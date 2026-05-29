@@ -7,8 +7,12 @@ in the repo" pillar. Use this unless you have a reason not to.
 Validated by `store/tasks.schema.json` (and by `init.sh`).
 
 - **list()** — read `state/tasks.json`, return `epics[].features[]`.
-- **next()** — first feature whose `status` is actionable (`pending`, `in-progress`,
-  `in-review`) and whose `depends_on` are all `done`. Prefer lower epic/feature ids.
+- **next()** — first feature whose `status` is actionable and whose `depends_on`
+  are all `done`. Prefer lower epic/feature ids. Actionable means `pending`,
+  `in-progress`, `in-review`, **or** `spec-ready` when the feature has
+  `autonomous: true` (that flag skips the human gate, so the Orchestrator may move
+  it straight to `in-progress` for Builder work). A `spec-ready` feature *without*
+  `autonomous: true` is **not** actionable — it is parked at the human gate.
 - **get(id)** — find the feature object by `id`.
 - **set_status(id, status)** — edit the feature's `status` in the JSON, then
   re-validate (`python3 -c "import json;json.load(open('state/tasks.json'))"`).

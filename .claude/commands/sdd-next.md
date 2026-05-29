@@ -10,6 +10,9 @@ Act as the **Orchestrator** (`agents/orchestrator.md`).
 3. Find the next actionable feature and route it by status per `docs/WORKFLOW.md`:
    - `pending` + sdd:true → spawn **architect**, then set `spec-ready` and PAUSE for
      the human gate (unless `autonomous`).
+   - `spec-ready` + `autonomous:true` → human gate is skipped: set `in-progress`,
+     spawn **builder** with the specs, then `in-review`. (A `spec-ready` feature
+     *without* `autonomous:true` is parked at the human gate — not actionable.)
    - `in-progress` → spawn **builder** with the approved specs only, then `in-review`.
    - `in-review` → spawn **reviewer**; approve → `done`, reject → back to `in-progress`.
 4. Append what happened to `progress/history.md`.
