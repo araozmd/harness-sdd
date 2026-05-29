@@ -1,0 +1,33 @@
+# harness-sdd configuration
+# The agents read this once (after init.sh) to learn HOW to read/write state.
+# Swapping a backend value changes where memory lives WITHOUT changing any prompt.
+
+store:
+  # TaskStore: high-level epic/feature/task state the Orchestrator reads.
+  #   local    -> state/tasks.json            (default, zero deps)
+  #   obsidian -> specs/ markdown frontmatter (graph view, backlinks)
+  #   jira     -> Atlassian via MCP           (STUBBED — see store/jira.md)
+  tasks: local
+
+  # DocStore: the externalized memory — specs, progress, history.
+  #   local    -> markdown files in specs/ and progress/
+  #   obsidian -> same files, Obsidian-flavored (wikilinks + frontmatter)
+  docs: local
+
+workflow:
+  # Human-in-the-loop gate. When true, a feature pauses at `spec-ready` until a
+  # human moves it to `in-progress`. Individual tasks can opt out via `sdd: false`
+  # or `autonomous: true` in their frontmatter / TaskStore entry.
+  require_spec_approval: true
+
+  # Context hygiene: agents should reset context when their window passes this
+  # fraction full, handing off via progress/ files. Degradation starts ~0.20.
+  context_reset_threshold: 0.40
+
+verification:
+  init_script: ./init.sh
+  # Commands the Reviewer must run before marking work done. Project-specific —
+  # edit these per target repo.
+  test_command: ""        # e.g. "pytest -q" or "npm test"
+  lint_command: ""        # e.g. "ruff check ." or "npm run lint"
+  typecheck_command: ""   # e.g. "mypy ." or "tsc --noEmit"

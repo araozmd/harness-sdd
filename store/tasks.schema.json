@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "harness-sdd TaskStore (local backend)",
+  "type": "object",
+  "required": ["project", "epics"],
+  "properties": {
+    "project": { "type": "string" },
+    "epics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "status", "features"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^E[0-9]+$" },
+          "title": { "type": "string" },
+          "status": { "enum": ["pending", "in-progress", "done"] },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "title", "status", "sdd", "spec_path"],
+              "properties": {
+                "id": { "type": "string", "pattern": "^E[0-9]+-F[0-9]+$" },
+                "title": { "type": "string" },
+                "status": {
+                  "enum": ["pending", "spec-ready", "in-progress", "in-review", "done"]
+                },
+                "sdd": { "type": "boolean" },
+                "autonomous": { "type": "boolean" },
+                "depends_on": { "type": "array", "items": { "type": "string" } },
+                "spec_path": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
