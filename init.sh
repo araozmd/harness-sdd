@@ -126,7 +126,9 @@ sys.exit(1 if errors else 0)
 PY
     ok "TaskStore (local) valid against schema"
   else
-    fail "python3 not found — cannot validate state/tasks.json against schema"
+    # The local backend is zero-dependency: a missing python3 must not block the
+    # gate. We can't validate the schema here, so warn loudly and continue.
+    echo "⚠️  python3 not found — skipping TaskStore schema validation (install python3 to enable it)" >&2
   fi
 fi
 
