@@ -82,8 +82,13 @@ else:
                 errors.append("%s: expected object" % ew); continue
             for k in ("id", "title", "status", "features"):
                 need(ep, k, ew)
-            if isinstance(ep.get("id"), str) and not re.match(r"^E[0-9]+$", ep["id"]):
-                errors.append("%s.id '%s': must match ^E[0-9]+$" % (ew, ep["id"]))
+            if "id" in ep:
+                if not isinstance(ep["id"], str):
+                    errors.append("%s.id: expected string" % ew)
+                elif not re.match(r"^E[0-9]+$", ep["id"]):
+                    errors.append("%s.id %r: must match ^E[0-9]+$" % (ew, ep["id"]))
+            if "title" in ep and not isinstance(ep["title"], str):
+                errors.append("%s.title: expected string" % ew)
             if ep.get("status") not in EPIC_STATUS and "status" in ep:
                 errors.append("%s.status '%s': not one of %s" % (ew, ep["status"], sorted(EPIC_STATUS)))
             feats = ep.get("features", [])
@@ -95,8 +100,13 @@ else:
                     errors.append("%s: expected object" % fw); continue
                 for k in ("id", "title", "status", "sdd", "spec_path"):
                     need(ft, k, fw)
-                if isinstance(ft.get("id"), str) and not re.match(r"^E[0-9]+-F[0-9]+$", ft["id"]):
-                    errors.append("%s.id '%s': must match ^E[0-9]+-F[0-9]+$" % (fw, ft["id"]))
+                if "id" in ft:
+                    if not isinstance(ft["id"], str):
+                        errors.append("%s.id: expected string" % fw)
+                    elif not re.match(r"^E[0-9]+-F[0-9]+$", ft["id"]):
+                        errors.append("%s.id %r: must match ^E[0-9]+-F[0-9]+$" % (fw, ft["id"]))
+                if "title" in ft and not isinstance(ft["title"], str):
+                    errors.append("%s.title: expected string" % fw)
                 if ft.get("status") not in FEAT_STATUS and "status" in ft:
                     errors.append("%s.status '%s': not one of %s" % (fw, ft["status"], sorted(FEAT_STATUS)))
                 if "sdd" in ft and not isinstance(ft["sdd"], bool):
