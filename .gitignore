@@ -3,6 +3,9 @@ progress/*/
 !progress/.gitkeep
 !progress/README.md
 
+# pr-loop / multi-cli-orchestrator local cache (Codex review state)
+.mco-cache/
+
 # OS / editor
 .DS_Store
 .obsidian/workspace*
