@@ -1,0 +1,38 @@
+{
+  "$schema": "../store/tasks.schema.json",
+  "project": "viernes-web",
+  "epics": [
+    {
+      "id": "E01",
+      "title": "Dashboard",
+      "status": "pending",
+      "features": [
+        {
+          "id": "E01-F01",
+          "title": "Overview widgets",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E01-dashboard/F01-overview-widgets/"
+        }
+      ]
+    },
+    {
+      "id": "E02",
+      "title": "Handoff",
+      "status": "pending",
+      "features": [
+        {
+          "id": "E02-F01",
+          "title": "Handoff screen",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E02-handoff/F01-handoff-screen/"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
+  "agent": {
+    "orchestrator": {
+      "description": "The Leader: reads state, runs init.sh, routes the next task, delegates. Never writes code.",
+      "mode": "primary",
+      "prompt": "{file:./agents/orchestrator.md}"
+    },
+    "architect": {
+      "description": "Spec Author: writes the 4-file spec (EARS). No production code.",
+      "mode": "subagent",
+      "prompt": "{file:./agents/architect.md}"
+    },
+    "builder": {
+      "description": "Implementer: writes code from an approved spec, one task at a time.",
+      "mode": "subagent",
+      "prompt": "{file:./agents/builder.md}"
+    },
+    "reviewer": {
+      "description": "Evaluator: verifies against the spec, runs tests, approves or rejects.",
+      "mode": "subagent",
+      "prompt": "{file:./agents/reviewer.md}"
+    },
+    "scout": {
+      "description": "Read-only codebase reconnaissance; writes findings to progress/.",
+      "mode": "subagent",
+      "prompt": "{file:./agents/scout.md}"
+    }
+  }
+}
