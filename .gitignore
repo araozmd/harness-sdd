@@ -1,0 +1,9 @@
+# Per-run agent output is ephemeral; keep the folder + history, ignore run dirs.
+progress/*/
+!progress/.gitkeep
+!progress/README.md
+
+# OS / editor
+.DS_Store
+.obsidian/workspace*
+*.swp
