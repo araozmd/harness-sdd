@@ -35,9 +35,10 @@ itself, so the installer stays deterministic.
 - **R5** — While upgrading, the system shall not overwrite project-authored files (`.harness/specs/product.md`, `.harness/state/tasks.json`, `.harness/specs/epics/`, `.harness/progress/`).
 - **R6** — When installing into a target with no prior harness, the system shall seed stub project files (`product.md`, a schema-valid bootstrap `tasks.json`, `progress/history.md`) so the harness is immediately runnable.
 - **R7** — When the installer runs, the system shall generate Claude Code glue (`.claude/agents/*.md` and `.claude/commands/sdd-next.md`) whose paths resolve against `.harness/`.
-- **R8** — When copying the config into the target, the system shall reset the verification commands (`test_command`, `lint_command`, `typecheck_command`) to empty.
+- **R8** — When seeding the config on a fresh install, the system shall reset the verification commands (`test_command`, `lint_command`, `typecheck_command`) to empty.
 - **R9** — If invoked with no target, or with a target equal to the harness source, then the system shall exit non-zero and make no changes.
 - **R10** — The installed `.harness/init.sh` shall exit zero (structural + schema checks pass) when run from the target repo root.
+- **R11** — While upgrading, the system shall preserve the target's `harness.config.yaml`, including any verification commands set during bootstrap.
 
 ## Out of scope
 - Intelligent merge/rewrite of the user's existing instruction prose (only a marked block is added).

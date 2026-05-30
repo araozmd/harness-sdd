@@ -13,9 +13,10 @@
 | R5 | Upgrade preserves project-authored files | `tests/test_install.sh` :: "upgrade preserves project files + is idempotent" (product/tasks sentinels) | integration | ✅ |
 | R6 | Fresh install seeds runnable project stubs | `tests/test_install.sh` :: "fresh install layout correct" (product.md, tasks.json) | integration | ✅ |
 | R7 | Claude Code glue resolves against `.harness/` | `tests/test_install.sh` :: "Claude Code glue generated" | integration | ✅ |
-| R8 | Target verification commands reset to blank | `tests/test_install.sh` :: "target verification commands reset" | integration | ✅ |
+| R8 | Fresh-install verification commands reset to blank | `tests/test_install.sh` :: "target verification commands reset" | integration | ✅ |
 | R9 | Bad invocations exit non-zero, no changes | `tests/test_install.sh` :: "arg guards reject bad invocations" | integration | ✅ |
 | R10 | Installed `init.sh` passes from target root | `tests/test_install.sh` :: "installed init.sh passes" | integration | ✅ |
+| R11 | Upgrade preserves bootstrap-set verification commands | `tests/test_install.sh` :: "upgrade preserves bootstrap-configured verification commands" | integration | ✅ |
 
 ## Behavioral / end-to-end checks
 - Install into a scratch dir that already has a `CLAUDE.md`; confirm the original

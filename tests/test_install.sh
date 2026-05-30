@@ -75,6 +75,14 @@ awk '/<!-- harness:end -->/{seen=1} /TRAILING-USER-NOTE/{print (seen?"AFTER":"BE
   | grep -q AFTER || fail "trailing user content reordered before the block on upgrade"
 pass "in-place block replacement preserves surrounding order (R4)"
 
+# verification commands set at bootstrap must survive an upgrade (not be reset)                # R11
+sed -e 's|^\( *test_command:\).*|\1 "pytest -q"|' "$T/.harness/harness.config.yaml" > "$T/.harness/cfg.b" \
+  && mv "$T/.harness/cfg.b" "$T/.harness/harness.config.yaml"
+sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "upgrade after bootstrap-config failed"
+grep -q 'test_command: "pytest -q"' "$T/.harness/harness.config.yaml" \
+  || fail "bootstrap test_command erased on upgrade"
+pass "upgrade preserves bootstrap-configured verification commands (R11)"
+
 # ── arg guards make no changes ────────────────────────────────────────────────
 sh "$SRC/harness-install.sh"            >/dev/null 2>&1 && fail "missing-arg should exit non-zero"   # R9
 sh "$SRC/harness-install.sh" "$SRC"     >/dev/null 2>&1 && fail "self-target should exit non-zero"   # R9

@@ -61,8 +61,8 @@ untouched. `.harness/.harness-version` records the installed version.
 
 | Class | Files | On upgrade |
 |---|---|---|
-| harness-owned | `.harness/{AGENTS.md,agents,docs,store,specs/_templates,init.sh,config}`, `.claude/*` | overwritten |
-| project-owned | `.harness/{specs/product.md,specs/epics,state/tasks.json,progress}` | never touched |
+| harness-owned | `.harness/{AGENTS.md,agents,docs,store,specs/_templates,init.sh}`, `.claude/*` | overwritten |
+| project-owned | `.harness/{harness.config.yaml,specs/product.md,specs/epics,state/tasks.json,progress}` | never touched |
 | merge-region | `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` | only the marked block |
 
 ## Fallback: AI-driven adoption
