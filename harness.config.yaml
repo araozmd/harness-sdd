@@ -24,6 +24,30 @@ workflow:
   # fraction full, handing off via progress/ files. Degradation starts ~0.20.
   context_reset_threshold: 0.40
 
+execution:
+  # The harness's single extension point for plugging in an EXTERNAL executor
+  # without forking any agent role file. Scope is structural: only roles listed
+  # here can be delegated, and only the Builder is delegatable today.
+  #
+  # The Orchestrator is deliberately NOT a key and never will be — it is the loop
+  # that reads this config and invokes delegate_cmd, so it always runs in the host
+  # code-agent. Architect / Reviewer / Scout also always run in-session. To make a
+  # new role delegatable later, add a sibling key here (e.g. `architect:`).
+  builder:
+    #   in-session -> the Builder agent implements the code itself, in this CLI
+    #                 session (DEFAULT). Works with ANY single coding agent and
+    #                 adds zero dependencies — this is what keeps the harness
+    #                 universal for engineers who run only one CLI.
+    #   delegate   -> the Builder does NOT write code; it shells out to
+    #                 `delegate_cmd`, which owns implementation (and may own PR
+    #                 creation/review too). Opt in only when an executor is wired.
+    backend: in-session
+
+    # Read ONLY when backend: delegate. The Builder invokes it as:
+    #     <delegate_cmd> <feature-id> <abs-spec-path>
+    # It must exit 0 on success, non-zero to signal failure back to the Builder.
+    delegate_cmd: ""
+
 verification:
   init_script: ./init.sh
   # Commands the Reviewer must run before marking work done. Project-specific —

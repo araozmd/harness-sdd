@@ -80,6 +80,25 @@ else
   info "harness.config.yaml preserved (bootstrap verification commands kept)"
 fi
 
+# init.project.sh is project-owned: init.sh (BODY, overwritten on upgrade) sources
+# it for project-specific gate checks, so they live HERE and survive upgrades.
+if [ ! -f "$H/init.project.sh" ]; then
+  cat > "$H/init.project.sh" <<'EOF'
+# init.project.sh — project-specific gate checks.
+# Sourced by init.sh from the PROJECT ROOT (not .harness/), so paths and commands
+# like `npm test` / `pytest` resolve against the repo. Seeded once; NEVER clobbered
+# on upgrade — put your real checks here instead of editing init.sh. Inherits the
+# `fail "msg"` (abort the gate) and `ok "msg"` helpers from init.sh.
+#
+# Examples:
+#   command -v node >/dev/null 2>&1 || fail "node not installed"
+#   npm test --silent             || fail "tests are failing — do not start work"
+EOF
+  info "seeded init.project.sh (no checks yet)"
+else
+  info "init.project.sh preserved"
+fi
+
 if [ ! -f "$H/specs/product.md" ]; then
   cat > "$H/specs/product.md" <<'EOF'
 ---
@@ -152,6 +171,7 @@ HARNESS-OWNED  (overwritten on every upgrade):
 
 PROJECT-OWNED  (seeded once, never clobbered on upgrade):
   .harness/harness.config.yaml   (verification commands + store backend)
+  .harness/init.project.sh       (project-specific init.sh gate checks)
   .harness/specs/product.md  .harness/specs/epics/
   .harness/state/tasks.json  .harness/progress/
 EOF
