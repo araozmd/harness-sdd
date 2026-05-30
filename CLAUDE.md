@@ -21,3 +21,20 @@ versions just point at them.
 ## Conventions
 - Hand off through files in `progress/`, never by passing chat history.
 - Respect the human gate (`require_spec_approval`) — see `docs/WORKFLOW.md`.
+
+## Versioning
+`harness-install.sh` stamps `VERSION` into every target's `.harness/.harness-version`
+and uses it for upgrade detection — so `VERSION` is a **public contract**. Bump it
+deliberately, not on every PR.
+
+- **When:** in the same PR, before it's ready to merge, **only if the PR changes the
+  installed body** (`harness-install.sh`, `init.sh`, `agents/`, `docs/`, `store/`,
+  `specs/_templates/`, `harness.config.yaml`, the `.claude/` glue). Docs-only,
+  demo-spec, or CI changes get **no** bump (else downstream `.harness/` dirs look
+  "upgraded" when nothing changed).
+- **How much (SemVer):** PATCH = body/installer bugfix (🐛); MINOR = new
+  backward-compatible capability (✨); MAJOR = breaking layout / `tasks.schema.json`
+  change requiring target migration (💥).
+- Record it in `CHANGELOG.md` and tag the merge commit `vX.Y.Z`.
+- (Optional enforcement: a CI check that fails a PR touching harness-owned paths
+  without a `VERSION` change.)

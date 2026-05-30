@@ -48,8 +48,10 @@ pass "Claude Code glue generated (R7)"
 grep -q 'test_command: ""' "$T/.harness/harness.config.yaml" || fail "test_command not blanked"
 pass "target verification commands reset (R8)"
 
-# installed init.sh passes from the target root (self-locating + valid stub schema)            # R10
-( cd "$T" && sh .harness/init.sh >/dev/null 2>&1 ) || fail "installed init.sh failed"
+# installed init.sh passes from the target root (self-locating + valid stub schema).           # R10
+# Invoke the executable directly (its bash shebang) — NOT via `sh`, which would force
+# bash-only `init.sh` through dash on Debian/Ubuntu where /bin/sh is dash.
+( cd "$T" && ./.harness/init.sh >/dev/null 2>&1 ) || fail "installed init.sh failed"
 pass "installed init.sh passes (R10)"
 
 # ── upgrade: mutate project files, re-run, assert preserved + idempotent ──────
