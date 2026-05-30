@@ -7,6 +7,17 @@
 
 set -euo pipefail
 
+# Resolve the harness root (this script's dir) and run structural checks from there,
+# so an installed copy at <repo>/.harness/init.sh works when invoked from the repo
+# root. PROJECT_ROOT is where project-specific checks (tests, build) must run: the
+# parent when we're installed under `.harness/`, else the harness root itself.
+HARNESS_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+case "$HARNESS_DIR" in
+  */.harness) PROJECT_ROOT="$(dirname "$HARNESS_DIR")" ;;
+  *)          PROJECT_ROOT="$HARNESS_DIR" ;;
+esac
+cd "$HARNESS_DIR"
+
 fail() { echo "❌ init: $1" >&2; exit 1; }
 ok()   { echo "✅ $1"; }
 
@@ -133,7 +144,9 @@ PY
 fi
 
 # 3. Project-specific checks — EDIT FOR THE TARGET REPO.
-#    Example: verify the toolchain and run the test suite. Uncomment + adapt.
+#    These run from the PROJECT ROOT (the repo, not .harness/) so commands like
+#    `npm test` / `pytest` resolve against the project. Uncomment + adapt.
+cd "$PROJECT_ROOT"
 #
 # command -v node >/dev/null 2>&1 || fail "node not installed"
 # npm test --silent             || fail "tests are failing — do not start work"
