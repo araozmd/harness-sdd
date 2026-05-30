@@ -67,6 +67,14 @@ cmp -s "$T/.harness/state/tasks.json" "$T/.harness/state/tasks.json.orig" \
   || fail "harness block duplicated on upgrade"                                                      # R4
 pass "upgrade preserves project files + is idempotent (R4, R5)"
 
+# user content placed AFTER the block must keep its position on upgrade (in-place replace)    # R4
+printf 'TRAILING-USER-NOTE\n' >> "$T/CLAUDE.md"
+sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "upgrade-with-suffix run failed"
+grep -qF 'TRAILING-USER-NOTE' "$T/CLAUDE.md" || fail "trailing user content lost on upgrade"
+awk '/<!-- harness:end -->/{seen=1} /TRAILING-USER-NOTE/{print (seen?"AFTER":"BEFORE")}' "$T/CLAUDE.md" \
+  | grep -q AFTER || fail "trailing user content reordered before the block on upgrade"
+pass "in-place block replacement preserves surrounding order (R4)"
+
 # ── arg guards make no changes ────────────────────────────────────────────────
 sh "$SRC/harness-install.sh"            >/dev/null 2>&1 && fail "missing-arg should exit non-zero"   # R9
 sh "$SRC/harness-install.sh" "$SRC"     >/dev/null 2>&1 && fail "self-target should exit non-zero"   # R9

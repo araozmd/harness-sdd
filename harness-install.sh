@@ -108,9 +108,9 @@ if [ ! -f "$H/state/tasks.json" ]; then
       "features": [
         {
           "id": "E00-F01",
-          "title": "Adapt harness to this project",
+          "title": "Bootstrap: adapt the harness to this project",
           "status": "pending",
-          "sdd": false,
+          "sdd": true,
           "autonomous": false,
           "depends_on": [],
           "spec_path": "specs/epics/E00-bootstrap/F01-adapt/"
@@ -162,9 +162,14 @@ Start every agent session as the **Orchestrator**:
    \`.harness/\`. In Claude Code, run \`/sdd-next\`.
 $MARK_END"
   if [ -f "$_f" ] && grep -qF "$MARK_BEGIN" "$_f"; then
-    awk -v b="$MARK_BEGIN" -v e="$MARK_END" '
-      $0==b {skip=1} skip && $0==e {skip=0; next} !skip {print}' "$_f" > "$_f.tmp"
-    printf '%s\n' "$_block" >> "$_f.tmp"
+    # Replace the marked block IN PLACE: keep the prefix before the begin marker
+    # and the suffix after the end marker, so user content on either side keeps
+    # its original order (the markers contain no sed-special characters).
+    {
+      sed "/$MARK_BEGIN/,\$d" "$_f"   # prefix: everything before the begin marker
+      printf '%s\n' "$_block"
+      sed "1,/$MARK_END/d" "$_f"      # suffix: everything after the end marker
+    } > "$_f.tmp"
     mv "$_f.tmp" "$_f"
   else
     if [ -f "$_f" ]; then printf '\n' >> "$_f"; fi

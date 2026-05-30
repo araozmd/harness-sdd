@@ -37,10 +37,11 @@ The installer is deterministic; the *project-specific* adaptation is done throug
 harness itself, under the human gate:
 
 1. Edit `.harness/specs/product.md` for your product.
-2. Open the project in Claude Code and run **`/sdd-next`**. The Orchestrator runs the
-   seeded `E00-F01` bootstrap task — Scout reconnoiters the repo, the Architect drafts
-   epics and detects your test/lint/typecheck commands (`.harness/harness.config.yaml`
-   + the project section of `.harness/init.sh`).
+2. Open the project in Claude Code and run **`/sdd-next`**. The seeded `E00-F01`
+   bootstrap task is `sdd: true`, so the Orchestrator routes it to the Architect
+   (with Scout recon) to draft epics and detect your test/lint/typecheck commands
+   (`.harness/harness.config.yaml` + the project section of `.harness/init.sh`), then
+   **pauses at the human gate** for your approval.
 3. Approve, then keep running `/sdd-next` to build features.
 
 ## Upgrade
