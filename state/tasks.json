@@ -5,12 +5,12 @@
     {
       "id": "E00",
       "title": "Harness installer",
-      "status": "in-progress",
+      "status": "done",
       "features": [
         {
           "id": "E00-F01",
           "title": "Installer script",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
