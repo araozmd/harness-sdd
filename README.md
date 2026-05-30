@@ -71,11 +71,24 @@ docs/                  SPEC-FORMAT.md, WORKFLOW.md, HARNESS.md
 .claude/               Claude Code sub-agents + commands
 ```
 
+## Installing into an existing project
+
+```bash
+./harness-install.sh /path/to/your-project
+```
+
+Idempotent install/upgrade: drops the harness body into `<project>/.harness/`, appends
+a marked pointer block to any existing `CLAUDE.md`/`AGENTS.md`/`GEMINI.md` (your prose
+is preserved), generates the Claude Code glue, and seeds a runnable workspace. Re-run
+to upgrade — project-authored specs/state are never clobbered. See `docs/INSTALL.md`.
+
 ## Adapting to a real project
 1. Rewrite `specs/product.md` for your product.
 2. Set the test/lint/typecheck commands in `harness.config.yaml` and the
    project-specific section of `init.sh`.
 3. Add epics/features (copy `specs/_templates/`), or run the Architect to generate them.
+
+After install, steps 1–2 are done for you by the first-run bootstrap (`/sdd-next`).
 
 Derived from the *Harnessing Engineering* research (harness-engineering + SDD videos,
 Anthropic's long-running-development post, the Harness Engineering knowledge graph).

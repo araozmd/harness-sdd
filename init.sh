@@ -7,6 +7,11 @@
 
 set -euo pipefail
 
+# Run from the harness root regardless of where we're invoked. In the source repo
+# this is a no-op (script dir = repo root); in an installed copy it lets
+# `.harness/init.sh` work when called from the target repo root.
+cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+
 fail() { echo "❌ init: $1" >&2; exit 1; }
 ok()   { echo "✅ $1"; }
 
