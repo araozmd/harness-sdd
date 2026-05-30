@@ -1,7 +1,7 @@
 ---
 id: E00
 title: Harness installer
-status: in-progress
+status: done
 owner: araozmd
 ---
 
@@ -24,7 +24,7 @@ upgradable, which is the whole "the harness is the stable chassis" thesis.
 ## Features
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| F01 | Installer script | in-review | true | — |
+| F01 | Installer script | done | true | — |
 
 ## Notes
 - Layout decision: harness body lives in `.harness/` (namespaced, zero collisions);

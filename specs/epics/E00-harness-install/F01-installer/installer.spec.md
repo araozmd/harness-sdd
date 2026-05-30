@@ -2,7 +2,7 @@
 id: E00-F01
 title: Installer script
 epic: E00-harness-install
-status: in-review
+status: done
 sdd: true
 autonomous: false
 depends_on: []
