@@ -143,15 +143,21 @@ PY
   fi
 fi
 
-# 3. Project-specific checks — EDIT FOR THE TARGET REPO.
-#    These run from the PROJECT ROOT (the repo, not .harness/) so commands like
-#    `npm test` / `pytest` resolve against the project. Uncomment + adapt.
+# 3. Project-specific checks.
+#    Project-authored gates live in `.harness/init.project.sh` — seeded once by
+#    harness-install.sh and NEVER clobbered on upgrade, unlike THIS file (which is
+#    harness BODY and gets overwritten). Put tests/build/lint/presence checks there
+#    rather than editing this file, or they vanish on the next upgrade. The hook is
+#    sourced from the PROJECT ROOT so `npm test` / `pytest` resolve against the repo,
+#    and it inherits the `fail`/`ok` helpers defined above.
 cd "$PROJECT_ROOT"
-#
-# command -v node >/dev/null 2>&1 || fail "node not installed"
-# npm test --silent             || fail "tests are failing — do not start work"
-#
-echo "ℹ️  no project-specific checks configured (edit init.sh for the target repo)"
+PROJECT_CHECKS="$HARNESS_DIR/init.project.sh"
+if [ -f "$PROJECT_CHECKS" ]; then
+  # shellcheck source=/dev/null
+  . "$PROJECT_CHECKS"
+else
+  echo "ℹ️  no project-specific checks (.harness/init.project.sh absent)"
+fi
 
 echo "──────────────────────────────────────────────────"
 ok "environment ready — agents may proceed"

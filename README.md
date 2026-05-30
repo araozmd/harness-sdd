@@ -54,6 +54,42 @@ sub-agent mechanism differ.
 | `obsidian` | ✅ | point a vault at the repo; frontmatter + `[[wikilinks]]` |
 | `jira` | ⏳ stub | contract defined in `store/jira.md`; wire MCP in a follow-up |
 
+## Delegating implementation (execution backend)
+
+By default the **Builder writes code itself**, in whatever CLI you're running — no
+extra dependencies, works for everyone. That's `execution.builder.backend: in-session`.
+
+If you have an external executor (a multi-agent orchestrator, a remote build
+service, anything that takes a spec and produces an implementation), you can hand
+the **Builder phase** off to it without forking any role file:
+
+```yaml
+# harness.config.yaml
+execution:
+  builder:
+    backend: delegate
+    delegate_cmd: "bash path/to/your-executor.sh"
+```
+
+In `delegate` mode the Builder does not write code — it invokes
+`delegate_cmd <feature-id> <abs-spec-path>` and surfaces the result. The executor
+owns implementation (and may own PR creation / review too). On non-zero exit the
+Builder records the failure and hands back to the Orchestrator.
+
+Scope is deliberate and structural:
+
+- **Only the Builder is delegatable.** The Orchestrator is *never* a key here — it
+  is the loop that reads this config and calls `delegate_cmd`, so it always runs in
+  the host code-agent. Architect / Reviewer / Scout also stay in-session.
+- To make a new role delegatable later, add a sibling key (e.g. `architect:`) — the
+  Orchestrator can never be one.
+
+This is the seam that lets a heavier orchestrator *consume* the harness while the
+harness stays standalone: the harness never learns what the executor is, and a
+single-CLI user is unaffected (they keep the `in-session` default). For a worked
+example, see the multi-cli-orchestrator project, which wires its CLI-routing +
+Codex-PR pipeline in as one such executor.
+
 ## Layout
 
 ```
