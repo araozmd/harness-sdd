@@ -1,0 +1,73 @@
+# harness-sdd configuration
+# The agents read this once (after init.sh) to learn HOW to read/write state.
+# Swapping a backend value changes where memory lives WITHOUT changing any prompt.
+
+store:
+  # TaskStore: high-level epic/feature/task state the Orchestrator reads.
+  #   local    -> state/tasks.json            (default, zero deps)
+  #   obsidian -> specs/ markdown frontmatter (graph view, backlinks)
+  #   jira     -> Atlassian via MCP           (STUBBED — see store/jira.md)
+  tasks: local
+
+  # DocStore: the externalized memory — specs, progress, history.
+  #   local    -> markdown files in specs/ and progress/
+  #   obsidian -> same files, Obsidian-flavored (wikilinks + frontmatter)
+  docs: local
+
+workflow:
+  # Human-in-the-loop gate. When true, a feature pauses at `spec-ready` until a
+  # human moves it to `in-progress`. Individual tasks can opt out via `sdd: false`
+  # or `autonomous: true` in their frontmatter / TaskStore entry.
+  require_spec_approval: true
+
+  # Context hygiene: agents should reset context when their window passes this
+  # fraction full, handing off via progress/ files. Degradation starts ~0.20.
+  context_reset_threshold: 0.40
+
+execution:
+  # The harness's single extension point for plugging in an EXTERNAL executor
+  # without forking any agent role file. Scope is structural: only roles listed
+  # here can be delegated, and only the Builder is delegatable today.
+  #
+  # The Orchestrator is deliberately NOT a key and never will be — it is the loop
+  # that reads this config and invokes delegate_cmd, so it always runs in the host
+  # code-agent. Architect / Reviewer / Scout also always run in-session. To make a
+  # new role delegatable later, add a sibling key here (e.g. `architect:`).
+  builder:
+    #   in-session -> the Builder agent implements the code itself, in this CLI
+    #                 session (DEFAULT). Works with ANY single coding agent and
+    #                 adds zero dependencies — this is what keeps the harness
+    #                 universal for engineers who run only one CLI.
+    #   delegate   -> the Builder does NOT write code; it shells out to
+    #                 `delegate_cmd`, which owns implementation (and may own PR
+    #                 creation/review too). Opt in only when an executor is wired.
+    backend: in-session
+
+    # Read ONLY when backend: delegate. The Builder invokes it as:
+    #     <delegate_cmd> <feature-id> <abs-spec-path>
+    # It must exit 0 on success, non-zero to signal failure back to the Builder.
+    delegate_cmd: ""
+
+verification:
+  init_script: ./init.sh
+  # Commands the Reviewer must run before marking work done. Project-specific —
+  # edit these per target repo.
+  test_command: ""        # set during bootstrap
+
+  lint_command: ""        # set during bootstrap
+  typecheck_command: ""   # set during bootstrap
+
+  # Umbrella mode only (see docs/UMBRELLA.md): the feature-level integration check
+  # that runs the stack together (e.g. "viernes-infra/dev.sh ci"). It runs ONLY when
+  # every slice of a cross-repo feature is done+merged, and a non-zero exit keeps the
+  # feature out of `done`. Empty ⇒ no integration gate (single-repo default).
+  integration_command: ""
+
+# Umbrella coordinator (cross-repo) — ADDITIVE / opt-in. See docs/UMBRELLA.md.
+# A single-repo project leaves this inert: with `manifest` unset (or the file
+# absent) the coordinator does nothing and the existing single-repo flow
+# (init.sh, verification.test_command, Reviewer `done` verdict) is unchanged.
+umbrella:
+  # Path to the umbrella manifest (see umbrella.manifest.example.yaml). The PRESENCE
+  # of this file is the umbrella-mode switch. Unset/absent ⇒ single-repo, inert.
+  manifest: ""

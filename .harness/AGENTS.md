@@ -53,15 +53,3 @@ Orchestrator → Architect → Builder → Reviewer        (Scout assists, read-
 2. Read `harness.config.yaml` to learn which store backends are active.
 3. Read `agents/orchestrator.md` and assume the Orchestrator role.
 4. Read the TaskStore, find the next actionable task, and delegate per the workflow.
-
-<!-- harness:begin -->
-## Agent Harness (Spec-Driven Development)
-This project uses a portable agent harness installed in `.harness/`.
-Start every agent session as the **Orchestrator**:
-1. Run `.harness/init.sh` — if it exits non-zero, STOP.
-2. Read `.harness/AGENTS.md` (the harness source of truth) and resolve its
-   relative paths against `.harness/` (config, agents/, specs/, state/, store/,
-   docs/, progress/).
-3. Product/source code lives at the repo root; harness bookkeeping lives in
-   `.harness/`. In Claude Code, run `/sdd-next`.
-<!-- harness:end -->

@@ -273,4 +273,46 @@ grep -Eq '^[[:space:]]*manifest:[[:space:]]*"\.\./umbrella\.manifest\.yaml"' "$B
 ( cd "$BU" && ./.harness/init.sh >/dev/null 2>&1 ) || fail "coordinator init.sh not green after blank-form activation (Codex #7)"
 pass "umbrella mode activates for unquoted/blank manifest values (Codex #7) [manifest_blank_forms_activate]"
 
+# ── P1 (Codex #7 r2): migration-added manifest (blank + trailing comment) activates ─
+# A pre-F01 coordinator (no umbrella block) upgraded via --umbrella: migrate_config
+# adds `manifest: ""   # comment`, and the activation must rewrite it despite the
+# trailing comment — otherwise the upgraded coordinator stays inert.
+PU="$T/umb-pref01"; mkdir -p "$PU/.harness" "$PU/repo-a/.git"
+printf 'tasks: local\nverification:\n  test_command: "x"\n' > "$PU/.harness/harness.config.yaml"
+sh "$INSTALL" --umbrella "$PU" >/dev/null 2>&1 || fail "pre-F01 coordinator upgrade failed (Codex #7 r2)"
+grep -Eq '^[[:space:]]*manifest:[[:space:]]*"\.\./umbrella\.manifest\.yaml"' "$PU/.harness/harness.config.yaml" \
+  || { echo "--- cfg ---"; grep -nE 'umbrella:|manifest:' "$PU/.harness/harness.config.yaml"; fail "migration-added blank+comment manifest not activated — coordinator inert (Codex #7 r2)"; }
+( cd "$PU" && ./.harness/init.sh >/dev/null 2>&1 ) || fail "upgraded coordinator init.sh not green (Codex #7 r2)"
+pass "migration-added manifest (blank + comment) is activated on upgrade (Codex #7 r2) [migrate_added_manifest_activates]"
+
+# ── P2 (Codex #7 r2): a commented section header must not be duplicated ─────────
+# `verification: # comment` must be recognized so migration inserts the key under it
+# rather than appending a second `verification:` mapping.
+CU="$T/cmt-hdr"; mkdir -p "$CU/.harness"
+printf 'tasks: local\nverification: # local commands\n  test_command: "y"\n' > "$CU/.harness/harness.config.yaml"
+sh "$INSTALL" "$CU" >/dev/null 2>&1 || fail "single-target upgrade over commented header failed (Codex #7 r2)"
+vc=$(grep -c '^verification:' "$CU/.harness/harness.config.yaml")
+[ "$vc" = "1" ] || { echo "--- cfg ---"; cat "$CU/.harness/harness.config.yaml"; fail "commented 'verification:' header duplicated ($vc found) (Codex #7 r2)"; }
+grep -Eq '^[[:space:]]*integration_command:' "$CU/.harness/harness.config.yaml" \
+  || fail "integration_command not inserted under commented header (Codex #7 r2)"
+grep -qF 'verification: # local commands' "$CU/.harness/harness.config.yaml" \
+  || fail "commented header altered (Codex #7 r2)"
+pass "commented section header recognized, not duplicated on migration (Codex #7 r2) [migrate_commented_header_no_dup]"
+
+# ── P1 (Codex #7 r2): the harness source itself is skipped as an umbrella child ──
+# If $SRC is an immediate child of the umbrella, it must NOT be installed into.
+SU="$T/umb-src"; mkdir -p "$SU/repo-a/.git"
+ln -s "$SRC" "$SU/harness-sdd" 2>/dev/null || true
+if [ -L "$SU/harness-sdd" ]; then
+  OUT="$T/src.out"
+  sh "$INSTALL" --umbrella "$SU" >"$OUT" 2>&1 || fail "umbrella install with source-as-child failed (Codex #7 r2)"
+  grep -qiE "harness source|not installing into the harness" "$OUT" \
+    || { echo "--- out ---"; cat "$OUT"; fail "harness source not reported as skipped (Codex #7 r2)"; }
+  grep -Eq '^  harness-sdd:[[:space:]]*$' "$SU/umbrella.manifest.yaml" 2>/dev/null \
+    && fail "harness source wrongly added to manifest (Codex #7 r2)"
+  pass "harness source skipped when it is an umbrella child (Codex #7 r2) [skip_harness_source_child]"
+else
+  pass "harness-source-child skip (symlink unsupported here — skipped) [skip_harness_source_child]"
+fi
+
 echo "All cascade tests passed."

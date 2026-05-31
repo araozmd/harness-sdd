@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "harness-sdd TaskStore (local backend)",
+  "type": "object",
+  "required": ["project", "epics"],
+  "properties": {
+    "project": { "type": "string" },
+    "epics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "status", "features"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^E[0-9]+$" },
+          "title": { "type": "string" },
+          "status": { "enum": ["pending", "in-progress", "done"] },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "title", "status", "sdd", "spec_path"],
+              "properties": {
+                "id": { "type": "string", "pattern": "^E[0-9]+-F[0-9]+$" },
+                "title": { "type": "string" },
+                "status": {
+                  "enum": ["pending", "spec-ready", "in-progress", "in-review", "done"]
+                },
+                "sdd": { "type": "boolean" },
+                "autonomous": { "type": "boolean" },
+                "depends_on": { "type": "array", "items": { "type": "string" } },
+                "spec_path": { "type": "string" },
+                "slices": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "repo", "status"],
+                    "properties": {
+                      "id": { "type": "string", "pattern": "^E[0-9]+-F[0-9]+@[a-z0-9-]+$" },
+                      "repo": { "type": "string" },
+                      "status": {
+                        "enum": ["pending", "spec-ready", "in-progress", "in-review", "done", "failed"]
+                      },
+                      "merged": { "type": "boolean" },
+                      "spec_path": { "type": "string" },
+                      "pr": { "type": "string", "description": "PR URL the child SDD loop opened; a valid `gh pr view` selector for the merge poll" },
+                      "depends_on": { "type": "array", "items": { "type": "string" } }
+                    }
+                  }
+                }
+              },
+              "allOf": [
+                {
+                  "$comment": "Cross-field: a sliced feature may only be `done` when every slice is done AND merged. Single-repo features (no slices) are unaffected — the `if` is false without slices.",
+                  "if": {
+                    "required": ["slices"],
+                    "properties": { "status": { "const": "done" } }
+                  },
+                  "then": {
+                    "properties": {
+                      "slices": {
+                        "items": {
+                          "required": ["merged"],
+                          "properties": {
+                            "status": { "const": "done" },
+                            "merged": { "const": true }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

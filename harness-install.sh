@@ -50,9 +50,11 @@ migrate_config() {
   # the (two-space-indented) key line to add, and the regex that detects the key.
 
   # --- verification.integration_command ---
+  # Section-header match tolerates a trailing `# comment` (e.g. `verification: # ...`),
+  # otherwise migration would append a SECOND `verification:` mapping at EOF.
   if ! grep -Eq '^[[:space:]]*integration_command:' "$_cfg"; then
-    if grep -Eq '^verification:[[:space:]]*$' "$_cfg"; then
-      _mc_insert_after "$_cfg" '^verification:[[:space:]]*$' \
+    if grep -Eq '^verification:[[:space:]]*(#.*)?$' "$_cfg"; then
+      _mc_insert_after "$_cfg" '^verification:[[:space:]]*(#.*)?$' \
         '  integration_command: ""   # umbrella integration gate (see docs/UMBRELLA.md)'
     else
       {
@@ -65,8 +67,8 @@ migrate_config() {
 
   # --- umbrella.manifest ---
   if ! grep -Eq '^[[:space:]]*manifest:' "$_cfg"; then
-    if grep -Eq '^umbrella:[[:space:]]*$' "$_cfg"; then
-      _mc_insert_after "$_cfg" '^umbrella:[[:space:]]*$' \
+    if grep -Eq '^umbrella:[[:space:]]*(#.*)?$' "$_cfg"; then
+      _mc_insert_after "$_cfg" '^umbrella:[[:space:]]*(#.*)?$' \
         '  manifest: ""   # path to umbrella.manifest.yaml; presence = umbrella mode'
     else
       {
@@ -456,13 +458,17 @@ MANIFEST="$UMB/umbrella.manifest.yaml"
 # Match every blank YAML representation — `manifest:`, `manifest: ""`, `manifest: ''`
 # — but NOT a real value. Otherwise a manually-cleared value leaves umbrella mode
 # inert despite the cascade having written the manifest.
-_blank_manifest='^[[:space:]]*manifest:[[:space:]]*("")?[[:space:]]*$|^[[:space:]]*manifest:[[:space:]]*('"''"')[[:space:]]*$'
+# Match every blank value form — `manifest:`, `manifest: ""`, `manifest: ''` — each
+# optionally followed by a trailing `# comment` (migrate_config emits exactly that),
+# but NEVER a real path value. Otherwise an upgraded/cleared coordinator stays inert
+# despite the cascade having written the manifest.
+_blank_manifest='^[[:space:]]*manifest:[[:space:]]*("")?[[:space:]]*(#.*)?$|^[[:space:]]*manifest:[[:space:]]*('"''"')[[:space:]]*(#.*)?$'
 if grep -Eq "$_blank_manifest" "$COORD_CFG"; then
   awk '
-    !done && $0 ~ /^[[:space:]]*manifest:[[:space:]]*("")?[[:space:]]*$/ {
+    !done && $0 ~ /^[[:space:]]*manifest:[[:space:]]*("")?[[:space:]]*(#.*)?$/ {
       sub(/manifest:.*/, "manifest: \"../umbrella.manifest.yaml\""); done=1; print; next
     }
-    !done && $0 ~ /^[[:space:]]*manifest:[[:space:]]*('"''"')[[:space:]]*$/ {
+    !done && $0 ~ /^[[:space:]]*manifest:[[:space:]]*('"''"')[[:space:]]*(#.*)?$/ {
       sub(/manifest:.*/, "manifest: \"../umbrella.manifest.yaml\""); done=1; print; next
     }
     { print }
@@ -490,6 +496,17 @@ for child in "$UMB"/*/; do
   [ "$name" = ".harness" ] && continue
   # R8: git child iff `.git` exists as a directory OR a file.
   [ -e "$child/.git" ] || continue
+  # Never install into the harness source itself — when the installer checkout is an
+  # immediate child of the umbrella (e.g. `harness-sdd/harness-install.sh --umbrella ..`)
+  # it would otherwise get .harness/, pointer blocks, and .claude/ glue written into it.
+  # Compare PHYSICAL paths (pwd -P) so a symlinked child that resolves to the source
+  # is caught too, not just a same-named real directory.
+  child_abs="$(CDPATH= cd -- "$child" && pwd -P)"
+  src_phys="$(CDPATH= cd -- "$SRC" && pwd -P)"
+  if [ "$child_abs" = "$src_phys" ]; then
+    echo "⚠️  skipping child '$name': it is the harness source ($SRC) — not installing into the harness itself"
+    continue
+  fi
   found_any=1
   # R13: directory name must satisfy the slice-id repo-key grammar.
   if ! printf '%s' "$name" | grep -Eq '^[a-z0-9-]+$'; then
