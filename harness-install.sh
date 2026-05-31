@@ -452,12 +452,8 @@ install_one "$UMB"
 # Then point umbrella.manifest at umbrella.manifest.yaml when it is unset/blank.
 COORD_CFG="$UMB/.harness/harness.config.yaml"
 migrate_config "$COORD_CFG"
-MANIFEST="$UMB/umbrella.manifest.yaml"
 # The manifest lives at the umbrella ROOT, but init.sh resolves umbrella.manifest
-# relative to the harness dir (.harness/), so point at ../umbrella.manifest.yaml.
-# Match every blank YAML representation — `manifest:`, `manifest: ""`, `manifest: ''`
-# — but NOT a real value. Otherwise a manually-cleared value leaves umbrella mode
-# inert despite the cascade having written the manifest.
+# relative to the harness dir (.harness/), so the default value is ../umbrella.manifest.yaml.
 # Match every blank value form — `manifest:`, `manifest: ""`, `manifest: ''` — each
 # optionally followed by a trailing `# comment` (migrate_config emits exactly that),
 # but NEVER a real path value. Otherwise an upgraded/cleared coordinator stays inert
@@ -475,6 +471,21 @@ if grep -Eq "$_blank_manifest" "$COORD_CFG"; then
   ' "$COORD_CFG" > "$COORD_CFG.umtmp" && mv "$COORD_CFG.umtmp" "$COORD_CFG"
   info "coordinator umbrella.manifest -> ../umbrella.manifest.yaml"
 fi
+
+# Derive the manifest WRITE TARGET from the (now-resolved) config value, so a
+# coordinator that intentionally keeps a CUSTOM non-blank umbrella.manifest path
+# receives the discovered repos too — not a hard-coded root file that init.sh would
+# then ignore. The value is resolved relative to .harness/, exactly as init.sh reads it.
+_cfg_manifest="$(grep -E '^[[:space:]]*manifest:' "$COORD_CFG" | head -1 \
+  | sed -E 's/^[[:space:]]*manifest:[[:space:]]*//; s/[[:space:]]*#.*$//; s/^"//; s/"$//; s/^'\''//; s/'\''$//')"
+case "$_cfg_manifest" in
+  "") MANIFEST="$UMB/umbrella.manifest.yaml" ;;     # no value (shouldn't happen post-activation)
+  /*) MANIFEST="$_cfg_manifest" ;;                  # absolute path, used as-is
+  *)  MANIFEST="$UMB/.harness/$_cfg_manifest" ;;     # relative to the harness dir
+esac
+mkdir -p "$(dirname "$MANIFEST")"
+# normalize so any `../` is collapsed before we write/compare.
+MANIFEST="$(CDPATH= cd -- "$(dirname "$MANIFEST")" && pwd)/$(basename "$MANIFEST")"
 
 # (b) discover immediate git children + (c) populate the manifest.
 echo "── discovering git children (depth 1) ──"

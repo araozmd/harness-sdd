@@ -315,4 +315,26 @@ else
   pass "harness-source-child skip (symlink unsupported here — skipped) [skip_harness_source_child]"
 fi
 
+# ── P2 (Codex #7 r3): a custom non-blank umbrella.manifest path receives the repos ─
+# A coordinator that intentionally keeps a custom manifest path must have discovered
+# children written THERE (what init.sh reads), not to a hard-coded root file.
+XU="$T/umb-custom"; mkdir -p "$XU/.harness" "$XU/repo-a/.git"
+cat > "$XU/.harness/harness.config.yaml" <<'CFG'
+tasks: local
+verification:
+  integration_command: ""
+umbrella:
+  manifest: "../custom/coord-manifest.yaml"
+CFG
+sh "$INSTALL" --umbrella "$XU" >/dev/null 2>&1 || fail "umbrella install with custom manifest path failed (Codex #7 r3)"
+grep -Eq '^  repo-a:[[:space:]]*$' "$XU/custom/coord-manifest.yaml" 2>/dev/null \
+  || { echo "--- custom manifest ---"; cat "$XU/custom/coord-manifest.yaml" 2>/dev/null; fail "discovered repo not written to the configured custom manifest path (Codex #7 r3)"; }
+if [ -f "$XU/umbrella.manifest.yaml" ] && grep -Eq '^  repo-a:' "$XU/umbrella.manifest.yaml"; then
+  fail "discovered repo written to the hard-coded root manifest instead of the configured path (Codex #7 r3)"
+fi
+# the configured value must be preserved (not overwritten to the default).
+grep -qF 'manifest: "../custom/coord-manifest.yaml"' "$XU/.harness/harness.config.yaml" \
+  || fail "custom umbrella.manifest value was overwritten (Codex #7 r3)"
+pass "custom umbrella.manifest path receives discovered repos (Codex #7 r3) [custom_manifest_path_target]"
+
 echo "All cascade tests passed."
