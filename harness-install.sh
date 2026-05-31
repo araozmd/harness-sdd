@@ -388,13 +388,20 @@ manifest_upsert() {
   if grep -Eq "^  ${_name}:[[:space:]]*$" "$_mf"; then
     return 0
   fi
-  {
-    printf '  %s:\n' "$_name"
-    printf '    path: ./%s\n' "$_name"
-    printf '    init: ./init.sh         # TODO: confirm child init\n'
-    printf '    test_command: ""        # TODO: set during bootstrap\n'
-    printf '    delegate_cmd: ""        # TODO: wire executor\n'
-  } >> "$_mf"
+  # Build the entry as a single string with literal `\n` escapes — `awk -v` converts
+  # them to newlines (a value with real newlines would error "newline in string").
+  _blk='  '"$_name"':\n    path: ./'"$_name"'\n    init: ./init.sh         # TODO: confirm child init\n    test_command: ""        # TODO: set during bootstrap\n    delegate_cmd: ""        # TODO: wire executor'
+  # Insert the entry INSIDE the repos: mapping — immediately before the next top-level
+  # key after `repos:` (a column-0, non-comment, non-blank line), or at EOF when
+  # repos: is the last section. Appending blindly at EOF would otherwise nest the entry
+  # under a later top-level section (e.g. a trailing `metadata:`), which init.sh — and
+  # therefore the coordinator — would not read.
+  awk -v blk="$_blk" '
+    /^repos:[[:space:]]*$/ { print; in_repos=1; next }
+    in_repos && !inserted && /^[^[:space:]#]/ { print blk; inserted=1; in_repos=0 }
+    { print }
+    END { if (in_repos && !inserted) print blk }
+  ' "$_mf" > "$_mf.uptmp" && mv "$_mf.uptmp" "$_mf"
 }
 
 # ── arg parsing ───────────────────────────────────────────────────────────────
@@ -472,20 +479,19 @@ if grep -Eq "$_blank_manifest" "$COORD_CFG"; then
   info "coordinator umbrella.manifest -> ../umbrella.manifest.yaml"
 fi
 
-# Derive the manifest WRITE TARGET from the (now-resolved) config value, so a
-# coordinator that intentionally keeps a CUSTOM non-blank umbrella.manifest path
-# receives the discovered repos too — not a hard-coded root file that init.sh would
-# then ignore. The value is resolved relative to .harness/, exactly as init.sh reads it.
+# Locked design: the auto-populated manifest ALWAYS lives at the umbrella root
+# (`<umbrella>/umbrella.manifest.yaml`, read by init.sh as ../umbrella.manifest.yaml).
+# If a coordinator has been pointed at a CUSTOM non-root path, the cascade does not
+# try to write there — child `path:` entries are relative to the manifest's own dir,
+# so a non-root manifest would mis-resolve every child. Warn and use the root file.
+MANIFEST="$UMB/umbrella.manifest.yaml"
 _cfg_manifest="$(grep -E '^[[:space:]]*manifest:' "$COORD_CFG" | head -1 \
   | sed -E 's/^[[:space:]]*manifest:[[:space:]]*//; s/[[:space:]]*#.*$//; s/^"//; s/"$//; s/^'\''//; s/'\''$//')"
 case "$_cfg_manifest" in
-  "") MANIFEST="$UMB/umbrella.manifest.yaml" ;;     # no value (shouldn't happen post-activation)
-  /*) MANIFEST="$_cfg_manifest" ;;                  # absolute path, used as-is
-  *)  MANIFEST="$UMB/.harness/$_cfg_manifest" ;;     # relative to the harness dir
+  ""|../umbrella.manifest.yaml|./umbrella.manifest.yaml|umbrella.manifest.yaml) : ;;  # the supported root location
+  *)
+    echo "⚠️  coordinator umbrella.manifest is a custom path ('$_cfg_manifest') — the cascade only auto-populates the root '$UMB/umbrella.manifest.yaml'. Point umbrella.manifest there, or maintain the custom manifest by hand." ;;
 esac
-mkdir -p "$(dirname "$MANIFEST")"
-# normalize so any `../` is collapsed before we write/compare.
-MANIFEST="$(CDPATH= cd -- "$(dirname "$MANIFEST")" && pwd)/$(basename "$MANIFEST")"
 
 # (b) discover immediate git children + (c) populate the manifest.
 echo "── discovering git children (depth 1) ──"

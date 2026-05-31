@@ -38,15 +38,3 @@ deliberately, not on every PR.
 - Record it in `CHANGELOG.md` and tag the merge commit `vX.Y.Z`.
 - (Optional enforcement: a CI check that fails a PR touching harness-owned paths
   without a `VERSION` change.)
-
-<!-- harness:begin -->
-## Agent Harness (Spec-Driven Development)
-This project uses a portable agent harness installed in `.harness/`.
-Start every agent session as the **Orchestrator**:
-1. Run `.harness/init.sh` — if it exits non-zero, STOP.
-2. Read `.harness/AGENTS.md` (the harness source of truth) and resolve its
-   relative paths against `.harness/` (config, agents/, specs/, state/, store/,
-   docs/, progress/).
-3. Product/source code lives at the repo root; harness bookkeeping lives in
-   `.harness/`. In Claude Code, run `/sdd-next`.
-<!-- harness:end -->

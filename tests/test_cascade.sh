@@ -315,9 +315,11 @@ else
   pass "harness-source-child skip (symlink unsupported here — skipped) [skip_harness_source_child]"
 fi
 
-# ── P2 (Codex #7 r3): a custom non-blank umbrella.manifest path receives the repos ─
-# A coordinator that intentionally keeps a custom manifest path must have discovered
-# children written THERE (what init.sh reads), not to a hard-coded root file.
+# ── Codex #7 r4 (simplified): manifest is ALWAYS the umbrella root; custom path warns ─
+# Locked design: the auto-populated manifest lives at <umbrella>/umbrella.manifest.yaml.
+# A coordinator with a CUSTOM non-root manifest path must NOT cause children to be
+# written under a non-root file (their `path:` is relative to the manifest dir and
+# would mis-resolve). The cascade warns and populates the root manifest instead.
 XU="$T/umb-custom"; mkdir -p "$XU/.harness" "$XU/repo-a/.git"
 cat > "$XU/.harness/harness.config.yaml" <<'CFG'
 tasks: local
@@ -326,15 +328,36 @@ verification:
 umbrella:
   manifest: "../custom/coord-manifest.yaml"
 CFG
-sh "$INSTALL" --umbrella "$XU" >/dev/null 2>&1 || fail "umbrella install with custom manifest path failed (Codex #7 r3)"
-grep -Eq '^  repo-a:[[:space:]]*$' "$XU/custom/coord-manifest.yaml" 2>/dev/null \
-  || { echo "--- custom manifest ---"; cat "$XU/custom/coord-manifest.yaml" 2>/dev/null; fail "discovered repo not written to the configured custom manifest path (Codex #7 r3)"; }
-if [ -f "$XU/umbrella.manifest.yaml" ] && grep -Eq '^  repo-a:' "$XU/umbrella.manifest.yaml"; then
-  fail "discovered repo written to the hard-coded root manifest instead of the configured path (Codex #7 r3)"
-fi
-# the configured value must be preserved (not overwritten to the default).
+XOUT="$T/custom.out"
+sh "$INSTALL" --umbrella "$XU" >"$XOUT" 2>&1 || fail "umbrella install with custom manifest path failed (Codex #7 r4)"
+grep -qiE "custom path|only auto-populates the root" "$XOUT" \
+  || { echo "--- out ---"; cat "$XOUT"; fail "custom manifest path did not warn (Codex #7 r4)"; }
+grep -Eq '^  repo-a:[[:space:]]*$' "$XU/umbrella.manifest.yaml" \
+  || { echo "--- root manifest ---"; cat "$XU/umbrella.manifest.yaml" 2>/dev/null; fail "discovered repo not written to the ROOT manifest (Codex #7 r4)"; }
+[ -e "$XU/custom/coord-manifest.yaml" ] && fail "cascade wrote to the unsupported custom manifest path (Codex #7 r4)"
+# the configured custom value is left as the user set it (not auto-rewritten).
 grep -qF 'manifest: "../custom/coord-manifest.yaml"' "$XU/.harness/harness.config.yaml" \
-  || fail "custom umbrella.manifest value was overwritten (Codex #7 r3)"
-pass "custom umbrella.manifest path receives discovered repos (Codex #7 r3) [custom_manifest_path_target]"
+  || fail "custom umbrella.manifest value was overwritten (Codex #7 r4)"
+pass "custom manifest path warns; root manifest is populated (Codex #7 r4) [custom_manifest_warns_root_used]"
+
+# ── P2 (Codex #7 r4): new entries are inserted INSIDE repos:, not after a later section ─
+# A pre-existing manifest with a trailing top-level section (e.g. metadata:) must
+# receive the new repo UNDER repos:, before that section — else init.sh stops scanning.
+MU="$T/umb-sections"; mkdir -p "$MU/.harness" "$MU/repo-b/.git"
+printf 'tasks: local\n' > "$MU/.harness/harness.config.yaml"
+cat > "$MU/umbrella.manifest.yaml" <<'MAN'
+repos:
+  repo-a:
+    path: ./repo-a
+metadata:
+  note: keep me last
+MAN
+sh "$INSTALL" --umbrella "$MU" >/dev/null 2>&1 || fail "umbrella install over sectioned manifest failed (Codex #7 r4)"
+# repo-b must appear AFTER repos: and BEFORE metadata: (i.e. inside the repos mapping).
+awk '/^repos:/{r=NR} /^  repo-b:/{b=NR} /^metadata:/{m=NR} END{exit !(r && b && m && r<b && b<m)}' "$MU/umbrella.manifest.yaml" \
+  || { echo "--- manifest ---"; cat "$MU/umbrella.manifest.yaml"; fail "repo-b not inserted inside repos: before the metadata section (Codex #7 r4)"; }
+# metadata section preserved intact.
+grep -qF 'note: keep me last' "$MU/umbrella.manifest.yaml" || fail "trailing section was clobbered (Codex #7 r4)"
+pass "new repo inserted inside repos: ahead of later sections (Codex #7 r4) [manifest_insert_within_repos]"
 
 echo "All cascade tests passed."

@@ -10,3 +10,6 @@ progress/*/
 .DS_Store
 .obsidian/workspace*
 *.swp
+
+# Never commit a self-install of the harness into its own source repo.
+.harness/
