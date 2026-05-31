@@ -18,6 +18,44 @@ Validated by `store/tasks.schema.json` (and by `init.sh`).
   re-validate (`python3 -c "import json;json.load(open('state/tasks.json'))"`).
   Keep the feature's `.spec.md` frontmatter `status` in sync.
 
+## Cross-repo features → `slices[]` (umbrella mode)
+A feature may optionally carry a `slices` array — one entry per child repo for a
+cross-repo (umbrella) feature. Each slice has `id` (`<feature-id>@<repo>`, e.g.
+`E03-F01@viernes-bff`), `repo`, `status`, optional `merged` (true once its PR is
+merged in that repo), optional `spec_path` (the slice's emitted `.tasks`/`.tests`),
+optional `pr` (the PR URL the child SDD loop opened — the selector used to poll the
+merge, since the short `repo` key is not a `gh` repo slug), and optional cross-repo
+`depends_on` (slice ids). A feature with **no** `slices`
+behaves exactly as a single-repo feature does today — the field is purely additive.
+
+- **slices(id)** — read the feature's `slices[]` (empty/absent ⇒ single-repo).
+- **next_slice(feature)** — the lowest-id slice that is actionable and whose every
+  `depends_on` upstream slice is `done` **and** `merged` (topological order).
+- **set_slice_status(feature, slice_id, status)** / **set_slice_merged(...)** —
+  edit the slice in place, then re-validate against `store/tasks.schema.json`.
+
+### Rollup rule (feature `done` is derived, then persisted)
+For a sliced feature the coordinator **derives** the feature's status from its slices
+rather than declaring `done` by fiat — but it **does persist** the derived result:
+
+- While **any** slice is not `done`+`merged`, the feature's rolled-up status is **not**
+  `done`, and the coordinator must NOT write `done` onto the feature.
+- A feature becomes `done` **only when every slice is `done` and `merged`** **and** the
+  feature-level integration check (`verification.integration_command`) has passed.
+- **When those conditions hold, the coordinator writes the derived `done` onto the
+  feature** (`set_feature_status`) and re-validates. This persistence is required:
+  feature-level `next()` gates `depends_on` on the *stored* feature status, so a
+  dependent feature (e.g. `E03-F02` depends_on `E03-F01`) stays blocked until the
+  upstream feature's `done` is actually written.
+- On each slice **advance** (a slice reaching `done`+`merged`), re-evaluate which
+  downstream slices have become dispatchable, then re-check the rollup condition.
+
+"Derived, never set directly" therefore means *never set `done` prematurely* (while a
+slice or the integration gate is red) — not "never written". This guarantees there is
+no path to a green feature with a red slice, while still unblocking dependents. The umbrella
+dispatch/gating loop that consumes these semantics is specified in
+`docs/UMBRELLA.md` and the "Umbrella mode" section of `agents/orchestrator.md`.
+
 ## DocStore → markdown
 - **read_spec(feature_id)** — read the 4 files under the feature's `spec_path`.
 - **write_spec** — Architect writes `<feature>.spec.md|plan.md|tasks.md|tests.md`

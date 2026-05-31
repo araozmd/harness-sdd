@@ -52,7 +52,22 @@ verification:
   init_script: ./init.sh
   # Commands the Reviewer must run before marking work done. Project-specific —
   # edit these per target repo.
-  test_command: "sh tests/test_install.sh"   # this harness's product IS the installer
+  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh"   # installer + umbrella coordinator suites
 
   lint_command: ""        # e.g. "ruff check ." or "npm run lint"
   typecheck_command: ""   # e.g. "mypy ." or "tsc --noEmit"
+
+  # Umbrella mode only (see docs/UMBRELLA.md): the feature-level integration check
+  # that runs the stack together (e.g. "viernes-infra/dev.sh ci"). It runs ONLY when
+  # every slice of a cross-repo feature is done+merged, and a non-zero exit keeps the
+  # feature out of `done`. Empty ⇒ no integration gate (single-repo default).
+  integration_command: ""
+
+# Umbrella coordinator (cross-repo) — ADDITIVE / opt-in. See docs/UMBRELLA.md.
+# A single-repo project leaves this inert: with `manifest` unset (or the file
+# absent) the coordinator does nothing and the existing single-repo flow
+# (init.sh, verification.test_command, Reviewer `done` verdict) is unchanged.
+umbrella:
+  # Path to the umbrella manifest (see umbrella.manifest.example.yaml). The PRESENCE
+  # of this file is the umbrella-mode switch. Unset/absent ⇒ single-repo, inert.
+  manifest: ""
