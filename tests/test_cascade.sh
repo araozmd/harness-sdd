@@ -240,4 +240,37 @@ cmp -s "$PRE/.harness/harness.config.yaml" "$T/pre.after1" \
        fail "migration not idempotent on a complete config (R20)"; }
 pass "migration is a no-op on a complete config, idempotent (R20) [migrate_idempotent]"
 
+# ── P2 (Codex #7): manifest header added when a comments-only manifest pre-exists ─
+# A pre-existing manifest with no top-level `repos:` (empty/comments-only) must still
+# end up with the header, else init.sh cannot read the appended child entries.
+HU="$T/umb-hdr"; mkdir -p "$HU/repo-a/.git"
+printf '# pre-existing manifest, comments only\n' > "$HU/umbrella.manifest.yaml"
+sh "$INSTALL" --umbrella "$HU" >/dev/null 2>&1 || fail "umbrella install over comments-only manifest failed (Codex #7)"
+grep -Eq '^repos:[[:space:]]*$' "$HU/umbrella.manifest.yaml" \
+  || { echo "--- manifest ---"; cat "$HU/umbrella.manifest.yaml"; fail "repos: header not added to a comments-only manifest (Codex #7)"; }
+grep -Eq '^  repo-a:[[:space:]]*$' "$HU/umbrella.manifest.yaml" \
+  || fail "child entry missing after header fix (Codex #7)"
+# the header must precede the first child entry.
+awk '/^repos:[[:space:]]*$/{h=NR} /^  repo-a:/{e=NR} END{exit !(h && e && h<e)}' "$HU/umbrella.manifest.yaml" \
+  || fail "repos: header does not precede child entry (Codex #7)"
+( cd "$HU" && ./.harness/init.sh >/dev/null 2>&1 ) || fail "coordinator init.sh not green after header fix (Codex #7)"
+pass "comments-only manifest gets a repos: header before child entries (Codex #7) [manifest_header_when_missing]"
+
+# ── P2 (Codex #7): umbrella mode activates for ALL blank manifest YAML forms ────
+# A manually-cleared, unquoted `manifest:` value must still be pointed at the
+# generated manifest (not only the double-quoted "" form).
+BU="$T/umb-blank"; mkdir -p "$BU/.harness" "$BU/repo-a/.git"
+cat > "$BU/.harness/harness.config.yaml" <<'CFG'
+tasks: local
+verification:
+  test_command: ""
+umbrella:
+  manifest:
+CFG
+sh "$INSTALL" --umbrella "$BU" >/dev/null 2>&1 || fail "umbrella install over unquoted-blank manifest failed (Codex #7)"
+grep -Eq '^[[:space:]]*manifest:[[:space:]]*"\.\./umbrella\.manifest\.yaml"' "$BU/.harness/harness.config.yaml" \
+  || { echo "--- coord cfg ---"; grep -n manifest "$BU/.harness/harness.config.yaml"; fail "unquoted-blank manifest not activated (Codex #7)"; }
+( cd "$BU" && ./.harness/init.sh >/dev/null 2>&1 ) || fail "coordinator init.sh not green after blank-form activation (Codex #7)"
+pass "umbrella mode activates for unquoted/blank manifest values (Codex #7) [manifest_blank_forms_activate]"
+
 echo "All cascade tests passed."

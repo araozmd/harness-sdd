@@ -376,6 +376,11 @@ manifest_upsert() {
   _mf="$1"; _name="$2"
   if [ ! -f "$_mf" ]; then
     printf 'repos:\n' > "$_mf"
+  elif ! grep -Eq '^repos:[[:space:]]*$' "$_mf"; then
+    # File exists but has no top-level `repos:` header (empty or comments-only).
+    # init.sh only recognizes repo entries AFTER a `repos:` line, so add it —
+    # otherwise the appended child blocks below would be unreadable.
+    printf 'repos:\n' >> "$_mf"
   fi
   # Already present? (anchored two-space key under repos:) — never clobber.
   if grep -Eq "^  ${_name}:[[:space:]]*$" "$_mf"; then
@@ -448,11 +453,17 @@ migrate_config "$COORD_CFG"
 MANIFEST="$UMB/umbrella.manifest.yaml"
 # The manifest lives at the umbrella ROOT, but init.sh resolves umbrella.manifest
 # relative to the harness dir (.harness/), so point at ../umbrella.manifest.yaml.
-if grep -Eq '^[[:space:]]*manifest:[[:space:]]*""' "$COORD_CFG"; then
+# Match every blank YAML representation — `manifest:`, `manifest: ""`, `manifest: ''`
+# — but NOT a real value. Otherwise a manually-cleared value leaves umbrella mode
+# inert despite the cascade having written the manifest.
+_blank_manifest='^[[:space:]]*manifest:[[:space:]]*("")?[[:space:]]*$|^[[:space:]]*manifest:[[:space:]]*('"''"')[[:space:]]*$'
+if grep -Eq "$_blank_manifest" "$COORD_CFG"; then
   awk '
-    !done && $0 ~ /^[[:space:]]*manifest:[[:space:]]*""/ {
-      sub(/manifest:[[:space:]]*""/, "manifest: \"../umbrella.manifest.yaml\"")
-      done=1
+    !done && $0 ~ /^[[:space:]]*manifest:[[:space:]]*("")?[[:space:]]*$/ {
+      sub(/manifest:.*/, "manifest: \"../umbrella.manifest.yaml\""); done=1; print; next
+    }
+    !done && $0 ~ /^[[:space:]]*manifest:[[:space:]]*('"''"')[[:space:]]*$/ {
+      sub(/manifest:.*/, "manifest: \"../umbrella.manifest.yaml\""); done=1; print; next
     }
     { print }
   ' "$COORD_CFG" > "$COORD_CFG.umtmp" && mv "$COORD_CFG.umtmp" "$COORD_CFG"
