@@ -52,6 +52,22 @@ isolation AND an integration check passes.
 | F01 | Umbrella coordinator | done | true | — |
 | F02 | Cascade installer | done | true | F01 |
 
+## Deferred follow-up (P2 YAML-parser hardening — from PR #7 Codex review)
+Non-blocking hardening against *pathological hand-edited* coordinator configs. The
+default cascade path is correct; these only bite manually-crafted YAML with duplicate
+keys nested under unrelated sections. Tracked for a future small feature, not shipped
+in F02:
+- `init.sh` reads `umbrella.manifest` with a file-wide "first indented `manifest:`"
+  lookup; scope it to the top-level `umbrella:` section (mirror the installer's
+  `_cfg_umbrella_manifest_value`). A nested `metadata:\n  manifest: x` before the
+  umbrella block would otherwise leave umbrella mode inert.
+- Cascade treats `manifest: umbrella.manifest.yaml` / `./umbrella.manifest.yaml` as the
+  supported root location, but `init.sh` resolves relative to `.harness/`, so only
+  `../umbrella.manifest.yaml` points at the populated root file — normalize the other
+  forms or warn.
+- `migrate_config`'s `integration_command` presence check is file-wide; scope it to the
+  top-level `verification:` section (the `umbrella.manifest` check already is).
+
 ## Notes
 - **F02 cascade installer (design intent, to be specified at its own gate):** the
   current `harness-install.sh` is single-target with no git detection. F02 extends it
