@@ -71,6 +71,7 @@ except ImportError:
 errors = []
 EPIC_STATUS = {"pending", "in-progress", "done"}
 FEAT_STATUS = {"pending", "spec-ready", "in-progress", "in-review", "done"}
+SLICE_STATUS = {"pending", "spec-ready", "in-progress", "in-review", "done", "failed"}
 
 def need(obj, key, where):
     if key not in obj:
@@ -130,6 +131,36 @@ else:
                     dep = ft["depends_on"]
                     if not isinstance(dep, list) or not all(isinstance(x, str) for x in dep):
                         errors.append("%s.depends_on: expected array of strings" % fw)
+                # Umbrella mode (optional): mirror the slice checks from the JSON
+                # schema so corrupted cross-repo state is rejected even without
+                # jsonschema installed. Absent `slices` ⇒ single-repo, unaffected.
+                if "slices" in ft:
+                    slices = ft["slices"]
+                    if not isinstance(slices, list):
+                        errors.append("%s.slices: expected array" % fw); slices = []
+                    for si, sl in enumerate(slices):
+                        sw = "%s.slices[%d]" % (fw, si)
+                        if not isinstance(sl, dict):
+                            errors.append("%s: expected object" % sw); continue
+                        for k in ("id", "repo", "status"):
+                            need(sl, k, sw)
+                        if "id" in sl:
+                            if not isinstance(sl["id"], str):
+                                errors.append("%s.id: expected string" % sw)
+                            elif not re.match(r"^E[0-9]+-F[0-9]+@[a-z0-9-]+$", sl["id"]):
+                                errors.append("%s.id %r: must match ^E[0-9]+-F[0-9]+@[a-z0-9-]+$" % (sw, sl["id"]))
+                        if "repo" in sl and not isinstance(sl["repo"], str):
+                            errors.append("%s.repo: expected string" % sw)
+                        if sl.get("status") not in SLICE_STATUS and "status" in sl:
+                            errors.append("%s.status '%s': not one of %s" % (sw, sl["status"], sorted(SLICE_STATUS)))
+                        if "merged" in sl and not isinstance(sl["merged"], bool):
+                            errors.append("%s.merged: expected boolean" % sw)
+                        if "spec_path" in sl and not isinstance(sl["spec_path"], str):
+                            errors.append("%s.spec_path: expected string" % sw)
+                        if "depends_on" in sl:
+                            sdep = sl["depends_on"]
+                            if not isinstance(sdep, list) or not all(isinstance(x, str) for x in sdep):
+                                errors.append("%s.depends_on: expected array of strings" % sw)
 
 for e in errors:
     print("  " + e, file=sys.stderr)

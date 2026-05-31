@@ -38,7 +38,7 @@
                       "id": { "type": "string", "pattern": "^E[0-9]+-F[0-9]+@[a-z0-9-]+$" },
                       "repo": { "type": "string" },
                       "status": {
-                        "enum": ["pending", "spec-ready", "in-progress", "in-review", "done"]
+                        "enum": ["pending", "spec-ready", "in-progress", "in-review", "done", "failed"]
                       },
                       "merged": { "type": "boolean" },
                       "spec_path": { "type": "string" },

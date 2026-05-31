@@ -37,7 +37,7 @@ except ImportError:
     pass
 # Zero-dep fallback: encode the slice invariants we assert in this test.
 SLICE_ID = re.compile(r"^E[0-9]+-F[0-9]+@[a-z0-9-]+$")
-FEAT_STATUS = {"pending","spec-ready","in-progress","in-review","done"}
+FEAT_STATUS = {"pending","spec-ready","in-progress","in-review","done","failed"}
 errors = []
 for ep in data.get("epics", []):
     for ft in ep.get("features", []):
@@ -124,6 +124,86 @@ if validate "$T/badslice.json" 2>/dev/null; then
   fi
 fi
 pass "malformed slice (missing repo) rejected (R1) [test_schema_accepts_slices]"
+
+# ── R12: fail-stop needs a schema-valid `failed` slice status ──────────────────
+# The fail-stop instruction sets a failed slice to status "failed"; the store must
+# stay schema-valid so the next init.sh gate does not reject it.
+cat > "$T/failed.json" <<'JSON'
+{
+  "project": "fixture",
+  "epics": [{
+    "id": "E03", "title": "multi-repo", "status": "in-progress",
+    "features": [{
+      "id": "E03-F01", "title": "umbrella", "status": "in-progress",
+      "sdd": true, "spec_path": "specs/x",
+      "slices": [{"id":"E03-F01@lia-api","repo":"lia-api","status":"failed","merged":false}]
+    }]
+  }]
+}
+JSON
+validate "$T/failed.json" || fail "slice status 'failed' rejected — fail-stop cannot persist (R12)"
+pass "slice status 'failed' is schema-valid (R12) [test_schema_failed_status]"
+
+# bogus slice status must still be rejected (the enum is not open).
+cat > "$T/bogus.json" <<'JSON'
+{
+  "project": "fixture",
+  "epics": [{
+    "id": "E03", "title": "multi-repo", "status": "in-progress",
+    "features": [{
+      "id": "E03-F01", "title": "umbrella", "status": "in-progress",
+      "sdd": true, "spec_path": "specs/x",
+      "slices": [{"id":"E03-F01@lia-api","repo":"lia-api","status":"banana"}]
+    }]
+  }]
+}
+JSON
+if validate "$T/bogus.json" 2>/dev/null; then
+  if have_py && python3 -c "import jsonschema" >/dev/null 2>&1; then
+    fail "bogus slice status wrongly accepted (R1)"
+  fi
+fi
+pass "bogus slice status rejected (R1) [test_schema_failed_status]"
+
+# ── P2 (Codex): init.sh ZERO-DEP fallback validates slices too ─────────────────
+# When python3 is present but jsonschema is NOT, init.sh uses its built-in
+# validator. Force that path with `python3 -S` (no site-packages ⇒ no jsonschema)
+# and confirm a malformed slice is rejected before orchestration begins.
+if have_py; then
+  BIN="$T/bin"; mkdir -p "$BIN"
+  REALPY="$(command -v python3)"
+  printf '#!/bin/sh\nexec "%s" -S "$@"\n' "$REALPY" > "$BIN/python3"
+  chmod +x "$BIN/python3"
+  if PATH="$BIN:$PATH" python3 -c "import jsonschema" >/dev/null 2>&1; then
+    echo "      (jsonschema importable even under -S — skipping fallback-path test)"
+  else
+    # Minimal harness layout init.sh's structural checks require.
+    H="$T/inst"; mkdir -p "$H/agents" "$H/specs" "$H/progress" "$H/state" "$H/store"
+    : > "$H/AGENTS.md"
+    printf 'tasks: local\n' > "$H/harness.config.yaml"
+    for r in orchestrator architect builder reviewer scout; do : > "$H/agents/$r.md"; done
+    cp "$SRC/store/tasks.schema.json" "$H/store/tasks.schema.json"
+    cp "$SRC/init.sh" "$H/init.sh"; chmod +x "$H/init.sh"
+    # malformed slice: bad id pattern, missing repo, bogus status.
+    cat > "$H/state/tasks.json" <<'JSON'
+{
+  "project": "fixture",
+  "epics": [{
+    "id": "E03", "title": "x", "status": "in-progress",
+    "features": [{
+      "id": "E03-F01", "title": "y", "status": "in-progress",
+      "sdd": true, "spec_path": "p",
+      "slices": [{"id":"BAD","status":"banana"}]
+    }]
+  }]
+}
+JSON
+    if ( cd "$H" && PATH="$BIN:$PATH" ./init.sh >/dev/null 2>&1 ); then
+      fail "init.sh fallback validator accepted a malformed slice (Codex P2)"
+    fi
+    pass "init.sh zero-dep fallback rejects malformed slice [test_fallback_validates_slices]"
+  fi
+fi
 
 # ── Reference coordinator algorithm (drives R3, R6, R9–R17) ────────────────────
 # A minimal POSIX-sh implementation of the documented loop, operating over a flat

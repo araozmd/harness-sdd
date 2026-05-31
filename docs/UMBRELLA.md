@@ -12,7 +12,10 @@ umbrella lives in a non-git parent directory hosting sibling child repos.
 
 ## Opt-in switch (single-repo stays inert)
 Umbrella mode is engaged **only** when `umbrella.manifest` in `harness.config.yaml`
-points at an existing manifest file (see `umbrella.manifest.example.yaml`). With the
+points at an existing manifest file. Copy the shipped template to start — it lives at
+the harness root as `umbrella.manifest.example.yaml`, and an installed harness places
+it at `.harness/umbrella.manifest.example.yaml` (the installer copies it with the rest
+of the body). With the
 key unset or the file absent, the coordinator is inert and the existing single-repo
 flow — `init.sh`, `verification.test_command`, the Reviewer's `done` verdict — behaves
 exactly as it does today. The presence of the manifest file (not a boolean flag) is

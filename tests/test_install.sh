@@ -23,6 +23,7 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "installer exited non-zero"
 [ -f "$T/.harness/agents/orchestrator.md" ]    || fail "role bodies missing"                 # R1
 [ -d "$T/.harness/docs" ]                      || fail "docs/ missing"                       # R1
 [ -f "$T/.harness/store/tasks.schema.json" ]   || fail "schema missing"                      # R1
+[ -f "$T/.harness/umbrella.manifest.example.yaml" ] || fail "umbrella manifest example not installed" # R1
 [ -x "$T/.harness/init.sh" ]                   || fail ".harness/init.sh not executable"     # R1
 [ -f "$T/.harness/specs/product.md" ]          || fail "product.md stub not seeded"          # R6
 [ -f "$T/.harness/state/tasks.json" ]          || fail "bootstrap tasks.json missing"        # R6
