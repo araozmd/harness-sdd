@@ -73,15 +73,23 @@ When the selected feature has `slices[]`, drive it slice by slice:
 4. **fail-stop** — if the `delegate_cmd` exits non-zero, set the slice `status:
    "failed"`, halt its downstream dependents, surface the failure, and hand back. Do
    not improvise. (`failed` is a slice-only status; a feature never goes `failed`.)
-5. **advance** — on zero-exit success, set the slice `status: "done"`. A slice is
-   created with `merged: false`; `done` alone does NOT unblock its dependents.
-6. **observe-merge** — a `done` slice still owns an open PR in its child repo. Wait
-   for (or poll) that PR to merge — `gh -R <repo> pr view <n> --json state` returning
-   `MERGED`, or the slice branch landed on the child's default branch. Only then set
-   the slice `merged: true`. Until a slice is **both** `done` and `merged`, the
-   `select`/`gate` steps keep every `depends_on` dependent (and the integration gate)
-   blocked. After setting `merged: true`, re-run **select** to re-evaluate which
-   downstream slices have become dispatchable.
+5. **advance** — on zero-exit success, set the slice `status: "done"` **and persist
+   the PR reference the delegate returned** into the slice's `pr` field (the full PR
+   URL the child SDD loop opened — `agents/builder.md` returns it). A slice is created
+   with `merged: false`; `done` alone does NOT unblock its dependents. If the delegate
+   returned **no** PR reference, record that and treat `merged` as a **manual**
+   confirmation step (see below) — never silently leave the chain stuck.
+6. **observe-merge** — a `done` slice still owns an open PR in its child repo. Poll it
+   to merge using the persisted reference: `gh pr view <slice.pr> --json state`
+   returning `MERGED` (a full PR **URL** is a valid selector and needs no `-R`; the
+   short manifest `repo` key is NOT a `gh` repo slug, so do not pass it to `-R`). If
+   no `pr` was persisted, fall back to the manifest repo's `path` + default-branch
+   landing check, or require an explicit human `merged: true` — and surface that the
+   slice is awaiting merge confirmation. Only on confirmed merge set the slice
+   `merged: true`. Until a slice is **both** `done` and `merged`, the `select`/`gate`
+   steps keep every `depends_on` dependent (and the integration gate) blocked. After
+   setting `merged: true`, re-run **select** to re-evaluate which downstream slices
+   have become dispatchable.
 
 **Integration gate + rollup (you DERIVE feature `done`, then PERSIST it):**
 - While any slice is not `done`+`merged`, do NOT run the integration check.

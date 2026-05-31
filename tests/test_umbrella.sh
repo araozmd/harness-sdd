@@ -62,10 +62,16 @@ for ep in data.get("epics", []):
                 errors.append("slice.status %r: bad enum" % sl.get("status"))
             if "merged" in sl and not isinstance(sl["merged"], bool):
                 errors.append("slice.merged: expected boolean")
+            if "pr" in sl and not isinstance(sl["pr"], str):
+                errors.append("slice.pr: expected string")
             if "depends_on" in sl:
                 d = sl["depends_on"]
                 if not isinstance(d, list) or not all(isinstance(x,str) for x in d):
                     errors.append("slice.depends_on: expected array of strings")
+        if ft.get("status") == "done":
+            for sl in slices:
+                if isinstance(sl, dict) and (sl.get("status") != "done" or sl.get("merged") is not True):
+                    errors.append("feature 'done' but a slice is not done+merged")
 sys.exit(1 if errors else 0)
 PY
 }
@@ -229,6 +235,54 @@ if validate "$T/emptyslices.json" 2>/dev/null; then
   fi
 fi
 pass "empty slices[] rejected, minItems:1 (no vacuous rollup) [test_schema_slices_min_items]"
+
+# ── P1 (Codex r3): a `done` feature with a red slice must be rejected ──────────
+# next() gates dependents on the STORED feature status, so a hand-edited/partial
+# store claiming feature done while a slice is unmerged would dispatch dependents
+# prematurely. Cross-field validation must reject it.
+cat > "$T/donefeature_redslice.json" <<'JSON'
+{
+  "project": "fixture",
+  "epics": [{
+    "id": "E03", "title": "multi-repo", "status": "in-progress",
+    "features": [{
+      "id": "E03-F01", "title": "umbrella", "status": "done",
+      "sdd": true, "spec_path": "specs/x",
+      "slices": [
+        {"id":"E03-F01@lia-api","repo":"lia-api","status":"done","merged":true},
+        {"id":"E03-F01@viernes-bff","repo":"viernes-bff","status":"done","merged":false}
+      ]
+    }]
+  }]
+}
+JSON
+if validate "$T/donefeature_redslice.json" 2>/dev/null; then
+  if have_py && python3 -c "import jsonschema" >/dev/null 2>&1; then
+    fail "feature 'done' with an unmerged slice wrongly accepted (Codex r3 P1)"
+  fi
+fi
+pass "feature 'done' requires every slice done+merged (Codex r3 P1) [test_schema_done_feature_all_slices_done]"
+
+# the same feature IS valid once every slice is done+merged, and a persisted PR URL
+# (the merge-poll selector) is accepted on a slice.
+cat > "$T/donefeature_ok.json" <<'JSON'
+{
+  "project": "fixture",
+  "epics": [{
+    "id": "E03", "title": "multi-repo", "status": "done",
+    "features": [{
+      "id": "E03-F01", "title": "umbrella", "status": "done",
+      "sdd": true, "spec_path": "specs/x",
+      "slices": [
+        {"id":"E03-F01@lia-api","repo":"lia-api","status":"done","merged":true,"pr":"https://github.com/o/lia-api/pull/7"},
+        {"id":"E03-F01@viernes-bff","repo":"viernes-bff","status":"done","merged":true,"pr":"https://github.com/o/viernes-bff/pull/3"}
+      ]
+    }]
+  }]
+}
+JSON
+validate "$T/donefeature_ok.json" || fail "all-slices-done feature with slice.pr rejected (Codex r3 P1/P2)"
+pass "feature 'done' with all slices done+merged and slice.pr persisted is valid (Codex r3) [test_schema_slice_pr_and_done_ok]"
 
 # ── Reference coordinator algorithm (drives R3, R6, R9–R17) ────────────────────
 # A minimal POSIX-sh implementation of the documented loop, operating over a flat

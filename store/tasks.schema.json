@@ -43,11 +43,34 @@
                       },
                       "merged": { "type": "boolean" },
                       "spec_path": { "type": "string" },
+                      "pr": { "type": "string", "description": "PR URL the child SDD loop opened; a valid `gh pr view` selector for the merge poll" },
                       "depends_on": { "type": "array", "items": { "type": "string" } }
                     }
                   }
                 }
-              }
+              },
+              "allOf": [
+                {
+                  "$comment": "Cross-field: a sliced feature may only be `done` when every slice is done AND merged. Single-repo features (no slices) are unaffected — the `if` is false without slices.",
+                  "if": {
+                    "required": ["slices"],
+                    "properties": { "status": { "const": "done" } }
+                  },
+                  "then": {
+                    "properties": {
+                      "slices": {
+                        "items": {
+                          "required": ["merged"],
+                          "properties": {
+                            "status": { "const": "done" },
+                            "merged": { "const": true }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
             }
           }
         }

@@ -26,8 +26,11 @@ the switch.
 - **Slice** — a per-repo unit of work for one cross-repo feature. In the TaskStore a
   feature carries an optional `slices[]` (see `store/local.md` and
   `store/tasks.schema.json`); each slice has `id` (`<feature-id>@<repo>`, e.g.
-  `E03-F01@viernes-bff`), `repo`, `status`, `merged`, `spec_path`, and cross-repo
-  `depends_on`.
+  `E03-F01@viernes-bff`), `repo`, `status`, `merged`, `spec_path`, optional `pr` (the
+  PR URL the child loop opened — the merge-poll selector), and cross-repo
+  `depends_on`. A sliced feature can only be persisted `done` when **every** slice is
+  `done`+`merged` (enforced by `tasks.schema.json` cross-field validation and the
+  `init.sh` fallback), so a hand-edited store cannot unblock dependents early.
 - **Manifest** — `umbrella.manifest.yaml`: maps each `repo` to its `path`, `init`,
   `test_command`, and `delegate_cmd`. The coordinator reads it to locate and dispatch
   each child repo.
@@ -68,25 +71,34 @@ section of `agents/orchestrator.md`); no role file is forked. It is engaged only
    <delegate_cmd> <feature-id> <abs-spec-path>
    ```
 
-   run in/for that child repo. The umbrella **never edits source files** in the child
-   repo itself — the child repo's own SDD loop owns implementation, its PR, and its
-   review.
+   run **from that child repo's working directory** (`cd` into the manifest `path`)
+   so a repo-local relative `delegate_cmd` (e.g. `./run-sdd.sh`) resolves correctly.
+   The umbrella **never edits source files** in the child repo itself — the child
+   repo's own SDD loop owns implementation, its PR, and its review.
 3. **gate** — never dispatch a downstream slice's Builder, nor open that downstream
    repo's PR, while any of its upstream `depends_on` slices is not yet `done` **and**
    `merged`.
-4. **fail-stop** — if a dispatched slice's `delegate_cmd` exits **non-zero**, mark
-   that slice **failed**, halt dispatch of its downstream dependents, and surface the
-   failure. Do not improvise a fix.
+4. **fail-stop** — if a dispatched slice's `delegate_cmd` exits **non-zero**, set that
+   slice's status to `failed`, halt dispatch of its downstream dependents, and surface
+   the failure. Do not improvise a fix.
 5. **advance** — on a slice's successful (zero-exit) completion, record its status as
-   `done` and **re-evaluate** which downstream slices have become dispatchable (their
-   upstreams are now `done`+`merged`), then re-run **select**.
+   `done` and **persist the PR URL** the delegate returned into the slice's `pr` field.
+   `done` alone does not unblock dependents.
+6. **observe-merge** — poll the slice's PR to merge with `gh pr view <slice.pr>
+   --json state` (a PR **URL** is a valid selector and needs no `-R`; never pass the
+   short manifest `repo` key to `-R`). If no `pr` was persisted, fall back to a
+   default-branch landing check in the manifest `path` or require an explicit human
+   `merged: true`, and surface that the slice awaits merge confirmation — never leave
+   the chain silently stuck. On confirmed merge set `merged: true`, then re-run
+   **select** so newly-unblocked downstream slices become dispatchable.
 
 This reuses the existing `execution.builder.delegate` contract exactly — the umbrella
 Builder is just that delegate seam invoked once per slice, with gating/ordering around
 it. Nothing new is added to the seam.
 
 ## Integration verification (rollup)
-The feature `done` verdict is **derived**, never set directly:
+The feature `done` verdict is **derived** from slice state, then **persisted** (never
+set `done` prematurely while a slice or the integration gate is red):
 
 - **Gated** — while **any** slice of the feature is not `done`, the coordinator does
   **not** run the integration check.
@@ -95,7 +107,11 @@ The feature `done` verdict is **derived**, never set directly:
   e.g. `viernes-infra/dev.sh ci`). If `integration_command` is empty there is no
   integration gate.
 - **Done** — the feature reaches `done` **only when** all per-repo slices pass their
-  own verification **and** the integration command exits **zero**.
+  own verification **and** the integration command exits **zero**. When that holds the
+  coordinator **writes** the derived `done` onto the feature (feature-level
+  `depends_on` gates on the *stored* status, so a dependent feature stays blocked until
+  the upstream `done` is actually persisted). The schema enforces this cross-field
+  invariant — a feature cannot be stored `done` while any slice is not `done`+`merged`.
 - **Failure** — if the integration command exits **non-zero**, keep the feature out of
   `done` and surface the integration failure.
 

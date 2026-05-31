@@ -159,10 +159,21 @@ else:
                             errors.append("%s.merged: expected boolean" % sw)
                         if "spec_path" in sl and not isinstance(sl["spec_path"], str):
                             errors.append("%s.spec_path: expected string" % sw)
+                        if "pr" in sl and not isinstance(sl["pr"], str):
+                            errors.append("%s.pr: expected string" % sw)
                         if "depends_on" in sl:
                             sdep = sl["depends_on"]
                             if not isinstance(sdep, list) or not all(isinstance(x, str) for x in sdep):
                                 errors.append("%s.depends_on: expected array of strings" % sw)
+                    # Cross-field: a sliced feature may only be `done` when every slice
+                    # is done AND merged. Guards a hand-edited/partial store from
+                    # dispatching dependents (which gate on the stored feature status).
+                    if ft.get("status") == "done":
+                        for si, sl in enumerate(slices):
+                            if not isinstance(sl, dict):
+                                continue
+                            if sl.get("status") != "done" or sl.get("merged") is not True:
+                                errors.append("%s.slices[%d]: feature is 'done' but slice is not done+merged" % (fw, si))
 
 for e in errors:
     print("  " + e, file=sys.stderr)

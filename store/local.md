@@ -23,7 +23,9 @@ A feature may optionally carry a `slices` array — one entry per child repo for
 cross-repo (umbrella) feature. Each slice has `id` (`<feature-id>@<repo>`, e.g.
 `E03-F01@viernes-bff`), `repo`, `status`, optional `merged` (true once its PR is
 merged in that repo), optional `spec_path` (the slice's emitted `.tasks`/`.tests`),
-and optional cross-repo `depends_on` (slice ids). A feature with **no** `slices`
+optional `pr` (the PR URL the child SDD loop opened — the selector used to poll the
+merge, since the short `repo` key is not a `gh` repo slug), and optional cross-repo
+`depends_on` (slice ids). A feature with **no** `slices`
 behaves exactly as a single-repo feature does today — the field is purely additive.
 
 - **slices(id)** — read the feature's `slices[]` (empty/absent ⇒ single-repo).
