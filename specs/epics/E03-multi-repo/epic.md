@@ -1,7 +1,7 @@
 ---
 id: E03
 title: Multi-repo coordination
-status: pending          # pending → in-progress → done (rollup of its features)
+status: done             # pending → in-progress → done (rollup of its features)
 owner: araozmd
 ---
 
@@ -50,7 +50,7 @@ isolation AND an integration check passes.
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
 | F01 | Umbrella coordinator | done | true | — |
-| F02 | Cascade installer | pending | true | F01 |
+| F02 | Cascade installer | done | true | F01 |
 
 ## Notes
 - **F02 cascade installer (design intent, to be specified at its own gate):** the

@@ -52,7 +52,7 @@ verification:
   init_script: ./init.sh
   # Commands the Reviewer must run before marking work done. Project-specific —
   # edit these per target repo.
-  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh"   # installer + umbrella coordinator suites
+  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh"   # installer + umbrella coordinator + cascade suites
 
   lint_command: ""        # e.g. "ruff check ." or "npm run lint"
   typecheck_command: ""   # e.g. "mypy ." or "tsc --noEmit"

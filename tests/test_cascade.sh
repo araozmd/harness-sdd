@@ -1,0 +1,243 @@
+#!/bin/sh
+# test_cascade.sh — test contract for E03-F02 (cascade installer).
+# Zero-dependency POSIX sh, matching tests/test_install.sh house style (self-cleaning
+# mktemp tree, fail/pass helpers). Covers every R-id in cascade-installer.tests.md.
+# The single-target non-regression suite (tests/test_install.sh) must also stay green;
+# this file additionally asserts R24's single-target-unchanged contract directly.
+
+set -eu
+
+SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+INSTALL="$SRC/harness-install.sh"
+T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-cascade)"
+trap 'rm -rf "$T"' EXIT
+
+fail() { echo "FAIL: $1" >&2; exit 1; }
+pass() { echo "ok - $1"; }
+
+# build_umbrella <dir> — populate a fresh umbrella fixture tree.
+#   viernes-bff/.git (dir)  lia-api/.git (file)  not_a_repo/ (no .git)
+#   bad_Name/.git (invalid key grammar)  .hidden/.git (dotfile)  .harness/ (own)
+build_umbrella() {
+  _u="$1"
+  mkdir -p "$_u/viernes-bff/.git"          # git child, .git as a DIRECTORY
+  mkdir -p "$_u/lia-api"; : > "$_u/lia-api/.git"   # git child, .git as a FILE
+  mkdir -p "$_u/not_a_repo"                # non-git child
+  mkdir -p "$_u/bad_Name/.git"             # git child, INVALID key grammar
+  mkdir -p "$_u/.hidden/.git"              # dotfile dir
+  mkdir -p "$_u/.harness"                  # pre-existing own harness dir name
+}
+
+# ── R3: arg guards make no filesystem writes ──────────────────────────────────
+sh "$INSTALL"                       >/dev/null 2>&1 && fail "missing-arg should exit non-zero (R3)"
+sh "$INSTALL" "$SRC"                >/dev/null 2>&1 && fail "self-target should exit non-zero (R3)"
+sh "$INSTALL" --umbrella            >/dev/null 2>&1 && fail "--umbrella without dir should exit non-zero (R3)"
+NODIR="$T/does-not-exist"
+sh "$INSTALL" --umbrella "$NODIR"   >/dev/null 2>&1 && fail "--umbrella non-dir should exit non-zero (R3)"
+[ -e "$NODIR" ] && fail "--umbrella on a bad dir made a filesystem change (R3)"
+pass "arg guards reject bad invocations, no writes (R3) [arg_guards_no_writes]"
+
+# ── R2 / R24: no --umbrella ⇒ single-target only, no cascade/manifest ──────────
+ST="$T/single"; mkdir -p "$ST"
+sh "$INSTALL" "$ST" >/dev/null 2>&1 || fail "single-target install failed (R2)"
+[ -d "$ST/.harness" ]                 || fail "single-target .harness missing (R2)"
+[ ! -f "$ST/umbrella.manifest.yaml" ] || fail "single-target wrote a manifest — cascade leaked (R2)"
+pass "no --umbrella ⇒ single-target only, no manifest/discovery (R2) [single_target_no_cascade]"
+
+# R24: single-target install output/layout matches the pre-F02 contract. We assert the
+# value-preserving migration changes no set value: seed a bootstrap value, upgrade,
+# confirm it survives and the rest of the single-target install is intact.
+sed -e 's|^\( *test_command:\).*|\1 "pytest -q"|' "$ST/.harness/harness.config.yaml" > "$ST/.harness/cfg.b" \
+  && mv "$ST/.harness/cfg.b" "$ST/.harness/harness.config.yaml"
+sh "$INSTALL" "$ST" >/dev/null 2>&1 || fail "single-target upgrade failed (R24)"
+grep -q 'test_command: "pytest -q"' "$ST/.harness/harness.config.yaml" \
+  || fail "single-target upgrade changed a bootstrap value (R24)"
+[ "$(grep -cF '<!-- harness:begin -->' "$ST/CLAUDE.md")" = "1" ] \
+  || fail "single-target upgrade duplicated the pointer block (R24)"
+pass "single-target behaviorally unchanged, migration value-preserving (R24) [single_target_unchanged]"
+
+# ── umbrella mode fresh run (drives most integration R-ids) ────────────────────
+U="$T/umb"; mkdir -p "$U"; build_umbrella "$U"
+OUT="$T/run1.out"
+sh "$INSTALL" --umbrella "$U" >"$OUT" 2>&1 || fail "umbrella mode exited non-zero (R1)"
+
+# R1: umbrella mode accepted and ran.
+grep -q "umbrella cascade" "$OUT" || fail "umbrella mode banner absent (R1)"
+pass "--umbrella <dir> mode accepted and runs (R1) [umbrella_mode_runs]"
+
+# R5: coordinator profile (full body) written to <umbrella>/.harness/.
+[ -d "$U/.harness" ]                          || fail "coordinator .harness missing (R5)"
+[ -f "$U/.harness/AGENTS.md" ]                || fail "coordinator body (AGENTS.md) missing (R5)"
+[ -f "$U/.harness/agents/orchestrator.md" ]   || fail "coordinator role bodies missing (R5)"
+[ -f "$U/.harness/store/tasks.schema.json" ]  || fail "coordinator schema missing (R5)"
+pass "coordinator profile (full body) installed in <umbrella>/.harness/ (R5) [coordinator_body_installed]"
+
+# R6: coordinator umbrella.manifest set to the manifest path (fresh).
+grep -Eq '^[[:space:]]*manifest:[[:space:]]*"\.\./umbrella\.manifest\.yaml"' "$U/.harness/harness.config.yaml" \
+  || fail "coordinator umbrella.manifest not set to the manifest path (R6)"
+pass "coordinator umbrella.manifest set to manifest path on fresh install (R6) [coordinator_manifest_key_set]"
+
+# R7: coordinator has integration_command key; no extra coordinator test_command set
+# (test_command remains blank-on-seed, exactly as single-target).
+grep -Eq '^[[:space:]]*integration_command:' "$U/.harness/harness.config.yaml" \
+  || fail "coordinator integration_command key missing (R7)"
+grep -q 'test_command: ""' "$U/.harness/harness.config.yaml" \
+  || fail "coordinator test_command not blank-on-seed (R7)"
+pass "coordinator carries integration_command, no extra test_command (R7) [coordinator_integration_key]"
+
+# R8: .git as a directory AND as a file both selected.
+[ -d "$U/viernes-bff/.harness" ] || fail ".git-dir child not installed (R8)"
+[ -d "$U/lia-api/.harness" ]     || fail ".git-file child not installed (R8)"
+pass ".git as directory OR file both selected (R8) [git_dir_or_file_selected]"
+
+# R9: dotfile dirs and the umbrella's own .harness skipped.
+[ ! -d "$U/.hidden/.harness" ]  || fail "dotfile child .hidden was installed (R9)"
+grep -q '\.hidden' "$U/umbrella.manifest.yaml" 2>/dev/null && fail ".hidden leaked into manifest (R9)"
+grep -Eq '^  harness:' "$U/umbrella.manifest.yaml" 2>/dev/null && fail "own .harness leaked into manifest (R9)"
+pass "dotfile dirs and own .harness skipped (R9) [hidden_and_harness_skipped]"
+
+# R10: each git child gets the normal child profile (same layout as single-target).
+[ -f "$U/viernes-bff/.harness/agents/builder.md" ] || fail "child profile body missing (R10)"
+[ -f "$U/viernes-bff/.harness/state/tasks.json" ]  || fail "child project workspace not seeded (R10)"
+[ -f "$U/viernes-bff/CLAUDE.md" ]                  || fail "child pointer not written (R10)"
+[ -f "$U/lia-api/.harness/agents/builder.md" ]     || fail "second child profile body missing (R10)"
+pass "each git child gets the normal child profile (R10) [child_profile_installed]"
+
+# R11: umbrella.manifest.yaml created with a top-level repos: mapping.
+[ -f "$U/umbrella.manifest.yaml" ]                  || fail "umbrella.manifest.yaml not created (R11)"
+grep -Eq '^repos:[[:space:]]*$' "$U/umbrella.manifest.yaml" || fail "manifest missing top-level repos: (R11)"
+pass "umbrella.manifest.yaml created with repos: header (R11) [manifest_created]"
+
+# R12: each git child gets an entry (key, relative path, TODO placeholders).
+grep -Eq '^  viernes-bff:[[:space:]]*$' "$U/umbrella.manifest.yaml" || fail "viernes-bff entry missing (R12)"
+grep -Eq '^  lia-api:[[:space:]]*$'     "$U/umbrella.manifest.yaml" || fail "lia-api entry missing (R12)"
+grep -q 'path: ./viernes-bff'           "$U/umbrella.manifest.yaml" || fail "viernes-bff relative path missing (R12)"
+grep -q 'path: ./lia-api'               "$U/umbrella.manifest.yaml" || fail "lia-api relative path missing (R12)"
+grep -q 'delegate_cmd:'                 "$U/umbrella.manifest.yaml" || fail "delegate_cmd placeholder missing (R12)"
+grep -q 'TODO'                          "$U/umbrella.manifest.yaml" || fail "TODO placeholders missing (R12)"
+pass "each child entry has key, relative path, TODO placeholders (R12) [manifest_entries_populated]"
+
+# R13: invalid-named child skipped + clear message, no entry / no install.
+grep -q "bad_Name" "$OUT"                       || fail "no message naming the invalid child (R13)"
+grep -q "a-z0-9" "$OUT"                          || fail "skip message does not state the grammar (R13)"
+[ ! -d "$U/bad_Name/.harness" ]                  || fail "invalid-named child was installed (R13)"
+grep -q 'bad_Name' "$U/umbrella.manifest.yaml" && fail "invalid-named child written to manifest (R13)"
+pass "invalid-named child skipped + warned, no entry/install (R13) [invalid_name_skipped]"
+
+# R15: written manifest passes init.sh repo-key + path grammar (no warning, umbrella mode).
+INITOUT="$T/initout"
+( cd "$U" && ./.harness/init.sh ) >"$INITOUT" 2>&1 || fail "coordinator init.sh non-zero on populated manifest (R15)"
+grep -q "umbrella mode: manifest present" "$INITOUT" || fail "init.sh did not engage umbrella mode (R15)"
+grep -q "not a valid slice-id segment" "$INITOUT" && fail "init.sh flagged a manifest repo-key grammar error (R15)"
+grep -q "path not found" "$INITOUT" && fail "init.sh flagged a missing manifest path (R15)"
+pass "manifest readable by init.sh, valid repo-keys + paths (R15) [manifest_init_compatible]"
+
+# R22: version stamp + manifest.txt for coordinator and each child.
+[ "$(cat "$U/.harness/.harness-version")" = "$(cat "$SRC/VERSION")" ] || fail "coordinator version mismatch (R22)"
+[ "$(cat "$U/viernes-bff/.harness/.harness-version")" = "$(cat "$SRC/VERSION")" ] || fail "child version mismatch (R22)"
+[ -f "$U/.harness/manifest.txt" ]            || fail "coordinator manifest.txt missing (R22)"
+[ -f "$U/viernes-bff/.harness/manifest.txt" ] || fail "child manifest.txt missing (R22)"
+[ -f "$U/lia-api/.harness/manifest.txt" ]    || fail "second child manifest.txt missing (R22)"
+pass "version stamp + manifest.txt for coordinator and each child (R22) [stamp_and_manifest_each]"
+
+# R23: coordinator manifest.txt lists umbrella.manifest.yaml as a project-owned artifact.
+grep -q 'umbrella.manifest.yaml' "$U/.harness/manifest.txt" || fail "coordinator manifest.txt omits umbrella.manifest.yaml (R23)"
+pass "coordinator manifest.txt lists umbrella.manifest.yaml (R23) [coordinator_manifest_txt_lists_manifest]"
+
+# R4: default scan is depth-1 only — a git repo nested two levels deep is NOT installed.
+DEEP="$T/deep"; mkdir -p "$DEEP"
+mkdir -p "$DEEP/level1/level2/.git"   # only reachable via depth 2
+sh "$INSTALL" --umbrella "$DEEP" >/dev/null 2>&1 || fail "depth fixture install failed (R4)"
+[ ! -d "$DEEP/level1/level2/.harness" ] || fail "depth-2 repo installed under default scan (R4)"
+[ ! -d "$DEEP/level1/.harness" ]        || fail "non-git intermediate installed (R4)"
+pass "default scan is depth-1 only (R4) [depth_one_default]"
+
+# ── R14 / R16 / R17 / R21: re-run idempotency + preservation ───────────────────
+# Mutate a manifest entry field and a child's project file, add a NEW git child,
+# bootstrap-fill a child config value, then re-run.
+sed 's|^\( *delegate_cmd:\).*|\1 "./run-sdd.sh"   # bootstrap-filled|' "$U/umbrella.manifest.yaml" > "$U/m.b" \
+  && mv "$U/m.b" "$U/umbrella.manifest.yaml"
+echo 'SENTINEL-CHILD-STATE' >> "$U/viernes-bff/.harness/state/tasks.json"
+cp "$U/viernes-bff/.harness/state/tasks.json" "$T/child-tasks.orig"
+sed -e 's|^\( *test_command:\).*|\1 "npm test"|' "$U/viernes-bff/.harness/harness.config.yaml" > "$U/viernes-bff/.harness/cfg.b" \
+  && mv "$U/viernes-bff/.harness/cfg.b" "$U/viernes-bff/.harness/harness.config.yaml"
+mkdir -p "$U/new-repo/.git"   # a NEW git child to be discovered on re-run
+PTRBEFORE="$(grep -cF '<!-- harness:begin -->' "$U/viernes-bff/CLAUDE.md")"
+
+sh "$INSTALL" --umbrella "$U" >/dev/null 2>&1 || fail "umbrella re-run failed (R14)"
+
+# R14: new repo discovered + appended; existing entry field NOT overwritten.
+grep -Eq '^  new-repo:[[:space:]]*$' "$U/umbrella.manifest.yaml" || fail "new git child not appended on re-run (R14)"
+grep -q 'delegate_cmd: "./run-sdd.sh"' "$U/umbrella.manifest.yaml" \
+  || fail "re-run clobbered a bootstrap-filled manifest field (R14)"
+[ "$(grep -cE '^  viernes-bff:[[:space:]]*$' "$U/umbrella.manifest.yaml")" = "1" ] \
+  || fail "re-run duplicated an existing manifest entry (R14)"
+pass "re-run adds new repos, never overwrites existing entry fields (R14) [manifest_upsert_preserves]"
+
+# R16: child project-owned files preserved.
+cmp -s "$U/viernes-bff/.harness/state/tasks.json" "$T/child-tasks.orig" \
+  || fail "child state/tasks.json clobbered on re-run (R16)"
+grep -qF 'SENTINEL-CHILD-STATE' "$U/viernes-bff/.harness/state/tasks.json" \
+  || fail "child project sentinel lost on re-run (R16)"
+pass "re-run preserves each child's project-owned files (R16) [child_project_files_preserved]"
+
+# R17: child entrypoint block not duplicated.
+[ "$(grep -cF '<!-- harness:begin -->' "$U/viernes-bff/CLAUDE.md")" = "1" ] \
+  || fail "child pointer block duplicated on re-run (R17)"
+[ "$PTRBEFORE" = "1" ] || fail "child pointer block was not singular after first run (R17)"
+pass "re-run does not duplicate the entrypoint block in children (R17) [child_pointer_not_duplicated]"
+
+# R21: migration ran on a child upgrade (bootstrap value retained) — proves migration
+# applies on both profiles, zero-dep (no yq/jq/python invoked by the cascade itself).
+grep -q 'test_command: "npm test"' "$U/viernes-bff/.harness/harness.config.yaml" \
+  || fail "child upgrade did not preserve bootstrap value through migration (R21)"
+grep -Eq '^[[:space:]]*integration_command:' "$U/viernes-bff/.harness/harness.config.yaml" \
+  || fail "child config missing integration_command after migration (R21)"
+pass "migration runs on coordinator and child, value-preserving, zero-dep (R21) [migrate_both_profiles]"
+
+# ── Config migration unit tests (R18, R19, R20) ────────────────────────────────
+# Pre-F01 config: no umbrella: block at all, a bootstrap-set test_command and a
+# trailing comment that must survive byte-for-byte.
+PRE="$T/pre-f01"; mkdir -p "$PRE/.harness"
+printf '0.1.0\n' > "$PRE/.harness/.harness-version"
+cat > "$PRE/.harness/harness.config.yaml" <<'EOF'
+store:
+  tasks: local
+verification:
+  init_script: ./init.sh
+  test_command: "pytest -q"   # keep me exactly
+  lint_command: ""
+EOF
+cp "$PRE/.harness/harness.config.yaml" "$T/pre.before"
+
+sh "$INSTALL" "$PRE" >/dev/null 2>&1 || fail "pre-F01 upgrade failed (R18)"
+
+# R18: missing default keys appended (integration_command under verification:, and a
+# whole umbrella: header+manifest block since the section was absent).
+grep -Eq '^[[:space:]]*integration_command:' "$PRE/.harness/harness.config.yaml" \
+  || fail "integration_command not appended on pre-F01 upgrade (R18)"
+grep -Eq '^umbrella:[[:space:]]*$' "$PRE/.harness/harness.config.yaml" \
+  || fail "umbrella: header not appended on pre-F01 upgrade (R18)"
+grep -Eq '^[[:space:]]*manifest:' "$PRE/.harness/harness.config.yaml" \
+  || fail "umbrella.manifest not appended on pre-F01 upgrade (R18)"
+pass "upgrade appends missing default keys to a pre-F01 config (R18) [migrate_appends_missing_keys]"
+
+# R19: every already-present line is byte-for-byte retained (value + comment).
+grep -qF 'test_command: "pytest -q"   # keep me exactly' "$PRE/.harness/harness.config.yaml" \
+  || fail "migration altered an existing value or comment (R19)"
+# none of the original lines may be removed.
+while IFS= read -r ln; do
+  [ -z "$ln" ] && continue
+  grep -qF "$ln" "$PRE/.harness/harness.config.yaml" || fail "migration removed line: $ln (R19)"
+done < "$T/pre.before"
+pass "migration preserves existing values/comments byte-for-byte (R19) [migrate_preserves_values]"
+
+# R20: a complete config is left identical — run migration twice, assert no change.
+cp "$PRE/.harness/harness.config.yaml" "$T/pre.after1"
+sh "$INSTALL" "$PRE" >/dev/null 2>&1 || fail "second pre-F01 upgrade failed (R20)"
+cmp -s "$PRE/.harness/harness.config.yaml" "$T/pre.after1" \
+  || { echo "--- diff ---"; diff "$T/pre.after1" "$PRE/.harness/harness.config.yaml" || true; \
+       fail "migration not idempotent on a complete config (R20)"; }
+pass "migration is a no-op on a complete config, idempotent (R20) [migrate_idempotent]"
+
+echo "All cascade tests passed."
