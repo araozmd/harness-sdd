@@ -53,7 +53,7 @@
     {
       "id": "E03",
       "title": "Multi-repo coordination",
-      "status": "in-progress",
+      "status": "done",
       "features": [
         {
           "id": "E03-F01",
@@ -67,7 +67,7 @@
         {
           "id": "E03-F02",
           "title": "Cascade installer",
-          "status": "pending",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": ["E03-F01"],

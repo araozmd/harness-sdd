@@ -21,6 +21,20 @@ flow — `init.sh`, `verification.test_command`, the Reviewer's `done` verdict �
 exactly as it does today. The presence of the manifest file (not a boolean flag) is
 the switch.
 
+## Installing the umbrella (cascade)
+Stand up the whole umbrella with a single command (see
+[`INSTALL.md`](./INSTALL.md#umbrella-mode-cascade-install)):
+
+```bash
+./harness-install.sh --umbrella /path/to/umbrella-dir
+```
+
+It installs the coordinator profile into `<umbrella>/.harness/`, installs the normal
+child profile into each immediate **git** child (depth 1), and auto-populates
+`umbrella.manifest.yaml`. Re-run any time to pick up newly-added child repos — it is
+idempotent and never clobbers a bootstrap-filled manifest entry. Bootstrap then fills
+each entry's `test_command`/`delegate_cmd` and the coordinator's `integration_command`.
+
 ## Concepts
 - **Umbrella** — the non-git parent directory hosting the coordinator harness.
 - **Slice** — a per-repo unit of work for one cross-repo feature. In the TaskStore a

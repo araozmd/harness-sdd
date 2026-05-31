@@ -13,3 +13,5 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-05-30 — E03 created (Multi-repo coordination). Architect wrote 4-file spec for E03-F01 (Umbrella coordinator) → spec-ready. PAUSED at human gate.
 - 2026-05-30 — E03-F01 approved by human → in-progress; dispatching Builder. Registered E03-F02 (Cascade installer, pending, depends_on E03-F01) from install-cascade discussion.
 - 2026-05-30 — E03-F01 Reviewer APPROVED (R1–R19 covered, tests green, pure-superset + no-fork verified) → done. Wired test_umbrella.sh into verification.test_command.
+- 2026-05-31 — E03-F01 merged to main (PR #6, 4 Codex rounds), tagged v0.2.0. Starting E03-F02 (Cascade installer) on feat/cascade-installer.
+- 2026-05-31 — E03-F02 Reviewer APPROVED (R1–R24, all suites green, non-regression + migration smoke-tested) → done. Epic E03 done. VERSION → 0.3.0.

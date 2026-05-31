@@ -57,6 +57,51 @@ The harness body and `.claude/` glue are refreshed; the pointer block is replace
 place (never duplicated); your `product.md`, `tasks.json`, epics and progress are left
 untouched. `.harness/.harness-version` records the installed version.
 
+## Umbrella mode (cascade install)
+
+For a cross-repo product (see [`UMBRELLA.md`](./UMBRELLA.md)) one invocation can
+**cascade** the harness across an umbrella directory that hosts sibling child repos:
+
+```bash
+./harness-install.sh --umbrella /path/to/umbrella-dir
+```
+
+This is a thin orchestration over the same single-target install (no second harness
+body); it does three things:
+
+1. **Coordinator profile** — installs the full harness into `<umbrella>/.harness/`,
+   sets `umbrella.manifest` to `../umbrella.manifest.yaml`, and ensures
+   `verification.integration_command` exists (left blank for bootstrap to fill). The
+   coordinator runs no per-repo unit tests — it relies on the integration command.
+2. **Child profile** — scans the umbrella's **immediate children only** (depth 1) and
+   installs the normal single-target `.harness/` into every child that is a **git
+   repo** (contains `.git` as a directory OR a file). Hidden/dotfile dirs and the
+   umbrella's own `.harness` are skipped. A child whose directory name does not match
+   `^[a-z0-9-]+$` is **skipped with a warning** (the name cannot form a slice-id repo
+   key) — no install, no manifest entry.
+3. **Manifest auto-population** — creates `<umbrella>/umbrella.manifest.yaml` (top-level
+   `repos:`) and appends one entry per discovered git child (`path: ./<name>` plus
+   `init`/`test_command`/`delegate_cmd` TODO placeholders for bootstrap to fill).
+
+`--recursive` is accepted but the deeper-scan semantics are deferred; today it still
+scans depth 1 and prints a note.
+
+Umbrella mode is **idempotent and additive**: re-running rediscovers newly-added git
+children and appends them without ever overwriting an existing manifest entry's fields
+or a child's project-owned files. With `--umbrella` absent, the installer behaves
+exactly as the single-target form below — only an additive, value-preserving config
+**migration** is layered in (see next section).
+
+## Config migration on upgrade (non-destructive)
+
+The installer preserves an existing `.harness/harness.config.yaml` on upgrade. To get
+newer additive default keys (e.g. the `umbrella.manifest` and
+`verification.integration_command` keys introduced after a target was first installed)
+into that preserved file, every upgrade runs an **append-only migration**: it adds any
+missing default key (under its section header, or as a new header+key block at EOF)
+**without altering any existing value or comment**. It is idempotent — a config that
+already has every default key is left byte-for-byte unchanged. POSIX `sh`, zero deps.
+
 ## Layout & ownership
 
 | Class | Files | On upgrade |
