@@ -1,0 +1,30 @@
+# umbrella.manifest.example.yaml — example umbrella coordinator manifest.
+#
+# Copy to the path named by `umbrella.manifest` in harness.config.yaml (e.g.
+# `umbrella.manifest.yaml`) at the umbrella harness root. The PRESENCE of the real
+# manifest is the umbrella-mode switch: when it exists the Orchestrator engages the
+# "Umbrella mode" loop; when it is absent the coordinator is inert and the harness
+# behaves exactly as a single-repo project (see docs/UMBRELLA.md).
+#
+# One entry per child repo. A slice whose `repo` is NOT a key under `repos:` here is
+# undispatchable: the coordinator must refuse to dispatch it and report an error that
+# names the missing repo.
+
+repos:
+  viernes-bff:
+    path: ../viernes-bff          # filesystem path to the child repo, relative to umbrella root
+    init: ./init.sh               # that repo's own environment gate
+    test_command: "npm test"      # that repo's own verification (its verification.test_command)
+    delegate_cmd: "<executor>"    # invoked as: <delegate_cmd> <feature-id> <abs-spec-path>
+
+  lia-api:
+    path: ../lia-api
+    init: ./init.sh
+    test_command: "pytest"
+    delegate_cmd: "<executor>"
+
+  viernes-web:
+    path: ../viernes-web
+    init: ./init.sh
+    test_command: "npm test"
+    delegate_cmd: "<executor>"

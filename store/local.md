@@ -18,6 +18,34 @@ Validated by `store/tasks.schema.json` (and by `init.sh`).
   re-validate (`python3 -c "import json;json.load(open('state/tasks.json'))"`).
   Keep the feature's `.spec.md` frontmatter `status` in sync.
 
+## Cross-repo features → `slices[]` (umbrella mode)
+A feature may optionally carry a `slices` array — one entry per child repo for a
+cross-repo (umbrella) feature. Each slice has `id` (`<feature-id>@<repo>`, e.g.
+`E03-F01@viernes-bff`), `repo`, `status`, optional `merged` (true once its PR is
+merged in that repo), optional `spec_path` (the slice's emitted `.tasks`/`.tests`),
+and optional cross-repo `depends_on` (slice ids). A feature with **no** `slices`
+behaves exactly as a single-repo feature does today — the field is purely additive.
+
+- **slices(id)** — read the feature's `slices[]` (empty/absent ⇒ single-repo).
+- **next_slice(feature)** — the lowest-id slice that is actionable and whose every
+  `depends_on` upstream slice is `done` **and** `merged` (topological order).
+- **set_slice_status(feature, slice_id, status)** / **set_slice_merged(...)** —
+  edit the slice in place, then re-validate against `store/tasks.schema.json`.
+
+### Rollup rule (feature `done` is derived, never set directly)
+For a sliced feature the coordinator **derives** the feature's status; it does not
+write `done` onto the feature manually:
+
+- While **any** slice is not `done`, the feature's rolled-up status is **not** `done`.
+- A feature is `done` **only when every slice is `done`** (and merged) **and** the
+  feature-level integration check (`verification.integration_command`) has passed.
+- On each slice **advance** (a slice reaching `done`), re-evaluate which downstream
+  slices have become dispatchable (their upstreams are now `done`+`merged`).
+
+This guarantees there is no path to a green feature with a red slice. The umbrella
+dispatch/gating loop that consumes these semantics is specified in
+`docs/UMBRELLA.md` and the "Umbrella mode" section of `agents/orchestrator.md`.
+
 ## DocStore → markdown
 - **read_spec(feature_id)** — read the 4 files under the feature's `spec_path`.
 - **write_spec** — Architect writes `<feature>.spec.md|plan.md|tasks.md|tests.md`

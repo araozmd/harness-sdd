@@ -143,6 +143,50 @@ PY
   fi
 fi
 
+# 2b. Umbrella mode (additive, opt-in). Engaged ONLY when harness.config.yaml has a
+#     non-empty `umbrella.manifest` AND that file exists. Inert otherwise, so a
+#     single-repo target is completely unaffected. The check is NON-FATAL: it warns
+#     about manifest repos whose `path` is missing rather than blocking the gate.
+UMBRELLA_MANIFEST="$(sed -n 's/^[[:space:]]*manifest:[[:space:]]*"\{0,1\}\([^"#]*\)"\{0,1\}.*/\1/p' harness.config.yaml 2>/dev/null | head -n1 | sed 's/[[:space:]]*$//')"
+if [ -n "${UMBRELLA_MANIFEST:-}" ] && [ -f "$UMBRELLA_MANIFEST" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$UMBRELLA_MANIFEST" <<'PY' || true
+import sys, os, re
+path = sys.argv[1]
+base = os.path.dirname(os.path.abspath(path))
+repo = None
+missing = []
+try:
+    with open(path) as f:
+        lines = f.readlines()
+except OSError as e:
+    print("⚠️  umbrella manifest unreadable: %s" % e); sys.exit(0)
+# Minimal YAML read (zero-dep): top-level `repos:` mapping, each repo a 2-space key
+# with a `path:` under it. Good enough to flag missing child-repo paths.
+in_repos = False
+for ln in lines:
+    if re.match(r"^repos:\s*$", ln):
+        in_repos = True; continue
+    if in_repos and re.match(r"^\S", ln):
+        in_repos = False
+    if not in_repos:
+        continue
+    m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", ln)
+    if m:
+        repo = m.group(1); continue
+    m = re.match(r"^\s+path:\s*\"?([^\"#\n]+)\"?", ln)
+    if m and repo:
+        p = m.group(1).strip()
+        full = p if os.path.isabs(p) else os.path.join(base, p)
+        if not os.path.exists(full):
+            missing.append((repo, p))
+for r, p in missing:
+    print("⚠️  umbrella manifest: repo '%s' path not found: %s" % (r, p))
+PY
+  fi
+  echo "ℹ️  umbrella mode: manifest present ($UMBRELLA_MANIFEST)"
+fi
+
 # 3. Project-specific checks.
 #    Project-authored gates live in `.harness/init.project.sh` — seeded once by
 #    harness-install.sh and NEVER clobbered on upgrade, unlike THIS file (which is

@@ -28,7 +28,24 @@
                 "sdd": { "type": "boolean" },
                 "autonomous": { "type": "boolean" },
                 "depends_on": { "type": "array", "items": { "type": "string" } },
-                "spec_path": { "type": "string" }
+                "spec_path": { "type": "string" },
+                "slices": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "repo", "status"],
+                    "properties": {
+                      "id": { "type": "string", "pattern": "^E[0-9]+-F[0-9]+@[a-z0-9-]+$" },
+                      "repo": { "type": "string" },
+                      "status": {
+                        "enum": ["pending", "spec-ready", "in-progress", "in-review", "done"]
+                      },
+                      "merged": { "type": "boolean" },
+                      "spec_path": { "type": "string" },
+                      "depends_on": { "type": "array", "items": { "type": "string" } }
+                    }
+                  }
+                }
               }
             }
           }

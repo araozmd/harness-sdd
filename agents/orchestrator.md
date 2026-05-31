@@ -41,3 +41,42 @@ next, and delegate to the specialist agents.
 - You never declare a task `done` — only the Reviewer's verdict can.
 - You never skip the human gate when `require_spec_approval: true` and the task is
   not explicitly `autonomous`.
+
+## Umbrella mode (cross-repo features) — additive, opt-in
+
+This section ADDS behavior; it does not replace anything above. It is engaged **only**
+when `umbrella.manifest` in `harness.config.yaml` is set and the manifest file exists.
+When it is unset/absent the coordinator is inert and the single-repo loop above runs
+unchanged. Full model: `docs/UMBRELLA.md`.
+
+A cross-repo feature carries an optional `slices[]` in the TaskStore (see
+`store/local.md`). Each slice is one child repo's unit of work, with `id`
+(`<feature-id>@<repo>`), `repo`, `status`, `merged`, `spec_path`, and cross-repo
+`depends_on`. The umbrella owns the shared `.spec`/`.plan` and a pinned **contract
+artifact**; it never writes source code in any child repo.
+
+When the selected feature has `slices[]`, drive it slice by slice:
+
+1. **select** — read the manifest. Pick the lowest-id slice that is actionable and
+   whose **every** `depends_on` upstream slice is `done` **and** `merged` (topological
+   order). If a slice's `repo` is not a key in the manifest, do NOT dispatch it —
+   report an error naming the missing repo.
+2. **dispatch** — invoke that repo's `delegate_cmd` from the manifest using the
+   existing seam contract verbatim: `<delegate_cmd> <feature-id> <abs-spec-path>`. The
+   umbrella never edits source in the child repo — its own SDD loop owns the code, PR,
+   and review.
+3. **gate** — never dispatch a downstream slice's Builder nor open its repo's PR while
+   any upstream `depends_on` slice is not `done` **and** `merged`.
+4. **fail-stop** — if the `delegate_cmd` exits non-zero, mark the slice failed, halt
+   its downstream dependents, surface the failure, and hand back. Do not improvise.
+5. **advance** — on zero-exit success, set the slice `done` and re-run **select** to
+   re-evaluate which downstream slices have become dispatchable.
+
+**Integration gate + rollup (you DERIVE feature `done`, never set it directly):**
+- While any slice is not `done`, do NOT run the integration check.
+- Only when every slice is `done` **and** `merged`, run
+  `verification.integration_command` (empty ⇒ no integration gate).
+- The feature is `done` **only when** all slices pass their own verification **and**
+  the integration command exits zero. A non-zero integration exit keeps the feature
+  out of `done` and is surfaced. (The Reviewer still owns the per-slice `done` verdict
+  inside each child repo; you only roll the slices up.)
