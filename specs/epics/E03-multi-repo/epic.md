@@ -61,6 +61,12 @@ isolation AND an integration check passes.
   auto-populates `umbrella.manifest.yaml`. One level deep by default (deeper =
   opt-in), detect `.git` as dir *or* file (worktrees/submodules), idempotent and
   additive on re-run (rediscover new repos, never clobber project-owned content).
+  **F02 must also include a non-destructive config migration**: on upgrade,
+  `harness-install.sh` preserves an existing `.harness/harness.config.yaml`, so the
+  umbrella keys (`umbrella.manifest`, `verification.integration_command`) added in F01
+  never reach an already-installed harness. F02 should append missing default keys
+  while retaining project-owned values. (Raised by Codex review on the F01 PR — install
+  mechanics are F02's domain, not F01's.)
 - Two genuinely net-new artifacts the Architect must define:
   1. **Contract artifact** — the inter-repo seam (OpenAPI fragment / event payload /
      shared types) pinned in the shared spec so parallel Builders don't drift.

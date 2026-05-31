@@ -215,9 +215,17 @@ for ln in lines:
         in_repos = False
     if not in_repos:
         continue
+    # Repo keys must use the SAME grammar as the slice-id `@<repo>` segment
+    # (^[a-z0-9-]+$). A key with an underscore/uppercase could not be represented
+    # as a canonical slice id `E03-F01@<repo>`, so flag it rather than silently
+    # accepting an undispatchable manifest entry.
     m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", ln)
     if m:
-        repo = m.group(1); continue
+        repo = m.group(1)
+        if not re.match(r"^[a-z0-9-]+$", repo):
+            print("⚠️  umbrella manifest: repo key '%s' is not a valid slice-id segment "
+                  "(use ^[a-z0-9-]+$ to match '<feature-id>@<repo>')" % repo, file=sys.stderr)
+        continue
     m = re.match(r"^\s+path:\s*\"?([^\"#\n]+)\"?", ln)
     if m and repo:
         p = m.group(1).strip()
