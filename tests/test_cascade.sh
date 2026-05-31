@@ -360,4 +360,46 @@ awk '/^repos:/{r=NR} /^  repo-b:/{b=NR} /^metadata:/{m=NR} END{exit !(r && b && 
 grep -qF 'note: keep me last' "$MU/umbrella.manifest.yaml" || fail "trailing section was clobbered (Codex #7 r4)"
 pass "new repo inserted inside repos: ahead of later sections (Codex #7 r4) [manifest_insert_within_repos]"
 
+# ── P2 (Codex #7 r5): existing-entry check is scoped to the repos: mapping ──────
+# A same-named two-space key in an UNRELATED section must not be mistaken for the
+# repo entry — the discovered child must still be added under repos:.
+EU="$T/umb-dupkey"; mkdir -p "$EU/.harness" "$EU/repo-a/.git"
+printf 'tasks: local\n' > "$EU/.harness/harness.config.yaml"
+cat > "$EU/umbrella.manifest.yaml" <<'MAN'
+repos:
+metadata:
+  repo-a: not-a-real-repo-entry
+MAN
+sh "$INSTALL" --umbrella "$EU" >/dev/null 2>&1 || fail "install over decoy-key manifest failed (Codex #7 r5)"
+awk '/^repos:/{r=NR} /^  repo-a:[[:space:]]*$/{e=NR} /^metadata:/{m=NR} END{exit !(r && e && m && r<e && e<m)}' "$EU/umbrella.manifest.yaml" \
+  || { echo "--- manifest ---"; cat "$EU/umbrella.manifest.yaml"; fail "repo-a not added under repos: despite a decoy metadata.repo-a key (Codex #7 r5)"; }
+pass "existing-entry check scoped to repos:, decoy key ignored (Codex #7 r5) [entry_check_scoped_to_repos]"
+
+# ── P2 (Codex #7 r5): migrate_config manifest lookup scoped to umbrella: section ─
+# A nested `metadata: manifest: ...` must NOT suppress adding the umbrella.manifest default.
+GU="$T/umb-nested"; mkdir -p "$GU/.harness" "$GU/repo-a/.git"
+cat > "$GU/.harness/harness.config.yaml" <<'CFG'
+tasks: local
+metadata:
+  manifest: artifacts.json
+CFG
+sh "$INSTALL" --umbrella "$GU" >/dev/null 2>&1 || fail "install over nested-manifest config failed (Codex #7 r5)"
+# the umbrella block + manifest must have been added and activated to the root manifest.
+awk '/^umbrella:[[:space:]]*(#.*)?$/{u=1;next} u&&/^[^[:space:]#]/{u=0} u&&/^[[:space:]]+manifest:[[:space:]]*"\.\.\/umbrella\.manifest\.yaml"/{ok=1} END{exit ok?0:1}' "$GU/.harness/harness.config.yaml" \
+  || { echo "--- cfg ---"; cat "$GU/.harness/harness.config.yaml"; fail "umbrella.manifest not added/activated despite an unrelated nested manifest: (Codex #7 r5)"; }
+grep -qF 'manifest: artifacts.json' "$GU/.harness/harness.config.yaml" \
+  || fail "unrelated nested manifest value was disturbed (Codex #7 r5)"
+( cd "$GU" && ./.harness/init.sh >/dev/null 2>&1 ) || fail "coordinator init.sh not green (Codex #7 r5)"
+pass "migrate scopes manifest lookup to umbrella: section (Codex #7 r5) [migrate_manifest_scoped_to_umbrella]"
+
+# ── P2 (Codex #7 r5): a symlinked umbrella resolving to the source is rejected ──
+SLU="$T/umb-srclink"
+ln -s "$SRC" "$SLU" 2>/dev/null || true
+if [ -L "$SLU" ]; then
+  sh "$INSTALL" --umbrella "$SLU" >/dev/null 2>&1 && fail "symlinked umbrella -> source was NOT rejected (Codex #7 r5)"
+  pass "symlinked umbrella that resolves to the source is rejected (Codex #7 r5) [umbrella_symlink_to_source_rejected]"
+else
+  pass "umbrella-symlink-to-source guard (symlink unsupported here — skipped) [umbrella_symlink_to_source_rejected]"
+fi
+
 echo "All cascade tests passed."

@@ -66,7 +66,9 @@ migrate_config() {
   fi
 
   # --- umbrella.manifest ---
-  if ! grep -Eq '^[[:space:]]*manifest:' "$_cfg"; then
+  # Scope the presence check to the top-level `umbrella:` section — an unrelated
+  # nested `manifest:` (e.g. under `metadata:`) must not suppress the default.
+  if ! _cfg_has_umbrella_manifest "$_cfg"; then
     if grep -Eq '^umbrella:[[:space:]]*(#.*)?$' "$_cfg"; then
       _mc_insert_after "$_cfg" '^umbrella:[[:space:]]*(#.*)?$' \
         '  manifest: ""   # path to umbrella.manifest.yaml; presence = umbrella mode'
@@ -78,6 +80,30 @@ migrate_config() {
       } >> "$_cfg"
     fi
   fi
+}
+
+# _cfg_has_umbrella_manifest <file> — true (exit 0) iff a `manifest:` key exists
+# INSIDE the top-level `umbrella:` section (not anywhere else in the YAML).
+_cfg_has_umbrella_manifest() {
+  awk '
+    /^umbrella:[[:space:]]*(#.*)?$/ { u=1; next }
+    u && /^[^[:space:]#]/ { u=0 }
+    u && /^[[:space:]]+manifest:/ { found=1 }
+    END { exit found ? 0 : 1 }
+  ' "$1"
+}
+
+# _cfg_umbrella_manifest_value <file> — print the umbrella.manifest value (unquoted,
+# comment-stripped) from inside the top-level `umbrella:` section; empty if unset.
+_cfg_umbrella_manifest_value() {
+  awk '
+    /^umbrella:[[:space:]]*(#.*)?$/ { u=1; next }
+    u && /^[^[:space:]#]/ { u=0 }
+    u && /^[[:space:]]+manifest:/ {
+      sub(/^[[:space:]]+manifest:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+      gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+    }
+  ' "$1"
 }
 
 # _mc_insert_after <file> <header-regex> <line>  — insert <line> immediately after the
@@ -384,8 +410,15 @@ manifest_upsert() {
     # otherwise the appended child blocks below would be unreadable.
     printf 'repos:\n' >> "$_mf"
   fi
-  # Already present? (anchored two-space key under repos:) — never clobber.
-  if grep -Eq "^  ${_name}:[[:space:]]*$" "$_mf"; then
+  # Already present UNDER repos:? — never clobber. Scope the check to the repos:
+  # mapping so a same-named two-space key in an unrelated section (e.g. `metadata:`)
+  # is not mistaken for the repo entry.
+  if awk -v n="$_name" '
+       /^repos:[[:space:]]*$/ { r=1; next }
+       r && /^[^[:space:]#]/ { r=0 }
+       r && $0 ~ ("^  " n ":[[:space:]]*$") { found=1 }
+       END { exit found ? 0 : 1 }
+     ' "$_mf"; then
     return 0
   fi
   # Build the entry as a single string with literal `\n` escapes — `awk -v` converts
@@ -446,8 +479,11 @@ fi
 # ── umbrella mode (cascade) ───────────────────────────────────────────────────
 if [ ! -d "$UMBRELLA" ]; then die "umbrella dir '$UMBRELLA' is not a directory"; fi
 if [ -n "$POSITIONAL" ]; then die "do not pass a positional <target> with --umbrella"; fi
-UMB="$(CDPATH= cd -- "$UMBRELLA" && pwd)"
-if [ "$UMB" = "$SRC" ]; then die "umbrella dir must differ from the harness source ($SRC)"; fi
+# Resolve PHYSICAL paths (pwd -P) so a symlinked umbrella that points at the harness
+# source is caught here — otherwise the coordinator install would self-install into
+# the source checkout (same footgun the child-loop guard already prevents).
+UMB="$(CDPATH= cd -- "$UMBRELLA" && pwd -P)"
+if [ "$UMB" = "$(CDPATH= cd -- "$SRC" && pwd -P)" ]; then die "umbrella dir must differ from the harness source ($SRC)"; fi
 
 echo "══ umbrella cascade → $UMB ══"
 
@@ -461,17 +497,18 @@ COORD_CFG="$UMB/.harness/harness.config.yaml"
 migrate_config "$COORD_CFG"
 # The manifest lives at the umbrella ROOT, but init.sh resolves umbrella.manifest
 # relative to the harness dir (.harness/), so the default value is ../umbrella.manifest.yaml.
-# Match every blank value form — `manifest:`, `manifest: ""`, `manifest: ''` — each
-# optionally followed by a trailing `# comment` (migrate_config emits exactly that),
-# but NEVER a real path value. Otherwise an upgraded/cleared coordinator stays inert
-# despite the cascade having written the manifest.
-_blank_manifest='^[[:space:]]*manifest:[[:space:]]*("")?[[:space:]]*(#.*)?$|^[[:space:]]*manifest:[[:space:]]*('"''"')[[:space:]]*(#.*)?$'
-if grep -Eq "$_blank_manifest" "$COORD_CFG"; then
+# When umbrella.manifest is blank (any form: ``, `""`, `''`, each with an optional
+# trailing comment — migrate_config emits exactly that), point it at the root manifest.
+# This operates ONLY inside the top-level `umbrella:` section, so a nested `manifest:`
+# elsewhere is never matched or rewritten. A real value is preserved (skip activation).
+if [ -z "$(_cfg_umbrella_manifest_value "$COORD_CFG")" ]; then
   awk '
-    !done && $0 ~ /^[[:space:]]*manifest:[[:space:]]*("")?[[:space:]]*(#.*)?$/ {
+    /^umbrella:[[:space:]]*(#.*)?$/ { u=1; print; next }
+    u && /^[^[:space:]#]/ { u=0 }
+    u && !done && $0 ~ /^[[:space:]]+manifest:[[:space:]]*("")?[[:space:]]*(#.*)?$/ {
       sub(/manifest:.*/, "manifest: \"../umbrella.manifest.yaml\""); done=1; print; next
     }
-    !done && $0 ~ /^[[:space:]]*manifest:[[:space:]]*('"''"')[[:space:]]*(#.*)?$/ {
+    u && !done && $0 ~ /^[[:space:]]+manifest:[[:space:]]*('"''"')[[:space:]]*(#.*)?$/ {
       sub(/manifest:.*/, "manifest: \"../umbrella.manifest.yaml\""); done=1; print; next
     }
     { print }
@@ -485,8 +522,7 @@ fi
 # try to write there — child `path:` entries are relative to the manifest's own dir,
 # so a non-root manifest would mis-resolve every child. Warn and use the root file.
 MANIFEST="$UMB/umbrella.manifest.yaml"
-_cfg_manifest="$(grep -E '^[[:space:]]*manifest:' "$COORD_CFG" | head -1 \
-  | sed -E 's/^[[:space:]]*manifest:[[:space:]]*//; s/[[:space:]]*#.*$//; s/^"//; s/"$//; s/^'\''//; s/'\''$//')"
+_cfg_manifest="$(_cfg_umbrella_manifest_value "$COORD_CFG")"
 case "$_cfg_manifest" in
   ""|../umbrella.manifest.yaml|./umbrella.manifest.yaml|umbrella.manifest.yaml) : ;;  # the supported root location
   *)
