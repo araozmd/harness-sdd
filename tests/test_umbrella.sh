@@ -46,6 +46,8 @@ for ep in data.get("epics", []):
             continue  # absent slices is always valid (pure superset)
         if not isinstance(slices, list):
             errors.append("slices: expected array"); continue
+        if len(slices) == 0:
+            errors.append("slices: must have at least 1 item"); continue
         for sl in slices:
             if not isinstance(sl, dict):
                 errors.append("slice: expected object"); continue
@@ -204,6 +206,29 @@ JSON
     pass "init.sh zero-dep fallback rejects malformed slice [test_fallback_validates_slices]"
   fi
 fi
+
+# ── P2 (Codex): empty slices[] must be rejected (no vacuous rollup) ────────────
+# "slices": [] would otherwise make every-slice-done/merged vacuously true and let a
+# feature reach done without dispatching any child repo. Schema requires minItems: 1.
+cat > "$T/emptyslices.json" <<'JSON'
+{
+  "project": "fixture",
+  "epics": [{
+    "id": "E03", "title": "multi-repo", "status": "in-progress",
+    "features": [{
+      "id": "E03-F01", "title": "umbrella", "status": "in-progress",
+      "sdd": true, "spec_path": "specs/x",
+      "slices": []
+    }]
+  }]
+}
+JSON
+if validate "$T/emptyslices.json" 2>/dev/null; then
+  if have_py && python3 -c "import jsonschema" >/dev/null 2>&1; then
+    fail "empty slices[] wrongly accepted — vacuous rollup possible (Codex P2)"
+  fi
+fi
+pass "empty slices[] rejected, minItems:1 (no vacuous rollup) [test_schema_slices_min_items]"
 
 # ── Reference coordinator algorithm (drives R3, R6, R9–R17) ────────────────────
 # A minimal POSIX-sh implementation of the documented loop, operating over a flat

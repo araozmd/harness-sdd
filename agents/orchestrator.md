@@ -62,9 +62,12 @@ When the selected feature has `slices[]`, drive it slice by slice:
    order). If a slice's `repo` is not a key in the manifest, do NOT dispatch it —
    report an error naming the missing repo.
 2. **dispatch** — invoke that repo's `delegate_cmd` from the manifest using the
-   existing seam contract verbatim: `<delegate_cmd> <feature-id> <abs-spec-path>`. The
-   umbrella never edits source in the child repo — its own SDD loop owns the code, PR,
-   and review.
+   existing seam contract verbatim: `<delegate_cmd> <feature-id> <abs-spec-path>`.
+   **Run it from the child repo's working directory** — `cd` into the manifest
+   `path` (or resolve the command against it) before invoking, so a repo-local
+   relative `delegate_cmd` (e.g. `./run-sdd.sh`) resolves to the right executable.
+   The umbrella never edits source in the child repo — its own SDD loop owns the
+   code, PR, and review.
 3. **gate** — never dispatch a downstream slice's Builder nor open its repo's PR while
    any upstream `depends_on` slice is not `done` **and** `merged`.
 4. **fail-stop** — if the `delegate_cmd` exits non-zero, set the slice `status:
@@ -80,11 +83,17 @@ When the selected feature has `slices[]`, drive it slice by slice:
    blocked. After setting `merged: true`, re-run **select** to re-evaluate which
    downstream slices have become dispatchable.
 
-**Integration gate + rollup (you DERIVE feature `done`, never set it directly):**
-- While any slice is not `done`, do NOT run the integration check.
+**Integration gate + rollup (you DERIVE feature `done`, then PERSIST it):**
+- While any slice is not `done`+`merged`, do NOT run the integration check.
 - Only when every slice is `done` **and** `merged`, run
   `verification.integration_command` (empty ⇒ no integration gate).
 - The feature is `done` **only when** all slices pass their own verification **and**
   the integration command exits zero. A non-zero integration exit keeps the feature
-  out of `done` and is surfaced. (The Reviewer still owns the per-slice `done` verdict
-  inside each child repo; you only roll the slices up.)
+  out of `done` and is surfaced.
+- When those conditions hold, **write the derived `done` onto the feature** and
+  re-validate. This persistence is required: feature-level `depends_on` is gated on
+  the *stored* feature status, so a dependent feature stays blocked until the
+  upstream feature's `done` is actually written. "Derive, never set directly" means
+  never set `done` *prematurely* (while a slice or integration is red) — not "never
+  write it". (The Reviewer still owns the per-slice `done` verdict inside each child
+  repo; you only roll the slices up.)

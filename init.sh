@@ -138,6 +138,8 @@ else:
                     slices = ft["slices"]
                     if not isinstance(slices, list):
                         errors.append("%s.slices: expected array" % fw); slices = []
+                    elif len(slices) == 0:
+                        errors.append("%s.slices: must have at least 1 item (omit the field for single-repo)" % fw)
                     for si, sl in enumerate(slices):
                         sw = "%s.slices[%d]" % (fw, si)
                         if not isinstance(sl, dict):
