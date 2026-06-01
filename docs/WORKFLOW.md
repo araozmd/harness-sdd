@@ -1,5 +1,29 @@
 # The Workflow
 
+## Intake — the step before `pending` (`/sdd-new`)
+
+Before a feature is `pending`, a raw idea has to become a well-formed TaskStore
+entry. That is **Inception**'s job (`agents/inception.md`), driven by the `/sdd-new`
+slash command. A human runs `/sdd-new "<idea>"`, answers a short adaptive Q&A, and
+Inception seeds the state machine below:
+
+```
+  /sdd-new "<idea>"  ─►  [Inception]  ─►  pending entry in state/tasks.json
+   (raw idea)           (triage +          + progress/inbox/<id>.md brief
+                         allocate id)              │
+                                                   ▼
+                                          (state machine below)
+```
+
+Inception **seeds; it never specs** — it writes only a `pending` entry plus the
+intent brief, never the four spec files, and never advances status past `pending`.
+From there `/sdd-next` (the Orchestrator) drives the flow below, including the human
+gate. Inception does not spawn the Architect — but the brief is not inert: when the
+Orchestrator spawns the Architect for that feature, it passes
+`progress/inbox/<feature-id>.md` as a primary input, and the Architect reads it
+first and specs from it. That read is what wires the captured intent into spec
+generation.
+
 ## State machine
 
 A feature moves through these states. The Orchestrator routes on the current state;
@@ -69,7 +93,9 @@ So:
 
 1. `./init.sh` → green.
 2. Orchestrator reads TaskStore → `E02-F01 handoff-screen` is `pending`, `sdd:true`.
-3. Architect writes the 4 files → `spec-ready`. **Pause.**
+3. Orchestrator spawns the Architect, passing `progress/inbox/E02-F01.md` (the
+   Inception brief); the Architect reads it first and writes the 4 files from it →
+   `spec-ready`. **Pause.**
 4. Human reads specs, approves → `in-progress`.
 5. Builder implements `tasks.md`, writes tests from `tests.md`, self-checks → `in-review`.
 6. Reviewer runs tests + Playwright, verifies every R-id → **approve** → `done`.

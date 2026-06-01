@@ -2,6 +2,9 @@
 progress/*/
 !progress/.gitkeep
 !progress/README.md
+# Inbox briefs are durable seeds the Architect specs from — keep them tracked.
+!progress/inbox/
+!progress/inbox/**
 
 # pr-loop / multi-cli-orchestrator local cache (Codex review state)
 .mco-cache/
