@@ -4,6 +4,29 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.4.0] — 2026-06-01
+
+### Added — Inception role + /sdd-new intake (E04-F01)
+- **Inception role (`agents/inception.md`):** the portable, model-interchangeable
+  front door *before* `pending`. Takes a raw idea, triages it to exactly one altitude
+  (new task on an existing not-`done` feature / new feature under an existing epic /
+  new epic + `epic.md` + first `F01`), allocates a **next-sequential** id (no reuse of
+  vacated ids), writes a `pending` TaskStore entry, re-validates `state/tasks.json`
+  against `store/tasks.schema.json` (fail-stop: a failed validation is never a
+  success), and writes an intent brief to `progress/inbox/<feature-id>.md`. It
+  **seeds; it never specs** — it never writes the four spec files, never advances
+  status past `pending`, and never spawns the Architect.
+- **`/sdd-new` slash command (`.claude/commands/sdd-new.md`):** thin Claude wrapper
+  that carries the interactive adaptive Q&A and ≤3 **text-only** mockup options,
+  taking the idea via `$ARGUMENTS` and deferring the durable contract to the role
+  file. Ends by reporting the seed + "run `/sdd-next`".
+- **Docs:** `AGENTS.md` role list + flow now name Inception; `docs/WORKFLOW.md`
+  documents the pre-`pending` intake step feeding the unchanged state machine.
+- **Tests:** `tests/test_inception.sh` covering R1–R16 (static file/format/grep +
+  schema validation), wired into `verification.test_command`.
+- **Purely additive:** no change to `store/tasks.schema.json`, no new status value,
+  and no change to the Orchestrator or Architect contracts.
+
 ## [0.3.0] — 2026-05-31
 
 ### Added — Cascade installer (E03-F02)

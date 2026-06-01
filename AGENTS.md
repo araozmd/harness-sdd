@@ -12,11 +12,12 @@
 
 A portable **Spec-Driven Development (SDD)** harness. Work flows through four roles
 that each run with a *clean, curated context* and hand off through **files on disk**,
-never through chat history.
+never through chat history. **Inception** is the front door *before* the loop: it
+turns a raw idea into a `pending` TaskStore entry + an intent brief (via `/sdd-new`).
 
 ```
-Orchestrator → Architect → Builder → Reviewer        (Scout assists, read-only)
-   (state)      (specs)     (code)    (verify)
+Inception ─► Orchestrator → Architect → Builder → Reviewer    (Scout assists, read-only)
+ (intake)      (state)       (specs)     (code)    (verify)
 ```
 
 ## The non-negotiable rules
@@ -38,7 +39,7 @@ Orchestrator → Architect → Builder → Reviewer        (Scout assists, read-
 | Path | Purpose |
 |---|---|
 | `harness.config.yaml` | Store backend selection + settings (read this first after init) |
-| `agents/*.md` | The role prompts (Orchestrator, Architect, Builder, Reviewer, Scout) |
+| `agents/*.md` | The role prompts (Inception, Orchestrator, Architect, Builder, Reviewer, Scout) |
 | `specs/product.md` | Layer 0 — product constitution (stable, high-level) |
 | `specs/epics/<E>/<F>/*.md` | The 4-file feature specs (`.spec` `.plan` `.tasks` `.tests`) |
 | `state/tasks.json` | The TaskStore (local backend) — epic/feature/task state |
