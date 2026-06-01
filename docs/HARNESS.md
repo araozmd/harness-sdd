@@ -32,8 +32,8 @@ plain files instead of a vendor wrapper.
    context and resume from files.
 
 4. **Separate roles.** One agent that plans + codes + reviews saturates its context
-   and reasons worse. A team — Orchestrator, Architect, Builder, Reviewer, Scout —
-   each with a clean context, beats it.
+   and reasons worse. A team — Inception (intake), Orchestrator, Architect, Builder,
+   Reviewer, Scout — each with a clean context, beats it.
 
 5. **Verify autonomously.** Never trust "done." The harness proves it: `init.sh`,
    tests, type/lint checks, and behavioral checks (e.g. Playwright clicking the live
