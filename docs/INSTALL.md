@@ -17,7 +17,7 @@ This writes, into your project:
 ```
 your-project/
 ├── CLAUDE.md / AGENTS.md / GEMINI.md   # your content kept; a marked harness block appended
-├── .claude/agents/*  .claude/commands/sdd-next.md   # Claude Code glue → resolves to .harness/
+├── .claude/agents/*  .claude/commands/{sdd-next,sdd-new}.md   # Claude Code glue → resolves to .harness/
 ├── opencode.json                       # created only if absent
 └── .harness/                           # the whole harness body
     ├── .harness-version  manifest.txt
@@ -43,6 +43,11 @@ harness itself, under the human gate:
    (`.harness/harness.config.yaml` + the project section of `.harness/init.sh`), then
    **pauses at the human gate** for your approval.
 3. Approve, then keep running `/sdd-next` to build features.
+
+To add new work later, run **`/sdd-new "<idea>"`** — the Inception intake triages it
+(new epic / feature / task), seeds a `pending` entry plus an intent brief, and tells
+you to run `/sdd-next` to spec and build it. The installer ships this command into your
+project alongside `/sdd-next`.
 
 ## Upgrade
 

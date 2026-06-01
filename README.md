@@ -9,11 +9,14 @@ because the harness is just files in the repo, and the model/CLI is interchangea
 
 ## How it works
 
-Four roles move work through files, each in a clean context:
+An interactive **intake** (Inception) turns a raw idea into a seeded `pending` task;
+from there the roles move it through files, each in a clean context:
 
 ```
-Orchestrator → Architect → Builder → Reviewer        (Scout = read-only recon)
-   state         specs       code      verify
+ /sdd-new                       /sdd-next
+  idea → Inception → pending → Orchestrator → Architect → Builder → Reviewer
+         (intake)                  state         specs       code      verify
+                                              (Scout = read-only recon)
 ```
 
 Specs follow a **Product → Epic → Feature** hierarchy, where each feature is a
@@ -26,16 +29,20 @@ criteria and full requirement→test **traceability**. See `docs/SPEC-FORMAT.md`
 cd harness-sdd
 ./init.sh                 # environment gate — must pass
 claude                    # CLAUDE.md → AGENTS.md auto-loads
-# then:  /sdd-next        # runs the Orchestrator on the next task
+# new idea? /sdd-new "<idea>"   # Inception triages it → seeds a pending task
+# then:     /sdd-next            # runs the Orchestrator on the next task
 ```
 
-The Orchestrator spawns `architect` → (human approves) → `builder` → `reviewer`.
+`/sdd-new` is the front door: it asks a few questions, decides whether the idea is a
+new epic / feature / task, and writes a `pending` entry plus an intent brief — without
+hand-editing `state/tasks.json`. Then the Orchestrator spawns `architect` → (human
+approves) → `builder` → `reviewer`.
 
 ## Using other CLIs
 
 | CLI | Entry file | Sub-agents |
 |---|---|---|
-| **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` + `/sdd-next` |
+| **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` + `/sdd-new`, `/sdd-next` |
 | **Codex** | `AGENTS.md` (native) | run roles sequentially; hand off via files |
 | **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
 | **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents |
@@ -122,7 +129,8 @@ to upgrade — project-authored specs/state are never clobbered. See `docs/INSTA
 1. Rewrite `specs/product.md` for your product.
 2. Set the test/lint/typecheck commands in `harness.config.yaml` and the
    project-specific section of `init.sh`.
-3. Add epics/features (copy `specs/_templates/`), or run the Architect to generate them.
+3. Add work by running `/sdd-new "<idea>"` (the Inception intake seeds it for you), or
+   hand-author entries from `specs/_templates/`.
 
 After install, steps 1–2 are done for you by the first-run bootstrap (`/sdd-next`).
 
