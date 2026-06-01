@@ -20,6 +20,10 @@ All notable changes to the harness body are recorded here. Versions follow
   that carries the interactive adaptive Q&A and ≤3 **text-only** mockup options,
   taking the idea via `$ARGUMENTS` and deferring the durable contract to the role
   file. Ends by reporting the seed + "run `/sdd-next`".
+- **Installer ships `/sdd-new`:** `harness-install.sh` now emits an installed
+  `.claude/commands/sdd-new.md` wrapper (with all paths rewritten to `.harness/…`)
+  alongside `/sdd-next`, so consumer repos get the Inception intake command too;
+  `tests/test_install.sh` asserts it is present and `.harness/`-prefixed.
 - **Docs:** `AGENTS.md` role list + flow now name Inception; `docs/WORKFLOW.md`
   documents the pre-`pending` intake step feeding the unchanged state machine.
 - **Tests:** `tests/test_inception.sh` covering R1–R16 (static file/format/grep +

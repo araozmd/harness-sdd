@@ -41,8 +41,13 @@ pass "entrypoint merge preserves prose + adds block (R3)"
 
 # Claude Code glue points at .harness/                                                         # R7
 [ -f "$T/.claude/commands/sdd-next.md" ] || fail "sdd-next command missing"
+[ -f "$T/.claude/commands/sdd-new.md" ]  || fail "sdd-new command missing"
 grep -qF '.harness/agents/orchestrator.md' "$T/.claude/agents/orchestrator.md" \
   || fail "agent shim does not resolve against .harness/"
+grep -qF '.harness/agents/inception.md' "$T/.claude/commands/sdd-new.md" \
+  || fail "sdd-new does not resolve inception against .harness/"
+grep -qE '(^|[^/])agents/inception\.md' "$T/.claude/commands/sdd-new.md" \
+  && fail "sdd-new references a bare agents/inception.md (missing .harness/ prefix)"
 pass "Claude Code glue generated (R7)"
 
 # target verification commands reset to blank                                                  # R8

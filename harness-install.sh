@@ -356,7 +356,42 @@ relative paths against `.harness/`.
 
 $ARGUMENTS may name a specific feature id (e.g. `E02-F01`); if given, operate on it.
 EOF
-  ok "Claude Code agents + /sdd-next installed (.claude/)"
+
+  cat > "$TARGET/.claude/commands/sdd-new.md" <<'EOF'
+---
+description: Seed a new idea into the TaskStore as Inception (interactive intake → pending entry + inbox brief)
+---
+
+Act as **Inception** (`.harness/agents/inception.md`). That role file is the durable
+contract; this command carries the interactive front-end. Resolve all relative paths
+against `.harness/`.
+
+The free-text idea is in `$ARGUMENTS`. If it is empty, ask the human for it.
+
+1. Run `.harness/init.sh`. If it exits non-zero, STOP and report — do not seed into a
+   broken environment.
+2. Read `.harness/harness.config.yaml` and the TaskStore (`.harness/state/tasks.json`,
+   per `.harness/store/local.md`).
+3. Run a short, **adaptive** Q&A with the human to clarify: the problem and who it is
+   for, the success outcome, the scope/boundaries, and any constraints. Where the
+   shape forks, offer **at most 3** options as **text-only** (markdown/ASCII) mockups
+   — never images. Keep it short; ask only what you need to triage and brief.
+4. **Triage** the idea to exactly one altitude and **allocate** a next-sequential id,
+   per `.harness/agents/inception.md` (new task on an existing not-`done` feature / new
+   feature under an existing epic / new epic + `epic.md` + `F01`).
+5. **Write** the `pending` feature entry into `.harness/state/tasks.json` (and, for a
+   new epic, the epic entry + `.harness/specs/epics/<slug>/epic.md` + first `F01`).
+6. **Re-validate** `.harness/state/tasks.json` against
+   `.harness/store/tasks.schema.json`. If it fails, report the failure and do NOT claim
+   a successful seed.
+7. **Write** the intent brief to `.harness/progress/inbox/<feature-id>.md` (frontmatter
+   + sections), using `.harness/progress/inbox/E04-F01.md` as the template.
+8. **Report** the new `<feature-id>`, the `.harness/state/tasks.json` entry, the
+   `.harness/progress/inbox/<feature-id>.md` path, and tell the human to **run
+   `/sdd-next`** next. Do NOT spawn the Architect and do NOT change any status —
+   Inception seeds, never specs, and never moves a feature past `pending`.
+EOF
+  ok "Claude Code agents + /sdd-next + /sdd-new installed (.claude/)"
 
   # ── 6. opencode.json (create if absent; never clobber an existing one) ──────
   if [ ! -f "$TARGET/opencode.json" ]; then
