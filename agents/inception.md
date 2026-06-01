@@ -45,9 +45,20 @@ You **seed; you never spec.**
 Read `state/tasks.json` first. Then resolve the idea to **exactly one** of these
 three altitudes — never more than one in a single run:
 
-1. **New task on an existing not-`done` feature.** The idea extends a feature already
-   in flight (any status that is not `done`). Capture it as a task-level note /
-   dependency in that feature's inbox brief; do not invent a competing feature.
+1. **New task on an existing feature.** The idea extends a feature that already
+   exists. The inbox brief is read by the Architect *only* while a feature is still
+   `pending`, so this path splits by the target's status:
+   - **Target is still `pending`** (not yet specified): capture the idea as a
+     task-level note / dependency in that feature's
+     `progress/inbox/<existing-feature-id>.md` brief; do not invent a competing
+     feature. The Architect will pick it up when it specs the feature.
+   - **Target is already `spec-ready`, `in-progress`, `in-review`, or `done`:** do
+     NOT append to the brief — the brief has already been consumed, so a note there
+     is a silent no-op that drops the work. STOP and surface the choice to the human:
+     the addition must either go back through specification (raise it with the
+     Architect to re-spec / update the feature's spec & task list), or be seeded as a
+     NEW feature (altitude 2) that `depends_on` the existing one. Do not write a
+     no-op note.
 2. **New feature under an existing epic.** The idea fits an epic that already exists
    but is not yet covered by a feature. Allocate the next `F##` within that epic.
 3. **New epic.** The idea is a brand-new area with no fitting epic. Allocate the next
@@ -107,8 +118,9 @@ never a success.
 
 Write the brief to `progress/inbox/<feature-id>.md`, where `<feature-id>` is **exactly
 the `id`** of the entry you wrote to `state/tasks.json` (e.g. `E04-F02` →
-`progress/inbox/E04-F02.md`). Use this very feature's brief,
-`progress/inbox/E04-F01.md`, as the canonical template. The brief must contain:
+`progress/inbox/E04-F02.md`). Copy the canonical template at
+`specs/_templates/inbox-brief.md` and fill it in (it ships to consumer repos via the
+installer). The brief must contain:
 
 YAML frontmatter:
 

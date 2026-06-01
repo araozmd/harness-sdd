@@ -48,6 +48,18 @@ grep -qF '.harness/agents/inception.md' "$T/.claude/commands/sdd-new.md" \
   || fail "sdd-new does not resolve inception against .harness/"
 grep -qE '(^|[^/])agents/inception\.md' "$T/.claude/commands/sdd-new.md" \
   && fail "sdd-new references a bare agents/inception.md (missing .harness/ prefix)"
+# installed wrapper must mirror the source: durable template path, not the un-shipped example
+grep -qF '.harness/specs/_templates/inbox-brief.md' "$T/.claude/commands/sdd-new.md" \
+  || fail "sdd-new does not reference the installed inbox-brief template"
+grep -qF 'E04-F01' "$T/.claude/commands/sdd-new.md" \
+  && fail "sdd-new references the un-shipped E04-F01.md example brief"
+[ -f "$T/.harness/specs/_templates/inbox-brief.md" ] \
+  || fail "inbox-brief template not installed into profile"
+# installed wrapper must carry the altitude-1 status branch
+grep -qF 'pending' "$T/.claude/commands/sdd-new.md" \
+  || fail "sdd-new missing altitude-1 pending branch"
+grep -qE 'spec-ready|in-review' "$T/.claude/commands/sdd-new.md" \
+  || fail "sdd-new missing altitude-1 consumed-status branch"
 pass "Claude Code glue generated (R7)"
 
 # target verification commands reset to blank                                                  # R8

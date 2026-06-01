@@ -22,8 +22,12 @@ All notable changes to the harness body are recorded here. Versions follow
   file. Ends by reporting the seed + "run `/sdd-next`".
 - **Installer ships `/sdd-new`:** `harness-install.sh` now emits an installed
   `.claude/commands/sdd-new.md` wrapper (with all paths rewritten to `.harness/…`)
-  alongside `/sdd-next`, so consumer repos get the Inception intake command too;
-  `tests/test_install.sh` asserts it is present and `.harness/`-prefixed.
+  alongside `/sdd-next`, so consumer repos get the Inception intake command too.
+  The installed wrapper mirrors the source's altitude-dependent write step (the
+  altitude-1 reuse-and-append branch keyed on the existing feature's status) and
+  copies its inbox brief from the shipped `.harness/specs/_templates/inbox-brief.md`
+  template instead of the un-shipped `E04-F01.md` example; `tests/test_install.sh`
+  asserts the template path, the absence of `E04-F01`, and the altitude-1 branch.
 - **Docs:** `AGENTS.md` role list + flow now name Inception; `docs/WORKFLOW.md`
   documents the pre-`pending` intake step feeding the unchanged state machine.
 - **Tests:** `tests/test_inception.sh` covering R1–R16 (static file/format/grep +

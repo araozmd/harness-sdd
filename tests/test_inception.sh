@@ -98,6 +98,18 @@ for sec in 'Problem' 'Success outcome' 'Scope' 'Constraints' 'Open questions'; d
   grep -qi "$sec" "$ROLE" || fail "R5: role does not specify the '$sec' section"
 done
 grep -qi 'chosen option' "$ROLE" || fail "R5: role does not specify the chosen-options section"
+# Canonical, distributable inbox-brief template (shipped to consumers via
+# specs/_templates/). Assert it exists and carries the same frontmatter + sections.
+TPL="specs/_templates/inbox-brief.md"
+[ -f "$TPL" ] || fail "R5: canonical template $TPL missing"
+for tok in 'feature' 'seeded_by: inception' 'date'; do
+  grep -qF "$tok" "$TPL" || fail "R5: template $TPL missing frontmatter '$tok'"
+done
+for sec in 'Problem' 'Success outcome' 'Scope' 'Constraints' 'Open questions'; do
+  grep -qi "$sec" "$TPL" || fail "R5: template $TPL missing the '$sec' section"
+done
+grep -qi 'chosen option' "$TPL" || fail "R5: template $TPL missing the chosen-options section"
+grep -qF 'specs/_templates/inbox-brief.md' "$ROLE" || fail "R5: role does not point at the canonical template"
 pass "R5 inbox_brief_format"
 
 # ── R7: validation failure ⇒ reported as non-success ─────────────────────────────
