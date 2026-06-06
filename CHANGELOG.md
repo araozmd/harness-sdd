@@ -4,6 +4,24 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.8.0] — 2026-06-06
+
+### Added
+- **Config migration seeds the `telemetry:` block on upgrade.** `harness-install.sh`'s
+  append-only `migrate_config` now adds the `telemetry:` block (`enabled` kill-switch +
+  `log:` path) to a preserved pre-telemetry config, so an upgraded consumer gains the
+  same discoverable config surface as a fresh install (a config without the block already
+  worked — it defaults to enabled + `telemetry.jsonl`). Covered by `tests/test_cascade.sh`.
+
+### Docs
+- **README** gains an **Observability (telemetry)** section (report commands, local-only
+  gitignored storage, the `telemetry:` config + `enabled` kill-switch, cost-out scope), a
+  note on the Reviewer's cross-file consistency check + multi-round build↔review loop, and
+  `tools/` in the layout.
+- **INSTALL.md** documents the installed `tools/`, the seeded `.harness/.gitignore` + local-only
+  `telemetry.jsonl`, the telemetry config migration, and a pre-v0.7.0 upgrade note; adds a
+  `runtime/local` row to the ownership table.
+
 ## [0.7.0] — 2026-06-06
 
 ### Added — ✨ Sub-agent & human-gate telemetry with rollup reports (E05-F02)

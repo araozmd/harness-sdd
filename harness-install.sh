@@ -81,6 +81,22 @@ migrate_config() {
       } >> "$_cfg"
     fi
   fi
+
+  # --- telemetry: block (E05-F02) ---
+  # A preserved pre-telemetry config keeps working (absence of the block ⇒ enabled
+  # with the default log), but a fresh install ships the discoverable `enabled`
+  # kill-switch + `log:` knob, so add the whole block on upgrade for parity. Append-only
+  # at EOF (it is a top-level block; no header to insert into when absent).
+  if ! grep -Eq '^telemetry:[[:space:]]*(#.*)?$' "$_cfg"; then
+    {
+      printf '\n'
+      printf '# Telemetry (E05-F02): local-only sub-agent + human-gate timing. See docs/UMBRELLA.md\n'
+      printf '# is unrelated; see agents/orchestrator.md "## Telemetry". Absent block ⇒ enabled defaults.\n'
+      printf 'telemetry:\n'
+      printf '  enabled: true            # false ⇒ Orchestrator skips telemetry capture entirely\n'
+      printf '  log: telemetry.jsonl     # resolved under HARNESS_DIR; gitignored/local-only\n'
+    } >> "$_cfg"
+  fi
 }
 
 # _cfg_has_umbrella_manifest <file> — true (exit 0) iff a `manifest:` key exists

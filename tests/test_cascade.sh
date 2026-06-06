@@ -220,6 +220,13 @@ grep -Eq '^umbrella:[[:space:]]*$' "$PRE/.harness/harness.config.yaml" \
   || fail "umbrella: header not appended on pre-F01 upgrade (R18)"
 grep -Eq '^[[:space:]]*manifest:' "$PRE/.harness/harness.config.yaml" \
   || fail "umbrella.manifest not appended on pre-F01 upgrade (R18)"
+# E05-F02: the telemetry: block (header + enabled + log) is appended when absent.
+grep -Eq '^telemetry:[[:space:]]*$' "$PRE/.harness/harness.config.yaml" \
+  || fail "telemetry: header not appended on pre-telemetry upgrade (R18)"
+grep -Eq '^[[:space:]]*enabled:' "$PRE/.harness/harness.config.yaml" \
+  || fail "telemetry.enabled not appended on pre-telemetry upgrade (R18)"
+grep -Eq '^[[:space:]]*log:[[:space:]]*telemetry\.jsonl' "$PRE/.harness/harness.config.yaml" \
+  || fail "telemetry.log not appended on pre-telemetry upgrade (R18)"
 pass "upgrade appends missing default keys to a pre-F01 config (R18) [migrate_appends_missing_keys]"
 
 # R19: every already-present line is byte-for-byte retained (value + comment).
