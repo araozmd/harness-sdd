@@ -21,11 +21,16 @@ your-project/
 ├── opencode.json                       # created only if absent
 └── .harness/                           # the whole harness body
     ├── .harness-version  manifest.txt
-    ├── AGENTS.md agents/ docs/ store/ specs/_templates/ init.sh harness.config.yaml
+    ├── AGENTS.md agents/ docs/ store/ tools/ specs/_templates/ init.sh harness.config.yaml
+    ├── .gitignore                       # seeded: keeps the local-only telemetry log out of VCS
+    ├── telemetry.jsonl                  # created on first run — local-only, gitignored (E05-F02)
     ├── specs/product.md  specs/epics/   # YOURS — seeded once, never overwritten
     ├── state/tasks.json                 # YOURS — bootstrap task seeded
     └── progress/
 ```
+
+`tools/` ships the zero-dep telemetry reporter (`python3 .harness/tools/telemetry-report.py`);
+see [`../README.md`](../README.md) → Observability and `agents/orchestrator.md` → "## Telemetry".
 
 Nothing you authored is destroyed: existing entrypoint prose is preserved (only the
 `<!-- harness:begin -->…<!-- harness:end -->` block is managed), and project files
@@ -100,19 +105,27 @@ exactly as the single-target form below — only an additive, value-preserving c
 ## Config migration on upgrade (non-destructive)
 
 The installer preserves an existing `.harness/harness.config.yaml` on upgrade. To get
-newer additive default keys (e.g. the `umbrella.manifest` and
-`verification.integration_command` keys introduced after a target was first installed)
-into that preserved file, every upgrade runs an **append-only migration**: it adds any
-missing default key (under its section header, or as a new header+key block at EOF)
-**without altering any existing value or comment**. It is idempotent — a config that
-already has every default key is left byte-for-byte unchanged. POSIX `sh`, zero deps.
+newer additive default keys (e.g. the `umbrella.manifest`,
+`verification.integration_command`, and the `telemetry:` block introduced after a target
+was first installed) into that preserved file, every upgrade runs an **append-only
+migration**: it adds any missing default key (under its section header, or as a new
+header+key block at EOF) **without altering any existing value or comment**. It is
+idempotent — a config that already has every default key is left byte-for-byte unchanged.
+POSIX `sh`, zero deps.
+
+> Upgrading from a pre-telemetry harness (< v0.7.0)? The upgrade refreshes the body
+> (so `tools/`, the `## Telemetry` orchestrator section, and the reviewer cross-file
+> check arrive), seeds `.harness/.gitignore`, and appends the `telemetry:` block to your
+> preserved config. A config *without* the block still works — telemetry defaults to
+> enabled with `telemetry.jsonl`.
 
 ## Layout & ownership
 
 | Class | Files | On upgrade |
 |---|---|---|
-| harness-owned | `.harness/{AGENTS.md,agents,docs,store,specs/_templates,init.sh}`, `.claude/*` | overwritten |
-| project-owned | `.harness/{harness.config.yaml,specs/product.md,specs/epics,state/tasks.json,progress}` | never touched |
+| harness-owned | `.harness/{AGENTS.md,agents,docs,store,tools,specs/_templates,init.sh}`, `.claude/*` | overwritten |
+| project-owned | `.harness/{harness.config.yaml,specs/product.md,specs/epics,state/tasks.json,progress}` | preserved (config also append-migrated) |
+| runtime/local | `.harness/{telemetry.jsonl,.gitignore}` | gitignored; `.gitignore` seeded once, log never committed |
 | merge-region | `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` | only the marked block |
 
 ## Fallback: AI-driven adoption

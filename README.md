@@ -23,6 +23,10 @@ Specs follow a **Product → Epic → Feature** hierarchy, where each feature is
 4-file spec (`.spec` / `.plan` / `.tasks` / `.tests`) with **EARS** acceptance
 criteria and full requirement→test **traceability**. See `docs/SPEC-FORMAT.md`.
 
+The Reviewer runs a **cross-file consistency** check (a change must not contradict the
+contracts it invokes) and the build↔review loop is **multi-round until green** — see
+`agents/reviewer.md`.
+
 ## Quick start (Claude Code)
 
 ```bash
@@ -97,6 +101,27 @@ single-CLI user is unaffected (they keep the `in-session` default). For a worked
 example, see the multi-cli-orchestrator project, which wires its CLI-routing +
 Codex-PR pipeline in as one such executor.
 
+## Observability (telemetry)
+
+The harness records its own work — per-sub-agent **durations**, build↔review **round
+counts**, and **human spec-approval latency** (the gap between `spec-ready` and a human
+moving it to `in-progress`) — to a zero-dependency JSONL log, and rolls it up into
+reports. It is **on by default** and **best-effort** (a telemetry write never blocks a
+gate or build).
+
+```bash
+python3 tools/telemetry-report.py            # all-granularity summary
+python3 tools/telemetry-report.py weekly      # daily|weekly|monthly|quarterly|semester|annual
+python3 tools/telemetry-report.py session     # this session (also printed at session end)
+```
+
+The log is **local-only / gitignored** runtime data at `<HARNESS_DIR>/telemetry.jsonl`
+(`.harness/telemetry.jsonl` in an installed consumer; the installer seeds a targeted
+`.harness/.gitignore`), configurable via the `telemetry:` block (incl. an `enabled`
+kill-switch) in `harness.config.yaml`. Token/USD cost is out of scope for the portable
+markdown-prompt runtime (a reserved `cost` slot is left for an instrumented SDK runtime).
+See `agents/orchestrator.md` → "## Telemetry".
+
 ## Layout
 
 ```
@@ -106,6 +131,7 @@ opencode.json          OpenCode agents + AGENTS.md instruction
 harness.config.yaml    store backends + settings
 init.sh                environment verification gate
 agents/                role prompts (canonical)
+tools/                 zero-dep utilities (telemetry-report.py)
 specs/                 product.md, glossary.md, _templates/, epics/<E>/<F>/*.md
 state/                 tasks.json (local TaskStore) + schema
 progress/              run output + history.md
