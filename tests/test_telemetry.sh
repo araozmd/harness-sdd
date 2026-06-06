@@ -342,6 +342,11 @@ printf '%s\n' \
 _cfgout="$(python3 "$_TH/tools/telemetry-report.py" session)"   # NO --log on purpose
 printf '%s\n' "$_cfgout" | grep -qF 'Total autonomous agent time: 300s' \
   || fail "R26: reader ignored configured telemetry.log override (got: $(printf '%s' "$_cfgout" | head -1))"
+# SINGLE-QUOTED value must parse identically to the installer's awk (PR #12 Codex r4)
+printf "telemetry:\n  enabled: true\n  log: 'custom/my.jsonl'\n" > "$_TH/harness.config.yaml"
+_sqout="$(python3 "$_TH/tools/telemetry-report.py" session)"
+printf '%s\n' "$_sqout" | grep -qF 'Total autonomous agent time: 300s' \
+  || fail "R26: reader does not strip single-quoted telemetry.log (got: $(printf '%s' "$_sqout" | head -1))"
 rm -rf "$_TH"
 pass "R26 reader_honors_configured_log"
 

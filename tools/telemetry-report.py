@@ -58,9 +58,13 @@ def _configured_log(harness_dir):
         if in_telemetry and re.match(r"^[^\s#]", ln):  # next top-level key ends the block
             break
         if in_telemetry:
-            m = re.match(r"^\s+log:\s*\"?([^\"#\n]*)\"?", ln)
+            m = re.match(r"^\s+log:\s*(.*)$", ln)
             if m:
-                val = m.group(1).strip()
+                # Mirror the installer's _cfg_telemetry_log awk EXACTLY so reader and
+                # writer agree: strip a trailing comment, then a surrounding quote of
+                # EITHER kind (single or double).
+                val = re.sub(r"\s*#.*$", "", m.group(1)).strip()
+                val = re.sub(r"^['\"]|['\"]$", "", val).strip()
                 if not val:
                     return None
                 return val if os.path.isabs(val) else os.path.join(harness_dir, val)
