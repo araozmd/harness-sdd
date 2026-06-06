@@ -16,12 +16,21 @@ saying "it works" means nothing until you prove it. AI-generated code is often
    curl the endpoints; inspect DB state). Looking right ≠ working.
 4. **Conventions.** Architecture and style match `specs/product.md` and the
    `.plan.md`. Nothing on the "DO NOT TOUCH" list was changed.
-5. **Contract artifact (sliced features only).** If the feature has `slices[]` (a
-   cross-repo feature — see `docs/UMBRELLA.md`), confirm exactly one pinned contract
-   artifact exists under `specs/epics/<epic>/<feature>/contract/`, that the shared
-   `.spec`/`.plan` reference it by id, and that **the slice under review references the
-   same contract**. Any wire field/shape in the slice that is not traceable to the
-   contract = reject (this is where inter-repo field drift gets caught).
+5. **Contract artifact (cross-repo slices).** This fires in **two** contexts, keyed off
+   the **contract reference**, not off a `slices[]` array — because in umbrella mode each
+   child repo's own SDD loop reviews the slice PR, and that child feature does **not**
+   carry the umbrella parent's `slices[]` (it lives in the umbrella). Keying off `slices[]`
+   would skip the check on exactly the child slice PR where wire-field drift appears.
+   - **Reviewing a slice in a child repo:** if the spec/tasks/tests under review
+     reference a pinned contract artifact (per `agents/architect.md`, every slice does),
+     confirm that reference resolves and that **every wire field/shape the slice uses is
+     traceable to the contract**. Any field/shape not traceable to the contract = reject.
+     This is where inter-repo field drift (e.g. `first_org_id` vs `onboarding_org_id`)
+     gets caught.
+   - **Rolling up in the umbrella repo:** if the parent feature has `slices[]`, confirm
+     exactly one pinned contract artifact exists under
+     `specs/epics/<epic>/<feature>/contract/` and the shared `.spec`/`.plan` reference it
+     by id.
 
 ## Be honest, not generous
 
