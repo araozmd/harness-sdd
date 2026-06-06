@@ -250,6 +250,22 @@ EOF
     printf '# Project history\n\n> Append one line per completed feature (Reviewer verdict).\n' > "$H/progress/history.md"
   fi
   if [ ! -f "$H/progress/.gitkeep" ]; then : > "$H/progress/.gitkeep"; fi
+
+  # Telemetry is local-only runtime data. In an installed consumer the harness body
+  # under .harness/ is committed and shared, so a blanket parent ignore would over-
+  # exclude it. Seed a TARGETED .harness/.gitignore that ignores only the telemetry log
+  # (created best-effort on first write at .harness/telemetry.jsonl), so the committed
+  # harness body coexists with a local-only log. Seed-once / never clobber an existing
+  # one (like init.project.sh) — if it already has the entry, leave it untouched.
+  if [ ! -f "$H/.gitignore" ]; then
+    printf '# Local-only telemetry log (see .harness/agents/orchestrator.md "## Telemetry").\ntelemetry.jsonl\n' > "$H/.gitignore"
+    info "seeded .harness/.gitignore (ignores telemetry.jsonl)"
+  elif ! grep -qF 'telemetry.jsonl' "$H/.gitignore"; then
+    printf 'telemetry.jsonl\n' >> "$H/.gitignore"
+    info "added telemetry.jsonl to existing .harness/.gitignore"
+  else
+    info ".harness/.gitignore preserved (telemetry.jsonl already ignored)"
+  fi
   ok "project workspace ready (.harness/specs, state, progress)"
 
   # ── 3. version stamp + manifest ─────────────────────────────────────────────

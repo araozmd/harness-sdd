@@ -2,7 +2,7 @@
 id: E05-F02
 title: Sub-agent & human-gate telemetry with rollup reports
 epic: E05-observability
-status: spec-ready          # pending → spec-ready → in-progress → in-review → done
+status: done # pending → spec-ready → in-progress → in-review → done
 sdd: true
 autonomous: false           # ships installed-body prose + a tool script + tests; human reviews the prompt edits
 depends_on: []

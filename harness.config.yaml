@@ -48,11 +48,30 @@ execution:
     # It must exit 0 on success, non-zero to signal failure back to the Builder.
     delegate_cmd: ""
 
+# Telemetry (optional, additive) — best-effort, local-only observability of how long
+# each sub-agent runs and how long the human spec-approval gate takes. Safe defaults so
+# a target with no `telemetry:` block behaves as if enabled with the default log path.
+telemetry:
+  # Master kill-switch. false ⇒ the Orchestrator skips telemetry capture entirely.
+  # Absence of this whole block ⇒ enabled defaults below.
+  enabled: true
+
+  # Writer + report default log path. Resolved UNDER HARNESS_DIR (the value init.sh
+  # computes: the repo root in the harness source, .harness/ in an installed consumer)
+  # unless given as an absolute path. GITIGNORED / LOCAL-ONLY — never committed (the
+  # source .gitignore ignores /telemetry.jsonl; the installer seeds a .harness/.gitignore
+  # holding telemetry.jsonl for consumers). The report script accepts --log to override.
+  log: telemetry.jsonl
+
+  # NOTE: token/USD cost accounting is OUT of scope. The `cost` field in each record is a
+  # reserved extension slot for a future instrumented SDK runtime and is null today; this
+  # harness never populates it.
+
 verification:
   init_script: ./init.sh
   # Commands the Reviewer must run before marking work done. Project-specific —
   # edit these per target repo.
-  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer suites
+  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry suites
 
   lint_command: ""        # e.g. "ruff check ." or "npm run lint"
   typecheck_command: ""   # e.g. "mypy ." or "tsc --noEmit"

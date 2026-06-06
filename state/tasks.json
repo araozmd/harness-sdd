@@ -70,7 +70,9 @@
           "status": "done",
           "sdd": true,
           "autonomous": false,
-          "depends_on": ["E03-F01"],
+          "depends_on": [
+            "E03-F01"
+          ],
           "spec_path": "specs/epics/E03-multi-repo/F02-cascade-installer/"
         }
       ]
@@ -94,11 +96,11 @@
     {
       "id": "E05",
       "title": "Harness observability & review quality",
-      "status": "pending",
+      "status": "done",
       "features": [
         {
           "id": "E05-F01",
-          "title": "Reviewer cross-file consistency + explicit build↔review rounds",
+          "title": "Reviewer cross-file consistency + explicit build\u2194review rounds",
           "status": "done",
           "sdd": true,
           "autonomous": true,
@@ -108,7 +110,7 @@
         {
           "id": "E05-F02",
           "title": "Sub-agent & human-gate telemetry with rollup reports",
-          "status": "spec-ready",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
