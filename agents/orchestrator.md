@@ -67,13 +67,29 @@ When the selected feature has `slices[]`, drive it slice by slice:
    repo's working directory**: `cd` into the manifest `path` first.
 
    - **`in-session` (default, zero-dependency — use this unless an executor is
-     wired).** Spawn the **Builder** sub-agent with a clean context, `cd`'d into the
-     child repo's manifest `path`, handing it ONLY that slice's
-     `.spec`/`.plan`/`.tasks`/`.tests` (and the pinned contract artifact). The
-     Builder writes the slice's code in that repo via its Loop A, opens the child
-     repo's PR, and returns its URL. The per-repo `delegate_cmd` is **unused** in this
-     mode — it may be empty in the manifest. This is the natural path for a single
-     code-agent session driving the whole umbrella.
+     wired).** Drive the child repo's **own SDD loop** from inside it — not a bare
+     Builder. The Builder's Loop A refuses to write code unless the *local* feature is
+     `in-progress`, and the umbrella slice's status lives in the **parent** TaskStore,
+     so you must first stand up child-local state:
+     1. **Seed child state.** In the child repo's TaskStore, ensure a feature entry
+        exists for this slice pointing at the emitted slice spec, then advance it to
+        `in-progress`. The shared spec already cleared the **umbrella's** human gate, so
+        the emitted slice should not re-gate per child — mark the child entry
+        `autonomous: true` (or `sdd: false`) so the child harness's own
+        `require_spec_approval` does not pause it a second time. Without an
+        `in-progress` local entry the Builder Loop A guard (`status: in-progress`) will
+        correctly STOP.
+     2. **Build.** Spawn the **Builder** sub-agent with a clean context, `cd`'d into the
+        manifest `path`, handing it ONLY that slice's `.spec`/`.plan`/`.tasks`/`.tests`
+        and the pinned contract artifact. It implements via Loop A and reports done.
+     3. **Review + PR.** Let the child repo's own **Reviewer** verify, then open the
+        child repo's PR (the child's normal way-of-work) and **capture its URL** — this
+        is the `pr` the advance/merge-poll steps persist. (Builder Loop A itself only
+        reports completion; PR creation is part of the child loop you drive, not the
+        Builder's job.)
+     The per-repo `delegate_cmd` is **unused** in this mode — it may be empty in the
+     manifest. This is the natural path for a single code-agent session driving the
+     whole umbrella.
    - **`delegate` (only when an executor is wired).** Invoke that repo's
      `delegate_cmd` from the manifest using the existing seam contract verbatim:
      `<delegate_cmd> <feature-id> <abs-spec-path>`, run from the manifest `path` so a
@@ -85,13 +101,17 @@ When the selected feature has `slices[]`, drive it slice by slice:
    PR, and review.
 3. **gate** — never dispatch a downstream slice's Builder nor open its repo's PR while
    any upstream `depends_on` slice is not `done` **and** `merged`.
-4. **fail-stop** — if the `delegate_cmd` exits non-zero, set the slice `status:
-   "failed"`, halt its downstream dependents, surface the failure, and hand back. Do
-   not improvise. (`failed` is a slice-only status; a feature never goes `failed`.)
+4. **fail-stop** — if the slice fails (a `delegate_cmd` non-zero exit, or — under
+   `in-session` — the child loop's Builder/Reviewer reporting it cannot complete), set
+   the slice `status: "failed"`, halt its downstream dependents, surface the failure,
+   and hand back. Do not improvise. (`failed` is a slice-only status; a feature never
+   goes `failed`.)
 5. **advance** — on a slice's successful completion (the delegate's zero exit, or the
-   in-session Builder reporting done), set the slice `status: "done"` **and persist the
-   PR reference it returned** into the slice's `pr` field (the full PR URL the child SDD
-   loop opened — `agents/builder.md` returns it in either backend). A slice is created
+   in-session child loop finishing Build+Review), set the slice `status: "done"` **and
+   persist the PR reference** into the slice's `pr` field — the full PR URL the child
+   loop opened: under `delegate` the executor returns it; under `in-session` it is the
+   URL captured in the dispatch step's Review+PR sub-step (the Builder alone does not
+   open a PR). A slice is created
    with `merged: false`; `done` alone does NOT unblock its dependents. If the delegate
    returned **no** PR reference, record that and treat `merged` as a **manual**
    confirmation step (see below) — never silently leave the chain stuck.

@@ -88,13 +88,20 @@ section of `agents/orchestrator.md`); no role file is forked. It is engaged only
    in `agents/builder.md`). Both modes run **from that child repo's working directory**
    (`cd` into the manifest `path` first):
 
-   - **`in-session` builder (default, zero-dependency).** The Orchestrator spawns the
-     **Builder** sub-agent with a clean context, `cd`'d into the child repo's manifest
-     `path`, handed only that slice's `.spec`/`.plan`/`.tasks`/`.tests` plus the pinned
-     contract artifact. The Builder implements the slice (its Loop A), opens the child
-     repo's PR, and returns the URL. The per-repo `delegate_cmd` is **not used** here
-     and may be left empty. **This is the natural mode for a single code-agent session
-     driving every child repo** — it needs no external executor.
+   - **`in-session` builder (default, zero-dependency).** The Orchestrator drives the
+     child repo's **own SDD loop** from inside it — not a bare Builder. Because Builder
+     Loop A refuses to write code unless the *local* feature is `in-progress`, and the
+     slice's status lives in the **parent** TaskStore, the Orchestrator first **seeds
+     child-local state**: it ensures the child repo's TaskStore has a feature entry for
+     the slice (pointing at the emitted slice spec) set to `in-progress`. It then spawns
+     the **Builder** sub-agent (clean context, `cd`'d into the manifest `path`, handed
+     only that slice's `.spec`/`.plan`/`.tasks`/`.tests` plus the pinned contract
+     artifact) to implement via Loop A, lets the child repo's **Reviewer** verify, opens
+     the child repo's PR, and **captures its URL** for the slice `pr`. (Builder Loop A
+     only reports completion; PR creation is part of the child loop, not the Builder.)
+     The per-repo `delegate_cmd` is **not used** here and may be left empty. **This is
+     the natural mode for a single code-agent session driving every child repo** — it
+     needs no external executor.
    - **`delegate` builder (only when an executor is wired).** Invoke that slice's repo
      `delegate_cmd` from the manifest using the existing seam contract **verbatim**:
 
@@ -109,12 +116,14 @@ section of `agents/orchestrator.md`); no role file is forked. It is engaged only
 3. **gate** — never dispatch a downstream slice's Builder, nor open that downstream
    repo's PR, while any of its upstream `depends_on` slices is not yet `done` **and**
    `merged`.
-4. **fail-stop** — if a dispatched slice's `delegate_cmd` exits **non-zero**, set that
-   slice's status to `failed`, halt dispatch of its downstream dependents, and surface
-   the failure. Do not improvise a fix.
-5. **advance** — on a slice's successful (zero-exit) completion, record its status as
-   `done` and **persist the PR URL** the delegate returned into the slice's `pr` field.
-   `done` alone does not unblock dependents.
+4. **fail-stop** — if a dispatched slice fails (a `delegate_cmd` non-zero exit, or —
+   under `in-session` — the child loop's Builder/Reviewer reporting it cannot complete),
+   set that slice's status to `failed`, halt dispatch of its downstream dependents, and
+   surface the failure. Do not improvise a fix.
+5. **advance** — on a slice's successful completion, record its status as `done` and
+   **persist the PR URL** into the slice's `pr` field — under `delegate` the executor
+   returns it; under `in-session` it is the URL captured in the dispatch step's
+   Review+PR sub-step. `done` alone does not unblock dependents.
 6. **observe-merge** — poll the slice's PR to merge with `gh pr view <slice.pr>
    --json state` (a PR **URL** is a valid selector and needs no `-R`; never pass the
    short manifest `repo` key to `-R`). If no `pr` was persisted, fall back to a
