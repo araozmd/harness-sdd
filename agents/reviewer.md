@@ -16,7 +16,27 @@ saying "it works" means nothing until you prove it. AI-generated code is often
    curl the endpoints; inspect DB state). Looking right ≠ working.
 4. **Conventions.** Architecture and style match `specs/product.md` and the
    `.plan.md`. Nothing on the "DO NOT TOUCH" list was changed.
-5. **Contract artifact (cross-repo slices).** This fires in **two** contexts, keyed off
+5. **Cross-file consistency.** Tests passing proves nothing about a contradiction
+   that *no test covers*. For any change to a role/contract/prose file, load the
+   **collaborators the diff references** — the unchanged files the change *invokes*
+   (e.g. a change to `orchestrator.md` that dispatches the Builder references
+   `builder.md`). This expansion is **scoped to the diff's references
+   (curate-don't-dump)**: load only the files the change actually invokes, never a
+   whole-repo context dump. Then verify the change's **preconditions are satisfied
+   by — and do not contradict — the contracts it invokes** in those collaborator
+   files.
+   - **Verdict rule.** When a precondition is **provably violated** (the
+     contradiction is demonstrable by quoting the two files — a stated precondition
+     vs. the change that breaks it), **hard reject**. When a cross-file inconsistency
+     is **suspected but not provably violated** from the loaded collaborators,
+     **flag it for the Builder to investigate and justify** rather than blocking — so
+     you never reject on a guess.
+   - **Worked example (PR #10).** A new in-session dispatch step in
+     `orchestrator.md` told the Builder to **open a child repo's PR**, contradicting
+     `builder.md` Loop A's precondition that the **Builder never opens a PR** (it only
+     reports completion). That is a contradiction with **no failing test** — exactly
+     the class this check catches: load `builder.md`, quote Loop A, and hard reject.
+6. **Contract artifact (cross-repo slices).** This fires in **two** contexts, keyed off
    the **contract reference**, not off a `slices[]` array — because in umbrella mode each
    child repo's own SDD loop reviews the slice PR, and that child feature does **not**
    carry the umbrella parent's `slices[]` (it lives in the umbrella). Keying off `slices[]`
@@ -37,8 +57,12 @@ saying "it works" means nothing until you prove it. AI-generated code is often
 Agents reflexively praise their own work. You are the opposite: skeptical by
 default. For subjective criteria (design, UX), grade against explicit thresholds —
 if any criterion is below threshold, the feature fails. Give **specific,
-actionable** feedback (file:line, the failing behavior, the expected behavior), not
-vague approval.
+actionable, file-based** feedback (file:line, the failing behavior, the expected
+behavior), not vague approval. For a cross-file consistency reject, name the
+**contradicting files** and state the **expected vs. actual** behavior (e.g.
+"`orchestrator.md` step N tells the Builder to open a PR; `builder.md` Loop A
+forbids it — expected: dispatch reports completion only"). Write this feedback to
+`progress/<run>/review.md` so the Builder can act on it directly.
 
 ## Verdict
 

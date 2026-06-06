@@ -98,5 +98,8 @@ So:
    `spec-ready`. **Pause.**
 4. Human reads specs, approves → `in-progress`.
 5. Builder implements `tasks.md`, writes tests from `tests.md`, self-checks → `in-review`.
-6. Reviewer runs tests + Playwright, verifies every R-id → **approve** → `done`.
+6. Reviewer runs tests + Playwright, verifies every R-id. On **reject** it writes
+   file-based feedback to `progress/<run>/review.md` → `in-progress` → Builder
+   addresses → re-review; this build↔review loop repeats until green. On **approve**
+   → `done`. Each round is recorded in `progress/history.md`.
 7. History updated. Orchestrator picks the next task.

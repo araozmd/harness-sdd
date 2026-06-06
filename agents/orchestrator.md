@@ -20,10 +20,28 @@ next, and delegate to the specialist agents.
    | `pending` + `sdd: false` | Spawn **Builder** directly for a quick task (skip full SDD). |
    | `spec-ready` | **PAUSE.** A human must review specs and move to `in-progress`. Do not proceed unless the task is marked `autonomous: true`. |
    | `in-progress` | Spawn **Builder** with the approved specs only. On finish, set `in-review`. |
-   | `in-review` | Spawn **Reviewer**. If it approves → `done`. If it rejects → back to `in-progress` with the Reviewer's feedback file. |
+   | `in-review` | Spawn **Reviewer**. If it approves → `done`. If it rejects → back to `in-progress` with the Reviewer's feedback file (see **Build↔review rounds** below). |
    | needs research | Spawn **Scout** (read-only) first; it writes findings to `progress/`. |
 
 5. **Record.** After each delegation, append a one-line entry to `progress/history.md`.
+
+### Build↔review rounds (explicit, multi-round, until green)
+
+The build↔review handoff is **not a single pass** — it is an explicit loop that
+**repeats until green**:
+
+1. `in-progress` → Builder addresses the work → `in-review`.
+2. `in-review` → Reviewer verdict. **Reject** → the Reviewer writes **actionable,
+   file-based feedback** to `progress/<run>/review.md` → set the feature back to
+   `in-progress` → the Builder addresses that specific feedback → **re-review**.
+   **Approve** → `done`.
+3. Repeat steps 1–2 for as many rounds as it takes; the loop exits **only on an
+   approve verdict** (or when you escalate a stuck feature to a human).
+
+**Each round is recorded.** Append **one line per round** to `progress/history.md`
+so the iteration is observable — e.g. `E0x-Fyy in-review → reject (round N)` and,
+on the final round, `E0x-Fyy in-review → approve`. The round counter lives only in
+this `progress/` history; it adds **no** status value and **no** schema field.
 
 ## How you delegate (avoid the "broken telephone")
 

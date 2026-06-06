@@ -4,6 +4,29 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.6.0] — 2026-06-06
+
+### Added — Reviewer cross-file consistency + explicit build↔review rounds
+- **Cross-file consistency check (`agents/reviewer.md`).** The in-loop Reviewer now
+  has a named "What you check" item for cross-file consistency: for any change to a
+  role/contract/prose file it loads the **collaborators the diff references** (the
+  unchanged files the change invokes), scoped to those references
+  (curate-don't-dump, never a whole-repo dump), and verifies the change's
+  preconditions are satisfied by — and do not contradict — the contracts it invokes.
+  A **provably violated** precondition is a **hard reject**; a suspected-but-unproven
+  inconsistency is **flagged for the Builder to justify** rather than blocked. Ships
+  the canonical **PR #10 worked example** (an `orchestrator.md` dispatch step telling
+  the Builder to open a child PR vs. `builder.md` Loop A's "Builder never opens a PR")
+  — a contradiction with no failing test, exactly what this check catches. Rejects
+  emit specific, actionable, **file-based** feedback (contradicting files + expected
+  vs. actual) to `progress/<run>/review.md`.
+- **Explicit multi-round build↔review loop (`agents/orchestrator.md`).** The
+  build↔review handoff is now documented as an explicit loop that repeats **until
+  green**: reject → actionable file feedback → `in-progress` → Builder addresses →
+  re-review. **Each round is recorded** (one line per round in `progress/history.md`).
+  No new status value and no schema change — the round counter lives only in
+  `progress/` history. `docs/WORKFLOW.md` aligned to the multi-round loop.
+
 ## [0.5.0] — 2026-06-06
 
 ### Added — umbrella mode hardening (feedback pass)

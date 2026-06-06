@@ -17,3 +17,6 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-05-31 — E03-F02 Reviewer APPROVED (R1–R24, all suites green, non-regression + migration smoke-tested) → done. Epic E03 done. VERSION → 0.3.0.
 - 2026-06-01 E04-F01 — Architect wrote 4-file spec (R1–R16) from intent brief → status spec-ready ⏸ human gate.
 - 2026-06-01 E04-F01 — Builder implemented (T1–T14), Reviewer APPROVED (R1–R16, all suites green), nit fixed → done. Epic E04 done. VERSION → 0.4.0.
+- 2026-06-06 E05 seeded (Inception): epic "Harness observability & review quality" + E05-F01 (reviewer cross-file, autonomous) + E05-F02 (telemetry, parks at gate).
+- 2026-06-06 E05-F01 — Architect spec (R1–R13) → Builder (T1–T9, VERSION 0.6.0, new tests/test_reviewer.sh) → Reviewer APPROVED round 1 (all 5 suites green, cross-file check self-applied) → done.
+- 2026-06-06 E05-F02 — Architect spec (R1–R21) + session-summary amendment (R22–R27 portable end-of-session summary) → spec-ready ⏸ human gate.
