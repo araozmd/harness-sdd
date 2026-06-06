@@ -38,3 +38,8 @@ deliberately, not on every PR.
 - Record it in `CHANGELOG.md` and tag the merge commit `vX.Y.Z`.
 - (Optional enforcement: a CI check that fails a PR touching harness-owned paths
   without a `VERSION` change.)
+
+## Way of work
+- Every new work, feature or bug should have its own branch
+- Once all locall verifications and tests passed, create a new PR and use the 
+  skill /pr-loop to invoke Codex reviews
