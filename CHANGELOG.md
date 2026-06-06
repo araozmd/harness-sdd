@@ -4,6 +4,38 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.5.0] — 2026-06-06
+
+### Added — umbrella mode hardening (feedback pass)
+- **`in-session` umbrella dispatch is now a first-class, documented mode.** The
+  coordinator loop previously documented slice dispatch *only* via an external
+  `delegate_cmd` — but the shipped default is `execution.builder.backend: in-session`,
+  which has no executor, so the documented path dead-ended on a fresh install.
+  `agents/orchestrator.md` and `docs/UMBRELLA.md` now branch dispatch on
+  `execution.builder.backend`: under `in-session` (default) the Orchestrator spawns the
+  Builder sub-agent `cd`'d into each child repo (zero-dependency, the natural
+  single-session path); under `delegate` it uses the `delegate_cmd` seam. `delegate_cmd`
+  is now documented as optional and ships empty in `umbrella.manifest.example.yaml`.
+- **Contract artifact is now prompted and enforced.** `agents/architect.md` gained an
+  Umbrella-mode section making the single pinned inter-repo contract artifact
+  **mandatory** for any feature with `slices[]`, with every slice required to reference
+  it (prevents inter-repo field drift). `agents/reviewer.md` gained a matching check:
+  a sliced feature is rejected unless the pinned contract exists and the slice under
+  review traces its wire fields/shapes to it.
+- **Cascade preview: `harness-install.sh --umbrella … --dry-run` (alias `--list`).**
+  Lists the coordinator + every git child that would be installed (with skip reasons),
+  writing nothing — so the cascade no longer surprises you by scaffolding untouched
+  repos. The activation message now states explicitly that pointing `umbrella.manifest`
+  ENGAGES umbrella mode.
+
+### Changed
+- Documented the two manifest path bases (the `umbrella.manifest` value resolves
+  relative to `.harness/`; each entry's `path:` resolves relative to the manifest's own
+  dir) in `harness.config.yaml`, `umbrella.manifest.example.yaml`, and `docs/UMBRELLA.md`.
+- Clarified in `init.sh` that `.harness/init.project.sh` is for FAST structural/presence
+  checks only — the heavy test suite belongs in `verification.test_command` (Reviewer-run,
+  once at the `in-review` gate), not in the per-step gate.
+
 ## [0.4.0] — 2026-06-01
 
 ### Added — Inception role + /sdd-new intake (E04-F01)

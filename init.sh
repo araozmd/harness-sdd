@@ -242,10 +242,15 @@ fi
 # 3. Project-specific checks.
 #    Project-authored gates live in `.harness/init.project.sh` — seeded once by
 #    harness-install.sh and NEVER clobbered on upgrade, unlike THIS file (which is
-#    harness BODY and gets overwritten). Put tests/build/lint/presence checks there
-#    rather than editing this file, or they vanish on the next upgrade. The hook is
-#    sourced from the PROJECT ROOT so `npm test` / `pytest` resolve against the repo,
-#    and it inherits the `fail`/`ok` helpers defined above.
+#    harness BODY and gets overwritten). Put FAST structural/presence/build checks
+#    here (the things that must hold for any agent to safely proceed) rather than
+#    editing this file, or they vanish on the next upgrade.
+#    KEEP IT FAST: init.sh runs before EVERY orchestrator step, so a slow suite here
+#    taxes the whole loop (multiplied across slices in umbrella mode). The heavy test
+#    suite belongs in `verification.test_command`, which the Reviewer runs once at the
+#    `in-review` gate — not here. The hook is sourced from the PROJECT ROOT so
+#    `npm test` / `pytest` resolve against the repo, and it inherits the `fail`/`ok`
+#    helpers defined above.
 cd "$PROJECT_ROOT"
 PROJECT_CHECKS="$HARNESS_DIR/init.project.sh"
 if [ -f "$PROJECT_CHECKS" ]; then
