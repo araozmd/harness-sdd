@@ -107,6 +107,20 @@ _cfg_umbrella_manifest_value() {
   ' "$1"
 }
 
+# _cfg_telemetry_log <file> — print the telemetry.log value (unquoted, comment-stripped)
+# from inside the top-level `telemetry:` section; empty if unset. Same scoping as the
+# python reader's _configured_log, so the installer ignores exactly what the writer uses.
+_cfg_telemetry_log() {
+  awk '
+    /^telemetry:[[:space:]]*(#.*)?$/ { t=1; next }
+    t && /^[^[:space:]#]/ { t=0 }
+    t && /^[[:space:]]+log:/ {
+      sub(/^[[:space:]]+log:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+      gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+    }
+  ' "$1"
+}
+
 # _mc_insert_after <file> <header-regex> <line>  — insert <line> immediately after the
 # first line matching <header-regex>, leaving every other line byte-for-byte intact.
 _mc_insert_after() {
@@ -255,18 +269,30 @@ EOF
 
   # Telemetry is local-only runtime data. In an installed consumer the harness body
   # under .harness/ is committed and shared, so a blanket parent ignore would over-
-  # exclude it. Seed a TARGETED .harness/.gitignore that ignores only the telemetry log
-  # (created best-effort on first write at .harness/telemetry.jsonl), so the committed
-  # harness body coexists with a local-only log. Seed-once / never clobber an existing
-  # one (like init.project.sh) — if it already has the entry, leave it untouched.
+  # exclude it. Seed a TARGETED .harness/.gitignore that ignores the telemetry log, so
+  # the committed harness body coexists with a local-only log. We ignore BOTH the default
+  # `telemetry.jsonl` AND the configured `telemetry.log` if it was overridden to a
+  # different RELATIVE path (resolved under .harness/, where this .gitignore lives) — so a
+  # documented override like `custom/my.jsonl` is still kept out of VCS. An ABSOLUTE
+  # override lives outside the repo and needs no ignore. NOTE: if you change telemetry.log
+  # AFTER install without re-running the installer, add the new path here yourself.
+  _tlog="$(_cfg_telemetry_log "$H/harness.config.yaml" 2>/dev/null)"
+  _ignores='telemetry.jsonl'
+  case "$_tlog" in
+    ''|telemetry.jsonl|/*) : ;;                 # default, unset, or absolute → nothing extra
+    *) _ignores="$_ignores
+$_tlog" ;;                                       # relative override → also ignore it
+  esac
   if [ ! -f "$H/.gitignore" ]; then
-    printf '# Local-only telemetry log (see .harness/agents/orchestrator.md "## Telemetry").\ntelemetry.jsonl\n' > "$H/.gitignore"
-    info "seeded .harness/.gitignore (ignores telemetry.jsonl)"
-  elif ! grep -qF 'telemetry.jsonl' "$H/.gitignore"; then
-    printf 'telemetry.jsonl\n' >> "$H/.gitignore"
-    info "added telemetry.jsonl to existing .harness/.gitignore"
+    { printf '# Local-only telemetry log (see .harness/agents/orchestrator.md "## Telemetry").\n'
+      printf '%s\n' "$_ignores"; } > "$H/.gitignore"
+    info "seeded .harness/.gitignore (ignores telemetry log)"
   else
-    info ".harness/.gitignore preserved (telemetry.jsonl already ignored)"
+    printf '%s\n' "$_ignores" | while IFS= read -r _pat; do
+      [ -n "$_pat" ] || continue
+      grep -qF "$_pat" "$H/.gitignore" || printf '%s\n' "$_pat" >> "$H/.gitignore"
+    done
+    info ".harness/.gitignore ensured (telemetry log ignored)"
   fi
   ok "project workspace ready (.harness/specs, state, progress)"
 

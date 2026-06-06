@@ -61,6 +61,9 @@ telemetry:
   # unless given as an absolute path. GITIGNORED / LOCAL-ONLY — never committed (the
   # source .gitignore ignores /telemetry.jsonl; the installer seeds a .harness/.gitignore
   # holding telemetry.jsonl for consumers). The report script accepts --log to override.
+  # If you OVERRIDE this to a custom RELATIVE path, the installer ignores it too on its
+  # next run — but if you change it post-install without re-running the installer, add
+  # the new path to .harness/.gitignore yourself so the log stays out of VCS.
   log: telemetry.jsonl
 
   # NOTE: token/USD cost accounting is OUT of scope. The `cost` field in each record is a

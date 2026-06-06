@@ -158,6 +158,28 @@ grep -qE 'if \[ ! -f "\$H/\.gitignore" \]|grep -qF .telemetry\.jsonl. "\$H/\.git
   || fail "R11: installer .harness/.gitignore seed is not guarded (seed-once)"
 pass "R11 installer_seeds_harness_gitignore"
 
+# ── R11 (installer): a RELATIVE telemetry.log override is also gitignored ─────────
+# Regression for PR #12 Codex r3: a documented override like `custom/my.jsonl` resolves
+# under .harness/ but the default ignore only covers `telemetry.jsonl`. The installer
+# must ignore the configured override too (on its next run).
+_CT="$T/consumer"; mkdir -p "$_CT"; ( cd "$_CT" && git init -q )
+sh "$ROOT/$INSTALLER" "$_CT" >/dev/null 2>&1 || fail "R11: install into consumer failed"
+# override telemetry.log to a relative subdir path, then re-run the installer
+python3 - "$_CT/.harness/harness.config.yaml" <<'PY'
+import re,sys
+p=sys.argv[1]; s=open(p).read()
+s=re.sub(r'(\n[ \t]+log:[ \t]*)telemetry\.jsonl', r'\1custom/my.jsonl', s, count=1)
+open(p,"w").write(s)
+PY
+sh "$ROOT/$INSTALLER" "$_CT" >/dev/null 2>&1 || fail "R11: re-install into consumer failed"
+grep -qF 'custom/my.jsonl' "$_CT/.harness/.gitignore" \
+  || fail "R11: relative telemetry.log override not added to .harness/.gitignore"
+# and prove git actually ignores it
+mkdir -p "$_CT/.harness/custom" && : > "$_CT/.harness/custom/my.jsonl"
+( cd "$_CT" && git check-ignore -q .harness/custom/my.jsonl ) \
+  || fail "R11: overridden telemetry log path is not git-ignored"
+pass "R11 installer_ignores_telemetry_log_override"
+
 # ── R12: absent log auto-handled, not an error ───────────────────────────────────
 python3 "$REPORT" --log "$T/absent.jsonl" >"$T/o12" 2>&1 || fail "R12: absent log exited non-zero"
 grep -qiF 'no telemetry yet' "$T/o12" || fail "R12: absent log did not print the notice"
