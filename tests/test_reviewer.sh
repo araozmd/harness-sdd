@@ -77,21 +77,25 @@ grep -qi 're-review\|repeats until green\|loop repeats' docs/WORKFLOW.md \
   || fail "R11: docs/WORKFLOW.md does not reflect the multi-round build↔review loop"
 pass "R11 docs_coherent"
 
-# ── R12: VERSION bumped + CHANGELOG entry ─────────────────────────────────────────
-[ "$(tr -d ' \n\r\t' < VERSION)" = "0.6.0" ] || fail "R12: VERSION is not 0.6.0"
-grep -qF '## [0.6.0]' CHANGELOG.md || fail "R12: CHANGELOG.md missing the ## [0.6.0] entry"
-pass "R12 version_bumped"
+# ── R12: VERSION is valid semver AND CHANGELOG carries its entry ─────────────────
+# Permanent-suite-safe: this runs on EVERY future harness review, so it must NOT pin
+# one release (0.6.0). The durable invariant is "VERSION is semver and CHANGELOG has a
+# matching entry" — which stays green across every legitimate future bump. Whether THIS
+# PR bumped VERSION is a PR-review-time concern (Codex / the Reviewer), not a frozen
+# assertion. (See the identical lesson applied to tests/test_inception.sh in PR #10.)
+_VER="$(tr -d ' \n\r\t' < VERSION)"
+printf '%s' "$_VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || fail "R12: VERSION '$_VER' is not semver"
+grep -qF "## [$_VER]" CHANGELOG.md || fail "R12: CHANGELOG.md missing the ## [$_VER] entry"
+pass "R12 version_changelog_coupled"
 
-# ── R13: DO NOT TOUCH — schema/status enum/builder/architect unchanged ───────────
+# ── R13: DO NOT TOUCH — status enum invariant ────────────────────────────────────
+# Permanent invariant only: the five-value status enum must never silently change.
+# We deliberately do NOT diff agents/builder.md / agents/architect.md vs main here —
+# that was E05-F01's per-feature DO-NOT-TOUCH boundary, not a permanent gate, and
+# freezing it would wrongly fail any future feature that legitimately edits those
+# files (the same leak fixed in tests/test_inception.sh, PR #10).
 grep -qF '"pending", "spec-ready", "in-progress", "in-review", "done"' store/tasks.schema.json \
   || fail "R13: feature status enum in schema changed"
-if git -C "$ROOT" rev-parse --verify -q main >/dev/null 2>&1; then
-  for f in store/tasks.schema.json agents/builder.md agents/architect.md; do
-    if ! git -C "$ROOT" diff --quiet main -- "$f" 2>/dev/null; then
-      fail "R13: DO-NOT-TOUCH file changed vs main: $f"
-    fi
-  done
-fi
-pass "R13 do_not_touch_clean"
+pass "R13 status_enum_intact"
 
 echo "All reviewer tests passed."
