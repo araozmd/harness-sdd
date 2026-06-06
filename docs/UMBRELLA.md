@@ -46,8 +46,13 @@ each entry's `test_command`/`delegate_cmd` and the coordinator's `integration_co
   `done`+`merged` (enforced by `tasks.schema.json` cross-field validation and the
   `init.sh` fallback), so a hand-edited store cannot unblock dependents early.
 - **Manifest** — `umbrella.manifest.yaml`: maps each `repo` to its `path`, `init`,
-  `test_command`, and `delegate_cmd`. The coordinator reads it to locate and dispatch
-  each child repo.
+  `test_command`, and (only for `backend: delegate`) `delegate_cmd`. The coordinator
+  reads it to locate and dispatch each child repo. **Two path bases, by design:** the
+  `umbrella.manifest` value in `harness.config.yaml` resolves relative to the harness
+  dir (`.harness/`, `init.sh`'s cwd), while each entry's `path:` resolves relative to
+  **the manifest file's own directory** (the umbrella root). The cascade installer
+  reconciles these by placing the manifest at the umbrella root and pointing
+  `umbrella.manifest` at `../umbrella.manifest.yaml`.
 - **Contract artifact** — the single pinned inter-repo seam (see below).
 
 ## Spec home = umbrella; slices = child repos
@@ -78,26 +83,47 @@ section of `agents/orchestrator.md`); no role file is forked. It is engaged only
    `merged`. Repeatedly applying this rule yields a topological order. If a slice
    names a `repo` that is **not** a key in the manifest, refuse to dispatch it and
    report an error that names the missing repo.
-2. **dispatch** — invoke that slice's repo `delegate_cmd` from the manifest using the
-   existing seam contract **verbatim**:
+2. **dispatch** — how a slice is dispatched is chosen by `execution.builder.backend`
+   in the umbrella's `harness.config.yaml` (the same global Builder switch documented
+   in `agents/builder.md`). Both modes run **from that child repo's working directory**
+   (`cd` into the manifest `path` first):
 
-   ```
-   <delegate_cmd> <feature-id> <abs-spec-path>
-   ```
+   - **`in-session` builder (default, zero-dependency).** The Orchestrator drives the
+     child repo's **own SDD loop** from inside it — not a bare Builder. Because Builder
+     Loop A refuses to write code unless the *local* feature is `in-progress`, and the
+     slice's status lives in the **parent** TaskStore, the Orchestrator first **seeds
+     child-local state**: it ensures the child repo's TaskStore has a feature entry for
+     the slice (pointing at the emitted slice spec) set to `in-progress`. It then spawns
+     the **Builder** sub-agent (clean context, `cd`'d into the manifest `path`, handed
+     only that slice's `.spec`/`.plan`/`.tasks`/`.tests` plus the pinned contract
+     artifact) to implement via Loop A, lets the child repo's **Reviewer** verify, opens
+     the child repo's PR, and **captures its URL** for the slice `pr`. (Builder Loop A
+     only reports completion; PR creation is part of the child loop, not the Builder.)
+     The per-repo `delegate_cmd` is **not used** here and may be left empty. **This is
+     the natural mode for a single code-agent session driving every child repo** — it
+     needs no external executor.
+   - **`delegate` builder (only when an executor is wired).** Invoke that slice's repo
+     `delegate_cmd` from the manifest using the existing seam contract **verbatim**:
 
-   run **from that child repo's working directory** (`cd` into the manifest `path`)
-   so a repo-local relative `delegate_cmd` (e.g. `./run-sdd.sh`) resolves correctly.
-   The umbrella **never edits source files** in the child repo itself — the child
-   repo's own SDD loop owns implementation, its PR, and its review.
+     ```
+     <delegate_cmd> <feature-id> <abs-spec-path>
+     ```
+
+     so a repo-local relative `delegate_cmd` (e.g. `./run-sdd.sh`) resolves correctly.
+
+   In **both** modes the umbrella **never edits source files** in the child repo
+   itself — the child repo's own SDD loop owns implementation, its PR, and its review.
 3. **gate** — never dispatch a downstream slice's Builder, nor open that downstream
    repo's PR, while any of its upstream `depends_on` slices is not yet `done` **and**
    `merged`.
-4. **fail-stop** — if a dispatched slice's `delegate_cmd` exits **non-zero**, set that
-   slice's status to `failed`, halt dispatch of its downstream dependents, and surface
-   the failure. Do not improvise a fix.
-5. **advance** — on a slice's successful (zero-exit) completion, record its status as
-   `done` and **persist the PR URL** the delegate returned into the slice's `pr` field.
-   `done` alone does not unblock dependents.
+4. **fail-stop** — if a dispatched slice fails (a `delegate_cmd` non-zero exit, or —
+   under `in-session` — the child loop's Builder/Reviewer reporting it cannot complete),
+   set that slice's status to `failed`, halt dispatch of its downstream dependents, and
+   surface the failure. Do not improvise a fix.
+5. **advance** — on a slice's successful completion, record its status as `done` and
+   **persist the PR URL** into the slice's `pr` field — under `delegate` the executor
+   returns it; under `in-session` it is the URL captured in the dispatch step's
+   Review+PR sub-step. `done` alone does not unblock dependents.
 6. **observe-merge** — poll the slice's PR to merge with `gh pr view <slice.pr>
    --json state` (a PR **URL** is a valid selector and needs no `-R`; never pass the
    short manifest `repo` key to `-R`). If no `pr` was persisted, fall back to a
@@ -106,9 +132,11 @@ section of `agents/orchestrator.md`); no role file is forked. It is engaged only
    the chain silently stuck. On confirmed merge set `merged: true`, then re-run
    **select** so newly-unblocked downstream slices become dispatchable.
 
-This reuses the existing `execution.builder.delegate` contract exactly — the umbrella
-Builder is just that delegate seam invoked once per slice, with gating/ordering around
-it. Nothing new is added to the seam.
+The dispatch step is just the existing single-repo Builder, scoped to one slice with
+cross-repo gating/ordering around it. Under `in-session` it is the Builder sub-agent
+run inside the child repo; under `delegate` it is the `execution.builder.delegate`
+seam invoked once per slice. Nothing new is added to the Builder contract — umbrella
+mode only adds the slice selection, gating, merge-poll, and rollup around it.
 
 ## Integration verification (rollup)
 The feature `done` verdict is **derived** from slice state, then **persisted** (never
@@ -131,5 +159,7 @@ set `done` prematurely while a slice or the integration gate is red):
 
 ## Manifest reference
 See `umbrella.manifest.example.yaml`. One entry per child repo under `repos:`, each
-with `path`, `init`, `test_command`, `delegate_cmd`. A slice whose `repo` is absent
-from `repos:` is undispatchable and must be reported.
+with `path`, `init`, `test_command`, and `delegate_cmd`. `delegate_cmd` is **required
+only under `backend: delegate`**; under the default `backend: in-session` it is unused
+and may be left empty. A slice whose `repo` is absent from `repos:` is undispatchable
+and must be reported.

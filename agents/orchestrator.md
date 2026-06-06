@@ -61,21 +61,57 @@ When the selected feature has `slices[]`, drive it slice by slice:
    whose **every** `depends_on` upstream slice is `done` **and** `merged` (topological
    order). If a slice's `repo` is not a key in the manifest, do NOT dispatch it —
    report an error naming the missing repo.
-2. **dispatch** — invoke that repo's `delegate_cmd` from the manifest using the
-   existing seam contract verbatim: `<delegate_cmd> <feature-id> <abs-spec-path>`.
-   **Run it from the child repo's working directory** — `cd` into the manifest
-   `path` (or resolve the command against it) before invoking, so a repo-local
-   relative `delegate_cmd` (e.g. `./run-sdd.sh`) resolves to the right executable.
-   The umbrella never edits source in the child repo — its own SDD loop owns the
-   code, PR, and review.
+2. **dispatch** — how you dispatch depends on `execution.builder.backend` in the
+   umbrella's `harness.config.yaml` (the same global switch the single-repo Builder
+   reads — see `agents/builder.md`). Either way, **everything runs from the child
+   repo's working directory**: `cd` into the manifest `path` first.
+
+   - **`in-session` (default, zero-dependency — use this unless an executor is
+     wired).** Drive the child repo's **own SDD loop** from inside it — not a bare
+     Builder. The Builder's Loop A refuses to write code unless the *local* feature is
+     `in-progress`, and the umbrella slice's status lives in the **parent** TaskStore,
+     so you must first stand up child-local state:
+     1. **Seed child state.** In the child repo's TaskStore, ensure a feature entry
+        exists for this slice pointing at the emitted slice spec, then advance it to
+        `in-progress`. The shared spec already cleared the **umbrella's** human gate, so
+        the emitted slice should not re-gate per child — mark the child entry
+        `autonomous: true` (or `sdd: false`) so the child harness's own
+        `require_spec_approval` does not pause it a second time. Without an
+        `in-progress` local entry the Builder Loop A guard (`status: in-progress`) will
+        correctly STOP.
+     2. **Build.** Spawn the **Builder** sub-agent with a clean context, `cd`'d into the
+        manifest `path`, handing it ONLY that slice's `.spec`/`.plan`/`.tasks`/`.tests`
+        and the pinned contract artifact. It implements via Loop A and reports done.
+     3. **Review + PR.** Let the child repo's own **Reviewer** verify, then open the
+        child repo's PR (the child's normal way-of-work) and **capture its URL** — this
+        is the `pr` the advance/merge-poll steps persist. (Builder Loop A itself only
+        reports completion; PR creation is part of the child loop you drive, not the
+        Builder's job.)
+     The per-repo `delegate_cmd` is **unused** in this mode — it may be empty in the
+     manifest. This is the natural path for a single code-agent session driving the
+     whole umbrella.
+   - **`delegate` (only when an executor is wired).** Invoke that repo's
+     `delegate_cmd` from the manifest using the existing seam contract verbatim:
+     `<delegate_cmd> <feature-id> <abs-spec-path>`, run from the manifest `path` so a
+     repo-local relative `delegate_cmd` (e.g. `./run-sdd.sh`) resolves. The external
+     executor owns implementation, PR, and review.
+
+   In **both** modes the umbrella itself never edits source in the child repo — the
+   child repo's own SDD loop (in-session Builder or external executor) owns the code,
+   PR, and review.
 3. **gate** — never dispatch a downstream slice's Builder nor open its repo's PR while
    any upstream `depends_on` slice is not `done` **and** `merged`.
-4. **fail-stop** — if the `delegate_cmd` exits non-zero, set the slice `status:
-   "failed"`, halt its downstream dependents, surface the failure, and hand back. Do
-   not improvise. (`failed` is a slice-only status; a feature never goes `failed`.)
-5. **advance** — on zero-exit success, set the slice `status: "done"` **and persist
-   the PR reference the delegate returned** into the slice's `pr` field (the full PR
-   URL the child SDD loop opened — `agents/builder.md` returns it). A slice is created
+4. **fail-stop** — if the slice fails (a `delegate_cmd` non-zero exit, or — under
+   `in-session` — the child loop's Builder/Reviewer reporting it cannot complete), set
+   the slice `status: "failed"`, halt its downstream dependents, surface the failure,
+   and hand back. Do not improvise. (`failed` is a slice-only status; a feature never
+   goes `failed`.)
+5. **advance** — on a slice's successful completion (the delegate's zero exit, or the
+   in-session child loop finishing Build+Review), set the slice `status: "done"` **and
+   persist the PR reference** into the slice's `pr` field — the full PR URL the child
+   loop opened: under `delegate` the executor returns it; under `in-session` it is the
+   URL captured in the dispatch step's Review+PR sub-step (the Builder alone does not
+   open a PR). A slice is created
    with `merged: false`; `done` alone does NOT unblock its dependents. If the delegate
    returned **no** PR reference, record that and treat `merged` as a **manual**
    confirmation step (see below) — never silently leave the chain stuck.

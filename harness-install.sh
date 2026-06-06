@@ -2,7 +2,7 @@
 # harness-install.sh — install or upgrade the agent harness into a target repo.
 #
 #   ./harness-install.sh <target-repo-path>
-#   ./harness-install.sh --umbrella <umbrella-dir> [--recursive]
+#   ./harness-install.sh --umbrella <umbrella-dir> [--recursive] [--dry-run|--list]
 #
 # Idempotent: run once to install, re-run to upgrade.
 #
@@ -18,7 +18,8 @@
 # an umbrella directory — writes the coordinator profile into the umbrella, discovers
 # its immediate git children (depth 1), installs the normal child profile into each,
 # and auto-populates umbrella.manifest.yaml. Single-target mode (no --umbrella) is
-# unchanged.
+# unchanged. Pass --dry-run (alias --list) with --umbrella to preview exactly which
+# coordinator + git children would be touched, writing nothing.
 #
 # POSIX sh, zero dependencies (matches init.sh's ethos).
 
@@ -496,16 +497,23 @@ manifest_upsert() {
 # ── arg parsing ───────────────────────────────────────────────────────────────
 UMBRELLA=""
 RECURSIVE=0
+DRY_RUN=0
 POSITIONAL=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --umbrella)
-      [ "$#" -ge 2 ] || die "usage: $0 --umbrella <umbrella-dir> [--recursive]"
+      [ "$#" -ge 2 ] || die "usage: $0 --umbrella <umbrella-dir> [--recursive] [--dry-run]"
       UMBRELLA="$2"
       shift 2
       ;;
     --recursive)
       RECURSIVE=1
+      shift
+      ;;
+    --dry-run|--list)
+      # Preview the cascade: list the coordinator + every git child that WOULD be
+      # installed (with skip reasons), writing nothing. Umbrella mode only.
+      DRY_RUN=1
       shift
       ;;
     --)
@@ -523,6 +531,7 @@ done
 
 # ── single-target mode (no --umbrella): behave exactly as before ──────────────
 if [ -z "$UMBRELLA" ]; then
+  [ "$DRY_RUN" = 0 ] || die "--dry-run/--list is umbrella-mode only (use with --umbrella)"
   if [ "${POSITIONAL}" = "" ]; then die "usage: $0 <target-repo-path>"; fi
   TGT="$POSITIONAL"
   if [ ! -d "$TGT" ]; then die "target '$TGT' is not a directory"; fi
@@ -541,9 +550,38 @@ if [ -n "$POSITIONAL" ]; then die "do not pass a positional <target> with --umbr
 UMB="$(CDPATH= cd -- "$UMBRELLA" && pwd -P)"
 if [ "$UMB" = "$(CDPATH= cd -- "$SRC" && pwd -P)" ]; then die "umbrella dir must differ from the harness source ($SRC)"; fi
 
-echo "══ umbrella cascade → $UMB ══"
+if [ "$DRY_RUN" = 1 ]; then
+  echo "══ umbrella cascade (DRY RUN — nothing will be written) → $UMB ══"
+else
+  echo "══ umbrella cascade → $UMB ══"
+fi
 
 # (a) coordinator profile into the umbrella dir.
+if [ "$DRY_RUN" = 1 ]; then
+  echo "would install coordinator profile → $UMB/.harness/"
+  echo "would set/keep umbrella.manifest → ../umbrella.manifest.yaml (ENGAGES umbrella mode)"
+  echo "── discovering git children (depth 1) ──"
+  found_any=0
+  for child in "$UMB"/*/; do
+    [ -d "$child" ] || continue
+    name="$(basename "$child")"
+    case "$name" in .*) continue ;; .harness) continue ;; esac
+    [ -e "$child/.git" ] || continue
+    child_abs="$(CDPATH= cd -- "$child" && pwd -P)"
+    if [ "$child_abs" = "$(CDPATH= cd -- "$SRC" && pwd -P)" ]; then
+      echo "  skip  $name  (it is the harness source)"; continue
+    fi
+    found_any=1
+    if ! printf '%s' "$name" | grep -Eq '^[a-z0-9-]+$'; then
+      echo "  skip  $name  (name must match ^[a-z0-9-]+\$)"; continue
+    fi
+    echo "  would install + add manifest entry:  $name"
+  done
+  [ "$found_any" = 1 ] || echo "  (no git children found under $UMB at depth 1)"
+  echo "── end dry run — re-run without --dry-run/--list to apply ──"
+  exit 0
+fi
+
 install_one "$UMB"
 
 # Ensure the coordinator config carries an integration_command key (migration on a
@@ -569,7 +607,7 @@ if [ -z "$(_cfg_umbrella_manifest_value "$COORD_CFG")" ]; then
     }
     { print }
   ' "$COORD_CFG" > "$COORD_CFG.umtmp" && mv "$COORD_CFG.umtmp" "$COORD_CFG"
-  info "coordinator umbrella.manifest -> ../umbrella.manifest.yaml"
+  info "coordinator umbrella.manifest -> ../umbrella.manifest.yaml — UMBRELLA MODE ENGAGED (init.sh now runs the coordinator loop; unset this value to revert to single-repo)"
 fi
 
 # Locked design: the auto-populated manifest ALWAYS lives at the umbrella root

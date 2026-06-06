@@ -9,22 +9,32 @@
 # One entry per child repo. A slice whose `repo` is NOT a key under `repos:` here is
 # undispatchable: the coordinator must refuse to dispatch it and report an error that
 # names the missing repo.
+#
+# `path:` is resolved relative to THIS manifest file's own directory (the umbrella
+# root), NOT relative to .harness/. (The `umbrella.manifest` value in
+# harness.config.yaml is the one resolved relative to .harness/ — two different bases,
+# by design. See docs/UMBRELLA.md → Manifest reference.)
+#
+# `delegate_cmd:` is read ONLY under `execution.builder.backend: delegate`. Under the
+# default `backend: in-session`, the Orchestrator dispatches each slice by spawning the
+# Builder sub-agent cd'd into the child repo (no executor needed) — leave `delegate_cmd`
+# empty in that mode.
 
 repos:
   viernes-bff:
-    path: ../viernes-bff          # filesystem path to the child repo, relative to umbrella root
+    path: ../viernes-bff          # filesystem path to the child repo, relative to THIS manifest's dir
     init: ./init.sh               # that repo's own environment gate
     test_command: "npm test"      # that repo's own verification (its verification.test_command)
-    delegate_cmd: "<executor>"    # invoked as: <delegate_cmd> <feature-id> <abs-spec-path>
+    delegate_cmd: ""              # only for backend: delegate — invoked as <delegate_cmd> <feature-id> <abs-spec-path>
 
   lia-api:
     path: ../lia-api
     init: ./init.sh
     test_command: "pytest"
-    delegate_cmd: "<executor>"
+    delegate_cmd: ""              # only for backend: delegate
 
   viernes-web:
     path: ../viernes-web
     init: ./init.sh
     test_command: "npm test"
-    delegate_cmd: "<executor>"
+    delegate_cmd: ""              # only for backend: delegate

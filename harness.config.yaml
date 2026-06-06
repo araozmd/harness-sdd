@@ -70,4 +70,14 @@ verification:
 umbrella:
   # Path to the umbrella manifest (see umbrella.manifest.example.yaml). The PRESENCE
   # of this file is the umbrella-mode switch. Unset/absent ⇒ single-repo, inert.
+  #
+  # Path bases (two, by design): THIS value resolves relative to the harness dir
+  # (.harness/, which is init.sh's cwd) — so the cascade installer's default is
+  # `../umbrella.manifest.yaml` (the manifest sits at the umbrella root). Inside the
+  # manifest, each repo's `path:` resolves relative to the MANIFEST file's own dir,
+  # not to .harness/. See docs/UMBRELLA.md → Manifest reference.
+  #
+  # Dispatch backend is execution.builder.backend above: the default `in-session`
+  # drives each slice by spawning the Builder cd'd into the child repo (no executor,
+  # no per-repo delegate_cmd needed); `delegate` shells out to each repo's delegate_cmd.
   manifest: ""

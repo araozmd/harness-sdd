@@ -166,12 +166,15 @@ grep -qF 'agents/orchestrator.md' "$ROLE"   || fail "R13: role does not name orc
 grep -qF 'agents/architect.md' "$ROLE"      || fail "R13: role does not name architect.md as untouchable"
 grep -qi 'new status' "$ROLE"               || fail "R13: role does not forbid a new status value"
 if git -C "$ROOT" rev-parse --verify -q main >/dev/null 2>&1; then
-  # Inception itself must not touch these. Note: agents/architect.md and
-  # .claude/commands/sdd-next.md are intentionally edited elsewhere to WIRE the
-  # inbox brief into the Architect handoff (otherwise the brief is inert and never
-  # reaches spec generation), so they are no longer byte-locked here; the schema and
-  # orchestrator routing remain hard DO-NOT-TOUCH.
-  for f in store/tasks.schema.json agents/orchestrator.md; do
+  # That the *Inception role* must not touch orchestrator routing / the schema is
+  # enforced permanently by the role-CONTENT assertions above (it names them as
+  # untouchable and forbids a new status). A byte-freeze-vs-main, by contrast, is only
+  # meaningful while THIS feature is the only thing on the branch — post-merge it would
+  # wrongly forbid ANY later feature from editing these files (e.g. orchestrator.md must
+  # evolve for umbrella in-session dispatch). So the diff guard is scoped to the schema,
+  # which carries a genuine permanent invariant (the status enum, re-checked below);
+  # agents/orchestrator.md and agents/architect.md are intentionally NOT byte-locked.
+  for f in store/tasks.schema.json; do
     if ! git -C "$ROOT" diff --quiet main -- "$f" 2>/dev/null; then
       fail "R13: DO-NOT-TOUCH file changed vs main: $f"
     fi
