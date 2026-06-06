@@ -136,10 +136,11 @@ extension field lets a future SDK runtime populate it without reworking the form
   review round count, and any human-gate latency observed — and shall report duration,
   latency, and counts only (no token/USD figures).
 - **R25** — The system shall place the end-of-session summary instruction in the
-  **portable role-prompt surface** (`agents/orchestrator.md`) and shall express it
-  without depending on any Claude-Code-specific feature, so that any AGENTS.md-
-  compatible CLI (Claude Code, Gemini, OpenCode, Codex, Antigravity) surfaces the same
-  summary.
+  **portable role-prompt surface** (`agents/orchestrator.md`) **and** add a one-line
+  pointer to it in `AGENTS.md` (the portable contract every AGENTS.md-compatible CLI
+  reads), and shall express it without depending on any Claude-Code-specific feature, so
+  that Claude Code, Gemini, OpenCode, Codex, and Antigravity all surface the same
+  summary. *(Gate decision 2026-06-06: orchestrator.md + AGENTS.md pointer.)*
 - **R26** — The report script shall provide a `session` view (a granularity/mode
   argument) that reproduces the same per-phase durations, round count, and human-gate
   latency as the Orchestrator's end-of-session summary, so the numbers are reproducible
@@ -159,12 +160,22 @@ extension field lets a future SDK runtime populate it without reworking the form
 - Backfilling telemetry for historical runs that predate this feature.
 - Real-time streaming or alerting on telemetry.
 
+## Gate decisions — human-approved 2026-06-06
+The human resolved the two load-bearing open questions at the spec-ready gate; these
+**override** the Architect's tentative picks below:
+- **Storage (overrides Q1):** the telemetry log is **gitignored runtime data under the
+  harness dir** — `<HARNESS_DIR>/telemetry.jsonl` (resolved by `init.sh`: the repo root
+  in the harness source, `.harness/` in an installed consumer), path overridable via the
+  `telemetry:` config block. It is **local-only, never committed**. The installer seeds a
+  targeted ignore (a `.harness/.gitignore` holding `telemetry.jsonl`) so a consumer's
+  shared, committed harness body coexists with a local-only log. Telemetry is operational
+  data, not source. Accepted trade-off: reports are **per-clone**, not team-aggregated;
+  an opt-in export is deferred (out of scope).
+- **Portability surface (R25):** orchestrator.md **plus** a one-line `AGENTS.md` pointer.
+
 ## Open questions (resolved by the Architect — confirm at the gate)
-1. **Storage location & VCS** — RESOLVED: `state/telemetry.jsonl`, committed/versioned
-   alongside `state/tasks.json`. Rationale: gives cross-session history the report needs;
-   `state/` is already the harness's durable machine-state home; churn is bounded
-   (append-only, one line per phase/gate). See plan §Storage decision. *Human may prefer
-   gitignored local-only to avoid repo churn — confirm.*
+1. **Storage location & VCS** — ~~`state/telemetry.jsonl`, committed~~ **SUPERSEDED by the
+   gate decision above:** gitignored `<HARNESS_DIR>/telemetry.jsonl`, local-only.
 2. **Single writer** — RESOLVED: the Orchestrator is the sole writer (phase spans + gate
    stamps). Sub-agents do not self-stamp (fewer places to get it wrong). See plan.
 3. **Wall-clock source** — RESOLVED: system clock via `date -u` at span open/close,
