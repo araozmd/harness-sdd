@@ -25,7 +25,7 @@ pass "R1 cross_file_check_item"
 
 # ── R2: check loads the collaborators the diff references ────────────────────────
 grep -qi 'collaborators' "$REVIEWER" || fail "R2: does not mention loading collaborators"
-grep -qi 'references\|invoke' "$REVIEWER" || fail "R2: does not tie collaborators to what the diff references/invokes"
+grep -qiE 'references|invoke' "$REVIEWER" || fail "R2: does not tie collaborators to what the diff references/invokes"
 pass "R2 loads_collaborators"
 
 # ── R3: expansion scoped, curate-don't-dump ──────────────────────────────────────
@@ -51,7 +51,7 @@ pass "R6 suspected_flag_not_block"
 
 # ── R7: PR #10 worked example present ─────────────────────────────────────────────
 grep -qi 'PR #10' "$REVIEWER" || fail "R7: missing the PR #10 worked example"
-grep -qi 'never opens a PR\|open.*PR' "$REVIEWER" || fail "R7: worked example does not cite the 'Builder never opens a PR' contradiction"
+grep -qiE 'never opens a PR|open.*PR' "$REVIEWER" || fail "R7: worked example does not cite the 'Builder never opens a PR' contradiction"
 pass "R7 pr10_worked_example"
 
 # ── R8: reject ⇒ specific, actionable, file-based feedback ───────────────────────
@@ -61,7 +61,7 @@ pass "R8 actionable_file_based_feedback"
 
 # ── R9: orchestrator.md states explicit multi-round build↔review until green ─────
 [ -f "$ORCH" ] || fail "R9: $ORCH missing"
-grep -qi 're-review\|until green' "$ORCH" || fail "R9: does not state re-review / until green"
+grep -qiE 're-review|until green' "$ORCH" || fail "R9: does not state re-review / until green"
 grep -qi 'in-progress' "$ORCH" || fail "R9: does not route reject back to in-progress"
 pass "R9 explicit_multi_round"
 
@@ -73,7 +73,7 @@ pass "R10 round_recorded"
 # ── R11: docs coherent with multi-round loop (no single-pass claim) ──────────────
 # The review-phase wording in WORKFLOW.md must not present review as a single pass;
 # it should reflect the reject→in-progress→re-review loop.
-grep -qi 're-review\|repeats until green\|loop repeats' docs/WORKFLOW.md \
+grep -qiE 're-review|repeats until green|loop repeats' docs/WORKFLOW.md \
   || fail "R11: docs/WORKFLOW.md does not reflect the multi-round build↔review loop"
 pass "R11 docs_coherent"
 
