@@ -22,3 +22,7 @@ progress/*/
 # .harness/ above does NOT cover — so ignore it explicitly. (Consumers get a seeded
 # .harness/.gitignore from harness-install.sh.)
 /telemetry.jsonl
+
+# Python bytecode cruft (e.g. from running tools/telemetry-report.py locally)
+__pycache__/
+*.pyc
