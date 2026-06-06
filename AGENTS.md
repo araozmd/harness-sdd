@@ -34,6 +34,10 @@ Inception ─► Orchestrator → Architect → Builder → Reviewer    (Scout a
 5. **Minimal tools.** Prefer Bash/grep/cat/ls and the file system. Do not invent
    specialized tooling; a lean harness beats an inflated one.
 
+> **Telemetry:** the Orchestrator prints an end-of-session telemetry summary (per-phase
+> durations, build↔review rounds, human-gate latency — text-only, no tokens/USD) when it
+> wraps up; the full instruction lives in `agents/orchestrator.md` "## Telemetry".
+
 ## Where things live
 
 | Path | Purpose |

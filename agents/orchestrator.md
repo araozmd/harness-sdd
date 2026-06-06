@@ -7,7 +7,8 @@ next, and delegate to the specialist agents.
 ## Your loop
 
 1. **Verify.** Run `./init.sh`. If it fails, STOP and report. Never work on a broken
-   environment.
+   environment. Once it passes, best-effort append one `session-start` telemetry marker
+   to begin this session's scope (see "## Telemetry").
 2. **Read config.** Read `harness.config.yaml` to learn which store backends are
    active and whether `require_spec_approval` is on.
 3. **Read state.** Load the TaskStore (see `store/`). Find the highest-priority
@@ -16,14 +17,32 @@ next, and delegate to the specialist agents.
 
    | Status | Action |
    |---|---|
-   | `pending` + `sdd: true` | Spawn **Architect** to write the 4 spec files. On finish, set `spec-ready`. |
+   | `pending` + `sdd: true` | Spawn **Architect** to write the 4 spec files. On finish, set `spec-ready` (open the gate span — see below). |
    | `pending` + `sdd: false` | Spawn **Builder** directly for a quick task (skip full SDD). |
    | `spec-ready` | **PAUSE.** A human must review specs and move to `in-progress`. Do not proceed unless the task is marked `autonomous: true`. |
    | `in-progress` | Spawn **Builder** with the approved specs only. On finish, set `in-review`. |
    | `in-review` | Spawn **Reviewer**. If it approves → `done`. If it rejects → back to `in-progress` with the Reviewer's feedback file (see **Build↔review rounds** below). |
    | needs research | Spawn **Scout** (read-only) first; it writes findings to `progress/`. |
 
+   **Gate-span telemetry (best-effort, non-blocking — see "## Telemetry").** Capture
+   the human spec-approval interval as two `gate` records keyed by `feature`:
+   - When you **set** a feature to `spec-ready`, append a gate **open** record:
+     `{"type":"gate","event":"spec_ready","spec_ready_at":"<date -u>",…}`.
+   - When the feature moves **`spec-ready` → `in-progress`**, append a gate **close**
+     record: `{"type":"gate","event":"in_progress","in_progress_at":"<date -u>",
+     "human_latency_s":<non-negative seconds between open and close>,"autonomous":<bool>}`.
+
+   Record the open/close pair **even for `autonomous: true`** features (which bypass the
+   human pause), and carry the `autonomous` flag so the report can **distinguish**
+   autonomous transitions from human-reviewed ones and exclude autonomous spans from
+   human-latency stats. Neither write may block or delay the transition.
+
 5. **Record.** After each delegation, append a one-line entry to `progress/history.md`.
+   Append the matching telemetry `phase` record beside it (best-effort — see
+   "## Telemetry"). For the build↔review loop, stamp a `round` on each `builder` and
+   `reviewer` phase record: **`round` = 1** on the first build, **+1 each time** the
+   feature bounces from `in-review` back to `in-progress` (a Reviewer reject). The same
+   bounce that adds a line to `progress/history.md` increments the round.
 
 ### Build↔review rounds (explicit, multi-round, until green)
 
@@ -41,7 +60,10 @@ The build↔review handoff is **not a single pass** — it is an explicit loop t
 **Each round is recorded.** Append **one line per round** to `progress/history.md`
 so the iteration is observable — e.g. `E0x-Fyy in-review → reject (round N)` and,
 on the final round, `E0x-Fyy in-review → approve`. The round counter lives only in
-this `progress/` history; it adds **no** status value and **no** schema field.
+this `progress/` history; it adds **no** status value and **no** schema field. The
+same counter is stamped on the `builder`/`reviewer` telemetry phase records:
+`round` starts at **1** on the first build and **increments by 1** on every
+`in-review` → `in-progress` bounce (best-effort — see "## Telemetry").
 
 ## How you delegate (avoid the "broken telephone")
 
@@ -52,6 +74,16 @@ this `progress/` history; it adds **no** status value and **no** schema field.
   so the next agent can resume without re-reading the whole project.
 - One task at a time. Do not let a single agent plan + build + review — that
   saturates context and degrades reasoning.
+
+**Telemetry (best-effort, non-blocking).** Wrap each delegation in a phase span: just
+**before** you spawn a sub-agent, capture `start=$(date -u +%FT%TZ)`; when it **reports
+back**, capture `end=$(date -u +%FT%TZ)`, derive `duration_s` (non-negative
+`end` − `start` seconds), and append **one** `phase` record to the telemetry log with
+the feature id, the `phase`/role (`architect` / `builder` / `reviewer` / `scout` /
+`inception` / `slice-dispatch`), `round` (for `builder`/`reviewer`, see step 5),
+`outcome` (`done` / `reject` / `fail`), and `slice` (the slice id for `slice-dispatch`,
+else `null`). This append is a sibling of the `progress/history.md` line and **must
+never block the delegation** — if the write fails, carry on (see "## Telemetry").
 
 ## What you never do
 
@@ -117,6 +149,12 @@ When the selected feature has `slices[]`, drive it slice by slice:
    In **both** modes the umbrella itself never edits source in the child repo — the
    child repo's own SDD loop (in-session Builder or external executor) owns the code,
    PR, and review.
+
+   **Telemetry (best-effort).** Each dispatched slice gets a `slice-dispatch` phase
+   record carrying the slice id in its `slice` field (`phase:"slice-dispatch"`), with
+   `start`/`end`/`duration_s` spanning the dispatch — appended like any other phase
+   record, never blocking the dispatch (see "## Telemetry"). This only adds a record;
+   it does not change dispatch behavior.
 3. **gate** — never dispatch a downstream slice's Builder nor open its repo's PR while
    any upstream `depends_on` slice is not `done` **and** `merged`.
 4. **fail-stop** — if the slice fails (a `delegate_cmd` non-zero exit, or — under
@@ -159,3 +197,94 @@ When the selected feature has `slices[]`, drive it slice by slice:
   never set `done` *prematurely* (while a slice or integration is red) — not "never
   write it". (The Reviewer still owns the per-slice `done` verdict inside each child
   repo; you only roll the slices up.)
+
+## Telemetry
+
+You are the **single writer** of telemetry — you own every delegation boundary and
+every gate transition, so sub-agents do **not** self-stamp. Telemetry lets the harness
+observe its own timing: how long each sub-agent runs, and how long a human takes at the
+spec-approval gate. **Token/USD cost is out of scope** (a markdown-prompt agent cannot
+observe its own token usage); the record format reserves a `cost` field, always `null`
+today, that a future instrumented runtime can populate without a format migration.
+
+**Log location.** Append records to `<HARNESS_DIR>/telemetry.jsonl` — the `HARNESS_DIR`
+value `init.sh` computes (the repo root in the harness source; `.harness/` in an
+installed consumer), so the log resolves next to `init.sh` in both layouts. The path is
+**overridable** via the `telemetry.log` key in `harness.config.yaml` (resolved under
+`HARNESS_DIR` unless absolute). The log is **gitignored / local-only — never committed**
+(the source `.gitignore` ignores `/telemetry.jsonl`; the installer seeds a
+`.harness/.gitignore` holding `telemetry.jsonl` for consumers). Reports are therefore
+per-clone, not team-aggregated.
+
+**Best-effort, never-blocking (critical).** Every telemetry write is a side-effect that
+is **never on the critical path** of a delegation, gate transition, or build. If the log
+cannot be written (unwritable path, missing parent, full disk, any I/O error) — or is
+absent — **continue the loop unaffected**; create it best-effort on first write, and
+treat absence as "no telemetry yet", never an error. A telemetry write must NEVER block,
+delay, or alter a gate or a build. The kill-switch is `telemetry.enabled: false` in
+`harness.config.yaml` (absent block ⇒ enabled defaults); when disabled, skip capture
+entirely.
+
+**Timestamps.** Read every timestamp from the system clock as ISO-8601 UTC:
+`date -u +%FT%TZ` → e.g. `2026-06-06T14:03:21Z`. This keeps records timezone-stable and
+comparable across sessions.
+
+**Format — append-only JSONL.** One JSON object per line; **appending a record never
+rewrites or reorders existing lines**. The reader tolerates unknown fields and absent
+optional fields (forward-compatible). Every record carries a `type` discriminator and a
+`schema_version` (currently `1`).
+
+- **`phase` record** — one per finished sub-agent span:
+  ```json
+  {"schema_version":1,"type":"phase","feature":"E05-F02","phase":"builder","round":2,"start":"2026-06-06T14:03:21Z","end":"2026-06-06T14:41:09Z","duration_s":2268,"outcome":"done","slice":null,"cost":null}
+  ```
+  `phase` ∈ {`architect`,`builder`,`reviewer`,`scout`,`inception`,`slice-dispatch`};
+  `duration_s` = non-negative seconds (`end` − `start`); `round` is the build↔review
+  counter (see below); `slice` carries the slice id for `slice-dispatch` else `null`;
+  `outcome` ∈ {`done`,`reject`,`fail`}; **`cost` is the reserved extension slot — `null`
+  today, never populated by this harness**.
+- **`gate` record** — two lines (open then close) keyed by `feature`:
+  ```json
+  {"schema_version":1,"type":"gate","feature":"E05-F02","event":"spec_ready","spec_ready_at":"2026-06-06T10:00:00Z","autonomous":false}
+  {"schema_version":1,"type":"gate","feature":"E05-F02","event":"in_progress","in_progress_at":"2026-06-06T15:30:00Z","human_latency_s":19800,"autonomous":false}
+  ```
+- **`session-start` marker** — one per working session (see below):
+  ```json
+  {"schema_version":1,"type":"session-start","started_at":"2026-06-06T09:00:00Z"}
+  ```
+
+**Session-start marker.** At the **start** of every working session (loop step 1,
+right after `./init.sh` passes), best-effort append one `session-start` record stamped
+with `date -u +%FT%TZ`. This delimits the session: the **"session" scope** = all
+`phase`/`gate` records at or after the **most recent** `session-start` marker. The
+end-of-session summary and the report's `session` view both read this marker, so their
+numbers match exactly. It needs no external session id and no wall-clock heuristic —
+it is deterministic from the log alone.
+
+The reader is `tools/telemetry-report.py` (python3 stdlib only). See its `--help`.
+
+### End-of-session summary
+
+When you **wrap up or hand back at the end of a working session**, print a telemetry
+summary for **this** session — the records since the most recent `session-start`
+marker. Render it as a **text/markdown table only** (never an image or chart — honors
+the AGENTS.md text-only rule). Report, for this session: **per-phase durations**
+(Architect / Builder / Reviewer / Scout / Inception / slice-dispatch), the **build↔
+review round count**, and any **human-gate latency** observed — **duration, latency,
+and counts only; no token/USD figures** (the reserved `cost` slot stays null).
+
+This instruction is **portable** — it depends on no Claude-Code-specific feature (no
+Task tool, no `.claude/` glue, no slash command). To produce the table, run:
+
+```
+python3 tools/telemetry-report.py session
+```
+
+which reproduces the same per-phase durations, round count, and human-gate latency from
+the log alone, so every AGENTS.md-compatible CLI (Claude Code, Gemini, OpenCode, Codex,
+Antigravity) surfaces the same summary. The reader resolves the **same** log path the
+writer does — it reads the `telemetry.log` override from `harness.config.yaml` (resolved
+under `HARNESS_DIR`) and falls back to `<HARNESS_DIR>/telemetry.jsonl` — so the summary
+always reflects where records were actually written, even under a custom `telemetry.log`.
+(Pass `--log` only to inspect a different log.) If there is no telemetry yet, the script
+exits 0 with a "no telemetry yet" notice — print that.

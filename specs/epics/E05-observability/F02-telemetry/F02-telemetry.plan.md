@@ -67,21 +67,39 @@ scope to records at or after the **most recent** marker:
 - Cost stays out (R27 → reuses the reserved `cost` slot, R20): the session summary shows
   duration + latency + counts only.
 
-## Storage decision  (serves: R12, R13, R8, R9)
+## Storage decision  (serves: R12, R13, R8, R9, R11)
 
-**`state/telemetry.jsonl`, committed/versioned** alongside `state/tasks.json`.
+**Gitignored runtime data under the harness dir — `<HARNESS_DIR>/telemetry.jsonl`,
+local-only, never committed.** *(Human gate decision 2026-06-06; supersedes the earlier
+tentative `state/telemetry.jsonl`-committed pick.)*
 
-Resolves brief open-question #1. Rationale:
-- `state/` is already the harness's durable machine-state home (`state/tasks.json`); the
-  report needs **cross-session** history, which a committed file gives for free.
-- Append-only, one line per phase/gate → bounded, low-noise churn (not per-keystroke).
-- The report reads exactly this path; keeping it versioned means the report works on a
-  fresh clone without a separate data-sync step.
-- **Trade-off / human confirm:** committed = repo churn on every run. If the human
-  prefers no churn, the alternative is gitignored local-only (`state/telemetry.jsonl` in
-  `.gitignore`) — same path, the writer/reader are identical, only the VCS treatment
-  changes. Flagged for the gate. (Do NOT add it to the installer's tracked body either
-  way — it is runtime state, like `state/tasks.json`, seeded empty.)
+`HARNESS_DIR` is the value `init.sh` already computes (`init.sh` line 14:
+`HARNESS_DIR="$(… dirname "$0" … pwd)"`): the **repo root** when running from the harness
+source, and **`.harness/`** in an installed consumer. So the log resolves to
+`telemetry.jsonl` next to `init.sh` in both layouts, with no new path logic. The path is
+**overridable** via the `telemetry:` config block (`log:`, see Config below).
+
+Rationale:
+- Telemetry is **operational data, not source** — it must never churn the repo or land in
+  a consumer's shared, committed harness body.
+- Resolving against `HARNESS_DIR` reuses the one path `init.sh` already establishes; the
+  writer (Orchestrator) and reader (`telemetry-report.py`) share the same default, and
+  `--log` / the `telemetry.log` config key override it.
+- **Local-only, never committed.** Two ignore seeds keep it out of VCS in both layouts:
+  1. **Harness source** runs from the repo root, where `<HARNESS_DIR>/telemetry.jsonl`
+     = `./telemetry.jsonl`. The source `.gitignore` already ignores `.harness/` but NOT a
+     root-level log, so add an **explicit ignore** for the source telemetry log path
+     (`/telemetry.jsonl`).
+  2. **Installed consumer** runs from `.harness/`, so the log is `.harness/telemetry.jsonl`
+     — inside the harness body the consumer **commits and shares**. A blanket parent ignore
+     would over-exclude, so the **installer (`harness-install.sh`) seeds a targeted ignore**:
+     it writes/ensures a `.harness/.gitignore` containing `telemetry.jsonl` (seed-once,
+     never clobbered — like `init.project.sh`). This lets the committed harness body coexist
+     with a local-only telemetry log.
+- **Accepted trade-off (per gate decision):** reports are **per-clone**, not
+  team-aggregated; an opt-in export is deferred (out of scope).
+- Do NOT add `telemetry.jsonl` to the installer's tracked/copied body — it is runtime
+  data, seeded empty or created best-effort on first write (R12), never shipped.
 
 ## Single-writer model  (serves: R1, R8, R9, R11)
 
@@ -104,7 +122,7 @@ say capture is best-effort and non-blocking (R11, R12).
 | `agents/orchestrator.md` — "How you delegate" section | Add a "Telemetry (best-effort)" paragraph: before spawning any sub-agent, capture `start=$(date -u +%FT%TZ)`; when it reports back, capture `end`, derive `duration_s`, and append one `phase` record (feature, phase/role, round, outcome). Never block the delegation on a telemetry write failure. | R1–R5, R11, R12 |
 | `agents/orchestrator.md` — "Your loop" step 5 (Record) | Note that the telemetry append is a sibling of the `progress/history.md` append, and that for build↔review cycles the `round` increments each `in-review`→`in-progress` bounce. | R6 |
 | `agents/orchestrator.md` — Umbrella "dispatch" step | Add: each dispatched slice gets a `slice-dispatch` phase record carrying the slice id. | R7 |
-| `agents/orchestrator.md` — a new short "## Telemetry" section | Define the JSONL record shapes (link the schema), the `state/telemetry.jsonl` path, the `date -u` source, the best-effort rule, and the `tools/telemetry-report.py` reader. Single source of the contract the loop edits reference. | R2, R3, R19, R20, R21 |
+| `agents/orchestrator.md` — a new short "## Telemetry" section | Define the JSONL record shapes (link the schema), the log path (`<HARNESS_DIR>/telemetry.jsonl`, gitignored/local-only, overridable via the `telemetry.log` config key), the `date -u` source, the best-effort rule, and the `tools/telemetry-report.py` reader. Single source of the contract the loop edits reference. | R2, R3, R19, R20, R21 |
 | `agents/orchestrator.md` — "Your loop" step 1 (Verify) **or** the new "## Telemetry" section | Add: at the **start** of a session, append one `session-start` marker record (`date -u` stamp). Best-effort. This delimits the session scope used by the end-of-session summary and the report's `session` view. | R27 |
 | `agents/orchestrator.md` — a new "### End-of-session summary" subsection under "## Telemetry" (portable surface) | Add: when the Orchestrator **wraps / hands back at the end of a session**, it prints a **text/markdown table** summarizing this session — per-phase durations, build↔review round count, human-gate latency observed — derived from telemetry records since the most recent `session-start` marker. **Duration + latency + counts only; no tokens/USD (reuses the reserved `cost` slot, R20).** Phrase it portably (plain prose + `python3 tools/telemetry-report.py session`), with **no** dependency on any Claude-Code-specific feature, so every AGENTS.md-compatible CLI surfaces the same summary. No images. | R22, R23, R24, R25, R26 |
 
@@ -119,7 +137,7 @@ prefer leaving them untouched.
 
 | Aspect | Decision | R-id |
 |---|---|---|
-| Invocation | `python3 tools/telemetry-report.py [granularity] [--log PATH]`; default log `state/telemetry.jsonl`. | R13, R14 |
+| Invocation | `python3 tools/telemetry-report.py [granularity] [--log PATH]`; default log `<HARNESS_DIR>/telemetry.jsonl` (resolved relative to the report script / the `telemetry.log` config key), overridable via `--log`. | R13, R14 |
 | Granularity arg | One of `daily weekly monthly quarterly semester annual`; `semester` = half-year (H1 Jan–Jun, H2 Jul–Dec); `quarterly` = calendar quarters. | R14 |
 | No arg | Print an all-granularity summary (each granularity's latest period or a documented default), exit 0. | R15 |
 | Per-period rows | Total autonomous agent time (sum `duration_s` over phase records), per-phase breakdown, phase count, mean + median `human_latency_s` (over gate close records, excluding `autonomous:true`). | R16, R10 |
@@ -130,12 +148,18 @@ prefer leaving them untouched.
 | `session` view | Accept `session` as a granularity/mode arg: scope to records at or after the most recent `session-start` marker (R27) and emit per-phase durations, build↔review round count, and mean/observed human-gate latency — **the same numbers the Orchestrator prints at end-of-session** (R26). Duration + latency + counts only; ignore `cost`. | R26, R22, R24, R27 |
 
 ### Portability note  (serves: R25)
+*(Human gate decision 2026-06-06: the portability surface is `orchestrator.md` **plus** a
+one-line `AGENTS.md` pointer.)*
+
 The end-of-session summary instruction lives in `agents/orchestrator.md` — a **portable
 role prompt** read by every AGENTS.md-compatible CLI — and is phrased in plain prose +
 `python3 tools/telemetry-report.py session`, with **no** Claude-Code-specific feature
-(no Task tool, no `.claude/` glue, no slash command) on the critical path. `AGENTS.md`
-already names `agents/*.md` as the canonical portable role prompts, so no `AGENTS.md`
-edit is required; the instruction is portable by virtue of living in `orchestrator.md`.
+(no Task tool, no `.claude/` glue, no slash command) on the critical path. In addition, a
+**one-line pointer is added to `AGENTS.md`** noting that the Orchestrator prints an
+end-of-session telemetry summary (per the `agents/orchestrator.md` "## Telemetry"
+section). This makes the summary discoverable from the portable contract every
+AGENTS.md-compatible CLI reads first, without duplicating the full instruction. The
+pointer is a single line; the authoritative instruction stays in `orchestrator.md`.
 
 ## Config  (serves: R11, R13)
 
@@ -144,20 +168,26 @@ Orchestrator; safe defaults so existing targets are unaffected):
 ```yaml
 telemetry:
   enabled: true                 # false ⇒ Orchestrator skips capture entirely
-  log: state/telemetry.jsonl    # writer + report default path
+  log: telemetry.jsonl          # writer + report default path, resolved under HARNESS_DIR;
+                                # gitignored / local-only, never committed.
   # cost accounting is OUT of scope; the `cost` record field is reserved for a future
   # instrumented SDK runtime and is null today.
 ```
 `enabled: false` is the documented kill-switch; absence of the block ⇒ defaults above
-(enabled). The report script accepts `--log` so it never hard-codes the path.
+(enabled, log `<HARNESS_DIR>/telemetry.jsonl`). `log:` is resolved relative to
+`HARNESS_DIR` (the value `init.sh` computes) unless given as an absolute path; the report
+script accepts `--log` so it never hard-codes the path.
 
 ## Files to change / create  (serves: R#)
 | File | Change | R-id |
 |---|---|---|
-| `agents/orchestrator.md` | modify: add "## Telemetry" section + the capture edits in the loop/delegate/umbrella sections (table above), the `session-start` marker, and the portable "### End-of-session summary" subsection | R1–R12, R19–R27 |
-| `tools/telemetry-report.py` | create: zero-dep JSONL rollup reporter, incl. the `session` view (R26) | R13–R18, R26 |
-| `harness.config.yaml` | modify: add optional `telemetry:` block | R11, R13 |
-| `state/telemetry.jsonl` | create (seed empty, or rely on best-effort create-on-first-write) | R12 |
+| `agents/orchestrator.md` | modify: add "## Telemetry" section + the capture edits in the loop/delegate/umbrella sections (table above), the `session-start` marker, and the portable "### End-of-session summary" subsection. State the log path as `<HARNESS_DIR>/telemetry.jsonl` (gitignored / local-only). | R1–R12, R19–R27 |
+| `AGENTS.md` | modify: add a **one-line pointer** that the Orchestrator prints an end-of-session telemetry summary (full instruction in `agents/orchestrator.md` "## Telemetry"). Per gate decision 2026-06-06. | R25 |
+| `tools/telemetry-report.py` | create: zero-dep JSONL rollup reporter, incl. the `session` view (R26); default log resolved under `HARNESS_DIR`, `--log` override | R13–R18, R26 |
+| `harness.config.yaml` | modify: add optional `telemetry:` block (default `log: telemetry.jsonl` under `HARNESS_DIR`) | R11, R13 |
+| `.gitignore` (harness source) | modify: add an explicit ignore for the source telemetry log path (`/telemetry.jsonl`) — the source runs from the repo root, where `.harness/` is already ignored but a root-level log is not | R11 |
+| `harness-install.sh` | modify: seed a targeted ignore for consumers — write/ensure `.harness/.gitignore` contains `telemetry.jsonl` (seed-once, never clobber, in the "project workspace seed" section) so the committed harness body coexists with a local-only log | R11 |
+| `telemetry.jsonl` (under `HARNESS_DIR`) | runtime data — NOT created/seeded in the tracked body; best-effort create-on-first-write (R12); gitignored | R12 |
 | `tests/test_telemetry.sh` | create: full R-id traceability suite | all |
 | `harness.config.yaml` `verification.test_command` | modify: append `&& sh tests/test_telemetry.sh` | all (CI wiring) |
 | `VERSION` | modify: MINOR bump (new backward-compatible capability ✨) | — |
@@ -165,14 +195,15 @@ telemetry:
 
 ## DO NOT TOUCH
 - The existing R1–R21 requirements and their resolved decisions, record shapes
-  (`phase`/`gate`), the `state/telemetry.jsonl` path, the single-writer model, and the
-  granularity arg set (`daily…annual`). The session work (R22–R27) is **additive**:
-  add a `session-start` record type and a `session` report mode; do NOT renumber,
-  rewrite, or alter any existing R-id, record field, or report granularity.
-- `AGENTS.md` — no edit required for R25. The portable surface for the summary
-  instruction is `agents/orchestrator.md` (which `AGENTS.md` already names canonical);
-  do NOT duplicate the instruction into `AGENTS.md`. Only touch `AGENTS.md` if the
-  Builder finds the portability claim genuinely needs a one-line pointer there.
+  (`phase`/`gate`), the single-writer model, and the granularity arg set
+  (`daily…annual`). The session work (R22–R27) is **additive**: add a `session-start`
+  record type and a `session` report mode; do NOT renumber, rewrite, or alter any
+  existing R-id, record field, or report granularity. (NOTE: the storage **path** is
+  NOT locked — the gate decision moved it from `state/telemetry.jsonl`-committed to
+  `<HARNESS_DIR>/telemetry.jsonl` gitignored/local-only; use the new path everywhere.)
+- `AGENTS.md` — touch it **only** for the one-line end-of-session-summary pointer
+  mandated by the gate decision (R25). Do NOT duplicate the full instruction into
+  `AGENTS.md`; the authoritative instruction stays in `agents/orchestrator.md`.
 - The reserved `cost` slot (R20) — the session summary reuses it as-is (null today);
   do NOT add token/USD computation for the session view (R24, R27 keep cost OUT).
 - `state/tasks.json` — TaskStore routing state; telemetry is a *separate* file.

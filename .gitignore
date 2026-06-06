@@ -16,3 +16,9 @@ progress/*/
 
 # Never commit a self-install of the harness into its own source repo.
 .harness/
+
+# Telemetry is local-only runtime data, never committed. The harness source runs from
+# the repo root, where <HARNESS_DIR>/telemetry.jsonl resolves to a root-level log that
+# .harness/ above does NOT cover — so ignore it explicitly. (Consumers get a seeded
+# .harness/.gitignore from harness-install.sh.)
+/telemetry.jsonl

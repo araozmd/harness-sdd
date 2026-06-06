@@ -22,6 +22,8 @@
 | R9 | in_progress close + human_latency_s | `tests/test_telemetry.sh::gate_latency` (fixture open 10:00 + close 15:30 → report mean latency = 19800s) | behavioral | ⬜ |
 | R10 | autonomous distinguishable / excluded | `tests/test_telemetry.sh::autonomous_excluded` (fixture has 1 autonomous + 1 human gate close → human-latency stats use only the human one) | behavioral | ⬜ |
 | R11 | unwritable log never blocks | `tests/test_telemetry.sh::best_effort_prose` (grep orchestrator for best-effort/never-block); report run against read-only/garbage path exits 0 | static+behavioral | ⬜ |
+| R11 | telemetry log path is gitignored (source) | `tests/test_telemetry.sh::source_gitignore_ignores_log` (assert the harness source `.gitignore` ignores the telemetry log path `/telemetry.jsonl`; `git check-ignore`-style or grep) | static | ⬜ |
+| R11 | installer seeds consumer ignore | `tests/test_telemetry.sh::installer_seeds_harness_gitignore` (grep `harness-install.sh` that it writes/ensures `telemetry.jsonl` into a `.harness/.gitignore`, seed-once / never-clobber) | static | ⬜ |
 | R12 | absent log auto-handled, not an error | `tests/test_telemetry.sh::absent_log_noop` (run report with a non-existent log → exit 0 + "no telemetry" notice) | behavioral | ⬜ |
 | R13 | zero-dep report script exists | `tests/test_telemetry.sh::report_script_exists` (`tools/telemetry-report.py` present; `python3` runs it; no non-stdlib imports grep) | static+behavioral | ⬜ |
 | R14 | all six granularities supported | `tests/test_telemetry.sh::granularities` (loop daily weekly monthly quarterly semester annual → each exits 0 + emits a table) | behavioral | ⬜ |
@@ -36,12 +38,14 @@
 | R23 | summary is text/markdown table, no image | `tests/test_telemetry.sh::session_summary_text_only` (`session` report output is a markdown table; grep orchestrator prose for "table"/"text-only"/no-image; assert no image/binary directive) | static+behavioral | ⬜ |
 | R24 | summary = per-phase durations + round count + gate latency, no tokens/USD | `tests/test_telemetry.sh::session_metrics` (fixture session → `session` view shows per-phase durations, build↔review round count, human-gate latency; assert output contains NO token/USD/cost figure) | behavioral | ⬜ |
 | R25 | instruction is portable, no Claude-only dep | `tests/test_telemetry.sh::session_summary_portable` (the instruction lives in `agents/orchestrator.md`; grep that it invokes `python3 tools/telemetry-report.py session` and does NOT depend on a Claude-Code-only feature — no Task tool / `.claude/` / slash command on the path) | static | ⬜ |
+| R25 | AGENTS.md pointer present | `tests/test_telemetry.sh::agents_md_summary_pointer` (grep `AGENTS.md` for the one-line end-of-session-summary pointer referencing `agents/orchestrator.md` / its "## Telemetry" section) | static | ⬜ |
 | R26 | `session` report view reproduces the summary numbers | `tests/test_telemetry.sh::session_view_reproducible` (fixture with a session-start marker + known phase/gate records → `telemetry-report.py session` exits 0 and emits per-phase durations, round count, mean/observed latency matching hand-computed values) | behavioral | ⬜ |
 | R27 | session-start marker scopes the session | `tests/test_telemetry.sh::session_marker_scope` (fixture with records before AND after the latest `session-start` marker → `session` view counts only at/after the marker; orchestrator prose appends the marker at session start; reuses reserved `cost` slot, no token/USD) | static+behavioral | ⬜ |
 
 ## Behavioral / end-to-end checks
-- **Fixture-driven rollup:** the test writes a deterministic `state/telemetry.jsonl`
-  fixture (or a temp log via `--log`) containing several phase records across known
+- **Fixture-driven rollup:** the test writes a deterministic telemetry-log fixture to a
+  temp path via `--log` (never the real `<HARNESS_DIR>/telemetry.jsonl`) containing
+  several phase records across known
   dates and a gate open/close pair, runs `tools/telemetry-report.py weekly` (and the
   other granularities), and asserts the totals, counts, per-phase breakdown, and
   mean/median human latency match hand-computed values.
@@ -52,8 +56,16 @@
   the "## Telemetry" section, the delegate-boundary phase capture, the
   `spec-ready`/`in-progress` gate stamps, the `slice-dispatch` record, the
   round-increment rule, `date -u`, the best-effort/never-block wording, the
+  `<HARNESS_DIR>/telemetry.jsonl` gitignored/local-only log path, the
   `session-start` marker (R27), and the portable "### End-of-session summary"
   instruction (R22–R25) invoking `python3 tools/telemetry-report.py session`.
+- **Storage / local-only (R11):** assert the harness source `.gitignore` ignores the
+  telemetry log path (`/telemetry.jsonl`), and grep `harness-install.sh` that it seeds
+  `telemetry.jsonl` into a `.harness/.gitignore` (seed-once / never-clobber) so a
+  consumer's committed harness body coexists with a local-only log. The log is never
+  added to the tracked/copied body.
+- **AGENTS.md pointer (R25):** grep `AGENTS.md` for the one-line end-of-session-summary
+  pointer that references `agents/orchestrator.md` (full instruction lives there).
 - **Session view (R26, R27):** the test writes a fixture log containing an older
   `session-start` marker + stale records, a newer `session-start` marker, then phase
   records (across phases, with a round-2 builder/reviewer pair) and a gate open/close
@@ -67,6 +79,9 @@
   (grep for disallowed third-party imports).
 - `./init.sh` stays green and is NOT extended with telemetry capture (best-effort, off
   the critical path).
+- The telemetry log is gitignored / local-only in both layouts: source `.gitignore`
+  ignores `/telemetry.jsonl`; the installer seeds `telemetry.jsonl` into a
+  `.harness/.gitignore`. The log is never committed and never part of the tracked body.
 - New suite wired into `harness.config.yaml` → `verification.test_command`.
 - Lint: `<lint_command>` clean (none configured).
 - Types: `<typecheck_command>` clean (none configured).

@@ -4,6 +4,41 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.7.0] — 2026-06-06
+
+### Added — ✨ Sub-agent & human-gate telemetry with rollup reports (E05-F02)
+- **Telemetry contract (`agents/orchestrator.md` "## Telemetry").** The Orchestrator —
+  the single writer — now appends structured, best-effort, append-only JSONL records at
+  every delegation boundary and gate transition: a `phase` record per sub-agent span
+  (`architect`/`builder`/`reviewer`/`scout`/`inception`/`slice-dispatch`) with
+  `start`/`end`/`duration_s`/`outcome`/`round`/`slice`, a two-line `gate` open/close pair
+  carrying `human_latency_s` (the human spec-approval interval, with an `autonomous` flag),
+  and a `session-start` marker delimiting each session. Timestamps are ISO-8601 UTC via
+  `date -u`. Capture is **never on the critical path** — a failed/absent write never
+  blocks a gate or build. Token/USD accounting is **out of scope**; a reserved `cost`
+  field (null today) lets a future instrumented runtime populate it without a format
+  migration.
+- **Storage = local-only runtime data.** The log resolves to `<HARNESS_DIR>/telemetry.jsonl`
+  (overridable via the new optional `telemetry:` block in `harness.config.yaml`;
+  `enabled: false` is the kill-switch). It is **gitignored / never committed**: the source
+  `.gitignore` ignores `/telemetry.jsonl`, and `harness-install.sh` seeds a targeted
+  `.harness/.gitignore` (containing `telemetry.jsonl`, seed-once / never clobbered) so a
+  consumer's committed harness body coexists with a local-only log.
+- **Report script (`tools/telemetry-report.py`, python3 stdlib only).** Reads the JSONL
+  log and emits text/markdown rollup tables at `daily`/`weekly`/`monthly`/`quarterly`/
+  `semester`/`annual` granularity (default: an all-granularity summary), plus a `session`
+  view scoped to the latest `session-start` marker that reproduces the Orchestrator's
+  end-of-session summary (per-phase durations, build↔review round count, mean/median
+  human-gate latency excluding autonomous transitions). Malformed lines are skipped; an
+  absent/empty log exits 0 with a "no telemetry yet" notice.
+- **Portable end-of-session summary.** The summary instruction lives in
+  `agents/orchestrator.md` (plain prose + `python3 tools/telemetry-report.py session`,
+  no Claude-Code-specific dependency) with a one-line pointer in `AGENTS.md`, so every
+  AGENTS.md-compatible CLI surfaces the same text-only table.
+- **Tests:** `tests/test_telemetry.sh` covering R1–R27 (fixture-driven rollups, best-
+  effort/empty no-op, schema/format, the two gitignores, the AGENTS.md pointer), wired
+  into `verification.test_command`.
+
 ## [0.6.0] — 2026-06-06
 
 ### Added — Reviewer cross-file consistency + explicit build↔review rounds
