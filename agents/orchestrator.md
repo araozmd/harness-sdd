@@ -282,5 +282,9 @@ python3 tools/telemetry-report.py session
 
 which reproduces the same per-phase durations, round count, and human-gate latency from
 the log alone, so every AGENTS.md-compatible CLI (Claude Code, Gemini, OpenCode, Codex,
-Antigravity) surfaces the same summary. If there is no telemetry yet, the script exits 0
-with a "no telemetry yet" notice — print that.
+Antigravity) surfaces the same summary. The reader resolves the **same** log path the
+writer does — it reads the `telemetry.log` override from `harness.config.yaml` (resolved
+under `HARNESS_DIR`) and falls back to `<HARNESS_DIR>/telemetry.jsonl` — so the summary
+always reflects where records were actually written, even under a custom `telemetry.log`.
+(Pass `--log` only to inspect a different log.) If there is no telemetry yet, the script
+exits 0 with a "no telemetry yet" notice — print that.

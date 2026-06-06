@@ -22,6 +22,7 @@ with --log. An absent or empty log exits 0 with a "no telemetry yet" notice.
 import argparse
 import json
 import os
+import re
 import statistics
 import sys
 from datetime import datetime, timezone
@@ -31,12 +32,47 @@ GRANULARITIES = ["daily", "weekly", "monthly", "quarterly", "semester", "annual"
 NO_DATA = "no telemetry yet"
 
 
-def default_log_path():
-    """<HARNESS_DIR>/telemetry.jsonl — HARNESS_DIR is this script's grandparent dir
-    (tools/ lives under the harness root, beside init.sh)."""
+def _harness_dir():
+    """HARNESS_DIR is this script's grandparent dir (tools/ lives under the harness
+    root, beside init.sh and harness.config.yaml)."""
     here = os.path.dirname(os.path.abspath(__file__))
-    harness_dir = os.path.dirname(here)  # tools/ -> harness root
-    return os.path.join(harness_dir, "telemetry.jsonl")
+    return os.path.dirname(here)  # tools/ -> harness root
+
+
+def _configured_log(harness_dir):
+    """The `telemetry.log` override from harness.config.yaml, or None. Scoped to the
+    top-level `telemetry:` block (so an unrelated `log:` elsewhere is never matched),
+    mirroring how the writer (agents/orchestrator.md) resolves it. Zero-dep: a minimal
+    regex parse, no YAML library. Resolved under HARNESS_DIR unless absolute."""
+    cfg = os.path.join(harness_dir, "harness.config.yaml")
+    try:
+        with open(cfg) as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    in_telemetry = False
+    for ln in lines:
+        if re.match(r"^telemetry:\s*(#.*)?$", ln):
+            in_telemetry = True
+            continue
+        if in_telemetry and re.match(r"^[^\s#]", ln):  # next top-level key ends the block
+            break
+        if in_telemetry:
+            m = re.match(r"^\s+log:\s*\"?([^\"#\n]*)\"?", ln)
+            if m:
+                val = m.group(1).strip()
+                if not val:
+                    return None
+                return val if os.path.isabs(val) else os.path.join(harness_dir, val)
+    return None
+
+
+def default_log_path():
+    """The reader resolves the SAME path the writer does: the configured
+    `telemetry.log` if set, else <HARNESS_DIR>/telemetry.jsonl. This keeps the
+    end-of-session summary and the writer in sync even under a config override."""
+    harness_dir = _harness_dir()
+    return _configured_log(harness_dir) or os.path.join(harness_dir, "telemetry.jsonl")
 
 
 def parse_ts(value):

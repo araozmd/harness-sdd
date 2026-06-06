@@ -50,7 +50,7 @@ command -v python3 >/dev/null 2>&1 || fail "R13: python3 not available to run th
 python3 "$REPORT" --help >/dev/null 2>&1 || fail "R13: report --help failed"
 # No third-party imports: every `import X` / `from X import` must be a stdlib module.
 _bad="$(grep -E '^[[:space:]]*(import|from)[[:space:]]+' "$REPORT" \
-  | grep -Ev '\b(argparse|json|os|statistics|sys|datetime)\b' || true)"
+  | grep -Ev '\b(argparse|json|os|re|statistics|sys|datetime)\b' || true)"
 [ -z "$_bad" ] || fail "R13: non-stdlib import found: $_bad"
 pass "R13 report_script_exists"
 
@@ -302,6 +302,26 @@ printf '%s\n' "$_out" | grep -qE '^\| architect \| 1 \|' \
 grep -qF 'session-start' "$ORCH" || fail "R27: orchestrator does not append a session-start marker"
 grep -qiE 'most recent|latest' "$ORCH" || fail "R27: orchestrator does not scope to the most-recent marker"
 pass "R27 session_marker_scope"
+
+# ── R26/R22: reader honors a CONFIGURED telemetry.log (reader/writer agreement) ──
+# Regression for PR #12 Codex r1: the end-of-session summary must read the SAME path
+# the writer uses, including a non-default `telemetry.log` override — otherwise the
+# wrap-up shows "no telemetry yet" even though the session was captured. Build a temp
+# harness layout with a custom log path and confirm the bare `session` run (no --log)
+# reads it.
+_TH="$(mktemp -d)"
+mkdir -p "$_TH/tools" "$_TH/custom"
+cp "$REPORT" "$_TH/tools/telemetry-report.py"
+printf 'telemetry:\n  enabled: true\n  log: custom/my.jsonl\n' > "$_TH/harness.config.yaml"
+printf '%s\n' \
+  '{"type":"session-start","started_at":"2026-06-06T10:00:00Z","schema_version":1}' \
+  '{"type":"phase","phase":"builder","start":"2026-06-06T10:00:00Z","duration_s":300,"round":1,"cost":null,"schema_version":1}' \
+  > "$_TH/custom/my.jsonl"
+_cfgout="$(python3 "$_TH/tools/telemetry-report.py" session)"   # NO --log on purpose
+printf '%s\n' "$_cfgout" | grep -qF 'Total autonomous agent time: 300s' \
+  || fail "R26: reader ignored configured telemetry.log override (got: $(printf '%s' "$_cfgout" | head -1))"
+rm -rf "$_TH"
+pass "R26 reader_honors_configured_log"
 
 # ── Config + CI wiring sanity ────────────────────────────────────────────────────
 grep -qE '^telemetry:' "$CONFIG" || fail "config: telemetry block missing"
