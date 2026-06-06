@@ -12,11 +12,15 @@ because the harness is just files in the repo, and the model/CLI is interchangea
 An interactive **intake** (Inception) turns a raw idea into a seeded `pending` task;
 from there the roles move it through files, each in a clean context:
 
-```
- /sdd-new                       /sdd-next
-  idea → Inception → pending → Orchestrator → Architect → Builder → Reviewer
-         (intake)                  state         specs       code      verify
-                                              (Scout = read-only recon)
+```mermaid
+flowchart LR
+    idea(["raw idea"]) -->|/sdd-new| Inception["Inception<br/>(intake)"]
+    Inception --> pending["pending<br/>(task)"]
+    pending -->|/sdd-next| Orchestrator["Orchestrator<br/>(state)"]
+    Orchestrator --> Architect["Architect<br/>(specs)"]
+    Architect --> Builder["Builder<br/>(code)"]
+    Builder --> Reviewer["Reviewer<br/>(verify)"]
+    Scout["Scout<br/>(read-only recon)"] -.assists.-> Orchestrator
 ```
 
 Specs follow a **Product → Epic → Feature** hierarchy, where each feature is a

@@ -7,12 +7,11 @@ entry. That is **Inception**'s job (`agents/inception.md`), driven by the `/sdd-
 slash command. A human runs `/sdd-new "<idea>"`, answers a short adaptive Q&A, and
 Inception seeds the state machine below:
 
-```
-  /sdd-new "<idea>"  ─►  [Inception]  ─►  pending entry in state/tasks.json
-   (raw idea)           (triage +          + progress/inbox/<id>.md brief
-                         allocate id)              │
-                                                   ▼
-                                          (state machine below)
+```mermaid
+flowchart LR
+    idea["/sdd-new #quot;#lt;idea#gt;#quot;<br/>(raw idea)"] --> inception["Inception<br/>(triage + allocate id)"]
+    inception --> entry["pending entry in state/tasks.json<br/>+ progress/inbox/#lt;id#gt;.md brief"]
+    entry --> sm(["state machine below"])
 ```
 
 Inception **seeds; it never specs** — it writes only a `pending` entry plus the
@@ -29,33 +28,21 @@ generation.
 A feature moves through these states. The Orchestrator routes on the current state;
 the human gate sits between `spec-ready` and `in-progress`.
 
-```
-                 ┌─────────┐
-                 │ pending │
-                 └────┬────┘
-        sdd:true      │      sdd:false (quick task)
-        ┌─────────────┴──────────────┐
-        ▼                            ▼
-   [Architect]                  [Builder] ──► in-review
-        │ writes 4 spec files
-        ▼
-  ┌────────────┐
-  │ spec-ready │ ⏸  HUMAN GATE  (unless autonomous:true)
-  └─────┬──────┘
-        │ human approves
-        ▼
-  ┌─────────────┐
-  │ in-progress │ ──► [Builder] writes code from approved specs
-  └─────┬───────┘
-        ▼
-  ┌───────────┐         reject (feedback → progress/)
-  │ in-review │ ──► [Reviewer] ───────────────┐
-  └─────┬─────┘                               │
-        │ approve                             ▼
-        ▼                              back to in-progress
-    ┌──────┐
-    │ done │  (Reviewer verdict only) → append to progress/history.md
-    └──────┘
+```mermaid
+stateDiagram-v2
+    state "spec-ready" as spec_ready
+    state "in-progress" as in_progress
+    state "in-review" as in_review
+
+    [*] --> pending
+    pending --> spec_ready: sdd:true · Architect writes 4 spec files
+    pending --> in_review: sdd:false · Builder (quick task)
+    spec_ready --> in_progress: human approves ⏸ HUMAN GATE (skipped if autonomous:true)
+    in_progress --> in_review: Builder writes code from approved specs
+    in_review --> done: Reviewer approves
+    in_review --> in_progress: Reviewer rejects · feedback → progress/
+    done --> [*]
+    note right of done: Reviewer verdict only — append to progress/history.md
 ```
 
 ## The human-in-the-loop gate
