@@ -63,6 +63,15 @@ grep -qE 'spec-ready|in-review' "$T/.claude/commands/sdd-new.md" \
   || fail "sdd-new missing altitude-1 consumed-status branch"
 pass "Claude Code glue generated (R7)"
 
+# OpenCode glue: same slash commands installed under .opencode/command/                        # R7
+[ -f "$T/.opencode/command/sdd-next.md" ] || fail "opencode sdd-next command missing"
+[ -f "$T/.opencode/command/sdd-new.md" ]  || fail "opencode sdd-new command missing"
+cmp -s "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" \
+  || fail "opencode sdd-next differs from claude sdd-next"
+cmp -s "$T/.claude/commands/sdd-new.md" "$T/.opencode/command/sdd-new.md" \
+  || fail "opencode sdd-new differs from claude sdd-new"
+pass "OpenCode commands generated (R7)"
+
 # target verification commands reset to blank                                                  # R8
 grep -q 'test_command: ""' "$T/.harness/harness.config.yaml" || fail "test_command not blanked"
 pass "target verification commands reset (R8)"

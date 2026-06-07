@@ -53,7 +53,7 @@ approves) → `builder` → `reviewer`.
 | **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` + `/sdd-new`, `/sdd-next` |
 | **Codex** | `AGENTS.md` (native) | run roles sequentially; hand off via files |
 | **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
-| **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents |
+| **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*` (`/sdd-new`, `/sdd-next`) |
 
 The harness body — `AGENTS.md`, `agents/`, `specs/`, `progress/`, `init.sh`, the
 stores — is **identical** across all of them. Only the entry filename and the
@@ -142,6 +142,7 @@ progress/              run output + history.md
 store/                 store contract + adapters (local, obsidian, jira)
 docs/                  SPEC-FORMAT.md, WORKFLOW.md, HARNESS.md
 .claude/               Claude Code sub-agents + commands
+.opencode/command/     OpenCode slash commands (/sdd-new, /sdd-next)
 ```
 
 ## Installing into an existing project

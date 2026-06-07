@@ -4,6 +4,17 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.9.0] — 2026-06-07
+
+### Added — ✨ Install `/sdd-next` + `/sdd-new` as OpenCode commands too
+- **`harness-install.sh` now emits the slash commands to `.opencode/command/` as well as
+  `.claude/commands/`.** Previously the commands were written only to the Claude Code
+  command dir, so targets driven through OpenCode saw the agents but had no `/sdd-next`
+  or `/sdd-new`. The command bodies are now authored once and written to both locations
+  (identical content; no `agent:` frontmatter, so they run under the primary
+  orchestrator agent defined in the generated `opencode.json`). Regenerated on every
+  install/upgrade. Manifest updated to list `.opencode/command/*` as harness-owned.
+
 ## [0.8.0] — 2026-06-06
 
 ### Added
