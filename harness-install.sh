@@ -322,7 +322,7 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .harness/AGENTS.md  .harness/init.sh
   .harness/agents/  .harness/docs/  .harness/store/  .harness/tools/  .harness/specs/_templates/
   .harness/specs/glossary.md  .harness/umbrella.manifest.example.yaml
-  .claude/agents/*  .claude/commands/sdd-next.md   (repo root, regenerated)
+  .claude/agents/*  .claude/commands/*   .opencode/command/*   (repo root, regenerated)
   CLAUDE.md / AGENTS.md / GEMINI.md  -> only the harness:begin..end block
 
 PROJECT-OWNED  (seeded once, never clobbered on upgrade):
@@ -474,6 +474,16 @@ The free-text idea is in `$ARGUMENTS`. If it is empty, ask the human for it.
    Inception seeds, never specs, and never moves a feature past `pending`.
 EOF
   ok "Claude Code agents + /sdd-next + /sdd-new installed (.claude/)"
+
+  # ── 5b. OpenCode commands (regenerated each run) ────────────────────────────
+  # Claude Code reads .claude/commands/; OpenCode reads .opencode/command/. Mirror
+  # the just-written command bodies there so /sdd-next and /sdd-new show up in
+  # OpenCode too. With no `agent:` frontmatter the command runs under the primary
+  # agent, which is the orchestrator in the opencode.json below.
+  mkdir -p "$TARGET/.opencode/command"
+  cp "$TARGET/.claude/commands/sdd-next.md" "$TARGET/.opencode/command/sdd-next.md"
+  cp "$TARGET/.claude/commands/sdd-new.md"  "$TARGET/.opencode/command/sdd-new.md"
+  ok "OpenCode commands /sdd-next + /sdd-new installed (.opencode/)"
 
   # ── 6. opencode.json (create if absent; never clobber an existing one) ──────
   if [ ! -f "$TARGET/opencode.json" ]; then
