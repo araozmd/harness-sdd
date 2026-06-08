@@ -43,3 +43,5 @@ deliberately, not on every PR.
 - Every new work, feature or bug should have its own branch
 - Once all locall verifications and tests passed, create a new PR and use the 
   skill /pr-loop to invoke Codex reviews
+- Once a brach is merged delete remote and local branch and go back to main 
+  to keep the repo clean

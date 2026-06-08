@@ -409,4 +409,51 @@ else
   pass "umbrella-symlink-to-source guard (symlink unsupported here — skipped) [umbrella_symlink_to_source_rejected]"
 fi
 
+# ── --shared-repo: opt-in version-control of the umbrella root ─────────────────
+# Flag is umbrella-mode only.
+sh "$INSTALL" "$T/single" --shared-repo >/dev/null 2>&1 \
+  && fail "--shared-repo accepted in single-target mode (should be umbrella-only)"
+pass "--shared-repo rejected without --umbrella [shared_repo_umbrella_only]"
+
+# Without the flag, the umbrella root stays NON-git (default unchanged / inert).
+SRU="$T/umb-sr"; mkdir -p "$SRU"; build_umbrella "$SRU"
+sh "$INSTALL" --umbrella "$SRU" >/dev/null 2>&1 || fail "plain umbrella install failed (shared-repo default)"
+[ ! -e "$SRU/.git" ] || fail "umbrella root became a git repo WITHOUT --shared-repo (default not inert)"
+pass "default (no --shared-repo) leaves the umbrella root non-git [shared_repo_default_inert]"
+
+# Dry-run previews the git-init + ignore plan, writing nothing.
+SRD="$T/umb-sr-dry"; mkdir -p "$SRD"; build_umbrella "$SRD"
+DOUT="$T/sr-dry.out"
+sh "$INSTALL" --umbrella "$SRD" --shared-repo --dry-run >"$DOUT" 2>&1 \
+  || fail "--shared-repo --dry-run exited non-zero"
+grep -qi "shared-repo" "$DOUT" || fail "dry-run did not mention shared-repo plan"
+[ ! -e "$SRD/.git" ]                  || fail "--dry-run created a git repo (must write nothing)"
+[ ! -f "$SRD/.harness/AGENTS.md" ]    || fail "--dry-run installed the coordinator body (must write nothing)"
+[ ! -e "$SRD/viernes-bff/.harness" ]  || fail "--dry-run installed a child profile (must write nothing)"
+[ ! -f "$SRD/.gitignore" ]            || fail "--dry-run seeded a .gitignore (must write nothing)"
+pass "--shared-repo --dry-run previews, writes nothing [shared_repo_dry_run]"
+
+# Real run: git-inits the root and ignores the discovered product children.
+sh "$INSTALL" --umbrella "$SRU" --shared-repo >/dev/null 2>&1 || fail "--shared-repo install failed"
+[ -e "$SRU/.git" ] || fail "--shared-repo did not git-init the umbrella root"
+[ -f "$SRU/.gitignore" ] || fail "--shared-repo did not seed an umbrella-root .gitignore"
+grep -qxF '/viernes-bff/' "$SRU/.gitignore" || fail "discovered child viernes-bff not ignored"
+grep -qxF '/lia-api/'     "$SRU/.gitignore" || fail "discovered child lia-api not ignored"
+grep -qF '.claude/settings.local.json' "$SRU/.gitignore" || fail "personal-state ignore missing from umbrella root"
+# the spec state itself must stay TRACKABLE — never ignore .harness wholesale.
+grep -qxF '.harness/' "$SRU/.gitignore" && fail "umbrella root ignores .harness/ wholesale (spec state would not be shared)"
+grep -qxF '/bad_Name/' "$SRU/.gitignore" && fail "skipped invalid-named child wrongly ignored"
+pass "--shared-repo git-inits root + ignores discovered children, keeps .harness tracked [shared_repo_inits_and_ignores]"
+
+# Idempotent + non-clobbering: a user entry survives, child ignores not duplicated, and an
+# existing .git is never re-initialized.
+printf 'my-extra-dir/\n' >> "$SRU/.gitignore"
+GITINO_BEFORE="$(ls -di "$SRU/.git" 2>/dev/null | awk '{print $1}')"
+sh "$INSTALL" --umbrella "$SRU" --shared-repo >/dev/null 2>&1 || fail "--shared-repo re-run failed"
+grep -qF 'my-extra-dir/' "$SRU/.gitignore" || fail "user .gitignore entry clobbered on re-run"
+[ "$(grep -cxF '/viernes-bff/' "$SRU/.gitignore")" = "1" ] || fail "child ignore duplicated on re-run (not idempotent)"
+GITINO_AFTER="$(ls -di "$SRU/.git" 2>/dev/null | awk '{print $1}')"
+[ "$GITINO_BEFORE" = "$GITINO_AFTER" ] || fail "existing .git was re-initialized on re-run"
+pass "--shared-repo is append-only + idempotent, never re-inits an existing .git [shared_repo_idempotent]"
+
 echo "All cascade tests passed."

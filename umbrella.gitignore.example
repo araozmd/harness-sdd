@@ -1,0 +1,33 @@
+# umbrella.gitignore.example — reference layout for a SHARED SPEC REPOSITORY.
+#
+# When you run `./harness-install.sh --umbrella <dir> --shared-repo`, the installer
+# generates the real umbrella-root .gitignore for you (append-only) — it ignores the
+# product child repos it discovered plus per-developer agent state. This file just
+# documents the intended shape so you can read or hand-tune it.
+#
+# The umbrella root is its OWN git repo (a "spec repository") that TRACKS the shared
+# planning state — .harness/ (specs, state/tasks.json, progress) and the umbrella docs
+# (CLAUDE.md, AGENTS.md, README.md, …) — and IGNORES everything that belongs elsewhere.
+
+# --- Product repos: each is its own git repo, cloned INTO the umbrella. ---
+# Tracked separately (never as gitlinks here). The installer lists the dirs it found;
+# add new ones here as you clone them. Examples:
+#/your-api/
+#/your-frontend/
+#/your-infra/
+
+# --- Assets that are not (yet) their own repo and shouldn't live in the spec repo. ---
+#/design-system/
+
+# --- Per-developer / runtime agent state — never shared. ---
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+# Per-tool MCP scratch dirs your setup may create — add your own (example):
+#.playwright-mcp/
+
+# --- OS / editor junk ---
+.DS_Store
+*.swp
+
+# NOTE: the local-only telemetry log (.harness/telemetry.jsonl) is already excluded by
+# the nested .harness/.gitignore the installer seeds — no entry needed here.

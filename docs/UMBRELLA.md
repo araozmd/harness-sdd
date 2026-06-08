@@ -7,8 +7,12 @@ cross-repo merge order, and rolls verification up so the feature is `done` only 
 every slice passes **and** an integration check passes.
 
 This is a harness feature. The umbrella **never writes source code**: it specifies
-once (the shared spec) and delegates down. No new git repo is introduced — the
-umbrella lives in a non-git parent directory hosting sibling child repos.
+once (the shared spec) and delegates down. **By default** no new git repo is introduced —
+the umbrella lives in a non-git parent directory hosting sibling child repos.
+**Optionally** (`--shared-repo`, see [below](#shared-spec-repository-opt-in)) the umbrella
+root can itself be a git repo that tracks **only** `.harness/` + the umbrella docs and
+git-ignores the child product repos — a *shared spec repository* a team clones so epics,
+specs, and task state are versioned and shared instead of stranded on one laptop.
 
 ## Opt-in switch (single-repo stays inert)
 Umbrella mode is engaged **only** when `umbrella.manifest` in `harness.config.yaml`
@@ -35,8 +39,39 @@ child profile into each immediate **git** child (depth 1), and auto-populates
 idempotent and never clobbers a bootstrap-filled manifest entry. Bootstrap then fills
 each entry's `test_command`/`delegate_cmd` and the coordinator's `integration_command`.
 
+## Shared spec repository (opt-in)
+By default the umbrella is a throwaway parent directory — the coordinator's `.harness/`
+(specs, `state/tasks.json`, progress) then lives only on whoever ran the cascade. For a
+team, that strands the planning state on one laptop and invites duplicated epics/features.
+
+Pass **`--shared-repo`** to version-control the umbrella root instead:
+
+```bash
+./harness-install.sh --umbrella /path/to/umbrella-dir --shared-repo
+```
+
+After the normal cascade it:
+1. **`git init`s the umbrella root** — but **only if it has no `.git` yet**. An existing
+   repo is never re-initialized.
+2. **Append-seeds the umbrella-root `.gitignore`** to ignore the product child repos it
+   just discovered (each stays its **own** repo, never a gitlink), on top of the
+   per-developer agent state every install already ignores
+   (`.claude/settings.local.json`, …). Append-only — an existing `.gitignore` is never
+   clobbered. See [`../umbrella.gitignore.example`](../umbrella.gitignore.example) for the
+   intended shape and [`CONFIG-LAYERING.md`](./CONFIG-LAYERING.md) for shared-vs-personal.
+
+The result is a **spec repository**: the umbrella root is a git repo that tracks `.harness/`
++ the umbrella docs (`CLAUDE.md`, `AGENTS.md`, `README.md`) and git-ignores the product
+repos cloned into it. Teammates `git clone` it to get the shared specs + task state, then
+clone the product repos beside the harness. `--shared-repo` only governs whether the root
+is version-controlled; it is orthogonal to the manifest, which still drives slice dispatch.
+The local TaskStore is now shared state — commit `.harness/` changes alongside the feature
+they describe so others pull a consistent board. Omit the flag and the umbrella behaves
+exactly as before (non-git parent dir).
+
 ## Concepts
-- **Umbrella** — the non-git parent directory hosting the coordinator harness.
+- **Umbrella** — the parent directory hosting the coordinator harness. Non-git by default;
+  optionally its own git repo (a *shared spec repository*) under `--shared-repo` (above).
 - **Slice** — a per-repo unit of work for one cross-repo feature. In the TaskStore a
   feature carries an optional `slices[]` (see `store/local.md` and
   `store/tasks.schema.json`); each slice has `id` (`<feature-id>@<repo>`, e.g.
