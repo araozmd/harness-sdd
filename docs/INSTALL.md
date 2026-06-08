@@ -125,8 +125,14 @@ POSIX `sh`, zero deps.
 |---|---|---|
 | harness-owned | `.harness/{AGENTS.md,agents,docs,store,tools,specs/_templates,init.sh}`, `.claude/*` | overwritten |
 | project-owned | `.harness/{harness.config.yaml,specs/product.md,specs/epics,state/tasks.json,progress}` | preserved (config also append-migrated) |
-| runtime/local | `.harness/{telemetry.jsonl,.gitignore}` | gitignored; `.gitignore` seeded once, log never committed |
+| runtime/local | `.harness/{telemetry.jsonl,.gitignore}`, project-root `.gitignore` | gitignored; both `.gitignore`s append-seeded (never clobbered), logs/personal state never committed |
 | merge-region | `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` | only the marked block |
+
+The installer also **append-seeds the project-root `.gitignore`** with per-developer
+agent state (`.claude/settings.local.json`, `.claude/scheduled_tasks.lock`, and a commented
+`.playwright-mcp/`) so a **shared** spec/umbrella repo never carries one developer's local
+config — while the generated `.claude/agents` and `.claude/commands` stay tracked. See
+[`CONFIG-LAYERING.md`](./CONFIG-LAYERING.md) for the shared-vs-personal model.
 
 ## Fallback: AI-driven adoption
 

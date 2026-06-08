@@ -4,6 +4,27 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.10.0] — 2026-06-08
+
+### Added — ✨ Seed a project-root `.gitignore` for personal/runtime agent state
+- **`harness-install.sh` now append-seeds the project-root `.gitignore`** with per-developer
+  agent state — `.claude/settings.local.json`, `.claude/scheduled_tasks.lock`, and a
+  commented `.playwright-mcp/` — so a **shared** spec/umbrella repo (a team clones the
+  install) never carries one developer's local config. The seed is **append-only and
+  idempotent**: it never clobbers an existing root `.gitignore` and only adds an entry that
+  is missing, mirroring the existing `.harness/.gitignore` telemetry seeding. It ignores
+  **specific files** under `.claude/`, never the whole dir, so the harness-generated
+  `.claude/agents` and `.claude/commands` stay tracked and shared.
+
+### Docs
+- **New `docs/CONFIG-LAYERING.md`** — the shared-vs-personal config model (project layer =
+  committed `CLAUDE.md`/`.harness`/`.claude` glue; personal layer = gitignored
+  `settings.local.json`; user-global = `~/.claude/CLAUDE.md`). Directly answers "should every
+  developer share the same `CLAUDE.md`?" (yes — keep it shared; push personal prefs to the
+  user-global layer).
+- **INSTALL.md** ownership table gains the project-root `.gitignore` under runtime/local and a
+  pointer to `CONFIG-LAYERING.md`.
+
 ## [0.9.0] — 2026-06-07
 
 ### Added — ✨ Install `/sdd-next` + `/sdd-new` as OpenCode commands too

@@ -30,6 +30,15 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "installer exited non-zero"
 [ -f "$T/.harness/state/tasks.json" ]          || fail "bootstrap tasks.json missing"        # R6
 pass "fresh install layout correct (R1, R6)"
 
+# project-root .gitignore append-seeded with personal/runtime agent state, ignoring
+# SPECIFIC .claude/ files (never the whole dir, so generated agents/commands stay tracked).
+[ -f "$T/.gitignore" ]                                  || fail "project-root .gitignore not seeded"
+grep -qF '.claude/settings.local.json' "$T/.gitignore"  || fail "root .gitignore missing settings.local.json"
+grep -qF '.claude/scheduled_tasks.lock' "$T/.gitignore" || fail "root .gitignore missing scheduler-lock"
+grep -qxF '.claude/' "$T/.gitignore"                    && fail "root .gitignore over-ignores the whole .claude/ dir"
+[ -f "$T/.harness/docs/CONFIG-LAYERING.md" ]            || fail "CONFIG-LAYERING.md not installed"
+pass "project-root .gitignore seeds personal/runtime ignores (config layering)"
+
 # version stamp matches source VERSION                                                        # R2
 [ "$(cat "$T/.harness/.harness-version")" = "$(cat "$SRC/VERSION")" ] || fail "version mismatch"
 pass "version stamped (R2)"
@@ -94,6 +103,15 @@ cmp -s "$T/.harness/state/tasks.json" "$T/.harness/state/tasks.json.orig" \
 [ "$(grep -cF '<!-- harness:begin -->' "$T/CLAUDE.md")" = "1" ] \
   || fail "harness block duplicated on upgrade"                                                      # R4
 pass "upgrade preserves project files + is idempotent (R4, R5)"
+
+# root .gitignore is append-only: a user-added entry survives upgrade, and a re-run does
+# not duplicate the seeded entries (idempotent — the default/inert path is a no-op).
+printf 'my-secret-dir/\n' >> "$T/.gitignore"
+sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "upgrade run (root .gitignore) failed"
+grep -qF 'my-secret-dir/' "$T/.gitignore" || fail "user entry in root .gitignore clobbered on upgrade"
+[ "$(grep -cF '.claude/settings.local.json' "$T/.gitignore")" = "1" ] \
+  || fail "root .gitignore seed duplicated on upgrade (not idempotent)"
+pass "project-root .gitignore is append-only + idempotent on upgrade"
 
 # user content placed AFTER the block must keep its position on upgrade (in-place replace)    # R4
 printf 'TRAILING-USER-NOTE\n' >> "$T/CLAUDE.md"
