@@ -96,6 +96,26 @@ body); it does three things:
 `--recursive` is accepted but the deeper-scan semantics are deferred; today it still
 scans depth 1 and prints a note.
 
+### Shared spec repository (`--shared-repo`)
+
+By default the umbrella root is **not** a git repo, so the coordinator's `.harness/`
+(specs, `state/tasks.json`, progress) lives only on the machine that ran the cascade. To
+share that planning state across a team, add `--shared-repo`:
+
+```bash
+./harness-install.sh --umbrella /path/to/umbrella-dir --shared-repo
+```
+
+After the normal cascade it (a) runs `git init` at the umbrella root **only if it has no
+`.git` yet** (an existing repo is never re-initialized), and (b) **append-seeds** the
+umbrella-root `.gitignore` to ignore the product child repos it discovered — so they stay
+their own repos, never gitlinks — on top of the per-developer state every install ignores.
+The umbrella becomes a **spec repository** that tracks `.harness/` + umbrella docs;
+teammates clone it for the shared specs/task state, then clone the product repos beside the
+harness. Preview it first with `--shared-repo --dry-run`. See
+[`UMBRELLA.md`](./UMBRELLA.md#shared-spec-repository-opt-in) and the shipped
+`umbrella.gitignore.example`. Omit the flag and nothing about the root changes.
+
 Umbrella mode is **idempotent and additive**: re-running rediscovers newly-added git
 children and appends them without ever overwriting an existing manifest entry's fields
 or a child's project-owned files. With `--umbrella` absent, the installer behaves

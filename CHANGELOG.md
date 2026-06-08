@@ -4,6 +4,30 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.11.0] — 2026-06-08
+
+### Added — ✨ `--shared-repo`: version-control the umbrella as a shared spec repository
+- **`harness-install.sh --umbrella <dir> --shared-repo`** makes the umbrella ROOT its own
+  git repo — a *shared spec repository* that tracks `.harness/` (specs, `state/tasks.json`,
+  progress) + the umbrella docs and **git-ignores the product child repos** (each stays its
+  own repo, never a gitlink). Solves the "planning state stranded on one laptop" gap a team
+  hits when several developers work the same umbrella. **Opt-in and inert by default**:
+  without the flag the umbrella stays a non-git parent dir, byte-for-byte as before.
+  - `git init` runs **only if the umbrella root has no `.git`** — an existing repo is never
+    re-initialized; if `git` is absent the install continues and seeds the `.gitignore`.
+  - The umbrella-root `.gitignore` is **append-seeded** with exactly the child repos the
+    cascade discovered (never a blanket rule; never clobbers an existing file).
+  - Works with `--dry-run` to preview the `git init` + ignore plan. Umbrella-mode only
+    (`--shared-repo` without `--umbrella` is rejected).
+- **New `umbrella.gitignore.example`** (shipped at the harness root, beside
+  `umbrella.manifest.example.yaml`) documents the intended shared-spec-repo `.gitignore`
+  shape: product repos ignored, `.harness/` + docs tracked, personal state ignored.
+
+### Docs
+- **`docs/UMBRELLA.md`** softens the absolute "No new git repo is introduced" claim into a
+  default-vs-opt-in statement and gains a **"Shared spec repository (opt-in)"** section.
+- **`docs/INSTALL.md`** gains a `--shared-repo` subsection under umbrella mode.
+
 ## [0.10.0] — 2026-06-08
 
 ### Added — ✨ Seed a project-root `.gitignore` for personal/runtime agent state

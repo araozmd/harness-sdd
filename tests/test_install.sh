@@ -24,6 +24,7 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "installer exited non-zero"
 [ -d "$T/.harness/docs" ]                      || fail "docs/ missing"                       # R1
 [ -f "$T/.harness/store/tasks.schema.json" ]   || fail "schema missing"                      # R1
 [ -f "$T/.harness/umbrella.manifest.example.yaml" ] || fail "umbrella manifest example not installed" # R1
+[ -f "$T/.harness/umbrella.gitignore.example" ] || fail "umbrella .gitignore example not installed"    # R1
 [ -f "$T/.harness/tools/telemetry-report.py" ] || fail "tools/telemetry-report.py not installed (telemetry summary would fail in consumers)" # R1
 [ -x "$T/.harness/init.sh" ]                   || fail ".harness/init.sh not executable"     # R1
 [ -f "$T/.harness/specs/product.md" ]          || fail "product.md stub not seeded"          # R6
