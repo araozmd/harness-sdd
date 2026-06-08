@@ -310,6 +310,30 @@ $_tlog" ;;                                       # relative override → also ig
     done
     info ".harness/.gitignore ensured (telemetry log ignored)"
   fi
+
+  # Personal/runtime agent state must never be committed to a SHARED project (e.g. a
+  # spec/umbrella repo a team clones). Claude Code writes per-developer config
+  # (.claude/settings.local.json), a scheduler lock (.claude/scheduled_tasks.lock), and
+  # browser-MCP scratch at the PROJECT ROOT — none of which belong in VCS, while the
+  # harness-GENERATED .claude/agents and .claude/commands DO. Seed/extend the project-root
+  # .gitignore with TARGETED, append-only ignores (never clobbering existing entries), so a
+  # shared repo stays free of one developer's local state. Full model:
+  # .harness/docs/CONFIG-LAYERING.md.
+  _root_ignores='.claude/settings.local.json
+.claude/scheduled_tasks.lock'
+  if [ ! -f "$TARGET/.gitignore" ]; then
+    { printf '# Personal/runtime agent state — never commit (see .harness/docs/CONFIG-LAYERING.md).\n'
+      printf '%s\n' "$_root_ignores"
+      printf '# Browser-MCP scratch (uncomment if you use the Playwright MCP):\n'
+      printf '#.playwright-mcp/\n'; } > "$TARGET/.gitignore"
+    info "seeded project-root .gitignore (personal/runtime agent state)"
+  else
+    printf '%s\n' "$_root_ignores" | while IFS= read -r _pat; do
+      [ -n "$_pat" ] || continue
+      grep -qF "$_pat" "$TARGET/.gitignore" || printf '%s\n' "$_pat" >> "$TARGET/.gitignore"
+    done
+    info "project-root .gitignore ensured (personal/runtime agent state)"
+  fi
   ok "project workspace ready (.harness/specs, state, progress)"
 
   # ── 3. version stamp + manifest ─────────────────────────────────────────────
