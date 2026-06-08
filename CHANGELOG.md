@@ -4,6 +4,34 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.12.0] — 2026-06-08
+
+### Added — ✨ Pluggable board mirror + generic post-write sync hook
+- **`tools/sync-board.mjs`** — a generic, provider-pluggable one-way **mirror** that
+  projects `state/tasks.json` onto an external project board (issue/work-item per feature,
+  Status + Epic fields, closes done / reopens regressed). `tasks.json` stays the source of
+  truth; the board is a downstream projection agents never read. **Inert by default.**
+  - Provider chosen by `mirror.board.provider`: `""`/`none` ⇒ no-op exit 0;
+    **`github-projects`** implemented (config-driven `owner`/`project_number`/`repo`, needs
+    `gh`); **`jira`** + **`azure-boards`** recognized as no-op **stubs**. No org/repo/tool is
+    hard-coded; status columns default to the harness status names verbatim (identity map).
+- **`store.on_write_command`** — a generic, **VCS/PM-neutral** post-write hook. When
+  non-empty the Orchestrator runs it after any persisted store write
+  (`<cmd> "<feature-id>" "<op>"`, cwd = `HARNESS_DIR`); empty (default) ⇒ no hook. Best-effort:
+  a non-zero exit never rolls back `tasks.json` and never blocks the loop. The harness never
+  learns what the command does (git push, board mirror, both). A team wires `sync-board.mjs`
+  into it via config — the mirror tool is never hard-coded into the loop.
+- Config migration seeds both `store.on_write_command` and the `mirror:` block on upgrade
+  (append-only, value-preserving); `sync-board.mjs` is installed + `chmod +x` like the
+  telemetry tool.
+
+### Docs
+- **New `store/board-mirror.md`** — the mirror contract, provider table, and the
+  **mirror-vs-backend** distinction (one-way projection vs where state lives).
+- **`store/README.md`** gains a "Mirrors vs backends" section; **`store/jira.md`** gets a
+  backend-not-mirror cross-link; **`store/local.md`** documents "Post-write sync";
+  **`agents/orchestrator.md`** gains the best-effort post-write-sync step.
+
 ## [0.11.0] — 2026-06-08
 
 ### Added — ✨ `--shared-repo`: version-control the umbrella as a shared spec repository

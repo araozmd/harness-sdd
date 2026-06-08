@@ -14,6 +14,15 @@ store:
   #   obsidian -> same files, Obsidian-flavored (wikilinks + frontmatter)
   docs: local
 
+  # Post-write sync hook (optional, VCS/PM-neutral). When NON-EMPTY, the Orchestrator
+  # runs this command once AFTER any persisted store write (set_status, set_slice_status,
+  # write_spec, done rollup), invoked as:  <cmd> "<feature-id>" "<op>"  with cwd = HARNESS_DIR.
+  # Best-effort: a non-zero exit NEVER rolls back tasks.json and never blocks the loop — it
+  # is reported as a sync gap. Empty (default) ⇒ no hook (today's behavior). The harness never
+  # learns what the command does — a git push, a board mirror, both, or nothing. A team might
+  # point it at `node tools/sync-board.mjs` (see mirror: below) or a push+mirror wrapper.
+  on_write_command: ""
+
 workflow:
   # Human-in-the-loop gate. When true, a feature pauses at `spec-ready` until a
   # human moves it to `in-progress`. Individual tasks can opt out via `sdd: false`
@@ -70,11 +79,28 @@ telemetry:
   # reserved extension slot for a future instrumented SDK runtime and is null today; this
   # harness never populates it.
 
+# Board mirror (optional, opt-in) — a one-way PROJECTION of state/tasks.json onto an
+# external project board for human visibility. tasks.json stays the SOURCE OF TRUTH;
+# the board is downstream and disposable (agents never read it). Driven by
+# tools/sync-board.mjs; see store/board-mirror.md. INERT by default: an empty provider
+# means the tool is a no-op. This is a MIRROR, not a store backend (where state lives) —
+# see store/README.md "Mirrors vs backends".
+mirror:
+  board:
+    # ""|none disables (default). github-projects is IMPLEMENTED; jira and azure-boards
+    # are recognized STUBS (no-op until implemented — see store/board-mirror.md).
+    provider: ""
+
+    # github-projects provider config (ignored by other providers):
+    owner: ""             # org/user login that owns the Project + the issues repo
+    project_number: 0     # the GitHub Project number (e.g. 1)
+    repo: ""              # owner/repo that holds the mirrored issues (e.g. my-org/specs)
+
 verification:
   init_script: ./init.sh
   # Commands the Reviewer must run before marking work done. Project-specific —
   # edit these per target repo.
-  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry suites
+  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh && sh tests/test_mirror.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry + board-mirror suites
 
   lint_command: ""        # e.g. "ruff check ." or "npm run lint"
   typecheck_command: ""   # e.g. "mypy ." or "tsc --noEmit"

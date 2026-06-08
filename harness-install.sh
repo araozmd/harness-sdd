@@ -105,6 +105,41 @@ migrate_config() {
       printf '  log: telemetry.jsonl     # resolved under HARNESS_DIR; gitignored/local-only\n'
     } >> "$_cfg"
   fi
+
+  # --- store.on_write_command (post-write sync hook) ---
+  # Insert under the top-level `store:` header (tolerating a trailing comment). Empty
+  # default ⇒ no hook, i.e. today's behavior. Scope the presence check to NOT match a
+  # same-named key elsewhere by requiring the two-space indent of a store child.
+  if ! grep -Eq '^[[:space:]]+on_write_command:' "$_cfg"; then
+    if grep -Eq '^store:[[:space:]]*(#.*)?$' "$_cfg"; then
+      _mc_insert_after "$_cfg" '^store:[[:space:]]*(#.*)?$' \
+        '  on_write_command: ""   # post-write sync hook; empty ⇒ none (see store/board-mirror.md)'
+    else
+      {
+        printf '\n'
+        printf 'store:\n'
+        printf '  on_write_command: ""   # post-write sync hook; empty ⇒ none (see store/board-mirror.md)\n'
+      } >> "$_cfg"
+    fi
+  fi
+
+  # --- mirror.board block (optional board projection) ---
+  # Top-level block; append at EOF when absent (no header to insert into). Empty provider
+  # ⇒ tools/sync-board.mjs is a no-op, so a preserved config without this block behaves
+  # exactly as before. See store/board-mirror.md.
+  if ! grep -Eq '^mirror:[[:space:]]*(#.*)?$' "$_cfg"; then
+    {
+      printf '\n'
+      printf '# Board mirror (optional, opt-in): one-way projection of tasks.json onto a project\n'
+      printf '# board. INERT by default (empty provider). MIRROR, not a backend. See store/board-mirror.md.\n'
+      printf 'mirror:\n'
+      printf '  board:\n'
+      printf '    provider: ""          # ""|none disables; github-projects implemented; jira|azure-boards stubs\n'
+      printf '    owner: ""             # github-projects: org/user login\n'
+      printf '    project_number: 0     # github-projects: Project number\n'
+      printf '    repo: ""              # github-projects: owner/repo holding the issues\n'
+    } >> "$_cfg"
+  fi
 }
 
 # _cfg_has_umbrella_manifest <file> — true (exit 0) iff a `manifest:` key exists
@@ -190,6 +225,7 @@ install_one() {
   copy umbrella.gitignore.example
   chmod +x "$H/init.sh" 2>/dev/null || true
   chmod +x "$H/tools/telemetry-report.py" 2>/dev/null || true
+  chmod +x "$H/tools/sync-board.mjs" 2>/dev/null || true
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"

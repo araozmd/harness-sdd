@@ -44,6 +44,14 @@ next, and delegate to the specialist agents.
    feature bounces from `in-review` back to `in-progress` (a Reviewer reject). The same
    bounce that adds a line to `progress/history.md` increments the round.
 
+6. **Post-write sync (best-effort).** After any **persisted** store write (a status
+   change, a slice update, a spec write, the done rollup), if `store.on_write_command` in
+   `harness.config.yaml` is **non-empty**, run it once as `<cmd> "<feature-id>" "<op>"`
+   from `HARNESS_DIR`. It is a side-effect on the same footing as telemetry: **never on the
+   critical path** — a non-zero exit (or unset command) NEVER rolls back the write and never
+   blocks the loop; complete the local write, then report any sync gap. Empty ⇒ skip
+   entirely. See `store/local.md` → "Post-write sync" and `store/board-mirror.md`.
+
 ### Build↔review rounds (explicit, multi-round, until green)
 
 The build↔review handoff is **not a single pass** — it is an explicit loop that
