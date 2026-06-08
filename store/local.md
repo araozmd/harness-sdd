@@ -63,6 +63,21 @@ dispatch/gating loop that consumes these semantics is specified in
 - **append_progress(run, note)** — write/append under `progress/<run>/`.
 - **append_history(line)** — append one line to `progress/history.md`.
 
+## Post-write sync (opt-in)
+After **any persisted write** — `set_status`, `set_slice_status`, `write_spec`, and the
+done rollup — the Orchestrator runs `store.on_write_command` (from `harness.config.yaml`)
+**when it is non-empty**, invoked as `<cmd> "<feature-id>" "<op>"` with cwd = `HARNESS_DIR`.
+This is the harness's generic, **VCS/PM-neutral** sync seam: the harness never learns what
+the command does. A team might point it at a `git push` of `state/tasks.json` + `specs/`,
+at a board mirror (`node tools/sync-board.mjs` — see [`board-mirror.md`](./board-mirror.md)),
+or at a wrapper doing both.
+
+- **Empty (default) ⇒ no hook** — exactly today's behavior.
+- **Best-effort, never-blocking** — a non-zero exit NEVER rolls back `tasks.json` and never
+  stalls `next()`. Do the local write regardless, then report the sync gap; never block
+  feature work on it. (Same discipline as telemetry.)
+- `tasks.json` stays the **source of truth**; anything the hook pushes to is downstream.
+
 ## Notes
 - Commit `state/tasks.json` and `specs/` so state is versioned with the code.
 - This backend is fully compatible with `obsidian` — pointing a vault at the repo

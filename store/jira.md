@@ -4,6 +4,10 @@ This adapter is **defined but not implemented**. The contract below is fixed so 
 drops in without re-architecting anything. Do not set `tasks: jira` in
 `harness.config.yaml` until the MCP wiring section is completed.
 
+> **Backend, not mirror.** This makes Jira the **source of truth** (`next()` queries Jira).
+> If instead you want to keep local `tasks.json` authoritative and just *project* it onto a
+> Jira board, that's a **mirror** — see [`board-mirror.md`](./board-mirror.md), not this file.
+
 ## Intended mapping
 | harness concept | Jira object |
 |---|---|

@@ -42,3 +42,18 @@ Backends: `local` (✅), `obsidian` (✅).
 Each adapter doc tells the agents exactly how to perform the operations above on
 that backend. To add a backend, write a new `store/<name>.md` implementing the
 contract and add it to `harness.config.yaml`.
+
+## Mirrors vs backends
+
+A **backend** is *where state lives* — what `next()` reads and `set_status` writes. A
+**mirror** is different: a one-way **projection** of `state/tasks.json` onto an external
+board (GitHub Projects, Jira, Azure Boards) for human visibility. `tasks.json` stays the
+source of truth; the board is downstream and disposable, and the agents never read it — so
+a mirror, unlike a backend, never has to be reachable for the loop to function. See
+[`board-mirror.md`](./board-mirror.md) (driven by `tools/sync-board.mjs`, opt-in via
+`mirror.board`). The generic, VCS/PM-neutral way to run a mirror after each write is the
+`store.on_write_command` hook — see [`local.md`](./local.md) → "Post-write sync".
+
+> A board can appear in *both* roles: `tasks: jira` (backend, Jira *is* the truth) is a
+> different choice from a Jira mirror (`tasks.json` is the truth, projected to Jira). Don't
+> conflate them.
