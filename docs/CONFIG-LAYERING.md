@@ -31,7 +31,7 @@ with the personal-layer paths:
 ```gitignore
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
-# Browser-MCP scratch (uncomment if you use the Playwright MCP):
+# Per-tool MCP scratch dirs your setup may create — add your own (example):
 #.playwright-mcp/
 ```
 
@@ -48,6 +48,6 @@ never gets committed.
 - **Let permissions/hooks live in `.claude/settings.local.json`** (gitignored). If your
   whole team genuinely needs a permission, put it in the *committed* `.claude/settings.json`
   instead — a deliberate shared choice, not a personal leak.
-- **Don't commit `.playwright-mcp/`, scheduler locks, or telemetry** — these are runtime
-  scratch. (The harness also seeds a `.harness/.gitignore` for the local-only
-  `telemetry.jsonl`; see [`INSTALL.md`](./INSTALL.md).)
+- **Don't commit per-tool MCP scratch dirs (e.g. `.playwright-mcp/`), scheduler locks, or
+  telemetry** — these are runtime scratch. (The harness also seeds a `.harness/.gitignore`
+  for the local-only `telemetry.jsonl`; see [`INSTALL.md`](./INSTALL.md).)

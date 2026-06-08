@@ -333,7 +333,7 @@ $_tlog" ;;                                       # relative override → also ig
   if [ ! -f "$TARGET/.gitignore" ]; then
     { printf '# Personal/runtime agent state — never commit (see .harness/docs/CONFIG-LAYERING.md).\n'
       printf '%s\n' "$_root_ignores"
-      printf '# Browser-MCP scratch (uncomment if you use the Playwright MCP):\n'
+      printf '# Per-tool MCP scratch dirs your setup may create — add your own (example):\n'
       printf '#.playwright-mcp/\n'; } > "$TARGET/.gitignore"
     info "seeded project-root .gitignore (personal/runtime agent state)"
   else

@@ -150,7 +150,7 @@ POSIX `sh`, zero deps.
 
 The installer also **append-seeds the project-root `.gitignore`** with per-developer
 agent state (`.claude/settings.local.json`, `.claude/scheduled_tasks.lock`, and a commented
-`.playwright-mcp/`) so a **shared** spec/umbrella repo never carries one developer's local
+example per-tool MCP scratch dir, e.g. `.playwright-mcp/`) so a **shared** spec/umbrella repo never carries one developer's local
 config — while the generated `.claude/agents` and `.claude/commands` stay tracked. See
 [`CONFIG-LAYERING.md`](./CONFIG-LAYERING.md) for the shared-vs-personal model.
 

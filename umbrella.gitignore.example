@@ -22,7 +22,7 @@
 # --- Per-developer / runtime agent state — never shared. ---
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
-# Browser-MCP scratch (uncomment if you use the Playwright MCP):
+# Per-tool MCP scratch dirs your setup may create — add your own (example):
 #.playwright-mcp/
 
 # --- OS / editor junk ---
