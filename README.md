@@ -69,6 +69,16 @@ sub-agent mechanism differ.
 | `obsidian` | ✅ | point a vault at the repo; frontmatter + `[[wikilinks]]` |
 | `jira` | ⏳ stub | contract defined in `store/jira.md`; wire MCP in a follow-up |
 
+A **backend** is *where state lives*. Two optional, **VCS/PM-neutral** seams sit beside it
+(both empty/off by default, so nothing changes unless you opt in):
+
+- **`store.on_write_command`** — a command the Orchestrator runs after every persisted
+  store write (best-effort, never blocks the loop). Point it at a `git push`, a board
+  mirror, or a wrapper doing both. The harness never learns what it does. See
+  `store/local.md` → "Post-write sync".
+- **Project board mirror** — a one-way projection of `state/tasks.json` onto a Kanban
+  board (see below).
+
 ## Delegating implementation (execution backend)
 
 By default the **Builder writes code itself**, in whatever CLI you're running — no
@@ -126,23 +136,55 @@ kill-switch) in `harness.config.yaml`. Token/USD cost is out of scope for the po
 markdown-prompt runtime (a reserved `cost` slot is left for an instrumented SDK runtime).
 See `agents/orchestrator.md` → "## Telemetry".
 
+## Project board mirror
+
+Optionally **mirror** `state/tasks.json` onto an external project board so humans get a
+Kanban view — one issue/work-item per feature, with Status + Epic fields, closing done /
+reopening regressed. It is a **one-way projection**: `tasks.json` stays the source of
+truth and the agents never read the board, so unlike a store backend it never has to be
+reachable for the loop to run. **Opt-in and inert by default.**
+
+```yaml
+# harness.config.yaml
+mirror:
+  board:
+    provider: github-projects   # ""/none (default) · github-projects · jira · azure-boards
+    owner: my-org
+    project_number: 1
+    repo: my-org/specs
+```
+
+```bash
+node tools/sync-board.mjs            # sync the configured provider
+node tools/sync-board.mjs --dry-run  # preview, mutate nothing
+```
+
+`github-projects` is implemented (needs `gh`); `jira` and `azure-boards` are recognized
+no-op **stubs**. Run it automatically after each status change by wiring it into
+`store.on_write_command`. **Mirror ≠ backend**: a mirror projects local truth outward; a
+backend (`tasks: jira`) *is* the truth. Full contract, the provider table, and column
+configuration: `store/board-mirror.md`.
+
 ## Layout
 
 ```
-AGENTS.md              entrypoint (open standard)
-CLAUDE.md GEMINI.md    thin per-CLI pointers
-opencode.json          OpenCode agents + AGENTS.md instruction
-harness.config.yaml    store backends + settings
-init.sh                environment verification gate
-agents/                role prompts (canonical)
-tools/                 zero-dep utilities (telemetry-report.py)
-specs/                 product.md, glossary.md, _templates/, epics/<E>/<F>/*.md
-state/                 tasks.json (local TaskStore) + schema
-progress/              run output + history.md
-store/                 store contract + adapters (local, obsidian, jira)
-docs/                  SPEC-FORMAT.md, WORKFLOW.md, HARNESS.md
-.claude/               Claude Code sub-agents + commands
-.opencode/command/     OpenCode slash commands (/sdd-new, /sdd-next)
+AGENTS.md                    entrypoint (open standard)
+CLAUDE.md GEMINI.md          thin per-CLI pointers
+opencode.json                OpenCode agents + AGENTS.md instruction
+harness.config.yaml          store backends, hooks, mirror, telemetry, umbrella
+harness-install.sh           install/upgrade into a target (+ --umbrella, --shared-repo)
+init.sh                      environment verification gate
+agents/                      role prompts (canonical)
+tools/                       zero-dep utilities (telemetry-report.py, sync-board.mjs)
+specs/                       product.md, glossary.md, _templates/, epics/<E>/<F>/*.md
+state/                       tasks.json (local TaskStore) + schema
+progress/                    run output + history.md
+store/                       store contract + adapters (local, obsidian, jira) + board-mirror
+docs/                        SPEC-FORMAT, WORKFLOW, HARNESS, INSTALL, UMBRELLA, CONFIG-LAYERING
+umbrella.manifest.example.yaml   cross-repo coordinator manifest template
+umbrella.gitignore.example       shared-spec-repo .gitignore reference
+.claude/                     Claude Code sub-agents + commands
+.opencode/command/           OpenCode slash commands (/sdd-new, /sdd-next)
 ```
 
 ## Installing into an existing project
@@ -155,6 +197,19 @@ Idempotent install/upgrade: drops the harness body into `<project>/.harness/`, a
 a marked pointer block to any existing `CLAUDE.md`/`AGENTS.md`/`GEMINI.md` (your prose
 is preserved), generates the Claude Code glue, and seeds a runnable workspace. Re-run
 to upgrade — project-authored specs/state are never clobbered. See `docs/INSTALL.md`.
+
+**Shared vs personal config.** The install is meant to be *committed and shared* — one
+`CLAUDE.md`, the `.harness/` body, the `.claude/` glue. Per-developer state stays local:
+the installer append-seeds the project-root `.gitignore` with `.claude/settings.local.json`
+and friends, and personal model/prompt preferences belong in your user-global
+`~/.claude/CLAUDE.md`. So yes — the same `CLAUDE.md` for the whole team is the intended
+setup. See `docs/CONFIG-LAYERING.md`.
+
+**Cross-repo products (umbrella).** One invocation can cascade the harness across an
+umbrella directory of sibling repos (`--umbrella`), and `--shared-repo` makes the umbrella
+root its own git repo — a **shared spec repository** that versions `.harness/` (specs,
+task state) for the team while git-ignoring the product repos cloned into it. Both opt-in;
+single-repo use is unaffected. See `docs/UMBRELLA.md`.
 
 ## Adapting to a real project
 1. Rewrite `specs/product.md` for your product.
