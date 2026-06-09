@@ -98,6 +98,38 @@ if command -v node >/dev/null 2>&1; then
   grep -q 'project view 7' "$T/gh-called" || { cat "$T/gh-called"; fail "parser did not read project_number"; }
   grep -q 'acme-org' "$T/gh-called"       || { cat "$T/gh-called"; fail "parser did not read owner"; }
   pass "github-projects parses nested config + dispatches to gh [ghprojects_parses_config]"
+
+  # 6) status_map ⇒ the nested-map reader maps statuses to CUSTOM board columns. A
+  #    dispatching fake gh returns minimal project/field JSON; with --dry-run the tool
+  #    reports the column names it WOULD set, which must be the mapped ones, not identity.
+  mkdir -p "$T/bin2"
+  cat > "$T/bin2/gh" <<'EOF'
+#!/bin/sh
+case "$1 $2" in
+  "project view")       echo '{"id":"PID"}' ;;
+  "project field-list") echo '{"fields":[{"id":"FS","name":"Status","options":[{"id":"o","name":"X"}]},{"id":"FE","name":"Epic","options":[]}]}' ;;
+  "project item-list")  echo '{"items":[]}' ;;
+  "issue list")         echo '[]' ;;
+  *)                    echo '{}' ;;
+esac
+exit 0
+EOF
+  chmod +x "$T/bin2/gh"
+  HSM="$T/h-statusmap"; mk_harness "$HSM" 'mirror:
+  board:
+    provider: "github-projects"
+    owner: "acme-org"
+    project_number: 7
+    repo: "acme-org/specs"
+    status_map:
+      pending: "Todo"
+      in-review: "In review"'
+  OUT="$(PATH="$T/bin2:$PATH" node "$HSM/tools/sync-board.mjs" --dry-run 2>&1)" || { echo "$OUT"; fail "status_map dry-run errored"; }
+  SLINE="$(printf '%s\n' "$OUT" | grep -i 'Status options' || true)"
+  printf '%s' "$SLINE" | grep -q 'Todo'                  || { echo "$OUT"; fail "status_map did not map pending -> Todo"; }
+  printf '%s' "$SLINE" | grep -q 'In review'             || { echo "$OUT"; fail "status_map did not map in-review -> In review"; }
+  printf '%s' "$SLINE" | grep -Eq '(^|[^-])pending' && fail "identity 'pending' column leaked despite status_map override"
+  pass "status_map remaps board columns via config, no file edit [status_map_overrides_columns]"
 else
   pass "node-running cases skipped (node unavailable) [inert_default_noop]"
 fi

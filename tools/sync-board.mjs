@@ -29,8 +29,9 @@ const TASKS_PATH = resolve(HERE, '../state/tasks.json');
 const DRY = process.argv.includes('--dry-run');
 const log = (...a) => console.log(...a);
 
-// --- minimal, dependency-free YAML scalar reader (same ethos as the shell _cfg_* awk
-// helpers): walk indentation, return the scalar at a dotted key path; undefined if absent.
+// --- minimal, dependency-free YAML reader (same ethos as the shell _cfg_* awk helpers):
+// walk indentation, return the scalar at a dotted key path; undefined if absent.
+const unquote = (s) => s.trim().replace(/^["']|["']$/g, '');
 function yamlGet(text, pathKeys) {
   const stack = [];
   for (const raw of text.split(/\r?\n/)) {
@@ -42,11 +43,39 @@ function yamlGet(text, pathKeys) {
     while (stack.length && indent <= stack[stack.length - 1].indent) stack.pop();
     const path = [...stack.map((s) => s.key), key];
     if (path.length === pathKeys.length && path.every((k, i) => k === pathKeys[i])) {
-      return rawVal.trim().replace(/^["']|["']$/g, '');
+      return unquote(rawVal);
     }
     stack.push({ indent, key });
   }
   return undefined;
+}
+
+// Return the immediate scalar children {key: value} of the map at a dotted key path,
+// or {} if the section is absent/empty. Used for the optional status_map.
+function yamlGetMap(text, pathKeys) {
+  const out = {};
+  const stack = [];
+  let parentIndent = null, childIndent = null;
+  for (const raw of text.split(/\r?\n/)) {
+    if (!raw.trim() || /^\s*#/.test(raw)) continue;
+    const indent = raw.length - raw.replace(/^\s+/, '').length;
+    const m = raw.replace(/\s+#.*$/, '').match(/^\s*([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!m) continue;
+    const [, key, rawVal] = m;
+    if (parentIndent !== null) {                 // collecting children of the matched section
+      if (indent <= parentIndent) break;          // section ended
+      if (childIndent === null) childIndent = indent;
+      if (indent === childIndent && rawVal.trim() !== '') out[key] = unquote(rawVal);
+      continue;
+    }
+    while (stack.length && indent <= stack[stack.length - 1].indent) stack.pop();
+    const path = [...stack.map((s) => s.key), key];
+    if (path.length === pathKeys.length && path.every((k, i) => k === pathKeys[i])) {
+      parentIndent = indent; continue;            // start collecting its children
+    }
+    stack.push({ indent, key });
+  }
+  return out;
 }
 
 // --- resolve provider config -------------------------------------------------
@@ -81,14 +110,15 @@ if (!OWNER || !PROJECT_NUMBER || !REPO) {
 try { execFileSync('gh', ['--version'], { stdio: 'ignore' }); }
 catch { console.error("[mirror] `gh` CLI not found — github-projects needs gh authed with 'project' + 'repo' scopes."); process.exit(1); }
 
-// feature state machine -> board column (IDENTITY by default: column == harness status).
-const STATUS = {
-  'pending':     { col: 'pending',     color: 'GRAY'   },
-  'spec-ready':  { col: 'spec-ready',  color: 'PURPLE' },
-  'in-progress': { col: 'in-progress', color: 'BLUE'   },
-  'in-review':   { col: 'in-review',   color: 'YELLOW' },
-  'done':        { col: 'done',        color: 'GREEN'  },
-};
+// feature state machine -> board column. Column NAMES default to IDENTITY (column ==
+// harness status) and can be overridden per status via `mirror.board.status_map` in
+// harness.config.yaml — so a team keeps its existing board columns (e.g. "Todo", "Done")
+// WITHOUT editing this file. Colors are fixed defaults (cosmetic).
+const STATUS_COLORS = { 'pending': 'GRAY', 'spec-ready': 'PURPLE', 'in-progress': 'BLUE', 'in-review': 'YELLOW', 'done': 'GREEN' };
+const statusMapCfg = yamlGetMap(cfgText, ['mirror', 'board', 'status_map']);
+const STATUS = Object.fromEntries(Object.keys(STATUS_COLORS).map((s) => [
+  s, { col: statusMapCfg[s] || s, color: STATUS_COLORS[s] },
+]));
 const STATUS_COLS = Object.values(STATUS).map((s) => s.col);
 const EPIC_COLORS = ['BLUE', 'GREEN', 'PURPLE', 'ORANGE', 'PINK', 'RED', 'YELLOW', 'GRAY'];
 
