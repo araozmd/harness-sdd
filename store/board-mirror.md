@@ -41,6 +41,31 @@ The status columns default to the **harness status names verbatim** (`pending`,
 tied to any one team's column naming. The tool owns the board's Status/Epic field options
 and derives them from `tasks.json`, so new epics/states appear automatically.
 
+### Keeping your existing columns (`status_map`)
+
+The tool **owns** the Status field's options, so by default it will rename an existing
+board's columns to the identity names on first sync. To keep columns you already use,
+map each harness status to your column name under `mirror.board.status_map` — **no edit to
+`sync-board.mjs` needed**, so an upgrade never clobbers it:
+
+```yaml
+mirror:
+  board:
+    provider: github-projects
+    owner: my-org
+    project_number: 1
+    repo: my-org/specs
+    status_map:                 # omit entirely for identity columns
+      pending: "Todo"
+      spec-ready: "Spec ready"
+      in-progress: "In Progress"
+      in-review: "In review"
+      done: "Done"
+```
+
+Any status you leave out falls back to its identity name. Run `--dry-run` after changing
+the map to confirm the tool won't rewrite options you didn't intend.
+
 ## github-projects contract
 
 `tasks.json` is the source of truth; the script makes the board match it, idempotently:

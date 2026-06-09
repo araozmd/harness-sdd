@@ -4,6 +4,17 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.13.0] — 2026-06-08
+
+### Added — ✨ `mirror.board.status_map` — keep existing board columns via config
+- **`tools/sync-board.mjs` now reads an optional `mirror.board.status_map`** mapping each
+  harness status to a board **column name** (e.g. `pending: "Todo"`, `done: "Done"`).
+  Omitted ⇒ identity columns (unchanged default). This lets a team whose board already has
+  custom columns adopt the shipped mirror **without editing `sync-board.mjs`** — so a
+  `harness-install.sh` upgrade never clobbers the customization. Backed by a new
+  dependency-free nested-map YAML reader (`yamlGetMap`). Config migration seeds a commented
+  `status_map` example into the `mirror:` block.
+
 ## [0.12.0] — 2026-06-08
 
 ### Added — ✨ Pluggable board mirror + generic post-write sync hook

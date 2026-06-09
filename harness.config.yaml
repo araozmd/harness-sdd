@@ -96,6 +96,15 @@ mirror:
     project_number: 0     # the GitHub Project number (e.g. 1)
     repo: ""              # owner/repo that holds the mirrored issues (e.g. my-org/specs)
 
+    # Optional: map harness status -> board COLUMN name. Omit for identity (column ==
+    # status). Set this to keep EXISTING board columns without editing sync-board.mjs:
+    # status_map:
+    #   pending: "Todo"
+    #   spec-ready: "Spec ready"
+    #   in-progress: "In Progress"
+    #   in-review: "In review"
+    #   done: "Done"
+
 verification:
   init_script: ./init.sh
   # Commands the Reviewer must run before marking work done. Project-specific —
