@@ -545,17 +545,66 @@ The free-text idea is in `$ARGUMENTS`. If it is empty, ask the human for it.
    `/sdd-next`** next. Do NOT spawn the Architect and do NOT change any status —
    Inception seeds, never specs, and never moves a feature past `pending`.
 EOF
-  ok "Claude Code agents + /sdd-next + /sdd-new installed (.claude/)"
+
+  cat > "$TARGET/.claude/commands/sdd-plan.md" <<'EOF'
+---
+description: Whole-project inception as Planner — produce vision + architecture + ADRs and seed a block of draft epics (interactive)
+---
+
+Act as **Planner** (`.harness/agents/planner.md`). That role file is the durable
+contract; this command carries the interactive front-end. Resolve all relative paths
+against `.harness/`.
+
+The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the human for it.
+
+1. Run `.harness/init.sh`. If it exits non-zero, STOP and report — do not plan into a
+   broken environment.
+2. Read `.harness/harness.config.yaml` and the TaskStore (`.harness/state/tasks.json`,
+   per `.harness/store/local.md`).
+3. **Re-run guard.** If `.harness/specs/vision.md` or `.harness/specs/architecture.md`
+   already exists, a default run STOPS and reports that the project already has a plan —
+   point the human at `/sdd-drill` (F03) to deepen existing epics, or at an explicit
+   amend mode that **appends** (never overwrites or renumbers). Do not silently
+   overwrite.
+4. Run a short, **adaptive** Q&A with the human to clarify: the problem and who it is
+   for, the outcomes, the non-goals, and the roadmap shape. Where the shape forks, offer
+   **at most 3** options as **text-only** (markdown/ASCII) mockups — never images. Keep
+   it short; ask only what you need to write the vision and sketch the roadmap.
+5. **Write** `.harness/specs/vision.md` from `.harness/specs/_templates/vision.md`
+   (north star: problem, users, outcomes, non-goals; it complements
+   `.harness/specs/product.md`/`glossary.md`).
+6. **Write** `.harness/specs/architecture.md` from
+   `.harness/specs/_templates/architecture.md` (system shape + stable upfront
+   decisions), and one ADR per decision at `.harness/specs/adr/NNNN-<title>.md` from
+   `.harness/specs/_templates/adr.md` (4-digit, above the max existing ADR number);
+   `architecture.md` references each ADR by its `ADR-NNNN` id. Stay at whole-system
+   depth — defer per-epic deltas to `/sdd-drill` (F03).
+7. **Seed** the roadmap: for each epic, write a `.harness/state/tasks.json` row with
+   `status: "draft"` and `features: []` (ids as a next-sequential block strictly above
+   the max existing `E##`, append-only, no reuse), and create
+   `.harness/specs/epics/<id>-<slug>/epic.md` = title + one-paragraph business brief
+   only (no `F01`, no feature spec).
+8. **Re-validate** `.harness/state/tasks.json` against
+   `.harness/store/tasks.schema.json`. If it fails, report the failure and do NOT claim
+   a successful plan.
+9. **Report** the artifacts written (`.harness/specs/vision.md`,
+   `.harness/specs/architecture.md`, each `.harness/specs/adr/NNNN-*.md`), the seeded
+   `draft` epics (ids + titles + `epic.md` paths), and tell the human to **run
+   `/sdd-drill <epic-id>`** next. Do NOT spawn the Architect, do NOT write any feature
+   spec, and do NOT advance any epic past `draft` — the Planner produces, never specs.
+EOF
+  ok "Claude Code agents + /sdd-next + /sdd-new + /sdd-plan installed (.claude/)"
 
   # ── 5b. OpenCode commands (regenerated each run) ────────────────────────────
   # Claude Code reads .claude/commands/; OpenCode reads .opencode/command/. Mirror
-  # the just-written command bodies there so /sdd-next and /sdd-new show up in
-  # OpenCode too. With no `agent:` frontmatter the command runs under the primary
+  # the just-written command bodies there so /sdd-next, /sdd-new and /sdd-plan show up
+  # in OpenCode too. With no `agent:` frontmatter the command runs under the primary
   # agent, which is the orchestrator in the opencode.json below.
   mkdir -p "$TARGET/.opencode/command"
   cp "$TARGET/.claude/commands/sdd-next.md" "$TARGET/.opencode/command/sdd-next.md"
   cp "$TARGET/.claude/commands/sdd-new.md"  "$TARGET/.opencode/command/sdd-new.md"
-  ok "OpenCode commands /sdd-next + /sdd-new installed (.opencode/)"
+  cp "$TARGET/.claude/commands/sdd-plan.md" "$TARGET/.opencode/command/sdd-plan.md"
+  ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan installed (.opencode/)"
 
   # ── 6. opencode.json (create if absent; never clobber an existing one) ──────
   if [ ! -f "$TARGET/opencode.json" ]; then

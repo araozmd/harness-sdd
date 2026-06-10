@@ -109,7 +109,7 @@ verification:
   init_script: ./init.sh
   # Commands the Reviewer must run before marking work done. Project-specific —
   # edit these per target repo.
-  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh && sh tests/test_mirror.sh && sh tests/test_epic_lifecycle.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry + board-mirror + epic lifecycle suites
+  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh && sh tests/test_mirror.sh && sh tests/test_epic_lifecycle.sh && sh tests/test_sdd_plan.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry + board-mirror + epic lifecycle + sdd-plan suites
 
   lint_command: ""        # e.g. "ruff check ." or "npm run lint"
   typecheck_command: ""   # e.g. "mypy ." or "tsc --noEmit"

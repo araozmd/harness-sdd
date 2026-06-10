@@ -4,6 +4,31 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.16.0] — 2026-06-10
+
+### Added — ✨ `/sdd-plan` whole-project inception skill (vision + architecture + draft epics)
+- **New portable Planner role (`agents/planner.md`)** — a sibling of Inception that
+  operates at the whole-roadmap altitude. It is a **producer that never specs**: it
+  writes `specs/vision.md`, `specs/architecture.md` + one-decision ADRs at
+  `specs/adr/NNNN-<title>.md`, and seeds a block of `draft` epics — and it never writes
+  a feature `.spec/.plan/.tasks/.tests`, never spawns the Architect, and never advances
+  an epic past `draft` (F03 `/sdd-drill` owns the `draft → planned` flip).
+- **New `/sdd-plan` slash command (`.claude/commands/sdd-plan.md`)** — the interactive
+  wrapper that acts as Planner, reads the idea from `$ARGUMENTS`, runs the ≤3 text-only
+  adaptive Q&A, and reports the seeded epics + artifact paths.
+- **New artifact templates** — `specs/_templates/vision.md` (problem/users/outcomes/
+  non-goals; complements `product.md`/`glossary.md`), `specs/_templates/architecture.md`
+  (system shape + stable upfront decisions + ADR index by `ADR-NNNN` id), and
+  `specs/_templates/adr.md` (one-decision context/decision/consequences).
+- **Draft-epic seeding** writes each epic with `status: "draft"` and `features: []` —
+  the schema-valid empty-features shape (no placeholder `F01`, the deliberate difference
+  from `/sdd-new`'s new-epic altitude) — allocating ids as a next-sequential block above
+  the current maximum, append-only, no reuse.
+- Purely **additive / backward-compatible**: `/sdd-new`, `/sdd-next`, and Inception are
+  unchanged; a repo that never runs `/sdd-plan` validates and behaves exactly as before.
+  `docs/WORKFLOW.md` + `README.md` updated; new suite `tests/test_sdd_plan.sh` wired into
+  `verification.test_command`.
+
 ## [0.15.0] — 2026-06-10
 
 ### Added — ✨ Human-readable telemetry durations (`HH:MM:SS`) + table total row
