@@ -33,6 +33,17 @@ The Orchestrator is never delegated; only this Builder phase is.
 5. Run `./init.sh` (and the project test command) to self-check before moving on.
 6. Tick the task in `<feature>.tasks.md` and append progress to `progress/<run>/`.
 
+### `sdd: false` items — work from the inbox brief (no `tasks.md`)
+
+A feature with `sdd: false` (e.g. a fix seeded by the Fixer, `agents/fixer.md`) has **no**
+four-file spec and **no** `<feature>.tasks.md` — the Orchestrator routes `pending + sdd:
+false` straight to you. For such an item, treat the **inbox brief** at
+`progress/inbox/<id>.md` (problem + intended fix + how to verify) as your worklist in place
+of a `tasks.md`, implement the fix it describes, and still **write at least one test that
+proves the fix** before hand-off. Everything else in Loop A is unchanged. (This clause is
+**additive**: it does not alter the `sdd: true` four-file path above — an `sdd: true`
+feature still works its `<feature>.tasks.md` against the approved four-file spec.)
+
 ## Loop B — delegate (an external executor implements)
 
 1. Confirm the feature status is `in-progress`. If only `spec-ready`, STOP.

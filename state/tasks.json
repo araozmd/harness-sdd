@@ -158,7 +158,7 @@
         {
           "id": "E06-F05",
           "title": "/sdd-fix lightweight lane (maintenance epic, brief-only intake)",
-          "status": "spec-ready",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [

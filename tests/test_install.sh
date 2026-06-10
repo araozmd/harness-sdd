@@ -67,6 +67,14 @@ grep -qF '$ARGUMENTS' "$T/.claude/commands/sdd-drill.md" \
   || fail "sdd-drill does not carry \$ARGUMENTS"
 [ -f "$T/.harness/agents/driller.md" ] \
   || fail "driller role not installed into profile"
+# R15/R16: installed /sdd-fix must act as Fixer, resolved against .harness/, carry args
+[ -f "$T/.claude/commands/sdd-fix.md" ] || fail "sdd-fix command missing"
+grep -qF '.harness/agents/fixer.md' "$T/.claude/commands/sdd-fix.md" \
+  || fail "sdd-fix does not resolve fixer against .harness/"
+grep -qF '$ARGUMENTS' "$T/.claude/commands/sdd-fix.md" \
+  || fail "sdd-fix does not carry \$ARGUMENTS"
+[ -f "$T/.harness/agents/fixer.md" ] \
+  || fail "fixer role not installed into profile"
 grep -qF '.harness/agents/orchestrator.md' "$T/.claude/agents/orchestrator.md" \
   || fail "agent shim does not resolve against .harness/"
 grep -qF '.harness/agents/inception.md' "$T/.claude/commands/sdd-new.md" \
@@ -92,6 +100,7 @@ pass "Claude Code glue generated (R7)"
 [ -f "$T/.opencode/command/sdd-new.md" ]  || fail "opencode sdd-new command missing"
 [ -f "$T/.opencode/command/sdd-plan.md" ] || fail "opencode sdd-plan command missing"
 [ -f "$T/.opencode/command/sdd-drill.md" ] || fail "opencode sdd-drill command missing"
+[ -f "$T/.opencode/command/sdd-fix.md" ] || fail "opencode sdd-fix command missing"
 cmp -s "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" \
   || fail "opencode sdd-next differs from claude sdd-next"
 cmp -s "$T/.claude/commands/sdd-new.md" "$T/.opencode/command/sdd-new.md" \
@@ -100,6 +109,8 @@ cmp -s "$T/.claude/commands/sdd-plan.md" "$T/.opencode/command/sdd-plan.md" \
   || fail "opencode sdd-plan differs from claude sdd-plan"
 cmp -s "$T/.claude/commands/sdd-drill.md" "$T/.opencode/command/sdd-drill.md" \
   || fail "opencode sdd-drill differs from claude sdd-drill"
+cmp -s "$T/.claude/commands/sdd-fix.md" "$T/.opencode/command/sdd-fix.md" \
+  || fail "opencode sdd-fix differs from claude sdd-fix"
 pass "OpenCode commands generated (R7)"
 
 # target verification commands reset to blank                                                  # R8

@@ -119,6 +119,19 @@ Full SDD for a one-line tweak is overkill. Each task carries `sdd: true|false`:
 - `sdd: true` → full flow: Architect → gate → Builder → Reviewer.
 - `sdd: false` → Orchestrator sends the Builder straight at it, then Reviewer.
 
+### Lightweight fix lane (`/sdd-fix`)
+
+For a one-line bug or hotfix, even seeding a full feature is overkill. `/sdd-fix
+"<desc>"` (the **Fixer**, `agents/fixer.md`) is a thin front-end over the `sdd: false`
+primitive: it seeds the fix as an `sdd: false` feature under a single **reserved
+maintenance epic** (`E99`, `status: planned`, created on first use and reused by id
+thereafter), carrying only a one-paragraph **inbox brief** at `progress/inbox/<id>.md` —
+**no 4-file spec**, no drill. The fix is stamped `autonomous: true` by default (a
+`--gated` opt-out keeps it parked at the gate), then handed off **in-session** to the
+existing `sdd: false → Builder → Reviewer` path. The lane **adds no new status and no new
+routing** — it reuses the `sdd: false` primitive above; the Builder works from the inbox
+brief and the Reviewer verifies the fix behaviourally.
+
 ## Context hygiene
 
 Agents degrade as their context fills (noticeably past ~20%, badly past ~40%).

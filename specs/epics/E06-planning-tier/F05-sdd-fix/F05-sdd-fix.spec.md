@@ -2,7 +2,7 @@
 id: E06-F05
 title: "/sdd-fix lightweight lane (maintenance epic, brief-only intake)"
 epic: E06-planning-tier
-status: spec-ready          # pending → spec-ready → in-progress → in-review → done
+status: done               # pending → spec-ready → in-progress → in-review → done
 sdd: true
 autonomous: false           # installed-body role + command + builder/reviewer notes + docs change; human reviews
 depends_on: [E06-F01]
