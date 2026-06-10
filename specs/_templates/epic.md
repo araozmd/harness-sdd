@@ -1,7 +1,7 @@
 ---
 id: E00
 title: <Epic title>
-status: pending          # pending → in-progress → done (rollup of its features)
+status: pending          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: <handle>
 ---
 

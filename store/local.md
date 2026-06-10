@@ -13,10 +13,24 @@ Validated by `store/tasks.schema.json` (and by `init.sh`).
   `autonomous: true` (that flag skips the human gate, so the Orchestrator may move
   it straight to `in-progress` for Builder work). A `spec-ready` feature *without*
   `autonomous: true` is **not** actionable — it is parked at the human gate.
+  **Epic gate:** features of a `draft` epic are **never actionable** — `next()`
+  never selects them, regardless of the feature's own `status`, `sdd`,
+  `autonomous`, or `depends_on` (`autonomous: true` does **not** override this
+  gate; it skips the human approval gate only). Epics in `pending`, `planned`,
+  `in-progress`, or `done` impose **no new gate** — their features are evaluated
+  by the per-feature rules above, unchanged.
 - **get(id)** — find the feature object by `id`.
 - **set_status(id, status)** — edit the feature's `status` in the JSON, then
   re-validate (`python3 -c "import json;json.load(open('state/tasks.json'))"`).
   Keep the feature's `.spec.md` frontmatter `status` in sync.
+
+### Epic lifecycle
+The canonical epic lifecycle is `draft → planned → in-progress → done`. A `draft`
+epic is an inception sketch (title + business brief only) whose features are never
+selectable; a `planned` epic is drilled down and human-approved. Epic-level
+`pending` is a **legacy alias of `planned`**, kept indefinitely for backward
+compatibility: `pending` and `planned` are **gating-equivalent** — selection
+treats them identically.
 
 ## Cross-repo features → `slices[]` (umbrella mode)
 A feature may optionally carry a `slices` array — one entry per child repo for a

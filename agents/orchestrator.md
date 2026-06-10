@@ -12,7 +12,13 @@ next, and delegate to the specialist agents.
 2. **Read config.** Read `harness.config.yaml` to learn which store backends are
    active and whether `require_spec_approval` is on.
 3. **Read state.** Load the TaskStore (see `store/`). Find the highest-priority
-   actionable task and read its current `status`.
+   actionable task and read its current `status`. **Epic gate:** never select a
+   feature whose parent epic's status is `draft` — its features are **not
+   actionable**, regardless of their own `status`, `sdd`, `autonomous`, or
+   `depends_on` values (`autonomous: true` skips the *human approval* gate, not
+   this *planning* gate). Features of `planned` epics are treated exactly like
+   features of `pending` epics (the epic-level alias — see `store/local.md`);
+   `pending`, `planned`, `in-progress`, and `done` epics impose no new gate.
 4. **Route by status** (see the state machine in `docs/WORKFLOW.md`):
 
    | Status | Action |
@@ -23,6 +29,10 @@ next, and delegate to the specialist agents.
    | `in-progress` | Spawn **Builder** with the approved specs only. On finish, set `in-review`. |
    | `in-review` | Spawn **Reviewer**. If it approves → `done`. If it rejects → back to `in-progress` with the Reviewer's feedback file (see **Build↔review rounds** below). |
    | needs research | Spawn **Scout** (read-only) first; it writes findings to `progress/`. |
+
+   The table routes on **feature** status and applies only to features that passed
+   the epic gate in step 3 — a `draft` epic's features are skipped entirely and
+   never reach this table.
 
    **Gate-span telemetry (best-effort, non-blocking — see "## Telemetry").** Capture
    the human spec-approval interval as two `gate` records keyed by `feature`:
