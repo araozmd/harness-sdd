@@ -45,6 +45,7 @@ cd harness-sdd
 claude                    # CLAUDE.md → AGENTS.md auto-loads
 # new idea? /sdd-new "<idea>"   # Inception triages it → seeds a pending task
 # whole project? /sdd-plan "<idea>"  # the whole-project inception skill: writes vision/architecture + ADRs and seeds draft epics
+# deepen one? /sdd-drill <epic-id>  # the per-epic drill-down skill: decomposes a draft epic into features + ADR deltas, then one epic-level approval (draft → planned)
 # then:     /sdd-next            # runs the Orchestrator on the next task
 ```
 

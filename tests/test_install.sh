@@ -59,6 +59,14 @@ grep -qF '.harness/agents/planner.md' "$T/.claude/commands/sdd-plan.md" \
   || fail "sdd-plan does not resolve planner against .harness/"
 grep -qF '$ARGUMENTS' "$T/.claude/commands/sdd-plan.md" \
   || fail "sdd-plan does not carry \$ARGUMENTS"
+[ -f "$T/.claude/commands/sdd-drill.md" ] || fail "sdd-drill command missing"
+# installed /sdd-drill must act as Driller, resolved against .harness/, and carry args
+grep -qF '.harness/agents/driller.md' "$T/.claude/commands/sdd-drill.md" \
+  || fail "sdd-drill does not resolve driller against .harness/"
+grep -qF '$ARGUMENTS' "$T/.claude/commands/sdd-drill.md" \
+  || fail "sdd-drill does not carry \$ARGUMENTS"
+[ -f "$T/.harness/agents/driller.md" ] \
+  || fail "driller role not installed into profile"
 grep -qF '.harness/agents/orchestrator.md' "$T/.claude/agents/orchestrator.md" \
   || fail "agent shim does not resolve against .harness/"
 grep -qF '.harness/agents/inception.md' "$T/.claude/commands/sdd-new.md" \
@@ -83,12 +91,15 @@ pass "Claude Code glue generated (R7)"
 [ -f "$T/.opencode/command/sdd-next.md" ] || fail "opencode sdd-next command missing"
 [ -f "$T/.opencode/command/sdd-new.md" ]  || fail "opencode sdd-new command missing"
 [ -f "$T/.opencode/command/sdd-plan.md" ] || fail "opencode sdd-plan command missing"
+[ -f "$T/.opencode/command/sdd-drill.md" ] || fail "opencode sdd-drill command missing"
 cmp -s "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" \
   || fail "opencode sdd-next differs from claude sdd-next"
 cmp -s "$T/.claude/commands/sdd-new.md" "$T/.opencode/command/sdd-new.md" \
   || fail "opencode sdd-new differs from claude sdd-new"
 cmp -s "$T/.claude/commands/sdd-plan.md" "$T/.opencode/command/sdd-plan.md" \
   || fail "opencode sdd-plan differs from claude sdd-plan"
+cmp -s "$T/.claude/commands/sdd-drill.md" "$T/.opencode/command/sdd-drill.md" \
+  || fail "opencode sdd-drill differs from claude sdd-drill"
 pass "OpenCode commands generated (R7)"
 
 # target verification commands reset to blank                                                  # R8
