@@ -27,6 +27,12 @@ Specs follow a **Product → Epic → Feature** hierarchy, where each feature is
 4-file spec (`.spec` / `.plan` / `.tasks` / `.tests`) with **EARS** acceptance
 criteria and full requirement→test **traceability**. See `docs/SPEC-FORMAT.md`.
 
+Epics carry their own lifecycle — `draft → planned → in-progress → done` (epic-level
+`pending` stays valid as a legacy alias of `planned`). A `draft` epic is an inception
+sketch: the Orchestrator **never selects features from a `draft` epic**, no matter
+what the feature itself says — the foundation for rolling-wave planning (epic
+roadmap: `specs/epics/E06-planning-tier/epic.md`). See `docs/WORKFLOW.md`.
+
 The Reviewer runs a **cross-file consistency** check (a change must not contradict the
 contracts it invokes) and the build↔review loop is **multi-round until green** — see
 `agents/reviewer.md`.
