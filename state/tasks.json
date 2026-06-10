@@ -154,6 +154,17 @@
             "E06-F02"
           ],
           "spec_path": "specs/epics/E06-planning-tier/F03-sdd-drill/"
+        },
+        {
+          "id": "E06-F05",
+          "title": "/sdd-fix lightweight lane (maintenance epic, brief-only intake)",
+          "status": "spec-ready",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E06-F01"
+          ],
+          "spec_path": "specs/epics/E06-planning-tier/F05-sdd-fix/"
         }
       ]
     }
