@@ -2,7 +2,7 @@
 id: E06-F01
 title: "Epic lifecycle: draft/planned states + next() gating"
 epic: E06-planning-tier
-status: spec-ready       # pending → spec-ready → in-progress → in-review → done
+status: in-review        # pending → spec-ready → in-progress → in-review → done
 sdd: true
 autonomous: false        # installed-body schema + role-prose change; human reviews
 depends_on: []
