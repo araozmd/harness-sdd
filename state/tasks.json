@@ -121,12 +121,12 @@
     {
       "id": "E06",
       "title": "Planning tier (rolling-wave inception + per-epic drill-down)",
-      "status": "pending",
+      "status": "in-progress",
       "features": [
         {
           "id": "E06-F01",
           "title": "Epic lifecycle: draft/planned states + next() gating",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],

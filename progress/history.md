@@ -25,3 +25,5 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-06-10 E06-F01 — Architect wrote 4-file spec (R1–R14, D1–D3 decisions) from intent brief → status spec-ready ⏸ human gate.
 - 2026-06-10 E06-F01 — gate-approved by human (D1–D3 accepted) → in-progress; dispatching Builder.
 - 2026-06-10 E06-F01 — Builder round 1 (T1–T12, VERSION 0.14.0, new tests/test_epic_lifecycle.sh, all 8 suites green; flagged test_inception.sh diff-vs-main removal) → in-review.
+- 2026-06-10 E06-F01 — Reviewer APPROVED round 1: init.sh + all 8 suites green (run independently); R1–R14 each traced to a passing check; zero-dep fallback path exercised with jsonschema shadowed (warn-only invariant + rejection both proven); cross-file story coherent (draft → planned → in-progress → done, pending = legacy alias); feature/slice enums byte-identical; test_inception.sh diff-vs-main removal ACCEPTED (documented permanent-suite anti-pattern, surgical); VERSION 0.14.0 (one MINOR ✨) + CHANGELOG per policy → recommend done.
+- 2026-06-10 E06-F01 — done (Reviewer verdict persisted). Epic E06 → in-progress (F02–F06 roadmap deliberately unseeded, rolling-wave).
