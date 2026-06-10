@@ -55,6 +55,19 @@ try:
 except (ValueError, OSError) as e:
     print("  schema not readable: %s" % e, file=sys.stderr); sys.exit(1)
 
+# Warn-only draft-epic invariant (runs on BOTH validation paths, before the
+# jsonschema branch below sys.exit()s): a `draft` epic is an inception sketch,
+# so its features should still be `pending`. A violation is NOT a validation
+# error — the next() draft gate already neutralizes it — so we warn and continue.
+if isinstance(data, dict):
+    for ep in data.get("epics") or []:
+        if isinstance(ep, dict) and ep.get("status") == "draft":
+            for ft in (ep.get("features") or []):
+                if isinstance(ft, dict) and ft.get("status") != "pending":
+                    print("⚠️  draft epic %s has feature %s with status '%s' (expected 'pending'; "
+                          "the draft gate keeps it unselectable)"
+                          % (ep.get("id"), ft.get("id"), ft.get("status")), file=sys.stderr)
+
 # Prefer the real validator when available; fall back to a built-in structural
 # check that encodes the same invariants so init.sh stays zero-dependency.
 try:
@@ -69,7 +82,7 @@ except ImportError:
     pass
 
 errors = []
-EPIC_STATUS = {"pending", "in-progress", "done"}
+EPIC_STATUS = {"draft", "planned", "pending", "in-progress", "done"}
 FEAT_STATUS = {"pending", "spec-ready", "in-progress", "in-review", "done"}
 SLICE_STATUS = {"pending", "spec-ready", "in-progress", "in-review", "done", "failed"}
 

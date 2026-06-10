@@ -117,6 +117,22 @@
           "spec_path": "specs/epics/E05-observability/F02-telemetry/"
         }
       ]
+    },
+    {
+      "id": "E06",
+      "title": "Planning tier (rolling-wave inception + per-epic drill-down)",
+      "status": "in-progress",
+      "features": [
+        {
+          "id": "E06-F01",
+          "title": "Epic lifecycle: draft/planned states + next() gating",
+          "status": "done",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E06-planning-tier/F01-epic-lifecycle/"
+        }
+      ]
     }
   ]
 }

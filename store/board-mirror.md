@@ -41,6 +41,12 @@ The status columns default to the **harness status names verbatim** (`pending`,
 tied to any one team's column naming. The tool owns the board's Status/Epic field options
 and derives them from `tasks.json`, so new epics/states appear automatically.
 
+The mirror projects **feature** statuses onto board columns — **epic** statuses never map
+to columns (the epic is a label/single-select field, not a column). The epic-lifecycle
+states `draft` and `planned` therefore need no provider work and no new `status_map`
+entries: a `draft` or `planned` epic's features simply appear in whatever column their
+own feature status maps to.
+
 ### Keeping your existing columns (`status_map`)
 
 The tool **owns** the Status field's options, so by default it will rename an existing

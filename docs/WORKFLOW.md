@@ -23,6 +23,19 @@ Orchestrator spawns the Architect for that feature, it passes
 first and specs from it. That read is what wires the captured intent into spec
 generation.
 
+## Epic lifecycle
+
+Epics have their own, simpler lifecycle: `draft → planned → in-progress → done`.
+
+- **`draft`** — an inception sketch: title + business brief only, not yet drilled
+  down. The Orchestrator **never selects work from a `draft` epic** — its features
+  are not actionable, no matter what the feature itself says (`autonomous: true`
+  skips the human approval gate, not this planning gate).
+- **`planned`** — drilled down and human-approved; its features follow the feature
+  state machine below, exactly as features of a `pending` epic do.
+- Epic-level **`pending` is a legacy alias of `planned`** — gating-equivalent and
+  kept indefinitely for backward compatibility. New docs use `planned`.
+
 ## State machine
 
 A feature moves through these states. The Orchestrator routes on the current state;

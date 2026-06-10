@@ -4,6 +4,30 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.14.0] — 2026-06-10
+
+### Added — ✨ Epic lifecycle: `draft`/`planned` states + `next()` draft gate
+- **Epic `status` enum gains `draft` and `planned`** (`store/tasks.schema.json`,
+  purely additive): canonical lifecycle is now `draft → planned → in-progress → done`,
+  with epic-level `pending` kept indefinitely as a **legacy alias of `planned`**
+  (gating-equivalent). Feature/slice status enums are unchanged; existing consumer
+  `tasks.json` files validate as-is — no migration.
+- **`next()` draft gate** (normative in `store/local.md` + `agents/orchestrator.md`,
+  the portable contract files): features of a `draft` epic are **never actionable** —
+  the Orchestrator never selects them, regardless of the feature's own
+  `status`/`sdd`/`autonomous`/`depends_on` (`autonomous: true` skips the *human
+  approval* gate, not this *planning* gate). `pending`/`planned`/`in-progress`/`done`
+  epics impose no new gate.
+- **Warn-only `init.sh` invariant**: a `draft` epic containing a feature whose status
+  is not `pending` prints a ⚠️ warning naming the epic and feature, and still exits 0
+  (the gate already neutralizes it; schema validation does not reject it). The
+  zero-dependency fallback validator accepts the new epic statuses.
+- Docs/template updates: epic-lifecycle section in `docs/WORKFLOW.md`, lifecycle
+  status comment in `specs/_templates/epic.md`, and a `store/board-mirror.md` note
+  that epic statuses (including `draft`/`planned`) never map to board columns.
+- New test suite `tests/test_epic_lifecycle.sh` (R1–R14), wired into
+  `verification.test_command`.
+
 ## [0.13.0] — 2026-06-08
 
 ### Added — ✨ `mirror.board.status_map` — keep existing board columns via config
