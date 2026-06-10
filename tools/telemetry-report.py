@@ -188,8 +188,14 @@ def human_latency_stats(closes):
     return mean, median, len(human), sum(1 for c in closes if c["autonomous"])
 
 
-def fmt_secs(s):
-    return "%ds" % round(s)
+def fmt_dur(s):
+    """Render a duration (seconds) as HH:MM:SS so the tables read in clock units
+    instead of raw seconds. Hours are NOT capped at 24 (a multi-day gate latency
+    shows e.g. 48:00:00), keeping the format unambiguous and lexically sortable."""
+    s = int(round(s))
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return "%02d:%02d:%02d" % (h, m, sec)
 
 
 def render_period(label, phases, closes):
@@ -198,7 +204,7 @@ def render_period(label, phases, closes):
     lines.append("### %s" % label)
     lines.append("")
     total = sum(p["duration_s"] for p in phases)
-    lines.append("- Total autonomous agent time: %s" % fmt_secs(total))
+    lines.append("- Total autonomous agent time: %s" % fmt_dur(total))
     lines.append("- Phase count: %d" % len(phases))
     lines.append("")
     lines.append("| phase | count | total duration |")
@@ -208,14 +214,15 @@ def render_period(label, phases, closes):
         if not sel:
             continue
         lines.append("| %s | %d | %s |"
-                     % (ph, len(sel), fmt_secs(sum(p["duration_s"] for p in sel))))
+                     % (ph, len(sel), fmt_dur(sum(p["duration_s"] for p in sel))))
+    lines.append("| **total** | %d | %s |" % (len(phases), fmt_dur(total)))
     lines.append("")
     mean, median, nhuman, nauto = human_latency_stats(closes)
     if mean is None:
         lines.append("- Human-gate latency: (no human-reviewed gate closes)")
     else:
         lines.append("- Human-gate latency (n=%d): mean %s, median %s"
-                     % (nhuman, fmt_secs(mean), fmt_secs(median)))
+                     % (nhuman, fmt_dur(mean), fmt_dur(median)))
     if nauto:
         lines.append("- Autonomous gate transitions (excluded from latency): %d" % nauto)
     lines.append("")
@@ -282,10 +289,11 @@ def report_session(records, out):
         if not sel:
             continue
         out.append("| %s | %d | %s |"
-                   % (ph, len(sel), fmt_secs(sum(p["duration_s"] for p in sel))))
+                   % (ph, len(sel), fmt_dur(sum(p["duration_s"] for p in sel))))
+    total = sum(p["duration_s"] for p in phases)
+    out.append("| **total** | %d | %s |" % (len(phases), fmt_dur(total)))
     out.append("")
-    out.append("- Total autonomous agent time: %s"
-               % fmt_secs(sum(p["duration_s"] for p in phases)))
+    out.append("- Total autonomous agent time: %s" % fmt_dur(total))
     # build<->review round count = max round seen on builder/reviewer phases
     rounds = [p["round"] for p in phases
               if p["phase"] in ("builder", "reviewer")
@@ -297,7 +305,7 @@ def report_session(records, out):
         out.append("- Human-gate latency: (none observed)")
     else:
         out.append("- Human-gate latency (n=%d): mean %s, median %s"
-                   % (nhuman, fmt_secs(mean), fmt_secs(median)))
+                   % (nhuman, fmt_dur(mean), fmt_dur(median)))
     if nauto:
         out.append("- Autonomous gate transitions (excluded from latency): %d" % nauto)
     out.append("")

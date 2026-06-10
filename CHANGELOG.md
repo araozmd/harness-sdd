@@ -4,6 +4,20 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.15.0] — 2026-06-10
+
+### Added — ✨ Human-readable telemetry durations (`HH:MM:SS`) + table total row
+- **`tools/telemetry-report.py` renders every duration as `HH:MM:SS`** instead of
+  raw seconds (e.g. `00:13:11` not `791s`), across the session view and all calendar
+  rollups — per-phase durations and human-gate latency alike. Hours are not capped at
+  24 (a multi-day gate latency shows e.g. `48:00:00`), keeping the format unambiguous.
+- **Per-phase breakdown tables gain a `**total**` row** (count + summed duration) so
+  the session total lives in the table itself, not only the prose bullet below it.
+- The change is output-only and backward-compatible: the JSONL telemetry record format
+  (`duration_s`/`human_latency_s` in seconds) is unchanged; only the rendered report
+  differs. Suite `tests/test_telemetry.sh` updated (R4/R9/R10 expectations) with a new
+  `R4b` covering the `HH:MM:SS` format and the total row.
+
 ## [0.14.0] — 2026-06-10
 
 ### Added — ✨ Epic lifecycle: `draft`/`planned` states + `next()` draft gate
