@@ -23,6 +23,24 @@ Orchestrator spawns the Architect for that feature, it passes
 first and specs from it. That read is what wires the captured intent into spec
 generation.
 
+## Whole-project inception (`/sdd-plan`)
+
+Where `/sdd-new` triages **one idea**, `/sdd-plan` captures the **whole project** up
+front. It is the **Planner** (`agents/planner.md`), a producer that sits **upstream** of
+both the per-epic `/sdd-drill` (F03) and the `/sdd-next` loop. A human runs
+`/sdd-plan "<idea>"`, answers a short adaptive Q&A, and the Planner writes the durable
+design artifacts — `specs/vision.md`, `specs/architecture.md` + ADRs at
+`specs/adr/NNNN-*.md` — and seeds a block of `draft` epics (`state/tasks.json` rows with
+`features: []` + a one-paragraph `epic.md` each).
+
+The Planner is a **producer that never specs**: it writes no feature
+`.spec/.plan/.tasks/.tests`, never spawns the Architect, and **never advances an epic
+past `draft`**. Seeded `draft` epics are inert — the F01 `next()` gate already keeps the
+Orchestrator from selecting their features. The flow reads `/sdd-plan` (sketch the
+roadmap) → `/sdd-drill <epic-id>` (deepen one epic, flip `draft → planned`) → `/sdd-next`
+(execute). It is purely additive: a repo that never runs `/sdd-plan` behaves exactly as
+before.
+
 ## Epic lifecycle
 
 Epics have their own, simpler lifecycle: `draft → planned → in-progress → done`.

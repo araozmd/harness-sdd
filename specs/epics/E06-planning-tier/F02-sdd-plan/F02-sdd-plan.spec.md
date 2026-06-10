@@ -2,7 +2,7 @@
 id: E06-F02
 title: "/sdd-plan inception skill (vision + architecture + draft epics)"
 epic: E06-planning-tier
-status: spec-ready       # pending → spec-ready → in-progress → in-review → done
+status: done               # pending → spec-ready → in-progress → in-review → done
 sdd: true
 autonomous: false        # installed-body role + templates + docs change; human reviews
 depends_on: [E06-F01]

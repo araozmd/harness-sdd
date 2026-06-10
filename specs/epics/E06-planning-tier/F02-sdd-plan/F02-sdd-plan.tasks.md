@@ -3,16 +3,16 @@
 > Atomic, sequential, independent steps. The Builder works these top to bottom, one at
 > a time. Each task names the R-id(s) it satisfies. Check off when done.
 
-- [ ] **T1** (R4, R18) — Create `specs/_templates/vision.md`: a vision template with
+- [x] **T1** (R4, R18) — Create `specs/_templates/vision.md`: a vision template with
   sections for **Problem**, **Users/audience**, **Outcomes**, and **Non-goals**, plus a
   one-line note that `vision.md` **complements** (does not supersede or absorb)
   `specs/product.md` and `specs/glossary.md`.
-- [ ] **T2** (R5) — Create `specs/_templates/architecture.md`: a template with a
+- [x] **T2** (R5) — Create `specs/_templates/architecture.md`: a template with a
   **System shape** section, a **Stable upfront decisions** section, and an **ADRs**
   index section that references decisions by `ADR-NNNN` id.
-- [ ] **T3** (R6) — Create `specs/_templates/adr.md`: a **one-decision** ADR template
+- [x] **T3** (R6) — Create `specs/_templates/adr.md`: a **one-decision** ADR template
   (e.g. `ADR-NNNN` title + Context / Decision / Consequences).
-- [ ] **T4** (R1, R3, R9, R10, R11, R12, R13, R14, R15, R16, R17, R18, R20) — Create
+- [x] **T4** (R1, R3, R9, R10, R11, R12, R13, R14, R15, R16, R17, R18, R20) — Create
   `agents/planner.md`, the portable Planner role contract. It must state/specify:
   - It is the **producer** of `specs/vision.md`, `specs/architecture.md` + ADRs, and a
     block of `draft` epics, and is written for any **AGENTS.md-compatible** CLI
@@ -47,31 +47,31 @@
     existing artifacts or epics (R17, D2).
   - `vision.md` **complements** `product.md`/`glossary.md` and the Planner does not
     rewrite or delete them (R18, D3).
-- [ ] **T5** (R2, R3) — Create `.claude/commands/sdd-plan.md`: a slash-command wrapper
+- [x] **T5** (R2, R3) — Create `.claude/commands/sdd-plan.md`: a slash-command wrapper
   that acts as **Planner**, points at `agents/planner.md` as the durable contract, reads
   the idea from `$ARGUMENTS`, runs `./init.sh` first (STOP on non-zero), carries the
   **≤3 text-only options** rule, and reports the seeded epics + artifact paths without
   spawning the Architect or advancing any status.
-- [ ] **T6** (R21) — Edit `docs/WORKFLOW.md`: add a short "Whole-project inception
+- [x] **T6** (R21) — Edit `docs/WORKFLOW.md`: add a short "Whole-project inception
   (`/sdd-plan`)" note placing `/sdd-plan` upstream of `/sdd-drill` (F03) and the
   `/sdd-next` loop — a producer that writes `vision.md`/`architecture.md` + ADRs and
   seeds `draft` epics, never writes feature specs, and never advances an epic past
   `draft`.
-- [ ] **T7** (R22) — Edit `README.md`: add a one-line `/sdd-plan` description (the
+- [x] **T7** (R22) — Edit `README.md`: add a one-line `/sdd-plan` description (the
   whole-project inception skill) beside the existing `/sdd-new` / `/sdd-next` mentions.
-- [ ] **T8** (R1–R23) — Create `tests/test_sdd_plan.sh` per `F02-sdd-plan.tests.md`
+- [x] **T8** (R1–R23) — Create `tests/test_sdd_plan.sh` per `F02-sdd-plan.tests.md`
   (POSIX sh; grep contract assertions over the role/command/templates/docs + one python
   fixture that seeds a synthetic `draft` epic with `features: []` into a temp store and
   asserts it validates against `store/tasks.schema.json` + one `./init.sh` exit-0 run).
   Constraints: read `VERSION` dynamically (never assert a literal version), never
   `git diff` against `main`, zero new dependencies, never mutate the live
   `state/tasks.json`.
-- [ ] **T9** (wiring) — Edit `harness.config.yaml`: append `&& sh tests/test_sdd_plan.sh`
+- [x] **T9** (wiring) — Edit `harness.config.yaml`: append `&& sh tests/test_sdd_plan.sh`
   to `verification.test_command` and extend its trailing comment (e.g. `+ sdd-plan`).
-- [ ] **T10** (R23) — Bump `VERSION` by one MINOR (read the current value first; do not
+- [x] **T10** (R23) — Bump `VERSION` by one MINOR (read the current value first; do not
   hard-code). Add a `CHANGELOG.md` entry under `## [<new version>]` describing
   `/sdd-plan`, the vision/architecture/ADR artifacts, and the `features: []` draft-epic
   seeding.
-- [ ] **T11** — Write/finish tests per `F02-sdd-plan.tests.md`, then run `./init.sh` and
+- [x] **T11** — Write/finish tests per `F02-sdd-plan.tests.md`, then run `./init.sh` and
   the full `verification.test_command`; ensure green before hand-off. Do **not** change
   any status in `state/tasks.json`, and do **not** touch any DO-NOT-TOUCH file.

@@ -135,7 +135,7 @@
         {
           "id": "E06-F02",
           "title": "/sdd-plan inception skill (vision + architecture + draft epics)",
-          "status": "spec-ready",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
