@@ -53,6 +53,12 @@ pass "entrypoint merge preserves prose + adds block (R3)"
 # Claude Code glue points at .harness/                                                         # R7
 [ -f "$T/.claude/commands/sdd-next.md" ] || fail "sdd-next command missing"
 [ -f "$T/.claude/commands/sdd-new.md" ]  || fail "sdd-new command missing"
+[ -f "$T/.claude/commands/sdd-plan.md" ] || fail "sdd-plan command missing"
+# installed /sdd-plan must act as Planner, resolved against .harness/, and carry args
+grep -qF '.harness/agents/planner.md' "$T/.claude/commands/sdd-plan.md" \
+  || fail "sdd-plan does not resolve planner against .harness/"
+grep -qF '$ARGUMENTS' "$T/.claude/commands/sdd-plan.md" \
+  || fail "sdd-plan does not carry \$ARGUMENTS"
 grep -qF '.harness/agents/orchestrator.md' "$T/.claude/agents/orchestrator.md" \
   || fail "agent shim does not resolve against .harness/"
 grep -qF '.harness/agents/inception.md' "$T/.claude/commands/sdd-new.md" \
@@ -76,10 +82,13 @@ pass "Claude Code glue generated (R7)"
 # OpenCode glue: same slash commands installed under .opencode/command/                        # R7
 [ -f "$T/.opencode/command/sdd-next.md" ] || fail "opencode sdd-next command missing"
 [ -f "$T/.opencode/command/sdd-new.md" ]  || fail "opencode sdd-new command missing"
+[ -f "$T/.opencode/command/sdd-plan.md" ] || fail "opencode sdd-plan command missing"
 cmp -s "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" \
   || fail "opencode sdd-next differs from claude sdd-next"
 cmp -s "$T/.claude/commands/sdd-new.md" "$T/.opencode/command/sdd-new.md" \
   || fail "opencode sdd-new differs from claude sdd-new"
+cmp -s "$T/.claude/commands/sdd-plan.md" "$T/.opencode/command/sdd-plan.md" \
+  || fail "opencode sdd-plan differs from claude sdd-plan"
 pass "OpenCode commands generated (R7)"
 
 # target verification commands reset to blank                                                  # R8
