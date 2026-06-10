@@ -131,6 +131,17 @@
           "autonomous": false,
           "depends_on": [],
           "spec_path": "specs/epics/E06-planning-tier/F01-epic-lifecycle/"
+        },
+        {
+          "id": "E06-F02",
+          "title": "/sdd-plan inception skill (vision + architecture + draft epics)",
+          "status": "spec-ready",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E06-F01"
+          ],
+          "spec_path": "specs/epics/E06-planning-tier/F02-sdd-plan/"
         }
       ]
     }
