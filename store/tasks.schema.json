@@ -13,7 +13,10 @@
         "properties": {
           "id": { "type": "string", "pattern": "^E[0-9]+$" },
           "title": { "type": "string" },
-          "status": { "enum": ["pending", "in-progress", "done"] },
+          "status": {
+            "$comment": "Epic lifecycle: draft → planned → in-progress → done. `pending` is a legacy alias of `planned` (gating-equivalent, kept for backward compatibility). Feature/slice status enums are separate and unchanged.",
+            "enum": ["draft", "planned", "pending", "in-progress", "done"]
+          },
           "features": {
             "type": "array",
             "items": {
