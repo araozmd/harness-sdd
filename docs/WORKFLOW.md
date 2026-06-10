@@ -41,6 +41,29 @@ roadmap) → `/sdd-drill <epic-id>` (deepen one epic, flip `draft → planned`) 
 (execute). It is purely additive: a repo that never runs `/sdd-plan` behaves exactly as
 before.
 
+## Per-epic drill-down (`/sdd-drill`)
+
+Where `/sdd-plan` sketches the **whole roadmap** as `draft` epics, `/sdd-drill` deepens
+**one** of them. It is the **Driller** (`agents/driller.md`), a consumer that sits between
+`/sdd-plan` and the `/sdd-next` loop. A human runs `/sdd-drill <epic-id>` on a single
+`draft` epic; the Driller decomposes it into a list of `pending` feature entries (ids,
+one-line intents, `depends_on`), fills the epic's `epic.md` feature table, writes a
+per-feature inbox brief, and appends any per-epic **ADR deltas** the decomposition forces.
+
+The drill ends in **exactly one** human decision at the epic granularity:
+
+- **approve** → flip the epic `draft → planned` and stamp `autonomous: true` on every
+  seeded feature, so the loop runs end-to-end with no per-feature gate;
+- **keep gated** → flip the epic `draft → planned` while leaving every feature
+  `autonomous: false`, so each parks at the normal per-feature spec-approval gate.
+
+`/sdd-drill` is the **only step that flips an epic `draft → planned`** (the Planner never
+advances past `draft`). It **decomposes, never specs** — it **never writes feature specs**
+(no feature `.spec/.plan/.tasks/.tests`) and never spawns the Architect; the Architect
+specs each feature just-in-time during the run. The flow reads `/sdd-plan` (sketch) →
+`/sdd-drill <epic-id>` (deepen one epic) → `/sdd-next` (execute). It is purely additive: a
+repo that never runs `/sdd-drill` behaves exactly as before.
+
 ## Epic lifecycle
 
 Epics have their own, simpler lifecycle: `draft → planned → in-progress → done`.

@@ -2,7 +2,7 @@
 id: E06-F03
 title: "/sdd-drill skill (decompose draft epic, ADR deltas, epic-level approval)"
 epic: E06-planning-tier
-status: spec-ready         # pending → spec-ready → in-progress → in-review → done
+status: done               # pending → spec-ready → in-progress → in-review → done
 sdd: true
 autonomous: false          # installed-body role + command + docs change; human reviews
 depends_on: [E06-F01, E06-F02]

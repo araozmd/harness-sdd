@@ -3,7 +3,7 @@
 > Atomic, sequential, independent steps. The Builder works these top to bottom, one at
 > a time. Each task names the R-id(s) it satisfies. Check off when done.
 
-- [ ] **T1** (R1, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17,
+- [x] **T1** (R1, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17,
   R19) — Create `agents/driller.md`, the portable Driller role contract. It must
   state/specify:
   - It is the **consumer** that decomposes exactly **one** `draft` epic into a feature
@@ -51,35 +51,35 @@
   - **Decomposes-never-specs**: never create/modify any `.spec.md`/`.plan.md`/`.tasks.md`/
     `.tests.md`, never write EARS or a plan, never spawn the Architect — the existing
     Architect specs each feature just-in-time during the autonomous run (R17).
-- [ ] **T2** (R2, R3, R4, R5) — Create `.claude/commands/sdd-drill.md`: a slash-command
+- [x] **T2** (R2, R3, R4, R5) — Create `.claude/commands/sdd-drill.md`: a slash-command
   wrapper that acts as **Driller**, points at `agents/driller.md` as the durable
   contract, reads `<epic-id>` from `$ARGUMENTS`, runs `./init.sh` first (STOP on
   non-zero), STOPs on empty/missing/non-`draft` target (R4, R5), carries the **≤3
   text-only options** rule (R3), and presents the single approve / keep-gated decision —
   without spawning the Architect or writing any feature spec.
-- [ ] **T3** (R20) — Edit `docs/WORKFLOW.md`: add a short "Per-epic drill-down
+- [x] **T3** (R20) — Edit `docs/WORKFLOW.md`: add a short "Per-epic drill-down
   (`/sdd-drill`)" note (adjacent to the existing `/sdd-plan` note) placing `/sdd-drill`
   between `/sdd-plan` and `/sdd-next` — it decomposes a `draft` epic into features + ADR
   deltas and ends in one epic-level approval (approve → `planned` + `autonomous: true`;
   keep gated → `planned`, features gated), is the only step that flips `draft → planned`,
   and never writes feature specs.
-- [ ] **T4** (R21) — Edit `README.md`: add a one-line `/sdd-drill` description (the
+- [x] **T4** (R21) — Edit `README.md`: add a one-line `/sdd-drill` description (the
   per-epic drill-down skill) beside the existing `/sdd-new` / `/sdd-plan` / `/sdd-next`
   mentions.
-- [ ] **T5** (R1–R22) — Create `tests/test_sdd_drill.sh` per `F03-sdd-drill.tests.md`
+- [x] **T5** (R1–R22) — Create `tests/test_sdd_drill.sh` per `F03-sdd-drill.tests.md`
   (POSIX sh; grep contract assertions over the role/command/docs + one python fixture
   that seeds a synthetic `pending` feature inside a `planned` epic — stamped `autonomous:
   true`, with the required root `project` field — into a TEMP store and asserts it
   validates against `store/tasks.schema.json` + one `./init.sh` exit-0 run). Constraints:
   read `VERSION` dynamically (never assert a literal version), never `git diff` against
   `main`, zero new dependencies, never mutate the live `state/tasks.json`.
-- [ ] **T6** (wiring) — Edit `harness.config.yaml`: append `&& sh tests/test_sdd_drill.sh`
+- [x] **T6** (wiring) — Edit `harness.config.yaml`: append `&& sh tests/test_sdd_drill.sh`
   to `verification.test_command` and extend its trailing comment (e.g. `+ sdd-drill`).
-- [ ] **T7** (R22) — Bump `VERSION` by one MINOR (read the current value first; do not
+- [x] **T7** (R22) — Bump `VERSION` by one MINOR (read the current value first; do not
   hard-code). Add a `CHANGELOG.md` entry under `## [<new version>]` describing
   `/sdd-drill`, the feature decomposition + ADR deltas, and the approve / keep-gated
   branches.
-- [ ] **T8** — Run `./init.sh` and the full `verification.test_command`; ensure green
+- [x] **T8** — Run `./init.sh` and the full `verification.test_command`; ensure green
   before hand-off. Do **not** change any status in `state/tasks.json` beyond the
   Orchestrator-owned transition for this feature, and do **not** touch any DO-NOT-TOUCH
   file.

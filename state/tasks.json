@@ -146,7 +146,7 @@
         {
           "id": "E06-F03",
           "title": "/sdd-drill skill (decompose draft epic, ADR deltas, epic-level approval)",
-          "status": "spec-ready",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [

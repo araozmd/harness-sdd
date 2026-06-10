@@ -4,6 +4,42 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.17.0] — 2026-06-10
+
+### Added — ✨ `/sdd-drill` per-epic drill-down skill (decompose draft epic, ADR deltas, epic-level approval)
+- **New portable Driller role (`agents/driller.md`)** — a sibling of the Planner and the
+  Architect that operates at the per-epic altitude. It is the **consumer that decomposes,
+  never specs**: it takes exactly one `draft` epic, seeds `pending` feature entries (ids,
+  one-line intents, `depends_on`, `sdd: true`, `spec_path`) into the epic's `features`
+  array, fills the `epic.md` feature table, and writes a per-feature inbox brief under
+  `progress/inbox/` (recording the `ADR-NNNN` ids each feature must honor). It allocates
+  feature ids as a next-sequential block strictly above the epic's max `F##` (append-only,
+  no reuse) and never writes a feature `.spec/.plan/.tasks/.tests` or spawns the Architect.
+- **ADR deltas** — the Driller appends per-epic design decisions as one-decision ADRs at
+  `specs/adr/NNNN-<title>.md` (4-digit, above the max existing ADR number, no reuse),
+  scoped one level below F02's whole-system upfront ADRs, and never rewrites or renumbers
+  F02's existing ADRs.
+- **Single epic-level approval (approve / keep-gated branches)** — the drill ends in
+  exactly one human decision at the epic granularity, realized solely through F01's
+  `planned` state and the existing `autonomous` flag (no new status, no new approval
+  mechanism, no schema change). **Approve** flips the epic `draft → planned` and stamps
+  `autonomous: true` on every seeded feature (all-or-nothing); **keep gated** flips the
+  epic `draft → planned` while leaving every feature `autonomous: false` so each parks at
+  the per-feature spec-approval gate. `/sdd-drill` is the only step that flips an epic
+  `draft → planned`.
+- **New `/sdd-drill` slash command (`.claude/commands/sdd-drill.md`)** — the interactive
+  wrapper that acts as Driller, reads the `<epic-id>` from `$ARGUMENTS`, STOPs on an
+  empty/missing/non-`draft` target, runs the ≤3 text-only adaptive Q&A, and presents the
+  single approve / keep-gated decision.
+- **Docs** — `docs/WORKFLOW.md` gains a "Per-epic drill-down (`/sdd-drill`)" note placing
+  it between `/sdd-plan` and `/sdd-next`; `README.md` gains a one-line `/sdd-drill` mention.
+- **Verification** — `tests/test_sdd_drill.sh` (wired into `verification.test_command`):
+  grep contract assertions over the role/command/docs plus one python fixture proving the
+  decomposed shape (a `pending` feature inside a `planned` epic, stamped `autonomous: true`,
+  with the required root `project` field) validates against `store/tasks.schema.json`.
+- Purely additive: `/sdd-new`, `/sdd-plan`, `/sdd-next`, Inception, and the Planner are
+  behaviorally unchanged; no schema change. MINOR `VERSION` bump → `0.17.0`.
+
 ## [0.16.0] — 2026-06-10
 
 ### Added — ✨ `/sdd-plan` whole-project inception skill (vision + architecture + draft epics)
