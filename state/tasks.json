@@ -126,7 +126,7 @@
         {
           "id": "E06-F01",
           "title": "Epic lifecycle: draft/planned states + next() gating",
-          "status": "pending",
+          "status": "spec-ready",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
