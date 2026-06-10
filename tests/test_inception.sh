@@ -165,22 +165,16 @@ grep -qF 'store/tasks.schema.json' "$ROLE"  || fail "R13: role does not name tas
 grep -qF 'agents/orchestrator.md' "$ROLE"   || fail "R13: role does not name orchestrator.md as untouchable"
 grep -qF 'agents/architect.md' "$ROLE"      || fail "R13: role does not name architect.md as untouchable"
 grep -qi 'new status' "$ROLE"               || fail "R13: role does not forbid a new status value"
-if git -C "$ROOT" rev-parse --verify -q main >/dev/null 2>&1; then
-  # That the *Inception role* must not touch orchestrator routing / the schema is
-  # enforced permanently by the role-CONTENT assertions above (it names them as
-  # untouchable and forbids a new status). A byte-freeze-vs-main, by contrast, is only
-  # meaningful while THIS feature is the only thing on the branch — post-merge it would
-  # wrongly forbid ANY later feature from editing these files (e.g. orchestrator.md must
-  # evolve for umbrella in-session dispatch). So the diff guard is scoped to the schema,
-  # which carries a genuine permanent invariant (the status enum, re-checked below);
-  # agents/orchestrator.md and agents/architect.md are intentionally NOT byte-locked.
-  for f in store/tasks.schema.json; do
-    if ! git -C "$ROOT" diff --quiet main -- "$f" 2>/dev/null; then
-      fail "R13: DO-NOT-TOUCH file changed vs main: $f"
-    fi
-  done
-fi
-# Status enum in the schema is unchanged (still the five canonical values, no new one).
+# That the *Inception role* must not touch orchestrator routing / the schema is
+# enforced permanently by the role-CONTENT assertions above (it names them as
+# untouchable and forbids a new status). A byte-freeze-vs-main, by contrast, is only
+# meaningful while THIS feature is the only thing on the branch — post-merge it would
+# wrongly forbid ANY later feature from editing these files (the permanent-suite
+# anti-pattern: e.g. E06-F01 legitimately extends the EPIC status enum). So no file
+# is diffed against main here; the genuine permanent invariant is the FEATURE status
+# enum content, re-checked below. Whether a given PR touched a DO-NOT-TOUCH file is a
+# PR-review-time concern (the Reviewer reads the diff), not a frozen suite assertion.
+# FEATURE status enum in the schema is unchanged (still the five canonical values, no new one).
 grep -qF '"pending", "spec-ready", "in-progress", "in-review", "done"' store/tasks.schema.json \
   || fail "R13: feature status enum in schema changed"
 pass "R13 do_not_touch_clean"
