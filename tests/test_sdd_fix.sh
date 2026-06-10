@@ -268,4 +268,53 @@ awk -v ver="## [$V]" '
 ' CHANGELOG.md | grep -qF '/sdd-fix' || fail "R21: CHANGELOG '## [$V]' section does not mention /sdd-fix"
 pass "R21 version_changelog"
 
+# ── R22: sdd:false routing split by autonomous — in-progress→Builder vs gated park ─
+# R22_routing_autonomous_split — the Orchestrator table must distinguish a
+# pending+sdd:false+autonomous:true fix (set in-progress, then Builder) from an
+# autonomous:false (--gated) fix (PAUSE/parked at the human gate). A single
+# undistinguished "Spawn Builder directly" row would FAIL these.
+ORCH="agents/orchestrator.md"
+[ -f "$ORCH" ]                                || fail "R22: $ORCH missing"
+# the table no longer routes EVERY pending+sdd:false straight to the Builder: it must
+# now name autonomous in the sdd:false rows (non-tautological — fails if the split is absent)
+grep -Eqi 'sdd: ?false.*autonomous: ?true|autonomous: ?true.*sdd: ?false' "$ORCH" \
+  || fail "R22: orchestrator does not split sdd:false by autonomous:true"
+grep -Eqi 'sdd: ?false.*autonomous: ?false|autonomous: ?false.*sdd: ?false' "$ORCH" \
+  || fail "R22: orchestrator does not split sdd:false by autonomous:false"
+# autonomous:true lane SETS in-progress before the Builder (satisfies Loop A precondition)
+grep -qi 'in-progress' "$ORCH"                || fail "R22: orchestrator sdd:false route does not set in-progress"
+# autonomous:false (--gated) lane PAUSES / parks at the human gate
+grep -qi 'PAUSE\|park' "$ORCH"                || fail "R22: orchestrator does not PAUSE/park the gated sdd:false fix"
+grep -qi 'gated\|--gated' "$ORCH"             || fail "R22: orchestrator does not name the gated opt-out"
+# store/local.md actionability: gated sdd:false fix is NOT actionable; autonomous:true is
+grep -qi 'sdd: false\|sdd:false' store/local.md || fail "R22: store/local.md does not mention sdd:false actionability"
+grep -qi 'not.*actionable\|parked' store/local.md || fail "R22: store/local.md does not state the gated fix is not actionable"
+pass "R22 routing_autonomous_split"
+
+# ── R23: Builder sdd:false clause no longer contradicts the Loop A in-progress precondition
+# R23_builder_precondition_coherent — the sdd:false clause must say the precondition is
+# SATISFIED by the routing (Orchestrator sets in-progress first), not waived. The old
+# "Orchestrator routes pending+sdd:false straight to you / everything else unchanged"
+# wording (with a step-1 in-progress STOP) was the contradiction; assert the fix.
+grep -qi 'in-progress' "$BUILDER"             || fail "R23: builder sdd:false clause does not mention the in-progress precondition"
+grep -Eqi 'precondition.*(hold|satisf)|(hold|satisf).*precondition' "$BUILDER" \
+  || fail "R23: builder sdd:false clause does not state the precondition holds/is satisfied by routing"
+# it must NOT claim the Orchestrator routes pending+sdd:false STRAIGHT to the Builder
+# (the contradiction with the in-progress precondition) — gated fixes park first.
+grep -qi 'pending + sdd: *false.* straight to you\|sdd: false.* straight to you' "$BUILDER" \
+  && fail "R23: builder still claims pending+sdd:false routes straight to the Builder (contradiction)"
+pass "R23 builder_precondition_coherent"
+
+# ── R24: Fixer documents --gated as PARKING at the human gate (not handed to Builder) ─
+# R24_gated_parks — the role must describe a --gated/autonomous:false fix as parking at
+# the human gate and NOT being handed straight to the Builder. Non-tautological: fails if
+# the role still implies a gated fix runs immediately.
+grep -qi -- '--gated\|gated' "$ROLE"          || fail "R24: role does not mention --gated"
+grep -qi 'park' "$ROLE"                       || fail "R24: role does not state a gated fix parks at the human gate"
+grep -qi 'human gate\|human must approve\|human must' "$ROLE" || fail "R24: role does not state a human must approve the gated fix"
+# the gated fix must NOT be handed straight to the Builder — the role must say so
+grep -qi 'not.*handed straight\|not.*straight to the Builder\|does not.*auto-run\|not auto-run' "$ROLE" \
+  || fail "R24: role does not state the gated fix is not handed straight to the Builder"
+pass "R24 gated_parks"
+
 echo "All sdd-fix tests passed."

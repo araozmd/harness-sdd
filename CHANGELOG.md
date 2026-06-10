@@ -42,6 +42,13 @@ All notable changes to the harness body are recorded here. Versions follow
   now states that for an `sdd: false` item the Reviewer verifies behaviourally + the fix's
   test and that its R-id traceability check does not apply when there are no R-ids. Both
   edits are strictly additive — the `sdd: true` four-file path is unchanged.
+- **`sdd: false` routing split by `autonomous` (coherence fix)** — the Orchestrator's
+  `pending + sdd: false` route is split in two: `autonomous: true` **sets the feature to
+  `in-progress`** (so the Builder's Loop A `in-progress` precondition holds) then spawns
+  the Builder directly → `in-review`; `autonomous: false` (e.g. `/sdd-fix --gated`)
+  **parks at the human gate** (not actionable until a human approves), so `--gated` is a
+  real opt-out instead of a no-op. `agents/builder.md`, `agents/fixer.md`,
+  `store/local.md`, and `docs/WORKFLOW.md` are aligned to this split.
 - **Docs + tests** — `docs/WORKFLOW.md` documents the lightweight fix lane alongside
   "Selective SDD" (adds no new status, no new routing); `README.md` carries a one-line
   `/sdd-fix` mention beside the existing `/sdd-new` / `/sdd-plan` / `/sdd-drill` /

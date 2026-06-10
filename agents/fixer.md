@@ -112,15 +112,21 @@ Read the maintenance epic's current `features` first. Then **append** one featur
 ### Autonomous by default, `--gated` opt-out (R9)
 
 Stamp the seeded fix **`autonomous: true` by default**, so `/sdd-fix "<desc>"` seeds
-**and runs** the fix through Builder → Reviewer with no per-feature spec-approval pause —
-there is no spec to approve for an `sdd: false` item, so a human spec-gate would be a
-pause with nothing to review. Honor an explicit **`--gated` opt-out** that instead stamps
-the fix `autonomous: false`, so it parks at the normal per-feature spec-approval gate for
-the rare fix a human wants to eyeball first. This **reuses the existing `autonomous`
-flag** — **no new approval mechanism**. (`sdd: false` features bypass `spec-ready`
-entirely — the Orchestrator routes `pending + sdd: false` straight to the Builder — so
-`autonomous` here governs only whether the human is *asked to confirm* before the Builder
-runs in-session, **not** the Reviewer, which always runs.)
+**and runs** the fix through Builder → Reviewer with no human pause — there is no spec to
+approve for an `sdd: false` item, so a human gate would be a pause with nothing to review.
+On this default route the Orchestrator's `pending + sdd: false + autonomous: true` rule
+sets the fix to `in-progress` and sends the Builder straight at it (then Reviewer),
+end-to-end.
+
+Honor an explicit **`--gated` opt-out** that instead stamps the fix `autonomous: false`.
+A `--gated` fix is **parked at the human gate**: the Orchestrator's `pending + sdd: false
++ autonomous: false` rule does **not** auto-run it (it is not actionable — see
+`store/local.md`), so it is **not handed straight to the Builder**. A human must approve
+it — move it to `in-progress`, or re-stamp `autonomous: true` — before the Builder runs.
+Use this for the rare fix a human wants to eyeball first. This **reuses the existing
+`autonomous` flag** — **no new approval mechanism**. (`sdd: false` features still bypass
+the four-file spec and `spec-ready` entirely; `autonomous` here governs only whether the
+fix runs immediately or parks at the gate — the Reviewer always runs once the Builder has.)
 
 ## Brief-only intake — one inbox brief, never a spec (R10)
 
@@ -160,10 +166,21 @@ surface the error, and stop. A failed validation is never a success.
 After seeding + re-validation, you **hand the seeded fix off to the existing `sdd: false
 → Builder → Reviewer` loop in-session** — you do **not** stop at seeding (stopping would
 re-introduce the very ceremony this lane removes). You do this by **triggering the
-existing Orchestrator routing** (`pending + sdd: false → Builder → Reviewer`, the same
-behaviour `/sdd-next` drives) on the just-seeded fix — you **reuse** that routing, you do
-**not re-implement** it. You still write **no production code** yourself (the Builder
-does) and you create **no spec** and never spawn the Architect.
+existing Orchestrator routing** (the same behaviour `/sdd-next` drives) on the just-seeded
+fix — you **reuse** that routing, you do **not re-implement** it. What the routing does
+depends on the fix's `autonomous` flag:
+
+- **default (`autonomous: true`)** — the Orchestrator's `pending + sdd: false +
+  autonomous: true` rule sets the fix to `in-progress` and runs it end-to-end through
+  Builder → Reviewer, no human pause.
+- **`--gated` (`autonomous: false`)** — the fix **parks at the human gate**: the
+  Orchestrator's `pending + sdd: false + autonomous: false` rule does not auto-run it, so
+  the hand-off **parks** rather than implementing — a human must approve it (move it to
+  `in-progress`, or re-stamp `autonomous: true`) before the Builder runs. Report that it
+  is parked; do not force it through.
+
+Either way you still write **no production code** yourself (the Builder does) and you
+create **no spec** and never spawn the Architect.
 
 ## What you NEVER do (guardrails)
 
@@ -190,5 +207,7 @@ When the fix is seeded and re-validation passed, report to the human:
 - that **no** feature `.spec/.plan/.tasks/.tests` and **no** `spec_path` directory were
   created and the Architect was **not** spawned;
 - and that the seeded fix has been **handed off to the existing `sdd: false → Builder →
-  Reviewer` loop in-session** (reusing the existing routing), with the Fixer writing no
-  production code.
+  Reviewer` loop in-session** (reusing the existing routing) — running end-to-end when
+  `autonomous: true`, or **parked at the human gate** when `--gated`/`autonomous: false`
+  (the Orchestrator does not auto-run it; a human must approve it first) — with the Fixer
+  writing no production code.

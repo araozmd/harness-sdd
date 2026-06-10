@@ -90,7 +90,8 @@ stateDiagram-v2
 
     [*] --> pending
     pending --> spec_ready: sdd:true · Architect writes 4 spec files
-    pending --> in_review: sdd:false · Builder (quick task)
+    pending --> in_progress: sdd:false · autonomous:true · Orchestrator sets in-progress, then Builder
+    pending --> in_progress: sdd:false · autonomous:false (--gated) ⏸ HUMAN GATE — parked until a human approves
     spec_ready --> in_progress: human approves ⏸ HUMAN GATE (skipped if autonomous:true)
     in_progress --> in_review: Builder writes code from approved specs
     in_review --> done: Reviewer approves
@@ -117,7 +118,12 @@ of *what the AI is building* before hours of code get written on a wrong premise
 Full SDD for a one-line tweak is overkill. Each task carries `sdd: true|false`:
 
 - `sdd: true` → full flow: Architect → gate → Builder → Reviewer.
-- `sdd: false` → Orchestrator sends the Builder straight at it, then Reviewer.
+- `sdd: false` + `autonomous: true` → the Orchestrator **sets the feature to
+  `in-progress`** (so the Builder's Loop A precondition holds), then sends the Builder
+  straight at it, then Reviewer. No human pause.
+- `sdd: false` + `autonomous: false` (e.g. `/sdd-fix --gated`) → **parked at the human
+  gate**: the Orchestrator does **not** auto-run it. A human must approve it (move it to
+  `in-progress`, or re-stamp `autonomous: true`) before the Builder runs.
 
 ### Lightweight fix lane (`/sdd-fix`)
 
@@ -126,10 +132,13 @@ For a one-line bug or hotfix, even seeding a full feature is overkill. `/sdd-fix
 primitive: it seeds the fix as an `sdd: false` feature under a single **reserved
 maintenance epic** (`E99`, `status: planned`, created on first use and reused by id
 thereafter), carrying only a one-paragraph **inbox brief** at `progress/inbox/<id>.md` —
-**no 4-file spec**, no drill. The fix is stamped `autonomous: true` by default (a
-`--gated` opt-out keeps it parked at the gate), then handed off **in-session** to the
-existing `sdd: false → Builder → Reviewer` path. The lane **adds no new status and no new
-routing** — it reuses the `sdd: false` primitive above; the Builder works from the inbox
+**no 4-file spec**, no drill. The fix is stamped `autonomous: true` by default, then handed
+off **in-session** to the existing `sdd: false → Builder → Reviewer` path: the Orchestrator
+sets it `in-progress` and the Builder runs it end-to-end. A `--gated` opt-out instead stamps
+`autonomous: false`, which **parks the fix at the human gate** — the Orchestrator does not
+auto-run it, so it waits until a human moves it to `in-progress` (or re-stamps it
+`autonomous: true`). The lane **adds no new status and no new routing** — it reuses the
+`sdd: false` primitive above (now split by `autonomous`); the Builder works from the inbox
 brief and the Reviewer verifies the fix behaviourally.
 
 ## Context hygiene
