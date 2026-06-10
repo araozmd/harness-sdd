@@ -243,10 +243,15 @@ pass "R13 mirror_note"
 # R14_version_changelog — never hard-code the version literal.
 V="$(cat VERSION)"
 echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || fail "R14: VERSION '$V' is not SemVer"
-grep -qF "## [$V]" CHANGELOG.md || fail "R14: CHANGELOG.md has no '## [$V]' heading"
-SECTION="$(awk -v v="## [$V]" '$0 ~ /^## \[/ { on = (index($0, v) == 1) } on' CHANGELOG.md)"
-echo "$SECTION" | grep -qi 'draft'   || fail "R14: CHANGELOG [$V] section does not mention draft"
-echo "$SECTION" | grep -qi 'planned' || fail "R14: CHANGELOG [$V] section does not mention planned"
+grep -qF "## [$V]" CHANGELOG.md || fail "R14: CHANGELOG.md has no '## [$V]' heading for the current VERSION"
+# The epic-lifecycle change must be recorded in CHANGELOG — but at the version that
+# SHIPPED it, NOT the live VERSION. Extracting the CURRENT release's section and
+# demanding it mention draft/planned freezes this permanent suite to one release, so
+# every later unrelated bump (e.g. a telemetry-formatting release) fails it. That is
+# the freeze-the-moving-value anti-pattern. Assert the lifecycle is documented
+# SOMEWHERE in the log instead, decoupled from $V.
+grep -qi 'draft'   CHANGELOG.md || fail "R14: CHANGELOG.md never records the draft epic state"
+grep -qi 'planned' CHANGELOG.md || fail "R14: CHANGELOG.md never records the planned epic state"
 pass "R14 version_changelog"
 
 echo "All epic-lifecycle tests passed."

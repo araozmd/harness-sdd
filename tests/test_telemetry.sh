@@ -76,20 +76,37 @@ grep -qF 'date -u' "$ORCH" || fail "R3: orchestrator prose does not mention date
 pass "R3 iso8601_utc_timestamps"
 
 # ── R4: duration_s = end − start, non-negative; summed time matches; negatives ignored
-# Session total autonomous time = 1800+600+300+120+60+300 = 3180s.
-python3 "$REPORT" session --log "$FIX" | grep -qF 'Total autonomous agent time: 3180s' \
-  || fail "R4: summed duration mismatch (expected 3180s)"
+# Durations render as HH:MM:SS (clock units, not raw seconds).
+# Session total autonomous time = 1800+600+300+120+60+300 = 3180s = 00:53:00.
+python3 "$REPORT" session --log "$FIX" | grep -qF 'Total autonomous agent time: 00:53:00' \
+  || fail "R4: summed duration mismatch (expected 00:53:00 = 3180s)"
 # A negative-duration phase must be ignored by the reader (not counted): a 100s valid
-# phase plus a negative one must total exactly 100s, not -3500s.
+# phase plus a negative one must total exactly 100s = 00:01:40, not -3500s.
 NEG="$T/neg.jsonl"
 printf '%s\n' \
   '{"schema_version":1,"type":"session-start","started_at":"2026-06-06T09:00:00Z"}' \
   '{"schema_version":1,"type":"phase","feature":"X","phase":"scout","round":1,"start":"2026-06-06T09:10:00Z","end":"2026-06-06T09:11:40Z","duration_s":100,"outcome":"done","slice":null,"cost":null}' \
   '{"schema_version":1,"type":"phase","feature":"X","phase":"builder","round":1,"start":"2026-06-06T10:00:00Z","end":"2026-06-06T09:00:00Z","duration_s":-3600,"outcome":"done","slice":null,"cost":null}' \
   > "$NEG"
-python3 "$REPORT" session --log "$NEG" | grep -qF 'Total autonomous agent time: 100s' \
-  || fail "R4: negative duration not ignored (total != 100s)"
+python3 "$REPORT" session --log "$NEG" | grep -qF 'Total autonomous agent time: 00:01:40' \
+  || fail "R4: negative duration not ignored (total != 00:01:40 = 100s)"
 pass "R4 duration_derivation"
+
+# ── R4b: durations render HH:MM:SS and the breakdown carries a **total** row ──────
+# Readability seam: phase rows + the total are clock-formatted; the total is in the
+# table itself (not only the prose bullet). Derived from the fixed fixtures, never
+# from VERSION — so this is not a permanent-suite freeze of a moving value.
+_out="$(python3 "$REPORT" session --log "$FIX")"
+printf '%s\n' "$_out" | grep -qE '^\| \*\*total\*\* \| 6 \| 00:53:00 \|$' \
+  || fail "R4b: session breakdown missing HH:MM:SS **total** row (6, 00:53:00)"
+printf '%s\n' "$_out" | grep -qE '^\| architect \| 1 \| 00:30:00 \|$' \
+  || fail "R4b: architect row not HH:MM:SS (expected 00:30:00 = 1800s)"
+if printf '%s\n' "$_out" \
+  | grep -E '^\| (architect|builder|reviewer|scout|inception|slice-dispatch|\*\*total\*\*) \|' \
+  | grep -qE '[0-9]+s '; then
+  fail "R4b: a duration cell still uses raw seconds"
+fi
+pass "R4b duration_hms_format_and_total_row"
 
 # ── R5: phase ∈ enumerated roles, bucketed in the breakdown ──────────────────────
 _out="$(python3 "$REPORT" session --log "$FIX")"
@@ -118,9 +135,9 @@ grep -qF 'spec_ready_at' "$ORCH" || fail "R8: orchestrator does not stamp spec_r
 grep -qF '"event":"spec_ready"' "$FIX" || fail "R8: fixture gate-open record missing"
 pass "R8 gate_open_record"
 
-# ── R9: in_progress close + human_latency_s (fixture 10:00..15:30 = 19800s) ──────
-python3 "$REPORT" session --log "$FIX" | grep -qE 'Human-gate latency.*mean 19800s' \
-  || fail "R9: mean human latency != 19800s"
+# ── R9: in_progress close + human_latency_s (fixture 10:00..15:30 = 19800s = 05:30:00)
+python3 "$REPORT" session --log "$FIX" | grep -qE 'Human-gate latency.*mean 05:30:00' \
+  || fail "R9: mean human latency != 05:30:00 (19800s)"
 grep -qF 'human_latency_s' "$ORCH" || fail "R9: orchestrator does not document human_latency_s"
 pass "R9 gate_latency"
 
@@ -128,7 +145,7 @@ pass "R9 gate_latency"
 # The autonomous close (2s) must NOT pull the human mean below 19800; it is reported
 # separately as an excluded autonomous transition.
 _out="$(python3 "$REPORT" session --log "$FIX")"
-printf '%s\n' "$_out" | grep -qE 'Human-gate latency \(n=1\).*mean 19800s' \
+printf '%s\n' "$_out" | grep -qE 'Human-gate latency \(n=1\).*mean 05:30:00' \
   || fail "R10: autonomous latency leaked into human stats"
 printf '%s\n' "$_out" | grep -qiE 'autonomous.*excluded.*: 1' \
   || fail "R10: autonomous transition not reported/excluded"
@@ -219,7 +236,7 @@ pass "R17 empty_log_notice"
 # The fixture's garbage line is present but the report still aggregates the good lines.
 grep -qF 'malformed line, not json' "$FIX" || fail "R18: fixture lost its garbage line"
 python3 "$REPORT" weekly --log "$FIX" >/dev/null 2>&1 || fail "R18: malformed line aborted the report"
-python3 "$REPORT" session --log "$FIX" | grep -qF 'Total autonomous agent time: 3180s' \
+python3 "$REPORT" session --log "$FIX" | grep -qF 'Total autonomous agent time: 00:53:00' \
   || fail "R18: malformed line corrupted aggregation"
 pass "R18 malformed_line_skipped"
 
@@ -308,16 +325,16 @@ pass "R25 agents_md_summary_pointer"
 # Post-marker phases: architect 1800 + builder 600 + reviewer 300 + scout 120 +
 # inception 60 + slice-dispatch 300 = 3180s; rounds=2; human latency mean=19800.
 _out="$(python3 "$REPORT" session --log "$FIX")"
-printf '%s\n' "$_out" | grep -qF 'Total autonomous agent time: 3180s' || fail "R26: total time mismatch"
+printf '%s\n' "$_out" | grep -qF 'Total autonomous agent time: 00:53:00' || fail "R26: total time mismatch"
 printf '%s\n' "$_out" | grep -qF 'Build/review rounds: 2' || fail "R26: round count mismatch"
-printf '%s\n' "$_out" | grep -qE 'Human-gate latency.*mean 19800s' || fail "R26: latency mismatch"
+printf '%s\n' "$_out" | grep -qE 'Human-gate latency.*mean 05:30:00' || fail "R26: latency mismatch"
 pass "R26 session_view_reproducible"
 
 # ── R27: session-start marker scopes the session (pre-marker records excluded) ───
 # The pre-marker architect span (E00-F00, also 1800s) must NOT be counted: if it were,
 # the architect row would be 2 and total would be 4980s, not 3180s.
 _out="$(python3 "$REPORT" session --log "$FIX")"
-printf '%s\n' "$_out" | grep -qF 'Total autonomous agent time: 3180s' \
+printf '%s\n' "$_out" | grep -qF 'Total autonomous agent time: 00:53:00' \
   || fail "R27: pre-marker records leaked into the session scope"
 printf '%s\n' "$_out" | grep -qE '^\| architect \| 1 \|' \
   || fail "R27: pre-marker architect span not excluded (architect count != 1)"
@@ -340,12 +357,12 @@ printf '%s\n' \
   '{"type":"phase","phase":"builder","start":"2026-06-06T10:00:00Z","duration_s":300,"round":1,"cost":null,"schema_version":1}' \
   > "$_TH/custom/my.jsonl"
 _cfgout="$(python3 "$_TH/tools/telemetry-report.py" session)"   # NO --log on purpose
-printf '%s\n' "$_cfgout" | grep -qF 'Total autonomous agent time: 300s' \
+printf '%s\n' "$_cfgout" | grep -qF 'Total autonomous agent time: 00:05:00' \
   || fail "R26: reader ignored configured telemetry.log override (got: $(printf '%s' "$_cfgout" | head -1))"
 # SINGLE-QUOTED value must parse identically to the installer's awk (PR #12 Codex r4)
 printf "telemetry:\n  enabled: true\n  log: 'custom/my.jsonl'\n" > "$_TH/harness.config.yaml"
 _sqout="$(python3 "$_TH/tools/telemetry-report.py" session)"
-printf '%s\n' "$_sqout" | grep -qF 'Total autonomous agent time: 300s' \
+printf '%s\n' "$_sqout" | grep -qF 'Total autonomous agent time: 00:05:00' \
   || fail "R26: reader does not strip single-quoted telemetry.log (got: $(printf '%s' "$_sqout" | head -1))"
 rm -rf "$_TH"
 pass "R26 reader_honors_configured_log"
