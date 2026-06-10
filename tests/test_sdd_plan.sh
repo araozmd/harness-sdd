@@ -117,7 +117,7 @@ grep -qi 'no reuse\|never reuse' "$ROLE"            || fail "R11: role does not 
 TMPSTORE="$(mktemp)"
 trap 'rm -f "$TMPSTORE"' EXIT
 cat > "$TMPSTORE" <<'JSON'
-{"epics":[{"id":"E99","title":"Synthetic draft epic","status":"draft","features":[]}]}
+{"project":"fixture","epics":[{"id":"E99","title":"Synthetic draft epic","status":"draft","features":[]}]}
 JSON
 python3 - "$TMPSTORE" store/tasks.schema.json <<'PY' || fail "R11: features:[] draft epic failed schema validation"
 import json, re, sys
