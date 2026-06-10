@@ -1,7 +1,7 @@
 ---
 id: E06
 title: Planning tier (rolling-wave inception + per-epic drill-down)
-status: pending          # pending → in-progress → done (rollup of its features)
+status: in-progress      # pending → in-progress → done (rollup of its features)
 owner: araozmd
 ---
 
@@ -40,9 +40,9 @@ clear and approved, the coding agent runs and validates autonomously.
 ## Features
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| F01 | Epic lifecycle: `draft`/`planned` states + `next()` gating | pending | true | — |
-| F02 | `/sdd-plan` inception skill (vision + architecture + draft epics) | not seeded | true | F01 |
-| F03 | `/sdd-drill <epic>` skill (decompose, ADR deltas, epic-level approval) | not seeded | true | F01 |
+| F01 | Epic lifecycle: `draft`/`planned` states + `next()` gating | done | true | — |
+| F02 | `/sdd-plan` inception skill (vision + architecture + draft epics) | done | true | F01 |
+| F03 | `/sdd-drill <epic>` skill (decompose, ADR deltas, epic-level approval) | pending | true | F01, F02 |
 | F04 | Architect contract: `architecture.md` mandatory input, specs cite ADRs | not seeded | true | F02 |
 | F05 | `/sdd-fix` lightweight lane (maintenance epic, brief-only intake) | not seeded | true | F01 |
 | F06 | Drift check on epic rollup (Scout re-validates remaining epics) | not seeded | true | F03 |
