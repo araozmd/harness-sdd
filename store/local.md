@@ -13,6 +13,11 @@ Validated by `store/tasks.schema.json` (and by `init.sh`).
   `autonomous: true` (that flag skips the human gate, so the Orchestrator may move
   it straight to `in-progress` for Builder work). A `spec-ready` feature *without*
   `autonomous: true` is **not** actionable — it is parked at the human gate.
+  The same gate applies to a `pending` + `sdd: false` fix: with `autonomous: true`
+  it **is** actionable (the Orchestrator sets it `in-progress` and sends the Builder
+  straight at it — there is no spec to gate); with `autonomous: false` (e.g.
+  `/sdd-fix --gated`) it is **not** actionable — it is parked at the human gate until
+  a human moves it to `in-progress` or re-stamps `autonomous: true`.
   **Epic gate:** features of a `draft` epic are **never actionable** — `next()`
   never selects them, regardless of the feature's own `status`, `sdd`,
   `autonomous`, or `depends_on` (`autonomous: true` does **not** override this

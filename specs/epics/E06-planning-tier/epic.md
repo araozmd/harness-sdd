@@ -43,8 +43,8 @@ clear and approved, the coding agent runs and validates autonomously.
 | F01 | Epic lifecycle: `draft`/`planned` states + `next()` gating | done | true | — |
 | F02 | `/sdd-plan` inception skill (vision + architecture + draft epics) | done | true | F01 |
 | F03 | `/sdd-drill <epic>` skill (decompose, ADR deltas, epic-level approval) | done | true | F01, F02 |
-| F04 | Architect contract: `architecture.md` mandatory input, specs cite ADRs | pending | true | F02 |
-| F05 | `/sdd-fix` lightweight lane (maintenance epic, brief-only intake) | not seeded | true | F01 |
+| F04 | Architect contract: `architecture.md` mandatory input, specs cite ADRs | done | true | F02 |
+| F05 | `/sdd-fix` lightweight lane (maintenance epic, brief-only intake) | done | true | F01 |
 | F06 | Drift check on epic rollup (Scout re-validates remaining epics) | not seeded | true | F03 |
 
 F02–F06 are the planned roadmap, listed here deliberately **without** TaskStore

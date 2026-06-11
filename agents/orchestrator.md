@@ -24,7 +24,8 @@ next, and delegate to the specialist agents.
    | Status | Action |
    |---|---|
    | `pending` + `sdd: true` | Spawn **Architect** to write the 4 spec files. On finish, set `spec-ready` (open the gate span — see below). |
-   | `pending` + `sdd: false` | Spawn **Builder** directly for a quick task (skip full SDD). |
+   | `pending` + `sdd: false` + `autonomous: true` | **Set the feature to `in-progress` first** (so the Builder's Loop A precondition holds — see `agents/builder.md`), then spawn **Builder** directly for a quick task (skip full SDD — there is no spec to gate). On finish, set `in-review`. Same status arc as a normal feature, minus the Architect. |
+   | `pending` + `sdd: false` + `autonomous: false` (e.g. `/sdd-fix --gated`) | **PAUSE at the human gate.** Do not auto-run. The fix is parked (not actionable) until a human approves it — by moving it to `in-progress`, or by re-stamping `autonomous: true`. Mirrors the `spec-ready` PAUSE semantics: parked, not actionable until a human acts. |
    | `spec-ready` | **PAUSE.** A human must review specs and move to `in-progress`. Do not proceed unless the task is marked `autonomous: true`. |
    | `in-progress` | Spawn **Builder** with the approved specs only. On finish, set `in-review`. |
    | `in-review` | Spawn **Reviewer**. If it approves → `done`. If it rejects → back to `in-progress` with the Reviewer's feedback file (see **Build↔review rounds** below). |

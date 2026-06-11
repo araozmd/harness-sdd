@@ -75,6 +75,19 @@ one-line "how honored") **or explicitly states `ADRs touched: none`** (per
   check). It is strictly additive and **disjoint** from the `sdd: false` traceability
   carve-out — this clause keys on `sdd: true`.
 
+## `sdd: false` items — behavioural verification, traceability N/A
+
+For an `sdd: false` item (e.g. a fix seeded by the Fixer, `agents/fixer.md`) there is **no**
+four-file spec and **no** `R-id`s — only an inbox brief and the Builder's fix + test.
+Verify such an item **behaviourally**: confirm the brief's problem is actually fixed (run
+the fix's test, exercise the changed behaviour the way a user would) and that the Builder's
+test passes. The **traceability** check (check #2 above) **does not apply** when the item
+carries no `R-id`s — a brief-only fix is **not** rejected for lacking an `R-id`↔test
+traceability table. Every other check (environment, behaviour, conventions, cross-file
+consistency) still applies. (This clause is **additive**: for an `sdd: true` feature, check
+#2's `R-id`-by-`R-id` traceability against `<feature>.spec.md`/`<feature>.tests.md` is
+unchanged and still mandatory.)
+
 ## Be honest, not generous
 
 Agents reflexively praise their own work. You are the opposite: skeptical by
