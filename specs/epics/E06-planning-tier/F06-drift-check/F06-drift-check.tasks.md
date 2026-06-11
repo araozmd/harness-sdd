@@ -3,7 +3,7 @@
 > Atomic, sequential, independent steps. The Builder works these top to bottom, one at
 > a time. Each task names the R-id(s) it satisfies. Check off when done.
 
-- [ ] **T1** (R1, R9, R14) — Edit `store/local.md`: in the rollup section (beside the
+- [x] **T1** (R1, R9, R14) — Edit `store/local.md`: in the rollup section (beside the
   existing sliced-feature rollup, **additively**, not inside it), document:
   - **Epic-done rollup** — *when every feature of an epic is `done`, the epic's `done`
     status is **derived and persisted** (mirroring the existing "derive, then persist"
@@ -14,7 +14,7 @@
     stale `planned`/`pending` epic to `draft`; a stale `draft` epic stays `draft` but is
     flagged; **`in-progress`/`done` epics are never demoted** (R9, R14).
 
-- [ ] **T2** (R2, R3, R7, R8, R9, R10, R11, R12, R13) — Edit `agents/orchestrator.md`: in
+- [x] **T2** (R2, R3, R7, R8, R9, R10, R11, R12, R13) — Edit `agents/orchestrator.md`: in
   or beside the rollup section (~205–218), add the epic-rollup → drift-check step. It must
   state:
   - When a feature transition makes **all** of an epic's features `done`, the Orchestrator
@@ -41,7 +41,7 @@
   - The **no-op note** "nothing to re-validate" when there are no remaining
     `draft`/`planned`/`pending` epics (R12) or no architecture to re-validate against (R13).
 
-- [ ] **T3** (R4, R5, R6, R12, R13) — Edit `agents/scout.md`: add a **drift-check mode**
+- [x] **T3** (R4, R5, R6, R12, R13) — Edit `agents/scout.md`: add a **drift-check mode**
   section that **preserves the read-only contract**. It must state:
   - **Inputs**: the just-completed epic, the remaining `draft`/`planned`/`pending` epics,
     and `specs/architecture.md` / `specs/adr/*`.
@@ -58,14 +58,14 @@
   - The **"nothing to re-validate"** note for the no-remaining-epic / no-architecture no-op
     (R12, R13).
 
-- [ ] **T4** (R15) — Edit `docs/WORKFLOW.md`: add a **new, distinct** "Drift check on epic
+- [x] **T4** (R15) — Edit `docs/WORKFLOW.md`: add a **new, distinct** "Drift check on epic
   rollup" section (separate from the existing `/sdd-plan`, `/sdd-drill`,
   architecture-alignment, and `/sdd-fix` sections) — it fires on epic rollup to `done`, the
   **Scout flags** and the **Orchestrator demotes** stale `planned`/`pending` epics to
   `draft`, re-drill (`/sdd-drill`) stays **manual**, and demotion only ever moves an epic
   **backward**.
 
-- [ ] **T5** (R1–R19) — Create `tests/test_drift_check.sh` per `F06-drift-check.tests.md`
+- [x] **T5** (R1–R19) — Create `tests/test_drift_check.sh` per `F06-drift-check.tests.md`
   (POSIX sh; grep contract assertions over the orchestrator/scout/store/doc prose + one
   python fixture that seeds, into a **temp** store carrying the required root `project`
   field, (a) a `done` epic whose features are all `done` and (b) a `draft` epic — the
@@ -75,14 +75,14 @@
   the current-top-version section); never `git diff` against `main`; zero new dependencies;
   never mutate the live `state/tasks.json`.
 
-- [ ] **T6** (wiring) — Edit `harness.config.yaml`: append `&& sh tests/test_drift_check.sh`
+- [x] **T6** (wiring) — Edit `harness.config.yaml`: append `&& sh tests/test_drift_check.sh`
   to `verification.test_command` and extend its trailing comment (e.g. `+ drift-check`).
 
-- [ ] **T7** (R19) — Bump `VERSION` by one MINOR (read the current value first; do **not**
+- [x] **T7** (R19) — Bump `VERSION` by one MINOR (read the current value first; do **not**
   hard-code). Add a `CHANGELOG.md` entry under `## [<new version>]` describing the epic-done
   rollup, the Scout drift-check mode, and the `planned`/`pending` → `draft` demotion.
 
-- [ ] **T8** — Run `./init.sh` and the **full** `verification.test_command`; ensure green
+- [x] **T8** — Run `./init.sh` and the **full** `verification.test_command`; ensure green
   before hand-off. Do **not** change any status in `state/tasks.json` beyond the
   Orchestrator-owned transition for this feature, and do **not** touch any DO-NOT-TOUCH file
   (especially `store/tasks.schema.json`, the existing feature-level rollup, and the Scout's

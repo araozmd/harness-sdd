@@ -95,6 +95,31 @@ This places the citation contract **between** `/sdd-plan`/`/sdd-drill` (the prod
 the Builder/Reviewer (the consumers) — it is additive and distinct from the `/sdd-plan`,
 `/sdd-drill`, and `/sdd-fix` lanes.
 
+## Drift check on epic rollup
+
+Rolling-wave planning has a failure mode: a plan sketched early goes **stale** as you learn.
+When an epic completes, the new ADRs and architecture deltas its implementation produced can
+invalidate the briefs behind the epics still waiting in `draft`/`planned`/`pending`. The drift
+check closes that loop, and it is **distinct from** the `/sdd-plan`, `/sdd-drill`,
+architecture-alignment, and `/sdd-fix` lanes above.
+
+- **When it fires:** **only** when an epic **rolls up to `done`** (all its features are `done`,
+  so the Orchestrator derives+persists the epic's `done`). It does not run on every loop or on a
+  feature `done` that does not complete its epic.
+- **Scout flags.** The Orchestrator spawns the **read-only Scout** in a drift-check mode to
+  re-validate the remaining `draft`/`planned`/`pending` epics against the just-completed epic's
+  artifacts. The Scout writes a per-epic still-valid/stale findings file to `progress/` and makes
+  **no** state change.
+- **Orchestrator demotes.** The **Orchestrator** (not the Scout) demotes a stale
+  `planned`/`pending` epic to **`draft`** and re-validates. A stale `draft` epic stays `draft`
+  but is flagged; an `in-progress`/`done` epic is **never** demoted.
+- **Backward only + manual re-drill.** Demotion only ever moves an epic **backward**
+  (`planned`/`pending` → `draft`) — it never advances one. Bringing a demoted epic back to
+  `planned` stays a **manual** `/sdd-drill <epic>` step; the Orchestrator reports that re-drill
+  pointer on every demotion.
+- **No-op, never silent.** With no remaining planning-tier epics, or no architecture to
+  re-validate against, the check emits a clear "nothing to re-validate" note and changes nothing.
+
 ## Epic lifecycle
 
 Epics have their own, simpler lifecycle: `draft → planned → in-progress → done`.
