@@ -176,6 +176,17 @@
             "E06-F01"
           ],
           "spec_path": "specs/epics/E06-planning-tier/F05-sdd-fix/"
+        },
+        {
+          "id": "E06-F06",
+          "title": "Drift check on epic rollup (Scout re-validates remaining epics)",
+          "status": "spec-ready",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E06-F03"
+          ],
+          "spec_path": "specs/epics/E06-planning-tier/F06-drift-check/"
         }
       ]
     }
