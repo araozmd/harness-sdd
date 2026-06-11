@@ -154,6 +154,17 @@
             "E06-F02"
           ],
           "spec_path": "specs/epics/E06-planning-tier/F03-sdd-drill/"
+        },
+        {
+          "id": "E06-F04",
+          "title": "Architect contract: architecture.md mandatory input, specs cite ADRs",
+          "status": "spec-ready",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E06-F02"
+          ],
+          "spec_path": "specs/epics/E06-planning-tier/F04-architect-adr-contract/"
         }
       ]
     }
