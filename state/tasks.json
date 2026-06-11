@@ -180,7 +180,7 @@
         {
           "id": "E06-F06",
           "title": "Drift check on epic rollup (Scout re-validates remaining epics)",
-          "status": "in-progress",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
