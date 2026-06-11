@@ -2,7 +2,7 @@
 id: E06-F04
 title: "Architect contract: architecture.md mandatory input, specs cite ADRs"
 epic: E06-planning-tier
-status: spec-ready          # pending → spec-ready → in-progress → in-review → done
+status: done               # pending → spec-ready → in-progress → in-review → done
 sdd: true
 autonomous: false           # installed-body role + template + docs change; human reviews
 depends_on: [E06-F02]

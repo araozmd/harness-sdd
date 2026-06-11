@@ -158,7 +158,7 @@
         {
           "id": "E06-F04",
           "title": "Architect contract: architecture.md mandatory input, specs cite ADRs",
-          "status": "spec-ready",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [

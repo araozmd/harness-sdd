@@ -64,6 +64,37 @@ specs each feature just-in-time during the run. The flow reads `/sdd-plan` (sket
 `/sdd-drill <epic-id>` (deepen one epic) → `/sdd-next` (execute). It is purely additive: a
 repo that never runs `/sdd-drill` behaves exactly as before.
 
+## Architecture-aligned specs (the Architect cites ADRs)
+
+The planning tier produces durable design artifacts; this contract makes them
+**consumed**. `/sdd-plan` (the Planner) writes `specs/architecture.md` + the ADRs at
+`specs/adr/NNNN-*.md`, and `/sdd-drill` (the Driller) records, in each feature's inbox
+brief, the `ADR-NNNN` ids that feature is expected to honor. The **Architect**
+(`agents/architect.md`) closes the loop: when those artifacts are present it reads
+`specs/architecture.md` + the ADRs as a **mandatory input** alongside the brief, and every
+feature `.spec.md` it writes carries a **`## Architecture alignment`** section citing the
+`ADR-NNNN` ids the feature touches (seeded from the brief's recorded ids — the F03-D7
+hook), each with a one-line "how this honors it".
+
+- When architecture artifacts exist but the feature touches **no** recorded decision, the
+  section records the explicit **`ADRs touched: none`** (a legitimate state, not a silent
+  omission). A divergence is **stated in the section** (which ADR, how, why); the Architect
+  never authors an ADR delta — that stays the Driller's job.
+- **Graceful degradation:** in a repo that never ran `/sdd-plan` (or `/sdd-new`'s
+  altitude-3 flow) the architecture is **absent** (a bare/template-stub file counts as
+  absent), so the section is **not required** — the Architect records the absence and
+  proceeds from the brief, fabricating no citation and never failing. Specs written before
+  this contract stay valid (no retro-fit).
+- The **Reviewer** confirms the section is present (citing ≥1 ADR or stating
+  `ADRs touched: none`) **only where** architecture artifacts exist **and** the spec is
+  `sdd: true`; a missing section there is a **soft flag** (not a hard reject), and the
+  check never fires for a legacy/no-architecture feature or an `sdd: false` brief-only
+  item.
+
+This places the citation contract **between** `/sdd-plan`/`/sdd-drill` (the producers) and
+the Builder/Reviewer (the consumers) — it is additive and distinct from the `/sdd-plan`,
+`/sdd-drill`, and `/sdd-fix` lanes.
+
 ## Epic lifecycle
 
 Epics have their own, simpler lifecycle: `draft → planned → in-progress → done`.

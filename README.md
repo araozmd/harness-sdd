@@ -25,7 +25,9 @@ flowchart LR
 
 Specs follow a **Product → Epic → Feature** hierarchy, where each feature is a
 4-file spec (`.spec` / `.plan` / `.tasks` / `.tests`) with **EARS** acceptance
-criteria and full requirement→test **traceability**. See `docs/SPEC-FORMAT.md`.
+criteria and full requirement→test **traceability**. When the project has an
+architecture (`/sdd-plan`), each feature spec also **cites the architecture decisions
+(ADRs) it touches** in a `## Architecture alignment` section. See `docs/SPEC-FORMAT.md`.
 
 Epics carry their own lifecycle — `draft → planned → in-progress → done` (epic-level
 `pending` stays valid as a legacy alias of `planned`). A `draft` epic is an inception

@@ -18,6 +18,18 @@ owner: <handle>
 - <rule>
 - <rule>
 
+## Architecture alignment
+> Cite the architecture decisions (ADRs) this feature touches. Required whenever
+> `specs/architecture.md` + `specs/adr/*` exist; omit only when the repo has no
+> architecture (legacy / `/sdd-new` altitude-3). See docs/SPEC-FORMAT.md.
+
+- ADR-NNNN — <decision title>: <one line on how this feature honors that decision>.
+- ADR-NNNN — <decision title>: <one line on how this feature honors it>.
+
+<!-- If this feature genuinely touches no recorded decision, replace the list with the
+     explicit line below (it is a legitimate state, not a silent omission): -->
+<!-- ADRs touched: none — <one-line why this feature constrains no recorded decision>. -->
+
 ## Acceptance criteria (EARS)
 > Each is one testable behavior with a stable id. See docs/SPEC-FORMAT.md.
 
