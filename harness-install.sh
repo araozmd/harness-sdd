@@ -487,7 +487,7 @@ relative paths against `.harness/`.
    - `in-review` → spawn **reviewer**; approve → `done`, reject → back to `in-progress`.
 4. Append what happened to `.harness/progress/history.md`.
 
-$ARGUMENTS may name a specific feature id (e.g. `E02-F01`); if given, operate on it.
+$ARGUMENTS may name a specific feature id (e.g. `E01-F01`); if given, operate on it.
 EOF
 
   cat > "$TARGET/.claude/commands/sdd-new.md" <<'EOF'

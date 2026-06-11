@@ -211,8 +211,8 @@ So:
 ## One run, end to end (example)
 
 1. `./init.sh` → green.
-2. Orchestrator reads TaskStore → `E02-F01 handoff-screen` is `pending`, `sdd:true`.
-3. Orchestrator spawns the Architect, passing `progress/inbox/E02-F01.md` (the
+2. Orchestrator reads TaskStore → `E01-F01 example-feature` is `pending`, `sdd:true`.
+3. Orchestrator spawns the Architect, passing `progress/inbox/E01-F01.md` (the
    Inception brief); the Architect reads it first and writes the 4 files from it →
    `spec-ready`. **Pause.**
 4. Human reads specs, approves → `in-progress`.
