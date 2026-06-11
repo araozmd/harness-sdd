@@ -52,6 +52,29 @@ saying "it works" means nothing until you prove it. AI-generated code is often
      `specs/epics/<epic>/<feature>/contract/` and the shared `.spec`/`.plan` reference it
      by id.
 
+## ADR-citation check (architecture-aligned specs)
+
+This additive check fires **only where** the project has a recorded architecture **and**
+the feature under review is a full SDD spec — **`specs/architecture.md` exists, at least
+one `specs/adr/NNNN-*.md` exists, and the feature carries a four-file spec (`sdd: true`)**.
+When that precondition holds, confirm the feature's `.spec.md` has a
+`## Architecture alignment` section that **either cites ≥1 `ADR-NNNN`** (each with a
+one-line "how honored") **or explicitly states `ADRs touched: none`** (per
+`agents/architect.md`).
+
+- **Soft flag, not hard reject.** A **missing or empty** `## Architecture alignment`
+  section (in the situation above) is **flagged for the Builder/Architect to investigate
+  and justify** — reusing the existing "suspected but not provably violated → flag, don't
+  block" verdict rule — **not a hard reject**. You cannot prove "forgot" versus
+  "legitimately touches none" from the files alone, so you flag rather than blocking. A
+  spec that **does** carry the section (citing ids, or stating `ADRs touched: none`)
+  passes this check.
+- **Does not fire otherwise.** The clause **does not fire** for a legacy /
+  no-architecture feature (no `specs/architecture.md` / no ADRs — graceful degradation),
+  and it **does not fire** for an `sdd: false` brief-only item (there is no `.spec.md` to
+  check). It is strictly additive and **disjoint** from the `sdd: false` traceability
+  carve-out — this clause keys on `sdd: true`.
+
 ## `sdd: false` items — behavioural verification, traceability N/A
 
 For an `sdd: false` item (e.g. a fix seeded by the Fixer, `agents/fixer.md`) there is **no**

@@ -25,7 +25,9 @@ flowchart LR
 
 Specs follow a **Product → Epic → Feature** hierarchy, where each feature is a
 4-file spec (`.spec` / `.plan` / `.tasks` / `.tests`) with **EARS** acceptance
-criteria and full requirement→test **traceability**. See `docs/SPEC-FORMAT.md`.
+criteria and full requirement→test **traceability**. When the project has an
+architecture (`/sdd-plan`), each feature spec also **cites the architecture decisions
+(ADRs) it touches** in a `## Architecture alignment` section. See `docs/SPEC-FORMAT.md`.
 
 Epics carry their own lifecycle — `draft → planned → in-progress → done` (epic-level
 `pending` stays valid as a legacy alias of `planned`). A `draft` epic is an inception
@@ -59,10 +61,10 @@ approves) → `builder` → `reviewer`.
 
 | CLI | Entry file | Sub-agents |
 |---|---|---|
-| **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` + `/sdd-new`, `/sdd-next` |
+| **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next` |
 | **Codex** | `AGENTS.md` (native) | run roles sequentially; hand off via files |
 | **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
-| **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*` (`/sdd-new`, `/sdd-next`) |
+| **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*` (`/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next`) |
 
 The harness body — `AGENTS.md`, `agents/`, `specs/`, `progress/`, `init.sh`, the
 stores — is **identical** across all of them. Only the entry filename and the
@@ -193,7 +195,7 @@ docs/                        SPEC-FORMAT, WORKFLOW, HARNESS, INSTALL, UMBRELLA, 
 umbrella.manifest.example.yaml   cross-repo coordinator manifest template
 umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
-.opencode/command/           OpenCode slash commands (/sdd-new, /sdd-next)
+.opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
 ```
 
 ## Installing into an existing project

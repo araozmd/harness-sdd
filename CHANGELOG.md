@@ -4,6 +4,47 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.19.0] — 2026-06-10
+
+### Added — ✨ Architect ADR-citation contract (architecture.md mandatory-when-present input; specs cite the ADRs they touch)
+- **Amended Architect contract (`agents/architect.md`)** — the Architect now **consumes**
+  the planning tier's durable design. When `specs/architecture.md` + `specs/adr/NNNN-*.md`
+  are **present**, they are a **mandatory input** alongside the inbox brief, and the
+  Architect reuses the **F03-D7 hook** (the touched `ADR-NNNN` ids the Driller already
+  recorded in the brief) as the seed. Every feature `.spec.md` it writes carries a
+  **`## Architecture alignment`** section citing each touched `ADR-NNNN` + a one-line "how
+  this honors it"; **`ADRs touched: none`** is the explicit, legitimate no-touch state; a
+  divergence is **stated in the section** (never an authored ADR delta — that stays F03's
+  job).
+- **Graceful degradation** — `present` means the file exists **and** carries real content
+  (a bare/template-stub counts as **absent**). When architecture is absent (legacy repo or
+  `/sdd-new` altitude-3), the Architect records the absence and proceeds from the brief
+  alone — no fabricated citation, no failure, section not required. Existing pre-contract
+  specs stay valid (no retro-fit). The rule also applies to umbrella shared specs,
+  orthogonal to the contract-artifact reference.
+- **`## Architecture alignment` template section** — `specs/_templates/feature.spec.md`
+  gains the section (between `## Business rules` and `## Acceptance criteria (EARS)`) with
+  the `ADRs touched: none` fallback, so every new spec has a consistent, checkable slot.
+- **Additive Reviewer clause (`agents/reviewer.md`)** — a new
+  `## ADR-citation check (architecture-aligned specs)` section that fires **only where**
+  `specs/architecture.md` + ≥1 ADR exist **and** the feature is `sdd: true`; it confirms
+  the `.spec.md` has a `## Architecture alignment` section citing ≥1 `ADR-NNNN` or stating
+  `ADRs touched: none`. A missing/empty section is a **soft flag**, not a hard reject; the
+  clause does not fire for legacy/no-architecture features or `sdd: false` brief-only items.
+- **Docs** — `docs/SPEC-FORMAT.md` documents the section + cite-your-ADRs rule;
+  `docs/WORKFLOW.md` gains a distinct "Architecture-aligned specs (the Architect cites
+  ADRs)" section placing the contract relative to `/sdd-plan` + `/sdd-drill`; `README.md`
+  gains a one-line note that feature specs cite the ADRs they touch.
+- **Verification** — `tests/test_architect_adr.sh` (wired into
+  `verification.test_command`): grep contract assertions over the role/reviewer/template/docs,
+  a temp-dir markdown fixture proving the `## Architecture alignment` shape (both citing an
+  ADR and `ADRs touched: none`) is internally consistent, and a temp JSON store fixture
+  proving the citation needs **no** `store/tasks.schema.json` change.
+- Purely additive / consume-only: F02 `/sdd-plan`, F03 `/sdd-drill`, the ADR
+  format/numbering, the architecture/adr templates, `store/tasks.schema.json`, and every
+  `/sdd-*` command are unchanged; a repo with no `specs/architecture.md` behaves exactly as
+  today.
+
 ## [0.18.0] — 2026-06-10
 
 ### Added — ✨ `/sdd-fix` lightweight fix lane (maintenance epic, brief-only `sdd: false` intake)

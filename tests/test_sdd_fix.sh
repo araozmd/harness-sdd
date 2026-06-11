@@ -260,12 +260,10 @@ pass "R20 readme_oneliner"
 V="$(cat VERSION)"
 echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || fail "R21: VERSION '$V' not semver"
 grep -qF "## [$V]" CHANGELOG.md                 || fail "R21: CHANGELOG.md has no '## [$V]' heading"
-# the section for the current version mentions /sdd-fix
-awk -v ver="## [$V]" '
-  index($0, ver)==1 {found=1; next}
-  found && /^## \[/ {exit}
-  found {print}
-' CHANGELOG.md | grep -qF '/sdd-fix' || fail "R21: CHANGELOG '## [$V]' section does not mention /sdd-fix"
+# /sdd-fix is recorded in the changelog under its own version section. Do NOT couple
+# this to the current top VERSION — a later feature (e.g. F04) bumps VERSION past it,
+# moving /sdd-fix out of the `## [$V]` section. Assert it is recorded somewhere.
+grep -qF '/sdd-fix' CHANGELOG.md || fail "R21: CHANGELOG.md does not record /sdd-fix"
 pass "R21 version_changelog"
 
 # ── R22: sdd:false routing split by autonomous — in-progress→Builder vs gated park ─

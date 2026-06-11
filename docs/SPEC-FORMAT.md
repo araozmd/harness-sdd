@@ -71,6 +71,30 @@ Patterns can be combined: *When `<trigger>`, while `<state>`, the `<system>` sha
 - Quantify: "at most 5 notes", "within 2s", not "a few", "fast".
 - Give each a stable id. Never renumber a shipped requirement — append.
 
+## Architecture alignment — cite the ADRs you touch
+
+When the project has been planned (`/sdd-plan` wrote `specs/architecture.md` and ADRs at
+`specs/adr/NNNN-*.md`), every feature `.spec.md` carries a dedicated
+**`## Architecture alignment`** section (it sits between `## Business rules` and
+`## Acceptance criteria (EARS)` — see `specs/_templates/feature.spec.md`). The Architect
+**cites** the architecture decisions the feature **touches**, seeded from the `ADR-NNNN`
+ids the inbox brief already records (the F03-D7 hook). The rule:
+
+- **Cite each touched ADR.** List each `ADR-NNNN` the feature touches, each with a
+  one-line "how this feature honors that decision".
+- **`ADRs touched: none`** — when architecture artifacts exist but the feature genuinely
+  touches **no** recorded decision, the section still appears and records the explicit line
+  `ADRs touched: none` with a one-line why. It is a legitimate state, **not** a silent
+  omission — which is what lets the Reviewer tell "touches none" from "forgot".
+- **Divergence** — when a feature must intentionally depart from an ADR, state the
+  divergence here (which ADR, how it departs, why); the Architect does **not** author an
+  ADR delta (that stays the Driller's job).
+- **Graceful degradation (absent architecture).** In a legacy repo that never ran
+  `/sdd-plan` (or `/sdd-new`'s altitude-3 flow), `specs/architecture.md` is **absent** — a
+  bare or template-stub file counts as absent too. Then the section is **not required**:
+  the Architect records the absence and proceeds, writing no fabricated citation. Specs
+  written before this contract (without the section) remain valid — no retro-fit.
+
 ## Frontmatter (machine-readable state)
 
 Every `.spec.md` starts with YAML frontmatter so the Orchestrator reads state
