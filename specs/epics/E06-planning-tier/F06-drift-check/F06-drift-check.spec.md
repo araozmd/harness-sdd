@@ -2,7 +2,7 @@
 id: E06-F06
 title: "Drift check on epic rollup (Scout re-validates remaining draft/planned epics)"
 epic: E06-planning-tier
-status: spec-ready          # pending → spec-ready → in-progress → in-review → done
+status: in-progress         # pending → spec-ready → in-progress → in-review → done
 sdd: true
 autonomous: false           # installed-body role + docs change; human reviews
 depends_on: [E06-F03]
