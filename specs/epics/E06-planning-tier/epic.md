@@ -1,7 +1,7 @@
 ---
 id: E06
 title: Planning tier (rolling-wave inception + per-epic drill-down)
-status: in-progress      # pending → in-progress → done (rollup of its features)
+status: done             # pending → in-progress → done (rollup of its features)
 owner: araozmd
 ---
 
@@ -45,7 +45,7 @@ clear and approved, the coding agent runs and validates autonomously.
 | F03 | `/sdd-drill <epic>` skill (decompose, ADR deltas, epic-level approval) | done | true | F01, F02 |
 | F04 | Architect contract: `architecture.md` mandatory input, specs cite ADRs | done | true | F02 |
 | F05 | `/sdd-fix` lightweight lane (maintenance epic, brief-only intake) | done | true | F01 |
-| F06 | Drift check on epic rollup (Scout re-validates remaining epics) | not seeded | true | F03 |
+| F06 | Drift check on epic rollup (Scout re-validates remaining epics) | done | true | F03 |
 
 F02–F06 are the planned roadmap, listed here deliberately **without** TaskStore
 entries: they get seeded as F01 lands and the shape firms up — the same

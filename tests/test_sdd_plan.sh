@@ -252,12 +252,11 @@ pass "R22 readme_oneliner"
 V="$(cat VERSION)"
 echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || fail "R23: VERSION '$V' not semver"
 grep -qF "## [$V]" CHANGELOG.md                 || fail "R23: CHANGELOG.md has no '## [$V]' heading"
-# the section for the current version mentions /sdd-plan
-awk -v ver="## [$V]" '
-  index($0, ver)==1 {found=1; next}
-  found && /^## \[/ {exit}
-  found {print}
-' CHANGELOG.md | grep -qF '/sdd-plan' || fail "R23: CHANGELOG '## [$V]' section does not mention /sdd-plan"
+# The /sdd-plan marker must appear SOMEWHERE in the CHANGELOG — grepped across the WHOLE
+# file, NOT coupled to the current-top `## [$V]` section. Coupling this to the top version
+# is the permanent-suite anti-pattern (a later, unrelated MINOR bump that adds a new top
+# section would otherwise break this suite — exactly what happened on the E06-F06 bump).
+grep -qF '/sdd-plan' CHANGELOG.md || fail "R23: CHANGELOG.md has no /sdd-plan marker anywhere"
 pass "R23 version_changelog"
 
 echo "All sdd-plan tests passed."

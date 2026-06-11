@@ -19,7 +19,11 @@ With `tasks: obsidian`, the source of truth for status is each feature's
   ```dataview
   table status, sdd, epic from "specs/epics" where id sort id asc
   ```
-- **set_status(id, status)** — edit the feature's frontmatter `status`.
+- **set_status(id, status)** — edit the addressed object's frontmatter `status`: a
+  **feature id** edits that feature's `.spec.md` frontmatter; an **epic id** edits that
+  epic's `specs/epics/<epic>/epic.md` frontmatter `status`. The epic case is required —
+  the epic-done rollup and drift-check demotion (`store/local.md`) write epic status
+  through this same operation.
 
 Keep `state/tasks.json` as an optional mirror if you also want the `local` view;
 otherwise frontmatter is canonical.

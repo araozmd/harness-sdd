@@ -217,6 +217,60 @@ When the selected feature has `slices[]`, drive it slice by slice:
   write it". (The Reviewer still owns the per-slice `done` verdict inside each child
   repo; you only roll the slices up.)
 
+## Epic-done rollup + drift check (additive — beside the feature rollup above)
+
+This section ADDS an **epic-level** rollup beside the feature-level rollup; it does not
+replace it. It is the **trigger** for the drift check.
+
+**Epic-done rollup (derive, then persist).** When a feature transition makes **all** of an
+epic's features `done`, you (the owner of `set_status`) **derive+persist** that epic's `done`
+status — write `done` onto the epic via `set_status` and **re-validate** `state/tasks.json`
+against `store/tasks.schema.json` — exactly mirroring the feature rollup's "derive, then
+persist" discipline (no new status value, no schema change; `done` is already an epic enum
+value). This fires **only** when **every** feature of the epic is `done`. Then, **before
+selecting the next task**, you **trigger the drift check**.
+
+**The drift check fires only on an epic rolling up to `done`** — never on every loop
+iteration, and never on a feature `done` that does not complete its epic. On that trigger you
+spawn the **read-only Scout** in a **drift-check mode** (see `agents/scout.md`) to re-validate
+the remaining `draft`/`planned`/`pending` epics against the just-completed epic's produced
+artifacts (new/changed ADRs + architecture deltas + what its features changed).
+
+**Scout flags, Orchestrator acts (the read-only contract is preserved).** The **Scout never
+writes `state/tasks.json`** — it produces the findings file under `progress/` and makes no
+state change. The **Orchestrator alone** (the owner of `set_status`) reads those findings and
+**applies the demotion**:
+
+- For each epic the Scout judged **stale**: demote a `planned` (or legacy `pending`) epic to
+  **`draft`** via `set_status`, then **re-validate** `state/tasks.json` against
+  `store/tasks.schema.json`. The demoted epic's features become non-selectable behind F01's
+  `next()` gate. A stale `draft` epic **stays `draft`** (already the lowest planning state) but
+  is flagged in the findings.
+- The check considers **`planned`, `pending`, and `draft`** epics and **never** an
+  `in-progress` or `done` epic.
+
+**Backward-only invariant.** Drift-driven demotion **only ever moves an epic backward**
+(`planned`/`pending` → `draft`). It **never advances an epic forward** and **never demotes an
+`in-progress` or `done` epic**. Re-drilling a demoted epic back to `planned` stays a **manual**
+`/sdd-drill <epic>` step (F03) — never an automatic F06 move.
+
+**Report + flag-only note.** On demoting an epic, **report the re-drill pointer** — tell the
+human to `run /sdd-drill <epic>` to re-validate and restore it to `planned`. You **may append a
+single flag line** `demoted on drift: <reason>` to the demoted epic's
+`specs/epics/<id>-<slug>/epic.md`. This is a **flag only** — it appends one breadcrumb line and
+**never rewrites** the brief, the feature table, or any feature spec / content.
+
+**No-op note, never silence.** When the drift check runs but there is nothing to do, emit a
+clear **"nothing to re-validate"** note (with the reason) and change **no** status:
+- there are **no** remaining `draft`/`planned`/`pending` epics (legacy/single-epic repo, or
+  every remaining epic already `done`); or
+- there is **no** `specs/architecture.md` / ADR set to re-validate against (graceful
+  degradation, exactly as the Architect contract handles absent architecture).
+
+The findings file under `progress/` is the durable audit trail; the drift-check Scout run is
+also recorded as a normal best-effort `phase: scout` telemetry record (see "## Telemetry") —
+never blocking the check or a demotion.
+
 ## Telemetry
 
 You are the **single writer** of telemetry — you own every delegation boundary and

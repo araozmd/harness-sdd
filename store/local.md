@@ -25,9 +25,15 @@ Validated by `store/tasks.schema.json` (and by `init.sh`).
   `in-progress`, or `done` impose **no new gate** — their features are evaluated
   by the per-feature rules above, unchanged.
 - **get(id)** — find the feature object by `id`.
-- **set_status(id, status)** — edit the feature's `status` in the JSON, then
-  re-validate (`python3 -c "import json;json.load(open('state/tasks.json'))"`).
-  Keep the feature's `.spec.md` frontmatter `status` in sync.
+- **set_status(id, status)** — set the `status` of the **object the id addresses**,
+  then re-validate (`python3 -c "import json;json.load(open('state/tasks.json'))"`).
+  The id selects the object kind:
+  - a **feature id** (`E06-F06`) edits that feature's `status` in `epics[].features[]`;
+    keep the feature's `.spec.md` frontmatter `status` in sync.
+  - an **epic id** (`E06`) edits that **epic's** `status` in `epics[]`; keep the epic's
+    `epic.md` frontmatter `status` in sync. Epic-status writes are required by the
+    epic-done rollup and the drift-check demotion (below) — `set_status` is the **one**
+    write path for both feature and epic status; backends MUST implement the epic case.
 
 ### Epic lifecycle
 The canonical epic lifecycle is `draft → planned → in-progress → done`. A `draft`
@@ -74,6 +80,36 @@ slice or the integration gate is red) — not "never written". This guarantees t
 no path to a green feature with a red slice, while still unblocking dependents. The umbrella
 dispatch/gating loop that consumes these semantics is specified in
 `docs/UMBRELLA.md` and the "Umbrella mode" section of `agents/orchestrator.md`.
+
+### Epic-done rollup (all features `done` ⇒ epic `done`, derived then persisted)
+Beside the sliced-feature rollup above — and **additively**, not inside it — the same
+"derive, then persist" discipline rolls an **epic** up. **When every feature of an epic is
+`done`, the epic's `done` status is derived and persisted** by the Orchestrator (the owner
+of `set_status`): it derives `done` from the fact that **all features are `done`**, writes it
+onto the epic, and **re-validates** `state/tasks.json` against `store/tasks.schema.json`. This
+mirrors the feature rollup exactly — `done` is never set by fiat while any feature is still
+open, but it **is persisted** once every feature is `done`. This introduces **no new status
+value** and **no schema change**: `done` is already an epic-enum value (`store/tasks.schema.json`).
+
+### Drift check on epic rollup (Scout re-validates, Orchestrator demotes)
+Immediately **after** an epic rolls up to `done`, the Orchestrator triggers a **drift check**
+to guard against stale rolling-wave plans. It spawns the **read-only Scout** in a drift-check
+mode (see `agents/scout.md`) to re-validate the remaining `draft`/`planned`/`pending` epics
+against what the just-completed epic produced (new/changed ADRs + architecture deltas + what
+its features changed). The **Scout flags, the Orchestrator acts**:
+
+- The Scout writes a per-epic still-valid/stale findings file under `progress/` and makes
+  **no** state change (its read-only contract is preserved — it never writes `state/tasks.json`).
+- The **Orchestrator demotes** a stale `planned`/`pending` epic to `draft` via `set_status`,
+  then re-validates `state/tasks.json`. A stale `draft` epic **stays `draft`** (already the
+  lowest planning state) but is **flagged** in the findings.
+- **`in-progress` and `done` epics are never demoted** — the check concerns *future* planned
+  work only. Demotion only ever moves an epic **backward**; re-drilling a demoted epic back to
+  `planned` stays a manual `/sdd-drill` (F03) step.
+
+The demoted epic's features become non-selectable behind `next()`'s epic gate until it is
+re-drilled. This adds **no new status value** and **no schema change** — demotion reuses the
+existing `draft` state.
 
 ## DocStore → markdown
 - **read_spec(feature_id)** — read the 4 files under the feature's `spec_path`.

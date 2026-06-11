@@ -4,6 +4,32 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.20.0] — 2026-06-11
+
+### Added — ✨ Drift check on epic rollup (Scout re-validates remaining draft/planned epics)
+- **Epic-done rollup formalized (`store/local.md`, `agents/orchestrator.md`)** — when every
+  feature of an epic is `done`, the Orchestrator now **derives and persists** the epic's `done`
+  status and **re-validates** `state/tasks.json` — additively, beside the existing
+  feature-level rollup, mirroring its "derive, then persist" discipline. No new status value,
+  no schema change (`done` was already an epic enum value).
+- **Scout drift-check mode (`agents/scout.md`)** — on that epic rollup the read-only Scout
+  re-validates the remaining `draft`/`planned`/`pending` epics against what the completed epic
+  produced and writes a per-epic still-valid/stale findings file to
+  `progress/<run>/scout-drift-<epic>.md`. Staleness uses concrete signals only — **(S1)** a new
+  ADR contradicts the brief, **(S2)** the brief references a removed/renamed thing, **(S3)** an
+  explicit `supersedes E0X` / `obsoletes E0X` marker — stale only when ≥1 fires. The Scout's
+  **read-only** contract is preserved: it writes only to `progress/`, never `state/tasks.json`.
+- **Orchestrator-applied demotion (`agents/orchestrator.md`)** — the Orchestrator (not the
+  Scout) demotes a stale `planned`/`pending` epic to `draft` via `set_status` and re-validates.
+  Demotion only ever moves an epic **backward**; `in-progress`/`done` epics are never demoted;
+  re-drilling a demoted epic back to `planned` stays a manual `/sdd-drill` step, reported as a
+  pointer with an optional flag-only `demoted on drift:` `epic.md` note. The no-op paths (no
+  remaining planning-tier epics, or no architecture) emit a clear "nothing to re-validate" note
+  and change nothing — this drift check never fails silently.
+- **Docs + tests** — `docs/WORKFLOW.md` gains a distinct "Drift check on epic rollup" section;
+  `tests/test_drift_check.sh` (POSIX sh + python3, zero new deps) is wired into
+  `verification.test_command`.
+
 ## [0.19.0] — 2026-06-10
 
 ### Added — ✨ Architect ADR-citation contract (architecture.md mandatory-when-present input; specs cite the ADRs they touch)
