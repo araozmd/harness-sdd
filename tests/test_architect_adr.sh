@@ -226,12 +226,11 @@ pass "R18 portable_contract"
 V="$(cat VERSION)"
 echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || fail "R19: VERSION '$V' not semver"
 grep -qF "## [$V]" CHANGELOG.md                  || fail "R19: CHANGELOG.md has no '## [$V]' heading"
-awk -v ver="## [$V]" '
-  index($0, ver)==1 {found=1; next}
-  found && /^## \[/ {exit}
-  found {print}
-' CHANGELOG.md | grep -qi 'Architecture alignment\|ADR\|cite' \
-  || fail "R19: CHANGELOG '## [$V]' section does not mention the ADR-citation contract"
+# The ADR-citation contract is recorded in the changelog under its own version
+# section. Do NOT couple to the current top VERSION — a later feature bumps past it.
+# Assert it is recorded somewhere (the section marker is F04-specific).
+grep -qi 'Architecture alignment' CHANGELOG.md \
+  || fail "R19: CHANGELOG.md does not record the ADR-citation contract"
 pass "R19 version_changelog"
 
 # ── Markdown fixture (R3/R4/R6): the `## Architecture alignment` shape is consistent ─
