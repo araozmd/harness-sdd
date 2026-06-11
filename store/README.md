@@ -15,7 +15,7 @@ The epic/feature/task tree the Orchestrator reads to decide what's next.
 | `list()` | all epics → features with status |
 | `next()` | highest-priority actionable feature (respecting `depends_on`) |
 | `get(id)` | one feature's state |
-| `set_status(id, status)` | move through the state machine |
+| `set_status(id, status)` | move a **feature** *or* **epic** through the state machine (a feature id edits the feature; an epic id edits the epic — see each backend doc) |
 
 Backends: `local` (✅), `obsidian` (✅), `jira` (⏳ stub).
 

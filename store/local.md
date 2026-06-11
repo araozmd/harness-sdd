@@ -25,9 +25,15 @@ Validated by `store/tasks.schema.json` (and by `init.sh`).
   `in-progress`, or `done` impose **no new gate** — their features are evaluated
   by the per-feature rules above, unchanged.
 - **get(id)** — find the feature object by `id`.
-- **set_status(id, status)** — edit the feature's `status` in the JSON, then
-  re-validate (`python3 -c "import json;json.load(open('state/tasks.json'))"`).
-  Keep the feature's `.spec.md` frontmatter `status` in sync.
+- **set_status(id, status)** — set the `status` of the **object the id addresses**,
+  then re-validate (`python3 -c "import json;json.load(open('state/tasks.json'))"`).
+  The id selects the object kind:
+  - a **feature id** (`E06-F06`) edits that feature's `status` in `epics[].features[]`;
+    keep the feature's `.spec.md` frontmatter `status` in sync.
+  - an **epic id** (`E06`) edits that **epic's** `status` in `epics[]`; keep the epic's
+    `epic.md` frontmatter `status` in sync. Epic-status writes are required by the
+    epic-done rollup and the drift-check demotion (below) — `set_status` is the **one**
+    write path for both feature and epic status; backends MUST implement the epic case.
 
 ### Epic lifecycle
 The canonical epic lifecycle is `draft → planned → in-progress → done`. A `draft`
