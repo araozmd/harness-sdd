@@ -33,6 +33,24 @@ The Orchestrator is never delegated; only this Builder phase is.
 5. Run `./init.sh` (and the project test command) to self-check before moving on.
 6. Tick the task in `<feature>.tasks.md` and append progress to `progress/<run>/`.
 
+### `sdd: false` items — work from the inbox brief (no `tasks.md`)
+
+A feature with `sdd: false` (e.g. a fix seeded by the Fixer, `agents/fixer.md`) has **no**
+four-file spec and **no** `<feature>.tasks.md`. The Orchestrator routes such an item to you
+**only after it has set the feature to `in-progress`** (its `pending + sdd: false +
+autonomous: true` route sets `in-progress` first; a `--gated`/`autonomous: false` fix parks
+at the human gate and never reaches you until a human moves it to `in-progress`). So the
+Loop A step-1 precondition (`status: in-progress`) **holds the same way it does for an
+`sdd: true` feature** — it is satisfied by the routing, not waived. Confirm it as usual; if
+the item is still `pending` (or only `spec-ready`), STOP. Once cleared, treat the **inbox
+brief** at `progress/inbox/<id>.md` (problem + intended fix + how to verify) as your
+worklist in place of a `tasks.md`, implement the fix it describes, and still **write at
+least one test that proves the fix** before hand-off. Everything else in Loop A is
+unchanged. (This clause is **additive**: it does not alter the `sdd: true` four-file path
+above — an `sdd: true` feature still works its `<feature>.tasks.md` against the approved
+four-file spec; it only names where the `sdd: false` item's `in-progress` precondition
+comes from.)
+
 ## Loop B — delegate (an external executor implements)
 
 1. Confirm the feature status is `in-progress`. If only `spec-ready`, STOP.
