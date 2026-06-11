@@ -1,7 +1,7 @@
 ---
 id: E06
 title: Planning tier (rolling-wave inception + per-epic drill-down)
-status: in-progress      # pending → in-progress → done (rollup of its features)
+status: done             # pending → in-progress → done (rollup of its features)
 owner: araozmd
 ---
 
