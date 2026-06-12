@@ -68,7 +68,7 @@
       "features": [
         {
           "id": "E05-F01",
-          "title": "Reviewer cross-file consistency + explicit build↔review rounds",
+          "title": "Reviewer cross-file consistency + explicit build\u2194review rounds",
           "status": "done",
           "sdd": true,
           "autonomous": true,
@@ -189,6 +189,22 @@
           "autonomous": false,
           "depends_on": [],
           "spec_path": "specs/epics/E08-installer-selection/F01-agent-selection/"
+        }
+      ]
+    },
+    {
+      "id": "E99",
+      "title": "Maintenance (hotfixes & minor fixes)",
+      "status": "planned",
+      "features": [
+        {
+          "id": "E99-F01",
+          "title": "Installer agent picker: arrow-key + spacebar checkbox UI (fallback to numbered)",
+          "status": "done",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F01-agent-picker-arrow-keys/"
         }
       ]
     }

@@ -4,6 +4,36 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.23.0] — 2026-06-12
+
+### Added — ✨ Installer agent picker: arrow-key + spacebar checkbox UI (E99-F01)
+- **Cursor-driven checkbox picker (`harness-install.sh` `tui_select`)** — on a raw-capable
+  interactive TTY the agent front-end selector now renders the four agent keys
+  (`claude gemini opencode antigravity`) as a checkbox list: ↑/↓ (or `k`/`j`) move a `>`
+  cursor, **Space** toggles the highlighted row's `[x]`/`[ ]`, **Enter** confirms (`q`/Esc
+  also confirm the current selection). This replaces the awkward type-a-number toggle model
+  as the preferred interactive path. Pre-check state still seeds from the saved
+  `.harness/.agents` set (or ALL on a fresh install), and only the resolved sorted keys
+  (one per line) reach stdout, so the captured `SELECTED` contract is unchanged.
+- **Graceful fallback (`tui_capable`)** — a capability probe detects whether `stty` can save +
+  enter + restore raw mode on an interactive TTY. When raw mode is unavailable (no `stty`,
+  non-interactive / piped stdin, sandboxed), `resolve_agents` falls back to the existing
+  numbered `toggle_select`. The install never hard-fails on a terminal that can't do raw mode.
+- **Guaranteed terminal restore** — raw mode is entered with `stty` and UNCONDITIONALLY
+  restored via an `EXIT`/`INT`/`TERM` trap (plus an explicit restore on the normal completion
+  path), so Ctrl-C or quitting never leaves the user's terminal stuck in raw mode; the cursor
+  is re-shown too. All prompts/UI go to **stderr**.
+- **No behavior change off the interactive path** — the no-TTY "ALL agents" default and the
+  `--agents=` / `HARNESS_AGENTS=` override path are untouched; the picker only changes the
+  interactive presentation. Portable POSIX sh, **no new binary dependencies**. `VERSION`
+  bumped 0.22.0 → 0.23.0 (MINOR). `tests/test_install.sh` gains an E99-F01 group asserting the
+  picker + capability probe + fallback wiring (the numbered fallback is what the suite
+  exercises non-interactively). `tests/test_sdd_fix.sh` R17 now checks the installer-SEEDED
+  store (throwaway target) for "no pre-seeded E99" instead of the mutable live
+  `state/tasks.json`, which this repo legitimately populates while dogfooding its own
+  `/sdd-fix` lane (permanent-suite anti-pattern fix). No canonical `agents/*.md` role file is
+  touched.
+
 ## [0.22.0] — 2026-06-12
 
 ### Added — ✨ Antigravity native support

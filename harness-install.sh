@@ -319,12 +319,129 @@ toggle_select() {
   normalize_keys "$_sel"
 }
 
+# tui_capable — true (exit 0) iff we can drive a raw-mode cursor TUI: stdin is an
+# interactive TTY AND `stty` can save + enter + restore raw mode. Probes by saving
+# the current terminal settings and immediately restoring them; any failure (no
+# stty, not a real tty, sandboxed) returns non-zero so the caller falls back to the
+# numbered toggle_select. Emits nothing to stdout (probe output is discarded).
+tui_capable() {
+  [ -t 0 ] || return 1
+  command -v stty >/dev/null 2>&1 || return 1
+  _probe="$(stty -g 2>/dev/null)" || return 1
+  [ -n "$_probe" ] || return 1
+  # Confirm we can actually restore from a saved snapshot.
+  stty "$_probe" 2>/dev/null || return 1
+  return 0
+}
+
+# tui_select <baseline-newline-list> — raw-mode arrow-key + spacebar checkbox UI
+# (the preferred interactive picker; falls back via resolve_agents to toggle_select
+# when tui_capable is false). Renders the four agent keys as a cursor-driven list:
+#   ↑/↓ (or k/j) move a `>` cursor · Space toggles the highlighted [x]/[ ] · Enter
+#   confirms · q/Esc confirms the current selection too.
+# Pre-check state seeds from <baseline> exactly as toggle_select does. ALL UI goes to
+# stderr; only the resolved sorted keys (one per line, via normalize_keys) hit stdout,
+# so the captured SELECTED contract is unchanged. Raw mode is entered with `stty` and
+# UNCONDITIONALLY restored via an EXIT/INT/TERM trap so Ctrl-C never leaves the
+# terminal in raw mode.
+tui_select() {
+  _baseline="$1"
+  # Positional key list + parallel on/off state (same seeding as toggle_select).
+  _i=0
+  for _k in $AGENT_KEYS; do
+    _i=$((_i + 1))
+    eval "_key_$_i=\$_k"
+    if printf '%s\n' "$_baseline" | grep -qx "$_k"; then
+      eval "_on_$_i=1"
+    else
+      eval "_on_$_i=0"
+    fi
+  done
+  _n="$_i"
+  _cursor=1
+
+  # Save terminal settings and guarantee restoration on ANY exit path.
+  _saved_stty="$(stty -g 2>/dev/null)"
+  # shellcheck disable=SC2064
+  trap "stty '$_saved_stty' 2>/dev/null; printf '\\033[?25h' >&2" EXIT INT TERM
+  # Raw-ish mode: no echo, char-at-a-time (-icanon min 1), keep signals usable.
+  stty -echo -icanon min 1 time 0 2>/dev/null
+  printf '\033[?25l' >&2  # hide cursor
+
+  printf '%s\n' \
+    "Select which agent front-ends to stamp:" \
+    "  ↑/↓ (or k/j) move · Space toggles [x]/[ ] · Enter confirms" >&2
+
+  _drawn=0
+  _redraw() {
+    # Move cursor up to overwrite the previous render (after the first draw).
+    if [ "$_drawn" = 1 ]; then printf '\033[%dA' "$_n" >&2; fi
+    _i=0
+    while [ "$_i" -lt "$_n" ]; do
+      _i=$((_i + 1))
+      eval "_k=\$_key_$_i; _s=\$_on_$_i"
+      if [ "$_s" = 1 ]; then _mark="[x]"; else _mark="[ ]"; fi
+      if [ "$_i" = "$_cursor" ]; then _point=">"; else _point=" "; fi
+      printf '\033[2K\r %s %s %s\n' "$_point" "$_mark" "$_k" >&2
+    done
+    _drawn=1
+  }
+  _redraw
+
+  # Read one byte at a time; decode arrows (ESC [ A/B) and act on space/enter/etc.
+  while :; do
+    _c="$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')"
+    [ -n "$_c" ] || continue
+    case "$_c" in
+      10|13)  # LF / CR → Enter, confirm
+        break ;;
+      32)     # Space → toggle highlighted row
+        eval "_cur=\$_on_$_cursor"
+        if [ "$_cur" = 1 ]; then eval "_on_$_cursor=0"; else eval "_on_$_cursor=1"; fi
+        _redraw ;;
+      107)    # 'k' → up
+        if [ "$_cursor" -gt 1 ]; then _cursor=$((_cursor - 1)); _redraw; fi ;;
+      106)    # 'j' → down
+        if [ "$_cursor" -lt "$_n" ]; then _cursor=$((_cursor + 1)); _redraw; fi ;;
+      113)    # 'q' → confirm current selection and quit
+        break ;;
+      27)     # ESC — could be a bare Esc (abort/confirm) or an arrow sequence ESC [ A/B
+        _c2="$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')"
+        if [ "$_c2" != 91 ]; then break; fi   # bare Esc → confirm current selection
+        _c3="$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')"
+        case "$_c3" in
+          65)  # 'A' → up arrow
+            if [ "$_cursor" -gt 1 ]; then _cursor=$((_cursor - 1)); _redraw; fi ;;
+          66)  # 'B' → down arrow
+            if [ "$_cursor" -lt "$_n" ]; then _cursor=$((_cursor + 1)); _redraw; fi ;;
+        esac ;;
+    esac
+  done
+
+  # Restore terminal NOW and clear the trap (normal completion path).
+  stty "$_saved_stty" 2>/dev/null
+  printf '\033[?25h' >&2
+  trap - EXIT INT TERM
+
+  _sel=""
+  _i=0
+  while [ "$_i" -lt "$_n" ]; do
+    _i=$((_i + 1))
+    eval "_k=\$_key_$_i; _s=\$_on_$_i"
+    [ "$_s" = 1 ] && _sel="$_sel $_k"
+  done
+  normalize_keys "$_sel"
+}
+
 # resolve_agents <target> — resolve the SELECTED agent set for this run (R1, R5,
 # R6, R9, R11). Resolution order, first match wins, decoupled from VERSION/UPGRADE:
 #   1. Override (R5/R7): a non-empty $AGENTS_OVERRIDE (from --agents/HARNESS_AGENTS)
 #      → validate_csv, no prompt — wins over persisted + TTY.
 #   2. Interactive (R1/R9): else if stdin is a TTY → pre-check baseline is the
-#      persisted .harness/.agents if present (R9) else ALL (R1); run toggle_select.
+#      persisted .harness/.agents if present (R9) else ALL (R1). On a raw-capable
+#      TTY this runs the arrow-key + spacebar checkbox picker (tui_select); when
+#      raw mode is unavailable it gracefully falls back to the numbered
+#      toggle_select. Both resolve the identical SELECTED set from the same baseline.
 #   3. No-TTY default (R6): else → ALL keys (back-compat: stamp everything).
 # Sets the global SELECTED to a sorted, newline-separated key list.
 resolve_agents() {
@@ -339,7 +456,13 @@ resolve_agents() {
     else
       _base="$(normalize_keys "$AGENT_KEYS")"
     fi
-    SELECTED="$(toggle_select "$_base")"
+    # Preferred interactive path: arrow-key + spacebar checkbox TUI when the
+    # terminal supports raw mode; otherwise fall back to the numbered toggle list.
+    if tui_capable; then
+      SELECTED="$(tui_select "$_base")"
+    else
+      SELECTED="$(toggle_select "$_base")"
+    fi
     info "agents: interactive selection ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
   else
     SELECTED="$(normalize_keys "$AGENT_KEYS")"
