@@ -157,6 +157,40 @@
           "spec_path": "specs/epics/E06-planning-tier/F06-drift-check/"
         }
       ]
+    },
+    {
+      "id": "E07",
+      "title": "Antigravity support",
+      "status": "pending",
+      "features": [
+        {
+          "id": "E07-F01",
+          "title": "Antigravity native support (entrypoint + installer wiring + role/command glue)",
+          "status": "spec-ready",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E08-F01"
+          ],
+          "spec_path": "specs/epics/E07-antigravity/F01-antigravity-support/"
+        }
+      ]
+    },
+    {
+      "id": "E08",
+      "title": "Installer: selectable agent targets",
+      "status": "done",
+      "features": [
+        {
+          "id": "E08-F01",
+          "title": "Interactive agent-target selection (checkbox + re-prompt on update)",
+          "status": "done",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E08-installer-selection/F01-agent-selection/"
+        }
+      ]
     }
   ]
 }

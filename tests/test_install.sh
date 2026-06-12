@@ -166,4 +166,120 @@ sh "$SRC/harness-install.sh"            >/dev/null 2>&1 && fail "missing-arg sho
 sh "$SRC/harness-install.sh" "$SRC"     >/dev/null 2>&1 && fail "self-target should exit non-zero"   # R9
 pass "arg guards reject bad invocations (R9)"
 
+# ── E08-F01: interactive agent-target selection (non-TTY drives via --agents) ──
+# All installer invocations here run via `sh …` with non-TTY stdin, so selection is
+# driven deterministically by --agents / HARNESS_AGENTS (never the interactive prompt).
+
+# default_all_when_no_persisted (R1) + all_four_front_ends_present (R6): a no-override,
+# no-TTY run resolves to ALL four agents (back-compat: this is the historical behavior,
+# and the proxy for "fresh install pre-checks ALL when .harness/.agents is absent").
+TA="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" "$TA" >/dev/null || fail "no-override install exited non-zero"
+[ -f "$TA/CLAUDE.md" ]       || fail "R6: no-override run did not stamp claude (CLAUDE.md)"
+[ -f "$TA/GEMINI.md" ]       || fail "R6: no-override run did not stamp gemini (GEMINI.md)"
+[ -f "$TA/opencode.json" ]   || fail "R6: no-override run did not stamp opencode (opencode.json)"
+[ -d "$TA/.claude/commands" ] || fail "R6: no-override run did not stamp claude glue"
+[ -d "$TA/.opencode/command" ] || fail "R6: no-override run did not stamp opencode glue"
+[ -f "$TA/.harness/.agents" ] || fail "R8: .harness/.agents not written on no-override run"
+for _k in claude gemini opencode antigravity; do
+  grep -qx "$_k" "$TA/.harness/.agents" || fail "R1/R6: .harness/.agents missing '$_k' on ALL default"
+done
+rm -rf "$TA"
+pass "no-TTY no-override run stamps ALL four agents + persists ALL (R1, R6)"
+
+# agents_claude_only_stamps_claude (R2, R3, R4): --agents=claude stamps only Claude.
+TB="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=claude "$TB" >/dev/null || fail "--agents=claude exited non-zero"
+[ -f "$TB/CLAUDE.md" ]        || fail "R2/R3: --agents=claude did not write CLAUDE.md"
+[ -d "$TB/.claude/agents" ]   || fail "R2/R3: --agents=claude did not write .claude/agents"
+[ -d "$TB/.claude/commands" ] || fail "R2/R3: --agents=claude did not write .claude/commands"
+[ -f "$TB/AGENTS.md" ]        || fail "R2: AGENTS.md (shared entrypoint) must always be written"
+[ -f "$TB/GEMINI.md" ]        && fail "R4: --agents=claude must not write GEMINI.md"
+[ -f "$TB/opencode.json" ]    && fail "R4: --agents=claude must not write opencode.json"
+[ -d "$TB/.opencode" ]        && fail "R4: --agents=claude must not write .opencode/"
+[ -d "$TB/.agent" ]           && fail "R4: --agents=claude must not write .agent/"
+rm -rf "$TB"
+pass "--agents=claude stamps only Claude, no other front-ends (R2, R3, R4)"
+
+# agents_multi_stamps_each (R3): --agents=claude,opencode stamps both.
+TC="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=claude,opencode "$TC" >/dev/null || fail "--agents=claude,opencode exited non-zero"
+[ -f "$TC/CLAUDE.md" ]      || fail "R3: claude not stamped in multi-select"
+[ -f "$TC/opencode.json" ] || fail "R3: opencode not stamped in multi-select"
+[ -d "$TC/.opencode/command" ] || fail "R3: opencode commands not stamped in multi-select"
+[ -f "$TC/GEMINI.md" ]     && fail "R4: gemini must be skipped in claude,opencode select"
+rm -rf "$TC"
+pass "--agents=claude,opencode stamps each selected agent (R3)"
+
+# env_override_selects (R5): HARNESS_AGENTS resolves the set, and --agents wins too.
+TD="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+HARNESS_AGENTS=gemini sh "$SRC/harness-install.sh" "$TD" >/dev/null || fail "HARNESS_AGENTS=gemini exited non-zero"
+[ -f "$TD/GEMINI.md" ]   || fail "R5: HARNESS_AGENTS=gemini did not stamp gemini"
+[ -f "$TD/CLAUDE.md" ]   && fail "R5: HARNESS_AGENTS=gemini must not stamp claude"
+[ -f "$TD/opencode.json" ] && fail "R5: HARNESS_AGENTS=gemini must not stamp opencode"
+rm -rf "$TD"
+# --agents wins over an HARNESS_AGENTS env value at the same time
+TD2="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+HARNESS_AGENTS=gemini sh "$SRC/harness-install.sh" --agents=claude "$TD2" >/dev/null || fail "override precedence run failed"
+[ -f "$TD2/CLAUDE.md" ]  || fail "R5: --agents=claude must win over HARNESS_AGENTS=gemini"
+[ -f "$TD2/GEMINI.md" ]  && fail "R5: --agents must override HARNESS_AGENTS (gemini should be skipped)"
+rm -rf "$TD2"
+pass "explicit --agents / HARNESS_AGENTS override resolves the set, --agents wins (R5)"
+
+# registry_keys (R10): every registry key is individually selectable.
+for _k in claude gemini opencode antigravity; do
+  TK="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  sh "$SRC/harness-install.sh" --agents="$_k" "$TK" >/dev/null || fail "R10: --agents=$_k exited non-zero"
+  grep -qx "$_k" "$TK/.harness/.agents" || fail "R10: '$_k' not selectable/persisted"
+  rm -rf "$TK"
+done
+pass "every registry key is individually selectable (R10)"
+
+# unknown_agent_key_rejected (R7): an unknown override exits non-zero, names it, no changes.
+TE="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+_err="$(sh "$SRC/harness-install.sh" --agents=claude,bogus "$TE" 2>&1 >/dev/null)" && fail "R7: unknown key must exit non-zero"
+printf '%s' "$_err" | grep -qF 'bogus' || fail "R7: error must name the unknown token 'bogus'"
+[ -d "$TE/.harness" ] && fail "R7: unknown-key run must make no changes (no .harness/ written)"
+[ -f "$TE/CLAUDE.md" ] && fail "R7: unknown-key run must not stamp any front-end"
+rm -rf "$TE"
+pass "unknown override key exits non-zero, names it, makes no changes (R7)"
+
+# persists_selection (R8): --agents=claude,opencode persists exactly those, sorted, 1/line.
+TF="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=opencode,claude "$TF" >/dev/null || fail "persist run failed"
+[ -f "$TF/.harness/.agents" ] || fail "R8: .harness/.agents not created"
+[ "$(cat "$TF/.harness/.agents")" = "$(printf 'claude\nopencode')" ] \
+  || fail "R8: .harness/.agents not exactly {claude,opencode} sorted one-per-line (got: $(cat "$TF/.harness/.agents" | tr '\n' ',' ))"
+# .harness/agents/ (the role-bodies DIR) must coexist with the .harness/.agents state FILE
+[ -d "$TF/.harness/agents" ] || fail "R8: role-bodies .harness/agents/ dir clobbered by state file"
+[ -f "$TF/.harness/agents/orchestrator.md" ] || fail "R8: role bodies missing alongside state file"
+rm -rf "$TF"
+pass ".harness/.agents persists the selection sorted, coexists with the roles dir (R8)"
+
+# reconcile_add + reconcile_remove + reprompt_baseline_is_persisted +
+# reconcile_without_version_bump (R9, R11, R12, R13): a re-run at the SAME version that
+# both adds and removes an agent, using the persisted set as the baseline.
+TG="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=claude,gemini "$TG" >/dev/null || fail "reconcile install1 failed"
+[ -f "$TG/GEMINI.md" ] || fail "reconcile setup: gemini not stamped in install1"
+[ -f "$TG/opencode.json" ] && fail "reconcile setup: opencode should be absent after install1"
+# Re-run at the SAME VERSION (R11): drop gemini, add opencode.
+_warn="$(sh "$SRC/harness-install.sh" --agents=claude,opencode "$TG" 2>&1 >/dev/null)" \
+  || fail "reconcile install2 exited non-zero"
+# add applied (R12)
+[ -f "$TG/opencode.json" ]     || fail "R12: re-run did not add opencode glue (opencode.json)"
+[ -d "$TG/.opencode/command" ] || fail "R12: re-run did not add opencode commands"
+# remove applied (R13): gemini glue gone, warning printed
+[ -f "$TG/GEMINI.md" ] && fail "R13: deselected gemini glue (GEMINI.md) not removed"
+printf '%s' "$_warn" | grep -qiF 'gemini' || fail "R13: removal of gemini was not warned about"
+# claude kept, AGENTS.md survives, .harness/ body intact (R13 never-touch invariants)
+[ -d "$TG/.claude" ]          || fail "R13: still-selected claude glue must survive"
+[ -f "$TG/AGENTS.md" ]        || fail "R13: shared AGENTS.md entrypoint must never be removed"
+[ -f "$TG/.harness/AGENTS.md" ] || fail "R13: .harness/ body must never be touched by removal"
+# .harness/.agents reflects the new baseline (R9): claude,opencode (not the old set, not ALL)
+[ "$(cat "$TG/.harness/.agents")" = "$(printf 'claude\nopencode')" ] \
+  || fail "R9: persisted baseline not updated to {claude,opencode} after reconcile"
+rm -rf "$TG"
+pass "re-run adds + removes agents at same VERSION, persisted baseline updated (R9, R11, R12, R13)"
+
 echo "All install tests passed."

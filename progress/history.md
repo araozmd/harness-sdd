@@ -27,3 +27,10 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-06-10 E06-F01 — Builder round 1 (T1–T12, VERSION 0.14.0, new tests/test_epic_lifecycle.sh, all 8 suites green; flagged test_inception.sh diff-vs-main removal) → in-review.
 - 2026-06-10 E06-F01 — Reviewer APPROVED round 1: init.sh + all 8 suites green (run independently); R1–R14 each traced to a passing check; zero-dep fallback path exercised with jsonschema shadowed (warn-only invariant + rejection both proven); cross-file story coherent (draft → planned → in-progress → done, pending = legacy alias); feature/slice enums byte-identical; test_inception.sh diff-vs-main removal ACCEPTED (documented permanent-suite anti-pattern, surgical); VERSION 0.14.0 (one MINOR ✨) + CHANGELOG per policy → recommend done.
 - 2026-06-10 E06-F01 — done (Reviewer verdict persisted). Epic E06 → in-progress (F02–F06 roadmap deliberately unseeded, rolling-wave).
+- 2026-06-12T04:43:33Z  E07-F01  pending → spec-ready (Architect: 4-file spec, 12 R-ids) — PAUSED at human gate
+- 2026-06-12T05:01:33Z  E08-F01  pending → spec-ready (Architect: 4-file spec, 15 R-ids) — PAUSED at human gate
+- 2026-06-12T05:12:17Z  E08-F01  spec-ready → in-progress (human approved, gate latency 644s) — spawning Builder (round 1)
+- 2026-06-12T05:22:43Z  E08-F01  in-progress → in-review (Builder: T1–T13, full suite green, round 1)
+- 2026-06-12T05:27:52Z  E08-F01  in-review → approve (round 1) — Reviewer verified suite + behavior
+- 2026-06-12T05:27:52Z  E08-F01  in-review → done; E08 epic rolled up → done
+- 2026-06-12T05:27:52Z  drift-check (trigger: E08 done): NO-OP — no specs/architecture.md / specs/adr to re-validate against (graceful degradation); no epic demoted
