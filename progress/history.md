@@ -34,3 +34,8 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-06-12T05:27:52Z  E08-F01  in-review → approve (round 1) — Reviewer verified suite + behavior
 - 2026-06-12T05:27:52Z  E08-F01  in-review → done; E08 epic rolled up → done
 - 2026-06-12T05:27:52Z  drift-check (trigger: E08 done): NO-OP — no specs/architecture.md / specs/adr to re-validate against (graceful degradation); no epic demoted
+- 2026-06-12T14:18:39Z  E07-F01  spec-ready → in-progress (human approved spec, 4 open questions accepted as-specced, gate latency 34506s) — spawning Builder (round 1)
+- 2026-06-12T14:27:14Z  E07-F01  in-progress → in-review (Builder round 1: T1–T11, §5c Antigravity glue, VERSION→0.22.0, deselect→scoped removal, all 13 suites green)
+- 2026-06-12T14:31:21Z  E07-F01  in-review → approve (round 1) — Reviewer verified all 13 suites green, R1–R12 traced, both deviations (VERSION→0.22.0, deselect→scoped removal) verified sound + data-loss safe
+- 2026-06-12T14:31:21Z  E07-F01  in-review → done (Reviewer verdict persisted); E07 epic rolled up → done
+- 2026-06-12T14:31:21Z  drift-check (trigger: E07 done): NO-OP — no remaining draft/planned/pending epics (all epics done); no Scout spawned, no demotion

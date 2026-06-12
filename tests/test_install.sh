@@ -113,6 +113,54 @@ cmp -s "$T/.claude/commands/sdd-fix.md" "$T/.opencode/command/sdd-fix.md" \
   || fail "opencode sdd-fix differs from claude sdd-fix"
 pass "OpenCode commands generated (R7)"
 
+# ── Antigravity glue (.agent/, E07-F01 R1–R12) ───────────────────────────────────────────────
+# Mirrors the .claude/ + .opencode/ assertions above. A sentinel of canonical orchestrator
+# prose proves the glue POINTS at the roles and never forks a body (R3/R5). The default
+# install (no override) stamps ALL agents, so antigravity glue is present here.
+AG_SENTINEL='You are the **Orchestrator**. You are the project manager of the harness.'
+
+# R1: GEMINI.md managed block boots the Orchestrator against .harness/AGENTS.md.
+grep -qF '<!-- harness:begin -->' "$T/GEMINI.md" || fail "GEMINI.md missing harness block (R1)"
+grep -qF '.harness/AGENTS.md' "$T/GEMINI.md"     || fail "GEMINI.md block does not point at .harness/AGENTS.md (R1)"
+
+# R2: Antigravity entrypoint rule written + points at the harness source of truth + entry role.
+[ -f "$T/.agent/rules/harness.md" ]                                  || fail "antigravity rule .agent/rules/harness.md missing (R2)"
+grep -qF '.harness/AGENTS.md' "$T/.agent/rules/harness.md"           || fail "antigravity rule does not point at .harness/AGENTS.md (R2)"
+grep -qF '.harness/agents/orchestrator.md' "$T/.agent/rules/harness.md" || fail "antigravity rule does not point at the orchestrator role (R2)"
+# R3: rule points at canonical roles, no copied role body (sentinel must be ABSENT).
+grep -qF "$AG_SENTINEL" "$T/.agent/rules/harness.md" && fail "antigravity rule embeds a copied role body (R3)"
+
+# R4/R5: one persona per role, each with a `description`, deferring to .harness/agents/<role>.md,
+# mandating init.sh + progress/ hand-off, with no copied role body.
+for r in orchestrator architect builder reviewer scout; do
+  [ -f "$T/.agent/agents/$r.md" ]                       || fail "antigravity persona $r missing (R4)"
+  grep -qE '^description:' "$T/.agent/agents/$r.md"      || fail "antigravity persona $r has no description (R4)"
+  grep -qF ".harness/agents/$r.md" "$T/.agent/agents/$r.md" || fail "antigravity persona $r does not defer to .harness/agents/$r.md (R5)"
+  grep -qF '.harness/init.sh' "$T/.agent/agents/$r.md"  || fail "antigravity persona $r does not mandate .harness/init.sh (R5)"
+  grep -qF '.harness/progress/' "$T/.agent/agents/$r.md" || fail "antigravity persona $r does not hand off via .harness/progress/ (R5)"
+  grep -qF "$AG_SENTINEL" "$T/.agent/agents/$r.md"      && fail "antigravity persona $r embeds a copied role body (R5)"
+done
+
+# R6/R7: all five workflows generated, each carrying a `description` (slash-command registration).
+for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix; do
+  [ -f "$T/.agent/workflows/$w.md" ]                    || fail "antigravity workflow $w missing (R6)"
+  grep -qE '^description:' "$T/.agent/workflows/$w.md"   || fail "antigravity workflow $w has no description (R7)"
+  grep -qF '$ARGUMENTS' "$T/.agent/workflows/$w.md"      || fail "antigravity workflow $w does not carry \$ARGUMENTS (R8)"
+done
+
+# R8: each workflow acts as its role, resolved against .harness/agents/*.md.
+grep -qF '.harness/agents/orchestrator.md' "$T/.agent/workflows/sdd-next.md" || fail "sdd-next workflow does not resolve orchestrator against .harness/ (R8)"
+grep -qF '.harness/agents/inception.md'    "$T/.agent/workflows/sdd-new.md"  || fail "sdd-new workflow does not resolve inception against .harness/ (R8)"
+grep -qF '.harness/agents/planner.md'      "$T/.agent/workflows/sdd-plan.md" || fail "sdd-plan workflow does not resolve planner against .harness/ (R8)"
+grep -qF '.harness/agents/driller.md'      "$T/.agent/workflows/sdd-drill.md" || fail "sdd-drill workflow does not resolve driller against .harness/ (R8)"
+grep -qF '.harness/agents/fixer.md'        "$T/.agent/workflows/sdd-fix.md"  || fail "sdd-fix workflow does not resolve fixer against .harness/ (R8)"
+
+# R9: each workflow body is byte-identical to the Claude command of the same name (no drift).
+for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix; do
+  cmp -s "$T/.claude/commands/$w.md" "$T/.agent/workflows/$w.md" || fail "antigravity workflow $w differs from claude $w (R9)"
+done
+pass "Antigravity glue generated (R11)"
+
 # target verification commands reset to blank                                                  # R8
 grep -q 'test_command: ""' "$T/.harness/harness.config.yaml" || fail "test_command not blanked"
 pass "target verification commands reset (R8)"
@@ -339,9 +387,10 @@ sh "$SRC/harness-install.sh" --agents=gemini "$TN" >/dev/null 2>&1 || fail "prun
 rm -rf "$TN"
 pass "deselect prunes harness dirs only when left empty (R13)"
 
-# deselect_antigravity_preserves_user_agent_dir (R13, Codex r3 P1 #3400997183): the
-# antigravity stamp is a no-op placeholder (E07-F01 not yet built), so the harness owns
-# nothing in .agent/ — deselecting it must NEVER delete a user-authored .agent/ dir.
+# deselect_antigravity_preserves_user_agent_dir (R13, Codex r3 P1 #3400997183): with the
+# E07-F01 .agent/ glue in place, deselecting antigravity removes ONLY the harness-owned
+# files (scoped remove_owned) and must NEVER delete a user-authored file or `rm -rf` the
+# user's .agent/ dir — the dir survives because it still holds the user's own content.
 TP="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 sh "$SRC/harness-install.sh" "$TP" >/dev/null || fail "antigravity-noop setup install failed"  # ALL ⇒ persists antigravity
 grep -qx antigravity "$TP/.harness/.agents" || fail "setup: antigravity not in persisted baseline"

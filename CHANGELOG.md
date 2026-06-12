@@ -4,6 +4,33 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.22.0] — 2026-06-12
+
+### Added — ✨ Antigravity native support
+- **Antigravity glue (`harness-install.sh` §5c)** — Google Antigravity (a Gemini-based
+  agentic IDE) is now a first-class, selectable harness target. On every run (gated on the
+  `antigravity` agent key), the installer stamps a workspace-local `.agent/` tree that POINTS
+  at the canonical `.harness/agents/*.md` roles — it never forks, copies, or redefines a role
+  body. Antigravity natively reads `<root>/.agent/{rules,agents,workflows}/*.md`.
+- **Entrypoint rule (`.agent/rules/harness.md`)** — a thin rule that loads the harness for an
+  Antigravity session (Antigravity does not auto-load `AGENTS.md`): it points at
+  `.harness/AGENTS.md` (source of truth) and `.harness/agents/orchestrator.md` (entry role),
+  mandates `.harness/init.sh` first, and documents the working model. The root `GEMINI.md`
+  pointer block (already written by §4) also serves Antigravity as the in-repo entrypoint.
+- **Personas (`.agent/agents/{orchestrator,architect,builder,reviewer,scout}.md`)** — one per
+  harness role, each carrying a `description` (so Antigravity registers it) and a body that
+  defers to `.harness/agents/<role>.md`, runs `.harness/init.sh` first (halt on non-zero), and
+  hands off via `.harness/progress/` files — no copied role body.
+- **Workflows (`.agent/workflows/{sdd-next,sdd-new,sdd-plan,sdd-drill,sdd-fix}.md`)** — the
+  same five SDD slash commands, COPIED from the shared command bodies (mirroring the OpenCode
+  block) so they stay byte-identical to the Claude/OpenCode copies and never drift. Each
+  already carries the `description` frontmatter Antigravity needs to register `/<name>`.
+- **No new dependencies; harness-owned + idempotent** — the `.agent/` glue is regenerated each
+  run (like `.claude/` / `.opencode/`); deselecting `antigravity` now removes ONLY those
+  harness-owned files (scoped `remove_owned`, never `rm -rf` of a user `.agent/`). `VERSION`
+  bumped 0.21.0 → 0.22.0 (MINOR). `tests/test_install.sh` gains an Antigravity assertion group
+  covering R1–R12; no canonical `agents/*.md` role file is touched.
+
 ## [0.21.0] — 2026-06-11
 
 ### Added — ✨ Selectable agent targets (interactive selection + re-prompt on update)

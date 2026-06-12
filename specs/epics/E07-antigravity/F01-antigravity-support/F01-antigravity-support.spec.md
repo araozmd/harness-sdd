@@ -2,7 +2,7 @@
 id: E07-F01
 title: Antigravity native support (entrypoint + installer wiring + role/command glue)
 epic: E07-antigravity
-status: pending          # pending → spec-ready → in-progress → in-review → done
+status: done             # pending → spec-ready → in-progress → in-review → done
 sdd: true                # full SDD — installer body change
 autonomous: false        # parks at the human spec-approval gate
 depends_on: []

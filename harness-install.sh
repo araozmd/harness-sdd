@@ -566,6 +566,7 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .harness/agents/  .harness/docs/  .harness/store/  .harness/tools/  .harness/specs/_templates/
   .harness/specs/glossary.md  .harness/umbrella.manifest.example.yaml  .harness/umbrella.gitignore.example
   .claude/agents/*  .claude/commands/*   .opencode/command/*   (repo root, regenerated)
+  .agent/rules/*  .agent/agents/*  .agent/workflows/*   (repo root, regenerated; Antigravity glue)
   CLAUDE.md / AGENTS.md / GEMINI.md  -> only the harness:begin..end block
 
 PROJECT-OWNED  (seeded once, never clobbered on upgrade):
@@ -668,6 +669,11 @@ EOF
   write_pointer AGENTS.md
   # Per-agent entrypoint pointers are gated on selection (R2/R3/R4).
   agent_selected claude && write_pointer CLAUDE.md
+  # The GEMINI.md managed block reads as "act as the Orchestrator, run
+  # .harness/init.sh, read .harness/AGENTS.md" — Antigravity natively loads
+  # GEMINI.md-style rules, so this same pointer also serves Antigravity as the
+  # in-repo entrypoint (E07-F01 R1/R12); the .agent/rules/harness.md rule (§5c) is
+  # the Antigravity-specific hook layered on top.
   agent_selected gemini && write_pointer GEMINI.md
   ok "entrypoint pointers written (AGENTS.md + selected agents)"
 
@@ -962,6 +968,86 @@ EOF
     ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix installed (.opencode/)"
   fi
 
+  # ── 5c. Antigravity glue (.agent/, regenerated each run, gated on `antigravity`) ─
+  # Antigravity (a Gemini-based agentic IDE) natively reads workspace-local
+  # <root>/.agent/{rules,agents,workflows}/*.md. We stamp a glue layer that POINTS at
+  # the canonical roles in .harness/agents/*.md — it never forks a role body. Mirrors
+  # the per-tool pattern: personas model the .claude/agents shims (R4/R5), and the
+  # workflows are COPIED from the shared CMDDIR command bodies exactly like OpenCode
+  # (§5b), so the three front-ends stay byte-identical (R9). Placed after §5b and before the
+  # CMDDIR cleanup so the workflow bodies are still available. (E07-F01 R2,R4,R6.)
+  if agent_selected antigravity; then
+    mkdir -p "$TARGET/.agent/rules" "$TARGET/.agent/agents" "$TARGET/.agent/workflows"
+
+    # Entrypoint rule (R2/R3): points the agent at the source of truth + entry role;
+    # mandates init.sh first. No copied role body — references by .harness/ path only.
+    cat > "$TARGET/.agent/rules/harness.md" <<'EOF'
+---
+description: SDD harness entrypoint — boot as the Orchestrator against .harness/.
+---
+
+This workspace uses the portable **SDD agent harness** installed in `.harness/`.
+Antigravity does not auto-load `AGENTS.md`, so this rule loads the harness for you.
+
+- **Source of truth:** `.harness/AGENTS.md` — read it and resolve every relative
+  path it mentions against `.harness/` (config, `agents/`, `specs/`, `state/`,
+  `store/`, `docs/`, `progress/`).
+- **Start every session as the Orchestrator:** `.harness/agents/orchestrator.md`.
+- **Before any work:** run `.harness/init.sh`. If it exits non-zero, STOP.
+- **Working model (R12):** Antigravity drives the harness through the `.agent/agents/`
+  personas and the `description`-gated `.agent/workflows/` slash commands, with
+  `.harness/progress/` files as the hand-off / isolation boundary — not a Task-tool
+  -style isolated spawn. Hand off through `.harness/progress/`, never by forwarding
+  chat history.
+
+The role files in `.agent/agents/` and the workflows in `.agent/workflows/` are thin
+pointers at the canonical `.harness/agents/*.md` roles — they do not duplicate them.
+EOF
+
+    # Personas (R4/R5): one per harness role, each with a `description` (so Antigravity
+    # registers the persona) + a body that DEFERS to the canonical .harness/agents/<role>.md,
+    # mandates init.sh-first + halt-on-fail, and hands off via .harness/progress/. No copied
+    # role body. Descriptions match the .claude/agents emit_agent calls for consistency.
+    emit_ag_agent() { # emit_ag_agent <role> <description>
+      cat > "$TARGET/.agent/agents/$1.md" <<EOF
+---
+description: $2
+---
+
+You are the **$1** for this project's agent harness (installed in \`.harness/\`).
+
+Your full, canonical role definition is \`.harness/agents/$1.md\` — read it now and
+follow it exactly. Resolve every relative path it mentions against \`.harness/\`
+(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
+\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on its
+non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
+chat history.
+EOF
+    }
+    emit_ag_agent orchestrator \
+      "The Leader. Reads state, runs init.sh, routes the next task, delegates to architect/builder/reviewer/scout. Never writes code."
+    emit_ag_agent architect \
+      "The Spec Author. Writes the 4-file spec in EARS. No production code."
+    emit_ag_agent builder \
+      "The Implementer. Writes code from an APPROVED spec, one task at a time."
+    emit_ag_agent reviewer \
+      "The Evaluator. Verifies against the spec, runs tests, approves or rejects."
+    emit_ag_agent scout \
+      "Read-only codebase reconnaissance. Writes findings to progress/."
+
+    # Workflows (R6/R7/R8/R9): COPY the shared command bodies from CMDDIR (mirror, like
+    # the OpenCode block — do not re-author). The bodies already begin with their own
+    # `---\ndescription: …\n---` frontmatter, which satisfies Antigravity's slash-command
+    # registration (R7), and they already act as their role resolved against
+    # .harness/agents/*.md carrying $ARGUMENTS (R8). A `cp` keeps them byte-identical to
+    # the Claude/OpenCode copies so the front-ends stay byte-identical.
+    for _w in $HARNESS_SDD_CMDS; do
+      cp "$CMDDIR/$_w.md" "$TARGET/.agent/workflows/$_w.md"
+    done
+
+    ok "Antigravity glue (rules + agents + workflows) installed (.agent/)"
+  fi
+
   rm -rf "$CMDDIR"
 
   # ── 6. opencode.json (gated on `opencode`; create if absent; never clobber) ──
@@ -1017,13 +1103,17 @@ EOF
           fi
           ;;
         antigravity)
-          # The antigravity stamp is a no-op placeholder until E07-F01 supplies the
-          # `.agent/` tree, so the harness currently OWNS no files there. Deselection
-          # must therefore be a no-op too: never `rm -rf` a user-authored `.agent/`
-          # dir (which may hold their own config, or — post-E07 — non-harness files).
-          # When E07-F01 lands it adds scoped removal of its known `.agent/` paths,
-          # mirroring remove_owned for Claude/OpenCode. (Codex r3 P1 #3400997183)
-          : # intentional no-op
+          # E07-F01: the antigravity stamp (§5c) now OWNS a scoped `.agent/` glue tree
+          # (rules/harness.md, the role personas, the sdd-* workflows). Deselection
+          # removes ONLY those harness-owned files — mirroring remove_owned for
+          # Claude/OpenCode — and prunes each `.agent/` subdir + the `.agent/` parent
+          # only when left empty, so a user's own `.agent/` config is never deleted
+          # (never `rm -rf` the dir). (Codex r3 P1 #3400997183 stays honored: scoped,
+          # never destructive of non-harness files.)
+          remove_owned .agent/rules     antigravity harness
+          remove_owned .agent/agents    antigravity $HARNESS_CLAUDE_SHIMS
+          remove_owned .agent/workflows antigravity $HARNESS_SDD_CMDS
+          rmdir "$TARGET/.agent" 2>/dev/null || true   # prune parent only if now empty
           ;;
       esac
     done
