@@ -1006,8 +1006,13 @@ EOF
           fi
           ;;
         antigravity)
-          # E07-F01 supplies the .agent/ tree; until then this is a no-op placeholder.
-          [ -d "$TARGET/.agent" ] && { rm -rf "$TARGET/.agent"; echo "⚠️  removed deselected agent 'antigravity' glue: .agent/" >&2; }
+          # The antigravity stamp is a no-op placeholder until E07-F01 supplies the
+          # `.agent/` tree, so the harness currently OWNS no files there. Deselection
+          # must therefore be a no-op too: never `rm -rf` a user-authored `.agent/`
+          # dir (which may hold their own config, or — post-E07 — non-harness files).
+          # When E07-F01 lands it adds scoped removal of its known `.agent/` paths,
+          # mirroring remove_owned for Claude/OpenCode. (Codex r3 P1 #3400997183)
+          : # intentional no-op
           ;;
       esac
     done

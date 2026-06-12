@@ -339,4 +339,17 @@ sh "$SRC/harness-install.sh" --agents=gemini "$TN" >/dev/null 2>&1 || fail "prun
 rm -rf "$TN"
 pass "deselect prunes harness dirs only when left empty (R13)"
 
+# deselect_antigravity_preserves_user_agent_dir (R13, Codex r3 P1 #3400997183): the
+# antigravity stamp is a no-op placeholder (E07-F01 not yet built), so the harness owns
+# nothing in .agent/ — deselecting it must NEVER delete a user-authored .agent/ dir.
+TP="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" "$TP" >/dev/null || fail "antigravity-noop setup install failed"  # ALL ⇒ persists antigravity
+grep -qx antigravity "$TP/.harness/.agents" || fail "setup: antigravity not in persisted baseline"
+mkdir -p "$TP/.agent"; printf 'mine\n' > "$TP/.agent/user-config.md"   # user-authored, not harness-owned
+sh "$SRC/harness-install.sh" --agents=claude "$TP" >/dev/null 2>&1 || fail "antigravity deselect rerun failed"
+[ -d "$TP/.agent" ]                  || fail "Codex r3 P1: user-authored .agent/ dir was wrongly deleted on antigravity deselect"
+[ -f "$TP/.agent/user-config.md" ]   || fail "Codex r3 P1: user-authored .agent/user-config.md was wrongly deleted"
+rm -rf "$TP"
+pass "antigravity deselect is a no-op, never deletes a user-authored .agent/ (Codex r3 P1)"
+
 echo "All install tests passed."
