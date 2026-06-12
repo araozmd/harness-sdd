@@ -26,9 +26,12 @@ All notable changes to the harness body are recorded here. Versions follow
   harness-owned regenerated glue is deleted (its pointer block / `.claude`|`.opencode` dir /
   generated `opencode.json`; a hand-edited `opencode.json` is left in place with a warning) and
   each removed path is warned about. `AGENTS.md` and the `.harness/` body are never removed.
+  An existing install with **no** persisted `.harness/.agents` (a pre-0.21 install that stamped
+  all front-ends) is treated as the **all-agents baseline**, so the first selective upgrade can
+  actually remove the now-deselected glue instead of leaving it stale.
 - **Docs + tests** — `tests/test_install.sh` gains an assertion group covering R1–R15 (selected-only
   stamping, no-TTY ALL default, explicit override + precedence, unknown-key rejection, persistence
-  round-trip, and an add+remove re-run at the same VERSION).
+  round-trip, an add+remove re-run at the same VERSION, and the legacy-upgrade baseline removal).
 
 ## [0.20.0] — 2026-06-11
 

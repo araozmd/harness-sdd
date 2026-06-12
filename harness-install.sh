@@ -355,7 +355,17 @@ install_one() {
   # BEFORE anything is written this run, then resolve the new SELECTED set. Note
   # this is decoupled from UPGRADE/VERSION — it runs every install_one (R11).
   PRIOR_AGENTS=""
-  if [ -f "$H/.agents" ]; then PRIOR_AGENTS="$(normalize_keys "$(cat "$H/.agents")")"; fi
+  if [ -f "$H/.agents" ]; then
+    PRIOR_AGENTS="$(normalize_keys "$(cat "$H/.agents")")"
+  elif [ "$UPGRADE" = 1 ]; then
+    # Legacy upgrade: a pre-E08 install stamped ALL front-ends but persisted no
+    # selection. Treat an existing install with no .harness/.agents as the
+    # all-agents baseline, so the first selective upgrade can actually remove the
+    # now-deselected glue (e.g. GEMINI.md, opencode.json) instead of leaving it
+    # stale. A fresh install (UPGRADE=0) keeps PRIOR_AGENTS empty — nothing to
+    # remove. (Codex P2 #3400941300.)
+    PRIOR_AGENTS="$(normalize_keys "$AGENT_KEYS")"
+  fi
   resolve_agents "$TARGET"
 
   echo "── harness install v$VERSION → $TARGET ──"

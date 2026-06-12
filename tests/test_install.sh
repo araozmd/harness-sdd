@@ -282,4 +282,24 @@ printf '%s' "$_warn" | grep -qiF 'gemini' || fail "R13: removal of gemini was no
 rm -rf "$TG"
 pass "re-run adds + removes agents at same VERSION, persisted baseline updated (R9, R11, R12, R13)"
 
+# legacy_upgrade_baseline_removes_deselected (R12/R13, Codex P2 #3400941300): an
+# existing install with NO persisted .harness/.agents (a pre-E08 install that
+# stamped ALL front-ends) must be treated as the all-agents baseline, so the first
+# selective upgrade actually removes the now-deselected glue rather than leaving it.
+TL="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" "$TL" >/dev/null || fail "legacy setup install failed"   # no-override ⇒ ALL
+[ -f "$TL/GEMINI.md" ]   || fail "legacy setup: gemini not stamped by ALL default"
+[ -f "$TL/opencode.json" ] || fail "legacy setup: opencode not stamped by ALL default"
+rm -f "$TL/.harness/.agents"   # simulate a pre-E08 install: stamped all, persisted none
+[ -f "$TL/.harness/.harness-version" ] || fail "legacy setup: not detected as an upgrade"
+_warn="$(sh "$SRC/harness-install.sh" --agents=claude "$TL" 2>&1 >/dev/null)" \
+  || fail "legacy upgrade run exited non-zero"
+[ -f "$TL/GEMINI.md" ]     && fail "Codex P2: legacy upgrade must remove deselected GEMINI.md"
+[ -f "$TL/opencode.json" ] && fail "Codex P2: legacy upgrade must remove deselected opencode.json"
+[ -d "$TL/.claude" ]       || fail "Codex P2: still-selected claude glue must survive legacy upgrade"
+[ "$(cat "$TL/.harness/.agents")" = "claude" ] \
+  || fail "Codex P2: legacy upgrade must persist the new {claude} baseline"
+rm -rf "$TL"
+pass "legacy upgrade (no persisted .agents) treats prior set as ALL, removes deselected glue (Codex P2)"
+
 echo "All install tests passed."
