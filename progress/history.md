@@ -43,3 +43,5 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-06-12T15:39:15Z  E07-F01  done → pending; E07 epic done → pending (premature rollup reverted — PR unmerged + re-spec). Human chose: re-spec via Architect.
 - 2026-06-12T15:44:29Z  E07-F01  pending → spec-ready (Architect re-spec: R1–R13, .agents/ plural + confirmed-primitives persona model) — PAUSED at human gate
 - 2026-06-12T16:36:52Z  E07-F01  spec-ready → in-progress (re-spec approved; .agents/ plural, primitives model, skills out-of-scope; gate latency 3143s) — Builder round 2 on PR #31 branch
+- 2026-06-12T16:44:24Z  E07-F01  in-progress → in-review (Builder round 2: .agent/→.agents/ rename, strengthened tests, VERSION held 0.22.0, all 13 suites green; commit d78e40f)
+- 2026-06-12T16:49:38Z  E07-F01  in-review → approve (round 2, re-spec) — Reviewer verified rename complete, deselect-safety preserved, persona-model honest; holding done until PR #31 merges
