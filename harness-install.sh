@@ -8,7 +8,7 @@
 #
 # Agent selection (E08-F01): the installer stamps a SELECTABLE set of coding-agent
 # front-ends — claude (CLAUDE.md + .claude/), gemini (GEMINI.md), opencode
-# (opencode.json + .opencode/command/), antigravity (.agent/, E07-F01). Resolution:
+# (opencode.json + .opencode/command/), antigravity (.agents/, E07-F01). Resolution:
 #   - --agents=<csv> or HARNESS_AGENTS=<csv> (comma-separated keys) → that set, no
 #     prompt (the override always wins). An unknown key aborts non-zero.
 #   - else an interactive TTY → a numbered toggle list (pre-checked from the saved
@@ -566,6 +566,7 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .harness/agents/  .harness/docs/  .harness/store/  .harness/tools/  .harness/specs/_templates/
   .harness/specs/glossary.md  .harness/umbrella.manifest.example.yaml  .harness/umbrella.gitignore.example
   .claude/agents/*  .claude/commands/*   .opencode/command/*   (repo root, regenerated)
+  .agents/rules/*  .agents/agents/*  .agents/workflows/*   (repo root, regenerated; Antigravity glue)
   CLAUDE.md / AGENTS.md / GEMINI.md  -> only the harness:begin..end block
 
 PROJECT-OWNED  (seeded once, never clobbered on upgrade):
@@ -664,11 +665,103 @@ $MARK_END"
 EOF
   }
 
+  # ── Antigravity .agents/ glue generators — single source of truth ─────────────
+  # These are hoisted out of §5c so BOTH the install stamp (§5c) and the deselect
+  # byte-compare (§7) call the exact same emitters. The deselect path removes an
+  # `.agents/` file ONLY when it is byte-identical to a freshly-generated stamp
+  # (pristine), never delete-by-name — so a user's own `.agents/agents/builder.md`
+  # (or any standard-named persona/workflow they authored) is preserved. Mirrors
+  # the opencode.json `cmp -s` "pristine generated" vs "differs — left in place"
+  # contract above. (Codex r2 P1 #3404240336.)
+
+  # gen_ag_rule <dest> — write the canonical .agents/rules/harness.md entrypoint rule.
+  gen_ag_rule() {
+    cat > "$1" <<'EOF'
+---
+description: SDD harness entrypoint — boot as the Orchestrator against .harness/.
+---
+
+This workspace uses the portable **SDD agent harness** installed in `.harness/`.
+Antigravity does not auto-load `AGENTS.md`, so this rule loads the harness for you.
+
+- **Source of truth:** `.harness/AGENTS.md` — read it and resolve every relative
+  path it mentions against `.harness/` (config, `agents/`, `specs/`, `state/`,
+  `store/`, `docs/`, `progress/`).
+- **Start every session as the Orchestrator:** `.harness/agents/orchestrator.md`.
+- **Before any work:** run `.harness/init.sh`. If it exits non-zero, STOP.
+- **Working model (R12):** Antigravity drives the harness through the
+  `description`-gated `.agents/workflows/` slash commands and the `.agents/agents/`
+  personas, with `.harness/progress/` files as the hand-off / isolation boundary —
+  NOT a Task-tool-style isolated spawn, and NOT an asserted bare-file subagent
+  registration (bare-file persona discovery is unconfirmed; the durable primitives
+  are this rule + the `description`-gated workflows + the `.harness/progress/`
+  hand-off). Hand off through `.harness/progress/`, never by forwarding chat history.
+
+The role files in `.agents/agents/` and the workflows in `.agents/workflows/` are thin
+pointers at the canonical `.harness/agents/*.md` roles — they do not duplicate them.
+EOF
+  }
+
+  # gen_ag_persona <role> <description> <dest> — write one .agents/agents/<role>.md.
+  gen_ag_persona() {
+    _agp_role="$1"; _agp_desc="$2"; _agp_dest="$3"
+    cat > "$_agp_dest" <<EOF
+---
+description: $_agp_desc
+---
+
+You are the **$_agp_role** for this project's agent harness (installed in \`.harness/\`).
+
+Your full, canonical role definition is \`.harness/agents/$_agp_role.md\` — read it now and
+follow it exactly. Resolve every relative path it mentions against \`.harness/\`
+(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
+\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on its
+non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
+chat history.
+EOF
+  }
+
+  # ag_personas — emit the role→description mapping ONE place, reused by the §5c
+  # install loop and the §7 deselect compare so they can never diverge. Each line is
+  # `<role>\t<description>`; callers read it field-by-field.
+  ag_personas() {
+    cat <<'EOF'
+orchestrator	The Leader. Reads state, runs init.sh, routes the next task, delegates to architect/builder/reviewer/scout. Never writes code.
+architect	The Spec Author. Writes the 4-file spec in EARS. No production code.
+builder	The Implementer. Writes code from an APPROVED spec, one task at a time.
+reviewer	The Evaluator. Verifies against the spec, runs tests, approves or rejects.
+scout	Read-only codebase reconnaissance. Writes findings to progress/.
+EOF
+  }
+
+  # remove_if_pristine <rel-path> <ref-file> <agent-label> — delete <TARGET>/<rel-path>
+  # ONLY when it is byte-identical to <ref-file> (a freshly-generated stamp). If it
+  # differs (user-edited or foreign), LEAVE it in place with a notice — exactly
+  # mirroring the opencode.json case. Echoes the removed relpath on stdout (so the
+  # caller can summarize) and prints user-facing notices to stderr.
+  remove_if_pristine() {
+    _rip_rel="$1"; _rip_ref="$2"; _rip_label="$3"
+    _rip_f="$TARGET/$_rip_rel"
+    [ -f "$_rip_f" ] || return 0
+    if cmp -s "$_rip_f" "$_rip_ref"; then
+      rm -f "$_rip_f"
+      printf '%s\n' "$_rip_rel"
+    else
+      echo "⚠️  $_rip_rel differs from the generated stamp (edited) — left in place (deselected '$_rip_label' not removed)" >&2
+    fi
+  }
+
   # AGENTS.md is the shared portable entrypoint — ALWAYS written, never gated (R2 note).
   write_pointer AGENTS.md
   # Per-agent entrypoint pointers are gated on selection (R2/R3/R4).
   agent_selected claude && write_pointer CLAUDE.md
-  agent_selected gemini && write_pointer GEMINI.md
+  # The GEMINI.md managed block reads as "act as the Orchestrator, run
+  # .harness/init.sh, read .harness/AGENTS.md" — Antigravity natively loads
+  # GEMINI.md-style rules, so this same pointer also serves Antigravity as the
+  # in-repo entrypoint (E07-F01 R1/R12); the .agents/rules/harness.md rule (§5c) is
+  # the Antigravity-specific hook layered on top. Written when EITHER gemini OR
+  # antigravity is selected — both share GEMINI.md as their in-repo entrypoint.
+  if agent_selected gemini || agent_selected antigravity; then write_pointer GEMINI.md; fi
   ok "entrypoint pointers written (AGENTS.md + selected agents)"
 
   # ── 5. Claude Code sub-agent shims + /sdd-next (regenerated each run) ────────
@@ -962,7 +1055,54 @@ EOF
     ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix installed (.opencode/)"
   fi
 
-  rm -rf "$CMDDIR"
+  # ── 5c. Antigravity glue (.agents/, regenerated each run, gated on `antigravity`) ─
+  # Antigravity (a Gemini-based agentic IDE) natively reads workspace-local
+  # <root>/.agents/{rules,agents,workflows}/*.md. We stamp a glue layer that POINTS at
+  # the canonical roles in .harness/agents/*.md — it never forks a role body. Mirrors
+  # the per-tool pattern: personas model the .claude/agents shims (R4/R5 — best-effort:
+  # bare-file persona discovery is unconfirmed, so they are written but not relied on),
+  # and the workflows are COPIED from the shared CMDDIR command bodies exactly like
+  # OpenCode (§5b), so the three front-ends stay byte-identical (R9). Placed after §5b and
+  # before the CMDDIR cleanup so the workflow bodies are still available. (E07-F01 R2,R4,R6.)
+  if agent_selected antigravity; then
+    mkdir -p "$TARGET/.agents/rules" "$TARGET/.agents/agents" "$TARGET/.agents/workflows"
+
+    # Entrypoint rule (R2/R3): points the agent at the source of truth + entry role;
+    # mandates init.sh first. No copied role body — references by .harness/ path only.
+    # Body lives in gen_ag_rule (hoisted) so the §7 deselect compare can reproduce it.
+    gen_ag_rule "$TARGET/.agents/rules/harness.md"
+
+    # Personas (R4/R5 — best-effort): one per harness role, each with a `description` + a
+    # body that DEFERS to the canonical .harness/agents/<role>.md, mandates init.sh-first +
+    # halt-on-fail, and hands off via .harness/progress/. No copied role body. Bare-file
+    # persona discovery is UNCONFIRMED, so these are written (cheap, possibly honored) but
+    # the harness does not claim they register as subagents — the durable model is the rule
+    # + the `description`-gated workflows (R12). Descriptions come from ag_personas (the
+    # single role→description source, shared with the §7 deselect compare so they can never
+    # diverge).
+    ag_personas | while IFS='	' read -r _agr _agd; do
+      [ -n "$_agr" ] || continue
+      gen_ag_persona "$_agr" "$_agd" "$TARGET/.agents/agents/$_agr.md"
+    done
+
+    # Workflows (R6/R7/R8/R9): COPY the shared command bodies from CMDDIR (mirror, like
+    # the OpenCode block — do not re-author). The bodies already begin with their own
+    # `---\ndescription: …\n---` frontmatter, which satisfies Antigravity's slash-command
+    # registration (R7), and they already act as their role resolved against
+    # .harness/agents/*.md carrying $ARGUMENTS (R8). A `cp` keeps them byte-identical to
+    # the Claude/OpenCode copies so the front-ends stay byte-identical.
+    for _w in $HARNESS_SDD_CMDS; do
+      cp "$CMDDIR/$_w.md" "$TARGET/.agents/workflows/$_w.md"
+    done
+
+    ok "Antigravity glue (rules + agents + workflows) installed (.agents/)"
+  fi
+
+  # NOTE: CMDDIR cleanup is intentionally DEFERRED to AFTER §7 — the antigravity
+  # deselect compare byte-checks each `.agents/workflows/<name>.md` against the
+  # source `$CMDDIR/<name>.md`, so the temp workflow bodies must stay available
+  # through the reconciliation loop. CMDDIR is only a temp dir; cleaning it later
+  # is harmless and still unconditional. (Codex r2 P1 #3404240336.)
 
   # ── 6. opencode.json (gated on `opencode`; create if absent; never clobber) ──
   if agent_selected opencode && [ ! -f "$TARGET/opencode.json" ]; then
@@ -993,8 +1133,14 @@ EOF
           rmdir "$TARGET/.claude" 2>/dev/null || true   # prune parent only if now empty
           ;;
         gemini)
-          remove_pointer GEMINI.md
-          echo "⚠️  removed deselected agent 'gemini' glue: GEMINI.md harness block" >&2
+          # GEMINI.md is SHARED: it is the in-repo entrypoint for gemini AND
+          # antigravity (E07-F01 R1/R12). Remove it only when NEITHER owner remains
+          # selected — otherwise deselecting gemini while antigravity stays selected
+          # would wrongly strip Antigravity's entrypoint.
+          if ! agent_selected antigravity; then
+            remove_pointer GEMINI.md
+            echo "⚠️  removed deselected agent 'gemini' glue: GEMINI.md harness block" >&2
+          fi
           ;;
         opencode)
           remove_owned .opencode/command opencode $HARNESS_SDD_CMDS
@@ -1017,17 +1163,57 @@ EOF
           fi
           ;;
         antigravity)
-          # The antigravity stamp is a no-op placeholder until E07-F01 supplies the
-          # `.agent/` tree, so the harness currently OWNS no files there. Deselection
-          # must therefore be a no-op too: never `rm -rf` a user-authored `.agent/`
-          # dir (which may hold their own config, or — post-E07 — non-harness files).
-          # When E07-F01 lands it adds scoped removal of its known `.agent/` paths,
-          # mirroring remove_owned for Claude/OpenCode. (Codex r3 P1 #3400997183)
-          : # intentional no-op
+          # E07-F01: the antigravity stamp (§5c) OWNS a scoped `.agents/` glue tree
+          # (rules/harness.md, the role personas, the sdd-* workflows). Deselection
+          # removes ONLY files byte-identical to a freshly-generated stamp (pristine)
+          # — NOT delete-by-name — so a user's OWN `.agents/agents/builder.md` (or any
+          # standard-named persona/workflow they authored) survives. This mirrors the
+          # opencode.json `cmp -s` contract above and fixes the data-loss case where a
+          # pre-this-version no-op antigravity install left `antigravity` persisted in
+          # `.harness/.agents` while the user authored their own `.agents/` files.
+          # (Codex r2 P1 #3404240336; r3 P1 #3400997183 stays honored — scoped, never
+          # destructive of non-harness files.)
+          _agtmp="$(mktemp 2>/dev/null || mktemp -t harness-ag)"
+          # rule
+          gen_ag_rule "$_agtmp"
+          remove_if_pristine .agents/rules/harness.md "$_agtmp" antigravity
+          # personas — compare each against its freshly-generated body (same source
+          # role→description map as the install loop, so no divergence).
+          ag_personas | while IFS='	' read -r _agr _agd; do
+            [ -n "$_agr" ] || continue
+            gen_ag_persona "$_agr" "$_agd" "$_agtmp"
+            remove_if_pristine ".agents/agents/$_agr.md" "$_agtmp" antigravity
+          done
+          # workflows — the install path `cp`s these verbatim from $CMDDIR, so the
+          # pristine reference is the still-present $CMDDIR/<name>.md source bytes.
+          for _agw in $HARNESS_SDD_CMDS; do
+            [ -f "$CMDDIR/$_agw.md" ] || continue
+            remove_if_pristine ".agents/workflows/$_agw.md" "$CMDDIR/$_agw.md" antigravity
+          done
+          rm -f "$_agtmp"
+          # Prune each now-empty `.agents/` subdir + the parent, only when empty
+          # (never `rm -rf` — preserve any user files left in place above).
+          rmdir "$TARGET/.agents/rules" 2>/dev/null || true
+          rmdir "$TARGET/.agents/agents" 2>/dev/null || true
+          rmdir "$TARGET/.agents/workflows" 2>/dev/null || true
+          rmdir "$TARGET/.agents" 2>/dev/null || true   # prune parent only if now empty
+          # GEMINI.md is SHARED with gemini (E07-F01 R1/R12). Antigravity owns it as
+          # an in-repo entrypoint too, so remove it on antigravity deselection ONLY
+          # when gemini is also not selected — mirroring the gemini case. (Without
+          # this, deselecting an antigravity-only install would orphan GEMINI.md,
+          # since the gemini branch never runs when gemini was never a prior agent.)
+          if ! agent_selected gemini; then
+            remove_pointer GEMINI.md
+            echo "⚠️  removed deselected agent 'antigravity' glue: GEMINI.md harness block" >&2
+          fi
           ;;
       esac
     done
   fi
+
+  # CMDDIR cleanup (deferred from §5c): the antigravity deselect compare above needs
+  # the temp workflow bodies. Unconditional — always runs regardless of selection.
+  rm -rf "$CMDDIR"
 
   # ── done ────────────────────────────────────────────────────────────────────
   echo "──────────────────────────────────────────────────"

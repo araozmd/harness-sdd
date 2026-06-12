@@ -113,6 +113,57 @@ cmp -s "$T/.claude/commands/sdd-fix.md" "$T/.opencode/command/sdd-fix.md" \
   || fail "opencode sdd-fix differs from claude sdd-fix"
 pass "OpenCode commands generated (R7)"
 
+# ── Antigravity glue (.agents/, E07-F01 R1–R12) ───────────────────────────────────────────────
+# Mirrors the .claude/ + .opencode/ assertions above. A sentinel of canonical orchestrator
+# prose proves the glue POINTS at the roles and never forks a body (R3/R5). The default
+# install (no override) stamps ALL agents, so antigravity glue is present here.
+AG_SENTINEL='You are the **Orchestrator**. You are the project manager of the harness.'
+
+# R1: GEMINI.md managed block boots the Orchestrator against .harness/AGENTS.md.
+grep -qF '<!-- harness:begin -->' "$T/GEMINI.md" || fail "GEMINI.md missing harness block (R1)"
+grep -qF '.harness/AGENTS.md' "$T/GEMINI.md"     || fail "GEMINI.md block does not point at .harness/AGENTS.md (R1)"
+
+# R2: Antigravity entrypoint rule written + points at the harness source of truth + entry role.
+[ -f "$T/.agents/rules/harness.md" ]                                  || fail "antigravity rule .agents/rules/harness.md missing (R2)"
+grep -qF '.harness/AGENTS.md' "$T/.agents/rules/harness.md"           || fail "antigravity rule does not point at .harness/AGENTS.md (R2)"
+grep -qF '.harness/agents/orchestrator.md' "$T/.agents/rules/harness.md" || fail "antigravity rule does not point at the orchestrator role (R2)"
+# R3: rule points at canonical roles, no copied role body (sentinel must be ABSENT).
+grep -qF "$AG_SENTINEL" "$T/.agents/rules/harness.md" && fail "antigravity rule embeds a copied role body (R3)"
+
+# R4/R5 (best-effort, SHAPE only — never registration): one persona per role, each with a
+# `description`, deferring to .harness/agents/<role>.md, mandating init.sh + progress/ hand-off,
+# with no copied role body. Bare-file persona discovery is unconfirmed, so these assert shape
+# (correct plural dir, description, defers to canonical role, sentinel absent) — NOT that the
+# persona registers as an Antigravity subagent.
+for r in orchestrator architect builder reviewer scout; do
+  [ -f "$T/.agents/agents/$r.md" ]                       || fail "antigravity persona $r missing (R4)"
+  grep -qE '^description:' "$T/.agents/agents/$r.md"      || fail "antigravity persona $r has no description (R4)"
+  grep -qF ".harness/agents/$r.md" "$T/.agents/agents/$r.md" || fail "antigravity persona $r does not defer to .harness/agents/$r.md (R5)"
+  grep -qF '.harness/init.sh' "$T/.agents/agents/$r.md"  || fail "antigravity persona $r does not mandate .harness/init.sh (R5)"
+  grep -qF '.harness/progress/' "$T/.agents/agents/$r.md" || fail "antigravity persona $r does not hand off via .harness/progress/ (R5)"
+  grep -qF "$AG_SENTINEL" "$T/.agents/agents/$r.md"      && fail "antigravity persona $r embeds a copied role body (R5)"
+done
+
+# R6/R7: all five workflows generated, each carrying a `description` (slash-command registration).
+for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix; do
+  [ -f "$T/.agents/workflows/$w.md" ]                    || fail "antigravity workflow $w missing (R6)"
+  grep -qE '^description:' "$T/.agents/workflows/$w.md"   || fail "antigravity workflow $w has no description (R7)"
+  grep -qF '$ARGUMENTS' "$T/.agents/workflows/$w.md"      || fail "antigravity workflow $w does not carry \$ARGUMENTS (R8)"
+done
+
+# R8: each workflow acts as its role, resolved against .harness/agents/*.md.
+grep -qF '.harness/agents/orchestrator.md' "$T/.agents/workflows/sdd-next.md" || fail "sdd-next workflow does not resolve orchestrator against .harness/ (R8)"
+grep -qF '.harness/agents/inception.md'    "$T/.agents/workflows/sdd-new.md"  || fail "sdd-new workflow does not resolve inception against .harness/ (R8)"
+grep -qF '.harness/agents/planner.md'      "$T/.agents/workflows/sdd-plan.md" || fail "sdd-plan workflow does not resolve planner against .harness/ (R8)"
+grep -qF '.harness/agents/driller.md'      "$T/.agents/workflows/sdd-drill.md" || fail "sdd-drill workflow does not resolve driller against .harness/ (R8)"
+grep -qF '.harness/agents/fixer.md'        "$T/.agents/workflows/sdd-fix.md"  || fail "sdd-fix workflow does not resolve fixer against .harness/ (R8)"
+
+# R9: each workflow body is byte-identical to the Claude command of the same name (no drift).
+for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix; do
+  cmp -s "$T/.claude/commands/$w.md" "$T/.agents/workflows/$w.md" || fail "antigravity workflow $w differs from claude $w (R9)"
+done
+pass "Antigravity glue generated (R11)"
+
 # target verification commands reset to blank                                                  # R8
 grep -q 'test_command: ""' "$T/.harness/harness.config.yaml" || fail "test_command not blanked"
 pass "target verification commands reset (R8)"
@@ -197,7 +248,7 @@ sh "$SRC/harness-install.sh" --agents=claude "$TB" >/dev/null || fail "--agents=
 [ -f "$TB/GEMINI.md" ]        && fail "R4: --agents=claude must not write GEMINI.md"
 [ -f "$TB/opencode.json" ]    && fail "R4: --agents=claude must not write opencode.json"
 [ -d "$TB/.opencode" ]        && fail "R4: --agents=claude must not write .opencode/"
-[ -d "$TB/.agent" ]           && fail "R4: --agents=claude must not write .agent/"
+[ -d "$TB/.agents" ]          && fail "R4: --agents=claude must not write .agents/"
 rm -rf "$TB"
 pass "--agents=claude stamps only Claude, no other front-ends (R2, R3, R4)"
 
@@ -234,6 +285,20 @@ for _k in claude gemini opencode antigravity; do
   rm -rf "$TK"
 done
 pass "every registry key is individually selectable (R10)"
+
+# antigravity_only_writes_gemini_entrypoint (E07-F01 R1, Codex r1 P2 #3404185446):
+# GEMINI.md is Antigravity's in-repo bootstrap entrypoint, so an antigravity-only
+# install (no gemini) MUST still write GEMINI.md with the harness managed block.
+TAG="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=antigravity "$TAG" >/dev/null || fail "--agents=antigravity exited non-zero"
+[ -f "$TAG/GEMINI.md" ]                              || fail "R1: --agents=antigravity must write GEMINI.md entrypoint (Codex r1 P2)"
+grep -qF '<!-- harness:begin -->' "$TAG/GEMINI.md"   || fail "R1: antigravity-only GEMINI.md missing harness managed block (Codex r1 P2)"
+grep -qF '.harness/AGENTS.md' "$TAG/GEMINI.md"       || fail "R1: antigravity-only GEMINI.md does not point at .harness/AGENTS.md"
+[ -f "$TAG/.agents/rules/harness.md" ]                || fail "R1: antigravity-only install missing .agents/ glue"
+[ -f "$TAG/CLAUDE.md" ]    && fail "R4: antigravity-only must not write CLAUDE.md"
+[ -f "$TAG/opencode.json" ] && fail "R4: antigravity-only must not write opencode.json"
+rm -rf "$TAG"
+pass "--agents=antigravity writes GEMINI.md entrypoint (R1, Codex r1 P2)"
 
 # unknown_agent_key_rejected (R7): an unknown override exits non-zero, names it, no changes.
 TE="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
@@ -339,18 +404,45 @@ sh "$SRC/harness-install.sh" --agents=gemini "$TN" >/dev/null 2>&1 || fail "prun
 rm -rf "$TN"
 pass "deselect prunes harness dirs only when left empty (R13)"
 
-# deselect_antigravity_preserves_user_agent_dir (R13, Codex r3 P1 #3400997183): the
-# antigravity stamp is a no-op placeholder (E07-F01 not yet built), so the harness owns
-# nothing in .agent/ — deselecting it must NEVER delete a user-authored .agent/ dir.
+# deselect_antigravity_preserves_user_agent_dir (R13, Codex r3 P1 #3400997183): with the
+# E07-F01 .agents/ glue in place, deselecting antigravity removes ONLY the harness-owned
+# files (scoped remove_owned) and must NEVER delete a user-authored file or `rm -rf` the
+# user's .agents/ dir — the dir survives because it still holds the user's own content.
 TP="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 sh "$SRC/harness-install.sh" "$TP" >/dev/null || fail "antigravity-noop setup install failed"  # ALL ⇒ persists antigravity
 grep -qx antigravity "$TP/.harness/.agents" || fail "setup: antigravity not in persisted baseline"
-mkdir -p "$TP/.agent"; printf 'mine\n' > "$TP/.agent/user-config.md"   # user-authored, not harness-owned
+mkdir -p "$TP/.agents"; printf 'mine\n' > "$TP/.agents/user-config.md"   # user-authored, not harness-owned
 sh "$SRC/harness-install.sh" --agents=claude "$TP" >/dev/null 2>&1 || fail "antigravity deselect rerun failed"
-[ -d "$TP/.agent" ]                  || fail "Codex r3 P1: user-authored .agent/ dir was wrongly deleted on antigravity deselect"
-[ -f "$TP/.agent/user-config.md" ]   || fail "Codex r3 P1: user-authored .agent/user-config.md was wrongly deleted"
+[ -d "$TP/.agents" ]                 || fail "Codex r3 P1: user-authored .agents/ dir was wrongly deleted on antigravity deselect"
+[ -f "$TP/.agents/user-config.md" ]   || fail "Codex r3 P1: user-authored .agents/user-config.md was wrongly deleted"
 rm -rf "$TP"
-pass "antigravity deselect is a no-op, never deletes a user-authored .agent/ (Codex r3 P1)"
+pass "antigravity deselect is a no-op, never deletes a user-authored .agents/ (Codex r3 P1)"
+
+# antigravity_deselect_is_byte_exact (R13, Codex r2 P1 #3404240336): a pre-this-version
+# no-op antigravity install can leave `antigravity` persisted in .harness/.agents while
+# the user authored their OWN .agents/agents/<role>.md with a STANDARD name. On deselect,
+# the .agents/ glue removal must be byte-compare-and-remove (like opencode.json) — delete
+# ONLY a pristine harness-generated file, NEVER a user file that merely shares the name.
+TPB="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=antigravity "$TPB" >/dev/null || fail "ag-exact setup install failed"
+[ -f "$TPB/.agents/agents/builder.md" ]   || fail "ag-exact setup: generated builder persona missing"
+[ -f "$TPB/.agents/agents/reviewer.md" ]  || fail "ag-exact setup: generated reviewer persona missing"
+[ -f "$TPB/.agents/workflows/sdd-next.md" ] || fail "ag-exact setup: generated sdd-next workflow missing"
+# User overwrites builder.md with their OWN distinctive content (a standard-named file).
+printf 'MY CUSTOM ANTIGRAVITY BUILDER\n' > "$TPB/.agents/agents/builder.md"
+# Deselect antigravity.
+sh "$SRC/harness-install.sh" --agents=claude "$TPB" >/dev/null 2>&1 || fail "ag-exact deselect rerun failed"
+# User-authored, standard-named file SURVIVES with its content intact.
+[ -f "$TPB/.agents/agents/builder.md" ]                       || fail "Codex r2 P1: user-authored .agents/agents/builder.md was wrongly deleted on deselect"
+grep -qF 'MY CUSTOM ANTIGRAVITY BUILDER' "$TPB/.agents/agents/builder.md" || fail "Codex r2 P1: user-authored builder.md content not preserved"
+# Pristine harness-generated glue (persona + workflow + rule) IS removed.
+[ -f "$TPB/.agents/agents/reviewer.md" ]  && fail "Codex r2 P1: pristine generated reviewer persona must be removed on deselect"
+[ -f "$TPB/.agents/workflows/sdd-next.md" ] && fail "Codex r2 P1: pristine generated sdd-next workflow must be removed on deselect"
+[ -f "$TPB/.agents/rules/harness.md" ]    && fail "Codex r2 P1: pristine generated .agents/rules/harness.md must be removed on deselect"
+# The .agents/ tree survives because the user file kept .agents/agents/ non-empty.
+[ -d "$TPB/.agents" ]                    || fail "Codex r2 P1: .agents/ wrongly removed while a user file remains"
+rm -rf "$TPB"
+pass "antigravity deselect deletes only byte-pristine .agents/ glue, keeps user files (Codex r2 P1)"
 
 # opencode_json_removal_is_byte_exact (R13, Codex r4 P2 #3401025100): on opencode
 # deselect, a PRISTINE generated opencode.json is removed, but one the user edited
@@ -371,5 +463,23 @@ sh "$SRC/harness-install.sh" --agents=claude "$TQ" >/dev/null 2>&1 || fail "oc-e
 grep -q '"model"' "$TQ/opencode.json" || fail "Codex r4 P2: user-edited opencode.json content not preserved"
 rm -rf "$TQ"
 pass "opencode.json deselect deletes only a byte-pristine generated file, keeps edits (Codex r4 P2)"
+
+# gemini_deselect_keeps_gemini_when_antigravity_remains (E07-F01 R1, Codex r1 P2
+# #3404185446): GEMINI.md is SHARED by gemini and antigravity. Deselecting gemini
+# while antigravity stays selected must KEEP GEMINI.md (antigravity still owns it),
+# and conversely deselecting antigravity-only orphan removal happens only when both
+# owners are gone.
+TR="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=gemini,antigravity "$TR" >/dev/null || fail "shared-gemini setup install failed"
+[ -f "$TR/GEMINI.md" ] || fail "shared-gemini setup: GEMINI.md not stamped for gemini,antigravity"
+# Drop gemini, keep antigravity: GEMINI.md must survive (antigravity owns it).
+sh "$SRC/harness-install.sh" --agents=antigravity "$TR" >/dev/null 2>&1 || fail "shared-gemini deselect-gemini rerun failed"
+[ -f "$TR/GEMINI.md" ]                || fail "R1: deselecting gemini while antigravity remains must KEEP GEMINI.md (Codex r1 P2)"
+grep -qF '<!-- harness:begin -->' "$TR/GEMINI.md" || fail "R1: GEMINI.md harness block stripped despite antigravity still selected"
+# Now drop antigravity too (last owner gone): GEMINI.md must finally be removed.
+sh "$SRC/harness-install.sh" --agents=claude "$TR" >/dev/null 2>&1 || fail "shared-gemini deselect-antigravity rerun failed"
+[ -f "$TR/GEMINI.md" ] && fail "R13: GEMINI.md must be removed once NEITHER gemini nor antigravity is selected"
+rm -rf "$TR"
+pass "GEMINI.md shared by gemini+antigravity: kept until both deselected (R1, R13, Codex r1 P2)"
 
 echo "All install tests passed."
