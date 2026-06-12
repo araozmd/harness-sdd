@@ -161,12 +161,12 @@
     {
       "id": "E07",
       "title": "Antigravity support",
-      "status": "pending",
+      "status": "done",
       "features": [
         {
           "id": "E07-F01",
           "title": "Antigravity native support (entrypoint + installer wiring + role/command glue)",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
