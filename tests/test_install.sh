@@ -482,4 +482,41 @@ sh "$SRC/harness-install.sh" --agents=claude "$TR" >/dev/null 2>&1 || fail "shar
 rm -rf "$TR"
 pass "GEMINI.md shared by gemini+antigravity: kept until both deselected (R1, R13, Codex r1 P2)"
 
+# ── E99-F01: interactive checkbox picker (tui_select) + graceful fallback ─────────
+# The arrow-key + spacebar checkbox UI is the PREFERRED interactive path, but it must
+# never change the resolved SELECTED contract and must gracefully fall back to the
+# numbered toggle_select when raw mode is unavailable (e.g. non-TTY / piped stdin —
+# exactly how this suite runs). We assert the picker + capability probe + fallback
+# wiring exist, and that the probe correctly reports "not capable" under no-TTY stdin.
+
+# The new helpers are present in the installer body.
+grep -qE '^tui_select\(\)' "$SRC/harness-install.sh"  || fail "E99-F01: tui_select() picker not defined"
+grep -qE '^tui_capable\(\)' "$SRC/harness-install.sh" || fail "E99-F01: tui_capable() probe not defined"
+
+# resolve_agents prefers tui_select but keeps toggle_select as the fallback branch.
+grep -qF 'if tui_capable; then' "$SRC/harness-install.sh"      || fail "E99-F01: resolve_agents does not gate on tui_capable"
+grep -qF 'SELECTED="$(tui_select "$_base")"' "$SRC/harness-install.sh"    || fail "E99-F01: tui_select not wired as preferred interactive picker"
+grep -qF 'SELECTED="$(toggle_select "$_base")"' "$SRC/harness-install.sh" || fail "E99-F01: toggle_select fallback branch removed"
+
+# Raw mode is entered AND unconditionally restored via an EXIT/INT/TERM trap so a
+# quit/Ctrl-C can never leave the terminal in raw mode.
+grep -qF 'trap - EXIT INT TERM' "$SRC/harness-install.sh" || fail "E99-F01: tui_select must clear its EXIT/INT/TERM trap on normal completion"
+grep -qE "trap .*EXIT INT TERM" "$SRC/harness-install.sh" || fail "E99-F01: tui_select must install an EXIT/INT/TERM restore trap"
+
+# tui_capable returns NON-ZERO when stdin is not an interactive TTY (so resolve_agents
+# falls back to toggle_select). Extract just the helper, then call it with stdin
+# explicitly redirected away from any TTY — the `[ -t 0 ]` guard must short-circuit to
+# the fallback. Written to a temp script so the redirect applies to the invocation
+# itself (not just the pipeline), which is how the non-interactive install path runs.
+TUI_PROBE_SH="$(mktemp 2>/dev/null || mktemp -t harness_tui)"
+{
+  sed -n '/^tui_capable()/,/^}/p' "$SRC/harness-install.sh"
+  printf 'tui_capable && echo CAPABLE || echo FALLBACK\n'
+} > "$TUI_PROBE_SH"
+_probe_out="$(sh "$TUI_PROBE_SH" </dev/null)"
+[ "$_probe_out" = "FALLBACK" ] \
+  || fail "E99-F01: tui_capable must report not-capable (fallback) under non-TTY stdin (got: '$_probe_out')"
+rm -f "$TUI_PROBE_SH"
+pass "checkbox picker tui_select + tui_capable probe exist; non-TTY falls back to toggle_select (E99-F01)"
+
 echo "All install tests passed."

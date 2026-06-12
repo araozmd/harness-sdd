@@ -219,12 +219,20 @@ pass "R14 handoff"
 grep -qF 'agents/driller.md'   ".claude/commands/sdd-drill.md" || fail "R17: sdd-drill no longer points at agents/driller.md"
 grep -qF 'agents/planner.md'   ".claude/commands/sdd-plan.md"  || fail "R17: sdd-plan no longer points at agents/planner.md"
 grep -qF 'agents/inception.md' ".claude/commands/sdd-new.md"   || fail "R17: sdd-new no longer points at agents/inception.md"
-# the live store carries NO E99 maintenance epic (lazy-create only; never pre-seeded)
-python3 - state/tasks.json <<'PY' || fail "R17: live state/tasks.json unexpectedly carries an E99 maintenance epic"
+# A freshly-installed store carries NO E99 maintenance epic (lazy-create only; the
+# Fixer role creates E99 on first use — it is never pre-seeded by the installer
+# template). Assert this against the installer's SEEDED store in a throwaway target,
+# NOT the live state/tasks.json: this repo dogfoods its own /sdd-fix lane, so the
+# live store legitimately carries E99 while a maintenance fix is in flight (the
+# permanent-suite anti-pattern: never couple a permanent test to mutable live state).
+TFIX="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$ROOT/harness-install.sh" --agents=claude "$TFIX" >/dev/null 2>&1 || fail "R17: seed install failed"
+python3 - "$TFIX/.harness/state/tasks.json" <<'PY' || fail "R17: freshly-seeded tasks.json unexpectedly carries a pre-seeded E99 maintenance epic"
 import json, sys
 data = json.load(open(sys.argv[1]))
 sys.exit(1 if any(ep.get("id") == "E99" for ep in data.get("epics", [])) else 0)
 PY
+rm -rf "$TFIX"
 ./init.sh >/dev/null 2>&1 || fail "R17: ./init.sh did not exit 0"
 pass "R17 backward_compatible"
 
