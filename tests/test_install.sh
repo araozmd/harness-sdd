@@ -302,4 +302,41 @@ _warn="$(sh "$SRC/harness-install.sh" --agents=claude "$TL" 2>&1 >/dev/null)" \
 rm -rf "$TL"
 pass "legacy upgrade (no persisted .agents) treats prior set as ALL, removes deselected glue (Codex P2)"
 
+# deselect_preserves_user_authored_files (R13, Codex r2 P1 #3400965003/#3400965008):
+# deselecting an agent must delete ONLY harness-generated files, never wipe whole
+# .claude/.opencode dirs that also hold the user's own agents/commands.
+TM="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=claude,opencode "$TM" >/dev/null || fail "scoped-remove install1 failed"
+[ -f "$TM/.claude/agents/orchestrator.md" ] || fail "scoped-remove setup: claude shims not stamped"
+[ -f "$TM/.opencode/command/sdd-next.md" ]  || fail "scoped-remove setup: opencode cmds not stamped"
+# user-authored artifacts the harness does NOT own, placed in the same dirs:
+printf 'mine\n' > "$TM/.claude/agents/my-custom.md"
+printf 'mine\n' > "$TM/.claude/commands/my-cmd.md"
+printf 'mine\n' > "$TM/.opencode/command/my-oc.md"
+# re-run dropping BOTH claude and opencode:
+sh "$SRC/harness-install.sh" --agents=gemini "$TM" >/dev/null 2>&1 || fail "scoped-remove rerun failed"
+# harness-owned glue removed:
+[ -f "$TM/.claude/agents/orchestrator.md" ] && fail "P1: harness claude shim not removed on deselect"
+[ -f "$TM/.claude/commands/sdd-next.md" ]   && fail "P1: harness claude command not removed on deselect"
+[ -f "$TM/.opencode/command/sdd-next.md" ]  && fail "P1: harness opencode command not removed on deselect"
+# user-authored files PRESERVED (the whole point):
+[ -f "$TM/.claude/agents/my-custom.md" ]   || fail "P1: user-authored .claude/agents/my-custom.md was wrongly deleted"
+[ -f "$TM/.claude/commands/my-cmd.md" ]     || fail "P1: user-authored .claude/commands/my-cmd.md was wrongly deleted"
+[ -f "$TM/.opencode/command/my-oc.md" ]     || fail "P1: user-authored .opencode/command/my-oc.md was wrongly deleted"
+# dirs survive because they still hold user files:
+[ -d "$TM/.claude/agents" ]   || fail "P1: .claude/agents removed despite user files present"
+[ -d "$TM/.opencode/command" ] || fail "P1: .opencode/command removed despite user files present"
+rm -rf "$TM"
+pass "deselect removes only harness-owned files, preserves user-authored agents/commands (Codex r2 P1)"
+
+# deselect_prunes_empty_dirs (R13): when NO user files remain, the now-empty harness
+# dirs are pruned (no stale empty .claude/.opencode left behind).
+TN="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=claude,opencode "$TN" >/dev/null || fail "prune setup install failed"
+sh "$SRC/harness-install.sh" --agents=gemini "$TN" >/dev/null 2>&1 || fail "prune rerun failed"
+[ -d "$TN/.claude" ]   && fail "R13: empty .claude/ not pruned after full claude deselect"
+[ -d "$TN/.opencode" ] && fail "R13: empty .opencode/ not pruned after full opencode deselect"
+rm -rf "$TN"
+pass "deselect prunes harness dirs only when left empty (R13)"
+
 echo "All install tests passed."

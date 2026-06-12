@@ -23,9 +23,12 @@ All notable changes to the harness body are recorded here. Versions follow
   (one sorted key per line; dot-prefixed to avoid colliding with the `.harness/agents/` role-bodies
   dir), beside `.harness/.harness-version`. Every re-run re-resolves and reconciles **decoupled
   from VERSION/upgrade detection**: an **added** agent is stamped, a **deselected** agent's
-  harness-owned regenerated glue is deleted (its pointer block / `.claude`|`.opencode` dir /
-  generated `opencode.json`; a hand-edited `opencode.json` is left in place with a warning) and
-  each removed path is warned about. `AGENTS.md` and the `.harness/` body are never removed.
+  harness-owned regenerated glue is deleted — **scoped to the specific generated files**
+  (its pointer block, the `orchestrator/architect/builder/reviewer/scout` shims, the `sdd-*`
+  commands, a generated `opencode.json`); user-authored files sharing `.claude/`/`.opencode/`
+  are preserved and those dirs are pruned only when left empty. A hand-edited `opencode.json`
+  is left in place with a warning, and each removed path is warned about. `AGENTS.md` and the
+  `.harness/` body are never removed.
   An existing install with **no** persisted `.harness/.agents` (a pre-0.21 install that stamped
   all front-ends) is treated as the **all-agents baseline**, so the first selective upgrade can
   actually remove the now-deselected glue instead of leaving it stale.

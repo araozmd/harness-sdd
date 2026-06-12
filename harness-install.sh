@@ -219,6 +219,13 @@ _mc_insert_after() {
 AGENT_KEYS="claude gemini opencode antigravity"
 # AGENTS.md (the shared portable entrypoint) is deliberately NOT a key: it is
 # always written, never gated, never removed (see write_pointer AGENTS.md).
+#
+# Harness-OWNED generated basenames (stems; all files are <stem>.md). These are the
+# ONLY files a deselection may delete, so a selective re-run never removes a user's
+# own agents/commands sharing the same dir (Codex r2 P1). Keep in sync with the
+# emit_agent calls and the command-copy loops in install_one().
+HARNESS_CLAUDE_SHIMS="orchestrator architect builder reviewer scout"
+HARNESS_SDD_CMDS="sdd-next sdd-new sdd-plan sdd-drill sdd-fix"
 
 # agent_known <key> — true (exit 0) iff <key> is a registered agent key (R7, R10).
 agent_known() {
@@ -623,6 +630,21 @@ $MARK_END"
     if ! grep -q '[^[:space:]]' "$_f"; then rm -f "$_f"; fi
     info "removed harness pointer block from $1"
   }
+  # remove_owned <dir-rel> <agent-label> <stem...> — on deselection, delete ONLY the
+  # named harness-generated files (<dir>/<stem>.md) inside <dir>, then rmdir <dir> if it
+  # is now empty. A user's own files in the same dir are preserved (the dir survives,
+  # non-empty). This keeps removal scoped to harness-owned glue so a selective re-run
+  # never deletes unrelated project/user config. (R13; Codex r2 P1)
+  remove_owned() {
+    _dir="$TARGET/$1"; _label="$2"; shift 2
+    [ -d "$_dir" ] || return 0
+    _removed=''
+    for _b in "$@"; do
+      if [ -f "$_dir/$_b.md" ]; then rm -f "$_dir/$_b.md"; _removed="$_removed $_b.md"; fi
+    done
+    [ -n "$_removed" ] && echo "⚠️  removed deselected agent '$_label' glue:$_removed (in $1/)" >&2
+    rmdir "$_dir" 2>/dev/null || { [ -n "$_removed" ] && echo "ℹ️  kept $1/ — contains non-harness files" >&2; }
+  }
 
   # AGENTS.md is the shared portable entrypoint — ALWAYS written, never gated (R2 note).
   write_pointer AGENTS.md
@@ -905,7 +927,7 @@ EOF
   # so OpenCode commands appear even when `claude` is deselected.
   if agent_selected claude; then
     mkdir -p "$TARGET/.claude/commands"
-    for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix; do
+    for _c in $HARNESS_SDD_CMDS; do
       cp "$CMDDIR/$_c.md" "$TARGET/.claude/commands/$_c.md"
     done
     ok "Claude Code commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix installed (.claude/)"
@@ -916,7 +938,7 @@ EOF
   # the orchestrator in the opencode.json below.
   if agent_selected opencode; then
     mkdir -p "$TARGET/.opencode/command"
-    for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix; do
+    for _c in $HARNESS_SDD_CMDS; do
       cp "$CMDDIR/$_c.md" "$TARGET/.opencode/command/$_c.md"
     done
     ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix installed (.opencode/)"
@@ -960,15 +982,17 @@ EOF
       case "$_rk" in
         claude)
           remove_pointer CLAUDE.md
-          [ -d "$TARGET/.claude/agents" ]   && { rm -rf "$TARGET/.claude/agents";   echo "⚠️  removed deselected agent 'claude' glue: .claude/agents/" >&2; }
-          [ -d "$TARGET/.claude/commands" ] && { rm -rf "$TARGET/.claude/commands"; echo "⚠️  removed deselected agent 'claude' glue: .claude/commands/" >&2; }
+          remove_owned .claude/agents   claude $HARNESS_CLAUDE_SHIMS
+          remove_owned .claude/commands claude $HARNESS_SDD_CMDS
+          rmdir "$TARGET/.claude" 2>/dev/null || true   # prune parent only if now empty
           ;;
         gemini)
           remove_pointer GEMINI.md
           echo "⚠️  removed deselected agent 'gemini' glue: GEMINI.md harness block" >&2
           ;;
         opencode)
-          [ -d "$TARGET/.opencode/command" ] && { rm -rf "$TARGET/.opencode/command"; echo "⚠️  removed deselected agent 'opencode' glue: .opencode/command/" >&2; }
+          remove_owned .opencode/command opencode $HARNESS_SDD_CMDS
+          rmdir "$TARGET/.opencode" 2>/dev/null || true   # prune parent only if now empty
           # opencode.json: delete ONLY a file the installer generated (detected by its
           # generated schema URL); a hand-edited file is left in place with a warning.
           if [ -f "$TARGET/opencode.json" ]; then
