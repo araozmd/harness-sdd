@@ -9,27 +9,35 @@ All notable changes to the harness body are recorded here. Versions follow
 ### Added — ✨ Antigravity native support
 - **Antigravity glue (`harness-install.sh` §5c)** — Google Antigravity (a Gemini-based
   agentic IDE) is now a first-class, selectable harness target. On every run (gated on the
-  `antigravity` agent key), the installer stamps a workspace-local `.agent/` tree that POINTS
+  `antigravity` agent key), the installer stamps a workspace-local `.agents/` tree that POINTS
   at the canonical `.harness/agents/*.md` roles — it never forks, copies, or redefines a role
-  body. Antigravity natively reads `<root>/.agent/{rules,agents,workflows}/*.md`.
-- **Entrypoint rule (`.agent/rules/harness.md`)** — a thin rule that loads the harness for an
+  body. Antigravity natively reads `<root>/.agents/{rules,agents,workflows}/*.md` (plural —
+  the dir its current build scans).
+- **Entrypoint rule (`.agents/rules/harness.md`)** — a thin rule that loads the harness for an
   Antigravity session (Antigravity does not auto-load `AGENTS.md`): it points at
   `.harness/AGENTS.md` (source of truth) and `.harness/agents/orchestrator.md` (entry role),
   mandates `.harness/init.sh` first, and documents the working model. The root `GEMINI.md`
   pointer block (already written by §4) also serves Antigravity as the in-repo entrypoint.
-- **Personas (`.agent/agents/{orchestrator,architect,builder,reviewer,scout}.md`)** — one per
-  harness role, each carrying a `description` (so Antigravity registers it) and a body that
+- **Personas (`.agents/agents/{orchestrator,architect,builder,reviewer,scout}.md`) —
+  best-effort** — one per harness role, each carrying a `description` and a body that
   defers to `.harness/agents/<role>.md`, runs `.harness/init.sh` first (halt on non-zero), and
-  hands off via `.harness/progress/` files — no copied role body.
-- **Workflows (`.agent/workflows/{sdd-next,sdd-new,sdd-plan,sdd-drill,sdd-fix}.md`)** — the
+  hands off via `.harness/progress/` files — no copied role body. Bare-file persona discovery
+  is unconfirmed, so the personas are written (cheap, possibly honored) but the harness does
+  NOT claim they register as Antigravity subagents.
+- **Workflows (`.agents/workflows/{sdd-next,sdd-new,sdd-plan,sdd-drill,sdd-fix}.md`)** — the
   same five SDD slash commands, COPIED from the shared command bodies (mirroring the OpenCode
   block) so they stay byte-identical to the Claude/OpenCode copies and never drift. Each
   already carries the `description` frontmatter Antigravity needs to register `/<name>`.
-- **No new dependencies; harness-owned + idempotent** — the `.agent/` glue is regenerated each
-  run (like `.claude/` / `.opencode/`); deselecting `antigravity` now removes ONLY those
-  harness-owned files (scoped `remove_owned`, never `rm -rf` of a user `.agent/`). `VERSION`
+- **Durable working model** — the confirmed primitives are the `.agents/rules/` entrypoint rule
+  + the `description`-gated `.agents/workflows/` slash commands + `.harness/progress/` files as
+  the hand-off / isolation boundary (not a Task-tool-style spawn, not an asserted bare-file
+  subagent registration); the personas above are a best-effort layer on top.
+- **No new dependencies; harness-owned + idempotent** — the `.agents/` glue is regenerated each
+  run (like `.claude/` / `.opencode/`); deselecting `antigravity` removes ONLY harness-owned
+  files that are byte-identical to a freshly-generated stamp (pristine) — never a user file that
+  merely shares a standard name, and never `rm -rf` of a user `.agents/` dir. `VERSION`
   bumped 0.21.0 → 0.22.0 (MINOR). `tests/test_install.sh` gains an Antigravity assertion group
-  covering R1–R12; no canonical `agents/*.md` role file is touched.
+  covering R1–R13; no canonical `agents/*.md` role file is touched.
 
 ## [0.21.0] — 2026-06-11
 

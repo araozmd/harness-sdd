@@ -1,7 +1,7 @@
 ---
 id: E07
 title: Antigravity support
-status: done             # pending → in-progress → done (rollup of its features)
+status: pending          # pending → in-progress → done (rollup of its features)
 owner: araozmd
 ---
 

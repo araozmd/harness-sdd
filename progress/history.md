@@ -39,3 +39,7 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-06-12T14:31:21Z  E07-F01  in-review → approve (round 1) — Reviewer verified all 13 suites green, R1–R12 traced, both deviations (VERSION→0.22.0, deselect→scoped removal) verified sound + data-loss safe
 - 2026-06-12T14:31:21Z  E07-F01  in-review → done (Reviewer verdict persisted); E07 epic rolled up → done
 - 2026-06-12T14:31:21Z  drift-check (trigger: E07 done): NO-OP — no remaining draft/planned/pending epics (all epics done); no Scout spawned, no demotion
+- 2026-06-12T15:39:15Z  E07-F01  in-review/round-3 → HELD (Codex r3 P2 #3404422700: .agent/ vs .agents/ + persona registration). PR #31 NOT merged, labeled needs-human.
+- 2026-06-12T15:39:15Z  E07-F01  done → pending; E07 epic done → pending (premature rollup reverted — PR unmerged + re-spec). Human chose: re-spec via Architect.
+- 2026-06-12T15:44:29Z  E07-F01  pending → spec-ready (Architect re-spec: R1–R13, .agents/ plural + confirmed-primitives persona model) — PAUSED at human gate
+- 2026-06-12T16:36:52Z  E07-F01  spec-ready → in-progress (re-spec approved; .agents/ plural, primitives model, skills out-of-scope; gate latency 3143s) — Builder round 2 on PR #31 branch

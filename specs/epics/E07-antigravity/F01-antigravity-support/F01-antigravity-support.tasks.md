@@ -1,58 +1,81 @@
 # Antigravity native support — Tasks
 
-> Atomic, sequential steps. The Builder works these top to bottom, one at a time.
-> Each task names the R-id(s) it satisfies. The whole change lives in
-> `harness-install.sh`, `tests/test_install.sh`, `VERSION`, and `CHANGELOG.md` — no
-> canonical `agents/*.md` is touched.
+> Atomic, sequential steps. The Builder works these top to bottom, one at a time, **on
+> the existing branch `feat/E07-F01-antigravity-support`** (commits `50f74a9`, `17280b7`
+> already landed the `.agent/` singular glue + deselect byte-compare). This re-spec's
+> work is primarily the **`.agent/` → `.agents/` (plural) rename** across generation,
+> entrypoint wiring, manifest, the deselect byte-compare, and the tests — plus the
+> honest best-effort persona model and strengthened (beyond-existence) test assertions.
+> Each task names the R-id(s) it satisfies. No canonical `agents/*.md` is touched.
+>
+> **Do the rename as a scoped, reviewed substitution — not a blind global sed.** Only the
+> Antigravity glue paths move; verify each site below.
 
-- [x] **T1** (R1) — In `harness-install.sh` §4 (`write_pointer` / `GEMINI.md`), confirm
-  the managed `GEMINI.md` block instructs an Antigravity session to act as the
-  Orchestrator and read `.harness/AGENTS.md`. If already satisfied, add a one-line
-  comment noting the `GEMINI.md` pointer also serves Antigravity (no behavioral change).
+- [x] **T1** (R2,R4,R6) — In `harness-install.sh` §5c, change the `mkdir -p` line so all
+  three glue dirs are **plural**: `"$TARGET/.agents/rules" "$TARGET/.agents/agents"
+  "$TARGET/.agents/workflows"`.
 
-- [x] **T2** (R2,R4,R6) — In `install_one()`, immediately after the §5b OpenCode block
-  (`ok "OpenCode commands …"`) and before §6 (`opencode.json`), add a new §5c block that
-  does `mkdir -p "$TARGET/.agent/rules" "$TARGET/.agent/agents" "$TARGET/.agent/workflows"`.
+- [x] **T2** (R2,R3,R12) — In §5c, change the `gen_ag_rule` destination to
+  `"$TARGET/.agents/rules/harness.md"`. In the `gen_ag_rule` body, update the working-model
+  prose: reference `.agents/agents/` and `.agents/workflows/` (plural); state the R12 model
+  explicitly — Antigravity drives the harness through the `description`-gated
+  `.agents/workflows/` slash commands + the `.agents/agents/` personas, with
+  `.harness/progress/` hand-off, and **not** a Task-tool-style spawn and **not** an asserted
+  bare-file subagent registration. Keep it a few lines; no copied role body.
 
-- [x] **T3** (R2,R3) — In §5c, write `$TARGET/.agent/rules/harness.md`: a short rule that
-  points the agent at `.harness/AGENTS.md` (source of truth) and
-  `.harness/agents/orchestrator.md` (entry role), mandates `.harness/init.sh` first, and
-  contains **no copied role body**.
+- [x] **T3** (R4,R5) — In §5c's persona loop, change the `gen_ag_persona` destination to
+  `"$TARGET/.agents/agents/$_agr.md"` (plural). Persona body is otherwise unchanged
+  (`description` frontmatter, defers to `.harness/agents/<role>.md`, `.harness/init.sh`
+  first + halt, `.harness/progress/` hand-off, no copied role body). These remain
+  **best-effort** — written but not claimed to register.
 
-- [x] **T4** (R4,R5) — In §5c, loop over `orchestrator architect builder reviewer scout`
-  and write `$TARGET/.agent/agents/<role>.md` for each: YAML frontmatter with a
-  `description:` line + a body that defers to `.harness/agents/<role>.md`, runs
-  `.harness/init.sh` first (halt on non-zero), and hands off via `.harness/progress/`.
-  Reuse the same role descriptions as the `.claude/agents` `emit_agent` calls. **No
-  copied role body.**
+- [x] **T4** (R6,R7,R8,R9) — In §5c's workflow loop, change the `cp` destination to
+  `"$TARGET/.agents/workflows/$_w.md"` (plural). Mirror from `$CMDDIR/$_w.md`, do not
+  re-author.
 
-- [x] **T5** (R6,R7,R8,R9) — In §5c, loop over `sdd-next sdd-new sdd-plan sdd-drill
-  sdd-fix` and write `$TARGET/.agent/workflows/<name>.md` for each by copying the body
-  from the already-generated `$TARGET/.claude/commands/<name>.md` (mirror, like the
-  OpenCode block — do not re-author). The Claude command files already begin with a
-  `description:` frontmatter block, which satisfies the slash-command registration
-  requirement; preserve it.
+- [x] **T5** (R12) — Update the §5c `ok` line to `ok "Antigravity glue (rules + agents +
+  workflows) installed (.agents/)"` (plural).
 
-- [x] **T6** (R12) — In §5c, add an `ok "Antigravity glue (rules + agents + workflows)
-  installed (.agent/)"` line for parity with the existing front-end `ok` lines.
+- [x] **T6** (R13) — In the §7 `antigravity)` deselect branch, change every relpath passed
+  to `remove_if_pristine` to the plural dir: `.agents/rules/harness.md`,
+  `.agents/agents/$_agr.md` (in the loop), `.agents/workflows/$_agw.md` (in the loop). Then
+  change the four `rmdir` prune targets to `"$TARGET/.agents/rules"`,
+  `"$TARGET/.agents/agents"`, `"$TARGET/.agents/workflows"`, `"$TARGET/.agents"`. **Do not
+  change the byte-compare safety logic** (pristine-only removal, never user files, never
+  `rm -rf`) — only the path literals. Leave the shared-GEMINI.md removal logic intact.
 
-- [x] **T7** (R10) — In §3, extend the `manifest.txt` HARNESS-OWNED list to mention
-  `.agent/rules/*  .agent/agents/*  .agent/workflows/*  (repo root, regenerated)`.
+- [x] **T7** (R10) — In §3, update the `manifest.txt` HARNESS-OWNED glue line to
+  `.agents/rules/*  .agents/agents/*  .agents/workflows/*  (repo root, regenerated;
+  Antigravity glue)`.
 
-- [x] **T8** (R10) — Bump `VERSION` from `0.20.0` to `0.21.0` (MINOR — new
-  backward-compatible capability).
+- [x] **T8** (R1,R12) — Update the §4 `write_pointer`/`GEMINI.md` comment that mentions
+  "the `.agent/rules/harness.md` rule (§5c)" to read `.agents/rules/harness.md` (plural).
+  No behavioral change to the shared-GEMINI.md logic.
 
-- [x] **T9** (R10) — Add a `## [0.21.0]` section to `CHANGELOG.md` under
-  `### Added — ✨ Antigravity native support`, describing the `GEMINI.md`/`.agent/rules`
-  entrypoint, the `.agent/agents` personas, and the `.agent/workflows` slash commands,
-  and noting no canonical role file is forked.
+- [x] **T9** (R10) — In `CHANGELOG.md`, edit the existing `## [0.22.0]` Antigravity section
+  so every `.agent/` reads `.agents/` (plural), and add a clause: personas are best-effort;
+  the durable working model is the `.agents/rules/` entrypoint + `description`-gated
+  `.agents/workflows/` slash commands + `.harness/progress/` hand-off. **Do not bump
+  `VERSION`** — it is already `0.22.0` for this same MINOR capability.
 
-- [x] **T10** (R11) — In `tests/test_install.sh`, after the OpenCode assertion group,
-  add an Antigravity glue assertion group implementing every check in
-  `F01-antigravity-support.tests.md` (entrypoint rule exists; all five personas exist;
-  all five workflows exist; each workflow has a `description`; each workflow resolves
-  its role against `.harness/agents/*.md`; no glue file embeds a copied role body),
-  each line tagged with its R-id and ending with `pass "Antigravity glue generated (R11)"`.
+- [x] **T10** (R11) — In `tests/test_install.sh`, update the Antigravity glue assertion
+  group: change every `$T/.agent/...` path to `$T/.agents/...` (rule, personas, workflows).
+  Keep/confirm the **shape-not-existence** assertions: correct plural dir; `description`
+  present (rule + personas + workflows); persona defers to `.harness/agents/<role>.md`;
+  each workflow resolves its role against `.harness/agents/*.md` and carries `$ARGUMENTS`;
+  each workflow `cmp -s` byte-identical to its Claude command; and the
+  canonical-orchestrator **sentinel is ABSENT** in the rule and every persona (no fork). Do
+  NOT add an assertion that personas "register" as subagents.
 
-- [x] **T11** — Run the full `verification.test_command` suite (`sh tests/test_install.sh
-  && …`) plus `./init.sh`; ensure green before hand-off.
+- [x] **T11** (R11,R13) — In `tests/test_install.sh`, update the three Antigravity/GEMINI.md
+  regression tests to the plural dir: `--agents=antigravity writes GEMINI.md entrypoint`
+  (the `.agent/rules/harness.md` existence check → `.agents/rules/harness.md`); `antigravity
+  deselect is byte-exact` (every `.agent/...` path → `.agents/...`, including the user-file
+  preservation + pristine-removal + `.agent/` survives → `.agents/` checks); and `GEMINI.md
+  shared by gemini+antigravity` (no path change unless it references `.agent/`). Keep all
+  assertions — they already exceed file-existence.
+
+- [x] **T12** — Run the full `verification.test_command` suite (`sh tests/test_install.sh`
+  + `./init.sh`); ensure green before hand-off. Confirm no stray `.agent/` (singular)
+  literal remains in the Antigravity glue paths (`grep -n "\.agent/" harness-install.sh
+  tests/test_install.sh` should show no Antigravity-glue singular paths).
