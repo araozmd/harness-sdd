@@ -342,8 +342,10 @@ tui_capable() {
 # Pre-check state seeds from <baseline> exactly as toggle_select does. ALL UI goes to
 # stderr; only the resolved sorted keys (one per line, via normalize_keys) hit stdout,
 # so the captured SELECTED contract is unchanged. Raw mode is entered with `stty` and
-# UNCONDITIONALLY restored via an EXIT/INT/TERM trap so Ctrl-C never leaves the
-# terminal in raw mode.
+# UNCONDITIONALLY restored: an EXIT trap restores on the normal return path, while a
+# separate INT/TERM trap restores AND aborts the whole installer (kill -INT $$ +
+# exit 130) so Ctrl-C never leaves the terminal in raw mode NOR silently continues to
+# write files on the next Enter.
 tui_select() {
   _baseline="$1"
   # Positional key list + parallel on/off state (same seeding as toggle_select).
@@ -362,8 +364,21 @@ tui_select() {
 
   # Save terminal settings and guarantee restoration on ANY exit path.
   _saved_stty="$(stty -g 2>/dev/null)"
+  # Two distinct trap behaviors (Codex P2 #3405383752):
+  #   • EXIT (normal return/confirm): just restore the terminal — must NOT force a
+  #     non-zero status, or the captured SELECTED contract would look like a failure.
+  #   • INT/TERM (Ctrl-C): restore the terminal AND abort the whole installer so no
+  #     filesystem writes follow. tui_select runs inside a command-substitution
+  #     subshell (SELECTED="$(tui_select …)"), so a bare `exit` would only end the
+  #     subshell and leave the parent free to continue on the next Enter. We instead
+  #     re-raise the signal to the MAIN shell: in POSIX sh `$$` is the PID of the
+  #     original (parent) shell even inside a subshell, so `kill -INT "$$"` aborts the
+  #     installer process itself (no top-level trap → default terminate). `exit 130`
+  #     is the belt-and-suspenders fallback if the kill is somehow swallowed.
   # shellcheck disable=SC2064
-  trap "stty '$_saved_stty' 2>/dev/null; printf '\\033[?25h' >&2" EXIT INT TERM
+  trap "stty '$_saved_stty' 2>/dev/null; printf '\\033[?25h' >&2" EXIT
+  # shellcheck disable=SC2064
+  trap "stty '$_saved_stty' 2>/dev/null; printf '\\033[?25h' >&2; trap - EXIT INT TERM; kill -INT $$ 2>/dev/null; exit 130" INT TERM
   # Raw-ish mode: no echo, char-at-a-time (-icanon min 1), keep signals usable.
   stty -echo -icanon min 1 time 0 2>/dev/null
   printf '\033[?25l' >&2  # hide cursor
