@@ -673,8 +673,9 @@ EOF
   # .harness/init.sh, read .harness/AGENTS.md" — Antigravity natively loads
   # GEMINI.md-style rules, so this same pointer also serves Antigravity as the
   # in-repo entrypoint (E07-F01 R1/R12); the .agent/rules/harness.md rule (§5c) is
-  # the Antigravity-specific hook layered on top.
-  agent_selected gemini && write_pointer GEMINI.md
+  # the Antigravity-specific hook layered on top. Written when EITHER gemini OR
+  # antigravity is selected — both share GEMINI.md as their in-repo entrypoint.
+  if agent_selected gemini || agent_selected antigravity; then write_pointer GEMINI.md; fi
   ok "entrypoint pointers written (AGENTS.md + selected agents)"
 
   # ── 5. Claude Code sub-agent shims + /sdd-next (regenerated each run) ────────
@@ -1079,8 +1080,14 @@ EOF
           rmdir "$TARGET/.claude" 2>/dev/null || true   # prune parent only if now empty
           ;;
         gemini)
-          remove_pointer GEMINI.md
-          echo "⚠️  removed deselected agent 'gemini' glue: GEMINI.md harness block" >&2
+          # GEMINI.md is SHARED: it is the in-repo entrypoint for gemini AND
+          # antigravity (E07-F01 R1/R12). Remove it only when NEITHER owner remains
+          # selected — otherwise deselecting gemini while antigravity stays selected
+          # would wrongly strip Antigravity's entrypoint.
+          if ! agent_selected antigravity; then
+            remove_pointer GEMINI.md
+            echo "⚠️  removed deselected agent 'gemini' glue: GEMINI.md harness block" >&2
+          fi
           ;;
         opencode)
           remove_owned .opencode/command opencode $HARNESS_SDD_CMDS
@@ -1114,6 +1121,15 @@ EOF
           remove_owned .agent/agents    antigravity $HARNESS_CLAUDE_SHIMS
           remove_owned .agent/workflows antigravity $HARNESS_SDD_CMDS
           rmdir "$TARGET/.agent" 2>/dev/null || true   # prune parent only if now empty
+          # GEMINI.md is SHARED with gemini (E07-F01 R1/R12). Antigravity owns it as
+          # an in-repo entrypoint too, so remove it on antigravity deselection ONLY
+          # when gemini is also not selected — mirroring the gemini case. (Without
+          # this, deselecting an antigravity-only install would orphan GEMINI.md,
+          # since the gemini branch never runs when gemini was never a prior agent.)
+          if ! agent_selected gemini; then
+            remove_pointer GEMINI.md
+            echo "⚠️  removed deselected agent 'antigravity' glue: GEMINI.md harness block" >&2
+          fi
           ;;
       esac
     done

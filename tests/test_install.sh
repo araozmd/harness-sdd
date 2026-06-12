@@ -283,6 +283,20 @@ for _k in claude gemini opencode antigravity; do
 done
 pass "every registry key is individually selectable (R10)"
 
+# antigravity_only_writes_gemini_entrypoint (E07-F01 R1, Codex r1 P2 #3404185446):
+# GEMINI.md is Antigravity's in-repo bootstrap entrypoint, so an antigravity-only
+# install (no gemini) MUST still write GEMINI.md with the harness managed block.
+TAG="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=antigravity "$TAG" >/dev/null || fail "--agents=antigravity exited non-zero"
+[ -f "$TAG/GEMINI.md" ]                              || fail "R1: --agents=antigravity must write GEMINI.md entrypoint (Codex r1 P2)"
+grep -qF '<!-- harness:begin -->' "$TAG/GEMINI.md"   || fail "R1: antigravity-only GEMINI.md missing harness managed block (Codex r1 P2)"
+grep -qF '.harness/AGENTS.md' "$TAG/GEMINI.md"       || fail "R1: antigravity-only GEMINI.md does not point at .harness/AGENTS.md"
+[ -f "$TAG/.agent/rules/harness.md" ]                || fail "R1: antigravity-only install missing .agent/ glue"
+[ -f "$TAG/CLAUDE.md" ]    && fail "R4: antigravity-only must not write CLAUDE.md"
+[ -f "$TAG/opencode.json" ] && fail "R4: antigravity-only must not write opencode.json"
+rm -rf "$TAG"
+pass "--agents=antigravity writes GEMINI.md entrypoint (R1, Codex r1 P2)"
+
 # unknown_agent_key_rejected (R7): an unknown override exits non-zero, names it, no changes.
 TE="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 _err="$(sh "$SRC/harness-install.sh" --agents=claude,bogus "$TE" 2>&1 >/dev/null)" && fail "R7: unknown key must exit non-zero"
@@ -420,5 +434,23 @@ sh "$SRC/harness-install.sh" --agents=claude "$TQ" >/dev/null 2>&1 || fail "oc-e
 grep -q '"model"' "$TQ/opencode.json" || fail "Codex r4 P2: user-edited opencode.json content not preserved"
 rm -rf "$TQ"
 pass "opencode.json deselect deletes only a byte-pristine generated file, keeps edits (Codex r4 P2)"
+
+# gemini_deselect_keeps_gemini_when_antigravity_remains (E07-F01 R1, Codex r1 P2
+# #3404185446): GEMINI.md is SHARED by gemini and antigravity. Deselecting gemini
+# while antigravity stays selected must KEEP GEMINI.md (antigravity still owns it),
+# and conversely deselecting antigravity-only orphan removal happens only when both
+# owners are gone.
+TR="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=gemini,antigravity "$TR" >/dev/null || fail "shared-gemini setup install failed"
+[ -f "$TR/GEMINI.md" ] || fail "shared-gemini setup: GEMINI.md not stamped for gemini,antigravity"
+# Drop gemini, keep antigravity: GEMINI.md must survive (antigravity owns it).
+sh "$SRC/harness-install.sh" --agents=antigravity "$TR" >/dev/null 2>&1 || fail "shared-gemini deselect-gemini rerun failed"
+[ -f "$TR/GEMINI.md" ]                || fail "R1: deselecting gemini while antigravity remains must KEEP GEMINI.md (Codex r1 P2)"
+grep -qF '<!-- harness:begin -->' "$TR/GEMINI.md" || fail "R1: GEMINI.md harness block stripped despite antigravity still selected"
+# Now drop antigravity too (last owner gone): GEMINI.md must finally be removed.
+sh "$SRC/harness-install.sh" --agents=claude "$TR" >/dev/null 2>&1 || fail "shared-gemini deselect-antigravity rerun failed"
+[ -f "$TR/GEMINI.md" ] && fail "R13: GEMINI.md must be removed once NEITHER gemini nor antigravity is selected"
+rm -rf "$TR"
+pass "GEMINI.md shared by gemini+antigravity: kept until both deselected (R1, R13, Codex r1 P2)"
 
 echo "All install tests passed."
