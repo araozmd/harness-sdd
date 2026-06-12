@@ -20,4 +20,4 @@ Act as the **Orchestrator** (`agents/orchestrator.md`).
    - `in-review` → spawn **reviewer**; approve → `done`, reject → back to `in-progress`.
 4. Append what happened to `progress/history.md`.
 
-$ARGUMENTS may name a specific feature id (e.g. `E02-F01`); if given, operate on it.
+$ARGUMENTS may name a specific feature id (e.g. `E01-F01`); if given, operate on it.

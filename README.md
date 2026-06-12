@@ -68,7 +68,9 @@ approves) → `builder` → `reviewer`.
 
 The harness body — `AGENTS.md`, `agents/`, `specs/`, `progress/`, `init.sh`, the
 stores — is **identical** across all of them. Only the entry filename and the
-sub-agent mechanism differ.
+sub-agent mechanism differ. Which of these front-ends gets installed is your choice —
+the installer lets you select the agents to support and re-prompts on every upgrade
+(see [Installing into an existing project](#installing-into-an-existing-project)).
 
 ## Configuring the knowledge base / state
 
@@ -206,8 +208,25 @@ umbrella.gitignore.example       shared-spec-repo .gitignore reference
 
 Idempotent install/upgrade: drops the harness body into `<project>/.harness/`, appends
 a marked pointer block to any existing `CLAUDE.md`/`AGENTS.md`/`GEMINI.md` (your prose
-is preserved), generates the Claude Code glue, and seeds a runnable workspace. Re-run
-to upgrade — project-authored specs/state are never clobbered. See `docs/INSTALL.md`.
+is preserved), generates the glue for the selected agents, and seeds a runnable
+workspace. Re-run to upgrade — project-authored specs/state are never clobbered. See
+`docs/INSTALL.md`.
+
+**Choosing which agents to support.** The shared portable entrypoint `AGENTS.md` is
+always written, but each coding agent's front-end is **opt-in**. On an interactive
+terminal the installer shows a checkbox-style toggle list — `claude`, `gemini`,
+`opencode`, `antigravity` — and stamps only the ones you pick. The choice is saved to
+`.harness/.agents`, so **every re-run re-prompts with your current selection
+pre-checked** — add or drop an agent any time, even when the harness version hasn't
+changed. Deselecting an agent removes only the harness-generated glue (your own
+`.claude/`/`.opencode/` files and a hand-edited `opencode.json` are left untouched).
+
+```bash
+# Non-interactive / CI — pick explicitly (no prompt):
+./harness-install.sh --agents=claude,opencode /path/to/your-project
+HARNESS_AGENTS=claude ./harness-install.sh /path/to/your-project
+# No TTY and no override ⇒ all agents are stamped (back-compatible default).
+```
 
 **Shared vs personal config.** The install is meant to be *committed and shared* — one
 `CLAUDE.md`, the `.harness/` body, the `.claude/` glue. Per-developer state stays local:

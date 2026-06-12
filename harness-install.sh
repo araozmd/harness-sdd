@@ -1,10 +1,25 @@
 #!/bin/sh
 # harness-install.sh — install or upgrade the agent harness into a target repo.
 #
-#   ./harness-install.sh <target-repo-path>
+#   ./harness-install.sh [--agents=<csv>] <target-repo-path>
 #   ./harness-install.sh --umbrella <umbrella-dir> [--shared-repo] [--recursive] [--dry-run|--list]
 #
 # Idempotent: run once to install, re-run to upgrade.
+#
+# Agent selection (E08-F01): the installer stamps a SELECTABLE set of coding-agent
+# front-ends — claude (CLAUDE.md + .claude/), gemini (GEMINI.md), opencode
+# (opencode.json + .opencode/command/), antigravity (.agent/, E07-F01). Resolution:
+#   - --agents=<csv> or HARNESS_AGENTS=<csv> (comma-separated keys) → that set, no
+#     prompt (the override always wins). An unknown key aborts non-zero.
+#   - else an interactive TTY → a numbered toggle list (pre-checked from the saved
+#     .harness/.agents set, or ALL on a fresh install).
+#   - else (no TTY, no override) → ALL agents (preserves the historical behavior).
+# The resolved set is persisted to .harness/.agents (a dot-file beside .harness-version;
+# dot-prefixed to avoid colliding with the .harness/agents/ role-bodies dir) and re-prompted
+# on every re-run, decoupled from VERSION/upgrade detection. A re-run that DESELECTS
+# an agent deletes that agent's harness-owned, regenerated glue and warns (it never
+# touches the shared AGENTS.md entrypoint or the .harness/ body; a hand-edited
+# opencode.json is left in place with a warning).
 #
 #   - The harness BODY (agents, docs, store, tools, templates, init.sh, config, AGENTS.md)
 #     is copied into <target>/.harness/ and OVERWRITTEN on every run.
@@ -193,6 +208,144 @@ _mc_insert_after() {
   ' "$_f" > "$_f.mctmp" && mv "$_f.mctmp" "$_f"
 }
 
+# ── agent registry (E08-F01) ──────────────────────────────────────────────────
+# Declarative table of the selectable coding-agent front-ends the installer can
+# stamp. Each agent is one row: a stable KEY, the existing stamp block it gates,
+# and the harness-owned glue paths it OWNS for removal (R10). Adding a future
+# agent is one new key here plus its gated stamp block + removal case.
+#
+# The selectable keys — the ONLY legal tokens for `--agents`/`HARNESS_AGENTS`,
+# the `.harness/.agents` state file, and the toggle UI — are exactly:
+AGENT_KEYS="claude gemini opencode antigravity"
+# AGENTS.md (the shared portable entrypoint) is deliberately NOT a key: it is
+# always written, never gated, never removed (see write_pointer AGENTS.md).
+#
+# Harness-OWNED generated basenames (stems; all files are <stem>.md). These are the
+# ONLY files a deselection may delete, so a selective re-run never removes a user's
+# own agents/commands sharing the same dir (Codex r2 P1). Keep in sync with the
+# emit_agent calls and the command-copy loops in install_one().
+HARNESS_CLAUDE_SHIMS="orchestrator architect builder reviewer scout"
+HARNESS_SDD_CMDS="sdd-next sdd-new sdd-plan sdd-drill sdd-fix"
+
+# agent_known <key> — true (exit 0) iff <key> is a registered agent key (R7, R10).
+agent_known() {
+  for _k in $AGENT_KEYS; do [ "$_k" = "$1" ] && return 0; done
+  return 1
+}
+
+# agent_selected <key> — true (exit 0) iff <key> is a line in $SELECTED (R3/R4).
+agent_selected() {
+  printf '%s\n' "$SELECTED" | grep -qx "$1"
+}
+
+# normalize_keys <space-or-newline-list> — print the given keys de-duplicated and
+# sorted, one per line (the stable on-disk + comparison form for .harness/.agents).
+normalize_keys() {
+  printf '%s\n' "$1" | tr ' ' '\n' | grep -v '^$' | sort -u
+}
+
+# validate_csv <csv> — split a comma-separated override on commas, trim each token,
+# drop empties, de-duplicate, validate each against the registry; `die` non-zero
+# naming the first unknown token (R7). On success, print the sorted keys (one per
+# line). Makes no filesystem changes (caller has not touched the target yet).
+validate_csv() {
+  _out=""
+  _ifs="$IFS"; IFS=','
+  for _tok in $1; do
+    IFS="$_ifs"
+    # trim surrounding whitespace
+    _tok="$(printf '%s' "$_tok" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    [ -n "$_tok" ] || continue
+    agent_known "$_tok" || die "unknown agent key '$_tok' in --agents/HARNESS_AGENTS (known: $AGENT_KEYS)"
+    _out="$_out $_tok"
+    IFS=','
+  done
+  IFS="$_ifs"
+  normalize_keys "$_out"
+}
+
+# toggle_select <baseline-newline-list> — pure-`read` numbered toggle UI (R1, R9).
+# Only ever called on an interactive TTY. Prints the four keys numbered with each
+# key's pre-check state taken from <baseline>; the user types space/comma-separated
+# numbers to toggle entries, then a blank line (or `done`) confirms. Prints the
+# resolved sorted keys (one per line) on stdout; all prompts go to stderr so the
+# captured stdout is purely the selection.
+toggle_select() {
+  _baseline="$1"
+  # Build a positional list of keys and a parallel on/off state.
+  _i=0
+  for _k in $AGENT_KEYS; do
+    _i=$((_i + 1))
+    eval "_key_$_i=\$_k"
+    if printf '%s\n' "$_baseline" | grep -qx "$_k"; then
+      eval "_on_$_i=1"
+    else
+      eval "_on_$_i=0"
+    fi
+  done
+  _n="$_i"
+  echo "Select which agent front-ends to stamp (toggle by number, blank line to confirm):" >&2
+  while :; do
+    _i=0
+    while [ "$_i" -lt "$_n" ]; do
+      _i=$((_i + 1))
+      eval "_k=\$_key_$_i; _s=\$_on_$_i"
+      if [ "$_s" = 1 ]; then _mark="[x]"; else _mark="[ ]"; fi
+      printf '  %d) %s %s\n' "$_i" "$_mark" "$_k" >&2
+    done
+    printf 'toggle #s (or Enter to confirm): ' >&2
+    if ! read -r _line; then break; fi
+    [ -n "$_line" ] || break
+    case "$_line" in done|DONE|d) break ;; esac
+    for _num in $(printf '%s' "$_line" | tr ',' ' '); do
+      case "$_num" in
+        *[!0-9]*) echo "  ignoring '$_num' (not a number)" >&2; continue ;;
+      esac
+      if [ "$_num" -ge 1 ] && [ "$_num" -le "$_n" ]; then
+        eval "_cur=\$_on_$_num"
+        if [ "$_cur" = 1 ]; then eval "_on_$_num=0"; else eval "_on_$_num=1"; fi
+      else
+        echo "  ignoring '$_num' (out of range 1-$_n)" >&2
+      fi
+    done
+  done
+  _sel=""
+  _i=0
+  while [ "$_i" -lt "$_n" ]; do
+    _i=$((_i + 1))
+    eval "_k=\$_key_$_i; _s=\$_on_$_i"
+    [ "$_s" = 1 ] && _sel="$_sel $_k"
+  done
+  normalize_keys "$_sel"
+}
+
+# resolve_agents <target> — resolve the SELECTED agent set for this run (R1, R5,
+# R6, R9, R11). Resolution order, first match wins, decoupled from VERSION/UPGRADE:
+#   1. Override (R5/R7): a non-empty $AGENTS_OVERRIDE (from --agents/HARNESS_AGENTS)
+#      → validate_csv, no prompt — wins over persisted + TTY.
+#   2. Interactive (R1/R9): else if stdin is a TTY → pre-check baseline is the
+#      persisted .harness/.agents if present (R9) else ALL (R1); run toggle_select.
+#   3. No-TTY default (R6): else → ALL keys (back-compat: stamp everything).
+# Sets the global SELECTED to a sorted, newline-separated key list.
+resolve_agents() {
+  _t="$1"
+  _persisted="$_t/.harness/.agents"
+  if [ -n "${AGENTS_OVERRIDE:-}" ]; then
+    SELECTED="$(validate_csv "$AGENTS_OVERRIDE")"
+    info "agents: explicit selection ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
+  elif [ -t 0 ]; then
+    if [ -f "$_persisted" ]; then
+      _base="$(normalize_keys "$(cat "$_persisted")")"
+    else
+      _base="$(normalize_keys "$AGENT_KEYS")"
+    fi
+    SELECTED="$(toggle_select "$_base")"
+    info "agents: interactive selection ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
+  else
+    SELECTED="$(normalize_keys "$AGENT_KEYS")"
+  fi
+}
+
 # ── install_one <target> ──────────────────────────────────────────────────────
 # Installs (or upgrades) the harness into <target>. Identical behavior to the
 # historical single-target installer. Sets LAST_UPGRADE to 0 (fresh) or 1 (upgrade)
@@ -203,6 +356,24 @@ install_one() {
   H="$TARGET/.harness"
   UPGRADE=0
   if [ -f "$H/.harness-version" ]; then UPGRADE=1; fi
+
+  # ── agent selection (E08-F01) ───────────────────────────────────────────────
+  # Capture the PRIOR persisted selection (for add/remove reconciliation, R12/R13)
+  # BEFORE anything is written this run, then resolve the new SELECTED set. Note
+  # this is decoupled from UPGRADE/VERSION — it runs every install_one (R11).
+  PRIOR_AGENTS=""
+  if [ -f "$H/.agents" ]; then
+    PRIOR_AGENTS="$(normalize_keys "$(cat "$H/.agents")")"
+  elif [ "$UPGRADE" = 1 ]; then
+    # Legacy upgrade: a pre-E08 install stamped ALL front-ends but persisted no
+    # selection. Treat an existing install with no .harness/.agents as the
+    # all-agents baseline, so the first selective upgrade can actually remove the
+    # now-deselected glue (e.g. GEMINI.md, opencode.json) instead of leaving it
+    # stale. A fresh install (UPGRADE=0) keeps PRIOR_AGENTS empty — nothing to
+    # remove. (Codex P2 #3400941300.)
+    PRIOR_AGENTS="$(normalize_keys "$AGENT_KEYS")"
+  fi
+  resolve_agents "$TARGET"
 
   echo "── harness install v$VERSION → $TARGET ──"
   if [ "$UPGRADE" = 1 ]; then info "existing install (v$(cat "$H/.harness-version")) — upgrading"; fi
@@ -403,6 +574,14 @@ PROJECT-OWNED  (seeded once, never clobbered on upgrade):
   .harness/specs/product.md  .harness/specs/epics/
   .harness/state/tasks.json  .harness/progress/
   umbrella.manifest.yaml         (umbrella mode only: coordinator manifest)
+
+AGENT SELECTION  (E08-F01):
+  .harness/.agents               harness-owned: the selected agent keys, one per line
+                                 (claude|gemini|opencode|antigravity), overwritten each run.
+  Choose with --agents=<csv> / HARNESS_AGENTS=<csv>, an interactive toggle list, or
+  (no TTY, no override) ALL. Deselecting an agent on a re-run REMOVES its glue above
+  (its pointer block / .claude|.opencode dir / generated opencode.json) and warns;
+  the shared AGENTS.md entrypoint and the .harness/ body are never removed.
 EOF
 
   # ── 4. entrypoint pointer blocks (idempotent marked region) ─────────────────
@@ -434,12 +613,69 @@ $MARK_END"
       printf '%s\n' "$_block" >> "$_f"
     fi
   }
-  write_pointer CLAUDE.md
+  # remove_pointer <relative-file> — delete the marked harness:begin..end block from
+  # <file> in place, preserving any user prose on either side (mirrors write_pointer's
+  # marker-aware edit). If the file becomes empty/whitespace-only afterward (it was
+  # harness-only), remove it. Never touches a file that has no harness block. (R13)
+  remove_pointer() {
+    _f="$TARGET/$1"
+    [ -f "$_f" ] || return 0
+    grep -qF "$MARK_BEGIN" "$_f" || return 0
+    {
+      sed "/$MARK_BEGIN/,\$d" "$_f"   # prefix: everything before the begin marker
+      sed "1,/$MARK_END/d" "$_f"      # suffix: everything after the end marker
+    } > "$_f.tmp"
+    mv "$_f.tmp" "$_f"
+    # Remove the file only if nothing but whitespace remains (it was harness-only).
+    if ! grep -q '[^[:space:]]' "$_f"; then rm -f "$_f"; fi
+    info "removed harness pointer block from $1"
+  }
+  # remove_owned <dir-rel> <agent-label> <stem...> — on deselection, delete ONLY the
+  # named harness-generated files (<dir>/<stem>.md) inside <dir>, then rmdir <dir> if it
+  # is now empty. A user's own files in the same dir are preserved (the dir survives,
+  # non-empty). This keeps removal scoped to harness-owned glue so a selective re-run
+  # never deletes unrelated project/user config. (R13; Codex r2 P1)
+  remove_owned() {
+    _rel="$1"; _dir="$TARGET/$1"; _label="$2"; shift 2
+    [ -d "$_dir" ] || return 0
+    _removed=''
+    for _b in "$@"; do
+      if [ -f "$_dir/$_b.md" ]; then rm -f "$_dir/$_b.md"; _removed="$_removed $_b.md"; fi
+    done
+    [ -n "$_removed" ] && echo "⚠️  removed deselected agent '$_label' glue:$_removed (in $_rel/)" >&2
+    rmdir "$_dir" 2>/dev/null || { [ -n "$_removed" ] && echo "ℹ️  kept $_rel/ — contains non-harness files" >&2; }
+  }
+  # gen_opencode_json <dest> — write the canonical generated opencode.json to <dest>.
+  # Single source of truth for both the stamp (§6) and the deselect byte-comparison,
+  # so removal deletes ONLY a pristine generated file and never a user-edited one.
+  gen_opencode_json() {
+    cat > "$1" <<'EOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [".harness/AGENTS.md"],
+  "agent": {
+    "orchestrator": { "mode": "primary",  "description": "The Leader: routes the next task, delegates. Never writes code.", "prompt": "{file:./.harness/agents/orchestrator.md}" },
+    "architect":    { "mode": "subagent", "description": "Spec Author: writes the 4-file spec (EARS).",                     "prompt": "{file:./.harness/agents/architect.md}" },
+    "builder":      { "mode": "subagent", "description": "Implementer: writes code from an approved spec.",                 "prompt": "{file:./.harness/agents/builder.md}" },
+    "reviewer":     { "mode": "subagent", "description": "Evaluator: verifies against the spec, runs tests.",               "prompt": "{file:./.harness/agents/reviewer.md}" },
+    "scout":        { "mode": "subagent", "description": "Read-only recon; writes findings to progress/.",                  "prompt": "{file:./.harness/agents/scout.md}" }
+  }
+}
+EOF
+  }
+
+  # AGENTS.md is the shared portable entrypoint — ALWAYS written, never gated (R2 note).
   write_pointer AGENTS.md
-  write_pointer GEMINI.md
-  ok "entrypoint pointers written (CLAUDE.md, AGENTS.md, GEMINI.md)"
+  # Per-agent entrypoint pointers are gated on selection (R2/R3/R4).
+  agent_selected claude && write_pointer CLAUDE.md
+  agent_selected gemini && write_pointer GEMINI.md
+  ok "entrypoint pointers written (AGENTS.md + selected agents)"
 
   # ── 5. Claude Code sub-agent shims + /sdd-next (regenerated each run) ────────
+  # Gated on selection (R3/R4): the Claude glue is stamped only when `claude` is in
+  # SELECTED. The OpenCode mirror in §5b copies from these files, so it is gated on
+  # `opencode` independently and re-derives the command bodies if Claude is skipped.
+  if agent_selected claude; then
   mkdir -p "$TARGET/.claude/agents" "$TARGET/.claude/commands"
   emit_agent() { # emit_agent <name> <tools> <description>
     cat > "$TARGET/.claude/agents/$1.md" <<EOF
@@ -468,8 +704,14 @@ EOF
     "The Evaluator. Verifies against the spec, runs tests, approves or rejects."
   emit_agent scout "Read, Grep, Glob, Bash" \
     "Read-only codebase reconnaissance. Writes findings to progress/."
+  ok "Claude Code sub-agent shims installed (.claude/agents/)"
+  fi  # end: claude-gated sub-agent shims
 
-  cat > "$TARGET/.claude/commands/sdd-next.md" <<'EOF'
+  # ── slash-command bodies (generated once into a temp dir, then mirrored to the
+  # selected front-ends' command dirs). Generating into a neutral CMDDIR lets the
+  # OpenCode mirror (§5b) work even when `claude` is NOT selected (R3/R4). ─────────
+  CMDDIR="$(mktemp -d 2>/dev/null || mktemp -d -t harness-cmd)"
+  cat > "$CMDDIR/sdd-next.md" <<'EOF'
 ---
 description: Run the Orchestrator loop on the next actionable task (init → route → delegate)
 ---
@@ -487,10 +729,10 @@ relative paths against `.harness/`.
    - `in-review` → spawn **reviewer**; approve → `done`, reject → back to `in-progress`.
 4. Append what happened to `.harness/progress/history.md`.
 
-$ARGUMENTS may name a specific feature id (e.g. `E02-F01`); if given, operate on it.
+$ARGUMENTS may name a specific feature id (e.g. `E01-F01`); if given, operate on it.
 EOF
 
-  cat > "$TARGET/.claude/commands/sdd-new.md" <<'EOF'
+  cat > "$CMDDIR/sdd-new.md" <<'EOF'
 ---
 description: Seed a new idea into the TaskStore as Inception (interactive intake → pending entry + inbox brief)
 ---
@@ -546,7 +788,7 @@ The free-text idea is in `$ARGUMENTS`. If it is empty, ask the human for it.
    Inception seeds, never specs, and never moves a feature past `pending`.
 EOF
 
-  cat > "$TARGET/.claude/commands/sdd-plan.md" <<'EOF'
+  cat > "$CMDDIR/sdd-plan.md" <<'EOF'
 ---
 description: Whole-project inception as Planner — produce vision + architecture + ADRs and seed a block of draft epics (interactive)
 ---
@@ -594,7 +836,7 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    spec, and do NOT advance any epic past `draft` — the Planner produces, never specs.
 EOF
 
-  cat > "$TARGET/.claude/commands/sdd-drill.md" <<'EOF'
+  cat > "$CMDDIR/sdd-drill.md" <<'EOF'
 ---
 description: Per-epic drill-down as Driller — decompose one draft epic into features + ADR deltas, then one epic-level approval (interactive)
 ---
@@ -648,7 +890,7 @@ an arbitrary epic.
     and advance ONLY the target epic to `planned` — the Driller decomposes, never specs.
 EOF
 
-  cat > "$TARGET/.claude/commands/sdd-fix.md" <<'EOF'
+  cat > "$CMDDIR/sdd-fix.md" <<'EOF'
 ---
 description: Lightweight fix lane as Fixer — seed an sdd:false fix under the reserved maintenance epic (brief only, no spec/drill) and hand it to the existing Builder → Reviewer loop (interactive)
 ---
@@ -697,39 +939,94 @@ The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, 
    directory / Architect was created or spawned, and that the fix was handed off to the
    existing `sdd: false` loop in-session.
 EOF
-  ok "Claude Code agents + /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix installed (.claude/)"
+  # Mirror the generated command bodies into the SELECTED front-ends. Claude Code
+  # reads .claude/commands/ (gated on `claude`, R3/R4); OpenCode reads
+  # .opencode/command/ (gated on `opencode`, R3/R4). Both copy from the same CMDDIR,
+  # so OpenCode commands appear even when `claude` is deselected.
+  if agent_selected claude; then
+    mkdir -p "$TARGET/.claude/commands"
+    for _c in $HARNESS_SDD_CMDS; do
+      cp "$CMDDIR/$_c.md" "$TARGET/.claude/commands/$_c.md"
+    done
+    ok "Claude Code commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix installed (.claude/)"
+  fi
 
-  # ── 5b. OpenCode commands (regenerated each run) ────────────────────────────
-  # Claude Code reads .claude/commands/; OpenCode reads .opencode/command/. Mirror
-  # the just-written command bodies there so /sdd-next, /sdd-new, /sdd-plan,
-  # /sdd-drill and /sdd-fix show up in OpenCode too. With no `agent:` frontmatter the command runs
-  # under the primary agent, which is the orchestrator in the opencode.json below.
-  mkdir -p "$TARGET/.opencode/command"
-  cp "$TARGET/.claude/commands/sdd-next.md"  "$TARGET/.opencode/command/sdd-next.md"
-  cp "$TARGET/.claude/commands/sdd-new.md"   "$TARGET/.opencode/command/sdd-new.md"
-  cp "$TARGET/.claude/commands/sdd-plan.md"  "$TARGET/.opencode/command/sdd-plan.md"
-  cp "$TARGET/.claude/commands/sdd-drill.md" "$TARGET/.opencode/command/sdd-drill.md"
-  cp "$TARGET/.claude/commands/sdd-fix.md"   "$TARGET/.opencode/command/sdd-fix.md"
-  ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix installed (.opencode/)"
+  # ── 5b. OpenCode commands (regenerated each run, gated on `opencode`) ────────
+  # With no `agent:` frontmatter the command runs under the primary agent, which is
+  # the orchestrator in the opencode.json below.
+  if agent_selected opencode; then
+    mkdir -p "$TARGET/.opencode/command"
+    for _c in $HARNESS_SDD_CMDS; do
+      cp "$CMDDIR/$_c.md" "$TARGET/.opencode/command/$_c.md"
+    done
+    ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix installed (.opencode/)"
+  fi
 
-  # ── 6. opencode.json (create if absent; never clobber an existing one) ──────
-  if [ ! -f "$TARGET/opencode.json" ]; then
-    cat > "$TARGET/opencode.json" <<'EOF'
-{
-  "$schema": "https://opencode.ai/config.json",
-  "instructions": [".harness/AGENTS.md"],
-  "agent": {
-    "orchestrator": { "mode": "primary",  "description": "The Leader: routes the next task, delegates. Never writes code.", "prompt": "{file:./.harness/agents/orchestrator.md}" },
-    "architect":    { "mode": "subagent", "description": "Spec Author: writes the 4-file spec (EARS).",                     "prompt": "{file:./.harness/agents/architect.md}" },
-    "builder":      { "mode": "subagent", "description": "Implementer: writes code from an approved spec.",                 "prompt": "{file:./.harness/agents/builder.md}" },
-    "reviewer":     { "mode": "subagent", "description": "Evaluator: verifies against the spec, runs tests.",               "prompt": "{file:./.harness/agents/reviewer.md}" },
-    "scout":        { "mode": "subagent", "description": "Read-only recon; writes findings to progress/.",                  "prompt": "{file:./.harness/agents/scout.md}" }
-  }
-}
-EOF
+  rm -rf "$CMDDIR"
+
+  # ── 6. opencode.json (gated on `opencode`; create if absent; never clobber) ──
+  if agent_selected opencode && [ ! -f "$TARGET/opencode.json" ]; then
+    gen_opencode_json "$TARGET/opencode.json"
     ok "opencode.json created"
-  else
+  elif agent_selected opencode; then
     info "opencode.json exists — left untouched (point it at .harness/ manually if you use OpenCode)"
+  fi
+
+  # ── 7. selection persistence + add/remove reconciliation (E08-F01) ───────────
+  # Persist the resolved selection beside .harness-version as harness-owned metadata
+  # (one sorted key per line, overwritten every run) (R8).
+  printf '%s\n' "$SELECTED" > "$H/.agents"
+
+  # Reconcile removals (R12 adds are handled by the gated stamps above): for any key
+  # in the PRIOR persisted set but NOT in SELECTED, delete that agent's harness-owned,
+  # regenerated glue and warn, naming each removed path. NEVER touch AGENTS.md or the
+  # .harness/ body (R13). Scoped to the registry-owned paths only.
+  if [ -n "$PRIOR_AGENTS" ]; then
+    printf '%s\n' "$PRIOR_AGENTS" | while IFS= read -r _rk; do
+      [ -n "$_rk" ] || continue
+      agent_selected "$_rk" && continue   # still selected → keep
+      case "$_rk" in
+        claude)
+          remove_pointer CLAUDE.md
+          remove_owned .claude/agents   claude $HARNESS_CLAUDE_SHIMS
+          remove_owned .claude/commands claude $HARNESS_SDD_CMDS
+          rmdir "$TARGET/.claude" 2>/dev/null || true   # prune parent only if now empty
+          ;;
+        gemini)
+          remove_pointer GEMINI.md
+          echo "⚠️  removed deselected agent 'gemini' glue: GEMINI.md harness block" >&2
+          ;;
+        opencode)
+          remove_owned .opencode/command opencode $HARNESS_SDD_CMDS
+          rmdir "$TARGET/.opencode" 2>/dev/null || true   # prune parent only if now empty
+          # opencode.json: delete ONLY a file byte-identical to what the installer
+          # generates (a pristine, untouched stamp). ANY user edit — even adding a
+          # `model`/providers key to the generated file — makes it differ, so it is
+          # left in place with a warning. This is precise where the old substring
+          # heuristic was too broad and could delete edited config. (Codex r4 P2)
+          if [ -f "$TARGET/opencode.json" ]; then
+            _ref="$(mktemp 2>/dev/null || mktemp -t harness-oc)"
+            gen_opencode_json "$_ref"
+            if cmp -s "$TARGET/opencode.json" "$_ref"; then
+              rm -f "$TARGET/opencode.json"
+              echo "⚠️  removed deselected agent 'opencode' glue: opencode.json (pristine generated)" >&2
+            else
+              echo "⚠️  opencode.json differs from the generated stamp (edited) — left in place (deselected 'opencode' not removed)" >&2
+            fi
+            rm -f "$_ref"
+          fi
+          ;;
+        antigravity)
+          # The antigravity stamp is a no-op placeholder until E07-F01 supplies the
+          # `.agent/` tree, so the harness currently OWNS no files there. Deselection
+          # must therefore be a no-op too: never `rm -rf` a user-authored `.agent/`
+          # dir (which may hold their own config, or — post-E07 — non-harness files).
+          # When E07-F01 lands it adds scoped removal of its known `.agent/` paths,
+          # mirroring remove_owned for Claude/OpenCode. (Codex r3 P1 #3400997183)
+          : # intentional no-op
+          ;;
+      esac
+    done
   fi
 
   # ── done ────────────────────────────────────────────────────────────────────
@@ -797,8 +1094,23 @@ RECURSIVE=0
 DRY_RUN=0
 SHARED_REPO=0
 POSITIONAL=""
+# Agent selection override (E08-F01): --agents=<csv> wins over HARNESS_AGENTS, which
+# wins over the interactive prompt / no-TTY ALL default. Seed from the environment so
+# `--agents` (parsed below) can supersede it; an empty value means "no override".
+AGENTS_OVERRIDE="${HARNESS_AGENTS:-}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --agents=*)
+      # Explicit override; an empty value (`--agents=`) is treated as "no override"
+      # (fall through to the prompt / ALL default), matching HARNESS_AGENTS="".
+      AGENTS_OVERRIDE="${1#--agents=}"
+      shift
+      ;;
+    --agents)
+      [ "$#" -ge 2 ] || die "usage: $0 --agents=<csv> (e.g. --agents=claude,opencode)"
+      AGENTS_OVERRIDE="$2"
+      shift 2
+      ;;
     --umbrella)
       [ "$#" -ge 2 ] || die "usage: $0 --umbrella <umbrella-dir> [--shared-repo] [--recursive] [--dry-run]"
       UMBRELLA="$2"

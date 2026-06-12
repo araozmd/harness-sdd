@@ -11,18 +11,18 @@ specs/
   product.md                         # Layer 0 — constitution: vision, audience,
   glossary.md                        #            domain model, AI features (stable)
   epics/
-    E01-dashboard/
+    E01-example/
       epic.md                        # business brief + feature index + status rollup
-      F01-overview-widgets/
-        overview-widgets.spec.md     # Business / Functional  (EARS acceptance criteria)
-        overview-widgets.plan.md     # Technical / Architecture
-        overview-widgets.tasks.md    # Atomic task checklist
-        overview-widgets.tests.md    # Contract: R-id → verifying test
+      F01-example-feature/
+        example-feature.spec.md      # Business / Functional  (EARS acceptance criteria)
+        example-feature.plan.md      # Technical / Architecture
+        example-feature.tasks.md     # Atomic task checklist
+        example-feature.tests.md     # Contract: R-id → verifying test
 ```
 
 - **Product** = the stable constitution. High-level on purpose — granular detail
   here cascades errors downstream.
-- **Epic** = a shippable area of product value (e.g. *Dashboard*, *Handoff*). Holds
+- **Epic** = a shippable area of product value (e.g. *Onboarding*, *Settings*). Holds
   one or more features and a status rollup.
 - **Feature** = one unit the Builder can implement in a single sprint. It owns the
   four spec files below.
@@ -53,11 +53,11 @@ test**. The five patterns:
 
 | Pattern | Template | Example |
 |---|---|---|
-| **Ubiquitous** | The `<system>` shall `<response>`. | The dashboard shall display the user's display name. |
-| **Event-driven** | **When** `<trigger>`, the `<system>` shall `<response>`. | When the user clicks "Take over", the system shall assign the conversation to that agent. |
-| **State-driven** | **While** `<state>`, the `<system>` shall `<response>`. | While a conversation is bot-handled, the system shall show a "Bot active" badge. |
-| **Unwanted** | **If** `<condition>`, **then** the `<system>` shall `<response>`. | If the handoff API returns 5xx, then the system shall show a retry banner and keep the message queued. |
-| **Optional** | **Where** `<feature>`, the `<system>` shall `<response>`. | Where analytics is enabled, the system shall log a `handoff_started` event. |
+| **Ubiquitous** | The `<system>` shall `<response>`. | The profile page shall display the user's display name. |
+| **Event-driven** | **When** `<trigger>`, the `<system>` shall `<response>`. | When the user clicks "Save", the system shall persist the form. |
+| **State-driven** | **While** `<state>`, the `<system>` shall `<response>`. | While a record is syncing, the system shall show a "Syncing" badge. |
+| **Unwanted** | **If** `<condition>`, **then** the `<system>` shall `<response>`. | If the save API returns 5xx, then the system shall show a retry banner and keep the edit queued. |
+| **Optional** | **Where** `<feature>`, the `<system>` shall `<response>`. | Where analytics is enabled, the system shall log a `record_saved` event. |
 
 Patterns can be combined: *When `<trigger>`, while `<state>`, the `<system>` shall
 `<response>`.*
@@ -103,8 +103,8 @@ cheaply (and so the `obsidian` store gets graph/backlink support for free):
 ```yaml
 ---
 id: E01-F01
-title: Overview widgets
-epic: E01-dashboard
+title: Example feature
+epic: E01-example
 status: pending          # pending → spec-ready → in-progress → in-review → done
 sdd: true                # false = skip full SDD (quick task, Builder direct)
 autonomous: false        # true = may bypass the human approval gate

@@ -36,5 +36,4 @@ visibility and control over what the bots are doing.
 ## Epics
 | id | title | status |
 |---|---|---|
-| E01 | Dashboard | pending |
-| E02 | Handoff | pending |
+| _none yet_ | replace with your project's epics | — |

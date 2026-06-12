@@ -4,6 +4,40 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.21.0] — 2026-06-11
+
+### Added — ✨ Selectable agent targets (interactive selection + re-prompt on update)
+- **Declarative agent registry (`harness-install.sh`)** — the four selectable coding-agent
+  front-ends (`claude`, `gemini`, `opencode`, `antigravity`) are modeled as a small registry
+  (`AGENT_KEYS`); each EXISTING per-agent stamp block is now **gated** on selection rather than
+  always running. The shared portable entrypoint `AGENTS.md` is never gated — it is always
+  written and never removed.
+- **Interactive selection (zero new deps)** — on an interactive TTY with no override, the
+  installer presents a pure-`read` numbered toggle list pre-checked from the saved selection
+  (or ALL on a fresh install) and stamps only the chosen agents.
+- **Non-interactive override + back-compat** — `--agents=<csv>` / `HARNESS_AGENTS=<csv>` resolve
+  the set without prompting (the override always wins; an unknown key aborts non-zero, naming the
+  token, with no changes). No-TTY + no override still stamps **ALL** agents, preserving the
+  historical behavior so existing CI is unchanged.
+- **Persistence + re-prompt-on-update** — the resolved set is persisted to `.harness/.agents`
+  (one sorted key per line; dot-prefixed to avoid colliding with the `.harness/agents/` role-bodies
+  dir), beside `.harness/.harness-version`. Every re-run re-resolves and reconciles **decoupled
+  from VERSION/upgrade detection**: an **added** agent is stamped, a **deselected** agent's
+  harness-owned regenerated glue is deleted — **scoped to the specific generated files**
+  (its pointer block, the `orchestrator/architect/builder/reviewer/scout` shims, the `sdd-*`
+  commands, a generated `opencode.json`); user-authored files sharing `.claude/`/`.opencode/`
+  are preserved and those dirs are pruned only when left empty. `opencode.json` is removed only
+  when **byte-identical** to the generated stamp — any user edit (e.g. an added `model`/providers
+  key) leaves it in place with a warning — and each removed path is warned about. `AGENTS.md` and the
+  `.harness/` body are never removed. Deselecting `antigravity` is a **no-op** while its stamp
+  is a placeholder (E07-F01), so a user-authored `.agent/` directory is never deleted.
+  An existing install with **no** persisted `.harness/.agents` (a pre-0.21 install that stamped
+  all front-ends) is treated as the **all-agents baseline**, so the first selective upgrade can
+  actually remove the now-deselected glue instead of leaving it stale.
+- **Docs + tests** — `tests/test_install.sh` gains an assertion group covering R1–R15 (selected-only
+  stamping, no-TTY ALL default, explicit override + precedence, unknown-key rejection, persistence
+  round-trip, an add+remove re-run at the same VERSION, and the legacy-upgrade baseline removal).
+
 ## [0.20.0] — 2026-06-11
 
 ### Added — ✨ Drift check on epic rollup (Scout re-validates remaining draft/planned epics)
