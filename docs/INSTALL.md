@@ -19,6 +19,7 @@ your-project/
 ├── CLAUDE.md / AGENTS.md / GEMINI.md   # your content kept; a marked harness block appended
 ├── .claude/agents/*  .claude/commands/{sdd-next,sdd-new}.md   # Claude Code glue → resolves to .harness/
 ├── opencode.json                       # created only if absent
+├── .agents/{rules,agents,workflows}/   # Antigravity glue → resolves to .harness/ (regenerated each run)
 └── .harness/                           # the whole harness body
     ├── .harness-version  manifest.txt
     ├── AGENTS.md agents/ docs/ store/ tools/ specs/_templates/ init.sh harness.config.yaml

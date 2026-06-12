@@ -6,7 +6,7 @@ The model is the engine (or the horse); the harness is the chassis (or the reins
 
 **The core bet:** *models change every few months; your harness does not.* Build on
 files you own and you can swap the brain — Claude today, Gemini or a local model
-tomorrow — and swap the CLI — Claude Code, Codex, Gemini CLI, OpenCode — without
+tomorrow — and swap the CLI — Claude Code, Codex, Gemini CLI, OpenCode, Antigravity — without
 rewriting your system. That portability is the whole point of using `AGENTS.md` and
 plain files instead of a vendor wrapper.
 

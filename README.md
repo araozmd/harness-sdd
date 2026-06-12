@@ -1,8 +1,9 @@
 # harness-sdd
 
 A portable **agent harness** for **Spec-Driven Development**. It runs primarily on
-**Claude Code** and is portable to **Codex**, **Gemini CLI**, and **OpenCode** —
-because the harness is just files in the repo, and the model/CLI is interchangeable.
+**Claude Code** and is portable to **Codex**, **Gemini CLI**, **OpenCode**, and
+**Antigravity** — because the harness is just files in the repo, and the model/CLI is
+interchangeable.
 
 > The model is the engine; the harness is the chassis. Models change every few
 > months — your harness doesn't. See `docs/HARNESS.md`.
@@ -65,6 +66,7 @@ approves) → `builder` → `reviewer`.
 | **Codex** | `AGENTS.md` (native) | run roles sequentially; hand off via files |
 | **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
 | **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*` (`/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next`) |
+| **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/agents/*` personas + `.agents/workflows/*` slash commands (`/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next`) |
 
 The harness body — `AGENTS.md`, `agents/`, `specs/`, `progress/`, `init.sh`, the
 stores — is **identical** across all of them. Only the entry filename and the
@@ -198,6 +200,7 @@ umbrella.manifest.example.yaml   cross-repo coordinator manifest template
 umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
 .opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
+.agents/                     Antigravity glue — rules + agent personas + workflows (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
 ```
 
 ## Installing into an existing project
@@ -219,7 +222,9 @@ terminal the installer shows a checkbox-style toggle list — `claude`, `gemini`
 `.harness/.agents`, so **every re-run re-prompts with your current selection
 pre-checked** — add or drop an agent any time, even when the harness version hasn't
 changed. Deselecting an agent removes only the harness-generated glue (your own
-`.claude/`/`.opencode/` files and a hand-edited `opencode.json` are left untouched).
+`.claude/`/`.opencode/`/`.agents/` files and a hand-edited `opencode.json` are left
+untouched — Antigravity glue is removed only when byte-identical to a freshly generated
+stamp, never your edited files).
 
 ```bash
 # Non-interactive / CI — pick explicitly (no prompt):

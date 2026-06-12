@@ -2,7 +2,7 @@
 
 This is the standard every spec in this harness follows. It is deliberately
 CLI-agnostic and model-agnostic: the same files drive Claude Code, Codex, Gemini
-CLI or OpenCode. Specs are also the project's **living documentation**.
+CLI, OpenCode or Antigravity. Specs are also the project's **living documentation**.
 
 ## The hierarchy: Product → Epic → Feature
 
