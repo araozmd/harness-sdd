@@ -636,14 +636,32 @@ $MARK_END"
   # non-empty). This keeps removal scoped to harness-owned glue so a selective re-run
   # never deletes unrelated project/user config. (R13; Codex r2 P1)
   remove_owned() {
-    _dir="$TARGET/$1"; _label="$2"; shift 2
+    _rel="$1"; _dir="$TARGET/$1"; _label="$2"; shift 2
     [ -d "$_dir" ] || return 0
     _removed=''
     for _b in "$@"; do
       if [ -f "$_dir/$_b.md" ]; then rm -f "$_dir/$_b.md"; _removed="$_removed $_b.md"; fi
     done
-    [ -n "$_removed" ] && echo "⚠️  removed deselected agent '$_label' glue:$_removed (in $1/)" >&2
-    rmdir "$_dir" 2>/dev/null || { [ -n "$_removed" ] && echo "ℹ️  kept $1/ — contains non-harness files" >&2; }
+    [ -n "$_removed" ] && echo "⚠️  removed deselected agent '$_label' glue:$_removed (in $_rel/)" >&2
+    rmdir "$_dir" 2>/dev/null || { [ -n "$_removed" ] && echo "ℹ️  kept $_rel/ — contains non-harness files" >&2; }
+  }
+  # gen_opencode_json <dest> — write the canonical generated opencode.json to <dest>.
+  # Single source of truth for both the stamp (§6) and the deselect byte-comparison,
+  # so removal deletes ONLY a pristine generated file and never a user-edited one.
+  gen_opencode_json() {
+    cat > "$1" <<'EOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [".harness/AGENTS.md"],
+  "agent": {
+    "orchestrator": { "mode": "primary",  "description": "The Leader: routes the next task, delegates. Never writes code.", "prompt": "{file:./.harness/agents/orchestrator.md}" },
+    "architect":    { "mode": "subagent", "description": "Spec Author: writes the 4-file spec (EARS).",                     "prompt": "{file:./.harness/agents/architect.md}" },
+    "builder":      { "mode": "subagent", "description": "Implementer: writes code from an approved spec.",                 "prompt": "{file:./.harness/agents/builder.md}" },
+    "reviewer":     { "mode": "subagent", "description": "Evaluator: verifies against the spec, runs tests.",               "prompt": "{file:./.harness/agents/reviewer.md}" },
+    "scout":        { "mode": "subagent", "description": "Read-only recon; writes findings to progress/.",                  "prompt": "{file:./.harness/agents/scout.md}" }
+  }
+}
+EOF
   }
 
   # AGENTS.md is the shared portable entrypoint — ALWAYS written, never gated (R2 note).
@@ -948,19 +966,7 @@ EOF
 
   # ── 6. opencode.json (gated on `opencode`; create if absent; never clobber) ──
   if agent_selected opencode && [ ! -f "$TARGET/opencode.json" ]; then
-    cat > "$TARGET/opencode.json" <<'EOF'
-{
-  "$schema": "https://opencode.ai/config.json",
-  "instructions": [".harness/AGENTS.md"],
-  "agent": {
-    "orchestrator": { "mode": "primary",  "description": "The Leader: routes the next task, delegates. Never writes code.", "prompt": "{file:./.harness/agents/orchestrator.md}" },
-    "architect":    { "mode": "subagent", "description": "Spec Author: writes the 4-file spec (EARS).",                     "prompt": "{file:./.harness/agents/architect.md}" },
-    "builder":      { "mode": "subagent", "description": "Implementer: writes code from an approved spec.",                 "prompt": "{file:./.harness/agents/builder.md}" },
-    "reviewer":     { "mode": "subagent", "description": "Evaluator: verifies against the spec, runs tests.",               "prompt": "{file:./.harness/agents/reviewer.md}" },
-    "scout":        { "mode": "subagent", "description": "Read-only recon; writes findings to progress/.",                  "prompt": "{file:./.harness/agents/scout.md}" }
-  }
-}
-EOF
+    gen_opencode_json "$TARGET/opencode.json"
     ok "opencode.json created"
   elif agent_selected opencode; then
     info "opencode.json exists — left untouched (point it at .harness/ manually if you use OpenCode)"
@@ -993,16 +999,21 @@ EOF
         opencode)
           remove_owned .opencode/command opencode $HARNESS_SDD_CMDS
           rmdir "$TARGET/.opencode" 2>/dev/null || true   # prune parent only if now empty
-          # opencode.json: delete ONLY a file the installer generated (detected by its
-          # generated schema URL); a hand-edited file is left in place with a warning.
+          # opencode.json: delete ONLY a file byte-identical to what the installer
+          # generates (a pristine, untouched stamp). ANY user edit — even adding a
+          # `model`/providers key to the generated file — makes it differ, so it is
+          # left in place with a warning. This is precise where the old substring
+          # heuristic was too broad and could delete edited config. (Codex r4 P2)
           if [ -f "$TARGET/opencode.json" ]; then
-            if grep -qF 'https://opencode.ai/config.json' "$TARGET/opencode.json" \
-               && grep -qF '{file:./.harness/agents/orchestrator.md}' "$TARGET/opencode.json"; then
+            _ref="$(mktemp 2>/dev/null || mktemp -t harness-oc)"
+            gen_opencode_json "$_ref"
+            if cmp -s "$TARGET/opencode.json" "$_ref"; then
               rm -f "$TARGET/opencode.json"
-              echo "⚠️  removed deselected agent 'opencode' glue: opencode.json (generated)" >&2
+              echo "⚠️  removed deselected agent 'opencode' glue: opencode.json (pristine generated)" >&2
             else
-              echo "⚠️  opencode.json looks hand-edited — left in place (deselected 'opencode' not removed)" >&2
+              echo "⚠️  opencode.json differs from the generated stamp (edited) — left in place (deselected 'opencode' not removed)" >&2
             fi
+            rm -f "$_ref"
           fi
           ;;
         antigravity)

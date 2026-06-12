@@ -26,8 +26,9 @@ All notable changes to the harness body are recorded here. Versions follow
   harness-owned regenerated glue is deleted — **scoped to the specific generated files**
   (its pointer block, the `orchestrator/architect/builder/reviewer/scout` shims, the `sdd-*`
   commands, a generated `opencode.json`); user-authored files sharing `.claude/`/`.opencode/`
-  are preserved and those dirs are pruned only when left empty. A hand-edited `opencode.json`
-  is left in place with a warning, and each removed path is warned about. `AGENTS.md` and the
+  are preserved and those dirs are pruned only when left empty. `opencode.json` is removed only
+  when **byte-identical** to the generated stamp — any user edit (e.g. an added `model`/providers
+  key) leaves it in place with a warning — and each removed path is warned about. `AGENTS.md` and the
   `.harness/` body are never removed. Deselecting `antigravity` is a **no-op** while its stamp
   is a placeholder (E07-F01), so a user-authored `.agent/` directory is never deleted.
   An existing install with **no** persisted `.harness/.agents` (a pre-0.21 install that stamped

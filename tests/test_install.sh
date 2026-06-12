@@ -352,4 +352,24 @@ sh "$SRC/harness-install.sh" --agents=claude "$TP" >/dev/null 2>&1 || fail "anti
 rm -rf "$TP"
 pass "antigravity deselect is a no-op, never deletes a user-authored .agent/ (Codex r3 P1)"
 
+# opencode_json_removal_is_byte_exact (R13, Codex r4 P2 #3401025100): on opencode
+# deselect, a PRISTINE generated opencode.json is removed, but one the user edited
+# (e.g. added a "model" key to the generated file) is preserved.
+TQ="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=opencode "$TQ" >/dev/null || fail "oc-exact setup1 failed"
+[ -f "$TQ/opencode.json" ] || fail "oc-exact setup: generated opencode.json missing"
+sh "$SRC/harness-install.sh" --agents=claude "$TQ" >/dev/null 2>&1 || fail "oc-exact rerun1 failed"
+[ -f "$TQ/opencode.json" ] && fail "Codex r4 P2: pristine generated opencode.json must be removed on deselect"
+# now the edited-file case: regenerate, then a user adds project settings to it
+sh "$SRC/harness-install.sh" --agents=opencode "$TQ" >/dev/null || fail "oc-exact setup2 failed"
+# insert a user "model" line after the schema line (started from the generated file)
+awk 'NR==2{print "  \"model\": \"anthropic/claude\","} {print}' "$TQ/opencode.json" > "$TQ/opencode.json.tmp" \
+  && mv "$TQ/opencode.json.tmp" "$TQ/opencode.json"
+grep -q '"model"' "$TQ/opencode.json" || fail "oc-exact setup: user edit not applied"
+sh "$SRC/harness-install.sh" --agents=claude "$TQ" >/dev/null 2>&1 || fail "oc-exact rerun2 failed"
+[ -f "$TQ/opencode.json" ] || fail "Codex r4 P2: user-edited opencode.json was wrongly deleted on deselect"
+grep -q '"model"' "$TQ/opencode.json" || fail "Codex r4 P2: user-edited opencode.json content not preserved"
+rm -rf "$TQ"
+pass "opencode.json deselect deletes only a byte-pristine generated file, keeps edits (Codex r4 P2)"
+
 echo "All install tests passed."
