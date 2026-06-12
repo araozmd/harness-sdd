@@ -665,6 +665,90 @@ $MARK_END"
 EOF
   }
 
+  # ── Antigravity .agent/ glue generators — single source of truth ─────────────
+  # These are hoisted out of §5c so BOTH the install stamp (§5c) and the deselect
+  # byte-compare (§7) call the exact same emitters. The deselect path removes an
+  # `.agent/` file ONLY when it is byte-identical to a freshly-generated stamp
+  # (pristine), never delete-by-name — so a user's own `.agent/agents/builder.md`
+  # (or any standard-named persona/workflow they authored) is preserved. Mirrors
+  # the opencode.json `cmp -s` "pristine generated" vs "differs — left in place"
+  # contract above. (Codex r2 P1 #3404240336.)
+
+  # gen_ag_rule <dest> — write the canonical .agent/rules/harness.md entrypoint rule.
+  gen_ag_rule() {
+    cat > "$1" <<'EOF'
+---
+description: SDD harness entrypoint — boot as the Orchestrator against .harness/.
+---
+
+This workspace uses the portable **SDD agent harness** installed in `.harness/`.
+Antigravity does not auto-load `AGENTS.md`, so this rule loads the harness for you.
+
+- **Source of truth:** `.harness/AGENTS.md` — read it and resolve every relative
+  path it mentions against `.harness/` (config, `agents/`, `specs/`, `state/`,
+  `store/`, `docs/`, `progress/`).
+- **Start every session as the Orchestrator:** `.harness/agents/orchestrator.md`.
+- **Before any work:** run `.harness/init.sh`. If it exits non-zero, STOP.
+- **Working model (R12):** Antigravity drives the harness through the `.agent/agents/`
+  personas and the `description`-gated `.agent/workflows/` slash commands, with
+  `.harness/progress/` files as the hand-off / isolation boundary — not a Task-tool
+  -style isolated spawn. Hand off through `.harness/progress/`, never by forwarding
+  chat history.
+
+The role files in `.agent/agents/` and the workflows in `.agent/workflows/` are thin
+pointers at the canonical `.harness/agents/*.md` roles — they do not duplicate them.
+EOF
+  }
+
+  # gen_ag_persona <role> <description> <dest> — write one .agent/agents/<role>.md.
+  gen_ag_persona() {
+    _agp_role="$1"; _agp_desc="$2"; _agp_dest="$3"
+    cat > "$_agp_dest" <<EOF
+---
+description: $_agp_desc
+---
+
+You are the **$_agp_role** for this project's agent harness (installed in \`.harness/\`).
+
+Your full, canonical role definition is \`.harness/agents/$_agp_role.md\` — read it now and
+follow it exactly. Resolve every relative path it mentions against \`.harness/\`
+(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
+\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on its
+non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
+chat history.
+EOF
+  }
+
+  # ag_personas — emit the role→description mapping ONE place, reused by the §5c
+  # install loop and the §7 deselect compare so they can never diverge. Each line is
+  # `<role>\t<description>`; callers read it field-by-field.
+  ag_personas() {
+    cat <<'EOF'
+orchestrator	The Leader. Reads state, runs init.sh, routes the next task, delegates to architect/builder/reviewer/scout. Never writes code.
+architect	The Spec Author. Writes the 4-file spec in EARS. No production code.
+builder	The Implementer. Writes code from an APPROVED spec, one task at a time.
+reviewer	The Evaluator. Verifies against the spec, runs tests, approves or rejects.
+scout	Read-only codebase reconnaissance. Writes findings to progress/.
+EOF
+  }
+
+  # remove_if_pristine <rel-path> <ref-file> <agent-label> — delete <TARGET>/<rel-path>
+  # ONLY when it is byte-identical to <ref-file> (a freshly-generated stamp). If it
+  # differs (user-edited or foreign), LEAVE it in place with a notice — exactly
+  # mirroring the opencode.json case. Echoes the removed relpath on stdout (so the
+  # caller can summarize) and prints user-facing notices to stderr.
+  remove_if_pristine() {
+    _rip_rel="$1"; _rip_ref="$2"; _rip_label="$3"
+    _rip_f="$TARGET/$_rip_rel"
+    [ -f "$_rip_f" ] || return 0
+    if cmp -s "$_rip_f" "$_rip_ref"; then
+      rm -f "$_rip_f"
+      printf '%s\n' "$_rip_rel"
+    else
+      echo "⚠️  $_rip_rel differs from the generated stamp (edited) — left in place (deselected '$_rip_label' not removed)" >&2
+    fi
+  }
+
   # AGENTS.md is the shared portable entrypoint — ALWAYS written, never gated (R2 note).
   write_pointer AGENTS.md
   # Per-agent entrypoint pointers are gated on selection (R2/R3/R4).
@@ -982,59 +1066,18 @@ EOF
 
     # Entrypoint rule (R2/R3): points the agent at the source of truth + entry role;
     # mandates init.sh first. No copied role body — references by .harness/ path only.
-    cat > "$TARGET/.agent/rules/harness.md" <<'EOF'
----
-description: SDD harness entrypoint — boot as the Orchestrator against .harness/.
----
-
-This workspace uses the portable **SDD agent harness** installed in `.harness/`.
-Antigravity does not auto-load `AGENTS.md`, so this rule loads the harness for you.
-
-- **Source of truth:** `.harness/AGENTS.md` — read it and resolve every relative
-  path it mentions against `.harness/` (config, `agents/`, `specs/`, `state/`,
-  `store/`, `docs/`, `progress/`).
-- **Start every session as the Orchestrator:** `.harness/agents/orchestrator.md`.
-- **Before any work:** run `.harness/init.sh`. If it exits non-zero, STOP.
-- **Working model (R12):** Antigravity drives the harness through the `.agent/agents/`
-  personas and the `description`-gated `.agent/workflows/` slash commands, with
-  `.harness/progress/` files as the hand-off / isolation boundary — not a Task-tool
-  -style isolated spawn. Hand off through `.harness/progress/`, never by forwarding
-  chat history.
-
-The role files in `.agent/agents/` and the workflows in `.agent/workflows/` are thin
-pointers at the canonical `.harness/agents/*.md` roles — they do not duplicate them.
-EOF
+    # Body lives in gen_ag_rule (hoisted) so the §7 deselect compare can reproduce it.
+    gen_ag_rule "$TARGET/.agent/rules/harness.md"
 
     # Personas (R4/R5): one per harness role, each with a `description` (so Antigravity
     # registers the persona) + a body that DEFERS to the canonical .harness/agents/<role>.md,
     # mandates init.sh-first + halt-on-fail, and hands off via .harness/progress/. No copied
-    # role body. Descriptions match the .claude/agents emit_agent calls for consistency.
-    emit_ag_agent() { # emit_ag_agent <role> <description>
-      cat > "$TARGET/.agent/agents/$1.md" <<EOF
----
-description: $2
----
-
-You are the **$1** for this project's agent harness (installed in \`.harness/\`).
-
-Your full, canonical role definition is \`.harness/agents/$1.md\` — read it now and
-follow it exactly. Resolve every relative path it mentions against \`.harness/\`
-(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
-\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on its
-non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
-chat history.
-EOF
-    }
-    emit_ag_agent orchestrator \
-      "The Leader. Reads state, runs init.sh, routes the next task, delegates to architect/builder/reviewer/scout. Never writes code."
-    emit_ag_agent architect \
-      "The Spec Author. Writes the 4-file spec in EARS. No production code."
-    emit_ag_agent builder \
-      "The Implementer. Writes code from an APPROVED spec, one task at a time."
-    emit_ag_agent reviewer \
-      "The Evaluator. Verifies against the spec, runs tests, approves or rejects."
-    emit_ag_agent scout \
-      "Read-only codebase reconnaissance. Writes findings to progress/."
+    # role body. Descriptions come from ag_personas (the single role→description source,
+    # shared with the §7 deselect compare so the two can never diverge).
+    ag_personas | while IFS='	' read -r _agr _agd; do
+      [ -n "$_agr" ] || continue
+      gen_ag_persona "$_agr" "$_agd" "$TARGET/.agent/agents/$_agr.md"
+    done
 
     # Workflows (R6/R7/R8/R9): COPY the shared command bodies from CMDDIR (mirror, like
     # the OpenCode block — do not re-author). The bodies already begin with their own
@@ -1049,7 +1092,11 @@ EOF
     ok "Antigravity glue (rules + agents + workflows) installed (.agent/)"
   fi
 
-  rm -rf "$CMDDIR"
+  # NOTE: CMDDIR cleanup is intentionally DEFERRED to AFTER §7 — the antigravity
+  # deselect compare byte-checks each `.agent/workflows/<name>.md` against the
+  # source `$CMDDIR/<name>.md`, so the temp workflow bodies must stay available
+  # through the reconciliation loop. CMDDIR is only a temp dir; cleaning it later
+  # is harmless and still unconditional. (Codex r2 P1 #3404240336.)
 
   # ── 6. opencode.json (gated on `opencode`; create if absent; never clobber) ──
   if agent_selected opencode && [ ! -f "$TARGET/opencode.json" ]; then
@@ -1110,16 +1157,39 @@ EOF
           fi
           ;;
         antigravity)
-          # E07-F01: the antigravity stamp (§5c) now OWNS a scoped `.agent/` glue tree
+          # E07-F01: the antigravity stamp (§5c) OWNS a scoped `.agent/` glue tree
           # (rules/harness.md, the role personas, the sdd-* workflows). Deselection
-          # removes ONLY those harness-owned files — mirroring remove_owned for
-          # Claude/OpenCode — and prunes each `.agent/` subdir + the `.agent/` parent
-          # only when left empty, so a user's own `.agent/` config is never deleted
-          # (never `rm -rf` the dir). (Codex r3 P1 #3400997183 stays honored: scoped,
-          # never destructive of non-harness files.)
-          remove_owned .agent/rules     antigravity harness
-          remove_owned .agent/agents    antigravity $HARNESS_CLAUDE_SHIMS
-          remove_owned .agent/workflows antigravity $HARNESS_SDD_CMDS
+          # removes ONLY files byte-identical to a freshly-generated stamp (pristine)
+          # — NOT delete-by-name — so a user's OWN `.agent/agents/builder.md` (or any
+          # standard-named persona/workflow they authored) survives. This mirrors the
+          # opencode.json `cmp -s` contract above and fixes the data-loss case where a
+          # pre-this-version no-op antigravity install left `antigravity` persisted in
+          # `.harness/.agents` while the user authored their own `.agent/` files.
+          # (Codex r2 P1 #3404240336; r3 P1 #3400997183 stays honored — scoped, never
+          # destructive of non-harness files.)
+          _agtmp="$(mktemp 2>/dev/null || mktemp -t harness-ag)"
+          # rule
+          gen_ag_rule "$_agtmp"
+          remove_if_pristine .agent/rules/harness.md "$_agtmp" antigravity
+          # personas — compare each against its freshly-generated body (same source
+          # role→description map as the install loop, so no divergence).
+          ag_personas | while IFS='	' read -r _agr _agd; do
+            [ -n "$_agr" ] || continue
+            gen_ag_persona "$_agr" "$_agd" "$_agtmp"
+            remove_if_pristine ".agent/agents/$_agr.md" "$_agtmp" antigravity
+          done
+          # workflows — the install path `cp`s these verbatim from $CMDDIR, so the
+          # pristine reference is the still-present $CMDDIR/<name>.md source bytes.
+          for _agw in $HARNESS_SDD_CMDS; do
+            [ -f "$CMDDIR/$_agw.md" ] || continue
+            remove_if_pristine ".agent/workflows/$_agw.md" "$CMDDIR/$_agw.md" antigravity
+          done
+          rm -f "$_agtmp"
+          # Prune each now-empty `.agent/` subdir + the parent, only when empty
+          # (never `rm -rf` — preserve any user files left in place above).
+          rmdir "$TARGET/.agent/rules" 2>/dev/null || true
+          rmdir "$TARGET/.agent/agents" 2>/dev/null || true
+          rmdir "$TARGET/.agent/workflows" 2>/dev/null || true
           rmdir "$TARGET/.agent" 2>/dev/null || true   # prune parent only if now empty
           # GEMINI.md is SHARED with gemini (E07-F01 R1/R12). Antigravity owns it as
           # an in-repo entrypoint too, so remove it on antigravity deselection ONLY
@@ -1134,6 +1204,10 @@ EOF
       esac
     done
   fi
+
+  # CMDDIR cleanup (deferred from §5c): the antigravity deselect compare above needs
+  # the temp workflow bodies. Unconditional — always runs regardless of selection.
+  rm -rf "$CMDDIR"
 
   # ── done ────────────────────────────────────────────────────────────────────
   echo "──────────────────────────────────────────────────"

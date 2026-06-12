@@ -415,6 +415,32 @@ sh "$SRC/harness-install.sh" --agents=claude "$TP" >/dev/null 2>&1 || fail "anti
 rm -rf "$TP"
 pass "antigravity deselect is a no-op, never deletes a user-authored .agent/ (Codex r3 P1)"
 
+# antigravity_deselect_is_byte_exact (R13, Codex r2 P1 #3404240336): a pre-this-version
+# no-op antigravity install can leave `antigravity` persisted in .harness/.agents while
+# the user authored their OWN .agent/agents/<role>.md with a STANDARD name. On deselect,
+# the .agent/ glue removal must be byte-compare-and-remove (like opencode.json) — delete
+# ONLY a pristine harness-generated file, NEVER a user file that merely shares the name.
+TPB="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=antigravity "$TPB" >/dev/null || fail "ag-exact setup install failed"
+[ -f "$TPB/.agent/agents/builder.md" ]   || fail "ag-exact setup: generated builder persona missing"
+[ -f "$TPB/.agent/agents/reviewer.md" ]  || fail "ag-exact setup: generated reviewer persona missing"
+[ -f "$TPB/.agent/workflows/sdd-next.md" ] || fail "ag-exact setup: generated sdd-next workflow missing"
+# User overwrites builder.md with their OWN distinctive content (a standard-named file).
+printf 'MY CUSTOM ANTIGRAVITY BUILDER\n' > "$TPB/.agent/agents/builder.md"
+# Deselect antigravity.
+sh "$SRC/harness-install.sh" --agents=claude "$TPB" >/dev/null 2>&1 || fail "ag-exact deselect rerun failed"
+# User-authored, standard-named file SURVIVES with its content intact.
+[ -f "$TPB/.agent/agents/builder.md" ]                       || fail "Codex r2 P1: user-authored .agent/agents/builder.md was wrongly deleted on deselect"
+grep -qF 'MY CUSTOM ANTIGRAVITY BUILDER' "$TPB/.agent/agents/builder.md" || fail "Codex r2 P1: user-authored builder.md content not preserved"
+# Pristine harness-generated glue (persona + workflow + rule) IS removed.
+[ -f "$TPB/.agent/agents/reviewer.md" ]  && fail "Codex r2 P1: pristine generated reviewer persona must be removed on deselect"
+[ -f "$TPB/.agent/workflows/sdd-next.md" ] && fail "Codex r2 P1: pristine generated sdd-next workflow must be removed on deselect"
+[ -f "$TPB/.agent/rules/harness.md" ]    && fail "Codex r2 P1: pristine generated .agent/rules/harness.md must be removed on deselect"
+# The .agent/ tree survives because the user file kept .agent/agents/ non-empty.
+[ -d "$TPB/.agent" ]                     || fail "Codex r2 P1: .agent/ wrongly removed while a user file remains"
+rm -rf "$TPB"
+pass "antigravity deselect deletes only byte-pristine .agent/ glue, keeps user files (Codex r2 P1)"
+
 # opencode_json_removal_is_byte_exact (R13, Codex r4 P2 #3401025100): on opencode
 # deselect, a PRISTINE generated opencode.json is removed, but one the user edited
 # (e.g. added a "model" key to the generated file) is preserved.
