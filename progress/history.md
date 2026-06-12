@@ -45,3 +45,5 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-06-12T16:36:52Z  E07-F01  spec-ready → in-progress (re-spec approved; .agents/ plural, primitives model, skills out-of-scope; gate latency 3143s) — Builder round 2 on PR #31 branch
 - 2026-06-12T16:44:24Z  E07-F01  in-progress → in-review (Builder round 2: .agent/→.agents/ rename, strengthened tests, VERSION held 0.22.0, all 13 suites green; commit d78e40f)
 - 2026-06-12T16:49:38Z  E07-F01  in-review → approve (round 2, re-spec) — Reviewer verified rename complete, deselect-safety preserved, persona-model honest; holding done until PR #31 merges
+- 2026-06-12T16:56:38Z  E07-F01  in-review → done (PR #31 MERGED 2be3817; Codex r4 P2 deferred as known cross-front-end limitation). E07 epic rolled up → done.
+- 2026-06-12T16:56:38Z  drift-check (trigger: E07 done): NO-OP — no remaining draft/planned/pending epics (ALL epics now done); no Scout spawned, no demotion.
