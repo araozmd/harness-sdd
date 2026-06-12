@@ -405,10 +405,21 @@ tui_select() {
         if [ "$_cursor" -lt "$_n" ]; then _cursor=$((_cursor + 1)); _redraw; fi ;;
       113)    # 'q' → confirm current selection and quit
         break ;;
-      27)     # ESC — could be a bare Esc (abort/confirm) or an arrow sequence ESC [ A/B
+      27)     # ESC — could be a bare Esc (abort/confirm) or an arrow sequence ESC [ A/B.
+        # The continuation bytes must be read NON-blocking: a bare Esc sends no further
+        # bytes, so a blocking `min 1` read would hang and freeze the installer. Switch
+        # to `min 0 time 1` (0.1s grace) for the sequence reads, then restore `min 1`.
+        stty -echo -icanon min 0 time 1 2>/dev/null
         _c2="$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')"
-        if [ "$_c2" != 91 ]; then break; fi   # bare Esc → confirm current selection
-        _c3="$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')"
+        if [ "$_c2" = 91 ]; then
+          _c3="$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')"
+        else
+          _c3=""
+        fi
+        stty -echo -icanon min 1 time 0 2>/dev/null
+        if [ "$_c2" != 91 ]; then
+          break   # bare Esc (or anything not starting a CSI) → confirm current selection
+        fi
         case "$_c3" in
           65)  # 'A' → up arrow
             if [ "$_cursor" -gt 1 ]; then _cursor=$((_cursor - 1)); _redraw; fi ;;
