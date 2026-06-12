@@ -343,9 +343,11 @@ tui_capable() {
 # stderr; only the resolved sorted keys (one per line, via normalize_keys) hit stdout,
 # so the captured SELECTED contract is unchanged. Raw mode is entered with `stty` and
 # UNCONDITIONALLY restored: an EXIT trap restores on the normal return path, while a
-# separate INT/TERM trap restores AND aborts the whole installer (kill -INT $$ +
-# exit 130) so Ctrl-C never leaves the terminal in raw mode NOR silently continues to
-# write files on the next Enter.
+# shared `_tui_abort` routine restores AND aborts the whole installer (kill -INT $$ +
+# exit 130). Ctrl-C is terminal-independent: the INT/TERM trap catches it where the
+# terminal generates SIGINT, and an explicit byte-3 (ETX) arm in the read loop catches
+# it on `-isig` terminals / PTYs that deliver it as a raw byte — so Ctrl-C never leaves
+# the terminal in raw mode NOR silently continues to write files on the next Enter.
 tui_select() {
   _baseline="$1"
   # Positional key list + parallel on/off state (same seeding as toggle_select).
@@ -364,22 +366,39 @@ tui_select() {
 
   # Save terminal settings and guarantee restoration on ANY exit path.
   _saved_stty="$(stty -g 2>/dev/null)"
-  # Two distinct trap behaviors (Codex P2 #3405383752):
-  #   • EXIT (normal return/confirm): just restore the terminal — must NOT force a
-  #     non-zero status, or the captured SELECTED contract would look like a failure.
-  #   • INT/TERM (Ctrl-C): restore the terminal AND abort the whole installer so no
-  #     filesystem writes follow. tui_select runs inside a command-substitution
-  #     subshell (SELECTED="$(tui_select …)"), so a bare `exit` would only end the
-  #     subshell and leave the parent free to continue on the next Enter. We instead
-  #     re-raise the signal to the MAIN shell: in POSIX sh `$$` is the PID of the
-  #     original (parent) shell even inside a subshell, so `kill -INT "$$"` aborts the
-  #     installer process itself (no top-level trap → default terminate). `exit 130`
-  #     is the belt-and-suspenders fallback if the kill is somehow swallowed.
+  # Ctrl-C abort is delivered two ways depending on the terminal, and BOTH must end
+  # in the exact same restore+abort sequence (Codex P2 #3405383752, #3405430430):
+  #   • Signal path — terminals/PTYs that keep `isig` (interrupt special chars) on
+  #     translate Ctrl-C into SIGINT. The INT/TERM trap below catches it.
+  #   • Raw-byte path — terminals that already have `-isig`, or PTYs that deliver
+  #     VINTR as raw byte 3 (ETX), send Ctrl-C straight into the read loop as a byte.
+  #     The loop's `case 3)` arm handles it (see below). Without this arm the byte is
+  #     unhandled and the picker spins in raw mode forever.
+  # `_tui_abort` is the single shared restore+abort routine both paths call:
+  #   restore the saved stty, show the cursor (stderr), clear traps so the re-raised
+  #   signal hits the default disposition, then abort the WHOLE installer. tui_select
+  #   runs inside a command-substitution subshell (SELECTED="$(tui_select …)"), so a
+  #   bare `exit` would only end the subshell and let the parent continue on the next
+  #   Enter; instead we `kill -INT "$$"` — in POSIX sh `$$` is the ORIGINAL (parent)
+  #   shell's PID even inside a subshell, so this aborts the installer process itself
+  #   (no top-level trap → default terminate). `exit 130` is the belt-and-suspenders
+  #   fallback if the kill is somehow swallowed. EXIT (normal confirm) just restores
+  #   the terminal and must NOT force a non-zero status, or the captured SELECTED
+  #   contract would look like a failure.
+  _tui_abort() {
+    stty "$_saved_stty" 2>/dev/null
+    printf '\033[?25h' >&2
+    trap - EXIT INT TERM
+    kill -INT "$$" 2>/dev/null
+    exit 130
+  }
   # shellcheck disable=SC2064
   trap "stty '$_saved_stty' 2>/dev/null; printf '\\033[?25h' >&2" EXIT
-  # shellcheck disable=SC2064
-  trap "stty '$_saved_stty' 2>/dev/null; printf '\\033[?25h' >&2; trap - EXIT INT TERM; kill -INT $$ 2>/dev/null; exit 130" INT TERM
-  # Raw-ish mode: no echo, char-at-a-time (-icanon min 1), keep signals usable.
+  trap '_tui_abort' INT TERM
+  # Raw-ish mode: no echo, char-at-a-time (-icanon min 1). We intentionally do NOT
+  # add `isig`: Ctrl-C is handled portably via the explicit byte-3 arm in the read
+  # loop, which works even where `isig` is unavailable/off; the INT/TERM trap stays
+  # as the secondary net for terminals that DO generate the signal.
   stty -echo -icanon min 1 time 0 2>/dev/null
   printf '\033[?25l' >&2  # hide cursor
 
@@ -406,8 +425,13 @@ tui_select() {
   # Read one byte at a time; decode arrows (ESC [ A/B) and act on space/enter/etc.
   while :; do
     _c="$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')"
-    [ -n "$_c" ] || continue
+    # Empty read = EOF (e.g. Ctrl-D / byte 4 closing stdin). Don't spin in raw mode —
+    # treat it as an abort so the terminal is restored and no install_one runs.
+    [ -n "$_c" ] || _tui_abort
     case "$_c" in
+      3|4)    # Ctrl-C (ETX) / Ctrl-D (EOT) raw byte → abort. Covers terminals/PTYs
+              # that deliver the interrupt as a byte instead of SIGINT (`-isig`).
+        _tui_abort ;;
       10|13)  # LF / CR → Enter, confirm
         break ;;
       32)     # Space → toggle highlighted row
