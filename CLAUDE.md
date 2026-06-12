@@ -41,6 +41,7 @@ deliberately, not on every PR.
 
 ## Way of work
 - Every new work, feature or bug should have its own branch
+- If a feature is completed make sure the README and docs are up to date
 - Once all locall verifications and tests passed, create a new PR and use the 
   skill /pr-loop to invoke Codex reviews
 - Once a brach is merged delete remote and local branch and go back to main 

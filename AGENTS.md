@@ -4,9 +4,9 @@
 > reads before doing anything. Keep it short — it is loaded into context every
 > session. Detailed rules live in the files it points to.
 >
-> `AGENTS.md` is an open standard. Claude Code, Codex, Gemini CLI and OpenCode all
-> read it (directly or via a one-line pointer). **The model is interchangeable; the
-> harness is not.**
+> `AGENTS.md` is an open standard. Claude Code, Codex, Gemini CLI, OpenCode and
+> Antigravity all read it (directly or via a one-line pointer). **The model is
+> interchangeable; the harness is not.**
 
 ## What this is
 
