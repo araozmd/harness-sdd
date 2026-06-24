@@ -15,13 +15,21 @@ from there the roles move it through files, each in a clean context:
 
 ```mermaid
 flowchart LR
+    project(["whole project"]) -->|/sdd-plan| Planner["Planner<br/>(vision + ADRs)"]
+    Planner --> draft["draft epics"]
+    draft -->|/sdd-drill| Driller["Driller<br/>(epic → features)"]
+    Driller --> pending
+
     idea(["raw idea"]) -->|/sdd-new| Inception["Inception<br/>(intake)"]
     Inception --> pending["pending<br/>(task)"]
+
     pending -->|/sdd-next| Orchestrator["Orchestrator<br/>(state)"]
     Orchestrator --> Architect["Architect<br/>(specs)"]
     Architect --> Builder["Builder<br/>(code)"]
     Builder --> Reviewer["Reviewer<br/>(verify)"]
     Scout["Scout<br/>(read-only recon)"] -.assists.-> Orchestrator
+
+    fix(["quick fix"]) -->|/sdd-fix| Builder
 ```
 
 Specs follow a **Product → Epic → Feature** hierarchy, where each feature is a
