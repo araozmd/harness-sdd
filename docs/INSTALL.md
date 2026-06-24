@@ -17,7 +17,7 @@ This writes, into your project:
 ```
 your-project/
 ├── CLAUDE.md / AGENTS.md / GEMINI.md   # your content kept; a marked harness block appended
-├── .claude/agents/*  .claude/commands/{sdd-next,sdd-new}.md   # Claude Code glue → resolves to .harness/
+├── .claude/agents/*  .claude/commands/{sdd-next,sdd-new,sdd-plan,sdd-drill,sdd-fix}.md   # Claude Code glue → resolves to .harness/
 ├── opencode.json                       # created only if absent
 ├── .agents/{rules,agents,workflows}/   # Antigravity glue → resolves to .harness/ (regenerated each run)
 └── .harness/                           # the whole harness body
