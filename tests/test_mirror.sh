@@ -130,6 +130,45 @@ EOF
   printf '%s' "$SLINE" | grep -q 'In review'             || { echo "$OUT"; fail "status_map did not map in-review -> In review"; }
   printf '%s' "$SLINE" | grep -Eq '(^|[^-])pending' && fail "identity 'pending' column leaked despite status_map override"
   pass "status_map remaps board columns via config, no file edit [status_map_overrides_columns]"
+
+  # 7) assignee ⇒ status-gated assign/unassign + dynamic "@me" resolution. A dispatching
+  #    fake gh resolves `gh api user` to a login and returns two pre-existing issues: one
+  #    for an in-progress feature (unassigned → should assign) and one for a pending feature
+  #    already assigned (not-started → should unassign). --dry-run reports both intents and
+  #    the "@me -> login" resolution, without mutating anything.
+  mkdir -p "$T/bin3"
+  cat > "$T/bin3/gh" <<'EOF'
+#!/bin/sh
+case "$1 $2" in
+  "api user")           echo 'resolveduser' ;;
+  "project view")       echo '{"id":"PID"}' ;;
+  "project field-list") echo '{"fields":[{"id":"FS","name":"Status","options":[{"id":"o","name":"in-progress"}]},{"id":"FE","name":"Epic","options":[{"id":"oe","name":"E01 — Demo"}]}]}' ;;
+  "project item-list")  echo '{"items":[{"id":"IT1","content":{"number":42}},{"id":"IT2","content":{"number":43}}]}' ;;
+  "issue list")         echo '[{"number":42,"title":"E01-F01 — X","url":"https://github.com/acme-org/specs/issues/42","state":"OPEN","assignees":[]},{"number":43,"title":"E01-F02 — Y","url":"https://github.com/acme-org/specs/issues/43","state":"OPEN","assignees":[{"login":"resolveduser"}]}]' ;;
+  *)                    echo '{}' ;;
+esac
+exit 0
+EOF
+  chmod +x "$T/bin3/gh"
+  HAS="$T/h-assignee"; mkdir -p "$HAS/tools" "$HAS/state"
+  cp "$TOOL" "$HAS/tools/sync-board.mjs"
+  printf '{"epics":[{"id":"E01","title":"Demo","features":[{"id":"E01-F01","title":"X","status":"in-progress"},{"id":"E01-F02","title":"Y","status":"pending"}]}]}\n' > "$HAS/state/tasks.json"
+  printf 'store:\n  tasks: local\nmirror:\n  board:\n    provider: "github-projects"\n    owner: "acme-org"\n    project_number: 7\n    repo: "acme-org/specs"\n    assignee: "@me"\n' > "$HAS/harness.config.yaml"
+  OUT="$(PATH="$T/bin3:$PATH" node "$HAS/tools/sync-board.mjs" --dry-run 2>&1)" || { echo "$OUT"; fail "assignee dry-run errored"; }
+  printf '%s' "$OUT" | grep -q "@me' -> resolveduser"          || { echo "$OUT"; fail "'@me' was not resolved to the authed gh login"; }
+  printf '%s' "$OUT" | grep -q 'would assign #42 -> resolveduser'   || { echo "$OUT"; fail "in-progress feature was not assigned"; }
+  printf '%s' "$OUT" | grep -q 'would unassign #43 <- resolveduser' || { echo "$OUT"; fail "regressed/not-started feature was not unassigned"; }
+  pass "assignee: @me resolves + status-gates assign/unassign [assignee_status_gated]"
+
+  # 8) assignee UNSET ⇒ the mirror never touches assignees (back-compat: no assign/unassign
+  #    log lines even though issues exist and statuses vary).
+  HNA="$T/h-noassignee"; mkdir -p "$HNA/tools" "$HNA/state"
+  cp "$TOOL" "$HNA/tools/sync-board.mjs"
+  cp "$HAS/state/tasks.json" "$HNA/state/tasks.json"
+  printf 'store:\n  tasks: local\nmirror:\n  board:\n    provider: "github-projects"\n    owner: "acme-org"\n    project_number: 7\n    repo: "acme-org/specs"\n' > "$HNA/harness.config.yaml"
+  OUT="$(PATH="$T/bin3:$PATH" node "$HNA/tools/sync-board.mjs" --dry-run 2>&1)" || { echo "$OUT"; fail "no-assignee dry-run errored"; }
+  printf '%s' "$OUT" | grep -Eqi 'assign' && { echo "$OUT"; fail "assignee unset but the mirror still touched assignees"; }
+  pass "assignee unset ⇒ mirror never touches assignees [assignee_default_inert]"
 else
   pass "node-running cases skipped (node unavailable) [inert_default_noop]"
 fi

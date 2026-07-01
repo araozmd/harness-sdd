@@ -4,6 +4,31 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.24.0] — 2026-07-01
+
+### Added — ✨ Board mirror: status-gated issue assignee (`mirror.board.assignee`)
+- **`assignee` config key (`tools/sync-board.mjs`)** — the board mirror can now fill the
+  provider's assignee/owner field from a new, provider-neutral `mirror.board.assignee` key.
+  Assignment is **status-gated**: a feature's item gets the assignee once work has started
+  (`in-progress`/`in-review`/`done`) and is **unassigned** when it regresses to a not-started
+  state (`pending`/`spec-ready`), so the board reflects who owns each item *right now*.
+  Empty (the default) ⇒ the mirror never touches assignees, so a preserved config behaves
+  exactly as before. Implemented for the `github-projects` provider; the `jira`/`azure-boards`
+  stubs ignore it until wired.
+- **Dynamic `"@me"` resolution** — `assignee: "@me"` (or `"self"`) resolves at sync time to
+  the authed `gh` user via `gh api user`, so a shared-repo config reflects whoever runs the
+  sync instead of hard-coding one login. Resolution failure degrades to "skip assignment this
+  run" rather than erroring, and assignment is idempotent (the API call is skipped when the
+  item already has the right assignee).
+- **Docs + template parity** — `store/board-mirror.md` documents the key as provider-neutral
+  (each tracker maps it to its own assignee/owner field) and the stub-provider guide tells
+  new providers to honor it; `harness.config.yaml` and the installer's `migrate_config` mirror
+  template both gain the commented `assignee: ""` default (append-only, existing configs
+  preserved). `tests/test_mirror.sh` gains coverage: `@me` resolution + status-gated
+  assign/unassign, and the assignee-unset back-compat no-op. **`VERSION` 0.23.1 → 0.24.0**
+  (MINOR: new backward-compatible capability). Upstreamed from a downstream install so the
+  canonical body now owns it and future upgrades no longer clobber a hand-carried copy.
+
 ## [0.23.1] — 2026-07-01
 
 ### Added — ✨ claude-mem-context block

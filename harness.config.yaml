@@ -96,6 +96,13 @@ mirror:
     project_number: 0     # the GitHub Project number (e.g. 1)
     repo: ""              # owner/repo that holds the mirrored issues (e.g. my-org/specs)
 
+    # Optional: GitHub login assigned to a feature's issue once work has STARTED
+    # (in-progress/in-review/done); cleared for not-started states (pending/spec-ready).
+    # Empty ⇒ never touch assignees. Use "@me" (or "self") to resolve dynamically to the
+    # authed `gh` user, so a shared-repo config reflects whoever runs the sync instead of
+    # hard-coding one person. Idempotent — skips the API call when already correct.
+    assignee: ""
+
     # Optional: map harness status -> board COLUMN name. Omit for identity (column ==
     # status). Set this to keep EXISTING board columns without editing sync-board.mjs:
     # status_map:

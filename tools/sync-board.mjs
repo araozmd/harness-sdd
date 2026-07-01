@@ -11,6 +11,10 @@
 // PROVIDER is chosen by `mirror.board.provider` in harness.config.yaml — INERT by default:
 //   ""|none         -> disabled; prints a notice and exits 0 (the default; no board).
 //   github-projects -> IMPLEMENTED (needs `gh` authed with `project` + `repo` scopes).
+//                      Optionally assigns each issue to `mirror.board.assignee` once the
+//                      feature is in-progress/in-review/done (cleared when not started).
+//                      `assignee: "@me"` resolves dynamically to the authed `gh` user so
+//                      this shared config never hard-codes one person.
 //   jira            -> STUB (recognized, not implemented yet — see store/board-mirror.md).
 //   azure-boards    -> STUB (recognized, not implemented yet — see store/board-mirror.md).
 //
@@ -103,6 +107,7 @@ if (provider !== 'github-projects') {
 const OWNER = yamlGet(cfgText, ['mirror', 'board', 'owner']) || '';
 const PROJECT_NUMBER = Number(yamlGet(cfgText, ['mirror', 'board', 'project_number']) || 0);
 const REPO = yamlGet(cfgText, ['mirror', 'board', 'repo']) || '';
+let ASSIGNEE = yamlGet(cfgText, ['mirror', 'board', 'assignee']) || '';
 if (!OWNER || !PROJECT_NUMBER || !REPO) {
   console.error('[mirror] provider github-projects needs mirror.board.{owner,project_number,repo} set in harness.config.yaml.');
   process.exit(1);
@@ -121,11 +126,29 @@ const STATUS = Object.fromEntries(Object.keys(STATUS_COLORS).map((s) => [
 ]));
 const STATUS_COLS = Object.values(STATUS).map((s) => s.col);
 const EPIC_COLORS = ['BLUE', 'GREEN', 'PURPLE', 'ORANGE', 'PINK', 'RED', 'YELLOW', 'GRAY'];
+// A feature gets ASSIGNEE attached once work has actually started; statuses before that
+// (pending/spec-ready) stay unassigned so the board reflects who is doing what right now.
+const ASSIGNED_STATUSES = new Set(['in-progress', 'in-review', 'done']);
 
 function gh(args, input) { return execFileSync('gh', args, { encoding: 'utf8', input, maxBuffer: 1 << 24 }); }
 function ghJson(args) { return JSON.parse(gh(args)); }
 function graphql(query, variables) {
   return JSON.parse(gh(['api', 'graphql', '--input', '-'], JSON.stringify({ query, variables })));
+}
+
+// Dynamic assignee: `@me`/`self` (or `$me`) means "whoever is running this sync" — resolve
+// to the authed gh login so each developer's board reflects their own ownership without
+// hard-coding one shared login in this shared-repo config. We resolve to the real login
+// (not pass `@me` straight to gh) so the idempotency + unassign comparisons below — which
+// match on `issue.assignees[].login` — keep working. Resolution failure degrades to "skip".
+if (['@me', 'self', '$me'].includes(ASSIGNEE.toLowerCase())) {
+  try {
+    ASSIGNEE = gh(['api', 'user', '--jq', '.login']).trim();
+    log(`[mirror] assignee '@me' -> ${ASSIGNEE} (authed gh user)`);
+  } catch {
+    console.error("[mirror] assignee '@me' set but `gh api user` failed — skipping assignment this run.");
+    ASSIGNEE = '';
+  }
 }
 
 // --- load + flatten tasks.json ------------------------------------------------
@@ -180,7 +203,7 @@ const EPIC_FIELD_ID = fieldByName('Epic').id;
 
 // --- existing issues + items --------------------------------------------------
 const issues = ghJson(['issue', 'list', '--repo', REPO, '--state', 'all', '--limit', '500',
-  '--json', 'number,title,url,state']);
+  '--json', 'number,title,url,state,assignees']);
 const issueByTitle = new Map(issues.map((i) => [i.title, i]));
 const items = ghJson(['project', 'item-list', String(PROJECT_NUMBER), '--owner', OWNER,
   '--format', 'json', '--limit', '500']).items;
@@ -194,7 +217,7 @@ for (const f of features) {
     const body = `**Epic:** ${f.epicLabel}\n**Status (tasks.json):** ${f.status}\n\nSeeded from \`state/tasks.json\` by \`sync-board.mjs\`.`;
     const url = gh(['issue', 'create', '--repo', REPO, '--title', f.title, '--body', body]).trim().split('\n').pop();
     const number = Number(url.split('/').pop());
-    issue = { number, title: f.title, url, state: 'OPEN' };
+    issue = { number, title: f.title, url, state: 'OPEN', assignees: [] };
     log(`[mirror] created issue #${number}: ${f.title}`);
   }
 
@@ -214,6 +237,20 @@ for (const f of features) {
       '--id', itemId, '--field-id', fieldId, '--single-select-option-id', optId]);
     setField(STATUS_FIELD_ID, wantStatusOpt);
     setField(EPIC_FIELD_ID, wantEpicOpt);
+  }
+
+  // assign once work has started, clear it if the feature regresses to a not-started
+  // status. Idempotent: skip the API call when the issue is already in the right state.
+  if (ASSIGNEE) {
+    const has = (issue.assignees || []).some((a) => a.login === ASSIGNEE);
+    const wantAssigned = ASSIGNED_STATUSES.has(f.status);
+    if (wantAssigned && !has) {
+      if (DRY) log(`[dry-run] would assign #${issue.number} -> ${ASSIGNEE}`);
+      else { gh(['issue', 'edit', String(issue.number), '--repo', REPO, '--add-assignee', ASSIGNEE]); log(`[mirror]   #${issue.number} assigned -> ${ASSIGNEE}`); }
+    } else if (!wantAssigned && has) {
+      if (DRY) log(`[dry-run] would unassign #${issue.number} <- ${ASSIGNEE}`);
+      else { gh(['issue', 'edit', String(issue.number), '--repo', REPO, '--remove-assignee', ASSIGNEE]); log(`[mirror]   #${issue.number} unassigned ${ASSIGNEE}`); }
+    }
   }
 
   // close done / reopen regressed
