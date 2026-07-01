@@ -153,6 +153,7 @@ migrate_config() {
       printf '    owner: ""             # github-projects: org/user login\n'
       printf '    project_number: 0     # github-projects: Project number\n'
       printf '    repo: ""              # github-projects: owner/repo holding the issues\n'
+      printf '    assignee: ""          # optional: gh login (or "@me") assigned once work starts; empty ⇒ skip\n'
       printf '    # status_map:         # optional: harness status -> board column name (omit ⇒ identity)\n'
       printf '    #   pending: "Todo"\n'
       printf '    #   done: "Done"\n'

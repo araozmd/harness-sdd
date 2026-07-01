@@ -4,7 +4,7 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
-## [0.24.0] — 2026-07-01
+## [0.25.0] — 2026-07-01
 
 ### Added — ✨ Codex CLI front-end (`codex` agent key)
 - **`codex` is now a selectable front-end (`harness-install.sh`).** Added to `AGENT_KEYS`
@@ -34,6 +34,33 @@ All notable changes to the harness body are recorded here. Versions follow
   touches the real `~/.codex`); adds `--agents=codex` (global-prompts-only + byte-identical
   to peers) and codex-deselect (pristine reclaim, edit-preserving, warns) cases; extends the
   ALL-default and registry-key coverage to include `codex`.
+
+## [0.24.0] — 2026-07-01
+
+### Added — ✨ Board mirror: status-gated issue assignee (`mirror.board.assignee`)
+- **`assignee` config key (`tools/sync-board.mjs`)** — the board mirror can now fill the
+  provider's assignee/owner field from a new, provider-neutral `mirror.board.assignee` key.
+  Assignment is **status-gated**: when `assignee` is set the mirror **owns** the Assignees
+  field for its items and reconciles it to the exact desired set every sync — a started item
+  (`in-progress`/`in-review`/`done`) ends up with *exactly* the configured login (any other
+  assignee removed), a not-started one (`pending`/`spec-ready`) with none — so the board
+  reflects who owns each item *right now* and a teammate's stale assignment from a shared
+  `@me` sync is cleared whether the item is in flight or regressed. Empty (the default) ⇒ the
+  mirror never touches assignees, so a preserved config behaves exactly as before. Implemented
+  for the `github-projects` provider; the `jira`/`azure-boards` stubs ignore it until wired.
+- **Dynamic `"@me"` resolution** — `assignee: "@me"` (or `"self"`) resolves at sync time to
+  the authed `gh` user via `gh api user`, so a shared-repo config reflects whoever runs the
+  sync instead of hard-coding one login. Resolution failure degrades to "skip assignment this
+  run" rather than erroring, and assignment is idempotent (the API call is skipped when the
+  item already has the right assignee).
+- **Docs + template parity** — `store/board-mirror.md` documents the key as provider-neutral
+  (each tracker maps it to its own assignee/owner field) and the stub-provider guide tells
+  new providers to honor it; `harness.config.yaml` and the installer's `migrate_config` mirror
+  template both gain the commented `assignee: ""` default (append-only, existing configs
+  preserved). `tests/test_mirror.sh` gains coverage: `@me` resolution + status-gated
+  assign/unassign, and the assignee-unset back-compat no-op. **`VERSION` 0.23.1 → 0.24.0**
+  (MINOR: new backward-compatible capability). Upstreamed from a downstream install so the
+  canonical body now owns it and future upgrades no longer clobber a hand-carried copy.
 
 ## [0.23.1] — 2026-07-01
 
