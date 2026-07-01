@@ -26,3 +26,7 @@ progress/*/
 # Python bytecode cruft (e.g. from running tools/telemetry-report.py locally)
 __pycache__/
 *.pyc
+
+# Local-only config for the harness, never committed.
+.local/
+.obsidian/
