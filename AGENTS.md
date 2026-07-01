@@ -58,3 +58,21 @@ Inception ─► Orchestrator → Architect → Builder → Reviewer    (Scout a
 2. Read `harness.config.yaml` to learn which store backends are active.
 3. Read `agents/orchestrator.md` and assume the Orchestrator role.
 4. Read the TaskStore, find the next actionable task, and delegate per the workflow.
+
+
+<claude-mem-context>
+# Memory Context
+
+# [harness-sdd] recent context, 2026-06-26 11:32pm CST
+
+Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
+Format: ID TIME TYPE TITLE
+Fetch details: get_observations([IDs]) | Search: mem-search skill
+
+Stats: 1 obs (201t read) | 12,067t work | 98% savings
+
+### Jun 26, 2026
+14 11:15p ✅ Removed BrowserMCP from Codex User-Level Configuration
+
+Access 12k tokens of past work via get_observations([IDs]) or mem-search skill.
+</claude-mem-context>
