@@ -247,6 +247,21 @@ normalize_keys() {
   printf '%s\n' "$1" | tr ' ' '\n' | grep -v '^$' | sort -u
 }
 
+# codex_prompts_dir — print the GLOBAL Codex prompts dir, or nothing if it cannot be
+# resolved. Codex reads custom prompts from `$CODEX_HOME/prompts` (default `~/.codex`).
+# Under `set -u` a bare `$HOME` expansion aborts the WHOLE install when neither var is
+# set (minimal CI/container/systemd) — and since the no-TTY default selects codex, even
+# a plain noninteractive install would hit it (Codex r1 P2). So resolve defensively:
+# prefer CODEX_HOME, fall back to HOME, and emit EMPTY (never a bare `/.codex`) when
+# neither is set so callers can warn-and-skip instead of crashing or writing to `/`.
+codex_prompts_dir() {
+  if [ -n "${CODEX_HOME:-}" ]; then
+    printf '%s\n' "${CODEX_HOME}/prompts"
+  elif [ -n "${HOME:-}" ]; then
+    printf '%s\n' "${HOME}/.codex/prompts"
+  fi
+}
+
 # validate_csv <csv> — split a comma-separated override on commas, trim each token,
 # drop empties, de-duplicate, validate each against the registry; `die` non-zero
 # naming the first unknown token (R7). On success, print the sorted keys (one per
@@ -1280,7 +1295,9 @@ EOF
   # Codex CLI has no project-local custom-command mechanism (no `.codex/commands/`
   # or workspace-local prompts dir it reads). Its ONLY custom-slash-command surface
   # is the GLOBAL prompts dir `${CODEX_HOME:-$HOME/.codex}/prompts/*.md`, where each
-  # `<name>.md` registers as `/<name>`. So — unlike every other front-end, whose glue
+  # `<name>.md` registers as the slash command `/prompts:<name>` (Codex namespaces
+  # prompt files under `/prompts:`, NOT top-level `/<name>`). So — unlike every other
+  # front-end, whose glue
   # is workspace-local under $TARGET — the `codex` stamp writes OUTSIDE the target, to
   # a single machine-global dir. Consequences, by design (accepted at install time):
   #   • the prompts are shared by EVERY harness target on this machine (they overwrite
@@ -1292,12 +1309,20 @@ EOF
   #     and honors $CODEX_HOME so it never touches an unrelated home.
   # Copies the same CMDDIR bodies as §5b/§5c, so all front-ends stay byte-identical.
   if agent_selected codex; then
-    _cdx="${CODEX_HOME:-$HOME/.codex}/prompts"
-    mkdir -p "$_cdx"
-    for _c in $HARNESS_SDD_CMDS; do
-      cp "$CMDDIR/$_c.md" "$_cdx/$_c.md"
-    done
-    ok "Codex CLI prompts /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix installed (GLOBAL: $_cdx)"
+    _cdx="$(codex_prompts_dir)"
+    if [ -z "$_cdx" ]; then
+      # Neither CODEX_HOME nor HOME set: skip Codex glue rather than abort the whole
+      # install (other front-ends must still complete). (Codex r1 P2.)
+      echo "⚠️  codex selected but neither CODEX_HOME nor HOME is set — skipping GLOBAL /prompts:sdd-* install" >&2
+    else
+      mkdir -p "$_cdx"
+      for _c in $HARNESS_SDD_CMDS; do
+        cp "$CMDDIR/$_c.md" "$_cdx/$_c.md"
+      done
+      # Codex surfaces a prompts-dir file `<name>.md` as the slash command
+      # `/prompts:<name>` (NOT top-level `/<name>`) — advertise it that way.
+      ok "Codex CLI prompts /prompts:sdd-next + /prompts:sdd-new + /prompts:sdd-plan + /prompts:sdd-drill + /prompts:sdd-fix installed (GLOBAL: $_cdx)"
+    fi
   fi
 
   # NOTE: CMDDIR cleanup is intentionally DEFERRED to AFTER §7 — the antigravity
@@ -1417,19 +1442,21 @@ EOF
           # are machine-global and may be shared by another harness target that still
           # selects `codex`; a subsequent install there re-stamps them (bodies are
           # regenerated every run), so removal here is safe but announced as GLOBAL.
-          _cdx="${CODEX_HOME:-$HOME/.codex}/prompts"
-          _cdx_removed=""
-          for _cdw in $HARNESS_SDD_CMDS; do
-            [ -f "$CMDDIR/$_cdw.md" ] || continue
-            if [ -f "$_cdx/$_cdw.md" ] && cmp -s "$_cdx/$_cdw.md" "$CMDDIR/$_cdw.md"; then
-              rm -f "$_cdx/$_cdw.md"
-              _cdx_removed="$_cdx_removed $_cdw.md"
-            elif [ -f "$_cdx/$_cdw.md" ]; then
-              echo "⚠️  $_cdx/$_cdw.md differs from the generated prompt (edited) — left in place (deselected 'codex' not fully removed)" >&2
-            fi
-          done
-          [ -n "$_cdx_removed" ] && echo "⚠️  removed deselected agent 'codex' glue:$_cdx_removed (in $_cdx/ — GLOBAL, shared prompts)" >&2
-          rmdir "$_cdx" 2>/dev/null || true   # prune only if now empty
+          _cdx="$(codex_prompts_dir)"
+          if [ -n "$_cdx" ]; then
+            _cdx_removed=""
+            for _cdw in $HARNESS_SDD_CMDS; do
+              [ -f "$CMDDIR/$_cdw.md" ] || continue
+              if [ -f "$_cdx/$_cdw.md" ] && cmp -s "$_cdx/$_cdw.md" "$CMDDIR/$_cdw.md"; then
+                rm -f "$_cdx/$_cdw.md"
+                _cdx_removed="$_cdx_removed $_cdw.md"
+              elif [ -f "$_cdx/$_cdw.md" ]; then
+                echo "⚠️  $_cdx/$_cdw.md differs from the generated prompt (edited) — left in place (deselected 'codex' not fully removed)" >&2
+              fi
+            done
+            [ -n "$_cdx_removed" ] && echo "⚠️  removed deselected agent 'codex' glue:$_cdx_removed (in $_cdx/ — GLOBAL, shared prompts)" >&2
+            rmdir "$_cdx" 2>/dev/null || true   # prune only if now empty
+          fi
           ;;
       esac
     done

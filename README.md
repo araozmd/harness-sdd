@@ -71,7 +71,7 @@ approves) → `builder` → `reviewer`.
 | CLI | Entry file | Sub-agents |
 |---|---|---|
 | **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next` |
-| **Codex** | `AGENTS.md` (native) | run roles sequentially; **global** `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next` prompts in `${CODEX_HOME:-~/.codex}/prompts/` |
+| **Codex** | `AGENTS.md` (native) | run roles sequentially; **global** `/prompts:sdd-new`, `/prompts:sdd-plan`, `/prompts:sdd-drill`, `/prompts:sdd-fix`, `/prompts:sdd-next` prompts in `${CODEX_HOME:-~/.codex}/prompts/` |
 | **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
 | **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*` (`/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next`) |
 | **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/agents/*` personas + `.agents/workflows/*` slash commands (`/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next`) |
@@ -209,7 +209,7 @@ umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
 .opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
 .agents/                     Antigravity glue — rules + agent personas + workflows (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
-${CODEX_HOME:-~/.codex}/prompts/  Codex CLI slash-command prompts (GLOBAL, not in-repo — /sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
+${CODEX_HOME:-~/.codex}/prompts/  Codex CLI slash-command prompts (GLOBAL, not in-repo — /prompts:sdd-new, /prompts:sdd-plan, /prompts:sdd-drill, /prompts:sdd-fix, /prompts:sdd-next)
 ```
 
 ## Installing into an existing project
@@ -237,12 +237,16 @@ generated stamp, never your edited files).
 
 > **Note — Codex is GLOBAL.** Codex CLI has no project-local custom-command
 > mechanism, so its only slash-command surface is the machine-global prompts dir
-> `${CODEX_HOME:-~/.codex}/prompts/`. Selecting `codex` therefore writes the `/sdd-*`
-> prompts *outside* the target repo, into that shared dir (honoring `$CODEX_HOME`).
-> The bodies resolve their paths against `.harness/` of whatever repo Codex is
-> launched in, so one global copy drives every target — but the prompts are shared
-> across all harness installs on the machine (later installs overwrite them), and
-> Codex's in-repo entrypoint remains the always-written `AGENTS.md`.
+> `${CODEX_HOME:-~/.codex}/prompts/`. Selecting `codex` therefore writes the prompt
+> files *outside* the target repo, into that shared dir (honoring `$CODEX_HOME`; if
+> neither `CODEX_HOME` nor `HOME` is set — e.g. minimal CI — the Codex step is
+> skipped with a warning rather than failing the install). Codex surfaces a file
+> `sdd-next.md` as **`/prompts:sdd-next`** (namespaced under `/prompts:`, not
+> top-level `/sdd-next`). The bodies resolve their paths against `.harness/` of
+> whatever repo Codex is launched in, so one global copy drives every target — but
+> the prompts are shared across all harness installs on the machine (later installs
+> overwrite them), and Codex's in-repo entrypoint remains the always-written
+> `AGENTS.md`.
 
 ```bash
 # Non-interactive / CI — pick explicitly (no prompt):

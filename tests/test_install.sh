@@ -352,6 +352,19 @@ grep -qx codex "$TCD/.harness/.agents" && fail "R8: codex must be dropped from .
 rm -rf "$TCD"
 pass "codex deselect reclaims pristine GLOBAL prompts, preserves edits, warns (§7, R13)"
 
+# codex_no_home_skips_not_aborts (Codex r1 P2): with `set -eu` active, a codex install
+# where NEITHER CODEX_HOME nor HOME is set must SKIP the global prompts with a warning,
+# NOT abort the whole install on an unbound `$HOME`. (No-TTY default selects codex, so a
+# plain noninteractive install in minimal CI would otherwise fail.)
+TCH="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+_chwarn="$(env -u HOME -u CODEX_HOME sh "$SRC/harness-install.sh" --agents=codex "$TCH" 2>&1 >/dev/null)" \
+  || fail "codex install with no HOME/CODEX_HOME must not abort under set -u"
+[ -f "$TCH/AGENTS.md" ]  || fail "codex no-HOME: install must still complete (AGENTS.md written)"
+[ -d "$TCH/.harness" ]   || fail "codex no-HOME: install must still complete (.harness written)"
+printf '%s' "$_chwarn" | grep -qiF 'codex' || fail "codex no-HOME: skip must be warned about"
+rm -rf "$TCH"
+pass "codex install skips global prompts (never aborts) when HOME+CODEX_HOME unset (Codex r1 P2)"
+
 # unknown_agent_key_rejected (R7): an unknown override exits non-zero, names it, no changes.
 TE="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 _err="$(sh "$SRC/harness-install.sh" --agents=claude,bogus "$TE" 2>&1 >/dev/null)" && fail "R7: unknown key must exit non-zero"

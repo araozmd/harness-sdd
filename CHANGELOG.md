@@ -14,11 +14,14 @@ All notable changes to the harness body are recorded here. Versions follow
 - **GLOBAL `/sdd-*` prompts (§5d).** Codex CLI has no project-local custom-command
   mechanism, so its only slash-command surface is the machine-global prompts dir
   `${CODEX_HOME:-$HOME/.codex}/prompts/`. When `codex` is selected the installer stamps
-  the five `/sdd-next`, `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix` prompt bodies
+  the five `sdd-next`, `sdd-new`, `sdd-plan`, `sdd-drill`, `sdd-fix` prompt bodies
   there — byte-identical to the Claude/OpenCode/Antigravity copies (same `CMDDIR` source).
-  This is the one front-end whose glue lands **outside** `$TARGET`; the bodies resolve
-  their paths against `.harness/` of whatever repo Codex launches in, so a single global
-  copy drives every target. Honors `$CODEX_HOME`.
+  Codex surfaces each `<name>.md` as the slash command **`/prompts:<name>`** (namespaced
+  under `/prompts:`, not top-level `/<name>`). This is the one front-end whose glue lands
+  **outside** `$TARGET`; the bodies resolve their paths against `.harness/` of whatever
+  repo Codex launches in, so a single global copy drives every target. Honors `$CODEX_HOME`,
+  and when neither `CODEX_HOME` nor `HOME` is set (minimal CI) the Codex step is skipped
+  with a warning instead of aborting the install under `set -u`.
 - **No new entrypoint pointer.** Codex reads the always-written `AGENTS.md` from the repo
   root natively, so a `codex`-only install needs no dedicated entry file.
 - **Pristine-only deselect (§7).** Dropping `codex` reclaims only byte-pristine global
