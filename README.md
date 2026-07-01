@@ -246,7 +246,9 @@ generated stamp, never your edited files).
 > whatever repo Codex is launched in, so one global copy drives every target — but
 > the prompts are shared across all harness installs on the machine (later installs
 > overwrite them), and Codex's in-repo entrypoint remains the always-written
-> `AGENTS.md`.
+> `AGENTS.md`. A same-named prompt you authored yourself is never silently lost — the
+> installer backs it up once to `<name>.md.pre-harness.bak` and warns before writing
+> the harness copy.
 
 ```bash
 # Non-interactive / CI — pick explicitly (no prompt):

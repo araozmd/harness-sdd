@@ -365,6 +365,27 @@ printf '%s' "$_chwarn" | grep -qiF 'codex' || fail "codex no-HOME: skip must be 
 rm -rf "$TCH"
 pass "codex install skips global prompts (never aborts) when HOME+CODEX_HOME unset (Codex r1 P2)"
 
+# codex_install_preserves_preexisting_prompt (Codex r2 P2): the GLOBAL prompts dir is a
+# user-owned namespace — a same-named pre-existing prompt must be backed up (once), never
+# silently destroyed, when the install writes the harness copy over it.
+TCP="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CHP="$TCP/ch/prompts"
+mkdir -p "$CHP"
+printf 'MY OWN global codex prompt — do not lose\n' > "$CHP/sdd-next.md"
+CODEX_HOME="$TCP/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCP" >/dev/null 2>"$TCP/warn.txt" \
+  || fail "codex install over a pre-existing prompt exited non-zero"
+[ -f "$CHP/sdd-next.md.pre-harness.bak" ] || fail "codex: pre-existing global prompt not backed up"
+grep -qF 'MY OWN global codex prompt' "$CHP/sdd-next.md.pre-harness.bak" \
+  || fail "codex: backup does not contain the original user content"
+grep -qF '$ARGUMENTS' "$CHP/sdd-next.md" || fail "codex: harness prompt not installed over the backup"
+grep -qiF 'backed up' "$TCP/warn.txt" || fail "codex: overwrite of a user prompt not warned about"
+# re-run (upgrade): the ORIGINAL backup must be preserved, not clobbered by the now-harness file
+CODEX_HOME="$TCP/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCP" >/dev/null 2>&1 || fail "codex re-install failed"
+grep -qF 'MY OWN global codex prompt' "$CHP/sdd-next.md.pre-harness.bak" \
+  || fail "codex: re-run clobbered the original backup (must back up only once)"
+rm -rf "$TCP"
+pass "codex install backs up a pre-existing global prompt once, never destroys it (Codex r2 P2)"
+
 # unknown_agent_key_rejected (R7): an unknown override exits non-zero, names it, no changes.
 TE="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 _err="$(sh "$SRC/harness-install.sh" --agents=claude,bogus "$TE" 2>&1 >/dev/null)" && fail "R7: unknown key must exit non-zero"

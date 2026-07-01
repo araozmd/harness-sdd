@@ -1317,7 +1317,20 @@ EOF
     else
       mkdir -p "$_cdx"
       for _c in $HARNESS_SDD_CMDS; do
-        cp "$CMDDIR/$_c.md" "$_cdx/$_c.md"
+        _dst="$_cdx/$_c.md"
+        # This dir is a USER-owned global namespace, not a harness-owned workspace dir,
+        # so a same-named file may be the user's OWN pre-existing global prompt. Never
+        # silently destroy it: if an existing file differs from the harness body, back
+        # the ORIGINAL up ONCE (don't clobber a prior backup on repeated upgrades) and
+        # warn, then install. Absent or already-identical files are written directly.
+        # (Codex r2 P2.)
+        if [ -f "$_dst" ] && ! cmp -s "$_dst" "$CMDDIR/$_c.md"; then
+          if [ ! -f "$_dst.pre-harness.bak" ]; then
+            cp "$_dst" "$_dst.pre-harness.bak"
+            echo "⚠️  existing global Codex prompt $_dst backed up to $_dst.pre-harness.bak before installing the harness copy" >&2
+          fi
+        fi
+        cp "$CMDDIR/$_c.md" "$_dst"
       done
       # Codex surfaces a prompts-dir file `<name>.md` as the slash command
       # `/prompts:<name>` (NOT top-level `/<name>`) — advertise it that way.

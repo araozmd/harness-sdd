@@ -24,8 +24,11 @@ All notable changes to the harness body are recorded here. Versions follow
   with a warning instead of aborting the install under `set -u`.
 - **No new entrypoint pointer.** Codex reads the always-written `AGENTS.md` from the repo
   root natively, so a `codex`-only install needs no dedicated entry file.
+- **Non-destructive install.** The global prompts dir is a user-owned namespace, so a
+  same-named pre-existing prompt is backed up once to `<name>.md.pre-harness.bak` (never
+  clobbered on repeated upgrades) and warned about before the harness copy is written.
 - **Pristine-only deselect (§7).** Dropping `codex` reclaims only byte-pristine global
-  prompts (a user-edited `/sdd-*` prompt survives), mirroring the `opencode.json` /
+  prompts (a user-edited `/prompts:sdd-*` prompt survives), mirroring the `opencode.json` /
   Antigravity `cmp -s` contract, and prunes the prompts dir only when empty.
 - **Tests (`tests/test_install.sh`).** Sandboxes `CODEX_HOME` for the whole suite (never
   touches the real `~/.codex`); adds `--agents=codex` (global-prompts-only + byte-identical
