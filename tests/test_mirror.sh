@@ -172,6 +172,31 @@ EOF
   OUT="$(PATH="$T/bin3:$PATH" node "$HNA/tools/sync-board.mjs" --dry-run 2>&1)" || { echo "$OUT"; fail "no-assignee dry-run errored"; }
   printf '%s' "$OUT" | grep -Eqi 'assign' && { echo "$OUT"; fail "assignee unset but the mirror still touched assignees"; }
   pass "assignee unset ⇒ mirror never touches assignees [assignee_default_inert]"
+
+  # 9) case-insensitive idempotency — GitHub logins are case-insensitive, so a configured
+  #    login whose casing differs from the API's canonical spelling must be a NO-OP, not a
+  #    perpetual add+remove of the same account. Config assignee "OctoCat" vs an issue already
+  #    assigned "octocat" on an in-progress feature ⇒ no assign and no unassign lines.
+  mkdir -p "$T/bin4"
+  cat > "$T/bin4/gh" <<'EOF'
+#!/bin/sh
+case "$1 $2" in
+  "project view")       echo '{"id":"PID"}' ;;
+  "project field-list") echo '{"fields":[{"id":"FS","name":"Status","options":[{"id":"o","name":"in-progress"}]},{"id":"FE","name":"Epic","options":[{"id":"oe","name":"E01 — Demo"}]}]}' ;;
+  "project item-list")  echo '{"items":[{"id":"IT1","content":{"number":42}}]}' ;;
+  "issue list")         echo '[{"number":42,"title":"E01-F01 — X","url":"https://github.com/acme-org/specs/issues/42","state":"OPEN","assignees":[{"login":"octocat"}]}]' ;;
+  *)                    echo '{}' ;;
+esac
+exit 0
+EOF
+  chmod +x "$T/bin4/gh"
+  HCI="$T/h-caseidem"; mkdir -p "$HCI/tools" "$HCI/state"
+  cp "$TOOL" "$HCI/tools/sync-board.mjs"
+  printf '{"epics":[{"id":"E01","title":"Demo","features":[{"id":"E01-F01","title":"X","status":"in-progress"}]}]}\n' > "$HCI/state/tasks.json"
+  printf 'store:\n  tasks: local\nmirror:\n  board:\n    provider: "github-projects"\n    owner: "acme-org"\n    project_number: 7\n    repo: "acme-org/specs"\n    assignee: "OctoCat"\n' > "$HCI/harness.config.yaml"
+  OUT="$(PATH="$T/bin4:$PATH" node "$HCI/tools/sync-board.mjs" --dry-run 2>&1)" || { echo "$OUT"; fail "case-idempotency dry-run errored"; }
+  printf '%s' "$OUT" | grep -Eqi 'would (assign|unassign)' && { echo "$OUT"; fail "case-mismatched login was not idempotent (add/remove churn)"; }
+  pass "assignee diff is case-insensitive (login casing ⇒ no churn) [assignee_case_idempotent]"
 else
   pass "node-running cases skipped (node unavailable) [inert_default_noop]"
 fi

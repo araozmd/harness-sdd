@@ -249,8 +249,16 @@ for (const f of features) {
   if (ASSIGNEE) {
     const current = (issue.assignees || []).map((a) => a.login);
     const want = ASSIGNED_STATUSES.has(f.status) ? [ASSIGNEE] : [];
-    const toAdd = want.filter((l) => !current.includes(l));
-    const toRemove = current.filter((l) => !want.includes(l));
+    // GitHub logins are case-INSENSITIVE, so diff on lowercased logins — otherwise a config
+    // `octocat` vs an API-returned `OctoCat` would look both missing AND foreign and the sync
+    // would forever `--add octocat`/`--remove OctoCat` the same account (never idempotent). We
+    // keep the ORIGINAL spelling for the actual flags: the configured spelling for --add, the
+    // existing-issue spelling for --remove.
+    const lc = (s) => s.toLowerCase();
+    const currentLc = current.map(lc);
+    const wantLc = want.map(lc);
+    const toAdd = want.filter((l) => !currentLc.includes(lc(l)));
+    const toRemove = current.filter((l) => !wantLc.includes(lc(l)));
     if (toAdd.length || toRemove.length) {
       if (DRY) {
         if (toAdd.length)    log(`[dry-run] would assign #${issue.number} -> ${toAdd.join(', ')}`);
