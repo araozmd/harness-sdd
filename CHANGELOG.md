@@ -4,6 +4,11 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.23.1] — 2026-07-01
+
+### Added — ✨ claude-mem-context block
+- **Memory context block (`AGENTS.md`)** — adds `claude-mem-context` to the orchestrator documentation to maintain memory of recent context.
+
 ## [0.23.0] — 2026-06-12
 
 ### Added — ✨ Installer agent picker: arrow-key + spacebar checkbox UI (E99-F01)
