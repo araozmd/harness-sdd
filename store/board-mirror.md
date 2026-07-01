@@ -101,7 +101,7 @@ stub provider* below).
 For `github-projects`, set it to a GitHub login and the mirror fills the issue's
 **Assignees** field alongside Status/Epic. Assignment is **status-gated**: a feature's issue
 gets the assignee once work has actually started (`in-progress`, `in-review`, `done`) and is
-**unassigned** if it regresses to a not-started state (`pending`, `spec-ready`), so the board
+**cleared** if it regresses to a not-started state (`pending`, `spec-ready`), so the board
 always reflects who is on it *right now*. Empty (the default) ⇒ the mirror never touches
 assignees. Like every knob it lives in config, so an upgrade never clobbers it:
 
@@ -118,10 +118,16 @@ mirror:
 Use `"@me"` (or `"self"`) to resolve **dynamically** to the authed `gh` user at sync time —
 ideal for a shared-repo config where each developer's board should reflect their own
 ownership without hard-coding one login. The tool resolves `@me` to the real login via
-`gh api user` (so idempotency and un-assignment compare against `assignees[].login`); if that
-lookup fails it degrades to "skip assignment this run" rather than erroring. Assignment is
-idempotent — the API call is skipped when the issue already has the right assignee. Run
-`--dry-run` to preview the assign/unassign actions without mutating the board.
+`gh api user`; if that lookup fails it degrades to "skip assignment this run" rather than
+erroring. Assignment is idempotent — the add is skipped when the resolved login is already
+present. Run `--dry-run` to preview the assign/clear actions without mutating the board.
+
+When `assignee` is set, the mirror **owns** the Assignees field for the items it manages:
+the clear on a not-started status removes **every** current assignee, not just the configured
+one. That matters under a shared `@me` config — whoever runs the sync clears a *teammate's*
+stale assignment on a regressed item too (comparing only the current login would silently
+leave it behind). Corollary: don't hand-assign people to mirrored items you expect to stick
+through a not-started phase — the mirror is the source of truth for that field.
 
 ## Driving it from the post-write hook
 

@@ -10,11 +10,13 @@ All notable changes to the harness body are recorded here. Versions follow
 - **`assignee` config key (`tools/sync-board.mjs`)** — the board mirror can now fill the
   provider's assignee/owner field from a new, provider-neutral `mirror.board.assignee` key.
   Assignment is **status-gated**: a feature's item gets the assignee once work has started
-  (`in-progress`/`in-review`/`done`) and is **unassigned** when it regresses to a not-started
-  state (`pending`/`spec-ready`), so the board reflects who owns each item *right now*.
-  Empty (the default) ⇒ the mirror never touches assignees, so a preserved config behaves
-  exactly as before. Implemented for the `github-projects` provider; the `jira`/`azure-boards`
-  stubs ignore it until wired.
+  (`in-progress`/`in-review`/`done`) and is **cleared** when it regresses to a not-started
+  state (`pending`/`spec-ready`), so the board reflects who owns each item *right now*. When
+  `assignee` is set the mirror **owns** the Assignees field for its items — the clear removes
+  *every* current assignee, so under a shared `@me` config any runner also clears a teammate's
+  stale assignment on a regressed item. Empty (the default) ⇒ the mirror never touches
+  assignees, so a preserved config behaves exactly as before. Implemented for the
+  `github-projects` provider; the `jira`/`azure-boards` stubs ignore it until wired.
 - **Dynamic `"@me"` resolution** — `assignee: "@me"` (or `"self"`) resolves at sync time to
   the authed `gh` user via `gh api user`, so a shared-repo config reflects whoever runs the
   sync instead of hard-coding one login. Resolution failure degrades to "skip assignment this

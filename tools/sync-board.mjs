@@ -239,17 +239,21 @@ for (const f of features) {
     setField(EPIC_FIELD_ID, wantEpicOpt);
   }
 
-  // assign once work has started, clear it if the feature regresses to a not-started
-  // status. Idempotent: skip the API call when the issue is already in the right state.
+  // assign once work has started; clear on regression to a not-started status. When
+  // ASSIGNEE is configured the mirror OWNS the Assignees field for its items, so the
+  // clear removes EVERY current assignee — not just ASSIGNEE. This keeps the status-gated
+  // promise under a shared `@me` config: whoever runs the sync clears a teammate's stale
+  // assignment on a regressed item too (comparing only the current login would leave it).
+  // Idempotent: skip the API call when the issue is already in the right state.
   if (ASSIGNEE) {
-    const has = (issue.assignees || []).some((a) => a.login === ASSIGNEE);
+    const current = (issue.assignees || []).map((a) => a.login);
     const wantAssigned = ASSIGNED_STATUSES.has(f.status);
-    if (wantAssigned && !has) {
+    if (wantAssigned && !current.includes(ASSIGNEE)) {
       if (DRY) log(`[dry-run] would assign #${issue.number} -> ${ASSIGNEE}`);
       else { gh(['issue', 'edit', String(issue.number), '--repo', REPO, '--add-assignee', ASSIGNEE]); log(`[mirror]   #${issue.number} assigned -> ${ASSIGNEE}`); }
-    } else if (!wantAssigned && has) {
-      if (DRY) log(`[dry-run] would unassign #${issue.number} <- ${ASSIGNEE}`);
-      else { gh(['issue', 'edit', String(issue.number), '--repo', REPO, '--remove-assignee', ASSIGNEE]); log(`[mirror]   #${issue.number} unassigned ${ASSIGNEE}`); }
+    } else if (!wantAssigned && current.length) {
+      if (DRY) log(`[dry-run] would unassign #${issue.number} <- ${current.join(', ')}`);
+      else { gh(['issue', 'edit', String(issue.number), '--repo', REPO, ...current.flatMap((l) => ['--remove-assignee', l])]); log(`[mirror]   #${issue.number} unassigned ${current.join(', ')}`); }
     }
   }
 
