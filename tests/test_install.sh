@@ -404,6 +404,24 @@ grep -qF '$ARGUMENTS' "$CHE/sdd-next.md" || fail "codex: harness prompt not rein
 rm -rf "$TCE"
 pass "codex install captures + warns on a later user edit, never silent loss (Codex r3 P2)"
 
+# codex_legacy_fallback_never_reclaims_global (Codex r4 P2): a LEGACY upgrade (an install
+# with no persisted .harness/.agents) must NOT let the all-agents fallback trigger a codex
+# removal — the GLOBAL prompts dir is cross-target, and a legacy target predates codex, so
+# reclaiming pristine prompts there could destroy another target's glue.
+TLG="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+LGCH="$TLG/ch"
+# populate the GLOBAL prompts with pristine harness bodies (stand-in for another target's)
+CODEX_HOME="$LGCH" sh "$SRC/harness-install.sh" --agents=claude,codex "$TLG" >/dev/null 2>&1 || fail "legacy-fallback setup install failed"
+[ -f "$LGCH/prompts/sdd-next.md" ] || fail "legacy-fallback setup: global prompts not stamped"
+# simulate a legacy target: drop the persisted selection so PRIOR_AGENTS uses the fallback
+rm -f "$TLG/.harness/.agents"
+# re-run selecting only claude (excludes codex): fallback must NOT reclaim the global prompts
+CODEX_HOME="$LGCH" sh "$SRC/harness-install.sh" --agents=claude "$TLG" >/dev/null 2>&1 || fail "legacy-fallback re-run exited non-zero"
+[ -f "$LGCH/prompts/sdd-next.md" ] \
+  || fail "codex: legacy all-agents fallback wrongly reclaimed GLOBAL prompts (cross-target data loss)"
+rm -rf "$TLG"
+pass "codex legacy-fallback upgrade never reclaims cross-target GLOBAL prompts (Codex r4 P2)"
+
 # unknown_agent_key_rejected (R7): an unknown override exits non-zero, names it, no changes.
 TE="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 _err="$(sh "$SRC/harness-install.sh" --agents=claude,bogus "$TE" 2>&1 >/dev/null)" && fail "R7: unknown key must exit non-zero"

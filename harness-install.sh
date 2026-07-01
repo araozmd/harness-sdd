@@ -563,7 +563,15 @@ install_one() {
     # now-deselected glue (e.g. GEMINI.md, opencode.json) instead of leaving it
     # stale. A fresh install (UPGRADE=0) keeps PRIOR_AGENTS empty — nothing to
     # remove. (Codex P2 #3400941300.)
-    PRIOR_AGENTS="$(normalize_keys "$AGENT_KEYS")"
+    #
+    # EXCLUDE codex from this fallback: a legacy install (no persisted selection)
+    # predates the codex front-end entirely, so it never installed the GLOBAL codex
+    # prompts. Because that glue lives in a shared, cross-target `$CODEX_HOME/prompts`
+    # dir, letting the all-agents fallback assume prior codex ownership would reclaim
+    # pristine prompts that may belong to ANOTHER harness target. codex removal must
+    # therefore fire only from an EXPLICIT persisted prior selection, never this
+    # legacy baseline. (Codex r4 P2.)
+    PRIOR_AGENTS="$(normalize_keys "$AGENT_KEYS" | grep -vx codex)"
   fi
   resolve_agents "$TARGET"
 
