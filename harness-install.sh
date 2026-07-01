@@ -1320,16 +1320,20 @@ EOF
       for _c in $HARNESS_SDD_CMDS; do
         _dst="$_cdx/$_c.md"
         # This dir is a USER-owned global namespace, not a harness-owned workspace dir,
-        # so a same-named file may be the user's OWN pre-existing global prompt. Never
-        # silently destroy it: if an existing file differs from the harness body, back
-        # the ORIGINAL up ONCE (don't clobber a prior backup on repeated upgrades) and
-        # warn, then install. Absent or already-identical files are written directly.
-        # (Codex r2 P2.)
+        # so a same-named file may be the user's OWN prompt — an original, OR a later
+        # edit of a previously-installed one. Never silently lose it: if the current file
+        # differs from the harness body we're about to write, back it up and warn BEFORE
+        # overwriting. Refresh the backup whenever the current contents differ from what
+        # the backup already holds, so a post-install user edit is captured too (not just
+        # the first original) — otherwise a stale backup + silent clobber would drop the
+        # user's latest content. A routine re-install/upgrade where the current file is
+        # already the (identical) harness body never enters this branch, so it neither
+        # warns nor churns the backup. (Codex r2 P2 + r3 P2.)
         if [ -f "$_dst" ] && ! cmp -s "$_dst" "$CMDDIR/$_c.md"; then
-          if [ ! -f "$_dst.pre-harness.bak" ]; then
+          if [ ! -f "$_dst.pre-harness.bak" ] || ! cmp -s "$_dst" "$_dst.pre-harness.bak"; then
             cp "$_dst" "$_dst.pre-harness.bak"
-            echo "⚠️  existing global Codex prompt $_dst backed up to $_dst.pre-harness.bak before installing the harness copy" >&2
           fi
+          echo "⚠️  existing global Codex prompt $_dst differs from the harness copy — backed up to $_dst.pre-harness.bak before overwriting" >&2
         fi
         cp "$CMDDIR/$_c.md" "$_dst"
       done

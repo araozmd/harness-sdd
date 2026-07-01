@@ -384,7 +384,25 @@ CODEX_HOME="$TCP/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCP" >/dev/nu
 grep -qF 'MY OWN global codex prompt' "$CHP/sdd-next.md.pre-harness.bak" \
   || fail "codex: re-run clobbered the original backup (must back up only once)"
 rm -rf "$TCP"
-pass "codex install backs up a pre-existing global prompt once, never destroys it (Codex r2 P2)"
+pass "codex install backs up a pre-existing global prompt, never destroys it (Codex r2 P2)"
+
+# codex_install_never_silently_loses_a_later_edit (Codex r3 P2): once a backup exists, a
+# SUBSEQUENT user edit of the installed prompt must still be captured + warned on the next
+# install — not silently clobbered while the backup keeps older content.
+TCE="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CHE="$TCE/ch/prompts"
+CODEX_HOME="$TCE/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCE" >/dev/null 2>&1 || fail "codex edit-guard setup failed"
+[ -f "$CHE/sdd-next.md" ] || fail "codex edit-guard setup: prompt not stamped"
+# user edits the installed prompt AFTER install (no .bak yet — install wrote a fresh file)
+printf '\n# my later customization — must not vanish\n' >> "$CHE/sdd-next.md"
+_cewarn="$(CODEX_HOME="$TCE/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCE" 2>&1 >/dev/null)" \
+  || fail "codex re-install over an edited prompt exited non-zero"
+grep -qF 'my later customization' "$CHE/sdd-next.md.pre-harness.bak" \
+  || fail "codex: a later user edit was silently lost (backup did not capture it)"
+printf '%s' "$_cewarn" | grep -qiF 'sdd-next.md' || fail "codex: overwrite of an edited prompt was not warned about"
+grep -qF '$ARGUMENTS' "$CHE/sdd-next.md" || fail "codex: harness prompt not reinstalled after capturing the edit"
+rm -rf "$TCE"
+pass "codex install captures + warns on a later user edit, never silent loss (Codex r3 P2)"
 
 # unknown_agent_key_rejected (R7): an unknown override exits non-zero, names it, no changes.
 TE="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
