@@ -122,12 +122,14 @@ ownership without hard-coding one login. The tool resolves `@me` to the real log
 erroring. Assignment is idempotent — the add is skipped when the resolved login is already
 present. Run `--dry-run` to preview the assign/clear actions without mutating the board.
 
-When `assignee` is set, the mirror **owns** the Assignees field for the items it manages:
-the clear on a not-started status removes **every** current assignee, not just the configured
-one. That matters under a shared `@me` config — whoever runs the sync clears a *teammate's*
-stale assignment on a regressed item too (comparing only the current login would silently
-leave it behind). Corollary: don't hand-assign people to mirrored items you expect to stick
-through a not-started phase — the mirror is the source of truth for that field.
+When `assignee` is set, the mirror **owns** the Assignees field for the items it manages and
+**reconciles it to the exact desired set** every sync: a started item (`in-progress`,
+`in-review`, `done`) ends up with *exactly* the configured login — any other assignee is
+removed — and a not-started item (`pending`, `spec-ready`) ends up with none. That matters
+under a shared `@me` config: whoever runs the sync clears a *teammate's* stale assignment —
+whether the item is still in flight or has regressed — instead of leaving it behind.
+Corollary: don't hand-assign people to mirrored items; the mirror is the source of truth for
+that field and will reconcile them away.
 
 ## Driving it from the post-write hook
 

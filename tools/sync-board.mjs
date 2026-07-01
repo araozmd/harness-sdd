@@ -239,21 +239,29 @@ for (const f of features) {
     setField(EPIC_FIELD_ID, wantEpicOpt);
   }
 
-  // assign once work has started; clear on regression to a not-started status. When
-  // ASSIGNEE is configured the mirror OWNS the Assignees field for its items, so the
-  // clear removes EVERY current assignee — not just ASSIGNEE. This keeps the status-gated
-  // promise under a shared `@me` config: whoever runs the sync clears a teammate's stale
-  // assignment on a regressed item too (comparing only the current login would leave it).
-  // Idempotent: skip the API call when the issue is already in the right state.
+  // When ASSIGNEE is configured the mirror OWNS the Assignees field for its items, so it
+  // RECONCILES the field to the exact desired set every sync: a started feature
+  // (in-progress/in-review/done) should have EXACTLY the configured login; a not-started
+  // one (pending/spec-ready) none. That means both directions: ADD the configured login
+  // where missing AND REMOVE every other login — so a teammate left over from a shared `@me`
+  // sync (e.g. Alice, then Bob runs it) is cleared off a started item too, not only when it
+  // later regresses. Idempotent: one `gh issue edit` only when the sets actually differ.
   if (ASSIGNEE) {
     const current = (issue.assignees || []).map((a) => a.login);
-    const wantAssigned = ASSIGNED_STATUSES.has(f.status);
-    if (wantAssigned && !current.includes(ASSIGNEE)) {
-      if (DRY) log(`[dry-run] would assign #${issue.number} -> ${ASSIGNEE}`);
-      else { gh(['issue', 'edit', String(issue.number), '--repo', REPO, '--add-assignee', ASSIGNEE]); log(`[mirror]   #${issue.number} assigned -> ${ASSIGNEE}`); }
-    } else if (!wantAssigned && current.length) {
-      if (DRY) log(`[dry-run] would unassign #${issue.number} <- ${current.join(', ')}`);
-      else { gh(['issue', 'edit', String(issue.number), '--repo', REPO, ...current.flatMap((l) => ['--remove-assignee', l])]); log(`[mirror]   #${issue.number} unassigned ${current.join(', ')}`); }
+    const want = ASSIGNED_STATUSES.has(f.status) ? [ASSIGNEE] : [];
+    const toAdd = want.filter((l) => !current.includes(l));
+    const toRemove = current.filter((l) => !want.includes(l));
+    if (toAdd.length || toRemove.length) {
+      if (DRY) {
+        if (toAdd.length)    log(`[dry-run] would assign #${issue.number} -> ${toAdd.join(', ')}`);
+        if (toRemove.length) log(`[dry-run] would unassign #${issue.number} <- ${toRemove.join(', ')}`);
+      } else {
+        gh(['issue', 'edit', String(issue.number), '--repo', REPO,
+          ...toAdd.flatMap((l) => ['--add-assignee', l]),
+          ...toRemove.flatMap((l) => ['--remove-assignee', l])]);
+        if (toAdd.length)    log(`[mirror]   #${issue.number} assigned -> ${toAdd.join(', ')}`);
+        if (toRemove.length) log(`[mirror]   #${issue.number} unassigned ${toRemove.join(', ')}`);
+      }
     }
   }
 

@@ -132,12 +132,12 @@ EOF
   pass "status_map remaps board columns via config, no file edit [status_map_overrides_columns]"
 
   # 7) assignee ⇒ status-gated assign/unassign + dynamic "@me" resolution. A dispatching
-  #    fake gh resolves `gh api user` to a login and returns two pre-existing issues: one
-  #    for an in-progress feature (unassigned → should assign as the resolved login) and one
-  #    for a pending feature already assigned to a DIFFERENT user 'alice' (not-started →
-  #    should clear ALL assignees, proving the mirror owns the field and clears a teammate's
-  #    stale assignment, not just the current runner's). --dry-run reports both intents and
-  #    the "@me -> login" resolution, without mutating anything.
+  #    fake gh resolves `gh api user` to a login and returns two pre-existing issues, each
+  #    already assigned to a DIFFERENT user. The mirror owns the field and RECONCILES to the
+  #    exact desired set: the in-progress feature (assigned 'carol') should reconcile to the
+  #    resolved login — add resolveduser AND remove carol; the pending feature (assigned
+  #    'alice') should clear to none. --dry-run reports all three intents and the
+  #    "@me -> login" resolution, without mutating anything.
   mkdir -p "$T/bin3"
   cat > "$T/bin3/gh" <<'EOF'
 #!/bin/sh
@@ -146,7 +146,7 @@ case "$1 $2" in
   "project view")       echo '{"id":"PID"}' ;;
   "project field-list") echo '{"fields":[{"id":"FS","name":"Status","options":[{"id":"o","name":"in-progress"}]},{"id":"FE","name":"Epic","options":[{"id":"oe","name":"E01 — Demo"}]}]}' ;;
   "project item-list")  echo '{"items":[{"id":"IT1","content":{"number":42}},{"id":"IT2","content":{"number":43}}]}' ;;
-  "issue list")         echo '[{"number":42,"title":"E01-F01 — X","url":"https://github.com/acme-org/specs/issues/42","state":"OPEN","assignees":[]},{"number":43,"title":"E01-F02 — Y","url":"https://github.com/acme-org/specs/issues/43","state":"OPEN","assignees":[{"login":"alice"}]}]' ;;
+  "issue list")         echo '[{"number":42,"title":"E01-F01 — X","url":"https://github.com/acme-org/specs/issues/42","state":"OPEN","assignees":[{"login":"carol"}]},{"number":43,"title":"E01-F02 — Y","url":"https://github.com/acme-org/specs/issues/43","state":"OPEN","assignees":[{"login":"alice"}]}]' ;;
   *)                    echo '{}' ;;
 esac
 exit 0
@@ -158,9 +158,10 @@ EOF
   printf 'store:\n  tasks: local\nmirror:\n  board:\n    provider: "github-projects"\n    owner: "acme-org"\n    project_number: 7\n    repo: "acme-org/specs"\n    assignee: "@me"\n' > "$HAS/harness.config.yaml"
   OUT="$(PATH="$T/bin3:$PATH" node "$HAS/tools/sync-board.mjs" --dry-run 2>&1)" || { echo "$OUT"; fail "assignee dry-run errored"; }
   printf '%s' "$OUT" | grep -q "@me' -> resolveduser"          || { echo "$OUT"; fail "'@me' was not resolved to the authed gh login"; }
-  printf '%s' "$OUT" | grep -q 'would assign #42 -> resolveduser'   || { echo "$OUT"; fail "in-progress feature was not assigned"; }
+  printf '%s' "$OUT" | grep -q 'would assign #42 -> resolveduser'   || { echo "$OUT"; fail "in-progress feature was not assigned the resolved login"; }
+  printf '%s' "$OUT" | grep -q 'would unassign #42 <- carol'        || { echo "$OUT"; fail "started item did not reconcile off a foreign assignee"; }
   printf '%s' "$OUT" | grep -q 'would unassign #43 <- alice'        || { echo "$OUT"; fail "not-started feature did not clear a teammate's stale assignee"; }
-  pass "assignee: @me resolves + status-gates assign/clears any stale assignee [assignee_status_gated]"
+  pass "assignee: @me resolves + reconciles started/not-started to the exact set [assignee_status_gated]"
 
   # 8) assignee UNSET ⇒ the mirror never touches assignees (back-compat: no assign/unassign
   #    log lines even though issues exist and statuses vary).
