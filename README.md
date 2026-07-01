@@ -71,7 +71,7 @@ approves) → `builder` → `reviewer`.
 | CLI | Entry file | Sub-agents |
 |---|---|---|
 | **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next` |
-| **Codex** | `AGENTS.md` (native) | run roles sequentially; hand off via files |
+| **Codex** | `AGENTS.md` (native) | run roles sequentially; **global** `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next` prompts in `${CODEX_HOME:-~/.codex}/prompts/` |
 | **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
 | **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*` (`/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next`) |
 | **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/agents/*` personas + `.agents/workflows/*` slash commands (`/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next`) |
@@ -209,6 +209,7 @@ umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
 .opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
 .agents/                     Antigravity glue — rules + agent personas + workflows (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
+${CODEX_HOME:-~/.codex}/prompts/  Codex CLI slash-command prompts (GLOBAL, not in-repo — /sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
 ```
 
 ## Installing into an existing project
@@ -226,13 +227,22 @@ workspace. Re-run to upgrade — project-authored specs/state are never clobbere
 **Choosing which agents to support.** The shared portable entrypoint `AGENTS.md` is
 always written, but each coding agent's front-end is **opt-in**. On an interactive
 terminal the installer shows a checkbox-style toggle list — `claude`, `gemini`,
-`opencode`, `antigravity` — and stamps only the ones you pick. The choice is saved to
-`.harness/.agents`, so **every re-run re-prompts with your current selection
+`opencode`, `antigravity`, `codex` — and stamps only the ones you pick. The choice is
+saved to `.harness/.agents`, so **every re-run re-prompts with your current selection
 pre-checked** — add or drop an agent any time, even when the harness version hasn't
 changed. Deselecting an agent removes only the harness-generated glue (your own
 `.claude/`/`.opencode/`/`.agents/` files and a hand-edited `opencode.json` are left
-untouched — Antigravity glue is removed only when byte-identical to a freshly generated
-stamp, never your edited files).
+untouched — Antigravity and Codex glue are removed only when byte-identical to a freshly
+generated stamp, never your edited files).
+
+> **Note — Codex is GLOBAL.** Codex CLI has no project-local custom-command
+> mechanism, so its only slash-command surface is the machine-global prompts dir
+> `${CODEX_HOME:-~/.codex}/prompts/`. Selecting `codex` therefore writes the `/sdd-*`
+> prompts *outside* the target repo, into that shared dir (honoring `$CODEX_HOME`).
+> The bodies resolve their paths against `.harness/` of whatever repo Codex is
+> launched in, so one global copy drives every target — but the prompts are shared
+> across all harness installs on the machine (later installs overwrite them), and
+> Codex's in-repo entrypoint remains the always-written `AGENTS.md`.
 
 ```bash
 # Non-interactive / CI — pick explicitly (no prompt):

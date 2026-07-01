@@ -4,6 +4,31 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.24.0] — 2026-07-01
+
+### Added — ✨ Codex CLI front-end (`codex` agent key)
+- **`codex` is now a selectable front-end (`harness-install.sh`).** Added to `AGENT_KEYS`
+  (`claude gemini opencode antigravity codex`), so it appears in the interactive picker,
+  is individually selectable via `--agents=codex` / `HARNESS_AGENTS`, and persists to
+  `.harness/.agents` like every other agent.
+- **GLOBAL `/sdd-*` prompts (§5d).** Codex CLI has no project-local custom-command
+  mechanism, so its only slash-command surface is the machine-global prompts dir
+  `${CODEX_HOME:-$HOME/.codex}/prompts/`. When `codex` is selected the installer stamps
+  the five `/sdd-next`, `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix` prompt bodies
+  there — byte-identical to the Claude/OpenCode/Antigravity copies (same `CMDDIR` source).
+  This is the one front-end whose glue lands **outside** `$TARGET`; the bodies resolve
+  their paths against `.harness/` of whatever repo Codex launches in, so a single global
+  copy drives every target. Honors `$CODEX_HOME`.
+- **No new entrypoint pointer.** Codex reads the always-written `AGENTS.md` from the repo
+  root natively, so a `codex`-only install needs no dedicated entry file.
+- **Pristine-only deselect (§7).** Dropping `codex` reclaims only byte-pristine global
+  prompts (a user-edited `/sdd-*` prompt survives), mirroring the `opencode.json` /
+  Antigravity `cmp -s` contract, and prunes the prompts dir only when empty.
+- **Tests (`tests/test_install.sh`).** Sandboxes `CODEX_HOME` for the whole suite (never
+  touches the real `~/.codex`); adds `--agents=codex` (global-prompts-only + byte-identical
+  to peers) and codex-deselect (pristine reclaim, edit-preserving, warns) cases; extends the
+  ALL-default and registry-key coverage to include `codex`.
+
 ## [0.23.1] — 2026-07-01
 
 ### Added — ✨ claude-mem-context block

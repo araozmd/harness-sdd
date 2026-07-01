@@ -11,6 +11,9 @@ SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 INSTALL="$SRC/harness-install.sh"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-cascade)"
 trap 'rm -rf "$T"' EXIT
+# Sandbox Codex's GLOBAL prompts dir (§5d) so ALL-default installs below never touch
+# the developer's real ~/.codex. (See test_install.sh for the same guard.)
+export CODEX_HOME="$T/codex-home"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }

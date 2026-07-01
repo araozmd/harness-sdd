@@ -216,9 +216,12 @@ _mc_insert_after() {
 #
 # The selectable keys — the ONLY legal tokens for `--agents`/`HARNESS_AGENTS`,
 # the `.harness/.agents` state file, and the toggle UI — are exactly:
-AGENT_KEYS="claude gemini opencode antigravity"
+AGENT_KEYS="claude gemini opencode antigravity codex"
 # AGENTS.md (the shared portable entrypoint) is deliberately NOT a key: it is
-# always written, never gated, never removed (see write_pointer AGENTS.md).
+# always written, never gated, never removed (see write_pointer AGENTS.md). It
+# also doubles as Codex CLI's native entrypoint — Codex reads AGENTS.md from the
+# repo root with no glue, so `codex` needs no entrypoint pointer of its own; its
+# only stamped glue is the GLOBAL /sdd-* prompts (§5d).
 #
 # Harness-OWNED generated basenames (stems; all files are <stem>.md). These are the
 # ONLY files a deselection may delete, so a selective re-run never removes a user's
@@ -265,7 +268,7 @@ validate_csv() {
 }
 
 # toggle_select <baseline-newline-list> — pure-`read` numbered toggle UI (R1, R9).
-# Only ever called on an interactive TTY. Prints the four keys numbered with each
+# Only ever called on an interactive TTY. Prints the agent keys numbered with each
 # key's pre-check state taken from <baseline>; the user types space/comma-separated
 # numbers to toggle entries, then a blank line (or `done`) confirms. Prints the
 # resolved sorted keys (one per line) on stdout; all prompts go to stderr so the
@@ -336,7 +339,7 @@ tui_capable() {
 
 # tui_select <baseline-newline-list> — raw-mode arrow-key + spacebar checkbox UI
 # (the preferred interactive picker; falls back via resolve_agents to toggle_select
-# when tui_capable is false). Renders the four agent keys as a cursor-driven list:
+# when tui_capable is false). Renders the agent keys as a cursor-driven list:
 #   ↑/↓ (or k/j) move a `>` cursor · Space toggles the highlighted [x]/[ ] · Enter
 #   confirms · q/Esc confirms the current selection too.
 # Pre-check state seeds from <baseline> exactly as toggle_select does. ALL UI goes to
@@ -925,6 +928,8 @@ EOF
   }
 
   # AGENTS.md is the shared portable entrypoint — ALWAYS written, never gated (R2 note).
+  # It is also Codex CLI's native repo entrypoint (Codex reads AGENTS.md with no glue),
+  # so a `codex`-only install needs no dedicated pointer here — AGENTS.md already serves it.
   write_pointer AGENTS.md
   # Per-agent entrypoint pointers are gated on selection (R2/R3/R4).
   agent_selected claude && write_pointer CLAUDE.md
@@ -1271,6 +1276,30 @@ EOF
     ok "Antigravity glue (rules + agents + workflows) installed (.agents/)"
   fi
 
+  # ── 5d. Codex CLI prompts (GLOBAL, gated on `codex`) ─────────────────────────
+  # Codex CLI has no project-local custom-command mechanism (no `.codex/commands/`
+  # or workspace-local prompts dir it reads). Its ONLY custom-slash-command surface
+  # is the GLOBAL prompts dir `${CODEX_HOME:-$HOME/.codex}/prompts/*.md`, where each
+  # `<name>.md` registers as `/<name>`. So — unlike every other front-end, whose glue
+  # is workspace-local under $TARGET — the `codex` stamp writes OUTSIDE the target, to
+  # a single machine-global dir. Consequences, by design (accepted at install time):
+  #   • the prompts are shared by EVERY harness target on this machine (they overwrite
+  #     each other), and are not scoped per-repo;
+  #   • that is harmless because each body resolves its relative paths against `.harness/`
+  #     of whatever repo Codex is launched in (Codex runs from the repo root and reads
+  #     that repo's AGENTS.md), so ONE global copy correctly drives any target;
+  #   • deselect removal (§7) only reclaims byte-pristine copies (a user edit survives),
+  #     and honors $CODEX_HOME so it never touches an unrelated home.
+  # Copies the same CMDDIR bodies as §5b/§5c, so all front-ends stay byte-identical.
+  if agent_selected codex; then
+    _cdx="${CODEX_HOME:-$HOME/.codex}/prompts"
+    mkdir -p "$_cdx"
+    for _c in $HARNESS_SDD_CMDS; do
+      cp "$CMDDIR/$_c.md" "$_cdx/$_c.md"
+    done
+    ok "Codex CLI prompts /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix installed (GLOBAL: $_cdx)"
+  fi
+
   # NOTE: CMDDIR cleanup is intentionally DEFERRED to AFTER §7 — the antigravity
   # deselect compare byte-checks each `.agents/workflows/<name>.md` against the
   # source `$CMDDIR/<name>.md`, so the temp workflow bodies must stay available
@@ -1379,6 +1408,28 @@ EOF
             remove_pointer GEMINI.md
             echo "⚠️  removed deselected agent 'antigravity' glue: GEMINI.md harness block" >&2
           fi
+          ;;
+        codex)
+          # §5d installs GLOBAL prompts to ${CODEX_HOME:-$HOME/.codex}/prompts. Reclaim
+          # ONLY byte-pristine copies (cmp -s against the still-present $CMDDIR source),
+          # so a user-edited /sdd-* prompt survives — mirroring the opencode.json /
+          # antigravity pristine-only contract. Honors $CODEX_HOME. NOTE: these prompts
+          # are machine-global and may be shared by another harness target that still
+          # selects `codex`; a subsequent install there re-stamps them (bodies are
+          # regenerated every run), so removal here is safe but announced as GLOBAL.
+          _cdx="${CODEX_HOME:-$HOME/.codex}/prompts"
+          _cdx_removed=""
+          for _cdw in $HARNESS_SDD_CMDS; do
+            [ -f "$CMDDIR/$_cdw.md" ] || continue
+            if [ -f "$_cdx/$_cdw.md" ] && cmp -s "$_cdx/$_cdw.md" "$CMDDIR/$_cdw.md"; then
+              rm -f "$_cdx/$_cdw.md"
+              _cdx_removed="$_cdx_removed $_cdw.md"
+            elif [ -f "$_cdx/$_cdw.md" ]; then
+              echo "⚠️  $_cdx/$_cdw.md differs from the generated prompt (edited) — left in place (deselected 'codex' not fully removed)" >&2
+            fi
+          done
+          [ -n "$_cdx_removed" ] && echo "⚠️  removed deselected agent 'codex' glue:$_cdx_removed (in $_cdx/ — GLOBAL, shared prompts)" >&2
+          rmdir "$_cdx" 2>/dev/null || true   # prune only if now empty
           ;;
       esac
     done
