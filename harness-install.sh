@@ -217,9 +217,12 @@ _mc_insert_after() {
 #
 # The selectable keys — the ONLY legal tokens for `--agents`/`HARNESS_AGENTS`,
 # the `.harness/.agents` state file, and the toggle UI — are exactly:
-AGENT_KEYS="claude gemini opencode antigravity"
+AGENT_KEYS="claude gemini opencode antigravity codex"
 # AGENTS.md (the shared portable entrypoint) is deliberately NOT a key: it is
-# always written, never gated, never removed (see write_pointer AGENTS.md).
+# always written, never gated, never removed (see write_pointer AGENTS.md). It
+# also doubles as Codex CLI's native entrypoint — Codex reads AGENTS.md from the
+# repo root with no glue, so `codex` needs no entrypoint pointer of its own; its
+# only stamped glue is the GLOBAL /sdd-* prompts (§5d).
 #
 # Harness-OWNED generated basenames (stems; all files are <stem>.md). These are the
 # ONLY files a deselection may delete, so a selective re-run never removes a user's
@@ -245,6 +248,21 @@ normalize_keys() {
   printf '%s\n' "$1" | tr ' ' '\n' | grep -v '^$' | sort -u
 }
 
+# codex_prompts_dir — print the GLOBAL Codex prompts dir, or nothing if it cannot be
+# resolved. Codex reads custom prompts from `$CODEX_HOME/prompts` (default `~/.codex`).
+# Under `set -u` a bare `$HOME` expansion aborts the WHOLE install when neither var is
+# set (minimal CI/container/systemd) — and since the no-TTY default selects codex, even
+# a plain noninteractive install would hit it (Codex r1 P2). So resolve defensively:
+# prefer CODEX_HOME, fall back to HOME, and emit EMPTY (never a bare `/.codex`) when
+# neither is set so callers can warn-and-skip instead of crashing or writing to `/`.
+codex_prompts_dir() {
+  if [ -n "${CODEX_HOME:-}" ]; then
+    printf '%s\n' "${CODEX_HOME}/prompts"
+  elif [ -n "${HOME:-}" ]; then
+    printf '%s\n' "${HOME}/.codex/prompts"
+  fi
+}
+
 # validate_csv <csv> — split a comma-separated override on commas, trim each token,
 # drop empties, de-duplicate, validate each against the registry; `die` non-zero
 # naming the first unknown token (R7). On success, print the sorted keys (one per
@@ -266,7 +284,7 @@ validate_csv() {
 }
 
 # toggle_select <baseline-newline-list> — pure-`read` numbered toggle UI (R1, R9).
-# Only ever called on an interactive TTY. Prints the four keys numbered with each
+# Only ever called on an interactive TTY. Prints the agent keys numbered with each
 # key's pre-check state taken from <baseline>; the user types space/comma-separated
 # numbers to toggle entries, then a blank line (or `done`) confirms. Prints the
 # resolved sorted keys (one per line) on stdout; all prompts go to stderr so the
@@ -337,7 +355,7 @@ tui_capable() {
 
 # tui_select <baseline-newline-list> — raw-mode arrow-key + spacebar checkbox UI
 # (the preferred interactive picker; falls back via resolve_agents to toggle_select
-# when tui_capable is false). Renders the four agent keys as a cursor-driven list:
+# when tui_capable is false). Renders the agent keys as a cursor-driven list:
 #   ↑/↓ (or k/j) move a `>` cursor · Space toggles the highlighted [x]/[ ] · Enter
 #   confirms · q/Esc confirms the current selection too.
 # Pre-check state seeds from <baseline> exactly as toggle_select does. ALL UI goes to
@@ -545,7 +563,15 @@ install_one() {
     # now-deselected glue (e.g. GEMINI.md, opencode.json) instead of leaving it
     # stale. A fresh install (UPGRADE=0) keeps PRIOR_AGENTS empty — nothing to
     # remove. (Codex P2 #3400941300.)
-    PRIOR_AGENTS="$(normalize_keys "$AGENT_KEYS")"
+    #
+    # EXCLUDE codex from this fallback: a legacy install (no persisted selection)
+    # predates the codex front-end entirely, so it never installed the GLOBAL codex
+    # prompts. Because that glue lives in a shared, cross-target `$CODEX_HOME/prompts`
+    # dir, letting the all-agents fallback assume prior codex ownership would reclaim
+    # pristine prompts that may belong to ANOTHER harness target. codex removal must
+    # therefore fire only from an EXPLICIT persisted prior selection, never this
+    # legacy baseline. (Codex r4 P2.)
+    PRIOR_AGENTS="$(normalize_keys "$AGENT_KEYS" | grep -vx codex)"
   fi
   resolve_agents "$TARGET"
 
@@ -926,6 +952,8 @@ EOF
   }
 
   # AGENTS.md is the shared portable entrypoint — ALWAYS written, never gated (R2 note).
+  # It is also Codex CLI's native repo entrypoint (Codex reads AGENTS.md with no glue),
+  # so a `codex`-only install needs no dedicated pointer here — AGENTS.md already serves it.
   write_pointer AGENTS.md
   # Per-agent entrypoint pointers are gated on selection (R2/R3/R4).
   agent_selected claude && write_pointer CLAUDE.md
@@ -1272,6 +1300,57 @@ EOF
     ok "Antigravity glue (rules + agents + workflows) installed (.agents/)"
   fi
 
+  # ── 5d. Codex CLI prompts (GLOBAL, gated on `codex`) ─────────────────────────
+  # Codex CLI has no project-local custom-command mechanism (no `.codex/commands/`
+  # or workspace-local prompts dir it reads). Its ONLY custom-slash-command surface
+  # is the GLOBAL prompts dir `${CODEX_HOME:-$HOME/.codex}/prompts/*.md`, where each
+  # `<name>.md` registers as the slash command `/prompts:<name>` (Codex namespaces
+  # prompt files under `/prompts:`, NOT top-level `/<name>`). So — unlike every other
+  # front-end, whose glue
+  # is workspace-local under $TARGET — the `codex` stamp writes OUTSIDE the target, to
+  # a single machine-global dir. Consequences, by design (accepted at install time):
+  #   • the prompts are shared by EVERY harness target on this machine (they overwrite
+  #     each other), and are not scoped per-repo;
+  #   • that is harmless because each body resolves its relative paths against `.harness/`
+  #     of whatever repo Codex is launched in (Codex runs from the repo root and reads
+  #     that repo's AGENTS.md), so ONE global copy correctly drives any target;
+  #   • deselect removal (§7) only reclaims byte-pristine copies (a user edit survives),
+  #     and honors $CODEX_HOME so it never touches an unrelated home.
+  # Copies the same CMDDIR bodies as §5b/§5c, so all front-ends stay byte-identical.
+  if agent_selected codex; then
+    _cdx="$(codex_prompts_dir)"
+    if [ -z "$_cdx" ]; then
+      # Neither CODEX_HOME nor HOME set: skip Codex glue rather than abort the whole
+      # install (other front-ends must still complete). (Codex r1 P2.)
+      echo "⚠️  codex selected but neither CODEX_HOME nor HOME is set — skipping GLOBAL /prompts:sdd-* install" >&2
+    else
+      mkdir -p "$_cdx"
+      for _c in $HARNESS_SDD_CMDS; do
+        _dst="$_cdx/$_c.md"
+        # This dir is a USER-owned global namespace, not a harness-owned workspace dir,
+        # so a same-named file may be the user's OWN prompt — an original, OR a later
+        # edit of a previously-installed one. Never silently lose it: if the current file
+        # differs from the harness body we're about to write, back it up and warn BEFORE
+        # overwriting. Refresh the backup whenever the current contents differ from what
+        # the backup already holds, so a post-install user edit is captured too (not just
+        # the first original) — otherwise a stale backup + silent clobber would drop the
+        # user's latest content. A routine re-install/upgrade where the current file is
+        # already the (identical) harness body never enters this branch, so it neither
+        # warns nor churns the backup. (Codex r2 P2 + r3 P2.)
+        if [ -f "$_dst" ] && ! cmp -s "$_dst" "$CMDDIR/$_c.md"; then
+          if [ ! -f "$_dst.pre-harness.bak" ] || ! cmp -s "$_dst" "$_dst.pre-harness.bak"; then
+            cp "$_dst" "$_dst.pre-harness.bak"
+          fi
+          echo "⚠️  existing global Codex prompt $_dst differs from the harness copy — backed up to $_dst.pre-harness.bak before overwriting" >&2
+        fi
+        cp "$CMDDIR/$_c.md" "$_dst"
+      done
+      # Codex surfaces a prompts-dir file `<name>.md` as the slash command
+      # `/prompts:<name>` (NOT top-level `/<name>`) — advertise it that way.
+      ok "Codex CLI prompts /prompts:sdd-next + /prompts:sdd-new + /prompts:sdd-plan + /prompts:sdd-drill + /prompts:sdd-fix installed (GLOBAL: $_cdx)"
+    fi
+  fi
+
   # NOTE: CMDDIR cleanup is intentionally DEFERRED to AFTER §7 — the antigravity
   # deselect compare byte-checks each `.agents/workflows/<name>.md` against the
   # source `$CMDDIR/<name>.md`, so the temp workflow bodies must stay available
@@ -1379,6 +1458,30 @@ EOF
           if ! agent_selected gemini; then
             remove_pointer GEMINI.md
             echo "⚠️  removed deselected agent 'antigravity' glue: GEMINI.md harness block" >&2
+          fi
+          ;;
+        codex)
+          # §5d installs GLOBAL prompts to ${CODEX_HOME:-$HOME/.codex}/prompts. Reclaim
+          # ONLY byte-pristine copies (cmp -s against the still-present $CMDDIR source),
+          # so a user-edited /sdd-* prompt survives — mirroring the opencode.json /
+          # antigravity pristine-only contract. Honors $CODEX_HOME. NOTE: these prompts
+          # are machine-global and may be shared by another harness target that still
+          # selects `codex`; a subsequent install there re-stamps them (bodies are
+          # regenerated every run), so removal here is safe but announced as GLOBAL.
+          _cdx="$(codex_prompts_dir)"
+          if [ -n "$_cdx" ]; then
+            _cdx_removed=""
+            for _cdw in $HARNESS_SDD_CMDS; do
+              [ -f "$CMDDIR/$_cdw.md" ] || continue
+              if [ -f "$_cdx/$_cdw.md" ] && cmp -s "$_cdx/$_cdw.md" "$CMDDIR/$_cdw.md"; then
+                rm -f "$_cdx/$_cdw.md"
+                _cdx_removed="$_cdx_removed $_cdw.md"
+              elif [ -f "$_cdx/$_cdw.md" ]; then
+                echo "⚠️  $_cdx/$_cdw.md differs from the generated prompt (edited) — left in place (deselected 'codex' not fully removed)" >&2
+              fi
+            done
+            [ -n "$_cdx_removed" ] && echo "⚠️  removed deselected agent 'codex' glue:$_cdx_removed (in $_cdx/ — GLOBAL, shared prompts)" >&2
+            rmdir "$_cdx" 2>/dev/null || true   # prune only if now empty
           fi
           ;;
       esac

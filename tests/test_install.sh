@@ -10,6 +10,12 @@ SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 trap 'rm -rf "$T"' EXIT
 
+# The `codex` front-end (§5d) installs GLOBAL prompts into
+# ${CODEX_HOME:-$HOME/.codex}/prompts. Sandbox CODEX_HOME under the temp dir for the
+# WHOLE suite so no installer run can ever write to the developer's real ~/.codex.
+# (Codex-specific tests below still override CODEX_HOME per-run for crisp isolation.)
+export CODEX_HOME="$T/codex-home"
+
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
@@ -221,26 +227,27 @@ pass "arg guards reject bad invocations (R9)"
 # All installer invocations here run via `sh …` with non-TTY stdin, so selection is
 # driven deterministically by --agents / HARNESS_AGENTS (never the interactive prompt).
 
-# default_all_when_no_persisted (R1) + all_four_front_ends_present (R6): a no-override,
-# no-TTY run resolves to ALL four agents (back-compat: this is the historical behavior,
+# default_all_when_no_persisted (R1) + all_front_ends_present (R6): a no-override,
+# no-TTY run resolves to ALL agents (back-compat: this is the historical behavior,
 # and the proxy for "fresh install pre-checks ALL when .harness/.agents is absent").
 TA="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-sh "$SRC/harness-install.sh" "$TA" >/dev/null || fail "no-override install exited non-zero"
+CODEX_HOME="$TA/ch" sh "$SRC/harness-install.sh" "$TA" >/dev/null || fail "no-override install exited non-zero"
 [ -f "$TA/CLAUDE.md" ]       || fail "R6: no-override run did not stamp claude (CLAUDE.md)"
 [ -f "$TA/GEMINI.md" ]       || fail "R6: no-override run did not stamp gemini (GEMINI.md)"
 [ -f "$TA/opencode.json" ]   || fail "R6: no-override run did not stamp opencode (opencode.json)"
 [ -d "$TA/.claude/commands" ] || fail "R6: no-override run did not stamp claude glue"
 [ -d "$TA/.opencode/command" ] || fail "R6: no-override run did not stamp opencode glue"
+[ -f "$TA/ch/prompts/sdd-next.md" ] || fail "R6: no-override run did not stamp codex glue (GLOBAL prompts)"
 [ -f "$TA/.harness/.agents" ] || fail "R8: .harness/.agents not written on no-override run"
-for _k in claude gemini opencode antigravity; do
+for _k in claude gemini opencode antigravity codex; do
   grep -qx "$_k" "$TA/.harness/.agents" || fail "R1/R6: .harness/.agents missing '$_k' on ALL default"
 done
 rm -rf "$TA"
-pass "no-TTY no-override run stamps ALL four agents + persists ALL (R1, R6)"
+pass "no-TTY no-override run stamps ALL front-ends + persists ALL (R1, R6)"
 
 # agents_claude_only_stamps_claude (R2, R3, R4): --agents=claude stamps only Claude.
 TB="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-sh "$SRC/harness-install.sh" --agents=claude "$TB" >/dev/null || fail "--agents=claude exited non-zero"
+CODEX_HOME="$TB/ch" sh "$SRC/harness-install.sh" --agents=claude "$TB" >/dev/null || fail "--agents=claude exited non-zero"
 [ -f "$TB/CLAUDE.md" ]        || fail "R2/R3: --agents=claude did not write CLAUDE.md"
 [ -d "$TB/.claude/agents" ]   || fail "R2/R3: --agents=claude did not write .claude/agents"
 [ -d "$TB/.claude/commands" ] || fail "R2/R3: --agents=claude did not write .claude/commands"
@@ -249,6 +256,7 @@ sh "$SRC/harness-install.sh" --agents=claude "$TB" >/dev/null || fail "--agents=
 [ -f "$TB/opencode.json" ]    && fail "R4: --agents=claude must not write opencode.json"
 [ -d "$TB/.opencode" ]        && fail "R4: --agents=claude must not write .opencode/"
 [ -d "$TB/.agents" ]          && fail "R4: --agents=claude must not write .agents/"
+[ -d "$TB/ch/prompts" ]       && fail "R4: --agents=claude must not write codex global prompts"
 rm -rf "$TB"
 pass "--agents=claude stamps only Claude, no other front-ends (R2, R3, R4)"
 
@@ -278,7 +286,7 @@ rm -rf "$TD2"
 pass "explicit --agents / HARNESS_AGENTS override resolves the set, --agents wins (R5)"
 
 # registry_keys (R10): every registry key is individually selectable.
-for _k in claude gemini opencode antigravity; do
+for _k in claude gemini opencode antigravity codex; do
   TK="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
   sh "$SRC/harness-install.sh" --agents="$_k" "$TK" >/dev/null || fail "R10: --agents=$_k exited non-zero"
   grep -qx "$_k" "$TK/.harness/.agents" || fail "R10: '$_k' not selectable/persisted"
@@ -299,6 +307,120 @@ grep -qF '.harness/AGENTS.md' "$TAG/GEMINI.md"       || fail "R1: antigravity-on
 [ -f "$TAG/opencode.json" ] && fail "R4: antigravity-only must not write opencode.json"
 rm -rf "$TAG"
 pass "--agents=antigravity writes GEMINI.md entrypoint (R1, Codex r1 P2)"
+
+# codex_only_stamps_global_prompts (§5d): --agents=codex writes the /sdd-* prompt
+# bodies to the GLOBAL ${CODEX_HOME}/prompts dir (never under $TARGET), leaves AGENTS.md
+# (Codex's native entrypoint, always written), and stamps NO other front-end.
+TCX="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CODEX_HOME="$TCX/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCX" >/dev/null || fail "--agents=codex exited non-zero"
+[ -f "$TCX/AGENTS.md" ]                 || fail "codex: AGENTS.md (Codex's native entrypoint) must always be written"
+for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix; do
+  [ -f "$TCX/ch/prompts/$_c.md" ]       || fail "codex: global prompt $_c.md not installed"
+done
+# prompts are GLOBAL — nothing codex-owned lands under the target repo
+[ -d "$TCX/.codex" ]                    && fail "codex: must not write a project-local .codex/ dir (prompts are GLOBAL)"
+# no OTHER front-end stamped
+[ -f "$TCX/CLAUDE.md" ]    && fail "R4: --agents=codex must not write CLAUDE.md"
+[ -f "$TCX/GEMINI.md" ]    && fail "R4: --agents=codex must not write GEMINI.md"
+[ -f "$TCX/opencode.json" ] && fail "R4: --agents=codex must not write opencode.json"
+[ -d "$TCX/.claude" ]      && fail "R4: --agents=codex must not write .claude/"
+grep -qx codex "$TCX/.harness/.agents" || fail "R8: codex not persisted in .harness/.agents"
+# installed /sdd-next prompt acts as the Orchestrator, resolved against .harness/, carrying args
+grep -qF '.harness/' "$TCX/ch/prompts/sdd-next.md" || fail "codex: sdd-next prompt does not resolve against .harness/"
+grep -qF '$ARGUMENTS' "$TCX/ch/prompts/sdd-next.md" || fail "codex: sdd-next prompt does not carry \$ARGUMENTS"
+# byte-identical to the Claude command body (front-ends stay in lock-step)
+CODEX_HOME="$TCX/ch2" sh "$SRC/harness-install.sh" --agents=claude,codex "$TCX" >/dev/null || fail "codex+claude install failed"
+cmp -s "$TCX/ch2/prompts/sdd-next.md" "$TCX/.claude/commands/sdd-next.md" \
+  || fail "codex: global prompt body not byte-identical to the Claude command body"
+rm -rf "$TCX"
+pass "--agents=codex stamps only GLOBAL /sdd-* prompts + AGENTS.md, byte-identical to peers (§5d)"
+
+# codex_deselect_reclaims_pristine (§7): re-run dropping codex removes byte-pristine
+# global prompts and warns; a user-EDITED prompt of the same name is preserved.
+TCD="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CH="$TCD/ch"
+CODEX_HOME="$CH" sh "$SRC/harness-install.sh" --agents=claude,codex "$TCD" >/dev/null || fail "codex deselect setup failed"
+[ -f "$CH/prompts/sdd-next.md" ] || fail "codex deselect setup: prompts not stamped"
+# user edits one prompt in place — it must survive deselection
+printf '\n# user edit\n' >> "$CH/prompts/sdd-fix.md"
+_cwarn="$(CODEX_HOME="$CH" sh "$SRC/harness-install.sh" --agents=claude "$TCD" 2>&1 >/dev/null)" \
+  || fail "codex deselect re-run exited non-zero"
+[ -f "$CH/prompts/sdd-next.md" ] && fail "R13: deselected codex pristine prompt (sdd-next.md) not removed"
+[ -f "$CH/prompts/sdd-fix.md" ]  || fail "R13: user-edited codex prompt (sdd-fix.md) must be preserved on deselect"
+printf '%s' "$_cwarn" | grep -qiF 'codex' || fail "R13: removal of codex glue was not warned about"
+grep -qx codex "$TCD/.harness/.agents" && fail "R8: codex must be dropped from .harness/.agents after deselect"
+rm -rf "$TCD"
+pass "codex deselect reclaims pristine GLOBAL prompts, preserves edits, warns (§7, R13)"
+
+# codex_no_home_skips_not_aborts (Codex r1 P2): with `set -eu` active, a codex install
+# where NEITHER CODEX_HOME nor HOME is set must SKIP the global prompts with a warning,
+# NOT abort the whole install on an unbound `$HOME`. (No-TTY default selects codex, so a
+# plain noninteractive install in minimal CI would otherwise fail.)
+TCH="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+_chwarn="$(env -u HOME -u CODEX_HOME sh "$SRC/harness-install.sh" --agents=codex "$TCH" 2>&1 >/dev/null)" \
+  || fail "codex install with no HOME/CODEX_HOME must not abort under set -u"
+[ -f "$TCH/AGENTS.md" ]  || fail "codex no-HOME: install must still complete (AGENTS.md written)"
+[ -d "$TCH/.harness" ]   || fail "codex no-HOME: install must still complete (.harness written)"
+printf '%s' "$_chwarn" | grep -qiF 'codex' || fail "codex no-HOME: skip must be warned about"
+rm -rf "$TCH"
+pass "codex install skips global prompts (never aborts) when HOME+CODEX_HOME unset (Codex r1 P2)"
+
+# codex_install_preserves_preexisting_prompt (Codex r2 P2): the GLOBAL prompts dir is a
+# user-owned namespace — a same-named pre-existing prompt must be backed up (once), never
+# silently destroyed, when the install writes the harness copy over it.
+TCP="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CHP="$TCP/ch/prompts"
+mkdir -p "$CHP"
+printf 'MY OWN global codex prompt — do not lose\n' > "$CHP/sdd-next.md"
+CODEX_HOME="$TCP/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCP" >/dev/null 2>"$TCP/warn.txt" \
+  || fail "codex install over a pre-existing prompt exited non-zero"
+[ -f "$CHP/sdd-next.md.pre-harness.bak" ] || fail "codex: pre-existing global prompt not backed up"
+grep -qF 'MY OWN global codex prompt' "$CHP/sdd-next.md.pre-harness.bak" \
+  || fail "codex: backup does not contain the original user content"
+grep -qF '$ARGUMENTS' "$CHP/sdd-next.md" || fail "codex: harness prompt not installed over the backup"
+grep -qiF 'backed up' "$TCP/warn.txt" || fail "codex: overwrite of a user prompt not warned about"
+# re-run (upgrade): the ORIGINAL backup must be preserved, not clobbered by the now-harness file
+CODEX_HOME="$TCP/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCP" >/dev/null 2>&1 || fail "codex re-install failed"
+grep -qF 'MY OWN global codex prompt' "$CHP/sdd-next.md.pre-harness.bak" \
+  || fail "codex: re-run clobbered the original backup (must back up only once)"
+rm -rf "$TCP"
+pass "codex install backs up a pre-existing global prompt, never destroys it (Codex r2 P2)"
+
+# codex_install_never_silently_loses_a_later_edit (Codex r3 P2): once a backup exists, a
+# SUBSEQUENT user edit of the installed prompt must still be captured + warned on the next
+# install — not silently clobbered while the backup keeps older content.
+TCE="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CHE="$TCE/ch/prompts"
+CODEX_HOME="$TCE/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCE" >/dev/null 2>&1 || fail "codex edit-guard setup failed"
+[ -f "$CHE/sdd-next.md" ] || fail "codex edit-guard setup: prompt not stamped"
+# user edits the installed prompt AFTER install (no .bak yet — install wrote a fresh file)
+printf '\n# my later customization — must not vanish\n' >> "$CHE/sdd-next.md"
+_cewarn="$(CODEX_HOME="$TCE/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCE" 2>&1 >/dev/null)" \
+  || fail "codex re-install over an edited prompt exited non-zero"
+grep -qF 'my later customization' "$CHE/sdd-next.md.pre-harness.bak" \
+  || fail "codex: a later user edit was silently lost (backup did not capture it)"
+printf '%s' "$_cewarn" | grep -qiF 'sdd-next.md' || fail "codex: overwrite of an edited prompt was not warned about"
+grep -qF '$ARGUMENTS' "$CHE/sdd-next.md" || fail "codex: harness prompt not reinstalled after capturing the edit"
+rm -rf "$TCE"
+pass "codex install captures + warns on a later user edit, never silent loss (Codex r3 P2)"
+
+# codex_legacy_fallback_never_reclaims_global (Codex r4 P2): a LEGACY upgrade (an install
+# with no persisted .harness/.agents) must NOT let the all-agents fallback trigger a codex
+# removal — the GLOBAL prompts dir is cross-target, and a legacy target predates codex, so
+# reclaiming pristine prompts there could destroy another target's glue.
+TLG="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+LGCH="$TLG/ch"
+# populate the GLOBAL prompts with pristine harness bodies (stand-in for another target's)
+CODEX_HOME="$LGCH" sh "$SRC/harness-install.sh" --agents=claude,codex "$TLG" >/dev/null 2>&1 || fail "legacy-fallback setup install failed"
+[ -f "$LGCH/prompts/sdd-next.md" ] || fail "legacy-fallback setup: global prompts not stamped"
+# simulate a legacy target: drop the persisted selection so PRIOR_AGENTS uses the fallback
+rm -f "$TLG/.harness/.agents"
+# re-run selecting only claude (excludes codex): fallback must NOT reclaim the global prompts
+CODEX_HOME="$LGCH" sh "$SRC/harness-install.sh" --agents=claude "$TLG" >/dev/null 2>&1 || fail "legacy-fallback re-run exited non-zero"
+[ -f "$LGCH/prompts/sdd-next.md" ] \
+  || fail "codex: legacy all-agents fallback wrongly reclaimed GLOBAL prompts (cross-target data loss)"
+rm -rf "$TLG"
+pass "codex legacy-fallback upgrade never reclaims cross-target GLOBAL prompts (Codex r4 P2)"
 
 # unknown_agent_key_rejected (R7): an unknown override exits non-zero, names it, no changes.
 TE="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"

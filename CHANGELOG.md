@@ -4,6 +4,40 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.25.0] — 2026-07-01
+
+### Added — ✨ Codex CLI front-end (`codex` agent key)
+- **`codex` is now a selectable front-end (`harness-install.sh`).** Added to `AGENT_KEYS`
+  (`claude gemini opencode antigravity codex`), so it appears in the interactive picker,
+  is individually selectable via `--agents=codex` / `HARNESS_AGENTS`, and persists to
+  `.harness/.agents` like every other agent.
+- **GLOBAL `/sdd-*` prompts (§5d).** Codex CLI has no project-local custom-command
+  mechanism, so its only slash-command surface is the machine-global prompts dir
+  `${CODEX_HOME:-$HOME/.codex}/prompts/`. When `codex` is selected the installer stamps
+  the five `sdd-next`, `sdd-new`, `sdd-plan`, `sdd-drill`, `sdd-fix` prompt bodies
+  there — byte-identical to the Claude/OpenCode/Antigravity copies (same `CMDDIR` source).
+  Codex surfaces each `<name>.md` as the slash command **`/prompts:<name>`** (namespaced
+  under `/prompts:`, not top-level `/<name>`). This is the one front-end whose glue lands
+  **outside** `$TARGET`; the bodies resolve their paths against `.harness/` of whatever
+  repo Codex launches in, so a single global copy drives every target. Honors `$CODEX_HOME`,
+  and when neither `CODEX_HOME` nor `HOME` is set (minimal CI) the Codex step is skipped
+  with a warning instead of aborting the install under `set -u`.
+- **No new entrypoint pointer.** Codex reads the always-written `AGENTS.md` from the repo
+  root natively, so a `codex`-only install needs no dedicated entry file.
+- **Non-destructive install.** The global prompts dir is a user-owned namespace, so a
+  same-named file that differs from the harness body — an original OR a later user edit —
+  is backed up to `<name>.md.pre-harness.bak` and warned about before the harness copy is
+  written. The backup refreshes whenever the current contents change, so a post-install
+  edit is captured too (never silently lost); a routine re-install where the file is
+  already the identical harness body neither warns nor churns the backup.
+- **Pristine-only deselect (§7).** Dropping `codex` reclaims only byte-pristine global
+  prompts (a user-edited `/prompts:sdd-*` prompt survives), mirroring the `opencode.json` /
+  Antigravity `cmp -s` contract, and prunes the prompts dir only when empty.
+- **Tests (`tests/test_install.sh`).** Sandboxes `CODEX_HOME` for the whole suite (never
+  touches the real `~/.codex`); adds `--agents=codex` (global-prompts-only + byte-identical
+  to peers) and codex-deselect (pristine reclaim, edit-preserving, warns) cases; extends the
+  ALL-default and registry-key coverage to include `codex`.
+
 ## [0.24.0] — 2026-07-01
 
 ### Added — ✨ Board mirror: status-gated issue assignee (`mirror.board.assignee`)
