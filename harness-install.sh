@@ -138,6 +138,26 @@ migrate_config() {
     fi
   fi
 
+  # --- workflow.identity (E10-F01 scoped `--mine` ownership) ---
+  # Insert under the top-level `workflow:` header (tolerating a trailing comment).
+  # Empty default ⇒ solo / board-wide, exactly today's behavior (owner ignored). A
+  # preserved pre-E10 config that lacks this key would make `/sdd-next --mine`
+  # fail-closed as an unresolved identity, so seed the documented default on upgrade.
+  # Scope the presence check to a two-space-indented `identity:` (a workflow child) so
+  # a same-named key elsewhere never suppresses it.
+  if ! grep -Eq '^[[:space:]]+identity:' "$_cfg"; then
+    if grep -Eq '^workflow:[[:space:]]*(#.*)?$' "$_cfg"; then
+      _mc_insert_after "$_cfg" '^workflow:[[:space:]]*(#.*)?$' \
+        '  identity: ""   # current developer identity for scoped `/sdd-next --mine` (E10-F01); empty ⇒ board-wide'
+    else
+      {
+        printf '\n'
+        printf 'workflow:\n'
+        printf '  identity: ""   # current developer identity for scoped `/sdd-next --mine` (E10-F01); empty ⇒ board-wide\n'
+      } >> "$_cfg"
+    fi
+  fi
+
   # --- mirror.board block (optional board projection) ---
   # Top-level block; append at EOF when absent (no header to insert into). Empty provider
   # ⇒ tools/sync-board.mjs is a no-op, so a preserved config without this block behaves

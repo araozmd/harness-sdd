@@ -446,6 +446,41 @@ grep -q 'test_command: "pytest -q"' "$T/.harness/harness.config.yaml" \
   || fail "bootstrap test_command erased on upgrade"
 pass "upgrade preserves bootstrap-configured verification commands (R11)"
 
+# ── migrate_config seeds workflow.identity on upgrade (E10-F01, Codex #40 r2 P2) ──
+# A preserved pre-E10 config that lacks workflow.identity would make `/sdd-next --mine`
+# fail-closed as an unresolved identity. The additive migration must seed the documented
+# default under the existing workflow: block, preserve existing values/comments, and be
+# idempotent (a second run must not duplicate the key or clobber a user-set value).
+TID="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+printf '# My Project\n' > "$TID/CLAUDE.md"
+CODEX_HOME="$TID/ch" sh "$SRC/harness-install.sh" "$TID" >/dev/null || fail "identity-migration fresh install exited non-zero"
+CFGID="$TID/.harness/harness.config.yaml"
+# Simulate a pre-E10 preserved config: a workflow: block WITHOUT identity, plus a
+# bootstrap value that must survive verbatim.
+cat > "$CFGID" <<'EOF'
+store:
+  tasks: local
+workflow:
+  require_spec_approval: true
+  context_reset_threshold: 0.40
+verification:
+  test_command: "pytest -q"   # keep me exactly
+EOF
+grep -Eq '^[[:space:]]+identity:' "$CFGID" && fail "identity-migration setup: identity present before upgrade (bad fixture)"
+CODEX_HOME="$TID/ch" sh "$SRC/harness-install.sh" "$TID" >/dev/null || fail "identity-migration upgrade exited non-zero"
+grep -Eq '^[[:space:]]+identity:' "$CFGID" || fail "workflow.identity not seeded on upgrade of a pre-E10 config"
+grep -qF 'test_command: "pytest -q"   # keep me exactly' "$CFGID" || fail "identity migration altered an existing value/comment"
+pass "upgrade seeds workflow.identity into a pre-E10 preserved config (Codex #40 r2 P2)"
+# Idempotent: a second run leaves a now-complete config byte-for-byte identical (no
+# duplicate identity: key) and a user-set value survives untouched.
+sed -e 's|^\( *identity:\).*|\1 "OctoCat"   # keep me exactly|' "$CFGID" > "$CFGID.b" && mv "$CFGID.b" "$CFGID"
+cp "$CFGID" "$TID/after1"
+CODEX_HOME="$TID/ch" sh "$SRC/harness-install.sh" "$TID" >/dev/null || fail "identity-migration second upgrade exited non-zero"
+cmp -s "$CFGID" "$TID/after1" || { diff "$TID/after1" "$CFGID" || true; fail "workflow.identity migration not idempotent (duplicated or clobbered a user value)"; }
+[ "$(grep -cE '^[[:space:]]+identity:' "$CFGID")" = "1" ] || fail "workflow.identity duplicated on re-run (not idempotent)"
+rm -rf "$TID"
+pass "workflow.identity migration is idempotent + preserves a user-set value (Codex #40 r2 P2)"
+
 # ── arg guards make no changes ────────────────────────────────────────────────
 sh "$SRC/harness-install.sh"            >/dev/null 2>&1 && fail "missing-arg should exit non-zero"   # R9
 sh "$SRC/harness-install.sh" "$SRC"     >/dev/null 2>&1 && fail "self-target should exit non-zero"   # R9
