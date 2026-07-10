@@ -89,7 +89,8 @@ test_umbrella_gitignore_example_includes_local_prompt_files() {
 }
 
 test_version_and_changelog_for_local_overrides() {
-  [ "$(cat "$SRC/VERSION")" = "0.27.0" ] || fail "VERSION was not bumped to 0.27.0 for E09-F02"
+  # Assert the E09-F02 CHANGELOG entry landed (not a frozen exact VERSION, which
+  # recurs as a permanent-suite anti-pattern and breaks on later PATCH bumps).
   grep -qF '## [0.27.0]' "$SRC/CHANGELOG.md" || fail "CHANGELOG missing 0.27.0 entry"
   grep -qF 'local prompt override' "$SRC/CHANGELOG.md" \
     || fail "CHANGELOG missing local prompt override summary"
@@ -186,8 +187,8 @@ done
 test_umbrella_gitignore_example_includes_local_prompt_files
 pass "umbrella gitignore example includes local prompt ignores"
 
-# E09-F02: installed-body change is versioned.
-[ "$(cat "$SRC/VERSION")" = "0.27.0" ] || fail "VERSION was not bumped to 0.27.0 for E09-F02"
+# E09-F02: installed-body change is versioned (assert the CHANGELOG entry landed, not a
+# frozen exact VERSION — freezing VERSION recurs as an anti-pattern and breaks on PATCH bumps).
 grep -qF '## [0.27.0]' "$SRC/CHANGELOG.md" || fail "CHANGELOG missing 0.27.0 entry"
 grep -qF 'local prompt override' "$SRC/CHANGELOG.md" \
   || fail "CHANGELOG missing local prompt override summary"
@@ -250,6 +251,42 @@ grep -qE 'spec-ready|in-review' "$T/.claude/commands/sdd-new.md" \
   || fail "sdd-new missing altitude-1 consumed-status branch"
 pass "Claude Code glue generated (R7)"
 
+# ── E09: doc-critic wired into the installed Claude workflow (Codex #39 r1 P1) ────
+# The advertised pre-`spec-ready` doc-critic checkpoint must be executable in the
+# primary installed Claude path: a doc-critic subagent shim exists, and the generating
+# architect subagent can spawn it (Task tool present). Mirrors the .harness role bodies.
+[ -f "$T/.claude/agents/doc-critic.md" ] \
+  || fail "E09: .claude/agents/doc-critic.md shim not emitted (critic cannot be spawned)"
+grep -qF '.harness/agents/doc-critic.md' "$T/.claude/agents/doc-critic.md" \
+  || fail "E09: doc-critic shim does not resolve against .harness/"
+grep -qE '^tools:.*\bTask\b' "$T/.claude/agents/architect.md" \
+  || fail "E09: architect shim lacks the Task tool — cannot spawn the doc-critic checkpoint"
+pass "E09: doc-critic spawnable in the installed Claude workflow (shim + architect Task)"
+
+# ── E09: /sdd-plan glue mirrors the drillable-minimum + doc-critic step (Codex #39 r1 P2) ─
+# Fresh installs run the slash-command body, so the installed /sdd-plan must require the
+# five drillable-minimum epic.md fields AND run the target-type=plan-output checkpoint.
+grep -qF 'drillable-minimum' "$T/.claude/commands/sdd-plan.md" \
+  || fail "E09: /sdd-plan glue missing the drillable-minimum requirement"
+grep -qF 'Business brief' "$T/.claude/commands/sdd-plan.md" \
+  || fail "E09: /sdd-plan glue missing drillable-minimum: business brief"
+grep -qF 'success criteria' "$T/.claude/commands/sdd-plan.md" \
+  || fail "E09: /sdd-plan glue missing drillable-minimum: epic-level success criteria"
+grep -qF 'non-goals' "$T/.claude/commands/sdd-plan.md" \
+  || fail "E09: /sdd-plan glue missing drillable-minimum: technical considerations/non-goals"
+grep -qF 'Cross-epic dependencies' "$T/.claude/commands/sdd-plan.md" \
+  || fail "E09: /sdd-plan glue missing drillable-minimum: cross-epic dependencies and boundaries"
+grep -qF 'shared ADRs' "$T/.claude/commands/sdd-plan.md" \
+  || fail "E09: /sdd-plan glue missing drillable-minimum: pointers to relevant shared ADRs"
+grep -qF 'target-type=plan-output' "$T/.claude/commands/sdd-plan.md" \
+  || fail "E09: /sdd-plan glue missing the target-type=plan-output doc-critic checkpoint"
+grep -qF 'Doc-critic' "$T/.claude/commands/sdd-plan.md" \
+  || fail "E09: /sdd-plan glue does not name the Doc-critic"
+# and /sdd-drill mirrors its own epic-decomposition checkpoint
+grep -qF 'target-type=epic-decomposition' "$T/.claude/commands/sdd-drill.md" \
+  || fail "E09: /sdd-drill glue missing the target-type=epic-decomposition doc-critic checkpoint"
+pass "E09: /sdd-plan + /sdd-drill glue carry drillable-minimum + doc-critic checkpoints"
+
 # OpenCode glue: same slash commands installed under .opencode/command/                        # R7
 [ -f "$T/.opencode/command/sdd-next.md" ] || fail "opencode sdd-next command missing"
 [ -f "$T/.opencode/command/sdd-new.md" ]  || fail "opencode sdd-new command missing"
@@ -290,7 +327,7 @@ grep -qF "$AG_SENTINEL" "$T/.agents/rules/harness.md" && fail "antigravity rule 
 # with no copied role body. Bare-file persona discovery is unconfirmed, so these assert shape
 # (correct plural dir, description, defers to canonical role, sentinel absent) — NOT that the
 # persona registers as an Antigravity subagent.
-for r in orchestrator architect builder reviewer scout; do
+for r in orchestrator architect builder reviewer scout doc-critic; do
   [ -f "$T/.agents/agents/$r.md" ]                       || fail "antigravity persona $r missing (R4)"
   grep -qE '^description:' "$T/.agents/agents/$r.md"      || fail "antigravity persona $r has no description (R4)"
   grep -qF ".harness/agents/$r.md" "$T/.agents/agents/$r.md" || fail "antigravity persona $r does not defer to .harness/agents/$r.md (R5)"

@@ -4,6 +4,29 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.27.1] — 2026-07-10
+
+### Fixed — 🔧 Wire the doc-critic checkpoint into the installer-generated glue (E09)
+- **doc-critic spawnable in the installed Claude workflow** — `harness-install.sh` now
+  emits a `.claude/agents/doc-critic.md` subagent shim (pointing at the canonical
+  `.harness/agents/doc-critic.md`) and adds the `Task` tool to the emitted `architect`
+  shim, so the advertised pre-`spec-ready` `target-type=feature-spec` checkpoint is
+  actually executable on the primary `/sdd-next` path. `doc-critic` is added to
+  `HARNESS_CLAUDE_SHIMS` so it participates in scoped deselect removal.
+- **doc-critic mirrored into every front-end registry** — the OpenCode `opencode.json`
+  agent set and the Antigravity `.agents/agents/` persona set now include `doc-critic`,
+  keeping all front-ends consistent with the Claude shims.
+- **`/sdd-plan` glue mirrors the drillable-minimum + checkpoint** — the installed
+  `/sdd-plan` command body now requires the five drillable-minimum `epic.md` elements
+  (business brief, epic-level success criteria, technical considerations/non-goals,
+  cross-epic dependencies and boundaries, pointers to relevant shared ADRs) and runs the
+  `target-type=plan-output` doc-critic checkpoint before re-validation; `/sdd-drill`
+  likewise runs its `target-type=epic-decomposition` checkpoint.
+- **Regression assertions** added to `tests/test_install.sh` for the doc-critic shim,
+  the architect `Task` tool, the antigravity `doc-critic` persona, and the `/sdd-plan` +
+  `/sdd-drill` drillable-minimum + checkpoint glue. `VERSION` bumped 0.27.0 → 0.27.1
+  (installed body changed; PATCH per the versioning policy). Fixes Codex #39 r1 P1/P2.
+
 ## [0.27.0] — 2026-07-10
 
 ### Added — ✨ Per-developer local prompt override convention (E09-F02)
