@@ -56,6 +56,12 @@ cat > "$T/badtype.json" <<'EOF'
 {"project":"demo","epics":[{"id":"E01","title":"Demo","status":"pending",
 "features":[{"id":"E01-F01","title":"X","status":"pending","sdd":true,"spec_path":"s","owner":5}]}]}
 EOF
+# non-string owner on an EPIC (R3): owner:5 on the epic ⇒ invalid. Exercises the
+# other object so the zero-dependency path is enforced on both, matching the schema.
+cat > "$T/badtype_epic.json" <<'EOF'
+{"project":"demo","epics":[{"id":"E01","title":"Demo","status":"pending","owner":5,
+"features":[{"id":"E01-F01","title":"X","status":"pending","sdd":true,"spec_path":"s"}]}]}
+EOF
 
 # Validate <doc> against the schema; echo "VALID"/"INVALID"/"SKIP" on stdout.
 validate() {
@@ -92,6 +98,61 @@ else
   pass "schema cases skipped (python3 unavailable) [owner_absent_validates]"
   pass "schema cases skipped (python3 unavailable) [owner_present_validates]"
   pass "schema cases skipped (python3 unavailable) [owner_type_enforced]"
+fi
+
+# ── R3 on the ZERO-DEPENDENCY path (init.sh fallback validator) ────────────────
+# The jsonschema block above SKIPS in installs without jsonschema, so R3 was
+# silently untested on the built-in fallback that init.sh actually uses there.
+# Drive owner:5 through init.sh's own fallback validator with jsonschema forced
+# unavailable, and assert it is REJECTED on BOTH the epic and the feature — while
+# owner-absent and string-owner docs still pass. We extract the real validator
+# snippet from init.sh (not a re-implementation) so it can never drift from prod.
+INIT_SH="$ROOT/init.sh"
+[ -f "$INIT_SH" ] || fail "init.sh missing (cannot test zero-dependency validator)"
+if command -v python3 >/dev/null 2>&1; then
+  # Pull the first `<<'PY' ... \nPY` heredoc — the TaskStore validator body.
+  awk "/<<'PY'/{f=1;next} f&&/^PY\$/{exit} f{print}" "$INIT_SH" > "$T/validator.py"
+  [ -s "$T/validator.py" ] || fail "could not extract fallback validator from init.sh [owner_type_enforced]"
+
+  # Run the extracted validator with jsonschema import blocked, forcing the
+  # built-in structural branch regardless of what is installed locally.
+  fb_validate() {
+    python3 - "$1" "$SCHEMA" "$T/validator.py" <<'PY' 2>/dev/null
+import sys, importlib.abc, importlib.machinery
+class _Block(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path, target=None):
+        if name == "jsonschema" or name.startswith("jsonschema."):
+            raise ImportError("jsonschema blocked for zero-dep test")
+        return None
+sys.meta_path.insert(0, _Block())
+data_path, schema_path, code_path = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.argv = [sys.argv[0], data_path, schema_path]
+code = open(code_path).read()
+try:
+    exec(compile(code, code_path, "exec"), {"__name__": "__main__"})
+    raise SystemExit(0)
+except SystemExit as e:
+    raise SystemExit(e.code if e.code is not None else 0)
+PY
+  }
+
+  if ! fb_validate "$T/absent.json"; then
+    fail "zero-dep validator must accept owner-free doc [owner_absent_validates]"
+  fi
+  pass "zero-dep (init.sh fallback) accepts owner-free state/tasks.json [owner_absent_validates]"
+  if ! fb_validate "$T/present.json"; then
+    fail "zero-dep validator must accept string owner [owner_present_validates]"
+  fi
+  pass "zero-dep (init.sh fallback) accepts string owner on epic + feature [owner_present_validates]"
+  if fb_validate "$T/badtype.json"; then
+    fail "zero-dep validator accepted feature owner:5 (must reject) [owner_type_enforced]"
+  fi
+  if fb_validate "$T/badtype_epic.json"; then
+    fail "zero-dep validator accepted epic owner:5 (must reject) [owner_type_enforced]"
+  fi
+  pass "zero-dep (init.sh fallback) rejects non-string owner on epic AND feature [owner_type_enforced]"
+else
+  pass "zero-dep validator R3 skipped (python3 unavailable) [owner_type_enforced]"
 fi
 
 # Also assert the schema does NOT list owner as required on either object (R1) and
