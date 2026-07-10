@@ -4,6 +4,33 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.29.0] — 2026-07-10
+
+### Added — ✨ GitHub Projects (v2) mirror completed via `gh` CLI, no MCP (E11-F01)
+- **Strengthened fail-closed preflight** in `tools/sync-board.mjs` for the `github-projects`
+  provider — before any board-mutating call it verifies `gh` is present, is at least
+  `2.31.0` (the first release with stable `gh project` Projects-v2 subcommands), and that its
+  token carries the required `project` + `repo` scopes (via `gh auth status`). Any failure
+  exits non-zero with an actionable message naming `gh` and the Projects-v2 / scope
+  requirement, so a preflight failure never leaves the board half-written. Transport stays
+  **`gh` CLI only — never MCP**; the inert-default (empty provider ⇒ no `gh` contact) and the
+  config-first validation order are preserved.
+- **Pinned contract in docs** — `store/board-mirror.md` now states the supported surface is
+  **GitHub Projects (v2)** (Classic unsupported), names the minimum `gh` version (`2.31.0`)
+  and the `project` + `repo` auth scopes, and reaffirms the `gh`-only / no-MCP transport and
+  the one-way (`tasks.json` → board; agents never read the board) invariant.
+- **Installer wiring asserted** — `tests/test_install.sh` now asserts a fresh install ships an
+  **executable** `.harness/tools/sync-board.mjs` (the mirror tool was already copied +
+  `chmod +x`'d by `harness-install.sh`; the assertion closes the wiring gap).
+- **Regression guardrails** — `tests/test_mirror.sh` gains behavioral cases for the preflight
+  (absent / too-old / under-scoped `gh` ⇒ non-zero, names `gh`, no board mutation), gh-only /
+  no-MCP dispatch, single `github-projects` code path, idempotent reconcile, `--dry-run`
+  mutates nothing, the one-way invariant (fixture-local `tasks.json` snapshot), and the docs +
+  no-new-config-key checks. Assertions are behavior/shape only — no exact-VERSION pin and no
+  diff of DO-NOT-TOUCH files against `main`.
+- **Scope note** — F01 projects **status** only; the pre-existing `mirror.board.assignee`
+  behavior is preserved untouched (no `owner → assignee` expansion — that is E10-F03).
+
 ## [0.28.0] — 2026-07-10
 
 ### Added — ✨ Ownership primitive: `owner` field in TaskStore + scoped `/sdd-next --mine` (E10-F01)

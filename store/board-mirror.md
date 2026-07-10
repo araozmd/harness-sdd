@@ -74,6 +74,29 @@ the map to confirm the tool won't rewrite options you didn't intend.
 
 ## github-projects contract
 
+### Transport & supported surface (pinned)
+
+- **Supported Project type: GitHub Projects (v2)** — the GraphQL-backed Projects surface
+  reached through `gh project` / `gh api graphql`. **Classic Projects are NOT supported.**
+- **Transport: the `gh` CLI ONLY — never MCP.** Every GitHub call goes through `gh`
+  (`gh project`, `gh issue`, `gh api` / `gh api graphql`). No MCP server is used or
+  required, so the mirror works inside MCP-restricted enterprises. REST/GraphQL, where
+  needed, is reached via `gh api`.
+- **Minimum `gh` version: `2.31.0`** — the first release that ships the stable
+  `gh project` (Projects v2) subcommands. Older `gh` fails the preflight below.
+- **Required auth scopes: `project` + `repo`.** Authenticate with the developer's existing
+  `gh` session — no new committed secret. Add the scopes with
+  `gh auth refresh -s project -s repo` (or `gh auth login` selecting them).
+- **One-way invariant.** The sync is strictly one-way: `state/tasks.json` → board. Agents
+  never **read** the board to decide work; `tasks.json` stays the single source of truth.
+  Nothing here makes the mirror bidirectional.
+
+**Preflight (fail-closed).** Before touching the board, `sync-board.mjs` verifies `gh` is
+present, is at least `2.31.0`, and its token carries the `project` + `repo` scopes. If any
+check fails the tool exits **non-zero** with an actionable message naming `gh` and the
+Projects-v2 / scope requirement — **before** any board-mutating call, so a preflight failure
+never leaves the board half-written.
+
 `tasks.json` is the source of truth; the script makes the board match it, idempotently:
 one **issue per feature** in `repo` (matched by exact title), each added as a **project
 item**, with the **Status** (mapped from the feature state machine) and **Epic**

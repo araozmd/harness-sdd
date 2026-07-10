@@ -23,6 +23,27 @@ pass() { echo "ok - $1"; }
 [ -f "$TOOL" ] || fail "tools/sync-board.mjs missing from the body"
 pass "sync-board.mjs ships in the body [tool_present]"
 
+# ── docs pin (R6 / R13) — behavior test on the governing phrases, not verbatim prose ──
+DOCS="$ROOT/store/board-mirror.md"
+[ -f "$DOCS" ] || fail "store/board-mirror.md missing"
+grep -qi 'Projects v2'            "$DOCS" || fail "docs do not pin Projects v2 [projects_v2_pinned_in_docs]"
+grep -qi 'Classic'                "$DOCS" || fail "docs do not state Classic Projects are unsupported"
+pass "docs pin the supported surface as Projects v2 (Classic unsupported) [projects_v2_pinned_in_docs]"
+grep -qi '2.31.0' "$DOCS" || fail "docs do not name the minimum gh version (2.31.0)"
+grep -qi 'project'                "$DOCS" || fail "docs do not name the required project scope"
+grep -qi 'repo'                   "$DOCS" || fail "docs do not name the required repo scope"
+grep -qi 'no[- ]*mcp\|never[[:space:]]*mcp\|not[[:space:]]*mcp' "$DOCS" \
+  || grep -qi 'gh` CLI ONLY'      "$DOCS" || fail "docs do not reaffirm the gh-only / no-MCP transport"
+grep -qi 'one-way'                "$DOCS" || fail "docs do not reaffirm the one-way invariant"
+pass "docs pin gh transport contract: min gh version + scopes + gh-only/no-MCP + one-way [docs_pin_gh_transport_contract]"
+
+# ── VERSION shape (R14) — SemVer shape + a matching CHANGELOG entry. Behavior/shape only:
+# NEVER pin the exact string and NEVER diff the working tree against HEAD/main.
+VER="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+echo "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || fail "VERSION is not valid SemVer MAJOR.MINOR.PATCH [version_bumped_minor]"
+grep -qF "## [$VER]" "$ROOT/CHANGELOG.md" || fail "CHANGELOG.md has no entry matching the current VERSION [version_bumped_minor]"
+pass "VERSION is valid SemVer with a matching CHANGELOG entry [version_bumped_minor]"
+
 # A fake .harness layout the tool resolves config + tasks against (HERE/../).
 mk_harness() { # mk_harness <dir> <provider-block>
   _h="$1"; _prov="$2"
@@ -33,13 +54,24 @@ mk_harness() { # mk_harness <dir> <provider-block>
 }
 
 # A fake `gh` on PATH that records ANY invocation — proves the inert path never shells out.
+# It also answers the strengthened preflight (R7): `gh --version` reports a recent version
+# and `gh auth status` reports the required `project` + `repo` scopes, so the happy-path
+# dispatch cases below get PAST the preflight. Preflight-failure is exercised separately
+# with dedicated shims (::preflight_gh_capability_fails_closed).
 mkdir -p "$T/bin"
 cat > "$T/bin/gh" <<EOF
 #!/bin/sh
 echo "called: \$*" >> "$T/gh-called"
+case "\$1 \$2" in
+  "--version ") echo "gh version 2.62.0 (2024-11-27)" ;;
+  "auth status") echo "Token scopes: 'project', 'read:org', 'repo'" ;;
+esac
 exit 0
 EOF
 chmod +x "$T/bin/gh"
+
+# The dispatching fake-gh shims below (bin2/bin3/bin4) each answer the R7 preflight
+# (`--version` + `auth status`) inline so they reach the reconcile dispatch they assert on.
 
 if command -v node >/dev/null 2>&1; then
   # 1) INERT DEFAULT — empty provider ⇒ exit 0, "disabled" notice, and NO gh call.
@@ -109,6 +141,8 @@ if command -v node >/dev/null 2>&1; then
   cat > "$T/bin2/gh" <<'EOF'
 #!/bin/sh
 case "$1 $2" in
+  "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
+  "auth status")        echo "Token scopes: 'project', 'read:org', 'repo'"; exit 0 ;;
   "project view")       echo '{"id":"PID"}' ;;
   "project field-list") echo '{"fields":[{"id":"FS","name":"Status","options":[{"id":"o","name":"X"}]},{"id":"FE","name":"Epic","options":[]}]}' ;;
   "project item-list")  echo '{"items":[]}' ;;
@@ -145,6 +179,8 @@ EOF
   cat > "$T/bin3/gh" <<'EOF'
 #!/bin/sh
 case "$1 $2" in
+  "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
+  "auth status")        echo "Token scopes: 'project', 'read:org', 'repo'"; exit 0 ;;
   "api user")           echo 'resolveduser' ;;
   "project view")       echo '{"id":"PID"}' ;;
   "project field-list") echo '{"fields":[{"id":"FS","name":"Status","options":[{"id":"o","name":"in-progress"}]},{"id":"FE","name":"Epic","options":[{"id":"oe","name":"E01 — Demo"}]}]}' ;;
@@ -184,6 +220,8 @@ EOF
   cat > "$T/bin4/gh" <<'EOF'
 #!/bin/sh
 case "$1 $2" in
+  "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
+  "auth status")        echo "Token scopes: 'project', 'read:org', 'repo'"; exit 0 ;;
   "project view")       echo '{"id":"PID"}' ;;
   "project field-list") echo '{"fields":[{"id":"FS","name":"Status","options":[{"id":"o","name":"in-progress"}]},{"id":"FE","name":"Epic","options":[{"id":"oe","name":"E01 — Demo"}]}]}' ;;
   "project item-list")  echo '{"items":[{"id":"IT1","content":{"number":42}}]}' ;;
@@ -200,6 +238,190 @@ EOF
   OUT="$(PATH="$T/bin4:$PATH" node "$HCI/tools/sync-board.mjs" --dry-run 2>&1)" || { echo "$OUT"; fail "case-idempotency dry-run errored"; }
   printf '%s' "$OUT" | grep -Eqi 'would (assign|unassign)' && { echo "$OUT"; fail "case-mismatched login was not idempotent (add/remove churn)"; }
   pass "assignee diff is case-insensitive (login casing ⇒ no churn) [assignee_case_idempotent]"
+
+  # 10) PREFLIGHT fails CLOSED (R7) — with a FULLY configured github-projects mirror, a
+  #     `gh` that is (a) absent, (b) below the minimum Projects-v2 version, or (c) missing
+  #     the required scope must each exit NON-ZERO, print a message NAMING gh (+ the
+  #     Projects-v2 / scope requirement), and make NO board-mutating call — the preflight
+  #     runs before the first project/issue query, so the recording shim shows no mutation.
+  HPF="$T/h-preflight"; mk_harness "$HPF" 'mirror:
+  board:
+    provider: "github-projects"
+    owner: "acme-org"
+    project_number: 7
+    repo: "acme-org/specs"'
+
+  # (a) gh ABSENT — a curated PATH that has `node` (so the tool can run) but NO `gh` at all.
+  mkdir -p "$T/bin-nogh"
+  ln -sf "$(command -v node)" "$T/bin-nogh/node"
+  rm -f "$T/gh-called"
+  if PATH="$T/bin-nogh" node "$HPF/tools/sync-board.mjs" >"$T/pf-absent.out" 2>&1; then
+    fail "preflight passed with gh absent (must fail closed)"
+  fi
+  grep -qi 'gh' "$T/pf-absent.out" || { cat "$T/pf-absent.out"; fail "gh-absent error does not name gh"; }
+  # (mutation impossible with no gh; nothing to assert on the shim here.)
+
+  # A fake gh that reports a BELOW-MINIMUM version and records every call (so we can prove
+  # no mutation happened). It never emits project/issue JSON, so if the tool got past the
+  # preflight it would crash anyway — but it must fail on the version check first.
+  mkdir -p "$T/bin-old"
+  cat > "$T/bin-old/gh" <<EOF
+#!/bin/sh
+echo "called: \$*" >> "$T/pf-old-called"
+case "\$1 \$2" in
+  "--version ") echo "gh version 2.20.0 (2023-01-01)" ;;
+  "auth status") echo "Token scopes: 'project', 'repo'" ;;
+esac
+exit 0
+EOF
+  chmod +x "$T/bin-old/gh"
+  rm -f "$T/pf-old-called"
+  if PATH="$T/bin-old:$PATH" node "$HPF/tools/sync-board.mjs" >"$T/pf-old.out" 2>&1; then
+    fail "preflight passed with a too-old gh (must fail closed)"
+  fi
+  grep -qi 'gh' "$T/pf-old.out"     || { cat "$T/pf-old.out"; fail "too-old-gh error does not name gh"; }
+  grep -qi '2.31' "$T/pf-old.out"   || { cat "$T/pf-old.out"; fail "too-old-gh error does not name the min Projects-v2 version"; }
+  # NO board-mutating call: the shim may see --version/auth status, but never project/issue mutations.
+  if [ -f "$T/pf-old-called" ]; then
+    grep -Eqi 'project (item-edit|item-add|view)|issue (create|close|reopen|edit)' "$T/pf-old-called" \
+      && { cat "$T/pf-old-called"; fail "too-old gh still made a board query/mutation"; }
+  fi
+  pass "preflight: too-old gh ⇒ non-zero, names gh + min version, no board mutation [preflight_gh_capability_fails_closed:old]"
+
+  # A fake gh at a fine version but whose token LACKS the `project` scope.
+  mkdir -p "$T/bin-noscope"
+  cat > "$T/bin-noscope/gh" <<EOF
+#!/bin/sh
+echo "called: \$*" >> "$T/pf-scope-called"
+case "\$1 \$2" in
+  "--version ") echo "gh version 2.62.0 (2024-11-27)" ;;
+  "auth status") echo "Token scopes: 'read:org', 'repo'"; exit 0 ;;
+esac
+exit 0
+EOF
+  chmod +x "$T/bin-noscope/gh"
+  rm -f "$T/pf-scope-called"
+  if PATH="$T/bin-noscope:$PATH" node "$HPF/tools/sync-board.mjs" >"$T/pf-scope.out" 2>&1; then
+    fail "preflight passed with a token missing the project scope (must fail closed)"
+  fi
+  grep -qi 'gh' "$T/pf-scope.out"      || { cat "$T/pf-scope.out"; fail "missing-scope error does not name gh"; }
+  grep -qi 'project' "$T/pf-scope.out" || { cat "$T/pf-scope.out"; fail "missing-scope error does not name the project scope requirement"; }
+  if [ -f "$T/pf-scope-called" ]; then
+    grep -Eqi 'project (item-edit|item-add|view)|issue (create|close|reopen|edit)' "$T/pf-scope-called" \
+      && { cat "$T/pf-scope-called"; fail "under-scoped gh still made a board query/mutation"; }
+  fi
+  pass "preflight: missing project scope ⇒ non-zero, names gh + scope, no board mutation [preflight_gh_capability_fails_closed:scope]"
+
+  # 11) gh-ONLY / no-MCP (R1) — a configured run dispatches ONLY to `gh`; neither the tool
+  #     source nor the recorded calls mention any MCP transport. (The recording shim from
+  #     bin/ answers preflight + returns empty JSON so the reconcile loop runs harmlessly.)
+  # No MCP *transport* in the tool — inspect only CODE lines (strip `//` and `#` comments,
+  # so the preflight's "never MCP" comment doesn't trip this). Every GitHub call is `gh`.
+  grep -vE '^\s*(//|#|\*)' "$TOOL" | grep -qi 'mcp' \
+    && fail "tool code references an MCP transport (must be gh-only)"
+  HMCP="$T/h-ghonly"; mk_harness "$HMCP" 'mirror:
+  board:
+    provider: "github-projects"
+    owner: "acme-org"
+    project_number: 7
+    repo: "acme-org/specs"'
+  rm -f "$T/gh-called"
+  PATH="$T/bin:$PATH" node "$HMCP/tools/sync-board.mjs" >/dev/null 2>&1 || true
+  [ -f "$T/gh-called" ] || fail "gh-only run never dispatched to gh"
+  grep -qi 'mcp' "$T/gh-called" && { cat "$T/gh-called"; fail "a run dispatched to a non-gh MCP transport"; }
+  pass "configured run dispatches to gh only, never MCP [gh_only_no_mcp]"
+
+  # 12) SINGLE github-projects code path (R2) — exactly one tool implements the provider
+  #     branch; no sibling GitHub-Projects script exists in tools/.
+  N_IMPL="$(grep -rlF "github-projects" "$ROOT/tools" | wc -l | tr -d ' ')"
+  [ "$N_IMPL" = "1" ] || { grep -rlF "github-projects" "$ROOT/tools"; fail "expected exactly one github-projects code path in tools/, found $N_IMPL"; }
+  grep -q "github-projects" "$TOOL" || fail "the single tool does not carry the github-projects provider branch"
+  pass "exactly one github-projects code path (the single mirror tool) [single_github_codepath]"
+
+  # 13) IDEMPOTENT reconcile (R3) — with a dispatching fake gh that already returns the
+  #     feature's issue AND its project item, a run must NOT create a duplicate issue or
+  #     re-add the item to the project (it reconciles the existing mapping).
+  mkdir -p "$T/bin-recon"
+  cat > "$T/bin-recon/gh" <<EOF
+#!/bin/sh
+echo "called: \$*" >> "$T/recon-called"
+case "\$1 \$2" in
+  "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
+  "auth status")        echo "Token scopes: 'project', 'repo'"; exit 0 ;;
+  "project view")       echo '{"id":"PID"}' ;;
+  "project field-list") echo '{"fields":[{"id":"FS","name":"Status","options":[{"id":"o","name":"pending"}]},{"id":"FE","name":"Epic","options":[{"id":"oe","name":"E01 — Demo"}]}]}' ;;
+  "project item-list")  echo '{"items":[{"id":"IT1","content":{"number":42}}]}' ;;
+  "issue list")         echo '[{"number":42,"title":"E01-F01 — X","url":"https://github.com/acme-org/specs/issues/42","state":"OPEN","assignees":[]}]' ;;
+  *)                    echo '{}' ;;
+esac
+exit 0
+EOF
+  chmod +x "$T/bin-recon/gh"
+  HRC="$T/h-reconcile"; mk_harness "$HRC" 'mirror:
+  board:
+    provider: "github-projects"
+    owner: "acme-org"
+    project_number: 7
+    repo: "acme-org/specs"'
+  rm -f "$T/recon-called"
+  PATH="$T/bin-recon:$PATH" node "$HRC/tools/sync-board.mjs" >/dev/null 2>&1 || { cat "$T/recon-called" 2>/dev/null; fail "reconcile run errored"; }
+  grep -Eqi 'issue create' "$T/recon-called" && { cat "$T/recon-called"; fail "re-run created a DUPLICATE issue for an already-mapped feature"; }
+  grep -Eqi 'project item-add' "$T/recon-called" && { cat "$T/recon-called"; fail "re-run RE-ADDED an already-present project item (duplicate)"; }
+  pass "re-run reconciles existing issue+item, no duplicate [reconcile_idempotent_rerun]"
+
+  # 14) DRY-RUN mutates nothing (R11) — against a dispatching fake gh with NO pre-existing
+  #     issue/item, --dry-run prints "would …" intents and issues zero mutating gh call.
+  mkdir -p "$T/bin-dry"
+  cat > "$T/bin-dry/gh" <<EOF
+#!/bin/sh
+echo "called: \$*" >> "$T/dry-called"
+case "\$1 \$2" in
+  "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
+  "auth status")        echo "Token scopes: 'project', 'repo'"; exit 0 ;;
+  "project view")       echo '{"id":"PID"}' ;;
+  "project field-list") echo '{"fields":[{"id":"FS","name":"Status","options":[{"id":"o","name":"pending"}]},{"id":"FE","name":"Epic","options":[{"id":"oe","name":"E01 — Demo"}]}]}' ;;
+  "project item-list")  echo '{"items":[]}' ;;
+  "issue list")         echo '[]' ;;
+  *)                    echo '{}' ;;
+esac
+exit 0
+EOF
+  chmod +x "$T/bin-dry/gh"
+  HDR="$T/h-dryrun"; mk_harness "$HDR" 'mirror:
+  board:
+    provider: "github-projects"
+    owner: "acme-org"
+    project_number: 7
+    repo: "acme-org/specs"'
+  cp "$HDR/state/tasks.json" "$T/dry-tasks-before"
+  rm -f "$T/dry-called"
+  OUT="$(PATH="$T/bin-dry:$PATH" node "$HDR/tools/sync-board.mjs" --dry-run 2>&1)" || { echo "$OUT"; fail "dry-run errored"; }
+  printf '%s' "$OUT" | grep -qi 'would' || { echo "$OUT"; fail "dry-run did not print a 'would …' intent"; }
+  grep -Eqi 'issue create|project item-add|item-edit|issue (close|reopen|edit)' "$T/dry-called" \
+    && { cat "$T/dry-called"; fail "--dry-run made a mutating gh call"; }
+  cmp -s "$HDR/state/tasks.json" "$T/dry-tasks-before" || fail "--dry-run wrote state/tasks.json (must mutate nothing)"
+  pass "--dry-run prints intents, issues no mutating gh call, leaves tasks.json unchanged [dry_run_mutates_nothing]"
+
+  # 15) ONE-WAY (R10) — after a real (non-dry) dispatching run, the fixture tasks.json is
+  #     byte-for-byte unchanged: the mirror writes only the board, never back into state.
+  #     (Fixture-local snapshot in the temp dir — NOT a diff against main.)
+  cp "$HRC/state/tasks.json" "$T/oneway-before"
+  PATH="$T/bin-recon:$PATH" node "$HRC/tools/sync-board.mjs" >/dev/null 2>&1 || true
+  cmp -s "$HRC/state/tasks.json" "$T/oneway-before" || fail "sync wrote state/tasks.json (mirror must be one-way)"
+  pass "sync never writes state/tasks.json (one-way) [one_way_never_writes_tasks_json]"
+
+  # 16) NO new committed config key (R5) — the tool reads owner/project_number/repo from the
+  #     EXISTING mirror.board shape and introduces no new mirror.board.* key or committed
+  #     secret. Assert the tool references only the known key set under mirror.board.
+  for k in provider owner project_number repo status_map assignee; do
+    grep -q "'$k'" "$TOOL" || fail "tool no longer reads the existing mirror.board key '$k'"
+  done
+  # No stray mirror.board key beyond the known set, and no committed token/secret literal.
+  UNKNOWN="$(grep -oE "\['mirror', 'board', '[a-z_]+'\]" "$TOOL" | grep -oE "'[a-z_]+'\]" | sed "s/[]']//g" \
+    | grep -vE '^(provider|owner|project_number|repo|status_map|assignee)$' || true)"
+  [ -z "$UNKNOWN" ] || fail "tool introduced a new mirror.board key: $UNKNOWN"
+  grep -Eqi 'ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' "$TOOL" && fail "tool contains a committed GitHub token literal"
+  pass "config read from existing mirror.board shape; no new key/secret [no_new_config_key]"
 else
   pass "node-running cases skipped (node unavailable) [inert_default_noop]"
 fi

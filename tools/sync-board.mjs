@@ -112,8 +112,46 @@ if (!OWNER || !PROJECT_NUMBER || !REPO) {
   console.error('[mirror] provider github-projects needs mirror.board.{owner,project_number,repo} set in harness.config.yaml.');
   process.exit(1);
 }
-try { execFileSync('gh', ['--version'], { stdio: 'ignore' }); }
-catch { console.error("[mirror] `gh` CLI not found — github-projects needs gh authed with 'project' + 'repo' scopes."); process.exit(1); }
+// ── PREFLIGHT (R7): transport is `gh` CLI ONLY (never MCP). Fail CLOSED, with an
+// actionable message, BEFORE any board-mutating `gh` call, if `gh` is (a) absent,
+// (b) below the minimum version that ships the Projects-v2 `gh project` commands, or
+// (c) missing the `project` + `repo` auth scopes. This runs after the config check and
+// before the first project/issue query, so a preflight failure never mutates the board.
+const GH_MIN = '2.31.0';   // first gh release with stable `gh project` (Projects v2) subcommands
+const SCOPE_HINT =
+  "run `gh auth refresh -s project -s repo` (or `gh auth login` with those scopes) so gh can reach GitHub Projects (v2)";
+const cmp = (a, b) => {   // semver-ish numeric compare: -1 / 0 / 1
+  const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d < 0 ? -1 : 1; }
+  return 0;
+};
+let ghVersionOut;
+try { ghVersionOut = execFileSync('gh', ['--version'], { encoding: 'utf8' }); }
+catch {
+  console.error(`[mirror] \`gh\` CLI not found — github-projects targets GitHub Projects (v2) via \`gh\` and needs gh >= ${GH_MIN} authed with 'project' + 'repo' scopes. Install gh (https://cli.github.com), then ${SCOPE_HINT}.`);
+  process.exit(1);
+}
+const ghVer = (ghVersionOut.match(/gh version (\d+\.\d+\.\d+)/) || [])[1];
+if (!ghVer || cmp(ghVer, GH_MIN) < 0) {
+  console.error(`[mirror] \`gh\`${ghVer ? ` ${ghVer}` : ''} is too old for GitHub Projects (v2) — the \`gh project\` commands need gh >= ${GH_MIN}. Upgrade gh (https://cli.github.com), then ${SCOPE_HINT}.`);
+  process.exit(1);
+}
+// Verify the required auth scopes without mutating anything: `gh auth status` reports the
+// token's scopes. Fail closed if it can't confirm both `project` and `repo` are present.
+let authOut = '';
+try { authOut = execFileSync('gh', ['auth', 'status'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+catch (e) {
+  const detail = (e && (e.stderr || e.stdout) || '').toString();
+  console.error(`[mirror] \`gh\` is not authenticated for GitHub Projects (v2) — ${SCOPE_HINT}.${detail ? `\n${detail.trim()}` : ''}`);
+  process.exit(1);
+}
+const scopesLine = (authOut.match(/Token scopes:.*$/m) || [''])[0];
+const hasScope = (s) => new RegExp(`['\"]${s}['\"]|(^|[^-])\\b${s}\\b`).test(scopesLine);
+const missingScopes = ['project', 'repo'].filter((s) => !hasScope(s));
+if (missingScopes.length) {
+  console.error(`[mirror] \`gh\` auth is missing required scope(s) for GitHub Projects (v2): ${missingScopes.join(', ')} — ${SCOPE_HINT}.`);
+  process.exit(1);
+}
 
 // feature state machine -> board column. Column NAMES default to IDENTITY (column ==
 // harness status) and can be overridden per status via `mirror.board.status_map` in
