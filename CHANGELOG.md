@@ -4,6 +4,34 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.28.0] — 2026-07-10
+
+### Added — ✨ Ownership primitive: `owner` field in TaskStore + scoped `/sdd-next --mine` (E10-F01)
+- **Optional `owner` field on epics and features** — `store/tasks.schema.json` now defines an
+  optional string `owner` on both epic objects and feature objects. It is **additive and
+  backward-compatible**: `owner` is not in any `required` array, so existing owner-free
+  `state/tasks.json` files validate unchanged and no migration is needed.
+- **Effective owner (feature wins)** — a feature's effective owner is its own `owner` when set,
+  else its parent epic's `owner`, else unowned. Documented in `agents/orchestrator.md`,
+  `docs/WORKFLOW.md`, and `store/local.md`.
+- **Scoped `/sdd-next --mine`** — the Orchestrator contract adds an "Ownership & scoped
+  selection" subsection: `--mine` selects only features whose effective owner equals the
+  identity resolved from `workflow.identity` (`@me`/`self` → authed `gh` user via `gh api
+  user`; else literal). Scoping is a filter layered on top of the existing `next()` gates —
+  it never relaxes a gate. It is **owned-only** (no claim-on-select — that is E10-F02) and
+  **fails closed** (unresolved identity or no owned actionable work ⇒ report + no state change,
+  never widen to board-wide). Bare `/sdd-next` is unchanged board-wide selection.
+- **`workflow.identity` config key** — new optional key in `harness.config.yaml` (empty default
+  ⇒ solo/board-wide, today's behavior).
+- **Installer wiring** — `harness-install.sh` generates the `--mine` scoped-selection front-end
+  into every selected target's `/sdd-next` glue (Claude/OpenCode/Antigravity/Codex), byte
+  identical; `tests/test_install.sh` asserts the wiring. New `tests/test_ownership.sh` behavior
+  suite added to `verification.test_command`.
+- The board mirror stays **one-way** — no agent reads the board for ownership; `state/tasks.json`
+  is the single source of truth (invariant preserved).
+- `VERSION` bumped 0.27.3 → 0.28.0 (installed body changed; **MINOR** per the versioning policy —
+  additive/backward-compatible).
+
 ## [0.27.3] — 2026-07-10
 
 ### Fixed — 📝 Align draft-epic docs + re-validate after driller approval mutation (E09)

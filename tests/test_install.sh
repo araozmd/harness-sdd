@@ -208,6 +208,14 @@ pass "entrypoint merge preserves prose + adds block (R3)"
 
 # Claude Code glue points at .harness/                                                         # R7
 [ -f "$T/.claude/commands/sdd-next.md" ] || fail "sdd-next command missing"
+# E10-F01: the generated /sdd-next glue forwards $ARGUMENTS and carries the --mine
+# scoped-selection wiring (owned-only, delegating to the Orchestrator contract).
+grep -qF '$ARGUMENTS' "$T/.claude/commands/sdd-next.md" \
+  || fail "sdd-next does not forward \$ARGUMENTS (E10-F01 scope wiring)"
+grep -qF -- '--mine' "$T/.claude/commands/sdd-next.md" \
+  || fail "sdd-next does not carry the --mine scoped-selection wiring (E10-F01)"
+grep -qiF 'effective owner' "$T/.claude/commands/sdd-next.md" \
+  || fail "sdd-next --mine wiring does not reference the effective-owner scope (E10-F01)"
 [ -f "$T/.claude/commands/sdd-new.md" ]  || fail "sdd-new command missing"
 [ -f "$T/.claude/commands/sdd-plan.md" ] || fail "sdd-plan command missing"
 # installed /sdd-plan must act as Planner, resolved against .harness/, and carry args
@@ -359,6 +367,16 @@ for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix; do
   cmp -s "$T/.claude/commands/$w.md" "$T/.agents/workflows/$w.md" || fail "antigravity workflow $w differs from claude $w (R9)"
 done
 pass "Antigravity glue generated (R11)"
+
+# E10-F01 R12/R13: the /sdd-next scoped-selection front-end is generated into EVERY selected
+# target (Claude/OpenCode/Antigravity here; Codex GLOBAL prompts in the codex-select case),
+# byte-identical, and each carries the --mine wiring + forwards $ARGUMENTS. The cmp -s chains
+# above prove byte-identity across targets; assert the scope token reached each generated body.
+for _b in "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" "$T/.agents/workflows/sdd-next.md"; do
+  grep -qF -- '--mine' "$_b"      || fail "generated /sdd-next glue missing --mine scope wiring: $_b (E10-F01 R12/R13)"
+  grep -qF '$ARGUMENTS' "$_b"     || fail "generated /sdd-next glue does not forward \$ARGUMENTS: $_b (E10-F01 R13)"
+done
+pass "E10-F01: /sdd-next glue generated per target, byte-identical, carries --mine + \$ARGUMENTS [sdd_next_glue_generated_all_targets][sdd_next_scope_wiring_asserted]"
 
 # target verification commands reset to blank                                                  # R8
 grep -q 'test_command: ""' "$T/.harness/harness.config.yaml" || fail "test_command not blanked"
@@ -538,6 +556,7 @@ grep -qx codex "$TCX/.harness/.agents" || fail "R8: codex not persisted in .harn
 # installed /sdd-next prompt acts as the Orchestrator, resolved against .harness/, carrying args
 grep -qF '.harness/' "$TCX/ch/prompts/sdd-next.md" || fail "codex: sdd-next prompt does not resolve against .harness/"
 grep -qF '$ARGUMENTS' "$TCX/ch/prompts/sdd-next.md" || fail "codex: sdd-next prompt does not carry \$ARGUMENTS"
+grep -qF -- '--mine' "$TCX/ch/prompts/sdd-next.md" || fail "codex: sdd-next prompt does not carry the --mine scoped-selection wiring (E10-F01)"
 # byte-identical to the Claude command body (front-ends stay in lock-step)
 CODEX_HOME="$TCX/ch2" sh "$SRC/harness-install.sh" --agents=claude,codex "$TCX" >/dev/null || fail "codex+claude install failed"
 cmp -s "$TCX/ch2/prompts/sdd-next.md" "$TCX/.claude/commands/sdd-next.md" \

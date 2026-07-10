@@ -35,6 +35,27 @@ Validated by `store/tasks.schema.json` (and by `init.sh`).
     epic-done rollup and the drift-check demotion (below) — `set_status` is the **one**
     write path for both feature and epic status; backends MUST implement the epic case.
 
+### Ownership & scoped selection (optional `owner` — E10-F01)
+Both **epic** objects and **feature** objects carry an **optional** string `owner`
+field in the schema. It is **additive and backward-compatible**: it is not in any
+`required` array, so an owner-free `state/tasks.json` validates unchanged and no
+migration is needed. With **no `owner` anywhere** and no `workflow.identity`,
+selection is **exactly today's** board-wide `next()` — `owner` is ignored.
+
+- **Effective owner.** A feature's effective owner = its own `owner` when set, else its
+  parent epic's `owner`, else **unowned** (feature-level wins). Comparison is literal.
+- **Identity.** The current developer's identity is `workflow.identity` in
+  `harness.config.yaml`: empty ⇒ board-wide; `"@me"`/`"self"` ⇒ resolve to the authed
+  `gh` user login (`gh api user`); any other value ⇒ literal string.
+- **Scoped `next()` (`/sdd-next --mine`).** A **filter layered on top of** the ordinary
+  `next()` above — it never relaxes any gate. It runs every existing gate (epic gate,
+  `depends_on`-done, actionable status, human gate), then keeps only candidates whose
+  effective owner equals the resolved identity, and picks the first by the usual lower
+  epic/feature ordering. It is **owned-only**: it never selects an unowned feature and
+  **never writes or claims** an `owner` (claim-on-select is E10-F02). If the identity is
+  unresolved, or no owned actionable feature exists, it **fails closed** — selects
+  nothing, reports, changes no state — and does **not** widen to board-wide.
+
 ### Epic lifecycle
 The canonical epic lifecycle is `draft → planned → in-progress → done`. A `draft`
 epic is an inception sketch (title + business brief only) whose features are never

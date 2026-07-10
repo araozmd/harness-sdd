@@ -63,3 +63,10 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-07-10T19:48:02Z E09-F02 in-review -> approve (round 2): Reviewer approved; feature marked done.
 - 2026-07-10T19:48:02Z E09 done rollup: all E09 features are done; drift check triggered.
 - 2026-07-10T19:49:21Z E09 drift check: no stale epics; no demotions (no architecture/ADR context to re-validate).
+- 2026-07-10T21:44:39Z E10-F01 pending -> spec-ready: Architect authored 4-file spec (15 R-ids, full R-id↔task↔test traceability, ADRs touched: none). PAUSED at human spec-approval gate (autonomous:false, require_spec_approval:true).
+- 2026-07-10T22:24:36Z E10-F01 spec-ready -> in-progress: human approved spec at gate; Builder spawned with approved specs.
+- 2026-07-10T22:33:34Z E10-F01 in-progress: Builder implemented ownership primitive (owner field + scoped /sdd-next --mine) per approved spec; T1-T13 done; ./init.sh + full test_command (incl. new test_ownership.sh) green; VERSION 0.27.3 -> 0.28.0. Handed back to Orchestrator for in-review.
+- 2026-07-10T22:34:15Z E10-F01 in-progress -> in-review: Builder implemented 13 tasks (schema owner field, orchestrator contract, /sdd-next --mine glue, installer wiring, docs, tests/test_ownership.sh), VERSION 0.27.3->0.28.0; full suite green. Reviewer spawned.
+- 2026-07-10T22:39:51Z E10-F01 in-review -> reject (round 1): Reviewer found R15 VERSION test uses git HEAD:VERSION OLD-vs-NEW diff (permanent-suite anti-pattern; would block next feature post-merge). Back to Builder for fix.
+- 2026-07-10T22:43:44Z E10-F01 in-progress -> in-review: Builder fixed R15 to shape-only SemVer+CHANGELOG assertion (round 2); proven green post-commit; full suite EXIT=0. Reviewer restarted.
+- 2026-07-10T22:46:59Z E10-F01 in-review -> approve (round 2): Reviewer verified R15 shape-only fix (proven green post-commit) + full-suite regression; local gate green. Proceeding to PR + Codex pr-loop before done (per do-not-roll-done-before-merge).
