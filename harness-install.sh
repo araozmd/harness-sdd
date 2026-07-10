@@ -752,7 +752,7 @@ AGENTS.override.md'
   else
     printf '%s\n' "$_root_ignores" | while IFS= read -r _pat; do
       [ -n "$_pat" ] || continue
-      grep -qF "$_pat" "$TARGET/.gitignore" || printf '%s\n' "$_pat" >> "$TARGET/.gitignore"
+      grep -qxF "$_pat" "$TARGET/.gitignore" || printf '%s\n' "$_pat" >> "$TARGET/.gitignore"
     done
     info "project-root .gitignore ensured (personal/runtime agent state)"
   fi
@@ -1011,7 +1011,7 @@ EOF
   # doc-critic sub-agent shim (E09): the advisory review pass the architect (and the
   # planner/driller slash commands) spawn at their pre-hand-off checkpoints. Points at
   # the canonical .harness/agents/doc-critic.md; documents-only, no production-code review.
-  emit_agent doc-critic "Read, Grep, Glob" \
+  emit_agent doc-critic "Read, Grep, Glob, Write" \
     "Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code."
   ok "Claude Code sub-agent shims installed (.claude/agents/)"
   fi  # end: claude-gated sub-agent shims

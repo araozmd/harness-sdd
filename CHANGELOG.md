@@ -4,6 +4,23 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.27.2] — 2026-07-10
+
+### Fixed — 🔒 Harden doc-critic write access + exact-line gitignore seeding (E09)
+- **doc-critic granted `Write`** — the emitted `.claude/agents/doc-critic.md` shim now
+  carries `Read, Grep, Glob, Write` (was read-only). The role writes an auditable
+  `progress/<run>/doc-critic-<checkpoint>.md` note (R7); without `Write` the checkpoint
+  left no file-based handoff. `Write` is the minimal, most-scoped grant (no Edit/Bash).
+- **exact-line matching for seeded root `.gitignore` ignores** — the append-only loop now
+  uses `grep -qxF` (whole-line) instead of `grep -qF` (substring), so a pre-existing
+  `.gitignore` that mentions `AGENTS.local.md`/`CLAUDE.local.md`/`AGENTS.override.md`
+  (or `.claude/settings.local.json`) only in a comment or negation still gets the real
+  ignore line appended — a personal override can no longer slip through uncommitted.
+- **Regression assertions** added to `tests/test_install.sh` for the doc-critic `Write`
+  grant and the exact-line gitignore seeding (a comment-only mention still gets the real
+  ignore added). `VERSION` bumped 0.27.1 → 0.27.2 (installed body changed; PATCH per the
+  versioning policy). Fixes Codex #39 r2 P2/P3.
+
 ## [0.27.1] — 2026-07-10
 
 ### Fixed — 🔧 Wire the doc-critic checkpoint into the installer-generated glue (E09)

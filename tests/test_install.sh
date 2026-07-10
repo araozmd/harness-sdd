@@ -261,7 +261,11 @@ grep -qF '.harness/agents/doc-critic.md' "$T/.claude/agents/doc-critic.md" \
   || fail "E09: doc-critic shim does not resolve against .harness/"
 grep -qE '^tools:.*\bTask\b' "$T/.claude/agents/architect.md" \
   || fail "E09: architect shim lacks the Task tool — cannot spawn the doc-critic checkpoint"
-pass "E09: doc-critic spawnable in the installed Claude workflow (shim + architect Task)"
+# The critic writes an auditable progress/<run>/doc-critic-<checkpoint>.md note (R7); its shim
+# must grant Write or the checkpoint leaves no file-based handoff (Codex #39 r2 P2).
+grep -qE '^tools:.*\bWrite\b' "$T/.claude/agents/doc-critic.md" \
+  || fail "E09: doc-critic shim lacks the Write tool — cannot record its progress/ note (R7)"
+pass "E09: doc-critic spawnable in the installed Claude workflow (shim + architect Task + Write)"
 
 # ── E09: /sdd-plan glue mirrors the drillable-minimum + doc-critic step (Codex #39 r1 P2) ─
 # Fresh installs run the slash-command body, so the installed /sdd-plan must require the
@@ -393,6 +397,20 @@ done
 test_root_gitignore_preserves_user_entries
 test_root_gitignore_local_prompt_entries_idempotent
 pass "project-root .gitignore is append-only + idempotent on upgrade"
+
+# root .gitignore seeding uses EXACT-LINE matching (grep -qxF), not substring: a pre-existing
+# .gitignore that mentions AGENTS.local.md only inside a COMMENT (or a negation) must still get
+# the real ignore line appended, or a personal override could be committed (Codex #39 r2 P3).
+TX="$(mktemp -d 2>/dev/null || mktemp -d -t harness-xline)"
+printf '# note: AGENTS.local.md is personal — do not commit\n' > "$TX/.gitignore"
+HOME="$TX/home" CODEX_HOME="$TX/codex-home" sh "$SRC/harness-install.sh" "$TX" >/dev/null \
+  || fail "exact-line gitignore install run exited non-zero"
+grep -qxF 'AGENTS.local.md' "$TX/.gitignore" \
+  || fail "root .gitignore substring-matched a comment — real AGENTS.local.md ignore not added (exact-line)"
+grep -qF '# note: AGENTS.local.md is personal' "$TX/.gitignore" \
+  || fail "pre-existing comment mentioning AGENTS.local.md clobbered on install"
+rm -rf "$TX"
+pass "project-root .gitignore uses exact-line matching (comment mention still gets the real ignore)"
 
 # user content placed AFTER the block must keep its position on upgrade (in-place replace)    # R4
 printf 'TRAILING-USER-NOTE\n' >> "$T/CLAUDE.md"
