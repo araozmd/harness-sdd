@@ -59,20 +59,31 @@ Inception ─► Orchestrator → Architect → Builder → Reviewer    (Scout a
 3. Read `agents/orchestrator.md` and assume the Orchestrator role.
 4. Read the TaskStore, find the next actionable task, and delegate per the workflow.
 
+## Versioning
 
-<claude-mem-context>
-# Memory Context
+`harness-install.sh` stamps `VERSION` into every target's `.harness/.harness-version`
+and uses it for upgrade detection — so `VERSION` is a **public contract**. Bump it
+deliberately, not on every PR.
 
-# [harness-sdd] recent context, 2026-06-26 11:32pm CST
+- **When:** in the same PR, before it's ready to merge, **only if the PR changes the
+  installed body** (`harness-install.sh`, `init.sh`, `agents/`, `docs/`, `store/`,
+  `specs/_templates/`, `harness.config.yaml`, the `.claude/` glue). Docs-only,
+  demo-spec, or CI changes get **no** bump (else downstream `.harness/` dirs look
+  "upgraded" when nothing changed).
+- **How much (SemVer):** PATCH = body/installer bugfix (🐛); MINOR = new
+  backward-compatible capability (✨); MAJOR = breaking layout / `tasks.schema.json`
+  change requiring target migration (💥).
+- Record it in `CHANGELOG.md` and tag the merge commit `vX.Y.Z`.
+- (Optional enforcement: a CI check that fails a PR touching harness-owned paths
+  without a `VERSION` change.)
 
-Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
-Format: ID TIME TYPE TITLE
-Fetch details: get_observations([IDs]) | Search: mem-search skill
+## Way of work
 
-Stats: 1 obs (201t read) | 12,067t work | 98% savings
-
-### Jun 26, 2026
-14 11:15p ✅ Removed BrowserMCP from Codex User-Level Configuration
-
-Access 12k tokens of past work via get_observations([IDs]) or mem-search skill.
-</claude-mem-context>
+- Every new work, feature or bug should have its own branch.
+- If a feature is completed make sure the README and docs are up to date.
+- Once all local verifications and tests passed, create a new PR for review.
+- Once a branch is merged delete remote and local branch and go back to main
+  to keep the repo clean.
+- After every feature is finished in its own branch and before continuing with
+  another feature, wait for it to be merged. Only continue autonomously if the
+  next task is explicitly marked as autonomous.

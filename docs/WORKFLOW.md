@@ -95,6 +95,27 @@ This places the citation contract **between** `/sdd-plan`/`/sdd-drill` (the prod
 the Builder/Reviewer (the consumers) — it is additive and distinct from the `/sdd-plan`,
 `/sdd-drill`, and `/sdd-fix` lanes.
 
+## Doc-critic checkpoints
+
+The **Doc-critic** (`agents/doc-critic.md`) is an automated, advisory review pass that
+runs at three defined checkpoints in the planning tier. It reviews harness-generated
+documents and specs, flags only issues that would cause real downstream problems
+(completeness, consistency, clarity, scope, YAGNI), and lets the generating agent fix
+them inline before proceeding. It is **advisory only** and never blocks or introduces a
+human gate.
+
+| Checkpoint | Caller | `target-type` | What is reviewed |
+|---|---|---|---|
+| After `/sdd-plan` | Planner | `plan-output` | `specs/vision.md`, `specs/architecture.md`, ADRs at `specs/adr/NNNN-*.md`, and every seeded `specs/epics/<id>-<slug>/epic.md` |
+| After `/sdd-drill` | Driller | `epic-decomposition` | The target `epic.md`, its feature table, per-feature inbox briefs under `progress/inbox/`, and any ADR deltas appended by the drill |
+| Before `spec-ready` | Architect | `feature-spec` | The four files for one feature: `.spec.md`, `.plan.md`, `.tasks.md`, `.tests.md` |
+
+The generating agent spawns the critic as a sub-agent with the `target-type` and the
+paths just written, applies any advisory findings **inline**, and proceeds. If the critic
+errors or times out, the agent proceeds **best-effort** and appends a short note to
+`progress/<run>/` so the skipped pass is auditable. The critic reviews **documents only**;
+production-code review remains the Reviewer's job (E05).
+
 ## Drift check on epic rollup
 
 Rolling-wave planning has a failure mode: a plan sketched early goes **stale** as you learn.

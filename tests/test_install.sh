@@ -19,6 +19,93 @@ export CODEX_HOME="$T/codex-home"
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
+test_root_gitignore_seeds_local_prompt_files() {
+  [ -f "$T/.gitignore" ] || fail "project-root .gitignore not seeded"
+  for _p in AGENTS.local.md CLAUDE.local.md AGENTS.override.md; do
+    grep -qxF "$_p" "$T/.gitignore" || fail "root .gitignore missing local prompt ignore $_p"
+  done
+}
+
+test_entrypoints_reference_local_overrides() {
+  test_entrypoints_reference_agents_local
+  test_local_override_guidance_is_conditional
+  test_local_override_precedence_wording
+}
+
+test_entrypoints_reference_agents_local() {
+  for _ep in AGENTS.md CLAUDE.md GEMINI.md; do
+    grep -qF 'AGENTS.local.md' "$T/$_ep" \
+      || fail "$_ep missing AGENTS.local.md local override guidance"
+  done
+}
+
+test_local_override_guidance_is_conditional() {
+  for _ep in AGENTS.md CLAUDE.md GEMINI.md; do
+    grep -qF 'if present' "$T/$_ep" \
+      || fail "$_ep local override guidance is not conditional"
+  done
+  [ ! -e "$T/AGENTS.local.md" ] || fail "installer must not require or create AGENTS.local.md"
+}
+
+test_local_override_precedence_wording() {
+  for _ep in AGENTS.md CLAUDE.md GEMINI.md; do
+    grep -qF 'committed instructions remain authoritative' "$T/$_ep" \
+      || fail "$_ep missing committed-instructions precedence wording"
+  done
+}
+
+test_existing_entrypoint_prose_preserved() {
+  grep -qF 'Custom instructions here.' "$T/CLAUDE.md" || fail "custom CLAUDE.md content lost"
+}
+
+test_config_layering_documents_personal_prompt_layer() {
+  grep -qF 'personal prompt' "$T/.harness/docs/CONFIG-LAYERING.md" \
+    || fail "CONFIG-LAYERING.md missing personal prompt layer"
+  grep -qF 'AGENTS.local.md' "$T/.harness/docs/CONFIG-LAYERING.md" \
+    || fail "CONFIG-LAYERING.md missing portable AGENTS.local.md convention"
+  grep -qF 'additive' "$T/.harness/docs/CONFIG-LAYERING.md" \
+    || fail "CONFIG-LAYERING.md missing additive local prompt guidance"
+}
+
+test_config_layering_documents_native_local_prompt_files() {
+  grep -qF 'CLAUDE.local.md' "$T/.harness/docs/CONFIG-LAYERING.md" \
+    || fail "CONFIG-LAYERING.md missing Claude native local prompt file"
+  grep -qF 'AGENTS.override.md' "$T/.harness/docs/CONFIG-LAYERING.md" \
+    || fail "CONFIG-LAYERING.md missing Codex native override file"
+}
+
+test_config_layering_documents_local_prompt_caveats() {
+  grep -qF 'fresh worktrees' "$T/.harness/docs/CONFIG-LAYERING.md" \
+    || fail "CONFIG-LAYERING.md missing fresh-worktree caveat"
+  grep -qF 'native local-file support differs by CLI' "$T/.harness/docs/CONFIG-LAYERING.md" \
+    || fail "CONFIG-LAYERING.md missing per-tool native support caveat"
+}
+
+test_umbrella_gitignore_example_includes_local_prompt_files() {
+  for _p in AGENTS.local.md CLAUDE.local.md AGENTS.override.md; do
+    grep -qxF "$_p" "$T/.harness/umbrella.gitignore.example" \
+      || fail "umbrella.gitignore.example missing local prompt ignore $_p"
+  done
+}
+
+test_version_and_changelog_for_local_overrides() {
+  [ "$(cat "$SRC/VERSION")" = "0.27.0" ] || fail "VERSION was not bumped to 0.27.0 for E09-F02"
+  grep -qF '## [0.27.0]' "$SRC/CHANGELOG.md" || fail "CHANGELOG missing 0.27.0 entry"
+  grep -qF 'local prompt override' "$SRC/CHANGELOG.md" \
+    || fail "CHANGELOG missing local prompt override summary"
+}
+
+test_root_gitignore_preserves_user_entries() {
+  grep -qF 'my-secret-dir/' "$T/.gitignore" || fail "user entry in root .gitignore clobbered on upgrade"
+}
+
+test_root_gitignore_local_prompt_entries_idempotent() {
+  for _p in AGENTS.local.md CLAUDE.local.md AGENTS.override.md; do
+    [ "$(grep -cxF "$_p" "$T/.gitignore")" = "1" ] \
+      || fail "root .gitignore local prompt seed duplicated on upgrade: $_p"
+  done
+}
+
 # A pre-existing entrypoint with custom prose that MUST survive.
 printf '# My Project\n\nCustom instructions here.\n' > "$T/CLAUDE.md"
 
@@ -35,16 +122,77 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "installer exited non-zero"
 [ -x "$T/.harness/init.sh" ]                   || fail ".harness/init.sh not executable"     # R1
 [ -f "$T/.harness/specs/product.md" ]          || fail "product.md stub not seeded"          # R6
 [ -f "$T/.harness/state/tasks.json" ]          || fail "bootstrap tasks.json missing"        # R6
-pass "fresh install layout correct (R1, R6)"
+# E09-F01: doc-critic role is installed and the generating-agent contracts reference it.
+[ -f "$T/.harness/agents/doc-critic.md" ]      || fail "doc-critic role not installed"       # R13
+grep -qF 'doc-critic' "$T/.harness/agents/planner.md"   || fail "installed planner does not reference doc-critic"   # R14
+grep -qF 'doc-critic' "$T/.harness/agents/driller.md"   || fail "installed driller does not reference doc-critic"   # R14
+grep -qF 'doc-critic' "$T/.harness/agents/architect.md" || fail "installed architect does not reference doc-critic" # R14
+grep -qF 'target-type=plan-output' "$T/.harness/agents/planner.md"     || fail "installed planner missing target-type=plan-output"     # R14
+grep -qF 'target-type=epic-decomposition' "$T/.harness/agents/driller.md" || fail "installed driller missing target-type=epic-decomposition" # R14
+grep -qF 'target-type=feature-spec' "$T/.harness/agents/architect.md"   || fail "installed architect missing target-type=feature-spec"   # R14
+pass "fresh install layout correct (R1, R6) + doc-critic installed and referenced (R13, R14)"
 
 # project-root .gitignore append-seeded with personal/runtime agent state, ignoring
 # SPECIFIC .claude/ files (never the whole dir, so generated agents/commands stay tracked).
 [ -f "$T/.gitignore" ]                                  || fail "project-root .gitignore not seeded"
 grep -qF '.claude/settings.local.json' "$T/.gitignore"  || fail "root .gitignore missing settings.local.json"
 grep -qF '.claude/scheduled_tasks.lock' "$T/.gitignore" || fail "root .gitignore missing scheduler-lock"
+for _p in AGENTS.local.md CLAUDE.local.md AGENTS.override.md; do
+  grep -qxF "$_p" "$T/.gitignore" || fail "root .gitignore missing local prompt ignore $_p"
+done
+test_root_gitignore_seeds_local_prompt_files
 grep -qxF '.claude/' "$T/.gitignore"                    && fail "root .gitignore over-ignores the whole .claude/ dir"
 [ -f "$T/.harness/docs/CONFIG-LAYERING.md" ]            || fail "CONFIG-LAYERING.md not installed"
-pass "project-root .gitignore seeds personal/runtime ignores (config layering)"
+pass "project-root .gitignore seeds personal/runtime and local prompt ignores (config layering)"
+
+# E09-F02: generated entrypoint marker blocks document optional local prompt guidance.
+for _ep in AGENTS.md CLAUDE.md GEMINI.md; do
+  grep -qF 'AGENTS.local.md' "$T/$_ep" \
+    || fail "$_ep missing AGENTS.local.md local override guidance"
+  grep -qF 'if present' "$T/$_ep" \
+    || fail "$_ep local override guidance is not conditional"
+  grep -qF 'committed instructions remain authoritative' "$T/$_ep" \
+    || fail "$_ep missing committed-instructions precedence wording"
+done
+[ ! -e "$T/AGENTS.local.md" ] || fail "installer must not require or create AGENTS.local.md"
+test_entrypoints_reference_local_overrides
+pass "entrypoints reference optional local overrides with committed-instructions precedence"
+
+# E09-F02: config layering docs describe the personal prompt layer and caveats.
+grep -qF 'personal prompt' "$T/.harness/docs/CONFIG-LAYERING.md" \
+  || fail "CONFIG-LAYERING.md missing personal prompt layer"
+grep -qF 'AGENTS.local.md' "$T/.harness/docs/CONFIG-LAYERING.md" \
+  || fail "CONFIG-LAYERING.md missing portable AGENTS.local.md convention"
+grep -qF 'CLAUDE.local.md' "$T/.harness/docs/CONFIG-LAYERING.md" \
+  || fail "CONFIG-LAYERING.md missing Claude native local prompt file"
+grep -qF 'AGENTS.override.md' "$T/.harness/docs/CONFIG-LAYERING.md" \
+  || fail "CONFIG-LAYERING.md missing Codex native override file"
+grep -qF 'additive' "$T/.harness/docs/CONFIG-LAYERING.md" \
+  || fail "CONFIG-LAYERING.md missing additive local prompt guidance"
+grep -qF 'fresh worktrees' "$T/.harness/docs/CONFIG-LAYERING.md" \
+  || fail "CONFIG-LAYERING.md missing fresh-worktree caveat"
+grep -qF 'native local-file support differs by CLI' "$T/.harness/docs/CONFIG-LAYERING.md" \
+  || fail "CONFIG-LAYERING.md missing per-tool native support caveat"
+test_config_layering_documents_personal_prompt_layer
+test_config_layering_documents_native_local_prompt_files
+test_config_layering_documents_local_prompt_caveats
+pass "CONFIG-LAYERING.md documents personal prompt files and caveats"
+
+# E09-F02: umbrella/shared-spec .gitignore example carries the same local prompt ignores.
+for _p in AGENTS.local.md CLAUDE.local.md AGENTS.override.md; do
+  grep -qxF "$_p" "$T/.harness/umbrella.gitignore.example" \
+    || fail "umbrella.gitignore.example missing local prompt ignore $_p"
+done
+test_umbrella_gitignore_example_includes_local_prompt_files
+pass "umbrella gitignore example includes local prompt ignores"
+
+# E09-F02: installed-body change is versioned.
+[ "$(cat "$SRC/VERSION")" = "0.27.0" ] || fail "VERSION was not bumped to 0.27.0 for E09-F02"
+grep -qF '## [0.27.0]' "$SRC/CHANGELOG.md" || fail "CHANGELOG missing 0.27.0 entry"
+grep -qF 'local prompt override' "$SRC/CHANGELOG.md" \
+  || fail "CHANGELOG missing local prompt override summary"
+test_version_and_changelog_for_local_overrides
+pass "VERSION and CHANGELOG record local overrides convention"
 
 # version stamp matches source VERSION                                                        # R2
 [ "$(cat "$T/.harness/.harness-version")" = "$(cat "$SRC/VERSION")" ] || fail "version mismatch"
@@ -54,6 +202,7 @@ pass "version stamped (R2)"
 grep -qF 'Custom instructions here.' "$T/CLAUDE.md" || fail "custom CLAUDE.md content lost"
 grep -qF '<!-- harness:begin -->'     "$T/CLAUDE.md" || fail "harness block not added"
 [ -f "$T/AGENTS.md" ] && [ -f "$T/GEMINI.md" ]      || fail "AGENTS.md/GEMINI.md not created"
+test_existing_entrypoint_prose_preserved
 pass "entrypoint merge preserves prose + adds block (R3)"
 
 # Claude Code glue points at .harness/                                                         # R7
@@ -200,6 +349,12 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "upgrade run (root .gitigno
 grep -qF 'my-secret-dir/' "$T/.gitignore" || fail "user entry in root .gitignore clobbered on upgrade"
 [ "$(grep -cF '.claude/settings.local.json' "$T/.gitignore")" = "1" ] \
   || fail "root .gitignore seed duplicated on upgrade (not idempotent)"
+for _p in AGENTS.local.md CLAUDE.local.md AGENTS.override.md; do
+  [ "$(grep -cxF "$_p" "$T/.gitignore")" = "1" ] \
+    || fail "root .gitignore local prompt seed duplicated on upgrade: $_p"
+done
+test_root_gitignore_preserves_user_entries
+test_root_gitignore_local_prompt_entries_idempotent
 pass "project-root .gitignore is append-only + idempotent on upgrade"
 
 # user content placed AFTER the block must keep its position on upgrade (in-place replace)    # R4

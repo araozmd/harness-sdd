@@ -111,21 +111,6 @@ honor (F02's upfront ADRs and/or this drill's deltas) — the ADR ids the featur
 **touches**. This is a forward-compatible note for F04; F03 does not itself make any spec
 cite an ADR.
 
-## Re-validate before claiming success (R10)
-
-After seeding (and after the state flip + stamp), you MUST **re-validate**
-`state/tasks.json` against `store/tasks.schema.json` via the zero-dependency path (the
-same validation `init.sh` performs):
-
-```sh
-python3 -c "import json; json.load(open('state/tasks.json'))"
-```
-
-plus a schema check against `store/tasks.schema.json`. **If** validation **fails**,
-**then** you MUST **report the failure** and you **must not claim a successful drill** —
-you must not leave an invalid TaskStore behind as a success. Fix or revert your edit,
-surface the error, and stop. A failed validation is never a success.
-
 ## ADR deltas — per-epic only (R11, R12, D5)
 
 When the decomposition forces a per-epic design decision, **append** it as a one-decision
@@ -142,6 +127,31 @@ epic*, or refinements informed by what an earlier epic's implementation taught. 
 **never** author the **feature-level** design that belongs in a feature's own four-file
 spec — that is the Architect's (F04's) boundary. Decisions local to a single feature are
 **deferred** to that feature's spec.
+
+## Doc-critic checkpoint after `/sdd-drill` (R11)
+
+After seeding the feature entries, filling the `epic.md` feature table, writing the
+per-feature inbox briefs, and appending any ADR deltas, spawn the **Doc-critic**
+(`agents/doc-critic.md`) as a sub-agent with `target-type=epic-decomposition`. Pass the
+target `epic.md` path, the feature table, the inbox brief paths, and the ADR delta paths.
+Apply any advisory findings inline, then proceed. If the critic invocation errors or
+times out, proceed best-effort and append a note to `progress/<run>/` recording the
+skipped or failed review.
+
+## Re-validate before claiming success (R10)
+
+After seeding, appending ADR deltas, and running the doc-critic checkpoint, you MUST
+**re-validate** `state/tasks.json` against `store/tasks.schema.json` via the
+zero-dependency path (the same validation `init.sh` performs):
+
+```sh
+python3 -c "import json; json.load(open('state/tasks.json'))"
+```
+
+plus a schema check against `store/tasks.schema.json`. **If** validation **fails**,
+**then** you MUST **report the failure** and you **must not claim a successful drill** —
+you must not leave an invalid TaskStore behind as a success. Fix or revert your edit,
+surface the error, and stop. A failed validation is never a success.
 
 ## The single epic-level human gate (R15)
 

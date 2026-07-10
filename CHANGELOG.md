@@ -4,6 +4,56 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.27.0] — 2026-07-10
+
+### Added — ✨ Per-developer local prompt override convention (E09-F02)
+- **Generated entrypoint guidance** — `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` managed
+  marker blocks now mention the optional `AGENTS.local.md` local prompt override. The
+  guidance is conditional, additive, and states that committed instructions remain
+  authoritative on conflict.
+- **Installer ignore seeding** — project-root `.gitignore` seeding now includes
+  `AGENTS.local.md`, `CLAUDE.local.md`, and `AGENTS.override.md` through the existing
+  append-only/idempotent seed path, preserving user-authored ignore entries.
+- **Docs and examples** — `docs/CONFIG-LAYERING.md` documents the personal prompt layer,
+  native local files for Claude Code and Codex, fresh worktree caveats, and per-tool
+  local-file differences. `umbrella.gitignore.example` includes the same local prompt
+  ignore entries for shared-spec repository roots.
+- **Verification** — `tests/test_install.sh` covers local prompt ignore seeding,
+  idempotence, generated entrypoint wording, docs coverage, umbrella example parity, and
+  this SemVer MINOR bump. `VERSION` bumped 0.26.0 → 0.27.0.
+
+## [0.26.0] — 2026-07-10
+
+### Added — ✨ Doc-critic: advisory review pass over harness-generated docs (E09-F01)
+- **New portable Doc-critic role (`agents/doc-critic.md`)** — an automated, advisory
+  sub-agent that reviews harness-generated planning documents and specs at three defined
+  checkpoints. It accepts a `target-type` argument (`plan-output`, `epic-decomposition`,
+  `feature-spec`) and flags only issues that would cause real downstream problems across
+  completeness, consistency, clarity, scope, and YAGNI. Findings are advisory only: the
+  generating agent applies fixes inline and proceeds, with a short note to `progress/<run>/`.
+  On error or timeout the agent proceeds best-effort and records the skipped pass.
+- **Planner checkpoint (`/sdd-plan`)** — after writing vision, architecture, ADRs, and
+  seeded `epic.md` files, the Planner spawns the Doc-critic with `target-type=plan-output`
+  and applies inline fixes. Each seeded `epic.md` must carry the drillable-minimum:
+  business brief, epic-level success criteria, technical considerations / restrictions /
+  non-goals, cross-epic dependencies and boundaries, and pointers to relevant shared ADRs.
+- **Driller checkpoint (`/sdd-drill`)** — after decomposing the epic (feature entries,
+  `epic.md` feature table, inbox briefs, ADR deltas), the Driller spawns the Doc-critic
+  with `target-type=epic-decomposition` and applies inline fixes.
+- **Architect checkpoint (before `spec-ready`)** — after drafting a feature's four-file
+  spec, the Architect spawns the Doc-critic with `target-type=feature-spec` and applies
+  inline fixes before handing off to the human gate.
+- **Installer wiring** — `agents/doc-critic.md` is copied into `.harness/agents/` on every
+  install/upgrade via the existing `copy agents` step.
+- **Verification** — `tests/test_doc_critic.sh` covers R1–R18 (static grep contract
+  assertions over the role and checkpoint wiring); `tests/test_install.sh` asserts the
+  role is installed and the Planner/Driller/Architect contracts reference it. Wired into
+  `verification.test_command`.
+- **Docs** — `docs/WORKFLOW.md` gains a distinct `## Doc-critic checkpoints` section
+  documenting the three checkpoints and the advisory/inline-fix/best-effort nature.
+- Purely additive: no change to `store/tasks.schema.json`, no new status value, no new
+  human gate, and no retro-fit of existing specs. `VERSION` bumped 0.25.0 → 0.26.0.
+
 ## [0.25.0] — 2026-07-01
 
 ### Added — ✨ Codex CLI front-end (`codex` agent key)

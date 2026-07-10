@@ -732,14 +732,17 @@ $_tlog" ;;                                       # relative override → also ig
 
   # Personal/runtime agent state must never be committed to a SHARED project (e.g. a
   # spec/umbrella repo a team clones). Claude Code writes per-developer config
-  # (.claude/settings.local.json), a scheduler lock (.claude/scheduled_tasks.lock), and
-  # browser-MCP scratch at the PROJECT ROOT — none of which belong in VCS, while the
+  # (.claude/settings.local.json), a scheduler lock (.claude/scheduled_tasks.lock), local
+  # prompt override files, and browser-MCP scratch at the PROJECT ROOT — none of which belong in VCS, while the
   # harness-GENERATED .claude/agents and .claude/commands DO. Seed/extend the project-root
   # .gitignore with TARGETED, append-only ignores (never clobbering existing entries), so a
   # shared repo stays free of one developer's local state. Full model:
   # .harness/docs/CONFIG-LAYERING.md.
   _root_ignores='.claude/settings.local.json
-.claude/scheduled_tasks.lock'
+.claude/scheduled_tasks.lock
+AGENTS.local.md
+CLAUDE.local.md
+AGENTS.override.md'
   if [ ! -f "$TARGET/.gitignore" ]; then
     { printf '# Personal/runtime agent state — never commit (see .harness/docs/CONFIG-LAYERING.md).\n'
       printf '%s\n' "$_root_ignores"
@@ -796,7 +799,9 @@ Start every agent session as the **Orchestrator**:
 2. Read \`.harness/AGENTS.md\` (the harness source of truth) and resolve its
    relative paths against \`.harness/\` (config, agents/, specs/, state/, store/,
    docs/, progress/).
-3. Product/source code lives at the repo root; harness bookkeeping lives in
+3. Local prompt override (if present): read \`AGENTS.local.md\` beside this entrypoint
+   after committed instructions as personal, additive guidance; committed instructions remain authoritative on conflict.
+4. Product/source code lives at the repo root; harness bookkeeping lives in
    \`.harness/\`. In Claude Code, run \`/sdd-next\`.
 $MARK_END"
     if [ -f "$_f" ] && grep -qF "$MARK_BEGIN" "$_f"; then

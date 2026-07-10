@@ -101,12 +101,41 @@ new-epic altitude). F03 later populates `features`.
 - **Append** new epics to the existing epic list; existing epics are **never** reordered
   or renumbered.
 
-### Per-epic `epic.md` — title + one-paragraph brief only (R12)
+### Per-epic `epic.md` — business brief + drillable-minimum five elements (R10, R12)
 
-For each seeded epic, create `specs/epics/<id>-<slug>/epic.md` that is the epic
-**title + a one-paragraph business brief only** — no feature specs, no `F01`, no EARS,
-and no technical plan. (You may copy `specs/_templates/epic.md`, but you fill in only
-the title and the business brief; you leave the features table empty / a placeholder.)
+For each seeded epic, create `specs/epics/<id>-<slug>/epic.md` that is **anchored by
+a one-paragraph business brief** and also carries the **drillable-minimum five
+elements** listed below. The file must still contain **no feature specs**, **no
+`F01`**, **no EARS acceptance criteria**, and **no detailed technical plan** — only
+the epic-level sketch that lets F03 (`/sdd-drill`) decompose it into features later.
+(You may copy `specs/_templates/epic.md`, but you fill in only the title, the
+business brief, and the drillable-minimum fields; you leave the features table
+empty / a placeholder.)
+
+### Drillable-minimum checklist
+
+Before the doc-critic checkpoint, ensure every seeded `epic.md` carries the
+following five elements so it can be drilled independently later:
+
+1. **Business brief** — one paragraph stating the problem/opportunity and the user.
+2. **Epic-level success criteria (outcomes)** — what "done" looks like for this epic.
+3. **Technical considerations / restrictions / non-goals** — constraints and explicit
+   non-goals that bound the epic.
+4. **Cross-epic dependencies and boundaries** — which other epics this epic touches,
+   relies on, or must stay clear of.
+5. **Pointers to relevant shared ADRs** — references in `architecture.md` / ADRs that
+   constrain this epic (or an explicit note that none apply).
+
+## Doc-critic checkpoint after `/sdd-plan` (R9)
+
+After writing the `/sdd-plan` artifacts (`specs/vision.md`,
+`specs/architecture.md`, the ADRs at `specs/adr/NNNN-*.md`, the draft epics in
+`state/tasks.json`, and every seeded `specs/epics/<id>-<slug>/epic.md`) and before
+re-validation, spawn the **Doc-critic** (`agents/doc-critic.md`) as a sub-agent with
+`target-type=plan-output`. Pass the paths just written. Apply any advisory findings
+inline, then proceed. If the critic invocation errors or times out, proceed
+best-effort and append a note to `progress/<run>/` recording the skipped or failed
+review.
 
 ## Re-validate before claiming success (R13)
 

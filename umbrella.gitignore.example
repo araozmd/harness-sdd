@@ -22,6 +22,9 @@
 # --- Per-developer / runtime agent state — never shared. ---
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+AGENTS.local.md
+CLAUDE.local.md
+AGENTS.override.md
 # Per-tool MCP scratch dirs your setup may create — add your own (example):
 #.playwright-mcp/
 
