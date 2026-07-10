@@ -151,6 +151,10 @@ grep -qF 'store/tasks.schema.json' "$ROLE"    || fail "R10: role does not name t
 grep -qi 're-validate\|revalidate' "$ROLE"    || fail "R10: role does not state re-validation"
 grep -qi 'not.*claim.*success\|do not claim a successful drill\|report the failure' "$ROLE" \
   || fail "R10: role does not state the fail-stop"
+# Re-validation must also cover the approval-branch mutation (state flip + autonomous
+# stamp), not only seeding — the final post-mutation validation gates the report.
+grep -qi 'after the approval mutation\|after.*approval.*mutat\|post-mutation\|after.*state flip.*stamp\|after.*flip/stamp' "$ROLE" \
+  || fail "R10: role does not require re-validation AFTER the approval/state-flip mutation"
 pass "R10 revalidate_fail_stop"
 
 # ── R11: role appends per-epic ADR deltas, above-max, 4-digit, no F02-ADR rewrite ─

@@ -4,6 +4,23 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.27.3] — 2026-07-10
+
+### Fixed — 📝 Align draft-epic docs + re-validate after driller approval mutation (E09)
+- **Driller re-validates after the approval mutation** — `agents/driller.md` R10 now states
+  re-validation of `state/tasks.json` runs both **after seeding AND after the approval-branch
+  mutation** (the `draft → planned` flip + `autonomous` stamp). That final post-mutation
+  validation gates the completion report: a malformed state flip/stamp can no longer be
+  reported as a successful drill. `tests/test_sdd_drill.sh` R10 asserts the post-mutation
+  re-validation requirement.
+- **WORKFLOW draft definition realigned to the drillable-minimum contract** — the epic
+  lifecycle `draft` bullet in `docs/WORKFLOW.md` replaced the stale "title + business brief
+  only" wording with the drillable-minimum five elements (matching `agents/planner.md`), so
+  role files and workflow docs give coherent canonical guidance. `tests/test_sdd_plan.sh` R21
+  asserts the coherence (drillable-minimum present, no stale "brief only").
+- `VERSION` bumped 0.27.2 → 0.27.3 (installed body changed; PATCH per the versioning policy).
+  Fixes Codex #39 r3 P2/P2.
+
 ## [0.27.2] — 2026-07-10
 
 ### Fixed — 🔒 Harden doc-critic write access + exact-line gitignore seeding (E09)

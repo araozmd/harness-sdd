@@ -145,10 +145,14 @@ architecture-alignment, and `/sdd-fix` lanes above.
 
 Epics have their own, simpler lifecycle: `draft → planned → in-progress → done`.
 
-- **`draft`** — an inception sketch: title + business brief only, not yet drilled
-  down. The Orchestrator **never selects work from a `draft` epic** — its features
-  are not actionable, no matter what the feature itself says (`autonomous: true`
-  skips the human approval gate, not this planning gate).
+- **`draft`** — an inception sketch **anchored by a one-paragraph business brief** and
+  carrying the **drillable-minimum five elements** (business brief; epic-level success
+  criteria; technical considerations / restrictions / non-goals; cross-epic dependencies
+  and boundaries; pointers to relevant shared ADRs), but **not yet drilled into
+  features** — no feature specs, no `F01`, no EARS acceptance criteria, no detailed
+  technical plan (see `agents/planner.md`). The Orchestrator **never selects work from a
+  `draft` epic** — its features are not actionable, no matter what the feature itself
+  says (`autonomous: true` skips the human approval gate, not this planning gate).
 - **`planned`** — drilled down and human-approved; its features follow the feature
   state machine below, exactly as features of a `pending` epic do.
 - Epic-level **`pending` is a legacy alias of `planned`** — gating-equivalent and

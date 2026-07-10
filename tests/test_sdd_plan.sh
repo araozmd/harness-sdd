@@ -240,6 +240,12 @@ grep -qi 'never.*feature spec\|no feature\|never specs' docs/WORKFLOW.md \
   || fail "R21: WORKFLOW.md does not state never feature specs"
 grep -qi 'never advance.*past .*draft\|never advances an epic past\|past .draft.' docs/WORKFLOW.md \
   || fail "R21: WORKFLOW.md does not state never past draft"
+# The WORKFLOW draft definition must stay coherent with planner.md's drillable-minimum
+# contract (not the stale "brief only" wording) — a draft carries the drillable minimum.
+grep -qi 'drillable-minimum\|drillable minimum' docs/WORKFLOW.md \
+  || fail "R21: WORKFLOW.md draft definition drifted from planner.md drillable-minimum contract"
+grep -qi 'business brief only\|brief only' docs/WORKFLOW.md \
+  && fail "R21: WORKFLOW.md still uses stale 'brief only' draft definition (contradicts planner.md)"
 pass "R21 workflow_doc"
 
 # ── R22: README one-liner for /sdd-plan ───────────────────────────────────────────

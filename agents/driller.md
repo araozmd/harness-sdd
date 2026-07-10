@@ -153,6 +153,17 @@ plus a schema check against `store/tasks.schema.json`. **If** validation **fails
 you must not leave an invalid TaskStore behind as a success. Fix or revert your edit,
 surface the error, and stop. A failed validation is never a success.
 
+**Re-validation runs both after seeding AND after the approval mutation.** R10's coverage
+does not end at seeding: the approval-branch mutation below (the epic `draft → planned`
+state flip and the `autonomous` stamping) is the **last** edit to `state/tasks.json`, so
+you MUST re-validate `state/tasks.json` against `store/tasks.schema.json` again — via the
+same zero-dependency path — **after** performing that mutation. This **final**
+post-mutation validation is the one that gates the completion report. If the post-mutation
+re-validation **fails** (a malformed state flip or `autonomous` stamp), you **must not
+claim a successful drill**: fix or revert the mutation, surface the error, and stop. A
+successful drill requires that the re-validation **after** the state flip/stamp passes,
+not only the re-validation after seeding.
+
 ## The single epic-level human gate (R15)
 
 The drill ends in **exactly one** human decision at the **epic** granularity (not per
@@ -178,6 +189,11 @@ surprising and would falsely re-gate it; `planned` + gated features is the faith
 "drilled but I still want to review each spec" state. Stamping is all-or-nothing: on keep
 gated **every** seeded feature stays `autonomous: false`.
 
+After **either** approval branch mutates `state/tasks.json` (the `draft → planned` flip
+and the `autonomous` stamp), you MUST **re-validate** `state/tasks.json` against
+`store/tasks.schema.json` again (R10, the same zero-dependency path) before reporting.
+You must **not claim a successful drill** if that post-mutation validation fails.
+
 ## What you NEVER do (guardrails)
 
 ### Only path past `draft` — advance only the epic (R16)
@@ -199,7 +215,8 @@ table, write inbox briefs, and append ADR deltas.
 ## Completion report
 
 When the decomposition is written, the approval decision is recorded, and re-validation
-passed, report to the human:
+passed — including the **final** re-validation **after** the approval-branch state
+flip/stamp — report to the human:
 
 - the seeded feature entries (ids + titles) and their `spec_path`s;
 - the per-feature inbox briefs written under `progress/inbox/` and the ADR ids each
