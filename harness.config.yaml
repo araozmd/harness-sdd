@@ -33,6 +33,15 @@ workflow:
   # fraction full, handing off via progress/ files. Degradation starts ~0.20.
   context_reset_threshold: 0.40
 
+  # Current developer's identity for scoped `/sdd-next --mine` selection (E10-F01).
+  # Empty (default) ⇒ solo / board-wide, exactly today's behavior (owner ignored).
+  # "@me" or "self" ⇒ resolve dynamically to the authed `gh` user (gh api user),
+  #   so a SHARED config reflects whoever runs it (board-mirror `assignee` pattern).
+  # Any other value ⇒ used verbatim as the literal identity string.
+  # Scoped `--mine` selects only features whose effective owner (feature `owner`
+  # else parent epic `owner`) equals this identity; it never claims unassigned work.
+  identity: ""
+
 execution:
   # The harness's single extension point for plugging in an EXTERNAL executor
   # without forking any agent role file. Scope is structural: only roles listed
@@ -116,7 +125,7 @@ verification:
   init_script: ./init.sh
   # Commands the Reviewer must run before marking work done. Project-specific —
   # edit these per target repo.
-  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh && sh tests/test_mirror.sh && sh tests/test_epic_lifecycle.sh && sh tests/test_sdd_plan.sh && sh tests/test_sdd_drill.sh && sh tests/test_sdd_fix.sh && sh tests/test_architect_adr.sh && sh tests/test_drift_check.sh && sh tests/test_doc_critic.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry + board-mirror + epic lifecycle + sdd-plan + sdd-drill + sdd-fix + architect-adr + drift-check + doc-critic suites
+  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh && sh tests/test_mirror.sh && sh tests/test_epic_lifecycle.sh && sh tests/test_sdd_plan.sh && sh tests/test_sdd_drill.sh && sh tests/test_sdd_fix.sh && sh tests/test_architect_adr.sh && sh tests/test_drift_check.sh && sh tests/test_doc_critic.sh && sh tests/test_ownership.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry + board-mirror + epic lifecycle + sdd-plan + sdd-drill + sdd-fix + architect-adr + drift-check + doc-critic + ownership suites
 
   lint_command: ""        # e.g. "ruff check ." or "npm run lint"
   typecheck_command: ""   # e.g. "mypy ." or "tsc --noEmit"

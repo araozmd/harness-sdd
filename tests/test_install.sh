@@ -208,6 +208,14 @@ pass "entrypoint merge preserves prose + adds block (R3)"
 
 # Claude Code glue points at .harness/                                                         # R7
 [ -f "$T/.claude/commands/sdd-next.md" ] || fail "sdd-next command missing"
+# E10-F01: the generated /sdd-next glue forwards $ARGUMENTS and carries the --mine
+# scoped-selection wiring (owned-only, delegating to the Orchestrator contract).
+grep -qF '$ARGUMENTS' "$T/.claude/commands/sdd-next.md" \
+  || fail "sdd-next does not forward \$ARGUMENTS (E10-F01 scope wiring)"
+grep -qF -- '--mine' "$T/.claude/commands/sdd-next.md" \
+  || fail "sdd-next does not carry the --mine scoped-selection wiring (E10-F01)"
+grep -qiF 'effective owner' "$T/.claude/commands/sdd-next.md" \
+  || fail "sdd-next --mine wiring does not reference the effective-owner scope (E10-F01)"
 [ -f "$T/.claude/commands/sdd-new.md" ]  || fail "sdd-new command missing"
 [ -f "$T/.claude/commands/sdd-plan.md" ] || fail "sdd-plan command missing"
 # installed /sdd-plan must act as Planner, resolved against .harness/, and carry args
@@ -360,6 +368,16 @@ for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix; do
 done
 pass "Antigravity glue generated (R11)"
 
+# E10-F01 R12/R13: the /sdd-next scoped-selection front-end is generated into EVERY selected
+# target (Claude/OpenCode/Antigravity here; Codex GLOBAL prompts in the codex-select case),
+# byte-identical, and each carries the --mine wiring + forwards $ARGUMENTS. The cmp -s chains
+# above prove byte-identity across targets; assert the scope token reached each generated body.
+for _b in "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" "$T/.agents/workflows/sdd-next.md"; do
+  grep -qF -- '--mine' "$_b"      || fail "generated /sdd-next glue missing --mine scope wiring: $_b (E10-F01 R12/R13)"
+  grep -qF '$ARGUMENTS' "$_b"     || fail "generated /sdd-next glue does not forward \$ARGUMENTS: $_b (E10-F01 R13)"
+done
+pass "E10-F01: /sdd-next glue generated per target, byte-identical, carries --mine + \$ARGUMENTS [sdd_next_glue_generated_all_targets][sdd_next_scope_wiring_asserted]"
+
 # target verification commands reset to blank                                                  # R8
 grep -q 'test_command: ""' "$T/.harness/harness.config.yaml" || fail "test_command not blanked"
 pass "target verification commands reset (R8)"
@@ -427,6 +445,66 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "upgrade after bootstrap-co
 grep -q 'test_command: "pytest -q"' "$T/.harness/harness.config.yaml" \
   || fail "bootstrap test_command erased on upgrade"
 pass "upgrade preserves bootstrap-configured verification commands (R11)"
+
+# ── migrate_config seeds workflow.identity on upgrade (E10-F01, Codex #40 r2 P2) ──
+# A preserved pre-E10 config that lacks workflow.identity would make `/sdd-next --mine`
+# fail-closed as an unresolved identity. The additive migration must seed the documented
+# default under the existing workflow: block, preserve existing values/comments, and be
+# idempotent (a second run must not duplicate the key or clobber a user-set value).
+TID="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+printf '# My Project\n' > "$TID/CLAUDE.md"
+CODEX_HOME="$TID/ch" sh "$SRC/harness-install.sh" "$TID" >/dev/null || fail "identity-migration fresh install exited non-zero"
+CFGID="$TID/.harness/harness.config.yaml"
+# Simulate a pre-E10 preserved config: a workflow: block WITHOUT identity, plus a
+# bootstrap value that must survive verbatim.
+cat > "$CFGID" <<'EOF'
+store:
+  tasks: local
+workflow:
+  require_spec_approval: true
+  context_reset_threshold: 0.40
+verification:
+  test_command: "pytest -q"   # keep me exactly
+EOF
+grep -Eq '^[[:space:]]+identity:' "$CFGID" && fail "identity-migration setup: identity present before upgrade (bad fixture)"
+CODEX_HOME="$TID/ch" sh "$SRC/harness-install.sh" "$TID" >/dev/null || fail "identity-migration upgrade exited non-zero"
+grep -Eq '^[[:space:]]+identity:' "$CFGID" || fail "workflow.identity not seeded on upgrade of a pre-E10 config"
+grep -qF 'test_command: "pytest -q"   # keep me exactly' "$CFGID" || fail "identity migration altered an existing value/comment"
+pass "upgrade seeds workflow.identity into a pre-E10 preserved config (Codex #40 r2 P2)"
+# Idempotent: a second run leaves a now-complete config byte-for-byte identical (no
+# duplicate identity: key) and a user-set value survives untouched.
+sed -e 's|^\( *identity:\).*|\1 "OctoCat"   # keep me exactly|' "$CFGID" > "$CFGID.b" && mv "$CFGID.b" "$CFGID"
+cp "$CFGID" "$TID/after1"
+CODEX_HOME="$TID/ch" sh "$SRC/harness-install.sh" "$TID" >/dev/null || fail "identity-migration second upgrade exited non-zero"
+cmp -s "$CFGID" "$TID/after1" || { diff "$TID/after1" "$CFGID" || true; fail "workflow.identity migration not idempotent (duplicated or clobbered a user value)"; }
+[ "$(grep -cE '^[[:space:]]+identity:' "$CFGID")" = "1" ] || fail "workflow.identity duplicated on re-run (not idempotent)"
+rm -rf "$TID"
+pass "workflow.identity migration is idempotent + preserves a user-set value (Codex #40 r2 P2)"
+
+# ── identity seeding is scoped to the workflow: section (E10-F01, Codex #40 r3 P2) ──
+# A preserved config carrying an unrelated indented `identity:` under ANOTHER section
+# (e.g. an auth/tool block) must NOT suppress seeding workflow.identity — the presence
+# check is scoped to the top-level workflow: block, not any same-named key file-wide.
+TID="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+printf '# My Project\n' > "$TID/CLAUDE.md"
+CODEX_HOME="$TID/ch" sh "$SRC/harness-install.sh" "$TID" >/dev/null || fail "identity-scope fresh install exited non-zero"
+CFGID="$TID/.harness/harness.config.yaml"
+cat > "$CFGID" <<'EOF'
+store:
+  tasks: local
+auth:
+  identity: "svc-account"   # unrelated key, keep me exactly
+workflow:
+  require_spec_approval: true
+EOF
+CODEX_HOME="$TID/ch" sh "$SRC/harness-install.sh" "$TID" >/dev/null || fail "identity-scope upgrade exited non-zero"
+# workflow.identity must now exist INSIDE the workflow: block…
+awk '/^workflow:[[:space:]]*(#.*)?$/{w=1;next} w&&/^[^[:space:]#]/{w=0} w&&/^[[:space:]]+identity:/{f=1} END{exit f?0:1}' "$CFGID" \
+  || fail "workflow.identity not seeded when an unrelated identity: exists elsewhere (Codex #40 r3 P2)"
+# …and the unrelated auth.identity must survive untouched.
+grep -qF 'identity: "svc-account"   # unrelated key, keep me exactly' "$CFGID" || fail "identity-scope migration altered the unrelated auth.identity"
+rm -rf "$TID"
+pass "workflow.identity seeding is scoped to the workflow: section (Codex #40 r3 P2)"
 
 # ── arg guards make no changes ────────────────────────────────────────────────
 sh "$SRC/harness-install.sh"            >/dev/null 2>&1 && fail "missing-arg should exit non-zero"   # R9
@@ -538,6 +616,7 @@ grep -qx codex "$TCX/.harness/.agents" || fail "R8: codex not persisted in .harn
 # installed /sdd-next prompt acts as the Orchestrator, resolved against .harness/, carrying args
 grep -qF '.harness/' "$TCX/ch/prompts/sdd-next.md" || fail "codex: sdd-next prompt does not resolve against .harness/"
 grep -qF '$ARGUMENTS' "$TCX/ch/prompts/sdd-next.md" || fail "codex: sdd-next prompt does not carry \$ARGUMENTS"
+grep -qF -- '--mine' "$TCX/ch/prompts/sdd-next.md" || fail "codex: sdd-next prompt does not carry the --mine scoped-selection wiring (E10-F01)"
 # byte-identical to the Claude command body (front-ends stay in lock-step)
 CODEX_HOME="$TCX/ch2" sh "$SRC/harness-install.sh" --agents=claude,codex "$TCX" >/dev/null || fail "codex+claude install failed"
 cmp -s "$TCX/ch2/prompts/sdd-next.md" "$TCX/.claude/commands/sdd-next.md" \

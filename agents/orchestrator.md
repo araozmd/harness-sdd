@@ -63,6 +63,57 @@ next, and delegate to the specialist agents.
    blocks the loop; complete the local write, then report any sync gap. Empty ⇒ skip
    entirely. See `store/local.md` → "Post-write sync" and `store/board-mirror.md`.
 
+## Ownership & scoped selection (additive, opt-in) — E10-F01
+
+This section ADDS a **selection filter**; it does not replace anything above. It is
+tool-agnostic (it depends on no Claude-Code-specific mechanism) so it holds on every
+installed agent target. It is engaged **only** when `/sdd-next` is invoked with the
+`--mine` scope token forwarded through the command's `$ARGUMENTS`. **Bare `/sdd-next`
+(no `--mine`) behaves exactly as today** — `owner` values are ignored for selection and
+the ordering/gating in step 3–4 above is unchanged (this is the backward-compat
+guarantee: **no `owner` anywhere ⇒ today's board-wide behavior**).
+
+**Effective owner.** A feature's **effective owner** is its own `owner` when that key is
+present, otherwise its parent epic's `owner` when present, otherwise the feature is
+**unowned**. Both the epic-level and feature-level `owner` are optional string fields in
+the TaskStore (see `store/local.md` / `store/tasks.schema.json`); the feature-level value
+**wins** when both are set. Owner comparison is **literal**: two identities match iff
+their resolved strings are equal — the harness performs no fuzzy/alias matching.
+
+**Identity resolution (`workflow.identity`).** Resolve the current developer's identity
+from `workflow.identity` in `harness.config.yaml`:
+- empty/unset ⇒ **no identity** (solo/board-wide; only meaningful for `--mine`, see
+  fail-closed below);
+- `"@me"` or `"self"` ⇒ resolve **dynamically** to the authed `gh` user login via
+  `gh api user` (mirroring the board-mirror `assignee` pattern, so a **shared** config
+  reflects whoever runs `/sdd-next`);
+- any other non-empty value ⇒ used **verbatim** as the literal identity string.
+
+**Scoped selection (`--mine`) is a filter layered on top of `next()` — never a
+relaxation.** Apply it in this order:
+
+1. **Resolve identity** as above. If `--mine` was requested but the identity is
+   **unresolved** (`workflow.identity` empty/unset, or a `"@me"`/`"self"` lookup fails
+   because `gh` is absent/unauthed), **fail closed**: select **no** feature, report that
+   the identity is **unresolved**, and change **no** state. Do **not** silently widen to
+   board-wide selection.
+2. **Run the existing `next()` candidate rules unchanged** — the epic gate,
+   `depends_on`-all-`done`, actionable status, and the human gate from steps 3–4 above.
+   Scoping never loosens any of these; a feature the current developer owns is still
+   skipped if it is not otherwise actionable.
+3. **Keep only candidates whose effective owner equals the resolved identity.** Drop
+   unowned candidates and candidates owned by anyone else. Scoped selection is
+   **owned-only**: you never select an unowned feature and you **never write, claim, or
+   mutate any `owner`** value — there is **no claim-on-select** here (claiming unassigned
+   work is E10-F02).
+4. **Select the first surviving candidate** by the existing lower-epic / lower-feature
+   ordering. If **none** survive, report **"no owned actionable work"**, change **no**
+   state, and do **not** widen to board-wide selection.
+
+**The board mirror stays one-way.** No agent reads the board to learn ownership;
+`state/tasks.json` remains the single source of truth for `owner` (invariant preserved,
+not changed by this feature).
+
 ### Build↔review rounds (explicit, multi-round, until green)
 
 The build↔review handoff is **not a single pass** — it is an explicit loop that

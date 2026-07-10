@@ -138,6 +138,27 @@ migrate_config() {
     fi
   fi
 
+  # --- workflow.identity (E10-F01 scoped `--mine` ownership) ---
+  # Insert under the top-level `workflow:` header (tolerating a trailing comment).
+  # Empty default ⇒ solo / board-wide, exactly today's behavior (owner ignored). A
+  # preserved pre-E10 config that lacks this key would make `/sdd-next --mine`
+  # fail-closed as an unresolved identity, so seed the documented default on upgrade.
+  # Scope the presence check to an `identity:` INSIDE the top-level `workflow:` section
+  # (via _cfg_has_workflow_identity) so a same-named key under another section — e.g. an
+  # auth/tool block — never suppresses seeding the workflow child.
+  if ! _cfg_has_workflow_identity "$_cfg"; then
+    if grep -Eq '^workflow:[[:space:]]*(#.*)?$' "$_cfg"; then
+      _mc_insert_after "$_cfg" '^workflow:[[:space:]]*(#.*)?$' \
+        '  identity: ""   # current developer identity for scoped `/sdd-next --mine` (E10-F01); empty ⇒ board-wide'
+    else
+      {
+        printf '\n'
+        printf 'workflow:\n'
+        printf '  identity: ""   # current developer identity for scoped `/sdd-next --mine` (E10-F01); empty ⇒ board-wide\n'
+      } >> "$_cfg"
+    fi
+  fi
+
   # --- mirror.board block (optional board projection) ---
   # Top-level block; append at EOF when absent (no header to insert into). Empty provider
   # ⇒ tools/sync-board.mjs is a no-op, so a preserved config without this block behaves
@@ -168,6 +189,19 @@ _cfg_has_umbrella_manifest() {
     /^umbrella:[[:space:]]*(#.*)?$/ { u=1; next }
     u && /^[^[:space:]#]/ { u=0 }
     u && /^[[:space:]]+manifest:/ { found=1 }
+    END { exit found ? 0 : 1 }
+  ' "$1"
+}
+
+# _cfg_has_workflow_identity <file> — true (exit 0) iff an `identity:` key exists
+# INSIDE the top-level `workflow:` section (not a same-named key under any other
+# section). Mirrors _cfg_has_umbrella_manifest so migrate_config never mis-detects
+# an unrelated indented `identity:` and skips seeding `workflow.identity`.
+_cfg_has_workflow_identity() {
+  awk '
+    /^workflow:[[:space:]]*(#.*)?$/ { w=1; next }
+    w && /^[^[:space:]#]/ { w=0 }
+    w && /^[[:space:]]+identity:/ { found=1 }
     END { exit found ? 0 : 1 }
   ' "$1"
 }
@@ -1038,7 +1072,19 @@ relative paths against `.harness/`.
    - `in-review` → spawn **reviewer**; approve → `done`, reject → back to `in-progress`.
 4. Append what happened to `.harness/progress/history.md`.
 
-$ARGUMENTS may name a specific feature id (e.g. `E01-F01`); if given, operate on it.
+`$ARGUMENTS` may carry either a specific feature id or a scope token; forward it verbatim
+to the Orchestrator:
+- a specific feature id (e.g. `E01-F01`) → operate on that feature (unchanged).
+- `--mine` → **scoped selection**: consider only features whose **effective owner**
+  (feature `owner` else parent epic `owner`) equals the identity resolved from
+  `workflow.identity` in `.harness/harness.config.yaml` (`@me`/`self` → authed `gh` user
+  via `gh api user`; else literal). This is **owned-only** — it never claims unassigned
+  work and never writes an `owner`; if the identity is unresolved or no owned actionable
+  feature exists, it **fails closed** (selects nothing, reports, changes no state) and
+  does **not** widen to board-wide selection. Bare `/sdd-next` (no `--mine`) is unchanged
+  board-wide selection and ignores `owner`. The scoping semantics live in the
+  **Orchestrator contract** (`.harness/agents/orchestrator.md` → "Ownership & scoped
+  selection"); this command only forwards the token.
 EOF
 
   cat > "$CMDDIR/sdd-new.md" <<'EOF'

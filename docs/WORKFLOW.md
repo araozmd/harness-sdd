@@ -181,6 +181,37 @@ stateDiagram-v2
     note right of done: Reviewer verdict only — append to progress/history.md
 ```
 
+## Ownership & scoped selection (`owner` + `/sdd-next --mine`)
+
+The TaskStore carries an **optional** `owner` field so a team sharing one install can
+scope work to a person without racing on `state/tasks.json`. It is **additive and
+backward-compatible**: with **no `owner` anywhere** and no `workflow.identity`, behavior
+is **exactly today's** — board-wide selection that ignores `owner`. No migration is
+needed; existing owner-free stores keep validating unchanged.
+
+- **Two levels, feature wins.** `owner` (a string) may be set on an **epic** and/or on a
+  **feature**. A feature's **effective owner** is its own `owner` when set, otherwise its
+  parent epic's `owner`, otherwise **unowned**.
+- **Identity.** The current developer's identity is `workflow.identity` in
+  `harness.config.yaml`. Empty (default) ⇒ solo/board-wide. `"@me"` or `"self"` resolves
+  **dynamically** to the authed `gh` user login (`gh api user`), so a **shared** config
+  reflects whoever runs `/sdd-next` (the board-mirror `assignee` pattern). Any other value
+  is a **literal** identity string. Comparison is literal — no alias/fuzzy matching.
+- **Scoped selection.** `/sdd-next --mine` considers **only** features whose effective
+  owner equals the resolved identity, selecting the first that is otherwise actionable.
+  Scoping is applied **after** every existing `next()` gate (epic gate, `depends_on`-done,
+  actionable status, human gate) — it **never relaxes** a gate. An owned feature that is
+  not otherwise actionable is still skipped.
+- **Owned-only, no claim (F01 boundary).** Scoped mode **never** selects an unowned
+  feature and **never writes or claims** an `owner`. Claiming unassigned work, mode
+  detection, and reassign UX are **E10-F02**.
+- **Fail closed, never widen.** If `--mine` is requested but the identity is unresolved
+  (`workflow.identity` empty, or a `@me`/`self` lookup fails), or if no owned actionable
+  feature exists, `/sdd-next` selects nothing, reports why, and changes **no** state — it
+  does **not** silently widen to board-wide selection.
+- **Mirror stays one-way.** `state/tasks.json` is the single source of truth for `owner`;
+  no agent reads the board to learn ownership.
+
 ## The human-in-the-loop gate
 
 When `harness.config.yaml` has `require_spec_approval: true` (default), the

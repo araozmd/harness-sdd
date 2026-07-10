@@ -13,6 +13,7 @@
         "properties": {
           "id": { "type": "string", "pattern": "^E[0-9]+$" },
           "title": { "type": "string" },
+          "owner": { "type": "string", "description": "Optional (additive, E10-F01). Coarse epic-level ownership. Absent ⇒ epic unowned; a feature with no owner of its own falls back to this. Not required; absence keeps existing stores valid." },
           "status": {
             "$comment": "Epic lifecycle: draft → planned → in-progress → done. `pending` is a legacy alias of `planned` (gating-equivalent, kept for backward compatibility). Feature/slice status enums are separate and unchanged.",
             "enum": ["draft", "planned", "pending", "in-progress", "done"]
@@ -25,6 +26,7 @@
               "properties": {
                 "id": { "type": "string", "pattern": "^E[0-9]+-F[0-9]+$" },
                 "title": { "type": "string" },
+                "owner": { "type": "string", "description": "Optional (additive, E10-F01). Fine feature-level ownership. Absent ⇒ falls back to the parent epic's owner (effective owner). Not required; absence keeps existing stores valid." },
                 "status": {
                   "enum": ["pending", "spec-ready", "in-progress", "in-review", "done"]
                 },

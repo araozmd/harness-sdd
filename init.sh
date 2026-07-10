@@ -114,6 +114,11 @@ else:
                     errors.append("%s.id %r: must match ^E[0-9]+$" % (ew, ep["id"]))
             if "title" in ep and not isinstance(ep["title"], str):
                 errors.append("%s.title: expected string" % ew)
+            # Optional (additive, E10-F01) coarse ownership: reject a non-string
+            # owner so the zero-dependency path matches the JSON schema. Absent
+            # ⇒ unowned, which stays valid (backward-compatible).
+            if "owner" in ep and not isinstance(ep["owner"], str):
+                errors.append("%s.owner: expected string" % ew)
             if ep.get("status") not in EPIC_STATUS and "status" in ep:
                 errors.append("%s.status '%s': not one of %s" % (ew, ep["status"], sorted(EPIC_STATUS)))
             feats = ep.get("features", [])
@@ -132,6 +137,11 @@ else:
                         errors.append("%s.id %r: must match ^E[0-9]+-F[0-9]+$" % (fw, ft["id"]))
                 if "title" in ft and not isinstance(ft["title"], str):
                     errors.append("%s.title: expected string" % fw)
+                # Optional (additive, E10-F01) fine ownership: reject a non-string
+                # owner so the zero-dependency path matches the JSON schema. Absent
+                # ⇒ falls back to the epic owner, which stays valid.
+                if "owner" in ft and not isinstance(ft["owner"], str):
+                    errors.append("%s.owner: expected string" % fw)
                 if ft.get("status") not in FEAT_STATUS and "status" in ft:
                     errors.append("%s.status '%s': not one of %s" % (fw, ft["status"], sorted(FEAT_STATUS)))
                 if "sdd" in ft and not isinstance(ft["sdd"], bool):

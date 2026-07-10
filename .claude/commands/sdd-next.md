@@ -20,4 +20,16 @@ Act as the **Orchestrator** (`agents/orchestrator.md`).
    - `in-review` → spawn **reviewer**; approve → `done`, reject → back to `in-progress`.
 4. Append what happened to `progress/history.md`.
 
-$ARGUMENTS may name a specific feature id (e.g. `E01-F01`); if given, operate on it.
+`$ARGUMENTS` may carry either a specific feature id or a scope token; forward it verbatim
+to the Orchestrator:
+- a specific feature id (e.g. `E01-F01`) → operate on that feature (unchanged).
+- `--mine` → **scoped selection**: consider only features whose **effective owner**
+  (feature `owner` else parent epic `owner`) equals the identity resolved from
+  `workflow.identity` in `harness.config.yaml` (`@me`/`self` → authed `gh` user via
+  `gh api user`; else literal). This is **owned-only** — it never claims unassigned work
+  and never writes an `owner`; if the identity is unresolved or no owned actionable
+  feature exists, it **fails closed** (selects nothing, reports, changes no state) and
+  does **not** widen to board-wide selection. Bare `/sdd-next` (no `--mine`) is unchanged
+  board-wide selection and ignores `owner`. The scoping semantics live in the
+  **Orchestrator contract** (`agents/orchestrator.md` → "Ownership & scoped selection");
+  this command only forwards the token.
