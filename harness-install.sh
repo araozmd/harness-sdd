@@ -228,7 +228,7 @@ AGENT_KEYS="claude gemini opencode antigravity codex"
 # ONLY files a deselection may delete, so a selective re-run never removes a user's
 # own agents/commands sharing the same dir (Codex r2 P1). Keep in sync with the
 # emit_agent calls and the command-copy loops in install_one().
-HARNESS_CLAUDE_SHIMS="orchestrator architect builder reviewer scout"
+HARNESS_CLAUDE_SHIMS="orchestrator architect builder reviewer scout doc-critic"
 HARNESS_SDD_CMDS="sdd-next sdd-new sdd-plan sdd-drill sdd-fix"
 
 # agent_known <key> — true (exit 0) iff <key> is a registered agent key (R7, R10).
@@ -732,14 +732,17 @@ $_tlog" ;;                                       # relative override → also ig
 
   # Personal/runtime agent state must never be committed to a SHARED project (e.g. a
   # spec/umbrella repo a team clones). Claude Code writes per-developer config
-  # (.claude/settings.local.json), a scheduler lock (.claude/scheduled_tasks.lock), and
-  # browser-MCP scratch at the PROJECT ROOT — none of which belong in VCS, while the
+  # (.claude/settings.local.json), a scheduler lock (.claude/scheduled_tasks.lock), local
+  # prompt override files, and browser-MCP scratch at the PROJECT ROOT — none of which belong in VCS, while the
   # harness-GENERATED .claude/agents and .claude/commands DO. Seed/extend the project-root
   # .gitignore with TARGETED, append-only ignores (never clobbering existing entries), so a
   # shared repo stays free of one developer's local state. Full model:
   # .harness/docs/CONFIG-LAYERING.md.
   _root_ignores='.claude/settings.local.json
-.claude/scheduled_tasks.lock'
+.claude/scheduled_tasks.lock
+AGENTS.local.md
+CLAUDE.local.md
+AGENTS.override.md'
   if [ ! -f "$TARGET/.gitignore" ]; then
     { printf '# Personal/runtime agent state — never commit (see .harness/docs/CONFIG-LAYERING.md).\n'
       printf '%s\n' "$_root_ignores"
@@ -749,7 +752,7 @@ $_tlog" ;;                                       # relative override → also ig
   else
     printf '%s\n' "$_root_ignores" | while IFS= read -r _pat; do
       [ -n "$_pat" ] || continue
-      grep -qF "$_pat" "$TARGET/.gitignore" || printf '%s\n' "$_pat" >> "$TARGET/.gitignore"
+      grep -qxF "$_pat" "$TARGET/.gitignore" || printf '%s\n' "$_pat" >> "$TARGET/.gitignore"
     done
     info "project-root .gitignore ensured (personal/runtime agent state)"
   fi
@@ -796,7 +799,9 @@ Start every agent session as the **Orchestrator**:
 2. Read \`.harness/AGENTS.md\` (the harness source of truth) and resolve its
    relative paths against \`.harness/\` (config, agents/, specs/, state/, store/,
    docs/, progress/).
-3. Product/source code lives at the repo root; harness bookkeeping lives in
+3. Local prompt override (if present): read \`AGENTS.local.md\` beside this entrypoint
+   after committed instructions as personal, additive guidance; committed instructions remain authoritative on conflict.
+4. Product/source code lives at the repo root; harness bookkeeping lives in
    \`.harness/\`. In Claude Code, run \`/sdd-next\`.
 $MARK_END"
     if [ -f "$_f" ] && grep -qF "$MARK_BEGIN" "$_f"; then
@@ -859,7 +864,8 @@ $MARK_END"
     "architect":    { "mode": "subagent", "description": "Spec Author: writes the 4-file spec (EARS).",                     "prompt": "{file:./.harness/agents/architect.md}" },
     "builder":      { "mode": "subagent", "description": "Implementer: writes code from an approved spec.",                 "prompt": "{file:./.harness/agents/builder.md}" },
     "reviewer":     { "mode": "subagent", "description": "Evaluator: verifies against the spec, runs tests.",               "prompt": "{file:./.harness/agents/reviewer.md}" },
-    "scout":        { "mode": "subagent", "description": "Read-only recon; writes findings to progress/.",                  "prompt": "{file:./.harness/agents/scout.md}" }
+    "scout":        { "mode": "subagent", "description": "Read-only recon; writes findings to progress/.",                  "prompt": "{file:./.harness/agents/scout.md}" },
+    "doc-critic":   { "mode": "subagent", "description": "Advisory doc review pass over planning docs + specs. Documents only, never code.", "prompt": "{file:./.harness/agents/doc-critic.md}" }
   }
 }
 EOF
@@ -931,6 +937,7 @@ architect	The Spec Author. Writes the 4-file spec in EARS. No production code.
 builder	The Implementer. Writes code from an APPROVED spec, one task at a time.
 reviewer	The Evaluator. Verifies against the spec, runs tests, approves or rejects.
 scout	Read-only codebase reconnaissance. Writes findings to progress/.
+doc-critic	Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code.
 EOF
   }
 
@@ -991,7 +998,9 @@ EOF
   }
   emit_agent orchestrator "Read, Bash, Edit, Grep, Glob, Task" \
     "The Leader. Reads state, runs init.sh, routes the next task, delegates to architect/builder/reviewer/scout. Never writes code."
-  emit_agent architect "Read, Write, Edit, Grep, Glob, Bash" \
+  # architect carries `Task` so it can spawn the doc-critic sub-agent at its
+  # pre-`spec-ready` `target-type=feature-spec` checkpoint (agents/architect.md).
+  emit_agent architect "Read, Write, Edit, Grep, Glob, Bash, Task" \
     "The Spec Author. Writes the 4-file spec in EARS. No production code."
   emit_agent builder "Read, Write, Edit, Bash, Grep, Glob" \
     "The Implementer. Writes code from an APPROVED spec, one task at a time."
@@ -999,6 +1008,11 @@ EOF
     "The Evaluator. Verifies against the spec, runs tests, approves or rejects."
   emit_agent scout "Read, Grep, Glob, Bash" \
     "Read-only codebase reconnaissance. Writes findings to progress/."
+  # doc-critic sub-agent shim (E09): the advisory review pass the architect (and the
+  # planner/driller slash commands) spawn at their pre-hand-off checkpoints. Points at
+  # the canonical .harness/agents/doc-critic.md; documents-only, no production-code review.
+  emit_agent doc-critic "Read, Grep, Glob, Write" \
+    "Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code."
   ok "Claude Code sub-agent shims installed (.claude/agents/)"
   fi  # end: claude-gated sub-agent shims
 
@@ -1119,12 +1133,27 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
 7. **Seed** the roadmap: for each epic, write a `.harness/state/tasks.json` row with
    `status: "draft"` and `features: []` (ids as a next-sequential block strictly above
    the max existing `E##`, append-only, no reuse), and create
-   `.harness/specs/epics/<id>-<slug>/epic.md` = title + one-paragraph business brief
-   only (no `F01`, no feature spec).
-8. **Re-validate** `.harness/state/tasks.json` against
+   `.harness/specs/epics/<id>-<slug>/epic.md` anchored by a one-paragraph business brief
+   and carrying the **drillable-minimum five elements** (no `F01`, no feature spec, no
+   EARS, no detailed technical plan):
+   1. **Business brief** — one paragraph stating the problem/opportunity and the user.
+   2. **Epic-level success criteria (outcomes)** — what "done" looks like for this epic.
+   3. **Technical considerations / restrictions / non-goals** — constraints and explicit
+      non-goals that bound the epic.
+   4. **Cross-epic dependencies and boundaries** — which other epics this epic touches,
+      relies on, or must stay clear of.
+   5. **Pointers to relevant shared ADRs** — references in `architecture.md` / ADRs that
+      constrain this epic (or an explicit note that none apply).
+8. **Doc-critic checkpoint (before re-validation).** Spawn the **Doc-critic**
+   (`.harness/agents/doc-critic.md`) as a sub-agent with `target-type=plan-output`,
+   passing the paths just written (`specs/vision.md`, `specs/architecture.md`, each ADR,
+   and every seeded `epic.md`). Apply any advisory findings inline, then proceed. If the
+   critic invocation errors or times out, proceed best-effort and append a note under
+   `.harness/progress/<run>/` recording the skipped/failed review.
+9. **Re-validate** `.harness/state/tasks.json` against
    `.harness/store/tasks.schema.json`. If it fails, report the failure and do NOT claim
    a successful plan.
-9. **Report** the artifacts written (`.harness/specs/vision.md`,
+10. **Report** the artifacts written (`.harness/specs/vision.md`,
    `.harness/specs/architecture.md`, each `.harness/specs/adr/NNNN-*.md`), the seeded
    `draft` epics (ids + titles + `epic.md` paths), and tell the human to **run
    `/sdd-drill <epic-id>`** next. Do NOT spawn the Architect, do NOT write any feature
@@ -1171,15 +1200,21 @@ an arbitrary epic.
    `.harness/specs/adr/NNNN-<title>.md` (4-digit, above the max existing ADR number, no
    reuse) — do NOT rewrite or renumber F02's existing ADRs. Stay at per-epic depth; defer
    feature-level design to the feature's own spec.
-8. **Re-validate** `.harness/state/tasks.json` against `.harness/store/tasks.schema.json`. If
+8. **Doc-critic checkpoint (before re-validation).** Spawn the **Doc-critic**
+   (`.harness/agents/doc-critic.md`) as a sub-agent with `target-type=epic-decomposition`,
+   passing the target `epic.md` path, its feature table, the per-feature inbox brief paths,
+   and any ADR delta paths. Apply any advisory findings inline, then proceed. If the critic
+   invocation errors or times out, proceed best-effort and append a note under
+   `.harness/progress/<run>/` recording the skipped/failed review.
+9. **Re-validate** `.harness/state/tasks.json` against `.harness/store/tasks.schema.json`. If
    it fails, report the failure and do NOT claim a successful drill.
-9. Present the **single epic-level decision** (one decision, not per feature):
+10. Present the **single epic-level decision** (one decision, not per feature):
    - **approve** → flip the epic `draft → planned` and stamp `autonomous: true` on every
      seeded feature (all-or-nothing); or
    - **keep gated** → flip the epic `draft → planned`, leaving every seeded feature
      `autonomous: false` so each parks at the per-feature spec-approval gate.
    Re-validate again after the flip/stamp.
-10. **Report** the seeded features (ids + titles + `spec_path`s), the inbox briefs + ADR
+11. **Report** the seeded features (ids + titles + `spec_path`s), the inbox briefs + ADR
     ids, any ADR deltas, and the decision taken; tell the human to **run `/sdd-next`** to
     execute. Do NOT spawn the Architect, do NOT write any feature `.spec/.plan/.tasks/.tests`,
     and advance ONLY the target epic to `planned` — the Driller decomposes, never specs.

@@ -47,3 +47,19 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-06-12T16:49:38Z  E07-F01  in-review → approve (round 2, re-spec) — Reviewer verified rename complete, deselect-safety preserved, persona-model honest; holding done until PR #31 merges
 - 2026-06-12T16:56:38Z  E07-F01  in-review → done (PR #31 MERGED 2be3817; Codex r4 P2 deferred as known cross-front-end limitation). E07 epic rolled up → done.
 - 2026-06-12T16:56:38Z  drift-check (trigger: E07 done): NO-OP — no remaining draft/planned/pending epics (ALL epics now done); no Scout spawned, no demotion.
+2026-07-10T18:50:23Z | architect | E09-F01 | pending → spec-ready (Architect: 4-file spec, 18 R-ids) — PAUSED at human gate
+2026-07-10T18:53:54Z | orchestrator | E09-F01 | spec-ready → in-progress (human approved, gate latency 211s) — spawning Builder (round 1)
+2026-07-10T19:06:27Z | builder | E09-F01 | in-progress → in-review (Builder: T1–T12, VERSION 0.26.0, all suites green)
+2026-07-10T19:11:57Z | reviewer | E09-F01 | in-review → reject (round 1) — feedback → progress/review-E09-F01.md; returning to Builder
+2026-07-10T19:17:55Z | builder | E09-F01 | in-progress → in-review (Builder round 2: planner.md contradiction reconciled, all suites green)
+- 2026-07-10T19:25:00Z | reviewer | E09-F01 | in-review → approve (round 2) — round-1 contradiction in `agents/planner.md` resolved; every R1–R18 traced to a passing test; full `verification.test_command` green; fresh-install check passes; `agents/doc-critic.md` installed and referenced. → done recommended.
+2026-07-10T19:22:18Z | reviewer | E09-F01 | in-review → approve (round 2) — all suites green, R1–R18 traced
+2026-07-10T19:22:38Z | orchestrator | E09-F01 | in-review → done (Reviewer verdict persisted); E09 epic not rolled up — E09-F02 still pending
+- 2026-07-10T19:28:34Z E09-F02 pending -> spec-ready: Architect wrote feature specs; paused at human approval gate.
+- 2026-07-10T19:30:49Z E09-F02 spec-ready -> in-progress: human approved specs; Builder started.
+- 2026-07-10T19:37:26Z E09-F02 in-progress -> in-review: Builder completed implementation and verification; Reviewer started.
+- 2026-07-10T19:41:15Z E09-F02 in-review -> reject (round 1): Reviewer found missing named test traceability; returned to Builder.
+- 2026-07-10T19:44:41Z E09-F02 in-progress -> in-review: Builder addressed review feedback (round 2); Reviewer restarted.
+- 2026-07-10T19:48:02Z E09-F02 in-review -> approve (round 2): Reviewer approved; feature marked done.
+- 2026-07-10T19:48:02Z E09 done rollup: all E09 features are done; drift check triggered.
+- 2026-07-10T19:49:21Z E09 drift check: no stale epics; no demotions (no architecture/ADR context to re-validate).

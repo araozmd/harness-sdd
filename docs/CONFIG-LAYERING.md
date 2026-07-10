@@ -15,7 +15,7 @@ layer their config, so *personal* settings have a separate home. The rule is jus
 | Layer | Lives in | Scope | VCS |
 |---|---|---|---|
 | **Project** | `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` (incl. the `harness:begin..end` block), `.harness/` | facts true for everyone on the project: architecture, conventions, the harness entrypoint | **committed** (shared) |
-| **Personal** | `.claude/settings.local.json`, `.claude/scheduled_tasks.lock` | one developer's permissions, model pick, local hooks, runtime locks | **gitignored** (never shared) |
+| **Personal** | `.claude/settings.local.json`, `.claude/scheduled_tasks.lock`, `AGENTS.local.md`, `CLAUDE.local.md`, `AGENTS.override.md` | one developer's permissions, model pick, local hooks, runtime locks, and personal prompt guidance | **gitignored** (never shared) |
 | **User-global** | `~/.claude/CLAUDE.md`, your global agent settings | prompt/model preferences that follow *you* across every project | not in any project repo |
 
 The harness-generated `.claude/agents/*` and `.claude/commands/*` are **project** layer —
@@ -31,13 +31,47 @@ with the personal-layer paths:
 ```gitignore
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+AGENTS.local.md
+CLAUDE.local.md
+AGENTS.override.md
 # Per-tool MCP scratch dirs your setup may create — add your own (example):
 #.playwright-mcp/
 ```
 
 It deliberately ignores **specific files** under `.claude/`, not the whole directory, so
 the shared `agents/` and `commands/` stay tracked while a developer's `settings.local.json`
-never gets committed.
+never gets committed. The local prompt files are ignored for the same reason: they are a
+personal prompt layer, not project facts.
+
+## Personal prompt files
+
+Use local prompt files only for personal, additive guidance: local house style, temporary
+debug notes, shortcuts, or preferences that should not become shared project instructions.
+Committed project instructions in `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, and
+`.harness/AGENTS.md` remain authoritative when they conflict with a personal prompt file.
+
+The portable convention is `AGENTS.local.md` at the repository root. Generated entrypoint
+blocks tell agents to read it only when it exists, so a repository works normally when no
+local prompt override file is present.
+
+Tool-native local files can be better when a CLI supports them:
+
+| File | Tool | Notes |
+|---|---|---|
+| `AGENTS.local.md` | Portable convention | Use for tools that do not provide a better native local prompt file. |
+| `CLAUDE.local.md` | Claude Code | Native local prompt file for Claude-specific personal guidance. |
+| `AGENTS.override.md` | Codex | Native override file for Codex-specific personal guidance. |
+
+These files are gitignored and additive. Do not put project architecture, workflow gates,
+status changes, safety rules, or team conventions in them; put shared facts in committed
+entrypoints instead.
+
+Two caveats:
+
+- **Fresh worktrees need their own local files.** Gitignored files do not automatically
+  follow fresh worktrees unless you recreate them or link them from a user-global location.
+- **Tool-native local-file support differs by CLI.** Prefer a CLI's native local file when
+  it exists, but keep `AGENTS.local.md` as the portable convention for tools without one.
 
 ## Practical guidance
 
@@ -45,6 +79,8 @@ never gets committed.
   things every teammate and agent needs identically.
 - **Push personal preferences up to `~/.claude/CLAUDE.md`** (your model, prose style,
   habits) — they follow you, not the project.
+- **Use local prompt files for repo-specific personal guidance** only when it is additive
+  and safe to keep uncommitted.
 - **Let permissions/hooks live in `.claude/settings.local.json`** (gitignored). If your
   whole team genuinely needs a permission, put it in the *committed* `.claude/settings.json`
   instead — a deliberate shared choice, not a personal leak.

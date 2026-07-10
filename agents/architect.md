@@ -139,8 +139,19 @@ The umbrella owns the shared `.spec`/`.plan` and the contract; the per-repo
 `.tasks`/`.tests` slices are emitted into each child repo. You still never write
 production code — including in the child repos.
 
+## Doc-critic checkpoint before `spec-ready` (R12)
+
+After drafting the four spec files (and any pinned contract artifact for a sliced
+feature) and before handing off, spawn the **Doc-critic** (`agents/doc-critic.md`) as a
+sub-agent with `target-type=feature-spec`. Pass the paths to `<feature>.spec.md`,
+`<feature>.plan.md`, `<feature>.tasks.md`, and `<feature>.tests.md`. Apply any advisory
+findings inline, then proceed to the hand-off. If the critic invocation errors or times
+out, proceed best-effort and append a note to `progress/<run>/` recording the skipped or
+failed review.
+
 ## Hand-off
 
 When all four files are written (plus, for a sliced feature, the pinned contract
-artifact and slice references), tell the Orchestrator the feature is ready and let it
-set the status to `spec-ready`. Then **stop** — the human gate comes next.
+artifact and slice references), the doc-critic checkpoint has completed, and any inline
+fixes are applied, tell the Orchestrator the feature is ready and let it set the status
+to `spec-ready`. Then **stop** — the human gate comes next.

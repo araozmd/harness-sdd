@@ -111,21 +111,6 @@ honor (F02's upfront ADRs and/or this drill's deltas) — the ADR ids the featur
 **touches**. This is a forward-compatible note for F04; F03 does not itself make any spec
 cite an ADR.
 
-## Re-validate before claiming success (R10)
-
-After seeding (and after the state flip + stamp), you MUST **re-validate**
-`state/tasks.json` against `store/tasks.schema.json` via the zero-dependency path (the
-same validation `init.sh` performs):
-
-```sh
-python3 -c "import json; json.load(open('state/tasks.json'))"
-```
-
-plus a schema check against `store/tasks.schema.json`. **If** validation **fails**,
-**then** you MUST **report the failure** and you **must not claim a successful drill** —
-you must not leave an invalid TaskStore behind as a success. Fix or revert your edit,
-surface the error, and stop. A failed validation is never a success.
-
 ## ADR deltas — per-epic only (R11, R12, D5)
 
 When the decomposition forces a per-epic design decision, **append** it as a one-decision
@@ -142,6 +127,42 @@ epic*, or refinements informed by what an earlier epic's implementation taught. 
 **never** author the **feature-level** design that belongs in a feature's own four-file
 spec — that is the Architect's (F04's) boundary. Decisions local to a single feature are
 **deferred** to that feature's spec.
+
+## Doc-critic checkpoint after `/sdd-drill` (R11)
+
+After seeding the feature entries, filling the `epic.md` feature table, writing the
+per-feature inbox briefs, and appending any ADR deltas, spawn the **Doc-critic**
+(`agents/doc-critic.md`) as a sub-agent with `target-type=epic-decomposition`. Pass the
+target `epic.md` path, the feature table, the inbox brief paths, and the ADR delta paths.
+Apply any advisory findings inline, then proceed. If the critic invocation errors or
+times out, proceed best-effort and append a note to `progress/<run>/` recording the
+skipped or failed review.
+
+## Re-validate before claiming success (R10)
+
+After seeding, appending ADR deltas, and running the doc-critic checkpoint, you MUST
+**re-validate** `state/tasks.json` against `store/tasks.schema.json` via the
+zero-dependency path (the same validation `init.sh` performs):
+
+```sh
+python3 -c "import json; json.load(open('state/tasks.json'))"
+```
+
+plus a schema check against `store/tasks.schema.json`. **If** validation **fails**,
+**then** you MUST **report the failure** and you **must not claim a successful drill** —
+you must not leave an invalid TaskStore behind as a success. Fix or revert your edit,
+surface the error, and stop. A failed validation is never a success.
+
+**Re-validation runs both after seeding AND after the approval mutation.** R10's coverage
+does not end at seeding: the approval-branch mutation below (the epic `draft → planned`
+state flip and the `autonomous` stamping) is the **last** edit to `state/tasks.json`, so
+you MUST re-validate `state/tasks.json` against `store/tasks.schema.json` again — via the
+same zero-dependency path — **after** performing that mutation. This **final**
+post-mutation validation is the one that gates the completion report. If the post-mutation
+re-validation **fails** (a malformed state flip or `autonomous` stamp), you **must not
+claim a successful drill**: fix or revert the mutation, surface the error, and stop. A
+successful drill requires that the re-validation **after** the state flip/stamp passes,
+not only the re-validation after seeding.
 
 ## The single epic-level human gate (R15)
 
@@ -168,6 +189,11 @@ surprising and would falsely re-gate it; `planned` + gated features is the faith
 "drilled but I still want to review each spec" state. Stamping is all-or-nothing: on keep
 gated **every** seeded feature stays `autonomous: false`.
 
+After **either** approval branch mutates `state/tasks.json` (the `draft → planned` flip
+and the `autonomous` stamp), you MUST **re-validate** `state/tasks.json` against
+`store/tasks.schema.json` again (R10, the same zero-dependency path) before reporting.
+You must **not claim a successful drill** if that post-mutation validation fails.
+
 ## What you NEVER do (guardrails)
 
 ### Only path past `draft` — advance only the epic (R16)
@@ -189,7 +215,8 @@ table, write inbox briefs, and append ADR deltas.
 ## Completion report
 
 When the decomposition is written, the approval decision is recorded, and re-validation
-passed, report to the human:
+passed — including the **final** re-validation **after** the approval-branch state
+flip/stamp — report to the human:
 
 - the seeded feature entries (ids + titles) and their `spec_path`s;
 - the per-feature inbox briefs written under `progress/inbox/` and the ADR ids each
