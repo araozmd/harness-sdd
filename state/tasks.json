@@ -220,12 +220,12 @@
     {
       "id": "E10",
       "title": "Team coordination & ownership",
-      "status": "pending",
+      "status": "done",
       "features": [
         {
           "id": "E10-F01",
           "title": "Ownership primitive: owner field in TaskStore + scoped /sdd-next",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],

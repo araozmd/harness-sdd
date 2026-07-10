@@ -2,7 +2,7 @@
 id: E10-F01
 title: "Ownership primitive: owner field in TaskStore + scoped /sdd-next"
 epic: E10-team-coordination
-status: spec-ready       # pending → spec-ready → in-progress → in-review → done
+status: done             # pending → spec-ready → in-progress → in-review → done
 sdd: true
 autonomous: false
 depends_on: []
