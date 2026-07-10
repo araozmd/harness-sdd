@@ -481,6 +481,31 @@ cmp -s "$CFGID" "$TID/after1" || { diff "$TID/after1" "$CFGID" || true; fail "wo
 rm -rf "$TID"
 pass "workflow.identity migration is idempotent + preserves a user-set value (Codex #40 r2 P2)"
 
+# ── identity seeding is scoped to the workflow: section (E10-F01, Codex #40 r3 P2) ──
+# A preserved config carrying an unrelated indented `identity:` under ANOTHER section
+# (e.g. an auth/tool block) must NOT suppress seeding workflow.identity — the presence
+# check is scoped to the top-level workflow: block, not any same-named key file-wide.
+TID="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+printf '# My Project\n' > "$TID/CLAUDE.md"
+CODEX_HOME="$TID/ch" sh "$SRC/harness-install.sh" "$TID" >/dev/null || fail "identity-scope fresh install exited non-zero"
+CFGID="$TID/.harness/harness.config.yaml"
+cat > "$CFGID" <<'EOF'
+store:
+  tasks: local
+auth:
+  identity: "svc-account"   # unrelated key, keep me exactly
+workflow:
+  require_spec_approval: true
+EOF
+CODEX_HOME="$TID/ch" sh "$SRC/harness-install.sh" "$TID" >/dev/null || fail "identity-scope upgrade exited non-zero"
+# workflow.identity must now exist INSIDE the workflow: block…
+awk '/^workflow:[[:space:]]*(#.*)?$/{w=1;next} w&&/^[^[:space:]#]/{w=0} w&&/^[[:space:]]+identity:/{f=1} END{exit f?0:1}' "$CFGID" \
+  || fail "workflow.identity not seeded when an unrelated identity: exists elsewhere (Codex #40 r3 P2)"
+# …and the unrelated auth.identity must survive untouched.
+grep -qF 'identity: "svc-account"   # unrelated key, keep me exactly' "$CFGID" || fail "identity-scope migration altered the unrelated auth.identity"
+rm -rf "$TID"
+pass "workflow.identity seeding is scoped to the workflow: section (Codex #40 r3 P2)"
+
 # ── arg guards make no changes ────────────────────────────────────────────────
 sh "$SRC/harness-install.sh"            >/dev/null 2>&1 && fail "missing-arg should exit non-zero"   # R9
 sh "$SRC/harness-install.sh" "$SRC"     >/dev/null 2>&1 && fail "self-target should exit non-zero"   # R9

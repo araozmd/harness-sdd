@@ -143,9 +143,10 @@ migrate_config() {
   # Empty default ⇒ solo / board-wide, exactly today's behavior (owner ignored). A
   # preserved pre-E10 config that lacks this key would make `/sdd-next --mine`
   # fail-closed as an unresolved identity, so seed the documented default on upgrade.
-  # Scope the presence check to a two-space-indented `identity:` (a workflow child) so
-  # a same-named key elsewhere never suppresses it.
-  if ! grep -Eq '^[[:space:]]+identity:' "$_cfg"; then
+  # Scope the presence check to an `identity:` INSIDE the top-level `workflow:` section
+  # (via _cfg_has_workflow_identity) so a same-named key under another section — e.g. an
+  # auth/tool block — never suppresses seeding the workflow child.
+  if ! _cfg_has_workflow_identity "$_cfg"; then
     if grep -Eq '^workflow:[[:space:]]*(#.*)?$' "$_cfg"; then
       _mc_insert_after "$_cfg" '^workflow:[[:space:]]*(#.*)?$' \
         '  identity: ""   # current developer identity for scoped `/sdd-next --mine` (E10-F01); empty ⇒ board-wide'
@@ -188,6 +189,19 @@ _cfg_has_umbrella_manifest() {
     /^umbrella:[[:space:]]*(#.*)?$/ { u=1; next }
     u && /^[^[:space:]#]/ { u=0 }
     u && /^[[:space:]]+manifest:/ { found=1 }
+    END { exit found ? 0 : 1 }
+  ' "$1"
+}
+
+# _cfg_has_workflow_identity <file> — true (exit 0) iff an `identity:` key exists
+# INSIDE the top-level `workflow:` section (not a same-named key under any other
+# section). Mirrors _cfg_has_umbrella_manifest so migrate_config never mis-detects
+# an unrelated indented `identity:` and skips seeding `workflow.identity`.
+_cfg_has_workflow_identity() {
+  awk '
+    /^workflow:[[:space:]]*(#.*)?$/ { w=1; next }
+    w && /^[^[:space:]#]/ { w=0 }
+    w && /^[[:space:]]+identity:/ { found=1 }
     END { exit found ? 0 : 1 }
   ' "$1"
 }
