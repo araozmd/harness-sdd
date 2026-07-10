@@ -70,3 +70,5 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-07-10T22:39:51Z E10-F01 in-review -> reject (round 1): Reviewer found R15 VERSION test uses git HEAD:VERSION OLD-vs-NEW diff (permanent-suite anti-pattern; would block next feature post-merge). Back to Builder for fix.
 - 2026-07-10T22:43:44Z E10-F01 in-progress -> in-review: Builder fixed R15 to shape-only SemVer+CHANGELOG assertion (round 2); proven green post-commit; full suite EXIT=0. Reviewer restarted.
 - 2026-07-10T22:46:59Z E10-F01 in-review -> approve (round 2): Reviewer verified R15 shape-only fix (proven green post-commit) + full-suite regression; local gate green. Proceeding to PR + Codex pr-loop before done (per do-not-roll-done-before-merge).
+- 2026-07-10T22:48:05Z E10-F01 PR #40 opened (feat/E10-F01-owner-field, VERSION 0.28.0); entering Codex /pr-loop. Feature parked at in-review until merge (do-not-roll-done-before-merge).
+- 2026-07-10T22:58:26Z E10-F01 PR #40 round 1: Codex filed 1 finding (P2 — zero-dep init.sh validator did not enforce owner string; R3 test skipped w/o jsonschema). Fixed via pr-fixer (init.sh fallback + R3 both-paths test); full suite green.
