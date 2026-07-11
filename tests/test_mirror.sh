@@ -375,6 +375,33 @@ EOF
   fi
   pass "preflight: read:project does NOT satisfy bare project scope ⇒ fails closed, no board mutation [preflight_gh_read_project_fails_closed]"
 
+  # A fake gh whose token has `repo:status` (a NARROWER scope) but NOT the bare `repo` scope,
+  # plus a valid `project`. Substring/regex matching wrongly satisfied bare `repo` from inside
+  # `repo:status`; with exact-token matching the bare-`repo` requirement is NOT satisfied, so the
+  # preflight must FAIL CLOSED before any board call, naming the missing `repo` scope. (Round-2.)
+  mkdir -p "$T/bin-repostatus"
+  cat > "$T/bin-repostatus/gh" <<EOF
+#!/bin/sh
+echo "called: \$*" >> "$T/pf-repostatus-called"
+case "\$1 \$2" in
+  "--version ") echo "gh version 2.62.0 (2024-11-27)" ;;
+  "auth status") echo "Token scopes: 'project', 'repo:status'"; exit 0 ;;
+esac
+exit 0
+EOF
+  chmod +x "$T/bin-repostatus/gh"
+  rm -f "$T/pf-repostatus-called"
+  if PATH="$T/bin-repostatus:$PATH" node "$HPF/tools/sync-board.mjs" >"$T/pf-repostatus.out" 2>&1; then
+    fail "preflight passed with only repo:status (must fail closed on the bare repo scope)"
+  fi
+  grep -qi 'gh' "$T/pf-repostatus.out"   || { cat "$T/pf-repostatus.out"; fail "repo:status error does not name gh"; }
+  grep -qi 'repo' "$T/pf-repostatus.out" || { cat "$T/pf-repostatus.out"; fail "repo:status error does not name the missing repo scope"; }
+  if [ -f "$T/pf-repostatus-called" ]; then
+    grep -Eqi 'project (item-edit|item-add|view)|issue (create|close|reopen|edit)' "$T/pf-repostatus-called" \
+      && { cat "$T/pf-repostatus-called"; fail "repo:status under-scoped gh still made a board query/mutation"; }
+  fi
+  pass "preflight: repo:status does NOT satisfy bare repo scope ⇒ fails closed, no board mutation [preflight_gh_repo_status_fails_closed]"
+
   # 11) gh-ONLY / no-MCP (R1) — a configured run dispatches ONLY to `gh`; neither the tool
   #     source nor the recorded calls mention any MCP transport. (The recording shim from
   #     bin/ answers preflight + returns empty JSON so the reconcile loop runs harmlessly.)

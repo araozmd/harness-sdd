@@ -150,7 +150,21 @@ if (authRes.error || authRes.status !== 0) {
 }
 const authOut = (authRes.stdout || '') + '\n' + (authRes.stderr || '');
 const scopesLine = (authOut.match(/Token scopes:.*$/m) || [''])[0];
-const hasScope = (s) => new RegExp(`['\"]${s}['\"]|(^|[^-:])\\b${s}\\b`).test(scopesLine);
+// Tokenize the scope list into EXACT scope strings, then require exact membership — never a
+// substring/regex match. GitHub lists narrower OAuth scopes (`repo:status`, `repo_deployment`,
+// `public_repo`, `repo:invite`, `read:project`) as separate tokens; only the bare `repo` and
+// bare `project` grant the read/write access this mirror needs, so anything qualified must FAIL
+// CLOSED (R7). Take the text after `Token scopes:`, split on commas, and strip surrounding
+// whitespace + surrounding quotes from each part (handles both `'project', 'repo'` and the
+// unquoted `project, repo` forms); drop empties.
+const scopeSet = new Set(
+  scopesLine
+    .replace(/^.*Token scopes:/, '')
+    .split(',')
+    .map((s) => s.trim().replace(/^['"]|['"]$/g, ''))
+    .filter(Boolean),
+);
+const hasScope = (s) => scopeSet.has(s);
 const missingScopes = ['project', 'repo'].filter((s) => !hasScope(s));
 if (missingScopes.length) {
   console.error(`[mirror] \`gh\` auth is missing required scope(s) for GitHub Projects (v2): ${missingScopes.join(', ')} — ${SCOPE_HINT}.`);
