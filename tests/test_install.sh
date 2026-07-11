@@ -120,6 +120,10 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "installer exited non-zero"
 [ -f "$T/.harness/umbrella.manifest.example.yaml" ] || fail "umbrella manifest example not installed" # R1
 [ -f "$T/.harness/umbrella.gitignore.example" ] || fail "umbrella .gitignore example not installed"    # R1
 [ -f "$T/.harness/tools/telemetry-report.py" ] || fail "tools/telemetry-report.py not installed (telemetry summary would fail in consumers)" # R1
+# E11-F01 R12: the github-projects board mirror tool must ship in the body AND be executable
+# (installer wiring asserted, not just emitted) [sync_board_tool_installed_executable].
+[ -f "$T/.harness/tools/sync-board.mjs" ] || fail "tools/sync-board.mjs not installed (board mirror would be missing in consumers)" # R12
+[ -x "$T/.harness/tools/sync-board.mjs" ] || fail "installed tools/sync-board.mjs is not executable (board mirror not runnable)"      # R12
 [ -x "$T/.harness/init.sh" ]                   || fail ".harness/init.sh not executable"     # R1
 [ -f "$T/.harness/specs/product.md" ]          || fail "product.md stub not seeded"          # R6
 [ -f "$T/.harness/state/tasks.json" ]          || fail "bootstrap tasks.json missing"        # R6
