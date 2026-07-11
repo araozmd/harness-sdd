@@ -236,12 +236,12 @@
     {
       "id": "E11",
       "title": "GitHub Projects board integration (gh CLI, no MCP)",
-      "status": "pending",
+      "status": "done",
       "features": [
         {
           "id": "E11-F01",
           "title": "GitHub Projects sync via gh CLI (no MCP)",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
