@@ -85,3 +85,7 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-07-11T00:35:01Z E11-F01 in-review -> done: PR #42 merged (merge commit 0d11c01); feature complete.
 - 2026-07-11T00:35:01Z E11 done rollup: all E11 features done; epic E11 -> done (derived + persisted; VERSION 0.29.0). Drift check triggered.
 - 2026-07-11T00:35:01Z E11 drift check (Scout, read-only): E12/E13/E14/E99 all STILL-VALID; no demotions (E11 extended the mirror, preserved mirror.board shape + one-way invariant + provider-per-epic + jira/azure stubs; ownership deferred to E10, no new contradiction). Flag (pre-existing, from E10 rollup not E11): E12/E13/E14 reference E10-F03 which does not exist in tasks.json — for human doc-cleanup/re-seed decision. Findings: progress/drift-check-E11.md.
+2026-07-11T00:51:39Z  E12-F01 pending → spec-ready — Architect wrote 4-file spec (Jira REST+PAT, no MCP); PAUSED at human gate (autonomous:false).
+2026-07-11T00:52:41Z  E12-F01 spec-ready → in-progress — human approved spec at gate; spawning Builder.
+2026-07-11T01:06:26Z  E12-F01 in-progress → in-review — Builder implemented T1–T14 (VERSION 0.30.0); all 15 suites green; spawning Reviewer (round 1).
+2026-07-11T01:10:42Z  E12-F01 in-review → approve (round 1) — Reviewer verified all 15 suites green, R1–R18 traced, invariants + secret-hygiene clean. Proceeding to PR + pr-loop before done rollup.
