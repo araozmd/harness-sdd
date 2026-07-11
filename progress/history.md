@@ -89,3 +89,6 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 2026-07-11T00:52:41Z  E12-F01 spec-ready → in-progress — human approved spec at gate; spawning Builder.
 2026-07-11T01:06:26Z  E12-F01 in-progress → in-review — Builder implemented T1–T14 (VERSION 0.30.0); all 15 suites green; spawning Reviewer (round 1).
 2026-07-11T01:10:42Z  E12-F01 in-review → approve (round 1) — Reviewer verified all 15 suites green, R1–R18 traced, invariants + secret-hygiene clean. Proceeding to PR + pr-loop before done rollup.
+2026-07-11T01:58:54Z  E12-F01 in-review → done — PR #44 merged (Codex clean r3, 2 rounds of P2 fixes: PAT-path, epic_name_field, PAT-log-scrub, transition-by-dest); Reviewer-approved, all 15 suites green.
+2026-07-11T01:58:54Z  E12 done rollup: all E12 features done; epic E12 -> done (derived + persisted; VERSION 0.30.0). Drift check triggered.
+2026-07-11T01:58:54Z  E12 drift check (Scout, read-only): E13/E14/E99 all STILL-VALID; no demotions (E12 filled the jira mirror branch additively, preserved mirror.board shape + one-way invariant + provider-per-epic + azure-boards no-op stub; ownership deferred to E10). No architecture.md/ADR set ⇒ degraded delta-basis. Carried flag: E13/E14 still reference nonexistent E10-F03 (human doc decision). Findings: progress/drift-check-E12.md.

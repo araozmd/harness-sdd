@@ -1,7 +1,7 @@
 ---
 id: E12
 title: Jira board integration (REST + Personal Access Token, no MCP)
-status: pending          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: done          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 
