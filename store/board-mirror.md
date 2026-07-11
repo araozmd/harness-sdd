@@ -180,8 +180,11 @@ The `jira` provider is an **implemented** mirror (not a stub): a one-way project
 The PAT is resolved from, in order (**first hit wins**):
 
 1. the **`JIRA_PAT`** environment variable (precedence when both are present), else
-2. the gitignored **`pat_file`** (default `.harness/jira.pat`, trimmed of a trailing
-   newline).
+2. the gitignored **`pat_file`** (default `jira.pat`, resolved **relative to the harness
+   dir** ⇒ `.harness/jira.pat` in a consumer install, trimmed of a trailing newline). An
+   explicit override should stay **bare-relative** (e.g. `jira.pat`) or absolute — a relative
+   override is joined onto the harness dir, so a consumer must NOT write `.harness/jira.pat`
+   (that would double-nest to `.harness/.harness/jira.pat`).
 
 If neither resolves, the tool exits **non-zero** with an actionable message naming
 `JIRA_PAT` and the `pat_file` path — **before** any Jira network call. The PAT value is
@@ -198,10 +201,11 @@ mirror:
     provider: jira
     base_url: https://jira.acme.internal   # Jira Server/DC base URL (required)
     project_key: HAR                        # target Jira project key (required)
-    pat_file: .harness/jira.pat             # gitignored PAT file; JIRA_PAT env wins
+    pat_file: jira.pat                      # gitignored PAT file, resolved under the harness dir (⇒ .harness/jira.pat); JIRA_PAT env wins
     issue_type_map:                         # optional — defaults epic→Epic, feature→Story
       epic: "Epic"
       feature: "Story"
+    epic_name_field: ""                     # optional — Server/DC "Epic Name" custom field id (e.g. customfield_10011); empty ⇒ omitted
     status_map:                             # optional — harness status → Jira workflow state
       pending: "To Do"                      # (identity default; nothing hard-coded)
       in-review: "In Review"
@@ -210,6 +214,13 @@ mirror:
 - **Issue types (configurable).** Harness **epics** map to the Jira **Epic** issue type and
   **features** to the Jira **Story** issue type by default; both are overridable via
   `mirror.board.issue_type_map` (e.g. `feature: Task`). Nothing is hard-coded.
+- **Epic Name field (optional, Server/DC).** On many Jira **Software Server/DC** projects the
+  **Epic Name** custom field is *required* on the Epic create screen, so an epic create that
+  sends only project/summary/type/labels returns **HTTP 400** and halts the sync. Set
+  `mirror.board.epic_name_field` to that project's custom field id (e.g. `customfield_10011`)
+  to populate it — the mirror sends the epic's summary as the Epic Name on **epic creates
+  only**. It stays a strictly **one-way**, additive knob: **empty/absent ⇒ the field is
+  omitted** (unchanged default behavior), so the common case needs no new config.
 - **Status → workflow (configurable).** Each feature's `status` maps to a Jira workflow
   state via the provider-neutral `mirror.board.status_map` (identity default), and the
   reconciled issue is **transitioned** to the mapped state. Nothing about the workflow-state

@@ -125,8 +125,9 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "installer exited non-zero"
 [ -f "$T/.harness/tools/sync-board.mjs" ] || fail "tools/sync-board.mjs not installed (board mirror would be missing in consumers)" # R12
 [ -x "$T/.harness/tools/sync-board.mjs" ] || fail "installed tools/sync-board.mjs is not executable (board mirror not runnable)"      # R12
 # E12-F01 R16: a fresh install must gitignore the default Jira mirror PAT file
-# (mirror.board.pat_file default `.harness/jira.pat`, i.e. `jira.pat` relative to the
-# .harness/ .gitignore) so a provisioned Jira PAT can never be committed by default
+# (mirror.board.pat_file default `jira.pat`, resolved under the harness dir ⇒
+# `.harness/jira.pat`, i.e. `jira.pat` relative to the .harness/ .gitignore where the tool
+# reads it) so a provisioned Jira PAT can never be committed by default
 # [jira_pat_file_gitignored]. Assert the seeded .harness/.gitignore covers it.
 [ -f "$T/.harness/.gitignore" ]                    || fail ".harness/.gitignore not seeded (Jira PAT would not be ignored)" # R16
 grep -qxF 'jira.pat' "$T/.harness/.gitignore"      || fail ".harness/.gitignore does not ignore the default Jira PAT file (jira.pat) — a PAT could be committed" # R16

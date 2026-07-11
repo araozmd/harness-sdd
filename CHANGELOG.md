@@ -16,7 +16,8 @@ All notable changes to the harness body are recorded here. Versions follow
   enterprises. Jira **Cloud** (Basic auth) is out of F01 scope, documented as a future
   extension.
 - **PAT hygiene** — the PAT is resolved from the **`JIRA_PAT`** env var (precedence) else a
-  gitignored **`pat_file`** (default `.harness/jira.pat`, trimmed); it is **never** written to
+  gitignored **`pat_file`** (default `jira.pat`, resolved under the harness dir ⇒
+  `.harness/jira.pat` in a consumer, trimmed); it is **never** written to
   `state/tasks.json`, `harness.config.yaml`, logs, or any committed file. Config
   (`base_url`/`project_key`) is validated and the PAT resolved **before** any network call
   (fail-closed); a missing PAT or missing config exits non-zero naming the requirement, and a
@@ -41,6 +42,12 @@ All notable changes to the harness body are recorded here. Versions follow
   issue-type + status maps, assignee no-op, one-way, `--dry-run`, 401/403, PAT-never-leaks,
   docs pin). Assertions are behavior/shape only — no exact-VERSION pin and no diff of
   DO-NOT-TOUCH files against `main`.
+- **Optional `mirror.board.epic_name_field`** (Codex #44 P2) — an additive, inert-by-default
+  Jira Server/DC "Epic Name" custom field id (e.g. `customfield_10011`). When set, the epic
+  `POST /issue` payload carries it (= the epic summary) so Server/DC projects that require
+  Epic Name on the create screen don't 400 and halt the sync; empty/absent ⇒ omitted
+  (unchanged default). Epic-only, create-only. Seeded inert in `harness.config.yaml` +
+  `harness-install.sh`, documented in `store/board-mirror.md`, guarded by `tests/test_mirror.sh`.
 
 ## [0.29.0] — 2026-07-10
 

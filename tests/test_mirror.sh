@@ -509,12 +509,12 @@ EOF
   done
   # E12-F01 adds the jira-scoped keys (base_url/project_key/pat_file/issue_type_map) under
   # the SAME mirror.board block — recognized additions, not a fork.
-  for k in base_url project_key pat_file issue_type_map; do
+  for k in base_url project_key pat_file issue_type_map epic_name_field; do
     grep -q "'$k'" "$TOOL" || fail "tool does not read the jira mirror.board key '$k'"
   done
   # No stray mirror.board key beyond the known set, and no committed token/secret literal.
   UNKNOWN="$(grep -oE "\['mirror', 'board', '[a-z_]+'\]" "$TOOL" | grep -oE "'[a-z_]+'\]" | sed "s/[]']//g" \
-    | grep -vE '^(provider|owner|project_number|repo|status_map|assignee|base_url|project_key|pat_file|issue_type_map)$' || true)"
+    | grep -vE '^(provider|owner|project_number|repo|status_map|assignee|base_url|project_key|pat_file|issue_type_map|epic_name_field)$' || true)"
   [ -z "$UNKNOWN" ] || fail "tool introduced a new mirror.board key: $UNKNOWN"
   grep -Eqi 'ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' "$TOOL" && fail "tool contains a committed GitHub token literal"
   pass "config read from existing mirror.board shape; no new key/secret [no_new_config_key]"
@@ -656,6 +656,23 @@ EOF
   grep -q "auth=Bearer $FILE_PAT" "$JR" || { cat "$JR"; fail "pat_file fallback PAT (trimmed) was not used when JIRA_PAT unset"; }
   pass "pat_file used (trimmed) when JIRA_PAT unset [jira_pat_file_fallback]"
 
+  # default resolution: with NO pat_file key configured, the default resolves to
+  # <HARNESS_DIR>/jira.pat — NOT <HARNESS_DIR>/.harness/jira.pat (Codex #44 P2). Seed the
+  # PAT at the harness-dir root and prove it's read (env unset). A file placed at a nested
+  # .harness/jira.pat must NOT satisfy it. HARNESS_DIR here is the tool's parent (hj-r6d).
+  JR="$T/jira-rec-r6d"; JB="$T/jira-body-r6d"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  DEF_PAT="DEFAULTpat_root_1234"
+  HJ6D="$T/hj-r6d"; mk_jira "$HJ6D" "$URL" ''    # empty extra ⇒ no pat_file key ⇒ default
+  mkdir -p "$HJ6D/.harness"
+  printf '%s\n' "WRONGpat_nested_9999" > "$HJ6D/.harness/jira.pat"  # decoy: must be ignored
+  printf '%s\n' "$DEF_PAT" > "$HJ6D/jira.pat"                       # the real default location
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="" node "$HJ6D/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira default-pat_file run errored"; }
+  stop_jira_stub
+  grep -q "auth=Bearer $DEF_PAT" "$JR" || { cat "$JR"; fail "default pat_file did not resolve to <HARNESS_DIR>/jira.pat (double .harness nesting bug)"; }
+  grep -q 'WRONGpat_nested' "$JR" && { cat "$JR"; fail "default pat_file resolved to the nested .harness/jira.pat (double-nesting bug)"; }
+  pass "default pat_file resolves to <HARNESS_DIR>/jira.pat, no double .harness [jira_default_pat_file_no_double_nest]"
+
   # ── R7 — no PAT resolvable ⇒ non-zero, names JIRA_PAT + pat_file, no network call ──
   JR="$T/jira-rec-r7"; JB="$T/jira-body-r7"
   URL="$(start_jira_stub normal "$JR" "$JB")"
@@ -743,6 +760,35 @@ EOF
   grep -qi 'assignee' "$JB" && { cat "$JB"; fail "jira sent an assignee field (must be a no-op in F01)"; }
   grep -Eqi '/rest/api/2/issue/[^/]+/assignee' "$JR" && { cat "$JR"; fail "jira made an assignee-setting REST call (deferred to E10)"; }
   pass "assignee is a recognized no-op for jira in F01 [jira_assignee_noop]"
+
+  # ── R14 — optional Epic Name custom field (Server/DC required field) ── (Codex #44 P2)
+  # When mirror.board.epic_name_field is set, the EPIC create payload must carry that custom
+  # field = the epic summary so Server/DC projects that require "Epic Name" don't 400. When
+  # absent, the create payload must NOT include any customfield_* key (inert default).
+  # 'normal' mode ⇒ empty search ⇒ both epic (E01) and feature get created.
+  # set: epic create includes the configured custom field id = epic summary.
+  JR="$T/jira-rec-r14s"; JB="$T/jira-body-r14s"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ14S="$T/hj-r14s"; mk_jira "$HJ14S" "$URL" '    epic_name_field: "customfield_10011"
+'
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ14S/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira epic_name_field run errored"; }
+  stop_jira_stub
+  # the epic create line (issuetype Epic) must carry the custom field set to the epic summary.
+  grep '"name":"Epic"' "$JB" | grep -q '"customfield_10011":"E01 — Demo"' \
+    || { cat "$JB"; fail "epic create did not populate the configured epic_name_field with the epic summary"; }
+  # the feature (Story) create must NOT carry the Epic Name field — epics only.
+  grep '"name":"Story"' "$JB" | grep -q 'customfield_10011' \
+    && { cat "$JB"; fail "epic_name_field leaked onto a feature (Story) create — must be epic-only"; }
+  pass "epic_name_field populates the Epic Name custom field on epic creates when set [jira_epic_name_field_set]"
+
+  # absent: no epic_name_field key ⇒ NO customfield_* on any create payload (inert default).
+  JR="$T/jira-rec-r14a"; JB="$T/jira-body-r14a"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ14A="$T/hj-r14a"; mk_jira "$HJ14A" "$URL" ''
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ14A/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira epic_name_field-absent run errored"; }
+  stop_jira_stub
+  grep -q 'customfield_' "$JB" && { cat "$JB"; fail "a customfield_* key appeared with no epic_name_field configured (inert default violated)"; }
+  pass "no customfield added when epic_name_field is absent/empty (inert default) [jira_epic_name_field_inert_default]"
 
   # ── R13 — one-way: sync never writes state/tasks.json (fixture-local snapshot) ──
   JR="$T/jira-rec-r13"; JB="$T/jira-body-r13"

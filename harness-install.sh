@@ -176,11 +176,12 @@ migrate_config() {
       printf '    repo: ""              # github-projects: owner/repo holding the issues\n'
       printf '    base_url: ""          # jira: Jira Server/DC base URL (e.g. https://jira.acme.internal)\n'
       printf '    project_key: ""       # jira: target Jira project key (e.g. HAR)\n'
-      printf '    pat_file: ".harness/jira.pat"   # jira: gitignored PAT file; JIRA_PAT env var wins. NEVER commit a PAT.\n'
+      printf '    pat_file: "jira.pat"   # jira: gitignored PAT file, resolved under the harness dir (this .harness/) ⇒ .harness/jira.pat; JIRA_PAT env var wins. NEVER commit a PAT.\n'
       printf '    assignee: ""          # optional: gh login (or "@me") assigned once work starts; empty ⇒ skip (no-op for jira in F01)\n'
       printf '    # issue_type_map:     # jira: harness concept -> Jira issue type (omit ⇒ epic:Epic, feature:Story)\n'
       printf '    #   epic: "Epic"\n'
       printf '    #   feature: "Story"\n'
+      printf '    epic_name_field: ""   # jira: optional Server/DC "Epic Name" custom field id (e.g. customfield_10011); set only if required on the Epic create screen. Empty ⇒ omitted (default)\n'
       printf '    # status_map:         # optional: harness status -> board column / Jira workflow state (omit ⇒ identity)\n'
       printf '    #   pending: "Todo"\n'
       printf '    #   done: "Done"\n'
@@ -752,8 +753,9 @@ EOF
   # override lives outside the repo and needs no ignore. NOTE: if you change telemetry.log
   # AFTER install without re-running the installer, add the new path here yourself.
   _tlog="$(_cfg_telemetry_log "$H/harness.config.yaml" 2>/dev/null)"
-  # Also ignore the default Jira mirror PAT file (mirror.board.pat_file default
-  # `.harness/jira.pat`, i.e. `jira.pat` relative to this .harness/ .gitignore) so a
+  # Also ignore the default Jira mirror PAT file (mirror.board.pat_file default `jira.pat`,
+  # resolved under the harness dir ⇒ `.harness/jira.pat`, i.e. `jira.pat` relative to this
+  # .harness/ .gitignore where the tool actually reads it) so a
   # provisioned Jira PAT can NEVER be committed by default. The PAT value itself is never
   # written to config — only this path is seeded here. See store/board-mirror.md "jira contract".
   _ignores='telemetry.jsonl

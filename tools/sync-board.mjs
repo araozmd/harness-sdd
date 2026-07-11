@@ -18,7 +18,8 @@
 //   jira            -> IMPLEMENTED (Jira Server/Data Center REST API + Bearer PAT, no MCP).
 //                      Needs `mirror.board.{base_url,project_key}` and a PAT from the
 //                      JIRA_PAT env var (precedence) or the gitignored pat_file
-//                      (default .harness/jira.pat). Status only; assignee is a no-op for
+//                      (default `jira.pat`, resolved under the harness dir ⇒ `.harness/jira.pat`
+//                      in a consumer). Status only; assignee is a no-op for
 //                      jira in F01 (deferred to E10). See store/board-mirror.md.
 //   azure-boards    -> STUB (recognized, not implemented yet — see store/board-mirror.md).
 //
@@ -385,7 +386,12 @@ async function runJira(cfgText) {
   }
 
   // --- PAT resolve + fail-closed preflight (before ANY network call) ----------
-  const rawPatFile = yamlGet(cfgText, ['mirror', 'board', 'pat_file']) || '.harness/jira.pat';
+  // pat_file resolves relative to HARNESS_DIR (HERE/.. — same base as CONFIG_PATH/TASKS_PATH),
+  // so the default is a BARE `jira.pat` that lands at <HARNESS_DIR>/jira.pat: `.harness/jira.pat`
+  // in a consumer (the installer gitignores exactly that), `<repo>/jira.pat` in source. Do NOT
+  // default to `.harness/jira.pat` — that would double-nest to `.harness/.harness/jira.pat` in a
+  // consumer. An explicit override should likewise be bare-relative (or absolute) to avoid nesting.
+  const rawPatFile = yamlGet(cfgText, ['mirror', 'board', 'pat_file']) || 'jira.pat';
   const patFile = isAbsolute(rawPatFile) ? rawPatFile : resolve(HERE, '..', rawPatFile);
   const PAT = resolveJiraPat(patFile);
   if (!PAT) {
@@ -398,6 +404,11 @@ async function runJira(cfgText) {
   const issueTypeMap = yamlGetMap(cfgText, ['mirror', 'board', 'issue_type_map']);
   const EPIC_TYPE = issueTypeMap.epic || 'Epic';
   const FEATURE_TYPE = issueTypeMap.feature || 'Story';
+  // Optional Jira Server/DC "Epic Name" custom field id (e.g. customfield_10011). On Software
+  // Server/DC projects this field is often REQUIRED on the Epic create screen, so a create with
+  // only project/summary/type/labels returns HTTP 400 and halts the sync. When set, we populate
+  // it (with the epic summary) on epic creates only. Empty/absent ⇒ omitted (inert default).
+  const EPIC_NAME_FIELD = (yamlGet(cfgText, ['mirror', 'board', 'epic_name_field']) || '').trim();
   // feature status → Jira workflow state via the provider-neutral status_map (identity default).
   const jiraStatusMap = yamlGetMap(cfgText, ['mirror', 'board', 'status_map']);
   const mapStatus = (s) => jiraStatusMap[s] || s;
@@ -463,14 +474,18 @@ async function runJira(cfgText) {
       if (DRY) {
         log(`[dry-run] would create ${obj.type} issue for ${obj.id}: "${obj.summary}" (label ${label})`);
       } else {
-        const created = await jiraFetch('POST', '/issue', {
-          fields: {
-            project: { key: PROJECT_KEY },
-            summary: obj.summary,
-            issuetype: { name: obj.type },
-            labels: [label],
-          },
-        });
+        const fields = {
+          project: { key: PROJECT_KEY },
+          summary: obj.summary,
+          issuetype: { name: obj.type },
+          labels: [label],
+        };
+        // Populate the optional "Epic Name" custom field on EPIC creates only, when configured.
+        // Avoids HTTP 400 on Server/DC projects that require it; inert when unset.
+        if (obj.kind === 'epic' && EPIC_NAME_FIELD) {
+          fields[EPIC_NAME_FIELD] = obj.summary;
+        }
+        const created = await jiraFetch('POST', '/issue', { fields });
         issueKey = created.key;
         log(`[mirror] jira: created ${obj.type} ${issueKey} for ${obj.id}`);
       }
