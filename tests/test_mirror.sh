@@ -312,6 +312,69 @@ EOF
   fi
   pass "preflight: missing project scope ⇒ non-zero, names gh + scope, no board mutation [preflight_gh_capability_fails_closed:scope]"
 
+  # A fake gh (supported version) that writes its `auth status` output to STDERR (as gh < 2.33
+  # does — cli/cli#7920) while exiting 0. The preflight must capture stdout+stderr and thus SEE
+  # the required scopes on the stderr stream, so scope verification SUCCEEDS and the tool
+  # proceeds PAST the preflight (no scope-missing error). It then reaches the reconcile loop;
+  # this shim returns empty project/issue JSON so that loop runs harmlessly and exits 0.
+  mkdir -p "$T/bin-stderr"
+  cat > "$T/bin-stderr/gh" <<EOF
+#!/bin/sh
+echo "called: \$*" >> "$T/pf-stderr-called"
+case "\$1 \$2" in
+  "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
+  # gh < 2.33 emits the scopes line on STDERR, not stdout (cli/cli#7920):
+  "auth status")        echo "Token scopes: 'project', 'read:org', 'repo'" 1>&2; exit 0 ;;
+  "project view")       echo '{"id":"PID"}' ;;
+  "project field-list") echo '{"fields":[{"id":"FS","name":"Status","options":[{"id":"o","name":"X"}]},{"id":"FE","name":"Epic","options":[]}]}' ;;
+  "project item-list")  echo '{"items":[]}' ;;
+  "issue list")         echo '[]' ;;
+  *)                    echo '{}' ;;
+esac
+exit 0
+EOF
+  chmod +x "$T/bin-stderr/gh"
+  rm -f "$T/pf-stderr-called"
+  # --dry-run keeps this a pure read; success proves the scope check saw the stderr-only scopes.
+  if ! PATH="$T/bin-stderr:$PATH" node "$HPF/tools/sync-board.mjs" --dry-run >"$T/pf-stderr.out" 2>&1; then
+    cat "$T/pf-stderr.out"; fail "preflight rejected a valid login whose gh writes auth status to stderr (gh<2.33 path)"
+  fi
+  grep -qi 'missing required scope' "$T/pf-stderr.out" \
+    && { cat "$T/pf-stderr.out"; fail "stderr-captured scopes were not recognized (scope check saw an empty stream)"; }
+  # No board MUTATION (dry-run + read-only preflight): the shim may see reads, never edits.
+  if [ -f "$T/pf-stderr-called" ]; then
+    grep -Eqi 'project (item-edit|item-add)|issue (create|close|reopen|edit)' "$T/pf-stderr-called" \
+      && { cat "$T/pf-stderr-called"; fail "stderr-auth path made a board mutation under --dry-run"; }
+  fi
+  pass "preflight: gh writes auth status to stderr (gh<2.33) ⇒ stdout+stderr captured, scopes recognized, proceeds [preflight_gh_auth_status_stderr]"
+
+  # A fake gh (supported version) whose token has only `read:project` (NOT the read/write
+  # `project` scope). The bare-`project` requirement must NOT be satisfied by the qualified
+  # `read:project` — the preflight must FAIL CLOSED before any board call, naming the missing
+  # project scope, instead of passing and later failing mid-mutation.
+  mkdir -p "$T/bin-readproject"
+  cat > "$T/bin-readproject/gh" <<EOF
+#!/bin/sh
+echo "called: \$*" >> "$T/pf-readproject-called"
+case "\$1 \$2" in
+  "--version ") echo "gh version 2.62.0 (2024-11-27)" ;;
+  "auth status") echo "Token scopes: 'read:project', 'repo'"; exit 0 ;;
+esac
+exit 0
+EOF
+  chmod +x "$T/bin-readproject/gh"
+  rm -f "$T/pf-readproject-called"
+  if PATH="$T/bin-readproject:$PATH" node "$HPF/tools/sync-board.mjs" >"$T/pf-readproject.out" 2>&1; then
+    fail "preflight passed with only read:project (must fail closed on the bare project scope)"
+  fi
+  grep -qi 'gh' "$T/pf-readproject.out"      || { cat "$T/pf-readproject.out"; fail "read:project error does not name gh"; }
+  grep -qi 'project' "$T/pf-readproject.out" || { cat "$T/pf-readproject.out"; fail "read:project error does not name the missing project scope"; }
+  if [ -f "$T/pf-readproject-called" ]; then
+    grep -Eqi 'project (item-edit|item-add|view)|issue (create|close|reopen|edit)' "$T/pf-readproject-called" \
+      && { cat "$T/pf-readproject-called"; fail "read:project under-scoped gh still made a board query/mutation"; }
+  fi
+  pass "preflight: read:project does NOT satisfy bare project scope ⇒ fails closed, no board mutation [preflight_gh_read_project_fails_closed]"
+
   # 11) gh-ONLY / no-MCP (R1) — a configured run dispatches ONLY to `gh`; neither the tool
   #     source nor the recorded calls mention any MCP transport. (The recording shim from
   #     bin/ answers preflight + returns empty JSON so the reconcile loop runs harmlessly.)

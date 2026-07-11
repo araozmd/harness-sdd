@@ -22,7 +22,7 @@
 // specific org/repo/tool is hard-coded here. Status columns default to the harness status
 // names verbatim (identity map), so the board is not tied to any one team's column naming.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -138,15 +138,19 @@ if (!ghVer || cmp(ghVer, GH_MIN) < 0) {
 }
 // Verify the required auth scopes without mutating anything: `gh auth status` reports the
 // token's scopes. Fail closed if it can't confirm both `project` and `repo` are present.
-let authOut = '';
-try { authOut = execFileSync('gh', ['auth', 'status'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
-catch (e) {
-  const detail = (e && (e.stderr || e.stdout) || '').toString();
+// gh < 2.33 writes `gh auth status` output to STDERR, not stdout (cli/cli#7920), so on the
+// documented minimum (2.31) a SUCCESSFUL status has an empty stdout. Capture BOTH streams and
+// scan their concatenation for the `Token scopes:` line so the scope check works on gh 2.31+
+// regardless of which stream gh uses.
+const authRes = spawnSync('gh', ['auth', 'status'], { encoding: 'utf8' });
+if (authRes.error || authRes.status !== 0) {
+  const detail = (authRes.stderr || authRes.stdout || (authRes.error && authRes.error.message) || '').toString();
   console.error(`[mirror] \`gh\` is not authenticated for GitHub Projects (v2) — ${SCOPE_HINT}.${detail ? `\n${detail.trim()}` : ''}`);
   process.exit(1);
 }
+const authOut = (authRes.stdout || '') + '\n' + (authRes.stderr || '');
 const scopesLine = (authOut.match(/Token scopes:.*$/m) || [''])[0];
-const hasScope = (s) => new RegExp(`['\"]${s}['\"]|(^|[^-])\\b${s}\\b`).test(scopesLine);
+const hasScope = (s) => new RegExp(`['\"]${s}['\"]|(^|[^-:])\\b${s}\\b`).test(scopesLine);
 const missingScopes = ['project', 'repo'].filter((s) => !hasScope(s));
 if (missingScopes.length) {
   console.error(`[mirror] \`gh\` auth is missing required scope(s) for GitHub Projects (v2): ${missingScopes.join(', ')} — ${SCOPE_HINT}.`);
