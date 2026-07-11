@@ -252,12 +252,12 @@
     {
       "id": "E12",
       "title": "Jira board integration (REST + Personal Access Token, no MCP)",
-      "status": "pending",
+      "status": "done",
       "features": [
         {
           "id": "E12-F01",
           "title": "Jira sync via REST API + Personal Access Token (no MCP)",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
