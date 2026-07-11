@@ -28,7 +28,7 @@ exits 0 (the default — no board, no dependency).
 | provider | status | needs |
 |---|---|---|
 | `github-projects` | ✅ implemented | `gh` authed with `project` + `repo` scopes; `mirror.board.{owner,project_number,repo}` |
-| `jira` | ⏳ stub (no-op) | — (recognized; prints "not implemented", exits 0) |
+| `jira` | ✅ implemented (mirror) | Jira **Server/DC** REST + Bearer PAT; `mirror.board.{base_url,project_key}` + a PAT (`JIRA_PAT` env or gitignored `pat_file`) |
 | `azure-boards` | ⏳ stub (no-op) | — (recognized; prints "not implemented", exits 0) |
 
 ```bash
@@ -118,8 +118,9 @@ mirror:
 the concept — "attach the person doing the work to each mirrored item" — applies to any
 board, and each provider maps it to its own field (GitHub Projects → issue **Assignees**;
 Jira → assignee; Monday/Azure → owner/assigned-to). It is **implemented for
-`github-projects` today**; the stub providers ignore it until wired (see *Implementing a
-stub provider* below).
+`github-projects` today**; it is a recognized **no-op for `jira`** in F01 (`owner →
+assignee` is deferred to E10-F03 — see the *jira contract* above), and the remaining stub
+providers ignore it until wired (see *Implementing a stub provider* below).
 
 For `github-projects`, set it to a GitHub login and the mirror fills the issue's
 **Assignees** field alongside Status/Epic. Assignment is **status-gated**: a feature's issue
@@ -154,6 +155,79 @@ whether the item is still in flight or has regressed — instead of leaving it b
 Corollary: don't hand-assign people to mirrored items; the mirror is the source of truth for
 that field and will reconcile them away.
 
+## jira contract
+
+The `jira` provider is an **implemented** mirror (not a stub): a one-way projection of
+`state/tasks.json` onto a Jira project.
+
+### Transport & supported surface (pinned)
+
+- **Supported Jira: Server / Data Center only (F01).** Auth is a **Server/DC Personal
+  Access Token (PAT)** sent as an `Authorization: Bearer <PAT>` header — the IT-approved
+  scripting path. **Jira Cloud** (which authenticates with Basic `email:api-token`) is
+  **out of F01 scope**, documented as a future extension (would add a
+  `mirror.board.auth: bearer|basic` selector and a Basic header path).
+- **Transport: the Jira REST API ONLY — never MCP.** Every Jira call is an HTTPS request to
+  the configured `base_url` `/rest/api/2/…` endpoint (search / create / transition),
+  authenticated by the Bearer PAT. No MCP server is used or required, so the mirror works
+  inside MCP-restricted enterprises.
+- **One-way invariant.** The sync is strictly one-way: `state/tasks.json` → Jira. Agents
+  never **read** Jira to decide work; `tasks.json` stays the single source of truth. Nothing
+  here writes back into `tasks.json` or makes the mirror bidirectional.
+
+### The PAT — `JIRA_PAT` env / gitignored `pat_file` (never committed)
+
+The PAT is resolved from, in order (**first hit wins**):
+
+1. the **`JIRA_PAT`** environment variable (precedence when both are present), else
+2. the gitignored **`pat_file`** (default `.harness/jira.pat`, trimmed of a trailing
+   newline).
+
+If neither resolves, the tool exits **non-zero** with an actionable message naming
+`JIRA_PAT` and the `pat_file` path — **before** any Jira network call. The PAT value is
+**never** written into `state/tasks.json`, `harness.config.yaml`, logs, or any committed
+file; only the *path* (`pat_file`) and the env-var *name* ever appear. The installer
+append-seeds the default `pat_file` path into `.gitignore` so it can't be committed by
+default.
+
+### Config + field / status mapping
+
+```yaml
+mirror:
+  board:
+    provider: jira
+    base_url: https://jira.acme.internal   # Jira Server/DC base URL (required)
+    project_key: HAR                        # target Jira project key (required)
+    pat_file: .harness/jira.pat             # gitignored PAT file; JIRA_PAT env wins
+    issue_type_map:                         # optional — defaults epic→Epic, feature→Story
+      epic: "Epic"
+      feature: "Story"
+    status_map:                             # optional — harness status → Jira workflow state
+      pending: "To Do"                      # (identity default; nothing hard-coded)
+      in-review: "In Review"
+```
+
+- **Issue types (configurable).** Harness **epics** map to the Jira **Epic** issue type and
+  **features** to the Jira **Story** issue type by default; both are overridable via
+  `mirror.board.issue_type_map` (e.g. `feature: Task`). Nothing is hard-coded.
+- **Status → workflow (configurable).** Each feature's `status` maps to a Jira workflow
+  state via the provider-neutral `mirror.board.status_map` (identity default), and the
+  reconciled issue is **transitioned** to the mapped state. Nothing about the workflow-state
+  names is hard-coded.
+- **Idempotent reconcile.** Each epic/feature maps to exactly one Jira issue, matched by a
+  stable `harness:<id>` label (JQL `project = <KEY> AND labels = harness:<id>`). A re-run
+  finds the existing issue and transitions it in place rather than creating a duplicate.
+- **`assignee` is a no-op for `jira` in F01.** The provider-neutral `assignee` knob is
+  recognized but **deferred to E10-F03** (`owner → assignee` projection); F01 projects
+  **status only** and never wires Jira's assignee field.
+- **`--dry-run`** prints the intended Jira changes (would-create / would-transition) and
+  mutates nothing — neither Jira nor `tasks.json`.
+
+**Fail-closed ordering.** Config (`base_url`/`project_key`) is validated and the PAT is
+resolved **before** the first network call, so a misconfigured or unauthenticated run never
+half-mutates Jira. A Jira **401/403** exits non-zero with an actionable message naming the
+PAT/scope requirement and **does not echo the PAT**.
+
 ## Driving it from the post-write hook
 
 A mirror is most useful run automatically after every status change. Wire it through the
@@ -170,10 +244,11 @@ reported as a sync gap and never blocks feature work.
 
 ## Implementing a stub provider
 
-To wire `jira`, `azure-boards`, or any other tracker (Monday, a custom tool, …), implement
-its branch in `tools/sync-board.mjs` against that tracker's CLI/API (`jira`/REST,
-`az boards`, …), reading the same `tasks.json` flat list and writing one work item per
-feature with the Status mapping above. Honor the same provider-neutral config keys where the
+To wire `azure-boards` or any other tracker (Monday, a custom tool, …) — `jira` is already
+implemented (see the *jira contract* above) — implement its branch in `tools/sync-board.mjs`
+against that tracker's CLI/API (`az boards`, …), reading the same `tasks.json` flat list and
+writing one work item per feature with the Status mapping above. Honor the same
+provider-neutral config keys where the
 tracker has an equivalent: `status_map` → its columns/states, and `assignee` → its
 assignee/owner field (status-gated the same way — set once work starts, cleared when not
 started). Keep it **one-way and idempotent** — never let the board write back into

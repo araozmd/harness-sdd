@@ -4,6 +4,44 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.30.0] — 2026-07-10
+
+### Added — ✨ Jira mirror completed via REST API + Bearer PAT, no MCP (E12-F01)
+- **Filled the recognized `jira` stub** in `tools/sync-board.mjs` (rather than forking a
+  second Jira code path): the shared `jira`/`azure-boards` stub is split so `azure-boards`
+  stays a recognized no-op stub while `jira` runs a real one-way projection of
+  `state/tasks.json` onto a Jira **Server / Data Center** project. Transport is the **Jira
+  REST API only** (`/rest/api/2/…`, dependency-free built-in `fetch`), authenticated with an
+  `Authorization: Bearer <PAT>` header — **never MCP**, so it works inside MCP-restricted
+  enterprises. Jira **Cloud** (Basic auth) is out of F01 scope, documented as a future
+  extension.
+- **PAT hygiene** — the PAT is resolved from the **`JIRA_PAT`** env var (precedence) else a
+  gitignored **`pat_file`** (default `.harness/jira.pat`, trimmed); it is **never** written to
+  `state/tasks.json`, `harness.config.yaml`, logs, or any committed file. Config
+  (`base_url`/`project_key`) is validated and the PAT resolved **before** any network call
+  (fail-closed); a missing PAT or missing config exits non-zero naming the requirement, and a
+  Jira **401/403** exits non-zero with an actionable, PAT-free message.
+- **Configurable mapping** — harness epics → Jira **Epic** and features → **Story** by
+  default, overridable via `mirror.board.issue_type_map`; feature status → Jira workflow state
+  via the provider-neutral `mirror.board.status_map` (identity default), transitioned in
+  place. Reconcile is **idempotent** (each feature matched by a stable `harness:<id>` label —
+  a re-run updates rather than duplicating). `assignee` is a recognized **no-op for `jira`**
+  in F01 (owner→assignee deferred to E10-F03). `--dry-run` prints intents and mutates nothing.
+- **Config seed + gitignore** — `harness-install.sh` seeds the inert Jira `mirror.board` keys
+  (`base_url`/`project_key`/`pat_file`/`issue_type_map`) and append-seeds the default PAT-file
+  path into `.harness/.gitignore` so a provisioned PAT can never be committed by default;
+  `tests/test_install.sh` asserts the executable tool ships and the PAT file is gitignored.
+- **Docs pinned** — `store/board-mirror.md` gains a **jira contract** section (Server/DC REST
+  + Bearer PAT, Cloud out of scope, `JIRA_PAT`/`pat_file` precedence, issue-type + status
+  maps, REST-only / no-MCP, one-way, assignee deferral); `store/jira.md` cross-references it
+  and clarifies the implemented **mirror** vs the still-stub **backend**.
+- **Regression guardrails** — `tests/test_mirror.sh` gains behavioral `jira` cases against a
+  stubbed recording REST endpoint (REST-only / no-MCP, single code path, Bearer PAT header,
+  env/file PAT precedence, fail-closed missing-PAT/missing-config, idempotent reconcile,
+  issue-type + status maps, assignee no-op, one-way, `--dry-run`, 401/403, PAT-never-leaks,
+  docs pin). Assertions are behavior/shape only — no exact-VERSION pin and no diff of
+  DO-NOT-TOUCH files against `main`.
+
 ## [0.29.0] — 2026-07-10
 
 ### Added — ✨ GitHub Projects (v2) mirror completed via `gh` CLI, no MCP (E11-F01)

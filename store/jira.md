@@ -4,9 +4,14 @@ This adapter is **defined but not implemented**. The contract below is fixed so 
 drops in without re-architecting anything. Do not set `tasks: jira` in
 `harness.config.yaml` until the MCP wiring section is completed.
 
-> **Backend, not mirror.** This makes Jira the **source of truth** (`next()` queries Jira).
-> If instead you want to keep local `tasks.json` authoritative and just *project* it onto a
-> Jira board, that's a **mirror** — see [`board-mirror.md`](./board-mirror.md), not this file.
+> **Backend, not mirror.** This file documents the Jira **store backend** — where Jira is
+> the **source of truth** (`next()` queries Jira). It is still a **stub** (not wired). If
+> instead you want to keep local `tasks.json` authoritative and just *project* (mirror) it
+> onto a Jira board **one-way**, that is the **mirror** `jira` provider — which **is
+> implemented** (Jira Server/DC REST API + Bearer PAT, no MCP). See
+> [`board-mirror.md`](./board-mirror.md) → *jira contract*, **not this file**. Don't confuse
+> the two: the implemented `mirror.board.provider: jira` is the mirror; the `tasks: jira`
+> backend below remains a stub.
 
 ## Intended mapping
 | harness concept | Jira object |

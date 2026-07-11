@@ -15,7 +15,11 @@
 //                      feature is in-progress/in-review/done (cleared when not started).
 //                      `assignee: "@me"` resolves dynamically to the authed `gh` user so
 //                      this shared config never hard-codes one person.
-//   jira            -> STUB (recognized, not implemented yet — see store/board-mirror.md).
+//   jira            -> IMPLEMENTED (Jira Server/Data Center REST API + Bearer PAT, no MCP).
+//                      Needs `mirror.board.{base_url,project_key}` and a PAT from the
+//                      JIRA_PAT env var (precedence) or the gitignored pat_file
+//                      (default .harness/jira.pat). Status only; assignee is a no-op for
+//                      jira in F01 (deferred to E10). See store/board-mirror.md.
 //   azure-boards    -> STUB (recognized, not implemented yet — see store/board-mirror.md).
 //
 // All provider config lives in harness.config.yaml under `mirror.board` — nothing about a
@@ -23,9 +27,9 @@
 // names verbatim (identity map), so the board is not tied to any one team's column naming.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, isAbsolute } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = resolve(HERE, '../harness.config.yaml');   // .harness/harness.config.yaml in a consumer
@@ -93,11 +97,22 @@ if (provider === '' || provider === 'none') {
   log('[mirror] board mirror disabled (mirror.board.provider is empty) — nothing to do.');
   process.exit(0);
 }
-if (provider === 'jira' || provider === 'azure-boards') {
+if (provider === 'azure-boards') {
   log(`[mirror] provider '${provider}' is recognized but NOT IMPLEMENTED yet (stub).`);
   log('[mirror] tasks.json is unchanged. See store/board-mirror.md to implement it.');
   process.exit(0);   // inert no-op: a known-but-unwired provider must never block the loop
 }
+
+// ── provider: jira ───────────────────────────────────────────────────────────
+// One-way MIRROR to a Jira Server / Data Center project via the REST API + a Bearer PAT.
+// NO MCP transport of any kind. Status only in F01 (assignee is a recognized no-op for
+// jira, deferred to E10). Config is validated and the PAT resolved BEFORE any network call
+// (fail-closed), so a misconfigured / unauthenticated run never half-mutates Jira.
+if (provider === 'jira') {
+  await runJira(cfgText);
+  process.exit(0);
+}
+
 if (provider !== 'github-projects') {
   console.error(`[mirror] unknown provider '${provider}'. Use one of: none, github-projects, jira, azure-boards.`);
   process.exit(1);
@@ -338,3 +353,149 @@ for (const f of features) {
   log(`[mirror]   #${issue.number} ${f.title}  ->  ${STATUS[f.status]?.col}${shouldClose ? ' (closed)' : ''}`);
 }
 log(DRY ? '[mirror] dry-run complete — nothing changed.' : '[mirror] board synced.');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// provider: jira — REST + Bearer PAT (Server / Data Center). NO MCP. Status only.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Resolve the PAT: JIRA_PAT env (precedence) else the gitignored pat_file (trimmed).
+// Returns the token string, or null if neither is available. The VALUE is never logged.
+function resolveJiraPat(patFile) {
+  const env = process.env.JIRA_PAT;
+  if (env && env.trim() !== '') return env.trim();
+  try {
+    if (patFile && existsSync(patFile)) {
+      const v = readFileSync(patFile, 'utf8').replace(/\r?\n$/, '').trim();
+      if (v !== '') return v;
+    }
+  } catch { /* unreadable file ⇒ treated as absent below */ }
+  return null;
+}
+
+async function runJira(cfgText) {
+  // --- config (validated BEFORE any network call / PAT read) ------------------
+  const BASE_URL = (yamlGet(cfgText, ['mirror', 'board', 'base_url']) || '').replace(/\/+$/, '');
+  const PROJECT_KEY = yamlGet(cfgText, ['mirror', 'board', 'project_key']) || '';
+  const missing = [];
+  if (!BASE_URL) missing.push('base_url');
+  if (!PROJECT_KEY) missing.push('project_key');
+  if (missing.length) {
+    console.error(`[mirror] provider jira needs mirror.board.${missing.length > 1 ? `{${missing.join(',')}}` : missing[0]} set in harness.config.yaml (Jira Server/DC base URL + project key) — no Jira request was made.`);
+    process.exit(1);
+  }
+
+  // --- PAT resolve + fail-closed preflight (before ANY network call) ----------
+  const rawPatFile = yamlGet(cfgText, ['mirror', 'board', 'pat_file']) || '.harness/jira.pat';
+  const patFile = isAbsolute(rawPatFile) ? rawPatFile : resolve(HERE, '..', rawPatFile);
+  const PAT = resolveJiraPat(patFile);
+  if (!PAT) {
+    console.error(`[mirror] provider jira has no PAT — set the JIRA_PAT environment variable or create the gitignored PAT file '${rawPatFile}'. No Jira request was made. (The PAT value is never printed, committed, or written to tasks.json.)`);
+    process.exit(1);
+  }
+
+  // --- issue-type + status maps (configurable, not hard-coded) ----------------
+  // epic → Epic, feature → Story by default; overridable via mirror.board.issue_type_map.
+  const issueTypeMap = yamlGetMap(cfgText, ['mirror', 'board', 'issue_type_map']);
+  const EPIC_TYPE = issueTypeMap.epic || 'Epic';
+  const FEATURE_TYPE = issueTypeMap.feature || 'Story';
+  // feature status → Jira workflow state via the provider-neutral status_map (identity default).
+  const jiraStatusMap = yamlGetMap(cfgText, ['mirror', 'board', 'status_map']);
+  const mapStatus = (s) => jiraStatusMap[s] || s;
+  // assignee is a RECOGNIZED NO-OP for jira in F01 (status only; owner→assignee deferred to
+  // E10-F03). We read it only to report the deferral; it is never sent to Jira.
+  const assigneeCfg = yamlGet(cfgText, ['mirror', 'board', 'assignee']) || '';
+  if (assigneeCfg) {
+    log(`[mirror] jira: mirror.board.assignee is set but is a NO-OP for jira in F01 (owner→assignee deferred to E10-F03) — not wiring Jira's assignee field.`);
+  }
+
+  // --- REST transport: HTTPS to base_url with Authorization: Bearer <PAT> ------
+  // Dependency-free: Node's built-in fetch. NO MCP, no new npm package. The PAT is only
+  // ever placed in the Authorization header — never logged, never persisted.
+  const API = `${BASE_URL}/rest/api/2`;
+  const authHeader = () => ({ Authorization: `Bearer ${PAT}` });
+  async function jiraFetch(method, path, body) {
+    const headers = { ...authHeader(), Accept: 'application/json' };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const res = await fetch(`${API}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    if (res.status === 401 || res.status === 403) {
+      // Fail closed with an actionable, PAT-FREE message (never echo the token).
+      console.error(`[mirror] Jira returned HTTP ${res.status} (authentication/authorization failed). Check that the PAT (JIRA_PAT env or pat_file) is valid and has permission on project ${PROJECT_KEY} at ${BASE_URL}. The PAT value is not shown.`);
+      process.exit(1);
+    }
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      console.error(`[mirror] Jira REST ${method} ${path} failed: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 300)}` : ''}`);
+      process.exit(1);
+    }
+    const text = await res.text();
+    return text ? JSON.parse(text) : {};
+  }
+
+  // --- load + flatten tasks.json (READ ONLY — one-way; never written back) ----
+  const data = JSON.parse(readFileSync(TASKS_PATH, 'utf8'));
+  const epics = data.epics.map((e) => ({
+    id: e.id, summary: `${e.id} — ${e.title}`, kind: 'epic', type: EPIC_TYPE, status: undefined,
+  }));
+  const features = data.epics.flatMap((e) =>
+    (e.features || []).map((f) => ({
+      id: f.id, summary: `${f.id} — ${f.title}`, kind: 'feature', type: FEATURE_TYPE, status: f.status,
+    })),
+  );
+  const objects = [...epics, ...features];
+  log(`[mirror] jira: ${epics.length} epics, ${features.length} features -> ${BASE_URL} project ${PROJECT_KEY}${DRY ? ' (dry-run)' : ''}`);
+
+  // Reconcile match key: a stable per-id label `harness:<id>` stored on the issue, searched
+  // via JQL. Idempotent — a re-run finds the existing issue and transitions it in place.
+  const labelFor = (id) => `harness:${id}`;
+
+  for (const obj of objects) {
+    const label = labelFor(obj.id);
+    // find-or-create by the stable feature-id label (idempotent reconcile).
+    const jql = `project = ${PROJECT_KEY} AND labels = ${label}`;
+    const found = await jiraFetch('GET', `/search?jql=${encodeURIComponent(jql)}&fields=status&maxResults=1`);
+    let issueKey = (found.issues && found.issues[0] && found.issues[0].key) || null;
+
+    if (!issueKey) {
+      if (DRY) {
+        log(`[dry-run] would create ${obj.type} issue for ${obj.id}: "${obj.summary}" (label ${label})`);
+      } else {
+        const created = await jiraFetch('POST', '/issue', {
+          fields: {
+            project: { key: PROJECT_KEY },
+            summary: obj.summary,
+            issuetype: { name: obj.type },
+            labels: [label],
+          },
+        });
+        issueKey = created.key;
+        log(`[mirror] jira: created ${obj.type} ${issueKey} for ${obj.id}`);
+      }
+    } else {
+      log(`[mirror] jira: reconciling existing ${issueKey} for ${obj.id} (no duplicate)`);
+    }
+
+    // Transition status — features only (epics carry no feature status/column). The target
+    // workflow-state name comes from status_map (identity default); nothing hard-coded.
+    if (obj.kind === 'feature') {
+      const wantState = mapStatus(obj.status);
+      if (DRY) {
+        log(`[dry-run] would transition ${issueKey || `<${obj.id}>`} -> "${wantState}"`);
+      } else if (issueKey) {
+        const tr = await jiraFetch('GET', `/issue/${issueKey}/transitions`);
+        const t = (tr.transitions || []).find((x) => x.to && x.to.name === wantState)
+          || (tr.transitions || []).find((x) => x.name === wantState);
+        if (t) {
+          await jiraFetch('POST', `/issue/${issueKey}/transitions`, { transition: { id: t.id } });
+          log(`[mirror] jira: ${issueKey} -> "${wantState}"`);
+        } else {
+          log(`[mirror] jira: ${issueKey} already at / has no transition to "${wantState}" (left as-is)`);
+        }
+      }
+    }
+  }
+  log(DRY ? '[mirror] jira dry-run complete — nothing changed.' : '[mirror] jira board synced.');
+}

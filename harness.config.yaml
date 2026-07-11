@@ -96,14 +96,24 @@ telemetry:
 # see store/README.md "Mirrors vs backends".
 mirror:
   board:
-    # ""|none disables (default). github-projects is IMPLEMENTED; jira and azure-boards
-    # are recognized STUBS (no-op until implemented — see store/board-mirror.md).
+    # ""|none disables (default). github-projects and jira are IMPLEMENTED; azure-boards
+    # is a recognized STUB (no-op until implemented — see store/board-mirror.md).
     provider: ""
 
     # github-projects provider config (ignored by other providers):
     owner: ""             # org/user login that owns the Project + the issues repo
     project_number: 0     # the GitHub Project number (e.g. 1)
     repo: ""              # owner/repo that holds the mirrored issues (e.g. my-org/specs)
+
+    # jira provider config (Jira Server / Data Center; ignored by other providers). Auth is
+    # a Bearer PAT read from the JIRA_PAT env var (precedence) OR the gitignored pat_file
+    # below — the PAT is NEVER stored here. REST API only, no MCP. See store/board-mirror.md.
+    base_url: ""              # jira: Jira Server/DC base URL (e.g. https://jira.acme.internal)
+    project_key: ""           # jira: target Jira project key (e.g. HAR)
+    pat_file: ".harness/jira.pat"   # jira: path to the gitignored PAT file; JIRA_PAT env wins
+    # issue_type_map:         # jira: harness concept -> Jira issue type (omit ⇒ Epic/Story)
+    #   epic: "Epic"
+    #   feature: "Story"
 
     # Optional: GitHub login assigned to a feature's issue once work has STARTED
     # (in-progress/in-review/done); cleared for not-started states (pending/spec-ready).

@@ -84,8 +84,9 @@ if command -v node >/dev/null 2>&1; then
   [ ! -f "$T/gh-called" ] || { cat "$T/gh-called"; fail "inert default shelled out to gh (must be a pure no-op)"; }
   pass "empty provider ⇒ no-op, never calls gh [inert_default_noop]"
 
-  # 2) STUB providers — recognized, no-op exit 0, no gh call.
-  for prov in jira azure-boards; do
+  # 2) STUB providers — recognized, no-op exit 0, no gh call. (jira is IMPLEMENTED as of
+  #    E12-F01 and exercised in the dedicated jira block below; azure-boards stays a stub.)
+  for prov in azure-boards; do
     HS="$T/h-$prov"; mk_harness "$HS" "mirror:
   board:
     provider: \"$prov\""
@@ -94,7 +95,7 @@ if command -v node >/dev/null 2>&1; then
     printf '%s' "$OUT" | grep -qi "not implemented" || { echo "$OUT"; fail "$prov stub did not say not implemented"; }
     [ ! -f "$T/gh-called" ] || fail "$prov stub shelled out to gh"
   done
-  pass "jira + azure-boards stubs no-op, never call gh [stub_providers_noop]"
+  pass "azure-boards stub no-ops, never calls gh [stub_providers_noop]"
 
   # 3) UNKNOWN provider ⇒ non-zero exit (clear error, no silent pass).
   HU="$T/h-unknown"; mk_harness "$HU" 'mirror:
@@ -506,12 +507,319 @@ EOF
   for k in provider owner project_number repo status_map assignee; do
     grep -q "'$k'" "$TOOL" || fail "tool no longer reads the existing mirror.board key '$k'"
   done
+  # E12-F01 adds the jira-scoped keys (base_url/project_key/pat_file/issue_type_map) under
+  # the SAME mirror.board block — recognized additions, not a fork.
+  for k in base_url project_key pat_file issue_type_map; do
+    grep -q "'$k'" "$TOOL" || fail "tool does not read the jira mirror.board key '$k'"
+  done
   # No stray mirror.board key beyond the known set, and no committed token/secret literal.
   UNKNOWN="$(grep -oE "\['mirror', 'board', '[a-z_]+'\]" "$TOOL" | grep -oE "'[a-z_]+'\]" | sed "s/[]']//g" \
-    | grep -vE '^(provider|owner|project_number|repo|status_map|assignee)$' || true)"
+    | grep -vE '^(provider|owner|project_number|repo|status_map|assignee|base_url|project_key|pat_file|issue_type_map)$' || true)"
   [ -z "$UNKNOWN" ] || fail "tool introduced a new mirror.board key: $UNKNOWN"
   grep -Eqi 'ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' "$TOOL" && fail "tool contains a committed GitHub token literal"
   pass "config read from existing mirror.board shape; no new key/secret [no_new_config_key]"
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # JIRA provider (E12-F01) — REST + Bearer PAT (Server/DC), NO MCP, status only.
+  # Exercised against a STUBBED Jira REST endpoint: a local recording HTTP server that
+  # logs every request (method, path, Authorization header, body) and returns canned JSON.
+  # We assert on the RECORDED calls (dispatch/idempotency/headers), never a live Jira.
+  # A unique SENTINEL PAT value is used so we can grep for its ABSENCE in committed
+  # artifacts + tool output (secret hygiene).
+  # ══════════════════════════════════════════════════════════════════════════════
+  SENTINEL_PAT='SENTINELpat_DEADBEEF_do_not_leak_123456'
+
+  # A dependency-free Node recording server. Behavior is controlled via env:
+  #   J_REC   — request log file (one line per request: "METHOD PATH auth=<hdr>")
+  #   J_BODY  — request-body log file (JSON bodies, one per line)
+  #   J_MODE  — normal | existing | auth401 | auth403
+  #   J_PORTFILE — file to write the bound port to (server binds 127.0.0.1:0)
+  cat > "$T/jira-stub.mjs" <<'EOF'
+import { createServer } from 'node:http';
+import { writeFileSync, appendFileSync } from 'node:fs';
+const REC = process.env.J_REC, BODYLOG = process.env.J_BODY;
+const MODE = process.env.J_MODE || 'normal';
+const PORTFILE = process.env.J_PORTFILE;
+const srv = createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => { body += c; });
+  req.on('end', () => {
+    appendFileSync(REC, `${req.method} ${req.url} auth=${req.headers['authorization'] || ''}\n`);
+    if (body) appendFileSync(BODYLOG, body.replace(/\n/g, ' ') + '\n');
+    const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+    if (MODE === 'auth401') return send(401, { errorMessages: ['auth failed'] });
+    if (MODE === 'auth403') return send(403, { errorMessages: ['forbidden'] });
+    const u = req.url.split('?')[0];
+    if (req.method === 'GET' && u === '/rest/api/2/search') {
+      if (MODE === 'existing') return send(200, { issues: [{ key: 'HAR-1', fields: { status: { name: 'pending' } } }] });
+      return send(200, { issues: [] });
+    }
+    if (req.method === 'POST' && u === '/rest/api/2/issue') return send(201, { key: 'HAR-NEW' });
+    if (req.method === 'GET' && /\/rest\/api\/2\/issue\/[^/]+\/transitions$/.test(u)) {
+      return send(200, { transitions: [
+        { id: '11', name: 'To pending', to: { name: 'pending' } },
+        { id: '21', name: 'Go review', to: { name: 'Custom Review' } },
+        { id: '31', name: 'To in-progress', to: { name: 'in-progress' } },
+      ] });
+    }
+    if (req.method === 'POST' && /\/rest\/api\/2\/issue\/[^/]+\/transitions$/.test(u)) return send(204, {});
+    return send(200, {});
+  });
+});
+srv.listen(0, '127.0.0.1', () => { writeFileSync(PORTFILE, String(srv.address().port)); });
+EOF
+
+  # start_jira_stub <mode> <recfile> <bodyfile> — starts the stub, echoes its base_url.
+  # The server's PID is written to $T/jira-stub.pid so stop_jira_stub (running in the PARENT
+  # shell, not the command-substitution subshell) can kill it reliably.
+  start_jira_stub() {
+    _mode="$1"; _rec="$2"; _bodyf="$3"
+    : > "$_rec"; : > "$_bodyf"
+    _pf="$T/jira-port"; rm -f "$_pf"
+    # Redirect the server's stdio to a file so a backgrounded server never holds open the
+    # command-substitution pipe of the `OUT="$(start_jira_stub …)"` caller (which would hang).
+    J_REC="$_rec" J_BODY="$_bodyf" J_MODE="$_mode" J_PORTFILE="$_pf" node "$T/jira-stub.mjs" >"$T/jira-stub.log" 2>&1 &
+    echo $! > "$T/jira-stub.pid"
+    # wait for the port file
+    _i=0; while [ ! -s "$_pf" ] && [ "$_i" -lt 50 ]; do sleep 0.1; _i=$((_i+1)); done
+    [ -s "$_pf" ] || { kill "$(cat "$T/jira-stub.pid" 2>/dev/null)" 2>/dev/null; fail "jira stub server did not start"; }
+    echo "http://127.0.0.1:$(cat "$_pf")"
+  }
+  stop_jira_stub() { [ -f "$T/jira-stub.pid" ] && kill "$(cat "$T/jira-stub.pid")" 2>/dev/null; rm -f "$T/jira-stub.pid"; return 0; }
+
+  # mk_jira <dir> <base_url> <extra-board-yaml>  — a .harness layout with a jira mirror.
+  mk_jira() {
+    _h="$1"; _url="$2"; _extra="$3"
+    mkdir -p "$_h/tools" "$_h/state"
+    cp "$TOOL" "$_h/tools/sync-board.mjs"
+    printf '{"epics":[{"id":"E01","title":"Demo","features":[{"id":"E01-F01","title":"X","status":"in-progress"}]}]}\n' > "$_h/state/tasks.json"
+    {
+      printf 'store:\n  tasks: local\nmirror:\n  board:\n    provider: "jira"\n'
+      printf '    base_url: "%s"\n    project_key: "HAR"\n' "$_url"
+      printf '%s' "$_extra"
+    } > "$_h/harness.config.yaml"
+  }
+
+  # ── R1 — configured jira run projects via Jira REST ONLY, no MCP transport ──
+  JR="$T/jira-rec-r1"; JB="$T/jira-body-r1"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ1="$T/hj-r1"; mk_jira "$HJ1" "$URL" '    pat_file: "'"$HJ1"'/pat"
+'
+  printf '%s' "$SENTINEL_PAT" > "$HJ1/pat"
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="" node "$HJ1/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira run errored"; }
+  stop_jira_stub
+  [ -s "$JR" ] || fail "configured jira run made no REST call to the stub endpoint"
+  grep -q '/rest/api/2/' "$JR" || { cat "$JR"; fail "jira run did not hit a Jira REST /rest/api/2/ endpoint"; }
+  # No MCP transport anywhere in the tool CODE (strip comments), nor in the recorded calls.
+  grep -vE '^\s*(//|#|\*)' "$TOOL" | grep -qi 'mcp' && fail "tool code references an MCP transport (jira must be REST-only)"
+  grep -qi 'mcp' "$JR" && { cat "$JR"; fail "jira run dispatched to a non-REST MCP transport"; }
+  pass "configured jira run projects via Jira REST only, never MCP [jira_rest_only_no_mcp]"
+
+  # ── R2 — exactly one jira code path (the single mirror tool's jira branch) ──
+  N_JIMPL="$(grep -rlF "'jira'" "$ROOT/tools" | wc -l | tr -d ' ')"
+  [ "$N_JIMPL" = "1" ] || { grep -rlF "'jira'" "$ROOT/tools"; fail "expected exactly one jira code path in tools/, found $N_JIMPL"; }
+  grep -q "provider === 'jira'" "$TOOL" || fail "the single tool does not carry the jira provider branch"
+  pass "exactly one jira code path (the single mirror tool) [single_jira_codepath]"
+
+  # ── R5 — auth is Server/DC Bearer PAT header (not Cloud Basic) ──
+  JR="$T/jira-rec-r5"; JB="$T/jira-body-r5"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ5="$T/hj-r5"; mk_jira "$HJ5" "$URL" ''
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ5/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira bearer run errored"; }
+  stop_jira_stub
+  grep -q "auth=Bearer $SENTINEL_PAT" "$JR" || { fail "jira request did not carry an Authorization: Bearer <PAT> header"; }
+  grep -qi 'auth=Basic' "$JR" && { cat "$JR"; fail "jira built a Cloud Basic auth header (must be Bearer PAT in F01)"; }
+  pass "jira authenticates with a Server/DC Bearer PAT header, never Basic [jira_bearer_pat_header]"
+
+  # ── R6 — PAT from JIRA_PAT env (precedence) else gitignored pat_file ──
+  # env precedence: env and pat_file hold DIFFERENT sentinels; the request uses the env one.
+  JR="$T/jira-rec-r6e"; JB="$T/jira-body-r6e"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  ENV_PAT="ENVpat_wins_9999"; FILE_PAT="FILEpat_loses_0000"
+  HJ6="$T/hj-r6e"; mk_jira "$HJ6" "$URL" '    pat_file: "'"$HJ6"'/pat"
+'
+  printf '%s' "$FILE_PAT" > "$HJ6/pat"
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$ENV_PAT" node "$HJ6/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira env-precedence run errored"; }
+  stop_jira_stub
+  grep -q "auth=Bearer $ENV_PAT" "$JR"  || { cat "$JR"; fail "JIRA_PAT env did not take precedence over pat_file"; }
+  grep -q "auth=Bearer $FILE_PAT" "$JR" && { cat "$JR"; fail "pat_file value used despite JIRA_PAT env being set (env must win)"; }
+  pass "JIRA_PAT env takes precedence over pat_file [jira_pat_env_precedence]"
+
+  # file fallback: JIRA_PAT unset ⇒ the request uses the (trimmed) pat_file value.
+  JR="$T/jira-rec-r6f"; JB="$T/jira-body-r6f"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ6F="$T/hj-r6f"; mk_jira "$HJ6F" "$URL" '    pat_file: "'"$HJ6F"'/pat"
+'
+  printf '%s\n' "$FILE_PAT" > "$HJ6F/pat"   # trailing newline must be trimmed
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="" node "$HJ6F/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira file-fallback run errored"; }
+  stop_jira_stub
+  grep -q "auth=Bearer $FILE_PAT" "$JR" || { cat "$JR"; fail "pat_file fallback PAT (trimmed) was not used when JIRA_PAT unset"; }
+  pass "pat_file used (trimmed) when JIRA_PAT unset [jira_pat_file_fallback]"
+
+  # ── R7 — no PAT resolvable ⇒ non-zero, names JIRA_PAT + pat_file, no network call ──
+  JR="$T/jira-rec-r7"; JB="$T/jira-body-r7"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ7="$T/hj-r7"; mk_jira "$HJ7" "$URL" '    pat_file: "'"$HJ7"'/does-not-exist"
+'
+  if PATH="$T/bin:$PATH" JIRA_PAT="" node "$HJ7/tools/sync-board.mjs" >"$T/r7.out" 2>&1; then
+    stop_jira_stub; fail "jira with no PAT should exit non-zero"
+  fi
+  stop_jira_stub
+  grep -q 'JIRA_PAT' "$T/r7.out"        || { cat "$T/r7.out"; fail "no-PAT error does not name JIRA_PAT"; }
+  grep -q 'does-not-exist' "$T/r7.out"  || { cat "$T/r7.out"; fail "no-PAT error does not name the pat_file path"; }
+  [ ! -s "$JR" ] || { cat "$JR"; fail "no-PAT path made a Jira network call (must fail closed BEFORE any request)"; }
+  pass "missing PAT fails closed, names JIRA_PAT + pat_file, no network call [jira_missing_pat_fails_closed]"
+
+  # ── R9 — missing base_url/project_key ⇒ non-zero, names key, no network call ──
+  # (No base_url ⇒ no endpoint to hit; assert it errors naming the key before any request.)
+  HJ9="$T/hj-r9"; mkdir -p "$HJ9/tools" "$HJ9/state"
+  cp "$TOOL" "$HJ9/tools/sync-board.mjs"
+  printf '{"epics":[{"id":"E01","title":"Demo","features":[{"id":"E01-F01","title":"X","status":"pending"}]}]}\n' > "$HJ9/state/tasks.json"
+  printf 'store:\n  tasks: local\nmirror:\n  board:\n    provider: "jira"\n    project_key: "HAR"\n' > "$HJ9/harness.config.yaml"
+  if PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ9/tools/sync-board.mjs" >"$T/r9.out" 2>&1; then
+    fail "jira with no base_url should exit non-zero"
+  fi
+  grep -q 'base_url' "$T/r9.out" || { cat "$T/r9.out"; fail "misconfig error does not name the missing base_url key"; }
+  pass "missing base_url errors before any network call [jira_misconfig_errors]"
+
+  # ── R3 — re-run reconciles by feature-id key, creates NO duplicate issue ──
+  JR="$T/jira-rec-r3"; JB="$T/jira-body-r3"
+  URL="$(start_jira_stub existing "$JR" "$JB")"   # search returns an EXISTING issue for the feature
+  HJ3="$T/hj-r3"; mk_jira "$HJ3" "$URL" ''
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ3/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira reconcile run errored"; }
+  stop_jira_stub
+  grep -Eq 'POST /rest/api/2/issue( |$|\?)' "$JR" && { cat "$JR"; fail "re-run CREATED a duplicate issue for an already-mapped feature"; }
+  grep -Eq 'POST /rest/api/2/issue/[^/]+/transitions' "$JR" || { cat "$JR"; fail "reconcile did not transition the existing issue"; }
+  pass "re-run reconciles existing issue, no duplicate create [jira_reconcile_idempotent_rerun]"
+
+  # ── R10 — epic→Epic, feature→Story defaults; issue_type_map overrides honored ──
+  # defaults: no existing issues ⇒ create calls carry issuetype Epic (epic) + Story (feature).
+  JR="$T/jira-rec-r10"; JB="$T/jira-body-r10"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ10="$T/hj-r10"; mk_jira "$HJ10" "$URL" ''
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ10/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira issue-type default run errored"; }
+  stop_jira_stub
+  grep -q '"name":"Epic"' "$JB"  || { cat "$JB"; fail "epic did not default to Jira issue type Epic"; }
+  grep -q '"name":"Story"' "$JB" || { cat "$JB"; fail "feature did not default to Jira issue type Story"; }
+  # override: feature→Task via issue_type_map.
+  JR="$T/jira-rec-r10o"; JB="$T/jira-body-r10o"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ10O="$T/hj-r10o"; mk_jira "$HJ10O" "$URL" '    issue_type_map:
+      feature: "Task"
+'
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ10O/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira issue-type override run errored"; }
+  stop_jira_stub
+  grep -q '"name":"Task"' "$JB"  || { cat "$JB"; fail "issue_type_map override feature→Task not honored"; }
+  grep -q '"name":"Story"' "$JB" && { cat "$JB"; fail "feature still created as Story despite issue_type_map override"; }
+  pass "issue types default Epic/Story, issue_type_map overrides honored [jira_issue_type_map]"
+
+  # ── R11 — status → Jira workflow via status_map (identity default); transitioned ──
+  # identity: feature status in-progress ⇒ transition targeting the 'in-progress' state.
+  JR="$T/jira-rec-r11"; JB="$T/jira-body-r11"
+  URL="$(start_jira_stub existing "$JR" "$JB")"
+  HJ11="$T/hj-r11"; mk_jira "$HJ11" "$URL" ''
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ11/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira status identity run errored"; }
+  stop_jira_stub
+  grep -Eq 'POST /rest/api/2/issue/[^/]+/transitions' "$JR" || { cat "$JR"; fail "identity status did not issue a transition"; }
+  grep -q '"id":"31"' "$JB" || { cat "$JB"; fail "identity status_map did not transition to the in-progress state (transition 31)"; }
+  # override: status_map in-progress -> "Custom Review" ⇒ transition to that named state (id 21).
+  JR="$T/jira-rec-r11o"; JB="$T/jira-body-r11o"
+  URL="$(start_jira_stub existing "$JR" "$JB")"
+  HJ11O="$T/hj-r11o"; mk_jira "$HJ11O" "$URL" '    status_map:
+      in-progress: "Custom Review"
+'
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ11O/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira status override run errored"; }
+  stop_jira_stub
+  grep -q '"id":"21"' "$JB" || { cat "$JB"; fail "status_map override in-progress→Custom Review not used (expected transition 21)"; }
+  pass "status maps to Jira workflow state via status_map (identity default), transitioned [jira_status_map_transition]"
+
+  # ── R12 — assignee is a NO-OP for jira in F01 (no owner→assignee wiring) ──
+  JR="$T/jira-rec-r12"; JB="$T/jira-body-r12"
+  URL="$(start_jira_stub existing "$JR" "$JB")"
+  HJ12="$T/hj-r12"; mk_jira "$HJ12" "$URL" '    assignee: "@me"
+'
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ12/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira assignee no-op run errored"; }
+  stop_jira_stub
+  grep -qi 'assignee' "$JB" && { cat "$JB"; fail "jira sent an assignee field (must be a no-op in F01)"; }
+  grep -Eqi '/rest/api/2/issue/[^/]+/assignee' "$JR" && { cat "$JR"; fail "jira made an assignee-setting REST call (deferred to E10)"; }
+  pass "assignee is a recognized no-op for jira in F01 [jira_assignee_noop]"
+
+  # ── R13 — one-way: sync never writes state/tasks.json (fixture-local snapshot) ──
+  JR="$T/jira-rec-r13"; JB="$T/jira-body-r13"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ13="$T/hj-r13"; mk_jira "$HJ13" "$URL" ''
+  cp "$HJ13/state/tasks.json" "$T/jira-oneway-before"
+  PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ13/tools/sync-board.mjs" >/dev/null 2>&1 || true
+  cmp -s "$HJ13/state/tasks.json" "$T/jira-oneway-before" || { stop_jira_stub; fail "jira sync wrote state/tasks.json (mirror must be one-way)"; }
+  # dry-run too.
+  PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ13/tools/sync-board.mjs" --dry-run >/dev/null 2>&1 || true
+  cmp -s "$HJ13/state/tasks.json" "$T/jira-oneway-before" || { stop_jira_stub; fail "jira --dry-run wrote state/tasks.json (must mutate nothing)"; }
+  stop_jira_stub
+  pass "jira sync never writes state/tasks.json (one-way) [jira_one_way_never_writes_tasks_json]"
+
+  # ── R14 — --dry-run prints intended Jira changes, mutates nothing (no create/transition) ──
+  JR="$T/jira-rec-r14"; JB="$T/jira-body-r14"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ14="$T/hj-r14"; mk_jira "$HJ14" "$URL" ''
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ14/tools/sync-board.mjs" --dry-run 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira dry-run errored"; }
+  stop_jira_stub
+  printf '%s' "$OUT" | grep -qi 'would' || { echo "$OUT"; fail "jira --dry-run did not print a 'would …' intent"; }
+  grep -Eq 'POST /rest/api/2/issue( |$|\?)' "$JR" && { cat "$JR"; fail "jira --dry-run made a mutating create call"; }
+  grep -Eq 'POST /rest/api/2/issue/[^/]+/transitions' "$JR" && { cat "$JR"; fail "jira --dry-run made a mutating transition call"; }
+  pass "jira --dry-run prints intents, issues no mutating REST call [jira_dry_run_mutates_nothing]"
+
+  # ── R15 — Jira 401/403 ⇒ non-zero, actionable, PAT not echoed ──
+  for code in auth401 auth403; do
+    JR="$T/jira-rec-$code"; JB="$T/jira-body-$code"
+    URL="$(start_jira_stub "$code" "$JR" "$JB")"
+    HJA="$T/hj-$code"; mk_jira "$HJA" "$URL" ''
+    if PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJA/tools/sync-board.mjs" >"$T/$code.out" 2>&1; then
+      stop_jira_stub; fail "jira $code should exit non-zero (fail closed)"
+    fi
+    stop_jira_stub
+    grep -Eqi 'PAT|scope|permission|auth' "$T/$code.out" || { cat "$T/$code.out"; fail "$code error is not actionable (PAT/scope/permission)"; }
+    grep -qF "$SENTINEL_PAT" "$T/$code.out" && { fail "$code error echoed the PAT value (must never leak)"; }
+  done
+  pass "jira 401/403 fail closed, actionable, PAT never echoed [jira_auth_error_fails_closed]"
+
+  # ── R8 — PAT never leaks: never in tasks.json / seeded config / tool output ──
+  # Gather EVERY jira output captured above + the fixture tasks.json + configs, and grep for
+  # the sentinel PAT — it must appear NOWHERE (secret hygiene). (The .out files intentionally
+  # used the sentinel via env; R15 already asserts the auth-error path doesn't echo it.)
+  JR="$T/jira-rec-r8"; JB="$T/jira-body-r8"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ8="$T/hj-r8"; mk_jira "$HJ8" "$URL" '    pat_file: "'"$HJ8"'/pat"
+'
+  printf '%s' "$SENTINEL_PAT" > "$HJ8/pat"
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="" node "$HJ8/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira hygiene run errored"; }
+  DRYOUT="$(PATH="$T/bin:$PATH" JIRA_PAT="" node "$HJ8/tools/sync-board.mjs" --dry-run 2>&1)" || true
+  stop_jira_stub
+  printf '%s\n%s' "$OUT" "$DRYOUT" | grep -qF "$SENTINEL_PAT" && { fail "PAT sentinel leaked into tool stdout/stderr"; }
+  grep -qF "$SENTINEL_PAT" "$HJ8/state/tasks.json" && fail "PAT sentinel leaked into state/tasks.json"
+  grep -qF "$SENTINEL_PAT" "$HJ8/harness.config.yaml" && fail "PAT sentinel leaked into the mirror config"
+  # The committed tool + repo config must never carry the sentinel (or any PAT literal).
+  grep -qF "$SENTINEL_PAT" "$TOOL" && fail "PAT sentinel present in the committed tool"
+  grep -qF "$SENTINEL_PAT" "$ROOT/harness.config.yaml" && fail "PAT sentinel present in the committed config"
+  pass "PAT never written to tasks.json/config/output, never logged [jira_pat_never_leaks]"
+
+  # ── R17 — docs pin the jira mirror REST+PAT contract (governing phrases) ──
+  grep -qi 'jira contract' "$DOCS"                 || fail "board-mirror.md has no jira contract section"
+  grep -qi 'Server / Data Center\|Server/DC\|Server / Data Center' "$DOCS" || fail "jira docs do not pin Server/DC"
+  grep -qi 'Bearer' "$DOCS"                        || fail "jira docs do not name the Bearer PAT auth"
+  grep -qi 'Cloud' "$DOCS"                         || fail "jira docs do not state Cloud is out of F01 scope"
+  grep -qi 'JIRA_PAT' "$DOCS"                       || fail "jira docs do not name the JIRA_PAT env var"
+  grep -qi 'pat_file' "$DOCS"                       || fail "jira docs do not name the gitignored pat_file"
+  grep -qi 'precedence' "$DOCS"                     || fail "jira docs do not state the env/file precedence"
+  grep -qi 'base_url' "$DOCS"                       || fail "jira docs do not name base_url"
+  grep -qi 'project_key' "$DOCS"                    || fail "jira docs do not name project_key"
+  grep -qi 'issue_type_map' "$DOCS"                 || fail "jira docs do not name issue_type_map"
+  grep -qi 'status_map' "$DOCS"                     || fail "jira docs do not name status_map workflow mapping"
+  grep -qi 'REST' "$DOCS"                           || fail "jira docs do not reaffirm the REST transport"
+  grep -qi 'E10' "$DOCS"                            || fail "jira docs do not defer assignee to E10"
+  grep -qi 'mirror' "$ROOT/store/jira.md"           || fail "store/jira.md lacks the mirror cross-reference"
+  grep -qi 'board-mirror.md' "$ROOT/store/jira.md"  || fail "store/jira.md does not cross-reference board-mirror.md"
+  pass "docs pin the jira Server/DC REST+PAT mirror contract + cross-ref [jira_docs_pin_rest_pat_contract]"
+
 else
   pass "node-running cases skipped (node unavailable) [inert_default_noop]"
 fi

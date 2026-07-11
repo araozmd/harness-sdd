@@ -257,7 +257,7 @@
         {
           "id": "E12-F01",
           "title": "Jira sync via REST API + Personal Access Token (no MCP)",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],

@@ -170,12 +170,18 @@ migrate_config() {
       printf '# board. INERT by default (empty provider). MIRROR, not a backend. See store/board-mirror.md.\n'
       printf 'mirror:\n'
       printf '  board:\n'
-      printf '    provider: ""          # ""|none disables; github-projects implemented; jira|azure-boards stubs\n'
+      printf '    provider: ""          # ""|none disables; github-projects+jira implemented; azure-boards stub\n'
       printf '    owner: ""             # github-projects: org/user login\n'
       printf '    project_number: 0     # github-projects: Project number\n'
       printf '    repo: ""              # github-projects: owner/repo holding the issues\n'
-      printf '    assignee: ""          # optional: gh login (or "@me") assigned once work starts; empty ⇒ skip\n'
-      printf '    # status_map:         # optional: harness status -> board column name (omit ⇒ identity)\n'
+      printf '    base_url: ""          # jira: Jira Server/DC base URL (e.g. https://jira.acme.internal)\n'
+      printf '    project_key: ""       # jira: target Jira project key (e.g. HAR)\n'
+      printf '    pat_file: ".harness/jira.pat"   # jira: gitignored PAT file; JIRA_PAT env var wins. NEVER commit a PAT.\n'
+      printf '    assignee: ""          # optional: gh login (or "@me") assigned once work starts; empty ⇒ skip (no-op for jira in F01)\n'
+      printf '    # issue_type_map:     # jira: harness concept -> Jira issue type (omit ⇒ epic:Epic, feature:Story)\n'
+      printf '    #   epic: "Epic"\n'
+      printf '    #   feature: "Story"\n'
+      printf '    # status_map:         # optional: harness status -> board column / Jira workflow state (omit ⇒ identity)\n'
       printf '    #   pending: "Todo"\n'
       printf '    #   done: "Done"\n'
     } >> "$_cfg"
@@ -746,7 +752,12 @@ EOF
   # override lives outside the repo and needs no ignore. NOTE: if you change telemetry.log
   # AFTER install without re-running the installer, add the new path here yourself.
   _tlog="$(_cfg_telemetry_log "$H/harness.config.yaml" 2>/dev/null)"
-  _ignores='telemetry.jsonl'
+  # Also ignore the default Jira mirror PAT file (mirror.board.pat_file default
+  # `.harness/jira.pat`, i.e. `jira.pat` relative to this .harness/ .gitignore) so a
+  # provisioned Jira PAT can NEVER be committed by default. The PAT value itself is never
+  # written to config — only this path is seeded here. See store/board-mirror.md "jira contract".
+  _ignores='telemetry.jsonl
+jira.pat'
   case "$_tlog" in
     ''|telemetry.jsonl|/*) : ;;                 # default, unset, or absolute → nothing extra
     *) _ignores="$_ignores
@@ -754,6 +765,7 @@ $_tlog" ;;                                       # relative override → also ig
   esac
   if [ ! -f "$H/.gitignore" ]; then
     { printf '# Local-only telemetry log (see .harness/agents/orchestrator.md "## Telemetry").\n'
+      printf '# Jira mirror PAT file (mirror.board.pat_file default) — never commit a PAT.\n'
       printf '%s\n' "$_ignores"; } > "$H/.gitignore"
     info "seeded .harness/.gitignore (ignores telemetry log)"
   else
