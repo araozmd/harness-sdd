@@ -359,6 +359,25 @@ log(DRY ? '[mirror] dry-run complete — nothing changed.' : '[mirror] board syn
 // provider: jira — REST + Bearer PAT (Server / Data Center). NO MCP. Status only.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Redact a resolved secret from any string BEFORE it reaches stderr/stdout, so a Jira
+// response body that echoes the request headers (misconfigured URL, debug proxy, non-401/403
+// error) can never print `Authorization: Bearer <PAT>` — the spec's hard "PAT never leaks to
+// logs" invariant. Replaces (a) the raw PAT value, (b) the same value with a leading `Bearer `,
+// and (c) any residual `Authorization: <...>` / `Bearer <token>` header echo, with a placeholder.
+// Used at EVERY stderr site that can include a response body. No-op when pat is empty/absent.
+function redactSecret(text, pat) {
+  let out = String(text ?? '');
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (pat) {
+    out = out.replace(new RegExp(`Bearer\\s+${escapeRe(pat)}`, 'g'), 'Bearer ***REDACTED***');
+    out = out.replace(new RegExp(escapeRe(pat), 'g'), '***REDACTED***');
+  }
+  // Defensive: scrub any lingering Bearer-token / Authorization-header echo regardless of value.
+  out = out.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer ***REDACTED***');
+  out = out.replace(/(Authorization"?\s*[:=]\s*"?)[^",}\s][^",}]*/gi, '$1***REDACTED***');
+  return out;
+}
+
 // Resolve the PAT: JIRA_PAT env (precedence) else the gitignored pat_file (trimmed).
 // Returns the token string, or null if neither is available. The VALUE is never logged.
 function resolveJiraPat(patFile) {
@@ -438,8 +457,11 @@ async function runJira(cfgText) {
       process.exit(1);
     }
     if (!res.ok) {
-      const detail = await res.text().catch(() => '');
-      console.error(`[mirror] Jira REST ${method} ${path} failed: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 300)}` : ''}`);
+      // A non-401/403 body can echo the request headers (bad URL / debug proxy) and print the
+      // Bearer PAT — scrub the resolved PAT (and any Bearer/Authorization echo) before logging.
+      const rawDetail = await res.text().catch(() => '');
+      const detail = redactSecret(rawDetail, PAT).slice(0, 300);
+      console.error(`[mirror] Jira REST ${method} ${path} failed: HTTP ${res.status}${detail ? ` — ${detail}` : ''}`);
       process.exit(1);
     }
     const text = await res.text();
@@ -501,13 +523,17 @@ async function runJira(cfgText) {
         log(`[dry-run] would transition ${issueKey || `<${obj.id}>`} -> "${wantState}"`);
       } else if (issueKey) {
         const tr = await jiraFetch('GET', `/issue/${issueKey}/transitions`);
-        const t = (tr.transitions || []).find((x) => x.to && x.to.name === wantState)
-          || (tr.transitions || []).find((x) => x.name === wantState);
+        // Match by DESTINATION workflow state only: accept a transition ONLY when its
+        // `to.name` is the mapped wantState. A transition whose action `name` happens to equal
+        // wantState but lands on a DIFFERENT `to.name` must never be selected — otherwise the
+        // mirror moves the issue to the wrong state while logging success. No name-based
+        // fallback. If none lands on wantState, leave the issue unchanged and say so.
+        const t = (tr.transitions || []).find((x) => x.to && x.to.name === wantState);
         if (t) {
           await jiraFetch('POST', `/issue/${issueKey}/transitions`, { transition: { id: t.id } });
           log(`[mirror] jira: ${issueKey} -> "${wantState}"`);
         } else {
-          log(`[mirror] jira: ${issueKey} already at / has no transition to "${wantState}" (left as-is)`);
+          log(`[mirror] jira: ${issueKey} no matching transition to "${wantState}" (already there or unavailable — left as-is)`);
         }
       }
     }

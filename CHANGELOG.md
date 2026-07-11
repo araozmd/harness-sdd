@@ -28,6 +28,15 @@ All notable changes to the harness body are recorded here. Versions follow
   place. Reconcile is **idempotent** (each feature matched by a stable `harness:<id>` label —
   a re-run updates rather than duplicating). `assignee` is a recognized **no-op for `jira`**
   in F01 (owner→assignee deferred to E10-F03). `--dry-run` prints intents and mutates nothing.
+- **Hardened PAT log hygiene + transition matching (Codex #44 r2 P2 ×2)** — Jira response
+  bodies for **non-401/403** errors are now scrubbed via a `redactSecret(text, PAT)` helper
+  before hitting stderr, so a bad-URL / debug-proxy body that echoes the `Authorization`
+  header can never print `Bearer <PAT>` (redacted to `Bearer ***REDACTED***`). Status
+  transitions are now matched by **destination `to.name === wantState` only** (the
+  match-by-action-`name` fallback is removed): a transition whose action name matches but
+  lands on a different state can no longer be selected, and when nothing lands on the mapped
+  state the issue is left unchanged with a "no matching transition" report instead of a false
+  success.
 - **Config seed + gitignore** — `harness-install.sh` seeds the inert Jira `mirror.board` keys
   (`base_url`/`project_key`/`pat_file`/`issue_type_map`) and append-seeds the default PAT-file
   path into `.harness/.gitignore` so a provisioned PAT can never be committed by default;

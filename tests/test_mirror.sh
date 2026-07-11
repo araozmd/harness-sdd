@@ -550,12 +550,31 @@ const srv = createServer((req, res) => {
     if (MODE === 'auth401') return send(401, { errorMessages: ['auth failed'] });
     if (MODE === 'auth403') return send(403, { errorMessages: ['forbidden'] });
     const u = req.url.split('?')[0];
+    // errbody: a NON-401/403 failure (HTTP 500) whose body ECHOES the request's Authorization
+    // header — the exact leak vector for the PAT (bad URL / debug proxy). The tool must scrub
+    // it before logging. We echo back the received auth header verbatim in the error body.
+    if (MODE === 'errbody') {
+      return send(500, { errorMessages: ['debug echo of request headers'], receivedAuthorization: req.headers['authorization'] || '' });
+    }
     if (req.method === 'GET' && u === '/rest/api/2/search') {
-      if (MODE === 'existing') return send(200, { issues: [{ key: 'HAR-1', fields: { status: { name: 'pending' } } }] });
+      if (MODE === 'existing' || MODE === 'trans_dest' || MODE === 'trans_wrongname')
+        return send(200, { issues: [{ key: 'HAR-1', fields: { status: { name: 'pending' } } }] });
       return send(200, { issues: [] });
     }
     if (req.method === 'POST' && u === '/rest/api/2/issue') return send(201, { key: 'HAR-NEW' });
     if (req.method === 'GET' && /\/rest\/api\/2\/issue\/[^/]+\/transitions$/.test(u)) {
+      // trans_dest: a transition whose action `name` matches wantState ('in-progress') but lands
+      // on a DIFFERENT to.name ('Backlog'), PLUS a correct one whose to.name IS 'in-progress'
+      // (id 71). The tool must pick 71 (by destination), never the name-matching decoy (id 61).
+      if (MODE === 'trans_dest') return send(200, { transitions: [
+        { id: '61', name: 'in-progress', to: { name: 'Backlog' } },
+        { id: '71', name: 'Start work', to: { name: 'in-progress' } },
+      ] });
+      // trans_wrongname: ONLY a decoy whose action `name` == wantState but to.name differs; NO
+      // transition lands on 'in-progress'. The tool must POST nothing and report no-match.
+      if (MODE === 'trans_wrongname') return send(200, { transitions: [
+        { id: '61', name: 'in-progress', to: { name: 'Backlog' } },
+      ] });
       return send(200, { transitions: [
         { id: '11', name: 'To pending', to: { name: 'pending' } },
         { id: '21', name: 'Go review', to: { name: 'Custom Review' } },
@@ -827,6 +846,51 @@ EOF
     grep -qF "$SENTINEL_PAT" "$T/$code.out" && { fail "$code error echoed the PAT value (must never leak)"; }
   done
   pass "jira 401/403 fail closed, actionable, PAT never echoed [jira_auth_error_fails_closed]"
+
+  # ── R16 — non-401/403 error body is SCRUBBED before logging (PAT never leaks) ── (Codex #44 P2)
+  # A bad URL / debug proxy can return a NON-auth error (HTTP 500) whose body echoes the
+  # request's Authorization header — printing `Bearer <PAT>` verbatim would violate the hard
+  # "PAT never leaks to logs" invariant. The 'errbody' stub echoes the received auth header in
+  # a 500 body; the tool must fail closed AND redact the sentinel PAT (and its Bearer form) from
+  # stderr. Assert: non-zero exit, the error body detail is surfaced, but neither the sentinel
+  # PAT nor `Bearer <sentinel>` appears — a redaction placeholder does.
+  JR="$T/jira-rec-r16"; JB="$T/jira-body-r16"
+  URL="$(start_jira_stub errbody "$JR" "$JB")"
+  HJ16="$T/hj-r16"; mk_jira "$HJ16" "$URL" ''
+  if PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ16/tools/sync-board.mjs" >"$T/r16.out" 2>&1; then
+    stop_jira_stub; fail "jira non-401/403 error should exit non-zero (fail closed)"
+  fi
+  stop_jira_stub
+  grep -qi 'HTTP 500' "$T/r16.out" || { cat "$T/r16.out"; fail "non-auth error did not surface the HTTP status"; }
+  grep -qF "$SENTINEL_PAT" "$T/r16.out" && { cat "$T/r16.out"; fail "error body leaked the raw PAT sentinel to stderr (must be redacted)"; }
+  grep -qF "Bearer $SENTINEL_PAT" "$T/r16.out" && { cat "$T/r16.out"; fail "error body leaked 'Bearer <PAT>' to stderr (must be redacted)"; }
+  grep -qi 'REDACTED' "$T/r16.out" || { cat "$T/r16.out"; fail "error body was not run through the PAT redactor (no redaction placeholder)"; }
+  pass "non-401/403 error body is scrubbed of the PAT before logging [jira_error_body_redacts_pat]"
+
+  # ── R18 — status transition matches by DESTINATION to.name only, never action name ── (Codex #44 P2)
+  # A transition whose action `name` matches wantState but whose `to.name` differs must NEVER be
+  # selected (it would move the issue to the WRONG state while logging success). The tool must
+  # pick the transition whose `to.name === wantState` (by id), and when only a wrong-`to.name`
+  # decoy exists, POST no transition and report no-match.
+  # (a) a name-matching decoy (id 61 -> Backlog) AND a correct one (id 71 -> in-progress):
+  #     the tool must POST id 71, never 61.
+  JR="$T/jira-rec-r18a"; JB="$T/jira-body-r18a"
+  URL="$(start_jira_stub trans_dest "$JR" "$JB")"
+  HJ18A="$T/hj-r18a"; mk_jira "$HJ18A" "$URL" ''
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ18A/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira dest-match run errored"; }
+  stop_jira_stub
+  grep -Eq 'POST /rest/api/2/issue/[^/]+/transitions' "$JR" || { cat "$JR"; fail "dest-match run did not POST a transition"; }
+  grep -q '"id":"71"' "$JB" || { cat "$JB"; fail "transition not matched by to.name (expected id 71 landing on in-progress)"; }
+  grep -q '"id":"61"' "$JB" && { cat "$JB"; fail "selected the name-matching decoy (id 61) landing on the WRONG to.name (Backlog)"; }
+  # (b) ONLY a wrong-to.name decoy exists ⇒ NO transition POST, and a no-match report.
+  JR="$T/jira-rec-r18b"; JB="$T/jira-body-r18b"
+  URL="$(start_jira_stub trans_wrongname "$JR" "$JB")"
+  HJ18B="$T/hj-r18b"; mk_jira "$HJ18B" "$URL" ''
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ18B/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "jira no-dest-match run errored"; }
+  stop_jira_stub
+  grep -Eq 'POST /rest/api/2/issue/[^/]+/transitions' "$JR" && { cat "$JR"; fail "POSTed a transition when NO action lands on wantState (must leave unchanged)"; }
+  printf '%s' "$OUT" | grep -qi 'no matching transition' || { echo "$OUT"; fail "no-match case did not report 'no matching transition'"; }
+  pass "transitions matched by destination to.name only, no-match leaves issue unchanged [jira_transition_match_by_dest]"
 
   # ── R8 — PAT never leaks: never in tasks.json / seeded config / tool output ──
   # Gather EVERY jira output captured above + the fixture tasks.json + configs, and grep for
