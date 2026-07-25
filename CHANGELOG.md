@@ -4,6 +4,35 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.31.0] — 2026-07-24
+
+### Added — 🔒 Board write lock: flock-guarded read-modify-write on tasks.json (E15-F01)
+- **New advisory-lock helper `tools/tasks-lock.py`** (installed body, executable) guards every
+  persisted `state/tasks.json` mutation. It owns the whole critical section in **one process**:
+  acquire a portable stdlib **`fcntl.flock`** on the sibling lockfile `state/tasks.json.lock`
+  (resolved with `cwd = HARNESS_DIR`) → **re-read `state/tasks.json` from disk inside the lock**
+  → apply the single status mutation → validate (`json` parse **and** `store/tasks.schema.json`
+  schema check) → atomically replace the file (write-temp-then-`os.replace`) → release. Re-reading
+  *inside* the lock is the point: two near-simultaneous writers (E15 parallel fix chains) can no
+  longer lose an update (last-writer-wins clobber).
+- **Fail-stop, no torn file** — a mutation that fails validation aborts non-zero, releases the
+  lock, and leaves the original `state/tasks.json` byte-for-byte intact.
+- **Bounded acquisition, never a silent hang** — lock acquisition is bounded by a ~10s timeout;
+  on timeout it exits non-zero with an actionable error naming the lockfile and the timeout,
+  never blocking forever and never writing unlocked.
+- **No-op for serial callers** — for a single (uncontended) caller the lock is taken immediately
+  and the output is byte-equivalent to the old read-modify-write, so `/sdd-next` and existing
+  tests are unchanged. The `store.on_write_command` hook fires **after** the lock is released,
+  never inside the critical section. **No new status value and no `store/tasks.schema.json`
+  change** — only the concurrency discipline around the write.
+- **Portable** — depends only on `python3` + stdlib `fcntl` (already a write-path dependency);
+  it does **not** use the Linux-only `flock(1)` binary (absent on macOS). Single-host scope;
+  cross-machine coordination is out of scope.
+- **Installer wiring** — `harness-install.sh` copies + `chmod +x`'s the helper into
+  `.harness/tools/` and gitignores the runtime lockfile (`state/tasks.json.lock`) in the seeded
+  `.harness/.gitignore`; `tests/test_install.sh` asserts a fresh install ships the executable
+  helper. `store/local.md`'s `set_status` contract is amended to mandate the lock protocol.
+
 ## [0.30.0] — 2026-07-10
 
 ### Added — ✨ Jira mirror completed via REST API + Bearer PAT, no MCP (E12-F01)

@@ -124,6 +124,10 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "installer exited non-zero"
 # (installer wiring asserted, not just emitted) [sync_board_tool_installed_executable].
 [ -f "$T/.harness/tools/sync-board.mjs" ] || fail "tools/sync-board.mjs not installed (board mirror would be missing in consumers)" # R12
 [ -x "$T/.harness/tools/sync-board.mjs" ] || fail "installed tools/sync-board.mjs is not executable (board mirror not runnable)"      # R12
+# E15-F01 R10: the board write-lock helper must ship in the body AND be executable
+# (installer wiring asserted, not just emitted) so set_status can run the guarded write.
+[ -f "$T/.harness/tools/tasks-lock.py" ] || fail "tools/tasks-lock.py not installed (board write lock would be missing in consumers)" # R10
+[ -x "$T/.harness/tools/tasks-lock.py" ] || fail "installed tools/tasks-lock.py is not executable (board write lock not runnable)"     # R10
 # E12-F01 R16: a fresh install must gitignore the default Jira mirror PAT file
 # (mirror.board.pat_file default `jira.pat`, resolved under the harness dir ⇒
 # `.harness/jira.pat`, i.e. `jira.pat` relative to the .harness/ .gitignore where the tool
