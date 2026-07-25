@@ -98,3 +98,5 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 2026-07-25T16:22:28Z  E15-F01 in-progress → in-review (round 2) — Builder added R12/R13 traceability and routed all structural TaskStore writer contracts through the existing guarded apply --mutator path; VERSION 0.32.1; focused + full 17-suite verification green.
 2026-07-25T16:45:58Z  E15-F01 in-review → approve (round 2) — Reviewer verified R1–R13 traceability, guarded writer-role/store coherence, PATCH versioning, focused suites, and the full 17-suite command. Feature remains in-review pending repair PR merge.
 2026-07-25T16:58:20Z  E15-F01 in-review → done — Repair PR #48 merged at 9e62c13 after Codex round 1 (0 P0/P1 blockers; 2 P2 suggestions recorded); VERSION 0.32.1.
+2026-07-25T17:06:49Z  E99 done rollup — all E99 features are done; epic E99 → done (derived + persisted). Drift check triggered before next-task selection.
+2026-07-25T17:09:20Z  E99 drift check (Scout, read-only) — E13, E14, E15, and E16 still valid under S1/S2/S3; no demotions. Findings: progress/E99-drift/scout-drift-E99.md.
