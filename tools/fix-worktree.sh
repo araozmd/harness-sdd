@@ -307,8 +307,6 @@ do_teardown() {
       die "could not remove unchanged managed links; preserved worktree: $WORKTREE"
     git -C "$PRIMARY" worktree remove "$WORKTREE" >/dev/null ||
       die "non-forced worktree removal failed; preserved: $WORKTREE"
-    git -C "$PRIMARY" worktree prune --expire now >/dev/null ||
-      die "worktree prune failed after removal"
   fi
   git -C "$PRIMARY" branch -d "$BRANCH" >/dev/null ||
     die "safe branch deletion failed; preserved $BRANCH"

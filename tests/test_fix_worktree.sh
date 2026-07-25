@@ -451,6 +451,11 @@ test_clean_merged_teardown_removes_exact_resources() {
   mkdir -p "$PRIMARY/.claude"
   printf '{}\n' > "$PRIMARY/.claude/settings.local.json"
   _unrelated="$(cd "$PRIMARY" && tools/fix-worktree.sh create E99-F143 unrelated)"
+  _unrelated_stale="$(CDPATH= cd -- "$PRIMARY" && pwd -P)/.claude/worktrees/unrelated-stale"
+  git -C "$PRIMARY" worktree add -b unrelated-stale "$_unrelated_stale" main >/dev/null 2>&1
+  mv "$_unrelated_stale" "$FIXTURE/unrelated-stale-away"
+  git -C "$PRIMARY" worktree list --porcelain | grep -F "worktree $_unrelated_stale" >/dev/null ||
+    fail "unrelated stale registration precondition missing"
   _wt="$(cd "$PRIMARY" && tools/fix-worktree.sh create E99-F121 clean)"
   printf merged > "$_wt/merged.txt"
   git -C "$_wt" add merged.txt
@@ -458,6 +463,8 @@ test_clean_merged_teardown_removes_exact_resources() {
   merge_fix_to_base feat/E99-F121-clean
   (cd "$PRIMARY" && tools/fix-worktree.sh teardown E99-F121 clean)
   [ ! -e "$_wt" ] || fail "clean teardown left path"
+  git -C "$PRIMARY" worktree list --porcelain | grep -F "worktree $_wt" >/dev/null &&
+    fail "clean teardown left registration"
   git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/E99-F121-clean &&
     fail "clean teardown left branch"
   [ -d "$_unrelated" ] || fail "clean teardown removed unrelated worktree"
@@ -465,6 +472,10 @@ test_clean_merged_teardown_removes_exact_resources() {
     fail "clean teardown removed unrelated branch"
   git -C "$PRIMARY" worktree list --porcelain | grep -F "worktree $_unrelated" >/dev/null ||
     fail "clean teardown removed unrelated registration"
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/unrelated-stale ||
+    fail "clean teardown removed unrelated stale branch"
+  git -C "$PRIMARY" worktree list --porcelain | grep -F "worktree $_unrelated_stale" >/dev/null ||
+    fail "clean teardown pruned unrelated stale registration"
   pass "test_clean_merged_teardown_removes_exact_resources"
 }
 
