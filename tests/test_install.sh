@@ -107,6 +107,44 @@ test_root_gitignore_local_prompt_entries_idempotent() {
   done
 }
 
+test_fix_worktree_helper_installed_executable() {
+  [ -x "$T/.harness/tools/fix-worktree.sh" ] ||
+    fail "installed tools/fix-worktree.sh is missing or not executable"
+}
+
+test_worktree_ignore_seed_preserved_idempotent() {
+  [ "$(grep -cxF '.claude/worktrees/' "$T/.gitignore")" = "1" ] ||
+    fail "root .gitignore must contain exactly one .claude/worktrees/ entry"
+  grep -qF 'my-secret-dir/' "$T/.gitignore" ||
+    fail "worktree ignore seeding clobbered a user entry"
+}
+
+test_fix_worktree_version_policy() {
+  _versions="$(awk '
+    /^## \[[0-9]+\.[0-9]+\.[0-9]+\]/ {
+      version=$2; gsub(/[][]/, "", version)
+      if (feature != "" && older == "") { older=version; print feature; print older; exit }
+      section=version
+    }
+    /E15-F02/ && feature == "" { feature=section }
+  ' "$SRC/CHANGELOG.md")"
+  _feature="$(printf '%s\n' "$_versions" | sed -n '1p')"
+  _older="$(printf '%s\n' "$_versions" | sed -n '2p')"
+  [ -n "$_feature" ] && [ -n "$_older" ] ||
+    fail "could not locate E15-F02 changelog section and immediately older section"
+  IFS=. read -r _fmaj _fmin _fpatch <<EOF
+$_feature
+EOF
+  IFS=. read -r _omaj _omin _opatch <<EOF
+$_older
+EOF
+  [ "$_fmaj" -eq "$_omaj" ] && [ "$_fmin" -eq $((_omin + 1)) ] && [ "$_fpatch" -eq 0 ] ||
+    fail "E15-F02 version $_feature is not one MINOR above $_older"
+  _current="$(cat "$SRC/VERSION")"
+  [ "$(printf '%s\n%s\n' "$_feature" "$_current" | sort -V | tail -1)" = "$_current" ] ||
+    fail "current VERSION $_current is older than E15-F02 feature version $_feature"
+}
+
 # A pre-existing entrypoint with custom prose that MUST survive.
 printf '# My Project\n\nCustom instructions here.\n' > "$T/CLAUDE.md"
 
@@ -128,6 +166,7 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "installer exited non-zero"
 # (installer wiring asserted, not just emitted) so set_status can run the guarded write.
 [ -f "$T/.harness/tools/tasks-lock.py" ] || fail "tools/tasks-lock.py not installed (board write lock would be missing in consumers)" # R10
 [ -x "$T/.harness/tools/tasks-lock.py" ] || fail "installed tools/tasks-lock.py is not executable (board write lock not runnable)"     # R10
+test_fix_worktree_helper_installed_executable
 # E15-F01 (Codex #46 r2 P1): the SHARED board validator must ship in the body AND be
 # executable — init.sh runs it as a CLI and tasks-lock.py imports its validate(); if it
 # is missing the gate and the guarded write both break in consumers.
@@ -163,6 +202,7 @@ for _p in AGENTS.local.md CLAUDE.local.md AGENTS.override.md; do
 done
 test_root_gitignore_seeds_local_prompt_files
 grep -qxF '.claude/' "$T/.gitignore"                    && fail "root .gitignore over-ignores the whole .claude/ dir"
+grep -qxF '.claude/worktrees/' "$T/.gitignore"          || fail "root .gitignore missing worktree runtime directory"
 [ -f "$T/.harness/docs/CONFIG-LAYERING.md" ]            || fail "CONFIG-LAYERING.md not installed"
 pass "project-root .gitignore seeds personal/runtime and local prompt ignores (config layering)"
 
@@ -194,6 +234,10 @@ grep -qF 'fresh worktrees' "$T/.harness/docs/CONFIG-LAYERING.md" \
   || fail "CONFIG-LAYERING.md missing fresh-worktree caveat"
 grep -qF 'native local-file support differs by CLI' "$T/.harness/docs/CONFIG-LAYERING.md" \
   || fail "CONFIG-LAYERING.md missing per-tool native support caveat"
+grep -qF '.claude/worktrees/' "$T/.harness/docs/CONFIG-LAYERING.md" \
+  || fail "CONFIG-LAYERING.md missing worktree local-only directory"
+grep -qF 'absolute symlink' "$T/.harness/docs/CONFIG-LAYERING.md" \
+  || fail "CONFIG-LAYERING.md missing worktree personal-layer link policy"
 test_config_layering_documents_personal_prompt_layer
 test_config_layering_documents_native_local_prompt_files
 test_config_layering_documents_local_prompt_caveats
@@ -213,6 +257,7 @@ grep -qF '## [0.27.0]' "$SRC/CHANGELOG.md" || fail "CHANGELOG missing 0.27.0 ent
 grep -qF 'local prompt override' "$SRC/CHANGELOG.md" \
   || fail "CHANGELOG missing local prompt override summary"
 test_version_and_changelog_for_local_overrides
+test_fix_worktree_version_policy
 pass "VERSION and CHANGELOG record local overrides convention"
 
 # version stamp matches source VERSION                                                        # R2
@@ -434,6 +479,7 @@ for _p in AGENTS.local.md CLAUDE.local.md AGENTS.override.md; do
 done
 test_root_gitignore_preserves_user_entries
 test_root_gitignore_local_prompt_entries_idempotent
+test_worktree_ignore_seed_preserved_idempotent
 pass "project-root .gitignore is append-only + idempotent on upgrade"
 
 # root .gitignore seeding uses EXACT-LINE matching (grep -qxF), not substring: a pre-existing

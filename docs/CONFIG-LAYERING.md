@@ -15,7 +15,7 @@ layer their config, so *personal* settings have a separate home. The rule is jus
 | Layer | Lives in | Scope | VCS |
 |---|---|---|---|
 | **Project** | `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` (incl. the `harness:begin..end` block), `.harness/` | facts true for everyone on the project: architecture, conventions, the harness entrypoint | **committed** (shared) |
-| **Personal** | `.claude/settings.local.json`, `.claude/scheduled_tasks.lock`, `AGENTS.local.md`, `CLAUDE.local.md`, `AGENTS.override.md` | one developer's permissions, model pick, local hooks, runtime locks, and personal prompt guidance | **gitignored** (never shared) |
+| **Personal** | `.claude/settings.local.json`, `.claude/scheduled_tasks.lock`, `.claude/worktrees/`, `AGENTS.local.md`, `CLAUDE.local.md`, `AGENTS.override.md` | one developer's permissions, model pick, local hooks, runtime locks, isolated fix checkouts, and personal prompt guidance | **gitignored** (never shared) |
 | **User-global** | `~/.claude/CLAUDE.md`, your global agent settings | prompt/model preferences that follow *you* across every project | not in any project repo |
 
 The harness-generated `.claude/agents/*` and `.claude/commands/*` are **project** layer —
@@ -31,6 +31,7 @@ with the personal-layer paths:
 ```gitignore
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+.claude/worktrees/
 AGENTS.local.md
 CLAUDE.local.md
 AGENTS.override.md
@@ -68,8 +69,14 @@ entrypoints instead.
 
 Two caveats:
 
-- **Fresh worktrees need their own local files.** Gitignored files do not automatically
-  follow fresh worktrees unless you recreate them or link them from a user-global location.
+- **Personal files in fresh worktrees use a narrow allowlist.** The
+  `tools/fix-worktree.sh` helper creates an absolute symlink only for an existing
+  `.claude/settings.local.json`, `AGENTS.local.md`, `CLAUDE.local.md`, or
+  `AGENTS.override.md` in the canonical checkout. Missing allowlisted files remain
+  absent. It never sweeps other ignored files, secrets, or caches.
+- **Runtime locks remain local to each worktree.** In particular,
+  `.claude/scheduled_tasks.lock` is never linked. Active helper-managed checkouts
+  live under the local-only `.claude/worktrees/` directory.
 - **Tool-native local-file support differs by CLI.** Prefer a CLI's native local file when
   it exists, but keep `AGENTS.local.md` as the portable convention for tools without one.
 

@@ -643,6 +643,7 @@ install_one() {
   chmod +x "$H/tools/sync-board.mjs" 2>/dev/null || true
   chmod +x "$H/tools/tasks-lock.py" 2>/dev/null || true   # E15-F01 board write lock helper
   chmod +x "$H/tools/validate-board.py" 2>/dev/null || true   # E15-F01 shared board validator (init.sh + tasks-lock)
+  chmod +x "$H/tools/fix-worktree.sh" 2>/dev/null || true   # E15-F02 isolated fix-worktree lifecycle helper
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"
@@ -795,6 +796,7 @@ $_tlog" ;;                                       # relative override → also ig
   # .harness/docs/CONFIG-LAYERING.md.
   _root_ignores='.claude/settings.local.json
 .claude/scheduled_tasks.lock
+.claude/worktrees/
 AGENTS.local.md
 CLAUDE.local.md
 AGENTS.override.md'

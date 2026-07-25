@@ -4,6 +4,23 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.33.0] — 2026-07-25
+
+### Added — ✨ Safe worktree-per-fix isolation lifecycle (E15-F02)
+- Added the portable executable `tools/fix-worktree.sh` with deterministic
+  `create`, exact-context `run`, and non-forced `teardown` operations for isolated
+  `feat/E99-Fn-slug` branches under `.claude/worktrees/`.
+- Creation resolves and snapshots a local default/base branch instead of ambient
+  `HEAD`, fails closed on dirty or colliding state, links only the documented
+  four-file personal layer, and safely rolls back unchanged failed provisioning.
+- Teardown proves exact identity, cleanliness, merged ancestry, and canonical
+  primary/base alignment before non-forced worktree removal and safe branch
+  deletion; unsafe or unexpected state is preserved with a recovery diagnostic.
+- The installer ships the helper executable and append-seeds
+  `.claude/worktrees/` exactly once without clobbering existing ignore rules.
+  Configuration-layering documentation and disposable Git integration coverage
+  define the local-link and runtime-lock boundaries.
+
 ## [0.32.1] — 2026-07-25
 
 ### Fixed — 🐛 Board-write contracts use the mandatory lock helper (E15-F01)

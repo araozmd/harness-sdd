@@ -294,7 +294,7 @@
         {
           "id": "E15-F02",
           "title": "Worktree-per-fix isolation helper for concurrent fix branches",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
