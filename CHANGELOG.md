@@ -137,6 +137,27 @@ All notable changes to the harness body are recorded here. Versions follow
   the original board's mode (`stat.S_IMODE(os.stat(board).st_mode)`) onto the temp file **inside the
   lock, before the replace**, preserving fail-stop semantics. `tests/test_board_lock.sh` asserts a
   `0600` board stays `0600` and a `0664` board stays `0664` across a `set-status`.
+- **Fail SAFE on canonical-board resolution; never a silent wrong-board write (Codex #46 r6 P1, id
+  3649368478).** Under `git init --separate-git-dir` or a submodule, the main worktree path is
+  **provably unrecoverable** from a linked worktree (`git rev-parse --git-common-dir` reports the
+  separate metadata dir, whose parent is not the main worktree, and git stores no back-pointer to
+  the primary working tree). The previous auto-discovery either resolved `HARNESS_DIR` to the
+  boardless metadata dir (`board not found`) or silently fell back to the linked worktree's OWN
+  board — a silent wrong-board write defeating the shared-board guarantee. Resolution is now
+  strict-precedence and fail-safe: **(1)** explicit `HARNESS_DIR` override [highest precedence, set
+  by the F03 `/sdd-fix-parallel` coordinator]; **(2)** best-effort auto-discovery for the standard
+  `.git` worktree layout — **accepted only when the canonical board actually exists** there
+  (`<canonical>/state/tasks.json`); **(3)** otherwise, when running inside a **linked** worktree,
+  a **loud non-zero fail** with an actionable message demanding an explicit `HARNESS_DIR` (never a
+  silent fall-back to the linked worktree's own board), while the ordinary non-worktree / serial
+  `/sdd-next` case keeps the `__file__` self-location. Standard-layout worktrees still auto-resolve;
+  exotic layouts fail safe; the coordinator's `HARNESS_DIR` injection makes ALL layouts correct.
+  `tests/test_board_lock.sh` gains **R12sgd**: from a `separate-git-dir` linked worktree, a
+  `set-status` with **no** `HARNESS_DIR` exits non-zero with the actionable message while the main
+  board AND the linked worktree's own board stay byte-unchanged, and the same call **with**
+  `HARNESS_DIR=<main>` (the coordinator path) lands on the main board. The spec's **R12** and the
+  F03 brief (`progress/inbox/E15-F03.md`) are updated to require the coordinator to inject
+  `HARNESS_DIR`.
 
 ## [0.30.0] — 2026-07-10
 

@@ -13,6 +13,8 @@
 #   R8 no schema/status change; a serial write validates and adds no new status
 #   R9 the lock uses stdlib fcntl.flock (python3), not the flock(1) binary
 #   R11 VERSION advanced (a MINOR bump, compared not frozen) + CHANGELOG entry
+#   R12sgd separate-git-dir linked worktree fails SAFE (loud) without HARNESS_DIR;
+#          the F03 coordinator's explicit HARNESS_DIR override lands on the main board
 #
 # Constraints (permanent-suite anti-pattern): never freeze the exact VERSION
 # literal, never diff DO-NOT-TOUCH files against main, never touch the live
@@ -802,6 +804,86 @@ PY
   fi
 fi
 
+# ── R12sgd: separate-git-dir linked worktree FAILS SAFE (loud) w/o override ─────
+# test_separate_git_dir_linked_worktree_fails_safe  (Codex #46 r6 P1, id 3649368478)
+# Under `git init --separate-git-dir` (and submodules) the MAIN worktree path is
+# PROVABLY unrecoverable from a LINKED worktree: `git rev-parse --git-common-dir`
+# reports the SEPARATE metadata dir, whose parent is NOT the main worktree, so
+# auto-discovery cannot yield the canonical board. The helper must then NEITHER
+# resolve to the boardless metadata dir NOR silently fall back to the linked
+# worktree's OWN board (a wrong-board write defeating the shared-board guarantee):
+# it must FAIL LOUDLY (non-zero + actionable message) demanding an explicit
+# HARNESS_DIR — and WITH that override (the F03 coordinator path) the write must
+# land on the MAIN board. Attempt the git feature; skip cleanly if unavailable.
+if ! git --version >/dev/null 2>&1; then
+  pass "R12sgd (skipped: git unavailable)"
+else
+  T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+  MAIN="$T/main"
+  GITDIR="$T/gitdir"
+  # SOURCE layout under a SEPARATE git dir: main worktree's `.git` is a gitlink
+  # FILE pointing at $GITDIR (not an in-tree .git directory).
+  make_fixture "$MAIN"
+  mkdir -p "$MAIN/tools"
+  cp "$HELPER" "$MAIN/tools/tasks-lock.py"
+  cp "$VALIDATOR" "$MAIN/tools/validate-board.py"
+  if ! git init -q --separate-git-dir="$GITDIR" "$MAIN" 2>/dev/null; then
+    rm -rf "$T"
+    pass "R12sgd (skipped: git init --separate-git-dir unsupported here)"
+  else
+    ( cd "$MAIN" \
+        && git config user.email t@t.com \
+        && git config user.name t \
+        && git add -A \
+        && git commit -qm init ) \
+      || fail "R12sgd: could not commit the separate-git-dir main fixture"
+    WT="$T/linked"
+    if ! ( cd "$MAIN" && git worktree add -q "$WT" HEAD ) 2>/dev/null; then
+      rm -rf "$T"
+      pass "R12sgd (skipped: no git worktree under separate-git-dir)"
+    else
+      LINKED_HELPER="$WT/tools/tasks-lock.py"
+      [ -f "$LINKED_HELPER" ] \
+        || fail "R12sgd: linked worktree did not check out the tools/ helper"
+      cp "$MAIN/state/tasks.json" "$T/main-before.json"
+      # Capture the linked worktree's own checked-out board (if any) BEFORE.
+      if [ -f "$WT/state/tasks.json" ]; then
+        cp "$WT/state/tasks.json" "$T/linked-before.json"
+      fi
+      # (a) NO HARNESS_DIR → LOUD non-zero fail with the actionable message.
+      if ( cd "$WT" && env -u HARNESS_DIR python3 "$LINKED_HELPER" \
+            set-status E01-F01 in-review ) 2>"$T/sgderr.txt"; then
+        fail "R12sgd: set-status from a separate-git-dir linked worktree did NOT fail (silent wrong-board write?)"
+      fi
+      grep -qiE 'linked git worktree|HARNESS_DIR' "$T/sgderr.txt" \
+        || fail "R12sgd: fail message does not demand an explicit HARNESS_DIR"
+      grep -qiF 'HARNESS_DIR' "$T/sgderr.txt" \
+        || fail "R12sgd: fail message does not name HARNESS_DIR"
+      # the MAIN board is byte-unchanged …
+      cmp -s "$T/main-before.json" "$MAIN/state/tasks.json" \
+        || fail "R12sgd: the MAIN board was modified despite the loud fail"
+      # … and the linked worktree's OWN board was NOT silently written.
+      if [ -f "$T/linked-before.json" ]; then
+        cmp -s "$T/linked-before.json" "$WT/state/tasks.json" \
+          || fail "R12sgd: the LINKED worktree's own board was silently written (wrong-board write)"
+      fi
+      # (b) WITH HARNESS_DIR override (the F03 coordinator path) → lands on MAIN.
+      ( cd "$WT" && HARNESS_DIR="$MAIN" python3 "$LINKED_HELPER" \
+          set-status E01-F01 in-review ) \
+        || fail "R12sgd: set-status with HARNESS_DIR override failed"
+      [ "$(status_of "$MAIN/state/tasks.json" E01-F01)" = "in-review" ] \
+        || fail "R12sgd: HARNESS_DIR override did not land the write on the MAIN board"
+      # and the linked worktree's own board still was not touched by the override run.
+      if [ -f "$T/linked-before.json" ]; then
+        cmp -s "$T/linked-before.json" "$WT/state/tasks.json" \
+          || fail "R12sgd: the LINKED board changed under the HARNESS_DIR override run"
+      fi
+      rm -rf "$T"
+      pass "R12sgd separate-git-dir linked worktree fails SAFE without HARNESS_DIR (main untouched); override lands on the main board"
+    fi
+  fi
+fi
+
 # ── R13struct: locate status STRUCTURALLY by id, not by textual key order ──────
 # test_status_before_id_targets_correct_object  (Codex #46 r4 P2, id 3649274120)
 # JSON imposes no key order. If the minimal-diff writer finds the target's status
@@ -929,4 +1011,4 @@ for _m in 600 664; do
 done
 pass "R14mode board file mode (0600 / 0664) preserved across the atomic os.replace"
 
-echo "PASS: test_board_lock.sh (R1-R9, R10a/R10b, R11, R12/R12b, R13, R12wt, R13struct, R14py3, R14mode)"
+echo "PASS: test_board_lock.sh (R1-R9, R10a/R10b, R11, R12/R12b, R13, R12wt, R12src, R12sgd, R13struct, R14py3, R14mode)"

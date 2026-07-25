@@ -30,32 +30,49 @@
 #       for callers that express a different single mutation). The mutator is a
 #       python file exposing `mutate(data) -> data`.
 #
-# HARNESS_DIR (env) selects the board root. Precedence (R12):
-#   (1) an explicit HARNESS_DIR env override always wins (escape hatch);
-#   (2) else, if this helper sits inside a git repo/worktree, resolve the SINGLE
-#       CANONICAL board root in the MAIN working tree — even when invoked from a
-#       LINKED git worktree (the F02/F03 parallel-fix flow). Every worker, in any
+# HARNESS_DIR (env) selects the board root. Precedence (R12), fail-SAFE:
+#   (1) an explicit HARNESS_DIR env override always wins (escape hatch, highest
+#       precedence). The /sdd-fix-parallel coordinator (F03) sets this to the
+#       canonical main harness directory for every worktree worker, which makes
+#       ALL git layouts correct regardless of what auto-discovery can recover.
+#   (2) else, best-effort auto-discovery for the STANDARD `.git` worktree layout:
+#       a linked worktree's `git rev-parse --git-common-dir` points at the MAIN
+#       repo's `.git` dir, so its parent is the main worktree root. We ACCEPT this
+#       canonical root ONLY IF the board actually exists there
+#       (`<canonical>/state/tasks.json`). Every worker, in any standard-layout
 #       worktree, then reads/writes the SAME state/tasks.json and contends on the
 #       SAME state/tasks.json.lock inode, so the no-lost-update guarantee (R1)
-#       holds across worktrees, not just within one directory;
-#   (3) else fall back to this helper's own self-location (parent-of-parent of
-#       __file__) — the source (tools/tasks-lock.py) and installed
-#       (.harness/tools/tasks-lock.py) layouts both work from ANY cwd.
+#       holds across worktrees, not just within one directory.
+#   (3) else, decide by whether we are inside a LINKED git worktree:
+#       - IF inside a linked worktree (a parallel-fix worker) but auto-discovery
+#         did NOT yield an existing canonical board — as happens under exotic
+#         layouts (`git init --separate-git-dir`, submodules) where the main
+#         worktree path is provably UNRECOVERABLE from a linked worktree — then
+#         FAIL LOUDLY (non-zero, actionable message) demanding an explicit
+#         HARNESS_DIR. We NEVER silently fall back to the linked worktree's OWN
+#         board — that would be a silent wrong-board write defeating the
+#         shared-board guarantee.
+#       - ELSE (not in a worktree at all: the ordinary single-repo / self-location
+#         case, i.e. serial /sdd-next) fall back to this helper's own self-location
+#         (parent-of-parent of __file__) — the source (tools/tasks-lock.py) and
+#         installed (.harness/tools/tasks-lock.py) layouts both work from ANY cwd.
 #
-# Main-worktree resolution (case 2): a linked worktree's `git rev-parse
-# --git-common-dir` points at the MAIN repo's `.git` dir, so its parent is the
-# main worktree root. We preserve the source-vs-installed layout by computing the
-# harness subpath as the helper's self-located dir RELATIVE to the current
-# worktree toplevel (`git rev-parse --show-toplevel`), then re-applying that same
-# relative subpath under the main worktree root (source → <main>/state/…;
-# installed → <main>/.harness/state/…). Git runs via subprocess with the helper's
-# OWN tools/ directory as cwd (`os.path.dirname(__file__)`) — a path that is
-# inside the current worktree in BOTH the source (<root>/tools) and installed
-# (<root>/.harness/tools) layouts, so discovery resolves the MAIN worktree from
-# any linked worktree. (Using the PARENT of the self-located harness dir would
-# escape the repo in the source layout, where the harness dir IS the toplevel.)
-# On ANY git failure (not a repo, git absent, timeout, unexpected layout) we
-# fall back to self-location — never crash, never block.
+# This makes the standard worktree layout work automatically, exotic layouts fail
+# safe (loud + actionable) instead of corrupting board state, and the F03
+# coordinator's HARNESS_DIR injection makes ALL layouts correct.
+#
+# Standard-layout resolution (case 2): we preserve the source-vs-installed layout
+# by computing the harness subpath as the helper's self-located dir RELATIVE to
+# the current worktree toplevel (`git rev-parse --show-toplevel`), then
+# re-applying that same relative subpath under the main worktree root (source →
+# <main>/state/…; installed → <main>/.harness/state/…). Git runs via subprocess
+# with the helper's OWN tools/ directory as cwd (`os.path.dirname(__file__)`) — a
+# path that is inside the current worktree in BOTH the source (<root>/tools) and
+# installed (<root>/.harness/tools) layouts, so discovery resolves the MAIN
+# worktree from any linked worktree. (Using the PARENT of the self-located harness
+# dir would escape the repo in the source layout, where the harness dir IS the
+# toplevel.) On ANY git failure (not a repo, git absent, timeout, unexpected
+# layout) we fall through to the case-3 decision — never crash, never block.
 
 import argparse
 import errno
@@ -121,12 +138,58 @@ def _git(args, cwd):
     return text or None
 
 
+def _in_linked_worktree():
+    """True iff the helper is running inside a LINKED git worktree.
+
+    A linked worktree is a parallel-fix worker (F02/F03): its `.git` is a FILE
+    (a `gitdir:` pointer), and `git rev-parse --git-common-dir` resolves OUTSIDE
+    the current worktree toplevel (to the MAIN repo's shared `.git`). We detect it
+    robustly across layouts — including `git init --separate-git-dir` and
+    submodules, where the current `.git` is also a file — by comparing the common
+    git dir against the current toplevel: a linked worktree's common dir lives
+    under a DIFFERENT toplevel (the main worktree), whereas a plain (main / single)
+    checkout's common dir is `<toplevel>/.git` (or, under separate-git-dir for the
+    PRIMARY working tree, still reachable as its own `.git` pointer — but the
+    PRIMARY tree has no `--git-common-dir` OUTSIDE itself). Returns False on any
+    git failure (not a repo, git absent) so a non-repo self-location run is never
+    misclassified as a worktree.
+    """
+    git_dir = os.path.dirname(os.path.abspath(__file__))  # the tools/ dir
+
+    toplevel = _git(["rev-parse", "--show-toplevel"], cwd=git_dir)
+    if toplevel is None:
+        return False  # not a git repo at all → not a worktree; self-locate.
+    toplevel = os.path.realpath(toplevel)
+
+    # `--is-inside-work-tree` guards the bare-repo edge; a bare repo has no
+    # working tree and no board, so treat it as non-worktree self-location.
+    inside = _git(["rev-parse", "--is-inside-work-tree"], cwd=git_dir)
+    if inside != "true":
+        return False
+
+    common_dir = _git(["rev-parse", "--git-common-dir"], cwd=git_dir)
+    if common_dir is None:
+        return False
+    common_dir = os.path.realpath(os.path.join(git_dir, common_dir))
+
+    # A LINKED worktree's shared common `.git` dir is NOT `<this-toplevel>/.git`:
+    # it lives under the MAIN worktree. A PRIMARY/single checkout's common dir IS
+    # `<toplevel>/.git` (colocated) — or, under separate-git-dir, the primary
+    # tree's `.git` FILE points at a git dir whose own parent is the separate
+    # metadata dir, NOT this toplevel. So the discriminant that specifically flags
+    # a LINKED worktree is: the common dir's parent is a DIFFERENT directory than
+    # this worktree's toplevel AND the common dir is not directly under it.
+    return os.path.dirname(common_dir) != toplevel
+
+
 def _canonical_harness_dir():
     """Map the self-located harness dir onto the MAIN worktree root (R12).
 
-    Returns the canonical board root in the main working tree, or None if the
-    helper is not inside a git worktree, git is unavailable, or the layout is
-    unexpected — in which case the caller falls back to self-location.
+    Returns the canonical board root in the main working tree ONLY when that
+    board actually exists there (`<canonical>/state/tasks.json`); otherwise None
+    (the helper is not inside a standard git worktree, git is unavailable, the
+    layout is unexpected/exotic, or the resolved main root carries no board) — in
+    which case the caller applies the case-3 fail-safe decision.
 
     The main worktree root is the parent of the common `.git` dir that a linked
     worktree's `git rev-parse --git-common-dir` reports. We then preserve the
@@ -170,16 +233,28 @@ def _canonical_harness_dir():
     if rel == os.curdir:
         rel = ""
 
-    return os.path.normpath(os.path.join(main_root, rel))
+    canonical = os.path.normpath(os.path.join(main_root, rel))
+    # ACCEPT the auto-resolved canonical root ONLY if the board actually exists
+    # there. Under `git init --separate-git-dir` / submodules the parent of the
+    # common `.git` dir is the metadata dir, NOT the real main worktree, so this
+    # existence check rejects the wrong path and lets the caller fail SAFE (loud)
+    # rather than resolve HARNESS_DIR to a boardless metadata dir.
+    if not os.path.exists(os.path.join(canonical, TASKS_REL)):
+        return None
+    return canonical
 
 
 def _harness_dir():
-    """Resolve the board root (see module docstring for full precedence).
+    """Resolve the board root (see module docstring for full precedence), fail-SAFE.
 
-    (1) explicit HARNESS_DIR env override; (2) the canonical main-worktree root
-    when inside a git worktree; (3) self-location fallback. Cases (2) and (3)
-    both keep the source-vs-installed layout, and no caller ever needs to
-    hand-set HARNESS_DIR just to run the documented command.
+    (1) explicit HARNESS_DIR env override [highest precedence — the F03
+    coordinator sets this]; (2) best-effort auto-discovery of the canonical
+    main-worktree root for the STANDARD `.git` worktree layout, accepted only when
+    the canonical board exists there; (3) otherwise, decide by worktree context:
+    inside a LINKED worktree (a parallel-fix worker) with no existing canonical
+    board → FAIL LOUDLY demanding explicit HARNESS_DIR (never silently write the
+    linked worktree's OWN board); NOT in a worktree at all → self-location
+    fallback (the ordinary serial /sdd-next path, unchanged).
     """
     override = os.environ.get("HARNESS_DIR")
     if override:
@@ -187,6 +262,20 @@ def _harness_dir():
     canonical = _canonical_harness_dir()
     if canonical is not None:
         return canonical
+    # Auto-discovery did NOT yield an existing canonical board. Fail SAFE: if we
+    # are inside a linked worktree (a parallel-fix worker under an exotic layout
+    # where the main worktree path is unrecoverable from git — separate-git-dir,
+    # submodules), do NOT silently fall back to the linked worktree's OWN board
+    # (a wrong-board write that defeats the shared-board guarantee). Demand an
+    # explicit HARNESS_DIR instead — which the /sdd-fix-parallel coordinator sets.
+    if _in_linked_worktree():
+        _die(
+            "running inside a linked git worktree but could not resolve the "
+            "canonical board; set HARNESS_DIR to the main harness directory "
+            "explicitly (the /sdd-fix-parallel coordinator sets this "
+            "automatically)"
+        )
+    # Ordinary single-repo / non-worktree case: self-locate (serial /sdd-next).
     return _self_harness_dir()
 
 
