@@ -9,6 +9,9 @@ progress/*/
 # pr-loop / multi-cli-orchestrator local cache (Codex review state)
 .mco-cache/
 
+# Local isolated feature worktrees.
+.worktrees/
+
 # OS / editor
 .DS_Store
 .obsidian/workspace*
