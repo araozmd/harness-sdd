@@ -409,6 +409,88 @@ git -C "$LIFE" worktree list --porcelain |
   fail "R14: unrelated worktree registration was removed"
 pass "R11/R14 real bookkeeping PR reconciliation and exact teardown lifecycle"
 
+# test_installed_manifest_waits_for_all_provisioning
+# Codex P1 #3651111576: in an installed consumer, .harness/progress is durable
+# tracked state. Exercise the real installed-layout F02 helper and prove every
+# selected create sees a clean canonical checkout. Only after all creates have
+# settled may the coordinator write the complete pre-dispatch manifest; that
+# manifest must precede claim/dispatch and retain guarded, failed, and deferred
+# classifications.
+INSTALLED="$TMP/installed-manifest-order"
+mkdir -p "$INSTALLED/.harness/tools" "$INSTALLED/.harness/progress"
+cp tools/fix-worktree.sh "$INSTALLED/.harness/tools/"
+chmod +x "$INSTALLED/.harness/tools/fix-worktree.sh"
+cat > "$INSTALLED/.harness/init.sh" <<'SH'
+#!/bin/sh
+exit 0
+SH
+chmod +x "$INSTALLED/.harness/init.sh"
+printf '.claude/worktrees/\n' > "$INSTALLED/.gitignore"
+git -C "$INSTALLED" init -q -b main
+git -C "$INSTALLED" config user.email test@example.com
+git -C "$INSTALLED" config user.name "Test User"
+git -C "$INSTALLED" add .
+git -C "$INSTALLED" commit -qm "installed fixture"
+
+ORDER="$TMP/installed-manifest-order.log"
+MANIFEST="$INSTALLED/.harness/progress/E99-fix-parallel-20260101T000000Z/summary.md"
+for _case in \
+  "E99-F701 parallel" \
+  "E99-F702 guarded" \
+  "E99-F703 fails"; do
+  set -- $_case
+  _id=$1
+  _slug=$2
+  [ ! -e "$MANIFEST" ] ||
+    fail "P1: installed manifest dirtied primary before all F02 creates settled"
+  [ -z "$(git -C "$INSTALLED" status --porcelain --untracked-files=all)" ] ||
+    fail "P1: installed canonical primary was dirty before F02 create $_id"
+  printf 'provision:%s\n' "$_id" >> "$ORDER"
+  if [ "$_id" = "E99-F703" ]; then
+    git -C "$INSTALLED" branch "feat/$_id-$_slug" main
+    if (cd "$INSTALLED" && .harness/tools/fix-worktree.sh create "$_id" "$_slug" >/dev/null 2>&1); then
+      fail "P1: installed provisioning-failure fixture unexpectedly succeeded"
+    fi
+  else
+    (cd "$INSTALLED" && .harness/tools/fix-worktree.sh create "$_id" "$_slug" >/dev/null) ||
+      fail "P1: installed F02 create failed for $_id"
+  fi
+done
+
+mkdir -p "$(dirname "$MANIFEST")"
+cat > "$MANIFEST" <<'MD'
+# Parallel fix batch
+- E99-F701: parallel-selected; provisioned
+- E99-F702: guarded-selected; provisioned; shared path tools/*
+- E99-F703: parallel-selected; provisioning-failed; branch already exists
+- E99-F704: cap-deferred
+MD
+printf 'manifest\nclaim\ndispatch\n' >> "$ORDER"
+if ! python3 - "$ORDER" "$MANIFEST" <<'PY'
+import pathlib, sys
+order = pathlib.Path(sys.argv[1]).read_text().splitlines()
+manifest = pathlib.Path(sys.argv[2]).read_text()
+assert order == [
+    "provision:E99-F701",
+    "provision:E99-F702",
+    "provision:E99-F703",
+    "manifest",
+    "claim",
+    "dispatch",
+]
+for expected in (
+    "E99-F701: parallel-selected; provisioned",
+    "E99-F702: guarded-selected; provisioned; shared path tools/*",
+    "E99-F703: parallel-selected; provisioning-failed; branch already exists",
+    "E99-F704: cap-deferred",
+):
+    assert expected in manifest
+PY
+then
+  fail "P1: installed provisioning/manifest/claim/dispatch ordering failed"
+fi
+pass "P1 installed manifest follows all F02 provisioning and precedes claim/dispatch"
+
 # Named traceability cases exercised by the ordered durable-contract checks:
 # test_native_safe_wave_fanout_contract
 # test_guarded_wave_is_exclusive_and_ordered
@@ -425,8 +507,8 @@ need "$CMD" 'agents/fixer.md' "R1: command does not resolve Fixer"
 need "$CMD" 'argument-free' "R1: command is not argument-free"
 for anchor in \
   'P1 — capability and config preflight' \
-  'P2 — complete pre-dispatch manifest' \
-  'P3 — provision selected worktrees while primary is clean' \
+  'P2 — provision selected worktrees while primary is clean' \
+  'P3 — complete pre-dispatch manifest' \
   'P4 — atomic locked batch claim' \
   'P5 — parallel-safe fan-out before any wait' \
   'P6 — guarded exclusive wave' \
@@ -437,8 +519,9 @@ python3 - "$FIXER" <<'PY' || fail "phase anchors are out of order"
 import sys
 s=open(sys.argv[1]).read()
 anchors=[
-"P1 — capability and config preflight","P2 — complete pre-dispatch manifest",
-"P3 — provision selected worktrees while primary is clean",
+"P1 — capability and config preflight",
+"P2 — provision selected worktrees while primary is clean",
+"P3 — complete pre-dispatch manifest",
 "P4 — atomic locked batch claim","P5 — parallel-safe fan-out before any wait",
 "P6 — guarded exclusive wave","P7 — aggregate report and exit"]
 assert [s.index(x) for x in anchors] == sorted(s.index(x) for x in anchors)

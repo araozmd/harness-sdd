@@ -10,10 +10,11 @@ This command is argument-free. If `$ARGUMENTS` is non-empty, STOP and report usa
 
 1. Run `./init.sh`; stop on non-zero.
 2. Execute the role's exact P1–P7 sequence: native concurrency/config/in-session
-   Builder preflight, complete manifest, one-time F02 provisioning while the primary
-   is clean, coordinator bookkeeping branch plus one F01 atomic claim with canonical
-   `HARNESS_DIR`, parallel-safe fan-out before any wait, guarded exclusive numeric
-   wave, bookkeeping PR reconciliation, updated-base proof, and aggregate report.
+   Builder preflight, one-time F02 provisioning while the primary is clean, complete
+   manifest with provisioning failures before claim/dispatch, coordinator bookkeeping
+   branch plus one F01 atomic claim with canonical `HARNESS_DIR`, parallel-safe fan-out
+   before any wait, guarded exclusive numeric wave, bookkeeping PR reconciliation,
+   updated-base proof, and aggregate report.
 3. Each worker uses Orchestrator “Targeted parallel-fix worker mode” for one id and
    its pre-provisioned branch/worktree, creates only its post-approval code PR,
    continues siblings, and reports an observed merge for coordinator-owned done and

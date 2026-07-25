@@ -249,25 +249,31 @@ eligibility, sort numeric `E99-F<NN>`, and select the first `max_parallel`. Late
 candidates remain pending. If none are ready, print exactly `no ready E99 fixes`,
 create no manifest or worktree, mutate nothing, and exit zero.
 
-### P2 — complete pre-dispatch manifest
-
-Before dispatch create
-`progress/E99-fix-parallel-YYYYMMDDTHHMMSSZ/summary.md`. List every ready candidate,
-marking it `parallel-selected`, `guarded-selected` with reason, or `cap-deferred`.
-Never silently truncate, serialize, or lose a candidate.
-
-### P3 — provision selected worktrees while primary is clean
+### P2 — provision selected worktrees while primary is clean
 
 Sequentially call `tools/fix-worktree.sh create <fix-id> <slug>` (or installed
-`.harness/tools/`) for every selected fix before a board write dirties the primary.
-Record its exact branch/worktree. A provisioning failure stays `pending`, is recorded,
-and does not prevent siblings from proceeding. This is the only create operation for
-the fix: keep that exact pre-provisioned branch/worktree through all Builder, Reviewer,
-PR, merge, and reconciliation steps. Only provisioned ids reach the claim.
+`.harness/tools/`) for every selected fix before any manifest or board write dirties
+the primary. Keep the classification for every ready candidate in memory throughout:
+`parallel-selected`, `guarded-selected` with reason, or `cap-deferred`. Record each
+successful fix's exact branch/worktree. A provisioning failure stays `pending`, is
+classified `provisioning-failed` with its reason, and does not prevent siblings from
+proceeding. This is the only create operation for the fix: keep that exact
+pre-provisioned branch/worktree through all Builder, Reviewer, PR, merge, and
+reconciliation steps. Only provisioned ids reach the claim.
+
+### P3 — complete pre-dispatch manifest
+
+After every selected provisioning attempt has settled and before the bookkeeping
+branch, claim, or dispatch, create
+`progress/E99-fix-parallel-YYYYMMDDTHHMMSSZ/summary.md`. List every ready candidate:
+each selected entry retains its parallel/guarded classification and reason plus either
+its provisioned branch/worktree or `provisioning-failed` reason, and every later ready
+candidate remains `cap-deferred`. Never silently truncate, serialize, or lose a
+candidate.
 
 ### P4 — atomic locked batch claim
 
-Before the first board write, create one collision-checked coordinator-owned
+After the manifest write and before the first board write, create one collision-checked coordinator-owned
 bookkeeping branch from the captured local base and switch the canonical primary onto
 it. This branch is the sole Git persistence lane for the batch's shared board/history
 state; it is not a fix implementation branch and never replaces any per-fix code PR.

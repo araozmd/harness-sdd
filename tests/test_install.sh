@@ -318,6 +318,20 @@ grep -qF 'bookkeeping PR reconciliation' "$T/.claude/commands/sdd-fix-parallel.m
   fail "sdd-fix-parallel installed body lacks bookkeeping reconciliation"
 grep -qF 'pre-provisioned branch/worktree' "$T/.claude/commands/sdd-fix-parallel.md" ||
   fail "sdd-fix-parallel installed body can recreate F02 resources"
+grep -qF 'one-time F02 provisioning while the primary is clean, complete' \
+  "$T/.claude/commands/sdd-fix-parallel.md" ||
+  fail "sdd-fix-parallel installed command writes manifest before provisioning"
+if ! python3 - "$T/.harness/agents/fixer.md" <<'PY'
+import sys
+text = open(sys.argv[1]).read()
+provision = text.index("P2 — provision selected worktrees while primary is clean")
+manifest = text.index("P3 — complete pre-dispatch manifest")
+claim = text.index("P4 — atomic locked batch claim")
+assert provision < manifest < claim
+PY
+then
+  fail "installed Fixer manifest phase does not follow clean-primary provisioning"
+fi
 grep -Eq '^fix_lane:' "$T/.harness/harness.config.yaml" ||
   fail "fresh installed config missing fix_lane"
 grep -Eq '^[[:space:]]+max_parallel:[[:space:]]+3' "$T/.harness/harness.config.yaml" ||
