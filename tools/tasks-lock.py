@@ -44,6 +44,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import sys
 import time
 
@@ -143,27 +144,73 @@ def _import_mutator(path):
     return module.mutate
 
 
-def _set_status_mutator(target_id, status):
-    """Build a mutator that sets the status of the object <target_id> addresses."""
-    is_feature = "-F" in target_id
+def _find_status_span(text, target_id):
+    """Locate the `"status": "<value>"` span of the object <target_id> addresses.
 
-    def mutate(data):
-        for epic in data.get("epics", []):
-            if is_feature:
-                for feat in epic.get("features", []):
-                    if feat.get("id") == target_id:
-                        feat["status"] = status
-                        return data
-            else:
-                if epic.get("id") == target_id:
-                    epic["status"] = status
-                    return data
-        _die("id %r not found in board" % target_id)
+    Returns (start, end, old_status) into `text`, where [start:end) is exactly the
+    quoted status VALUE token (excluding the surrounding quotes' contents change —
+    we replace only the value between the quotes). Deriving the span from the
+    ORIGINAL text (not a re-serialization) is what makes the write minimal-diff:
+    every other byte — indentation, inline vs multiline arrays, trailing newline —
+    is preserved verbatim (R6).
 
-    return mutate
+    We anchor on the target's own `"id": "<target_id>"` occurrence, then find the
+    FIRST `"status"` key at-or-after it. In this store an object's `id` precedes
+    its `status`, and ids are unique, so this pins the correct object without a
+    hand-rolled JSON walker. Returns None if the id (or a following status) is not
+    found, so the caller can fail-stop exactly like the old lookup did.
+    """
+    id_pat = re.compile(r'"id"\s*:\s*"' + re.escape(target_id) + r'"')
+    m_id = id_pat.search(text)
+    if m_id is None:
+        return None
+    status_pat = re.compile(r'"status"\s*:\s*"([^"]*)"')
+    m_status = status_pat.search(text, m_id.end())
+    if m_status is None:
+        return None
+    return (m_status.start(1), m_status.end(1), m_status.group(1))
 
 
-def run(mutator, timeout):
+def _set_status_text_transform(target_id, status):
+    """Build a TEXT transform that changes ONLY the target's status value.
+
+    Unlike a parse → mutate → re-serialize round-trip (which reformats every
+    line to `json.dumps(indent=2)` shape and thus rewrites unrelated entries —
+    e.g. collapsing/expanding sibling inline arrays), this edits the original
+    text in place: it replaces just the target object's status VALUE token and
+    leaves all surrounding bytes untouched. The caller still json.loads + schema-
+    validates the RESULT before the atomic replace, so an invalid outcome (bad
+    id, illegal status, sliced-done invariant) still fail-stops (R4).
+    """
+
+    def transform(text):
+        span = _find_status_span(text, target_id)
+        if span is None:
+            _die("id %r not found in board" % target_id)
+        start, end, _old = span
+        return text[:start] + status + text[end:]
+
+    return transform
+
+
+def _mutator_text_transform(mutate):
+    """Wrap a data-level `mutate(data) -> data` as a text transform.
+
+    External mutators (the `apply --mutator` path) may change arbitrary
+    structure, so there is no meaningful original-text token to surgically
+    patch; we parse, mutate, and re-serialize with the canonical `indent=2`
+    representation (unchanged behaviour for that path).
+    """
+
+    def transform(text):
+        data = json.loads(text)
+        data = mutate(data)
+        return json.dumps(data, indent=2) + "\n"
+
+    return transform
+
+
+def run(transform, timeout):
     hdir = _harness_dir()
     tasks_path = os.path.join(hdir, TASKS_REL)
     lock_path = os.path.join(hdir, LOCK_REL)
@@ -182,15 +229,19 @@ def run(mutator, timeout):
         _acquire(lock_fd, lock_path, timeout)  # R3, R5
         try:
             # RE-READ from disk INSIDE the lock (R2) — never a pre-lock copy.
+            # Read the RAW TEXT (not just the parsed object): the minimal-diff
+            # set-status path patches this text in place, preserving every byte of
+            # unrelated entries (inline vs multiline arrays, indentation, trailing
+            # newline) so a serial write stays byte-equivalent to a plain
+            # read-modify-write (R6) and does not enlarge Git diffs.
             with open(tasks_path) as fh:
-                data = json.load(fh)
+                original_text = fh.read()
 
-            data = mutator(data)  # the single mutation (R1)
+            serialized = transform(original_text)  # the single mutation (R1)
 
             # Validate the mutated content BEFORE replacing the file (R4), using
             # the SAME shared validator init.sh runs. Any error → fail-stop, board
             # untouched (raised here, caught by main() → non-zero, clear message).
-            serialized = json.dumps(data, indent=2) + "\n"
             reparsed = json.loads(serialized)  # parse check
             errs = validate(reparsed, schema)  # schema check (shared with init.sh)
             if errs:
@@ -253,14 +304,16 @@ def main(argv):
         )
 
     if args.cmd == "set-status":
-        mutator = _set_status_mutator(args.id, args.status)
+        # Minimal-diff text transform: patches only the target's status token.
+        transform = _set_status_text_transform(args.id, args.status)
     elif args.cmd == "apply":
-        mutator = _import_mutator(args.mutator)
+        # External mutators may change arbitrary structure → parse+re-serialize.
+        transform = _mutator_text_transform(_import_mutator(args.mutator))
     else:  # pragma: no cover - argparse enforces
         parser.error("unknown command")
 
     try:
-        run(mutator, args.timeout)
+        run(transform, args.timeout)
     except SystemExit:
         raise
     except json.JSONDecodeError as exc:

@@ -64,6 +64,22 @@ All notable changes to the harness body are recorded here. Versions follow
   infinite bound). The helper now validates the timeout is **finite and non-negative** up front and
   exits non-zero with a clear message before entering the poll loop, restoring the bounded-
   acquisition contract (R5).
+- **Minimal-diff status writes preserve existing board formatting (Codex #46 r3 P2, id 3649236637).**
+  `set-status` now patches ONLY the addressed object's `"status"` value token in the original file
+  text, leaving every other byte untouched, instead of parsing → `json.dumps(indent=2)` →
+  re-serializing (which rewrote unrelated entries — e.g. expanding a sibling feature's inline
+  `depends_on` array — on any board not already `indent=2`-canonical). This restores the promised
+  serial byte-equivalence (R6) and keeps Git diffs / merge-conflict surface minimal, exactly when
+  E15 introduces parallel branches. The result is still `json`-parsed and schema-validated through
+  the shared `tools/validate-board.py` before the atomic `os.replace`, so an invalid outcome (bad
+  id, illegal status, sliced-`done` invariant) still fail-stops with the board intact. The
+  `apply --mutator` path is unchanged (external mutators may alter arbitrary structure).
+- **Ignore the source-layout board lockfile (Codex #46 r3 P2, id 3649236638).** The
+  `state/tasks.json.lock` ignore was seeded only into an installed consumer's `.harness/.gitignore`.
+  In this source repo the documented `python3 tools/tasks-lock.py set-status …` creates the lock at
+  root-relative `state/tasks.json.lock`, which the root `.gitignore` did not cover — dirtying the
+  worktree. Added `/state/tasks.json.lock` to the repo root `.gitignore` (the installed-layout
+  `.harness/.gitignore` entry is unchanged).
 
 ## [0.30.0] — 2026-07-10
 

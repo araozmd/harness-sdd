@@ -205,28 +205,79 @@ wait "$_hp" 2>/dev/null || true
 rm -rf "$T"
 pass "R5 held-lock acquisition aborts bounded + clear error (names lockfile+timeout)"
 
-# ── R6: serial write byte-equivalent to a plain read-modify-write ─────────────
+# ── R6: serial write is a MINIMAL-DIFF read-modify-write (formatting preserved) ─
 # test_serial_caller_result_unchanged
+# The write must change ONLY the addressed status VALUE and leave every other byte
+# of the file untouched — the promised serial byte-equivalence. We assert this
+# against a fixture whose feature objects are INLINE/COMPACT (not indent=2-expanded)
+# so a naive parse→json.dumps(indent=2)→write would rewrite unrelated lines; the
+# minimal-diff helper must not. The "plain read-modify-write" baseline here is a
+# byte-preserving textual edit of just the target status.
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
 make_fixture "$T"
-# Apply the same mutation two ways: (a) through the helper, (b) a trivial
-# read-modify-write with the same json.dumps formatting the helper uses.
+# Baseline: edit only the target status token in the ORIGINAL text (formatting
+# preserved) — this is what a minimal-diff read-modify-write yields.
 cp "$T/state/tasks.json" "$T/plain.json"
 python3 - "$T/plain.json" <<'EOF'
-import json, sys
+import re, sys
 p = sys.argv[1]
-d = json.load(open(p))
-for e in d['epics']:
-    for f in e['features']:
-        if f['id'] == 'E01-F01': f['status'] = 'in-progress'
-open(p, 'w').write(json.dumps(d, indent=2) + "\n")
+t = open(p).read()
+m_id = re.search(r'"id"\s*:\s*"E01-F01"', t)
+m_st = re.search(r'"status"\s*:\s*"([^"]*)"', t[m_id.end():])
+s = m_id.end() + m_st.start(1); e = m_id.end() + m_st.end(1)
+open(p, 'w').write(t[:s] + 'in-progress' + t[e:])
 EOF
 HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 in-progress \
   || fail "R6: serial helper call failed"
 cmp -s "$T/state/tasks.json" "$T/plain.json" \
-  || fail "R6: helper output differs byte-for-byte from a plain read-modify-write"
+  || fail "R6: helper output differs byte-for-byte from a minimal-diff read-modify-write"
 rm -rf "$T"
-pass "R6 serial (uncontended) write is byte-equivalent to plain read-modify-write"
+pass "R6 serial (uncontended) write is a minimal-diff read-modify-write (formatting preserved)"
+
+# ── R6b: a single set-status on a COMPACT board changes ONLY the target line ───
+# test_minimal_diff_leaves_unrelated_inline_arrays_untouched  (Codex #46 r3 P2,
+# id 3649236637): a board with inline/compact `depends_on` arrays (NOT indent=2-
+# expanded) must, after one set-status, differ from the before-image by EXACTLY
+# the one status delta — every unrelated inline array/line stays byte-identical.
+T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+mkdir -p "$T/state" "$T/store"
+cp "$SCHEMA" "$T/store/tasks.schema.json"
+# Deliberately NON-canonical formatting: inline compact depends_on arrays and
+# inline feature objects that json.dumps(indent=2) would reformat.
+cat > "$T/state/tasks.json" <<'EOF'
+{
+  "project": "fixture",
+  "epics": [
+    {
+      "id": "E15",
+      "title": "epic",
+      "status": "planned",
+      "features": [
+        { "id": "E15-F01", "title": "f one", "status": "in-progress", "sdd": true, "spec_path": "a" },
+        { "id": "E15-F02", "title": "f two", "status": "pending", "sdd": true, "spec_path": "b", "depends_on": ["E15-F01"] },
+        { "id": "E15-F03", "title": "f three", "status": "pending", "sdd": true, "spec_path": "c", "depends_on": ["E15-F01", "E15-F02"] }
+      ]
+    }
+  ]
+}
+EOF
+cp "$T/state/tasks.json" "$T/before.json"
+# A no-op-shaped single transition: only E15-F01's status flips to in-review.
+HARNESS_DIR="$T" python3 "$HELPER" set-status E15-F01 in-review \
+  || fail "R6b: set-status on the compact board failed"
+# Exactly ONE line differs, and it is precisely the status delta on the target.
+_ndiff="$(diff "$T/before.json" "$T/state/tasks.json" | grep -cE '^[<>]')"
+[ "$_ndiff" -eq 2 ] \
+  || fail "R6b: expected exactly one changed line (2 diff sides), got $_ndiff — unrelated lines were reformatted"
+diff "$T/before.json" "$T/state/tasks.json" | grep -qE '^> .*"E15-F01".*"status": "in-review"' \
+  || fail "R6b: the changed line is not the target status delta"
+# The unrelated F02/F03 inline depends_on arrays are byte-identical before/after.
+grep -F '"depends_on": ["E15-F01"]' "$T/state/tasks.json" >/dev/null \
+  || fail "R6b: F02 inline depends_on array was reformatted"
+grep -F '"depends_on": ["E15-F01", "E15-F02"]' "$T/state/tasks.json" >/dev/null \
+  || fail "R6b: F03 inline depends_on array was reformatted"
+rm -rf "$T"
+pass "R6b single set-status on a compact board changes only the target status line (inline arrays intact)"
 
 # ── R7: on_write_command hook observable only AFTER the lock is released ───────
 # test_hook_fires_after_release
