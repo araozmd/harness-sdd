@@ -65,6 +65,22 @@ if grep -q "tasks: local" harness.config.yaml 2>/dev/null; then
   python3 tools/validate-board.py state/tasks.json store/tasks.schema.json \
     || fail "state/tasks.json failed schema validation (see errors above)"
   ok "TaskStore (local) valid against schema"
+
+  # Dependency cycles are planning diagnostics, not schema failures. Run this
+  # only after canonical validation succeeds, capture the helper status before
+  # rendering records, and keep both cycles and helper failures warn-only.
+  if CYCLE_RECORDS="$(python3 tools/task-diagnostics.py cycles state/tasks.json 2>&1)"; then
+    if [ -n "$CYCLE_RECORDS" ]; then
+      while IFS="$(printf '\t')" read -r cycle_code cycle_kind cycle_path; do
+        [ "$cycle_code" = "dependency-cycle" ] || continue
+        echo "⚠️  TaskStore dependency-cycle [$cycle_kind]: $cycle_path (warn-only)"
+      done <<EOF
+$CYCLE_RECORDS
+EOF
+    fi
+  else
+    echo "⚠️  TaskStore dependency diagnostics unavailable: $CYCLE_RECORDS (warn-only)" >&2
+  fi
 fi
 
 # 2b. Umbrella mode (additive, opt-in). Engaged ONLY when harness.config.yaml has a

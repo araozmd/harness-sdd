@@ -112,6 +112,45 @@ test_fix_worktree_helper_installed_executable() {
     fail "installed tools/fix-worktree.sh is missing or not executable"
 }
 
+test_dependency_diagnostics_installed_contract() {
+  [ -x "$T/.harness/tools/task-diagnostics.py" ] ||
+    fail "E16-F01: installed task-diagnostics.py missing or not executable"
+  cmp -s "$SRC/tools/task-diagnostics.py" "$T/.harness/tools/task-diagnostics.py" ||
+    fail "E16-F01: installed diagnostic helper differs from source"
+  grep -qF 'chmod +x "$H/tools/task-diagnostics.py"' "$SRC/harness-install.sh" ||
+    fail "E16-F01: installer lacks explicit diagnostic-helper executable wiring"
+  grep -qF 'tools/task-diagnostics.py cycles state/tasks.json' "$T/.harness/init.sh" ||
+    fail "E16-F01: installed init does not invoke diagnostic helper"
+  for code in dependency-cycle gated-epic unmet-dependency human-gate \
+    owner-excluded owner-unresolved no-candidates
+  do
+    grep -qF "\`$code\`" "$T/.harness/agents/orchestrator.md" ||
+      fail "E16-F01: installed Orchestrator missing reason $code"
+  done
+  grep -qF 'top-level selection returns a sliced feature' \
+    "$T/.harness/agents/orchestrator.md" ||
+    fail "E16-F01: installed Orchestrator missing sliced-parent no-result trigger"
+  grep -qF 'whole-board top-level diagnostics' \
+    "$T/.harness/agents/orchestrator.md" ||
+    fail "E16-F01: installed Orchestrator missing sliced-parent diagnostic scope"
+
+  cp "$T/.harness/state/tasks.json" "$T/.harness/state/tasks.json.e16-backup"
+  cat >"$T/.harness/state/tasks.json" <<'JSON'
+{"project":"fixture","epics":[{"id":"E16","title":"x","status":"planned","features":[
+ {"id":"E16-F1","title":"a","status":"pending","sdd":true,"autonomous":true,
+  "depends_on":["E16-F2"],"spec_path":"a/"},
+ {"id":"E16-F2","title":"b","status":"pending","sdd":true,"autonomous":true,
+  "depends_on":["E16-F1"],"spec_path":"b/"}
+]}]}
+JSON
+  "$T/.harness/init.sh" >"$T/e16-installed-init.out" 2>"$T/e16-installed-init.err" ||
+    fail "E16-F01: installed init failed for a schema-valid cyclic board"
+  grep -qF 'TaskStore dependency-cycle [feature]: E16-F1 -> E16-F2 -> E16-F1 (warn-only)' \
+    "$T/e16-installed-init.out" ||
+    fail "E16-F01: installed init did not execute full-path warn-only diagnostic"
+  mv "$T/.harness/state/tasks.json.e16-backup" "$T/.harness/state/tasks.json"
+}
+
 test_worktree_ignore_seed_preserved_idempotent() {
   [ "$(grep -cxF '.claude/worktrees/' "$T/.gitignore")" = "1" ] ||
     fail "root .gitignore must contain exactly one .claude/worktrees/ entry"
@@ -167,6 +206,7 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "installer exited non-zero"
 [ -f "$T/.harness/tools/tasks-lock.py" ] || fail "tools/tasks-lock.py not installed (board write lock would be missing in consumers)" # R10
 [ -x "$T/.harness/tools/tasks-lock.py" ] || fail "installed tools/tasks-lock.py is not executable (board write lock not runnable)"     # R10
 test_fix_worktree_helper_installed_executable
+test_dependency_diagnostics_installed_contract
 # E15-F01 (Codex #46 r2 P1): the SHARED board validator must ship in the body AND be
 # executable — init.sh runs it as a CLI and tasks-lock.py imports its validate(); if it
 # is missing the gate and the guarded write both break in consumers.

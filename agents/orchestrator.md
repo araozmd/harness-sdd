@@ -146,6 +146,68 @@ relaxation.** Apply it in this order:
 `state/tasks.json` remains the single source of truth for `owner` (invariant preserved,
 not changed by this feature).
 
+## No-actionable-work diagnostics — E16-F01
+
+Activate this diagnostic contract in either no-result path:
+
+- When ordinary or scoped top-level selection returns no task, explain the existing
+  feature gates across the board.
+- When top-level selection returns a sliced feature but `next_slice(feature)` returns
+  no slice while unfinished slices remain, explain only the gates on unfinished
+  slices of that selected parent feature. Use the same stable records, reason order,
+  and final summary below. Do not run whole-board top-level diagnostics in this path
+  and do not emit records for features or slices outside the selected parent feature.
+
+Do not choose a fallback or implement a second selector. These diagnostics are
+**informational**, return successful command completion, and **change no state**.
+In other words, selection diagnostics are read-only: the operation changes no state.
+E16-F03 must reuse the following reason codes, meanings, human templates, and both
+no-result activation paths **verbatim** when it moves selection into
+`tools/next-task.mjs`.
+
+Emit each candidate record exactly as:
+
+`blocked <id> [<reason-code>]: <human text>`
+
+Sort candidate ids numerically by epic then feature, with feature before slice and
+slice repository suffixes lexical. For one subject, emit **all applicable**
+non-owner reasons in this fixed order, then owner reasons: `dependency-cycle`,
+`gated-epic`, `unmet-dependency`, `human-gate`, `owner-excluded`,
+`owner-unresolved`. Sort every dependency named within a detail by the same
+canonical id order.
+
+| Reason code | When it applies | Exact human template |
+|---|---|---|
+| `dependency-cycle` | Subject participates in a same-kind feature or slice cycle. Emit the canonical full closed witness in addition to any unmet blocker. | `dependency cycle (<kind>): <id> -> ... -> <id>` |
+| `gated-epic` | An unfinished feature belongs to a `draft` epic. | `epic <id> is draft` |
+| `unmet-dependency` | A dependency is missing, not `done`, or a slice dependency is done but not merged. Name all blockers; use the actual status for a known non-done node. | `blocking dependencies: <id>=missing, <id>=<status>, <id>=done-but-unmerged` |
+| `human-gate` | A non-autonomous feature is parked at `spec-ready`, or a non-autonomous `sdd: false` quick fix remains `pending`. | Exactly `spec-ready requires approval` or `gated quick fix requires approval` |
+| `owner-excluded` | Only under resolved `--mine`, and only for an **otherwise actionable** candidate whose effective owner does not match. | Exactly `effective owner=<literal>` or `effective owner=unowned` |
+| `owner-unresolved` | `--mine` identity cannot resolve. The subject is `--mine`, not a fabricated feature. | Exactly `workflow.identity=<empty>`, `workflow.identity=@me lookup failed`, or `workflow.identity=self lookup failed` |
+| `no-candidates` | The board has no features, or every feature is `done`. No `blocked` record is emitted. | See terminal lines below. |
+
+Missing ids and cross-kind references are `unmet-dependency` blockers with
+`=missing`; never invent them as cycle nodes. Dependency graphs are disjoint:
+feature edges resolve only to features and slice edges only to slices. Use
+`python3 tools/task-diagnostics.py cycles state/tasks.json` for the same
+deterministic one-witness-per-cyclic-component paths shown by `init.sh`.
+
+Ownership reasons are scoped-only. Bare `/sdd-next` emits neither
+`owner-excluded` nor `owner-unresolved` and ignores owners as before.
+`owner-excluded` is evaluated after all ordinary gates and only for an otherwise
+actionable candidate. A failed identity resolution produces one
+`blocked --mine [owner-unresolved]: ...` record.
+
+When at least one `blocked` record exists, follow all records with exactly:
+
+`no actionable work: selection blocked; see reasons above`
+
+When there are no unfinished candidates, emit only one of these terminal summaries,
+with no fabricated blocked subject:
+
+- `no actionable work [no-candidates]: board has no features`
+- `no actionable work [no-candidates]: all features are done`
+
 ### Build↔review rounds (explicit, multi-round, until green)
 
 The build↔review handoff is **not a single pass** — it is an explicit loop that
@@ -212,7 +274,9 @@ When the selected feature has `slices[]`, drive it slice by slice:
 1. **select** — read the manifest. Pick the lowest-id slice that is actionable and
    whose **every** `depends_on` upstream slice is `done` **and** `merged` (topological
    order). If a slice's `repo` is not a key in the manifest, do NOT dispatch it —
-   report an error naming the missing repo.
+   report an error naming the missing repo. If unfinished slices remain but
+   `next_slice(feature)` returns no slice, invoke the E16-F01 no-result diagnostic
+   contract scoped to this selected parent feature's unfinished slices.
 2. **dispatch** — how you dispatch depends on `execution.builder.backend` in the
    umbrella's `harness.config.yaml` (the same global switch the single-repo Builder
    reads — see `agents/builder.md`). Either way, **everything runs from the child

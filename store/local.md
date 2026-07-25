@@ -121,6 +121,48 @@ selection is **exactly today's** board-wide `next()` — `owner` is ignored.
   unresolved, or no owned actionable feature exists, it **fails closed** — selects
   nothing, reports, changes no state — and does **not** widen to board-wide.
 
+### `next()` no-result diagnostic contract — E16-F01
+
+The Orchestrator activates this contract when `next()` or scoped `next()` selects
+nothing, explaining the existing gates across the board without changing
+actionability. It also activates when top-level selection returns a sliced feature
+but `next_slice(feature)` returns no slice while unfinished slices remain; that path
+emits records only for unfinished slices of the selected parent feature. Do not run
+whole-board top-level diagnostics for the sliced-parent path, and do not emit records
+for any other feature or slice. Both paths use the same stable records, reason order,
+and final summary below. Diagnostics are informational, successful, read-only
+records; selection changes no state. E16-F03 must reuse this vocabulary and both
+no-result activation paths **verbatim** in the future deterministic selector.
+
+Candidate records have the exact shape
+`blocked <id> [<reason-code>]: <human text>`. Sort candidates by numeric epic and
+feature id, feature before slice, and lexical slice suffix. Emit all applicable
+non-owner reasons for a subject in this order: `dependency-cycle`, `gated-epic`,
+`unmet-dependency`, `human-gate`; then scoped owner reasons
+`owner-excluded`, `owner-unresolved`.
+
+- `dependency-cycle`: `dependency cycle (<kind>): <id> -> ... -> <id>`, using the
+  canonical closed feature or slice witness.
+- `gated-epic`: `epic <id> is draft`.
+- `unmet-dependency`: `blocking dependencies: <id>=missing,
+  <id>=<status>, <id>=done-but-unmerged`; name every blocker in canonical order.
+  Missing and cross-kind ids use `missing` and never become cycle nodes.
+- `human-gate`: exactly `spec-ready requires approval` or
+  `gated quick fix requires approval`.
+- `owner-excluded`: only in resolved `--mine`, only for an otherwise actionable
+  candidate; exactly `effective owner=<literal>` or `effective owner=unowned`.
+- `owner-unresolved`: subject `--mine`; exactly
+  `workflow.identity=<empty>`, `workflow.identity=@me lookup failed`, or
+  `workflow.identity=self lookup failed`.
+- `no-candidates`: no subject and no blocked record; exactly
+  `no actionable work [no-candidates]: board has no features` or
+  `no actionable work [no-candidates]: all features are done`.
+
+Bare `/sdd-next` emits neither ownership reason. A cycle does not hide other
+dependency blockers: emit both applicable records. After one or more candidate
+records, emit exactly
+`no actionable work: selection blocked; see reasons above`.
+
 ### Epic lifecycle
 The canonical epic lifecycle is `draft → planned → in-progress → done`. A `draft`
 epic is an inception sketch (title + business brief only) whose features are never

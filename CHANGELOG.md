@@ -4,6 +4,20 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.35.0] — 2026-07-25
+
+### Added — ✨ Dependency-cycle and blocked-selection diagnostics (E16-F01)
+- Added the executable stdlib-only `tools/task-diagnostics.py` helper with
+  deterministic feature/slice SCC witnesses, graceful empty-board behavior, and
+  actionable direct-input errors.
+- Integrated warn-only cycle paths into source and installed `init.sh` after the
+  canonical TaskStore validator, preserving all existing gate exit semantics.
+- Pinned the seven stable no-selection reason codes, exact human templates,
+  canonical ordering, scoped ownership behavior, and read-only informational
+  contract for the Orchestrator, local store, and future E16-F03 selector.
+- Added executable graph, 2,000-node scale, installed-layout, schema/status
+  invariance, documentation, and full-suite regression coverage.
+
 ## [0.34.0] — 2026-07-25
 
 ### Added — ✨ Bounded isolated parallel maintenance fixes (E15-F03)
