@@ -300,14 +300,26 @@ fcntl.flock(fd, fcntl.LOCK_UN)
 EOF
 python3 "$T/hook.py" \
   || fail "R7: lock still held after helper returned — hook would run inside the critical section"
-# and the helper must not itself INVOKE any hook (no shell-out to a sync command):
-# it may name on_write_command in a comment explaining the after-release contract,
-# but it must never call subprocess/os.system to run it.
-if grep -nE "subprocess|os\.system|os\.popen|os\.exec" "$HELPER" >/dev/null 2>&1; then
-  fail "R7: helper shells out to a subprocess — the on_write_command hook must be the caller's job (after release)"
+# and the helper must not itself INVOKE the on_write_command sync hook: it may
+# name on_write_command in a comment explaining the after-release contract, but it
+# must never shell out to RUN it. The helper legitimately shells out to `git` for
+# canonical main-worktree path resolution (R12) — a read-only rev-parse, not a
+# board mutation — so we forbid running a hook/sync command specifically rather
+# than banning subprocess use outright. Prove the helper references neither the
+# hook key nor a generic shell that could run it.
+if grep -nE "os\.system|os\.popen|os\.exec" "$HELPER" >/dev/null 2>&1; then
+  fail "R7: helper uses a generic shell (os.system/popen/exec) — the sync hook must be the caller's job (after release)"
+fi
+# Any subprocess use must be confined to read-only `git` invocations (path
+# resolution), never a sync/hook command.
+if grep -nE "subprocess" "$HELPER" | grep -vE "subprocess\.(run|PIPE|DEVNULL|SubprocessError)|import subprocess|# " >/dev/null 2>&1; then
+  fail "R7: helper uses subprocess for something other than read-only git path resolution"
+fi
+if grep -nE 'subprocess\.run\(\s*\[\s*"[^g]' "$HELPER" >/dev/null 2>&1; then
+  fail "R7: helper spawns a non-git subprocess (only read-only git path resolution is allowed)"
 fi
 rm -rf "$T"
-pass "R7 lock is released before any post-write hook could run; helper runs no hook"
+pass "R7 lock is released before any post-write hook could run; helper runs no hook (git path-resolution only)"
 
 # ── R8: no schema/status change; serial write validates, adds no new status ───
 # test_no_schema_or_status_change
@@ -618,4 +630,142 @@ grep -qiF 'E15-F01' "$ROOT/CHANGELOG.md" \
   || fail "R11: CHANGELOG.md gained no E15-F01 entry"
 pass "R11 VERSION advanced (MINOR) + CHANGELOG entry present (compared, not frozen)"
 
-echo "PASS: test_board_lock.sh (R1-R9, R10a/R10b, R11, R12/R12b, R13)"
+# ── R12wt: canonical board+lock across git worktrees (Codex #46 r4 P1, id 3649274119) ─
+# test_canonical_board_lock_across_worktrees
+# The F02/F03 parallel-fix flow runs each fix in its OWN linked git worktree. If
+# the helper resolved the board relative to whatever worktree it ran in, each
+# worker would read/write a DIFFERENT worktree-local state/tasks.json and contend
+# on a DIFFERENT lockfile inode — so flock would not serialize cross-worktree
+# writers and R1's no-lost-update guarantee would be absent in exactly the scenario
+# the epic targets. The helper must resolve BOTH the board and the lockfile to the
+# SINGLE canonical location in the MAIN working tree (git rev-parse
+# --git-common-dir → main worktree), regardless of which worktree invoked it.
+if ! git --version >/dev/null 2>&1; then
+  pass "R12wt (skipped: git unavailable)"
+else
+  T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+  MAIN="$T/main"
+  # Build the MAIN worktree with an INSTALLED-layout harness (.harness/…) so we
+  # also exercise the source-vs-installed subpath re-application.
+  mkdir -p "$MAIN"
+  make_fixture "$MAIN/.harness"
+  mkdir -p "$MAIN/.harness/tools"
+  cp "$HELPER" "$MAIN/.harness/tools/tasks-lock.py"
+  cp "$VALIDATOR" "$MAIN/.harness/tools/validate-board.py"
+  ( cd "$MAIN" \
+      && git init -q \
+      && git config user.email t@t.com \
+      && git config user.name t \
+      && git add -A \
+      && git commit -qm init ) \
+    || fail "R12wt: could not initialise the main git worktree fixture"
+  # Attempt to add a LINKED worktree; skip cleanly if unsupported in this env.
+  WT="$T/linked"
+  if ! ( cd "$MAIN" && git worktree add -q "$WT" HEAD ) 2>/dev/null; then
+    rm -rf "$T"
+    pass "R12wt (skipped: no git worktree)"
+  else
+    # The linked worktree has its OWN checked-out copy of the helper + board.
+    LINKED_HELPER="$WT/.harness/tools/tasks-lock.py"
+    [ -f "$LINKED_HELPER" ] \
+      || fail "R12wt: linked worktree did not check out the .harness/tools helper"
+    # (a) invoke set-status from INSIDE the linked worktree, NO HARNESS_DIR set.
+    ( cd "$WT" && env -u HARNESS_DIR python3 "$LINKED_HELPER" set-status E01-F01 in-review ) \
+      || fail "R12wt: set-status from the linked worktree failed"
+    # the MAIN worktree's board received the transition …
+    [ "$(status_of "$MAIN/.harness/state/tasks.json" E01-F01)" = "in-review" ] \
+      || fail "R12wt: transition did not land on the MAIN worktree board (per-worktree board bug)"
+    # … and the linked worktree's own checked-out board was NOT written.
+    if [ -f "$WT/.harness/state/tasks.json" ]; then
+      [ "$(status_of "$WT/.harness/state/tasks.json" E01-F01)" = "pending" ] \
+        || fail "R12wt: the LINKED worktree's board was mutated (should target only the canonical main board)"
+    fi
+    # (b) the lockfile is the MAIN worktree's canonical one (created there).
+    [ -f "$MAIN/.harness/state/tasks.json.lock" ] \
+      || fail "R12wt: canonical lockfile not created under the MAIN worktree"
+    # invoking from the linked worktree and from the main worktree must resolve the
+    # SAME lockfile path (same inode) — prove by resolving the helper's target from
+    # both cwds and comparing.
+    LOCK_FROM_LINKED="$( cd "$WT" && env -u HARNESS_DIR python3 - "$LINKED_HELPER" <<'PY'
+import importlib.util, os, sys
+p = sys.argv[1]
+spec = importlib.util.spec_from_file_location("_tl", p)
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(os.path.realpath(os.path.join(m._harness_dir(), m.LOCK_REL)))
+PY
+)"
+    LOCK_FROM_MAIN="$( cd "$MAIN" && env -u HARNESS_DIR python3 - "$MAIN/.harness/tools/tasks-lock.py" <<'PY'
+import importlib.util, os, sys
+p = sys.argv[1]
+spec = importlib.util.spec_from_file_location("_tl", p)
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(os.path.realpath(os.path.join(m._harness_dir(), m.LOCK_REL)))
+PY
+)"
+    [ "$LOCK_FROM_LINKED" = "$LOCK_FROM_MAIN" ] \
+      || fail "R12wt: linked ($LOCK_FROM_LINKED) and main ($LOCK_FROM_MAIN) resolved DIFFERENT lockfiles"
+    [ "$LOCK_FROM_MAIN" = "$(python3 -c "import os;print(os.path.realpath('$MAIN/.harness/state/tasks.json.lock'))")" ] \
+      || fail "R12wt: canonical lockfile is not the MAIN worktree's state/tasks.json.lock"
+    # (c) two concurrent writers launched from two DIFFERENT worktrees both survive.
+    ( cd "$WT"   && env -u HARNESS_DIR python3 "$LINKED_HELPER" set-status E01-F01 in-progress --timeout 10 ) &
+    _wa=$!
+    ( cd "$MAIN" && env -u HARNESS_DIR python3 "$MAIN/.harness/tools/tasks-lock.py" set-status E01-F02 in-review --timeout 10 ) &
+    _wb=$!
+    wait "$_wa" || fail "R12wt: concurrent worktree writer A exited non-zero"
+    wait "$_wb" || fail "R12wt: concurrent worktree writer B exited non-zero"
+    [ "$(status_of "$MAIN/.harness/state/tasks.json" E01-F01)" = "in-progress" ] \
+      || fail "R12wt: E01-F01 transition lost under cross-worktree contention"
+    [ "$(status_of "$MAIN/.harness/state/tasks.json" E01-F02)" = "in-review" ] \
+      || fail "R12wt: E01-F02 transition lost under cross-worktree contention"
+    rm -rf "$T"
+    pass "R12wt canonical board+lock resolved to the MAIN worktree from any linked worktree (no lost update)"
+  fi
+fi
+
+# ── R13struct: locate status STRUCTURALLY by id, not by textual key order ──────
+# test_status_before_id_targets_correct_object  (Codex #46 r4 P2, id 3649274120)
+# JSON imposes no key order. If the minimal-diff writer finds the target's status
+# as the first "status" at-or-after the "id" match, a board that orders "status"
+# BEFORE "id" makes the patch land on the NEXT object's status — silently
+# transitioning the WRONG task while validation still passes. The helper must
+# resolve the addressed object structurally by id and change only THAT object's
+# status token.
+T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+mkdir -p "$T/state" "$T/store"
+cp "$SCHEMA" "$T/store/tasks.schema.json"
+# The TARGET (E01-F01) orders "status" BEFORE "id"; a FOLLOWING object (E01-F02)
+# whose status must remain untouched.
+cat > "$T/state/tasks.json" <<'EOF'
+{
+  "project": "fixture",
+  "epics": [
+    {
+      "id": "E01",
+      "title": "epic one",
+      "status": "planned",
+      "features": [
+        { "status": "pending", "id": "E01-F01", "title": "feature one", "sdd": true, "spec_path": "a" },
+        { "status": "pending", "id": "E01-F02", "title": "feature two", "sdd": true, "spec_path": "b" }
+      ]
+    }
+  ]
+}
+EOF
+cp "$T/state/tasks.json" "$T/before.json"
+HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 in-review \
+  || fail "R13struct: set-status on a status-before-id board failed"
+# The CORRECT object transitioned …
+[ "$(status_of "$T/state/tasks.json" E01-F01)" = "in-review" ] \
+  || fail "R13struct: target E01-F01 was NOT transitioned (structural id resolution failed)"
+# … and the FOLLOWING object's status is untouched (the naive first-status-after-id
+# bug would have flipped THIS one instead).
+[ "$(status_of "$T/state/tasks.json" E01-F02)" = "pending" ] \
+  || fail "R13struct: the FOLLOWING object E01-F02 was wrongly transitioned (textual key-order bug)"
+# Minimal-diff preserved: exactly one status token changed.
+_ndiff="$(diff "$T/before.json" "$T/state/tasks.json" | grep -cE '^[<>]')"
+[ "$_ndiff" -eq 2 ] \
+  || fail "R13struct: expected exactly one changed line (2 diff sides), got $_ndiff"
+rm -rf "$T"
+pass "R13struct status located structurally by id (status-before-id board transitions the CORRECT object)"
+
+echo "PASS: test_board_lock.sh (R1-R9, R10a/R10b, R11, R12/R12b, R13, R12wt, R13struct)"

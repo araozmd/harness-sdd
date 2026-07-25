@@ -38,14 +38,23 @@ Validated by `store/tasks.schema.json` (and by `init.sh`).
   python3 tools/tasks-lock.py set-status <id> <status>
   ```
 
-  Run it from **any** cwd — the helper resolves the harness directory from **its own
-  path** (`<HARNESS_DIR>/tools/tasks-lock.py`, so `HARNESS_DIR` = parent-of-parent of
-  the script), so the command above is correct in both layouts with no `HARNESS_DIR`
-  override required. An explicit `HARNESS_DIR=<dir>` env var still wins as a
-  highest-precedence escape hatch for unusual layouts.
+  Run it from **any** cwd, **and from any git worktree** — the helper resolves the
+  harness directory with this precedence: (1) an explicit `HARNESS_DIR=<dir>` env
+  var wins as a highest-precedence escape hatch; else (2) when inside a git
+  repo/worktree it resolves the **single canonical board root in the MAIN working
+  tree** — even when invoked from a **linked git worktree** (the E15 F02/F03
+  parallel-fix flow) — via `git rev-parse --git-common-dir` (whose parent is the
+  main worktree root), re-applying the source-vs-installed subpath under that root;
+  else (3) it falls back to its **own path** (`<HARNESS_DIR>/tools/tasks-lock.py`,
+  so `HARNESS_DIR` = parent-of-parent of the script). Because of (2), every worker
+  in every worktree reads/writes the **same** `state/tasks.json` and contends on the
+  **same** `state/tasks.json.lock` inode, so the no-lost-update guarantee holds across
+  parallel worktrees, not only within one directory. Any git failure (not a repo,
+  git absent, timeout, unexpected layout) degrades to (3) — never crashes, never
+  blocks. The command above is correct in both layouts with no override required.
 
   The helper acquires an advisory `fcntl.flock` on the sibling lockfile
-  `state/tasks.json.lock` (resolved under the self-derived `HARNESS_DIR`) → **re-reads
+  `state/tasks.json.lock` (resolved under the canonical `HARNESS_DIR`) → **re-reads
   `state/tasks.json` from disk inside the lock** (never a copy read before the lock)
   → applies the single status mutation to that fresh content → validates it (`json`
   parse **and** `store/tasks.schema.json` schema check) → atomically replaces the

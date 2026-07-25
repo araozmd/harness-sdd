@@ -80,6 +80,32 @@ All notable changes to the harness body are recorded here. Versions follow
   root-relative `state/tasks.json.lock`, which the root `.gitignore` did not cover — dirtying the
   worktree. Added `/state/tasks.json.lock` to the repo root `.gitignore` (the installed-layout
   `.harness/.gitignore` entry is unchanged).
+- **Canonical board + lock across git worktrees (Codex #46 r4 P1, id 3649274119).** The E15
+  F02/F03 parallel-fix flow runs each fix in its OWN linked git worktree. Previously
+  `tools/tasks-lock.py` resolved the board (and its lockfile) relative to whatever worktree it
+  ran in, so each worker read/wrote a **different** worktree-local `state/tasks.json` and contended
+  on a **different** `state/tasks.json.lock` inode — the `flock` did not serialize cross-worktree
+  writers, so R1's no-lost-update guarantee was absent in exactly the scenario the epic targets.
+  The helper now resolves **both** the board and the lockfile to the **single canonical location in
+  the MAIN working tree**: precedence is (1) explicit `HARNESS_DIR` override, else (2) when inside a
+  git repo/worktree, the main worktree root via `git rev-parse --git-common-dir` (its parent),
+  re-applying the source-vs-installed subpath (computed relative to `git rev-parse --show-toplevel`)
+  under that root, else (3) the prior `__file__` self-location. Git runs via `subprocess` with the
+  helper's own directory as cwd and a bounded timeout; **any** git failure (not a repo, git absent,
+  timeout, unexpected layout) degrades to (3) — never crashes, never blocks. Every worker in every
+  worktree now shares one board and one lock inode, so concurrent writers from different worktrees
+  cannot lose an update.
+- **Locate the status token STRUCTURALLY by id, not by textual key order (Codex #46 r4 P2, id
+  3649274120).** The minimal-diff `set-status` writer found the target's status as the first
+  `"status"` at-or-after the `"id"` match. JSON imposes no key order, so a board that orders
+  `status` **before** `id` in an object made the patch land on the **next** object's status —
+  silently transitioning the wrong task while validation still passed. The writer now resolves the
+  addressed object **structurally by id**: it anchors on the unique `"id": "<target>"`, delimits
+  THAT object's character span with a brace-aware, string-literal-aware scan, and replaces only the
+  `status` value token that lives at object depth 1 inside that span (a nested slice's status is
+  never mistaken for the object's own). The minimal-diff property is preserved (only the addressed
+  status token changes; unrelated inline arrays/formatting untouched) and the reparsed result is
+  still schema-validated through the shared `tools/validate-board.py` before the atomic `os.replace`.
 
 ## [0.30.0] — 2026-07-10
 

@@ -30,12 +30,27 @@
 #       for callers that express a different single mutation). The mutator is a
 #       python file exposing `mutate(data) -> data`.
 #
-# HARNESS_DIR (env) selects the board root; when unset it is derived from this
-# helper's own path — the file lives at <HARNESS_DIR>/tools/tasks-lock.py, so the
-# harness dir is the parent of the parent of __file__. Deriving from __file__ (not
-# cwd) makes the documented invocation correct from ANY cwd, in BOTH the source
-# layout (tools/tasks-lock.py, board at state/tasks.json) and the installed layout
-# (.harness/tools/tasks-lock.py, board at .harness/state/tasks.json).
+# HARNESS_DIR (env) selects the board root. Precedence (R12):
+#   (1) an explicit HARNESS_DIR env override always wins (escape hatch);
+#   (2) else, if this helper sits inside a git repo/worktree, resolve the SINGLE
+#       CANONICAL board root in the MAIN working tree — even when invoked from a
+#       LINKED git worktree (the F02/F03 parallel-fix flow). Every worker, in any
+#       worktree, then reads/writes the SAME state/tasks.json and contends on the
+#       SAME state/tasks.json.lock inode, so the no-lost-update guarantee (R1)
+#       holds across worktrees, not just within one directory;
+#   (3) else fall back to this helper's own self-location (parent-of-parent of
+#       __file__) — the source (tools/tasks-lock.py) and installed
+#       (.harness/tools/tasks-lock.py) layouts both work from ANY cwd.
+#
+# Main-worktree resolution (case 2): a linked worktree's `git rev-parse
+# --git-common-dir` points at the MAIN repo's `.git` dir, so its parent is the
+# main worktree root. We preserve the source-vs-installed layout by computing the
+# harness subpath as the helper's self-located dir RELATIVE to the current
+# worktree toplevel (`git rev-parse --show-toplevel`), then re-applying that same
+# relative subpath under the main worktree root (source → <main>/state/…;
+# installed → <main>/.harness/state/…). Git runs via subprocess with the helper's
+# own directory as cwd; on ANY git failure (not a repo, git absent, timeout,
+# unexpected layout) we fall back to self-location — never crash, never block.
 
 import argparse
 import errno
@@ -45,6 +60,7 @@ import json
 import math
 import os
 import re
+import subprocess
 import sys
 import time
 
@@ -66,20 +82,100 @@ def _die(msg):
     sys.exit(1)
 
 
-def _harness_dir():
-    """Resolve the board root.
+def _self_harness_dir():
+    """Self-located board root: parent-of-parent of this file's absolute path.
 
-    Highest precedence is an explicit HARNESS_DIR env override (an escape hatch
-    for unusual layouts). Otherwise derive it from this helper's own location:
-    the file lives at <HARNESS_DIR>/tools/tasks-lock.py, so the harness dir is the
-    parent of the parent of __file__. This is robust to any cwd and works in both
-    the source layout and the installed `.harness/tools/` layout — no caller ever
-    needs to hand-set HARNESS_DIR just to run the documented command.
+    The helper lives at <HARNESS_DIR>/tools/tasks-lock.py, so the harness dir is
+    the parent of the parent of __file__. Robust to any cwd and correct in both
+    the source and installed (.harness/tools/) layouts.
+    """
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _git(args, cwd):
+    """Run `git <args>` in <cwd>, returning stripped stdout or None on ANY error.
+
+    Never raises and never blocks: a bounded timeout, and any non-zero exit,
+    missing git binary, or timeout maps to None so the caller falls back to
+    self-location.
+    """
+    try:
+        out = subprocess.run(
+            ["git"] + list(args),
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    text = out.stdout.decode("utf-8", "replace").strip()
+    return text or None
+
+
+def _canonical_harness_dir():
+    """Map the self-located harness dir onto the MAIN worktree root (R12).
+
+    Returns the canonical board root in the main working tree, or None if the
+    helper is not inside a git worktree, git is unavailable, or the layout is
+    unexpected — in which case the caller falls back to self-location.
+
+    The main worktree root is the parent of the common `.git` dir that a linked
+    worktree's `git rev-parse --git-common-dir` reports. We then preserve the
+    source-vs-installed layout by re-applying the helper's harness subpath
+    (relative to the CURRENT worktree toplevel) under that main root.
+    """
+    # realpath everywhere: git reports fully symlink-resolved paths (e.g. macOS
+    # /var → /private/var), while self_dir comes from __file__; normalising both
+    # sides makes the relpath subtraction below correct despite symlinked temp
+    # dirs and worktree roots.
+    self_dir = os.path.realpath(_self_harness_dir())
+    git_dir = os.path.dirname(self_dir)  # run git from the helper's own directory
+
+    common_dir = _git(["rev-parse", "--git-common-dir"], cwd=git_dir)
+    if common_dir is None:
+        return None
+    # --git-common-dir may be relative to the cwd we ran git in; anchor it.
+    common_dir = os.path.realpath(os.path.join(git_dir, common_dir))
+    main_root = os.path.dirname(common_dir)  # parent of the common `.git` dir
+    if not os.path.isdir(main_root):
+        return None
+
+    toplevel = _git(["rev-parse", "--show-toplevel"], cwd=git_dir)
+    if toplevel is None:
+        return None
+    toplevel = os.path.realpath(toplevel)
+
+    # Harness subpath = self-located harness dir relative to the current worktree
+    # toplevel (source layout → ""; installed layout → ".harness"). Re-apply it
+    # under the main worktree root so both layouts resolve canonically.
+    rel = os.path.relpath(self_dir, toplevel)
+    if rel.startswith(os.pardir + os.sep) or rel == os.pardir:
+        # self_dir is not under the worktree toplevel — unexpected; fall back.
+        return None
+    if rel == os.curdir:
+        rel = ""
+
+    return os.path.normpath(os.path.join(main_root, rel))
+
+
+def _harness_dir():
+    """Resolve the board root (see module docstring for full precedence).
+
+    (1) explicit HARNESS_DIR env override; (2) the canonical main-worktree root
+    when inside a git worktree; (3) self-location fallback. Cases (2) and (3)
+    both keep the source-vs-installed layout, and no caller ever needs to
+    hand-set HARNESS_DIR just to run the documented command.
     """
     override = os.environ.get("HARNESS_DIR")
     if override:
         return override
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    canonical = _canonical_harness_dir()
+    if canonical is not None:
+        return canonical
+    return _self_harness_dir()
 
 
 def _acquire(lock_fd, lockfile, timeout):
@@ -144,31 +240,114 @@ def _import_mutator(path):
     return module.mutate
 
 
+def _scan_object_span(text, inner_pos):
+    """Given a char offset inside a JSON object, return (start, end) of that object.
+
+    [start:end) spans from the object's opening `{` to the matching closing `}`
+    (inclusive of both braces). The scan is brace-aware AND string-aware: braces
+    inside string literals (and their escapes) are ignored, so a `{`/`}` in a
+    title or path never miscounts the nesting. Returns None if a balanced object
+    cannot be delimited around `inner_pos`.
+
+    We first walk backwards to the `{` that opens the object containing
+    `inner_pos` (tracking string state forward from the document start so we know,
+    at every index, whether a brace is structural), then walk forward from that
+    `{` counting depth to its match.
+    """
+    # Precompute, for each index, whether it lies inside a string literal, by a
+    # single forward pass that respects backslash escapes.
+    in_string = bytearray(len(text))
+    escaped = False
+    instr = False
+    for i, ch in enumerate(text):
+        if instr:
+            in_string[i] = 1
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                instr = False  # this closing quote is still part of the string
+        else:
+            if ch == '"':
+                instr = True
+                in_string[i] = 1
+
+    # Walk backward from inner_pos to the opening `{` of the enclosing object,
+    # skipping any nested `{...}`/`}` pairs and ignoring braces inside strings.
+    depth = 0
+    start = None
+    i = inner_pos
+    while i >= 0:
+        ch = text[i]
+        if not in_string[i]:
+            if ch == "}":
+                depth += 1
+            elif ch == "{":
+                if depth == 0:
+                    start = i
+                    break
+                depth -= 1
+        i -= 1
+    if start is None:
+        return None
+
+    # Walk forward from the opening `{` to its matching `}`.
+    depth = 0
+    j = start
+    n = len(text)
+    while j < n:
+        ch = text[j]
+        if not in_string[j]:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return (start, j + 1)
+        j += 1
+    return None
+
+
 def _find_status_span(text, target_id):
     """Locate the `"status": "<value>"` span of the object <target_id> addresses.
 
     Returns (start, end, old_status) into `text`, where [start:end) is exactly the
-    quoted status VALUE token (excluding the surrounding quotes' contents change —
-    we replace only the value between the quotes). Deriving the span from the
-    ORIGINAL text (not a re-serialization) is what makes the write minimal-diff:
-    every other byte — indentation, inline vs multiline arrays, trailing newline —
-    is preserved verbatim (R6).
+    quoted status VALUE token (we replace only the value between the quotes).
+    Deriving the span from the ORIGINAL text (not a re-serialization) is what makes
+    the write minimal-diff: every other byte — indentation, inline vs multiline
+    arrays, trailing newline — is preserved verbatim (R6).
 
-    We anchor on the target's own `"id": "<target_id>"` occurrence, then find the
-    FIRST `"status"` key at-or-after it. In this store an object's `id` precedes
-    its `status`, and ids are unique, so this pins the correct object without a
-    hand-rolled JSON walker. Returns None if the id (or a following status) is not
-    found, so the caller can fail-stop exactly like the old lookup did.
+    Resolution is STRUCTURAL by id (R13), NOT by textual key order: we anchor on
+    the target's unique `"id": "<target_id>"`, delimit THAT object's brace span,
+    and replace the `status` value that lives INSIDE that span (not merely the
+    first `"status"` at-or-after the id). A board whose objects order `status`
+    before `id` therefore cannot make this patch the NEXT object's status.
+    Returns None if the id (or a status key within its object) is not found, so the
+    caller can fail-stop exactly like before.
     """
     id_pat = re.compile(r'"id"\s*:\s*"' + re.escape(target_id) + r'"')
     m_id = id_pat.search(text)
     if m_id is None:
         return None
-    status_pat = re.compile(r'"status"\s*:\s*"([^"]*)"')
-    m_status = status_pat.search(text, m_id.end())
-    if m_status is None:
+
+    obj = _scan_object_span(text, m_id.start())
+    if obj is None:
         return None
-    return (m_status.start(1), m_status.end(1), m_status.group(1))
+    obj_start, obj_end = obj
+
+    # Find the `status` key of THIS object only — the first status key at object
+    # depth 1 (not inside a nested child object such as a slice). We reuse a
+    # depth-aware scan bounded to [obj_start, obj_end).
+    status_pat = re.compile(r'"status"\s*:\s*"([^"]*)"')
+    for m_status in status_pat.finditer(text, obj_start, obj_end):
+        # Confirm the matched status belongs to THIS object (depth 1), not a
+        # nested object inside it: the smallest enclosing object of the status
+        # key must be exactly this object.
+        enclosing = _scan_object_span(text, m_status.start())
+        if enclosing is not None and enclosing[0] == obj_start:
+            return (m_status.start(1), m_status.end(1), m_status.group(1))
+    return None
 
 
 def _set_status_text_transform(target_id, status):
