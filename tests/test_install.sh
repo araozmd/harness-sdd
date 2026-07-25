@@ -127,6 +127,12 @@ test_dependency_diagnostics_installed_contract() {
     grep -qF "\`$code\`" "$T/.harness/agents/orchestrator.md" ||
       fail "E16-F01: installed Orchestrator missing reason $code"
   done
+  grep -qF 'top-level selection returns a sliced feature' \
+    "$T/.harness/agents/orchestrator.md" ||
+    fail "E16-F01: installed Orchestrator missing sliced-parent no-result trigger"
+  grep -qF 'whole-board top-level diagnostics' \
+    "$T/.harness/agents/orchestrator.md" ||
+    fail "E16-F01: installed Orchestrator missing sliced-parent diagnostic scope"
 
   cp "$T/.harness/state/tasks.json" "$T/.harness/state/tasks.json.e16-backup"
   cat >"$T/.harness/state/tasks.json" <<'JSON'

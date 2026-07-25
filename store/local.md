@@ -123,10 +123,16 @@ selection is **exactly today's** board-wide `next()` — `owner` is ignored.
 
 ### `next()` no-result diagnostic contract — E16-F01
 
-When `next()` or scoped `next()` selects nothing, the Orchestrator explains the
-existing gates without changing actionability. Diagnostics are informational,
-successful, read-only records; selection changes no state. E16-F03 must reuse this
-vocabulary **verbatim** in the future deterministic selector.
+The Orchestrator activates this contract when `next()` or scoped `next()` selects
+nothing, explaining the existing gates across the board without changing
+actionability. It also activates when top-level selection returns a sliced feature
+but `next_slice(feature)` returns no slice while unfinished slices remain; that path
+emits records only for unfinished slices of the selected parent feature. Do not run
+whole-board top-level diagnostics for the sliced-parent path, and do not emit records
+for any other feature or slice. Both paths use the same stable records, reason order,
+and final summary below. Diagnostics are informational, successful, read-only
+records; selection changes no state. E16-F03 must reuse this vocabulary and both
+no-result activation paths **verbatim** in the future deterministic selector.
 
 Candidate records have the exact shape
 `blocked <id> [<reason-code>]: <human text>`. Sort candidates by numeric epic and

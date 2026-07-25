@@ -148,12 +148,22 @@ not changed by this feature).
 
 ## No-actionable-work diagnostics — E16-F01
 
-When ordinary or scoped selection returns no task, explain the existing gates; do not
-choose a fallback or implement a second selector. These diagnostics are
+Activate this diagnostic contract in either no-result path:
+
+- When ordinary or scoped top-level selection returns no task, explain the existing
+  feature gates across the board.
+- When top-level selection returns a sliced feature but `next_slice(feature)` returns
+  no slice while unfinished slices remain, explain only the gates on unfinished
+  slices of that selected parent feature. Use the same stable records, reason order,
+  and final summary below. Do not run whole-board top-level diagnostics in this path
+  and do not emit records for features or slices outside the selected parent feature.
+
+Do not choose a fallback or implement a second selector. These diagnostics are
 **informational**, return successful command completion, and **change no state**.
 In other words, selection diagnostics are read-only: the operation changes no state.
-E16-F03 must reuse the following reason codes, meanings, and human templates
-**verbatim** when it moves selection into `tools/next-task.mjs`.
+E16-F03 must reuse the following reason codes, meanings, human templates, and both
+no-result activation paths **verbatim** when it moves selection into
+`tools/next-task.mjs`.
 
 Emit each candidate record exactly as:
 
@@ -264,7 +274,9 @@ When the selected feature has `slices[]`, drive it slice by slice:
 1. **select** — read the manifest. Pick the lowest-id slice that is actionable and
    whose **every** `depends_on` upstream slice is `done` **and** `merged` (topological
    order). If a slice's `repo` is not a key in the manifest, do NOT dispatch it —
-   report an error naming the missing repo.
+   report an error naming the missing repo. If unfinished slices remain but
+   `next_slice(feature)` returns no slice, invoke the E16-F01 no-result diagnostic
+   contract scoped to this selected parent feature's unfinished slices.
 2. **dispatch** — how you dispatch depends on `execution.builder.backend` in the
    umbrella's `harness.config.yaml` (the same global switch the single-repo Builder
    reads — see `agents/builder.md`). Either way, **everything runs from the child

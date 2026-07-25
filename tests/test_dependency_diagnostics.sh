@@ -261,6 +261,107 @@ require_text "$ROOT/agents/orchestrator.md" 'changes no state'
 require_text "$ROOT/agents/orchestrator.md" 'informational'
 pass "R8-R12 Orchestrator pins ordering, scope, no-mutation, and informational semantics"
 
+# test_selected_sliced_parent_no_result_diagnostics
+for contract in "$ROOT/agents/orchestrator.md" "$ROOT/store/local.md"; do
+  require_text "$contract" 'top-level selection returns a sliced feature'
+  require_text "$contract" '`next_slice(feature)` returns no slice'
+  require_text "$contract" 'selected parent feature'
+  require_text "$contract" 'whole-board top-level diagnostics'
+done
+
+cat >"$TMP/selected-sliced-parent.json" <<'JSON'
+{"project":"fixture","epics":[{"id":"E16","status":"planned","features":[
+  {"id":"E16-F20","status":"in-progress","slices":[
+    {"id":"E16-F20@web","status":"pending","merged":false,
+     "depends_on":["E16-F20@api"]},
+    {"id":"E16-F20@worker","status":"pending","merged":false,
+     "depends_on":["E16-F20@missing"]},
+    {"id":"E16-F20@api","status":"pending","merged":false,
+     "depends_on":["E16-F20@web"]}
+  ]},
+  {"id":"E16-F21","status":"spec-ready","sdd":true,"autonomous":false}
+]}]}
+JSON
+python3 - "$HELPER" "$TMP/selected-sliced-parent.json" <<'PY'
+import hashlib
+import importlib.util
+import json
+import pathlib
+import sys
+
+helper_path, fixture_path = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("task_diagnostics", helper_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+path = pathlib.Path(fixture_path)
+before = path.read_bytes()
+board = json.loads(before)
+selected = board["epics"][0]["features"][0]
+assert selected["id"] == "E16-F20"
+
+slices = {item["id"]: item for item in selected["slices"]}
+actionable = []
+for item in slices.values():
+    dependencies_ready = all(
+        dep in slices
+        and slices[dep].get("status") == "done"
+        and slices[dep].get("merged") is True
+        for dep in item.get("depends_on", [])
+    )
+    if item.get("status") in {"pending", "in-progress", "in-review"} and dependencies_ready:
+        actionable.append(item["id"])
+assert actionable == [], "fixture must make next_slice(feature) return no slice"
+
+cycle = next(
+    record for record in module.find_dependency_cycles(board)
+    if record["kind"] == "slice" and record["path"][0].startswith("E16-F20@")
+)
+witness = " -> ".join(cycle["path"])
+cyclic_ids = set(cycle["path"][:-1])
+records = []
+for slice_id in sorted(slices, key=module.node_sort_key):
+    item = slices[slice_id]
+    if slice_id in cyclic_ids:
+        records.append(
+            f"blocked {slice_id} [dependency-cycle]: "
+            f"dependency cycle (slice): {witness}"
+        )
+    blockers = []
+    for dependency in sorted(item.get("depends_on", []), key=module.node_sort_key):
+        upstream = slices.get(dependency)
+        if upstream is None:
+            blockers.append(f"{dependency}=missing")
+        elif upstream.get("status") != "done":
+            blockers.append(f"{dependency}={upstream.get('status')}")
+        elif upstream.get("merged") is not True:
+            blockers.append(f"{dependency}=done-but-unmerged")
+    if blockers:
+        records.append(
+            f"blocked {slice_id} [unmet-dependency]: "
+            f"blocking dependencies: {', '.join(blockers)}"
+        )
+records.append("no actionable work: selection blocked; see reasons above")
+
+expected = [
+    "blocked E16-F20@api [dependency-cycle]: dependency cycle (slice): "
+    "E16-F20@api -> E16-F20@web -> E16-F20@api",
+    "blocked E16-F20@api [unmet-dependency]: "
+    "blocking dependencies: E16-F20@web=pending",
+    "blocked E16-F20@web [dependency-cycle]: dependency cycle (slice): "
+    "E16-F20@api -> E16-F20@web -> E16-F20@api",
+    "blocked E16-F20@web [unmet-dependency]: "
+    "blocking dependencies: E16-F20@api=pending",
+    "blocked E16-F20@worker [unmet-dependency]: "
+    "blocking dependencies: E16-F20@missing=missing",
+    "no actionable work: selection blocked; see reasons above",
+]
+assert records == expected, records
+assert all("E16-F21" not in record for record in records)
+assert hashlib.sha256(path.read_bytes()).digest() == hashlib.sha256(before).digest()
+PY
+pass "R8/R10 selected sliced parent no-result is scoped, stable, and read-only"
+
 # test_scale_dependencies_schema_docs_and_version (executable helper portion)
 SCHEMA_BEFORE=$(cksum "$ROOT/store/tasks.schema.json")
 python3 - "$HELPER" "$TMP/scale.json" <<'PY'
