@@ -358,7 +358,34 @@ def _import_mutator(path):
     return module.mutate
 
 
-def _scan_object_span(text, inner_pos):
+def _string_mask(text):
+    """Per-index mask: 1 where `text[i]` lies inside a JSON string literal.
+
+    One forward pass respecting backslash escapes. Structural scans consult this
+    so a `{`, `}`, `[` or `]` appearing inside a title or path never miscounts
+    nesting. Computed ONCE per resolution and threaded through the scans below
+    (recomputing it per call would make id resolution quadratic on large boards).
+    """
+    mask = bytearray(len(text))
+    escaped = False
+    instr = False
+    for i, ch in enumerate(text):
+        if instr:
+            mask[i] = 1
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                instr = False  # this closing quote is still part of the string
+        else:
+            if ch == '"':
+                instr = True
+                mask[i] = 1
+    return mask
+
+
+def _scan_object_span(text, inner_pos, in_string=None):
     """Given a char offset inside a JSON object, return (start, end) of that object.
 
     [start:end) spans from the object's opening `{` to the matching closing `}`
@@ -372,24 +399,8 @@ def _scan_object_span(text, inner_pos):
     at every index, whether a brace is structural), then walk forward from that
     `{` counting depth to its match.
     """
-    # Precompute, for each index, whether it lies inside a string literal, by a
-    # single forward pass that respects backslash escapes.
-    in_string = bytearray(len(text))
-    escaped = False
-    instr = False
-    for i, ch in enumerate(text):
-        if instr:
-            in_string[i] = 1
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                instr = False  # this closing quote is still part of the string
-        else:
-            if ch == '"':
-                instr = True
-                in_string[i] = 1
+    if in_string is None:
+        in_string = _string_mask(text)
 
     # Walk backward from inner_pos to the opening `{` of the enclosing object,
     # skipping any nested `{...}`/`}` pairs and ignoring braces inside strings.
@@ -427,6 +438,64 @@ def _scan_object_span(text, inner_pos):
     return None
 
 
+def _depth1_key_matches(text, in_string, obj_start, obj_end, pattern):
+    """Yield `pattern` matches that are DIRECT members of the object [obj_start, obj_end).
+
+    A match nested inside a child object (a slice, an extension object) is
+    skipped: the smallest object enclosing the match must be this object itself.
+    """
+    for m in pattern.finditer(text, obj_start, obj_end):
+        enclosing = _scan_object_span(text, m.start(), in_string)
+        if enclosing is not None and enclosing[0] == obj_start:
+            yield m
+
+
+def _depth1_value_start(text, in_string, obj_start, obj_end, key):
+    """Offset of the VALUE of the direct member `key`, or None if absent."""
+    pat = re.compile(r'"' + re.escape(key) + r'"\s*:\s*')
+    for m in _depth1_key_matches(text, in_string, obj_start, obj_end, pat):
+        return m.end()
+    return None
+
+
+def _iter_array_object_spans(text, in_string, arr_start):
+    """Yield (start, end) spans of the DIRECT object elements of the array at `arr_start`.
+
+    `arr_start` is the offset of the array's `[`. Objects nested deeper inside an
+    element are not yielded — only the elements themselves.
+    """
+    if arr_start is None or arr_start >= len(text) or text[arr_start] != "[":
+        return
+    depth = 0
+    i = arr_start
+    n = len(text)
+    while i < n:
+        if not in_string[i]:
+            ch = text[i]
+            if ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    return
+            elif ch == "{" and depth == 1:
+                span = _scan_object_span(text, i, in_string)
+                if span is None:
+                    return
+                yield span
+                i = span[1]
+                continue
+        i += 1
+
+
+def _depth1_id(text, in_string, obj_start, obj_end):
+    """The direct `id` string value of an object, or None."""
+    pat = re.compile(r'"id"\s*:\s*"([^"]*)"')
+    for m in _depth1_key_matches(text, in_string, obj_start, obj_end, pat):
+        return m.group(1)
+    return None
+
+
 def _find_status_span(text, target_id):
     """Locate the `"status": "<value>"` span of the object <target_id> addresses.
 
@@ -436,35 +505,53 @@ def _find_status_span(text, target_id):
     the write minimal-diff: every other byte — indentation, inline vs multiline
     arrays, trailing newline — is preserved verbatim (R6).
 
-    Resolution is STRUCTURAL by id (R13), NOT by textual key order: we anchor on
-    the target's unique `"id": "<target_id>"`, delimit THAT object's brace span,
-    and replace the `status` value that lives INSIDE that span (not merely the
-    first `"status"` at-or-after the id). A board whose objects order `status`
-    before `id` therefore cannot make this patch the NEXT object's status.
+    Resolution is STRUCTURAL (R13) in BOTH senses — it never trusts textual order:
+
+    * We do not accept the first textual `"id": "<target_id>"` in the DOCUMENT.
+      The schema permits additional properties, so a board may carry an extension
+      object (a mirror record, a cache entry) whose `id` equals a real feature or
+      epic id. If such an object appeared earlier in the file and had a `status`,
+      a document-wide search would silently retitle THAT object's status and leave
+      the addressed task untouched — and the result still schema-validates. So we
+      WALK the board: root → `epics[]` elements → each epic's `features[]`
+      elements, matching only a DIRECT `id` member at each level. Only a genuine
+      epic or feature is addressable; anything outside those two arrays is invisible.
+    * Within the matched object we replace the `status` that is a DIRECT member
+      (not merely the first `"status"` at-or-after the id, and not a nested
+      slice's), so a board ordering `status` before `id` cannot shift the patch
+      onto the next object.
+
     Returns None if the id (or a status key within its object) is not found, so the
     caller can fail-stop exactly like before.
     """
-    id_pat = re.compile(r'"id"\s*:\s*"' + re.escape(target_id) + r'"')
-    m_id = id_pat.search(text)
-    if m_id is None:
+    in_string = _string_mask(text)
+
+    # Delimit the root object (first STRUCTURAL `{`, i.e. not one inside a string).
+    root_brace = None
+    for i, ch in enumerate(text):
+        if ch == "{" and not in_string[i]:
+            root_brace = i
+            break
+    if root_brace is None:
+        return None
+    root = _scan_object_span(text, root_brace, in_string)
+    if root is None:
         return None
 
-    obj = _scan_object_span(text, m_id.start())
-    if obj is None:
+    def status_span_of(obj_start, obj_end):
+        pat = re.compile(r'"status"\s*:\s*"([^"]*)"')
+        for m in _depth1_key_matches(text, in_string, obj_start, obj_end, pat):
+            return (m.start(1), m.end(1), m.group(1))
         return None
-    obj_start, obj_end = obj
 
-    # Find the `status` key of THIS object only — the first status key at object
-    # depth 1 (not inside a nested child object such as a slice). We reuse a
-    # depth-aware scan bounded to [obj_start, obj_end).
-    status_pat = re.compile(r'"status"\s*:\s*"([^"]*)"')
-    for m_status in status_pat.finditer(text, obj_start, obj_end):
-        # Confirm the matched status belongs to THIS object (depth 1), not a
-        # nested object inside it: the smallest enclosing object of the status
-        # key must be exactly this object.
-        enclosing = _scan_object_span(text, m_status.start())
-        if enclosing is not None and enclosing[0] == obj_start:
-            return (m_status.start(1), m_status.end(1), m_status.group(1))
+    epics_start = _depth1_value_start(text, in_string, root[0], root[1], "epics")
+    for e_start, e_end in _iter_array_object_spans(text, in_string, epics_start):
+        if _depth1_id(text, in_string, e_start, e_end) == target_id:
+            return status_span_of(e_start, e_end)
+        feats_start = _depth1_value_start(text, in_string, e_start, e_end, "features")
+        for f_start, f_end in _iter_array_object_spans(text, in_string, feats_start):
+            if _depth1_id(text, in_string, f_start, f_end) == target_id:
+                return status_span_of(f_start, f_end)
     return None
 
 

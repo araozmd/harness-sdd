@@ -1048,6 +1048,67 @@ _ndiff="$(diff "$T/before.json" "$T/state/tasks.json" | grep -cE '^[<>]')"
 rm -rf "$T"
 pass "R13struct status located structurally by id (status-before-id board transitions the CORRECT object)"
 
+# ── R13ext: an EXTENSION object with a colliding id is not addressable ─────────
+# test_extension_object_with_colliding_id_ignored  (Codex #46 r9 P2, id 3649498027)
+# The board schema permits additional properties, so a board may carry an
+# extension object (mirror record, cache entry) whose "id" equals a real feature
+# or epic id. A document-wide first-textual-match id lookup selects that earlier
+# occurrence: `set-status` then silently updates the EXTENSION's status while the
+# addressed feature stays unchanged — and the result still validates, so nothing
+# surfaces the wrong write. Only members of epics[] / epics[].features[] may be
+# addressed. Fixture puts the decoy BEFORE epics (so first-match picks it) and
+# also nests one INSIDE the epic (so "restrict to the epics array" is not enough).
+T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+mkdir -p "$T/state" "$T/store"
+cp "$SCHEMA" "$T/store/tasks.schema.json"
+cat > "$T/state/tasks.json" <<'EOF'
+{
+  "project": "fixture",
+  "mirror_cache": [
+    { "id": "E01-F01", "status": "synced" },
+    { "id": "E01", "status": "synced" }
+  ],
+  "epics": [
+    {
+      "id": "E01",
+      "title": "epic one",
+      "status": "planned",
+      "integrations": [
+        { "id": "E01-F01", "status": "synced" }
+      ],
+      "features": [
+        { "id": "E01-F01", "title": "feature one", "status": "pending", "sdd": true, "spec_path": "a" },
+        { "id": "E01-F02", "title": "feature two", "status": "pending", "sdd": true, "spec_path": "b" }
+      ]
+    }
+  ]
+}
+EOF
+cp "$T/state/tasks.json" "$T/before.json"
+HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 in-review \
+  || fail "R13ext: set-status on a board with a colliding extension id failed"
+# The real FEATURE transitioned …
+[ "$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d['epics'][0]['features'][0]['status'])" "$T/state/tasks.json")" = "in-review" ] \
+  || fail "R13ext: the addressed FEATURE E01-F01 was NOT transitioned (write landed on a colliding extension object)"
+# … and NEITHER decoy was touched (top-level cache nor the epic-nested one).
+[ "$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d['mirror_cache'][0]['status'])" "$T/state/tasks.json")" = "synced" ] \
+  || fail "R13ext: the top-level extension object with a colliding id was mutated"
+[ "$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d['epics'][0]['integrations'][0]['status'])" "$T/state/tasks.json")" = "synced" ] \
+  || fail "R13ext: the epic-nested extension object with a colliding id was mutated"
+# Minimal-diff still holds: exactly one status token changed.
+_ndiff="$(diff "$T/before.json" "$T/state/tasks.json" | grep -cE '^[<>]')"
+[ "$_ndiff" -eq 2 ] \
+  || fail "R13ext: expected exactly one changed line (2 diff sides), got $_ndiff"
+# The EPIC id is likewise resolved in epics[], not from the colliding cache entry.
+HARNESS_DIR="$T" python3 "$HELPER" set-status E01 in-progress \
+  || fail "R13ext: set-status on the epic id failed"
+[ "$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d['epics'][0]['status'])" "$T/state/tasks.json")" = "in-progress" ] \
+  || fail "R13ext: the addressed EPIC was NOT transitioned (write landed on the colliding cache entry)"
+[ "$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d['mirror_cache'][1]['status'])" "$T/state/tasks.json")" = "synced" ] \
+  || fail "R13ext: the extension object with a colliding EPIC id was mutated"
+rm -rf "$T"
+pass "R13ext colliding extension ids are unaddressable (only epics[]/features[] members resolve)"
+
 # ── R14py3: init.sh HARD-fails (non-zero, clear msg) when python3 is absent ────
 # test_init_requires_python3  (Codex #46 r6 P1, id 3649368481)
 # Since E15-F01 the ONLY supported set_status write path is
@@ -1081,7 +1142,11 @@ done
 # python3's absolute path from earlier tests, so a same-shell `command -v` would
 # report a false positive regardless of PATH. init.sh runs in its own subshell
 # and thus sees the true (python3-less) resolution, which is what we assert here.
+# `bash` must ALSO be reachable through the shim: init.sh is a BASH script
+# (`#!/usr/bin/env bash` + `set -o pipefail`) and must be invoked with bash, so a
+# shim without bash cannot run the scenario at all.
 if ! env -i PATH="$SHIM" sh -c 'command -v grep' >/dev/null 2>&1 \
+   || ! env -i PATH="$SHIM" sh -c 'command -v bash' >/dev/null 2>&1 \
    || env -i PATH="$SHIM" sh -c 'command -v python3' >/dev/null 2>&1; then
   # Some environments expose python3 from a builtins dir we can't exclude; skip.
   rm -rf "$SBX"
@@ -1091,7 +1156,14 @@ else
   # Run init.sh in a scrubbed environment (`env -i`) so NO inherited command hash
   # or leaked PATH lets it find a python3 the shim omits — it must resolve exactly
   # the python3-less PATH we hand it and hard-fail.
-  if ( cd "$SBX" && env -i PATH="$SHIM" HOME="$SBX" sh ./init.sh ) >"$_out" 2>&1; then
+  # Invoke with `bash`, NOT `sh`: init.sh declares `#!/usr/bin/env bash` and uses
+  # `set -o pipefail`. Where /bin/sh is dash (typical Ubuntu CI), `sh ./init.sh`
+  # ignores the shebang and aborts at line 8 with "Illegal option -o pipefail",
+  # NEVER reaching the python3 gate — the run still exits non-zero (so the
+  # must-fail assertion below passes vacuously) but the output names no python3,
+  # so the message greps fail and the whole suite goes red on CI while passing on
+  # macOS, where /bin/sh is bash in POSIX mode and does support pipefail.
+  if ( cd "$SBX" && env -i PATH="$SHIM" HOME="$SBX" bash ./init.sh ) >"$_out" 2>&1; then
     cat "$_out" >&2
     rm -rf "$SBX"
     fail "R14py3: init.sh reported success with python3 absent (must hard-fail — the mandatory lock helper needs python3)"

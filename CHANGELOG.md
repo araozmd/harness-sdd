@@ -196,6 +196,31 @@ All notable changes to the harness body are recorded here. Versions follow
   breaking dependency change was recorded here but not on the entrypoint agents actually read;
   `AGENTS.md` rule 1 now states the `python3` + stdlib `fcntl` requirement, when it became
   mandatory, and the remedy.
+- **Invoke the Bash-only `init.sh` with `bash` in the R14py3 test (Codex #46 r9 P1, id
+  3649498024).** `tests/test_board_lock.sh` ran the python3-less gate check as `sh ./init.sh`.
+  `init.sh` declares `#!/usr/bin/env bash` and uses `set -o pipefail`, so wherever `/bin/sh` is
+  **dash** — typical Ubuntu CI — the shebang is bypassed and the script aborts at line 8 with
+  `Illegal option -o pipefail`, **never reaching the python3 gate**. The run still exited non-zero
+  (so the must-fail assertion passed vacuously) but printed no python3 message, so the two message
+  greps failed and the configured `test_board_lock.sh` suite went **red on CI while passing on
+  macOS**, where `/bin/sh` is bash in POSIX mode and does support `pipefail`. The case now invokes
+  `bash ./init.sh` and additionally requires `bash` to be reachable through the PATH shim (else it
+  skips cleanly). Verified by reproducing the dash condition: `sh` → `Illegal option -o pipefail`
+  with zero python3 mentions; `bash` → the exact hard-fail message the assertions expect.
+- **Restrict id resolution to real task objects (Codex #46 r9 P2, id 3649498027).** The
+  minimal-diff writer anchored on the **first textual** `"id": "<target>"` in the whole document.
+  The board schema permits additional properties, so a board may carry an extension object (a
+  mirror record, a cache entry) whose `id` equals a real feature or epic id; if it appeared earlier
+  in the file and had a `status`, `set-status` silently updated **that** object and left the
+  addressed task unchanged — and the result still schema-validated, so nothing surfaced the wrong
+  write. Resolution now **walks the board structurally** — root → `epics[]` elements → each epic's
+  `features[]` elements, matching only a **direct** `id` member at each level — so only a genuine
+  epic or feature is addressable and anything outside those two arrays is invisible. The string
+  mask backing the brace/bracket scans is computed once per resolution and threaded through
+  (previously recomputed per call), keeping resolution linear rather than quadratic on large
+  boards. `tests/test_board_lock.sh` gains **R13ext**: a board with colliding-id extension objects
+  both **before** `epics` and **nested inside** the epic must transition the real feature (and the
+  real epic), leave both decoys `synced`, and still change exactly one status token.
 
 ## [0.30.0] — 2026-07-10
 
