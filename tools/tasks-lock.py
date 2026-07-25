@@ -49,8 +49,13 @@
 # worktree toplevel (`git rev-parse --show-toplevel`), then re-applying that same
 # relative subpath under the main worktree root (source → <main>/state/…;
 # installed → <main>/.harness/state/…). Git runs via subprocess with the helper's
-# own directory as cwd; on ANY git failure (not a repo, git absent, timeout,
-# unexpected layout) we fall back to self-location — never crash, never block.
+# OWN tools/ directory as cwd (`os.path.dirname(__file__)`) — a path that is
+# inside the current worktree in BOTH the source (<root>/tools) and installed
+# (<root>/.harness/tools) layouts, so discovery resolves the MAIN worktree from
+# any linked worktree. (Using the PARENT of the self-located harness dir would
+# escape the repo in the source layout, where the harness dir IS the toplevel.)
+# On ANY git failure (not a repo, git absent, timeout, unexpected layout) we
+# fall back to self-location — never crash, never block.
 
 import argparse
 import errno
@@ -132,7 +137,13 @@ def _canonical_harness_dir():
     # sides makes the relpath subtraction below correct despite symlinked temp
     # dirs and worktree roots.
     self_dir = os.path.realpath(_self_harness_dir())
-    git_dir = os.path.dirname(self_dir)  # run git from the helper's own directory
+    # Run git discovery from a cwd GUARANTEED to be inside the current worktree
+    # for BOTH layouts. The helper's own directory (the tools/ dir) is always
+    # inside the worktree — source: <root>/tools, installed: <root>/.harness/tools.
+    # Do NOT use os.path.dirname(self_dir): in the SOURCE layout self_dir is the
+    # worktree TOPLEVEL, so its parent is OUTSIDE the repo and both rev-parse
+    # calls then fail or resolve a DIFFERENT repo, silently defeating R12.
+    git_dir = os.path.dirname(os.path.abspath(__file__))  # the tools/ dir
 
     common_dir = _git(["rev-parse", "--git-common-dir"], cwd=git_dir)
     if common_dir is None:

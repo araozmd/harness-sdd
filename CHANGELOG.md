@@ -106,6 +106,21 @@ All notable changes to the harness body are recorded here. Versions follow
   never mistaken for the object's own). The minimal-diff property is preserved (only the addressed
   status token changes; unrelated inline arrays/formatting untouched) and the reparsed result is
   still schema-validated through the shared `tools/validate-board.py` before the atomic `os.replace`.
+- **Run git worktree discovery from INSIDE the worktree in the source layout (Codex #46 r5 P1, id
+  3649327432).** The canonical-board resolution (id 3649274119) ran both `git rev-parse` calls with
+  `os.path.dirname(self_dir)` as cwd. In the **installed** layout the self-located harness dir is
+  `<root>/.harness`, whose parent (`<root>`) is still inside the repo, so discovery worked and the
+  R12 test passed. In the **source** layout the harness dir **is** the worktree toplevel, so its
+  parent is the repo's PARENT — git ran OUTSIDE the worktree, `--git-common-dir` / `--show-toplevel`
+  failed (or resolved a different repo), and the helper fell back to the LINKED worktree's own board;
+  `set-status` then mutated only the linked copy while the MAIN board stayed unchanged, defeating the
+  shared-board/shared-lock guarantee (R12) in the exact parallel-worktree scenario. Git discovery now
+  runs from `os.path.dirname(os.path.abspath(__file__))` (the helper's `tools/` dir), which is inside
+  the current worktree in **both** layouts, so source and installed resolve the main worktree
+  identically. The R12 behavioural test now also covers the source layout (harness dir == worktree
+  toplevel) with a real linked `git worktree`, asserting the transition lands on the MAIN board and
+  contends on the MAIN `state/tasks.json.lock`; it fails against the old `dirname(self_dir)` cwd and
+  passes after the fix.
 
 ## [0.30.0] — 2026-07-10
 

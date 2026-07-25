@@ -722,6 +722,86 @@ PY
   fi
 fi
 
+# ── R12src: SOURCE-layout canonical board+lock across git worktrees ────────────
+# test_canonical_board_lock_across_worktrees_source_layout (Codex #46 r5 P1, id 3649327432)
+# The R12wt case above builds an INSTALLED-layout harness (.harness/…). In that
+# layout the helper's self-located harness dir is <root>/.harness, whose PARENT
+# (<root>) is STILL inside the repo — so a git-discovery cwd of dirname(self_dir)
+# happens to work and never surfaced the bug. In the SOURCE layout the harness
+# dir IS the worktree TOPLEVEL (board at <root>/state/tasks.json, helper at
+# <root>/tools/tasks-lock.py), so dirname(self_dir) is the repo's PARENT — git
+# runs OUTSIDE the worktree, --git-common-dir / --show-toplevel fail or resolve a
+# DIFFERENT repo, and the helper falls back to the LINKED worktree's own board,
+# defeating R12. This case reproduces that: set-status invoked from INSIDE the
+# linked worktree must transition the MAIN worktree's board (NOT the linked copy)
+# and contend on the MAIN worktree's state/tasks.json.lock. It FAILS against the
+# old dirname(self_dir) cwd and PASSES once discovery runs from the tools/ dir.
+if ! git --version >/dev/null 2>&1; then
+  pass "R12src (skipped: git unavailable)"
+else
+  T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+  MAIN="$T/main"
+  # SOURCE layout: the harness dir == the worktree toplevel. Board + helper live
+  # directly under <root>/state and <root>/tools (NO .harness nesting).
+  make_fixture "$MAIN"
+  mkdir -p "$MAIN/tools"
+  cp "$HELPER" "$MAIN/tools/tasks-lock.py"
+  cp "$VALIDATOR" "$MAIN/tools/validate-board.py"
+  ( cd "$MAIN" \
+      && git init -q \
+      && git config user.email t@t.com \
+      && git config user.name t \
+      && git add -A \
+      && git commit -qm init ) \
+    || fail "R12src: could not initialise the main git worktree fixture"
+  WT="$T/linked"
+  if ! ( cd "$MAIN" && git worktree add -q "$WT" HEAD ) 2>/dev/null; then
+    rm -rf "$T"
+    pass "R12src (skipped: no git worktree)"
+  else
+    LINKED_HELPER="$WT/tools/tasks-lock.py"
+    [ -f "$LINKED_HELPER" ] \
+      || fail "R12src: linked worktree did not check out the tools/ helper"
+    # (a) invoke set-status from INSIDE the linked worktree, NO HARNESS_DIR set.
+    ( cd "$WT" && env -u HARNESS_DIR python3 "$LINKED_HELPER" set-status E01-F01 in-review ) \
+      || fail "R12src: set-status from the linked worktree failed"
+    # the MAIN worktree's board received the transition …
+    [ "$(status_of "$MAIN/state/tasks.json" E01-F01)" = "in-review" ] \
+      || fail "R12src: transition did not land on the MAIN worktree board (source-layout per-worktree board bug — git ran outside the worktree)"
+    # … and the linked worktree's own checked-out board was NOT written.
+    if [ -f "$WT/state/tasks.json" ]; then
+      [ "$(status_of "$WT/state/tasks.json" E01-F01)" = "pending" ] \
+        || fail "R12src: the LINKED worktree's board was mutated (should target only the canonical main board)"
+    fi
+    # (b) the canonical lockfile is the MAIN worktree's one.
+    [ -f "$MAIN/state/tasks.json.lock" ] \
+      || fail "R12src: canonical lockfile not created under the MAIN worktree"
+    LOCK_FROM_LINKED="$( cd "$WT" && env -u HARNESS_DIR python3 - "$LINKED_HELPER" <<'PY'
+import importlib.util, os, sys
+p = sys.argv[1]
+spec = importlib.util.spec_from_file_location("_tl", p)
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(os.path.realpath(os.path.join(m._harness_dir(), m.LOCK_REL)))
+PY
+)"
+    [ "$LOCK_FROM_LINKED" = "$(python3 -c "import os;print(os.path.realpath('$MAIN/state/tasks.json.lock'))")" ] \
+      || fail "R12src: linked worktree resolved lockfile $LOCK_FROM_LINKED, not the MAIN worktree's state/tasks.json.lock"
+    # (c) two concurrent writers from two DIFFERENT worktrees both survive.
+    ( cd "$WT"   && env -u HARNESS_DIR python3 "$LINKED_HELPER" set-status E01-F01 in-progress --timeout 10 ) &
+    _wa=$!
+    ( cd "$MAIN" && env -u HARNESS_DIR python3 "$MAIN/tools/tasks-lock.py" set-status E01-F02 in-review --timeout 10 ) &
+    _wb=$!
+    wait "$_wa" || fail "R12src: concurrent worktree writer A exited non-zero"
+    wait "$_wb" || fail "R12src: concurrent worktree writer B exited non-zero"
+    [ "$(status_of "$MAIN/state/tasks.json" E01-F01)" = "in-progress" ] \
+      || fail "R12src: E01-F01 transition lost under cross-worktree contention"
+    [ "$(status_of "$MAIN/state/tasks.json" E01-F02)" = "in-review" ] \
+      || fail "R12src: E01-F02 transition lost under cross-worktree contention"
+    rm -rf "$T"
+    pass "R12src source-layout canonical board+lock resolved to the MAIN worktree from any linked worktree (no lost update)"
+  fi
+fi
+
 # ── R13struct: locate status STRUCTURALLY by id, not by textual key order ──────
 # test_status_before_id_targets_correct_object  (Codex #46 r4 P2, id 3649274120)
 # JSON imposes no key order. If the minimal-diff writer finds the target's status
