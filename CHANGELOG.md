@@ -47,6 +47,23 @@ All notable changes to the harness body are recorded here. Versions follow
   after the status-enum check, so `set-status <sliced-feature> done` on unfinished slices could
   atomically persist a board that `init.sh` later rejects (and prematurely unblock dependents).
   No schema/status change; single-repo features are unaffected.
+- **One shared board validator (Codex #46 r2 P1, id 3649182844).** Extracted a single canonical
+  validator, `tools/validate-board.py`, and made **both** consumers use it: `init.sh` now calls it
+  as a CLI (identical success/failure lines and stderr contract) and `tools/tasks-lock.py` imports
+  its `validate(data, schema) -> list[str]` in-process while holding the lock, before the atomic
+  `os.replace`. This deletes the partial hand-rolled fallback in `tasks-lock.py` that silently
+  accepted boards `init.sh` rejected (e.g. a non-boolean `sdd`, malformed `slices`). The validator
+  prefers `jsonschema.Draft7Validator` when importable and otherwise runs the **complete**
+  zero-dependency structural check (required keys, types, id patterns, enums, owner defaults,
+  slices rules, and the sliced-`done` cross-field invariant) — the exact behaviour `init.sh`
+  carried before, now shared verbatim so both paths accept/reject identically. Shipped executable
+  by `harness-install.sh` and asserted by `tests/test_install.sh`.
+- **Reject non-finite / negative lock timeouts (Codex #46 r2 P2, id 3649182846).** `argparse`'s
+  `float()` accepted `--timeout nan`/`inf`, which poisoned the deadline arithmetic (`nan` makes
+  `monotonic() >= deadline` always False → unbounded wait against a contended lock; `+inf` is an
+  infinite bound). The helper now validates the timeout is **finite and non-negative** up front and
+  exits non-zero with a clear message before entering the poll loop, restoring the bounded-
+  acquisition contract (R5).
 
 ## [0.30.0] — 2026-07-10
 

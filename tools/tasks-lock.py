@@ -42,6 +42,7 @@ import errno
 import fcntl
 import importlib.util
 import json
+import math
 import os
 import sys
 import time
@@ -100,103 +101,35 @@ def _acquire(lock_fd, lockfile, timeout):
             time.sleep(_POLL_INTERVAL_SECONDS)
 
 
-def _load_schema_validator(schema_path):
-    """Return a callable(data)->None that raises on schema violation.
+def _load_shared_validator():
+    """Import the SINGLE canonical validator shared with init.sh.
 
-    Prefers `jsonschema` if available; otherwise falls back to a minimal
-    structural check derived from store/tasks.schema.json (enum + required +
-    id-pattern) so the fail-stop guarantee (R4) holds with zero extra deps.
+    `tools/validate-board.py` is the one source of truth for what a valid board
+    is; init.sh runs it as a CLI and this helper imports its `validate(data,
+    schema) -> list[str]` so the guarded write fail-stops (R4) on EXACTLY the
+    same rules the gate enforces. Previously this file carried a partial
+    hand-rolled copy that silently accepted boards init.sh rejected (wrong `sdd`
+    type, malformed slices, …); the shared import removes that drift at its root.
+
+    Loaded by absolute path from the sibling file so it works in both the source
+    (tools/) and installed (.harness/tools/) layouts regardless of sys.path.
     """
+    validator_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "validate-board.py")
+    spec = importlib.util.spec_from_file_location("_validate_board", validator_path)
+    if spec is None or spec.loader is None:
+        _die("could not load shared validator from %s" % validator_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if not hasattr(module, "validate"):
+        _die("shared validator %s does not define validate(data, schema)"
+             % validator_path)
+    return module.validate
+
+
+def _load_schema(schema_path):
     with open(schema_path) as fh:
-        schema = json.load(fh)
-    try:
-        import jsonschema  # type: ignore
-
-        def _validate(data):
-            jsonschema.validate(data, schema)
-
-        return _validate
-    except Exception:
-        return _make_minimal_validator(schema)
-
-
-def _make_minimal_validator(schema):
-    import re
-
-    feat_status = set(
-        schema["properties"]["epics"]["items"]["properties"]["features"]["items"][
-            "properties"
-        ]["status"]["enum"]
-    )
-    epic_status = set(
-        schema["properties"]["epics"]["items"]["properties"]["status"]["enum"]
-    )
-    epic_id_re = re.compile(
-        schema["properties"]["epics"]["items"]["properties"]["id"]["pattern"]
-    )
-    feat_id_re = re.compile(
-        schema["properties"]["epics"]["items"]["properties"]["features"]["items"][
-            "properties"
-        ]["id"]["pattern"]
-    )
-
-    def _validate(data):
-        if not isinstance(data, dict):
-            raise ValueError("board root is not an object")
-        if "project" not in data or "epics" not in data:
-            raise ValueError("board missing required 'project'/'epics'")
-        if not isinstance(data["epics"], list):
-            raise ValueError("'epics' is not an array")
-        for epic in data["epics"]:
-            for req in ("id", "title", "status", "features"):
-                if req not in epic:
-                    raise ValueError("epic missing required field '%s'" % req)
-            if not epic_id_re.match(epic["id"]):
-                raise ValueError("epic id %r fails id pattern" % epic.get("id"))
-            if epic["status"] not in epic_status:
-                raise ValueError(
-                    "epic %s has invalid status %r (not in %s)"
-                    % (epic["id"], epic["status"], sorted(epic_status))
-                )
-            for feat in epic["features"]:
-                for req in ("id", "title", "status", "sdd", "spec_path"):
-                    if req not in feat:
-                        raise ValueError(
-                            "feature missing required field '%s'" % req
-                        )
-                if not feat_id_re.match(feat["id"]):
-                    raise ValueError(
-                        "feature id %r fails id pattern" % feat.get("id")
-                    )
-                if feat["status"] not in feat_status:
-                    raise ValueError(
-                        "feature %s has invalid status %r (not in %s)"
-                        % (feat["id"], feat["status"], sorted(feat_status))
-                    )
-                # Mirror the schema's cross-field `slices` invariant (allOf/if-then):
-                # a sliced feature may be `done` ONLY when every slice is itself
-                # `done` AND `merged: true`. Without this, the zero-dependency
-                # fallback would let `set-status <sliced-feature> done` persist a
-                # board that init.sh's full jsonschema pass later rejects — and
-                # would prematurely unblock dependents. Single-repo features (no
-                # `slices`) are unaffected: the guard only fires when slices exist.
-                if feat["status"] == "done" and feat.get("slices"):
-                    for sl in feat["slices"]:
-                        if sl.get("status") != "done" or sl.get("merged") is not True:
-                            raise ValueError(
-                                "feature %s is 'done' but slice %s is not "
-                                "done+merged (status=%r, merged=%r); a sliced "
-                                "feature may be done only when every slice is "
-                                "done and merged"
-                                % (
-                                    feat["id"],
-                                    sl.get("id"),
-                                    sl.get("status"),
-                                    sl.get("merged"),
-                                )
-                            )
-
-    return _validate
+        return json.load(fh)
 
 
 def _import_mutator(path):
@@ -239,7 +172,8 @@ def run(mutator, timeout):
     if not os.path.exists(tasks_path):
         _die("board not found at %s (HARNESS_DIR=%s)" % (tasks_path, hdir))
 
-    validate = _load_schema_validator(schema_path)
+    validate = _load_shared_validator()
+    schema = _load_schema(schema_path)
 
     # Open (creating if needed) the sibling lockfile. It only ever anchors the
     # advisory lock; it never holds board data.
@@ -253,10 +187,14 @@ def run(mutator, timeout):
 
             data = mutator(data)  # the single mutation (R1)
 
-            # Validate the mutated content BEFORE replacing the file (R4).
+            # Validate the mutated content BEFORE replacing the file (R4), using
+            # the SAME shared validator init.sh runs. Any error → fail-stop, board
+            # untouched (raised here, caught by main() → non-zero, clear message).
             serialized = json.dumps(data, indent=2) + "\n"
             reparsed = json.loads(serialized)  # parse check
-            validate(reparsed)  # schema check
+            errs = validate(reparsed, schema)  # schema check (shared with init.sh)
+            if errs:
+                raise ValueError("; ".join(errs))
 
             # Atomic write: temp in the same dir, then os.replace (R4 — no torn
             # file). If the process dies mid-write, the original is untouched.
@@ -300,6 +238,19 @@ def main(argv):
     )
 
     args = parser.parse_args(argv)
+
+    # Bounded-acquisition contract (R5): argparse's float() accepts `nan`/`inf`,
+    # which would poison the deadline arithmetic in _acquire — `nan` makes the
+    # `time.monotonic() >= deadline` comparison ALWAYS False (unbounded wait
+    # against a contended lock), and `+inf` is an infinite bound. Reject any
+    # non-finite or negative timeout up front, before the poll loop, so the
+    # acquisition is provably bounded.
+    if not (math.isfinite(args.timeout) and args.timeout >= 0):
+        _die(
+            "--timeout must be a finite, non-negative number of seconds "
+            "(got %r); a non-finite bound would wait forever, violating the "
+            "bounded-acquisition contract" % args.timeout
+        )
 
     if args.cmd == "set-status":
         mutator = _set_status_mutator(args.id, args.status)

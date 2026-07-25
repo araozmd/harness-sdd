@@ -24,12 +24,16 @@ set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 HELPER="$ROOT/tools/tasks-lock.py"
+# tasks-lock.py imports the SHARED validator from its sibling validate-board.py,
+# so any temp tools/ layout the tests build must copy BOTH files.
+VALIDATOR="$ROOT/tools/validate-board.py"
 SCHEMA="$ROOT/store/tasks.schema.json"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
 [ -f "$HELPER" ] || fail "tools/tasks-lock.py missing"
+[ -f "$VALIDATOR" ] || fail "tools/validate-board.py (shared validator) missing"
 
 # ── shared fixture builder ────────────────────────────────────────────────────
 # make_fixture <dir> — seed a valid two-feature board + schema under <dir>.
@@ -328,6 +332,7 @@ T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
 make_fixture "$T"
 mkdir -p "$T/tools"
 cp "$HELPER" "$T/tools/tasks-lock.py"
+cp "$VALIDATOR" "$T/tools/validate-board.py"   # shared validator sibling
 # invoke from an unrelated cwd, env HARNESS_DIR explicitly UNSET
 ( cd / && env -u HARNESS_DIR python3 "$T/tools/tasks-lock.py" set-status E01-F01 in-review ) \
   || fail "R10a: helper failed to self-locate its board from an arbitrary cwd (no HARNESS_DIR)"
@@ -338,6 +343,7 @@ T2="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
 make_fixture "$T2/.harness"
 mkdir -p "$T2/.harness/tools"
 cp "$HELPER" "$T2/.harness/tools/tasks-lock.py"
+cp "$VALIDATOR" "$T2/.harness/tools/validate-board.py"   # shared validator sibling
 ( cd / && env -u HARNESS_DIR python3 "$T2/.harness/tools/tasks-lock.py" set-status E01-F02 done ) \
   || fail "R10a: helper failed to self-locate the .harness/ installed-layout board"
 [ "$(status_of "$T2/.harness/state/tasks.json" E01-F02)" = "done" ] \
@@ -426,6 +432,121 @@ HARNESS_DIR="$T" python3 "$T/run_nojs.py" \
 rm -rf "$T"
 pass "R10b fallback validator (no jsonschema) enforces slices done+merged before feature 'done'"
 
+# ── R12: shared validator (init.sh + tasks-lock) enforces the FULL schema ──────
+# test_shared_validator_full_schema_on_fallback  (Codex #46 r2 P1, id 3649182844)
+# The write path validates through the SAME tools/validate-board.py that init.sh
+# runs — so a constraint the old partial fallback omitted (e.g. `sdd` must be a
+# boolean) is now rejected even on the zero-dependency install path (jsonschema
+# absent). Prove: with `import jsonschema` blocked, a mutator setting `sdd` to a
+# non-boolean ("yes") is REJECTED non-zero and the board is left byte-identical.
+T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+make_fixture "$T"
+cp "$T/state/tasks.json" "$T/before.json"
+cat > "$T/sddmut.py" <<'EOF'
+def mutate(data):
+    # non-boolean sdd — schema requires a boolean; the OLD partial fallback in
+    # tasks-lock.py never checked this and would have let it through.
+    data['epics'][0]['features'][0]['sdd'] = "yes"
+    return data
+EOF
+# Drive the helper as __main__ with jsonschema import blocked (zero-dep path).
+cat > "$T/run_nojs.py" <<EOF
+import runpy, sys, builtins
+_real = builtins.__import__
+def _imp(name, *a, **k):
+    if name == "jsonschema":
+        raise ImportError("blocked: simulate zero-dep install path")
+    return _real(name, *a, **k)
+builtins.__import__ = _imp
+sys.argv = ["tasks-lock.py", "apply", "--mutator", "$T/sddmut.py"]
+try:
+    runpy.run_path("$HELPER", run_name="__main__")
+    sys.exit(0)
+except SystemExit as e:
+    sys.exit(0 if e.code in (None, 0) else 2)
+EOF
+if HARNESS_DIR="$T" python3 "$T/run_nojs.py" 2>"$T/serr.txt"; then
+  fail "R12: shared validator ALLOWED a non-boolean sdd on the fallback path (partial validator regression)"
+fi
+grep -qiE 'sdd|boolean' "$T/serr.txt" \
+  || fail "R12: fallback rejection did not name the sdd/boolean constraint"
+cmp -s "$T/before.json" "$T/state/tasks.json" \
+  || fail "R12: original board was modified/torn on the rejected non-boolean-sdd write"
+# and a VALID serial write still passes through the shared validator.
+HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 in-progress --timeout 3 \
+  || fail "R12: a valid write was rejected by the shared validator"
+[ "$(status_of "$T/state/tasks.json" E01-F01)" = "in-progress" ] \
+  || fail "R12: valid write did not persist through the shared validator"
+rm -rf "$T"
+pass "R12 write path uses the shared validator; full-schema fallback rejects non-boolean sdd (board byte-identical)"
+
+# ── R12b: the shared validator is the ACTUAL code init.sh runs (one source) ────
+# Prove tools/validate-board.py exists, exposes a CLI with the init.sh contract
+# (non-zero + stderr on invalid), and that init.sh calls it rather than embedding
+# a duplicate validator heredoc (the root cause of the drift Codex flagged).
+VALIDATOR="$ROOT/tools/validate-board.py"
+[ -f "$VALIDATOR" ] || fail "R12b: tools/validate-board.py (shared validator) missing"
+grep -qF 'tools/validate-board.py' "$ROOT/init.sh" \
+  || fail "R12b: init.sh no longer calls the shared tools/validate-board.py"
+# init.sh must NOT still carry the old embedded fallback validator (dedup).
+grep -qF 'def need(obj, key, where)' "$ROOT/init.sh" \
+  && fail "R12b: init.sh still embeds a duplicate validator body (extraction incomplete)"
+# CLI contract: invalid board → non-zero with a stderr message; valid → zero.
+T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+make_fixture "$T"
+python3 "$VALIDATOR" "$T/state/tasks.json" "$SCHEMA" \
+  || fail "R12b: shared validator CLI rejected a valid fixture board"
+# corrupt the board (drop required 'epics') → must fail non-zero.
+python3 -c "import json,sys
+d=json.load(open(sys.argv[1])); d.pop('epics'); open(sys.argv[1],'w').write(json.dumps(d))" \
+  "$T/state/tasks.json"
+if python3 "$VALIDATOR" "$T/state/tasks.json" "$SCHEMA" 2>"$T/verr.txt"; then
+  fail "R12b: shared validator CLI accepted a board missing required 'epics'"
+fi
+[ -s "$T/verr.txt" ] || fail "R12b: shared validator CLI printed no error on an invalid board"
+rm -rf "$T"
+pass "R12b init.sh + tasks-lock share ONE validator (tools/validate-board.py); no embedded duplicate"
+
+# ── R13: reject non-finite / negative lock timeouts (bounded acquisition) ──────
+# test_reject_non_finite_timeout  (Codex #46 r2 P2, id 3649182846)
+# argparse's float() happily parses `nan`/`inf`; a NaN deadline makes the
+# `monotonic() >= deadline` comparison ALWAYS False (unbounded wait), and +inf is
+# an infinite bound. Both must be rejected non-zero BEFORE the poll loop — i.e.
+# quickly, even against a HELD lock (proving no blocking occurred).
+for bad in nan inf -inf -1; do
+  T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+  make_fixture "$T"
+  # Hold the lock so that, if the guard were missing, the call would BLOCK.
+  cat > "$T/holder.py" <<EOF
+import fcntl, os, time
+fd = os.open("$T/state/tasks.json.lock", os.O_RDWR | os.O_CREAT, 0o644)
+fcntl.flock(fd, fcntl.LOCK_EX)
+open("$T/held.flag", "w").close()
+time.sleep(6)
+EOF
+  python3 "$T/holder.py" &
+  _hp=$!
+  until [ -f "$T/held.flag" ]; do sleep 0.05; done
+  _start="$(python3 -c 'import time;print(time.time())')"
+  if HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 done --timeout "$bad" 2>"$T/gerr.txt"; then
+    kill "$_hp" 2>/dev/null || true
+    fail "R13: --timeout $bad was accepted (should be rejected before the poll loop)"
+  fi
+  _end="$(python3 -c 'import time;print(time.time())')"
+  # rejected up front ⇒ returns near-instantly, NOT after blocking on the held lock.
+  python3 -c "import sys; sys.exit(0 if ($_end - $_start) < 3 else 1)" \
+    || fail "R13: --timeout $bad blocked on the held lock instead of failing fast"
+  grep -qiE 'timeout|finite|non-negative' "$T/gerr.txt" \
+    || fail "R13: --timeout $bad rejection message does not explain the constraint"
+  # board untouched.
+  [ "$(status_of "$T/state/tasks.json" E01-F01)" = "pending" ] \
+    || fail "R13: --timeout $bad mutated the board despite being rejected"
+  kill "$_hp" 2>/dev/null || true
+  wait "$_hp" 2>/dev/null || true
+  rm -rf "$T"
+done
+pass "R13 non-finite/negative --timeout (nan/inf/-inf/-1) rejected fast, before blocking (bounded R5)"
+
 # ── R11: VERSION advanced (a MINOR bump) + CHANGELOG entry (compared, not frozen) ─
 # test_version_advanced_not_frozen
 [ -f "$ROOT/VERSION" ] || fail "R11: VERSION file missing"
@@ -446,4 +567,4 @@ grep -qiF 'E15-F01' "$ROOT/CHANGELOG.md" \
   || fail "R11: CHANGELOG.md gained no E15-F01 entry"
 pass "R11 VERSION advanced (MINOR) + CHANGELOG entry present (compared, not frozen)"
 
-echo "PASS: test_board_lock.sh (R1-R9, R10a/R10b, R11)"
+echo "PASS: test_board_lock.sh (R1-R9, R10a/R10b, R11, R12/R12b, R13)"

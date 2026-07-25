@@ -642,6 +642,7 @@ install_one() {
   chmod +x "$H/tools/telemetry-report.py" 2>/dev/null || true
   chmod +x "$H/tools/sync-board.mjs" 2>/dev/null || true
   chmod +x "$H/tools/tasks-lock.py" 2>/dev/null || true   # E15-F01 board write lock helper
+  chmod +x "$H/tools/validate-board.py" 2>/dev/null || true   # E15-F01 shared board validator (init.sh + tasks-lock)
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"

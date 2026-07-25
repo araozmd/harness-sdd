@@ -192,6 +192,10 @@ if have_py; then
     for r in orchestrator architect builder reviewer scout; do : > "$H/agents/$r.md"; done
     cp "$SRC/store/tasks.schema.json" "$H/store/tasks.schema.json"
     cp "$SRC/init.sh" "$H/init.sh"; chmod +x "$H/init.sh"
+    # init.sh delegates schema validation to the shared tools/validate-board.py
+    # (E15-F01, Codex #46 r2); ship it into the sandbox so the fallback path is
+    # genuinely exercised (not a spurious "file not found" non-zero).
+    mkdir -p "$H/tools"; cp "$SRC/tools/validate-board.py" "$H/tools/validate-board.py"
     # malformed slice: bad id pattern, missing repo, bogus status.
     cat > "$H/state/tasks.json" <<'JSON'
 {
