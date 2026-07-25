@@ -355,7 +355,7 @@
     {
       "id": "E99",
       "title": "Maintenance (hotfixes & minor fixes)",
-      "status": "planned",
+      "status": "done",
       "features": [
         {
           "id": "E99-F01",
