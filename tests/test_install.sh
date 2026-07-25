@@ -151,6 +151,18 @@ JSON
   mv "$T/.harness/state/tasks.json.e16-backup" "$T/.harness/state/tasks.json"
 }
 
+test_rationale_docs_installed_contract() {
+  [ -f "$T/.harness/docs/RATIONALE.md" ] ||
+    fail "E16-F02: installed rationale document missing"
+  cmp -s "$SRC/docs/RATIONALE.md" "$T/.harness/docs/RATIONALE.md" ||
+    fail "E16-F02: installed rationale differs from source"
+  grep -qF '| `docs/RATIONALE.md` |' "$T/.harness/AGENTS.md" ||
+    fail "E16-F02: installed AGENTS docs map does not point to rationale"
+  grep -qF '[rationale and deletion ledger](RATIONALE.md)' \
+    "$T/.harness/docs/HARNESS.md" ||
+    fail "E16-F02: installed HARNESS overview does not point to rationale"
+}
+
 test_worktree_ignore_seed_preserved_idempotent() {
   [ "$(grep -cxF '.claude/worktrees/' "$T/.gitignore")" = "1" ] ||
     fail "root .gitignore must contain exactly one .claude/worktrees/ entry"
@@ -207,6 +219,7 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "installer exited non-zero"
 [ -x "$T/.harness/tools/tasks-lock.py" ] || fail "installed tools/tasks-lock.py is not executable (board write lock not runnable)"     # R10
 test_fix_worktree_helper_installed_executable
 test_dependency_diagnostics_installed_contract
+test_rationale_docs_installed_contract
 # E15-F01 (Codex #46 r2 P1): the SHARED board validator must ship in the body AND be
 # executable — init.sh runs it as a CLI and tasks-lock.py imports its validate(); if it
 # is missing the gate and the guarded write both break in consumers.

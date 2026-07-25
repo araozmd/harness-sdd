@@ -5,8 +5,9 @@ A portable **agent harness** for **Spec-Driven Development**. It runs primarily 
 **Antigravity** — because the harness is just files in the repo, and the model/CLI is
 interchangeable.
 
-> The model is the engine; the harness is the chassis. Models change every few
-> months — your harness doesn't. See `docs/HARNESS.md`.
+> The model is the engine; the harness is the chassis. Start with
+> [why the harness exists](docs/RATIONALE.md), then see the compact
+> [harness overview](docs/HARNESS.md).
 
 ## How it works
 
@@ -213,7 +214,7 @@ specs/                       product.md, glossary.md, _templates/, epics/<E>/<F>
 state/                       tasks.json (local TaskStore) + schema
 progress/                    run output + history.md
 store/                       store contract + adapters (local, obsidian, jira) + board-mirror
-docs/                        SPEC-FORMAT, WORKFLOW, HARNESS, INSTALL, UMBRELLA, CONFIG-LAYERING
+docs/                        [RATIONALE.md](docs/RATIONALE.md), SPEC-FORMAT, WORKFLOW, HARNESS, INSTALL, UMBRELLA, CONFIG-LAYERING
 umbrella.manifest.example.yaml   cross-repo coordinator manifest template
 umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
