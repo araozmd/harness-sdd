@@ -23,6 +23,13 @@ progress/*/
 # .harness/.gitignore from harness-install.sh.)
 /telemetry.jsonl
 
+# Runtime board write lockfile (E15-F01). The documented source-layout invocation
+# `python3 tools/tasks-lock.py set-status …` creates a zero-byte flock target at
+# root-relative state/tasks.json.lock (never board data); the .harness/ ignore above
+# does NOT cover this source-layout path, so ignore it explicitly. (Installed consumers
+# get the equivalent entry in their seeded .harness/.gitignore from harness-install.sh.)
+/state/tasks.json.lock
+
 # Python bytecode cruft (e.g. from running tools/telemetry-report.py locally)
 __pycache__/
 *.pyc

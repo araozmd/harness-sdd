@@ -278,6 +278,40 @@
       "features": []
     },
     {
+      "id": "E15",
+      "title": "Parallel fix lane (concurrent E99 fixes in isolated worktrees)",
+      "status": "planned",
+      "features": [
+        {
+          "id": "E15-F01",
+          "title": "Board write lock: flock-guarded read-modify-write on tasks.json",
+          "status": "in-review",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E15-parallel-fix-lane/F01-board-write-lock/"
+        },
+        {
+          "id": "E15-F02",
+          "title": "Worktree-per-fix isolation helper for concurrent fix branches",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": ["E15-F01"],
+          "spec_path": "specs/epics/E15-parallel-fix-lane/F02-worktree-isolation/"
+        },
+        {
+          "id": "E15-F03",
+          "title": "/sdd-fix-parallel dispatch with shared-path conflict guard + installer wiring",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": ["E15-F01", "E15-F02"],
+          "spec_path": "specs/epics/E15-parallel-fix-lane/F03-parallel-dispatch/"
+        }
+      ]
+    },
+    {
       "id": "E99",
       "title": "Maintenance (hotfixes & minor fixes)",
       "status": "planned",

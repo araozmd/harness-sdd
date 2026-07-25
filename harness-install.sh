@@ -641,6 +641,8 @@ install_one() {
   chmod +x "$H/init.sh" 2>/dev/null || true
   chmod +x "$H/tools/telemetry-report.py" 2>/dev/null || true
   chmod +x "$H/tools/sync-board.mjs" 2>/dev/null || true
+  chmod +x "$H/tools/tasks-lock.py" 2>/dev/null || true   # E15-F01 board write lock helper
+  chmod +x "$H/tools/validate-board.py" 2>/dev/null || true   # E15-F01 shared board validator (init.sh + tasks-lock)
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"
@@ -758,8 +760,13 @@ EOF
   # .harness/ .gitignore where the tool actually reads it) so a
   # provisioned Jira PAT can NEVER be committed by default. The PAT value itself is never
   # written to config — only this path is seeded here. See store/board-mirror.md "jira contract".
+  # Also ignore the runtime board write lockfile (E15-F01: mirror.board-neutral
+  # advisory lock on state/tasks.json). It is a zero-byte flock target created at
+  # runtime under .harness/ (state/tasks.json.lock), never board data — keep it out
+  # of VCS. Path is relative to this .harness/ .gitignore. See store/local.md set_status.
   _ignores='telemetry.jsonl
-jira.pat'
+jira.pat
+state/tasks.json.lock'
   case "$_tlog" in
     ''|telemetry.jsonl|/*) : ;;                 # default, unset, or absolute → nothing extra
     *) _ignores="$_ignores

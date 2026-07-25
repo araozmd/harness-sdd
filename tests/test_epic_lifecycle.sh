@@ -138,10 +138,18 @@ pass "R3 legacy_store_valid"
 
 # ── R4: init.sh fallback validator parity + green run on the untouched repo ──────
 # R4_init_parity
-grep 'EPIC_STATUS' init.sh | grep -qF '"draft"' \
-  || fail "R4: init.sh EPIC_STATUS set missing \"draft\""
-grep 'EPIC_STATUS' init.sh | grep -qF '"planned"' \
-  || fail "R4: init.sh EPIC_STATUS set missing \"planned\""
+# The zero-dependency fallback enum set now lives in the SHARED validator
+# tools/validate-board.py (E15-F01, Codex #46 r2): init.sh calls it as a CLI
+# rather than embedding a duplicate. Assert the enum parity on the shared file
+# AND that init.sh actually invokes it (so the parity chain still reaches init.sh).
+VALIDATOR="tools/validate-board.py"
+[ -f "$VALIDATOR" ] || fail "R4: shared validator tools/validate-board.py missing"
+grep 'EPIC_STATUS' "$VALIDATOR" | grep -qF '"draft"' \
+  || fail "R4: shared validator EPIC_STATUS set missing \"draft\""
+grep 'EPIC_STATUS' "$VALIDATOR" | grep -qF '"planned"' \
+  || fail "R4: shared validator EPIC_STATUS set missing \"planned\""
+grep -qF 'tools/validate-board.py' init.sh \
+  || fail "R4: init.sh does not invoke the shared validator tools/validate-board.py"
 ./init.sh >/dev/null 2>&1 || fail "R4: ./init.sh failed on the untouched repo"
 pass "R4 init_parity"
 
@@ -217,7 +225,9 @@ python3 "$TMP/validate.py" "$TMP/r12.json" "$SCHEMA" \
   || fail "R12: schema rejected a draft epic with an in-progress feature (must be warn-only)"
 SBX="$TMP/sandbox"
 mkdir -p "$SBX/state"
-for p in init.sh AGENTS.md harness.config.yaml agents specs progress store; do
+# init.sh now delegates schema validation to the shared tools/validate-board.py
+# (E15-F01, Codex #46 r2), so the sandbox must include tools/ too.
+for p in init.sh AGENTS.md harness.config.yaml agents specs progress store tools; do
   cp -R "$ROOT/$p" "$SBX/"
 done
 cp "$TMP/r12.json" "$SBX/state/tasks.json"

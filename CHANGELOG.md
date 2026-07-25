@@ -4,6 +4,251 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.31.0] — 2026-07-24
+
+### Added — 🔒 Board write lock: flock-guarded read-modify-write on tasks.json (E15-F01)
+- **New advisory-lock helper `tools/tasks-lock.py`** (installed body, executable) guards every
+  persisted `state/tasks.json` mutation. It owns the whole critical section in **one process**:
+  acquire a portable stdlib **`fcntl.flock`** on the sibling lockfile `state/tasks.json.lock`
+  (resolved with `cwd = HARNESS_DIR`) → **re-read `state/tasks.json` from disk inside the lock**
+  → apply the single status mutation → validate (`json` parse **and** `store/tasks.schema.json`
+  schema check) → atomically replace the file (write-temp-then-`os.replace`) → release. Re-reading
+  *inside* the lock is the point: two near-simultaneous writers (E15 parallel fix chains) can no
+  longer lose an update (last-writer-wins clobber).
+- **Fail-stop, no torn file** — a mutation that fails validation aborts non-zero, releases the
+  lock, and leaves the original `state/tasks.json` byte-for-byte intact.
+- **Bounded acquisition, never a silent hang** — lock acquisition is bounded by a ~10s timeout;
+  on timeout it exits non-zero with an actionable error naming the lockfile and the timeout,
+  never blocking forever and never writing unlocked.
+- **No-op for serial callers** — for a single (uncontended) caller the lock is taken immediately
+  and the output is byte-equivalent to the old read-modify-write, so `/sdd-next` and existing
+  tests are unchanged. The `store.on_write_command` hook fires **after** the lock is released,
+  never inside the critical section. **No new status value and no `store/tasks.schema.json`
+  change** — only the concurrency discipline around the write.
+- **Portable** — depends only on `python3` + stdlib `fcntl` (already a write-path dependency);
+  it does **not** use the Linux-only `flock(1)` binary (absent on macOS). Single-host scope;
+  cross-machine coordination is out of scope.
+- **Installer wiring** — `harness-install.sh` copies + `chmod +x`'s the helper into
+  `.harness/tools/` and gitignores the runtime lockfile (`state/tasks.json.lock`) in the seeded
+  `.harness/.gitignore`; `tests/test_install.sh` asserts a fresh install ships the executable
+  helper. `store/local.md`'s `set_status` contract is amended to mandate the lock protocol.
+
+### Fixed — board write lock robustness (Codex #46 P1 ×2, pre-release under 0.31.0)
+- **Helper resolves `HARNESS_DIR` from its own path, not `cwd`.** `tools/tasks-lock.py` now
+  derives the board root from `__file__` (`<HARNESS_DIR>/tools/tasks-lock.py` ⇒ parent-of-parent)
+  when `HARNESS_DIR` is unset, so the documented `set_status` invocation is correct from **any
+  cwd** in both the source layout (`tools/…`, board `state/tasks.json`) and the installed layout
+  (`.harness/tools/…`, board `.harness/state/tasks.json`) — no `.harness/.harness` double-nesting
+  and no requirement to hand-set `HARNESS_DIR`. An explicit `HARNESS_DIR` env var still wins as a
+  highest-precedence escape hatch. `store/local.md`'s `set_status` contract is corrected to match.
+- **Zero-dependency fallback validator now enforces the `slices` invariant.** When `jsonschema`
+  is unavailable, the minimal validator mirrors the schema's cross-field rule: a **sliced feature
+  may be `done` only when every slice is `done` and `merged`**. Previously the fallback stopped
+  after the status-enum check, so `set-status <sliced-feature> done` on unfinished slices could
+  atomically persist a board that `init.sh` later rejects (and prematurely unblock dependents).
+  No schema/status change; single-repo features are unaffected.
+- **One shared board validator (Codex #46 r2 P1, id 3649182844).** Extracted a single canonical
+  validator, `tools/validate-board.py`, and made **both** consumers use it: `init.sh` now calls it
+  as a CLI (identical success/failure lines and stderr contract) and `tools/tasks-lock.py` imports
+  its `validate(data, schema) -> list[str]` in-process while holding the lock, before the atomic
+  `os.replace`. This deletes the partial hand-rolled fallback in `tasks-lock.py` that silently
+  accepted boards `init.sh` rejected (e.g. a non-boolean `sdd`, malformed `slices`). The validator
+  prefers `jsonschema.Draft7Validator` when importable and otherwise runs the **complete**
+  zero-dependency structural check (required keys, types, id patterns, enums, owner defaults,
+  slices rules, and the sliced-`done` cross-field invariant) — the exact behaviour `init.sh`
+  carried before, now shared verbatim so both paths accept/reject identically. Shipped executable
+  by `harness-install.sh` and asserted by `tests/test_install.sh`.
+- **Reject non-finite / negative lock timeouts (Codex #46 r2 P2, id 3649182846).** `argparse`'s
+  `float()` accepted `--timeout nan`/`inf`, which poisoned the deadline arithmetic (`nan` makes
+  `monotonic() >= deadline` always False → unbounded wait against a contended lock; `+inf` is an
+  infinite bound). The helper now validates the timeout is **finite and non-negative** up front and
+  exits non-zero with a clear message before entering the poll loop, restoring the bounded-
+  acquisition contract (R5).
+- **Minimal-diff status writes preserve existing board formatting (Codex #46 r3 P2, id 3649236637).**
+  `set-status` now patches ONLY the addressed object's `"status"` value token in the original file
+  text, leaving every other byte untouched, instead of parsing → `json.dumps(indent=2)` →
+  re-serializing (which rewrote unrelated entries — e.g. expanding a sibling feature's inline
+  `depends_on` array — on any board not already `indent=2`-canonical). This restores the promised
+  serial byte-equivalence (R6) and keeps Git diffs / merge-conflict surface minimal, exactly when
+  E15 introduces parallel branches. The result is still `json`-parsed and schema-validated through
+  the shared `tools/validate-board.py` before the atomic `os.replace`, so an invalid outcome (bad
+  id, illegal status, sliced-`done` invariant) still fail-stops with the board intact. The
+  `apply --mutator` path is unchanged (external mutators may alter arbitrary structure).
+- **Ignore the source-layout board lockfile (Codex #46 r3 P2, id 3649236638).** The
+  `state/tasks.json.lock` ignore was seeded only into an installed consumer's `.harness/.gitignore`.
+  In this source repo the documented `python3 tools/tasks-lock.py set-status …` creates the lock at
+  root-relative `state/tasks.json.lock`, which the root `.gitignore` did not cover — dirtying the
+  worktree. Added `/state/tasks.json.lock` to the repo root `.gitignore` (the installed-layout
+  `.harness/.gitignore` entry is unchanged).
+- **Canonical board + lock across git worktrees (Codex #46 r4 P1, id 3649274119).** The E15
+  F02/F03 parallel-fix flow runs each fix in its OWN linked git worktree. Previously
+  `tools/tasks-lock.py` resolved the board (and its lockfile) relative to whatever worktree it
+  ran in, so each worker read/wrote a **different** worktree-local `state/tasks.json` and contended
+  on a **different** `state/tasks.json.lock` inode — the `flock` did not serialize cross-worktree
+  writers, so R1's no-lost-update guarantee was absent in exactly the scenario the epic targets.
+  The helper now resolves **both** the board and the lockfile to the **single canonical location in
+  the MAIN working tree**: precedence is (1) explicit `HARNESS_DIR` override, else (2) when inside a
+  git repo/worktree, the main worktree root via `git rev-parse --git-common-dir` (its parent),
+  re-applying the source-vs-installed subpath (computed relative to `git rev-parse --show-toplevel`)
+  under that root, else (3) the prior `__file__` self-location. Git runs via `subprocess` with the
+  helper's own directory as cwd and a bounded timeout; **any** git failure (not a repo, git absent,
+  timeout, unexpected layout) degrades to (3) — never crashes, never blocks. Every worker in every
+  worktree now shares one board and one lock inode, so concurrent writers from different worktrees
+  cannot lose an update.
+- **Locate the status token STRUCTURALLY by id, not by textual key order (Codex #46 r4 P2, id
+  3649274120).** The minimal-diff `set-status` writer found the target's status as the first
+  `"status"` at-or-after the `"id"` match. JSON imposes no key order, so a board that orders
+  `status` **before** `id` in an object made the patch land on the **next** object's status —
+  silently transitioning the wrong task while validation still passed. The writer now resolves the
+  addressed object **structurally by id**: it anchors on the unique `"id": "<target>"`, delimits
+  THAT object's character span with a brace-aware, string-literal-aware scan, and replaces only the
+  `status` value token that lives at object depth 1 inside that span (a nested slice's status is
+  never mistaken for the object's own). The minimal-diff property is preserved (only the addressed
+  status token changes; unrelated inline arrays/formatting untouched) and the reparsed result is
+  still schema-validated through the shared `tools/validate-board.py` before the atomic `os.replace`.
+- **Run git worktree discovery from INSIDE the worktree in the source layout (Codex #46 r5 P1, id
+  3649327432).** The canonical-board resolution (id 3649274119) ran both `git rev-parse` calls with
+  `os.path.dirname(self_dir)` as cwd. In the **installed** layout the self-located harness dir is
+  `<root>/.harness`, whose parent (`<root>`) is still inside the repo, so discovery worked and the
+  R12 test passed. In the **source** layout the harness dir **is** the worktree toplevel, so its
+  parent is the repo's PARENT — git ran OUTSIDE the worktree, `--git-common-dir` / `--show-toplevel`
+  failed (or resolved a different repo), and the helper fell back to the LINKED worktree's own board;
+  `set-status` then mutated only the linked copy while the MAIN board stayed unchanged, defeating the
+  shared-board/shared-lock guarantee (R12) in the exact parallel-worktree scenario. Git discovery now
+  runs from `os.path.dirname(os.path.abspath(__file__))` (the helper's `tools/` dir), which is inside
+  the current worktree in **both** layouts, so source and installed resolve the main worktree
+  identically. The R12 behavioural test now also covers the source layout (harness dir == worktree
+  toplevel) with a real linked `git worktree`, asserting the transition lands on the MAIN board and
+  contends on the MAIN `state/tasks.json.lock`; it fails against the old `dirname(self_dir)` cwd and
+  passes after the fix.
+- **`init.sh` rejects installs that can't run the lock helper (Codex #46 r6 P1, id 3649368481).**
+  Since this feature makes `python3 tools/tasks-lock.py` the **mandatory** `set_status` write path,
+  a python3-less install that previously warned-and-continued (`⚠️ python3 not found — skipping …`)
+  would report "environment ready" yet fail on the first Orchestrator transition with
+  `python3: not found`. The local-backend gate now **hard-fails** (non-zero, clear message) when
+  `python3` is absent, and additionally verifies the stdlib **`fcntl`** module the lock helper needs
+  is importable — so an unsupported interpreter is caught at `init.sh` time, not mid-transition.
+  `tests/test_board_lock.sh` gains a case that runs `init.sh` under a python3-less `PATH` and asserts
+  the non-zero exit with a message naming python3 and the reason.
+- **Preserve the TaskStore file mode across the atomic replace (Codex #46 r6 P2, id 3649368484).**
+  The guarded write created a fresh temp file (per the process umask) and `os.replace`d it in, which
+  reset the board's permission bits — silently widening a `0600` board to `0644` (exposing data) or
+  narrowing a shared `0664` board (breaking another account's later writes). The helper now copies
+  the original board's mode (`stat.S_IMODE(os.stat(board).st_mode)`) onto the temp file **inside the
+  lock, before the replace**, preserving fail-stop semantics. `tests/test_board_lock.sh` asserts a
+  `0600` board stays `0600` and a `0664` board stays `0664` across a `set-status`.
+- **Fail SAFE on canonical-board resolution; never a silent wrong-board write (Codex #46 r6 P1, id
+  3649368478).** Under `git init --separate-git-dir` or a submodule, the main worktree path is
+  **provably unrecoverable** from a linked worktree (`git rev-parse --git-common-dir` reports the
+  separate metadata dir, whose parent is not the main worktree, and git stores no back-pointer to
+  the primary working tree). The previous auto-discovery either resolved `HARNESS_DIR` to the
+  boardless metadata dir (`board not found`) or silently fell back to the linked worktree's OWN
+  board — a silent wrong-board write defeating the shared-board guarantee. Resolution is now
+  strict-precedence and fail-safe: **(1)** explicit `HARNESS_DIR` override [highest precedence, set
+  by the F03 `/sdd-fix-parallel` coordinator]; **(2)** best-effort auto-discovery for the standard
+  `.git` worktree layout — **accepted only when the canonical board actually exists** there
+  (`<canonical>/state/tasks.json`); **(3)** otherwise, when running inside a **linked** worktree,
+  a **loud non-zero fail** with an actionable message demanding an explicit `HARNESS_DIR` (never a
+  silent fall-back to the linked worktree's own board), while the ordinary non-worktree / serial
+  `/sdd-next` case keeps the `__file__` self-location. Standard-layout worktrees still auto-resolve;
+  exotic layouts fail safe; the coordinator's `HARNESS_DIR` injection makes ALL layouts correct.
+  `tests/test_board_lock.sh` gains **R12sgd**: from a `separate-git-dir` linked worktree, a
+  `set-status` with **no** `HARNESS_DIR` exits non-zero with the actionable message while the main
+  board AND the linked worktree's own board stay byte-unchanged, and the same call **with**
+  `HARNESS_DIR=<main>` (the coordinator path) lands on the main board. The spec's **R12** and the
+  F03 brief (`progress/inbox/E15-F03.md`) are updated to require the coordinator to inject
+  `HARNESS_DIR`.
+- **Distinguish linked worktrees from separate-git-dir primaries (Codex #46 r7 P2, id 3649430729).**
+  `_in_linked_worktree()` detected a linked worktree by comparing the common `.git` dir's **parent**
+  with the worktree toplevel. But a **PRIMARY** checkout made with `git init --separate-git-dir`
+  (or a submodule primary) also keeps its common dir OUTSIDE the working tree, so that comparison
+  returned `true` and misclassified the primary as linked — combined with a failed canonical
+  board-existence check, ordinary **serial** `set-status` then exited demanding `HARNESS_DIR`, so
+  plain serial orchestration could not transition tasks in that layout without an undocumented
+  override. Detection now compares `git rev-parse --git-dir` with `git rev-parse --git-common-dir`
+  (both realpath-normalized): **equal ⇒ any primary checkout** (colocated, separate-git-dir, or
+  submodule) ⇒ NOT linked ⇒ the serial self-location fallback applies with no spurious `HARNESS_DIR`
+  demand; **distinct ⇒ a genuine linked worktree** ⇒ the existing loud-fail-if-no-canonical-board
+  behavior is unchanged. Any git failure still degrades to not-linked / self-location — never
+  crashes, never blocks. `tests/test_board_lock.sh` gains **R12sgdp**: a `separate-git-dir` PRIMARY
+  checkout runs `set-status` with **no** `HARNESS_DIR` and must succeed and transition its own board
+  (fails on the old parent-comparison logic, passes on the git-dir-vs-common-dir logic); the R12sgd
+  linked-worktree loud-fail and the R12wt/R12src worktree cases stay green.
+- **Common-dir remapping is now reserved for genuine linked worktrees (Codex #46 r8 P1, id
+  3649460575).** `_canonical_harness_dir()` ran the `--git-common-dir` → main-worktree-root remap
+  unconditionally, including for **PRIMARY** checkouts. In a primary made with
+  `git init --separate-git-dir`, the parent of the (external) metadata dir is an **unrelated**
+  directory — and if that directory happened to hold another harness board, the
+  board-existence check ACCEPTED it as canonical, so `set-status` silently mutated that unrelated
+  board while the real checkout stayed stale (reproduced: checkout still `pending`, metadata-parent
+  board flipped to `in-progress`). A primary checkout already **is** the main working tree and has
+  nothing to remap, so the remap is now gated on `_in_linked_worktree()`: primaries always
+  self-locate, and common-dir remapping applies only to a genuine linked worktree. Cross-worktree
+  canonical resolution (R12wt/R12src), the separate-git-dir linked loud-fail (R12sgd) and the
+  separate-git-dir primary serial path (R12sgdp) are unchanged. `tests/test_board_lock.sh` gains
+  **R12sgdx**: a `separate-git-dir` primary whose metadata dir sits **inside a decoy harness dir
+  with its own board** must transition its OWN board and leave the decoy byte-unchanged with no
+  lockfile created there (fails on unconditional remapping, passes once gated).
+- **`python3` documented as a local-backend prerequisite in `AGENTS.md` (Codex #46 r8 P2, id
+  3649460576).** The r6 P1 turned `init.sh`'s python3 check from warn-and-continue into a hard
+  fail, which — because rule 1 halts all work on a non-zero `init.sh` — makes python3 a
+  prerequisite for *any* harness work on the local backend, not just for locked status writes. The
+  breaking dependency change was recorded here but not on the entrypoint agents actually read;
+  `AGENTS.md` rule 1 now states the `python3` + stdlib `fcntl` requirement, when it became
+  mandatory, and the remedy.
+- **Invoke the Bash-only `init.sh` with `bash` in the R14py3 test (Codex #46 r9 P1, id
+  3649498024).** `tests/test_board_lock.sh` ran the python3-less gate check as `sh ./init.sh`.
+  `init.sh` declares `#!/usr/bin/env bash` and uses `set -o pipefail`, so wherever `/bin/sh` is
+  **dash** — typical Ubuntu CI — the shebang is bypassed and the script aborts at line 8 with
+  `Illegal option -o pipefail`, **never reaching the python3 gate**. The run still exited non-zero
+  (so the must-fail assertion passed vacuously) but printed no python3 message, so the two message
+  greps failed and the configured `test_board_lock.sh` suite went **red on CI while passing on
+  macOS**, where `/bin/sh` is bash in POSIX mode and does support `pipefail`. The case now invokes
+  `bash ./init.sh` and additionally requires `bash` to be reachable through the PATH shim (else it
+  skips cleanly). Verified by reproducing the dash condition: `sh` → `Illegal option -o pipefail`
+  with zero python3 mentions; `bash` → the exact hard-fail message the assertions expect.
+- **Restrict id resolution to real task objects (Codex #46 r9 P2, id 3649498027).** The
+  minimal-diff writer anchored on the **first textual** `"id": "<target>"` in the whole document.
+  The board schema permits additional properties, so a board may carry an extension object (a
+  mirror record, a cache entry) whose `id` equals a real feature or epic id; if it appeared earlier
+  in the file and had a `status`, `set-status` silently updated **that** object and left the
+  addressed task unchanged — and the result still schema-validated, so nothing surfaced the wrong
+  write. Resolution now **walks the board structurally** — root → `epics[]` elements → each epic's
+  `features[]` elements, matching only a **direct** `id` member at each level — so only a genuine
+  epic or feature is addressable and anything outside those two arrays is invisible. The string
+  mask backing the brace/bracket scans is computed once per resolution and threaded through
+  (previously recomputed per call), keeping resolution linear rather than quadratic on large
+  boards. `tests/test_board_lock.sh` gains **R13ext**: a board with colliding-id extension objects
+  both **before** `epics` and **nested inside** the epic must transition the real feature (and the
+  real epic), leave both decoys `synced`, and still change exactly one status token.
+- **Duplicate `status` member fails STOP instead of silently no-opping (Codex #46 r10 P2, id
+  3649544829).** JSON permits duplicate members and `json.loads` keeps the **last**, while a
+  first-match text patch rewrites the **first** — so on such a board the helper exited 0 having
+  persisted a file whose **effective** status never changed, and post-write validation still
+  passed. The sole supported write path could therefore silently drop a requested transition. The
+  writer now refuses to patch an object carrying more than one direct `status` member, exiting
+  non-zero with a message naming the id and the count, board byte-unchanged (R4 semantics).
+  Relatedly, object **selection** now reads a duplicated `id` as its **last** value, matching
+  `json.loads`, so the text walk can never select an object whose effective id differs.
+  `tests/test_board_lock.sh` gains **R13dup**.
+- **Preserve board ownership across the atomic replace (Codex #46 r10 P2, id 3649544831).** The
+  mode copy added in r6 carried permission bits but not ownership. In a multi-account checkout the
+  board is group-owned so several accounts can write it via the `0664` group bit; without setgid
+  inheritance on the directory the temp file takes the **current** writer's group, so `os.replace`
+  silently re-grouped the board and locked the other accounts out of the mandatory write path. The
+  helper now also copies the original `st_uid`/`st_gid` onto the temp file inside the lock.
+  Best-effort by construction — `chown` is privileged in the general case, so an `EPERM` refusal
+  (or a platform without it) is swallowed rather than failing the write; the mode copy already
+  covers the common single-owner case.
+- **Document the linked-worktree fail-loud branch in `store/local.md` (Codex #46 r10 P2, id
+  3649544832).** The local-backend contract still described resolution as "works from any worktree,
+  resolves the main board automatically", which no longer matched the fail-safe behavior: from a
+  **linked** worktree under `separate-git-dir`/submodule layouts the helper deliberately exits
+  non-zero demanding an explicit `HARNESS_DIR`, so anyone driving it by hand outside the
+  `/sdd-fix-parallel` coordinator hit an undocumented hard failure. The contract now states the
+  corrected precedence (primary checkouts are never remapped — they already *are* the main working
+  tree), the one case that exits non-zero, and the `HARNESS_DIR=…` invocation that resolves it.
+
 ## [0.30.0] — 2026-07-10
 
 ### Added — ✨ Jira mirror completed via REST API + Bearer PAT, no MCP (E12-F01)

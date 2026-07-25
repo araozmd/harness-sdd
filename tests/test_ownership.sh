@@ -100,24 +100,25 @@ else
   pass "schema cases skipped (python3 unavailable) [owner_type_enforced]"
 fi
 
-# ── R3 on the ZERO-DEPENDENCY path (init.sh fallback validator) ────────────────
+# ── R3 on the ZERO-DEPENDENCY path (shared fallback validator) ─────────────────
 # The jsonschema block above SKIPS in installs without jsonschema, so R3 was
 # silently untested on the built-in fallback that init.sh actually uses there.
-# Drive owner:5 through init.sh's own fallback validator with jsonschema forced
-# unavailable, and assert it is REJECTED on BOTH the epic and the feature — while
-# owner-absent and string-owner docs still pass. We extract the real validator
-# snippet from init.sh (not a re-implementation) so it can never drift from prod.
-INIT_SH="$ROOT/init.sh"
-[ -f "$INIT_SH" ] || fail "init.sh missing (cannot test zero-dependency validator)"
+# Drive owner:5 through the SHARED validator init.sh runs (tools/validate-board.py,
+# E15-F01 Codex #46 r2) with jsonschema forced unavailable, and assert it is
+# REJECTED on BOTH the epic and the feature — while owner-absent and string-owner
+# docs still pass. We run the REAL production validator (the exact file init.sh
+# invokes and tasks-lock.py imports), never a re-implementation, so it can never
+# drift from prod.
+VALIDATOR="$ROOT/tools/validate-board.py"
+[ -f "$VALIDATOR" ] || fail "tools/validate-board.py missing (cannot test zero-dependency validator)"
+# init.sh must actually invoke it (guards the extraction↔prod link this test asserts).
+grep -qF 'tools/validate-board.py' "$ROOT/init.sh" \
+  || fail "init.sh does not invoke tools/validate-board.py [owner_type_enforced]"
 if command -v python3 >/dev/null 2>&1; then
-  # Pull the first `<<'PY' ... \nPY` heredoc — the TaskStore validator body.
-  awk "/<<'PY'/{f=1;next} f&&/^PY\$/{exit} f{print}" "$INIT_SH" > "$T/validator.py"
-  [ -s "$T/validator.py" ] || fail "could not extract fallback validator from init.sh [owner_type_enforced]"
-
-  # Run the extracted validator with jsonschema import blocked, forcing the
+  # Run the production validator with jsonschema import blocked, forcing the
   # built-in structural branch regardless of what is installed locally.
   fb_validate() {
-    python3 - "$1" "$SCHEMA" "$T/validator.py" <<'PY' 2>/dev/null
+    python3 - "$1" "$SCHEMA" "$VALIDATOR" <<'PY' 2>/dev/null
 import sys, importlib.abc, importlib.machinery
 class _Block(importlib.abc.MetaPathFinder):
     def find_spec(self, name, path, target=None):

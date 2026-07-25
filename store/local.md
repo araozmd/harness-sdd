@@ -25,8 +25,73 @@ Validated by `store/tasks.schema.json` (and by `init.sh`).
   `in-progress`, or `done` impose **no new gate** — their features are evaluated
   by the per-feature rules above, unchanged.
 - **get(id)** — find the feature object by `id`.
-- **set_status(id, status)** — set the `status` of the **object the id addresses**,
-  then re-validate (`python3 -c "import json;json.load(open('state/tasks.json'))"`).
+- **set_status(id, status)** — set the `status` of the **object the id addresses**.
+  The whole persist is run **under an advisory lock** so concurrent writers (E15
+  parallel fix chains) can never lose an update. Do **not** hand-edit
+  `state/tasks.json` and re-validate inline; instead run the write through the lock
+  helper, which owns the entire critical section in one process:
+
+  ```
+  # installed layout (consumer repo): helper at .harness/tools/, board at .harness/state/
+  python3 .harness/tools/tasks-lock.py set-status <id> <status>
+  # source layout (this repo): helper at tools/, board at state/
+  python3 tools/tasks-lock.py set-status <id> <status>
+  ```
+
+  Run it from **any** cwd — the helper resolves the harness directory with this
+  precedence: (1) an explicit `HARNESS_DIR=<dir>` env var wins as a
+  highest-precedence escape hatch; else (2) when invoked from a **linked git
+  worktree** (the E15 F02/F03 parallel-fix flow) it resolves the **single canonical
+  board root in the MAIN working tree** via `git rev-parse --git-common-dir` (whose
+  parent is the main worktree root), re-applying the source-vs-installed subpath
+  under that root — **accepted only if the board actually exists there**; else (3)
+  it falls back to its **own path** (`<HARNESS_DIR>/tools/tasks-lock.py`, so
+  `HARNESS_DIR` = parent-of-parent of the script). A **primary** checkout is never
+  remapped — it already *is* the main working tree, so it always takes (3).
+  Because of (2), every worker in every worktree reads/writes the **same**
+  `state/tasks.json` and contends on the **same** `state/tasks.json.lock` inode, so
+  the no-lost-update guarantee holds across parallel worktrees, not only within one
+  directory. Any git failure (not a repo, git absent, timeout) degrades to (3) —
+  never crashes, never blocks.
+
+  **One case exits non-zero instead of guessing.** From a **linked worktree** whose
+  main working tree is unrecoverable from git — `git init --separate-git-dir` and
+  submodule-style layouts, where `--git-common-dir` reports a separate metadata dir
+  that is not the main worktree — step (2) cannot find the canonical board, and
+  falling back to (3) would write the linked worktree's **own** checked-out board,
+  silently defeating the shared-board guarantee. The helper therefore **fails loudly**
+  and asks for an explicit override:
+
+  ```
+  HARNESS_DIR=/path/to/main/harness python3 tools/tasks-lock.py set-status <id> <status>
+  ```
+
+  The `/sdd-fix-parallel` coordinator sets `HARNESS_DIR` for every worktree worker
+  automatically, so this is only visible when driving the helper by hand from a
+  linked worktree in one of those layouts. Everywhere else — any cwd, a primary
+  checkout in any layout, or a linked worktree of an ordinary repo — the plain
+  command above is correct in both layouts with no override required.
+
+  The helper acquires an advisory `fcntl.flock` on the sibling lockfile
+  `state/tasks.json.lock` (resolved under the canonical `HARNESS_DIR`) → **re-reads
+  `state/tasks.json` from disk inside the lock** (never a copy read before the lock)
+  → applies the single status mutation to that fresh content → validates it (`json`
+  parse **and** `store/tasks.schema.json` schema check) → atomically replaces the
+  file (write-temp-then-`os.replace`, so a failure never leaves a torn file) →
+  releases the lock. On validation failure it aborts non-zero, releases the lock,
+  and leaves the original `state/tasks.json` untouched (fail-stop). Lock acquisition
+  is **bounded by a timeout** (default ~10s): if the lock cannot be taken it aborts
+  non-zero with an error naming the lockfile and the timeout — it never blocks
+  forever and never writes unlocked. For a **serial (uncontended) caller** the lock
+  is taken immediately and the resulting file is byte-for-byte what the old
+  read-modify-write produced, so `/sdd-next` and existing tests are unchanged. Scope
+  is **single-host** (a `flock`-family advisory lock; cross-machine coordination is
+  out of scope). This adds **no new status value and no `store/tasks.schema.json`
+  change** — only the concurrency discipline around the write. The best-effort
+  `store.on_write_command` hook (see "Post-write sync" below) fires **after** the
+  lock is released — never inside the critical section, so it can never hold the
+  board lock.
+
   The id selects the object kind:
   - a **feature id** (`E06-F06`) edits that feature's `status` in `epics[].features[]`;
     keep the feature's `.spec.md` frontmatter `status` in sync.
@@ -152,6 +217,10 @@ or at a wrapper doing both.
 - **Best-effort, never-blocking** — a non-zero exit NEVER rolls back `tasks.json` and never
   stalls `next()`. Do the local write regardless, then report the sync gap; never block
   feature work on it. (Same discipline as telemetry.)
+- **Runs AFTER the board-write lock is released** — for a `set_status` persist the hook
+  fires once the lock helper (see `set_status` above) has returned, i.e. *after* the
+  advisory lock is released. The hook is never invoked inside the critical section, so it
+  can never hold the board lock (E15-F01).
 - `tasks.json` stays the **source of truth**; anything the hook pushes to is downstream.
 
 ## Notes
