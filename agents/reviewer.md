@@ -60,15 +60,19 @@ one `specs/adr/NNNN-*.md` exists, and the feature carries a four-file spec (`sdd
 When that precondition holds, confirm the feature's `.spec.md` has a
 `## Architecture alignment` section that **either cites ≥1 `ADR-NNNN`** (each with a
 one-line "how honored") **or explicitly states `ADRs touched: none`** (per
-`agents/architect.md`).
+`agents/architect.md`). Each cited `ADR-NNNN` id must **also resolve to an existing
+`specs/adr/NNNN-*.md` file** — a citation that resolves to nothing is exactly the
+typo that silently breaks design-to-feature traceability.
 
 - **Soft flag, not hard reject.** A **missing or empty** `## Architecture alignment`
-  section (in the situation above) is **flagged for the Builder/Architect to investigate
-  and justify** — reusing the existing "suspected but not provably violated → flag, don't
-  block" verdict rule — **not a hard reject**. You cannot prove "forgot" versus
-  "legitimately touches none" from the files alone, so you flag rather than blocking. A
-  spec that **does** carry the section (citing ids, or stating `ADRs touched: none`)
-  passes this check.
+  section (in the situation above) — and likewise a **cited-but-nonexistent** id (a
+  cited `ADR-NNNN` with no matching `specs/adr/NNNN-*.md` file) — is **flagged for the
+  Builder/Architect to investigate and justify** — reusing the existing "suspected but
+  not provably violated → flag, don't block" verdict rule — **not a hard reject**. You
+  cannot prove "forgot" versus "legitimately touches none" from the files alone — nor
+  "typo" versus "ADR legitimately renamed/removed since the spec was written" — so you
+  flag rather than blocking. A spec that **does** carry the section (citing ids that
+  each resolve, or stating `ADRs touched: none`) passes this check.
 - **Does not fire otherwise.** The clause **does not fire** for a legacy /
   no-architecture feature (no `specs/architecture.md` / no ADRs — graceful degradation),
   and it **does not fire** for an `sdd: false` brief-only item (there is no `.spec.md` to

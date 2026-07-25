@@ -4,6 +4,29 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.32.0] — 2026-07-25
+
+### Added — ✨ ADR-citation id resolution: Reviewer soft flag + init.sh warn-only sweep (E99-F02)
+- **Reviewer check extended to id resolution** (`agents/reviewer.md`): where architecture
+  artifacts exist and the spec is `sdd: true`, each `ADR-NNNN` cited in a feature spec's
+  `## Architecture alignment` section must **also resolve to an existing
+  `specs/adr/NNNN-*.md` file**. A cited-but-nonexistent id is a **soft flag** for the
+  Builder/Architect to investigate — reusing the existing "suspected but not provably
+  violated → flag, don't block" verdict rule, **never a hard reject** (a dangling id may be
+  a typo *or* an ADR legitimately renamed/removed since the spec was written). The check
+  still never fires for a legacy/no-architecture feature or an `sdd: false` brief-only item.
+- **`init.sh` session-start sweep (warn-only, additive)** — new section 2c scans every
+  `specs/epics/**/*.spec.md` carrying the `## Architecture alignment` section and warns on
+  any `ADR-NNNN` cited **inside that section** (incidental mentions elsewhere don't count)
+  that resolves to no `specs/adr/NNNN-*.md`, surfacing the typo at session start instead of
+  waiting for review. Zero-dep (grep/awk/ls), **never fails the gate**, and a complete no-op
+  when `specs/adr/` is absent (graceful degradation, mirroring the Reviewer precondition).
+- **New suite `tests/test_adr_citation.sh`** (R1–R6) covers dangling-id warn, all-resolve
+  silence, `ADRs touched: none`, section-scoped extraction, and the no-`specs/adr/` no-op;
+  wired into `verification.test_command` in `harness.config.yaml`. No status/schema change;
+  the Architect's "cite ids or `ADRs touched: none`" contract is untouched — resolution is a
+  strict refinement.
+
 ## [0.31.0] — 2026-07-24
 
 ### Added — 🔒 Board write lock: flock-guarded read-modify-write on tasks.json (E15-F01)

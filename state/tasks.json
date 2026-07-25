@@ -297,7 +297,9 @@
           "status": "pending",
           "sdd": true,
           "autonomous": true,
-          "depends_on": ["E15-F01"],
+          "depends_on": [
+            "E15-F01"
+          ],
           "spec_path": "specs/epics/E15-parallel-fix-lane/F02-worktree-isolation/"
         },
         {
@@ -306,7 +308,10 @@
           "status": "pending",
           "sdd": true,
           "autonomous": true,
-          "depends_on": ["E15-F01", "E15-F02"],
+          "depends_on": [
+            "E15-F01",
+            "E15-F02"
+          ],
           "spec_path": "specs/epics/E15-parallel-fix-lane/F03-parallel-dispatch/"
         }
       ]
@@ -324,6 +329,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F01-agent-picker-arrow-keys/"
+        },
+        {
+          "id": "E99-F02",
+          "title": "Validate cited ADR-NNNN ids resolve to specs/adr/ files (Reviewer soft flag + init.sh warn-only sweep)",
+          "status": "in-review",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F02-adr-citation-id-validation/"
         }
       ]
     }

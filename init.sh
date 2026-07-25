@@ -119,6 +119,36 @@ PY
   echo "ℹ️  umbrella mode: manifest present ($UMBRELLA_MANIFEST)"
 fi
 
+# 2c. ADR-citation sweep (WARN-ONLY, additive). Feature specs cite the ADRs they
+#     honor in a `## Architecture alignment` section (agents/architect.md); the
+#     Reviewer soft-flags a cited-but-nonexistent id at review time. This sweep
+#     surfaces the same typo at session start instead: for each
+#     specs/epics/**/*.spec.md carrying the section, every `ADR-NNNN` cited INSIDE
+#     that section (only there — incidental ADR-NNNN mentions elsewhere don't count)
+#     must resolve to an existing specs/adr/NNNN-*.md. A miss WARNS and NEVER fails
+#     the gate (the ADR may have been renamed/removed legitimately — the Reviewer's
+#     soft flag owns the verdict). No-op when specs/adr/ is absent (graceful
+#     degradation, mirroring the Reviewer check's precondition). Zero-dep + fast:
+#     one grep -rl over specs/epics plus a tiny awk per matching spec.
+if [ -d specs/adr ]; then
+  ADR_MISS=0
+  for spec in $(grep -rl '^## Architecture alignment' specs/epics --include='*.spec.md' 2>/dev/null || true); do
+    for id in $(awk '/^## Architecture alignment/{f=1;next} /^## /{f=0} f' "$spec" \
+                | grep -oE 'ADR-[0-9]{4}' | sort -u || true); do
+      n="${id#ADR-}"
+      if ! ls "specs/adr/${n}-"*.md >/dev/null 2>&1; then
+        echo "⚠️  ADR citation: $spec cites $id but no specs/adr/${n}-*.md exists"
+        ADR_MISS=$((ADR_MISS+1))
+      fi
+    done
+  done
+  if [ "$ADR_MISS" -eq 0 ]; then
+    ok "ADR citations resolve (specs/adr/ present)"
+  else
+    echo "⚠️  $ADR_MISS unresolved ADR citation(s) — warn-only, never blocks the gate (fix the typo or update the spec)"
+  fi
+fi
+
 # 3. Project-specific checks.
 #    Project-authored gates live in `.harness/init.project.sh` — seeded once by
 #    harness-install.sh and NEVER clobbered on upgrade, unlike THIS file (which is
