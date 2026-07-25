@@ -33,6 +33,21 @@ All notable changes to the harness body are recorded here. Versions follow
   `.harness/.gitignore`; `tests/test_install.sh` asserts a fresh install ships the executable
   helper. `store/local.md`'s `set_status` contract is amended to mandate the lock protocol.
 
+### Fixed — board write lock robustness (Codex #46 P1 ×2, pre-release under 0.31.0)
+- **Helper resolves `HARNESS_DIR` from its own path, not `cwd`.** `tools/tasks-lock.py` now
+  derives the board root from `__file__` (`<HARNESS_DIR>/tools/tasks-lock.py` ⇒ parent-of-parent)
+  when `HARNESS_DIR` is unset, so the documented `set_status` invocation is correct from **any
+  cwd** in both the source layout (`tools/…`, board `state/tasks.json`) and the installed layout
+  (`.harness/tools/…`, board `.harness/state/tasks.json`) — no `.harness/.harness` double-nesting
+  and no requirement to hand-set `HARNESS_DIR`. An explicit `HARNESS_DIR` env var still wins as a
+  highest-precedence escape hatch. `store/local.md`'s `set_status` contract is corrected to match.
+- **Zero-dependency fallback validator now enforces the `slices` invariant.** When `jsonschema`
+  is unavailable, the minimal validator mirrors the schema's cross-field rule: a **sliced feature
+  may be `done` only when every slice is `done` and `merged`**. Previously the fallback stopped
+  after the status-enum check, so `set-status <sliced-feature> done` on unfinished slices could
+  atomically persist a board that `init.sh` later rejects (and prematurely unblock dependents).
+  No schema/status change; single-repo features are unaffected.
+
 ## [0.30.0] — 2026-07-10
 
 ### Added — ✨ Jira mirror completed via REST API + Bearer PAT, no MCP (E12-F01)

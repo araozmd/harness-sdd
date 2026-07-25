@@ -2,8 +2,8 @@
 # tasks-lock.py — portable advisory lock for the harness board write path.
 #
 # Guards every persisted `state/tasks.json` mutation with a single advisory
-# `fcntl.flock` on the sibling lockfile `state/tasks.json.lock` (resolved with
-# cwd = HARNESS_DIR), so concurrent writers (E15 parallel fix chains) can never
+# `fcntl.flock` on the sibling lockfile `state/tasks.json.lock` (resolved under
+# HARNESS_DIR — see below), so concurrent writers (E15 parallel fix chains) can never
 # lose an update (last-writer-wins clobber). The whole critical section runs in
 # ONE process holding ONE lock:
 #
@@ -30,7 +30,12 @@
 #       for callers that express a different single mutation). The mutator is a
 #       python file exposing `mutate(data) -> data`.
 #
-# HARNESS_DIR (env) selects the board root; defaults to the current directory.
+# HARNESS_DIR (env) selects the board root; when unset it is derived from this
+# helper's own path — the file lives at <HARNESS_DIR>/tools/tasks-lock.py, so the
+# harness dir is the parent of the parent of __file__. Deriving from __file__ (not
+# cwd) makes the documented invocation correct from ANY cwd, in BOTH the source
+# layout (tools/tasks-lock.py, board at state/tasks.json) and the installed layout
+# (.harness/tools/tasks-lock.py, board at .harness/state/tasks.json).
 
 import argparse
 import errno
@@ -60,7 +65,19 @@ def _die(msg):
 
 
 def _harness_dir():
-    return os.environ.get("HARNESS_DIR", os.getcwd())
+    """Resolve the board root.
+
+    Highest precedence is an explicit HARNESS_DIR env override (an escape hatch
+    for unusual layouts). Otherwise derive it from this helper's own location:
+    the file lives at <HARNESS_DIR>/tools/tasks-lock.py, so the harness dir is the
+    parent of the parent of __file__. This is robust to any cwd and works in both
+    the source layout and the installed `.harness/tools/` layout — no caller ever
+    needs to hand-set HARNESS_DIR just to run the documented command.
+    """
+    override = os.environ.get("HARNESS_DIR")
+    if override:
+        return override
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _acquire(lock_fd, lockfile, timeout):
@@ -156,6 +173,28 @@ def _make_minimal_validator(schema):
                         "feature %s has invalid status %r (not in %s)"
                         % (feat["id"], feat["status"], sorted(feat_status))
                     )
+                # Mirror the schema's cross-field `slices` invariant (allOf/if-then):
+                # a sliced feature may be `done` ONLY when every slice is itself
+                # `done` AND `merged: true`. Without this, the zero-dependency
+                # fallback would let `set-status <sliced-feature> done` persist a
+                # board that init.sh's full jsonschema pass later rejects — and
+                # would prematurely unblock dependents. Single-repo features (no
+                # `slices`) are unaffected: the guard only fires when slices exist.
+                if feat["status"] == "done" and feat.get("slices"):
+                    for sl in feat["slices"]:
+                        if sl.get("status") != "done" or sl.get("merged") is not True:
+                            raise ValueError(
+                                "feature %s is 'done' but slice %s is not "
+                                "done+merged (status=%r, merged=%r); a sliced "
+                                "feature may be done only when every slice is "
+                                "done and merged"
+                                % (
+                                    feat["id"],
+                                    sl.get("id"),
+                                    sl.get("status"),
+                                    sl.get("merged"),
+                                )
+                            )
 
     return _validate
 

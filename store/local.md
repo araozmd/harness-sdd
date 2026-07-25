@@ -32,11 +32,20 @@ Validated by `store/tasks.schema.json` (and by `init.sh`).
   helper, which owns the entire critical section in one process:
 
   ```
-  python3 .harness/tools/tasks-lock.py set-status <id> <status>   # cwd = HARNESS_DIR
+  # installed layout (consumer repo): helper at .harness/tools/, board at .harness/state/
+  python3 .harness/tools/tasks-lock.py set-status <id> <status>
+  # source layout (this repo): helper at tools/, board at state/
+  python3 tools/tasks-lock.py set-status <id> <status>
   ```
 
+  Run it from **any** cwd — the helper resolves the harness directory from **its own
+  path** (`<HARNESS_DIR>/tools/tasks-lock.py`, so `HARNESS_DIR` = parent-of-parent of
+  the script), so the command above is correct in both layouts with no `HARNESS_DIR`
+  override required. An explicit `HARNESS_DIR=<dir>` env var still wins as a
+  highest-precedence escape hatch for unusual layouts.
+
   The helper acquires an advisory `fcntl.flock` on the sibling lockfile
-  `state/tasks.json.lock` (resolved with `cwd = HARNESS_DIR`) → **re-reads
+  `state/tasks.json.lock` (resolved under the self-derived `HARNESS_DIR`) → **re-reads
   `state/tasks.json` from disk inside the lock** (never a copy read before the lock)
   → applies the single status mutation to that fresh content → validates it (`json`
   parse **and** `store/tasks.schema.json` schema check) → atomically replaces the

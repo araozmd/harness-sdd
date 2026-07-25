@@ -317,6 +317,115 @@ HARNESS_DIR="$T" PATH="$_shadow:$PATH" python3 "$HELPER" set-status E01-F01 done
 rm -rf "$T"
 pass "R9 portable stdlib fcntl.flock; ignores a poisoned flock(1) on PATH"
 
+# ── R10a: helper resolves its board from ITS OWN path (self-location), any cwd ──
+# test_helper_self_locates_board_both_layouts
+# Codex #46 P1 (id 3649152686): the documented invocation must work from any cwd
+# in BOTH the source layout (tools/tasks-lock.py) and the installed layout
+# (.harness/tools/tasks-lock.py) WITHOUT a HARNESS_DIR override. Prove it by
+# copying the helper into a <root>/tools/ layout under a temp dir and invoking it
+# from an unrelated cwd (/) with NO HARNESS_DIR set: it must find <root>/state.
+T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+make_fixture "$T"
+mkdir -p "$T/tools"
+cp "$HELPER" "$T/tools/tasks-lock.py"
+# invoke from an unrelated cwd, env HARNESS_DIR explicitly UNSET
+( cd / && env -u HARNESS_DIR python3 "$T/tools/tasks-lock.py" set-status E01-F01 in-review ) \
+  || fail "R10a: helper failed to self-locate its board from an arbitrary cwd (no HARNESS_DIR)"
+[ "$(status_of "$T/state/tasks.json" E01-F01)" = "in-review" ] \
+  || fail "R10a: self-located write did not apply to <root>/state/tasks.json"
+# and the installed layout: helper at <root2>/.harness/tools/, board at <root2>/.harness/state/
+T2="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+make_fixture "$T2/.harness"
+mkdir -p "$T2/.harness/tools"
+cp "$HELPER" "$T2/.harness/tools/tasks-lock.py"
+( cd / && env -u HARNESS_DIR python3 "$T2/.harness/tools/tasks-lock.py" set-status E01-F02 done ) \
+  || fail "R10a: helper failed to self-locate the .harness/ installed-layout board"
+[ "$(status_of "$T2/.harness/state/tasks.json" E01-F02)" = "done" ] \
+  || fail "R10a: installed-layout self-located write did not apply to .harness/state/tasks.json"
+# explicit HARNESS_DIR still wins as the highest-precedence escape hatch.
+T3="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+make_fixture "$T3"
+HARNESS_DIR="$T3" python3 "$T/tools/tasks-lock.py" set-status E01-F01 in-progress \
+  || fail "R10a: explicit HARNESS_DIR override no longer works"
+[ "$(status_of "$T3/state/tasks.json" E01-F01)" = "in-progress" ] \
+  || fail "R10a: HARNESS_DIR override did not target the overridden dir"
+rm -rf "$T" "$T2" "$T3"
+pass "R10a helper self-locates its board from __file__ (both layouts, any cwd); HARNESS_DIR still overrides"
+
+# ── R10b: fallback validator (jsonschema absent) enforces the slices invariant ──
+# test_fallback_validator_enforces_slices_invariant
+# Codex #46 P1 (id 3649152689): on the zero-dependency install path (no jsonschema)
+# the fallback validator must mirror the schema's cross-field rule — a sliced
+# feature may be `done` ONLY when every slice is done AND merged. Simulate
+# jsonschema being absent by blocking its import, then attempt an illegal
+# `set-status <sliced-feature> done` while a slice is unfinished: it must fail
+# non-zero and leave the board intact.
+T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+mkdir -p "$T/state" "$T/store"
+cp "$SCHEMA" "$T/store/tasks.schema.json"
+cat > "$T/state/tasks.json" <<'EOF'
+{
+  "project": "fixture",
+  "epics": [
+    {
+      "id": "E01",
+      "title": "epic one",
+      "status": "planned",
+      "features": [
+        { "id": "E01-F01", "title": "sliced", "status": "in-review", "sdd": true, "spec_path": "a",
+          "slices": [
+            { "id": "E01-F01@repo-a", "repo": "repo-a", "status": "done", "merged": true },
+            { "id": "E01-F01@repo-b", "repo": "repo-b", "status": "in-progress" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+EOF
+cp "$T/state/tasks.json" "$T/before.json"
+# Runner that blocks `import jsonschema`, then drives the helper as __main__ with
+# the illegal transition; captures the SystemExit code.
+cat > "$T/run_nojs.py" <<EOF
+import runpy, sys, builtins
+_real = builtins.__import__
+def _imp(name, *a, **k):
+    if name == "jsonschema":
+        raise ImportError("blocked: simulate zero-dep install path")
+    return _real(name, *a, **k)
+builtins.__import__ = _imp
+sys.argv = ["tasks-lock.py", "set-status", "E01-F01", "done"]
+try:
+    runpy.run_path("$HELPER", run_name="__main__")
+    sys.exit(0)
+except SystemExit as e:
+    sys.exit(0 if e.code in (None, 0) else 2)
+EOF
+if HARNESS_DIR="$T" python3 "$T/run_nojs.py" 2>"$T/nerr.txt"; then
+  fail "R10b: fallback validator ALLOWED sliced feature 'done' with an unfinished slice (jsonschema absent)"
+fi
+grep -qiE 'slice|done and merged' "$T/nerr.txt" \
+  || fail "R10b: fallback rejection did not name the slices invariant"
+cmp -s "$T/before.json" "$T/state/tasks.json" \
+  || fail "R10b: original board was modified/torn on the rejected sliced-done transition"
+# and the LEGAL transition (all slices done+merged) still succeeds on the fallback path.
+python3 - "$T/state/tasks.json" <<'EOF'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+for e in d['epics']:
+    for f in e['features']:
+        for s in f.get('slices', []):
+            s['status'] = 'done'; s['merged'] = True
+open(p, 'w').write(json.dumps(d, indent=2) + "\n")
+EOF
+HARNESS_DIR="$T" python3 "$T/run_nojs.py" \
+  || fail "R10b: fallback validator REJECTED a legal sliced 'done' (all slices done+merged)"
+[ "$(status_of "$T/state/tasks.json" E01-F01)" = "done" ] \
+  || fail "R10b: legal sliced 'done' did not persist on the fallback path"
+rm -rf "$T"
+pass "R10b fallback validator (no jsonschema) enforces slices done+merged before feature 'done'"
+
 # ── R11: VERSION advanced (a MINOR bump) + CHANGELOG entry (compared, not frozen) ─
 # test_version_advanced_not_frozen
 [ -f "$ROOT/VERSION" ] || fail "R11: VERSION file missing"
@@ -337,4 +446,4 @@ grep -qiF 'E15-F01' "$ROOT/CHANGELOG.md" \
   || fail "R11: CHANGELOG.md gained no E15-F01 entry"
 pass "R11 VERSION advanced (MINOR) + CHANGELOG entry present (compared, not frozen)"
 
-echo "PASS: test_board_lock.sh (R1-R9, R11)"
+echo "PASS: test_board_lock.sh (R1-R9, R10a/R10b, R11)"
