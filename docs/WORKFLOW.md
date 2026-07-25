@@ -256,6 +256,37 @@ auto-run it, so it waits until a human moves it to `in-progress` (or re-stamps i
 `sdd: false` primitive above (now split by `autonomous`); the Builder works from the inbox
 brief and the Reviewer verifies the fix behaviourally.
 
+### Bounded parallel fix lane (`/sdd-fix-parallel`)
+
+The argument-free command consumes only ready autonomous `sdd:false` E99 fixes. It
+orders numeric ids, selects at most `fix_lane.max_parallel` (default `3`), and reports
+later ready candidates as cap-deferred. Every serial brief records
+`## Files expected to change`; immutable guards cover `harness-install.sh`,
+`tests/test_install.sh`, and `tools/*`, while `fix_lane.shared_paths` only extends the
+guard. Missing, unsafe, or ambiguous metadata serializes fail-safe.
+
+After native-concurrency/config preflight and a complete manifest, the coordinator
+provisions each selected F02 worktree exactly once while the primary is clean. It then
+switches the canonical primary to a collision-checked coordinator bookkeeping branch,
+atomically claims the successful subset through F01 with canonical `HARNESS_DIR`, and
+commits that shared claim before dispatch. All safe targeted workers start before any
+is awaited; guarded fixes run exclusively in numeric order after that wave settles.
+
+Each targeted worker keeps its pre-provisioned branch/worktree, drives clean
+Builder↔Reviewer rounds, creates only the code PR after local approval, and runs
+`/pr-loop` for that PR alone. An observed code merge is reported to the coordinator;
+the worker does not recreate or tear down F02 resources.
+
+After all workers settle, the coordinator serializes history, performs one locked final
+status reconciliation, and persists that truth through its bookkeeping PR. Once that
+PR merge is observed, it fetches and fast-forwards the canonical local base, proves the
+primary is clean/on the updated base/exact captured commit, and then tears down only
+merged fixes with the original exact F02 identities. It never stashes, resets, cleans,
+or force-deletes shared state. Recoverable failures preserve resources and do not
+cancel siblings. No ready work is a zero-mutation success; missing native concurrency
+or `execution.builder.backend: delegate` fails before manifest/provision/claim and
+points to serial `/sdd-fix`.
+
 ## Context hygiene
 
 Agents degrade as their context fills (noticeably past ~20%, badly past ~40%).

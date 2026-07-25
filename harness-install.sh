@@ -187,6 +187,18 @@ migrate_config() {
       printf '    #   done: "Done"\n'
     } >> "$_cfg"
   fi
+
+  # --- fix_lane block (E15-F03 bounded E99 parallel dispatch) ---
+  # Top-level additive defaults; absence is behaviorally equivalent to these values.
+  if ! grep -Eq '^fix_lane:[[:space:]]*(#.*)?$' "$_cfg"; then
+    {
+      printf '\n'
+      printf '# Bounded E99 fix dispatch; shared_paths extends immutable built-ins.\n'
+      printf 'fix_lane:\n'
+      printf '  max_parallel: 3\n'
+      printf '  shared_paths: []\n'
+    } >> "$_cfg"
+  fi
 }
 
 # _cfg_has_umbrella_manifest <file> — true (exit 0) iff a `manifest:` key exists
@@ -270,7 +282,7 @@ AGENT_KEYS="claude gemini opencode antigravity codex"
 # own agents/commands sharing the same dir (Codex r2 P1). Keep in sync with the
 # emit_agent calls and the command-copy loops in install_one().
 HARNESS_CLAUDE_SHIMS="orchestrator architect builder reviewer scout doc-critic"
-HARNESS_SDD_CMDS="sdd-next sdd-new sdd-plan sdd-drill sdd-fix"
+HARNESS_SDD_CMDS="sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel"
 
 # agent_known <key> — true (exit 0) iff <key> is a registered agent key (R7, R10).
 agent_known() {
@@ -1306,8 +1318,10 @@ The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, 
 2. Read `.harness/harness.config.yaml` and the TaskStore (`.harness/state/tasks.json`,
    per `.harness/store/local.md`).
 3. Run a short, **adaptive** Q&A with the human to settle the fix's shape: what's broken,
-   the intended fix, and how to verify. Where the shape forks, offer **at most 3** options
-   as **text-only** (markdown/ASCII) mockups — never images. Keep it short.
+   the intended fix, how to verify, and a non-empty `## Files expected to change` list
+   of normalized repo-relative paths. Remove one leading `./`, then reject absolute
+   paths, unsafe components, wildcards, control characters, and ambiguous prose.
+   Where the shape forks, offer **at most 3** text-only options; never images.
 4. **Maintenance epic (create-on-first-use / reuse-by-id).** Look up epic `E99` in
    `.harness/state/tasks.json`. If **absent**, create it with `id: "E99"`, slug
    `maintenance`, title `"Maintenance (hotfixes & minor fixes)"`, `status: "planned"`,
@@ -1321,7 +1335,7 @@ The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, 
    reuse). Stamp it `autonomous: true` by **default**; if the human passes a `--gated`
    opt-out, stamp it `autonomous: false` instead (it then parks at the normal gate).
 6. Write **exactly one** fix-oriented inbox brief at `.harness/progress/inbox/<id>.md`
-   (problem + intended fix + how to verify) from
+   (problem + intended fix + how to verify + `## Files expected to change`) from
    `.harness/specs/_templates/inbox-brief.md`. Do **NOT** create any feature
    `.spec.md`/`.plan.md`/`.tasks.md`/`.tests.md`, do **NOT** create the `spec_path`
    directory, and do **NOT** spawn the Architect — brief-only, never a spec.
@@ -1338,6 +1352,34 @@ The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, 
    directory / Architect was created or spawned, and that the fix was handed off to the
    existing `sdd: false` loop in-session.
 EOF
+
+  cat > "$CMDDIR/sdd-fix-parallel.md" <<'EOF'
+---
+description: Run a bounded batch of isolated autonomous E99 fixes through targeted workers
+---
+
+Act as the **Fixer parallel coordinator** (`.harness/agents/fixer.md` → “Parallel
+dispatch mode”), resolving all durable paths against `.harness/`.
+
+This command is argument-free. If `$ARGUMENTS` is non-empty, STOP and report usage
+`/sdd-fix-parallel`.
+
+1. Run `.harness/init.sh`; stop on non-zero.
+2. Execute the Fixer role's P1–P7 sequence: native concurrency/config/in-session
+   Builder preflight, complete manifest, one-time F02 provisioning while the primary
+   is clean, coordinator bookkeeping branch plus one F01 atomic claim with explicit
+   canonical `HARNESS_DIR`, parallel-safe fan-out before any wait, guarded exclusive
+   numeric wave, bookkeeping PR reconciliation, updated-base proof, and aggregate
+   report.
+3. Each worker uses `.harness/agents/orchestrator.md` “Targeted parallel-fix worker mode”
+   for one id and its pre-provisioned branch/worktree, creates only its post-approval
+   code PR, continues siblings, and reports an observed merge for coordinator-owned
+   done and teardown.
+4. No ready work is a zero-mutation `no ready E99 fixes` success. Missing native
+   delegation or `execution.builder.backend: delegate` fails before
+   manifest/provisioning/claim and points to serial `/sdd-fix`; never invent a vendor
+   API or background shell agent.
+EOF
   # Mirror the generated command bodies into the SELECTED front-ends. Claude Code
   # reads .claude/commands/ (gated on `claude`, R3/R4); OpenCode reads
   # .opencode/command/ (gated on `opencode`, R3/R4). Both copy from the same CMDDIR,
@@ -1347,7 +1389,7 @@ EOF
     for _c in $HARNESS_SDD_CMDS; do
       cp "$CMDDIR/$_c.md" "$TARGET/.claude/commands/$_c.md"
     done
-    ok "Claude Code commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix installed (.claude/)"
+    ok "Claude Code commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel installed (.claude/)"
   fi
 
   # ── 5b. OpenCode commands (regenerated each run, gated on `opencode`) ────────
@@ -1358,7 +1400,7 @@ EOF
     for _c in $HARNESS_SDD_CMDS; do
       cp "$CMDDIR/$_c.md" "$TARGET/.opencode/command/$_c.md"
     done
-    ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix installed (.opencode/)"
+    ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel installed (.opencode/)"
   fi
 
   # ── 5c. Antigravity glue (.agents/, regenerated each run, gated on `antigravity`) ─
@@ -1451,7 +1493,7 @@ EOF
       done
       # Codex surfaces a prompts-dir file `<name>.md` as the slash command
       # `/prompts:<name>` (NOT top-level `/<name>`) — advertise it that way.
-      ok "Codex CLI prompts /prompts:sdd-next + /prompts:sdd-new + /prompts:sdd-plan + /prompts:sdd-drill + /prompts:sdd-fix installed (GLOBAL: $_cdx)"
+      ok "Codex CLI prompts /prompts:sdd-next + /prompts:sdd-new + /prompts:sdd-plan + /prompts:sdd-drill + /prompts:sdd-fix + /prompts:sdd-fix-parallel installed (GLOBAL: $_cdx)"
     fi
   fi
 

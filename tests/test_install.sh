@@ -304,6 +304,26 @@ grep -qF '$ARGUMENTS' "$T/.claude/commands/sdd-fix.md" \
   || fail "sdd-fix does not carry \$ARGUMENTS"
 [ -f "$T/.harness/agents/fixer.md" ] \
   || fail "fixer role not installed into profile"
+# test_sdd_fix_parallel_generated_all_frontends
+# E15-F03: sixth command + installed defaults resolve through the same Fixer body.
+[ -f "$T/.claude/commands/sdd-fix-parallel.md" ] ||
+  fail "sdd-fix-parallel command missing"
+grep -qF '.harness/agents/fixer.md' "$T/.claude/commands/sdd-fix-parallel.md" ||
+  fail "sdd-fix-parallel does not resolve Fixer against .harness/"
+grep -qF 'Targeted parallel-fix worker mode' "$T/.claude/commands/sdd-fix-parallel.md" ||
+  fail "sdd-fix-parallel does not route targeted workers"
+grep -qF 'execution.builder.backend: delegate' "$T/.claude/commands/sdd-fix-parallel.md" ||
+  fail "sdd-fix-parallel installed body lacks delegate preflight"
+grep -qF 'bookkeeping PR reconciliation' "$T/.claude/commands/sdd-fix-parallel.md" ||
+  fail "sdd-fix-parallel installed body lacks bookkeeping reconciliation"
+grep -qF 'pre-provisioned branch/worktree' "$T/.claude/commands/sdd-fix-parallel.md" ||
+  fail "sdd-fix-parallel installed body can recreate F02 resources"
+grep -Eq '^fix_lane:' "$T/.harness/harness.config.yaml" ||
+  fail "fresh installed config missing fix_lane"
+grep -Eq '^[[:space:]]+max_parallel:[[:space:]]+3' "$T/.harness/harness.config.yaml" ||
+  fail "fresh installed config missing max_parallel default"
+grep -Eq '^[[:space:]]+shared_paths:[[:space:]]+\[\]' "$T/.harness/harness.config.yaml" ||
+  fail "fresh installed config missing shared_paths default"
 grep -qF '.harness/agents/orchestrator.md' "$T/.claude/agents/orchestrator.md" \
   || fail "agent shim does not resolve against .harness/"
 grep -qF '.harness/agents/inception.md' "$T/.claude/commands/sdd-new.md" \
@@ -370,6 +390,7 @@ pass "E09: /sdd-plan + /sdd-drill glue carry drillable-minimum + doc-critic chec
 [ -f "$T/.opencode/command/sdd-plan.md" ] || fail "opencode sdd-plan command missing"
 [ -f "$T/.opencode/command/sdd-drill.md" ] || fail "opencode sdd-drill command missing"
 [ -f "$T/.opencode/command/sdd-fix.md" ] || fail "opencode sdd-fix command missing"
+[ -f "$T/.opencode/command/sdd-fix-parallel.md" ] || fail "opencode sdd-fix-parallel command missing"
 cmp -s "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" \
   || fail "opencode sdd-next differs from claude sdd-next"
 cmp -s "$T/.claude/commands/sdd-new.md" "$T/.opencode/command/sdd-new.md" \
@@ -380,6 +401,8 @@ cmp -s "$T/.claude/commands/sdd-drill.md" "$T/.opencode/command/sdd-drill.md" \
   || fail "opencode sdd-drill differs from claude sdd-drill"
 cmp -s "$T/.claude/commands/sdd-fix.md" "$T/.opencode/command/sdd-fix.md" \
   || fail "opencode sdd-fix differs from claude sdd-fix"
+cmp -s "$T/.claude/commands/sdd-fix-parallel.md" "$T/.opencode/command/sdd-fix-parallel.md" \
+  || fail "opencode sdd-fix-parallel differs from claude"
 pass "OpenCode commands generated (R7)"
 
 # ── Antigravity glue (.agents/, E07-F01 R1–R12) ───────────────────────────────────────────────
@@ -414,7 +437,7 @@ for r in orchestrator architect builder reviewer scout doc-critic; do
 done
 
 # R6/R7: all five workflows generated, each carrying a `description` (slash-command registration).
-for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix; do
+for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel; do
   [ -f "$T/.agents/workflows/$w.md" ]                    || fail "antigravity workflow $w missing (R6)"
   grep -qE '^description:' "$T/.agents/workflows/$w.md"   || fail "antigravity workflow $w has no description (R7)"
   grep -qF '$ARGUMENTS' "$T/.agents/workflows/$w.md"      || fail "antigravity workflow $w does not carry \$ARGUMENTS (R8)"
@@ -426,9 +449,10 @@ grep -qF '.harness/agents/inception.md'    "$T/.agents/workflows/sdd-new.md"  ||
 grep -qF '.harness/agents/planner.md'      "$T/.agents/workflows/sdd-plan.md" || fail "sdd-plan workflow does not resolve planner against .harness/ (R8)"
 grep -qF '.harness/agents/driller.md'      "$T/.agents/workflows/sdd-drill.md" || fail "sdd-drill workflow does not resolve driller against .harness/ (R8)"
 grep -qF '.harness/agents/fixer.md'        "$T/.agents/workflows/sdd-fix.md"  || fail "sdd-fix workflow does not resolve fixer against .harness/ (R8)"
+grep -qF '.harness/agents/fixer.md' "$T/.agents/workflows/sdd-fix-parallel.md" || fail "sdd-fix-parallel workflow does not resolve fixer"
 
 # R9: each workflow body is byte-identical to the Claude command of the same name (no drift).
-for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix; do
+for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel; do
   cmp -s "$T/.claude/commands/$w.md" "$T/.agents/workflows/$w.md" || fail "antigravity workflow $w differs from claude $w (R9)"
 done
 pass "Antigravity glue generated (R11)"
@@ -668,7 +692,7 @@ pass "--agents=antigravity writes GEMINI.md entrypoint (R1, Codex r1 P2)"
 TCX="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 CODEX_HOME="$TCX/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCX" >/dev/null || fail "--agents=codex exited non-zero"
 [ -f "$TCX/AGENTS.md" ]                 || fail "codex: AGENTS.md (Codex's native entrypoint) must always be written"
-for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix; do
+for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel; do
   [ -f "$TCX/ch/prompts/$_c.md" ]       || fail "codex: global prompt $_c.md not installed"
 done
 # prompts are GLOBAL — nothing codex-owned lands under the target repo
@@ -687,9 +711,12 @@ grep -qF -- '--mine' "$TCX/ch/prompts/sdd-next.md" || fail "codex: sdd-next prom
 CODEX_HOME="$TCX/ch2" sh "$SRC/harness-install.sh" --agents=claude,codex "$TCX" >/dev/null || fail "codex+claude install failed"
 cmp -s "$TCX/ch2/prompts/sdd-next.md" "$TCX/.claude/commands/sdd-next.md" \
   || fail "codex: global prompt body not byte-identical to the Claude command body"
+cmp -s "$TCX/ch2/prompts/sdd-fix-parallel.md" "$TCX/.claude/commands/sdd-fix-parallel.md" ||
+  fail "codex: parallel prompt not byte-identical to Claude"
 rm -rf "$TCX"
 pass "--agents=codex stamps only GLOBAL /sdd-* prompts + AGENTS.md, byte-identical to peers (§5d)"
 
+# test_sdd_fix_parallel_registry_cleanup (covered across each deselection block below)
 # codex_deselect_reclaims_pristine (§7): re-run dropping codex removes byte-pristine
 # global prompts and warns; a user-EDITED prompt of the same name is preserved.
 TCD="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
@@ -701,6 +728,7 @@ printf '\n# user edit\n' >> "$CH/prompts/sdd-fix.md"
 _cwarn="$(CODEX_HOME="$CH" sh "$SRC/harness-install.sh" --agents=claude "$TCD" 2>&1 >/dev/null)" \
   || fail "codex deselect re-run exited non-zero"
 [ -f "$CH/prompts/sdd-next.md" ] && fail "R13: deselected codex pristine prompt (sdd-next.md) not removed"
+[ -f "$CH/prompts/sdd-fix-parallel.md" ] && fail "E15-F03: deselected pristine parallel prompt not removed"
 [ -f "$CH/prompts/sdd-fix.md" ]  || fail "R13: user-edited codex prompt (sdd-fix.md) must be preserved on deselect"
 printf '%s' "$_cwarn" | grep -qiF 'codex' || fail "R13: removal of codex glue was not warned about"
 grep -qx codex "$TCD/.harness/.agents" && fail "R8: codex must be dropped from .harness/.agents after deselect"
@@ -860,7 +888,9 @@ sh "$SRC/harness-install.sh" --agents=gemini "$TM" >/dev/null 2>&1 || fail "scop
 # harness-owned glue removed:
 [ -f "$TM/.claude/agents/orchestrator.md" ] && fail "P1: harness claude shim not removed on deselect"
 [ -f "$TM/.claude/commands/sdd-next.md" ]   && fail "P1: harness claude command not removed on deselect"
+[ -f "$TM/.claude/commands/sdd-fix-parallel.md" ] && fail "E15-F03: harness parallel command not removed on deselect"
 [ -f "$TM/.opencode/command/sdd-next.md" ]  && fail "P1: harness opencode command not removed on deselect"
+[ -f "$TM/.opencode/command/sdd-fix-parallel.md" ] && fail "E15-F03: opencode parallel command not removed on deselect"
 # user-authored files PRESERVED (the whole point):
 [ -f "$TM/.claude/agents/my-custom.md" ]   || fail "P1: user-authored .claude/agents/my-custom.md was wrongly deleted"
 [ -f "$TM/.claude/commands/my-cmd.md" ]     || fail "P1: user-authored .claude/commands/my-cmd.md was wrongly deleted"

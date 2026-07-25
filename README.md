@@ -30,6 +30,7 @@ flowchart LR
     Scout["Scout<br/>(read-only recon)"] -.assists.-> Orchestrator
 
     fix(["quick fix"]) -->|/sdd-fix| Builder
+    fixes(["ready E99 fixes"]) -->|/sdd-fix-parallel| Orchestrator
 ```
 
 Specs follow a **Product → Epic → Feature** hierarchy, where each feature is a
@@ -58,6 +59,7 @@ claude                    # CLAUDE.md → AGENTS.md auto-loads
 # whole project? /sdd-plan "<idea>"  # the whole-project inception skill: writes vision/architecture + ADRs and seeds draft epics
 # deepen one? /sdd-drill <epic-id>  # the per-epic drill-down skill: decomposes a draft epic into features + ADR deltas, then one epic-level approval (draft → planned)
 # quick fix? /sdd-fix "<desc>"   # the lightweight fix lane: seeds an sdd:false fix under the reserved maintenance epic (brief only, no spec) and runs Builder → Reviewer
+# batch fixes? /sdd-fix-parallel # bounded E99 batch: isolated safe fixes overlap; shared/unknown paths serialize
 # then:     /sdd-next            # runs the Orchestrator on the next task
 ```
 
@@ -70,11 +72,11 @@ approves) → `builder` → `reviewer`.
 
 | CLI | Entry file | Sub-agents |
 |---|---|---|
-| **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next` |
-| **Codex** | `AGENTS.md` (native) | run roles sequentially; **global** `/prompts:sdd-new`, `/prompts:sdd-plan`, `/prompts:sdd-drill`, `/prompts:sdd-fix`, `/prompts:sdd-next` prompts in `${CODEX_HOME:-~/.codex}/prompts/` |
+| **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-fix-parallel`, `/sdd-next` |
+| **Codex** | `AGENTS.md` (native) | run roles sequentially; global `/prompts:sdd-*` prompts, including `/prompts:sdd-fix-parallel`, in `${CODEX_HOME:-~/.codex}/prompts/` |
 | **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
-| **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*` (`/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next`) |
-| **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/agents/*` personas + `.agents/workflows/*` slash commands (`/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-next`) |
+| **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-fix-parallel` |
+| **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/agents/*` personas + `.agents/workflows/*`, including `/sdd-fix-parallel` |
 
 The harness body — `AGENTS.md`, `agents/`, `specs/`, `progress/`, `init.sh`, the
 stores — is **identical** across all of them. Only the entry filename and the
@@ -209,8 +211,20 @@ umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
 .opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
 .agents/                     Antigravity glue — rules + agent personas + workflows (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
-${CODEX_HOME:-~/.codex}/prompts/  Codex CLI slash-command prompts (GLOBAL, not in-repo — /prompts:sdd-new, /prompts:sdd-plan, /prompts:sdd-drill, /prompts:sdd-fix, /prompts:sdd-next)
+${CODEX_HOME:-~/.codex}/prompts/  Codex CLI slash-command prompts (GLOBAL, including /prompts:sdd-fix-parallel)
 ```
+
+### Parallel maintenance fixes
+
+`/sdd-fix-parallel` consumes a deterministic bounded batch of ready autonomous
+`sdd:false` fixes already seeded under E99. `fix_lane.max_parallel` defaults to `3`.
+The built-in guard always serializes fixes naming `harness-install.sh`,
+`tests/test_install.sh`, or `tools/*`; `fix_lane.shared_paths` can only extend that
+list. Missing or unsafe expected-path metadata is guarded. Parallel-safe workers use
+isolated F02 worktrees and host-native sub-agent concurrency. Each worktree is created
+once; shared locked board state is persisted through a coordinator bookkeeping PR,
+then the local base is fast-forwarded before exact safe teardown. If the host lacks
+that capability, or `execution.builder.backend` is `delegate`, use serial `/sdd-fix`.
 
 ## Installing into an existing project
 

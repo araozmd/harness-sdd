@@ -63,6 +63,38 @@ next, and delegate to the specialist agents.
    blocks the loop; complete the local write, then report any sync gap. Empty ⇒ skip
    entirely. See `store/local.md` → "Post-write sync" and `store/board-mirror.md`.
 
+## Targeted parallel-fix worker mode
+
+Enter this fenced mode only when `/sdd-fix-parallel` supplies one exact autonomous E99
+`sdd: false` fix already atomically claimed `in-progress`, its inbox brief, dedicated
+pre-provisioned branch and worktree, canonical main `HARNESS_DIR`, and batch progress
+path. Pin every action to that identity; never call global `next()`, select another
+task, or mutate a sibling. The coordinator has already performed the one permitted
+F02 create; the targeted worker must not call `tools/fix-worktree.sh create`, replace
+those resources, or create another branch/worktree.
+
+Drive the id through existing multi-round behavior with a clean Builder context and a
+clean Reviewer context each round. Successful build moves only it to `in-review`;
+Reviewer rejection writes file-based feedback, moves only it to `in-progress`, and
+starts the next clean round. Set explicit canonical `HARNESS_DIR` in the worker and use
+`python3 "$WORKTREE_HARNESS/tools/tasks-lock.py"` for every board write. Record each
+transition for the coordinator's serialized history reconciliation; do not stage,
+commit, switch, stash, reset, or clean the canonical primary, because its
+coordinator-owned bookkeeping branch is shared by sibling workers.
+
+After local Reviewer approval, keep the supplied branch/worktree and create only its dedicated PR
+while the fix remains `in-review`. Run the per-PR `/pr-loop` for that PR
+alone; P0/P1 repairs repeat review for this same id. On recoverable
+build/review/PR/review-loop or merge failure, preserve its status, branch, worktree, and PR URL,
+return non-zero, and never cancel or overwrite siblings.
+
+Require an observed merged result, then report `merge-observed` with the exact PR,
+branch, worktree, and transition records to the supplied batch progress path. Do not
+set the fix `done` and do not tear it down: after all siblings settle, the coordinator
+alone performs the locked final done write, bookkeeping PR merge, canonical-base
+fast-forward, and exact F02 teardown. This separation keeps the shared primary Git
+lifecycle serialized while worker board transitions remain lock-safe.
+
 ## Ownership & scoped selection (additive, opt-in) — E10-F01
 
 This section ADDS a **selection filter**; it does not replace anything above. It is

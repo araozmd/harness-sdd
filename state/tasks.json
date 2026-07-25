@@ -305,7 +305,7 @@
         {
           "id": "E15-F03",
           "title": "/sdd-fix-parallel dispatch with shared-path conflict guard + installer wiring",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
