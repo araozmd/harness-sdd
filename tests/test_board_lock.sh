@@ -884,6 +884,64 @@ else
   fi
 fi
 
+# ── R12sgdp: separate-git-dir PRIMARY (NOT linked) → serial works w/o override ──
+# test_separate_git_dir_primary_not_linked  (Codex #46 r7 P2, id 3649430729)
+# A PRIMARY checkout created with `git init --separate-git-dir` (like a submodule
+# primary) has its common `.git` dir OUTSIDE the working tree — so the OLD
+# `_in_linked_worktree()` discriminant (common dir's PARENT != worktree toplevel)
+# misclassified this PRIMARY as a LINKED worktree. Combined with a failed
+# canonical board-existence check, ordinary serial `set-status` then exited
+# demanding HARNESS_DIR, breaking serial orchestration in this layout. The correct
+# discriminant is `git rev-parse --git-dir` vs `--git-common-dir`: EQUAL for any
+# primary, DISTINCT only for a genuine linked worktree. This primary is NOT linked,
+# so set-status with NO HARNESS_DIR must SUCCEED and transition the board. FAILS on
+# the old parent-comparison logic; PASSES on the git-dir-vs-common-dir logic.
+if ! git --version >/dev/null 2>&1; then
+  pass "R12sgdp (skipped: git unavailable)"
+else
+  T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+  MAIN="$T/main"
+  GITDIR="$T/gitdir"
+  # SOURCE layout under a SEPARATE git dir: the PRIMARY checkout's `.git` is a
+  # gitlink FILE pointing at $GITDIR (outside the working tree). No linked worktree.
+  make_fixture "$MAIN"
+  mkdir -p "$MAIN/tools"
+  cp "$HELPER" "$MAIN/tools/tasks-lock.py"
+  cp "$VALIDATOR" "$MAIN/tools/validate-board.py"
+  if ! git init -q --separate-git-dir="$GITDIR" "$MAIN" 2>/dev/null; then
+    rm -rf "$T"
+    pass "R12sgdp (skipped: git init --separate-git-dir unsupported here)"
+  else
+    ( cd "$MAIN" \
+        && git config user.email t@t.com \
+        && git config user.name t \
+        && git add -A \
+        && git commit -qm init ) \
+      || fail "R12sgdp: could not commit the separate-git-dir primary fixture"
+    # Sanity: confirm this really is a separate-git-dir primary (common dir OUTSIDE
+    # the toplevel), i.e. the exact layout that tripped the old logic.
+    _cmn="$( cd "$MAIN/tools" && python3 -c "import os,subprocess as s;print(os.path.realpath(os.path.join(os.getcwd(),s.run(['git','rev-parse','--git-common-dir'],stdout=s.PIPE).stdout.decode().strip())))" )"
+    _top="$( cd "$MAIN" && python3 -c "import os;print(os.path.realpath(os.getcwd()))" )"
+    [ "$(dirname "$_cmn")" != "$_top" ] \
+      || fail "R12sgdp: fixture did NOT produce a common dir outside the toplevel (not exercising the bug)"
+    # Serial set-status from the PRIMARY checkout, NO HARNESS_DIR → must SUCCEED
+    # (must NOT demand HARNESS_DIR) and transition the primary's own board.
+    ( cd "$MAIN" && env -u HARNESS_DIR python3 "$MAIN/tools/tasks-lock.py" \
+        set-status E01-F01 in-review ) 2>"$T/sgdperr.txt" \
+      || { cat "$T/sgdperr.txt" >&2; fail "R12sgdp: serial set-status from a separate-git-dir PRIMARY was rejected (misclassified as a linked worktree)"; }
+    [ "$(status_of "$MAIN/state/tasks.json" E01-F01)" = "in-review" ] \
+      || fail "R12sgdp: transition did not land on the separate-git-dir primary's own board"
+    # Also prove serial works from an unrelated cwd (self-location path), still no override.
+    ( cd / && env -u HARNESS_DIR python3 "$MAIN/tools/tasks-lock.py" \
+        set-status E01-F02 done ) \
+      || fail "R12sgdp: serial set-status from an arbitrary cwd was rejected under separate-git-dir primary"
+    [ "$(status_of "$MAIN/state/tasks.json" E01-F02)" = "done" ] \
+      || fail "R12sgdp: second serial transition did not persist on the primary board"
+    rm -rf "$T"
+    pass "R12sgdp separate-git-dir PRIMARY is NOT a linked worktree → serial set-status works with no HARNESS_DIR"
+  fi
+fi
+
 # ── R13struct: locate status STRUCTURALLY by id, not by textual key order ──────
 # test_status_before_id_targets_correct_object  (Codex #46 r4 P2, id 3649274120)
 # JSON imposes no key order. If the minimal-diff writer finds the target's status

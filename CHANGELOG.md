@@ -158,6 +158,22 @@ All notable changes to the harness body are recorded here. Versions follow
   `HARNESS_DIR=<main>` (the coordinator path) lands on the main board. The spec's **R12** and the
   F03 brief (`progress/inbox/E15-F03.md`) are updated to require the coordinator to inject
   `HARNESS_DIR`.
+- **Distinguish linked worktrees from separate-git-dir primaries (Codex #46 r7 P2, id 3649430729).**
+  `_in_linked_worktree()` detected a linked worktree by comparing the common `.git` dir's **parent**
+  with the worktree toplevel. But a **PRIMARY** checkout made with `git init --separate-git-dir`
+  (or a submodule primary) also keeps its common dir OUTSIDE the working tree, so that comparison
+  returned `true` and misclassified the primary as linked — combined with a failed canonical
+  board-existence check, ordinary **serial** `set-status` then exited demanding `HARNESS_DIR`, so
+  plain serial orchestration could not transition tasks in that layout without an undocumented
+  override. Detection now compares `git rev-parse --git-dir` with `git rev-parse --git-common-dir`
+  (both realpath-normalized): **equal ⇒ any primary checkout** (colocated, separate-git-dir, or
+  submodule) ⇒ NOT linked ⇒ the serial self-location fallback applies with no spurious `HARNESS_DIR`
+  demand; **distinct ⇒ a genuine linked worktree** ⇒ the existing loud-fail-if-no-canonical-board
+  behavior is unchanged. Any git failure still degrades to not-linked / self-location — never
+  crashes, never blocks. `tests/test_board_lock.sh` gains **R12sgdp**: a `separate-git-dir` PRIMARY
+  checkout runs `set-status` with **no** `HARNESS_DIR` and must succeed and transition its own board
+  (fails on the old parent-comparison logic, passes on the git-dir-vs-common-dir logic); the R12sgd
+  linked-worktree loud-fail and the R12wt/R12src worktree cases stay green.
 
 ## [0.30.0] — 2026-07-10
 

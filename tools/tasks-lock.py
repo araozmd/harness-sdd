@@ -141,45 +141,44 @@ def _git(args, cwd):
 def _in_linked_worktree():
     """True iff the helper is running inside a LINKED git worktree.
 
-    A linked worktree is a parallel-fix worker (F02/F03): its `.git` is a FILE
-    (a `gitdir:` pointer), and `git rev-parse --git-common-dir` resolves OUTSIDE
-    the current worktree toplevel (to the MAIN repo's shared `.git`). We detect it
-    robustly across layouts — including `git init --separate-git-dir` and
-    submodules, where the current `.git` is also a file — by comparing the common
-    git dir against the current toplevel: a linked worktree's common dir lives
-    under a DIFFERENT toplevel (the main worktree), whereas a plain (main / single)
-    checkout's common dir is `<toplevel>/.git` (or, under separate-git-dir for the
-    PRIMARY working tree, still reachable as its own `.git` pointer — but the
-    PRIMARY tree has no `--git-common-dir` OUTSIDE itself). Returns False on any
-    git failure (not a repo, git absent) so a non-repo self-location run is never
-    misclassified as a worktree.
+    A linked worktree is a parallel-fix worker (F02/F03): git keeps its
+    per-worktree git dir (`git rev-parse --git-dir`, e.g. a
+    `<common>/worktrees/<name>` path) DISTINCT from the shared common dir
+    (`git rev-parse --git-common-dir`, the MAIN repo's `.git`). For a PRIMARY
+    checkout the two are IDENTICAL — including `git init --separate-git-dir` and
+    submodule primaries, whose git dir simply lives outside the working tree but
+    is still the single common dir (there is no separate per-worktree dir). So the
+    ONLY reliable discriminant is `--git-dir` vs `--git-common-dir`:
+
+      * EQUAL   → PRIMARY checkout (colocated, separate-git-dir, or submodule
+                  primary) → NOT linked → serial self-location applies.
+      * DISTINCT → genuine LINKED worktree → the loud-fail-if-no-canonical-board
+                  behavior applies.
+
+    Comparing the common dir's PARENT against the worktree toplevel (the prior
+    approach) misclassified separate-git-dir/submodule PRIMARIES as linked,
+    because their common dir sits outside the toplevel even though nothing is
+    linked. Both paths are realpath-normalized before comparison. Returns False on
+    any git failure (not a repo, git absent) so a non-repo self-location run is
+    never misclassified as a worktree.
     """
-    git_dir = os.path.dirname(os.path.abspath(__file__))  # the tools/ dir
+    cwd = os.path.dirname(os.path.abspath(__file__))  # the tools/ dir
 
-    toplevel = _git(["rev-parse", "--show-toplevel"], cwd=git_dir)
-    if toplevel is None:
+    git_dir = _git(["rev-parse", "--git-dir"], cwd=cwd)
+    if git_dir is None:
         return False  # not a git repo at all → not a worktree; self-locate.
-    toplevel = os.path.realpath(toplevel)
-
-    # `--is-inside-work-tree` guards the bare-repo edge; a bare repo has no
-    # working tree and no board, so treat it as non-worktree self-location.
-    inside = _git(["rev-parse", "--is-inside-work-tree"], cwd=git_dir)
-    if inside != "true":
-        return False
-
-    common_dir = _git(["rev-parse", "--git-common-dir"], cwd=git_dir)
+    common_dir = _git(["rev-parse", "--git-common-dir"], cwd=cwd)
     if common_dir is None:
         return False
-    common_dir = os.path.realpath(os.path.join(git_dir, common_dir))
 
-    # A LINKED worktree's shared common `.git` dir is NOT `<this-toplevel>/.git`:
-    # it lives under the MAIN worktree. A PRIMARY/single checkout's common dir IS
-    # `<toplevel>/.git` (colocated) — or, under separate-git-dir, the primary
-    # tree's `.git` FILE points at a git dir whose own parent is the separate
-    # metadata dir, NOT this toplevel. So the discriminant that specifically flags
-    # a LINKED worktree is: the common dir's parent is a DIFFERENT directory than
-    # this worktree's toplevel AND the common dir is not directly under it.
-    return os.path.dirname(common_dir) != toplevel
+    # Both may be reported relative to the cwd we ran git in; anchor + normalize
+    # so equal git dirs compare equal despite symlinked temp dirs (macOS /var →
+    # /private/var) or relative-vs-absolute reporting.
+    git_dir = os.path.realpath(os.path.join(cwd, git_dir))
+    common_dir = os.path.realpath(os.path.join(cwd, common_dir))
+
+    # DISTINCT ⇒ genuine linked worktree; EQUAL ⇒ any PRIMARY checkout.
+    return git_dir != common_dir
 
 
 def _canonical_harness_dir():
