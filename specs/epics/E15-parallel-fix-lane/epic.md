@@ -1,7 +1,7 @@
 ---
 id: E15
 title: Parallel fix lane (concurrent E99 fixes in isolated worktrees)
-status: planned          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: done             # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 
@@ -32,9 +32,9 @@ made safe under a lock. Scope is deliberately fenced to the E99 fix lane — thi
 ## Features
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| F01 | Board write lock: flock-guarded read-modify-write on tasks.json | pending | true | — |
-| F02 | Worktree-per-fix isolation helper for concurrent fix branches | pending | true | F01 |
-| F03 | /sdd-fix-parallel dispatch with shared-path conflict guard + installer wiring | pending | true | F01, F02 |
+| F01 | Board write lock: flock-guarded read-modify-write on tasks.json | done | true | — |
+| F02 | Worktree-per-fix isolation helper for concurrent fix branches | done | true | F01 |
+| F03 | /sdd-fix-parallel dispatch with shared-path conflict guard + installer wiring | done | true | F01, F02 |
 
 ## Notes — intended decomposition & restrictions
 Intended feature shape for the driller (source of truth remains `state/tasks.json`;

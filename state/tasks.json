@@ -280,7 +280,7 @@
     {
       "id": "E15",
       "title": "Parallel fix lane (concurrent E99 fixes in isolated worktrees)",
-      "status": "planned",
+      "status": "done",
       "features": [
         {
           "id": "E15-F01",
@@ -305,14 +305,14 @@
         {
           "id": "E15-F03",
           "title": "/sdd-fix-parallel dispatch with shared-path conflict guard + installer wiring",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
             "E15-F01",
             "E15-F02"
           ],
-          "spec_path": "specs/epics/E15-parallel-fix-lane/F03-parallel-dispatch/"
+          "spec_path": "specs/epics/E15-parallel-fix-lane/F03-parallel-fix-dispatch/"
         }
       ]
     },
