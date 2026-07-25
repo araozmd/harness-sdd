@@ -489,11 +489,18 @@ def _iter_array_object_spans(text, in_string, arr_start):
 
 
 def _depth1_id(text, in_string, obj_start, obj_end):
-    """The direct `id` string value of an object, or None."""
+    """The direct `id` string value of an object, or None.
+
+    On a duplicated `id` member we return the LAST, matching `json.loads`
+    semantics, so object SELECTION always agrees with the parsed board the
+    validator sees — a first-match walk could otherwise pick an object whose
+    effective id is something else entirely.
+    """
     pat = re.compile(r'"id"\s*:\s*"([^"]*)"')
+    value = None
     for m in _depth1_key_matches(text, in_string, obj_start, obj_end, pat):
-        return m.group(1)
-    return None
+        value = m.group(1)
+    return value
 
 
 def _find_status_span(text, target_id):
@@ -539,8 +546,24 @@ def _find_status_span(text, target_id):
         return None
 
     def status_span_of(obj_start, obj_end):
+        # JSON permits (while discouraging) DUPLICATE members. If the target
+        # object carries two `status` members, `json.loads` keeps the LAST while
+        # a first-match text patch rewrites the FIRST — the helper would exit 0
+        # having persisted a board whose EFFECTIVE status never changed, i.e. the
+        # sole supported write path silently no-ops the requested transition.
+        # Rather than guess which token is authoritative, fail-stop loudly.
         pat = re.compile(r'"status"\s*:\s*"([^"]*)"')
-        for m in _depth1_key_matches(text, in_string, obj_start, obj_end, pat):
+        found = [
+            m for m in _depth1_key_matches(text, in_string, obj_start, obj_end, pat)
+        ]
+        if len(found) > 1:
+            _die(
+                "object %r has %d direct 'status' members; refusing to patch an "
+                "ambiguous board (json parsing would keep the LAST while a text "
+                "patch rewrites the FIRST, silently no-opping the transition). "
+                "Remove the duplicate key and re-run." % (target_id, len(found))
+            )
+        for m in found:
             return (m.start(1), m.end(1), m.group(1))
         return None
 
@@ -647,7 +670,22 @@ def run(transform, timeout):
                 # mode onto the temp file before the replace, inside the lock,
                 # preserving fail-stop semantics.
                 if os.path.exists(tasks_path):
-                    os.chmod(tmp_path, stat.S_IMODE(os.stat(tasks_path).st_mode))
+                    _st = os.stat(tasks_path)
+                    os.chmod(tmp_path, stat.S_IMODE(_st.st_mode))
+                    # Also carry the board's OWNERSHIP across the replace. In a
+                    # multi-account checkout the board is group-owned so several
+                    # accounts can write it via the 0664 group bit; without
+                    # setgid inheritance on the directory the temp file picks up
+                    # the CURRENT writer's group, so os.replace would silently
+                    # re-group the board and lock the other accounts out of the
+                    # mandatory write path. Best-effort by construction: chown is
+                    # privileged in the general case, so a refusal (EPERM) or a
+                    # platform without it must NOT fail the write — the mode copy
+                    # above already covers the common single-owner case.
+                    try:
+                        os.chown(tmp_path, _st.st_uid, _st.st_gid)
+                    except (OSError, AttributeError):
+                        pass
                 os.replace(tmp_path, tasks_path)
             except Exception:
                 try:

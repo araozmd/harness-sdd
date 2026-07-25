@@ -1109,6 +1109,43 @@ HARNESS_DIR="$T" python3 "$HELPER" set-status E01 in-progress \
 rm -rf "$T"
 pass "R13ext colliding extension ids are unaddressable (only epics[]/features[] members resolve)"
 
+# ── R13dup: a duplicated `status` member fails STOP, never a silent no-op ──────
+# test_duplicate_status_member_fails_stop  (Codex #46 r10 P2, id 3649544829)
+# JSON permits duplicate members; `json.loads` keeps the LAST. A first-match text
+# patch rewrites the FIRST, so the helper would exit 0 having written a board
+# whose EFFECTIVE status never changed — the sole supported write path silently
+# no-opping the requested transition (and validation still passes, so nothing
+# surfaces it). The helper must refuse to patch an ambiguous object instead.
+T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+mkdir -p "$T/state" "$T/store"
+cp "$SCHEMA" "$T/store/tasks.schema.json"
+cat > "$T/state/tasks.json" <<'EOF'
+{
+  "project": "fixture",
+  "epics": [
+    {
+      "id": "E01",
+      "title": "epic one",
+      "status": "planned",
+      "features": [
+        { "id": "E01-F01", "title": "feature one", "status": "pending", "sdd": true, "spec_path": "a", "status": "pending" }
+      ]
+    }
+  ]
+}
+EOF
+cp "$T/state/tasks.json" "$T/before.json"
+if HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 in-review 2>"$T/duperr.txt"; then
+  fail "R13dup: set-status on a duplicate-status object SUCCEEDED (silent no-op — parsed status is the LAST member, the patch rewrote the FIRST)"
+fi
+grep -qiE 'duplicat|status' "$T/duperr.txt" \
+  || { cat "$T/duperr.txt" >&2; fail "R13dup: failure message does not explain the duplicate status member"; }
+# Fail-stop: the board is byte-for-byte untouched (R4 semantics).
+cmp -s "$T/before.json" "$T/state/tasks.json" \
+  || fail "R13dup: the board was modified despite the fail-stop"
+rm -rf "$T"
+pass "R13dup duplicate status member fails stop with a clear message (board untouched, never a silent no-op)"
+
 # ── R14py3: init.sh HARD-fails (non-zero, clear msg) when python3 is absent ────
 # test_init_requires_python3  (Codex #46 r6 P1, id 3649368481)
 # Since E15-F01 the ONLY supported set_status write path is

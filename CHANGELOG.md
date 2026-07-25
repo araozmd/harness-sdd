@@ -221,6 +221,33 @@ All notable changes to the harness body are recorded here. Versions follow
   boards. `tests/test_board_lock.sh` gains **R13ext**: a board with colliding-id extension objects
   both **before** `epics` and **nested inside** the epic must transition the real feature (and the
   real epic), leave both decoys `synced`, and still change exactly one status token.
+- **Duplicate `status` member fails STOP instead of silently no-opping (Codex #46 r10 P2, id
+  3649544829).** JSON permits duplicate members and `json.loads` keeps the **last**, while a
+  first-match text patch rewrites the **first** — so on such a board the helper exited 0 having
+  persisted a file whose **effective** status never changed, and post-write validation still
+  passed. The sole supported write path could therefore silently drop a requested transition. The
+  writer now refuses to patch an object carrying more than one direct `status` member, exiting
+  non-zero with a message naming the id and the count, board byte-unchanged (R4 semantics).
+  Relatedly, object **selection** now reads a duplicated `id` as its **last** value, matching
+  `json.loads`, so the text walk can never select an object whose effective id differs.
+  `tests/test_board_lock.sh` gains **R13dup**.
+- **Preserve board ownership across the atomic replace (Codex #46 r10 P2, id 3649544831).** The
+  mode copy added in r6 carried permission bits but not ownership. In a multi-account checkout the
+  board is group-owned so several accounts can write it via the `0664` group bit; without setgid
+  inheritance on the directory the temp file takes the **current** writer's group, so `os.replace`
+  silently re-grouped the board and locked the other accounts out of the mandatory write path. The
+  helper now also copies the original `st_uid`/`st_gid` onto the temp file inside the lock.
+  Best-effort by construction — `chown` is privileged in the general case, so an `EPERM` refusal
+  (or a platform without it) is swallowed rather than failing the write; the mode copy already
+  covers the common single-owner case.
+- **Document the linked-worktree fail-loud branch in `store/local.md` (Codex #46 r10 P2, id
+  3649544832).** The local-backend contract still described resolution as "works from any worktree,
+  resolves the main board automatically", which no longer matched the fail-safe behavior: from a
+  **linked** worktree under `separate-git-dir`/submodule layouts the helper deliberately exits
+  non-zero demanding an explicit `HARNESS_DIR`, so anyone driving it by hand outside the
+  `/sdd-fix-parallel` coordinator hit an undocumented hard failure. The contract now states the
+  corrected precedence (primary checkouts are never remapped — they already *are* the main working
+  tree), the one case that exits non-zero, and the `HARNESS_DIR=…` invocation that resolves it.
 
 ## [0.30.0] — 2026-07-10
 
