@@ -231,7 +231,7 @@ do_create() {
   else
     _init="$WORKTREE/.harness/init.sh"
   fi
-  if [ ! -x "$_init" ] || ! (cd "$WORKTREE" && "$_init"); then
+  if [ ! -x "$_init" ] || ! (cd "$WORKTREE" && "$_init" >&2); then
     rollback_create || exit 1
     die "initialization failed and provisioning was rolled back"
   fi

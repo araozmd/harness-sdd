@@ -222,12 +222,24 @@ test_personal_layer_allowlist_only() {
 
 test_source_and_installed_init_gate() {
   make_source_fixture init_source
-  printf '#!/bin/sh\npwd > .source-init-ran\nexit 0\n' > "$PRIMARY/init.sh"
+  printf '#!/bin/sh\npwd > .source-init-ran\nprintf "source init banner\\n"\nprintf "source init diagnostic\\n" >&2\nexit 0\n' > "$PRIMARY/init.sh"
   printf '.source-init-ran\n.installed-init-ran\n' >> "$PRIMARY/.gitignore"
   git -C "$PRIMARY" add init.sh
   git -C "$PRIMARY" add .gitignore
   git -C "$PRIMARY" commit -m init-record >/dev/null
-  _source_wt="$(cd "$PRIMARY" && tools/fix-worktree.sh create E99-F115 source-init)"
+  (cd "$PRIMARY" && tools/fix-worktree.sh create E99-F115 source-init) \
+    >"$FIXTURE/source.out" 2>"$FIXTURE/source.err"
+  _source_wt="$(cat "$FIXTURE/source.out")"
+  [ "$(wc -l < "$FIXTURE/source.out" | tr -d ' ')" -eq 1 ] ||
+    fail "source-layout create stdout was not exactly one line: $(cat "$FIXTURE/source.out")"
+  case "$_source_wt" in
+    /*) : ;;
+    *) fail "source-layout create stdout was not an absolute path: $_source_wt" ;;
+  esac
+  grep -q '^source init banner$' "$FIXTURE/source.err" ||
+    fail "source-layout init stdout was not redirected to stderr"
+  grep -q '^source init diagnostic$' "$FIXTURE/source.err" ||
+    fail "source-layout init stderr diagnostic was not preserved"
   [ "$(cat "$_source_wt/.source-init-ran")" = "$_source_wt" ] ||
     fail "source-layout init did not run in the new worktree"
 
@@ -235,7 +247,7 @@ test_source_and_installed_init_gate() {
   mkdir -p "$PRIMARY/.harness/tools"
   mv "$PRIMARY/tools/fix-worktree.sh" "$PRIMARY/.harness/tools/fix-worktree.sh"
   mkdir -p "$PRIMARY/.harness"
-  printf '#!/bin/sh\npwd > .installed-init-ran\nexit 0\n' > "$PRIMARY/.harness/init.sh"
+  printf '#!/bin/sh\npwd > .installed-init-ran\nprintf "installed init banner\\n"\nprintf "installed init diagnostic\\n" >&2\nexit 0\n' > "$PRIMARY/.harness/init.sh"
   printf '.installed-init-ran\n' >> "$PRIMARY/.gitignore"
   chmod +x "$PRIMARY/.harness/init.sh" "$PRIMARY/.harness/tools/fix-worktree.sh"
   git -C "$PRIMARY" rm tools/fix-worktree.sh >/dev/null
@@ -243,13 +255,29 @@ test_source_and_installed_init_gate() {
   git -C "$PRIMARY" add .gitignore
   git -C "$PRIMARY" commit -m installed-layout >/dev/null
   HELPER=.harness/tools/fix-worktree.sh
-  _installed_wt="$(cd "$PRIMARY" && .harness/tools/fix-worktree.sh create E99-F116 installed-init)"
+  (cd "$PRIMARY" && .harness/tools/fix-worktree.sh create E99-F116 installed-init) \
+    >"$FIXTURE/installed.out" 2>"$FIXTURE/installed.err"
+  _installed_wt="$(cat "$FIXTURE/installed.out")"
+  [ "$(wc -l < "$FIXTURE/installed.out" | tr -d ' ')" -eq 1 ] ||
+    fail "installed-layout create stdout was not exactly one line: $(cat "$FIXTURE/installed.out")"
+  case "$_installed_wt" in
+    /*) : ;;
+    *) fail "installed-layout create stdout was not an absolute path: $_installed_wt" ;;
+  esac
+  grep -q '^installed init banner$' "$FIXTURE/installed.err" ||
+    fail "installed-layout init stdout was not redirected to stderr"
+  grep -q '^installed init diagnostic$' "$FIXTURE/installed.err" ||
+    fail "installed-layout init stderr diagnostic was not preserved"
   [ "$(cat "$_installed_wt/.installed-init-ran")" = "$_installed_wt" ] ||
     fail "installed-layout init did not run in the new worktree"
 
-  printf '#!/bin/sh\nexit 17\n' > "$PRIMARY/.harness/init.sh"
+  printf '#!/bin/sh\nprintf "failing init banner\\n"\nprintf "failing init diagnostic\\n" >&2\nexit 17\n' > "$PRIMARY/.harness/init.sh"
   git -C "$PRIMARY" commit -am installed-init-failure >/dev/null
   assert_create_fails initialization create E99-F139 installed-init-fail
+  grep -q '^failing init banner$' "$FIXTURE/err" ||
+    fail "failing installed init stdout was not redirected to stderr"
+  grep -q '^failing init diagnostic$' "$FIXTURE/err" ||
+    fail "failing installed init stderr diagnostic was not preserved"
   git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/E99-F139-installed-init-fail &&
     fail "installed-layout init failure left branch"
   [ ! -e "$PRIMARY/.claude/worktrees/E99-F139-installed-init-fail" ] ||
@@ -259,9 +287,13 @@ test_source_and_installed_init_gate() {
 
 test_init_failure_triggers_safe_rollback() {
   make_source_fixture init_failure
-  printf '#!/bin/sh\nexit 9\n' > "$PRIMARY/init.sh"
+  printf '#!/bin/sh\nprintf "failing source init banner\\n"\nprintf "failing source init diagnostic\\n" >&2\nexit 9\n' > "$PRIMARY/init.sh"
   git -C "$PRIMARY" commit -am failing-init >/dev/null
   assert_create_fails initialization create E99-F117 init-fail
+  grep -q '^failing source init banner$' "$FIXTURE/err" ||
+    fail "failing source init stdout was not redirected to stderr"
+  grep -q '^failing source init diagnostic$' "$FIXTURE/err" ||
+    fail "failing source init stderr diagnostic was not preserved"
   git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/E99-F117-init-fail &&
     fail "safe init failure left branch"
   [ ! -e "$PRIMARY/.claude/worktrees/E99-F117-init-fail" ] ||
