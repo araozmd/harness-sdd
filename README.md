@@ -63,6 +63,14 @@ claude                    # CLAUDE.md → AGENTS.md auto-loads
 # then:     /sdd-next            # runs the Orchestrator on the next task
 ```
 
+If `./init.sh` prints a `TaskStore dependency-cycle` warning, follow the closed
+feature/slice path to repair `depends_on`; the check is **warn-only** and does not
+make a structurally valid board fail. If `/sdd-next` selects nothing, its
+`blocked <id> [<reason-code>]` lines explain the relevant dependency, epic,
+human-gate, or scoped-owner gate and finish with a `no actionable work` summary.
+Diagnostics are read-only and do not change selection policy. See
+[Diagnosing blocked selection](docs/WORKFLOW.md#diagnosing-blocked-selection).
+
 `/sdd-new` is the front door: it asks a few questions, decides whether the idea is a
 new epic / feature / task, and writes a `pending` entry plus an intent brief — without
 hand-editing `state/tasks.json`. Then the Orchestrator spawns `architect` → (human

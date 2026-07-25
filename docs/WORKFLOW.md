@@ -215,6 +215,36 @@ needed; existing owner-free stores keep validating unchanged.
 - **Mirror stays one-way.** `state/tasks.json` is the single source of truth for `owner`;
   no agent reads the board to learn ownership.
 
+## Diagnosing blocked selection
+
+Dependency cycles and an empty `/sdd-next` result are planning diagnostics, not
+environment failures. After the local TaskStore passes structural validation,
+`init.sh` reports one deterministic warning per cyclic feature or slice component:
+
+```text
+⚠️  TaskStore dependency-cycle [feature]: E2-F1 -> E2-F2 -> E2-F1 (warn-only)
+```
+
+The full closed path is a repair witness. Feature and slice graphs are separate;
+missing or cross-kind dependencies are blockers but are not invented as cycle
+nodes. Warnings are **warn-only**: they do not change state or make an otherwise
+healthy initialization fail.
+
+When selection finds no task, the Orchestrator names each blocked candidate and
+gate with stable reason codes:
+
+```text
+blocked E2-F1 [dependency-cycle]: dependency cycle (feature): E2-F1 -> E2-F2 -> E2-F1
+blocked E2-F1 [unmet-dependency]: blocking dependencies: E2-F2=pending
+no actionable work: selection blocked; see reasons above
+```
+
+Other reasons distinguish a draft parent (`gated-epic`), human approval
+(`human-gate`), scoped ownership (`owner-excluded` / `owner-unresolved`), and a
+truly empty or all-done board (`no-candidates`). This output is informational and
+read-only. It explains the current selection policy; it does not relax a gate,
+pick a fallback, or introduce a new TaskStore status.
+
 ## The human-in-the-loop gate
 
 When `harness.config.yaml` has `require_spec_approval: true` (default), the

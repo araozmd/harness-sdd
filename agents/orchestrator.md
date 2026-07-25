@@ -146,6 +146,58 @@ relaxation.** Apply it in this order:
 `state/tasks.json` remains the single source of truth for `owner` (invariant preserved,
 not changed by this feature).
 
+## No-actionable-work diagnostics — E16-F01
+
+When ordinary or scoped selection returns no task, explain the existing gates; do not
+choose a fallback or implement a second selector. These diagnostics are
+**informational**, return successful command completion, and **change no state**.
+In other words, selection diagnostics are read-only: the operation changes no state.
+E16-F03 must reuse the following reason codes, meanings, and human templates
+**verbatim** when it moves selection into `tools/next-task.mjs`.
+
+Emit each candidate record exactly as:
+
+`blocked <id> [<reason-code>]: <human text>`
+
+Sort candidate ids numerically by epic then feature, with feature before slice and
+slice repository suffixes lexical. For one subject, emit **all applicable**
+non-owner reasons in this fixed order, then owner reasons: `dependency-cycle`,
+`gated-epic`, `unmet-dependency`, `human-gate`, `owner-excluded`,
+`owner-unresolved`. Sort every dependency named within a detail by the same
+canonical id order.
+
+| Reason code | When it applies | Exact human template |
+|---|---|---|
+| `dependency-cycle` | Subject participates in a same-kind feature or slice cycle. Emit the canonical full closed witness in addition to any unmet blocker. | `dependency cycle (<kind>): <id> -> ... -> <id>` |
+| `gated-epic` | An unfinished feature belongs to a `draft` epic. | `epic <id> is draft` |
+| `unmet-dependency` | A dependency is missing, not `done`, or a slice dependency is done but not merged. Name all blockers; use the actual status for a known non-done node. | `blocking dependencies: <id>=missing, <id>=<status>, <id>=done-but-unmerged` |
+| `human-gate` | A non-autonomous feature is parked at `spec-ready`, or a non-autonomous `sdd: false` quick fix remains `pending`. | Exactly `spec-ready requires approval` or `gated quick fix requires approval` |
+| `owner-excluded` | Only under resolved `--mine`, and only for an **otherwise actionable** candidate whose effective owner does not match. | Exactly `effective owner=<literal>` or `effective owner=unowned` |
+| `owner-unresolved` | `--mine` identity cannot resolve. The subject is `--mine`, not a fabricated feature. | Exactly `workflow.identity=<empty>`, `workflow.identity=@me lookup failed`, or `workflow.identity=self lookup failed` |
+| `no-candidates` | The board has no features, or every feature is `done`. No `blocked` record is emitted. | See terminal lines below. |
+
+Missing ids and cross-kind references are `unmet-dependency` blockers with
+`=missing`; never invent them as cycle nodes. Dependency graphs are disjoint:
+feature edges resolve only to features and slice edges only to slices. Use
+`python3 tools/task-diagnostics.py cycles state/tasks.json` for the same
+deterministic one-witness-per-cyclic-component paths shown by `init.sh`.
+
+Ownership reasons are scoped-only. Bare `/sdd-next` emits neither
+`owner-excluded` nor `owner-unresolved` and ignores owners as before.
+`owner-excluded` is evaluated after all ordinary gates and only for an otherwise
+actionable candidate. A failed identity resolution produces one
+`blocked --mine [owner-unresolved]: ...` record.
+
+When at least one `blocked` record exists, follow all records with exactly:
+
+`no actionable work: selection blocked; see reasons above`
+
+When there are no unfinished candidates, emit only one of these terminal summaries,
+with no fabricated blocked subject:
+
+- `no actionable work [no-candidates]: board has no features`
+- `no actionable work [no-candidates]: all features are done`
+
 ### Build↔review rounds (explicit, multi-round, until green)
 
 The build↔review handoff is **not a single pass** — it is an explicit loop that
