@@ -30,9 +30,9 @@ spec.**
 4. **Write** `specs/architecture.md` from `specs/_templates/architecture.md`, and one
    ADR per decision at `specs/adr/NNNN-<title>.md` from `specs/_templates/adr.md`;
    `architecture.md` references each ADR by its `ADR-NNNN` id.
-5. **Seed** a block of `draft` epics into `state/tasks.json` (each `status: "draft"`,
+5. **Seed under the board lock** a block of `draft` epics (each `status: "draft"`,
    `features: []`) and a matching `specs/epics/<id>-<slug>/epic.md` per epic.
-6. **Re-validate** `state/tasks.json` against `store/tasks.schema.json`.
+6. Confirm the guarded helper's built-in parse + schema validation passed.
 7. **Report** the artifacts written, the seeded epics, and that `/sdd-drill` (F03) is
    the next step to deepen a `draft` epic.
 
@@ -101,6 +101,19 @@ new-epic altitude). F03 later populates `features`.
 - **Append** new epics to the existing epic list; existing epics are **never** reordered
   or renumbered.
 
+Persist the whole block as one structural mutation: prepare a temporary Python
+mutator exposing `mutate(data) -> data`, recompute the max `E##` and allocate the
+block from the fresh `data` passed to it, then run:
+
+```sh
+# installed layout; use tools/tasks-lock.py in this source repository
+python3 .harness/tools/tasks-lock.py apply --mutator <temporary-mutator.py>
+```
+
+The helper locks, re-reads, validates, and atomically replaces the board. Do not
+hand-edit `state/tasks.json` or persist ids derived only from the earlier unlocked
+read.
+
 ### Per-epic `epic.md` — business brief + drillable-minimum five elements (R10, R12)
 
 For each seeded epic, create `specs/epics/<id>-<slug>/epic.md` that is **anchored by
@@ -137,19 +150,14 @@ inline, then proceed. If the critic invocation errors or times out, proceed
 best-effort and append a note to `progress/<run>/` recording the skipped or failed
 review.
 
-## Re-validate before claiming success (R13)
+## Validate before claiming success (R13)
 
-After seeding, you MUST re-validate `state/tasks.json` against `store/tasks.schema.json`
-via the zero-dependency path (the same validation `init.sh` performs):
-
-```sh
-python3 -c "import json; json.load(open('state/tasks.json'))"
-```
-
-plus a schema check against `store/tasks.schema.json`. **If** validation **fails**,
-**then** you MUST report the failure and you **must not claim a successful plan** — do
-not leave an invalid TaskStore behind as a success. Fix or revert your edit, surface the
-error, and stop. A failed validation is never a success.
+The guarded `apply --mutator` call validates JSON plus
+`store/tasks.schema.json` before replacing the board; the helper **re-validates**
+the guarded result, which is the required
+**re-validation after seeding**. If it exits non-zero, report
+the failure and do not claim a successful plan. The helper leaves the original
+board intact; surface the error and stop. A failed guarded write is never a success.
 
 ## What you NEVER do (guardrails)
 

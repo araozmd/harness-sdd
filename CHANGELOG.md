@@ -4,6 +4,19 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.32.1] — 2026-07-25
+
+### Fixed — 🐛 Board-write contracts use the mandatory lock helper (E15-F01)
+- Routed the Inception, Fixer, Planner, and Driller structural TaskStore mutations
+  through the existing `tasks-lock.py apply --mutator` path, with allocation and
+  target checks repeated against the fresh board read inside the lock. Removed the
+  obsolete direct-edit + inline-validation instructions.
+- Routed slice mutations through guarded `apply --mutator` and documented feature/
+  epic status rollups through `set-status`, so every persisted board write uses the
+  single advisory lock without adding helper commands or changing helper behavior.
+- Added static regression coverage for the role/store contracts and completed the
+  E15-F01 test traceability matrix and behavioral checks for R12 and R13.
+
 ## [0.32.0] — 2026-07-25
 
 ### Added — ✨ ADR-citation id resolution: Reviewer soft flag + init.sh warn-only sweep (E99-F02)

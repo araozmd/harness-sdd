@@ -143,7 +143,19 @@ behaves exactly as a single-repo feature does today — the field is purely addi
 - **next_slice(feature)** — the lowest-id slice that is actionable and whose every
   `depends_on` upstream slice is `done` **and** `merged` (topological order).
 - **set_slice_status(feature, slice_id, status)** / **set_slice_merged(...)** —
-  edit the slice in place, then re-validate against `store/tasks.schema.json`.
+  these are structural slice mutations, so express each as a temporary Python
+  mutator exposing `mutate(data) -> data` and run it through the same guarded
+  persist primitive:
+
+  ```
+  # installed layout; use tools/tasks-lock.py in this source repository
+  python3 .harness/tools/tasks-lock.py apply --mutator <temporary-mutator.py>
+  ```
+
+  The mutator locates the feature and slice by id from the fresh board passed to
+  it. The helper acquires the canonical lock, re-reads inside it, applies the
+  mutation, validates, and atomically replaces the board. Do not hand-edit the
+  slice or validate inline.
 
 ### Rollup rule (feature `done` is derived, then persisted)
 For a sliced feature the coordinator **derives** the feature's status from its slices
@@ -154,7 +166,7 @@ rather than declaring `done` by fiat — but it **does persist** the derived res
 - A feature becomes `done` **only when every slice is `done` and `merged`** **and** the
   feature-level integration check (`verification.integration_command`) has passed.
 - **When those conditions hold, the coordinator writes the derived `done` onto the
-  feature** (`set_feature_status`) and re-validates. This persistence is required:
+  feature** through `tasks-lock.py set-status <feature-id> done`. This persistence is required:
   feature-level `next()` gates `depends_on` on the *stored* feature status, so a
   dependent feature (e.g. `E03-F02` depends_on `E03-F01`) stays blocked until the
   upstream feature's `done` is actually written.
@@ -172,7 +184,8 @@ Beside the sliced-feature rollup above — and **additively**, not inside it —
 "derive, then persist" discipline rolls an **epic** up. **When every feature of an epic is
 `done`, the epic's `done` status is derived and persisted** by the Orchestrator (the owner
 of `set_status`): it derives `done` from the fact that **all features are `done`**, writes it
-onto the epic, and **re-validates** `state/tasks.json` against `store/tasks.schema.json`. This
+onto the epic through `tasks-lock.py set-status <epic-id> done`. The helper performs
+the validation before persisting. This
 mirrors the feature rollup exactly — `done` is never set by fiat while any feature is still
 open, but it **is persisted** once every feature is `done`. This introduces **no new status
 value** and **no schema change**: `done` is already an epic-enum value (`store/tasks.schema.json`).

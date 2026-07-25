@@ -22,12 +22,13 @@ single epic-level approval — and you must **never spec**.
 1. Take a required `<epic-id>` and read the target `draft` epic plus F02's durable
    design artifacts as inputs.
 2. Run a short, **adaptive** Q&A to settle the feature breakdown.
-3. **Seed** `pending` feature entries into the epic's `features` array (ids, one-line
-   intents, `depends_on`), fill the epic's `epic.md` feature table, and write a
-   per-feature inbox brief under `progress/inbox/`.
+3. **Seed under the board lock** `pending` feature entries into the epic's
+   `features` array (ids, one-line intents, `depends_on`), fill the epic's
+   `epic.md` feature table, and write a per-feature inbox brief under
+   `progress/inbox/`.
 4. **Append** any per-epic **ADR deltas** the decomposition forces at
    `specs/adr/NNNN-<title>.md` (F02's convention).
-5. **Re-validate** `state/tasks.json` against `store/tasks.schema.json`.
+5. Confirm the guarded helper's built-in parse + schema validation passed.
 6. End in **exactly one** epic-level human decision: *approve* (flip the epic
    `draft → planned` and stamp `autonomous: true` on every seeded feature) or *keep gated*
    (flip the epic `draft → planned`, leave every seeded feature `autonomous: false`).
@@ -95,6 +96,19 @@ Read the epic's current `features` first. Then write each new feature into that 
 - **Append** new features to the epic's `features` array; existing features are **never**
   reordered or renumbered.
 
+Persist the feature block as one structural mutation: prepare a temporary Python
+mutator exposing `mutate(data) -> data`, re-resolve the target epic and recompute
+the max `F##` from the fresh `data` passed to it, then run:
+
+```sh
+# installed layout; use tools/tasks-lock.py in this source repository
+python3 .harness/tools/tasks-lock.py apply --mutator <temporary-mutator.py>
+```
+
+The helper locks, re-reads, validates, and atomically replaces the board. Do not
+hand-edit `state/tasks.json` or persist ids derived only from the earlier unlocked
+read.
+
 ## Fill the epic.md feature table (R8)
 
 Fill that epic's `specs/epics/<id>-<slug>/epic.md` **feature table** with **one row per**
@@ -138,31 +152,20 @@ Apply any advisory findings inline, then proceed. If the critic invocation error
 times out, proceed best-effort and append a note to `progress/<run>/` recording the
 skipped or failed review.
 
-## Re-validate before claiming success (R10)
+## Validate before claiming success (R10)
 
-After seeding, appending ADR deltas, and running the doc-critic checkpoint, you MUST
-**re-validate** `state/tasks.json` against `store/tasks.schema.json` via the
-zero-dependency path (the same validation `init.sh` performs):
+After seeding, appending ADR deltas, and running the doc-critic checkpoint, the
+guarded `apply --mutator` call must have succeeded. It validates JSON plus
+`store/tasks.schema.json` before replacing the board; the helper **re-validates**
+the guarded result, which is the required
+**re-validation after seeding**. If it exits non-zero, report the failure and do
+not claim a successful drill. The helper leaves the original board intact; surface
+the error and stop.
 
-```sh
-python3 -c "import json; json.load(open('state/tasks.json'))"
-```
-
-plus a schema check against `store/tasks.schema.json`. **If** validation **fails**,
-**then** you MUST **report the failure** and you **must not claim a successful drill** —
-you must not leave an invalid TaskStore behind as a success. Fix or revert your edit,
-surface the error, and stop. A failed validation is never a success.
-
-**Re-validation runs both after seeding AND after the approval mutation.** R10's coverage
-does not end at seeding: the approval-branch mutation below (the epic `draft → planned`
-state flip and the `autonomous` stamping) is the **last** edit to `state/tasks.json`, so
-you MUST re-validate `state/tasks.json` against `store/tasks.schema.json` again — via the
-same zero-dependency path — **after** performing that mutation. This **final**
-post-mutation validation is the one that gates the completion report. If the post-mutation
-re-validation **fails** (a malformed state flip or `autonomous` stamp), you **must not
-claim a successful drill**: fix or revert the mutation, surface the error, and stop. A
-successful drill requires that the re-validation **after** the state flip/stamp passes,
-not only the re-validation after seeding.
+R10 covers both the guarded seed and the approval writes below. Every helper call
+performs validation before its atomic replace; the last successful helper call gates
+the completion report. This is also the required **re-validation after the approval mutation**
+(the autonomous stamp and epic state flip).
 
 ## The single epic-level human gate (R15)
 
@@ -179,6 +182,17 @@ status `draft → planned` and stamp `autonomous: true` on **every** feature you
 that epic — **all-or-nothing**, all features, no per-feature subset. The existing loop
 then runs end-to-end with no per-feature gate.
 
+The `autonomous` stamp is a structural mutation: apply it with a temporary mutator
+through `tasks-lock.py apply --mutator`, re-resolving the target epic inside
+`mutate(data)`. After that succeeds, perform the epic status transition through the
+status-specific path:
+
+```sh
+python3 .harness/tools/tasks-lock.py set-status <epic-id> planned
+```
+
+Use `tools/tasks-lock.py` for both commands in this source repository.
+
 ### Keep-gated branch (R14, D4, D6)
 
 When the human chooses **keep gated**, you flip that **epic**'s status `draft → planned`
@@ -189,10 +203,10 @@ surprising and would falsely re-gate it; `planned` + gated features is the faith
 "drilled but I still want to review each spec" state. Stamping is all-or-nothing: on keep
 gated **every** seeded feature stays `autonomous: false`.
 
-After **either** approval branch mutates `state/tasks.json` (the `draft → planned` flip
-and the `autonomous` stamp), you MUST **re-validate** `state/tasks.json` against
-`store/tasks.schema.json` again (R10, the same zero-dependency path) before reporting.
-You must **not claim a successful drill** if that post-mutation validation fails.
+For keep-gated, the seeded features already carry `autonomous: false`; do not
+hand-edit them. For **either** branch, perform the epic `draft → planned` transition
+with `tasks-lock.py set-status` as shown above. Each command validates before
+persisting. Do not claim a successful drill if any guarded write fails.
 
 ## What you NEVER do (guardrails)
 
