@@ -121,6 +121,22 @@ All notable changes to the harness body are recorded here. Versions follow
   toplevel) with a real linked `git worktree`, asserting the transition lands on the MAIN board and
   contends on the MAIN `state/tasks.json.lock`; it fails against the old `dirname(self_dir)` cwd and
   passes after the fix.
+- **`init.sh` rejects installs that can't run the lock helper (Codex #46 r6 P1, id 3649368481).**
+  Since this feature makes `python3 tools/tasks-lock.py` the **mandatory** `set_status` write path,
+  a python3-less install that previously warned-and-continued (`⚠️ python3 not found — skipping …`)
+  would report "environment ready" yet fail on the first Orchestrator transition with
+  `python3: not found`. The local-backend gate now **hard-fails** (non-zero, clear message) when
+  `python3` is absent, and additionally verifies the stdlib **`fcntl`** module the lock helper needs
+  is importable — so an unsupported interpreter is caught at `init.sh` time, not mid-transition.
+  `tests/test_board_lock.sh` gains a case that runs `init.sh` under a python3-less `PATH` and asserts
+  the non-zero exit with a message naming python3 and the reason.
+- **Preserve the TaskStore file mode across the atomic replace (Codex #46 r6 P2, id 3649368484).**
+  The guarded write created a fresh temp file (per the process umask) and `os.replace`d it in, which
+  reset the board's permission bits — silently widening a `0600` board to `0644` (exposing data) or
+  narrowing a shared `0664` board (breaking another account's later writes). The helper now copies
+  the original board's mode (`stat.S_IMODE(os.stat(board).st_mode)`) onto the temp file **inside the
+  lock, before the replace**, preserving fail-stop semantics. `tests/test_board_lock.sh` asserts a
+  `0600` board stays `0600` and a `0664` board stays `0664` across a `set-status`.
 
 ## [0.30.0] — 2026-07-10
 

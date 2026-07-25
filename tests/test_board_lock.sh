@@ -848,4 +848,85 @@ _ndiff="$(diff "$T/before.json" "$T/state/tasks.json" | grep -cE '^[<>]')"
 rm -rf "$T"
 pass "R13struct status located structurally by id (status-before-id board transitions the CORRECT object)"
 
-echo "PASS: test_board_lock.sh (R1-R9, R10a/R10b, R11, R12/R12b, R13, R12wt, R13struct)"
+# ── R14py3: init.sh HARD-fails (non-zero, clear msg) when python3 is absent ────
+# test_init_requires_python3  (Codex #46 r6 P1, id 3649368481)
+# Since E15-F01 the ONLY supported set_status write path is
+# `python3 tools/tasks-lock.py`, so a python3-less install must NOT report
+# "environment ready" (it would fail on the first Orchestrator transition with
+# `python3: not found`). init.sh's old warn-and-continue is now a hard fail.
+# We build a sandboxed harness copy and run init.sh under a PATH that provides
+# the ordinary shell tools but OMITS python3 (a shim dir that symlinks the
+# needed binaries and deliberately does not expose python3).
+SBX="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+for p in init.sh AGENTS.md harness.config.yaml agents specs progress store tools; do
+  cp -R "$ROOT/$p" "$SBX/" 2>/dev/null || true
+done
+mkdir -p "$SBX/state"
+cp "$ROOT/state/tasks.json" "$SBX/state/tasks.json" 2>/dev/null \
+  || make_fixture "$SBX"   # any valid board; the run must fail BEFORE validating it
+# Build a PATH shim that has the usual tools but NO python3/python. Only symlink
+# resolved ABSOLUTE paths (a `command -v` that resolves to a shell builtin/alias
+# must not be symlinked as a bogus self-referential link).
+SHIM="$SBX/shimbin"
+mkdir -p "$SHIM"
+for tool in sh bash dirname pwd grep sed cat command test head env true false mktemp; do
+  _tp="$(command -v "$tool" 2>/dev/null || true)"
+  case "$_tp" in
+    /*) ln -sf "$_tp" "$SHIM/$tool" 2>/dev/null || true ;;
+  esac
+done
+# Sanity: grep must still resolve (so the shim is usable) AND python3 must NOT be
+# reachable via the shim-only PATH; otherwise we cannot construct the scenario.
+# Probe in a FRESH subshell (`env -i sh -c`): the current shell may have HASHED
+# python3's absolute path from earlier tests, so a same-shell `command -v` would
+# report a false positive regardless of PATH. init.sh runs in its own subshell
+# and thus sees the true (python3-less) resolution, which is what we assert here.
+if ! env -i PATH="$SHIM" sh -c 'command -v grep' >/dev/null 2>&1 \
+   || env -i PATH="$SHIM" sh -c 'command -v python3' >/dev/null 2>&1; then
+  # Some environments expose python3 from a builtins dir we can't exclude; skip.
+  rm -rf "$SBX"
+  pass "R14py3 (skipped: cannot construct a python3-less PATH in this environment)"
+else
+  _out="$SBX/init.out"
+  # Run init.sh in a scrubbed environment (`env -i`) so NO inherited command hash
+  # or leaked PATH lets it find a python3 the shim omits — it must resolve exactly
+  # the python3-less PATH we hand it and hard-fail.
+  if ( cd "$SBX" && env -i PATH="$SHIM" HOME="$SBX" sh ./init.sh ) >"$_out" 2>&1; then
+    cat "$_out" >&2
+    rm -rf "$SBX"
+    fail "R14py3: init.sh reported success with python3 absent (must hard-fail — the mandatory lock helper needs python3)"
+  fi
+  grep -qi 'python3' "$_out" \
+    || { cat "$_out" >&2; rm -rf "$SBX"; fail "R14py3: init.sh failure message does not name python3"; }
+  grep -qiE 'requir|mandat|lock|validation' "$_out" \
+    || { cat "$_out" >&2; rm -rf "$SBX"; fail "R14py3: init.sh failure message does not explain why python3 is required"; }
+  rm -rf "$SBX"
+  pass "R14py3 init.sh hard-fails with a clear message when python3 is absent (mandatory lock helper)"
+fi
+
+# ── R14mode: TaskStore file mode is preserved across the atomic replace ────────
+# test_mode_preserved_across_replace  (Codex #46 r6 P2, id 3649368484)
+# The write creates a temp file (per umask) then os.replace's it in. Without
+# copying the original mode onto the temp file, a 0600 board silently becomes
+# 0644 (exposing data) and a 0664 shared board narrows (breaking another
+# account's writes). The helper must copy the original board's permission bits
+# onto the temp file before the replace, inside the lock.
+mode_of() { python3 -c "import os,stat,sys;print('%o' % stat.S_IMODE(os.stat(sys.argv[1]).st_mode))" "$1"; }
+for _m in 600 664; do
+  T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+  make_fixture "$T"
+  chmod "$_m" "$T/state/tasks.json"
+  _before="$(mode_of "$T/state/tasks.json")"
+  [ "$_before" = "$_m" ] || fail "R14mode: could not set fixture board to $_m (got $_before)"
+  HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 in-review \
+    || fail "R14mode: set-status on a $_m board failed"
+  _after="$(mode_of "$T/state/tasks.json")"
+  [ "$_after" = "$_m" ] \
+    || fail "R14mode: board mode changed across the atomic replace ($_m -> $_after) — temp-file mode not copied"
+  [ "$(status_of "$T/state/tasks.json" E01-F01)" = "in-review" ] \
+    || fail "R14mode: the transition did not apply on the $_m board"
+  rm -rf "$T"
+done
+pass "R14mode board file mode (0600 / 0664) preserved across the atomic os.replace"
+
+echo "PASS: test_board_lock.sh (R1-R9, R10a/R10b, R11, R12/R12b, R13, R12wt, R13struct, R14py3, R14mode)"

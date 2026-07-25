@@ -65,6 +65,7 @@ import json
 import math
 import os
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -445,6 +446,15 @@ def run(transform, timeout):
                     out.write(serialized)
                     out.flush()
                     os.fsync(out.fileno())
+                # Preserve the board's permission bits across the replace: a
+                # fresh temp file is created per the process umask (e.g. 0644),
+                # so os.replace would otherwise silently widen a 0600 board to
+                # 0644 (exposing data) or narrow a shared 0664 board (breaking
+                # another account's later writes). Copy the ORIGINAL board's
+                # mode onto the temp file before the replace, inside the lock,
+                # preserving fail-stop semantics.
+                if os.path.exists(tasks_path):
+                    os.chmod(tmp_path, stat.S_IMODE(os.stat(tasks_path).st_mode))
                 os.replace(tmp_path, tasks_path)
             except Exception:
                 try:

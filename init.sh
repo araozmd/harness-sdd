@@ -41,22 +41,30 @@ ok "harness structure intact"
 if grep -q "tasks: local" harness.config.yaml 2>/dev/null; then
   [ -f state/tasks.json ]          || fail "state/tasks.json missing (local TaskStore)"
   [ -f store/tasks.schema.json ]   || fail "store/tasks.schema.json missing (cannot validate TaskStore)"
-  if command -v python3 >/dev/null 2>&1; then
-    # The validation logic lives in ONE canonical place — tools/validate-board.py —
-    # shared verbatim with the guarded write path (tasks-lock.py imports its
-    # validate()). It prefers jsonschema.Draft7Validator when importable and
-    # otherwise runs the complete zero-dependency structural check, so init.sh
-    # stays zero-dependency while accepting/rejecting exactly what the write lock
-    # does. Same stderr contract as before (draft warning, then two-space-prefixed
-    # errors) and non-zero on invalid.
-    python3 tools/validate-board.py state/tasks.json store/tasks.schema.json \
-      || fail "state/tasks.json failed schema validation (see errors above)"
-    ok "TaskStore (local) valid against schema"
-  else
-    # The local backend is zero-dependency: a missing python3 must not block the
-    # gate. We can't validate the schema here, so warn loudly and continue.
-    echo "⚠️  python3 not found — skipping TaskStore schema validation (install python3 to enable it)" >&2
-  fi
+  # python3 is a HARD prerequisite for the local backend, not optional. Since
+  # E15-F01 the ONLY supported `set_status` write path is the flock-guarded
+  # `python3 tools/tasks-lock.py`, and schema validation runs the same
+  # `python3 tools/validate-board.py`. A python3-less install would look "ready"
+  # here yet fail on the very first Orchestrator transition with
+  # `python3: not found`, so we fail-stop now with a clear message rather than
+  # warn-and-continue.
+  command -v python3 >/dev/null 2>&1 \
+    || fail "python3 not found — REQUIRED for TaskStore schema validation and the mandatory board write lock (tools/tasks-lock.py). Install python3 and re-run."
+  # The lock helper depends on stdlib fcntl.flock; it is stdlib on every Unix
+  # target but verify it is importable so a broken/stripped interpreter fails
+  # clearly HERE, not mid-transition.
+  python3 -c "import fcntl" 2>/dev/null \
+    || fail "python3 lacks the stdlib 'fcntl' module — REQUIRED for the board write lock (tools/tasks-lock.py). Use a Unix python3 with fcntl support."
+  # The validation logic lives in ONE canonical place — tools/validate-board.py —
+  # shared verbatim with the guarded write path (tasks-lock.py imports its
+  # validate()). It prefers jsonschema.Draft7Validator when importable and
+  # otherwise runs the complete zero-dependency structural check, so init.sh
+  # stays zero-dependency while accepting/rejecting exactly what the write lock
+  # does. Same stderr contract as before (draft warning, then two-space-prefixed
+  # errors) and non-zero on invalid.
+  python3 tools/validate-board.py state/tasks.json store/tasks.schema.json \
+    || fail "state/tasks.json failed schema validation (see errors above)"
+  ok "TaskStore (local) valid against schema"
 fi
 
 # 2b. Umbrella mode (additive, opt-in). Engaged ONLY when harness.config.yaml has a
