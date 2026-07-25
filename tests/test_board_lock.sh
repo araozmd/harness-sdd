@@ -1238,4 +1238,39 @@ for _m in 600 664; do
 done
 pass "R14mode board file mode (0600 / 0664) preserved across the atomic os.replace"
 
-echo "PASS: test_board_lock.sh (R1-R9, R10a/R10b, R11, R12/R12b, R13, R12wt, R12src, R12sgd, R13struct, R14py3, R14mode)"
+# ── R1 contracts: every documented board mutation uses the lock helper ───────
+# test_role_and_store_contracts_route_all_board_writes_through_lock_helper
+# These are static regression checks because the role files and local backend are
+# executable contracts: agents follow the commands written there. A passing helper
+# suite is insufficient if an invoked role still tells an agent to hand-edit the
+# board and run the obsolete inline json.load validation afterward.
+require_locked_apply_contract() {
+  _contract="$1"
+  grep -qF 'tasks-lock.py apply --mutator' "$ROOT/$_contract" \
+    || fail "R1 contract: $_contract does not route structural board writes through apply --mutator"
+  if grep -qF 'python3 -c "import json; json.load(open('\''state/tasks.json'\''))"' "$ROOT/$_contract"; then
+    fail "R1 contract: $_contract still prescribes obsolete inline tasks.json validation"
+  fi
+}
+
+for _contract in \
+  agents/inception.md \
+  agents/fixer.md \
+  agents/planner.md \
+  agents/driller.md
+do
+  require_locked_apply_contract "$_contract"
+done
+
+grep -qF 'set_slice_status(feature, slice_id, status)' "$ROOT/store/local.md" \
+  || fail "R1 contract: store/local.md lost the slice mutation contract"
+grep -qF 'tasks-lock.py apply --mutator' "$ROOT/store/local.md" \
+  || fail "R1 contract: store/local.md does not lock structural slice mutations"
+grep -qF 'tasks-lock.py set-status <id> <status>' "$ROOT/store/local.md" \
+  || fail "R1 contract: store/local.md no longer keeps status transitions on set-status"
+if grep -qF 'edit the slice in place, then re-validate' "$ROOT/store/local.md"; then
+  fail "R1 contract: store/local.md still prescribes an unlocked slice hand-edit"
+fi
+pass "R1 role/store contracts route structural board writes through apply --mutator and status writes through set-status"
+
+echo "PASS: test_board_lock.sh (R1-R9, R10a/R10b, R11, R12/R12b, R13, R12wt, R12src, R12sgd, R13struct, R14py3, R14mode, role/store contracts)"

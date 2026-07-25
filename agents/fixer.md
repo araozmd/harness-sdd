@@ -29,8 +29,8 @@ heavier altitude and **never** touch any epic other than the reserved maintenanc
 4. **Seed** one `sdd: false` fix feature into `E99`'s `features` array, stamped
    `autonomous: true` by default (a `--gated` opt-out stamps `autonomous: false`), plus
    **exactly one** fix-oriented inbox brief.
-5. **Re-validate** `state/tasks.json` against `store/tasks.schema.json`; fail-stop on
-   error.
+5. Confirm each guarded board mutation's built-in parse + schema validation passed;
+   fail-stop on error.
 6. **Hand the seeded fix off** to the existing `sdd: false → Builder → Reviewer` loop
    **in-session** — you do not stop at seeding.
 
@@ -146,20 +146,27 @@ You must **NEVER**:
 This is the same **seeds-never-specs** guardrail as Inception / Planner / Driller: a fix
 is **brief-only, never a spec**.
 
-## Re-validate before claiming success (R11)
+## Persist and validate under the board lock (R11)
 
-After **each write** — the epic create **and** the fix append — you MUST **re-validate**
-`state/tasks.json` against `store/tasks.schema.json` via the zero-dependency path (the
-same validation `init.sh` performs):
+Express the epic create (when needed) and fix append as temporary Python mutators,
+each exposing `mutate(data) -> data`, and execute each structural mutation through
+the sole supported board-write path:
 
 ```sh
-python3 -c "import json; json.load(open('state/tasks.json'))"
+# installed layout; use tools/tasks-lock.py in this source repository
+python3 .harness/tools/tasks-lock.py apply --mutator <temporary-mutator.py>
 ```
 
-plus a schema check against `store/tasks.schema.json`. **If** validation **fails**,
-**then** you MUST **report the failure** and you **must not claim a successful seed** —
-you must not leave an invalid TaskStore behind as a success. Fix or revert your edit,
-surface the error, and stop. A failed validation is never a success.
+Each mutator MUST re-check `E99` and allocate the next feature id from the fresh
+board passed to `mutate`; do not persist structure derived only from an unlocked
+read. The helper locks, re-reads, validates JSON plus the schema, and atomically
+replaces the board. The helper **re-validates** after each guarded write; this is
+the required **re-validation after
+each write**. Do not hand-edit `state/tasks.json`.
+
+**If** either helper call exits non-zero, **then** report the failure and do not
+claim a successful seed. The helper leaves the original board intact; surface the
+error and stop. A failed guarded write is never a success.
 
 ## Hand off to the existing loop, in-session (R14)
 

@@ -18,9 +18,9 @@ You **seed; you never spec.**
    and any forks in the shape (presenting at most 3 text-only options).
 3. **Triage** the idea to exactly one altitude (see below).
 4. **Allocate** a next-sequential id within that scope.
-5. **Write** a `pending` feature entry into `state/tasks.json` (and, for a new epic,
+5. **Persist under the board lock** a `pending` feature entry (and, for a new epic,
    the epic entry + `epic.md` + a first `F01`).
-6. **Re-validate** `state/tasks.json` against `store/tasks.schema.json`.
+6. Confirm the guarded helper's built-in parse + schema validation passed.
 7. **Write** the intent brief at `progress/inbox/<feature-id>.md`.
 8. **Report** the new id, the entry, the brief path, and that `/sdd-next` is next.
 
@@ -79,10 +79,10 @@ If the altitude is ambiguous, ask the human in the Q&A rather than guessing.
 - The `id` strings must match the schema patterns: `^E[0-9]+$` for epics,
   `^E[0-9]+-F[0-9]+$` for features.
 
-## Write the TaskStore entry (R3)
+## Write the TaskStore entry under the board lock (R3)
 
-Write a `pending` **feature** entry into `state/tasks.json` carrying exactly these
-fields:
+Prepare a temporary Python mutator exposing `mutate(data) -> data` that appends a
+`pending` **feature** entry carrying exactly these fields:
 
 | Field | Value |
 |---|---|
@@ -99,20 +99,27 @@ For a **new epic** (altitude 3), also write the epic entry with `id` (`^E[0-9]+$
 entry above; and create `specs/epics/<epic-slug>/epic.md` (problem/success-criteria
 prose only — no spec/EARS). (R9)
 
-## Re-validate before claiming success (R6, R7)
-
-After writing `state/tasks.json`, you MUST re-validate it against the schema before
-reporting completion. Reuse the zero-dependency check from `store/local.md`:
+The mutator MUST re-check the chosen epic and next-sequential id against the fresh
+`data` it receives; do not persist an id derived only from the earlier unlocked read.
+Run that structural mutation through the sole supported board-write path:
 
 ```sh
-python3 -c "import json; json.load(open('state/tasks.json'))"
+# installed layout; use tools/tasks-lock.py in this source repository
+python3 .harness/tools/tasks-lock.py apply --mutator <temporary-mutator.py>
 ```
 
-and a schema check against `store/tasks.schema.json` (the same validation `init.sh`
-performs). If the validation **fails**, you MUST report the failure and **must not**
-claim a successful seed — do not leave an invalid TaskStore behind as a "done"
-result. Fix or revert your edit, surface the error, and stop. A failed validation is
-never a success.
+The helper acquires the board lock, re-reads `state/tasks.json` inside it, applies
+the mutation, validates JSON plus `store/tasks.schema.json`, and atomically replaces
+the board. Do not hand-edit `state/tasks.json`.
+
+## Validate before claiming success (R6, R7)
+
+The guarded `apply --mutator` command performs the same parse + schema validation
+as `init.sh` before replacing the board. If it exits non-zero, you MUST report the
+failure and **must not claim a successful seed** — do not leave an invalid
+TaskStore behind as a "done"
+result. Surface the error and stop; the helper leaves the original board intact.
+A failed guarded write is never a success.
 
 ## Write the intent brief (R4, R5)
 
