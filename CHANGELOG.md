@@ -174,6 +174,28 @@ All notable changes to the harness body are recorded here. Versions follow
   checkout runs `set-status` with **no** `HARNESS_DIR` and must succeed and transition its own board
   (fails on the old parent-comparison logic, passes on the git-dir-vs-common-dir logic); the R12sgd
   linked-worktree loud-fail and the R12wt/R12src worktree cases stay green.
+- **Common-dir remapping is now reserved for genuine linked worktrees (Codex #46 r8 P1, id
+  3649460575).** `_canonical_harness_dir()` ran the `--git-common-dir` → main-worktree-root remap
+  unconditionally, including for **PRIMARY** checkouts. In a primary made with
+  `git init --separate-git-dir`, the parent of the (external) metadata dir is an **unrelated**
+  directory — and if that directory happened to hold another harness board, the
+  board-existence check ACCEPTED it as canonical, so `set-status` silently mutated that unrelated
+  board while the real checkout stayed stale (reproduced: checkout still `pending`, metadata-parent
+  board flipped to `in-progress`). A primary checkout already **is** the main working tree and has
+  nothing to remap, so the remap is now gated on `_in_linked_worktree()`: primaries always
+  self-locate, and common-dir remapping applies only to a genuine linked worktree. Cross-worktree
+  canonical resolution (R12wt/R12src), the separate-git-dir linked loud-fail (R12sgd) and the
+  separate-git-dir primary serial path (R12sgdp) are unchanged. `tests/test_board_lock.sh` gains
+  **R12sgdx**: a `separate-git-dir` primary whose metadata dir sits **inside a decoy harness dir
+  with its own board** must transition its OWN board and leave the decoy byte-unchanged with no
+  lockfile created there (fails on unconditional remapping, passes once gated).
+- **`python3` documented as a local-backend prerequisite in `AGENTS.md` (Codex #46 r8 P2, id
+  3649460576).** The r6 P1 turned `init.sh`'s python3 check from warn-and-continue into a hard
+  fail, which — because rule 1 halts all work on a non-zero `init.sh` — makes python3 a
+  prerequisite for *any* harness work on the local backend, not just for locked status writes. The
+  breaking dependency change was recorded here but not on the entrypoint agents actually read;
+  `AGENTS.md` rule 1 now states the `python3` + stdlib `fcntl` requirement, when it became
+  mandatory, and the remedy.
 
 ## [0.30.0] — 2026-07-10
 

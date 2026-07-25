@@ -35,14 +35,19 @@
 #       precedence). The /sdd-fix-parallel coordinator (F03) sets this to the
 #       canonical main harness directory for every worktree worker, which makes
 #       ALL git layouts correct regardless of what auto-discovery can recover.
-#   (2) else, best-effort auto-discovery for the STANDARD `.git` worktree layout:
-#       a linked worktree's `git rev-parse --git-common-dir` points at the MAIN
-#       repo's `.git` dir, so its parent is the main worktree root. We ACCEPT this
-#       canonical root ONLY IF the board actually exists there
-#       (`<canonical>/state/tasks.json`). Every worker, in any standard-layout
-#       worktree, then reads/writes the SAME state/tasks.json and contends on the
-#       SAME state/tasks.json.lock inode, so the no-lost-update guarantee (R1)
-#       holds across worktrees, not just within one directory.
+#   (2) else, IF AND ONLY IF we are inside a genuine LINKED worktree (`git
+#       rev-parse --git-dir` != `--git-common-dir`), best-effort auto-discovery for
+#       the STANDARD `.git` worktree layout: a linked worktree's
+#       `git rev-parse --git-common-dir` points at the MAIN repo's `.git` dir, so
+#       its parent is the main worktree root. We ACCEPT this canonical root ONLY IF
+#       the board actually exists there (`<canonical>/state/tasks.json`). Every
+#       worker, in any standard-layout worktree, then reads/writes the SAME
+#       state/tasks.json and contends on the SAME state/tasks.json.lock inode, so
+#       the no-lost-update guarantee (R1) holds across worktrees, not just within
+#       one directory. A PRIMARY checkout is NEVER remapped — it already IS the
+#       main working tree, and under `git init --separate-git-dir`/submodules the
+#       parent of its (external) common dir is an unrelated directory that could
+#       otherwise be mistaken for the main worktree and silently written.
 #   (3) else, decide by whether we are inside a LINKED git worktree:
 #       - IF inside a linked worktree (a parallel-fix worker) but auto-discovery
 #         did NOT yield an existing canonical board — as happens under exotic
@@ -184,17 +189,30 @@ def _in_linked_worktree():
 def _canonical_harness_dir():
     """Map the self-located harness dir onto the MAIN worktree root (R12).
 
+    Applies ONLY inside a genuine LINKED worktree. A PRIMARY checkout already IS
+    the main working tree, so it must self-locate: under
+    `git init --separate-git-dir` (and submodule primaries) the common `.git` dir
+    lives outside the checkout, and its parent is an unrelated directory — if that
+    directory happened to hold another harness board, remapping would silently
+    write the WRONG board. Gating on `_in_linked_worktree()` removes that class of
+    mis-resolution entirely.
+
     Returns the canonical board root in the main working tree ONLY when that
     board actually exists there (`<canonical>/state/tasks.json`); otherwise None
-    (the helper is not inside a standard git worktree, git is unavailable, the
-    layout is unexpected/exotic, or the resolved main root carries no board) — in
-    which case the caller applies the case-3 fail-safe decision.
+    (not a linked worktree, git is unavailable, the layout is unexpected/exotic,
+    or the resolved main root carries no board) — in which case the caller applies
+    the case-3 fail-safe decision.
 
     The main worktree root is the parent of the common `.git` dir that a linked
     worktree's `git rev-parse --git-common-dir` reports. We then preserve the
     source-vs-installed layout by re-applying the helper's harness subpath
     (relative to the CURRENT worktree toplevel) under that main root.
     """
+    # PRIMARY checkouts (colocated, separate-git-dir, submodule) self-locate: the
+    # checkout IS the main worktree, so there is nothing to remap and the parent
+    # of a separate common dir must never be mistaken for a main worktree root.
+    if not _in_linked_worktree():
+        return None
     # realpath everywhere: git reports fully symlink-resolved paths (e.g. macOS
     # /var → /private/var), while self_dir comes from __file__; normalising both
     # sides makes the relpath subtraction below correct despite symlinked temp

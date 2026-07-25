@@ -15,6 +15,8 @@
 #   R11 VERSION advanced (a MINOR bump, compared not frozen) + CHANGELOG entry
 #   R12sgd separate-git-dir linked worktree fails SAFE (loud) without HARNESS_DIR;
 #          the F03 coordinator's explicit HARNESS_DIR override lands on the main board
+#   R12sgdx a separate-git-dir PRIMARY self-locates — an unrelated board sitting
+#          beside its metadata dir is never resolved as canonical, never written
 #
 # Constraints (permanent-suite anti-pattern): never freeze the exact VERSION
 # literal, never diff DO-NOT-TOUCH files against main, never touch the live
@@ -939,6 +941,64 @@ else
       || fail "R12sgdp: second serial transition did not persist on the primary board"
     rm -rf "$T"
     pass "R12sgdp separate-git-dir PRIMARY is NOT a linked worktree → serial set-status works with no HARNESS_DIR"
+  fi
+fi
+
+# ── R12sgdx: separate-git-dir PRIMARY never writes a board beside its git dir ──
+# test_separate_git_dir_primary_ignores_metadata_parent_board (Codex #46 r8 P1, id 3649460575)
+# For a PRIMARY checkout created with `git init --separate-git-dir`, the parent of
+# the common `.git` (metadata) dir is NOT the main worktree — it is an unrelated
+# directory. If auto-discovery remaps onto it and that directory HAPPENS to hold
+# another harness board, the board-existence check accepts it and `set-status`
+# silently mutates the WRONG board while the real checkout stays stale. A primary
+# checkout must SELF-LOCATE; common-dir remapping is reserved for genuine linked
+# worktrees. Fixture: put the separate git dir INSIDE a decoy harness dir that has
+# its own state/tasks.json, then assert the write lands on the checkout's board and
+# the decoy is byte-unchanged. FAILS on unconditional remapping; PASSES once
+# _canonical_harness_dir() is gated on _in_linked_worktree().
+if ! git --version >/dev/null 2>&1; then
+  pass "R12sgdx (skipped: git unavailable)"
+else
+  T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+  MAIN="$T/main"
+  DECOY="$T/decoy"
+  GITDIR="$DECOY/gitdir"   # ⇒ dirname(common dir) == $DECOY, which owns a board
+  make_fixture "$MAIN"
+  mkdir -p "$MAIN/tools"
+  cp "$HELPER" "$MAIN/tools/tasks-lock.py"
+  cp "$VALIDATOR" "$MAIN/tools/validate-board.py"
+  # The DECOY is a complete, valid harness dir sitting beside the metadata dir —
+  # exactly what makes the existence check wrongly accept it.
+  make_fixture "$DECOY"
+  if ! git init -q --separate-git-dir="$GITDIR" "$MAIN" 2>/dev/null; then
+    rm -rf "$T"
+    pass "R12sgdx (skipped: git init --separate-git-dir unsupported here)"
+  else
+    ( cd "$MAIN" \
+        && git config user.email t@t.com \
+        && git config user.name t \
+        && git add -A \
+        && git commit -qm init ) \
+      || fail "R12sgdx: could not commit the separate-git-dir primary fixture"
+    # Sanity: the metadata dir's parent really is the decoy board dir (the trap).
+    _cmn="$( cd "$MAIN/tools" && python3 -c "import os,subprocess as s;print(os.path.realpath(os.path.join(os.getcwd(),s.run(['git','rev-parse','--git-common-dir'],stdout=s.PIPE).stdout.decode().strip())))" )"
+    [ -f "$(dirname "$_cmn")/state/tasks.json" ] \
+      || fail "R12sgdx: fixture did not place a decoy board beside the separate git dir (not exercising the bug)"
+    cp "$DECOY/state/tasks.json" "$T/decoy-before.json"
+    ( cd "$MAIN" && env -u HARNESS_DIR python3 "$MAIN/tools/tasks-lock.py" \
+        set-status E01-F01 in-progress ) 2>"$T/sgdxerr.txt" \
+      || { cat "$T/sgdxerr.txt" >&2; fail "R12sgdx: serial set-status from a separate-git-dir PRIMARY failed"; }
+    # the checkout's OWN board transitioned …
+    [ "$(status_of "$MAIN/state/tasks.json" E01-F01)" = "in-progress" ] \
+      || fail "R12sgdx: the primary checkout's own board was NOT transitioned (write went elsewhere)"
+    # … and the unrelated board beside the metadata dir is byte-unchanged.
+    cmp -s "$T/decoy-before.json" "$DECOY/state/tasks.json" \
+      || fail "R12sgdx: the UNRELATED board beside the separate git dir was mutated (metadata-parent remap bug)"
+    # No lockfile was created in the decoy either (proves it was never the target).
+    [ ! -f "$DECOY/state/tasks.json.lock" ] \
+      || fail "R12sgdx: the lock was taken on the unrelated board beside the separate git dir"
+    rm -rf "$T"
+    pass "R12sgdx separate-git-dir PRIMARY self-locates (unrelated board beside the metadata dir untouched)"
   fi
 fi
 

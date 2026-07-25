@@ -24,6 +24,10 @@ Inception ─► Orchestrator → Architect → Builder → Reviewer    (Scout a
 
 1. **Run `./init.sh` before any work.** If it exits non-zero, STOP. Do not "fix and
    continue" — a broken environment means hallucinated work. Report and halt.
+   The local backend requires **`python3` with the stdlib `fcntl` module** — since
+   `v0.31.0` the only supported board write path is the lock helper
+   `python3 tools/tasks-lock.py`, so `init.sh` hard-fails (rather than warning)
+   when it is missing. Install python3 or point the harness at another backend.
 2. **Memory lives in files, not in your context.** Read only what you need. Write
    what you did to `progress/`. Never carry another agent's chat history.
 3. **A task is `done` only when the Reviewer verifies it** — tests pass via
