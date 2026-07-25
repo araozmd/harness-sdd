@@ -12,7 +12,10 @@ The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, 
    environment.
 2. Read `harness.config.yaml` and the TaskStore (`state/tasks.json`, per `store/local.md`).
 3. Run a short, **adaptive** Q&A with the human to settle the fix's shape: what's broken,
-   the intended fix, and how to verify. Where the shape forks, offer **at most 3** options
+   the intended fix, how to verify, and a non-empty `## Files expected to change` list
+   of normalized repo-relative paths. Remove one leading `./`, then reject absolute
+   paths, empty/`.`/`..` components, repeated/trailing separators, control characters,
+   wildcards, and ambiguous prose. Where the shape forks, offer **at most 3** options
    as **text-only** (markdown/ASCII) mockups — never images. Keep it short.
 4. **Maintenance epic (create-on-first-use / reuse-by-id).** Look up epic `E99` in
    `state/tasks.json`. If **absent**, create it with `id: "E99"`, slug `maintenance`,
@@ -27,7 +30,8 @@ The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, 
    reuse). Stamp it `autonomous: true` by **default**; if the human passes a `--gated`
    opt-out, stamp it `autonomous: false` instead (it then parks at the normal gate).
 6. Write **exactly one** fix-oriented inbox brief at `progress/inbox/<id>.md` (problem +
-   intended fix + how to verify) from `specs/_templates/inbox-brief.md`. Do **NOT** create
+   intended fix + how to verify + `## Files expected to change`) from
+   `specs/_templates/inbox-brief.md`. Do **NOT** create
    any feature `.spec.md`/`.plan.md`/`.tasks.md`/`.tests.md`, do **NOT** create the
    `spec_path` directory, and do **NOT** spawn the Architect — brief-only, never a spec.
 7. **Re-validate** `state/tasks.json` against `store/tasks.schema.json` after the epic

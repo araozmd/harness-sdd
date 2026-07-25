@@ -66,6 +66,14 @@ execution:
     # It must exit 0 on success, non-zero to signal failure back to the Builder.
     delegate_cmd: ""
 
+# Bounded E99 quick-fix dispatch. Built-ins harness-install.sh,
+# tests/test_install.sh, and tools/* are immutable; shared_paths only extends them.
+# This lane requires execution.builder.backend: in-session so local review owns
+# post-approval PR timing; delegate mode must use serial /sdd-fix.
+fix_lane:
+  max_parallel: 3
+  shared_paths: []
+
 # Telemetry (optional, additive) — best-effort, local-only observability of how long
 # each sub-agent runs and how long the human spec-approval gate takes. Safe defaults so
 # a target with no `telemetry:` block behaves as if enabled with the default log path.
@@ -136,7 +144,7 @@ verification:
   init_script: ./init.sh
   # Commands the Reviewer must run before marking work done. Project-specific —
   # edit these per target repo.
-  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh && sh tests/test_mirror.sh && sh tests/test_epic_lifecycle.sh && sh tests/test_sdd_plan.sh && sh tests/test_sdd_drill.sh && sh tests/test_sdd_fix.sh && sh tests/test_architect_adr.sh && sh tests/test_drift_check.sh && sh tests/test_doc_critic.sh && sh tests/test_ownership.sh && sh tests/test_board_lock.sh && sh tests/test_adr_citation.sh && sh tests/test_fix_worktree.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry + board-mirror + epic lifecycle + sdd-plan + sdd-drill + sdd-fix + architect-adr + drift-check + doc-critic + ownership + board-lock + adr-citation + fix-worktree suites
+  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh && sh tests/test_mirror.sh && sh tests/test_epic_lifecycle.sh && sh tests/test_sdd_plan.sh && sh tests/test_sdd_drill.sh && sh tests/test_sdd_fix.sh && sh tests/test_architect_adr.sh && sh tests/test_drift_check.sh && sh tests/test_doc_critic.sh && sh tests/test_ownership.sh && sh tests/test_board_lock.sh && sh tests/test_adr_citation.sh && sh tests/test_fix_worktree.sh && sh tests/test_sdd_fix_parallel.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry + board-mirror + epic lifecycle + sdd-plan + sdd-drill + sdd-fix + architect-adr + drift-check + doc-critic + ownership + board-lock + adr-citation + fix-worktree + parallel-fix suites
 
   lint_command: ""        # e.g. "ruff check ." or "npm run lint"
   typecheck_command: ""   # e.g. "mypy ." or "tsc --noEmit"

@@ -17,7 +17,7 @@ This writes, into your project:
 ```
 your-project/
 ├── CLAUDE.md / AGENTS.md / GEMINI.md   # your content kept; a marked harness block appended
-├── .claude/agents/*  .claude/commands/{sdd-next,sdd-new,sdd-plan,sdd-drill,sdd-fix}.md   # Claude Code glue → resolves to .harness/
+├── .claude/agents/*  .claude/commands/{sdd-next,sdd-new,sdd-plan,sdd-drill,sdd-fix,sdd-fix-parallel}.md
 ├── opencode.json                       # created only if absent
 ├── .agents/{rules,agents,workflows}/   # Antigravity glue → resolves to .harness/ (regenerated each run)
 └── .harness/                           # the whole harness body
@@ -54,6 +54,15 @@ To add new work later, run **`/sdd-new "<idea>"`** — the Inception intake tria
 (new epic / feature / task), seeds a `pending` entry plus an intent brief, and tells
 you to run `/sdd-next` to spec and build it. The installer ships this command into your
 project alongside `/sdd-next`.
+
+The installer also generates `/sdd-fix-parallel` from one byte-identical command body
+for Claude, OpenCode, Antigravity, and global Codex prompts. It resolves the portable
+Fixer and targeted Orchestrator contracts from `.harness/`, and its filename is
+registry-owned for safe front-end cleanup. Fresh config includes
+`fix_lane.max_parallel: 3` and extension-only `fix_lane.shared_paths: []`. The
+parallel command requires the default `execution.builder.backend: in-session`; a
+delegate backend fails before manifest/provision/claim and points to serial
+`/sdd-fix`, because delegates may own PR/review timing.
 
 ## Upgrade
 

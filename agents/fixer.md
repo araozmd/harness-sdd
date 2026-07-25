@@ -24,7 +24,7 @@ heavier altitude and **never** touch any epic other than the reserved maintenanc
 1. Read the free-text fix description (the problem to fix). If it is empty, **STOP** and
    **ask** the human for it.
 2. Run a short, **adaptive** Q&A to settle the fix's shape (what's broken, the intended
-   fix, how to verify).
+   fix, how to verify, and the files expected to change).
 3. **Create-on-first-use / reuse-by-id** the reserved maintenance epic `E99`.
 4. **Seed** one `sdd: false` fix feature into `E99`'s `features` array, stamped
    `autonomous: true` by default (a `--gated` opt-out stamps `autonomous: false`), plus
@@ -132,8 +132,12 @@ fix runs immediately or parks at the gate — the Reviewer always runs once the 
 
 Write **exactly one** fix-oriented inbox brief at `progress/inbox/<id>.md` (e.g.
 `progress/inbox/E99-F01.md`) from `specs/_templates/inbox-brief.md`, capturing: the
-**problem**, the **intended fix**, and **how to verify** it. The Builder works from this
-brief as its worklist.
+**problem**, the **intended fix**, **how to verify** it, and a non-empty
+`## Files expected to change` list. Each list item is a normalized repo-relative path:
+remove one harmless leading `./`, then reject absolute paths, empty/`.`/`..` components,
+repeated or trailing separators, control characters, wildcards, and ambiguous prose.
+The Builder works from this brief as its worklist. Existing E99 allocation,
+`sdd: false`, autonomous/`--gated`, one-brief, and hand-off behavior is unchanged.
 
 You must **NEVER**:
 
@@ -201,6 +205,136 @@ create **no spec** and never spawn the Architect.
   change — you **reuse** the existing `sdd: false` primitive and the existing `autonomous`
   flag.
 - **Never** write production code — you seed and hand off; the Builder implements.
+
+## Parallel dispatch mode (`/sdd-fix-parallel`)
+
+This is a fenced, argument-free coordinator over already-seeded E99 fixes. It creates
+no fix and asks no intake questions. Select only E99 features that are `pending`,
+`sdd: false`, `autonomous: true`, whose parent E99 is not `draft`, and whose every
+`depends_on` id resolves to a `done` feature. Never select another epic or `sdd: true`
+feature, and introduce no status, schema field, or TaskStore shape.
+
+The host must provide native in-session concurrent sub-agent delegation: it can start
+several clean targeted Orchestrator workers and later await them. This is a portable
+capability, not a vendor API. Never launch code-agent prompts with shell `&` or as
+background processes. If unavailable, stop before mutation, name the missing native
+concurrency capability, and direct the operator to serial `/sdd-fix`.
+
+Parallel dispatch also requires `execution.builder.backend: in-session`. A configured
+`execution.builder.backend: delegate` may open a PR or run review during Builder, which
+cannot preserve this lane's local-review-before-PR and one-PR ownership contract.
+Reject it during P1 before manifest/provision/claim, name the incompatible backend,
+and direct the operator to serial `/sdd-fix`. Reject any unknown backend the same way.
+
+Read optional `fix_lane.max_parallel` (absent means positive integer `3`) and
+`fix_lane.shared_paths` (absent means `[]`). Shared paths must be a list of non-empty
+canonical repo-relative exact paths or directory-prefix patterns with one terminal
+`/*`. Reject before mutation any scalar/map/non-string, absolute or leading-`./`
+entry, empty/`.`/`..` component, empty/repeated/trailing separator, control character,
+or other wildcard. Entries extend, never replace, immutable built-ins
+`harness-install.sh`, `tests/test_install.sh`, and `tools/*`.
+
+For brief paths remove at most one leading `./`, then require a relative wildcard-free
+path with no unsafe component. Exact patterns match exactly; `dir/*` matches only
+descendants under `dir/`. A shared match, absent brief or heading, empty declaration,
+or unsafe/ambiguous path is guarded and its reason is recorded. Only a complete safe
+list is parallel-safe.
+
+### P1 — capability and config preflight
+
+Resolve canonical `HARNESS_MAIN` once (`<primary>` in source layout and
+`<primary>/.harness` installed), run init, prove native concurrency, require the
+in-session Builder backend, validate config, read a fresh board and briefs, apply
+eligibility, sort numeric `E99-F<NN>`, and select the first `max_parallel`. Later ready
+candidates remain pending. If none are ready, print exactly `no ready E99 fixes`,
+create no manifest or worktree, mutate nothing, and exit zero.
+
+### P2 — provision selected worktrees while primary is clean
+
+Sequentially call `tools/fix-worktree.sh create <fix-id> <slug>` (or installed
+`.harness/tools/`) for every selected fix before any manifest or board write dirties
+the primary. Keep the classification for every ready candidate in memory throughout:
+`parallel-selected`, `guarded-selected` with reason, or `cap-deferred`. Record each
+successful fix's exact branch/worktree. A provisioning failure stays `pending`, is
+classified `provisioning-failed` with its reason, and does not prevent siblings from
+proceeding. This is the only create operation for the fix: keep that exact
+pre-provisioned branch/worktree through all Builder, Reviewer, PR, merge, and
+reconciliation steps. Only provisioned ids reach the claim.
+
+### P3 — complete pre-dispatch manifest
+
+After every selected provisioning attempt has settled and before the bookkeeping
+branch, claim, or dispatch, create
+`progress/E99-fix-parallel-YYYYMMDDTHHMMSSZ/summary.md`. List every ready candidate:
+each selected entry retains its parallel/guarded classification and reason plus either
+its provisioned branch/worktree or `provisioning-failed` reason, and every later ready
+candidate remains `cap-deferred`. Never silently truncate, serialize, or lose a
+candidate.
+
+### P4 — atomic locked batch claim
+
+After the manifest write and before the first board write, create one collision-checked coordinator-owned
+bookkeeping branch from the captured local base and switch the canonical primary onto
+it. This branch is the sole Git persistence lane for the batch's shared board/history
+state; it is not a fix implementation branch and never replaces any per-fix code PR.
+
+Create one temporary `mutate(data) -> data` mutator for the provisioned subset. Under
+the fresh lock, re-identify E99, rebuild the all-feature dependency map, and re-check
+every eligibility predicate plus every dependency's current `done` status for every id
+before setting all `pending → in-progress`. Invoke only through:
+
+```sh
+HARNESS_DIR="$HARNESS_MAIN" python3 "$WORKTREE_HARNESS/tools/tasks-lock.py" apply --mutator "$CLAIM_MUTATOR"
+```
+
+Never hand-edit or claim ids separately. On all-or-none claim failure, safely tear down
+every still-unclaimed F02 worktree after returning the clean canonical primary to the
+captured base; remove only the uncommitted bookkeeping branch, then stop before
+dispatch. On success, commit the locked claim on the bookkeeping branch before
+dispatch. Workers may make later locked board transitions against this same canonical
+`HARNESS_DIR`, but must never stage, commit, switch, stash, reset, or clean the primary;
+the coordinator alone owns bookkeeping Git operations. The coordinator also owns
+serialized `progress/history.md` reconciliation after workers settle, so concurrent
+workers cannot lose history appends.
+
+### P5 — parallel-safe fan-out before any wait
+
+For each provisioned parallel-safe fix, create a clean targeted Orchestrator worker
+with exactly its id, brief, branch/worktree, canonical `HARNESS_DIR`, and batch progress
+path. Start every parallel-safe targeted worker before awaiting any one result, up to
+the cap, then await the whole safe wave. Record each result and continue every sibling
+even when one returns non-zero. Every worker consumes its pre-provisioned resources;
+none creates a second branch or worktree.
+
+### P6 — guarded exclusive wave
+
+After the safe wave settles, run guarded fixes one-at-a-time in numeric feature-id order.
+While one guarded worker runs, run no other fix worker. Supply the same targeted
+inputs and append its outcome plus guard reason.
+
+### P7 — aggregate report and exit
+
+Append a terminal or recoverable result for every selected fix and retain all
+`cap-deferred` entries. After every worker settles, serialize the supplied transition
+records into `progress/history.md`, then run one locked finalizer: set only fixes whose
+worker reported `merge-observed` to `done`, and preserve every recoverable failure at
+its last legitimate state. Commit the complete final board/history truth on the
+bookkeeping branch, push it, create/update its coordinator-owned bookkeeping PR, and
+require that PR's observed merge before cleanup. This PR contains shared bookkeeping
+only; it does not bypass a fix's local Reviewer or replace a per-fix code PR.
+
+Fetch the observed bookkeeping merge, switch the canonical primary back to the local
+base, and advance it with `--ff-only` to the exact updated remote base. Prove the
+primary is clean, on that base, and at its newly captured commit. Only then call F02
+teardown once for each `merge-observed`/`done` fix, using its original exact branch and
+worktree; keep failed fixes' resources intact. Delete the bookkeeping branch only with
+normal merged-branch deletion. Never stash, reset, force-delete, clean, or hide board
+changes to manufacture F02 preconditions.
+
+Provisioning, bookkeeping persistence/merge/reconciliation, recoverable chain failure,
+or cleanup failure makes the aggregate exit non-zero only after all siblings settle
+and are recorded. Exit zero when every selected fix succeeds; cap-only deferrals are
+not failures. A merged/done cleanup gap is reported without undoing merged truth.
 
 ## Completion report
 

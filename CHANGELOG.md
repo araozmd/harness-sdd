@@ -4,6 +4,21 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.34.0] — 2026-07-25
+
+### Added — ✨ Bounded isolated parallel maintenance fixes (E15-F03)
+- Added `/sdd-fix-parallel`, a portable coordinator that provisions isolated F02
+  worktrees before one atomic F01 claim, overlaps safe targeted workers, and
+  serializes shared or unknown paths.
+- Added targeted Orchestrator rules for Builder/Reviewer rounds, one PR and
+  `/pr-loop` per fix, merge-before-done, failure isolation, and safe teardown.
+- Kept each pre-provisioned F02 identity for the entire worker lifecycle and added
+  coordinator-owned bookkeeping-PR persistence plus updated-base reconciliation
+  before non-forced teardown. Parallel preflight rejects the delegate Builder
+  backend with the serial fallback.
+- Added `fix_lane` defaults, expected-path brief metadata, all-frontend installer
+  generation/ownership, documentation, and permanent disposable coverage.
+
 ## [0.33.0] — 2026-07-25
 
 ### Added — ✨ Safe worktree-per-fix isolation lifecycle (E15-F02)
