@@ -72,6 +72,13 @@ human-gate, or scoped-owner gate and finish with a `no actionable work` summary.
 Diagnostics are read-only and do not change selection policy. See
 [Diagnosing blocked selection](docs/WORKFLOW.md#diagnosing-blocked-selection).
 
+`/sdd-next` uses `tools/next-task.mjs` for deterministic, read-only JSON
+selection. Missing Node or invalid selector output is reported and falls back to
+the preserved Orchestrator prose oracle, so Node is an optional upgrade rather
+than an `init.sh` prerequisite. For direct troubleshooting, run
+`node tools/next-task.mjs --json` (or
+`node .harness/tools/next-task.mjs --json` after installation).
+
 `/sdd-new` is the front door: it asks a few questions, decides whether the idea is a
 new epic / feature / task, and writes a `pending` entry plus an intent brief — without
 hand-editing `state/tasks.json`. Then the Orchestrator spawns `architect` → (human
@@ -209,7 +216,7 @@ harness.config.yaml          store backends, hooks, mirror, telemetry, umbrella
 harness-install.sh           install/upgrade into a target (+ --umbrella, --shared-repo)
 init.sh                      environment verification gate
 agents/                      role prompts (canonical)
-tools/                       zero-dep utilities (telemetry-report.py, sync-board.mjs)
+tools/                       zero-dep utilities (next-task.mjs, telemetry-report.py, sync-board.mjs)
 specs/                       product.md, glossary.md, _templates/, epics/<E>/<F>/*.md
 state/                       tasks.json (local TaskStore) + schema
 progress/                    run output + history.md

@@ -657,6 +657,7 @@ install_one() {
   chmod +x "$H/tools/validate-board.py" 2>/dev/null || true   # E15-F01 shared board validator (init.sh + tasks-lock)
   chmod +x "$H/tools/fix-worktree.sh" 2>/dev/null || true   # E15-F02 isolated fix-worktree lifecycle helper
   chmod +x "$H/tools/task-diagnostics.py" 2>/dev/null || true   # E16-F01 warn-only dependency diagnostics
+  chmod +x "$H/tools/next-task.mjs" 2>/dev/null || true   # E16-F03 deterministic read-only selector
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"

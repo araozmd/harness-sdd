@@ -151,6 +151,29 @@ JSON
   mv "$T/.harness/state/tasks.json.e16-backup" "$T/.harness/state/tasks.json"
 }
 
+test_next_task_installed_contract() {
+  [ -x "$T/.harness/tools/next-task.mjs" ] ||
+    fail "E16-F03: installed next-task.mjs missing or not executable"
+  cmp -s "$SRC/tools/next-task.mjs" "$T/.harness/tools/next-task.mjs" ||
+    fail "E16-F03: installed selector differs from source"
+  grep -qF 'chmod +x "$H/tools/next-task.mjs"' "$SRC/harness-install.sh" ||
+    fail "E16-F03: installer lacks explicit selector executable wiring"
+
+  cp "$T/.harness/state/tasks.json" "$T/.harness/state/tasks.json.e16f03-backup"
+  cat >"$T/.harness/state/tasks.json" <<'JSON'
+{"project":"installed-fixture","epics":[{"id":"E2","title":"two","status":"planned","features":[
+ {"id":"E2-F1","title":"next","status":"in-progress","sdd":true,"spec_path":"specs/next/"}
+]}]}
+JSON
+  _actual="$(cd / && node "$T/.harness/tools/next-task.mjs" --json)" ||
+    fail "E16-F03: installed-layout default-path selector failed outside target cwd"
+  printf '%s\n' "$_actual" | grep -qF '"feature_id":"E2-F1"' ||
+    fail "E16-F03: installed selector did not resolve its own TaskStore"
+  printf '%s\n' "$_actual" | grep -qF '"route":"builder"' ||
+    fail "E16-F03: installed selector returned wrong route"
+  mv "$T/.harness/state/tasks.json.e16f03-backup" "$T/.harness/state/tasks.json"
+}
+
 test_rationale_docs_installed_contract() {
   [ -f "$T/.harness/docs/RATIONALE.md" ] ||
     fail "E16-F02: installed rationale document missing"
@@ -219,6 +242,7 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "installer exited non-zero"
 [ -x "$T/.harness/tools/tasks-lock.py" ] || fail "installed tools/tasks-lock.py is not executable (board write lock not runnable)"     # R10
 test_fix_worktree_helper_installed_executable
 test_dependency_diagnostics_installed_contract
+test_next_task_installed_contract
 test_rationale_docs_installed_contract
 # E15-F01 (Codex #46 r2 P1): the SHARED board validator must ship in the body AND be
 # executable — init.sh runs it as a CLI and tasks-lock.py imports its validate(); if it

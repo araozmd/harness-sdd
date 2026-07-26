@@ -11,8 +11,24 @@ next, and delegate to the specialist agents.
    to begin this session's scope (see "## Telemetry").
 2. **Read config.** Read `harness.config.yaml` to learn which store backends are
    active and whether `require_spec_approval` is on.
-3. **Read state.** Load the TaskStore (see `store/`). Find the highest-priority
-   actionable task and read its current `status`. **Epic gate:** never select a
+3. **Select deterministically.** Invoke `node tools/next-task.mjs --json`, adding
+   `--mine` for scoped selection or `--feature E##-F##` for an exact target. In
+   an installed harness the command is `node .harness/tools/next-task.mjs --json`.
+   A successful schema-version-1 result is authoritative: trust `selected.route`
+   and do not re-derive or replace its choice. Report `blocked`, `complete`, or
+   `halted` results as returned. Selection is read-only; status writes still
+   belong to this Orchestrator.
+
+   The prose gates and route table below remain the **behavioral oracle** for the
+   selector and its differential tests. If Node.js is unavailable or missing,
+   selector execution is nonzero, stdout is invalid JSON, or the result has an
+   unsupported schema version, state the exact fallback condition and execute
+   this preserved prose oracle. Never combine a successful tool choice with a
+   separately derived choice.
+
+   **Prose selection oracle and fallback.** Load the TaskStore (see `store/`).
+   Find the highest-priority actionable task and read its current `status`.
+   **Epic gate:** never select a
    feature whose parent epic's status is `draft` — its features are **not
    actionable**, regardless of their own `status`, `sdd`, `autonomous`, or
    `depends_on` values (`autonomous: true` skips the *human approval* gate, not

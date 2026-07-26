@@ -4,6 +4,22 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.37.0] — 2026-07-25
+
+### Added — ✨ Deterministic next-task selection (E16-F03)
+- Added the executable, zero-dependency Node 18+ `tools/next-task.mjs` selector
+  with strict JSON output, canonical feature/slice ordering, exact dependency
+  diagnostics, target and owner scopes, and umbrella fail/merge/integration
+  precedence.
+- Made valid selector output authoritative for the Orchestrator while retaining
+  the complete Markdown routing policy as a reported fallback when Node is
+  unavailable or output is invalid. Selection remains read-only and no gate,
+  status, schema, dependency, ownership, or rollup policy changed.
+- Installed the selector verbatim and executable, documented source/installed
+  troubleshooting, and added differential feature/slice/owner/error fixtures,
+  immutable-input checks, reordered byte determinism, and a 2,000-feature
+  performance contract.
+
 ## [0.36.0] — 2026-07-25
 
 ### Added — ✨ Harness rationale and deletion ledger (E16-F02)
