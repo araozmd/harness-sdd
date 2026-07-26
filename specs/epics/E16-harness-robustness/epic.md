@@ -1,3 +1,9 @@
+---
+id: E16
+title: Harness robustness & rationale (harness-engineering investigation follow-ups)
+status: done             # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+---
+
 # E16 — Harness robustness & rationale (harness-engineering investigation follow-ups)
 
 ## Problem
@@ -28,11 +34,11 @@ the harness.
 
 ## Features
 
-| id | title | depends_on |
-|----|-------|------------|
-| E16-F01 | depends_on cycle detection (features + slices) + Orchestrator "why nothing selectable" diagnostic | — |
-| E16-F02 | Deletion ledger + why-a-harness rationale docs (compensation vs durable two-layer model) | — |
-| E16-F03 | Deterministic next() selection: zero-dep tools/next-task.mjs emitting chosen id + reason | E16-F01 |
+| id | title | status | depends_on |
+|----|-------|--------|------------|
+| E16-F01 | depends_on cycle detection (features + slices) + Orchestrator "why nothing selectable" diagnostic | done | — |
+| E16-F02 | Deletion ledger + why-a-harness rationale docs (compensation vs durable two-layer model) | done | — |
+| E16-F03 | Deterministic next() selection: zero-dep tools/next-task.mjs emitting chosen id + reason | done | E16-F01 |
 
 ADRs: [ADR-0001](../../adr/0001-deterministic-next-selection.md) — next() routing
 moves from prose to a deterministic tool; F01's diagnostic reason strings are the
