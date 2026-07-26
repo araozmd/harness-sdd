@@ -1,14 +1,15 @@
 # What a harness is (and why this one is built this way)
 
 A **harness** is the environment you build *around* a model: the context, tools,
-memory, and verification that turn a powerful-but-wild model into a reliable worker.
+memory, and verification that help a model work within a repeatable process.
 The model is the engine (or the horse); the harness is the chassis (or the reins).
 
-**The core bet:** *models change every few months; your harness does not.* Build on
-files you own and you can swap the brain — Claude today, Gemini or a local model
-tomorrow — and swap the CLI — Claude Code, Codex, Gemini CLI, OpenCode, Antigravity — without
-rewriting your system. That portability is the whole point of using `AGENTS.md` and
-plain files instead of a vendor wrapper.
+**The core bet:** models and runtimes change, while repository-owned intent and
+evidence can remain portable. Files you own let this project support Claude, Gemini,
+Codex, or a local model and multiple CLIs without adopting one vendor wrapper.
+Read the deeper [rationale and deletion ledger](RATIONALE.md) for the limits of
+that claim, the distinction between current-model compensation and durable process
+value, and the evidence required before removing a mechanism.
 
 ## The four components
 
@@ -23,27 +24,26 @@ plain files instead of a vendor wrapper.
    `progress/` + `init.sh`. No external app, no magic — just files that reference
    each other.
 
-2. **Minimal tooling.** Specialized tools degrade agents. (Vercel cut 80% of D0's
-   tools, left it Bash + filesystem → 3× faster, ~47% fewer tokens, 80%→100%
-   success.) Add a tool only when a real task proves it's needed.
+2. **Minimal tooling.** Every tool adds context and another failure surface. This
+   project starts with Bash and the filesystem, then adds a tool only when a task
+   and its verification show a need.
 
-3. **Externalize memory.** Models degrade well before the context window is full.
-   Keep state in `state/`, `specs/`, `progress/`; read only what's needed; reset
-   context and resume from files.
+3. **Externalize memory.** Keep resumable state in `state/`, `specs/`, and
+   `progress/`; read only what is needed and resume from files when a session or
+   context changes.
 
-4. **Separate roles.** One agent that plans + codes + reviews saturates its context
-   and reasons worse. A team — Inception (intake), Orchestrator, Architect, Builder,
-   Reviewer, Scout — each with a clean context, beats it.
+4. **Separate roles.** Inception (intake), Orchestrator, Architect, Builder,
+   Reviewer, and Scout have bounded responsibilities so planning, implementation,
+   and independent challenge leave distinct evidence.
 
 5. **Verify autonomously.** Never trust "done." The harness proves it: `init.sh`,
    tests, type/lint checks, and behavioral checks (e.g. Playwright clicking the live
    app). The Reviewer can even improve the harness so a failure can't recur — a
-   self-improving loop.
+   correction loop.
 
 ## Where the ideas come from
 
-Synthesized from the *Harnessing Engineering* research: the BettaTech harness-
-engineering and SDD-for-Claude-Code videos, Anthropic's "Harness design for
-long-running application development" (Planner/Generator/Evaluator + sprint
-contracts), and the Harness Engineering knowledge graph. See `specs/product.md` for
-how to adapt the harness to a specific project.
+The [rationale and deletion ledger](RATIONALE.md) attributes the primary source
+reports that motivated specific design hypotheses and states their limits. See
+[`specs/product.md`](../specs/product.md) for how to adapt the harness to a specific
+project.

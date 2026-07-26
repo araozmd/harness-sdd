@@ -333,11 +333,11 @@
         {
           "id": "E16-F02",
           "title": "Deletion ledger + why-a-harness rationale docs (compensation vs durable two-layer model)",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E16-harness-robustness/F02-deletion-ledger-rationale/"
+          "spec_path": "specs/epics/E16-harness-robustness/F02-harness-rationale-ledger/"
         },
         {
           "id": "E16-F03",

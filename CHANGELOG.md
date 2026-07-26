@@ -4,6 +4,20 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.36.0] — 2026-07-25
+
+### Added — ✨ Harness rationale and deletion ledger (E16-F02)
+- Added a cold-readable `docs/RATIONALE.md` that explains why repository-changing,
+  long-running agent work needs more than repeated prompting and separates
+  current-model capability compensation from durable trust-and-intent controls.
+- Added the complete 21-row C1–C8/D1–D13 retention ledger with repository pointers,
+  mechanism-specific reconsideration evidence, a retain-by-default protocol, and
+  the ADR-0001/E16-F03 boundary for replacing prose routing without removing the
+  human-auditable gate policy.
+- Added bounded primary-source notes, explicit METR study limitations, source and
+  installed navigation, byte-identical installer coverage, offline link/inventory
+  checks, and full-suite wiring without runtime or role-contract changes.
+
 ## [0.35.0] — 2026-07-25
 
 ### Added — ✨ Dependency-cycle and blocked-selection diagnostics (E16-F01)
