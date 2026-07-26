@@ -24,6 +24,22 @@ Validated by `store/tasks.schema.json` (and by `init.sh`).
   gate; it skips the human approval gate only). Epics in `pending`, `planned`,
   `in-progress`, or `done` impose **no new gate** — their features are evaluated
   by the per-feature rules above, unchanged.
+
+### Deterministic read-only selector (E16-F03)
+
+`node tools/next-task.mjs --json` executes the `next()` and optional
+`next_slice()` policy against the local TaskStore. Installed consumers use
+`node .harness/tools/next-task.mjs --json`. Add `--mine` for the existing owner
+filter or `--feature E##-F##` for an exact target. It emits one compact
+schema-version-1 JSON object with fixed fields `schema_version`, `mode`,
+`outcome`, `selected`, `reason`, `blocked`, and `summary`; it never writes state.
+
+The Orchestrator treats a valid successful result as authoritative. Missing Node,
+a nonzero invocation, invalid JSON, or an unsupported schema version is reported
+and falls back to the preserved behavioral prose oracle in
+`agents/orchestrator.md`. This changes neither the gates above nor the
+Orchestrator's exclusive ownership of state writes.
+
 - **get(id)** — find the feature object by `id`.
 - **set_status(id, status)** — set the `status` of the **object the id addresses**.
   The whole persist is run **under an advisory lock** so concurrent writers (E15

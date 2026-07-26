@@ -342,13 +342,13 @@
         {
           "id": "E16-F03",
           "title": "Deterministic next() selection: zero-dep tools/next-task.mjs emitting chosen id + reason",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
             "E16-F01"
           ],
-          "spec_path": "specs/epics/E16-harness-robustness/F03-deterministic-next-task/"
+          "spec_path": "specs/epics/E16-harness-robustness/F03-deterministic-next-selection/"
         }
       ]
     },

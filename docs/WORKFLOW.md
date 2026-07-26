@@ -23,6 +23,22 @@ Orchestrator spawns the Architect for that feature, it passes
 first and specs from it. That read is what wires the captured intent into spec
 generation.
 
+### Deterministic selection with a portable fallback
+
+`/sdd-next` normally asks the read-only, zero-dependency Node selector
+`tools/next-task.mjs` for one schema-version-1 JSON decision. Bare selection,
+`--mine`, and an exact feature target map respectively to no scope flag,
+`--mine`, and `--feature E##-F##`. A valid result is authoritative: the
+Orchestrator follows its route or reports its blocked/complete/halted outcome
+without independently choosing different work.
+
+Node remains optional. If it is unavailable, the selector fails, stdout is
+invalid JSON, or the schema version is unsupported, the Orchestrator reports the
+condition and uses the complete Markdown routing table retained in
+`agents/orchestrator.md` as the behavioral oracle. Both paths preserve the same
+epic, dependency, approval, ownership, slice merge, and rollup policy; only the
+Orchestrator performs state writes.
+
 ## Whole-project inception (`/sdd-plan`)
 
 Where `/sdd-new` triages **one idea**, `/sdd-plan` captures the **whole project** up
