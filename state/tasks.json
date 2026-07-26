@@ -319,7 +319,7 @@
     {
       "id": "E16",
       "title": "Harness robustness & rationale (harness-engineering investigation follow-ups)",
-      "status": "pending",
+      "status": "done",
       "features": [
         {
           "id": "E16-F01",
@@ -342,7 +342,7 @@
         {
           "id": "E16-F03",
           "title": "Deterministic next() selection: zero-dep tools/next-task.mjs emitting chosen id + reason",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
