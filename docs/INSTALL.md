@@ -18,10 +18,14 @@ This writes, into your project:
 your-project/
 ├── CLAUDE.md / AGENTS.md / GEMINI.md   # your content kept; a marked harness block appended
 ├── .claude/agents/*  .claude/commands/{sdd-next,sdd-new,sdd-plan,sdd-drill,sdd-fix,sdd-fix-parallel}.md
-├── opencode.json                       # created only if absent
+├── opencode.json                       # created only if absent (re-stamped only while pristine)
 ├── .agents/{rules,agents,workflows}/   # Antigravity glue → resolves to .harness/ (regenerated each run)
+├── .gemini/agents/*.md                 # per-role model routing only — created ONLY when a tier resolves
+├── .codex/agents/*.toml                # per-role model routing only — project-local, never ~/.codex
 └── .harness/                           # the whole harness body
     ├── .harness-version  manifest.txt
+    ├── .opencode.stamp                  # byte copy of the last generated opencode.json (model routing only)
+    ├── .model-agents/                   # byte copies of the last .gemini/.codex per-role files (model routing only)
     ├── AGENTS.md agents/ docs/ store/ tools/ specs/_templates/ init.sh harness.config.yaml
     ├── .gitignore                       # seeded: keeps the local-only telemetry log out of VCS
     ├── telemetry.jsonl                  # created on first run — local-only, gitignored (E05-F02)
@@ -131,6 +135,113 @@ children and appends them without ever overwriting an existing manifest entry's 
 or a child's project-owned files. With `--umbrella` absent, the installer behaves
 exactly as the single-target form below — only an additive, value-preserving config
 **migration** is layered in (see next section).
+
+## Per-role model routing (`models:`) — opt-in
+
+Every sub-agent normally inherits whatever model the host CLI session runs, so the
+Architect's design work and the Builder's mechanical execution of an approved `tasks.md`
+cost the same per token. The `models:` block in `.harness/harness.config.yaml` lets you
+put each SDD role on the tier that fits its job. It is **opt-in and inert by default**:
+the seeded block puts every role on `inherit`, and an absent block, an empty block and an
+all-`inherit` block are all byte-for-byte identical to a harness without this feature.
+
+```yaml
+models:
+  default: inherit        # tier for any role not listed below
+  orchestrator: inherit
+  architect: reasoning
+  builder: standard
+  reviewer: standard
+  scout: cheap
+  doc-critic: cheap
+  # pin.opencode.standard: "anthropic/claude-sonnet-4-5"
+  # pin.codex.cheap: "gpt-5-mini"
+```
+
+**Tier vocabulary: `reasoning | standard | cheap | inherit`.** A role's tier is
+`models.<role>`, else `models.default`, else `inherit`. An **unrecognized** tier is a
+warning on stderr, resolves as `inherit`, and never fails the install — so a config
+written for a newer harness can never block an upgrade on an older installer.
+
+`inherit` compiles to **key omission** on every front-end. The literal string `inherit`
+is never written anywhere: it is unknown on Codex and a hard error on OpenCode, while an
+absent key means "use the session model" on all five.
+
+### What each tier stamps
+
+| tier | claude | antigravity | gemini | codex | opencode |
+|---|---|---|---|---|---|
+| `reasoning` | `opus` | `pro` | `pro` | *(pin required)* | *(pin required)* |
+| `standard` | `sonnet` | `pro` | `pro` | *(pin required)* | *(pin required)* |
+| `cheap` | `haiku` | `flash` | `flash` | *(pin required)* | *(pin required)* |
+| `inherit` | *omitted* | *omitted* | *omitted* | *omitted* | *omitted* |
+
+Every built-in value is a **floating vendor alias**, never a version-pinned model id, so
+a new model release is picked up without a harness change. Antigravity and Gemini expose
+only two tiers upstream, so `reasoning` and `standard` both map to `pro`.
+
+### Pinning an exact model — `models.pin.<front-end>.<tier>`
+
+A pin is written **verbatim** in that front-end's own vocabulary and overrides the
+built-in alias for every role on that tier. It is **required** for `codex` and `opencode`,
+which have no floating alias — an unpinned tier there stamps nothing and the installer
+prints one advisory line naming the exact `pin.` key to set.
+
+- `opencode` **must** be `provider/model`. A value without a `/` would abort your OpenCode
+  runs, so it is warned about and dropped.
+- `codex` **must** be a bare model id; the provider comes from your `model_provider`.
+- A pin of `"inherit"` is a **tier name, not a model id**. It is warned about and dropped
+  on every front-end, stamping nothing — exactly like the `inherit` tier. The literal
+  string `inherit` is never written into a generated artifact.
+
+Those are the only two value checks the installer makes; it cannot know any vendor's
+model list, so every other pin value is passed through untouched.
+- `antigravity` accepts only tier aliases and needs **`agy` >= 1.1.5**; below that the
+  `model:` frontmatter key is inert, never an error. The installer does not probe your
+  CLI version.
+
+### Where the values land
+
+| front-end | artifact | form |
+|---|---|---|
+| `claude` | `.claude/agents/<role>.md` | `model:` frontmatter key |
+| `antigravity` | `.agents/agents/<role>.md` | `model:` frontmatter key |
+| `opencode` | `opencode.json` | `"model"` member in `agent.<role>` |
+| `gemini` | `.gemini/agents/<role>.md` | `model:` frontmatter key (**new file**) |
+| `codex` | `.codex/agents/<role>.toml` | `model = "…"` (**new file**, project-local) |
+
+`.gemini/agents/` and `.codex/agents/` are created **only** when at least one role
+resolves to a concrete value for that front-end. Only **selected** front-ends
+(`--agents`) are ever stamped. The Codex artifact is deliberately project-local: unlike
+the target-independent global `/prompts:sdd-*` bodies, a model stamp is target-dependent,
+so writing it to `~/.codex` would let one repo silently retune every other repo on the
+machine.
+
+> **Codex precondition — the project must be trusted.** Codex discovers agent files by
+> directory convention (`$CODEX_HOME/agents/` and the project-local `<repo>/.codex/agents/`),
+> so the generated files need no registration. But Codex only reads a project's local
+> `.codex/` config at all when that project is **trusted** — i.e. `~/.codex/config.toml`
+> carries `[projects."<absolute path to your repo>"]` with `trust_level = "trusted"`.
+> On an untrusted clone the generated role files are silently ignored and every role keeps
+> the session model. Each file defines the required trio `name` / `description` /
+> `developer_instructions`; `codex doctor` reports any role file Codex rejected.
+
+`opencode.json` is the one config file the harness does not regenerate on a plain re-run.
+It is re-stamped **only** when it is byte-identical to `.harness/.opencode.stamp` (the
+last body the installer wrote) or to a freshly generated model-free body; anything else
+is treated as yours, left untouched, and reported. `.harness/.model-agents/` is the same
+device for the `.gemini/agents/` and `.codex/agents/` trees: it remembers the exact bytes
+last written there, so putting every role back on `inherit` (or deselecting the front-end)
+reclaims those files instead of orphaning them with their old `model` keys. Both stamps
+exist only while the artifacts they describe do.
+Deselecting a front-end reclaims its
+stamped artifacts through the same pristine byte-comparison every other generated file
+uses — an edited file survives with a warning.
+
+> **`models.orchestrator` does not choose your session's model.** The Orchestrator drives
+> the session *you* launched, and how you launched it decides its model. This key applies
+> only where the orchestrator is a spawned sub-agent (Claude) or the configured primary
+> agent (OpenCode).
 
 ## Config migration on upgrade (non-destructive)
 

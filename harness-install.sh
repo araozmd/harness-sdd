@@ -199,6 +199,48 @@ migrate_config() {
       printf '  shared_paths: []\n'
     } >> "$_cfg"
   fi
+
+  # --- models block (E17-F01 per-role model routing) ---
+  # Top-level, append-only at EOF, OPT-IN and INERT: every role seeds to `inherit`,
+  # which compiles to KEY OMISSION on every front-end — so a migrated target's
+  # generated agent definitions stay byte-identical until the operator edits a tier.
+  # Keep this block byte-identical to the tail of the source harness.config.yaml, so a
+  # FRESH install (which copies the config verbatim and never migrates) and an UPGRADED
+  # install (which only migrates) converge on the same text. Presence check tolerates a
+  # trailing comment on the `models:` line so a second run never duplicates the block.
+  if ! grep -Eq '^models:[[:space:]]*(#.*)?$' "$_cfg"; then
+    cat >> "$_cfg" <<'EOF'
+
+# Per-role model routing (E17-F01) — OPT-IN and INERT by default.
+# Tiers: reasoning | standard | cheap | inherit
+# `inherit` compiles to KEY OMISSION on every front-end — the generated agent
+# definitions are byte-identical to a harness without this block.
+# NOTE: `orchestrator` applies only where the orchestrator is a spawned sub-agent
+# (Claude) or the configured primary agent (OpenCode). The model of the session you
+# launched by hand is chosen by how you launched it, not by the harness.
+models:
+  default: inherit        # tier for any role not listed below
+  orchestrator: inherit
+  architect: inherit      # try: reasoning
+  builder: inherit        # try: standard
+  reviewer: inherit       # try: standard
+  scout: inherit          # try: cheap
+  doc-critic: inherit     # try: cheap
+  # Exact-value escape hatch: `pin.<front-end>.<tier>`, written VERBATIM in that
+  # front-end's own vocabulary. REQUIRED for codex and opencode, which have no
+  # floating tier alias — an unpinned tier there stamps nothing.
+  #   opencode MUST be "provider/model" (an invalid value aborts your OpenCode run)
+  #   codex    MUST be a bare model id (the provider comes from `model_provider`)
+  #   antigravity accepts only tier aliases and needs `agy` >= 1.1.5 (inert below it)
+  # pin.opencode.reasoning: ""
+  # pin.opencode.standard: ""
+  # pin.opencode.cheap: ""
+  # pin.codex.reasoning: ""
+  # pin.codex.standard: ""
+  # pin.codex.cheap: ""
+  # pin.claude.reasoning: ""
+EOF
+  fi
 }
 
 # _cfg_has_umbrella_manifest <file> — true (exit 0) iff a `manifest:` key exists
@@ -252,6 +294,25 @@ _cfg_telemetry_log() {
   ' "$1"
 }
 
+# _cfg_models_value <file> <key> — print the `models.<key>` scalar (unquoted,
+# comment-stripped) from inside the top-level `models:` section; empty if unset or if
+# the file does not exist. Same section-scoped shape as _cfg_telemetry_log. <key> may be
+# a DOTTED composite (e.g. `pin.opencode.cheap`); each `.` is matched LITERALLY (rewritten
+# to the bracket expression `[.]`) so `pin.codex.cheap` can never match `pinXcodexYcheap`.
+# Commented example lines (`  # pin.codex.cheap: ""`) never match — the `#` precedes the key.
+_cfg_models_value() {
+  [ -f "$1" ] || return 0
+  awk -v k="$2" '
+    BEGIN { gsub(/\./, "[.]", k); re = "^[[:space:]]+" k ":" }
+    /^models:[[:space:]]*(#.*)?$/ { m=1; next }
+    m && /^[^[:space:]#]/ { m=0 }
+    m && $0 ~ re {
+      sub(/^[[:space:]]+[^:]*:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+      gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+    }
+  ' "$1"
+}
+
 # _mc_insert_after <file> <header-regex> <line>  — insert <line> immediately after the
 # first line matching <header-regex>, leaving every other line byte-for-byte intact.
 _mc_insert_after() {
@@ -283,6 +344,141 @@ AGENT_KEYS="claude gemini opencode antigravity codex"
 # emit_agent calls and the command-copy loops in install_one().
 HARNESS_CLAUDE_SHIMS="orchestrator architect builder reviewer scout doc-critic"
 HARNESS_SDD_CMDS="sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel"
+
+# ── per-role model routing (E17-F01) ──────────────────────────────────────────
+# Config (`models:` in .harness/harness.config.yaml) → the NATIVE model value of each
+# selected front-end. Everything here is a PURE function of (config bytes, front-end,
+# role): the resolved value goes to stdout, every diagnostic goes to stderr. That purity
+# is load-bearing — the deselect path re-generates each artifact and byte-compares it
+# against what is on disk (remove_if_pristine), so a non-deterministic stamp would make a
+# previously-installed file permanently unremovable.
+#
+# The six roles the installer already emits an agent definition for. Adding a future role
+# variant (e.g. E17-F02's `builder-heavy`) is ONE new name here + one `models:` line — no
+# config migration, because the map is flat and keyed off role names.
+MODEL_ROLES="orchestrator architect builder reviewer scout doc-critic"
+
+# Set to 1 to force every resolution to EMPTY (used to regenerate the "model-free" body
+# an older opencode.json is compared against). Never set outside that narrow window.
+MODELS_OFF=0
+# Run-scoped stderr de-duplication ledger (set in install_one). resolve_model runs inside
+# `$(...)` subshells, so an in-memory flag would not survive; the marker file does. Six
+# roles × five front-ends is 30 resolutions per run — without this the output degenerates
+# into thirty identical advisory lines.
+MODEL_DIAG=""
+
+# _models_cfg — path of the target config the resolver reads. Empty before install_one
+# sets $H, in which case every lookup below yields empty (⇒ `inherit` ⇒ omission).
+_models_cfg() { [ -n "${H:-}" ] && printf '%s\n' "$H/harness.config.yaml"; return 0; }
+
+# _model_warn_once <dedup-key> <message…> — print <message> to stderr at most once per
+# <dedup-key> per install run.
+_model_warn_once() {
+  _mw_key="$1"; shift
+  if [ -n "${MODEL_DIAG:-}" ] && [ -f "$MODEL_DIAG" ]; then
+    grep -qxF "$_mw_key" "$MODEL_DIAG" && return 0
+    printf '%s\n' "$_mw_key" >> "$MODEL_DIAG"
+  fi
+  echo "$*" >&2
+  return 0
+}
+
+# model_tier <role> — print the resolved TIER: `models.<role>`, else `models.default`,
+# else `inherit`. An unrecognized tier is a WARNING, not a fatal error (a config written
+# for a newer harness must never block an upgrade on an older installer): warn once
+# naming the role and the value, resolve as `inherit`, keep exit status 0.
+model_tier() {
+  _mt_cfg="$(_models_cfg)"
+  _mt_v="$(_cfg_models_value "$_mt_cfg" "$1")"
+  [ -n "$_mt_v" ] || _mt_v="$(_cfg_models_value "$_mt_cfg" default)"
+  [ -n "$_mt_v" ] || _mt_v="inherit"
+  case "$_mt_v" in
+    reasoning|standard|cheap|inherit) ;;
+    *)
+      _model_warn_once "tier:$1:$_mt_v" \
+        "⚠️  models.$1: unrecognized tier '$_mt_v' — treating it as 'inherit' (known tiers: reasoning standard cheap inherit)"
+      _mt_v="inherit" ;;
+  esac
+  printf '%s\n' "$_mt_v"
+}
+
+# model_alias <front-end> <tier> — the built-in tier→native value table. Every entry is
+# a FLOATING vendor alias, never a version-pinned model id, so a new model release is
+# picked up without a harness change. Antigravity/Gemini expose only two tiers upstream
+# (flash/pro), so `reasoning` and `standard` both map to `pro` — stated, not hidden.
+# `codex` and `opencode` have NO floating alias (they require a concrete id / a
+# `provider/model` pair), so they are deliberately absent: an unpinned tier there stamps
+# nothing rather than having the harness invent a model id.
+model_alias() {
+  case "$1:$2" in
+    claude:reasoning)                          printf 'opus\n' ;;
+    claude:standard)                           printf 'sonnet\n' ;;
+    claude:cheap)                              printf 'haiku\n' ;;
+    antigravity:reasoning|antigravity:standard) printf 'pro\n' ;;
+    antigravity:cheap)                         printf 'flash\n' ;;
+    gemini:reasoning|gemini:standard)          printf 'pro\n' ;;
+    gemini:cheap)                              printf 'flash\n' ;;
+  esac
+  return 0
+}
+
+# resolve_model <front-end> <role> — print that front-end's NATIVE model value for the
+# role, or NOTHING to mean "omit the model key entirely". Order: tier → an explicit
+# `models.pin.<front-end>.<tier>` (verbatim, wins) → the built-in floating alias →
+# omission. `inherit` always yields empty: the literal string `inherit` is never written
+# into a generated artifact (it is unknown on Codex and a HARD ERROR on OpenCode, while
+# "key absent" means "use the session model" on all five front-ends).
+resolve_model() {
+  [ "${MODELS_OFF:-0}" = 1 ] && return 0
+  _rm_fe="$1"; _rm_role="$2"
+  _rm_tier="$(model_tier "$_rm_role")"
+  [ "$_rm_tier" = "inherit" ] && return 0
+
+  _rm_pin="$(_cfg_models_value "$(_models_cfg)" "pin.$_rm_fe.$_rm_tier")"
+  if [ -n "$_rm_pin" ]; then
+    # A pin is otherwise written VERBATIM — but `inherit` is a TIER name, not a model id,
+    # and R5 is absolute: the literal string `inherit` must never reach a generated
+    # artifact on ANY front-end (it is an unknown model id on Codex and a hard error on
+    # OpenCode). Writing it into a `pin.` field is an easy misreading of the documented
+    # tier vocabulary, so it compiles to the same thing the `inherit` TIER does: omission.
+    if [ "$_rm_pin" = "inherit" ]; then
+      _model_warn_once "inheritpin:$_rm_fe:$_rm_tier" \
+        "⚠️  models.pin.$_rm_fe.$_rm_tier = 'inherit' is a tier name, not a model id — ignored, no model key written"
+      return 0
+    fi
+    # OpenCode is the one front-end where a syntactically invalid value ABORTS the
+    # operator's runs, so its `provider/model` shape is guarded (a format check, not a
+    # model-list check — the installer cannot know any vendor's model list).
+    if [ "$_rm_fe" = "opencode" ]; then
+      case "$_rm_pin" in
+        */*) ;;
+        *)
+          _model_warn_once "ocpin:$_rm_tier" \
+            "⚠️  models.pin.opencode.$_rm_tier = '$_rm_pin' is not in provider/model form — ignored, no model key written to opencode.json"
+          return 0 ;;
+      esac
+    fi
+    printf '%s\n' "$_rm_pin"
+    return 0
+  fi
+
+  _rm_alias="$(model_alias "$_rm_fe" "$_rm_tier")"
+  if [ -n "$_rm_alias" ]; then printf '%s\n' "$_rm_alias"; return 0; fi
+
+  _model_warn_once "nopin:$_rm_fe:$_rm_tier" \
+    "ℹ️  $_rm_fe has no built-in alias for tier '$_rm_tier' — set models.pin.$_rm_fe.$_rm_tier in .harness/harness.config.yaml to stamp a model there"
+  return 0
+}
+
+# models_any <front-end> — exit 0 iff at least one role resolves to a non-empty value.
+# Gates the CONDITIONAL creation of the `.gemini/agents/` and `.codex/agents/` trees, so
+# an unconfigured target never grows a directory it did not have before.
+models_any() {
+  for _ma_role in $MODEL_ROLES; do
+    if [ -n "$(resolve_model "$1" "$_ma_role")" ]; then return 0; fi
+  done
+  return 1
+}
 
 # agent_known <key> — true (exit 0) iff <key> is a registered agent key (R7, R10).
 agent_known() {
@@ -602,6 +798,14 @@ install_one() {
   UPGRADE=0
   if [ -f "$H/.harness-version" ]; then UPGRADE=1; fi
 
+  # Run-scoped ledger for model-routing diagnostics (E17-F01): resolve_model runs inside
+  # command substitutions, so de-duplication has to survive a subshell — hence a file.
+  # Cleared per target so a cascade install still advises once per repo. Removed with
+  # CMDDIR after §7.
+  MODELS_OFF=0
+  MODEL_DIAG="$(mktemp 2>/dev/null || mktemp -t harness-mdl)"
+  : > "$MODEL_DIAG"
+
   # ── agent selection (E08-F01) ───────────────────────────────────────────────
   # Capture the PRIOR persisted selection (for add/remove reconciliation, R12/R13)
   # BEFORE anything is written this run, then resolve the new SELECTED set. Note
@@ -843,6 +1047,18 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .agents/rules/*  .agents/agents/*  .agents/workflows/*   (repo root, regenerated; Antigravity glue)
   CLAUDE.md / AGENTS.md / GEMINI.md  -> only the harness:begin..end block
 
+MODEL ROUTING  (created ONLY when models: resolves a role to a concrete value):
+  .gemini/agents/*               per-role Gemini agent definitions (regenerated)
+  .codex/agents/*                per-role Codex agent definitions, PROJECT-LOCAL
+                                 (never written to \$CODEX_HOME / ~/.codex)
+  .harness/.opencode.stamp       byte copy of the last generated opencode.json, kept
+                                 only while it carries a model key (enables re-stamping)
+  .harness/.model-agents/        byte copies of the last generated .gemini/.codex per-role
+                                 files, kept only while those files exist (lets a switch
+                                 back to \`inherit\` reclaim them instead of orphaning them)
+  With no models: block — or every role on \`inherit\` — none of the above exists and
+  the generated tree is byte-identical to a harness without model routing.
+
 PROJECT-OWNED  (seeded once, never clobbered on upgrade):
   .harness/harness.config.yaml   (verification commands + store backend)
   .harness/init.project.sh       (project-specific init.sh gate checks)
@@ -852,7 +1068,7 @@ PROJECT-OWNED  (seeded once, never clobbered on upgrade):
 
 AGENT SELECTION  (E08-F01):
   .harness/.agents               harness-owned: the selected agent keys, one per line
-                                 (claude|gemini|opencode|antigravity), overwritten each run.
+                                 (claude|gemini|opencode|antigravity|codex), overwritten each run.
   Choose with --agents=<csv> / HARNESS_AGENTS=<csv>, an interactive toggle list, or
   (no TTY, no override) ALL. Deselecting an agent on a re-run REMOVES its glue above
   (its pointer block / .claude|.opencode dir / generated opencode.json) and warns;
@@ -925,18 +1141,31 @@ $MARK_END"
   # gen_opencode_json <dest> — write the canonical generated opencode.json to <dest>.
   # Single source of truth for both the stamp (§6) and the deselect byte-comparison,
   # so removal deletes ONLY a pristine generated file and never a user-edited one.
+  # _oc_model <role> — the `"model": "<value>", ` JSON member for <role>, or the EMPTY
+  # string when the role resolves to `inherit`/omission. Interpolated inline below, so an
+  # unconfigured target yields byte-for-byte the same opencode.json it always did.
+  _oc_model() {
+    _ocm="$(resolve_model opencode "$1")"
+    if [ -n "$_ocm" ]; then printf '"model": "%s", ' "$_ocm"; fi
+  }
   gen_opencode_json() {
-    cat > "$1" <<'EOF'
+    _oc_m_orchestrator="$(_oc_model orchestrator)"
+    _oc_m_architect="$(_oc_model architect)"
+    _oc_m_builder="$(_oc_model builder)"
+    _oc_m_reviewer="$(_oc_model reviewer)"
+    _oc_m_scout="$(_oc_model scout)"
+    _oc_m_doc_critic="$(_oc_model doc-critic)"
+    cat > "$1" <<EOF
 {
-  "$schema": "https://opencode.ai/config.json",
+  "\$schema": "https://opencode.ai/config.json",
   "instructions": [".harness/AGENTS.md"],
   "agent": {
-    "orchestrator": { "mode": "primary",  "description": "The Leader: routes the next task, delegates. Never writes code.", "prompt": "{file:./.harness/agents/orchestrator.md}" },
-    "architect":    { "mode": "subagent", "description": "Spec Author: writes the 4-file spec (EARS).",                     "prompt": "{file:./.harness/agents/architect.md}" },
-    "builder":      { "mode": "subagent", "description": "Implementer: writes code from an approved spec.",                 "prompt": "{file:./.harness/agents/builder.md}" },
-    "reviewer":     { "mode": "subagent", "description": "Evaluator: verifies against the spec, runs tests.",               "prompt": "{file:./.harness/agents/reviewer.md}" },
-    "scout":        { "mode": "subagent", "description": "Read-only recon; writes findings to progress/.",                  "prompt": "{file:./.harness/agents/scout.md}" },
-    "doc-critic":   { "mode": "subagent", "description": "Advisory doc review pass over planning docs + specs. Documents only, never code.", "prompt": "{file:./.harness/agents/doc-critic.md}" }
+    "orchestrator": { "mode": "primary",  "description": "The Leader: routes the next task, delegates. Never writes code.", ${_oc_m_orchestrator}"prompt": "{file:./.harness/agents/orchestrator.md}" },
+    "architect":    { "mode": "subagent", "description": "Spec Author: writes the 4-file spec (EARS).",                     ${_oc_m_architect}"prompt": "{file:./.harness/agents/architect.md}" },
+    "builder":      { "mode": "subagent", "description": "Implementer: writes code from an approved spec.",                 ${_oc_m_builder}"prompt": "{file:./.harness/agents/builder.md}" },
+    "reviewer":     { "mode": "subagent", "description": "Evaluator: verifies against the spec, runs tests.",               ${_oc_m_reviewer}"prompt": "{file:./.harness/agents/reviewer.md}" },
+    "scout":        { "mode": "subagent", "description": "Read-only recon; writes findings to progress/.",                  ${_oc_m_scout}"prompt": "{file:./.harness/agents/scout.md}" },
+    "doc-critic":   { "mode": "subagent", "description": "Advisory doc review pass over planning docs + specs. Documents only, never code.", ${_oc_m_doc_critic}"prompt": "{file:./.harness/agents/doc-critic.md}" }
   }
 }
 EOF
@@ -982,10 +1211,17 @@ EOF
   # gen_ag_persona <role> <description> <dest> — write one .agents/agents/<role>.md.
   gen_ag_persona() {
     _agp_role="$1"; _agp_desc="$2"; _agp_dest="$3"
-    cat > "$_agp_dest" <<EOF
----
-description: $_agp_desc
----
+    # Fixed key order (description, model); `model:` present or absent, never moved.
+    # Antigravity accepts only tier aliases here and needs `agy` >= 1.1.5 — below that
+    # the key is inert, never an error. (E17-F01 R13/R19/R21.)
+    _agp_model="$(resolve_model antigravity "$_agp_role")"
+    {
+      printf -- '---\n'
+      printf 'description: %s\n' "$_agp_desc"
+      if [ -n "$_agp_model" ]; then printf 'model: %s\n' "$_agp_model"; fi
+      printf -- '---\n'
+    } > "$_agp_dest"
+    cat >> "$_agp_dest" <<EOF
 
 You are the **$_agp_role** for this project's agent harness (installed in \`.harness/\`).
 
@@ -1012,6 +1248,67 @@ doc-critic	Advisory doc review pass over harness-generated planning docs + specs
 EOF
   }
 
+  # ── model-routing per-role artifacts for gemini + codex (E17-F01) ─────────────
+  # These two front-ends have no per-role generated artifact today, so "stamp a model per
+  # role" means CREATING the native per-role agent definition. Both emitters are hoisted
+  # here so the install stamp (§5e/§5f) and the deselect byte-compare (§7) call the exact
+  # same function — emitting twice from two places is what would make a stamped file
+  # permanently unremovable. Neither tree is created unless `models_any` says at least one
+  # role resolves, so an unconfigured target grows no new directory.
+
+  # gen_gemini_agent <role> <description> <dest> — one `.gemini/agents/<role>.md`.
+  # Gemini's `--model` flag and `/model` command do not reach sub-agents, so per-agent
+  # frontmatter is the only lever that exists. The body POINTS at the canonical
+  # `.harness/agents/<role>.md`; it never duplicates a role body.
+  gen_gemini_agent() {
+    _gga_role="$1"; _gga_desc="$2"; _gga_dest="$3"
+    _gga_model="$(resolve_model gemini "$_gga_role")"
+    {
+      printf -- '---\n'
+      printf 'name: %s\n' "$_gga_role"
+      printf 'description: %s\n' "$_gga_desc"
+      if [ -n "$_gga_model" ]; then printf 'model: %s\n' "$_gga_model"; fi
+      printf -- '---\n'
+    } > "$_gga_dest"
+    cat >> "$_gga_dest" <<EOF
+
+You are the **$_gga_role** for this project's agent harness (installed in \`.harness/\`).
+
+Your full, canonical role definition is \`.harness/agents/$_gga_role.md\` — read it now and
+follow it exactly. Resolve every relative path it mentions against \`.harness/\`
+(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
+\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on its
+non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
+chat history.
+EOF
+  }
+
+  # gen_codex_agent <role> <description> <dest> — one `.codex/agents/<role>.toml`, written
+  # INSIDE the target repo. Codex's other glue (§5d /sdd-* prompts) is machine-GLOBAL,
+  # which is only safe because those prompt bodies are target-independent. A model stamp
+  # is target-DEPENDENT: writing it to `$CODEX_HOME/agents/` would let one target silently
+  # retune every other target on the same machine. Project-local also keeps deselection
+  # inside $TARGET, where the pristine-compare machinery lives.
+  #
+  # Codex discovers agent files by DIRECTORY CONVENTION (`$CODEX_HOME/agents/` and the
+  # project-local `<repo>/.codex/agents/`); no registration in `.codex/config.toml` is
+  # needed. But it requires the trio `name` / `description` / `developer_instructions` —
+  # a file that spells the last key `instructions` is rejected at load time with
+  # "must define `developer_instructions`" (verified with `codex doctor --json`, CLI
+  # 0.145.0) and its model stamp silently never applies. Project-local `.codex/` is only
+  # read when the project is TRUSTED by Codex; see docs/INSTALL.md.
+  gen_codex_agent() {
+    _gca_role="$1"; _gca_desc="$2"; _gca_dest="$3"
+    _gca_model="$(resolve_model codex "$_gca_role")"
+    {
+      printf '# Generated by harness-install.sh — per-role model routing. Do not edit by hand.\n'
+      printf 'name = "%s"\n' "$_gca_role"
+      printf 'description = "%s"\n' "$_gca_desc"
+      if [ -n "$_gca_model" ]; then printf 'model = "%s"\n' "$_gca_model"; fi
+      printf 'developer_instructions = "Read .harness/agents/%s.md and follow it exactly; resolve every relative path against .harness/. Run .harness/init.sh first and halt on a non-zero exit."\n' "$_gca_role"
+    } > "$_gca_dest"
+  }
+
   # remove_if_pristine <rel-path> <ref-file> <agent-label> — delete <TARGET>/<rel-path>
   # ONLY when it is byte-identical to <ref-file> (a freshly-generated stamp). If it
   # differs (user-edited or foreign), LEAVE it in place with a notice — exactly
@@ -1027,6 +1324,82 @@ EOF
     else
       echo "⚠️  $_rip_rel differs from the generated stamp (edited) — left in place (deselected '$_rip_label' not removed)" >&2
     fi
+  }
+
+  # ── per-role model-artifact stamps + reclamation (E17-F01 R11/R22/R23) ────────
+  # `.harness/.model-agents/<front-end>/<file>` is a byte copy of the last per-role
+  # artifact the installer wrote for that front-end — the exact device
+  # `.harness/.opencode.stamp` already uses for opencode.json (R20).
+  #
+  # It exists because the reclamation reference has to be the bytes produced by the
+  # config that was in force WHEN THE FILE WAS WRITTEN, not by the config in force
+  # now. Both reclamation cases change the config by construction:
+  #   • every role moved back to `inherit` (§5e/§5f) — a freshly generated body then
+  #     carries no `model:` key while the on-disk file still does, so without the
+  #     stamp EVERY pristine file would be misread as user-edited and orphaned,
+  #     leaving the old model silently in force (Codex r1 P1 #3654925551);
+  #   • a front-end deselected in the same run as a `models:` edit (§7)
+  #     (Codex r1 P2 #3654925555).
+  # The stamp is kept ONLY while the artifacts it describes exist and is removed with
+  # them, so a target where nothing resolves keeps its R11 byte-identity.
+
+  # stamp_model_agent <front-end> <file> <src> — remember the bytes just written.
+  stamp_model_agent() {
+    mkdir -p "$H/.model-agents/$1"
+    cp "$3" "$H/.model-agents/$1/$2"
+  }
+
+  # reclaim_model_agents <front-end> — remove this front-end's per-role model
+  # artifacts, pristine-only, and prune the harness-created dirs. Called from BOTH the
+  # install path (nothing resolves any more) and §7 (front-end deselected), so the two
+  # never diverge. Emission stays in the ONE hoisted emitter per front-end (R21).
+  reclaim_model_agents() {
+    _rma_fe="$1"
+    # NOTE: the emitter is dispatched through a NAME, not a `case` inside the loop
+    # below — bash 3.2 (still the /bin/sh on macOS) mis-parses a `case` nested in a
+    # `$( )` command substitution. Same single-emitter guarantee, one indirection.
+    case "$_rma_fe" in
+      gemini) _rma_top=".gemini"; _rma_ext="md";   _rma_gen=gen_gemini_agent ;;
+      codex)  _rma_top=".codex";  _rma_ext="toml"; _rma_gen=gen_codex_agent ;;
+      *) return 0 ;;
+    esac
+    _rma_sub="$_rma_top/agents"
+    _rma_stamp="$H/.model-agents/$_rma_fe"
+    if [ -d "$TARGET/$_rma_sub" ]; then
+      _rma_tmp="$(mktemp 2>/dev/null || mktemp -t harness-ma)"
+      _rma_gone="$(ag_personas | while IFS='	' read -r _rma_r _rma_d; do
+        [ -n "$_rma_r" ] || continue
+        _rma_f="$_rma_r.$_rma_ext"
+        [ -f "$TARGET/$_rma_sub/$_rma_f" ] || continue
+        # Reference: the remembered bytes when they match what is on disk (the file may
+        # have been written under a different `models:` config); otherwise a freshly
+        # generated body, which still covers targets stamped before stamps existed.
+        "$_rma_gen" "$_rma_r" "$_rma_d" "$_rma_tmp"
+        _rma_ref="$_rma_tmp"
+        if [ -f "$_rma_stamp/$_rma_f" ] \
+           && cmp -s "$TARGET/$_rma_sub/$_rma_f" "$_rma_stamp/$_rma_f"; then
+          _rma_ref="$_rma_stamp/$_rma_f"
+        fi
+        remove_if_pristine "$_rma_sub/$_rma_f" "$_rma_ref" "$_rma_fe"
+      done)"
+      rm -f "$_rma_tmp"
+      # Never `rm -rf`: named files above, then rmdir — which fails harmlessly when a
+      # user-edited (or foreign) file was deliberately left behind.
+      rmdir "$TARGET/$_rma_sub" 2>/dev/null || true
+      rmdir "$TARGET/$_rma_top" 2>/dev/null || true
+      [ -n "$_rma_gone" ] && info "reclaimed $_rma_fe per-role model artifacts ($_rma_sub/)"
+    fi
+    # The stamps describe files the harness no longer owns — drop them, or an
+    # all-`inherit` target would keep state a never-configured one does not have (R11).
+    if [ -d "$_rma_stamp" ]; then
+      ag_personas | while IFS='	' read -r _rma_r _rma_d; do
+        [ -n "$_rma_r" ] || continue
+        rm -f "$_rma_stamp/$_rma_r.$_rma_ext"
+      done
+      rmdir "$_rma_stamp" 2>/dev/null || true
+      rmdir "$H/.model-agents" 2>/dev/null || true
+    fi
+    return 0
   }
 
   # AGENTS.md is the shared portable entrypoint — ALWAYS written, never gated (R2 note).
@@ -1051,12 +1424,20 @@ EOF
   if agent_selected claude; then
   mkdir -p "$TARGET/.claude/agents" "$TARGET/.claude/commands"
   emit_agent() { # emit_agent <name> <tools> <description>
-    cat > "$TARGET/.claude/agents/$1.md" <<EOF
----
-name: $1
-description: $3
-tools: $2
----
+    # Frontmatter key order is FIXED (name, description, tools, model) regardless of
+    # config state — the `model:` line is either present in that one position or absent
+    # entirely, never reordered. Order is part of the byte contract the deselect
+    # pristine-compare depends on. (E17-F01 R12/R19/R21.)
+    _ea_model="$(resolve_model claude "$1")"
+    {
+      printf -- '---\n'
+      printf 'name: %s\n' "$1"
+      printf 'description: %s\n' "$3"
+      printf 'tools: %s\n' "$2"
+      if [ -n "$_ea_model" ]; then printf 'model: %s\n' "$_ea_model"; fi
+      printf -- '---\n'
+    } > "$TARGET/.claude/agents/$1.md"
+    cat >> "$TARGET/.claude/agents/$1.md" <<EOF
 
 You are the **$1** for this project's agent harness (installed in \`.harness/\`).
 
@@ -1499,6 +1880,47 @@ EOF
     fi
   fi
 
+  # ── 5e. Gemini per-role agent definitions (gated on `gemini` + a resolvable model) ─
+  # CONDITIONAL by design (E17-F01 R11/R17): this tree is created ONLY when at least one
+  # role resolves to a concrete value. With no `models:` block — or every role on
+  # `inherit` — `.gemini/agents/` is never created and the target tree stays exactly what
+  # it was before this feature existed.
+  if agent_selected gemini && models_any gemini; then
+    mkdir -p "$TARGET/.gemini/agents"
+    ag_personas | while IFS='	' read -r _gmr _gmd; do
+      [ -n "$_gmr" ] || continue
+      gen_gemini_agent "$_gmr" "$_gmd" "$TARGET/.gemini/agents/$_gmr.md"
+      stamp_model_agent gemini "$_gmr.md" "$TARGET/.gemini/agents/$_gmr.md"
+    done
+    ok "Gemini per-role agent definitions installed (.gemini/agents/)"
+  elif agent_selected gemini; then
+    # Nothing resolves any more — but a PREVIOUS run may have stamped this tree with a
+    # concrete tier. Skipping here would leave those files (and their old `model:` keys)
+    # discoverable, so the documented switch back to session inheritance would silently
+    # keep using the old model. Reconcile instead: reclaim the pristine stamps and prune,
+    # which is what makes R11 ("no `.gemini/agents/` at all") true on a target that WAS
+    # configured, not just on a fresh one. (Codex r1 P1 #3654925551.)
+    reclaim_model_agents gemini
+  fi
+
+  # ── 5f. Codex per-role agent definitions (gated on `codex` + a resolvable model) ──
+  # PROJECT-LOCAL, always: written under $TARGET, never into $CODEX_HOME/$HOME/.codex.
+  # A model stamp is target-dependent, so the machine-global path §5d uses for prompts
+  # would let one repo silently retune another. Same conditional creation as §5e.
+  if agent_selected codex && models_any codex; then
+    mkdir -p "$TARGET/.codex/agents"
+    ag_personas | while IFS='	' read -r _cxr _cxd; do
+      [ -n "$_cxr" ] || continue
+      gen_codex_agent "$_cxr" "$_cxd" "$TARGET/.codex/agents/$_cxr.toml"
+      stamp_model_agent codex "$_cxr.toml" "$TARGET/.codex/agents/$_cxr.toml"
+    done
+    ok "Codex per-role agent definitions installed (.codex/agents/ — project-local)"
+  elif agent_selected codex; then
+    # Same reconciliation as §5e — see the note there. Only the PROJECT-LOCAL tree is
+    # touched; nothing under $CODEX_HOME is ever created or removed by model routing.
+    reclaim_model_agents codex
+  fi
+
   # NOTE: CMDDIR cleanup is intentionally DEFERRED to AFTER §7 — the antigravity
   # deselect compare byte-checks each `.agents/workflows/<name>.md` against the
   # source `$CMDDIR/<name>.md`, so the temp workflow bodies must stay available
@@ -1506,11 +1928,58 @@ EOF
   # is harmless and still unconditional. (Codex r2 P1 #3404240336.)
 
   # ── 6. opencode.json (gated on `opencode`; create if absent; never clobber) ──
-  if agent_selected opencode && [ ! -f "$TARGET/opencode.json" ]; then
-    gen_opencode_json "$TARGET/opencode.json"
-    ok "opencode.json created"
-  elif agent_selected opencode; then
-    info "opencode.json exists — left untouched (point it at .harness/ manually if you use OpenCode)"
+  # Unlike every other generated artifact, opencode.json is NOT regenerated on a plain
+  # re-run — it is a config file the operator may own. Per-role model routing needs a
+  # re-stamp path, so the never-clobber contract is refined rather than dropped
+  # (E17-F01 R20): regenerate in place ONLY when the on-disk file is byte-identical to
+  # something the installer itself produced —
+  #   (a) `.harness/.opencode.stamp`, the byte copy of the last opencode.json we wrote
+  #       (this is what makes a re-stamp possible AFTER a model was already stamped), or
+  #   (b) a freshly generated MODEL-FREE body (every pre-E17 target, and every target
+  #       whose roles are all `inherit`).
+  # Anything else is a user-owned file: left byte-for-byte untouched, with a warning that
+  # model changes were not applied.
+  #
+  # The body is installed with `cat "$_oc_new" > …`, NEVER `cp`. `$_oc_new` is a mktemp
+  # file (mode 0600) and `cp` to a NON-EXISTENT destination copies the source's permission
+  # bits, which would silently make a fresh install's opencode.json 0600 where the
+  # pre-E17 `gen_opencode_json "$TARGET/opencode.json"` (a plain `>` redirect) produced
+  # 0666 & ~umask ⇒ 0644 — and would make fresh targets diverge from upgraded ones, since
+  # `cp` onto an EXISTING file keeps that file's mode. `>` creates at the umask default
+  # and preserves an existing file's mode, i.e. the exact pre-feature behaviour on both
+  # paths. Asserted by tests/test_model_routing.sh::test_opencode_json_restamp_rules.
+  if agent_selected opencode; then
+    _oc_new="$(mktemp 2>/dev/null || mktemp -t harness-oc)"
+    gen_opencode_json "$_oc_new"
+    _oc_written=0
+    if [ ! -f "$TARGET/opencode.json" ]; then
+      cat "$_oc_new" > "$TARGET/opencode.json"
+      _oc_written=1
+      ok "opencode.json created"
+    else
+      _oc_free="$(mktemp 2>/dev/null || mktemp -t harness-ocf)"
+      MODELS_OFF=1; gen_opencode_json "$_oc_free"; MODELS_OFF=0
+      if { [ -f "$H/.opencode.stamp" ] && cmp -s "$TARGET/opencode.json" "$H/.opencode.stamp"; } \
+         || cmp -s "$TARGET/opencode.json" "$_oc_free"; then
+        cat "$_oc_new" > "$TARGET/opencode.json"
+        _oc_written=1
+        info "opencode.json regenerated (pristine harness stamp; model routing applied)"
+      else
+        echo "⚠️  opencode.json differs from the generated stamp (edited) — left untouched; model routing changes were NOT applied" >&2
+      fi
+      rm -f "$_oc_free"
+    fi
+    # The stamp exists only to make a re-stamp possible once a model key is present; a
+    # model-free body is already reproducible from gen_opencode_json, so no stamp is kept
+    # for it (that keeps R11 true: an unconfigured target grows no new file).
+    if [ "$_oc_written" = 1 ]; then
+      if grep -q '"model":' "$TARGET/opencode.json"; then
+        cp "$TARGET/opencode.json" "$H/.opencode.stamp"
+      else
+        rm -f "$H/.opencode.stamp"
+      fi
+    fi
+    rm -f "$_oc_new"
   fi
 
   # ── 7. selection persistence + add/remove reconciliation (E08-F01) ───────────
@@ -1542,6 +2011,11 @@ EOF
             remove_pointer GEMINI.md
             echo "⚠️  removed deselected agent 'gemini' glue: GEMINI.md harness block" >&2
           fi
+          # E17-F01: reclaim the per-role model artifacts (.gemini/agents/<role>.md)
+          # through the SAME helper §5e's reconciliation uses, so deselection and
+          # "everything back to inherit" can never diverge. Pristine-only (a
+          # user-edited file is left in place with a warning); never `rm -rf`.
+          reclaim_model_agents gemini
           ;;
         opencode)
           remove_owned .opencode/command opencode $HARNESS_SDD_CMDS
@@ -1551,11 +2025,18 @@ EOF
           # `model`/providers key to the generated file — makes it differ, so it is
           # left in place with a warning. This is precise where the old substring
           # heuristic was too broad and could delete edited config. (Codex r4 P2)
+          # E17-F01 R22: with model routing the generated body depends on the config, so
+          # compare against `.harness/.opencode.stamp` (the exact bytes we last wrote)
+          # FIRST, then fall back to a freshly generated body. The stamp closes the gap
+          # where the operator edits `models:` and deselects WITHOUT an install in
+          # between. On removal the stamp goes with the file it describes.
           if [ -f "$TARGET/opencode.json" ]; then
             _ref="$(mktemp 2>/dev/null || mktemp -t harness-oc)"
             gen_opencode_json "$_ref"
-            if cmp -s "$TARGET/opencode.json" "$_ref"; then
+            if { [ -f "$H/.opencode.stamp" ] && cmp -s "$TARGET/opencode.json" "$H/.opencode.stamp"; } \
+               || cmp -s "$TARGET/opencode.json" "$_ref"; then
               rm -f "$TARGET/opencode.json"
+              rm -f "$H/.opencode.stamp"
               echo "⚠️  removed deselected agent 'opencode' glue: opencode.json (pristine generated)" >&2
             else
               echo "⚠️  opencode.json differs from the generated stamp (edited) — left in place (deselected 'opencode' not removed)" >&2
@@ -1631,6 +2112,11 @@ EOF
             [ -n "$_cdx_removed" ] && echo "⚠️  removed deselected agent 'codex' glue:$_cdx_removed (in $_cdx/ — GLOBAL, shared prompts)" >&2
             rmdir "$_cdx" 2>/dev/null || true   # prune only if now empty
           fi
+          # E17-F01: reclaim the PROJECT-LOCAL per-role model artifacts
+          # (.codex/agents/<role>.toml) through the same shared helper as §5f. The GLOBAL
+          # prompt reclamation above is untouched, and nothing under $CODEX_HOME/agents is
+          # ever created or removed.
+          reclaim_model_agents codex
           ;;
       esac
     done
@@ -1639,6 +2125,8 @@ EOF
   # CMDDIR cleanup (deferred from §5c): the antigravity deselect compare above needs
   # the temp workflow bodies. Unconditional — always runs regardless of selection.
   rm -rf "$CMDDIR"
+  # Model-routing diagnostic ledger (E17-F01): only de-duplicates stderr advisories.
+  rm -f "$MODEL_DIAG"
 
   # ── done ────────────────────────────────────────────────────────────────────
   echo "──────────────────────────────────────────────────"
