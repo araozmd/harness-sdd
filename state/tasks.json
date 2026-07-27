@@ -385,7 +385,7 @@
         {
           "id": "E17-F01",
           "title": "Per-role model selection: config schema + per-front-end agent stamping",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
