@@ -113,6 +113,52 @@ OUT="$(cd "$T/noadr" && ./init.sh 2>&1)" || fail "R5: init.sh exited non-zero wi
 echo "$OUT" | grep -qi 'ADR' && fail "R5: sweep emitted ADR output despite specs/adr/ being absent (must be a no-op)"
 pass "R5 noop_without_adr_dir"
 
+# ── R7: a citation resolving in a SECOND ADR namespace (specs/<product>/adr/) is ──
+#       NOT a miss; only the genuinely unresolvable id warns (E99-F50).
+# R7_multi_namespace_resolution
+mk_sandbox multins
+mkdir -p "$T/multins/specs/adr" "$T/multins/specs/bookings/adr"
+cat > "$T/multins/specs/adr/0001-platform-decision.md" <<'MD'
+# ADR-0001 — platform-space decision
+MD
+cat > "$T/multins/specs/bookings/adr/0026-product-decision.md" <<'MD'
+# ADR-0026 — product-space decision (separate numbering space)
+MD
+cat > "$T/multins/specs/epics/E01-demo/F01-thing/E01-F01.spec.md" <<'MD'
+# E01-F01 — fixture spec
+
+## Architecture alignment
+- ADR-0001 — resolves in the platform namespace specs/adr/.
+- ADR-0026 — resolves in the product namespace specs/bookings/adr/.
+- ADR-0042 — resolves in NEITHER namespace: this is the only real miss.
+MD
+OUT="$(cd "$T/multins" && ./init.sh 2>&1)" || fail "R7: init.sh exited non-zero with two ADR namespaces (must stay warn-only)"
+echo "$OUT" | grep -q 'ADR-0001' && fail "R7: warned on an id that resolves in specs/adr/"
+echo "$OUT" | grep -q 'ADR-0026' && fail "R7: warned on an id that resolves in the second namespace specs/bookings/adr/ (false positive)"
+echo "$OUT" | grep -q 'ADR citation:.*ADR-0042' || fail "R7: did not warn on the id that resolves in NO namespace (check went blind)"
+[ "$(echo "$OUT" | grep -c 'ADR citation:')" -eq 1 ] || fail "R7: expected exactly 1 unresolved-citation warning"
+echo "$OUT" | grep -q '1 unresolved ADR citation' || fail "R7: trailing count line wrong or missing"
+pass "R7 multi_namespace_resolution"
+
+# ── R8: ONLY the product namespace exists (no specs/adr/) ⇒ sweep still runs and ──
+#       resolves against it, instead of no-op'ing or warning on everything.
+# R8_product_namespace_only
+mk_sandbox prodns
+mkdir -p "$T/prodns/specs/bookings/adr"
+cat > "$T/prodns/specs/bookings/adr/0030-only-space.md" <<'MD'
+# ADR-0030 — the only ADR namespace in this project
+MD
+cat > "$T/prodns/specs/epics/E01-demo/F01-thing/E01-F01.spec.md" <<'MD'
+# E01-F01 — fixture spec
+
+## Architecture alignment
+- ADR-0030 — resolves in the sole (product) namespace.
+MD
+OUT="$(cd "$T/prodns" && ./init.sh 2>&1)" || fail "R8: init.sh exited non-zero with only a product ADR namespace"
+echo "$OUT" | grep -q 'ADR citation:' && fail "R8: warned although the citation resolves in specs/bookings/adr/"
+echo "$OUT" | grep -q 'ADR citations resolve' || fail "R8: success line missing (sweep did not run against the product namespace)"
+pass "R8 product_namespace_only"
+
 # ── R6: the live repo's ./init.sh still exits 0 (sweep is additive, never gates) ──
 # R6_live_init_green
 ./init.sh >/dev/null 2>&1 || fail "R6: ./init.sh did not exit 0 in the live repo"

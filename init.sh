@@ -141,25 +141,40 @@ fi
 #     surfaces the same typo at session start instead: for each
 #     specs/epics/**/*.spec.md carrying the section, every `ADR-NNNN` cited INSIDE
 #     that section (only there — incidental ADR-NNNN mentions elsewhere don't count)
-#     must resolve to an existing specs/adr/NNNN-*.md. A miss WARNS and NEVER fails
-#     the gate (the ADR may have been renamed/removed legitimately — the Reviewer's
-#     soft flag owns the verdict). No-op when specs/adr/ is absent (graceful
-#     degradation, mirroring the Reviewer check's precondition). Zero-dep + fast:
-#     one grep -rl over specs/epics plus a tiny awk per matching spec.
-if [ -d specs/adr ]; then
+#     must resolve to an ADR file `NNNN-*.md`. A miss WARNS and NEVER fails the gate
+#     (the ADR may have been renamed/removed legitimately — the Reviewer's soft flag
+#     owns the verdict).
+#
+#     RESOLUTION IS NAMESPACE-AWARE: a project may keep more than one ADR space —
+#     the platform space `specs/adr/` plus one product/agent space per subtree, e.g.
+#     `specs/<product>/adr/` (that split is itself an ADR-recorded decision in
+#     downstream projects, and the number spaces are independent). A citation
+#     therefore resolves against **any `adr/` directory under `specs/`**, and only
+#     warns when it resolves in NONE of them — otherwise every legitimate
+#     product-namespace citation cries wolf and a real typo becomes invisible.
+#     No-op when `specs/` holds no `adr/` directory at all (graceful degradation,
+#     mirroring the Reviewer check's precondition). Zero-dep + fast: two `find`
+#     passes over `specs/` build a one-shot index of known ADR numbers, then one
+#     `grep -rl` over specs/epics plus a tiny awk per matching spec.
+ADR_NAMESPACES="$(find specs -type d -name adr 2>/dev/null | sort | tr '\n' ' ')"
+if [ -n "$ADR_NAMESPACES" ]; then
+  # Index every ADR number once (basename `NNNN-*.md` in any namespace), so the
+  # per-citation lookup is a string match instead of a filesystem probe per space.
+  ADR_INDEX="$(find specs -type f -path '*/adr/*' -name '*.md' 2>/dev/null \
+               | sed 's|.*/||' | grep -oE '^[0-9]+' | sort -u || true)"
   ADR_MISS=0
   for spec in $(grep -rl '^## Architecture alignment' specs/epics --include='*.spec.md' 2>/dev/null || true); do
     for id in $(awk '/^## Architecture alignment/{f=1;next} /^## /{f=0} f' "$spec" \
                 | grep -oE 'ADR-[0-9]{4}' | sort -u || true); do
       n="${id#ADR-}"
-      if ! ls "specs/adr/${n}-"*.md >/dev/null 2>&1; then
-        echo "⚠️  ADR citation: $spec cites $id but no specs/adr/${n}-*.md exists"
+      if ! printf '%s\n' "$ADR_INDEX" | grep -qx "$n"; then
+        echo "⚠️  ADR citation: $spec cites $id but no ${n}-*.md exists in any ADR namespace (searched: ${ADR_NAMESPACES% })"
         ADR_MISS=$((ADR_MISS+1))
       fi
     done
   done
   if [ "$ADR_MISS" -eq 0 ]; then
-    ok "ADR citations resolve (specs/adr/ present)"
+    ok "ADR citations resolve (namespaces: ${ADR_NAMESPACES% })"
   else
     echo "⚠️  $ADR_MISS unresolved ADR citation(s) — warn-only, never blocks the gate (fix the typo or update the spec)"
   fi

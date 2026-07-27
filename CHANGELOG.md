@@ -4,6 +4,25 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.37.1] — 2026-07-27
+
+### Fixed — 🐛 ADR-citation sweep resolves every ADR namespace (E99-F50)
+- `init.sh` section 2c resolved a cited `ADR-NNNN` **only** against `specs/adr/`, so a
+  project that keeps a second, legitimate ADR namespace (`specs/<product>/adr/`, e.g.
+  the platform-vs-product altitude split) got a standing wall of false-positive
+  warnings — 18 of them in one downstream install, every one of them wrong.
+- A citation now resolves against **any `adr/` directory under `specs/`** and warns
+  only when it resolves in **none** of them. The sweep builds a one-shot index of ADR
+  numbers (two `find` passes over `specs/`) instead of probing a single hard-coded
+  directory, so a third namespace needs no code change.
+- Unchanged by design: warn-only (never gates), POSIX `sh`, zero dependencies, the
+  `## Architecture alignment` section scoping, the trailing unresolved-count line, and
+  the complete no-op when `specs/` holds no `adr/` directory at all. The success line
+  and the miss warning now name the namespaces that were searched.
+- `tests/test_adr_citation.sh` gains R7 (a citation resolving in a second namespace is
+  silent while a genuinely unresolvable id is the *only* warning) and R8 (a project
+  whose *only* ADR space is a product namespace still gets a live sweep, not a no-op).
+
 ## [0.37.0] — 2026-07-25
 
 ### Added — ✨ Deterministic next-task selection (E16-F03)
