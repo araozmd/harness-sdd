@@ -24,6 +24,11 @@ All notable changes to the harness body are recorded here. Versions follow
   `en_US.UTF-8` and `C` (skipping cleanly where a locale is absent) and asserts rejection
   plus no ref/registration/path mutation — so the hole is caught in C-locale CI too, not
   only on a developer laptop.
+- Accepted consequence: because `LC_ALL=C` is **exported**, `fix-worktree.sh run` now
+  executes its command in the C locale, so a target repo whose test command is
+  collation-sensitive (a `sort`, a `[a-z]` range, locale-formatted output) sees C
+  ordering there — the pass-through contract itself is unchanged, since `run` guarantees
+  only cwd, `HARNESS_DIR`, and exit status.
 - Scope is only this glob: the `grep -Eq '^[a-z0-9-]+$'` validators in `harness-install.sh`
   and the Python `re` validator in `init.sh` were verified unaffected and left alone.
 
