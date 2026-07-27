@@ -11,11 +11,14 @@ write production code.
   open questions) captured by Inception during intake. Spec **from** that brief, not
   from the one-line TaskStore title. The one-line intent is only a fallback when no
   brief exists.
-- **`specs/architecture.md` + `specs/adr/NNNN-*.md` are a mandatory input — whenever
-  they are present.** When the project has been planned (`/sdd-plan` wrote the durable
+- **`specs/architecture.md` + the ADRs are a mandatory input — whenever they are
+  present.** When the project has been planned (`/sdd-plan` wrote the durable
   design), the system architecture and the Architecture Decision Records are a
   **required** input alongside the inbox brief: read them before you write the spec, so
   the feature is designed *inside* the recorded decisions rather than re-litigating them.
+  ADRs live in the platform space `specs/adr/NNNN-*.md` **and**, in a project that keeps
+  a product/agent space, in `specs/<product>/adr/NNNN-*.md` — read **every** `adr/`
+  directory under `specs/`, not just the root one.
   This input is mandatory **only when those artifacts exist** — see *Graceful
   degradation* below for legacy / un-planned repos.
 - **Reuse the F03-D7 hook — don't re-derive the touched ADRs.** The inbox brief the
@@ -62,6 +65,16 @@ section, and its content obeys these rules:
    the brief's recorded ids, per the F03-D7 hook above), each with a **one-line statement
    of how this feature honors** that decision. Example:
    `- ADR-0001 — Event-sourced store: this feature appends events, honoring the decision.`
+   **Qualify the namespace when the project has more than one ADR space.** A project may
+   keep the platform space `specs/adr/` plus a product/agent space per subtree, e.g.
+   `specs/<product>/adr/`; the number spaces are independent and normally **collide**
+   (`0023` can exist in both with different content). Write `<ns>/ADR-NNNN` — the `<ns>`
+   token is the `adr/` directory's parent basename, with `platform` reserved for the root
+   space — e.g. `- bookings/ADR-0023 — …` and `- platform ADR-0008 — …`. A **qualified**
+   citation is checked against **that space only** (by `agents/reviewer.md` and by
+   `init.sh`'s warn-only sweep), which is what catches a cross-namespace typo. A **bare**
+   `ADR-NNNN` still resolves against any space, so it is legal but **unchecked across
+   namespaces** — use it only in single-namespace projects.
 2. **`ADRs touched: none` is an explicit, legitimate state.** When architecture artifacts
    are present but the feature genuinely touches **no** recorded decision, you still write
    the section, and you record exactly **`ADRs touched: none`** with a one-line *why*. This
@@ -79,8 +92,9 @@ section, and its content obeys these rules:
 - **Present = exists AND carries real content.** Treat `specs/architecture.md` as
   **present** only when the file exists **and** carries **real content** — not an empty
   file and **not the untouched template stub**. Treat the ADR set as present only when
-  `specs/adr/` holds **at least one real `NNNN-*.md`**. A bare scaffold counts as
-  **absent**.
+  **some ADR namespace** holds **at least one real `NNNN-*.md`** — the platform space
+  `specs/adr/` **or** a product space `specs/<product>/adr/` (a project may legitimately
+  have only the latter). A bare scaffold counts as **absent**.
 - **Absent ⇒ note it and proceed — never fail, never fabricate.** If
   `specs/architecture.md` / the ADRs are **absent** (a legacy repo that never ran
   `/sdd-plan`, or `/sdd-new`'s altitude-3 flow that produces no architecture), **record

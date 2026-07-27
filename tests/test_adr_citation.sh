@@ -78,6 +78,9 @@ echo "$OUT" | grep -q 'ADR citation:'             || fail "R3: init.sh emitted n
 echo "$OUT" | grep -q 'ADR-0042'                  || fail "R3: warning does not name the unresolved id ADR-0042"
 echo "$OUT" | grep -q 'ADR-9999' && fail "R3: sweep scanned an ADR id OUTSIDE the Architecture alignment section (ADR-9999)"
 echo "$OUT" | grep -q 'ADR-8888' && fail "R3: sweep scanned an ADR id AFTER the section ended (ADR-8888)"
+# NOTE: the `NNNN-*.md exists` substring below is LOAD-BEARING — it is how this
+# negative assertion distinguishes "warned about 0001" from any other mention of the
+# id. Every miss message in init.sh section 2c must keep it or this goes vacuous.
 echo "$OUT" | grep -q '0001-\*\.md'.*'exists' && fail "R3: sweep wrongly warned on the RESOLVING id ADR-0001"
 echo "$OUT" | grep -q 'environment ready'         || fail "R3: init.sh did not reach the final ready gate"
 pass "R3 sweep_warns_exit0"
@@ -158,6 +161,94 @@ OUT="$(cd "$T/prodns" && ./init.sh 2>&1)" || fail "R8: init.sh exited non-zero w
 echo "$OUT" | grep -q 'ADR citation:' && fail "R8: warned although the citation resolves in specs/bookings/adr/"
 echo "$OUT" | grep -q 'ADR citations resolve' || fail "R8: success line missing (sweep did not run against the product namespace)"
 pass "R8 product_namespace_only"
+
+# ── R9: a QUALIFIED citation (`<ns>/ADR-NNNN`, or `<ns> ADR-NNNN` for a known ns) ──
+#       resolves in THAT namespace ONLY — cross-namespace ids and unknown namespaces
+#       still warn even though the number exists somewhere (E99-F50 round 2).
+#       The two spaces deliberately COLLIDE (0001 platform-only, 0023/0026 bookings-only).
+# R9_qualified_is_namespace_scoped
+mk_sandbox qualns
+mkdir -p "$T/qualns/specs/adr" "$T/qualns/specs/bookings/adr"
+cat > "$T/qualns/specs/adr/0001-platform-only.md" <<'MD'
+# ADR-0001 — exists ONLY in the platform namespace
+MD
+cat > "$T/qualns/specs/bookings/adr/0023-product-only.md" <<'MD'
+# ADR-0023 — exists ONLY in the product namespace
+MD
+cat > "$T/qualns/specs/bookings/adr/0026-product-only.md" <<'MD'
+# ADR-0026 — exists ONLY in the product namespace
+MD
+cat > "$T/qualns/specs/epics/E01-demo/F01-thing/E01-F01.spec.md" <<'MD'
+# E01-F01 — fixture spec
+
+## Architecture alignment
+- bookings/ADR-0023 — qualified, resolves in its own namespace: silent.
+- bookings/ADR-0026 — qualified, resolves in its own namespace: silent.
+- platform ADR-0001 — qualified prose form, resolves in specs/adr/: silent.
+- platform ADR-0023 — MISS: 0023 is product-only, so this is a cross-namespace typo.
+- bookings/ADR-0001 — MISS: 0001 is platform-only (the other direction).
+- fictional/ADR-0001 — MISS: 'fictional' is not an ADR namespace in this project.
+MD
+OUT="$(cd "$T/qualns" && ./init.sh 2>&1)" || fail "R9: init.sh exited non-zero on qualified citations (must stay warn-only)"
+echo "$OUT" | grep -q 'platform/ADR-0023' || fail "R9: a qualified platform id silently resolved against the product namespace (cross-namespace typo went undetected)"
+echo "$OUT" | grep -q 'bookings/ADR-0001' || fail "R9: a qualified product id silently resolved against the platform namespace"
+echo "$OUT" | grep -q 'fictional/ADR-0001' || fail "R9: a citation qualified with an unknown namespace did not warn"
+echo "$OUT" | grep -q 'ADR-0026' && fail "R9: warned on bookings/ADR-0026, which resolves in the namespace it names (false positive)"
+echo "$OUT" | grep -q 'ADR citation:.*cites ADR-' && fail "R9: a qualified citation was treated as bare (qualifier discarded)"
+[ "$(echo "$OUT" | grep -c 'ADR citation:')" -eq 3 ] || fail "R9: expected exactly 3 unresolved-citation warnings, got $(echo "$OUT" | grep -c 'ADR citation:')"
+pass "R9 qualified_is_namespace_scoped"
+
+# ── R10: a BARE `ADR-NNNN` asserts no namespace, so it stays permissive-any (the ────
+#        deliberate ruling: never infer a namespace the author did not write), and an
+#        ordinary prose word before an id is NOT a qualifier (E99-F50 round 2).
+# R10_bare_is_namespace_agnostic
+mk_sandbox barens
+mkdir -p "$T/barens/specs/adr" "$T/barens/specs/bookings/adr"
+cat > "$T/barens/specs/adr/0001-platform-only.md" <<'MD'
+# ADR-0001 — exists ONLY in the platform namespace
+MD
+cat > "$T/barens/specs/bookings/adr/0026-product-only.md" <<'MD'
+# ADR-0026 — exists ONLY in the product namespace
+MD
+cat > "$T/barens/specs/epics/E01-demo/F01-thing/E01-F01.spec.md" <<'MD'
+# E01-F01 — fixture spec
+
+## Architecture alignment
+- ADR-0001 — bare, resolves in the platform namespace: silent.
+- ADR-0026 — bare, resolves in the product namespace: silent (bare = any namespace).
+- the availability ADR-0026 rule — an ordinary prose word is NOT a namespace qualifier.
+- ADR-0042 — resolves in NO namespace: the only real miss.
+MD
+OUT="$(cd "$T/barens" && ./init.sh 2>&1)" || fail "R10: init.sh exited non-zero on bare citations (must stay warn-only)"
+# Ordered first on purpose: it is the assertion that dies under the "any preceding word
+# is a namespace qualifier" mutant, and the ADR-0026 check below would shadow it.
+echo "$OUT" | grep -q 'availability/' && fail "R10: promoted an ordinary prose word to an ADR namespace qualifier"
+echo "$OUT" | grep -q 'ADR-0026' && fail "R10: warned on a bare id that resolves in the product namespace (bare must stay permissive-any)"
+echo "$OUT" | grep -q 'ADR citation:.*cites ADR-0042' || fail "R10: did not warn on the bare id that resolves in NO namespace (check went blind)"
+[ "$(echo "$OUT" | grep -c 'ADR citation:')" -eq 1 ] || fail "R10: expected exactly 1 unresolved-citation warning, got $(echo "$OUT" | grep -c 'ADR citation:')"
+pass "R10 bare_is_namespace_agnostic"
+
+# ── R11: contract coherence — init.sh, the Reviewer, the Architect and the spec ────
+#        template must state the SAME namespace rule. init.sh's sweep and the
+#        Reviewer's soft flag are the same check at two altitudes; if the prose only
+#        knows `specs/adr/`, a Reviewer following it literally re-flags every product-
+#        namespace citation the sweep certifies clean (E99-F50 round 2, blocker 2).
+# R11_contract_coherence
+ARC="agents/architect.md"; TPL="specs/_templates/feature.spec.md"
+for f in "$REV" "$ARC" "$TPL" init.sh; do
+  [ -f "$f" ] || fail "R11: $f missing"
+  grep -qF 'specs/<product>/adr/' "$f" \
+    || fail "R11: $f does not acknowledge a second ADR namespace (specs/<product>/adr/)"
+done
+grep -qi 'qualified' "$REV"      || fail "R11: reviewer.md does not state the qualified-citation rule"
+grep -qF '<ns>/ADR-NNNN' "$REV"  || fail "R11: reviewer.md does not name the <ns>/ADR-NNNN form"
+grep -qi 'bare' "$REV"           || fail "R11: reviewer.md does not state what a BARE citation means"
+grep -q 'ADR namespace holds a real' "$REV" \
+  || fail "R11: reviewer.md's firing precondition still demands specs/adr/ specifically"
+grep -qi 'qualify the namespace' "$ARC" || fail "R11: architect.md does not teach the qualifier convention"
+grep -qi 'qualify the namespace' "$TPL" || fail "R11: the spec template does not teach the qualifier convention"
+grep -qi 'RESIDUAL HOLE' init.sh || fail "R11: init.sh does not record the accepted bare-citation hole"
+pass "R11 contract_coherence"
 
 # ── R6: the live repo's ./init.sh still exits 0 (sweep is additive, never gates) ──
 # R6_live_init_green

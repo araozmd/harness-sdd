@@ -20,11 +20,20 @@ owner: <handle>
 
 ## Architecture alignment
 > Cite the architecture decisions (ADRs) this feature touches. Required whenever
-> `specs/architecture.md` + `specs/adr/*` exist; omit only when the repo has no
-> architecture (legacy / `/sdd-new` altitude-3). See docs/SPEC-FORMAT.md.
+> `specs/architecture.md` + at least one `**/adr/*` ADR exist; omit only when the repo has
+> no architecture (legacy / `/sdd-new` altitude-3). See docs/SPEC-FORMAT.md.
+>
+> **Qualify the namespace when the project keeps more than one ADR space** (the platform
+> space `specs/adr/` plus a product space `specs/<product>/adr/` — the number spaces are
+> independent and normally collide). `<ns>/ADR-NNNN` is checked against **that space only**
+> (`platform` = `specs/adr/`); a bare `ADR-NNNN` resolves against any space and is
+> therefore **not** cross-namespace-checked.
 
 - ADR-NNNN — <decision title>: <one line on how this feature honors that decision>.
 - ADR-NNNN — <decision title>: <one line on how this feature honors it>.
+<!-- Multi-namespace project — qualify instead:
+- platform ADR-NNNN — <decision title>: <how this feature honors it>.
+- <product>/ADR-NNNN — <decision title>: <how this feature honors it>. -->
 
 <!-- If this feature genuinely touches no recorded decision, replace the list with the
      explicit line below (it is a legitimate state, not a silent omission): -->

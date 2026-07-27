@@ -6,22 +6,51 @@ All notable changes to the harness body are recorded here. Versions follow
 
 ## [0.37.1] — 2026-07-27
 
-### Fixed — 🐛 ADR-citation sweep resolves every ADR namespace (E99-F50)
+### Fixed — 🐛 ADR-citation resolution is namespace- and qualifier-aware (E99-F50)
 - `init.sh` section 2c resolved a cited `ADR-NNNN` **only** against `specs/adr/`, so a
   project that keeps a second, legitimate ADR namespace (`specs/<product>/adr/`, e.g.
   the platform-vs-product altitude split) got a standing wall of false-positive
   warnings — 18 of them in one downstream install, every one of them wrong.
-- A citation now resolves against **any `adr/` directory under `specs/`** and warns
-  only when it resolves in **none** of them. The sweep builds a one-shot index of ADR
-  numbers (two `find` passes over `specs/`) instead of probing a single hard-coded
-  directory, so a third namespace needs no code change.
-- Unchanged by design: warn-only (never gates), POSIX `sh`, zero dependencies, the
+- ADR spaces are now first-class. A **namespace** is a directory literally named `adr/`
+  under `specs/`; only `*.md` sitting directly in it counts as an ADR. Its **token** is
+  the parent directory's basename, with `platform` reserved for the root space
+  `specs/adr/`. The spaces are independent and normally **collide** (`0023` in both,
+  different content), so resolution is **qualifier-aware**:
+  - **Qualified** — `<ns>/ADR-NNNN`, or `<ns> ADR-NNNN` when `<ns>` is a real namespace
+    token — resolves against **that namespace only**. `platform ADR-0023` still warns
+    when only `bookings/0023` exists; an unknown `<ns>/` never resolves. This is the
+    cross-namespace typo the sweep exists to catch, and it is now caught.
+  - **Bare** — `ADR-NNNN` asserts no namespace, so it resolves against **any** of them
+    and warns only when it resolves in **none**. Deliberate: pre-convention corpora and
+    single-namespace projects write bare ids, and inferring a namespace the author never
+    wrote would recreate the false-positive wall.
+  - **Known, accepted hole:** a **bare** citation is therefore *not* namespace-checked —
+    in a multi-namespace project a bare cross-namespace typo passes silently. Write the
+    qualifier to get it checked. This trade-off is recorded in `init.sh` section 2c, in
+    `agents/reviewer.md`, and taught by `agents/architect.md` +
+    `specs/_templates/feature.spec.md`.
+- The per-namespace index is built **once** per run, so each citation costs one string
+  match. A third namespace needs no code change. The index now takes only ADRs sitting
+  *directly* in an `adr/` directory (an `adr/archive/` subtree is not a namespace),
+  matching what the comment always claimed. The `searched:`/success lines are
+  comma-joined so a namespace path containing a space stays unambiguous.
+- **Contract sync (same rule at every altitude).** `agents/reviewer.md` no longer
+  requires every cited id to resolve under `specs/adr/` and no longer preconditions its
+  check on `specs/adr/` specifically — it states the qualified/bare rule verbatim, so an
+  id `init.sh` certifies clean is never re-flagged at review time (and a product-
+  namespace-only project gets a Reviewer check at all). `agents/architect.md`,
+  `specs/_templates/feature.spec.md`, `docs/SPEC-FORMAT.md` and `docs/WORKFLOW.md` teach
+  the qualifier convention and drop the single-namespace assumption.
+- Unchanged by design: warn-only (never gates), zero dependencies, the
   `## Architecture alignment` section scoping, the trailing unresolved-count line, and
-  the complete no-op when `specs/` holds no `adr/` directory at all. The success line
-  and the miss warning now name the namespaces that were searched.
+  the complete no-op when `specs/` holds no `adr/` directory at all.
 - `tests/test_adr_citation.sh` gains R7 (a citation resolving in a second namespace is
-  silent while a genuinely unresolvable id is the *only* warning) and R8 (a project
-  whose *only* ADR space is a product namespace still gets a live sweep, not a no-op).
+  silent while a genuinely unresolvable id is the *only* warning), R8 (a project whose
+  *only* ADR space is a product namespace still gets a live sweep, not a no-op), R9 (a
+  qualified citation does **not** resolve cross-namespace, in both directions, and an
+  unknown namespace warns), R10 (a bare citation stays permissive-any and an ordinary
+  prose word is not promoted to a qualifier) and R11 (contract coherence across
+  `init.sh`, the Reviewer, the Architect and the spec template).
 
 ## [0.37.0] — 2026-07-25
 
