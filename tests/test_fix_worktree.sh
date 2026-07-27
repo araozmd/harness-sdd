@@ -145,12 +145,32 @@ test_invalid_inputs_are_non_mutating() {
   pass "test_invalid_inputs_are_non_mutating"
 }
 
+# Resolve an installed UTF-8 locale by EFFECT, not by the `locale -a` spelling:
+# glibc (Debian/Ubuntu) lists it as `en_US.utf8` while macOS lists `en_US.UTF-8`,
+# so an exact name match silently skips the only non-C leg on precisely the CI
+# platform the regression test protects. Assigning an absent locale fails
+# silently and falls back to ASCII, so the charmap is the reliable discriminator
+# (ANSI_X3.4-1968 on glibc, US-ASCII on macOS, vs UTF-8 when it really took).
+# Echoes the first candidate that works, or nothing when none does.
+utf8_locale() {
+  for _cand in en_US.UTF-8 en_US.utf8; do
+    if [ "$(LC_ALL="$_cand" locale charmap 2>/dev/null)" = UTF-8 ]; then
+      printf '%s\n' "$_cand"
+      return 0
+    fi
+  done
+  return 0
+}
+
 test_slug_rejection_is_locale_independent() {
   make_source_fixture locale_slug
   _ran=0
-  for _loc in en_US.UTF-8 C; do
+  for _loc in "$(utf8_locale)" C; do
     # Skip gracefully where the locale is not installed; never fail on absence.
-    locale -a 2>/dev/null | grep -qix "$_loc" || continue
+    case "$_loc" in
+      '') continue ;;
+      C) locale -a 2>/dev/null | grep -qix C || continue ;;
+    esac
     _ran=$((_ran + 1))
     for _slug in Bad-Slug UPPER caf.e; do
       _refs_before="$(git -C "$PRIMARY" show-ref)"
