@@ -1,11 +1,12 @@
 #!/bin/sh
 # test_model_routing.sh — E17-F01 per-role model selection.
 #
-# Covers R4–R23: tier resolution, `inherit` ⇒ key omission, the built-in floating-alias
-# table, pin override + the OpenCode `provider/model` guard, unknown-tier tolerance,
-# per-front-end stamping (claude / antigravity / opencode / gemini / codex), conditional
-# creation of the two new trees, selection gating, idempotent re-stamping, the
-# opencode.json re-stamp rules, determinism, and deselection symmetry.
+# Covers R4–R23 and R26: tier resolution, `inherit` ⇒ key omission, the built-in
+# floating-alias table, pin override + the OpenCode `provider/model` guard, unknown-tier
+# tolerance, per-front-end stamping (claude / antigravity / opencode / gemini / codex),
+# conditional creation of the two new trees, selection gating, idempotent re-stamping, the
+# opencode.json re-stamp rules, determinism, and both halves of the BR6 seam — deselection
+# preserves a user-edited artifact (R23) while a re-install regenerates one (R26).
 #
 # Zero dependencies; self-cleaning temp dir. R1–R3, R11, R12, R24 and R25 (the
 # installer-wiring half) live in tests/test_install.sh.
@@ -404,6 +405,98 @@ test_restamp_after_config_change() {
   return 0
 }
 
+# ── R26: a routine re-install regenerates an EDITED artifact (the other half of BR6) ─
+# BR6 has two paths with two different rules, and R23 only pins one of them. RECLAMATION
+# (deselect) never deletes a user-edited file; REGENERATION (re-install) always overwrites
+# one, exactly as `.claude/agents/*.md` and `.agents/agents/*.md` have always behaved.
+# The two are asserted together here so the wording cannot drift back into the ambiguity
+# the PR #61 review found (E17-F01.spec.md § Amendments A1).
+#
+# The config is byte-UNCHANGED across the re-run on purpose: with a changed tier this
+# would just be R19 again and would prove nothing about an untouched config.
+# `opencode.json` is deliberately absent — it is a SHARED file and R20(c) requires the
+# opposite of R26 for it (edited ⇒ untouched + warning).
+test_restamp_overwrites_user_edits() {
+  _t="$(mk r26)"; run "$_t" "$ALL"
+  set_tier "$_t" scout cheap
+  set_pin "$_t" codex cheap "gpt-5-mini"
+  run "$_t" "$ALL"
+
+  _cl="$_t/.claude/agents/scout.md"        # pre-existing generated glue — the precedent
+  _ag="$_t/.agents/agents/scout.md"        # pre-existing generated glue — the precedent
+  _gm="$_t/.gemini/agents/scout.md"        # new in E17-F01
+  _cx="$_t/.codex/agents/scout.toml"       # new in E17-F01
+  for _f in "$_cl" "$_ag" "$_gm" "$_cx"; do
+    [ -f "$_f" ] || fail "R26: setup — $_f was not stamped"
+  done
+
+  # Keep a pristine reference of each file plus the config, then plant the same edit in
+  # all four. The reference is what "regenerated from the current configuration" means.
+  _ref="$T/r26-ref"; rm -rf "$_ref"; mkdir -p "$_ref"
+  cp "$_cl" "$_ref/claude.md"
+  cp "$_ag" "$_ref/antigravity.md"
+  cp "$_gm" "$_ref/gemini.md"
+  cp "$_cx" "$_ref/codex.toml"
+  cp "$(cfg "$_t")" "$_ref/harness.config.yaml"
+  for _f in "$_cl" "$_ag" "$_gm" "$_cx"; do
+    printf 'zzz-user-edit\n' >> "$_f"
+  done
+
+  run "$_t" "$ALL"
+
+  # The premise of this test: no set_tier, no set_pin, so the installer saw the SAME
+  # config bytes it saw on the previous run. If this ever fails the test has silently
+  # become a duplicate of R19.
+  cmp -s "$_ref/harness.config.yaml" "$(cfg "$_t")" \
+    || fail "R26: the config changed across the re-run — this test must exercise an UNCHANGED config (R19 owns the changed case)"
+
+  # (a) the edit is gone from the two NEW artifact types…
+  grep -q 'zzz-user-edit' "$_gm" && fail "R26: an edited .gemini/agents/scout.md was not regenerated on re-install"
+  grep -q 'zzz-user-edit' "$_cx" && fail "R26: an edited .codex/agents/scout.toml was not regenerated on re-install"
+  # (b) …and from the two PRE-EXISTING ones, the contract R26 says it matches. Asserting
+  #     this here is what makes "matching the pre-existing generated-glue contract"
+  #     verified rather than merely claimed in prose.
+  grep -q 'zzz-user-edit' "$_cl" && fail "R26: an edited .claude/agents/scout.md was not regenerated (the precedent R26 cites no longer holds)"
+  grep -q 'zzz-user-edit' "$_ag" && fail "R26: an edited .agents/agents/scout.md was not regenerated (the precedent R26 cites no longer holds)"
+
+  # (c) the regenerated body is the NORMAL one — the stamp is intact and single, not a
+  #     truncated or doubled rewrite.
+  [ "$(grep -c '^model:' "$_gm")" = "1" ] || fail "R26: .gemini/agents/scout.md does not carry exactly one model: key after regeneration"
+  [ "$(grep -c '^model = ' "$_cx")" = "1" ] || fail "R26: .codex/agents/scout.toml does not carry exactly one model key after regeneration"
+  [ "$(grep -c '^model:' "$_cl")" = "1" ] || fail "R26: .claude/agents/scout.md does not carry exactly one model: key after regeneration"
+  [ "$(grep -c '^model:' "$_ag")" = "1" ] || fail "R26: .agents/agents/scout.md does not carry exactly one model: key after regeneration"
+  grep -q '^model: flash$' "$_gm"            || fail "R26: .gemini/agents/scout.md lost its resolved value"
+  grep -q '^model = "gpt-5-mini"$' "$_cx"    || fail "R26: .codex/agents/scout.toml lost its resolved value"
+  grep -q '^model: haiku$' "$_cl"            || fail "R26: .claude/agents/scout.md lost its resolved value"
+  grep -q '^model: flash$' "$_ag"            || fail "R26: .agents/agents/scout.md lost its resolved value"
+
+  # (d) strongest form: each regenerated file is byte-identical to the pristine reference,
+  #     i.e. the re-run reproduced the generator's output exactly (this is also what keeps
+  #     deselection able to reclaim these files at all — R21).
+  cmp -s "$_ref/gemini.md"      "$_gm" || fail "R26: the regenerated .gemini/agents/scout.md is not byte-identical to the pristine reference"
+  cmp -s "$_ref/codex.toml"     "$_cx" || fail "R26: the regenerated .codex/agents/scout.toml is not byte-identical to the pristine reference"
+  cmp -s "$_ref/claude.md"      "$_cl" || fail "R26: the regenerated .claude/agents/scout.md is not byte-identical to the pristine reference"
+  cmp -s "$_ref/antigravity.md" "$_ag" || fail "R26: the regenerated .agents/agents/scout.md is not byte-identical to the pristine reference"
+
+  # (e) the OTHER half of BR6, in a separate target so both sides of the seam are visible
+  #     in one place: the very same edit, on the DESELECT path, must SURVIVE with a
+  #     warning. R23 unchanged — regeneration overwrites, reclamation does not delete.
+  _b="$(mk r26b)"; run "$_b" "$ALL"
+  set_tier "$_b" scout cheap
+  set_pin "$_b" codex cheap "gpt-5-mini"
+  run "$_b" "$ALL"
+  [ -f "$_b/.gemini/agents/scout.md" ] || fail "R26b: setup — gemini artifact missing"
+  printf 'zzz-user-edit\n' >> "$_b/.gemini/agents/scout.md"
+  _e="$(run_err "$_b" claude)"
+  [ -f "$_b/.gemini/agents/scout.md" ] \
+    || fail "R26b: deselection deleted an EDITED .gemini/agents/scout.md — reclamation must not destroy a user edit (R23)"
+  grep -qx 'zzz-user-edit' "$_b/.gemini/agents/scout.md" \
+    || fail "R26b: the user edit did not survive deselection (R23)"
+  printf '%s\n' "$_e" | grep -q '.gemini/agents/scout.md' \
+    || fail "R26b: no warning naming the preserved file on deselect (R23)"
+  return 0
+}
+
 # ── R20: the three opencode.json re-stamp cases ──────────────────────────────────
 test_opencode_json_restamp_rules() {
   # (a) a pre-existing PRISTINE model-free body gains the model members
@@ -657,6 +750,8 @@ test_selection_gating
 pass "an unselected front-end is never stamped, even with a full models: block (R18)"
 test_restamp_after_config_change
 pass "a config change re-stamps every artifact, exactly one model key per role (R19)"
+test_restamp_overwrites_user_edits
+pass "a re-install with an UNCHANGED config regenerates an edited artifact on every front-end, while deselection still preserves one (R26)"
 test_opencode_json_restamp_rules
 pass "opencode.json: pristine ⇒ regenerated, stamped ⇒ re-stamped, edited ⇒ untouched + warning (R20)"
 test_opencode_json_file_mode
