@@ -3,6 +3,42 @@
 
 set -u
 
+# Bracket ranges in a `case` glob (e.g. *[!a-z0-9-]*) are resolved through the
+# active locale's COLLATION order, not ASCII: under en_US.UTF-8 an uppercase
+# letter falls inside a-z, so an invalid slug would be accepted. Pin the whole
+# script to C so every glob here means ASCII, and export it so the `git`
+# plumbing this helper parses stays in the deterministic C locale too.
+#
+# That export must NOT reach the FOREIGN code this helper executes. Three
+# surfaces belong to the target repo, not to us: the project init gate, `run`
+# commands, and the post-checkout hook / checkout filters that `git worktree add`
+# fires. A consumer whose `.harness/init.project.sh` needs UTF-8 would fail its
+# own gate and lose an otherwise valid worktree to the rollback. Capture the
+# caller's LC_ALL first so those escapes can put it back (restore_caller_locale).
+if [ -n "${LC_ALL+x}" ]; then
+  CALLER_LC_ALL_SET=1
+else
+  CALLER_LC_ALL_SET=0
+fi
+CALLER_LC_ALL="${LC_ALL-}"
+LC_ALL=C
+export LC_ALL
+
+# Put the caller's locale back. Only ever called inside a subshell that is about
+# to exec foreign code, so the script's own C pinning is never disturbed.
+# When the caller had LC_ALL unset we UNSET it rather than writing an empty
+# value: an empty LC_ALL is ignored by some implementations but honored by
+# others, and unsetting is what lets the caller's LANG/LC_* layering resurface.
+restore_caller_locale() {
+  if [ "$CALLER_LC_ALL_SET" = 1 ]; then
+    LC_ALL="$CALLER_LC_ALL"
+    export LC_ALL
+  else
+    unset LC_ALL
+  fi
+  return 0
+}
+
 die() { echo "fix-worktree: $*" >&2; exit 1; }
 
 usage() {
@@ -219,7 +255,15 @@ do_create() {
 
   CREATED_MANAGED_LINKS=
   mkdir -p "$(dirname "$WORKTREE")" || die "cannot create worktree parent"
-  if ! git -C "$PRIMARY" worktree add -b "$BRANCH" "$WORKTREE" "$BASE_COMMIT" >/dev/null 2>&1; then
+  # `worktree add` is the ONLY git call here that runs target-repo code: it fires
+  # the repo's post-checkout hook and any checkout (smudge) filters. Give those
+  # the caller's locale like the other foreign-code escapes. Safe to un-pin
+  # precisely because this call's output is discarded — only its exit status is
+  # read — so the C pin's parsing determinism is not what is being relaxed.
+  # Every remaining git call in this file is read-only plumbing we DO parse, and
+  # stays under C.
+  if ! (restore_caller_locale &&
+        git -C "$PRIMARY" worktree add -b "$BRANCH" "$WORKTREE" "$BASE_COMMIT" >/dev/null 2>&1); then
     die "git worktree creation failed for $WORKTREE"
   fi
   if ! materialize_links; then
@@ -231,7 +275,7 @@ do_create() {
   else
     _init="$WORKTREE/.harness/init.sh"
   fi
-  if [ ! -x "$_init" ] || ! (cd "$WORKTREE" && "$_init" >&2); then
+  if [ ! -x "$_init" ] || ! (cd "$WORKTREE" && restore_caller_locale && "$_init" >&2); then
     rollback_create || exit 1
     die "initialization failed and provisioning was rolled back"
   fi
@@ -251,7 +295,8 @@ do_run() {
   verify_exact_worktree
   [ "$#" -ge 2 ] && [ "$1" = "--" ] || usage
   shift
-  (cd "$WORKTREE" && HARNESS_DIR="$HARNESS_MAIN" export HARNESS_DIR && "$@")
+  (cd "$WORKTREE" && restore_caller_locale &&
+    HARNESS_DIR="$HARNESS_MAIN" export HARNESS_DIR && "$@")
 }
 
 require_primary_on_base() {

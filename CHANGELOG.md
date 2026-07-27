@@ -4,6 +4,45 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.38.1] — 2026-07-27
+
+### Fixed — 🐛 Slug validation in `fix-worktree.sh` is locale-independent (E99-F03)
+- `validate_key()` screens the fix slug with the shell glob `*[!a-z0-9-]*`. Bracket
+  ranges in a `case` glob are resolved through the active locale's **collation order**,
+  not ASCII, so under the common developer default `en_US.UTF-8` an uppercase slug like
+  `Bad-Slug` fell inside `a-z`, the negated class did not match, and the invalid slug was
+  **accepted** — a malformed value then propagated into the branch and worktree names the
+  helper creates on disk. Under `C` the same expression rejected it correctly.
+- `tools/fix-worktree.sh` now pins `LC_ALL=C` (exported) next to `set -u`, so every glob
+  in the file means ASCII and the `git` plumbing output it parses stays deterministic.
+  The `case` patterns are unchanged — with `LC_ALL=C` in force they were already correct.
+  `[[:lower:]]` was deliberately **not** used: that class is itself locale-defined and
+  would newly accept accented lowercase, widening the slug grammar instead of fixing it.
+- The bug hid because `verification.test_command` runs in a C locale, where the
+  expression behaves. `tests/test_fix_worktree.sh` gains
+  `test_slug_rejection_is_locale_independent`, which drives the helper under **both**
+  `en_US.UTF-8` and `C` (skipping cleanly where a locale is absent) and asserts rejection
+  plus no ref/registration/path mutation — so the hole is caught in C-locale CI too, not
+  only on a developer laptop.
+- The C pin stops at **foreign code**. `fix-worktree.sh` executes code owned by the target
+  repo at three surfaces — the project init gate (`init.sh`, which sources
+  `.harness/init.project.sh`), `run` commands, and the `post-checkout` hook plus checkout
+  (smudge) filters that `git worktree add` fires — and all three now run under the
+  **caller's** locale, restored from the value captured before the pin. Exporting C into
+  them was a real defect, not just a broad blast radius: a consumer whose
+  `init.project.sh` requires UTF-8 failed its own gate, and `create` then rolled back an
+  otherwise valid worktree.
+- A caller with `LC_ALL` unset gets it restored as **unset**, not empty, so their
+  `LANG`/`LC_*` layering resurfaces — an empty `LC_ALL` is ignored by some
+  implementations and honored by others.
+- `worktree add` is safe to un-pin precisely because its output is discarded and only its
+  exit status is read; every remaining `git` call in the helper is read-only plumbing that
+  **is** parsed and stays under `C`, so the determinism the pin was chosen for is intact.
+- `tests/test_fix_worktree.sh` gains `test_child_commands_see_caller_locale`, whose init,
+  `run`, and post-checkout-hook legs are each independently mutation-sensitive.
+- Scope is only this glob: the `grep -Eq '^[a-z0-9-]+$'` validators in `harness-install.sh`
+  and the Python `re` validator in `init.sh` were verified unaffected and left alone.
+
 ## [0.38.0] — 2026-07-27
 
 ### Added — ✨ Per-role model selection (E17-F01)

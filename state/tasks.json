@@ -355,7 +355,7 @@
     {
       "id": "E99",
       "title": "Maintenance (hotfixes & minor fixes)",
-      "status": "done",
+      "status": "in-progress",
       "features": [
         {
           "id": "E99-F01",
@@ -374,6 +374,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F02-adr-citation-id-validation/"
+        },
+        {
+          "id": "E99-F03",
+          "title": "Reject non-ASCII-lowercase slugs in fix-worktree validate_key under any locale",
+          "status": "in-review",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F03-locale-safe-validate-key/"
         }
       ]
     },

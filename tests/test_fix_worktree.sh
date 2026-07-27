@@ -145,6 +145,129 @@ test_invalid_inputs_are_non_mutating() {
   pass "test_invalid_inputs_are_non_mutating"
 }
 
+# Resolve an installed UTF-8 locale by EFFECT, not by the `locale -a` spelling:
+# glibc (Debian/Ubuntu) lists it as `en_US.utf8` while macOS lists `en_US.UTF-8`,
+# so an exact name match silently skips the only non-C leg on precisely the CI
+# platform the regression test protects. Assigning an absent locale fails
+# silently and falls back to ASCII, so the charmap is the reliable discriminator
+# (ANSI_X3.4-1968 on glibc, US-ASCII on macOS, vs UTF-8 when it really took).
+# Echoes the first candidate that works, or nothing when none does.
+utf8_locale() {
+  for _cand in en_US.UTF-8 en_US.utf8; do
+    if [ "$(LC_ALL="$_cand" locale charmap 2>/dev/null)" = UTF-8 ]; then
+      printf '%s\n' "$_cand"
+      return 0
+    fi
+  done
+  return 0
+}
+
+test_slug_rejection_is_locale_independent() {
+  make_source_fixture locale_slug
+  _ran=0
+  for _loc in "$(utf8_locale)" C; do
+    # Skip gracefully where the locale is not installed; never fail on absence.
+    case "$_loc" in
+      '') continue ;;
+      C) locale -a 2>/dev/null | grep -qix C || continue ;;
+    esac
+    _ran=$((_ran + 1))
+    for _slug in Bad-Slug UPPER caf.e; do
+      _refs_before="$(git -C "$PRIMARY" show-ref)"
+      _registrations_before="$(git -C "$PRIMARY" worktree list --porcelain)"
+      _destination="$PRIMARY/.claude/worktrees/E99-F149-$_slug"
+      [ ! -e "$_destination" ] && [ ! -L "$_destination" ] ||
+        fail "locale slug precondition has an existing destination: $_destination"
+      if (cd "$PRIMARY" && LC_ALL="$_loc" "$HELPER" create E99-F149 "$_slug") \
+          >"$FIXTURE/out" 2>"$FIXTURE/err"; then
+        fail "LC_ALL=$_loc accepted invalid slug: $_slug"
+      fi
+      grep -qi invalid "$FIXTURE/err" ||
+        fail "LC_ALL=$_loc rejection did not name invalid: $(cat "$FIXTURE/err")"
+      [ "$(git -C "$PRIMARY" show-ref)" = "$_refs_before" ] ||
+        fail "LC_ALL=$_loc rejected slug mutated refs: $_slug"
+      [ "$(git -C "$PRIMARY" worktree list --porcelain)" = "$_registrations_before" ] ||
+        fail "LC_ALL=$_loc rejected slug mutated worktree registrations: $_slug"
+      [ ! -e "$_destination" ] && [ ! -L "$_destination" ] ||
+        fail "LC_ALL=$_loc rejected slug made destination: $_destination"
+    done
+  done
+  [ "$_ran" -ge 1 ] || fail "no locale leg ran; expected at least the C locale"
+  pass "test_slug_rejection_is_locale_independent"
+}
+
+# The helper pins itself to LC_ALL=C so its globs mean ASCII and its `git`
+# plumbing parses deterministically. That pin must stop at every surface where it
+# executes FOREIGN code owned by the target repo: the project init gate, `run`
+# commands, and the post-checkout hook / checkout filters fired by
+# `git worktree add`. Exporting C into them made a consumer whose
+# `.harness/init.project.sh` requires UTF-8 fail its own gate, and `do_create`
+# then rolled back an otherwise valid worktree.
+test_child_commands_see_caller_locale() {
+  _utf8="$(utf8_locale)"
+  if [ -z "$_utf8" ]; then
+    pass "test_child_commands_see_caller_locale (skipped: no UTF-8 locale installed)"
+    return 0
+  fi
+
+  make_source_fixture caller_locale
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'printf "%s\n" "${LC_ALL-unset}" > .init-lc-all' \
+    'printf "%s\n" "$(locale charmap)" > .init-charmap' \
+    'exit 0' > "$PRIMARY/init.sh"
+  printf '.init-lc-all\n.init-charmap\nrun-locale.out\n' >> "$PRIMARY/.gitignore"
+  git -C "$PRIMARY" add init.sh .gitignore
+  git -C "$PRIMARY" commit -m caller-locale-init >/dev/null
+
+  # 1. An explicit caller LC_ALL reaches the project gate unchanged, and the
+  #    worktree survives instead of being rolled back by a failed UTF-8 gate.
+  _wt="$(cd "$PRIMARY" && LC_ALL="$_utf8" tools/fix-worktree.sh create E99-F150 explicit)"
+  [ "$(cat "$_wt/.init-lc-all")" = "$_utf8" ] ||
+    fail "init gate saw LC_ALL=$(cat "$_wt/.init-lc-all"); expected $_utf8"
+  [ "$(cat "$_wt/.init-charmap")" = UTF-8 ] ||
+    fail "init gate ran under charmap $(cat "$_wt/.init-charmap"); expected UTF-8"
+
+  # 2. `run` hands the caller's locale to the child command too — a target repo
+  #    with collation-sensitive tests must not be silently switched to C.
+  (cd "$PRIMARY" && LC_ALL="$_utf8" tools/fix-worktree.sh run E99-F150 explicit -- sh -c \
+    'printf "%s\n%s\n" "${LC_ALL-unset}" "$(locale charmap)" > run-locale.out')
+  [ "$(sed -n '1p' "$_wt/run-locale.out")" = "$_utf8" ] ||
+    fail "run child saw LC_ALL=$(sed -n '1p' "$_wt/run-locale.out"); expected $_utf8"
+  [ "$(sed -n '2p' "$_wt/run-locale.out")" = UTF-8 ] ||
+    fail "run child ran under charmap $(sed -n '2p' "$_wt/run-locale.out"); expected UTF-8"
+
+  # 3. An UNSET caller LC_ALL must be restored as unset, not as an empty string:
+  #    an empty LC_ALL is ignored by some implementations and honored by others,
+  #    and only unsetting lets the caller's LANG/LC_* layering resurface.
+  _wt2="$(cd "$PRIMARY" && env -u LC_ALL LANG="$_utf8" tools/fix-worktree.sh create E99-F151 inherited)"
+  [ "$(cat "$_wt2/.init-lc-all")" = unset ] ||
+    fail "init gate saw LC_ALL=$(cat "$_wt2/.init-lc-all"); expected it to stay unset"
+  [ "$(cat "$_wt2/.init-charmap")" = UTF-8 ] ||
+    fail "unset LC_ALL did not let the caller's LANG resurface: $(cat "$_wt2/.init-charmap")"
+
+  # 4. `git worktree add` fires the target repo's post-checkout hook and checkout
+  #    filters — a third foreign-code surface, and the only hook/filter-triggering
+  #    git call in the helper (every other one is read-only plumbing we parse).
+  printf '%s\n' \
+    '#!/bin/sh' \
+    "printf '%s\n' \"\${LC_ALL-unset}\" > \"$FIXTURE/hook-lc-all\"" \
+    "printf '%s\n' \"\$(locale charmap)\" > \"$FIXTURE/hook-charmap\"" \
+    > "$PRIMARY/.git/hooks/post-checkout"
+  chmod +x "$PRIMARY/.git/hooks/post-checkout"
+  (cd "$PRIMARY" && LC_ALL="$_utf8" tools/fix-worktree.sh create E99-F152 hooks) >/dev/null
+  [ -f "$FIXTURE/hook-lc-all" ] || fail "post-checkout hook did not fire on worktree add"
+  [ "$(cat "$FIXTURE/hook-lc-all")" = "$_utf8" ] ||
+    fail "post-checkout hook saw LC_ALL=$(cat "$FIXTURE/hook-lc-all"); expected $_utf8"
+  [ "$(cat "$FIXTURE/hook-charmap")" = UTF-8 ] ||
+    fail "post-checkout hook ran under charmap $(cat "$FIXTURE/hook-charmap"); expected UTF-8"
+
+  # 5. Restoring the caller's locale for foreign code must NOT loosen the helper's
+  #    own ASCII slug guard — the whole point of the C pin.
+  assert_create_fails invalid create E99-F153 Bad-Slug
+  pass "test_child_commands_see_caller_locale"
+}
+
 test_base_accepts_short_local_ref_only() {
   make_source_fixture base_validation
   git -C "$PRIMARY" branch release/1.2 main
@@ -578,6 +701,8 @@ test_default_and_explicit_base_resolution
 test_base_is_ref_not_ambient_head
 test_dirty_primary_fails_before_mutation
 test_invalid_inputs_are_non_mutating
+test_slug_rejection_is_locale_independent
+test_child_commands_see_caller_locale
 test_base_accepts_short_local_ref_only
 test_branch_path_and_registration_collisions_fail_closed
 test_two_active_worktrees_are_isolated
