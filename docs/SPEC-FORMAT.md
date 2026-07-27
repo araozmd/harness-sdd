@@ -82,6 +82,15 @@ ids the inbox brief already records (the F03-D7 hook). The rule:
 
 - **Cite each touched ADR.** List each `ADR-NNNN` the feature touches, each with a
   one-line "how this feature honors that decision".
+- **Namespaces — qualify when there is more than one ADR space.** A project may keep the
+  platform space `specs/adr/` plus a product/agent space `specs/<product>/adr/`; the
+  number spaces are independent and normally **collide** (`0023` in both, different
+  content). The `<ns>` token is the `adr/` directory's parent basename, with `platform`
+  reserved for the root space. A **qualified** citation (`<ns>/ADR-NNNN`, or
+  `<ns> ADR-NNNN` for a real token) resolves against **that space only** — which is what
+  makes a cross-namespace typo detectable. A **bare** `ADR-NNNN` asserts no space, so it
+  resolves against **any** of them and is therefore **not** cross-namespace-checked. Both
+  `agents/reviewer.md` and `init.sh`'s warn-only sweep apply exactly this rule.
 - **`ADRs touched: none`** — when architecture artifacts exist but the feature genuinely
   touches **no** recorded decision, the section still appears and records the explicit line
   `ADRs touched: none` with a one-line why. It is a legitimate state, **not** a silent
