@@ -198,7 +198,21 @@ if [ -n "$ADR_NS_DIRS" ]; then
     # lowercase, promote a KNOWN `<ns> ADR-` prose qualifier to `<ns>/`, then drop any
     # other leading word (ordinary prose like "the contract ADR-0012" is NOT a qualifier).
     # No spaces survive, so the `for` word-split below is safe.
+    #
+    # Two normalizations run BEFORE the extractor, because the optional qualifier group
+    # `[A-Za-z0-9_-]+` is a blunt instrument at both of its boundaries:
+    #  1. Emphasis/quote wrappers are deleted (`*`, `"`, backtick, `'`). Without this a
+    #     REAL qualifier written `**platform** ADR-0023` is demoted to a bare id, because
+    #     the char before the space is outside the group's char class. `_` is deliberately
+    #     NOT deleted: underscore is legal in a namespace token (`my_product/`), so
+    #     stripping it would corrupt real tokens (`_platform_ ADR-N` stays demoted).
+    #  2. A `|` is appended to EVERY id. Without this the group happily eats a preceding
+    #     CITATION (`ADR-0042` is letters+digits+hyphen too), so `ADR-0042 ADR-0001`
+    #     yields ONE match whose "qualifier" `adr-0042` is then discarded by the demotion
+    #     `sed` below — the first id would never be looked up at all. The delimiter must
+    #     be a SUFFIX: a `|` prefix would also break the legitimate `<ns> ADR-NNNN` form.
     for cite in $(awk '/^## Architecture alignment/{f=1;next} /^## /{f=0} f' "$spec" \
+                  | sed -e 's#[*"`]##g' -e "s#'##g" -e 's#ADR-[0-9][0-9][0-9][0-9]#&|#g' \
                   | grep -oE '([A-Za-z0-9_-]+[ /])?ADR-[0-9]{4}' \
                   | tr '[:upper:]' '[:lower:]' \
                   | sed -E "s#^(${ADR_NS_ALT}) adr-#\\1/adr-#" \

@@ -29,6 +29,15 @@ All notable changes to the harness body are recorded here. Versions follow
     qualifier to get it checked. This trade-off is recorded in `init.sh` section 2c, in
     `agents/reviewer.md`, and taught by `agents/architect.md` +
     `specs/_templates/feature.spec.md`.
+- **The extractor normalizes before it matches**, because the optional qualifier group is
+  blunt at both boundaries. (a) A `|` is appended to every id, so a citation can never be
+  eaten as the *qualifier* of the id next to it — without it `ADR-0042 ADR-0001` produced
+  one match whose "qualifier" `adr-0042` was then discarded and **never looked up**, a
+  coverage regression against the plain `ADR-[0-9]{4}` scan. The delimiter must be a
+  suffix; a prefix would break the legitimate `<ns> ADR-NNNN` form. (b) Emphasis/quote
+  wrappers (`*`, `"`, backtick, `'`) are stripped, so a real qualifier written
+  `**platform** ADR-0023` stays qualified instead of being silently demoted to bare.
+  `_` is deliberately not stripped — underscore is legal in a namespace token.
 - The per-namespace index is built **once** per run, so each citation costs one string
   match. A third namespace needs no code change. The index now takes only ADRs sitting
   *directly* in an `adr/` directory (an `adr/archive/` subtree is not a namespace),
@@ -49,8 +58,12 @@ All notable changes to the harness body are recorded here. Versions follow
   *only* ADR space is a product namespace still gets a live sweep, not a no-op), R9 (a
   qualified citation does **not** resolve cross-namespace, in both directions, and an
   unknown namespace warns), R10 (a bare citation stays permissive-any and an ordinary
-  prose word is not promoted to a qualifier) and R11 (contract coherence across
-  `init.sh`, the Reviewer, the Architect and the spec template).
+  prose word is not promoted to a qualifier), R11 (contract coherence — each of the
+  **five** contract files, `agents/reviewer.md`, `agents/architect.md`,
+  `specs/_templates/feature.spec.md`, `docs/SPEC-FORMAT.md`, `docs/WORKFLOW.md`, plus
+  `init.sh`, pinned independently), R12 (two adjacent ids on one line are **both**
+  checked, in every bracket/bullet/indent/slash form, and no bogus namespace token is
+  invented) and R13 (a qualifier wrapped in emphasis/quotes stays qualified).
 
 ## [0.37.0] — 2026-07-25
 

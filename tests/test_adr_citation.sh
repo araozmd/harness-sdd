@@ -228,17 +228,101 @@ echo "$OUT" | grep -q 'ADR citation:.*cites ADR-0042' || fail "R10: did not warn
 [ "$(echo "$OUT" | grep -c 'ADR citation:')" -eq 1 ] || fail "R10: expected exactly 1 unresolved-citation warning, got $(echo "$OUT" | grep -c 'ADR citation:')"
 pass "R10 bare_is_namespace_agnostic"
 
+# ── R12: TWO ids on one line — the extractor must check BOTH. The optional qualifier ─
+#        group `[A-Za-z0-9_-]+` also matches a citation, so without a delimiter
+#        `ADR-0042 ADR-0001` collapses into ONE match whose "qualifier" (`adr-0042`) is
+#        then discarded — the first id is never looked up (E99-F50 round 3, blocker).
+#        Every bracket/bullet/indent/slash form is pinned: the dash-bullet form escaped
+#        the defect only by accident (`-` was eaten as the word), which is precisely why
+#        it must not be the only case in the suite.
+# R12_adjacent_ids_both_checked
+mk_sandbox adjacent
+mkdir -p "$T/adjacent/specs/adr" "$T/adjacent/specs/bookings/adr"
+cat > "$T/adjacent/specs/adr/0001-platform-only.md" <<'MD'
+# ADR-0001 — exists ONLY in the platform namespace
+MD
+cat > "$T/adjacent/specs/bookings/adr/0026-product-only.md" <<'MD'
+# ADR-0026 — exists ONLY in the product namespace
+MD
+cat > "$T/adjacent/specs/epics/E01-demo/F01-thing/E01-F01.spec.md" <<'MD'
+# E01-F01 — fixture spec
+
+## Architecture alignment
+(ADR-0042 ADR-0001) — parens: BOTH ids are citations; 0042 resolves nowhere.
+* ADR-0043 ADR-0001 — star bullet.
+  ADR-0044 ADR-0001 — indented, no bullet marker.
+- ADR-0045 ADR-0001 — dash bullet (escaped the defect by accident).
+ADR-0046/ADR-0001 — slash-adjacent: 0046 must warn as BARE, not invent a namespace.
+- ADR-0001 ADR-0026 — two RESOLVING ids adjacent: still silent.
+MD
+OUT="$(cd "$T/adjacent" && ./init.sh 2>&1)" || fail "R12: init.sh exited non-zero on adjacent ids (must stay warn-only)"
+for n in 0042 0043 0044 0045 0046; do
+  echo "$OUT" | grep -q "ADR citation:.*cites ADR-$n " \
+    || fail "R12: ADR-$n was swallowed as a 'qualifier' of the id next to it and never looked up"
+done
+echo "$OUT" | grep -q 'adr-00' && fail "R12: an id was promoted to a bogus namespace token (e.g. 'adr-0046/ADR-0001')"
+echo "$OUT" | grep -q 'ADR-0001' && fail "R12: warned on ADR-0001, which resolves in the platform namespace"
+echo "$OUT" | grep -q 'ADR-0026' && fail "R12: warned on ADR-0026, which resolves in the product namespace"
+[ "$(echo "$OUT" | grep -c 'ADR citation:')" -eq 5 ] || fail "R12: expected exactly 5 unresolved-citation warnings, got $(echo "$OUT" | grep -c 'ADR citation:')"
+pass "R12 adjacent_ids_both_checked"
+
+# ── R13: a REAL qualifier wrapped in markdown emphasis/quotes stays qualified ──────
+#        (`**platform** ADR-NNNN`). The wrapper sits between the token and the space,
+#        outside the qualifier group's char class, so without the strip the citation is
+#        demoted to bare and a cross-namespace typo goes silent (E99-F50 round 3).
+#        `_`-italics are NOT strippable (underscore is legal in a namespace token) —
+#        that boundary stays documented in init.sh, not pinned here.
+# R13_wrapped_qualifier_survives
+mk_sandbox wrapped
+mkdir -p "$T/wrapped/specs/adr" "$T/wrapped/specs/bookings/adr"
+cat > "$T/wrapped/specs/adr/0001-platform-only.md" <<'MD'
+# ADR-0001 — exists ONLY in the platform namespace
+MD
+for n in 0027 0028 0029; do
+  printf '# ADR-%s — exists ONLY in the product namespace\n' "$n" \
+    > "$T/wrapped/specs/bookings/adr/$n-product-only.md"
+done
+cat > "$T/wrapped/specs/epics/E01-demo/F01-thing/E01-F01.spec.md" <<'MD'
+# E01-F01 — fixture spec
+
+## Architecture alignment
+- **platform** ADR-0027 — emphasized qualifier: a platform-space typo, must warn.
+- "platform" ADR-0028 — quoted qualifier: same.
+- 'platform' ADR-0029 — single-quoted qualifier: same.
+- `bookings/ADR-0027` — code-spanned, qualified correctly: silent.
+- ADR-0001 — bare control: silent.
+MD
+OUT="$(cd "$T/wrapped" && ./init.sh 2>&1)" || fail "R13: init.sh exited non-zero on wrapped qualifiers (must stay warn-only)"
+for n in 0027 0028 0029; do
+  echo "$OUT" | grep -q "cites platform/ADR-$n" \
+    || fail "R13: a qualifier wrapped in emphasis/quotes was demoted to bare, so the platform-space typo ADR-$n resolved silently against the product namespace"
+  echo "$OUT" | grep -q "cites ADR-$n " && fail "R13: ADR-$n was treated as bare (wrapper not stripped from the qualifier)"
+done
+echo "$OUT" | grep -q 'ADR-0001' && fail "R13: warned on the bare control ADR-0001, which resolves in the platform namespace"
+[ "$(echo "$OUT" | grep -c 'ADR citation:')" -eq 3 ] || fail "R13: expected exactly 3 unresolved-citation warnings, got $(echo "$OUT" | grep -c 'ADR citation:')"
+pass "R13 wrapped_qualifier_survives"
+
 # ── R11: contract coherence — init.sh, the Reviewer, the Architect and the spec ────
 #        template must state the SAME namespace rule. init.sh's sweep and the
 #        Reviewer's soft flag are the same check at two altitudes; if the prose only
 #        knows `specs/adr/`, a Reviewer following it literally re-flags every product-
 #        namespace citation the sweep certifies clean (E99-F50 round 2, blocker 2).
 # R11_contract_coherence
+#        ALL FIVE contract files are pinned INDEPENDENTLY (round 3): docs/SPEC-FORMAT.md
+#        and docs/WORKFLOW.md carried the identical stale claim and were fixed with the
+#        rest, but nothing failed when either was reverted to the stale text.
 ARC="agents/architect.md"; TPL="specs/_templates/feature.spec.md"
-for f in "$REV" "$ARC" "$TPL" init.sh; do
+SPF="docs/SPEC-FORMAT.md"; WFL="docs/WORKFLOW.md"
+for f in "$REV" "$ARC" "$TPL" "$SPF" "$WFL" init.sh; do
   [ -f "$f" ] || fail "R11: $f missing"
-  grep -qF 'specs/<product>/adr/' "$f" \
+  # `<product>` in the illustrative form, `<ns>` in the normative one — either names a
+  # second namespace; the stale single-namespace text has neither.
+  grep -qE 'specs/<(product|ns)>/adr/' "$f" \
     || fail "R11: $f does not acknowledge a second ADR namespace (specs/<product>/adr/)"
+  grep -qF '<ns>/ADR-NNNN' "$f" \
+    || fail "R11: $f does not name the QUALIFIED citation form <ns>/ADR-NNNN"
+  grep -qi 'bare' "$f" \
+    || fail "R11: $f does not state what a BARE citation resolves against"
 done
 grep -qi 'qualified' "$REV"      || fail "R11: reviewer.md does not state the qualified-citation rule"
 grep -qF '<ns>/ADR-NNNN' "$REV"  || fail "R11: reviewer.md does not name the <ns>/ADR-NNNN form"
