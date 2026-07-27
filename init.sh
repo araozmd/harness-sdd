@@ -141,25 +141,101 @@ fi
 #     surfaces the same typo at session start instead: for each
 #     specs/epics/**/*.spec.md carrying the section, every `ADR-NNNN` cited INSIDE
 #     that section (only there — incidental ADR-NNNN mentions elsewhere don't count)
-#     must resolve to an existing specs/adr/NNNN-*.md. A miss WARNS and NEVER fails
-#     the gate (the ADR may have been renamed/removed legitimately — the Reviewer's
-#     soft flag owns the verdict). No-op when specs/adr/ is absent (graceful
-#     degradation, mirroring the Reviewer check's precondition). Zero-dep + fast:
-#     one grep -rl over specs/epics plus a tiny awk per matching spec.
-if [ -d specs/adr ]; then
+#     must resolve to an ADR file `NNNN-*.md`. A miss WARNS and NEVER fails the gate
+#     (the ADR may have been renamed/removed legitimately — the Reviewer's soft flag
+#     owns the verdict).
+#
+#     ADR NAMESPACES. A project may keep more than one ADR space: the platform space
+#     `specs/adr/` plus one product/agent space per subtree, e.g. `specs/<product>/adr/`
+#     (that split is itself an ADR-recorded decision downstream). The number spaces are
+#     INDEPENDENT and normally COLLIDE — `0023` may exist in both with different
+#     content — so "which space" is part of the citation, not a detail.
+#     A namespace is a directory literally named `adr/` anywhere under `specs/`; only
+#     `*.md` sitting DIRECTLY in it counts as an ADR (an `adr/archive/` subtree is not a
+#     namespace). Its TOKEN is the parent directory's basename, with the reserved token
+#     `platform` for the root space `specs/adr/` (which has no parent name of its own).
+#
+#     RESOLUTION IS QUALIFIER-AWARE (E99-F50). Specs already disambiguate in prose:
+#       * QUALIFIED — `<ns>/ADR-NNNN`, or `<ns> ADR-NNNN` when `<ns>` is a known
+#         namespace token — ASSERTS a space, so it resolves against THAT space ONLY.
+#         `platform ADR-0023` warns even when `bookings/0023` exists: a cross-namespace
+#         id is exactly the typo this sweep exists to catch. An unknown `<ns>/` warns too.
+#       * BARE — `ADR-NNNN` asserts NO space, so it resolves against ANY namespace and
+#         warns only when it resolves in NONE. Deliberate: pre-convention corpora and
+#         single-namespace projects write bare ids, and inferring a space the author
+#         never wrote would recreate the false-positive wall this rule replaced.
+#     RESIDUAL HOLE (known, intentional): a BARE citation is NOT namespace-checked, so in
+#     a multi-namespace project a bare cross-namespace typo (bare `ADR-0023` meant as
+#     platform, resolving against bookings/0023) still passes silently. Write the
+#     qualifier to get it checked — that is the convention `specs/_templates/feature.spec.md`,
+#     `agents/architect.md` and `agents/reviewer.md` now teach.
+#     No-op when `specs/` holds no `adr/` directory at all (graceful degradation,
+#     mirroring the Reviewer check's precondition). Zero-dep + fast: the per-namespace
+#     index is built ONCE per run, then each citation is one `grep -qx`.
+ADR_NS_DIRS="$(find specs -type d -name adr 2>/dev/null | sort)"
+if [ -n "$ADR_NS_DIRS" ]; then
+  # Namespace tokens (`platform` for specs/adr, else the adr/ dir's parent basename)
+  # and an alternation of them, used to recognize the `<ns> ADR-NNNN` prose form.
+  ADR_NS_TOKENS="$(printf '%s\n' "$ADR_NS_DIRS" \
+                   | sed -e 's|/adr$||' -e 's|^specs$|platform|' -e 's|.*/||' | sort -u)"
+  ADR_NS_ALT="$(printf '%s\n' "$ADR_NS_TOKENS" | tr '\n' '|' | sed 's/|$//')"
+  # Namespace-tagged index (`<token>/<NNNN>`), built once: the per-citation lookup is a
+  # string match, not a filesystem probe per space. ADR_INDEX drops the tag for bare ids.
+  ADR_INDEX_NS="$(printf '%s\n' "$ADR_NS_DIRS" | while IFS= read -r d; do
+      [ -n "$d" ] || continue
+      p="${d%/adr}"; t="platform"
+      [ "$p" = "specs" ] || t="${p##*/}"
+      printf '%s\n' "$d"/*.md | sed 's|.*/||' \
+        | grep -oE '^[0-9]+' | sed "s|^|$t/|" || true
+    done | sort -u)"
+  ADR_INDEX="$(printf '%s\n' "$ADR_INDEX_NS" | sed 's|^.*/||' | sort -u || true)"
+  # Comma-joined for humans: a namespace path may itself contain a space, so a
+  # space-joined list would be ambiguous.
+  ADR_NS_LIST="$(printf '%s\n' "$ADR_NS_DIRS" | sed 's|$|, |' | tr -d '\n' | sed 's|, $||')"
   ADR_MISS=0
   for spec in $(grep -rl '^## Architecture alignment' specs/epics --include='*.spec.md' 2>/dev/null || true); do
-    for id in $(awk '/^## Architecture alignment/{f=1;next} /^## /{f=0} f' "$spec" \
-                | grep -oE 'ADR-[0-9]{4}' | sort -u || true); do
-      n="${id#ADR-}"
-      if ! ls "specs/adr/${n}-"*.md >/dev/null 2>&1; then
-        echo "⚠️  ADR citation: $spec cites $id but no specs/adr/${n}-*.md exists"
-        ADR_MISS=$((ADR_MISS+1))
-      fi
+    # Normalize each citation to `adr-NNNN` (bare) or `<ns>/adr-NNNN` (qualified):
+    # lowercase, promote a KNOWN `<ns> ADR-` prose qualifier to `<ns>/`, then drop any
+    # other leading word (ordinary prose like "the contract ADR-0012" is NOT a qualifier).
+    # No spaces survive, so the `for` word-split below is safe.
+    #
+    # Two normalizations run BEFORE the extractor, because the optional qualifier group
+    # `[A-Za-z0-9_-]+` is a blunt instrument at both of its boundaries:
+    #  1. Emphasis/quote wrappers are deleted (`*`, `"`, backtick, `'`). Without this a
+    #     REAL qualifier written `**platform** ADR-0023` is demoted to a bare id, because
+    #     the char before the space is outside the group's char class. `_` is deliberately
+    #     NOT deleted: underscore is legal in a namespace token (`my_product/`), so
+    #     stripping it would corrupt real tokens (`_platform_ ADR-N` stays demoted).
+    #  2. A `|` is appended to EVERY id. Without this the group happily eats a preceding
+    #     CITATION (`ADR-0042` is letters+digits+hyphen too), so `ADR-0042 ADR-0001`
+    #     yields ONE match whose "qualifier" `adr-0042` is then discarded by the demotion
+    #     `sed` below — the first id would never be looked up at all. The delimiter must
+    #     be a SUFFIX: a `|` prefix would also break the legitimate `<ns> ADR-NNNN` form.
+    for cite in $(awk '/^## Architecture alignment/{f=1;next} /^## /{f=0} f' "$spec" \
+                  | sed -e 's#[*"`]##g' -e "s#'##g" -e 's#ADR-[0-9][0-9][0-9][0-9]#&|#g' \
+                  | grep -oE '([A-Za-z0-9_-]+[ /])?ADR-[0-9]{4}' \
+                  | tr '[:upper:]' '[:lower:]' \
+                  | sed -E "s#^(${ADR_NS_ALT}) adr-#\\1/adr-#" \
+                  | sed -E 's#^[a-z0-9_-]+ adr-#adr-#' \
+                  | sort -u || true); do
+      case "$cite" in
+        */*)  # qualified: that namespace only
+          ns="${cite%%/*}"; n="${cite##*adr-}"
+          if ! printf '%s\n' "$ADR_INDEX_NS" | grep -qx "$ns/$n"; then
+            echo "⚠️  ADR citation: $spec cites $ns/ADR-$n but no ${n}-*.md exists in the '$ns' ADR namespace (a qualified citation resolves in that namespace ONLY; namespaces: $ADR_NS_LIST)"
+            ADR_MISS=$((ADR_MISS+1))
+          fi ;;
+        *)    # bare: any namespace
+          n="${cite#adr-}"
+          if ! printf '%s\n' "$ADR_INDEX" | grep -qx "$n"; then
+            echo "⚠️  ADR citation: $spec cites ADR-$n but no ${n}-*.md exists in any ADR namespace (searched: $ADR_NS_LIST)"
+            ADR_MISS=$((ADR_MISS+1))
+          fi ;;
+      esac
     done
   done
   if [ "$ADR_MISS" -eq 0 ]; then
-    ok "ADR citations resolve (specs/adr/ present)"
+    ok "ADR citations resolve (namespaces: $ADR_NS_LIST)"
   else
     echo "⚠️  $ADR_MISS unresolved ADR citation(s) — warn-only, never blocks the gate (fix the typo or update the spec)"
   fi

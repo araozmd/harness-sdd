@@ -103,8 +103,10 @@ hook), each with a one-line "how this honors it".
   this contract stay valid (no retro-fit).
 - The **Reviewer** confirms the section is present (citing ≥1 ADR or stating
   `ADRs touched: none`) **only where** architecture artifacts exist **and** the spec is
-  `sdd: true` — and that each cited `ADR-NNNN` **resolves to an existing
-  `specs/adr/NNNN-*.md` file**. A missing section there — like a cited-but-nonexistent
+  `sdd: true` — and that each cited `ADR-NNNN` **resolves to an existing ADR file**: a
+  **qualified** `<ns>/ADR-NNNN` against `specs/<ns>/adr/NNNN-*.md` **only** (`platform` =
+  `specs/adr/`), a **bare** `ADR-NNNN` against **any** `adr/` namespace under `specs/`.
+  A missing section there — like a cited-but-nonexistent
   (dangling) id — is a **soft flag** (not a hard reject), and the check never fires for
   a legacy/no-architecture feature or an `sdd: false` brief-only item. `init.sh` also
   runs a **warn-only sweep** of the same resolution check at session start, surfacing a

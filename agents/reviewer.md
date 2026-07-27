@@ -56,17 +56,41 @@ saying "it works" means nothing until you prove it. AI-generated code is often
 
 This additive check fires **only where** the project has a recorded architecture **and**
 the feature under review is a full SDD spec — **`specs/architecture.md` exists, at least
-one `specs/adr/NNNN-*.md` exists, and the feature carries a four-file spec (`sdd: true`)**.
+one ADR namespace holds a real `NNNN-*.md` (see *ADR namespaces* below), and the feature
+carries a four-file spec (`sdd: true`)**.
 When that precondition holds, confirm the feature's `.spec.md` has a
 `## Architecture alignment` section that **either cites ≥1 `ADR-NNNN`** (each with a
 one-line "how honored") **or explicitly states `ADRs touched: none`** (per
-`agents/architect.md`). Each cited `ADR-NNNN` id must **also resolve to an existing
-`specs/adr/NNNN-*.md` file** — a citation that resolves to nothing is exactly the
-typo that silently breaks design-to-feature traceability.
+`agents/architect.md`). Each cited id must **also resolve to an existing ADR file**
+under the rule below — a citation that resolves to nothing is exactly the typo that
+silently breaks design-to-feature traceability.
+
+### ADR namespaces and the resolution rule
+
+A project may keep **more than one ADR space**: the platform space `specs/adr/` plus one
+product/agent space per subtree, e.g. `specs/<product>/adr/`. The number spaces are
+**independent and normally collide** — `0023` may exist in both with different content —
+so *which* space is part of the citation. A namespace is a directory literally named
+`adr/` under `specs/`; its **token** is the parent directory's basename, with `platform`
+reserved for the root space `specs/adr/`. Resolve exactly as `init.sh` section 2c does:
+
+- **Qualified** — `<ns>/ADR-NNNN` (or `<ns> ADR-NNNN` when `<ns>` is a real namespace
+  token) resolves against **`specs/<ns>/adr/NNNN-*.md` only** (`platform` →
+  `specs/adr/NNNN-*.md`). It does **not** resolve because the number happens to exist in
+  another space, and an unknown `<ns>` never resolves.
+- **Bare** — `ADR-NNNN` asserts no space, so it resolves against **any** namespace and is
+  a miss only when it resolves in **none**. Do **not** flag a bare id that resolves in a
+  product namespace: that is the false positive this rule exists to prevent. The flip
+  side is a known, accepted hole — a bare id is **not** namespace-checked, so a bare
+  cross-namespace typo passes silently; prefer the qualified form in new specs
+  (`agents/architect.md` and `specs/_templates/feature.spec.md` teach it).
+
+`init.sh` runs this **same** rule as a warn-only sweep at session start, so the two must
+agree: an id `init.sh` certifies clean is not a flag here, and vice versa.
 
 - **Soft flag, not hard reject.** A **missing or empty** `## Architecture alignment`
   section (in the situation above) — and likewise a **cited-but-nonexistent** id (a
-  cited `ADR-NNNN` with no matching `specs/adr/NNNN-*.md` file) — is **flagged for the
+  cited `ADR-NNNN` that resolves to no ADR file under the rule above) — is **flagged for the
   Builder/Architect to investigate and justify** — reusing the existing "suspected but
   not provably violated → flag, don't block" verdict rule — **not a hard reject**. You
   cannot prove "forgot" versus "legitimately touches none" from the files alone — nor
