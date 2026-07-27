@@ -312,6 +312,19 @@ test_codex_agent_files_project_local() {
   run "$_t" codex
   for _r in $ROLES; do
     [ -f "$_t/.codex/agents/$_r.toml" ] || fail "R16: .codex/agents/$_r.toml not created"
+    # Codex rejects an agent role file that is missing any of this trio ("must define
+    # `developer_instructions`") and then silently ignores the model stamp. Assert the
+    # exact key names statically — the suite must not depend on the `codex` CLI.
+    grep -q "^name = \"$_r\"\$" "$_t/.codex/agents/$_r.toml" \
+      || fail "R16: $_r.toml does not define name"
+    grep -q '^description = "..*"$' "$_t/.codex/agents/$_r.toml" \
+      || fail "R16: $_r.toml does not define description"
+    grep -q '^developer_instructions = "..*"$' "$_t/.codex/agents/$_r.toml" \
+      || fail "R16: $_r.toml does not define developer_instructions — Codex rejects the file and the model stamp never applies"
+    grep -q '^instructions = ' "$_t/.codex/agents/$_r.toml" \
+      && fail "R16: $_r.toml uses the unsupported key 'instructions'"
+    grep -qF ".harness/agents/$_r.md" "$_t/.codex/agents/$_r.toml" \
+      || fail "R16: $_r.toml does not point at the canonical .harness/agents/$_r.md"
   done
   grep -q '^model = "gpt-5-codex"$' "$_t/.codex/agents/builder.toml" \
     || fail "R16: builder.toml carries no model = key"

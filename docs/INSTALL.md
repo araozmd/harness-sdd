@@ -217,6 +217,15 @@ the target-independent global `/prompts:sdd-*` bodies, a model stamp is target-d
 so writing it to `~/.codex` would let one repo silently retune every other repo on the
 machine.
 
+> **Codex precondition — the project must be trusted.** Codex discovers agent files by
+> directory convention (`$CODEX_HOME/agents/` and the project-local `<repo>/.codex/agents/`),
+> so the generated files need no registration. But Codex only reads a project's local
+> `.codex/` config at all when that project is **trusted** — i.e. `~/.codex/config.toml`
+> carries `[projects."<absolute path to your repo>"]` with `trust_level = "trusted"`.
+> On an untrusted clone the generated role files are silently ignored and every role keeps
+> the session model. Each file defines the required trio `name` / `description` /
+> `developer_instructions`; `codex doctor` reports any role file Codex rejected.
+
 `opencode.json` is the one config file the harness does not regenerate on a plain re-run.
 It is re-stamped **only** when it is byte-identical to `.harness/.opencode.stamp` (the
 last body the installer wrote) or to a freshly generated model-free body; anything else

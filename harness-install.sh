@@ -1289,6 +1289,14 @@ EOF
   # is target-DEPENDENT: writing it to `$CODEX_HOME/agents/` would let one target silently
   # retune every other target on the same machine. Project-local also keeps deselection
   # inside $TARGET, where the pristine-compare machinery lives.
+  #
+  # Codex discovers agent files by DIRECTORY CONVENTION (`$CODEX_HOME/agents/` and the
+  # project-local `<repo>/.codex/agents/`); no registration in `.codex/config.toml` is
+  # needed. But it requires the trio `name` / `description` / `developer_instructions` —
+  # a file that spells the last key `instructions` is rejected at load time with
+  # "must define `developer_instructions`" (verified with `codex doctor --json`, CLI
+  # 0.145.0) and its model stamp silently never applies. Project-local `.codex/` is only
+  # read when the project is TRUSTED by Codex; see docs/INSTALL.md.
   gen_codex_agent() {
     _gca_role="$1"; _gca_desc="$2"; _gca_dest="$3"
     _gca_model="$(resolve_model codex "$_gca_role")"
@@ -1297,7 +1305,7 @@ EOF
       printf 'name = "%s"\n' "$_gca_role"
       printf 'description = "%s"\n' "$_gca_desc"
       if [ -n "$_gca_model" ]; then printf 'model = "%s"\n' "$_gca_model"; fi
-      printf 'instructions = "Read .harness/agents/%s.md and follow it exactly; resolve every relative path against .harness/. Run .harness/init.sh first and halt on a non-zero exit."\n' "$_gca_role"
+      printf 'developer_instructions = "Read .harness/agents/%s.md and follow it exactly; resolve every relative path against .harness/. Run .harness/init.sh first and halt on a non-zero exit."\n' "$_gca_role"
     } > "$_gca_dest"
   }
 
