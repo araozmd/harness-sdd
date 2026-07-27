@@ -24,17 +24,22 @@ All notable changes to the harness body are recorded here. Versions follow
   `en_US.UTF-8` and `C` (skipping cleanly where a locale is absent) and asserts rejection
   plus no ref/registration/path mutation — so the hole is caught in C-locale CI too, not
   only on a developer laptop.
-- The C pin stops at **foreign code**. `fix-worktree.sh` executes code it does not own in
-  exactly two places — the project init gate (`init.sh`, which sources the target repo's
-  `.harness/init.project.sh`) and `run` commands — and both now run under the **caller's**
-  locale, restored from the value captured before the pin. Exporting C into them was a
-  real defect, not just a broad blast radius: a consumer whose `init.project.sh` requires
-  UTF-8 failed its own gate, and `create` then rolled back an otherwise valid worktree.
-  A caller with `LC_ALL` unset gets it restored as **unset**, not empty, so their
-  `LANG`/`LC_*` layering resurfaces. Every glob and every `git` plumbing call inside the
-  helper still runs under `C`, so the determinism the pin was chosen for is intact.
-  `tests/test_fix_worktree.sh` gains `test_child_commands_see_caller_locale`, whose init
-  and `run` legs are independently mutation-sensitive.
+- The C pin stops at **foreign code**. `fix-worktree.sh` executes code owned by the target
+  repo at three surfaces — the project init gate (`init.sh`, which sources
+  `.harness/init.project.sh`), `run` commands, and the `post-checkout` hook plus checkout
+  (smudge) filters that `git worktree add` fires — and all three now run under the
+  **caller's** locale, restored from the value captured before the pin. Exporting C into
+  them was a real defect, not just a broad blast radius: a consumer whose
+  `init.project.sh` requires UTF-8 failed its own gate, and `create` then rolled back an
+  otherwise valid worktree.
+- A caller with `LC_ALL` unset gets it restored as **unset**, not empty, so their
+  `LANG`/`LC_*` layering resurfaces — an empty `LC_ALL` is ignored by some
+  implementations and honored by others.
+- `worktree add` is safe to un-pin precisely because its output is discarded and only its
+  exit status is read; every remaining `git` call in the helper is read-only plumbing that
+  **is** parsed and stays under `C`, so the determinism the pin was chosen for is intact.
+- `tests/test_fix_worktree.sh` gains `test_child_commands_see_caller_locale`, whose init,
+  `run`, and post-checkout-hook legs are each independently mutation-sensitive.
 - Scope is only this glob: the `grep -Eq '^[a-z0-9-]+$'` validators in `harness-install.sh`
   and the Python `re` validator in `init.sh` were verified unaffected and left alone.
 

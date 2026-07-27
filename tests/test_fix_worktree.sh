@@ -197,9 +197,10 @@ test_slug_rejection_is_locale_independent() {
 }
 
 # The helper pins itself to LC_ALL=C so its globs mean ASCII and its `git`
-# plumbing parses deterministically. That pin must stop at the two places it
-# executes FOREIGN code — the project init gate and `run` commands — which
-# belong to the target repo. Exporting C into them made a consumer whose
+# plumbing parses deterministically. That pin must stop at every surface where it
+# executes FOREIGN code owned by the target repo: the project init gate, `run`
+# commands, and the post-checkout hook / checkout filters fired by
+# `git worktree add`. Exporting C into them made a consumer whose
 # `.harness/init.project.sh` requires UTF-8 fail its own gate, and `do_create`
 # then rolled back an otherwise valid worktree.
 test_child_commands_see_caller_locale() {
@@ -245,9 +246,25 @@ test_child_commands_see_caller_locale() {
   [ "$(cat "$_wt2/.init-charmap")" = UTF-8 ] ||
     fail "unset LC_ALL did not let the caller's LANG resurface: $(cat "$_wt2/.init-charmap")"
 
-  # 4. Restoring the caller's locale for children must NOT loosen the helper's
+  # 4. `git worktree add` fires the target repo's post-checkout hook and checkout
+  #    filters — a third foreign-code surface, and the only hook/filter-triggering
+  #    git call in the helper (every other one is read-only plumbing we parse).
+  printf '%s\n' \
+    '#!/bin/sh' \
+    "printf '%s\n' \"\${LC_ALL-unset}\" > \"$FIXTURE/hook-lc-all\"" \
+    "printf '%s\n' \"\$(locale charmap)\" > \"$FIXTURE/hook-charmap\"" \
+    > "$PRIMARY/.git/hooks/post-checkout"
+  chmod +x "$PRIMARY/.git/hooks/post-checkout"
+  (cd "$PRIMARY" && LC_ALL="$_utf8" tools/fix-worktree.sh create E99-F152 hooks) >/dev/null
+  [ -f "$FIXTURE/hook-lc-all" ] || fail "post-checkout hook did not fire on worktree add"
+  [ "$(cat "$FIXTURE/hook-lc-all")" = "$_utf8" ] ||
+    fail "post-checkout hook saw LC_ALL=$(cat "$FIXTURE/hook-lc-all"); expected $_utf8"
+  [ "$(cat "$FIXTURE/hook-charmap")" = UTF-8 ] ||
+    fail "post-checkout hook ran under charmap $(cat "$FIXTURE/hook-charmap"); expected UTF-8"
+
+  # 5. Restoring the caller's locale for foreign code must NOT loosen the helper's
   #    own ASCII slug guard — the whole point of the C pin.
-  assert_create_fails invalid create E99-F152 Bad-Slug
+  assert_create_fails invalid create E99-F153 Bad-Slug
   pass "test_child_commands_see_caller_locale"
 }
 

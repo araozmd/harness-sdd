@@ -9,11 +9,12 @@ set -u
 # script to C so every glob here means ASCII, and export it so the `git`
 # plumbing this helper parses stays in the deterministic C locale too.
 #
-# That export must NOT reach the FOREIGN code this helper executes — the project
-# init gate and `run` commands. Those belong to the target repo, not to us: a
-# consumer whose `.harness/init.project.sh` needs UTF-8 would fail its own gate
-# and lose an otherwise valid worktree to the rollback. Capture the caller's
-# LC_ALL first so those two escapes can put it back (see restore_caller_locale).
+# That export must NOT reach the FOREIGN code this helper executes. Three
+# surfaces belong to the target repo, not to us: the project init gate, `run`
+# commands, and the post-checkout hook / checkout filters that `git worktree add`
+# fires. A consumer whose `.harness/init.project.sh` needs UTF-8 would fail its
+# own gate and lose an otherwise valid worktree to the rollback. Capture the
+# caller's LC_ALL first so those escapes can put it back (restore_caller_locale).
 if [ -n "${LC_ALL+x}" ]; then
   CALLER_LC_ALL_SET=1
 else
@@ -254,7 +255,15 @@ do_create() {
 
   CREATED_MANAGED_LINKS=
   mkdir -p "$(dirname "$WORKTREE")" || die "cannot create worktree parent"
-  if ! git -C "$PRIMARY" worktree add -b "$BRANCH" "$WORKTREE" "$BASE_COMMIT" >/dev/null 2>&1; then
+  # `worktree add` is the ONLY git call here that runs target-repo code: it fires
+  # the repo's post-checkout hook and any checkout (smudge) filters. Give those
+  # the caller's locale like the other foreign-code escapes. Safe to un-pin
+  # precisely because this call's output is discarded — only its exit status is
+  # read — so the C pin's parsing determinism is not what is being relaxed.
+  # Every remaining git call in this file is read-only plumbing we DO parse, and
+  # stays under C.
+  if ! (restore_caller_locale &&
+        git -C "$PRIMARY" worktree add -b "$BRANCH" "$WORKTREE" "$BASE_COMMIT" >/dev/null 2>&1); then
     die "git worktree creation failed for $WORKTREE"
   fi
   if ! materialize_links; then
