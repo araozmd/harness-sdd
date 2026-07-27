@@ -400,6 +400,12 @@ merge_fix_to_base() {
   git -C "$PRIMARY" merge --no-ff -m merge "$_branch" >/dev/null
 }
 
+squash_merge_fix_to_base() {
+  _branch=$1
+  git -C "$PRIMARY" merge --squash "$_branch" >/dev/null
+  git -C "$PRIMARY" commit -m "squash $_branch" >/dev/null
+}
+
 test_teardown_refuses_dirty_wrong_branch_unmerged_and_wrong_primary_head() {
   make_source_fixture teardown_refusals
   _wt="$(cd "$PRIMARY" && tools/fix-worktree.sh create E99-F120 refuse)"
@@ -477,6 +483,59 @@ test_clean_merged_teardown_removes_exact_resources() {
   git -C "$PRIMARY" worktree list --porcelain | grep -F "worktree $_unrelated_stale" >/dev/null ||
     fail "clean teardown pruned unrelated stale registration"
   pass "test_clean_merged_teardown_removes_exact_resources"
+}
+
+test_squash_merged_teardown_removes_exact_resources() {
+  make_source_fixture teardown_squash
+  _wt="$(cd "$PRIMARY" && tools/fix-worktree.sh create E99-F150 squashed)"
+  printf squashed > "$_wt/squashed.txt"
+  git -C "$_wt" add squashed.txt
+  git -C "$_wt" commit -m first >/dev/null
+  printf more >> "$_wt/squashed.txt"
+  git -C "$_wt" add squashed.txt
+  git -C "$_wt" commit -m second >/dev/null
+  squash_merge_fix_to_base feat/E99-F150-squashed
+  # A later unrelated commit on the base must not hide the squashed patch.
+  printf later > "$PRIMARY/later.txt"
+  git -C "$PRIMARY" add later.txt
+  git -C "$PRIMARY" commit -m later >/dev/null
+  git -C "$PRIMARY" merge-base --is-ancestor feat/E99-F150-squashed main &&
+    fail "squash fixture precondition: branch is an ancestor of base"
+  (cd "$PRIMARY" && tools/fix-worktree.sh teardown E99-F150 squashed)
+  [ ! -e "$_wt" ] || fail "squash-merged teardown left path"
+  git -C "$PRIMARY" worktree list --porcelain | grep -F "worktree $_wt" >/dev/null &&
+    fail "squash-merged teardown left registration"
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/E99-F150-squashed &&
+    fail "squash-merged teardown left branch"
+
+  # Same recognition on the lone-branch path (worktree already gone, branch remains).
+  make_source_fixture teardown_squash_lone
+  _lone="$(cd "$PRIMARY" && tools/fix-worktree.sh create E99-F151 squashed-lone)"
+  printf lone > "$_lone/lone.txt"
+  git -C "$_lone" add lone.txt
+  git -C "$_lone" commit -m lone >/dev/null
+  squash_merge_fix_to_base feat/E99-F151-squashed-lone
+  git -C "$PRIMARY" worktree remove "$_lone" >/dev/null
+  (cd "$PRIMARY" && tools/fix-worktree.sh teardown E99-F151 squashed-lone)
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/E99-F151-squashed-lone &&
+    fail "squash-merged lone-branch teardown left branch"
+
+  # Work the base never received stays refused and preserved.
+  make_source_fixture teardown_squash_partial
+  _partial="$(cd "$PRIMARY" && tools/fix-worktree.sh create E99-F152 squashed-partial)"
+  printf shipped > "$_partial/shipped.txt"
+  git -C "$_partial" add shipped.txt
+  git -C "$_partial" commit -m shipped >/dev/null
+  squash_merge_fix_to_base feat/E99-F152-squashed-partial
+  printf held > "$_partial/held.txt"
+  git -C "$_partial" add held.txt
+  git -C "$_partial" commit -m held >/dev/null
+  _partial_oid="$(git -C "$PRIMARY" rev-parse refs/heads/feat/E99-F152-squashed-partial)"
+  assert_create_fails merged teardown E99-F152 squashed-partial
+  [ -d "$_partial" ] || fail "partially squashed teardown removed path"
+  [ "$(git -C "$PRIMARY" rev-parse refs/heads/feat/E99-F152-squashed-partial)" = "$_partial_oid" ] ||
+    fail "partially squashed teardown changed branch"
+  pass "test_squash_merged_teardown_removes_exact_resources"
 }
 
 test_teardown_idempotent_and_partial_safe() {
@@ -570,6 +629,10 @@ test_helper_rejects_forced_or_recursive_cleanup() {
     fail "helper contains forced branch deletion"
   grep -q -- 'rm -rf' "$SRC/tools/fix-worktree.sh" &&
     fail "helper contains recursive filesystem deletion"
+  # The squash path deletes the ref itself; keep it a compare-and-swap on the verified
+  # tip so a branch that moved after verification is preserved, not silently dropped.
+  grep -q -- 'update-ref -d "refs/heads/\$BRANCH" "\$_retire_tip"' "$SRC/tools/fix-worktree.sh" ||
+    fail "squash-merge branch deletion is not guarded by an expected old value"
   pass "test_helper_rejects_forced_or_recursive_cleanup"
 }
 
@@ -592,5 +655,6 @@ test_provision_failure_preserves_unexpected_work
 test_provision_failure_preserves_changed_managed_link
 test_teardown_refuses_dirty_wrong_branch_unmerged_and_wrong_primary_head
 test_clean_merged_teardown_removes_exact_resources
+test_squash_merged_teardown_removes_exact_resources
 test_teardown_idempotent_and_partial_safe
 test_helper_rejects_forced_or_recursive_cleanup

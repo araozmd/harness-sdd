@@ -4,6 +4,28 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.38.1] — 2026-07-27
+
+### Fixed — 🐛 Worktree teardown accepts squash-merged fix branches (E99)
+- `tools/fix-worktree.sh` decided "is this branch merged?" with
+  `git merge-base --is-ancestor` alone. A squash merge rewrites the branch into a
+  single new commit on the base, so the branch tip is **not** an ancestor of the base
+  and the check reported every squash-merged branch as unmerged. Since squash is the
+  documented merge style downstream, `teardown` aborted after each successful parallel
+  fix batch and left its worktrees and local branches behind — the one cleanup path
+  the lifecycle exists to guarantee.
+- `branch_merged()` now falls back to a **patch-id** comparison when ancestry fails: it
+  replays the branch's cumulative tree as one commit on the merge base and asks
+  `git cherry` whether the base already carries that patch. This recognizes the squash
+  commit without trusting its message, author, or date, and still refuses a branch
+  holding work the base never received. It records the answer in `BRANCH_MERGE_KIND`.
+- Deletion follows suit. `git branch -d` repeats the same ancestry test and would
+  refuse the branch that was just proven merged, so the squash path deletes the ref
+  with `git update-ref -d <ref> <expected-tip>` — a compare-and-swap that aborts if the
+  branch moved after verification. The helper still contains no forced branch
+  deletion, no forced worktree removal, and no recursive delete; the invariant test
+  now also pins the compare-and-swap guard.
+
 ## [0.38.0] — 2026-07-27
 
 ### Added — ✨ Per-role model selection (E17-F01)

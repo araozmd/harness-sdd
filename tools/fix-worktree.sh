@@ -264,8 +264,51 @@ require_primary_on_base() {
     die "canonical primary is not on captured base commit $BASE_COMMIT"
 }
 
+# Records how the branch reached the base in BRANCH_MERGE_KIND: `ancestor` for a
+# fast-forward or merge commit, `squash` when the base carries the branch's work as a
+# rewritten single commit. A squash merge leaves the tip outside the base's ancestry,
+# so ancestry alone reports a merged branch as unmerged and aborts every teardown.
 branch_merged() {
-  git -C "$PRIMARY" merge-base --is-ancestor "$BRANCH" "$BASE_COMMIT" 2>/dev/null
+  BRANCH_MERGE_KIND=
+  if git -C "$PRIMARY" merge-base --is-ancestor "$BRANCH" "$BASE_COMMIT" 2>/dev/null; then
+    BRANCH_MERGE_KIND=ancestor
+    return 0
+  fi
+  # Replay the branch's cumulative tree as one commit on the merge base, then ask
+  # whether the base already contains that patch. `git cherry` compares patch ids, so
+  # this recognizes the squash commit without trusting its message, author, or date.
+  _merge_base="$(git -C "$PRIMARY" merge-base "$BRANCH" "$BASE_COMMIT" 2>/dev/null)" || return 1
+  [ -n "$_merge_base" ] || return 1
+  _branch_tree="$(git -C "$PRIMARY" rev-parse -q --verify "refs/heads/$BRANCH^{tree}" 2>/dev/null)" ||
+    return 1
+  [ -n "$_branch_tree" ] || return 1
+  _squash_probe="$(
+    GIT_AUTHOR_NAME=harness GIT_AUTHOR_EMAIL=harness@localhost \
+    GIT_COMMITTER_NAME=harness GIT_COMMITTER_EMAIL=harness@localhost \
+    git -C "$PRIMARY" commit-tree "$_branch_tree" -p "$_merge_base" -m squash-probe 2>/dev/null
+  )" || return 1
+  [ -n "$_squash_probe" ] || return 1
+  _unmerged="$(git -C "$PRIMARY" cherry "$BASE_COMMIT" "$_squash_probe" 2>/dev/null |
+    grep -c '^+' || :)"
+  [ "${_unmerged:-1}" -eq 0 ] || return 1
+  BRANCH_MERGE_KIND=squash
+  return 0
+}
+
+# `git branch -d` repeats the same ancestry test, so it refuses a squash-merged branch
+# that branch_merged() just proved is in the base. Delete that ref directly instead —
+# `update-ref -d` with the expected old value is a compare-and-swap, so it aborts if
+# the branch moved since verification — which a forced delete would not.
+delete_retired_branch() {
+  _retire_tip="$(git -C "$PRIMARY" rev-parse -q --verify "refs/heads/$BRANCH" 2>/dev/null)" ||
+    die "cannot resolve branch tip for deletion; preserved $BRANCH"
+  if [ "${BRANCH_MERGE_KIND:-}" = squash ]; then
+    git -C "$PRIMARY" update-ref -d "refs/heads/$BRANCH" "$_retire_tip" >/dev/null ||
+      die "verified squash-merge branch deletion failed; preserved $BRANCH"
+  else
+    git -C "$PRIMARY" branch -d "$BRANCH" >/dev/null ||
+      die "safe branch deletion failed; preserved $BRANCH"
+  fi
 }
 
 do_teardown() {
@@ -280,8 +323,7 @@ do_teardown() {
     [ "$_branch_exists" -eq 1 ] || return 0
     require_primary_on_base
     branch_merged || die "feature branch is not merged into resolved base: $BRANCH"
-    git -C "$PRIMARY" branch -d "$BRANCH" >/dev/null ||
-      die "safe branch deletion failed; preserved $BRANCH"
+    delete_retired_branch
     return 0
   }
 
@@ -308,8 +350,7 @@ do_teardown() {
     git -C "$PRIMARY" worktree remove "$WORKTREE" >/dev/null ||
       die "non-forced worktree removal failed; preserved: $WORKTREE"
   fi
-  git -C "$PRIMARY" branch -d "$BRANCH" >/dev/null ||
-    die "safe branch deletion failed; preserved $BRANCH"
+  delete_retired_branch
 }
 
 [ "$#" -ge 3 ] || usage
