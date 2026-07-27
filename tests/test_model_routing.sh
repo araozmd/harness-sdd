@@ -540,6 +540,80 @@ test_deselect_preserves_user_edits() {
   return 0
 }
 
+# ── R11/R17: every role back to `inherit` reconciles a PREVIOUSLY stamped target ──
+# Regression for Codex r1 P1 #3654925551. R17 ("no resolvable value ⇒ neither tree is
+# created") was only ever exercised on a FRESH target; on a target that had been stamped
+# with a concrete tier the install path just skipped, so the old files — and their old
+# `model:` keys — survived and stayed discoverable. The documented switch back to session
+# inheritance then silently kept using the old model.
+test_return_to_inherit_reconciles() {
+  # (a) all-pristine: both trees, and the stamp state behind them, must be GONE.
+  _t="$(mk r11rec)"; run "$_t" gemini,codex
+  set_tier "$_t" architect reasoning
+  set_tier "$_t" scout cheap
+  set_pin "$_t" codex cheap "gpt-5-mini"
+  run "$_t" gemini,codex
+  [ -f "$_t/.gemini/agents/architect.md" ] || fail "R11rec: setup — gemini artifact missing"
+  [ -f "$_t/.codex/agents/scout.toml" ]    || fail "R11rec: setup — codex artifact missing"
+  grep -q '^model: ' "$_t/.gemini/agents/architect.md" || fail "R11rec: setup — gemini model: key missing"
+  grep -q '^model = ' "$_t/.codex/agents/scout.toml"   || fail "R11rec: setup — codex model key missing"
+  # Now put EVERY role back on inherit — nothing resolves for either front-end.
+  set_tier "$_t" architect inherit
+  set_tier "$_t" scout inherit
+  run "$_t" gemini,codex
+  [ -e "$_t/.gemini/agents" ] && fail "R11rec: .gemini/agents/ survived a switch back to inherit"
+  [ -e "$_t/.gemini" ]        && fail "R11rec: the harness-created .gemini/ dir survived"
+  [ -e "$_t/.codex/agents" ]  && fail "R11rec: .codex/agents/ survived a switch back to inherit"
+  [ -e "$_t/.codex" ]         && fail "R11rec: the harness-created .codex/ dir survived"
+  # R11 byte-identity is about the WHOLE tree: no leftover stamp state either.
+  [ -e "$_t/.harness/.model-agents" ] \
+    && fail "R11rec: .harness/.model-agents/ survived — the tree is not equivalent to an unconfigured install"
+  # The still-selected front-ends keep the rest of their glue.
+  [ -d "$_t/ch/prompts" ] || fail "R11rec: the GLOBAL codex /prompts:sdd-* glue was collaterally removed"
+
+  # (b) a user-edited artifact is NEVER destroyed (BR6/R23) — it and only it survives.
+  _u="$(mk r11rec_edit)"; run "$_u" gemini,codex
+  set_tier "$_u" architect reasoning
+  set_tier "$_u" scout cheap
+  set_pin "$_u" codex cheap "gpt-5-mini"
+  run "$_u" gemini,codex
+  printf 'mine\n' >> "$_u/.gemini/agents/architect.md"
+  printf '# mine\n' >> "$_u/.codex/agents/scout.toml"
+  set_tier "$_u" architect inherit
+  set_tier "$_u" scout inherit
+  _e="$(run_err "$_u" gemini,codex)"
+  [ -f "$_u/.gemini/agents/architect.md" ] \
+    || fail "R11rec: an EDITED .gemini/agents/architect.md was deleted on the switch back to inherit"
+  grep -qx 'mine' "$_u/.gemini/agents/architect.md" || fail "R11rec: the gemini user edit was not preserved"
+  [ -f "$_u/.codex/agents/scout.toml" ] \
+    || fail "R11rec: an EDITED .codex/agents/scout.toml was deleted on the switch back to inherit"
+  grep -qx '# mine' "$_u/.codex/agents/scout.toml" || fail "R11rec: the codex user edit was not preserved"
+  printf '%s\n' "$_e" | grep -q '.gemini/agents/architect.md' \
+    || fail "R11rec: no warning naming the preserved gemini file"
+  printf '%s\n' "$_e" | grep -q '.codex/agents/scout.toml' \
+    || fail "R11rec: no warning naming the preserved codex file"
+  # pristine siblings ARE reclaimed even though the dirs must survive for the edited file
+  [ -f "$_u/.gemini/agents/builder.md" ]  && fail "R11rec: a pristine sibling was not reclaimed (gemini)"
+  [ -f "$_u/.codex/agents/builder.toml" ] && fail "R11rec: a pristine sibling was not reclaimed (codex)"
+
+  # (c) R22 with the `models:` edit and the DESELECT in the SAME run: the on-disk files
+  # came from the OLD config, so a freshly generated reference cannot match them. The
+  # remembered bytes can — without them a pristine file would be misclassified as
+  # user-edited and orphaned. (Codex r1 P2 #3654925555.)
+  _d="$(mk r11rec_desel)"; run "$_d" gemini,codex
+  set_tier "$_d" architect reasoning
+  set_pin "$_d" codex reasoning "gpt-5"
+  run "$_d" gemini,codex
+  [ -f "$_d/.gemini/agents/architect.md" ] || fail "R11rec: setup — gemini artifact missing (c)"
+  [ -f "$_d/.codex/agents/architect.toml" ] || fail "R11rec: setup — codex artifact missing (c)"
+  set_tier "$_d" architect cheap          # config changes AND the front-ends go away
+  run "$_d" claude
+  [ -e "$_d/.gemini" ] && fail 'R11rec: a models: edit in the deselect run orphaned .gemini/'
+  [ -e "$_d/.codex" ]  && fail 'R11rec: a models: edit in the deselect run orphaned .codex/'
+  [ -e "$_d/.harness/.model-agents" ] && fail "R11rec: .model-agents/ outlived the artifacts it describes"
+  return 0
+}
+
 test_tier_resolution_order
 pass "tier resolves role → models.default → inherit (R4)"
 test_inherit_is_omission
@@ -564,6 +638,8 @@ test_codex_agent_files_project_local
 pass "codex .codex/agents/<role>.toml is project-local; \$CODEX_HOME is never touched (R16)"
 test_new_trees_conditional
 pass "no resolvable value ⇒ .gemini/agents/ and .codex/agents/ are never created (R17)"
+test_return_to_inherit_reconciles
+pass "every role back to inherit reclaims a previously stamped .gemini/.codex tree, preserving user edits (R11, R17, R23)"
 test_selection_gating
 pass "an unselected front-end is never stamped, even with a full models: block (R18)"
 test_restamp_after_config_change

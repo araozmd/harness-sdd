@@ -1213,6 +1213,7 @@ test_no_models_block_is_byte_identical() {   # R11
   [ -d "$_ta/.gemini/agents" ]              && fail "R11: unconfigured install created .gemini/agents/"
   [ -d "$_ta/.codex/agents" ]               && fail "R11: unconfigured install created .codex/agents/"
   [ -f "$_ta/.harness/.opencode.stamp" ]    && fail "R11: unconfigured install created .harness/.opencode.stamp"
+  [ -d "$_ta/.harness/.model-agents" ]      && fail "R11: unconfigured install created .harness/.model-agents/"
   # And prove the RESOLVER itself treats a config with no models: block as `inherit`
   # (migrate_config always re-seeds the block, so this is the only way to exercise the
   # genuinely block-less config an older target hands us mid-run).

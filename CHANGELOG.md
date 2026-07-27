@@ -25,11 +25,18 @@ All notable changes to the harness body are recorded here. Versions follow
 - **Opt-in and inert by default**: `inherit` compiles to key omission on every
   front-end (the literal string is never written), so an absent, empty or all-`inherit`
   block leaves the generated tree byte-identical to a harness without model routing —
-  no model key, no `.gemini/`/`.codex/` directory, no `.harness/.opencode.stamp`.
+  no model key, no `.gemini/`/`.codex/` directory, no `.harness/.opencode.stamp`,
+  no `.harness/.model-agents/`. Moving a previously-stamped target back to all-`inherit`
+  **reconciles** it: the pristine per-role files are reclaimed and the harness-created
+  directories pruned, so the switch back to session inheritance actually takes effect
+  instead of leaving the old `model` keys discoverable.
 - Refined the `opencode.json` never-clobber contract so model changes can land: it is
   regenerated only when byte-identical to `.harness/.opencode.stamp` or to a freshly
   generated model-free body, and otherwise left untouched with a warning. Deselection
   reclaims every stamped artifact through the existing pristine byte-comparison.
+  `.harness/.model-agents/` extends that stamp device to `.gemini/agents/` and
+  `.codex/agents/`, so reclamation stays correct even when the `models:` block is edited
+  in the same run — a user-edited artifact is still never deleted, only warned about.
 - An unrecognized tier warns and resolves as `inherit` (never fatal). A pin is otherwise
   written verbatim, with exactly two guards: an `opencode` pin without a `/` and a pin
   whose value is the tier name `"inherit"` are each warned about and dropped, stamping

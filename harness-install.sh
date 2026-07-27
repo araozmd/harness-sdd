@@ -1053,6 +1053,9 @@ MODEL ROUTING  (created ONLY when models: resolves a role to a concrete value):
                                  (never written to \$CODEX_HOME / ~/.codex)
   .harness/.opencode.stamp       byte copy of the last generated opencode.json, kept
                                  only while it carries a model key (enables re-stamping)
+  .harness/.model-agents/        byte copies of the last generated .gemini/.codex per-role
+                                 files, kept only while those files exist (lets a switch
+                                 back to \`inherit\` reclaim them instead of orphaning them)
   With no models: block — or every role on \`inherit\` — none of the above exists and
   the generated tree is byte-identical to a harness without model routing.
 
@@ -1313,6 +1316,82 @@ EOF
     else
       echo "⚠️  $_rip_rel differs from the generated stamp (edited) — left in place (deselected '$_rip_label' not removed)" >&2
     fi
+  }
+
+  # ── per-role model-artifact stamps + reclamation (E17-F01 R11/R22/R23) ────────
+  # `.harness/.model-agents/<front-end>/<file>` is a byte copy of the last per-role
+  # artifact the installer wrote for that front-end — the exact device
+  # `.harness/.opencode.stamp` already uses for opencode.json (R20).
+  #
+  # It exists because the reclamation reference has to be the bytes produced by the
+  # config that was in force WHEN THE FILE WAS WRITTEN, not by the config in force
+  # now. Both reclamation cases change the config by construction:
+  #   • every role moved back to `inherit` (§5e/§5f) — a freshly generated body then
+  #     carries no `model:` key while the on-disk file still does, so without the
+  #     stamp EVERY pristine file would be misread as user-edited and orphaned,
+  #     leaving the old model silently in force (Codex r1 P1 #3654925551);
+  #   • a front-end deselected in the same run as a `models:` edit (§7)
+  #     (Codex r1 P2 #3654925555).
+  # The stamp is kept ONLY while the artifacts it describes exist and is removed with
+  # them, so a target where nothing resolves keeps its R11 byte-identity.
+
+  # stamp_model_agent <front-end> <file> <src> — remember the bytes just written.
+  stamp_model_agent() {
+    mkdir -p "$H/.model-agents/$1"
+    cp "$3" "$H/.model-agents/$1/$2"
+  }
+
+  # reclaim_model_agents <front-end> — remove this front-end's per-role model
+  # artifacts, pristine-only, and prune the harness-created dirs. Called from BOTH the
+  # install path (nothing resolves any more) and §7 (front-end deselected), so the two
+  # never diverge. Emission stays in the ONE hoisted emitter per front-end (R21).
+  reclaim_model_agents() {
+    _rma_fe="$1"
+    # NOTE: the emitter is dispatched through a NAME, not a `case` inside the loop
+    # below — bash 3.2 (still the /bin/sh on macOS) mis-parses a `case` nested in a
+    # `$( )` command substitution. Same single-emitter guarantee, one indirection.
+    case "$_rma_fe" in
+      gemini) _rma_top=".gemini"; _rma_ext="md";   _rma_gen=gen_gemini_agent ;;
+      codex)  _rma_top=".codex";  _rma_ext="toml"; _rma_gen=gen_codex_agent ;;
+      *) return 0 ;;
+    esac
+    _rma_sub="$_rma_top/agents"
+    _rma_stamp="$H/.model-agents/$_rma_fe"
+    if [ -d "$TARGET/$_rma_sub" ]; then
+      _rma_tmp="$(mktemp 2>/dev/null || mktemp -t harness-ma)"
+      _rma_gone="$(ag_personas | while IFS='	' read -r _rma_r _rma_d; do
+        [ -n "$_rma_r" ] || continue
+        _rma_f="$_rma_r.$_rma_ext"
+        [ -f "$TARGET/$_rma_sub/$_rma_f" ] || continue
+        # Reference: the remembered bytes when they match what is on disk (the file may
+        # have been written under a different `models:` config); otherwise a freshly
+        # generated body, which still covers targets stamped before stamps existed.
+        "$_rma_gen" "$_rma_r" "$_rma_d" "$_rma_tmp"
+        _rma_ref="$_rma_tmp"
+        if [ -f "$_rma_stamp/$_rma_f" ] \
+           && cmp -s "$TARGET/$_rma_sub/$_rma_f" "$_rma_stamp/$_rma_f"; then
+          _rma_ref="$_rma_stamp/$_rma_f"
+        fi
+        remove_if_pristine "$_rma_sub/$_rma_f" "$_rma_ref" "$_rma_fe"
+      done)"
+      rm -f "$_rma_tmp"
+      # Never `rm -rf`: named files above, then rmdir — which fails harmlessly when a
+      # user-edited (or foreign) file was deliberately left behind.
+      rmdir "$TARGET/$_rma_sub" 2>/dev/null || true
+      rmdir "$TARGET/$_rma_top" 2>/dev/null || true
+      [ -n "$_rma_gone" ] && info "reclaimed $_rma_fe per-role model artifacts ($_rma_sub/)"
+    fi
+    # The stamps describe files the harness no longer owns — drop them, or an
+    # all-`inherit` target would keep state a never-configured one does not have (R11).
+    if [ -d "$_rma_stamp" ]; then
+      ag_personas | while IFS='	' read -r _rma_r _rma_d; do
+        [ -n "$_rma_r" ] || continue
+        rm -f "$_rma_stamp/$_rma_r.$_rma_ext"
+      done
+      rmdir "$_rma_stamp" 2>/dev/null || true
+      rmdir "$H/.model-agents" 2>/dev/null || true
+    fi
+    return 0
   }
 
   # AGENTS.md is the shared portable entrypoint — ALWAYS written, never gated (R2 note).
@@ -1803,8 +1882,17 @@ EOF
     ag_personas | while IFS='	' read -r _gmr _gmd; do
       [ -n "$_gmr" ] || continue
       gen_gemini_agent "$_gmr" "$_gmd" "$TARGET/.gemini/agents/$_gmr.md"
+      stamp_model_agent gemini "$_gmr.md" "$TARGET/.gemini/agents/$_gmr.md"
     done
     ok "Gemini per-role agent definitions installed (.gemini/agents/)"
+  elif agent_selected gemini; then
+    # Nothing resolves any more — but a PREVIOUS run may have stamped this tree with a
+    # concrete tier. Skipping here would leave those files (and their old `model:` keys)
+    # discoverable, so the documented switch back to session inheritance would silently
+    # keep using the old model. Reconcile instead: reclaim the pristine stamps and prune,
+    # which is what makes R11 ("no `.gemini/agents/` at all") true on a target that WAS
+    # configured, not just on a fresh one. (Codex r1 P1 #3654925551.)
+    reclaim_model_agents gemini
   fi
 
   # ── 5f. Codex per-role agent definitions (gated on `codex` + a resolvable model) ──
@@ -1816,8 +1904,13 @@ EOF
     ag_personas | while IFS='	' read -r _cxr _cxd; do
       [ -n "$_cxr" ] || continue
       gen_codex_agent "$_cxr" "$_cxd" "$TARGET/.codex/agents/$_cxr.toml"
+      stamp_model_agent codex "$_cxr.toml" "$TARGET/.codex/agents/$_cxr.toml"
     done
     ok "Codex per-role agent definitions installed (.codex/agents/ — project-local)"
+  elif agent_selected codex; then
+    # Same reconciliation as §5e — see the note there. Only the PROJECT-LOCAL tree is
+    # touched; nothing under $CODEX_HOME is ever created or removed by model routing.
+    reclaim_model_agents codex
   fi
 
   # NOTE: CMDDIR cleanup is intentionally DEFERRED to AFTER §7 — the antigravity
@@ -1910,21 +2003,11 @@ EOF
             remove_pointer GEMINI.md
             echo "⚠️  removed deselected agent 'gemini' glue: GEMINI.md harness block" >&2
           fi
-          # E17-F01: reclaim the per-role model artifacts (.gemini/agents/<role>.md).
-          # Pristine-only, through the SAME hoisted emitter the install path uses — a
-          # user-edited file is left in place with a warning. Never `rm -rf`: delete named
-          # files, then rmdir, which fails harmlessly if the user left their own files.
-          if [ -d "$TARGET/.gemini/agents" ]; then
-            _gmtmp="$(mktemp 2>/dev/null || mktemp -t harness-gm)"
-            ag_personas | while IFS='	' read -r _gmr _gmd; do
-              [ -n "$_gmr" ] || continue
-              gen_gemini_agent "$_gmr" "$_gmd" "$_gmtmp"
-              remove_if_pristine ".gemini/agents/$_gmr.md" "$_gmtmp" gemini
-            done
-            rm -f "$_gmtmp"
-            rmdir "$TARGET/.gemini/agents" 2>/dev/null || true
-            rmdir "$TARGET/.gemini" 2>/dev/null || true
-          fi
+          # E17-F01: reclaim the per-role model artifacts (.gemini/agents/<role>.md)
+          # through the SAME helper §5e's reconciliation uses, so deselection and
+          # "everything back to inherit" can never diverge. Pristine-only (a
+          # user-edited file is left in place with a warning); never `rm -rf`.
+          reclaim_model_agents gemini
           ;;
         opencode)
           remove_owned .opencode/command opencode $HARNESS_SDD_CMDS
@@ -2022,20 +2105,10 @@ EOF
             rmdir "$_cdx" 2>/dev/null || true   # prune only if now empty
           fi
           # E17-F01: reclaim the PROJECT-LOCAL per-role model artifacts
-          # (.codex/agents/<role>.toml). Pristine-only, through the same hoisted emitter
-          # the install path uses. The GLOBAL prompt reclamation above is untouched, and
-          # nothing under $CODEX_HOME/agents is ever created or removed.
-          if [ -d "$TARGET/.codex/agents" ]; then
-            _cxtmp="$(mktemp 2>/dev/null || mktemp -t harness-cx)"
-            ag_personas | while IFS='	' read -r _cxr _cxd; do
-              [ -n "$_cxr" ] || continue
-              gen_codex_agent "$_cxr" "$_cxd" "$_cxtmp"
-              remove_if_pristine ".codex/agents/$_cxr.toml" "$_cxtmp" codex
-            done
-            rm -f "$_cxtmp"
-            rmdir "$TARGET/.codex/agents" 2>/dev/null || true
-            rmdir "$TARGET/.codex" 2>/dev/null || true
-          fi
+          # (.codex/agents/<role>.toml) through the same shared helper as §5f. The GLOBAL
+          # prompt reclamation above is untouched, and nothing under $CODEX_HOME/agents is
+          # ever created or removed.
+          reclaim_model_agents codex
           ;;
       esac
     done

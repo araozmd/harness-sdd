@@ -25,6 +25,7 @@ your-project/
 └── .harness/                           # the whole harness body
     ├── .harness-version  manifest.txt
     ├── .opencode.stamp                  # byte copy of the last generated opencode.json (model routing only)
+    ├── .model-agents/                   # byte copies of the last .gemini/.codex per-role files (model routing only)
     ├── AGENTS.md agents/ docs/ store/ tools/ specs/_templates/ init.sh harness.config.yaml
     ├── .gitignore                       # seeded: keeps the local-only telemetry log out of VCS
     ├── telemetry.jsonl                  # created on first run — local-only, gitignored (E05-F02)
@@ -219,7 +220,12 @@ machine.
 `opencode.json` is the one config file the harness does not regenerate on a plain re-run.
 It is re-stamped **only** when it is byte-identical to `.harness/.opencode.stamp` (the
 last body the installer wrote) or to a freshly generated model-free body; anything else
-is treated as yours, left untouched, and reported. Deselecting a front-end reclaims its
+is treated as yours, left untouched, and reported. `.harness/.model-agents/` is the same
+device for the `.gemini/agents/` and `.codex/agents/` trees: it remembers the exact bytes
+last written there, so putting every role back on `inherit` (or deselecting the front-end)
+reclaims those files instead of orphaning them with their old `model` keys. Both stamps
+exist only while the artifacts they describe do.
+Deselecting a front-end reclaims its
 stamped artifacts through the same pristine byte-comparison every other generated file
 uses — an edited file survives with a warning.
 
