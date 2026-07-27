@@ -68,7 +68,7 @@
       "features": [
         {
           "id": "E05-F01",
-          "title": "Reviewer cross-file consistency + explicit build\u2194review rounds",
+          "title": "Reviewer cross-file consistency + explicit build↔review rounds",
           "status": "done",
           "sdd": true,
           "autonomous": true,
@@ -267,13 +267,13 @@
     },
     {
       "id": "E13",
-      "title": "Monday board integration (draft \u2014 not current use case)",
+      "title": "Monday board integration (draft — not current use case)",
       "status": "draft",
       "features": []
     },
     {
       "id": "E14",
-      "title": "Azure Boards integration (draft \u2014 not current use case)",
+      "title": "Azure Boards integration (draft — not current use case)",
       "status": "draft",
       "features": []
     },
@@ -378,11 +378,22 @@
         {
           "id": "E99-F03",
           "title": "Reject non-ASCII-lowercase slugs in fix-worktree validate_key under any locale",
-          "status": "in-review",
+          "status": "done",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F03-locale-safe-validate-key/"
+        },
+        {
+          "id": "E99-F04",
+          "title": "Decide the locale boundary for repo-owned git hooks in fix-worktree (reference-transaction on teardown/rollback)",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": false,
+          "depends_on": [
+            "E99-F03"
+          ],
+          "spec_path": "specs/epics/E99-maintenance/F04-hook-locale-boundary/"
         }
       ]
     },
