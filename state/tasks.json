@@ -378,7 +378,7 @@
         {
           "id": "E99-F03",
           "title": "Reject non-ASCII-lowercase slugs in fix-worktree validate_key under any locale",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
