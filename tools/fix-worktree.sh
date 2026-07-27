@@ -3,6 +3,14 @@
 
 set -u
 
+# Bracket ranges in a `case` glob (e.g. *[!a-z0-9-]*) are resolved through the
+# active locale's COLLATION order, not ASCII: under en_US.UTF-8 an uppercase
+# letter falls inside a-z, so an invalid slug would be accepted. Pin the whole
+# script to C so every glob here means ASCII, and export it so the `git`
+# plumbing this helper parses stays in the deterministic C locale too.
+LC_ALL=C
+export LC_ALL
+
 die() { echo "fix-worktree: $*" >&2; exit 1; }
 
 usage() {

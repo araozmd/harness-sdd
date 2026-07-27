@@ -145,6 +145,37 @@ test_invalid_inputs_are_non_mutating() {
   pass "test_invalid_inputs_are_non_mutating"
 }
 
+test_slug_rejection_is_locale_independent() {
+  make_source_fixture locale_slug
+  _ran=0
+  for _loc in en_US.UTF-8 C; do
+    # Skip gracefully where the locale is not installed; never fail on absence.
+    locale -a 2>/dev/null | grep -qix "$_loc" || continue
+    _ran=$((_ran + 1))
+    for _slug in Bad-Slug UPPER caf.e; do
+      _refs_before="$(git -C "$PRIMARY" show-ref)"
+      _registrations_before="$(git -C "$PRIMARY" worktree list --porcelain)"
+      _destination="$PRIMARY/.claude/worktrees/E99-F149-$_slug"
+      [ ! -e "$_destination" ] && [ ! -L "$_destination" ] ||
+        fail "locale slug precondition has an existing destination: $_destination"
+      if (cd "$PRIMARY" && LC_ALL="$_loc" "$HELPER" create E99-F149 "$_slug") \
+          >"$FIXTURE/out" 2>"$FIXTURE/err"; then
+        fail "LC_ALL=$_loc accepted invalid slug: $_slug"
+      fi
+      grep -qi invalid "$FIXTURE/err" ||
+        fail "LC_ALL=$_loc rejection did not name invalid: $(cat "$FIXTURE/err")"
+      [ "$(git -C "$PRIMARY" show-ref)" = "$_refs_before" ] ||
+        fail "LC_ALL=$_loc rejected slug mutated refs: $_slug"
+      [ "$(git -C "$PRIMARY" worktree list --porcelain)" = "$_registrations_before" ] ||
+        fail "LC_ALL=$_loc rejected slug mutated worktree registrations: $_slug"
+      [ ! -e "$_destination" ] && [ ! -L "$_destination" ] ||
+        fail "LC_ALL=$_loc rejected slug made destination: $_destination"
+    done
+  done
+  [ "$_ran" -ge 1 ] || fail "no locale leg ran; expected at least the C locale"
+  pass "test_slug_rejection_is_locale_independent"
+}
+
 test_base_accepts_short_local_ref_only() {
   make_source_fixture base_validation
   git -C "$PRIMARY" branch release/1.2 main
@@ -578,6 +609,7 @@ test_default_and_explicit_base_resolution
 test_base_is_ref_not_ambient_head
 test_dirty_primary_fails_before_mutation
 test_invalid_inputs_are_non_mutating
+test_slug_rejection_is_locale_independent
 test_base_accepts_short_local_ref_only
 test_branch_path_and_registration_collisions_fail_closed
 test_two_active_worktrees_are_isolated
