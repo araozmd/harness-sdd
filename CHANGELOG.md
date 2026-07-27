@@ -24,11 +24,17 @@ All notable changes to the harness body are recorded here. Versions follow
   `en_US.UTF-8` and `C` (skipping cleanly where a locale is absent) and asserts rejection
   plus no ref/registration/path mutation — so the hole is caught in C-locale CI too, not
   only on a developer laptop.
-- Accepted consequence: because `LC_ALL=C` is **exported**, `fix-worktree.sh run` now
-  executes its command in the C locale, so a target repo whose test command is
-  collation-sensitive (a `sort`, a `[a-z]` range, locale-formatted output) sees C
-  ordering there — the pass-through contract itself is unchanged, since `run` guarantees
-  only cwd, `HARNESS_DIR`, and exit status.
+- The C pin stops at **foreign code**. `fix-worktree.sh` executes code it does not own in
+  exactly two places — the project init gate (`init.sh`, which sources the target repo's
+  `.harness/init.project.sh`) and `run` commands — and both now run under the **caller's**
+  locale, restored from the value captured before the pin. Exporting C into them was a
+  real defect, not just a broad blast radius: a consumer whose `init.project.sh` requires
+  UTF-8 failed its own gate, and `create` then rolled back an otherwise valid worktree.
+  A caller with `LC_ALL` unset gets it restored as **unset**, not empty, so their
+  `LANG`/`LC_*` layering resurfaces. Every glob and every `git` plumbing call inside the
+  helper still runs under `C`, so the determinism the pin was chosen for is intact.
+  `tests/test_fix_worktree.sh` gains `test_child_commands_see_caller_locale`, whose init
+  and `run` legs are independently mutation-sensitive.
 - Scope is only this glob: the `grep -Eq '^[a-z0-9-]+$'` validators in `harness-install.sh`
   and the Python `re` validator in `init.sh` were verified unaffected and left alone.
 
