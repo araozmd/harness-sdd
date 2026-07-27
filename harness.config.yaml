@@ -147,7 +147,7 @@ verification:
   init_script: ./init.sh
   # Commands the Reviewer must run before marking work done. Project-specific —
   # edit these per target repo.
-  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh && sh tests/test_mirror.sh && sh tests/test_epic_lifecycle.sh && sh tests/test_sdd_plan.sh && sh tests/test_sdd_drill.sh && sh tests/test_sdd_fix.sh && sh tests/test_architect_adr.sh && sh tests/test_drift_check.sh && sh tests/test_doc_critic.sh && sh tests/test_ownership.sh && sh tests/test_board_lock.sh && sh tests/test_adr_citation.sh && sh tests/test_fix_worktree.sh && sh tests/test_sdd_fix_parallel.sh && sh tests/test_dependency_diagnostics.sh && sh tests/test_rationale_docs.sh && sh tests/test_next_task.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry + board-mirror + epic lifecycle + sdd-plan + sdd-drill + sdd-fix + architect-adr + drift-check + doc-critic + ownership + board-lock + adr-citation + fix-worktree + parallel-fix + dependency diagnostics + rationale docs + deterministic selector suites
+  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh && sh tests/test_mirror.sh && sh tests/test_epic_lifecycle.sh && sh tests/test_sdd_plan.sh && sh tests/test_sdd_drill.sh && sh tests/test_sdd_fix.sh && sh tests/test_architect_adr.sh && sh tests/test_drift_check.sh && sh tests/test_doc_critic.sh && sh tests/test_ownership.sh && sh tests/test_board_lock.sh && sh tests/test_adr_citation.sh && sh tests/test_fix_worktree.sh && sh tests/test_sdd_fix_parallel.sh && sh tests/test_dependency_diagnostics.sh && sh tests/test_rationale_docs.sh && sh tests/test_next_task.sh && sh tests/test_model_routing.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry + board-mirror + epic lifecycle + sdd-plan + sdd-drill + sdd-fix + architect-adr + drift-check + doc-critic + ownership + board-lock + adr-citation + fix-worktree + parallel-fix + dependency diagnostics + rationale docs + deterministic selector + per-role model routing suites
 
   lint_command: ""        # e.g. "ruff check ." or "npm run lint"
   typecheck_command: ""   # e.g. "mypy ." or "tsc --noEmit"
@@ -176,3 +176,32 @@ umbrella:
   # drives each slice by spawning the Builder cd'd into the child repo (no executor,
   # no per-repo delegate_cmd needed); `delegate` shells out to each repo's delegate_cmd.
   manifest: ""
+
+# Per-role model routing (E17-F01) — OPT-IN and INERT by default.
+# Tiers: reasoning | standard | cheap | inherit
+# `inherit` compiles to KEY OMISSION on every front-end — the generated agent
+# definitions are byte-identical to a harness without this block.
+# NOTE: `orchestrator` applies only where the orchestrator is a spawned sub-agent
+# (Claude) or the configured primary agent (OpenCode). The model of the session you
+# launched by hand is chosen by how you launched it, not by the harness.
+models:
+  default: inherit        # tier for any role not listed below
+  orchestrator: inherit
+  architect: inherit      # try: reasoning
+  builder: inherit        # try: standard
+  reviewer: inherit       # try: standard
+  scout: inherit          # try: cheap
+  doc-critic: inherit     # try: cheap
+  # Exact-value escape hatch: `pin.<front-end>.<tier>`, written VERBATIM in that
+  # front-end's own vocabulary. REQUIRED for codex and opencode, which have no
+  # floating tier alias — an unpinned tier there stamps nothing.
+  #   opencode MUST be "provider/model" (an invalid value aborts your OpenCode run)
+  #   codex    MUST be a bare model id (the provider comes from `model_provider`)
+  #   antigravity accepts only tier aliases and needs `agy` >= 1.1.5 (inert below it)
+  # pin.opencode.reasoning: ""
+  # pin.opencode.standard: ""
+  # pin.opencode.cheap: ""
+  # pin.codex.reasoning: ""
+  # pin.codex.standard: ""
+  # pin.codex.cheap: ""
+  # pin.claude.reasoning: ""

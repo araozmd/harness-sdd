@@ -4,6 +4,38 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.38.0] — 2026-07-26
+
+### Added — ✨ Per-role model selection (E17-F01)
+- Added a front-end-agnostic `models:` block to `harness.config.yaml` (seeded on a
+  fresh install, append-migrated onto a preserved config) that maps each of the six
+  SDD roles — `orchestrator architect builder reviewer scout doc-critic` — onto the
+  tier vocabulary `reasoning | standard | cheap | inherit`, plus a
+  `models.pin.<front-end>.<tier>` escape hatch written verbatim (see the two guards
+  below).
+- Taught `harness-install.sh` to stamp the resolved per-role model into the native
+  agent-definition convention of every **selected** front-end: `model:` frontmatter in
+  `.claude/agents/*.md` and `.agents/agents/*.md`, a `"model"` member in
+  `opencode.json`, and two new conditionally-created project-local artifacts,
+  `.gemini/agents/*.md` and `.codex/agents/*.toml` (never `$CODEX_HOME`).
+- Built-in tiers resolve to floating vendor aliases only (`opus`/`sonnet`/`haiku`,
+  `pro`/`flash`) — the harness ships no version-pinned model id. `codex` and
+  `opencode` have no floating alias, so an unpinned tier there stamps nothing and the
+  installer prints one advisory line naming the `pin.` key to set.
+- **Opt-in and inert by default**: `inherit` compiles to key omission on every
+  front-end (the literal string is never written), so an absent, empty or all-`inherit`
+  block leaves the generated tree byte-identical to a harness without model routing —
+  no model key, no `.gemini/`/`.codex/` directory, no `.harness/.opencode.stamp`.
+- Refined the `opencode.json` never-clobber contract so model changes can land: it is
+  regenerated only when byte-identical to `.harness/.opencode.stamp` or to a freshly
+  generated model-free body, and otherwise left untouched with a warning. Deselection
+  reclaims every stamped artifact through the existing pristine byte-comparison.
+- An unrecognized tier warns and resolves as `inherit` (never fatal). A pin is otherwise
+  written verbatim, with exactly two guards: an `opencode` pin without a `/` and a pin
+  whose value is the tier name `"inherit"` are each warned about and dropped, stamping
+  nothing. Documented in `docs/INSTALL.md`; added `tests/test_model_routing.sh` to
+  `verification.test_command`.
+
 ## [0.37.0] — 2026-07-25
 
 ### Added — ✨ Deterministic next-task selection (E16-F03)

@@ -1117,4 +1117,185 @@ _probe_out="$(sh "$TUI_PROBE_SH" </dev/null)"
 rm -f "$TUI_PROBE_SH"
 pass "checkbox picker tui_select + tui_capable probe exist; non-TTY falls back to toggle_select (E99-F01)"
 
+# ── E17-F01: per-role model routing — INSTALLER WIRING ────────────────────────────
+# The `models:` block has TWO halves that must ship together: the fresh-install source
+# (harness.config.yaml, copied verbatim) and the upgrade path (migrate_config). Missing
+# either makes a fresh target and an upgraded target diverge, so both are asserted here,
+# in the same change as the installer edit. CODEX_HOME is sandboxed suite-wide (above)
+# and per-run below, so no assertion can write into the developer's real ~/.codex.
+MODEL_ROLE_NAMES="orchestrator architect builder reviewer scout doc-critic"
+
+test_models_block_seeded() {   # R1
+  _mt="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_mt/ch" sh "$SRC/harness-install.sh" --agents=claude "$_mt" >/dev/null \
+    || fail "R1: fresh install for models seeding exited non-zero"
+  _mc="$_mt/.harness/harness.config.yaml"
+  grep -Eq '^models:[[:space:]]*(#.*)?$' "$_mc" || fail "R1: fresh config has no top-level models: block"
+  grep -Eq '^  default: inherit' "$_mc"          || fail "R1: fresh config models: block has no default: inherit"
+  for _r in $MODEL_ROLE_NAMES; do
+    grep -Eq "^  $_r: inherit" "$_mc" || fail "R1: fresh config models: block missing '$_r: inherit'"
+  done
+  grep -qF 'pin.opencode.' "$_mc" || fail "R1: fresh config models: block missing the commented pin. examples"
+  rm -rf "$_mt"
+}
+
+test_models_block_migrated() {   # R2
+  _mt="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_mt/ch" sh "$SRC/harness-install.sh" --agents=claude "$_mt" >/dev/null \
+    || fail "R2: setup install exited non-zero"
+  _mc="$_mt/.harness/harness.config.yaml"
+  # Simulate a pre-E17 target: strip the whole models: block, then add a user comment +
+  # a user value that MUST survive byte-for-byte.
+  awk '/^# Per-role model routing/ { drop=1 } !drop { print }' "$_mc" > "$_mc.pre" && mv "$_mc.pre" "$_mc"
+  grep -Eq '^models:' "$_mc" && fail "R2: setup failed — models: block not stripped"
+  printf '\n# my own note, keep me verbatim\nmy_key: "my value"   # trailing comment\n' >> "$_mc"
+  cp "$_mc" "$_mt/before.yaml"
+  CODEX_HOME="$_mt/ch" sh "$SRC/harness-install.sh" --agents=claude "$_mt" >/dev/null \
+    || fail "R2: upgrade run exited non-zero"
+  grep -Eq '^models:[[:space:]]*(#.*)?$' "$_mc" || fail "R2: upgrade did not append the models: block"
+  grep -Eq '^  default: inherit' "$_mc"          || fail "R2: migrated models: block has no default: inherit"
+  for _r in $MODEL_ROLE_NAMES; do
+    grep -Eq "^  $_r: inherit" "$_mc" || fail "R2: migrated models: block missing '$_r: inherit'"
+  done
+  # Every pre-existing line (values AND comments) survives byte-for-byte as a PREFIX.
+  _n="$(wc -l < "$_mt/before.yaml")"
+  head -n "$_n" "$_mc" > "$_mt/after-head.yaml"
+  cmp -s "$_mt/before.yaml" "$_mt/after-head.yaml" \
+    || fail "R2: migration altered pre-existing config lines (must be append-only)"
+  rm -rf "$_mt"
+}
+
+test_models_block_idempotent() {   # R3
+  _mt="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_mt/ch" sh "$SRC/harness-install.sh" --agents=claude "$_mt" >/dev/null \
+    || fail "R3: setup install exited non-zero"
+  _mc="$_mt/.harness/harness.config.yaml"
+  cp "$_mc" "$_mt/run1.yaml"
+  CODEX_HOME="$_mt/ch" sh "$SRC/harness-install.sh" --agents=claude "$_mt" >/dev/null \
+    || fail "R3: second run exited non-zero"
+  cmp -s "$_mt/run1.yaml" "$_mc" || fail "R3: second run did not leave harness.config.yaml byte-identical"
+  [ "$(grep -c '^models:' "$_mc")" = "1" ] || fail "R3: models: block duplicated on re-run"
+  # A trailing comment on the `models:` line must still count as "present".
+  sed 's/^models:$/models:   # my routing/' "$_mc" > "$_mc.t" && mv "$_mc.t" "$_mc"
+  cp "$_mc" "$_mt/run2.yaml"
+  CODEX_HOME="$_mt/ch" sh "$SRC/harness-install.sh" --agents=claude "$_mt" >/dev/null \
+    || fail "R3: trailing-comment run exited non-zero"
+  cmp -s "$_mt/run2.yaml" "$_mc" \
+    || fail "R3: a trailing comment on the models: line made migration re-append the block"
+  rm -rf "$_mt"
+}
+
+test_no_models_block_is_byte_identical() {   # R11
+  _all=claude,gemini,opencode,antigravity,codex
+  _ta="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  _tb="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_ta/ch" sh "$SRC/harness-install.sh" --agents="$_all" "$_ta" >/dev/null \
+    || fail "R11: TA install exited non-zero"
+  CODEX_HOME="$_tb/ch" sh "$SRC/harness-install.sh" --agents="$_all" "$_tb" >/dev/null \
+    || fail "R11: TB install exited non-zero"
+  # TB: strip the whole models: block, then re-run. (migrate_config re-seeds it — that is
+  # the point: seeding must be INERT, so the generated tree may not move a byte.)
+  _bc="$_tb/.harness/harness.config.yaml"
+  awk '/^# Per-role model routing/ { drop=1 } !drop { print }' "$_bc" > "$_bc.pre" && mv "$_bc.pre" "$_bc"
+  CODEX_HOME="$_tb/ch" sh "$SRC/harness-install.sh" --agents="$_all" "$_tb" >/dev/null \
+    || fail "R11: TB re-run exited non-zero"
+  # R11 permits exactly ONE exclusion — `.harness/harness.config.yaml` (TB's block was
+  # stripped and re-seeded, so its bytes legitimately differ). `__pycache__` is a python
+  # runtime artifact, not an installed file. Nothing else may be excluded: manifest.txt in
+  # particular MUST be compared, or the strongest test in the suite goes blind to any leak
+  # of model state into the manifest.
+  diff -r -x 'harness.config.yaml' -x '__pycache__' "$_ta" "$_tb" >/dev/null \
+    || fail "R11: an all-inherit target differs from one whose models: block was stripped"
+  # Explicit negatives: an unconfigured target grows NO model key and NO new directory.
+  grep -rq '^model:' "$_ta/.claude/agents"  && fail "R11: unconfigured install stamped a model: in .claude/agents"
+  grep -q '"model"' "$_ta/opencode.json"    && fail "R11: unconfigured install stamped a model member in opencode.json"
+  grep -rq '^model:' "$_ta/.agents/agents"  && fail "R11: unconfigured install stamped a model: in .agents/agents"
+  [ -d "$_ta/.gemini/agents" ]              && fail "R11: unconfigured install created .gemini/agents/"
+  [ -d "$_ta/.codex/agents" ]               && fail "R11: unconfigured install created .codex/agents/"
+  [ -f "$_ta/.harness/.opencode.stamp" ]    && fail "R11: unconfigured install created .harness/.opencode.stamp"
+  # And prove the RESOLVER itself treats a config with no models: block as `inherit`
+  # (migrate_config always re-seeds the block, so this is the only way to exercise the
+  # genuinely block-less config an older target hands us mid-run).
+  _probe="$(mktemp 2>/dev/null || mktemp -t harness_mdl)"
+  printf 'store:\n  tasks: local\n' > "$_ta/no-models.yaml"
+  {
+    sed -n '/^_cfg_models_value()/,/^}/p' "$SRC/harness-install.sh"
+    printf 'v="$(_cfg_models_value "%s" default)"; [ -z "$v" ] && echo INHERIT || echo "GOT:$v"\n' "$_ta/no-models.yaml"
+  } > "$_probe"
+  [ "$(sh "$_probe")" = "INHERIT" ] \
+    || fail "R11: a config with no models: block must resolve to empty (⇒ inherit ⇒ key omission)"
+  rm -f "$_probe"; rm -rf "$_ta" "$_tb"
+}
+
+test_claude_model_frontmatter() {   # R12, R18
+  _mt="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_mt/ch" sh "$SRC/harness-install.sh" --agents=claude "$_mt" >/dev/null \
+    || fail "R12: setup install exited non-zero"
+  _mc="$_mt/.harness/harness.config.yaml"
+  sed -e 's/^  architect: inherit.*/  architect: reasoning/' \
+      -e 's/^  scout: inherit.*/  scout: cheap/' "$_mc" > "$_mc.t" && mv "$_mc.t" "$_mc"
+  CODEX_HOME="$_mt/ch" sh "$SRC/harness-install.sh" --agents=claude "$_mt" >/dev/null \
+    || fail "R12: re-stamp run exited non-zero"
+  _a="$_mt/.claude/agents/architect.md"
+  grep -q '^name: architect' "$_a"        || fail "R12: architect.md lost its name: key"
+  grep -q '^description: ' "$_a"          || fail "R12: architect.md lost its description: key"
+  grep -q '^tools: ' "$_a"                || fail "R12: architect.md lost its tools: key"
+  grep -q '^model: ' "$_a"                || fail "R12: architect.md carries no model: frontmatter key"
+  [ "$(grep -c '^model:' "$_a")" = "1" ]  || fail "R12: architect.md accumulated more than one model: key"
+  grep -q '^model: ' "$_mt/.claude/agents/scout.md" || fail "R12: scout.md carries no model: key"
+  [ "$(sed -n 's/^model: //p' "$_a")" != "$(sed -n 's/^model: //p' "$_mt/.claude/agents/scout.md")" ] \
+    || fail "R12: reasoning and cheap tiers stamped the same claude value"
+  grep -q '^model:' "$_mt/.claude/agents/builder.md" \
+    && fail "R12: a role left on inherit must carry NO model: key"
+  # R18: only `claude` was selected, so no other front-end may have been stamped.
+  [ -d "$_mt/.gemini/agents" ] && fail "R18: unselected gemini was stamped"
+  [ -d "$_mt/.codex/agents" ]  && fail "R18: unselected codex was stamped"
+  [ -f "$_mt/opencode.json" ]  && fail "R18: unselected opencode was stamped"
+  rm -rf "$_mt"
+}
+
+test_models_docs_and_manifest() {   # R24
+  _mt="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_mt/ch" sh "$SRC/harness-install.sh" --agents=claude "$_mt" >/dev/null \
+    || fail "R24: setup install exited non-zero"
+  _mf="$_mt/.harness/manifest.txt"
+  grep -qF '.gemini/agents/' "$_mf"          || fail "R24: manifest.txt does not list .gemini/agents/"
+  grep -qF '.codex/agents/' "$_mf"           || fail "R24: manifest.txt does not list .codex/agents/"
+  grep -qF '.harness/.opencode.stamp' "$_mf" || fail "R24: manifest.txt does not list .harness/.opencode.stamp"
+  grep -qF 'claude|gemini|opencode|antigravity|codex' "$_mf" \
+    || fail "R24: manifest.txt AGENT SELECTION paragraph still omits codex"
+  # The docs must SHIP (the installed copy under .harness/docs/), not just exist in SRC.
+  _mi="$_mt/.harness/docs/INSTALL.md"
+  grep -qF 'models:' "$_mi"          || fail "R24: installed docs/INSTALL.md does not document the models: block"
+  grep -qF 'reasoning' "$_mi"        || fail "R24: installed docs/INSTALL.md does not document the tier vocabulary"
+  grep -qF 'provider/model' "$_mi"   || fail "R24: installed docs/INSTALL.md does not document the opencode value rule"
+  grep -qF 'agy' "$_mi"              || fail "R24: installed docs/INSTALL.md does not document the Antigravity agy floor"
+  grep -qF '.gemini/agents/' "$_mi"  || fail "R24: installed docs/INSTALL.md layout tree omits .gemini/agents/"
+  grep -qF '.codex/agents/' "$_mi"   || fail "R24: installed docs/INSTALL.md layout tree omits .codex/agents/"
+  grep -qF 'tests/test_model_routing.sh' "$SRC/harness.config.yaml" \
+    || fail "R24: tests/test_model_routing.sh is not registered in verification.test_command"
+  [ -f "$SRC/tests/test_model_routing.sh" ] || fail "R24: tests/test_model_routing.sh does not exist"
+  rm -rf "$_mt"
+}
+
+test_models_changelog_entry() {   # R25
+  # Assert the CHANGELOG heading + summary, never a frozen exact VERSION string (that is
+  # a permanent-suite anti-pattern that breaks on the next PATCH bump).
+  grep -qF '## [0.38.0]' "$SRC/CHANGELOG.md" || fail "R25: CHANGELOG missing 0.38.0 entry"
+  grep -qF 'per-role model' "$SRC/CHANGELOG.md" \
+    || fail "R25: CHANGELOG missing the per-role model routing summary"
+}
+
+test_models_block_seeded
+test_models_block_migrated
+test_models_block_idempotent
+pass "models: block seeded on fresh install, appended on upgrade, idempotent (R1, R2, R3)"
+test_no_models_block_is_byte_identical
+pass "no/all-inherit models: block leaves the generated tree byte-identical, no new dirs (R11)"
+test_claude_model_frontmatter
+pass "claude .claude/agents/<role>.md carries model: beside name/description/tools; unselected front-ends untouched (R12, R18)"
+test_models_docs_and_manifest
+test_models_changelog_entry
+pass "manifest.txt + docs/INSTALL.md document model routing; new suite registered; CHANGELOG entry present (R24, R25)"
+
 echo "All install tests passed."
