@@ -284,7 +284,9 @@ workspace. Re-run to upgrade — project-authored specs/state are never clobbere
 **Choosing which agents to support.** The shared portable entrypoint `AGENTS.md` is
 always written, but each coding agent's front-end is **opt-in**. On an interactive
 terminal the installer shows a checkbox-style toggle list — `claude`, `gemini`,
-`opencode`, `antigravity`, `codex` — and stamps only the ones you pick. The choice is
+`opencode`, `antigravity`, `codex` — and stamps only the ones you pick. On a **first**
+interactive install the CLI you are running in is the only one pre-checked (all five when
+it cannot be detected); the others are one keystroke away before you confirm. The choice is
 saved to `.harness/.agents`, so **every re-run re-prompts with your current selection
 pre-checked** — add or drop an agent any time, even when the harness version hasn't
 changed. Deselecting an agent removes only the harness-generated glue (your own

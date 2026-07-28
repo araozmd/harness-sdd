@@ -111,6 +111,20 @@ prov_entry() {
   ' "$INST"
 }
 
+# comment_block_above <literal first characters of a definition line> — print the run of
+# `#` comment lines immediately above that definition, and nothing else.
+#
+# The SCOPING is the point (same reason prov_entry scopes per key): a file-wide grep for a
+# stale phrase either misses the block that matters or fires on unrelated prose elsewhere.
+# Matching is by literal prefix, so no regex escaping of `()` is involved.
+comment_block_above() {
+  awk -v fn="$1" '
+    index($0, fn) == 1 { printf "%s", buf; exit }
+    /^#/               { buf = buf $0 "\n"; next }
+                       { buf = "" }
+  ' "$INST"
+}
+
 # ── R1, R3, R7 — a single present marker resolves to exactly one key ───────────
 test_host_single_marker() {
   _x="$(sandbox single)"; _t="$_x/t"; mkdir -p "$_t"
@@ -257,8 +271,20 @@ test_print_agents_contract() {
   [ "$(wc -l <"$_x/a.out" | tr -d ' ')" = "2" ] \
     || fail "R23: --print-agents printed $(wc -l <"$_x/a.out") stdout lines, expected exactly 2"
   sed -n '1p' "$_x/a.out" | grep -qx 'host=claude' || fail "R23: line 1 is not host=<key>"
-  sed -n '2p' "$_x/a.out" | grep -qx 'baseline=antigravity claude codex gemini opencode' \
-    || fail "R23: line 2 is not the sorted baseline ($(sed -n '2p' "$_x/a.out"))"
+  # E19-F02 R1 CHANGED THIS EXPECTED VALUE, deliberately: on a target with no existing
+  # install the baseline is now the detected host alone, and `baseline=` reports the
+  # picker's pre-check set (R6). The old expectation here was all five — the very default
+  # this feature replaces. The sorted MULTI-key rendering the line also has to prove is
+  # preserved in (a2) below, on the same fresh dir with detection missing.
+  sed -n '2p' "$_x/a.out" | grep -qx 'baseline=claude' \
+    || fail "R23/F02 R1: line 2 is not the detected-host baseline ($(sed -n '2p' "$_x/a.out"))"
+  [ "$(find "$_t" | sort)" = "$_before" ] \
+    || fail "R11/R23: --print-agents created or modified a file in the target"
+  # (a2) the same fresh dir, no marker ⇒ the sorted all-keys line.
+  hrun "$_x" -- --print-agents "$_t" >"$_x/a2.out" 2>/dev/null \
+    || fail "R23: --print-agents exited non-zero on an undetected fresh dir"
+  sed -n '2p' "$_x/a2.out" | grep -qx 'baseline=antigravity claude codex gemini opencode' \
+    || fail "R23: line 2 is not the sorted baseline ($(sed -n '2p' "$_x/a2.out"))"
   [ "$(find "$_t" | sort)" = "$_before" ] \
     || fail "R11/R23: --print-agents created or modified a file in the target"
   # (b) … and an INSTALLED target, on both TTY-less runs.
@@ -541,8 +567,14 @@ test_baseline_single_helper() {
   # The undetected-fallback answer has one source, shared by resolution and the diagnostic.
   grep -q 'host_fallback_set "$_t"' "$INST" \
     || fail "R26: resolve_agents does not resolve the undetected fallback through host_fallback_set"
-  grep -q 'host_fallback_set "$TGT"' "$INST" \
-    || fail "R26: --print-agents does not compute baseline= through host_fallback_set"
+  # E19-F02 R6 REPOINTED THIS: `baseline=` now reports precheck_baseline — the picker's
+  # pre-check set — so the diagnostic advertises the new fresh-install default instead of
+  # the old one. For every UNDETECTED target the two helpers return the identical set
+  # (host_fallback_set defers to precheck_baseline on an existing install and both answer
+  # ALL otherwise), so R26's preview-matches-install property is preserved, not traded
+  # away; test_print_agents_matches_host_install below still proves it end to end.
+  grep -q 'precheck_baseline "$TGT"' "$INST" \
+    || fail "R26/F02 R6: --print-agents does not compute baseline= through precheck_baseline"
   # The old inline computation is gone — two sources could disagree.
   grep -q '_base="$(normalize_keys "$(cat "$_persisted")")"' "$INST" \
     && fail "R26: the inline interactive baseline computation still exists alongside the helper"
@@ -657,6 +689,280 @@ test_version_and_changelog() {
   [ "$_min" -ge 40 ] || fail "R31: VERSION $_v is not the MINOR bump this feature requires"
   grep -qF "## [$_v]" "$SRC/CHANGELOG.md" || fail "R31: CHANGELOG.md has no entry for $_v"
   grep -qF 'host' "$SRC/CHANGELOG.md" || fail "R31: CHANGELOG.md does not mention the host mode"
+  # E19-F02 R13 — one more MINOR step on top of the 0.40 E19-F01 shipped, still compared
+  # by parsed components. The feature marker is looked for ANYWHERE in the file, not in
+  # the current top section, so a later release cannot be forced to re-mention it.
+  [ "$_min" -ge 41 ] \
+    || fail "F02 R13: VERSION $_v is not a MINOR step beyond the 0.40 E19-F01 shipped"
+  grep -qiE 'pre-check|precheck' "$SRC/CHANGELOG.md" \
+    || fail "F02 R13: CHANGELOG.md carries no fresh-install pre-check baseline entry"
+  return 0
+}
+
+# ══ E19-F02 — the fresh-install pre-check baseline ════════════════════════════════════
+#
+# WHY --print-agents IS THE INSTRUMENT: the thing under test is what the INTERACTIVE
+# picker pre-checks, and a POSIX suite cannot portably hand the installer a TTY. E19-F01
+# R26 / E19-F02 R6 make the picker's baseline and the `baseline=` diagnostic line the
+# output of the SAME helper (precheck_baseline), so asserting `baseline=` is asserting the
+# picker — and test_baseline_single_helper below is what keeps that equivalence honest.
+
+# ALL — the five keys, sorted, as --print-agents renders them on one line. Derived from
+# the installer's own AGENT_KEYS so a future sixth front-end cannot make these cases pass
+# by leaving the expectation frozen at five names.
+ALL_KEYS="$(sed -n 's/^AGENT_KEYS="\(.*\)"$/\1/p' "$INST" | tr ' ' '\n' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+
+# baseline_of <sandbox> <target> [VAR=VALUE …] — the `baseline=` value --print-agents
+# reports, under hrun's env discipline.
+#
+# Like host_of, it distinguishes "ran and reported" from "failed to run": a crashed
+# installer yields a loud sentinel rather than an empty string, so no assertion below can
+# pass (or fail) vacuously.
+baseline_of() {
+  _bo_x="$1"; _bo_t="$2"; shift 2
+  if ! hrun "$_bo_x" "$@" -- --print-agents "$_bo_t" >"$_bo_x/baseline_of.out" 2>"$_bo_x/baseline_of.err"; then
+    printf '%s\n' "__INSTALLER_EXITED_NONZERO__"
+    return 0
+  fi
+  if ! grep -q '^baseline=' "$_bo_x/baseline_of.out"; then
+    printf '%s\n' "__NO_BASELINE_LINE_ON_STDOUT__"
+    return 0
+  fi
+  sed -n 's/^baseline=//p' "$_bo_x/baseline_of.out"
+}
+
+# ── R4, R9 — a pre-E08 install (stamped, no persisted selection) ⇒ ALL ────────
+# THE regression this feature must not cause. Such a target carries every front-end's glue
+# and no .harness/.agents; if the fresh-install detection branch could reach it, a human
+# pressing Enter on the pre-checked picker would DELETE four working front-ends. The
+# "existing install" test is therefore the VERSION STAMP, not the presence of .agents.
+test_baseline_legacy_upgrade_is_all() {
+  _x="$(sandbox f2legacy)"; _t="$_x/t"; mkdir -p "$_t"
+  hrun "$_x" -- --agents=claude,gemini "$_t" >/dev/null 2>&1 || fail "R4: setup install failed"
+  rm -f "$_t/.harness/.agents"
+  [ -f "$_t/.harness/.harness-version" ] \
+    || fail "R4: the pre-E08 fixture must still carry its version stamp"
+  _got="$(baseline_of "$_x" "$_t" CLAUDECODE=1)"
+  [ "$_got" = "$ALL_KEYS" ] \
+    || fail "R4/R9: a pre-E08 upgrade's baseline was narrowed by detection (got '$_got', want '$ALL_KEYS')"
+  return 0
+}
+
+# ── R1 — no existing install + detected ⇒ that key ALONE ─────────────────────
+# The equality is EXACT on the whole line, which is what makes this the
+# host-only-not-host-plus-claude check: `claude gemini`, `antigravity claude` or any other
+# union that merely CONTAINS the detected key fails here. Two different hosts are asserted
+# so a hardcoded `claude` cannot pass, and the declared-host path is included because a
+# front-end with no verified marker must reach the same branch.
+test_baseline_fresh_is_host_only() {
+  _x="$(sandbox f2fresh)"; _t="$_x/t"; mkdir -p "$_t"
+  _got="$(baseline_of "$_x" "$_t" CLAUDECODE=1)"
+  [ "$_got" = "claude" ] \
+    || fail "R1: a fresh install inside Claude Code does not pre-check 'claude' alone (got '$_got')"
+  _got="$(baseline_of "$_x" "$_t" OPENCODE=1)"
+  [ "$_got" = "opencode" ] \
+    || fail "R1: a fresh install inside OpenCode does not pre-check 'opencode' alone (got '$_got')"
+  _got="$(baseline_of "$_x" "$_t" HARNESS_HOST_AGENT=gemini)"
+  [ "$_got" = "gemini" ] \
+    || fail "R1: a declared host does not pre-check that key alone on a fresh target (got '$_got')"
+  # The target is still untouched — a baseline is computed, never installed.
+  [ -d "$_t/.harness" ] && fail "R1: computing the fresh baseline wrote to the target"
+  return 0
+}
+
+# ── R2 — no existing install + undetected ⇒ ALL ──────────────────────────────
+# The detection MISS keeps today's behavior byte-for-byte; it is the designed degradation
+# for every front-end with no verified marker, not a gap.
+test_baseline_fresh_undetected_is_all() {
+  _x="$(sandbox f2freshall)"; _t="$_x/t"; mkdir -p "$_t"
+  _got="$(baseline_of "$_x" "$_t")"
+  [ "$_got" = "$ALL_KEYS" ] \
+    || fail "R2: an undetected fresh target does not pre-check ALL (got '$_got', want '$ALL_KEYS')"
+  # Ambiguity (two front-ends' markers at once) is a MISS, so it lands here too.
+  _got="$(baseline_of "$_x" "$_t" CLAUDECODE=1 OPENCODE=1)"
+  [ "$_got" = "$ALL_KEYS" ] \
+    || fail "R2: competing markers on a fresh target did not fall back to ALL (got '$_got')"
+  return 0
+}
+
+# ── R3 — existing install + persisted selection ⇒ that selection ─────────────
+# Detection must not reach an upgrade at all: the marker here (claude) is deliberately NOT
+# the persisted key (gemini), so a baseline that consulted detection would be visible.
+test_baseline_upgrade_keeps_persisted() {
+  _x="$(sandbox f2upg)"; _t="$_x/t"; mkdir -p "$_t"
+  hrun "$_x" -- --agents=gemini "$_t" >/dev/null 2>&1 || fail "R3: setup install failed"
+  _got="$(baseline_of "$_x" "$_t" CLAUDECODE=1)"
+  [ "$_got" = "gemini" ] \
+    || fail "R3: an upgrade's baseline is not its persisted selection (got '$_got')"
+  # …and it is the SAME with detection absent — the persisted set is the only input.
+  _plain="$(baseline_of "$_x" "$_t")"
+  [ "$_plain" = "$_got" ] \
+    || fail "R3: an upgrade's baseline changed with the marker set ('$_plain' vs '$_got')"
+  return 0
+}
+
+# ── R5 — no TTY + no override ⇒ ALL, exactly as before this feature ──────────
+# CI back-compat is non-negotiable: a scripted run has no human to correct a wrong guess,
+# so the narrowing axis is explicit-vs-implicit, and this path never consults the helper.
+test_no_tty_default_unchanged() {
+  _x="$(sandbox f2nottty)"; _t="$_x/t"; mkdir -p "$_t"
+  hrun "$_x" CLAUDECODE=1 -- "$_t" >/dev/null 2>&1 \
+    || fail "R5: a no-override non-TTY install with a marker set exited non-zero"
+  [ "$(tr '\n' ' ' <"$_t/.harness/.agents" | sed 's/[[:space:]]*$//')" = "$ALL_KEYS" ] \
+    || fail "R5: a no-override non-TTY run no longer persists ALL ($(tr '\n' ' ' <"$_t/.harness/.agents"))"
+  for _f in CLAUDE.md GEMINI.md opencode.json AGENTS.md; do
+    [ -f "$_t/$_f" ] || fail "R5: the no-TTY default stopped stamping $_f"
+  done
+  [ -d "$_t/.agents" ]      || fail "R5: the no-TTY default stopped stamping the antigravity .agents/ tree"
+  [ -d "$_x/ch/prompts" ]   || fail "R5: the no-TTY default stopped stamping the global codex prompts"
+  # Source: that branch still assigns ALL directly and never reaches precheck_baseline.
+  _tail="$(sed -n '/^resolve_agents() {/,/^}/p' "$INST" | sed -n '/^  else$/,/^}/p')"
+  printf '%s\n' "$_tail" | grep -qF 'SELECTED="$(normalize_keys "$AGENT_KEYS")"' \
+    || fail "R5: the no-TTY/no-override branch no longer assigns ALL directly"
+  printf '%s\n' "$_tail" | grep -q 'precheck_baseline\|detect_host' \
+    && fail "R5: the no-TTY/no-override branch now consults detection"
+  return 0
+}
+
+# ── R8 — confirming the narrowed fresh baseline removes nothing ──────────────
+# `--agents=host` is the non-interactive proxy for a human confirming the pre-check: it
+# resolves to the same single key. The GLOBAL codex prompts dir is shared across every
+# harness target, so the only acceptable outcome is that a narrowed fresh install is
+# byte-inert there — including E18-F01's .sdd-pr-loop.owners cross-target ledger.
+test_baseline_fresh_removes_nothing() {
+  _x="$(sandbox f2freshsafe)"; _t="$_x/t"; mkdir -p "$_t" "$_x/ch/prompts"
+  _foreign="$_x/ch/prompts/someone-elses.md"
+  printf 'not ours\n' > "$_foreign"
+  _ledger="$_x/ch/prompts/.sdd-pr-loop.owners"
+  printf '%s\n' "/some/other/target" > "$_ledger"
+  _pr="$_x/ch/prompts/sdd-pr-loop.md"
+  printf 'another target stamped this\n' > "$_pr"
+  cp -R "$_x/ch/prompts" "$_x/prompts.before"
+  hrun "$_x" CLAUDECODE=1 -- --agents=host "$_t" >"$_x/out" 2>"$_x/err" \
+    || fail "R8: the narrowed fresh install exited non-zero"
+  # Byte-identical, file-for-file: nothing deleted, nothing rewritten, nothing added.
+  diff -r "$_x/prompts.before" "$_x/ch/prompts" >"$_x/promptsdiff" 2>&1 \
+    || fail "R8: the narrowed fresh install changed the shared codex prompts dir: $(command cat "$_x/promptsdiff")"
+  grep -qx '/some/other/target' "$_ledger" \
+    || fail "R8: another target's .sdd-pr-loop.owners claim was dropped"
+  # And it removed no front-end glue in the target: the removal path never ran.
+  printf '%s\n' "$(command cat "$_x/err")" | grep -qi 'removing' \
+    && fail "R8: a fresh narrowed install reported a glue removal"
+  [ -f "$_t/CLAUDE.md" ] || fail "R8: the narrowed install did not stamp the host's own glue"
+  return 0
+}
+
+# ── R9 — an existing install's resolution is independent of every marker ─────
+# NOTE on the shape of this check: a no-override non-TTY re-run resolves to ALL by R5, so
+# "unchanged bytes" is NOT the invariant (that path widens a narrow install today, and
+# this feature does not touch it). The invariant R9 states is MARKER-INDEPENDENCE, so two
+# identical installs are re-run — one inside a detected host, one not — and compared to
+# each other. A stamp-blind precheck_baseline, or a detection branch leaking into the
+# no-override path, makes them differ.
+test_existing_install_never_narrows() {
+  _x="$(sandbox f2narrow)"; _m="$_x/marked"; _p="$_x/plain"; mkdir -p "$_m" "$_p"
+  for _d in "$_m" "$_p"; do
+    hrun "$_x" -- --agents=claude,gemini "$_d" >/dev/null 2>&1 || fail "R9: setup install failed"
+  done
+  hrun "$_x" CLAUDECODE=1 -- "$_m" >/dev/null 2>&1 || fail "R9: the marked re-run exited non-zero"
+  hrun "$_x" -- "$_p" >/dev/null 2>&1               || fail "R9: the unmarked re-run exited non-zero"
+  [ "$(command cat "$_m/.harness/.agents")" = "$(command cat "$_p/.harness/.agents")" ] \
+    || fail "R9: a marker changed what a no-override re-run resolved ($(tr '\n' ' ' <"$_m/.harness/.agents") vs $(tr '\n' ' ' <"$_p/.harness/.agents"))"
+  # Nothing was NARROWED away either: the previously selected glue is still there.
+  [ -f "$_m/GEMINI.md" ] || fail "R9: a no-override re-run inside Claude Code deleted GEMINI.md"
+  [ -f "$_m/CLAUDE.md" ] || fail "R9: a no-override re-run deleted CLAUDE.md"
+  # The PRE-CHECK side of the same rule: the baseline offered for an existing install is
+  # the same with and without a marker.
+  _bm="$(baseline_of "$_x" "$_m" CLAUDECODE=1)"; _bp="$(baseline_of "$_x" "$_m")"
+  [ "$_bm" = "$_bp" ] \
+    || fail "R9: an existing install's baseline depends on a marker ('$_bm' vs '$_bp')"
+  return 0
+}
+
+# ── R10 — docs/INSTALL.md + the installer header state the new default ───────
+# Scoped to the section body, so a stray mention of a word elsewhere in a 400-line doc
+# cannot satisfy the check, and phrased as SUBSTANCE (the three cases the default has),
+# not as a keyword hunt.
+test_docs_document_fresh_default() {
+  _doc="$SRC/docs/INSTALL.md"
+  _sec="$(awk '/^### The fresh-install default/{f=1;next} /^#{2,3} /{f=0} f' "$_doc")"
+  [ -n "$_sec" ] \
+    || fail "R10: docs/INSTALL.md has no '### The fresh-install default' section"
+  printf '%s\n' "$_sec" | grep -qi 'interactive' \
+    || fail "R10: the fresh-install default section does not say it applies to an interactive install"
+  printf '%s\n' "$_sec" | grep -qi 'no existing install\|first install\|fresh install' \
+    || fail "R10: the section does not scope the new default to a target with no existing install"
+  printf '%s\n' "$_sec" | grep -qi 'pre-check' \
+    || fail "R10: the section does not say the detected host is PRE-CHECKED (a default, not a restriction)"
+  printf '%s\n' "$_sec" | grep -qi 'upgrade' \
+    || fail "R10: the section does not state the upgrade exception"
+  printf '%s\n' "$_sec" | grep -qF '.harness/.agents' \
+    || fail "R10: the section does not name .harness/.agents as what an upgrade keeps"
+  printf '%s\n' "$_sec" | grep -qi 'undetected' \
+    || fail "R10: the section does not state that an undetected host still pre-checks everything"
+  # The installer header no longer claims the old default.
+  _hdr="$(sed -n '1,60p' "$INST")"
+  printf '%s\n' "$_hdr" | grep -qF 'ALL on a fresh install' \
+    && fail "R10: the harness-install.sh header still claims the interactive path pre-checks ALL on a fresh install"
+  printf '%s\n' "$_hdr" | grep -qi 'pre-check' \
+    || fail "R10: the harness-install.sh header no longer describes the interactive pre-check at all"
+  # R10 is about the file's own description of the default, and the header is not the only
+  # place that gives it. The two docblocks BELOW that describe the same decision are held
+  # to the same standard, scoped to the block so unrelated prose can neither satisfy nor
+  # break the check. (Deliberately NOT done: a file-wide ban on the phrase "ALL on a fresh
+  # install". That sentence is TRUE of the no-TTY branch, so a file-wide ban would fire on
+  # a correct future comment about it — brittle, for no extra catch.)
+  #
+  # (a) resolve_agents' resolution-order block is what a maintainer reads before editing
+  #     the branch, so it must describe the CURRENT pre-check, not the one F02 replaced.
+  #     Positive assertions: an accurate description cannot omit these.
+  _ra="$(comment_block_above 'resolve_agents() {')"
+  [ -n "$_ra" ] || fail "R10: no comment block was found above resolve_agents()"
+  printf '%s\n' "$_ra" | grep -qi 'detected host\|detect_host' \
+    || fail "R10: resolve_agents' resolution-order block does not mention the detected host — it still describes the pre-F02 pre-check"
+  printf '%s\n' "$_ra" | grep -qi 'no existing install' \
+    || fail "R10: resolve_agents' resolution-order block does not scope the new pre-check to a target with no existing install"
+  printf '%s\n' "$_ra" | grep -qF 'precheck_baseline' \
+    || fail "R10: resolve_agents' resolution-order block no longer names the helper the picker seeds from"
+  # (b) host_fallback_set's docblock used to justify keeping `baseline=` off
+  #     precheck_baseline and to claim two callers. Both became false in E19-F02, and the
+  #     first read as a standing instruction to revert the feature. The caller claim is
+  #     pinned to the REAL count, so a future feature that re-adds a caller trips this
+  #     first and updates both together.
+  _hfs_calls="$(grep -c '^[^#]*host_fallback_set "' "$INST" || :)"
+  [ "$_hfs_calls" = "1" ] \
+    || fail "R10: host_fallback_set has $_hfs_calls non-comment call sites, expected exactly 1 (resolve_agents' undetected host arm)"
+  _hfs="$(comment_block_above 'host_fallback_set() {')"
+  [ -n "$_hfs" ] || fail "R10: no comment block was found above host_fallback_set()"
+  printf '%s\n' "$_hfs" | grep -qiE 'two callers|both call sites' \
+    && fail "R10: the host_fallback_set docblock still claims two callers — --print-agents stopped calling it in E19-F02"
+  printf '%s\n' "$_hfs" | grep -qiF 'not precheck_baseline' \
+    && fail "R10: the host_fallback_set docblock still instructs a maintainer to keep baseline= off precheck_baseline — that is the change this feature exists to make"
+  return 0
+}
+
+# ── R11 — docs/INSTALL.md documents the re-run re-toggle path ────────────────
+# This fact shipped only inside a source header comment; it is the first question the new
+# default provokes, so the doc must carry the command AND the fact that a re-run removes.
+test_docs_document_retoggle_path() {
+  _doc="$SRC/docs/INSTALL.md"
+  _sec="$(awk '/^### Changing the selection later/{f=1;next} /^#{2,3} /{f=0} f' "$_doc")"
+  [ -n "$_sec" ] \
+    || fail "R11: docs/INSTALL.md has no '### Changing the selection later' section"
+  printf '%s\n' "$_sec" | grep -qF './harness-install.sh' \
+    || fail "R11: the re-toggle section carries no copy-pasteable installer command"
+  printf '%s\n' "$_sec" | grep -qF '.harness/.agents' \
+    || fail "R11: the re-toggle section does not name .harness/.agents as the pre-checked source"
+  printf '%s\n' "$_sec" | grep -qi 'remove\|deselect' \
+    || fail "R11: the re-toggle section does not say a re-run also applies REMOVALS"
+  printf '%s\n' "$_sec" | grep -qi 'add' \
+    || fail "R11: the re-toggle section does not say a re-run applies additions"
+  # It must SHIP, not merely exist in the source tree (the installed copy is what a user
+  # of the harness reads).
+  _x="$(sandbox f2docs)"; _t="$_x/t"; mkdir -p "$_t"
+  hrun "$_x" CLAUDECODE=1 -- --agents=host "$_t" >/dev/null 2>&1 || fail "R11: install failed"
+  grep -qF 'Changing the selection later' "$_t/.harness/docs/INSTALL.md" \
+    || fail "R11: the installed docs/INSTALL.md does not carry the re-toggle section"
   return 0
 }
 
@@ -692,7 +998,7 @@ pass "'host' mixed with any other token is rejected and writes nothing (R16)"
 test_host_not_a_registry_key
 pass "'host' is not an AGENT_KEYS member and is never persisted (R17, R18)"
 test_prior_agents_unchanged
-pass "PRIOR_AGENTS keeps its legacy codex exclusion; no cross-target prompt is reclaimed (R19)"
+pass "PRIOR_AGENTS keeps its legacy codex exclusion; no cross-target prompt is reclaimed (R19, F02 R7)"
 test_host_fresh_removes_nothing
 pass "a fresh host install leaves foreign global prompts and the owners ledger untouched (R20)"
 test_host_upgrade_removal_respects_pristine
@@ -708,10 +1014,36 @@ test_docs_document_host_mode
 pass "INSTALL.md, README.md, the installer header and manifest.txt document the host mode (R27)"
 test_suite_wired_into_verification
 test_suite_hygiene
-pass "the suite is wired into verification.test_command and keeps its env discipline (R28, R29)"
+pass "the suite is wired into verification.test_command and keeps its env discipline (R28, R29, F02 R12)"
 test_init_still_green
 pass "no new dependency; an installed target still passes init.sh (R30)"
 test_version_and_changelog
-pass "VERSION carries the MINOR bump and CHANGELOG.md the matching entry (R31)"
+pass "VERSION carries the MINOR bump and CHANGELOG.md the matching entry (R31, F02 R13)"
+
+# ── E19-F02 — the fresh-install pre-check baseline ────────────────────────────
+# (F02 R6 is asserted inside test_baseline_single_helper, F02 R7 inside
+#  test_prior_agents_unchanged and F02 R12 inside test_suite_hygiene — the F01 checks that
+#  already own those source properties; extending them beats a second copy that could
+#  disagree.)
+[ -n "$ALL_KEYS" ] && [ "$(printf '%s\n' "$ALL_KEYS" | wc -w | tr -d ' ')" -ge 5 ] \
+  || fail "F02: ALL_KEYS was not derived from AGENT_KEYS ('$ALL_KEYS') — the baseline cases would compare against nothing"
+test_baseline_legacy_upgrade_is_all
+pass "F02 baseline_legacy_upgrade_is_all: a pre-E08 upgrade pre-checks ALL, detection ignored (F02 R4, R9)"
+test_baseline_fresh_is_host_only
+pass "F02 baseline_fresh_is_host_only: a fresh install pre-checks the detected host ALONE (F02 R1)"
+test_baseline_fresh_undetected_is_all
+pass "F02 baseline_fresh_undetected_is_all: an undetected fresh install still pre-checks ALL (F02 R2)"
+test_baseline_upgrade_keeps_persisted
+pass "F02 baseline_upgrade_keeps_persisted: an upgrade pre-checks its persisted selection (F02 R3)"
+test_no_tty_default_unchanged
+pass "F02 no_tty_default_unchanged: no TTY + no override still stamps ALL (F02 R5)"
+test_baseline_fresh_removes_nothing
+pass "F02 baseline_fresh_removes_nothing: the narrowed fresh install is byte-inert in the shared codex prompts (F02 R8)"
+test_existing_install_never_narrows
+pass "F02 existing_install_never_narrows: an existing install's resolution ignores every marker (F02 R9)"
+test_docs_document_fresh_default
+pass "F02 docs_document_fresh_default: INSTALL.md and the installer header state the new default (F02 R10)"
+test_docs_document_retoggle_path
+pass "F02 docs_document_retoggle_path: INSTALL.md documents the re-run re-toggle path (F02 R11)"
 
 echo "All agents-host tests passed."
