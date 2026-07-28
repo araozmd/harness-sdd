@@ -1,7 +1,7 @@
 #!/bin/sh
 # harness-install.sh — install or upgrade the agent harness into a target repo.
 #
-#   ./harness-install.sh [--agents=<csv>] [--builder-backend=<value>] <target-repo-path>
+#   ./harness-install.sh [--agents=<csv>] [--builder-backend=<value>] [--pr-loop=<true|false>] <target-repo-path>
 #   ./harness-install.sh --umbrella <umbrella-dir> [--shared-repo] [--recursive] [--dry-run|--list]
 #
 # Idempotent: run once to install, re-run to upgrade.
@@ -49,6 +49,28 @@
 # it. Selecting `delegate` while delegate_cmd is still unset is allowed on purpose: the
 # installer writes the choice and warns, rather than diverge from what the human asked for
 # by silently downgrading — the Builder then stops and reports at run time.
+# Change it later by RE-RUNNING the installer (or by hand-editing that key).
+#
+# PR review loop (E20-F02): the installer's THIRD question, asked as a plain line-oriented
+# prompt right after the second one. It sets pr_loop.enabled in
+# <target>/.harness/harness.config.yaml, whose two legal values are `true` and `false`:
+#   - false (DEFAULT, opt-in) → no /sdd-pr-loop glue is stamped anywhere.
+#   - true                    → /sdd-pr-loop + the pr-fixer sub-agent are stamped into
+#                               every selected front-end, and flipping back to false
+#                               reclaims all of it in that same run (E18-F01 §7b).
+# THE DEFAULT DOES NOT CHANGE: pressing Enter keeps whatever the target already has, which
+# on a fresh install is `false` — a fresh seed never inherits this repo's own `true`.
+# Resolution: --pr-loop=<value> wins over the prompt; an empty value means "no override".
+# An illegal value aborts non-zero BEFORE anything is written. With no TTY and no override
+# nothing is asked and the config is left byte-identical, so CI keeps today's behavior.
+# There is deliberately NO environment twin: HARNESS_PR_LOOP_ENABLED is E18-F01's PER-RUN
+# gate override (like HARNESS_AUTO_MERGE / HARNESS_MAX_ROUNDS) and is NEVER persisted —
+# when it disagrees with the resolved value the installer says so once, rather than letting
+# the run's behavior quietly diverge from what the file records.
+# NO INSTALL-TIME PREFLIGHT is run: the installer is POSIX sh with zero dependencies and
+# never invokes `gh` or `jq`. /sdd-pr-loop needs the Codex GitHub App on the repo plus an
+# authed `gh`; the prompt SAYS so, and /sdd-pr-loop's own fail-fast diagnoses it at the one
+# moment it can be accurate (the App may legitimately be installed after the harness).
 # Change it later by RE-RUNNING the installer (or by hand-editing that key).
 #
 #   - The harness BODY (agents, docs, store, tools, templates, init.sh, config, AGENTS.md)
@@ -292,6 +314,13 @@ EOF
 # `gh` (and `jq` on PATH) — without them /sdd-pr-loop can only fail its own preflight.
 # While it is on, /sdd-pr-loop and the pr-fixer sub-agent are stamped into every
 # selected front-end; flipping it back to false reclaims all of that glue.
+# The installer ASKS for `enabled` (E20-F02) — a follow-up prompt right after the
+# builder-backend question, on a TTY — and takes --pr-loop=<true|false> for scripted
+# runs. Enter keeps the current value, so the opt-in default never flips by itself. No
+# preflight runs at install time; the prompt just states the precondition. RE-RUN the
+# installer to change it later, or edit the value below: only that one scalar is ever
+# rewritten, so every comment and hand-edit in this file survives. HARNESS_PR_LOOP_ENABLED
+# below is a PER-RUN override — it gates ONE run and is NEVER persisted back here.
 # Per-run env overrides (env wins over config): HARNESS_PR_LOOP_ENABLED,
 # HARNESS_AUTO_MERGE, HARNESS_MAX_ROUNDS, HARNESS_BLOCKING_SEVERITIES,
 # HARNESS_MERGE_STRATEGY. Execution knobs are env-ONLY (never config):
@@ -1538,6 +1567,183 @@ set_builder_backend() {
   ' "$1" > "$1.bbtmp" && mv "$1.bbtmp" "$1"
 }
 
+# ── the THIRD question: pr_loop.enabled (E20-F02) ─────────────────────────────
+# One more prompt behind the SAME resolver/writer pair the second question uses — a
+# linear seam, deliberately NOT a framework for N toggles. Everything E20-F01 said about
+# why this is a plain `read` prompt rather than a picker row applies here unchanged, and
+# more strongly: this is an ENUM of two booleans, not a multi-select.
+#
+# WHY ASK AT ALL. `/sdd-pr-loop` only functions on a repo that has the Codex GitHub App
+# installed plus an authed `gh` (and `jq`). On any other repo the correct value is `false`,
+# and the human running the installer is the only one who knows which repo is which. The
+# key has been settable since E18-F01 — by hand-editing YAML, discoverable only by reading
+# source comments. This makes it audible.
+#
+# WHAT THIS DOES NOT DO. It does not change the opt-in default (still `false`, on a fresh
+# install and on an upgrade — pressing Enter never turns the loop on), it does not touch
+# seed_pr_loop_optin, pr_loop_enabled, _cfg_pr_loop_value, the §5 unconditional CMDDIR
+# generation or the §7b reclamation pass, and it runs NO install-time preflight: the
+# installer is POSIX sh with zero dependencies and never invokes `gh` or `jq`. The
+# precondition is stated in the prompt text instead, and /sdd-pr-loop's own fail-fast
+# reports it at the one moment it can be accurate.
+
+# pr_loop_answer <answer> <current> — the answer→value mapping, and the ONLY place the
+# prompt's semantics live (R2). PURE: no `read`, no config access, no file write, no
+# global. Prints one of the two literals `true` / `false` and nothing else.
+#
+#   ""  (Enter)              → <current>   … the CURRENT value, never a hard-coded default
+#   1 | n | no | false       → false
+#   2 | y | yes | true       → true
+#   anything else            → <current>   … forgiving on purpose (see below)
+#
+# The word forms are case-insensitive (bracket patterns — POSIX sh `case` has no
+# case-folding operator and this file adds no dependencies).
+#
+# THE RAW ANSWER IS NEVER WRITTEN TO THE CONFIG. E18-F01 R18b makes `Yes`, `1` and `True`
+# all resolve the gate OFF (only the literal `true` is true), so an implementation that
+# passed the answer through would write a value that reads back as the OPPOSITE of what
+# the human chose. Only the mapped literal is ever emitted.
+#
+# A typo is forgiving HERE and fatal in the flag (R4): a human at a prompt sees the outcome
+# reported on the very next line and re-runs, while a typo'd flag in a script is silent.
+# Same asymmetry E20-F01 and `--agents` already apply.
+#
+# SHAPE CONTRACT (R2): `sed -n '/^pr_loop_answer() {$/,/^}$/p'` must yield a complete,
+# sourceable definition, so the test suite can exercise this truth table without a pty.
+# The opening line is exactly `pr_loop_answer() {` and NO line inside the body may be
+# exactly `}`. Do not reformat.
+pr_loop_answer() {
+  case "$1" in
+    1|[nN]|[nN][oO]|[fF][aA][lL][sS][eE]) printf '%s\n' "false" ;;
+    2|[yY]|[yY][eE][sS]|[tT][rR][uU][eE]) printf '%s\n' "true" ;;
+    *)                                    printf '%s\n' "$2" ;;
+  esac
+}
+
+# pr_loop_prompt <current> — ask the third question. The menu goes to STDERR (the
+# resolved value is this function's stdout, read via command substitution).
+#
+# KEEP THIS FUNCTION THIS THIN. It is the only part of the feature a POSIX suite cannot
+# drive — there is no pty — so every decision it feeds lives in pr_loop_answer above,
+# which the suite extracts and unit-tests. Logic that migrates in here becomes untestable,
+# and a structural check in tests/test_installer_toggles.sh fails if any appears. No loop,
+# no re-ask, no config read, no write, no preflight.
+#
+# The text NAMES the precondition (the Codex GitHub App + an authed `gh`) on purpose: that
+# sentence is this feature's entire substitute for an install-time probe, so R1 makes it
+# falsifiable — the suite asserts both names are present.
+pr_loop_prompt() {
+  _plp_cur="$1"
+  printf '\n' >&2
+  printf '%s\n' "Enable the Codex PR review loop on this install? (E20-F02)" >&2
+  printf '%s\n' "  1) false   stamp no /sdd-pr-loop glue — the opt-in default" >&2
+  printf '%s\n' "  2) true    stamp /sdd-pr-loop + the pr-fixer sub-agent" >&2
+  printf '%s\n' "             NEEDS the Codex GitHub App on this repo plus an authed \`gh\`." >&2
+  printf '%s\n' "             Nothing is probed now; the first /sdd-pr-loop run reports it." >&2
+  printf '%s' "  choose 1/2 [Enter keeps $_plp_cur]: " >&2
+  _plp_ans=""
+  read -r _plp_ans || :
+  printf '\n' >&2
+  pr_loop_answer "$_plp_ans" "$_plp_cur"
+}
+
+# resolve_pr_loop <target> — set the globals PR_LOOP_CHOICE (the resolved value) and
+# PR_LOOP_CHOICE_SOURCE (how it resolved, for the one report line).
+# Precedence, first match wins — the same ladder --agents and --builder-backend use:
+#   1. a non-empty $PR_LOOP_OVERRIDE (--pr-loop), already validated against the legal
+#      values at parse time (R4);
+#   2. else an interactive TTY → the prompt, pre-selected from the current effective
+#      value (R1);
+#   3. else the current effective value — a no-op, so a non-interactive run with no
+#      override asks nothing and changes nothing (R6).
+#
+# CURRENT EFFECTIVE VALUE = `true` ONLY when the target config's gate key reads exactly
+# `true`; an absent file, an absent block, an absent key, an empty or malformed value all
+# normalize to `false` (the E18-F01 R18/R18b normalization). On a FRESH install the config
+# does not exist yet at this point, so the current value is the built-in `false` — which is
+# also what seed_pr_loop_optin will force into the freshly copied file moments later. "No
+# answer ⇒ off" is therefore enforced TWICE, and the only route to `true` on a fresh
+# install is an explicit `2` / `yes` / `--pr-loop=true` (R9; E18-F01 R15).
+#
+# It deliberately does NOT consult HARNESS_PR_LOOP_ENABLED. That variable is E18-F01's
+# PER-RUN gate override (the same family as HARNESS_AUTO_MERGE / HARNESS_MAX_ROUNDS) and
+# persisting it would silently and permanently disable a target's configured loop — see
+# the arg-parsing note beside PR_LOOP_OVERRIDE (R5).
+PR_LOOP_CHOICE="false"
+PR_LOOP_CHOICE_SOURCE="unchanged"
+resolve_pr_loop() {
+  _rpl_cfg="$1/.harness/harness.config.yaml"
+  _rpl_cur="false"
+  if [ -f "$_rpl_cfg" ]; then
+    if [ "$(_cfg_pr_loop_value "$_rpl_cfg" enabled)" = "true" ]; then _rpl_cur="true"; fi
+  fi
+  if [ -n "${PR_LOOP_OVERRIDE:-}" ]; then
+    PR_LOOP_CHOICE="$PR_LOOP_OVERRIDE"
+    PR_LOOP_CHOICE_SOURCE="explicit --pr-loop"
+  elif [ -t 0 ]; then
+    PR_LOOP_CHOICE="$(pr_loop_prompt "$_rpl_cur")"
+    PR_LOOP_CHOICE_SOURCE="interactive prompt"
+  else
+    PR_LOOP_CHOICE="$_rpl_cur"
+    PR_LOOP_CHOICE_SOURCE="unchanged"
+  fi
+}
+
+# set_pr_loop_enabled <config-file> <value> — write the gate key inside the TOP-LEVEL
+# `pr_loop:` section, and nowhere else.
+#
+# The config is NEVER rewritten wholesale: this file is heavily commented BY DESIGN and
+# those comments are the harness's load-bearing documentation of its own knobs. Two shapes,
+# one canonical result:
+#
+#   • the key EXISTS → replace ONLY the value token. The line's indentation and everything
+#     after the value (spacing + any trailing comment) survive verbatim, and every other
+#     byte of the file is untouched — including a same-named `enabled:` key under any OTHER
+#     top-level section, which the `p &&` section guard is what keeps safe (R7).
+#   • the section exists with NO `enabled:` key → insert the CANONICAL line immediately
+#     after the header. E18-F01 R18b constructs exactly that config, and without this
+#     branch resolving `true` there would silently do nothing (R7).
+#
+# BYTE CONVERGENCE (R10, E18-F01 R17). $_spl_tail below is the tail of the ONE canonical
+# gate line — the line seed_pr_loop_optin writes into a freshly seeded config and the line
+# migrate_config appends into an upgraded one. Because both of those start from the same
+# bytes, replacing just the value token on either yields the same bytes, and the inserted
+# line is built from that same tail rather than hand-aligned. So a seeded target and a
+# stripped-then-migrated one converge for BOTH values. If you edit the canonical line in
+# seed_pr_loop_optin or migrate_config, edit this tail with it.
+#
+# Callers skip this entirely when the value already matches, so an unchanged run is
+# trivially byte-identical (R8). Same `$f.tmp` + `mv` shape as seed_pr_loop_optin /
+# set_builder_backend / _mc_insert_after.
+set_pr_loop_enabled() {
+  _spl_f="$1"; _spl_v="$2"
+  _spl_tail='                 # opt-in master gate; ONLY `true` stamps /sdd-pr-loop glue'
+  if awk '
+      /^pr_loop:[[:space:]]*(#.*)?$/ { p=1; next }
+      p && /^[^[:space:]#]/ { p=0 }
+      p && /^[[:space:]]+enabled:/ { found=1 }
+      END { exit found ? 0 : 1 }
+    ' "$_spl_f"; then
+    awk -v val="$_spl_v" '
+      /^pr_loop:[[:space:]]*(#.*)?$/ { p=1; print; next }
+      p && /^[^[:space:]#]/ { p=0 }
+      p && !done && match($0, /^[[:space:]]+enabled:[[:space:]]*/) {
+        pre = substr($0, 1, RLENGTH)
+        tail = substr($0, RLENGTH + 1)
+        if (tail !~ /^#/) { sub(/^[^[:space:]]+/, "", tail) }
+        if (pre !~ /[[:space:]]$/) { pre = pre " " }
+        if (tail ~ /^#/) { tail = " " tail }
+        print pre val tail
+        done = 1
+        next
+      }
+      { print }
+    ' "$_spl_f" > "$_spl_f.prwtmp" && mv "$_spl_f.prwtmp" "$_spl_f"
+  else
+    _mc_insert_after "$_spl_f" '^pr_loop:[[:space:]]*(#.*)?$' "  enabled: $_spl_v$_spl_tail"
+  fi
+}
+
 # ── install_one <target> ──────────────────────────────────────────────────────
 # Installs (or upgrades) the harness into <target>. Identical behavior to the
 # historical single-target installer. Sets LAST_UPGRADE to 0 (fresh) or 1 (upgrade)
@@ -1598,6 +1804,13 @@ install_one() {
   # output from the body copy. Only RESOLVED here — the value is applied later, at the
   # config seed/preserve stage, where the file is guaranteed to exist.
   resolve_builder_backend "$TARGET"
+  # The THIRD question (E20-F02), asked back to back with the other two so every question
+  # this run will ask is behind us before the body copy prints anything. RESOLVED ONLY —
+  # the write happens at §2b, after seed/preserve + seed_pr_loop_optin + migrate_config,
+  # where the file and its `pr_loop:` block are both guaranteed to exist. That ordering is
+  # the whole feature: §2b precedes §5 (stamping) and §7b (gate-off reclamation), so a
+  # prompt answer is reconciled INSIDE THIS RUN through E18-F01's existing machinery.
+  resolve_pr_loop "$TARGET"
 
   echo "── harness install v$VERSION → $TARGET ──"
   if [ "$UPGRADE" = 1 ]; then info "existing install (v$(cat "$H/.harness-version")) — upgrading"; fi
@@ -1684,6 +1897,42 @@ install_one() {
   # NOT on --print-agents, whose stdout is frozen at two lines — that flag exits long
   # before install_one.
   info "builder backend: $BUILDER_BACKEND ($BUILDER_BACKEND_SOURCE)"
+
+  # ── 2c. apply the resolved pr_loop gate (E20-F02) ───────────────────────────
+  # Runs HERE for two reasons. (1) The file exists: on a fresh install the config has just
+  # been copied AND normalized to the opt-in default by seed_pr_loop_optin, on an upgrade
+  # migrate_config has just appended the block if it was missing. seed_pr_loop_optin is
+  # untouched and still runs FIRST, so a fresh install can never inherit this repo's own
+  # `enabled: true` — only an explicit answer or flag can leave it on (R9; E18-F01 R15).
+  # (2) It is upstream of §5 and §7b, so the resolved value is what pr_loop_enabled reads
+  # for the rest of the run: turning it on stamps /sdd-pr-loop + pr-fixer, turning it off
+  # runs the §7b reclamation, both in this single run and with zero changes to E18-F01 (R11).
+  #
+  # The writer is skipped ENTIRELY when the value already matches — not merely re-written
+  # with the same content — so a non-interactive run with no override leaves the config
+  # byte-identical, mtime included (R6, R8).
+  _prl_cfg="$H/harness.config.yaml"
+  _prl_cur="false"
+  if [ "$(_cfg_pr_loop_value "$_prl_cfg" enabled)" = "true" ]; then _prl_cur="true"; fi
+  if [ "$_prl_cur" != "$PR_LOOP_CHOICE" ]; then
+    set_pr_loop_enabled "$_prl_cfg" "$PR_LOOP_CHOICE"
+  fi
+  # HARNESS_PR_LOOP_ENABLED is E18-F01's PER-RUN gate override and this feature does not
+  # change that by one byte: it is never persisted, and it keeps winning over the config
+  # for what THIS run stamps (E18-F01 R20). The two can therefore disagree, so say so once
+  # — silently stamping the opposite of what the file now records is the surprise this
+  # warning exists to prevent. Nothing is printed when it is unset or agrees (R5).
+  if [ -n "${HARNESS_PR_LOOP_ENABLED:-}" ]; then
+    _prl_env="false"
+    if [ "$HARNESS_PR_LOOP_ENABLED" = "true" ]; then _prl_env="true"; fi
+    if [ "$_prl_env" != "$PR_LOOP_CHOICE" ]; then
+      echo "⚠️  HARNESS_PR_LOOP_ENABLED=$HARNESS_PR_LOOP_ENABLED is a PER-RUN override — it gates THIS run only and was NOT persisted; $_prl_cfg records $PR_LOOP_CHOICE (use --pr-loop=<true|false>, or the installer's prompt, to persist a value)" >&2
+    fi
+  fi
+  # Exactly ONE report line per target, on STDOUT, from the same resolver every path feeds
+  # (R12). The marker carries a colon so it cannot collide with §7b's stderr announcement
+  # ("pr_loop.enabled is not true — reclaimed …"), which is counted by no one.
+  info "pr_loop.enabled: $PR_LOOP_CHOICE ($PR_LOOP_CHOICE_SOURCE)"
 
   # init.project.sh is project-owned: init.sh (BODY, overwritten on upgrade) sources
   # it for project-specific gate checks, so they live HERE and survive upgrades.
@@ -1904,6 +2153,21 @@ BUILDER EXECUTION BACKEND  (E20-F01) — the installer's second question:
   current value untouched. Only that one scalar is ever rewritten — every comment and
   hand-edit in the file survives. Choosing \`delegate\` without setting delegate_cmd
   installs anyway and WARNS (the Builder stops and reports at run time).
+  RE-RUN the installer to change it later.
+
+PR REVIEW LOOP  (E20-F02) — the installer's third question:
+  The pr_loop.enabled gate in .harness/harness.config.yaml. Legal values:
+    false        (DEFAULT, opt-in) no /sdd-pr-loop glue is stamped at all
+    true         /sdd-pr-loop + the pr-fixer sub-agent are stamped into every
+                 selected front-end (flipping back to false reclaims all of it)
+  Choose with the follow-up prompt (asked after the backend question, on a TTY only)
+  or with --pr-loop=<true|false>; an empty value means "no override". An illegal
+  value aborts before anything is written. No TTY and no override ⇒ nothing asked,
+  the target's current value untouched. Only that one scalar is ever rewritten.
+  The loop NEEDS the Codex GitHub App on the repo plus an authed \`gh\` — the
+  installer probes NOTHING at install time; /sdd-pr-loop's own preflight reports it.
+  HARNESS_PR_LOOP_ENABLED stays a PER-RUN override: it gates a single run and is
+  never persisted (the installer warns once if it disagrees with the stored value).
   RE-RUN the installer to change it later.
 EOF
 
@@ -3731,8 +3995,32 @@ AGENTS_OVERRIDE="${HARNESS_AGENTS:-}"
 # current value. Seeded from the environment so the flag (parsed below) can supersede it;
 # an empty value means "no override", exactly like --agents=.
 BUILDER_BACKEND_OVERRIDE="${HARNESS_BUILDER_BACKEND:-}"
+# PR review loop override (E20-F02): --pr-loop=<true|false> wins over the interactive
+# third question, which wins over the target's current value.
+#
+# SEEDED FROM NOTHING — there is deliberately NO environment twin, and in particular this
+# is NOT seeded from HARNESS_PR_LOOP_ENABLED. That variable is E18-F01's PER-RUN gate
+# override, documented in harness.config.yaml, docs/INSTALL.md, README.md and the
+# /sdd-pr-loop body as one of five per-run knobs (HARNESS_AUTO_MERGE, HARNESS_MAX_ROUNDS,
+# …). Making one member of that family persist while the other four stay per-run is an
+# inconsistency no reader can infer from the name, and it turns
+# `HARNESS_PR_LOOP_ENABLED=false ./harness-install.sh <target>` from "don't stamp on this
+# run" into "permanently disable this target's loop". The layering is: the FLAG (and the
+# prompt) persists, the ENV overrides the run — with one warning at §2c when they disagree.
+PR_LOOP_OVERRIDE=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --pr-loop=*)
+      # Explicit override; an empty value (`--pr-loop=`) is treated as "no override"
+      # (fall through to the prompt / no-op), matching --agents= and --builder-backend=.
+      PR_LOOP_OVERRIDE="${1#--pr-loop=}"
+      shift
+      ;;
+    --pr-loop)
+      [ "$#" -ge 2 ] || die "usage: $0 --pr-loop=<true|false>"
+      PR_LOOP_OVERRIDE="$2"
+      shift 2
+      ;;
     --builder-backend=*)
       # Explicit override; an empty value (`--builder-backend=`) is treated as "no
       # override" (fall through to the prompt / no-op), matching HARNESS_BUILDER_BACKEND="".
@@ -3805,6 +4093,16 @@ done
 case "${BUILDER_BACKEND_OVERRIDE:-}" in
   ""|in-session|delegate) ;;
   *) die "unknown builder backend '$BUILDER_BACKEND_OVERRIDE' — legal values are 'in-session' and 'delegate' (--builder-backend=<value> / HARNESS_BUILDER_BACKEND)" ;;
+esac
+
+# Same place, same reason, for the pr_loop override (E20-F02 R4): an illegal value aborts
+# non-zero here — after the parse loop, before target resolution and before any
+# install_one — so nothing is created or modified in the target. A typo'd flag in a script
+# is silent, which is why this aborts where the interactive prompt merely keeps the
+# current value.
+case "${PR_LOOP_OVERRIDE:-}" in
+  ""|true|false) ;;
+  *) die "unknown pr_loop value '$PR_LOOP_OVERRIDE' — legal values are 'true' and 'false' (--pr-loop=<value>)" ;;
 esac
 
 # ── single-target mode (no --umbrella): behave exactly as before ──────────────

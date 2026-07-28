@@ -220,6 +220,13 @@ models:
 # `gh` (and `jq` on PATH) — without them /sdd-pr-loop can only fail its own preflight.
 # While it is on, /sdd-pr-loop and the pr-fixer sub-agent are stamped into every
 # selected front-end; flipping it back to false reclaims all of that glue.
+# The installer ASKS for `enabled` (E20-F02) — a follow-up prompt right after the
+# builder-backend question, on a TTY — and takes --pr-loop=<true|false> for scripted
+# runs. Enter keeps the current value, so the opt-in default never flips by itself. No
+# preflight runs at install time; the prompt just states the precondition. RE-RUN the
+# installer to change it later, or edit the value below: only that one scalar is ever
+# rewritten, so every comment and hand-edit in this file survives. HARNESS_PR_LOOP_ENABLED
+# below is a PER-RUN override — it gates ONE run and is NEVER persisted back here.
 # Per-run env overrides (env wins over config): HARNESS_PR_LOOP_ENABLED,
 # HARNESS_AUTO_MERGE, HARNESS_MAX_ROUNDS, HARNESS_BLOCKING_SEVERITIES,
 # HARNESS_MERGE_STRATEGY. Execution knobs are env-ONLY (never config):

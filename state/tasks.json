@@ -487,7 +487,7 @@
         {
           "id": "E20-F02",
           "title": "pr_loop.enabled prompt in the installer picker",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
