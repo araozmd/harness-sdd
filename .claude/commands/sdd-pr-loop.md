@@ -357,6 +357,16 @@ command's **exit status** and fail closed: a failed enumeration is a needs-human
 state that resolves nothing and merges nothing. Hence `merge_ok` starts at `0` and is
 raised only on the branch that actually *proved* every unresolved thread Codex-owned.
 
+**A resolve you could not complete is not a resolve.** The `resolveReviewThread` mutation
+can fail on its own — a transient 5xx, a token without write access — and a thread that
+stayed unresolved is exactly the review feedback the merge gate exists to protect. So
+check **every** mutation's exit status and raise `merge_ok` only once they have **all**
+succeeded; branch protection may or may not catch the leftover thread, and this loop must
+not depend on it. Mind the shape of the loop while you do: `... | while read` runs its
+body in a **subshell** in POSIX sh, so a failure recorded there dies at the `done` and is
+silently forgotten. Feed the loop from a here-document instead and it runs in the current
+shell, where the flag survives.
+
 ```bash
 # Per unresolved thread emit "<allcodex> <id>", where <allcodex> is true only when the
 # thread was read in FULL and EVERY participant is the Codex bot. A human reply on a
@@ -391,13 +401,24 @@ then
 elif printf '%s\n' "$unresolved" | grep -q '^false '; then
   echo "a thread is non-Codex or was not read in full — needs-human" >&2  # resolve NOTHING
 else
-  merge_ok=1          # enumeration completed; every unresolved thread is provably Codex's
-  printf '%s\n' "$unresolved" | while read -r _allcodex tid; do
+  # Enumeration completed; every unresolved thread is provably Codex's — resolve them,
+  # and raise `merge_ok` only if every mutation actually reported success. The loop reads
+  # from a here-document rather than from `printf ... | while`, because a piped loop body
+  # is a subshell: `resolve_ok=0` set in there would never reach this shell.
+  resolve_ok=1
+  while read -r _allcodex tid; do
     [ -z "$tid" ] && continue
     gh api graphql -f query='
       mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ id isResolved } } }' \
-      -f id="$tid" >/dev/null
-  done
+      -f id="$tid" >/dev/null || resolve_ok=0   # try the rest, but remember the failure
+  done <<UNRESOLVED
+$unresolved
+UNRESOLVED
+  if [ "$resolve_ok" = 1 ]; then
+    merge_ok=1        # all requested threads resolved; nothing is left to merge over
+  else
+    echo "a Codex thread could not be resolved — needs-human, not merging" >&2
+  fi
 fi
 ```
 

@@ -1367,6 +1367,65 @@ SH
   pass "R42c a review-thread enumeration failure fails closed ⇒ needs-human, nothing merged"
 }
 
+test_body_failed_resolve_never_merges() {             # R42 (fail-closed resolve mutation)
+  # The query side is guarded; so is the MUTATION side. A `resolveReviewThread` that fails
+  # (transient 5xx, a token without write access) leaves Codex feedback unresolved, and if
+  # its status is ignored the auto-merge path still merges — whenever branch protection
+  # does not independently block it. `merge_ok` must therefore be raised only after EVERY
+  # requested mutation succeeded. Note the trap this guards against: `... | while read`
+  # runs in a SUBSHELL, so a flag cleared inside a piped loop never reaches the merge test.
+  need_body "R42: the body does not check the resolve mutation's status" \
+    '-f id="$tid" >/dev/null || resolve_ok=0'
+  need_body "R42: merge_ok is no longer raised behind the all-resolved test" \
+    'if [ "$resolve_ok" = 1 ]; then'
+  need_body "R42: the body does not state that a failed resolve is not a resolve" \
+    'A resolve you could not complete is not a resolve.'
+  grep -qF 'printf '"'"'%s\n'"'"' "$unresolved" | while read' "$BODY" \
+    && fail "R42: the resolve loop pipes into \`while\` again — its flag dies in the subshell"
+  # Execute the body's OWN snippet (same extraction as R42c) against a stub `gh` whose
+  # enumeration succeeds with two Codex-only threads and whose mutation fails. Twice, with
+  # and without `set -e`, since the guard must not depend on the reader's shell options.
+  _fr="$T/resolve"; mkdir -p "$_fr"
+  awk '/^```bash$/                 { buf=""; inblk=1; next }
+       inblk && /^```$/            { if (buf ~ /unresolved=\$\(gh api graphql/) {
+                                       printf "%s", buf; exit } inblk=0; next }
+       inblk                       { buf = buf $0 "\n" }' "$BODY" > "$_fr/snippet.sh"
+  grep -q 'resolveReviewThread' "$_fr/snippet.sh" \
+    || fail "R42: could not extract the thread-resolve snippet from the body"
+  cat > "$_fr/harness.sh" <<'SH'
+gh() {
+  printf '%s\n' "$*" >> "$GH_LOG"
+  case "$*" in
+    *resolveReviewThread*)                          # the mutation
+      [ "${RESOLVE_MODE:-ok}" = "ok" ] && return 0
+      echo "gh: HTTP 502 Bad Gateway" >&2; return 1 ;;
+    *) printf 'true T_codex_1\ntrue T_codex_2\n' ;; # the enumeration: two Codex-only threads
+  esac
+}
+owner=o; repo=r; pr_number=1
+. "$SNIPPET"
+echo "merge_ok=${merge_ok:-unset}"
+SH
+  for _opt in '' '-e'; do
+    RESOLVE_MODE=fail GH_LOG="$_fr/calls" SNIPPET="$_fr/snippet.sh" \
+      sh $_opt -u "$_fr/harness.sh" > "$_fr/out" 2>"$_fr/err" \
+      || fail "R42: the resolve snippet aborted under 'sh $_opt -u' instead of failing closed"
+    grep -qxF 'merge_ok=0' "$_fr/out" \
+      || fail "R42: a FAILED resolve authorized the merge under 'sh $_opt -u' ($(cat "$_fr/out"))"
+    rm -f "$_fr/calls" "$_fr/out"
+    # …and the all-succeed path still merges, so the guard is not a blanket stop.
+    RESOLVE_MODE=ok GH_LOG="$_fr/calls" SNIPPET="$_fr/snippet.sh" \
+      sh $_opt -u "$_fr/harness.sh" > "$_fr/out" 2>/dev/null \
+      || fail "R42: the snippet failed under 'sh $_opt -u' when every resolve succeeded"
+    grep -qxF 'merge_ok=1' "$_fr/out" \
+      || fail "R42: fully resolved Codex threads must stay mergeable ($(cat "$_fr/out"))"
+    [ "$(grep -c 'resolveReviewThread' "$_fr/calls")" = 2 ] \
+      || fail "R42: the loop did not request a mutation for each unresolved Codex thread"
+    rm -f "$_fr/calls" "$_fr/out"
+  done
+  pass "R42d a failed resolveReviewThread fails closed ⇒ needs-human, nothing merged"
+}
+
 test_body_auto_merge_path() {                         # R43
   need_body "R43: body does not resolve Codex threads via GraphQL" 'resolveReviewThread'
   need_body "R43: body does not merge" 'gh pr merge'
@@ -1654,6 +1713,7 @@ test_body_round_branching
 test_body_never_resolves_human_threads
 test_body_truncated_thread_is_not_codex_only
 test_body_failed_enumeration_never_merges
+test_body_failed_resolve_never_merges
 test_body_auto_merge_path
 test_body_squash_prep_cannot_hang
 test_body_auto_merge_false_stops
