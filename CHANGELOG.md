@@ -4,6 +4,59 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.39.0] — 2026-07-27
+
+### Added — ✨ `/sdd-pr-loop` + vendored Codex watcher, gated by `pr_loop.enabled` (E18-F01)
+- The harness told its own agents to run `/pr-loop` in three places but shipped no such
+  command — it came from the separate multi-cli-orchestrator skill set at
+  `~/.agents/skills/`. The moment those skills are uninstalled (or on any fresh consumer
+  that never had them) the documented review workflow pointed at a command that does not
+  exist, and the watcher path it named was dangling. The loop is now **vendored into the
+  harness** as first-class, installer-generated glue.
+- **New command `/sdd-pr-loop <pr>`** — one body, mirrored byte-identically into
+  `.claude/commands/`, `.opencode/command/`, `.agents/workflows/` and the GLOBAL
+  `${CODEX_HOME:-~/.codex}/prompts/`. It preflights, posts `@codex review`, launches the
+  watcher in the background, classifies `P0|P1|P2|nit`, spawns one fixer per blocking
+  comment, escalates on a stall, and merges when every gate is green.
+- **New watcher `tools/wait-for-codex.sh`** — the vendored background poller, converted to
+  POSIX `sh` and installed executable. Three modes: `wait` (the source contract, exit `0`
+  findings / `2` timeout / `3` clean / `4` usage), `preflight <pr>` (gh + auth + jq + repo
+  slug + open PR; posts nothing; exit `5` with a one-line diagnostic naming the failed
+  check), and `evaluate <round-dir>` (a pure, offline re-run of the same freshness rules —
+  invokes no `gh`). A new **first-response probe** exits `5` naming the Codex GitHub App
+  when nothing answers within `HARNESS_FIRST_RESPONSE` (default 180s), instead of polling
+  to the 900s ceiling. All four vendored source files, the `--paginate --slurp` fetches
+  and the three independent clean signals are preserved.
+- **New canonical role `agents/pr-fixer.md`** — front-end neutral (one comment, one fix,
+  one commit, one return), with gated shims for Claude (`.claude/agents/pr-fixer.md`),
+  OpenCode (`.opencode/agent/pr-fixer.md`, `mode: subagent`) and Antigravity
+  (`.agents/agents/pr-fixer.md`). No `pr-fixer` artifact is created for codex or gemini —
+  those apply fixes in-session — and the model-routing role map is untouched, so
+  `opencode.json` and `.harness/.opencode.stamp` stay byte-identical either way.
+- **New `pr_loop:` config block** (`enabled`, `auto_merge`, `max_rounds`,
+  `blocking_severities`, `merge_strategy`), seeded on a fresh install and appended
+  byte-identically by `migrate_config` on upgrade. Absence of the block — or of any key —
+  behaves exactly as the documented defaults. Each key takes a `HARNESS_*` env override;
+  the execution knobs (`HARNESS_POLL_INTERVAL`, `HARNESS_POLL_CEILING`,
+  `HARNESS_FIRST_RESPONSE`, `HARNESS_DRY_RUN`) are env-only.
+- **`pr_loop.enabled: false` reclaims the glue** from every *still-selected* front-end (a
+  new §7b reconciliation pass, since the existing deselect loop only reconciles
+  front-ends that left the selection), pristine-only in the user-owned `$CODEX_HOME`
+  prompts dir and the `.agents/` tree, pruning only dirs left empty. Flipping it back on
+  restores byte-identical glue. The command body is generated into the neutral `CMDDIR` on
+  **every** run regardless of the gate — that copy is the pristine reference reclamation
+  compares against.
+- **Clean break on env vars**: no `MCO_*`, `.mco-cache`, `~/.agents/skills`, `route-task`
+  or `start-feature` token remains in the harness body. The round cache moved to
+  `<HARNESS_DIR>/.pr-loop/<pr>/round-<n>/`, ignored by both the seeded
+  `.harness/.gitignore` and the source repo's own `.gitignore`.
+- `gh` and `jq` are **loop-runtime** dependencies only: `init.sh` gains no gate, so a
+  target with neither still passes the environment check.
+- New suite `tests/test_pr_loop.sh` (wired into `verification.test_command`);
+  `tests/test_install.sh` asserts `/sdd-pr-loop` generation + deselect removal per
+  front-end. Docs updated: `README.md`, `docs/INSTALL.md`, `docs/WORKFLOW.md`,
+  `docs/HARNESS.md`, `CLAUDE.md`, `agents/orchestrator.md`.
+
 ## [0.38.1] — 2026-07-27
 
 ### Fixed — 🐛 Slug validation in `fix-worktree.sh` is locale-independent (E99-F03)

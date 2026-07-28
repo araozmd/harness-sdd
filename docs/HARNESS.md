@@ -41,6 +41,30 @@ value, and the evidence required before removing a mechanism.
    app). The Reviewer can even improve the harness so a failure can't recur — a
    correction loop.
 
+## The commands this harness ships
+
+One body per command, mirrored byte-identically into every selected front-end
+(`.claude/commands/`, `.opencode/command/`, `.agents/workflows/`, and the global
+`${CODEX_HOME:-~/.codex}/prompts/`). See [WORKFLOW.md](WORKFLOW.md) for the loop each
+one drives.
+
+| Command | Role it runs | Gate |
+|---|---|---|
+| `/sdd-new "<idea>"` | Inception — triage an idea into a `pending` entry + intent brief | always |
+| `/sdd-plan "<idea>"` | Planner — whole-project vision/architecture + ADRs + draft epics | always |
+| `/sdd-drill <epic-id>` | Driller — decompose one draft epic into features | always |
+| `/sdd-next` | Orchestrator — route and delegate the next actionable task | always |
+| `/sdd-fix "<desc>"` | Fixer — the lightweight `sdd:false` maintenance lane | always |
+| `/sdd-fix-parallel` | Fixer — bounded parallel batch of ready E99 fixes | always |
+| `/sdd-pr-loop <pr>` | the Codex review cycle on one open PR (spawns `pr-fixer`) | `pr_loop.enabled` |
+
+`/sdd-pr-loop` is the one **gated** command: it is stamped only while
+`pr_loop.enabled` is `true` (the default), because it works only on a repository with
+the **Codex GitHub App** installed plus an **authed `gh`** and **`jq`** on `PATH`. Those
+are loop-runtime dependencies alone — `init.sh` never checks for them, so a target
+without either still passes the environment gate. Turning the key off reclaims the
+command and its `pr-fixer` sub-agent from every front-end.
+
 ## Where the ideas come from
 
 The [rationale and deletion ledger](RATIONALE.md) attributes the primary source

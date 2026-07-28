@@ -18,6 +18,8 @@ This writes, into your project:
 your-project/
 ├── CLAUDE.md / AGENTS.md / GEMINI.md   # your content kept; a marked harness block appended
 ├── .claude/agents/*  .claude/commands/{sdd-next,sdd-new,sdd-plan,sdd-drill,sdd-fix,sdd-fix-parallel}.md
+├── .claude/commands/sdd-pr-loop.md  .claude/agents/pr-fixer.md   # only while pr_loop.enabled
+├── .opencode/agent/pr-fixer.md         # only while pr_loop.enabled (OpenCode file-based sub-agent)
 ├── opencode.json                       # created only if absent (re-stamped only while pristine)
 ├── .agents/{rules,agents,workflows}/   # Antigravity glue → resolves to .harness/ (regenerated each run)
 ├── .gemini/agents/*.md                 # per-role model routing only — created ONLY when a tier resolves
@@ -67,6 +69,49 @@ registry-owned for safe front-end cleanup. Fresh config includes
 parallel command requires the default `execution.builder.backend: in-session`; a
 delegate backend fails before manifest/provision/claim and points to serial
 `/sdd-fix`, because delegates may own PR/review timing.
+
+### `/sdd-pr-loop` (gated on `pr_loop.enabled`)
+
+The installer also generates **`/sdd-pr-loop`** — the Codex review loop — from one
+byte-identical body into `.claude/commands/`, `.opencode/command/`, `.agents/workflows/`
+and the GLOBAL `${CODEX_HOME:-~/.codex}/prompts/`, plus a `pr-fixer` sub-agent for Claude
+(`.claude/agents/pr-fixer.md`), OpenCode (`.opencode/agent/pr-fixer.md`) and Antigravity
+(`.agents/agents/pr-fixer.md`). All of it points at the canonical
+`.harness/agents/pr-fixer.md`; no role body is duplicated, and **no** `pr-fixer` artifact
+is created for the codex or gemini front-ends (those apply fixes in-session).
+
+**Preconditions — the loop only works with all three:** the **Codex GitHub App** installed
+on the target repository, an **authed `gh`**, and **`jq`** on `PATH`. The watcher's
+`preflight` mode checks each one before anything is posted and fails fast (exit `5`) with
+a one-line diagnostic naming the failed check and its remedy. These are **loop-runtime**
+dependencies only: `init.sh` gains no new gate, so a target with neither `gh` nor `jq`
+still passes the environment gate.
+
+Fresh config seeds:
+
+```yaml
+pr_loop:
+  enabled: true                  # master gate; false ⇒ no /sdd-pr-loop glue anywhere
+  auto_merge: true               # merge once every gate is green and threads are Codex-only
+  max_rounds: 4                  # round cap; the cap round labels the PR needs-human
+  blocking_severities: "P0,P1"   # comma-separated severities that block a merge
+  merge_strategy: "merge"        # merge | squash
+```
+
+An upgrade appends the same block byte-for-byte; an absent block (or key) behaves exactly
+as the defaults above. Each policy key takes a per-run env override —
+`HARNESS_PR_LOOP_ENABLED`, `HARNESS_AUTO_MERGE`, `HARNESS_MAX_ROUNDS`,
+`HARNESS_BLOCKING_SEVERITIES`, `HARNESS_MERGE_STRATEGY` (env wins over config, config wins
+over the default). Execution knobs are **env-only**: `HARNESS_POLL_INTERVAL` (60),
+`HARNESS_POLL_CEILING` (900), `HARNESS_FIRST_RESPONSE` (180, `0` disables the probe) and
+`HARNESS_DRY_RUN`.
+
+Set `pr_loop.enabled: false` and re-run the installer on a repo without the Codex App: the
+command and every `pr-fixer` artifact are **reclaimed** from each still-selected front-end
+(pristine-only in the user-owned `$CODEX_HOME/prompts` dir and the `.agents/` tree), and
+empty dirs are pruned. Flipping it back to `true` restores byte-identical glue. The round
+cache lives at `.harness/.pr-loop/<pr>/round-<n>/` and is gitignored by the seeded
+`.harness/.gitignore`.
 
 ## Upgrade
 
