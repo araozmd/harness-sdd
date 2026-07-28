@@ -956,6 +956,28 @@ sh "$SRC/harness-install.sh" --agents=opencode,claude "$TF" >/dev/null || fail "
 rm -rf "$TF"
 pass ".harness/.agents persists the selection sorted, coexists with the roles dir (R8)"
 
+# agents_host_end_to_end + agents_host_never_persisted (E19-F01 R28, R18): `host` is a
+# RESOLUTION MODE, not a sixth agent key. Run under `env -i` with an explicit marker so
+# the verdict cannot depend on whatever CLI happens to be running this suite (and with
+# CODEX_HOME sandboxed under the case dir, since the codex front-end writes GLOBAL
+# prompts). The detection matrix itself lives in tests/test_agents_host.sh.
+TH="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+mkdir -p "$TH/home" "$TH/ch" "$TH/t"
+env -i PATH="$PATH" HOME="$TH/home" CODEX_HOME="$TH/ch" CLAUDECODE=1 \
+  sh "$SRC/harness-install.sh" --agents=host "$TH/t" >/dev/null 2>&1 \
+  || fail "E19-F01 R28: --agents=host exited non-zero"
+[ -f "$TH/t/CLAUDE.md" ]     || fail "E19-F01 R28: detected host did not stamp CLAUDE.md"
+[ -f "$TH/t/AGENTS.md" ]     || fail "E19-F01 R28: AGENTS.md must always be written"
+[ -f "$TH/t/GEMINI.md" ]     && fail "E19-F01 R28: host mode stamped an unselected front-end"
+[ -f "$TH/t/opencode.json" ] && fail "E19-F01 R28: host mode stamped opencode.json"
+[ -d "$TH/ch/prompts" ]      && fail "E19-F01 R28: host mode stamped the GLOBAL codex prompts"
+[ "$(cat "$TH/t/.harness/.agents")" = "claude" ] \
+  || fail "E19-F01 R28: host mode persisted '$(cat "$TH/t/.harness/.agents" | tr '\n' ',')', expected claude"
+grep -qx 'host' "$TH/t/.harness/.agents" \
+  && fail "E19-F01 R18: the token 'host' must NEVER be persisted to .harness/.agents"
+rm -rf "$TH"
+pass "--agents=host resolves the running front-end end to end; 'host' is never persisted (E19-F01 R28, R18)"
+
 # reconcile_add + reconcile_remove + reprompt_baseline_is_persisted +
 # reconcile_without_version_bump (R9, R11, R12, R13): a re-run at the SAME version that
 # both adds and removes an agent, using the persisted set as the baseline.

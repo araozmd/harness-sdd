@@ -51,7 +51,8 @@ caller expects.
 ## Features
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| F01 | `--agents=host` resolution + fresh-install pre-check baseline | pending | true | — |
+| F01 | Host detection + explicit `--agents=host` resolution mode | in-review | true | — |
+| F02 | Fresh-install pre-check baseline = the detected host | pending | true | E19-F01 |
 
 ## Notes
 - **`host` is a resolution mode, not a sixth agent key.** It must be accepted by
@@ -61,5 +62,14 @@ caller expects.
 - **Detection is inherently heuristic.** Env markers (`CLAUDECODE`, `CODEX_HOME`, and the
   OpenCode/Gemini/Antigravity equivalents) are the obvious signal, but the harness must
   treat a miss as normal, not exceptional — hence the all-keys fallback.
-- Ordering: E20-F01 depends on this feature because both edit the same installer region
+- Ordering: E20-F01 depends on this epic's work because both edit the same installer region
   around the picker; sequencing them avoids a needless conflict.
+- **The epic is decomposed into two micro-features so each PR settles in 1–2 review rounds.**
+  F01 is deliberately **additive**: it adds detection, the `host` override token,
+  `HARNESS_HOST_AGENT` and a `--print-agents` diagnostic, and changes nothing about an install
+  that does not name `host`. F02 spends that mechanism on the actual default, in one branch of
+  the single `precheck_baseline` helper F01 extracts. The epic's success criteria are met only
+  when **both** have merged.
+- **Flag for the human:** `E20-F01` currently records `depends_on: ["E18-F01", "E19-F01"]`.
+  It is F02 that touches the picker's pre-check region, so the human may want to retarget that
+  dependency to `E19-F02` (or add it). The Architect did not change another epic's board entry.

@@ -442,17 +442,28 @@
     {
       "id": "E19",
       "title": "Installer: single-CLI (host) agent default",
-      "status": "pending",
+      "status": "in-progress",
       "owner": "araozmd",
       "features": [
         {
           "id": "E19-F01",
-          "title": "--agents=host resolution + fresh-install pre-check baseline",
-          "status": "pending",
+          "title": "Host detection + explicit --agents=host resolution mode",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
           "spec_path": "specs/epics/E19-single-cli-default/F01-agents-host-resolution/"
+        },
+        {
+          "id": "E19-F02",
+          "title": "Fresh-install pre-check baseline = the detected host",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E19-F01"
+          ],
+          "spec_path": "specs/epics/E19-single-cli-default/F02-fresh-install-baseline/"
         }
       ]
     },

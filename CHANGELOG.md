@@ -4,6 +4,47 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.40.0] — 2026-07-28
+
+### Added — ✨ `--agents=host`: install the glue for the CLI you are actually in (E19-F01)
+- A human who works in exactly one coding-agent CLI used to get all five front-ends
+  stamped into their repo — `GEMINI.md`, `opencode.json`, an Antigravity `.agents/` tree
+  and global Codex prompts alongside the glue they wanted. The installer now understands a
+  **`host` resolution mode**: `--agents=host` (or `HARNESS_AGENTS=host`) resolves to the
+  single front-end this installer session is running in and stamps only that one.
+- **Detection reads session markers, never ambient configuration.** A variable counts only
+  when the front-end injects it into the environment of the processes it launches.
+  Verified empirically, one row per front-end: `claude` (`CLAUDECODE`,
+  `CLAUDE_CODE_ENTRYPOINT`; Claude Code 2.1.220), `codex` (`CODEX_THREAD_ID`; codex-cli
+  0.145.0), `opencode` (`OPENCODE`, `OPENCODE_PID`; opencode 1.18.5) and `antigravity`
+  (`ANTIGRAVITY_AGENT`, `ANTIGRAVITY_CONVERSATION_ID`; agy 1.1.8). `gemini` has no
+  verified marker and is deliberately **undetectable** rather than guessed at.
+  Config/credential variables are forbidden by rule — `CODEX_HOME`, `HOME`, `TERM_PROGRAM`
+  and anything ending `_API_KEY` — because they prove only that you *use* a tool, never
+  that this run was launched from it.
+- **A miss is normal operation, never an error.** Markers for two or more front-ends at
+  once (what nesting looks like) is treated as *undetected* with a stderr diagnostic, not
+  as a tie to break. An undetected `host` run falls back to **ALL** front-ends on a target
+  with no existing install (byte-identical to today's no-override default) and to the
+  target's **persisted `.harness/.agents`** selection on one that already carries an
+  install — so it can never silently widen a claude-only repo back to five front-ends.
+  One line reports which happened.
+- **New `HARNESS_HOST_AGENT=<key>`** — declare your host once (e.g. in a shell profile)
+  for a front-end with no verified marker. An invalid value warns and is ignored; it never
+  aborts an install.
+- **New `--print-agents <target>`** — prints `host=<key or empty>` and `baseline=<keys>`,
+  writes nothing, exits 0. It shares the resolution helpers with the real install, so the
+  preview cannot disagree with what an actual run would do.
+- **Strictly additive.** `host` is a resolution *mode*, not a sixth agent key: it is never
+  added to `AGENT_KEYS`, never offered as a picker row, and never written to
+  `.harness/.agents` (`--agents=host,gemini` is rejected). An install that does not name
+  `host` behaves exactly as it did before — same no-TTY default, same explicit-CSV
+  behavior, same interactive pre-check baseline, same `PRIOR_AGENTS` removal rules and the
+  same `.sdd-pr-loop.owners` ledger authority over the shared global Codex prompts.
+- New suite `tests/test_agents_host.sh` (wired into `verification.test_command`), every
+  detection-sensitive case run under `env -i` with a sandboxed `CODEX_HOME`; the E08 block
+  in `tests/test_install.sh` gains the end-to-end `host` case.
+
 ## [0.39.0] — 2026-07-27
 
 ### Added — ✨ `/sdd-pr-loop` + vendored Codex watcher, opt-in via `pr_loop.enabled` (E18-F01)
