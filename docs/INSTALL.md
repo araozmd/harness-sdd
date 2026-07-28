@@ -134,9 +134,10 @@ list, it is never written to `.harness/.agents` (that file holds concrete keys o
 it must be the **entire** value — `--agents=host,gemini` is rejected with a non-zero exit
 and changes nothing.
 
-Nothing about an install that does *not* pass `host` changes: a no-override
-non-interactive run still stamps every front-end, an explicit `--agents=<csv>` still wins,
-and the interactive picker still pre-checks what it always did.
+Nothing about a **scripted** install that does not pass `host` changes: a no-override
+non-interactive run still stamps every front-end and an explicit `--agents=<csv>` still
+wins. The **interactive first install** now starts from the detected host — see
+[The fresh-install default](#the-fresh-install-default) below.
 
 ### Which markers are trusted
 
@@ -197,19 +198,98 @@ because detection happened to miss is a user-visible regression. So the rule is
 *detected ⇒ narrow to the one key you asked for; undetected ⇒ never change the shape of
 the install*. Either way the run prints one line saying which it did.
 
+### The fresh-install default
+
+You do not have to pass `host` on a **first, interactive install**. When you run the
+installer from a terminal inside a CLI it can detect, the picker opens with **that
+front-end pre-checked and the others unchecked**:
+
+```
+[x] claude
+[ ] gemini
+[ ] opencode
+[ ] antigravity
+[ ] codex
+```
+
+It is a **pre-check, not a restriction**: the list is already on screen, so spacebar adds
+any other front-end before you confirm. Confirming as-is stamps the detected front-end's
+glue (plus the always-written `AGENTS.md`) and nothing else.
+
+Exactly three cases, and only the first is new:
+
+| Target | Interactive pre-check |
+|---|---|
+| **No existing install**, host detected | **that front-end alone** |
+| **No existing install**, host undetected | **all** front-ends (unchanged) |
+| **Existing install** (any `.harness/.harness-version`) | its persisted `.harness/.agents` selection — **all** front-ends if it predates that file |
+
+Three limits are deliberate:
+
+- **An upgrade is never narrowed by detection.** "Existing install" means the target
+  carries `.harness/.harness-version`. A pre-E08 install has every front-end stamped and
+  no persisted selection, so it pre-checks everything: pressing Enter on an upgrade can
+  never delete glue you are using.
+- **Undetected still means everything.** A miss is normal operation, so a front-end with
+  no verified marker keeps the historical behavior exactly.
+- **Nothing changes without a TTY.** A piped or CI run with no override still stamps every
+  front-end (pass `--agents=host` or `--agents=<csv>` to narrow a scripted install) — a
+  best-effort guess is only acceptable where a human can correct it before it applies.
+
+The pre-check is the detected front-end **alone**, never unioned with `claude`: a Gemini
+CLI or OpenCode user should not have to delete `CLAUDE.md` they never asked for.
+
 ### Seeing what it would do — `--print-agents`
 
 ```bash
 ./harness-install.sh --print-agents /path/to/your-project
 host=claude
-baseline=antigravity claude codex gemini opencode
+baseline=claude
 ```
 
-Two lines on stdout, exit 0, **nothing written anywhere** — the diagnostic answer to "what
-would `--agents=host` do here?". `host=` is the detected key (empty when undetected) and
-`baseline=` is the fallback set for that target. Both come from the same helpers the real
-resolution uses, so the preview cannot disagree with the install. It is single-target
-only: combined with `--umbrella` it exits non-zero with a usage message.
+Two lines on stdout, exit 0, **nothing written anywhere**. `host=` is the detected key
+(empty when undetected) and `baseline=` is the set that would be **pre-checked** for that
+target — the same helper the picker seeds from, so the preview cannot disagree with what
+the picker will offer you. On an undetected fresh target it prints all five; on an
+installed target it prints that target's persisted selection. It is single-target only:
+combined with `--umbrella` it exits non-zero with a usage message.
+
+`baseline=` answers "what will the picker check?", which is the same set an **undetected**
+`--agents=host` run falls back to — but on an *existing* install it is not what a
+**detected** `--agents=host` run would select. Reading a `gemini` install from inside
+Claude Code, `host=claude` and `baseline=gemini`: the picker would offer `gemini`, while
+`--agents=host` would narrow the install to `claude`. The two lines are separate answers on
+purpose.
+
+### Changing the selection later
+
+**Re-running the installer is the supported way to change which front-ends are stamped.**
+There is no separate reconfiguration command — the installer *is* the config UI:
+
+```bash
+cd harness-sdd            # your harness checkout
+./harness-install.sh /path/to/your-project
+```
+
+Run interactively, it re-opens the picker **pre-checked from the project's saved
+`.harness/.agents`** and applies the diff both ways:
+
+- **Added** front-ends get their glue stamped on the spot.
+- **Removed** (deselected) front-ends have their harness-owned, regenerated glue
+  **deleted**, with a warning naming each file. The shared `AGENTS.md` entrypoint and the
+  `.harness/` body are never touched, and hand-edited files (e.g. an `opencode.json` you
+  changed) are left in place with a warning instead of being destroyed.
+
+The same thing works non-interactively when you already know the answer — the override
+always wins, and it is the form to use in a script:
+
+```bash
+./harness-install.sh --agents=claude,gemini /path/to/your-project   # exactly these two
+./harness-install.sh --agents=host /path/to/your-project            # just this session's CLI
+```
+
+Either way the resolved set is persisted back to `.harness/.agents`, so the next re-run
+starts from what you chose.
 
 ## Upgrade
 

@@ -4,6 +4,38 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.41.0] — 2026-07-28
+
+### Changed — ✨ a fresh interactive install pre-checks the CLI you are in (E19-F02)
+- E19-F01 built the detection and the explicit `--agents=host` mode but deliberately
+  changed no default. This release spends it: on a **first, interactive** install into a
+  target with **no existing install**, the agent picker now opens with the **detected host
+  pre-checked and the other front-ends unchecked**, so installing from inside one CLI no
+  longer stamps the other four's glue *and you do not have to know a flag exists*.
+- **It is a pre-check, not a restriction.** The picker is already on screen: spacebar adds
+  any other front-end before you confirm. That is precisely why the guess is made only
+  here — where a human can correct it before anything is written.
+- **The pre-check is the host ALONE**, never unioned with `claude`. Unioning would
+  re-create the same complaint for every non-Claude user, in a harness whose premise is
+  that the front-end is interchangeable.
+- **An upgrade is never narrowed by detection.** "Existing install" is the presence of
+  `.harness/.harness-version`, not of `.harness/.agents` — so a **pre-E08 install** (every
+  front-end stamped, no persisted selection) still pre-checks **all** of them, and
+  pressing Enter on an upgrade can never delete glue you are using. On an install that
+  does carry a selection, that selection is the baseline, exactly as before.
+- **Undetected still means everything**, and **nothing changes without a TTY**: a piped or
+  CI run with no override still stamps all five front-ends, byte-for-byte as before. No
+  removal authority, pristine-compare rule or `.sdd-pr-loop.owners` ledger behavior
+  changes.
+- **`--print-agents`' `baseline=` line now reports the picker's pre-check set**, so the
+  diagnostic advertises the new default instead of the old one. For every *undetected*
+  target it prints exactly what it printed before.
+- **Documented in `docs/INSTALL.md`**: the new fresh-install default with its three cases,
+  and — new section — that **re-running the installer** is the supported way to change the
+  selection later (it re-opens the picker pre-checked from `.harness/.agents` and applies
+  both additions and removals), a fact that previously lived only in a source header
+  comment.
+
 ## [0.40.0] — 2026-07-28
 
 ### Added — ✨ `--agents=host`: install the glue for the CLI you are actually in (E19-F01)
