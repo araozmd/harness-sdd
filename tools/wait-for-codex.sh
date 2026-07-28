@@ -45,9 +45,16 @@
 
 set -eu
 
-# The Codex bot login. `gh pr view` (GraphQL) reports `chatgpt-codex-connector`; the REST
-# API reports `chatgpt-codex-connector[bot]`. ALWAYS prefix-match — never an exact literal.
+# The Codex bot logins. `gh pr view` (GraphQL) reports `chatgpt-codex-connector`; the REST
+# API reports `chatgpt-codex-connector[bot]`. Both spellings are accepted, as EXACT literals
+# and nothing else. A prefix test (the shape this shipped with) is a spoofing hole: any
+# GitHub account whose login merely BEGINS with the bot name — `chatgpt-codex-connector-evil`
+# — could add a 👍 to the trigger comment or post a "Reviewed commit: <head>" banner, driving
+# `evaluate` to exit 3 ("clean, zero findings"), which the caller does not classify and
+# auto-merges. The two literals below cover the GraphQL/REST spelling split completely, so
+# there is nothing left for a prefix to buy.
 WFC_BOT="chatgpt-codex-connector"
+WFC_BOT_REST="chatgpt-codex-connector[bot]"
 
 wfc_usage() {
   echo "usage: $0 <pr-number> <trigger-comment-id> <round-dir>" >&2
@@ -113,8 +120,9 @@ wfc_evaluate() {
   # clean (exit 3), which the caller skips classification on and auto-merges. Stay
   # pending so the poll retries.
   [ -f "$_ev_dir/review-comments.json" ] || { echo pending; return 0; }
-  _ev_findings="$(jq --arg bot "$WFC_BOT" --arg head "$_ev_head" --arg since "$_ev_since" '
-    [ .[]? | select((.user.login // "") | startswith($bot))
+  _ev_findings="$(jq --arg bot "$WFC_BOT" --arg botr "$WFC_BOT_REST" \
+                     --arg head "$_ev_head" --arg since "$_ev_since" '
+    [ .[]? | select((.user.login // "") == $bot or (.user.login // "") == $botr)
            | select((.commit_id // "") == $head)
            | select($since == "" or ((.created_at // "") >= $since)) ] | length' \
     "$_ev_dir/review-comments.json" 2>/dev/null || printf 'unreadable')"
@@ -126,8 +134,9 @@ wfc_evaluate() {
   # Condition 2: FRESH review summary banner naming the head commit, with zero findings.
   # submittedAt >= trigger excludes a banner from a PRIOR review of the same head (e.g. a
   # re-request without a new commit), which would otherwise flag the new round clean early.
-  _ev_banner="$(jq --arg bot "$WFC_BOT" --arg sh "$_ev_short" --arg since "$_ev_since" '
-    [ .reviews[]? | select((.author.login // "") | startswith($bot))
+  _ev_banner="$(jq --arg bot "$WFC_BOT" --arg botr "$WFC_BOT_REST" \
+                   --arg sh "$_ev_short" --arg since "$_ev_since" '
+    [ .reviews[]? | select((.author.login // "") == $bot or (.author.login // "") == $botr)
                   | select((.body // "") | contains("Reviewed commit") and contains($sh))
                   | select($since == "" or ((.submittedAt // "") >= $since)) ]
     | length' "$_ev_dir/pr.json" 2>/dev/null || echo 0)"
@@ -141,8 +150,9 @@ wfc_evaluate() {
   # Same created_at >= trigger freshness guard as condition 1 — a stale banner from a
   # prior review of this head must not flag the new round clean before Codex responds.
   if [ -f "$_ev_dir/issue-comments.json" ]; then
-    _ev_banner_issue="$(jq --arg bot "$WFC_BOT" --arg sh "$_ev_short" --arg since "$_ev_since" '
-      [ .[]? | select((.user.login // "") | startswith($bot))
+    _ev_banner_issue="$(jq --arg bot "$WFC_BOT" --arg botr "$WFC_BOT_REST" \
+                           --arg sh "$_ev_short" --arg since "$_ev_since" '
+      [ .[]? | select((.user.login // "") == $bot or (.user.login // "") == $botr)
              | select((.body // "") | contains("Reviewed commit") and contains($sh))
              | select($since == "" or ((.created_at // "") >= $since)) ]
       | length' "$_ev_dir/issue-comments.json" 2>/dev/null || echo 0)"
@@ -151,9 +161,9 @@ wfc_evaluate() {
 
   # Condition 3: Codex bot reacted 👍 (+1) on the triggering comment.
   if [ -f "$_ev_dir/reactions.json" ]; then
-    _ev_thumbs="$(jq --arg bot "$WFC_BOT" '
+    _ev_thumbs="$(jq --arg bot "$WFC_BOT" --arg botr "$WFC_BOT_REST" '
       [ .[]? | select((.content // "") == "+1")
-             | select((.user.login // "") | startswith($bot)) ] | length' \
+             | select((.user.login // "") == $bot or (.user.login // "") == $botr) ] | length' \
       "$_ev_dir/reactions.json" 2>/dev/null || echo 0)"
     if [ "$(wfc_count "$_ev_thumbs")" -gt 0 ]; then echo clean; return 0; fi
   fi
@@ -172,14 +182,14 @@ wfc_bot_seen() {
     [ "$(wfc_count "$_bs_n")" -gt 0 ] && return 0
   fi
   if [ -f "$_bs_dir/issue-comments.json" ]; then
-    _bs_n="$(jq --arg bot "$WFC_BOT" \
-      '[ .[]? | select((.user.login // "") | startswith($bot)) ] | length' \
+    _bs_n="$(jq --arg bot "$WFC_BOT" --arg botr "$WFC_BOT_REST" \
+      '[ .[]? | select((.user.login // "") == $bot or (.user.login // "") == $botr) ] | length' \
       "$_bs_dir/issue-comments.json" 2>/dev/null || echo 0)"
     [ "$(wfc_count "$_bs_n")" -gt 0 ] && return 0
   fi
   if [ -f "$_bs_dir/pr.json" ]; then
-    _bs_n="$(jq --arg bot "$WFC_BOT" \
-      '[ .reviews[]? | select((.author.login // "") | startswith($bot)) ] | length' \
+    _bs_n="$(jq --arg bot "$WFC_BOT" --arg botr "$WFC_BOT_REST" \
+      '[ .reviews[]? | select((.author.login // "") == $bot or (.author.login // "") == $botr) ] | length' \
       "$_bs_dir/pr.json" 2>/dev/null || echo 0)"
     [ "$(wfc_count "$_bs_n")" -gt 0 ] && return 0
   fi

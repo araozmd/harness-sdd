@@ -965,21 +965,91 @@ test_clean_via_thumbs_reaction() {                    # R26c
   pass "R26c clean via a Codex 👍 reaction on the trigger comment"
 }
 
-test_bot_login_prefix_match() {                       # R27
-  if ! have_jq; then skip "test_bot_login_prefix_match (jq not installed)"; return 0; fi
+test_bot_login_exact_match() {                        # R27
+  if ! have_jq; then skip "test_bot_login_exact_match (jq not installed)"; return 0; fi
   for _login in 'chatgpt-codex-connector' 'chatgpt-codex-connector[bot]'; do
     _f="$(mk_fixture "bot-$(printf '%s' "$_login" | tr -d '[]')")"
     printf '[{"id":4,"user":{"login":"%s"},"commit_id":"%s","created_at":"2026-06-02T00:00:00Z","body":"P1"}]\n' \
       "$_login" "$FX_HEAD" > "$_f/review-comments.json"
-    [ "$(eval_fixture "$_f")" = 0 ] || fail "R27: login '$_login' was not matched by prefix"
+    [ "$(eval_fixture "$_f")" = 0 ] || fail "R27: legitimate login '$_login' was not recognised"
   done
   # an unrelated login is not the bot
   _f="$(mk_fixture bot-other)"
   printf '[{"id":5,"user":{"login":"dependabot[bot]"},"commit_id":"%s","created_at":"2026-06-02T00:00:00Z","body":"P1"}]\n' \
     "$FX_HEAD" > "$_f/review-comments.json"
   [ "$(eval_fixture "$_f")" = 1 ] || fail "R27: a non-Codex bot must not count as a Codex finding"
-  grep -qF 'startswith($bot)' "$W" || fail "R27: the bot match is not a prefix test"
-  pass "R27 the Codex bot login is matched by prefix, with and without the [bot] suffix"
+  grep -qF 'startswith($bot)' "$W" \
+    && fail "R27: the bot identity is still a prefix test — a lookalike login can impersonate Codex"
+  pass "R27 both legitimate Codex logins are matched, exactly, and no prefix test remains"
+}
+
+test_bot_login_lookalike_cannot_signal_clean() {      # R27 (Codex #68 P1, id 3663040307)
+  # A prefix predicate (`startswith("chatgpt-codex-connector")`) made every ordinary GitHub
+  # account whose login merely BEGINS with the bot name a valid Codex identity. Such an
+  # account could 👍 the trigger comment or post a "Reviewed commit: <head>" banner; the
+  # watcher exits 3 = "clean, zero findings", which the caller does not classify and (auto
+  # merge on) merges — a PR shipped with no Codex review at all. Lock all three signal
+  # paths, plus thread ownership, against the near-miss logins.
+  if ! have_jq; then
+    skip "test_bot_login_lookalike_cannot_signal_clean (jq not installed)"; return 0
+  fi
+  _tag=0
+  for _evil in 'chatgpt-codex-connector-evil' 'chatgpt-codex-connectorX'; do
+    _tag=$(( _tag + 1 ))
+    # (a) reaction path — the cheapest spoof: one +1 on the trigger comment
+    _f="$(mk_fixture "lookalike-thumbs-$_tag")"
+    printf '[{"content":"+1","user":{"login":"%s"}}]\n' "$_evil" > "$_f/reactions.json"
+    [ "$(eval_fixture "$_f")" = 1 ] \
+      || fail "R27: a +1 from lookalike '$_evil' was accepted as a clean Codex review"
+    # (b) banner path — as a review, and as an issue comment
+    _f="$(mk_fixture "lookalike-review-$_tag")"
+    printf '{"headRefOid":"%s","reviews":[{"author":{"login":"%s"},"body":"Reviewed commit: abcdef1 — all good","submittedAt":"2026-06-02T00:00:00Z"}],"comments":[]}\n' \
+      "$FX_HEAD" "$_evil" > "$_f/pr.json"
+    [ "$(eval_fixture "$_f")" = 1 ] \
+      || fail "R27: a review banner from lookalike '$_evil' was accepted as clean"
+    _f="$(mk_fixture "lookalike-issue-$_tag")"
+    printf '[{"user":{"login":"%s"},"created_at":"2026-06-02T00:00:00Z","body":"Didnt find any major issues. Breezy! Reviewed commit: abcdef1"}]\n' \
+      "$_evil" > "$_f/issue-comments.json"
+    [ "$(eval_fixture "$_f")" = 1 ] \
+      || fail "R27: an issue-comment banner from lookalike '$_evil' was accepted as clean"
+    # (c) findings path — a lookalike's inline comment is not a Codex finding either
+    _f="$(mk_fixture "lookalike-finding-$_tag")"
+    printf '[{"id":9,"user":{"login":"%s"},"commit_id":"%s","created_at":"2026-06-02T00:00:00Z","body":"P1"}]\n' \
+      "$_evil" "$FX_HEAD" > "$_f/review-comments.json"
+    [ "$(eval_fixture "$_f")" = 1 ] \
+      || fail "R27: an inline comment from lookalike '$_evil' counted as a Codex finding"
+  done
+  # (d) thread ownership, run through the command body's OWN --jq program (extracted
+  # verbatim), so the resolve/merge gate is locked against the same impersonation.
+  need_body "R27: the body no longer states that the bot logins are exact literals" \
+    'Never prefix-match'
+  grep -qF 'all(startswith("chatgpt-codex-connector"))' "$BODY" \
+    && fail "R27: the body's thread-ownership test is still a prefix match"
+  _lt="$T/lookalike-threads"; mkdir -p "$_lt"
+  awk '/^  --jq .\.data\.repository\.pullRequest\.reviewThreads\.nodes\[\]$/ { f=1 }
+       f { print }
+       f && /\\\(\$whole and \$codex\) \\\(\.id\)"..$/ { exit }' "$BODY" \
+    | sed -e "1s/^  --jq '//" -e "\$s/')\$//" > "$_lt/filter.jq"
+  [ -s "$_lt/filter.jq" ] || fail "R27: could not extract the thread-classifier jq from the body"
+  cat > "$_lt/threads.json" <<'JSON'
+{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
+ {"id":"T_real","isResolved":false,"comments":{"totalCount":2,"nodes":[
+   {"author":{"login":"chatgpt-codex-connector"}},{"author":{"login":"chatgpt-codex-connector[bot]"}}]}},
+ {"id":"T_evil","isResolved":false,"comments":{"totalCount":1,"nodes":[
+   {"author":{"login":"chatgpt-codex-connector-evil"}}]}},
+ {"id":"T_evilX","isResolved":false,"comments":{"totalCount":1,"nodes":[
+   {"author":{"login":"chatgpt-codex-connectorX"}}]}}
+]}}}}}
+JSON
+  jq -r -f "$_lt/filter.jq" "$_lt/threads.json" > "$_lt/out" \
+    || fail "R27: the body's thread-classifier jq does not run"
+  grep -qxF 'true T_real' "$_lt/out" \
+    || fail "R27: a genuine Codex-only thread is no longer resolvable"
+  grep -qxF 'false T_evil' "$_lt/out" \
+    || fail "R27: a thread owned by 'chatgpt-codex-connector-evil' was treated as Codex-owned"
+  grep -qxF 'false T_evilX' "$_lt/out" \
+    || fail "R27: a thread owned by 'chatgpt-codex-connectorX' was treated as Codex-owned"
+  pass "R27b a lookalike login cannot signal clean, file a finding, or own a thread"
 }
 
 test_evaluate_is_offline() {                          # R29
@@ -1568,7 +1638,8 @@ test_stale_reanchored_thread_is_not_a_finding
 test_clean_via_review_banner
 test_clean_via_issue_comment_banner
 test_clean_via_thumbs_reaction
-test_bot_login_prefix_match
+test_bot_login_exact_match
+test_bot_login_lookalike_cannot_signal_clean
 test_evaluate_is_offline
 test_failed_findings_fetch_is_never_clean
 test_cache_root_and_gitignore

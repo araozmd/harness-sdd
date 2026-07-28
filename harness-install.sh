@@ -2162,10 +2162,13 @@ clean; (3) a Codex-bot 👍 (`+1`) on the trigger comment → clean.
   major issues." + `Reviewed commit: <head>`) posts to `.comments[]`, which conditions
   1/2 never scan.
 
-**Codex bot identity.** Match the author login `chatgpt-codex-connector` by **prefix**,
-with an optional `[bot]` suffix — `gh pr view` (GraphQL) reports
-`chatgpt-codex-connector`, the REST API reports `chatgpt-codex-connector[bot]`. Never use
-an exact literal.
+**Codex bot identity.** Accept **exactly two** author logins and nothing else:
+`chatgpt-codex-connector` (what `gh pr view` / GraphQL reports) and
+`chatgpt-codex-connector[bot]` (what the REST API reports). Never prefix-match: any account
+whose login merely *begins* with the bot name (`chatgpt-codex-connector-evil`) could then
+👍 the trigger comment or post a `Reviewed commit: <head>` banner and be read as a clean
+Codex review — zero findings, no classification, auto-merge. The two literals cover the
+GraphQL/REST spelling split completely.
 
 > **No background tool available?** The watcher still runs in the foreground and exits
 > with the same codes — it just blocks until resolution or ceiling.
@@ -2381,8 +2384,10 @@ raised only on the branch that actually *proved* every unresolved thread Codex-o
 # thread was read in FULL and EVERY participant is the Codex bot. A human reply on a
 # Codex-opened thread makes it false — and so does a comment list longer than the 100
 # fetched here, since an author you never read must never be assumed to be the bot.
-# Both tests run in jq — no shell word-splitting. The bot login is inlined because
-# `gh api --jq` takes no --arg.
+# Both tests run in jq — no shell word-splitting. The two bot logins are inlined because
+# `gh api --jq` takes no --arg, and are compared as EXACT literals: a prefix test would
+# let `chatgpt-codex-connector-evil` pass as the thread's only participant, so the loop
+# would resolve an impostor's thread and merge over it.
 merge_ok=0            # fail closed: only a COMPLETED, clean enumeration may raise this
 if ! unresolved=$(gh api graphql -f query='
   query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
@@ -2397,7 +2402,8 @@ if ! unresolved=$(gh api graphql -f query='
         | select(.isResolved | not)
         | (.comments.totalCount == (.comments.nodes | length)) as $whole
         | ([.comments.nodes[].author.login // ""]
-             | all(startswith("chatgpt-codex-connector"))) as $codex
+             | all(. == "chatgpt-codex-connector"
+                or . == "chatgpt-codex-connector[bot]")) as $codex
         | "\($whole and $codex) \(.id)"')
 then
   # Enumeration FAILED: `unresolved` is empty because gh errored, not because the PR is
