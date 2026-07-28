@@ -6,7 +6,7 @@ All notable changes to the harness body are recorded here. Versions follow
 
 ## [0.39.0] — 2026-07-27
 
-### Added — ✨ `/sdd-pr-loop` + vendored Codex watcher, gated by `pr_loop.enabled` (E18-F01)
+### Added — ✨ `/sdd-pr-loop` + vendored Codex watcher, opt-in via `pr_loop.enabled` (E18-F01)
 - The harness told its own agents to run `/pr-loop` in three places but shipped no such
   command — it came from the separate multi-cli-orchestrator skill set at
   `~/.agents/skills/`. The moment those skills are uninstalled (or on any fresh consumer
@@ -15,7 +15,8 @@ All notable changes to the harness body are recorded here. Versions follow
   harness** as first-class, installer-generated glue.
 - **New command `/sdd-pr-loop <pr>`** — one body, mirrored byte-identically into
   `.claude/commands/`, `.opencode/command/`, `.agents/workflows/` and the GLOBAL
-  `${CODEX_HOME:-~/.codex}/prompts/`. It preflights, posts `@codex review`, launches the
+  `${CODEX_HOME:-~/.codex}/prompts/` — **only where `pr_loop.enabled` is `true`; nothing
+  is stamped by default**. It preflights, posts `@codex review`, launches the
   watcher in the background, classifies `P0|P1|P2|nit`, spawns one fixer per blocking
   comment, escalates on a stall, and merges when every gate is green.
 - **New watcher `tools/wait-for-codex.sh`** — the vendored background poller, converted to
@@ -39,7 +40,16 @@ All notable changes to the harness body are recorded here. Versions follow
   behaves exactly as the documented defaults. Each key takes a `HARNESS_*` env override;
   the execution knobs (`HARNESS_POLL_INTERVAL`, `HARNESS_POLL_CEILING`,
   `HARNESS_FIRST_RESPONSE`, `HARNESS_DRY_RUN`) are env-only.
-- **`pr_loop.enabled: false` reclaims the glue** from every *still-selected* front-end (a
+- **`pr_loop.enabled` is OPT-IN — a fresh install seeds `false` and stamps no
+  `/sdd-pr-loop` glue at all.** The gate is on **only** when the key resolves to the
+  literal `true`; an absent block, an absent key, an empty value and any other token alike
+  mean off. The loop functions only on a repository with the **Codex GitHub App** plus an
+  authed `gh`, so defaulting it on would give every fresh install a command that could do
+  nothing but fail its own preflight. Turning it on is a one-line edit of
+  `.harness/harness.config.yaml` plus a re-run of the installer (E20-F01 will offer the
+  choice at install time). The seed never inherits the *harness source repo's* own value,
+  which stays `true` because that repo does have the App.
+- **`pr_loop.enabled` back to `false` reclaims the glue** from every *still-selected* front-end (a
   new §7b reconciliation pass, since the existing deselect loop only reconciles
   front-ends that left the selection), pristine-only in the user-owned `$CODEX_HOME`
   prompts dir and the `.agents/` tree, pruning only dirs left empty. Flipping it back on

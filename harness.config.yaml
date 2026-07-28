@@ -207,17 +207,20 @@ models:
   # pin.claude.reasoning: ""
 
 # Codex PR review loop (E18-F01) — the policy knobs of `/sdd-pr-loop`.
-# The loop only works on a repo with the Codex GitHub App installed plus an authed
-# `gh` (and `jq` on PATH); set `enabled: false` on a repo without them and no
-# /sdd-pr-loop command or pr-fixer sub-agent is stamped into ANY front-end.
-# An absent block — or an absent key — behaves exactly as the values below.
+# `enabled` is OPT-IN: it is off unless it reads exactly `true`. An absent block, an
+# absent key, an empty value or any other value all mean OFF, and nothing is stamped.
+# Turn it on ONLY on a repo that has the Codex GitHub App installed plus an authed
+# `gh` (and `jq` on PATH) — without them /sdd-pr-loop can only fail its own preflight.
+# While it is on, /sdd-pr-loop and the pr-fixer sub-agent are stamped into every
+# selected front-end; flipping it back to false reclaims all of that glue.
 # Per-run env overrides (env wins over config): HARNESS_PR_LOOP_ENABLED,
 # HARNESS_AUTO_MERGE, HARNESS_MAX_ROUNDS, HARNESS_BLOCKING_SEVERITIES,
 # HARNESS_MERGE_STRATEGY. Execution knobs are env-ONLY (never config):
 # HARNESS_POLL_INTERVAL (60), HARNESS_POLL_CEILING (900),
 # HARNESS_FIRST_RESPONSE (180), HARNESS_DRY_RUN.
+# (The harness's own source repo opts in; every fresh install is seeded with `false`.)
 pr_loop:
-  enabled: true                  # master gate; false ⇒ no /sdd-pr-loop glue anywhere
+  enabled: true                  # opt-in master gate; ONLY `true` stamps /sdd-pr-loop glue
   auto_merge: true               # merge once every gate is green and threads are Codex-only
   max_rounds: 4                  # round cap; the cap round labels the PR needs-human
   blocking_severities: "P0,P1"   # comma-separated severities that block a merge

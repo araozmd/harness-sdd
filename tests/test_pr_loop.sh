@@ -30,6 +30,21 @@ pass() { echo "ok - $1"; }
 skip() { echo "skip - $1"; }
 have_jq() { command -v jq >/dev/null 2>&1; }
 
+# cfg_pr_loop_enabled <config-file> — print pr_loop.enabled, SECTION-SCOPED and
+# comment-stripped: the test-side mirror of the installer's _cfg_pr_loop_value. An
+# unscoped `grep '^  enabled:'` is wrong here — `telemetry:` carries an `enabled:` key at
+# the same indent, so it would answer for the wrong section. Prints nothing when unset.
+cfg_pr_loop_enabled() {
+  awk '
+    /^pr_loop:[[:space:]]*(#.*)?$/ { p=1; next }
+    p && /^[^[:space:]#]/ { p=0 }
+    p && /^[[:space:]]+enabled:/ {
+      sub(/^[[:space:]]+enabled:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+      print; exit
+    }
+  ' "$1"
+}
+
 # install_at <target> [installer-args...] — the ONLY way this suite runs the installer.
 # Always sandboxes CODEX_HOME to <target>/ch, so no run can touch a developer's ~/.codex.
 install_at() {
@@ -39,28 +54,52 @@ install_at() {
     || { cat "$_ia_t/.err" >&2; fail "installer exited non-zero for $_ia_t"; }
 }
 
-# set_gate <target> <true|false> — rewrite pr_loop.enabled in the target's preserved config.
+# install_on <target> [installer-args...] — install with the pr_loop gate armed via the
+# ENV override. The gate is OPT-IN (a fresh install seeds `enabled: false`), so every
+# "the loop is installed" assertion has to turn it on explicitly. Tests that exercise the
+# CONFIG axis use set_gate instead.
+install_on() {
+  HARNESS_PR_LOOP_ENABLED=true; export HARNESS_PR_LOOP_ENABLED
+  install_at "$@"
+  unset HARNESS_PR_LOOP_ENABLED
+}
+
+# set_gate <target> <true|false> — rewrite pr_loop.enabled in the target's config,
+# section-scoped. When the target has not been installed yet, the source config is used as
+# the starting point, so a test can pre-seed a preserved config whose gate is already on.
 set_gate() {
+  mkdir -p "$1/.harness"
+  if [ -f "$1/.harness/harness.config.yaml" ]; then _sg_in="$1/.harness/harness.config.yaml"
+  else _sg_in="$SRC/harness.config.yaml"; fi
   awk -v v="$2" '
     /^pr_loop:[[:space:]]*(#.*)?$/ { p=1; print; next }
     p && /^[^[:space:]#]/ { p=0 }
     p && /^[[:space:]]+enabled:/ { print "  enabled: " v "  # test-set"; next }
     { print }
-  ' "$1/.harness/harness.config.yaml" > "$1/.cfg.tmp"
+  ' "$_sg_in" > "$1/.cfg.tmp"
   mv "$1/.cfg.tmp" "$1/.harness/harness.config.yaml"
 }
 
 # ── shared fixtures ───────────────────────────────────────────────────────────
+# BASE is the GATE-ON reference target: every body/artifact assertion reads from it. The
+# gate is armed by env, so BASE's own config is still the untouched SEEDED one — which is
+# what test_pr_loop_block_seeded (R15) asserts against.
 BASE="$T/base"
-install_at "$BASE"
+install_on "$BASE"
 BODY="$BASE/.claude/commands/sdd-pr-loop.md"
-[ -f "$BODY" ] || fail "setup: default install did not generate the /sdd-pr-loop body"
+[ -f "$BODY" ] || fail "setup: gate-on install did not generate the /sdd-pr-loop body"
+
+# ...and the DEFAULT install (no env, no config edit) must stamp nothing at all.
+DEF="$T/default"
+install_at "$DEF"
+[ -e "$DEF/.claude/commands/sdd-pr-loop.md" ] \
+  && fail "setup: a default install stamped /sdd-pr-loop — the gate must be opt-in"
 
 # ══ Command generation, gating and removal (R1–R8) ════════════════════════════
 
 test_command_mirrored_to_all_frontends() {           # R2
   _m="$T/mirror"
-  install_at "$_m"
+  install_on "$_m"
   for _f in "$_m/.claude/commands/sdd-pr-loop.md" \
             "$_m/.opencode/command/sdd-pr-loop.md" \
             "$_m/.agents/workflows/sdd-pr-loop.md" \
@@ -73,14 +112,11 @@ test_command_mirrored_to_all_frontends() {           # R2
 }
 
 test_gate_off_stamps_nothing() {                      # R3
-  _o="$T/off"
-  mkdir -p "$_o/.harness"
-  # Pre-seed a preserved config whose gate is OFF, so the FRESH install never stamps.
-  sed 's/^  enabled: true .*/  enabled: false/' "$SRC/harness.config.yaml" \
-    > "$_o/.harness/harness.config.yaml"
-  grep -q '^  enabled: false$' "$_o/.harness/harness.config.yaml" \
-    || fail "R3 setup: could not disable the gate in the seeded config"
-  install_at "$_o"
+  # The gate is OPT-IN, so this is the DEFAULT path: a plain fresh install, no config edit
+  # and no env override, must stamp no pr_loop glue anywhere. $DEF is exactly that install.
+  _o="$DEF"
+  [ "$(cfg_pr_loop_enabled "$_o/.harness/harness.config.yaml")" = "false" ] \
+    || fail "R3: a fresh install did not seed pr_loop.enabled: false"
   for _f in "$_o/.claude/commands/sdd-pr-loop.md" \
             "$_o/.opencode/command/sdd-pr-loop.md" \
             "$_o/.agents/workflows/sdd-pr-loop.md" \
@@ -93,15 +129,16 @@ test_gate_off_stamps_nothing() {                      # R3
   [ -d "$_o/.opencode/agent" ] && fail "R3: gate off must not create .opencode/agent/"
   # the ungated commands are unaffected, and the run exited 0 (install_at asserts that)
   [ -f "$_o/.claude/commands/sdd-next.md" ] || fail "R3: gate off wrongly suppressed /sdd-next"
-  pass "R3 gate off: no /sdd-pr-loop command and no pr-fixer artifact anywhere, exit 0"
+  pass "R3 default (opt-in gate off): no /sdd-pr-loop command and no pr-fixer artifact, exit 0"
 }
 
 test_deselect_removes_pr_loop_glue() {                # R4
   _d="$T/desel"
-  install_at "$_d"
+  install_on "$_d"
   [ -f "$_d/.claude/commands/sdd-pr-loop.md" ] || fail "R4 setup: glue not stamped"
   [ -f "$_d/ch/prompts/sdd-pr-loop.md" ]       || fail "R4 setup: global prompt not stamped"
-  install_at "$_d" --agents=gemini
+  # the gate stays ON across the re-run: this proves DESELECTION reclaims, not the gate
+  install_on "$_d" --agents=gemini
   for _f in "$_d/.claude/commands/sdd-pr-loop.md" "$_d/.claude/agents/pr-fixer.md" \
             "$_d/.opencode/command/sdd-pr-loop.md" "$_d/.opencode/agent/pr-fixer.md" \
             "$_d/.agents/workflows/sdd-pr-loop.md" "$_d/.agents/agents/pr-fixer.md" \
@@ -113,6 +150,7 @@ test_deselect_removes_pr_loop_glue() {                # R4
 
 test_gate_flip_off_reclaims() {                       # R5
   _f="$T/flip"
+  set_gate "$_f" true            # pre-seed a preserved config that opts IN
   install_at "$_f"
   [ -f "$_f/.claude/commands/sdd-pr-loop.md" ] || fail "R5 setup: glue not stamped"
   set_gate "$_f" false
@@ -127,12 +165,13 @@ test_gate_flip_off_reclaims() {                       # R5
   [ -f "$_f/.claude/commands/sdd-next.md" ]    || fail "R5: flip-off wrongly removed /sdd-next"
   [ -f "$_f/.claude/agents/orchestrator.md" ]  || fail "R5: flip-off wrongly removed a role shim"
   [ -f "$_f/ch/prompts/sdd-next.md" ]          || fail "R5: flip-off wrongly removed a global prompt"
-  grep -qF 'pr_loop.enabled is false' "$_f/.err" || fail "R5: gate-off reclamation was not announced"
+  grep -qF 'pr_loop.enabled is not true' "$_f/.err" || fail "R5: gate-off reclamation was not announced"
   pass "R5 gate true->false while selected reclaims the glue from every front-end"
 }
 
 test_edited_copy_left_in_place_and_warns() {          # R6
   _e="$T/edited"
+  set_gate "$_e" true
   install_at "$_e"
   printf '\n# my own note\n' >> "$_e/ch/prompts/sdd-pr-loop.md"
   printf '\n# my own note\n' >> "$_e/.agents/agents/pr-fixer.md"
@@ -151,6 +190,7 @@ test_edited_copy_left_in_place_and_warns() {          # R6
 
 test_reclaim_preserves_user_files_and_prunes() {      # R7
   _u="$T/userfiles"
+  set_gate "$_u" true
   install_at "$_u"
   [ -f "$_u/.opencode/agent/pr-fixer.md" ] || fail "R7 setup: opencode pr-fixer not stamped"
   printf 'mine\n' > "$_u/.opencode/agent/my-agent.md"
@@ -161,6 +201,7 @@ test_reclaim_preserves_user_files_and_prunes() {      # R7
   [ -d "$_u/.opencode/agent" ]             || fail "R7: dir pruned despite holding a user file"
   # and with nothing left, the dir IS pruned
   _u2="$T/prune"
+  set_gate "$_u2" true
   install_at "$_u2"
   set_gate "$_u2" false
   install_at "$_u2"
@@ -171,6 +212,7 @@ test_reclaim_preserves_user_files_and_prunes() {      # R7
 
 test_gate_off_then_on_restores() {                    # R8
   _r="$T/roundtrip"
+  set_gate "$_r" true
   install_at "$_r"
   cp "$_r/.claude/commands/sdd-pr-loop.md" "$T/.rt-cmd"
   cp "$_r/.claude/agents/pr-fixer.md"      "$T/.rt-fixer"
@@ -194,6 +236,7 @@ test_gate_off_still_reclaims_global_codex_prompt() {  # R1
   # /sdd-pr-loop body into CMDDIR on EVERY run, gate on or off. Gating GENERATION would
   # delete the reference and make an already-stamped prompt permanently unremovable.
   _g="$T/r1"
+  set_gate "$_g" true
   install_at "$_g" --agents=codex
   [ -f "$_g/ch/prompts/sdd-pr-loop.md" ] || fail "R1 setup: global prompt not stamped"
   set_gate "$_g" false
@@ -248,10 +291,8 @@ test_opencode_pr_fixer_agent_file() {                 # R11
 
 test_opencode_json_unaffected_by_pr_loop() {          # R12
   _on="$T/ocon"; _of="$T/ocoff"
-  install_at "$_on"
-  install_at "$_of"
-  set_gate "$_of" false
-  install_at "$_of"
+  install_on "$_on"
+  install_at "$_of"                 # default = gate off
   cmp -s "$_on/opencode.json" "$_of/opencode.json" \
     || fail "R12: opencode.json differs between pr_loop on and off"
   if [ -e "$_on/.harness/.opencode.stamp" ] || [ -e "$_of/.harness/.opencode.stamp" ]; then
@@ -285,14 +326,21 @@ test_no_codex_gemini_pr_fixer_artifact() {            # R14
 # ══ Configuration (R15–R20) ═══════════════════════════════════════════════════
 
 test_pr_loop_block_seeded() {                         # R15
+  # BASE was installed with the gate armed by ENV, so its config is the untouched SEEDED
+  # one: the seed must carry the OPT-IN default regardless of the env override, and
+  # regardless of what the harness SOURCE repo sets for itself.
   _c="$BASE/.harness/harness.config.yaml"
   grep -qE '^pr_loop:[[:space:]]*(#.*)?$' "$_c" || fail "R15: fresh install seeded no pr_loop: block"
-  grep -qE '^  enabled: true'                "$_c" || fail "R15: pr_loop.enabled default not seeded"
+  [ "$(cfg_pr_loop_enabled "$_c")" = "false" ] \
+    || fail "R15: pr_loop.enabled was not seeded as the opt-in default false (got '$(cfg_pr_loop_enabled "$_c")')"
   grep -qE '^  auto_merge: true'             "$_c" || fail "R15: pr_loop.auto_merge default not seeded"
   grep -qE '^  max_rounds: 4'                "$_c" || fail "R15: pr_loop.max_rounds default not seeded"
   grep -qE '^  blocking_severities: "P0,P1"' "$_c" || fail "R15: pr_loop.blocking_severities default not seeded"
   grep -qE '^  merge_strategy: "merge"'      "$_c" || fail "R15: pr_loop.merge_strategy default not seeded"
-  pass "R15 fresh install seeds the five pr_loop keys with the documented defaults"
+  # ...and the seeded block explains that turning it on is a deliberate choice
+  grep -qF 'opt-in' "$_c" || fail "R15: the seeded block does not document the opt-in gate"
+  grep -qF 'Codex GitHub App' "$_c" || fail "R15: the seeded block does not state the Codex App precondition"
+  pass "R15 fresh install seeds the five pr_loop keys, with enabled opt-in false"
 }
 
 test_pr_loop_block_migrated_idempotent() {            # R16
@@ -330,27 +378,70 @@ test_seeded_and_migrated_block_identical() {          # R17
   pass "R17 seeded block == migrated block, byte for byte"
 }
 
-test_absent_block_defaults_to_enabled() {             # R18
+test_absent_block_defaults_to_disabled() {            # R18
   _a="$T/absent"
   mkdir -p "$_a/.harness"
-  # a preserved config with NO pr_loop block at all: the gate must default to ENABLED,
-  # and the migration must then seed the documented defaults.
+  # A preserved config with NO pr_loop block at all — i.e. every config written before the
+  # block existed. The gate is OPT-IN, so absence must resolve to DISABLED, and the
+  # migration must then append the documented defaults (which are themselves off).
   awk '/^# Codex PR review loop/{exit} {print}' "$SRC/harness.config.yaml" \
     > "$_a/.harness/harness.config.yaml"
   grep -q '^pr_loop:' "$_a/.harness/harness.config.yaml" && fail "R18 setup: block still present"
   install_at "$_a"
-  [ -f "$_a/.claude/commands/sdd-pr-loop.md" ] \
-    || fail "R18: an absent pr_loop block must behave as enabled: true"
-  [ -f "$_a/.claude/agents/pr-fixer.md" ] || fail "R18: absent block must still stamp pr-fixer"
-  for _k in 'enabled: true' 'auto_merge: true' 'max_rounds: 4' \
+  [ -e "$_a/.claude/commands/sdd-pr-loop.md" ] \
+    && fail "R18: an absent pr_loop block must resolve to DISABLED, not enabled"
+  [ -e "$_a/.claude/agents/pr-fixer.md" ] && fail "R18: absent block must stamp no pr-fixer"
+  for _k in 'enabled: false' 'auto_merge: true' 'max_rounds: 4' \
             'blocking_severities: "P0,P1"' 'merge_strategy: "merge"'; do
     grep -qF "$_k" "$_a/.harness/harness.config.yaml" || fail "R18: default '$_k' not documented after migration"
   done
-  pass "R18 an absent pr_loop block (or key) resolves to the documented defaults"
+  pass "R18 an absent pr_loop block resolves to DISABLED and migrates to the documented defaults"
+}
+
+test_absent_enabled_key_resolves_off() {              # R18b
+  # The narrower, load-bearing case for the OPT-IN inversion: the block EXISTS (so
+  # migrate_config leaves it alone) but `enabled` is absent, empty, or some near-miss
+  # token. Under the old opt-out logic every one of these resolved to ENABLED and stamped
+  # the glue; under the opt-in gate only the literal `true` may.
+  _k="$T/keyoff"
+  # 1. block present, `enabled:` key removed entirely
+  mkdir -p "$_k/.harness"
+  awk '
+    /^pr_loop:[[:space:]]*(#.*)?$/ { p=1; print; next }
+    p && /^[^[:space:]#]/ { p=0 }
+    p && /^[[:space:]]+enabled:/ { next }
+    { print }
+  ' "$SRC/harness.config.yaml" > "$_k/.harness/harness.config.yaml"
+  grep -q '^pr_loop:' "$_k/.harness/harness.config.yaml" || fail "R18b setup: block was lost"
+  [ -z "$(cfg_pr_loop_enabled "$_k/.harness/harness.config.yaml")" ] \
+    || fail "R18b setup: the enabled key is still present under pr_loop:"
+  install_at "$_k"
+  [ -e "$_k/.claude/commands/sdd-pr-loop.md" ] \
+    && fail "R18b: an absent pr_loop.enabled key must resolve OFF"
+  [ -e "$_k/.claude/agents/pr-fixer.md" ] && fail "R18b: absent key must stamp no pr-fixer"
+  # the migration must NOT re-add the key (the block is present; it is append-only)
+  [ -z "$(cfg_pr_loop_enabled "$_k/.harness/harness.config.yaml")" ] \
+    || fail "R18b: migration rewrote an existing pr_loop block"
+  # 2. present but empty / near-miss values — each must stay OFF
+  for _v in '' 'yes' '1' 'True' 'TRUE' 'on' 'false'; do
+    _n="$T/keyval$(printf '%s' "$_v" | tr -cd 'A-Za-z0-9')x"
+    set_gate "$_n" "$_v"
+    install_at "$_n"
+    [ -e "$_n/.claude/commands/sdd-pr-loop.md" ] \
+      && fail "R18b: pr_loop.enabled='$_v' must not arm the gate — only the literal true may"
+  done
+  # ...and the literal `true` still does arm it, from the very same code path
+  _y="$T/keyyes"
+  set_gate "$_y" true
+  install_at "$_y"
+  [ -f "$_y/.claude/commands/sdd-pr-loop.md" ] \
+    || fail "R18b: the literal pr_loop.enabled: true failed to arm the gate"
+  pass "R18b absent/empty/malformed pr_loop.enabled resolves OFF; only the literal true arms it"
 }
 
 test_pr_loop_key_is_section_scoped() {                # R19
   _s="$T/scoped"
+  set_gate "$_s" true
   install_at "$_s"
   _cfg="$_s/.harness/harness.config.yaml"
   # A same-named key under ANOTHER top-level section must never be read as pr_loop.enabled.
@@ -362,7 +453,16 @@ test_pr_loop_key_is_section_scoped() {                # R19
   set_gate "$_s" false
   install_at "$_s"
   [ -e "$_s/.claude/commands/sdd-pr-loop.md" ] && fail "R19: the top-level pr_loop.enabled was not honored"
-  pass "R19 pr_loop keys are read only from the top-level pr_loop: section"
+  # The inverse direction matters more now that the gate is opt-in: a foreign section's
+  # 'enabled: true' must not ARM a gate whose own key says otherwise.
+  _s2="$T/scoped2"
+  install_at "$_s2"
+  { printf '\nsome_other_section:\n'; printf '  enabled: true\n'; } \
+    >> "$_s2/.harness/harness.config.yaml"
+  install_at "$_s2"
+  [ -e "$_s2/.claude/commands/sdd-pr-loop.md" ] \
+    && fail "R19: a foreign section's 'enabled: true' armed the pr_loop gate"
+  pass "R19 pr_loop keys are read only from the top-level pr_loop: section (both directions)"
 }
 
 test_no_mco_tokens_in_body() {                        # R20
@@ -389,6 +489,7 @@ test_no_mco_tokens_in_body() {                        # R20
 
 test_env_overrides_config() {                         # R20 precedence
   _e="$T/envprec"
+  set_gate "$_e" true
   install_at "$_e"
   [ -f "$_e/.claude/commands/sdd-pr-loop.md" ] || fail "R20 setup: glue not stamped"
   # env override beats a config value of true
@@ -990,6 +1091,12 @@ test_docs_document_pr_loop() {                        # R50
     grep -qF 'Codex GitHub App' "$_d" || fail "R50: $_d does not state the Codex GitHub App precondition"
   done
   grep -qF 'pr_loop.enabled' "$SRC/docs/INSTALL.md" || fail "R50: INSTALL.md does not document the gate"
+  # the OPT-IN default is a documented contract, not an implementation detail
+  for _d in "$SRC/README.md" "$SRC/docs/INSTALL.md" "$SRC/docs/WORKFLOW.md" "$SRC/docs/HARNESS.md"; do
+    grep -qiF 'opt-in' "$_d" || fail "R50: $_d does not state that pr_loop.enabled is opt-in"
+  done
+  grep -qF 'enabled: false' "$SRC/docs/INSTALL.md" \
+    || fail "R50: INSTALL.md does not show the seeded opt-in default"
   for _k in auto_merge max_rounds blocking_severities merge_strategy; do
     grep -qF "$_k" "$SRC/docs/INSTALL.md" || fail "R50: INSTALL.md does not document pr_loop.$_k"
   done
@@ -1079,7 +1186,8 @@ test_no_codex_gemini_pr_fixer_artifact
 test_pr_loop_block_seeded
 test_pr_loop_block_migrated_idempotent
 test_seeded_and_migrated_block_identical
-test_absent_block_defaults_to_enabled
+test_absent_block_defaults_to_disabled
+test_absent_enabled_key_resolves_off
 test_pr_loop_key_is_section_scoped
 test_no_mco_tokens_in_body
 test_env_overrides_config

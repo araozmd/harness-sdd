@@ -243,33 +243,60 @@ EOF
   fi
 
   # --- pr_loop block (E18-F01 Codex review loop) ---
-  # Top-level, append-only at EOF. Absence is behaviorally equivalent to these values
-  # (see _cfg_pr_loop_value / pr_loop_enabled), so a preserved pre-E18 config keeps
-  # working — but a fresh install ships the discoverable off switch, so add the whole
-  # block on upgrade for parity. Keep this text BYTE-IDENTICAL to the tail of the source
-  # harness.config.yaml: a FRESH install copies the config verbatim and never migrates,
-  # an UPGRADE only migrates, and R17 requires the two to converge on the same bytes.
+  # Top-level, append-only at EOF. `enabled` is OPT-IN, so an absent block is behaviorally
+  # equivalent to the values below (see _cfg_pr_loop_value / pr_loop_enabled): a preserved
+  # pre-E18 config resolves to DISABLED and keeps working untouched. The block is still
+  # appended on upgrade so the on switch is discoverable, and so seeded and migrated
+  # configs converge. Keep this text BYTE-IDENTICAL to the tail of the source
+  # harness.config.yaml (modulo the `enabled:` line, which seed_pr_loop_optin forces to
+  # the opt-in default on a fresh copy): a FRESH install copies the config and never
+  # migrates, an UPGRADE only migrates, and R17 requires the two to converge on the same
+  # bytes.
   if ! grep -Eq '^pr_loop:[[:space:]]*(#.*)?$' "$_cfg"; then
     cat >> "$_cfg" <<'EOF'
 
 # Codex PR review loop (E18-F01) — the policy knobs of `/sdd-pr-loop`.
-# The loop only works on a repo with the Codex GitHub App installed plus an authed
-# `gh` (and `jq` on PATH); set `enabled: false` on a repo without them and no
-# /sdd-pr-loop command or pr-fixer sub-agent is stamped into ANY front-end.
-# An absent block — or an absent key — behaves exactly as the values below.
+# `enabled` is OPT-IN: it is off unless it reads exactly `true`. An absent block, an
+# absent key, an empty value or any other value all mean OFF, and nothing is stamped.
+# Turn it on ONLY on a repo that has the Codex GitHub App installed plus an authed
+# `gh` (and `jq` on PATH) — without them /sdd-pr-loop can only fail its own preflight.
+# While it is on, /sdd-pr-loop and the pr-fixer sub-agent are stamped into every
+# selected front-end; flipping it back to false reclaims all of that glue.
 # Per-run env overrides (env wins over config): HARNESS_PR_LOOP_ENABLED,
 # HARNESS_AUTO_MERGE, HARNESS_MAX_ROUNDS, HARNESS_BLOCKING_SEVERITIES,
 # HARNESS_MERGE_STRATEGY. Execution knobs are env-ONLY (never config):
 # HARNESS_POLL_INTERVAL (60), HARNESS_POLL_CEILING (900),
 # HARNESS_FIRST_RESPONSE (180), HARNESS_DRY_RUN.
+# (The harness's own source repo opts in; every fresh install is seeded with `false`.)
 pr_loop:
-  enabled: true                  # master gate; false ⇒ no /sdd-pr-loop glue anywhere
+  enabled: false                 # opt-in master gate; ONLY `true` stamps /sdd-pr-loop glue
   auto_merge: true               # merge once every gate is green and threads are Codex-only
   max_rounds: 4                  # round cap; the cap round labels the PR needs-human
   blocking_severities: "P0,P1"   # comma-separated severities that block a merge
   merge_strategy: "merge"        # merge | squash
 EOF
   fi
+}
+
+# seed_pr_loop_optin <file> — force `pr_loop.enabled` to the OPT-IN default (`false`) in a
+# freshly SEEDED config, section-scoped so no same-named key elsewhere is touched.
+#
+# A fresh install copies the harness's own harness.config.yaml verbatim, and the harness
+# source repo legitimately runs with `enabled: true` (it has the Codex GitHub App). Copying
+# that value into a target would arm a review loop the target may have no way to run — the
+# same reason `test_command` is blanked on seed. The replacement line is BYTE-IDENTICAL to
+# the one migrate_config appends, which is what keeps seeded and migrated blocks convergent
+# (E18-F01 R15/R17). A no-op when the block or the key is absent — absent already means off.
+seed_pr_loop_optin() {
+  awk '
+    /^pr_loop:[[:space:]]*(#.*)?$/ { p=1; print; next }
+    p && /^[^[:space:]#]/ { p=0 }
+    p && /^[[:space:]]+enabled:/ {
+      print "  enabled: false                 # opt-in master gate; ONLY `true` stamps /sdd-pr-loop glue"
+      next
+    }
+    { print }
+  ' "$1" > "$1.prltmp" && mv "$1.prltmp" "$1"
 }
 
 # _cfg_has_umbrella_manifest <file> — true (exit 0) iff a `manifest:` key exists
@@ -360,17 +387,22 @@ _cfg_pr_loop_value() {
   ' "$1"
 }
 
-# pr_loop_enabled — exit 0 unless `pr_loop.enabled` resolves to the literal `false`.
-# Precedence: HARNESS_PR_LOOP_ENABLED env → config value → the built-in default `true`
-# (E18-F01 R18/R20), so an ABSENT block or an absent key means ENABLED. Reads the target
-# config through $H, which is empty before install_one sets it (⇒ default: enabled).
+# pr_loop_enabled — exit 0 ONLY when `pr_loop.enabled` resolves to the literal `true`.
+# Precedence: HARNESS_PR_LOOP_ENABLED env → config value → the built-in default `false`
+# (E18-F01 R18/R20). The gate is OPT-IN: an absent block, an absent key, an empty value
+# and any non-`true` value alike mean DISABLED. `/sdd-pr-loop` only functions on a repo
+# that has the Codex GitHub App installed plus an authed `gh`, so defaulting it on would
+# grow a command that can do nothing but fail its own preflight on a fresh install.
+# Enablement is therefore an explicit choice made at install time (E20-F01 surfaces it in
+# the installer; until then it is a documented one-line hand-edit). Reads the target
+# config through $H, which is empty before install_one sets it (⇒ default: disabled).
 pr_loop_enabled() {
   _prl_v="${HARNESS_PR_LOOP_ENABLED:-}"
   if [ -z "$_prl_v" ] && [ -n "${H:-}" ]; then
     _prl_v="$(_cfg_pr_loop_value "$H/harness.config.yaml" enabled)"
   fi
-  [ "$_prl_v" = "false" ] && return 1
-  return 0
+  [ "$_prl_v" = "true" ] && return 0
+  return 1
 }
 
 # _mc_insert_after <file> <header-regex> <line>  — insert <line> immediately after the
@@ -405,8 +437,9 @@ AGENT_KEYS="claude gemini opencode antigravity codex"
 HARNESS_CLAUDE_SHIMS="orchestrator architect builder reviewer scout doc-critic pr-fixer"
 HARNESS_SDD_CMDS="sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel"
 
-# E18-F01: the pr_loop glue is GATED on `pr_loop.enabled`, so it is emitted from a
-# SEPARATE list — joining $HARNESS_SDD_CMDS would make it unconditional. Removal, by
+# E18-F01: the pr_loop glue is GATED on the OPT-IN `pr_loop.enabled`, so it is emitted
+# from a SEPARATE list — joining $HARNESS_SDD_CMDS would make it unconditional (and, with
+# the gate off by default, would defeat the opt-in entirely). Removal, by
 # contrast, must always consider it (a target stamped while the gate was on has to be
 # reclaimable after the gate flips off), so every reclamation loop iterates the UNION.
 # `pr-fixer` rides in HARNESS_CLAUDE_SHIMS above for the same reason: ledger only —
@@ -957,7 +990,10 @@ install_one() {
         -e 's|^\( *typecheck_command:\).*|\1 ""   # set during bootstrap|' \
         "$H/harness.config.yaml" > "$H/harness.config.yaml.tmp" \
         && mv "$H/harness.config.yaml.tmp" "$H/harness.config.yaml"
-    info "seeded harness.config.yaml (verification commands blank)"
+    # ...and the target may not have the Codex GitHub App — the review loop is OPT-IN, so
+    # a fresh seed never inherits this repo's own `pr_loop.enabled: true` (E18-F01 R15).
+    seed_pr_loop_optin "$H/harness.config.yaml"
+    info "seeded harness.config.yaml (verification commands blank, pr_loop disabled)"
   else
     info "harness.config.yaml preserved (bootstrap verification commands kept)"
     # Additive, value-preserving migration: append any missing default keys (e.g.
@@ -1129,13 +1165,14 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .agents/rules/*  .agents/agents/*  .agents/workflows/*   (repo root, regenerated; Antigravity glue)
   CLAUDE.md / AGENTS.md / GEMINI.md  -> only the harness:begin..end block
 
-PR LOOP GLUE  (created ONLY while pr_loop.enabled is true — E18-F01):
+PR LOOP GLUE  (OPT-IN — created ONLY while pr_loop.enabled reads exactly true; a fresh
+install seeds false, so none of this exists until you turn it on — E18-F01):
   .claude/commands/sdd-pr-loop.md   .opencode/command/sdd-pr-loop.md
   .agents/workflows/sdd-pr-loop.md  \${CODEX_HOME:-~/.codex}/prompts/sdd-pr-loop.md (GLOBAL)
   .claude/agents/pr-fixer.md  .opencode/agent/pr-fixer.md  .agents/agents/pr-fixer.md
-  Flipping pr_loop.enabled to false on a re-run RECLAIMS all of the above (pristine-only
-  in the user-owned \$CODEX_HOME prompts dir and .agents/ tree) and prunes empty dirs.
-  No pr-fixer artifact is ever created for the codex or gemini front-ends.
+  Flipping pr_loop.enabled back to false on a re-run RECLAIMS all of the above
+  (pristine-only in the user-owned \$CODEX_HOME prompts dir and .agents/ tree) and prunes
+  empty dirs. No pr-fixer artifact is ever created for the codex or gemini front-ends.
 
 MODEL ROUTING  (created ONLY when models: resolves a role to a concrete value):
   .gemini/agents/*               per-role Gemini agent definitions (regenerated)
@@ -1586,8 +1623,8 @@ EOF
   emit_agent doc-critic "Read, Grep, Glob, Write" \
     "Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code."
   # pr-fixer (E18-F01 R10): the /sdd-pr-loop worker sub-agent, spawned once per blocking
-  # Codex comment. GATED on pr_loop.enabled — unlike the six roles above it is not stamped
-  # at all when the loop is off. It rides the SAME emit_agent path (one shim, pointing at
+  # Codex comment. GATED on the opt-in pr_loop.enabled — unlike the six roles above it is
+  # NOT stamped by default. It rides the SAME emit_agent path (one shim, pointing at
   # the canonical .harness/agents/pr-fixer.md — the role body is never duplicated).
   if pr_loop_enabled; then
     emit_agent pr-fixer "Read, Edit, Bash, Grep, Glob" "$PR_FIXER_DESC"
@@ -1918,10 +1955,15 @@ key behaves exactly as the default.
 
 | Config key | Env override | Default |
 |---|---|---|
+| `pr_loop.enabled` | `HARNESS_PR_LOOP_ENABLED` | `false` (opt-in) |
 | `pr_loop.auto_merge` | `HARNESS_AUTO_MERGE` | `true` |
 | `pr_loop.max_rounds` | `HARNESS_MAX_ROUNDS` | `4` |
 | `pr_loop.blocking_severities` | `HARNESS_BLOCKING_SEVERITIES` | `P0,P1` |
 | `pr_loop.merge_strategy` | `HARNESS_MERGE_STRATEGY` | `merge` |
+
+`pr_loop.enabled` is the **opt-in** master gate: this command is only installed at all
+because it reads exactly `true`. Anything else — an absent block, an absent key, an empty
+or malformed value — means off, and the installer stamps no `/sdd-pr-loop` glue.
 
 Execution knobs are **env-only** (never config): `HARNESS_POLL_INTERVAL` (60),
 `HARNESS_POLL_CEILING` (900), `HARNESS_FIRST_RESPONSE` (180), `HARNESS_DRY_RUN`.
@@ -1942,8 +1984,8 @@ sh .harness/tools/wait-for-codex.sh preflight "$pr_number"
 It checks `gh` on PATH, `gh auth status`, `jq` on PATH, a resolvable repo slug, and that
 the PR exists and is OPEN. It posts **nothing**. On a non-zero exit (`5`), **STOP** and
 report its one-line diagnostic verbatim — do not post `@codex review`, do not poll, do
-not fall back to a hand-rolled check. A repo without the Codex GitHub App should set
-`pr_loop.enabled: false` rather than run this loop.
+not fall back to a hand-rolled check. A repo without the Codex GitHub App should leave
+`pr_loop.enabled` at its opt-in default of `false` rather than run this loop.
 
 ### 1. Trigger the review
 
@@ -2784,7 +2826,7 @@ EOF
       fi
     fi
     if [ -n "$(printf '%s' "$_prl_gone" | tr -d '[:space:]')" ]; then
-      echo "⚠️  pr_loop.enabled is false — reclaimed /sdd-pr-loop glue:$_prl_gone" >&2
+      echo "⚠️  pr_loop.enabled is not true — reclaimed /sdd-pr-loop glue:$_prl_gone" >&2
     fi
   fi
 

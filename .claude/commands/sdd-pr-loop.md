@@ -21,10 +21,15 @@ key behaves exactly as the default.
 
 | Config key | Env override | Default |
 |---|---|---|
+| `pr_loop.enabled` | `HARNESS_PR_LOOP_ENABLED` | `false` (opt-in) |
 | `pr_loop.auto_merge` | `HARNESS_AUTO_MERGE` | `true` |
 | `pr_loop.max_rounds` | `HARNESS_MAX_ROUNDS` | `4` |
 | `pr_loop.blocking_severities` | `HARNESS_BLOCKING_SEVERITIES` | `P0,P1` |
 | `pr_loop.merge_strategy` | `HARNESS_MERGE_STRATEGY` | `merge` |
+
+`pr_loop.enabled` is the **opt-in** master gate: this command is only installed at all
+because it reads exactly `true`. Anything else — an absent block, an absent key, an empty
+or malformed value — means off, and the installer stamps no `/sdd-pr-loop` glue.
 
 Execution knobs are **env-only** (never config): `HARNESS_POLL_INTERVAL` (60),
 `HARNESS_POLL_CEILING` (900), `HARNESS_FIRST_RESPONSE` (180), `HARNESS_DRY_RUN`.
@@ -45,8 +50,8 @@ sh tools/wait-for-codex.sh preflight "$pr_number"
 It checks `gh` on PATH, `gh auth status`, `jq` on PATH, a resolvable repo slug, and that
 the PR exists and is OPEN. It posts **nothing**. On a non-zero exit (`5`), **STOP** and
 report its one-line diagnostic verbatim — do not post `@codex review`, do not poll, do
-not fall back to a hand-rolled check. A repo without the Codex GitHub App should set
-`pr_loop.enabled: false` rather than run this loop.
+not fall back to a hand-rolled check. A repo without the Codex GitHub App should leave
+`pr_loop.enabled` at its opt-in default of `false` rather than run this loop.
 
 ### 1. Trigger the review
 

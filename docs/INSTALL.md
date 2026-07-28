@@ -18,7 +18,7 @@ This writes, into your project:
 your-project/
 ├── CLAUDE.md / AGENTS.md / GEMINI.md   # your content kept; a marked harness block appended
 ├── .claude/agents/*  .claude/commands/{sdd-next,sdd-new,sdd-plan,sdd-drill,sdd-fix,sdd-fix-parallel}.md
-├── .claude/commands/sdd-pr-loop.md  .claude/agents/pr-fixer.md   # only while pr_loop.enabled
+├── .claude/commands/sdd-pr-loop.md  .claude/agents/pr-fixer.md   # only while pr_loop.enabled (opt-in, seeded false)
 ├── .opencode/agent/pr-fixer.md         # only while pr_loop.enabled (OpenCode file-based sub-agent)
 ├── opencode.json                       # created only if absent (re-stamped only while pristine)
 ├── .agents/{rules,agents,workflows}/   # Antigravity glue → resolves to .harness/ (regenerated each run)
@@ -70,7 +70,12 @@ parallel command requires the default `execution.builder.backend: in-session`; a
 delegate backend fails before manifest/provision/claim and points to serial
 `/sdd-fix`, because delegates may own PR/review timing.
 
-### `/sdd-pr-loop` (gated on `pr_loop.enabled`)
+### `/sdd-pr-loop` (opt-in, gated on `pr_loop.enabled`)
+
+> **Opt-in.** A fresh install seeds `pr_loop.enabled: false` and stamps **no**
+> `/sdd-pr-loop` glue at all. Set it to `true` in `.harness/harness.config.yaml` and re-run
+> the installer to turn the loop on. Only the literal `true` enables it — an absent block,
+> an absent key, an empty or malformed value all mean off.
 
 The installer also generates **`/sdd-pr-loop`** — the Codex review loop — from one
 byte-identical body into `.claude/commands/`, `.opencode/command/`, `.agents/workflows/`
@@ -91,7 +96,7 @@ Fresh config seeds:
 
 ```yaml
 pr_loop:
-  enabled: true                  # master gate; false ⇒ no /sdd-pr-loop glue anywhere
+  enabled: false                 # opt-in master gate; ONLY `true` stamps /sdd-pr-loop glue
   auto_merge: true               # merge once every gate is green and threads are Codex-only
   max_rounds: 4                  # round cap; the cap round labels the PR needs-human
   blocking_severities: "P0,P1"   # comma-separated severities that block a merge
@@ -99,15 +104,16 @@ pr_loop:
 ```
 
 An upgrade appends the same block byte-for-byte; an absent block (or key) behaves exactly
-as the defaults above. Each policy key takes a per-run env override —
+as the defaults above, so an existing config that predates the block stays **off** until
+you add it. Each policy key takes a per-run env override —
 `HARNESS_PR_LOOP_ENABLED`, `HARNESS_AUTO_MERGE`, `HARNESS_MAX_ROUNDS`,
 `HARNESS_BLOCKING_SEVERITIES`, `HARNESS_MERGE_STRATEGY` (env wins over config, config wins
 over the default). Execution knobs are **env-only**: `HARNESS_POLL_INTERVAL` (60),
 `HARNESS_POLL_CEILING` (900), `HARNESS_FIRST_RESPONSE` (180, `0` disables the probe) and
 `HARNESS_DRY_RUN`.
 
-Set `pr_loop.enabled: false` and re-run the installer on a repo without the Codex App: the
-command and every `pr-fixer` artifact are **reclaimed** from each still-selected front-end
+Flipping `pr_loop.enabled` back to `false` and re-running the installer **reclaims** the
+command and every `pr-fixer` artifact from each still-selected front-end
 (pristine-only in the user-owned `$CODEX_HOME/prompts` dir and the `.agents/` tree), and
 empty dirs are pruned. Flipping it back to `true` restores byte-identical glue. The round
 cache lives at `.harness/.pr-loop/<pr>/round-<n>/` and is gitignored by the seeded

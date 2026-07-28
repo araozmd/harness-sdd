@@ -56,14 +56,17 @@ one drives.
 | `/sdd-next` | Orchestrator — route and delegate the next actionable task | always |
 | `/sdd-fix "<desc>"` | Fixer — the lightweight `sdd:false` maintenance lane | always |
 | `/sdd-fix-parallel` | Fixer — bounded parallel batch of ready E99 fixes | always |
-| `/sdd-pr-loop <pr>` | the Codex review cycle on one open PR (spawns `pr-fixer`) | `pr_loop.enabled` |
+| `/sdd-pr-loop <pr>` | the Codex review cycle on one open PR (spawns `pr-fixer`) | `pr_loop.enabled` (opt-in) |
 
-`/sdd-pr-loop` is the one **gated** command: it is stamped only while
-`pr_loop.enabled` is `true` (the default), because it works only on a repository with
-the **Codex GitHub App** installed plus an **authed `gh`** and **`jq`** on `PATH`. Those
-are loop-runtime dependencies alone — `init.sh` never checks for them, so a target
-without either still passes the environment gate. Turning the key off reclaims the
-command and its `pr-fixer` sub-agent from every front-end.
+`/sdd-pr-loop` is the one **gated** command, and the gate is **opt-in**: it is stamped
+only while `pr_loop.enabled` reads exactly `true`, and a fresh install seeds `false`.
+An absent block, an absent key, an empty or malformed value all mean off. The reason is
+that the loop works only on a repository with the **Codex GitHub App** installed plus an
+**authed `gh`** and **`jq`** on `PATH` — defaulting it on would grow a command that can
+only fail its own preflight. Those are loop-runtime dependencies alone — `init.sh` never
+checks for them, so a target without either still passes the environment gate. Turning
+the key on and re-running the installer stamps the command and its `pr-fixer` sub-agent
+into every selected front-end; turning it back off reclaims all of it.
 
 ## Where the ideas come from
 

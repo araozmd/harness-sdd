@@ -16,6 +16,13 @@ trap 'rm -rf "$T"' EXIT
 # (Codex-specific tests below still override CODEX_HOME per-run for crisp isolation.)
 export CODEX_HOME="$T/codex-home"
 
+# E18-F01: `pr_loop.enabled` is an OPT-IN gate — a fresh install seeds `false` and stamps
+# no /sdd-pr-loop glue at all. This suite's job is the COMMAND-SURFACE contract (generated
+# into every selected front-end, reclaimed on deselect), which only has a subject when the
+# loop is on, so arm the gate for the whole suite via the env override. The opt-in default
+# itself is owned by tests/test_pr_loop.sh (R3/R15/R18/R18b), which never sets this.
+export HARNESS_PR_LOOP_ENABLED=true
+
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 

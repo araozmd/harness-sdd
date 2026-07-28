@@ -340,9 +340,11 @@ points to serial `/sdd-fix`.
 
 After a feature's local gate is green and its PR is open, `/sdd-pr-loop <pr>` drives the
 Codex review cycle to a terminal state. It is installed only while `pr_loop.enabled` is
-`true` (the default) — see [INSTALL.md](INSTALL.md#sdd-pr-loop-gated-on-pr_loopenabled)
-for the config block and the `HARNESS_*` env knobs. Where it is **not** installed, drive
-the same cycle by hand: request the review, apply the blocking findings, wait for merge.
+`true`, and that gate is **opt-in**: a fresh install seeds `false`, so the command is
+absent until someone turns it on — see
+[INSTALL.md](INSTALL.md#sdd-pr-loop-opt-in-gated-on-pr_loopenabled) for the config block
+and the `HARNESS_*` env knobs. Where it is **not** installed, drive the same cycle by
+hand: request the review, apply the blocking findings, wait for merge.
 
 **Preconditions.** The **Codex GitHub App** on the repository, an **authed `gh`**, and
 **`jq`** on `PATH`. Step 0 of the loop runs `tools/wait-for-codex.sh preflight <pr>`,

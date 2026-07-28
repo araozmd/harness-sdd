@@ -96,9 +96,11 @@ approves) → `builder` → `reviewer`.
 | **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/agents/*` personas (+ `pr-fixer`) + `.agents/workflows/*`, including `/sdd-fix-parallel` and `/sdd-pr-loop` |
 
 `/sdd-pr-loop` and the `pr-fixer` sub-agent are the only **gated** glue: they are stamped
-only while `pr_loop.enabled` is `true` (the default) in `harness.config.yaml`. The loop
-needs the **Codex GitHub App** on the repo, an **authed `gh`** and **`jq`**; on a repo
-without them set `pr_loop.enabled: false` and no `/sdd-pr-loop` glue is written anywhere.
+only while `pr_loop.enabled` is `true` in `harness.config.yaml`, and that gate is
+**opt-in — a fresh install seeds `false`**. The loop needs the **Codex GitHub App** on the
+repo, an **authed `gh`** and **`jq`**; without them `/sdd-pr-loop` could only fail its own
+preflight, so nothing is written until you set `pr_loop.enabled: true` and re-run the
+installer. An absent block, an absent key or any non-`true` value all mean off.
 
 The harness body — `AGENTS.md`, `agents/`, `specs/`, `progress/`, `init.sh`, the
 stores — is **identical** across all of them. Only the entry filename and the
@@ -246,8 +248,9 @@ ${CODEX_HOME:-~/.codex}/prompts/  Codex CLI slash-command prompts (GLOBAL, inclu
 unresolved thread is Codex-owned. A non-Codex unresolved thread routes to `needs-human`
 and never merges.
 
-Policy lives in `harness.config.yaml` under `pr_loop:` — `enabled` (master gate),
-`auto_merge`, `max_rounds`, `blocking_severities`, `merge_strategy` — each overridable
+Policy lives in `harness.config.yaml` under `pr_loop:` — `enabled` (opt-in master gate,
+seeded `false`), `auto_merge`, `max_rounds`, `blocking_severities`, `merge_strategy` —
+each overridable
 per run by `HARNESS_PR_LOOP_ENABLED`, `HARNESS_AUTO_MERGE`, `HARNESS_MAX_ROUNDS`,
 `HARNESS_BLOCKING_SEVERITIES`, `HARNESS_MERGE_STRATEGY`. Execution knobs are env-only:
 `HARNESS_POLL_INTERVAL` (60s), `HARNESS_POLL_CEILING` (900s), `HARNESS_FIRST_RESPONSE`
