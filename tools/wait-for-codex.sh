@@ -86,14 +86,22 @@ wfc_evaluate() {
   # The created_at >= trigger filter excludes stale threads that GitHub re-anchored to
   # head (their commit_id matches but they predate this round's trigger). No-op when
   # the anchor is empty. ISO-8601 timestamps compare correctly as lexical strings.
-  if [ -f "$_ev_dir/review-comments.json" ]; then
-    _ev_findings="$(jq --arg bot "$WFC_BOT" --arg head "$_ev_head" --arg since "$_ev_since" '
-      [ .[]? | select((.user.login // "") | startswith($bot))
-             | select((.commit_id // "") == $head)
-             | select($since == "" or ((.created_at // "") >= $since)) ] | length' \
-      "$_ev_dir/review-comments.json" 2>/dev/null || echo 0)"
-    if [ "$(wfc_count "$_ev_findings")" -gt 0 ]; then echo findings; return 0; fi
-  fi
+  # review-comments.json is a REQUIRED source, not an optional one: it is the only
+  # stream that carries inline findings. Absent (a failed fetch never staged it) or
+  # unreadable means "we do not know", NOT "zero findings" — falling through to the
+  # clean-banner conditions there would report a PR with fresh blocking findings as
+  # clean (exit 3), which the caller skips classification on and auto-merges. Stay
+  # pending so the poll retries.
+  [ -f "$_ev_dir/review-comments.json" ] || { echo pending; return 0; }
+  _ev_findings="$(jq --arg bot "$WFC_BOT" --arg head "$_ev_head" --arg since "$_ev_since" '
+    [ .[]? | select((.user.login // "") | startswith($bot))
+           | select((.commit_id // "") == $head)
+           | select($since == "" or ((.created_at // "") >= $since)) ] | length' \
+    "$_ev_dir/review-comments.json" 2>/dev/null || printf 'unreadable')"
+  case "$_ev_findings" in
+    ''|*[!0-9]*) echo pending; return 0 ;;
+  esac
+  if [ "$_ev_findings" -gt 0 ]; then echo findings; return 0; fi
 
   # Condition 2: FRESH review summary banner naming the head commit, with zero findings.
   # submittedAt >= trigger excludes a banner from a PRIOR review of the same head (e.g. a
@@ -297,9 +305,26 @@ fetch_sources() {
   # `--paginate --slurp` then `jq 'add // []'`: --slurp is required so paginated REST
   # results remain parseable past page 1, and --paginate is required so a finding past
   # page 1 is seen at all. Neither may be dropped.
-  gh api "repos/$owner/$repo/pulls/$PR_NUMBER/comments" --paginate --slurp 2>/dev/null \
-    | jq 'add // []' > "$ROUND_DIR/review-comments.json" \
-    || echo '[]' > "$ROUND_DIR/review-comments.json"
+  #
+  # A FAILED fetch is NOT an empty result. This is the authoritative findings stream, so
+  # writing `[]` on failure lets a fresh clean banner be read as a clean review (exit 3),
+  # which the caller does not classify and auto-merges — a PR with blocking findings
+  # merged on a transient API error. Stage into a temp file and only publish it when the
+  # fetch AND the flatten both succeeded; otherwise keep the last good copy untouched and
+  # return 1 so the poll retries. (Piping straight into jq cannot detect this: jq reads
+  # gh's empty stdout, exits 0 and truncates the file, so the `||` branch never fires.)
+  _fs_raw="$ROUND_DIR/.review-comments.raw"
+  _fs_tmp="$ROUND_DIR/.review-comments.tmp"
+  if gh api "repos/$owner/$repo/pulls/$PR_NUMBER/comments" --paginate --slurp \
+       > "$_fs_raw" 2>/dev/null \
+     && jq 'add // []' < "$_fs_raw" > "$_fs_tmp" 2>/dev/null \
+     && [ -s "$_fs_tmp" ]; then
+    rm -f "$_fs_raw"
+    mv "$_fs_tmp" "$ROUND_DIR/review-comments.json"
+  else
+    rm -f "$_fs_raw" "$_fs_tmp"
+    return 1
+  fi
   # Issue comments via the PAGINATED REST endpoint. gh pr view --json comments caps at
   # first:100, so a clean banner (condition 2b) posted past page 1 would be missed and
   # an otherwise-clean PR would time out. This file is what condition 2b scans.
@@ -312,8 +337,9 @@ fetch_sources() {
   else
     echo '[]' > "$ROUND_DIR/reactions.json"
   fi
-  # A truncated/failed write must never poison the evaluation.
-  [ -s "$ROUND_DIR/review-comments.json" ] || echo '[]' > "$ROUND_DIR/review-comments.json"
+  # A truncated/failed write must never poison the evaluation. review-comments.json is
+  # deliberately NOT defaulted here: for the findings stream, an empty-but-valid `[]` is
+  # indistinguishable from a successful zero-findings fetch, so it is retried above.
   [ -s "$ROUND_DIR/issue-comments.json" ]  || echo '[]' > "$ROUND_DIR/issue-comments.json"
   [ -s "$ROUND_DIR/reactions.json" ]       || echo '[]' > "$ROUND_DIR/reactions.json"
   return 0

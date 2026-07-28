@@ -483,7 +483,11 @@ case "$sub" in
     done
     case "$_ep" in
       */issues/comments/*/reactions) cat "$STUB_DIR/reactions.json" ;;
-      */pulls/*/comments)            cat "$STUB_DIR/review-comments.page.json" ;;
+      */pulls/*/comments)
+        # `comments-fetch-fail` = the pull-review-comments endpoint alone fails, while
+        # everything else (including a clean banner in `gh pr view`) still answers.
+        [ "$mode" = "comments-fetch-fail" ] && exit 1
+        cat "$STUB_DIR/review-comments.page.json" ;;
       */issues/comments/*)
         [ "$mode" = "no-trigger-ts" ] && exit 1
         printf '%s\n' "${STUB_TRIGGER_TS:-2026-01-01T00:00:00Z}" ;;
@@ -756,6 +760,36 @@ test_evaluate_is_offline() {                          # R29
   _eb="$T/fx/bin"
   [ -e "$_eb/gh" ] && fail "R29: the offline sandbox leaked a gh binary"
   pass "R29 evaluate is offline (PATH without gh) and exits 0/1/3"
+}
+
+test_failed_findings_fetch_is_never_clean() {         # R55
+  if ! have_jq; then skip "test_failed_findings_fetch_is_never_clean (jq not installed)"; return 0; fi
+  # review-comments.json is the authoritative findings stream. If its fetch fails while a
+  # FRESH clean banner is already visible, an empty-but-valid `[]` would satisfy condition
+  # 2 and exit 3 — and 3 means "clean, zero findings", which the caller does not classify
+  # and (auto_merge defaults on) merges. A failed required-source fetch must RETRY.
+  _rc="$(run_wait wcfail clean comments-fetch-fail \
+         HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=1 HARNESS_FIRST_RESPONSE=0)"
+  [ "$_rc" = 3 ] && fail "R55: a failed findings fetch alongside a fresh banner was reported clean"
+  [ "$_rc" = 2 ] || fail "R55: a failed findings fetch must keep polling to the ceiling (got $_rc)"
+  grep -qiF 'fetch failed' "$T/.wcfail.err" || fail "R55: the failed fetch is not reported as a retry"
+  [ -f "$T/wcfail/round/review-comments.json" ] \
+    && fail "R55: a failed fetch published an empty findings stream"
+  # …and offline, the same shape must evaluate as pending, never clean.
+  _f="$(mk_fixture no-findings-stream)"
+  printf '{"headRefOid":"%s","reviews":[{"author":{"login":"chatgpt-codex-connector"},"body":"Reviewed commit: abcdef1 — all good","submittedAt":"2026-06-02T00:00:00Z"}],"comments":[]}\n' \
+    "$FX_HEAD" > "$_f/pr.json"
+  rm -f "$_f/review-comments.json"
+  [ "$(eval_fixture "$_f")" = 1 ] \
+    || fail "R55: a MISSING findings stream must stay pending, never clean"
+  printf 'not json\n' > "$_f/review-comments.json"
+  [ "$(eval_fixture "$_f")" = 1 ] \
+    || fail "R55: an UNREADABLE findings stream must stay pending, never clean"
+  # a genuinely fetched empty stream is still allowed to be clean
+  echo '[]' > "$_f/review-comments.json"
+  [ "$(eval_fixture "$_f")" = 3 ] \
+    || fail "R55: a successfully fetched zero-findings stream must still read as clean"
+  pass "R55 a failed/unreadable findings fetch retries and is never reported as a clean review"
 }
 
 test_cache_root_and_gitignore() {                     # R35
@@ -1035,6 +1069,7 @@ test_clean_via_issue_comment_banner
 test_clean_via_thumbs_reaction
 test_bot_login_prefix_match
 test_evaluate_is_offline
+test_failed_findings_fetch_is_never_clean
 test_cache_root_and_gitignore
 
 test_body_preflight_before_trigger
