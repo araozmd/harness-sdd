@@ -322,7 +322,8 @@ is awaited; guarded fixes run exclusively in numeric order after that wave settl
 
 Each targeted worker keeps its pre-provisioned branch/worktree, drives clean
 Builder↔Reviewer rounds, creates only the code PR after local approval, and runs
-`/pr-loop` for that PR alone. An observed code merge is reported to the coordinator;
+`/sdd-pr-loop` for that PR alone if it is installed (otherwise it drives that one PR's
+review by hand). An observed code merge is reported to the coordinator;
 the worker does not recreate or tear down F02 resources.
 
 After all workers settle, the coordinator serializes history, performs one locked final
@@ -334,6 +335,65 @@ or force-deletes shared state. Recoverable failures preserve resources and do no
 cancel siblings. No ready work is a zero-mutation success; missing native concurrency
 or `execution.builder.backend: delegate` fails before manifest/provision/claim and
 points to serial `/sdd-fix`.
+
+## The PR review loop (`/sdd-pr-loop`)
+
+After a feature's local gate is green and its PR is open, `/sdd-pr-loop <pr>` drives the
+Codex review cycle to a terminal state. It is installed only while `pr_loop.enabled` is
+`true`, and that gate is **opt-in**: a fresh install seeds `false`, so the command is
+absent until someone turns it on — see
+[INSTALL.md](INSTALL.md#sdd-pr-loop-opt-in-gated-on-pr_loopenabled) for the config block
+and the `HARNESS_*` env knobs. Where it is **not** installed, drive the same cycle by
+hand: request the review, apply the blocking findings, wait for merge.
+
+**Preconditions.** The **Codex GitHub App** on the repository, an **authed `gh`**, and
+**`jq`** on `PATH`. Step 0 of the loop runs `tools/wait-for-codex.sh preflight <pr>`,
+which checks each one and **posts nothing**; a failure exits `5` with a one-line
+diagnostic naming the failed check and its remedy, and the loop stops there. None of this
+is an `init.sh` dependency.
+
+**One round.**
+
+1. **Preflight** — stop on any failure before posting.
+2. **Trigger** — `gh pr comment <pr> --body "@codex review"`, taking the trigger comment
+   id from the URL that command prints (`…#issuecomment-<id>`), never from a separate
+   comment-list call: an unpaginated list returns only the first 30 (oldest) comments, so
+   on a busy PR the lookup yields a stale id and silently disables the freshness filter.
+3. **Watch** — launch `tools/wait-for-codex.sh <pr> <trigger-id> <round-dir>` **in the
+   background** and branch on its exit code; never hand-poll. `0` findings · `3` clean ·
+   `2` ceiling timeout (never "clean") · `4` usage/precondition · `5` no Codex activity
+   inside `HARNESS_FIRST_RESPONSE` (the Codex GitHub App is probably not installed).
+   The watcher writes `pr.json`, `review-comments.json`, `issue-comments.json`,
+   `reactions.json` and `trigger-ts.txt` into the round dir on every poll — `gh pr view`
+   alone returns neither the inline findings nor a banner past the first 100 comments.
+   Codex signals *clean* three different ways (a review banner naming the head commit,
+   that same banner as an issue comment, or a 👍 reaction on the trigger comment) and all
+   three are load-bearing.
+4. **Classify** — match `P0|P1|P2|nit` case-insensitively anywhere in the body (Codex tags
+   severity as a shields.io **badge**, not bare text), first match wins, default `P2`,
+   then filter to `blocking_severities`. Only **fresh** inline comments count: filed
+   against `headRefOid` **and** `created_at >= trigger`, because GitHub re-stamps stale
+   threads' `commit_id` onto each new head.
+5. **Stall check** — a blocking comment id present in this round *and* the previous one
+   escalates immediately, whatever the round number.
+6. **Fix** — one `pr-fixer` sub-agent per blocking comment (one comment, one fix, one
+   commit), then push. The `max_rounds - 1` round instead builds one combined prompt and
+   escalates to a different worker, or runs one combined in-session pass. Reaching
+   `max_rounds` labels the PR `needs-human` and stops.
+7. **Gate re-check + terminal state** — with every gate green: if any unresolved review
+   thread has a **non-Codex** participant, route to `needs-human`, resolve nothing and do
+   not merge. Otherwise resolve the Codex-owned threads and, when `auto_merge` is true,
+   merge with `merge_strategy` and `--delete-branch`; with `auto_merge` false, stop after
+   the green summary. Local branch cleanup runs only if the merge command itself
+   succeeded. A handover summary (rounds, worker totals, round-by-round, blocking
+   comments resolved, cache path) is written to
+   `<HARNESS_DIR>/.pr-loop/<pr>/handover-summary.md` and posted on **both** terminal
+   states.
+
+The per-round cache lives at `<HARNESS_DIR>/.pr-loop/<pr>/round-<n>/`, is gitignored, and
+is best-effort — if it is missing or corrupt, reconstruct it from the `gh` API. Re-check
+an existing round offline (no `gh`, no network) with
+`sh tools/wait-for-codex.sh evaluate <round-dir>` — `0` findings, `3` clean, `1` pending.
 
 ## Context hygiene
 

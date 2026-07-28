@@ -16,6 +16,13 @@ trap 'rm -rf "$T"' EXIT
 # (Codex-specific tests below still override CODEX_HOME per-run for crisp isolation.)
 export CODEX_HOME="$T/codex-home"
 
+# E18-F01: `pr_loop.enabled` is an OPT-IN gate — a fresh install seeds `false` and stamps
+# no /sdd-pr-loop glue at all. This suite's job is the COMMAND-SURFACE contract (generated
+# into every selected front-end, reclaimed on deselect), which only has a subject when the
+# loop is on, so arm the gate for the whole suite via the env override. The opt-in default
+# itself is owned by tests/test_pr_loop.sh (R3/R15/R18/R18b), which never sets this.
+export HARNESS_PR_LOOP_ENABLED=true
+
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
@@ -398,6 +405,22 @@ grep -qF 'pre-provisioned branch/worktree' "$T/.claude/commands/sdd-fix-parallel
 grep -qF 'one-time F02 provisioning while the primary is clean, complete' \
   "$T/.claude/commands/sdd-fix-parallel.md" ||
   fail "sdd-fix-parallel installed command writes manifest before provisioning"
+# E18-F01 R52: the gated /sdd-pr-loop command ships alongside the six ungated ones on a
+# default install (pr_loop.enabled defaults to true), resolves the watcher + the pr-fixer
+# role against .harness/, and carries $ARGUMENTS.
+[ -f "$T/.claude/commands/sdd-pr-loop.md" ] || fail "sdd-pr-loop command missing"
+grep -qF '.harness/tools/wait-for-codex.sh' "$T/.claude/commands/sdd-pr-loop.md" \
+  || fail "sdd-pr-loop does not resolve the watcher against .harness/"
+grep -qF '$ARGUMENTS' "$T/.claude/commands/sdd-pr-loop.md" \
+  || fail "sdd-pr-loop does not carry \$ARGUMENTS"
+[ -f "$T/.harness/agents/pr-fixer.md" ] \
+  || fail "pr-fixer role not installed into profile"
+[ -f "$T/.claude/agents/pr-fixer.md" ] \
+  || fail "pr-fixer Claude sub-agent shim not emitted"
+grep -qF '.harness/agents/pr-fixer.md' "$T/.claude/agents/pr-fixer.md" \
+  || fail "pr-fixer shim does not resolve against .harness/"
+[ -x "$T/.harness/tools/wait-for-codex.sh" ] \
+  || fail "wait-for-codex.sh not installed executable"
 if ! python3 - "$T/.harness/agents/fixer.md" <<'PY'
 import sys
 text = open(sys.argv[1]).read()
@@ -494,6 +517,14 @@ cmp -s "$T/.claude/commands/sdd-fix.md" "$T/.opencode/command/sdd-fix.md" \
   || fail "opencode sdd-fix differs from claude sdd-fix"
 cmp -s "$T/.claude/commands/sdd-fix-parallel.md" "$T/.opencode/command/sdd-fix-parallel.md" \
   || fail "opencode sdd-fix-parallel differs from claude"
+# E18-F01 R52/R11: the gated command mirrors into OpenCode byte-identically, and the
+# file-based pr-fixer sub-agent is emitted with `mode: subagent`.
+[ -f "$T/.opencode/command/sdd-pr-loop.md" ] || fail "opencode sdd-pr-loop command missing"
+cmp -s "$T/.claude/commands/sdd-pr-loop.md" "$T/.opencode/command/sdd-pr-loop.md" \
+  || fail "opencode sdd-pr-loop differs from claude sdd-pr-loop"
+[ -f "$T/.opencode/agent/pr-fixer.md" ] || fail "opencode pr-fixer sub-agent missing"
+grep -qE '^mode: subagent$' "$T/.opencode/agent/pr-fixer.md" \
+  || fail "opencode pr-fixer is not declared mode: subagent"
 pass "OpenCode commands generated (R7)"
 
 # ── Antigravity glue (.agents/, E07-F01 R1–R12) ───────────────────────────────────────────────
@@ -528,11 +559,16 @@ for r in orchestrator architect builder reviewer scout doc-critic; do
 done
 
 # R6/R7: all five workflows generated, each carrying a `description` (slash-command registration).
-for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel; do
+for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-loop; do
   [ -f "$T/.agents/workflows/$w.md" ]                    || fail "antigravity workflow $w missing (R6)"
   grep -qE '^description:' "$T/.agents/workflows/$w.md"   || fail "antigravity workflow $w has no description (R7)"
   grep -qF '$ARGUMENTS' "$T/.agents/workflows/$w.md"      || fail "antigravity workflow $w does not carry \$ARGUMENTS (R8)"
 done
+# E18-F01 R13/R52: the gated pr-fixer persona is emitted for antigravity too, pointing at
+# the canonical role — and it is NOT part of the model-routing persona map.
+[ -f "$T/.agents/agents/pr-fixer.md" ] || fail "antigravity pr-fixer persona missing (E18-F01 R13)"
+grep -qF '.harness/agents/pr-fixer.md' "$T/.agents/agents/pr-fixer.md" \
+  || fail "antigravity pr-fixer persona does not defer to .harness/agents/pr-fixer.md" 
 
 # R8: each workflow acts as its role, resolved against .harness/agents/*.md.
 grep -qF '.harness/agents/orchestrator.md' "$T/.agents/workflows/sdd-next.md" || fail "sdd-next workflow does not resolve orchestrator against .harness/ (R8)"
@@ -543,7 +579,7 @@ grep -qF '.harness/agents/fixer.md'        "$T/.agents/workflows/sdd-fix.md"  ||
 grep -qF '.harness/agents/fixer.md' "$T/.agents/workflows/sdd-fix-parallel.md" || fail "sdd-fix-parallel workflow does not resolve fixer"
 
 # R9: each workflow body is byte-identical to the Claude command of the same name (no drift).
-for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel; do
+for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-loop; do
   cmp -s "$T/.claude/commands/$w.md" "$T/.agents/workflows/$w.md" || fail "antigravity workflow $w differs from claude $w (R9)"
 done
 pass "Antigravity glue generated (R11)"
@@ -783,9 +819,11 @@ pass "--agents=antigravity writes GEMINI.md entrypoint (R1, Codex r1 P2)"
 TCX="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 CODEX_HOME="$TCX/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCX" >/dev/null || fail "--agents=codex exited non-zero"
 [ -f "$TCX/AGENTS.md" ]                 || fail "codex: AGENTS.md (Codex's native entrypoint) must always be written"
-for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel; do
+for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-loop; do
   [ -f "$TCX/ch/prompts/$_c.md" ]       || fail "codex: global prompt $_c.md not installed"
 done
+# E18-F01 R14: NO pr-fixer artifact is ever created for the codex front-end.
+[ -f "$TCX/.codex/agents/pr-fixer.toml" ] && fail "codex: must not create a pr-fixer artifact (E18-F01 R14)" 
 # prompts are GLOBAL — nothing codex-owned lands under the target repo
 [ -d "$TCX/.codex" ]                    && fail "codex: must not write a project-local .codex/ dir (prompts are GLOBAL)"
 # no OTHER front-end stamped
@@ -820,6 +858,7 @@ _cwarn="$(CODEX_HOME="$CH" sh "$SRC/harness-install.sh" --agents=claude "$TCD" 2
   || fail "codex deselect re-run exited non-zero"
 [ -f "$CH/prompts/sdd-next.md" ] && fail "R13: deselected codex pristine prompt (sdd-next.md) not removed"
 [ -f "$CH/prompts/sdd-fix-parallel.md" ] && fail "E15-F03: deselected pristine parallel prompt not removed"
+[ -f "$CH/prompts/sdd-pr-loop.md" ] && fail "E18-F01 R4: deselected pristine sdd-pr-loop prompt not removed"
 [ -f "$CH/prompts/sdd-fix.md" ]  || fail "R13: user-edited codex prompt (sdd-fix.md) must be preserved on deselect"
 printf '%s' "$_cwarn" | grep -qiF 'codex' || fail "R13: removal of codex glue was not warned about"
 grep -qx codex "$TCD/.harness/.agents" && fail "R8: codex must be dropped from .harness/.agents after deselect"
@@ -980,8 +1019,12 @@ sh "$SRC/harness-install.sh" --agents=gemini "$TM" >/dev/null 2>&1 || fail "scop
 [ -f "$TM/.claude/agents/orchestrator.md" ] && fail "P1: harness claude shim not removed on deselect"
 [ -f "$TM/.claude/commands/sdd-next.md" ]   && fail "P1: harness claude command not removed on deselect"
 [ -f "$TM/.claude/commands/sdd-fix-parallel.md" ] && fail "E15-F03: harness parallel command not removed on deselect"
+[ -f "$TM/.claude/commands/sdd-pr-loop.md" ] && fail "E18-F01 R4: harness sdd-pr-loop command not removed on deselect"
+[ -f "$TM/.claude/agents/pr-fixer.md" ] && fail "E18-F01 R4: harness pr-fixer shim not removed on deselect"
 [ -f "$TM/.opencode/command/sdd-next.md" ]  && fail "P1: harness opencode command not removed on deselect"
 [ -f "$TM/.opencode/command/sdd-fix-parallel.md" ] && fail "E15-F03: opencode parallel command not removed on deselect"
+[ -f "$TM/.opencode/command/sdd-pr-loop.md" ] && fail "E18-F01 R4: opencode sdd-pr-loop not removed on deselect"
+[ -f "$TM/.opencode/agent/pr-fixer.md" ] && fail "E18-F01 R4: opencode pr-fixer agent not removed on deselect"
 # user-authored files PRESERVED (the whole point):
 [ -f "$TM/.claude/agents/my-custom.md" ]   || fail "P1: user-authored .claude/agents/my-custom.md was wrongly deleted"
 [ -f "$TM/.claude/commands/my-cmd.md" ]     || fail "P1: user-authored .claude/commands/my-cmd.md was wrongly deleted"
@@ -1201,10 +1244,14 @@ test_no_models_block_is_byte_identical() {   # R11
     || fail "R11: TB re-run exited non-zero"
   # R11 permits exactly ONE exclusion — `.harness/harness.config.yaml` (TB's block was
   # stripped and re-seeded, so its bytes legitimately differ). `__pycache__` is a python
-  # runtime artifact, not an installed file. Nothing else may be excluded: manifest.txt in
-  # particular MUST be compared, or the strongest test in the suite goes blind to any leak
-  # of model state into the manifest.
-  diff -r -x 'harness.config.yaml' -x '__pycache__' "$_ta" "$_tb" >/dev/null \
+  # runtime artifact, not an installed file. `.sdd-pr-loop.owners` is the cross-target
+  # ownership ledger of the machine-GLOBAL Codex prompt (E18-F01, Codex r4 P1 #3662785235):
+  # it records WHICH target wants that prompt, so by construction it holds TA's path in
+  # TA's sandboxed CODEX_HOME and TB's in TB's — it can never be byte-identical between two
+  # different targets, and it carries no model state. Nothing else may be excluded:
+  # manifest.txt in particular MUST be compared, or the strongest test in the suite goes
+  # blind to any leak of model state into the manifest.
+  diff -r -x 'harness.config.yaml' -x '__pycache__' -x '.sdd-pr-loop.owners' "$_ta" "$_tb" >/dev/null \
     || fail "R11: an all-inherit target differs from one whose models: block was stripped"
   # Explicit negatives: an unconfigured target grows NO model key and NO new directory.
   grep -rq '^model:' "$_ta/.claude/agents"  && fail "R11: unconfigured install stamped a model: in .claude/agents"

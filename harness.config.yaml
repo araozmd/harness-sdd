@@ -147,7 +147,7 @@ verification:
   init_script: ./init.sh
   # Commands the Reviewer must run before marking work done. Project-specific —
   # edit these per target repo.
-  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh && sh tests/test_mirror.sh && sh tests/test_epic_lifecycle.sh && sh tests/test_sdd_plan.sh && sh tests/test_sdd_drill.sh && sh tests/test_sdd_fix.sh && sh tests/test_architect_adr.sh && sh tests/test_drift_check.sh && sh tests/test_doc_critic.sh && sh tests/test_ownership.sh && sh tests/test_board_lock.sh && sh tests/test_adr_citation.sh && sh tests/test_fix_worktree.sh && sh tests/test_sdd_fix_parallel.sh && sh tests/test_dependency_diagnostics.sh && sh tests/test_rationale_docs.sh && sh tests/test_next_task.sh && sh tests/test_model_routing.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry + board-mirror + epic lifecycle + sdd-plan + sdd-drill + sdd-fix + architect-adr + drift-check + doc-critic + ownership + board-lock + adr-citation + fix-worktree + parallel-fix + dependency diagnostics + rationale docs + deterministic selector + per-role model routing suites
+  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh && sh tests/test_mirror.sh && sh tests/test_epic_lifecycle.sh && sh tests/test_sdd_plan.sh && sh tests/test_sdd_drill.sh && sh tests/test_sdd_fix.sh && sh tests/test_architect_adr.sh && sh tests/test_drift_check.sh && sh tests/test_doc_critic.sh && sh tests/test_ownership.sh && sh tests/test_board_lock.sh && sh tests/test_adr_citation.sh && sh tests/test_fix_worktree.sh && sh tests/test_sdd_fix_parallel.sh && sh tests/test_dependency_diagnostics.sh && sh tests/test_rationale_docs.sh && sh tests/test_next_task.sh && sh tests/test_model_routing.sh && sh tests/test_pr_loop.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry + board-mirror + epic lifecycle + sdd-plan + sdd-drill + sdd-fix + architect-adr + drift-check + doc-critic + ownership + board-lock + adr-citation + fix-worktree + parallel-fix + dependency diagnostics + rationale docs + deterministic selector + per-role model routing + pr-loop suites
 
   lint_command: ""        # e.g. "ruff check ." or "npm run lint"
   typecheck_command: ""   # e.g. "mypy ." or "tsc --noEmit"
@@ -205,3 +205,23 @@ models:
   # pin.codex.standard: ""
   # pin.codex.cheap: ""
   # pin.claude.reasoning: ""
+
+# Codex PR review loop (E18-F01) — the policy knobs of `/sdd-pr-loop`.
+# `enabled` is OPT-IN: it is off unless it reads exactly `true`. An absent block, an
+# absent key, an empty value or any other value all mean OFF, and nothing is stamped.
+# Turn it on ONLY on a repo that has the Codex GitHub App installed plus an authed
+# `gh` (and `jq` on PATH) — without them /sdd-pr-loop can only fail its own preflight.
+# While it is on, /sdd-pr-loop and the pr-fixer sub-agent are stamped into every
+# selected front-end; flipping it back to false reclaims all of that glue.
+# Per-run env overrides (env wins over config): HARNESS_PR_LOOP_ENABLED,
+# HARNESS_AUTO_MERGE, HARNESS_MAX_ROUNDS, HARNESS_BLOCKING_SEVERITIES,
+# HARNESS_MERGE_STRATEGY. Execution knobs are env-ONLY (never config):
+# HARNESS_POLL_INTERVAL (60), HARNESS_POLL_CEILING (900),
+# HARNESS_FIRST_RESPONSE (180), HARNESS_DRY_RUN.
+# (The harness's own source repo opts in; every fresh install is seeded with `false`.)
+pr_loop:
+  enabled: true                  # opt-in master gate; ONLY `true` stamps /sdd-pr-loop glue
+  auto_merge: true               # merge once every gate is green and threads are Codex-only
+  max_rounds: 4                  # round cap; the cap round labels the PR needs-human
+  blocking_severities: "P0,P1"   # comma-separated severities that block a merge
+  merge_strategy: "merge"        # merge | squash

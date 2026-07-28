@@ -6,8 +6,11 @@ progress/*/
 !progress/inbox/
 !progress/inbox/**
 
-# pr-loop / multi-cli-orchestrator local cache (Codex review state)
-.mco-cache/
+# /sdd-pr-loop round cache (Codex review state fetched per round). The harness source
+# runs from the repo root, where <HARNESS_DIR>/.pr-loop resolves to a root-level dir that
+# the .harness/ ignore below does NOT cover — so ignore it explicitly. (Installed consumers
+# get the equivalent entry in their seeded .harness/.gitignore from harness-install.sh.)
+/.pr-loop/
 
 # Local isolated feature worktrees.
 .worktrees/

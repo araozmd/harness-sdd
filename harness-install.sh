@@ -241,6 +241,62 @@ models:
   # pin.claude.reasoning: ""
 EOF
   fi
+
+  # --- pr_loop block (E18-F01 Codex review loop) ---
+  # Top-level, append-only at EOF. `enabled` is OPT-IN, so an absent block is behaviorally
+  # equivalent to the values below (see _cfg_pr_loop_value / pr_loop_enabled): a preserved
+  # pre-E18 config resolves to DISABLED and keeps working untouched. The block is still
+  # appended on upgrade so the on switch is discoverable, and so seeded and migrated
+  # configs converge. Keep this text BYTE-IDENTICAL to the tail of the source
+  # harness.config.yaml (modulo the `enabled:` line, which seed_pr_loop_optin forces to
+  # the opt-in default on a fresh copy): a FRESH install copies the config and never
+  # migrates, an UPGRADE only migrates, and R17 requires the two to converge on the same
+  # bytes.
+  if ! grep -Eq '^pr_loop:[[:space:]]*(#.*)?$' "$_cfg"; then
+    cat >> "$_cfg" <<'EOF'
+
+# Codex PR review loop (E18-F01) — the policy knobs of `/sdd-pr-loop`.
+# `enabled` is OPT-IN: it is off unless it reads exactly `true`. An absent block, an
+# absent key, an empty value or any other value all mean OFF, and nothing is stamped.
+# Turn it on ONLY on a repo that has the Codex GitHub App installed plus an authed
+# `gh` (and `jq` on PATH) — without them /sdd-pr-loop can only fail its own preflight.
+# While it is on, /sdd-pr-loop and the pr-fixer sub-agent are stamped into every
+# selected front-end; flipping it back to false reclaims all of that glue.
+# Per-run env overrides (env wins over config): HARNESS_PR_LOOP_ENABLED,
+# HARNESS_AUTO_MERGE, HARNESS_MAX_ROUNDS, HARNESS_BLOCKING_SEVERITIES,
+# HARNESS_MERGE_STRATEGY. Execution knobs are env-ONLY (never config):
+# HARNESS_POLL_INTERVAL (60), HARNESS_POLL_CEILING (900),
+# HARNESS_FIRST_RESPONSE (180), HARNESS_DRY_RUN.
+# (The harness's own source repo opts in; every fresh install is seeded with `false`.)
+pr_loop:
+  enabled: false                 # opt-in master gate; ONLY `true` stamps /sdd-pr-loop glue
+  auto_merge: true               # merge once every gate is green and threads are Codex-only
+  max_rounds: 4                  # round cap; the cap round labels the PR needs-human
+  blocking_severities: "P0,P1"   # comma-separated severities that block a merge
+  merge_strategy: "merge"        # merge | squash
+EOF
+  fi
+}
+
+# seed_pr_loop_optin <file> — force `pr_loop.enabled` to the OPT-IN default (`false`) in a
+# freshly SEEDED config, section-scoped so no same-named key elsewhere is touched.
+#
+# A fresh install copies the harness's own harness.config.yaml verbatim, and the harness
+# source repo legitimately runs with `enabled: true` (it has the Codex GitHub App). Copying
+# that value into a target would arm a review loop the target may have no way to run — the
+# same reason `test_command` is blanked on seed. The replacement line is BYTE-IDENTICAL to
+# the one migrate_config appends, which is what keeps seeded and migrated blocks convergent
+# (E18-F01 R15/R17). A no-op when the block or the key is absent — absent already means off.
+seed_pr_loop_optin() {
+  awk '
+    /^pr_loop:[[:space:]]*(#.*)?$/ { p=1; print; next }
+    p && /^[^[:space:]#]/ { p=0 }
+    p && /^[[:space:]]+enabled:/ {
+      print "  enabled: false                 # opt-in master gate; ONLY `true` stamps /sdd-pr-loop glue"
+      next
+    }
+    { print }
+  ' "$1" > "$1.prltmp" && mv "$1.prltmp" "$1"
 }
 
 # _cfg_has_umbrella_manifest <file> — true (exit 0) iff a `manifest:` key exists
@@ -313,6 +369,42 @@ _cfg_models_value() {
   ' "$1"
 }
 
+# _cfg_pr_loop_value <file> <key> — print the `pr_loop.<key>` scalar (unquoted,
+# comment-stripped) from inside the TOP-LEVEL `pr_loop:` section; empty if unset or if the
+# file does not exist. Section-scoped exactly like _cfg_models_value, so a same-named key
+# nested under ANOTHER section (e.g. `ci:\n  enabled: false`) can never change pr_loop
+# behavior (E18-F01 R19). Commented example lines never match — the `#` precedes the key.
+_cfg_pr_loop_value() {
+  [ -f "$1" ] || return 0
+  awk -v k="$2" '
+    BEGIN { gsub(/\./, "[.]", k); re = "^[[:space:]]+" k ":" }
+    /^pr_loop:[[:space:]]*(#.*)?$/ { p=1; next }
+    p && /^[^[:space:]#]/ { p=0 }
+    p && $0 ~ re {
+      sub(/^[[:space:]]+[^:]*:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+      gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+    }
+  ' "$1"
+}
+
+# pr_loop_enabled — exit 0 ONLY when `pr_loop.enabled` resolves to the literal `true`.
+# Precedence: HARNESS_PR_LOOP_ENABLED env → config value → the built-in default `false`
+# (E18-F01 R18/R20). The gate is OPT-IN: an absent block, an absent key, an empty value
+# and any non-`true` value alike mean DISABLED. `/sdd-pr-loop` only functions on a repo
+# that has the Codex GitHub App installed plus an authed `gh`, so defaulting it on would
+# grow a command that can do nothing but fail its own preflight on a fresh install.
+# Enablement is therefore an explicit choice made at install time (E20-F01 surfaces it in
+# the installer; until then it is a documented one-line hand-edit). Reads the target
+# config through $H, which is empty before install_one sets it (⇒ default: disabled).
+pr_loop_enabled() {
+  _prl_v="${HARNESS_PR_LOOP_ENABLED:-}"
+  if [ -z "$_prl_v" ] && [ -n "${H:-}" ]; then
+    _prl_v="$(_cfg_pr_loop_value "$H/harness.config.yaml" enabled)"
+  fi
+  [ "$_prl_v" = "true" ] && return 0
+  return 1
+}
+
 # _mc_insert_after <file> <header-regex> <line>  — insert <line> immediately after the
 # first line matching <header-regex>, leaving every other line byte-for-byte intact.
 _mc_insert_after() {
@@ -342,8 +434,25 @@ AGENT_KEYS="claude gemini opencode antigravity codex"
 # ONLY files a deselection may delete, so a selective re-run never removes a user's
 # own agents/commands sharing the same dir (Codex r2 P1). Keep in sync with the
 # emit_agent calls and the command-copy loops in install_one().
-HARNESS_CLAUDE_SHIMS="orchestrator architect builder reviewer scout doc-critic"
+HARNESS_CLAUDE_SHIMS="orchestrator architect builder reviewer scout doc-critic pr-fixer"
 HARNESS_SDD_CMDS="sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel"
+
+# E18-F01: the pr_loop glue is GATED on the OPT-IN `pr_loop.enabled`, so it is emitted
+# from a SEPARATE list — joining $HARNESS_SDD_CMDS would make it unconditional (and, with
+# the gate off by default, would defeat the opt-in entirely). Removal, by
+# contrast, must always consider it (a target stamped while the gate was on has to be
+# reclaimable after the gate flips off), so every reclamation loop iterates the UNION.
+# `pr-fixer` rides in HARNESS_CLAUDE_SHIMS above for the same reason: ledger only —
+# its emission stays gated. remove_owned is by-name and `[ -f ]`-guarded, so a stem
+# that was never stamped is a harmless no-op.
+HARNESS_PR_LOOP_CMDS="sdd-pr-loop"
+HARNESS_OWNED_CMDS="$HARNESS_SDD_CMDS $HARNESS_PR_LOOP_CMDS"
+
+# The ONE pr-fixer description, shared by every front-end's emitter and by the §7/§7b
+# reclamation compares, so the two can never diverge — a second copy would let the
+# install stamp and the pristine reference disagree, which is exactly what makes an
+# already-stamped file unremovable.
+PR_FIXER_DESC="Fixes exactly ONE Codex review comment in an isolated context: reads the comment and the cited hunk, applies the smallest change, commits, returns. One comment, one fix, one commit, one return."
 
 # ── per-role model routing (E17-F01) ──────────────────────────────────────────
 # Config (`models:` in .harness/harness.config.yaml) → the NATIVE model value of each
@@ -510,6 +619,90 @@ codex_prompts_dir() {
   elif [ -n "${HOME:-}" ]; then
     printf '%s\n' "${HOME}/.codex/prompts"
   fi
+}
+
+# ── cross-target ownership ledger for the GATED global prompt (E18-F01) ────────
+# `${CODEX_HOME:-$HOME/.codex}/prompts/` is machine-GLOBAL and shared by every harness
+# target on the box, but `pr_loop.enabled` is PER-TARGET — and OPT-IN, so `false` is the
+# default. Deciding to reclaim a SHARED artifact from ONE target's local gate therefore
+# destroys a prompt another target still wants: installing any second project with the
+# default config used to silently delete `/prompts:sdd-pr-loop` out from under an
+# already-enabled project, which only got it back by re-running its own installer.
+# (Codex r4 P1 #3662785235.)
+#
+# This is the same hazard that keeps `codex` out of the legacy PRIOR_AGENTS baseline in
+# install_one: never infer ownership of a cross-target artifact from one target's state.
+# The ungated `/sdd-*` prompts do not need a ledger — every selecting target re-stamps
+# them on its next run — but a gate-OFF target never re-stamps `sdd-pr-loop`, so its loss
+# is permanent. Hence: the gated prompt carries a ledger of the targets that currently
+# want it. A target appends itself while its gate is on (§5d), drops itself when the gate
+# goes off or it deselects codex (§7/§7b), and the prompt is reclaimed ONLY once the
+# ledger is EMPTY.
+#
+# FAIL SAFE — unknown ownership never deletes. A missing, unreadable or unwritable ledger
+# beside an existing prompt means "someone else put this here" ⇒ keep it. A stale prompt
+# is a harmless no-op; deleting another project's working command is not.
+#
+# Ledger hygiene: entries are garbage-collected on every read — an entry whose recorded
+# target no longer carries a `.harness/` install cannot want anything, so a deleted (or
+# un-harnessed) target can never pin the prompt forever. Entries are canonical physical
+# paths and the file is rewritten sorted+unique, so re-running converges instead of
+# oscillating.
+
+# _prompt_owner_id — the current target's canonical (symlink-resolved) ledger identity.
+_prompt_owner_id() {
+  ( CDPATH= cd -- "$TARGET" 2>/dev/null && pwd -P ) || printf '%s\n' "$TARGET"
+}
+
+# _owners_file <prompts-dir> <cmd-name> — the ledger path for that prompt. Dot-prefixed
+# and NOT `.md`, so Codex's `*.md` prompt discovery never surfaces it as a command.
+_owners_file() { printf '%s\n' "$1/.$2.owners"; }
+
+# _owners_live <prompts-dir> <cmd-name> — print the ledger's LIVE owners, one per line,
+# dropping entries whose target no longer holds a `.harness/` install. Returns 1 when the
+# ledger is missing or unreadable (ownership UNKNOWN — callers must not reclaim).
+_owners_live() {
+  _ol_f="$(_owners_file "$1" "$2")"
+  { [ -f "$_ol_f" ] && [ -r "$_ol_f" ]; } || return 1
+  while IFS= read -r _ol_e || [ -n "$_ol_e" ]; do
+    [ -n "$_ol_e" ] || continue
+    [ -d "$_ol_e/.harness" ] || continue
+    printf '%s\n' "$_ol_e"
+  done < "$_ol_f"
+}
+
+# _owners_claim <prompts-dir> <cmd-name> — record the current target as an owner
+# (idempotent). Never rewrites a ledger it cannot read: clobbering it would erase the
+# other targets' claims, which is exactly the data loss this ledger exists to prevent.
+_owners_claim() {
+  _oc_f="$(_owners_file "$1" "$2")"
+  if [ -e "$_oc_f" ] && [ ! -r "$_oc_f" ]; then return 0; fi
+  { _owners_live "$1" "$2" || :; _prompt_owner_id; } | sort -u > "$_oc_f.tmp" 2>/dev/null || return 0
+  mv "$_oc_f.tmp" "$_oc_f" 2>/dev/null || rm -f "$_oc_f.tmp" 2>/dev/null || :
+}
+
+# _owners_release <prompts-dir> <cmd-name> — drop the current target's claim. Exits 0 ONLY
+# when the prompt is left UNOWNED (safe to reclaim, ledger removed); 1 when another live
+# target still wants it, or ownership is unknown/unmanageable — in both of which cases the
+# caller must leave the shared prompt alone.
+_owners_release() {
+  _or_f="$(_owners_file "$1" "$2")"
+  [ -e "$_or_f" ] || return 1                              # no ledger ⇒ unknown ⇒ keep
+  { [ -r "$_or_f" ] && [ -w "$_or_f" ]; } || return 1      # unreadable/frozen ⇒ keep
+  _or_rest="$(_owners_live "$1" "$2" | grep -vxF "$(_prompt_owner_id)" || :)"
+  if [ -n "$_or_rest" ]; then
+    printf '%s\n' "$_or_rest" > "$_or_f" 2>/dev/null || :
+    return 1
+  fi
+  rm -f "$_or_f" 2>/dev/null || :
+  return 0
+}
+
+# _is_pr_loop_cmd <cmd-name> — true for the pr_loop-GATED command names (the only ones
+# whose global prompt is ledger-governed).
+_is_pr_loop_cmd() {
+  case " $HARNESS_PR_LOOP_CMDS " in *" $1 "*) return 0 ;; esac
+  return 1
 }
 
 # validate_csv <csv> — split a comma-separated override on commas, trim each token,
@@ -862,6 +1055,7 @@ install_one() {
   chmod +x "$H/tools/fix-worktree.sh" 2>/dev/null || true   # E15-F02 isolated fix-worktree lifecycle helper
   chmod +x "$H/tools/task-diagnostics.py" 2>/dev/null || true   # E16-F01 warn-only dependency diagnostics
   chmod +x "$H/tools/next-task.mjs" 2>/dev/null || true   # E16-F03 deterministic read-only selector
+  chmod +x "$H/tools/wait-for-codex.sh" 2>/dev/null || true   # E18-F01 /sdd-pr-loop background Codex watcher
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"
@@ -880,7 +1074,10 @@ install_one() {
         -e 's|^\( *typecheck_command:\).*|\1 ""   # set during bootstrap|' \
         "$H/harness.config.yaml" > "$H/harness.config.yaml.tmp" \
         && mv "$H/harness.config.yaml.tmp" "$H/harness.config.yaml"
-    info "seeded harness.config.yaml (verification commands blank)"
+    # ...and the target may not have the Codex GitHub App — the review loop is OPT-IN, so
+    # a fresh seed never inherits this repo's own `pr_loop.enabled: true` (E18-F01 R15).
+    seed_pr_loop_optin "$H/harness.config.yaml"
+    info "seeded harness.config.yaml (verification commands blank, pr_loop disabled)"
   else
     info "harness.config.yaml preserved (bootstrap verification commands kept)"
     # Additive, value-preserving migration: append any missing default keys (e.g.
@@ -983,9 +1180,14 @@ EOF
   # advisory lock on state/tasks.json). It is a zero-byte flock target created at
   # runtime under .harness/ (state/tasks.json.lock), never board data — keep it out
   # of VCS. Path is relative to this .harness/ .gitignore. See store/local.md set_status.
+  # Also ignore the /sdd-pr-loop round cache (E18-F01): <HARNESS_DIR>/.pr-loop/<pr>/round-<n>/
+  # holds fetched GitHub review JSON + per-round fix notes. Pure runtime scratch, rebuildable
+  # from the `gh` API, never board data — keep it out of VCS. Path is relative to this
+  # .harness/ .gitignore, where the loop actually writes it.
   _ignores='telemetry.jsonl
 jira.pat
-state/tasks.json.lock'
+state/tasks.json.lock
+.pr-loop/'
   case "$_tlog" in
     ''|telemetry.jsonl|/*) : ;;                 # default, unset, or absolute → nothing extra
     *) _ignores="$_ignores
@@ -1046,6 +1248,19 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .claude/agents/*  .claude/commands/*   .opencode/command/*   (repo root, regenerated)
   .agents/rules/*  .agents/agents/*  .agents/workflows/*   (repo root, regenerated; Antigravity glue)
   CLAUDE.md / AGENTS.md / GEMINI.md  -> only the harness:begin..end block
+
+PR LOOP GLUE  (OPT-IN — created ONLY while pr_loop.enabled reads exactly true; a fresh
+install seeds false, so none of this exists until you turn it on — E18-F01):
+  .claude/commands/sdd-pr-loop.md   .opencode/command/sdd-pr-loop.md
+  .agents/workflows/sdd-pr-loop.md  \${CODEX_HOME:-~/.codex}/prompts/sdd-pr-loop.md (GLOBAL)
+  .claude/agents/pr-fixer.md  .opencode/agent/pr-fixer.md  .agents/agents/pr-fixer.md
+  Flipping pr_loop.enabled back to false on a re-run RECLAIMS all of the above
+  (pristine-only in the user-owned \$CODEX_HOME prompts dir and .agents/ tree) and prunes
+  empty dirs. No pr-fixer artifact is ever created for the codex or gemini front-ends.
+  The GLOBAL prompt is shared by every target on this machine, so it is ledger-governed
+  (\${CODEX_HOME:-~/.codex}/prompts/.sdd-pr-loop.owners): turning the gate off here only
+  retires THIS repo's claim, and the prompt survives while any other target still wants
+  it — or whenever that ownership cannot be read.
 
 MODEL ROUTING  (created ONLY when models: resolves a role to a concrete value):
   .gemini/agents/*               per-role Gemini agent definitions (regenerated)
@@ -1168,6 +1383,36 @@ $MARK_END"
     "doc-critic":   { "mode": "subagent", "description": "Advisory doc review pass over planning docs + specs. Documents only, never code.", ${_oc_m_doc_critic}"prompt": "{file:./.harness/agents/doc-critic.md}" }
   }
 }
+EOF
+  }
+
+  # gen_oc_agent <role> <description> <dest> — write one FILE-BASED OpenCode sub-agent
+  # (.opencode/agent/<role>.md). Hoisted for the same reason as the antigravity emitters:
+  # the §7/§7b reclamation byte-compares an on-disk file against a freshly generated body,
+  # so emission must live in exactly ONE function. Deliberately independent of
+  # gen_opencode_json — the `agent:` map in opencode.json (and the .harness/.opencode.stamp
+  # byte contract it feeds) is NOT touched by pr_loop (E18-F01 R11/R12). The body POINTS at
+  # the canonical .harness/agents/<role>.md; it never duplicates a role body. No `model:`
+  # key: pr-fixer is not in MODEL_ROLES and inherits the session model (R14).
+  gen_oc_agent() {
+    _oca_role="$1"; _oca_desc="$2"; _oca_dest="$3"
+    {
+      printf -- '---\n'
+      printf 'description: %s\n' "$_oca_desc"
+      printf 'mode: subagent\n'
+      printf 'permission:\n'
+      printf '  edit: allow\n'
+      printf '  bash: allow\n'
+      printf -- '---\n'
+    } > "$_oca_dest"
+    cat >> "$_oca_dest" <<EOF
+
+You are the **$_oca_role** for this project's agent harness (installed in \`.harness/\`).
+
+Your full, canonical role definition is \`.harness/agents/$_oca_role.md\` — read it now and
+follow it exactly. Resolve every relative path it mentions against \`.harness/\`
+(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
+\`.harness/progress/\`).
 EOF
   }
 
@@ -1465,6 +1710,13 @@ EOF
   # the canonical .harness/agents/doc-critic.md; documents-only, no production-code review.
   emit_agent doc-critic "Read, Grep, Glob, Write" \
     "Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code."
+  # pr-fixer (E18-F01 R10): the /sdd-pr-loop worker sub-agent, spawned once per blocking
+  # Codex comment. GATED on the opt-in pr_loop.enabled — unlike the six roles above it is
+  # NOT stamped by default. It rides the SAME emit_agent path (one shim, pointing at
+  # the canonical .harness/agents/pr-fixer.md — the role body is never duplicated).
+  if pr_loop_enabled; then
+    emit_agent pr-fixer "Read, Edit, Bash, Grep, Glob" "$PR_FIXER_DESC"
+  fi
   ok "Claude Code sub-agent shims installed (.claude/agents/)"
   fi  # end: claude-gated sub-agent shims
 
@@ -1763,6 +2015,515 @@ This command is argument-free. If `$ARGUMENTS` is non-empty, STOP and report usa
    manifest/provisioning/claim and points to serial `/sdd-fix`; never invent a vendor
    API or background shell agent.
 EOF
+  # /sdd-pr-loop (E18-F01) — written UNCONDITIONALLY, even when pr_loop.enabled is false.
+  # This is load-bearing, not an oversight: the codex-prompts and antigravity reclamation
+  # paths byte-compare an on-disk copy against `$CMDDIR/<name>.md`, so gating GENERATION
+  # would make an already-stamped copy permanently unremovable the moment the gate flips
+  # off. Only the per-front-end MIRRORING below is gated (R1/R2/R3).
+  cat > "$CMDDIR/sdd-pr-loop.md" <<'EOF'
+---
+description: Drive the Codex review cycle on an open PR — trigger @codex review, watch in the background, classify severities, fix blocking findings, merge when every gate is green
+---
+
+Drive the Codex review cycle on an open PR until every gate is green or the round cap is
+hit. Resolve every relative path against `.harness/`.
+
+The PR number is in `$ARGUMENTS`. If `$ARGUMENTS` is empty, resolve the current branch's
+PR with `gh pr view --json number --jq '.number'`; if that fails, STOP and ask which PR.
+
+> **Preconditions.** This loop only works on a repository with the **Codex GitHub App**
+> installed, an **authed `gh`**, and **`jq`** on PATH. Step 0 verifies all of them and
+> fails fast with a named remedy — never post first and discover it later.
+
+## Configuration
+
+Policy lives in `.harness/harness.config.yaml` under `pr_loop:`. Precedence for every
+knob is **env override → config value → built-in default**; an absent block or an absent
+key behaves exactly as the default.
+
+| Config key | Env override | Default |
+|---|---|---|
+| `pr_loop.enabled` | `HARNESS_PR_LOOP_ENABLED` | `false` (opt-in) |
+| `pr_loop.auto_merge` | `HARNESS_AUTO_MERGE` | `true` |
+| `pr_loop.max_rounds` | `HARNESS_MAX_ROUNDS` | `4` |
+| `pr_loop.blocking_severities` | `HARNESS_BLOCKING_SEVERITIES` | `P0,P1` |
+| `pr_loop.merge_strategy` | `HARNESS_MERGE_STRATEGY` | `merge` |
+
+`pr_loop.enabled` is the **opt-in** master gate: this command is only installed at all
+because it reads exactly `true`. Anything else — an absent block, an absent key, an empty
+or malformed value — means off, and the installer stamps no `/sdd-pr-loop` glue.
+
+Execution knobs are **env-only** (never config): `HARNESS_POLL_INTERVAL` (60),
+`HARNESS_POLL_CEILING` (900), `HARNESS_FIRST_RESPONSE` (180), `HARNESS_DRY_RUN`.
+
+Round cache: `.harness/.pr-loop/<pr>/round-<n>/` — gitignored and best-effort; if it is
+missing or corrupt, reconstruct it from the `gh` API.
+
+## Per-round runbook
+
+For `round` from 1 to `max_rounds`, with `round_dir=.harness/.pr-loop/<pr>/round-<round>`:
+
+### 0. Preflight — BEFORE posting anything
+
+```bash
+sh .harness/tools/wait-for-codex.sh preflight "$pr_number"
+```
+
+It checks `gh` on PATH, `gh auth status`, `jq` on PATH, a resolvable repo slug, and that
+the PR exists and is OPEN. It posts **nothing**. On a non-zero exit (`5`), **STOP** and
+report its one-line diagnostic verbatim — do not post `@codex review`, do not poll, do
+not fall back to a hand-rolled check. A repo without the Codex GitHub App should leave
+`pr_loop.enabled` at its opt-in default of `false` rather than run this loop.
+
+### 1. Trigger the review
+
+Resolve the repo slug once (the `gh api` calls below need it):
+
+```bash
+slug=$(gh repo view --json owner,name --jq '"\(.owner.login) \(.name)"')
+owner=${slug%% *}; repo=${slug##* }
+```
+
+- **Round 1:** mark the PR ready for review (`gh pr ready <pr>`), then comment `@codex review`.
+- **Round 2+:** comment `@codex review` again to request a re-review of the new commits.
+
+**Capture the triggering comment's id straight from the post response.** Step 2 uses it
+both to poll reactions (the 👍-only clean case) and as the **freshness anchor**
+(`trigger-ts.txt`, the `created_at >= trigger` filter). Derive it from the URL
+`gh pr comment` prints, **never from a separate comment-list call**: a non-paginated
+`GET issues/<n>/comments` returns only the first 30 (oldest) comments, so on a busy PR
+the just-posted `@codex review` is on a later page and the lookup returns a stale id or
+`null` — which silently disables the freshness filter.
+
+```bash
+trigger_url=$(gh pr comment "$pr_number" --body "@codex review")   # this IS the round's trigger post
+trigger_comment_id="${trigger_url##*issuecomment-}"                # .../pull/N#issuecomment-<id>
+```
+
+(The "comment `@codex review`" step and this capture are a single action — do not post twice.)
+
+If `HARNESS_DRY_RUN=1`, **skip the real `gh pr comment` post** entirely and synthesize
+stub review data in `$round_dir` for downstream testing.
+
+### 2. Poll for the review (background watcher)
+
+Wait for a Codex review to land on the latest commit. **Do not poll by hand.** A by-hand
+poll is why landed Codex comments get missed: in an interactive session you fetch the
+review state once, see nothing yet, and the turn ends — so a review that lands minutes
+later goes unnoticed until a human nudges "review again". Foreground `sleep` is also
+blocked in this harness, so an inline "sleep 30; check; repeat" cannot run either.
+
+Instead, launch the harness watcher **in the background** and let the harness wake you
+when it exits:
+
+```bash
+# Claude Code: Bash tool with run_in_background: true. Elsewhere: `… &` or the host's
+# equivalent. It keeps polling across turns and re-invokes you on exit.
+sh .harness/tools/wait-for-codex.sh "$pr_number" "$trigger_comment_id" "$round_dir"
+```
+
+The watcher polls every `HARNESS_POLL_INTERVAL` seconds (default **60**) up to
+`HARNESS_POLL_CEILING` (default **900** = 15 min) and writes the **four sources** into
+`$round_dir` on every poll (`gh pr view` alone does NOT return Codex's findings):
+
+- `pr.json` — `gh pr view --json reviews,comments,statusCheckRollup,headRefOid`
+- `review-comments.json` — `repos/<o>/<r>/pulls/<n>/comments`, paginated + flattened —
+  **the inline findings**, anchored to file/line. Returned by neither `--json comments`
+  (issue comments only) nor `reviews[*].body` (summary banner only).
+- `issue-comments.json` — `repos/<o>/<r>/issues/<n>/comments`, paginated, scanned for a
+  clean banner posted past the first 100 comments.
+- `reactions.json` — reactions on the `@codex review` comment (Codex reacts 👍 when it
+  has nothing to say).
+- `trigger-ts.txt` — the freshness anchor, resolved once at startup.
+
+When the watcher exits, the harness re-invokes you. **Branch on its exit code** — never
+re-poll by hand:
+
+| Exit | Meaning | Next |
+|---|---|---|
+| `0` | Review **with findings** landed on the head commit | Step 3, classify `review-comments.json` |
+| `3` | **Clean review, 0 findings** (head banner as a review **or** an issue comment, or a 👍 reaction) | Skip classification; treat the round as zero blocking |
+| `2` | **Timeout** — ceiling hit, no resolution | Abort the round with `needs-human`. Never treat a timeout as "clean". |
+| `4` | Usage / precondition error (incl. an unresolvable trigger timestamp) | Fix the args and relaunch; do not disable the freshness filter |
+| `5` | No Codex activity inside `HARNESS_FIRST_RESPONSE` (default 180s) | Report the diagnostic: the Codex GitHub App is most likely not installed. Do NOT wait out the ceiling. |
+
+The exit codes encode the freshness conditions the watcher checks: (1) Codex-bot inline
+comments filed against `headRefOid` **and created at/after the trigger comment** →
+findings; (2) a summary banner containing `Reviewed commit: <short headRefOid>` with zero
+head findings → clean; (2b) that same head banner delivered as an **issue comment** →
+clean; (3) a Codex-bot 👍 (`+1`) on the trigger comment → clean.
+
+**Two freshness pitfalls the watcher guards against** (both previously stalled clean PRs):
+
+- **Re-anchored stale threads.** GitHub re-stamps old unresolved threads' `commit_id` to
+  each new head, so a stale thread's `commit_id` matches `headRefOid` even though it
+  predates this round. An inline comment counts only when `created_at >= trigger.created_at`.
+- **Clean banner as an issue comment.** Codex's zero-findings result ("Didn't find any
+  major issues." + `Reviewed commit: <head>`) posts to `.comments[]`, which conditions
+  1/2 never scan.
+
+**Codex bot identity.** Accept **exactly two** author logins and nothing else:
+`chatgpt-codex-connector` (what `gh pr view` / GraphQL reports) and
+`chatgpt-codex-connector[bot]` (what the REST API reports). Never prefix-match: any account
+whose login merely *begins* with the bot name (`chatgpt-codex-connector-evil`) could then
+👍 the trigger comment or post a `Reviewed commit: <head>` banner and be read as a clean
+Codex review — zero findings, no classification, auto-merge. The two literals cover the
+GraphQL/REST spelling split completely.
+
+> **No background tool available?** The watcher still runs in the foreground and exits
+> with the same codes — it just blocks until resolution or ceiling.
+
+### 3. Parse and classify comments
+
+Walk **`review-comments.json` (the inline findings)** + `pr.json` `reviews[*].body` +
+`issue-comments.json` looking for severity tags. Codex tags severity as a **badge image**,
+not bare text — e.g. `![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)`.
+Match `P0|P1|P2|nit` **case-insensitively anywhere in the body** (this catches both the
+badge alt-text/URL form and any bare-text form); **first match wins**; **default to `P2`**
+when nothing matches.
+
+**Only FRESH inline comments count for this round** — the same freshness guard the watcher
+applies (see step 2). An inline comment counts only when it is filed against the head
+commit **and** its `created_at >= trigger.created_at`; otherwise a stale thread GitHub
+re-anchored to head slips back into `blocking.json` and defeats the guard. The watcher
+persists the anchor to `trigger-ts.txt`; apply it when reading the unfiltered
+`review-comments.json`:
+
+**A head oid you could not read is not a head oid.** A `pr.json` that is missing or
+truncated makes `jq` exit non-zero with empty output; a `pr.json` that parses but carries
+no `headRefOid` makes `jq -r` print `null` and exit **0**. Either way `$head` is not the
+head commit, every comment fails `commit_id == $h`, and `fresh-comments.json` — hence
+`blocking.json` — comes out `[]`, which step 6 reads as "zero blocking findings ⇒ all
+gates green ⇒ merge". So guard the **value** as well as the exit status and fail closed:
+an unreadable head aborts the round as `needs-human`, it is not a clean round. (`since`
+needs no such guard — an empty `since` disables the freshness filter and admits *more*
+findings, which errs toward review rather than toward the merge.)
+
+```bash
+since=$(cat "$round_dir/trigger-ts.txt" 2>/dev/null)  # empty ⇒ filter off ⇒ admits MORE
+head_ok=0            # fail closed: only a head oid we actually READ may filter findings
+if ! head=$(jq -r '.headRefOid // ""' "$round_dir/pr.json") || [ -z "$head" ]; then
+  # Head oid UNKNOWN: pr.json missing, truncated, or without a headRefOid. Filtering on ""
+  # would match nothing and hand the gate an empty blocking.json. Testing the status on the
+  # `if` itself reads the same whether or not the host shell runs with `set -e`, and
+  # `[ -z "$head" ]` catches the absent/null key that `jq -r` reports with exit status 0.
+  rm -f "$round_dir/fresh-comments.json"   # never leave a previous round's file standing
+  echo "could not read headRefOid from pr.json — needs-human, not merging" >&2
+else
+  head_ok=1          # the filter below is anchored to a head oid that was really read
+  jq --arg h "$head" --arg since "$since" '
+    [ .[] | select((.commit_id // "") == $h)
+          | select($since == "" or ((.created_at // "") >= $since)) ]' \
+    "$round_dir/review-comments.json" > "$round_dir/fresh-comments.json"
+fi
+# classify severities from fresh-comments.json (not the raw review-comments.json)
+```
+
+With `head_ok=0` there is no `fresh-comments.json` to classify and therefore no
+`blocking.json`: take the `needs-human` terminal state of step 5's cap row (label, hand
+over, return failure). Only `head_ok=1` with an empty `blocking.json` means "zero fresh
+blocking findings".
+
+To re-check the round files offline at any point (no `gh`, no network), run
+`sh .harness/tools/wait-for-codex.sh evaluate "$round_dir"` — exit `0` findings,
+`3` clean, `1` pending, applying exactly the rules above.
+
+Then filter to the **blocking severities only** (`pr_loop.blocking_severities`, default
+`P0,P1`; `P2`/`nit` never block). Save into the round dir:
+
+```
+comments.json     # all comments with a severity tag attached
+blocking.json     # filtered to the blocking severities only
+status.json       # statusCheckRollup snapshot
+```
+
+### 4. Stall detection
+
+Compare `blocking.json` to the **previous round**'s (`round-<n-1>/blocking.json`) by
+comment id (or, if ids are unstable, by `(path, line, severity, body-hash)`). If **any**
+blocking comment id appears in both rounds, the fixes are not landing: **escalate to the
+`max_rounds - 1` behavior immediately**, even if the current round is 1 or 2.
+
+### 5. Branch on round
+
+| Round | Behavior |
+|---|---|
+| below `max_rounds - 1` | For each blocking comment, spawn one **`pr-fixer`** sub-agent, passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
+| `max_rounds - 1` | Build **one combined fix prompt** (all blocking comments concatenated) and escalate to a **different worker** if the host CLI offers one; where no router exists, run one combined **in-session** pass instead. Then push. |
+| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. Post the handover summary listing every round, the blocking comments that survived, and the cache path. Return failure. |
+
+At the default `max_rounds: 4` that is rounds 1–2 per-comment, round 3 combined
+escalation, round 4 `needs-human`. A `max_rounds` below `3` simply has no per-comment
+fixer rounds.
+
+**Front-ends without a `pr-fixer` sub-agent** (codex, gemini) do not spawn one: apply each
+blocking comment's fix **in-session**, under the same discipline — one comment, one
+targeted fix, one commit, one `fix-<comment_id>.md` note — then push once at the end of
+the round.
+
+**Always write the worker file for this round** so the handover summary stays
+reconstructible from cache:
+
+```bash
+echo "<worker>" > "$round_dir/worker"   # e.g. claude | opencode | agy | codex
+echo "<role>"   > "$round_dir/role"     # implementation | fix | escalation
+```
+
+### 6. Re-check the gates
+
+After the fix commits land, re-fetch the PR JSON and check the gates **before** triggering
+another Codex round:
+
+- CI green (`statusCheckRollup[*].conclusion == "SUCCESS"` for required checks)
+- Tests / typecheck / lint green (subsets of CI)
+- Zero unresolved blocking comments — i.e. `blocking.json` is empty
+
+If all are green, **proceed to "ready to merge"** — do not waste another Codex round. If
+checks are still pending, wait for them; if any fail, treat the failure like a blocking
+comment for the next round.
+
+#### Squash-merge prep (only when `merge_strategy` is `squash`)
+
+**Compose the message locally — never ask Codex for it.** The watcher resolves on exactly
+three signals (fresh inline findings on head, a fresh `Reviewed commit <sha>` banner as a
+review or an issue comment, a `+1` reaction on the trigger comment), and a raw-text reply
+to an `@codex summarize` request is none of them: polling for one runs to the ceiling,
+exits `2`, and strands the squash path in `needs-human` with no `squash-message.txt` ever
+written. Everything the message needs is already in the round cache, so write it yourself
+— no post, no poll, nothing that can hang:
+
+```bash
+msg=".harness/.pr-loop/$pr_number/squash-message.txt"
+default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+{
+  gh pr view "$pr_number" --json title --jq '.title'
+  echo
+  echo "<2-4 lines, in your own words: the core implementation goal>"
+  echo
+  git log --reverse --format='- %s' "origin/$default_branch..HEAD"
+  echo
+  echo "Blocking fixes resolved:"
+  for f in .harness/.pr-loop/"$pr_number"/round-*/fix-*.md; do
+    [ -f "$f" ] && sed -n 's/^- One-line: //p' "$f"
+  done
+} > "$msg"
+[ -s "$msg" ] || rm -f "$msg"   # empty ⇒ the merge below uses GitHub's default body
+```
+
+A missing or empty `$msg` is **not** a failure: the merge command below falls back to
+GitHub's default squash body, so the squash path always reaches its merge.
+
+## Handover summary
+
+Before posting **either** terminal-state comment, build the handover summary by walking
+the cache:
+
+```bash
+for d in .harness/.pr-loop/"$pr_number"/round-*/; do
+  n=$(basename "$d" | sed 's/round-//')
+  worker=$(cat "$d/worker" 2>/dev/null || echo "?")
+  role=$(cat "$d/role" 2>/dev/null || echo "?")
+  echo "- round-$n: $worker ($role)"
+done
+for d in .harness/.pr-loop/"$pr_number"/round-*/; do cat "$d/worker" 2>/dev/null; done \
+  | sort | uniq -c
+```
+
+Save the rendered summary to `.harness/.pr-loop/<pr>/handover-summary.md` and post it on
+**both** terminal states.
+
+## Terminal states
+
+### Ready to merge (success)
+
+Post a summary comment on the PR:
+
+```
+sdd-pr-loop: all gates green ✅
+
+Handover summary:
+- Rounds run: <n>
+- Worker totals: <worker>=<count>, ...
+- Round-by-round:
+  • round-1: <worker> (fix x<count>)
+  • ...
+- Blocking comments resolved: <count>
+- Cache: .harness/.pr-loop/<pr>/
+```
+
+**Resolve Codex threads first — never human ones.** A repo ruleset may require every
+review thread resolved before merge, but this loop may only auto-resolve threads **it
+owns** (opened by the Codex bot). Auto-resolving a human reviewer's unresolved
+conversation would silently bypass the merge gate that keeps human feedback meaningful.
+So: fetch each unresolved thread with its participants; if **any** non-Codex participant
+appears on an unresolved thread, **stop and go to the needs-human terminal state — resolve
+nothing and do not merge**. Only when every remaining unresolved thread is Codex-owned do
+you resolve them (via the GraphQL `resolveReviewThread` mutation — there is no REST/`gh pr`
+equivalent) and proceed.
+
+**A thread you could not read in full is not Codex-owned.** `--paginate` walks the outer
+`reviewThreads` connection, but each thread's nested `comments` connection is fetched
+once and capped at 100 — a human reply at position 101 would be invisible and the thread
+would look Codex-only, which is exactly the auto-merge-over-human-feedback hole this rule
+exists to close. So compare each thread's `comments.totalCount` against the number of
+authors actually returned and **fail closed**: a truncated thread is *not* provably
+Codex-only and takes the same needs-human path as a human reply. (`totalCount` rather
+than a nested `pageInfo`, because a second `pageInfo` in the same response is precisely
+what `gh api --paginate` scans when it looks for the next cursor.)
+
+**An enumeration you could not finish is not an empty enumeration.** If the thread query
+itself fails — transient API error, expired auth, a pagination hiccup — `gh` exits non-zero
+having printed nothing, and that empty output is byte-identical to "this PR has no
+unresolved threads". No inspection of the output can tell the two apart, so check the
+command's **exit status** and fail closed: a failed enumeration is a needs-human terminal
+state that resolves nothing and merges nothing. Hence `merge_ok` starts at `0` and is
+raised only on the branch that actually *proved* every unresolved thread Codex-owned.
+
+**A resolve you could not complete is not a resolve.** The `resolveReviewThread` mutation
+can fail on its own — a transient 5xx, a token without write access — and a thread that
+stayed unresolved is exactly the review feedback the merge gate exists to protect. So
+check **every** mutation's exit status and raise `merge_ok` only once they have **all**
+succeeded; branch protection may or may not catch the leftover thread, and this loop must
+not depend on it. Mind the shape of the loop while you do: `... | while read` runs its
+body in a **subshell** in POSIX sh, so a failure recorded there dies at the `done` and is
+silently forgotten. Feed the loop from a here-document instead and it runs in the current
+shell, where the flag survives.
+
+```bash
+# Per unresolved thread emit "<allcodex> <id>", where <allcodex> is true only when the
+# thread was read in FULL and EVERY participant is the Codex bot. A human reply on a
+# Codex-opened thread makes it false — and so does a comment list longer than the 100
+# fetched here, since an author you never read must never be assumed to be the bot.
+# Both tests run in jq — no shell word-splitting. The two bot logins are inlined because
+# `gh api --jq` takes no --arg, and are compared as EXACT literals: a prefix test would
+# let `chatgpt-codex-connector-evil` pass as the thread's only participant, so the loop
+# would resolve an impostor's thread and merge over it.
+merge_ok=0            # fail closed: only a COMPLETED, clean enumeration may raise this
+if ! unresolved=$(gh api graphql -f query='
+  query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
+    repository(owner:$owner,name:$repo){
+      pullRequest(number:$pr){
+        reviewThreads(first:100,after:$endCursor){
+          nodes{ id isResolved comments(first:100){ totalCount nodes{ author{ login } } } }
+          pageInfo{ hasNextPage endCursor }
+        }}}}' \
+  -f owner="$owner" -f repo="$repo" -F pr="$pr_number" --paginate \
+  --jq '.data.repository.pullRequest.reviewThreads.nodes[]
+        | select(.isResolved | not)
+        | (.comments.totalCount == (.comments.nodes | length)) as $whole
+        | ([.comments.nodes[].author.login // ""]
+             | all(. == "chatgpt-codex-connector"
+                or . == "chatgpt-codex-connector[bot]")) as $codex
+        | "\($whole and $codex) \(.id)"')
+then
+  # Enumeration FAILED: `unresolved` is empty because gh errored, not because the PR is
+  # clean. Testing the status on the `if` itself (rather than after the assignment) reads
+  # the same whether or not the host shell runs with `set -e`.
+  echo "could not enumerate review threads — needs-human, not merging" >&2
+elif printf '%s\n' "$unresolved" | grep -q '^false '; then
+  echo "a thread is non-Codex or was not read in full — needs-human" >&2  # resolve NOTHING
+else
+  # Enumeration completed; every unresolved thread is provably Codex's — resolve them,
+  # and raise `merge_ok` only if every mutation actually reported success. The loop reads
+  # from a here-document rather than from `printf ... | while`, because a piped loop body
+  # is a subshell: `resolve_ok=0` set in there would never reach this shell.
+  resolve_ok=1
+  while read -r _allcodex tid; do
+    [ -z "$tid" ] && continue
+    gh api graphql -f query='
+      mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ id isResolved } } }' \
+      -f id="$tid" >/dev/null || resolve_ok=0   # try the rest, but remember the failure
+  done <<UNRESOLVED
+$unresolved
+UNRESOLVED
+  if [ "$resolve_ok" = 1 ]; then
+    merge_ok=1        # all requested threads resolved; nothing is left to merge over
+  else
+    echo "a Codex thread could not be resolved — needs-human, not merging" >&2
+  fi
+fi
+```
+
+**If `merge_ok=0`, stop here** — go straight to the needs-human terminal state and run
+**none** of the merge commands below.
+
+While `pr_loop.auto_merge` is **false**, stop after posting the all-gates-green summary
+and hand back to the human — resolve threads if you like, but **do not merge**. That
+hand-back **completes** the loop: **return success**. It is the one terminal state where an
+unmerged PR is the intended outcome, so never route it to needs-human.
+
+Where `pr_loop.auto_merge` is **true**, merge with the configured `merge_strategy`,
+deleting the remote branch in the same call. Track whether the merge command itself
+**succeeded** (`merged`) — separate from `merge_ok`, which only recorded thread
+eligibility — so cleanup never runs on a failed or pending merge:
+
+```bash
+merged=0
+if [ "${merge_ok:-0}" != "1" ]; then
+  echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
+elif [ "${merge_strategy:-merge}" = "squash" ]; then
+  msg=".harness/.pr-loop/$pr_number/squash-message.txt"
+  if [ -s "$msg" ]; then
+    gh pr merge "$pr_number" --squash --delete-branch --body-file "$msg" && merged=1
+  else                        # no message composed — squash with GitHub's default body
+    gh pr merge "$pr_number" --squash --delete-branch && merged=1
+  fi
+else
+  gh pr merge "$pr_number" --merge --delete-branch && merged=1
+fi
+```
+
+`--delete-branch` removes the remote branch and the local tracking branch. Clean up any
+lingering local branch **only if the merge command itself succeeded** (`merged=1`) —
+never merely because thread eligibility was satisfied:
+
+```bash
+if [ "${merged:-0}" = "1" ]; then
+  default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+  branch=$(gh pr view "$pr_number" --json headRefName --jq '.headRefName')
+  git checkout "$default_branch" >/dev/null 2>&1 || true
+  git pull --ff-only >/dev/null 2>&1 || true
+  git branch -D "$branch" 2>/dev/null || true          # local
+  git remote prune origin >/dev/null 2>&1 || true      # drop the stale remote-tracking ref
+fi
+```
+
+If `gh pr merge` fails (branch-protection race, a required review not yet registered, a
+re-opened thread), retry once after 30s. If it still fails the PR will not land: take the
+needs-human terminal state below — label `needs-human`, post the error alongside the
+handover summary, and **return failure**. A merge that auto-merge was asked to land and did
+not land is never reported as success.
+
+### Needs-human (failure)
+
+Apply the `needs-human` label, post the **same handover summary** block (so the human sees
+exactly which workers tried and where they got stuck), and return failure. Reached by: the
+`max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, or a merge
+that would not land.
+
+**Every path into this state returns failure**, whatever the reason — the only successes
+are a merge that actually landed and the `auto_merge: false` hand-back above. So an
+unmerged PR is a success **only** when auto-merge was off; when auto-merge was on and the
+merge did not land, that is this state, and it is a failure.
+
+## Cache layout
+
+```
+.harness/.pr-loop/<pr>/
+  round-1/
+    pr.json                   # reviews summary, issue comments, checks, head oid
+    review-comments.json      # the inline findings (source of truth)
+    issue-comments.json       # paginated issue-comment stream (clean-banner scan)
+    reactions.json            # reactions on the @codex trigger comment (👍 = clean)
+    trigger-ts.txt            # freshness anchor
+    fresh-comments.json, comments.json, blocking.json, status.json
+    worker, role
+    fix-<comment-id>.md       # one per fix
+  round-2/ ...
+  handover-summary.md
+  squash-message.txt          # only when merge_strategy: squash
+```
+EOF
   # Mirror the generated command bodies into the SELECTED front-ends. Claude Code
   # reads .claude/commands/ (gated on `claude`, R3/R4); OpenCode reads
   # .opencode/command/ (gated on `opencode`, R3/R4). Both copy from the same CMDDIR,
@@ -1773,6 +2534,12 @@ EOF
       cp "$CMDDIR/$_c.md" "$TARGET/.claude/commands/$_c.md"
     done
     ok "Claude Code commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel installed (.claude/)"
+    if pr_loop_enabled; then
+      for _c in $HARNESS_PR_LOOP_CMDS; do
+        cp "$CMDDIR/$_c.md" "$TARGET/.claude/commands/$_c.md"
+      done
+      ok "Claude Code command /sdd-pr-loop installed (.claude/ — pr_loop.enabled)"
+    fi
   fi
 
   # ── 5b. OpenCode commands (regenerated each run, gated on `opencode`) ────────
@@ -1784,6 +2551,17 @@ EOF
       cp "$CMDDIR/$_c.md" "$TARGET/.opencode/command/$_c.md"
     done
     ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel installed (.opencode/)"
+    if pr_loop_enabled; then
+      for _c in $HARNESS_PR_LOOP_CMDS; do
+        cp "$CMDDIR/$_c.md" "$TARGET/.opencode/command/$_c.md"
+      done
+      # OpenCode discovers a file-based sub-agent at .opencode/agent/<name>.md. This is
+      # the vendored source's own shape and keeps gen_opencode_json (and the
+      # .harness/.opencode.stamp byte contract) completely untouched (R11/R12).
+      mkdir -p "$TARGET/.opencode/agent"
+      gen_oc_agent pr-fixer "$PR_FIXER_DESC" "$TARGET/.opencode/agent/pr-fixer.md"
+      ok "OpenCode command /sdd-pr-loop + pr-fixer sub-agent installed (.opencode/ — pr_loop.enabled)"
+    fi
   fi
 
   # ── 5c. Antigravity glue (.agents/, regenerated each run, gated on `antigravity`) ─
@@ -1826,6 +2604,18 @@ EOF
       cp "$CMDDIR/$_w.md" "$TARGET/.agents/workflows/$_w.md"
     done
 
+    # Gated pr_loop glue (E18-F01 R2/R13): the /sdd-pr-loop workflow + the pr-fixer
+    # persona. gen_ag_persona is called HERE, deliberately OUTSIDE the ag_personas loop
+    # above — adding a `pr-fixer` row to ag_personas would also create
+    # `.gemini/agents/pr-fixer.md` and `.codex/agents/pr-fixer.toml` (§5e/§5f iterate the
+    # same map) and break E17-F01 R11. The persona is emitted, never model-routed (R14).
+    if pr_loop_enabled; then
+      for _w in $HARNESS_PR_LOOP_CMDS; do
+        cp "$CMDDIR/$_w.md" "$TARGET/.agents/workflows/$_w.md"
+      done
+      gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$TARGET/.agents/agents/pr-fixer.md"
+    fi
+
     ok "Antigravity glue (rules + agents + workflows) installed (.agents/)"
   fi
 
@@ -1854,7 +2644,11 @@ EOF
       echo "⚠️  codex selected but neither CODEX_HOME nor HOME is set — skipping GLOBAL /prompts:sdd-* install" >&2
     else
       mkdir -p "$_cdx"
-      for _c in $HARNESS_SDD_CMDS; do
+      # The gated /sdd-pr-loop prompt joins the same copy loop (and therefore the same
+      # backup/warn behavior) only while pr_loop.enabled is true (R2/R3).
+      _cdx_cmds="$HARNESS_SDD_CMDS"
+      if pr_loop_enabled; then _cdx_cmds="$HARNESS_OWNED_CMDS"; fi
+      for _c in $_cdx_cmds; do
         _dst="$_cdx/$_c.md"
         # This dir is a USER-owned global namespace, not a harness-owned workspace dir,
         # so a same-named file may be the user's OWN prompt — an original, OR a later
@@ -1873,6 +2667,9 @@ EOF
           echo "⚠️  existing global Codex prompt $_dst differs from the harness copy — backed up to $_dst.pre-harness.bak before overwriting" >&2
         fi
         cp "$CMDDIR/$_c.md" "$_dst"
+        # Stake this target's claim on the GATED prompt in the shared, cross-target
+        # prompts dir, so no OTHER target's gate-off run can reclaim it out from under us.
+        if _is_pr_loop_cmd "$_c"; then _owners_claim "$_cdx" "$_c"; fi
       done
       # Codex surfaces a prompts-dir file `<name>.md` as the slash command
       # `/prompts:<name>` (NOT top-level `/<name>`) — advertise it that way.
@@ -1998,8 +2795,12 @@ EOF
       case "$_rk" in
         claude)
           remove_pointer CLAUDE.md
+          # HARNESS_CLAUDE_SHIMS carries `pr-fixer` and HARNESS_OWNED_CMDS carries
+          # `sdd-pr-loop` as REMOVAL-ledger entries (E18-F01 R4): a target stamped while
+          # pr_loop.enabled was true must still be reclaimable. remove_owned is by-name and
+          # `[ -f ]`-guarded, so a never-stamped stem is a harmless no-op.
           remove_owned .claude/agents   claude $HARNESS_CLAUDE_SHIMS
-          remove_owned .claude/commands claude $HARNESS_SDD_CMDS
+          remove_owned .claude/commands claude $HARNESS_OWNED_CMDS
           rmdir "$TARGET/.claude" 2>/dev/null || true   # prune parent only if now empty
           ;;
         gemini)
@@ -2018,7 +2819,11 @@ EOF
           reclaim_model_agents gemini
           ;;
         opencode)
-          remove_owned .opencode/command opencode $HARNESS_SDD_CMDS
+          remove_owned .opencode/command opencode $HARNESS_OWNED_CMDS
+          # E18-F01 R4/R7: `.opencode/agent/` is a pr_loop-owned dir. By-name removal of the
+          # harness stem only, then rmdir the subdir and the parent — each only when empty,
+          # so a user's own file-based agent (and the dir holding it) survives.
+          remove_owned .opencode/agent   opencode pr-fixer
           rmdir "$TARGET/.opencode" 2>/dev/null || true   # prune parent only if now empty
           # opencode.json: delete ONLY a file byte-identical to what the installer
           # generates (a pristine, untouched stamp). ANY user edit — even adding a
@@ -2066,9 +2871,14 @@ EOF
             gen_ag_persona "$_agr" "$_agd" "$_agtmp"
             remove_if_pristine ".agents/agents/$_agr.md" "$_agtmp" antigravity
           done
+          # pr-fixer (E18-F01 R4): emitted OUTSIDE ag_personas (see §5c), so reclaim it
+          # outside the loop too — same emitter, same pristine-only contract.
+          gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$_agtmp"
+          remove_if_pristine ".agents/agents/pr-fixer.md" "$_agtmp" antigravity
           # workflows — the install path `cp`s these verbatim from $CMDDIR, so the
           # pristine reference is the still-present $CMDDIR/<name>.md source bytes.
-          for _agw in $HARNESS_SDD_CMDS; do
+          # HARNESS_OWNED_CMDS so a stamped `sdd-pr-loop` workflow is reclaimable too.
+          for _agw in $HARNESS_OWNED_CMDS; do
             [ -f "$CMDDIR/$_agw.md" ] || continue
             remove_if_pristine ".agents/workflows/$_agw.md" "$CMDDIR/$_agw.md" antigravity
           done
@@ -2100,8 +2910,19 @@ EOF
           _cdx="$(codex_prompts_dir)"
           if [ -n "$_cdx" ]; then
             _cdx_removed=""
-            for _cdw in $HARNESS_SDD_CMDS; do
+            for _cdw in $HARNESS_OWNED_CMDS; do
               [ -f "$CMDDIR/$_cdw.md" ] || continue
+              # The GATED prompt is ledger-governed (see _owners_release): dropping codex
+              # here retires only THIS target's claim, and the shared file survives while
+              # any other target still wants it. Unlike the ungated /sdd-* prompts, a
+              # target that stops wanting it never re-stamps it, so a wrong delete is
+              # permanent for everyone else.
+              if _is_pr_loop_cmd "$_cdw" && ! _owners_release "$_cdx" "$_cdw"; then
+                if [ -f "$_cdx/$_cdw.md" ]; then
+                  echo "⚠️  $_cdx/$_cdw.md is still claimed by another harness target (or its ownership is unknown) — left in place (GLOBAL, shared prompts)" >&2
+                fi
+                continue
+              fi
               if [ -f "$_cdx/$_cdw.md" ] && cmp -s "$_cdx/$_cdw.md" "$CMDDIR/$_cdw.md"; then
                 rm -f "$_cdx/$_cdw.md"
                 _cdx_removed="$_cdx_removed $_cdw.md"
@@ -2122,8 +2943,96 @@ EOF
     done
   fi
 
-  # CMDDIR cleanup (deferred from §5c): the antigravity deselect compare above needs
-  # the temp workflow bodies. Unconditional — always runs regardless of selection.
+  # ── 7b. pr_loop gate-off reclamation (E18-F01 R5) ────────────────────────────
+  # The §7 loop above reconciles ONE axis: a front-end that was in PRIOR_AGENTS and is no
+  # longer SELECTED. `pr_loop.enabled: true → false` is a DIFFERENT axis — the front-end
+  # is still selected, so that loop structurally never visits it and a previously-stamped
+  # /sdd-pr-loop command + pr-fixer artifact would be orphaned (still discoverable, still
+  # advertising a loop the operator turned off).
+  #
+  # So: while the gate is OFF, walk every STILL-SELECTED front-end and reclaim its pr_loop
+  # glue under exactly the R4 ownership rules — by name inside harness-owned workspace
+  # dirs, byte-pristine-compare inside the user-owned global Codex prompts dir and the
+  # Antigravity `.agents/` tree — then prune only dirs left empty.
+  #
+  # ORDERING IS LOAD-BEARING: this must run BEFORE the `rm -rf "$CMDDIR"` below, because
+  # the pristine references are the still-present `$CMDDIR/<name>.md` bytes. That is also
+  # why §5 generates the body unconditionally (R1) — with generation gated, the reference
+  # would vanish the moment the gate flipped and the stamped copy would be unremovable.
+  if ! pr_loop_enabled; then
+    _prl_gone=""
+    if agent_selected claude; then
+      for _prc in $HARNESS_PR_LOOP_CMDS; do
+        if [ -f "$TARGET/.claude/commands/$_prc.md" ]; then
+          rm -f "$TARGET/.claude/commands/$_prc.md"; _prl_gone="$_prl_gone .claude/commands/$_prc.md"
+        fi
+      done
+      if [ -f "$TARGET/.claude/agents/pr-fixer.md" ]; then
+        rm -f "$TARGET/.claude/agents/pr-fixer.md"; _prl_gone="$_prl_gone .claude/agents/pr-fixer.md"
+      fi
+      rmdir "$TARGET/.claude/commands" 2>/dev/null || true
+      rmdir "$TARGET/.claude/agents" 2>/dev/null || true
+      rmdir "$TARGET/.claude" 2>/dev/null || true
+    fi
+    if agent_selected opencode; then
+      for _prc in $HARNESS_PR_LOOP_CMDS; do
+        if [ -f "$TARGET/.opencode/command/$_prc.md" ]; then
+          rm -f "$TARGET/.opencode/command/$_prc.md"; _prl_gone="$_prl_gone .opencode/command/$_prc.md"
+        fi
+      done
+      if [ -f "$TARGET/.opencode/agent/pr-fixer.md" ]; then
+        rm -f "$TARGET/.opencode/agent/pr-fixer.md"; _prl_gone="$_prl_gone .opencode/agent/pr-fixer.md"
+      fi
+      rmdir "$TARGET/.opencode/agent" 2>/dev/null || true
+      rmdir "$TARGET/.opencode/command" 2>/dev/null || true
+      rmdir "$TARGET/.opencode" 2>/dev/null || true
+    fi
+    if agent_selected antigravity; then
+      # `.agents/` is a user-owned namespace ⇒ pristine-compare, never delete-by-name.
+      _prl_tmp="$(mktemp 2>/dev/null || mktemp -t harness-prl)"
+      gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$_prl_tmp"
+      _prl_gone="$_prl_gone $(remove_if_pristine .agents/agents/pr-fixer.md "$_prl_tmp" antigravity)"
+      rm -f "$_prl_tmp"
+      for _prc in $HARNESS_PR_LOOP_CMDS; do
+        [ -f "$CMDDIR/$_prc.md" ] || continue
+        _prl_gone="$_prl_gone $(remove_if_pristine ".agents/workflows/$_prc.md" "$CMDDIR/$_prc.md" antigravity)"
+      done
+      rmdir "$TARGET/.agents/agents" 2>/dev/null || true
+      rmdir "$TARGET/.agents/workflows" 2>/dev/null || true
+      rmdir "$TARGET/.agents" 2>/dev/null || true
+    fi
+    if agent_selected codex; then
+      # GLOBAL, cross-target prompts dir — pristine-only, honors $CODEX_HOME.
+      # THIS target's gate says nothing about what OTHER targets sharing $CODEX_HOME want,
+      # so reclamation is ledger-governed: retire our claim first and touch the shared file
+      # only once nobody is left holding one (see _owners_release; Codex r4 P1 #3662785235).
+      _prl_cdx="$(codex_prompts_dir)"
+      if [ -n "$_prl_cdx" ]; then
+        for _prc in $HARNESS_PR_LOOP_CMDS; do
+          [ -f "$CMDDIR/$_prc.md" ] || continue
+          if ! _owners_release "$_prl_cdx" "$_prc"; then
+            if [ -f "$_prl_cdx/$_prc.md" ]; then
+              echo "⚠️  $_prl_cdx/$_prc.md is still claimed by another harness target (or its ownership is unknown) — left in place (pr_loop disabled here, GLOBAL shared prompts)" >&2
+            fi
+            continue
+          fi
+          if [ -f "$_prl_cdx/$_prc.md" ] && cmp -s "$_prl_cdx/$_prc.md" "$CMDDIR/$_prc.md"; then
+            rm -f "$_prl_cdx/$_prc.md"; _prl_gone="$_prl_gone $_prl_cdx/$_prc.md"
+          elif [ -f "$_prl_cdx/$_prc.md" ]; then
+            echo "⚠️  $_prl_cdx/$_prc.md differs from the generated prompt (edited) — left in place (pr_loop disabled, not removed)" >&2
+          fi
+        done
+        rmdir "$_prl_cdx" 2>/dev/null || true   # prune only if now empty
+      fi
+    fi
+    if [ -n "$(printf '%s' "$_prl_gone" | tr -d '[:space:]')" ]; then
+      echo "⚠️  pr_loop.enabled is not true — reclaimed /sdd-pr-loop glue:$_prl_gone" >&2
+    fi
+  fi
+
+  # CMDDIR cleanup (deferred from §5c and §7b): the antigravity deselect compare and the
+  # gate-off pass above need the temp command bodies as their pristine reference.
+  # Unconditional — always runs regardless of selection.
   rm -rf "$CMDDIR"
   # Model-routing diagnostic ledger (E17-F01): only de-duplicates stderr advisories.
   rm -f "$MODEL_DIAG"

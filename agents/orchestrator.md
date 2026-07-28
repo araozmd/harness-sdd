@@ -99,8 +99,11 @@ commit, switch, stash, reset, or clean the canonical primary, because its
 coordinator-owned bookkeeping branch is shared by sibling workers.
 
 After local Reviewer approval, keep the supplied branch/worktree and create only its dedicated PR
-while the fix remains `in-review`. Run the per-PR `/pr-loop` for that PR
-alone; P0/P1 repairs repeat review for this same id. On recoverable
+while the fix remains `in-review`. If `/sdd-pr-loop` is installed (it is only while the
+opt-in `pr_loop.enabled` is `true`), run the per-PR `/sdd-pr-loop` for that PR alone;
+if it is not installed, drive that one PR's review by hand instead — request the
+review, apply the blocking findings, and wait for the merge. Either way, P0/P1
+repairs repeat review for this same id. On recoverable
 build/review/PR/review-loop or merge failure, preserve its status, branch, worktree, and PR URL,
 return non-zero, and never cancel or overwrite siblings.
 

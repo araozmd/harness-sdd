@@ -62,6 +62,7 @@ claude                    # CLAUDE.md → AGENTS.md auto-loads
 # quick fix? /sdd-fix "<desc>"   # the lightweight fix lane: seeds an sdd:false fix under the reserved maintenance epic (brief only, no spec) and runs Builder → Reviewer
 # batch fixes? /sdd-fix-parallel # bounded E99 batch: isolated safe fixes overlap; shared/unknown paths serialize
 # then:     /sdd-next            # runs the Orchestrator on the next task
+# PR open?  /sdd-pr-loop <pr>    # drives the Codex review cycle: trigger, background watch, classify, fix, merge
 ```
 
 If `./init.sh` prints a `TaskStore dependency-cycle` warning, follow the closed
@@ -88,11 +89,18 @@ approves) → `builder` → `reviewer`.
 
 | CLI | Entry file | Sub-agents |
 |---|---|---|
-| **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-fix-parallel`, `/sdd-next` |
-| **Codex** | `AGENTS.md` (native) | run roles sequentially; global `/prompts:sdd-*` prompts, including `/prompts:sdd-fix-parallel`, in `${CODEX_HOME:-~/.codex}/prompts/` |
+| **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` (+ `pr-fixer`) + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-fix-parallel`, `/sdd-next`, `/sdd-pr-loop` |
+| **Codex** | `AGENTS.md` (native) | run roles sequentially; global `/prompts:sdd-*` prompts, including `/prompts:sdd-fix-parallel` and `/prompts:sdd-pr-loop`, in `${CODEX_HOME:-~/.codex}/prompts/` |
 | **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
-| **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-fix-parallel` |
-| **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/agents/*` personas + `.agents/workflows/*`, including `/sdd-fix-parallel` |
+| **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-fix-parallel` and `/sdd-pr-loop`; `.opencode/agent/pr-fixer.md` |
+| **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/agents/*` personas (+ `pr-fixer`) + `.agents/workflows/*`, including `/sdd-fix-parallel` and `/sdd-pr-loop` |
+
+`/sdd-pr-loop` and the `pr-fixer` sub-agent are the only **gated** glue: they are stamped
+only while `pr_loop.enabled` is `true` in `harness.config.yaml`, and that gate is
+**opt-in — a fresh install seeds `false`**. The loop needs the **Codex GitHub App** on the
+repo, an **authed `gh`** and **`jq`**; without them `/sdd-pr-loop` could only fail its own
+preflight, so nothing is written until you set `pr_loop.enabled: true` and re-run the
+installer. An absent block, an absent key or any non-`true` value all mean off.
 
 The harness body — `AGENTS.md`, `agents/`, `specs/`, `progress/`, `init.sh`, the
 stores — is **identical** across all of them. Only the entry filename and the
@@ -216,7 +224,7 @@ harness.config.yaml          store backends, hooks, mirror, telemetry, umbrella
 harness-install.sh           install/upgrade into a target (+ --umbrella, --shared-repo)
 init.sh                      environment verification gate
 agents/                      role prompts (canonical)
-tools/                       zero-dep utilities (next-task.mjs, telemetry-report.py, sync-board.mjs)
+tools/                       zero-dep utilities (next-task.mjs, telemetry-report.py, sync-board.mjs, wait-for-codex.sh)
 specs/                       product.md, glossary.md, _templates/, epics/<E>/<F>/*.md
 state/                       tasks.json (local TaskStore) + schema
 progress/                    run output + history.md
@@ -227,8 +235,27 @@ umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
 .opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
 .agents/                     Antigravity glue — rules + agent personas + workflows (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
-${CODEX_HOME:-~/.codex}/prompts/  Codex CLI slash-command prompts (GLOBAL, including /prompts:sdd-fix-parallel)
+${CODEX_HOME:-~/.codex}/prompts/  Codex CLI slash-command prompts (GLOBAL, including /prompts:sdd-fix-parallel and /prompts:sdd-pr-loop)
 ```
+
+### Codex PR review loop
+
+`/sdd-pr-loop <pr>` drives the Codex review cycle on one open PR: it preflights
+`gh`/auth/`jq`/the PR, posts `@codex review`, launches `tools/wait-for-codex.sh` in the
+**background** (so a review landing minutes later still wakes the session), classifies
+`P0|P1|P2|nit` from the inline findings + review bodies + issue comments, spawns one
+`pr-fixer` per blocking comment, and merges when every gate is green and every remaining
+unresolved thread is Codex-owned. A non-Codex unresolved thread routes to `needs-human`
+and never merges.
+
+Policy lives in `harness.config.yaml` under `pr_loop:` — `enabled` (opt-in master gate,
+seeded `false`), `auto_merge`, `max_rounds`, `blocking_severities`, `merge_strategy` —
+each overridable
+per run by `HARNESS_PR_LOOP_ENABLED`, `HARNESS_AUTO_MERGE`, `HARNESS_MAX_ROUNDS`,
+`HARNESS_BLOCKING_SEVERITIES`, `HARNESS_MERGE_STRATEGY`. Execution knobs are env-only:
+`HARNESS_POLL_INTERVAL` (60s), `HARNESS_POLL_CEILING` (900s), `HARNESS_FIRST_RESPONSE`
+(180s — fail fast when the Codex GitHub App never answers) and `HARNESS_DRY_RUN`.
+`gh` and `jq` are required only by this loop; `init.sh` does not check for them.
 
 ### Parallel maintenance fixes
 
