@@ -448,7 +448,7 @@
         {
           "id": "E19-F01",
           "title": "Host detection + explicit --agents=host resolution mode",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
@@ -457,7 +457,7 @@
         {
           "id": "E19-F02",
           "title": "Fresh-install pre-check baseline = the detected host",
-          "status": "pending",
+          "status": "spec-ready",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
