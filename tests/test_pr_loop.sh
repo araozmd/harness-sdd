@@ -1729,4 +1729,100 @@ test_suite_is_wired_and_hygienic
 test_init_has_no_new_dependency
 test_version_has_changelog_entry
 
+# ── E21-F03: convergence trend — "split, don't re-review" at the cap ─────────────────────
+# The cap already stops the loop; what it never said is what the human should CONCLUDE. The
+# observed response is to post `@codex review` again — twelve times on the PR that motivated
+# this. These assertions drive the real tool against fixture round dirs, because the verdict
+# is the whole feature: a grep over the script cannot tell a converging series from a flat one.
+
+mk_rounds() { # mk_rounds <cache-dir> <count>... — one round dir per count, N findings each
+  _c="$1"; shift; _i=1
+  for _n in "$@"; do
+    mkdir -p "$_c/round-$_i"
+    _j=0; printf '[' > "$_c/round-$_i/blocking.json"
+    while [ "$_j" -lt "$_n" ]; do
+      [ "$_j" -eq 0 ] || printf ',' >> "$_c/round-$_i/blocking.json"
+      printf '{"path":"src/runtime.ts","id":%d}' "$_j" >> "$_c/round-$_i/blocking.json"
+      _j=$((_j + 1))
+    done
+    printf ']' >> "$_c/round-$_i/blocking.json"
+    _i=$((_i + 1))
+  done
+}
+verdict_of() { sh "$SRC/tools/pr-round-trend.sh" --cache "$1" --format json | sed -n 's/.*"verdict":"\([a-z-]*\)".*/\1/p'; }
+
+test_round_trend_verdicts() {
+  [ -x "$SRC/tools/pr-round-trend.sh" ] || fail "E21-F03: tools/pr-round-trend.sh missing or not executable"
+  if ! command -v jq >/dev/null 2>&1; then skip "round_trend_verdicts (jq not installed)"; return 0; fi
+
+  # The real PR #76 shape: never decays. Must read as non-converging.
+  _f="$T/trend-flat"; mkdir -p "$_f"; mk_rounds "$_f" 1 3 1 2 1 3
+  [ "$(verdict_of "$_f")" = "non-converging" ] \
+    || fail "E21-F03: a flat series (1 3 1 2 1 3) read as $(verdict_of "$_f"), expected non-converging"
+
+  # A converging PR must NOT be told to split — this is the assertion that keeps the rule
+  # from degenerating into "any PR with several rounds is too big".
+  _c="$T/trend-conv"; mkdir -p "$_c"; mk_rounds "$_c" 3 1 0
+  [ "$(verdict_of "$_c")" = "converging" ] \
+    || fail "E21-F03: a converging series (3 1 0) read as $(verdict_of "$_c"), expected converging"
+
+  # Too little evidence is its own answer, not a default to either verdict.
+  _s="$T/trend-short"; mkdir -p "$_s"; mk_rounds "$_s" 2 1
+  [ "$(verdict_of "$_s")" = "insufficient" ] \
+    || fail "E21-F03: 2 rounds read as $(verdict_of "$_s"), expected insufficient"
+
+  # A round that aborted before classifying has NO blocking.json. Counting its absence as
+  # zero would fake a convergence that never happened.
+  _a="$T/trend-abort"; mkdir -p "$_a"; mk_rounds "$_a" 1 2 3; mkdir -p "$_a/round-4"
+  [ "$(verdict_of "$_a")" = "non-converging" ] \
+    || fail "E21-F03: an aborted round without blocking.json was counted as a zero finding round"
+
+  # Advisory: exit 0 at every verdict, including the one that says split.
+  sh "$SRC/tools/pr-round-trend.sh" --cache "$_f" >/dev/null \
+    || fail "E21-F03: the tool exited non-zero on a non-converging verdict — it must never block"
+  pass "E21-F03 round_trend_verdicts: flat ⇒ non-converging, decaying ⇒ converging, exit 0 always"
+}
+
+test_round_trend_names_the_seams() {
+  if ! command -v jq >/dev/null 2>&1; then skip "round_trend_names_the_seams (jq not installed)"; return 0; fi
+  _f="$T/trend-seams"; mkdir -p "$_f"; mk_rounds "$_f" 1 3 1 2 1 3
+  _out="$(sh "$SRC/tools/pr-round-trend.sh" --cache "$_f")"
+  printf '%s' "$_out" | grep -qi 'SPLIT THIS PR' \
+    || fail "E21-F03: a non-converging verdict does not tell the human to split the PR"
+  printf '%s' "$_out" | grep -qF 'src/runtime.ts' \
+    || fail "E21-F03: the non-converging report does not name where findings concentrate"
+  printf '%s' "$(sh "$SRC/tools/pr-round-trend.sh" --cache "$T/trend-conv")" | grep -qi 'SPLIT THIS PR' \
+    && fail "E21-F03: a CONVERGING verdict told the human to split — the advice must be earned" || :
+  pass "E21-F03 round_trend_names_the_seams: split advice only when non-converging, with seams"
+}
+
+test_round_trend_usage_errors() {
+  sh "$SRC/tools/pr-round-trend.sh" --cache "$T/no-such-cache" >/dev/null 2>&1 && _rc=0 || _rc=$?
+  [ "$_rc" = "4" ] || fail "E21-F03: a missing cache dir exited $_rc, expected 4"
+  sh "$SRC/tools/pr-round-trend.sh" >/dev/null 2>&1 && _rc=0 || _rc=$?
+  [ "$_rc" = "4" ] || fail "E21-F03: a missing --cache exited $_rc, expected 4"
+  pass "E21-F03 round_trend_usage_errors: exit 4 only for usage, never for a verdict"
+}
+
+test_installed_command_carries_the_trend() {
+  _t="$T/trend-install"
+  install_on "$_t" --agents=claude
+  _cmd="$_t/.claude/commands/sdd-pr-loop.md"
+  [ -f "$_cmd" ] || fail "E21-F03: /sdd-pr-loop not installed with the gate on"
+  grep -qF 'pr-round-trend.sh' "$_cmd" \
+    || fail "E21-F03: the INSTALLED /sdd-pr-loop does not run the convergence trend (source-layout copy edited but not the installer heredoc)"
+  grep -qi 'split the PR\|split this PR' "$_cmd" \
+    || fail "E21-F03: the installed command never tells the human to split at a non-converging cap"
+  grep -qi 'advisory and it never blocks\|never blocks' "$_cmd" \
+    || fail "E21-F03: the installed command does not state that the trend never blocks"
+  [ -x "$_t/.harness/tools/pr-round-trend.sh" ] \
+    || fail "E21-F03: installed tools/pr-round-trend.sh missing or not executable"
+  pass "E21-F03 installed_command_carries_the_trend"
+}
+
+test_round_trend_verdicts
+test_round_trend_names_the_seams
+test_round_trend_usage_errors
+test_installed_command_carries_the_trend
+
 echo "All pr-loop tests passed."

@@ -535,7 +535,7 @@
         {
           "id": "E21-F03",
           "title": "/sdd-pr-loop: per-round finding trend + 'split, don't re-review' at the round cap",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [

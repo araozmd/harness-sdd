@@ -4,6 +4,37 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.46.0] — 2026-07-28
+
+### Added — ✨ `/sdd-pr-loop` reports whether the review is converging (E21-F03)
+- `pr_loop.max_rounds` caps the loop and labels the PR `needs-human`, but never said what the
+  human should **conclude**. The observed conclusion is "run it again": on
+  `viernes-ai/viernes-bookings-api` PR #76 the operator posted `@codex review` twelve times by
+  hand, and rounds 5–12 cost roughly 2M input tokens and 8 hours of wall clock to keep
+  rediscovering that the diff was too large to review in one pass.
+- The evidence was already on the PR and nobody aggregated it — the per-round blocking-finding
+  count: `1 3 1 2 1 3 1 2 2 1 2 1`. A **decaying** count means the review is converging and one
+  more round is rational. A **flat** count means the reviewer is sampling a surface larger than
+  one pass can cover, so another round buys another *sample*, not more confidence.
+- New `tools/pr-round-trend.sh` reads only `.pr-loop/<pr>/round-*/blocking.json` — files the
+  loop already writes — and reports the series, a verdict (`converging` / `non-converging` /
+  `insufficient`) and where the findings concentrate. No `gh`, no network, no new state; `jq`
+  was already a `/sdd-pr-loop` precondition, so no new dependency.
+- The rule is deliberately the simplest one that separates the two cases, because it has to be
+  explainable inside a `needs-human` message: **the last 3 rounds each produced at least one
+  blocking finding**. A least-squares slope would be defensible and unreadable.
+- A round that aborted before classifying has no `blocking.json` and is **excluded** from the
+  series rather than counted as zero — counting it would fake a convergence that never happened.
+- New step 4b in `/sdd-pr-loop`; the cap row and the `needs-human` terminal state now carry the
+  verdict, and on `non-converging` the message says **split this PR** and lists the files the
+  findings concentrate on as candidate seams.
+- **Advisory throughout**: exit 0 at every verdict, no change to when the cap fires, and no
+  change to the watcher's exit-code contract, freshness guards or clean-signal detection.
+- The installer's **generated** command body was updated alongside the source-layout copy, and
+  `tests/test_pr_loop.sh` asserts against the installed body — editing only the source copy is
+  a wiring gap that has been raised as a blocking review finding in this repo before, so the
+  mutation (remove step 4b from the heredoc only) is verified to fail the suite.
+
 ## [0.45.0] — 2026-07-28
 
 ### Added — ✨ Pre-PR change-size check on the Reviewer → PR handoff (E21-F02)
