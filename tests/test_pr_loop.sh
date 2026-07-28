@@ -976,6 +976,60 @@ nothing and do not merge'
   pass "R42 an unresolved non-Codex thread routes to needs-human, resolves nothing, no merge"
 }
 
+test_body_truncated_thread_is_not_codex_only() {      # R42 (fail-closed pagination)
+  # `--paginate` walks the OUTER reviewThreads connection only; each thread's nested
+  # comments connection is fetched once, capped at 100. A human reply at position 101 is
+  # therefore unread — and an unread author must never be assumed to be the bot, or the
+  # loop resolves a human's thread and (auto_merge on) merges over the feedback.
+  need_body "R42: the thread query does not ask how many comments the thread really has" \
+    'comments(first:100){ totalCount nodes{ author{ login } } }'
+  need_body "R42: the body does not compare totalCount against the authors it read" \
+    '(.comments.totalCount == (.comments.nodes | length)) as $whole'
+  need_body "R42: the body does not state that a truncated thread fails closed" \
+    'a truncated thread is *not* provably'
+  if ! have_jq; then
+    skip "test_body_truncated_thread_is_not_codex_only classifier (jq not installed)"
+    return 0
+  fi
+  # Run the body's OWN --jq program (extracted verbatim) over a fixture in the shape the
+  # GraphQL query returns, so this locks the classifier and not a paraphrase of it.
+  _tt="$T/threads"; mkdir -p "$_tt"
+  awk '/^  --jq .\.data\.repository\.pullRequest\.reviewThreads\.nodes\[\]$/ { f=1 }
+       f { print }
+       f && /\\\(\$whole and \$codex\) \\\(\.id\)"..$/ { exit }' "$BODY" \
+    | sed -e "1s/^  --jq '//" -e "\$s/')\$//" > "$_tt/filter.jq"
+  [ -s "$_tt/filter.jq" ] || fail "R42: could not extract the thread-classifier jq from the body"
+  cat > "$_tt/threads.json" <<'JSON'
+{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
+ {"id":"T_whole","isResolved":false,"comments":{"totalCount":2,"nodes":[
+   {"author":{"login":"chatgpt-codex-connector"}},{"author":{"login":"chatgpt-codex-connector[bot]"}}]}},
+ {"id":"T_human","isResolved":false,"comments":{"totalCount":2,"nodes":[
+   {"author":{"login":"chatgpt-codex-connector"}},{"author":{"login":"some-human"}}]}},
+ {"id":"T_truncated","isResolved":false,"comments":{"totalCount":101,"nodes":[
+   {"author":{"login":"chatgpt-codex-connector"}}]}},
+ {"id":"T_no_count","isResolved":false,"comments":{"nodes":[
+   {"author":{"login":"chatgpt-codex-connector"}}]}},
+ {"id":"T_resolved","isResolved":true,"comments":{"totalCount":1,"nodes":[
+   {"author":{"login":"some-human"}}]}}
+]}}}}}
+JSON
+  jq -r -f "$_tt/filter.jq" "$_tt/threads.json" > "$_tt/out" \
+    || fail "R42: the body's thread-classifier jq does not run"
+  grep -qxF 'true T_whole' "$_tt/out" \
+    || fail "R42: a fully-read Codex-only thread is no longer resolvable"
+  grep -qxF 'false T_human' "$_tt/out" \
+    || fail "R42: a human reply no longer makes the thread non-Codex"
+  grep -qxF 'false T_truncated' "$_tt/out" \
+    || fail "R42: a thread with another page of comments was treated as Codex-only"
+  grep -qxF 'false T_no_count' "$_tt/out" \
+    || fail "R42: a thread with no totalCount must fail closed, not open"
+  grep -q 'T_resolved' "$_tt/out" && fail "R42: a resolved thread leaked into the unresolved set"
+  # …and the merge gate the classifier feeds still trips on any `false` line.
+  _mo=1; grep -q '^false ' "$_tt/out" && _mo=0
+  [ "$_mo" = 0 ] || fail "R42: a non-Codex/truncated thread did not set merge_ok=0"
+  pass "R42b a thread with unread comments is not Codex-only ⇒ needs-human, nothing resolved"
+}
+
 test_body_auto_merge_path() {                         # R43
   need_body "R43: body does not resolve Codex threads via GraphQL" 'resolveReviewThread'
   need_body "R43: body does not merge" 'gh pr merge'
@@ -1218,6 +1272,7 @@ test_body_classification_rules
 test_body_stall_detection
 test_body_round_branching
 test_body_never_resolves_human_threads
+test_body_truncated_thread_is_not_codex_only
 test_body_auto_merge_path
 test_body_squash_prep_cannot_hang
 test_body_auto_merge_false_stops

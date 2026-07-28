@@ -311,23 +311,38 @@ nothing and do not merge**. Only when every remaining unresolved thread is Codex
 you resolve them (via the GraphQL `resolveReviewThread` mutation — there is no REST/`gh pr`
 equivalent) and proceed.
 
+**A thread you could not read in full is not Codex-owned.** `--paginate` walks the outer
+`reviewThreads` connection, but each thread's nested `comments` connection is fetched
+once and capped at 100 — a human reply at position 101 would be invisible and the thread
+would look Codex-only, which is exactly the auto-merge-over-human-feedback hole this rule
+exists to close. So compare each thread's `comments.totalCount` against the number of
+authors actually returned and **fail closed**: a truncated thread is *not* provably
+Codex-only and takes the same needs-human path as a human reply. (`totalCount` rather
+than a nested `pageInfo`, because a second `pageInfo` in the same response is precisely
+what `gh api --paginate` scans when it looks for the next cursor.)
+
 ```bash
-# Per unresolved thread emit "<allcodex> <id>", where <allcodex> is true only when EVERY
-# participant is the Codex bot (a human reply on a Codex-opened thread makes it false).
-# The all-participants test runs in jq — no shell word-splitting. The bot login is inlined
-# because `gh api --jq` takes no --arg.
+# Per unresolved thread emit "<allcodex> <id>", where <allcodex> is true only when the
+# thread was read in FULL and EVERY participant is the Codex bot. A human reply on a
+# Codex-opened thread makes it false — and so does a comment list longer than the 100
+# fetched here, since an author you never read must never be assumed to be the bot.
+# Both tests run in jq — no shell word-splitting. The bot login is inlined because
+# `gh api --jq` takes no --arg.
 unresolved=$(gh api graphql -f query='
   query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
     repository(owner:$owner,name:$repo){
       pullRequest(number:$pr){
         reviewThreads(first:100,after:$endCursor){
-          nodes{ id isResolved comments(first:100){ nodes{ author{ login } } } }
+          nodes{ id isResolved comments(first:100){ totalCount nodes{ author{ login } } } }
           pageInfo{ hasNextPage endCursor }
         }}}}' \
   -f owner="$owner" -f repo="$repo" -F pr="$pr_number" --paginate \
   --jq '.data.repository.pullRequest.reviewThreads.nodes[]
         | select(.isResolved | not)
-        | "\(([.comments.nodes[].author.login // ""] | all(startswith("chatgpt-codex-connector")))) \(.id)"')
+        | (.comments.totalCount == (.comments.nodes | length)) as $whole
+        | ([.comments.nodes[].author.login // ""]
+             | all(startswith("chatgpt-codex-connector"))) as $codex
+        | "\($whole and $codex) \(.id)"')
 
 merge_ok=1
 if printf '%s\n' "$unresolved" | grep -q '^false '; then
