@@ -1104,7 +1104,7 @@ tui_select() {
   normalize_keys "$_sel"
 }
 
-# precheck_baseline <target> — print, one per line and sorted, the agent keys the
+# precheck_baseline <target> [<host-verdict>] — print, one per line and sorted, the agent keys the
 # interactive picker PRE-CHECKS for <target>. It is the SINGLE source of that answer
 # (E19-F01 R26): the picker seeds from it, `--print-agents` reports it as `baseline=`, and
 # host_fallback_set asks it for an existing install's shape — so no second copy of "what
@@ -1132,6 +1132,22 @@ tui_select() {
 # narrow anything a run did not choose. The key is emitted ALONE: never unioned with
 # `claude` or any other key, or every non-Claude user would keep getting glue they never
 # asked for (R1).
+#
+# OPTIONAL SECOND ARGUMENT — an ALREADY-COMPUTED detect_host verdict to REUSE instead of
+# calling detect_host a second time. detect_host's diagnostics are contract-bound to fire
+# ONCE per run (E19-F01 R5's ambiguity line, R10's invalid-declaration warning), so a
+# caller that has already asked the question and now needs this helper's answer on the same
+# code path must hand the verdict down rather than ask again — `--print-agents` prints
+# `host=` and then `baseline=`, and asking twice printed every diagnostic twice.
+#
+# Supplied-ness is tested with `$#`, never with emptiness: EMPTY is a meaningful verdict
+# (undetected), so `precheck_baseline "$t" ""` means "reuse this undetected verdict" while
+# `precheck_baseline "$t"` still means "go detect". That keeps the parameter purely
+# ADDITIVE — every existing one-argument call site is byte-unchanged (R22).
+#
+# The verdict travels as a PARAMETER, not a cache: this helper stores nothing, so there is
+# no per-run state that could leak from one target to the next when the installer processes
+# several (`--umbrella`). Each target's call carries its own verdict or computes one.
 precheck_baseline() {
   if [ -f "$1/.harness/.harness-version" ]; then
     if [ -f "$1/.harness/.agents" ]; then
@@ -1140,7 +1156,7 @@ precheck_baseline() {
       normalize_keys "$AGENT_KEYS"
     fi
   else
-    _pb_host="$(detect_host)"
+    if [ "$#" -ge 2 ]; then _pb_host="$2"; else _pb_host="$(detect_host)"; fi
     if [ -n "$_pb_host" ]; then
       printf '%s\n' "$_pb_host"
     else
@@ -3499,8 +3515,16 @@ if [ -z "$UMBRELLA" ]; then
     # differ only where the old value was a hypothetical: it used to report the
     # if-undetected fallback even though detection had just succeeded, so a fresh target
     # inside Claude Code advertised all five while `--agents=host` installed one.
-    printf 'host=%s\n' "$(detect_host)"
-    printf 'baseline=%s\n' "$(precheck_baseline "$TGT" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    #
+    # Detection runs EXACTLY ONCE here and the verdict is handed to precheck_baseline
+    # (which would otherwise detect again for a target with no existing install). Its
+    # stderr diagnostics are one-per-run by contract — the ambiguity line for competing
+    # markers (E19-F01 R5) and the invalid-HARNESS_HOST_AGENT warning (R10) — and a
+    # second call printed each of them twice. The verdict is passed DOWN as an argument,
+    # never cached in a global, so no state survives this block.
+    _pa_host="$(detect_host)"
+    printf 'host=%s\n' "$_pa_host"
+    printf 'baseline=%s\n' "$(precheck_baseline "$TGT" "$_pa_host" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
     exit 0
   fi
   install_one "$TGT"

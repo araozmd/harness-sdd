@@ -966,6 +966,40 @@ test_docs_document_retoggle_path() {
   return 0
 }
 
+# ── F01 R5/R10 — ONE host diagnostic per --print-agents run ──────────────────
+# Regression (Codex P2 on PR #72, comment 3664489955): F02 repointed `baseline=` at
+# precheck_baseline, which on a target with NO existing install detects the host itself —
+# so a single preview asked detect_host twice (once for `host=`, once inside the baseline)
+# and printed the ambiguity line (F01 R5) and the invalid-HARNESS_HOST_AGENT warning
+# (F01 R10) TWICE each. Both requirements say exactly ONE.
+#
+# COUNTING is the whole point: every other assertion in this file checks that a diagnostic
+# is PRESENT, and a presence check is satisfied just as happily by a duplicate. The fixture
+# is deliberately a FRESH target — the stamped branches never detect, so only a fresh one
+# exercises the double-call path.
+test_print_agents_diagnostic_once() {
+  _x="$(sandbox diagonce)"; _t="$_x/t"; mkdir -p "$_t"
+  [ -e "$_t/.harness" ] && fail "F01 R5/R10: the fixture must be a target with no existing install"
+  # (a) competing markers — the nesting case (one CLI shelling out to another).
+  hrun "$_x" CLAUDECODE=1 OPENCODE=1 -- --print-agents "$_t" >"$_x/a.out" 2>"$_x/a.err" \
+    || fail "F01 R5: the competing-marker preview exited non-zero"
+  grep -qx 'host=' "$_x/a.out" \
+    || fail "F01 R5: competing markers did not resolve to undetected"
+  _n="$(grep -c 'ambiguous' "$_x/a.err" || :)"
+  [ "$_n" = 1 ] \
+    || fail "F01 R5: one --print-agents run printed $_n ambiguity diagnostics, expected exactly 1"
+  # (b) an invalid declaration — warns once, then falls through to the marker verdict.
+  hrun "$_x" HARNESS_HOST_AGENT=bogus CLAUDECODE=1 -- --print-agents "$_t" \
+    >"$_x/b.out" 2>"$_x/b.err" \
+    || fail "F01 R10: the invalid-declaration preview exited non-zero"
+  grep -qx 'host=claude' "$_x/b.out" \
+    || fail "F01 R10: the invalid declaration did not fall back to the marker verdict"
+  _n="$(grep -c 'HARNESS_HOST_AGENT' "$_x/b.err" || :)"
+  [ "$_n" = 1 ] \
+    || fail "F01 R10: one --print-agents run printed $_n invalid-declaration warnings, expected exactly 1"
+  return 0
+}
+
 test_host_single_marker
 test_host_empty_marker_is_absent
 test_host_no_marker_undetected
@@ -1045,5 +1079,7 @@ test_docs_document_fresh_default
 pass "F02 docs_document_fresh_default: INSTALL.md and the installer header state the new default (F02 R10)"
 test_docs_document_retoggle_path
 pass "F02 docs_document_retoggle_path: INSTALL.md documents the re-run re-toggle path (F02 R11)"
+test_print_agents_diagnostic_once
+pass "F02 print_agents_diagnostic_once: one preview prints each host diagnostic exactly once (F01 R5/R10)"
 
 echo "All agents-host tests passed."
