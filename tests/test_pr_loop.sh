@@ -1891,10 +1891,22 @@ test_installed_command_carries_the_stack_guard() {
     || fail "E21-F04: the installed command does not state the merge-order rule"
   grep -qi 'retarget' "$_cmd" \
     || fail "E21-F04: the installed command does not warn that a parent-merge retarget is not a review event"
+  # The exit table is what an agent actually follows. Round 1 fixed the guard and left the
+  # table saying exit 0 covers "no open PR owns the base" — so following the doc would merge
+  # a child into a dead branch, the exact failure the guard fix closed.
+  grep -qi 'the base \*\*is\*\* the default branch\|only.*the default branch' "$_cmd" \
+    || fail "E21-F04: the installed exit table does not restrict exit 0 to the default branch (doc/guard drift)"
   [ -x "$_t/.harness/tools/pr-stack-guard.sh" ] \
     || fail "E21-F04: installed tools/pr-stack-guard.sh missing or not executable"
   grep -qi 'stacked' "$_t/.harness/docs/WORKFLOW.md" \
     || fail "E21-F04: installed docs/WORKFLOW.md does not document the stacked-PR lane"
+  # The lane gives incremental REVIEW, never atomic delivery: merging PR A publishes wave 1
+  # to the default branch while B and C are open. An earlier draft claimed the opposite,
+  # which invited exactly the half-wired main it appeared to prevent.
+  grep -qi 'does NOT give atomic delivery\|not.*atomic delivery' "$_t/.harness/docs/WORKFLOW.md" \
+    || fail "E21-F04: installed WORKFLOW.md does not state that the stacked lane gives no atomic delivery"
+  grep -qi 'independently safe' "$_t/.harness/docs/WORKFLOW.md" \
+    || fail "E21-F04: installed WORKFLOW.md does not require each wave to be independently safe on the default branch"
   pass "E21-F04 installed_command_carries_the_stack_guard"
 }
 

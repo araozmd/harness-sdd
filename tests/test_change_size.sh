@@ -208,6 +208,32 @@ fi
 [ "${_rc3:-0}" = "4" ] || fail "R8: bad --format exited ${_rc3:-0}, expected 4"
 pass "R8 exit 4 for not-a-repo / unresolvable base / bad --format; never for a large diff"
 
+# ── R8b: a clean tree reports ZERO files, not a phantom one ──────────────────────────────
+# An empty $stats still reaches awk as one blank record. Counted as a production file, a
+# clean tree reports production_files: 1 — and a branch sitting on exactly advise_files or
+# escalate_files gets pushed into the next tier by a file that does not exist.
+RC="$T/repo-clean"; mkrepo "$RC"; git -C "$RC" checkout -q -b feature
+_j="$("$TOOL" --repo "$RC" --base main --format json)"
+[ "$(printf '%s' "$_j" | sed -n 's/.*"production_files":\([0-9]*\).*/\1/p')" = "0" ] \
+  || fail "R8b: a clean tree reported a phantom production file"
+[ "$(printf '%s' "$_j" | sed -n 's/.*"total_files":\([0-9]*\).*/\1/p')" = "0" ] \
+  || fail "R8b: a clean tree reported a phantom changed file"
+pass "R8b a clean tree reports zero files, not one phantom record"
+
+# ── R8c: --format json stays parseable for a filename containing a quote ─────────────────
+# A path with `"` interpolated raw produces output that EXITS 0 and is unparseable — the
+# worst shape for a machine interface, because the caller only finds out when jq dies.
+if command -v jq >/dev/null 2>&1; then
+  RQ="$T/repo-quote"; mkrepo "$RQ"; git -C "$RQ" checkout -q -b feature
+  n_lines 3 > "$RQ/a\"b.js"
+  git -C "$RQ" add -A && git -C "$RQ" commit -qm "a filename with a quote in it"
+  "$TOOL" --repo "$RQ" --base main --format json | jq -e . >/dev/null 2>&1 \
+    || fail "R8c: --format json emitted unparseable output for a filename containing a quote"
+  pass "R8c --format json survives a filename containing a quote"
+else
+  echo "skip - R8c (jq not installed)"
+fi
+
 # ── R9: the Reviewer and Orchestrator carry the handoff rule ─────────────────────────────
 grep -qF 'tools/change-size.sh' "$ROOT/agents/reviewer.md" \
   || fail "R9: reviewer.md does not run the change-size check before the PR handoff"

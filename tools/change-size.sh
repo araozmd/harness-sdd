@@ -148,13 +148,15 @@ for _p in $(_extra generated_paths || true); do GEN_RE="$GEN_RE|$_p";  done
 # with zero production lines — the check reporting green on precisely the branch it exists to
 # measure. `git diff <commit>` covers committed + staged + unstaged with no double counting
 # (and equals `<commit>...HEAD` exactly when the tree is clean, since $mb IS the merge base).
-stats="$(git -C "$repo" diff --numstat "$mb" 2>/dev/null || true)"
+# `-c core.quotePath=false` keeps a path like `a"b.js` literal instead of git wrapping it in
+# its own quotes — otherwise the JSON emitter would be escaping git's quoting, not the path.
+stats="$(git -C "$repo" -c core.quotePath=false diff --numstat "$mb" 2>/dev/null || true)"
 
 # Untracked files are invisible to `git diff` at any range, and a new feature is mostly new
 # FILES — the single largest thing this check could miss. Count their lines directly and
 # append them in the same numstat shape. `--exclude-standard` honours .gitignore, so build
 # output and the harness's own scratch stay out.
-_untracked="$(git -C "$repo" ls-files --others --exclude-standard 2>/dev/null || true)"
+_untracked="$(git -C "$repo" -c core.quotePath=false ls-files --others --exclude-standard 2>/dev/null || true)"
 if [ -n "$_untracked" ]; then
   _extra_stats="$(printf '%s\n' "$_untracked" | while IFS= read -r _f; do
       [ -n "$_f" ] || continue
@@ -174,6 +176,11 @@ fi
 export CS_TEST_RE="$TEST_RE" CS_DOC_RE="$DOC_RE" CS_GEN_RE="$GEN_RE"
 eval "$(printf '%s\n' "$stats" | awk -F'\t' '
   BEGIN { tre = ENVIRON["CS_TEST_RE"]; dre = ENVIRON["CS_DOC_RE"]; gre = ENVIRON["CS_GEN_RE"] }
+  # An EMPTY $stats still arrives as one blank record from `printf %s\n ""`. Without this the
+  # unconditional handler counts it as a production file, so a clean tree reports
+  # production_files: 1 — and a branch sitting on exactly advise_files/escalate_files gets
+  # pushed into the next tier by a file that does not exist.
+  NF < 3 { next }
   $1 == "-" { next }                                   # binary file: no line count
   {
     n = $1 + 0; f = $3
@@ -198,8 +205,15 @@ if [ "$prod" -gt "$escalate_lines" ] || [ "$prod_files" -gt "$escalate_files" ];
 # cut", not "how big is it" — and review risk is not uniform across a diff.
 top="$(printf '%s\n' "$stats" | awk -F'\t' '
   BEGIN { tre = ENVIRON["CS_TEST_RE"]; dre = ENVIRON["CS_DOC_RE"]; gre = ENVIRON["CS_GEN_RE"] }
+  NF < 3 { next }
   $1 == "-" { next }
   { f = $3; if (f ~ gre || f ~ tre || f ~ dre) next; printf "%d\t%s\n", $1, f }' | sort -rn | head -5)"
+
+# JSON string escaping for a path interpolated into --format json output. A valid git
+# filename may contain `"` or `\`, and emitting one raw produces output that exits 0 and is
+# unparseable — the worst failure shape for a machine interface, because the caller only finds
+# out when jq dies. Backslash first, or it would double-escape the quotes it just added.
+_json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 
 if [ "$format" = json ]; then
   printf '{"base":"%s","merge_base":"%s","tier":"%s","production_lines":%d,"production_files":%d,' \
@@ -213,7 +227,7 @@ if [ "$format" = json ]; then
   printf '%s\n' "$top" | while IFS="$(printf '\t')" read -r _n _f; do
     [ -n "${_f:-}" ] || continue
     [ "$_first" = 1 ] || printf ','
-    printf '{"file":"%s","additions":%d}' "$_f" "$_n"
+    printf '{"file":"%s","additions":%d}' "$(_json_escape "$_f")" "$_n"
     _first=0
   done
   printf ']}\n'
