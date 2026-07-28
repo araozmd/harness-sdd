@@ -73,8 +73,10 @@ delegate backend fails before manifest/provision/claim and points to serial
 ### `/sdd-pr-loop` (opt-in, gated on `pr_loop.enabled`)
 
 > **Opt-in.** A fresh install seeds `pr_loop.enabled: false` and stamps **no**
-> `/sdd-pr-loop` glue at all. Set it to `true` in `.harness/harness.config.yaml` and re-run
-> the installer to turn the loop on. Only the literal `true` enables it — an absent block,
+> `/sdd-pr-loop` glue at all. The installer **asks** — see
+> [The third question](#the-third-question--pr_loopenabled) — so answer `2` at the prompt,
+> pass `--pr-loop=true`, or set the key in `.harness/harness.config.yaml` and re-run the
+> installer to turn the loop on. Only the literal `true` enables it — an absent block,
 > an absent key, an empty or malformed value all mean off.
 
 The installer also generates **`/sdd-pr-loop`** — the Codex review loop — from one
@@ -347,7 +349,83 @@ installer does not prompt for, so refusing would mean the prompt could never tur
 delegation on at all. If the command is still unset when work starts, the Builder role
 stops and reports the misconfiguration rather than quietly writing code itself.
 
-### Changing it later
+## The third question — `pr_loop.enabled`
+
+One more, asked straight after the backend question on an interactive run:
+
+```
+Enable the Codex PR review loop on this install? (E20-F02)
+  1) false   stamp no /sdd-pr-loop glue — the opt-in default
+  2) true    stamp /sdd-pr-loop + the pr-fixer sub-agent
+             NEEDS the Codex GitHub App on this repo plus an authed `gh`.
+             Nothing is probed now; the first /sdd-pr-loop run reports it.
+  choose 1/2 [Enter keeps false]:
+```
+
+The answer is written to `pr_loop.enabled` in `.harness/harness.config.yaml`, whose two
+legal values are `true` and `false`:
+
+| Value | Meaning |
+|---|---|
+| `false` | **Default, opt-in.** No `/sdd-pr-loop` glue is stamped anywhere — no command, no `pr-fixer` sub-agent, no global Codex prompt. |
+| `true` | `/sdd-pr-loop` and the `pr-fixer` sub-agent are stamped into every selected front-end. Answering `1` on a later re-run **reclaims** all of it in that same run. |
+
+**The prompt does not change the default.** Pressing Enter keeps whatever the target
+already has — `false` on a fresh install, and on a re-run the value currently in the file.
+A fresh install never inherits the harness source repo's own `pr_loop.enabled`, so the only
+way a fresh target ends up at `true` is an explicit `2` or `--pr-loop=true`. An
+unrecognized answer keeps the current value too (the installer reports the outcome on the
+next line; re-run to correct it).
+
+**Why the question exists.** `/sdd-pr-loop` only functions on a repo with the **Codex
+GitHub App** installed plus an authed `gh` (and `jq`). On any other repo the correct value
+is `false`, and you are the only one who knows which repo is which.
+
+### Scripted installs — `--pr-loop=`
+
+```bash
+./harness-install.sh --pr-loop=true  /path/to/your-project
+./harness-install.sh --pr-loop=false /path/to/your-project
+```
+
+Both suppress the prompt, and an **empty** value (`--pr-loop=`) means *no override* —
+exactly like `--agents=` and `--builder-backend=`. A value that is neither `true` nor
+`false` aborts non-zero **before anything is created or modified** in the target.
+
+With **no TTY and no override** the installer asks nothing and leaves the config
+**byte-identical**, so CI and scripted upgrades behave as they always have.
+
+### `HARNESS_PR_LOOP_ENABLED` is per-run, and is never persisted
+
+There is deliberately **no** environment twin for `--pr-loop`.
+`HARNESS_PR_LOOP_ENABLED` keeps exactly the meaning it has always had: one of the five
+**per-run** overrides (with `HARNESS_AUTO_MERGE`, `HARNESS_MAX_ROUNDS`,
+`HARNESS_BLOCKING_SEVERITIES`, `HARNESS_MERGE_STRATEGY`) that gate a single run and change
+**no byte** of `harness.config.yaml`. It still wins over the config for what that run
+stamps. When it disagrees with the value the installer resolved, you get one warning:
+
+```
+⚠️  HARNESS_PR_LOOP_ENABLED=true is a PER-RUN override — it gates THIS run only and was NOT persisted; …
+```
+
+To persist a value, use the prompt or `--pr-loop=`. Re-running the installer is the
+supported way to change it later; there is no `/sdd-config` command, on purpose — two
+configuration surfaces would be two things to diverge.
+
+### No install-time preflight
+
+Enabling the loop runs **no** check for the Codex GitHub App, `gh` or `jq`. The installer
+is POSIX `sh` with zero dependencies and never invokes either tool — those stay
+**loop-runtime** requirements (see the preconditions above), so a target with neither still
+installs and still passes `init.sh`. The App can also legitimately be installed *after* the
+harness, and a target may not even have a remote yet, so an install-time "missing App"
+warning would routinely be wrong. The prompt states the precondition instead, and
+`/sdd-pr-loop`'s own preflight fails fast (exit `5`) naming the failed check and its
+remedy at the one moment that diagnosis can be accurate.
+
+### Changing either answer later
+
+Applies to both follow-up questions — `execution.builder.backend` and `pr_loop.enabled`.
 
 **Re-run the installer** — same as front-end selection, and the same reason: the installer
 *is* the config UI, so there is no second surface to keep in sync. Only that one scalar is

@@ -4,6 +4,66 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.43.0] — 2026-07-28
+
+### Added — ✨ the installer asks a third question: `pr_loop.enabled` (E20-F02)
+- The toggle this work stream was opened for: **the human running the installer is the one
+  who marks the PR-loop enablement.** E18-F01 made `pr_loop.enabled` opt-in (default
+  `false`); turning it on has been a one-line hand-edit of `.harness/harness.config.yaml`
+  ever since, discoverable only by reading source comments. The installer now **asks**, as
+  one more plain line-oriented prompt right after the E20-F01 backend question:
+
+  ```
+  Enable the Codex PR review loop on this install? (E20-F02)
+    1) false   stamp no /sdd-pr-loop glue — the opt-in default
+    2) true    stamp /sdd-pr-loop + the pr-fixer sub-agent
+               NEEDS the Codex GitHub App on this repo plus an authed `gh`.
+               Nothing is probed now; the first /sdd-pr-loop run reports it.
+    choose 1/2 [Enter keeps false]:
+  ```
+
+- **The opt-in default does not change.** This adds a prompt, not a new default. Pressing
+  Enter keeps whatever the target already has, and a fresh install still cannot inherit the
+  harness source repo's own `pr_loop.enabled: true` — `seed_pr_loop_optin` is unmodified and
+  still normalizes a freshly copied config to `false` **before** the resolved value is
+  applied, so "no answer ⇒ off" is enforced twice. The only route to `true` on a fresh
+  target is an explicit `2` / `yes` / `--pr-loop=true`.
+- **Scripted installs: `--pr-loop=<true|false>`** (also `--pr-loop <value>`). Suppresses the
+  prompt; an empty value means *no override*, exactly like `--agents=` and
+  `--builder-backend=`; an illegal value aborts non-zero **before** anything is created or
+  modified in the target. With no TTY and no override nothing is asked and the config is
+  left **byte-identical**, so CI keeps today's behavior exactly.
+- **No environment twin, on purpose.** `HARNESS_PR_LOOP_ENABLED` keeps its exact E18-F01
+  meaning: one of five **per-run** overrides (with `HARNESS_AUTO_MERGE`,
+  `HARNESS_MAX_ROUNDS`, …) that gates a single run, still wins over the config for what that
+  run stamps, and changes **no byte** of `harness.config.yaml`. Making one member of that
+  family persist would turn `HARNESS_PR_LOOP_ENABLED=false ./harness-install.sh <target>`
+  from "don't stamp on this run" into "permanently disable this target's loop". The layering
+  is *the flag/prompt persists, the env overrides the run* — with exactly one warning when
+  the two disagree, and none when they agree or the variable is unset.
+- **The flip is reconciled inside the same run.** The write lands after the config
+  seed/migrate stage and before glue generation, so answering `2` stamps `/sdd-pr-loop` and
+  the `pr-fixer` sub-agent immediately, and answering `1` on a later re-run reclaims all of
+  it through E18-F01's existing pass — including the `.sdd-pr-loop.owners` ledger, so a
+  target flipping its own gate off never deletes a global Codex prompt another target still
+  claims. E18-F01's unconditional command-body generation (the pristine reference that
+  reclamation byte-compares against) is untouched.
+- **No install-time preflight.** Enabling the loop probes nothing: the installer is POSIX
+  `sh` with zero dependencies and never invokes `gh` or `jq`, which stay loop-runtime
+  requirements. The prompt states the precondition instead, and `/sdd-pr-loop`'s own
+  fail-fast diagnoses it at the one moment that can be accurate — the Codex GitHub App may
+  legitimately be installed *after* the harness.
+- **The config write is surgical.** Only the one scalar on the gate line is replaced,
+  preserving its indentation and any trailing comment verbatim; where the `pr_loop:` section
+  exists with no `enabled:` key at all, the canonical line is inserted after the header. A
+  same-named `enabled:` under any other section, every comment, blank line and unrelated
+  hand-edit survive, and a seeded target and an upgraded one converge on byte-identical
+  blocks for both values.
+- Docs: `docs/INSTALL.md` gains a "third question" section (the prompt, `--pr-loop=`, the
+  per-run env ruling, the no-preflight ruling, re-run-to-change); the `pr_loop:` comment
+  block in `harness.config.yaml` and in the installer's migration heredoc document the
+  prompt in byte-identical text. Checks live in `tests/test_installer_toggles.sh`.
+
 ## [0.42.0] — 2026-07-28
 
 ### Added — ✨ the installer asks a second question: `execution.builder.backend` (E20-F01)
