@@ -782,6 +782,34 @@ eval_fixture() {
   printf '%s\n' "$_erc"
 }
 
+test_non_positive_interval_cannot_spin() {            # R56
+  # Codex #68 P2 (id 3662643325): `0` is a numeric value the knob parser accepts, and with
+  # it `sleep 0` returns instantly while a summed-interval `elapsed` never advances — so
+  # NEITHER deadline is ever reached and the watcher hammers the GitHub API forever. A
+  # non-positive interval must fail closed as a usage error, before any polling happens.
+  if ! have_jq; then skip "test_non_positive_interval_cannot_spin (jq not installed)"; return 0; fi
+  for _iv in 0 00; do
+    _t0="$(date +%s)"
+    _rc="$(run_wait "wspin$_iv" pending ok \
+           "HARNESS_POLL_INTERVAL=$_iv" HARNESS_POLL_CEILING=60 HARNESS_FIRST_RESPONSE=0)"
+    _t1="$(date +%s)"
+    [ "$_rc" = 4 ] \
+      || fail "R56: HARNESS_POLL_INTERVAL=$_iv must exit 4, not poll (got $_rc)"
+    [ "$(( _t1 - _t0 ))" -lt 20 ] \
+      || fail "R56: HARNESS_POLL_INTERVAL=$_iv kept the watcher running instead of failing fast"
+    grep -qF 'HARNESS_POLL_INTERVAL' "$T/.wspin$_iv.err" \
+      || fail "R56: the diagnostic for interval $_iv does not name the knob"
+    # nothing was fetched: the round dir was never populated, so no API call was made
+    if [ -f "$T/wspin$_iv/round/pr.json" ]; then
+      fail "R56: the watcher polled the GitHub API with a $_iv-second interval"
+    fi
+  done
+  # the deadlines are advanced by WALL CLOCK, not by summing the interval, so a poll that
+  # itself takes time counts against the ceiling instead of inflating it
+  grep -qF 'date +%s' "$W" || fail "R56: the watcher no longer measures elapsed time by wall clock"
+  pass "R56 a non-positive HARNESS_POLL_INTERVAL exits 4 before polling — no unbounded loop"
+}
+
 test_stale_reanchored_thread_is_not_a_finding() {     # R25
   if ! have_jq; then skip "test_stale_reanchored_thread_is_not_a_finding (jq not installed)"; return 0; fi
   _f="$(mk_fixture stale-reanchored)"
@@ -1256,6 +1284,7 @@ test_timeout_exits_2_not_clean
 test_first_response_window_fails_fast
 test_first_response_probe_disabled
 test_poll_env_knobs_honored
+test_non_positive_interval_cannot_spin
 test_stale_reanchored_thread_is_not_a_finding
 test_clean_via_review_banner
 test_clean_via_issue_comment_banner

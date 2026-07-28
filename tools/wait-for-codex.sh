@@ -23,7 +23,7 @@
 #                       files + trigger-ts.txt land
 #
 # Env knobs (all optional). HARNESS_* names ONLY — no other vendor prefix is read:
-#   HARNESS_POLL_INTERVAL   seconds between polls                     (default 60)
+#   HARNESS_POLL_INTERVAL   seconds between polls, MUST be > 0        (default 60)
 #   HARNESS_POLL_CEILING    max seconds to wait before timeout        (default 900 = 15 min)
 #   HARNESS_FIRST_RESPONSE  seconds to wait for ANY Codex activity    (default 180; 0 = off)
 #
@@ -33,13 +33,15 @@
 #   2  → timeout: ceiling hit with no resolution. Caller aborts round w/ needs-human.
 #   3  → clean review, zero findings (summary banner on head as a review OR as an
 #        issue comment, OR 👍 reaction on the trigger comment).
-#   4  → usage / precondition error (includes an unresolvable trigger timestamp).
+#   4  → usage / precondition error (includes an unresolvable trigger timestamp and a
+#        non-positive HARNESS_POLL_INTERVAL).
 #   5  → preflight check failed, or no Codex activity within HARNESS_FIRST_RESPONSE.
 #
 # Always (re)writes pr.json, review-comments.json, issue-comments.json, reactions.json
 # into round-dir on every poll, so the caller reads the same sources the command body
 # describes. POSIX sh, no bashisms (the harness's zero-dependency ethos); the ONLY
-# runtime dependencies are `gh` (authed) and `jq`, both asserted by `preflight`.
+# runtime dependencies are `gh` (authed) and `jq`, both asserted by `preflight` (`date +%s`
+# is used opportunistically for the wall-clock deadlines, with a fallback when absent).
 
 set -eu
 
@@ -59,6 +61,24 @@ wfc_int() {
     ''|*[!0-9]*) printf '%s\n' "$2" ;;
     *)           printf '%s\n' "$1" ;;
   esac
+}
+
+# wfc_elapsed <start-epoch> <fallback> — seconds since <start-epoch> by WALL CLOCK, or
+# <fallback> when the clock is unusable (absent/odd `date`, or a backwards step). Advancing
+# the deadlines by the poll interval alone UNDERSTATES real time — every poll makes several
+# `gh` calls — so both the ceiling and the first-response window silently stretch past their
+# configured budgets. `date +%s` is deliberately NOT a hard dependency: without it the caller
+# falls back to the accumulator, which is bounded because the interval is validated positive.
+wfc_elapsed() {
+  case "$1" in
+    ''|*[!0-9]*) printf '%s\n' "$2"; return 0 ;;
+  esac
+  _wfce_now="$(date +%s 2>/dev/null || true)"
+  case "$_wfce_now" in
+    ''|*[!0-9]*) printf '%s\n' "$2"; return 0 ;;
+  esac
+  if [ "$_wfce_now" -lt "$1" ]; then printf '%s\n' "$2"; return 0; fi
+  printf '%s\n' "$(( _wfce_now - $1 ))"
 }
 
 # wfc_count <value> — normalize a jq `length` result to a plain integer (0 on anything else).
@@ -247,6 +267,17 @@ INTERVAL="$(wfc_int "${HARNESS_POLL_INTERVAL:-60}" 60)"
 CEILING="$(wfc_int "${HARNESS_POLL_CEILING:-900}" 900)"
 FIRST_RESPONSE="$(wfc_int "${HARNESS_FIRST_RESPONSE:-180}" 180)"
 
+# A ZERO interval is the one numeric value wfc_int accepts that makes this loop unbounded:
+# `sleep 0` returns instantly, so the watcher would hammer the GitHub API at full rate until
+# killed from outside. (Wall-clock deadlines below would cap it at the ceiling, but a
+# rate-limit burn is still not a mode we ship.) Fail closed as a usage error instead —
+# 0 has no useful meaning for this knob, unlike HARNESS_FIRST_RESPONSE=0 (probe off).
+if [ "$INTERVAL" -le 0 ]; then
+  echo "wait-for-codex: HARNESS_POLL_INTERVAL must be a positive number of seconds" \
+       "(got '${HARNESS_POLL_INTERVAL:-}') — refusing to poll the GitHub API without a delay" >&2
+  exit 4
+fi
+
 if ! command -v gh >/dev/null 2>&1; then
   echo "wait-for-codex: \`gh\` is not on PATH — run \`$0 preflight $PR_NUMBER\` for the full diagnostic" >&2
   exit 4
@@ -355,7 +386,13 @@ PROBE=1
 if [ "$FIRST_RESPONSE" -eq 0 ]; then PROBE=0; fi
 if [ "$FIRST_RESPONSE" -ge "$CEILING" ]; then PROBE=0; fi
 
+# Deadline clock. WFC_START anchors the wall-clock measurement; `ticks` is the summed-
+# interval fallback used only when `date` is unusable.
+WFC_START="$(date +%s 2>/dev/null || true)"
+case "$WFC_START" in ''|*[!0-9]*) WFC_START='' ;; esac
+
 elapsed=0
+ticks=0
 while :; do
   if fetch_sources; then
     case "$(wfc_evaluate "$ROUND_DIR" "$TRIGGER_TS")" in
@@ -368,6 +405,10 @@ while :; do
   else
     echo "wait-for-codex: gh fetch failed, retrying (${elapsed}s)" >&2
   fi
+
+  # Re-measure BEFORE the two deadline checks, so the time this poll's `gh` calls actually
+  # took counts against them rather than being rounded away.
+  elapsed="$(wfc_elapsed "$WFC_START" "$ticks")"
 
   if [ "$PROBE" = 1 ] && [ "$elapsed" -ge "$FIRST_RESPONSE" ]; then
     echo "wait-for-codex: no Codex activity of any kind within ${FIRST_RESPONSE}s —" \
@@ -382,5 +423,5 @@ while :; do
     exit 2
   fi
   sleep "$INTERVAL"
-  elapsed=$(( elapsed + INTERVAL ))
+  ticks=$(( ticks + INTERVAL ))
 done
