@@ -442,7 +442,7 @@
     {
       "id": "E19",
       "title": "Installer: single-CLI (host) agent default",
-      "status": "in-progress",
+      "status": "done",
       "owner": "araozmd",
       "features": [
         {
@@ -457,7 +457,7 @@
         {
           "id": "E19-F02",
           "title": "Fresh-install pre-check baseline = the detected host",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
@@ -475,15 +475,25 @@
       "features": [
         {
           "id": "E20-F01",
-          "title": "execution.builder.backend + pr_loop.enabled prompts in the installer picker",
+          "title": "execution.builder.backend prompt in the installer picker",
           "status": "pending",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
-            "E18-F01",
-            "E19-F01"
+            "E19-F02"
           ],
-          "spec_path": "specs/epics/E20-workflow-toggles/F01-workflow-toggle-prompts/"
+          "spec_path": "specs/epics/E20-workflow-toggles/F01-builder-backend-prompt/"
+        },
+        {
+          "id": "E20-F02",
+          "title": "pr_loop.enabled prompt in the installer picker",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E20-F01"
+          ],
+          "spec_path": "specs/epics/E20-workflow-toggles/F02-pr-loop-prompt/"
         }
       ]
     }
