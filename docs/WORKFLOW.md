@@ -149,6 +149,44 @@ count as production.
 The Reviewer runs it before approving and records the tier and the decision in its verdict;
 the Orchestrator runs it before opening the PR and carries the tier into the PR body.
 
+### When the feature genuinely cannot be split: the stacked-PR lane
+
+E21-F01 splits features at drill time and the pre-PR check catches what slips through. Both
+assume the work *can* be split into independently-mergeable units. Sometimes it cannot: a
+capability whose intermediate states are not safely shippable — a half-wired booking tool that
+can commit an appointment but cannot confirm it — is one deliverable no matter how many
+requirements it contains.
+
+For that case, split the **review** instead of the delivery. Base each increment on the
+previous increment's branch rather than on the default branch:
+
+```
+main  ←  PR A (wave 1)  ←  PR B (wave 2)  ←  PR C (wave 3)
+```
+
+The reviewer reads only each increment's own diff, so each PR converges on its own budget;
+the feature still lands atomically with respect to `main`, in order. A merge train, not a
+17k-line pass. Cut the stack on the same **wave boundaries** the Driller used — the seams the
+work actually has, not equal thirds.
+
+Two rules make this safe, and both are enforced rather than remembered:
+
+- **Never merge a child ahead of its parent.** `tools/pr-stack-guard.sh` answers exactly that
+  question offline from JSON `/sdd-pr-loop` already fetches, and returns a dedicated exit `6`
+  meaning *wait for the parent*. That is a normal state in a stack — the loop hands back
+  rather than labelling a healthy child `needs-human` every round.
+- **A retarget is not a review event.** When the parent merges, GitHub retargets the child and
+  pushes no commit: `baseRefName` changes, the head does not. The freshness anchor and the
+  clean-signal rules are untouched.
+
+Growing the stack as the Builder finishes each wave — rather than creating all branches up
+front — is what buys the wall-clock: increment 1 is in review while increment 3 is still being
+written.
+
+**Restacking after a review fix is still manual.** If increment A takes a fix, the children
+need a rebase; the harness does not automate that today, deliberately — it is a `git` workflow
+question, and a wrong automated restack loses commits. Do it by hand and re-run the loop.
+
 ## Architecture-aligned specs (the Architect cites ADRs)
 
 The planning tier produces durable design artifacts; this contract makes them

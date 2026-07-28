@@ -4,6 +4,38 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.47.0] — 2026-07-28
+
+### Added — ✨ Stacked-PR lane: never merge a child ahead of its parent (E21-F04)
+- E21-F01 splits features at drill time and E21-F02 catches what slips through, but both
+  assume the work *can* be split into independently-mergeable units. Some capabilities cannot:
+  a half-wired booking tool that can commit an appointment but not confirm it is one
+  deliverable however many requirements it holds.
+- For that case, split the **review** instead of the delivery: base each increment on the
+  previous increment's branch. The reviewer reads only that increment's diff, so each PR
+  converges on its own budget, while the feature still lands atomically against `main`, in
+  order — a merge train rather than one 17k-line pass. Cut on the Driller's **wave
+  boundaries**, the seams the work actually has.
+- Stacking introduces exactly one new way to corrupt a branch: merging increment B before
+  increment A. That is a **correctness bug, not a race**, and `auto_merge` would have walked
+  into it — the existing gates only ask "checks green, threads resolved", never "is my base
+  branch itself still an open PR".
+- New `tools/pr-stack-guard.sh` answers that one question **offline**, from JSON the loop
+  already fetches, so it is testable without `gh`, a network, or a real stack. Exit `0` safe,
+  `6` stacked (naming the parent PR to wait on), `4` unreadable.
+- **Exit `6` is deliberately its own code.** "Waiting on the parent" is a normal state in a
+  stack, not a failure — folding it into a generic error would label a perfectly healthy child
+  PR `needs-human` on every round while its parent is still in review.
+- **Fails closed on an unreadable base**, mirroring step 3's `head_ok` discipline: a base that
+  could not be read is not "the default branch", and assuming it is would be how a guard meant
+  to prevent out-of-order merges permits one.
+- A parent-merge **retarget is not a review event** — it changes `baseRefName`, not the head,
+  so the freshness anchor and the clean-signal rules are untouched. Documented in the command.
+- Wired into step 6 of both the source-layout command and the installer's generated body;
+  `docs/WORKFLOW.md` documents the lane. **Restacking after a review fix stays manual** and is
+  documented as such: it is a `git` workflow question, and a wrong automated restack loses
+  commits.
+
 ## [0.46.0] — 2026-07-28
 
 ### Added — ✨ `/sdd-pr-loop` reports whether the review is converging (E21-F03)

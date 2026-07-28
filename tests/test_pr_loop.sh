@@ -1820,9 +1820,75 @@ test_installed_command_carries_the_trend() {
   pass "E21-F03 installed_command_carries_the_trend"
 }
 
+# ── E21-F04: stacked-PR lane — never merge a child ahead of its parent ───────────────────
+# Merging increment B before increment A is a correctness bug, not a race, and auto_merge
+# would walk into it: the existing gates ask "checks green, threads resolved", never "is my
+# base branch itself still an open PR". Driven offline against fixture JSON so the guard is
+# testable without gh, a network, or a real stack.
+
+test_stack_guard_verdicts() {
+  [ -x "$SRC/tools/pr-stack-guard.sh" ] || fail "E21-F04: tools/pr-stack-guard.sh missing or not executable"
+  if ! command -v jq >/dev/null 2>&1; then skip "stack_guard_verdicts (jq not installed)"; return 0; fi
+  _d="$T/stack"; mkdir -p "$_d"
+  printf '{"baseRefName":"main"}\n'             > "$_d/base-main.json"
+  printf '{"baseRefName":"feat/wave-a"}\n'      > "$_d/base-stacked.json"
+  printf '{"headRefOid":"abc"}\n'               > "$_d/base-missing.json"
+  printf '[{"number":80,"headRefName":"feat/wave-a"}]\n' > "$_d/open-parent.json"
+  printf '[]\n'                                 > "$_d/open-none.json"
+
+  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_d/base-main.json" "$_d/open-parent.json" >/dev/null 2>&1 \
+    || fail "E21-F04: a PR based on the default branch was not cleared to merge"
+
+  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_d/base-stacked.json" "$_d/open-parent.json" >/dev/null 2>&1 && _rc=0 || _rc=$?
+  [ "$_rc" = "6" ] \
+    || fail "E21-F04: a child whose base is an OPEN parent PR exited $_rc, expected 6 (would have merged out of order)"
+
+  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_d/base-stacked.json" "$_d/open-none.json" >/dev/null 2>&1 \
+    || fail "E21-F04: a non-default base with no open PR owning it must be safe to merge (parent already landed)"
+
+  # Fail CLOSED: a base we could not read is NOT the default branch. Treating it as one is
+  # exactly how a guard meant to prevent out-of-order merges permits one.
+  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_d/base-missing.json" "$_d/open-parent.json" >/dev/null 2>&1 && _rc=0 || _rc=$?
+  [ "$_rc" = "4" ] || fail "E21-F04: an unreadable baseRefName exited $_rc, expected 4 (must fail closed)"
+  pass "E21-F04 stack_guard_verdicts: parent-open ⇒ 6, default base ⇒ 0, unreadable base ⇒ 4"
+}
+
+test_stack_guard_exit6_is_not_a_failure_state() {
+  if ! command -v jq >/dev/null 2>&1; then skip "stack_guard_exit6_is_not_a_failure_state (jq not installed)"; return 0; fi
+  # Exit 6 must be distinct from the loop's existing failure codes, or a healthy child PR
+  # gets labelled needs-human on every round while its parent is still in review.
+  for _bad in 1 2 3 4 5; do
+    [ "$_bad" != "6" ] || fail "E21-F04: exit 6 collides with an existing pr-loop exit code"
+  done
+  _out="$(sh "$SRC/tools/pr-stack-guard.sh" evaluate "$T/stack/base-stacked.json" "$T/stack/open-parent.json" 2>&1 || true)"
+  printf '%s' "$_out" | grep -qF '#80' \
+    || fail "E21-F04: the stacked verdict does not name the parent PR number to wait on"
+  pass "E21-F04 stack_guard_exit6_is_not_a_failure_state: names the parent, distinct exit code"
+}
+
+test_installed_command_carries_the_stack_guard() {
+  _t="$T/stack-install"
+  install_on "$_t" --agents=claude
+  _cmd="$_t/.claude/commands/sdd-pr-loop.md"
+  grep -qF 'pr-stack-guard.sh' "$_cmd" \
+    || fail "E21-F04: the INSTALLED /sdd-pr-loop does not run the stack guard (installer heredoc not updated)"
+  grep -qi 'merge the parent first\|never merge a child' "$_cmd" \
+    || fail "E21-F04: the installed command does not state the merge-order rule"
+  grep -qi 'retarget' "$_cmd" \
+    || fail "E21-F04: the installed command does not warn that a parent-merge retarget is not a review event"
+  [ -x "$_t/.harness/tools/pr-stack-guard.sh" ] \
+    || fail "E21-F04: installed tools/pr-stack-guard.sh missing or not executable"
+  grep -qi 'stacked' "$_t/.harness/docs/WORKFLOW.md" \
+    || fail "E21-F04: installed docs/WORKFLOW.md does not document the stacked-PR lane"
+  pass "E21-F04 installed_command_carries_the_stack_guard"
+}
+
 test_round_trend_verdicts
 test_round_trend_names_the_seams
 test_round_trend_usage_errors
 test_installed_command_carries_the_trend
+test_stack_guard_verdicts
+test_stack_guard_exit6_is_not_a_failure_state
+test_installed_command_carries_the_stack_guard
 
 echo "All pr-loop tests passed."

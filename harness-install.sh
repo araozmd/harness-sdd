@@ -1881,6 +1881,7 @@ install_one() {
   chmod +x "$H/tools/wait-for-codex.sh" 2>/dev/null || true   # E18-F01 /sdd-pr-loop background Codex watcher
   chmod +x "$H/tools/change-size.sh" 2>/dev/null || true   # E21-F02 advisory pre-PR change-size check
   chmod +x "$H/tools/pr-round-trend.sh" 2>/dev/null || true   # E21-F03 pr-loop convergence trend
+  chmod +x "$H/tools/pr-stack-guard.sh" 2>/dev/null || true   # E21-F04 stacked-PR merge-order guard
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"
@@ -3258,6 +3259,35 @@ another Codex round:
 If all are green, **proceed to "ready to merge"** — do not waste another Codex round. If
 checks are still pending, wait for them; if any fail, treat the failure like a blocking
 comment for the next round.
+
+#### Stack guard — never merge a child ahead of its parent (E21-F04)
+
+A stacked PR is based on another PR's head branch, not the default branch, so the reviewer
+reads only that increment's own diff. Merging increment B before increment A is **not a
+race — it is a correctness bug**, and `auto_merge` would walk straight into it: the gates
+above only ever ask "checks green, threads resolved", never "is my base branch itself still
+an open PR". So ask, every time, before any merge:
+
+```bash
+gh pr view "$pr_number" --json baseRefName > "$round_dir/base.json"
+gh pr list --state open --json number,headRefName > "$round_dir/open-prs.json"
+sh .harness/tools/pr-stack-guard.sh evaluate "$round_dir/base.json" "$round_dir/open-prs.json" \
+  --default-branch "$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')"
+```
+
+| Exit | Meaning | Next |
+|---|---|---|
+| `0` | base is the default branch, or no open PR owns it | merge as normal |
+| `6` | **stacked**: the base is another OPEN PR's head | do **not** merge. Report `waiting on parent PR #N` and hand back — this is a normal state in a stack, **not** `needs-human` and **not** a failure |
+| `4` | base unreadable | do not merge; a base you could not read is not the default branch |
+
+Exit `6` is its own code precisely so the loop does not label a healthy child PR
+`needs-human` on every round while its parent is still in review.
+
+**When the parent merges, GitHub retargets the child** onto the parent's base and pushes no
+commit. Do not read that retarget as a review event: it changes `baseRefName`, not the head,
+so the freshness anchor and the clean-signal rules are untouched — re-run the guard, and
+merge if it now returns `0`.
 
 #### Squash-merge prep (only when `merge_strategy` is `squash`)
 
