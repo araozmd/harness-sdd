@@ -247,6 +247,108 @@ test_gate_off_still_reclaims_global_codex_prompt() {  # R1
   pass "R1 CMDDIR body is generated on every run (pristine reference survives a gate flip)"
 }
 
+# ══ The GLOBAL prompt is CROSS-TARGET (Codex r4 P1 #3662785235) ═══════════════
+# `${CODEX_HOME:-$HOME/.codex}/prompts/` is machine-global: one dir, every repo on the
+# box. `pr_loop.enabled` is per-target AND opt-in, so without cross-target ownership the
+# DEFAULT install of any second project deletes the prompt an enabled project depends on.
+# These tests share ONE CODEX_HOME between two targets on purpose — that is the real
+# topology, and it is still a sandbox under this suite's temp dir.
+
+# install_shared <target> <shared-codex-home> <true|false> — install <target> against a
+# CODEX_HOME deliberately shared with the other targets of the same test.
+install_shared() {
+  _is_t="$1"; _is_ch="$2"; _is_g="$3"
+  mkdir -p "$_is_t" "$_is_ch"
+  HARNESS_PR_LOOP_ENABLED="$_is_g" CODEX_HOME="$_is_ch" sh "$SRC/harness-install.sh" --agents=claude,codex "$_is_t" >"$_is_t/.out" 2>"$_is_t/.err" \
+    || { cat "$_is_t/.err" >&2; fail "installer exited non-zero for $_is_t"; }
+}
+
+test_shared_prompt_survives_another_targets_gate_off() {
+  _s="$T/xtarget"; _ch="$_s/ch"
+  install_shared "$_s/A" "$_ch" true
+  [ -f "$_ch/prompts/sdd-pr-loop.md" ] || fail "cross-target setup: A's global prompt not stamped"
+  # B is a DIFFERENT repo taking the opt-in default (gate off) on the same machine
+  install_shared "$_s/B" "$_ch" false
+  [ -f "$_ch/prompts/sdd-pr-loop.md" ] \
+    || fail "cross-target: B's gate-off install deleted the global prompt A still wants"
+  grep -qF 'still claimed by another harness target' "$_s/B/.err" \
+    || fail "cross-target: keeping another target's prompt was not announced"
+  # B's OWN glue is still reclaimed — the local axis (R5) is untouched
+  [ -e "$_s/B/.claude/commands/sdd-pr-loop.md" ] \
+    && fail "cross-target: B kept its own gated command despite the gate being off"
+  # idempotent: re-running B converges instead of oscillating
+  install_shared "$_s/B" "$_ch" false
+  [ -f "$_ch/prompts/sdd-pr-loop.md" ] || fail "cross-target: a second B run deleted A's prompt"
+  # and A, whose gate is still on, keeps working without a repair run
+  install_shared "$_s/A" "$_ch" true
+  [ -f "$_ch/prompts/sdd-pr-loop.md" ] || fail "cross-target: A's re-run lost its own prompt"
+  # the ledger is not itself discoverable as a Codex slash command (Codex globs *.md)
+  for _l in "$_ch"/prompts/.*.owners; do
+    [ -e "$_l" ] || continue
+    case "$_l" in *.md) fail "cross-target: the ownership ledger is named like a prompt" ;; esac
+  done
+  pass "one target's gate-off never deletes the shared global prompt another target wants"
+}
+
+test_shared_prompt_reclaimed_when_last_owner_opts_out() {
+  _s="$T/xtarget2"; _ch="$_s/ch"
+  install_shared "$_s/A" "$_ch" true
+  install_shared "$_s/B" "$_ch" true
+  [ -f "$_ch/prompts/sdd-pr-loop.md" ] || fail "last-owner setup: prompt not stamped"
+  install_shared "$_s/A" "$_ch" false
+  [ -f "$_ch/prompts/sdd-pr-loop.md" ] || fail "last-owner: reclaimed while B still wants it"
+  install_shared "$_s/B" "$_ch" false
+  [ -e "$_ch/prompts/sdd-pr-loop.md" ] \
+    && fail "last-owner: the prompt survived after EVERY target turned the gate off"
+  [ -e "$_ch/prompts/.sdd-pr-loop.owners" ] \
+    && fail "last-owner: the emptied ownership ledger was left behind as garbage"
+  [ -f "$_ch/prompts/sdd-next.md" ] || fail "last-owner: an ungated global prompt was wrongly reclaimed"
+  pass "the shared global prompt is reclaimed exactly when the LAST owner opts out"
+}
+
+test_dead_owner_never_pins_the_shared_prompt() {
+  # A ledger entry must not outlive its target: a repo that was deleted (or un-harnessed)
+  # cannot want anything, so it is garbage-collected on read rather than pinning the
+  # prompt forever.
+  _s="$T/xtarget3"; _ch="$_s/ch"
+  install_shared "$_s/A" "$_ch" true
+  install_shared "$_s/B" "$_ch" true
+  rm -rf "$_s/A"                       # A's repo is gone from disk
+  install_shared "$_s/B" "$_ch" false
+  [ -e "$_ch/prompts/sdd-pr-loop.md" ] \
+    && fail "dead owner: a deleted target's stale claim pinned the shared prompt forever"
+  pass "a deleted target's stale claim is garbage-collected, never pins the prompt"
+}
+
+test_unknown_ownership_always_keeps_the_shared_prompt() {
+  # Fail safe: when ownership cannot be read the prompt may belong to a target this run
+  # knows nothing about. Leaving a stale prompt is a no-op; deleting another project's
+  # working command is not.
+  _s="$T/xtarget4"; _ch="$_s/ch"
+  install_shared "$_s/A" "$_ch" true
+  rm -f "$_ch/prompts/.sdd-pr-loop.owners"      # e.g. stamped by an installer that predates the ledger
+  install_shared "$_s/A" "$_ch" false
+  [ -f "$_ch/prompts/sdd-pr-loop.md" ] \
+    || fail "unknown ownership: an ABSENT ledger authorized deleting the shared prompt"
+  grep -qF 'ownership is unknown' "$_s/A/.err" \
+    || fail "unknown ownership: keeping the prompt was not announced"
+  # an UNREADABLE ledger gets the same verdict
+  install_shared "$_s/A" "$_ch" true
+  [ -f "$_ch/prompts/.sdd-pr-loop.owners" ] || fail "unknown ownership: ledger not re-created by the gate-on run"
+  if [ "$(id -u)" = 0 ]; then
+    skip "unreadable ledger (running as root — a mode-000 file is still readable)"
+  else
+    chmod 000 "$_ch/prompts/.sdd-pr-loop.owners"
+    install_shared "$_s/A" "$_ch" false
+    [ -f "$_ch/prompts/sdd-pr-loop.md" ] \
+      || fail "unknown ownership: an UNREADABLE ledger authorized deleting the shared prompt"
+    [ -f "$_ch/prompts/.sdd-pr-loop.owners" ] \
+      || fail "unknown ownership: an unreadable ledger was destroyed instead of left alone"
+    chmod 644 "$_ch/prompts/.sdd-pr-loop.owners"
+  fi
+  pass "unknown or unreadable ownership never authorizes deleting the shared global prompt"
+}
+
 # ══ The pr-fixer sub-agent (R9–R14) ═══════════════════════════════════════════
 
 test_canonical_pr_fixer_role() {                      # R9
@@ -1293,6 +1395,10 @@ test_gate_flip_off_reclaims
 test_edited_copy_left_in_place_and_warns
 test_reclaim_preserves_user_files_and_prunes
 test_gate_off_then_on_restores
+test_shared_prompt_survives_another_targets_gate_off
+test_shared_prompt_reclaimed_when_last_owner_opts_out
+test_dead_owner_never_pins_the_shared_prompt
+test_unknown_ownership_always_keeps_the_shared_prompt
 
 test_canonical_pr_fixer_role
 test_claude_pr_fixer_shim

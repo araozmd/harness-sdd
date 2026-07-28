@@ -621,6 +621,90 @@ codex_prompts_dir() {
   fi
 }
 
+# ── cross-target ownership ledger for the GATED global prompt (E18-F01) ────────
+# `${CODEX_HOME:-$HOME/.codex}/prompts/` is machine-GLOBAL and shared by every harness
+# target on the box, but `pr_loop.enabled` is PER-TARGET — and OPT-IN, so `false` is the
+# default. Deciding to reclaim a SHARED artifact from ONE target's local gate therefore
+# destroys a prompt another target still wants: installing any second project with the
+# default config used to silently delete `/prompts:sdd-pr-loop` out from under an
+# already-enabled project, which only got it back by re-running its own installer.
+# (Codex r4 P1 #3662785235.)
+#
+# This is the same hazard that keeps `codex` out of the legacy PRIOR_AGENTS baseline in
+# install_one: never infer ownership of a cross-target artifact from one target's state.
+# The ungated `/sdd-*` prompts do not need a ledger — every selecting target re-stamps
+# them on its next run — but a gate-OFF target never re-stamps `sdd-pr-loop`, so its loss
+# is permanent. Hence: the gated prompt carries a ledger of the targets that currently
+# want it. A target appends itself while its gate is on (§5d), drops itself when the gate
+# goes off or it deselects codex (§7/§7b), and the prompt is reclaimed ONLY once the
+# ledger is EMPTY.
+#
+# FAIL SAFE — unknown ownership never deletes. A missing, unreadable or unwritable ledger
+# beside an existing prompt means "someone else put this here" ⇒ keep it. A stale prompt
+# is a harmless no-op; deleting another project's working command is not.
+#
+# Ledger hygiene: entries are garbage-collected on every read — an entry whose recorded
+# target no longer carries a `.harness/` install cannot want anything, so a deleted (or
+# un-harnessed) target can never pin the prompt forever. Entries are canonical physical
+# paths and the file is rewritten sorted+unique, so re-running converges instead of
+# oscillating.
+
+# _prompt_owner_id — the current target's canonical (symlink-resolved) ledger identity.
+_prompt_owner_id() {
+  ( CDPATH= cd -- "$TARGET" 2>/dev/null && pwd -P ) || printf '%s\n' "$TARGET"
+}
+
+# _owners_file <prompts-dir> <cmd-name> — the ledger path for that prompt. Dot-prefixed
+# and NOT `.md`, so Codex's `*.md` prompt discovery never surfaces it as a command.
+_owners_file() { printf '%s\n' "$1/.$2.owners"; }
+
+# _owners_live <prompts-dir> <cmd-name> — print the ledger's LIVE owners, one per line,
+# dropping entries whose target no longer holds a `.harness/` install. Returns 1 when the
+# ledger is missing or unreadable (ownership UNKNOWN — callers must not reclaim).
+_owners_live() {
+  _ol_f="$(_owners_file "$1" "$2")"
+  { [ -f "$_ol_f" ] && [ -r "$_ol_f" ]; } || return 1
+  while IFS= read -r _ol_e || [ -n "$_ol_e" ]; do
+    [ -n "$_ol_e" ] || continue
+    [ -d "$_ol_e/.harness" ] || continue
+    printf '%s\n' "$_ol_e"
+  done < "$_ol_f"
+}
+
+# _owners_claim <prompts-dir> <cmd-name> — record the current target as an owner
+# (idempotent). Never rewrites a ledger it cannot read: clobbering it would erase the
+# other targets' claims, which is exactly the data loss this ledger exists to prevent.
+_owners_claim() {
+  _oc_f="$(_owners_file "$1" "$2")"
+  if [ -e "$_oc_f" ] && [ ! -r "$_oc_f" ]; then return 0; fi
+  { _owners_live "$1" "$2" || :; _prompt_owner_id; } | sort -u > "$_oc_f.tmp" 2>/dev/null || return 0
+  mv "$_oc_f.tmp" "$_oc_f" 2>/dev/null || rm -f "$_oc_f.tmp" 2>/dev/null || :
+}
+
+# _owners_release <prompts-dir> <cmd-name> — drop the current target's claim. Exits 0 ONLY
+# when the prompt is left UNOWNED (safe to reclaim, ledger removed); 1 when another live
+# target still wants it, or ownership is unknown/unmanageable — in both of which cases the
+# caller must leave the shared prompt alone.
+_owners_release() {
+  _or_f="$(_owners_file "$1" "$2")"
+  [ -e "$_or_f" ] || return 1                              # no ledger ⇒ unknown ⇒ keep
+  { [ -r "$_or_f" ] && [ -w "$_or_f" ]; } || return 1      # unreadable/frozen ⇒ keep
+  _or_rest="$(_owners_live "$1" "$2" | grep -vxF "$(_prompt_owner_id)" || :)"
+  if [ -n "$_or_rest" ]; then
+    printf '%s\n' "$_or_rest" > "$_or_f" 2>/dev/null || :
+    return 1
+  fi
+  rm -f "$_or_f" 2>/dev/null || :
+  return 0
+}
+
+# _is_pr_loop_cmd <cmd-name> — true for the pr_loop-GATED command names (the only ones
+# whose global prompt is ledger-governed).
+_is_pr_loop_cmd() {
+  case " $HARNESS_PR_LOOP_CMDS " in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
 # validate_csv <csv> — split a comma-separated override on commas, trim each token,
 # drop empties, de-duplicate, validate each against the registry; `die` non-zero
 # naming the first unknown token (R7). On success, print the sorted keys (one per
@@ -1173,6 +1257,10 @@ install seeds false, so none of this exists until you turn it on — E18-F01):
   Flipping pr_loop.enabled back to false on a re-run RECLAIMS all of the above
   (pristine-only in the user-owned \$CODEX_HOME prompts dir and .agents/ tree) and prunes
   empty dirs. No pr-fixer artifact is ever created for the codex or gemini front-ends.
+  The GLOBAL prompt is shared by every target on this machine, so it is ledger-governed
+  (\${CODEX_HOME:-~/.codex}/prompts/.sdd-pr-loop.owners): turning the gate off here only
+  retires THIS repo's claim, and the prompt survives while any other target still wants
+  it — or whenever that ownership cannot be read.
 
 MODEL ROUTING  (created ONLY when models: resolves a role to a concrete value):
   .gemini/agents/*               per-role Gemini agent definitions (regenerated)
@@ -2514,6 +2602,9 @@ EOF
           echo "⚠️  existing global Codex prompt $_dst differs from the harness copy — backed up to $_dst.pre-harness.bak before overwriting" >&2
         fi
         cp "$CMDDIR/$_c.md" "$_dst"
+        # Stake this target's claim on the GATED prompt in the shared, cross-target
+        # prompts dir, so no OTHER target's gate-off run can reclaim it out from under us.
+        if _is_pr_loop_cmd "$_c"; then _owners_claim "$_cdx" "$_c"; fi
       done
       # Codex surfaces a prompts-dir file `<name>.md` as the slash command
       # `/prompts:<name>` (NOT top-level `/<name>`) — advertise it that way.
@@ -2756,6 +2847,17 @@ EOF
             _cdx_removed=""
             for _cdw in $HARNESS_OWNED_CMDS; do
               [ -f "$CMDDIR/$_cdw.md" ] || continue
+              # The GATED prompt is ledger-governed (see _owners_release): dropping codex
+              # here retires only THIS target's claim, and the shared file survives while
+              # any other target still wants it. Unlike the ungated /sdd-* prompts, a
+              # target that stops wanting it never re-stamps it, so a wrong delete is
+              # permanent for everyone else.
+              if _is_pr_loop_cmd "$_cdw" && ! _owners_release "$_cdx" "$_cdw"; then
+                if [ -f "$_cdx/$_cdw.md" ]; then
+                  echo "⚠️  $_cdx/$_cdw.md is still claimed by another harness target (or its ownership is unknown) — left in place (GLOBAL, shared prompts)" >&2
+                fi
+                continue
+              fi
               if [ -f "$_cdx/$_cdw.md" ] && cmp -s "$_cdx/$_cdw.md" "$CMDDIR/$_cdw.md"; then
                 rm -f "$_cdx/$_cdw.md"
                 _cdx_removed="$_cdx_removed $_cdw.md"
@@ -2836,10 +2938,19 @@ EOF
     fi
     if agent_selected codex; then
       # GLOBAL, cross-target prompts dir — pristine-only, honors $CODEX_HOME.
+      # THIS target's gate says nothing about what OTHER targets sharing $CODEX_HOME want,
+      # so reclamation is ledger-governed: retire our claim first and touch the shared file
+      # only once nobody is left holding one (see _owners_release; Codex r4 P1 #3662785235).
       _prl_cdx="$(codex_prompts_dir)"
       if [ -n "$_prl_cdx" ]; then
         for _prc in $HARNESS_PR_LOOP_CMDS; do
           [ -f "$CMDDIR/$_prc.md" ] || continue
+          if ! _owners_release "$_prl_cdx" "$_prc"; then
+            if [ -f "$_prl_cdx/$_prc.md" ]; then
+              echo "⚠️  $_prl_cdx/$_prc.md is still claimed by another harness target (or its ownership is unknown) — left in place (pr_loop disabled here, GLOBAL shared prompts)" >&2
+            fi
+            continue
+          fi
           if [ -f "$_prl_cdx/$_prc.md" ] && cmp -s "$_prl_cdx/$_prc.md" "$CMDDIR/$_prc.md"; then
             rm -f "$_prl_cdx/$_prc.md"; _prl_gone="$_prl_gone $_prl_cdx/$_prc.md"
           elif [ -f "$_prl_cdx/$_prc.md" ]; then

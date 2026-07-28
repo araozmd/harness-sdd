@@ -1244,10 +1244,14 @@ test_no_models_block_is_byte_identical() {   # R11
     || fail "R11: TB re-run exited non-zero"
   # R11 permits exactly ONE exclusion — `.harness/harness.config.yaml` (TB's block was
   # stripped and re-seeded, so its bytes legitimately differ). `__pycache__` is a python
-  # runtime artifact, not an installed file. Nothing else may be excluded: manifest.txt in
-  # particular MUST be compared, or the strongest test in the suite goes blind to any leak
-  # of model state into the manifest.
-  diff -r -x 'harness.config.yaml' -x '__pycache__' "$_ta" "$_tb" >/dev/null \
+  # runtime artifact, not an installed file. `.sdd-pr-loop.owners` is the cross-target
+  # ownership ledger of the machine-GLOBAL Codex prompt (E18-F01, Codex r4 P1 #3662785235):
+  # it records WHICH target wants that prompt, so by construction it holds TA's path in
+  # TA's sandboxed CODEX_HOME and TB's in TB's — it can never be byte-identical between two
+  # different targets, and it carries no model state. Nothing else may be excluded:
+  # manifest.txt in particular MUST be compared, or the strongest test in the suite goes
+  # blind to any leak of model state into the manifest.
+  diff -r -x 'harness.config.yaml' -x '__pycache__' -x '.sdd-pr-loop.owners' "$_ta" "$_tb" >/dev/null \
     || fail "R11: an all-inherit target differs from one whose models: block was stripped"
   # Explicit negatives: an unconfigured target grows NO model key and NO new directory.
   grep -rq '^model:' "$_ta/.claude/agents"  && fail "R11: unconfigured install stamped a model: in .claude/agents"
