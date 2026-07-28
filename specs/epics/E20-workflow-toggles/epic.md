@@ -50,12 +50,17 @@ YAML. Surfacing them converts tribal knowledge into a prompt.
 ## Features
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| F01 | `execution.builder.backend` + `pr_loop.enabled` prompts in the installer picker | pending | true | E18-F01, E19-F01 |
+| F01 | `execution.builder.backend` prompt in the installer picker | pending | true | E19-F02 |
+| F02 | `pr_loop.enabled` prompt in the installer picker | pending | true | E20-F01 |
 
 ## Notes
-- **Depends on both predecessors, for different reasons.** E18-F01 must land first
-  because it creates the `pr_loop` config block this epic surfaces; E19-F01 because it
-  edits the same `resolve_agents` region and sequencing avoids a conflict.
+- **Split into two micro-features (2026-07-28).** The two toggles are independent
+  questions with independent failure modes, and a single 30+ R-id feature is what made
+  E18-F01 take six Codex review rounds. F01 ships the picker's second-question
+  machinery with ONE toggle on it; F02 adds the second toggle to that machinery.
+- **Dependency retargeted.** The original entry depended on `E19-F01`, but after the E19
+  micro-split it is `E19-F02` that owns the pre-check region this epic extends. E18-F01
+  (which creates the `pr_loop` block F02 surfaces) is already merged.
 - **These are not agent keys.** They are booleans/enums about *workflow*, not about which
   front-end to stamp. The Architect should decide whether they belong in the same TUI
   screen as the checkbox list or a second prompt after it — the existing `tui_select`
