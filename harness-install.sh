@@ -1105,22 +1105,55 @@ tui_select() {
 #
 # A behavior-preserving EXTRACTION (E19-F01) of what resolve_agents's interactive branch
 # used to compute inline — the resolved set for every pre-existing code path is identical
-# (R22). It is now the SINGLE source of that answer, with three callers: the interactive
-# pre-check baseline, the `host`-undetected fallback, and `--print-agents`'s `baseline=`
-# line — so the diagnostic can never disagree with what the installer actually does (R26).
+# (R22). It is now the SINGLE source of that answer, for the interactive pre-check baseline
+# and for host_fallback_set's R14 arm, so no second copy of "what does this target carry?"
+# can drift from it (R26).
 #
 # This helper answers ONLY "what selection does this target carry?" — it deliberately does
 # NOT decide whether the target is an existing install. The spec defines that by the VERSION
 # STAMP (`.harness/.harness-version`), not by the presence of `.harness/.agents`, so the
-# R13/R14 branch is taken by the `host`-undetected caller in resolve_agents, which consults
-# the stamp first and only then asks this helper for the persisted shape (R14). Keeping the
-# stamp test out of here is what preserves R22: the interactive pre-check baseline and
-# `--print-agents`'s `baseline=` line remain the persisted set when present and ALL
-# otherwise, exactly as before this feature.
+# R13/R14 branch lives one layer up, in host_fallback_set, which consults the stamp first
+# and only then asks this helper for the persisted shape (R14). Keeping the stamp test out
+# of here is what preserves R22: the interactive pre-check baseline remains the persisted
+# set when present and ALL otherwise, exactly as before this feature.
 precheck_baseline() {
   _pb_persisted="$1/.harness/.agents"
   if [ -f "$_pb_persisted" ]; then
     normalize_keys "$(cat "$_pb_persisted")"
+  else
+    normalize_keys "$AGENT_KEYS"
+  fi
+}
+
+# host_fallback_keeps_selection <target> — true when an UNDETECTED `host` run would preserve
+# <target>'s persisted selection (R14) rather than falling back to ALL (R13).
+#
+# That is the case only when the target is an EXISTING INSTALL *and* carries a selection:
+# the version stamp is the spec's definition of "existing install", and a stamped install
+# with no `.harness/.agents` is a legacy pre-E08 one, whose R14 answer is ALL anyway. So
+# this single predicate is exactly the R13/R14 branch, and it also decides which of the two
+# undetected report lines R25 requires.
+host_fallback_keeps_selection() {
+  [ -f "$1/.harness/.harness-version" ] && [ -f "$1/.harness/.agents" ]
+}
+
+# host_fallback_set <target> — the set an UNDETECTED `host` run resolves to for <target>:
+# its persisted selection on an existing install (R14), ALL otherwise (R13).
+#
+# This is the SINGLE source of the undetected-fallback answer, with two callers: the
+# `host` arm of resolve_agents and `--print-agents`'s `baseline=` line — which is what
+# makes the diagnostic unable to disagree with what an actual `--agents=host` run does
+# (R26). `baseline=` deliberately reports THIS, not precheck_baseline: on a fresh target
+# holding orphan metadata (a copied or half-restored `.harness/.agents` with no stamp) the
+# two differ, and the diagnostic must advertise the set that will really be installed.
+#
+# It cannot affect a run that never names `host`: both call sites are gated on `host` —
+# resolve_agents reaches this arm only when the override value is exactly `host`, and
+# --print-agents writes nothing at all. The interactive picker and the no-override
+# defaults still go through precheck_baseline / AGENT_KEYS untouched (R22).
+host_fallback_set() {
+  if host_fallback_keeps_selection "$1"; then
+    precheck_baseline "$1"
   else
     normalize_keys "$AGENT_KEYS"
   fi
@@ -1157,7 +1190,7 @@ override_host_kind() {
 #   1. Override (R5/R7): a non-empty $AGENTS_OVERRIDE (from --agents/HARNESS_AGENTS)
 #      → validate_csv, no prompt — wins over persisted + TTY.
 #      1a. E19-F01: the whole-value token `host` is a RESOLUTION MODE handled inside this
-#          arm — SELECTED becomes detect_host's single key, or precheck_baseline when the
+#          arm — SELECTED becomes detect_host's single key, or host_fallback_set when the
 #          host is undetected. It is honored uniformly, interactive or not (R15), because
 #          it is an explicit instruction exactly like `--agents=claude`. Mixed with any
 #          other token it is rejected (R16). Nothing outside this arm changes: a run that
@@ -1187,22 +1220,12 @@ resolve_agents() {
         # current shape so the run can only ever preserve it (R13/R14), and say WHICH
         # fallback applied (R25) — the two cases must be distinguishable in the text.
         #
-        # "Existing install" is the VERSION STAMP, per the spec's own definition — NOT the
-        # presence of .harness/.agents. A fresh target that happens to carry an orphan
-        # .agents (copied or half-restored metadata) is not an install, so R13 applies and
-        # the run selects ALL; consulting the persisted file there would silently omit
-        # front-ends the target never opted out of.
-        _hb_kept=0
-        if [ -f "$_t/.harness/.harness-version" ]; then
-          # R14 — existing install: exactly its persisted set, and ALL when a legacy
-          # pre-E08 install persisted none. Never widens, never narrows.
-          SELECTED="$(precheck_baseline "$_t")"
-          if [ -f "$_t/.harness/.agents" ]; then _hb_kept=1; fi
-        else
-          # R13 — no existing install: ALL, byte-identical to the no-override, no-TTY default.
-          SELECTED="$(normalize_keys "$AGENT_KEYS")"
-        fi
-        if [ "$_hb_kept" = 1 ]; then
+        # Both the set and the branch come from the shared host_fallback_* helpers, so
+        # `--print-agents` reports precisely what this line resolves (R26). "Existing
+        # install" is the VERSION STAMP there, per the spec's own definition — NOT the
+        # presence of .harness/.agents.
+        SELECTED="$(host_fallback_set "$_t")"
+        if host_fallback_keeps_selection "$_t"; then
           info "agents: host undetected — keeping this install's selection ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
         else
           info "agents: host undetected — selecting all front-ends ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
@@ -3429,10 +3452,12 @@ if [ -z "$UMBRELLA" ]; then
     # Diagnostic short-circuit (R23): two lines on stdout, then exit 0 — BEFORE
     # install_one, so nothing is created or modified anywhere, on a TTY or off it, on a
     # fresh dir or an installed target. Both values come from the same helpers the real
-    # resolution uses (detect_host / precheck_baseline), so this can never disagree with
-    # what an actual `--agents=host` run would do (R26).
+    # resolution uses (detect_host / host_fallback_set), so this can never disagree with
+    # what an actual `--agents=host` run would do (R26) — including on a fresh target that
+    # carries orphan `.harness/.agents` metadata with no version stamp, where the fallback
+    # is ALL and the persisted file is not the answer.
     printf 'host=%s\n' "$(detect_host)"
-    printf 'baseline=%s\n' "$(precheck_baseline "$TGT" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    printf 'baseline=%s\n' "$(host_fallback_set "$TGT" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
     exit 0
   fi
   install_one "$TGT"

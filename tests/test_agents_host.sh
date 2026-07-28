@@ -531,17 +531,54 @@ test_host_reports_resolution() {
 # ── R26 — one shared helper behind baseline=, the picker and the fallback ─────
 test_baseline_single_helper() {
   grep -q '^precheck_baseline() {' "$INST" || fail "R26: precheck_baseline is not defined"
-  # Three callers: the interactive branch, the host-undetected fallback, --print-agents.
+  grep -q '^host_fallback_set() {' "$INST" || fail "R26: host_fallback_set is not defined"
+  # The persisted-shape answer has one source, shared by the picker and the R14 arm.
   _calls="$(grep -c 'precheck_baseline "' "$INST" || :)"
-  [ "$_calls" -ge 3 ] \
-    || fail "R26: precheck_baseline has $_calls call sites, expected the 3 documented ones"
+  [ "$_calls" -ge 2 ] \
+    || fail "R26: precheck_baseline has $_calls call sites, expected the 2 documented ones"
   grep -q 'precheck_baseline "$_t"' "$INST" \
-    || fail "R26: resolve_agents does not compute its baseline through precheck_baseline"
-  grep -q 'precheck_baseline "$TGT"' "$INST" \
-    || fail "R26: --print-agents does not compute baseline= through precheck_baseline"
+    || fail "R26: resolve_agents does not compute the picker baseline through precheck_baseline"
+  # The undetected-fallback answer has one source, shared by resolution and the diagnostic.
+  grep -q 'host_fallback_set "$_t"' "$INST" \
+    || fail "R26: resolve_agents does not resolve the undetected fallback through host_fallback_set"
+  grep -q 'host_fallback_set "$TGT"' "$INST" \
+    || fail "R26: --print-agents does not compute baseline= through host_fallback_set"
   # The old inline computation is gone — two sources could disagree.
   grep -q '_base="$(normalize_keys "$(cat "$_persisted")")"' "$INST" \
     && fail "R26: the inline interactive baseline computation still exists alongside the helper"
+  return 0
+}
+
+# ── R26 — the advertised baseline IS what a real --agents=host run installs ────
+# Regression (Codex P2 on PR #70, comment 3663900848): baseline= was computed from the
+# persisted file alone, so a fresh target carrying an orphan .harness/.agents advertised
+# `baseline=claude` while an actual undetected --agents=host run took the R13 branch and
+# selected all five. A preview that disagrees with the install is worse than no preview.
+# Each case previews and then installs the SAME target — --print-agents writes nothing.
+test_print_agents_matches_host_install() {
+  _x="$(sandbox previewmatch)"
+  # (a) the orphan corner: metadata present, version stamp absent ⇒ R13, ALL.
+  _t="$_x/orphan"; mkdir -p "$_t/.harness"
+  printf 'claude\n' > "$_t/.harness/.agents"
+  [ -f "$_t/.harness/.harness-version" ] && fail "R26: the orphan fixture must carry no version stamp"
+  _adv="$(hrun "$_x" -- --print-agents "$_t" 2>/dev/null | sed -n 's/^baseline=//p')"
+  [ -n "$_adv" ] || fail "R26: --print-agents printed no baseline= line for the orphan target"
+  hrun "$_x" -- --agents=host "$_t" >/dev/null 2>&1 \
+    || fail "R26: undetected --agents=host on the orphan target exited non-zero"
+  _got="$(tr '\n' ' ' <"$_t/.harness/.agents" | sed 's/[[:space:]]*$//')"
+  [ "$_adv" = "$_got" ] \
+    || fail "R26: --print-agents advertised '$_adv' but the host install selected '$_got' (orphan .agents, no stamp)"
+  # (b) and the same agreement on a REAL existing install, which must stay narrow.
+  _s="$_x/stamped"; mkdir -p "$_s"
+  hrun "$_x" -- --agents=claude "$_s" >/dev/null 2>&1 || fail "R26: stamped setup install failed"
+  _adv2="$(hrun "$_x" -- --print-agents "$_s" 2>/dev/null | sed -n 's/^baseline=//p')"
+  hrun "$_x" -- --agents=host "$_s" >/dev/null 2>&1 \
+    || fail "R26: undetected --agents=host on the stamped target exited non-zero"
+  _got2="$(tr '\n' ' ' <"$_s/.harness/.agents" | sed 's/[[:space:]]*$//')"
+  [ "$_adv2" = "$_got2" ] \
+    || fail "R26: --print-agents advertised '$_adv2' but the host install selected '$_got2' (existing install)"
+  [ "$_adv2" = "claude" ] \
+    || fail "R26: the preview for a claude-only install is not 'claude' (got '$_adv2')"
   return 0
 }
 
@@ -665,7 +702,8 @@ pass "a run that never names 'host' behaves exactly as before this feature (R22)
 test_host_reports_resolution
 pass "the host branch prints one report line naming the key or the applied fallback (R25)"
 test_baseline_single_helper
-pass "the fallback, the picker baseline and baseline= share one precheck_baseline helper (R26)"
+test_print_agents_matches_host_install
+pass "baseline= and the undetected fallback share one helper, so the preview matches the install (R26)"
 test_docs_document_host_mode
 pass "INSTALL.md, README.md, the installer header and manifest.txt document the host mode (R27)"
 test_suite_wired_into_verification
