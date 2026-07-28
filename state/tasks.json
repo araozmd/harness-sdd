@@ -470,7 +470,7 @@
     {
       "id": "E20",
       "title": "Installer: workflow toggles beyond front-end selection",
-      "status": "in-progress",
+      "status": "done",
       "owner": "araozmd",
       "features": [
         {
@@ -487,7 +487,7 @@
         {
           "id": "E20-F02",
           "title": "pr_loop.enabled prompt in the installer picker",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [

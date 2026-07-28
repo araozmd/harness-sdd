@@ -50,8 +50,8 @@ YAML. Surfacing them converts tribal knowledge into a prompt.
 ## Features
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| F01 | `execution.builder.backend` prompt in the installer picker | pending | true | E19-F02 |
-| F02 | `pr_loop.enabled` prompt in the installer picker | pending | true | E20-F01 |
+| F01 | `execution.builder.backend` prompt in the installer picker | done | true | E19-F02 |
+| F02 | `pr_loop.enabled` prompt in the installer picker | done | true | E20-F01 |
 
 ## Notes
 - **Split into two micro-features (2026-07-28).** The two toggles are independent
