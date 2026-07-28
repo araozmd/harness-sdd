@@ -119,6 +119,98 @@ empty dirs are pruned. Flipping it back to `true` restores byte-identical glue. 
 cache lives at `.harness/.pr-loop/<pr>/round-<n>/` and is gitignored by the seeded
 `.harness/.gitignore`.
 
+## Host detection — `--agents=host` (opt-in)
+
+If you work in exactly one coding-agent CLI, you can ask the installer to stamp *that*
+front-end's glue and nothing else, without naming it:
+
+```bash
+./harness-install.sh --agents=host /path/to/your-project
+HARNESS_AGENTS=host ./harness-install.sh /path/to/your-project
+```
+
+`host` is a **resolution mode, not a sixth agent key**. It never appears in the toggle
+list, it is never written to `.harness/.agents` (that file holds concrete keys only), and
+it must be the **entire** value — `--agents=host,gemini` is rejected with a non-zero exit
+and changes nothing.
+
+Nothing about an install that does *not* pass `host` changes: a no-override
+non-interactive run still stamps every front-end, an explicit `--agents=<csv>` still wins,
+and the interactive picker still pre-checks what it always did.
+
+### Which markers are trusted
+
+Detection reads **session markers** only — variables a CLI *injects into the environment
+of the processes it launches*. It deliberately ignores ambient configuration and
+credentials: `CODEX_HOME`, `HOME`, `TERM_PROGRAM` and anything ending `_API_KEY`
+(`GEMINI_API_KEY`, `OPENCODE_API_KEY`, `ANTHROPIC_API_KEY`) are forbidden by rule. Those
+prove you *use* a tool somewhere; they never prove this install was launched from it.
+
+| Front-end | Marker(s) | Verified on |
+|---|---|---|
+| `claude` | `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT` | Claude Code 2.1.220 |
+| `codex` | `CODEX_THREAD_ID` | codex-cli 0.145.0 (`codex exec`, sandboxed and not) |
+| `opencode` | `OPENCODE`, `OPENCODE_PID` | opencode 1.18.5 (`opencode run`) |
+| `antigravity` | `ANTIGRAVITY_AGENT`, `ANTIGRAVITY_CONVERSATION_ID` | agy 1.1.8 (`agy -p`) |
+| `gemini` | *(none — undetectable)* | no marker verified |
+
+Every row above was observed empirically in the delta between a plain login shell and a
+shell the CLI itself spawned. A front-end with no verified marker carries **no row** and
+is simply undetectable — that is an accepted outcome, not a bug, and it degrades to the
+fallback below. **A miss is normal operation and never fails the install.**
+
+Two more rules keep detection honest:
+
+- A marker set to the **empty string** does not count as present.
+- If markers for **two or more** front-ends are present at once — which is exactly what
+  nesting looks like, one CLI shelling out to another — the host is **undetected**, with a
+  diagnostic on stderr naming the candidates. There is no way to tell inner from outer
+  from the environment, so the installer refuses to guess rather than picking a winner.
+
+### Declaring the host yourself — `HARNESS_HOST_AGENT`
+
+If your front-end is undetectable (or you simply prefer to be explicit), declare it once,
+e.g. in your shell profile:
+
+```bash
+export HARNESS_HOST_AGENT=gemini
+```
+
+It takes exactly one known agent key and wins over the marker table. Any other value — an
+unknown token, several tokens, or the literal `host` — prints one warning naming the value
+and is then ignored; it never aborts the install. On its own it changes nothing: it only
+feeds `host` resolution, so a run that never passes `host` is unaffected.
+
+### What happens when the host is undetected — and why the two cases differ
+
+| Situation | Resolved set |
+|---|---|
+| Detected | that front-end alone |
+| Undetected, **no existing install** in the target | **ALL** front-ends |
+| Undetected, target **already carries an install** | its **persisted `.harness/.agents`** set (ALL if a pre-E08 install persisted none) |
+
+The asymmetry is deliberate. On a target with no existing install there is nothing to
+preserve, so `host` falls back to exactly today's no-override behavior — it can never
+stamp *less* than a plain install would. On a target that already carries an install
+there *is* something to preserve: re-stamping four front-ends onto a claude-only repo
+because detection happened to miss is a user-visible regression. So the rule is
+*detected ⇒ narrow to the one key you asked for; undetected ⇒ never change the shape of
+the install*. Either way the run prints one line saying which it did.
+
+### Seeing what it would do — `--print-agents`
+
+```bash
+./harness-install.sh --print-agents /path/to/your-project
+host=claude
+baseline=antigravity claude codex gemini opencode
+```
+
+Two lines on stdout, exit 0, **nothing written anywhere** — the diagnostic answer to "what
+would `--agents=host` do here?". `host=` is the detected key (empty when undetected) and
+`baseline=` is the fallback set for that target. Both come from the same helpers the real
+resolution uses, so the preview cannot disagree with the install. It is single-target
+only: combined with `--umbrella` it exits non-zero with a usage message.
+
 ## Upgrade
 
 Re-run the same command after pulling a newer harness:

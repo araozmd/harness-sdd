@@ -311,8 +311,20 @@ generated stamp, never your edited files).
 # Non-interactive / CI — pick explicitly (no prompt):
 ./harness-install.sh --agents=claude,opencode /path/to/your-project
 HARNESS_AGENTS=claude ./harness-install.sh /path/to/your-project
+# Work in exactly one CLI? Let the installer detect it (opt-in resolution mode):
+./harness-install.sh --agents=host /path/to/your-project
+./harness-install.sh --print-agents /path/to/your-project   # preview, writes nothing
 # No TTY and no override ⇒ all agents are stamped (back-compatible default).
 ```
+
+`--agents=host` resolves to the front-end whose **session marker** is in this shell —
+`claude`, `codex`, `opencode` or `antigravity` — and stamps only that one. It is a
+resolution *mode*, never a selectable key, so `host` is never saved to `.harness/.agents`.
+A front-end the harness cannot detect (or that you'd rather name yourself) is declared
+with `HARNESS_HOST_AGENT=<key>`. When the host is undetected the run falls back to today's
+behavior — ALL front-ends on a target with no existing install, and the target's existing
+selection on one that already has an install, so it never silently widens or narrows. See
+[`docs/INSTALL.md`](docs/INSTALL.md) → "Host detection".
 
 **Shared vs personal config.** The install is meant to be *committed and shared* — one
 `CLAUDE.md`, the `.harness/` body, the `.claude/` glue. Per-developer state stays local:

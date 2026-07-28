@@ -11,6 +11,15 @@
 # (opencode.json + .opencode/command/), antigravity (.agents/, E07-F01). Resolution:
 #   - --agents=<csv> or HARNESS_AGENTS=<csv> (comma-separated keys) → that set, no
 #     prompt (the override always wins). An unknown key aborts non-zero.
+#   - --agents=host / HARNESS_AGENTS=host (E19-F01) → the ONE front-end this installer
+#     session is running in, detected from that CLI's session env markers. `host` is a
+#     RESOLUTION MODE, not an agent key: it is never a picker row and never written to
+#     .harness/.agents, and it must be the whole value (`--agents=host,gemini` aborts).
+#     Undetected is normal, never an error: it falls back to ALL on a target with no
+#     existing install, and to that target's persisted selection on one that has an
+#     install — so it never silently widens or narrows. HARNESS_HOST_AGENT=<key>
+#     declares the host explicitly for a front-end with no verified marker, and
+#     `--print-agents <target>` previews the verdict + baseline without writing anything.
 #   - else an interactive TTY → a numbered toggle list (pre-checked from the saved
 #     .harness/.agents set, or ALL on a fresh install).
 #   - else (no TTY, no override) → ALL agents (preserves the historical behavior).
@@ -430,6 +439,91 @@ AGENT_KEYS="claude gemini opencode antigravity codex"
 # repo root with no glue, so `codex` needs no entrypoint pointer of its own; its
 # only stamped glue is the GLOBAL /sdd-* prompts (§5d).
 #
+# ── host front-end detection: the marker table (E19-F01) ──────────────────────
+# Consumed ONLY by detect_host, i.e. only by the `--agents=host` resolution mode.
+# One row per DETECTABLE agent key, whitespace-separated:
+#
+#     <agent-key> <MARKER_VAR> [<MARKER_VAR> …]
+#
+# A row MATCHES when ANY of its variables is set and non-empty (R2). Exactly one
+# matching key ⇒ that key (R3); zero ⇒ undetected (R4); two or more ⇒ undetected
+# plus one stderr diagnostic (R5) — nesting (one CLI shelling out to another)
+# inherits the outer CLI's markers, so a tie CANNOT be broken from the environment.
+#
+# RULES — these are requirements, not style:
+#   * SESSION MARKERS ONLY. A variable qualifies only when the front-end INJECTS it
+#     into the environment of the processes it launches. A variable a human exports
+#     in a shell profile proves they use that tool *somewhere*; it never proves THIS
+#     installer run was launched from it.
+#   * FORBIDDEN BY NAME (R6): CODEX_HOME, HOME, TERM_PROGRAM, and any variable whose
+#     name ends in _API_KEY (GEMINI_API_KEY, OPENCODE_API_KEY, ANTHROPIC_API_KEY …).
+#     CODEX_HOME especially — tests/test_install.sh exports it suite-wide, so a
+#     CODEX_HOME row would look correct in CI and be wrong on every real machine.
+#     (Observed inside a live Claude Code session: CODEX_HOME unset, while
+#     CODEX_COMPANION_SESSION_ID held the *Claude Code* session id — a name prefix is
+#     not evidence.)
+#   * EVERY NON-`claude` ROW REQUIRES EMPIRICAL VERIFICATION (R8), recorded in an
+#     adjacent comment naming the CLI + version it was observed on. The procedure:
+#     `env | sort` in a plain terminal, `env | sort` from inside the CLI's own
+#     shell tool, then `comm -13` the two; accept a variable only if it is in that
+#     delta, names the CLI's SESSION rather than its config/credentials, and is
+#     present in the CLI's DEFAULT mode. If nothing qualifies, ADD NO ROW: a
+#     front-end with no verified marker is simply UNDETECTABLE, which degrades to
+#     the fallback (today's behavior). That is an expected outcome, not a defect.
+#   * `host` is NOT an agent key. It never joins AGENT_KEYS, never appears as a
+#     picker row, and is never written to .harness/.agents (R17, R18).
+#
+# PROVENANCE — one entry per key, recording the CLI + VERSION each of that row's marker
+# variables was observed on (R8). Every name below appeared in the `comm -13` delta
+# between a plain login shell and a shell the CLI itself spawned, on 2026-07-28; none of
+# them was present in the plain login shell (the only front-end name that WAS is
+# OPENCODE_API_KEY — a credential, and forbidden by R6, which is the whole point).
+#
+# FORMAT IS LOAD-BEARING, do not reflow: an entry starts with the agent key at exactly
+# three spaces of indent and continues on more deeply indented lines. Each entry names
+# ONLY the variables that entry's row actually ships, and REJECTED candidates are listed
+# in their own section below — so a negative mention can never be mistaken for evidence.
+# tests/test_agents_host.sh parses this block and fails the build if a row carries a
+# variable this block does not record under that key, or if the entry names no version.
+#
+#   claude      Claude Code 2.1.220 — CLAUDECODE=1 and CLAUDE_CODE_ENTRYPOINT=cli, in a
+#               shell spawned by the session, in default mode.
+#   codex       codex-cli 0.145.0 — CODEX_THREAD_ID=<session uuid>, matching the session
+#               id the CLI printed. Observed via `codex exec`, BOTH under the seatbelt
+#               sandbox and with the sandbox bypassed on a pty, so it is not a
+#               sandbox-only artifact.
+#   opencode    opencode 1.18.5 — OPENCODE=1 and OPENCODE_PID=<pid>, observed via
+#               `opencode run`.
+#   antigravity agy 1.1.8 — ANTIGRAVITY_AGENT=1 and ANTIGRAVITY_CONVERSATION_ID=<uuid>,
+#               observed via `agy -p` (the same run also carried a CLI-versioned
+#               ANTIGRAVITY_LS_VERSION, which is why the version claim is exact).
+#
+# NO ROW — undetectable, and that is an ACCEPTED outcome, not a defect: it degrades to
+# the fallback, i.e. today's behavior (R8).
+#   gemini      the gemini CLI is not installed on the verification machine, so nothing
+#               could be observed for it. A gemini user declares the host explicitly
+#               with HARNESS_HOST_AGENT=gemini (R9) instead of the harness guessing.
+#
+# REJECTED CANDIDATES — recorded so the next contributor does not re-litigate them. None
+# of these may appear in a row: CODEX_SANDBOX and CODEX_SANDBOX_NETWORK_DISABLED (they
+# vanish when codex runs with the sandbox off); CODEX_CI (a mode flag, not a session id);
+# AGENT (opencode sets it, but the name belongs to no front-end in particular);
+# GEMINI_CLI (it did NOT appear in the agy delta, and it could not discriminate gemini
+# from antigravity anyway); every *_API_KEY and CODEX_HOME (ambient config/credentials,
+# forbidden by R6).
+#
+# Caveat recorded honestly: codex/opencode/antigravity were exercised through each
+# CLI's NON-INTERACTIVE entrypoint (`exec`/`run`/`-p`), which is the mode a scripted
+# install runs under. If an interactive TUI session turns out not to export the same
+# name, that front-end is merely undetected there — the fallback keeps the install
+# byte-identical to today, so the failure mode is inert.
+HOST_MARKERS="
+claude CLAUDECODE CLAUDE_CODE_ENTRYPOINT
+codex CODEX_THREAD_ID
+opencode OPENCODE OPENCODE_PID
+antigravity ANTIGRAVITY_AGENT ANTIGRAVITY_CONVERSATION_ID
+"
+#
 # Harness-OWNED generated basenames (stems; all files are <stem>.md). These are the
 # ONLY files a deselection may delete, so a selective re-run never removes a user's
 # own agents/commands sharing the same dir (Codex r2 P1). Keep in sync with the
@@ -593,6 +687,67 @@ models_any() {
 agent_known() {
   for _k in $AGENT_KEYS; do [ "$_k" = "$1" ] && return 0; done
   return 1
+}
+
+# marker_present <var-name> — true (exit 0) iff the NAMED environment variable is set
+# and NON-EMPTY (R2). The `${…:-}` guard is load-bearing: detect_host runs under
+# `set -eu`, where a bare expansion of an unset marker would abort the whole install.
+# A variable set to the empty string is deliberately NOT present.
+marker_present() {
+  eval "_mp_val=\${$1:-}"
+  [ -n "$_mp_val" ]
+}
+
+# detect_host — print the ONE agent key this installer session appears to be running
+# INSIDE, or print nothing when it cannot tell (R1, R3-R5, R9-R11).
+#
+# Contract: the verdict goes to STDOUT (it is consumed via `$(…)`, the same contract
+# tui_select/toggle_select already use); every diagnostic goes to STDERR. It reads,
+# writes and creates NO file, makes no network call, and NEVER exits non-zero — a miss
+# is normal operation, not an error (R11). Detection is a best-effort NARROWING; the
+# caller decides what an empty verdict falls back to.
+detect_host() {
+  # 1. Explicit declaration wins outright (R9) — the escape hatch for a front-end whose
+  #    session marker cannot be honestly verified, set once in a shell profile.
+  _dh_decl="${HARNESS_HOST_AGENT:-}"
+  if [ -n "$_dh_decl" ]; then
+    _dh_n=0; _dh_one=""
+    for _dh_t in $_dh_decl; do _dh_n=$((_dh_n + 1)); _dh_one="$_dh_t"; done
+    if [ "$_dh_n" -eq 1 ] && agent_known "$_dh_one"; then
+      printf '%s\n' "$_dh_one"
+      return 0
+    fi
+    # Any other value — an unknown token, several tokens, or the literal `host` —
+    # warns ONCE naming the value and continues as if the variable were unset (R10).
+    # Never `die`: a mistyped declaration must not block an install.
+    echo "⚠️  ignoring HARNESS_HOST_AGENT='$_dh_decl' — expected exactly one of: $AGENT_KEYS" >&2
+  fi
+
+  # 2. Walk the marker table and collect every key with at least one present marker.
+  #    The walk runs in a subshell (it inherits the environment, which is all it reads),
+  #    so nothing here can leak state into the caller.
+  _dh_hits="$(
+    printf '%s\n' "$HOST_MARKERS" | while IFS= read -r _dh_row; do
+      [ -n "$_dh_row" ] || continue
+      _dh_key=""
+      for _dh_var in $_dh_row; do
+        if [ -z "$_dh_key" ]; then _dh_key="$_dh_var"; continue; fi
+        if marker_present "$_dh_var"; then printf '%s\n' "$_dh_key"; break; fi
+      done
+    done
+  )"
+  [ -z "$_dh_hits" ] || _dh_hits="$(normalize_keys "$_dh_hits")"
+
+  # 3. Exactly one hit wins; anything else is UNDETECTED. Ambiguity is deliberately not
+  #    a tie-break — the table is not ordered by confidence and the first hit never wins.
+  _dh_n=0
+  for _dh_k in $_dh_hits; do _dh_n=$((_dh_n + 1)); done
+  if [ "$_dh_n" -eq 1 ]; then
+    printf '%s\n' "$_dh_hits"
+  elif [ "$_dh_n" -gt 1 ]; then
+    echo "⚠️  host detection ambiguous — session markers present for: $(printf '%s' "$_dh_hits" | tr '\n' ' ') — treating the host as undetected" >&2
+  fi
+  return 0
 }
 
 # agent_selected <key> — true (exit 0) iff <key> is a line in $SELECTED (R3/R4).
@@ -944,12 +1099,69 @@ tui_select() {
   normalize_keys "$_sel"
 }
 
+# precheck_baseline <target> — print, one per line and sorted, the agent keys that
+# represent THIS TARGET'S CURRENT SHAPE: the persisted .harness/.agents when the target
+# carries a selection, else ALL keys.
+#
+# A behavior-preserving EXTRACTION (E19-F01) of what resolve_agents's interactive branch
+# used to compute inline — the resolved set for every pre-existing code path is identical
+# (R22). It is now the SINGLE source of that answer, with three callers: the interactive
+# pre-check baseline, the `host`-undetected fallback, and `--print-agents`'s `baseline=`
+# line — so the diagnostic can never disagree with what the installer actually does (R26).
+#
+# The R13/R14 asymmetry falls out of this ONE expression, which is why it is one function:
+# a target with NO existing install has no persisted file ⇒ ALL, byte-identical to today's
+# no-override/no-TTY default (R13); a target that HAS one ⇒ exactly its persisted set, and
+# a legacy pre-E08 install that persisted none ⇒ ALL (R14). So an undetected `host` run
+# never widens (re-stamping four front-ends onto a claude-only target) nor narrows.
+precheck_baseline() {
+  _pb_persisted="$1/.harness/.agents"
+  if [ -f "$_pb_persisted" ]; then
+    normalize_keys "$(cat "$_pb_persisted")"
+  else
+    normalize_keys "$AGENT_KEYS"
+  fi
+}
+
+# override_host_kind <csv> — classify an --agents/HARNESS_AGENTS override with respect to
+# the `host` RESOLUTION MODE (E19-F01). Exit status:
+#   0 → every token is `host`      ⇒ resolve via detect_host          (R12-R15)
+#   1 → no `host` token at all     ⇒ validate_csv, exactly as before  (R22)
+#   2 → `host` mixed with another  ⇒ reject                           (R16)
+# Classifying `host` HERE, *before* validate_csv, is what keeps it out of validate_csv's
+# token grammar — the structural guarantee that `host` can never be validated as a key,
+# offered as a picker row, or persisted to .harness/.agents (R17, R18). It also makes the
+# mixed-token error specific instead of the generic "unknown agent key 'host'".
+override_host_kind() {
+  _ohk_host=0; _ohk_other=0
+  _ohk_ifs="$IFS"; IFS=','
+  for _ohk_tok in $1; do
+    IFS="$_ohk_ifs"
+    _ohk_tok="$(printf '%s' "$_ohk_tok" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    if [ -n "$_ohk_tok" ]; then
+      if [ "$_ohk_tok" = "host" ]; then _ohk_host=1; else _ohk_other=1; fi
+    fi
+    IFS=','
+  done
+  IFS="$_ohk_ifs"
+  [ "$_ohk_host" = 1 ] || return 1
+  [ "$_ohk_other" = 0 ] || return 2
+  return 0
+}
+
 # resolve_agents <target> — resolve the SELECTED agent set for this run (R1, R5,
 # R6, R9, R11). Resolution order, first match wins, decoupled from VERSION/UPGRADE:
 #   1. Override (R5/R7): a non-empty $AGENTS_OVERRIDE (from --agents/HARNESS_AGENTS)
 #      → validate_csv, no prompt — wins over persisted + TTY.
+#      1a. E19-F01: the whole-value token `host` is a RESOLUTION MODE handled inside this
+#          arm — SELECTED becomes detect_host's single key, or precheck_baseline when the
+#          host is undetected. It is honored uniformly, interactive or not (R15), because
+#          it is an explicit instruction exactly like `--agents=claude`. Mixed with any
+#          other token it is rejected (R16). Nothing outside this arm changes: a run that
+#          does not NAME `host` cannot reach any of it (R22).
 #   2. Interactive (R1/R9): else if stdin is a TTY → pre-check baseline is the
-#      persisted .harness/.agents if present (R9) else ALL (R1). On a raw-capable
+#      persisted .harness/.agents if present (R9) else ALL (R1), now via
+#      precheck_baseline (R26). On a raw-capable
 #      TTY this runs the arrow-key + spacebar checkbox picker (tui_select); when
 #      raw mode is unavailable it gracefully falls back to the numbered
 #      toggle_select. Both resolve the identical SELECTED set from the same baseline.
@@ -957,16 +1169,33 @@ tui_select() {
 # Sets the global SELECTED to a sorted, newline-separated key list.
 resolve_agents() {
   _t="$1"
-  _persisted="$_t/.harness/.agents"
   if [ -n "${AGENTS_OVERRIDE:-}" ]; then
-    SELECTED="$(validate_csv "$AGENTS_OVERRIDE")"
-    info "agents: explicit selection ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
-  elif [ -t 0 ]; then
-    if [ -f "$_persisted" ]; then
-      _base="$(normalize_keys "$(cat "$_persisted")")"
-    else
-      _base="$(normalize_keys "$AGENT_KEYS")"
+    if override_host_kind "$AGENTS_OVERRIDE"; then _kind=0; else _kind=$?; fi
+    if [ "$_kind" = 2 ]; then
+      die "'host' is a resolution mode, not an agent key — pass it as the ENTIRE value (--agents=host), never mixed with other keys (got '$AGENTS_OVERRIDE')"
     fi
+    if [ "$_kind" = 0 ]; then
+      _host="$(detect_host)"
+      if [ -n "$_host" ]; then
+        SELECTED="$_host"
+        info "agents: host detected — selecting '$_host' only"
+      else
+        # Undetected is NORMAL operation, never an error. Fall back to this target's
+        # current shape so the run can only ever preserve it (R13/R14), and say WHICH
+        # fallback applied (R25) — the two cases must be distinguishable in the text.
+        SELECTED="$(precheck_baseline "$_t")"
+        if [ -f "$_t/.harness/.agents" ]; then
+          info "agents: host undetected — keeping this install's selection ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
+        else
+          info "agents: host undetected — selecting all front-ends ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
+        fi
+      fi
+    else
+      SELECTED="$(validate_csv "$AGENTS_OVERRIDE")"
+      info "agents: explicit selection ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
+    fi
+  elif [ -t 0 ]; then
+    _base="$(precheck_baseline "$_t")"
     # Preferred interactive path: arrow-key + spacebar checkbox TUI when the
     # terminal supports raw mode; otherwise fall back to the numbered toggle list.
     if tui_capable; then
@@ -1285,7 +1514,12 @@ AGENT SELECTION  (E08-F01):
   .harness/.agents               harness-owned: the selected agent keys, one per line
                                  (claude|gemini|opencode|antigravity|codex), overwritten each run.
   Choose with --agents=<csv> / HARNESS_AGENTS=<csv>, an interactive toggle list, or
-  (no TTY, no override) ALL. Deselecting an agent on a re-run REMOVES its glue above
+  (no TTY, no override) ALL. --agents=host resolves to the single front-end this
+  installer session runs in (session env markers; HARNESS_HOST_AGENT=<key> declares it
+  explicitly). \`host\` is a resolution MODE — it is never a picker row and never appears
+  in .harness/.agents; an undetected host keeps this target's current shape. Preview with
+  --print-agents <target>, which writes nothing.
+  Deselecting an agent on a re-run REMOVES its glue above
   (its pointer block / .claude|.opencode dir / generated opencode.json) and warns;
   the shared AGENTS.md entrypoint and the .harness/ body are never removed.
 EOF
@@ -3102,6 +3336,9 @@ RECURSIVE=0
 DRY_RUN=0
 SHARED_REPO=0
 POSITIONAL=""
+# Diagnostic only (E19-F01): report what `--agents=host` WOULD resolve to for a target,
+# then exit 0 without touching anything. Single-target mode only.
+PRINT_AGENTS=0
 # Agent selection override (E08-F01): --agents=<csv> wins over HARNESS_AGENTS, which
 # wins over the interactive prompt / no-TTY ALL default. Seed from the environment so
 # `--agents` (parsed below) can supersede it; an empty value means "no override".
@@ -3118,6 +3355,14 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || die "usage: $0 --agents=<csv> (e.g. --agents=claude,opencode)"
       AGENTS_OVERRIDE="$2"
       shift 2
+      ;;
+    --print-agents)
+      # Diagnostic (E19-F01, R23): print `host=<detected key or empty>` and
+      # `baseline=<keys>` for <target> and exit 0, creating/modifying NOTHING. It is the
+      # answer to "what would --agents=host do here?" and the only way to observe
+      # detection without installing. Single-target mode only (R24).
+      PRINT_AGENTS=1
+      shift
       ;;
     --umbrella)
       [ "$#" -ge 2 ] || die "usage: $0 --umbrella <umbrella-dir> [--shared-repo] [--recursive] [--dry-run]"
@@ -3162,11 +3407,25 @@ if [ -z "$UMBRELLA" ]; then
   if [ ! -d "$TGT" ]; then die "target '$TGT' is not a directory"; fi
   TGT="$(CDPATH= cd -- "$TGT" && pwd)"
   if [ "$TGT" = "$SRC" ]; then die "target must differ from the harness source ($SRC)"; fi
+  if [ "$PRINT_AGENTS" = 1 ]; then
+    # Diagnostic short-circuit (R23): two lines on stdout, then exit 0 — BEFORE
+    # install_one, so nothing is created or modified anywhere, on a TTY or off it, on a
+    # fresh dir or an installed target. Both values come from the same helpers the real
+    # resolution uses (detect_host / precheck_baseline), so this can never disagree with
+    # what an actual `--agents=host` run would do (R26).
+    printf 'host=%s\n' "$(detect_host)"
+    printf 'baseline=%s\n' "$(precheck_baseline "$TGT" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    exit 0
+  fi
   install_one "$TGT"
   exit 0
 fi
 
 # ── umbrella mode (cascade) ───────────────────────────────────────────────────
+# --print-agents is a single-target diagnostic: it reports on ONE target's baseline, and a
+# cascade has no single baseline to report. Reject the combination before anything is
+# written or discovered (R24).
+[ "$PRINT_AGENTS" = 0 ] || die "usage: $0 --print-agents <target-repo-path> (single-target mode only; not valid with --umbrella)"
 if [ ! -d "$UMBRELLA" ]; then die "umbrella dir '$UMBRELLA' is not a directory"; fi
 if [ -n "$POSITIONAL" ]; then die "do not pass a positional <target> with --umbrella"; fi
 # Resolve PHYSICAL paths (pwd -P) so a symlinked umbrella that points at the harness
