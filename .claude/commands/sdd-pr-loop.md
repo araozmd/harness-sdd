@@ -229,14 +229,34 @@ comment for the next round.
 
 #### Squash-merge prep (only when `merge_strategy` is `squash`)
 
-Ask Codex for the commit message once, then save it:
+**Compose the message locally — never ask Codex for it.** The watcher resolves on exactly
+three signals (fresh inline findings on head, a fresh `Reviewed commit <sha>` banner as a
+review or an issue comment, a `+1` reaction on the trigger comment), and a raw-text reply
+to an `@codex summarize` request is none of them: polling for one runs to the ceiling,
+exits `2`, and strands the squash path in `needs-human` with no `squash-message.txt` ever
+written. Everything the message needs is already in the round cache, so write it yourself
+— no post, no poll, nothing that can hang:
 
 ```bash
-gh pr comment "$pr_number" --body "@codex summarize: generate a high-signal squash commit message. Include the core implementation goal, which workers were used for which rounds, and a list of key blocking fixes resolved. Output raw text only."
+msg=".pr-loop/$pr_number/squash-message.txt"
+default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+{
+  gh pr view "$pr_number" --json title --jq '.title'
+  echo
+  echo "<2-4 lines, in your own words: the core implementation goal>"
+  echo
+  git log --reverse --format='- %s' "origin/$default_branch..HEAD"
+  echo
+  echo "Blocking fixes resolved:"
+  for f in .pr-loop/"$pr_number"/round-*/fix-*.md; do
+    [ -f "$f" ] && sed -n 's/^- One-line: //p' "$f"
+  done
+} > "$msg"
+[ -s "$msg" ] || rm -f "$msg"   # empty ⇒ the merge below uses GitHub's default body
 ```
 
-Poll for that summary the same way (background watcher), then save it to
-`.pr-loop/<pr>/squash-message.txt`.
+A missing or empty `$msg` is **not** a failure: the merge command below falls back to
+GitHub's default squash body, so the squash path always reaches its merge.
 
 ## Handover summary
 
@@ -333,8 +353,12 @@ merged=0
 if [ "${merge_ok:-0}" != "1" ]; then
   echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
 elif [ "${merge_strategy:-merge}" = "squash" ]; then
-  gh pr merge "$pr_number" --squash --delete-branch \
-    --body-file ".pr-loop/$pr_number/squash-message.txt" && merged=1
+  msg=".pr-loop/$pr_number/squash-message.txt"
+  if [ -s "$msg" ]; then
+    gh pr merge "$pr_number" --squash --delete-branch --body-file "$msg" && merged=1
+  else                        # no message composed — squash with GitHub's default body
+    gh pr merge "$pr_number" --squash --delete-branch && merged=1
+  fi
 else
   gh pr merge "$pr_number" --merge --delete-branch && merged=1
 fi

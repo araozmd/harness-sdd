@@ -884,6 +884,37 @@ test_body_auto_merge_path() {                         # R43
   pass "R43 auto_merge + green + Codex-only threads ⇒ resolve then merge with the strategy"
 }
 
+test_body_squash_prep_cannot_hang() {                 # R43 (squash path)
+  # PREMISE, proven offline: wfc_evaluate resolves on three signals only (fresh inline
+  # findings on head, a fresh `Reviewed commit <sha>` banner, a Codex +1 on the trigger).
+  # A raw-text reply to an `@codex summarize` request matches NONE of them, so a body that
+  # polled for one would run to the ceiling, exit 2 and land in needs-human — with
+  # squash-message.txt never written and `merge_strategy: squash` unable to reach its
+  # merge command. Lock the premise, then lock the body that no longer depends on it.
+  if have_jq; then
+    _f="$(mk_fixture summarize-reply)"
+    printf '[{"user":{"login":"chatgpt-codex-connector[bot]"},"created_at":"2026-06-02T00:00:00Z","body":"feat: vendor the review loop\\n\\nA high-signal squash message with no banner text in it."}]\n' \
+      > "$_f/issue-comments.json"
+    [ "$(eval_fixture "$_f")" = 1 ] \
+      || fail "R43: a raw-text Codex summary now resolves the watcher — this premise changed"
+  else
+    skip "test_body_squash_prep_cannot_hang premise (jq not installed)"
+  fi
+  # The body may NAME `@codex summarize` (it explains why that round-trip was dropped);
+  # what it must never do again is POST one and wait for the reply.
+  grep -qF 'gh pr comment "$pr_number" --body "@codex summarize' "$BODY" \
+    && fail "R43: the body still posts an @codex summarize request the watcher cannot detect"
+  need_body "R43: body does not compose the squash message locally" \
+    'Compose the message locally'
+  need_body "R43: body does not forbid asking Codex for the squash message" \
+    'never ask Codex for it'
+  need_body "R43: body does not write the squash message itself" 'squash-message.txt'
+  need_body "R43: the squash merge is not guarded on a non-empty message" 'if [ -s "$msg" ]'
+  need_body "R43: the squash merge has no default-body fallback" \
+    'gh pr merge "$pr_number" --squash --delete-branch && merged=1'
+  pass "R43 squash prep composes the message locally and degrades to the default body"
+}
+
 test_body_auto_merge_false_stops() {                  # R44
   need_body "R44: body does not stop when auto_merge is false" \
     'stop after posting the all-gates-green summary'
@@ -1080,6 +1111,7 @@ test_body_stall_detection
 test_body_round_branching
 test_body_never_resolves_human_threads
 test_body_auto_merge_path
+test_body_squash_prep_cannot_hang
 test_body_auto_merge_false_stops
 test_body_cleanup_gated_on_merged
 test_body_handover_summary
