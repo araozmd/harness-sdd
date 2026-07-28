@@ -4,6 +4,50 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.42.0] — 2026-07-28
+
+### Added — ✨ the installer asks a second question: `execution.builder.backend` (E20-F01)
+- Until now the installer asked exactly **one** question — which front-ends to stamp — and
+  every other install-shaping choice was a hand-edit of `.harness/harness.config.yaml`
+  discovered by reading source comments. The most consequential of those,
+  **`execution.builder.backend`** (`in-session` vs `delegate` — the single seam an external
+  executor plugs into), is now asked out loud, as a plain numbered follow-up prompt right
+  after the front-end picker confirms.
+- **The picker itself is untouched.** The new question is a separate line-oriented `read`
+  prompt, not a row inside the checkbox list: that list is keyed on agent keys and emits a
+  sorted key list, an enum has no `[x]`/`[ ]` meaning in it, and its raw-mode path (stty
+  state, EXIT/INT traps, raw Ctrl-C bytes) is the highest-risk code in the installer. A
+  `read` prompt is also identical on both interactive rungs, so the new toggle needs no
+  fallback ladder of its own.
+- **Scripted twin: `--builder-backend=<in-session|delegate>` / `HARNESS_BUILDER_BACKEND`**,
+  exactly symmetric with `--agents` / `HARNESS_AGENTS`. The flag wins over the env var,
+  both suppress the prompt, an **empty** value means *no override*, and an illegal value
+  aborts non-zero **before anything is created or modified** in the target.
+- **Nothing changes for anyone pressing Enter, or for CI.** Enter keeps the value the
+  target already has (`in-session` on a fresh install), an unrecognized answer keeps it
+  too, and a run with **no TTY and no override** asks nothing and leaves
+  `harness.config.yaml` byte-identical.
+- **The config is never rewritten wholesale.** Only the one scalar on the `backend:` line
+  is replaced; its indentation, its trailing comment, and every other comment and
+  hand-edit in the file survive byte-for-byte. Re-applying the same value is a no-op.
+  `migrate_config` gained one entry so a config predating the `execution:` block gets it
+  appended once, append-only — and that appended block is **byte-identical to the one a
+  fresh install seeds**, the convergence rule `migrate_config` already states for its
+  `models:` and `pr_loop:` entries, now asserted for `execution:` too.
+- **The seeded `harness.config.yaml` documents the new surface where you edit it.** The
+  `execution:` block's comment header names the prompt, `--builder-backend=` and
+  `HARNESS_BUILDER_BACKEND`, so the majority path — a fresh install — is the discoverable
+  one.
+- **Choosing `delegate` before wiring `delegate_cmd` warns and proceeds** — it is neither
+  refused nor silently downgraded to `in-session`. `delegate_cmd` is a free-text command
+  the installer does not prompt for, so refusing would mean the prompt could never turn
+  delegation on at all; downgrading would make the installer lie about what was chosen.
+  The warning names `execution.builder.delegate_cmd` and the file to edit, and the Builder
+  role already stops and reports if it is still empty when work starts.
+- Change the value later by **re-running the installer** — the same reconfiguration path
+  front-end selection already uses. `--print-agents` still prints exactly two stdout lines.
+- New suite `tests/test_installer_toggles.sh`, wired into `verification.test_command`.
+
 ## [0.41.0] — 2026-07-28
 
 ### Changed — ✨ a fresh interactive install pre-checks the CLI you are in (E19-F02)

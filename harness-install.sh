@@ -1,7 +1,7 @@
 #!/bin/sh
 # harness-install.sh — install or upgrade the agent harness into a target repo.
 #
-#   ./harness-install.sh [--agents=<csv>] <target-repo-path>
+#   ./harness-install.sh [--agents=<csv>] [--builder-backend=<value>] <target-repo-path>
 #   ./harness-install.sh --umbrella <umbrella-dir> [--shared-repo] [--recursive] [--dry-run|--list]
 #
 # Idempotent: run once to install, re-run to upgrade.
@@ -34,6 +34,22 @@
 # an agent deletes that agent's harness-owned, regenerated glue and warns (it never
 # touches the shared AGENTS.md entrypoint or the .harness/ body; a hand-edited
 # opencode.json is left in place with a warning).
+#
+# Builder execution backend (E20-F01): the installer's SECOND question, asked as a plain
+# line-oriented prompt right after the front-end picker confirms (never a row inside it).
+# It sets execution.builder.backend in <target>/.harness/harness.config.yaml:
+#   - in-session (DEFAULT) → the Builder writes the code in the CLI session it runs in.
+#   - delegate             → the Builder shells out to execution.builder.delegate_cmd,
+#                            which owns implementation.
+# Resolution: --builder-backend=<value> wins over HARNESS_BUILDER_BACKEND, which wins over
+# the prompt; an empty value means "no override" (like --agents=). An illegal value aborts
+# non-zero BEFORE anything is written. With no TTY and no override nothing is asked and the
+# target's current value is left byte-identical, so CI keeps today's behavior exactly.
+# Pressing Enter keeps whatever the target already has, so a re-run cannot silently change
+# it. Selecting `delegate` while delegate_cmd is still unset is allowed on purpose: the
+# installer writes the choice and warns, rather than diverge from what the human asked for
+# by silently downgrading — the Builder then stops and reports at run time.
+# Change it later by RE-RUNNING the installer (or by hand-editing that key).
 #
 #   - The harness BODY (agents, docs, store, tools, templates, init.sh, config, AGENTS.md)
 #     is copied into <target>/.harness/ and OVERWRITTEN on every run.
@@ -290,6 +306,61 @@ pr_loop:
   merge_strategy: "merge"        # merge | squash
 EOF
   fi
+
+  # --- execution block (E20-F01 builder backend) ---
+  # Top-level, append-only at EOF. Keyed off the TOP-LEVEL `execution:` header ONLY (the
+  # same shape the mirror: / fix_lane: / models: / pr_loop: entries use): header absent ⇒
+  # append the whole block, header present ⇒ do NOTHING. Deliberately NOT an
+  # _mc_insert_after of a nested key: a present-but-partial `execution:` block would gain a
+  # SECOND `builder:` mapping, which is invalid YAML and strictly worse than the status quo.
+  # An absent block is behaviorally equivalent to the values below (agents/builder.md treats
+  # a missing key as `in-session`), so a config that predates `execution:` keeps working —
+  # the block is appended so the knob, and the installer's follow-up prompt, are
+  # discoverable in the file the human actually edits.
+  #
+  # Keep this text BYTE-IDENTICAL to the `execution:` block of the source
+  # harness.config.yaml — the same convergence rule the models: and pr_loop: entries above
+  # state, for the same reason: a FRESH install copies the config verbatim and never
+  # migrates, an UPGRADE only migrates, and the two must not end up documenting the same
+  # values with different comments. Only the POSITION differs (the source block sits
+  # mid-file; migration can only append at EOF), which is why the convergence check in
+  # tests/test_installer_toggles.sh compares the extracted BLOCK, not the whole file.
+  # If you edit one, edit the other.
+  if ! grep -Eq '^execution:[[:space:]]*(#.*)?$' "$_cfg"; then
+    cat >> "$_cfg" <<'EOF'
+
+# Builder execution backend. The installer ASKS for this — a follow-up prompt right after
+# the front-end picker, on a TTY — and takes --builder-backend=<in-session|delegate> or
+# HARNESS_BUILDER_BACKEND=<value> for scripted runs (the flag wins). RE-RUN the installer
+# to change it later, or edit the value below: only that one scalar is ever rewritten, so
+# every comment and hand-edit in this file survives.
+execution:
+  # The harness's single extension point for plugging in an EXTERNAL executor
+  # without forking any agent role file. Scope is structural: only roles listed
+  # here can be delegated, and only the Builder is delegatable today.
+  #
+  # The Orchestrator is deliberately NOT a key and never will be — it is the loop
+  # that reads this config and invokes delegate_cmd, so it always runs in the host
+  # code-agent. Architect / Reviewer / Scout also always run in-session. To make a
+  # new role delegatable later, add a sibling key here (e.g. `architect:`).
+  builder:
+    #   in-session -> the Builder agent implements the code itself, in this CLI
+    #                 session (DEFAULT). Works with ANY single coding agent and
+    #                 adds zero dependencies — this is what keeps the harness
+    #                 universal for engineers who run only one CLI.
+    #   delegate   -> the Builder does NOT write code; it shells out to
+    #                 `delegate_cmd`, which owns implementation (and may own PR
+    #                 creation/review too). Opt in only when an executor is wired.
+    #                 Selecting it while delegate_cmd is still empty installs fine
+    #                 and WARNS; the Builder stops and reports at run time.
+    backend: in-session
+
+    # Read ONLY when backend: delegate. The Builder invokes it as:
+    #     <delegate_cmd> <feature-id> <abs-spec-path>
+    # It must exit 0 on success, non-zero to signal failure back to the Builder.
+    delegate_cmd: ""
+EOF
+  fi
 }
 
 # seed_pr_loop_optin <file> — force `pr_loop.enabled` to the OPT-IN default (`false`) in a
@@ -397,6 +468,42 @@ _cfg_pr_loop_value() {
     p && $0 ~ re {
       sub(/^[[:space:]]+[^:]*:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
       gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+    }
+  ' "$1"
+}
+
+# _cfg_execution_builder_value <file> <key> — print the `execution.builder.<key>` scalar
+# (unquoted, comment-stripped) from inside the TOP-LEVEL `execution:` section's `builder:`
+# mapping; empty if the file, the section, the mapping or the key is absent (E20-F01).
+#
+# Same section-scoped shape as _cfg_pr_loop_value, ONE NESTING LEVEL DEEPER: the `builder:`
+# mapping is entered only inside `execution:`, and it is left again as soon as a line
+# appears at or above `builder:`'s own indentation. So neither a `builder:` under another
+# top-level section (e.g. `fix_lane:`) nor a SIBLING of `builder:` inside `execution:`
+# (e.g. a future `architect:`) can ever be read as this key. Commented example lines never
+# match — the `#` precedes the key.
+#
+# DO NOT "SIMPLIFY" THE SCOPE GUARDS HERE OR IN set_builder_backend. Today `builder:` is
+# the only mapping under `execution:` and `backend:` occurs exactly once as a key in the
+# whole config, so dropping the `e &&` / `b &&` guards is behaviorally invisible AND
+# passes the suite (Reviewer mutations S1/S2 on E20-F01 confirmed this). They become
+# load-bearing the moment a second mapping lands under `execution:` — which is precisely
+# what E20-F02 does. Whoever adds it should also add a fixture with a decoy `backend:`
+# under a sibling/other section, which is what makes these guards falsifiable.
+_cfg_execution_builder_value() {
+  [ -f "$1" ] || return 0
+  awk -v k="$2" '
+    BEGIN { gsub(/\./, "[.]", k); re = "^[[:space:]]+" k ":" }
+    /^execution:[[:space:]]*(#.*)?$/ { e=1; b=0; next }
+    e && /^[^[:space:]#]/ { e=0; b=0 }
+    e && /^[[:space:]]+[^[:space:]#]/ {
+      match($0, /^[[:space:]]*/); ind = RLENGTH
+      if ($0 ~ /^[[:space:]]+builder:[[:space:]]*(#.*)?$/) { b=1; bind=ind; next }
+      if (b && ind <= bind) { b=0 }
+      if (b && $0 ~ re) {
+        sub(/^[[:space:]]+[^:]*:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+        gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+      }
     }
   ' "$1"
 }
@@ -1306,6 +1413,131 @@ resolve_agents() {
   fi
 }
 
+# ── the second question: execution.builder.backend (E20-F01) ──────────────────
+# The installer's only OTHER question. Deliberately a plain line-oriented `read`
+# follow-up asked AFTER the front-end picker has resolved — not a row in tui_select /
+# toggle_select. Those are keyed on AGENT_KEYS and emit a sorted key list through
+# normalize_keys; an enum has no [x]/[ ] meaning there, and the raw-mode picker (stty
+# state, EXIT/INT traps, raw byte-3 Ctrl-C) is the highest-risk code in this file. A
+# `read` prompt also works identically on BOTH interactive rungs, so this toggle needs
+# no fallback ladder of its own (E20-F01 R1/R3).
+#
+# E20-F02 adds `pr_loop.enabled` by appending ONE more prompt behind this same
+# resolver/writer pair — a linear seam, not a framework for N toggles.
+
+# builder_backend_answer <answer> <current> — the answer→value mapping, and the ONLY
+# place the prompt's semantics live (R2). PURE: no `read`, no config access, no file
+# write, no global. Prints the resolved value and nothing else.
+#
+#   ""  (Enter)          → <current>   … the CURRENT value, never a hard-coded default
+#   1 | in-session       → in-session
+#   2 | delegate         → delegate
+#   anything else        → <current>   … forgiving on purpose (see below)
+#
+# A typo is forgiving HERE and fatal in the flag (R5): a human at a prompt sees the
+# outcome reported on the very next line and re-runs, while a typo'd flag in a script is
+# silent. Same asymmetry the harness already applies to `--agents` (unknown key aborts)
+# versus the picker (an out-of-range number is ignored with a note).
+#
+# SHAPE CONTRACT (R2): `sed -n '/^builder_backend_answer() {$/,/^}$/p'` must yield a
+# complete, sourceable definition, so the test suite can exercise this truth table
+# without a pty. The opening line is exactly `builder_backend_answer() {` and NO line
+# inside the body may be exactly `}`. Do not reformat.
+builder_backend_answer() {
+  case "$1" in
+    1|in-session) printf '%s\n' "in-session" ;;
+    2|delegate)   printf '%s\n' "delegate" ;;
+    *)            printf '%s\n' "$2" ;;
+  esac
+}
+
+# builder_backend_prompt <current> — ask the follow-up question. The menu goes to
+# STDERR (the resolved value is this function's stdout, read via command substitution).
+#
+# KEEP THIS FUNCTION THIS THIN. It is the only part of the feature a POSIX suite cannot
+# drive — there is no pty — so every decision it feeds lives in builder_backend_answer
+# above, which the suite extracts and unit-tests. Logic that migrates in here becomes
+# untestable, and a structural check in tests/test_installer_toggles.sh fails if any
+# appears. No loop, no re-ask, no config read, no write.
+builder_backend_prompt() {
+  _bbp_cur="$1"
+  printf '\n' >&2
+  printf '%s\n' "Which builder backend should this install use? (E20-F01)" >&2
+  printf '%s\n' "  1) in-session   the Builder writes the code itself, in this CLI session" >&2
+  printf '%s\n' "  2) delegate     the Builder shells out to execution.builder.delegate_cmd" >&2
+  printf '%s\n' "                  (set that command too — delegate does nothing without it)" >&2
+  printf '%s' "  choose 1/2 [Enter keeps $_bbp_cur]: " >&2
+  _bbp_ans=""
+  read -r _bbp_ans || :
+  printf '\n' >&2
+  builder_backend_answer "$_bbp_ans" "$_bbp_cur"
+}
+
+# resolve_builder_backend <target> — set the globals BUILDER_BACKEND (the resolved
+# value) and BUILDER_BACKEND_SOURCE (how it resolved, for the one report line).
+# Precedence, first match wins — the same ladder --agents uses:
+#   1. a non-empty $BUILDER_BACKEND_OVERRIDE (--builder-backend / HARNESS_BUILDER_BACKEND),
+#      already validated against the legal values at parse time (R4/R5);
+#   2. else an interactive TTY → the follow-up prompt, pre-selected from the current
+#      effective value (R1);
+#   3. else the current effective value — a no-op, so a non-interactive run with no
+#      override asks nothing and changes nothing (R6).
+# CURRENT EFFECTIVE VALUE = the target config's backend key when that file exists, else
+# the built-in `in-session`. On a FRESH install the config does not exist yet at this
+# point, so the default is `in-session` — exactly what the seeded file will contain (R10).
+BUILDER_BACKEND="in-session"
+BUILDER_BACKEND_SOURCE="unchanged"
+resolve_builder_backend() {
+  _rbb_cfg="$1/.harness/harness.config.yaml"
+  _rbb_cur="in-session"
+  if [ -f "$_rbb_cfg" ]; then
+    _rbb_v="$(_cfg_execution_builder_value "$_rbb_cfg" backend)"
+    if [ -n "$_rbb_v" ]; then _rbb_cur="$_rbb_v"; fi
+  fi
+  if [ -n "${BUILDER_BACKEND_OVERRIDE:-}" ]; then
+    BUILDER_BACKEND="$BUILDER_BACKEND_OVERRIDE"
+    BUILDER_BACKEND_SOURCE="explicit --builder-backend/HARNESS_BUILDER_BACKEND"
+  elif [ -t 0 ]; then
+    BUILDER_BACKEND="$(builder_backend_prompt "$_rbb_cur")"
+    BUILDER_BACKEND_SOURCE="interactive prompt"
+  else
+    BUILDER_BACKEND="$_rbb_cur"
+    BUILDER_BACKEND_SOURCE="unchanged"
+  fi
+}
+
+# set_builder_backend <config-file> <value> — replace ONLY the value token on the
+# `backend:` line inside the top-level `execution:` section's `builder:` mapping.
+#
+# The config is NEVER rewritten wholesale: this file is heavily commented BY DESIGN and
+# those comments are the harness's load-bearing documentation of its own knobs. The
+# line's indentation and everything after the value (spacing + any trailing comment)
+# survive verbatim, and every other byte of the file is untouched (R7). Callers skip this
+# entirely when the value already matches, so an unchanged run is trivially byte-identical
+# (R8). Same `$f.tmp` + `mv` shape as seed_pr_loop_optin / _mc_insert_after.
+set_builder_backend() {
+  awk -v val="$2" '
+    /^execution:[[:space:]]*(#.*)?$/ { e=1; b=0; print; next }
+    e && /^[^[:space:]#]/ { e=0; b=0 }
+    e && !done && /^[[:space:]]+[^[:space:]#]/ {
+      match($0, /^[[:space:]]*/); ind = RLENGTH
+      if ($0 ~ /^[[:space:]]+builder:[[:space:]]*(#.*)?$/) { b=1; bind=ind; print; next }
+      if (b && ind <= bind) { b=0 }
+      if (b && match($0, /^[[:space:]]*backend:[[:space:]]*/)) {
+        pre = substr($0, 1, RLENGTH)
+        tail = substr($0, RLENGTH + 1)
+        if (tail !~ /^#/) { sub(/^[^[:space:]]+/, "", tail) }
+        if (pre !~ /[[:space:]]$/) { pre = pre " " }
+        if (tail ~ /^#/) { tail = " " tail }
+        print pre val tail
+        done = 1
+        next
+      }
+    }
+    { print }
+  ' "$1" > "$1.bbtmp" && mv "$1.bbtmp" "$1"
+}
+
 # ── install_one <target> ──────────────────────────────────────────────────────
 # Installs (or upgrades) the harness into <target>. Identical behavior to the
 # historical single-target installer. Sets LAST_UPGRADE to 0 (fresh) or 1 (upgrade)
@@ -1362,6 +1594,10 @@ install_one() {
     PRIOR_AGENTS="$(normalize_keys "$AGENT_KEYS" | grep -vx codex)"
   fi
   resolve_agents "$TARGET"
+  # The SECOND question (E20-F01), asked back to back with the picker and before any
+  # output from the body copy. Only RESOLVED here — the value is applied later, at the
+  # config seed/preserve stage, where the file is guaranteed to exist.
+  resolve_builder_backend "$TARGET"
 
   echo "── harness install v$VERSION → $TARGET ──"
   if [ "$UPGRADE" = 1 ]; then info "existing install (v$(cat "$H/.harness-version")) — upgrading"; fi
@@ -1423,6 +1659,31 @@ install_one() {
     # config without altering existing values or comments.
     migrate_config "$H/harness.config.yaml"
   fi
+
+  # ── 2b. apply the resolved builder backend (E20-F01) ────────────────────────
+  # Runs HERE, after seed/preserve + migrate_config, so the file and its `execution:`
+  # block are both guaranteed to exist. The writer is skipped ENTIRELY when the value
+  # already matches — not merely re-written with the same content — so a non-interactive
+  # run with no override leaves the config byte-identical, mtime included (R6, R8).
+  _bb_cfg="$H/harness.config.yaml"
+  _bb_cur="$(_cfg_execution_builder_value "$_bb_cfg" backend)"
+  if [ "$_bb_cur" != "$BUILDER_BACKEND" ]; then
+    set_builder_backend "$_bb_cfg" "$BUILDER_BACKEND"
+  fi
+  # `delegate` with no command wired is a real install, loudly incomplete — never a
+  # silent downgrade to in-session and never an abort (R11). Refusing would be an
+  # unbreakable chicken-and-egg: delegate_cmd is a value the installer does not prompt
+  # for, so "no delegate until a command is wired" means the prompt could never turn
+  # delegation on. agents/builder.md already STOPS and reports if it is still empty at
+  # run time, so the broken install fails where a human can act on it.
+  if [ "$BUILDER_BACKEND" = "delegate" ] \
+     && [ -z "$(_cfg_execution_builder_value "$_bb_cfg" delegate_cmd)" ]; then
+    echo "⚠️  builder backend is 'delegate' but execution.builder.delegate_cmd is empty — set it in $_bb_cfg, or the Builder will stop and report instead of implementing" >&2
+  fi
+  # Exactly ONE report line per target, from the same resolver every path feeds (R12).
+  # NOT on --print-agents, whose stdout is frozen at two lines — that flag exits long
+  # before install_one.
+  info "builder backend: $BUILDER_BACKEND ($BUILDER_BACKEND_SOURCE)"
 
   # init.project.sh is project-owned: init.sh (BODY, overwritten on upgrade) sources
   # it for project-specific gate checks, so they live HERE and survive upgrades.
@@ -1631,6 +1892,19 @@ AGENT SELECTION  (E08-F01):
   Deselecting an agent on a re-run REMOVES its glue above
   (its pointer block / .claude|.opencode dir / generated opencode.json) and warns;
   the shared AGENTS.md entrypoint and the .harness/ body are never removed.
+
+BUILDER EXECUTION BACKEND  (E20-F01) — the installer's second question:
+  execution.builder.backend in .harness/harness.config.yaml. Legal values:
+    in-session   (DEFAULT) the Builder writes the code in this CLI session
+    delegate     the Builder shells out to execution.builder.delegate_cmd
+  Choose with the follow-up prompt (asked after the agent picker, on a TTY only),
+  or with --builder-backend=<value> / HARNESS_BUILDER_BACKEND=<value>; the flag wins
+  over the env var and an empty value means "no override". An illegal value aborts
+  before anything is written. No TTY and no override ⇒ nothing asked, the target's
+  current value untouched. Only that one scalar is ever rewritten — every comment and
+  hand-edit in the file survives. Choosing \`delegate\` without setting delegate_cmd
+  installs anyway and WARNS (the Builder stops and reports at run time).
+  RE-RUN the installer to change it later.
 EOF
 
   # ── 4. entrypoint pointer blocks (idempotent marked region) ─────────────────
@@ -3452,8 +3726,24 @@ PRINT_AGENTS=0
 # wins over the interactive prompt / no-TTY ALL default. Seed from the environment so
 # `--agents` (parsed below) can supersede it; an empty value means "no override".
 AGENTS_OVERRIDE="${HARNESS_AGENTS:-}"
+# Builder backend override (E20-F01): --builder-backend=<value> wins over
+# HARNESS_BUILDER_BACKEND, which wins over the interactive follow-up prompt / the target's
+# current value. Seeded from the environment so the flag (parsed below) can supersede it;
+# an empty value means "no override", exactly like --agents=.
+BUILDER_BACKEND_OVERRIDE="${HARNESS_BUILDER_BACKEND:-}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --builder-backend=*)
+      # Explicit override; an empty value (`--builder-backend=`) is treated as "no
+      # override" (fall through to the prompt / no-op), matching HARNESS_BUILDER_BACKEND="".
+      BUILDER_BACKEND_OVERRIDE="${1#--builder-backend=}"
+      shift
+      ;;
+    --builder-backend)
+      [ "$#" -ge 2 ] || die "usage: $0 --builder-backend=<in-session|delegate>"
+      BUILDER_BACKEND_OVERRIDE="$2"
+      shift 2
+      ;;
     --agents=*)
       # Explicit override; an empty value (`--agents=`) is treated as "no override"
       # (fall through to the prompt / ALL default), matching HARNESS_AGENTS="".
@@ -3506,6 +3796,16 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+# Validate the builder-backend override HERE — after the parse loop, before target
+# resolution and before any install_one — so an illegal value aborts non-zero with
+# nothing created or modified in the target (E20-F01 R5). A typo'd flag in a script is
+# silent, which is why this aborts where the interactive prompt merely keeps the current
+# value: at a prompt a human sees the outcome on the next line and re-runs.
+case "${BUILDER_BACKEND_OVERRIDE:-}" in
+  ""|in-session|delegate) ;;
+  *) die "unknown builder backend '$BUILDER_BACKEND_OVERRIDE' — legal values are 'in-session' and 'delegate' (--builder-backend=<value> / HARNESS_BUILDER_BACKEND)" ;;
+esac
 
 # ── single-target mode (no --umbrella): behave exactly as before ──────────────
 if [ -z "$UMBRELLA" ]; then

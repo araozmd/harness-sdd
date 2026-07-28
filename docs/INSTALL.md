@@ -291,6 +291,70 @@ always wins, and it is the form to use in a script:
 Either way the resolved set is persisted back to `.harness/.agents`, so the next re-run
 starts from what you chose.
 
+## The second question — `execution.builder.backend`
+
+Front-end selection is not the only question the installer asks. Right after the picker
+confirms, an interactive run asks **one** more, as a plain numbered prompt (it is not a row
+inside the checkbox picker):
+
+```
+Which builder backend should this install use? (E20-F01)
+  1) in-session   the Builder writes the code itself, in this CLI session
+  2) delegate     the Builder shells out to execution.builder.delegate_cmd
+  choose 1/2 [Enter keeps in-session]:
+```
+
+The answer is written to `execution.builder.backend` in
+`.harness/harness.config.yaml`. The two legal values are:
+
+| Value | Meaning |
+|---|---|
+| `in-session` | **Default.** The Builder agent implements the code itself, in the CLI session it is already running in. Works with any single coding agent and adds zero dependencies. |
+| `delegate` | The Builder does **not** write code. It shells out to `execution.builder.delegate_cmd`, invoked as `<delegate_cmd> <feature-id> <abs-spec-path>`, which owns implementation. |
+
+**Pressing Enter keeps whatever the target already has** — `in-session` on a fresh
+install, and on a re-run the value currently in the file. The prompt cannot silently
+change your setting, and an unrecognized answer keeps the current value too (the
+installer reports the outcome on the next line; re-run to correct it).
+
+### Scripted installs — `--builder-backend=` / `HARNESS_BUILDER_BACKEND`
+
+```bash
+./harness-install.sh --builder-backend=delegate /path/to/your-project
+HARNESS_BUILDER_BACKEND=in-session ./harness-install.sh /path/to/your-project
+```
+
+The flag wins over the environment variable, both suppress the prompt, and an **empty**
+value (`--builder-backend=`) means *no override* — exactly like `--agents=`. A value that
+is neither `in-session` nor `delegate` aborts non-zero **before anything is created or
+modified** in the target.
+
+With **no TTY and no override** the installer asks nothing and leaves the value exactly as
+it is, so CI and scripted upgrades behave as they always have.
+
+### Choosing `delegate` before wiring `delegate_cmd`
+
+Allowed, on purpose. The installer writes `delegate` and prints a warning naming
+`execution.builder.delegate_cmd` and the config file to edit:
+
+```
+⚠️  builder backend is 'delegate' but execution.builder.delegate_cmd is empty — set it in …
+```
+
+It does **not** abort and does **not** silently downgrade you to `in-session` — that would
+make the installer lie about what you chose. `delegate_cmd` is a free-text command the
+installer does not prompt for, so refusing would mean the prompt could never turn
+delegation on at all. If the command is still unset when work starts, the Builder role
+stops and reports the misconfiguration rather than quietly writing code itself.
+
+### Changing it later
+
+**Re-run the installer** — same as front-end selection, and the same reason: the installer
+*is* the config UI, so there is no second surface to keep in sync. Only that one scalar is
+ever rewritten; the indentation, the trailing comment on the line, and every other comment
+and hand-edit in `harness.config.yaml` survive byte-for-byte. (Hand-editing the key
+directly works too — the installer reads it back on the next run.)
+
 ## Upgrade
 
 Re-run the same command after pulling a newer harness:
