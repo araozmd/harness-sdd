@@ -1105,6 +1105,42 @@ test_body_auto_merge_false_stops() {                  # R44
   pass "R44 auto_merge false stops after the green summary without merging"
 }
 
+test_body_terminal_return_values_agree() {            # R41/R42/R44 — cross-state contract
+  # The two terminal states must not disagree about what the loop returns. A merge that
+  # will not land IS the needs-human state and returns failure; the auto_merge:false
+  # hand-back is a completed loop and returns success even though nothing merged.
+  grep -qF -- 'Return success to the caller' "$BODY" \
+    && fail "R41: a merge that would not land still tells the caller to return success"
+  need_body "R41: the failed-merge fallback does not return failure" \
+    'handover summary, and **return failure**'
+  need_body "R41: the failed-merge fallback does not route to the needs-human state" \
+    'needs-human terminal state below'
+  need_body "R41: a merge that did not land is not barred from reporting success" \
+    'is never reported as success'
+  need_body "R44: the auto_merge-false hand-back does not return success" \
+    'hand-back **completes** the loop: **return success**'
+  need_body "R44: the auto_merge-false hand-back is not kept out of needs-human" \
+    'never route it to needs-human'
+  need_body "R42: the needs-human state does not claim every path returns failure" \
+    '**Every path into this state returns failure**'
+  # Placement: both statements must sit on the right side of the terminal-state heading,
+  # so neither section can be read as contradicting the other.
+  python3 - "$BODY" <<'PY' || fail "R41/R44: the terminal-state return values are misplaced"
+import sys
+s = open(sys.argv[1]).read()
+ok_hdr, nh_hdr = s.index("### Ready to merge (success)"), s.index("### Needs-human (failure)")
+ok_ret = s.index("hand-back **completes** the loop: **return success**")
+fail_ret = s.index("handover summary, and **return failure**")
+# the auto_merge:false success and the failed-merge failure are both stated in the
+# success section (that is where the merge is attempted) ...
+assert ok_hdr < ok_ret < nh_hdr, "auto_merge:false success is not in the success section"
+assert ok_hdr < fail_ret < nh_hdr, "failed-merge failure is not in the success section"
+# ... and nothing after the needs-human heading walks the failure back to a success.
+assert "return success" not in s[nh_hdr:].lower(), "needs-human section returns success"
+PY
+  pass "R41/R42/R44 terminal states agree: a merge that will not land fails, the auto_merge-false hand-back succeeds"
+}
+
 test_body_cleanup_gated_on_merged() {                 # R45
   need_body "R45: body does not track whether the merge itself succeeded" 'merged=1'
   need_body "R45: body does not gate cleanup on the merge succeeding" \
@@ -1305,6 +1341,7 @@ test_body_truncated_thread_is_not_codex_only
 test_body_auto_merge_path
 test_body_squash_prep_cannot_hang
 test_body_auto_merge_false_stops
+test_body_terminal_return_values_agree
 test_body_cleanup_gated_on_merged
 test_body_handover_summary
 test_body_dry_run

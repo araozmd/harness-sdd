@@ -2295,7 +2295,9 @@ fi
 **none** of the merge commands below.
 
 While `pr_loop.auto_merge` is **false**, stop after posting the all-gates-green summary
-and hand back to the human — resolve threads if you like, but **do not merge**.
+and hand back to the human — resolve threads if you like, but **do not merge**. That
+hand-back **completes** the loop: **return success**. It is the one terminal state where an
+unmerged PR is the intended outcome, so never route it to needs-human.
 
 Where `pr_loop.auto_merge` is **true**, merge with the configured `merge_strategy`,
 deleting the remote branch in the same call. Track whether the merge command itself
@@ -2334,8 +2336,10 @@ fi
 ```
 
 If `gh pr merge` fails (branch-protection race, a required review not yet registered, a
-re-opened thread), retry once after 30s. If it still fails, fall back to labeling
-`needs-human` and posting the error. Return success to the caller.
+re-opened thread), retry once after 30s. If it still fails the PR will not land: take the
+needs-human terminal state below — label `needs-human`, post the error alongside the
+handover summary, and **return failure**. A merge that auto-merge was asked to land and did
+not land is never reported as success.
 
 ### Needs-human (failure)
 
@@ -2343,6 +2347,11 @@ Apply the `needs-human` label, post the **same handover summary** block (so the 
 exactly which workers tried and where they got stuck), and return failure. Reached by: the
 `max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, or a merge
 that would not land.
+
+**Every path into this state returns failure**, whatever the reason — the only successes
+are a merge that actually landed and the `auto_merge: false` hand-back above. So an
+unmerged PR is a success **only** when auto-merge was off; when auto-merge was on and the
+merge did not land, that is this state, and it is a failure.
 
 ## Cache layout
 
