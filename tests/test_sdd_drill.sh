@@ -266,4 +266,55 @@ grep -qF "## [$V]" CHANGELOG.md                 || fail "R22: CHANGELOG.md has n
 grep -qF '/sdd-drill' CHANGELOG.md || fail "R22: CHANGELOG.md has no /sdd-drill marker anywhere"
 pass "R22 version_changelog"
 
+# ── E21-F01: feature-size budget carried by the Driller + Architect ───────────────
+# The Driller is the ONLY role that decides feature size and nothing downstream revisits
+# it, so the rule has to live in its prompt. Asserted as required phrases (the house way
+# for a prose contract, cf. R1/R20 above), plus the two boundaries that make it safe:
+# it must be advisory (never `blocked` on size) and it must leave the diff-measuring keys
+# alone (those govern a measured diff, which does not exist at decomposition time).
+
+# R4/R5/R6_driller_carries_size_budget
+grep -qF 'change_size.max_requirements' "$ROLE" \
+  || fail "E21-F01 R4: driller does not read change_size.max_requirements"
+grep -qF 'depends_on' "$ROLE" \
+  || fail "E21-F01 R4: driller does not sequence a split on the depends_on graph"
+grep -qi 'epic.md' "$ROLE" \
+  || fail "E21-F01 R5: driller does not record the size decision in epic.md"
+grep -qi 'never blocks\|never.*`blocked`.*on size\|not.*emit a `blocked` record on size' "$ROLE" \
+  || fail "E21-F01 R6: driller does not state the budget never produces a blocked record"
+pass "E21-F01 R4/R5/R6 driller_carries_size_budget"
+
+# R7/R8_architect_carries_size_budget
+ARCH="agents/architect.md"
+grep -qF 'change_size.max_requirements' "$ARCH" \
+  || fail "E21-F01 R7: architect does not read change_size.max_requirements"
+grep -qi 'stop before writing the four files' "$ARCH" \
+  || fail "E21-F01 R7: architect does not stop before writing the four spec files when over budget"
+grep -qi 'override line' "$ARCH" \
+  || fail "E21-F01 R8: architect does not require a recorded override line when told to proceed"
+pass "E21-F01 R7/R8 architect_carries_size_budget"
+
+# R1/R2_change_size_defaults_in_source_config
+# The DEFAULTS are documented in exactly one place — the config — and an absent block must
+# behave as if they were written. Assert each key with its default value so a silent
+# retune of a shipped default cannot pass unnoticed.
+CFG="harness.config.yaml"
+grep -Eq '^change_size:[[:space:]]*(#.*)?$' "$CFG" \
+  || fail "E21-F01 R1: harness.config.yaml has no top-level change_size: block"
+for _kv in 'advise_lines: 1500' 'escalate_lines: 3000' 'advise_files: 25' \
+           'escalate_files: 50' 'max_requirements: 12'; do
+  grep -qF "$_kv" "$CFG" || fail "E21-F01 R1/R2: change_size default missing or retuned: $_kv"
+done
+pass "E21-F01 R1/R2 change_size_defaults_in_source_config"
+
+# R9_change_size_documented
+# Both tiers named, and the non-blocking property stated — the property most likely to be
+# lost when someone later "tightens" the rule.
+grep -qF 'change_size' docs/WORKFLOW.md   || fail "E21-F01 R9: WORKFLOW.md does not document change_size"
+grep -qi 'advise'   docs/WORKFLOW.md      || fail "E21-F01 R9: WORKFLOW.md does not name the advise tier"
+grep -qi 'escalate' docs/WORKFLOW.md      || fail "E21-F01 R9: WORKFLOW.md does not name the escalate tier"
+grep -qi 'Neither tier blocks\|neither blocks\|never a hard' docs/WORKFLOW.md \
+  || fail "E21-F01 R9: WORKFLOW.md does not state that the budget never blocks"
+pass "E21-F01 R9 change_size_documented"
+
 echo "All sdd-drill tests passed."

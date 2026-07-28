@@ -89,9 +89,12 @@ Two things from the pattern are deliberately **rejected**:
   reviewed in budget-sized increments.
 
 ## Success criteria — non-goals
-- **No hard block on a large diff.** The budget is a gate that reports and requires an
-  explicit override, never a refusal to open a PR. Some changes (a rename sweep, a generated
-  contract, a vendored file) are legitimately large and carry near-zero review risk per line.
+- **No hard wall.** The budget is two soft tiers (advise / escalate) that produce a *recorded
+  decision*, never a refusal to open a PR. A single hard cap is the wrong instrument twice
+  over: an agent-written change is legitimately denser than a hand-written one, and a rename
+  sweep, a generated contract or a vendored file can be thousands of lines at near-zero review
+  risk per line. The defaults are calibrated from one 60-PR sample and live in config so a repo
+  with a different test ratio can move them.
 - **No line-counting of tests as a defect.** Tests were 59% of PR #76 and that is a deliberate
   quality choice. The budget is expressed in *production* lines, with tests following.
 - Not a change to how Codex is invoked, or to `pr_loop.blocking_severities` / `max_rounds`
@@ -119,5 +122,5 @@ Two things from the pattern are deliberately **rejected**:
   prompt to split along risk, which is why F01 puts the rule at decomposition time where the
   risk structure is still visible, rather than at the diff where only lines are.
 - **`.harness/progress/` leakage is out of scope here** and is seeded as its own maintenance
-  fix (`E99-F05`): 796 lines of per-round pr-loop scratch (5% of PR #76's diff) were committed
+  fix (`E99-F06`): 796 lines of per-round pr-loop scratch (5% of PR #76's diff) were committed
   into the product diff and re-read by the reviewer every round.

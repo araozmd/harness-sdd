@@ -4,6 +4,49 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.44.0] — 2026-07-28
+
+### Added — ✨ Change-size discipline: a feature-size budget the Driller and Architect honor (E21-F01)
+- Nothing in the harness bounded the size of a feature. `agents/driller.md` decomposed an epic
+  with no size rule and `agents/architect.md` specced whatever it was handed, so the sizing
+  decision was made implicitly at drill time and never revisited. Measured consequence
+  (`viernes-ai/viernes-bookings-api` PR #76, E14-F05): one feature carrying R1–R36 / T1–T25
+  became a PR of 17,202 additions across 77 files whose review did **not converge in twelve
+  `@codex review` rounds** — a flat per-round blocking-finding rate (20 P1 + 15 P2), meaning a
+  clean round would have been indistinguishable from a round that sampled a quiet region.
+- New advisory `change_size:` block in `harness.config.yaml`, seeded on fresh install and
+  migrated on upgrade: `advise_lines: 1500`, `escalate_lines: 3000`, `advise_files: 25`,
+  `escalate_files: 50`, `max_requirements: 12`. An absent block behaves exactly as those
+  defaults, matching the `telemetry:` / `fix_lane:` / `models:` convention.
+- **Two soft tiers, no hard wall.** Both tiers produce a *recorded decision*; neither refuses
+  work. A single cap is the wrong instrument twice over: an agent-written change is
+  legitimately denser than a hand-written one, and a rename sweep or generated contract can be
+  thousands of lines at near-zero review risk per line. Review risk concentrates rather than
+  spreading — in PR #76, 10% of the files carried 67% of the findings — so the budget prompts a
+  split *along seams*, not a refusal.
+- Budgets are **production** lines: tests are a deliberate quality choice the Reviewer already
+  enforces (a passing test per `R-id`) and must not be penalised by the instrument that governs
+  review surface. Requirement count is the drill-time proxy because it is the only size signal
+  that exists before any code does, and each `R-id` obliges a test.
+- `agents/driller.md` now splits an over-budget candidate into siblings sequenced on
+  `depends_on` and records the decision (or the deliberate non-split) in the epic's `epic.md`.
+  `agents/architect.md` now stops before writing the four spec files when a feature would
+  exceed the budget, reports the count and the seams, and — where a human directs it to proceed
+  — records an explicit override line in the `.spec.md`. Neither role emits a `blocked` record
+  on size: `blocked` is a closed vocabulary about dependencies and ownership.
+- Documented in `docs/WORKFLOW.md` ("Change-size discipline"). Asserted in
+  `tests/test_sdd_drill.sh` (both role files carry the rule and its non-blocking boundary;
+  the shipped defaults cannot be silently retuned) and `tests/test_install.sh` (block seeded
+  on fresh install, appended exactly once on migration, and the presence check tolerates a
+  target's annotated `change_size:   # tuned` line rather than shadowing it with a second block).
+- **On micro-specs:** the [pattern](https://www.augmentcode.com/guides/micro-specs-pattern-ai-agent-test-coverage)
+  is already implemented here — an EARS `R-id` *is* an atomic single-behavior spec and the
+  Reviewer already mandates a test per `R-id`. E14-F05 had 36 working micro-specs and was still
+  unreviewable, because nothing mapped a micro-spec to a **deliverable**. This release adds the
+  missing grouping rule, not another authoring phase; over-applied spec ceremony has its own
+  documented failure mode
+  ([Böckeler](https://martinfowler.com/articles/exploring-gen-ai/sdd-3-tools.html)).
+
 ## [0.43.1] — 2026-07-28
 
 ### Fixed — 🐛 Installer keeps `.harness/progress/` run dirs out of a consumer's VCS (E99-F06)

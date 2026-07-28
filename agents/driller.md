@@ -69,6 +69,40 @@ Before decomposing, you **read** as inputs:
 
 These are the inputs to the feature breakdown — you read them, you do not rewrite them.
 
+## Feature-size budget — split here, not later (E21-F01)
+
+You are the **only** role that decides how large a feature is. Nothing downstream revisits it:
+the Architect specs what you hand it, the Builder builds the spec, and the reviewer reads
+whatever diff comes out. A feature you leave too large becomes a PR whose review does not
+converge — a flat blocking-finding rate round after round, where "clean" stops meaning
+"correct" and starts meaning "the reviewer sampled a quiet region".
+
+Read `change_size.max_requirements` from `harness.config.yaml` (default **12** when the
+`change_size:` block is absent). It is a proxy for size at the only altitude you have: no code
+exists yet, and an EARS `R-id` is both the harness's unit of behavior and an obligation to
+write a test.
+
+**When a candidate feature's brief implies more than `max_requirements` requirements, split
+it** into sibling features and sequence them with the intra-epic `depends_on` graph you already
+build. Split along the **seams the work actually has** — a new interpretation layer, a
+read-only surface, the one operation that commits state — not into equal thirds. Review risk
+concentrates: in the case that motivated this rule, 10% of the files carried 67% of the
+findings, so a split that leaves the dangerous part mixed into a large sibling has bought
+nothing.
+
+**Record the decision either way (R5).** In the epic's `epic.md` Notes, state in one line that
+you split an over-budget candidate and on which seams — or that you deliberately did not, and
+why. A size decision nobody can see is a size decision nobody can revisit.
+
+**This is advisory and it never blocks (R6).** You decompose and you record; you do **not**
+emit a `blocked` record on size alone, and you do not refuse to seed a feature because it is
+large. Some work is legitimately big at near-zero risk per line. The rule exists to make the
+choice explicit, not to make it for you.
+
+`change_size.advise_lines` / `escalate_lines` / `advise_files` / `escalate_files` are **not
+yours** — they govern a measured diff, which does not exist at decomposition time. Leave them
+to the pre-PR check.
+
 ## Seed the feature entries (R7, D3)
 
 Read the epic's current `features` first. Then write each new feature into that epic's

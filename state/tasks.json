@@ -407,7 +407,7 @@
         {
           "id": "E99-F06",
           "title": "Installer: keep .harness/progress/ run dirs out of the consumer's VCS",
-          "status": "done",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -515,7 +515,7 @@
         {
           "id": "E21-F01",
           "title": "Feature-size budget in the Driller and Architect (split at decomposition time)",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],

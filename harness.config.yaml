@@ -239,3 +239,21 @@ pr_loop:
   max_rounds: 4                  # round cap; the cap round labels the PR needs-human
   blocking_severities: "P0,P1"   # comma-separated severities that block a merge
   merge_strategy: "merge"        # merge | squash
+
+# Change-size discipline (E21-F01) — ADVISORY in two tiers, never a hard block.
+# Both tiers produce a RECORDED DECISION; neither refuses work. A single hard cap is the
+# wrong instrument twice over: an agent-written change is legitimately denser than a
+# hand-written one, and a rename sweep or a generated contract can be thousands of lines at
+# near-zero review risk per line. An absent block behaves exactly as the values below.
+# Budgets are PRODUCTION lines — tests are a deliberate quality choice already enforced by
+# the Reviewer (a passing test per R-id) and must not be penalised by the instrument that
+# governs review surface.
+change_size:
+  advise_lines: 1500       # production lines added ⇒ split, or record one line saying why not
+  escalate_lines: 3000     # production lines added ⇒ recorded split plan, or an explicit override naming the reason
+  advise_files: 25         # files touched, advise tier
+  escalate_files: 50       # files touched, escalate tier
+  # Drill-time proxy: R-ids in ONE feature spec. It is the only size signal that exists
+  # before any code does, and each R-id obliges a test. Consumed by the Driller (split at
+  # decomposition) and the Architect (stop and report rather than spec an over-budget feature).
+  max_requirements: 12

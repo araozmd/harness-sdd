@@ -390,6 +390,36 @@ execution:
     delegate_cmd: ""
 EOF
   fi
+
+  # --- change_size block (E21-F01 change-size discipline) ---
+  # Top-level, append-only at EOF, ADVISORY: nothing here refuses work, so a migrated target
+  # behaves identically until a human acts on what the Driller/Architect now report. Keep this
+  # heredoc byte-identical to the tail of the source harness.config.yaml so a FRESH install
+  # (which copies the config verbatim) and an UPGRADED install (which only migrates) converge
+  # on the same text. The presence check tolerates a trailing comment on the `change_size:`
+  # line so a target that annotated it never gets a duplicate block on the next upgrade.
+  if ! grep -Eq '^change_size:[[:space:]]*(#.*)?$' "$_cfg"; then
+    cat >> "$_cfg" <<'EOF'
+
+# Change-size discipline (E21-F01) — ADVISORY in two tiers, never a hard block.
+# Both tiers produce a RECORDED DECISION; neither refuses work. A single hard cap is the
+# wrong instrument twice over: an agent-written change is legitimately denser than a
+# hand-written one, and a rename sweep or a generated contract can be thousands of lines at
+# near-zero review risk per line. An absent block behaves exactly as the values below.
+# Budgets are PRODUCTION lines — tests are a deliberate quality choice already enforced by
+# the Reviewer (a passing test per R-id) and must not be penalised by the instrument that
+# governs review surface.
+change_size:
+  advise_lines: 1500       # production lines added ⇒ split, or record one line saying why not
+  escalate_lines: 3000     # production lines added ⇒ recorded split plan, or an explicit override naming the reason
+  advise_files: 25         # files touched, advise tier
+  escalate_files: 50       # files touched, escalate tier
+  # Drill-time proxy: R-ids in ONE feature spec. It is the only size signal that exists
+  # before any code does, and each R-id obliges a test. Consumed by the Driller (split at
+  # decomposition) and the Architect (stop and report rather than spec an over-budget feature).
+  max_requirements: 12
+EOF
+  fi
 }
 
 # seed_pr_loop_optin <file> — force `pr_loop.enabled` to the OPT-IN default (`false`) in a
@@ -2150,7 +2180,7 @@ MODEL ROUTING  (created ONLY when models: resolves a role to a concrete value):
   the generated tree is byte-identical to a harness without model routing.
 
 PROJECT-OWNED  (seeded once, never clobbered on upgrade):
-  .harness/harness.config.yaml   (verification commands + store backend)
+  .harness/harness.config.yaml   (verification commands + store backend + change_size budget)
   .harness/init.project.sh       (project-specific init.sh gate checks)
   .harness/specs/product.md  .harness/specs/epics/
   .harness/state/tasks.json  .harness/progress/

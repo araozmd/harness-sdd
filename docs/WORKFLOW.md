@@ -80,6 +80,46 @@ specs each feature just-in-time during the run. The flow reads `/sdd-plan` (sket
 `/sdd-drill <epic-id>` (deepen one epic) → `/sdd-next` (execute). It is purely additive: a
 repo that never runs `/sdd-drill` behaves exactly as before.
 
+## Change-size discipline (`change_size:`)
+
+How large a feature is allowed to be is decided at **drill time** — the Architect specs what
+it is handed, the Builder builds the spec, and the reviewer reads whatever diff comes out.
+Nothing downstream revisits that decision, so the harness makes it explicit where it is made.
+
+The `change_size:` block in `harness.config.yaml` is **advisory in two tiers**.
+Neither tier blocks anything; each produces a *recorded decision*:
+
+| tier | default | what it asks for |
+|---|---|---|
+| **advise** | `advise_lines: 1500` production lines, or `advise_files: 25` | split, or record one line saying why not |
+| **escalate** | `escalate_lines: 3000` production lines, or `escalate_files: 50` | a recorded split plan, or an explicit override naming the reason |
+| **drill-time proxy** | `max_requirements: 12` `R-id`s in one feature spec | split at decomposition, before any spec exists |
+
+An absent `change_size:` block behaves exactly as those defaults.
+
+**Why not a hard cap.** A single wall is the wrong instrument twice over: an agent-written
+change is legitimately denser than a hand-written one, and a rename sweep, a generated
+contract or a vendored file can be thousands of lines at near-zero review risk per line.
+Review risk concentrates rather than spreading — in the case that motivated this rule, 10% of
+the files carried 67% of the findings — so the budget prompts a *split along seams*, not a
+refusal.
+
+**Why production lines.** Tests are a deliberate quality choice the Reviewer already enforces
+(a passing test per `R-id`); budgeting total lines would penalise exactly the discipline the
+harness asks for. Budget the production number and let tests scale off it.
+
+**Why requirement count at drill time.** It is the only size signal that exists before any
+code does, and each `R-id` obliges a test — so the count *is* the size of the eventual diff.
+
+**Who reads what.** The Driller reads `max_requirements` and splits an over-budget candidate
+into siblings sequenced on `depends_on`, recording the decision in the epic's `epic.md`. The
+Architect reads the same key and stops before writing the four spec files if the feature would
+exceed it, reporting the count and the seams instead — or, where a human directs it to proceed,
+writing an explicit override line into the `.spec.md`. Neither role emits a `blocked` record on
+size: `blocked` is a closed vocabulary about dependencies and ownership.
+
+The line and file budgets govern a *measured diff*, which does not exist at decomposition time.
+
 ## Architecture-aligned specs (the Architect cites ADRs)
 
 The planning tier produces durable design artifacts; this contract makes them
