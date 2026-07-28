@@ -879,6 +879,55 @@ test_existing_install_never_narrows() {
   return 0
 }
 
+# ── R14 — the stamp defines "existing install" for REMOVAL AUTHORITY too ──────
+# Regression (Codex P2 #3664630744 on PR #72): this feature made an orphan
+# `.harness/.agents` with NO version stamp — a copied or half-restored `.harness/` — count
+# as "no existing install" for the picker baseline, while `install_one` still seeded
+# `PRIOR_AGENTS` from that same orphan file. The two halves disagreed about what the target
+# WAS, so confirming the host-narrowed picker reconciled every OTHER recorded key as
+# "deselected" and deleted pristine glue this run had never installed (reported: install
+# claude,gemini · delete only `.harness/.harness-version` · confirm ⇒ GEMINI.md gone).
+#
+# WHY AN OVERRIDE DRIVES IT: the report reaches the bug through the picker, which needs a
+# TTY this POSIX suite cannot portably supply. The deletion itself happens downstream of
+# how SELECTED was resolved, in install_one's PRIOR_AGENTS reconciliation loop — so a
+# narrowing override reaches the identical loop with the identical PRIOR_AGENTS input, and
+# the picker equivalence is already pinned by test_baseline_fresh_is_host_only.
+test_orphan_metadata_grants_no_removal() {
+  # (a) ORPHAN — metadata present, stamp absent ⇒ not an install ⇒ removal authority NIL.
+  _x="$(sandbox f2orphanrm)"; _t="$_x/t"; mkdir -p "$_t"
+  hrun "$_x" -- --agents=claude,gemini,codex "$_t" >/dev/null 2>&1 \
+    || fail "R14: orphan setup install failed"
+  _gp="$_x/ch/prompts/sdd-next.md"
+  [ -f "$_t/GEMINI.md" ] || fail "R14: orphan setup did not stamp GEMINI.md"
+  [ -f "$_gp" ]          || fail "R14: orphan setup did not stamp the global codex prompts"
+  rm -f "$_t/.harness/.harness-version"
+  hrun "$_x" CLAUDECODE=1 -- --agents=claude "$_t" >/dev/null 2>&1 \
+    || fail "R14: the re-run over orphan metadata exited non-zero"
+  [ -f "$_t/GEMINI.md" ] \
+    || fail "R14: an orphan .harness/.agents was read as a prior selection — GEMINI.md was deleted"
+  [ -f "$_gp" ] \
+    || fail "R14: orphan metadata reclaimed a GLOBAL codex prompt (cross-target data loss)"
+  [ "$(tr '\n' ' ' <"$_t/.harness/.agents")" = "claude " ] \
+    || fail "R14: the orphan re-run did not persist its own selection ($(tr '\n' ' ' <"$_t/.harness/.agents"))"
+  # (b) GENUINE install — the same deselection must STILL reconcile: this narrows removal
+  # authority to stamped targets, it does not disable removal.
+  _y="$(sandbox f2stampedrm)"; _s="$_y/t"; mkdir -p "$_s"
+  hrun "$_y" -- --agents=claude,gemini,codex "$_s" >/dev/null 2>&1 \
+    || fail "R14: stamped setup install failed"
+  _gp2="$_y/ch/prompts/sdd-next.md"
+  [ -f "$_s/GEMINI.md" ] || fail "R14: stamped setup did not stamp GEMINI.md"
+  [ -f "$_gp2" ]         || fail "R14: stamped setup did not stamp the global codex prompts"
+  [ -f "$_s/.harness/.harness-version" ] || fail "R14: stamped setup left no version stamp"
+  hrun "$_y" CLAUDECODE=1 -- --agents=claude "$_s" >/dev/null 2>&1 \
+    || fail "R14: the deselecting upgrade exited non-zero"
+  [ -f "$_s/GEMINI.md" ] \
+    && fail "R14: a real existing install stopped reconciling a deselected front-end"
+  [ -f "$_gp2" ] \
+    && fail "R14: a real existing install stopped reclaiming its pristine global codex prompt"
+  return 0
+}
+
 # ── R10 — docs/INSTALL.md + the installer header state the new default ───────
 # Scoped to the section body, so a stray mention of a word elsewhere in a 400-line doc
 # cannot satisfy the check, and phrased as SUBSTANCE (the three cases the default has),
@@ -1075,6 +1124,8 @@ test_baseline_fresh_removes_nothing
 pass "F02 baseline_fresh_removes_nothing: the narrowed fresh install is byte-inert in the shared codex prompts (F02 R8)"
 test_existing_install_never_narrows
 pass "F02 existing_install_never_narrows: an existing install's resolution ignores every marker (F02 R9)"
+test_orphan_metadata_grants_no_removal
+pass "F02 orphan_metadata_grants_no_removal: a stamp-less target grants no removal authority, a stamped one still reconciles (F02 R14)"
 test_docs_document_fresh_default
 pass "F02 docs_document_fresh_default: INSTALL.md and the installer header state the new default (F02 R10)"
 test_docs_document_retoggle_path

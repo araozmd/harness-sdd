@@ -1125,6 +1125,11 @@ tui_select() {
 # what keeps orphan metadata — a copied or half-restored `.agents` with no stamp — from
 # being read as an install (E19-F01 R13).
 #
+# That definition is SHARED, not local to this helper: install_one's PRIOR_AGENTS gates on
+# the same stamp (E19-F02 R14), so a target this helper calls "no install" also grants no
+# removal authority. Were the two to disagree, confirming the host-narrowed picker on an
+# orphan target would delete the other recorded front-ends' pristine glue.
+#
 # The detection branch is a PRE-CHECK, not a decision: it only seeds a picker that is
 # already on screen, where one keystroke adds any other front-end before confirming. It
 # is therefore reached only where a human can correct it — a no-TTY run with no override
@@ -1322,10 +1327,22 @@ install_one() {
 
   # ── agent selection (E08-F01) ───────────────────────────────────────────────
   # Capture the PRIOR persisted selection (for add/remove reconciliation, R12/R13)
-  # BEFORE anything is written this run, then resolve the new SELECTED set. Note
-  # this is decoupled from UPGRADE/VERSION — it runs every install_one (R11).
+  # BEFORE anything is written this run, then resolve the new SELECTED set. This is
+  # decoupled from VERSION — a re-run at the SAME version still reconciles, which is
+  # E08-F01 R11 — but it is NOT decoupled from "is this an existing install?".
+  #
+  # ONE DEFINITION OF "EXISTING INSTALL", used by the baseline AND by removal
+  # authority (E19-F02 R14): the VERSION STAMP. precheck_baseline treats a
+  # `.harness/.agents` with no `.harness/.harness-version` — orphan metadata from a
+  # copied or half-restored `.harness/` — as NO install and pre-checks the detected
+  # host alone. If the same orphan file still seeded PRIOR_AGENTS here, the two halves
+  # would disagree about what the target IS: confirming that one-key picker would
+  # reconcile every OTHER recorded key as "deselected" and delete pristine glue the
+  # run never installed (e.g. GEMINI.md). A target with no stamp is not an install, so
+  # it grants NO removal authority: PRIOR_AGENTS stays empty and this run only adds.
+  # (Codex P2 #3664630744.)
   PRIOR_AGENTS=""
-  if [ -f "$H/.agents" ]; then
+  if [ "$UPGRADE" = 1 ] && [ -f "$H/.agents" ]; then
     PRIOR_AGENTS="$(normalize_keys "$(cat "$H/.agents")")"
   elif [ "$UPGRADE" = 1 ]; then
     # Legacy upgrade: a pre-E08 install stamped ALL front-ends but persisted no
