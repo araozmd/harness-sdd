@@ -2032,10 +2032,29 @@ EOF
   # holds fetched GitHub review JSON + per-round fix notes. Pure runtime scratch, rebuildable
   # from the `gh` API, never board data — keep it out of VCS. Path is relative to this
   # .harness/ .gitignore, where the loop actually writes it.
+  # Also ignore the PER-RUN agent output dirs under .harness/progress/ (E99-F06). The harness
+  # SOURCE has always ignored these (`progress/*/` in its own root .gitignore) but that ignore
+  # was never propagated to consumers, so in an installed target every run dir was committable
+  # — and in practice got committed, shipping agent scratch inside the product diff where a PR
+  # reviewer re-reads it every round. The re-inclusions matter and MUST follow the ignore line:
+  # `progress/*/` excludes the `inbox` directory itself, and git does not descend into an
+  # excluded directory, so `!progress/inbox/**` alone would NOT re-include the briefs — the
+  # directory has to be re-included first. progress/inbox/ holds the durable per-feature briefs
+  # the Architect specs from. Loose FILES directly under progress/ (README.md, history.md,
+  # .gitkeep) are never matched by `progress/*/`, which matches directories only — the explicit
+  # re-inclusions below mirror the source .gitignore and are defensive, not load-bearing.
+  # NOTE: a new ignore rule does not untrack a file that is ALREADY tracked; an existing target
+  # must run `git rm -r --cached .harness/progress/<run-dir>` once itself. The installer
+  # deliberately does not do that — untracking files in someone's repo is not an installer's call.
   _ignores='telemetry.jsonl
 jira.pat
 state/tasks.json.lock
-.pr-loop/'
+.pr-loop/
+progress/*/
+!progress/.gitkeep
+!progress/README.md
+!progress/inbox/
+!progress/inbox/**'
   case "$_tlog" in
     ''|telemetry.jsonl|/*) : ;;                 # default, unset, or absolute → nothing extra
     *) _ignores="$_ignores
@@ -2044,14 +2063,22 @@ $_tlog" ;;                                       # relative override → also ig
   if [ ! -f "$H/.gitignore" ]; then
     { printf '# Local-only telemetry log (see .harness/agents/orchestrator.md "## Telemetry").\n'
       printf '# Jira mirror PAT file (mirror.board.pat_file default) — never commit a PAT.\n'
+      printf '# Per-run agent output under progress/ is ephemeral scratch; the inbox briefs and\n'
+      printf '# the loose files directly under progress/ stay tracked (order matters — the\n'
+      printf '# re-inclusions must follow progress/*/).\n'
       printf '%s\n' "$_ignores"; } > "$H/.gitignore"
-    info "seeded .harness/.gitignore (ignores telemetry log)"
+    info "seeded .harness/.gitignore (telemetry log + progress run dirs ignored)"
   else
+    # Whole-LINE match (-x). A substring match is unsafe now that the list carries negations:
+    # `!progress/inbox/` is a substring of `!progress/inbox/**`, so a file holding only the
+    # latter would suppress the former — and without the directory re-inclusion git never
+    # descends into progress/inbox/, silently ignoring every brief. Append-only either way:
+    # a target's own entries are never rewritten or reordered.
     printf '%s\n' "$_ignores" | while IFS= read -r _pat; do
       [ -n "$_pat" ] || continue
-      grep -qF "$_pat" "$H/.gitignore" || printf '%s\n' "$_pat" >> "$H/.gitignore"
+      grep -qxF "$_pat" "$H/.gitignore" || printf '%s\n' "$_pat" >> "$H/.gitignore"
     done
-    info ".harness/.gitignore ensured (telemetry log ignored)"
+    info ".harness/.gitignore ensured (telemetry log + progress run dirs ignored)"
   fi
 
   # Personal/runtime agent state must never be committed to a SHARED project (e.g. a

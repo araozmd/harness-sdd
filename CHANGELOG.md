@@ -4,6 +4,35 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.43.1] — 2026-07-28
+
+### Fixed — 🐛 Installer keeps `.harness/progress/` run dirs out of a consumer's VCS (E99-F06)
+- The harness **source** has always ignored its own per-run agent output (`progress/*/` in
+  its root `.gitignore`), but that ignore was never propagated to installed targets. The
+  seeded `.harness/.gitignore` covered `telemetry.jsonl`, `jira.pat` and
+  `state/tasks.json.lock` only — so in every consumer each agent run dir was committable,
+  and in practice got committed. Measured on `viernes-ai/viernes-bookings-api` PR #76:
+  796 lines across 6 files (**5% of that PR's additions**) were `.harness/progress/`
+  pr-loop round scratch, shipped inside the product diff and re-read by the reviewer on
+  each of twelve review rounds.
+- `harness-install.sh` now seeds `progress/*/` plus the re-inclusions that keep the durable
+  artifacts tracked (`!progress/.gitkeep`, `!progress/README.md`, `!progress/inbox/`,
+  `!progress/inbox/**`). **Order is load-bearing**: `progress/*/` excludes the `inbox`
+  directory itself and git does not descend into an excluded directory, so
+  `!progress/inbox/**` alone would silently ignore every Architect brief.
+- The append path (an existing `.harness/.gitignore`) now matches whole LINES (`grep -qxF`)
+  instead of substrings. With negations in the list a substring match is unsafe:
+  `!progress/inbox/` is a substring of `!progress/inbox/**`, so a file holding only the
+  latter would suppress the former and lose the briefs. Still append-only — a target's own
+  entries are never rewritten or reordered.
+- A new ignore rule does **not** untrack an already-tracked file; an existing target must
+  run `git rm -r --cached .harness/progress/<run-dir>` once itself. The installer
+  deliberately does not do this — untracking files in someone's repo is not its call.
+- `tests/test_install.sh` asserts the behavior with `git check-ignore` on a throwaway repo
+  (run output ignored, briefs and `history.md` still tracked) rather than by grepping for
+  strings, because no grep can see the ordering the re-inclusion depends on. Both the
+  dropped-ignore and the dropped-directory-re-inclusion mutations fail the suite.
+
 ## [0.43.0] — 2026-07-28
 
 ### Added — ✨ the installer asks a third question: `pr_loop.enabled` (E20-F02)

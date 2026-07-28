@@ -407,7 +407,7 @@
         {
           "id": "E99-F06",
           "title": "Installer: keep .harness/progress/ run dirs out of the consumer's VCS",
-          "status": "pending",
+          "status": "done",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],

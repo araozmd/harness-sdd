@@ -33,6 +33,36 @@ test_root_gitignore_seeds_local_prompt_files() {
   done
 }
 
+# E99-F06: per-run agent output under .harness/progress/ must not be committable in a
+# consumer — the harness source has always ignored `progress/*/`, but that ignore was never
+# propagated by the installer, so run dirs shipped inside product diffs (796 lines / 5% of
+# viernes-bookings-api PR #76, re-read by the reviewer on all twelve rounds).
+#
+# Asserted as BEHAVIOR via `git check-ignore`, not as string presence: the re-inclusion of
+# progress/inbox/ only works if it FOLLOWS `progress/*/` in the file, and no grep can see
+# ordering. A string-only test would pass on a .gitignore that silently ignores every brief.
+test_progress_run_dirs_gitignored() {
+  grep -qxF 'progress/*/' "$T/.harness/.gitignore" \
+    || fail ".harness/.gitignore does not ignore per-run progress dirs (progress/*/) — agent scratch would ship in the product diff"
+  command -v git >/dev/null 2>&1 || return 0
+  _g="$T/.gitignore-probe"
+  rm -rf "$_g"
+  mkdir -p "$_g"
+  git -C "$_g" init -q >/dev/null 2>&1 || { rm -rf "$_g"; return 0; }
+  mkdir -p "$_g/.harness/progress/E01-F01-run" "$_g/.harness/progress/inbox"
+  cp "$T/.harness/.gitignore" "$_g/.harness/.gitignore"
+  : > "$_g/.harness/progress/E01-F01-run/build.md"
+  : > "$_g/.harness/progress/inbox/E01-F01.md"
+  : > "$_g/.harness/progress/history.md"
+  git -C "$_g" check-ignore -q .harness/progress/E01-F01-run/build.md \
+    || fail "per-run progress output is NOT ignored by the seeded .harness/.gitignore — agent scratch would be committed into the product diff"
+  ! git -C "$_g" check-ignore -q .harness/progress/inbox/E01-F01.md \
+    || fail "progress/inbox briefs ARE ignored by the seeded .harness/.gitignore — the Architect's durable per-feature seeds would be lost (re-inclusion must follow progress/*/)"
+  ! git -C "$_g" check-ignore -q .harness/progress/history.md \
+    || fail "progress/history.md IS ignored by the seeded .harness/.gitignore — project history would be lost"
+  rm -rf "$_g"
+}
+
 test_entrypoints_reference_local_overrides() {
   test_entrypoints_reference_agents_local
   test_local_override_guidance_is_conditional
@@ -263,6 +293,7 @@ test_rationale_docs_installed_contract
 # [jira_pat_file_gitignored]. Assert the seeded .harness/.gitignore covers it.
 [ -f "$T/.harness/.gitignore" ]                    || fail ".harness/.gitignore not seeded (Jira PAT would not be ignored)" # R16
 grep -qxF 'jira.pat' "$T/.harness/.gitignore"      || fail ".harness/.gitignore does not ignore the default Jira PAT file (jira.pat) — a PAT could be committed" # R16
+test_progress_run_dirs_gitignored   # E99-F06
 [ -x "$T/.harness/init.sh" ]                   || fail ".harness/init.sh not executable"     # R1
 [ -f "$T/.harness/specs/product.md" ]          || fail "product.md stub not seeded"          # R6
 [ -f "$T/.harness/state/tasks.json" ]          || fail "bootstrap tasks.json missing"        # R6
@@ -632,6 +663,20 @@ test_root_gitignore_preserves_user_entries
 test_root_gitignore_local_prompt_entries_idempotent
 test_worktree_ignore_seed_preserved_idempotent
 pass "project-root .gitignore is append-only + idempotent on upgrade"
+
+# E99-F06: the .harness/.gitignore APPEND path (a file already exists from the fresh install)
+# must add the progress patterns exactly once and must not clobber a target's own entries —
+# and the resulting file must still behave correctly, not merely contain the right strings.
+printf 'my-harness-scratch/\n' >> "$T/.harness/.gitignore"
+sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "upgrade run (.harness/.gitignore) failed"
+grep -qxF 'my-harness-scratch/' "$T/.harness/.gitignore" \
+  || fail "user entry in .harness/.gitignore clobbered on upgrade"
+for _p in 'progress/*/' '!progress/inbox/' '!progress/inbox/**'; do
+  [ "$(grep -cxF "$_p" "$T/.harness/.gitignore")" = "1" ] \
+    || fail ".harness/.gitignore progress seed duplicated on upgrade (not idempotent): $_p"
+done
+test_progress_run_dirs_gitignored
+pass ".harness/.gitignore progress seed is append-only + idempotent on upgrade (E99-F06)"
 
 # root .gitignore seeding uses EXACT-LINE matching (grep -qxF), not substring: a pre-existing
 # .gitignore that mentions AGENTS.local.md only inside a COMMENT (or a negation) must still get
