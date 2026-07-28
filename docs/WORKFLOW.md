@@ -118,7 +118,36 @@ exceed it, reporting the count and the seams instead — or, where a human direc
 writing an explicit override line into the `.spec.md`. Neither role emits a `blocked` record on
 size: `blocked` is a closed vocabulary about dependencies and ownership.
 
-The line and file budgets govern a *measured diff*, which does not exist at decomposition time.
+### The pre-PR check (`tools/change-size.sh`)
+
+The line and file budgets govern a *measured diff*, which does not exist at decomposition
+time. They are consumed at the **Reviewer → PR handoff** — the last moment splitting is still
+cheap, because a PR once opened carries review threads, a review history, and a `depends_on`
+edge someone is waiting on.
+
+```sh
+sh "$HARNESS_DIR/tools/change-size.sh" --base origin/main [--format text|json]
+```
+
+It measures the diff from the **merge base** (the branch may be rebased or carry merges; only
+the merge base is what a reviewer actually reads), classifies every changed file, and reports
+the tier plus — when over budget — the production files carrying the most additions. That last
+part is the point: the actionable question at the handoff is *where do I cut*, not *how big is
+it*, and a bare total is equally true of the 15,500 low-risk lines and the 1,716 dangerous ones.
+
+**It never blocks.** Exit 0 at every tier, including `escalate`. The only non-zero exit is `4`
+— not a git repo, no resolvable base ref, bad flag — and that measures nothing. A tool that
+could fail a branch for being large would be a hard cap wearing an advisory label, and the
+first response to it would be to stop running it.
+
+Classification is additive and configurable: `change_size.test_paths` and
+`change_size.generated_paths` take extended regexes that are **added** to the built-in
+multi-ecosystem defaults, never substituted for them. Get this wrong and the number is not
+slightly off, it is meaningless — so extend the classifier rather than letting a repo's tests
+count as production.
+
+The Reviewer runs it before approving and records the tier and the decision in its verdict;
+the Orchestrator runs it before opening the PR and carries the tier into the PR body.
 
 ## Architecture-aligned specs (the Architect cites ADRs)
 

@@ -4,6 +4,37 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.45.0] — 2026-07-28
+
+### Added — ✨ Pre-PR change-size check on the Reviewer → PR handoff (E21-F02)
+- E21-F01 put a budget where the sizing *decision* is made; this puts a measurement where that
+  decision is last *reversible*. Nothing between local approval and PR creation looked at how
+  large a branch actually was — on `viernes-bookings-api` E14-F05 the branch was 17,202
+  additions across 77 files before any number was attached to it, and the first entity to
+  notice was a paid reviewer, twelve times.
+- New `tools/change-size.sh` (POSIX sh + git + awk, no `gh`, no network — it runs *before* a
+  PR exists). Measures the diff from the **merge base**, classifies every changed file, reports
+  the tier, and when over budget lists the production files carrying the most additions.
+- **It never blocks.** Exit 0 at every tier including `escalate`; the only non-zero exit is `4`
+  (not a repo / no resolvable base ref / bad flag) and that measures nothing. A tool that could
+  fail a branch for being large would be a hard cap wearing an advisory label.
+- Reports **where** the lines are, not just how many: the actionable question at the handoff is
+  *where do I cut*. On PR #76 a bare total would have been equally true of the 15,500 low-risk
+  lines and the 1,716 that carried two thirds of the findings.
+- Classification is additive: new `change_size.test_paths` / `generated_paths` take extended
+  regexes **added** to the built-in multi-ecosystem defaults (JS/TS, Python, Go, Ruby,
+  Java/Kotlin/C#, common lockfiles and vendor dirs), never substituted for them.
+- `agents/reviewer.md` runs it before approving and records the tier and the decision in its
+  verdict; `agents/orchestrator.md` runs it before opening the PR and carries the tier into the
+  PR body. Documented in `docs/WORKFLOW.md`.
+- New behavioral suite `tests/test_change_size.sh` (registered in `verification.test_command`)
+  drives the tool against a real throwaway git repo — a grep over the script would prove
+  nothing about whether a test file counts as production, which is the failure that makes the
+  number meaningless. Two fixture defects were found and fixed while writing it: the fixture's
+  own rewritten `.harness/` config was landing in the measured diff, and R7's original
+  `thing_spec.rb` already matched a built-in pattern, so it would have passed without ever
+  exercising the config hook.
+
 ## [0.44.0] — 2026-07-28
 
 ### Added — ✨ Change-size discipline: a feature-size budget the Driller and Architect honor (E21-F01)

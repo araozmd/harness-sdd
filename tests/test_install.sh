@@ -81,6 +81,21 @@ test_change_size_block_seeded() {
     || fail "installed architect.md does not carry the size budget rule (E21-F01 R10)"
   grep -qF 'change_size' "$T/.harness/docs/WORKFLOW.md" \
     || fail "installed docs/WORKFLOW.md does not document change_size (E21-F01 R9)"
+  # E21-F02: the pre-PR check ships as a runnable tool, not just a rule in a prompt. A role
+  # file that tells the Reviewer to run a script the installer never made executable is a
+  # silent no-op in every consumer.
+  [ -f "$T/.harness/tools/change-size.sh" ] \
+    || fail "tools/change-size.sh not installed (the pre-PR size check would be missing in consumers) (E21-F02)"
+  [ -x "$T/.harness/tools/change-size.sh" ] \
+    || fail "installed tools/change-size.sh is not executable (the pre-PR size check would not run) (E21-F02)"
+  grep -qF 'tools/change-size.sh' "$T/.harness/agents/reviewer.md" \
+    || fail "installed reviewer.md does not run the pre-PR change-size check (E21-F02)"
+  grep -qF 'tools/change-size.sh' "$T/.harness/agents/orchestrator.md" \
+    || fail "installed orchestrator.md does not run the pre-PR change-size check (E21-F02)"
+  for _k in 'test_paths:' 'generated_paths:'; do
+    grep -qF "$_k" "$T/.harness/harness.config.yaml" \
+      || fail "installed change_size block missing classifier key $_k (E21-F02)"
+  done
 }
 
 test_entrypoints_reference_local_overrides() {

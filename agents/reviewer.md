@@ -128,10 +128,41 @@ behavior), not vague approval. For a cross-file consistency reject, name the
 forbids it — expected: dispatch reports completion only"). Write this feedback to
 `progress/<run>/review.md` so the Builder can act on it directly.
 
+## Change-size check before the PR handoff (E21-F02)
+
+Before you approve, run the advisory size check on the branch you are approving:
+
+```sh
+sh "$HARNESS_DIR/tools/change-size.sh" --base origin/main
+```
+
+It measures **production** additions and files against the `change_size:` budget
+(`advise_lines` / `escalate_lines` / `advise_files` / `escalate_files`), reports the tier,
+and — when over budget — names the files carrying most of the change. This is the **last
+moment splitting is cheap**: once the PR exists it carries review threads, a review history,
+and someone waiting on a `depends_on` edge.
+
+**It never blocks.** The tool always exits 0 when it can measure; it asks for a *recorded
+decision*, not permission:
+
+- `ok` → nothing to do.
+- `advise` → say in your verdict either how the branch should split, or one line on why it
+  should not (a rename sweep and a generated contract are legitimately large at near-zero
+  review risk per line — say so, and that is the whole obligation).
+- `escalate` → record a split plan, or an explicit override naming the reason and who
+  decided. Approving an escalate-tier branch with no recorded reason is the one outcome this
+  check exists to prevent.
+
+Put the tier and the decision in `progress/<run>/review.md` and in your verdict, so the
+choice is visible to whoever picks the branch up. If the tool exits `4` it could not measure
+(no base ref, not a git repo) — note that and carry on; a failed measurement is never a
+reject.
+
 ## Verdict
 
 - **Approve** → tell the Orchestrator to set `done`; append a summary to
-  `progress/history.md`.
+  `progress/history.md`. Include the change-size tier and, for `advise`/`escalate`, the
+  recorded decision.
 - **Reject** → write detailed feedback to `progress/<run>/review.md` and send the
   feature back to `in-progress` for the Builder.
 

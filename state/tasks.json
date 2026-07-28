@@ -524,7 +524,7 @@
         {
           "id": "E21-F02",
           "title": "Pre-PR change-size check on the Reviewer -> PR handoff",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [

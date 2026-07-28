@@ -418,6 +418,12 @@ change_size:
   # before any code does, and each R-id obliges a test. Consumed by the Driller (split at
   # decomposition) and the Architect (stop and report rather than spec an over-budget feature).
   max_requirements: 12
+  # Path classifiers for the pre-PR check (E21-F02), one EXTENDED REGEX per entry, MATCHED
+  # AGAINST THE REPO-RELATIVE PATH and ADDED to the built-in multi-ecosystem defaults (they
+  # never replace them). A wrong classifier does not make the number slightly off — it makes
+  # it meaningless, so extend these rather than letting a repo's tests count as production.
+  test_paths: []           # extra test-file patterns, e.g. - "(^|/)spec/"
+  generated_paths: []      # extra generated/vendored patterns, excluded from the budget entirely
 EOF
   fi
 }
@@ -1873,6 +1879,7 @@ install_one() {
   chmod +x "$H/tools/task-diagnostics.py" 2>/dev/null || true   # E16-F01 warn-only dependency diagnostics
   chmod +x "$H/tools/next-task.mjs" 2>/dev/null || true   # E16-F03 deterministic read-only selector
   chmod +x "$H/tools/wait-for-codex.sh" 2>/dev/null || true   # E18-F01 /sdd-pr-loop background Codex watcher
+  chmod +x "$H/tools/change-size.sh" 2>/dev/null || true   # E21-F02 advisory pre-PR change-size check
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"
