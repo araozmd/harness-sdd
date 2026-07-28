@@ -130,6 +130,44 @@ git -C "$R" checkout -q feature
   || fail "R5: production count changed after main advanced — not measuring from the merge base"
 pass "R5 measures from the merge base, so an advanced base ref does not distort the count"
 
+# ── R5b: UNCOMMITTED and UNTRACKED work is measured ──────────────────────────────────────
+# The default in-session agents/builder.md has no commit step — it edits, tests, and hands
+# the feature to the Reviewer. So at the moment this check runs the implementation is
+# routinely staged or unstaged, and a `<mb>...HEAD` diff would omit the whole feature and
+# report tier `ok` with zero production lines: the check reporting green on precisely the
+# branch it exists to measure. New FILES matter most and are invisible to `git diff` at any
+# range, so they are counted separately.
+RU="$T/repo-dirty"; mkrepo "$RU"
+git -C "$RU" checkout -q -b feature
+mkdir -p "$RU/src"
+n_lines 120 > "$RU/src/new-feature.js"   # untracked — never added, never committed
+n_lines 30 >> "$RU/seed.txt"             # tracked, modified, unstaged
+_pl="$("$TOOL" --repo "$RU" --base main --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')"
+[ "$_pl" = "150" ] \
+  || fail "R5b: production_lines=$_pl, expected 150 — uncommitted/untracked Builder output is not being measured"
+git -C "$RU" add -A && git -C "$RU" commit -qm "same content, now committed"
+_pl2="$("$TOOL" --repo "$RU" --base main --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')"
+[ "$_pl2" = "150" ] \
+  || fail "R5b: committing the same content changed the count from 150 to $_pl2 — the measurement must not depend on whether the Builder committed"
+pass "R5b uncommitted + untracked work counts, and committing it changes nothing"
+
+# ── R5c: the default branch is resolved, not assumed to be main ───────────────────────────
+# A hard-coded origin/main exits 4 on a repo whose default is `develop`, and the Reviewer is
+# told to carry on without measuring anything — the check silently vanishing on exactly the
+# repos nobody tested it on.
+RD="$T/repo-develop"; mkdir -p "$RD"
+git -C "$RD" init -q; git -C "$RD" config user.email t@example.com; git -C "$RD" config user.name T
+git -C "$RD" checkout -q -b develop
+printf 'seed\n' > "$RD/seed.txt"; git -C "$RD" add -A && git -C "$RD" commit -qm seed
+git -C "$RD" checkout -q -b feature; n_lines 42 > "$RD/app.js"
+git -C "$RD" add -A && git -C "$RD" commit -qm work
+git -C "$RD" symbolic-ref refs/remotes/origin/HEAD refs/heads/develop 2>/dev/null || true
+"$TOOL" --repo "$RD" >/dev/null 2>&1 \
+  || fail "R5c: no --base on a repo whose default is develop exited non-zero — the check would silently disappear there"
+[ "$("$TOOL" --repo "$RD" --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')" = "42" ] \
+  || fail "R5c: default-branch resolution measured the wrong range on a non-main repo"
+pass "R5c resolves the repo's real default branch instead of assuming origin/main"
+
 # ── R6: concentration is reported when over budget (where to cut, not just how big) ──────
 cfgw 20 30 50 100
 txt="$("$TOOL" --repo "$R" --base main)"

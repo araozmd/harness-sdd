@@ -89,10 +89,21 @@ _v="$(_cfg_change_size "$_cfg" advise_files   || true)"; advise_files="${_v:-$DE
 _v="$(_cfg_change_size "$_cfg" escalate_files || true)"; escalate_files="${_v:-$DEF_ESCALATE_FILES}"
 
 # ── base ref ─────────────────────────────────────────────────────────────────────
+# Ask git what the default branch actually IS before guessing. `origin/HEAD` is the
+# authoritative answer on any clone that has it, and it is the only candidate that works on a
+# repo whose default is `develop`, `trunk`, or anything else. The hard-coded list is the
+# fallback for a clone without an origin/HEAD ref, not the primary path — a caller on a
+# non-`main` repo should get a measurement, not exit 4 and a Reviewer told to carry on
+# without measuring anything.
 if [ -z "$base" ]; then
-  for _c in origin/main main origin/master master; do
-    if git -C "$repo" rev-parse --verify --quiet "$_c" >/dev/null 2>&1; then base="$_c"; break; fi
-  done
+  _oh="$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  if [ -n "$_oh" ] && git -C "$repo" rev-parse --verify --quiet "$_oh" >/dev/null 2>&1; then
+    base="$_oh"
+  else
+    for _c in origin/main main origin/master master origin/trunk trunk; do
+      if git -C "$repo" rev-parse --verify --quiet "$_c" >/dev/null 2>&1; then base="$_c"; break; fi
+    done
+  fi
 fi
 [ -n "$base" ] || { printf 'change-size.sh: no base ref found (tried origin/main, main, origin/master, master); pass --base\n' >&2; exit 4; }
 git -C "$repo" rev-parse --verify --quiet "$base" >/dev/null 2>&1 \
@@ -130,7 +141,29 @@ GEN_RE='(^|/)(vendor|node_modules|dist|build)/|\.lock$|(^|/)(package-lock\.json|
 for _p in $(_extra test_paths      || true); do TEST_RE="$TEST_RE|$_p"; done
 for _p in $(_extra generated_paths || true); do GEN_RE="$GEN_RE|$_p";  done
 
-stats="$(git -C "$repo" diff --numstat "$mb"...HEAD 2>/dev/null || true)"
+# Measure the WORKING TREE against the merge base, not `"$mb"...HEAD`. The default
+# in-session `agents/builder.md` has no commit step: it edits, tests, and hands the feature
+# to the Reviewer, so at the moment this check runs the implementation is routinely staged or
+# unstaged. A `...HEAD` diff would omit the entire feature and cheerfully report tier `ok`
+# with zero production lines — the check reporting green on precisely the branch it exists to
+# measure. `git diff <commit>` covers committed + staged + unstaged with no double counting
+# (and equals `<commit>...HEAD` exactly when the tree is clean, since $mb IS the merge base).
+stats="$(git -C "$repo" diff --numstat "$mb" 2>/dev/null || true)"
+
+# Untracked files are invisible to `git diff` at any range, and a new feature is mostly new
+# FILES — the single largest thing this check could miss. Count their lines directly and
+# append them in the same numstat shape. `--exclude-standard` honours .gitignore, so build
+# output and the harness's own scratch stay out.
+_untracked="$(git -C "$repo" ls-files --others --exclude-standard 2>/dev/null || true)"
+if [ -n "$_untracked" ]; then
+  _extra_stats="$(printf '%s\n' "$_untracked" | while IFS= read -r _f; do
+      [ -n "$_f" ] || continue
+      [ -f "$repo/$_f" ] || continue
+      printf '%s\t0\t%s\n' "$(wc -l < "$repo/$_f" | tr -d ' ')" "$_f"
+    done)"
+  [ -z "$_extra_stats" ] || stats="$stats
+$_extra_stats"
+fi
 [ -n "$stats" ] || stats=""
 
 # Passed through the ENVIRONMENT, not `awk -v`. An `-v` assignment runs the value through

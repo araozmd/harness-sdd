@@ -133,8 +133,14 @@ forbids it — expected: dispatch reports completion only"). Write this feedback
 Before you approve, run the advisory size check on the branch you are approving:
 
 ```sh
-sh "$HARNESS_DIR/tools/change-size.sh" --base origin/main
+sh "$HARNESS_DIR/tools/change-size.sh"        # omit --base: the tool resolves the default branch
 ```
+
+**Do not hard-code `--base origin/main`.** On a repo whose default branch is not `main`, or a
+clone with no `origin/main` ref, that exits `4` and you are told to carry on without measuring
+anything — the check silently disappears on exactly the repos nobody tested it on. Left to
+itself the tool reads `origin/HEAD` and falls back through the usual names. Pass `--base` only
+when you deliberately want a different comparison point (a stacked increment's parent, say).
 
 It measures **production** additions and files against the `change_size:` budget
 (`advise_lines` / `escalate_lines` / `advise_files` / `escalate_files`), reports the tier,

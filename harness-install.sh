@@ -3283,9 +3283,14 @@ sh .harness/tools/pr-stack-guard.sh evaluate "$round_dir/base.json" "$round_dir/
 
 | Exit | Meaning | Next |
 |---|---|---|
-| `0` | base is the default branch, or no open PR owns it | merge as normal |
-| `6` | **stacked**: the base is another OPEN PR's head | do **not** merge. Report `waiting on parent PR #N` and hand back — this is a normal state in a stack, **not** `needs-human` and **not** a failure |
+| `0` | the base **is** the default branch | merge as normal |
+| `6` | **not safe yet** — either the base is another OPEN PR's head (`merge the parent first`), or it is a non-default branch that no open PR owns, meaning the child has **not been retargeted** | do **not** merge. Report what it is waiting on and hand back — a normal state in a stack, **not** `needs-human` and **not** a failure |
 | `4` | base unreadable | do not merge; a base you could not read is not the default branch |
+
+Exit `0` is **only** the default branch. A non-default base that nobody owns is *not* proof the
+parent landed safely: the parent may have merged before GitHub retargeted the child, or merged
+without deleting its branch at all. Merging there puts the child's commits into an
+already-merged branch — they never reach the default branch, and the loop reports success.
 
 Exit `6` is its own code precisely so the loop does not label a healthy child PR
 `needs-human` on every round while its parent is still in review.
