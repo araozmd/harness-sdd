@@ -3270,7 +3270,13 @@ an open PR". So ask, every time, before any merge:
 
 ```bash
 gh pr view "$pr_number" --json baseRefName > "$round_dir/base.json"
-gh pr list --state open --json number,headRefName > "$round_dir/open-prs.json"
+# `gh pr list` defaults to --limit 30. On a busy repo the parent can fall off that page,
+# the guard reads the truncated list as "no parent exists", and a child merges ahead of
+# its still-open parent. Query for the base branch DIRECTLY (--head) so the answer cannot
+# be paged out, and keep a high --limit as a second belt.
+base_ref=$(jq -r '.baseRefName // ""' "$round_dir/base.json")
+gh pr list --state open --head "$base_ref" --limit 100 --json number,headRefName \
+  > "$round_dir/open-prs.json"
 sh .harness/tools/pr-stack-guard.sh evaluate "$round_dir/base.json" "$round_dir/open-prs.json" \
   --default-branch "$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')"
 ```

@@ -66,6 +66,23 @@ _get() { printf '%s' "$out" | sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p"; }
 [ "$(_get total_lines)" = "1450" ]    || fail "R1: total_lines=$(_get total_lines), expected 1450"
 pass "R1 classification: production excludes tests, docs and generated files"
 
+# ── R1b: literal-dot escapes in the classifiers survive into awk ─────────────────────────
+# `awk -v re='...\.'` runs the value through awk's string-escape decoding, so `\.` arrives as
+# a bare `.` — a wildcard. `src/foo-testXjs` then matches the TEST classifier and vanishes from
+# the production budget, understating the tier. Passing the regexes via ENVIRON avoids the
+# decoding. This fixture has no dot before the extension precisely so it can only match if the
+# escape was eaten.
+# Its OWN repo: adding this file to $R would shift every downstream fixture's expected
+# counts, which is how a regression test quietly becomes a maintenance tax on unrelated ones.
+RB="$T/repo-esc"; mkrepo "$RB"
+git -C "$RB" checkout -q -b feature
+mkdir -p "$RB/src"
+n_lines 25 > "$RB/src/foo-testXjs"
+git -C "$RB" add -A && git -C "$RB" commit -qm "a production file a wildcard would swallow"
+[ "$("$TOOL" --repo "$RB" --base main --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')" = "25" ] \
+  || fail "R1b: src/foo-testXjs was not counted as production — a literal-dot escape was decoded away, so the classifier matched on a wildcard"
+pass "R1b classifier escapes survive: a dotless near-miss filename stays in the production budget"
+
 # ── R2: tiers come from config, and the tool NEVER blocks ────────────────────────────────
 # 50 production lines against a tiny budget must reach every tier, and exit 0 every time.
 mkdir -p "$R/.harness"

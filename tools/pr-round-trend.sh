@@ -58,11 +58,27 @@ command -v jq >/dev/null 2>&1 || { printf 'pr-round-trend.sh: jq is required (sa
 # Only rounds with a READABLE blocking.json count. A round that aborted before classifying
 # (unreadable head oid, watcher timeout) has no finding count — treating its absence as 0
 # would fake a convergence that never happened.
+#
+# Sort by the NUMERIC suffix, not by the glob. A shell glob expands lexicographically, so at
+# ten or more rounds `round-*/` yields round-1, round-10, round-11, round-12, round-2, … and
+# the last-N window would trend rounds 7–9 while calling them the latest. That is not a
+# cosmetic ordering bug: on a twelve-round PR — the exact case this tool exists for — it can
+# invert the verdict and tell the human to keep reviewing.
 series=""; rounds=""; n_rounds=0
+# Collect the suffixes first, then `sort -n`. The collection loop stays OUTSIDE a command
+# substitution on purpose: an unparenthesised `case` pattern inside `$( … )` closes the
+# substitution early in some shells, which is a parse error rather than a wrong answer.
+_nums=""
 for d in "$cache"/round-*/; do
   [ -d "$d" ] || continue
-  _n="$(basename "$d" | sed 's/^round-//')"
+  _b="${d%/}"; _b="${_b##*/}"; _n="${_b#round-}"
   case "$_n" in ''|*[!0-9]*) continue ;; esac
+  _nums="$_nums$_n
+"
+done
+_ordered="$(printf '%s' "$_nums" | sort -n)"
+for _n in $_ordered; do
+  d="$cache/round-$_n"
   [ -f "$d/blocking.json" ] || continue
   _c="$(jq 'length' "$d/blocking.json" 2>/dev/null || true)"
   case "${_c:-}" in ''|*[!0-9]*) continue ;; esac

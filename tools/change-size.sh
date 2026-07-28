@@ -133,7 +133,14 @@ for _p in $(_extra generated_paths || true); do GEN_RE="$GEN_RE|$_p";  done
 stats="$(git -C "$repo" diff --numstat "$mb"...HEAD 2>/dev/null || true)"
 [ -n "$stats" ] || stats=""
 
-eval "$(printf '%s\n' "$stats" | awk -F'\t' -v tre="$TEST_RE" -v dre="$DOC_RE" -v gre="$GEN_RE" '
+# Passed through the ENVIRONMENT, not `awk -v`. An `-v` assignment runs the value through
+# awk's string-escape decoding, so `\.` arrives as a bare `.` — a wildcard — and gawk even
+# warns about it. The literal separators would silently become "any character", so a
+# production file named `src/foo-testXjs` would match the TEST classifier and drop out of the
+# production budget, understating the tier. ENVIRON does no such decoding.
+export CS_TEST_RE="$TEST_RE" CS_DOC_RE="$DOC_RE" CS_GEN_RE="$GEN_RE"
+eval "$(printf '%s\n' "$stats" | awk -F'\t' '
+  BEGIN { tre = ENVIRON["CS_TEST_RE"]; dre = ENVIRON["CS_DOC_RE"]; gre = ENVIRON["CS_GEN_RE"] }
   $1 == "-" { next }                                   # binary file: no line count
   {
     n = $1 + 0; f = $3
@@ -156,7 +163,8 @@ if [ "$prod" -gt "$escalate_lines" ] || [ "$prod_files" -gt "$escalate_files" ];
 
 # Concentration: WHERE the lines are. The actionable question at this point is "where do I
 # cut", not "how big is it" — and review risk is not uniform across a diff.
-top="$(printf '%s\n' "$stats" | awk -F'\t' -v tre="$TEST_RE" -v dre="$DOC_RE" -v gre="$GEN_RE" '
+top="$(printf '%s\n' "$stats" | awk -F'\t' '
+  BEGIN { tre = ENVIRON["CS_TEST_RE"]; dre = ENVIRON["CS_DOC_RE"]; gre = ENVIRON["CS_GEN_RE"] }
   $1 == "-" { next }
   { f = $3; if (f ~ gre || f ~ tre || f ~ dre) next; printf "%d\t%s\n", $1, f }' | sort -rn | head -5)"
 

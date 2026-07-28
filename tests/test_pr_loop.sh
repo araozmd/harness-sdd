@@ -1777,6 +1777,16 @@ test_round_trend_verdicts() {
   [ "$(verdict_of "$_a")" = "non-converging" ] \
     || fail "E21-F03: an aborted round without blocking.json was counted as a zero finding round"
 
+  # 12-round ordering. A shell glob is lexicographic, so round-10..12 sort BEFORE round-2 and
+  # the last-3 window would trend rounds 7-9 while calling them the latest. Here rounds 1-9
+  # are flat and 10-12 decay to zero: with the numeric sort the verdict is `converging`; with
+  # the glob order it inverts and tells the human to keep reviewing the wrong evidence.
+  _o="$T/trend-order"; mkdir -p "$_o"; mk_rounds "$_o" 1 3 1 2 1 3 1 2 2 1 1 0
+  [ "$(verdict_of "$_o")" = "converging" ] \
+    || fail "E21-F03: 12 rounds ending 1,1,0 read as $(verdict_of "$_o") — round dirs are not sorted numerically"
+  sh "$SRC/tools/pr-round-trend.sh" --cache "$_o" | grep -q 'round *1 *2 *3 *4 *5 *6 *7 *8 *9 *10 *11 *12' \
+    || fail "E21-F03: the printed round series is not in numeric order"
+
   # Advisory: exit 0 at every verdict, including the one that says split.
   sh "$SRC/tools/pr-round-trend.sh" --cache "$_f" >/dev/null \
     || fail "E21-F03: the tool exited non-zero on a non-converging verdict — it must never block"
@@ -1843,8 +1853,13 @@ test_stack_guard_verdicts() {
   [ "$_rc" = "6" ] \
     || fail "E21-F04: a child whose base is an OPEN parent PR exited $_rc, expected 6 (would have merged out of order)"
 
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_d/base-stacked.json" "$_d/open-none.json" >/dev/null 2>&1 \
-    || fail "E21-F04: a non-default base with no open PR owning it must be safe to merge (parent already landed)"
+  # A non-default base that NO open PR owns is not proof of safety: the parent may have
+  # merged without GitHub having retargeted the child yet (or without deleting its branch at
+  # all), in which case merging lands the child in an already-merged branch and its commits
+  # never reach the default branch — while the loop reports success. Must keep waiting.
+  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_d/base-stacked.json" "$_d/open-none.json" >/dev/null 2>&1 && _rc=0 || _rc=$?
+  [ "$_rc" = "6" ] \
+    || fail "E21-F04: a non-default base with no open PR owning it exited $_rc, expected 6 (un-retargeted child would merge into a dead branch)"
 
   # Fail CLOSED: a base we could not read is NOT the default branch. Treating it as one is
   # exactly how a guard meant to prevent out-of-order merges permits one.
