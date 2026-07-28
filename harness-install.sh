@@ -1107,7 +1107,7 @@ tui_select() {
 # used to compute inline — the resolved set for every pre-existing code path is identical
 # (R22). It is now the SINGLE source of that answer, for the interactive pre-check baseline
 # and for host_fallback_set's R14 arm, so no second copy of "what does this target carry?"
-# can drift from it (R26).
+# can diverge from it (R26).
 #
 # This helper answers ONLY "what selection does this target carry?" — it deliberately does
 # NOT decide whether the target is an existing install. The spec defines that by the VERSION
