@@ -1109,11 +1109,14 @@ tui_select() {
 # pre-check baseline, the `host`-undetected fallback, and `--print-agents`'s `baseline=`
 # line — so the diagnostic can never disagree with what the installer actually does (R26).
 #
-# The R13/R14 asymmetry falls out of this ONE expression, which is why it is one function:
-# a target with NO existing install has no persisted file ⇒ ALL, byte-identical to today's
-# no-override/no-TTY default (R13); a target that HAS one ⇒ exactly its persisted set, and
-# a legacy pre-E08 install that persisted none ⇒ ALL (R14). So an undetected `host` run
-# never widens (re-stamping four front-ends onto a claude-only target) nor narrows.
+# This helper answers ONLY "what selection does this target carry?" — it deliberately does
+# NOT decide whether the target is an existing install. The spec defines that by the VERSION
+# STAMP (`.harness/.harness-version`), not by the presence of `.harness/.agents`, so the
+# R13/R14 branch is taken by the `host`-undetected caller in resolve_agents, which consults
+# the stamp first and only then asks this helper for the persisted shape (R14). Keeping the
+# stamp test out of here is what preserves R22: the interactive pre-check baseline and
+# `--print-agents`'s `baseline=` line remain the persisted set when present and ALL
+# otherwise, exactly as before this feature.
 precheck_baseline() {
   _pb_persisted="$1/.harness/.agents"
   if [ -f "$_pb_persisted" ]; then
@@ -1183,8 +1186,23 @@ resolve_agents() {
         # Undetected is NORMAL operation, never an error. Fall back to this target's
         # current shape so the run can only ever preserve it (R13/R14), and say WHICH
         # fallback applied (R25) — the two cases must be distinguishable in the text.
-        SELECTED="$(precheck_baseline "$_t")"
-        if [ -f "$_t/.harness/.agents" ]; then
+        #
+        # "Existing install" is the VERSION STAMP, per the spec's own definition — NOT the
+        # presence of .harness/.agents. A fresh target that happens to carry an orphan
+        # .agents (copied or half-restored metadata) is not an install, so R13 applies and
+        # the run selects ALL; consulting the persisted file there would silently omit
+        # front-ends the target never opted out of.
+        _hb_kept=0
+        if [ -f "$_t/.harness/.harness-version" ]; then
+          # R14 — existing install: exactly its persisted set, and ALL when a legacy
+          # pre-E08 install persisted none. Never widens, never narrows.
+          SELECTED="$(precheck_baseline "$_t")"
+          if [ -f "$_t/.harness/.agents" ]; then _hb_kept=1; fi
+        else
+          # R13 — no existing install: ALL, byte-identical to the no-override, no-TTY default.
+          SELECTED="$(normalize_keys "$AGENT_KEYS")"
+        fi
+        if [ "$_hb_kept" = 1 ]; then
           info "agents: host undetected — keeping this install's selection ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
         else
           info "agents: host undetected — selecting all front-ends ($(printf '%s' "$SELECTED" | tr '\n' ' '))"

@@ -343,6 +343,34 @@ test_host_undetected_upgrade_keeps_selection() {
   return 0
 }
 
+# ── R13/R14 — "existing install" is the VERSION STAMP, not a stray .agents ────
+# Regression (Codex P2 on PR #70): a fresh target can carry metadata without being an
+# install — copied, or half-restored — and keying the fallback off .harness/.agents alone
+# treated that as an existing install and silently omitted the other front-ends.
+test_host_undetected_orphan_agents_is_all() {
+  _x="$(sandbox orphan)"; _t="$_x/t"; _r="$_x/ref"; mkdir -p "$_t/.harness" "$_r"
+  printf 'claude\n' > "$_t/.harness/.agents"
+  [ -f "$_t/.harness/.harness-version" ] && fail "R13: the orphan fixture must carry no version stamp"
+  hrun "$_x" -- --agents=host "$_t" >/dev/null 2>&1 \
+    || fail "R13: undetected --agents=host on orphan metadata exited non-zero"
+  hrun "$_x" -- "$_r" >/dev/null 2>&1 || fail "R13: reference install failed"
+  [ "$(command cat "$_t/.harness/.agents")" = "$(command cat "$_r/.harness/.agents")" ] \
+    || fail "R13: an orphan .harness/.agents narrowed a target with no existing install ($(tr '\n' ' ' <"$_t/.harness/.agents"))"
+  for _f in GEMINI.md opencode.json; do
+    [ -f "$_t/$_f" ] || fail "R13: the orphan-metadata host install is missing $_f"
+  done
+  # …and the anti-widening property is untouched: WITH the stamp, the same shape is kept.
+  _s="$_x/stamped"; mkdir -p "$_s"
+  hrun "$_x" -- --agents=claude "$_s" >/dev/null 2>&1 || fail "R14: stamped setup install failed"
+  [ -f "$_s/.harness/.harness-version" ] || fail "R14: the setup install left no version stamp"
+  hrun "$_x" -- --agents=host "$_s" >/dev/null 2>&1 \
+    || fail "R14: undetected --agents=host on a real existing install exited non-zero"
+  [ "$(tr '\n' ' ' <"$_s/.harness/.agents")" = "claude " ] \
+    || fail "R14: an undetected host run WIDENED a real existing install"
+  [ -f "$_s/GEMINI.md" ] && fail "R14: an undetected host run created GEMINI.md on a real install"
+  return 0
+}
+
 # ── R15 — honored via HARNESS_AGENTS too, and on an upgrade ───────────────────
 test_host_mode_env_and_upgrade() {
   _x="$(sandbox envmode)"; _e="$_x/env"; _f="$_x/flag"; mkdir -p "$_e" "$_f"
@@ -618,6 +646,8 @@ test_host_undetected_fresh_is_all
 pass "undetected host on a target with no existing install ⇒ ALL, as today (R13)"
 test_host_undetected_upgrade_keeps_selection
 pass "undetected host on an existing install keeps its selection, never widens (R14)"
+test_host_undetected_orphan_agents_is_all
+pass "an orphan .harness/.agents with no version stamp is not an install ⇒ ALL (R13, R14)"
 test_host_mode_env_and_upgrade
 pass "HARNESS_AGENTS=host matches --agents=host, and repeats cleanly on an upgrade (R15)"
 test_host_mixed_token_rejected
