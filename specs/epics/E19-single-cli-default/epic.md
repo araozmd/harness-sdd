@@ -51,8 +51,8 @@ caller expects.
 ## Features
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| F01 | Host detection + explicit `--agents=host` resolution mode | in-review | true | — |
-| F02 | Fresh-install pre-check baseline = the detected host | pending | true | E19-F01 |
+| F01 | Host detection + explicit `--agents=host` resolution mode | done | true | — |
+| F02 | Fresh-install pre-check baseline = the detected host | done | true | E19-F01 |
 
 ## Notes
 - **`host` is a resolution mode, not a sixth agent key.** It must be accepted by
@@ -70,6 +70,5 @@ caller expects.
   that does not name `host`. F02 spends that mechanism on the actual default, in one branch of
   the single `precheck_baseline` helper F01 extracts. The epic's success criteria are met only
   when **both** have merged.
-- **Flag for the human:** `E20-F01` currently records `depends_on: ["E18-F01", "E19-F01"]`.
-  It is F02 that touches the picker's pre-check region, so the human may want to retarget that
-  dependency to `E19-F02` (or add it). The Architect did not change another epic's board entry.
+- **Resolved:** `E20-F01`'s dependency was retargeted to `E19-F02`, which is the feature
+  that owns the pre-check region E20 extends. Both E20 features have since merged.

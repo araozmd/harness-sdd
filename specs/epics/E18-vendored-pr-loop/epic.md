@@ -55,7 +55,7 @@ step in the harness's own runbook — follows that key.
 ## Features
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| F01 | `/sdd-pr-loop` command + vendored Codex watcher, gated by `pr_loop.enabled` | pending | true | — |
+| F01 | `/sdd-pr-loop` command + vendored Codex watcher, gated by `pr_loop.enabled` | done | true | — |
 
 The Architect may recommend decomposing F01 during specification. The natural seams are
 (a) the command body + watcher + config block, (b) the per-front-end `pr-fixer` agent
