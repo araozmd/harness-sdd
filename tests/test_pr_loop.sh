@@ -1160,6 +1160,56 @@ JSON
   pass "R42b a thread with unread comments is not Codex-only ⇒ needs-human, nothing resolved"
 }
 
+test_body_failed_enumeration_never_merges() {         # R42 (fail-closed enumeration)
+  # An enumeration that ERRORS prints nothing, which is byte-identical to "no unresolved
+  # threads". If the body ignores the exit status and starts from merge_ok=1, a transient
+  # API/auth/pagination failure authorizes a merge over review feedback nobody read.
+  need_body "R42: the body does not test the enumeration's exit status" \
+    'if ! unresolved=$(gh api graphql'
+  need_body "R42: merge_ok no longer starts fail-closed at 0" \
+    'merge_ok=0            # fail closed'
+  need_body "R42: the body does not state that a failed enumeration is not an empty one" \
+    'An enumeration you could not finish is not an empty enumeration.'
+  # Run the body's OWN snippet (extracted verbatim from its fenced block) against a stub
+  # `gh`, so this locks the shipped shell and not a paraphrase of it. Twice, with and
+  # without `set -e`: the guard must not depend on the reader's shell options.
+  _fe="$T/enum"; mkdir -p "$_fe"
+  awk '/^```bash$/                 { buf=""; inblk=1; next }
+       inblk && /^```$/            { if (buf ~ /unresolved=\$\(gh api graphql/) {
+                                       printf "%s", buf; exit } inblk=0; next }
+       inblk                       { buf = buf $0 "\n" }' "$BODY" > "$_fe/snippet.sh"
+  grep -q 'gh api graphql' "$_fe/snippet.sh" \
+    || fail "R42: could not extract the thread-enumeration snippet from the body"
+  cat > "$_fe/harness.sh" <<'SH'
+gh() {
+  printf '%s\n' "$*" >> "$GH_LOG"
+  [ "${GH_MODE:-fail}" = "fail" ] || return 0     # ok: a PR with zero unresolved threads
+  echo "gh: HTTP 502 Bad Gateway" >&2; return 1   # transient enumeration failure
+}
+owner=o; repo=r; pr_number=1
+. "$SNIPPET"
+echo "merge_ok=${merge_ok:-unset}"
+SH
+  for _opt in '' '-e'; do
+    GH_LOG="$_fe/calls" GH_MODE=fail SNIPPET="$_fe/snippet.sh" \
+      sh $_opt -u "$_fe/harness.sh" > "$_fe/out" 2>"$_fe/err" \
+      || fail "R42: the enumeration snippet aborted under 'sh $_opt -u' instead of failing closed"
+    grep -qxF 'merge_ok=0' "$_fe/out" \
+      || fail "R42: a FAILED enumeration authorized the merge under 'sh $_opt -u' ($(cat "$_fe/out"))"
+    grep -q 'resolveReviewThread' "$_fe/calls" \
+      && fail "R42: a failed enumeration still tried to resolve a thread"
+    rm -f "$_fe/calls"
+  done
+  # …and the other side of the distinction: a SUCCESSFUL enumeration returning zero
+  # unresolved threads is clean and still merges, so the guard is not a blanket stop.
+  GH_LOG="$_fe/calls" GH_MODE=empty SNIPPET="$_fe/snippet.sh" \
+    sh -u "$_fe/harness.sh" > "$_fe/out" 2>/dev/null \
+    || fail "R42: the snippet failed on a clean, successful enumeration"
+  grep -qxF 'merge_ok=1' "$_fe/out" \
+    || fail "R42: zero unresolved threads must stay mergeable ($(cat "$_fe/out"))"
+  pass "R42c a review-thread enumeration failure fails closed ⇒ needs-human, nothing merged"
+}
+
 test_body_auto_merge_path() {                         # R43
   need_body "R43: body does not resolve Codex threads via GraphQL" 'resolveReviewThread'
   need_body "R43: body does not merge" 'gh pr merge'
@@ -1444,6 +1494,7 @@ test_body_stall_detection
 test_body_round_branching
 test_body_never_resolves_human_threads
 test_body_truncated_thread_is_not_codex_only
+test_body_failed_enumeration_never_merges
 test_body_auto_merge_path
 test_body_squash_prep_cannot_hang
 test_body_auto_merge_false_stops

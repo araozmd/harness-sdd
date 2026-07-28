@@ -2343,6 +2343,14 @@ Codex-only and takes the same needs-human path as a human reply. (`totalCount` r
 than a nested `pageInfo`, because a second `pageInfo` in the same response is precisely
 what `gh api --paginate` scans when it looks for the next cursor.)
 
+**An enumeration you could not finish is not an empty enumeration.** If the thread query
+itself fails — transient API error, expired auth, a pagination hiccup — `gh` exits non-zero
+having printed nothing, and that empty output is byte-identical to "this PR has no
+unresolved threads". No inspection of the output can tell the two apart, so check the
+command's **exit status** and fail closed: a failed enumeration is a needs-human terminal
+state that resolves nothing and merges nothing. Hence `merge_ok` starts at `0` and is
+raised only on the branch that actually *proved* every unresolved thread Codex-owned.
+
 ```bash
 # Per unresolved thread emit "<allcodex> <id>", where <allcodex> is true only when the
 # thread was read in FULL and EVERY participant is the Codex bot. A human reply on a
@@ -2350,7 +2358,8 @@ what `gh api --paginate` scans when it looks for the next cursor.)
 # fetched here, since an author you never read must never be assumed to be the bot.
 # Both tests run in jq — no shell word-splitting. The bot login is inlined because
 # `gh api --jq` takes no --arg.
-unresolved=$(gh api graphql -f query='
+merge_ok=0            # fail closed: only a COMPLETED, clean enumeration may raise this
+if ! unresolved=$(gh api graphql -f query='
   query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
     repository(owner:$owner,name:$repo){
       pullRequest(number:$pr){
@@ -2365,11 +2374,15 @@ unresolved=$(gh api graphql -f query='
         | ([.comments.nodes[].author.login // ""]
              | all(startswith("chatgpt-codex-connector"))) as $codex
         | "\($whole and $codex) \(.id)"')
-
-merge_ok=1
-if printf '%s\n' "$unresolved" | grep -q '^false '; then
-  merge_ok=0                                                 # → needs-human, resolve NOTHING
+then
+  # Enumeration FAILED: `unresolved` is empty because gh errored, not because the PR is
+  # clean. Testing the status on the `if` itself (rather than after the assignment) reads
+  # the same whether or not the host shell runs with `set -e`.
+  echo "could not enumerate review threads — needs-human, not merging" >&2
+elif printf '%s\n' "$unresolved" | grep -q '^false '; then
+  echo "a thread is non-Codex or was not read in full — needs-human" >&2  # resolve NOTHING
 else
+  merge_ok=1          # enumeration completed; every unresolved thread is provably Codex's
   printf '%s\n' "$unresolved" | while read -r _allcodex tid; do
     [ -z "$tid" ] && continue
     gh api graphql -f query='
