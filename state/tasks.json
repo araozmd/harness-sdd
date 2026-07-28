@@ -470,13 +470,13 @@
     {
       "id": "E20",
       "title": "Installer: workflow toggles beyond front-end selection",
-      "status": "pending",
+      "status": "in-progress",
       "owner": "araozmd",
       "features": [
         {
           "id": "E20-F01",
           "title": "execution.builder.backend prompt in the installer picker",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
