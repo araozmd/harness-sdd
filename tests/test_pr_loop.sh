@@ -1082,6 +1082,93 @@ test_body_classification_rules() {                    # R39
   pass "R39 body classifies from all three sources, badge-aware, first match wins, defaults P2"
 }
 
+test_body_unreadable_head_fails_closed() {            # R39 (fail-closed head oid)
+  # `pr.json` missing or truncated makes jq exit non-zero with empty output; a `pr.json`
+  # with no `headRefOid` makes `jq -r` print `null` and exit 0. Either way the freshness
+  # filter matches NOTHING, so fresh-comments.json — hence blocking.json — comes out `[]`,
+  # which step 6 reads as "zero blocking findings ⇒ all gates green ⇒ merge".
+  need_body "R39: the body does not test the head-oid read's exit status" \
+    'if ! head=$(jq -r'
+  need_body "R39: the body does not guard the head-oid VALUE as well as the status" \
+    '|| [ -z "$head" ]; then'
+  need_body "R39: head_ok no longer starts fail-closed at 0" \
+    'head_ok=0            # fail closed'
+  need_body "R39: the body does not state that an unreadable head is not a clean round" \
+    'A head oid you could not read is not a head oid.'
+  if ! have_jq; then
+    skip "test_body_unreadable_head_fails_closed classifier (jq not installed)"
+    return 0
+  fi
+  # Run the body's OWN snippet (extracted verbatim from its fenced block), so this locks
+  # the shipped shell and not a paraphrase of it, under both `sh -u` and `sh -e -u`.
+  _hd="$T/headoid"; mkdir -p "$_hd"
+  awk '/^```bash$/                 { buf=""; inblk=1; next }
+       inblk && /^```$/            { if (buf ~ /head_ok=0/) {
+                                       printf "%s", buf; exit } inblk=0; next }
+       inblk                       { buf = buf $0 "\n" }' "$BODY" > "$_hd/snippet.sh"
+  grep -q 'headRefOid' "$_hd/snippet.sh" \
+    || fail "R39: could not extract the freshness-filter snippet from the body"
+  cat > "$_hd/harness.sh" <<'SH'
+. "$SNIPPET"
+printf 'head_ok=%s\n' "${head_ok:-unset}"
+if [ -f "$round_dir/fresh-comments.json" ]; then
+  printf 'fresh=%s\n' "$(tr -d ' \n' < "$round_dir/fresh-comments.json")"
+else
+  printf 'fresh=ABSENT\n'
+fi
+SH
+  # One genuinely fresh P1, plus the two the freshness rule must keep dropping: a stale
+  # thread GitHub re-anchored to head, and a comment filed on an older commit.
+  cat > "$_hd/findings.json" <<'JSON'
+[{"id":1,"commit_id":"deadbeef","created_at":"2026-07-02T00:00:00Z","body":"![P1 Badge](u) boom"},
+ {"id":2,"commit_id":"deadbeef","created_at":"2026-06-01T00:00:00Z","body":"P1 stale, re-anchored"},
+ {"id":3,"commit_id":"c0ffee00","created_at":"2026-07-02T00:00:00Z","body":"P1 on an older commit"}]
+JSON
+  # _mk_head_round <dir> <pr.json contents, or @none> — plus a stale fresh-comments.json from an
+  # earlier poll, which a failed read must clear rather than hand on as "zero findings".
+  _mk_head_round() {
+    rm -rf "$1"; mkdir -p "$1"
+    printf '2026-07-01T00:00:00Z\n' > "$1/trigger-ts.txt"
+    cp "$_hd/findings.json" "$1/review-comments.json"
+    printf '[]\n' > "$1/fresh-comments.json"
+    [ "$2" = '@none' ] || printf '%s' "$2" > "$1/pr.json"
+  }
+  for _c in missing truncated nokey nullkey; do
+    case "$_c" in
+      missing)   _pr='@none' ;;                          # watcher never wrote it
+      truncated) _pr='{"headRefOid":"deadbe' ;;          # half-written / corrupt
+      nokey)     _pr='{"reviews":[],"comments":[]}' ;;   # parses, no headRefOid
+      nullkey)   _pr='{"headRefOid":null}' ;;            # jq -r prints "null", exits 0
+    esac
+    for _opt in '' '-e'; do
+      _mk_head_round "$_hd/r" "$_pr"
+      SNIPPET="$_hd/snippet.sh" round_dir="$_hd/r" \
+        sh $_opt -u "$_hd/harness.sh" > "$_hd/out" 2>"$_hd/err" \
+        || fail "R39: the snippet aborted under 'sh $_opt -u' on a $_c pr.json instead of failing closed"
+      grep -qxF 'head_ok=0' "$_hd/out" \
+        || fail "R39: a $_c pr.json passed as a readable head under 'sh $_opt -u' ($(cat "$_hd/out"))"
+      grep -qxF 'fresh=ABSENT' "$_hd/out" \
+        || fail "R39: a $_c pr.json still produced a fresh-comments.json ($(cat "$_hd/out")) — an empty one reads as a merge"
+    done
+  done
+  # …and both sides of the distinction on a head oid that WAS read: zero fresh findings
+  # must still read as a genuine zero, and a fresh finding must survive intact.
+  _mk_head_round "$_hd/r" '{"headRefOid":"deadbeef"}'
+  SNIPPET="$_hd/snippet.sh" round_dir="$_hd/r" sh -u "$_hd/harness.sh" > "$_hd/out" 2>/dev/null \
+    || fail "R39: the snippet failed on a valid pr.json"
+  grep -qxF 'head_ok=1' "$_hd/out" || fail "R39: a readable head was rejected ($(cat "$_hd/out"))"
+  grep -qF '"id":1' "$_hd/out"  || fail "R39: the fresh head finding was dropped ($(cat "$_hd/out"))"
+  grep -qF '"id":2' "$_hd/out"  && fail "R39: a stale re-anchored thread leaked back in"
+  grep -qF '"id":3' "$_hd/out"  && fail "R39: a comment filed on an older commit leaked in"
+  _mk_head_round "$_hd/r" '{"headRefOid":"feedface"}'          # head nobody filed against
+  SNIPPET="$_hd/snippet.sh" round_dir="$_hd/r" sh -u "$_hd/harness.sh" > "$_hd/out" 2>/dev/null \
+    || fail "R39: the snippet failed on a valid pr.json with zero fresh findings"
+  grep -qxF 'head_ok=1' "$_hd/out" || fail "R39: a readable head with zero findings was rejected"
+  grep -qxF 'fresh=[]' "$_hd/out" \
+    || fail "R39: zero fresh findings must stay readable as zero ($(cat "$_hd/out"))"
+  pass "R39b an unreadable/headless pr.json fails closed ⇒ no empty blocking.json authorizes a merge"
+}
+
 test_body_stall_detection() {                         # R40
   need_body "R40: body has no stall-detection step" 'Stall detection'
   need_body "R40: body does not compare against the previous round" 'round-<n-1>/blocking.json'
@@ -1490,6 +1577,7 @@ test_body_preflight_before_trigger
 test_body_trigger_id_from_url
 test_body_background_watcher_and_exit_branching
 test_body_classification_rules
+test_body_unreadable_head_fails_closed
 test_body_stall_detection
 test_body_round_branching
 test_body_never_resolves_human_threads

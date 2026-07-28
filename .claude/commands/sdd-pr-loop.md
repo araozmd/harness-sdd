@@ -164,15 +164,40 @@ re-anchored to head slips back into `blocking.json` and defeats the guard. The w
 persists the anchor to `trigger-ts.txt`; apply it when reading the unfiltered
 `review-comments.json`:
 
+**A head oid you could not read is not a head oid.** A `pr.json` that is missing or
+truncated makes `jq` exit non-zero with empty output; a `pr.json` that parses but carries
+no `headRefOid` makes `jq -r` print `null` and exit **0**. Either way `$head` is not the
+head commit, every comment fails `commit_id == $h`, and `fresh-comments.json` — hence
+`blocking.json` — comes out `[]`, which step 6 reads as "zero blocking findings ⇒ all
+gates green ⇒ merge". So guard the **value** as well as the exit status and fail closed:
+an unreadable head aborts the round as `needs-human`, it is not a clean round. (`since`
+needs no such guard — an empty `since` disables the freshness filter and admits *more*
+findings, which errs toward review rather than toward the merge.)
+
 ```bash
-since=$(cat "$round_dir/trigger-ts.txt" 2>/dev/null)
-head=$(jq -r '.headRefOid' "$round_dir/pr.json")
-jq --arg h "$head" --arg since "$since" '
-  [ .[] | select((.commit_id // "") == $h)
-        | select($since == "" or ((.created_at // "") >= $since)) ]' \
-  "$round_dir/review-comments.json" > "$round_dir/fresh-comments.json"
+since=$(cat "$round_dir/trigger-ts.txt" 2>/dev/null)  # empty ⇒ filter off ⇒ admits MORE
+head_ok=0            # fail closed: only a head oid we actually READ may filter findings
+if ! head=$(jq -r '.headRefOid // ""' "$round_dir/pr.json") || [ -z "$head" ]; then
+  # Head oid UNKNOWN: pr.json missing, truncated, or without a headRefOid. Filtering on ""
+  # would match nothing and hand the gate an empty blocking.json. Testing the status on the
+  # `if` itself reads the same whether or not the host shell runs with `set -e`, and
+  # `[ -z "$head" ]` catches the absent/null key that `jq -r` reports with exit status 0.
+  rm -f "$round_dir/fresh-comments.json"   # never leave a previous round's file standing
+  echo "could not read headRefOid from pr.json — needs-human, not merging" >&2
+else
+  head_ok=1          # the filter below is anchored to a head oid that was really read
+  jq --arg h "$head" --arg since "$since" '
+    [ .[] | select((.commit_id // "") == $h)
+          | select($since == "" or ((.created_at // "") >= $since)) ]' \
+    "$round_dir/review-comments.json" > "$round_dir/fresh-comments.json"
+fi
 # classify severities from fresh-comments.json (not the raw review-comments.json)
 ```
+
+With `head_ok=0` there is no `fresh-comments.json` to classify and therefore no
+`blocking.json`: take the `needs-human` terminal state of step 5's cap row (label, hand
+over, return failure). Only `head_ok=1` with an empty `blocking.json` means "zero fresh
+blocking findings".
 
 To re-check the round files offline at any point (no `gh`, no network), run
 `sh tools/wait-for-codex.sh evaluate "$round_dir"` — exit `0` findings,
