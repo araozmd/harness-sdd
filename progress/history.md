@@ -170,3 +170,6 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 2026-07-29T16:27:58Z - E21-F04 pending -> spec-ready (Architect completed specs)
 2026-07-29T17:03:16Z - E21-F04 spec-ready -> in-progress (Human approved)
 2026-07-29T18:45:00Z - OpenCode /sdd-fix-parallel opt-in + model helper — installer skips /sdd-fix-parallel for OpenCode by default; adds /sdd-test-concurrency probe and --with-opencode-parallel flag; fixes remove_owned set -e regression on macOS sh; adds tools/opencode-model-helper.sh with heuristic tier pins; updates docs/manifest; VERSION 0.47.0. Relevant suites green.
+2026-07-29T21:00:26Z | orchestrator | E21-F04 | pending → architect (re-spec after withdrawal in PR #78): spawning Architect with inbox brief + existing spec + epic context
+2026-07-29T21:06:28Z | architect | E21-F04 | pending → spec-ready (re-spec after withdrawal: 9 R-ids, stacking framed as incremental review only, ADRs touched: none, Doc-critic clean) — PAUSED at human gate
+2026-07-29T21:21:33Z | orchestrator | E21-F04 | spec-ready → in-progress (human approved, gate latency 905s) — spawning Builder (round 1)
