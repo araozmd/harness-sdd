@@ -4,6 +4,27 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.47.0] — 2026-07-29
+
+### Added — ✨ OpenCode concurrency probe + model helper (E22-F01)
+
+- **`/sdd-test-concurrency`** command is now installed for the OpenCode front-end. It
+  spawns two trivial subagents, measures whether OpenCode executes them concurrently, and
+  writes a durable marker (`.harness/.opencode-parallel`: `supported` or `sequential`).
+- **`--with-opencode-parallel=true|false`** installer flag overrides the marker.
+- **`tools/opencode-model-helper.sh`** lists the models OpenCode sees, maps them to the
+  harness tiers (`reasoning`/`standard`/`cheap`) by name heuristic, and emits ready-to-paste
+  `pin.opencode.*` YAML. Pass `--apply` to append missing pins to `harness.config.yaml`
+  without overwriting existing values.
+
+### Changed — 📝 `/sdd-fix-parallel` is opt-in for OpenCode
+
+`/sdd-fix-parallel` requires native concurrent sub-agent delegation. On OpenCode the
+installer now reads the marker written by `/sdd-test-concurrency` and stamps the command
+**only** when the marker says `supported` or when `--with-opencode-parallel=true` is passed.
+The command is omitted by default on a fresh OpenCode install. Use serial `/sdd-fix` if
+concurrency is not available.
+
 ## [0.46.3] — 2026-07-29
 
 ### Fixed — 🐛 change-size path handling, symlinks, handoff coverage and trend caching (E99-F07)
