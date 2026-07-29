@@ -329,7 +329,7 @@ pass "R7e tracked C-quoted / tab-bearing / renamed paths are classified on their
 printf '%s' "$_jt" | grep -q "$_TAB" \
   && fail "R7f: --format json emitted a RAW tab; a control character inside a JSON string is invalid and no parser will accept it" || :
 printf '%s' "$_jt" | grep -qF 'src/tab\tprod.js' \
-  || fail "R7f: the tab-bearing pathname is not present as an escaped \\t in the JSON — it was truncated at the tab, or dropped"
+  || fail "R7f: the tab-bearing pathname is not present in its escaped backslash-t form in the JSON — it was truncated at the tab, or dropped"
 if command -v jq >/dev/null 2>&1; then
   printf '%s' "$_jt" | jq -e . >/dev/null 2>&1 \
     || fail "R7f: --format json emitted unparseable output for a pathname containing a literal tab"
@@ -433,6 +433,11 @@ printf '%s\n' "$_outside" | grep -qF 'tools/change-size.sh' \
 # umbrella child-PR sub-step is one), so a `$_outside` grep is satisfied no matter what the
 # section says, and the failure message ends up naming a guarantee it cannot detect.
 # `index()` on a heading line, not a regex, so the heading text needs no escaping.
+# Resets on `/^#+ /` — ANY heading level — whereas `_rev_cs` below resets on `^## `. That is not
+# an oversight: this target is a `###` section, so the next `###` sibling ends it, while
+# `_rev_cs`'s target is a `##` section, which may legitimately contain `###` subsections that
+# belong to it. Each extractor stops at the first heading that could not be part of its own
+# section, which is why the two differ.
 export CS_ORCH_SECTION="$_ORCH_SECTION"
 _main_cs="$(awk '
   BEGIN { h = ENVIRON["CS_ORCH_SECTION"] }
@@ -443,6 +448,12 @@ _main_cs="$(awk '
   || fail "R9b: could not extract the '$_ORCH_SECTION' section from orchestrator.md — the heading was renamed or removed, so every assertion below it would pass vacuously"
 printf '%s\n' "$_main_cs" | grep -qF 'tools/change-size.sh' \
   || fail "R9b: the main-path handoff section does not actually invoke tools/change-size.sh — it only talks about it"
+# Deliberately NOT narrowed to a single fixed phrase. "PR body" occurs three times in this
+# section, all three stating the same contract in different words — so a survivor here is
+# evidence the contract is still stated, which is the opposite of B2 (a match in an unrelated
+# part of the file) and B3 (a match in arbitrary English). Pinning one exact sentence would trade
+# a real guarantee for brittleness against legitimate rewording of that same guarantee, in the
+# same section, and lose that distinction. Within-section paraphrase is signal, not noise.
 printf '%s\n' "$_main_cs" | grep -qi 'PR body' \
   || fail "R9b: the main-path handoff does not say to carry the tier into the PR body (E21-F02)"
 printf '%s\n' "$_main_cs" | grep -qi 'never blocks\|advisory' \
@@ -484,18 +495,32 @@ grep -qE "^#+ .*$_ORCH_SECTION" "$_ORCH" \
   || fail "R9b: reviewer.md cites an orchestrator.md section '$_ORCH_SECTION' that has no matching heading"
 pass "R9b the pre-PR change-size handoff fires on the main path, with the fix lane's --repo caveat intact"
 
-# ── R9c: the harness records the rule that four assertions in this feature broke ──────────
-# Four assertions added by E99-F07 passed while the guarantee they named was absent — three of
-# them a whole-file grep over a prose contract. That is a rule gap, not four accidents, so the
-# rule lives in the installed body rather than only in a review thread. Asserted here, beside the
-# assertions that motivated it, because there is no builder-prose suite; move it if one appears.
+# ── R9c: the harness records the rule that five assertions in this feature broke ──────────
+# Five assertions added by E99-F07 passed while the guarantee they named was absent — three of
+# them a whole-file grep over a prose contract, and the fifth was the first version of the LAST
+# assertion in this very block. That is a rule gap, not five accidents, so the rule lives in the
+# installed body rather than only in a review thread. Asserted here, beside the assertions that
+# motivated it, because there is no builder-prose suite; move it if one appears.
 _BUILDER="$ROOT/agents/builder.md"
 grep -qi 'section it names\|grep the SECTION' "$_BUILDER" \
   || fail "R9c: builder.md does not carry the rule that a prose-contract test must grep the SECTION it names, not the whole file"
 grep -qF 'index($0,h)' "$_BUILDER" \
   || fail "R9c: builder.md states the section-scoping rule but gives no extraction recipe — the rule is only followed when it is copy-pasteable"
-grep -qi 'reachable\|other than the one' "$_BUILDER" \
+# The lens itself, matched as DISTINCTIVE FIXED substrings — one per operative clause.
+# The first version of this assertion was `grep -qi 'reachable\|other than the one'`, and it was
+# the fifth instance of the very pattern it guards: those are ordinary English words, so replacing
+# the whole bullet with an unrelated one about dead code left the suite green while the lens was
+# gone from the installed body. Use `-qF` on a phrase only the intended sentence can produce,
+# never `-qi` with alternation over common words. Each clause is asserted separately because
+# deleting any one of them guts the rule a different way: the lens without its question is a
+# slogan, and the question without the mutation step invites reasoning about the answer instead of
+# running it — which is precisely how the abandoned `HARNESS_DIR` tightening got written.
+grep -qF 'expected value being reachable ONE way' "$_BUILDER" \
   || fail "R9c: builder.md does not carry the underlying lens (is this expected value reachable by more than one path?)"
+grep -qF 'path other than the one the failure message names' "$_BUILDER" \
+  || fail "R9c: builder.md names the lens but not the question that operationalises it"
+grep -qF 'the fix in place and confirming the test fails' "$_BUILDER" \
+  || fail "R9c: builder.md poses the question but no longer requires PROVING the answer by mutation — the lens is not reliable as a reasoning exercise"
 pass "R9c builder.md carries the section-scoping rule and the reachable-another-way lens"
 
 echo "All change-size tests passed."

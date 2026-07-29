@@ -45,18 +45,21 @@ Four non-blocking findings deferred at the merge of PR #78, all reproducible.
 - Not in scope, documented inline as unsupported: a filename containing a literal **newline**.
   `-z` framing handles every other special character.
 
-### Added — 📝 `agents/builder.md`: two rules about assertions that pass without proving anything
-Four assertions added while fixing the above passed while the guarantee named in their own
-failure message was absent. That is a rule gap, not four accidents, so the lens now lives in the
-installed body:
+### Changed — 📝 `agents/builder.md`: two rules about assertions that pass without proving anything
+Guidance added to an existing role prompt's `## Principles` — no new capability, hence `Changed`.
+**Five** assertions added while fixing the above passed while the guarantee named in their own
+failure message was absent; the fifth was the guard written to stop the other four. That is a
+rule gap, not five accidents, so the lens now lives in the installed body:
 - **An assertion is only worth its expected value being reachable one way.** Ask of every
   assertion whether the expected value could be produced by any path other than the one the
   failure message names. If it can, the test passes whether or not the guarantee holds and its
   message misleads the next maintainer — worse than no assertion, because it stops anyone looking.
+  Prove the answer by reverting the fix in place; the question is not reliable as a reasoning
+  exercise.
 - **A test asserting a PROSE contract must grep the SECTION it names, not the whole file**, with
   a copy-pasteable `awk` extraction recipe. A whole-file grep is satisfied by any unrelated
   occurrence of the phrase elsewhere in the file — including one the same change just added,
-  which is exactly how three of the four slipped through.
+  which is exactly how three of the five slipped through.
 
 ## [0.46.0] — 2026-07-28
 
