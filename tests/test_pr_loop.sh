@@ -206,6 +206,42 @@ test_edited_copy_left_in_place_and_warns() {          # R6
   pass "R6 edited copies in user-owned namespaces survive, each named in a warning"
 }
 
+test_partial_codex_skill_unit_reclaims_owned_paths() {
+  # Missing companion: the stamp-owned SKILL.md must not remain discoverable.
+  _m="$T/partial-missing"
+  set_gate "$_m" true
+  install_at "$_m" --agents=codex
+  rm -f "$_m/.agents/skills/sdd-pr-loop/agents/openai.yaml"
+  set_gate "$_m" false
+  install_at "$_m" --agents=codex
+  [ -e "$_m/.agents/skills/sdd-pr-loop/SKILL.md" ] \
+    && fail "R5 partial: missing companion stranded a stamp-owned gated SKILL.md"
+  [ -e "$_m/.agents/skills/sdd-pr-loop" ] \
+    && fail "R5 partial: empty gated skill directory was not pruned"
+  [ -e "$_m/.harness/.codex-skills/sdd-pr-loop" ] \
+    && fail "R5 partial: missing-companion gate-off left a stale ownership stamp"
+
+  # Edited companion: reclaim the independently proven SKILL.md, preserve the policy
+  # bytes that ownership cannot prove, and keep only the non-empty directory chain.
+  _e="$T/partial-edited"
+  set_gate "$_e" true
+  install_at "$_e" --agents=codex
+  printf '\n# user policy edit\n' >> "$_e/.agents/skills/sdd-pr-loop/agents/openai.yaml"
+  set_gate "$_e" false
+  install_at "$_e" --agents=codex
+  [ -e "$_e/.agents/skills/sdd-pr-loop/SKILL.md" ] \
+    && fail "R5 partial: edited companion stranded a stamp-owned gated SKILL.md"
+  [ -f "$_e/.agents/skills/sdd-pr-loop/agents/openai.yaml" ] \
+    || fail "R5 partial: edited gated companion metadata was deleted"
+  grep -qF '# user policy edit' "$_e/.agents/skills/sdd-pr-loop/agents/openai.yaml" \
+    || fail "R5 partial: edited gated companion metadata bytes changed"
+  [ -d "$_e/.agents/skills/sdd-pr-loop/agents" ] \
+    || fail "R5 partial: non-empty companion directory was pruned"
+  [ -e "$_e/.harness/.codex-skills/sdd-pr-loop" ] \
+    && fail "R5 partial: edited-companion gate-off left a stale ownership stamp"
+  pass "R5 partial Codex units reclaim proven SKILL.md paths and preserve edited metadata"
+}
+
 test_reclaim_preserves_user_files_and_prunes() {      # R7
   _u="$T/userfiles"
   set_gate "$_u" true
@@ -1753,6 +1789,7 @@ test_gate_off_stamps_nothing
 test_deselect_removes_pr_loop_glue
 test_gate_flip_off_reclaims
 test_edited_copy_left_in_place_and_warns
+test_partial_codex_skill_unit_reclaims_owned_paths
 test_reclaim_preserves_user_files_and_prunes
 test_gate_off_then_on_restores
 test_shared_prompt_survives_another_targets_gate_off

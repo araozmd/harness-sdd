@@ -3808,28 +3808,42 @@ EOF
     return 0
   }
 
-  # reclaim_codex_skills <command-list> — reclaim only two-file skill units whose
-  # live bytes still match both last-written stamps. `.agents/` is shared with
-  # Antigravity and users, so remove named files and use only `rmdir` for pruning.
+  # reclaim_codex_skills <command-list> — reclaim each proven path independently.
+  # A stamp-owned SKILL.md remains removable when its companion is missing/edited.
+  # Conversely, when an edited SKILL.md survives, retain its policy companion so the
+  # still-discoverable mutating workflow does not become implicitly invocable.
   reclaim_codex_skills() {
     _rcs_cmds="$1"; _rcs_gone=""
     for _rcs_cmd in $_rcs_cmds; do
       _rcs_live="$TARGET/.agents/skills/$_rcs_cmd"
       _rcs_stamp="$H/.codex-skills/$_rcs_cmd"
-      _rcs_present=0
-      [ -e "$_rcs_live/SKILL.md" ] && _rcs_present=1
-      [ -e "$_rcs_live/agents/openai.yaml" ] && _rcs_present=1
-      if [ "$_rcs_present" = 1 ] \
-         && [ -f "$_rcs_live/SKILL.md" ] \
-         && [ -f "$_rcs_live/agents/openai.yaml" ] \
-         && [ -f "$_rcs_stamp/SKILL.md" ] \
-         && [ -f "$_rcs_stamp/agents/openai.yaml" ] \
-         && cmp -s "$_rcs_live/SKILL.md" "$_rcs_stamp/SKILL.md" \
-         && cmp -s "$_rcs_live/agents/openai.yaml" "$_rcs_stamp/agents/openai.yaml"; then
-        rm -f "$_rcs_live/SKILL.md" "$_rcs_live/agents/openai.yaml"
-        _rcs_gone="$_rcs_gone .agents/skills/$_rcs_cmd/SKILL.md .agents/skills/$_rcs_cmd/agents/openai.yaml"
-      elif [ "$_rcs_present" = 1 ]; then
-        echo "⚠️  .agents/skills/$_rcs_cmd has no matching two-file last-written stamp (foreign or edited) — left in place" >&2
+      _rcs_skill="$_rcs_live/SKILL.md"
+      _rcs_skill_stamp="$_rcs_stamp/SKILL.md"
+      _rcs_policy="$_rcs_live/agents/openai.yaml"
+      _rcs_policy_stamp="$_rcs_stamp/agents/openai.yaml"
+      _rcs_skill_survives=0
+
+      if [ -e "$_rcs_skill" ]; then
+        if [ -f "$_rcs_skill" ] && [ -f "$_rcs_skill_stamp" ] \
+           && cmp -s "$_rcs_skill" "$_rcs_skill_stamp"; then
+          rm -f "$_rcs_skill"
+          _rcs_gone="$_rcs_gone .agents/skills/$_rcs_cmd/SKILL.md"
+        else
+          _rcs_skill_survives=1
+          echo "⚠️  .agents/skills/$_rcs_cmd/SKILL.md has no matching last-written stamp (foreign or edited) — left in place" >&2
+        fi
+      fi
+
+      if [ -e "$_rcs_policy" ]; then
+        if [ "$_rcs_skill_survives" = 1 ]; then
+          echo "⚠️  .agents/skills/$_rcs_cmd/agents/openai.yaml retained as the explicit-only policy companion of the surviving SKILL.md" >&2
+        elif [ -f "$_rcs_policy" ] && [ -f "$_rcs_policy_stamp" ] \
+             && cmp -s "$_rcs_policy" "$_rcs_policy_stamp"; then
+          rm -f "$_rcs_policy"
+          _rcs_gone="$_rcs_gone .agents/skills/$_rcs_cmd/agents/openai.yaml"
+        else
+          echo "⚠️  .agents/skills/$_rcs_cmd/agents/openai.yaml has no matching last-written stamp (foreign or edited) — left in place" >&2
+        fi
       fi
       rm -f "$_rcs_stamp/SKILL.md" "$_rcs_stamp/agents/openai.yaml"
       rmdir "$_rcs_stamp/agents" 2>/dev/null || true

@@ -1051,6 +1051,31 @@ grep -qx codex "$TCD/.harness/.agents" && fail "R8: codex must be dropped from .
 rm -rf "$TCD"
 pass "codex deselect reclaims pristine project skills and preserves edited/sibling files"
 
+# Partial skill units on Codex deselection: a stamp-owned SKILL.md remains reclaimable
+# when its companion metadata is missing or edited. An edited, unproven companion is
+# preserved individually, and only empty directories are pruned.
+TCDP="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CODEX_HOME="$TCDP/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCDP" >/dev/null \
+  || fail "codex partial-unit deselect setup failed"
+rm -f "$TCDP/.agents/skills/sdd-next/agents/openai.yaml"
+printf '\n# user policy edit\n' >> "$TCDP/.agents/skills/sdd-new/agents/openai.yaml"
+CODEX_HOME="$TCDP/ch" sh "$SRC/harness-install.sh" --agents=claude "$TCDP" >/dev/null \
+  || fail "codex partial-unit deselect failed"
+[ -e "$TCDP/.agents/skills/sdd-next/SKILL.md" ] \
+  && fail "R3 partial: missing companion stranded a stamp-owned SKILL.md on deselect"
+[ -e "$TCDP/.agents/skills/sdd-next" ] \
+  && fail "R3 partial: empty skill directory was not pruned after missing-companion deselect"
+[ -e "$TCDP/.agents/skills/sdd-new/SKILL.md" ] \
+  && fail "R3 partial: edited companion stranded a stamp-owned SKILL.md on deselect"
+[ -f "$TCDP/.agents/skills/sdd-new/agents/openai.yaml" ] \
+  || fail "R3 partial: edited companion metadata was deleted on deselect"
+grep -qF '# user policy edit' "$TCDP/.agents/skills/sdd-new/agents/openai.yaml" \
+  || fail "R3 partial: edited companion metadata bytes changed on deselect"
+[ -e "$TCDP/.harness/.codex-skills" ] \
+  && fail "R3 partial: deselection left stale Codex skill ownership stamps"
+rm -rf "$TCDP"
+pass "Codex deselection reclaims proven paths from partial units and preserves edited metadata"
+
 # codex_no_home_required: the current repository-local surface does not resolve HOME or
 # CODEX_HOME at all, and remains fully functional when both are absent.
 TCH="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"

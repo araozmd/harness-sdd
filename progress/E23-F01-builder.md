@@ -194,3 +194,55 @@ repository-wide Inception fallback concern recorded in round 1 remains out of sc
 - `git diff --check` — exit `0`.
 - Unsafe active-surface claim scan — no stale claim that ungated legacy prompts are
   reclaimed or that Codex still writes the retired global prompt surface.
+
+---
+
+## Review round 3
+
+### Status
+
+DONE_WITH_CONCERNS — the narrow partial-state fix, focused suites, non-Codex byte check,
+environment gate, and static checks are green. The unchanged out-of-scope Inception
+fallback concern from round 1 remains.
+
+### Root cause
+
+`reclaim_codex_skills` required both live paths and both last-written stamps to match
+before deleting either path. If `agents/openai.yaml` was missing or edited, the helper
+left a separately stamp-owned `SKILL.md` discoverable after gate-off or Codex
+deselection.
+
+### RED evidence
+
+- `sh tests/test_install.sh`
+  - Exit: `1`
+  - Expected failure:
+    `FAIL: R3 partial: missing companion stranded a stamp-owned SKILL.md on deselect`
+- `sh tests/test_pr_loop.sh`
+  - Exit: `1`
+  - Expected failure:
+    `FAIL: R5 partial: missing companion stranded a stamp-owned gated SKILL.md`
+- Both suites also include the edited-companion variant. The existing edited-`SKILL.md`
+  case continues to require its explicit-only policy companion to survive.
+
+### Fix
+
+- Reconciliation now proves and reclaims `SKILL.md` and `agents/openai.yaml`
+  individually from their respective last-written stamps.
+- A stamp-owned `SKILL.md` is removed even when companion metadata is missing or edited.
+- Unproven individual paths are preserved.
+- If an edited/foreign `SKILL.md` survives, its policy companion is deliberately retained
+  even when the policy itself matches its stamp, preventing the surviving mutating skill
+  from becoming implicitly invocable.
+- Directory cleanup remains `rmdir`-only.
+
+### Focused GREEN evidence
+
+- `sh tests/test_install.sh` — exit `0`, `All install tests passed.`
+- `sh tests/test_pr_loop.sh` — exit `0`, `All pr-loop tests passed.`
+- The model-agent helper was not changed, so no model-routing behavior was in the patch.
+- Cross-version generation against round-2 commit `5f0bd97` passed byte-for-byte for
+  Claude, OpenCode, Antigravity, and Gemini surfaces.
+- Fresh `./init.sh` — exit `0`, `✅ environment ready — agents may proceed`.
+- `sh -n harness-install.sh tests/test_install.sh tests/test_pr_loop.sh` — exit `0`.
+- `git diff --check` — exit `0`.
