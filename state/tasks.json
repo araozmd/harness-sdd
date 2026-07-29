@@ -387,7 +387,7 @@
         {
           "id": "E99-F04",
           "title": "Decide the locale boundary for repo-owned git hooks in fix-worktree (reference-transaction on teardown/rollback)",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": false,
           "depends_on": [
@@ -398,7 +398,7 @@
         {
           "id": "E99-F05",
           "title": "Scope the pr-loop first-response probe to the current round",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],

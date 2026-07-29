@@ -61,6 +61,60 @@ rule gap, not five accidents, so the lens now lives in the installed body:
   occurrence of the phrase elsewhere in the file — including one the same change just added,
   which is exactly how three of the five slipped through.
 
+## [0.46.2] — 2026-07-29
+
+### Fixed — 🐛 `fix-worktree.sh` runs under the caller's locale; `C` is scoped to the ASCII slug globs (E99-F04)
+- E99-F03 exported `LC_ALL=C` for the whole of `tools/fix-worktree.sh`. Three successive Codex
+  rounds on PR #65 each found that export leaking into code the **target repo** owns: the
+  project init gate (P1, round 2), the `post-checkout` hook and checkout filters fired by
+  `git worktree add` (round 3), and the `reference-transaction` hook fired by `git branch -d`
+  during teardown and `git update-ref -d` during create's rollback (round 4, deferred here).
+- Rounds 2 and 3 were patched surface-by-surface. `reference-transaction` fires on essentially
+  **every** ref update, so continuing that strategy converges on un-pinning the whole script —
+  and no test can prove such an allowlist complete. The default is therefore **inverted**: the
+  helper now runs under the **caller's** locale, and pins `LC_ALL=C` around exactly one region,
+  the bracket-range `case` globs in `validate_key`, restoring the caller's locale on every exit
+  path (including `die`) before any git call or foreign code runs.
+- Every other read in the file was audited per call and left un-pinned: each is either
+  exit-status-only or parses output that is ASCII by construction — object ids, refnames,
+  absolute paths, `worktree list --porcelain` records split on literal ASCII prefixes, and
+  `status --porcelain` tested only for emptiness. None is compared with a range glob.
+- The E99-F03 defect stays fixed: `validate_key` still rejects non-ASCII-lowercase slugs under
+  every locale, and the three previously-closed foreign-code surfaces stay closed — now by
+  construction rather than by per-call escapes, which are removed as dead code.
+- Teardown/rollback **ordering** — the worktree is retired before the branch ref in both paths,
+  but for two *different* reasons, now documented separately. In `do_teardown` git enforces it:
+  `branch -d`/`-D` refuse to delete a branch that is checked out in a worktree. In
+  `rollback_create` git does **not** enforce it — `update-ref -d` has no such guard and will
+  delete the ref out from under the checkout — but deleting the ref first leaves that worktree
+  on an unborn branch, so the non-forced `worktree remove` then refuses and the residual is
+  "registration present, branch absent": the one state `teardown` hard-refuses, which a re-run
+  cannot reconcile. The retained order's worst residual is "registration retired, branch
+  preserved", which a re-run of `teardown` does reconcile. Both diagnostics now name that state
+  and that recovery instead of implying nothing moved.
+
+## [0.46.1] — 2026-07-28
+
+### Fixed — 🐛 the `/sdd-pr-loop` first-response probe is scoped to the current round (E99-F05)
+- `tools/wait-for-codex.sh` arms a first-response probe (`HARNESS_FIRST_RESPONSE`, default
+  180s) whose job is to exit `5` with a named remedy when the Codex GitHub App cannot answer
+  at all — instead of making the caller wait out the full 900s ceiling for a review that can
+  never arrive.
+- `wfc_bot_seen` counted Codex issue comments and reviews with **no freshness filter**, and
+  an earlier round's comments and reviews never leave the PR. So from round 2 on, the probe
+  was disarmed on the very first poll by activity that predated the round's `@codex review`,
+  and a repo whose App had gone away produced a plain timeout (exit `2`) instead of the
+  missing-App diagnostic. Observed live on PR #68, rounds 2–6.
+- Both counts are now filtered by the round's trigger timestamp — the same `trigger-ts.txt`
+  anchor the resolution conditions already use (`created_at` for issue comments, `submittedAt`
+  for reviews). An empty anchor (the no-trigger-id compat path) keeps the filter a no-op.
+- The reaction check is deliberately left **unfiltered**: `reactions.json` is fetched per poll
+  from *this* round's trigger comment id, so a 👀 there is round-scoped by construction and
+  still counts as a first response.
+- No change to the exit-code contract (`0` findings / `1` pending / `2` timeout / `3` clean /
+  `4` usage / `5` no-first-response), the freshness guards, the three clean-signal forms, or
+  the exact-literal bot-login match.
+
 ## [0.46.0] — 2026-07-28
 
 ### Added — ✨ `/sdd-pr-loop` reports whether the review is converging (E21-F03)
