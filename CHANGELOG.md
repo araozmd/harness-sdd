@@ -66,6 +66,12 @@ All notable changes to the harness body are recorded here. Versions follow
 - `agents/reviewer.md` runs it before approving and records the tier and the decision in its
   verdict; `agents/orchestrator.md` runs it before opening the PR and carries the tier into the
   PR body. Documented in `docs/WORKFLOW.md`.
+- Budget correctness: **binary** files now occupy the file budget (git reports `-` for their
+  line counts, and discarding the record meant 30 production images reported
+  `production_files: 0` and tier `ok`), and untracked paths are read **NUL-delimited** because
+  `ls-files` C-quotes a name containing `"`, a backslash or a tab regardless of
+  `core.quotePath` — the encoded text was used as the pathname, so those files vanished from
+  the measurement entirely.
 - Classifier robustness: a configured `test_paths`/`generated_paths` regex containing whitespace
   stays **one** alternative (it was word-split, so `(^|/)integration tests/` became
   `(^|/)integration|tests/` and every production path starting with `integration` silently left

@@ -178,7 +178,14 @@ stats="$(git -C "$repo" -c core.quotePath=false diff --numstat "$mb" 2>/dev/null
 # FILES — the single largest thing this check could miss. Count their lines directly and
 # append them in the same numstat shape. `--exclude-standard` honours .gitignore, so build
 # output and the harness's own scratch stay out.
-_untracked="$(git -C "$repo" -c core.quotePath=false ls-files --others --exclude-standard 2>/dev/null || true)"
+# `-z` (NUL-delimited). `ls-files` C-quotes a path containing `"`, `\`, or a tab even under
+# core.quotePath=false — it returns `a"b.js` as the seven characters `"a\"b.js"`. That encoded
+# text was then used as the pathname, `[ -f ]` failed, and the file was silently skipped: whole
+# untracked Builder output disappearing from the measurement. NUL framing is the only form git
+# never encodes.
+# (Known limit: a filename containing a literal NEWLINE is not supported here — it would still
+# split on the tr below. Every other special character now round-trips.)
+_untracked="$(git -C "$repo" ls-files -z --others --exclude-standard 2>/dev/null | tr '\0' '\n' || true)"
 if [ -n "$_untracked" ]; then
   _extra_stats="$(printf '%s\n' "$_untracked" | while IFS= read -r _f; do
       [ -n "$_f" ] || continue
@@ -207,9 +214,12 @@ eval "$(printf '%s\n' "$stats" | awk -F'\t' '
   # production_files: 1 — and a branch sitting on exactly advise_files/escalate_files gets
   # pushed into the next tier by a file that does not exist.
   NF < 3 { next }
-  $1 == "-" { next }                                   # binary file: no line count
   {
-    n = $1 + 0; f = $3
+    # A binary file reports "-" for both counts. Discarding the record entirely defeated the
+    # FILE budget, which exists precisely to fire independently of lines: a branch adding 30
+    # production images reported production_files: 0 and tier ok. Count the file, contribute
+    # no lines.
+    f = $3; n = ($1 == "-") ? 0 : $1 + 0
     if (f ~ gre)      { g += n; gf++ }
     else if (f ~ tre) { t += n; tf++ }
     else if (f ~ dre) { d += n; df++ }

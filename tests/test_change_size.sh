@@ -109,6 +109,23 @@ cfgw 100000 200000 1 2
   || fail "R3: file budget did not trip on its own (2 production files > advise_files 1), got $(tier_of)"
 pass "R3 file budget trips independently of the line budget"
 
+# ── R3b: BINARY files occupy the file budget ─────────────────────────────────────────────
+# git --numstat reports "-" for both counts on a binary. Discarding the record defeated the
+# very budget that exists to fire independently of lines: 30 production images reported
+# production_files: 0 and tier ok.
+RB2="$T/repo-bin"; mkrepo "$RB2"; git -C "$RB2" checkout -q -b feature
+mkdir -p "$RB2/img"; _i=1
+while [ "$_i" -le 30 ]; do printf '\211PNG\r\n\032\n\000\001\002\003' > "$RB2/img/p$_i.png"; _i=$((_i+1)); done
+git -C "$RB2" add -A && git -C "$RB2" commit -qm binaries
+_jb="$("$TOOL" --repo "$RB2" --base main --format json)"
+[ "$(printf '%s' "$_jb" | sed -n 's/.*"production_files":\([0-9]*\).*/\1/p')" = "30" ] \
+  || fail "R3b: 30 binary production files were not counted toward the file budget"
+[ "$(printf '%s' "$_jb" | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')" = "0" ] \
+  || fail "R3b: binary files contributed phantom LINES; they have no line count"
+[ "$(printf '%s' "$_jb" | sed -n 's/.*"tier":"\([a-z]*\)".*/\1/p')" = "advise" ] \
+  || fail "R3b: 30 files did not trip advise_files (default 25) — the file budget is defeated by binaries"
+pass "R3b binary files occupy the file budget and contribute no lines"
+
 # ── R4: an ABSENT change_size block falls back to the documented defaults ────────────────
 rm -f "$R/.harness/harness.config.yaml"
 out="$("$TOOL" --repo "$R" --base main --format json)"
@@ -226,6 +243,20 @@ git -C "$RN" add -A && git -C "$RN" commit -qm committed
 [ "$("$TOOL" --repo "$RN" --base main --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')" = "1" ] \
   || fail "R7c: committing the unterminated file changed its count — the measurement must not depend on that"
 pass "R7c unterminated last lines count, committed or not"
+
+# ── R7d: an untracked path git would C-quote is still measured ───────────────────────────
+# `ls-files` C-quotes a path containing `"`, a backslash or a tab even under
+# core.quotePath=false, returning `a"b.js` as `"a\"b.js"`. That encoded text was used as the
+# pathname, `[ -f ]` failed, and the file vanished from the measurement — whole untracked
+# Builder output disappearing silently. NUL framing is the only form git never encodes.
+RQ2="$T/repo-uq"; mkrepo "$RQ2"; git -C "$RQ2" checkout -q -b feature
+n_lines 3 > "$RQ2/q\"uote.js"                       # untracked, never added
+_ju="$("$TOOL" --repo "$RQ2" --base main --format json)"
+[ "$(printf '%s' "$_ju" | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')" = "3" ] \
+  || fail "R7d: an untracked filename git C-quotes was skipped entirely by the measurement"
+[ "$(printf '%s' "$_ju" | sed -n 's/.*"production_files":\([0-9]*\).*/\1/p')" = "1" ] \
+  || fail "R7d: the C-quoted untracked file was not counted toward the file budget"
+pass "R7d untracked paths git would C-quote are measured, not skipped"
 
 # ── R8: usage errors are the ONLY non-zero exit, and they measure nothing ────────────────
 if "$TOOL" --repo "$T/definitely-not-a-repo" --base main >/dev/null 2>&1; then

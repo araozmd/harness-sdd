@@ -100,7 +100,7 @@ coordinator-owned bookkeeping branch is shared by sibling workers.
 
 After local Reviewer approval, keep the supplied branch/worktree and create only its dedicated PR
 while the fix remains `in-review`. Before opening it, run
-`sh "$HARNESS_DIR/tools/change-size.sh"` (omit `--base` unless the PR targets something other than the default branch — the tool resolves `origin/HEAD` itself, and a hard-coded `origin/main` exits 4 on a repo whose default differs) and carry the reported tier into the
+`sh "$HARNESS_DIR/tools/change-size.sh" --repo "<the supplied worktree>"` — **pass `--repo` explicitly here.** `HARNESS_DIR` locates the *script*, not the tree under measurement, and `--repo` defaults to the current directory; a worker spawned from the canonical primary would otherwise measure the coordinator's bookkeeping branch instead of the fix, and report `ok` for a branch it never looked at. (Omit `--base` unless the PR targets something other than the default branch — the tool resolves `origin/HEAD` itself, and a hard-coded `origin/main` exits 4 on a repo whose default differs.) and carry the reported tier into the
 PR body (E21-F02). It is **advisory and never blocks** — it exits 0 at every tier — but an
 `advise`/`escalate` branch opened with no recorded split decision is exactly the state the
 budget exists to surface, and the PR body is where the next reader will look for it. If `/sdd-pr-loop` is installed (it is only while the
