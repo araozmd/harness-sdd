@@ -334,9 +334,11 @@ another Codex round:
 - Tests / typecheck / lint green (subsets of CI)
 - Zero unresolved blocking comments — i.e. `blocking.json` is empty
 
-If all are green, **proceed to "ready to merge"** — do not waste another Codex round. If
-checks are still pending, wait for them; if any fail, treat the failure like a blocking
-comment for the next round.
+If all are green, **break the loop before advancing the round counter** and **proceed to
+"ready to merge"** — do not waste another Codex round. Breaking preserves the successful
+`round` value; the Ready-to-merge section then reads `round-$round/pr.json` from the
+correct round, not from the advanced counter. If checks are still pending, wait for them;
+if any fail, treat the failure like a blocking comment for the next round.
 
 #### Squash-merge prep (only when `merge_strategy` is `squash`)
 
@@ -377,6 +379,9 @@ After the per-round gates and fixes complete:
 round=$(( round + 1 ))
 done
 ```
+
+A green round breaks **before** this increment — see step 6. The terminal states below
+run with `round` pointing at the round that just verified, not one past it.
 
 ## Handover summary
 
