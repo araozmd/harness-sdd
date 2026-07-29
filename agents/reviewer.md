@@ -164,6 +164,13 @@ choice is visible to whoever picks the branch up. If the tool exits `4` it could
 (no base ref, not a git repo) — note that and carry on; a failed measurement is never a
 reject.
 
+Your run is one half of the handoff. The Orchestrator runs the same check again on **every** PR
+it opens — the ordinary approve → PR route, an umbrella child repo's slice PR, and a targeted
+parallel-fix worker's PR (`agents/orchestrator.md` → "### The pre-PR change-size handoff") — and
+carries the tier into the PR body. Your verdict is where the *decision* lives; the PR body is
+where the next reader finds it. Recording it here is what makes that possible, so do not skip it
+on the assumption the Orchestrator will re-derive it.
+
 ## Verdict
 
 - **Approve** → tell the Orchestrator to set `done`; append a summary to

@@ -258,6 +258,108 @@ _ju="$("$TOOL" --repo "$RQ2" --base main --format json)"
   || fail "R7d: the C-quoted untracked file was not counted toward the file budget"
 pass "R7d untracked paths git would C-quote are measured, not skipped"
 
+# ── R7e: a TRACKED path git would C-quote is classified on its real name ─────────────────
+# The untracked side was fixed by R7d; the tracked side still parsed plain `--numstat`.
+# `core.quotePath=false` governs non-ASCII bytes only — it does NOT stop git C-quoting a path
+# containing `"`, a backslash or a tab. `src/foo".spec.js` arrived as `"src/foo\".spec.js"`,
+# whose trailing quote defeats the `[._-](test|spec)\.[a-z]+$` suffix rule, so a TEST file was
+# charged to the PRODUCTION budget: the tier silently overstated. `--numstat -z` never encodes.
+#
+# The same fixture pins the two things `-z` changes on the way in:
+#   * a literal TAB now reaches the parser instead of arriving as the two characters `\t`, so
+#     the pathname spans awk fields 3..NF and `$3` alone would truncate it; and
+#   * `-z` reframes RENAMES as an empty path field followed by TWO extra fields, which parsed
+#     naively becomes two or three phantom records instead of one.
+RT="$T/repo-tracked-q"; mkrepo "$RT"
+# Pin rename detection on, or a host with diff.renames off measures a different shape entirely.
+git -C "$RT" config diff.renames true
+mkdir -p "$RT/src"
+_TAB="$(printf '\t')"
+# The rename baseline lives on MAIN, so the branch carries a real rename rather than an add.
+# It must satisfy THREE conditions at once or it cannot detect a broken fold:
+#   (a) similar enough that git calls it a rename at all (60 of 66 lines survive);
+#   (b) carrying ADDED lines, so the folded record contributes a non-zero count; and
+#   (c) a destination whose CLASSIFICATION differs from the source's (production → test).
+# A 0-line rename between two production paths — the obvious fixture, and the one this test
+# shipped with in round 1 — proves nothing: the unfolded header record has an EMPTY pathname,
+# which also classifies as production and also contributes 0 lines, while the two bare path
+# records are eaten by `NF < 3 { next }`. Every number came out identical with the fold deleted.
+n_lines 60 > "$RT/src/zmoved.js"                # production on main…
+git -C "$RT" add -A && git -C "$RT" commit -qm "pre-rename baseline"
+git -C "$RT" checkout -q -b feature
+# The two C-quoted/tab TEST files are the other discriminators: each is classified ONLY if its
+# full pathname survives intact. `src/foo".spec.js` needs git's C-quoting gone (the trailing `"`
+# breaks the suffix rule); `src/tab<TAB>bed.spec.js` needs the awk pass to rejoin fields 3..NF
+# (bare `$3` truncates it to `src/tab`, which matches nothing and lands in production).
+n_lines 7 > "$RT/src/foo\".spec.js"             # TEST — quote must not defeat the suffix rule
+n_lines 5 > "$RT/src/tab${_TAB}bed.spec.js"    # TEST — tab must not truncate the suffix away
+n_lines 4 > "$RT/src/tab${_TAB}prod.js"        # production, pathname contains a literal tab
+n_lines 3 > "$RT/src/plain.js"                 # production, ordinary name
+git -C "$RT" mv src/zmoved.js src/zmoved.spec.js # …renamed onto a TEST path on the branch
+n_lines 6 >> "$RT/src/zmoved.spec.js"           # + modification, so the fold carries real lines
+git -C "$RT" add -A && git -C "$RT" commit -qm "paths git would C-quote"
+_jt="$("$TOOL" --repo "$RT" --base main --format json)"
+_gt() { printf '%s' "$_jt" | sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p"; }
+# test_lines is the assertion that discriminates the rename fold. Drop the fold, or key it on
+# the SOURCE instead of the destination, and the renamed file's 6 added lines are charged to
+# production (empty pathname, or `src/zmoved.js`) instead of to tests: 12, not 18.
+[ "$(_gt test_lines)" = "18" ] \
+  || fail "R7e: test_lines=$(_gt test_lines), expected 18 — a C-quoted, tab-bearing or RENAMED-ONTO TRACKED test path was charged to production"
+[ "$(_gt production_lines)" = "7" ] \
+  || fail "R7e: production_lines=$(_gt production_lines), expected 7 (4 tab-named + 3 plain); a rename onto a test path must contribute NONE of its added lines here"
+[ "$(_gt production_files)" = "2" ] \
+  || fail "R7e: production_files=$(_gt production_files), expected 2"
+# total_files is kept, but its message now names only what it can actually detect. It does NOT
+# detect a missing fold: with the fold deleted the rename still yields exactly one counted record
+# (the header, whose empty pathname classifies as production), and the two bare path records are
+# dropped by `NF < 3 { next }` — so 5 either way. What it does catch is a fold that emits BOTH
+# halves of the rename, which is 6. Saying more than that here would be a failure message naming
+# a guarantee it cannot detect, which is the defect this whole assertion block was rewritten for.
+[ "$(_gt total_files)" = "5" ] \
+  || fail "R7e: total_files=$(_gt total_files), expected 5 — a -z rename must contribute ONE record, not both its source and its destination"
+pass "R7e tracked C-quoted / tab-bearing / renamed paths are classified on their real names"
+
+# ── R7f: --format json survives a TRACKED pathname containing a literal tab ───────────────
+# `-z` removes git's C-quoting, so a real control character now reaches the emitter. A raw tab
+# inside a JSON string is invalid, and the caller only finds out when jq dies — the same
+# machine-interface failure shape R8c exists to prevent, arriving through a new door.
+# The escape itself is asserted WITHOUT jq, so this coverage does not silently vanish on a
+# jq-less host — which is what the `skip` below would otherwise mean. The emitter never prints a
+# tab for any other reason, so "no raw tab anywhere in the JSON" is exact rather than incidental.
+printf '%s' "$_jt" | grep -q "$_TAB" \
+  && fail "R7f: --format json emitted a RAW tab; a control character inside a JSON string is invalid and no parser will accept it" || :
+printf '%s' "$_jt" | grep -qF 'src/tab\tprod.js' \
+  || fail "R7f: the tab-bearing pathname is not present in its escaped backslash-t form in the JSON — it was truncated at the tab, or dropped"
+if command -v jq >/dev/null 2>&1; then
+  printf '%s' "$_jt" | jq -e . >/dev/null 2>&1 \
+    || fail "R7f: --format json emitted unparseable output for a pathname containing a literal tab"
+  printf '%s' "$_jt" | jq -r '.top_production_files[].file' | grep -qF "src/tab${_TAB}prod.js" \
+    || fail "R7f: the tab-bearing pathname did not round-trip through JSON intact (truncated at the tab, or mis-escaped)"
+  pass "R7f --format json escapes a literal tab and the pathname round-trips intact"
+else
+  echo "skip - R7f jq round-trip (jq not installed); the escape itself was still asserted"
+fi
+
+# ── R7g: an untracked SYMLINK counts as its link value, not its target's contents ─────────
+# `[ -f ]` FOLLOWS a symlink, so a link to a regular file passed the guard and the line count
+# read the TARGET. git stores a symlink as a blob holding the link value — exactly one line.
+# A link to a 2,000-line file therefore contributed 2,000 lines before commit and 1 after,
+# reintroducing precisely the commit-coupling R5b exists to remove. Broken links and links to
+# directories are counted 1 by git too, and `[ -f ]` dropped both to 0.
+RL="$T/repo-symlink"; mkrepo "$RL"; git -C "$RL" checkout -q -b feature
+n_lines 2000 > "$RL/big.txt"                    # untracked regular file
+(cd "$RL" && ln -s big.txt link.txt)            # untracked link to a 2,000-line file
+(cd "$RL" && ln -s nowhere.txt broken.txt)      # untracked broken link
+mkdir "$RL/d"; (cd "$RL" && ln -s d dirlink)    # untracked link to a directory
+_pls="$("$TOOL" --repo "$RL" --base main --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')"
+[ "$_pls" = "2003" ] \
+  || fail "R7g: production_lines=$_pls, expected 2003 (2000 + one line per symlink) — a symlink was read THROUGH to its target"
+git -C "$RL" add -A && git -C "$RL" commit -qm "same content, now committed"
+_pls2="$("$TOOL" --repo "$RL" --base main --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')"
+[ "$_pls2" = "$_pls" ] \
+  || fail "R7g: committing changed the count from $_pls to $_pls2 — symlink handling still couples the measurement to whether the Builder committed"
+pass "R7g untracked symlinks count one line each, committed or not"
+
 # ── R8: usage errors are the ONLY non-zero exit, and they measure nothing ────────────────
 if "$TOOL" --repo "$T/definitely-not-a-repo" --base main >/dev/null 2>&1; then
   fail "R8: a non-git directory should exit 4"
@@ -306,5 +408,119 @@ grep -qi 'never blocks' "$ROOT/agents/reviewer.md" \
 grep -qi 'recorded decision\|record one line\|split plan' "$ROOT/agents/reviewer.md" \
   || fail "R9: reviewer.md does not require a recorded decision at advise/escalate"
 pass "R9 reviewer + orchestrator carry the advisory handoff rule"
+
+# ── R9b: the Orchestrator's pre-PR handoff is on the MAIN path, not only the fix lane ─────
+# R9 above greps the whole file, so it stayed green while the only copy of the instruction sat
+# inside the fenced "## Targeted parallel-fix worker mode" section — which is entered only for a
+# /sdd-fix-parallel E99 worker. Ordinary features routed through the main `in-review` flow, and
+# umbrella child PRs, never reached it, so the tier never reached those PR bodies at all. Assert
+# against the file with that fenced section REMOVED, which is the only form of this check that
+# can fail when the instruction is fix-lane-only.
+_ORCH="$ROOT/agents/orchestrator.md"
+_ORCH_SECTION='The pre-PR change-size handoff'
+_outside="$(awk '
+  /^## Targeted parallel-fix worker mode/ { skip = 1; next }
+  /^## / { skip = 0 }
+  !skip
+' "$_ORCH")"
+printf '%s\n' "$_outside" | grep -qF 'tools/change-size.sh' \
+  || fail "R9b: orchestrator.md runs the change-size check ONLY inside the parallel-fix worker mode — the main in-review → PR path never reaches it"
+# Everything about WHAT the main-path handoff must say is asserted against the SECTION, not
+# against `$_outside`. `$_outside` is the whole file minus the fenced worker mode, and it is the
+# right scope for exactly one question — "is the instruction fix-lane-only?" — because that
+# question is about the file as a whole. It is the wrong scope for every other question here: a
+# phrase like "PR body" occurs elsewhere in the file for unrelated reasons (this feature's own
+# umbrella child-PR sub-step is one), so a `$_outside` grep is satisfied no matter what the
+# section says, and the failure message ends up naming a guarantee it cannot detect.
+# `index()` on a heading line, not a regex, so the heading text needs no escaping.
+# Resets on `/^#+ /` — ANY heading level — whereas `_rev_cs` below resets on `^## `. That is not
+# an oversight: this target is a `###` section, so the next `###` sibling ends it, while
+# `_rev_cs`'s target is a `##` section, which may legitimately contain `###` subsections that
+# belong to it. Each extractor stops at the first heading that could not be part of its own
+# section, which is why the two differ.
+export CS_ORCH_SECTION="$_ORCH_SECTION"
+_main_cs="$(awk '
+  BEGIN { h = ENVIRON["CS_ORCH_SECTION"] }
+  /^#+ / { keep = (index($0, h) > 0); next }
+  keep
+' "$_ORCH")"
+[ -n "$(printf '%s' "$_main_cs" | tr -d '[:space:]')" ] \
+  || fail "R9b: could not extract the '$_ORCH_SECTION' section from orchestrator.md — the heading was renamed or removed, so every assertion below it would pass vacuously"
+printf '%s\n' "$_main_cs" | grep -qF 'tools/change-size.sh' \
+  || fail "R9b: the main-path handoff section does not actually invoke tools/change-size.sh — it only talks about it"
+# Deliberately NOT narrowed to a single fixed phrase. "PR body" occurs three times in this
+# section, all three stating the same contract in different words — so a survivor here is
+# evidence the contract is still stated, which is the opposite of B2 (a match in an unrelated
+# part of the file) and B3 (a match in arbitrary English). Pinning one exact sentence would trade
+# a real guarantee for brittleness against legitimate rewording of that same guarantee, in the
+# same section, and lose that distinction. Within-section paraphrase is signal, not noise.
+printf '%s\n' "$_main_cs" | grep -qi 'PR body' \
+  || fail "R9b: the main-path handoff does not say to carry the tier into the PR body (E21-F02)"
+printf '%s\n' "$_main_cs" | grep -qi 'never blocks\|advisory' \
+  || fail "R9b: the main-path handoff does not state that the check is advisory and never blocks"
+# The parallel-fix section must NOT be weakened on the way: its --repo caveat is load-bearing
+# because HARNESS_DIR locates the script, not the tree under measurement.
+_inside="$(awk '
+  /^## Targeted parallel-fix worker mode/ { keep = 1; next }
+  /^## / { keep = 0 }
+  keep
+' "$_ORCH")"
+printf '%s\n' "$_inside" | grep -qF -- '--repo' \
+  || fail "R9b: the parallel-fix worker mode lost its --repo caveat — a worker spawned from the canonical primary would measure the coordinator's bookkeeping branch"
+# …and the REASON, not just the flag. `--repo` appears several times in that section, so the flag
+# alone is satisfied by the bare invocation even after the explanation is deleted — the caveat is
+# the load-bearing part, because a reader who does not know WHY will drop the flag the first time
+# it looks redundant. Match the distinctive CLAUSE, not `HARNESS_DIR`: that token appears four
+# times in this section for unrelated worker-setup reasons, so keying on it would be satisfied by
+# any of them — the same reachable-another-way defect this assertion exists to close.
+printf '%s\n' "$_inside" | grep -qF 'not the tree under measurement' \
+  || fail "R9b: the parallel-fix worker mode still names --repo but no longer explains WHY (HARNESS_DIR locates the script, not the tree under measurement) — a reader who does not know why drops the flag the first time it looks redundant"
+# Cross-file consistency: the Reviewer holds the other half of this handoff, so its OWN
+# change-size section must agree that the Orchestrator repeats the check on every PR it opens.
+# Scope the grep to that section — reviewer.md says "slice PR" and "child repo" elsewhere for
+# unrelated reasons, and a whole-file grep would pass no matter what the section said. (This is
+# the same reasoning `_main_cs` above now applies to orchestrator.md; it was written here first
+# and simply never carried across.)
+_rev_cs="$(awk '
+  /^## Change-size check before the PR handoff/ { keep = 1; next }
+  /^## / { keep = 0 }
+  keep
+' "$ROOT/agents/reviewer.md")"
+printf '%s\n' "$_rev_cs" | grep -qi 'orchestrator' \
+  || fail "R9b: reviewer.md's change-size section never mentions the Orchestrator's half of the handoff"
+printf '%s\n' "$_rev_cs" | grep -qF "$_ORCH_SECTION" \
+  || fail "R9b: reviewer.md does not cite orchestrator.md's '$_ORCH_SECTION' section — the two copies of the rule can drift apart unnoticed"
+# …and the cited section must actually exist as a heading, or the citation is a dead reference.
+grep -qE "^#+ .*$_ORCH_SECTION" "$_ORCH" \
+  || fail "R9b: reviewer.md cites an orchestrator.md section '$_ORCH_SECTION' that has no matching heading"
+pass "R9b the pre-PR change-size handoff fires on the main path, with the fix lane's --repo caveat intact"
+
+# ── R9c: the harness records the rule that five assertions in this feature broke ──────────
+# Five assertions added by E99-F07 passed while the guarantee they named was absent — three of
+# them a whole-file grep over a prose contract, and the fifth was the first version of the LAST
+# assertion in this very block. That is a rule gap, not five accidents, so the rule lives in the
+# installed body rather than only in a review thread. Asserted here, beside the assertions that
+# motivated it, because there is no builder-prose suite; move it if one appears.
+_BUILDER="$ROOT/agents/builder.md"
+grep -qi 'section it names\|grep the SECTION' "$_BUILDER" \
+  || fail "R9c: builder.md does not carry the rule that a prose-contract test must grep the SECTION it names, not the whole file"
+grep -qF 'index($0,h)' "$_BUILDER" \
+  || fail "R9c: builder.md states the section-scoping rule but gives no extraction recipe — the rule is only followed when it is copy-pasteable"
+# The lens itself, matched as DISTINCTIVE FIXED substrings — one per operative clause.
+# The first version of this assertion was `grep -qi 'reachable\|other than the one'`, and it was
+# the fifth instance of the very pattern it guards: those are ordinary English words, so replacing
+# the whole bullet with an unrelated one about dead code left the suite green while the lens was
+# gone from the installed body. Use `-qF` on a phrase only the intended sentence can produce,
+# never `-qi` with alternation over common words. Each clause is asserted separately because
+# deleting any one of them guts the rule a different way: the lens without its question is a
+# slogan, and the question without the mutation step invites reasoning about the answer instead of
+# running it — which is precisely how the abandoned `HARNESS_DIR` tightening got written.
+grep -qF 'expected value being reachable ONE way' "$_BUILDER" \
+  || fail "R9c: builder.md does not carry the underlying lens (is this expected value reachable by more than one path?)"
+grep -qF 'path other than the one the failure message names' "$_BUILDER" \
+  || fail "R9c: builder.md names the lens but not the question that operationalises it"
+grep -qF 'the fix in place and confirming the test fails' "$_BUILDER" \
+  || fail "R9c: builder.md poses the question but no longer requires PROVING the answer by mutation — the lens is not reliable as a reasoning exercise"
+pass "R9c builder.md carries the section-scoping rule and the reachable-another-way lens"
 
 echo "All change-size tests passed."

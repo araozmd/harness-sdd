@@ -151,7 +151,12 @@ slightly off, it is meaningless — so extend the classifier rather than letting
 count as production.
 
 The Reviewer runs it before approving and records the tier and the decision in its verdict;
-the Orchestrator runs it before opening the PR and carries the tier into the PR body.
+the Orchestrator runs it before opening the PR and carries the tier into the PR body. That
+second half covers **every** PR route the Orchestrator drives — the ordinary approve → PR
+handoff, an umbrella child repo's slice PR, and a `/sdd-fix-parallel` worker's dedicated PR.
+Pass `--repo` whenever the caller is not standing in the tree being measured (`HARNESS_DIR`
+locates the script, not the branch), or the check measures the wrong tree and reports `ok` for
+a branch it never looked at.
 
 ## Architecture-aligned specs (the Architect cites ADRs)
 

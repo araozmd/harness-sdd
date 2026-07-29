@@ -170,9 +170,34 @@ fi
 # with zero production lines — the check reporting green on precisely the branch it exists to
 # measure. `git diff <commit>` covers committed + staged + unstaged with no double counting
 # (and equals `<commit>...HEAD` exactly when the tree is clean, since $mb IS the merge base).
-# `-c core.quotePath=false` keeps a path like `a"b.js` literal instead of git wrapping it in
-# its own quotes — otherwise the JSON emitter would be escaping git's quoting, not the path.
-stats="$(git -C "$repo" -c core.quotePath=false diff --numstat "$mb" 2>/dev/null || true)"
+#
+# `-z`, for the same reason `ls-files -z` is used below. `core.quotePath=false` does NOT stop
+# git C-quoting a TRACKED path containing `"`, a backslash or a tab — that knob governs
+# non-ASCII bytes only. `src/foo".spec.js` then arrives as the quoted text `"src/foo\".spec.js"`,
+# whose trailing quote defeats the `[._-](test|spec)\.[a-z]+$` suffix rule: a TEST file is
+# charged to the PRODUCTION budget and the tier is silently overstated. NUL framing is the only
+# form git never encodes.
+#
+# `-z` also changes numstat's record framing, and not to the obvious shape:
+#   normal   "<add>\t<del>\t<path>" NUL
+#   rename   "<add>\t<del>\t"       NUL <src> NUL <dst> NUL   — the path field is EMPTY and TWO
+#                                                               extra fields follow
+# Rename detection is on by default, so that is not an exotic case; parsed naively each half of
+# a rename looks like its own malformed record. Fold it back into one record keyed on the
+# DESTINATION, which is what a reviewer actually reads.
+#
+# (Known limits, shared with the untracked pass below. A filename containing a literal NEWLINE is
+# not supported — it splits on the `tr`. A pathname ENDING in a tab survives classification, but
+# the `while IFS=<tab> read` loops that render the concentration list strip it, because tab is
+# IFS whitespace; both are far outside the supported set and neither is worth the complexity.
+# Every other special character round-trips, including an interior TAB, which is why the awk
+# passes rejoin fields 3..NF into the pathname.)
+stats="$(git -C "$repo" diff --numstat -z "$mb" 2>/dev/null | tr '\0' '\n' | awk -F'\t' '
+  st == 2 { st = 1; next }                        # rename source — the destination is what counts
+  st == 1 { print hdr $0; st = 0; next }          # rename destination — re-attach its counts
+  NF == 3 && $3 == "" { hdr = $0; st = 2; next }  # rename header: the path field is empty
+  { print }
+' || true)"
 
 # Untracked files are invisible to `git diff` at any range, and a new feature is mostly new
 # FILES — the single largest thing this check could miss. Count their lines directly and
@@ -189,6 +214,18 @@ _untracked="$(git -C "$repo" ls-files -z --others --exclude-standard 2>/dev/null
 if [ -n "$_untracked" ]; then
   _extra_stats="$(printf '%s\n' "$_untracked" | while IFS= read -r _f; do
       [ -n "$_f" ] || continue
+      # SYMLINKS. git stores a symlink as a blob holding its link value: exactly ONE line,
+      # whatever it points at. `[ -f ]` FOLLOWS the link, so a link to a regular file passed that
+      # guard and the line count below read the TARGET — a link to a 2,000-line file contributed
+      # 2,000 lines before commit and 1 after, reintroducing the commit-coupling R5b exists to
+      # remove. What stops the read-through is this branch EXISTING: the `continue` short-
+      # circuits before any counting. Placing it BEFORE `[ -f ]` buys something different and
+      # also wanted — a broken link and a link to a directory both fail `[ -f ]` and were dropped
+      # to 0, while git counts them 1 like any other mode-120000 blob.
+      # (Keep every comment inside this command substitution APOSTROPHE-FREE. bash 3.2 in sh
+      # mode does not honour `#` when re-scanning a `$( … )` body, so an apostrophe opens a
+      # quote that swallows the rest of the block and `sh -n` rejects a file dash accepts.)
+      if [ -h "$repo/$_f" ]; then printf '1\t0\t%s\n' "$_f"; continue; fi
       [ -f "$repo/$_f" ] || continue
       # `awk END{print NR}`, not `wc -l`: wc counts NEWLINES, so a file whose last line is
       # unterminated is undercounted by one — and a one-line file with no trailing newline
@@ -219,7 +256,11 @@ eval "$(printf '%s\n' "$stats" | awk -F'\t' '
     # FILE budget, which exists precisely to fire independently of lines: a branch adding 30
     # production images reported production_files: 0 and tier ok. Count the file, contribute
     # no lines.
-    f = $3; n = ($1 == "-") ? 0 : $1 + 0
+    # Fields 3..NF, not just $3: under `-z` a pathname containing a literal TAB is no longer
+    # C-quoted by git, so it splits across fields and `$3` alone would truncate `src/a<TAB>b.js`
+    # to `src/a` — losing every classifier suffix on it.
+    f = $3; for (i = 4; i <= NF; i++) f = f "\t" $i
+    n = ($1 == "-") ? 0 : $1 + 0
     if (f ~ gre)      { g += n; gf++ }
     else if (f ~ tre) { t += n; tf++ }
     else if (f ~ dre) { d += n; df++ }
@@ -243,13 +284,20 @@ top="$(printf '%s\n' "$stats" | awk -F'\t' '
   BEGIN { tre = ENVIRON["CS_TEST_RE"]; dre = ENVIRON["CS_DOC_RE"]; gre = ENVIRON["CS_GEN_RE"] }
   NF < 3 { next }
   $1 == "-" { next }
-  { f = $3; if (f ~ gre || f ~ tre || f ~ dre) next; printf "%d\t%s\n", $1, f }' | sort -rn | head -5)"
+  { f = $3; for (i = 4; i <= NF; i++) f = f "\t" $i     # see the classifier pass: `-z` lets a
+    if (f ~ gre || f ~ tre || f ~ dre) next             # literal TAB through in a pathname
+    printf "%d\t%s\n", $1, f }' | sort -rn | head -5)"
 
 # JSON string escaping for a path interpolated into --format json output. A valid git
 # filename may contain `"` or `\`, and emitting one raw produces output that exits 0 and is
 # unparseable — the worst failure shape for a machine interface, because the caller only finds
 # out when jq dies. Backslash first, or it would double-escape the quotes it just added.
-_json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+# The TAB rule is not decorative: a raw control character is invalid inside a JSON string, and
+# git's C-quoting used to hide tabs behind a two-character `\t`. Now that the numstat pass reads
+# `-z`, the real tab reaches here and has to be escaped on our side instead. Matched via a
+# variable because `\t` in a sed BRE is not portable.
+_CS_TAB="$(printf '\t')"
+_json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e "s/$_CS_TAB/\\\\t/g"; }
 
 if [ "$format" = json ]; then
   printf '{"base":"%s","merge_base":"%s","tier":"%s","production_lines":%d,"production_files":%d,' \

@@ -1897,6 +1897,30 @@ test_round_trend_survives_a_malformed_round() {
   pass "E21-F03 round_trend_survives_a_malformed_round: seams still named alongside an unreadable round"
 }
 
+test_round_trend_cache_path_with_whitespace() {
+  if ! command -v jq >/dev/null 2>&1; then skip "round_trend_cache_path_with_whitespace (jq not installed)"; return 0; fi
+  # `--cache` is caller-supplied, and a checkout under `/Users/me/My Repos/…` is ordinary. The
+  # concentration pass used to concatenate the round files into ONE unquoted word list, so a
+  # single whitespace-bearing path was split into several arguments, every `cat` failed, and
+  # `top` came back empty under the `|| true`. The verdict still computed and the report still
+  # said "SPLIT THIS PR" — while naming no seams at all. That loses the concentration data on
+  # exactly the non-converging handoff that exists to carry it, and it fails silently.
+  _w="$T/trend cache with spaces"; mkdir -p "$_w"; mk_rounds "$_w" 1 3 1 2 1 3
+  [ "$(verdict_of "$_w")" = "non-converging" ] \
+    || fail "E21-F03: a whitespace-containing --cache path changed the verdict"
+  sh "$SRC/tools/pr-round-trend.sh" --cache "$_w" | grep -qF 'src/runtime.ts' \
+    || fail "E21-F03: a whitespace-containing --cache path emptied the concentration list — the split advice names no seams"
+  # The machine interface must carry it too: an empty top_files is how a caller silently loses
+  # the seams, and it is indistinguishable from "no findings had a path".
+  sh "$SRC/tools/pr-round-trend.sh" --cache "$_w" --format json \
+    | jq -e '.top_files | length > 0' >/dev/null 2>&1 \
+    || fail "E21-F03: --format json returned an EMPTY top_files for a whitespace-containing --cache path"
+  sh "$SRC/tools/pr-round-trend.sh" --cache "$_w" --format json \
+    | jq -e '.top_files[0].path == "src/runtime.ts"' >/dev/null 2>&1 \
+    || fail "E21-F03: --format json did not name the concentrating file for a whitespace-containing --cache path"
+  pass "E21-F03 round_trend_cache_path_with_whitespace: seams survive a --cache path containing spaces"
+}
+
 test_round_trend_json_escapes_paths() {
   if ! command -v jq >/dev/null 2>&1; then skip "round_trend_json_escapes_paths (jq not installed)"; return 0; fi
   # A path containing `"` interpolated raw exits 0 and cannot be parsed — the same defect
@@ -1938,6 +1962,7 @@ test_installed_command_carries_the_trend() {
 test_round_trend_verdicts
 test_round_trend_names_the_seams
 test_round_trend_survives_a_malformed_round
+test_round_trend_cache_path_with_whitespace
 test_round_trend_json_escapes_paths
 test_round_trend_usage_errors
 test_installed_command_carries_the_trend
