@@ -196,13 +196,24 @@ test_slug_rejection_is_locale_independent() {
   pass "test_slug_rejection_is_locale_independent"
 }
 
-# The helper pins itself to LC_ALL=C so its globs mean ASCII and its `git`
-# plumbing parses deterministically. That pin must stop at every surface where it
-# executes FOREIGN code owned by the target repo: the project init gate, `run`
-# commands, and the post-checkout hook / checkout filters fired by
-# `git worktree add`. Exporting C into them made a consumer whose
-# `.harness/init.project.sh` requires UTF-8 fail its own gate, and `do_create`
-# then rolled back an otherwise valid worktree.
+# The helper runs under the CALLER'S locale (E99-F04 inverted E99-F03's
+# whole-script C pin) and scopes LC_ALL=C to `validate_key`'s ASCII globs alone.
+# Every surface where it executes FOREIGN code owned by the target repo must
+# therefore see the caller's locale: the project init gate, `run` commands, and
+# the post-checkout hook / checkout filters fired by `git worktree add`.
+# Exporting C into them made a consumer whose `.harness/init.project.sh`
+# requires UTF-8 fail its own gate, and `do_create` then rolled back an
+# otherwise valid worktree.
+#
+# NOTE (E99-F04): these legs used to fail independently — each named git call
+# carried its own `restore_caller_locale` escape, so each could be mutated
+# alone. Under the inverted default they share ONE cause: re-introducing a
+# process-wide `LC_ALL=C` export. They still bite against exactly that
+# regression (which is the one that actually happened, three rounds running),
+# but they are no longer independent mutants. Kept as separate legs anyway
+# because they assert three distinct, separately-reachable foreign-code
+# surfaces, and a future partial re-pin would still be caught by whichever leg
+# it touched.
 test_child_commands_see_caller_locale() {
   _utf8="$(utf8_locale)"
   if [ -z "$_utf8" ]; then
@@ -266,6 +277,119 @@ test_child_commands_see_caller_locale() {
   #    own ASCII slug guard — the whole point of the C pin.
   assert_create_fails invalid create E99-F153 Bad-Slug
   pass "test_child_commands_see_caller_locale"
+}
+
+# Install/remove a repo-owned `reference-transaction` hook that RECORDS the
+# locale it ran under and REJECTS the transaction unless the charmap is UTF-8.
+# The hook lives in the shared `.git/hooks` dir, so it fires for the primary and
+# every linked worktree; install it only around the helper invocation under
+# test so the fixture's own git commands are never subject to it.
+install_reftx_hook() {
+  printf '%s\n' \
+    '#!/bin/sh' \
+    "printf '%s\n' \"\${LC_ALL-unset}\" >> \"$FIXTURE/reftx-lc-all\"" \
+    "printf '%s\n' \"\$(locale charmap)\" >> \"$FIXTURE/reftx-charmap\"" \
+    '[ "$(locale charmap)" = UTF-8 ] || exit 1' \
+    > "$PRIMARY/.git/hooks/reference-transaction"
+  chmod +x "$PRIMARY/.git/hooks/reference-transaction"
+}
+
+remove_reftx_hook() {
+  rm -f "$PRIMARY/.git/hooks/reference-transaction"
+}
+
+assert_reftx_hook_saw_caller_locale() {
+  _what=$1
+  _want=$2
+  [ -s "$FIXTURE/reftx-charmap" ] ||
+    fail "reference-transaction hook never fired during $_what"
+  if grep -qv '^UTF-8$' "$FIXTURE/reftx-charmap"; then
+    fail "$_what ran the reference-transaction hook under charmap $(sort -u "$FIXTURE/reftx-charmap" | tr '\n' ' ')"
+  fi
+  if grep -qv "^$_want\$" "$FIXTURE/reftx-lc-all"; then
+    fail "$_what ran the reference-transaction hook with LC_ALL $(sort -u "$FIXTURE/reftx-lc-all" | tr '\n' ' '); expected $_want"
+  fi
+}
+
+# E99-F04 / Codex round 4 on PR #65. `reference-transaction` is a repo-owned hook
+# that fires on essentially EVERY ref update — including the `branch -d` that
+# teardown performs and the `update-ref -d` that create's rollback performs.
+# Under E99-F03's whole-script `LC_ALL=C` export those two calls handed C to the
+# target repo's own hook: a hook that needs UTF-8 rejected the transaction, so
+# teardown died with the worktree already removed and the branch left behind,
+# and rollback stranded the branch it was supposed to retire. Neither call could
+# be fixed by another per-call escape without un-pinning the whole file — which
+# is what E99-F04 did.
+test_ref_transaction_hook_sees_caller_locale() {
+  _utf8="$(utf8_locale)"
+  if [ -z "$_utf8" ]; then
+    pass "test_ref_transaction_hook_sees_caller_locale (skipped: no UTF-8 locale installed)"
+    return 0
+  fi
+
+  # 1. teardown: `git branch -d` on a clean, merged fix branch.
+  make_source_fixture reftx_teardown
+  _wt="$(cd "$PRIMARY" && LC_ALL="$_utf8" tools/fix-worktree.sh create E99-F154 reftx-teardown)"
+  printf merged > "$_wt/merged.txt"
+  git -C "$_wt" add merged.txt
+  git -C "$_wt" commit -m merged >/dev/null
+  merge_fix_to_base feat/E99-F154-reftx-teardown
+  install_reftx_hook
+  if (cd "$PRIMARY" && LC_ALL="$_utf8" tools/fix-worktree.sh teardown E99-F154 reftx-teardown) \
+      >"$FIXTURE/out" 2>"$FIXTURE/err"; then
+    remove_reftx_hook
+  else
+    remove_reftx_hook
+    fail "repo-owned reference-transaction hook rejected teardown: $(cat "$FIXTURE/err")"
+  fi
+  assert_reftx_hook_saw_caller_locale teardown "$_utf8"
+  [ ! -e "$_wt" ] || fail "teardown under a ref hook left path"
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/E99-F154-reftx-teardown &&
+    fail "teardown under a ref hook left branch"
+
+  # 2. rollback: `git update-ref -d` when the project init gate fails. The hook
+  #    also fires for the branch ref `worktree add` creates, so this leg covers
+  #    both ends of a create that has to undo itself.
+  make_source_fixture reftx_rollback
+  printf '#!/bin/sh\nexit 9\n' > "$PRIMARY/init.sh"
+  git -C "$PRIMARY" commit -am failing-init >/dev/null
+  install_reftx_hook
+  if (cd "$PRIMARY" && LC_ALL="$_utf8" tools/fix-worktree.sh create E99-F155 reftx-rollback) \
+      >"$FIXTURE/out" 2>"$FIXTURE/err"; then
+    remove_reftx_hook
+    fail "create with a failing init gate unexpectedly succeeded"
+  fi
+  remove_reftx_hook
+  grep -qi 'rolled back' "$FIXTURE/err" ||
+    fail "rollback under a ref hook did not complete: $(cat "$FIXTURE/err")"
+  assert_reftx_hook_saw_caller_locale rollback "$_utf8"
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/E99-F155-reftx-rollback &&
+    fail "rollback under a ref hook left branch"
+  [ ! -e "$PRIMARY/.claude/worktrees/E99-F155-reftx-rollback" ] ||
+    fail "rollback under a ref hook left path"
+
+  # 3. An UNSET caller LC_ALL must reach the hook as unset too, so the repo's own
+  #    LANG/LC_* layering — not an empty string — decides its locale.
+  make_source_fixture reftx_inherited
+  _wt="$(cd "$PRIMARY" && env -u LC_ALL LANG="$_utf8" tools/fix-worktree.sh create E99-F156 reftx-inherited)"
+  printf merged > "$_wt/merged.txt"
+  git -C "$_wt" add merged.txt
+  git -C "$_wt" commit -m merged >/dev/null
+  merge_fix_to_base feat/E99-F156-reftx-inherited
+  install_reftx_hook
+  if (cd "$PRIMARY" && env -u LC_ALL LANG="$_utf8" tools/fix-worktree.sh teardown E99-F156 reftx-inherited) \
+      >"$FIXTURE/out" 2>"$FIXTURE/err"; then
+    remove_reftx_hook
+  else
+    remove_reftx_hook
+    fail "reference-transaction hook rejected teardown under an inherited LANG: $(cat "$FIXTURE/err")"
+  fi
+  assert_reftx_hook_saw_caller_locale "teardown with inherited LANG" unset
+
+  # 4. The narrow C pin still guards the ASCII slug globs — un-pinning the file
+  #    must not have loosened the one operation that genuinely needs C.
+  assert_create_fails invalid create E99-F157 Bad-Slug
+  pass "test_ref_transaction_hook_sees_caller_locale"
 }
 
 test_base_accepts_short_local_ref_only() {
@@ -703,6 +827,7 @@ test_dirty_primary_fails_before_mutation
 test_invalid_inputs_are_non_mutating
 test_slug_rejection_is_locale_independent
 test_child_commands_see_caller_locale
+test_ref_transaction_hook_sees_caller_locale
 test_base_accepts_short_local_ref_only
 test_branch_path_and_registration_collisions_fail_closed
 test_two_active_worktrees_are_isolated

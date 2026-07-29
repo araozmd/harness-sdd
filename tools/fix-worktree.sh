@@ -3,32 +3,52 @@
 
 set -u
 
-# Bracket ranges in a `case` glob (e.g. *[!a-z0-9-]*) are resolved through the
-# active locale's COLLATION order, not ASCII: under en_US.UTF-8 an uppercase
-# letter falls inside a-z, so an invalid slug would be accepted. Pin the whole
-# script to C so every glob here means ASCII, and export it so the `git`
-# plumbing this helper parses stays in the deterministic C locale too.
+# LOCALE CONTRACT — the default is the CALLER'S locale (E99-F04; this inverts
+# E99-F03's whole-script `LC_ALL=C` export).
 #
-# That export must NOT reach the FOREIGN code this helper executes. Three
-# surfaces belong to the target repo, not to us: the project init gate, `run`
-# commands, and the post-checkout hook / checkout filters that `git worktree add`
-# fires. A consumer whose `.harness/init.project.sh` needs UTF-8 would fail its
-# own gate and lose an otherwise valid worktree to the rollback. Capture the
-# caller's LC_ALL first so those escapes can put it back (restore_caller_locale).
+# This helper executes code the TARGET REPO owns at several points: the project
+# init gate, `run` commands, and every git hook or filter a checkout or a ref
+# update fires — `post-checkout` and checkout/smudge filters via `worktree add`,
+# and `reference-transaction` via `branch -d` / `update-ref -d`. All of that is
+# foreign code and must see the environment its own repo was configured for.
+# E99-F03 exported `LC_ALL=C` for the whole script; three successive review
+# rounds each found that pin leaking into repo-owned code (a consumer whose
+# `.harness/init.project.sh` needs UTF-8 failed its own gate and lost an
+# otherwise valid worktree to the rollback). Because `reference-transaction`
+# fires on essentially every ref update, an allowlist of per-call "escapes" can
+# never be proved complete — so the default is inverted instead.
+#
+# Exactly ONE operation here is locale-sensitive: the bracket ranges in
+# `validate_key`'s `case` globs (e.g. *[!a-z0-9-]*), which are resolved through
+# the active locale's COLLATION order, not ASCII — under en_US.UTF-8 an
+# uppercase letter falls inside a-z, so an invalid slug would be accepted.
+# `validate_key` pins `LC_ALL=C` around those globs alone and restores the
+# caller's locale on every exit path, so nothing downstream — no git call, no
+# hook, no child command — ever runs under C because of us.
+#
+# Per-call audit of every other read in this file (E99-F04): each is either
+# exit-status-only (`check-ref-format`, `merge-base --is-ancestor`, `show-ref
+# --quiet`, `worktree add/remove/prune`, `branch -d`, `update-ref -d`) or parses
+# output that is ASCII by construction — object ids (`rev-parse`, `commit-tree`
+# ancestry), refnames (`symbolic-ref`, `for-each-ref --format=%(refname:short)`),
+# absolute paths (`rev-parse --show-toplevel` / `--git-common-dir` /
+# `--absolute-git-dir`), `worktree list --porcelain` records split on literal
+# ASCII prefixes, and `status --porcelain` tested only for emptiness. None is
+# compared with a range glob and none is collation-sensitive, so none is pinned:
+# an unnecessary pin is precisely the defect this contract exists to prevent.
+#
+# Capture the caller's LC_ALL up front so `validate_key`'s narrow pin can put it
+# back EXACTLY. When the caller had LC_ALL unset we UNSET it again rather than
+# writing an empty value: an empty LC_ALL is ignored by some implementations but
+# honored by others, and unsetting is what lets the caller's LANG/LC_* layering
+# resurface.
 if [ -n "${LC_ALL+x}" ]; then
   CALLER_LC_ALL_SET=1
 else
   CALLER_LC_ALL_SET=0
 fi
 CALLER_LC_ALL="${LC_ALL-}"
-LC_ALL=C
-export LC_ALL
 
-# Put the caller's locale back. Only ever called inside a subshell that is about
-# to exec foreign code, so the script's own C pinning is never disturbed.
-# When the caller had LC_ALL unset we UNSET it rather than writing an empty
-# value: an empty LC_ALL is ignored by some implementations but honored by
-# others, and unsetting is what lets the caller's LANG/LC_* layering resurface.
 restore_caller_locale() {
   if [ "$CALLER_LC_ALL_SET" = 1 ]; then
     LC_ALL="$CALLER_LC_ALL"
@@ -45,16 +65,29 @@ usage() {
   die "usage: fix-worktree.sh create <E99-Fn> <slug> [--base <branch>] | run <E99-Fn> <slug> -- <command> [args...] | teardown <E99-Fn> <slug> [--base <branch>]"
 }
 
+# The ONLY C-pinned region in this file (see the locale contract above). The
+# bracket ranges below must mean ASCII, so pin C for the two `case` statements
+# and nothing else. The verdict is recorded rather than acted on immediately so
+# that the caller's locale is restored BEFORE any `die` — no exit path, success
+# or failure, may leave the process in C for the git calls and foreign code that
+# follow.
 validate_key() {
+  LC_ALL=C
+  export LC_ALL
+  _key_error=
   case "$FIX_ID" in
-    E99-F*[!0-9]*|E99-F) die "invalid fix id: $FIX_ID" ;;
+    E99-F*[!0-9]*|E99-F) _key_error="invalid fix id: $FIX_ID" ;;
     E99-F[0-9]*) : ;;
-    *) die "invalid fix id: $FIX_ID" ;;
+    *) _key_error="invalid fix id: $FIX_ID" ;;
   esac
-  case "$FIX_SLUG" in
-    ''|*[!a-z0-9-]*|-*|*-) die "invalid slug: $FIX_SLUG" ;;
-    *--*) die "invalid slug: $FIX_SLUG" ;;
-  esac
+  if [ -z "$_key_error" ]; then
+    case "$FIX_SLUG" in
+      ''|*[!a-z0-9-]*|-*|*-) _key_error="invalid slug: $FIX_SLUG" ;;
+      *--*) _key_error="invalid slug: $FIX_SLUG" ;;
+    esac
+  fi
+  restore_caller_locale
+  [ -z "$_key_error" ] || die "$_key_error"
 }
 
 absolute_dir() {
@@ -233,8 +266,13 @@ rollback_create() {
         echo "fix-worktree: rollback removed worktree path but could not prune its registration; branch $BRANCH preserved" >&2
         return 1
       fi
+      # Ordering note (E99-F04): git refuses to delete a branch that is checked
+      # out in a worktree, so the removal above MUST precede this deletion — the
+      # sequence is forced, not chosen. If the deletion is then refused (e.g. a
+      # repo-owned `reference-transaction` hook rejects it) the path is already
+      # gone and the branch survives; the message names that exact half state.
       if ! git -C "$PRIMARY" update-ref -d "refs/heads/$BRANCH" "$BASE_COMMIT" >/dev/null 2>&1; then
-        echo "fix-worktree: rollback removed worktree but exact branch deletion failed; preserved $BRANCH" >&2
+        echo "fix-worktree: rollback removed worktree but exact branch deletion failed; preserved $BRANCH — delete it by hand once the refusal is resolved" >&2
         return 1
       fi
       return 0
@@ -255,15 +293,11 @@ do_create() {
 
   CREATED_MANAGED_LINKS=
   mkdir -p "$(dirname "$WORKTREE")" || die "cannot create worktree parent"
-  # `worktree add` is the ONLY git call here that runs target-repo code: it fires
-  # the repo's post-checkout hook and any checkout (smudge) filters. Give those
-  # the caller's locale like the other foreign-code escapes. Safe to un-pin
-  # precisely because this call's output is discarded — only its exit status is
-  # read — so the C pin's parsing determinism is not what is being relaxed.
-  # Every remaining git call in this file is read-only plumbing we DO parse, and
-  # stays under C.
-  if ! (restore_caller_locale &&
-        git -C "$PRIMARY" worktree add -b "$BRANCH" "$WORKTREE" "$BASE_COMMIT" >/dev/null 2>&1); then
+  # `worktree add` runs target-repo code — the `post-checkout` hook, any checkout
+  # (smudge) filters, and the `reference-transaction` hook for the new branch
+  # ref. It needs no locale wrapper: under the inverted contract the caller's
+  # locale is already in effect here (see the locale contract at the top).
+  if ! git -C "$PRIMARY" worktree add -b "$BRANCH" "$WORKTREE" "$BASE_COMMIT" >/dev/null 2>&1; then
     die "git worktree creation failed for $WORKTREE"
   fi
   if ! materialize_links; then
@@ -275,7 +309,9 @@ do_create() {
   else
     _init="$WORKTREE/.harness/init.sh"
   fi
-  if [ ! -x "$_init" ] || ! (cd "$WORKTREE" && restore_caller_locale && "$_init" >&2); then
+  # The project init gate is the target repo's own script and inherits the
+  # caller's locale unchanged; the subshell exists only to scope the `cd`.
+  if [ ! -x "$_init" ] || ! (cd "$WORKTREE" && "$_init" >&2); then
     rollback_create || exit 1
     die "initialization failed and provisioning was rolled back"
   fi
@@ -295,8 +331,9 @@ do_run() {
   verify_exact_worktree
   [ "$#" -ge 2 ] && [ "$1" = "--" ] || usage
   shift
-  (cd "$WORKTREE" && restore_caller_locale &&
-    HARNESS_DIR="$HARNESS_MAIN" export HARNESS_DIR && "$@")
+  # The child command is the caller's own; it inherits the caller's locale
+  # unchanged. The subshell scopes the `cd` and the HARNESS_DIR export only.
+  (cd "$WORKTREE" && HARNESS_DIR="$HARNESS_MAIN" export HARNESS_DIR && "$@")
 }
 
 require_primary_on_base() {
@@ -353,8 +390,16 @@ do_teardown() {
     git -C "$PRIMARY" worktree remove "$WORKTREE" >/dev/null ||
       die "non-forced worktree removal failed; preserved: $WORKTREE"
   fi
+  # Ordering note (E99-F04): the worktree is retired above BEFORE the branch is
+  # deleted because git refuses to delete a branch that is checked out in a
+  # worktree ("cannot delete branch ... used by worktree"), so this sequence is
+  # forced by git, not chosen. If the deletion is refused after the removal has
+  # already landed, the result is the "registration absent, branch present"
+  # state — which is precisely the state the FOUND_REG=0 branch above reconciles
+  # on a re-run, so no work is stranded. Name that recovery in the diagnostic
+  # rather than implying nothing moved.
   git -C "$PRIMARY" branch -d "$BRANCH" >/dev/null ||
-    die "safe branch deletion failed; preserved $BRANCH"
+    die "safe branch deletion failed after the worktree registration was retired; preserved $BRANCH — re-run teardown to finish once the refusal is resolved"
 }
 
 [ "$#" -ge 3 ] || usage
