@@ -3607,6 +3607,10 @@ elif [ -n "$base_ref" ]; then
     echo "sdd-pr-loop: merge refused — could not fetch open PR list" >&2
     gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
   else
+    # Refresh pr.json with the current base before evaluating the guard — a PR
+    # retargeted after the round cache was written would otherwise be evaluated
+    # with stale data.
+    gh pr view "$pr_number" --json reviews,comments,statusCheckRollup,headRefOid,baseRefName,baseRefOid > ".harness/.pr-loop/$pr_number/round-$round/pr.json" 2>/dev/null || echo '{}' > ".harness/.pr-loop/$pr_number/round-$round/pr.json"
     guard_rc=0
     sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" || guard_rc=$?
     if [ "$guard_rc" = 0 ]; then
