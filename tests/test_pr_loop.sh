@@ -1976,14 +1976,14 @@ test_stack_guard_parent_open() {                       # R3
   printf '[{"number":42,"headRefName":"feat/wave-1"}]\n' > "$_g/open-prs.json"
   if ! have_jq; then skip "test_stack_guard_parent_open (jq not installed)"; return 0; fi
   _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" >"$_g/out" 2>/dev/null || _rc=$?
+  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>/dev/null || _rc=$?
   [ "$_rc" = 6 ] || fail "R3: pr-stack-guard must exit 6 when base matches an open PR's head (got $_rc)"
   grep -qF 'feat/wave-1' "$_g/out" || fail "R3: the diagnostic does not name the base branch"
   grep -qF '#42' "$_g/out" || fail "R3: the diagnostic does not name the open parent PR number"
   # The SAFE case: base is the default branch — must exit 0.
   printf '{"baseRefName":"main"}\n' > "$_g/pr.json"
   _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" >/dev/null 2>&1 || _rc=$?
+  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >/dev/null 2>&1 || _rc=$?
   [ "$_rc" = 0 ] || fail "R3: a PR targeting the default branch must exit 0 (got $_rc)"
   pass "R3 pr-stack-guard exits 6 when parent is open, 0 when base is default"
 }
@@ -1996,25 +1996,25 @@ test_stack_guard_unreadable_base() {                   # R4
   # No .baseRefName field at all
   printf '{"someKey":"someValue"}\n' > "$_g/pr.json"
   _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" >"$_g/out" 2>&1 || _rc=$?
+  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>&1 || _rc=$?
   [ "$_rc" != 0 ] || fail "R4: a pr.json with no .baseRefName must exit non-zero (got $_rc)"
   [ "$_rc" != 6 ] || fail "R4: an unreadable base must NOT exit 6 (that would mean 'stacked')"
   # baseRefName is null
   printf '{"baseRefName":null}\n' > "$_g/pr.json"
   _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" >"$_g/out" 2>&1 || _rc=$?
+  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>&1 || _rc=$?
   [ "$_rc" != 0 ] || fail "R4: a null baseRefName must exit non-zero (got $_rc)"
   [ "$_rc" != 6 ] || fail "R4: a null baseRefName must NOT exit 6"
   # Unparseable open-prs.json
   printf '{"baseRefName":"feat/x"}\n' > "$_g/pr.json"
   printf 'not json\n' > "$_g/open-prs.json"
   _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" >"$_g/out" 2>&1 || _rc=$?
+  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>&1 || _rc=$?
   [ "$_rc" != 0 ] || fail "R4: an unparseable open-prs.json must exit non-zero (got $_rc)"
   [ "$_rc" != 6 ] || fail "R4: an unparseable open-prs.json must NOT exit 6"
   # Missing pr.json file
   _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/no-such.json" "$_g/open-prs.json" >"$_g/out" 2>&1 || _rc=$?
+  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/no-such.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>&1 || _rc=$?
   [ "$_rc" = 4 ] || fail "R4: a missing pr.json must exit 4 (got $_rc)"
   pass "R4 pr-stack-guard fails closed (non-zero, not 6) on unreadable/unparseable input"
 }
@@ -2040,7 +2040,7 @@ test_stacked_pr_refuse_child_merge() {                 # R2
   # Verify the pr-loop body refuses to merge a child PR whose parent is still open.
   grep -qiF 'pr-stack-guard.sh' "$BODY" \
     || fail "R2: the body does not invoke pr-stack-guard.sh before merging"
-  grep -qiF 'parent is still open' "$BODY" \
+  grep -qiF 'merge refused' "$BODY" \
     || fail "R2: the body does not describe the parent-open refusal case"
   grep -qF 'needs-human' "$BODY" \
     || fail "R2: the body does not route the guard refusal to needs-human"
@@ -2094,7 +2094,7 @@ test_stacked_pr_opt_in() {                             # R9
   printf '[]\n' > "$_g/open-prs.json"
   if ! have_jq; then skip "test_stacked_pr_opt_in (jq not installed)"; return 0; fi
   _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" >/dev/null 2>&1 || _rc=$?
+  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >/dev/null 2>&1 || _rc=$?
   [ "$_rc" = 0 ] || fail "R9: a PR targeting main must exit 0 (got $_rc)"
   # The body must state that the default lane is unchanged.
   grep -qF 'single-PR default lane' "$BODY" \

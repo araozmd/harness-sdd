@@ -3102,10 +3102,15 @@ changed since the last round — when a stacked PR's parent is rebased (review f
 child's `baseRefOid` moves, and the child must be re-reviewed from scratch (R5).
 
 ```bash
-if [ "$round" -gt 1 ]; then
+# Only stacked PRs (base != default branch) get base-change detection. A PR targeting the
+# default branch naturally sees baseRefOid move as other PRs merge; restarting review on
+# every such change would destroy the ordinary single-PR lane.
+default_branch="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo '')"
+if [ "$round" -gt 1 ] && [ -n "$default_branch" ]; then
   prior_round_dir=".harness/.pr-loop/$pr_number/round-$(( round - 1 ))"
+  prior_base_name="$(jq -r '.baseRefName // ""' "$prior_round_dir/pr.json" 2>/dev/null || echo '')"
   prior_base_oid="$(jq -r '.baseRefOid // ""' "$prior_round_dir/pr.json" 2>/dev/null || echo '')"
-  if [ -n "$prior_base_oid" ]; then
+  if [ -n "$prior_base_name" ] && [ "$prior_base_name" != "$default_branch" ] && [ -n "$prior_base_oid" ]; then
     current_base_oid="$(gh pr view "$pr_number" --json baseRefOid --jq '.baseRefOid' 2>/dev/null || echo '')"
     if [ -n "$current_base_oid" ] && [ "$current_base_oid" != "$prior_base_oid" ]; then
       echo "baseRefOid changed (${prior_base_oid:0:7} -> ${current_base_oid:0:7}) — parent rebased; discarding prior round cache, restarting from round 1" >&2
@@ -3541,21 +3546,22 @@ call is a lightweight `gh pr list`.
 
 ```bash
 # Stacked-PR merge-order guard (E21-F04 R2): refuse to merge a child PR whose parent
-# is still open. Only activates when baseRefName is not the default branch — a PR
-# targeting main exits 0 immediately.
+# is still open. Only exit 0 authorizes merging; any other guard exit (including exit 4
+# for unreadable input) routes to needs-human.
+default_branch="${default_branch:-$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo '')}"
 open_prs_json=".harness/.pr-loop/$pr_number/open-prs.json"
 gh pr list --state open --json number,headRefName > "$open_prs_json" 2>/dev/null || echo '[]' > "$open_prs_json"
 guard_rc=0
-sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" || guard_rc=$?
-if [ "$guard_rc" = 6 ]; then
-  echo "sdd-pr-loop: merge refused — a stacked PR's parent is still open" >&2
-  sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" 2>&1 >&2
+sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" || guard_rc=$?
+if [ "$guard_rc" = 0 ]; then
+  guard_ok=1
+else
+  guard_ok=0
+  echo "sdd-pr-loop: merge refused — stack guard returned exit $guard_rc" >&2
+  sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" 2>&1 >&2
   gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
   # Post the handover summary and exit — the guard diagnostic is already on stderr.
   # (The needs-human handover block below handles the summary post.)
-  guard_ok=0
-else
-  guard_ok=1
 fi
 ```
 

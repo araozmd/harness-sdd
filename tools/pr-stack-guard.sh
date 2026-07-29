@@ -43,13 +43,21 @@ usage() {
 [ "$1" = evaluate ] || usage
 shift
 pr_json="$1"; open_json="$2"; shift 2
-default_branch="main"
+default_branch=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --default-branch) [ $# -ge 2 ] || usage; default_branch="$2"; shift 2 ;;
     *) printf 'pr-stack-guard.sh: unknown argument: %s\n' "$1" >&2; usage ;;
   esac
 done
+
+# The caller must supply the repository's actual default branch. A hard-coded "main"
+# would misclassify every ordinary PR in a repo whose default is something else, so the
+# guard refuses to guess. The pr-loop resolves the default once per round with gh.
+if [ -z "$default_branch" ]; then
+  printf 'pr-stack-guard.sh: --default-branch is required\n' >&2
+  usage
+fi
 
 [ -f "$pr_json" ]   || { printf 'pr-stack-guard.sh: no such file: %s\n' "$pr_json" >&2; exit 4; }
 [ -f "$open_json" ] || { printf 'pr-stack-guard.sh: no such file: %s\n' "$open_json" >&2; exit 4; }
