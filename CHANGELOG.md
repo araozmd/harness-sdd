@@ -4,6 +4,28 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.46.1] — 2026-07-28
+
+### Fixed — 🐛 the `/sdd-pr-loop` first-response probe is scoped to the current round (E99-F05)
+- `tools/wait-for-codex.sh` arms a first-response probe (`HARNESS_FIRST_RESPONSE`, default
+  180s) whose job is to exit `5` with a named remedy when the Codex GitHub App cannot answer
+  at all — instead of making the caller wait out the full 900s ceiling for a review that can
+  never arrive.
+- `wfc_bot_seen` counted Codex issue comments and reviews with **no freshness filter**, and
+  an earlier round's comments and reviews never leave the PR. So from round 2 on, the probe
+  was disarmed on the very first poll by activity that predated the round's `@codex review`,
+  and a repo whose App had gone away produced a plain timeout (exit `2`) instead of the
+  missing-App diagnostic. Observed live on PR #68, rounds 2–6.
+- Both counts are now filtered by the round's trigger timestamp — the same `trigger-ts.txt`
+  anchor the resolution conditions already use (`created_at` for issue comments, `submittedAt`
+  for reviews). An empty anchor (the no-trigger-id compat path) keeps the filter a no-op.
+- The reaction check is deliberately left **unfiltered**: `reactions.json` is fetched per poll
+  from *this* round's trigger comment id, so a 👀 there is round-scoped by construction and
+  still counts as a first response.
+- No change to the exit-code contract (`0` findings / `1` pending / `2` timeout / `3` clean /
+  `4` usage / `5` no-first-response), the freshness guards, the three clean-signal forms, or
+  the exact-literal bot-login match.
+
 ## [0.46.0] — 2026-07-28
 
 ### Added — ✨ `/sdd-pr-loop` reports whether the review is converging (E21-F03)
