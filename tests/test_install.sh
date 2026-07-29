@@ -614,43 +614,27 @@ grep -qF '.harness/agents/orchestrator.md' "$T/.agents/rules/harness.md" || fail
 # R3: rule points at canonical roles, no copied role body (sentinel must be ABSENT).
 grep -qF "$AG_SENTINEL" "$T/.agents/rules/harness.md" && fail "antigravity rule embeds a copied role body (R3)"
 
-# R4/R5 (best-effort, SHAPE only — never registration): one persona per role, each with a
-# `description`, deferring to .harness/agents/<role>.md, mandating init.sh + progress/ hand-off,
-# with no copied role body. Bare-file persona discovery is unconfirmed, so these assert shape
-# (correct plural dir, description, defers to canonical role, sentinel absent) — NOT that the
-# persona registers as an Antigravity subagent.
-for r in orchestrator architect builder reviewer scout doc-critic; do
-  [ -f "$T/.agents/agents/$r.md" ]                       || fail "antigravity persona $r missing (R4)"
-  grep -qE '^description:' "$T/.agents/agents/$r.md"      || fail "antigravity persona $r has no description (R4)"
-  grep -qF ".harness/agents/$r.md" "$T/.agents/agents/$r.md" || fail "antigravity persona $r does not defer to .harness/agents/$r.md (R5)"
-  grep -qF '.harness/init.sh' "$T/.agents/agents/$r.md"  || fail "antigravity persona $r does not mandate .harness/init.sh (R5)"
-  grep -qF '.harness/progress/' "$T/.agents/agents/$r.md" || fail "antigravity persona $r does not hand off via .harness/progress/ (R5)"
-  grep -qF "$AG_SENTINEL" "$T/.agents/agents/$r.md"      && fail "antigravity persona $r embeds a copied role body (R5)"
-done
-
-# R6/R7: all five workflows generated, each carrying a `description` (slash-command registration).
+# R6/R7: all workflows generated as skills, each carrying a `name` and `description` frontmatter.
 for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-loop; do
-  [ -f "$T/.agents/workflows/$w.md" ]                    || fail "antigravity workflow $w missing (R6)"
-  grep -qE '^description:' "$T/.agents/workflows/$w.md"   || fail "antigravity workflow $w has no description (R7)"
-  grep -qF '$ARGUMENTS' "$T/.agents/workflows/$w.md"      || fail "antigravity workflow $w does not carry \$ARGUMENTS (R8)"
+  [ -f "$T/.agents/skills/$w/SKILL.md" ]                    || fail "antigravity skill $w missing (R6)"
+  grep -qE '^description:' "$T/.agents/skills/$w/SKILL.md"   || fail "antigravity skill $w has no description (R7)"
+  grep -qE '^name: '"$w"'$' "$T/.agents/skills/$w/SKILL.md"  || fail "antigravity skill $w has no name frontmatter"
+  grep -qF '$ARGUMENTS' "$T/.agents/skills/$w/SKILL.md"      || fail "antigravity skill $w does not carry \$ARGUMENTS (R8)"
 done
-# E18-F01 R13/R52: the gated pr-fixer persona is emitted for antigravity too, pointing at
-# the canonical role — and it is NOT part of the model-routing persona map.
-[ -f "$T/.agents/agents/pr-fixer.md" ] || fail "antigravity pr-fixer persona missing (E18-F01 R13)"
-grep -qF '.harness/agents/pr-fixer.md' "$T/.agents/agents/pr-fixer.md" \
-  || fail "antigravity pr-fixer persona does not defer to .harness/agents/pr-fixer.md" 
 
 # R8: each workflow acts as its role, resolved against .harness/agents/*.md.
-grep -qF '.harness/agents/orchestrator.md' "$T/.agents/workflows/sdd-next.md" || fail "sdd-next workflow does not resolve orchestrator against .harness/ (R8)"
-grep -qF '.harness/agents/inception.md'    "$T/.agents/workflows/sdd-new.md"  || fail "sdd-new workflow does not resolve inception against .harness/ (R8)"
-grep -qF '.harness/agents/planner.md'      "$T/.agents/workflows/sdd-plan.md" || fail "sdd-plan workflow does not resolve planner against .harness/ (R8)"
-grep -qF '.harness/agents/driller.md'      "$T/.agents/workflows/sdd-drill.md" || fail "sdd-drill workflow does not resolve driller against .harness/ (R8)"
-grep -qF '.harness/agents/fixer.md'        "$T/.agents/workflows/sdd-fix.md"  || fail "sdd-fix workflow does not resolve fixer against .harness/ (R8)"
-grep -qF '.harness/agents/fixer.md' "$T/.agents/workflows/sdd-fix-parallel.md" || fail "sdd-fix-parallel workflow does not resolve fixer"
+grep -qF '.harness/agents/orchestrator.md' "$T/.agents/skills/sdd-next/SKILL.md" || fail "sdd-next skill does not resolve orchestrator against .harness/ (R8)"
+grep -qF '.harness/agents/inception.md'    "$T/.agents/skills/sdd-new/SKILL.md"  || fail "sdd-new skill does not resolve inception against .harness/ (R8)"
+grep -qF '.harness/agents/planner.md'      "$T/.agents/skills/sdd-plan/SKILL.md" || fail "sdd-plan skill does not resolve planner against .harness/ (R8)"
+grep -qF '.harness/agents/driller.md'      "$T/.agents/skills/sdd-drill/SKILL.md" || fail "sdd-drill skill does not resolve driller against .harness/ (R8)"
+grep -qF '.harness/agents/fixer.md'        "$T/.agents/skills/sdd-fix/SKILL.md"  || fail "sdd-fix skill does not resolve fixer against .harness/ (R8)"
+grep -qF '.harness/agents/fixer.md' "$T/.agents/skills/sdd-fix-parallel/SKILL.md" || fail "sdd-fix-parallel skill does not resolve fixer"
 
-# R9: each workflow body is byte-identical to the Claude command of the same name (no drift).
+# R9: each skill body (ignoring injected name frontmatter) is identical to the Claude command.
 for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-loop; do
-  cmp -s "$T/.claude/commands/$w.md" "$T/.agents/workflows/$w.md" || fail "antigravity workflow $w differs from claude $w (R9)"
+  sed '/^name: /d' "$T/.agents/skills/$w/SKILL.md" > "$T/.agents/skills/$w/SKILL_tmp.md"
+  cmp -s "$T/.claude/commands/$w.md" "$T/.agents/skills/$w/SKILL_tmp.md" || fail "antigravity skill $w differs from claude $w (R9)"
+  rm -f "$T/.agents/skills/$w/SKILL_tmp.md"
 done
 pass "Antigravity glue generated (R11)"
 
@@ -658,7 +642,7 @@ pass "Antigravity glue generated (R11)"
 # target (Claude/OpenCode/Antigravity here; Codex GLOBAL prompts in the codex-select case),
 # byte-identical, and each carries the --mine wiring + forwards $ARGUMENTS. The cmp -s chains
 # above prove byte-identity across targets; assert the scope token reached each generated body.
-for _b in "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" "$T/.agents/workflows/sdd-next.md"; do
+for _b in "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" "$T/.agents/skills/sdd-next/SKILL.md"; do
   grep -qF -- '--mine' "$_b"      || fail "generated /sdd-next glue missing --mine scope wiring: $_b (E10-F01 R12/R13)"
   grep -qF '$ARGUMENTS' "$_b"     || fail "generated /sdd-next glue does not forward \$ARGUMENTS: $_b (E10-F01 R13)"
 done
@@ -1199,26 +1183,24 @@ pass "antigravity deselect is a no-op, never deletes a user-authored .agents/ (C
 
 # antigravity_deselect_is_byte_exact (R13, Codex r2 P1 #3404240336): a pre-this-version
 # no-op antigravity install can leave `antigravity` persisted in .harness/.agents while
-# the user authored their OWN .agents/agents/<role>.md with a STANDARD name. On deselect,
+# the user authored their OWN .agents/skills/<skill>/SKILL.md with a STANDARD name. On deselect,
 # the .agents/ glue removal must be byte-compare-and-remove (like opencode.json) — delete
 # ONLY a pristine harness-generated file, NEVER a user file that merely shares the name.
 TPB="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 sh "$SRC/harness-install.sh" --agents=antigravity "$TPB" >/dev/null || fail "ag-exact setup install failed"
-[ -f "$TPB/.agents/agents/builder.md" ]   || fail "ag-exact setup: generated builder persona missing"
-[ -f "$TPB/.agents/agents/reviewer.md" ]  || fail "ag-exact setup: generated reviewer persona missing"
-[ -f "$TPB/.agents/workflows/sdd-next.md" ] || fail "ag-exact setup: generated sdd-next workflow missing"
-# User overwrites builder.md with their OWN distinctive content (a standard-named file).
-printf 'MY CUSTOM ANTIGRAVITY BUILDER\n' > "$TPB/.agents/agents/builder.md"
+[ -f "$TPB/.agents/skills/sdd-next/SKILL.md" ] || fail "ag-exact setup: generated sdd-next skill missing"
+[ -f "$TPB/.agents/skills/sdd-plan/SKILL.md" ] || fail "ag-exact setup: generated sdd-plan skill missing"
+# User overwrites sdd-next/SKILL.md with their OWN distinctive content (a standard-named file).
+printf 'MY CUSTOM ANTIGRAVITY SKILL\n' > "$TPB/.agents/skills/sdd-next/SKILL.md"
 # Deselect antigravity.
 sh "$SRC/harness-install.sh" --agents=claude "$TPB" >/dev/null 2>&1 || fail "ag-exact deselect rerun failed"
 # User-authored, standard-named file SURVIVES with its content intact.
-[ -f "$TPB/.agents/agents/builder.md" ]                       || fail "Codex r2 P1: user-authored .agents/agents/builder.md was wrongly deleted on deselect"
-grep -qF 'MY CUSTOM ANTIGRAVITY BUILDER' "$TPB/.agents/agents/builder.md" || fail "Codex r2 P1: user-authored builder.md content not preserved"
-# Pristine harness-generated glue (persona + workflow + rule) IS removed.
-[ -f "$TPB/.agents/agents/reviewer.md" ]  && fail "Codex r2 P1: pristine generated reviewer persona must be removed on deselect"
-[ -f "$TPB/.agents/workflows/sdd-next.md" ] && fail "Codex r2 P1: pristine generated sdd-next workflow must be removed on deselect"
+[ -f "$TPB/.agents/skills/sdd-next/SKILL.md" ]                       || fail "Codex r2 P1: user-authored .agents/skills/sdd-next/SKILL.md was wrongly deleted on deselect"
+grep -qF 'MY CUSTOM ANTIGRAVITY SKILL' "$TPB/.agents/skills/sdd-next/SKILL.md" || fail "Codex r2 P1: user-authored sdd-next/SKILL.md content not preserved"
+# Pristine harness-generated glue (skill + rule) IS removed.
+[ -f "$TPB/.agents/skills/sdd-plan/SKILL.md" ]  && fail "Codex r2 P1: pristine generated sdd-plan skill must be removed on deselect"
 [ -f "$TPB/.agents/rules/harness.md" ]    && fail "Codex r2 P1: pristine generated .agents/rules/harness.md must be removed on deselect"
-# The .agents/ tree survives because the user file kept .agents/agents/ non-empty.
+# The .agents/ tree survives because the user file kept .agents/skills/ non-empty.
 [ -d "$TPB/.agents" ]                    || fail "Codex r2 P1: .agents/ wrongly removed while a user file remains"
 rm -rf "$TPB"
 pass "antigravity deselect deletes only byte-pristine .agents/ glue, keeps user files (Codex r2 P1)"
@@ -1394,7 +1376,7 @@ test_no_models_block_is_byte_identical() {   # R11
   # Explicit negatives: an unconfigured target grows NO model key and NO new directory.
   grep -rq '^model:' "$_ta/.claude/agents"  && fail "R11: unconfigured install stamped a model: in .claude/agents"
   grep -q '"model"' "$_ta/opencode.json"    && fail "R11: unconfigured install stamped a model member in opencode.json"
-  grep -rq '^model:' "$_ta/.agents/agents"  && fail "R11: unconfigured install stamped a model: in .agents/agents"
+
   [ -d "$_ta/.gemini/agents" ]              && fail "R11: unconfigured install created .gemini/agents/"
   [ -d "$_ta/.codex/agents" ]               && fail "R11: unconfigured install created .codex/agents/"
   [ -f "$_ta/.harness/.opencode.stamp" ]    && fail "R11: unconfigured install created .harness/.opencode.stamp"

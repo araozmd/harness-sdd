@@ -3660,49 +3660,28 @@ EOF
   # OpenCode (§5b), so the three front-ends stay byte-identical (R9). Placed after §5b and
   # before the CMDDIR cleanup so the workflow bodies are still available. (E07-F01 R2,R4,R6.)
   if agent_selected antigravity; then
-    mkdir -p "$TARGET/.agents/rules" "$TARGET/.agents/agents" "$TARGET/.agents/workflows"
+    mkdir -p "$TARGET/.agents/rules" "$TARGET/.agents/skills"
 
     # Entrypoint rule (R2/R3): points the agent at the source of truth + entry role;
     # mandates init.sh first. No copied role body — references by .harness/ path only.
     # Body lives in gen_ag_rule (hoisted) so the §7 deselect compare can reproduce it.
     gen_ag_rule "$TARGET/.agents/rules/harness.md"
 
-    # Personas (R4/R5 — best-effort): one per harness role, each with a `description` + a
-    # body that DEFERS to the canonical .harness/agents/<role>.md, mandates init.sh-first +
-    # halt-on-fail, and hands off via .harness/progress/. No copied role body. Bare-file
-    # persona discovery is UNCONFIRMED, so these are written (cheap, possibly honored) but
-    # the harness does not claim they register as subagents — the durable model is the rule
-    # + the `description`-gated workflows (R12). Descriptions come from ag_personas (the
-    # single role→description source, shared with the §7 deselect compare so they can never
-    # diverge).
-    ag_personas | while IFS='	' read -r _agr _agd; do
-      [ -n "$_agr" ] || continue
-      gen_ag_persona "$_agr" "$_agd" "$TARGET/.agents/agents/$_agr.md"
-    done
-
-    # Workflows (R6/R7/R8/R9): COPY the shared command bodies from CMDDIR (mirror, like
-    # the OpenCode block — do not re-author). The bodies already begin with their own
-    # `---\ndescription: …\n---` frontmatter, which satisfies Antigravity's slash-command
-    # registration (R7), and they already act as their role resolved against
-    # .harness/agents/*.md carrying $ARGUMENTS (R8). A `cp` keeps them byte-identical to
-    # the Claude/OpenCode copies so the front-ends stay byte-identical.
+    # Skills (R6/R7/R8/R9): COPY the shared command bodies from CMDDIR and inject `name` frontmatter.
     for _w in $HARNESS_SDD_CMDS; do
-      cp "$CMDDIR/$_w.md" "$TARGET/.agents/workflows/$_w.md"
+      mkdir -p "$TARGET/.agents/skills/$_w"
+      awk 'NR==2 {print "name: '"$_w"'"} 1' "$CMDDIR/$_w.md" > "$TARGET/.agents/skills/$_w/SKILL.md"
     done
 
-    # Gated pr_loop glue (E18-F01 R2/R13): the /sdd-pr-loop workflow + the pr-fixer
-    # persona. gen_ag_persona is called HERE, deliberately OUTSIDE the ag_personas loop
-    # above — adding a `pr-fixer` row to ag_personas would also create
-    # `.gemini/agents/pr-fixer.md` and `.codex/agents/pr-fixer.toml` (§5e/§5f iterate the
-    # same map) and break E17-F01 R11. The persona is emitted, never model-routed (R14).
+    # Gated pr_loop glue (E18-F01 R2/R13): the /sdd-pr-loop workflow.
     if pr_loop_enabled; then
       for _w in $HARNESS_PR_LOOP_CMDS; do
-        cp "$CMDDIR/$_w.md" "$TARGET/.agents/workflows/$_w.md"
+        mkdir -p "$TARGET/.agents/skills/$_w"
+        awk 'NR==2 {print "name: '"$_w"'"} 1' "$CMDDIR/$_w.md" > "$TARGET/.agents/skills/$_w/SKILL.md"
       done
-      gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$TARGET/.agents/agents/pr-fixer.md"
     fi
 
-    ok "Antigravity glue (rules + agents + workflows) installed (.agents/)"
+    ok "Antigravity glue (rules + skills) installed (.agents/)"
   fi
 
   # ── 5d. Codex CLI prompts (GLOBAL, gated on `codex`) ─────────────────────────
@@ -3963,30 +3942,18 @@ EOF
           # rule
           gen_ag_rule "$_agtmp"
           remove_if_pristine .agents/rules/harness.md "$_agtmp" antigravity
-          # personas — compare each against its freshly-generated body (same source
-          # role→description map as the install loop, so no divergence).
-          ag_personas | while IFS='	' read -r _agr _agd; do
-            [ -n "$_agr" ] || continue
-            gen_ag_persona "$_agr" "$_agd" "$_agtmp"
-            remove_if_pristine ".agents/agents/$_agr.md" "$_agtmp" antigravity
-          done
-          # pr-fixer (E18-F01 R4): emitted OUTSIDE ag_personas (see §5c), so reclaim it
-          # outside the loop too — same emitter, same pristine-only contract.
-          gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$_agtmp"
-          remove_if_pristine ".agents/agents/pr-fixer.md" "$_agtmp" antigravity
-          # workflows — the install path `cp`s these verbatim from $CMDDIR, so the
-          # pristine reference is the still-present $CMDDIR/<name>.md source bytes.
-          # HARNESS_OWNED_CMDS so a stamped `sdd-pr-loop` workflow is reclaimable too.
+          # skills — compare against awk-injected files
           for _agw in $HARNESS_OWNED_CMDS; do
             [ -f "$CMDDIR/$_agw.md" ] || continue
-            remove_if_pristine ".agents/workflows/$_agw.md" "$CMDDIR/$_agw.md" antigravity
+            awk 'NR==2 {print "name: '"$_agw"'"} 1' "$CMDDIR/$_agw.md" > "$_agtmp"
+            remove_if_pristine ".agents/skills/$_agw/SKILL.md" "$_agtmp" antigravity
+            rmdir "$TARGET/.agents/skills/$_agw" 2>/dev/null || true
           done
           rm -f "$_agtmp"
           # Prune each now-empty `.agents/` subdir + the parent, only when empty
           # (never `rm -rf` — preserve any user files left in place above).
           rmdir "$TARGET/.agents/rules" 2>/dev/null || true
-          rmdir "$TARGET/.agents/agents" 2>/dev/null || true
-          rmdir "$TARGET/.agents/workflows" 2>/dev/null || true
+          rmdir "$TARGET/.agents/skills" 2>/dev/null || true
           rmdir "$TARGET/.agents" 2>/dev/null || true   # prune parent only if now empty
           # GEMINI.md is SHARED with gemini (E07-F01 R1/R12). Antigravity owns it as
           # an in-repo entrypoint too, so remove it on antigravity deselection ONLY
