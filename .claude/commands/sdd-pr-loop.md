@@ -526,33 +526,35 @@ The guard is called with JSON the pr-loop already fetches; the only additional n
 call is a lightweight `gh pr list`.
 
 ```bash
-# Stacked-PR merge-order guard (E21-F04 R2): only invoked when the PR is actually
-# stacked — i.e. its baseRefName is the head of another open PR. A PR targeting the
-# default branch or a long-lived release/integration branch follows the normal path.
-# Fail closed on every error: a guard that cannot prove safety must not authorize a merge.
+# Stacked-PR merge-order guard (E21-F04 R2). Fail closed on every error: a guard that
+# cannot prove safety must not authorize a merge.
 default_branch="${default_branch:-$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo '')}"
-base_ref="$(jq -r '.baseRefName // ""' ".pr-loop/$pr_number/round-$round/pr.json" 2>/dev/null || echo '')"
-is_stacked=0
 guard_ok=1
-if [ -n "$base_ref" ] && [ "$base_ref" != "$default_branch" ]; then
+guard_deferred=0
+# Require a readable base. A missing or corrupt round cache that produces an empty
+# base_ref must not silently authorize a merge — it is indistinguishable from
+# "targeting the default branch", and that is exactly the path that would bypass
+# the guard for a stacked child.
+if ! base_ref="$(jq -r '.baseRefName // ""' ".pr-loop/$pr_number/round-$round/pr.json" 2>/dev/null)" || [ -z "$base_ref" ]; then
+  guard_ok=0
+  echo "sdd-pr-loop: merge refused — could not read baseRefName from round cache" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+elif [ "$base_ref" = "$default_branch" ]; then
+  : # targeting the default branch — not stacked, guard_ok stays 1
+elif [ -n "$base_ref" ]; then
   open_prs_json=".pr-loop/$pr_number/open-prs.json"
-  if ! gh pr list --state open --json number,headRefName > "$open_prs_json" 2>/dev/null; then
-    # Fail closed: an open-PR list we could not fetch is not an empty one. A child
-    # whose parent is still open would bypass the guard and merge out of order.
+  if ! gh pr list --state open --json number,headRefName --limit 1000 > "$open_prs_json" 2>/dev/null; then
     guard_ok=0
     echo "sdd-pr-loop: merge refused — could not fetch open PR list" >&2
     gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-  elif jq -e --arg b "$base_ref" 'map(select(.headRefName == $b)) | length > 0' "$open_prs_json" >/dev/null 2>&1; then
-    is_stacked=1
+  else
     guard_rc=0
     sh tools/pr-stack-guard.sh evaluate ".pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" || guard_rc=$?
     if [ "$guard_rc" = 0 ]; then
-      guard_ok=1
+      : # guard_ok stays 1
     elif [ "$guard_rc" = 6 ]; then
-      # Exit 6 is the normal "parent still open" state — the guard did its job,
-      # the stack is healthy, and the child waits for the parent. Do not escalate
-      # to needs-human; the child will retry after the parent lands.
       guard_ok=0
+      guard_deferred=1
       echo "sdd-pr-loop: merge deferred — parent PR is still open (guard exit 6)" >&2
       sh tools/pr-stack-guard.sh evaluate ".pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" 2>&1 >&2
     else
@@ -572,7 +574,14 @@ eligibility — so cleanup never runs on a failed or pending merge:
 ```bash
 merged=0
 if [ "${guard_ok:-1}" != "1" ]; then
-  echo "merge-order guard refused — needs-human, not merging" >&2
+  if [ "${guard_deferred:-0}" = "1" ]; then
+    # Exit 6 from pr-stack-guard.sh — parent is still open, which is a normal
+    # waiting state in a healthy stack. Report it and exit gracefully without
+    # needs-human; the child retries after the parent lands.
+    echo "sdd-pr-loop: merge deferred — parent PR is still open" >&2
+  else
+    echo "merge-order guard refused — needs-human, not merging" >&2
+  fi
 elif [ "${merge_ok:-0}" != "1" ]; then
   echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
 elif [ "${merge_strategy:-merge}" = "squash" ]; then
