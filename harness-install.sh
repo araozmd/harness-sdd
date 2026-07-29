@@ -2570,6 +2570,24 @@ EOF
     cp "$3" "$H/.model-agents/$1/$2"
   }
 
+  # Codex's project-local role namespace is shared with the operator. Reject symlinks
+  # at every destination component before an ownership comparison or write: `test -f`,
+  # `cmp`, and redirection all follow them. `test -L` detects both live and dangling
+  # links without dereferencing their external targets.
+  codex_agent_tree_is_symlinked() {
+    [ -L "$TARGET/.codex" ] || [ -L "$TARGET/.codex/agents" ]
+  }
+
+  codex_agent_destination_is_symlinked() {
+    codex_agent_tree_is_symlinked || [ -L "$TARGET/.codex/agents/$1" ]
+  }
+
+  discard_codex_agent_stamp() {
+    rm -f "$H/.model-agents/codex/$1"
+    rmdir "$H/.model-agents/codex" 2>/dev/null || true
+    rmdir "$H/.model-agents" 2>/dev/null || true
+  }
+
   # install_codex_agent <file> <candidate> — selected Codex installs replace a role
   # only when ownership is safe: the path is absent, already equals the current
   # generated body, or still equals the last body this installer stamped.
@@ -2577,6 +2595,11 @@ EOF
     _ica_file="$1"; _ica_src="$2"
     _ica_dest="$TARGET/.codex/agents/$_ica_file"
     _ica_stamp="$H/.model-agents/codex/$_ica_file"
+    if codex_agent_destination_is_symlinked "$_ica_file"; then
+      echo "⚠️  .codex/agents/$_ica_file has a symlinked destination component — selected Codex install left it unchanged" >&2
+      discard_codex_agent_stamp "$_ica_file"
+      return 0
+    fi
     _ica_safe=0
     if [ ! -e "$_ica_dest" ]; then
       _ica_safe=1
@@ -2612,11 +2635,21 @@ EOF
     esac
     _rma_sub="$_rma_top/agents"
     _rma_stamp="$H/.model-agents/$_rma_fe"
-    if [ -d "$TARGET/$_rma_sub" ]; then
+    _rma_tree_safe=1
+    if [ "$_rma_fe" = codex ] && codex_agent_tree_is_symlinked; then
+      _rma_tree_safe=0
+      echo "⚠️  $_rma_sub has a symlinked destination component — left in place (deselected '$_rma_fe' not removed)" >&2
+    fi
+    if [ "$_rma_tree_safe" = 1 ] && [ -d "$TARGET/$_rma_sub" ]; then
       _rma_tmp="$(mktemp 2>/dev/null || mktemp -t harness-ma)"
       _rma_gone="$(ag_personas | while IFS='	' read -r _rma_r _rma_d; do
         [ -n "$_rma_r" ] || continue
         _rma_f="$_rma_r.$_rma_ext"
+        if [ "$_rma_fe" = codex ] \
+           && codex_agent_destination_is_symlinked "$_rma_f"; then
+          echo "⚠️  $_rma_sub/$_rma_f is a symlinked destination — left in place (deselected '$_rma_fe' not removed)" >&2
+          continue
+        fi
         [ -f "$TARGET/$_rma_sub/$_rma_f" ] || continue
         if [ "$_rma_fe" = codex ]; then
           # Codex lives in a shared project-local namespace. Reclamation requires the
@@ -3767,6 +3800,28 @@ policy:
 EOF
   }
 
+  # A Codex skill is an ownership unit rooted in a shared repository namespace. Reject
+  # any symlinked writable component or destination file before generation, comparison,
+  # stamping, reclamation, or writes.
+  codex_skill_destination_is_symlinked() {
+    _csd_cmd="$1"
+    _csd_live="$TARGET/.agents/skills/$_csd_cmd"
+    [ -L "$TARGET/.agents" ] \
+      || [ -L "$TARGET/.agents/skills" ] \
+      || [ -L "$_csd_live" ] \
+      || [ -L "$_csd_live/SKILL.md" ] \
+      || [ -L "$_csd_live/agents" ] \
+      || [ -L "$_csd_live/agents/openai.yaml" ]
+  }
+
+  discard_codex_skill_stamp() {
+    _dcs_stamp="$H/.codex-skills/$1"
+    rm -f "$_dcs_stamp/SKILL.md" "$_dcs_stamp/agents/openai.yaml"
+    rmdir "$_dcs_stamp/agents" 2>/dev/null || true
+    rmdir "$_dcs_stamp" 2>/dev/null || true
+    rmdir "$H/.codex-skills" 2>/dev/null || true
+  }
+
   # install_codex_skill <command> — manage SKILL.md + agents/openai.yaml as one
   # ownership unit. Both artifacts are updated only when each existing path is current
   # generated output or matches its last-written stamp.
@@ -3774,6 +3829,11 @@ EOF
     _ics_cmd="$1"
     _ics_live="$TARGET/.agents/skills/$_ics_cmd"
     _ics_stamp="$H/.codex-skills/$_ics_cmd"
+    if codex_skill_destination_is_symlinked "$_ics_cmd"; then
+      echo "⚠️  .agents/skills/$_ics_cmd has a symlinked destination component — selected Codex install left the skill unit unchanged" >&2
+      discard_codex_skill_stamp "$_ics_cmd"
+      return 0
+    fi
     _ics_tmp="$(mktemp -d 2>/dev/null || mktemp -d -t harness-codex-skill)"
     mkdir -p "$_ics_tmp/agents"
     gen_codex_skill "$_ics_cmd" "$_ics_tmp/SKILL.md"
@@ -3822,6 +3882,12 @@ EOF
       _rcs_policy="$_rcs_live/agents/openai.yaml"
       _rcs_policy_stamp="$_rcs_stamp/agents/openai.yaml"
       _rcs_skill_survives=0
+
+      if codex_skill_destination_is_symlinked "$_rcs_cmd"; then
+        echo "⚠️  .agents/skills/$_rcs_cmd has a symlinked destination component — skill unit left in place" >&2
+        discard_codex_skill_stamp "$_rcs_cmd"
+        continue
+      fi
 
       if [ -e "$_rcs_skill" ]; then
         if [ -f "$_rcs_skill" ] && [ -f "$_rcs_skill_stamp" ] \
@@ -3935,11 +4001,24 @@ EOF
   # inherits or its tier is unpinned, and adds it only for a concrete resolved pin.
   if agent_selected codex; then
     _codex_agent_tmp="$(mktemp 2>/dev/null || mktemp -t harness-codex-agent)"
-    ag_personas | while IFS='	' read -r _cxr _cxd; do
-      [ -n "$_cxr" ] || continue
-      gen_codex_agent "$_cxr" "$_cxd" "$_codex_agent_tmp"
-      install_codex_agent "$_cxr.toml" "$_codex_agent_tmp"
-    done
+    if codex_agent_tree_is_symlinked; then
+      echo "⚠️  .codex/agents has a symlinked destination component — selected Codex install left role definitions unchanged" >&2
+      ag_personas | while IFS='	' read -r _cxr _cxd; do
+        [ -n "$_cxr" ] || continue
+        discard_codex_agent_stamp "$_cxr.toml"
+      done
+    else
+      ag_personas | while IFS='	' read -r _cxr _cxd; do
+        [ -n "$_cxr" ] || continue
+        if codex_agent_destination_is_symlinked "$_cxr.toml"; then
+          echo "⚠️  .codex/agents/$_cxr.toml is a symlinked destination — selected Codex install left it unchanged" >&2
+          discard_codex_agent_stamp "$_cxr.toml"
+          continue
+        fi
+        gen_codex_agent "$_cxr" "$_cxd" "$_codex_agent_tmp"
+        install_codex_agent "$_cxr.toml" "$_codex_agent_tmp"
+      done
+    fi
     rm -f "$_codex_agent_tmp"
     ok "Codex per-role agent definitions installed (.codex/agents/ — project-local)"
   fi
