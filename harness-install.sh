@@ -3001,10 +3001,12 @@ description: Probe whether this OpenCode session can run subagents concurrently
 Run a concurrency probe. This command spawns two trivial subagents and measures whether
 OpenCode executes them in parallel.
 
-1. Prepare a temp directory under `.harness/progress/opencode-concurrency-probe/`
+1. Run `./.harness/init.sh` from the project root. If it exits non-zero, STOP: the harness
+   considers this environment broken and the probe must not write a capability marker.
+2. Prepare a temp directory under `.harness/progress/opencode-concurrency-probe/`
    (remove any previous probe first). This lives in the Scout role's allowed output area
    so the subagents do not have to violate their read-only contract.
-2. Spawn **two** identical `scout` subagents **in the same response / at the same time**
+3. Spawn **two** identical `scout` subagents **in the same response / at the same time**
    using the `task` tool. Give each subagent this exact job, with its own index `N` (1 or
    2) and the temp directory `DIR`:
 
@@ -3015,15 +3017,15 @@ OpenCode executes them in parallel.
 
    Do not read files, do not run tests, do not modify source code. The only output must
    be the four timestamp files.
-3. Wait until **both** subagents finish.
-4. Read the four timestamps and compute the wall-clock span from the earliest start to
+4. Wait until **both** subagents finish.
+5. Read the four timestamps and compute the wall-clock span from the earliest start to
    the latest end.
    - If the span is **less than 8 seconds**, OpenCode ran the subagents concurrently.
    - Otherwise, OpenCode ran them sequentially.
-5. Write the result to `.harness/.opencode-parallel` as exactly one word:
+6. Write the result to `.harness/.opencode-parallel` as exactly one word:
    - `supported`   (concurrent)
    - `sequential`  (sequential)
-6. Report the result to the human:
+7. Report the result to the human:
     - **concurrent**: `/sdd-fix-parallel` is supported. Re-run the installer with
       `--with-opencode-parallel=true` to stamp it, or just re-run the installer if the marker
       already says `supported`.
@@ -3903,11 +3905,24 @@ EOF
           reclaim_model_agents gemini
           ;;
         opencode)
-          remove_owned .opencode/command opencode $HARNESS_OWNED_CMDS sdd-test-concurrency
-          # E18-F01 R4/R7: `.opencode/agent/` is a pr_loop-owned dir. By-name removal of the
-          # harness stem only, then rmdir the subdir and the parent — each only when empty,
-          # so a user's own file-based agent (and the dir holding it) survives.
-          remove_owned .opencode/agent   opencode pr-fixer
+          # Pristine-only removal: a user-authored file with the same name as a harness
+          # command (e.g. a custom sdd-fix-parallel.md) must survive OpenCode deselection.
+          _oc_tmp="$(mktemp 2>/dev/null || mktemp -t harness-oc)"
+          _oc_removed=''
+          for _oc_cmd in $HARNESS_OWNED_CMDS sdd-test-concurrency; do
+            _oc_rel="$(remove_if_pristine ".opencode/command/$_oc_cmd.md" "$CMDDIR/$_oc_cmd.md" opencode)"
+            [ -n "$_oc_rel" ] && _oc_removed="$_oc_removed $_oc_cmd.md"
+          done
+          # E18-F01 R4/R7: `.opencode/agent/` is a pr_loop-owned dir. Compare the pr-fixer
+          # shim against a freshly-generated body, then rmdir the subdir and the parent —
+          # each only when empty, so a user's own file-based agent survives.
+          gen_oc_agent pr-fixer "$PR_FIXER_DESC" "$_oc_tmp"
+          _oc_rel="$(remove_if_pristine ".opencode/agent/pr-fixer.md" "$_oc_tmp" opencode)"
+          [ -n "$_oc_rel" ] && _oc_removed="$_oc_removed pr-fixer.md"
+          rm -f "$_oc_tmp"
+          [ -n "$_oc_removed" ] && echo "⚠️  removed deselected agent 'opencode' glue:$_oc_removed (in .opencode/)" >&2
+          rmdir "$TARGET/.opencode/agent" 2>/dev/null || true
+          rmdir "$TARGET/.opencode/command" 2>/dev/null || true
           rmdir "$TARGET/.opencode" 2>/dev/null || true   # prune parent only if now empty
           # opencode.json: delete ONLY a file byte-identical to what the installer
           # generates (a pristine, untouched stamp). ANY user edit — even adding a
