@@ -412,6 +412,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F06-progress-gitignore/"
+        },
+        {
+          "id": "E99-F07",
+          "title": "Change-size measurement: remaining path/symlink/coverage gaps from PR #78 review",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F07-change-size-gaps/"
         }
       ]
     },
