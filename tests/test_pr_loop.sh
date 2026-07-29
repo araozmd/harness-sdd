@@ -725,6 +725,32 @@ mk_stub_payload() {
     clean)
       printf '{"headRefOid":"%s","reviews":[{"author":{"login":"chatgpt-codex-connector"},"body":"Reviewed commit: abcdef1 — no findings","submittedAt":"2026-06-01T00:00:00Z"}],"comments":[],"statusCheckRollup":[]}\n' \
         "$_head" > "$_d/pr.json" ;;
+    # ── round-2+ shapes for the first-response probe (E99-F05) ────────────────
+    # The stub resolves the trigger timestamp as $STUB_TRIGGER_TS (default 2026-01-01),
+    # so "stale" = before it (an EARLIER round's Codex activity, still on the PR) and
+    # "fresh" = at/after it (this round's response). None of these bodies contain
+    # "Reviewed commit", so no clean-signal condition can fire and the run reaches the
+    # probe/ceiling decision the assertions are about.
+    stale-round)
+      printf '[[{"id":21,"user":{"login":"chatgpt-codex-connector[bot]"},"created_at":"2025-12-01T00:00:00Z","body":"Round 1: found 2 issues"}]]\n' \
+        > "$_d/issue-comments.page.json"
+      printf '{"headRefOid":"%s","reviews":[{"author":{"login":"chatgpt-codex-connector"},"body":"Round 1 review","submittedAt":"2025-12-01T00:00:00Z"}],"comments":[],"statusCheckRollup":[]}\n' \
+        "$_head" > "$_d/pr.json" ;;
+    stale-round-reacted)
+      printf '[[{"id":21,"user":{"login":"chatgpt-codex-connector[bot]"},"created_at":"2025-12-01T00:00:00Z","body":"Round 1: found 2 issues"}]]\n' \
+        > "$_d/issue-comments.page.json"
+      printf '{"headRefOid":"%s","reviews":[{"author":{"login":"chatgpt-codex-connector"},"body":"Round 1 review","submittedAt":"2025-12-01T00:00:00Z"}],"comments":[],"statusCheckRollup":[]}\n' \
+        "$_head" > "$_d/pr.json"
+      # 👀 on THIS round's trigger comment — the reactions endpoint is keyed by the
+      # current trigger comment id, so this is round-scoped without a timestamp.
+      printf '[{"content":"eyes","user":{"login":"chatgpt-codex-connector[bot]"}}]\n' \
+        > "$_d/reactions.json" ;;
+    fresh-comment)
+      printf '[[{"id":21,"user":{"login":"chatgpt-codex-connector[bot]"},"created_at":"2025-12-01T00:00:00Z","body":"Round 1: found 2 issues"},{"id":22,"user":{"login":"chatgpt-codex-connector[bot]"},"created_at":"2026-02-01T00:00:00Z","body":"Working on it"}]]\n' \
+        > "$_d/issue-comments.page.json" ;;
+    fresh-review)
+      printf '{"headRefOid":"%s","reviews":[{"author":{"login":"chatgpt-codex-connector"},"body":"Round 2 review","submittedAt":"2026-02-01T00:00:00Z"}],"comments":[],"statusCheckRollup":[]}\n' \
+        "$_head" > "$_d/pr.json" ;;
     pending) : ;;
   esac
 }
@@ -844,6 +870,56 @@ test_first_response_probe_disabled() {                # R33
   [ "$_rc" = 2 ] || fail "R33: HARNESS_FIRST_RESPONSE=0 must disable the probe (expected 2, got $_rc)"
   grep -qF 'GitHub App' "$T/.wfr0.err" && fail "R33: the probe fired although it was disabled"
   pass "R33 HARNESS_FIRST_RESPONSE=0 disables the first-response probe entirely"
+}
+
+test_first_response_probe_is_round_scoped() {         # R57
+  # Codex #68 P2 (round 6): `wfc_bot_seen` counted Codex issue comments and reviews with
+  # NO freshness filter, so from round 2 on the PRIOR rounds' comments/reviews — which
+  # never leave the PR — disarmed the probe on the very first poll. A repo whose Codex App
+  # had gone away then polled to the 900s ceiling and returned a plain timeout (exit 2)
+  # instead of the named missing-App remedy (exit 5). Observed live on PR #68 rounds 2–6.
+  if ! have_jq; then skip "test_first_response_probe_is_round_scoped (jq not installed)"; return 0; fi
+
+  # (a) round 2+: only STALE bot activity ⇒ the probe still fires, fast, with the remedy.
+  _t0="$(date +%s)"
+  _rc="$(run_wait wfrr stale-round ok \
+         HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=20 HARNESS_FIRST_RESPONSE=1)"
+  _t1="$(date +%s)"
+  [ "$_rc" = 5 ] \
+    || fail "R57: an earlier round's Codex comments/reviews disarmed the probe (expected 5, got $_rc)"
+  grep -qF 'GitHub App' "$T/.wfrr.err" || fail "R57: the round-2 probe exit does not name the Codex GitHub App"
+  grep -qiF 'timeout' "$T/.wfrr.err" && fail "R57: the round-2 no-response case was reported as a plain timeout"
+  [ "$(( _t1 - _t0 ))" -lt 15 ] || fail "R57: the probe waited out the ceiling instead of failing fast"
+  # the stale sources really were present — otherwise this proves nothing
+  jq -e '[ .[] | select((.user.login // "") == "chatgpt-codex-connector[bot]") ] | length > 0' \
+    "$T/wfrr/round/issue-comments.json" >/dev/null \
+    || fail "R57 setup: no stale bot issue comment was staged"
+  jq -e '[ .reviews[] | select((.author.login // "") == "chatgpt-codex-connector") ] | length > 0' \
+    "$T/wfrr/round/pr.json" >/dev/null \
+    || fail "R57 setup: no stale bot review was staged"
+
+  # (b) the disarm still works on FRESH activity — the fix scopes the probe, it does not
+  #     neuter it. A bot comment/review at-or-after the trigger ⇒ ceiling governs (exit 2).
+  _rc="$(run_wait wfrc fresh-comment ok \
+         HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=2 HARNESS_FIRST_RESPONSE=1)"
+  [ "$_rc" = 2 ] || fail "R57: a FRESH bot issue comment must disarm the probe (expected 2, got $_rc)"
+  grep -qF 'GitHub App' "$T/.wfrc.err" && fail "R57: the probe fired despite a fresh bot issue comment"
+  _rc="$(run_wait wfrv fresh-review ok \
+         HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=2 HARNESS_FIRST_RESPONSE=1)"
+  [ "$_rc" = 2 ] || fail "R57: a FRESH bot review must disarm the probe (expected 2, got $_rc)"
+  grep -qF 'GitHub App' "$T/.wfrv.err" && fail "R57: the probe fired despite a fresh bot review"
+
+  # (c) reactions stay UNFILTERED on purpose: reactions.json is fetched from THIS round's
+  #     trigger comment id, so it is round-scoped by construction and a 👀 there is a first
+  #     response even though the comments/reviews around it are stale.
+  _rc="$(run_wait wfrx stale-round-reacted ok \
+         HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=2 HARNESS_FIRST_RESPONSE=1)"
+  [ "$_rc" = 2 ] \
+    || fail "R57: a reaction on the CURRENT trigger comment must disarm the probe (expected 2, got $_rc)"
+  grep -qF 'GitHub App' "$T/.wfrx.err" && fail "R57: the probe fired despite a reaction on the trigger comment"
+  grep -qF 'issues/comments/$TRIGGER_COMMENT_ID/reactions' "$W" \
+    || fail "R57: reactions are no longer fetched per-round from the trigger comment id"
+  pass "R57 the first-response probe is scoped to the current round (stale activity cannot disarm it)"
 }
 
 test_poll_env_knobs_honored() {                       # R34
@@ -1691,6 +1767,7 @@ test_unresolvable_trigger_ts_exits_4
 test_timeout_exits_2_not_clean
 test_first_response_window_fails_fast
 test_first_response_probe_disabled
+test_first_response_probe_is_round_scoped
 test_poll_env_knobs_honored
 test_non_positive_interval_cannot_spin
 test_stale_reanchored_thread_is_not_a_finding

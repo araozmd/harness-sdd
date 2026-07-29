@@ -398,7 +398,7 @@
         {
           "id": "E99-F05",
           "title": "Scope the pr-loop first-response probe to the current round",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],

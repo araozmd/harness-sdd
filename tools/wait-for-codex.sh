@@ -25,7 +25,8 @@
 # Env knobs (all optional). HARNESS_* names ONLY — no other vendor prefix is read:
 #   HARNESS_POLL_INTERVAL   seconds between polls, MUST be > 0        (default 60)
 #   HARNESS_POLL_CEILING    max seconds to wait before timeout        (default 900 = 15 min)
-#   HARNESS_FIRST_RESPONSE  seconds to wait for ANY Codex activity    (default 180; 0 = off)
+#   HARNESS_FIRST_RESPONSE  seconds to wait for THIS ROUND's Codex    (default 180; 0 = off)
+#                           activity (see wfc_bot_seen)
 #
 # Exit codes (the caller branches on these):
 #   0  → a Codex review with FRESH findings landed on head (created_at >= trigger).
@@ -171,25 +172,41 @@ wfc_evaluate() {
   echo pending
 }
 
-# wfc_bot_seen <round-dir> — exit 0 when ANY Codex activity is visible: any reaction on
-# the trigger comment (Codex adds 👀 on pickup), any bot issue comment, any bot review.
-# This is deliberately broader than the resolution conditions — it answers "did the app
-# respond at all", not "did it finish" (R32).
+# wfc_bot_seen <round-dir> <trigger-ts> — exit 0 when Codex activity for THIS ROUND is
+# visible: any reaction on the trigger comment (Codex adds 👀 on pickup), any bot issue
+# comment or bot review created at/after the trigger. This is deliberately broader than
+# the resolution conditions — it answers "did the app respond at all", not "did it
+# finish" (R32).
+#
+# The comment/review counts MUST be scoped by <trigger-ts>, exactly like the resolution
+# conditions above. Unscoped, every round after the first sees the PRIOR rounds' Codex
+# comments and reviews still sitting on the PR, disarms the probe on the very first poll,
+# and a repo where the App can no longer answer waits out the full ceiling and reports a
+# plain timeout (exit 2) instead of the missing-App diagnostic (exit 5). ISO-8601
+# timestamps compare correctly as lexical strings; an empty anchor (the no-trigger-id
+# compat path) makes the filter a no-op, preserving the pre-scoping behaviour there.
+#
+# reactions.json needs NO timestamp filter: it is fetched per poll from THIS round's
+# trigger comment id (`issues/comments/$TRIGGER_COMMENT_ID/reactions`), so it is already
+# round-scoped by construction — a reaction there can only have been left in response to
+# the current `@codex review`.
 wfc_bot_seen() {
-  _bs_dir="$1"
+  _bs_dir="$1"; _bs_since="${2:-}"
   if [ -f "$_bs_dir/reactions.json" ]; then
     _bs_n="$(jq '[ .[]? ] | length' "$_bs_dir/reactions.json" 2>/dev/null || echo 0)"
     [ "$(wfc_count "$_bs_n")" -gt 0 ] && return 0
   fi
   if [ -f "$_bs_dir/issue-comments.json" ]; then
-    _bs_n="$(jq --arg bot "$WFC_BOT" --arg botr "$WFC_BOT_REST" \
-      '[ .[]? | select((.user.login // "") == $bot or (.user.login // "") == $botr) ] | length' \
+    _bs_n="$(jq --arg bot "$WFC_BOT" --arg botr "$WFC_BOT_REST" --arg since "$_bs_since" \
+      '[ .[]? | select((.user.login // "") == $bot or (.user.login // "") == $botr)
+              | select($since == "" or ((.created_at // "") >= $since)) ] | length' \
       "$_bs_dir/issue-comments.json" 2>/dev/null || echo 0)"
     [ "$(wfc_count "$_bs_n")" -gt 0 ] && return 0
   fi
   if [ -f "$_bs_dir/pr.json" ]; then
-    _bs_n="$(jq --arg bot "$WFC_BOT" --arg botr "$WFC_BOT_REST" \
-      '[ .reviews[]? | select((.author.login // "") == $bot or (.author.login // "") == $botr) ] | length' \
+    _bs_n="$(jq --arg bot "$WFC_BOT" --arg botr "$WFC_BOT_REST" --arg since "$_bs_since" \
+      '[ .reviews[]? | select((.author.login // "") == $bot or (.author.login // "") == $botr)
+                     | select($since == "" or ((.submittedAt // "") >= $since)) ] | length' \
       "$_bs_dir/pr.json" 2>/dev/null || echo 0)"
     [ "$(wfc_count "$_bs_n")" -gt 0 ] && return 0
   fi
@@ -388,10 +405,11 @@ fetch_sources() {
 
 # First-response probe (R32/R33): the failure this catches is "the Codex GitHub App is
 # not installed on this repo", where `@codex review` is posted and NOTHING ever answers.
-# Without it that costs the full ceiling. Armed only while no bot activity has been seen,
-# disarmed PERMANENTLY on first sighting (so a slow review is never mistaken for a dead
-# app), skipped entirely at 0 (R33) or when the window is not below the ceiling (which
-# already covers that case).
+# Without it that costs the full ceiling. Armed only while no bot activity FOR THIS ROUND
+# has been seen (wfc_bot_seen scopes by the trigger anchor, so an earlier round's comments
+# and reviews cannot disarm it), disarmed PERMANENTLY on first sighting (so a slow review
+# is never mistaken for a dead app), skipped entirely at 0 (R33) or when the window is not
+# below the ceiling (which already covers that case).
 PROBE=1
 if [ "$FIRST_RESPONSE" -eq 0 ]; then PROBE=0; fi
 if [ "$FIRST_RESPONSE" -ge "$CEILING" ]; then PROBE=0; fi
@@ -409,7 +427,7 @@ while :; do
       findings) echo "wait-for-codex: review with findings landed on head (${elapsed}s)" >&2; exit 0 ;;
       clean)    echo "wait-for-codex: clean review, 0 findings (${elapsed}s)" >&2; exit 3 ;;
     esac
-    if [ "$PROBE" = 1 ] && wfc_bot_seen "$ROUND_DIR"; then
+    if [ "$PROBE" = 1 ] && wfc_bot_seen "$ROUND_DIR" "$TRIGGER_TS"; then
       PROBE=0   # disarm permanently — Codex is awake, let the ceiling govern from here
     fi
   else
