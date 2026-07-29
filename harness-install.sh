@@ -3008,9 +3008,9 @@ OpenCode executes them in parallel.
    using the `task` tool. Give each subagent this exact job, with its own index `N` (1 or
    2) and the temp directory `DIR`:
 
-   - Write `date -u +%FT%T.%NZ` to `DIR/start-N.txt`
+   - Write `date -u +%FT%T` to `DIR/start-N.txt`
    - Sleep for 5 seconds
-   - Write `date -u +%FT%T.%NZ` to `DIR/end-N.txt`
+   - Write `date -u +%FT%T` to `DIR/end-N.txt`
    - Report completion
 
    Do not read files, do not run tests, do not modify source code. The only output must
@@ -3024,9 +3024,9 @@ OpenCode executes them in parallel.
    - `supported`   (concurrent)
    - `sequential`  (sequential)
 6. Report the result to the human:
-   - **concurrent**: `/sdd-fix-parallel` is supported. Re-run the installer with
-     `--with-opencode-parallel` to stamp it, or just re-run the installer if the marker
-     already says `supported`.
+    - **concurrent**: `/sdd-fix-parallel` is supported. Re-run the installer with
+      `--with-opencode-parallel=true` to stamp it, or just re-run the installer if the marker
+      already says `supported`.
    - **sequential**: `/sdd-fix-parallel` is NOT supported on this OpenCode setup. Use
      serial `/sdd-fix` for bounded fix batches.
 
@@ -3633,7 +3633,7 @@ EOF
     if opencode_parallel_wanted; then
       ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel installed (.opencode/)"
     else
-      ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-test-concurrency installed (.opencode/); /sdd-fix-parallel skipped (run /sdd-test-concurrency, then re-run installer with --with-opencode-parallel to add it)"
+      ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-test-concurrency installed (.opencode/); /sdd-fix-parallel skipped (run /sdd-test-concurrency, then re-run installer with --with-opencode-parallel=true to add it)"
     fi
     if pr_loop_enabled; then
       for _c in $HARNESS_PR_LOOP_CMDS; do
