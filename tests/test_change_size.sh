@@ -258,6 +258,81 @@ _ju="$("$TOOL" --repo "$RQ2" --base main --format json)"
   || fail "R7d: the C-quoted untracked file was not counted toward the file budget"
 pass "R7d untracked paths git would C-quote are measured, not skipped"
 
+# ── R7e: a TRACKED path git would C-quote is classified on its real name ─────────────────
+# The untracked side was fixed by R7d; the tracked side still parsed plain `--numstat`.
+# `core.quotePath=false` governs non-ASCII bytes only — it does NOT stop git C-quoting a path
+# containing `"`, a backslash or a tab. `src/foo".spec.js` arrived as `"src/foo\".spec.js"`,
+# whose trailing quote defeats the `[._-](test|spec)\.[a-z]+$` suffix rule, so a TEST file was
+# charged to the PRODUCTION budget: the tier silently overstated. `--numstat -z` never encodes.
+#
+# The same fixture pins the two things `-z` changes on the way in:
+#   * a literal TAB now reaches the parser instead of arriving as the two characters `\t`, so
+#     the pathname spans awk fields 3..NF and `$3` alone would truncate it; and
+#   * `-z` reframes RENAMES as an empty path field followed by TWO extra fields, which parsed
+#     naively becomes two or three phantom records instead of one.
+RT="$T/repo-tracked-q"; mkrepo "$RT"
+# Pin rename detection on: the expected total_files depends on the rename folding into ONE
+# record, and a host with diff.renames off would otherwise report an unrelated number.
+git -C "$RT" config diff.renames true
+git -C "$RT" checkout -q -b feature
+mkdir -p "$RT/src"
+_TAB="$(printf '\t')"
+# The two TEST files are the discriminators: each is classified ONLY if its full pathname
+# survives intact. `src/foo".spec.js` needs git's C-quoting gone (the trailing `"` breaks the
+# suffix rule); `src/tab<TAB>bed.spec.js` needs the awk pass to rejoin fields 3..NF (bare `$3`
+# truncates it to `src/tab`, which matches nothing and lands in production).
+n_lines 7 > "$RT/src/foo\".spec.js"             # TEST — quote must not defeat the suffix rule
+n_lines 5 > "$RT/src/tab${_TAB}bed.spec.js"    # TEST — tab must not truncate the suffix away
+n_lines 4 > "$RT/src/tab${_TAB}prod.js"        # production, pathname contains a literal tab
+n_lines 3 > "$RT/src/plain.js"                 # production, ordinary name
+git -C "$RT" mv seed.txt renamed.txt           # a rename: one record, keyed on the destination
+git -C "$RT" add -A && git -C "$RT" commit -qm "paths git would C-quote"
+_jt="$("$TOOL" --repo "$RT" --base main --format json)"
+_gt() { printf '%s' "$_jt" | sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p"; }
+[ "$(_gt test_lines)" = "12" ] \
+  || fail "R7e: test_lines=$(_gt test_lines), expected 12 — a C-quoted or tab-bearing TRACKED test path was charged to production"
+[ "$(_gt production_lines)" = "7" ] \
+  || fail "R7e: production_lines=$(_gt production_lines), expected 7 (4 tab-named + 3 plain + 0 renamed)"
+[ "$(_gt production_files)" = "3" ] \
+  || fail "R7e: production_files=$(_gt production_files), expected 3"
+[ "$(_gt total_files)" = "5" ] \
+  || fail "R7e: total_files=$(_gt total_files), expected 5 — a -z rename must fold into ONE record, not extra phantom ones"
+pass "R7e tracked C-quoted / tab-bearing / renamed paths are classified on their real names"
+
+# ── R7f: --format json survives a TRACKED pathname containing a literal tab ───────────────
+# `-z` removes git's C-quoting, so a real control character now reaches the emitter. A raw tab
+# inside a JSON string is invalid, and the caller only finds out when jq dies — the same
+# machine-interface failure shape R8c exists to prevent, arriving through a new door.
+if command -v jq >/dev/null 2>&1; then
+  printf '%s' "$_jt" | jq -e . >/dev/null 2>&1 \
+    || fail "R7f: --format json emitted unparseable output for a pathname containing a literal tab"
+  printf '%s' "$_jt" | jq -r '.top_production_files[].file' | grep -qF "src/tab${_TAB}prod.js" \
+    || fail "R7f: the tab-bearing pathname did not round-trip through JSON intact (truncated at the tab, or mis-escaped)"
+  pass "R7f --format json escapes a literal tab and the pathname round-trips intact"
+else
+  echo "skip - R7f (jq not installed)"
+fi
+
+# ── R7g: an untracked SYMLINK counts as its link value, not its target's contents ─────────
+# `[ -f ]` FOLLOWS a symlink, so a link to a regular file passed the guard and the line count
+# read the TARGET. git stores a symlink as a blob holding the link value — exactly one line.
+# A link to a 2,000-line file therefore contributed 2,000 lines before commit and 1 after,
+# reintroducing precisely the commit-coupling R5b exists to remove. Broken links and links to
+# directories are counted 1 by git too, and `[ -f ]` dropped both to 0.
+RL="$T/repo-symlink"; mkrepo "$RL"; git -C "$RL" checkout -q -b feature
+n_lines 2000 > "$RL/big.txt"                    # untracked regular file
+(cd "$RL" && ln -s big.txt link.txt)            # untracked link to a 2,000-line file
+(cd "$RL" && ln -s nowhere.txt broken.txt)      # untracked broken link
+mkdir "$RL/d"; (cd "$RL" && ln -s d dirlink)    # untracked link to a directory
+_pls="$("$TOOL" --repo "$RL" --base main --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')"
+[ "$_pls" = "2003" ] \
+  || fail "R7g: production_lines=$_pls, expected 2003 (2000 + one line per symlink) — a symlink was read THROUGH to its target"
+git -C "$RL" add -A && git -C "$RL" commit -qm "same content, now committed"
+_pls2="$("$TOOL" --repo "$RL" --base main --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')"
+[ "$_pls2" = "$_pls" ] \
+  || fail "R7g: committing changed the count from $_pls to $_pls2 — symlink handling still couples the measurement to whether the Builder committed"
+pass "R7g untracked symlinks count one line each, committed or not"
+
 # ── R8: usage errors are the ONLY non-zero exit, and they measure nothing ────────────────
 if "$TOOL" --repo "$T/definitely-not-a-repo" --base main >/dev/null 2>&1; then
   fail "R8: a non-git directory should exit 4"
@@ -306,5 +381,52 @@ grep -qi 'never blocks' "$ROOT/agents/reviewer.md" \
 grep -qi 'recorded decision\|record one line\|split plan' "$ROOT/agents/reviewer.md" \
   || fail "R9: reviewer.md does not require a recorded decision at advise/escalate"
 pass "R9 reviewer + orchestrator carry the advisory handoff rule"
+
+# ── R9b: the Orchestrator's pre-PR handoff is on the MAIN path, not only the fix lane ─────
+# R9 above greps the whole file, so it stayed green while the only copy of the instruction sat
+# inside the fenced "## Targeted parallel-fix worker mode" section — which is entered only for a
+# /sdd-fix-parallel E99 worker. Ordinary features routed through the main `in-review` flow, and
+# umbrella child PRs, never reached it, so the tier never reached those PR bodies at all. Assert
+# against the file with that fenced section REMOVED, which is the only form of this check that
+# can fail when the instruction is fix-lane-only.
+_ORCH="$ROOT/agents/orchestrator.md"
+_outside="$(awk '
+  /^## Targeted parallel-fix worker mode/ { skip = 1; next }
+  /^## / { skip = 0 }
+  !skip
+' "$_ORCH")"
+printf '%s\n' "$_outside" | grep -qF 'tools/change-size.sh' \
+  || fail "R9b: orchestrator.md runs the change-size check ONLY inside the parallel-fix worker mode — the main in-review → PR path never reaches it"
+printf '%s\n' "$_outside" | grep -qi 'PR body' \
+  || fail "R9b: the main-path handoff does not say to carry the tier into the PR body (E21-F02)"
+printf '%s\n' "$_outside" | grep -qi 'never blocks\|advisory' \
+  || fail "R9b: the main-path handoff does not state that the check is advisory and never blocks"
+# The parallel-fix section must NOT be weakened on the way: its --repo caveat is load-bearing
+# because HARNESS_DIR locates the script, not the tree under measurement.
+_inside="$(awk '
+  /^## Targeted parallel-fix worker mode/ { keep = 1; next }
+  /^## / { keep = 0 }
+  keep
+' "$_ORCH")"
+printf '%s\n' "$_inside" | grep -qF -- '--repo' \
+  || fail "R9b: the parallel-fix worker mode lost its --repo caveat — a worker spawned from the canonical primary would measure the coordinator's bookkeeping branch"
+# Cross-file consistency: the Reviewer holds the other half of this handoff, so its OWN
+# change-size section must agree that the Orchestrator repeats the check on every PR it opens.
+# Scope the grep to that section — reviewer.md says "slice PR" and "child repo" elsewhere for
+# unrelated reasons, and a whole-file grep would pass no matter what the section said.
+_ORCH_SECTION='The pre-PR change-size handoff'
+_rev_cs="$(awk '
+  /^## Change-size check before the PR handoff/ { keep = 1; next }
+  /^## / { keep = 0 }
+  keep
+' "$ROOT/agents/reviewer.md")"
+printf '%s\n' "$_rev_cs" | grep -qi 'orchestrator' \
+  || fail "R9b: reviewer.md's change-size section never mentions the Orchestrator's half of the handoff"
+printf '%s\n' "$_rev_cs" | grep -qF "$_ORCH_SECTION" \
+  || fail "R9b: reviewer.md does not cite orchestrator.md's '$_ORCH_SECTION' section — the two copies of the rule can drift apart unnoticed"
+# …and the cited section must actually exist as a heading, or the citation is a dead reference.
+grep -qE "^#+ .*$_ORCH_SECTION" "$_ORCH" \
+  || fail "R9b: reviewer.md cites an orchestrator.md section '$_ORCH_SECTION' that has no matching heading"
+pass "R9b the pre-PR change-size handoff fires on the main path, with the fix lane's --repo caveat intact"
 
 echo "All change-size tests passed."

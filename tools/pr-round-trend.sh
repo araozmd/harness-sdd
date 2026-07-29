@@ -121,11 +121,17 @@ fi
 # handoff says "split this PR" while naming no seams — losing the concentration data on exactly
 # the report that exists to carry it. The per-round loop already excluded that file; the
 # concentration pass must honour the same exclusion rather than re-deriving its own input.
-_readable=""
-for _rn in $rounds; do _readable="$_readable $cache/round-$_rn/blocking.json"; done
+#
+# Concatenate inside a loop with each path QUOTED, rather than building one unquoted
+# `$_readable` word list. `--cache` is caller-supplied and a `.pr-loop` dir under a path with a
+# space in it (`/Users/me/My Repos/…`) is ordinary; an unquoted expansion split that single
+# filename into several arguments, every `cat` failed, and `top` came back empty under the
+# `|| true` — losing the seam list on exactly the non-converging handoff that exists to carry
+# it, while the verdict still printed and looked fine. `$rounds` itself holds only digits
+# (validated above), so word-splitting THAT is safe and intended.
 top=""
-if [ -n "$_readable" ]; then
-  top="$(cat $_readable 2>/dev/null \
+if [ -n "$rounds" ]; then
+  top="$(for _rn in $rounds; do cat "$cache/round-$_rn/blocking.json" 2>/dev/null || true; done \
     | jq -r -s 'add // [] | map(.path // "(no path)") | group_by(.) | map({p:.[0], n:length})
                 | sort_by(-.n) | .[:5] | .[] | "\(.n)\t\(.p)"' 2>/dev/null || true)"
 fi

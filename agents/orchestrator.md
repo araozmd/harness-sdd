@@ -99,7 +99,10 @@ commit, switch, stash, reset, or clean the canonical primary, because its
 coordinator-owned bookkeeping branch is shared by sibling workers.
 
 After local Reviewer approval, keep the supplied branch/worktree and create only its dedicated PR
-while the fix remains `in-review`. Before opening it, run
+while the fix remains `in-review`. Before opening it, apply the general **pre-PR change-size
+handoff** (see "### The pre-PR change-size handoff" in the main loop above) — with `--repo`
+**mandatory** in this mode, because a targeted worker is spawned from the canonical primary and
+is never standing in the tree it must measure. Concretely, run
 `sh "$HARNESS_DIR/tools/change-size.sh" --repo "<the supplied worktree>"` — **pass `--repo` explicitly here.** `HARNESS_DIR` locates the *script*, not the tree under measurement, and `--repo` defaults to the current directory; a worker spawned from the canonical primary would otherwise measure the coordinator's bookkeeping branch instead of the fix, and report `ok` for a branch it never looked at. (Omit `--base` unless the PR targets something other than the default branch — the tool resolves `origin/HEAD` itself, and a hard-coded `origin/main` exits 4 on a repo whose default differs.) and carry the reported tier into the
 PR body (E21-F02). It is **advisory and never blocks** — it exits 0 at every tier — but an
 `advise`/`escalate` branch opened with no recorded split decision is exactly the state the
@@ -252,6 +255,36 @@ same counter is stamped on the `builder`/`reviewer` telemetry phase records:
 `round` starts at **1** on the first build and **increments by 1** on every
 `in-review` → `in-progress` bounce (best-effort — see "## Telemetry").
 
+### The pre-PR change-size handoff (E21-F02)
+
+This applies to **every** PR you open for a feature: the ordinary `in-review` → approve → PR
+handoff above, an umbrella child repo's slice PR, and the targeted parallel-fix worker's
+dedicated PR alike. It is deliberately stated **here, on the main path** — a check that fired
+only inside the `/sdd-fix-parallel` lane would skip the common route it was written for, and the
+tier would never reach the PR bodies most people read.
+
+After the Reviewer approves and **before** you open the PR, measure the branch you are about to
+propose and carry the reported tier into the PR body:
+
+```sh
+sh "$HARNESS_DIR/tools/change-size.sh" --repo "<the tree the branch lives in>"
+```
+
+**Pass `--repo` unless you are standing in that tree.** `HARNESS_DIR` locates the *script*, not
+the tree under measurement, and `--repo` defaults to the current directory — so a session
+driving a worktree, a child repo, or a fix worker from the canonical primary would otherwise
+measure the coordinator's own bookkeeping branch and report `ok` for a branch it never looked
+at. Omit `--base` unless the PR targets something other than the default branch: the tool
+resolves `origin/HEAD` itself, and a hard-coded `origin/main` exits `4` on a repo whose default
+differs.
+
+It is **advisory and never blocks** — it exits 0 at every tier, and exit `4` only means it could
+not measure (note that and carry on; a failed measurement is never a reason to hold a PR). But
+an `advise`/`escalate` branch opened with **no recorded split decision** is exactly the state
+the budget exists to surface, and the PR body is where the next reader will look for it. The
+Reviewer records the same tier and decision in its verdict (`agents/reviewer.md` → "Change-size
+check before the PR handoff"); your PR body carries it forward.
+
 ## How you delegate (avoid the "broken telephone")
 
 - Spawn each sub-agent with a **clean context**. Pass it ONLY: its role file, the
@@ -325,7 +358,10 @@ When the selected feature has `slices[]`, drive it slice by slice:
         child repo's PR (the child's normal way-of-work) and **capture its URL** — this
         is the `pr` the advance/merge-poll steps persist. (Builder Loop A itself only
         reports completion; PR creation is part of the child loop you drive, not the
-        Builder's job.)
+        Builder's job.) The **pre-PR change-size handoff** applies to this PR like any
+        other — run it with `--repo "<the manifest path for this child repo>"`, since
+        you are driving from the umbrella and not from the child tree, and carry the tier
+        into the child PR body.
      The per-repo `delegate_cmd` is **unused** in this mode — it may be empty in the
      manifest. This is the natural path for a single code-agent session driving the
      whole umbrella.

@@ -4,6 +4,47 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.46.3] — 2026-07-29
+
+### Fixed — 🐛 change-size path handling, symlinks, handoff coverage and trend caching (E99-F07)
+Four non-blocking findings deferred at the merge of PR #78, all reproducible.
+
+- **`git diff --numstat` C-quoted TRACKED paths too** (`tools/change-size.sh`). The untracked
+  side moved to `ls-files -z` during that review; the tracked side still parsed plain
+  `--numstat`. `core.quotePath=false` governs non-ASCII bytes only — it does **not** stop git
+  C-quoting a path containing `"`, a backslash or a tab, so `src/foo".spec.js` arrived as
+  `"src/foo\".spec.js"` and its trailing quote defeated the `[._-](test|spec)\.[a-z]+$` suffix
+  rule. A **test** file was charged to the **production** budget and the tier was silently
+  overstated. Now `--numstat -z`, which git never encodes.
+- `-z` also reframes numstat records, so the parser handles the real format rather than
+  assuming it: a **rename** emits an empty path field followed by two extra fields, and is now
+  folded into one record keyed on the destination instead of becoming phantom records. A
+  literal **tab** in a pathname is no longer hidden behind C-quoting either, so both awk passes
+  rejoin fields 3..NF (bare `$3` truncated `src/a<TAB>b.spec.js` to `src/a`, losing the
+  classifier suffix), and `--format json` escapes the tab — a raw control character inside a
+  JSON string is invalid and the caller only finds out when `jq` dies.
+- **Untracked symlinks were followed** (`tools/change-size.sh`). `[ -f ]` follows a link, so a
+  link to a regular file passed the guard and the line count read the **target**. git stores a
+  symlink as a blob holding its link value: exactly one line. A link to a 2,000-line file
+  contributed 2,000 lines before commit and 1 after — reintroducing the commit-coupling the
+  uncommitted-work measurement exists to remove. A `-h` test now precedes `[ -f ]`, which also
+  brings broken links and links to directories (previously dropped to 0) in line with git.
+- **The pre-PR change-size handoff only fired in parallel-fix mode** (`agents/orchestrator.md`)
+  — a coverage hole in the feature as shipped, not a nit. The instruction sat inside the fenced
+  *Targeted parallel-fix worker mode*, so only `/sdd-fix-parallel` E99 workers ran it; ordinary
+  features on the main `in-review` flow, and umbrella child PRs, never reached it and the tier
+  never reached those PR bodies. It is now stated on the **main path** as
+  *### The pre-PR change-size handoff*, cited by `agents/reviewer.md` and `docs/WORKFLOW.md`,
+  and applied explicitly to umbrella child PRs. The worker mode keeps its load-bearing `--repo`
+  caveat: `HARNESS_DIR` locates the *script*, not the tree under measurement.
+- **`--cache` paths containing whitespace** (`tools/pr-round-trend.sh`). The concentration pass
+  concatenated the round files into one unquoted word list, so a cache dir under a path with a
+  space in it split into several arguments, every `cat` failed, and `top_files` came back empty
+  under the `|| true`. The verdict still printed "SPLIT THIS PR" while naming **no seams** —
+  losing the concentration data on exactly the non-converging handoff that exists to carry it.
+- Not in scope, documented inline as unsupported: a filename containing a literal **newline**.
+  `-z` framing handles every other special character.
+
 ## [0.46.0] — 2026-07-28
 
 ### Added — ✨ `/sdd-pr-loop` reports whether the review is converging (E21-F03)
