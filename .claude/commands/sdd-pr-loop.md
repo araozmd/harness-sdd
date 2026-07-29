@@ -291,46 +291,6 @@ If all are green, **proceed to "ready to merge"** — do not waste another Codex
 checks are still pending, wait for them; if any fail, treat the failure like a blocking
 comment for the next round.
 
-#### Stack guard — never merge a child ahead of its parent (E21-F04)
-
-A stacked PR is based on another PR's head branch, not the default branch, so the reviewer
-reads only that increment's own diff. Merging increment B before increment A is **not a
-race — it is a correctness bug**, and `auto_merge` would walk straight into it: the gates
-above only ever ask "checks green, threads resolved", never "is my base branch itself still
-an open PR". So ask, every time, before any merge:
-
-```bash
-gh pr view "$pr_number" --json baseRefName > "$round_dir/base.json"
-# `gh pr list` defaults to --limit 30. On a busy repo the parent can fall off that page,
-# the guard reads the truncated list as "no parent exists", and a child merges ahead of
-# its still-open parent. Query for the base branch DIRECTLY (--head) so the answer cannot
-# be paged out, and keep a high --limit as a second belt.
-base_ref=$(jq -r '.baseRefName // ""' "$round_dir/base.json")
-gh pr list --state open --head "$base_ref" --limit 100 --json number,headRefName \
-  > "$round_dir/open-prs.json"
-sh tools/pr-stack-guard.sh evaluate "$round_dir/base.json" "$round_dir/open-prs.json" \
-  --default-branch "$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')"
-```
-
-| Exit | Meaning | Next |
-|---|---|---|
-| `0` | the base **is** the default branch | merge as normal |
-| `6` | **not safe yet** — either the base is another OPEN PR's head (`merge the parent first`), or it is a non-default branch that no open PR owns, meaning the child has **not been retargeted** | do **not** merge. Report what it is waiting on and hand back — a normal state in a stack, **not** `needs-human` and **not** a failure |
-| `4` | base unreadable | do not merge; a base you could not read is not the default branch |
-
-Exit `0` is **only** the default branch. A non-default base that nobody owns is *not* proof the
-parent landed safely: the parent may have merged before GitHub retargeted the child, or merged
-without deleting its branch at all. Merging there puts the child's commits into an
-already-merged branch — they never reach the default branch, and the loop reports success.
-
-Exit `6` is its own code precisely so the loop does not label a healthy child PR
-`needs-human` on every round while its parent is still in review.
-
-**When the parent merges, GitHub retargets the child** onto the parent's base and pushes no
-commit. Do not read that retarget as a review event: it changes `baseRefName`, not the head,
-so the freshness anchor and the clean-signal rules are untouched — re-run the guard, and
-merge if it now returns `0`.
-
 #### Squash-merge prep (only when `merge_strategy` is `squash`)
 
 **Compose the message locally — never ask Codex for it.** The watcher resolves on exactly

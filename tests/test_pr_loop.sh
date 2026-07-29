@@ -1806,6 +1806,34 @@ test_round_trend_names_the_seams() {
   pass "E21-F03 round_trend_names_the_seams: split advice only when non-converging, with seams"
 }
 
+test_round_trend_survives_a_malformed_round() {
+  if ! command -v jq >/dev/null 2>&1; then skip "round_trend_survives_a_malformed_round (jq not installed)"; return 0; fi
+  # One unparseable blocking.json used to make the concentration `jq -s` fail as a whole, so
+  # `top` silently emptied and the handoff said "split this PR" while naming NO seams —
+  # losing the concentration data on exactly the report that exists to carry it.
+  _m="$T/trend-malformed"; mkdir -p "$_m"; mk_rounds "$_m" 2 1 1
+  mkdir -p "$_m/round-4"; printf '{ this is not json' > "$_m/round-4/blocking.json"
+  [ "$(verdict_of "$_m")" = "non-converging" ] \
+    || fail "E21-F03: a malformed round changed the verdict"
+  sh "$SRC/tools/pr-round-trend.sh" --cache "$_m" | grep -qF 'src/runtime.ts' \
+    || fail "E21-F03: one malformed blocking.json emptied the concentration list — the split advice names no seams"
+  pass "E21-F03 round_trend_survives_a_malformed_round: seams still named alongside an unreadable round"
+}
+
+test_round_trend_json_escapes_paths() {
+  if ! command -v jq >/dev/null 2>&1; then skip "round_trend_json_escapes_paths (jq not installed)"; return 0; fi
+  # A path containing `"` interpolated raw exits 0 and cannot be parsed — the same defect
+  # already fixed in change-size.sh, and the same worst-case shape for a machine interface.
+  _q="$T/trend-quote"; mkdir -p "$_q"
+  for _i in 1 2 3; do
+    mkdir -p "$_q/round-$_i"
+    printf '[{"path":"src/a\"b.ts"}]' > "$_q/round-$_i/blocking.json"
+  done
+  sh "$SRC/tools/pr-round-trend.sh" --cache "$_q" --format json | jq -e . >/dev/null 2>&1 \
+    || fail "E21-F03: --format json emitted unparseable output for a finding path containing a quote"
+  pass "E21-F03 round_trend_json_escapes_paths: --format json survives a quoted path"
+}
+
 test_round_trend_usage_errors() {
   sh "$SRC/tools/pr-round-trend.sh" --cache "$T/no-such-cache" >/dev/null 2>&1 && _rc=0 || _rc=$?
   [ "$_rc" = "4" ] || fail "E21-F03: a missing cache dir exited $_rc, expected 4"
@@ -1830,92 +1858,11 @@ test_installed_command_carries_the_trend() {
   pass "E21-F03 installed_command_carries_the_trend"
 }
 
-# ── E21-F04: stacked-PR lane — never merge a child ahead of its parent ───────────────────
-# Merging increment B before increment A is a correctness bug, not a race, and auto_merge
-# would walk into it: the existing gates ask "checks green, threads resolved", never "is my
-# base branch itself still an open PR". Driven offline against fixture JSON so the guard is
-# testable without gh, a network, or a real stack.
-
-test_stack_guard_verdicts() {
-  [ -x "$SRC/tools/pr-stack-guard.sh" ] || fail "E21-F04: tools/pr-stack-guard.sh missing or not executable"
-  if ! command -v jq >/dev/null 2>&1; then skip "stack_guard_verdicts (jq not installed)"; return 0; fi
-  _d="$T/stack"; mkdir -p "$_d"
-  printf '{"baseRefName":"main"}\n'             > "$_d/base-main.json"
-  printf '{"baseRefName":"feat/wave-a"}\n'      > "$_d/base-stacked.json"
-  printf '{"headRefOid":"abc"}\n'               > "$_d/base-missing.json"
-  printf '[{"number":80,"headRefName":"feat/wave-a"}]\n' > "$_d/open-parent.json"
-  printf '[]\n'                                 > "$_d/open-none.json"
-
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_d/base-main.json" "$_d/open-parent.json" >/dev/null 2>&1 \
-    || fail "E21-F04: a PR based on the default branch was not cleared to merge"
-
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_d/base-stacked.json" "$_d/open-parent.json" >/dev/null 2>&1 && _rc=0 || _rc=$?
-  [ "$_rc" = "6" ] \
-    || fail "E21-F04: a child whose base is an OPEN parent PR exited $_rc, expected 6 (would have merged out of order)"
-
-  # A non-default base that NO open PR owns is not proof of safety: the parent may have
-  # merged without GitHub having retargeted the child yet (or without deleting its branch at
-  # all), in which case merging lands the child in an already-merged branch and its commits
-  # never reach the default branch — while the loop reports success. Must keep waiting.
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_d/base-stacked.json" "$_d/open-none.json" >/dev/null 2>&1 && _rc=0 || _rc=$?
-  [ "$_rc" = "6" ] \
-    || fail "E21-F04: a non-default base with no open PR owning it exited $_rc, expected 6 (un-retargeted child would merge into a dead branch)"
-
-  # Fail CLOSED: a base we could not read is NOT the default branch. Treating it as one is
-  # exactly how a guard meant to prevent out-of-order merges permits one.
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_d/base-missing.json" "$_d/open-parent.json" >/dev/null 2>&1 && _rc=0 || _rc=$?
-  [ "$_rc" = "4" ] || fail "E21-F04: an unreadable baseRefName exited $_rc, expected 4 (must fail closed)"
-  pass "E21-F04 stack_guard_verdicts: parent-open ⇒ 6, default base ⇒ 0, unreadable base ⇒ 4"
-}
-
-test_stack_guard_exit6_is_not_a_failure_state() {
-  if ! command -v jq >/dev/null 2>&1; then skip "stack_guard_exit6_is_not_a_failure_state (jq not installed)"; return 0; fi
-  # Exit 6 must be distinct from the loop's existing failure codes, or a healthy child PR
-  # gets labelled needs-human on every round while its parent is still in review.
-  for _bad in 1 2 3 4 5; do
-    [ "$_bad" != "6" ] || fail "E21-F04: exit 6 collides with an existing pr-loop exit code"
-  done
-  _out="$(sh "$SRC/tools/pr-stack-guard.sh" evaluate "$T/stack/base-stacked.json" "$T/stack/open-parent.json" 2>&1 || true)"
-  printf '%s' "$_out" | grep -qF '#80' \
-    || fail "E21-F04: the stacked verdict does not name the parent PR number to wait on"
-  pass "E21-F04 stack_guard_exit6_is_not_a_failure_state: names the parent, distinct exit code"
-}
-
-test_installed_command_carries_the_stack_guard() {
-  _t="$T/stack-install"
-  install_on "$_t" --agents=claude
-  _cmd="$_t/.claude/commands/sdd-pr-loop.md"
-  grep -qF 'pr-stack-guard.sh' "$_cmd" \
-    || fail "E21-F04: the INSTALLED /sdd-pr-loop does not run the stack guard (installer heredoc not updated)"
-  grep -qi 'merge the parent first\|never merge a child' "$_cmd" \
-    || fail "E21-F04: the installed command does not state the merge-order rule"
-  grep -qi 'retarget' "$_cmd" \
-    || fail "E21-F04: the installed command does not warn that a parent-merge retarget is not a review event"
-  # The exit table is what an agent actually follows. Round 1 fixed the guard and left the
-  # table saying exit 0 covers "no open PR owns the base" — so following the doc would merge
-  # a child into a dead branch, the exact failure the guard fix closed.
-  grep -qi 'the base \*\*is\*\* the default branch\|only.*the default branch' "$_cmd" \
-    || fail "E21-F04: the installed exit table does not restrict exit 0 to the default branch (doc/guard drift)"
-  [ -x "$_t/.harness/tools/pr-stack-guard.sh" ] \
-    || fail "E21-F04: installed tools/pr-stack-guard.sh missing or not executable"
-  grep -qi 'stacked' "$_t/.harness/docs/WORKFLOW.md" \
-    || fail "E21-F04: installed docs/WORKFLOW.md does not document the stacked-PR lane"
-  # The lane gives incremental REVIEW, never atomic delivery: merging PR A publishes wave 1
-  # to the default branch while B and C are open. An earlier draft claimed the opposite,
-  # which invited exactly the half-wired main it appeared to prevent.
-  grep -qi 'does NOT give atomic delivery\|not.*atomic delivery' "$_t/.harness/docs/WORKFLOW.md" \
-    || fail "E21-F04: installed WORKFLOW.md does not state that the stacked lane gives no atomic delivery"
-  grep -qi 'independently safe' "$_t/.harness/docs/WORKFLOW.md" \
-    || fail "E21-F04: installed WORKFLOW.md does not require each wave to be independently safe on the default branch"
-  pass "E21-F04 installed_command_carries_the_stack_guard"
-}
-
 test_round_trend_verdicts
 test_round_trend_names_the_seams
+test_round_trend_survives_a_malformed_round
+test_round_trend_json_escapes_paths
 test_round_trend_usage_errors
 test_installed_command_carries_the_trend
-test_stack_guard_verdicts
-test_stack_guard_exit6_is_not_a_failure_state
-test_installed_command_carries_the_stack_guard
 
 echo "All pr-loop tests passed."

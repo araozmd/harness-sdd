@@ -43,8 +43,9 @@ Two further measurements shape the response:
 The lever is upstream. Once a 17k-line branch exists, every option is bad; the cheap fix is to
 never let the *unit of work* get there. This epic bounds the delivery unit where it is actually
 chosen (F01), measures it at the one point where it can still be acted on before a reviewer is
-paid (F02), makes non-convergence legible instead of inviting more rounds (F03), and gives a
-genuinely atomic feature a way to ship reviewably anyway (F04).
+paid (F02), makes non-convergence legible instead of inviting more rounds (F03), and — originally — gave a
+genuinely atomic feature a way to ship reviewably anyway (F04). **F04 was withdrawn during
+review; see Notes.**
 
 ## Why this is not "adopt micro-specs"
 The [micro-specs pattern](https://www.augmentcode.com/guides/micro-specs-pattern-ai-agent-test-coverage)
@@ -85,8 +86,10 @@ Two things from the pattern are deliberately **rejected**:
   last moment splitting is still cheap.
 - A PR that reaches the `/sdd-pr-loop` round cap while its blocking-finding rate is *flat*
   reports "split this PR", not "review it again". The trend is shown, not asserted.
-- A feature that genuinely cannot be split into independently-mergeable PRs can still be
-  reviewed in budget-sized increments.
+- ~~A feature that genuinely cannot be split into independently-mergeable PRs can still be
+  reviewed in budget-sized increments.~~ **Withdrawn with F04** — the mechanism proposed for it
+  (stacked PRs) delivers incremental *review*, not atomic delivery, so it never satisfied this
+  criterion. The criterion itself stands as an open problem; nothing in this epic meets it.
 
 ## Success criteria — non-goals
 - **No hard wall.** The budget is two soft tiers (advise / escalate) that produce a *recorded
@@ -106,9 +109,27 @@ Two things from the pattern are deliberately **rejected**:
 | F01 | Feature-size budget in the Driller and Architect (split at decomposition time) | pending | true | — |
 | F02 | Pre-PR change-size check on the Reviewer → PR handoff | pending | true | E21-F01 |
 | F03 | `/sdd-pr-loop`: per-round finding trend + "split, don't re-review" at the round cap | pending | true | E18-F01 |
-| F04 | Stacked-PR lane for an atomic feature that exceeds the budget | pending | true | E18-F01, E21-F03 |
+| F04 | Stacked-PR lane for an atomic feature that exceeds the budget | pending (**withdrawn — needs re-spec**) | true | E18-F01, E21-F03 |
 
 ## Notes
+- **F04 was withdrawn during review of PR #78 (2026-07-28).** Its premise was wrong. The lane
+  claimed a stacked feature "lands atomically with respect to `main`"; it does not — merging
+  increment A publishes wave 1 while B and C are still open. Stacking buys incremental
+  **review**, never atomic delivery, so it does not solve the case F04 was seeded for: a
+  capability whose intermediate states are unsafe. That needs a feature flag or an aggregate
+  landing strategy, and remains **unsolved**.
+
+  Four `@codex review` rounds produced **five blocking findings, every one of them on F04's
+  surface**, each largely created by the previous round's fix — a cascade, not a review that
+  needed more rounds. F01/F02/F03 and E99-F06 produced zero blocking findings on their own
+  surface. Per this repo's rule, a finding that contradicts approved architecture goes back
+  through the human gate as a re-spec rather than a pr-fixer patch, so F04's implementation was
+  removed from PR #78 and the feature re-gated to `autonomous: false`.
+
+  The one genuinely valuable artifact — `tools/pr-stack-guard.sh`, a tested offline merge-order
+  guard — is recoverable from git history (`git show 1873af9:tools/pr-stack-guard.sh`) if the
+  re-spec keeps a stacked lane. It was removed rather than kept because without the lane it has
+  no caller.
 - **Ordering.** F01 defines the budget; F02 consumes it, so F02 depends on F01 to avoid two
   sources of truth for the same numbers. F03 and F04 edit `/sdd-pr-loop` glue that **E18-F01
   has not merged yet** — they are correctly blocked, and must not be started against a `main`

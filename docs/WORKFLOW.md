@@ -153,57 +153,6 @@ count as production.
 The Reviewer runs it before approving and records the tier and the decision in its verdict;
 the Orchestrator runs it before opening the PR and carries the tier into the PR body.
 
-### Splitting the review without splitting the branch: the stacked-PR lane
-
-A large feature that *is* safely splittable can still be awkward to review as one PR. Base
-each increment on the previous increment's branch rather than on the default branch:
-
-```
-main  ←  PR A (wave 1)  ←  PR B (wave 2)  ←  PR C (wave 3)
-```
-
-The reviewer reads only each increment's own diff, so each PR converges on its own budget: a
-merge train instead of one 17k-line pass. Cut the stack on the same **wave boundaries** the
-Driller used — the seams the work actually has, not equal thirds.
-
-> **This lane does NOT give atomic delivery, and must not be used as if it did.**
-> Merging PR A publishes wave 1 to `main` while B and C are still open. The stack guard
-> enforces *order*; nothing here makes the waves land together. So **every wave must be
-> independently safe to be on `main` on its own** — the same bar as an ordinary split, just
-> reviewed in smaller pieces.
->
-> An earlier draft of this section claimed the opposite ("the feature still lands atomically
-> with respect to `main`"). That was wrong, and it was the dangerous kind of wrong: it invited
-> exactly the half-wired intermediate state — a booking tool that can commit an appointment but
-> cannot confirm it — that the claim promised to prevent.
->
-> **A capability whose intermediate states are genuinely unsafe is still unsolved here.** It
-> needs a feature flag or an aggregate landing strategy, neither of which this lane provides.
-> Do not reach for stacking to work around it.
-
-Two rules make this safe, and both are enforced rather than remembered:
-
-- **Never merge a child ahead of its parent.** `tools/pr-stack-guard.sh` answers exactly that
-  question offline from JSON `/sdd-pr-loop` already fetches, and returns a dedicated exit `6`
-  meaning *wait for the parent*. That is a normal state in a stack — the loop hands back
-  rather than labelling a healthy child `needs-human` every round.
-- **A retarget is not a review event.** When the parent merges *and its branch is deleted*,
-  GitHub retargets the child and pushes no commit: `baseRefName` changes, the head does not.
-  The freshness anchor and the clean-signal rules are untouched.
-- **If the parent merges without deleting its branch, no retarget happens** and the guard will
-  keep returning `6` — correctly, because merging into that stale branch would never reach
-  `main`. The recovery is one command, and it is a human's call, not the loop's:
-  `gh pr edit <child> --base <default-branch>`. Merge with `--delete-branch` (what
-  `/sdd-pr-loop` does) and this does not arise.
-
-Growing the stack as the Builder finishes each wave — rather than creating all branches up
-front — is what buys the wall-clock: increment 1 is in review while increment 3 is still being
-written.
-
-**Restacking after a review fix is still manual.** If increment A takes a fix, the children
-need a rebase; the harness does not automate that today, deliberately — it is a `git` workflow
-question, and a wrong automated restack loses commits. Do it by hand and re-run the loop.
-
 ## Architecture-aligned specs (the Architect cites ADRs)
 
 The planning tier produces durable design artifacts; this contract makes them

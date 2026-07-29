@@ -4,38 +4,6 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
-## [0.47.0] — 2026-07-28
-
-### Added — ✨ Stacked-PR lane: never merge a child ahead of its parent (E21-F04)
-- E21-F01 splits features at drill time and E21-F02 catches what slips through, but both
-  assume the work *can* be split into independently-mergeable units. Some capabilities cannot:
-  a half-wired booking tool that can commit an appointment but not confirm it is one
-  deliverable however many requirements it holds.
-- For that case, split the **review** instead of the delivery: base each increment on the
-  previous increment's branch. The reviewer reads only that increment's diff, so each PR
-  converges on its own budget, while the feature still lands atomically against `main`, in
-  order — a merge train rather than one 17k-line pass. Cut on the Driller's **wave
-  boundaries**, the seams the work actually has.
-- Stacking introduces exactly one new way to corrupt a branch: merging increment B before
-  increment A. That is a **correctness bug, not a race**, and `auto_merge` would have walked
-  into it — the existing gates only ask "checks green, threads resolved", never "is my base
-  branch itself still an open PR".
-- New `tools/pr-stack-guard.sh` answers that one question **offline**, from JSON the loop
-  already fetches, so it is testable without `gh`, a network, or a real stack. Exit `0` safe,
-  `6` stacked (naming the parent PR to wait on), `4` unreadable.
-- **Exit `6` is deliberately its own code.** "Waiting on the parent" is a normal state in a
-  stack, not a failure — folding it into a generic error would label a perfectly healthy child
-  PR `needs-human` on every round while its parent is still in review.
-- **Fails closed on an unreadable base**, mirroring step 3's `head_ok` discipline: a base that
-  could not be read is not "the default branch", and assuming it is would be how a guard meant
-  to prevent out-of-order merges permits one.
-- A parent-merge **retarget is not a review event** — it changes `baseRefName`, not the head,
-  so the freshness anchor and the clean-signal rules are untouched. Documented in the command.
-- Wired into step 6 of both the source-layout command and the installer's generated body;
-  `docs/WORKFLOW.md` documents the lane. **Restacking after a review fix stays manual** and is
-  documented as such: it is a `git` workflow question, and a wrong automated restack loses
-  commits.
-
 ## [0.46.0] — 2026-07-28
 
 ### Added — ✨ `/sdd-pr-loop` reports whether the review is converging (E21-F03)
@@ -62,6 +30,14 @@ All notable changes to the harness body are recorded here. Versions follow
   findings concentrate on as candidate seams.
 - **Advisory throughout**: exit 0 at every verdict, no change to when the cap fires, and no
   change to the watcher's exit-code contract, freshness guards or clean-signal detection.
+- Round dirs are ordered by their **numeric** suffix. A shell glob is lexicographic, so at ten
+  or more rounds `round-10..12` sort before `round-2` and the last-N window would trend rounds
+  7–9 while calling them the latest — inverting the verdict on exactly the twelve-round PR this
+  exists for.
+- One unparseable `blocking.json` no longer empties the concentration list: the aggregation runs
+  over the rounds already validated, so an aborted round cannot cost the handoff its seam names.
+- `--format json` escapes finding paths, so a filename containing `"` no longer produces output
+  that exits 0 and cannot be parsed.
 - The installer's **generated** command body was updated alongside the source-layout copy, and
   `tests/test_pr_loop.sh` asserts against the installed body — editing only the source copy is
   a wiring gap that has been raised as a blocking review finding in this repo before, so the

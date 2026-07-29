@@ -116,9 +116,25 @@ fi
 # this is one jq pass over files the loop wrote anyway. It turns "split this PR" from advice
 # into a pointer: on PR #76 the same grouping put 11 of 33 findings on ONE file that was
 # 5.4% of the diff.
-top="$(cat "$cache"/round-*/blocking.json 2>/dev/null \
-  | jq -r -s 'add // [] | map(.path // "(no path)") | group_by(.) | map({p:.[0], n:length})
-              | sort_by(-.n) | .[:5] | .[] | "\(.n)\t\(.p)"' 2>/dev/null || true)"
+# Aggregate ONLY the rounds already validated above. Globbing every blocking.json back in
+# means one malformed file makes the whole `jq -s` fail, `top` silently becomes empty, and the
+# handoff says "split this PR" while naming no seams — losing the concentration data on exactly
+# the report that exists to carry it. The per-round loop already excluded that file; the
+# concentration pass must honour the same exclusion rather than re-deriving its own input.
+_readable=""
+for _rn in $rounds; do _readable="$_readable $cache/round-$_rn/blocking.json"; done
+top=""
+if [ -n "$_readable" ]; then
+  top="$(cat $_readable 2>/dev/null \
+    | jq -r -s 'add // [] | map(.path // "(no path)") | group_by(.) | map({p:.[0], n:length})
+                | sort_by(-.n) | .[:5] | .[] | "\(.n)\t\(.p)"' 2>/dev/null || true)"
+fi
+
+# JSON string escaping for a path interpolated into --format json. A valid git filename may
+# contain `"` or `\`; emitting one raw produces output that exits 0 and cannot be parsed — the
+# worst shape for a machine interface. Same defect, same fix as tools/change-size.sh.
+# Backslash first, or it would double-escape the quotes it just added.
+_json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 
 if [ "$format" = json ]; then
   printf '{"verdict":"%s","rounds":%d,"window":%d,"series":[' "$verdict" "$n_rounds" "$WINDOW"
@@ -130,7 +146,7 @@ if [ "$format" = json ]; then
   printf '%s\n' "$top" | while IFS="$(printf '\t')" read -r _n _p; do
     [ -n "${_p:-}" ] || continue
     [ "$_f" = 1 ] || printf ','
-    printf '{"path":"%s","findings":%d}' "$_p" "$_n"; _f=0
+    printf '{"path":"%s","findings":%d}' "$(_json_escape "$_p")" "$_n"; _f=0
   done
   printf ']}\n'
   exit 0
