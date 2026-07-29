@@ -387,7 +387,7 @@
         {
           "id": "E99-F04",
           "title": "Decide the locale boundary for repo-owned git hooks in fix-worktree (reference-transaction on teardown/rollback)",
-          "status": "in-review",
+          "status": "done",
           "sdd": false,
           "autonomous": false,
           "depends_on": [
@@ -398,7 +398,7 @@
         {
           "id": "E99-F05",
           "title": "Scope the pr-loop first-response probe to the current round",
-          "status": "in-review",
+          "status": "done",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -416,11 +416,20 @@
         {
           "id": "E99-F07",
           "title": "Change-size measurement: remaining path/symlink/coverage gaps from PR #78 review",
-          "status": "pending",
+          "status": "done",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F07-change-size-gaps/"
+        },
+        {
+          "id": "E99-F08",
+          "title": "change-size --format json: escape every C0 control character, not just tab",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F08-json-control-chars/"
         }
       ]
     },
