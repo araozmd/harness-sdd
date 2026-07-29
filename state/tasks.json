@@ -430,6 +430,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F08-json-control-chars/"
+        },
+        {
+          "id": "E99-F09",
+          "title": "Update Antigravity integration to use Skills architecture",
+          "status": "done",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F09-antigravity-skills/"
         }
       ]
     },
