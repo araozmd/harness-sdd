@@ -2565,7 +2565,20 @@ EOF
   # them, so a target where nothing resolves keeps its R11 byte-identity.
 
   # stamp_model_agent <front-end> <file> <src> — remember the bytes just written.
+  model_agent_stamp_tree_is_symlinked() {
+    [ -L "$H/.model-agents" ] || [ -L "$H/.model-agents/$1" ]
+  }
+
+  model_agent_stamp_destination_is_symlinked() {
+    model_agent_stamp_tree_is_symlinked "$1" \
+      || [ -L "$H/.model-agents/$1/$2" ]
+  }
+
   stamp_model_agent() {
+    if model_agent_stamp_destination_is_symlinked "$1" "$2"; then
+      echo "⚠️  .harness/.model-agents/$1/$2 has a symlinked stamp component — ownership stamp not written" >&2
+      return 0
+    fi
     mkdir -p "$H/.model-agents/$1"
     cp "$3" "$H/.model-agents/$1/$2"
   }
@@ -2583,9 +2596,15 @@ EOF
   }
 
   discard_codex_agent_stamp() {
+    if model_agent_stamp_destination_is_symlinked codex "$1"; then
+      echo "⚠️  .harness/.model-agents/codex/$1 has a symlinked stamp component — ownership stamp left unchanged" >&2
+      return 0
+    fi
     rm -f "$H/.model-agents/codex/$1"
-    rmdir "$H/.model-agents/codex" 2>/dev/null || true
-    rmdir "$H/.model-agents" 2>/dev/null || true
+    if ! model_agent_stamp_tree_is_symlinked codex; then
+      rmdir "$H/.model-agents/codex" 2>/dev/null || true
+      [ -L "$H/.model-agents" ] || rmdir "$H/.model-agents" 2>/dev/null || true
+    fi
   }
 
   # install_codex_agent <file> <candidate> — selected Codex installs replace a role
@@ -2598,6 +2617,10 @@ EOF
     if codex_agent_destination_is_symlinked "$_ica_file"; then
       echo "⚠️  .codex/agents/$_ica_file has a symlinked destination component — selected Codex install left it unchanged" >&2
       discard_codex_agent_stamp "$_ica_file"
+      return 0
+    fi
+    if model_agent_stamp_destination_is_symlinked codex "$_ica_file"; then
+      echo "⚠️  .harness/.model-agents/codex/$_ica_file has a symlinked stamp component — selected Codex install left the live role and stamp unchanged" >&2
       return 0
     fi
     _ica_safe=0
@@ -2640,6 +2663,10 @@ EOF
       _rma_tree_safe=0
       echo "⚠️  $_rma_sub has a symlinked destination component — left in place (deselected '$_rma_fe' not removed)" >&2
     fi
+    if model_agent_stamp_tree_is_symlinked "$_rma_fe"; then
+      _rma_tree_safe=0
+      echo "⚠️  .harness/.model-agents/$_rma_fe has a symlinked stamp component — live artifacts and ownership stamps left unchanged" >&2
+    fi
     if [ "$_rma_tree_safe" = 1 ] && [ -d "$TARGET/$_rma_sub" ]; then
       _rma_tmp="$(mktemp 2>/dev/null || mktemp -t harness-ma)"
       _rma_gone="$(ag_personas | while IFS='	' read -r _rma_r _rma_d; do
@@ -2648,6 +2675,10 @@ EOF
         if [ "$_rma_fe" = codex ] \
            && codex_agent_destination_is_symlinked "$_rma_f"; then
           echo "⚠️  $_rma_sub/$_rma_f is a symlinked destination — left in place (deselected '$_rma_fe' not removed)" >&2
+          continue
+        fi
+        if model_agent_stamp_destination_is_symlinked "$_rma_fe" "$_rma_f"; then
+          echo "⚠️  .harness/.model-agents/$_rma_fe/$_rma_f has a symlinked stamp component — live artifact and stamp left unchanged" >&2
           continue
         fi
         [ -f "$TARGET/$_rma_sub/$_rma_f" ] || continue
@@ -2680,13 +2711,18 @@ EOF
     fi
     # The stamps describe files the harness no longer owns — drop them, or an
     # all-`inherit` target would keep state a never-configured one does not have (R11).
-    if [ -d "$_rma_stamp" ]; then
+    if ! model_agent_stamp_tree_is_symlinked "$_rma_fe" && [ -d "$_rma_stamp" ]; then
       ag_personas | while IFS='	' read -r _rma_r _rma_d; do
         [ -n "$_rma_r" ] || continue
-        rm -f "$_rma_stamp/$_rma_r.$_rma_ext"
+        _rma_stamp_file="$_rma_r.$_rma_ext"
+        if model_agent_stamp_destination_is_symlinked "$_rma_fe" "$_rma_stamp_file"; then
+          echo "⚠️  .harness/.model-agents/$_rma_fe/$_rma_stamp_file has a symlinked stamp component — ownership stamp left unchanged" >&2
+          continue
+        fi
+        rm -f "$_rma_stamp/$_rma_stamp_file"
       done
       rmdir "$_rma_stamp" 2>/dev/null || true
-      rmdir "$H/.model-agents" 2>/dev/null || true
+      [ -L "$H/.model-agents" ] || rmdir "$H/.model-agents" 2>/dev/null || true
     fi
     return 0
   }
@@ -3814,12 +3850,26 @@ EOF
       || [ -L "$_csd_live/agents/openai.yaml" ]
   }
 
+  codex_skill_stamp_is_symlinked() {
+    _css_cmd="$1"
+    _css_stamp="$H/.codex-skills/$_css_cmd"
+    [ -L "$H/.codex-skills" ] \
+      || [ -L "$_css_stamp" ] \
+      || [ -L "$_css_stamp/SKILL.md" ] \
+      || [ -L "$_css_stamp/agents" ] \
+      || [ -L "$_css_stamp/agents/openai.yaml" ]
+  }
+
   discard_codex_skill_stamp() {
     _dcs_stamp="$H/.codex-skills/$1"
+    if codex_skill_stamp_is_symlinked "$1"; then
+      echo "⚠️  .harness/.codex-skills/$1 has a symlinked stamp component — ownership stamp left unchanged" >&2
+      return 0
+    fi
     rm -f "$_dcs_stamp/SKILL.md" "$_dcs_stamp/agents/openai.yaml"
     rmdir "$_dcs_stamp/agents" 2>/dev/null || true
     rmdir "$_dcs_stamp" 2>/dev/null || true
-    rmdir "$H/.codex-skills" 2>/dev/null || true
+    [ -L "$H/.codex-skills" ] || rmdir "$H/.codex-skills" 2>/dev/null || true
   }
 
   # install_codex_skill <command> — manage SKILL.md + agents/openai.yaml as one
@@ -3832,6 +3882,10 @@ EOF
     if codex_skill_destination_is_symlinked "$_ics_cmd"; then
       echo "⚠️  .agents/skills/$_ics_cmd has a symlinked destination component — selected Codex install left the skill unit unchanged" >&2
       discard_codex_skill_stamp "$_ics_cmd"
+      return 0
+    fi
+    if codex_skill_stamp_is_symlinked "$_ics_cmd"; then
+      echo "⚠️  .harness/.codex-skills/$_ics_cmd has a symlinked stamp component — selected Codex install left the live skill unit and stamp unchanged" >&2
       return 0
     fi
     _ics_tmp="$(mktemp -d 2>/dev/null || mktemp -d -t harness-codex-skill)"
@@ -3888,6 +3942,10 @@ EOF
         discard_codex_skill_stamp "$_rcs_cmd"
         continue
       fi
+      if codex_skill_stamp_is_symlinked "$_rcs_cmd"; then
+        echo "⚠️  .harness/.codex-skills/$_rcs_cmd has a symlinked stamp component — live skill unit and ownership stamp left unchanged" >&2
+        continue
+      fi
 
       if [ -e "$_rcs_skill" ]; then
         if [ -f "$_rcs_skill" ] && [ -f "$_rcs_skill_stamp" ] \
@@ -3917,7 +3975,7 @@ EOF
       rmdir "$_rcs_live/agents" 2>/dev/null || true
       rmdir "$TARGET/.agents/skills/$_rcs_cmd" 2>/dev/null || true
     done
-    rmdir "$H/.codex-skills" 2>/dev/null || true
+    [ -L "$H/.codex-skills" ] || rmdir "$H/.codex-skills" 2>/dev/null || true
     rmdir "$TARGET/.agents/skills" 2>/dev/null || true
     rmdir "$TARGET/.agents" 2>/dev/null || true
     [ -n "$_rcs_gone" ] && printf '%s\n' "$_rcs_gone"
@@ -3978,12 +4036,20 @@ EOF
   # `inherit` — `.gemini/agents/` is never created and the target tree stays exactly what
   # it was before this feature existed.
   if agent_selected gemini && models_any gemini; then
-    mkdir -p "$TARGET/.gemini/agents"
-    ag_personas | while IFS='	' read -r _gmr _gmd; do
-      [ -n "$_gmr" ] || continue
-      gen_gemini_agent "$_gmr" "$_gmd" "$TARGET/.gemini/agents/$_gmr.md"
-      stamp_model_agent gemini "$_gmr.md" "$TARGET/.gemini/agents/$_gmr.md"
-    done
+    if model_agent_stamp_tree_is_symlinked gemini; then
+      echo "⚠️  .harness/.model-agents/gemini has a symlinked stamp component — selected Gemini routing left live artifacts and stamps unchanged" >&2
+    else
+      mkdir -p "$TARGET/.gemini/agents"
+      ag_personas | while IFS='	' read -r _gmr _gmd; do
+        [ -n "$_gmr" ] || continue
+        if model_agent_stamp_destination_is_symlinked gemini "$_gmr.md"; then
+          echo "⚠️  .harness/.model-agents/gemini/$_gmr.md has a symlinked stamp component — selected Gemini routing left the live artifact and stamp unchanged" >&2
+          continue
+        fi
+        gen_gemini_agent "$_gmr" "$_gmd" "$TARGET/.gemini/agents/$_gmr.md"
+        stamp_model_agent gemini "$_gmr.md" "$TARGET/.gemini/agents/$_gmr.md"
+      done
+    fi
     ok "Gemini per-role agent definitions installed (.gemini/agents/)"
   elif agent_selected gemini; then
     # Nothing resolves any more — but a PREVIOUS run may have stamped this tree with a

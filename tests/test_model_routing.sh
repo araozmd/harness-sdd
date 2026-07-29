@@ -432,6 +432,75 @@ test_codex_rejects_symlinked_role_destinations() {
   return 0
 }
 
+# Last-written model stamps must not become ownership capabilities through symlinks.
+# Cover a Codex stamp directory across selected routing + deselection, a Codex stamp
+# leaf across routing, and Gemini's shared stamp helper to keep the guard generic.
+test_model_stamp_symlinks_are_not_followed() {
+  _d="$(mk model-stamp-dir-link)"; run "$_d" codex
+  _dext="$T/model-stamp-dir.external"
+  mv "$_d/.harness/.model-agents/codex" "$_dext"
+  ln -s "$_dext" "$_d/.harness/.model-agents/codex"
+  printf 'external model stamp sentinel\n' > "$_dext/builder.toml"
+  cp "$_dext/builder.toml" "$_d/.codex/agents/builder.toml"
+  cp -R "$_dext" "$_dext.ref"
+  cp "$_d/.codex/agents/builder.toml" "$_d/live.ref"
+  set_tier "$_d" builder standard
+  set_pin "$_d" codex standard "gpt-5-codex"
+  run "$_d" codex
+  [ -L "$_d/.harness/.model-agents/codex" ] \
+    || fail "round-5 model stamp: routing replaced a Codex stamp-directory link"
+  diff -r "$_dext.ref" "$_dext" >/dev/null \
+    || fail "round-5 model stamp: routing changed an external Codex stamp directory"
+  cmp -s "$_d/live.ref" "$_d/.codex/agents/builder.toml" \
+    || fail "round-5 model stamp: routing used a linked Codex stamp as ownership evidence"
+  run "$_d" claude
+  [ -L "$_d/.harness/.model-agents/codex" ] \
+    || fail "round-5 model stamp: deselection removed a Codex stamp-directory link"
+  diff -r "$_dext.ref" "$_dext" >/dev/null \
+    || fail "round-5 model stamp: deselection changed an external Codex stamp directory"
+  cmp -s "$_d/live.ref" "$_d/.codex/agents/builder.toml" \
+    || fail "round-5 model stamp: deselection removed a role through linked ownership evidence"
+
+  _f="$(mk model-stamp-leaf-link)"; run "$_f" codex
+  _fext="$T/model-stamp-leaf.external"
+  mv "$_f/.harness/.model-agents/codex/architect.toml" "$_fext"
+  ln -s "$_fext" "$_f/.harness/.model-agents/codex/architect.toml"
+  printf 'external model leaf sentinel\n' > "$_fext"
+  cp "$_fext" "$_f/.codex/agents/architect.toml"
+  cp "$_fext" "$_fext.ref"
+  cp "$_f/.codex/agents/architect.toml" "$_f/live.ref"
+  set_tier "$_f" architect reasoning
+  set_pin "$_f" codex reasoning "gpt-5"
+  run "$_f" codex
+  [ -L "$_f/.harness/.model-agents/codex/architect.toml" ] \
+    || fail "round-5 model stamp: routing removed a Codex stamp-leaf link"
+  cmp -s "$_fext.ref" "$_fext" \
+    || fail "round-5 model stamp: routing changed an external Codex stamp leaf"
+  cmp -s "$_f/live.ref" "$_f/.codex/agents/architect.toml" \
+    || fail "round-5 model stamp: routing used a linked Codex stamp leaf as ownership evidence"
+
+  _g="$(mk model-stamp-gemini-link)"
+  run "$_g" gemini
+  set_tier "$_g" scout cheap
+  run "$_g" gemini
+  _gext="$T/model-stamp-gemini.external"
+  mv "$_g/.harness/.model-agents/gemini/scout.md" "$_gext"
+  ln -s "$_gext" "$_g/.harness/.model-agents/gemini/scout.md"
+  printf 'external Gemini stamp sentinel\n' > "$_gext"
+  cp "$_gext" "$_g/.gemini/agents/scout.md"
+  cp "$_gext" "$_gext.ref"
+  cp "$_g/.gemini/agents/scout.md" "$_g/live.ref"
+  set_tier "$_g" scout reasoning
+  run "$_g" gemini
+  [ -L "$_g/.harness/.model-agents/gemini/scout.md" ] \
+    || fail "round-5 model stamp: routing removed a Gemini stamp-leaf link"
+  cmp -s "$_gext.ref" "$_gext" \
+    || fail "round-5 model stamp: routing changed an external Gemini stamp leaf"
+  cmp -s "$_g/live.ref" "$_g/.gemini/agents/scout.md" \
+    || fail "round-5 model stamp: routing changed live Gemini bytes while its stamp was unsafe"
+  return 0
+}
+
 # ── R17: Gemini remains conditional; selected Codex roles are always registered ──
 test_new_trees_conditional() {
   # (a) everything on inherit
@@ -843,6 +912,8 @@ test_codex_selected_preserves_foreign_and_edited
 pass "selected Codex role installs preserve foreign/edited files through last-written ownership stamps"
 test_codex_rejects_symlinked_role_destinations
 pass "Codex role install/reclamation reject symlinked files and directories without touching external targets"
+test_model_stamp_symlinks_are_not_followed
+pass "model-agent stamp symlinks are never followed for routing or deselection"
 test_new_trees_conditional
 pass "Gemini remains conditional; selected Codex always registers six model-optional roles (R6, R7, R17)"
 test_return_to_inherit_reconciles

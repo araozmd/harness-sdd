@@ -1121,6 +1121,69 @@ cmp -s "$TCSYL_FILE_EXT.ref" "$TCSYL_FILE_EXT" \
   && fail "R4 symlink: rejected symlinked skill file retained an ownership stamp"
 pass "Codex skill install/reclamation reject symlinked units and files without touching external targets"
 
+# Last-written skill stamps are ownership evidence, so their path must be held to the
+# same no-symlink rule as the live destination. Exercise a command-stamp directory on
+# selected install, the gated command on gate-off, and a stamp leaf on deselection.
+TCSS_DIR="$T/codex-stamp-symlink-dir"
+TCSS_GATE="$T/codex-stamp-symlink-gate"
+TCSS_LEAF="$T/codex-stamp-symlink-leaf"
+TCSS_DIR_EXT="$T/codex-stamp-symlink-dir.external"
+TCSS_GATE_EXT="$T/codex-stamp-symlink-gate.external"
+TCSS_LEAF_EXT="$T/codex-stamp-symlink-leaf.external"
+
+mkdir -p "$TCSS_DIR"
+CODEX_HOME="$TCSS_DIR/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCSS_DIR" >/dev/null \
+  || fail "codex stamp-dir selected-install setup failed"
+mv "$TCSS_DIR/.harness/.codex-skills/sdd-next" "$TCSS_DIR_EXT"
+ln -s "$TCSS_DIR_EXT" "$TCSS_DIR/.harness/.codex-skills/sdd-next"
+printf 'external stamp sentinel\n' > "$TCSS_DIR_EXT/SKILL.md"
+cp "$TCSS_DIR_EXT/SKILL.md" "$TCSS_DIR/.agents/skills/sdd-next/SKILL.md"
+cp "$TCSS_DIR_EXT/SKILL.md" "$TCSS_DIR_EXT/SKILL.ref"
+cp "$TCSS_DIR/.agents/skills/sdd-next/SKILL.md" "$TCSS_DIR/live.ref"
+CODEX_HOME="$TCSS_DIR/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCSS_DIR" >/dev/null \
+  || fail "codex stamp-dir selected install failed"
+[ -L "$TCSS_DIR/.harness/.codex-skills/sdd-next" ] \
+  || fail "round-5 stamp symlink: selected install replaced a skill stamp directory link"
+cmp -s "$TCSS_DIR_EXT/SKILL.ref" "$TCSS_DIR_EXT/SKILL.md" \
+  || fail "round-5 stamp symlink: selected install changed an external skill stamp"
+cmp -s "$TCSS_DIR/live.ref" "$TCSS_DIR/.agents/skills/sdd-next/SKILL.md" \
+  || fail "round-5 stamp symlink: selected install used a linked stamp as ownership evidence"
+
+mkdir -p "$TCSS_GATE"
+HARNESS_PR_LOOP_ENABLED=true CODEX_HOME="$TCSS_GATE/ch" \
+  sh "$SRC/harness-install.sh" --agents=codex "$TCSS_GATE" >/dev/null \
+  || fail "codex stamp-dir gate-off setup failed"
+mv "$TCSS_GATE/.harness/.codex-skills/sdd-pr-loop" "$TCSS_GATE_EXT"
+ln -s "$TCSS_GATE_EXT" "$TCSS_GATE/.harness/.codex-skills/sdd-pr-loop"
+cp -R "$TCSS_GATE_EXT" "$TCSS_GATE_EXT.ref"
+cp "$TCSS_GATE/.agents/skills/sdd-pr-loop/SKILL.md" "$TCSS_GATE/live.ref"
+HARNESS_PR_LOOP_ENABLED=false CODEX_HOME="$TCSS_GATE/ch" \
+  sh "$SRC/harness-install.sh" --agents=codex "$TCSS_GATE" >/dev/null \
+  || fail "codex stamp-dir gate-off install failed"
+[ -L "$TCSS_GATE/.harness/.codex-skills/sdd-pr-loop" ] \
+  || fail "round-5 stamp symlink: gate-off removed a skill stamp directory link"
+diff -r "$TCSS_GATE_EXT.ref" "$TCSS_GATE_EXT" >/dev/null \
+  || fail "round-5 stamp symlink: gate-off changed an external skill stamp directory"
+cmp -s "$TCSS_GATE/live.ref" "$TCSS_GATE/.agents/skills/sdd-pr-loop/SKILL.md" \
+  || fail "round-5 stamp symlink: gate-off removed a live skill through linked ownership evidence"
+
+mkdir -p "$TCSS_LEAF"
+CODEX_HOME="$TCSS_LEAF/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCSS_LEAF" >/dev/null \
+  || fail "codex stamp-leaf deselection setup failed"
+mv "$TCSS_LEAF/.harness/.codex-skills/sdd-new/SKILL.md" "$TCSS_LEAF_EXT"
+ln -s "$TCSS_LEAF_EXT" "$TCSS_LEAF/.harness/.codex-skills/sdd-new/SKILL.md"
+cp "$TCSS_LEAF_EXT" "$TCSS_LEAF_EXT.ref"
+cp "$TCSS_LEAF/.agents/skills/sdd-new/SKILL.md" "$TCSS_LEAF/live.ref"
+CODEX_HOME="$TCSS_LEAF/ch" sh "$SRC/harness-install.sh" --agents=claude "$TCSS_LEAF" >/dev/null \
+  || fail "codex stamp-leaf deselection failed"
+[ -L "$TCSS_LEAF/.harness/.codex-skills/sdd-new/SKILL.md" ] \
+  || fail "round-5 stamp symlink: deselection removed a skill stamp leaf link"
+cmp -s "$TCSS_LEAF_EXT.ref" "$TCSS_LEAF_EXT" \
+  || fail "round-5 stamp symlink: deselection changed an external skill stamp leaf"
+cmp -s "$TCSS_LEAF/live.ref" "$TCSS_LEAF/.agents/skills/sdd-new/SKILL.md" \
+  || fail "round-5 stamp symlink: deselection removed a live skill through linked ownership evidence"
+pass "Codex skill stamp symlinks are never followed for selected install, gate-off, or deselection"
+
 # codex_no_home_required: the current repository-local surface does not resolve HOME or
 # CODEX_HOME at all, and remains fully functional when both are absent.
 TCH="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
