@@ -106,9 +106,9 @@ Two things from the pattern are deliberately **rejected**:
 ## Features
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| F01 | Feature-size budget in the Driller and Architect (split at decomposition time) | pending | true | — |
-| F02 | Pre-PR change-size check on the Reviewer → PR handoff | pending | true | E21-F01 |
-| F03 | `/sdd-pr-loop`: per-round finding trend + "split, don't re-review" at the round cap | pending | true | E18-F01 |
+| F01 | Feature-size budget in the Driller and Architect (split at decomposition time) | done | true | — |
+| F02 | Pre-PR change-size check on the Reviewer → PR handoff | done | true | E21-F01 |
+| F03 | `/sdd-pr-loop`: per-round finding trend + "split, don't re-review" at the round cap | done | true | E18-F01 |
 | F04 | Stacked-PR lane for an atomic feature that exceeds the budget | pending (**withdrawn — needs re-spec**) | true | E18-F01, E21-F03 |
 
 ## Notes
