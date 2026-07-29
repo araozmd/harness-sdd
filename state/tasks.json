@@ -564,7 +564,7 @@
         {
           "id": "E21-F04",
           "title": "Stacked-PR lane for an atomic feature that exceeds the budget",
-          "status": "in-progress",
+          "status": "pending",
           "sdd": true,
           "autonomous": false,
           "depends_on": [

@@ -3001,9 +3001,9 @@ description: Probe whether this OpenCode session can run subagents concurrently
 Run a concurrency probe. This command spawns two trivial subagents and measures whether
 OpenCode executes them in parallel.
 
-1. Prepare a temp directory under `progress/opencode-concurrency-probe/` (remove any
-   previous probe first). This lives in the Scout role's allowed output area so the
-   subagents do not have to violate their read-only contract.
+1. Prepare a temp directory under `.harness/progress/opencode-concurrency-probe/`
+   (remove any previous probe first). This lives in the Scout role's allowed output area
+   so the subagents do not have to violate their read-only contract.
 2. Spawn **two** identical `scout` subagents **in the same response / at the same time**
    using the `task` tool. Give each subagent this exact job, with its own index `N` (1 or
    2) and the temp directory `DIR`:

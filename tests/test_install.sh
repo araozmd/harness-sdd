@@ -1481,8 +1481,8 @@ test_opencode_parallel_optin() {
   # Default: probe present, parallel absent.
   [ -f "$_op/.opencode/command/sdd-test-concurrency.md" ] \
     || fail "E22-F01: default opencode install missing sdd-test-concurrency"
-  grep -q 'progress/opencode-concurrency-probe/' "$_op/.opencode/command/sdd-test-concurrency.md" \
-    || fail "E22-F01: probe does not use the Scout-allowed progress/ output area"
+  grep -q '.harness/progress/opencode-concurrency-probe/' "$_op/.opencode/command/sdd-test-concurrency.md" \
+    || fail "E22-F01: probe does not use the Scout-allowed .harness/progress/ output area"
   [ ! -f "$_op/.opencode/command/sdd-fix-parallel.md" ] \
     || fail "E22-F01: default opencode install stamped sdd-fix-parallel"
   # Force it on.
