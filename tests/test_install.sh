@@ -653,7 +653,7 @@ done
 pass "Antigravity glue generated (R11)"
 
 # E10-F01 R12/R13: the /sdd-next scoped-selection front-end is generated into EVERY selected
-# target (Claude/OpenCode/Antigravity here; Codex GLOBAL prompts in the codex-select case),
+# target (Claude/OpenCode/Antigravity here; Codex repository skills in its select case),
 # byte-identical, and each carries the --mine wiring + forwards $ARGUMENTS. The cmp -s chains
 # above prove byte-identity across targets; assert the scope token reached each generated body.
 for _b in "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" "$T/.agents/workflows/sdd-next.md"; do
@@ -936,11 +936,21 @@ CODEX_HOME="$TCX/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCX" >/dev/nu
 [ -f "$TCX/AGENTS.md" ]                 || fail "codex: AGENTS.md (Codex's native entrypoint) must always be written"
 for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-loop; do
   _skill="$TCX/.agents/skills/$_c/SKILL.md"
+  _policy="$TCX/.agents/skills/$_c/agents/openai.yaml"
   [ -f "$_skill" ]                      || fail "codex: project skill $_c/SKILL.md not installed"
+  [ -f "$_policy" ]                     || fail "codex: project skill $_c has no agents/openai.yaml"
   [ "$(sed -n '1p' "$_skill")" = "---" ] || fail "codex: $_c skill frontmatter does not open"
   grep -qx "name: $_c" "$_skill"         || fail "codex: $_c skill has no stable name metadata"
   grep -q '^description: .[^ ]' "$_skill" || fail "codex: $_c skill has no non-empty description metadata"
   [ "$(sed -n '4p' "$_skill")" = "---" ] || fail "codex: $_c skill frontmatter does not close deterministically"
+  grep -qx 'policy:' "$_policy" \
+    || fail "codex: $_c metadata has no policy block"
+  grep -qx '  allow_implicit_invocation: false' "$_policy" \
+    || fail "codex: $_c is not explicit-invocation-only"
+  grep -qF "all text accompanying the explicit \`\$$_c\` mention" "$_skill" \
+    || fail "codex: $_c does not map invocation text to the canonical argument term"
+  grep -qF 'as the value of `$ARGUMENTS`' "$_skill" \
+    || fail "codex: $_c does not define the canonical \$ARGUMENTS mapping"
 done
 # E18-F01 R14: NO pr-fixer artifact is ever created for the codex front-end.
 [ -f "$TCX/.codex/agents/pr-fixer.toml" ] && fail "codex: must not create a pr-fixer artifact (E18-F01 R14)" 
@@ -955,18 +965,65 @@ grep -qx codex "$TCX/.harness/.agents" || fail "R8: codex not persisted in .harn
 grep -qF '.harness/' "$TCX/.agents/skills/sdd-next/SKILL.md" || fail "codex: sdd-next skill does not resolve against .harness/"
 grep -qF '$ARGUMENTS' "$TCX/.agents/skills/sdd-next/SKILL.md" || fail "codex: sdd-next skill does not carry \$ARGUMENTS"
 grep -qF -- '--mine' "$TCX/.agents/skills/sdd-next/SKILL.md" || fail "codex: sdd-next skill does not carry the --mine scoped-selection wiring (E10-F01)"
-# After removing the adapter metadata, the instruction body is byte-identical to Claude.
+# After removing the adapter metadata/instruction, the canonical workflow remains
+# byte-identical to Claude.
 CODEX_HOME="$TCX/ch2" sh "$SRC/harness-install.sh" --agents=claude,codex "$TCX" >/dev/null || fail "codex+claude install failed"
-tail -n +5 "$TCX/.agents/skills/sdd-next/SKILL.md" > "$TCX/skill.body"
+sed -n '/^## Canonical workflow$/,$p' "$TCX/.agents/skills/sdd-next/SKILL.md" | tail -n +2 > "$TCX/skill.body"
 tail -n +5 "$TCX/.claude/commands/sdd-next.md" > "$TCX/command.body"
 cmp -s "$TCX/skill.body" "$TCX/command.body" \
   || fail "codex: sdd-next skill instructions differ from the canonical command body"
-tail -n +5 "$TCX/.agents/skills/sdd-fix-parallel/SKILL.md" > "$TCX/parallel-skill.body"
+sed -n '/^## Canonical workflow$/,$p' "$TCX/.agents/skills/sdd-fix-parallel/SKILL.md" | tail -n +2 > "$TCX/parallel-skill.body"
 tail -n +5 "$TCX/.claude/commands/sdd-fix-parallel.md" > "$TCX/parallel-command.body"
 cmp -s "$TCX/parallel-skill.body" "$TCX/parallel-command.body" \
   || fail "codex: parallel skill instructions differ from the canonical command body"
 rm -rf "$TCX"
-pass "--agents=codex stamps project-local \$sdd-* skills with canonical command bodies"
+pass "--agents=codex stamps explicit-only project skills with an argument adapter and canonical bodies"
+
+# Selected installs own a skill only through a last-written two-file unit stamp. A
+# foreign unit is preserved byte-for-byte; a harness-owned prior-version unit (live
+# bytes still match the remembered bytes) is updated as a whole and remains reclaimable.
+TCU="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+mkdir -p "$TCU/.agents/skills/sdd-next/agents"
+printf 'foreign skill\n' > "$TCU/.agents/skills/sdd-next/SKILL.md"
+printf 'foreign policy\n' > "$TCU/.agents/skills/sdd-next/agents/openai.yaml"
+cp "$TCU/.agents/skills/sdd-next/SKILL.md" "$TCU/foreign-skill.ref"
+cp "$TCU/.agents/skills/sdd-next/agents/openai.yaml" "$TCU/foreign-policy.ref"
+_foreign_warn="$(CODEX_HOME="$TCU/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCU" 2>&1 >/dev/null)" \
+  || fail "codex foreign-unit preservation install failed"
+cmp -s "$TCU/foreign-skill.ref" "$TCU/.agents/skills/sdd-next/SKILL.md" \
+  || fail "R3: selected Codex install overwrote a foreign SKILL.md"
+cmp -s "$TCU/foreign-policy.ref" "$TCU/.agents/skills/sdd-next/agents/openai.yaml" \
+  || fail "R3: selected Codex install overwrote foreign agents/openai.yaml"
+printf '%s\n' "$_foreign_warn" | grep -qF '.agents/skills/sdd-next' \
+  || fail "R3: selected foreign skill unit preservation was not diagnosed"
+[ -e "$TCU/.harness/.codex-skills/sdd-next" ] \
+  && fail "R3: installer claimed a last-written stamp for a foreign skill unit"
+rm -rf "$TCU"
+
+TCS="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CODEX_HOME="$TCS/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCS" >/dev/null \
+  || fail "codex skill stamp setup failed"
+_live="$TCS/.agents/skills/sdd-next"
+_stamp="$TCS/.harness/.codex-skills/sdd-next"
+[ -f "$_stamp/SKILL.md" ] && [ -f "$_stamp/agents/openai.yaml" ] \
+  || fail "R3: harness-owned skill unit has no two-file last-written stamp"
+printf '\nold harness body\n' >> "$_live/SKILL.md"
+printf '\nold harness body\n' >> "$_stamp/SKILL.md"
+CODEX_HOME="$TCS/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCS" >/dev/null \
+  || fail "codex stamped skill update failed"
+grep -qF 'old harness body' "$_live/SKILL.md" \
+  && fail "R3: stamp-matching harness skill did not update"
+cmp -s "$_live/SKILL.md" "$_stamp/SKILL.md" \
+  || fail "R3: updated SKILL.md stamp does not match the written file"
+cmp -s "$_live/agents/openai.yaml" "$_stamp/agents/openai.yaml" \
+  || fail "R3: updated openai.yaml stamp does not match the written file"
+CODEX_HOME="$TCS/ch" sh "$SRC/harness-install.sh" --agents=claude "$TCS" >/dev/null \
+  || fail "codex stamped skill deselect failed"
+[ -e "$_live/SKILL.md" ] && fail "R3: stamped SKILL.md survived deselection"
+[ -e "$_live/agents/openai.yaml" ] && fail "R3: stamped agents/openai.yaml survived deselection"
+[ -e "$_stamp" ] && fail "R3: skill ownership stamp survived deselection"
+rm -rf "$TCS"
+pass "selected Codex skill units preserve foreign bytes and update/reclaim only through last-written stamps"
 
 # test_sdd_fix_parallel_registry_cleanup (covered across each deselection block below)
 # codex_deselect_reclaims_pristine (§7): re-run dropping codex removes byte-pristine
@@ -984,6 +1041,8 @@ _cwarn="$(CODEX_HOME="$CH" sh "$SRC/harness-install.sh" --agents=antigravity "$T
 [ -f "$TCD/.agents/skills/sdd-pr-loop/SKILL.md" ] && fail "R3: deselected pristine pr-loop skill was not removed"
 [ -f "$TCD/.agents/skills/sdd-fix/SKILL.md" ] || fail "R3: user-edited Codex skill must be preserved on deselect"
 grep -qF '# user edit' "$TCD/.agents/skills/sdd-fix/SKILL.md" || fail "R3: edited skill content was lost"
+[ -f "$TCD/.agents/skills/sdd-fix/agents/openai.yaml" ] \
+  || fail "R3: edited skill unit lost its explicit-only companion on deselect"
 [ -f "$TCD/.agents/rules/harness.md" ] || fail "R3/R9: Codex deselection damaged Antigravity rules"
 [ -f "$TCD/.agents/workflows/sdd-next.md" ] || fail "R3/R9: Codex deselection damaged Antigravity workflows"
 [ -f "$TCD/.agents/user-file.txt" ] || fail "R3: Codex deselection deleted a user sibling"
@@ -1004,27 +1063,33 @@ printf '%s' "$_chwarn" | grep -q 'skipping GLOBAL' && fail "codex no-HOME: insta
 rm -rf "$TCH"
 pass "codex project skills install without HOME or CODEX_HOME"
 
-# Legacy global prompt migration: a byte-identical generated legacy prompt is removed,
-# while an edited prompt is preserved byte-for-byte and diagnosed. No backup/current
-# prompt replacement is created because global prompts are no longer an active surface.
+# Legacy ungated global prompts have no cross-target ownership ledger. Preserve even a
+# byte-identical generated legacy prompt because another pre-0.48 target may still rely
+# on it; edited prompts are likewise preserved byte-for-byte. No backup/current prompt
+# replacement is created because global prompts are no longer an active surface.
 TCP="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 CHP="$TCP/ch/prompts"
 mkdir -p "$CHP"
 CODEX_HOME="$TCP/ch" sh "$SRC/harness-install.sh" --agents=claude "$TCP" >/dev/null 2>&1 \
   || fail "legacy migration reference setup failed"
 cp "$TCP/.claude/commands/sdd-next.md" "$CHP/sdd-next.md"
+cp "$TCP/.claude/commands/sdd-next.md" "$TCP/sdd-next.ref"
 cp "$TCP/.claude/commands/sdd-fix.md" "$CHP/sdd-fix.md"
 printf '\n# user edit survives\n' >> "$CHP/sdd-fix.md"
 _legacy_warn="$(CODEX_HOME="$TCP/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCP" 2>&1 >/dev/null)" \
   || fail "codex legacy migration exited non-zero"
-[ -f "$CHP/sdd-next.md" ] && fail "R5: byte-pristine legacy sdd-next prompt was not removed"
+[ -f "$CHP/sdd-next.md" ] || fail "R5: ownership-unknown legacy sdd-next prompt was removed"
+cmp -s "$TCP/sdd-next.ref" "$CHP/sdd-next.md" \
+  || fail "R5: ownership-unknown legacy sdd-next prompt bytes were changed"
 [ -f "$CHP/sdd-fix.md" ] || fail "R5: edited legacy prompt was removed"
 grep -qF '# user edit survives' "$CHP/sdd-fix.md" || fail "R5: edited legacy prompt bytes were changed"
 [ -e "$CHP/sdd-next.md.pre-harness.bak" ] && fail "R4: migration created an obsolete prompt backup"
 printf '%s\n' "$_legacy_warn" | grep -qF 'sdd-fix.md' || fail "R5: edited legacy prompt preservation was not diagnosed"
+printf '%s\n' "$_legacy_warn" | grep -qF 'sdd-next.md' || fail "R5: ownership-unknown legacy prompt preservation was not diagnosed"
+printf '%s\n' "$_legacy_warn" | grep -qiF 'ownership' || fail "R5: legacy preservation warning does not name the ownership reason"
 [ -f "$TCP/.agents/skills/sdd-next/SKILL.md" ] || fail "R1: current repository skill missing after legacy migration"
 rm -rf "$TCP"
-pass "codex safely migrates pristine legacy prompts and preserves edited prompts"
+pass "codex preserves ownership-unknown ungated legacy prompts and edited prompts"
 
 # E23-F01 R10: shipped documentation and the installed manifest describe the native
 # Codex surface, always-present roles, safe migration, and the public release version.
@@ -1034,12 +1099,16 @@ for _doc in "$SRC/README.md" "$SRC/docs/HARNESS.md" "$SRC/docs/INSTALL.md"; do
   grep -qF '$sdd-' "$_doc" || fail "R10: $_doc does not document Codex \$sdd-* skills"
   grep -qF '.agents/skills' "$_doc" || fail "R10: $_doc omits the Codex skill layout"
   grep -qiF 'legacy' "$_doc" || fail "R10: $_doc does not document legacy migration"
+  grep -qiF 'explicit' "$_doc" || fail "R10: $_doc does not document explicit-only Codex skills"
+  grep -qiF 'ownership' "$_doc" || fail "R10: $_doc does not document ownership-safe reconciliation"
 done
 TDOC="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 env -u HOME -u CODEX_HOME sh "$SRC/harness-install.sh" --agents=codex "$TDOC" >/dev/null \
   || fail "R10: manifest fixture install failed"
 grep -qF '.agents/skills/sdd-*/SKILL.md' "$TDOC/.harness/manifest.txt" \
   || fail "R10: installed manifest omits Codex skills"
+grep -qF 'agents/openai.yaml' "$TDOC/.harness/manifest.txt" \
+  || fail "R10: installed manifest omits explicit-only Codex skill metadata"
 grep -qF 'six selected Codex role' "$TDOC/.harness/manifest.txt" \
   || fail "R10: installed manifest does not describe always-present Codex roles"
 grep -qF 'Current installs never create or overwrite' "$TDOC/.harness/manifest.txt" \

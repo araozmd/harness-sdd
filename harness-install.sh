@@ -2164,8 +2164,11 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .harness/specs/glossary.md  .harness/umbrella.manifest.example.yaml  .harness/umbrella.gitignore.example
   .claude/agents/*  .claude/commands/*   .opencode/command/*   (repo root, regenerated)
   .agents/rules/*  .agents/agents/*  .agents/workflows/*   (repo root, regenerated; Antigravity glue)
-  .agents/skills/sdd-*/SKILL.md       Codex \$sdd-* repository skills (pristine-only cleanup)
+  .agents/skills/sdd-*/SKILL.md       Codex \$sdd-* repository skill instructions
+  .agents/skills/sdd-*/agents/openai.yaml
+                                      explicit-only invocation policy
   .codex/agents/*.toml                six selected Codex role definitions (model optional)
+  .harness/.codex-skills/             last-written Codex skill-unit ownership stamps
   CLAUDE.md / AGENTS.md / GEMINI.md  -> only the harness:begin..end block
 
 OPENCODE CONCURRENCY PROBE  (E22-F01):
@@ -2184,9 +2187,9 @@ install seeds false, so none of this exists until you turn it on — E18-F01):
   empty dirs. No pr-fixer artifact is ever created for the codex or gemini front-ends.
 
 CODEX LEGACY MIGRATION:
-  Current installs never create or overwrite \$CODEX_HOME/prompts/sdd-*.md. Byte-pristine
-  legacy prompts may be removed during upgrade; edited prompts survive. Legacy
-  sdd-pr-loop additionally requires a readable owners ledger proving no live owners.
+  Current installs never create or overwrite \$CODEX_HOME/prompts/sdd-*.md. Ungated
+  legacy prompts are preserved because cross-target ownership is unknowable. Only a
+  byte-pristine sdd-pr-loop with a readable ledger proving no live owners is reclaimed.
 
 MODEL ROUTING:
   .gemini/agents/*               per-role Gemini agent definitions (regenerated)
@@ -2198,7 +2201,8 @@ MODEL ROUTING:
                                  files, kept only while those files exist (lets a switch
                                  back to \`inherit\` reclaim them instead of orphaning them)
   Gemini remains conditional on a concrete model. Selected Codex always has all six roles;
-  inherited or unpinned roles omit model, while concrete pins add it role by role.
+  inherited or unpinned roles omit model, while concrete pins add it role by role. Codex
+  role replacement/reclamation requires a matching last-written ownership stamp.
 
 PROJECT-OWNED  (seeded once, never clobbered on upgrade):
   .harness/harness.config.yaml   (verification commands + store backend + change_size budget)
@@ -2566,6 +2570,32 @@ EOF
     cp "$3" "$H/.model-agents/$1/$2"
   }
 
+  # install_codex_agent <file> <candidate> — selected Codex installs replace a role
+  # only when ownership is safe: the path is absent, already equals the current
+  # generated body, or still equals the last body this installer stamped.
+  install_codex_agent() {
+    _ica_file="$1"; _ica_src="$2"
+    _ica_dest="$TARGET/.codex/agents/$_ica_file"
+    _ica_stamp="$H/.model-agents/codex/$_ica_file"
+    _ica_safe=0
+    if [ ! -e "$_ica_dest" ]; then
+      _ica_safe=1
+    elif [ -f "$_ica_dest" ] && [ -f "$_ica_stamp" ] \
+         && cmp -s "$_ica_dest" "$_ica_stamp"; then
+      _ica_safe=1
+    elif [ -f "$_ica_dest" ] && cmp -s "$_ica_dest" "$_ica_src"; then
+      _ica_safe=1
+    fi
+    if [ "$_ica_safe" = 0 ]; then
+      echo "⚠️  .codex/agents/$_ica_file is foreign or edited — selected Codex install left it unchanged" >&2
+      return 0
+    fi
+    mkdir -p "$TARGET/.codex/agents"
+    cat "$_ica_src" > "$_ica_dest"
+    stamp_model_agent codex "$_ica_file" "$_ica_dest"
+    return 0
+  }
+
   # reclaim_model_agents <front-end> — remove this front-end's per-role model
   # artifacts, pristine-only, and prune the harness-created dirs. Called from BOTH the
   # install path (nothing resolves any more) and §7 (front-end deselected), so the two
@@ -2588,16 +2618,25 @@ EOF
         [ -n "$_rma_r" ] || continue
         _rma_f="$_rma_r.$_rma_ext"
         [ -f "$TARGET/$_rma_sub/$_rma_f" ] || continue
-        # Reference: the remembered bytes when they match what is on disk (the file may
-        # have been written under a different `models:` config); otherwise a freshly
-        # generated body, which still covers targets stamped before stamps existed.
-        "$_rma_gen" "$_rma_r" "$_rma_d" "$_rma_tmp"
-        _rma_ref="$_rma_tmp"
-        if [ -f "$_rma_stamp/$_rma_f" ] \
-           && cmp -s "$TARGET/$_rma_sub/$_rma_f" "$_rma_stamp/$_rma_f"; then
-          _rma_ref="$_rma_stamp/$_rma_f"
+        if [ "$_rma_fe" = codex ]; then
+          # Codex lives in a shared project-local namespace. Reclamation requires the
+          # last-written stamp; a fresh body cannot prove that a same-named file is ours.
+          if [ -f "$_rma_stamp/$_rma_f" ] \
+             && cmp -s "$TARGET/$_rma_sub/$_rma_f" "$_rma_stamp/$_rma_f"; then
+            remove_if_pristine "$_rma_sub/$_rma_f" "$_rma_stamp/$_rma_f" "$_rma_fe"
+          else
+            echo "⚠️  $_rma_sub/$_rma_f has no matching last-written stamp (foreign or edited) — left in place (deselected '$_rma_fe' not removed)" >&2
+          fi
+        else
+          # Gemini retains its existing compatibility fallback for pre-stamp targets.
+          "$_rma_gen" "$_rma_r" "$_rma_d" "$_rma_tmp"
+          _rma_ref="$_rma_tmp"
+          if [ -f "$_rma_stamp/$_rma_f" ] \
+             && cmp -s "$TARGET/$_rma_sub/$_rma_f" "$_rma_stamp/$_rma_f"; then
+            _rma_ref="$_rma_stamp/$_rma_f"
+          fi
+          remove_if_pristine "$_rma_sub/$_rma_f" "$_rma_ref" "$_rma_fe"
         fi
-        remove_if_pristine "$_rma_sub/$_rma_f" "$_rma_ref" "$_rma_fe"
       done)"
       rm -f "$_rma_tmp"
       # Never `rm -rf`: named files above, then rmdir — which fails harmlessly when a
@@ -3704,8 +3743,8 @@ EOF
   fi
 
   # gen_codex_skill <command> <dest> — adapt the canonical command body to Codex's
-  # repository-local skill format. Metadata is derived from the generated command
-  # frontmatter; the instructions after that frontmatter are copied byte-for-byte.
+  # repository-local skill format. The adapter explicitly maps text accompanying the
+  # `$skill` mention to the canonical body's `$ARGUMENTS` term.
   gen_codex_skill() {
     _gcs_name="$1"; _gcs_dest="$2"; _gcs_src="$CMDDIR/$_gcs_name.md"
     _gcs_desc="$(sed -n 's/^description: //p' "$_gcs_src" | sed -n '1p')"
@@ -3714,24 +3753,91 @@ EOF
       printf 'name: %s\n' "$_gcs_name"
       printf 'description: %s\n' "$_gcs_desc"
       printf '%s\n' '---'
+      printf '\n## Codex invocation adapter\n\n'
+      printf 'When explicitly invoked, treat all text accompanying the explicit `$%s` mention as the value of `$ARGUMENTS` in the canonical instructions below.\n' "$_gcs_name"
+      printf '\n## Canonical workflow\n'
       sed -n '5,$p' "$_gcs_src"
     } > "$_gcs_dest"
   }
 
-  # reclaim_codex_skills <command-list> — reclaim only byte-pristine harness skills.
-  # `.agents/` is shared with Antigravity and users, so remove named files and use only
-  # `rmdir` for directory pruning.
+  gen_codex_skill_policy() {
+    cat > "$1" <<'EOF'
+policy:
+  allow_implicit_invocation: false
+EOF
+  }
+
+  # install_codex_skill <command> — manage SKILL.md + agents/openai.yaml as one
+  # ownership unit. Both artifacts are updated only when each existing path is current
+  # generated output or matches its last-written stamp.
+  install_codex_skill() {
+    _ics_cmd="$1"
+    _ics_live="$TARGET/.agents/skills/$_ics_cmd"
+    _ics_stamp="$H/.codex-skills/$_ics_cmd"
+    _ics_tmp="$(mktemp -d 2>/dev/null || mktemp -d -t harness-codex-skill)"
+    mkdir -p "$_ics_tmp/agents"
+    gen_codex_skill "$_ics_cmd" "$_ics_tmp/SKILL.md"
+    gen_codex_skill_policy "$_ics_tmp/agents/openai.yaml"
+    _ics_safe=1
+    for _ics_rel in SKILL.md agents/openai.yaml; do
+      _ics_dest="$_ics_live/$_ics_rel"
+      _ics_ref="$_ics_tmp/$_ics_rel"
+      _ics_old="$_ics_stamp/$_ics_rel"
+      if [ ! -e "$_ics_dest" ]; then
+        :
+      elif [ -f "$_ics_dest" ] && [ -f "$_ics_old" ] \
+           && cmp -s "$_ics_dest" "$_ics_old"; then
+        :
+      elif [ -f "$_ics_dest" ] && cmp -s "$_ics_dest" "$_ics_ref"; then
+        :
+      else
+        _ics_safe=0
+      fi
+    done
+    if [ "$_ics_safe" = 0 ]; then
+      echo "⚠️  .agents/skills/$_ics_cmd is a foreign or edited skill unit — selected Codex install left SKILL.md and agents/openai.yaml unchanged" >&2
+      rm -rf "$_ics_tmp"
+      return 0
+    fi
+    mkdir -p "$_ics_live/agents" "$_ics_stamp/agents"
+    cat "$_ics_tmp/SKILL.md" > "$_ics_live/SKILL.md"
+    cat "$_ics_tmp/agents/openai.yaml" > "$_ics_live/agents/openai.yaml"
+    cp "$_ics_live/SKILL.md" "$_ics_stamp/SKILL.md"
+    cp "$_ics_live/agents/openai.yaml" "$_ics_stamp/agents/openai.yaml"
+    rm -rf "$_ics_tmp"
+    return 0
+  }
+
+  # reclaim_codex_skills <command-list> — reclaim only two-file skill units whose
+  # live bytes still match both last-written stamps. `.agents/` is shared with
+  # Antigravity and users, so remove named files and use only `rmdir` for pruning.
   reclaim_codex_skills() {
     _rcs_cmds="$1"; _rcs_gone=""
-    _rcs_tmp="$(mktemp 2>/dev/null || mktemp -t harness-codex-skill)"
     for _rcs_cmd in $_rcs_cmds; do
-      [ -f "$CMDDIR/$_rcs_cmd.md" ] || continue
-      gen_codex_skill "$_rcs_cmd" "$_rcs_tmp"
-      _rcs_removed="$(remove_if_pristine ".agents/skills/$_rcs_cmd/SKILL.md" "$_rcs_tmp" codex)"
-      [ -n "$_rcs_removed" ] && _rcs_gone="$_rcs_gone $_rcs_removed"
+      _rcs_live="$TARGET/.agents/skills/$_rcs_cmd"
+      _rcs_stamp="$H/.codex-skills/$_rcs_cmd"
+      _rcs_present=0
+      [ -e "$_rcs_live/SKILL.md" ] && _rcs_present=1
+      [ -e "$_rcs_live/agents/openai.yaml" ] && _rcs_present=1
+      if [ "$_rcs_present" = 1 ] \
+         && [ -f "$_rcs_live/SKILL.md" ] \
+         && [ -f "$_rcs_live/agents/openai.yaml" ] \
+         && [ -f "$_rcs_stamp/SKILL.md" ] \
+         && [ -f "$_rcs_stamp/agents/openai.yaml" ] \
+         && cmp -s "$_rcs_live/SKILL.md" "$_rcs_stamp/SKILL.md" \
+         && cmp -s "$_rcs_live/agents/openai.yaml" "$_rcs_stamp/agents/openai.yaml"; then
+        rm -f "$_rcs_live/SKILL.md" "$_rcs_live/agents/openai.yaml"
+        _rcs_gone="$_rcs_gone .agents/skills/$_rcs_cmd/SKILL.md .agents/skills/$_rcs_cmd/agents/openai.yaml"
+      elif [ "$_rcs_present" = 1 ]; then
+        echo "⚠️  .agents/skills/$_rcs_cmd has no matching two-file last-written stamp (foreign or edited) — left in place" >&2
+      fi
+      rm -f "$_rcs_stamp/SKILL.md" "$_rcs_stamp/agents/openai.yaml"
+      rmdir "$_rcs_stamp/agents" 2>/dev/null || true
+      rmdir "$_rcs_stamp" 2>/dev/null || true
+      rmdir "$_rcs_live/agents" 2>/dev/null || true
       rmdir "$TARGET/.agents/skills/$_rcs_cmd" 2>/dev/null || true
     done
-    rm -f "$_rcs_tmp"
+    rmdir "$H/.codex-skills" 2>/dev/null || true
     rmdir "$TARGET/.agents/skills" 2>/dev/null || true
     rmdir "$TARGET/.agents" 2>/dev/null || true
     [ -n "$_rcs_gone" ] && printf '%s\n' "$_rcs_gone"
@@ -3740,8 +3846,8 @@ EOF
 
   # migrate_legacy_codex_prompts — retire the pre-0.48 machine-global prompt surface.
   # The directory is resolved only for migration and is never created. Ungated prompts
-  # require byte identity with the canonical legacy command reference. The gated prompt
-  # additionally requires a readable ownership ledger proving there are no live owners.
+  # are always ownership-unknown and therefore preserved. The gated prompt requires both
+  # byte identity and a readable ownership ledger proving there are no live owners.
   migrate_legacy_codex_prompts() {
     _mlc_dir="$(codex_prompts_dir)"
     [ -n "$_mlc_dir" ] && [ -d "$_mlc_dir" ] || return 0
@@ -3749,12 +3855,15 @@ EOF
     for _mlc_cmd in $HARNESS_OWNED_CMDS; do
       _mlc_file="$_mlc_dir/$_mlc_cmd.md"
       [ -f "$_mlc_file" ] || continue
+      if ! _is_pr_loop_cmd "$_mlc_cmd"; then
+        echo "⚠️  legacy Codex prompt $_mlc_file has unknown cross-target ownership — preserved" >&2
+        continue
+      fi
       if ! cmp -s "$_mlc_file" "$CMDDIR/$_mlc_cmd.md"; then
         echo "⚠️  legacy Codex prompt $_mlc_file differs from the generated legacy reference (edited) — preserved" >&2
         continue
       fi
-      if _is_pr_loop_cmd "$_mlc_cmd" \
-         && ! _owners_release "$_mlc_dir" "$_mlc_cmd"; then
+      if ! _owners_release "$_mlc_dir" "$_mlc_cmd"; then
         echo "⚠️  legacy Codex prompt $_mlc_file has live or unknown ownership — preserved" >&2
         continue
       fi
@@ -3775,8 +3884,7 @@ EOF
     _cdx_cmds="$HARNESS_SDD_CMDS"
     if pr_loop_enabled; then _cdx_cmds="$HARNESS_OWNED_CMDS"; fi
     for _c in $_cdx_cmds; do
-      mkdir -p "$TARGET/.agents/skills/$_c"
-      gen_codex_skill "$_c" "$TARGET/.agents/skills/$_c/SKILL.md"
+      install_codex_skill "$_c"
     done
     ok "Codex skills \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel installed (.agents/skills/ — project-local)"
   fi
@@ -3812,12 +3920,13 @@ EOF
   # always exist for selected Codex. `gen_codex_agent` omits `model` when the role
   # inherits or its tier is unpinned, and adds it only for a concrete resolved pin.
   if agent_selected codex; then
-    mkdir -p "$TARGET/.codex/agents"
+    _codex_agent_tmp="$(mktemp 2>/dev/null || mktemp -t harness-codex-agent)"
     ag_personas | while IFS='	' read -r _cxr _cxd; do
       [ -n "$_cxr" ] || continue
-      gen_codex_agent "$_cxr" "$_cxd" "$TARGET/.codex/agents/$_cxr.toml"
-      stamp_model_agent codex "$_cxr.toml" "$TARGET/.codex/agents/$_cxr.toml"
+      gen_codex_agent "$_cxr" "$_cxd" "$_codex_agent_tmp"
+      install_codex_agent "$_cxr.toml" "$_codex_agent_tmp"
     done
+    rm -f "$_codex_agent_tmp"
     ok "Codex per-role agent definitions installed (.codex/agents/ — project-local)"
   fi
 

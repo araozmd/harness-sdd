@@ -28,7 +28,7 @@
 # ENVIRONMENT DISCIPLINE (R14). Every installer invocation goes through `hrun`, the ONE
 # place this suite names the installer, which runs it under `env -i` with nothing but
 # PATH, a sandboxed HOME and a sandboxed CODEX_HOME (never the developer's real ~/.codex,
-# which the `codex` front-end writes global prompts into). No check freezes the exact
+# which legacy Codex migration may inspect). No check freezes the exact
 # VERSION string, compares against a hard-coded previous version, or diffs any file
 # against `main` — all three are permanent-suite anti-patterns.
 #

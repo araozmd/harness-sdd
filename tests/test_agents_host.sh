@@ -1089,7 +1089,7 @@ pass "PRIOR_AGENTS keeps its legacy codex exclusion; no cross-target prompt is r
 test_host_fresh_removes_nothing
 pass "a fresh host install leaves foreign global prompts and the owners ledger untouched (R20)"
 test_host_upgrade_removal_respects_pristine
-pass "a host upgrade reclaims pristine global prompts and preserves a hand-edited one (R21)"
+pass "a host upgrade reclaims stamped local skills and preserves a hand-edited one (R21)"
 test_additive_no_host_unchanged
 pass "a run that never names 'host' behaves exactly as before this feature (R22)"
 test_host_reports_resolution

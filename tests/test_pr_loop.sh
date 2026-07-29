@@ -108,9 +108,15 @@ test_command_mirrored_to_all_frontends() {           # R2
       || fail "R2: $_f is not byte-identical to the Claude copy"
   done
   _skill="$_m/.agents/skills/sdd-pr-loop/SKILL.md"
+  _policy="$_m/.agents/skills/sdd-pr-loop/agents/openai.yaml"
   [ -f "$_skill" ] || fail "R2: gated Codex sdd-pr-loop skill missing"
+  [ -f "$_policy" ] || fail "R2: gated Codex sdd-pr-loop explicit-only metadata missing"
   grep -qx 'name: sdd-pr-loop' "$_skill" || fail "R2: Codex pr-loop skill lacks name metadata"
-  tail -n +5 "$_skill" > "$_m/skill.body"
+  grep -qx '  allow_implicit_invocation: false' "$_policy" \
+    || fail "R2: Codex pr-loop skill permits implicit invocation"
+  grep -qF 'all text accompanying the explicit `$sdd-pr-loop` mention' "$_skill" \
+    || fail "R2: Codex pr-loop skill does not map explicit invocation text"
+  sed -n '/^## Canonical workflow$/,$p' "$_skill" | tail -n +2 > "$_m/skill.body"
   tail -n +5 "$_m/.claude/commands/sdd-pr-loop.md" > "$_m/command.body"
   cmp -s "$_m/skill.body" "$_m/command.body" \
     || fail "R2: Codex pr-loop skill instructions differ from the canonical body"
@@ -128,6 +134,7 @@ test_gate_off_stamps_nothing() {                      # R3
             "$_o/.opencode/command/sdd-pr-loop.md" \
             "$_o/.agents/workflows/sdd-pr-loop.md" \
             "$_o/.agents/skills/sdd-pr-loop/SKILL.md" \
+            "$_o/.agents/skills/sdd-pr-loop/agents/openai.yaml" \
             "$_o/.claude/agents/pr-fixer.md" \
             "$_o/.opencode/agent/pr-fixer.md" \
             "$_o/.agents/agents/pr-fixer.md"; do
@@ -149,7 +156,8 @@ test_deselect_removes_pr_loop_glue() {                # R4
   for _f in "$_d/.claude/commands/sdd-pr-loop.md" "$_d/.claude/agents/pr-fixer.md" \
             "$_d/.opencode/command/sdd-pr-loop.md" "$_d/.opencode/agent/pr-fixer.md" \
             "$_d/.agents/workflows/sdd-pr-loop.md" "$_d/.agents/agents/pr-fixer.md" \
-            "$_d/.agents/skills/sdd-pr-loop/SKILL.md"; do
+            "$_d/.agents/skills/sdd-pr-loop/SKILL.md" \
+            "$_d/.agents/skills/sdd-pr-loop/agents/openai.yaml"; do
     [ -e "$_f" ] && fail "R4: deselected front-end kept $_f"
   done
   pass "R4 deselect: every front-end's /sdd-pr-loop + pr-fixer reclaimed"
@@ -165,7 +173,8 @@ test_gate_flip_off_reclaims() {                       # R5
   for _p in "$_f/.claude/commands/sdd-pr-loop.md" "$_f/.claude/agents/pr-fixer.md" \
             "$_f/.opencode/command/sdd-pr-loop.md" "$_f/.opencode/agent/pr-fixer.md" \
             "$_f/.agents/workflows/sdd-pr-loop.md" "$_f/.agents/agents/pr-fixer.md" \
-            "$_f/.agents/skills/sdd-pr-loop/SKILL.md"; do
+            "$_f/.agents/skills/sdd-pr-loop/SKILL.md" \
+            "$_f/.agents/skills/sdd-pr-loop/agents/openai.yaml"; do
     [ -e "$_p" ] && fail "R5: gate flipped off but $_p survived while the front-end is still selected"
   done
   # the still-selected front-ends keep everything else
@@ -186,6 +195,8 @@ test_edited_copy_left_in_place_and_warns() {          # R6
   install_at "$_e"
   [ -f "$_e/.agents/skills/sdd-pr-loop/SKILL.md" ] \
     || fail "R6: an EDITED Codex skill must survive reclamation"
+  [ -f "$_e/.agents/skills/sdd-pr-loop/agents/openai.yaml" ] \
+    || fail "R6: edited Codex skill unit lost its explicit-only metadata"
   grep -qF 'my own note' "$_e/.agents/skills/sdd-pr-loop/SKILL.md" \
     || fail "R6: the user's edit was lost"
   [ -f "$_e/.agents/agents/pr-fixer.md" ] \
@@ -226,6 +237,7 @@ test_gate_off_then_on_restores() {                    # R8
   cp "$_r/.opencode/agent/pr-fixer.md"     "$T/.rt-ocfixer"
   cp "$_r/.agents/agents/pr-fixer.md"      "$T/.rt-agfixer"
   cp "$_r/.agents/skills/sdd-pr-loop/SKILL.md" "$T/.rt-codex-skill"
+  cp "$_r/.agents/skills/sdd-pr-loop/agents/openai.yaml" "$T/.rt-codex-policy"
   set_gate "$_r" false
   install_at "$_r"
   set_gate "$_r" true
@@ -236,6 +248,8 @@ test_gate_off_then_on_restores() {                    # R8
   cmp -s "$_r/.agents/agents/pr-fixer.md"      "$T/.rt-agfixer" || fail "R8: antigravity pr-fixer not byte-identical after off->on"
   cmp -s "$_r/.agents/skills/sdd-pr-loop/SKILL.md" "$T/.rt-codex-skill" \
     || fail "R8: Codex skill not byte-identical after off->on"
+  cmp -s "$_r/.agents/skills/sdd-pr-loop/agents/openai.yaml" "$T/.rt-codex-policy" \
+    || fail "R8: Codex explicit-only metadata not byte-identical after off->on"
   pass "R8 gate off->on round-trip restores byte-identical glue"
 }
 

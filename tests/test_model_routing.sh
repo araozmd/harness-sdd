@@ -17,8 +17,7 @@ SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 trap 'rm -rf "$T"' EXIT
 
-# The `codex` front-end installs GLOBAL prompts into ${CODEX_HOME:-$HOME/.codex}/prompts.
-# Sandbox CODEX_HOME for the WHOLE suite so no installer run can ever touch the
+# Sandbox CODEX_HOME for the WHOLE suite so legacy-migration checks can never touch the
 # developer's real ~/.codex; each target below also gets its own per-run CODEX_HOME so
 # the "project-local, never global" assertion (R16) is crisp.
 export CODEX_HOME="$T/codex-home"
@@ -342,6 +341,42 @@ test_codex_agent_files_project_local() {
   return 0
 }
 
+# ── E23-F01 review: selected Codex preserves foreign/edited standard role files ──
+test_codex_selected_preserves_foreign_and_edited() {
+  _t="$(mk codex-owned)"
+  mkdir -p "$_t/.codex/agents"
+  printf 'foreign orchestrator role\n' > "$_t/.codex/agents/orchestrator.toml"
+  cp "$_t/.codex/agents/orchestrator.toml" "$_t/foreign-role.ref"
+  _e="$(run_err "$_t" codex)"
+  cmp -s "$_t/foreign-role.ref" "$_t/.codex/agents/orchestrator.toml" \
+    || fail "E23 review: selected Codex install overwrote a foreign orchestrator role"
+  [ -e "$_t/.harness/.model-agents/codex/orchestrator.toml" ] \
+    && fail "E23 review: installer claimed a last-written stamp for a foreign role"
+  printf '%s\n' "$_e" | grep -qF '.codex/agents/orchestrator.toml' \
+    || fail "E23 review: selected foreign role preservation was not diagnosed"
+  [ "$(find "$_t/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "6" ] \
+    || fail "E23 review: preserving one foreign role did not leave exactly six registrations"
+
+  # A role the harness DID write has a last-written stamp. Once edited, a selected
+  # re-install must leave it byte-for-byte untouched even when routing changes.
+  _role="$_t/.codex/agents/builder.toml"
+  _stamp="$_t/.harness/.model-agents/codex/builder.toml"
+  [ -f "$_stamp" ] && cmp -s "$_role" "$_stamp" \
+    || fail "E23 review: harness-owned builder role has no matching last-written stamp"
+  printf '# user edit\n' >> "$_role"
+  cp "$_role" "$_t/edited-role.ref"
+  set_tier "$_t" builder cheap
+  set_pin "$_t" codex cheap "gpt-5-mini"
+  _e2="$(run_err "$_t" codex)"
+  cmp -s "$_t/edited-role.ref" "$_role" \
+    || fail "E23 review: selected re-install overwrote an edited Codex role"
+  grep -q '^model = ' "$_role" \
+    && fail "E23 review setup: edited pre-routing role unexpectedly gained the new model"
+  printf '%s\n' "$_e2" | grep -qF '.codex/agents/builder.toml' \
+    || fail "E23 review: selected edited role preservation was not diagnosed"
+  return 0
+}
+
 # ── R17: Gemini remains conditional; selected Codex roles are always registered ──
 test_new_trees_conditional() {
   # (a) everything on inherit
@@ -415,12 +450,11 @@ test_restamp_after_config_change() {
   return 0
 }
 
-# ── R26: a routine re-install regenerates an EDITED artifact (the other half of BR6) ─
+# ── R26: historical front-ends regenerate edits; Codex requires ownership ──────────
 # BR6 has two paths with two different rules, and R23 only pins one of them. RECLAMATION
 # (deselect) never deletes a user-edited file; REGENERATION (re-install) always overwrites
-# one, exactly as `.claude/agents/*.md` and `.agents/agents/*.md` have always behaved.
-# The two are asserted together here so the wording cannot drift back into the ambiguity
-# the PR #61 review found (E17-F01.spec.md § Amendments A1).
+# one for the historical front-ends. Codex's shared project-local namespace now requires
+# a matching last-written stamp before replacement, so an edited Codex role is preserved.
 #
 # The config is byte-UNCHANGED across the re-run on purpose: with a changed tier this
 # would just be R19 again and would prove nothing about an untouched config.
@@ -460,9 +494,9 @@ test_restamp_overwrites_user_edits() {
   cmp -s "$_ref/harness.config.yaml" "$(cfg "$_t")" \
     || fail "R26: the config changed across the re-run — this test must exercise an UNCHANGED config (R19 owns the changed case)"
 
-  # (a) the edit is gone from the two NEW artifact types…
+  # (a) Gemini retains its regeneration contract; Codex preserves the edit.
   grep -q 'zzz-user-edit' "$_gm" && fail "R26: an edited .gemini/agents/scout.md was not regenerated on re-install"
-  grep -q 'zzz-user-edit' "$_cx" && fail "R26: an edited .codex/agents/scout.toml was not regenerated on re-install"
+  grep -q 'zzz-user-edit' "$_cx" || fail "E23 review: an edited .codex/agents/scout.toml was overwritten on selected re-install"
   # (b) …and from the two PRE-EXISTING ones, the contract R26 says it matches. Asserting
   #     this here is what makes "matching the pre-existing generated-glue contract"
   #     verified rather than merely claimed in prose.
@@ -472,7 +506,7 @@ test_restamp_overwrites_user_edits() {
   # (c) the regenerated body is the NORMAL one — the stamp is intact and single, not a
   #     truncated or doubled rewrite.
   [ "$(grep -c '^model:' "$_gm")" = "1" ] || fail "R26: .gemini/agents/scout.md does not carry exactly one model: key after regeneration"
-  [ "$(grep -c '^model = ' "$_cx")" = "1" ] || fail "R26: .codex/agents/scout.toml does not carry exactly one model key after regeneration"
+  [ "$(grep -c '^model = ' "$_cx")" = "1" ] || fail "E23 review: preserved .codex/agents/scout.toml lost its model key"
   [ "$(grep -c '^model:' "$_cl")" = "1" ] || fail "R26: .claude/agents/scout.md does not carry exactly one model: key after regeneration"
   [ "$(grep -c '^model:' "$_ag")" = "1" ] || fail "R26: .agents/agents/scout.md does not carry exactly one model: key after regeneration"
   grep -q '^model: flash$' "$_gm"            || fail "R26: .gemini/agents/scout.md lost its resolved value"
@@ -484,7 +518,7 @@ test_restamp_overwrites_user_edits() {
   #     i.e. the re-run reproduced the generator's output exactly (this is also what keeps
   #     deselection able to reclaim these files at all — R21).
   cmp -s "$_ref/gemini.md"      "$_gm" || fail "R26: the regenerated .gemini/agents/scout.md is not byte-identical to the pristine reference"
-  cmp -s "$_ref/codex.toml"     "$_cx" || fail "R26: the regenerated .codex/agents/scout.toml is not byte-identical to the pristine reference"
+  cmp -s "$_ref/codex.toml"     "$_cx" && fail "E23 review: edited Codex role unexpectedly reverted to its pristine reference"
   cmp -s "$_ref/claude.md"      "$_cl" || fail "R26: the regenerated .claude/agents/scout.md is not byte-identical to the pristine reference"
   cmp -s "$_ref/antigravity.md" "$_ag" || fail "R26: the regenerated .agents/agents/scout.md is not byte-identical to the pristine reference"
 
@@ -681,8 +715,8 @@ test_return_to_inherit_reconciles() {
   # The still-selected front-ends keep the rest of their glue.
   [ -f "$_t/.agents/skills/sdd-next/SKILL.md" ] || fail "R8: pin→inherit removed Codex skills"
 
-  # (b) Selected Codex roles are regenerated from current routing; Gemini's old
-  # pristine-only return-to-inherit behavior remains unchanged.
+  # (b) Selected Codex roles update from current routing only while their live bytes
+  # still match the last-written stamp. Edited Codex and Gemini roles are preserved.
   _u="$(mk r11rec_edit)"; run "$_u" gemini,codex
   set_tier "$_u" architect reasoning
   set_tier "$_u" scout cheap
@@ -699,11 +733,13 @@ test_return_to_inherit_reconciles() {
   [ -f "$_u/.codex/agents/scout.toml" ] \
     || fail "R8: Codex scout role vanished on the switch back to inherit"
   grep -qx '# mine' "$_u/.codex/agents/scout.toml" \
-    && fail "R8: selected Codex role was not regenerated on pin→inherit"
-  grep -q '^model = ' "$_u/.codex/agents/scout.toml" \
-    && fail "R8: regenerated Codex role retained the old model key"
+    || fail "R8: selected Codex pin→inherit overwrote an edited role"
+  grep -q '^model = "gpt-5-mini"$' "$_u/.codex/agents/scout.toml" \
+    || fail "R8: preserved edited Codex role unexpectedly changed its prior routing"
   printf '%s\n' "$_e" | grep -q '.gemini/agents/architect.md' \
     || fail "R11rec: no warning naming the preserved gemini file"
+  printf '%s\n' "$_e" | grep -q '.codex/agents/scout.toml' \
+    || fail "R8: no warning naming the preserved edited Codex role"
   # Gemini pristine siblings are reclaimed; Codex siblings remain registered model-less.
   [ -f "$_u/.gemini/agents/builder.md" ]  && fail "R11rec: a pristine sibling was not reclaimed (gemini)"
   [ -f "$_u/.codex/agents/builder.toml" ] || fail "R8: Codex sibling role vanished on pin→inherit"
@@ -748,6 +784,8 @@ test_gemini_agent_files
 pass "gemini .gemini/agents/<role>.md created for all six roles with a pointer body (R15)"
 test_codex_agent_files_project_local
 pass "codex .codex/agents/<role>.toml is project-local; \$CODEX_HOME is never touched (R16)"
+test_codex_selected_preserves_foreign_and_edited
+pass "selected Codex role installs preserve foreign/edited files through last-written ownership stamps"
 test_new_trees_conditional
 pass "Gemini remains conditional; selected Codex always registers six model-optional roles (R6, R7, R17)"
 test_return_to_inherit_reconciles
@@ -757,7 +795,7 @@ pass "an unselected front-end is never stamped, even with a full models: block (
 test_restamp_after_config_change
 pass "a config change re-stamps every artifact, exactly one model key per role (R19)"
 test_restamp_overwrites_user_edits
-pass "a re-install with an UNCHANGED config regenerates an edited artifact on every front-end, while deselection still preserves one (R26)"
+pass "historical front-ends retain regeneration behavior while selected Codex preserves edited roles through ownership stamps (R26)"
 test_opencode_json_restamp_rules
 pass "opencode.json: pristine ⇒ regenerated, stamped ⇒ re-stamped, edited ⇒ untouched + warning (R20)"
 test_opencode_json_file_mode

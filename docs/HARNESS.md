@@ -71,9 +71,12 @@ into every selected front-end; turning it back off reclaims all of it.
 
 Selecting Codex also registers exactly six project-local roles in `.codex/agents/`.
 Inherited or unpinned roles remain registered without a `model` key; a concrete Codex
-pin adds `model` only where it resolves. Current installs never create global Codex
-prompts. Upgrade migration removes only byte-pristine legacy prompts and preserves
-edited or ownership-ambiguous `sdd-pr-loop` files with a diagnostic.
+pin adds `model` only where it resolves. Codex skills are explicit-only through
+`agents/openai.yaml`; their adapter maps text accompanying an explicit `$skill` mention
+to the canonical `$ARGUMENTS` term. Last-written stamps protect skill units and role
+files from selected-install overwrite and unsafe reclamation. Current installs never
+create global Codex prompts. Ungated legacy prompts remain because their cross-target
+ownership is unknowable; only ledger-proven, byte-pristine `sdd-pr-loop` is reclaimed.
 
 ## Where the ideas come from
 

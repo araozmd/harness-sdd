@@ -22,7 +22,9 @@ your-project/
 ├── .opencode/agent/pr-fixer.md         # only while pr_loop.enabled (OpenCode file-based sub-agent)
 ├── opencode.json                       # created only if absent (re-stamped only while pristine)
 ├── .agents/{rules,agents,workflows}/   # Antigravity glue → resolves to .harness/ (regenerated each run)
-├── .agents/skills/sdd-*/SKILL.md       # Codex repository-local $sdd-* workflow skills
+├── .agents/skills/sdd-*/                # Codex repository-local $sdd-* skill units
+│   ├── SKILL.md                         # adapter + canonical workflow
+│   └── agents/openai.yaml               # explicit-only invocation policy
 ├── .gemini/agents/*.md                 # per-role model routing only — created ONLY when a tier resolves
 ├── .codex/agents/*.toml                # six selected Codex roles; model optional, never ~/.codex
 └── .harness/                           # the whole harness body
@@ -48,15 +50,25 @@ under `.harness/specs|state|progress` are written once and never clobbered.
 
 Codex workflow discovery is repository-local. Select `codex` to install `$sdd-next`,
 `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`, and `$sdd-fix-parallel` under
-`.agents/skills/`; `$sdd-pr-loop` follows the opt-in gate. Current installation does not
-read `HOME` or `CODEX_HOME` to create workflow glue and never writes or overwrites
+`.agents/skills/`; `$sdd-pr-loop` follows the opt-in gate. Each skill is a two-file
+ownership unit: `SKILL.md` carries the canonical workflow plus an adapter mapping text
+accompanying the explicit `$skill` mention to `$ARGUMENTS`, while `agents/openai.yaml`
+sets `policy.allow_implicit_invocation: false`. Current installation does not read
+`HOME` or `CODEX_HOME` to create workflow glue and never writes or overwrites
 `${CODEX_HOME:-$HOME/.codex}/prompts/sdd-*.md`.
 
-The old global resolver is retained only for upgrade migration. A legacy prompt is
-removed only when its bytes exactly match the canonical generated legacy command.
-Edited prompts are preserved and diagnosed. `sdd-pr-loop.md` is stricter: its ownership
-ledger must also be readable and prove that no live target still claims the prompt;
-missing, unreadable, or live-owner state fails safe and preserves the file.
+Last-written copies under `.harness/.codex-skills/` let a selected install update both
+skill files only when the live unit is absent, current-generated, or still matches the
+previous stamp. The same ownership rule governs gate-off and deselection, so foreign or
+edited units survive intact. Codex role TOMLs use their existing last-written stamps
+under `.harness/.model-agents/codex/` for the same protection.
+
+The old global resolver is retained only for upgrade migration. Ungated legacy prompts
+are always preserved and diagnosed because there is no cross-target ownership ledger
+that can prove another pre-0.48 repository no longer relies on them. Only
+`sdd-pr-loop.md` is reclaimable: its bytes must match the canonical generated legacy
+command and its readable ownership ledger must prove that no live target still claims
+the prompt. Missing, unreadable, or live-owner state fails safe.
 
 ## Bootstrap (first run)
 
@@ -629,9 +641,10 @@ It is re-stamped **only** when it is byte-identical to `.harness/.opencode.stamp
 last body the installer wrote) or to a freshly generated model-free body; anything else
 is treated as yours, left untouched, and reported. `.harness/.model-agents/` is the same
 device for the `.gemini/agents/` and `.codex/agents/` trees: it remembers the exact bytes
-last written there. Returning Codex roles to `inherit` regenerates the six TOMLs without
-their old `model` keys; deselecting Codex reclaims byte-pristine role files. Both stamps
-exist only while the artifacts they describe do.
+last written there. Returning Codex roles to `inherit` regenerates stamp-matching TOMLs
+without their old `model` keys; a foreign or edited role is preserved and diagnosed.
+Deselecting Codex reclaims only roles that still match their last-written stamp. Both
+stamp trees exist only while the artifacts they describe do.
 Deselecting a front-end reclaims its
 stamped artifacts through the same pristine byte-comparison every other generated file
 uses — an edited file survives with a warning.

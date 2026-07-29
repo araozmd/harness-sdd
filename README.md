@@ -238,7 +238,7 @@ umbrella.manifest.example.yaml   cross-repo coordinator manifest template
 umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
 .opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next, /sdd-test-concurrency); /sdd-fix-parallel is opt-in
-.agents/                     Antigravity rules/personas/workflows + Codex repository skills (.agents/skills/sdd-*/SKILL.md)
+.agents/                     Antigravity glue + explicit-only Codex skills (.agents/skills/sdd-*/{SKILL.md,agents/openai.yaml})
 .codex/agents/               six Codex role TOMLs (always present when Codex is selected; model optional)
 ```
 
@@ -295,17 +295,20 @@ saved to `.harness/.agents`, so **every re-run re-prompts with your current sele
 pre-checked** — add or drop an agent any time, even when the harness version hasn't
 changed. Deselecting an agent removes only the harness-generated glue (your own
 `.claude/`/`.opencode/`/`.agents/` files and a hand-edited `opencode.json` are left
-untouched — Antigravity and Codex glue are removed only when byte-identical to a freshly
-generated stamp, never your edited files).
+untouched — Antigravity glue uses a freshly generated reference, while Codex skills and
+roles require their last-written ownership stamps; edited files survive).
 
 > **Codex is repository-local.** Selecting `codex` creates `$sdd-next`, `$sdd-new`,
 > `$sdd-plan`, `$sdd-drill`, `$sdd-fix`, and `$sdd-fix-parallel` as
 > `.agents/skills/<name>/SKILL.md`, plus `$sdd-pr-loop` only while its opt-in gate is
-> enabled. It also registers all six standard roles in `.codex/agents/`; inherited or
-> unpinned roles simply omit `model`. No current install needs `HOME`/`CODEX_HOME` or
-> writes global prompts. During upgrade, byte-pristine legacy `sdd-*.md` prompts may be
-> removed from the old global directory; edited prompts and ownership-ambiguous
-> `sdd-pr-loop` prompts are preserved with a diagnostic.
+> enabled. Each skill also carries `agents/openai.yaml`, disables implicit invocation,
+> and maps text accompanying the explicit `$skill` mention to the canonical workflow's
+> `$ARGUMENTS`. It also registers all six standard roles in `.codex/agents/`; inherited
+> or unpinned roles simply omit `model`. Last-written ownership stamps prevent selected
+> installs or cleanup from replacing foreign or edited skill units and role files. No
+> current install needs `HOME`/`CODEX_HOME` or writes global prompts. Ungated legacy
+> prompts are preserved because their cross-target ownership is unknowable; only a
+> byte-pristine `sdd-pr-loop` prompt whose ledger proves no live owners may be reclaimed.
 
 ```bash
 # Non-interactive / CI — pick explicitly (no prompt):

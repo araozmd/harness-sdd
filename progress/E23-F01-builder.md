@@ -106,3 +106,91 @@ out-of-scope Inception fallback validation of existing draft epic statuses.
 - Review the Codex-only installer paths, especially legacy ownership-ledger migration.
 - The controller owns latest-main reconciliation, PR-loop execution, merge waiting, and
   branch cleanup.
+
+---
+
+## Review round 2
+
+### Status
+
+DONE_WITH_CONCERNS — all round-2 focused behavior/docs suites, cross-version non-Codex
+byte checks, static checks, and the environment gate are green. The unchanged
+repository-wide Inception fallback concern recorded in round 1 remains out of scope.
+
+### Feedback diagnosis
+
+1. Selected skill and role generation redirected into live files before consulting the
+   existing last-written role stamps, and skills had no stamps at all.
+2. Byte identity proved content, not cross-target ownership, for ungated legacy global
+   prompts.
+3. Copying the canonical `$ARGUMENTS` token did not define how Codex text accompanying
+   an explicit `$skill` invocation supplies that value.
+4. A lone `SKILL.md` left these mutating workflows implicitly invocable because Codex's
+   documented default is `true` without `agents/openai.yaml`.
+
+### RED evidence
+
+1. `sh tests/test_install.sh`
+   - Exit: `1`
+   - Expected first failure:
+     `FAIL: codex: project skill sdd-next has no agents/openai.yaml`
+   - The same new block asserts explicit-only policy, `$skill` → `$ARGUMENTS` mapping,
+     two-file ownership stamps, foreign/edited preservation, stamped update/reclaim,
+     and ownership-unknown ungated legacy preservation.
+2. `sh tests/test_model_routing.sh`
+   - Exit: `1`
+   - Expected failure:
+     `FAIL: E23 review: selected Codex install overwrote a foreign orchestrator role`
+3. Focused legacy migration reproduction
+   - Exit: `1`
+   - Expected failure:
+     `FAIL: ownership-unknown ungated legacy prompt deleted`
+4. `tests/test_pr_loop.sh` gained explicit-only two-file unit assertions while retaining
+   its existing ledger matrix: live owner preserves, last/cleared owner reclaims, and
+   missing/unreadable ownership fails closed.
+
+### Implementation
+
+- Each Codex skill now consists of `SKILL.md` plus `agents/openai.yaml`; the latter sets
+  `policy.allow_implicit_invocation: false`.
+- The skill adapter explicitly maps all text accompanying `$<skill>` to `$ARGUMENTS`,
+  then preserves the canonical command body byte-for-byte under a named boundary.
+- `.harness/.codex-skills/<command>/` stores the last-written two-file unit. Selected
+  install, gate-off, and deselection update/reclaim only absent, current-generated, or
+  stamp-matching units; foreign/edited units remain byte-identical with diagnostics.
+- Selected Codex role writes now consult `.harness/.model-agents/codex/` before
+  replacement. Foreign/edited standard role files survive; stamp-matching files still
+  update across routing changes and reclaim on deselection.
+- Ungated legacy prompts are always preserved as ownership-unknown. Only byte-pristine
+  `sdd-pr-loop` with a readable ledger proving no live owners is reclaimed.
+- README, HARNESS/INSTALL docs, manifest text, and CHANGELOG now state these boundaries.
+
+### Focused GREEN evidence
+
+- `sh tests/test_install.sh` — exit `0`, `All install tests passed.`
+- `sh tests/test_model_routing.sh` — exit `0`,
+  `All model-routing tests passed.`
+- `sh tests/test_pr_loop.sh` — exit `0`, `All pr-loop tests passed.`
+- `sh tests/test_installer_toggles.sh` — exit `0`,
+  `All installer-toggle tests passed.`
+- `sh tests/test_agents_host.sh` — exit `0`, `All agents-host tests passed.`
+
+### Final round-2 verification
+
+- Fresh parallel rerun:
+  - `sh tests/test_model_routing.sh` — exit `0`.
+  - `sh tests/test_pr_loop.sh` — exit `0`.
+  - `sh tests/test_installer_toggles.sh` — exit `0`.
+  - `sh tests/test_agents_host.sh` — exit `0`.
+- Fresh `sh tests/test_install.sh` after documentation/manifest updates — exit `0`.
+- Cross-version non-Codex byte comparison:
+  - Generated the Claude, OpenCode, Antigravity, and Gemini surfaces with the
+    round-1 installer (`77d5184`) and the round-2 installer under identical selected
+    front-ends, PR-loop gate, and model routing.
+  - `diff -r` passed for `.claude`, `.opencode`, `.agents/{rules,agents,workflows}`,
+    `.gemini`, `opencode.json`, `CLAUDE.md`, `GEMINI.md`, and `AGENTS.md`.
+- `./init.sh` — exit `0`, `✅ environment ready — agents may proceed`.
+- `sh -n` on the installer and all five owned shell suites — exit `0`.
+- `git diff --check` — exit `0`.
+- Unsafe active-surface claim scan — no stale claim that ungated legacy prompts are
+  reclaimed or that Codex still writes the retired global prompt surface.

@@ -11,7 +11,8 @@ All notable changes to the harness body are recorded here. Versions follow
 - Selecting Codex now installs `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`,
   `$sdd-fix`, and `$sdd-fix-parallel` as repository-local
   `.agents/skills/<name>/SKILL.md` artifacts. `$sdd-pr-loop` follows the existing
-  opt-in `pr_loop.enabled` gate.
+  opt-in `pr_loop.enabled` gate. Every skill includes explicit-only
+  `agents/openai.yaml` metadata and maps text accompanying `$skill` to `$ARGUMENTS`.
 - Codex now always receives exactly six project-local `.codex/agents/*.toml` role
   definitions. Inherited and unpinned roles omit `model`; concrete Codex pins add it
   only to the roles that resolve to that pin.
@@ -21,11 +22,12 @@ All notable changes to the harness body are recorded here. Versions follow
 - Current installs no longer create, overwrite, or advertise
   `${CODEX_HOME:-$HOME/.codex}/prompts/sdd-*.md` as an active command surface and do
   not require `HOME` or `CODEX_HOME`.
-- Upgrades migrate only byte-pristine generated legacy prompts. Edited prompts are
-  preserved and diagnosed; legacy `sdd-pr-loop` additionally requires a readable
-  ownership ledger proving that no live target still claims it.
-- Codex skill and role deselection is pristine-only and prunes empty named directories
-  without recursively deleting the shared `.agents/` tree.
+- Ungated legacy prompts are preserved because their cross-target ownership is
+  unknowable. Only byte-pristine legacy `sdd-pr-loop` is reclaimed, and only when its
+  readable ownership ledger proves that no live target still claims it.
+- Last-written stamps make selected Codex skill/role updates and deselection
+  ownership-safe. Foreign or edited files are preserved; empty named directories are
+  pruned without recursively deleting the shared `.agents/` tree.
 
 ## [0.47.0] — 2026-07-29
 
