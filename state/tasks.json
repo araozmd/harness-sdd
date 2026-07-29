@@ -425,7 +425,7 @@
         {
           "id": "E99-F08",
           "title": "change-size --format json: escape every C0 control character, not just tab",
-          "status": "done",
+          "status": "pending",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
