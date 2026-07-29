@@ -3081,7 +3081,14 @@ missing or corrupt, reconstruct it from the `gh` API.
 
 ## Per-round runbook
 
-For `round` from 1 to `max_rounds`, with `round_dir=.harness/.pr-loop/<pr>/round-<round>`:
+Use a `while` loop so the round counter can be restarted. `round_dir=.harness/.pr-loop/<pr>/round-<round>`;
+`max_rounds` is read from `pr_loop.max_rounds` (default 4).
+
+```bash
+round=1
+while [ "$round" -le "$max_rounds" ]; do
+  round_dir=".harness/.pr-loop/$pr_number/round-$round"
+  mkdir -p "$round_dir"
 
 ### 0. Preflight — BEFORE posting anything
 
@@ -3114,10 +3121,16 @@ if [ "$round" -gt 1 ] && [ -n "$default_branch" ]; then
     current_base_oid="$(gh pr view "$pr_number" --json baseRefOid --jq '.baseRefOid' 2>/dev/null || echo '')"
     if [ -n "$current_base_oid" ] && [ "$current_base_oid" != "$prior_base_oid" ]; then
       echo "baseRefOid changed (${prior_base_oid:0:7} -> ${current_base_oid:0:7}) — parent rebased; discarding prior round cache, restarting from round 1" >&2
-      # Prior round dirs are preserved for the handover summary but not used for gate evaluation.
+      # Move the stale round directories out of the active cache path so stall/trend
+      # evaluation cannot accidentally consume them. The handover summary still reports
+      # their existence, but the active round-1 starts fresh.
+      stale_dir=".harness/.pr-loop/$pr_number/stale-$(date -u +%s)"
+      mkdir -p "$stale_dir"
+      for d in .harness/.pr-loop/$pr_number/round-*/; do
+        [ -d "$d" ] && mv "$d" "$stale_dir/"
+      done
       round=1
-      # The outer for loop will continue with the new round=1; the prior round dirs
-      # (round-1, round-2, ...) remain on disk but are now stale.
+      continue
     fi
   fi
 fi
@@ -3397,6 +3410,15 @@ default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.na
 A missing or empty `$msg` is **not** a failure: the merge command below falls back to
 GitHub's default squash body, so the squash path always reaches its merge.
 
+### Round advance
+
+After the per-round gates and fixes complete:
+
+```bash
+round=$(( round + 1 ))
+done
+```
+
 ## Handover summary
 
 Before posting **either** terminal-state comment, build the handover summary by walking
@@ -3545,24 +3567,33 @@ The guard is called with JSON the pr-loop already fetches; the only additional n
 call is a lightweight `gh pr list`.
 
 ```bash
-# Stacked-PR merge-order guard (E21-F04 R2): refuse to merge a child PR whose parent
-# is still open. Only exit 0 authorizes merging; any other guard exit (including exit 4
-# for unreadable input) routes to needs-human.
+# Stacked-PR merge-order guard (E21-F04 R2): only invoked when the PR is actually
+# stacked — i.e. its baseRefName is the head of another open PR. A PR targeting the
+# default branch or a long-lived release/integration branch follows the normal path.
 default_branch="${default_branch:-$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo '')}"
-open_prs_json=".harness/.pr-loop/$pr_number/open-prs.json"
-gh pr list --state open --json number,headRefName > "$open_prs_json" 2>/dev/null || echo '[]' > "$open_prs_json"
-guard_rc=0
-sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" || guard_rc=$?
-if [ "$guard_rc" = 0 ]; then
-  guard_ok=1
-else
-  guard_ok=0
-  echo "sdd-pr-loop: merge refused — stack guard returned exit $guard_rc" >&2
-  sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" 2>&1 >&2
-  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-  # Post the handover summary and exit — the guard diagnostic is already on stderr.
-  # (The needs-human handover block below handles the summary post.)
+base_ref="$(jq -r '.baseRefName // ""' ".harness/.pr-loop/$pr_number/round-$round/pr.json" 2>/dev/null || echo '')"
+is_stacked=0
+if [ -n "$base_ref" ] && [ "$base_ref" != "$default_branch" ]; then
+  open_prs_json=".harness/.pr-loop/$pr_number/open-prs.json"
+  gh pr list --state open --json number,headRefName > "$open_prs_json" 2>/dev/null || echo '[]' > "$open_prs_json"
+  if jq -e --arg b "$base_ref" 'map(select(.headRefName == $b)) | length > 0' "$open_prs_json" >/dev/null 2>&1; then
+    is_stacked=1
+    guard_rc=0
+    sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" || guard_rc=$?
+    if [ "$guard_rc" = 0 ]; then
+      guard_ok=1
+    else
+      guard_ok=0
+      echo "sdd-pr-loop: merge refused — stack guard returned exit $guard_rc" >&2
+      sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" 2>&1 >&2
+      gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+      # Post the handover summary and exit — the guard diagnostic is already on stderr.
+      # (The needs-human handover block below handles the summary post.)
+    fi
+  fi
 fi
+# Non-stacked PRs (base is the default branch or a non-PR-head branch): guard_ok=1.
+[ "$is_stacked" = 0 ] && guard_ok=1
 ```
 
 Track whether the merge command itself
