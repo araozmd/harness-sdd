@@ -368,3 +368,69 @@ using both stamp-directory and stamp-leaf symlinks.
 - Existing model-routing determinism, historical-front-end regeneration, and
   OpenCode/Claude/Antigravity assertions remained green, providing the requested
   non-Codex regression coverage without changing their emitters.
+
+---
+
+## Review round 6
+
+### Status
+
+DONE_WITH_CONCERNS — mixed Codex stamp leaves now reconcile independently, Gemini
+selected live-role generation is restored to its exact baseline semantics, and all
+focused/non-Codex adapter regressions are green. The unchanged out-of-scope
+Inception fallback concern from round 1 remains.
+
+### Root causes
+
+1. `reclaim_codex_skills` treated either symlinked stamp leaf as making the whole
+   skill unit unsafe. A linked policy stamp therefore stranded a regular,
+   byte-matching gated `SKILL.md` after PR-loop gate-off.
+2. Round 5 made Gemini live-role generation conditional on stamp-tree safety.
+   `.model-agents` is ownership bookkeeping, so that changed Gemini's established
+   selected-output behavior outside E23's Codex-only scope.
+
+### RED evidence
+
+- `sh tests/test_install.sh`
+  - Exit: `1`
+  - Expected failure:
+    `FAIL: round-6 mixed stamp: deselection did not reclaim the safe live policy counterpart`
+- `sh tests/test_model_routing.sh`
+  - Exit: `1`
+  - Expected failure:
+    `FAIL: round-6 model stamp: unsafe Gemini stamp suppressed normal live-role regeneration`
+
+The final Codex regression uses the review's exact mixed state: regular
+`SKILL.md` live/stamp plus a symlinked policy stamp and regular live policy during
+PR-loop gate-off.
+
+A mutation check restored the former whole-unit stamp guard; the final regression
+then failed at the intended boundary with:
+`FAIL: round-6 mixed stamp: unsafe policy stamp stranded a safely owned gated SKILL.md`.
+Restoring the per-leaf implementation returned the full install suite to green.
+
+### Fix
+
+- Split Codex stamp safety into directory-component and per-leaf checks.
+- Reclamation now preserves an unsafe stamp leaf, its corresponding live artifact,
+  and its external target while independently reclaiming a regular sibling whose
+  stamp proves ownership.
+- A surviving `SKILL.md` still retains its explicit-only policy companion, preserving
+  the round-2 safety contract.
+- Restored Gemini's unconditional selected live-role generator. The generic
+  `stamp_model_agent` guard alone skips an unsafe stamp write, so stamp safety no
+  longer changes generated `.gemini/agents` bytes.
+
+### GREEN evidence
+
+- `sh tests/test_install.sh` — exit `0`, `All install tests passed.`
+- `sh tests/test_model_routing.sh` — exit `0`,
+  `All model-routing tests passed.`
+- `sh tests/test_pr_loop.sh` — exit `0`, `All pr-loop tests passed.`
+- `sh tests/test_installer_toggles.sh` — exit `0`,
+  `All installer-toggle tests passed.`
+- `sh tests/test_agents_host.sh` — exit `0`,
+  `All agents-host tests passed.`
+- The Gemini regression compares the entire selected `.gemini/` tree against a
+  same-config baseline with `diff -r`, while separately proving the linked external
+  stamp tree remains byte-identical.

@@ -496,8 +496,35 @@ test_model_stamp_symlinks_are_not_followed() {
     || fail "round-5 model stamp: routing removed a Gemini stamp-leaf link"
   cmp -s "$_gext.ref" "$_gext" \
     || fail "round-5 model stamp: routing changed an external Gemini stamp leaf"
-  cmp -s "$_g/live.ref" "$_g/.gemini/agents/scout.md" \
-    || fail "round-5 model stamp: routing changed live Gemini bytes while its stamp was unsafe"
+  grep -q '^model: pro$' "$_g/.gemini/agents/scout.md" \
+    || fail "round-6 model stamp: unsafe Gemini stamp suppressed normal live-role regeneration"
+  return 0
+}
+
+# R9/round 6: an unsafe Gemini stamp tree affects bookkeeping only. Under the same
+# selected model config, live role bytes must remain exactly the pre-feature baseline.
+test_gemini_unsafe_stamp_keeps_live_generation_bytes() {
+  _base="$(mk gemini-stamp-baseline)"
+  run "$_base" gemini
+  set_tier "$_base" scout cheap
+  run "$_base" gemini
+
+  _unsafe="$(mk gemini-stamp-unsafe)"
+  run "$_unsafe" gemini
+  set_tier "$_unsafe" scout cheap
+  _external="$T/gemini-stamp-tree.external"
+  mkdir -p "$_unsafe/.harness/.model-agents" "$_external"
+  printf 'external Gemini stamp tree sentinel\n' > "$_external/sentinel"
+  cp "$_external/sentinel" "$_external/sentinel.ref"
+  ln -s "$_external" "$_unsafe/.harness/.model-agents/gemini"
+  run "$_unsafe" gemini
+
+  diff -r "$_base/.gemini" "$_unsafe/.gemini" >/dev/null \
+    || fail "round-6 Gemini baseline: unsafe stamp tree changed selected live-role bytes"
+  [ -L "$_unsafe/.harness/.model-agents/gemini" ] \
+    || fail "round-6 Gemini baseline: selected routing replaced the unsafe stamp-tree link"
+  cmp -s "$_external/sentinel.ref" "$_external/sentinel" \
+    || fail "round-6 Gemini baseline: selected routing changed external stamp-tree bytes"
   return 0
 }
 
@@ -914,6 +941,8 @@ test_codex_rejects_symlinked_role_destinations
 pass "Codex role install/reclamation reject symlinked files and directories without touching external targets"
 test_model_stamp_symlinks_are_not_followed
 pass "model-agent stamp symlinks are never followed for routing or deselection"
+test_gemini_unsafe_stamp_keeps_live_generation_bytes
+pass "unsafe Gemini stamp trees do not change selected live-role generation bytes"
 test_new_trees_conditional
 pass "Gemini remains conditional; selected Codex always registers six model-optional roles (R6, R7, R17)"
 test_return_to_inherit_reconciles

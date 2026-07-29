@@ -1184,6 +1184,34 @@ cmp -s "$TCSS_LEAF/live.ref" "$TCSS_LEAF/.agents/skills/sdd-new/SKILL.md" \
   || fail "round-5 stamp symlink: deselection removed a live skill through linked ownership evidence"
 pass "Codex skill stamp symlinks are never followed for selected install, gate-off, or deselection"
 
+# Mixed gated unit: an unsafe policy stamp leaf protects only its corresponding live
+# policy. The regular SKILL.md stamp remains valid ownership evidence and must still
+# remove the gated workflow when pr_loop flips off.
+TCSM="$T/codex-stamp-mixed-gate"
+TCSM_EXT="$T/codex-stamp-mixed-gate.external"
+mkdir -p "$TCSM"
+HARNESS_PR_LOOP_ENABLED=true CODEX_HOME="$TCSM/ch" \
+  sh "$SRC/harness-install.sh" --agents=codex "$TCSM" >/dev/null \
+  || fail "codex mixed-stamp gate-off setup failed"
+mv "$TCSM/.harness/.codex-skills/sdd-pr-loop/agents/openai.yaml" "$TCSM_EXT"
+ln -s "$TCSM_EXT" "$TCSM/.harness/.codex-skills/sdd-pr-loop/agents/openai.yaml"
+cp "$TCSM_EXT" "$TCSM_EXT.ref"
+cp "$TCSM/.agents/skills/sdd-pr-loop/agents/openai.yaml" "$TCSM/live-policy.ref"
+HARNESS_PR_LOOP_ENABLED=false CODEX_HOME="$TCSM/ch" \
+  sh "$SRC/harness-install.sh" --agents=codex "$TCSM" >/dev/null \
+  || fail "codex mixed-stamp gate-off install failed"
+[ -e "$TCSM/.agents/skills/sdd-pr-loop/SKILL.md" ] \
+  && fail "round-6 mixed stamp: unsafe policy stamp stranded a safely owned gated SKILL.md"
+[ -e "$TCSM/.harness/.codex-skills/sdd-pr-loop/SKILL.md" ] \
+  && fail "round-6 mixed stamp: safe gated SKILL.md stamp was not reclaimed"
+[ -L "$TCSM/.harness/.codex-skills/sdd-pr-loop/agents/openai.yaml" ] \
+  || fail "round-6 mixed stamp: unsafe policy stamp link was removed"
+cmp -s "$TCSM_EXT.ref" "$TCSM_EXT" \
+  || fail "round-6 mixed stamp: gate-off changed the external policy stamp target"
+cmp -s "$TCSM/live-policy.ref" "$TCSM/.agents/skills/sdd-pr-loop/agents/openai.yaml" \
+  || fail "round-6 mixed stamp: unsafe policy stamp did not preserve its live counterpart"
+pass "Codex gate-off reconciles safe and unsafe stamp leaves independently"
+
 # codex_no_home_required: the current repository-local surface does not resolve HOME or
 # CODEX_HOME at all, and remains fully functional when both are absent.
 TCH="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"

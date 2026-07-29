@@ -3853,11 +3853,21 @@ EOF
   codex_skill_stamp_is_symlinked() {
     _css_cmd="$1"
     _css_stamp="$H/.codex-skills/$_css_cmd"
-    [ -L "$H/.codex-skills" ] \
-      || [ -L "$_css_stamp" ] \
+    codex_skill_stamp_tree_is_symlinked "$_css_cmd" \
       || [ -L "$_css_stamp/SKILL.md" ] \
-      || [ -L "$_css_stamp/agents" ] \
       || [ -L "$_css_stamp/agents/openai.yaml" ]
+  }
+
+  codex_skill_stamp_tree_is_symlinked() {
+    _cst_stamp="$H/.codex-skills/$1"
+    [ -L "$H/.codex-skills" ] \
+      || [ -L "$_cst_stamp" ] \
+      || [ -L "$_cst_stamp/agents" ]
+  }
+
+  codex_skill_stamp_leaf_is_symlinked() {
+    codex_skill_stamp_tree_is_symlinked "$1" \
+      || [ -L "$H/.codex-skills/$1/$2" ]
   }
 
   discard_codex_skill_stamp() {
@@ -3942,13 +3952,16 @@ EOF
         discard_codex_skill_stamp "$_rcs_cmd"
         continue
       fi
-      if codex_skill_stamp_is_symlinked "$_rcs_cmd"; then
-        echo "⚠️  .harness/.codex-skills/$_rcs_cmd has a symlinked stamp component — live skill unit and ownership stamp left unchanged" >&2
+      if codex_skill_stamp_tree_is_symlinked "$_rcs_cmd"; then
+        echo "⚠️  .harness/.codex-skills/$_rcs_cmd has a symlinked stamp directory component — live skill unit and ownership stamps left unchanged" >&2
         continue
       fi
 
       if [ -e "$_rcs_skill" ]; then
-        if [ -f "$_rcs_skill" ] && [ -f "$_rcs_skill_stamp" ] \
+        if codex_skill_stamp_leaf_is_symlinked "$_rcs_cmd" SKILL.md; then
+          _rcs_skill_survives=1
+          echo "⚠️  .harness/.codex-skills/$_rcs_cmd/SKILL.md is a symlinked stamp leaf — corresponding live skill and stamp left unchanged" >&2
+        elif [ -f "$_rcs_skill" ] && [ -f "$_rcs_skill_stamp" ] \
            && cmp -s "$_rcs_skill" "$_rcs_skill_stamp"; then
           rm -f "$_rcs_skill"
           _rcs_gone="$_rcs_gone .agents/skills/$_rcs_cmd/SKILL.md"
@@ -3959,7 +3972,9 @@ EOF
       fi
 
       if [ -e "$_rcs_policy" ]; then
-        if [ "$_rcs_skill_survives" = 1 ]; then
+        if codex_skill_stamp_leaf_is_symlinked "$_rcs_cmd" agents/openai.yaml; then
+          echo "⚠️  .harness/.codex-skills/$_rcs_cmd/agents/openai.yaml is a symlinked stamp leaf — corresponding live policy and stamp left unchanged" >&2
+        elif [ "$_rcs_skill_survives" = 1 ]; then
           echo "⚠️  .agents/skills/$_rcs_cmd/agents/openai.yaml retained as the explicit-only policy companion of the surviving SKILL.md" >&2
         elif [ -f "$_rcs_policy" ] && [ -f "$_rcs_policy_stamp" ] \
              && cmp -s "$_rcs_policy" "$_rcs_policy_stamp"; then
@@ -3969,7 +3984,12 @@ EOF
           echo "⚠️  .agents/skills/$_rcs_cmd/agents/openai.yaml has no matching last-written stamp (foreign or edited) — left in place" >&2
         fi
       fi
-      rm -f "$_rcs_stamp/SKILL.md" "$_rcs_stamp/agents/openai.yaml"
+      if ! codex_skill_stamp_leaf_is_symlinked "$_rcs_cmd" SKILL.md; then
+        rm -f "$_rcs_stamp/SKILL.md"
+      fi
+      if ! codex_skill_stamp_leaf_is_symlinked "$_rcs_cmd" agents/openai.yaml; then
+        rm -f "$_rcs_stamp/agents/openai.yaml"
+      fi
       rmdir "$_rcs_stamp/agents" 2>/dev/null || true
       rmdir "$_rcs_stamp" 2>/dev/null || true
       rmdir "$_rcs_live/agents" 2>/dev/null || true
@@ -4036,20 +4056,14 @@ EOF
   # `inherit` — `.gemini/agents/` is never created and the target tree stays exactly what
   # it was before this feature existed.
   if agent_selected gemini && models_any gemini; then
-    if model_agent_stamp_tree_is_symlinked gemini; then
-      echo "⚠️  .harness/.model-agents/gemini has a symlinked stamp component — selected Gemini routing left live artifacts and stamps unchanged" >&2
-    else
-      mkdir -p "$TARGET/.gemini/agents"
-      ag_personas | while IFS='	' read -r _gmr _gmd; do
-        [ -n "$_gmr" ] || continue
-        if model_agent_stamp_destination_is_symlinked gemini "$_gmr.md"; then
-          echo "⚠️  .harness/.model-agents/gemini/$_gmr.md has a symlinked stamp component — selected Gemini routing left the live artifact and stamp unchanged" >&2
-          continue
-        fi
-        gen_gemini_agent "$_gmr" "$_gmd" "$TARGET/.gemini/agents/$_gmr.md"
-        stamp_model_agent gemini "$_gmr.md" "$TARGET/.gemini/agents/$_gmr.md"
-      done
-    fi
+    mkdir -p "$TARGET/.gemini/agents"
+    ag_personas | while IFS='	' read -r _gmr _gmd; do
+      [ -n "$_gmr" ] || continue
+      gen_gemini_agent "$_gmr" "$_gmd" "$TARGET/.gemini/agents/$_gmr.md"
+      # Stamp safety is bookkeeping-only for Gemini: a rejected ownership stamp must
+      # never suppress its established selected live-role generation semantics.
+      stamp_model_agent gemini "$_gmr.md" "$TARGET/.gemini/agents/$_gmr.md"
+    done
     ok "Gemini per-role agent definitions installed (.gemini/agents/)"
   elif agent_selected gemini; then
     # Nothing resolves any more — but a PREVIOUS run may have stamped this tree with a
