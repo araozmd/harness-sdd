@@ -100,7 +100,7 @@ coordinator-owned bookkeeping branch is shared by sibling workers.
 
 After local Reviewer approval, keep the supplied branch/worktree and create only its dedicated PR
 while the fix remains `in-review`. Before opening it, apply the general **pre-PR change-size
-handoff** (see "### The pre-PR change-size handoff" in the main loop above) — with `--repo`
+handoff** (see "### The pre-PR change-size handoff", in the main loop below) — with `--repo`
 **mandatory** in this mode, because a targeted worker is spawned from the canonical primary and
 is never standing in the tree it must measure. Concretely, run
 `sh "$HARNESS_DIR/tools/change-size.sh" --repo "<the supplied worktree>"` — **pass `--repo` explicitly here.** `HARNESS_DIR` locates the *script*, not the tree under measurement, and `--repo` defaults to the current directory; a worker spawned from the canonical primary would otherwise measure the coordinator's bookkeeping branch instead of the fix, and report `ok` for a branch it never looked at. (Omit `--base` unless the PR targets something other than the default branch — the tool resolves `origin/HEAD` itself, and a hard-coded `origin/main` exits 4 on a repo whose default differs.) and carry the reported tier into the
@@ -359,9 +359,12 @@ When the selected feature has `slices[]`, drive it slice by slice:
         is the `pr` the advance/merge-poll steps persist. (Builder Loop A itself only
         reports completion; PR creation is part of the child loop you drive, not the
         Builder's job.) The **pre-PR change-size handoff** applies to this PR like any
-        other — run it with `--repo "<the manifest path for this child repo>"`, since
-        you are driving from the umbrella and not from the child tree, and carry the tier
-        into the child PR body.
+        other — run it with `--repo "<the RESOLVED manifest path for this child repo>"`,
+        since you are driving from the umbrella and not from the child tree, and carry the
+        tier into the child PR body. Resolve it the same way the `cd` in the dispatch step
+        above does: manifest `path` is relative to the **manifest's own directory**, while
+        `--repo` resolves against the caller's CWD, so passing the raw string from a
+        different CWD measures the wrong tree — or nothing.
      The per-repo `delegate_cmd` is **unused** in this mode — it may be empty in the
      manifest. This is the natural path for a single code-agent session driving the
      whole umbrella.

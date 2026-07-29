@@ -271,30 +271,44 @@ pass "R7d untracked paths git would C-quote are measured, not skipped"
 #   * `-z` reframes RENAMES as an empty path field followed by TWO extra fields, which parsed
 #     naively becomes two or three phantom records instead of one.
 RT="$T/repo-tracked-q"; mkrepo "$RT"
-# Pin rename detection on: the expected total_files depends on the rename folding into ONE
-# record, and a host with diff.renames off would otherwise report an unrelated number.
+# Pin rename detection on, or a host with diff.renames off measures a different shape entirely.
 git -C "$RT" config diff.renames true
-git -C "$RT" checkout -q -b feature
 mkdir -p "$RT/src"
 _TAB="$(printf '\t')"
-# The two TEST files are the discriminators: each is classified ONLY if its full pathname
-# survives intact. `src/foo".spec.js` needs git's C-quoting gone (the trailing `"` breaks the
-# suffix rule); `src/tab<TAB>bed.spec.js` needs the awk pass to rejoin fields 3..NF (bare `$3`
-# truncates it to `src/tab`, which matches nothing and lands in production).
+# The rename baseline lives on MAIN, so the branch carries a real rename rather than an add.
+# It must satisfy THREE conditions at once or it cannot detect a broken fold:
+#   (a) similar enough that git calls it a rename at all (60 of 66 lines survive);
+#   (b) carrying ADDED lines, so the folded record contributes a non-zero count; and
+#   (c) a destination whose CLASSIFICATION differs from the source's (production → test).
+# A 0-line rename between two production paths — the obvious fixture, and the one this test
+# shipped with in round 1 — proves nothing: the unfolded header record has an EMPTY pathname,
+# which also classifies as production and also contributes 0 lines, while the two bare path
+# records are eaten by `NF < 3 { next }`. Every number came out identical with the fold deleted.
+n_lines 60 > "$RT/src/moved.js"                # production on main…
+git -C "$RT" add -A && git -C "$RT" commit -qm "pre-rename baseline"
+git -C "$RT" checkout -q -b feature
+# The two C-quoted/tab TEST files are the other discriminators: each is classified ONLY if its
+# full pathname survives intact. `src/foo".spec.js` needs git's C-quoting gone (the trailing `"`
+# breaks the suffix rule); `src/tab<TAB>bed.spec.js` needs the awk pass to rejoin fields 3..NF
+# (bare `$3` truncates it to `src/tab`, which matches nothing and lands in production).
 n_lines 7 > "$RT/src/foo\".spec.js"             # TEST — quote must not defeat the suffix rule
 n_lines 5 > "$RT/src/tab${_TAB}bed.spec.js"    # TEST — tab must not truncate the suffix away
 n_lines 4 > "$RT/src/tab${_TAB}prod.js"        # production, pathname contains a literal tab
 n_lines 3 > "$RT/src/plain.js"                 # production, ordinary name
-git -C "$RT" mv seed.txt renamed.txt           # a rename: one record, keyed on the destination
+git -C "$RT" mv src/moved.js src/moved.spec.js # …renamed onto a TEST path on the branch
+n_lines 6 >> "$RT/src/moved.spec.js"           # + modification, so the fold carries real lines
 git -C "$RT" add -A && git -C "$RT" commit -qm "paths git would C-quote"
 _jt="$("$TOOL" --repo "$RT" --base main --format json)"
 _gt() { printf '%s' "$_jt" | sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p"; }
-[ "$(_gt test_lines)" = "12" ] \
-  || fail "R7e: test_lines=$(_gt test_lines), expected 12 — a C-quoted or tab-bearing TRACKED test path was charged to production"
+# test_lines is the assertion that discriminates the rename fold. Drop the fold, or key it on
+# the SOURCE instead of the destination, and the renamed file's 6 added lines are charged to
+# production (empty pathname, or `src/moved.js`) instead of to tests: 12, not 18.
+[ "$(_gt test_lines)" = "18" ] \
+  || fail "R7e: test_lines=$(_gt test_lines), expected 18 — a C-quoted, tab-bearing or RENAMED-ONTO TRACKED test path was charged to production"
 [ "$(_gt production_lines)" = "7" ] \
-  || fail "R7e: production_lines=$(_gt production_lines), expected 7 (4 tab-named + 3 plain + 0 renamed)"
-[ "$(_gt production_files)" = "3" ] \
-  || fail "R7e: production_files=$(_gt production_files), expected 3"
+  || fail "R7e: production_lines=$(_gt production_lines), expected 7 (4 tab-named + 3 plain); a rename onto a test path must contribute NONE of its added lines here"
+[ "$(_gt production_files)" = "2" ] \
+  || fail "R7e: production_files=$(_gt production_files), expected 2"
 [ "$(_gt total_files)" = "5" ] \
   || fail "R7e: total_files=$(_gt total_files), expected 5 — a -z rename must fold into ONE record, not extra phantom ones"
 pass "R7e tracked C-quoted / tab-bearing / renamed paths are classified on their real names"

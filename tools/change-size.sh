@@ -186,9 +186,12 @@ fi
 # a rename looks like its own malformed record. Fold it back into one record keyed on the
 # DESTINATION, which is what a reviewer actually reads.
 #
-# (Known limit, shared with the untracked pass below: a filename containing a literal NEWLINE is
-# not supported — it splits on the `tr`. Every other special character round-trips, including a
-# literal TAB, which is why the awk passes rejoin fields 3..NF into the pathname.)
+# (Known limits, shared with the untracked pass below. A filename containing a literal NEWLINE is
+# not supported — it splits on the `tr`. A pathname ENDING in a tab survives classification, but
+# the `while IFS=<tab> read` loops that render the concentration list strip it, because tab is
+# IFS whitespace; both are far outside the supported set and neither is worth the complexity.
+# Every other special character round-trips, including an interior TAB, which is why the awk
+# passes rejoin fields 3..NF into the pathname.)
 stats="$(git -C "$repo" diff --numstat -z "$mb" 2>/dev/null | tr '\0' '\n' | awk -F'\t' '
   st == 2 { st = 1; next }                        # rename source — the destination is what counts
   st == 1 { print hdr $0; st = 0; next }          # rename destination — re-attach its counts
@@ -211,13 +214,14 @@ _untracked="$(git -C "$repo" ls-files -z --others --exclude-standard 2>/dev/null
 if [ -n "$_untracked" ]; then
   _extra_stats="$(printf '%s\n' "$_untracked" | while IFS= read -r _f; do
       [ -n "$_f" ] || continue
-      # SYMLINKS, before the `[ -f ]` test — which FOLLOWS the link, so a link to a regular file
-      # passes it and the line count below then reads the TARGET file. git stores a symlink as a
-      # blob holding its link value: exactly ONE line, whatever it points at. A link to a
-      # 2,000-line file therefore contributed 2,000 lines before commit and 1 after —
-      # reintroducing the commit-coupling R5b exists to remove. `-h` does not follow, so this
-      # also covers broken links and links to directories, which `[ -f ]` dropped to 0 while git
-      # counts them as 1.
+      # SYMLINKS. git stores a symlink as a blob holding its link value: exactly ONE line,
+      # whatever it points at. `[ -f ]` FOLLOWS the link, so a link to a regular file passed that
+      # guard and the line count below read the TARGET — a link to a 2,000-line file contributed
+      # 2,000 lines before commit and 1 after, reintroducing the commit-coupling R5b exists to
+      # remove. What stops the read-through is this branch EXISTING: the `continue` short-
+      # circuits before any counting. Placing it BEFORE `[ -f ]` buys something different and
+      # also wanted — a broken link and a link to a directory both fail `[ -f ]` and were dropped
+      # to 0, while git counts them 1 like any other mode-120000 blob.
       # (Keep every comment inside this command substitution APOSTROPHE-FREE. bash 3.2 in sh
       # mode does not honour `#` when re-scanning a `$( … )` body, so an apostrophe opens a
       # quote that swallows the rest of the block and `sh -n` rejects a file dash accepts.)
