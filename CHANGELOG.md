@@ -25,10 +25,16 @@ All notable changes to the harness body are recorded here. Versions follow
 - The E99-F03 defect stays fixed: `validate_key` still rejects non-ASCII-lowercase slugs under
   every locale, and the three previously-closed foreign-code surfaces stay closed — now by
   construction rather than by per-call escapes, which are removed as dead code.
-- Teardown/rollback **ordering** is documented as forced, not chosen: git refuses to delete a
-  branch that is checked out in a worktree, so the worktree must be retired before the ref
-  update. The diagnostics now name the resulting half state ("registration retired, branch
-  preserved") and the re-run that reconciles it, instead of implying nothing moved.
+- Teardown/rollback **ordering** — the worktree is retired before the branch ref in both paths,
+  but for two *different* reasons, now documented separately. In `do_teardown` git enforces it:
+  `branch -d`/`-D` refuse to delete a branch that is checked out in a worktree. In
+  `rollback_create` git does **not** enforce it — `update-ref -d` has no such guard and will
+  delete the ref out from under the checkout — but deleting the ref first leaves that worktree
+  on an unborn branch, so the non-forced `worktree remove` then refuses and the residual is
+  "registration present, branch absent": the one state `teardown` hard-refuses, which a re-run
+  cannot reconcile. The retained order's worst residual is "registration retired, branch
+  preserved", which a re-run of `teardown` does reconcile. Both diagnostics now name that state
+  and that recovery instead of implying nothing moved.
 
 ## [0.46.1] — 2026-07-28
 

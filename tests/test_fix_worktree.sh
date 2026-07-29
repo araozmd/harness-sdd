@@ -303,10 +303,14 @@ assert_reftx_hook_saw_caller_locale() {
   _want=$2
   [ -s "$FIXTURE/reftx-charmap" ] ||
     fail "reference-transaction hook never fired during $_what"
-  if grep -qv '^UTF-8$' "$FIXTURE/reftx-charmap"; then
+  # -F -x: compare as a FIXED, whole-line string rather than a regex. The
+  # expected values contain `.` and `-` (`en_US.UTF-8`), which as a regex match
+  # loosely — only ever more permissively, so a regex could mask a real mismatch
+  # rather than invent one.
+  if grep -qvxF UTF-8 "$FIXTURE/reftx-charmap"; then
     fail "$_what ran the reference-transaction hook under charmap $(sort -u "$FIXTURE/reftx-charmap" | tr '\n' ' ')"
   fi
-  if grep -qv "^$_want\$" "$FIXTURE/reftx-lc-all"; then
+  if grep -qvxF "$_want" "$FIXTURE/reftx-lc-all"; then
     fail "$_what ran the reference-transaction hook with LC_ALL $(sort -u "$FIXTURE/reftx-lc-all" | tr '\n' ' '); expected $_want"
   fi
 }
@@ -387,8 +391,19 @@ test_ref_transaction_hook_sees_caller_locale() {
   assert_reftx_hook_saw_caller_locale "teardown with inherited LANG" unset
 
   # 4. The narrow C pin still guards the ASCII slug globs — un-pinning the file
-  #    must not have loosened the one operation that genuinely needs C.
-  assert_create_fails invalid create E99-F157 Bad-Slug
+  #    must not have loosened the one operation that genuinely needs C. Forced
+  #    under the UTF-8 locale rather than the ambient one: under a C-locale suite
+  #    run the ambient form is a near-tautology, since C is the locale in which
+  #    the glob is correct anyway.
+  _refs_before="$(git -C "$PRIMARY" show-ref)"
+  if (cd "$PRIMARY" && LC_ALL="$_utf8" "$HELPER" create E99-F157 Bad-Slug) \
+      >"$FIXTURE/out" 2>"$FIXTURE/err"; then
+    fail "LC_ALL=$_utf8 accepted invalid slug after the ref-hook legs: Bad-Slug"
+  fi
+  grep -qi invalid "$FIXTURE/err" ||
+    fail "LC_ALL=$_utf8 rejection did not name invalid: $(cat "$FIXTURE/err")"
+  [ "$(git -C "$PRIMARY" show-ref)" = "$_refs_before" ] ||
+    fail "LC_ALL=$_utf8 rejected slug mutated refs"
   pass "test_ref_transaction_hook_sees_caller_locale"
 }
 

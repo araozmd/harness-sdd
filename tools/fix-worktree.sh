@@ -266,13 +266,28 @@ rollback_create() {
         echo "fix-worktree: rollback removed worktree path but could not prune its registration; branch $BRANCH preserved" >&2
         return 1
       fi
-      # Ordering note (E99-F04): git refuses to delete a branch that is checked
-      # out in a worktree, so the removal above MUST precede this deletion — the
-      # sequence is forced, not chosen. If the deletion is then refused (e.g. a
-      # repo-owned `reference-transaction` hook rejects it) the path is already
-      # gone and the branch survives; the message names that exact half state.
+      # Ordering note (E99-F04, corrected at review round 2). Unlike `branch -d`,
+      # `update-ref -d` has NO checked-out-in-a-worktree guard: it deletes this
+      # ref happily while the worktree above still has it checked out (git
+      # 2.55.0, exact call form including the old-value argument — exit 0, ref
+      # gone). So git does NOT force this order; the consequences do.
+      #
+      # Deleting the ref first would leave that worktree on an UNBORN branch —
+      # HEAD still names refs/heads/$BRANCH but resolves to nothing, so every
+      # tracked file reads as staged-new and the non-forced `worktree remove`
+      # then refuses ("contains modified or untracked files"). The residual is
+      # *registration present + branch absent*, the one state do_teardown
+      # hard-refuses ("registered worktree branch is absent"): a re-run cannot
+      # reconcile it and only --force could clear it. Hence the ref deletion goes
+      # last.
+      #
+      # In this order the worst residual is *registration retired + branch
+      # present* (e.g. a repo-owned `reference-transaction` hook rejects the
+      # deletion), which is the FOUND_REG=0 state do_teardown reconciles on a
+      # re-run — the branch tip is $BASE_COMMIT, so branch_merged holds by
+      # construction.
       if ! git -C "$PRIMARY" update-ref -d "refs/heads/$BRANCH" "$BASE_COMMIT" >/dev/null 2>&1; then
-        echo "fix-worktree: rollback removed worktree but exact branch deletion failed; preserved $BRANCH — delete it by hand once the refusal is resolved" >&2
+        echo "fix-worktree: rollback removed worktree but exact branch deletion failed; preserved $BRANCH — re-run teardown to finish once the refusal is resolved" >&2
         return 1
       fi
       return 0
@@ -393,8 +408,10 @@ do_teardown() {
   # Ordering note (E99-F04): the worktree is retired above BEFORE the branch is
   # deleted because git refuses to delete a branch that is checked out in a
   # worktree ("cannot delete branch ... used by worktree"), so this sequence is
-  # forced by git, not chosen. If the deletion is refused after the removal has
-  # already landed, the result is the "registration absent, branch present"
+  # forced by git, not chosen. That guard belongs to `branch -d`/`-D` ONLY — do
+  # not generalise it to `update-ref -d`, which has no such check; see the
+  # separate ordering note in rollback_create. If the deletion is refused after
+  # the removal has already landed, the result is the "registration absent, branch present"
   # state — which is precisely the state the FOUND_REG=0 branch above reconciles
   # on a re-run, so no work is stranded. Name that recovery in the diagnostic
   # rather than implying nothing moved.
