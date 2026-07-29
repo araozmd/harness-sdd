@@ -3120,7 +3120,18 @@ if [ "$round" -gt 1 ] && [ -n "$default_branch" ]; then
   prior_base_oid="$(jq -r '.baseRefOid // ""' "$prior_round_dir/pr.json" 2>/dev/null || echo '')"
   if [ -n "$prior_base_name" ] && [ "$prior_base_name" != "$default_branch" ] && [ -n "$prior_base_oid" ]; then
     current_base_oid="$(gh pr view "$pr_number" --json baseRefOid --jq '.baseRefOid' 2>/dev/null || echo '')"
-    if [ -n "$current_base_oid" ] && [ "$current_base_oid" != "$prior_base_oid" ]; then
+    # Fail closed on either side of the comparison being unreadable — a missing
+    # prior cache or a transient API failure must not silently bypass the detection.
+    if [ -z "$current_base_oid" ]; then
+      echo "base-change detection: could not read current baseRefOid — restarting from round 1" >&2
+      stale_dir=".harness/.pr-loop/$pr_number/stale-$(date -u +%s)"
+      mkdir -p "$stale_dir"
+      for d in .harness/.pr-loop/$pr_number/round-*/; do
+        [ -d "$d" ] && mv "$d" "$stale_dir/"
+      done
+      round=1
+      continue
+    elif [ "$current_base_oid" != "$prior_base_oid" ]; then
       echo "baseRefOid changed (${prior_base_oid:0:7} -> ${current_base_oid:0:7}) — parent rebased; discarding prior round cache, restarting from round 1" >&2
       # Move the stale round directories out of the active cache path so stall/trend
       # evaluation cannot accidentally consume them. The handover summary still reports
@@ -3580,13 +3591,12 @@ call is a lightweight `gh pr list`.
 default_branch="${default_branch:-$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo '')}"
 guard_ok=1
 guard_deferred=0
-# Require a readable base. A missing or corrupt round cache that produces an empty
-# base_ref must not silently authorize a merge — it is indistinguishable from
-# "targeting the default branch", and that is exactly the path that would bypass
-# the guard for a stacked child.
-if ! base_ref="$(jq -r '.baseRefName // ""' ".harness/.pr-loop/$pr_number/round-$round/pr.json" 2>/dev/null)" || [ -z "$base_ref" ]; then
+# Fetch the current baseRefName immediately before authorizing the merge — the PR may
+# have been retargeted after the round cache was written, and a stale cached default-
+# branch value would bypass the guard entirely for a newly stacked child.
+if ! base_ref="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null)" || [ -z "$base_ref" ]; then
   guard_ok=0
-  echo "sdd-pr-loop: merge refused — could not read baseRefName from round cache" >&2
+  echo "sdd-pr-loop: merge refused — could not read current baseRefName" >&2
   gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
 elif [ "$base_ref" = "$default_branch" ]; then
   : # targeting the default branch — not stacked, guard_ok stays 1
