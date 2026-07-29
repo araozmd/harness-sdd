@@ -222,13 +222,44 @@ comment id (or, if ids are unstable, by `(path, line, severity, body-hash)`). If
 blocking comment id appears in both rounds, the fixes are not landing: **escalate to the
 `max_rounds - 1` behavior immediately**, even if the current round is 1 or 2.
 
+### 4b. Convergence trend — is the review converging, or just resampling? (E21-F03)
+
+Stall detection above catches the *same* finding surviving a fix. This catches the other
+failure: *different* findings arriving at a steady rate, round after round, because the diff
+is larger than one review pass can cover.
+
+```bash
+sh "$HARNESS_DIR/tools/pr-round-trend.sh" --cache ".pr-loop/$pr_number"
+```
+
+It reads only `round-*/blocking.json`, which this loop already writes — no `gh`, no network,
+no new state. It reports the per-round blocking count, a verdict, and where the findings
+concentrate:
+
+| verdict | meaning | what it implies |
+|---|---|---|
+| `converging` | the rate is coming down | one more round is rational |
+| `non-converging` | the last 3 rounds each produced a blocking finding | **split the PR — do not re-review it** |
+| `insufficient` | fewer than 3 rounds with a readable `blocking.json` | no conclusion yet |
+
+A flat rate does not mean the fixes are bad. It means the reviewer is sampling a surface
+larger than one pass can cover, so another round buys another *sample*, not more confidence —
+and a clean round would be indistinguishable from one that happened to land somewhere quiet.
+On the PR that motivated this (17,202 additions, twelve rounds), the rate never decayed:
+`1 3 1 2 1 3 1 2 2 1 2 1`. Rounds 5–12 cost roughly 2M input tokens and 8 hours to keep
+rediscovering that the diff was too big.
+
+This is **advisory and it never blocks**: the tool exits 0 at every verdict, it does not
+change when the cap fires, and it never merges or fails a PR on its own. Carry the verdict
+into the handover summary, and — at the cap — into the `needs-human` message.
+
 ### 5. Branch on round
 
 | Round | Behavior |
 |---|---|
 | below `max_rounds - 1` | For each blocking comment, spawn one **`pr-fixer`** sub-agent, passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
 | `max_rounds - 1` | Build **one combined fix prompt** (all blocking comments concatenated) and escalate to a **different worker** if the host CLI offers one; where no router exists, run one combined **in-session** pass instead. Then push. |
-| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. Post the handover summary listing every round, the blocking comments that survived, and the cache path. Return failure. |
+| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. Post the handover summary listing every round, the blocking comments that survived, and the cache path — **and the step-4b trend verdict**. When it is `non-converging`, the message must say **split this PR**, not "re-review it", and must show the per-round series and the concentration list that make the case. Return failure. |
 
 At the default `max_rounds: 4` that is rounds 1–2 per-comment, round 3 combined
 escalation, round 4 `needs-human`. A `max_rounds` below `3` simply has no per-comment
@@ -478,6 +509,15 @@ Apply the `needs-human` label, post the **same handover summary** block (so the 
 exactly which workers tried and where they got stuck), and return failure. Reached by: the
 `max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, or a merge
 that would not land.
+
+**Say what the human should conclude.** Include the step-4b trend output. A `converging`
+verdict means the loop simply ran out of rounds and resuming is reasonable. A
+`non-converging` verdict means more rounds will not help: state plainly that the PR should
+be **split**, show the per-round series, and list the files the findings concentrate on as
+candidate seams. Without this, the observed human response to the cap is to post
+`@codex review` again — which on the PR that motivated this feature happened eight more
+times, for roughly 2M input tokens and 8 hours, before anyone concluded the diff was too
+large to review in one pass.
 
 **Every path into this state returns failure**, whatever the reason — the only successes
 are a merge that actually landed and the `auto_merge: false` hand-back above. So an

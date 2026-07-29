@@ -390,6 +390,42 @@ execution:
     delegate_cmd: ""
 EOF
   fi
+
+  # --- change_size block (E21-F01 change-size discipline) ---
+  # Top-level, append-only at EOF, ADVISORY: nothing here refuses work, so a migrated target
+  # behaves identically until a human acts on what the Driller/Architect now report. Keep this
+  # heredoc byte-identical to the tail of the source harness.config.yaml so a FRESH install
+  # (which copies the config verbatim) and an UPGRADED install (which only migrates) converge
+  # on the same text. The presence check tolerates a trailing comment on the `change_size:`
+  # line so a target that annotated it never gets a duplicate block on the next upgrade.
+  if ! grep -Eq '^change_size:[[:space:]]*(#.*)?$' "$_cfg"; then
+    cat >> "$_cfg" <<'EOF'
+
+# Change-size discipline (E21-F01) — ADVISORY in two tiers, never a hard block.
+# Both tiers produce a RECORDED DECISION; neither refuses work. A single hard cap is the
+# wrong instrument twice over: an agent-written change is legitimately denser than a
+# hand-written one, and a rename sweep or a generated contract can be thousands of lines at
+# near-zero review risk per line. An absent block behaves exactly as the values below.
+# Budgets are PRODUCTION lines — tests are a deliberate quality choice already enforced by
+# the Reviewer (a passing test per R-id) and must not be penalised by the instrument that
+# governs review surface.
+change_size:
+  advise_lines: 1500       # production lines added ⇒ split, or record one line saying why not
+  escalate_lines: 3000     # production lines added ⇒ recorded split plan, or an explicit override naming the reason
+  advise_files: 25         # files touched, advise tier
+  escalate_files: 50       # files touched, escalate tier
+  # Drill-time proxy: R-ids in ONE feature spec. It is the only size signal that exists
+  # before any code does, and each R-id obliges a test. Consumed by the Driller (split at
+  # decomposition) and the Architect (stop and report rather than spec an over-budget feature).
+  max_requirements: 12
+  # Path classifiers for the pre-PR check (E21-F02), one EXTENDED REGEX per entry, MATCHED
+  # AGAINST THE REPO-RELATIVE PATH and ADDED to the built-in multi-ecosystem defaults (they
+  # never replace them). A wrong classifier does not make the number slightly off — it makes
+  # it meaningless, so extend these rather than letting a repo's tests count as production.
+  test_paths: []           # extra test-file patterns, e.g. - "(^|/)spec/"
+  generated_paths: []      # extra generated/vendored patterns, excluded from the budget entirely
+EOF
+  fi
 }
 
 # seed_pr_loop_optin <file> — force `pr_loop.enabled` to the OPT-IN default (`false`) in a
@@ -1843,6 +1879,8 @@ install_one() {
   chmod +x "$H/tools/task-diagnostics.py" 2>/dev/null || true   # E16-F01 warn-only dependency diagnostics
   chmod +x "$H/tools/next-task.mjs" 2>/dev/null || true   # E16-F03 deterministic read-only selector
   chmod +x "$H/tools/wait-for-codex.sh" 2>/dev/null || true   # E18-F01 /sdd-pr-loop background Codex watcher
+  chmod +x "$H/tools/change-size.sh" 2>/dev/null || true   # E21-F02 advisory pre-PR change-size check
+  chmod +x "$H/tools/pr-round-trend.sh" 2>/dev/null || true   # E21-F03 pr-loop convergence trend
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"
@@ -2032,10 +2070,29 @@ EOF
   # holds fetched GitHub review JSON + per-round fix notes. Pure runtime scratch, rebuildable
   # from the `gh` API, never board data — keep it out of VCS. Path is relative to this
   # .harness/ .gitignore, where the loop actually writes it.
+  # Also ignore the PER-RUN agent output dirs under .harness/progress/ (E99-F06). The harness
+  # SOURCE has always ignored these (`progress/*/` in its own root .gitignore) but that ignore
+  # was never propagated to consumers, so in an installed target every run dir was committable
+  # — and in practice got committed, shipping agent scratch inside the product diff where a PR
+  # reviewer re-reads it every round. The re-inclusions matter and MUST follow the ignore line:
+  # `progress/*/` excludes the `inbox` directory itself, and git does not descend into an
+  # excluded directory, so `!progress/inbox/**` alone would NOT re-include the briefs — the
+  # directory has to be re-included first. progress/inbox/ holds the durable per-feature briefs
+  # the Architect specs from. Loose FILES directly under progress/ (README.md, history.md,
+  # .gitkeep) are never matched by `progress/*/`, which matches directories only — the explicit
+  # re-inclusions below mirror the source .gitignore and are defensive, not load-bearing.
+  # NOTE: a new ignore rule does not untrack a file that is ALREADY tracked; an existing target
+  # must run `git rm -r --cached .harness/progress/<run-dir>` once itself. The installer
+  # deliberately does not do that — untracking files in someone's repo is not an installer's call.
   _ignores='telemetry.jsonl
 jira.pat
 state/tasks.json.lock
-.pr-loop/'
+.pr-loop/
+progress/*/
+!progress/.gitkeep
+!progress/README.md
+!progress/inbox/
+!progress/inbox/**'
   case "$_tlog" in
     ''|telemetry.jsonl|/*) : ;;                 # default, unset, or absolute → nothing extra
     *) _ignores="$_ignores
@@ -2044,14 +2101,22 @@ $_tlog" ;;                                       # relative override → also ig
   if [ ! -f "$H/.gitignore" ]; then
     { printf '# Local-only telemetry log (see .harness/agents/orchestrator.md "## Telemetry").\n'
       printf '# Jira mirror PAT file (mirror.board.pat_file default) — never commit a PAT.\n'
+      printf '# Per-run agent output under progress/ is ephemeral scratch; the inbox briefs and\n'
+      printf '# the loose files directly under progress/ stay tracked (order matters — the\n'
+      printf '# re-inclusions must follow progress/*/).\n'
       printf '%s\n' "$_ignores"; } > "$H/.gitignore"
-    info "seeded .harness/.gitignore (ignores telemetry log)"
+    info "seeded .harness/.gitignore (telemetry log + progress run dirs ignored)"
   else
+    # Whole-LINE match (-x). A substring match is unsafe now that the list carries negations:
+    # `!progress/inbox/` is a substring of `!progress/inbox/**`, so a file holding only the
+    # latter would suppress the former — and without the directory re-inclusion git never
+    # descends into progress/inbox/, silently ignoring every brief. Append-only either way:
+    # a target's own entries are never rewritten or reordered.
     printf '%s\n' "$_ignores" | while IFS= read -r _pat; do
       [ -n "$_pat" ] || continue
-      grep -qF "$_pat" "$H/.gitignore" || printf '%s\n' "$_pat" >> "$H/.gitignore"
+      grep -qxF "$_pat" "$H/.gitignore" || printf '%s\n' "$_pat" >> "$H/.gitignore"
     done
-    info ".harness/.gitignore ensured (telemetry log ignored)"
+    info ".harness/.gitignore ensured (telemetry log + progress run dirs ignored)"
   fi
 
   # Personal/runtime agent state must never be committed to a SHARED project (e.g. a
@@ -2123,7 +2188,7 @@ MODEL ROUTING  (created ONLY when models: resolves a role to a concrete value):
   the generated tree is byte-identical to a harness without model routing.
 
 PROJECT-OWNED  (seeded once, never clobbered on upgrade):
-  .harness/harness.config.yaml   (verification commands + store backend)
+  .harness/harness.config.yaml   (verification commands + store backend + change_size budget)
   .harness/init.project.sh       (project-specific init.sh gate checks)
   .harness/specs/product.md  .harness/specs/epics/
   .harness/state/tasks.json  .harness/progress/
@@ -3125,13 +3190,44 @@ comment id (or, if ids are unstable, by `(path, line, severity, body-hash)`). If
 blocking comment id appears in both rounds, the fixes are not landing: **escalate to the
 `max_rounds - 1` behavior immediately**, even if the current round is 1 or 2.
 
+### 4b. Convergence trend — is the review converging, or just resampling? (E21-F03)
+
+Stall detection above catches the *same* finding surviving a fix. This catches the other
+failure: *different* findings arriving at a steady rate, round after round, because the diff
+is larger than one review pass can cover.
+
+```bash
+sh .harness/tools/pr-round-trend.sh --cache ".harness/.pr-loop/$pr_number"
+```
+
+It reads only `round-*/blocking.json`, which this loop already writes — no `gh`, no network,
+no new state. It reports the per-round blocking count, a verdict, and where the findings
+concentrate:
+
+| verdict | meaning | what it implies |
+|---|---|---|
+| `converging` | the rate is coming down | one more round is rational |
+| `non-converging` | the last 3 rounds each produced a blocking finding | **split the PR — do not re-review it** |
+| `insufficient` | fewer than 3 rounds with a readable `blocking.json` | no conclusion yet |
+
+A flat rate does not mean the fixes are bad. It means the reviewer is sampling a surface
+larger than one pass can cover, so another round buys another *sample*, not more confidence —
+and a clean round would be indistinguishable from one that happened to land somewhere quiet.
+On the PR that motivated this (17,202 additions, twelve rounds), the rate never decayed:
+`1 3 1 2 1 3 1 2 2 1 2 1`. Rounds 5–12 cost roughly 2M input tokens and 8 hours to keep
+rediscovering that the diff was too big.
+
+This is **advisory and it never blocks**: the tool exits 0 at every verdict, it does not
+change when the cap fires, and it never merges or fails a PR on its own. Carry the verdict
+into the handover summary, and — at the cap — into the `needs-human` message.
+
 ### 5. Branch on round
 
 | Round | Behavior |
 |---|---|
 | below `max_rounds - 1` | For each blocking comment, spawn one **`pr-fixer`** sub-agent, passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
 | `max_rounds - 1` | Build **one combined fix prompt** (all blocking comments concatenated) and escalate to a **different worker** if the host CLI offers one; where no router exists, run one combined **in-session** pass instead. Then push. |
-| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. Post the handover summary listing every round, the blocking comments that survived, and the cache path. Return failure. |
+| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. Post the handover summary listing every round, the blocking comments that survived, and the cache path — **and the step-4b trend verdict**. When it is `non-converging`, the message must say **split this PR**, not "re-review it", and must show the per-round series and the concentration list that make the case. Return failure. |
 
 At the default `max_rounds: 4` that is rounds 1–2 per-comment, round 3 combined
 escalation, round 4 `needs-human`. A `max_rounds` below `3` simply has no per-comment
@@ -3381,6 +3477,15 @@ Apply the `needs-human` label, post the **same handover summary** block (so the 
 exactly which workers tried and where they got stuck), and return failure. Reached by: the
 `max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, or a merge
 that would not land.
+
+**Say what the human should conclude.** Include the step-4b trend output. A `converging`
+verdict means the loop simply ran out of rounds and resuming is reasonable. A
+`non-converging` verdict means more rounds will not help: state plainly that the PR should
+be **split**, show the per-round series, and list the files the findings concentrate on as
+candidate seams. Without this, the observed human response to the cap is to post
+`@codex review` again — which on the PR that motivated this feature happened eight more
+times, for roughly 2M input tokens and 8 hours, before anyone concluded the diff was too
+large to review in one pass.
 
 **Every path into this state returns failure**, whatever the reason — the only successes
 are a merge that actually landed and the `auto_merge: false` hand-back above. So an

@@ -4,6 +4,159 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.46.0] — 2026-07-28
+
+### Added — ✨ `/sdd-pr-loop` reports whether the review is converging (E21-F03)
+- `pr_loop.max_rounds` caps the loop and labels the PR `needs-human`, but never said what the
+  human should **conclude**. The observed conclusion is "run it again": on
+  `viernes-ai/viernes-bookings-api` PR #76 the operator posted `@codex review` twelve times by
+  hand, and rounds 5–12 cost roughly 2M input tokens and 8 hours of wall clock to keep
+  rediscovering that the diff was too large to review in one pass.
+- The evidence was already on the PR and nobody aggregated it — the per-round blocking-finding
+  count: `1 3 1 2 1 3 1 2 2 1 2 1`. A **decaying** count means the review is converging and one
+  more round is rational. A **flat** count means the reviewer is sampling a surface larger than
+  one pass can cover, so another round buys another *sample*, not more confidence.
+- New `tools/pr-round-trend.sh` reads only `.pr-loop/<pr>/round-*/blocking.json` — files the
+  loop already writes — and reports the series, a verdict (`converging` / `non-converging` /
+  `insufficient`) and where the findings concentrate. No `gh`, no network, no new state; `jq`
+  was already a `/sdd-pr-loop` precondition, so no new dependency.
+- The rule is deliberately the simplest one that separates the two cases, because it has to be
+  explainable inside a `needs-human` message: **the last 3 rounds each produced at least one
+  blocking finding**. A least-squares slope would be defensible and unreadable.
+- A round that aborted before classifying has no `blocking.json` and is **excluded** from the
+  series rather than counted as zero — counting it would fake a convergence that never happened.
+- New step 4b in `/sdd-pr-loop`; the cap row and the `needs-human` terminal state now carry the
+  verdict, and on `non-converging` the message says **split this PR** and lists the files the
+  findings concentrate on as candidate seams.
+- **Advisory throughout**: exit 0 at every verdict, no change to when the cap fires, and no
+  change to the watcher's exit-code contract, freshness guards or clean-signal detection.
+- Round dirs are ordered by their **numeric** suffix. A shell glob is lexicographic, so at ten
+  or more rounds `round-10..12` sort before `round-2` and the last-N window would trend rounds
+  7–9 while calling them the latest — inverting the verdict on exactly the twelve-round PR this
+  exists for.
+- One unparseable `blocking.json` no longer empties the concentration list: the aggregation runs
+  over the rounds already validated, so an aborted round cannot cost the handoff its seam names.
+- `--format json` escapes finding paths, so a filename containing `"` no longer produces output
+  that exits 0 and cannot be parsed.
+- The installer's **generated** command body was updated alongside the source-layout copy, and
+  `tests/test_pr_loop.sh` asserts against the installed body — editing only the source copy is
+  a wiring gap that has been raised as a blocking review finding in this repo before, so the
+  mutation (remove step 4b from the heredoc only) is verified to fail the suite.
+
+## [0.45.0] — 2026-07-28
+
+### Added — ✨ Pre-PR change-size check on the Reviewer → PR handoff (E21-F02)
+- E21-F01 put a budget where the sizing *decision* is made; this puts a measurement where that
+  decision is last *reversible*. Nothing between local approval and PR creation looked at how
+  large a branch actually was — on `viernes-bookings-api` E14-F05 the branch was 17,202
+  additions across 77 files before any number was attached to it, and the first entity to
+  notice was a paid reviewer, twelve times.
+- New `tools/change-size.sh` (POSIX sh + git + awk, no `gh`, no network — it runs *before* a
+  PR exists). Measures the diff from the **merge base**, classifies every changed file, reports
+  the tier, and when over budget lists the production files carrying the most additions.
+- **It never blocks.** Exit 0 at every tier including `escalate`; the only non-zero exit is `4`
+  (not a repo / no resolvable base ref / bad flag) and that measures nothing. A tool that could
+  fail a branch for being large would be a hard cap wearing an advisory label.
+- Reports **where** the lines are, not just how many: the actionable question at the handoff is
+  *where do I cut*. On PR #76 a bare total would have been equally true of the 15,500 low-risk
+  lines and the 1,716 that carried two thirds of the findings.
+- Classification is additive: new `change_size.test_paths` / `generated_paths` take extended
+  regexes **added** to the built-in multi-ecosystem defaults (JS/TS, Python, Go, Ruby,
+  Java/Kotlin/C#, common lockfiles and vendor dirs), never substituted for them.
+- `agents/reviewer.md` runs it before approving and records the tier and the decision in its
+  verdict; `agents/orchestrator.md` runs it before opening the PR and carries the tier into the
+  PR body. Documented in `docs/WORKFLOW.md`.
+- Budget correctness: **binary** files now occupy the file budget (git reports `-` for their
+  line counts, and discarding the record meant 30 production images reported
+  `production_files: 0` and tier `ok`), and untracked paths are read **NUL-delimited** because
+  `ls-files` C-quotes a name containing `"`, a backslash or a tab regardless of
+  `core.quotePath` — the encoded text was used as the pathname, so those files vanished from
+  the measurement entirely.
+- Classifier robustness: a configured `test_paths`/`generated_paths` regex containing whitespace
+  stays **one** alternative (it was word-split, so `(^|/)integration tests/` became
+  `(^|/)integration|tests/` and every production path starting with `integration` silently left
+  the budget), and untracked lines are counted with `awk NR` rather than `wc -l`, which counts
+  newlines and therefore reported a one-line file with no trailing newline as **zero** additions.
+- New behavioral suite `tests/test_change_size.sh` (registered in `verification.test_command`)
+  drives the tool against a real throwaway git repo — a grep over the script would prove
+  nothing about whether a test file counts as production, which is the failure that makes the
+  number meaningless. Two fixture defects were found and fixed while writing it: the fixture's
+  own rewritten `.harness/` config was landing in the measured diff, and R7's original
+  `thing_spec.rb` already matched a built-in pattern, so it would have passed without ever
+  exercising the config hook.
+
+## [0.44.0] — 2026-07-28
+
+### Added — ✨ Change-size discipline: a feature-size budget the Driller and Architect honor (E21-F01)
+- Nothing in the harness bounded the size of a feature. `agents/driller.md` decomposed an epic
+  with no size rule and `agents/architect.md` specced whatever it was handed, so the sizing
+  decision was made implicitly at drill time and never revisited. Measured consequence
+  (`viernes-ai/viernes-bookings-api` PR #76, E14-F05): one feature carrying R1–R36 / T1–T25
+  became a PR of 17,202 additions across 77 files whose review did **not converge in twelve
+  `@codex review` rounds** — a flat per-round blocking-finding rate (20 P1 + 15 P2), meaning a
+  clean round would have been indistinguishable from a round that sampled a quiet region.
+- New advisory `change_size:` block in `harness.config.yaml`, seeded on fresh install and
+  migrated on upgrade: `advise_lines: 1500`, `escalate_lines: 3000`, `advise_files: 25`,
+  `escalate_files: 50`, `max_requirements: 12`. An absent block behaves exactly as those
+  defaults, matching the `telemetry:` / `fix_lane:` / `models:` convention.
+- **Two soft tiers, no hard wall.** Both tiers produce a *recorded decision*; neither refuses
+  work. A single cap is the wrong instrument twice over: an agent-written change is
+  legitimately denser than a hand-written one, and a rename sweep or generated contract can be
+  thousands of lines at near-zero review risk per line. Review risk concentrates rather than
+  spreading — in PR #76, 10% of the files carried 67% of the findings — so the budget prompts a
+  split *along seams*, not a refusal.
+- Budgets are **production** lines: tests are a deliberate quality choice the Reviewer already
+  enforces (a passing test per `R-id`) and must not be penalised by the instrument that governs
+  review surface. Requirement count is the drill-time proxy because it is the only size signal
+  that exists before any code does, and each `R-id` obliges a test.
+- `agents/driller.md` now splits an over-budget candidate into siblings sequenced on
+  `depends_on` and records the decision (or the deliberate non-split) in the epic's `epic.md`.
+  `agents/architect.md` now stops before writing the four spec files when a feature would
+  exceed the budget, reports the count and the seams, and — where a human directs it to proceed
+  — records an explicit override line in the `.spec.md`. Neither role emits a `blocked` record
+  on size: `blocked` is a closed vocabulary about dependencies and ownership.
+- Documented in `docs/WORKFLOW.md` ("Change-size discipline"). Asserted in
+  `tests/test_sdd_drill.sh` (both role files carry the rule and its non-blocking boundary;
+  the shipped defaults cannot be silently retuned) and `tests/test_install.sh` (block seeded
+  on fresh install, appended exactly once on migration, and the presence check tolerates a
+  target's annotated `change_size:   # tuned` line rather than shadowing it with a second block).
+- **On micro-specs:** the [pattern](https://www.augmentcode.com/guides/micro-specs-pattern-ai-agent-test-coverage)
+  is already implemented here — an EARS `R-id` *is* an atomic single-behavior spec and the
+  Reviewer already mandates a test per `R-id`. E14-F05 had 36 working micro-specs and was still
+  unreviewable, because nothing mapped a micro-spec to a **deliverable**. This release adds the
+  missing grouping rule, not another authoring phase; over-applied spec ceremony has its own
+  documented failure mode
+  ([Böckeler](https://martinfowler.com/articles/exploring-gen-ai/sdd-3-tools.html)).
+
+## [0.43.1] — 2026-07-28
+
+### Fixed — 🐛 Installer keeps `.harness/progress/` run dirs out of a consumer's VCS (E99-F06)
+- The harness **source** has always ignored its own per-run agent output (`progress/*/` in
+  its root `.gitignore`), but that ignore was never propagated to installed targets. The
+  seeded `.harness/.gitignore` covered `telemetry.jsonl`, `jira.pat` and
+  `state/tasks.json.lock` only — so in every consumer each agent run dir was committable,
+  and in practice got committed. Measured on `viernes-ai/viernes-bookings-api` PR #76:
+  796 lines across 6 files (**5% of that PR's additions**) were `.harness/progress/`
+  pr-loop round scratch, shipped inside the product diff and re-read by the reviewer on
+  each of twelve review rounds.
+- `harness-install.sh` now seeds `progress/*/` plus the re-inclusions that keep the durable
+  artifacts tracked (`!progress/.gitkeep`, `!progress/README.md`, `!progress/inbox/`,
+  `!progress/inbox/**`). **Order is load-bearing**: `progress/*/` excludes the `inbox`
+  directory itself and git does not descend into an excluded directory, so
+  `!progress/inbox/**` alone would silently ignore every Architect brief.
+- The append path (an existing `.harness/.gitignore`) now matches whole LINES (`grep -qxF`)
+  instead of substrings. With negations in the list a substring match is unsafe:
+  `!progress/inbox/` is a substring of `!progress/inbox/**`, so a file holding only the
+  latter would suppress the former and lose the briefs. Still append-only — a target's own
+  entries are never rewritten or reordered.
+- A new ignore rule does **not** untrack an already-tracked file; an existing target must
+  run `git rm -r --cached .harness/progress/<run-dir>` once itself. The installer
+  deliberately does not do this — untracking files in someone's repo is not its call.
+- `tests/test_install.sh` asserts the behavior with `git check-ignore` on a throwaway repo
+  (run output ignored, briefs and `history.md` still tracked) rather than by grepping for
+  strings, because no grep can see the ordering the re-inclusion depends on. Both the
+  dropped-ignore and the dropped-directory-re-inclusion mutations fail the suite.
+
 ## [0.43.0] — 2026-07-28
 
 ### Added — ✨ the installer asks a third question: `pr_loop.enabled` (E20-F02)

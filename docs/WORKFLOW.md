@@ -80,6 +80,79 @@ specs each feature just-in-time during the run. The flow reads `/sdd-plan` (sket
 `/sdd-drill <epic-id>` (deepen one epic) → `/sdd-next` (execute). It is purely additive: a
 repo that never runs `/sdd-drill` behaves exactly as before.
 
+## Change-size discipline (`change_size:`)
+
+How large a feature is allowed to be is decided at **drill time** — the Architect specs what
+it is handed, the Builder builds the spec, and the reviewer reads whatever diff comes out.
+Nothing downstream revisits that decision, so the harness makes it explicit where it is made.
+
+The `change_size:` block in `harness.config.yaml` is **advisory in two tiers**.
+Neither tier blocks anything; each produces a *recorded decision*:
+
+| tier | default | what it asks for |
+|---|---|---|
+| **advise** | `advise_lines: 1500` production lines, or `advise_files: 25` | split, or record one line saying why not |
+| **escalate** | `escalate_lines: 3000` production lines, or `escalate_files: 50` | a recorded split plan, or an explicit override naming the reason |
+| **drill-time proxy** | `max_requirements: 12` `R-id`s in one feature spec | split at decomposition, before any spec exists |
+
+An absent `change_size:` block behaves exactly as those defaults.
+
+**Why not a hard cap.** A single wall is the wrong instrument twice over: an agent-written
+change is legitimately denser than a hand-written one, and a rename sweep, a generated
+contract or a vendored file can be thousands of lines at near-zero review risk per line.
+Review risk concentrates rather than spreading — in the case that motivated this rule, 10% of
+the files carried 67% of the findings — so the budget prompts a *split along seams*, not a
+refusal.
+
+**Why production lines.** Tests are a deliberate quality choice the Reviewer already enforces
+(a passing test per `R-id`); budgeting total lines would penalise exactly the discipline the
+harness asks for. Budget the production number and let tests scale off it.
+
+**Why requirement count at drill time.** It is the only size signal that exists before any
+code does, and each `R-id` obliges a test — so the count *is* the size of the eventual diff.
+
+**Who reads what.** The Driller reads `max_requirements` and splits an over-budget candidate
+into siblings sequenced on `depends_on`, recording the decision in the epic's `epic.md`. The
+Architect reads the same key and stops before writing the four spec files if the feature would
+exceed it, reporting the count and the seams instead — or, where a human directs it to proceed,
+writing an explicit override line into the `.spec.md`. Neither role emits a `blocked` record on
+size: `blocked` is a closed vocabulary about dependencies and ownership.
+
+### The pre-PR check (`tools/change-size.sh`)
+
+The line and file budgets govern a *measured diff*, which does not exist at decomposition
+time. They are consumed at the **Reviewer → PR handoff** — the last moment splitting is still
+cheap, because a PR once opened carries review threads, a review history, and a `depends_on`
+edge someone is waiting on.
+
+```sh
+sh "$HARNESS_DIR/tools/change-size.sh" [--format text|json]
+```
+
+Omit `--base`: the tool resolves `refs/remotes/origin/HEAD` and falls back through the usual
+names. A hard-coded `--base origin/main` exits `4` on a repo whose default is `develop` or
+`trunk`, which turns the check into a silent no-op on exactly the repos nobody tested it on.
+
+It measures the diff from the **merge base** (the branch may be rebased or carry merges; only
+the merge base is what a reviewer actually reads), classifies every changed file, and reports
+the tier plus — when over budget — the production files carrying the most additions. That last
+part is the point: the actionable question at the handoff is *where do I cut*, not *how big is
+it*, and a bare total is equally true of the 15,500 low-risk lines and the 1,716 dangerous ones.
+
+**It never blocks.** Exit 0 at every tier, including `escalate`. The only non-zero exit is `4`
+— not a git repo, no resolvable base ref, bad flag — and that measures nothing. A tool that
+could fail a branch for being large would be a hard cap wearing an advisory label, and the
+first response to it would be to stop running it.
+
+Classification is additive and configurable: `change_size.test_paths` and
+`change_size.generated_paths` take extended regexes that are **added** to the built-in
+multi-ecosystem defaults, never substituted for them. Get this wrong and the number is not
+slightly off, it is meaningless — so extend the classifier rather than letting a repo's tests
+count as production.
+
+The Reviewer runs it before approving and records the tier and the decision in its verdict;
+the Orchestrator runs it before opening the PR and carries the tier into the PR body.
+
 ## Architecture-aligned specs (the Architect cites ADRs)
 
 The planning tier produces durable design artifacts; this contract makes them

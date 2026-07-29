@@ -127,6 +127,22 @@ reference (the inter-repo seam): they are independent, and you satisfy both. Per
   reasoning. Make them self-contained.
 - **Persist as you go.** Write the files under the feature folder so a cancelled
   session can resume. Note open questions in the spec rather than guessing.
+- **Stay inside the size budget (E21-F01).** Read `change_size.max_requirements` from
+  `harness.config.yaml` (default **12** when the `change_size:` block is absent). Every
+  `R-id` you write obliges a test, so the requirement count *is* the size of the eventual
+  diff. If the feature you were handed would carry more `R-id`s than the budget, then
+  **stop before writing the four files** and report back: the count you arrived at, and the
+  seams you would split it on. Do not quietly emit a 36-requirement spec — that is how a PR
+  whose review never converges gets created three phases before anyone can see it.
+  - The right fix is usually a **re-drill**: the Driller owns decomposition, and the seams
+    are a decomposition decision, not a spec-writing one.
+  - This is a **report to the human, not a `blocked` record.** `blocked` is a closed
+    vocabulary about dependencies and ownership; size is neither.
+  - **Where the human directs you to proceed anyway**, write the spec and record an explicit
+    override line in the `.spec.md` naming who decided and why — e.g.
+    `Size override: 19 R-ids, approved by <handle> — the booking commit path cannot be split
+    without shipping a half-wired tool to main.` An over-budget spec is a legitimate
+    outcome; an *unrecorded* one is not.
 
 ## Umbrella mode (cross-repo features) — only when the feature has `slices[]`
 

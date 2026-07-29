@@ -33,6 +33,71 @@ test_root_gitignore_seeds_local_prompt_files() {
   done
 }
 
+# E99-F06: per-run agent output under .harness/progress/ must not be committable in a
+# consumer — the harness source has always ignored `progress/*/`, but that ignore was never
+# propagated by the installer, so run dirs shipped inside product diffs (796 lines / 5% of
+# viernes-bookings-api PR #76, re-read by the reviewer on all twelve rounds).
+#
+# Asserted as BEHAVIOR via `git check-ignore`, not as string presence: the re-inclusion of
+# progress/inbox/ only works if it FOLLOWS `progress/*/` in the file, and no grep can see
+# ordering. A string-only test would pass on a .gitignore that silently ignores every brief.
+test_progress_run_dirs_gitignored() {
+  grep -qxF 'progress/*/' "$T/.harness/.gitignore" \
+    || fail ".harness/.gitignore does not ignore per-run progress dirs (progress/*/) — agent scratch would ship in the product diff"
+  command -v git >/dev/null 2>&1 || return 0
+  _g="$T/.gitignore-probe"
+  rm -rf "$_g"
+  mkdir -p "$_g"
+  git -C "$_g" init -q >/dev/null 2>&1 || { rm -rf "$_g"; return 0; }
+  mkdir -p "$_g/.harness/progress/E01-F01-run" "$_g/.harness/progress/inbox"
+  cp "$T/.harness/.gitignore" "$_g/.harness/.gitignore"
+  : > "$_g/.harness/progress/E01-F01-run/build.md"
+  : > "$_g/.harness/progress/inbox/E01-F01.md"
+  : > "$_g/.harness/progress/history.md"
+  git -C "$_g" check-ignore -q .harness/progress/E01-F01-run/build.md \
+    || fail "per-run progress output is NOT ignored by the seeded .harness/.gitignore — agent scratch would be committed into the product diff"
+  ! git -C "$_g" check-ignore -q .harness/progress/inbox/E01-F01.md \
+    || fail "progress/inbox briefs ARE ignored by the seeded .harness/.gitignore — the Architect's durable per-feature seeds would be lost (re-inclusion must follow progress/*/)"
+  ! git -C "$_g" check-ignore -q .harness/progress/history.md \
+    || fail "progress/history.md IS ignored by the seeded .harness/.gitignore — project history would be lost"
+  rm -rf "$_g"
+}
+
+# E21-F01: the change_size budget must reach a consumer both as config (the numbers, which a
+# target may retune) and as prompt text in the INSTALLED role files (the rule, which it may
+# not). Config-only would ship numbers nobody reads; prompt-only would hard-code a per-repo
+# budget into a harness-OWNED file that the next upgrade clobbers.
+test_change_size_block_seeded() {
+  _c="$T/.harness/harness.config.yaml"
+  grep -Eq '^change_size:[[:space:]]*(#.*)?$' "$_c" \
+    || fail "installed harness.config.yaml has no top-level change_size: block (E21-F01 R1)"
+  for _kv in 'advise_lines: 1500' 'escalate_lines: 3000' 'advise_files: 25' \
+             'escalate_files: 50' 'max_requirements: 12'; do
+    grep -qF "$_kv" "$_c" || fail "installed change_size block missing default: $_kv (E21-F01 R1/R2)"
+  done
+  grep -qF 'change_size.max_requirements' "$T/.harness/agents/driller.md" \
+    || fail "installed driller.md does not carry the size budget rule (E21-F01 R10)"
+  grep -qF 'change_size.max_requirements' "$T/.harness/agents/architect.md" \
+    || fail "installed architect.md does not carry the size budget rule (E21-F01 R10)"
+  grep -qF 'change_size' "$T/.harness/docs/WORKFLOW.md" \
+    || fail "installed docs/WORKFLOW.md does not document change_size (E21-F01 R9)"
+  # E21-F02: the pre-PR check ships as a runnable tool, not just a rule in a prompt. A role
+  # file that tells the Reviewer to run a script the installer never made executable is a
+  # silent no-op in every consumer.
+  [ -f "$T/.harness/tools/change-size.sh" ] \
+    || fail "tools/change-size.sh not installed (the pre-PR size check would be missing in consumers) (E21-F02)"
+  [ -x "$T/.harness/tools/change-size.sh" ] \
+    || fail "installed tools/change-size.sh is not executable (the pre-PR size check would not run) (E21-F02)"
+  grep -qF 'tools/change-size.sh' "$T/.harness/agents/reviewer.md" \
+    || fail "installed reviewer.md does not run the pre-PR change-size check (E21-F02)"
+  grep -qF 'tools/change-size.sh' "$T/.harness/agents/orchestrator.md" \
+    || fail "installed orchestrator.md does not run the pre-PR change-size check (E21-F02)"
+  for _k in 'test_paths:' 'generated_paths:'; do
+    grep -qF "$_k" "$T/.harness/harness.config.yaml" \
+      || fail "installed change_size block missing classifier key $_k (E21-F02)"
+  done
+}
+
 test_entrypoints_reference_local_overrides() {
   test_entrypoints_reference_agents_local
   test_local_override_guidance_is_conditional
@@ -263,6 +328,8 @@ test_rationale_docs_installed_contract
 # [jira_pat_file_gitignored]. Assert the seeded .harness/.gitignore covers it.
 [ -f "$T/.harness/.gitignore" ]                    || fail ".harness/.gitignore not seeded (Jira PAT would not be ignored)" # R16
 grep -qxF 'jira.pat' "$T/.harness/.gitignore"      || fail ".harness/.gitignore does not ignore the default Jira PAT file (jira.pat) — a PAT could be committed" # R16
+test_progress_run_dirs_gitignored   # E99-F06
+test_change_size_block_seeded       # E21-F01
 [ -x "$T/.harness/init.sh" ]                   || fail ".harness/init.sh not executable"     # R1
 [ -f "$T/.harness/specs/product.md" ]          || fail "product.md stub not seeded"          # R6
 [ -f "$T/.harness/state/tasks.json" ]          || fail "bootstrap tasks.json missing"        # R6
@@ -632,6 +699,52 @@ test_root_gitignore_preserves_user_entries
 test_root_gitignore_local_prompt_entries_idempotent
 test_worktree_ignore_seed_preserved_idempotent
 pass "project-root .gitignore is append-only + idempotent on upgrade"
+
+# E99-F06: the .harness/.gitignore APPEND path (a file already exists from the fresh install)
+# must add the progress patterns exactly once and must not clobber a target's own entries —
+# and the resulting file must still behave correctly, not merely contain the right strings.
+printf 'my-harness-scratch/\n' >> "$T/.harness/.gitignore"
+sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "upgrade run (.harness/.gitignore) failed"
+grep -qxF 'my-harness-scratch/' "$T/.harness/.gitignore" \
+  || fail "user entry in .harness/.gitignore clobbered on upgrade"
+for _p in 'progress/*/' '!progress/inbox/' '!progress/inbox/**'; do
+  [ "$(grep -cxF "$_p" "$T/.harness/.gitignore")" = "1" ] \
+    || fail ".harness/.gitignore progress seed duplicated on upgrade (not idempotent): $_p"
+done
+test_progress_run_dirs_gitignored
+pass ".harness/.gitignore progress seed is append-only + idempotent on upgrade (E99-F06)"
+
+# E21-F01 R3: the MIGRATION path. A fresh install copies harness.config.yaml verbatim, so it
+# proves nothing about a target whose config predates the block. Strip the block to simulate
+# that target, re-run, and assert the installer appends it — then annotate the `change_size:`
+# line with a trailing comment (what a target that retuned the budget actually looks like) and
+# re-run again: the presence check must tolerate the comment or the target gets a SECOND block
+# whose defaults silently shadow the tuned ones.
+python3 - "$T/.harness/harness.config.yaml" <<'PY'
+import re, sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+s2 = re.sub(r'\n# Change-size discipline.*?\n  max_requirements: \d+\n', '\n', s, flags=re.S)
+assert s2 != s, "fixture setup: change_size block not found to strip"
+p.write_text(s2)
+PY
+grep -Eq '^change_size:' "$T/.harness/harness.config.yaml" && fail "fixture setup: change_size block survived the strip"
+sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "migration run (change_size) failed"
+[ "$(grep -Ec '^change_size:[[:space:]]*(#.*)?$' "$T/.harness/harness.config.yaml")" = "1" ] \
+  || fail "installer did not append exactly one change_size: block on migration (E21-F01 R3)"
+grep -qF 'max_requirements: 12' "$T/.harness/harness.config.yaml" \
+  || fail "migrated change_size block missing max_requirements default (E21-F01 R3)"
+# annotated line — the presence check must tolerate a trailing comment
+python3 - "$T/.harness/harness.config.yaml" <<'PY'
+import re, sys, pathlib
+p = pathlib.Path(sys.argv[1])
+p.write_text(re.sub(r'(?m)^change_size:[ \t]*$', 'change_size:   # tuned for this repo', p.read_text()))
+PY
+sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "upgrade run (annotated change_size) failed"
+[ "$(grep -Ec '^change_size:[[:space:]]*(#.*)?$' "$T/.harness/harness.config.yaml")" = "1" ] \
+  || fail "installer duplicated the change_size: block over an annotated line (E21-F01 R3)"
+grep -qF 'change_size:   # tuned for this repo' "$T/.harness/harness.config.yaml" \
+  || fail "installer clobbered the target's annotated change_size: line (E21-F01 R3)"
+pass "change_size block migrates once + tolerates an annotated line (E21-F01 R3)"
 
 # root .gitignore seeding uses EXACT-LINE matching (grep -qxF), not substring: a pre-existing
 # .gitignore that mentions AGENTS.local.md only inside a COMMENT (or a negation) must still get
