@@ -4,6 +4,16 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.48.0] — 2026-07-29
+
+### Changed — ✨ Antigravity integration uses Skills architecture (E99-F09)
+
+- Migrated Antigravity CLI integration from the deprecated `workflows/` and `agents/` directories to the new `.agents/skills/` architecture.
+- Added dynamic YAML frontmatter injection (`name:` and `description:`) during installation.
+- Cleaned up duplicate/obsolete legacy `.agents/` artifacts during upgrades.
+- Brought Antigravity `pr-fixer` up to date with the latest Skills API and fallback logic.
+- Resolved Antigravity model routing issues caused by persona removal.
+
 ## [0.47.0] — 2026-07-29
 
 ### Added — ✨ OpenCode concurrency probe + model helper (E22-F01)

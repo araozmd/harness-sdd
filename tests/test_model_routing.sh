@@ -109,7 +109,7 @@ test_inherit_is_omission() {
   run "$_t" "$ALL"
   # Roles left on inherit carry NO key at all, on every front-end.
   grep -q '^model:' "$_t/.claude/agents/builder.md"  && fail "R5: inherit role got a model: key (claude)"
-  grep -q '^model:' "$_t/.agents/agents/builder.md"  && fail "R5: inherit role got a model: key (antigravity)"
+  grep -q '^model:' "$_t/.agents/skills/builder/SKILL.md"  && fail "R5: inherit role got a model: key (antigravity)"
   grep -q '^model:' "$_t/.gemini/agents/builder.md"  && fail "R5: inherit role got a model: key (gemini)"
   grep -q '^model = ' "$_t/.codex/agents/builder.toml" && fail "R5: inherit role got a model key (codex)"
   grep -q '"builder":.*"model"' "$_t/opencode.json"  && fail "R5: inherit role got a model member (opencode)"
@@ -118,7 +118,7 @@ test_inherit_is_omission() {
   # (config, docs, specs, role bodies, tools, init.sh, manifest prose) and legitimately
   # uses the word in prose — copying is not generating, so it is out of scope here.
   _hits="$(grep -rl 'inherit' \
-      "$_t/.claude/agents" "$_t/.agents/agents" "$_t/.gemini/agents" "$_t/.codex/agents" \
+      "$_t/.claude/agents" "$_t/.agents/skills" "$_t/.gemini/agents" "$_t/.codex/agents" \
       "$_t/opencode.json" 2>/dev/null || true)"
   [ -z "$_hits" ] || fail "R5: the literal 'inherit' leaked into generated artifacts: $_hits"
 
@@ -142,7 +142,7 @@ test_inherit_is_omission() {
   # The pinned-to-`inherit` role carries NO model key anywhere. (`opus`/`pro` would mean
   # the guard fell through to the alias instead of omitting.)
   grep -q '^model:'   "$_p/.claude/agents/builder.md"    && fail "R5pin: a pin of 'inherit' produced a model: key (claude)"
-  grep -q '^model:'   "$_p/.agents/agents/builder.md"    && fail "R5pin: a pin of 'inherit' produced a model: key (antigravity)"
+  grep -q '^model:'   "$_p/.agents/skills/builder/SKILL.md"    && fail "R5pin: a pin of 'inherit' produced a model: key (antigravity)"
   grep -q '^model:'   "$_p/.gemini/agents/builder.md"    && fail "R5pin: a pin of 'inherit' produced a model: key (gemini)"
   grep -q '^model = ' "$_p/.codex/agents/builder.toml"   && fail "R5pin: a pin of 'inherit' produced a model key (codex)"
   grep -q '"builder":.*"model"' "$_p/opencode.json"      && fail "R5pin: a pin of 'inherit' produced a model member (opencode)"
@@ -153,7 +153,7 @@ test_inherit_is_omission() {
     || fail "R5pin: setup — the codex scout pin should still resolve"
   # No literal `inherit` anywhere in the generated artifacts, and the drop is diagnosed.
   _phits="$(grep -rl 'inherit' \
-      "$_p/.claude/agents" "$_p/.agents/agents" "$_p/.gemini/agents" "$_p/.codex/agents" \
+      "$_p/.claude/agents" "$_p/.agents/skills" "$_p/.gemini/agents" "$_p/.codex/agents" \
       "$_p/opencode.json" 2>/dev/null || true)"
   [ -z "$_phits" ] || fail "R5pin: the literal 'inherit' leaked in via a pin: $_phits"
   printf '%s\n' "$_pe" | grep -q "is a tier name, not a model id" \
@@ -169,7 +169,7 @@ test_builtin_tier_aliases() {
   set_tier "$_t" scout cheap
   run "$_t" claude,gemini,antigravity
   _cl() { sed -n 's/^model: //p' "$_t/.claude/agents/$1.md"; }
-  _ag() { sed -n 's/^model: //p' "$_t/.agents/agents/$1.md"; }
+  _ag() { sed -n 's/^model: //p' "$_t/.agents/skills/$1/SKILL.md"; }
   _gm() { sed -n 's/^model: //p' "$_t/.gemini/agents/$1.md"; }
   [ "$(_cl architect)" = "opus" ]   || fail "R6: claude reasoning != opus (got '$(_cl architect)')"
   [ "$(_cl builder)"   = "sonnet" ] || fail "R6: claude standard != sonnet (got '$(_cl builder)')"
@@ -253,16 +253,16 @@ test_opencode_pin_format_guard() {
   return 0
 }
 
-# ── R13: antigravity `.agents/agents/<role>.md` frontmatter ──────────────────────
+# ── R13: antigravity `.agents/skills/<role>.md` frontmatter ──────────────────────
 test_antigravity_model_frontmatter() {
   _t="$(mk r13)"; run "$_t" antigravity
   set_tier "$_t" scout cheap
   run "$_t" antigravity
-  _f="$_t/.agents/agents/scout.md"
+  _f="$_t/.agents/skills/scout/SKILL.md"
   grep -q '^description: ' "$_f"        || fail "R13: scout persona lost its description: key"
   grep -q '^model: flash$' "$_f"        || fail "R13: scout persona carries no model: flash key"
   [ "$(grep -c '^model:' "$_f")" = "1" ] || fail "R13: scout persona accumulated more than one model: key"
-  grep -q '^model:' "$_t/.agents/agents/builder.md" \
+  grep -q '^model:' "$_t/.agents/skills/builder/SKILL.md" \
     && fail "R13: a role on inherit must carry no model: key"
   return 0
 }
@@ -364,7 +364,7 @@ test_selection_gating() {
   [ -d "$_t/.gemini/agents" ]   && fail "R18: unselected gemini was stamped"
   [ -d "$_t/.codex/agents" ]    && fail "R18: unselected codex was stamped"
   [ -f "$_t/opencode.json" ]    && fail "R18: unselected opencode was stamped"
-  [ -d "$_t/.agents/agents" ]   && fail "R18: unselected antigravity was stamped"
+  [ -d "$_t/.agents/skills" ]   && fail "R18: unselected antigravity was stamped"
   [ -f "$_t/.harness/.opencode.stamp" ] && fail "R18: unselected opencode left a stamp file"
   return 0
 }
@@ -386,10 +386,10 @@ test_restamp_after_config_change() {
     || fail "R19: .claude/agents/builder.md was not re-stamped to the new value"
   [ "$(grep -c '^model:' "$_t/.claude/agents/builder.md")" = "1" ] \
     || fail "R19: .claude/agents/builder.md accumulated a second model key"
-  [ "$(sed -n 's/^model: //p' "$_t/.agents/agents/builder.md")" = "pro" ] \
-    || fail "R19: .agents/agents/builder.md was not re-stamped"
-  [ "$(grep -c '^model:' "$_t/.agents/agents/builder.md")" = "1" ] \
-    || fail "R19: .agents/agents/builder.md accumulated a second model key"
+  [ "$(sed -n 's/^model: //p' "$_t/.agents/skills/builder/SKILL.md")" = "pro" ] \
+    || fail "R19: .agents/skills/builder/SKILL.md was not re-stamped"
+  [ "$(grep -c '^model:' "$_t/.agents/skills/builder/SKILL.md")" = "1" ] \
+    || fail "R19: .agents/skills/builder/SKILL.md accumulated a second model key"
   [ "$(sed -n 's/^model: //p' "$_t/.gemini/agents/builder.md")" = "pro" ] \
     || fail "R19: .gemini/agents/builder.md was not re-stamped"
   [ "$(grep -c '^model:' "$_t/.gemini/agents/builder.md")" = "1" ] \
@@ -408,7 +408,7 @@ test_restamp_after_config_change() {
 # ── R26: a routine re-install regenerates an EDITED artifact (the other half of BR6) ─
 # BR6 has two paths with two different rules, and R23 only pins one of them. RECLAMATION
 # (deselect) never deletes a user-edited file; REGENERATION (re-install) always overwrites
-# one, exactly as `.claude/agents/*.md` and `.agents/agents/*.md` have always behaved.
+# one, exactly as `.claude/agents/*.md` and `.agents/skills/*.md` have always behaved.
 # The two are asserted together here so the wording cannot drift back into the ambiguity
 # the PR #61 review found (E17-F01.spec.md § Amendments A1).
 #
@@ -423,7 +423,7 @@ test_restamp_overwrites_user_edits() {
   run "$_t" "$ALL"
 
   _cl="$_t/.claude/agents/scout.md"        # pre-existing generated glue — the precedent
-  _ag="$_t/.agents/agents/scout.md"        # pre-existing generated glue — the precedent
+  _ag="$_t/.agents/skills/scout/SKILL.md"        # pre-existing generated glue — the precedent
   _gm="$_t/.gemini/agents/scout.md"        # new in E17-F01
   _cx="$_t/.codex/agents/scout.toml"       # new in E17-F01
   for _f in "$_cl" "$_ag" "$_gm" "$_cx"; do
@@ -457,18 +457,18 @@ test_restamp_overwrites_user_edits() {
   #     this here is what makes "matching the pre-existing generated-glue contract"
   #     verified rather than merely claimed in prose.
   grep -q 'zzz-user-edit' "$_cl" && fail "R26: an edited .claude/agents/scout.md was not regenerated (the precedent R26 cites no longer holds)"
-  grep -q 'zzz-user-edit' "$_ag" && fail "R26: an edited .agents/agents/scout.md was not regenerated (the precedent R26 cites no longer holds)"
+  grep -q 'zzz-user-edit' "$_ag" && fail "R26: an edited .agents/skills/scout/SKILL.md was not regenerated (the precedent R26 cites no longer holds)"
 
   # (c) the regenerated body is the NORMAL one — the stamp is intact and single, not a
   #     truncated or doubled rewrite.
   [ "$(grep -c '^model:' "$_gm")" = "1" ] || fail "R26: .gemini/agents/scout.md does not carry exactly one model: key after regeneration"
   [ "$(grep -c '^model = ' "$_cx")" = "1" ] || fail "R26: .codex/agents/scout.toml does not carry exactly one model key after regeneration"
   [ "$(grep -c '^model:' "$_cl")" = "1" ] || fail "R26: .claude/agents/scout.md does not carry exactly one model: key after regeneration"
-  [ "$(grep -c '^model:' "$_ag")" = "1" ] || fail "R26: .agents/agents/scout.md does not carry exactly one model: key after regeneration"
+  [ "$(grep -c '^model:' "$_ag")" = "1" ] || fail "R26: .agents/skills/scout/SKILL.md does not carry exactly one model: key after regeneration"
   grep -q '^model: flash$' "$_gm"            || fail "R26: .gemini/agents/scout.md lost its resolved value"
   grep -q '^model = "gpt-5-mini"$' "$_cx"    || fail "R26: .codex/agents/scout.toml lost its resolved value"
   grep -q '^model: haiku$' "$_cl"            || fail "R26: .claude/agents/scout.md lost its resolved value"
-  grep -q '^model: flash$' "$_ag"            || fail "R26: .agents/agents/scout.md lost its resolved value"
+  grep -q '^model: flash$' "$_ag"            || fail "R26: .agents/skills/scout/SKILL.md lost its resolved value"
 
   # (d) strongest form: each regenerated file is byte-identical to the pristine reference,
   #     i.e. the re-run reproduced the generator's output exactly (this is also what keeps
@@ -476,7 +476,7 @@ test_restamp_overwrites_user_edits() {
   cmp -s "$_ref/gemini.md"      "$_gm" || fail "R26: the regenerated .gemini/agents/scout.md is not byte-identical to the pristine reference"
   cmp -s "$_ref/codex.toml"     "$_cx" || fail "R26: the regenerated .codex/agents/scout.toml is not byte-identical to the pristine reference"
   cmp -s "$_ref/claude.md"      "$_cl" || fail "R26: the regenerated .claude/agents/scout.md is not byte-identical to the pristine reference"
-  cmp -s "$_ref/antigravity.md" "$_ag" || fail "R26: the regenerated .agents/agents/scout.md is not byte-identical to the pristine reference"
+  cmp -s "$_ref/antigravity.md" "$_ag" || fail "R26: the regenerated .agents/skills/scout/SKILL.md is not byte-identical to the pristine reference"
 
   # (e) the OTHER half of BR6, in a separate target so both sides of the seam are visible
   #     in one place: the very same edit, on the DESELECT path, must SURVIVE with a
@@ -617,7 +617,7 @@ test_deselect_reclaims_stamped() {
   [ -e "$_t/.codex" ]                    && fail "R22: the harness-created .codex/ dir left behind"
   [ -e "$_t/opencode.json" ]             && fail "R22: a stamped opencode.json was not reclaimed"
   [ -e "$_t/.harness/.opencode.stamp" ]  && fail "R22: .opencode.stamp was not removed with opencode.json"
-  [ -e "$_t/.agents/agents" ]            && fail "R22: stamped antigravity personas left behind"
+  [ -e "$_t/.agents/skills" ]            && fail "R22: stamped antigravity skills left behind"
   [ -f "$_t/.claude/agents/architect.md" ] || fail "R22: the still-selected front-end lost its glue"
   return 0
 }
@@ -735,7 +735,7 @@ pass "unknown tier warns, resolves as inherit, exits 0 (R9)"
 test_opencode_pin_format_guard
 pass "an opencode pin without '/' warns and never reaches opencode.json (R10)"
 test_antigravity_model_frontmatter
-pass "antigravity personas carry model: beside description (R13)"
+pass "antigravity skills carry model: beside description (R13)"
 test_opencode_json_model_member
 pass "opencode agent.<role> carries a \"model\" member (R14)"
 test_gemini_agent_files

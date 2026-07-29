@@ -2415,19 +2415,18 @@ Antigravity does not auto-load `AGENTS.md`, so this rule loads the harness for y
 - **Start every session as the Orchestrator:** `.harness/agents/orchestrator.md`.
 - **Before any work:** run `.harness/init.sh`. If it exits non-zero, STOP.
 - **Working model (R12):** Antigravity drives the harness through the
-  `description`-gated `.agents/workflows/` slash commands and the `.agents/agents/`
-  personas, with `.harness/progress/` files as the hand-off / isolation boundary —
-  NOT a Task-tool-style isolated spawn, and NOT an asserted bare-file subagent
-  registration (bare-file persona discovery is unconfirmed; the durable primitives
-  are this rule + the `description`-gated workflows + the `.harness/progress/`
-  hand-off). Hand off through `.harness/progress/`, never by forwarding chat history.
+  `description`-gated `.agents/skills/` commands and subagents, with `.harness/progress/`
+  files as the hand-off / isolation boundary — NOT a Task-tool-style isolated spawn.
+  The durable primitives are this rule + the `name`-gated skills + the
+  `.harness/progress/` hand-off. Hand off through `.harness/progress/`, never by
+  forwarding chat history.
 
-The role files in `.agents/agents/` and the workflows in `.agents/workflows/` are thin
-pointers at the canonical `.harness/agents/*.md` roles — they do not duplicate them.
+The skill files in `.agents/skills/` are thin pointers at the canonical
+`.harness/agents/*.md` roles — they do not duplicate them.
 EOF
   }
 
-  # gen_ag_persona <role> <description> <dest> — write one .agents/agents/<role>.md.
+  # gen_ag_persona <role> <description> <dest> — write one .agents/skills/<role>/SKILL.md.
   gen_ag_persona() {
     _agp_role="$1"; _agp_desc="$2"; _agp_dest="$3"
     # Fixed key order (description, model); `model:` present or absent, never moved.
@@ -2436,6 +2435,7 @@ EOF
     _agp_model="$(resolve_model antigravity "$_agp_role")"
     {
       printf -- '---\n'
+      printf 'name: %s\n' "$_agp_role"
       printf 'description: %s\n' "$_agp_desc"
       if [ -n "$_agp_model" ]; then printf 'model: %s\n' "$_agp_model"; fi
       printf -- '---\n'
@@ -3660,6 +3660,60 @@ EOF
   # OpenCode (§5b), so the three front-ends stay byte-identical (R9). Placed after §5b and
   # before the CMDDIR cleanup so the workflow bodies are still available. (E07-F01 R2,R4,R6.)
   if agent_selected antigravity; then
+    # Clean up obsolete legacy Antigravity layouts during upgrades.
+    _ag_tmp_old="$(mktemp 2>/dev/null || mktemp -t harness-ag-old)"
+    ag_personas | while IFS='	' read -r _agr _agd; do
+      [ -n "$_agr" ] || continue
+      # Inline generation of the old bare-markdown persona format.
+      _agp_model="$(resolve_model antigravity "$_agr")"
+      {
+        printf -- '---\n'
+        printf 'description: %s\n' "$_agd"
+        if [ -n "$_agp_model" ]; then printf 'model: %s\n' "$_agp_model"; fi
+        printf -- '---\n'
+      } > "$_ag_tmp_old"
+      cat >> "$_ag_tmp_old" <<EOF
+
+You are the **$_agr** for this project's agent harness (installed in \`.harness/\`).
+
+Your full, canonical role definition is \`.harness/agents/$_agr.md\` — read it now and
+follow it exactly. Resolve every relative path it mentions against \`.harness/\`
+(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
+\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on its
+non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
+chat history.
+EOF
+      remove_if_pristine ".agents/agents/$_agr.md" "$_ag_tmp_old" antigravity >/dev/null
+    done
+    
+    # Also clean up pr-fixer legacy persona.
+    _agp_model="$(resolve_model antigravity "pr-fixer")"
+    {
+      printf -- '---\n'
+      printf 'description: %s\n' "$PR_FIXER_DESC"
+      if [ -n "$_agp_model" ]; then printf 'model: %s\n' "$_agp_model"; fi
+      printf -- '---\n'
+    } > "$_ag_tmp_old"
+    cat >> "$_ag_tmp_old" <<EOF
+
+You are the **pr-fixer** for this project's agent harness (installed in \`.harness/\`).
+
+Your full, canonical role definition is \`.harness/agents/pr-fixer.md\` — read it now and
+follow it exactly. Resolve every relative path it mentions against \`.harness/\`
+(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
+\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on its
+non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
+chat history.
+EOF
+    remove_if_pristine ".agents/agents/pr-fixer.md" "$_ag_tmp_old" antigravity >/dev/null
+
+    for _w in $HARNESS_SDD_CMDS $HARNESS_PR_LOOP_CMDS; do
+      remove_if_pristine ".agents/workflows/$_w.md" "$CMDDIR/$_w.md" antigravity >/dev/null
+    done
+    rm -f "$_ag_tmp_old"
+    rmdir "$TARGET/.agents/agents" 2>/dev/null || true
+    rmdir "$TARGET/.agents/workflows" 2>/dev/null || true
+
     mkdir -p "$TARGET/.agents/rules" "$TARGET/.agents/skills"
 
     # Entrypoint rule (R2/R3): points the agent at the source of truth + entry role;
@@ -3667,18 +3721,34 @@ EOF
     # Body lives in gen_ag_rule (hoisted) so the §7 deselect compare can reproduce it.
     gen_ag_rule "$TARGET/.agents/rules/harness.md"
 
+    # Personas (R4/R5 — best-effort): one per harness role, each with a `description` + a
+    # body that DEFERS to the canonical .harness/agents/<role>.md, mandates init.sh-first +
+    # halt-on-fail, and hands off via .harness/progress/. No copied role body. Bare-file
+    # persona discovery is UNCONFIRMED, so these are written (cheap, possibly honored) but
+    # the harness does not claim they register as subagents — the durable model is the rule
+    # + the `description`-gated workflows (R12). Descriptions come from ag_personas (the
+    # single role→description source, shared with the §7 deselect compare so they can never
+    # diverge).
+    ag_personas | while IFS='	' read -r _agr _agd; do
+      [ -n "$_agr" ] || continue
+      mkdir -p "$TARGET/.agents/skills/$_agr"
+      gen_ag_persona "$_agr" "$_agd" "$TARGET/.agents/skills/$_agr/SKILL.md"
+    done
+
     # Skills (R6/R7/R8/R9): COPY the shared command bodies from CMDDIR and inject `name` frontmatter.
     for _w in $HARNESS_SDD_CMDS; do
       mkdir -p "$TARGET/.agents/skills/$_w"
       awk 'NR==2 {print "name: '"$_w"'"} 1' "$CMDDIR/$_w.md" > "$TARGET/.agents/skills/$_w/SKILL.md"
     done
 
-    # Gated pr_loop glue (E18-F01 R2/R13): the /sdd-pr-loop workflow.
+    # Gated pr_loop glue (E18-F01 R2/R13): the /sdd-pr-loop workflow + the pr-fixer persona.
     if pr_loop_enabled; then
       for _w in $HARNESS_PR_LOOP_CMDS; do
         mkdir -p "$TARGET/.agents/skills/$_w"
         awk 'NR==2 {print "name: '"$_w"'"} 1' "$CMDDIR/$_w.md" > "$TARGET/.agents/skills/$_w/SKILL.md"
       done
+      mkdir -p "$TARGET/.agents/skills/pr-fixer"
+      gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$TARGET/.agents/skills/pr-fixer/SKILL.md"
     fi
 
     ok "Antigravity glue (rules + skills) installed (.agents/)"
@@ -3949,6 +4019,13 @@ EOF
             remove_if_pristine ".agents/skills/$_agw/SKILL.md" "$_agtmp" antigravity
             rmdir "$TARGET/.agents/skills/$_agw" 2>/dev/null || true
           done
+          # skills (personas)
+          ag_personas | while IFS='	' read -r _agr _agd; do
+            [ -n "$_agr" ] || continue
+            gen_ag_persona "$_agr" "$_agd" "$_agtmp"
+            remove_if_pristine ".agents/skills/$_agr/SKILL.md" "$_agtmp" antigravity
+            rmdir "$TARGET/.agents/skills/$_agr" 2>/dev/null || true
+          done
           rm -f "$_agtmp"
           # Prune each now-empty `.agents/` subdir + the parent, only when empty
           # (never `rm -rf` — preserve any user files left in place above).
@@ -4057,14 +4134,18 @@ EOF
       # `.agents/` is a user-owned namespace ⇒ pristine-compare, never delete-by-name.
       _prl_tmp="$(mktemp 2>/dev/null || mktemp -t harness-prl)"
       gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$_prl_tmp"
-      _prl_gone="$_prl_gone $(remove_if_pristine .agents/agents/pr-fixer.md "$_prl_tmp" antigravity)"
+      _prl_gone="$_prl_gone $(remove_if_pristine .agents/skills/pr-fixer/SKILL.md "$_prl_tmp" antigravity)"
       rm -f "$_prl_tmp"
       for _prc in $HARNESS_PR_LOOP_CMDS; do
         [ -f "$CMDDIR/$_prc.md" ] || continue
-        _prl_gone="$_prl_gone $(remove_if_pristine ".agents/workflows/$_prc.md" "$CMDDIR/$_prc.md" antigravity)"
+        _prl_tmp2="$(mktemp 2>/dev/null || mktemp -t harness-prl2)"
+        awk 'NR==2 {print "name: '"$_prc"'"} 1' "$CMDDIR/$_prc.md" > "$_prl_tmp2"
+        _prl_gone="$_prl_gone $(remove_if_pristine ".agents/skills/$_prc/SKILL.md" "$_prl_tmp2" antigravity)"
+        rm -f "$_prl_tmp2"
+        rmdir "$TARGET/.agents/skills/$_prc" 2>/dev/null || true
       done
-      rmdir "$TARGET/.agents/agents" 2>/dev/null || true
-      rmdir "$TARGET/.agents/workflows" 2>/dev/null || true
+      rmdir "$TARGET/.agents/skills/pr-fixer" 2>/dev/null || true
+      rmdir "$TARGET/.agents/skills" 2>/dev/null || true
       rmdir "$TARGET/.agents" 2>/dev/null || true
     fi
     if agent_selected codex; then
