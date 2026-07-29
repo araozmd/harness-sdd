@@ -198,7 +198,11 @@ test_unpinned_codex_opencode_omits() {
   [ "$(printf '%s\n' "$_e" | grep -c 'pin\.opencode\.cheap')" = "1" ] \
     || fail "R7: the opencode advisory was not de-duplicated to one line per (front-end, tier)"
   grep -q '"model"' "$_t/opencode.json" && fail "R7: an unpinned tier stamped a model into opencode.json"
-  [ -d "$_t/.codex/agents" ] && fail "R7: an unpinned codex tier created .codex/agents/"
+  for _r in $ROLES; do
+    [ -f "$_t/.codex/agents/$_r.toml" ] || fail "R6/R7: unpinned Codex omitted registered role $_r"
+    grep -q '^model = ' "$_t/.codex/agents/$_r.toml" \
+      && fail "R7: unpinned Codex role $_r gained a model key"
+  done
   # claude/gemini/antigravity DO resolve on the same config (they have aliases).
   grep -q '^model: haiku' "$_t/.claude/agents/scout.md" || fail "R7: claude did not resolve while codex/opencode were unpinned"
   return 0
@@ -334,22 +338,28 @@ test_codex_agent_files_project_local() {
   # The operator's GLOBAL codex config must be untouched by model routing.
   [ -d "$_t/ch/agents" ] && fail "R16: the installer wrote a per-role agent file into \$CODEX_HOME"
   [ -d "$CODEX_HOME/agents" ] && fail "R16: the installer wrote into the suite-level \$CODEX_HOME/agents"
-  [ -d "$_t/ch/prompts" ] || fail "R16: the existing GLOBAL /prompts:sdd-* glue regressed"
+  [ -d "$_t/ch/prompts" ] && fail "R4: model routing created the retired global Codex prompt surface"
   return 0
 }
 
-# ── R17: no resolvable value ⇒ neither new tree is created ───────────────────────
+# ── R17: Gemini remains conditional; selected Codex roles are always registered ──
 test_new_trees_conditional() {
   # (a) everything on inherit
   _t="$(mk r17a)"; run "$_t" gemini,codex
   [ -d "$_t/.gemini/agents" ] && fail "R17: all-inherit created .gemini/agents/"
-  [ -d "$_t/.codex/agents" ]  && fail "R17: all-inherit created .codex/agents/"
-  # (b) a real tier, but codex has no alias and no pin ⇒ still no .codex/agents/
+  [ "$(find "$_t/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "6" ] \
+    || fail "R6: all-inherit Codex did not create exactly six role TOMLs"
+  grep -q '^model = ' "$_t/.codex/agents/"*.toml \
+    && fail "R7: all-inherit Codex role gained a model key"
+  # (b) a real tier without a Codex pin remains model-less, while Gemini resolves.
   _t2="$(mk r17b)"; run "$_t2" gemini,codex
   set_tier "$_t2" architect reasoning
   run "$_t2" gemini,codex
   [ -d "$_t2/.gemini/agents" ] || fail "R17: a resolvable gemini tier must create .gemini/agents/"
-  [ -d "$_t2/.codex/agents" ]  && fail "R17: an unpinned codex tier must not create .codex/agents/"
+  [ "$(find "$_t2/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "6" ] \
+    || fail "R6: unpinned Codex did not retain exactly six role TOMLs"
+  grep -q '^model = ' "$_t2/.codex/agents/"*.toml \
+    && fail "R7: unpinned Codex tier stamped a model key"
   return 0
 }
 
@@ -646,14 +656,9 @@ test_deselect_preserves_user_edits() {
   return 0
 }
 
-# ── R11/R17: every role back to `inherit` reconciles a PREVIOUSLY stamped target ──
-# Regression for Codex r1 P1 #3654925551. R17 ("no resolvable value ⇒ neither tree is
-# created") was only ever exercised on a FRESH target; on a target that had been stamped
-# with a concrete tier the install path just skipped, so the old files — and their old
-# `model:` keys — survived and stayed discoverable. The documented switch back to session
-# inheritance then silently kept using the old model.
+# ── R11/R17: every role back to `inherit` reconciles previously stamped models ──
 test_return_to_inherit_reconciles() {
-  # (a) all-pristine: both trees, and the stamp state behind them, must be GONE.
+  # (a) Gemini remains conditional; Codex regenerates the same six model-less roles.
   _t="$(mk r11rec)"; run "$_t" gemini,codex
   set_tier "$_t" architect reasoning
   set_tier "$_t" scout cheap
@@ -669,15 +674,15 @@ test_return_to_inherit_reconciles() {
   run "$_t" gemini,codex
   [ -e "$_t/.gemini/agents" ] && fail "R11rec: .gemini/agents/ survived a switch back to inherit"
   [ -e "$_t/.gemini" ]        && fail "R11rec: the harness-created .gemini/ dir survived"
-  [ -e "$_t/.codex/agents" ]  && fail "R11rec: .codex/agents/ survived a switch back to inherit"
-  [ -e "$_t/.codex" ]         && fail "R11rec: the harness-created .codex/ dir survived"
-  # R11 byte-identity is about the WHOLE tree: no leftover stamp state either.
-  [ -e "$_t/.harness/.model-agents" ] \
-    && fail "R11rec: .harness/.model-agents/ survived — the tree is not equivalent to an unconfigured install"
+  [ "$(find "$_t/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "6" ] \
+    || fail "R8: pin→inherit did not retain exactly six Codex roles"
+  grep -q '^model = ' "$_t/.codex/agents/"*.toml \
+    && fail "R8: pin→inherit left a Codex model key behind"
   # The still-selected front-ends keep the rest of their glue.
-  [ -d "$_t/ch/prompts" ] || fail "R11rec: the GLOBAL codex /prompts:sdd-* glue was collaterally removed"
+  [ -f "$_t/.agents/skills/sdd-next/SKILL.md" ] || fail "R8: pin→inherit removed Codex skills"
 
-  # (b) a user-edited artifact is NEVER destroyed (BR6/R23) — it and only it survives.
+  # (b) Selected Codex roles are regenerated from current routing; Gemini's old
+  # pristine-only return-to-inherit behavior remains unchanged.
   _u="$(mk r11rec_edit)"; run "$_u" gemini,codex
   set_tier "$_u" architect reasoning
   set_tier "$_u" scout cheap
@@ -692,15 +697,16 @@ test_return_to_inherit_reconciles() {
     || fail "R11rec: an EDITED .gemini/agents/architect.md was deleted on the switch back to inherit"
   grep -qx 'mine' "$_u/.gemini/agents/architect.md" || fail "R11rec: the gemini user edit was not preserved"
   [ -f "$_u/.codex/agents/scout.toml" ] \
-    || fail "R11rec: an EDITED .codex/agents/scout.toml was deleted on the switch back to inherit"
-  grep -qx '# mine' "$_u/.codex/agents/scout.toml" || fail "R11rec: the codex user edit was not preserved"
+    || fail "R8: Codex scout role vanished on the switch back to inherit"
+  grep -qx '# mine' "$_u/.codex/agents/scout.toml" \
+    && fail "R8: selected Codex role was not regenerated on pin→inherit"
+  grep -q '^model = ' "$_u/.codex/agents/scout.toml" \
+    && fail "R8: regenerated Codex role retained the old model key"
   printf '%s\n' "$_e" | grep -q '.gemini/agents/architect.md' \
     || fail "R11rec: no warning naming the preserved gemini file"
-  printf '%s\n' "$_e" | grep -q '.codex/agents/scout.toml' \
-    || fail "R11rec: no warning naming the preserved codex file"
-  # pristine siblings ARE reclaimed even though the dirs must survive for the edited file
+  # Gemini pristine siblings are reclaimed; Codex siblings remain registered model-less.
   [ -f "$_u/.gemini/agents/builder.md" ]  && fail "R11rec: a pristine sibling was not reclaimed (gemini)"
-  [ -f "$_u/.codex/agents/builder.toml" ] && fail "R11rec: a pristine sibling was not reclaimed (codex)"
+  [ -f "$_u/.codex/agents/builder.toml" ] || fail "R8: Codex sibling role vanished on pin→inherit"
 
   # (c) R22 with the `models:` edit and the DESELECT in the SAME run: the on-disk files
   # came from the OLD config, so a freshly generated reference cannot match them. The
@@ -743,9 +749,9 @@ pass "gemini .gemini/agents/<role>.md created for all six roles with a pointer b
 test_codex_agent_files_project_local
 pass "codex .codex/agents/<role>.toml is project-local; \$CODEX_HOME is never touched (R16)"
 test_new_trees_conditional
-pass "no resolvable value ⇒ .gemini/agents/ and .codex/agents/ are never created (R17)"
+pass "Gemini remains conditional; selected Codex always registers six model-optional roles (R6, R7, R17)"
 test_return_to_inherit_reconciles
-pass "every role back to inherit reclaims a previously stamped .gemini/.codex tree, preserving user edits (R11, R17, R23)"
+pass "every role back to inherit reclaims Gemini and regenerates six model-less Codex roles (R8, R11, R17)"
 test_selection_gating
 pass "an unselected front-end is never stamped, even with a full models: block (R18)"
 test_restamp_after_config_change

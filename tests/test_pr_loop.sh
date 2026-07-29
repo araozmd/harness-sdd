@@ -102,13 +102,20 @@ test_command_mirrored_to_all_frontends() {           # R2
   install_on "$_m"
   for _f in "$_m/.claude/commands/sdd-pr-loop.md" \
             "$_m/.opencode/command/sdd-pr-loop.md" \
-            "$_m/.agents/workflows/sdd-pr-loop.md" \
-            "$_m/ch/prompts/sdd-pr-loop.md"; do
+            "$_m/.agents/workflows/sdd-pr-loop.md"; do
     [ -f "$_f" ] || fail "R2: /sdd-pr-loop not mirrored to $_f"
     cmp -s "$_f" "$_m/.claude/commands/sdd-pr-loop.md" \
       || fail "R2: $_f is not byte-identical to the Claude copy"
   done
-  pass "R2 gate on: /sdd-pr-loop mirrored byte-identically into all four command surfaces"
+  _skill="$_m/.agents/skills/sdd-pr-loop/SKILL.md"
+  [ -f "$_skill" ] || fail "R2: gated Codex sdd-pr-loop skill missing"
+  grep -qx 'name: sdd-pr-loop' "$_skill" || fail "R2: Codex pr-loop skill lacks name metadata"
+  tail -n +5 "$_skill" > "$_m/skill.body"
+  tail -n +5 "$_m/.claude/commands/sdd-pr-loop.md" > "$_m/command.body"
+  cmp -s "$_m/skill.body" "$_m/command.body" \
+    || fail "R2: Codex pr-loop skill instructions differ from the canonical body"
+  [ -d "$_m/ch/prompts" ] && fail "R4: gate-on install created a global Codex prompt"
+  pass "R2 gate on: /sdd-pr-loop mirrored to command surfaces and adapted as a Codex skill"
 }
 
 test_gate_off_stamps_nothing() {                      # R3
@@ -120,7 +127,7 @@ test_gate_off_stamps_nothing() {                      # R3
   for _f in "$_o/.claude/commands/sdd-pr-loop.md" \
             "$_o/.opencode/command/sdd-pr-loop.md" \
             "$_o/.agents/workflows/sdd-pr-loop.md" \
-            "$_o/ch/prompts/sdd-pr-loop.md" \
+            "$_o/.agents/skills/sdd-pr-loop/SKILL.md" \
             "$_o/.claude/agents/pr-fixer.md" \
             "$_o/.opencode/agent/pr-fixer.md" \
             "$_o/.agents/agents/pr-fixer.md"; do
@@ -136,13 +143,13 @@ test_deselect_removes_pr_loop_glue() {                # R4
   _d="$T/desel"
   install_on "$_d"
   [ -f "$_d/.claude/commands/sdd-pr-loop.md" ] || fail "R4 setup: glue not stamped"
-  [ -f "$_d/ch/prompts/sdd-pr-loop.md" ]       || fail "R4 setup: global prompt not stamped"
+  [ -f "$_d/.agents/skills/sdd-pr-loop/SKILL.md" ] || fail "R4 setup: Codex skill not stamped"
   # the gate stays ON across the re-run: this proves DESELECTION reclaims, not the gate
   install_on "$_d" --agents=gemini
   for _f in "$_d/.claude/commands/sdd-pr-loop.md" "$_d/.claude/agents/pr-fixer.md" \
             "$_d/.opencode/command/sdd-pr-loop.md" "$_d/.opencode/agent/pr-fixer.md" \
             "$_d/.agents/workflows/sdd-pr-loop.md" "$_d/.agents/agents/pr-fixer.md" \
-            "$_d/ch/prompts/sdd-pr-loop.md"; do
+            "$_d/.agents/skills/sdd-pr-loop/SKILL.md"; do
     [ -e "$_f" ] && fail "R4: deselected front-end kept $_f"
   done
   pass "R4 deselect: every front-end's /sdd-pr-loop + pr-fixer reclaimed"
@@ -158,13 +165,13 @@ test_gate_flip_off_reclaims() {                       # R5
   for _p in "$_f/.claude/commands/sdd-pr-loop.md" "$_f/.claude/agents/pr-fixer.md" \
             "$_f/.opencode/command/sdd-pr-loop.md" "$_f/.opencode/agent/pr-fixer.md" \
             "$_f/.agents/workflows/sdd-pr-loop.md" "$_f/.agents/agents/pr-fixer.md" \
-            "$_f/ch/prompts/sdd-pr-loop.md"; do
+            "$_f/.agents/skills/sdd-pr-loop/SKILL.md"; do
     [ -e "$_p" ] && fail "R5: gate flipped off but $_p survived while the front-end is still selected"
   done
   # the still-selected front-ends keep everything else
   [ -f "$_f/.claude/commands/sdd-next.md" ]    || fail "R5: flip-off wrongly removed /sdd-next"
   [ -f "$_f/.claude/agents/orchestrator.md" ]  || fail "R5: flip-off wrongly removed a role shim"
-  [ -f "$_f/ch/prompts/sdd-next.md" ]          || fail "R5: flip-off wrongly removed a global prompt"
+  [ -f "$_f/.agents/skills/sdd-next/SKILL.md" ] || fail "R5: flip-off wrongly removed an ungated Codex skill"
   grep -qF 'pr_loop.enabled is not true' "$_f/.err" || fail "R5: gate-off reclamation was not announced"
   pass "R5 gate true->false while selected reclaims the glue from every front-end"
 }
@@ -173,13 +180,13 @@ test_edited_copy_left_in_place_and_warns() {          # R6
   _e="$T/edited"
   set_gate "$_e" true
   install_at "$_e"
-  printf '\n# my own note\n' >> "$_e/ch/prompts/sdd-pr-loop.md"
+  printf '\n# my own note\n' >> "$_e/.agents/skills/sdd-pr-loop/SKILL.md"
   printf '\n# my own note\n' >> "$_e/.agents/agents/pr-fixer.md"
   set_gate "$_e" false
   install_at "$_e"
-  [ -f "$_e/ch/prompts/sdd-pr-loop.md" ] \
-    || fail "R6: an EDITED global Codex prompt must survive reclamation"
-  grep -qF 'my own note' "$_e/ch/prompts/sdd-pr-loop.md" \
+  [ -f "$_e/.agents/skills/sdd-pr-loop/SKILL.md" ] \
+    || fail "R6: an EDITED Codex skill must survive reclamation"
+  grep -qF 'my own note' "$_e/.agents/skills/sdd-pr-loop/SKILL.md" \
     || fail "R6: the user's edit was lost"
   [ -f "$_e/.agents/agents/pr-fixer.md" ] \
     || fail "R6: an EDITED .agents/ persona must survive reclamation"
@@ -218,6 +225,7 @@ test_gate_off_then_on_restores() {                    # R8
   cp "$_r/.claude/agents/pr-fixer.md"      "$T/.rt-fixer"
   cp "$_r/.opencode/agent/pr-fixer.md"     "$T/.rt-ocfixer"
   cp "$_r/.agents/agents/pr-fixer.md"      "$T/.rt-agfixer"
+  cp "$_r/.agents/skills/sdd-pr-loop/SKILL.md" "$T/.rt-codex-skill"
   set_gate "$_r" false
   install_at "$_r"
   set_gate "$_r" true
@@ -226,33 +234,29 @@ test_gate_off_then_on_restores() {                    # R8
   cmp -s "$_r/.claude/agents/pr-fixer.md"      "$T/.rt-fixer"  || fail "R8: claude pr-fixer not byte-identical after off->on"
   cmp -s "$_r/.opencode/agent/pr-fixer.md"     "$T/.rt-ocfixer" || fail "R8: opencode pr-fixer not byte-identical after off->on"
   cmp -s "$_r/.agents/agents/pr-fixer.md"      "$T/.rt-agfixer" || fail "R8: antigravity pr-fixer not byte-identical after off->on"
-  cmp -s "$_r/ch/prompts/sdd-pr-loop.md"       "$T/.rt-cmd"    || fail "R8: global prompt not byte-identical after off->on"
+  cmp -s "$_r/.agents/skills/sdd-pr-loop/SKILL.md" "$T/.rt-codex-skill" \
+    || fail "R8: Codex skill not byte-identical after off->on"
   pass "R8 gate off->on round-trip restores byte-identical glue"
 }
 
 test_gate_off_still_reclaims_global_codex_prompt() {  # R1
-  # This is the R1 probe: the reclamation below compares the on-disk global prompt against
-  # the freshly generated CMDDIR body. It can only pass if the installer generates the
-  # /sdd-pr-loop body into CMDDIR on EVERY run, gate on or off. Gating GENERATION would
-  # delete the reference and make an already-stamped prompt permanently unremovable.
+  # Reclamation compares the on-disk skill against a freshly generated adapter reference.
+  # The canonical body therefore remains generated even while the gate is off.
   _g="$T/r1"
   set_gate "$_g" true
   install_at "$_g" --agents=codex
-  [ -f "$_g/ch/prompts/sdd-pr-loop.md" ] || fail "R1 setup: global prompt not stamped"
+  [ -f "$_g/.agents/skills/sdd-pr-loop/SKILL.md" ] || fail "R1 setup: Codex skill not stamped"
   set_gate "$_g" false
   install_at "$_g" --agents=codex
-  [ -e "$_g/ch/prompts/sdd-pr-loop.md" ] \
-    && fail "R1: pristine global prompt not reclaimed — the CMDDIR body must be generated on EVERY run"
-  [ -f "$_g/ch/prompts/sdd-next.md" ] || fail "R1: ungated global prompts must be untouched"
+  [ -e "$_g/.agents/skills/sdd-pr-loop/SKILL.md" ] \
+    && fail "R1: pristine gated skill not reclaimed — the adapter reference must be generated on EVERY run"
+  [ -f "$_g/.agents/skills/sdd-next/SKILL.md" ] || fail "R1: ungated Codex skills must be untouched"
   pass "R1 CMDDIR body is generated on every run (pristine reference survives a gate flip)"
 }
 
-# ══ The GLOBAL prompt is CROSS-TARGET (Codex r4 P1 #3662785235) ═══════════════
-# `${CODEX_HOME:-$HOME/.codex}/prompts/` is machine-global: one dir, every repo on the
-# box. `pr_loop.enabled` is per-target AND opt-in, so without cross-target ownership the
-# DEFAULT install of any second project deletes the prompt an enabled project depends on.
-# These tests share ONE CODEX_HOME between two targets on purpose — that is the real
-# topology, and it is still a sandbox under this suite's temp dir.
+# ══ Legacy GLOBAL prompt migration ownership ══════════════════════════════════
+# Current installs never create these files. Fixtures seed the pre-0.48 artifact and its
+# ledger explicitly so migration proves fail-safe cross-target ownership handling.
 
 # install_shared <target> <shared-codex-home> <true|false> — install <target> against a
 # CODEX_HOME deliberately shared with the other targets of the same test.
@@ -262,48 +266,44 @@ install_shared() {
   HARNESS_PR_LOOP_ENABLED="$_is_g" CODEX_HOME="$_is_ch" sh "$SRC/harness-install.sh" --agents=claude,codex "$_is_t" >"$_is_t/.out" 2>"$_is_t/.err" \
     || { cat "$_is_t/.err" >&2; fail "installer exited non-zero for $_is_t"; }
 }
+legacy_owner() { (CDPATH= cd -- "$1" && pwd -P); }
 
 test_shared_prompt_survives_another_targets_gate_off() {
   _s="$T/xtarget"; _ch="$_s/ch"
   install_shared "$_s/A" "$_ch" true
-  [ -f "$_ch/prompts/sdd-pr-loop.md" ] || fail "cross-target setup: A's global prompt not stamped"
-  # B is a DIFFERENT repo taking the opt-in default (gate off) on the same machine
+  mkdir -p "$_ch/prompts"
+  cp "$_s/A/.claude/commands/sdd-pr-loop.md" "$_ch/prompts/sdd-pr-loop.md"
+  legacy_owner "$_s/A" > "$_ch/prompts/.sdd-pr-loop.owners"
+  # B migrates against a legacy prompt still owned by A.
   install_shared "$_s/B" "$_ch" false
   [ -f "$_ch/prompts/sdd-pr-loop.md" ] \
-    || fail "cross-target: B's gate-off install deleted the global prompt A still wants"
-  grep -qF 'still claimed by another harness target' "$_s/B/.err" \
+    || fail "cross-target: B deleted a legacy prompt A still owns"
+  grep -qF 'live or unknown ownership' "$_s/B/.err" \
     || fail "cross-target: keeping another target's prompt was not announced"
-  # B's OWN glue is still reclaimed — the local axis (R5) is untouched
   [ -e "$_s/B/.claude/commands/sdd-pr-loop.md" ] \
     && fail "cross-target: B kept its own gated command despite the gate being off"
-  # idempotent: re-running B converges instead of oscillating
-  install_shared "$_s/B" "$_ch" false
-  [ -f "$_ch/prompts/sdd-pr-loop.md" ] || fail "cross-target: a second B run deleted A's prompt"
-  # and A, whose gate is still on, keeps working without a repair run
+  # A's migration releases the final live owner and reclaims the pristine legacy file.
   install_shared "$_s/A" "$_ch" true
-  [ -f "$_ch/prompts/sdd-pr-loop.md" ] || fail "cross-target: A's re-run lost its own prompt"
-  # the ledger is not itself discoverable as a Codex slash command (Codex globs *.md)
-  for _l in "$_ch"/prompts/.*.owners; do
-    [ -e "$_l" ] || continue
-    case "$_l" in *.md) fail "cross-target: the ownership ledger is named like a prompt" ;; esac
-  done
-  pass "one target's gate-off never deletes the shared global prompt another target wants"
+  [ -e "$_ch/prompts/sdd-pr-loop.md" ] \
+    && fail "cross-target: final owner migration left a pristine legacy prompt"
+  pass "legacy pr-loop migration preserves live owners and reclaims after the final release"
 }
 
 test_shared_prompt_reclaimed_when_last_owner_opts_out() {
   _s="$T/xtarget2"; _ch="$_s/ch"
   install_shared "$_s/A" "$_ch" true
   install_shared "$_s/B" "$_ch" true
-  [ -f "$_ch/prompts/sdd-pr-loop.md" ] || fail "last-owner setup: prompt not stamped"
-  install_shared "$_s/A" "$_ch" false
+  mkdir -p "$_ch/prompts"
+  cp "$_s/A/.claude/commands/sdd-pr-loop.md" "$_ch/prompts/sdd-pr-loop.md"
+  { legacy_owner "$_s/A"; legacy_owner "$_s/B"; } > "$_ch/prompts/.sdd-pr-loop.owners"
+  install_shared "$_s/A" "$_ch" true
   [ -f "$_ch/prompts/sdd-pr-loop.md" ] || fail "last-owner: reclaimed while B still wants it"
-  install_shared "$_s/B" "$_ch" false
+  install_shared "$_s/B" "$_ch" true
   [ -e "$_ch/prompts/sdd-pr-loop.md" ] \
     && fail "last-owner: the prompt survived after EVERY target turned the gate off"
   [ -e "$_ch/prompts/.sdd-pr-loop.owners" ] \
     && fail "last-owner: the emptied ownership ledger was left behind as garbage"
-  [ -f "$_ch/prompts/sdd-next.md" ] || fail "last-owner: an ungated global prompt was wrongly reclaimed"
-  pass "the shared global prompt is reclaimed exactly when the LAST owner opts out"
+  pass "the legacy global prompt is reclaimed exactly when the LAST owner migrates"
 }
 
 test_dead_owner_never_pins_the_shared_prompt() {
@@ -313,8 +313,11 @@ test_dead_owner_never_pins_the_shared_prompt() {
   _s="$T/xtarget3"; _ch="$_s/ch"
   install_shared "$_s/A" "$_ch" true
   install_shared "$_s/B" "$_ch" true
-  rm -rf "$_s/A"                       # A's repo is gone from disk
-  install_shared "$_s/B" "$_ch" false
+  mkdir -p "$_ch/prompts"
+  cp "$_s/B/.claude/commands/sdd-pr-loop.md" "$_ch/prompts/sdd-pr-loop.md"
+  { legacy_owner "$_s/A"; legacy_owner "$_s/B"; } > "$_ch/prompts/.sdd-pr-loop.owners"
+  rm -rf "$_s/A"
+  install_shared "$_s/B" "$_ch" true
   [ -e "$_ch/prompts/sdd-pr-loop.md" ] \
     && fail "dead owner: a deleted target's stale claim pinned the shared prompt forever"
   pass "a deleted target's stale claim is garbage-collected, never pins the prompt"
@@ -326,20 +329,21 @@ test_unknown_ownership_always_keeps_the_shared_prompt() {
   # working command is not.
   _s="$T/xtarget4"; _ch="$_s/ch"
   install_shared "$_s/A" "$_ch" true
-  rm -f "$_ch/prompts/.sdd-pr-loop.owners"      # e.g. stamped by an installer that predates the ledger
-  install_shared "$_s/A" "$_ch" false
+  mkdir -p "$_ch/prompts"
+  cp "$_s/A/.claude/commands/sdd-pr-loop.md" "$_ch/prompts/sdd-pr-loop.md"
+  rm -f "$_ch/prompts/.sdd-pr-loop.owners"
+  install_shared "$_s/A" "$_ch" true
   [ -f "$_ch/prompts/sdd-pr-loop.md" ] \
     || fail "unknown ownership: an ABSENT ledger authorized deleting the shared prompt"
-  grep -qF 'ownership is unknown' "$_s/A/.err" \
+  grep -qF 'live or unknown ownership' "$_s/A/.err" \
     || fail "unknown ownership: keeping the prompt was not announced"
   # an UNREADABLE ledger gets the same verdict
-  install_shared "$_s/A" "$_ch" true
-  [ -f "$_ch/prompts/.sdd-pr-loop.owners" ] || fail "unknown ownership: ledger not re-created by the gate-on run"
+  legacy_owner "$_s/A" > "$_ch/prompts/.sdd-pr-loop.owners"
   if [ "$(id -u)" = 0 ]; then
     skip "unreadable ledger (running as root — a mode-000 file is still readable)"
   else
     chmod 000 "$_ch/prompts/.sdd-pr-loop.owners"
-    install_shared "$_s/A" "$_ch" false
+    install_shared "$_s/A" "$_ch" true
     [ -f "$_ch/prompts/sdd-pr-loop.md" ] \
       || fail "unknown ownership: an UNREADABLE ledger authorized deleting the shared prompt"
     [ -f "$_ch/prompts/.sdd-pr-loop.owners" ] \
@@ -573,7 +577,7 @@ test_no_mco_tokens_in_body() {                        # R20
   _paths="$SRC/agents $SRC/docs $SRC/store $SRC/tools $SRC/specs/_templates \
           $SRC/AGENTS.md $SRC/CLAUDE.md $SRC/README.md $SRC/harness-install.sh \
           $SRC/harness.config.yaml $SRC/.claude"
-  for _tok in 'MCO_' '.mco-cache' '/.agents/skills' 'route-task' 'start-feature'; do
+  for _tok in 'MCO_' '.mco-cache' 'route-task' 'start-feature'; do
     # shellcheck disable=SC2086 -- intentional word split of the path list
     if grep -rlF "$_tok" $_paths 2>/dev/null | grep -q .; then
       # shellcheck disable=SC2086
@@ -586,7 +590,7 @@ test_no_mco_tokens_in_body() {                        # R20
     grep -qF "$_v" "$W" || fail "R20: watcher does not read $_v"
   done
   grep -qF 'HARNESS_DRY_RUN' "$BODY" || fail "R20: body does not honor HARNESS_DRY_RUN"
-  pass "R20 no MCO/skills/route-task/start-feature token in the body; HARNESS_* names only"
+  pass "R20 no MCO/route-task/start-feature token in the body; HARNESS_* names only"
 }
 
 test_env_overrides_config() {                         # R20 precedence

@@ -10,10 +10,8 @@ SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 trap 'rm -rf "$T"' EXIT
 
-# The `codex` front-end (§5d) installs GLOBAL prompts into
-# ${CODEX_HOME:-$HOME/.codex}/prompts. Sandbox CODEX_HOME under the temp dir for the
-# WHOLE suite so no installer run can ever write to the developer's real ~/.codex.
-# (Codex-specific tests below still override CODEX_HOME per-run for crisp isolation.)
+# Sandbox CODEX_HOME under the temp dir for the WHOLE suite. Current Codex installs must
+# never write there; migration cases below seed legacy prompts explicitly.
 export CODEX_HOME="$T/codex-home"
 
 # E18-F01: `pr_loop.enabled` is an OPT-IN gate — a fresh install seeds `false` and stamps
@@ -858,7 +856,8 @@ CODEX_HOME="$TA/ch" sh "$SRC/harness-install.sh" "$TA" >/dev/null || fail "no-ov
 [ -f "$TA/opencode.json" ]   || fail "R6: no-override run did not stamp opencode (opencode.json)"
 [ -d "$TA/.claude/commands" ] || fail "R6: no-override run did not stamp claude glue"
 [ -d "$TA/.opencode/command" ] || fail "R6: no-override run did not stamp opencode glue"
-[ -f "$TA/ch/prompts/sdd-next.md" ] || fail "R6: no-override run did not stamp codex glue (GLOBAL prompts)"
+[ -f "$TA/.agents/skills/sdd-next/SKILL.md" ] || fail "R6: no-override run did not stamp codex repository skill"
+[ -d "$TA/ch/prompts" ] && fail "R4: no-override run wrote deprecated global Codex prompts"
 [ -f "$TA/.harness/.agents" ] || fail "R8: .harness/.agents not written on no-override run"
 for _k in claude gemini opencode antigravity codex; do
   grep -qx "$_k" "$TA/.harness/.agents" || fail "R1/R6: .harness/.agents missing '$_k' on ALL default"
@@ -929,127 +928,124 @@ grep -qF '.harness/AGENTS.md' "$TAG/GEMINI.md"       || fail "R1: antigravity-on
 rm -rf "$TAG"
 pass "--agents=antigravity writes GEMINI.md entrypoint (R1, Codex r1 P2)"
 
-# codex_only_stamps_global_prompts (§5d): --agents=codex writes the /sdd-* prompt
-# bodies to the GLOBAL ${CODEX_HOME}/prompts dir (never under $TARGET), leaves AGENTS.md
-# (Codex's native entrypoint, always written), and stamps NO other front-end.
+# codex_only_stamps_project_skills: --agents=codex writes repository-local skills with
+# deterministic metadata wrapped around the canonical command bodies. It never creates
+# the deprecated machine-global prompt surface.
 TCX="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 CODEX_HOME="$TCX/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCX" >/dev/null || fail "--agents=codex exited non-zero"
 [ -f "$TCX/AGENTS.md" ]                 || fail "codex: AGENTS.md (Codex's native entrypoint) must always be written"
 for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-loop; do
-  [ -f "$TCX/ch/prompts/$_c.md" ]       || fail "codex: global prompt $_c.md not installed"
+  _skill="$TCX/.agents/skills/$_c/SKILL.md"
+  [ -f "$_skill" ]                      || fail "codex: project skill $_c/SKILL.md not installed"
+  [ "$(sed -n '1p' "$_skill")" = "---" ] || fail "codex: $_c skill frontmatter does not open"
+  grep -qx "name: $_c" "$_skill"         || fail "codex: $_c skill has no stable name metadata"
+  grep -q '^description: .[^ ]' "$_skill" || fail "codex: $_c skill has no non-empty description metadata"
+  [ "$(sed -n '4p' "$_skill")" = "---" ] || fail "codex: $_c skill frontmatter does not close deterministically"
 done
 # E18-F01 R14: NO pr-fixer artifact is ever created for the codex front-end.
 [ -f "$TCX/.codex/agents/pr-fixer.toml" ] && fail "codex: must not create a pr-fixer artifact (E18-F01 R14)" 
-# prompts are GLOBAL — nothing codex-owned lands under the target repo
-[ -d "$TCX/.codex" ]                    && fail "codex: must not write a project-local .codex/ dir (prompts are GLOBAL)"
+[ -d "$TCX/ch/prompts" ]                 && fail "codex: current install created deprecated global prompts"
 # no OTHER front-end stamped
 [ -f "$TCX/CLAUDE.md" ]    && fail "R4: --agents=codex must not write CLAUDE.md"
 [ -f "$TCX/GEMINI.md" ]    && fail "R4: --agents=codex must not write GEMINI.md"
 [ -f "$TCX/opencode.json" ] && fail "R4: --agents=codex must not write opencode.json"
 [ -d "$TCX/.claude" ]      && fail "R4: --agents=codex must not write .claude/"
 grep -qx codex "$TCX/.harness/.agents" || fail "R8: codex not persisted in .harness/.agents"
-# installed /sdd-next prompt acts as the Orchestrator, resolved against .harness/, carrying args
-grep -qF '.harness/' "$TCX/ch/prompts/sdd-next.md" || fail "codex: sdd-next prompt does not resolve against .harness/"
-grep -qF '$ARGUMENTS' "$TCX/ch/prompts/sdd-next.md" || fail "codex: sdd-next prompt does not carry \$ARGUMENTS"
-grep -qF -- '--mine' "$TCX/ch/prompts/sdd-next.md" || fail "codex: sdd-next prompt does not carry the --mine scoped-selection wiring (E10-F01)"
-# byte-identical to the Claude command body (front-ends stay in lock-step)
+# Installed $sdd-next acts as the Orchestrator, resolves against .harness/, and carries args.
+grep -qF '.harness/' "$TCX/.agents/skills/sdd-next/SKILL.md" || fail "codex: sdd-next skill does not resolve against .harness/"
+grep -qF '$ARGUMENTS' "$TCX/.agents/skills/sdd-next/SKILL.md" || fail "codex: sdd-next skill does not carry \$ARGUMENTS"
+grep -qF -- '--mine' "$TCX/.agents/skills/sdd-next/SKILL.md" || fail "codex: sdd-next skill does not carry the --mine scoped-selection wiring (E10-F01)"
+# After removing the adapter metadata, the instruction body is byte-identical to Claude.
 CODEX_HOME="$TCX/ch2" sh "$SRC/harness-install.sh" --agents=claude,codex "$TCX" >/dev/null || fail "codex+claude install failed"
-cmp -s "$TCX/ch2/prompts/sdd-next.md" "$TCX/.claude/commands/sdd-next.md" \
-  || fail "codex: global prompt body not byte-identical to the Claude command body"
-cmp -s "$TCX/ch2/prompts/sdd-fix-parallel.md" "$TCX/.claude/commands/sdd-fix-parallel.md" ||
-  fail "codex: parallel prompt not byte-identical to Claude"
+tail -n +5 "$TCX/.agents/skills/sdd-next/SKILL.md" > "$TCX/skill.body"
+tail -n +5 "$TCX/.claude/commands/sdd-next.md" > "$TCX/command.body"
+cmp -s "$TCX/skill.body" "$TCX/command.body" \
+  || fail "codex: sdd-next skill instructions differ from the canonical command body"
+tail -n +5 "$TCX/.agents/skills/sdd-fix-parallel/SKILL.md" > "$TCX/parallel-skill.body"
+tail -n +5 "$TCX/.claude/commands/sdd-fix-parallel.md" > "$TCX/parallel-command.body"
+cmp -s "$TCX/parallel-skill.body" "$TCX/parallel-command.body" \
+  || fail "codex: parallel skill instructions differ from the canonical command body"
 rm -rf "$TCX"
-pass "--agents=codex stamps only GLOBAL /sdd-* prompts + AGENTS.md, byte-identical to peers (§5d)"
+pass "--agents=codex stamps project-local \$sdd-* skills with canonical command bodies"
 
 # test_sdd_fix_parallel_registry_cleanup (covered across each deselection block below)
 # codex_deselect_reclaims_pristine (§7): re-run dropping codex removes byte-pristine
-# global prompts and warns; a user-EDITED prompt of the same name is preserved.
+# skills and warns; a user-EDITED skill and Antigravity/user sibling trees survive.
 TCD="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 CH="$TCD/ch"
-CODEX_HOME="$CH" sh "$SRC/harness-install.sh" --agents=claude,codex "$TCD" >/dev/null || fail "codex deselect setup failed"
-[ -f "$CH/prompts/sdd-next.md" ] || fail "codex deselect setup: prompts not stamped"
-# user edits one prompt in place — it must survive deselection
-printf '\n# user edit\n' >> "$CH/prompts/sdd-fix.md"
-_cwarn="$(CODEX_HOME="$CH" sh "$SRC/harness-install.sh" --agents=claude "$TCD" 2>&1 >/dev/null)" \
+CODEX_HOME="$CH" sh "$SRC/harness-install.sh" --agents=antigravity,codex "$TCD" >/dev/null || fail "codex deselect setup failed"
+[ -f "$TCD/.agents/skills/sdd-next/SKILL.md" ] || fail "codex deselect setup: skills not stamped"
+printf '\n# user edit\n' >> "$TCD/.agents/skills/sdd-fix/SKILL.md"
+printf 'mine\n' > "$TCD/.agents/user-file.txt"
+_cwarn="$(CODEX_HOME="$CH" sh "$SRC/harness-install.sh" --agents=antigravity "$TCD" 2>&1 >/dev/null)" \
   || fail "codex deselect re-run exited non-zero"
-[ -f "$CH/prompts/sdd-next.md" ] && fail "R13: deselected codex pristine prompt (sdd-next.md) not removed"
-[ -f "$CH/prompts/sdd-fix-parallel.md" ] && fail "E15-F03: deselected pristine parallel prompt not removed"
-[ -f "$CH/prompts/sdd-pr-loop.md" ] && fail "E18-F01 R4: deselected pristine sdd-pr-loop prompt not removed"
-[ -f "$CH/prompts/sdd-fix.md" ]  || fail "R13: user-edited codex prompt (sdd-fix.md) must be preserved on deselect"
+[ -f "$TCD/.agents/skills/sdd-next/SKILL.md" ] && fail "R3: deselected pristine Codex skill was not removed"
+[ -f "$TCD/.agents/skills/sdd-fix-parallel/SKILL.md" ] && fail "R3: deselected pristine parallel skill was not removed"
+[ -f "$TCD/.agents/skills/sdd-pr-loop/SKILL.md" ] && fail "R3: deselected pristine pr-loop skill was not removed"
+[ -f "$TCD/.agents/skills/sdd-fix/SKILL.md" ] || fail "R3: user-edited Codex skill must be preserved on deselect"
+grep -qF '# user edit' "$TCD/.agents/skills/sdd-fix/SKILL.md" || fail "R3: edited skill content was lost"
+[ -f "$TCD/.agents/rules/harness.md" ] || fail "R3/R9: Codex deselection damaged Antigravity rules"
+[ -f "$TCD/.agents/workflows/sdd-next.md" ] || fail "R3/R9: Codex deselection damaged Antigravity workflows"
+[ -f "$TCD/.agents/user-file.txt" ] || fail "R3: Codex deselection deleted a user sibling"
 printf '%s' "$_cwarn" | grep -qiF 'codex' || fail "R13: removal of codex glue was not warned about"
 grep -qx codex "$TCD/.harness/.agents" && fail "R8: codex must be dropped from .harness/.agents after deselect"
 rm -rf "$TCD"
-pass "codex deselect reclaims pristine GLOBAL prompts, preserves edits, warns (§7, R13)"
+pass "codex deselect reclaims pristine project skills and preserves edited/sibling files"
 
-# codex_no_home_skips_not_aborts (Codex r1 P2): with `set -eu` active, a codex install
-# where NEITHER CODEX_HOME nor HOME is set must SKIP the global prompts with a warning,
-# NOT abort the whole install on an unbound `$HOME`. (No-TTY default selects codex, so a
-# plain noninteractive install in minimal CI would otherwise fail.)
+# codex_no_home_required: the current repository-local surface does not resolve HOME or
+# CODEX_HOME at all, and remains fully functional when both are absent.
 TCH="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 _chwarn="$(env -u HOME -u CODEX_HOME sh "$SRC/harness-install.sh" --agents=codex "$TCH" 2>&1 >/dev/null)" \
   || fail "codex install with no HOME/CODEX_HOME must not abort under set -u"
 [ -f "$TCH/AGENTS.md" ]  || fail "codex no-HOME: install must still complete (AGENTS.md written)"
 [ -d "$TCH/.harness" ]   || fail "codex no-HOME: install must still complete (.harness written)"
-printf '%s' "$_chwarn" | grep -qiF 'codex' || fail "codex no-HOME: skip must be warned about"
+[ -f "$TCH/.agents/skills/sdd-next/SKILL.md" ] || fail "codex no-HOME: project skill was not installed"
+printf '%s' "$_chwarn" | grep -q 'skipping GLOBAL' && fail "codex no-HOME: installer still advertised the retired global prompt surface"
 rm -rf "$TCH"
-pass "codex install skips global prompts (never aborts) when HOME+CODEX_HOME unset (Codex r1 P2)"
+pass "codex project skills install without HOME or CODEX_HOME"
 
-# codex_install_preserves_preexisting_prompt (Codex r2 P2): the GLOBAL prompts dir is a
-# user-owned namespace — a same-named pre-existing prompt must be backed up (once), never
-# silently destroyed, when the install writes the harness copy over it.
+# Legacy global prompt migration: a byte-identical generated legacy prompt is removed,
+# while an edited prompt is preserved byte-for-byte and diagnosed. No backup/current
+# prompt replacement is created because global prompts are no longer an active surface.
 TCP="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 CHP="$TCP/ch/prompts"
 mkdir -p "$CHP"
-printf 'MY OWN global codex prompt — do not lose\n' > "$CHP/sdd-next.md"
-CODEX_HOME="$TCP/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCP" >/dev/null 2>"$TCP/warn.txt" \
-  || fail "codex install over a pre-existing prompt exited non-zero"
-[ -f "$CHP/sdd-next.md.pre-harness.bak" ] || fail "codex: pre-existing global prompt not backed up"
-grep -qF 'MY OWN global codex prompt' "$CHP/sdd-next.md.pre-harness.bak" \
-  || fail "codex: backup does not contain the original user content"
-grep -qF '$ARGUMENTS' "$CHP/sdd-next.md" || fail "codex: harness prompt not installed over the backup"
-grep -qiF 'backed up' "$TCP/warn.txt" || fail "codex: overwrite of a user prompt not warned about"
-# re-run (upgrade): the ORIGINAL backup must be preserved, not clobbered by the now-harness file
-CODEX_HOME="$TCP/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCP" >/dev/null 2>&1 || fail "codex re-install failed"
-grep -qF 'MY OWN global codex prompt' "$CHP/sdd-next.md.pre-harness.bak" \
-  || fail "codex: re-run clobbered the original backup (must back up only once)"
+CODEX_HOME="$TCP/ch" sh "$SRC/harness-install.sh" --agents=claude "$TCP" >/dev/null 2>&1 \
+  || fail "legacy migration reference setup failed"
+cp "$TCP/.claude/commands/sdd-next.md" "$CHP/sdd-next.md"
+cp "$TCP/.claude/commands/sdd-fix.md" "$CHP/sdd-fix.md"
+printf '\n# user edit survives\n' >> "$CHP/sdd-fix.md"
+_legacy_warn="$(CODEX_HOME="$TCP/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCP" 2>&1 >/dev/null)" \
+  || fail "codex legacy migration exited non-zero"
+[ -f "$CHP/sdd-next.md" ] && fail "R5: byte-pristine legacy sdd-next prompt was not removed"
+[ -f "$CHP/sdd-fix.md" ] || fail "R5: edited legacy prompt was removed"
+grep -qF '# user edit survives' "$CHP/sdd-fix.md" || fail "R5: edited legacy prompt bytes were changed"
+[ -e "$CHP/sdd-next.md.pre-harness.bak" ] && fail "R4: migration created an obsolete prompt backup"
+printf '%s\n' "$_legacy_warn" | grep -qF 'sdd-fix.md' || fail "R5: edited legacy prompt preservation was not diagnosed"
+[ -f "$TCP/.agents/skills/sdd-next/SKILL.md" ] || fail "R1: current repository skill missing after legacy migration"
 rm -rf "$TCP"
-pass "codex install backs up a pre-existing global prompt, never destroys it (Codex r2 P2)"
+pass "codex safely migrates pristine legacy prompts and preserves edited prompts"
 
-# codex_install_never_silently_loses_a_later_edit (Codex r3 P2): once a backup exists, a
-# SUBSEQUENT user edit of the installed prompt must still be captured + warned on the next
-# install — not silently clobbered while the backup keeps older content.
-TCE="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-CHE="$TCE/ch/prompts"
-CODEX_HOME="$TCE/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCE" >/dev/null 2>&1 || fail "codex edit-guard setup failed"
-[ -f "$CHE/sdd-next.md" ] || fail "codex edit-guard setup: prompt not stamped"
-# user edits the installed prompt AFTER install (no .bak yet — install wrote a fresh file)
-printf '\n# my later customization — must not vanish\n' >> "$CHE/sdd-next.md"
-_cewarn="$(CODEX_HOME="$TCE/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCE" 2>&1 >/dev/null)" \
-  || fail "codex re-install over an edited prompt exited non-zero"
-grep -qF 'my later customization' "$CHE/sdd-next.md.pre-harness.bak" \
-  || fail "codex: a later user edit was silently lost (backup did not capture it)"
-printf '%s' "$_cewarn" | grep -qiF 'sdd-next.md' || fail "codex: overwrite of an edited prompt was not warned about"
-grep -qF '$ARGUMENTS' "$CHE/sdd-next.md" || fail "codex: harness prompt not reinstalled after capturing the edit"
-rm -rf "$TCE"
-pass "codex install captures + warns on a later user edit, never silent loss (Codex r3 P2)"
-
-# codex_legacy_fallback_never_reclaims_global (Codex r4 P2): a LEGACY upgrade (an install
-# with no persisted .harness/.agents) must NOT let the all-agents fallback trigger a codex
-# removal — the GLOBAL prompts dir is cross-target, and a legacy target predates codex, so
-# reclaiming pristine prompts there could destroy another target's glue.
-TLG="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-LGCH="$TLG/ch"
-# populate the GLOBAL prompts with pristine harness bodies (stand-in for another target's)
-CODEX_HOME="$LGCH" sh "$SRC/harness-install.sh" --agents=claude,codex "$TLG" >/dev/null 2>&1 || fail "legacy-fallback setup install failed"
-[ -f "$LGCH/prompts/sdd-next.md" ] || fail "legacy-fallback setup: global prompts not stamped"
-# simulate a legacy target: drop the persisted selection so PRIOR_AGENTS uses the fallback
-rm -f "$TLG/.harness/.agents"
-# re-run selecting only claude (excludes codex): fallback must NOT reclaim the global prompts
-CODEX_HOME="$LGCH" sh "$SRC/harness-install.sh" --agents=claude "$TLG" >/dev/null 2>&1 || fail "legacy-fallback re-run exited non-zero"
-[ -f "$LGCH/prompts/sdd-next.md" ] \
-  || fail "codex: legacy all-agents fallback wrongly reclaimed GLOBAL prompts (cross-target data loss)"
-rm -rf "$TLG"
-pass "codex legacy-fallback upgrade never reclaims cross-target GLOBAL prompts (Codex r4 P2)"
+# E23-F01 R10: shipped documentation and the installed manifest describe the native
+# Codex surface, always-present roles, safe migration, and the public release version.
+[ "$(cat "$SRC/VERSION")" = "0.48.0" ] || fail "R10: VERSION is not 0.48.0"
+grep -qF '## [0.48.0]' "$SRC/CHANGELOG.md" || fail "R10: CHANGELOG lacks 0.48.0"
+for _doc in "$SRC/README.md" "$SRC/docs/HARNESS.md" "$SRC/docs/INSTALL.md"; do
+  grep -qF '$sdd-' "$_doc" || fail "R10: $_doc does not document Codex \$sdd-* skills"
+  grep -qF '.agents/skills' "$_doc" || fail "R10: $_doc omits the Codex skill layout"
+  grep -qiF 'legacy' "$_doc" || fail "R10: $_doc does not document legacy migration"
+done
+TDOC="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+env -u HOME -u CODEX_HOME sh "$SRC/harness-install.sh" --agents=codex "$TDOC" >/dev/null \
+  || fail "R10: manifest fixture install failed"
+grep -qF '.agents/skills/sdd-*/SKILL.md' "$TDOC/.harness/manifest.txt" \
+  || fail "R10: installed manifest omits Codex skills"
+grep -qF 'six selected Codex role' "$TDOC/.harness/manifest.txt" \
+  || fail "R10: installed manifest does not describe always-present Codex roles"
+grep -qF 'Current installs never create or overwrite' "$TDOC/.harness/manifest.txt" \
+  || fail "R10: installed manifest does not retire global prompt writes"
+rm -rf "$TDOC"
+pass "Codex manifest/docs/changelog/VERSION contract is current (R10)"
 
 # unknown_agent_key_rejected (R7): an unknown override exits non-zero, names it, no changes.
 TE="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
@@ -1380,25 +1376,26 @@ test_no_models_block_is_byte_identical() {   # R11
   awk '/^# Per-role model routing/ { drop=1 } !drop { print }' "$_bc" > "$_bc.pre" && mv "$_bc.pre" "$_bc"
   CODEX_HOME="$_tb/ch" sh "$SRC/harness-install.sh" --agents="$_all" "$_tb" >/dev/null \
     || fail "R11: TB re-run exited non-zero"
-  # R11 permits exactly ONE exclusion — `.harness/harness.config.yaml` (TB's block was
-  # stripped and re-seeded, so its bytes legitimately differ). `__pycache__` is a python
-  # runtime artifact, not an installed file. `.sdd-pr-loop.owners` is the cross-target
-  # ownership ledger of the machine-GLOBAL Codex prompt (E18-F01, Codex r4 P1 #3662785235):
-  # it records WHICH target wants that prompt, so by construction it holds TA's path in
-  # TA's sandboxed CODEX_HOME and TB's in TB's — it can never be byte-identical between two
-  # different targets, and it carries no model state. Nothing else may be excluded:
+  # R11 permits exactly ONE product exclusion — `.harness/harness.config.yaml` (TB's
+  # block was stripped and re-seeded, so its bytes legitimately differ). `__pycache__`
+  # is a Python runtime artifact. Nothing else may be excluded:
   # manifest.txt in particular MUST be compared, or the strongest test in the suite goes
   # blind to any leak of model state into the manifest.
-  diff -r -x 'harness.config.yaml' -x '__pycache__' -x '.sdd-pr-loop.owners' "$_ta" "$_tb" >/dev/null \
+  diff -r -x 'harness.config.yaml' -x '__pycache__' "$_ta" "$_tb" >/dev/null \
     || fail "R11: an all-inherit target differs from one whose models: block was stripped"
-  # Explicit negatives: an unconfigured target grows NO model key and NO new directory.
+  # Explicit negatives: no unresolved role gains a model key. Gemini stays conditional;
+  # selected Codex still registers its six model-less roles.
   grep -rq '^model:' "$_ta/.claude/agents"  && fail "R11: unconfigured install stamped a model: in .claude/agents"
   grep -q '"model"' "$_ta/opencode.json"    && fail "R11: unconfigured install stamped a model member in opencode.json"
   grep -rq '^model:' "$_ta/.agents/agents"  && fail "R11: unconfigured install stamped a model: in .agents/agents"
   [ -d "$_ta/.gemini/agents" ]              && fail "R11: unconfigured install created .gemini/agents/"
-  [ -d "$_ta/.codex/agents" ]               && fail "R11: unconfigured install created .codex/agents/"
+  [ "$(find "$_ta/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "6" ] \
+    || fail "R6: unconfigured selected Codex did not register exactly six roles"
+  grep -q '^model = ' "$_ta/.codex/agents/"*.toml \
+    && fail "R7: unconfigured Codex role gained a model key"
   [ -f "$_ta/.harness/.opencode.stamp" ]    && fail "R11: unconfigured install created .harness/.opencode.stamp"
-  [ -d "$_ta/.harness/.model-agents" ]      && fail "R11: unconfigured install created .harness/.model-agents/"
+  [ -d "$_ta/.harness/.model-agents/gemini" ] \
+    && fail "R11: unconfigured install created Gemini model-agent stamps"
   # And prove the RESOLVER itself treats a config with no models: block as `inherit`
   # (migrate_config always re-seeds the block, so this is the only way to exercise the
   # genuinely block-less config an older target hands us mid-run).

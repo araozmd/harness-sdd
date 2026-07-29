@@ -614,7 +614,7 @@ AGENT_KEYS="claude gemini opencode antigravity codex"
 # always written, never gated, never removed (see write_pointer AGENTS.md). It
 # also doubles as Codex CLI's native entrypoint — Codex reads AGENTS.md from the
 # repo root with no glue, so `codex` needs no entrypoint pointer of its own; its
-# only stamped glue is the GLOBAL /sdd-* prompts (§5d).
+# repository-local skills and roles are stamped by §5d/§5f.
 #
 # ── host front-end detection: the marker table (E19-F01) ──────────────────────
 # Consumed ONLY by detect_host, i.e. only by the `--agents=host` resolution mode.
@@ -938,8 +938,7 @@ normalize_keys() {
   printf '%s\n' "$1" | tr ' ' '\n' | grep -v '^$' | sort -u
 }
 
-# codex_prompts_dir — print the GLOBAL Codex prompts dir, or nothing if it cannot be
-# resolved. Codex reads custom prompts from `$CODEX_HOME/prompts` (default `~/.codex`).
+# codex_prompts_dir — resolve the retired GLOBAL Codex prompts dir for migration only.
 # Under `set -u` a bare `$HOME` expansion aborts the WHOLE install when neither var is
 # set (minimal CI/container/systemd) — and since the no-TTY default selects codex, even
 # a plain noninteractive install would hit it (Codex r1 P2). So resolve defensively:
@@ -2165,6 +2164,8 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .harness/specs/glossary.md  .harness/umbrella.manifest.example.yaml  .harness/umbrella.gitignore.example
   .claude/agents/*  .claude/commands/*   .opencode/command/*   (repo root, regenerated)
   .agents/rules/*  .agents/agents/*  .agents/workflows/*   (repo root, regenerated; Antigravity glue)
+  .agents/skills/sdd-*/SKILL.md       Codex \$sdd-* repository skills (pristine-only cleanup)
+  .codex/agents/*.toml                six selected Codex role definitions (model optional)
   CLAUDE.md / AGENTS.md / GEMINI.md  -> only the harness:begin..end block
 
 OPENCODE CONCURRENCY PROBE  (E22-F01):
@@ -2176,17 +2177,18 @@ OPENCODE CONCURRENCY PROBE  (E22-F01):
 PR LOOP GLUE  (OPT-IN — created ONLY while pr_loop.enabled reads exactly true; a fresh
 install seeds false, so none of this exists until you turn it on — E18-F01):
   .claude/commands/sdd-pr-loop.md   .opencode/command/sdd-pr-loop.md
-  .agents/workflows/sdd-pr-loop.md  \${CODEX_HOME:-~/.codex}/prompts/sdd-pr-loop.md (GLOBAL)
+  .agents/workflows/sdd-pr-loop.md  .agents/skills/sdd-pr-loop/SKILL.md (Codex)
   .claude/agents/pr-fixer.md  .opencode/agent/pr-fixer.md  .agents/agents/pr-fixer.md
   Flipping pr_loop.enabled back to false on a re-run RECLAIMS all of the above
-  (pristine-only in the user-owned \$CODEX_HOME prompts dir and .agents/ tree) and prunes
+  (pristine-only in the user-owned .agents/ tree) and prunes
   empty dirs. No pr-fixer artifact is ever created for the codex or gemini front-ends.
-  The GLOBAL prompt is shared by every target on this machine, so it is ledger-governed
-  (\${CODEX_HOME:-~/.codex}/prompts/.sdd-pr-loop.owners): turning the gate off here only
-  retires THIS repo's claim, and the prompt survives while any other target still wants
-  it — or whenever that ownership cannot be read.
 
-MODEL ROUTING  (created ONLY when models: resolves a role to a concrete value):
+CODEX LEGACY MIGRATION:
+  Current installs never create or overwrite \$CODEX_HOME/prompts/sdd-*.md. Byte-pristine
+  legacy prompts may be removed during upgrade; edited prompts survive. Legacy
+  sdd-pr-loop additionally requires a readable owners ledger proving no live owners.
+
+MODEL ROUTING:
   .gemini/agents/*               per-role Gemini agent definitions (regenerated)
   .codex/agents/*                per-role Codex agent definitions, PROJECT-LOCAL
                                  (never written to \$CODEX_HOME / ~/.codex)
@@ -2195,8 +2197,8 @@ MODEL ROUTING  (created ONLY when models: resolves a role to a concrete value):
   .harness/.model-agents/        byte copies of the last generated .gemini/.codex per-role
                                  files, kept only while those files exist (lets a switch
                                  back to \`inherit\` reclaim them instead of orphaning them)
-  With no models: block — or every role on \`inherit\` — none of the above exists and
-  the generated tree is byte-identical to a harness without model routing.
+  Gemini remains conditional on a concrete model. Selected Codex always has all six roles;
+  inherited or unpinned roles omit model, while concrete pins add it role by role.
 
 PROJECT-OWNED  (seeded once, never clobbered on upgrade):
   .harness/harness.config.yaml   (verification commands + store backend + change_size budget)
@@ -2502,12 +2504,8 @@ chat history.
 EOF
   }
 
-  # gen_codex_agent <role> <description> <dest> — one `.codex/agents/<role>.toml`, written
-  # INSIDE the target repo. Codex's other glue (§5d /sdd-* prompts) is machine-GLOBAL,
-  # which is only safe because those prompt bodies are target-independent. A model stamp
-  # is target-DEPENDENT: writing it to `$CODEX_HOME/agents/` would let one target silently
-  # retune every other target on the same machine. Project-local also keeps deselection
-  # inside $TARGET, where the pristine-compare machinery lives.
+  # gen_codex_agent <role> <description> <dest> — one `.codex/agents/<role>.toml`,
+  # written inside the target repo alongside the repository-local skill surface.
   #
   # Codex discovers agent files by DIRECTORY CONVENTION (`$CODEX_HOME/agents/` and the
   # project-local `<repo>/.codex/agents/`); no registration in `.codex/config.toml` is
@@ -3705,62 +3703,85 @@ EOF
     ok "Antigravity glue (rules + agents + workflows) installed (.agents/)"
   fi
 
-  # ── 5d. Codex CLI prompts (GLOBAL, gated on `codex`) ─────────────────────────
-  # Codex CLI has no project-local custom-command mechanism (no `.codex/commands/`
-  # or workspace-local prompts dir it reads). Its ONLY custom-slash-command surface
-  # is the GLOBAL prompts dir `${CODEX_HOME:-$HOME/.codex}/prompts/*.md`, where each
-  # `<name>.md` registers as the slash command `/prompts:<name>` (Codex namespaces
-  # prompt files under `/prompts:`, NOT top-level `/<name>`). So — unlike every other
-  # front-end, whose glue
-  # is workspace-local under $TARGET — the `codex` stamp writes OUTSIDE the target, to
-  # a single machine-global dir. Consequences, by design (accepted at install time):
-  #   • the prompts are shared by EVERY harness target on this machine (they overwrite
-  #     each other), and are not scoped per-repo;
-  #   • that is harmless because each body resolves its relative paths against `.harness/`
-  #     of whatever repo Codex is launched in (Codex runs from the repo root and reads
-  #     that repo's AGENTS.md), so ONE global copy correctly drives any target;
-  #   • deselect removal (§7) only reclaims byte-pristine copies (a user edit survives),
-  #     and honors $CODEX_HOME so it never touches an unrelated home.
-  # Copies the same CMDDIR bodies as §5b/§5c, so all front-ends stay byte-identical.
+  # gen_codex_skill <command> <dest> — adapt the canonical command body to Codex's
+  # repository-local skill format. Metadata is derived from the generated command
+  # frontmatter; the instructions after that frontmatter are copied byte-for-byte.
+  gen_codex_skill() {
+    _gcs_name="$1"; _gcs_dest="$2"; _gcs_src="$CMDDIR/$_gcs_name.md"
+    _gcs_desc="$(sed -n 's/^description: //p' "$_gcs_src" | sed -n '1p')"
+    {
+      printf '%s\n' '---'
+      printf 'name: %s\n' "$_gcs_name"
+      printf 'description: %s\n' "$_gcs_desc"
+      printf '%s\n' '---'
+      sed -n '5,$p' "$_gcs_src"
+    } > "$_gcs_dest"
+  }
+
+  # reclaim_codex_skills <command-list> — reclaim only byte-pristine harness skills.
+  # `.agents/` is shared with Antigravity and users, so remove named files and use only
+  # `rmdir` for directory pruning.
+  reclaim_codex_skills() {
+    _rcs_cmds="$1"; _rcs_gone=""
+    _rcs_tmp="$(mktemp 2>/dev/null || mktemp -t harness-codex-skill)"
+    for _rcs_cmd in $_rcs_cmds; do
+      [ -f "$CMDDIR/$_rcs_cmd.md" ] || continue
+      gen_codex_skill "$_rcs_cmd" "$_rcs_tmp"
+      _rcs_removed="$(remove_if_pristine ".agents/skills/$_rcs_cmd/SKILL.md" "$_rcs_tmp" codex)"
+      [ -n "$_rcs_removed" ] && _rcs_gone="$_rcs_gone $_rcs_removed"
+      rmdir "$TARGET/.agents/skills/$_rcs_cmd" 2>/dev/null || true
+    done
+    rm -f "$_rcs_tmp"
+    rmdir "$TARGET/.agents/skills" 2>/dev/null || true
+    rmdir "$TARGET/.agents" 2>/dev/null || true
+    [ -n "$_rcs_gone" ] && printf '%s\n' "$_rcs_gone"
+    return 0
+  }
+
+  # migrate_legacy_codex_prompts — retire the pre-0.48 machine-global prompt surface.
+  # The directory is resolved only for migration and is never created. Ungated prompts
+  # require byte identity with the canonical legacy command reference. The gated prompt
+  # additionally requires a readable ownership ledger proving there are no live owners.
+  migrate_legacy_codex_prompts() {
+    _mlc_dir="$(codex_prompts_dir)"
+    [ -n "$_mlc_dir" ] && [ -d "$_mlc_dir" ] || return 0
+    _mlc_removed=""
+    for _mlc_cmd in $HARNESS_OWNED_CMDS; do
+      _mlc_file="$_mlc_dir/$_mlc_cmd.md"
+      [ -f "$_mlc_file" ] || continue
+      if ! cmp -s "$_mlc_file" "$CMDDIR/$_mlc_cmd.md"; then
+        echo "⚠️  legacy Codex prompt $_mlc_file differs from the generated legacy reference (edited) — preserved" >&2
+        continue
+      fi
+      if _is_pr_loop_cmd "$_mlc_cmd" \
+         && ! _owners_release "$_mlc_dir" "$_mlc_cmd"; then
+        echo "⚠️  legacy Codex prompt $_mlc_file has live or unknown ownership — preserved" >&2
+        continue
+      fi
+      rm -f "$_mlc_file"
+      _mlc_removed="$_mlc_removed $_mlc_cmd.md"
+    done
+    rmdir "$_mlc_dir" 2>/dev/null || true
+    [ -n "$_mlc_removed" ] \
+      && echo "⚠️  migrated byte-pristine legacy Codex prompts:$_mlc_removed" >&2
+    return 0
+  }
+
+  # ── 5d. Codex repository skills (gated on `codex`) ──────────────────────────
+  # Codex discovers project skills under `.agents/skills/<name>/SKILL.md`. This
+  # current surface is fully repository-local and never requires or writes HOME /
+  # CODEX_HOME. The old global prompts resolver remains below only for safe migration.
   if agent_selected codex; then
-    _cdx="$(codex_prompts_dir)"
-    if [ -z "$_cdx" ]; then
-      # Neither CODEX_HOME nor HOME set: skip Codex glue rather than abort the whole
-      # install (other front-ends must still complete). (Codex r1 P2.)
-      echo "⚠️  codex selected but neither CODEX_HOME nor HOME is set — skipping GLOBAL /prompts:sdd-* install" >&2
-    else
-      mkdir -p "$_cdx"
-      # The gated /sdd-pr-loop prompt joins the same copy loop (and therefore the same
-      # backup/warn behavior) only while pr_loop.enabled is true (R2/R3).
-      _cdx_cmds="$HARNESS_SDD_CMDS"
-      if pr_loop_enabled; then _cdx_cmds="$HARNESS_OWNED_CMDS"; fi
-      for _c in $_cdx_cmds; do
-        _dst="$_cdx/$_c.md"
-        # This dir is a USER-owned global namespace, not a harness-owned workspace dir,
-        # so a same-named file may be the user's OWN prompt — an original, OR a later
-        # edit of a previously-installed one. Never silently lose it: if the current file
-        # differs from the harness body we're about to write, back it up and warn BEFORE
-        # overwriting. Refresh the backup whenever the current contents differ from what
-        # the backup already holds, so a post-install user edit is captured too (not just
-        # the first original) — otherwise a stale backup + silent clobber would drop the
-        # user's latest content. A routine re-install/upgrade where the current file is
-        # already the (identical) harness body never enters this branch, so it neither
-        # warns nor churns the backup. (Codex r2 P2 + r3 P2.)
-        if [ -f "$_dst" ] && ! cmp -s "$_dst" "$CMDDIR/$_c.md"; then
-          if [ ! -f "$_dst.pre-harness.bak" ] || ! cmp -s "$_dst" "$_dst.pre-harness.bak"; then
-            cp "$_dst" "$_dst.pre-harness.bak"
-          fi
-          echo "⚠️  existing global Codex prompt $_dst differs from the harness copy — backed up to $_dst.pre-harness.bak before overwriting" >&2
-        fi
-        cp "$CMDDIR/$_c.md" "$_dst"
-        # Stake this target's claim on the GATED prompt in the shared, cross-target
-        # prompts dir, so no OTHER target's gate-off run can reclaim it out from under us.
-        if _is_pr_loop_cmd "$_c"; then _owners_claim "$_cdx" "$_c"; fi
-      done
-      # Codex surfaces a prompts-dir file `<name>.md` as the slash command
-      # `/prompts:<name>` (NOT top-level `/<name>`) — advertise it that way.
-      ok "Codex CLI prompts /prompts:sdd-next + /prompts:sdd-new + /prompts:sdd-plan + /prompts:sdd-drill + /prompts:sdd-fix + /prompts:sdd-fix-parallel installed (GLOBAL: $_cdx)"
-    fi
+    _cdx_cmds="$HARNESS_SDD_CMDS"
+    if pr_loop_enabled; then _cdx_cmds="$HARNESS_OWNED_CMDS"; fi
+    for _c in $_cdx_cmds; do
+      mkdir -p "$TARGET/.agents/skills/$_c"
+      gen_codex_skill "$_c" "$TARGET/.agents/skills/$_c/SKILL.md"
+    done
+    ok "Codex skills \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel installed (.agents/skills/ — project-local)"
+  fi
+  if agent_selected codex || printf '%s\n' "$PRIOR_AGENTS" | grep -qx codex; then
+    migrate_legacy_codex_prompts
   fi
 
   # ── 5e. Gemini per-role agent definitions (gated on `gemini` + a resolvable model) ─
@@ -3786,11 +3807,11 @@ EOF
     reclaim_model_agents gemini
   fi
 
-  # ── 5f. Codex per-role agent definitions (gated on `codex` + a resolvable model) ──
-  # PROJECT-LOCAL, always: written under $TARGET, never into $CODEX_HOME/$HOME/.codex.
-  # A model stamp is target-dependent, so the machine-global path §5d uses for prompts
-  # would let one repo silently retune another. Same conditional creation as §5e.
-  if agent_selected codex && models_any codex; then
+  # ── 5f. Codex per-role agent definitions (gated only on selected `codex`) ──────
+  # Role registration is independent from model routing: all six project-local TOMLs
+  # always exist for selected Codex. `gen_codex_agent` omits `model` when the role
+  # inherits or its tier is unpinned, and adds it only for a concrete resolved pin.
+  if agent_selected codex; then
     mkdir -p "$TARGET/.codex/agents"
     ag_personas | while IFS='	' read -r _cxr _cxd; do
       [ -n "$_cxr" ] || continue
@@ -3798,10 +3819,6 @@ EOF
       stamp_model_agent codex "$_cxr.toml" "$TARGET/.codex/agents/$_cxr.toml"
     done
     ok "Codex per-role agent definitions installed (.codex/agents/ — project-local)"
-  elif agent_selected codex; then
-    # Same reconciliation as §5e — see the note there. Only the PROJECT-LOCAL tree is
-    # touched; nothing under $CODEX_HOME is ever created or removed by model routing.
-    reclaim_model_agents codex
   fi
 
   # NOTE: CMDDIR cleanup is intentionally DEFERRED to AFTER §7 — the antigravity
@@ -3999,43 +4016,9 @@ EOF
           fi
           ;;
         codex)
-          # §5d installs GLOBAL prompts to ${CODEX_HOME:-$HOME/.codex}/prompts. Reclaim
-          # ONLY byte-pristine copies (cmp -s against the still-present $CMDDIR source),
-          # so a user-edited /sdd-* prompt survives — mirroring the opencode.json /
-          # antigravity pristine-only contract. Honors $CODEX_HOME. NOTE: these prompts
-          # are machine-global and may be shared by another harness target that still
-          # selects `codex`; a subsequent install there re-stamps them (bodies are
-          # regenerated every run), so removal here is safe but announced as GLOBAL.
-          _cdx="$(codex_prompts_dir)"
-          if [ -n "$_cdx" ]; then
-            _cdx_removed=""
-            for _cdw in $HARNESS_OWNED_CMDS; do
-              [ -f "$CMDDIR/$_cdw.md" ] || continue
-              # The GATED prompt is ledger-governed (see _owners_release): dropping codex
-              # here retires only THIS target's claim, and the shared file survives while
-              # any other target still wants it. Unlike the ungated /sdd-* prompts, a
-              # target that stops wanting it never re-stamps it, so a wrong delete is
-              # permanent for everyone else.
-              if _is_pr_loop_cmd "$_cdw" && ! _owners_release "$_cdx" "$_cdw"; then
-                if [ -f "$_cdx/$_cdw.md" ]; then
-                  echo "⚠️  $_cdx/$_cdw.md is still claimed by another harness target (or its ownership is unknown) — left in place (GLOBAL, shared prompts)" >&2
-                fi
-                continue
-              fi
-              if [ -f "$_cdx/$_cdw.md" ] && cmp -s "$_cdx/$_cdw.md" "$CMDDIR/$_cdw.md"; then
-                rm -f "$_cdx/$_cdw.md"
-                _cdx_removed="$_cdx_removed $_cdw.md"
-              elif [ -f "$_cdx/$_cdw.md" ]; then
-                echo "⚠️  $_cdx/$_cdw.md differs from the generated prompt (edited) — left in place (deselected 'codex' not fully removed)" >&2
-              fi
-            done
-            [ -n "$_cdx_removed" ] && echo "⚠️  removed deselected agent 'codex' glue:$_cdx_removed (in $_cdx/ — GLOBAL, shared prompts)" >&2
-            rmdir "$_cdx" 2>/dev/null || true   # prune only if now empty
-          fi
-          # E17-F01: reclaim the PROJECT-LOCAL per-role model artifacts
-          # (.codex/agents/<role>.toml) through the same shared helper as §5f. The GLOBAL
-          # prompt reclamation above is untouched, and nothing under $CODEX_HOME/agents is
-          # ever created or removed.
+          _cdx_removed="$(reclaim_codex_skills "$HARNESS_OWNED_CMDS")"
+          [ -n "$_cdx_removed" ] \
+            && echo "⚠️  removed deselected agent 'codex' skills:$_cdx_removed" >&2
           reclaim_model_agents codex
           ;;
       esac
@@ -4051,8 +4034,8 @@ EOF
   #
   # So: while the gate is OFF, walk every STILL-SELECTED front-end and reclaim its pr_loop
   # glue under exactly the R4 ownership rules — by name inside harness-owned workspace
-  # dirs, byte-pristine-compare inside the user-owned global Codex prompts dir and the
-  # Antigravity `.agents/` tree — then prune only dirs left empty.
+  # dirs and byte-pristine comparison inside the shared `.agents/` tree — then prune only
+  # dirs left empty.
   #
   # ORDERING IS LOAD-BEARING: this must run BEFORE the `rm -rf "$CMDDIR"` below, because
   # the pristine references are the still-present `$CMDDIR/<name>.md` bytes. That is also
@@ -4101,28 +4084,7 @@ EOF
       rmdir "$TARGET/.agents" 2>/dev/null || true
     fi
     if agent_selected codex; then
-      # GLOBAL, cross-target prompts dir — pristine-only, honors $CODEX_HOME.
-      # THIS target's gate says nothing about what OTHER targets sharing $CODEX_HOME want,
-      # so reclamation is ledger-governed: retire our claim first and touch the shared file
-      # only once nobody is left holding one (see _owners_release; Codex r4 P1 #3662785235).
-      _prl_cdx="$(codex_prompts_dir)"
-      if [ -n "$_prl_cdx" ]; then
-        for _prc in $HARNESS_PR_LOOP_CMDS; do
-          [ -f "$CMDDIR/$_prc.md" ] || continue
-          if ! _owners_release "$_prl_cdx" "$_prc"; then
-            if [ -f "$_prl_cdx/$_prc.md" ]; then
-              echo "⚠️  $_prl_cdx/$_prc.md is still claimed by another harness target (or its ownership is unknown) — left in place (pr_loop disabled here, GLOBAL shared prompts)" >&2
-            fi
-            continue
-          fi
-          if [ -f "$_prl_cdx/$_prc.md" ] && cmp -s "$_prl_cdx/$_prc.md" "$CMDDIR/$_prc.md"; then
-            rm -f "$_prl_cdx/$_prc.md"; _prl_gone="$_prl_gone $_prl_cdx/$_prc.md"
-          elif [ -f "$_prl_cdx/$_prc.md" ]; then
-            echo "⚠️  $_prl_cdx/$_prc.md differs from the generated prompt (edited) — left in place (pr_loop disabled, not removed)" >&2
-          fi
-        done
-        rmdir "$_prl_cdx" 2>/dev/null || true   # prune only if now empty
-      fi
+      _prl_gone="$_prl_gone $(reclaim_codex_skills "$HARNESS_PR_LOOP_CMDS")"
     fi
     if [ -n "$(printf '%s' "$_prl_gone" | tr -d '[:space:]')" ]; then
       echo "⚠️  pr_loop.enabled is not true — reclaimed /sdd-pr-loop glue:$_prl_gone" >&2

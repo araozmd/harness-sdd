@@ -10,8 +10,8 @@
 # one that does not, or worse, pass in CI for the wrong reason. Every installer invocation
 # here therefore goes through `hrun`, the ONE place this suite names the installer, which
 # runs it under `env -i` with nothing but PATH, a sandboxed HOME and a sandboxed
-# CODEX_HOME (never the developer's real ~/.codex, whose /prompts dir the `codex`
-# front-end writes to). No check freezes the exact VERSION string; no check diffs a
+# CODEX_HOME (never the developer's real ~/.codex; legacy migration tests seed prompts
+# there explicitly). No check freezes the exact VERSION string; no check diffs a
 # DO-NOT-TOUCH file against `main`.
 #
 # Zero dependencies; self-cleaning temp dir.
@@ -452,11 +452,13 @@ test_host_not_a_registry_key() {
 test_prior_agents_unchanged() {
   grep -qF 'PRIOR_AGENTS="$(normalize_keys "$AGENT_KEYS" | grep -vx codex)"' "$INST" \
     || fail "R19: the PRIOR_AGENTS legacy baseline lost its 'grep -vx codex' exclusion"
-  # Integration: a legacy-shaped upgrade selecting claude must reclaim NO global prompt.
+  # Integration: a legacy-shaped upgrade selecting claude must not infer Codex ownership
+  # and migrate a prompt from an unrelated target.
   _x="$(sandbox prior)"; _t="$_x/t"; mkdir -p "$_t"
   hrun "$_x" -- --agents=claude,codex "$_t" >/dev/null 2>&1 || fail "R19: setup install failed"
+  mkdir -p "$_x/ch/prompts"
   _kept="$_x/ch/prompts/sdd-next.md"
-  [ -f "$_kept" ] || fail "R19: setup did not stamp the global codex prompts"
+  cp "$_t/.claude/commands/sdd-next.md" "$_kept"
   rm -f "$_t/.harness/.agents"   # legacy shape: install present, selection absent
   hrun "$_x" CLAUDECODE=1 -- --agents=host "$_t" >/dev/null 2>&1 \
     || fail "R19: legacy-shaped host upgrade exited non-zero"
@@ -489,18 +491,18 @@ test_host_fresh_removes_nothing() {
   return 0
 }
 
-# ── R21 — a host upgrade that drops codex obeys the pristine-compare rule ─────
+# ── R21 — a host upgrade that drops codex obeys local pristine comparison ─────
 test_host_upgrade_removal_respects_pristine() {
   _x="$(sandbox pristine)"; _t="$_x/t"; mkdir -p "$_t"
   hrun "$_x" -- --agents=claude,codex "$_t" >/dev/null 2>&1 || fail "R21: setup install failed"
-  _edited="$_x/ch/prompts/sdd-new.md"
-  _clean="$_x/ch/prompts/sdd-next.md"
-  [ -f "$_edited" ] && [ -f "$_clean" ] || fail "R21: setup did not stamp the global prompts"
+  _edited="$_t/.agents/skills/sdd-new/SKILL.md"
+  _clean="$_t/.agents/skills/sdd-next/SKILL.md"
+  [ -f "$_edited" ] && [ -f "$_clean" ] || fail "R21: setup did not stamp Codex skills"
   printf '\nhand-edited by the user\n' >> "$_edited"
   _warn="$(hrun "$_x" CLAUDECODE=1 -- --agents=host "$_t" 2>&1 >/dev/null)" \
     || fail "R21: the host upgrade exited non-zero"
-  [ -f "$_clean" ] && fail "R21: a byte-pristine deselected global prompt was not reclaimed"
-  [ -f "$_edited" ] || fail "R21: a hand-edited global prompt was destroyed"
+  [ -f "$_clean" ] && fail "R21: a byte-pristine deselected Codex skill was not reclaimed"
+  [ -f "$_edited" ] || fail "R21: a hand-edited Codex skill was destroyed"
   grep -qF 'hand-edited by the user' "$_edited" \
     || fail "R21: the user's edit was overwritten instead of preserved"
   printf '%s\n' "$_warn" | grep -q '⚠️' \
@@ -814,7 +816,9 @@ test_no_tty_default_unchanged() {
     [ -f "$_t/$_f" ] || fail "R5: the no-TTY default stopped stamping $_f"
   done
   [ -d "$_t/.agents" ]      || fail "R5: the no-TTY default stopped stamping the antigravity .agents/ tree"
-  [ -d "$_x/ch/prompts" ]   || fail "R5: the no-TTY default stopped stamping the global codex prompts"
+  [ -f "$_t/.agents/skills/sdd-next/SKILL.md" ] \
+    || fail "R5: the no-TTY default stopped stamping Codex project skills"
+  [ -d "$_x/ch/prompts" ] && fail "R5: the no-TTY default created retired global Codex prompts"
   # Source: that branch still assigns ALL directly and never reaches precheck_baseline.
   _tail="$(sed -n '/^resolve_agents() {/,/^}/p' "$INST" | sed -n '/^  else$/,/^}/p')"
   printf '%s\n' "$_tail" | grep -qF 'SELECTED="$(normalize_keys "$AGENT_KEYS")"' \
@@ -898,16 +902,16 @@ test_orphan_metadata_grants_no_removal() {
   _x="$(sandbox f2orphanrm)"; _t="$_x/t"; mkdir -p "$_t"
   hrun "$_x" -- --agents=claude,gemini,codex "$_t" >/dev/null 2>&1 \
     || fail "R14: orphan setup install failed"
-  _gp="$_x/ch/prompts/sdd-next.md"
+  _gp="$_t/.agents/skills/sdd-next/SKILL.md"
   [ -f "$_t/GEMINI.md" ] || fail "R14: orphan setup did not stamp GEMINI.md"
-  [ -f "$_gp" ]          || fail "R14: orphan setup did not stamp the global codex prompts"
+  [ -f "$_gp" ]          || fail "R14: orphan setup did not stamp Codex skills"
   rm -f "$_t/.harness/.harness-version"
   hrun "$_x" CLAUDECODE=1 -- --agents=claude "$_t" >/dev/null 2>&1 \
     || fail "R14: the re-run over orphan metadata exited non-zero"
   [ -f "$_t/GEMINI.md" ] \
     || fail "R14: an orphan .harness/.agents was read as a prior selection — GEMINI.md was deleted"
   [ -f "$_gp" ] \
-    || fail "R14: orphan metadata reclaimed a GLOBAL codex prompt (cross-target data loss)"
+    || fail "R14: orphan metadata reclaimed a Codex skill without removal authority"
   [ "$(tr '\n' ' ' <"$_t/.harness/.agents")" = "claude " ] \
     || fail "R14: the orphan re-run did not persist its own selection ($(tr '\n' ' ' <"$_t/.harness/.agents"))"
   # (b) GENUINE install — the same deselection must STILL reconcile: this narrows removal
@@ -915,16 +919,16 @@ test_orphan_metadata_grants_no_removal() {
   _y="$(sandbox f2stampedrm)"; _s="$_y/t"; mkdir -p "$_s"
   hrun "$_y" -- --agents=claude,gemini,codex "$_s" >/dev/null 2>&1 \
     || fail "R14: stamped setup install failed"
-  _gp2="$_y/ch/prompts/sdd-next.md"
+  _gp2="$_s/.agents/skills/sdd-next/SKILL.md"
   [ -f "$_s/GEMINI.md" ] || fail "R14: stamped setup did not stamp GEMINI.md"
-  [ -f "$_gp2" ]         || fail "R14: stamped setup did not stamp the global codex prompts"
+  [ -f "$_gp2" ]         || fail "R14: stamped setup did not stamp Codex skills"
   [ -f "$_s/.harness/.harness-version" ] || fail "R14: stamped setup left no version stamp"
   hrun "$_y" CLAUDECODE=1 -- --agents=claude "$_s" >/dev/null 2>&1 \
     || fail "R14: the deselecting upgrade exited non-zero"
   [ -f "$_s/GEMINI.md" ] \
     && fail "R14: a real existing install stopped reconciling a deselected front-end"
   [ -f "$_gp2" ] \
-    && fail "R14: a real existing install stopped reclaiming its pristine global codex prompt"
+    && fail "R14: a real existing install stopped reclaiming its pristine Codex skill"
   return 0
 }
 

@@ -4,6 +4,29 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.48.0] — 2026-07-29
+
+### Added — ✨ Native Codex skills and inherited role registration (E23-F01)
+
+- Selecting Codex now installs `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`,
+  `$sdd-fix`, and `$sdd-fix-parallel` as repository-local
+  `.agents/skills/<name>/SKILL.md` artifacts. `$sdd-pr-loop` follows the existing
+  opt-in `pr_loop.enabled` gate.
+- Codex now always receives exactly six project-local `.codex/agents/*.toml` role
+  definitions. Inherited and unpinned roles omit `model`; concrete Codex pins add it
+  only to the roles that resolve to that pin.
+
+### Changed — 📝 Safe retirement of global Codex prompts
+
+- Current installs no longer create, overwrite, or advertise
+  `${CODEX_HOME:-$HOME/.codex}/prompts/sdd-*.md` as an active command surface and do
+  not require `HOME` or `CODEX_HOME`.
+- Upgrades migrate only byte-pristine generated legacy prompts. Edited prompts are
+  preserved and diagnosed; legacy `sdd-pr-loop` additionally requires a readable
+  ownership ledger proving that no live target still claims it.
+- Codex skill and role deselection is pristine-only and prunes empty named directories
+  without recursively deleting the shared `.agents/` tree.
+
 ## [0.47.0] — 2026-07-29
 
 ### Added — ✨ OpenCode concurrency probe + model helper (E22-F01)

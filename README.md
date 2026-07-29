@@ -90,10 +90,14 @@ approves) → `builder` → `reviewer`.
 | CLI | Entry file | Sub-agents |
 |---|---|---|
 | **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` (+ `pr-fixer`) + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-fix-parallel`, `/sdd-next`, `/sdd-pr-loop` |
-| **Codex** | `AGENTS.md` (native) | run roles sequentially; global `/prompts:sdd-*` prompts, including `/prompts:sdd-fix-parallel` and `/prompts:sdd-pr-loop`, in `${CODEX_HOME:-~/.codex}/prompts/` |
+| **Codex** | `AGENTS.md` (native) | `.codex/agents/*.toml` roles + repository-local `$sdd-*` skills in `.agents/skills/` (including gated `$sdd-pr-loop`) |
 | **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
 | **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-test-concurrency` and `/sdd-pr-loop`; `/sdd-fix-parallel` is opt-in (verified by `/sdd-test-concurrency`) |
 | **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/agents/*` personas (+ `pr-fixer`) + `.agents/workflows/*`, including `/sdd-fix-parallel` and `/sdd-pr-loop` |
+
+The tables and workflow prose use the portable `/sdd-*` spelling; in Codex, invoke the
+repository skills as `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`,
+`$sdd-fix-parallel`, and (when enabled) `$sdd-pr-loop`.
 
 `/sdd-pr-loop` and the `pr-fixer` sub-agent are the only **gated** glue: they are stamped
 only while `pr_loop.enabled` is `true` in `harness.config.yaml`, and that gate is
@@ -234,13 +238,13 @@ umbrella.manifest.example.yaml   cross-repo coordinator manifest template
 umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
 .opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next, /sdd-test-concurrency); /sdd-fix-parallel is opt-in
-.agents/                     Antigravity glue — rules + agent personas + workflows (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
-${CODEX_HOME:-~/.codex}/prompts/  Codex CLI slash-command prompts (GLOBAL, including /prompts:sdd-fix-parallel and /prompts:sdd-pr-loop)
+.agents/                     Antigravity rules/personas/workflows + Codex repository skills (.agents/skills/sdd-*/SKILL.md)
+.codex/agents/               six Codex role TOMLs (always present when Codex is selected; model optional)
 ```
 
 ### Codex PR review loop
 
-`/sdd-pr-loop <pr>` drives the Codex review cycle on one open PR: it preflights
+`/sdd-pr-loop <pr>` (or `$sdd-pr-loop <pr>` in Codex) drives the Codex review cycle on one open PR: it preflights
 `gh`/auth/`jq`/the PR, posts `@codex review`, launches `tools/wait-for-codex.sh` in the
 **background** (so a review landing minutes later still wakes the session), classifies
 `P0|P1|P2|nit` from the inline findings + review bodies + issue comments, spawns one
@@ -294,20 +298,14 @@ changed. Deselecting an agent removes only the harness-generated glue (your own
 untouched — Antigravity and Codex glue are removed only when byte-identical to a freshly
 generated stamp, never your edited files).
 
-> **Note — Codex is GLOBAL.** Codex CLI has no project-local custom-command
-> mechanism, so its only slash-command surface is the machine-global prompts dir
-> `${CODEX_HOME:-~/.codex}/prompts/`. Selecting `codex` therefore writes the prompt
-> files *outside* the target repo, into that shared dir (honoring `$CODEX_HOME`; if
-> neither `CODEX_HOME` nor `HOME` is set — e.g. minimal CI — the Codex step is
-> skipped with a warning rather than failing the install). Codex surfaces a file
-> `sdd-next.md` as **`/prompts:sdd-next`** (namespaced under `/prompts:`, not
-> top-level `/sdd-next`). The bodies resolve their paths against `.harness/` of
-> whatever repo Codex is launched in, so one global copy drives every target — but
-> the prompts are shared across all harness installs on the machine (later installs
-> overwrite them), and Codex's in-repo entrypoint remains the always-written
-> `AGENTS.md`. A same-named prompt you authored yourself is never silently lost — the
-> installer backs it up once to `<name>.md.pre-harness.bak` and warns before writing
-> the harness copy.
+> **Codex is repository-local.** Selecting `codex` creates `$sdd-next`, `$sdd-new`,
+> `$sdd-plan`, `$sdd-drill`, `$sdd-fix`, and `$sdd-fix-parallel` as
+> `.agents/skills/<name>/SKILL.md`, plus `$sdd-pr-loop` only while its opt-in gate is
+> enabled. It also registers all six standard roles in `.codex/agents/`; inherited or
+> unpinned roles simply omit `model`. No current install needs `HOME`/`CODEX_HOME` or
+> writes global prompts. During upgrade, byte-pristine legacy `sdd-*.md` prompts may be
+> removed from the old global directory; edited prompts and ownership-ambiguous
+> `sdd-pr-loop` prompts are preserved with a diagnostic.
 
 ```bash
 # Non-interactive / CI — pick explicitly (no prompt):

@@ -1297,16 +1297,18 @@ test_seeded_migrated_block_converge() {
 test_same_run_stamp_and_reclaim() {
   _x="$(sandbox prlsamerun)"; _t="$_x/t"; mkdir -p "$_t"
   _prompts="$_x/ch/prompts"
+  _skill="$_t/.agents/skills/sdd-pr-loop/SKILL.md"
 
-  # (a) ON: every front-end's glue is stamped, including the GLOBAL codex prompt.
+  # (a) ON: Codex receives the project-local gated skill; no global prompt is created.
   hrun "$_x" -- --agents=claude,codex --pr-loop=true "$_t" >"$_x/a.out" 2>"$_x/a.err" </dev/null \
     || fail "F02 R11: the enabling install exited non-zero"
   for _f in "$_t/.claude/commands/sdd-pr-loop.md" "$_t/.claude/agents/pr-fixer.md" \
-            "$_prompts/sdd-pr-loop.md"; do
+            "$_skill"; do
     [ -f "$_f" ] || fail "F02 R11: --pr-loop=true did not stamp $_f"
   done
+  [ -d "$_prompts" ] && fail "F02 R11: enabling install created retired global prompts"
   cp "$_t/.claude/commands/sdd-pr-loop.md" "$_x/ref-cmd.md"
-  cp "$_prompts/sdd-pr-loop.md" "$_x/ref-prompt.md"
+  cp "$_skill" "$_x/ref-skill.md"
 
   # (b) OFF, in ONE run: the same run that writes `false` also reclaims the glue and says
   #     so. No second install — this is the whole point of writing at §2c.
@@ -1315,7 +1317,7 @@ test_same_run_stamp_and_reclaim() {
   [ "$(cfg_pr_loop "$_t/.harness/harness.config.yaml")" = "false" ] \
     || fail "F02 R11: --pr-loop=false did not persist"
   for _f in "$_t/.claude/commands/sdd-pr-loop.md" "$_t/.claude/agents/pr-fixer.md" \
-            "$_prompts/sdd-pr-loop.md"; do
+            "$_skill"; do
     [ -f "$_f" ] && fail "F02 R11: the gate-off run left $_f behind"
   done
   grep -qF "$PRL_RECLAIM_MARKER" "$_x/b.err" \
@@ -1326,50 +1328,29 @@ test_same_run_stamp_and_reclaim() {
     || fail "F02 R11: the re-enabling install exited non-zero"
   cmp -s "$_x/ref-cmd.md" "$_t/.claude/commands/sdd-pr-loop.md" \
     || fail "F02 R11: the restored /sdd-pr-loop command is not byte-identical to the original"
-  cmp -s "$_x/ref-prompt.md" "$_prompts/sdd-pr-loop.md" \
-    || fail "F02 R11: the restored GLOBAL codex prompt is not byte-identical to the original"
+  cmp -s "$_x/ref-skill.md" "$_skill" \
+    || fail "F02 R11: the restored Codex skill is not byte-identical to the original"
 
-  # (d) the cross-target owners ledger is honored in BOTH directions. A target flipping its
-  #     own gate off must not delete a GLOBAL prompt another live target still claims.
+  # (d) Legacy migration still honors the ownership ledger in both directions.
+  mkdir -p "$_prompts"
+  cp "$_x/ref-cmd.md" "$_prompts/sdd-pr-loop.md"
   _ledger="$_prompts/.sdd-pr-loop.owners"
-  [ -f "$_ledger" ] || fail "F02 R11: no .sdd-pr-loop.owners ledger was written"
-  _foreign="$_x/foreign"; mkdir -p "$_foreign/.harness"    # "live" == it holds a .harness/
-  printf '%s\n' "$_foreign" >> "$_ledger"
+  _foreign="$_x/foreign"; mkdir -p "$_foreign/.harness"
+  _foreign_phys="$( CDPATH= cd -- "$_foreign" && pwd -P )"
+  printf '%s\n' "$_foreign_phys" > "$_ledger"
   hrun "$_x" -- --agents=claude,codex --pr-loop=false "$_t" >"$_x/d.out" 2>"$_x/d.err" </dev/null \
     || fail "F02 R11: the ledger-guarded gate-off run exited non-zero"
   [ -f "$_prompts/sdd-pr-loop.md" ] \
-    || fail "F02 R11: the GLOBAL prompt was deleted while another live target still claimed it"
-  grep -qxF "$_foreign" "$_ledger" \
+    || fail "F02 R11: legacy prompt was deleted while another live target still claimed it"
+  grep -qxF "$_foreign_phys" "$_ledger" \
     || fail "F02 R11: the foreign owner's claim was dropped from the ledger"
-  grep -qF 'still claimed by another harness target' "$_x/d.err" \
-    || fail "F02 R11: no warning was printed for the still-claimed GLOBAL prompt"
-
-  # …and the ledger EDIT itself really happened. Leaving the shared prompt in place is only
-  # half of a release: the departing target must also drop its OWN claim, or a stale entry
-  # pins the shared prompt for every other target forever — and the mirror of that bug (a
-  # release write that runs when it should not) is what deletes another target's prompt.
-  # A ledger write guarded by an `&&` chain is exactly how it goes missing: under `set -e`
-  # a failing NON-FINAL command in an AND-list is ignored, so the write is skipped and
-  # nothing says so. "The foreign line survives" cannot catch that — a ledger that was
-  # never rewritten at all still carries that line. So assert both sides of the rewrite.
-  _tphys="$( CDPATH= cd -- "$_t" && pwd -P )"
-  grep -qxF "$_tphys" "$_ledger" \
-    && fail "F02 R11: the gate-off target's OWN claim survived in the ledger — the release write was skipped, so a stale claim now pins the shared prompt: $(command cat "$_ledger")"
-  [ "$(grep -c . "$_ledger" || :)" = "1" ] \
-    || fail "F02 R11: the ledger holds $(grep -c . "$_ledger" || :) entries after the release, expected exactly the 1 foreign owner: $(command cat "$_ledger")"
-
-  # …and once no one else claims it, the SAME command does reclaim it. Both directions, so
-  # the ledger check can actually fail.
-  # (`|| :` because dropping the only remaining line leaves grep with nothing to print,
-  #  which is exit 1 — and an `&&` chain would then silently skip the mv.)
-  { grep -vxF "$_foreign" "$_ledger" || :; } > "$_ledger.t"
-  mv "$_ledger.t" "$_ledger"
-  grep -qxF "$_foreign" "$_ledger" \
-    && fail "F02 R11: setup failed — the foreign claim was not removed from the ledger"
+  grep -qF 'live or unknown ownership' "$_x/d.err" \
+    || fail "F02 R11: no warning was printed for the still-owned legacy prompt"
+  : > "$_ledger"
   hrun "$_x" -- --agents=claude,codex --pr-loop=false "$_t" >"$_x/e.out" 2>"$_x/e.err" </dev/null \
     || fail "F02 R11: the unclaimed gate-off run exited non-zero"
   [ -f "$_prompts/sdd-pr-loop.md" ] \
-    && fail "F02 R11: the GLOBAL prompt was NOT reclaimed once nobody else claimed it — the ledger check cannot fail"
+    && fail "F02 R11: pristine legacy prompt was not reclaimed after ownership cleared"
 
   # (e) source: §5 generates the /sdd-pr-loop body into CMDDIR UNCONDITIONALLY (E18-F01
   #     R1). It is the pristine reference the reclamation in (b) byte-compares against, so

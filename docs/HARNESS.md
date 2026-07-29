@@ -43,9 +43,10 @@ value, and the evidence required before removing a mechanism.
 
 ## The commands this harness ships
 
-One body per command, mirrored byte-identically into every selected front-end
-(`.claude/commands/`, `.opencode/command/`, `.agents/workflows/`, and the global
-`${CODEX_HOME:-~/.codex}/prompts/`). See [WORKFLOW.md](WORKFLOW.md) for the loop each
+One canonical body per command is mirrored into `.claude/commands/`,
+`.opencode/command/`, and `.agents/workflows/`. Codex wraps the same instruction body
+with deterministic metadata at `.agents/skills/<name>/SKILL.md`; invoke those
+repository-local workflows as `$sdd-*`. See [WORKFLOW.md](WORKFLOW.md) for the loop each
 one drives.
 
 | Command | Role it runs | Gate |
@@ -67,6 +68,12 @@ only fail its own preflight. Those are loop-runtime dependencies alone — `init
 checks for them, so a target without either still passes the environment gate. Turning
 the key on and re-running the installer stamps the command and its `pr-fixer` sub-agent
 into every selected front-end; turning it back off reclaims all of it.
+
+Selecting Codex also registers exactly six project-local roles in `.codex/agents/`.
+Inherited or unpinned roles remain registered without a `model` key; a concrete Codex
+pin adds `model` only where it resolves. Current installs never create global Codex
+prompts. Upgrade migration removes only byte-pristine legacy prompts and preserves
+edited or ownership-ambiguous `sdd-pr-loop` files with a diagnostic.
 
 ## Where the ideas come from
 
