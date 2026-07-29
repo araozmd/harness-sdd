@@ -90,7 +90,28 @@ if [ "$round" -gt 1 ] && [ -n "$default_branch" ]; then
       round=1
       continue
     elif [ "$current_base_oid" != "$prior_base_oid" ]; then
-      echo "baseRefOid changed (${prior_base_oid:0:7} -> ${current_base_oid:0:7}) — parent rebased; discarding prior round cache, restarting from round 1" >&2
+      echo "baseRefOid changed (${prior_base_oid:0:7} -> ${current_base_oid:0:7}) — parent rebased" >&2
+      # Verify the child has actually been restacked onto the new parent tip before
+      # restarting review. An unrestacked child would be reviewed with superseded parent
+      # commits in its diff. The restack procedure is in docs/WORKFLOW.md.
+      head_ref_oid="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo '')"
+      if [ -n "$head_ref_oid" ] && command -v git >/dev/null 2>&1; then
+        if ! git merge-base --is-ancestor "$current_base_oid" "$head_ref_oid" 2>/dev/null; then
+          echo "child has not been restacked onto the new parent tip — restack before restarting review" >&2
+          echo "See docs/WORKFLOW.md 'Restack procedure'" >&2
+          # Archive the cache and pause, not restart. The child needs a manual rebase.
+          stale_dir=".pr-loop/$pr_number/stale-$(date -u +%s)"
+          mkdir -p "$stale_dir"
+          for d in .pr-loop/$pr_number/round-*/; do
+            [ -d "$d" ] && mv "$d" "$stale_dir/"
+          done
+          # Do not continue the loop — the child needs human intervention to restack.
+          # Set needs-human and exit.
+          gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+          return 1
+        fi
+      fi
+      echo "parent rebased; discarding prior round cache, restarting from round 1" >&2
       # Move the stale round directories out of the active cache path so stall/trend
       # evaluation cannot accidentally consume them. The handover summary still reports
       # their existence, but the active round-1 starts fresh.
