@@ -571,7 +571,12 @@ pass "E09: /sdd-plan + /sdd-drill glue carry drillable-minimum + doc-critic chec
 [ -f "$T/.opencode/command/sdd-plan.md" ] || fail "opencode sdd-plan command missing"
 [ -f "$T/.opencode/command/sdd-drill.md" ] || fail "opencode sdd-drill command missing"
 [ -f "$T/.opencode/command/sdd-fix.md" ] || fail "opencode sdd-fix command missing"
-[ -f "$T/.opencode/command/sdd-fix-parallel.md" ] || fail "opencode sdd-fix-parallel command missing"
+# E22-F01: /sdd-fix-parallel requires concurrent subagents, which OpenCode may not provide.
+# It is skipped by default; only the probe command is installed.
+[ -f "$T/.opencode/command/sdd-test-concurrency.md" ] \
+  || fail "opencode sdd-test-concurrency command missing"
+[ ! -f "$T/.opencode/command/sdd-fix-parallel.md" ] \
+  || fail "opencode sdd-fix-parallel installed by default (should be opt-in)"
 cmp -s "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" \
   || fail "opencode sdd-next differs from claude sdd-next"
 cmp -s "$T/.claude/commands/sdd-new.md" "$T/.opencode/command/sdd-new.md" \
@@ -582,8 +587,6 @@ cmp -s "$T/.claude/commands/sdd-drill.md" "$T/.opencode/command/sdd-drill.md" \
   || fail "opencode sdd-drill differs from claude sdd-drill"
 cmp -s "$T/.claude/commands/sdd-fix.md" "$T/.opencode/command/sdd-fix.md" \
   || fail "opencode sdd-fix differs from claude sdd-fix"
-cmp -s "$T/.claude/commands/sdd-fix-parallel.md" "$T/.opencode/command/sdd-fix-parallel.md" \
-  || fail "opencode sdd-fix-parallel differs from claude"
 # E18-F01 R52/R11: the gated command mirrors into OpenCode byte-identically, and the
 # file-based pr-fixer sub-agent is emitted with `mode: subagent`.
 [ -f "$T/.opencode/command/sdd-pr-loop.md" ] || fail "opencode sdd-pr-loop command missing"
@@ -1469,6 +1472,44 @@ test_models_changelog_entry() {   # R25
     || fail "R25: CHANGELOG missing the per-role model routing summary"
 }
 
+# E22-F01: /sdd-fix-parallel is skipped for OpenCode by default; the probe is installed;
+# --with-opencode-parallel=true overrides; and the marker written by the probe is honored.
+test_opencode_parallel_optin() {
+  _op="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_op/ch" sh "$SRC/harness-install.sh" --agents=opencode "$_op" >/dev/null \
+    || fail "E22-F01: default opencode install exited non-zero"
+  # Default: probe present, parallel absent.
+  [ -f "$_op/.opencode/command/sdd-test-concurrency.md" ] \
+    || fail "E22-F01: default opencode install missing sdd-test-concurrency"
+  [ ! -f "$_op/.opencode/command/sdd-fix-parallel.md" ] \
+    || fail "E22-F01: default opencode install stamped sdd-fix-parallel"
+  # Force it on.
+  CODEX_HOME="$_op/ch" sh "$SRC/harness-install.sh" --agents=opencode --with-opencode-parallel=true "$_op" >/dev/null \
+    || fail "E22-F01: --with-opencode-parallel=true install exited non-zero"
+  [ -f "$_op/.opencode/command/sdd-fix-parallel.md" ] \
+    || fail "E22-F01: --with-opencode-parallel=true did not stamp sdd-fix-parallel"
+  [ -f "$_op/.opencode/command/sdd-test-concurrency.md" ] \
+    || fail "E22-F01: --with-opencode-parallel=true removed sdd-test-concurrency"
+  # Force it off again.
+  CODEX_HOME="$_op/ch" sh "$SRC/harness-install.sh" --agents=opencode --with-opencode-parallel=false "$_op" >/dev/null \
+    || fail "E22-F01: --with-opencode-parallel=false install exited non-zero"
+  [ ! -f "$_op/.opencode/command/sdd-fix-parallel.md" ] \
+    || fail "E22-F01: --with-opencode-parallel=false did not remove sdd-fix-parallel"
+  # Marker-driven: write a supported marker and re-run without the flag.
+  printf 'supported\n' > "$_op/.harness/.opencode-parallel"
+  CODEX_HOME="$_op/ch" sh "$SRC/harness-install.sh" --agents=opencode "$_op" >/dev/null \
+    || fail "E22-F01: marker-driven install exited non-zero"
+  [ -f "$_op/.opencode/command/sdd-fix-parallel.md" ] \
+    || fail "E22-F01: supported marker did not cause sdd-fix-parallel to be installed"
+  # sequential marker should skip.
+  printf 'sequential\n' > "$_op/.harness/.opencode-parallel"
+  CODEX_HOME="$_op/ch" sh "$SRC/harness-install.sh" --agents=opencode "$_op" >/dev/null \
+    || fail "E22-F01: sequential-marker install exited non-zero"
+  [ ! -f "$_op/.opencode/command/sdd-fix-parallel.md" ] \
+    || fail "E22-F01: sequential marker did not cause sdd-fix-parallel to be removed"
+  rm -rf "$_op"
+}
+
 test_models_block_seeded
 test_models_block_migrated
 test_models_block_idempotent
@@ -1480,5 +1521,21 @@ pass "claude .claude/agents/<role>.md carries model: beside name/description/too
 test_models_docs_and_manifest
 test_models_changelog_entry
 pass "manifest.txt + docs/INSTALL.md document model routing; new suite registered; CHANGELOG entry present (R24, R25)"
+test_opencode_parallel_optin
+pass "OpenCode /sdd-fix-parallel is opt-in via --with-opencode-parallel or the /sdd-test-concurrency marker (E22-F01)"
+
+test_opencode_model_helper() {
+  _oh="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_oh/ch" sh "$SRC/harness-install.sh" --agents=opencode "$_oh" >/dev/null \
+    || fail "E22-F01: model helper install exited non-zero"
+  [ -x "$_oh/.harness/tools/opencode-model-helper.sh" ] \
+    || fail "E22-F01: opencode-model-helper.sh not installed executable"
+  grep -q 'pin.opencode.reasoning' "$_oh/.harness/tools/opencode-model-helper.sh" \
+    || fail "E22-F01: helper missing expected reasoning tier placeholder"
+  rm -rf "$_oh"
+}
+
+test_opencode_model_helper
+pass "OpenCode model helper is installed as an executable tool under .harness/tools (E22-F01)"
 
 echo "All install tests passed."

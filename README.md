@@ -92,7 +92,7 @@ approves) → `builder` → `reviewer`.
 | **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` (+ `pr-fixer`) + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-fix-parallel`, `/sdd-next`, `/sdd-pr-loop` |
 | **Codex** | `AGENTS.md` (native) | run roles sequentially; global `/prompts:sdd-*` prompts, including `/prompts:sdd-fix-parallel` and `/prompts:sdd-pr-loop`, in `${CODEX_HOME:-~/.codex}/prompts/` |
 | **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
-| **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-fix-parallel` and `/sdd-pr-loop`; `.opencode/agent/pr-fixer.md` |
+| **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-test-concurrency` and `/sdd-pr-loop`; `/sdd-fix-parallel` is opt-in (verified by `/sdd-test-concurrency`) |
 | **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/agents/*` personas (+ `pr-fixer`) + `.agents/workflows/*`, including `/sdd-fix-parallel` and `/sdd-pr-loop` |
 
 `/sdd-pr-loop` and the `pr-fixer` sub-agent are the only **gated** glue: they are stamped
@@ -224,7 +224,7 @@ harness.config.yaml          store backends, hooks, mirror, telemetry, umbrella
 harness-install.sh           install/upgrade into a target (+ --umbrella, --shared-repo)
 init.sh                      environment verification gate
 agents/                      role prompts (canonical)
-tools/                       zero-dep utilities (next-task.mjs, telemetry-report.py, sync-board.mjs, wait-for-codex.sh)
+tools/                       zero-dep utilities (next-task.mjs, telemetry-report.py, sync-board.mjs, wait-for-codex.sh, opencode-model-helper.sh)
 specs/                       product.md, glossary.md, _templates/, epics/<E>/<F>/*.md
 state/                       tasks.json (local TaskStore) + schema
 progress/                    run output + history.md
@@ -233,7 +233,7 @@ docs/                        [RATIONALE.md](docs/RATIONALE.md), SPEC-FORMAT, WOR
 umbrella.manifest.example.yaml   cross-repo coordinator manifest template
 umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
-.opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
+.opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next, /sdd-test-concurrency); /sdd-fix-parallel is opt-in
 .agents/                     Antigravity glue — rules + agent personas + workflows (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
 ${CODEX_HOME:-~/.codex}/prompts/  Codex CLI slash-command prompts (GLOBAL, including /prompts:sdd-fix-parallel and /prompts:sdd-pr-loop)
 ```

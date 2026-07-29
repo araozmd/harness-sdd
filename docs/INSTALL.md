@@ -293,6 +293,25 @@ always wins, and it is the form to use in a script:
 Either way the resolved set is persisted back to `.harness/.agents`, so the next re-run
 starts from what you chose.
 
+## OpenCode parallel-fix support (`/sdd-fix-parallel`)
+
+`/sdd-fix-parallel` requires a front-end that can spawn several targeted Orchestrator
+workers concurrently. OpenCode support is **not assumed** — it is verified by the
+`/sdd-test-concurrency` command that the installer always adds for OpenCode.
+
+1. Run `/sdd-test-concurrency` inside OpenCode. It spawns two trivial subagents,
+   measures whether they ran in parallel, and writes the result to
+   `.harness/.opencode-parallel` as either `supported` or `sequential`.
+2. Re-run the installer. If the marker says `supported`, `/sdd-fix-parallel` is stamped.
+3. If the marker says `sequential` (or the file is absent), the installer leaves
+   `/sdd-fix-parallel` out. Use the serial `/sdd-fix` lane instead.
+4. You can force the decision with `--with-opencode-parallel=true` or
+   `--with-opencode-parallel=false`:
+
+```bash
+./harness-install.sh --agents=opencode --with-opencode-parallel=true /path/to/your-project
+```
+
 ## The second question — `execution.builder.backend`
 
 Front-end selection is not the only question the installer asks. Right after the picker
@@ -607,6 +626,35 @@ uses — an edited file survives with a warning.
 > the session *you* launched, and how you launched it decides its model. This key applies
 > only where the orchestrator is a spawned sub-agent (Claude) or the configured primary
 > agent (OpenCode).
+
+### OpenCode model helper
+
+OpenCode has no floating tier alias, so you must supply a concrete `provider/model` pin.
+The installer ships a helper that lists the models OpenCode sees and suggests tier
+mappings:
+
+```bash
+sh .harness/tools/opencode-model-helper.sh
+```
+
+It prints a ready-to-paste snippet like:
+
+```yaml
+  pin.opencode.reasoning: "anthropic/claude-opus-4-5"
+  pin.opencode.standard: "anthropic/claude-sonnet-4-5"
+  pin.opencode.cheap: "anthropic/claude-haiku-4-5"
+```
+
+Add the snippet by hand under the `models:` block, or apply it automatically:
+
+```bash
+sh .harness/tools/opencode-model-helper.sh --apply
+```
+
+`--apply` appends missing `pin.opencode.*` lines to `.harness/harness.config.yaml` and
+never overwrites existing values. The mapping is heuristic — review the suggestions before
+applying. If a tier has no matching model, no pin is emitted for it and the role stays on
+the session model (`inherit`).
 
 ## Config migration on upgrade (non-destructive)
 

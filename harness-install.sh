@@ -1,7 +1,7 @@
 #!/bin/sh
 # harness-install.sh — install or upgrade the agent harness into a target repo.
 #
-#   ./harness-install.sh [--agents=<csv>] [--builder-backend=<value>] [--pr-loop=<true|false>] <target-repo-path>
+#   ./harness-install.sh [--agents=<csv>] [--builder-backend=<value>] [--pr-loop=<true|false>] [--with-opencode-parallel=<true|false>] <target-repo-path>
 #   ./harness-install.sh --umbrella <umbrella-dir> [--shared-repo] [--recursive] [--dry-run|--list]
 #
 # Idempotent: run once to install, re-run to upgrade.
@@ -1881,6 +1881,7 @@ install_one() {
   chmod +x "$H/tools/wait-for-codex.sh" 2>/dev/null || true   # E18-F01 /sdd-pr-loop background Codex watcher
   chmod +x "$H/tools/change-size.sh" 2>/dev/null || true   # E21-F02 advisory pre-PR change-size check
   chmod +x "$H/tools/pr-round-trend.sh" 2>/dev/null || true   # E21-F03 pr-loop convergence trend
+  chmod +x "$H/tools/opencode-model-helper.sh" 2>/dev/null || true   # E22-F01 OpenCode model pin helper
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"
@@ -2162,6 +2163,12 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .agents/rules/*  .agents/agents/*  .agents/workflows/*   (repo root, regenerated; Antigravity glue)
   CLAUDE.md / AGENTS.md / GEMINI.md  -> only the harness:begin..end block
 
+OPENCODE CONCURRENCY PROBE  (E22-F01):
+  .opencode/command/sdd-test-concurrency.md   (always installed for OpenCode)
+  .harness/.opencode-parallel                   (marker: 'supported' or 'sequential')
+  /sdd-fix-parallel is stamped for OpenCode ONLY when the marker is 'supported' or when
+  the installer is run with --with-opencode-parallel=true; otherwise it is omitted.
+
 PR LOOP GLUE  (OPT-IN — created ONLY while pr_loop.enabled reads exactly true; a fresh
 install seeds false, so none of this exists until you turn it on — E18-F01):
   .claude/commands/sdd-pr-loop.md   .opencode/command/sdd-pr-loop.md
@@ -2298,6 +2305,23 @@ $MARK_END"
     done
     [ -n "$_removed" ] && echo "⚠️  removed deselected agent '$_label' glue:$_removed (in $_rel/)" >&2
     rmdir "$_dir" 2>/dev/null || { [ -n "$_removed" ] && echo "ℹ️  kept $_rel/ — contains non-harness files" >&2; }
+    return 0
+  }
+
+  # opencode_parallel_wanted — decide whether /sdd-fix-parallel should be stamped for
+  # OpenCode on this run. Honors --with-opencode-parallel=<true|false>; otherwise reads
+  # the marker written by /sdd-test-concurrency. Default is skip (no marker or marker
+  # says sequential). (E22-F01)
+  opencode_parallel_wanted() {
+    case "${OPENCODE_PARALLEL_OVERRIDE:-}" in
+      true) return 0 ;;
+      false) return 1 ;;
+    esac
+    if [ -f "$TARGET/.harness/.opencode-parallel" ]; then
+      _opw="$(head -n 1 "$TARGET/.harness/.opencode-parallel" | tr -d '[:space:]')"
+      [ "$_opw" = "supported" ] && return 0
+    fi
+    return 1
   }
   # gen_opencode_json <dest> — write the canonical generated opencode.json to <dest>.
   # Single source of truth for both the stamp (§6) and the deselect byte-comparison,
@@ -2961,6 +2985,48 @@ This command is argument-free. If `$ARGUMENTS` is non-empty, STOP and report usa
    manifest/provisioning/claim and points to serial `/sdd-fix`; never invent a vendor
    API or background shell agent.
 EOF
+
+  # /sdd-test-concurrency (OpenCode only) — probes whether this OpenCode session can
+  # spawn subagents concurrently. The marker it writes drives whether
+  # harness-install.sh stamps /sdd-fix-parallel for OpenCode.
+  cat > "$CMDDIR/sdd-test-concurrency.md" <<'EOF'
+---
+description: Probe whether this OpenCode session can run subagents concurrently
+---
+
+Run a concurrency probe. This command spawns two trivial subagents and measures whether
+OpenCode executes them in parallel.
+
+1. Prepare a temp directory under `.harness/.tmp/concurrency-test/` (remove any previous
+   probe first).
+2. Spawn **two** identical `scout` subagents **in the same response / at the same time**
+   using the `task` tool. Give each subagent this exact job, with its own index `N` (1 or
+   2) and the temp directory `DIR`:
+
+   - Write `date -u +%FT%T.%NZ` to `DIR/start-N.txt`
+   - Sleep for 5 seconds
+   - Write `date -u +%FT%T.%NZ` to `DIR/end-N.txt`
+   - Report completion
+
+   Do not read files, do not run tests, do not modify source code. The only output must
+   be the four timestamp files.
+3. Wait until **both** subagents finish.
+4. Read the four timestamps and compute the wall-clock span from the earliest start to
+   the latest end.
+   - If the span is **less than 8 seconds**, OpenCode ran the subagents concurrently.
+   - Otherwise, OpenCode ran them sequentially.
+5. Write the result to `.harness/.opencode-parallel` as exactly one word:
+   - `supported`   (concurrent)
+   - `sequential`  (sequential)
+6. Report the result to the human:
+   - **concurrent**: `/sdd-fix-parallel` is supported. Re-run the installer with
+     `--with-opencode-parallel` to stamp it, or just re-run the installer if the marker
+     already says `supported`.
+   - **sequential**: `/sdd-fix-parallel` is NOT supported on this OpenCode setup. Use
+     serial `/sdd-fix` for bounded fix batches.
+
+This command changes no TaskStore state, no feature status, and no source code.
+EOF
   # /sdd-pr-loop (E18-F01) — written UNCONDITIONALLY, even when pr_loop.enabled is false.
   # This is load-bearing, not an oversight: the codex-prompts and antigravity reclamation
   # paths byte-compare an on-disk copy against `$CMDDIR/<name>.md`, so gating GENERATION
@@ -3533,10 +3599,28 @@ EOF
   # the orchestrator in the opencode.json below.
   if agent_selected opencode; then
     mkdir -p "$TARGET/.opencode/command"
+    # The concurrency probe is always available so a user can verify /sdd-fix-parallel
+    # support before (or after) installing it.
+    cp "$CMDDIR/sdd-test-concurrency.md" "$TARGET/.opencode/command/sdd-test-concurrency.md"
+    # /sdd-fix-parallel requires native concurrent sub-agent delegation. Without an
+    # explicit override or a supported marker from a prior /sdd-test-concurrency run,
+    # leave it out of the OpenCode command surface (E22-F01).
     for _c in $HARNESS_SDD_CMDS; do
+      if [ "$_c" = "sdd-fix-parallel" ] && ! opencode_parallel_wanted; then
+        continue
+      fi
       cp "$CMDDIR/$_c.md" "$TARGET/.opencode/command/$_c.md"
     done
-    ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel installed (.opencode/)"
+    # If a previous run installed /sdd-fix-parallel but the marker now says sequential
+    # (or the user forced it off), remove the command. Only harness-owned file by name.
+    if ! opencode_parallel_wanted; then
+      remove_owned .opencode/command opencode sdd-fix-parallel
+    fi
+    if opencode_parallel_wanted; then
+      ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel installed (.opencode/)"
+    else
+      ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-test-concurrency installed (.opencode/); /sdd-fix-parallel skipped (run /sdd-test-concurrency, then re-run installer with --with-opencode-parallel to add it)"
+    fi
     if pr_loop_enabled; then
       for _c in $HARNESS_PR_LOOP_CMDS; do
         cp "$CMDDIR/$_c.md" "$TARGET/.opencode/command/$_c.md"
@@ -3805,7 +3889,7 @@ EOF
           reclaim_model_agents gemini
           ;;
         opencode)
-          remove_owned .opencode/command opencode $HARNESS_OWNED_CMDS
+          remove_owned .opencode/command opencode $HARNESS_OWNED_CMDS sdd-test-concurrency
           # E18-F01 R4/R7: `.opencode/agent/` is a pr_loop-owned dir. By-name removal of the
           # harness stem only, then rmdir the subdir and the parent — each only when empty,
           # so a user's own file-based agent (and the dir holding it) survives.
@@ -4113,6 +4197,14 @@ BUILDER_BACKEND_OVERRIDE="${HARNESS_BUILDER_BACKEND:-}"
 # run" into "permanently disable this target's loop". The layering is: the FLAG (and the
 # prompt) persists, the ENV overrides the run — with one warning at §2c when they disagree.
 PR_LOOP_OVERRIDE=""
+
+# OpenCode parallel-fix override (E22-F01): --with-opencode-parallel=<true|false>
+# forces the /sdd-fix-parallel command to be (or not be) stamped for the OpenCode
+# front-end. Without the flag, the installer reads the marker written by the
+# /sdd-test-concurrency command: supported → stamp, absent/sequential → skip.
+# This keeps a command that requires concurrent subagents off OpenCode installs that
+# cannot satisfy it. Default is "auto" (read marker). Explicit true/false override.
+OPENCODE_PARALLEL_OVERRIDE=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --pr-loop=*)
@@ -4124,6 +4216,15 @@ while [ "$#" -gt 0 ]; do
     --pr-loop)
       [ "$#" -ge 2 ] || die "usage: $0 --pr-loop=<true|false>"
       PR_LOOP_OVERRIDE="$2"
+      shift 2
+      ;;
+    --with-opencode-parallel=*)
+      OPENCODE_PARALLEL_OVERRIDE="${1#--with-opencode-parallel=}"
+      shift
+      ;;
+    --with-opencode-parallel)
+      [ "$#" -ge 2 ] || die "usage: $0 --with-opencode-parallel=<true|false>"
+      OPENCODE_PARALLEL_OVERRIDE="$2"
       shift 2
       ;;
     --builder-backend=*)
@@ -4203,11 +4304,17 @@ esac
 # Same place, same reason, for the pr_loop override (E20-F02 R4): an illegal value aborts
 # non-zero here — after the parse loop, before target resolution and before any
 # install_one — so nothing is created or modified in the target. A typo'd flag in a script
-# is silent, which is why this aborts where the interactive prompt merely keeps the
-# current value.
+# is silent, which is why this aborts where the interactive prompt merely keeps the current
+# value.
 case "${PR_LOOP_OVERRIDE:-}" in
   ""|true|false) ;;
   *) die "unknown pr_loop value '$PR_LOOP_OVERRIDE' — legal values are 'true' and 'false' (--pr-loop=<value>)" ;;
+esac
+
+# OpenCode parallel-fix override validation (E22-F01). Same abort-before-write discipline.
+case "${OPENCODE_PARALLEL_OVERRIDE:-}" in
+  ""|true|false) ;;
+  *) die "unknown --with-opencode-parallel value '$OPENCODE_PARALLEL_OVERRIDE' — legal values are 'true' and 'false'" ;;
 esac
 
 # ── single-target mode (no --umbrella): behave exactly as before ──────────────

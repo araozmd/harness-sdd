@@ -425,7 +425,7 @@
         {
           "id": "E99-F08",
           "title": "change-size --format json: escape every C0 control character, not just tab",
-          "status": "pending",
+          "status": "done",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -564,7 +564,7 @@
         {
           "id": "E21-F04",
           "title": "Stacked-PR lane for an atomic feature that exceeds the budget",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
