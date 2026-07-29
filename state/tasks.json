@@ -407,7 +407,7 @@
         {
           "id": "E99-F06",
           "title": "Installer: keep .harness/progress/ run dirs out of the consumer's VCS",
-          "status": "in-review",
+          "status": "done",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -518,13 +518,13 @@
     {
       "id": "E21",
       "title": "Change-size discipline: keep the review a gate",
-      "status": "pending",
+      "status": "in-progress",
       "owner": "araozmd",
       "features": [
         {
           "id": "E21-F01",
           "title": "Feature-size budget in the Driller and Architect (split at decomposition time)",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
@@ -533,7 +533,7 @@
         {
           "id": "E21-F02",
           "title": "Pre-PR change-size check on the Reviewer -> PR handoff",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
@@ -544,7 +544,7 @@
         {
           "id": "E21-F03",
           "title": "/sdd-pr-loop: per-round finding trend + 'split, don't re-review' at the round cap",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
