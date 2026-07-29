@@ -2085,10 +2085,14 @@ EOF
   # NOTE: a new ignore rule does not untrack a file that is ALREADY tracked; an existing target
   # must run `git rm -r --cached .harness/progress/<run-dir>` once itself. The installer
   # deliberately does not do that — untracking files in someone's repo is not an installer's call.
+  # Also ignore the OpenCode concurrency marker (E22-F01). It is machine-specific runtime state
+  # written by /sdd-test-concurrency; committing it would make other developers' installers
+  # trust a probe result from a different OpenCode version or setup.
   _ignores='telemetry.jsonl
 jira.pat
 state/tasks.json.lock
 .pr-loop/
+.opencode-parallel
 progress/*/
 !progress/.gitkeep
 !progress/README.md
@@ -2997,8 +3001,9 @@ description: Probe whether this OpenCode session can run subagents concurrently
 Run a concurrency probe. This command spawns two trivial subagents and measures whether
 OpenCode executes them in parallel.
 
-1. Prepare a temp directory under `.harness/.tmp/concurrency-test/` (remove any previous
-   probe first).
+1. Prepare a temp directory under `progress/opencode-concurrency-probe/` (remove any
+   previous probe first). This lives in the Scout role's allowed output area so the
+   subagents do not have to violate their read-only contract.
 2. Spawn **two** identical `scout` subagents **in the same response / at the same time**
    using the `task` tool. Give each subagent this exact job, with its own index `N` (1 or
    2) and the temp directory `DIR`:
@@ -3612,9 +3617,18 @@ EOF
       cp "$CMDDIR/$_c.md" "$TARGET/.opencode/command/$_c.md"
     done
     # If a previous run installed /sdd-fix-parallel but the marker now says sequential
-    # (or the user forced it off), remove the command. Only harness-owned file by name.
+    # (or the user forced it off), remove the command ONLY if it is byte-identical to the
+    # harness-generated source. A user-authored command with the same name must survive.
     if ! opencode_parallel_wanted; then
-      remove_owned .opencode/command opencode sdd-fix-parallel
+      _fp="$TARGET/.opencode/command/sdd-fix-parallel.md"
+      if [ -f "$_fp" ]; then
+        if cmp -s "$CMDDIR/sdd-fix-parallel.md" "$_fp"; then
+          rm -f "$_fp"
+          echo "⚠️  removed deselected agent 'opencode' glue: sdd-fix-parallel.md (in .opencode/command/)" >&2
+        else
+          echo "⚠️  kept user-edited .opencode/command/sdd-fix-parallel.md (not harness-owned)" >&2
+        fi
+      fi
     fi
     if opencode_parallel_wanted; then
       ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel installed (.opencode/)"

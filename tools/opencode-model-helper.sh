@@ -16,14 +16,20 @@
 
 set -eu
 
-CONFIG="harness.config.yaml"
+# Default config path: when installed under .harness/tools/ the config lives at
+# .harness/harness.config.yaml; in the source layout it lives at repo root.
+_script_dir=$(cd "$(dirname "$0")" && pwd)
+_default_config="$_script_dir/../harness.config.yaml"
+[ -f "$_default_config" ] || _default_config="harness.config.yaml"
+
+CONFIG="$_default_config"
 APPLY=0
 
 if [ "${1:-}" = "--apply" ]; then
   APPLY=1
-  CONFIG="${2:-harness.config.yaml}"
+  CONFIG="${2:-$_default_config}"
 else
-  CONFIG="${1:-harness.config.yaml}"
+  CONFIG="${1:-$_default_config}"
 fi
 
 warn() { echo "⚠️  $1" >&2; }

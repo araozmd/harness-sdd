@@ -1481,6 +1481,8 @@ test_opencode_parallel_optin() {
   # Default: probe present, parallel absent.
   [ -f "$_op/.opencode/command/sdd-test-concurrency.md" ] \
     || fail "E22-F01: default opencode install missing sdd-test-concurrency"
+  grep -q 'progress/opencode-concurrency-probe/' "$_op/.opencode/command/sdd-test-concurrency.md" \
+    || fail "E22-F01: probe does not use the Scout-allowed progress/ output area"
   [ ! -f "$_op/.opencode/command/sdd-fix-parallel.md" ] \
     || fail "E22-F01: default opencode install stamped sdd-fix-parallel"
   # Force it on.
@@ -1507,7 +1509,20 @@ test_opencode_parallel_optin() {
     || fail "E22-F01: sequential-marker install exited non-zero"
   [ ! -f "$_op/.opencode/command/sdd-fix-parallel.md" ] \
     || fail "E22-F01: sequential marker did not cause sdd-fix-parallel to be removed"
-  rm -rf "$_op"
+  # A user-authored sdd-fix-parallel.md must survive when the harness skips it.
+  _op2="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  mkdir -p "$_op2/.opencode/command"
+  printf 'user-authored\n' > "$_op2/.opencode/command/sdd-fix-parallel.md"
+  CODEX_HOME="$_op2/ch" sh "$SRC/harness-install.sh" --agents=opencode "$_op2" >/dev/null \
+    || fail "E22-F01: user-parallel install exited non-zero"
+  [ -f "$_op2/.opencode/command/sdd-fix-parallel.md" ] \
+    || fail "E22-F01: user-authored sdd-fix-parallel.md was deleted on default install"
+  grep -q 'user-authored' "$_op2/.opencode/command/sdd-fix-parallel.md" \
+    || fail "E22-F01: user-authored sdd-fix-parallel.md content was overwritten"
+  # The marker file is ignored by the seeded .harness/.gitignore.
+  grep -qxF '.opencode-parallel' "$_op2/.harness/.gitignore" \
+    || fail "E22-F01: .harness/.gitignore does not ignore .opencode-parallel"
+  rm -rf "$_op" "$_op2"
 }
 
 test_models_block_seeded
@@ -1532,6 +1547,9 @@ test_opencode_model_helper() {
     || fail "E22-F01: opencode-model-helper.sh not installed executable"
   grep -q 'pin.opencode.reasoning' "$_oh/.harness/tools/opencode-model-helper.sh" \
     || fail "E22-F01: helper missing expected reasoning tier placeholder"
+  # The installed helper defaults to the installed config path.
+  grep -q '\.harness/harness\.config\.yaml' "$_oh/.harness/tools/opencode-model-helper.sh" \
+    || fail "E22-F01: installed helper does not default to .harness/harness.config.yaml"
   rm -rf "$_oh"
 }
 
