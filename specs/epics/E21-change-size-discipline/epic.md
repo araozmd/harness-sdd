@@ -109,7 +109,8 @@ Two things from the pattern are deliberately **rejected**:
 | F01 | Feature-size budget in the Driller and Architect (split at decomposition time) | done | true | — |
 | F02 | Pre-PR change-size check on the Reviewer → PR handoff | done | true | E21-F01 |
 | F03 | `/sdd-pr-loop`: per-round finding trend + "split, don't re-review" at the round cap | done | true | E18-F01 |
-| F04 | Stacked-PR lane for an atomic feature that exceeds the budget | pending (**withdrawn — needs re-spec**) | true | E18-F01, E21-F03 |
+| F04 | Merge-order safety for a non-default PR base | pending | true | E18-F01, E21-F03 |
+| F05 | The stacked-PR lane: doctrine, seams, and role contracts | pending | true | E21-F04 |
 
 ## Notes
 - **F04 was withdrawn during review of PR #78 (2026-07-28).** Its premise was wrong. The lane
@@ -130,6 +131,42 @@ Two things from the pattern are deliberately **rejected**:
   guard — is recoverable from git history (`git show 1873af9:tools/pr-stack-guard.sh`) if the
   re-spec keeps a stacked lane. It was removed rather than kept because without the lane it has
   no caller.
+- **F04 was re-drilled into F04 + F05 (2026-07-29).** The human gate chose lane **(a)** —
+  stacking is a *review-size* tool for work that is already safely splittable, and every
+  atomicity claim is struck. Specced completely at that scope, the feature came to **19 R-ids**
+  against `change_size.max_requirements: 12`, so the Architect stopped before writing the four
+  files and reported the seams instead — F01's own rule, applied to F01's own epic.
+
+  The seam is the one the review history already found. The salvaged guard was *independently
+  sound*; all five blocking findings landed on the **claim/doctrine** surface. So the split
+  isolates the doctrine behind a merged, tested mechanism:
+
+  - **F04 (12 R-ids)** — the merge-order guard and the loop's non-default-base correctness. No
+    doctrine, no role edits, no schema change. Useful standalone even if nobody ever stacks: it
+    makes `/sdd-pr-loop` safe against *any* non-default base, release and integration branches
+    included.
+  - **F05 (10 R-ids)** — the lane doctrine, the seams, the Builder/Orchestrator contracts and
+    the board-representation decision. Stays `autonomous: false`; this is the surface that bled.
+
+  F04 specced out at **12 R-ids — at the ceiling, not over it.** The Architect declined to fold
+  its two withhold legs (open parent ⇒ 6, unowned base ⇒ 6) into one to reach 11: they produce
+  different messages and different mutations, and since `auto_merge` is gated by the guard
+  rather than forced off, every leg must be individually mutation-provable. One brief item — the
+  pre-PR change-size check measured against the increment's own base — turned out to be
+  **already on `main`** (`2e71d2b`, verified) and carries a regression assertion instead of an
+  R-id; the freed slot went to the squash-message base behavior.
+
+  Three decisions were taken at the gate and are binding on the specs: `auto_merge` stays
+  enabled on a child PR and is **gated by the guard** rather than forced off; a healthy child
+  waiting on an open parent is a **third success terminal state**, named explicitly in the
+  terminal-states contract beside the `auto_merge: false` hand-back; and the guard's literal
+  `default_branch="main"` fallback is a latent defect that F04 must remove — it must resolve the
+  default branch the way `tools/change-size.sh` already does, or a `develop`/`trunk` repo reads
+  every PR as stacked and the loop merges nothing, ever.
+
+  The **atomic-delivery problem remains unsolved and out of scope for this epic** — neither F04
+  nor F05 addresses a capability whose intermediate states are unsafe to ship. That needs a
+  feature flag or an aggregate landing strategy, and is not seeded.
 - **Ordering.** F01 defines the budget; F02 consumes it, so F02 depends on F01 to avoid two
   sources of truth for the same numbers. F03 and F04 edit `/sdd-pr-loop` glue that **E18-F01
   has not merged yet** — they are correctly blocked, and must not be started against a `main`
