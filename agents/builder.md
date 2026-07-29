@@ -76,6 +76,19 @@ comes from.)
   tooling.
 - **Small, verifiable steps.** Prefer many small correct changes over one large
   leap you can't verify.
+- **An assertion is only worth its expected value being reachable ONE way.** Before you
+  call a test done, ask of every assertion: *could this expected value be produced by any
+  path other than the one the failure message names?* If yes, the test passes whether or
+  not the guarantee holds, and its message will mislead the next maintainer — which is
+  worse than having no assertion, because it stops anyone looking. Prove it by reverting
+  the fix in place and confirming the test fails **with the real symptom**.
+- **A test that asserts a PROSE contract must grep the SECTION it names, not the whole
+  file.** Extract the section by heading first —
+  `awk 'BEGIN{h="<heading>"} /^#+ /{k=(index($0,h)>0);next} k' <file>` — and grep that.
+  A whole-file grep is satisfied by any unrelated occurrence of the phrase elsewhere in
+  the file (including one your own change just added), so the assertion's failure message
+  ends up naming a guarantee it cannot detect. This is the same defect as above, in the
+  shape it most often takes for agent/contract files.
 
 ## Hand-off
 
