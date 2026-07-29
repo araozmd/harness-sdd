@@ -138,8 +138,30 @@ _extra() { # _extra <key> — newline-separated list values from the change_size
 TEST_RE='(^|/)tests?/|(^|/)__tests__/|[._-](test|spec)\.[a-z]+$|_test\.(go|py|rb)$|^test_[^/]*\.(py|sh)$|/test_[^/]*\.(py|sh)$|Test[s]?\.(java|kt|cs)$'
 DOC_RE='(^|/)(specs|progress|docs)/|(^|/)(CHANGELOG|README)\.md$'
 GEN_RE='(^|/)(vendor|node_modules|dist|build)/|\.lock$|(^|/)(package-lock\.json|yarn\.lock|poetry\.lock|Cargo\.lock|go\.sum)$|\.(pb|generated)\.[a-z]+$'
-for _p in $(_extra test_paths      || true); do TEST_RE="$TEST_RE|$_p"; done
-for _p in $(_extra generated_paths || true); do GEN_RE="$GEN_RE|$_p";  done
+# One entry, one regex — read LINE by line. `for _p in $(...)` word-splits on IFS, so a
+# configured pattern containing a space, e.g. `(^|/)integration tests/`, would be appended as
+# TWO alternatives (`(^|/)integration|tests/`) and every production path starting with
+# `integration` would silently drop out of the budget. Fed from a here-document rather than a
+# pipe, because a piped `while read` runs in a subshell and the appended value would not
+# survive the loop.
+_tp="$(_extra test_paths || true)"
+if [ -n "$_tp" ]; then
+  while IFS= read -r _p; do
+    [ -n "$_p" ] || continue
+    TEST_RE="$TEST_RE|$_p"
+  done <<CS_TEST_PATHS
+$_tp
+CS_TEST_PATHS
+fi
+_gp="$(_extra generated_paths || true)"
+if [ -n "$_gp" ]; then
+  while IFS= read -r _p; do
+    [ -n "$_p" ] || continue
+    GEN_RE="$GEN_RE|$_p"
+  done <<CS_GEN_PATHS
+$_gp
+CS_GEN_PATHS
+fi
 
 # Measure the WORKING TREE against the merge base, not `"$mb"...HEAD`. The default
 # in-session `agents/builder.md` has no commit step: it edits, tests, and hands the feature
@@ -161,7 +183,11 @@ if [ -n "$_untracked" ]; then
   _extra_stats="$(printf '%s\n' "$_untracked" | while IFS= read -r _f; do
       [ -n "$_f" ] || continue
       [ -f "$repo/$_f" ] || continue
-      printf '%s\t0\t%s\n' "$(wc -l < "$repo/$_f" | tr -d ' ')" "$_f"
+      # `awk END{print NR}`, not `wc -l`: wc counts NEWLINES, so a file whose last line is
+      # unterminated is undercounted by one — and a one-line file with no trailing newline
+      # reports ZERO additions. git --numstat counts it correctly once committed, so wc would
+      # make the tier depend on whether the Builder had committed yet.
+      printf '%s\t0\t%s\n' "$(awk 'END{print NR}' "$repo/$_f")" "$_f"
     done)"
   [ -z "$_extra_stats" ] || stats="$stats
 $_extra_stats"

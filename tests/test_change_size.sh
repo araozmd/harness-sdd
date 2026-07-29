@@ -196,6 +196,37 @@ git -C "$R" add -A && git -C "$R" commit -qm "ruby-style specs"
   || fail "R7: extra test_paths REPLACED the built-ins instead of extending them (tests/app.test.js lost)"
 pass "R7 change_size.test_paths extends the built-in classifiers, never replaces them"
 
+# ── R7b: a configured regex containing whitespace stays ONE alternative ──────────────────
+# `for _p in $(...)` word-splits on IFS, so `(^|/)integration tests/` would be appended as two
+# alternatives — `(^|/)integration|tests/` — and every production path merely STARTING with
+# `integration` would silently drop out of the budget. That understates the tier while looking
+# like it worked, which is the failure mode the whole classifier contract exists to prevent.
+RW="$T/repo-ws"; mkrepo "$RW"; git -C "$RW" checkout -q -b feature
+mkdir -p "$RW/.harness" "$RW/integrationX" "$RW/integration tests"
+n_lines 20 > "$RW/integrationX/prod.js"          # production — must NOT be swallowed
+n_lines 60 > "$RW/integration tests/spec.js"     # test — matched by the configured regex
+git -C "$RW" add -A && git -C "$RW" commit -qm work
+printf 'change_size:\n  test_paths:\n    - "(^|/)integration tests/"\n' > "$RW/.harness/harness.config.yaml"
+_j="$("$TOOL" --repo "$RW" --base main --format json)"
+[ "$(printf '%s' "$_j" | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')" = "20" ] \
+  || fail "R7b: a whitespace-containing test_paths regex was word-split — integrationX/prod.js left the production budget"
+[ "$(printf '%s' "$_j" | sed -n 's/.*"test_lines":\([0-9]*\).*/\1/p')" = "60" ] \
+  || fail "R7b: the whitespace-containing regex did not classify its own directory as tests"
+pass "R7b a configured regex containing whitespace is one alternative, not two"
+
+# ── R7c: an untracked file whose last line is unterminated is not undercounted ────────────
+# `wc -l` counts NEWLINES, so a one-line file with no trailing newline reports ZERO additions.
+# git --numstat counts it correctly once committed, so `wc` would make the tier depend on
+# whether the Builder had committed yet — the exact coupling R5b exists to remove.
+RN="$T/repo-nonl"; mkrepo "$RN"; git -C "$RN" checkout -q -b feature
+mkdir -p "$RN/src"; printf 'one line and no trailing newline' > "$RN/src/a.js"   # untracked
+[ "$("$TOOL" --repo "$RN" --base main --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')" = "1" ] \
+  || fail "R7c: an untracked file with no trailing newline was counted as zero additions"
+git -C "$RN" add -A && git -C "$RN" commit -qm committed
+[ "$("$TOOL" --repo "$RN" --base main --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')" = "1" ] \
+  || fail "R7c: committing the unterminated file changed its count — the measurement must not depend on that"
+pass "R7c unterminated last lines count, committed or not"
+
 # ── R8: usage errors are the ONLY non-zero exit, and they measure nothing ────────────────
 if "$TOOL" --repo "$T/definitely-not-a-repo" --base main >/dev/null 2>&1; then
   fail "R8: a non-git directory should exit 4"

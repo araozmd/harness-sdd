@@ -66,6 +66,11 @@ All notable changes to the harness body are recorded here. Versions follow
 - `agents/reviewer.md` runs it before approving and records the tier and the decision in its
   verdict; `agents/orchestrator.md` runs it before opening the PR and carries the tier into the
   PR body. Documented in `docs/WORKFLOW.md`.
+- Classifier robustness: a configured `test_paths`/`generated_paths` regex containing whitespace
+  stays **one** alternative (it was word-split, so `(^|/)integration tests/` became
+  `(^|/)integration|tests/` and every production path starting with `integration` silently left
+  the budget), and untracked lines are counted with `awk NR` rather than `wc -l`, which counts
+  newlines and therefore reported a one-line file with no trailing newline as **zero** additions.
 - New behavioral suite `tests/test_change_size.sh` (registered in `verification.test_command`)
   drives the tool against a real throwaway git repo — a grep over the script would prove
   nothing about whether a test file counts as production, which is the failure that makes the
