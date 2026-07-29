@@ -387,7 +387,7 @@
         {
           "id": "E99-F04",
           "title": "Decide the locale boundary for repo-owned git hooks in fix-worktree (reference-transaction on teardown/rollback)",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": false,
           "depends_on": [

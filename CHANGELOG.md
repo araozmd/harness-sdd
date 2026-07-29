@@ -4,6 +4,38 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.46.2] — 2026-07-29
+
+### Fixed — 🐛 `fix-worktree.sh` runs under the caller's locale; `C` is scoped to the ASCII slug globs (E99-F04)
+- E99-F03 exported `LC_ALL=C` for the whole of `tools/fix-worktree.sh`. Three successive Codex
+  rounds on PR #65 each found that export leaking into code the **target repo** owns: the
+  project init gate (P1, round 2), the `post-checkout` hook and checkout filters fired by
+  `git worktree add` (round 3), and the `reference-transaction` hook fired by `git branch -d`
+  during teardown and `git update-ref -d` during create's rollback (round 4, deferred here).
+- Rounds 2 and 3 were patched surface-by-surface. `reference-transaction` fires on essentially
+  **every** ref update, so continuing that strategy converges on un-pinning the whole script —
+  and no test can prove such an allowlist complete. The default is therefore **inverted**: the
+  helper now runs under the **caller's** locale, and pins `LC_ALL=C` around exactly one region,
+  the bracket-range `case` globs in `validate_key`, restoring the caller's locale on every exit
+  path (including `die`) before any git call or foreign code runs.
+- Every other read in the file was audited per call and left un-pinned: each is either
+  exit-status-only or parses output that is ASCII by construction — object ids, refnames,
+  absolute paths, `worktree list --porcelain` records split on literal ASCII prefixes, and
+  `status --porcelain` tested only for emptiness. None is compared with a range glob.
+- The E99-F03 defect stays fixed: `validate_key` still rejects non-ASCII-lowercase slugs under
+  every locale, and the three previously-closed foreign-code surfaces stay closed — now by
+  construction rather than by per-call escapes, which are removed as dead code.
+- Teardown/rollback **ordering** — the worktree is retired before the branch ref in both paths,
+  but for two *different* reasons, now documented separately. In `do_teardown` git enforces it:
+  `branch -d`/`-D` refuse to delete a branch that is checked out in a worktree. In
+  `rollback_create` git does **not** enforce it — `update-ref -d` has no such guard and will
+  delete the ref out from under the checkout — but deleting the ref first leaves that worktree
+  on an unborn branch, so the non-forced `worktree remove` then refuses and the residual is
+  "registration present, branch absent": the one state `teardown` hard-refuses, which a re-run
+  cannot reconcile. The retained order's worst residual is "registration retired, branch
+  preserved", which a re-run of `teardown` does reconcile. Both diagnostics now name that state
+  and that recovery instead of implying nothing moved.
+
 ## [0.46.1] — 2026-07-28
 
 ### Fixed — 🐛 the `/sdd-pr-loop` first-response probe is scoped to the current round (E99-F05)
