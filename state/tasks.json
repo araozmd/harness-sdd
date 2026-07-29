@@ -574,6 +574,22 @@
           "spec_path": "specs/epics/E21-change-size-discipline/F04-stacked-pr-lane/"
         }
       ]
+    },
+    {
+      "id": "E23",
+      "title": "Native Codex compatibility",
+      "status": "pending",
+      "features": [
+        {
+          "id": "E23-F01",
+          "title": "Modern Codex skills and inherited role registration",
+          "status": "in-progress",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E23-codex-native-compatibility/F01-codex-skill-adapter/"
+        }
+      ]
     }
   ]
 }
