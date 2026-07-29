@@ -542,9 +542,12 @@ git rebase --onto feat/wave-2 old-base-commit
 git push --force-with-lease
 ```
 
-The `old-base-commit` is the parent's head SHA before it was rebased. If you don't have
-it, `git rebase feat/wave-N` on each child (from oldest to newest) is equivalent when
-the intermediate states are identical.
+The `old-base-commit` is the parent's head SHA before it was rebased. **Do not substitute
+the bare two-arg form** (`git rebase feat/wave-N`): when the parent was rebased or
+force-pushed, that shorthand replays the child's copies of the *old* parent commits along
+with the child-only commits, producing conflicts and duplicated changes. Recover the old
+parent tip from the parent's reflog or the `baseRefOid` recorded in the round cache, and
+always use `git rebase --onto`.
 
 ### Opt-in and inert-when-disabled
 
