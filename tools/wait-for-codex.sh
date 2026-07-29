@@ -358,7 +358,7 @@ printf '%s' "$TRIGGER_TS" > "$ROUND_DIR/trigger-ts.txt"
 
 # Fetch the sources into the round dir for this poll.
 fetch_sources() {
-  gh pr view "$PR_NUMBER" --json reviews,comments,statusCheckRollup,headRefOid \
+  gh pr view "$PR_NUMBER" --json reviews,comments,statusCheckRollup,headRefOid,baseRefName,baseRefOid \
     > "$ROUND_DIR/pr.json" 2>/dev/null || return 1
   # `--paginate --slurp` then `jq 'add // []'`: --slurp is required so paginated REST
   # results remain parseable past page 1, and --paginate is required so a finding past

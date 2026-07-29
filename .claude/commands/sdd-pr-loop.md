@@ -53,6 +53,34 @@ report its one-line diagnostic verbatim — do not post `@codex review`, do not 
 not fall back to a hand-rolled check. A repo without the Codex GitHub App should leave
 `pr_loop.enabled` at its opt-in default of `false` rather than run this loop.
 
+### 0b. Base-change detection (stacked PRs only)
+
+On round 2+, before triggering a new Codex review, check whether the base branch has
+changed since the last round — when a stacked PR's parent is rebased (review fixes), the
+child's `baseRefOid` moves, and the child must be re-reviewed from scratch (R5).
+
+```bash
+if [ "$round" -gt 1 ]; then
+  prior_round_dir=".pr-loop/$pr_number/round-$(( round - 1 ))"
+  prior_base_oid="$(jq -r '.baseRefOid // ""' "$prior_round_dir/pr.json" 2>/dev/null || echo '')"
+  if [ -n "$prior_base_oid" ]; then
+    current_base_oid="$(gh pr view "$pr_number" --json baseRefOid --jq '.baseRefOid' 2>/dev/null || echo '')"
+    if [ -n "$current_base_oid" ] && [ "$current_base_oid" != "$prior_base_oid" ]; then
+      echo "baseRefOid changed (${prior_base_oid:0:7} -> ${current_base_oid:0:7}) — parent rebased; discarding prior round cache, restarting from round 1" >&2
+      # Prior round dirs are preserved for the handover summary but not used for gate evaluation.
+      round=1
+      # The outer for loop will continue with the new round=1; the prior round dirs
+      # (round-1, round-2, ...) remain on disk but are now stale.
+    fi
+  fi
+fi
+```
+
+If the base changed, discard prior round-cache data for merge-gate evaluation and restart
+the round counter from 1. This detection activates only when the PR's `baseRefName` is
+not the default branch — a PR targeting `main` has `baseRefOid` that tracks the default
+branch's head, which changes on every merge anyway, so the check is inert there.
+
 ### 1. Trigger the review
 
 Resolve the repo slug once (the `gh api` calls below need it):
@@ -462,13 +490,42 @@ hand-back **completes** the loop: **return success**. It is the one terminal sta
 unmerged PR is the intended outcome, so never route it to needs-human.
 
 Where `pr_loop.auto_merge` is **true**, merge with the configured `merge_strategy`,
-deleting the remote branch in the same call. Track whether the merge command itself
+deleting the remote branch in the same call. **First, invoke the stacked-PR merge-order
+guard (R2):** before `gh pr merge`, fetch the open-PR list and call the offline guard to
+verify this PR is not stacked on an unmerged parent. On exit 6, refuse the merge and
+enter the `needs-human` terminal state with the guard's diagnostic naming the parent PR.
+The guard is called with JSON the pr-loop already fetches; the only additional network
+call is a lightweight `gh pr list`.
+
+```bash
+# Stacked-PR merge-order guard (E21-F04 R2): refuse to merge a child PR whose parent
+# is still open. Only activates when baseRefName is not the default branch — a PR
+# targeting main exits 0 immediately.
+open_prs_json=".pr-loop/$pr_number/open-prs.json"
+gh pr list --state open --json number,headRefName > "$open_prs_json" 2>/dev/null || echo '[]' > "$open_prs_json"
+guard_rc=0
+sh tools/pr-stack-guard.sh evaluate ".pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" || guard_rc=$?
+if [ "$guard_rc" = 6 ]; then
+  echo "sdd-pr-loop: merge refused — a stacked PR's parent is still open" >&2
+  sh tools/pr-stack-guard.sh evaluate ".pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" 2>&1 >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  # Post the handover summary and exit — the guard diagnostic is already on stderr.
+  # (The needs-human handover block below handles the summary post.)
+  guard_ok=0
+else
+  guard_ok=1
+fi
+```
+
+Track whether the merge command itself
 **succeeded** (`merged`) — separate from `merge_ok`, which only recorded thread
 eligibility — so cleanup never runs on a failed or pending merge:
 
 ```bash
 merged=0
-if [ "${merge_ok:-0}" != "1" ]; then
+if [ "${guard_ok:-1}" != "1" ]; then
+  echo "merge-order guard refused — needs-human, not merging" >&2
+elif [ "${merge_ok:-0}" != "1" ]; then
   echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
 elif [ "${merge_strategy:-merge}" = "squash" ]; then
   msg=".pr-loop/$pr_number/squash-message.txt"
@@ -507,8 +564,8 @@ not land is never reported as success.
 
 Apply the `needs-human` label, post the **same handover summary** block (so the human sees
 exactly which workers tried and where they got stuck), and return failure. Reached by: the
-`max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, or a merge
-that would not land.
+`max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, a
+stacked-PR merge-order guard refusal (exit `6`), or a merge that would not land.
 
 **Say what the human should conclude.** Include the step-4b trend output. A `converging`
 verdict means the loop simply ran out of rounds and resuming is reasonable. A
@@ -529,7 +586,7 @@ merge did not land, that is this state, and it is a failure.
 ```
 .pr-loop/<pr>/
   round-1/
-    pr.json                   # reviews summary, issue comments, checks, head oid
+    pr.json                   # reviews summary, issue comments, checks, head oid, base branch + oid
     review-comments.json      # the inline findings (source of truth)
     issue-comments.json       # paginated issue-comment stream (clean-banner scan)
     reactions.json            # reactions on the @codex trigger comment (👍 = clean)

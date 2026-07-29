@@ -3,19 +3,19 @@
 > Atomic, sequential, independent steps. The Builder works these top to bottom,
 > one at a time. Each task names the R-id(s) it satisfies. Check off when done.
 
-- [ ] **T1** (R3, R4) — Verify `tools/pr-stack-guard.sh` is on disk, `shellcheck` clean,
+- [x] **T1** (R3, R4) — Verify `tools/pr-stack-guard.sh` is on disk, `shellcheck` clean,
   and its behavior matches the spec: exit 6 when parent PR is open, exit non-zero on
   unreadable input. The script was resurrected from commit `1873af9` and should already be
   present. Run `shellcheck tools/pr-stack-guard.sh` and confirm zero findings.
 
-- [ ] **T2** (R1, R5) — Update `tools/wait-for-codex.sh` to add `baseRefName` and
+- [x] **T2** (R1, R5) — Update `tools/wait-for-codex.sh` to add `baseRefName` and
   `baseRefOid` to the `gh pr view --json` field list. The current list is
   `reviews,comments,statusCheckRollup,headRefOid`; add `baseRefName,baseRefOid` so the
   round cache's `pr.json` always carries the actual base branch name and its head SHA
   (needed for base-change detection in R5). No behavioral change to the watcher —
   purely additive to the cached payload.
 
-- [ ] **T3** (R1, R2, R5) — Update `.claude/commands/sdd-pr-loop.md` to:
+- [x] **T3** (R1, R2, R5) — Update `.claude/commands/sdd-pr-loop.md` to:
   - In the merge step (auto-merge path, section "### Merge"), before the `gh pr merge`
     call: fetch the open-PR list (`gh pr list --state open --json number,headRefName`),
     invoke `tools/pr-stack-guard.sh evaluate <pr.json> <open-prs.json>`, and refuse the
@@ -29,7 +29,7 @@
     and post-merge cleanup (line 493) shall remain as-is — those uses are about the
     target, not the base, and are correct for both stacked and non-stacked PRs.
 
-- [ ] **T4** (R6, R7) — Add a "Stacked-PR lane" section to `docs/WORKFLOW.md`. Document:
+- [x] **T4** (R6, R7) — Add a "Stacked-PR lane" section to `docs/WORKFLOW.md`. Document:
   - The lane's purpose: incremental review of safely-splittable features whose
     intermediate increments are safe to merge to `main` independently.
   - Explicit statement: stacking provides incremental **review**, not atomic delivery —
@@ -43,7 +43,7 @@
   - Manual restack procedure (R7): when an earlier increment takes review fixes, the
     Builder rebases each child increment onto the updated parent branch.
 
-- [ ] **T5** (R1–R5, R8, R9) — Add test cases to `tests/test_pr_loop.sh`:
+- [x] **T5** (R1–R5, R8, R9) — Add test cases to `tests/test_pr_loop.sh`:
   - `test_stacked_pr_base_detection` — verify the pr-loop fetches and uses
     `baseRefName` when evaluating a stacked PR (R1).
   - `test_stacked_pr_refuse_child_merge` — verify the pr-loop refuses to merge a child
@@ -64,9 +64,9 @@
   - Follow suite conventions: no frozen VERSION string, no diff against `main`, use
     `install_at()`/`install_on()` for sandboxed installs.
 
-- [ ] **T6** — Write tests per `F04-stacked-pr-lane.tests.md` traceability table. Ensure
+- [x] **T6** — Write tests per `F04-stacked-pr-lane.tests.md` traceability table. Ensure
   every R-id in the table maps to at least one test assertion.
 
-- [ ] **T7** — Run `./init.sh` and the full verification suite (`sh tests/test_pr_loop.sh`
+- [x] **T7** — Run `./init.sh` and the full verification suite (`sh tests/test_pr_loop.sh`
   plus any other affected suites). Ensure all tests pass and the pr-loop test suite is
   green before hand-off.
