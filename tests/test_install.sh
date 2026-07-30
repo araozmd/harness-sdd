@@ -1278,6 +1278,23 @@ grep -qF 'my own note' "$TLE/.opencode/agent/pr-fixer.md" || fail "Codex r5 P1: 
 rm -rf "$TLE"
 pass "opencode deselect reclaims a pristine pre-quoting pr-fixer, keeps an edited one (Codex r5 P1)"
 
+# antigravity_deselect_reclaims_skill_after_tier_change (Codex r6 P1 #3679286029): a
+# skill stamped with models.builder=inherit (NO model line), then the tier is raised to
+# reasoning in the SAME run that deselects antigravity — the regenerated reference
+# carries `model: pro`, and the pristine installed skill must still be reclaimed (the
+# model-drift direction opposite to the legacy-persona case).
+TLF="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=antigravity "$TLF" >/dev/null || fail "ag-tierchange setup install failed"
+[ -f "$TLF/.agents/skills/builder/SKILL.md" ] || fail "ag-tierchange setup: builder skill missing"
+grep -q '^model: ' "$TLF/.agents/skills/builder/SKILL.md" && fail "ag-tierchange setup: skill unexpectedly stamped a model"
+sed "s/^  builder: .*/  builder: reasoning/" "$TLF/.harness/harness.config.yaml" > "$TLF/.cfg.t" && mv "$TLF/.cfg.t" "$TLF/.harness/harness.config.yaml"
+grep -q '^  builder: reasoning$' "$TLF/.harness/harness.config.yaml" || fail "ag-tierchange setup: models.builder not set to reasoning"
+sh "$SRC/harness-install.sh" --agents=claude "$TLF" >/dev/null 2>&1 || fail "ag-tierchange deselect rerun failed"
+[ -f "$TLF/.agents/skills/builder/SKILL.md" ] && fail "Codex r6 P1: pristine skill must be reclaimed when the tier changed in the deselect run"
+[ -d "$TLF/.agents" ] && fail "Codex r6 P1: .agents tree must be fully reclaimed after tier-change deselect"
+rm -rf "$TLF"
+pass "antigravity deselect reclaims a skill whose tier changed in the same run (Codex r6 P1)"
+
 # antigravity_deselect_reclaims_pr_fixer_skill (Codex r2 P1 #3678594358): with
 # pr_loop.enabled true, antigravity stamps .agents/skills/pr-fixer/SKILL.md, but the §7
 # persona loop only visits ag_personas (no pr-fixer) and the gate-off reconciliation is

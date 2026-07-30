@@ -41,6 +41,10 @@ All notable changes to the harness body are recorded here. Versions follow
 - The OpenCode deselect compare for `.opencode/agent/pr-fixer.md` also matches the
   frozen pre-0.48 (unquoted-description) body, so the quoting change does not strand a
   pristine old fixer as "user-edited" on deselection (Codex r5 P1 #3679176984).
+- The Antigravity skill-persona deselect compares use the same known-model-variant
+  rule, in BOTH drift directions — a skill stamped without a `model:` line is still
+  reclaimed when its tier was raised in the same run that deselects antigravity
+  (Codex r6 P1 #3679286029).
 
 ## [0.47.0] — 2026-07-29
 

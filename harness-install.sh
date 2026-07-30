@@ -2695,14 +2695,16 @@ EOF
   }
 
   # remove_if_pristine_known_model <rel-path> <ref-file> <agent-label> — like
-  # remove_if_pristine, but ALSO removes <rel-path> when it differs from <ref-file>
-  # ONLY by a single `^model: <v>` line whose <v> is a known generated variant
-  # (_ag_known_model): a legacy persona was stamped under the `models:` config in force
-  # at INSTALL time, while the reference is regenerated under the CURRENT config, so a
-  # tier change between the two runs would otherwise strand a harness-owned persona as
-  # "user-edited" (Codex r4 P2 #3679037642). A model line that is NOT a known generated
-  # value is the user's own edit and the file survives (Codex r5 P1 #3679176989) —
-  # every other difference still reads as user-edited too.
+  # remove_if_pristine, but ALSO removes <rel-path> when it matches <ref-file> once
+  # every `^model: ` line is dropped from BOTH sides, provided the ON-DISK file carries
+  # at most one such line and its value is a known generated variant (_ag_known_model).
+  # The reference's own model line is current-config output and needs no proof. This
+  # covers both directions of a `models:` change between install and now: the file was
+  # stamped WITH a model the config no longer writes (Codex r4 P2
+  # #3679037642) or WITHOUT one the config now writes (Codex r6 P1 #3679286029). A
+  # model line that is NOT a known generated value is the user's own edit and the file
+  # survives (Codex r5 P1 #3679176989) — every other difference also still reads as
+  # user-edited.
   remove_if_pristine_known_model() {
     _rkm_rel="$1"; _rkm_ref="$2"; _rkm_label="$3"
     _rkm_f="$TARGET/$_rkm_rel"
@@ -2712,8 +2714,10 @@ EOF
       printf '%s\n' "$_rkm_rel"
       return 0
     fi
+    _rkm_nlines="$(grep -c '^model: ' "$_rkm_f" || true)"
     _rkm_vals="$(sed -n 's/^model: //p' "$_rkm_f")"
-    if [ "$(printf '%s\n' "$_rkm_vals" | grep -c .)" -eq 1 ] && _ag_known_model "$_rkm_vals"; then
+    if [ "$_rkm_nlines" -le 1 ] \
+       && { [ "$_rkm_nlines" -eq 0 ] || _ag_known_model "$_rkm_vals"; }; then
       _rkm_a="$(mktemp 2>/dev/null || mktemp -t harness-rkm)"
       _rkm_b="$(mktemp 2>/dev/null || mktemp -t harness-rkm)"
       sed '/^model: /d' "$_rkm_f"   > "$_rkm_a"
@@ -4174,11 +4178,13 @@ EOF
             remove_if_pristine ".agents/skills/$_agw/SKILL.md" "$_agtmp" antigravity
             rmdir "$TARGET/.agents/skills/$_agw" 2>/dev/null || true
           done
-          # skills (personas)
+          # skills (personas) — known-model-variant compare: a skill stamped under the
+          # install-time `models:` config must still be reclaimed when the tiers changed
+          # before this deselect run (Codex r6 P1 #3679286029).
           ag_personas | while IFS='	' read -r _agr _agd; do
             [ -n "$_agr" ] || continue
             gen_ag_persona "$_agr" "$_agd" "$_agtmp"
-            remove_if_pristine ".agents/skills/$_agr/SKILL.md" "$_agtmp" antigravity
+            remove_if_pristine_known_model ".agents/skills/$_agr/SKILL.md" "$_agtmp" antigravity
             rmdir "$TARGET/.agents/skills/$_agr" 2>/dev/null || true
           done
           # pr-fixer persona: gated on pr_loop.enabled, so it is NOT in ag_personas and
@@ -4187,7 +4193,7 @@ EOF
           # R4 removal-ledger rule, mirrored for the skills layout). (Codex r2 P1
           # #3678594358.)
           gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$_agtmp"
-          remove_if_pristine ".agents/skills/pr-fixer/SKILL.md" "$_agtmp" antigravity
+          remove_if_pristine_known_model ".agents/skills/pr-fixer/SKILL.md" "$_agtmp" antigravity
           rmdir "$TARGET/.agents/skills/pr-fixer" 2>/dev/null || true
           rm -f "$_agtmp"
           # Prune each now-empty `.agents/` subdir + the parent, only when empty
@@ -4297,7 +4303,7 @@ EOF
       # `.agents/` is a user-owned namespace ⇒ pristine-compare, never delete-by-name.
       _prl_tmp="$(mktemp 2>/dev/null || mktemp -t harness-prl)"
       gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$_prl_tmp"
-      _prl_gone="$_prl_gone $(remove_if_pristine .agents/skills/pr-fixer/SKILL.md "$_prl_tmp" antigravity)"
+      _prl_gone="$_prl_gone $(remove_if_pristine_known_model .agents/skills/pr-fixer/SKILL.md "$_prl_tmp" antigravity)"
       rm -f "$_prl_tmp"
       for _prc in $HARNESS_PR_LOOP_CMDS; do
         [ -f "$CMDDIR/$_prc.md" ] || continue
