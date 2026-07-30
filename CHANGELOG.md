@@ -56,6 +56,9 @@ All notable changes to the harness body are recorded here. Versions follow
   compare also accepts the derived ≤0.47.0 body (the front-ends paragraph is the only
   delta), so a copy stamped before the change is not stranded as "user-edited" on
   upgrade or deselection (Codex r11 P1 #3679729160).
+- E99-F09 stays `in-review` until the Reviewer records its verification verdict, and
+  the install guide now describes the Antigravity fixer as a role pointer with the
+  in-session fallback rather than a sub-agent (Codex r12 P1 #3682042719, P2 #3682042725).
 
 ## [0.47.0] — 2026-07-29
 

@@ -434,7 +434,7 @@
         {
           "id": "E99-F09",
           "title": "Update Antigravity integration to use Skills architecture",
-          "status": "done",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],

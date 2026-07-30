@@ -83,10 +83,12 @@ The installer also generates **`/sdd-pr-loop`** — the Codex review loop — fr
 byte-identical body into `.claude/commands/`, `.opencode/command/`,
 `.agents/skills/sdd-pr-loop/SKILL.md` (Antigravity, with an injected `name:` line) and
 the GLOBAL `${CODEX_HOME:-~/.codex}/prompts/`, plus a `pr-fixer` sub-agent for Claude
-(`.claude/agents/pr-fixer.md`), OpenCode (`.opencode/agent/pr-fixer.md`) and Antigravity
-(`.agents/skills/pr-fixer/SKILL.md`). All of it points at the canonical
-`.harness/agents/pr-fixer.md`; no role body is duplicated, and **no** `pr-fixer` artifact
-is created for the codex or gemini front-ends (those apply fixes in-session).
+(`.claude/agents/pr-fixer.md`) and OpenCode (`.opencode/agent/pr-fixer.md`). Antigravity
+gets a **role pointer**, not a sub-agent: `.agents/skills/pr-fixer/SKILL.md` defers to
+the canonical role, but a workspace skill is not spawnable, so Antigravity applies the
+fix runbook **in-session** — the same path codex and gemini use, and the reason **no**
+`pr-fixer` artifact is created for those two front-ends. All of it points at the
+canonical `.harness/agents/pr-fixer.md`; no role body is duplicated.
 
 **Preconditions — the loop only works with all three:** the **Codex GitHub App** installed
 on the target repository, an **authed `gh`**, and **`jq`** on `PATH`. The watcher's
