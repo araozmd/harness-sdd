@@ -1210,12 +1210,14 @@ pass "antigravity deselect deletes only byte-pristine .agents/ glue, keeps user 
 # while SWITCHING AWAY from antigravity must lose the pristine legacy files too — §5c's
 # cleanup only runs while antigravity stays selected, so the §7 deselect path runs the
 # same hoisted reclaim. Legacy bytes are derived from the installer's own new-layout
-# output: the old persona is the SKILL.md minus its `name:` line; the old workflow is
-# the SKILL.md minus the injected name line at line 2.
+# output: the old persona is the SKILL.md minus its `name:` line and with the (now
+# YAML-quoted) description back in plain form; the old workflow is the SKILL.md minus
+# the injected name line at line 2.
 TLA="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 sh "$SRC/harness-install.sh" --agents=antigravity "$TLA" >/dev/null || fail "ag-legacy setup install failed"
 mkdir -p "$TLA/.agents/agents" "$TLA/.agents/workflows"
-grep -v '^name: ' "$TLA/.agents/skills/orchestrator/SKILL.md" > "$TLA/.agents/agents/orchestrator.md"
+grep -v '^name: ' "$TLA/.agents/skills/orchestrator/SKILL.md" \
+  | sed 's/^description: "\(.*\)"$/description: \1/' > "$TLA/.agents/agents/orchestrator.md"
 sed '2d' "$TLA/.agents/skills/sdd-next/SKILL.md" > "$TLA/.agents/workflows/sdd-next.md"
 printf 'MY OWN LEGACY WORKFLOW\n' > "$TLA/.agents/workflows/sdd-fix.md"   # user-authored legacy file
 sh "$SRC/harness-install.sh" --agents=claude "$TLA" >/dev/null 2>&1 || fail "ag-legacy deselect rerun failed"

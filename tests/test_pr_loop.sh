@@ -379,7 +379,7 @@ test_claude_pr_fixer_shim() {                         # R10
   _s="$BASE/.claude/agents/pr-fixer.md"
   [ -f "$_s" ] || fail "R10: .claude/agents/pr-fixer.md not emitted"
   grep -qE '^name: pr-fixer$' "$_s"        || fail "R10: shim frontmatter has no name"
-  grep -qE '^description: '   "$_s"        || fail "R10: shim frontmatter has no description"
+  grep -qE '^description: "'  "$_s"        || fail "R10: shim description is not YAML-quoted (Codex r4 P1)"
   grep -qE '^tools: '         "$_s"        || fail "R10: shim frontmatter has no tools"
   grep -qF '.harness/agents/pr-fixer.md' "$_s" || fail "R10: shim does not point at the canonical role"
   grep -qF 'Do not refactor adjacent code' "$_s" \
@@ -391,7 +391,7 @@ test_opencode_pr_fixer_agent_file() {                 # R11
   _a="$BASE/.opencode/agent/pr-fixer.md"
   [ -f "$_a" ] || fail "R11: .opencode/agent/pr-fixer.md not emitted"
   grep -qE '^mode: subagent$' "$_a" || fail "R11: opencode pr-fixer lacks mode: subagent"
-  grep -qE '^description: '   "$_a" || fail "R11: opencode pr-fixer lacks a description"
+  grep -qE '^description: "'   "$_a" || fail "R11: opencode pr-fixer description is not YAML-quoted (Codex r4 P1)"
   grep -qF '.harness/agents/pr-fixer.md' "$_a" || fail "R11: opencode pr-fixer does not point at the role"
   grep -qF 'pr-fixer' "$BASE/opencode.json" \
     && fail "R11/R12: opencode.json must not gain a pr-fixer entry"
@@ -415,7 +415,7 @@ test_antigravity_pr_fixer_persona() {                 # R13
   _p="$BASE/.agents/skills/pr-fixer/SKILL.md"
   [ -f "$_p" ] || fail "R13: .agents/skills/pr-fixer/SKILL.md not emitted"
   grep -qE '^name: pr-fixer$' "$_p" || fail "R13: antigravity pr-fixer skill lacks a name frontmatter"
-  grep -qE '^description: ' "$_p" || fail "R13: antigravity persona lacks a description"
+  grep -qE '^description: "' "$_p" || fail "R13: antigravity pr-fixer skill description is not YAML-quoted (Codex r4 P1)"
   grep -qF '.harness/agents/pr-fixer.md' "$_p" || fail "R13: persona does not point at the canonical role"
   pass "R13 .agents/skills/pr-fixer/SKILL.md emitted through the persona emitter (E99-F09)"
 }

@@ -2368,11 +2368,21 @@ EOF
   # byte contract it feeds) is NOT touched by pr_loop (E18-F01 R11/R12). The body POINTS at
   # the canonical .harness/agents/<role>.md; it never duplicates a role body. No `model:`
   # key: pr-fixer is not in MODEL_ROLES and inherits the session model (R14).
+  # _yaml_dq <value> — print <value> escaped for a double-quoted YAML scalar. A plain
+  # (unquoted) scalar breaks on the first `: ` — PR_FIXER_DESC carries "context: reads",
+  # which made every generated pr-fixer frontmatter invalid YAML ("mapping values are
+  # not allowed"). Every LIVE frontmatter description goes through here; the FROZEN
+  # ≤0.47.0 emitters (reclaim_ag_legacy_layout, gen_ag_rule_legacy) deliberately stay
+  # unquoted to reproduce the old bytes. (Codex r4 P1 #3679037635.)
+  _yaml_dq() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+  }
+
   gen_oc_agent() {
     _oca_role="$1"; _oca_desc="$2"; _oca_dest="$3"
     {
       printf -- '---\n'
-      printf 'description: %s\n' "$_oca_desc"
+      printf 'description: "%s"\n' "$(_yaml_dq "$_oca_desc")"
       printf 'mode: subagent\n'
       printf 'permission:\n'
       printf '  edit: allow\n'
@@ -2470,7 +2480,7 @@ EOF
     {
       printf -- '---\n'
       printf 'name: %s\n' "$_agp_role"
-      printf 'description: %s\n' "$_agp_desc"
+      printf 'description: "%s"\n' "$(_yaml_dq "$_agp_desc")"
       if [ -n "$_agp_model" ]; then printf 'model: %s\n' "$_agp_model"; fi
       printf -- '---\n'
     } > "$_agp_dest"
@@ -2581,7 +2591,7 @@ EOF
     {
       printf -- '---\n'
       printf 'name: %s\n' "$_gga_role"
-      printf 'description: %s\n' "$_gga_desc"
+      printf 'description: "%s"\n' "$(_yaml_dq "$_gga_desc")"
       if [ -n "$_gga_model" ]; then printf 'model: %s\n' "$_gga_model"; fi
       printf -- '---\n'
     } > "$_gga_dest"
@@ -2747,7 +2757,7 @@ EOF
     {
       printf -- '---\n'
       printf 'name: %s\n' "$1"
-      printf 'description: %s\n' "$3"
+      printf 'description: "%s"\n' "$(_yaml_dq "$3")"
       printf 'tools: %s\n' "$2"
       if [ -n "$_ea_model" ]; then printf 'model: %s\n' "$_ea_model"; fi
       printf -- '---\n'

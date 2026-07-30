@@ -28,6 +28,10 @@ All notable changes to the harness body are recorded here. Versions follow
   ≤0.47.0 rule body — a pre-Skills target upgrading while switching front-ends no longer
   misreads its pristine old entrypoint rule as user-edited and leaves it behind
   (Codex r3 P1 #3678958588).
+- Generated frontmatter descriptions are now YAML double-quoted everywhere (claude
+  shims, OpenCode agent files, Antigravity + Gemini skills): `PR_FIXER_DESC` contains
+  `context: reads`, which made every generated pr-fixer frontmatter invalid YAML and
+  broke Antigravity's discovery of the fixer skill (Codex r4 P1 #3679037635).
 
 ## [0.47.0] — 2026-07-29
 
