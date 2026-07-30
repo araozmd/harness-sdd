@@ -93,7 +93,7 @@ approves) → `builder` → `reviewer`.
 | **Codex** | `AGENTS.md` (native) | run roles sequentially; global `/prompts:sdd-*` prompts, including `/prompts:sdd-fix-parallel` and `/prompts:sdd-pr-loop`, in `${CODEX_HOME:-~/.codex}/prompts/` |
 | **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
 | **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-test-concurrency` and `/sdd-pr-loop`; `/sdd-fix-parallel` is opt-in (verified by `/sdd-test-concurrency`) |
-| **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/skills/<role>/SKILL.md` personas (+ `pr-fixer`) + `.agents/skills/<cmd>/SKILL.md`, including `/sdd-fix-parallel` and `/sdd-pr-loop` |
+| **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/skills/<name>/SKILL.md` — role & command pointers (incl. `/sdd-fix-parallel`, `/sdd-pr-loop`); no spawnable sub-agents, so fixes run in-session |
 
 `/sdd-pr-loop` and the `pr-fixer` sub-agent are the only **gated** glue: they are stamped
 only while `pr_loop.enabled` is `true` in `harness.config.yaml`, and that gate is

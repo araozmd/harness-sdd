@@ -283,7 +283,7 @@ models:
   # floating tier alias — an unpinned tier there stamps nothing.
   #   opencode MUST be "provider/model" (an invalid value aborts your OpenCode run)
   #   codex    MUST be a bare model id (the provider comes from `model_provider`)
-  #   antigravity accepts only tier aliases and needs `agy` >= 1.1.5 (inert below it)
+  #   antigravity is NOT routed: Agent Skills frontmatter defines no model key (E17-F01 A2)
   # pin.opencode.reasoning: ""
   # pin.opencode.standard: ""
   # pin.opencode.cheap: ""
