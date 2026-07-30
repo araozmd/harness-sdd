@@ -22,8 +22,11 @@ your-project/
 ├── .opencode/agent/pr-fixer.md         # only while pr_loop.enabled (OpenCode file-based sub-agent)
 ├── opencode.json                       # created only if absent (re-stamped only while pristine)
 ├── .agents/{rules,agents,workflows}/   # Antigravity glue → resolves to .harness/ (regenerated each run)
+├── .agents/skills/sdd-*/                # Codex repository-local $sdd-* skill units
+│   ├── SKILL.md                         # adapter + canonical workflow
+│   └── agents/openai.yaml               # explicit-only invocation policy
 ├── .gemini/agents/*.md                 # per-role model routing only — created ONLY when a tier resolves
-├── .codex/agents/*.toml                # per-role model routing only — project-local, never ~/.codex
+├── .codex/agents/*.toml                # six selected Codex roles; model optional, never ~/.codex
 └── .harness/                           # the whole harness body
     ├── .harness-version  manifest.txt
     ├── .opencode.stamp                  # byte copy of the last generated opencode.json (model routing only)
@@ -43,6 +46,30 @@ Nothing you authored is destroyed: existing entrypoint prose is preserved (only 
 `<!-- harness:begin -->…<!-- harness:end -->` block is managed), and project files
 under `.harness/specs|state|progress` are written once and never clobbered.
 
+### Codex skills and legacy prompt migration
+
+Codex workflow discovery is repository-local. Select `codex` to install `$sdd-next`,
+`$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`, and `$sdd-fix-parallel` under
+`.agents/skills/`; `$sdd-pr-loop` follows the opt-in gate. Each skill is a two-file
+ownership unit: `SKILL.md` carries the canonical workflow plus an adapter mapping text
+accompanying the explicit `$skill` mention to `$ARGUMENTS`, while `agents/openai.yaml`
+sets `policy.allow_implicit_invocation: false`. Current installation does not read
+`HOME` or `CODEX_HOME` to create workflow glue and never writes or overwrites
+`${CODEX_HOME:-$HOME/.codex}/prompts/sdd-*.md`.
+
+Last-written copies under `.harness/.codex-skills/` let a selected install update both
+skill files only when the live unit is absent, current-generated, or still matches the
+previous stamp. The same ownership rule governs gate-off and deselection, so foreign or
+edited units survive intact. Codex role TOMLs use their existing last-written stamps
+under `.harness/.model-agents/codex/` for the same protection.
+
+The old global resolver is retained only for upgrade migration. Ungated legacy prompts
+are always preserved and diagnosed because there is no cross-target ownership ledger
+that can prove another pre-0.48 repository no longer relies on them. Only
+`sdd-pr-loop.md` is reclaimable: its bytes must match the canonical generated legacy
+command and its readable ownership ledger must prove that no live target still claims
+the prompt. Missing, unreadable, or live-owner state fails safe.
+
 ## Bootstrap (first run)
 
 The installer is deterministic; the *project-specific* adaptation is done through the
@@ -61,8 +88,8 @@ To add new work later, run **`/sdd-new "<idea>"`** — the Inception intake tria
 you to run `/sdd-next` to spec and build it. The installer ships this command into your
 project alongside `/sdd-next`.
 
-The installer also generates `/sdd-fix-parallel` from one byte-identical command body
-for Claude, OpenCode, Antigravity, and global Codex prompts. It resolves the portable
+The installer also generates `/sdd-fix-parallel` from one canonical command body for
+Claude, OpenCode, Antigravity, and the Codex `$sdd-fix-parallel` repository skill. It resolves the portable
 Fixer and targeted Orchestrator contracts from `.harness/`, and its filename is
 registry-owned for safe front-end cleanup. Fresh config includes
 `fix_lane.max_parallel: 3` and extension-only `fix_lane.shared_paths: []`. The
@@ -79,9 +106,9 @@ delegate backend fails before manifest/provision/claim and points to serial
 > installer to turn the loop on. Only the literal `true` enables it — an absent block,
 > an absent key, an empty or malformed value all mean off.
 
-The installer also generates **`/sdd-pr-loop`** — the Codex review loop — from one
-byte-identical body into `.claude/commands/`, `.opencode/command/`, `.agents/workflows/`
-and the GLOBAL `${CODEX_HOME:-~/.codex}/prompts/`, plus a `pr-fixer` sub-agent for Claude
+The installer also generates **`/sdd-pr-loop`** — `$sdd-pr-loop` in Codex — from one
+canonical body into `.claude/commands/`, `.opencode/command/`, `.agents/workflows/`,
+and `.agents/skills/sdd-pr-loop/SKILL.md`, plus a `pr-fixer` sub-agent for Claude
 (`.claude/agents/pr-fixer.md`), OpenCode (`.opencode/agent/pr-fixer.md`) and Antigravity
 (`.agents/agents/pr-fixer.md`). All of it points at the canonical
 `.harness/agents/pr-fixer.md`; no role body is duplicated, and **no** `pr-fixer` artifact
@@ -116,7 +143,7 @@ over the default). Execution knobs are **env-only**: `HARNESS_POLL_INTERVAL` (60
 
 Flipping `pr_loop.enabled` back to `false` and re-running the installer **reclaims** the
 command and every `pr-fixer` artifact from each still-selected front-end
-(pristine-only in the user-owned `$CODEX_HOME/prompts` dir and the `.agents/` tree), and
+(pristine-only in the user-owned `.agents/` tree), and
 empty dirs are pruned. Flipping it back to `true` restores byte-identical glue. The round
 cache lives at `.harness/.pr-loop/<pr>/round-<n>/` and is gitignored by the seeded
 `.harness/.gitignore`.
@@ -592,14 +619,13 @@ model list, so every other pin value is passed through untouched.
 | `antigravity` | `.agents/agents/<role>.md` | `model:` frontmatter key |
 | `opencode` | `opencode.json` | `"model"` member in `agent.<role>` |
 | `gemini` | `.gemini/agents/<role>.md` | `model:` frontmatter key (**new file**) |
-| `codex` | `.codex/agents/<role>.toml` | `model = "…"` (**new file**, project-local) |
+| `codex` | `.codex/agents/<role>.toml` | optional `model = "…"` (role always registered, project-local) |
 
-`.gemini/agents/` and `.codex/agents/` are created **only** when at least one role
-resolves to a concrete value for that front-end. Only **selected** front-ends
-(`--agents`) are ever stamped. The Codex artifact is deliberately project-local: unlike
-the target-independent global `/prompts:sdd-*` bodies, a model stamp is target-dependent,
-so writing it to `~/.codex` would let one repo silently retune every other repo on the
-machine.
+`.gemini/agents/` remains conditional on at least one concrete Gemini value.
+`.codex/agents/` is different: selecting Codex always registers exactly the six standard
+roles with `name`, `description`, and `developer_instructions`. An inherited role or an
+unpinned Codex tier omits `model`; a concrete pin adds `model` only to the roles that
+resolve to it. Only selected front-ends (`--agents`) are stamped.
 
 > **Codex precondition — the project must be trusted.** Codex discovers agent files by
 > directory convention (`$CODEX_HOME/agents/` and the project-local `<repo>/.codex/agents/`),
@@ -615,9 +641,10 @@ It is re-stamped **only** when it is byte-identical to `.harness/.opencode.stamp
 last body the installer wrote) or to a freshly generated model-free body; anything else
 is treated as yours, left untouched, and reported. `.harness/.model-agents/` is the same
 device for the `.gemini/agents/` and `.codex/agents/` trees: it remembers the exact bytes
-last written there, so putting every role back on `inherit` (or deselecting the front-end)
-reclaims those files instead of orphaning them with their old `model` keys. Both stamps
-exist only while the artifacts they describe do.
+last written there. Returning Codex roles to `inherit` regenerates stamp-matching TOMLs
+without their old `model` keys; a foreign or edited role is preserved and diagnosed.
+Deselecting Codex reclaims only roles that still match their last-written stamp. Both
+stamp trees exist only while the artifacts they describe do.
 Deselecting a front-end reclaims its
 stamped artifacts through the same pristine byte-comparison every other generated file
 uses — an edited file survives with a warning.
