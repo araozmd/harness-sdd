@@ -41,8 +41,8 @@ No product data or TaskStore schema changes.
 | `README.md` | Replace `/prompts:sdd-*` and global-path instructions with `.agents/skills` and `$sdd-*`; update the compatibility/layout tables | R10 |
 | `docs/HARNESS.md` | Document Codex skills alongside the unchanged command mirrors for the other front-ends | R10 |
 | `docs/INSTALL.md` | Document the installed skill/role layout, selection/reclamation behavior, legacy prompt migration, model omission under inherit, and project trust | R10 |
-| `CHANGELOG.md` | Add the `0.48.0` E23-F01 release entry | R10 |
-| `VERSION` | Bump `0.47.0` to `0.48.0` because the installed body gains a backward-compatible current-Codex adapter capability | R10 |
+| `CHANGELOG.md` | Add the `0.49.0` E23-F01 release entry after reconciling the concurrent `0.48.0` release on `main` | R10 |
+| `VERSION` | Bump the post-merge baseline `0.48.0` to `0.49.0` because the installed body gains a backward-compatible current-Codex adapter capability | R10 |
 
 ## DO NOT TOUCH
 

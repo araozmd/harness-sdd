@@ -76,7 +76,7 @@ deterministic task selection and is not touched by this installer-adapter change
 - **R10** — When this feature ships, the installed manifest, README, installation
   guide, harness guide, changelog, and public version shall describe repository-local
   `$sdd-*` Codex skills, always-present selected Codex roles, legacy prompt migration,
-  and release version `0.48.0`.
+  and release version `0.49.0`.
 
 ## Out of scope
 

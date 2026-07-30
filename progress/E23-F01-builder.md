@@ -76,7 +76,8 @@ out-of-scope Inception fallback validation of existing draft epic statuses.
   TOMLs. Inherit/unpinned routing omits `model`; concrete pins add it only where
   resolved; pin-to-inherit regenerates the role without deleting the role tree.
 - Updated focused installer/host/model/pr-loop/toggle tests, active-surface
-  documentation, the changelog, and the public version (`0.48.0`).
+  documentation, the changelog, and the public version (reconciled to `0.49.0`
+  after the concurrent `0.48.0` release merged to `main`).
 
 ## Final verification
 

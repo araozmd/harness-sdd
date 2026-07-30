@@ -24,7 +24,7 @@ APPROVED. No blocking spec, quality, security, or compatibility findings remain.
   byte-identical to their pre-feature behavior. Gemini live generation is
   independent of unsafe ownership bookkeeping.
 - README, INSTALL, HARNESS, manifest, CHANGELOG, and VERSION consistently document
-  the Codex adapter and release `0.48.0`.
+  the Codex adapter and reconciled release `0.49.0`.
 
 ## Verification
 

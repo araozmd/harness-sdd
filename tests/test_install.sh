@@ -1306,8 +1306,8 @@ pass "codex preserves ownership-unknown ungated legacy prompts and edited prompt
 
 # E23-F01 R10: shipped documentation and the installed manifest describe the native
 # Codex surface, always-present roles, safe migration, and the public release version.
-[ "$(cat "$SRC/VERSION")" = "0.48.0" ] || fail "R10: VERSION is not 0.48.0"
-grep -qF '## [0.48.0]' "$SRC/CHANGELOG.md" || fail "R10: CHANGELOG lacks 0.48.0"
+[ "$(cat "$SRC/VERSION")" = "0.49.0" ] || fail "R10: VERSION is not 0.49.0"
+grep -qF '## [0.49.0]' "$SRC/CHANGELOG.md" || fail "R10: CHANGELOG lacks 0.49.0"
 for _doc in "$SRC/README.md" "$SRC/docs/HARNESS.md" "$SRC/docs/INSTALL.md"; do
   grep -qF '$sdd-' "$_doc" || fail "R10: $_doc does not document Codex \$sdd-* skills"
   grep -qF '.agents/skills' "$_doc" || fail "R10: $_doc omits the Codex skill layout"

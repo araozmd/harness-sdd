@@ -31,6 +31,6 @@
   installer-toggle, and host-detection suites; fix only regressions attributable to the
   Codex adapter and confirm non-Codex artifact assertions remain green.
 - [ ] **T10** (R10) — Update `README.md`, `docs/HARNESS.md`, `docs/INSTALL.md`, the
-  installer-generated manifest/help text, `CHANGELOG.md`, and `VERSION` to `0.48.0`.
+  installer-generated manifest/help text, `CHANGELOG.md`, and `VERSION` to `0.49.0`.
 - [ ] **T11** (R1–R10) — Run `./init.sh` and the complete
   `verification.test_command`; record the exact commands/results for Reviewer hand-off.

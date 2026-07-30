@@ -170,4 +170,11 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 2026-07-29T16:27:58Z - E21-F04 pending -> spec-ready (Architect completed specs)
 2026-07-29T17:03:16Z - E21-F04 spec-ready -> in-progress (Human approved)
 2026-07-29T18:45:00Z - OpenCode /sdd-fix-parallel opt-in + model helper — installer skips /sdd-fix-parallel for OpenCode by default; adds /sdd-test-concurrency probe and --with-opencode-parallel flag; fixes remove_owned set -e regression on macOS sh; adds tools/opencode-model-helper.sh with heuristic tier pins; updates docs/manifest; VERSION 0.47.0. Relevant suites green.
+2026-07-29T21:00:26Z | orchestrator | E21-F04 | pending → architect (re-spec after withdrawal in PR #78): spawning Architect with inbox brief + existing spec + epic context
+2026-07-29T21:06:28Z | architect | E21-F04 | pending → spec-ready (re-spec after withdrawal: 9 R-ids, stacking framed as incremental review only, ADRs touched: none, Doc-critic clean) — PAUSED at human gate
+2026-07-29T21:21:33Z | orchestrator | E21-F04 | spec-ready → in-progress (human approved, gate latency 905s) — spawning Builder (round 1)
+2026-07-29T21:37:34Z | builder | E21-F04 | in-progress → in-review (Builder round 1: T1–T7, 6 files changed, init.sh + all tests green) — spawning Reviewer
+2026-07-29T21:42:45Z | reviewer | E21-F04 | in-review → approve (round 1) — all 83 pr-loop tests green, R1–R9 traced, cross-file consistent, DO NOT TOUCH honored, ADRs correct, change-size ok (225 lines/5 files) → done
+2026-07-29T21:42:45Z | orchestrator | E21-F04 | done (Reviewer verdict persisted). E21 epic rolled up → done.
+2026-07-29T21:42:45Z | orchestrator | E21 drift check (trigger: E21 done): NO-OP — no specs/architecture.md to re-validate against (graceful degradation); no epic demoted
 2026-07-30T00:28:39Z  E23-F01 in-review → approve (round 7) — Independent spec and quality/security reviewers approved all R1-R10 at f0a3fc4 after seven file-backed rounds closed ownership, partial-unit, invocation, and symlink boundary defects. The exact configured 27-suite chain passed; change-size tier ok (433 production lines / 3 files). Proceeding to PR + sdd-pr-loop before merge cleanup.

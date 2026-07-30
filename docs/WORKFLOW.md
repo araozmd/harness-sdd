@@ -473,6 +473,89 @@ is best-effort — if it is missing or corrupt, reconstruct it from the `gh` API
 an existing round offline (no `gh`, no network) with
 `sh tools/wait-for-codex.sh evaluate <round-dir>` — `0` findings, `3` clean, `1` pending.
 
+## Stacked-PR lane — incremental review of safely-splittable features
+
+When a feature legitimately exceeds the single-PR review budget yet its intermediate
+increments are **safely shippable** — each wave can land on `main` without breaking
+anything, and only the combined work delivers the full capability — stacking PRs lets
+each increment be a separate PR whose base is the previous increment's branch. The
+reviewer reads only that increment's own diff (budget-sized), and the stack merges in
+**order**: increment 1, then 2, then 3.
+
+**Stacking provides incremental *review*, not atomic delivery.** Merging increment A
+publishes wave 1 to `main` while B and C are still open. A feature whose intermediate
+states are unsafe to ship needs a different mechanism (feature flags, an aggregate
+landing strategy) and is explicitly out of scope for this lane.
+
+### When to use what
+
+| Scenario | Mechanism |
+|---|---|
+| Feature fits the single-PR review budget | Open one PR against `main` — the default lane |
+| Feature exceeds the budget but intermediate increments are safely shippable | Open a **stacked PR** per increment — this lane |
+| Feature exceeds the budget and intermediate increments are NOT safely shippable | Do **not** stack. Use **feature flags** to gate the incomplete work, or split into **separate independent features** that can ship on their own |
+| Increments are truly independent (no shared code, no order dependency) | Open **parallel independent PRs** — stacking adds unnecessary ordering |
+
+### Creating stacked increments
+
+Use `gh pr create --base <parent-branch>` to set each PR's base to the previous
+increment's branch:
+
+```bash
+# Increment 1 targets main (default):
+gh pr create --base main --title "feat: wave 1 — ..."
+
+# Increment 2 targets increment 1's branch:
+gh pr create --base feat/wave-1 --title "feat: wave 2 — ..."
+
+# Increment 3 targets increment 2's branch:
+gh pr create --base feat/wave-2 --title "feat: wave 3 — ..."
+```
+
+The pr-loop detects stacked PRs automatically: a PR whose `baseRefName` is not the
+default branch is a stacked PR. The merge-order guard (`tools/pr-stack-guard.sh`) then
+prevents merging a child while its parent is still open.
+
+### Wave-boundary guidance
+
+Align increments with the wave structure from the feature's decomposition (E21-F01).
+Each increment should correspond to one wave: a self-contained, independently-reviewable
+chunk that is safe to land on `main` on its own. The per-increment diff should stay
+within the `change_size` budget thresholds so the reviewer can read it in one pass.
+
+### Manual restack procedure (R7)
+
+When an earlier increment takes review fixes (the parent branch is rebased), each child
+increment must be rebased onto the updated parent branch. The pr-loop detects the base
+change (`baseRefOid` shifts) and restarts review from round 1, but it does not rebase
+automatically. The Builder does it by hand:
+
+```bash
+# After increment 1 (parent) is rebased and force-pushed:
+# For each child, rebase onto the updated parent:
+git checkout feat/wave-2
+git rebase --onto feat/wave-1 old-base-commit   # or: git rebase feat/wave-1
+git push --force-with-lease
+
+git checkout feat/wave-3
+git rebase --onto feat/wave-2 old-base-commit
+git push --force-with-lease
+```
+
+The `old-base-commit` is the parent's head SHA before it was rebased. **Do not substitute
+the bare two-arg form** (`git rebase feat/wave-N`): when the parent was rebased or
+force-pushed, that shorthand replays the child's copies of the *old* parent commits along
+with the child-only commits, producing conflicts and duplicated changes. Recover the old
+parent tip from the parent's reflog or the `baseRefOid` recorded in the round cache, and
+always use `git rebase --onto`.
+
+### Opt-in and inert-when-disabled
+
+The stacked-PR lane is opt-in — a feature that does not explicitly create a PR with a
+non-default base follows the existing single-PR default lane unchanged (R9). Where
+`pr_loop.enabled` is `false`, the stacking lane is inert: no guard invocation, no
+stacking-specific merge logic, no stacking documentation is stamped (R8).
+
 ## Context hygiene
 
 Agents degrade as their context fills (noticeably past ~20%, badly past ~40%).
