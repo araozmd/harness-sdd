@@ -1298,6 +1298,52 @@ grep -q '^model: flash$' "$TLF/.agents/skills/builder/SKILL.md" || fail "Codex r
 rm -rf "$TLF"
 pass "antigravity deselect reclaims a skill whose tier changed in the same run, keeps a user-set model (Codex r6 P1 + r7 P1)"
 
+# antigravity_upgrade_reclaims_pre_r10_pr_loop_workflow (Codex r11 P1 #3679729160): the
+# r10 front-ends paragraph changed the /sdd-pr-loop command body, so a ≤0.47.0 copy
+# fails the byte compare against the CURRENT body and would keep the obsolete subagent
+# path discoverable. Every sdd-pr-loop.md reclaim compare accepts the derived ≤0.47.0
+# body. Old bytes built from the installer's own output: the skill minus its name line
+# is the current body; swapping the new paragraph for the frozen old one is the 0.47.0
+# body (the paragraph is the only delta).
+TLG="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=antigravity,opencode --pr-loop=true "$TLG" >/dev/null || fail "ag-oldpl setup install failed"
+sed '2d' "$TLG/.agents/skills/sdd-pr-loop/SKILL.md" > "$TLG/.pl-current"
+awk '
+  /^\*\*Front-ends without a `pr-fixer` sub-agent\*\*/ {
+    print "**Front-ends without a `pr-fixer` sub-agent** (codex, gemini) do not spawn one: apply each"
+    print "blocking comment'"'"'s fix **in-session**, under the same discipline — one comment, one"
+    print "targeted fix, one commit, one `fix-<comment_id>.md` note — then push once at the end of"
+    print "the round."
+    skip=1
+    next
+  }
+  skip {
+    if ($0 == "") { skip=0; print "" }
+    next
+  }
+  { print }
+' "$TLG/.pl-current" > "$TLG/.pl-old"
+grep -qF '(codex, gemini) do not spawn one' "$TLG/.pl-old" || fail "ag-oldpl setup: legacy paragraph swap failed"
+# (a) retained antigravity upgrade: legacy workflow beside the new skill must go away
+mkdir -p "$TLG/.agents/workflows"
+cp "$TLG/.pl-old" "$TLG/.agents/workflows/sdd-pr-loop.md"
+sh "$SRC/harness-install.sh" --agents=antigravity,opencode --pr-loop=true "$TLG" >/dev/null 2>&1 || fail "ag-oldpl upgrade rerun failed"
+[ -f "$TLG/.agents/workflows/sdd-pr-loop.md" ] && fail "Codex r11 P1: pristine ≤0.47.0 pr-loop workflow must be reclaimed on upgrade"
+# (b) opencode deselect: same body in .opencode/command must go away
+cp "$TLG/.pl-old" "$TLG/.opencode/command/sdd-pr-loop.md"
+sh "$SRC/harness-install.sh" --agents=antigravity --pr-loop=true "$TLG" >/dev/null 2>&1 || fail "ag-oldpl deselect rerun failed"
+[ -f "$TLG/.opencode/command/sdd-pr-loop.md" ] && fail "Codex r11 P1: pristine ≤0.47.0 pr-loop command must be reclaimed on opencode deselect"
+# (c) an EDITED old copy is still user content and survives both compares
+sh "$SRC/harness-install.sh" --agents=antigravity,opencode --pr-loop=true "$TLG" >/dev/null || fail "ag-oldpl reinstall failed"
+mkdir -p "$TLG/.agents/workflows"
+cp "$TLG/.pl-old" "$TLG/.agents/workflows/sdd-pr-loop.md"
+printf '\n# my own note\n' >> "$TLG/.agents/workflows/sdd-pr-loop.md"
+sh "$SRC/harness-install.sh" --agents=antigravity,opencode --pr-loop=true "$TLG" >/dev/null 2>&1 || fail "ag-oldpl edited rerun failed"
+[ -f "$TLG/.agents/workflows/sdd-pr-loop.md" ] || fail "Codex r11 P1: user-edited old workflow was wrongly deleted"
+grep -qF 'my own note' "$TLG/.agents/workflows/sdd-pr-loop.md" || fail "Codex r11 P1: user edit not preserved"
+rm -rf "$TLG"
+pass "pre-r10 /sdd-pr-loop copies are reclaimed on upgrade and deselect, edited ones kept (Codex r11 P1)"
+
 # antigravity_deselect_reclaims_pr_fixer_skill (Codex r2 P1 #3678594358): with
 # pr_loop.enabled true, antigravity stamps .agents/skills/pr-fixer/SKILL.md, but the §7
 # persona loop only visits ag_personas (no pr-fixer) and the gate-off reconciliation is

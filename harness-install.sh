@@ -2464,6 +2464,46 @@ The skill files in `.agents/skills/` are thin pointers at the canonical
 EOF
   }
 
+  # gen_pr_loop_cmd_legacy <dest> — write the ≤0.47.0 /sdd-pr-loop command body, DERIVED
+  # from the current $CMDDIR/sdd-pr-loop.md: the only delta this PR made to the command
+  # is the front-ends paragraph (Codex r10 P1 #3679626254), so swapping that one
+  # paragraph back reproduces the old bytes exactly. It exists as the pristine reference
+  # for every sdd-pr-loop.md reclaim compare — without it an untouched copy stamped
+  # before the paragraph changed is misread as user-edited and the obsolete subagent
+  # path stays discoverable. (Codex r11 P1 #3679729160.)
+  gen_pr_loop_cmd_legacy() {
+    awk '
+      /^\*\*Front-ends without a `pr-fixer` sub-agent\*\*/ {
+        print "**Front-ends without a `pr-fixer` sub-agent** (codex, gemini) do not spawn one: apply each"
+        print "blocking comment'"'"'s fix **in-session**, under the same discipline — one comment, one"
+        print "targeted fix, one commit, one `fix-<comment_id>.md` note — then push once at the end of"
+        print "the round."
+        skip=1
+        next
+      }
+      skip {
+        if ($0 == "") { skip=0; print "" }
+        next
+      }
+      { print }
+    ' "$CMDDIR/sdd-pr-loop.md" > "$1"
+  }
+
+  # remove_if_pristine_either <rel-path> <ref-A> <ref-B> <agent-label> — like
+  # remove_if_pristine, but the file is reclaimed when it matches EITHER reference
+  # byte-for-byte (e.g. the current command body or its derived legacy form).
+  remove_if_pristine_either() {
+    _rpe_rel="$1"; _rpe_a="$2"; _rpe_b="$3"; _rpe_label="$4"
+    _rpe_f="$TARGET/$_rpe_rel"
+    [ -f "$_rpe_f" ] || return 0
+    if cmp -s "$_rpe_f" "$_rpe_a" || cmp -s "$_rpe_f" "$_rpe_b"; then
+      rm -f "$_rpe_f"
+      printf '%s\n' "$_rpe_rel"
+    else
+      echo "⚠️  $_rpe_rel differs from the generated stamp (edited) — left in place (deselected '$_rpe_label' not removed)" >&2
+    fi
+  }
+
   # gen_ag_rule_legacy <dest> — the FROZEN ≤0.47.0 (pre-Skills) entrypoint rule body.
   # It exists ONLY as a §7 pristine reference: a target stamped by 0.47.0 that upgrades
   # while switching front-end carries THESE bytes in .agents/rules/harness.md, and a
@@ -2600,7 +2640,13 @@ EOF
     remove_if_pristine_modelless ".agents/agents/pr-fixer.md" "$_agl_tmp" antigravity >/dev/null
 
     for _agl_w in $HARNESS_SDD_CMDS $HARNESS_PR_LOOP_CMDS; do
-      remove_if_pristine ".agents/workflows/$_agl_w.md" "$CMDDIR/$_agl_w.md" antigravity >/dev/null
+      # sdd-pr-loop gets a second reference: a ≤0.47.0 copy predates the r10
+      # front-ends paragraph and must not be stranded as "user-edited" (Codex r11 P1).
+      if [ "$_agl_w" = "sdd-pr-loop" ]; then
+        remove_if_pristine_either ".agents/workflows/$_agl_w.md" "$CMDDIR/$_agl_w.md" "$CMDDIR/sdd-pr-loop.legacy.md" antigravity >/dev/null
+      else
+        remove_if_pristine ".agents/workflows/$_agl_w.md" "$CMDDIR/$_agl_w.md" antigravity >/dev/null
+      fi
     done
     rm -f "$_agl_tmp"
     rmdir "$TARGET/.agents/agents" 2>/dev/null || true
@@ -3761,6 +3807,11 @@ merge did not land, that is this state, and it is a failure.
   squash-message.txt          # only when merge_strategy: squash
 ```
 EOF
+  # The derived ≤0.47.0 body (front-ends paragraph swapped back, Codex r10/r11) — the
+  # pristine reference every sdd-pr-loop.md reclaim compare falls back to, so a copy
+  # stamped before the paragraph changed is not misread as user-edited. Generated
+  # unconditionally for the same load-bearing reason as the main body above.
+  gen_pr_loop_cmd_legacy "$CMDDIR/sdd-pr-loop.legacy.md"
   # Mirror the generated command bodies into the SELECTED front-ends. Claude Code
   # reads .claude/commands/ (gated on `claude`, R3/R4); OpenCode reads
   # .opencode/command/ (gated on `opencode`, R3/R4). Both copy from the same CMDDIR,
@@ -4088,7 +4139,12 @@ EOF
           _oc_tmp="$(mktemp 2>/dev/null || mktemp -t harness-oc)"
           _oc_removed=''
           for _oc_cmd in $HARNESS_OWNED_CMDS sdd-test-concurrency; do
-            _oc_rel="$(remove_if_pristine ".opencode/command/$_oc_cmd.md" "$CMDDIR/$_oc_cmd.md" opencode)"
+            # sdd-pr-loop: accept the derived ≤0.47.0 body too (Codex r11 P1).
+            if [ "$_oc_cmd" = "sdd-pr-loop" ]; then
+              _oc_rel="$(remove_if_pristine_either ".opencode/command/$_oc_cmd.md" "$CMDDIR/$_oc_cmd.md" "$CMDDIR/sdd-pr-loop.legacy.md" opencode)"
+            else
+              _oc_rel="$(remove_if_pristine ".opencode/command/$_oc_cmd.md" "$CMDDIR/$_oc_cmd.md" opencode)"
+            fi
             [ -n "$_oc_rel" ] && _oc_removed="$_oc_removed $_oc_cmd.md"
           done
           # E18-F01 R4/R7: `.opencode/agent/` is a pr_loop-owned dir. Compare the pr-fixer
@@ -4228,6 +4284,12 @@ EOF
               if [ -f "$_cdx/$_cdw.md" ] && cmp -s "$_cdx/$_cdw.md" "$CMDDIR/$_cdw.md"; then
                 rm -f "$_cdx/$_cdw.md"
                 _cdx_removed="$_cdx_removed $_cdw.md"
+              elif [ -f "$_cdx/$_cdw.md" ] && [ "$_cdw" = "sdd-pr-loop" ] \
+                   && cmp -s "$_cdx/$_cdw.md" "$CMDDIR/sdd-pr-loop.legacy.md"; then
+                # a ≤0.47.0-stamped prompt predates the r10 front-ends paragraph — still
+                # harness-owned, still reclaimed (Codex r11 P1)
+                rm -f "$_cdx/$_cdw.md"
+                _cdx_removed="$_cdx_removed $_cdw.md"
               elif [ -f "$_cdx/$_cdw.md" ]; then
                 echo "⚠️  $_cdx/$_cdw.md differs from the generated prompt (edited) — left in place (deselected 'codex' not fully removed)" >&2
               fi
@@ -4323,6 +4385,9 @@ EOF
             continue
           fi
           if [ -f "$_prl_cdx/$_prc.md" ] && cmp -s "$_prl_cdx/$_prc.md" "$CMDDIR/$_prc.md"; then
+            rm -f "$_prl_cdx/$_prc.md"; _prl_gone="$_prl_gone $_prl_cdx/$_prc.md"
+          elif [ -f "$_prl_cdx/$_prc.md" ] && cmp -s "$_prl_cdx/$_prc.md" "$CMDDIR/sdd-pr-loop.legacy.md"; then
+            # a ≤0.47.0-stamped prompt predates the r10 front-ends paragraph (Codex r11 P1)
             rm -f "$_prl_cdx/$_prc.md"; _prl_gone="$_prl_gone $_prl_cdx/$_prc.md"
           elif [ -f "$_prl_cdx/$_prc.md" ]; then
             echo "⚠️  $_prl_cdx/$_prc.md differs from the generated prompt (edited) — left in place (pr_loop disabled, not removed)" >&2

@@ -52,7 +52,10 @@ All notable changes to the harness body are recorded here. Versions follow
 - `/sdd-pr-loop` now routes Antigravity through the documented **in-session** fix lane:
   a workspace `SKILL.md` is a pointer at the canonical role, not a spawnable subagent,
   so the loop body names antigravity alongside codex and gemini as front-ends without a
-  `pr-fixer` sub-agent (Codex r10 P1 #3679626254).
+  `pr-fixer` sub-agent (Codex r10 P1 #3679626254). Every `sdd-pr-loop.md` reclaim
+  compare also accepts the derived ≤0.47.0 body (the front-ends paragraph is the only
+  delta), so a copy stamped before the change is not stranded as "user-edited" on
+  upgrade or deselection (Codex r11 P1 #3679729160).
 
 ## [0.47.0] — 2026-07-29
 
