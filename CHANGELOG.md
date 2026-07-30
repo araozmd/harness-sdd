@@ -38,6 +38,9 @@ All notable changes to the harness body are recorded here. Versions follow
   #3679037642). The allowance is limited to KNOWN generated variants (tier aliases and
   current pins): a hand-set model value is a user edit and survives (Codex r5 P1
   #3679176989).
+- The OpenCode deselect compare for `.opencode/agent/pr-fixer.md` also matches the
+  frozen pre-0.48 (unquoted-description) body, so the quoting change does not strand a
+  pristine old fixer as "user-edited" on deselection (Codex r5 P1 #3679176984).
 
 ## [0.47.0] — 2026-07-29
 

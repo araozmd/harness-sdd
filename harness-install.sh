@@ -2400,6 +2400,34 @@ follow it exactly. Resolve every relative path it mentions against \`.harness/\`
 EOF
   }
 
+  # gen_oc_agent_legacy <role> <description> <dest> — the FROZEN pre-0.48 body: identical
+  # to gen_oc_agent but with the description as a PLAIN (unquoted) YAML scalar, which is
+  # what ≤0.47.0 stamped. It exists ONLY as the §7 deselect pristine reference for
+  # upgrades that cross the quoting change: without it a pristine old
+  # `.opencode/agent/pr-fixer.md` is misread as user-edited and the obsolete,
+  # invalid-YAML fixer survives deselection. Never edit. (Codex r5 P1 #3679176984.)
+  gen_oc_agent_legacy() {
+    _ocal_role="$1"; _ocal_desc="$2"; _ocal_dest="$3"
+    {
+      printf -- '---\n'
+      printf 'description: %s\n' "$_ocal_desc"
+      printf 'mode: subagent\n'
+      printf 'permission:\n'
+      printf '  edit: allow\n'
+      printf '  bash: allow\n'
+      printf -- '---\n'
+    } > "$_ocal_dest"
+    cat >> "$_ocal_dest" <<EOF
+
+You are the **$_ocal_role** for this project's agent harness (installed in \`.harness/\`).
+
+Your full, canonical role definition is \`.harness/agents/$_ocal_role.md\` — read it now and
+follow it exactly. Resolve every relative path it mentions against \`.harness/\`
+(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
+\`.harness/progress/\`).
+EOF
+  }
+
   # ── Antigravity .agents/ glue generators — single source of truth ─────────────
   # These are hoisted out of §5c so BOTH the install stamp (§5c) and the deselect
   # byte-compare (§7) call the exact same emitters. The deselect path removes an
@@ -4073,6 +4101,13 @@ EOF
           # shim against a freshly-generated body, then rmdir the subdir and the parent —
           # each only when empty, so a user's own file-based agent survives.
           gen_oc_agent pr-fixer "$PR_FIXER_DESC" "$_oc_tmp"
+          # ≤0.47.0 targets carry the UNQUOTED-description body (pre-quoting-change):
+          # without the frozen reference a pristine old fixer is misread as edited and
+          # survives deselection. (Codex r5 P1 #3679176984.)
+          if [ -f "$TARGET/.opencode/agent/pr-fixer.md" ] \
+             && ! cmp -s "$TARGET/.opencode/agent/pr-fixer.md" "$_oc_tmp"; then
+            gen_oc_agent_legacy pr-fixer "$PR_FIXER_DESC" "$_oc_tmp"
+          fi
           _oc_rel="$(remove_if_pristine ".opencode/agent/pr-fixer.md" "$_oc_tmp" opencode)"
           [ -n "$_oc_rel" ] && _oc_removed="$_oc_removed pr-fixer.md"
           rm -f "$_oc_tmp"

@@ -1256,6 +1256,28 @@ grep -q '^model: my-custom$' "$TLD/.agents/agents/builder.md" || fail "Codex r5 
 rm -rf "$TLD"
 pass "antigravity deselect reclaims a legacy persona with a known generated model, keeps a user-set one (Codex r4 P2 + r5 P1)"
 
+# opencode_deselect_reclaims_pre_quoting_fixer (Codex r5 P1 #3679176984): a ≤0.47.0
+# target carries the UNQUOTED-description pr-fixer agent file. Deselecting opencode
+# after the quoting change must still reclaim it — the §7 compare accepts the frozen
+# pre-0.48 body alongside the current one. Legacy bytes derived from the installer's
+# own output (quoting is the only delta).
+TLE="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=opencode --pr-loop=true "$TLE" >/dev/null || fail "oc-legacyfixer setup install failed"
+[ -f "$TLE/.opencode/agent/pr-fixer.md" ] || fail "oc-legacyfixer setup: pr-fixer agent missing"
+sed 's/^description: "\(.*\)"$/description: \1/' "$TLE/.opencode/agent/pr-fixer.md" > "$TLE/.oc-legacy"
+cp "$TLE/.oc-legacy" "$TLE/.opencode/agent/pr-fixer.md"   # simulate the ≤0.47.0 stamp
+sh "$SRC/harness-install.sh" --agents=claude --pr-loop=true "$TLE" >/dev/null 2>&1 || fail "oc-legacyfixer deselect rerun failed"
+[ -f "$TLE/.opencode/agent/pr-fixer.md" ] && fail "Codex r5 P1: pristine pre-quoting pr-fixer must be removed on opencode deselect"
+# ...but a genuinely edited old fixer still survives:
+sh "$SRC/harness-install.sh" --agents=opencode --pr-loop=true "$TLE" >/dev/null || fail "oc-legacyfixer reinstall failed"
+cp "$TLE/.oc-legacy" "$TLE/.opencode/agent/pr-fixer.md"
+printf '\n# my own note\n' >> "$TLE/.opencode/agent/pr-fixer.md"
+sh "$SRC/harness-install.sh" --agents=claude --pr-loop=true "$TLE" >/dev/null 2>&1 || fail "oc-legacyfixer edited deselect rerun failed"
+[ -f "$TLE/.opencode/agent/pr-fixer.md" ] || fail "Codex r5 P1: user-edited pre-quoting pr-fixer was wrongly deleted"
+grep -qF 'my own note' "$TLE/.opencode/agent/pr-fixer.md" || fail "Codex r5 P1: user edit not preserved"
+rm -rf "$TLE"
+pass "opencode deselect reclaims a pristine pre-quoting pr-fixer, keeps an edited one (Codex r5 P1)"
+
 # antigravity_deselect_reclaims_pr_fixer_skill (Codex r2 P1 #3678594358): with
 # pr_loop.enabled true, antigravity stamps .agents/skills/pr-fixer/SKILL.md, but the §7
 # persona loop only visits ag_personas (no pr-fixer) and the gate-off reconciliation is
