@@ -4,7 +4,7 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
-## [0.48.1] — 2026-07-29
+## [0.49.1] — 2026-07-29
 
 ### Fixed — 🐛 change-size `--format json` escapes every C0 control character (E99-F08)
 
@@ -22,6 +22,31 @@ P2 deferred at the merge of PR #83 (E99-F07).
   it. New regression coverage (R8d in `tests/test_change_size.sh`) round-trips tracked
   pathnames containing a raw CR (short-escape branch) and a raw VT (`\u00XX` branch) through
   `--format json`, with jq-free assertions so the coverage does not vanish on a jq-less host.
+
+## [0.49.0] — 2026-07-29
+
+### Added — ✨ Native Codex skills and inherited role registration (E23-F01)
+
+- Selecting Codex now installs `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`,
+  `$sdd-fix`, and `$sdd-fix-parallel` as repository-local
+  `.agents/skills/<name>/SKILL.md` artifacts. `$sdd-pr-loop` follows the existing
+  opt-in `pr_loop.enabled` gate. Every skill includes explicit-only
+  `agents/openai.yaml` metadata and maps text accompanying `$skill` to `$ARGUMENTS`.
+- Codex now always receives exactly six project-local `.codex/agents/*.toml` role
+  definitions. Inherited and unpinned roles omit `model`; concrete Codex pins add it
+  only to the roles that resolve to that pin.
+
+### Changed — 📝 Safe retirement of global Codex prompts
+
+- Current installs no longer create, overwrite, or advertise
+  `${CODEX_HOME:-$HOME/.codex}/prompts/sdd-*.md` as an active command surface and do
+  not require `HOME` or `CODEX_HOME`.
+- Ungated legacy prompts are preserved because their cross-target ownership is
+  unknowable. Only byte-pristine legacy `sdd-pr-loop` is reclaimed, and only when its
+  readable ownership ledger proves that no live target still claims it.
+- Last-written stamps make selected Codex skill/role updates and deselection
+  ownership-safe. Foreign or edited files are preserved; empty named directories are
+  pruned without recursively deleting the shared `.agents/` tree.
 
 ## [0.48.0] — 2026-07-29
 
