@@ -102,13 +102,20 @@ test_command_mirrored_to_all_frontends() {           # R2
   install_on "$_m"
   for _f in "$_m/.claude/commands/sdd-pr-loop.md" \
             "$_m/.opencode/command/sdd-pr-loop.md" \
-            "$_m/.agents/workflows/sdd-pr-loop.md" \
             "$_m/ch/prompts/sdd-pr-loop.md"; do
     [ -f "$_f" ] || fail "R2: /sdd-pr-loop not mirrored to $_f"
     cmp -s "$_f" "$_m/.claude/commands/sdd-pr-loop.md" \
       || fail "R2: $_f is not byte-identical to the Claude copy"
   done
-  pass "R2 gate on: /sdd-pr-loop mirrored byte-identically into all four command surfaces"
+  # The Antigravity copy is a SKILL.md with an injected `name:` frontmatter line —
+  # byte-identical to the Claude copy once that line is stripped (E99-F09).
+  _mf="$_m/.agents/skills/sdd-pr-loop/SKILL.md"
+  [ -f "$_mf" ] || fail "R2: /sdd-pr-loop not mirrored to $_mf"
+  sed '/^name: /d' "$_mf" > "$_m/.r2-skill"
+  cmp -s "$_m/.r2-skill" "$_m/.claude/commands/sdd-pr-loop.md" \
+    || fail "R2: $_mf differs from the Claude copy beyond the injected name line"
+  rm -f "$_m/.r2-skill"
+  pass "R2 gate on: /sdd-pr-loop mirrored into all four command surfaces (agy skill = claude body + name frontmatter)"
 }
 
 test_gate_off_stamps_nothing() {                      # R3
@@ -119,11 +126,11 @@ test_gate_off_stamps_nothing() {                      # R3
     || fail "R3: a fresh install did not seed pr_loop.enabled: false"
   for _f in "$_o/.claude/commands/sdd-pr-loop.md" \
             "$_o/.opencode/command/sdd-pr-loop.md" \
-            "$_o/.agents/workflows/sdd-pr-loop.md" \
+            "$_o/.agents/skills/sdd-pr-loop/SKILL.md" \
             "$_o/ch/prompts/sdd-pr-loop.md" \
             "$_o/.claude/agents/pr-fixer.md" \
             "$_o/.opencode/agent/pr-fixer.md" \
-            "$_o/.agents/agents/pr-fixer.md"; do
+            "$_o/.agents/skills/pr-fixer/SKILL.md"; do
     [ -e "$_f" ] && fail "R3: gate off but $_f was stamped"
   done
   [ -d "$_o/.opencode/agent" ] && fail "R3: gate off must not create .opencode/agent/"
@@ -141,7 +148,7 @@ test_deselect_removes_pr_loop_glue() {                # R4
   install_on "$_d" --agents=gemini
   for _f in "$_d/.claude/commands/sdd-pr-loop.md" "$_d/.claude/agents/pr-fixer.md" \
             "$_d/.opencode/command/sdd-pr-loop.md" "$_d/.opencode/agent/pr-fixer.md" \
-            "$_d/.agents/workflows/sdd-pr-loop.md" "$_d/.agents/agents/pr-fixer.md" \
+            "$_d/.agents/skills/sdd-pr-loop/SKILL.md" "$_d/.agents/skills/pr-fixer/SKILL.md" \
             "$_d/ch/prompts/sdd-pr-loop.md"; do
     [ -e "$_f" ] && fail "R4: deselected front-end kept $_f"
   done
@@ -157,7 +164,7 @@ test_gate_flip_off_reclaims() {                       # R5
   install_at "$_f"
   for _p in "$_f/.claude/commands/sdd-pr-loop.md" "$_f/.claude/agents/pr-fixer.md" \
             "$_f/.opencode/command/sdd-pr-loop.md" "$_f/.opencode/agent/pr-fixer.md" \
-            "$_f/.agents/workflows/sdd-pr-loop.md" "$_f/.agents/agents/pr-fixer.md" \
+            "$_f/.agents/skills/sdd-pr-loop/SKILL.md" "$_f/.agents/skills/pr-fixer/SKILL.md" \
             "$_f/ch/prompts/sdd-pr-loop.md"; do
     [ -e "$_p" ] && fail "R5: gate flipped off but $_p survived while the front-end is still selected"
   done
@@ -174,17 +181,17 @@ test_edited_copy_left_in_place_and_warns() {          # R6
   set_gate "$_e" true
   install_at "$_e"
   printf '\n# my own note\n' >> "$_e/ch/prompts/sdd-pr-loop.md"
-  printf '\n# my own note\n' >> "$_e/.agents/agents/pr-fixer.md"
+  printf '\n# my own note\n' >> "$_e/.agents/skills/pr-fixer/SKILL.md"
   set_gate "$_e" false
   install_at "$_e"
   [ -f "$_e/ch/prompts/sdd-pr-loop.md" ] \
     || fail "R6: an EDITED global Codex prompt must survive reclamation"
   grep -qF 'my own note' "$_e/ch/prompts/sdd-pr-loop.md" \
     || fail "R6: the user's edit was lost"
-  [ -f "$_e/.agents/agents/pr-fixer.md" ] \
+  [ -f "$_e/.agents/skills/pr-fixer/SKILL.md" ] \
     || fail "R6: an EDITED .agents/ persona must survive reclamation"
   grep -qF 'sdd-pr-loop.md' "$_e/.err" || fail "R6: surviving edited prompt was not named in a warning"
-  grep -qF 'pr-fixer.md' "$_e/.err"    || fail "R6: surviving edited persona was not named in a warning"
+  grep -qF 'pr-fixer/SKILL.md' "$_e/.err"    || fail "R6: surviving edited persona was not named in a warning"
   pass "R6 edited copies in user-owned namespaces survive, each named in a warning"
 }
 
@@ -217,7 +224,7 @@ test_gate_off_then_on_restores() {                    # R8
   cp "$_r/.claude/commands/sdd-pr-loop.md" "$T/.rt-cmd"
   cp "$_r/.claude/agents/pr-fixer.md"      "$T/.rt-fixer"
   cp "$_r/.opencode/agent/pr-fixer.md"     "$T/.rt-ocfixer"
-  cp "$_r/.agents/agents/pr-fixer.md"      "$T/.rt-agfixer"
+  cp "$_r/.agents/skills/pr-fixer/SKILL.md" "$T/.rt-agfixer"
   set_gate "$_r" false
   install_at "$_r"
   set_gate "$_r" true
@@ -225,7 +232,7 @@ test_gate_off_then_on_restores() {                    # R8
   cmp -s "$_r/.claude/commands/sdd-pr-loop.md" "$T/.rt-cmd"    || fail "R8: command not byte-identical after off->on"
   cmp -s "$_r/.claude/agents/pr-fixer.md"      "$T/.rt-fixer"  || fail "R8: claude pr-fixer not byte-identical after off->on"
   cmp -s "$_r/.opencode/agent/pr-fixer.md"     "$T/.rt-ocfixer" || fail "R8: opencode pr-fixer not byte-identical after off->on"
-  cmp -s "$_r/.agents/agents/pr-fixer.md"      "$T/.rt-agfixer" || fail "R8: antigravity pr-fixer not byte-identical after off->on"
+  cmp -s "$_r/.agents/skills/pr-fixer/SKILL.md" "$T/.rt-agfixer" || fail "R8: antigravity pr-fixer not byte-identical after off->on"
   cmp -s "$_r/ch/prompts/sdd-pr-loop.md"       "$T/.rt-cmd"    || fail "R8: global prompt not byte-identical after off->on"
   pass "R8 gate off->on round-trip restores byte-identical glue"
 }
@@ -405,11 +412,12 @@ test_opencode_json_unaffected_by_pr_loop() {          # R12
 }
 
 test_antigravity_pr_fixer_persona() {                 # R13
-  _p="$BASE/.agents/agents/pr-fixer.md"
-  [ -f "$_p" ] || fail "R13: .agents/agents/pr-fixer.md not emitted"
+  _p="$BASE/.agents/skills/pr-fixer/SKILL.md"
+  [ -f "$_p" ] || fail "R13: .agents/skills/pr-fixer/SKILL.md not emitted"
+  grep -qE '^name: pr-fixer$' "$_p" || fail "R13: antigravity pr-fixer skill lacks a name frontmatter"
   grep -qE '^description: ' "$_p" || fail "R13: antigravity persona lacks a description"
   grep -qF '.harness/agents/pr-fixer.md' "$_p" || fail "R13: persona does not point at the canonical role"
-  pass "R13 .agents/agents/pr-fixer.md emitted through the existing persona emitter"
+  pass "R13 .agents/skills/pr-fixer/SKILL.md emitted through the persona emitter (E99-F09)"
 }
 
 test_no_codex_gemini_pr_fixer_artifact() {            # R14
@@ -570,10 +578,12 @@ test_pr_loop_key_is_section_scoped() {                # R19
 test_no_mco_tokens_in_body() {                        # R20
   # Sweeps the INSTALLED body only. progress/ and specs/epics/ are historical records and
   # are deliberately excluded; so is tests/, which must be able to name the banned tokens.
+  # NOTE: '/.agents/skills' was banned here while it was a FOREIGN project's path; E99-F09
+  # made .agents/skills/ the harness's own Antigravity layout, so it left the ban list.
   _paths="$SRC/agents $SRC/docs $SRC/store $SRC/tools $SRC/specs/_templates \
           $SRC/AGENTS.md $SRC/CLAUDE.md $SRC/README.md $SRC/harness-install.sh \
           $SRC/harness.config.yaml $SRC/.claude"
-  for _tok in 'MCO_' '.mco-cache' '/.agents/skills' 'route-task' 'start-feature'; do
+  for _tok in 'MCO_' '.mco-cache' 'route-task' 'start-feature'; do
     # shellcheck disable=SC2086 -- intentional word split of the path list
     if grep -rlF "$_tok" $_paths 2>/dev/null | grep -q .; then
       # shellcheck disable=SC2086

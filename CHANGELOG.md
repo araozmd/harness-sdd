@@ -14,6 +14,17 @@ All notable changes to the harness body are recorded here. Versions follow
 - Brought Antigravity `pr-fixer` up to date with the latest Skills API and fallback logic.
 - Resolved Antigravity model routing issues caused by persona removal.
 
+### Fixed — 🐛 Antigravity deselection reclaims every stamped artifact (Codex round-2)
+
+- Legacy pre-Skills layouts (`.agents/agents/*.md`, `.agents/workflows/*.md`) are now
+  reclaimed pristine-only on the **deselect** path too — a 0.47.0 target that upgraded
+  while switching front-ends kept the obsolete, still-discoverable files because the
+  cleanup only ran while antigravity stayed selected. The reclaim is hoisted so the
+  install and deselect paths run the same pass (Codex r2 P1 #3678594352).
+- `.agents/skills/pr-fixer/SKILL.md` is reclaimed when antigravity is deselected while
+  `pr_loop.enabled` stays `true` — the persona loop only visits `ag_personas`, which
+  never carried the gated pr-fixer (Codex r2 P1 #3678594358).
+
 ## [0.47.0] — 2026-07-29
 
 ### Added — ✨ OpenCode concurrency probe + model helper (E22-F01)
