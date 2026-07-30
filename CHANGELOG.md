@@ -32,19 +32,19 @@ All notable changes to the harness body are recorded here. Versions follow
   shims, OpenCode agent files, Antigravity + Gemini skills): `PR_FIXER_DESC` contains
   `context: reads`, which made every generated pr-fixer frontmatter invalid YAML and
   broke Antigravity's discovery of the fixer skill (Codex r4 P1 #3679037635).
-- The legacy-persona reclaim ignores `model:`-line drift on both sides of the pristine
-  compare — a pre-Skills target whose `models:` tiers changed between install and
-  upgrade no longer strands harness-owned personas as "user-edited" (Codex r4 P2
-  #3679037642). The allowance is limited to KNOWN generated variants (tier aliases and
-  current pins): a hand-set model value is a user edit and survives (Codex r5 P1
-  #3679176989).
+- The legacy-persona and skill-persona reclaims tolerate a MISSING `model:` line on disk
+  (the file was stamped before its tier was raised) by comparing against the reference
+  with its own model lines dropped (Codex r6 P1 #3679286029). A model value present ON
+  DISK is always user-owned — generated under an older config or typed by hand are
+  indistinguishable without recorded bytes, so every such file is kept and named in a
+  warning rather than silently deleted (Codex r4 P2 #3679037642, r5 P1 #3679176989,
+  r7 P1 #3679380913).
 - The OpenCode deselect compare for `.opencode/agent/pr-fixer.md` also matches the
   frozen pre-0.48 (unquoted-description) body, so the quoting change does not strand a
   pristine old fixer as "user-edited" on deselection (Codex r5 P1 #3679176984).
-- The Antigravity skill-persona deselect compares use the same known-model-variant
-  rule, in BOTH drift directions — a skill stamped without a `model:` line is still
-  reclaimed when its tier was raised in the same run that deselects antigravity
-  (Codex r6 P1 #3679286029).
+- The Antigravity skill-persona deselect compares use the same model-less-tolerant rule
+  — a skill stamped without a `model:` line is still reclaimed when its tier was raised
+  in the same run that deselects antigravity (Codex r6 P1 #3679286029).
 
 ## [0.47.0] — 2026-07-29
 

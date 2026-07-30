@@ -1229,32 +1229,28 @@ grep -qF 'MY OWN LEGACY WORKFLOW' "$TLA/.agents/workflows/sdd-fix.md" || fail "C
 rm -rf "$TLA"
 pass "antigravity deselect reclaims pristine legacy personas/workflows, keeps user files (Codex r2 P1)"
 
-# antigravity_deselect_reclaims_legacy_persona_model_drift (Codex r4 P2 #3679037642): a
-# legacy persona stamped WITH a `model:` line (the config in force at install time) must
-# still be reclaimed when the CURRENT config resolves no model — but ONLY while the
-# stamped value is a KNOWN generated variant (a tier alias or a current pin). A model
-# line the installer could never have written is the user's own edit and survives
-# (Codex r5 P1 #3679176989).
+# antigravity_deselect_preserves_legacy_persona_model_lines (Codex r4 P2 #3679037642,
+# r5 P1 #3679176989, r7 P1 #3679380913): a `^model: ` line ON DISK is always treated as
+# user-owned on the stamp-less legacy path — whether it is a leftover of an older
+# config (pro), a hand-set known alias (flash) or a value the installer never generates
+# (my-custom), the three being indistinguishable without recorded bytes. Every variant
+# is kept and named in a warning; the file is never silently deleted.
 TLD="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 sh "$SRC/harness-install.sh" --agents=antigravity "$TLD" >/dev/null || fail "ag-modeldrift setup install failed"
 mkdir -p "$TLD/.agents/agents"
-grep -v '^name: ' "$TLD/.agents/skills/builder/SKILL.md" \
-  | sed 's/^description: "\(.*\)"$/description: \1/' \
-  | awk '{print} /^description: /{print "model: pro"}' > "$TLD/.agents/agents/builder.md"
-grep -q '^model: pro$' "$TLD/.agents/agents/builder.md" || fail "ag-modeldrift setup: model line not injected"
-sh "$SRC/harness-install.sh" --agents=claude "$TLD" >/dev/null 2>&1 || fail "ag-modeldrift deselect rerun failed"
-[ -f "$TLD/.agents/agents/builder.md" ] && fail "Codex r4 P2: model-drifted pristine legacy persona must be reclaimed on deselect"
-# ...but a hand-set model value the installer could never have stamped SURVIVES:
-sh "$SRC/harness-install.sh" --agents=antigravity "$TLD" >/dev/null || fail "ag-modeldrift reinstall failed"
-mkdir -p "$TLD/.agents/agents"
-grep -v '^name: ' "$TLD/.agents/skills/builder/SKILL.md" \
-  | sed 's/^description: "\(.*\)"$/description: \1/' \
-  | awk '{print} /^description: /{print "model: my-custom"}' > "$TLD/.agents/agents/builder.md"
-sh "$SRC/harness-install.sh" --agents=claude "$TLD" >/dev/null 2>&1 || fail "ag-modeldrift custom deselect rerun failed"
-[ -f "$TLD/.agents/agents/builder.md" ] || fail "Codex r5 P1: legacy persona with a user-set model value was wrongly deleted"
-grep -q '^model: my-custom$' "$TLD/.agents/agents/builder.md" || fail "Codex r5 P1: user-set model line not preserved"
+for _mv in pro flash my-custom; do
+  grep -v '^name: ' "$TLD/.agents/skills/builder/SKILL.md" \
+    | sed 's/^description: "\(.*\)"$/description: \1/' \
+    | awk -v m="$_mv" '{print} /^description: /{print "model: " m}' > "$TLD/.agents/agents/builder.md"
+  sh "$SRC/harness-install.sh" --agents=claude "$TLD" >"$TLD/.out" 2>"$TLD/.err" || fail "ag-modeldrift deselect rerun failed (model: $_mv)"
+  [ -f "$TLD/.agents/agents/builder.md" ] || fail "Codex r7 P1: legacy persona with model: $_mv was wrongly deleted"
+  grep -q "^model: $_mv\$" "$TLD/.agents/agents/builder.md" || fail "Codex r7 P1: model: $_mv line not preserved"
+  grep -qF '.agents/agents/builder.md' "$TLD/.err" || fail "Codex r7 P1: kept model: $_mv persona not named in a warning"
+  sh "$SRC/harness-install.sh" --agents=antigravity "$TLD" >/dev/null || fail "ag-modeldrift reinstall failed (model: $_mv)"
+  mkdir -p "$TLD/.agents/agents"
+done
 rm -rf "$TLD"
-pass "antigravity deselect reclaims a legacy persona with a known generated model, keeps a user-set one (Codex r4 P2 + r5 P1)"
+pass "antigravity deselect preserves every on-disk model line on the legacy path (Codex r4 P2 + r5 P1 + r7 P1)"
 
 # opencode_deselect_reclaims_pre_quoting_fixer (Codex r5 P1 #3679176984): a ≤0.47.0
 # target carries the UNQUOTED-description pr-fixer agent file. Deselecting opencode
@@ -1292,8 +1288,15 @@ grep -q '^  builder: reasoning$' "$TLF/.harness/harness.config.yaml" || fail "ag
 sh "$SRC/harness-install.sh" --agents=claude "$TLF" >/dev/null 2>&1 || fail "ag-tierchange deselect rerun failed"
 [ -f "$TLF/.agents/skills/builder/SKILL.md" ] && fail "Codex r6 P1: pristine skill must be reclaimed when the tier changed in the deselect run"
 [ -d "$TLF/.agents" ] && fail "Codex r6 P1: .agents tree must be fully reclaimed after tier-change deselect"
+# ...but a user-set model line ON the skill is never treated as installer-owned, even
+# when the value is a known alias (Codex r7 P1 #3679380913):
+sh "$SRC/harness-install.sh" --agents=antigravity "$TLF" >/dev/null || fail "ag-tierchange reinstall failed"
+awk '{print} /^description: /{print "model: flash"}' "$TLF/.agents/skills/builder/SKILL.md" > "$TLF/.sk.t" && mv "$TLF/.sk.t" "$TLF/.agents/skills/builder/SKILL.md"
+sh "$SRC/harness-install.sh" --agents=claude "$TLF" >"$TLF/.out" 2>"$TLF/.err" || fail "ag-tierchange user-model deselect rerun failed"
+[ -f "$TLF/.agents/skills/builder/SKILL.md" ] || fail "Codex r7 P1: skill with a user-set model: flash was wrongly deleted"
+grep -q '^model: flash$' "$TLF/.agents/skills/builder/SKILL.md" || fail "Codex r7 P1: user-set model line not preserved on the skill"
 rm -rf "$TLF"
-pass "antigravity deselect reclaims a skill whose tier changed in the same run (Codex r6 P1)"
+pass "antigravity deselect reclaims a skill whose tier changed in the same run, keeps a user-set model (Codex r6 P1 + r7 P1)"
 
 # antigravity_deselect_reclaims_pr_fixer_skill (Codex r2 P1 #3678594358): with
 # pr_loop.enabled true, antigravity stamps .agents/skills/pr-fixer/SKILL.md, but the §7

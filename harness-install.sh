@@ -2569,7 +2569,7 @@ follow it exactly. Resolve every relative path it mentions against \`.harness/\`
 non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
 chat history.
 EOF
-      remove_if_pristine_known_model ".agents/agents/$_agl_r.md" "$_agl_tmp" antigravity >/dev/null
+      remove_if_pristine_modelless ".agents/agents/$_agl_r.md" "$_agl_tmp" antigravity >/dev/null
     done
 
     # Also clean up pr-fixer legacy persona.
@@ -2591,7 +2591,7 @@ follow it exactly. Resolve every relative path it mentions against \`.harness/\`
 non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
 chat history.
 EOF
-    remove_if_pristine_known_model ".agents/agents/pr-fixer.md" "$_agl_tmp" antigravity >/dev/null
+    remove_if_pristine_modelless ".agents/agents/pr-fixer.md" "$_agl_tmp" antigravity >/dev/null
 
     for _agl_w in $HARNESS_SDD_CMDS $HARNESS_PR_LOOP_CMDS; do
       remove_if_pristine ".agents/workflows/$_agl_w.md" "$CMDDIR/$_agl_w.md" antigravity >/dev/null
@@ -2679,58 +2679,35 @@ EOF
     fi
   }
 
-  # _ag_known_model <value> — true iff <value> is a model the installer itself could
-  # have stamped into an antigravity artifact: a built-in tier alias (model_alias) or a
-  # verbatim `pin.antigravity.<tier>` from the CURRENT config. The config in force when
-  # the file was written is unknowable, so a stale pin value falls to the safe side
-  # (file kept). `inherit` is never a stamped value (R5), so it never counts.
-  _ag_known_model() {
-    [ -n "$1" ] || return 1
-    for _akm_t in reasoning standard cheap; do
-      [ "$1" = "$(model_alias antigravity "$_akm_t")" ] && return 0
-      _akm_pin="$(_cfg_models_value "$(_models_cfg)" "pin.antigravity.$_akm_t")"
-      [ -n "$_akm_pin" ] && [ "$_akm_pin" != "inherit" ] && [ "$1" = "$_akm_pin" ] && return 0
-    done
-    return 1
-  }
-
-  # remove_if_pristine_known_model <rel-path> <ref-file> <agent-label> — like
-  # remove_if_pristine, but ALSO removes <rel-path> when it matches <ref-file> once
-  # every `^model: ` line is dropped from BOTH sides, provided the ON-DISK file carries
-  # at most one such line and its value is a known generated variant (_ag_known_model).
-  # The reference's own model line is current-config output and needs no proof. This
-  # covers both directions of a `models:` change between install and now: the file was
-  # stamped WITH a model the config no longer writes (Codex r4 P2
-  # #3679037642) or WITHOUT one the config now writes (Codex r6 P1 #3679286029). A
-  # model line that is NOT a known generated value is the user's own edit and the file
-  # survives (Codex r5 P1 #3679176989) — every other difference also still reads as
-  # user-edited.
-  remove_if_pristine_known_model() {
-    _rkm_rel="$1"; _rkm_ref="$2"; _rkm_label="$3"
-    _rkm_f="$TARGET/$_rkm_rel"
-    [ -f "$_rkm_f" ] || return 0
-    if cmp -s "$_rkm_f" "$_rkm_ref"; then
-      rm -f "$_rkm_f"
-      printf '%s\n' "$_rkm_rel"
+  # remove_if_pristine_modelless <rel-path> <ref-file> <agent-label> — like
+  # remove_if_pristine, but ALSO removes <rel-path> when it matches <ref-file> with the
+  # REFERENCE's `^model: ` lines dropped: the on-disk file may LACK a model the current
+  # config would stamp, because it was written before the tier was raised (Codex r6 P1
+  # #3679286029). The file's OWN `^model: ` lines are never stripped: a model value on
+  # disk — written under an older config or typed by the user; indistinguishable
+  # without recorded bytes — is always treated as user-owned and the file survives with
+  # a warning naming it (Codex r5 P1 #3679176989, r7 P1 #3679380913). The r4 P2 case
+  # (#3679037642, a legacy persona stamped with a model the config no longer writes) is
+  # the deliberate safe side of the same rule: kept and announced, never silently
+  # deleted.
+  remove_if_pristine_modelless() {
+    _rml_rel="$1"; _rml_ref="$2"; _rml_label="$3"
+    _rml_f="$TARGET/$_rml_rel"
+    [ -f "$_rml_f" ] || return 0
+    if cmp -s "$_rml_f" "$_rml_ref"; then
+      rm -f "$_rml_f"
+      printf '%s\n' "$_rml_rel"
       return 0
     fi
-    _rkm_nlines="$(grep -c '^model: ' "$_rkm_f" || true)"
-    _rkm_vals="$(sed -n 's/^model: //p' "$_rkm_f")"
-    if [ "$_rkm_nlines" -le 1 ] \
-       && { [ "$_rkm_nlines" -eq 0 ] || _ag_known_model "$_rkm_vals"; }; then
-      _rkm_a="$(mktemp 2>/dev/null || mktemp -t harness-rkm)"
-      _rkm_b="$(mktemp 2>/dev/null || mktemp -t harness-rkm)"
-      sed '/^model: /d' "$_rkm_f"   > "$_rkm_a"
-      sed '/^model: /d' "$_rkm_ref" > "$_rkm_b"
-      if cmp -s "$_rkm_a" "$_rkm_b"; then
-        rm -f "$_rkm_f"
-        printf '%s\n' "$_rkm_rel"
-        rm -f "$_rkm_a" "$_rkm_b"
-        return 0
-      fi
-      rm -f "$_rkm_a" "$_rkm_b"
+    _rml_tmp="$(mktemp 2>/dev/null || mktemp -t harness-rml)"
+    sed '/^model: /d' "$_rml_ref" > "$_rml_tmp"
+    if cmp -s "$_rml_f" "$_rml_tmp"; then
+      rm -f "$_rml_f"
+      printf '%s\n' "$_rml_rel"
+    else
+      echo "⚠️  $_rml_rel differs from the generated stamp (edited) — left in place (deselected '$_rml_label' not removed)" >&2
     fi
-    echo "⚠️  $_rkm_rel differs from the generated stamp (edited) — left in place (deselected '$_rkm_label' not removed)" >&2
+    rm -f "$_rml_tmp"
   }
 
   # ── per-role model-artifact stamps + reclamation (E17-F01 R11/R22/R23) ────────
@@ -4184,7 +4161,7 @@ EOF
           ag_personas | while IFS='	' read -r _agr _agd; do
             [ -n "$_agr" ] || continue
             gen_ag_persona "$_agr" "$_agd" "$_agtmp"
-            remove_if_pristine_known_model ".agents/skills/$_agr/SKILL.md" "$_agtmp" antigravity
+            remove_if_pristine_modelless ".agents/skills/$_agr/SKILL.md" "$_agtmp" antigravity
             rmdir "$TARGET/.agents/skills/$_agr" 2>/dev/null || true
           done
           # pr-fixer persona: gated on pr_loop.enabled, so it is NOT in ag_personas and
@@ -4193,7 +4170,7 @@ EOF
           # R4 removal-ledger rule, mirrored for the skills layout). (Codex r2 P1
           # #3678594358.)
           gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$_agtmp"
-          remove_if_pristine_known_model ".agents/skills/pr-fixer/SKILL.md" "$_agtmp" antigravity
+          remove_if_pristine_modelless ".agents/skills/pr-fixer/SKILL.md" "$_agtmp" antigravity
           rmdir "$TARGET/.agents/skills/pr-fixer" 2>/dev/null || true
           rm -f "$_agtmp"
           # Prune each now-empty `.agents/` subdir + the parent, only when empty
@@ -4303,7 +4280,7 @@ EOF
       # `.agents/` is a user-owned namespace ⇒ pristine-compare, never delete-by-name.
       _prl_tmp="$(mktemp 2>/dev/null || mktemp -t harness-prl)"
       gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$_prl_tmp"
-      _prl_gone="$_prl_gone $(remove_if_pristine_known_model .agents/skills/pr-fixer/SKILL.md "$_prl_tmp" antigravity)"
+      _prl_gone="$_prl_gone $(remove_if_pristine_modelless .agents/skills/pr-fixer/SKILL.md "$_prl_tmp" antigravity)"
       rm -f "$_prl_tmp"
       for _prc in $HARNESS_PR_LOOP_CMDS; do
         [ -f "$CMDDIR/$_prc.md" ] || continue
