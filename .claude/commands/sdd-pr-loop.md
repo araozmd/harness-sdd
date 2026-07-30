@@ -72,7 +72,10 @@ child's `baseRefOid` moves, and the child must be re-reviewed from scratch (R5).
 # default branch naturally sees baseRefOid move as other PRs merge; restarting review on
 # every such change would destroy the ordinary single-PR lane.
 default_branch="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo '')"
-if [ "$round" -gt 1 ] && [ -n "$default_branch" ]; then
+# Fetch the current baseRefName fresh — a stacked child may have been retargeted before
+# the first review round, and round 1 must validate stack ancestry too.
+base_ref="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo '')"
+if [ -n "$default_branch" ] && [ -n "$base_ref" ] && [ "$base_ref" != "$default_branch" ]; then
   prior_round_dir=".pr-loop/$pr_number/round-$(( round - 1 ))"
   prior_base_name="$(jq -r '.baseRefName // ""' "$prior_round_dir/pr.json" 2>/dev/null || echo '')"
   prior_base_oid="$(jq -r '.baseRefOid // ""' "$prior_round_dir/pr.json" 2>/dev/null || echo '')"
