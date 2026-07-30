@@ -289,15 +289,45 @@ top="$(printf '%s\n' "$stats" | awk -F'\t' '
     printf "%d\t%s\n", $1, f }' | sort -rn | head -5)"
 
 # JSON string escaping for a path interpolated into --format json output. A valid git
-# filename may contain `"` or `\`, and emitting one raw produces output that exits 0 and is
-# unparseable — the worst failure shape for a machine interface, because the caller only finds
-# out when jq dies. Backslash first, or it would double-escape the quotes it just added.
-# The TAB rule is not decorative: a raw control character is invalid inside a JSON string, and
-# git's C-quoting used to hide tabs behind a two-character `\t`. Now that the numstat pass reads
-# `-z`, the real tab reaches here and has to be escaped on our side instead. Matched via a
-# variable because `\t` in a sed BRE is not portable.
-_CS_TAB="$(printf '\t')"
-_json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e "s/$_CS_TAB/\\\\t/g"; }
+# filename may contain `"`, `\`, or any C0 control character, and emitting one raw produces
+# output that exits 0 and is unparseable — the worst failure shape for a machine interface,
+# because the caller only finds out when jq dies. Now that the numstat pass reads `-z`, git's
+# C-quoting no longer hides control bytes behind `\t`-style encodings: the real byte reaches
+# here and has to be escaped on our side.
+#
+# Escape the CLASS, not the characters someone happened to report — a CR rule beside the tab
+# rule just leaves the next control character to be discovered the same way. `\b \t \n \f \r`
+# get their short escapes; every other C0 control (U+0000–U+001F) gets `\u00XX`. U+0000 cannot
+# occur here — no shell variable or environment value can carry a NUL — so the table starts at
+# U+0001, where index() doubles as the code point. DEL (U+007F) is NOT escaped: it is not a C0
+# control and JSON does not require it. The string travels via the ENVIRONMENT, not a pipe, so
+# awk never record-splits it and even a literal newline would be escaped, not misframed.
+_json_escape() {
+  CS_RAW="$1" awk '
+    BEGIN {
+      s = ENVIRON["CS_RAW"]
+      ctrls = ""
+      for (i = 1; i < 32; i++) ctrls = ctrls sprintf("%c", i)
+      out = ""
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == "\\")      e = "\\\\"
+        else if (c == "\"") e = "\\\""
+        else {
+          p = index(ctrls, c)
+          if (p == 0)       e = c
+          else if (p == 8)  e = "\\b"
+          else if (p == 9)  e = "\\t"
+          else if (p == 10) e = "\\n"
+          else if (p == 12) e = "\\f"
+          else if (p == 13) e = "\\r"
+          else              e = sprintf("\\u%04x", p)
+        }
+        out = out e
+      }
+      printf "%s", out
+    }'
+}
 
 if [ "$format" = json ]; then
   printf '{"base":"%s","merge_base":"%s","tier":"%s","production_lines":%d,"production_files":%d,' \

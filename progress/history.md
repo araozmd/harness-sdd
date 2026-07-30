@@ -177,3 +177,7 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 2026-07-29T21:42:45Z | reviewer | E21-F04 | in-review → approve (round 1) — all 83 pr-loop tests green, R1–R9 traced, cross-file consistent, DO NOT TOUCH honored, ADRs correct, change-size ok (225 lines/5 files) → done
 2026-07-29T21:42:45Z | orchestrator | E21-F04 | done (Reviewer verdict persisted). E21 epic rolled up → done.
 2026-07-29T21:42:45Z | orchestrator | E21 drift check (trigger: E21 done): NO-OP — no specs/architecture.md to re-validate against (graceful degradation); no epic demoted
+2026-07-30T01:44:22Z | builder | E99-F08 | in-progress → in-review (Builder round 1: _json_escape handles the full C0 class; R8d regression test; VERSION 0.48.0 → 0.48.1) — spawning Reviewer
+2026-07-30T01:44:22Z | reviewer | E99-F08 | in-review → approve (round 1) — full test_command (27 suites) green; exhaustive C0 class check byte-exact under sh/dash/bash-3.2; mutation re-run: R8d fails on pre-fix mutant with the real symptom, fix restored byte-identical; POSIX syntax clean; R7f/R8c untouched; change-size ok (41 lines/3 files) → done
+- E99-F08 in-review → approve (round 1); E99 rolled up to done
+- E99 drift check: E13/E14/E17 NOT-STALE, no demotions (scout: progress/E99-drift/scout-drift-E99.md)

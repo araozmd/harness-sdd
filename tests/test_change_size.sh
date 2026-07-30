@@ -398,6 +398,44 @@ else
   echo "skip - R8c (jq not installed)"
 fi
 
+# ── R8d: --format json escapes EVERY C0 control character, not just tab ─────────────────
+# E99-F07 moved the tracked path scan to `--numstat -z`, which stops git C-quoting special
+# characters — so a raw control byte in a TRACKED pathname now reaches the JSON emitter
+# unencoded. The emitter escaped `\`, `"` and tab only, so a tracked `a<CR>b.js` made
+# --format json EXIT 0 while emitting JSON jq rejects with an invalid-control-character
+# error — fail-silent on a machine interface. The fix escapes the CLASS (short escapes for
+# `\b \t \n \f \r`, `\u00XX` for the rest of U+0000–U+001F), not a CR rule beside the tab
+# rule. The fixture below exercises one short escape (CR) and one `\u00XX` escape (VT), so
+# each branch of the class is asserted against a real byte.
+# jq-free halves first (the R7f lesson): the emitter prints CR/VT for no other reason, so
+# "no raw byte anywhere in the JSON" is exact, and the escaped form must be present verbatim.
+RCR="$T/repo-cr"; mkrepo "$RCR"; git -C "$RCR" checkout -q -b feature
+_CR="$(printf '\r')"; _VT="$(printf '\013')"
+n_lines 3 > "$RCR/a${_CR}b.js"               # raw carriage return in a TRACKED pathname
+n_lines 2 > "$RCR/v${_VT}b.js"               # raw vertical tab — the \u00XX branch
+git -C "$RCR" add -A && git -C "$RCR" commit -qm "control characters in tracked pathnames"
+_jcr="$("$TOOL" --repo "$RCR" --base main --format json)"
+printf '%s' "$_jcr" | grep -q "$_CR" \
+  && fail "R8d: --format json emitted a RAW carriage return; a control character inside a JSON string is invalid and the caller only finds out when jq dies" || :
+printf '%s' "$_jcr" | grep -qF 'a\rb.js' \
+  || fail "R8d: the CR-bearing pathname is not present in its escaped backslash-r form in the JSON — it was emitted raw, truncated, or dropped"
+printf '%s' "$_jcr" | grep -q "$_VT" \
+  && fail "R8d: --format json emitted a RAW vertical tab; the \u00XX branch of the C0 escape is missing" || :
+_BS='\'; _VT_ESC="v${_BS}u000bb.js"    # the escaped form: v, one backslash, u000b, b.js
+printf '%s' "$_jcr" | grep -qF "$_VT_ESC" \
+  || fail "R8d: the VT-bearing pathname is not present in its escaped \\u000b form in the JSON"
+if command -v jq >/dev/null 2>&1; then
+  printf '%s' "$_jcr" | jq -e . >/dev/null 2>&1 \
+    || fail "R8d: --format json emitted unparseable output for a pathname containing a control character"
+  printf '%s' "$_jcr" | jq -r '.top_production_files[].file' | grep -qF "a${_CR}b.js" \
+    || fail "R8d: the CR-bearing pathname did not round-trip through JSON intact"
+  printf '%s' "$_jcr" | jq -r '.top_production_files[].file' | grep -qF "v${_VT}b.js" \
+    || fail "R8d: the VT-bearing pathname did not round-trip through JSON intact"
+  pass "R8d --format json escapes the C0 class (CR short escape + VT \u00XX form) and both pathnames round-trip intact"
+else
+  echo "skip - R8d jq round-trip (jq not installed); both escapes were still asserted jq-free"
+fi
+
 # ── R9: the Reviewer and Orchestrator carry the handoff rule ─────────────────────────────
 grep -qF 'tools/change-size.sh' "$ROOT/agents/reviewer.md" \
   || fail "R9: reviewer.md does not run the change-size check before the PR handoff"

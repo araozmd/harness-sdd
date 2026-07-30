@@ -4,6 +4,25 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.48.1] — 2026-07-29
+
+### Fixed — 🐛 change-size `--format json` escapes every C0 control character (E99-F08)
+
+P2 deferred at the merge of PR #83 (E99-F07).
+
+- **`_json_escape` escaped only `\`, `"` and tab** (`tools/change-size.sh`). E99-F07 moved the
+  tracked path scan to `git diff --numstat -z`, which stops git C-quoting special characters —
+  so a raw control byte in a tracked pathname now reaches the JSON emitter **unencoded**. A
+  tracked `src/a<CR>b.js` made `--format json` **exit 0 while emitting JSON that `jq` rejects**
+  with an invalid-control-character error: fail-silent on a machine interface, discovered only
+  when the consuming parser dies. The escape now handles the **class** rather than adding a CR
+  rule beside the tab rule: short escapes for `\b \t \n \f \r`, `\u00XX` for every other C0
+  control (U+0000–U+001F), via a single awk pass keyed on an ordered control table. DEL
+  (U+007F) is deliberately **not** escaped — it is not a C0 control and JSON does not require
+  it. New regression coverage (R8d in `tests/test_change_size.sh`) round-trips tracked
+  pathnames containing a raw CR (short-escape branch) and a raw VT (`\u00XX` branch) through
+  `--format json`, with jq-free assertions so the coverage does not vanish on a jq-less host.
+
 ## [0.48.0] — 2026-07-29
 
 ### Added — ✨ Stacked-PR lane for reviewability (E21-F04)

@@ -355,7 +355,7 @@
     {
       "id": "E99",
       "title": "Maintenance (hotfixes & minor fixes)",
-      "status": "in-progress",
+      "status": "done",
       "features": [
         {
           "id": "E99-F01",
@@ -425,7 +425,7 @@
         {
           "id": "E99-F08",
           "title": "change-size --format json: escape every C0 control character, not just tab",
-          "status": "pending",
+          "status": "done",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
