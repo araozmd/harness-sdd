@@ -4,6 +4,27 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.48.0] — 2026-07-29
+
+### Added — ✨ Stacked-PR lane for reviewability (E21-F04)
+
+- **`tools/pr-stack-guard.sh`** offline merge-order guard. Given a PR's `baseRefName` and
+  the list of open PR head branches, it exits `6` when a child PR is stacked on an
+  unmerged parent and `0` only when the base is the repository's actual default branch.
+- **`/sdd-pr-loop`** now fetches and uses the PR's real `baseRefName` / `baseRefOid` for
+  diff computation, round-cache keying, and merge-gate evaluation instead of assuming
+  `main`. It enforces the parent-before-child merge order for stacked PRs and restarts
+  review from round 1 when a stacked parent is rebased.
+- **Documentation** in `docs/WORKFLOW.md` describes when to use the lane, how to cut wave
+  boundaries, and the manual restack procedure. Stacking is explicitly scoped to
+  safely-splittable features and provides incremental review, not atomic delivery.
+
+### Changed
+
+- `pr-stack-guard.sh` requires `--default-branch` from the caller; it no longer hard-codes
+  `main`. This prevents ordinary PRs in repositories whose default branch is not `main`
+  from being misclassified as stacked.
+
 ## [0.47.0] — 2026-07-29
 
 ### Added — ✨ OpenCode concurrency probe + model helper (E22-F01)

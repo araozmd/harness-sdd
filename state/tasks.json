@@ -527,7 +527,7 @@
     {
       "id": "E21",
       "title": "Change-size discipline: keep the review a gate",
-      "status": "in-progress",
+      "status": "done",
       "owner": "araozmd",
       "features": [
         {
@@ -564,7 +564,7 @@
         {
           "id": "E21-F04",
           "title": "Stacked-PR lane for an atomic feature that exceeds the budget",
-          "status": "pending",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
