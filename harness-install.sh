@@ -4045,6 +4045,14 @@ EOF
             remove_if_pristine ".agents/skills/$_agr/SKILL.md" "$_agtmp" antigravity
             rmdir "$TARGET/.agents/skills/$_agr" 2>/dev/null || true
           done
+          # pr-fixer persona: gated on pr_loop.enabled, so it is NOT in ag_personas and
+          # the gate-off reconciliation is skipped while the gate stays true — a target
+          # stamped with the gate on must still be reclaimable on deselect (the E18-F01
+          # R4 removal-ledger rule, mirrored for the skills layout). (Codex r2 P1
+          # #3678594358.)
+          gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$_agtmp"
+          remove_if_pristine ".agents/skills/pr-fixer/SKILL.md" "$_agtmp" antigravity
+          rmdir "$TARGET/.agents/skills/pr-fixer" 2>/dev/null || true
           rm -f "$_agtmp"
           # Prune each now-empty `.agents/` subdir + the parent, only when empty
           # (never `rm -rf` — preserve any user files left in place above).

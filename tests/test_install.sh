@@ -1227,6 +1227,22 @@ grep -qF 'MY OWN LEGACY WORKFLOW' "$TLA/.agents/workflows/sdd-fix.md" || fail "C
 rm -rf "$TLA"
 pass "antigravity deselect reclaims pristine legacy personas/workflows, keeps user files (Codex r2 P1)"
 
+# antigravity_deselect_reclaims_pr_fixer_skill (Codex r2 P1 #3678594358): with
+# pr_loop.enabled true, antigravity stamps .agents/skills/pr-fixer/SKILL.md, but the §7
+# persona loop only visits ag_personas (no pr-fixer) and the gate-off reconciliation is
+# skipped while the gate stays true — deselecting antigravity orphaned the fixer skill.
+TLB="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=antigravity --pr-loop=true "$TLB" >/dev/null || fail "ag-prfixer setup install failed"
+[ -f "$TLB/.agents/skills/pr-fixer/SKILL.md" ]    || fail "ag-prfixer setup: pr-fixer skill missing"
+[ -f "$TLB/.agents/skills/sdd-pr-loop/SKILL.md" ] || fail "ag-prfixer setup: sdd-pr-loop skill missing"
+sh "$SRC/harness-install.sh" --agents=claude --pr-loop=true "$TLB" >/dev/null 2>&1 || fail "ag-prfixer deselect rerun failed"
+[ -f "$TLB/.agents/skills/pr-fixer/SKILL.md" ]    && fail "Codex r2 P1: pr-fixer skill must be removed on antigravity deselect (gate still on)"
+[ -f "$TLB/.agents/skills/sdd-pr-loop/SKILL.md" ] && fail "Codex r2 P1: sdd-pr-loop skill must be removed on antigravity deselect (gate still on)"
+[ -d "$TLB/.agents" ] && fail "Codex r2 P1: empty .agents tree not pruned after full antigravity deselect"
+[ -f "$TLB/.claude/agents/pr-fixer.md" ] || fail "ag-prfixer: claude pr-fixer shim missing after switch (sanity)"
+rm -rf "$TLB"
+pass "antigravity deselect reclaims the pr-fixer skill while pr_loop stays enabled (Codex r2 P1)"
+
 # opencode_json_removal_is_byte_exact (R13, Codex r4 P2 #3401025100): on opencode
 # deselect, a PRISTINE generated opencode.json is removed, but one the user edited
 # (e.g. added a "model" key to the generated file) is preserved.
