@@ -2467,6 +2467,68 @@ doc-critic	Advisory doc review pass over harness-generated planning docs + specs
 EOF
   }
 
+  # reclaim_ag_legacy_layout — remove the pre-Skills Antigravity layout
+  # (`.agents/agents/<role>.md` personas + `.agents/workflows/<cmd>.md` commands),
+  # pristine-only, then prune the two legacy dirs. Hoisted so BOTH the §5c install path
+  # (antigravity retained across an upgrade) and the §7 deselect path (antigravity
+  # dropped in the same upgrade run) reclaim the old bytes — a 0.47.0 target that
+  # switches front-end while upgrading must not keep the obsolete, still-discoverable
+  # commands and personas. (Codex r2 P1 #3678594352.)
+  reclaim_ag_legacy_layout() {
+    _agl_tmp="$(mktemp 2>/dev/null || mktemp -t harness-ag-old)"
+    ag_personas | while IFS='	' read -r _agl_r _agl_d; do
+      [ -n "$_agl_r" ] || continue
+      # Inline generation of the old bare-markdown persona format.
+      _agl_model="$(resolve_model antigravity "$_agl_r")"
+      {
+        printf -- '---\n'
+        printf 'description: %s\n' "$_agl_d"
+        if [ -n "$_agl_model" ]; then printf 'model: %s\n' "$_agl_model"; fi
+        printf -- '---\n'
+      } > "$_agl_tmp"
+      cat >> "$_agl_tmp" <<EOF
+
+You are the **$_agl_r** for this project's agent harness (installed in \`.harness/\`).
+
+Your full, canonical role definition is \`.harness/agents/$_agl_r.md\` — read it now and
+follow it exactly. Resolve every relative path it mentions against \`.harness/\`
+(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
+\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on its
+non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
+chat history.
+EOF
+      remove_if_pristine ".agents/agents/$_agl_r.md" "$_agl_tmp" antigravity >/dev/null
+    done
+
+    # Also clean up pr-fixer legacy persona.
+    _agl_model="$(resolve_model antigravity "pr-fixer")"
+    {
+      printf -- '---\n'
+      printf 'description: %s\n' "$PR_FIXER_DESC"
+      if [ -n "$_agl_model" ]; then printf 'model: %s\n' "$_agl_model"; fi
+      printf -- '---\n'
+    } > "$_agl_tmp"
+    cat >> "$_agl_tmp" <<EOF
+
+You are the **pr-fixer** for this project's agent harness (installed in \`.harness/\`).
+
+Your full, canonical role definition is \`.harness/agents/pr-fixer.md\` — read it now and
+follow it exactly. Resolve every relative path it mentions against \`.harness/\`
+(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
+\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on its
+non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
+chat history.
+EOF
+    remove_if_pristine ".agents/agents/pr-fixer.md" "$_agl_tmp" antigravity >/dev/null
+
+    for _agl_w in $HARNESS_SDD_CMDS $HARNESS_PR_LOOP_CMDS; do
+      remove_if_pristine ".agents/workflows/$_agl_w.md" "$CMDDIR/$_agl_w.md" antigravity >/dev/null
+    done
+    rm -f "$_agl_tmp"
+    rmdir "$TARGET/.agents/agents" 2>/dev/null || true
+    rmdir "$TARGET/.agents/workflows" 2>/dev/null || true
+  }
+
   # ── model-routing per-role artifacts for gemini + codex (E17-F01) ─────────────
   # These two front-ends have no per-role generated artifact today, so "stamp a model per
   # role" means CREATING the native per-role agent definition. Both emitters are hoisted
@@ -3660,59 +3722,10 @@ EOF
   # OpenCode (§5b), so the three front-ends stay byte-identical (R9). Placed after §5b and
   # before the CMDDIR cleanup so the workflow bodies are still available. (E07-F01 R2,R4,R6.)
   if agent_selected antigravity; then
-    # Clean up obsolete legacy Antigravity layouts during upgrades.
-    _ag_tmp_old="$(mktemp 2>/dev/null || mktemp -t harness-ag-old)"
-    ag_personas | while IFS='	' read -r _agr _agd; do
-      [ -n "$_agr" ] || continue
-      # Inline generation of the old bare-markdown persona format.
-      _agp_model="$(resolve_model antigravity "$_agr")"
-      {
-        printf -- '---\n'
-        printf 'description: %s\n' "$_agd"
-        if [ -n "$_agp_model" ]; then printf 'model: %s\n' "$_agp_model"; fi
-        printf -- '---\n'
-      } > "$_ag_tmp_old"
-      cat >> "$_ag_tmp_old" <<EOF
-
-You are the **$_agr** for this project's agent harness (installed in \`.harness/\`).
-
-Your full, canonical role definition is \`.harness/agents/$_agr.md\` — read it now and
-follow it exactly. Resolve every relative path it mentions against \`.harness/\`
-(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
-\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on its
-non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
-chat history.
-EOF
-      remove_if_pristine ".agents/agents/$_agr.md" "$_ag_tmp_old" antigravity >/dev/null
-    done
-    
-    # Also clean up pr-fixer legacy persona.
-    _agp_model="$(resolve_model antigravity "pr-fixer")"
-    {
-      printf -- '---\n'
-      printf 'description: %s\n' "$PR_FIXER_DESC"
-      if [ -n "$_agp_model" ]; then printf 'model: %s\n' "$_agp_model"; fi
-      printf -- '---\n'
-    } > "$_ag_tmp_old"
-    cat >> "$_ag_tmp_old" <<EOF
-
-You are the **pr-fixer** for this project's agent harness (installed in \`.harness/\`).
-
-Your full, canonical role definition is \`.harness/agents/pr-fixer.md\` — read it now and
-follow it exactly. Resolve every relative path it mentions against \`.harness/\`
-(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
-\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on its
-non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
-chat history.
-EOF
-    remove_if_pristine ".agents/agents/pr-fixer.md" "$_ag_tmp_old" antigravity >/dev/null
-
-    for _w in $HARNESS_SDD_CMDS $HARNESS_PR_LOOP_CMDS; do
-      remove_if_pristine ".agents/workflows/$_w.md" "$CMDDIR/$_w.md" antigravity >/dev/null
-    done
-    rm -f "$_ag_tmp_old"
-    rmdir "$TARGET/.agents/agents" 2>/dev/null || true
-    rmdir "$TARGET/.agents/workflows" 2>/dev/null || true
+    # Clean up obsolete legacy Antigravity layouts during upgrades. Hoisted so the §7
+    # deselect path runs the SAME reclaim — one pass, two callers (Codex r2 P1
+    # #3678594352).
+    reclaim_ag_legacy_layout
 
     mkdir -p "$TARGET/.agents/rules" "$TARGET/.agents/skills"
 
@@ -4008,6 +4021,12 @@ EOF
           # `.harness/.agents` while the user authored their own `.agents/` files.
           # (Codex r2 P1 #3404240336; r3 P1 #3400997183 stays honored — scoped, never
           # destructive of non-harness files.)
+          # Pre-Skills legacy layout (≤0.47.0): reclaim it on this path too — §5c's copy
+          # of the pass only runs while antigravity stays selected, so a target that
+          # upgrades AND switches front-end in one run would otherwise keep the obsolete
+          # `.agents/agents/*.md` + `.agents/workflows/*.md` files discoverable.
+          # (Codex r2 P1 #3678594352.)
+          reclaim_ag_legacy_layout
           _agtmp="$(mktemp 2>/dev/null || mktemp -t harness-ag)"
           # rule
           gen_ag_rule "$_agtmp"

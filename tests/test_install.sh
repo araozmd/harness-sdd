@@ -1205,6 +1205,28 @@ grep -qF 'MY CUSTOM ANTIGRAVITY SKILL' "$TPB/.agents/skills/sdd-next/SKILL.md" |
 rm -rf "$TPB"
 pass "antigravity deselect deletes only byte-pristine .agents/ glue, keeps user files (Codex r2 P1)"
 
+# antigravity_deselect_reclaims_legacy_layout (Codex r2 P1 #3678594352): a ≤0.47.0 target
+# (legacy .agents/agents/*.md personas + .agents/workflows/*.md commands) that upgrades
+# while SWITCHING AWAY from antigravity must lose the pristine legacy files too — §5c's
+# cleanup only runs while antigravity stays selected, so the §7 deselect path runs the
+# same hoisted reclaim. Legacy bytes are derived from the installer's own new-layout
+# output: the old persona is the SKILL.md minus its `name:` line; the old workflow is
+# the SKILL.md minus the injected name line at line 2.
+TLA="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=antigravity "$TLA" >/dev/null || fail "ag-legacy setup install failed"
+mkdir -p "$TLA/.agents/agents" "$TLA/.agents/workflows"
+grep -v '^name: ' "$TLA/.agents/skills/orchestrator/SKILL.md" > "$TLA/.agents/agents/orchestrator.md"
+sed '2d' "$TLA/.agents/skills/sdd-next/SKILL.md" > "$TLA/.agents/workflows/sdd-next.md"
+printf 'MY OWN LEGACY WORKFLOW\n' > "$TLA/.agents/workflows/sdd-fix.md"   # user-authored legacy file
+sh "$SRC/harness-install.sh" --agents=claude "$TLA" >/dev/null 2>&1 || fail "ag-legacy deselect rerun failed"
+[ -f "$TLA/.agents/agents/orchestrator.md" ] && fail "Codex r2 P1: pristine legacy persona must be removed on antigravity deselect"
+[ -f "$TLA/.agents/workflows/sdd-next.md" ]  && fail "Codex r2 P1: pristine legacy workflow must be removed on antigravity deselect"
+[ -f "$TLA/.agents/workflows/sdd-fix.md" ]   || fail "Codex r2 P1: user-authored legacy workflow was wrongly deleted on deselect"
+grep -qF 'MY OWN LEGACY WORKFLOW' "$TLA/.agents/workflows/sdd-fix.md" || fail "Codex r2 P1: user-authored legacy workflow content not preserved"
+[ -d "$TLA/.agents/agents" ] && fail "Codex r2 P1: empty legacy .agents/agents dir not pruned on deselect"
+rm -rf "$TLA"
+pass "antigravity deselect reclaims pristine legacy personas/workflows, keeps user files (Codex r2 P1)"
+
 # opencode_json_removal_is_byte_exact (R13, Codex r4 P2 #3401025100): on opencode
 # deselect, a PRISTINE generated opencode.json is removed, but one the user edited
 # (e.g. added a "model" key to the generated file) is preserved.
