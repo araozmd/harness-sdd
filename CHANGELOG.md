@@ -34,11 +34,17 @@ P2 deferred at the merge of PR #83 (E99-F07).
   NUL-framed fields, folds renames onto the destination exactly as before, and encodes each
   pathname (`\` → `\\`, then LF → `\n`) for the newline-framed pipeline; the classifier awk
   decodes in a single left-to-right pass **before** matching, and the concentration list
-  decodes only at emission. (An earlier revision of this fix used python3, which `init.sh`
-  only guarantees for the `tasks: local` backend — caught in review.) New regression coverage
-  (R8e) round-trips newline-bearing tracked, untracked, and renamed-onto pathnames through
-  `--format json` byte-exact, asserts the test/production split, and was mutation-verified
-  against the raw-pathname defect shape.
+  decodes only at emission. The concentration list's exclusion filter matches on the
+  **decoded** pathname too: a configured `test_paths`/`generated_paths` regex can tell the
+  encoded and decoded forms apart (`^foo\\nbar[.]js$` hits the encoded form of a real-LF
+  path), so matching the transit form could drop a production file from — or add a generated
+  file to — `top_production_files` while the totals said the opposite. (An earlier revision
+  of this fix used python3, which `init.sh` only guarantees for the `tasks: local` backend —
+  caught in review.) New regression coverage: R8e round-trips newline-bearing tracked,
+  untracked, and renamed-onto pathnames through `--format json` byte-exact and asserts the
+  test/production split; R8f pins both encoded-vs-decoded mismatch directions against a
+  configured `generated_paths` regex. Both were mutation-verified against their defect
+  shapes.
 
 ## [0.49.0] — 2026-07-29
 

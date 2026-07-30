@@ -346,16 +346,35 @@ if [ "$prod" -gt "$escalate_lines" ] || [ "$prod_files" -gt "$escalate_files" ];
 
 # Concentration: WHERE the lines are. The actionable question at this point is "where do I
 # cut", not "how big is it" — and review risk is not uniform across a diff.
-# The concentration list keeps the ENCODED pathname in transit (encoded vs decoded matches
-# identically here: the encoding inserts `\`+`n` where a real LF was, and neither byte joins
-# the boundary classes of the exclusion regexes), so a newline-bearing path stays one line
-# through the sort and the read loop. It is decoded only at emission (printf %b + sentinel).
+# The concentration list EXCLUDES on the decoded pathname and TRANSPORTS the encoded one.
+# Matching the encoded form agrees with the classifier for the built-in regexes (neither the
+# inserted backslash nor the n joins their boundary classes), but a CONFIGURED test_paths /
+# generated_paths regex can tell the two forms apart — `^foo\\nbar[.]js$` (one literal
+# backslash) matches the encoded form of a real-LF path and excludes from the list a file the
+# totals charge to production, while a real-backslash file goes the other way (Codex PR #89
+# round 3). Decode into a second variable for the match so this pass classifies exactly what
+# the totals pass classified; keep the encoded form in transit so a newline-bearing path
+# stays one line through the sort and the read loop, and decode only at emission.
 top="$(printf '%s\n' "$stats" | awk -F'\t' '
   BEGIN { tre = ENVIRON["CS_TEST_RE"]; dre = ENVIRON["CS_DOC_RE"]; gre = ENVIRON["CS_GEN_RE"] }
+  function _cs_unesc(s,   out, i, c, n) {
+    out = ""
+    for (i = 1; i <= length(s); i++) {
+      c = substr(s, i, 1)
+      if (c == "\\" && i < length(s)) {
+        n = substr(s, i + 1, 1)
+        if (n == "n")       { out = out "\n"; i++ }
+        else if (n == "\\") { out = out "\\"; i++ }
+        else                  out = out c
+      } else out = out c
+    }
+    return out
+  }
   NF < 3 { next }
   $1 == "-" { next }
   { f = $3; for (i = 4; i <= NF; i++) f = f "\t" $i     # see the classifier pass: `-z` lets a
-    if (f ~ gre || f ~ tre || f ~ dre) next             # literal TAB through in a pathname
+    fd = _cs_unesc(f)                                   # literal TAB through in a pathname
+    if (fd ~ gre || fd ~ tre || fd ~ dre) next
     printf "%d\t%s\n", $1, f }' | sort -rn | head -5)"
 
 # JSON string escaping for a path interpolated into --format json output. A valid git

@@ -493,6 +493,40 @@ else
   echo "skip - R8e jq round-trip (jq not installed); classification and the escaped form were still asserted jq-free"
 fi
 
+# ── R8f: the concentration list EXCLUDES on the decoded path, like the totals ───────────
+# Codex PR #89 round 3: the totals classify the DECODED pathname but `top` applied the same
+# exclusion regexes to the transit-ENCODED form. For the built-ins the two agree, but a
+# CONFIGURED generated_paths/test_paths regex can tell them apart: `^foo\\nbar[.]js$` (one
+# literal backslash) matches the ENCODED form of `foo<LF>bar.js`, excluding from the list a
+# file the totals charge to production; and a real-backslash `foo\nbar.js` goes the other
+# way — generated in the totals, yet listed as production. Both directions are asserted
+# against jq, byte-exact; the count assertions stay jq-free.
+RGF="$T/repo-genre"; mkrepo "$RGF"; git -C "$RGF" checkout -q -b feature
+mkdir -p "$RGF/.harness"
+cat > "$RGF/.harness/harness.config.yaml" <<'EOF'
+change_size:
+  generated_paths:
+    - "^foo\\nbar[.]js$"
+EOF
+n_lines 7  > "$RGF/foo${_LF}bar.js"      # real newline: decoded form does NOT match the regex
+n_lines 11 > "$RGF/foo\nbar.js"          # real backslash-n: decoded form DOES match (generated)
+git -C "$RGF" add -A && git -C "$RGF" commit -qm "encoded-vs-decoded classifier gap"
+_jgf="$("$TOOL" --repo "$RGF" --base main --format json)"
+_ggf() { printf '%s' "$_jgf" | sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p"; }
+[ "$(_ggf production_lines)" = "7" ] \
+  || fail "R8f: production_lines=$(_ggf production_lines), expected 7 — the real-newline path belongs to production"
+[ "$(_ggf generated_lines)" = "11" ] \
+  || fail "R8f: generated_lines=$(_ggf generated_lines), expected 11 — the real-backslash path matches the configured regex only AFTER decoding"
+if command -v jq >/dev/null 2>&1; then
+  printf '%s' "$_jgf" | jq -e --arg w "foo${_LF}bar.js" '[.top_production_files[].file] | index($w) != null' >/dev/null \
+    || fail "R8f: a PRODUCTION file (real newline) was excluded from top_production_files — the list matched the ENCODED form against the configured regex"
+  printf '%s' "$_jgf" | jq -e --arg w 'foo\nbar.js' '[.top_production_files[].file] | index($w) == null' >/dev/null \
+    || fail "R8f: a GENERATED file (real backslash-n) was listed as production — the list matched the ENCODED form, which the regex does not hit"
+  pass "R8f the concentration list excludes on the decoded pathname, exactly like the totals"
+else
+  echo "skip - R8f jq list membership (jq not installed); both counts were still asserted jq-free"
+fi
+
 # ── R9: the Reviewer and Orchestrator carry the handoff rule ─────────────────────────────
 grep -qF 'tools/change-size.sh' "$ROOT/agents/reviewer.md" \
   || fail "R9: reviewer.md does not run the change-size check before the PR handoff"
