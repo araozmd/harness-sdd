@@ -1229,6 +1229,22 @@ grep -qF 'MY OWN LEGACY WORKFLOW' "$TLA/.agents/workflows/sdd-fix.md" || fail "C
 rm -rf "$TLA"
 pass "antigravity deselect reclaims pristine legacy personas/workflows, keeps user files (Codex r2 P1)"
 
+# antigravity_deselect_reclaims_legacy_persona_model_drift (Codex r4 P2 #3679037642): a
+# legacy persona stamped WITH a `model:` line (the config in force at install time) must
+# still be reclaimed when the CURRENT config resolves no model — the pristine compare
+# ignores the model line on both sides, while any other drift keeps the file.
+TLD="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=antigravity "$TLD" >/dev/null || fail "ag-modeldrift setup install failed"
+mkdir -p "$TLD/.agents/agents"
+grep -v '^name: ' "$TLD/.agents/skills/builder/SKILL.md" \
+  | sed 's/^description: "\(.*\)"$/description: \1/' \
+  | awk '{print} /^description: /{print "model: pro"}' > "$TLD/.agents/agents/builder.md"
+grep -q '^model: pro$' "$TLD/.agents/agents/builder.md" || fail "ag-modeldrift setup: model line not injected"
+sh "$SRC/harness-install.sh" --agents=claude "$TLD" >/dev/null 2>&1 || fail "ag-modeldrift deselect rerun failed"
+[ -f "$TLD/.agents/agents/builder.md" ] && fail "Codex r4 P2: model-drifted pristine legacy persona must be reclaimed on deselect"
+rm -rf "$TLD"
+pass "antigravity deselect reclaims a legacy persona whose only drift is the model tier (Codex r4 P2)"
+
 # antigravity_deselect_reclaims_pr_fixer_skill (Codex r2 P1 #3678594358): with
 # pr_loop.enabled true, antigravity stamps .agents/skills/pr-fixer/SKILL.md, but the §7
 # persona loop only visits ag_personas (no pr-fixer) and the gate-off reconciliation is

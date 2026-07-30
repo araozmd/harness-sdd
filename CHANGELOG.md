@@ -32,6 +32,10 @@ All notable changes to the harness body are recorded here. Versions follow
   shims, OpenCode agent files, Antigravity + Gemini skills): `PR_FIXER_DESC` contains
   `context: reads`, which made every generated pr-fixer frontmatter invalid YAML and
   broke Antigravity's discovery of the fixer skill (Codex r4 P1 #3679037635).
+- The legacy-persona reclaim ignores `model:`-line drift on both sides of the pristine
+  compare — a pre-Skills target whose `models:` tiers changed between install and
+  upgrade no longer strands harness-owned personas as "user-edited" (Codex r4 P2
+  #3679037642).
 
 ## [0.47.0] — 2026-07-29
 
