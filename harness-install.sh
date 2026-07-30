@@ -2164,7 +2164,7 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .harness/agents/  .harness/docs/  .harness/store/  .harness/tools/  .harness/specs/_templates/
   .harness/specs/glossary.md  .harness/umbrella.manifest.example.yaml  .harness/umbrella.gitignore.example
   .claude/agents/*  .claude/commands/*   .opencode/command/*   (repo root, regenerated)
-  .agents/rules/*  .agents/agents/*  .agents/workflows/*   (repo root, regenerated; Antigravity glue)
+  .agents/rules/*  .agents/skills/*/SKILL.md   (repo root, regenerated; Antigravity glue)
   CLAUDE.md / AGENTS.md / GEMINI.md  -> only the harness:begin..end block
 
 OPENCODE CONCURRENCY PROBE  (E22-F01):
@@ -2176,8 +2176,8 @@ OPENCODE CONCURRENCY PROBE  (E22-F01):
 PR LOOP GLUE  (OPT-IN — created ONLY while pr_loop.enabled reads exactly true; a fresh
 install seeds false, so none of this exists until you turn it on — E18-F01):
   .claude/commands/sdd-pr-loop.md   .opencode/command/sdd-pr-loop.md
-  .agents/workflows/sdd-pr-loop.md  \${CODEX_HOME:-~/.codex}/prompts/sdd-pr-loop.md (GLOBAL)
-  .claude/agents/pr-fixer.md  .opencode/agent/pr-fixer.md  .agents/agents/pr-fixer.md
+  .agents/skills/sdd-pr-loop/SKILL.md  \${CODEX_HOME:-~/.codex}/prompts/sdd-pr-loop.md (GLOBAL)
+  .claude/agents/pr-fixer.md  .opencode/agent/pr-fixer.md  .agents/skills/pr-fixer/SKILL.md
   Flipping pr_loop.enabled back to false on a re-run RECLAIMS all of the above
   (pristine-only in the user-owned \$CODEX_HOME prompts dir and .agents/ tree) and prunes
   empty dirs. No pr-fixer artifact is ever created for the codex or gemini front-ends.

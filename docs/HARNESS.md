@@ -44,9 +44,9 @@ value, and the evidence required before removing a mechanism.
 ## The commands this harness ships
 
 One body per command, mirrored byte-identically into every selected front-end
-(`.claude/commands/`, `.opencode/command/`, `.agents/workflows/`, and the global
-`${CODEX_HOME:-~/.codex}/prompts/`). See [WORKFLOW.md](WORKFLOW.md) for the loop each
-one drives.
+(`.claude/commands/`, `.opencode/command/`, `.agents/skills/<cmd>/SKILL.md` with an
+injected `name:` line, and the global `${CODEX_HOME:-~/.codex}/prompts/`).
+See [WORKFLOW.md](WORKFLOW.md) for the loop each one drives.
 
 | Command | Role it runs | Gate |
 |---|---|---|

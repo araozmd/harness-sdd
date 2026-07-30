@@ -21,7 +21,7 @@ your-project/
 ├── .claude/commands/sdd-pr-loop.md  .claude/agents/pr-fixer.md   # only while pr_loop.enabled (opt-in, seeded false)
 ├── .opencode/agent/pr-fixer.md         # only while pr_loop.enabled (OpenCode file-based sub-agent)
 ├── opencode.json                       # created only if absent (re-stamped only while pristine)
-├── .agents/{rules,agents,workflows}/   # Antigravity glue → resolves to .harness/ (regenerated each run)
+├── .agents/{rules,skills}/           # Antigravity glue → resolves to .harness/ (regenerated each run)
 ├── .gemini/agents/*.md                 # per-role model routing only — created ONLY when a tier resolves
 ├── .codex/agents/*.toml                # per-role model routing only — project-local, never ~/.codex
 └── .harness/                           # the whole harness body
@@ -80,10 +80,11 @@ delegate backend fails before manifest/provision/claim and points to serial
 > an absent key, an empty or malformed value all mean off.
 
 The installer also generates **`/sdd-pr-loop`** — the Codex review loop — from one
-byte-identical body into `.claude/commands/`, `.opencode/command/`, `.agents/workflows/`
-and the GLOBAL `${CODEX_HOME:-~/.codex}/prompts/`, plus a `pr-fixer` sub-agent for Claude
+byte-identical body into `.claude/commands/`, `.opencode/command/`,
+`.agents/skills/sdd-pr-loop/SKILL.md` (Antigravity, with an injected `name:` line) and
+the GLOBAL `${CODEX_HOME:-~/.codex}/prompts/`, plus a `pr-fixer` sub-agent for Claude
 (`.claude/agents/pr-fixer.md`), OpenCode (`.opencode/agent/pr-fixer.md`) and Antigravity
-(`.agents/agents/pr-fixer.md`). All of it points at the canonical
+(`.agents/skills/pr-fixer/SKILL.md`). All of it points at the canonical
 `.harness/agents/pr-fixer.md`; no role body is duplicated, and **no** `pr-fixer` artifact
 is created for the codex or gemini front-ends (those apply fixes in-session).
 
@@ -589,7 +590,7 @@ model list, so every other pin value is passed through untouched.
 | front-end | artifact | form |
 |---|---|---|
 | `claude` | `.claude/agents/<role>.md` | `model:` frontmatter key |
-| `antigravity` | `.agents/agents/<role>.md` | `model:` frontmatter key |
+| `antigravity` | `.agents/skills/<role>/SKILL.md` | `model:` frontmatter key |
 | `opencode` | `opencode.json` | `"model"` member in `agent.<role>` |
 | `gemini` | `.gemini/agents/<role>.md` | `model:` frontmatter key (**new file**) |
 | `codex` | `.codex/agents/<role>.toml` | `model = "…"` (**new file**, project-local) |

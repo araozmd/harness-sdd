@@ -93,7 +93,7 @@ approves) → `builder` → `reviewer`.
 | **Codex** | `AGENTS.md` (native) | run roles sequentially; global `/prompts:sdd-*` prompts, including `/prompts:sdd-fix-parallel` and `/prompts:sdd-pr-loop`, in `${CODEX_HOME:-~/.codex}/prompts/` |
 | **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
 | **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-test-concurrency` and `/sdd-pr-loop`; `/sdd-fix-parallel` is opt-in (verified by `/sdd-test-concurrency`) |
-| **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/agents/*` personas (+ `pr-fixer`) + `.agents/workflows/*`, including `/sdd-fix-parallel` and `/sdd-pr-loop` |
+| **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/skills/<role>/SKILL.md` personas (+ `pr-fixer`) + `.agents/skills/<cmd>/SKILL.md`, including `/sdd-fix-parallel` and `/sdd-pr-loop` |
 
 `/sdd-pr-loop` and the `pr-fixer` sub-agent are the only **gated** glue: they are stamped
 only while `pr_loop.enabled` is `true` in `harness.config.yaml`, and that gate is
@@ -234,7 +234,7 @@ umbrella.manifest.example.yaml   cross-repo coordinator manifest template
 umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
 .opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next, /sdd-test-concurrency); /sdd-fix-parallel is opt-in
-.agents/                     Antigravity glue — rules + agent personas + workflows (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next)
+.agents/                     Antigravity glue — rules + skills (personas and /sdd-* commands as <name>/SKILL.md)
 ${CODEX_HOME:-~/.codex}/prompts/  Codex CLI slash-command prompts (GLOBAL, including /prompts:sdd-fix-parallel and /prompts:sdd-pr-loop)
 ```
 
