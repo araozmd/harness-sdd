@@ -4,6 +4,48 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.49.1] — 2026-07-29
+
+### Fixed — 🐛 change-size `--format json` escapes every C0 control character (E99-F08)
+
+P2 deferred at the merge of PR #83 (E99-F07).
+
+- **`_json_escape` escaped only `\`, `"` and tab** (`tools/change-size.sh`). E99-F07 moved the
+  tracked path scan to `git diff --numstat -z`, which stops git C-quoting special characters —
+  so a raw control byte in a tracked pathname now reaches the JSON emitter **unencoded**. A
+  tracked `src/a<CR>b.js` made `--format json` **exit 0 while emitting JSON that `jq` rejects**
+  with an invalid-control-character error: fail-silent on a machine interface, discovered only
+  when the consuming parser dies. The escape now handles the **class** rather than adding a CR
+  rule beside the tab rule: short escapes for `\b \t \n \f \r`, `\u00XX` for every other C0
+  control (U+0000–U+001F), via a single awk pass keyed on an ordered control table. DEL
+  (U+007F) is deliberately **not** escaped — it is not a C0 control and JSON does not require
+  it. New regression coverage (R8d in `tests/test_change_size.sh`) round-trips tracked
+  pathnames containing a raw CR (short-escape branch) and a raw VT (`\u00XX` branch) through
+  `--format json`, with jq-free assertions so the coverage does not vanish on a jq-less host.
+
+### Fixed — 🐛 change-size misclassifies a pathname containing a literal newline (PR #89, Codex P2)
+
+- **The NUL-framing repair `tr '\0' '\n'` made a content LF indistinguishable from a record
+  separator** (`tools/change-size.sh`). A tracked `a<LF>b.js` split mid-path and the counts
+  landed on the first fragment; a `x<LF>_test.py` was charged to **production** because the
+  classifier never saw the test suffix — the JSON stayed parseable and the number was wrong.
+  The framing parse is now byte-exact and adds **no new dependency**: `od -An -v -tu1`
+  (POSIX, 8-bit clean by design) renders the stream as decimal bytes and awk reassembles
+  NUL-framed fields, folds renames onto the destination exactly as before, and encodes each
+  pathname (`\` → `\\`, then LF → `\n`) for the newline-framed pipeline; the classifier awk
+  decodes in a single left-to-right pass **before** matching, and the concentration list
+  decodes only at emission. The concentration list's exclusion filter matches on the
+  **decoded** pathname too: a configured `test_paths`/`generated_paths` regex can tell the
+  encoded and decoded forms apart (`^foo\\nbar[.]js$` hits the encoded form of a real-LF
+  path), so matching the transit form could drop a production file from — or add a generated
+  file to — `top_production_files` while the totals said the opposite. (An earlier revision
+  of this fix used python3, which `init.sh` only guarantees for the `tasks: local` backend —
+  caught in review.) New regression coverage: R8e round-trips newline-bearing tracked,
+  untracked, and renamed-onto pathnames through `--format json` byte-exact and asserts the
+  test/production split; R8f pins both encoded-vs-decoded mismatch directions against a
+  configured `generated_paths` regex. Both were mutation-verified against their defect
+  shapes.
+
 ## [0.49.0] — 2026-07-29
 
 ### Added — ✨ Native Codex skills and inherited role registration (E23-F01)

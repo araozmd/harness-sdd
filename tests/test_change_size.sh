@@ -398,6 +398,135 @@ else
   echo "skip - R8c (jq not installed)"
 fi
 
+# ── R8d: --format json escapes EVERY C0 control character, not just tab ─────────────────
+# E99-F07 moved the tracked path scan to `--numstat -z`, which stops git C-quoting special
+# characters — so a raw control byte in a TRACKED pathname now reaches the JSON emitter
+# unencoded. The emitter escaped `\`, `"` and tab only, so a tracked `a<CR>b.js` made
+# --format json EXIT 0 while emitting JSON jq rejects with an invalid-control-character
+# error — fail-silent on a machine interface. The fix escapes the CLASS (short escapes for
+# `\b \t \n \f \r`, `\u00XX` for the rest of U+0000–U+001F), not a CR rule beside the tab
+# rule. The fixture below exercises one short escape (CR) and one `\u00XX` escape (VT), so
+# each branch of the class is asserted against a real byte.
+# jq-free halves first (the R7f lesson): the emitter prints CR/VT for no other reason, so
+# "no raw byte anywhere in the JSON" is exact, and the escaped form must be present verbatim.
+RCR="$T/repo-cr"; mkrepo "$RCR"; git -C "$RCR" checkout -q -b feature
+_CR="$(printf '\r')"; _VT="$(printf '\013')"
+n_lines 3 > "$RCR/a${_CR}b.js"               # raw carriage return in a TRACKED pathname
+n_lines 2 > "$RCR/v${_VT}b.js"               # raw vertical tab — the \u00XX branch
+git -C "$RCR" add -A && git -C "$RCR" commit -qm "control characters in tracked pathnames"
+_jcr="$("$TOOL" --repo "$RCR" --base main --format json)"
+printf '%s' "$_jcr" | grep -q "$_CR" \
+  && fail "R8d: --format json emitted a RAW carriage return; a control character inside a JSON string is invalid and the caller only finds out when jq dies" || :
+printf '%s' "$_jcr" | grep -qF 'a\rb.js' \
+  || fail "R8d: the CR-bearing pathname is not present in its escaped backslash-r form in the JSON — it was emitted raw, truncated, or dropped"
+printf '%s' "$_jcr" | grep -q "$_VT" \
+  && fail "R8d: --format json emitted a RAW vertical tab; the \u00XX branch of the C0 escape is missing" || :
+_BS='\'; _VT_ESC="v${_BS}u000bb.js"    # the escaped form: v, one backslash, u000b, b.js
+printf '%s' "$_jcr" | grep -qF "$_VT_ESC" \
+  || fail "R8d: the VT-bearing pathname is not present in its escaped \\u000b form in the JSON"
+if command -v jq >/dev/null 2>&1; then
+  printf '%s' "$_jcr" | jq -e . >/dev/null 2>&1 \
+    || fail "R8d: --format json emitted unparseable output for a pathname containing a control character"
+  printf '%s' "$_jcr" | jq -r '.top_production_files[].file' | grep -qF "a${_CR}b.js" \
+    || fail "R8d: the CR-bearing pathname did not round-trip through JSON intact"
+  printf '%s' "$_jcr" | jq -r '.top_production_files[].file' | grep -qF "v${_VT}b.js" \
+    || fail "R8d: the VT-bearing pathname did not round-trip through JSON intact"
+  pass "R8d --format json escapes the C0 class (CR short escape + VT \u00XX form) and both pathnames round-trip intact"
+else
+  echo "skip - R8d jq round-trip (jq not installed); both escapes were still asserted jq-free"
+fi
+
+# ── R8e: a TRACKED pathname containing a literal NEWLINE round-trips intact ─────────────
+# Codex on PR #89: `-z` stops git C-quoting, but the NUL-to-LF `tr` that framed the records
+# made a content LF indistinguishable from a record separator — a tracked `a\nb.js` split
+# mid-path, the counts landed on the first FRAGMENT (`a`), and `x\n_test.py` was charged to
+# PRODUCTION because the classifier never saw the test suffix. Fail-silent budget corruption:
+# the JSON stayed parseable and the number was wrong. The framing parse is now byte-exact
+# (python3 splits real NULs, folds renames, encodes `\` then LF), the classifier decodes
+# before matching, and the concentration list decodes only at emission.
+# jq-free halves first (the R7f lesson). The discriminator for "no raw LF leaked into the
+# JSON" is exact without jq: the emitter prints a single trailing newline and nothing else,
+# so after command-substitution stripping the captured JSON must contain NO newline at all.
+RLF="$T/repo-lf"; mkrepo "$RLF"
+# NOT `_LF="$(printf '\n')"` — command substitution strips trailing newlines, leaving _LF
+# EMPTY, and every pathname below would contain no newline at all: the fixture without the
+# byte is the reachable-another-way defect this suite exists to kill. Decode with a sentinel
+# and remove exactly that character.
+_LF="$(printf '\n.')"; _LF=${_LF%.}
+n_lines 5 > "$RLF/oldname.js"
+git -C "$RLF" add -A && git -C "$RLF" commit -qm "rename base"
+git -C "$RLF" checkout -q -b feature
+mkdir -p "$RLF/src"
+n_lines 3 > "$RLF/src/a${_LF}b.js"              # raw newline in a TRACKED pathname
+n_lines 4 > "$RLF/evil${_LF}_test.py"           # newline before a test suffix — must stay TEST
+git -C "$RLF" mv oldname.js "ren${_LF}amed.js"  # rename onto a newline-bearing path
+git -C "$RLF" add -A && git -C "$RLF" commit -qm "newline-bearing pathnames"
+n_lines 2 > "$RLF/un${_LF}tracked.js"           # raw newline in an UNTRACKED pathname
+_jlf="$("$TOOL" --repo "$RLF" --base main --format json)"
+# NOT grep: a newline PATTERN is an empty pattern (grep splits patterns on newlines) and
+# matches every line — the reachable-another-way defect in miniature. case globbing matches
+# the literal byte, and the emitter prints a single trailing newline and nothing else, so
+# after command-substitution stripping ANY surviving newline is a leak.
+case "$_jlf" in
+  *"$_LF"*) fail "R8e: --format json emitted a RAW newline; the pathname was emitted unescaped (or split) and jq will reject it" ;;
+esac
+printf '%s' "$_jlf" | grep -qF 'src/a\nb.js' \
+  || fail "R8e: the newline-bearing pathname is not present in its escaped backslash-n form in the JSON — it was split at the newline, or dropped"
+_glf() { printf '%s' "$_jlf" | sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p"; }
+[ "$(_glf test_lines)" = "4" ] \
+  || fail "R8e: test_lines=$(_glf test_lines), expected 4 — a newline-bearing TEST path was charged to production (the counts landed on the fragment before the newline)"
+[ "$(_glf production_lines)" = "5" ] \
+  || fail "R8e: production_lines=$(_glf production_lines), expected 5 (3 tracked + 0 pure rename + 2 untracked)"
+[ "$(_glf production_files)" = "3" ] \
+  || fail "R8e: production_files=$(_glf production_files), expected 3 (a<LF>b.js, ren<LF>amed.js, un<LF>tracked.js)"
+[ "$(_glf total_files)" = "4" ] \
+  || fail "R8e: total_files=$(_glf total_files), expected 4 — a rename onto a newline-bearing path must still fold to ONE record keyed on the destination"
+if command -v jq >/dev/null 2>&1; then
+  printf '%s' "$_jlf" | jq -e . >/dev/null 2>&1 \
+    || fail "R8e: --format json emitted unparseable output for a pathname containing a newline"
+  printf '%s' "$_jlf" | jq -e --arg w "src/a${_LF}b.js" '[.top_production_files[].file] | index($w) != null' >/dev/null \
+    || fail "R8e: the tracked newline-bearing pathname did not round-trip through JSON byte-exact"
+  printf '%s' "$_jlf" | jq -e --arg w "un${_LF}tracked.js" '[.top_production_files[].file] | index($w) != null' >/dev/null \
+    || fail "R8e: the untracked newline-bearing pathname did not round-trip through JSON byte-exact"
+  pass "R8e newline-bearing tracked/untracked/renamed pathnames classify correctly and round-trip through JSON byte-exact"
+else
+  echo "skip - R8e jq round-trip (jq not installed); classification and the escaped form were still asserted jq-free"
+fi
+
+# ── R8f: the concentration list EXCLUDES on the decoded path, like the totals ───────────
+# Codex PR #89 round 3: the totals classify the DECODED pathname but `top` applied the same
+# exclusion regexes to the transit-ENCODED form. For the built-ins the two agree, but a
+# CONFIGURED generated_paths/test_paths regex can tell them apart: `^foo\\nbar[.]js$` (one
+# literal backslash) matches the ENCODED form of `foo<LF>bar.js`, excluding from the list a
+# file the totals charge to production; and a real-backslash `foo\nbar.js` goes the other
+# way — generated in the totals, yet listed as production. Both directions are asserted
+# against jq, byte-exact; the count assertions stay jq-free.
+RGF="$T/repo-genre"; mkrepo "$RGF"; git -C "$RGF" checkout -q -b feature
+mkdir -p "$RGF/.harness"
+cat > "$RGF/.harness/harness.config.yaml" <<'EOF'
+change_size:
+  generated_paths:
+    - "^foo\\nbar[.]js$"
+EOF
+n_lines 7  > "$RGF/foo${_LF}bar.js"      # real newline: decoded form does NOT match the regex
+n_lines 11 > "$RGF/foo\nbar.js"          # real backslash-n: decoded form DOES match (generated)
+git -C "$RGF" add -A && git -C "$RGF" commit -qm "encoded-vs-decoded classifier gap"
+_jgf="$("$TOOL" --repo "$RGF" --base main --format json)"
+_ggf() { printf '%s' "$_jgf" | sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p"; }
+[ "$(_ggf production_lines)" = "7" ] \
+  || fail "R8f: production_lines=$(_ggf production_lines), expected 7 — the real-newline path belongs to production"
+[ "$(_ggf generated_lines)" = "11" ] \
+  || fail "R8f: generated_lines=$(_ggf generated_lines), expected 11 — the real-backslash path matches the configured regex only AFTER decoding"
+if command -v jq >/dev/null 2>&1; then
+  printf '%s' "$_jgf" | jq -e --arg w "foo${_LF}bar.js" '[.top_production_files[].file] | index($w) != null' >/dev/null \
+    || fail "R8f: a PRODUCTION file (real newline) was excluded from top_production_files — the list matched the ENCODED form against the configured regex"
+  printf '%s' "$_jgf" | jq -e --arg w 'foo\nbar.js' '[.top_production_files[].file] | index($w) == null' >/dev/null \
+    || fail "R8f: a GENERATED file (real backslash-n) was listed as production — the list matched the ENCODED form, which the regex does not hit"
+  pass "R8f the concentration list excludes on the decoded pathname, exactly like the totals"
+else
+  echo "skip - R8f jq list membership (jq not installed); both counts were still asserted jq-free"
+fi
+
 # ── R9: the Reviewer and Orchestrator carry the handoff rule ─────────────────────────────
 grep -qF 'tools/change-size.sh' "$ROOT/agents/reviewer.md" \
   || fail "R9: reviewer.md does not run the change-size check before the PR handoff"
