@@ -29,15 +29,16 @@ P2 deferred at the merge of PR #83 (E99-F07).
   separator** (`tools/change-size.sh`). A tracked `a<LF>b.js` split mid-path and the counts
   landed on the first fragment; a `x<LF>_test.py` was charged to **production** because the
   classifier never saw the test suffix — the JSON stayed parseable and the number was wrong.
-  The framing parse is now byte-exact: python3 (a hard harness prerequisite since the
-  TaskStore lock moved to `tools/tasks-lock.py`) splits real NULs, folds renames onto the
-  destination exactly as before, and encodes each pathname (`\` → `\\`, then LF → `\n`) for
-  the newline-framed pipeline; the classifier awk decodes in a single left-to-right pass
-  **before** matching, and the concentration list decodes only at emission. A missing python3
-  now exits 4 loudly instead of reporting tier `ok` on an unmeasured branch. New regression
-  coverage (R8e) round-trips newline-bearing tracked, untracked, and renamed-onto pathnames
-  through `--format json` byte-exact, asserts the test/production split, and was
-  mutation-verified against the raw-pathname defect shape.
+  The framing parse is now byte-exact and adds **no new dependency**: `od -An -v -tu1`
+  (POSIX, 8-bit clean by design) renders the stream as decimal bytes and awk reassembles
+  NUL-framed fields, folds renames onto the destination exactly as before, and encodes each
+  pathname (`\` → `\\`, then LF → `\n`) for the newline-framed pipeline; the classifier awk
+  decodes in a single left-to-right pass **before** matching, and the concentration list
+  decodes only at emission. (An earlier revision of this fix used python3, which `init.sh`
+  only guarantees for the `tasks: local` backend — caught in review.) New regression coverage
+  (R8e) round-trips newline-bearing tracked, untracked, and renamed-onto pathnames through
+  `--format json` byte-exact, asserts the test/production split, and was mutation-verified
+  against the raw-pathname defect shape.
 
 ## [0.49.0] — 2026-07-29
 

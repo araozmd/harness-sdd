@@ -55,13 +55,6 @@ case "$format" in text|json) : ;; *) printf 'change-size.sh: --format must be te
 [ -d "$repo" ] || { printf 'change-size.sh: not a directory: %s\n' "$repo" >&2; exit 4; }
 git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 \
   || { printf 'change-size.sh: not a git repository: %s\n' "$repo" >&2; exit 4; }
-# python3 is a hard harness prerequisite (init.sh hard-fails without it; the TaskStore write
-# path is tools/tasks-lock.py). The NUL-framed numstat/ls-files parse below needs real byte
-# fidelity, which neither tr (single-byte, no way to distinguish a record NUL from a content
-# LF after translation) nor awk (NUL in input is not portable) can provide. Fail LOUD here
-# rather than measure an empty stream and cheerfully report tier ok on a branch we never read.
-command -v python3 >/dev/null 2>&1 \
-  || { printf 'change-size.sh: python3 not found — it is a hard harness prerequisite (see init.sh)\n' >&2; exit 4; }
 
 # ── budget ───────────────────────────────────────────────────────────────────────
 # Scoped to the top-level `change_size:` section so a same-named key elsewhere in the YAML
@@ -193,47 +186,58 @@ fi
 # a rename looks like its own malformed record. Fold it back into one record keyed on the
 # DESTINATION, which is what a reviewer actually reads.
 #
-# The framing parse is python3, not `tr '\0' '\n'`: a pathname containing a literal LF is
+# The framing parse is `od | awk`, not `tr '\0' '\n'`: a pathname containing a literal LF is
 # legal to git, and after a byte-wise NUL-to-LF translation it is indistinguishable from the
 # record separator — the record split mid-path, the counts landed on the first FRAGMENT, and
 # a `x\n_test.py`-style name was charged to PRODUCTION (the classifier never saw the test
-# suffix). Fail-silent budget corruption, found by Codex on PR #89. The python pass splits on
-# real NULs, folds renames, and encodes each pathname (`\` -> `\\`, then LF -> `\n`) so the
-# downstream newline-framed pipeline carries one record per line with the true path
-# recoverable. The classifier awk decodes (`_cs_unesc`) BEFORE matching, so every classifier
-# sees the path git actually tracks; the concentration list keeps the encoded form in transit
-# and decodes only at emission. (Known limit, unchanged: a pathname ENDING in a tab survives
-# classification, but the `while IFS=<tab> read` loops that render the concentration list
-# strip it, because tab is IFS whitespace. Every other special character round-trips,
-# including an interior TAB, which is why the awk passes rejoin fields 3..NF into the
-# pathname.)
-# The python source is assigned at TOP LEVEL, never inside a command substitution, and stays
-# apostrophe-free (bash 3.2 does not honour `#` when re-scanning a `$( … )` body).
-_cs_znumstat='
-import sys
-out = sys.stdout.buffer
-fields = sys.stdin.buffer.read().split(b"\0")
-i = 0
-while i < len(fields):
-    rec = fields[i]
-    i += 1
-    if not rec:
-        continue
-    parts = rec.split(b"\t", 2)
-    if len(parts) != 3:
-        continue
-    path = parts[2]
-    if path == b"":
-        if i + 1 >= len(fields):
-            break
-        path = fields[i + 1]
-        i += 2
-    if path == b"":
-        continue
-    p = path.replace(b"\\", b"\\\\").replace(b"\n", b"\\n")
-    out.write(parts[0] + b"\t" + parts[1] + b"\t" + p + b"\n")
-'
-stats="$(git -C "$repo" diff --numstat -z "$mb" 2>/dev/null | python3 -c "$_cs_znumstat" || true)"
+# suffix). Fail-silent budget corruption, found by Codex on PR #89. awk cannot match NUL in
+# its input portably, so `od -An -v -tu1` (POSIX, 8-bit clean by design) renders the stream
+# as decimal bytes and awk reassembles NUL-framed fields with full byte fidelity
+# (sprintf("%c") is byte-exact under the LC_ALL=C this script exports) — no python3, which
+# init.sh only guarantees for the `tasks: local` backend, not for every store a consumer may
+# configure. The pass splits on real NULs, folds renames, and encodes each pathname
+# (`\` -> `\\`, then LF -> `\n`) so the downstream newline-framed pipeline carries one record
+# per line with the true path recoverable. The classifier awk decodes (`_cs_unesc`) BEFORE
+# matching, so every classifier sees the path git actually tracks; the concentration list
+# keeps the encoded form in transit and decodes only at emission. (Known limit, unchanged: a
+# pathname ENDING in a tab survives classification, but the `while IFS=<tab> read` loops that
+# render the concentration list strip it, because tab is IFS whitespace. Every other special
+# character round-trips, including an interior TAB, which is why the awk passes rejoin fields
+# 3..NF into the pathname.)
+# _cs_zparse <numstat|paths> — read a NUL-framed stream (as od decimal bytes) on stdin, emit
+# LF-framed records with pathnames transit-encoded. Encoding is gsub-sequential and SAFE in
+# this direction (backslashes double first; the LF pass introduces no new ones); DECODING is
+# the single-pass `_cs_unesc` in the classifier below.
+_cs_zparse() {
+  awk -v mode="$1" '
+    { for (i = 1; i <= NF; i++) {
+        b = $i + 0
+        if (b == 0) { f[++nf] = cur; cur = "" }
+        else cur = cur sprintf("%c", b)
+    } }
+    END {
+      for (k = 1; k <= nf; k++) {
+        rec = f[k]
+        if (rec == "") continue
+        if (mode == "paths") { emit(rec); continue }
+        t1 = index(rec, "\t"); if (!t1) continue
+        a = substr(rec, 1, t1 - 1); rest = substr(rec, t1 + 1)
+        t2 = index(rest, "\t"); if (!t2) continue
+        d = substr(rest, 1, t2 - 1); path = substr(rest, t2 + 1)
+        if (path == "") {                        # rename header: the destination is two fields on
+          if (k + 2 > nf) break
+          path = f[k + 2]; k += 2
+        }
+        if (path == "") continue
+        emit2(a, d, path)
+      }
+    }
+    function esc(p) { gsub(/\\/, "\\\\", p); gsub(/\n/, "\\n", p); return p }
+    function emit(p) { printf "%s\n", esc(p) }
+    function emit2(a, d, p) { printf "%s\t%s\t%s\n", a, d, esc(p) }
+  '
+}
+stats="$(git -C "$repo" diff --numstat -z "$mb" 2>/dev/null | od -An -v -tu1 | _cs_zparse numstat || true)"
 
 # Untracked files are invisible to `git diff` at any range, and a new feature is mostly new
 # FILES — the single largest thing this check could miss. Count their lines directly and
@@ -244,18 +248,12 @@ stats="$(git -C "$repo" diff --numstat -z "$mb" 2>/dev/null | python3 -c "$_cs_z
 # text was then used as the pathname, `[ -f ]` failed, and the file was silently skipped: whole
 # untracked Builder output disappearing from the measurement. NUL framing is the only form git
 # never encodes.
-# Same LF-in-pathname framing repair as the tracked pass above: python3 splits on real NULs
-# and encodes `\` -> `\\`, LF -> `\n`; the loop below decodes per entry (printf %b, with a
-# sentinel so a trailing newline survives command substitution) before touching the disk, and
-# emits the ENCODED form into $stats so the classifier decodes uniformly downstream.
-_cs_zpaths='
-import sys
-out = sys.stdout.buffer
-for f in sys.stdin.buffer.read().split(b"\0"):
-    if f:
-        out.write(f.replace(b"\\", b"\\\\").replace(b"\n", b"\\n") + b"\n")
-'
-_untracked="$(git -C "$repo" ls-files -z --others --exclude-standard 2>/dev/null | python3 -c "$_cs_zpaths" || true)"
+# Same LF-in-pathname framing repair as the tracked pass above: `od | _cs_zparse paths`
+# splits on real NULs and encodes `\` -> `\\`, LF -> `\n`; the loop below decodes per entry
+# (printf %b, with a sentinel so a trailing newline survives command substitution) before
+# touching the disk, and emits the ENCODED form into $stats so the classifier decodes
+# uniformly downstream.
+_untracked="$(git -C "$repo" ls-files -z --others --exclude-standard 2>/dev/null | od -An -v -tu1 | _cs_zparse paths || true)"
 if [ -n "$_untracked" ]; then
   _extra_stats="$(printf '%s\n' "$_untracked" | while IFS= read -r _f; do
       [ -n "$_f" ] || continue
