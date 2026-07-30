@@ -1243,6 +1243,30 @@ sh "$SRC/harness-install.sh" --agents=claude --pr-loop=true "$TLB" >/dev/null 2>
 rm -rf "$TLB"
 pass "antigravity deselect reclaims the pr-fixer skill while pr_loop stays enabled (Codex r2 P1)"
 
+# antigravity_deselect_reclaims_legacy_rule (Codex r3 P1 #3678958588): a ≤0.47.0 target
+# carries the PRE-Skills entrypoint rule body; deselecting antigravity on upgrade must
+# not misread that pristine old rule as user-edited and leave the entrypoint behind.
+# The reference bytes are extracted from the installer's own frozen gen_ag_rule_legacy
+# heredoc (asserted elsewhere to be byte-identical to the 0.47.0 stamp).
+TLC="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+sh "$SRC/harness-install.sh" --agents=antigravity "$TLC" >/dev/null || fail "ag-legacy-rule setup install failed"
+awk '/^  gen_ag_rule_legacy\(\) \{/,/^  \}/' "$SRC/harness-install.sh" \
+  | sed -n "/<<'EOF'/,/^EOF\$/p" | sed '1d;$d' > "$TLC/.legacy-rule"
+[ -s "$TLC/.legacy-rule" ] || fail "ag-legacy-rule setup: could not extract the legacy rule body"
+cp "$TLC/.legacy-rule" "$TLC/.agents/rules/harness.md"   # simulate the ≤0.47.0 stamp
+sh "$SRC/harness-install.sh" --agents=claude "$TLC" >/dev/null 2>&1 || fail "ag-legacy-rule deselect rerun failed"
+[ -f "$TLC/.agents/rules/harness.md" ] && fail "Codex r3 P1: pristine ≤0.47.0 rule must be removed on antigravity deselect"
+[ -d "$TLC/.agents" ] && fail "Codex r3 P1: .agents tree must be fully reclaimed after legacy-rule deselect"
+# ...but a genuinely edited rule still survives:
+sh "$SRC/harness-install.sh" --agents=antigravity "$TLC" >/dev/null || fail "ag-legacy-rule reinstall failed"
+cp "$TLC/.legacy-rule" "$TLC/.agents/rules/harness.md"
+printf '\n# my own note\n' >> "$TLC/.agents/rules/harness.md"
+sh "$SRC/harness-install.sh" --agents=claude "$TLC" >/dev/null 2>&1 || fail "ag-legacy-rule edited deselect rerun failed"
+[ -f "$TLC/.agents/rules/harness.md" ] || fail "Codex r3 P1: user-edited rule was wrongly deleted on deselect"
+grep -qF 'my own note' "$TLC/.agents/rules/harness.md" || fail "Codex r3 P1: user edit not preserved"
+rm -rf "$TLC"
+pass "antigravity deselect reclaims a pristine ≤0.47.0 rule, keeps an edited one (Codex r3 P1)"
+
 # opencode_json_removal_is_byte_exact (R13, Codex r4 P2 #3401025100): on opencode
 # deselect, a PRISTINE generated opencode.json is removed, but one the user edited
 # (e.g. added a "model" key to the generated file) is preserved.

@@ -2426,6 +2426,40 @@ The skill files in `.agents/skills/` are thin pointers at the canonical
 EOF
   }
 
+  # gen_ag_rule_legacy <dest> — the FROZEN ≤0.47.0 (pre-Skills) entrypoint rule body.
+  # It exists ONLY as a §7 pristine reference: a target stamped by 0.47.0 that upgrades
+  # while switching front-end carries THESE bytes in .agents/rules/harness.md, and a
+  # compare against the current body alone would misread that pristine file as
+  # user-edited and leave the Antigravity entrypoint behind on deselection. Never edit
+  # — the bytes must stay byte-identical to what 0.47.0 stamped. (Codex r3 P1
+  # #3678958588.)
+  gen_ag_rule_legacy() {
+    cat > "$1" <<'EOF'
+---
+description: SDD harness entrypoint — boot as the Orchestrator against .harness/.
+---
+
+This workspace uses the portable **SDD agent harness** installed in `.harness/`.
+Antigravity does not auto-load `AGENTS.md`, so this rule loads the harness for you.
+
+- **Source of truth:** `.harness/AGENTS.md` — read it and resolve every relative
+  path it mentions against `.harness/` (config, `agents/`, `specs/`, `state/`,
+  `store/`, `docs/`, `progress/`).
+- **Start every session as the Orchestrator:** `.harness/agents/orchestrator.md`.
+- **Before any work:** run `.harness/init.sh`. If it exits non-zero, STOP.
+- **Working model (R12):** Antigravity drives the harness through the
+  `description`-gated `.agents/workflows/` slash commands and the `.agents/agents/`
+  personas, with `.harness/progress/` files as the hand-off / isolation boundary —
+  NOT a Task-tool-style isolated spawn, and NOT an asserted bare-file subagent
+  registration (bare-file persona discovery is unconfirmed; the durable primitives
+  are this rule + the `description`-gated workflows + the `.harness/progress/`
+  hand-off). Hand off through `.harness/progress/`, never by forwarding chat history.
+
+The role files in `.agents/agents/` and the workflows in `.agents/workflows/` are thin
+pointers at the canonical `.harness/agents/*.md` roles — they do not duplicate them.
+EOF
+  }
+
   # gen_ag_persona <role> <description> <dest> — write one .agents/skills/<role>/SKILL.md.
   gen_ag_persona() {
     _agp_role="$1"; _agp_desc="$2"; _agp_dest="$3"
@@ -4028,8 +4062,15 @@ EOF
           # (Codex r2 P1 #3678594352.)
           reclaim_ag_legacy_layout
           _agtmp="$(mktemp 2>/dev/null || mktemp -t harness-ag)"
-          # rule
+          # rule — pristine against the CURRENT body or the frozen ≤0.47.0 one: a
+          # pre-Skills upgrade that deselects in the same run must not misclassify the
+          # old pristine rule as user-edited and leave the entrypoint behind.
+          # (Codex r3 P1 #3678958588.)
           gen_ag_rule "$_agtmp"
+          if [ -f "$TARGET/.agents/rules/harness.md" ] \
+             && ! cmp -s "$TARGET/.agents/rules/harness.md" "$_agtmp"; then
+            gen_ag_rule_legacy "$_agtmp"
+          fi
           remove_if_pristine .agents/rules/harness.md "$_agtmp" antigravity
           # skills — compare against awk-injected files
           for _agw in $HARNESS_OWNED_CMDS; do

@@ -24,6 +24,10 @@ All notable changes to the harness body are recorded here. Versions follow
 - `.agents/skills/pr-fixer/SKILL.md` is reclaimed when antigravity is deselected while
   `pr_loop.enabled` stays `true` — the persona loop only visits `ag_personas`, which
   never carried the gated pr-fixer (Codex r2 P1 #3678594358).
+- The §7 deselect compare for `.agents/rules/harness.md` now also matches the frozen
+  ≤0.47.0 rule body — a pre-Skills target upgrading while switching front-ends no longer
+  misreads its pristine old entrypoint rule as user-edited and leaves it behind
+  (Codex r3 P1 #3678958588).
 
 ## [0.47.0] — 2026-07-29
 
