@@ -59,6 +59,11 @@ All notable changes to the harness body are recorded here. Versions follow
 - E99-F09 stays `in-review` until the Reviewer records its verification verdict, and
   the install guide now describes the Antigravity fixer as a role pointer with the
   in-session fallback rather than a sub-agent (Codex r12 P1 #3682042719, P2 #3682042725).
+- Antigravity per-role model routing is **retired**: Agent Skills frontmatter defines no
+  `model:` key and schema-validating consumers may reject the unknown key, so
+  `.agents/skills/` artifacts never carry one. The built-in antigravity tier aliases
+  remain only for the frozen ≤0.47.0 legacy-persona reclaim; docs and the routing suite
+  updated to match (Codex r13 P1 #3682228770).
 
 ## [0.47.0] — 2026-07-29
 

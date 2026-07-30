@@ -556,16 +556,18 @@ absent key means "use the session model" on all five.
 
 ### What each tier stamps
 
-| tier | claude | antigravity | gemini | codex | opencode |
-|---|---|---|---|---|---|
-| `reasoning` | `opus` | `pro` | `pro` | *(pin required)* | *(pin required)* |
-| `standard` | `sonnet` | `pro` | `pro` | *(pin required)* | *(pin required)* |
-| `cheap` | `haiku` | `flash` | `flash` | *(pin required)* | *(pin required)* |
-| `inherit` | *omitted* | *omitted* | *omitted* | *omitted* | *omitted* |
+| tier | claude | gemini | codex | opencode |
+|---|---|---|---|---|
+| `reasoning` | `opus` | `pro` | *(pin required)* | *(pin required)* |
+| `standard` | `sonnet` | `pro` | *(pin required)* | *(pin required)* |
+| `cheap` | `haiku` | `flash` | *(pin required)* | *(pin required)* |
+| `inherit` | *omitted* | *omitted* | *omitted* | *omitted* |
 
 Every built-in value is a **floating vendor alias**, never a version-pinned model id, so
-a new model release is picked up without a harness change. Antigravity and Gemini expose
-only two tiers upstream, so `reasoning` and `standard` both map to `pro`.
+a new model release is picked up without a harness change. Gemini exposes only two tiers
+upstream, so `reasoning` and `standard` both map to `pro`. **Antigravity is not routed:**
+Agent Skills frontmatter defines no `model:` key, so its `.agents/skills/` artifacts
+never carry one — `models.*` tiers simply have no Antigravity surface to land on.
 
 ### Pinning an exact model — `models.pin.<front-end>.<tier>`
 
@@ -583,16 +585,12 @@ prints one advisory line naming the exact `pin.` key to set.
 
 Those are the only two value checks the installer makes; it cannot know any vendor's
 model list, so every other pin value is passed through untouched.
-- `antigravity` accepts only tier aliases and needs **`agy` >= 1.1.5**; below that the
-  `model:` frontmatter key is inert, never an error. The installer does not probe your
-  CLI version.
 
 ### Where the values land
 
 | front-end | artifact | form |
 |---|---|---|
 | `claude` | `.claude/agents/<role>.md` | `model:` frontmatter key |
-| `antigravity` | `.agents/skills/<role>/SKILL.md` | `model:` frontmatter key |
 | `opencode` | `opencode.json` | `"model"` member in `agent.<role>` |
 | `gemini` | `.gemini/agents/<role>.md` | `model:` frontmatter key (**new file**) |
 | `codex` | `.codex/agents/<role>.toml` | `model = "…"` (**new file**, project-local) |

@@ -784,8 +784,11 @@ model_tier() {
 
 # model_alias <front-end> <tier> — the built-in tier→native value table. Every entry is
 # a FLOATING vendor alias, never a version-pinned model id, so a new model release is
-# picked up without a harness change. Antigravity/Gemini expose only two tiers upstream
+# picked up without a harness change. Gemini exposes only two tiers upstream
 # (flash/pro), so `reasoning` and `standard` both map to `pro` — stated, not hidden.
+# The ANTIGRAVITY rows now serve only the frozen ≤0.47.0 legacy-persona emitter:
+# Agent Skills frontmatter defines no `model:` key, so no live artifact resolves an
+# antigravity model any more (Codex r13 P1 #3682228770).
 # `codex` and `opencode` have NO floating alias (they require a concrete id / a
 # `provider/model` pair), so they are deliberately absent: an unpinned tier there stamps
 # nothing rather than having the harness invent a model id.
@@ -2541,21 +2544,15 @@ EOF
   # gen_ag_persona <role> <description> <dest> — write one .agents/skills/<role>/SKILL.md.
   gen_ag_persona() {
     _agp_role="$1"; _agp_desc="$2"; _agp_dest="$3"
-    # Fixed key order (description, model); `model:` present or absent, never moved.
-    # Antigravity accepts only tier aliases here and needs `agy` >= 1.1.5 — below that
-    # the key is inert, never an error. (E17-F01 R13/R19/R21.)
-    # pr-fixer is NOT in MODEL_ROLES: like the OpenCode agent file it inherits the
-    # session model — a stamped model would strand the skill when models.default moves
-    # later (no reference can reproduce it). (E18-F01 R14, Codex r9 P1 #3679555795.)
-    case " $MODEL_ROLES " in
-      *" $_agp_role "*) _agp_model="$(resolve_model antigravity "$_agp_role")" ;;
-      *) _agp_model="" ;;
-    esac
+    # Frontmatter is name + description ONLY. Agent Skills define no `model:` key — a
+    # skill is procedural context, not an agent execution configuration, and a
+    # schema-validating consumer may reject the unknown key — so Antigravity has NO
+    # per-role model routing surface and none is emitted, for any role. (Codex r13 P1
+    # #3682228770; supersedes the r1 attempt to keep routing via the skills layout.)
     {
       printf -- '---\n'
       printf 'name: %s\n' "$_agp_role"
       printf 'description: "%s"\n' "$(_yaml_dq "$_agp_desc")"
-      if [ -n "$_agp_model" ]; then printf 'model: %s\n' "$_agp_model"; fi
       printf -- '---\n'
     } > "$_agp_dest"
     cat >> "$_agp_dest" <<EOF

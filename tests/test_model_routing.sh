@@ -3,7 +3,8 @@
 #
 # Covers R4–R23 and R26: tier resolution, `inherit` ⇒ key omission, the built-in
 # floating-alias table, pin override + the OpenCode `provider/model` guard, unknown-tier
-# tolerance, per-front-end stamping (claude / antigravity / opencode / gemini / codex),
+# tolerance, per-front-end stamping (claude / opencode / gemini / codex — antigravity
+# skills carry NO model key, Codex r13 P1),
 # conditional creation of the two new trees, selection gating, idempotent re-stamping, the
 # opencode.json re-stamp rules, determinism, and both halves of the BR6 seam — deselection
 # preserves a user-edited artifact (R23) while a re-install regenerates one (R26).
@@ -169,14 +170,14 @@ test_builtin_tier_aliases() {
   set_tier "$_t" scout cheap
   run "$_t" claude,gemini,antigravity
   _cl() { sed -n 's/^model: //p' "$_t/.claude/agents/$1.md"; }
-  _ag() { sed -n 's/^model: //p' "$_t/.agents/skills/$1/SKILL.md"; }
   _gm() { sed -n 's/^model: //p' "$_t/.gemini/agents/$1.md"; }
   [ "$(_cl architect)" = "opus" ]   || fail "R6: claude reasoning != opus (got '$(_cl architect)')"
   [ "$(_cl builder)"   = "sonnet" ] || fail "R6: claude standard != sonnet (got '$(_cl builder)')"
   [ "$(_cl scout)"     = "haiku" ]  || fail "R6: claude cheap != haiku (got '$(_cl scout)')"
-  [ "$(_ag architect)" = "pro" ]    || fail "R6: antigravity reasoning != pro"
-  [ "$(_ag builder)"   = "pro" ]    || fail "R6: antigravity standard != pro"
-  [ "$(_ag scout)"     = "flash" ]  || fail "R6: antigravity cheap != flash"
+  # Antigravity skills NEVER carry a model line — Skills frontmatter defines no such
+  # key (Codex r13 P1); the per-role routing contract is retired for this front-end.
+  grep -q '^model:' "$_t/.agents/skills/architect/SKILL.md" && fail "R6: antigravity skill stamped a model key"
+  grep -q '^model:' "$_t/.agents/skills/scout/SKILL.md"     && fail "R6: antigravity skill stamped a model key"
   [ "$(_gm architect)" = "pro" ]    || fail "R6: gemini reasoning != pro"
   [ "$(_gm scout)"     = "flash" ]  || fail "R6: gemini cheap != flash"
   # No built-in default may be a version-pinned id (any digit in the emitted alias).
@@ -199,7 +200,8 @@ test_unpinned_codex_opencode_omits() {
     || fail "R7: the opencode advisory was not de-duplicated to one line per (front-end, tier)"
   grep -q '"model"' "$_t/opencode.json" && fail "R7: an unpinned tier stamped a model into opencode.json"
   [ -d "$_t/.codex/agents" ] && fail "R7: an unpinned codex tier created .codex/agents/"
-  # claude/gemini/antigravity DO resolve on the same config (they have aliases).
+  # claude/gemini DO resolve on the same config (they have aliases; antigravity skills
+  # never carry a model key at all — Codex r13 P1).
   grep -q '^model: haiku' "$_t/.claude/agents/scout.md" || fail "R7: claude did not resolve while codex/opencode were unpinned"
   return 0
 }
@@ -253,15 +255,14 @@ test_opencode_pin_format_guard() {
   return 0
 }
 
-# ── R13: antigravity `.agents/skills/<role>.md` frontmatter ──────────────────────
+# ── R13: antigravity skills frontmatter — never a model key (Codex r13 P1) ──────
 test_antigravity_model_frontmatter() {
   _t="$(mk r13)"; run "$_t" antigravity
   set_tier "$_t" scout cheap
   run "$_t" antigravity
   _f="$_t/.agents/skills/scout/SKILL.md"
   grep -q '^description: ' "$_f"        || fail "R13: scout persona lost its description: key"
-  grep -q '^model: flash$' "$_f"        || fail "R13: scout persona carries no model: flash key"
-  [ "$(grep -c '^model:' "$_f")" = "1" ] || fail "R13: scout persona accumulated more than one model: key"
+  grep -q '^model:' "$_f"               && fail "R13: skill carries an unsupported model: key (Skills frontmatter has none)"
   grep -q '^model:' "$_t/.agents/skills/builder/SKILL.md" \
     && fail "R13: a role on inherit must carry no model: key"
   return 0
@@ -386,10 +387,9 @@ test_restamp_after_config_change() {
     || fail "R19: .claude/agents/builder.md was not re-stamped to the new value"
   [ "$(grep -c '^model:' "$_t/.claude/agents/builder.md")" = "1" ] \
     || fail "R19: .claude/agents/builder.md accumulated a second model key"
-  [ "$(sed -n 's/^model: //p' "$_t/.agents/skills/builder/SKILL.md")" = "pro" ] \
-    || fail "R19: .agents/skills/builder/SKILL.md was not re-stamped"
-  [ "$(grep -c '^model:' "$_t/.agents/skills/builder/SKILL.md")" = "1" ] \
-    || fail "R19: .agents/skills/builder/SKILL.md accumulated a second model key"
+  # Antigravity skills never carry a model key (Codex r13 P1) — nothing to re-stamp.
+  grep -q '^model:' "$_t/.agents/skills/builder/SKILL.md" \
+    && fail "R19: .agents/skills/builder/SKILL.md carries an unsupported model key"
   [ "$(sed -n 's/^model: //p' "$_t/.gemini/agents/builder.md")" = "pro" ] \
     || fail "R19: .gemini/agents/builder.md was not re-stamped"
   [ "$(grep -c '^model:' "$_t/.gemini/agents/builder.md")" = "1" ] \
@@ -464,11 +464,11 @@ test_restamp_overwrites_user_edits() {
   [ "$(grep -c '^model:' "$_gm")" = "1" ] || fail "R26: .gemini/agents/scout.md does not carry exactly one model: key after regeneration"
   [ "$(grep -c '^model = ' "$_cx")" = "1" ] || fail "R26: .codex/agents/scout.toml does not carry exactly one model key after regeneration"
   [ "$(grep -c '^model:' "$_cl")" = "1" ] || fail "R26: .claude/agents/scout.md does not carry exactly one model: key after regeneration"
-  [ "$(grep -c '^model:' "$_ag")" = "1" ] || fail "R26: .agents/skills/scout/SKILL.md does not carry exactly one model: key after regeneration"
+  # Antigravity skills carry NO model key by design (Codex r13 P1) — assert the absence.
+  grep -q '^model:' "$_ag" && fail "R26: .agents/skills/scout/SKILL.md carries an unsupported model key"
   grep -q '^model: flash$' "$_gm"            || fail "R26: .gemini/agents/scout.md lost its resolved value"
   grep -q '^model = "gpt-5-mini"$' "$_cx"    || fail "R26: .codex/agents/scout.toml lost its resolved value"
   grep -q '^model: haiku$' "$_cl"            || fail "R26: .claude/agents/scout.md lost its resolved value"
-  grep -q '^model: flash$' "$_ag"            || fail "R26: .agents/skills/scout/SKILL.md lost its resolved value"
 
   # (d) strongest form: each regenerated file is byte-identical to the pristine reference,
   #     i.e. the re-run reproduced the generator's output exactly (this is also what keeps
