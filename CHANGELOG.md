@@ -23,6 +23,22 @@ P2 deferred at the merge of PR #83 (E99-F07).
   pathnames containing a raw CR (short-escape branch) and a raw VT (`\u00XX` branch) through
   `--format json`, with jq-free assertions so the coverage does not vanish on a jq-less host.
 
+### Fixed — 🐛 change-size misclassifies a pathname containing a literal newline (PR #89, Codex P2)
+
+- **The NUL-framing repair `tr '\0' '\n'` made a content LF indistinguishable from a record
+  separator** (`tools/change-size.sh`). A tracked `a<LF>b.js` split mid-path and the counts
+  landed on the first fragment; a `x<LF>_test.py` was charged to **production** because the
+  classifier never saw the test suffix — the JSON stayed parseable and the number was wrong.
+  The framing parse is now byte-exact: python3 (a hard harness prerequisite since the
+  TaskStore lock moved to `tools/tasks-lock.py`) splits real NULs, folds renames onto the
+  destination exactly as before, and encodes each pathname (`\` → `\\`, then LF → `\n`) for
+  the newline-framed pipeline; the classifier awk decodes in a single left-to-right pass
+  **before** matching, and the concentration list decodes only at emission. A missing python3
+  now exits 4 loudly instead of reporting tier `ok` on an unmeasured branch. New regression
+  coverage (R8e) round-trips newline-bearing tracked, untracked, and renamed-onto pathnames
+  through `--format json` byte-exact, asserts the test/production split, and was
+  mutation-verified against the raw-pathname defect shape.
+
 ## [0.49.0] — 2026-07-29
 
 ### Added — ✨ Native Codex skills and inherited role registration (E23-F01)

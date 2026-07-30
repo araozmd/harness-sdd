@@ -55,6 +55,13 @@ case "$format" in text|json) : ;; *) printf 'change-size.sh: --format must be te
 [ -d "$repo" ] || { printf 'change-size.sh: not a directory: %s\n' "$repo" >&2; exit 4; }
 git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 \
   || { printf 'change-size.sh: not a git repository: %s\n' "$repo" >&2; exit 4; }
+# python3 is a hard harness prerequisite (init.sh hard-fails without it; the TaskStore write
+# path is tools/tasks-lock.py). The NUL-framed numstat/ls-files parse below needs real byte
+# fidelity, which neither tr (single-byte, no way to distinguish a record NUL from a content
+# LF after translation) nor awk (NUL in input is not portable) can provide. Fail LOUD here
+# rather than measure an empty stream and cheerfully report tier ok on a branch we never read.
+command -v python3 >/dev/null 2>&1 \
+  || { printf 'change-size.sh: python3 not found — it is a hard harness prerequisite (see init.sh)\n' >&2; exit 4; }
 
 # ── budget ───────────────────────────────────────────────────────────────────────
 # Scoped to the top-level `change_size:` section so a same-named key elsewhere in the YAML
@@ -186,18 +193,47 @@ fi
 # a rename looks like its own malformed record. Fold it back into one record keyed on the
 # DESTINATION, which is what a reviewer actually reads.
 #
-# (Known limits, shared with the untracked pass below. A filename containing a literal NEWLINE is
-# not supported — it splits on the `tr`. A pathname ENDING in a tab survives classification, but
-# the `while IFS=<tab> read` loops that render the concentration list strip it, because tab is
-# IFS whitespace; both are far outside the supported set and neither is worth the complexity.
-# Every other special character round-trips, including an interior TAB, which is why the awk
-# passes rejoin fields 3..NF into the pathname.)
-stats="$(git -C "$repo" diff --numstat -z "$mb" 2>/dev/null | tr '\0' '\n' | awk -F'\t' '
-  st == 2 { st = 1; next }                        # rename source — the destination is what counts
-  st == 1 { print hdr $0; st = 0; next }          # rename destination — re-attach its counts
-  NF == 3 && $3 == "" { hdr = $0; st = 2; next }  # rename header: the path field is empty
-  { print }
-' || true)"
+# The framing parse is python3, not `tr '\0' '\n'`: a pathname containing a literal LF is
+# legal to git, and after a byte-wise NUL-to-LF translation it is indistinguishable from the
+# record separator — the record split mid-path, the counts landed on the first FRAGMENT, and
+# a `x\n_test.py`-style name was charged to PRODUCTION (the classifier never saw the test
+# suffix). Fail-silent budget corruption, found by Codex on PR #89. The python pass splits on
+# real NULs, folds renames, and encodes each pathname (`\` -> `\\`, then LF -> `\n`) so the
+# downstream newline-framed pipeline carries one record per line with the true path
+# recoverable. The classifier awk decodes (`_cs_unesc`) BEFORE matching, so every classifier
+# sees the path git actually tracks; the concentration list keeps the encoded form in transit
+# and decodes only at emission. (Known limit, unchanged: a pathname ENDING in a tab survives
+# classification, but the `while IFS=<tab> read` loops that render the concentration list
+# strip it, because tab is IFS whitespace. Every other special character round-trips,
+# including an interior TAB, which is why the awk passes rejoin fields 3..NF into the
+# pathname.)
+# The python source is assigned at TOP LEVEL, never inside a command substitution, and stays
+# apostrophe-free (bash 3.2 does not honour `#` when re-scanning a `$( … )` body).
+_cs_znumstat='
+import sys
+out = sys.stdout.buffer
+fields = sys.stdin.buffer.read().split(b"\0")
+i = 0
+while i < len(fields):
+    rec = fields[i]
+    i += 1
+    if not rec:
+        continue
+    parts = rec.split(b"\t", 2)
+    if len(parts) != 3:
+        continue
+    path = parts[2]
+    if path == b"":
+        if i + 1 >= len(fields):
+            break
+        path = fields[i + 1]
+        i += 2
+    if path == b"":
+        continue
+    p = path.replace(b"\\", b"\\\\").replace(b"\n", b"\\n")
+    out.write(parts[0] + b"\t" + parts[1] + b"\t" + p + b"\n")
+'
+stats="$(git -C "$repo" diff --numstat -z "$mb" 2>/dev/null | python3 -c "$_cs_znumstat" || true)"
 
 # Untracked files are invisible to `git diff` at any range, and a new feature is mostly new
 # FILES — the single largest thing this check could miss. Count their lines directly and
@@ -208,12 +244,25 @@ stats="$(git -C "$repo" diff --numstat -z "$mb" 2>/dev/null | tr '\0' '\n' | awk
 # text was then used as the pathname, `[ -f ]` failed, and the file was silently skipped: whole
 # untracked Builder output disappearing from the measurement. NUL framing is the only form git
 # never encodes.
-# (Known limit: a filename containing a literal NEWLINE is not supported here — it would still
-# split on the tr below. Every other special character now round-trips.)
-_untracked="$(git -C "$repo" ls-files -z --others --exclude-standard 2>/dev/null | tr '\0' '\n' || true)"
+# Same LF-in-pathname framing repair as the tracked pass above: python3 splits on real NULs
+# and encodes `\` -> `\\`, LF -> `\n`; the loop below decodes per entry (printf %b, with a
+# sentinel so a trailing newline survives command substitution) before touching the disk, and
+# emits the ENCODED form into $stats so the classifier decodes uniformly downstream.
+_cs_zpaths='
+import sys
+out = sys.stdout.buffer
+for f in sys.stdin.buffer.read().split(b"\0"):
+    if f:
+        out.write(f.replace(b"\\", b"\\\\").replace(b"\n", b"\\n") + b"\n")
+'
+_untracked="$(git -C "$repo" ls-files -z --others --exclude-standard 2>/dev/null | python3 -c "$_cs_zpaths" || true)"
 if [ -n "$_untracked" ]; then
   _extra_stats="$(printf '%s\n' "$_untracked" | while IFS= read -r _f; do
       [ -n "$_f" ] || continue
+      # Decode the transit encoding (only \\ and \n pairs exist in it). The sentinel dot
+      # guards a path ENDING in a newline: command substitution strips trailing newlines, so
+      # decode with one extra character appended and remove exactly that character after.
+      _fd=$(printf '%b.' "$_f"); _fd=${_fd%.}
       # SYMLINKS. git stores a symlink as a blob holding its link value: exactly ONE line,
       # whatever it points at. `[ -f ]` FOLLOWS the link, so a link to a regular file passed that
       # guard and the line count below read the TARGET — a link to a 2,000-line file contributed
@@ -225,13 +274,13 @@ if [ -n "$_untracked" ]; then
       # (Keep every comment inside this command substitution APOSTROPHE-FREE. bash 3.2 in sh
       # mode does not honour `#` when re-scanning a `$( … )` body, so an apostrophe opens a
       # quote that swallows the rest of the block and `sh -n` rejects a file dash accepts.)
-      if [ -h "$repo/$_f" ]; then printf '1\t0\t%s\n' "$_f"; continue; fi
-      [ -f "$repo/$_f" ] || continue
+      if [ -h "$repo/$_fd" ]; then printf '1\t0\t%s\n' "$_f"; continue; fi
+      [ -f "$repo/$_fd" ] || continue
       # `awk END{print NR}`, not `wc -l`: wc counts NEWLINES, so a file whose last line is
       # unterminated is undercounted by one — and a one-line file with no trailing newline
       # reports ZERO additions. git --numstat counts it correctly once committed, so wc would
       # make the tier depend on whether the Builder had committed yet.
-      printf '%s\t0\t%s\n' "$(awk 'END{print NR}' "$repo/$_f")" "$_f"
+      printf '%s\t0\t%s\n' "$(awk 'END{print NR}' "$repo/$_fd")" "$_f"
     done)"
   [ -z "$_extra_stats" ] || stats="$stats
 $_extra_stats"
@@ -246,6 +295,24 @@ fi
 export CS_TEST_RE="$TEST_RE" CS_DOC_RE="$DOC_RE" CS_GEN_RE="$GEN_RE"
 eval "$(printf '%s\n' "$stats" | awk -F'\t' '
   BEGIN { tre = ENVIRON["CS_TEST_RE"]; dre = ENVIRON["CS_DOC_RE"]; gre = ENVIRON["CS_GEN_RE"] }
+  # Decode the transit encoding the framing pass applied (`\\` then `\n` pairs only). Single
+  # left-to-right pass — sequential gsub would decode `\\n` (a real backslash followed by a
+  # real n) into a newline. Classifiers must see the path git actually tracks: a real LF sits
+  # in NO class of the boundary regexes, so a `x\n_test.py` suffix still matches while a
+  # `foo\n/tests/` component does not invent a test-directory hit.
+  function _cs_unesc(s,   out, i, c, n) {
+    out = ""
+    for (i = 1; i <= length(s); i++) {
+      c = substr(s, i, 1)
+      if (c == "\\" && i < length(s)) {
+        n = substr(s, i + 1, 1)
+        if (n == "n")       { out = out "\n"; i++ }
+        else if (n == "\\") { out = out "\\"; i++ }
+        else                  out = out c
+      } else out = out c
+    }
+    return out
+  }
   # An EMPTY $stats still arrives as one blank record from `printf %s\n ""`. Without this the
   # unconditional handler counts it as a production file, so a clean tree reports
   # production_files: 1 — and a branch sitting on exactly advise_files/escalate_files gets
@@ -260,6 +327,7 @@ eval "$(printf '%s\n' "$stats" | awk -F'\t' '
     # C-quoted by git, so it splits across fields and `$3` alone would truncate `src/a<TAB>b.js`
     # to `src/a` — losing every classifier suffix on it.
     f = $3; for (i = 4; i <= NF; i++) f = f "\t" $i
+    f = _cs_unesc(f)
     n = ($1 == "-") ? 0 : $1 + 0
     if (f ~ gre)      { g += n; gf++ }
     else if (f ~ tre) { t += n; tf++ }
@@ -280,6 +348,10 @@ if [ "$prod" -gt "$escalate_lines" ] || [ "$prod_files" -gt "$escalate_files" ];
 
 # Concentration: WHERE the lines are. The actionable question at this point is "where do I
 # cut", not "how big is it" — and review risk is not uniform across a diff.
+# The concentration list keeps the ENCODED pathname in transit (encoded vs decoded matches
+# identically here: the encoding inserts `\`+`n` where a real LF was, and neither byte joins
+# the boundary classes of the exclusion regexes), so a newline-bearing path stays one line
+# through the sort and the read loop. It is decoded only at emission (printf %b + sentinel).
 top="$(printf '%s\n' "$stats" | awk -F'\t' '
   BEGIN { tre = ENVIRON["CS_TEST_RE"]; dre = ENVIRON["CS_DOC_RE"]; gre = ENVIRON["CS_GEN_RE"] }
   NF < 3 { next }
@@ -341,7 +413,10 @@ if [ "$format" = json ]; then
   printf '%s\n' "$top" | while IFS="$(printf '\t')" read -r _n _f; do
     [ -n "${_f:-}" ] || continue
     [ "$_first" = 1 ] || printf ','
-    printf '{"file":"%s","additions":%d}' "$(_json_escape "$_f")" "$_n"
+    # Decode the transit encoding (only \\ and \n pairs exist in it); the sentinel dot keeps
+    # a trailing newline from being stripped by the command substitution.
+    _fd=$(printf '%b.' "$_f"); _fd=${_fd%.}
+    printf '{"file":"%s","additions":%d}' "$(_json_escape "$_fd")" "$_n"
     _first=0
   done
   printf ']}\n'
@@ -366,7 +441,11 @@ if [ "$tier" != ok ] && [ -n "$top" ]; then
   printf '  of the findings):\n'
   printf '%s\n' "$top" | while IFS="$(printf '\t')" read -r _n _f; do
     [ -n "${_f:-}" ] || continue
-    printf '    %6d  %s\n' "$_n" "$_f"
+    # Decode the transit encoding (only \\ and \n pairs exist in it); the sentinel dot keeps
+    # a trailing newline from being stripped by the command substitution. A real LF in the
+    # pathname renders as a line break here — cosmetic only, never a count.
+    _fd=$(printf '%b.' "$_f"); _fd=${_fd%.}
+    printf '    %6d  %s\n' "$_n" "$_fd"
   done
 fi
 printf '\n  This is advisory. It never blocks a PR — it asks for a recorded decision.\n'

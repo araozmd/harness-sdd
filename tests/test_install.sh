@@ -1306,7 +1306,13 @@ pass "codex preserves ownership-unknown ungated legacy prompts and edited prompt
 
 # E23-F01 R10: shipped documentation and the installed manifest describe the native
 # Codex surface, always-present roles, safe migration, and the public release version.
-[ "$(cat "$SRC/VERSION")" = "0.49.0" ] || fail "R10: VERSION is not 0.49.0"
+# The release assertion is DERIVED, never a frozen literal (the suite-wide constraint):
+# VERSION must equal the newest CHANGELOG entry, so any mandated body-change bump — like
+# 0.49.0 -> 0.49.1 on PR #89 — passes without editing this test.
+_expected_v="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' "$SRC/CHANGELOG.md" | head -1)"
+[ -n "$_expected_v" ] || fail "R10: no version heading found at the top of CHANGELOG.md"
+[ "$(cat "$SRC/VERSION")" = "$_expected_v" ] \
+  || fail "R10: VERSION $(cat "$SRC/VERSION") does not match the newest CHANGELOG entry $_expected_v"
 grep -qF '## [0.49.0]' "$SRC/CHANGELOG.md" || fail "R10: CHANGELOG lacks 0.49.0"
 for _doc in "$SRC/README.md" "$SRC/docs/HARNESS.md" "$SRC/docs/INSTALL.md"; do
   grep -qF '$sdd-' "$_doc" || fail "R10: $_doc does not document Codex \$sdd-* skills"

@@ -436,6 +436,63 @@ else
   echo "skip - R8d jq round-trip (jq not installed); both escapes were still asserted jq-free"
 fi
 
+# ── R8e: a TRACKED pathname containing a literal NEWLINE round-trips intact ─────────────
+# Codex on PR #89: `-z` stops git C-quoting, but the NUL-to-LF `tr` that framed the records
+# made a content LF indistinguishable from a record separator — a tracked `a\nb.js` split
+# mid-path, the counts landed on the first FRAGMENT (`a`), and `x\n_test.py` was charged to
+# PRODUCTION because the classifier never saw the test suffix. Fail-silent budget corruption:
+# the JSON stayed parseable and the number was wrong. The framing parse is now byte-exact
+# (python3 splits real NULs, folds renames, encodes `\` then LF), the classifier decodes
+# before matching, and the concentration list decodes only at emission.
+# jq-free halves first (the R7f lesson). The discriminator for "no raw LF leaked into the
+# JSON" is exact without jq: the emitter prints a single trailing newline and nothing else,
+# so after command-substitution stripping the captured JSON must contain NO newline at all.
+RLF="$T/repo-lf"; mkrepo "$RLF"
+# NOT `_LF="$(printf '\n')"` — command substitution strips trailing newlines, leaving _LF
+# EMPTY, and every pathname below would contain no newline at all: the fixture without the
+# byte is the reachable-another-way defect this suite exists to kill. Decode with a sentinel
+# and remove exactly that character.
+_LF="$(printf '\n.')"; _LF=${_LF%.}
+n_lines 5 > "$RLF/oldname.js"
+git -C "$RLF" add -A && git -C "$RLF" commit -qm "rename base"
+git -C "$RLF" checkout -q -b feature
+mkdir -p "$RLF/src"
+n_lines 3 > "$RLF/src/a${_LF}b.js"              # raw newline in a TRACKED pathname
+n_lines 4 > "$RLF/evil${_LF}_test.py"           # newline before a test suffix — must stay TEST
+git -C "$RLF" mv oldname.js "ren${_LF}amed.js"  # rename onto a newline-bearing path
+git -C "$RLF" add -A && git -C "$RLF" commit -qm "newline-bearing pathnames"
+n_lines 2 > "$RLF/un${_LF}tracked.js"           # raw newline in an UNTRACKED pathname
+_jlf="$("$TOOL" --repo "$RLF" --base main --format json)"
+# NOT grep: a newline PATTERN is an empty pattern (grep splits patterns on newlines) and
+# matches every line — the reachable-another-way defect in miniature. case globbing matches
+# the literal byte, and the emitter prints a single trailing newline and nothing else, so
+# after command-substitution stripping ANY surviving newline is a leak.
+case "$_jlf" in
+  *"$_LF"*) fail "R8e: --format json emitted a RAW newline; the pathname was emitted unescaped (or split) and jq will reject it" ;;
+esac
+printf '%s' "$_jlf" | grep -qF 'src/a\nb.js' \
+  || fail "R8e: the newline-bearing pathname is not present in its escaped backslash-n form in the JSON — it was split at the newline, or dropped"
+_glf() { printf '%s' "$_jlf" | sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p"; }
+[ "$(_glf test_lines)" = "4" ] \
+  || fail "R8e: test_lines=$(_glf test_lines), expected 4 — a newline-bearing TEST path was charged to production (the counts landed on the fragment before the newline)"
+[ "$(_glf production_lines)" = "5" ] \
+  || fail "R8e: production_lines=$(_glf production_lines), expected 5 (3 tracked + 0 pure rename + 2 untracked)"
+[ "$(_glf production_files)" = "3" ] \
+  || fail "R8e: production_files=$(_glf production_files), expected 3 (a<LF>b.js, ren<LF>amed.js, un<LF>tracked.js)"
+[ "$(_glf total_files)" = "4" ] \
+  || fail "R8e: total_files=$(_glf total_files), expected 4 — a rename onto a newline-bearing path must still fold to ONE record keyed on the destination"
+if command -v jq >/dev/null 2>&1; then
+  printf '%s' "$_jlf" | jq -e . >/dev/null 2>&1 \
+    || fail "R8e: --format json emitted unparseable output for a pathname containing a newline"
+  printf '%s' "$_jlf" | jq -e --arg w "src/a${_LF}b.js" '[.top_production_files[].file] | index($w) != null' >/dev/null \
+    || fail "R8e: the tracked newline-bearing pathname did not round-trip through JSON byte-exact"
+  printf '%s' "$_jlf" | jq -e --arg w "un${_LF}tracked.js" '[.top_production_files[].file] | index($w) != null' >/dev/null \
+    || fail "R8e: the untracked newline-bearing pathname did not round-trip through JSON byte-exact"
+  pass "R8e newline-bearing tracked/untracked/renamed pathnames classify correctly and round-trip through JSON byte-exact"
+else
+  echo "skip - R8e jq round-trip (jq not installed); classification and the escaped form were still asserted jq-free"
+fi
+
 # ── R9: the Reviewer and Orchestrator carry the handoff rule ─────────────────────────────
 grep -qF 'tools/change-size.sh' "$ROOT/agents/reviewer.md" \
   || fail "R9: reviewer.md does not run the change-size check before the PR handoff"
