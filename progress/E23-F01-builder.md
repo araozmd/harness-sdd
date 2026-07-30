@@ -431,6 +431,58 @@ Restoring the per-leaf implementation returned the full install suite to green.
   `All installer-toggle tests passed.`
 - `sh tests/test_agents_host.sh` — exit `0`,
   `All agents-host tests passed.`
+- `sh -n harness-install.sh` and `dash -n harness-install.sh` — exit `0`.
+- `./init.sh` — exit `0`, `✅ environment ready — agents may proceed`.
+- `git diff --check` — exit `0`.
 - The Gemini regression compares the entire selected `.gemini/` tree against a
   same-config baseline with `diff -r`, while separately proving the linked external
   stamp tree remains byte-identical.
+
+---
+
+## Review round 7
+
+### Status
+
+DONE_WITH_CONCERNS — nested policy stamp-directory symlinks now protect only the
+policy path during reclamation. Gate-off and deselection independently reclaim a
+regular, byte-owned sibling `SKILL.md`. The unchanged out-of-scope Inception
+fallback concern from round 1 remains.
+
+### Root cause
+
+`codex_skill_stamp_tree_is_symlinked` classified the policy-specific
+`<command>/agents/` directory as a common skill-unit component. Reclamation
+therefore stopped before evaluating the independently safe `SKILL.md` leaf.
+
+### RED evidence
+
+- Added exact gate-off and deselection regressions with a symlinked
+  `.harness/.codex-skills/<command>/agents/` directory.
+- `sh tests/test_install.sh` — exit `1` at the first new boundary:
+  `FAIL: round-7 nested policy stamp: gate-off stranded a safely owned SKILL.md`.
+
+### Fix
+
+- Common stamp-tree safety now covers only `.harness/.codex-skills/` and the
+  command directory.
+- Policy-leaf safety additionally checks the nested `agents/` directory and
+  `agents/openai.yaml`.
+- Whole-unit selected installation still rejects an unsafe nested policy stamp
+  component.
+- Both regressions prove the unsafe policy stamp link, live policy bytes, and
+  external target bytes survive while the safe live/stamped `SKILL.md` is removed.
+
+### GREEN evidence
+
+- `sh tests/test_install.sh` — exit `0`, `All install tests passed.`
+- `sh tests/test_model_routing.sh` — exit `0`,
+  `All model-routing tests passed.`
+- `sh tests/test_pr_loop.sh` — exit `0`, `All pr-loop tests passed.`
+- `sh tests/test_installer_toggles.sh` — exit `0`,
+  `All installer-toggle tests passed.`
+- `sh tests/test_agents_host.sh` — exit `0`,
+  `All agents-host tests passed.`
+- `sh -n harness-install.sh` and `dash -n harness-install.sh` — exit `0`.
+- `./init.sh` — exit `0`, `✅ environment ready — agents may proceed`.
+- `git diff --check` — exit `0`.

@@ -3855,19 +3855,29 @@ EOF
     _css_stamp="$H/.codex-skills/$_css_cmd"
     codex_skill_stamp_tree_is_symlinked "$_css_cmd" \
       || [ -L "$_css_stamp/SKILL.md" ] \
+      || [ -L "$_css_stamp/agents" ] \
       || [ -L "$_css_stamp/agents/openai.yaml" ]
   }
 
   codex_skill_stamp_tree_is_symlinked() {
     _cst_stamp="$H/.codex-skills/$1"
     [ -L "$H/.codex-skills" ] \
-      || [ -L "$_cst_stamp" ] \
-      || [ -L "$_cst_stamp/agents" ]
+      || [ -L "$_cst_stamp" ]
   }
 
   codex_skill_stamp_leaf_is_symlinked() {
-    codex_skill_stamp_tree_is_symlinked "$1" \
-      || [ -L "$H/.codex-skills/$1/$2" ]
+    _csl_cmd="$1"
+    _csl_rel="$2"
+    codex_skill_stamp_tree_is_symlinked "$_csl_cmd" && return 0
+    case "$_csl_rel" in
+      agents/openai.yaml)
+        [ -L "$H/.codex-skills/$_csl_cmd/agents" ] \
+          || [ -L "$H/.codex-skills/$_csl_cmd/$_csl_rel" ]
+        ;;
+      *)
+        [ -L "$H/.codex-skills/$_csl_cmd/$_csl_rel" ]
+        ;;
+    esac
   }
 
   discard_codex_skill_stamp() {

@@ -1212,6 +1212,58 @@ cmp -s "$TCSM/live-policy.ref" "$TCSM/.agents/skills/sdd-pr-loop/agents/openai.y
   || fail "round-6 mixed stamp: unsafe policy stamp did not preserve its live counterpart"
 pass "Codex gate-off reconciles safe and unsafe stamp leaves independently"
 
+# A nested stamp agents/ directory is policy-specific, not a common component of
+# the skill ownership unit. Its symlink must protect policy bytes without
+# invalidating the sibling regular SKILL.md stamp during gate-off or deselection.
+TCSN_GATE="$T/codex-stamp-nested-policy-gate"
+TCSN_GATE_EXT="$T/codex-stamp-nested-policy-gate.external"
+mkdir -p "$TCSN_GATE"
+HARNESS_PR_LOOP_ENABLED=true CODEX_HOME="$TCSN_GATE/ch" \
+  sh "$SRC/harness-install.sh" --agents=codex "$TCSN_GATE" >/dev/null \
+  || fail "codex nested-policy stamp gate-off setup failed"
+mv "$TCSN_GATE/.harness/.codex-skills/sdd-pr-loop/agents" "$TCSN_GATE_EXT"
+ln -s "$TCSN_GATE_EXT" "$TCSN_GATE/.harness/.codex-skills/sdd-pr-loop/agents"
+cp -R "$TCSN_GATE_EXT" "$TCSN_GATE_EXT.ref"
+cp "$TCSN_GATE/.agents/skills/sdd-pr-loop/agents/openai.yaml" "$TCSN_GATE/live-policy.ref"
+HARNESS_PR_LOOP_ENABLED=false CODEX_HOME="$TCSN_GATE/ch" \
+  sh "$SRC/harness-install.sh" --agents=codex "$TCSN_GATE" >/dev/null \
+  || fail "codex nested-policy stamp gate-off failed"
+[ -e "$TCSN_GATE/.agents/skills/sdd-pr-loop/SKILL.md" ] \
+  && fail "round-7 nested policy stamp: gate-off stranded a safely owned SKILL.md"
+[ -e "$TCSN_GATE/.harness/.codex-skills/sdd-pr-loop/SKILL.md" ] \
+  && fail "round-7 nested policy stamp: gate-off retained the regular SKILL.md stamp"
+[ -L "$TCSN_GATE/.harness/.codex-skills/sdd-pr-loop/agents" ] \
+  || fail "round-7 nested policy stamp: gate-off removed the unsafe policy stamp directory"
+diff -r "$TCSN_GATE_EXT.ref" "$TCSN_GATE_EXT" >/dev/null \
+  || fail "round-7 nested policy stamp: gate-off changed external policy stamp bytes"
+cmp -s "$TCSN_GATE/live-policy.ref" \
+  "$TCSN_GATE/.agents/skills/sdd-pr-loop/agents/openai.yaml" \
+  || fail "round-7 nested policy stamp: gate-off changed the live policy bytes"
+
+TCSN_DROP="$T/codex-stamp-nested-policy-deselect"
+TCSN_DROP_EXT="$T/codex-stamp-nested-policy-deselect.external"
+mkdir -p "$TCSN_DROP"
+CODEX_HOME="$TCSN_DROP/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCSN_DROP" >/dev/null \
+  || fail "codex nested-policy stamp deselection setup failed"
+mv "$TCSN_DROP/.harness/.codex-skills/sdd-new/agents" "$TCSN_DROP_EXT"
+ln -s "$TCSN_DROP_EXT" "$TCSN_DROP/.harness/.codex-skills/sdd-new/agents"
+cp -R "$TCSN_DROP_EXT" "$TCSN_DROP_EXT.ref"
+cp "$TCSN_DROP/.agents/skills/sdd-new/agents/openai.yaml" "$TCSN_DROP/live-policy.ref"
+CODEX_HOME="$TCSN_DROP/ch" sh "$SRC/harness-install.sh" --agents=claude "$TCSN_DROP" >/dev/null \
+  || fail "codex nested-policy stamp deselection failed"
+[ -e "$TCSN_DROP/.agents/skills/sdd-new/SKILL.md" ] \
+  && fail "round-7 nested policy stamp: deselection stranded a safely owned SKILL.md"
+[ -e "$TCSN_DROP/.harness/.codex-skills/sdd-new/SKILL.md" ] \
+  && fail "round-7 nested policy stamp: deselection retained the regular SKILL.md stamp"
+[ -L "$TCSN_DROP/.harness/.codex-skills/sdd-new/agents" ] \
+  || fail "round-7 nested policy stamp: deselection removed the unsafe policy stamp directory"
+diff -r "$TCSN_DROP_EXT.ref" "$TCSN_DROP_EXT" >/dev/null \
+  || fail "round-7 nested policy stamp: deselection changed external policy stamp bytes"
+cmp -s "$TCSN_DROP/live-policy.ref" \
+  "$TCSN_DROP/.agents/skills/sdd-new/agents/openai.yaml" \
+  || fail "round-7 nested policy stamp: deselection changed the live policy bytes"
+pass "Codex nested policy stamp directories do not block sibling SKILL.md reclamation"
+
 # codex_no_home_required: the current repository-local surface does not resolve HOME or
 # CODEX_HOME at all, and remains fully functional when both are absent.
 TCH="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
