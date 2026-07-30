@@ -3149,6 +3149,10 @@ if [ -n "$default_branch" ] && [ -n "$base_ref" ] && [ "$base_ref" != "$default_
         return 1
       fi
       if command -v git >/dev/null 2>&1; then
+        # Fetch the refs before checking ancestry — in a fresh or shallow clone, or
+        # after a force-push, the OIDs from GitHub may not exist locally and
+        # `git merge-base` would exit 128 (error) instead of 1 (non-ancestor).
+        git fetch origin --no-tags --depth=50 2>/dev/null || true
         if ! git merge-base --is-ancestor "$current_base_oid" "$head_ref_oid" 2>/dev/null; then
           echo "child has not been restacked onto the new parent tip — restack before restarting review" >&2
           echo "See docs/WORKFLOW.md 'Restack procedure'" >&2
