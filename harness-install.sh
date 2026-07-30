@@ -3140,7 +3140,15 @@ if [ -n "$default_branch" ] && [ -n "$base_ref" ] && [ "$base_ref" != "$default_
       # restarting review. An unrestacked child would be reviewed with superseded parent
       # commits in its diff. The restack procedure is in docs/WORKFLOW.md.
       head_ref_oid="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo '')"
-      if [ -n "$head_ref_oid" ] && command -v git >/dev/null 2>&1; then
+      # Fail closed when the head OID is unreadable — an empty head OID must not bypass
+      # the ancestry check, because an unrestacked child could then be reviewed with
+      # superseded parent commits and merged after its parent lands.
+      if [ -z "$head_ref_oid" ]; then
+        echo "base-change detection: could not read headRefOid — refusing to restart review" >&2
+        gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+        return 1
+      fi
+      if command -v git >/dev/null 2>&1; then
         if ! git merge-base --is-ancestor "$current_base_oid" "$head_ref_oid" 2>/dev/null; then
           echo "child has not been restacked onto the new parent tip — restack before restarting review" >&2
           echo "See docs/WORKFLOW.md 'Restack procedure'" >&2
