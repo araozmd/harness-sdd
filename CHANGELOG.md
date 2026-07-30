@@ -35,7 +35,9 @@ All notable changes to the harness body are recorded here. Versions follow
 - The legacy-persona reclaim ignores `model:`-line drift on both sides of the pristine
   compare — a pre-Skills target whose `models:` tiers changed between install and
   upgrade no longer strands harness-owned personas as "user-edited" (Codex r4 P2
-  #3679037642).
+  #3679037642). The allowance is limited to KNOWN generated variants (tier aliases and
+  current pins): a hand-set model value is a user edit and survives (Codex r5 P1
+  #3679176989).
 
 ## [0.47.0] — 2026-07-29
 

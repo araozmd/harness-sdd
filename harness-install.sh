@@ -2541,7 +2541,7 @@ follow it exactly. Resolve every relative path it mentions against \`.harness/\`
 non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
 chat history.
 EOF
-      remove_if_pristine_ignore_model ".agents/agents/$_agl_r.md" "$_agl_tmp" antigravity >/dev/null
+      remove_if_pristine_known_model ".agents/agents/$_agl_r.md" "$_agl_tmp" antigravity >/dev/null
     done
 
     # Also clean up pr-fixer legacy persona.
@@ -2563,7 +2563,7 @@ follow it exactly. Resolve every relative path it mentions against \`.harness/\`
 non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
 chat history.
 EOF
-    remove_if_pristine_ignore_model ".agents/agents/pr-fixer.md" "$_agl_tmp" antigravity >/dev/null
+    remove_if_pristine_known_model ".agents/agents/pr-fixer.md" "$_agl_tmp" antigravity >/dev/null
 
     for _agl_w in $HARNESS_SDD_CMDS $HARNESS_PR_LOOP_CMDS; do
       remove_if_pristine ".agents/workflows/$_agl_w.md" "$CMDDIR/$_agl_w.md" antigravity >/dev/null
@@ -2651,29 +2651,54 @@ EOF
     fi
   }
 
-  # remove_if_pristine_ignore_model <rel-path> <ref-file> <agent-label> — like
-  # remove_if_pristine, but the byte-compare drops `^model: ` lines on BOTH sides
-  # first: a legacy persona was stamped under the `models:` config in force at
-  # INSTALL time, while the reference is regenerated under the CURRENT config, so a
-  # tier change between the two runs would otherwise strand a harness-owned persona
-  # as "user-edited" (the gap E17-F01's .model-agents stamps close for gemini/codex,
-  # which ≤0.47.0 never wrote for antigravity). Any other difference still reads as
-  # user-edited. (Codex r4 P2 #3679037642.)
-  remove_if_pristine_ignore_model() {
-    _rpm_rel="$1"; _rpm_ref="$2"; _rpm_label="$3"
-    _rpm_f="$TARGET/$_rpm_rel"
-    [ -f "$_rpm_f" ] || return 0
-    _rpm_a="$(mktemp 2>/dev/null || mktemp -t harness-rpm)"
-    _rpm_b="$(mktemp 2>/dev/null || mktemp -t harness-rpm)"
-    grep -v '^model: ' "$_rpm_f"   > "$_rpm_a" || true
-    grep -v '^model: ' "$_rpm_ref" > "$_rpm_b" || true
-    if cmp -s "$_rpm_a" "$_rpm_b"; then
-      rm -f "$_rpm_f"
-      printf '%s\n' "$_rpm_rel"
-    else
-      echo "⚠️  $_rpm_rel differs from the generated stamp (edited) — left in place (deselected '$_rpm_label' not removed)" >&2
+  # _ag_known_model <value> — true iff <value> is a model the installer itself could
+  # have stamped into an antigravity artifact: a built-in tier alias (model_alias) or a
+  # verbatim `pin.antigravity.<tier>` from the CURRENT config. The config in force when
+  # the file was written is unknowable, so a stale pin value falls to the safe side
+  # (file kept). `inherit` is never a stamped value (R5), so it never counts.
+  _ag_known_model() {
+    [ -n "$1" ] || return 1
+    for _akm_t in reasoning standard cheap; do
+      [ "$1" = "$(model_alias antigravity "$_akm_t")" ] && return 0
+      _akm_pin="$(_cfg_models_value "$(_models_cfg)" "pin.antigravity.$_akm_t")"
+      [ -n "$_akm_pin" ] && [ "$_akm_pin" != "inherit" ] && [ "$1" = "$_akm_pin" ] && return 0
+    done
+    return 1
+  }
+
+  # remove_if_pristine_known_model <rel-path> <ref-file> <agent-label> — like
+  # remove_if_pristine, but ALSO removes <rel-path> when it differs from <ref-file>
+  # ONLY by a single `^model: <v>` line whose <v> is a known generated variant
+  # (_ag_known_model): a legacy persona was stamped under the `models:` config in force
+  # at INSTALL time, while the reference is regenerated under the CURRENT config, so a
+  # tier change between the two runs would otherwise strand a harness-owned persona as
+  # "user-edited" (Codex r4 P2 #3679037642). A model line that is NOT a known generated
+  # value is the user's own edit and the file survives (Codex r5 P1 #3679176989) —
+  # every other difference still reads as user-edited too.
+  remove_if_pristine_known_model() {
+    _rkm_rel="$1"; _rkm_ref="$2"; _rkm_label="$3"
+    _rkm_f="$TARGET/$_rkm_rel"
+    [ -f "$_rkm_f" ] || return 0
+    if cmp -s "$_rkm_f" "$_rkm_ref"; then
+      rm -f "$_rkm_f"
+      printf '%s\n' "$_rkm_rel"
+      return 0
     fi
-    rm -f "$_rpm_a" "$_rpm_b"
+    _rkm_vals="$(sed -n 's/^model: //p' "$_rkm_f")"
+    if [ "$(printf '%s\n' "$_rkm_vals" | grep -c .)" -eq 1 ] && _ag_known_model "$_rkm_vals"; then
+      _rkm_a="$(mktemp 2>/dev/null || mktemp -t harness-rkm)"
+      _rkm_b="$(mktemp 2>/dev/null || mktemp -t harness-rkm)"
+      sed '/^model: /d' "$_rkm_f"   > "$_rkm_a"
+      sed '/^model: /d' "$_rkm_ref" > "$_rkm_b"
+      if cmp -s "$_rkm_a" "$_rkm_b"; then
+        rm -f "$_rkm_f"
+        printf '%s\n' "$_rkm_rel"
+        rm -f "$_rkm_a" "$_rkm_b"
+        return 0
+      fi
+      rm -f "$_rkm_a" "$_rkm_b"
+    fi
+    echo "⚠️  $_rkm_rel differs from the generated stamp (edited) — left in place (deselected '$_rkm_label' not removed)" >&2
   }
 
   # ── per-role model-artifact stamps + reclamation (E17-F01 R11/R22/R23) ────────

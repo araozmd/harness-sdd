@@ -1231,8 +1231,10 @@ pass "antigravity deselect reclaims pristine legacy personas/workflows, keeps us
 
 # antigravity_deselect_reclaims_legacy_persona_model_drift (Codex r4 P2 #3679037642): a
 # legacy persona stamped WITH a `model:` line (the config in force at install time) must
-# still be reclaimed when the CURRENT config resolves no model — the pristine compare
-# ignores the model line on both sides, while any other drift keeps the file.
+# still be reclaimed when the CURRENT config resolves no model — but ONLY while the
+# stamped value is a KNOWN generated variant (a tier alias or a current pin). A model
+# line the installer could never have written is the user's own edit and survives
+# (Codex r5 P1 #3679176989).
 TLD="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 sh "$SRC/harness-install.sh" --agents=antigravity "$TLD" >/dev/null || fail "ag-modeldrift setup install failed"
 mkdir -p "$TLD/.agents/agents"
@@ -1242,8 +1244,17 @@ grep -v '^name: ' "$TLD/.agents/skills/builder/SKILL.md" \
 grep -q '^model: pro$' "$TLD/.agents/agents/builder.md" || fail "ag-modeldrift setup: model line not injected"
 sh "$SRC/harness-install.sh" --agents=claude "$TLD" >/dev/null 2>&1 || fail "ag-modeldrift deselect rerun failed"
 [ -f "$TLD/.agents/agents/builder.md" ] && fail "Codex r4 P2: model-drifted pristine legacy persona must be reclaimed on deselect"
+# ...but a hand-set model value the installer could never have stamped SURVIVES:
+sh "$SRC/harness-install.sh" --agents=antigravity "$TLD" >/dev/null || fail "ag-modeldrift reinstall failed"
+mkdir -p "$TLD/.agents/agents"
+grep -v '^name: ' "$TLD/.agents/skills/builder/SKILL.md" \
+  | sed 's/^description: "\(.*\)"$/description: \1/' \
+  | awk '{print} /^description: /{print "model: my-custom"}' > "$TLD/.agents/agents/builder.md"
+sh "$SRC/harness-install.sh" --agents=claude "$TLD" >/dev/null 2>&1 || fail "ag-modeldrift custom deselect rerun failed"
+[ -f "$TLD/.agents/agents/builder.md" ] || fail "Codex r5 P1: legacy persona with a user-set model value was wrongly deleted"
+grep -q '^model: my-custom$' "$TLD/.agents/agents/builder.md" || fail "Codex r5 P1: user-set model line not preserved"
 rm -rf "$TLD"
-pass "antigravity deselect reclaims a legacy persona whose only drift is the model tier (Codex r4 P2)"
+pass "antigravity deselect reclaims a legacy persona with a known generated model, keeps a user-set one (Codex r4 P2 + r5 P1)"
 
 # antigravity_deselect_reclaims_pr_fixer_skill (Codex r2 P1 #3678594358): with
 # pr_loop.enabled true, antigravity stamps .agents/skills/pr-fixer/SKILL.md, but the §7
