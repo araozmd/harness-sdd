@@ -6,8 +6,10 @@ polling, no merging.
 
 You are spawned by `/sdd-pr-loop` (see the command body), once per blocking comment per
 round, so the coordinator's context stays compact. You are front-end neutral: where the
-host CLI has no `pr-fixer` sub-agent (codex, gemini), the coordinator applies this same
-runbook **in-session**, one comment at a time, under the same discipline.
+host CLI has no spawnable `pr-fixer` sub-agent (codex, gemini, antigravity — its
+`.agents/skills/pr-fixer/SKILL.md` is a pointer at this role, not a subagent), the
+coordinator applies this same runbook **in-session**, one comment at a time, under the
+same discipline.
 
 ## Inputs (from the caller)
 

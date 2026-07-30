@@ -3482,10 +3482,12 @@ At the default `max_rounds: 4` that is rounds 1–2 per-comment, round 3 combine
 escalation, round 4 `needs-human`. A `max_rounds` below `3` simply has no per-comment
 fixer rounds.
 
-**Front-ends without a `pr-fixer` sub-agent** (codex, gemini) do not spawn one: apply each
-blocking comment's fix **in-session**, under the same discipline — one comment, one
-targeted fix, one commit, one `fix-<comment_id>.md` note — then push once at the end of
-the round.
+**Front-ends without a `pr-fixer` sub-agent** (codex, gemini, antigravity) do not spawn
+one: apply each blocking comment's fix **in-session**, under the same discipline — one
+comment, one targeted fix, one commit, one `fix-<comment_id>.md` note — then push once
+at the end of the round. (Antigravity's `.agents/skills/pr-fixer/SKILL.md` is a pointer
+at the canonical role, not a spawnable subagent — bare workspace files do not register
+as Antigravity subagents, so the in-session path is its fix lane.)
 
 **Always write the worker file for this round** so the handover summary stays
 reconstructible from cache:

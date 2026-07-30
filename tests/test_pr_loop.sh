@@ -455,7 +455,7 @@ test_no_codex_gemini_pr_fixer_artifact() {            # R14
   awk '/^  ag_personas\(\)/,/^  }/' "$SRC/harness-install.sh" | grep -q 'pr-fixer' \
     && fail "R14: pr-fixer was added to the ag_personas map"
   grep -qF 'in-session' "$BODY" || fail "R14: body does not tell a front-end without pr-fixer to fix in-session"
-  grep -qF 'codex, gemini' "$BODY" || fail "R14: body does not name the front-ends without a pr-fixer sub-agent"
+  grep -qF 'codex, gemini, antigravity' "$BODY" || fail "R14: body does not name the front-ends without a pr-fixer sub-agent (incl. antigravity — Codex r10 P1)"
   pass "R14 no codex/gemini pr-fixer artifact; role map untouched; body says in-session"
 }
 

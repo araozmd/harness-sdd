@@ -49,6 +49,10 @@ All notable changes to the harness body are recorded here. Versions follow
   `MODEL_ROLES` and inherits the session model, so neither the Antigravity skill nor the
   Claude shim stamps a `model:` line for it any more — a `models.default` change can no
   longer strand the gated fixer as "user-edited" (Codex r9 P1 #3679555795).
+- `/sdd-pr-loop` now routes Antigravity through the documented **in-session** fix lane:
+  a workspace `SKILL.md` is a pointer at the canonical role, not a spawnable subagent,
+  so the loop body names antigravity alongside codex and gemini as front-ends without a
+  `pr-fixer` sub-agent (Codex r10 P1 #3679626254).
 
 ## [0.47.0] — 2026-07-29
 
