@@ -420,6 +420,32 @@ test_antigravity_pr_fixer_persona() {                 # R13
   pass "R13 .agents/skills/pr-fixer/SKILL.md emitted through the persona emitter (E99-F09)"
 }
 
+test_pr_fixer_never_model_stamped() {                 # R13b (Codex r9 P1 #3679555795)
+  # pr-fixer is NOT in MODEL_ROLES — it inherits the session model on every front-end.
+  # With models.default set to a concrete tier, neither the Antigravity skill nor the
+  # Claude shim may carry a `model:` line; and with the default back on inherit and the
+  # gate off in the same run, the skill must be reclaimed (no stranded model line can
+  # make it read as user-edited).
+  _m="$T/fixermodel"
+  set_gate "$_m" true            # pre-seed a preserved config that opts IN
+  sed "s/^  default: .*/  default: cheap/" "$_m/.harness/harness.config.yaml" > "$_m/.cfg.t" \
+    && mv "$_m/.cfg.t" "$_m/.harness/harness.config.yaml"
+  grep -q '^  default: cheap$' "$_m/.harness/harness.config.yaml" || fail "R13b setup: models.default not set"
+  install_at "$_m"
+  [ -f "$_m/.agents/skills/pr-fixer/SKILL.md" ] || fail "R13b setup: pr-fixer skill missing"
+  grep -q '^model: ' "$_m/.agents/skills/pr-fixer/SKILL.md" \
+    && fail "R13b: antigravity pr-fixer skill stamped a model (must inherit the session model)"
+  grep -q '^model: ' "$_m/.claude/agents/pr-fixer.md" \
+    && fail "R13b: claude pr-fixer shim stamped a model (must inherit the session model)"
+  sed "s/^  default: .*/  default: inherit/" "$_m/.harness/harness.config.yaml" > "$_m/.cfg.t" \
+    && mv "$_m/.cfg.t" "$_m/.harness/harness.config.yaml"
+  set_gate "$_m" false
+  install_at "$_m"
+  [ -e "$_m/.agents/skills/pr-fixer/SKILL.md" ] \
+    && fail "R13b: pr-fixer skill survived default->inherit + gate off (Codex r9 P1)"
+  pass "R13b pr-fixer never carries a model line; reclaimed on default->inherit + gate off"
+}
+
 test_no_codex_gemini_pr_fixer_artifact() {            # R14
   [ -e "$BASE/.codex/agents/pr-fixer.toml" ] && fail "R14: a codex pr-fixer artifact was created"
   [ -e "$BASE/.gemini/agents/pr-fixer.md" ]  && fail "R14: a gemini pr-fixer artifact was created"
@@ -1757,6 +1783,7 @@ test_claude_pr_fixer_shim
 test_opencode_pr_fixer_agent_file
 test_opencode_json_unaffected_by_pr_loop
 test_antigravity_pr_fixer_persona
+test_pr_fixer_never_model_stamped
 test_no_codex_gemini_pr_fixer_artifact
 
 test_pr_loop_block_seeded

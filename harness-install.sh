@@ -2504,7 +2504,13 @@ EOF
     # Fixed key order (description, model); `model:` present or absent, never moved.
     # Antigravity accepts only tier aliases here and needs `agy` >= 1.1.5 — below that
     # the key is inert, never an error. (E17-F01 R13/R19/R21.)
-    _agp_model="$(resolve_model antigravity "$_agp_role")"
+    # pr-fixer is NOT in MODEL_ROLES: like the OpenCode agent file it inherits the
+    # session model — a stamped model would strand the skill when models.default moves
+    # later (no reference can reproduce it). (E18-F01 R14, Codex r9 P1 #3679555795.)
+    case " $MODEL_ROLES " in
+      *" $_agp_role "*) _agp_model="$(resolve_model antigravity "$_agp_role")" ;;
+      *) _agp_model="" ;;
+    esac
     {
       printf -- '---\n'
       printf 'name: %s\n' "$_agp_role"
@@ -2812,7 +2818,12 @@ EOF
     # config state — the `model:` line is either present in that one position or absent
     # entirely, never reordered. Order is part of the byte contract the deselect
     # pristine-compare depends on. (E17-F01 R12/R19/R21.)
-    _ea_model="$(resolve_model claude "$1")"
+    # pr-fixer is NOT in MODEL_ROLES: it inherits the session model (E18-F01 R14, Codex
+    # r9 P1 #3679555795).
+    case " $MODEL_ROLES " in
+      *" $1 "*) _ea_model="$(resolve_model claude "$1")" ;;
+      *) _ea_model="" ;;
+    esac
     {
       printf -- '---\n'
       printf 'name: %s\n' "$1"

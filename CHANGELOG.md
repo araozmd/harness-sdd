@@ -45,6 +45,10 @@ All notable changes to the harness body are recorded here. Versions follow
 - The Antigravity skill-persona deselect compares use the same model-less-tolerant rule
   — a skill stamped without a `model:` line is still reclaimed when its tier was raised
   in the same run that deselects antigravity (Codex r6 P1 #3679286029).
+- `pr-fixer` is excluded from default model routing on every front-end: it is not in
+  `MODEL_ROLES` and inherits the session model, so neither the Antigravity skill nor the
+  Claude shim stamps a `model:` line for it any more — a `models.default` change can no
+  longer strand the gated fixer as "user-edited" (Codex r9 P1 #3679555795).
 
 ## [0.47.0] — 2026-07-29
 
