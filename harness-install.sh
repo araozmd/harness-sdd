@@ -1881,6 +1881,8 @@ install_one() {
   chmod +x "$H/tools/change-size.sh" 2>/dev/null || true   # E21-F02 advisory pre-PR change-size check
   chmod +x "$H/tools/pr-round-trend.sh" 2>/dev/null || true   # E21-F03 pr-loop convergence trend
   chmod +x "$H/tools/pr-stack-guard.sh" 2>/dev/null || true   # E21-F04 stacked-PR merge-order guard
+  chmod +x "$H/tools/pr-gate.sh" 2>/dev/null || true   # E99 deterministic pr-loop merge/fix/budget verdict
+  chmod +x "$H/tools/run-tests.sh" 2>/dev/null || true   # E99 concurrent suite runner, failures-only output
   chmod +x "$H/tools/opencode-model-helper.sh" 2>/dev/null || true   # E22-F01 OpenCode model pin helper
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
@@ -3190,8 +3192,21 @@ missing or corrupt, reconstruct it from the `gh` API.
 Use a `while` loop so the round counter can be restarted. `round_dir=.harness/.pr-loop/<pr>/round-<round>`;
 `max_rounds` is read from `pr_loop.max_rounds` (default 4).
 
+`max_rounds` is a budget for the **PR**, not for one invocation of this command. Resume the
+counter from the highest round already in the cache, so re-running `/sdd-pr-loop` cannot
+silently grant a fresh budget — PR #86 reached round 12 against `max_rounds: 4` exactly that
+way, and the `needs-human` hand-off that should have fired at round 4 never did. The
+base-change restart below moves the stale rounds to `stale-<ts>/`, so it correctly
+re-derives round 1 on its own.
+
 ```bash
 round=1
+for _d in .harness/.pr-loop/$pr_number/round-*/; do
+  [ -d "$_d" ] || continue                       # unmatched glob — no cache yet
+  _n="${_d%/}"; _n="${_n##*/round-}"
+  case "$_n" in ''|*[!0-9]*) continue ;; esac
+  [ "$_n" -ge "$round" ] && round=$((_n + 1))
+done
 while [ "$round" -le "$max_rounds" ]; do
   round_dir=".harness/.pr-loop/$pr_number/round-$round"
   mkdir -p "$round_dir"
@@ -3497,6 +3512,44 @@ into the handover summary, and — at the cap — into the `needs-human` message
 
 ### 5. Branch on round
 
+**Ask the gate FIRST — before branching on the budget.** The verdict already folds the
+round budget in, so the table below is a rendering of the gate's answer, not a second
+opinion beside it:
+
+```bash
+sh .harness/tools/pr-gate.sh evaluate "$round_dir" --round "$round" --max-rounds "$max_rounds"
+gate_rc=$?
+```
+
+**The gate's verdict is binding, and it is asked exactly ONCE per round.** `merge` (0) means
+the review is finished: leave this step entirely, **break the loop before advancing the round
+counter**, and go to step 6 then "ready to merge". Breaking preserves the successful `round`
+value, so the Ready-to-merge section reads `round-$round/pr.json` from the correct round.
+`fix` (6), `escalate` (7) and `needs-human` (8) select the rows below. `unresolved` (9) — no
+Codex review landed for this round — and unreadable input (4) both take the `needs-human`
+terminal state; never read an empty `blocking.json` as clean.
+
+The gate answers the budget question from `blocking.json` alone when findings remain, and
+proves a review actually landed (via `wait-for-codex.sh evaluate`) only when the blocking set
+is empty — because an empty set means two opposite things, "reviewed, nothing blocking" and
+"no review landed", and only the first may merge.
+
+**Do not fix non-blocking findings to make the PR look clean.** `blocking.json` is already
+filtered to `pr_loop.blocking_severities`; P2 and nit are excluded **by configuration, not by
+oversight**. A P2 comment sitting on a PR the gate calls `merge` is not unfinished work — it is
+work this loop was told not to do. If it deserves attention it deserves its own PR, where it
+gets reviewed on its own diff instead of extending a review that already converged.
+
+That instruction exists because the loop stopped honouring it. On PR #89 every round reported zero
+blocking findings and the loop still spent three rounds and three commits on P2s; on PR #86
+rounds 6-8 were clean and it ran to round 12. Across this repo 20 of 43 Codex-fix commits
+addressed P2s — roughly half the fix budget spent on findings that never blocked anything.
+
+Branching on the budget first is the ordering bug this replaces: at the cap round the
+`max_rounds` row stopped with `needs-human` before anything consulted the findings, so a
+**clean final round could never merge** — the loop handed a green PR to a human. Only a cap
+round that still has blocking findings is a hand-over.
+
 | Round | Behavior |
 |---|---|
 | below `max_rounds - 1` | For each blocking comment, spawn one **`pr-fixer`** sub-agent, passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
@@ -3527,14 +3580,17 @@ another Codex round:
 
 - CI green (`statusCheckRollup[*].conclusion == "SUCCESS"` for required checks)
 - Tests / typecheck / lint green (subsets of CI)
-- Zero unresolved blocking comments — i.e. `blocking.json` is empty
 
-If all are green, **break the loop before advancing the round counter** and **proceed to
-"ready to merge"** — do not waste another Codex round. Breaking preserves the successful
-`round` value; the Ready-to-merge section then reads `round-$round/pr.json` from the
-correct round, not from the advanced counter. If checks are still pending, wait for them;
-if any fail, treat the failure like a blocking comment for the next round.
-checks are still pending, wait for them; if any fail, treat the failure like a blocking
+**Do not ask the gate again.** It was asked once, at step 5, and its verdict is what routed
+you here. `blocking.json` still holds THIS round's findings — the fixer commits do not rewrite
+it — so a second call necessarily returns `fix`/`escalate` again and sends you back through
+step 5 on the same stale set, forever. One round, one verdict.
+
+What remains is to confirm the fix commits did not break anything, then **advance**: bump the
+round counter and trigger a fresh `@codex review` (step 1). The new review is what produces
+the next round's blocking set.
+
+If checks are still pending, wait for them; if any fail, treat the failure like a blocking
 comment for the next round.
 
 #### Squash-merge prep (only when `merge_strategy` is `squash`)

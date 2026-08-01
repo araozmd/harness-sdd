@@ -208,11 +208,21 @@ links_and_verification_wiring() {
   check_local_links_in "$ROOT/README.md"
   check_local_links_in "$ROOT/AGENTS.md"
   check_local_links_in "$ROOT/docs/HARNESS.md"
-  _command="$(sed -n 's/^[[:space:]]*test_command: "\(.*\)"[[:space:]]*#.*$/\1/p' "$ROOT/harness.config.yaml")"
-  printf '%s\n' "$_command" | grep -qF 'sh tests/test_rationale_docs.sh' ||
-    fail "configured full verification does not include rationale suite"
-  [ "$(printf '%s\n' "$_command" | grep -o 'sh tests/test_rationale_docs.sh' | wc -l | tr -d ' ')" -eq 1 ] ||
-    fail "rationale suite must be appended exactly once"
+  # verification.test_command now delegates to tools/run-tests.sh, which DISCOVERS every
+  # tests/test_*.sh. The intent of this check is "this suite is not orphaned", so accept
+  # either spelling: an explicit mention, or the discovering runner plus the file existing.
+  _command="$(sed -n 's/^[[:space:]]*test_command: "\([^"]*\)".*$/\1/p' "$ROOT/harness.config.yaml")"
+  { printf '%s\n' "$_command" | grep -qF 'sh tests/test_rationale_docs.sh'; } \
+    || { printf '%s\n' "$_command" | grep -qF 'tools/run-tests.sh' \
+         && [ -f "$ROOT/tests/test_rationale_docs.sh" ]; } ||
+    fail "configured full verification does not reach the rationale suite"
+  # The duplicate guard only means something for the explicit &&-chain spelling, where a
+  # suite could be appended twice. Under the discovering runner the name appears zero times
+  # by design, and a suite cannot be discovered twice.
+  _named="$(printf '%s\n' "$_command" | grep -o 'sh tests/test_rationale_docs.sh' | wc -l | tr -d ' ')"
+  if [ "$_named" -ne 0 ]; then
+    [ "$_named" -eq 1 ] || fail "rationale suite must be appended exactly once"
+  fi
   pass "links_and_verification_wiring"
 }
 

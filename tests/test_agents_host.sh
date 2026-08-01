@@ -639,9 +639,18 @@ test_docs_document_host_mode() {
 
 # ── R28 — the suite exists and is wired into verification.test_command ────────
 test_suite_wired_into_verification() {
-  grep -qF 'tests/test_agents_host.sh' "$SRC/harness.config.yaml" \
-    || fail "R28: this suite is not registered in verification.test_command"
+  # The intent is "this suite is not orphaned — verification.test_command actually runs it".
+  # That is satisfied two ways: the config names the suite outright, or it delegates to
+  # tools/run-tests.sh, which DISCOVERS every tests/test_*.sh. Asserting only the first
+  # spelling would freeze a config detail this suite has no stake in.
   [ -f "$SRC/tests/test_agents_host.sh" ] || fail "R28: tests/test_agents_host.sh does not exist"
+_tc_value() {  # echo the test_command scalar only — never the surrounding comments
+  sed -n 's/^[[:space:]]*test_command:[[:space:]]*"\([^"]*\)".*$/\1/p' "$1"
+}
+  _tc="$(_tc_value "$SRC/harness.config.yaml")"
+  printf '%s\n' "$_tc" | grep -qF 'tests/test_agents_host.sh' \
+    || printf '%s\n' "$_tc" | grep -qF 'tools/run-tests.sh' \
+    || fail "R28: this suite is not reachable from verification.test_command"
   grep -qF -e 'agents=host' "$SRC/tests/test_install.sh" \
     || fail "R28: tests/test_install.sh does not cover --agents=host end to end"
   return 0

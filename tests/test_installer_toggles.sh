@@ -682,8 +682,18 @@ test_docs_document_backend_prompt() {
 # ── R14 — suite wiring + permanent-suite hygiene ─────────────────────────────
 test_suite_wiring_and_hygiene() {
   _self="$SRC/tests/test_installer_toggles.sh"
-  grep -qF 'tests/test_installer_toggles.sh' "$SRC/harness.config.yaml" \
-    || fail "R14: verification.test_command does not name tests/test_installer_toggles.sh"
+  # The intent is "this suite is not orphaned — verification.test_command actually runs it".
+  # That is satisfied two ways: the config names the suite outright, or it delegates to
+  # tools/run-tests.sh, which DISCOVERS every tests/test_*.sh. Asserting only the first
+  # spelling would freeze a config detail this suite has no stake in — the same
+  # permanent-suite anti-pattern the rest of R14 guards against.
+_tc_value() {  # echo the test_command scalar only — never the surrounding comments
+  sed -n 's/^[[:space:]]*test_command:[[:space:]]*"\([^"]*\)".*$/\1/p' "$1"
+}
+  _tc="$(_tc_value "$SRC/harness.config.yaml")"
+  printf '%s\n' "$_tc" | grep -qF 'tests/test_installer_toggles.sh' \
+    || printf '%s\n' "$_tc" | grep -qF 'tools/run-tests.sh' \
+    || fail "R14: this suite is not reachable from verification.test_command"
   # (The pattern is spelled with a character class so this very line does not match it.)
   grep -q 'git[[:space:]][[:space:]]*diff' "$_self" \
     && fail "R14: this suite diffs a file against git — a permanent suite must never do that"

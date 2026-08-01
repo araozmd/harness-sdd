@@ -437,8 +437,17 @@ for doc in "$ROOT/docs/WORKFLOW.md" "$ROOT/README.md"; do
 done
 pass "R5/R8-R13 operator documentation names warnings and blocked output"
 
-require_text "$ROOT/harness.config.yaml" 'sh tests/test_dependency_diagnostics.sh'
-require_text "$ROOT/harness.config.yaml" 'dependency diagnostics'
+# verification.test_command now delegates to tools/run-tests.sh, which DISCOVERS every
+# tests/test_*.sh. The intent of this check is "this suite is not orphaned", so accept
+# either spelling: an explicit mention, or the discovering runner plus the file existing.
+_tc_value() {  # echo the test_command scalar only — never the surrounding comments
+  sed -n 's/^[[:space:]]*test_command:[[:space:]]*"\([^"]*\)".*$/\1/p' "$1"
+}
+_tc="$(_tc_value "$ROOT/harness.config.yaml")"
+{ printf '%s\n' "$_tc" | grep -qF 'sh tests/test_dependency_diagnostics.sh' \
+    || { printf '%s\n' "$_tc" | grep -qF 'tools/run-tests.sh' \
+         && [ -f "$ROOT/tests/test_dependency_diagnostics.sh" ]; }; } \
+  || fail "dependency-diagnostics suite is not reachable from verification.test_command"
 python3 - "$ROOT/VERSION" "$ROOT/CHANGELOG.md" <<'PY'
 import pathlib
 import re

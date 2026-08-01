@@ -182,6 +182,37 @@ test_fix_worktree_helper_installed_executable() {
     fail "installed tools/fix-worktree.sh is missing or not executable"
 }
 
+# E99: the deterministic pr-loop gate and the concurrent suite runner must ship in the
+# body AND be executable. Both are wired the same way every other tools/ helper is —
+# `copy tools` plus an explicit chmod — and the chmod line is asserted here, not just the
+# emitted file, because a helper that installs non-executable fails only at run time in a
+# consumer, long after this suite went green.
+test_e99_throughput_helpers_installed_contract() {
+  [ -x "$T/.harness/tools/pr-gate.sh" ] ||
+    fail "E99: installed tools/pr-gate.sh missing or not executable (pr-loop merge gate not runnable)"
+  cmp -s "$SRC/tools/pr-gate.sh" "$T/.harness/tools/pr-gate.sh" ||
+    fail "E99: installed pr-gate.sh differs from source"
+  grep -qF 'chmod +x "$H/tools/pr-gate.sh"' "$SRC/harness-install.sh" ||
+    fail "E99: installer lacks explicit pr-gate executable wiring"
+
+  [ -x "$T/.harness/tools/run-tests.sh" ] ||
+    fail "E99: installed tools/run-tests.sh missing or not executable (suite runner not runnable)"
+  cmp -s "$SRC/tools/run-tests.sh" "$T/.harness/tools/run-tests.sh" ||
+    fail "E99: installed run-tests.sh differs from source"
+  grep -qF 'chmod +x "$H/tools/run-tests.sh"' "$SRC/harness-install.sh" ||
+    fail "E99: installer lacks explicit suite-runner executable wiring"
+
+  # The installed /sdd-pr-loop must actually CALL the gate. The whole defect this fixes was
+  # a correct classification that nothing was obliged to act on, so an installed runbook
+  # that still leaves the merge decision to prose would reintroduce it verbatim.
+  if [ -f "$T/.claude/commands/sdd-pr-loop.md" ]; then
+    grep -qF '.harness/tools/pr-gate.sh evaluate' "$T/.claude/commands/sdd-pr-loop.md" ||
+      fail "E99: installed sdd-pr-loop does not invoke the pr-gate"
+    grep -qF 'budget for the **PR**' "$T/.claude/commands/sdd-pr-loop.md" ||
+      fail "E99: installed sdd-pr-loop does not resume the round counter (max_rounds would reset per invocation)"
+  fi
+}
+
 test_dependency_diagnostics_installed_contract() {
   [ -x "$T/.harness/tools/task-diagnostics.py" ] ||
     fail "E16-F01: installed task-diagnostics.py missing or not executable"
@@ -314,6 +345,7 @@ test_fix_worktree_helper_installed_executable
 test_dependency_diagnostics_installed_contract
 test_next_task_installed_contract
 test_rationale_docs_installed_contract
+test_e99_throughput_helpers_installed_contract
 # E15-F01 (Codex #46 r2 P1): the SHARED board validator must ship in the body AND be
 # executable — init.sh runs it as a CLI and tasks-lock.py imports its validate(); if it
 # is missing the gate and the guarded write both break in consumers.
@@ -1743,8 +1775,17 @@ test_models_docs_and_manifest() {   # R24
   grep -qF 'agy' "$_mi"              || fail "R24: installed docs/INSTALL.md does not document the Antigravity agy floor"
   grep -qF '.gemini/agents/' "$_mi"  || fail "R24: installed docs/INSTALL.md layout tree omits .gemini/agents/"
   grep -qF '.codex/agents/' "$_mi"   || fail "R24: installed docs/INSTALL.md layout tree omits .codex/agents/"
-  grep -qF 'tests/test_model_routing.sh' "$SRC/harness.config.yaml" \
-    || fail "R24: tests/test_model_routing.sh is not registered in verification.test_command"
+  # verification.test_command now delegates to tools/run-tests.sh, which DISCOVERS every
+  # tests/test_*.sh. The intent of this check is "this suite is not orphaned", so accept
+  # either spelling: an explicit mention, or the discovering runner plus the file existing.
+_tc_value() {  # echo the test_command scalar only — never the surrounding comments
+  sed -n 's/^[[:space:]]*test_command:[[:space:]]*"\([^"]*\)".*$/\1/p' "$1"
+}
+  _tc="$(_tc_value "$SRC/harness.config.yaml")"
+  { printf '%s\n' "$_tc" | grep -qF 'tests/test_model_routing.sh' \
+      || { printf '%s\n' "$_tc" | grep -qF 'tools/run-tests.sh' \
+           && [ -f "$SRC/tests/test_model_routing.sh" ]; }; } \
+    || fail "R24: tests/test_model_routing.sh is not reachable from verification.test_command"
   [ -f "$SRC/tests/test_model_routing.sh" ] || fail "R24: tests/test_model_routing.sh does not exist"
   rm -rf "$_mt"
 }
