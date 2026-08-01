@@ -1724,8 +1724,17 @@ test_docs_document_pr_loop() {                        # R50
 }
 
 test_suite_is_wired_and_hygienic() {                  # R51
-  grep -qF 'sh tests/test_pr_loop.sh' "$SRC/harness.config.yaml" \
-    || fail "R51: this suite is not wired into verification.test_command"
+  # verification.test_command now delegates to tools/run-tests.sh, which DISCOVERS every
+  # tests/test_*.sh. The intent of this check is "this suite is not orphaned", so accept
+  # either spelling: an explicit mention, or the discovering runner plus the file existing.
+_tc_value() {  # echo the test_command scalar only — never the surrounding comments
+  sed -n 's/^[[:space:]]*test_command:[[:space:]]*"\([^"]*\)".*$/\1/p' "$1"
+}
+  _tc="$(_tc_value "$SRC/harness.config.yaml")"
+  { printf '%s\n' "$_tc" | grep -qF 'sh tests/test_pr_loop.sh' \
+      || { printf '%s\n' "$_tc" | grep -qF 'tools/run-tests.sh' \
+           && [ -f "$SRC/tests/test_pr_loop.sh" ]; }; } \
+    || fail "R51: this suite is not reachable from verification.test_command"
   grep -q '^export CODEX_HOME=' "$SELF" || fail "R51: the suite does not sandbox CODEX_HOME"
   # every installer invocation in this file must carry a sandboxed CODEX_HOME
   if grep -n 'sh "$SRC/harness-install\.sh"' "$SELF" | grep -v 'CODEX_HOME' | grep -q .; then

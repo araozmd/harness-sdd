@@ -374,7 +374,16 @@ pass "R26 reader_honors_configured_log"
 grep -qE '^telemetry:' "$CONFIG" || fail "config: telemetry block missing"
 grep -qE '^[[:space:]]*enabled:' "$CONFIG" || fail "config: telemetry.enabled missing (kill-switch)"
 grep -qE '^[[:space:]]*log:[[:space:]]*telemetry\.jsonl' "$CONFIG" || fail "config: telemetry.log default missing"
-grep -qF 'tests/test_telemetry.sh' "$CONFIG" || fail "config: test suite not wired into verification.test_command"
+# verification.test_command now delegates to tools/run-tests.sh, which DISCOVERS every
+# tests/test_*.sh. The intent of this check is "this suite is not orphaned", so accept
+# either spelling: an explicit mention, or the discovering runner plus the file existing.
+_tc_value() {  # echo the test_command scalar only — never the surrounding comments
+  sed -n 's/^[[:space:]]*test_command:[[:space:]]*"\([^"]*\)".*$/\1/p' "$1"
+}
+_tc="$(_tc_value "$CONFIG")"
+{ printf '%s\n' "$_tc" | grep -qF 'tests/test_telemetry.sh' \
+    || { printf '%s\n' "$_tc" | grep -qF 'tools/run-tests.sh' && [ -f "$ROOT/tests/test_telemetry.sh" ]; }; } \
+  || fail "config: test suite not reachable from verification.test_command"
 pass "config_and_ci_wired"
 
 echo "All telemetry tests passed."

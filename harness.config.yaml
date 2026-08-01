@@ -154,7 +154,15 @@ verification:
   init_script: ./init.sh
   # Commands the Reviewer must run before marking work done. Project-specific —
   # edit these per target repo.
-  test_command: "sh tests/test_install.sh && sh tests/test_umbrella.sh && sh tests/test_cascade.sh && sh tests/test_inception.sh && sh tests/test_reviewer.sh && sh tests/test_telemetry.sh && sh tests/test_mirror.sh && sh tests/test_epic_lifecycle.sh && sh tests/test_sdd_plan.sh && sh tests/test_sdd_drill.sh && sh tests/test_sdd_fix.sh && sh tests/test_architect_adr.sh && sh tests/test_drift_check.sh && sh tests/test_doc_critic.sh && sh tests/test_ownership.sh && sh tests/test_board_lock.sh && sh tests/test_adr_citation.sh && sh tests/test_fix_worktree.sh && sh tests/test_sdd_fix_parallel.sh && sh tests/test_dependency_diagnostics.sh && sh tests/test_rationale_docs.sh && sh tests/test_next_task.sh && sh tests/test_model_routing.sh && sh tests/test_pr_loop.sh && sh tests/test_change_size.sh && sh tests/test_agents_host.sh && sh tests/test_installer_toggles.sh"   # installer + umbrella coordinator + cascade + inception intake + reviewer + telemetry + board-mirror + epic lifecycle + sdd-plan + sdd-drill + sdd-fix + architect-adr + drift-check + doc-critic + ownership + board-lock + adr-citation + fix-worktree + parallel-fix + dependency diagnostics + rationale docs + deterministic selector + per-role model routing + pr-loop + change-size + agents-host detection + installer-toggle suites
+  # Every suite under tests/, run concurrently, printing only what failed. The suites are
+  # mutually isolated (per-case mktemp fixtures, sandboxed HOME/CODEX_HOME, no writes into
+  # state/ specs/ progress/), so this is 3.5x faster than the serial chain it replaces
+  # (634s -> 171s here) and emits one line on green instead of ~19k tokens of chatter the
+  # Reviewer had to read every round. It also DISCOVERS suites, so adding tests/test_*.sh
+  # no longer means hand-editing this scalar -- the old chain had grown to 27 entries and
+  # every feature appended one. Use `sh tools/run-tests.sh --serial` to bisect a suspected
+  # cross-suite interaction.
+  test_command: "sh tools/run-tests.sh"
 
   lint_command: ""        # e.g. "ruff check ." or "npm run lint"
   typecheck_command: ""   # e.g. "mypy ." or "tsc --noEmit"

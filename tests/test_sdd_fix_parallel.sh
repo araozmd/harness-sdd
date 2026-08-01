@@ -579,7 +579,16 @@ pass "R9 portable native-concurrency contract"
 grep -Eq '^fix_lane:' harness.config.yaml || fail "R2: fix_lane config missing"
 grep -Eq '^[[:space:]]+max_parallel:[[:space:]]+3' harness.config.yaml || fail "R2: max_parallel default missing"
 grep -Eq '^[[:space:]]+shared_paths:[[:space:]]+\[\]' harness.config.yaml || fail "R5: shared_paths default missing"
-grep -qF 'sh tests/test_sdd_fix_parallel.sh' harness.config.yaml || fail "R18: suite not in full verification"
+# verification.test_command now delegates to tools/run-tests.sh, which DISCOVERS every
+# tests/test_*.sh. The intent of this check is "this suite is not orphaned", so accept
+# either spelling: an explicit mention, or the discovering runner plus the file existing.
+_tc_value() {  # echo the test_command scalar only — never the surrounding comments
+  sed -n 's/^[[:space:]]*test_command:[[:space:]]*"\([^"]*\)".*$/\1/p' "$1"
+}
+_tc="$(_tc_value harness.config.yaml)"
+{ printf '%s\n' "$_tc" | grep -qF 'sh tests/test_sdd_fix_parallel.sh' \
+    || { printf '%s\n' "$_tc" | grep -qF 'tools/run-tests.sh' && [ -f tests/test_sdd_fix_parallel.sh ]; }; } \
+  || fail "R18: suite not reachable from full verification"
 for f in README.md docs/WORKFLOW.md docs/INSTALL.md; do
   need "$f" '/sdd-fix-parallel' "R18: $f does not document command"
 done

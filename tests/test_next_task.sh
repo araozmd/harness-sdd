@@ -505,7 +505,16 @@ pass "R14 orchestrator authority, oracle, fallback, and command mapping"
 [ -x "$TOOL" ] || fail "source selector is not executable"
 grep -qF 'tools/next-task.mjs' "$ROOT/harness-install.sh" ||
   fail "installer does not carry the selector"
-grep -qF 'tests/test_next_task.sh' "$ROOT/harness.config.yaml" ||
+# verification.test_command now delegates to tools/run-tests.sh, which DISCOVERS every
+# tests/test_*.sh. The intent of this check is "this suite is not orphaned", so accept
+# either spelling: an explicit mention, or the discovering runner plus the file existing.
+_tc_value() {  # echo the test_command scalar only — never the surrounding comments
+  sed -n 's/^[[:space:]]*test_command:[[:space:]]*"\([^"]*\)".*$/\1/p' "$1"
+}
+_tc="$(_tc_value "$ROOT/harness.config.yaml")"
+{ printf '%s\n' "$_tc" | grep -qF 'tests/test_next_task.sh' \
+    || { printf '%s\n' "$_tc" | grep -qF 'tools/run-tests.sh' \
+         && [ -f "$ROOT/tests/test_next_task.sh" ]; }; } ||
   fail "selector suite is absent from full verification"
 python3 - "$ROOT/CHANGELOG.md" "$ROOT/VERSION" <<'PY' ||
 import re, sys

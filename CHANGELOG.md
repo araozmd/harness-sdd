@@ -4,6 +4,62 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.50.0] — 2026-08-01
+
+### Fixed — 🐛 the pr-loop chased findings it was configured to ignore (E99)
+
+Measured on this repo's telemetry and `.pr-loop/` cache: **20 of 43 Codex-fix commits
+addressed P2s**, a severity `pr_loop.blocking_severities` (default `P0,P1`) explicitly
+excludes. PR #89 reported **zero blocking findings in all three rounds** and still spent
+three rounds and three P2 commits; PR #86 was clean at rounds 6, 7 and 8 with CI green and
+ran on to **round 12** against `max_rounds: 4`.
+
+The classification was never wrong — `blocking.json` was correctly empty every time. What
+was missing is that the ACTION was left to the driving agent's prose reading of the runbook,
+and prose is something an agent can talk itself out of when a reviewer bot keeps posting.
+
+- **New `tools/pr-gate.sh`** — reads the round cache the loop already wrote and prints one
+  binding verdict: `merge` (0), `fix` (6), `escalate` (7), `needs-human` (8), usage/unreadable
+  (4). Zero blocking findings ⇒ `merge`, at any round. It **fails closed**: a missing, empty
+  or non-array `blocking.json` is never a `merge`. Scope is deliberately narrow — a `merge`
+  verdict says "the review converged", NOT "this PR may merge"; the CI-green check and
+  `tools/pr-stack-guard.sh` remain separate gates.
+- **`/sdd-pr-loop` now calls the gate** and states that non-blocking findings are excluded by
+  configuration, not oversight — a P2 on a PR the gate calls `merge` belongs in its own PR.
+- **`max_rounds` is now a budget for the PR, not for one invocation.** The round counter
+  resumed from `round=1` on every run, so re-running `/sdd-pr-loop` silently granted a fresh
+  budget — how #86 reached round 12 without the round-4 `needs-human` hand-off ever firing.
+  It now resumes from the highest round already in the cache. The base-change restart still
+  re-derives round 1 correctly, because it moves stale rounds to `stale-<ts>/` first.
+- Removed a **pre-existing duplicated sentence fragment** in the installer's `/sdd-pr-loop`
+  heredoc that had been shipping to every consumer.
+
+### Changed — ⚡ the suite runs concurrently and reports only failures (E99)
+
+`verification.test_command` was a hand-maintained chain of **27 `&&`-joined suites** that
+every feature appended to. It cost the Reviewer, every round, on two axes:
+
+- **634s wall clock**, serially.
+- **~77KB (~19k tokens) of output on a fully GREEN run** — 32KB of it `test_install.sh`
+  installer warnings — all of which the Reviewer read to learn one bit.
+
+- **New `tools/run-tests.sh`** — discovers `tests/test_*.sh` and runs them concurrently
+  (`--jobs`, default 8; `--serial` to bisect). On green it prints **one line**; on red it
+  fails, names each failing suite and surfaces its output **in full**. Measured here:
+  **634s → 171s, all 27 suites still passing.**
+- `verification.test_command` is now `sh tools/run-tests.sh`. Because it DISCOVERS suites,
+  adding a `tests/test_*.sh` no longer means hand-editing the scalar.
+- The suites were already mutually isolated (per-case `mktemp` fixtures, sandboxed `HOME`
+  and `CODEX_HOME`, no writes into `state/`, `specs/`, `progress/`); concurrency is a claim
+  about that, and a suite that passes `--serial` but fails under `--jobs` is an isolation
+  bug in the suite, not a reason to pin the runner.
+
+### Added — ✅ `tests/test_pr_gate.sh`
+
+Twelve assertions over both tools: the verdict table, the P2-only-PR case that motivated the
+work, fail-closed behaviour on unreadable input, both maintained `/sdd-pr-loop` copies
+actually calling the gate, and the runner's quiet-green / loud-red contract.
+
 ## [0.49.1] — 2026-07-29
 
 ### Fixed — 🐛 change-size `--format json` escapes every C0 control character (E99-F08)
