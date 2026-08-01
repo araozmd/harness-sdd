@@ -24,6 +24,14 @@ and prose is something an agent can talk itself out of when a reviewer bot keeps
   or non-array `blocking.json` is never a `merge`. Scope is deliberately narrow — a `merge`
   verdict says "the review converged", NOT "this PR may merge"; the CI-green check and
   `tools/pr-stack-guard.sh` remain separate gates.
+- **An empty `blocking.json` is not by itself evidence of a clean review.** A round where
+  the watcher timed out has an empty blocking set for the opposite reason — no review landed.
+  The first version of the gate answered `merge` there. Caught on this change's own PR #90,
+  where Codex replied **54s inside the 900s ceiling** and the 60s-interval watcher missed it.
+  The gate now re-derives the round's review state via `wait-for-codex.sh evaluate` before it
+  reads `blocking.json` at all, and reports `unresolved` (exit 9) when no review has landed.
+  The verification is deliberately independent rather than a caller-supplied flag: the point
+  of the gate is not to take the loop's word for it.
 - **`/sdd-pr-loop` now calls the gate** and states that non-blocking findings are excluded by
   configuration, not oversight — a P2 on a PR the gate calls `merge` belongs in its own PR.
 - **`max_rounds` is now a budget for the PR, not for one invocation.** The round counter

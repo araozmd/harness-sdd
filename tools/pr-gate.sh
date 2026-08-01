@@ -27,6 +27,7 @@
 #   7  escalate     blocking findings remain and this is the last productive round —
 #                   one combined pass (the `max_rounds - 1` behavior)
 #   8  needs-human  the round budget is exhausted — label and hand over
+#   9  unresolved   NO REVIEW HAS LANDED for this round — hand over, never merge
 #   4  usage error / unreadable input
 #
 # SCOPE — read this before wiring it into a merge. A `merge` verdict answers ONE question:
@@ -36,6 +37,17 @@
 #
 # Fails CLOSED: a missing, empty or unparseable blocking.json is never a `merge`. A gate that
 # cannot prove the review converged must not be the reason a PR merged.
+#
+# AN EMPTY blocking.json IS NOT BY ITSELF EVIDENCE OF A CLEAN REVIEW. A round where the
+# watcher timed out has an empty blocking.json for the opposite reason: no review landed at
+# all. The first version of this tool answered `merge` in exactly that state, and it was
+# caught on this tool's OWN pull request, where Codex replied 54s inside the 900s ceiling
+# and the 60s-interval watcher missed it. So before reading blocking.json at all, the gate
+# re-derives the round's review state with `wait-for-codex.sh evaluate`, which is offline,
+# needs no network, and is the same logic the watcher resolves on. Only a round that
+# provably RESOLVED — clean, or findings that were then severity-filtered — can reach a
+# `merge`. This verification is deliberately independent rather than a caller-supplied
+# flag: the whole purpose of the gate is to not take the loop's word for it.
 
 set -eu
 LC_ALL=C; export LC_ALL
@@ -76,6 +88,27 @@ command -v jq >/dev/null 2>&1 || {
   printf 'pr-gate: `jq` is not on PATH — install jq (https://jqlang.github.io/jq/)\n' >&2
   exit 4
 }
+
+# ── Did a review actually resolve for this round? ────────────────────────────
+# Delegated to the watcher's offline evaluator so there is exactly one implementation of
+# "what counts as a resolved Codex review". Exit 0 findings, 3 clean, 1 pending, 4 error.
+watcher="$(dirname -- "$0")/wait-for-codex.sh"
+[ -f "$watcher" ] || {
+  printf 'pr-gate: cannot find wait-for-codex.sh next to this script — cannot prove a review landed\n' >&2
+  exit 4
+}
+ev_rc=0
+sh "$watcher" evaluate "$round_dir" >/dev/null 2>&1 || ev_rc=$?
+case "$ev_rc" in
+  0|3) : ;;                       # findings, or clean — either way the round RESOLVED
+  1)   printf 'unresolved\n'
+       printf 'pr-gate: no Codex review has resolved for %s (watcher pending/timed out) — not a merge\n' \
+         "$round_dir" >&2
+       exit 9 ;;
+  *)   printf 'pr-gate: could not evaluate the review state of %s (wait-for-codex exit %s)\n' \
+         "$round_dir" "$ev_rc" >&2
+       exit 4 ;;
+esac
 
 blocking="$round_dir/blocking.json"
 [ -f "$blocking" ] || {

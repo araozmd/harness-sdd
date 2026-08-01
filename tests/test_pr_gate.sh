@@ -29,7 +29,35 @@ verdict() {
   sh "$GATE" evaluate "$_d" --round "$_r" --max-rounds "$_m" 2>/dev/null || true
 }
 
-mk() { mkdir -p "$WORK/$1"; printf '%s' "$2" >"$WORK/$1/blocking.json"; }
+HEAD='aaaaaaa1111111222222233333334444444555555'
+SHORT='aaaaaaa'
+SINCE='2026-01-01T00:00:00Z'
+LATER='2026-06-01T00:00:00Z'
+BOT='chatgpt-codex-connector'
+
+# _resolve <dir> <clean|findings> — write the watcher artifacts so `wait-for-codex.sh
+# evaluate` reports a RESOLVED round. The gate refuses to look at blocking.json until a
+# review has provably landed, so every verdict fixture needs these.
+_resolve() {
+  _d="$WORK/$1"; mkdir -p "$_d"
+  printf '%s\n' "$SINCE" >"$_d/trigger-ts.txt"
+  if [ "$2" = clean ]; then
+    printf '[]' >"$_d/review-comments.json"
+    printf '{"headRefOid":"%s","reviews":[{"author":{"login":"%s"},"submittedAt":"%s","body":"Reviewed commit: %s"}]}' \
+      "$HEAD" "$BOT" "$LATER" "$SHORT" >"$_d/pr.json"
+  else
+    printf '[{"id":1,"user":{"login":"%s"},"commit_id":"%s","created_at":"%s","body":"P1 finding"}]' \
+      "$BOT" "$HEAD" "$LATER" >"$_d/review-comments.json"
+    printf '{"headRefOid":"%s","reviews":[]}' "$HEAD" >"$_d/pr.json"
+  fi
+}
+
+# mk <dir> <blocking-json> [clean|findings] — a RESOLVED round with the given blocking set
+mk() {
+  mkdir -p "$WORK/$1"
+  _resolve "$1" "${3:-clean}"
+  printf '%s' "$2" >"$WORK/$1/blocking.json"
+}
 
 # ── R1: zero blocking findings ends the loop, at ANY round ────────────────────
 # The regression this whole feature exists for: PR #86 rounds 6-8 were clean and the loop
@@ -43,8 +71,7 @@ pass "R1 zero blocking findings ⇒ merge at any round"
 
 # ── R2: a P2-only PR is CLEAN, because blocking.json is already severity-filtered ──
 # Guards the exact drift: non-blocking chatter must never turn into another round of work.
-mkdir -p "$WORK/p2only"
-printf '%s' '[]' >"$WORK/p2only/blocking.json"
+mk p2only '[]'
 cat >"$WORK/p2only/comments.json" <<'JSON'
 [{"id":1,"severity":"P2","body":"nit: rename this"},
  {"id":2,"severity":"nit","body":"stray whitespace"}]
@@ -54,7 +81,7 @@ JSON
 pass "R2 P2/nit-only PR ⇒ merge (never another fix round)"
 
 # ── R3/R4/R5: with real blocking findings the verdict is a pure budget decision ──
-mk blocked '[{"id":9,"severity":"P1","body":"real"}]'
+mk blocked '[{"id":9,"severity":"P1","body":"real"}]' findings
 [ "$(verdict "$WORK/blocked" 1 4)" = fix ]          || fail "R3: round 1 of 4 is not 'fix'"
 [ "$(rc "$WORK/blocked" 1 4)" -eq 6 ]               || fail "R3: 'fix' exit is not 6"
 [ "$(verdict "$WORK/blocked" 2 4)" = fix ]          || fail "R3: round 2 of 4 is not 'fix'"
@@ -66,7 +93,7 @@ mk blocked '[{"id":9,"severity":"P1","body":"real"}]'
 pass "R3-R5 blocking findings ⇒ fix / escalate / needs-human by budget"
 
 # ── R6: fail closed. Nothing unreadable may ever come back 'merge' ────────────
-mkdir -p "$WORK/nofile"
+mkdir -p "$WORK/nofile"; _resolve nofile clean
 [ "$(rc "$WORK/nofile" 1 4)" -eq 4 ]  || fail "R6: a missing blocking.json is not exit 4"
 [ "$(verdict "$WORK/nofile" 1 4)" != merge ] || fail "R6: a missing blocking.json returned 'merge'"
 
@@ -79,6 +106,22 @@ mk object '{"findings":[]}'
 
 [ "$(rc "$WORK/missing-dir-xyz" 1 4)" -eq 4 ] || fail "R6: a missing round dir is not exit 4"
 pass "R6 unreadable input fails closed (never 'merge')"
+
+# ── R6b: a round where NO REVIEW LANDED is never a merge ──────────────────────
+# Found on this tool's own PR #90: Codex replied 54s inside the 900s ceiling and the
+# 60s-interval watcher missed it, so the round timed out with blocking.json = []. The
+# first version of the gate answered `merge` there — an empty blocking set read as a
+# clean review when it actually meant "no review at all".
+mkdir -p "$WORK/timedout"
+printf '%s\n' "$SINCE" >"$WORK/timedout/trigger-ts.txt"
+printf '[]' >"$WORK/timedout/review-comments.json"
+printf '{"headRefOid":"%s","reviews":[]}' "$HEAD" >"$WORK/timedout/pr.json"   # no banner ⇒ pending
+printf '[]' >"$WORK/timedout/blocking.json"
+[ "$(verdict "$WORK/timedout" 1 4)" = unresolved ] \
+  || fail "R6b: a timed-out round with an empty blocking.json must be 'unresolved', not 'merge'"
+[ "$(rc "$WORK/timedout" 1 4)" -eq 9 ] || fail "R6b: 'unresolved' exit is not 9"
+[ "$(verdict "$WORK/timedout" 1 4)" != merge ] || fail "R6b: a round with no review returned 'merge'"
+pass "R6b no review landed ⇒ unresolved (never merge)"
 
 # ── R7: both counters are required and must be numeric ────────────────────────
 sh "$GATE" evaluate "$WORK/clean" --round 1 >/dev/null 2>&1 && fail "R7: missing --max-rounds accepted"

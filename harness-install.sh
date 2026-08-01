@@ -3553,8 +3553,14 @@ gate_rc=$?
 loop before advancing the round counter** and proceed to "ready to merge". Breaking preserves
 the successful `round` value; the Ready-to-merge section then reads `round-$round/pr.json`
 from the correct round, not from the advanced counter. `fix` (6), `escalate` (7) and
-`needs-human` (8) map to the step-5 severity rows. Exit `4` is unreadable input — fail closed,
+`needs-human` (8) map to the step-5 severity rows. Exit `9` is `unresolved` — no Codex review
+has landed for this round (the watcher timed out); take the `needs-human` terminal state, and
+never read the empty `blocking.json` as clean. Exit `4` is unreadable input — fail closed,
 treat it as `needs-human`, never as `merge`.
+
+The gate re-derives the round's review state with `wait-for-codex.sh evaluate` before it
+reads `blocking.json` at all, precisely because an empty blocking set means two opposite
+things: "reviewed, nothing blocking" and "no review landed". Only the first may merge.
 
 **Do not fix non-blocking findings to make the PR look clean.** `blocking.json` is already
 filtered to `pr_loop.blocking_severities`; P2 and nit are excluded **by configuration, not by
