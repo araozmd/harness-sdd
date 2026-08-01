@@ -171,8 +171,14 @@ pass "R7 usage errors rejected"
 for f in "$SRC/.claude/commands/sdd-pr-loop.md" "$SRC/harness-install.sh"; do
   grep -qF 'tools/pr-gate.sh evaluate' "$f" || fail "R8: $f does not invoke the pr-gate"
   grep -qF 'budget for the **PR**' "$f"     || fail "R8: $f does not resume the round counter"
+  # EXACTLY ONE call per round. A second call (step 6, after the fixers push) re-reads the
+  # SAME blocking.json — the fix commits do not rewrite it — so it returns fix/escalate
+  # again and routes the driver back through step 5 on the stale set, forever.
+  _calls="$(grep -cF 'tools/pr-gate.sh evaluate' "$f")"
+  [ "$_calls" -eq 1 ] \
+    || fail "R8: $f calls the pr-gate $_calls times — it must be asked exactly once per round"
 done
-pass "R8 both maintained pr-loop copies call the gate and resume the round counter"
+pass "R8 both pr-loop copies call the gate exactly once and resume the round counter"
 
 # ── R9: the suite runner reports green quietly and red loudly ─────────────────
 mkdir -p "$WORK/t/tests" "$WORK/t/tools"

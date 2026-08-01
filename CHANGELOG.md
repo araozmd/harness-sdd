@@ -42,6 +42,12 @@ and prose is something an agent can talk itself out of when a reviewer bot keeps
   the gate, so a clean round at the cap could never merge. Now: blocking findings ⇒ pure budget
   decision with no probe; empty/absent blocking set ⇒ prove a review landed. Inline findings
   with no `blocking.json` fail closed — unclassified severities prove nothing.
+- **The gate is asked exactly ONCE per round** (Codex P1, PR #90 round 3). Consolidating the
+  verdict into step 5 left a second call in step 6, after the fixers push. The fix commits do
+  not rewrite `blocking.json`, so that second call necessarily re-read the same non-empty set,
+  returned `fix`/`escalate` again, and routed the driver back through step 5 forever. Step 6
+  now confirms CI and **advances** to a fresh review; `tests/test_pr_gate.sh` R8 asserts the
+  call count in both maintained copies.
 - **`/sdd-pr-loop` now calls the gate** and states that non-blocking findings are excluded by
   configuration, not oversight — a P2 on a PR the gate calls `merge` belongs in its own PR.
 - **`max_rounds` is now a budget for the PR, not for one invocation.** The round counter

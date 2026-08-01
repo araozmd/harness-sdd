@@ -3521,9 +3521,29 @@ sh .harness/tools/pr-gate.sh evaluate "$round_dir" --round "$round" --max-rounds
 gate_rc=$?
 ```
 
-`merge` (0) leaves this step entirely — go to step 6's gates and then "ready to merge".
-`fix` (6), `escalate` (7) and `needs-human` (8) select the rows below. `unresolved` (9) and
-unreadable input (4) both take the `needs-human` terminal state.
+**The gate's verdict is binding, and it is asked exactly ONCE per round.** `merge` (0) means
+the review is finished: leave this step entirely, **break the loop before advancing the round
+counter**, and go to step 6 then "ready to merge". Breaking preserves the successful `round`
+value, so the Ready-to-merge section reads `round-$round/pr.json` from the correct round.
+`fix` (6), `escalate` (7) and `needs-human` (8) select the rows below. `unresolved` (9) — no
+Codex review landed for this round — and unreadable input (4) both take the `needs-human`
+terminal state; never read an empty `blocking.json` as clean.
+
+The gate answers the budget question from `blocking.json` alone when findings remain, and
+proves a review actually landed (via `wait-for-codex.sh evaluate`) only when the blocking set
+is empty — because an empty set means two opposite things, "reviewed, nothing blocking" and
+"no review landed", and only the first may merge.
+
+**Do not fix non-blocking findings to make the PR look clean.** `blocking.json` is already
+filtered to `pr_loop.blocking_severities`; P2 and nit are excluded **by configuration, not by
+oversight**. A P2 comment sitting on a PR the gate calls `merge` is not unfinished work — it is
+work this loop was told not to do. If it deserves attention it deserves its own PR, where it
+gets reviewed on its own diff instead of extending a review that already converged.
+
+That instruction exists because the loop stopped honouring it. On PR #89 every round reported zero
+blocking findings and the loop still spent three rounds and three commits on P2s; on PR #86
+rounds 6-8 were clean and it ran to round 12. Across this repo 20 of 43 Codex-fix commits
+addressed P2s — roughly half the fix budget spent on findings that never blocked anything.
 
 Branching on the budget first is the ordering bug this replaces: at the cap round the
 `max_rounds` row stopped with `needs-human` before anything consulted the findings, so a
@@ -3560,36 +3580,15 @@ another Codex round:
 
 - CI green (`statusCheckRollup[*].conclusion == "SUCCESS"` for required checks)
 - Tests / typecheck / lint green (subsets of CI)
-- Zero unresolved blocking comments — ask the gate, do not eyeball the PR:
 
-```bash
-sh .harness/tools/pr-gate.sh evaluate "$round_dir" --round "$round" --max-rounds "$max_rounds"
-gate_rc=$?
-```
+**Do not ask the gate again.** It was asked once, at step 5, and its verdict is what routed
+you here. `blocking.json` still holds THIS round's findings — the fixer commits do not rewrite
+it — so a second call necessarily returns `fix`/`escalate` again and sends you back through
+step 5 on the same stale set, forever. One round, one verdict.
 
-**The gate's verdict is binding.** `merge` (exit 0) means the review is finished: **break the
-loop before advancing the round counter** and proceed to "ready to merge". Breaking preserves
-the successful `round` value; the Ready-to-merge section then reads `round-$round/pr.json`
-from the correct round, not from the advanced counter. `fix` (6), `escalate` (7) and
-`needs-human` (8) map to the step-5 severity rows. Exit `9` is `unresolved` — no Codex review
-has landed for this round (the watcher timed out); take the `needs-human` terminal state, and
-never read the empty `blocking.json` as clean. Exit `4` is unreadable input — fail closed,
-treat it as `needs-human`, never as `merge`.
-
-The gate re-derives the round's review state with `wait-for-codex.sh evaluate` before it
-reads `blocking.json` at all, precisely because an empty blocking set means two opposite
-things: "reviewed, nothing blocking" and "no review landed". Only the first may merge.
-
-**Do not fix non-blocking findings to make the PR look clean.** `blocking.json` is already
-filtered to `pr_loop.blocking_severities`; P2 and nit are excluded **by configuration, not by
-oversight**. A P2 comment sitting on a PR the gate calls `merge` is not unfinished work — it is
-work this loop was told not to do. If it deserves attention it deserves its own PR, where it
-gets reviewed on its own diff instead of extending a review that already converged.
-
-That instruction exists because the loop stopped honouring it. On PR #89 every round reported zero
-blocking findings and the loop still spent three rounds and three commits on P2s; on PR #86
-rounds 6-8 were clean and it ran to round 12. Across this repo 20 of 43 Codex-fix commits
-addressed P2s — roughly half the fix budget spent on findings that never blocked anything.
+What remains is to confirm the fix commits did not break anything, then **advance**: bump the
+round counter and trigger a fresh `@codex review` (step 1). The new review is what produces
+the next round's blocking set.
 
 If checks are still pending, wait for them; if any fail, treat the failure like a blocking
 comment for the next round.
