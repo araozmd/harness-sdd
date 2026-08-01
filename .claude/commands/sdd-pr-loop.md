@@ -362,6 +362,24 @@ into the handover summary, and — at the cap — into the `needs-human` message
 
 ### 5. Branch on round
 
+**Ask the gate FIRST — before branching on the budget.** The verdict already folds the
+round budget in, so the table below is a rendering of the gate's answer, not a second
+opinion beside it:
+
+```bash
+sh tools/pr-gate.sh evaluate "$round_dir" --round "$round" --max-rounds "$max_rounds"
+gate_rc=$?
+```
+
+`merge` (0) leaves this step entirely — go to step 6's gates and then "ready to merge".
+`fix` (6), `escalate` (7) and `needs-human` (8) select the rows below. `unresolved` (9) and
+unreadable input (4) both take the `needs-human` terminal state.
+
+Branching on the budget first is the ordering bug this replaces: at the cap round the
+`max_rounds` row stopped with `needs-human` before anything consulted the findings, so a
+**clean final round could never merge** — the loop handed a green PR to a human. Only a cap
+round that still has blocking findings is a hand-over.
+
 | Round | Behavior |
 |---|---|
 | below `max_rounds - 1` | For each blocking comment, spawn one **`pr-fixer`** sub-agent, passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |

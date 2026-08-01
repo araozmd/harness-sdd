@@ -32,6 +32,16 @@ and prose is something an agent can talk itself out of when a reviewer bot keeps
   reads `blocking.json` at all, and reports `unresolved` (exit 9) when no review has landed.
   The verification is deliberately independent rather than a caller-supplied flag: the point
   of the gate is not to take the loop's word for it.
+- **The gate asks the budget question first and probes the review only to justify a merge**
+  (Codex P1 x3 on PR #90 round 2). Three ordering defects in the first cut: a *clean* review
+  legitimately has no `blocking.json` — the runbook skips classification on watcher exit 3 —
+  so demanding the file sent every banner/reaction clean review to `needs-human`; probing the
+  review state on a *blocking* round returned `unresolved` for every ordinary round, because
+  step 6 re-fetches `pr.json` after a fixer pushes and the cached head moves past the head the
+  findings were filed against; and the runbook branched on the round budget **before** calling
+  the gate, so a clean round at the cap could never merge. Now: blocking findings ⇒ pure budget
+  decision with no probe; empty/absent blocking set ⇒ prove a review landed. Inline findings
+  with no `blocking.json` fail closed — unclassified severities prove nothing.
 - **`/sdd-pr-loop` now calls the gate** and states that non-blocking findings are excluded by
   configuration, not oversight — a P2 on a PR the gate calls `merge` belongs in its own PR.
 - **`max_rounds` is now a budget for the PR, not for one invocation.** The round counter

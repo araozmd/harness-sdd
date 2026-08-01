@@ -93,10 +93,8 @@ mk blocked '[{"id":9,"severity":"P1","body":"real"}]' findings
 pass "R3-R5 blocking findings ⇒ fix / escalate / needs-human by budget"
 
 # ── R6: fail closed. Nothing unreadable may ever come back 'merge' ────────────
-mkdir -p "$WORK/nofile"; _resolve nofile clean
-[ "$(rc "$WORK/nofile" 1 4)" -eq 4 ]  || fail "R6: a missing blocking.json is not exit 4"
-[ "$(verdict "$WORK/nofile" 1 4)" != merge ] || fail "R6: a missing blocking.json returned 'merge'"
-
+# (A MISSING blocking.json is not covered here — it is legitimate on a clean round and is
+# split across R6c/R6d/R6e by what the review state actually was.)
 mk garbage 'not json at all'
 [ "$(rc "$WORK/garbage" 1 4)" -eq 4 ] || fail "R6: unparseable blocking.json is not exit 4"
 
@@ -122,6 +120,42 @@ printf '[]' >"$WORK/timedout/blocking.json"
 [ "$(rc "$WORK/timedout" 1 4)" -eq 9 ] || fail "R6b: 'unresolved' exit is not 9"
 [ "$(verdict "$WORK/timedout" 1 4)" != merge ] || fail "R6b: a round with no review returned 'merge'"
 pass "R6b no review landed ⇒ unresolved (never merge)"
+
+# ── R6c/R6d/R6e: the three P1s Codex raised on PR #90 round 2 ────────────────
+# R6c — a clean review has NO blocking.json. The runbook tells the driver to skip
+# classification on watcher exit 3, so requiring the file sent every banner/reaction
+# clean review to needs-human instead of merging.
+mkdir -p "$WORK/cleannofile"; _resolve cleannofile clean      # deliberately no blocking.json
+[ "$(verdict "$WORK/cleannofile" 1 4)" = merge ] \
+  || fail "R6c: a resolved CLEAN round without blocking.json must be 'merge'"
+[ "$(verdict "$WORK/cleannofile" 4 4)" = merge ] \
+  || fail "R6c: a clean round AT THE CAP must be 'merge', not needs-human"
+pass "R6c clean review without blocking.json ⇒ merge (incl. at the cap)"
+
+# R6d — inline findings but no blocking.json: severities were never determined, so
+# nothing proves they are non-blocking. Fail closed rather than merge.
+mkdir -p "$WORK/unclassified"; _resolve unclassified findings  # deliberately no blocking.json
+[ "$(rc "$WORK/unclassified" 1 4)" -eq 4 ] \
+  || fail "R6d: findings with no blocking.json must fail closed (exit 4)"
+[ "$(verdict "$WORK/unclassified" 1 4)" != merge ] \
+  || fail "R6d: unclassified findings returned 'merge'"
+pass "R6d inline findings, unclassified ⇒ fail closed"
+
+# R6e — a blocking round must NOT probe review state. After a fixer pushes, step 6
+# re-fetches pr.json, so the cached head moves past the head the findings were filed
+# against and the evaluator reports `pending`. Probing there returned `unresolved` for
+# every ordinary blocking round.
+mkdir -p "$WORK/movedhead"
+printf '%s\n' "$SINCE" >"$WORK/movedhead/trigger-ts.txt"
+printf '[{"id":1,"user":{"login":"%s"},"commit_id":"OLDHEAD","created_at":"%s","body":"P1"}]' \
+  "$BOT" "$LATER" >"$WORK/movedhead/review-comments.json"
+printf '{"headRefOid":"NEWHEAD","reviews":[]}' >"$WORK/movedhead/pr.json"
+printf '[{"id":1,"severity":"P1"}]' >"$WORK/movedhead/blocking.json"
+[ "$(verdict "$WORK/movedhead" 1 4)" = fix ] \
+  || fail "R6e: a blocking round whose cached head moved must still be 'fix', not 'unresolved'"
+[ "$(verdict "$WORK/movedhead" 4 4)" = needs-human ] \
+  || fail "R6e: a blocking round at the cap must be 'needs-human'"
+pass "R6e blocking round never probes review state (survives the post-fix head refresh)"
 
 # ── R7: both counters are required and must be numeric ────────────────────────
 sh "$GATE" evaluate "$WORK/clean" --round 1 >/dev/null 2>&1 && fail "R7: missing --max-rounds accepted"

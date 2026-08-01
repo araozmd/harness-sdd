@@ -89,9 +89,43 @@ command -v jq >/dev/null 2>&1 || {
   exit 4
 }
 
-# ── Did a review actually resolve for this round? ────────────────────────────
-# Delegated to the watcher's offline evaluator so there is exactly one implementation of
-# "what counts as a resolved Codex review". Exit 0 findings, 3 clean, 1 pending, 4 error.
+blocking="$round_dir/blocking.json"
+have_blocking=0
+n_blocking=0
+if [ -f "$blocking" ]; then
+  # `length` on a non-array is an error, which is exactly the fail-closed behaviour we want:
+  # a blocking.json that is not a JSON array is unreadable input, not "zero findings".
+  n_blocking="$(jq -e 'if type == "array" then length else error("not an array") end' \
+    "$blocking" 2>/dev/null)" || {
+    printf 'pr-gate: blocking.json in %s is not a readable JSON array\n' "$round_dir" >&2
+    exit 4
+  }
+  have_blocking=1
+fi
+
+# ── Blocking findings present ⇒ a pure budget decision ───────────────────────
+# Deliberately BEFORE any review-state probe. The findings are themselves proof that a
+# review landed, and after a fixer pushes, step 6 re-fetches pr.json — so the cached head
+# has moved on from the head those findings were filed against, and the evaluator would
+# report `pending`. Probing here would hand every ordinary blocking round to a human.
+if [ "$have_blocking" = 1 ] && [ "$n_blocking" -gt 0 ]; then
+  if [ "$round" -ge "$max_rounds" ]; then
+    printf 'needs-human\n'
+    exit 8
+  fi
+  if [ "$round" -eq $((max_rounds - 1)) ]; then
+    printf 'escalate\n'
+    exit 7
+  fi
+  printf 'fix\n'
+  exit 6
+fi
+
+# ── Zero blocking findings ⇒ only now must a landed review be PROVEN ─────────
+# An empty (or absent) blocking set means two opposite things — "reviewed, nothing
+# blocking" and "no review landed" — and only the first may merge. Delegated to the
+# watcher's offline evaluator so there is exactly one implementation of "a resolved Codex
+# review". Exit 0 findings, 3 clean, 1 pending, 4 error.
 watcher="$(dirname -- "$0")/wait-for-codex.sh"
 [ -f "$watcher" ] || {
   printf 'pr-gate: cannot find wait-for-codex.sh next to this script — cannot prove a review landed\n' >&2
@@ -99,48 +133,39 @@ watcher="$(dirname -- "$0")/wait-for-codex.sh"
 }
 ev_rc=0
 sh "$watcher" evaluate "$round_dir" >/dev/null 2>&1 || ev_rc=$?
+
 case "$ev_rc" in
-  0|3) : ;;                       # findings, or clean — either way the round RESOLVED
-  1)   printf 'unresolved\n'
-       printf 'pr-gate: no Codex review has resolved for %s (watcher pending/timed out) — not a merge\n' \
-         "$round_dir" >&2
-       exit 9 ;;
-  *)   printf 'pr-gate: could not evaluate the review state of %s (wait-for-codex exit %s)\n' \
-         "$round_dir" "$ev_rc" >&2
-       exit 4 ;;
+  3)
+    # Clean review. The runbook tells the driver to SKIP classification on a watcher exit
+    # 3, so a banner- or reaction-based clean round legitimately has no blocking.json at
+    # all. Exit 3 IS the authoritative empty blocking set; demanding the file here would
+    # send every clean review to needs-human instead of merging.
+    printf 'merge\n'
+    exit 0
+    ;;
+  0)
+    # Inline findings exist. Merging is right only if they were classified and none were
+    # blocking (the P2-only case). With no blocking.json their severities were never
+    # determined, so there is nothing proving they are non-blocking — fail closed.
+    if [ "$have_blocking" = 1 ]; then
+      printf 'merge\n'
+      exit 0
+    fi
+    printf 'pr-gate: %s has inline findings but no blocking.json — severities unclassified, not a merge\n' \
+      "$round_dir" >&2
+    exit 4
+    ;;
+  1)
+    printf 'unresolved\n'
+    printf 'pr-gate: no Codex review has resolved for %s (watcher pending/timed out) — not a merge\n' \
+      "$round_dir" >&2
+    exit 9
+    ;;
+  *)
+    printf 'pr-gate: could not evaluate the review state of %s (wait-for-codex exit %s)\n' \
+      "$round_dir" "$ev_rc" >&2
+    exit 4
+    ;;
 esac
 
-blocking="$round_dir/blocking.json"
-[ -f "$blocking" ] || {
-  printf 'pr-gate: no blocking.json in %s — cannot prove the review converged\n' "$round_dir" >&2
-  exit 4
-}
-
-# `length` on a non-array is an error, which is exactly the fail-closed behaviour we want:
-# a blocking.json that is not a JSON array is unreadable input, not "zero findings".
-n_blocking="$(jq -e 'if type == "array" then length else error("not an array") end' \
-  "$blocking" 2>/dev/null)" || {
-  printf 'pr-gate: blocking.json in %s is not a readable JSON array\n' "$round_dir" >&2
-  exit 4
-}
-
-if [ "$n_blocking" -eq 0 ]; then
-  # The whole point of the tool. Zero BLOCKING findings ends the loop, whatever
-  # non-blocking chatter is still on the PR.
-  printf 'merge\n'
-  exit 0
-fi
-
-# Findings remain — the verdict is now purely a budget question.
-if [ "$round" -ge "$max_rounds" ]; then
-  printf 'needs-human\n'
-  exit 8
-fi
-
-if [ "$round" -eq $((max_rounds - 1)) ]; then
-  printf 'escalate\n'
-  exit 7
-fi
-
-printf 'fix\n'
-exit 6
+# Unreachable — every branch of the case above exits.
