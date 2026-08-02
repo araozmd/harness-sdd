@@ -54,16 +54,32 @@ Three concrete gaps follow from that:
 | id | title | status | depends_on |
 |----|-------|--------|------------|
 | E17-F01 | Per-role model selection: config schema + per-front-end agent stamping | done | — |
+| E17-F02 | The `builder-heavy` role: a seventh role at a heavier tier | pending (gated) | — |
+| E17-F03 | Deterministic escalation to `builder-heavy` (complexity tag + two-rejection rule) | pending (gated) | E17-F02 |
+| E17-F04 | Worker roster: invocable CLIs as versioned data | pending (gated) | — |
 
-Anticipated but **not yet seeded** (decompose with `/sdd-drill`, or seed individually
-with `/sdd-new`, once F01 lands and the config schema is settled):
+**Seeded 2026-08-02 by `/sdd-drill E17` in amend mode** (E17 was already `pending`, the
+legacy alias of `planned`, so ids were appended above the existing max with no renumbering
+and no epic re-flip). The decomposition is **three** features, not the two anticipated
+below: "dual Builder + deterministic escalation" specced to roughly 17 R-ids against
+`change_size.max_requirements: 12`, so it was split at decomposition — F02 adds the role,
+F03 decides when to use it — which is exactly what E21-F01 put that budget in the Driller's
+hands to do. The seam is clean: F02 is additive plumbing that is independently useful (pin
+the tier and invoke the role by hand), while F03 is a routing rule with no new artifacts.
 
-- **F02 — dual Builder + deterministic escalation.** A `builder-heavy` variant alongside
-  the standard Builder; Orchestrator routing on the Architect's complexity tag and on
-  the two-rejection rule.
-- **F03 — worker roster.** Installer-detected, capability-tagged roster of invocable
-  CLIs, written as versioned data (`schema: 1`) and read by external kits. The harness
-  core writes it but never executes it.
+Every seeded feature is `autonomous: false` — the epic-level decision was **keep gated**, so
+each parks at its own spec-approval gate. F02 rewrites role emission across all five
+front-ends in `harness-install.sh`.
+
+The decision behind F02/F03 is recorded in **[ADR-0002](../../adr/0002-builder-heavy-is-a-tier-not-a-second-prompt.md)**:
+`builder-heavy` is the same instruction body at a heavier model tier, never a second Builder
+prompt. Escalation is therefore routing, not behavior. Per-feature intent briefs are in
+`progress/inbox/E17-F0{2,3,4}.md`.
+
+Originally anticipated at drill time, kept here for provenance:
+
+- **dual Builder + deterministic escalation** → split into **F02** + **F03**.
+- **worker roster** → seeded as **F04**, scope unchanged.
 
 `pr-loop` migration into the harness as an opt-in module is deliberately **not** part of
 this epic — it is the PR-review lane, not execution routing, and gets its own epic.
