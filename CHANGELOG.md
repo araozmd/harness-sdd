@@ -4,6 +4,34 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.50.1] — 2026-08-02
+
+### Fixed — 🐛 the `pin.` comment over-claimed what an unpinned tier does on Codex (E23 follow-up)
+
+E23-F01 made role registration independent of model routing: selecting Codex now always
+writes all six `.codex/agents/*.toml`, and `gen_codex_agent` simply omits the `model` key
+when the role inherits or its tier is unpinned. The guidance around `models.pin.` was
+written before that and still said an unpinned tier "stamps nothing" — which now reads as
+"you get no role definition at all" rather than the truth, "you get the role definition
+without a `model` key". Semantics are unchanged; only the wording was wrong.
+
+Corrected in all four places the claim appeared, so they cannot drift apart:
+
+- `harness.config.yaml` and the matching migration heredoc in `harness-install.sh` — these
+  two are required to stay **byte-identical** (a fresh install copies the config verbatim,
+  an upgrade only migrates), so fixing one without the other would have split them.
+- The `model_alias` comment in `harness-install.sh`, which describes the absent Codex /
+  OpenCode alias entries.
+- `docs/INSTALL.md` → "Pinning an exact model", now cross-referencing "Where the values
+  land", which already described the post-E23 behavior correctly.
+
+### Changed — 📝 board bookkeeping
+
+- `specs/epics/E17-model-routing/epic.md` listed `E17-F01` as `pending` in its feature
+  table while `state/tasks.json` had it `done`. The feature table now matches the board.
+
+No behavior change: comments and documentation only. Surfaced by the E23 drift check.
+
 ## [0.50.0] — 2026-08-01
 
 ### Fixed — 🐛 the pr-loop chased findings it was configured to ignore (E99)

@@ -53,7 +53,7 @@ Three concrete gaps follow from that:
 
 | id | title | status | depends_on |
 |----|-------|--------|------------|
-| E17-F01 | Per-role model selection: config schema + per-front-end agent stamping | pending | — |
+| E17-F01 | Per-role model selection: config schema + per-front-end agent stamping | done | — |
 
 Anticipated but **not yet seeded** (decompose with `/sdd-drill`, or seed individually
 with `/sdd-new`, once F01 lands and the config schema is settled):

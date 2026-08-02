@@ -280,7 +280,9 @@ models:
   doc-critic: inherit     # try: cheap
   # Exact-value escape hatch: `pin.<front-end>.<tier>`, written VERBATIM in that
   # front-end's own vocabulary. REQUIRED for codex and opencode, which have no
-  # floating tier alias — an unpinned tier there stamps nothing.
+  # floating tier alias — an unpinned tier there stamps no MODEL. The role artifact
+  # itself is still written (selecting Codex always registers all six
+  # .codex/agents/*.toml); only the `model` key is omitted, as for the `inherit` tier.
   #   opencode MUST be "provider/model" (an invalid value aborts your OpenCode run)
   #   codex    MUST be a bare model id (the provider comes from `model_provider`)
   #   antigravity accepts only tier aliases and needs `agy` >= 1.1.5 (inert below it)
@@ -788,7 +790,8 @@ model_tier() {
 # (flash/pro), so `reasoning` and `standard` both map to `pro` — stated, not hidden.
 # `codex` and `opencode` have NO floating alias (they require a concrete id / a
 # `provider/model` pair), so they are deliberately absent: an unpinned tier there stamps
-# nothing rather than having the harness invent a model id.
+# no model value rather than having the harness invent a model id. That omits the `model`
+# key; it never suppresses the role artifact itself.
 model_alias() {
   case "$1:$2" in
     claude:reasoning)                          printf 'opus\n' ;;
