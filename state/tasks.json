@@ -355,7 +355,7 @@
     {
       "id": "E99",
       "title": "Maintenance (hotfixes & minor fixes)",
-      "status": "done",
+      "status": "in-progress",
       "features": [
         {
           "id": "E99-F01",
@@ -430,6 +430,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F08-json-control-chars/"
+        },
+        {
+          "id": "E99-F09",
+          "title": "Antigravity Skills migration, re-specced against the post-E23 .agents/skills layout",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F09-antigravity-skills/"
         }
       ]
     },
@@ -446,6 +455,35 @@
           "autonomous": false,
           "depends_on": [],
           "spec_path": "specs/epics/E17-model-routing/F01-per-role-model-selection/"
+        },
+        {
+          "id": "E17-F02",
+          "title": "The `builder-heavy` role: a seventh role at a heavier tier",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E17-model-routing/F02-builder-heavy-role/"
+        },
+        {
+          "id": "E17-F03",
+          "title": "Deterministic escalation to `builder-heavy` (complexity tag + two-rejection rule)",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E17-F02"
+          ],
+          "spec_path": "specs/epics/E17-model-routing/F03-deterministic-escalation/"
+        },
+        {
+          "id": "E17-F04",
+          "title": "Worker roster: invocable CLIs as versioned data",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E17-model-routing/F04-worker-roster/"
         }
       ]
     },
