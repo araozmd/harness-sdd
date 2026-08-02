@@ -384,6 +384,15 @@ done
 test_root_gitignore_seeds_local_prompt_files
 grep -qxF '.claude/' "$T/.gitignore"                    && fail "root .gitignore over-ignores the whole .claude/ dir"
 grep -qxF '.claude/worktrees/' "$T/.gitignore"          || fail "root .gitignore missing worktree runtime directory"
+# Per-CLI generated scaffolding + mutation backups stay OUT of the working tree's untracked
+# set, because that set is exactly what tools/change-size.sh measures (E99-F71/F89).
+for _p in .agents/ .codex/ .opencode/ '*.mutbak'; do
+  grep -qxF "$_p" "$T/.gitignore" || fail "root .gitignore missing generated-scaffolding ignore $_p — it would inflate the change-size tier (E99-F71/F89)"
+done
+grep -qxF '.claude/' "$T/.gitignore"                    && fail "the scaffolding ignores must not extend to .claude/, whose agents/ and commands/ are meant to be committed"
+for _p in .codex-skills/ .model-agents/ __pycache__/ '*.pyc'; do
+  grep -qxF "$_p" "$T/.harness/.gitignore" || fail ".harness/.gitignore missing generated-artifact ignore $_p — it would inflate the change-size tier (E99-F71/F89)"
+done
 [ -f "$T/.harness/docs/CONFIG-LAYERING.md" ]            || fail "CONFIG-LAYERING.md not installed"
 pass "project-root .gitignore seeds personal/runtime and local prompt ignores (config layering)"
 

@@ -243,6 +243,16 @@ stats="$(git -C "$repo" diff --numstat -z "$mb" 2>/dev/null | od -An -v -tu1 | _
 # FILES — the single largest thing this check could miss. Count their lines directly and
 # append them in the same numstat shape. `--exclude-standard` honours .gitignore, so build
 # output and the harness's own scratch stay out.
+#
+# `--exclude-standard` IS THE LOAD-BEARING WORD, and dropping it is the standing temptation
+# here (E99-F71/F89). When per-developer scaffolding or `.mutbak` backups inflate a tier, the
+# reflex is to blame this block and switch the whole measurement to `"$mb"...HEAD`. That is
+# the WRONG repair and it is strictly worse: it reintroduces the exact defect the working-tree
+# comment above documents, reporting `ok` with zero production lines on a branch the Builder
+# has not committed — a 26x overstatement traded for a 100% understatement, on a check whose
+# entire purpose is to fire before the commit. The right repair is always to make the noise
+# IGNORED at its source; this flag then removes it for free. tests/test_change_size.sh pins
+# both halves: R5b that untracked real work still counts, R5d that ignored scratch does not.
 # `-z` (NUL-delimited). `ls-files` C-quotes a path containing `"`, `\`, or a tab even under
 # core.quotePath=false — it returns `a"b.js` as the seven characters `"a\"b.js"`. That encoded
 # text was then used as the pathname, `[ -f ]` failed, and the file was silently skipped: whole
