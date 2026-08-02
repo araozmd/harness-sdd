@@ -527,7 +527,7 @@
     {
       "id": "E21",
       "title": "Change-size discipline: keep the review a gate",
-      "status": "done",
+      "status": "in-progress",
       "owner": "araozmd",
       "features": [
         {
@@ -572,6 +572,33 @@
             "E21-F03"
           ],
           "spec_path": "specs/epics/E21-change-size-discipline/F04-stacked-pr-lane/"
+        },
+        {
+          "id": "E21-F05",
+          "title": "The stacked-PR lane: doctrine, seams, and role contracts",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E21-F04"
+          ],
+          "spec_path": "specs/epics/E21-change-size-discipline/F05-stacked-pr-doctrine/"
+        }
+      ]
+    },
+    {
+      "id": "E22",
+      "title": "OpenCode parity: parallel-fix opt-in & model tier pins",
+      "status": "done",
+      "features": [
+        {
+          "id": "E22-F01",
+          "title": "OpenCode /sdd-fix-parallel opt-in + model tier helper",
+          "status": "done",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E22-opencode-parity/F01-parallel-optin-model-helper/"
         }
       ]
     },
