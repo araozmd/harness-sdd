@@ -1,7 +1,7 @@
 ---
 id: E23
 title: "Native Codex compatibility"
-status: pending
+status: done
 ---
 
 # Epic E23 — Native Codex compatibility

@@ -578,7 +578,7 @@
     {
       "id": "E23",
       "title": "Native Codex compatibility",
-      "status": "pending",
+      "status": "done",
       "features": [
         {
           "id": "E23-F01",
