@@ -1,7 +1,7 @@
 ---
 id: E21
 title: "Change-size discipline: keep the review a gate"
-status: pending          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: in-progress      # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 
@@ -109,7 +109,8 @@ Two things from the pattern are deliberately **rejected**:
 | F01 | Feature-size budget in the Driller and Architect (split at decomposition time) | done | true | — |
 | F02 | Pre-PR change-size check on the Reviewer → PR handoff | done | true | E21-F01 |
 | F03 | `/sdd-pr-loop`: per-round finding trend + "split, don't re-review" at the round cap | done | true | E18-F01 |
-| F04 | Stacked-PR lane for an atomic feature that exceeds the budget | pending (**withdrawn — needs re-spec**) | true | E18-F01, E21-F03 |
+| F04 | Stacked-PR lane for an atomic feature that exceeds the budget | done (re-spec'd as **merge-order safety**) | true | E18-F01, E21-F03 |
+| F05 | The stacked-PR lane: doctrine, seams, and role contracts | pending (gated) | true | E21-F04 |
 
 ## Notes
 - **F04 was withdrawn during review of PR #78 (2026-07-28).** Its premise was wrong. The lane
@@ -130,6 +131,20 @@ Two things from the pattern are deliberately **rejected**:
   guard — is recoverable from git history (`git show 1873af9:tools/pr-stack-guard.sh`) if the
   re-spec keeps a stacked lane. It was removed rather than kept because without the lane it has
   no caller.
+
+  **Resolved (2026-07-29).** The re-spec went back through the human gate and chose lane (a):
+  stacking is a **review-size tool** for work that is *already safely splittable*, never a
+  delivery-atomicity mechanism. At that scope the feature specced to **19 R-ids** against
+  `change_size.max_requirements: 12`, so the Architect stopped and reported the seam — E21-F01's
+  own budget applied to E21-F01's own epic. The split follows the review history: every blocking
+  finding had landed on the **claim/doctrine** surface, while the guard was independently sound.
+  So the mechanism shipped first and alone as **F04** (merged PR #86, `tools/pr-stack-guard.sh`
+  restored with a caller), and the doctrine behind it became **F05**.
+- **F05 is gated (`autonomous: false`) on purpose.** Its surface is exactly where all five of
+  PR #78's blocking findings landed, so it does not skip the human spec-approval gate. Its
+  intent brief is `progress/inbox/E21-F05.md`, salvaged from the abandoned PR #81 — that PR's
+  F04 specs were superseded by the re-spec merged as #86, but the F05 brief had never landed
+  anywhere and would have been lost when #81 was closed.
 - **Ordering.** F01 defines the budget; F02 consumes it, so F02 depends on F01 to avoid two
   sources of truth for the same numbers. F03 and F04 edit `/sdd-pr-loop` glue that **E18-F01
   has not merged yet** — they are correctly blocked, and must not be started against a `main`
