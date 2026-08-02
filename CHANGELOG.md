@@ -4,6 +4,47 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.50.2] — 2026-08-02
+
+### Fixed — 🐛 change-size charged the harness body and agent surfaces to the product budget (E99-F71/F89)
+
+`tools/change-size.sh` counts the working tree INCLUDING untracked files, deliberately: the
+in-session Builder has no commit step, so a `<merge-base>...HEAD` diff would report tier `ok`
+with zero production lines on precisely the branch the check exists to measure (pinned by
+`test_change_size.sh` R5b). That inclusion also charged installer output to whatever branch
+was under review, and the tier went wrong in both directions:
+
+- four `.mutbak` backups in the tree → `production 1104 lines / 2 files` against a true
+  `42 / 1`, a **26x overstatement**. Since mutation campaigns became routine, `.mutbak` files
+  are now the EXPECTED state during review, so this misfired more often over time, not less;
+- a consumer's 78 untracked install artifacts (2154 lines) → `ESCALATE 3965 / 87` for a branch
+  that measured `ADVISE 1811 / 9`. Both PRs had their tier re-derived by hand.
+
+The reported root cause prescribed measuring `<base>..HEAD` instead of the working tree. That
+was **rejected**: it reintroduces the defect R5b prevents, trading a 26x overstatement for a
+100% understatement on a check whose whole purpose is to fire before the Builder commits. The
+rejection is now recorded in the script so it is not attempted a third time.
+
+The fix is classification, not concealment. The harness body and the agent surfaces this
+installer writes — `.harness/`, `.claude/{agents,commands}/`, `.agents/`, `.codex/`,
+`.opencode/` — are installer OUTPUT in every consumer, so they join the built-in `generated`
+classifier and are excluded from the budget entirely. They stay **tracked**: the documented
+install workflow is committed-and-shared, and ignoring them would leave every Codex skill,
+Antigravity rule and OpenCode command out of a fresh clone, making `.claude/` first-class and
+every other front end second-class. Scoped deliberately — `.claude/agents/` and
+`.claude/commands/` only, never `.claude/` wholesale, and no root file: `CLAUDE.md` is
+hand-authored per repo and still counts as production.
+
+Only genuinely machine-local artifacts are ignored, because no clone should receive them:
+`*.mutbak` (per-developer review scratch) at the project root, and `__pycache__/` + `*.pyc`
+under `.harness/` — the latter already ignored by the harness source's own root `.gitignore`,
+just never propagated to consumers.
+
+Pinned by `test_change_size.sh` R5d (gitignored scratch never moves the count, while untracked
+real work still does — witness: 42 lines vs 2442 with `--exclude-standard` dropped) and R5e
+(generated surfaces stay tracked and classified out — witness: 80 lines vs 1980 without the
+classifier), plus `test_install.sh` assertions that the agent surfaces are NOT ignored.
+
 ## [0.50.1] — 2026-08-02
 
 ### Fixed — 🐛 the `pin.` comment over-claimed what an unpinned tier does on Codex (E23 follow-up)

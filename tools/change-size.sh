@@ -138,6 +138,23 @@ _extra() { # _extra <key> — newline-separated list values from the change_size
 TEST_RE='(^|/)tests?/|(^|/)__tests__/|[._-](test|spec)\.[a-z]+$|_test\.(go|py|rb)$|^test_[^/]*\.(py|sh)$|/test_[^/]*\.(py|sh)$|Test[s]?\.(java|kt|cs)$'
 DOC_RE='(^|/)(specs|progress|docs)/|(^|/)(CHANGELOG|README)\.md$'
 GEN_RE='(^|/)(vendor|node_modules|dist|build)/|\.lock$|(^|/)(package-lock\.json|yarn\.lock|poetry\.lock|Cargo\.lock|go\.sum)$|\.(pb|generated)\.[a-z]+$'
+# The harness body and the agent surfaces it generates (E99-F71/F89). These are INSTALLER
+# OUTPUT in every consumer: harness-install.sh copies .harness/ byte-for-byte from the source
+# repo and writes .claude/{agents,commands}/, .agents/, .codex/, .opencode/ from its own
+# templates, rewriting them on every install. They are exactly what `generated` means — no
+# line of them was authored in the repo being measured, and none carries review risk per line.
+#
+# Classifying them is the RIGHT instrument; gitignoring them is not. An earlier revision of
+# this fix ignored .agents/, .codex/ and .opencode/ instead, and Codex was correct to call it
+# a P1: the documented install workflow is committed-and-shared, so hiding those directories
+# would leave every Codex skill, Antigravity rule and OpenCode command out of a fresh clone —
+# making .claude/ first-class and every other front end second-class. They stay TRACKED, and
+# they stop distorting the budget here rather than by disappearing.
+#
+# Scoped deliberately: .claude/agents/ and .claude/commands/ only, never .claude/ wholesale,
+# and none of the root files (CLAUDE.md, AGENTS.md, GEMINI.md, opencode.json) — CLAUDE.md in
+# particular is hand-authored per repo and carries real review risk.
+GEN_RE="$GEN_RE"'|(^|/)\.harness/|(^|/)\.claude/(agents|commands)/|(^|/)\.(agents|codex|opencode)/'
 # One entry, one regex — read LINE by line. `for _p in $(...)` word-splits on IFS, so a
 # configured pattern containing a space, e.g. `(^|/)integration tests/`, would be appended as
 # TWO alternatives (`(^|/)integration|tests/`) and every production path starting with

@@ -201,6 +201,40 @@ _fi="$("$TOOL" --repo "$RI" --base main --format json | sed -n 's/.*"production_
   || fail "R5d: production_files=$_fi, expected 1 — gitignored scratch is inflating the FILE budget"
 pass "R5d gitignored scratch never moves the count, while untracked real work still does"
 
+# ── R5e: TRACKED generated agent surfaces are classified, not counted (E99-F71/F89) ───────
+# The other half of R5d, and the correction to its first revision. The harness body and the
+# agent surfaces harness-install.sh writes are installer OUTPUT in every consumer, so they
+# must not crowd a product budget — but they must also stay TRACKED, because the documented
+# install workflow is committed-and-shared and a fresh clone needs them. Ignoring them (the
+# first attempt) would have left every Codex skill, Antigravity rule and OpenCode command out
+# of a clone; classifying them removes the distortion without hiding a single file.
+RG="$T/repo-generated"; mkrepo "$RG"
+# mkrepo seeds `.harness/` into .gitignore so its per-assertion config rewrites stay out of
+# the measured diff. R5e is the one case that must NOT ignore it: the whole point is that the
+# body is TRACKED and excluded by classification rather than by an ignore. R5e never calls
+# cfgw, so it needs no config file and loses nothing by dropping that line.
+: > "$RG/.gitignore"
+git -C "$RG" add .gitignore && git -C "$RG" commit -qm "track .harness/ (R5e)"
+git -C "$RG" checkout -q -b feature
+mkdir -p "$RG/src" "$RG/.harness/agents" "$RG/.claude/commands" "$RG/.agents" "$RG/.codex" "$RG/.opencode/command"
+n_lines 30   > "$RG/src/real-feature.js"                  # production — MUST count
+n_lines 900  > "$RG/.harness/agents/builder.md"           # vendored body    — must NOT count
+n_lines 400  > "$RG/.claude/commands/sdd-next.md"         # generated glue   — must NOT count
+n_lines 300  > "$RG/.agents/builder.md"                   # generated glue   — must NOT count
+n_lines 200  > "$RG/.codex/agents.md"                     # generated glue   — must NOT count
+n_lines 100  > "$RG/.opencode/command/sdd-next.md"        # generated glue   — must NOT count
+n_lines 50   > "$RG/CLAUDE.md"                            # HAND-authored    — MUST count
+git -C "$RG" add -A && git -C "$RG" commit -qm "tracked, exactly as a real install commits it"
+_pg="$("$TOOL" --repo "$RG" --base main --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')"
+[ "$_pg" = "80" ] \
+  || fail "R5e: production_lines=$_pg, expected 80 (30 src + 50 CLAUDE.md) — generated agent surfaces are being charged to the product budget"
+# ...and they are TRACKED, not ignored: the files must really be in the index.
+for _f in .harness/agents/builder.md .claude/commands/sdd-next.md .agents/builder.md; do
+  git -C "$RG" ls-files --error-unmatch "$_f" >/dev/null 2>&1 \
+    || fail "R5e: $_f is not tracked — a fresh clone would not receive it"
+done
+pass "R5e generated agent surfaces stay tracked and are classified out of the budget, while hand-authored CLAUDE.md still counts"
+
 # ── R5c: the default branch is resolved, not assumed to be main ───────────────────────────
 # A hard-coded origin/main exits 4 on a repo whose default is `develop`, and the Reviewer is
 # told to carry on without measuring anything — the check silently vanishing on exactly the

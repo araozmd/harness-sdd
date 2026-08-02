@@ -384,15 +384,24 @@ done
 test_root_gitignore_seeds_local_prompt_files
 grep -qxF '.claude/' "$T/.gitignore"                    && fail "root .gitignore over-ignores the whole .claude/ dir"
 grep -qxF '.claude/worktrees/' "$T/.gitignore"          || fail "root .gitignore missing worktree runtime directory"
-# Per-CLI generated scaffolding + mutation backups stay OUT of the working tree's untracked
-# set, because that set is exactly what tools/change-size.sh measures (E99-F71/F89).
-for _p in .agents/ .codex/ .opencode/ '*.mutbak'; do
-  grep -qxF "$_p" "$T/.gitignore" || fail "root .gitignore missing generated-scaffolding ignore $_p — it would inflate the change-size tier (E99-F71/F89)"
+# Machine-local review scratch and bytecode stay OUT of the untracked set, because that set
+# is exactly what tools/change-size.sh measures (E99-F71/F89).
+grep -qxF '*.mutbak' "$T/.gitignore" || fail "root .gitignore missing the *.mutbak ignore — mutation backups inflate the change-size tier (E99-F71)"
+for _p in __pycache__/ '*.pyc'; do
+  grep -qxF "$_p" "$T/.harness/.gitignore" || fail ".harness/.gitignore missing bytecode ignore $_p (E99-F71/F89)"
 done
-grep -qxF '.claude/' "$T/.gitignore"                    && fail "the scaffolding ignores must not extend to .claude/, whose agents/ and commands/ are meant to be committed"
-for _p in .codex-skills/ .model-agents/ __pycache__/ '*.pyc'; do
-  grep -qxF "$_p" "$T/.harness/.gitignore" || fail ".harness/.gitignore missing generated-artifact ignore $_p — it would inflate the change-size tier (E99-F71/F89)"
+# GENERATED AGENT SURFACES MUST STAY TRACKED. The documented install workflow is
+# committed-and-shared, so ignoring these would leave every Codex skill, Antigravity rule and
+# OpenCode command out of a fresh clone — making .claude/ first-class and every other front
+# end second-class (Codex P1 on araozmd/harness-sdd#96). They are excluded from the
+# change-size budget by the built-in `generated` classifier instead, never by an ignore.
+for _p in .agents/ .codex/ .opencode/; do
+  grep -qxF "$_p" "$T/.gitignore" && fail "root .gitignore ignores the generated agent surface $_p — a fresh clone would not receive it; exclude it from the budget via change-size.sh's generated classifier instead"
 done
+for _p in .codex-skills/ .model-agents/; do
+  grep -qxF "$_p" "$T/.harness/.gitignore" && fail ".harness/.gitignore ignores the generated agent surface $_p — a fresh clone would not receive it"
+done
+grep -qxF '.claude/' "$T/.gitignore"                    && fail "the ignores must not extend to .claude/, whose agents/ and commands/ are meant to be committed"
 [ -f "$T/.harness/docs/CONFIG-LAYERING.md" ]            || fail "CONFIG-LAYERING.md not installed"
 pass "project-root .gitignore seeds personal/runtime and local prompt ignores (config layering)"
 
