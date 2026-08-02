@@ -168,6 +168,73 @@ _pl2="$("$TOOL" --repo "$RU" --base main --format json | sed -n 's/.*"production
   || fail "R5b: committing the same content changed the count from 150 to $_pl2 — the measurement must not depend on whether the Builder committed"
 pass "R5b uncommitted + untracked work counts, and committing it changes nothing"
 
+# ── R5d: GITIGNORED scratch never moves the count (E99-F71/F89) ──────────────────────────
+# The counterpart to R5b, and the boundary between them is the whole fix. R5b requires that
+# untracked Builder output IS measured; that same inclusion also swept in per-developer
+# scaffolding and mutation-campaign backups, and the tier went wrong in BOTH directions:
+# `.mutbak` copies reported production 1104 lines / 2 files against a true 42/1 (a 26x
+# OVERSTATEMENT, E99-F71), and viernes-web's 78 untracked install artifacts reported
+# ESCALATE 3965/87 for a branch that measured ADVISE 1811/9 (E99-F89).
+#
+# The fix is NOT to stop measuring the working tree — that reintroduces the exact defect R5b
+# exists to prevent, trading a 26x overstatement for a 100% understatement on a check that
+# runs before the Builder has committed. `ls-files --others --exclude-standard` already
+# honours .gitignore, so the correct fix is that the noise be IGNORED at its source. This
+# pins the mechanism so a future edit cannot quietly drop --exclude-standard.
+RI="$T/repo-ignored"; mkrepo "$RI"
+# The ignore rules land on MAIN, before the branch: they are pre-existing repo policy, not
+# part of the change under measurement. Committing them on the feature branch would put the
+# .gitignore edit itself into the diff and inflate the expected count by its own line total.
+printf 'scratch/\n*.mutbak\n__pycache__/\n' >> "$RI/.gitignore"
+git -C "$RI" add .gitignore && git -C "$RI" commit -qm "ignore scratch"
+git -C "$RI" checkout -q -b feature
+mkdir -p "$RI/src" "$RI/scratch" "$RI/__pycache__"
+n_lines 42 > "$RI/src/real-feature.js"                 # untracked, real work — MUST count
+n_lines 900 > "$RI/scratch/notes.js"                   # ignored dir       — must NOT count
+n_lines 800 > "$RI/src/real-feature.js.mutbak"         # mutation backup   — must NOT count
+n_lines 700 > "$RI/__pycache__/mod.cpython-313.pyc"    # bytecode cruft    — must NOT count
+_pi="$("$TOOL" --repo "$RI" --base main --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')"
+[ "$_pi" = "42" ] \
+  || fail "R5d: production_lines=$_pi, expected 42 — gitignored scratch is inflating the tier (E99-F71/F89)"
+_fi="$("$TOOL" --repo "$RI" --base main --format json | sed -n 's/.*"production_files":\([0-9]*\).*/\1/p')"
+[ "$_fi" = "1" ] \
+  || fail "R5d: production_files=$_fi, expected 1 — gitignored scratch is inflating the FILE budget"
+pass "R5d gitignored scratch never moves the count, while untracked real work still does"
+
+# ── R5e: TRACKED generated agent surfaces are classified, not counted (E99-F71/F89) ───────
+# The other half of R5d, and the correction to its first revision. The harness body and the
+# agent surfaces harness-install.sh writes are installer OUTPUT in every consumer, so they
+# must not crowd a product budget — but they must also stay TRACKED, because the documented
+# install workflow is committed-and-shared and a fresh clone needs them. Ignoring them (the
+# first attempt) would have left every Codex skill, Antigravity rule and OpenCode command out
+# of a clone; classifying them removes the distortion without hiding a single file.
+RG="$T/repo-generated"; mkrepo "$RG"
+# mkrepo seeds `.harness/` into .gitignore so its per-assertion config rewrites stay out of
+# the measured diff. R5e is the one case that must NOT ignore it: the whole point is that the
+# body is TRACKED and excluded by classification rather than by an ignore. R5e never calls
+# cfgw, so it needs no config file and loses nothing by dropping that line.
+: > "$RG/.gitignore"
+git -C "$RG" add .gitignore && git -C "$RG" commit -qm "track .harness/ (R5e)"
+git -C "$RG" checkout -q -b feature
+mkdir -p "$RG/src" "$RG/.harness/agents" "$RG/.claude/commands" "$RG/.agents" "$RG/.codex" "$RG/.opencode/command"
+n_lines 30   > "$RG/src/real-feature.js"                  # production — MUST count
+n_lines 900  > "$RG/.harness/agents/builder.md"           # vendored body    — must NOT count
+n_lines 400  > "$RG/.claude/commands/sdd-next.md"         # generated glue   — must NOT count
+n_lines 300  > "$RG/.agents/builder.md"                   # generated glue   — must NOT count
+n_lines 200  > "$RG/.codex/agents.md"                     # generated glue   — must NOT count
+n_lines 100  > "$RG/.opencode/command/sdd-next.md"        # generated glue   — must NOT count
+n_lines 50   > "$RG/CLAUDE.md"                            # HAND-authored    — MUST count
+git -C "$RG" add -A && git -C "$RG" commit -qm "tracked, exactly as a real install commits it"
+_pg="$("$TOOL" --repo "$RG" --base main --format json | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')"
+[ "$_pg" = "80" ] \
+  || fail "R5e: production_lines=$_pg, expected 80 (30 src + 50 CLAUDE.md) — generated agent surfaces are being charged to the product budget"
+# ...and they are TRACKED, not ignored: the files must really be in the index.
+for _f in .harness/agents/builder.md .claude/commands/sdd-next.md .agents/builder.md; do
+  git -C "$RG" ls-files --error-unmatch "$_f" >/dev/null 2>&1 \
+    || fail "R5e: $_f is not tracked — a fresh clone would not receive it"
+done
+pass "R5e generated agent surfaces stay tracked and are classified out of the budget, while hand-authored CLAUDE.md still counts"
+
 # ── R5c: the default branch is resolved, not assumed to be main ───────────────────────────
 # A hard-coded origin/main exits 4 on a repo whose default is `develop`, and the Reviewer is
 # told to carry on without measuring anything — the check silently vanishing on exactly the

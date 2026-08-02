@@ -2093,11 +2093,25 @@ EOF
   # Also ignore the OpenCode concurrency marker (E22-F01). It is machine-specific runtime state
   # written by /sdd-test-concurrency; committing it would make other developers' installers
   # trust a probe result from a different OpenCode version or setup.
+  # Also ignore Python bytecode (E99-F71/F89). __pycache__/ and *.pyc come from running
+  # tools/*.py locally; the harness SOURCE has always ignored them in its own root .gitignore,
+  # but that ignore was never propagated to consumers, so every installed target accumulated
+  # untracked .pyc files. Left untracked-but-not-ignored they land in
+  # `ls-files --others --exclude-standard`, which is what tools/change-size.sh counts.
+  #
+  # NOTE what is deliberately NOT here: .codex-skills/ and .model-agents/. They are installer
+  # output, but so is .claude/agents — and the documented install workflow is
+  # committed-and-shared, so ignoring a generated AGENT SURFACE would keep it out of a fresh
+  # clone entirely. They stay tracked and are excluded from the change-size budget by the
+  # built-in `generated` classifier in tools/change-size.sh instead. Bytecode is different:
+  # it is machine-local, never shared, and nothing reads it from a clone.
   _ignores='telemetry.jsonl
 jira.pat
 state/tasks.json.lock
 .pr-loop/
 .opencode-parallel
+__pycache__/
+*.pyc
 progress/*/
 !progress/.gitkeep
 !progress/README.md
@@ -2137,12 +2151,30 @@ $_tlog" ;;                                       # relative override → also ig
   # .gitignore with TARGETED, append-only ignores (never clobbering existing entries), so a
   # shared repo stays free of one developer's local state. Full model:
   # .harness/docs/CONFIG-LAYERING.md.
+  # *.mutbak is the Reviewer's mutation-campaign backup copy: with four of them in the tree,
+  # change-size.sh reported production 1104 lines / 2 files against a true 42/1, a 26x
+  # overstatement. Since E99-F58 made mutation campaigns routine, .mutbak files in a working
+  # tree are the EXPECTED state during review, so this misfires more often from here, not less.
+  # It is per-developer review scratch that no clone should ever receive — which is precisely
+  # what distinguishes it from the agent surfaces below. (E99-F71/F89.)
+  #
+  # NOTE what is deliberately NOT here: .agents/, .codex/ and .opencode/. An earlier revision
+  # ignored them as "installer output", and Codex raised a correct P1: the documented install
+  # workflow is committed-and-shared, so those ignores would leave every Codex skill and role,
+  # every Antigravity rule and workflow, and every OpenCode command absent from a fresh clone —
+  # treating .claude/ as first-class and every other front end as second-class. They stay
+  # TRACKED; tools/change-size.sh excludes them from the budget via its built-in `generated`
+  # classifier, which removes the distortion without hiding the files.
+  #
+  # (A new ignore never untracks an ALREADY-tracked file — a target that committed one of
+  # these must run `git rm -r --cached <path>` once itself; see the note above.)
   _root_ignores='.claude/settings.local.json
 .claude/scheduled_tasks.lock
 .claude/worktrees/
 AGENTS.local.md
 CLAUDE.local.md
-AGENTS.override.md'
+AGENTS.override.md
+*.mutbak'
   if [ ! -f "$TARGET/.gitignore" ]; then
     { printf '# Personal/runtime agent state — never commit (see .harness/docs/CONFIG-LAYERING.md).\n'
       printf '%s\n' "$_root_ignores"
