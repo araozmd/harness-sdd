@@ -595,8 +595,10 @@ only two tiers upstream, so `reasoning` and `standard` both map to `pro`.
 
 A pin is written **verbatim** in that front-end's own vocabulary and overrides the
 built-in alias for every role on that tier. It is **required** for `codex` and `opencode`,
-which have no floating alias — an unpinned tier there stamps nothing and the installer
-prints one advisory line naming the exact `pin.` key to set.
+which have no floating alias — an unpinned tier there stamps no **model**, and the
+installer prints one advisory line naming the exact `pin.` key to set. It is the `model`
+key that is omitted, not the role artifact: selecting Codex always registers all six
+`.codex/agents/*.toml` regardless of any pin (see "Where the values land" below).
 
 - `opencode` **must** be `provider/model`. A value without a `/` would abort your OpenCode
   runs, so it is warned about and dropped.
