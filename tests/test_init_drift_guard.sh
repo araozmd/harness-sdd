@@ -239,17 +239,19 @@ pass "untracked drift is caught even under status.showUntrackedFiles=no (R2) [R2
 # so drift confined to .codex/agents/ tripped the gate and was then invisible to the one
 # command offered for inspecting it. Reported as P2 on PR #98.
 mk_target "$T/reco"
-mkdir -p "$T/reco/.codex/agents"
 i=1
 while [ "$i" -le 12 ]; do
-  printf '# drifted %s\n' "$i" > "$T/reco/.codex/agents/role-$i.toml"
+  printf '# drifted %s\n' "$i" > "$T/reco/.claude/commands/generated-$i.md"
   i=$((i + 1))
 done
 run_gate "$T/reco"
-[ "$GATE_RC" != "0" ] || fail "R3-regression: drift confined to .codex/agents/ PASSED the gate: $GATE_OUT"
+[ "$GATE_RC" != "0" ] || fail "R3-regression: drift confined to .claude/commands/ PASSED the gate: $GATE_OUT"
 RECO="$(printf '%s\n' "$GATE_OUT" | grep 'list them:' || true)"
 [ -n "$RECO" ] || fail "R3-regression: no recovery command printed: $GATE_OUT"
-for want in ".codex/agents/" ".gemini/agents/" "opencode.json" ":(exclude).harness/state/"; do
+# `.codex/agents/`/`.gemini/agents/` are deliberately NOT expected here: since E99-F10 they
+# are claimed per-file from the installer's ownership ledger, and a claude-only target has
+# no such ledger — so their absence from this command is correct, not a gap.
+for want in ".claude/commands/" ".opencode/command/" "opencode.json" ":(exclude).harness/state/"; do
   case "$RECO" in
     *"$want"*) : ;;
     *) fail "R3-regression: recovery command omits '$want' — it does not reproduce the checked set: $RECO" ;;
@@ -335,5 +337,222 @@ printf '%s' "$GATE_OUT" | grep -qi "not version-controlled" \
   || fail "R9-regression: an ignored body did not produce the warn-only branch: $GATE_OUT"
 [ "$GATE_RC" = "0" ] || fail "R9-regression: the warn-only branch must not fail the gate: $GATE_OUT"
 pass "an ignored body warns instead of falsely reporting clean (R9) [R9_ignored_body_is_not_masked_by_tracked_glue]"
+
+# ── E99-F10 / R4: `.codex/agents/` is shared with the operator ────────────────────
+# R4_codex_agents_namespace_is_shared
+# The installer calls this namespace "shared with the operator" and preserves foreign or
+# edited role files. A directory-wide pathspec failed the MANDATORY gate on a project's own
+# role file. Owned membership now comes from the installer's ledger,
+# .harness/.model-agents/codex/, so this needs no duplicated MODEL_ROLES list.
+mkdir -p "$T/cx"
+git -C "$T/cx" init -q .
+git -C "$T/cx" config user.email "test@harness.local"
+git -C "$T/cx" config user.name "harness test"
+CODEX_HOME="$T/cx/.codex-home" HOME="$T/cx/.home" \
+  sh "$SRC/harness-install.sh" --agents=codex "$T/cx" >/dev/null 2>&1 \
+  || fail "E99-F10/R4: codex install exited non-zero"
+printf 'name = "ours"\n' > "$T/cx/.codex/agents/project-role.toml"
+git -C "$T/cx" add -A
+git -C "$T/cx" commit -q -m "installed harness (codex) + our own role"
+# Preconditions: the ledger exists, and it does NOT claim the operator's file.
+[ -d "$T/cx/.harness/.model-agents/codex" ] \
+  || fail "E99-F10/R4: fixture precondition broken — no codex ownership ledger was written"
+[ ! -e "$T/cx/.harness/.model-agents/codex/project-role.toml" ] \
+  || fail "E99-F10/R4: fixture precondition broken — the ledger claims the operator's file"
+printf 'name = "ours, edited"\n' > "$T/cx/.codex/agents/project-role.toml"
+run_gate "$T/cx"
+[ "$GATE_RC" = "0" ] \
+  || fail "E99-F10/R4: an operator's own .codex/agents/project-role.toml failed the MANDATORY gate: $GATE_OUT"
+pass "an operator's own Codex role file does not trip the guard (R4) [R4_codex_agents_namespace_is_shared]"
+# positive control: a role file the ledger DOES claim is still checked
+echo "# unlanded" >> "$T/cx/.codex/agents/builder.toml"
+run_gate "$T/cx"
+[ "$GATE_RC" != "0" ] \
+  || fail "E99-F10/R4 control: drift in a LEDGER-OWNED .codex/agents/builder.toml PASSED — the guard claims nothing"
+pass "…while a ledger-owned Codex role file still is (R4 control) [R4_codex_agents_namespace_is_shared]"
+
+# ── E99-F10 / R2: a huge drift must print its diagnostic, not die at 141 ───────────
+# R2_large_drift_prints_diagnostic
+# `printf | head -n 10` early-closes the pipe; under `set -o pipefail` + `set -e` the
+# upstream printf takes SIGPIPE (141) and the gate aborts BEFORE the elision count, the
+# recovery command, and the fail() message. The gate still fails closed — it just fails
+# uninformatively at exactly the moment the diagnostic matters most.
+mk_target "$T/huge"
+i=1
+while [ "$i" -le 3000 ]; do
+  : > "$T/huge/.harness/agents/generated-role-with-a-deliberately-long-name-$i.md"
+  i=$((i + 1))
+done
+# PRECONDITION, asserted rather than assumed: the porcelain output must exceed the pipe
+# buffer, or `head` never early-closes and this case passes without exercising anything.
+# Measured on this platform: ~70KB (1200 files) does NOT trip SIGPIPE; ~176KB (3000) does.
+# A first draft of this test used 1200 and survived mutation M12 — it was asserting nothing.
+DRIFT_BYTES="$(git -C "$T/huge" status --porcelain -uall -- .harness/ | wc -c | tr -d ' ')"
+[ "$DRIFT_BYTES" -gt 131072 ] \
+  || fail "E99-F10/R2: fixture precondition broken — drift output is only ${DRIFT_BYTES}B, below the pipe buffer, so SIGPIPE cannot occur"
+run_gate "$T/huge"
+[ "$GATE_RC" != "0" ] || fail "E99-F10/R2: a 1200-file drift PASSED the gate: $GATE_OUT"
+[ "$GATE_RC" != "141" ] \
+  || fail "E99-F10/R2: the gate died of SIGPIPE (141) while capping the sample — no diagnostic printed"
+printf '%s' "$GATE_OUT" | grep -qi "not committed" \
+  || fail "E99-F10/R2: no fail() diagnostic printed on a large drift (rc=$GATE_RC): $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -q "more" \
+  || fail "E99-F10/R2: no elision marker printed on a large drift: $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -q "list them:" \
+  || fail "E99-F10/R2: no recovery command printed on a large drift: $GATE_OUT"
+pass "a drift larger than the pipe buffer still prints its full diagnostic (R2) [R2_large_drift_prints_diagnostic]"
+
+# ── E99-F10 / R3: the recovery command survives a path containing whitespace ───────
+# R3_recovery_command_quotes_the_root
+# An unquoted -C value reaches git as its first word only, so the printed command exits 128
+# when pasted — on the one PR where the operator most needs to paste it.
+WS="$T/with space/repo"
+mkdir -p "$WS"
+mk_target "$WS"
+echo "# unlanded edit" >> "$WS/.harness/agents/builder.md"
+run_gate "$WS"
+[ "$GATE_RC" != "0" ] || fail "E99-F10/R3: drift in a whitespace path PASSED the gate: $GATE_OUT"
+RECO="$(printf '%s\n' "$GATE_OUT" | sed -n 's/^   list them:  //p')"
+[ -n "$RECO" ] || fail "E99-F10/R3: no recovery command printed: $GATE_OUT"
+# The real assertion: the printed command must actually RUN. Anything less tests the string,
+# not the promise — and the promise is that this line can be copied and pasted.
+RECO_OUT="$(cd / && eval "$RECO" 2>&1)" && RECO_RC=0 || RECO_RC=$?
+[ "$RECO_RC" = "0" ] \
+  || fail "E99-F10/R3: the printed recovery command failed to run (rc=$RECO_RC) from a whitespace path: $RECO_OUT"
+printf '%s' "$RECO_OUT" | grep -q "builder.md" \
+  || fail "E99-F10/R3: the recovery command ran but did not list the drifted file: $RECO_OUT"
+pass "the recovery command runs verbatim from a path containing whitespace (R3) [R3_recovery_command_quotes_the_root]"
+
+# ── E99-F10 / R4: a SYMLINKED ownership ledger is not a ledger ────────────────────
+# R4_symlinked_ledger_is_rejected
+# `-d` and the glob both follow symlinks, so a symlinked .model-agents/<tool> enumerates an
+# EXTERNAL directory and turns arbitrary basenames there into "owned" pathspecs — failing
+# the mandatory gate on an operator role file no valid stamp claims. The installer already
+# refuses to trust these components; the guard must inherit that boundary.
+mkdir -p "$T/symledger"
+git -C "$T/symledger" init -q .
+git -C "$T/symledger" config user.email "test@harness.local"
+git -C "$T/symledger" config user.name "harness test"
+CODEX_HOME="$T/symledger/.codex-home" HOME="$T/symledger/.home" \
+  sh "$SRC/harness-install.sh" --agents=codex "$T/symledger" >/dev/null 2>&1 \
+  || fail "E99-F10/R4-symlink: codex install exited non-zero"
+printf 'name = "ours"\n' > "$T/symledger/.codex/agents/project-role.toml"
+git -C "$T/symledger" add -A
+git -C "$T/symledger" commit -q -m "installed harness (codex) + our own role"
+# An external directory whose basenames collide with the operator's own role file.
+mkdir -p "$T/evil-ledger"
+: > "$T/evil-ledger/project-role.toml"
+rm -rf "$T/symledger/.harness/.model-agents/codex"
+ln -s "$T/evil-ledger" "$T/symledger/.harness/.model-agents/codex"
+# Preconditions: the ledger really is a symlink, and the external dir really does name the
+# operator's file — otherwise this case cannot reproduce the escalation it exists for.
+[ -L "$T/symledger/.harness/.model-agents/codex" ] \
+  || fail "E99-F10/R4-symlink: fixture precondition broken — the ledger is not a symlink"
+[ -e "$T/evil-ledger/project-role.toml" ] \
+  || fail "E99-F10/R4-symlink: fixture precondition broken — the external dir does not name the operator's file"
+# The ledger swap is itself drift under .harness/, so commit it: the question under test is
+# whether the OPERATOR'S file gets claimed through the symlink, not whether the swap shows.
+git -C "$T/symledger" add -A
+git -C "$T/symledger" commit -q -m "symlinked ledger"
+printf 'name = "ours, edited"\n' > "$T/symledger/.codex/agents/project-role.toml"
+run_gate "$T/symledger"
+[ "$GATE_RC" = "0" ] \
+  || fail "E99-F10/R4-symlink: an operator's role file was claimed through a SYMLINKED ledger and failed the mandatory gate: $GATE_OUT"
+pass "a symlinked ownership ledger claims nothing (R4) [R4_symlinked_ledger_is_rejected]"
+
+# ── E99-F10 / R4: a ledger entry must be a REGULAR FILE ───────────────────────────
+# R4_non_regular_ledger_entry_is_rejected
+# The installer writes byte copies and nothing else, so anything that is not a regular file
+# is not a stamp. `-e` accepted a DIRECTORY, whose basename was then promoted to an owned
+# pathspec — failing the mandatory gate on the operator's own role file of that name. `-f`
+# is the general form: it rejects directory, fifo, socket and device in one test.
+mkdir -p "$T/dirstamp"
+git -C "$T/dirstamp" init -q .
+git -C "$T/dirstamp" config user.email "test@harness.local"
+git -C "$T/dirstamp" config user.name "harness test"
+CODEX_HOME="$T/dirstamp/.codex-home" HOME="$T/dirstamp/.home" \
+  sh "$SRC/harness-install.sh" --agents=codex "$T/dirstamp" >/dev/null 2>&1 \
+  || fail "E99-F10/R4-regular: codex install exited non-zero"
+printf 'name = "ours"\n' > "$T/dirstamp/.codex/agents/project-role.toml"
+mkdir -p "$T/dirstamp/.harness/.model-agents/codex/project-role.toml"
+: > "$T/dirstamp/.harness/.model-agents/codex/project-role.toml/keep"
+git -C "$T/dirstamp" add -A
+git -C "$T/dirstamp" commit -q -m "installed harness (codex), our own role, a directory ledger entry"
+# Preconditions: the entry really is a directory, and a real stamp file still exists beside
+# it — so a fix that rejected the WHOLE ledger would be caught by the control below.
+[ -d "$T/dirstamp/.harness/.model-agents/codex/project-role.toml" ] \
+  || fail "E99-F10/R4-regular: fixture precondition broken — the ledger entry is not a directory"
+[ -f "$T/dirstamp/.harness/.model-agents/codex/builder.toml" ] \
+  || fail "E99-F10/R4-regular: fixture precondition broken — no real stamp file beside it"
+printf 'name = "ours, edited"\n' > "$T/dirstamp/.codex/agents/project-role.toml"
+run_gate "$T/dirstamp"
+[ "$GATE_RC" = "0" ] \
+  || fail "E99-F10/R4-regular: a DIRECTORY ledger entry claimed the operator's role file and failed the mandatory gate: $GATE_OUT"
+pass "a non-regular ledger entry claims nothing (R4) [R4_non_regular_ledger_entry_is_rejected]"
+# positive control: the real stamp beside it still claims its role file
+echo "# unlanded" >> "$T/dirstamp/.codex/agents/builder.toml"
+run_gate "$T/dirstamp"
+[ "$GATE_RC" != "0" ] \
+  || fail "E99-F10/R4-regular control: a REAL stamp's role file PASSED — the fix rejected the whole ledger"
+pass "…while a real stamp beside it still does (R4 control) [R4_non_regular_ledger_entry_is_rejected]"
+
+# ── E99-F10 / R4: a ledger basename is DATA, not a git pattern ────────────────────
+# R4_ledger_basename_is_a_literal_pathspec
+# A stamp named `project-*.toml` was appended as a bare pathspec, which git reads as an
+# fnmatch wildcard — claiming every `.codex/agents/project-*.toml`, so the operator's own
+# `project-role.toml` failed the mandatory gate although no stamp of that name exists.
+mkdir -p "$T/wildcard"
+git -C "$T/wildcard" init -q .
+git -C "$T/wildcard" config user.email "test@harness.local"
+git -C "$T/wildcard" config user.name "harness test"
+CODEX_HOME="$T/wildcard/.codex-home" HOME="$T/wildcard/.home" \
+  sh "$SRC/harness-install.sh" --agents=codex "$T/wildcard" >/dev/null 2>&1 \
+  || fail "E99-F10/R4-literal: codex install exited non-zero"
+printf 'name = "ours"\n' > "$T/wildcard/.codex/agents/project-role.toml"
+: > "$T/wildcard/.harness/.model-agents/codex/project-*.toml"
+git -C "$T/wildcard" add -A
+git -C "$T/wildcard" commit -q -m "installed harness (codex), our own role, a wildcard-named stamp"
+# Preconditions: the wildcard stamp is a real regular file (so it clears the -f gate and the
+# case actually exercises pattern-vs-literal), and no stamp names the operator's file.
+[ -f "$T/wildcard/.harness/.model-agents/codex/project-*.toml" ] \
+  || fail "E99-F10/R4-literal: fixture precondition broken — the wildcard stamp is not a regular file"
+[ ! -e "$T/wildcard/.harness/.model-agents/codex/project-role.toml" ] \
+  || fail "E99-F10/R4-literal: fixture precondition broken — a stamp names the operator's file"
+printf 'name = "ours, edited"\n' > "$T/wildcard/.codex/agents/project-role.toml"
+run_gate "$T/wildcard"
+[ "$GATE_RC" = "0" ] \
+  || fail "E99-F10/R4-literal: a wildcard-named stamp claimed the operator's role file and failed the mandatory gate: $GATE_OUT"
+pass "a ledger basename is matched literally, not as a pattern (R4) [R4_ledger_basename_is_a_literal_pathspec]"
+
+# ── E99-F10 / R3: every derived pathspec is shell-escaped, not just the root ───────
+# R3_recovery_command_escapes_derived_pathspecs
+# A ledger-derived entry carries an operator-chosen basename. A stamp named
+# `operator's-role.toml` closed the quote early, so the advertised command died with
+# `unexpected EOF while looking for matching quote` — on the one line meant to be pasted.
+mkdir -p "$T/quote"
+git -C "$T/quote" init -q .
+git -C "$T/quote" config user.email "test@harness.local"
+git -C "$T/quote" config user.name "harness test"
+CODEX_HOME="$T/quote/.codex-home" HOME="$T/quote/.home" \
+  sh "$SRC/harness-install.sh" --agents=codex "$T/quote" >/dev/null 2>&1 \
+  || fail "E99-F10/R3-quote: codex install exited non-zero"
+: > "$T/quote/.harness/.model-agents/codex/operator's-role.toml"
+printf 'name = "ours"\n' > "$T/quote/.codex/agents/operator's-role.toml"
+git -C "$T/quote" add -A
+git -C "$T/quote" commit -q -m "installed harness (codex) + an apostrophe in a stamp name"
+[ -f "$T/quote/.harness/.model-agents/codex/operator's-role.toml" ] \
+  || fail "E99-F3-quote: fixture precondition broken — the apostrophe stamp is not a regular file"
+echo "# unlanded" >> "$T/quote/.harness/agents/builder.md"
+run_gate "$T/quote"
+[ "$GATE_RC" != "0" ] || fail "E99-F10/R3-quote: drift PASSED the gate: $GATE_OUT"
+RECO="$(printf '%s\n' "$GATE_OUT" | sed -n 's/^   list them:  //p')"
+[ -n "$RECO" ] || fail "E99-F10/R3-quote: no recovery command printed: $GATE_OUT"
+# The assertion is that it RUNS. String-matching would pass on a command that cannot parse.
+RECO_OUT="$(cd / && eval "$RECO" 2>&1)" && RECO_RC=0 || RECO_RC=$?
+[ "$RECO_RC" = "0" ] \
+  || fail "E99-F10/R3-quote: the printed recovery command failed to run (rc=$RECO_RC) with an apostrophe in a ledger name: $RECO_OUT"
+printf '%s' "$RECO_OUT" | grep -q "builder.md" \
+  || fail "E99-F10/R3-quote: the recovery command ran but did not list the drifted file: $RECO_OUT"
+pass "every derived pathspec is shell-escaped, so the command still runs (R3) [R3_recovery_command_escapes_derived_pathspecs]"
 
 echo "All init drift-guard tests passed."
