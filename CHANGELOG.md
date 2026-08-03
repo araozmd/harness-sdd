@@ -4,6 +4,82 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.51.0] — 2026-08-02
+
+### Added — ✨ `init.sh` refuses to run on an unlanded harness (E24-F01)
+
+`harness-install.sh` stamps `VERSION` into `.harness/.harness-version`
+(`harness-install.sh:2194`), but exactly one caller ever read it: the *next* installer run,
+deciding upgrade-vs-fresh (`harness-install.sh:1794`). At runtime the stamp was dead
+metadata — `init.sh` referenced neither it, nor `VERSION`, nor whether the installed body
+was committed. An upgrade that was written but never landed was therefore
+indistinguishable from one that was landed.
+
+That gap is not theoretical. A v0.50.x umbrella cascade across five children left 26–29
+uncommitted files in each. Nothing failed, for days: every Builder and Reviewer spawned
+there read agent prompts no commit describes, and three children ran the change-size
+classifier against a committed `harness.config.yaml` with no `change_size` block while
+`migrate_config()` had already appended that block to the working tree.
+
+`init.sh` now checks, between its structural checks and its TaskStore validation, that the
+harness-owned paths match what the branch records. Drift fails the gate with the count, a
+capped sample of the paths, and the command that lists the rest.
+
+**One check, not two.** `.harness-version` is itself a tracked file inside the harness-owned
+tree and every upgrade rewrites it, so a half-applied upgrade surfaces through the same
+dirty-tree check that catches the prompts. No second signal exists at runtime: `init.sh` has
+no access to the harness *source* it was installed from, so installed-vs-latest is not a
+comparison it can make.
+
+**Scope is ownership, not diff size.** The checked set is `.harness/` minus the PROJECT-OWNED
+paths (`harness.config.yaml`, `init.project.sh`, `specs/product.md`, `specs/epics/`, `state/`,
+`progress/`), plus the generated front-end glue at the project root (`.claude/agents/`,
+`.claude/commands/`, `.agents/`, `.codex/agents/`, `.gemini/agents/`, `opencode.json`). It is
+deliberately *not* an enumeration of the ~29 owned files, which would duplicate the
+installer's knowledge in a second place and drift from it.
+
+**False positives are the dominant risk** — this gate runs before every agent step, so a
+misfire halts the harness and gets the guard disabled. Every ambiguous case degrades to a
+silent skip or a warning, never a failure: no install stamp, no git work tree, or a body that
+is not version-controlled at all. `HARNESS_SKIP_DRIFT_CHECK=1` overrides it per invocation
+(an env var, not a config key — a config key gets set once during a bad afternoon and
+disables the guard forever), and the skip prints a line rather than staying silent.
+
+The guard reports; it never repairs. No auto-commit, no auto-reinstall, no writes of any kind.
+Landing the upgrade is the producing side's job — E24-F02.
+
+Round-1 review hardening (PR #98): the suite now **executes** `.harness/init.sh` rather than
+`sh`-ing it — `init.sh` is bash (`set -euo pipefail`, a bash array), so on any system whose
+`/bin/sh` is dash it died at line 8 before the guard ran, making the verification command
+unconditionally red in CI while passing on macOS where `/bin/sh` is bash in POSIX mode.
+`run_gate()` now asserts the harness banner appears, so an interpreter-level death can never
+again be read as a gate verdict. `git status` is called with **`-uall`**: an upgrade that
+*adds* a body file leaves it untracked, and `status.showUntrackedFiles=no` in any repo or
+global gitconfig made the guard print "matches the commit" over exactly that drift. And the
+"list them" recovery command is now derived from the pathspec array instead of a
+hand-written approximation that had already drifted from it — it omitted `.codex/agents/`,
+`.gemini/agents/` and `opencode.json` and dropped every `:(exclude)`.
+
+Round-2 review hardening (PR #98) closed three more holes, all in the checked path set.
+`.agents/` is a **user-owned** tree in which the installer owns only `rules/*`, `agents/*`,
+`workflows/*` and the `sdd-*` skill units, so the blanket pathspec would have failed the
+mandatory gate on a project's own `.agents/skills/mine/SKILL.md` — the false positive this
+feature named as its dominant risk. The generated OpenCode glue (`.opencode/command/*`,
+`.opencode/agent/pr-fixer.md`) was outside every pathspec, so an opencode target reported
+clean over edited harness glue. And the R9 probe now asks about the installed **body**
+alone: a repo that gitignores `.harness/` while tracking the root glue had a non-zero
+combined count, skipped the warn-only branch, and then — git being unable to report the
+ignored body either — printed `✅ installed harness matches the commit` over an edited
+`.harness/agents/builder.md`. A false clean is the worst output this feature can emit.
+
+Pinned by `tests/test_init_drift_guard.sh`, a behavioral suite that installs real targets and
+reads the gate's exit code. Four of its requirements assert an absence or a pass, so each is
+paired with a positive control on the same fixture where only the discriminating fact differs
+— an expected value with more than one producing code path proves nothing. R9 in particular
+pins the `ls-files`-before-`status` ordering: `git status --porcelain -- .harness/` reports
+`?? .harness/` when nothing is tracked, so a status-first implementation would read an
+un-version-controlled install as drift and hard-fail it.
+
 ## [0.50.2] — 2026-08-02
 
 ### Fixed — 🐛 change-size charged the harness body and agent surfaces to the product budget (E99-F71/F89)
