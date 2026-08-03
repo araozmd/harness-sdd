@@ -448,6 +448,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F10-drift-guard-followups/"
+        },
+        {
+          "id": "E99-F11",
+          "title": "Landing audit: match git-quoted paths when a telemetry override contains whitespace",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F11-audit-quoted-paths/"
         }
       ]
     },
@@ -682,7 +691,7 @@
         {
           "id": "E24-F02",
           "title": "The cascade lands the upgrade (or reports that it did not)",
-          "status": "pending",
+          "status": "done",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
