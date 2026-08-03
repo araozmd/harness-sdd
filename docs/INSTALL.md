@@ -514,9 +514,12 @@ rest. The fix is normally just to commit the upgrade.
 **What counts as harness-owned:** everything under `.harness/` *except* the project-owned
 files the installer seeds once and never clobbers (`harness.config.yaml`,
 `init.project.sh`, `specs/product.md`, `specs/epics/`, `state/`, `progress/`), plus the
-generated front-end glue at the project root (`.claude/agents/`, `.claude/commands/`,
-`.agents/`, `.codex/agents/`, `.gemini/agents/`, `opencode.json`). Your own edits to
-project-owned files never trip it — that is the whole point of the split.
+generated front-end glue at the project root — `.claude/agents/`, `.claude/commands/`,
+`.opencode/command/`, `.opencode/agent/pr-fixer.md`, `.codex/agents/`, `.gemini/agents/`,
+`opencode.json`, and, inside the **user-owned** `.agents/` tree, only the parts the
+installer regenerates: `.agents/rules/`, `.agents/agents/`, `.agents/workflows/` and the
+`.agents/skills/sdd-*/` units. Your own edits to project-owned files — and your own files
+elsewhere under `.agents/` — never trip it. That is the whole point of the split.
 
 **When the check does not apply**, it stays quiet rather than failing:
 
@@ -524,7 +527,11 @@ project-owned files never trip it — that is the whole point of the split.
 |---|---|
 | No `.harness/.harness-version` (not an installed harness — e.g. the harness source itself) | silent skip |
 | The project is not a git work tree | silent skip |
-| `.harness/` exists but nothing in it is tracked | **warns**, does not fail |
+| `.harness/` exists but nothing **in it** is tracked | **warns**, does not fail |
+
+That last row is about the installed **body** specifically. A repo that gitignores
+`.harness/` while tracking the root glue still warns — the body is what agents execute, so
+its version-control status is asked on its own rather than folded in with the glue.
 
 **Override:** `HARNESS_SKIP_DRIFT_CHECK=1 ./init.sh` proceeds anyway and says that it did.
 It is an environment variable, per invocation — deliberately not a `harness.config.yaml`

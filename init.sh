@@ -82,7 +82,10 @@ if [ -f "$HARNESS_DIR/.harness-version" ]; then
       # A bash array, not `set --`: init.sh sources .harness/init.project.sh at the end,
       # and a sourced hook inherits the caller's positional parameters. Clobbering them
       # with a pathspec list would be an invisible action at a distance.
-      HARNESS_OWNED=(
+      # The installed BODY — the executable harness an agent actually reads. Kept as its
+      # own list because R9's "is this version-controlled at all?" question is about the
+      # body specifically, not about the body plus the root glue (see below).
+      HARNESS_BODY=(
         ".harness/"
         ":(exclude).harness/harness.config.yaml"
         ":(exclude).harness/init.project.sh"
@@ -90,16 +93,38 @@ if [ -f "$HARNESS_DIR/.harness-version" ]; then
         ":(exclude).harness/specs/epics/"
         ":(exclude).harness/state/"
         ":(exclude).harness/progress/"
-        ".claude/agents/" ".claude/commands/" ".agents/"
+      )
+      # The generated front-end glue at the project root. Enumerated to the granularity the
+      # install manifest actually claims — NOT by directory. `.agents/` is described there
+      # as a USER-OWNED tree in which the installer owns only `rules/*`, `agents/*`,
+      # `workflows/*` and the `sdd-*` skill units; a blanket `.agents/` pathspec would
+      # classify a project's own `.agents/skills/mine/SKILL.md` as harness drift and fail
+      # the mandatory gate, halting all agent work. That is the false positive this feature
+      # named as its dominant risk, so the guard must not create one.
+      # `:(glob)` is required for the `sdd-*` wildcard — a plain wildcard pathspec matches
+      # nothing here (verified against git 2.55.0).
+      HARNESS_GLUE=(
+        ".claude/agents/" ".claude/commands/"
+        ".agents/rules/" ".agents/agents/" ".agents/workflows/"
+        ":(glob).agents/skills/sdd-*/**"
+        ".opencode/command/" ".opencode/agent/pr-fixer.md"
         ".codex/agents/" ".gemini/agents/" "opencode.json"
       )
+      HARNESS_OWNED=( "${HARNESS_BODY[@]}" "${HARNESS_GLUE[@]}" )
 
       # ORDER IS LOAD-BEARING (R9 before R2). In a repo where nothing is tracked yet,
       # `git status --porcelain -- .harness/` reports `?? .harness/` — non-empty. Running
       # status first would read an un-version-controlled install as DRIFT and hard-fail it,
       # which is exactly the false positive R9 exists to prevent. ls-files decides first.
-      if [ "$(git -C "$PROJECT_ROOT" ls-files -- "${HARNESS_OWNED[@]}" | wc -l | tr -d ' ')" = "0" ]; then
-        echo "⚠️  installed harness is not version-controlled here — cannot verify it matches a commit (warn-only)"
+      #
+      # And it probes the BODY ALONE, not the combined set. A repo that gitignores
+      # `.harness/` while tracking the root glue has a non-zero combined count, which
+      # skipped the warn-only branch — and then `git status` cannot report the ignored body
+      # either, so an edited `.harness/agents/builder.md` produced `✅ installed harness
+      # matches the commit`. A false CLEAN is the worst output this feature can emit, and it
+      # also contradicted the docs/INSTALL.md promise that an untracked body warns.
+      if [ "$(git -C "$PROJECT_ROOT" ls-files -- "${HARNESS_BODY[@]}" | wc -l | tr -d ' ')" = "0" ]; then
+        echo "⚠️  installed harness body (.harness/) is not version-controlled here — cannot verify it matches a commit (warn-only)"
       else
         # -uall is REQUIRED, not a default worth inheriting. `status.showUntrackedFiles=no`
         # in a repo or global gitconfig suppresses untracked files entirely, and an upgrade

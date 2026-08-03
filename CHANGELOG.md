@@ -60,6 +60,18 @@ global gitconfig made the guard print "matches the commit" over exactly that dri
 hand-written approximation that had already drifted from it — it omitted `.codex/agents/`,
 `.gemini/agents/` and `opencode.json` and dropped every `:(exclude)`.
 
+Round-2 review hardening (PR #98) closed three more holes, all in the checked path set.
+`.agents/` is a **user-owned** tree in which the installer owns only `rules/*`, `agents/*`,
+`workflows/*` and the `sdd-*` skill units, so the blanket pathspec would have failed the
+mandatory gate on a project's own `.agents/skills/mine/SKILL.md` — the false positive this
+feature named as its dominant risk. The generated OpenCode glue (`.opencode/command/*`,
+`.opencode/agent/pr-fixer.md`) was outside every pathspec, so an opencode target reported
+clean over edited harness glue. And the R9 probe now asks about the installed **body**
+alone: a repo that gitignores `.harness/` while tracking the root glue had a non-zero
+combined count, skipped the warn-only branch, and then — git being unable to report the
+ignored body either — printed `✅ installed harness matches the commit` over an edited
+`.harness/agents/builder.md`. A false clean is the worst output this feature can emit.
+
 Pinned by `tests/test_init_drift_guard.sh`, a behavioral suite that installs real targets and
 reads the gate's exit code. Four of its requirements assert an absence or a pass, so each is
 paired with a positive control on the same fixture where only the discriminating fact differs
