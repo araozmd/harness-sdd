@@ -5194,22 +5194,26 @@ audit_one() {
   # unambiguous, keeps each record whole, and needs no NUL-aware tooling (BSD awk cannot take
   # NUL as RS, and this installer is POSIX sh with no new dependencies).
   #
-  # LC_ALL=C on the filters because these are RAW BYTES, not text. A filename may hold bytes
-  # that are not valid in the ambient locale, and a multibyte-aware `grep` may then refuse to
-  # match — or drop — the line, which silently changes the count and can subtract a record
-  # that should have been kept. Byte semantics are what this filter actually wants, and the
-  # repo already takes the same precaution in tools/run-tests.sh.
+  # LC_ALL=C for the whole pipeline because these are RAW BYTES, not text. A filename may
+  # hold bytes that are not valid in the ambient locale; a multibyte-aware `grep` may then
+  # refuse to match — or drop — the line, silently changing the count, and BSD `sed` fails
+  # outright with an illegal byte sequence. Byte semantics are what every stage here wants,
+  # and the repo already takes the same precaution in tools/run-tests.sh.
   _lo="$("$SRC/tools/harness-owned-paths.sh" local-only "$_t/.harness" 2>/dev/null || true)"
   _lo_alt="$(printf '%s' "$_lo" | tr '\n' '|' | sed 's/|$//')"
   [ -n "$_lo_alt" ] || _lo_alt='$^'        # match nothing rather than everything if empty
   _ign=$(
+    # ONE locale for the whole pipeline, not per command. Every stage below consumes raw
+    # bytes, and prefixing only some of them is how the previous attempt left `sed` in the
+    # ambient locale after fixing both greps — on BSD sed that is an illegal-byte-sequence
+    # failure, not a mismatch. Export once; nothing here wants text semantics.
+    LC_ALL=C; export LC_ALL
     set --
     while IFS= read -r _p; do [ -n "$_p" ] && set -- "$@" "$_p"; done <<ISPEC
 $_spec
 ISPEC
     GIT_OPTIONAL_LOCKS=0 git -C "$_t" status --porcelain -z -uall --ignored=matching -- "$@" 2>/dev/null \
-      | tr '\n' '\001' | tr '\0' '\n' | sed -n 's/^!! //p' \
-      | LC_ALL=C grep -Ev "$_lo_alt" | LC_ALL=C grep -c '' || true
+      | tr '\n' '\001' | tr '\0' '\n' | sed -n 's/^!! //p' | grep -Ev "$_lo_alt" | grep -c '' || true
   )
   if [ "${_ign:-0}" -gt 0 ]; then
     printf '   no vcs    %-26s (%s owned path(s) git-ignored — cannot verify)\n' "$_label" "$_ign"
@@ -5229,6 +5233,11 @@ ISPEC
   # a false CLEAN, the one output this audit must never produce. Check the exit status and
   # emit a sentinel instead of a count.
   _n=$(
+    # Same byte locale as the ignore probe. This query uses DEFAULT porcelain, which quotes
+    # unusual paths and is therefore ASCII — but only while `core.quotePath` is on, and that
+    # is a config the operator can turn off. With it off, raw bytes reach `grep -c` here too,
+    # and a dropped line under-counts, which tips a divergent target toward `landed`.
+    LC_ALL=C; export LC_ALL
     set --
     while IFS= read -r _p; do [ -n "$_p" ] && set -- "$@" "$_p"; done <<SPEC
 $_spec
