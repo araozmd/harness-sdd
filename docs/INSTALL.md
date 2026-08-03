@@ -142,10 +142,6 @@ is a property of what that repo builds — for an ordinary product repo, blockin
 spends review rounds on findings that never blocked anything. Raise it yourself if your
 project has the same shape; nothing stops you.
 
-```yaml
-  merge_strategy: "merge"        # merge | squash
-```
-
 An upgrade appends the same block byte-for-byte; an absent block (or key) behaves exactly
 as the defaults above, so an existing config that predates the block stays **off** until
 you add it. Each policy key takes a per-run env override —
