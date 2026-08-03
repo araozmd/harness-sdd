@@ -50,8 +50,23 @@ mk_target() {
 
 # run_gate <dir> — run the installed gate, capture combined output + exit code into
 # GATE_OUT / GATE_RC. Never aborts the suite (set -e safe).
+#
+# EXECUTE IT, do not `sh` it. init.sh is `#!/usr/bin/env bash` + `set -euo pipefail`, and
+# on any system where /bin/sh is dash (Ubuntu CI, and this macOS box via `dash`) `sh
+# .harness/init.sh` dies at line 8 with `set: Illegal option -o pipefail` — before the
+# drift guard runs at all. The bash array `HARNESS_OWNED=(...)` is equally un-POSIX. So an
+# `sh`-invoked suite tests the interpreter, not the gate: every case would fail for the
+# same reason in CI while passing on a macOS box whose /bin/sh is bash in POSIX mode.
 run_gate() {
-  GATE_OUT="$(cd "$1" && sh .harness/init.sh 2>&1)" && GATE_RC=0 || GATE_RC=$?
+  GATE_OUT="$(cd "$1" && ./.harness/init.sh 2>&1)" && GATE_RC=0 || GATE_RC=$?
+  # Shared postcondition for EVERY case: the script must actually have executed. Without
+  # this, an interpreter-level death (wrong shell, missing shebang, non-executable bit)
+  # is indistinguishable from a gate that ran and failed — which is precisely how the
+  # `sh`-invoked version of this suite looked green in one environment and red in another.
+  case "$GATE_OUT" in
+    *"harness-sdd init"*) : ;;
+    *) fail "init.sh did not execute in $1 (no banner) — interpreter error, not a gate verdict: $GATE_OUT" ;;
+  esac
 }
 
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-drift)"
@@ -168,7 +183,7 @@ mk_target "$T/hatch"
 echo "# unlanded edit" >> "$T/hatch/.harness/agents/builder.md"
 run_gate "$T/hatch"
 [ "$GATE_RC" != "0" ] || fail "R8 control: drifted target PASSED before the override was applied"
-GATE_OUT="$(cd "$T/hatch" && HARNESS_SKIP_DRIFT_CHECK=1 sh .harness/init.sh 2>&1)" && GATE_RC=0 || GATE_RC=$?
+GATE_OUT="$(cd "$T/hatch" && HARNESS_SKIP_DRIFT_CHECK=1 ./.harness/init.sh 2>&1)" && GATE_RC=0 || GATE_RC=$?
 [ "$GATE_RC" = "0" ] || fail "R8: HARNESS_SKIP_DRIFT_CHECK=1 did not let the drifted target through: $GATE_OUT"
 printf '%s' "$GATE_OUT" | grep -qi "skip" \
   || fail "R8: the override was silent — an overridden gate must say so: $GATE_OUT"
@@ -196,5 +211,54 @@ run_gate "$T/untracked"
 printf '%s' "$GATE_OUT" | grep -qi "not version-controlled" \
   || fail "R9: no warning that drift cannot be verified: $GATE_OUT"
 pass "un-version-controlled body warns and does not fail (R9) [R9_untracked_body_warns_not_fails]"
+
+# ── R2 regression: status.showUntrackedFiles=no must not hide an unlanded file ────
+# R2_untracked_hidden_by_config_still_caught
+# A repo or global gitconfig can set status.showUntrackedFiles=no, and `git status
+# --porcelain` silently inherits it. An upgrade that ADDS a harness-owned file leaves that
+# file untracked — so without an explicit -uall the guard prints "matches the commit" over
+# an unlanded file. Reported as P2 on PR #98; kept as a first-class case because a guard
+# that reports clean while drift exists is worse than no guard.
+mk_target "$T/hidden"
+git -C "$T/hidden" config status.showUntrackedFiles no
+printf '# added by an upgrade, never committed\n' > "$T/hidden/.harness/agents/unlanded-new.md"
+# Precondition: without -uall this really is invisible. If git ever changes that, this
+# case would silently stop testing anything.
+[ -z "$(git -C "$T/hidden" status --porcelain -- .harness/)" ] \
+  || fail "R2-regression: fixture precondition broken — showUntrackedFiles=no did not hide the file"
+run_gate "$T/hidden"
+[ "$GATE_RC" != "0" ] \
+  || fail "R2-regression: an untracked harness-owned file was hidden by status.showUntrackedFiles=no — the guard needs -uall: $GATE_OUT"
+pass "untracked drift is caught even under status.showUntrackedFiles=no (R2) [R2_untracked_hidden_by_config_still_caught]"
+
+# ── R3 regression: the recovery command reproduces the ACTUAL checked path set ─────
+# R3_recovery_command_matches_checked_set
+# The advertised command must list the same paths the guard checked. An approximation
+# drifts silently: the first version printed `.harness/ .claude/ .agents/`, omitting the
+# checked .codex/agents/, .gemini/agents/ and opencode.json and dropping every :(exclude) —
+# so drift confined to .codex/agents/ tripped the gate and was then invisible to the one
+# command offered for inspecting it. Reported as P2 on PR #98.
+mk_target "$T/reco"
+mkdir -p "$T/reco/.codex/agents"
+i=1
+while [ "$i" -le 12 ]; do
+  printf '# drifted %s\n' "$i" > "$T/reco/.codex/agents/role-$i.toml"
+  i=$((i + 1))
+done
+run_gate "$T/reco"
+[ "$GATE_RC" != "0" ] || fail "R3-regression: drift confined to .codex/agents/ PASSED the gate: $GATE_OUT"
+RECO="$(printf '%s\n' "$GATE_OUT" | grep 'list them:' || true)"
+[ -n "$RECO" ] || fail "R3-regression: no recovery command printed: $GATE_OUT"
+for want in ".codex/agents/" ".gemini/agents/" "opencode.json" ":(exclude).harness/state/"; do
+  case "$RECO" in
+    *"$want"*) : ;;
+    *) fail "R3-regression: recovery command omits '$want' — it does not reproduce the checked set: $RECO" ;;
+  esac
+done
+case "$RECO" in
+  *"-uall"*) : ;;
+  *) fail "R3-regression: recovery command omits -uall, so it would not show the untracked drift it is offered for: $RECO" ;;
+esac
+pass "recovery command reproduces the actual checked pathspec set (R3) [R3_recovery_command_matches_checked_set]"
 
 echo "All init drift-guard tests passed."

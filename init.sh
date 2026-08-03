@@ -101,7 +101,13 @@ if [ -f "$HARNESS_DIR/.harness-version" ]; then
       if [ "$(git -C "$PROJECT_ROOT" ls-files -- "${HARNESS_OWNED[@]}" | wc -l | tr -d ' ')" = "0" ]; then
         echo "⚠️  installed harness is not version-controlled here — cannot verify it matches a commit (warn-only)"
       else
-        DRIFT="$(git -C "$PROJECT_ROOT" status --porcelain -- "${HARNESS_OWNED[@]}")"
+        # -uall is REQUIRED, not a default worth inheriting. `status.showUntrackedFiles=no`
+        # in a repo or global gitconfig suppresses untracked files entirely, and an upgrade
+        # that ADDS a harness-owned file leaves it untracked — so without this flag the
+        # guard prints "installed harness matches the commit" over an unlanded file, which
+        # is the exact silent false negative this whole feature exists to end. Reproduced:
+        # `git config status.showUntrackedFiles no` + a new .harness/agents/*.md ⇒ clean.
+        DRIFT="$(git -C "$PROJECT_ROOT" status --porcelain -uall -- "${HARNESS_OWNED[@]}")"
         if [ -z "$DRIFT" ]; then
           ok "installed harness matches the commit"                       # R10
         else
@@ -110,7 +116,15 @@ if [ -f "$HARNESS_DIR/.harness-version" ]; then
           DRIFT_N="$(printf '%s\n' "$DRIFT" | wc -l | tr -d ' ')"
           printf '%s\n' "$DRIFT" | head -n 10 | sed 's/^/     /'
           [ "$DRIFT_N" -le 10 ] || echo "     … $((DRIFT_N - 10)) more …"
-          echo "   list them:  git -C $PROJECT_ROOT status --porcelain -- .harness/ .claude/ .agents/"
+          # Reproduce the ACTUAL pathspec set. A hand-written approximation drifts from
+          # HARNESS_OWNED silently: an earlier version printed `.harness/ .claude/ .agents/`,
+          # which both omitted the checked `.codex/agents/`, `.gemini/agents/` and
+          # `opencode.json` AND dropped every `:(exclude)`, so eleven drifted files under
+          # .codex/agents/ would trip the gate and then be invisible to the one command
+          # offered for inspecting them.
+          DRIFT_SPEC=""
+          for _p in "${HARNESS_OWNED[@]}"; do DRIFT_SPEC="$DRIFT_SPEC '$_p'"; done
+          echo "   list them:  git -C $PROJECT_ROOT status --porcelain -uall --$DRIFT_SPEC"
           echo "   land them, or re-run with HARNESS_SKIP_DRIFT_CHECK=1 to proceed anyway."
           fail "the installed harness is not committed — $DRIFT_N harness-owned path(s) differ from what this branch records. Agents would run on a body no commit describes."
         fi

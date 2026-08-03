@@ -48,6 +48,18 @@ disables the guard forever), and the skip prints a line rather than staying sile
 The guard reports; it never repairs. No auto-commit, no auto-reinstall, no writes of any kind.
 Landing the upgrade is the producing side's job — E24-F02.
 
+Round-1 review hardening (PR #98): the suite now **executes** `.harness/init.sh` rather than
+`sh`-ing it — `init.sh` is bash (`set -euo pipefail`, a bash array), so on any system whose
+`/bin/sh` is dash it died at line 8 before the guard ran, making the verification command
+unconditionally red in CI while passing on macOS where `/bin/sh` is bash in POSIX mode.
+`run_gate()` now asserts the harness banner appears, so an interpreter-level death can never
+again be read as a gate verdict. `git status` is called with **`-uall`**: an upgrade that
+*adds* a body file leaves it untracked, and `status.showUntrackedFiles=no` in any repo or
+global gitconfig made the guard print "matches the commit" over exactly that drift. And the
+"list them" recovery command is now derived from the pathspec array instead of a
+hand-written approximation that had already drifted from it — it omitted `.codex/agents/`,
+`.gemini/agents/` and `opencode.json` and dropped every `:(exclude)`.
+
 Pinned by `tests/test_init_drift_guard.sh`, a behavioral suite that installs real targets and
 reads the gate's exit code. Four of its requirements assert an absence or a pass, so each is
 paired with a positive control on the same fixture where only the discriminating fact differs
