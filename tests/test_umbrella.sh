@@ -987,6 +987,37 @@ grep -qF 'deeper body' "$AU/f03c-full/.harness/docs/nested/deeper/x.md" \
   || fail "R2-shape control: the full install did not preserve the nested file either"
 pass "R2 nested dirs and dotfiles keep their shape in a thin child"
 
+# ── R1/R2: a SYMLINKED child resolves its umbrella too ─────────────────────────────────
+# The cascade deliberately accepts a symlinked child. `..` from such a child's .harness/ is
+# resolved by the kernel against the LINK TARGET, so a hard-coded `../../` lands outside the
+# umbrella: the child installed a full body AND persisted an unreachable umbrella.root.
+# The value is derived from the physical path, with the absolute umbrella as the fallback.
+# (Codex r3 P2 #3705849222.)
+ELS="$AU/f03d-elsewhere"
+mkdir -p "$ELS/realrepo" "$AU/f03d"
+git -C "$ELS/realrepo" init -q .
+git -C "$ELS/realrepo" config user.email "test@harness.local"
+git -C "$ELS/realrepo" config user.name  "harness test"
+echo seed > "$ELS/realrepo/README.md"
+git -C "$ELS/realrepo" add -A
+git -C "$ELS/realrepo" commit -q -m init
+ln -s "$ELS/realrepo" "$AU/f03d/kid-link"
+# A real sibling in the SAME umbrella, so the relative form is asserted in the same run —
+# a fix that switched everything to absolute paths would pass the symlink case alone.
+mk_umb "$AU/f03d" kid-real
+cascade "$AU/f03d"
+is_stub "$ELS/realrepo/.harness/AGENTS.md" \
+  || fail "R2-symlink: a symlinked child got a full body — its umbrella.root did not resolve"
+_symroot="$(sed -n 's/^  root: "\(.*\)"$/\1/p' "$ELS/realrepo/.harness/harness.config.yaml")"
+[ -n "$_symroot" ] || fail "R1-symlink: no umbrella.root recorded for the symlinked child"
+[ -f "$_symroot/.harness/.harness-version" ] \
+  || fail "R1-symlink: the recorded umbrella.root ($_symroot) does not resolve to an installed body"
+grep -q '^  root: "\.\./\.\./"' "$AU/f03d/kid-real/.harness/harness.config.yaml" \
+  || fail "R1-symlink: an ORDINARY child stopped getting the relative form"
+is_stub "$AU/f03d/kid-real/.harness/AGENTS.md" \
+  || fail "R2-symlink: the ordinary sibling stopped being thinned"
+pass "R1/R2 a symlinked child resolves its umbrella; an ordinary sibling keeps the relative form"
+
 # ── R9: an existing full-copy child is left alone ──────────────────────────────────────
 # Converting one is destructive, needs a pristine check, and is E24-F04 — never a side
 # effect of a routine cascade. Asserted on BYTES: a swap to stubs leaves every path present.

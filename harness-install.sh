@@ -5340,18 +5340,50 @@ for child in "$UMB"/*/; do
     continue
   fi
   echo "── child: $name ──"
-  # E24-F03 R1: tell the child where its umbrella is. `../../` — from the child's
-  # `.harness/` up to the child root, then up to the umbrella root — because every child
-  # sits at depth 1 under $UMB by construction (this loop only visits "$UMB"/*/). A
-  # RELATIVE value keeps the whole umbrella tree movable; it is resolved against the
-  # child's harness dir by umbrella_body_dir, and persisted into the child's config at
-  # §2a so a later standalone re-run needs no env var.
+  # E24-F03 R1: tell the child where its umbrella is.
+  #
+  # DERIVED FROM THE PHYSICAL PATH, never hard-coded. A hard-coded `../../` is right only
+  # when the child is a real directory at depth 1: this loop deliberately accepts a
+  # SYMLINKED child (see the source-identity check above, which resolves `child_abs` with
+  # `pwd -P` precisely because a child may be a link). For one of those, `..` from the
+  # child's `.harness/` is resolved by the kernel against the link's TARGET, so `../../`
+  # lands outside the umbrella entirely — the child then installs a full body AND persists
+  # an unreachable `umbrella.root`. Reproduced before fixing. (Codex r3 P2 #3705849222.)
+  #
+  # A RELATIVE value keeps the whole umbrella tree movable, so it stays the normal case;
+  # the absolute physical path is the fallback for a child that resolves outside the
+  # umbrella, where no relative path would survive the link anyway.
   #
   # Set and UNSET explicitly rather than `VAR=v install_one …`: a variable assignment
   # prefixing a FUNCTION call persists after the function returns in POSIX sh, so the
   # prefix form would leave every later target — including a coordinator re-install —
   # believing it is a child of something.
-  HARNESS_UMBRELLA_ROOT='../../'
+  _umb_phys="$(CDPATH= cd -- "$UMB" && pwd -P)"
+  case "$child_abs" in
+    "$_umb_phys"/*)
+      # One `../` to leave `.harness/`, then one per component of the child's path under
+      # the umbrella (normally just the child's own directory name).
+      _crel="${child_abs#"$_umb_phys"/}"
+      _ucomp=1
+      while : ; do
+        case "$_crel" in
+          */*) _crel="${_crel#*/}"; _ucomp=$((_ucomp + 1)) ;;
+          *)   break ;;
+        esac
+      done
+      HARNESS_UMBRELLA_ROOT=""
+      _ui=0
+      while [ "$_ui" -le "$_ucomp" ]; do
+        HARNESS_UMBRELLA_ROOT="../$HARNESS_UMBRELLA_ROOT"
+        _ui=$((_ui + 1))
+      done
+      ;;
+    *)
+      # The child resolves outside the umbrella (a symlink to a repo elsewhere). Record the
+      # absolute physical umbrella path — umbrella_body_dir accepts either form.
+      HARNESS_UMBRELLA_ROOT="$_umb_phys"
+      ;;
+  esac
   install_one "$UMB/$name"   # R10
   unset HARNESS_UMBRELLA_ROOT
   manifest_upsert "$MANIFEST" "$name"   # R12, R14
