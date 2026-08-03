@@ -443,7 +443,7 @@
         {
           "id": "E99-F10",
           "title": "Drift guard follow-ups: SIGPIPE on a large sample, .codex/agents/ over-claim, unquoted root",
-          "status": "in-progress",
+          "status": "done",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
