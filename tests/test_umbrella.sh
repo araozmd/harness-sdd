@@ -840,4 +840,107 @@ else
   echo "ok - SKIPPED R2_newline_in_ignored_path_is_not_landed (filesystem rejects newline in a filename)"
 fi
 
+
+# ══ E24-F03 — thin the child: umbrella-resolved body with local fallback ═══════════════
+# ADR-0004. The tier line is drawn by WHAT READS THE FILE: prose is stub-able because an
+# agent follows a reference; init.sh/store/tools are not, because a program parses them.
+SENTINEL='<!-- harness:umbrella-stub -->'
+PROSE_TIER='AGENTS.md agents/builder.md agents/orchestrator.md docs/WORKFLOW.md specs/_templates/feature.spec.md specs/glossary.md'
+LOCAL_TIER='init.sh store/tasks.schema.json tools/tasks-lock.py tools/harness-owned-paths.sh'
+
+is_stub() { head -n 1 "$1" 2>/dev/null | grep -qxF "$SENTINEL"; }
+
+# ── FIXTURE PRECONDITION for every stub assertion below ────────────────────────────────
+# A single-repo install is the control: if the prose tier there were ALSO missing or
+# stubbed, "contains the sentinel" downstream would prove nothing at all.
+TF="$AU/f03-control"
+mkdir -p "$TF"
+CODEX_HOME="$TF/.ch" HOME="$TF/.home" sh "$SRC/harness-install.sh" --agents=claude "$TF" >/dev/null 2>&1 \
+  || fail "R5 control: single-repo install exited non-zero"
+for _p in $PROSE_TIER $LOCAL_TIER; do
+  [ -f "$TF/.harness/$_p" ] || fail "R5 control: single-repo install is missing $_p"
+  is_stub "$TF/.harness/$_p" && fail "R5: single-repo install stubbed $_p — there is no umbrella to resolve"
+done
+grep -qF 'You are the **Builder**' "$TF/.harness/agents/builder.md" \
+  || fail "R5 control: agents/builder.md is not the real body"
+# The sentinel must be absent from the WHOLE tree, not from a sampled file: a per-file
+# probe is only ever as complete as the last bug report.
+[ "$(grep -rlF "$SENTINEL" "$TF/.harness" 2>/dev/null | wc -l | tr -d ' ')" = "0" ] \
+  || fail "R5: a single-repo install wrote a stub somewhere in .harness/"
+pass "R5 single_repo_body_is_complete — no umbrella.root ⇒ full body, no sentinel anywhere"
+
+# ── R1/R2/R3/R4: a fresh cascade child is thin ─────────────────────────────────────────
+mk_umb "$AU/f03" kid-a kid-b
+cascade "$AU/f03"
+KA="$AU/f03/kid-a/.harness"
+[ -d "$KA" ] || fail "R2 setup: the cascade did not install into kid-a"
+
+grep -q '^  root: "\.\./\.\./"' "$KA/harness.config.yaml" \
+  || fail "R1: the cascade did not record umbrella.root in the child config"
+pass "R1 cascade_records_umbrella_root"
+
+for _p in $PROSE_TIER; do
+  is_stub "$KA/$_p" || fail "R2: prose-tier $_p is not a stub in a fresh cascade child"
+done
+pass "R2 thin_child_prose_tier_is_stubbed"
+
+for _p in $LOCAL_TIER; do
+  [ -f "$KA/$_p" ] || fail "R4: program-tier $_p missing from a thin child"
+  is_stub "$KA/$_p" && fail "R4: program-tier $_p was stubbed — init.sh execs/parses it"
+done
+grep -q 'tasks.schema.json\|"\$schema"\|properties' "$KA/store/tasks.schema.json" \
+  || fail "R4: store/tasks.schema.json is not a real schema in a thin child"
+pass "R4 thin_child_standalone_tier_is_local"
+
+# The stub is a contract: sentinel, the resolved path, and the recovery instruction. And
+# the path it names must actually resolve from the child's own harness dir.
+is_stub "$KA/agents/builder.md" || fail "R3: stub has no sentinel on line 1"
+grep -qF '../../.harness/agents/builder.md' "$KA/agents/builder.md" \
+  || fail "R3: stub does not name the resolved path of its authoritative copy"
+grep -qiF 'run the harness installer against this repository' "$KA/agents/builder.md" \
+  || fail "R3: stub does not name the recovery step"
+( cd "$KA" && grep -qF 'You are the **Builder**' ../../.harness/agents/builder.md ) \
+  || fail "R3: the path the stub names does not resolve to the real body"
+pass "R3 stub_contract"
+
+grep -q 'This target holds the thin body layout' "$KA/manifest.txt" \
+  || fail "R8: a thin child's manifest does not record the thin layout"
+grep -q 'This target holds the full body layout' "$AU/f03/.harness/manifest.txt" \
+  || fail "R8: the coordinator's manifest does not record the full layout"
+is_stub "$AU/f03/.harness/agents/builder.md" \
+  && fail "R8/R2: the COORDINATOR was thinned — it holds the authoritative body"
+pass "R8 manifest_records_layout"
+
+# ── R7: an umbrella upgrade leaves child stubs byte-identical ──────────────────────────
+# Positive control in the SAME run: without it this passes on a re-run that did nothing.
+cp "$KA/agents/builder.md" "$AU/f03-stub.ref"
+cp "$KA/.harness-version" "$AU/f03-ver.ref"
+_v_orig="$(cat "$SRC/VERSION")"
+printf '99.99.99\n' > "$SRC/VERSION"
+cascade "$AU/f03"
+printf '%s\n' "$_v_orig" > "$SRC/VERSION"          # restore before any assertion can exit
+cmp -s "$AU/f03-stub.ref" "$KA/agents/builder.md" \
+  || fail "R7: a VERSION bump rewrote a thin child's stub"
+cmp -s "$AU/f03-ver.ref" "$KA/.harness-version" \
+  && fail "R7 control: the version stamp did NOT change — the re-run did nothing, so the stub comparison proves nothing"
+pass "R7 stubs_survive_version_bump (with a positive control on the standalone tier)"
+
+# ── R9: an existing full-copy child is left alone ──────────────────────────────────────
+# Converting one is destructive, needs a pristine check, and is E24-F04 — never a side
+# effect of a routine cascade. Asserted on BYTES: a swap to stubs leaves every path present.
+mk_umb "$AU/f03b" kid-c
+KC="$AU/f03b/kid-c"
+CODEX_HOME="$AU/f03b/.ch" HOME="$AU/f03b/.home" sh "$SRC/harness-install.sh" --agents=claude "$KC" >/dev/null 2>&1 \
+  || fail "R9 setup: standalone install into kid-c failed"
+is_stub "$KC/.harness/agents/builder.md" && fail "R9 setup: the standalone install already wrote a stub"
+cp "$KC/.harness/agents/builder.md" "$AU/f03b-full.ref"
+cascade "$AU/f03b"
+cmp -s "$AU/f03b-full.ref" "$KC/.harness/agents/builder.md" \
+  || fail "R9: the cascade converted an existing full-copy child's body to stubs"
+grep -q 'This target holds the full body layout' "$KC/.harness/manifest.txt" \
+  || fail "R9: an unconverted child's manifest does not report the full layout"
+printf '%s' "$AU_OUT" | grep -qi 'already holds a full body' \
+  || fail "R9: the cascade did not report that it left an existing full body alone"
+pass "R9 existing_full_copy_child_untouched"
+
 echo "All umbrella tests passed."

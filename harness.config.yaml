@@ -192,6 +192,25 @@ umbrella:
   # no per-repo delegate_cmd needed); `delegate` shells out to each repo's delegate_cmd.
   manifest: ""
 
+  # CHILD-SIDE key (E24-F03, ADR-0004). Set on a CHILD of an umbrella — never on the
+  # coordinator — to the umbrella root, relative to THIS harness dir (`.harness/`), so
+  # a cascade writes `../../`. It is what lets a child resolve the shared harness body
+  # instead of carrying its own copy of it.
+  #
+  # With this set AND resolving to an installed body (`<root>/.harness/.harness-version`
+  # present), the child's PROSE tier — AGENTS.md, agents/, docs/, specs/_templates/,
+  # specs/glossary.md — is written as one-line pointer stubs at the same paths. The
+  # PROGRAM-READ tier — init.sh, store/, tools/ — is always a full local copy, because
+  # init.sh execs and parses those and a program cannot follow a prose pointer.
+  #
+  # UNSET, empty, or unresolvable ⇒ the complete body is installed locally, exactly as
+  # a single-repo install. That is not a degraded mode and never fails init.sh: a child
+  # entered on its own (CI, a lone clone, a PR reviewer's checkout) is a supported state.
+  #
+  # The cascade writes this; you rarely set it by hand. Moving the umbrella directory
+  # invalidates every child's value at once — greppable, but a real coupling.
+  root: ""
+
 # Per-role model routing (E17-F01) — OPT-IN and INERT by default.
 # Tiers: reasoning | standard | cheap | inherit
 # `inherit` compiles to KEY OMISSION on every front-end — the generated agent
