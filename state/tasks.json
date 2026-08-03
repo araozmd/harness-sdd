@@ -434,7 +434,7 @@
         {
           "id": "E99-F09",
           "title": "Antigravity claims the shared skill unit (scoped reclaim, both-selected proof)",
-          "status": "spec-ready",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],

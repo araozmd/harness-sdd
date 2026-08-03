@@ -22,7 +22,7 @@ your-project/
 ├── .opencode/agent/pr-fixer.md         # only while pr_loop.enabled (OpenCode file-based sub-agent)
 ├── opencode.json                       # created only if absent (re-stamped only while pristine)
 ├── .agents/{rules,agents,workflows}/   # Antigravity glue → resolves to .harness/ (regenerated each run)
-├── .agents/skills/sdd-*/                # Codex repository-local $sdd-* skill units
+├── .agents/skills/sdd-*/                # SHARED repository-local $sdd-* skill units (Codex + Antigravity)
 │   ├── SKILL.md                         # adapter + canonical workflow
 │   └── agents/openai.yaml               # explicit-only invocation policy
 ├── .gemini/agents/*.md                 # per-role model routing only — created ONLY when a tier resolves
@@ -46,20 +46,32 @@ Nothing you authored is destroyed: existing entrypoint prose is preserved (only 
 `<!-- harness:begin -->…<!-- harness:end -->` block is managed), and project files
 under `.harness/specs|state|progress` are written once and never clobbered.
 
-### Codex skills and legacy prompt migration
+### Shared skill units and legacy Codex prompt migration
 
-Codex workflow discovery is repository-local. Select `codex` to install `$sdd-next`,
-`$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`, and `$sdd-fix-parallel` under
-`.agents/skills/`; `$sdd-pr-loop` follows the opt-in gate. Each skill is a two-file
-ownership unit: `SKILL.md` carries the canonical workflow plus an adapter mapping text
+Workflow discovery through `.agents/skills/<name>/SKILL.md` is repository-local and is
+read by **both Codex and Antigravity** — Antigravity discovers workspace skills at that
+exact path, and the unit the harness generates already satisfies its `name` +
+`description` frontmatter contract. So the harness writes **one shared unit per command**
+rather than one per front-end (see `specs/adr/0003-one-shared-skill-unit-per-command.md`).
+
+Selecting **either** front-end installs `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`,
+`$sdd-fix`, and `$sdd-fix-parallel` under `.agents/skills/`; `$sdd-pr-loop` follows the
+opt-in gate. Deselecting one front-end while the other is still selected leaves the units
+in place — they are reclaimed only when the **last** claiming front-end goes. Each skill is
+a two-file ownership unit: `SKILL.md` carries the canonical workflow plus an adapter mapping text
 accompanying the explicit `$skill` mention to `$ARGUMENTS`, while `agents/openai.yaml`
 sets `policy.allow_implicit_invocation: false`. Current installation does not read
 `HOME` or `CODEX_HOME` to create workflow glue and never writes or overwrites
 `${CODEX_HOME:-$HOME/.codex}/prompts/sdd-*.md`.
 
+The `agents/openai.yaml` companion is written wherever a unit is written, including when
+`codex` is not selected: Codex discovers the directory itself, so a `SKILL.md` without the
+explicit-only policy would be implicitly invocable for anyone who runs Codex in the repo.
+
 Last-written copies under `.harness/.codex-skills/` let a selected install update both
 skill files only when the live unit is absent, current-generated, or still matches the
-previous stamp. The same ownership rule governs gate-off and deselection, so foreign or
+previous stamp. That directory keeps its historical name on purpose — it now stamps shared
+units, and renaming it would orphan the ownership proof on every installed target. The same ownership rule governs gate-off and deselection, so foreign or
 edited units survive intact. Codex role TOMLs use their existing last-written stamps
 under `.harness/.model-agents/codex/` for the same protection.
 

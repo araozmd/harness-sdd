@@ -185,6 +185,38 @@ test_gate_flip_off_reclaims() {                       # R5
   pass "R5 gate true->false while selected reclaims the glue from every front-end"
 }
 
+test_gate_off_reclaims_unit_without_codex() {         # E99-F09 R6
+  # The gated skill unit is SHARED (ADR-0003), so the gate-off pass must reclaim it for
+  # ANY claiming front-end. Gated on `agent_selected codex` — as it was before E99-F09 —
+  # an antigravity-only target keeps an orphaned `.agents/skills/sdd-pr-loop/`
+  # advertising a loop the operator turned off.
+  _a="$T/agy-gate"
+  set_gate "$_a" true
+  install_at "$_a" --agents=antigravity
+  # Fixture precondition: an antigravity-only install must actually stamp the unit,
+  # otherwise "absent after the flip" is satisfied by never having written it.
+  [ -f "$_a/.agents/skills/sdd-pr-loop/SKILL.md" ] \
+    || fail "R6 setup: antigravity-only gate-on install did not stamp the shared pr-loop unit"
+  [ -f "$_a/.agents/skills/sdd-next/SKILL.md" ] \
+    || fail "R6 setup: antigravity-only install did not stamp the ungated units"
+  set_gate "$_a" false
+  install_at "$_a" --agents=antigravity
+  for _p in "$_a/.agents/skills/sdd-pr-loop/SKILL.md" \
+            "$_a/.agents/skills/sdd-pr-loop/agents/openai.yaml" \
+            "$_a/.agents/workflows/sdd-pr-loop.md"; do
+    [ -e "$_p" ] && fail "R6: gate off without codex selected left $_p behind"
+  done
+  # Same run, opposite direction: a gate-off that reclaimed everything would pass the
+  # removal assertions alone.
+  [ -f "$_a/.agents/skills/sdd-next/SKILL.md" ] \
+    || fail "R6: gate off wrongly reclaimed an ungated shared unit"
+  [ -f "$_a/.agents/rules/harness.md" ] \
+    || fail "R6: gate off wrongly reclaimed the antigravity rule"
+  grep -qF 'pr_loop.enabled is not true' "$_a/.err" \
+    || fail "R6: gate-off reclamation was not announced on an antigravity-only target"
+  pass "R6 gate-off reclaims the shared pr-loop unit on an antigravity-only target"
+}
+
 test_edited_copy_left_in_place_and_warns() {          # R6
   _e="$T/edited"
   set_gate "$_e" true
@@ -1839,6 +1871,7 @@ test_command_mirrored_to_all_frontends
 test_gate_off_stamps_nothing
 test_deselect_removes_pr_loop_glue
 test_gate_flip_off_reclaims
+test_gate_off_reclaims_unit_without_codex
 test_edited_copy_left_in_place_and_warns
 test_partial_codex_skill_unit_reclaims_owned_paths
 test_reclaim_preserves_user_files_and_prunes

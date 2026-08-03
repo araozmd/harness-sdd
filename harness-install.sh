@@ -2232,11 +2232,15 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .harness/specs/glossary.md  .harness/umbrella.manifest.example.yaml  .harness/umbrella.gitignore.example
   .claude/agents/*  .claude/commands/*   .opencode/command/*   (repo root, regenerated)
   .agents/rules/*  .agents/agents/*  .agents/workflows/*   (repo root, regenerated; Antigravity glue)
-  .agents/skills/sdd-*/SKILL.md       Codex \$sdd-* repository skill instructions
+  .agents/skills/sdd-*/SKILL.md       SHARED \$sdd-* repository skill instructions, read by
+                                      BOTH Codex and Antigravity; installed while EITHER is
+                                      selected, reclaimed when the LAST one is (ADR-0003)
   .agents/skills/sdd-*/agents/openai.yaml
-                                      explicit-only invocation policy
+                                      explicit-only invocation policy — written wherever the
+                                      unit is, since Codex discovers the directory itself
   .codex/agents/*.toml                six selected Codex role definitions (model optional)
-  .harness/.codex-skills/             last-written Codex skill-unit ownership stamps
+  .harness/.codex-skills/             last-written skill-unit ownership stamps (historical
+                                      name; it stamps shared units — ADR-0003)
   CLAUDE.md / AGENTS.md / GEMINI.md  -> only the harness:begin..end block
 
 OPENCODE CONCURRENCY PROBE  (E22-F01):
@@ -2248,7 +2252,7 @@ OPENCODE CONCURRENCY PROBE  (E22-F01):
 PR LOOP GLUE  (OPT-IN — created ONLY while pr_loop.enabled reads exactly true; a fresh
 install seeds false, so none of this exists until you turn it on — E18-F01):
   .claude/commands/sdd-pr-loop.md   .opencode/command/sdd-pr-loop.md
-  .agents/workflows/sdd-pr-loop.md  .agents/skills/sdd-pr-loop/SKILL.md (Codex)
+  .agents/workflows/sdd-pr-loop.md  .agents/skills/sdd-pr-loop/SKILL.md (shared unit)
   .claude/agents/pr-fixer.md  .opencode/agent/pr-fixer.md  .agents/agents/pr-fixer.md
   Flipping pr_loop.enabled back to false on a re-run RECLAIMS all of the above
   (pristine-only in the user-owned .agents/ tree) and prunes
@@ -4114,10 +4118,24 @@ EOF
     ok "Antigravity glue (rules + agents + workflows) installed (.agents/)"
   fi
 
-  # gen_codex_skill <command> <dest> — adapt the canonical command body to Codex's
+  # skill_unit_claimed — true while ANY front-end that READS `.agents/skills/` is selected.
+  # ADR-0003: a skill unit is ONE shared artifact per command, not one per front-end. Codex
+  # discovers repository skills there, and so does Antigravity (its bundled customization
+  # guide documents `.agents/skills/<name>/SKILL.md` with `name` + `description`
+  # frontmatter — exactly what gen_skill_body emits).
+  #
+  # ADD A FRONT-END HERE THE MOMENT IT LEARNS TO READ THAT SURFACE. Forgetting fails in the
+  # destructive direction and in silence: its units are reclaimed out from under it by the
+  # OTHER front-end's deselection, and the pristine-only guard does not save them because
+  # they genuinely are pristine — just pristine for someone else.
+  skill_unit_claimed() {
+    agent_selected codex || agent_selected antigravity
+  }
+
+  # gen_skill_body <command> <dest> — adapt the canonical command body to the shared
   # repository-local skill format. The adapter explicitly maps text accompanying the
   # `$skill` mention to the canonical body's `$ARGUMENTS` term.
-  gen_codex_skill() {
+  gen_skill_body() {
     _gcs_name="$1"; _gcs_dest="$2"; _gcs_src="$CMDDIR/$_gcs_name.md"
     _gcs_desc="$(sed -n 's/^description: //p' "$_gcs_src" | sed -n '1p')"
     {
@@ -4139,10 +4157,10 @@ policy:
 EOF
   }
 
-  # A Codex skill is an ownership unit rooted in a shared repository namespace. Reject
-  # any symlinked writable component or destination file before generation, comparison,
-  # stamping, reclamation, or writes.
-  codex_skill_destination_is_symlinked() {
+  # A skill unit is an ownership unit rooted in a shared repository namespace, claimed by
+  # every front-end that reads it (ADR-0003). Reject any symlinked writable component or
+  # destination file before generation, comparison, stamping, reclamation, or writes.
+  skill_unit_destination_is_symlinked() {
     _csd_cmd="$1"
     _csd_live="$TARGET/.agents/skills/$_csd_cmd"
     [ -L "$TARGET/.agents" ] \
@@ -4195,14 +4213,26 @@ EOF
     [ -L "$H/.codex-skills" ] || rmdir "$H/.codex-skills" 2>/dev/null || true
   }
 
-  # install_codex_skill <command> — manage SKILL.md + agents/openai.yaml as one
+  # install_skill_unit <command> — manage SKILL.md + agents/openai.yaml as one
   # ownership unit. Both artifacts are updated only when each existing path is current
   # generated output or matches its last-written stamp.
-  install_codex_skill() {
+  #
+  # The policy companion is written UNCONDITIONALLY, including where `codex` is not
+  # selected (ADR-0003). Codex discovers repository skills from the directory itself, not
+  # from this installer's front-end selection, so a SKILL.md on disk WITHOUT its
+  # explicit-only companion is an implicitly-invocable mutating workflow for anyone who
+  # runs Codex in that repo. The reclaim path already encodes this reasoning in the other
+  # direction ("a surviving SKILL.md retains its companion"); this keeps it symmetric.
+  # To Antigravity the file is an unrecognised optional sibling and therefore inert.
+  #
+  # `$H/.codex-skills/` keeps its historical name on purpose — see ADR-0003. Renaming it
+  # orphans the ownership proof on every installed target, after which each live unit
+  # reads as "foreign or edited" and becomes permanently unreclaimable.
+  install_skill_unit() {
     _ics_cmd="$1"
     _ics_live="$TARGET/.agents/skills/$_ics_cmd"
     _ics_stamp="$H/.codex-skills/$_ics_cmd"
-    if codex_skill_destination_is_symlinked "$_ics_cmd"; then
+    if skill_unit_destination_is_symlinked "$_ics_cmd"; then
       echo "⚠️  .agents/skills/$_ics_cmd has a symlinked destination component — selected Codex install left the skill unit unchanged" >&2
       discard_codex_skill_stamp "$_ics_cmd"
       return 0
@@ -4213,7 +4243,7 @@ EOF
     fi
     _ics_tmp="$(mktemp -d 2>/dev/null || mktemp -d -t harness-codex-skill)"
     mkdir -p "$_ics_tmp/agents"
-    gen_codex_skill "$_ics_cmd" "$_ics_tmp/SKILL.md"
+    gen_skill_body "$_ics_cmd" "$_ics_tmp/SKILL.md"
     gen_codex_skill_policy "$_ics_tmp/agents/openai.yaml"
     _ics_safe=1
     for _ics_rel in SKILL.md agents/openai.yaml; do
@@ -4245,11 +4275,11 @@ EOF
     return 0
   }
 
-  # reclaim_codex_skills <command-list> — reclaim each proven path independently.
+  # reclaim_skill_units <command-list> — reclaim each proven path independently.
   # A stamp-owned SKILL.md remains removable when its companion is missing/edited.
   # Conversely, when an edited SKILL.md survives, retain its policy companion so the
   # still-discoverable mutating workflow does not become implicitly invocable.
-  reclaim_codex_skills() {
+  reclaim_skill_units() {
     _rcs_cmds="$1"; _rcs_gone=""
     for _rcs_cmd in $_rcs_cmds; do
       _rcs_live="$TARGET/.agents/skills/$_rcs_cmd"
@@ -4260,7 +4290,7 @@ EOF
       _rcs_policy_stamp="$_rcs_stamp/agents/openai.yaml"
       _rcs_skill_survives=0
 
-      if codex_skill_destination_is_symlinked "$_rcs_cmd"; then
+      if skill_unit_destination_is_symlinked "$_rcs_cmd"; then
         echo "⚠️  .agents/skills/$_rcs_cmd has a symlinked destination component — skill unit left in place" >&2
         discard_codex_skill_stamp "$_rcs_cmd"
         continue
@@ -4347,17 +4377,19 @@ EOF
     return 0
   }
 
-  # ── 5d. Codex repository skills (gated on `codex`) ──────────────────────────
-  # Codex discovers project skills under `.agents/skills/<name>/SKILL.md`. This
-  # current surface is fully repository-local and never requires or writes HOME /
-  # CODEX_HOME. The old global prompts resolver remains below only for safe migration.
-  if agent_selected codex; then
+  # ── 5d. Shared repository skill units (gated on ANY claiming front-end) ──────
+  # BOTH Codex and Antigravity discover project skills under
+  # `.agents/skills/<name>/SKILL.md`, and one generated unit satisfies both contracts —
+  # so this writes ONE shared unit per command rather than one per front-end (ADR-0003).
+  # The surface is fully repository-local and never requires or writes HOME / CODEX_HOME.
+  # The old global prompts resolver remains below only for safe migration.
+  if skill_unit_claimed; then
     _cdx_cmds="$HARNESS_SDD_CMDS"
     if pr_loop_enabled; then _cdx_cmds="$HARNESS_OWNED_CMDS"; fi
     for _c in $_cdx_cmds; do
-      install_codex_skill "$_c"
+      install_skill_unit "$_c"
     done
-    ok "Codex skills \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel installed (.agents/skills/ — project-local)"
+    ok "shared skill units \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel installed (.agents/skills/ — project-local, read by Codex + Antigravity)"
   fi
   if agent_selected codex || printf '%s\n' "$PRIOR_AGENTS" | grep -qx codex; then
     migrate_legacy_codex_prompts
@@ -4594,6 +4626,17 @@ EOF
             remove_if_pristine ".agents/workflows/$_agw.md" "$CMDDIR/$_agw.md" antigravity
           done
           rm -f "$_agtmp"
+          # Shared skill units (ADR-0003, E99-F09 R5): Antigravity is a CLAIMANT of
+          # `.agents/skills/`, so its deselection reclaims those units — but ONLY when no
+          # other claimant remains. With `codex` still selected the unit is still live glue
+          # for it, and reclaiming here would delete another front-end's working commands
+          # (the exact failure this decision exists to prevent). Reclaim is idempotent, so
+          # deselecting BOTH front-ends in one run simply finds the paths already gone.
+          if ! agent_selected codex; then
+            _agskills_gone="$(reclaim_skill_units "$HARNESS_OWNED_CMDS")"
+            [ -n "$_agskills_gone" ] \
+              && echo "⚠️  removed deselected agent 'antigravity' skill units:$_agskills_gone" >&2
+          fi
           # Prune each now-empty `.agents/` subdir + the parent, only when empty
           # (never `rm -rf` — preserve any user files left in place above).
           rmdir "$TARGET/.agents/rules" 2>/dev/null || true
@@ -4611,9 +4654,17 @@ EOF
           fi
           ;;
         codex)
-          _cdx_removed="$(reclaim_codex_skills "$HARNESS_OWNED_CMDS")"
-          [ -n "$_cdx_removed" ] \
-            && echo "⚠️  removed deselected agent 'codex' skills:$_cdx_removed" >&2
+          # Symmetric to the antigravity case above (ADR-0003, E99-F09 R4): the skill unit
+          # is SHARED, so it survives Codex's deselection while Antigravity still claims it.
+          # Its `agents/openai.yaml` companion goes with it and is NOT reclaimed separately —
+          # a surviving, still-discoverable SKILL.md without the explicit-only policy would
+          # become implicitly invocable for anyone who runs Codex in the repo, which is the
+          # same reasoning the partial-unit reclaim below already applies to edited units.
+          if ! agent_selected antigravity; then
+            _cdx_removed="$(reclaim_skill_units "$HARNESS_OWNED_CMDS")"
+            [ -n "$_cdx_removed" ] \
+              && echo "⚠️  removed deselected agent 'codex' skills:$_cdx_removed" >&2
+          fi
           reclaim_model_agents codex
           ;;
       esac
@@ -4678,8 +4729,11 @@ EOF
       rmdir "$TARGET/.agents/workflows" 2>/dev/null || true
       rmdir "$TARGET/.agents" 2>/dev/null || true
     fi
-    if agent_selected codex; then
-      _prl_gone="$_prl_gone $(reclaim_codex_skills "$HARNESS_PR_LOOP_CMDS")"
+    # ANY claiming front-end, not just codex (ADR-0003, E99-F09 R6): the gated unit is
+    # shared, so an antigravity-only target would otherwise keep an orphaned
+    # `.agents/skills/sdd-pr-loop/` advertising a loop the operator turned off.
+    if skill_unit_claimed; then
+      _prl_gone="$_prl_gone $(reclaim_skill_units "$HARNESS_PR_LOOP_CMDS")"
     fi
     if [ -n "$(printf '%s' "$_prl_gone" | tr -d '[:space:]')" ]; then
       echo "⚠️  pr_loop.enabled is not true — reclaimed /sdd-pr-loop glue:$_prl_gone" >&2

@@ -44,9 +44,9 @@ value, and the evidence required before removing a mechanism.
 ## The commands this harness ships
 
 One canonical body per command is mirrored into `.claude/commands/`,
-`.opencode/command/`, and `.agents/workflows/`. Codex wraps the same instruction body
-with deterministic metadata at `.agents/skills/<name>/SKILL.md`; invoke those
-repository-local workflows as `$sdd-*`. See [WORKFLOW.md](WORKFLOW.md) for the loop each
+`.opencode/command/`, and `.agents/workflows/`. The same instruction body is also wrapped with
+deterministic metadata at `.agents/skills/<name>/SKILL.md` — one shared unit read by both
+Codex and Antigravity (ADR-0003); invoke those repository-local workflows as `$sdd-*`. See [WORKFLOW.md](WORKFLOW.md) for the loop each
 one drives.
 
 | Command | Role it runs | Gate |
@@ -71,8 +71,8 @@ into every selected front-end; turning it back off reclaims all of it.
 
 Selecting Codex also registers exactly six project-local roles in `.codex/agents/`.
 Inherited or unpinned roles remain registered without a `model` key; a concrete Codex
-pin adds `model` only where it resolves. Codex skills are explicit-only through
-`agents/openai.yaml`; their adapter maps text accompanying an explicit `$skill` mention
+pin adds `model` only where it resolves. Shared skill units are explicit-only through
+`agents/openai.yaml`, which is written wherever the unit is; their adapter maps text accompanying an explicit `$skill` mention
 to the canonical `$ARGUMENTS` term. Last-written stamps protect skill units and role
 files from selected-install overwrite and unsafe reclamation. Current installs never
 create global Codex prompts. Ungated legacy prompts remain because their cross-target

@@ -4,6 +4,46 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.53.0] — 2026-08-03
+
+### Added — ✨ Antigravity claims the shared skill unit (E99-F09)
+
+`.agents/skills/<name>/SKILL.md` is **Antigravity's documented workspace-skill discovery
+path**, not just Codex's — and the unit the harness has been generating since v0.49.0
+already satisfies Antigravity's contract (`name` + `description` frontmatter over the
+canonical workflow body). It was simply gated on `codex`, so an Antigravity-only target
+received `.agents/workflows/*.md`, which Antigravity's documented discovery does not read,
+and no invocable `/sdd-*` command at all.
+
+So a skill unit is now **one shared artifact per command, claimed by every front-end that
+reads it** — `{codex, antigravity}` — recorded as
+[`ADR-0003`](specs/adr/0003-one-shared-skill-unit-per-command.md):
+
+- **Install while *any* claimant is selected.** Selecting `antigravity` alone now writes
+  the same units a `codex` selection does, byte for byte.
+- **Reclaim when the *last* claimant is deselected.** The stamp-and-pristine ownership
+  rules are unchanged; only *when* they run changed.
+- **The policy companion follows the unit, not the selection.** `agents/openai.yaml` is
+  written wherever a `SKILL.md` is, including where `codex` is not selected: Codex
+  discovers the directory itself, so a unit without its explicit-only policy is an
+  implicitly-invocable mutating workflow for anyone who runs Codex in that repo.
+- **`.harness/.codex-skills/` keeps its historical name on purpose.** It stamps shared
+  units now; renaming it would orphan the ownership proof on every installed target, after
+  which each live unit reads as "foreign or edited" and becomes permanently unreclaimable.
+
+### Changed — 💥-adjacent behavior change (read this if you select both front-ends)
+
+**Deselecting `codex` from a target that still selects `antigravity` no longer removes the
+`.agents/skills/sdd-*/` units.** Before this release it did — correct while the surface was
+Codex's alone, and data loss now that Antigravity claims it too. The reverse (deselecting
+`antigravity` while `codex` remains) never touched them and still does not. Units are
+removed only when no claiming front-end is left selected, and the `pr_loop` gate-off pass
+now reclaims the gated unit for an Antigravity-only target as well.
+
+This is the re-spec of the migration parked as PR #87: there was nothing to migrate, only
+ownership to scope. The both-selected/deselect-one case whose absence let that PR reach
+fifteen review rounds is now a test in both directions.
+
 ## [0.52.1] — 2026-08-03
 
 ### Fixed — 🐛 the landing audit reads git-quoted paths (E99-F11)
