@@ -114,8 +114,15 @@ test_command_mirrored_to_all_frontends() {           # R2
   grep -qx 'name: sdd-pr-loop' "$_skill" || fail "R2: Codex pr-loop skill lacks name metadata"
   grep -qx '  allow_implicit_invocation: false' "$_policy" \
     || fail "R2: Codex pr-loop skill permits implicit invocation"
-  grep -qF 'all text accompanying the explicit `$sdd-pr-loop` mention' "$_skill" \
-    || fail "R2: Codex pr-loop skill does not map explicit invocation text"
+  # Both invocation spellings, for the same reason as in test_install.sh: the unit is
+  # shared, and an adapter naming only `$sdd-pr-loop` leaves an Antigravity user's
+  # `/sdd-pr-loop <args>` unbound. (Codex r1 P2 #3705086021.)
+  _adapter="$(grep -F 'as the value of `$ARGUMENTS`' "$_skill")"
+  [ -n "$_adapter" ] || fail "R2: pr-loop skill has no adapter line binding \$ARGUMENTS"
+  printf '%s' "$_adapter" | grep -qF '`$sdd-pr-loop`' \
+    || fail "R2: pr-loop skill adapter does not bind the \$sdd-pr-loop (Codex) spelling"
+  printf '%s' "$_adapter" | grep -qF '`/sdd-pr-loop`' \
+    || fail "R2: pr-loop skill adapter does not bind the /sdd-pr-loop (Antigravity) spelling"
   sed -n '/^## Canonical workflow$/,$p' "$_skill" | tail -n +2 > "$_m/skill.body"
   tail -n +5 "$_m/.claude/commands/sdd-pr-loop.md" > "$_m/command.body"
   cmp -s "$_m/skill.body" "$_m/command.body" \

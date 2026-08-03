@@ -27,6 +27,10 @@ reads it** — `{codex, antigravity}` — recorded as
   written wherever a `SKILL.md` is, including where `codex` is not selected: Codex
   discovers the directory itself, so a unit without its explicit-only policy is an
   implicitly-invocable mutating workflow for anyone who runs Codex in that repo.
+- **The invocation adapter names both spellings.** A shared unit is invoked as
+  `$sdd-drill` in Codex and `/sdd-drill` in Antigravity; the adapter binds the text
+  accompanying **either** to the canonical body's `$ARGUMENTS`, so an Antigravity
+  invocation no longer runs the workflow without the target it was given.
 - **`.harness/.codex-skills/` keeps its historical name on purpose.** It stamps shared
   units now; renaming it would orphan the ownership proof on every installed target, after
   which each live unit reads as "foreign or edited" and becomes permanently unreclaimable.

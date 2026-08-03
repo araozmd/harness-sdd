@@ -4143,8 +4143,8 @@ EOF
       printf 'name: %s\n' "$_gcs_name"
       printf 'description: %s\n' "$_gcs_desc"
       printf '%s\n' '---'
-      printf '\n## Codex invocation adapter\n\n'
-      printf 'When explicitly invoked, treat all text accompanying the explicit `$%s` mention as the value of `$ARGUMENTS` in the canonical instructions below.\n' "$_gcs_name"
+      printf '\n## Invocation adapter\n\n'
+      printf 'When explicitly invoked — as `$%s` (Codex'"'"'s spelling) or `/%s` (Antigravity'"'"'s) — treat all text accompanying that mention as the value of `$ARGUMENTS` in the canonical instructions below.\n' "$_gcs_name" "$_gcs_name"
       printf '\n## Canonical workflow\n'
       sed -n '5,$p' "$_gcs_src"
     } > "$_gcs_dest"

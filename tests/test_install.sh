@@ -1037,8 +1037,16 @@ for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-lo
     || fail "codex: $_c metadata has no policy block"
   grep -qx '  allow_implicit_invocation: false' "$_policy" \
     || fail "codex: $_c is not explicit-invocation-only"
-  grep -qF "all text accompanying the explicit \`\$$_c\` mention" "$_skill" \
-    || fail "codex: $_c does not map invocation text to the canonical argument term"
+  # The unit is shared, so the adapter must bind arguments for BOTH invocation spellings:
+  # Codex types `$sdd-next`, Antigravity types `/sdd-next` (E07-F01 spec → Commands).
+  # Naming only one spelling leaves the other's arguments unbound — the workflow then runs
+  # without the target the user asked for. (Codex r1 P2 #3705086021.)
+  _adapter="$(grep -F 'as the value of `$ARGUMENTS`' "$_skill")"
+  [ -n "$_adapter" ] || fail "codex: $_c has no adapter line binding \$ARGUMENTS"
+  printf '%s' "$_adapter" | grep -qF "\`\$$_c\`" \
+    || fail "codex: $_c adapter does not bind the \$$_c (Codex) invocation spelling"
+  printf '%s' "$_adapter" | grep -qF "\`/$_c\`" \
+    || fail "codex: $_c adapter does not bind the /$_c (Antigravity) invocation spelling"
   grep -qF 'as the value of `$ARGUMENTS`' "$_skill" \
     || fail "codex: $_c does not define the canonical \$ARGUMENTS mapping"
 done
