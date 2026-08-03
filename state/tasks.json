@@ -452,11 +452,20 @@
         {
           "id": "E99-F11",
           "title": "Landing audit: match git-quoted paths when a telemetry override contains whitespace",
-          "status": "in-progress",
+          "status": "done",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F11-audit-quoted-paths/"
+        },
+        {
+          "id": "E99-F12",
+          "title": "init.sh should report a non-GNU/BSD grep so local runs are not silently unlike CI",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F12-grep-flavour-probe/"
         }
       ]
     },
