@@ -5120,6 +5120,154 @@ if [ "$SHARED_REPO" = 1 ]; then
   echo "   shared spec repo: $UMB tracks .harness/ + umbrella docs; product repos git-ignored."
 fi
 
+# (e) landing audit (E24-F02) — "complete" must mean STATE REACHED, not files written.
+#
+# The cascade used to print its green banner after WRITING files, with no opinion about
+# whether any of it was committed. A real five-child cascade produced exactly that banner
+# and left 26-29 uncommitted files in every child, indefinitely: agents there then read
+# agent prompts no commit describes, and three children ran the change-size classifier
+# against a committed config with no change_size block while migrate_config had already
+# appended it on disk. Nothing failed. That is the defect.
+#
+# E24-F01 made the CONSUMER notice (init.sh refuses to run on an unlanded harness). This is
+# the producing side, so the guard is a backstop rather than the normal way anyone finds out
+# — one operator upgrading N repos in one command is exactly where N-way manual follow-up
+# gets skipped.
+#
+# It REPORTS; it never commits. Committing into N repos the operator did not ask you to
+# commit into is a far larger claim on their working tree, and the constraints it would have
+# to honour (never stage unrelated work, never touch a foreign branch) are the accidents this
+# whole epic exists to prevent.
+echo "── landing audit ──"
+
+# audit_one <target-dir> <label> — print this target's line; echo "unlanded" on stdout's
+# LAST line only when it is. Kept as a function so the pathspec list can be expanded through
+# positional parameters inside a subshell: `git status` has no --pathspec-from-file, and the
+# specs carry `:(exclude)` / `:(glob)` / `:(literal)` magic plus a target path that may
+# contain spaces, so neither word-splitting nor xargs is safe here.
+audit_one() {
+  _t="$1"; _label="$2"
+  if ! git -C "$_t" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf '   no git    %-26s (not a work tree — cannot verify)\n' "$_label"
+    return 2
+  fi
+  _spec="$("$SRC/tools/harness-owned-paths.sh" all "$_t/.harness" 2>/dev/null || true)"
+  if [ -z "$_spec" ]; then
+    printf '   no spec   %-26s (ownership helper unavailable — cannot verify)\n' "$_label"
+    return 2
+  fi
+  # Is ANY owned path git-ignored? Ask git for the COMPLETE set, then subtract the ignores
+  # the harness deliberately seeds itself.
+  #
+  # A body git cannot see has nothing in the index, so `git status` reports no entries even
+  # immediately after the cascade wrote all of it: the audit would print `landed` and claim
+  # the target committed over a body that was never committed. A false CLEAN is the worst
+  # output this audit can emit.
+  #
+  # THREE narrower probes were tried across three review rounds, and each missed a real case:
+  #   ls-files-empty          a FRESH cascade also has nothing tracked — identical state to
+  #                           an ignored body, opposite meaning; broke the primary case.
+  #   check-ignore .harness   misses a partially-ignored body (`.harness/tools/`).
+  #   witness files           samples a few paths, so an ignored subtree containing none of
+  #                           them (`.harness/docs/`, `.claude/commands/`) slipped through.
+  #
+  # Each fix was a narrower sample and each invited the next gap, so this one inverts the
+  # question: take git's COMPLETE ignored set over the owned pathspecs and subtract the
+  # short, deliberate local-only list. New body subtrees are then covered automatically; only
+  # a new deliberate ignore needs maintenance, in the one file that owns that knowledge.
+  _lo="$("$SRC/tools/harness-owned-paths.sh" local-only "$_t/.harness" 2>/dev/null || true)"
+  _lo_alt="$(printf '%s' "$_lo" | tr '\n' '|' | sed 's/|$//')"
+  [ -n "$_lo_alt" ] || _lo_alt='$^'        # match nothing rather than everything if empty
+  _ign=$(
+    set --
+    while IFS= read -r _p; do [ -n "$_p" ] && set -- "$@" "$_p"; done <<ISPEC
+$_spec
+ISPEC
+    GIT_OPTIONAL_LOCKS=0 git -C "$_t" status --porcelain -uall --ignored=matching -- "$@" 2>/dev/null \
+      | sed -n 's/^!! //p' | grep -Ev "$_lo_alt" | grep -c '' || true
+  )
+  if [ "${_ign:-0}" -gt 0 ]; then
+    printf '   no vcs    %-26s (%s owned path(s) git-ignored — cannot verify)\n' "$_label" "$_ign"
+    return 2
+  fi
+  # -uall for the reason E99-F10 established: an upgrade that ADDS a body file leaves it
+  # untracked, and status.showUntrackedFiles=no would hide exactly the divergence being audited.
+  #
+  # GIT_OPTIONAL_LOCKS=0 because R9 says this audit never writes a target's git state, and a
+  # plain `git status` does: install_one removes and recopies the body immediately before
+  # this call, so tracked-file mtimes all change and status rewrites `.git/index` to refresh
+  # its stat cache. That is a real write, on every idempotent landed cascade. The variable is
+  # git's documented way to suppress exactly that opportunistic write.
+  # A status that FAILED is not a status that found nothing. `git status` can exit non-zero
+  # on a corrupt or unreadable index, and piping it straight into `grep -c` discarded that:
+  # the count came back 0 and the audit printed `landed` over a target it never inspected —
+  # a false CLEAN, the one output this audit must never produce. Check the exit status and
+  # emit a sentinel instead of a count.
+  _n=$(
+    set --
+    while IFS= read -r _p; do [ -n "$_p" ] && set -- "$@" "$_p"; done <<SPEC
+$_spec
+SPEC
+    if _st="$(GIT_OPTIONAL_LOCKS=0 git -C "$_t" status --porcelain -uall -- "$@" 2>/dev/null)"; then
+      # An empty status is 0 changes; `printf '' | grep -c ''` would say 1.
+      if [ -z "$_st" ]; then printf '0\n'; else printf '%s\n' "$_st" | grep -c '' || true; fi
+    else
+      printf 'ERR\n'
+    fi
+  )
+  if [ "$_n" = "ERR" ]; then
+    printf '   no read   %-26s (git status failed — cannot verify)\n' "$_label"
+    return 2
+  fi
+  if [ "${_n:-0}" -gt 0 ]; then
+    printf '   unlanded  %-26s %s harness-owned path(s)\n' "$_label" "$_n"
+    return 1
+  fi
+  printf '   landed    %-26s\n' "$_label"
+  return 0
+}
+
+_audit_unlanded=0
+_audit_unverified=0
+_audit_total=0
+# Fed from a here-document, not a pipe: `... | while read` runs its body in a SUBSHELL in
+# POSIX sh, so every counter incremented in there would die at the `done`.
+while IFS= read -r _c; do
+  [ -n "$_c" ] || continue
+  _audit_total=$((_audit_total + 1))
+  # 0 landed, 1 unlanded, 2 unverifiable — counted separately so the closing line can
+  # state what was actually established rather than over-claiming.
+  _rc=0
+  if [ "$_c" = "." ]; then
+    audit_one "$UMB" "(coordinator)" || _rc=$?
+  else
+    audit_one "$UMB/$_c" "$_c" || _rc=$?
+  fi
+  case "$_rc" in
+    1) _audit_unlanded=$((_audit_unlanded + 1)) ;;
+    2) _audit_unverified=$((_audit_unverified + 1)) ;;
+  esac
+done <<AUDIT
+.
+$INSTALLED_CHILDREN
+AUDIT
+
 echo "══════════════════════════════════════════════════"
-ok "umbrella cascade complete (v$VERSION)"
+if [ "$_audit_unlanded" -gt 0 ]; then
+  echo "   coordinator: $UMB/.harness   manifest: $MANIFEST"
+  echo "❌ install: the cascade wrote an upgrade that is NOT COMMITTED in $_audit_unlanded of $_audit_total target(s)." >&2
+  echo "   Commit the harness files in each, or agents there run on a body no commit describes." >&2
+  echo "   Nothing was committed for you — this installer never writes to a target's git state." >&2
+  # Exit 3, deliberately NOT the generic die() code 1: "the install broke" and "the install
+  # succeeded and is unlanded" are different outcomes, and a wrapper or CI job that cannot
+  # tell them apart loses the only information that makes the code actionable.
+  exit 3
+fi
+if [ "$_audit_unverified" -gt 0 ]; then
+  # Say only what was established. "every target committed" over a target whose body could
+  # not be inspected is the same over-claim, one level up, that this whole epic is about.
+  ok "umbrella cascade complete (v$VERSION) — $((_audit_total - _audit_unverified)) of $_audit_total target(s) verified committed, $_audit_unverified not verifiable"
+else
+  ok "umbrella cascade complete (v$VERSION) — every target committed"
+fi
 echo "   coordinator: $UMB/.harness   manifest: $MANIFEST"

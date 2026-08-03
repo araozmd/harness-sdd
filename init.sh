@@ -66,98 +66,29 @@ if [ -f "$HARNESS_DIR/.harness-version" ]; then
       # globally does not announce a skip of a check that never applied here.
       echo "ℹ️  harness drift check skipped (HARNESS_SKIP_DRIFT_CHECK is set)"
     else
-      # R4/R5: scope is decided by OWNERSHIP, expressed as ".harness/ minus the
-      # project-owned paths, plus the generated front-end glue at the project root".
-      # Deliberately NOT an enumeration of the ~29 harness-owned files: that would
-      # duplicate harness-install.sh's knowledge in a second place and drift from it on
-      # the next feature that adds a body file. The project-owned set is short, stable,
-      # and documented in the install manifest ("PROJECT-OWNED (seeded once, never
-      # clobbered on upgrade)").
-      #
-      # .harness/telemetry.jsonl needs no exclusion — the installer seeds .harness/.gitignore
-      # for it, so git never reports it. umbrella.manifest.yaml is project-owned and is
-      # simply never listed. A pathspec matching nothing is not an error, so the root-level
-      # glue is listed unconditionally regardless of which front-ends were selected.
-      #
-      # A bash array, not `set --`: init.sh sources .harness/init.project.sh at the end,
-      # and a sourced hook inherits the caller's positional parameters. Clobbering them
-      # with a pathspec list would be an invisible action at a distance.
-      # The installed BODY — the executable harness an agent actually reads. Kept as its
-      # own list because R9's "is this version-controlled at all?" question is about the
-      # body specifically, not about the body plus the root glue (see below).
-      HARNESS_BODY=(
-        ".harness/"
-        ":(exclude).harness/harness.config.yaml"
-        ":(exclude).harness/init.project.sh"
-        ":(exclude).harness/specs/product.md"
-        ":(exclude).harness/specs/epics/"
-        ":(exclude).harness/state/"
-        ":(exclude).harness/progress/"
-      )
-      # The generated front-end glue at the project root. Enumerated to the granularity the
-      # install manifest actually claims — NOT by directory. `.agents/` is described there
-      # as a USER-OWNED tree in which the installer owns only `rules/*`, `agents/*`,
-      # `workflows/*` and the `sdd-*` skill units; a blanket `.agents/` pathspec would
-      # classify a project's own `.agents/skills/mine/SKILL.md` as harness drift and fail
-      # the mandatory gate, halting all agent work. That is the false positive this feature
-      # named as its dominant risk, so the guard must not create one.
-      # `:(glob)` is required for the `sdd-*` wildcard — a plain wildcard pathspec matches
-      # nothing here (verified against git 2.55.0).
-      HARNESS_GLUE=(
-        ".claude/agents/" ".claude/commands/"
-        ".agents/rules/" ".agents/agents/" ".agents/workflows/"
-        ":(glob).agents/skills/sdd-*/**"
-        ".opencode/command/" ".opencode/agent/pr-fixer.md"
-        "opencode.json"
-      )
-      # `.codex/agents/` and `.gemini/agents/` are the SAME shape of trap as `.agents/`, and
-      # the first narrowing missed both: the installer describes the Codex role namespace as
-      # shared with the operator and deliberately preserves foreign or edited role files
-      # (harness-install.sh "Codex's project-local role namespace is shared with the
-      # operator"). A directory-wide pathspec fails the MANDATORY gate on a project's own
-      # `.codex/agents/project-role.toml`, halting every agent step.
-      #
-      # Resolve them from the installer's own ownership ledger instead of enumerating role
-      # names here. `.harness/.model-agents/<tool>/` holds a byte copy of each per-role file
-      # the installer last wrote, so its listing IS the owned set — it needs no duplicated
-      # knowledge of MODEL_ROLES and it stays correct when that list changes. No stamps ⇒
-      # claim nothing for that tool: either nothing was generated (the `inherit` default
-      # creates no `.gemini/agents/` at all) or ownership is unprovable, and in both cases
-      # claiming nothing is the fail-safe direction — a false negative costs a missed drift,
-      # a false positive halts the harness.
-      #
-      # REJECT A SYMLINKED LEDGER. `-d` and the glob below both follow symlinks, so a
-      # symlinked `.model-agents` or `.model-agents/<tool>` would enumerate an EXTERNAL
-      # directory and turn arbitrary basenames there into "installer-owned" pathspecs —
-      # failing the mandatory gate on an operator's `.codex/agents/project-role.toml` that
-      # no valid stamp claims. The installer already refuses to trust these exact
-      # components (`model_agent_stamp_tree_is_symlinked` /
-      # `model_agent_stamp_destination_is_symlinked`, harness-install.sh:2606-2618); the
-      # guard inherits that trust boundary rather than inventing a weaker one. `-L` detects
-      # live and dangling links without dereferencing them.
-      for _tool in codex gemini; do
-        [ -L "$HARNESS_DIR/.model-agents" ] && break     # the whole ledger tree is untrusted
-        _stamp_dir="$HARNESS_DIR/.model-agents/$_tool"
-        [ -L "$_stamp_dir" ] && continue                 # this tool's ledger is untrusted
-        [ -d "$_stamp_dir" ] || continue
-        for _stamp in "$_stamp_dir"/*; do
-          [ -L "$_stamp" ] && continue                   # an individual stamp is untrusted
-          # A REGULAR FILE, not merely something that exists. The installer writes byte
-          # copies and nothing else, so `-f` is the general form of "this is a stamp": it
-          # rejects a directory, fifo, socket and device in one test. `-e` accepted all of
-          # them, and a directory named `project-role.toml` inside the ledger was therefore
-          # promoted to an owned pathspec — failing the mandatory gate on the operator's
-          # own role file of that name. `-L` is tested first because `-f` follows symlinks.
-          [ -f "$_stamp" ] || continue
-          # `:(literal)` — a ledger basename is DATA, not a pattern. Without it a stamp
-          # named `project-*.toml` is read as an fnmatch wildcard and claims every
-          # `.codex/agents/project-*.toml`, so the operator's own `project-role.toml` fails
-          # the mandatory gate although no stamp of that name exists. Verified against git
-          # 2.55.0: the literal form matches 0 files there, the bare form matches 1.
-          HARNESS_GLUE+=( ":(literal).$_tool/agents/${_stamp##*/}" )
-        done
-      done
-      HARNESS_OWNED=( "${HARNESS_BODY[@]}" "${HARNESS_GLUE[@]}" )
+      # R4/R5/R8: the checked set comes from ONE definition, tools/harness-owned-paths.sh,
+      # which the E24-F02 cascade audit also calls. It used to live inline here; E99-F10 then
+      # needed four corrections to it in a single week — .codex/.gemini claimed wholesale,
+      # symlinked ledgers, non-regular ledger entries, wildcard basenames — every one a FALSE
+      # POSITIVE failing this mandatory gate on a file the operator owns. A second copy in the
+      # installer would have had to relearn all four, so there is exactly one.
+      OWNED_HELPER="$HARNESS_DIR/tools/harness-owned-paths.sh"
+      if [ ! -x "$OWNED_HELPER" ] && [ ! -f "$OWNED_HELPER" ]; then
+        # A torn install (init.sh present, tools/ not) must not hard-fail the gate every
+        # session — same fail-safe direction as every other ambiguous case here. tools/ is
+        # harness-owned and ships with init.sh, so this is a broken copy, not a configuration.
+        echo "⚠️  tools/harness-owned-paths.sh missing — cannot verify the installed harness is committed (warn-only)"
+        OWNED_HELPER=""
+      fi
+      if [ -n "$OWNED_HELPER" ]; then
+      HARNESS_BODY=()
+      while IFS= read -r _l; do [ -n "$_l" ] && HARNESS_BODY+=( "$_l" ); done <<EOF
+$(sh "$OWNED_HELPER" body "$HARNESS_DIR")
+EOF
+      HARNESS_OWNED=()
+      while IFS= read -r _l; do [ -n "$_l" ] && HARNESS_OWNED+=( "$_l" ); done <<EOF
+$(sh "$OWNED_HELPER" all "$HARNESS_DIR")
+EOF
 
       # ORDER IS LOAD-BEARING (R9 before R2). In a repo where nothing is tracked yet,
       # `git status --porcelain -- .harness/` reports `?? .harness/` — non-empty. Running
@@ -216,6 +147,7 @@ if [ -f "$HARNESS_DIR/.harness-version" ]; then
           echo "   land them, or re-run with HARNESS_SKIP_DRIFT_CHECK=1 to proceed anyway."
           fail "the installed harness is not committed — $DRIFT_N harness-owned path(s) differ from what this branch records. Agents would run on a body no commit describes."
         fi
+      fi
       fi
     fi
   fi

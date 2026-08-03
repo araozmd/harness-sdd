@@ -35,7 +35,45 @@ Stand up the whole umbrella with a single command (see
 
 It installs the coordinator profile into `<umbrella>/.harness/`, installs the normal
 child profile into each immediate **git** child (depth 1), and auto-populates
-`umbrella.manifest.yaml`. Re-run any time to pick up newly-added child repos — it is
+`umbrella.manifest.yaml`.
+
+### The landing audit — "complete" means committed
+
+Writing an upgrade is not landing one. A five-child cascade once printed its green banner
+and left 26–29 **uncommitted** files in every child: agents there then read prompts no
+commit describes, and three children ran the change-size classifier against a committed
+config with no `change_size` block while the installer had already appended it on disk.
+Nothing failed.
+
+Since **v0.52.0** the cascade ends by auditing every target it touched:
+
+```
+── landing audit ──
+   no git    (coordinator)              (not a work tree — cannot verify)
+   unlanded  viernes-bff                29 harness-owned path(s)
+   landed    viernes-web
+❌ install: the cascade wrote an upgrade that is NOT COMMITTED in 1 of 3 target(s).
+```
+
+| Outcome | Exit |
+|---|---|
+| every target committed | `0` |
+| at least one target unlanded | **`3`** |
+| the install itself failed | `1` |
+
+`3` is deliberately distinct from `1`: *"the install broke"* and *"the install succeeded and
+is unlanded"* are different outcomes, and a wrapper or CI job that cannot tell them apart
+loses the only information that makes the code actionable. A **fresh** cascade into git
+children reports `3` too — correctly, since nothing is committed yet.
+
+A target that is not a git work tree (the default non-git umbrella root, for instance) is
+reported and never counted as unlanded: it cannot be unlanded from anything.
+
+**The audit never commits.** No staging, no committing, no branch changes — committing into
+N repos the operator did not ask you to commit into is a far larger claim on their working
+tree, and the constraints it would need to honour (never stage unrelated work, never touch a
+foreign branch) are exactly the accidents this guard exists to prevent. `--dry-run` skips the
+audit entirely, as it writes nothing. Re-run any time to pick up newly-added child repos — it is
 idempotent and never clobbers a bootstrap-filled manifest entry. Bootstrap then fills
 each entry's `test_command`/`delegate_cmd` and the coordinator's `integration_command`.
 

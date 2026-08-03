@@ -437,7 +437,17 @@ grep -qi "shared-repo" "$DOUT" || fail "dry-run did not mention shared-repo plan
 pass "--shared-repo --dry-run previews, writes nothing [shared_repo_dry_run]"
 
 # Real run: git-inits the root and ignores the discovered product children.
-sh "$INSTALL" --umbrella "$SRU" --shared-repo >/dev/null 2>&1 || fail "--shared-repo install failed"
+# Exit 3 is EXPECTED here and is not a failure (E24-F02): the landing audit reports that the
+# freshly-written harness is not committed in the discovered children, which is exactly true
+# of any fresh cascade into a git repo. This case is about --shared-repo's git-init and
+# .gitignore seeding, so it accepts 0 or 3 and rejects every other code — writing `|| true`
+# would let a genuine install failure pass silently.
+_src_rc=0
+sh "$INSTALL" --umbrella "$SRU" --shared-repo >/dev/null 2>&1 || _src_rc=$?
+case "$_src_rc" in
+  0|3) : ;;
+  *) fail "--shared-repo install failed (exit $_src_rc)" ;;
+esac
 [ -e "$SRU/.git" ] || fail "--shared-repo did not git-init the umbrella root"
 [ -f "$SRU/.gitignore" ] || fail "--shared-repo did not seed an umbrella-root .gitignore"
 grep -qxF '/viernes-bff/' "$SRU/.gitignore" || fail "discovered child viernes-bff not ignored"
@@ -452,7 +462,14 @@ pass "--shared-repo git-inits root + ignores discovered children, keeps .harness
 # existing .git is never re-initialized.
 printf 'my-extra-dir/\n' >> "$SRU/.gitignore"
 GITINO_BEFORE="$(ls -di "$SRU/.git" 2>/dev/null | awk '{print $1}')"
-sh "$INSTALL" --umbrella "$SRU" --shared-repo >/dev/null 2>&1 || fail "--shared-repo re-run failed"
+# Same 0-or-3 contract as the first run above: idempotence is what is under test here, not
+# whether the children happen to have committed the harness the installer just wrote.
+_src_rc=0
+sh "$INSTALL" --umbrella "$SRU" --shared-repo >/dev/null 2>&1 || _src_rc=$?
+case "$_src_rc" in
+  0|3) : ;;
+  *) fail "--shared-repo re-run failed (exit $_src_rc)" ;;
+esac
 grep -qF 'my-extra-dir/' "$SRU/.gitignore" || fail "user .gitignore entry clobbered on re-run"
 [ "$(grep -cxF '/viernes-bff/' "$SRU/.gitignore")" = "1" ] || fail "child ignore duplicated on re-run (not idempotent)"
 GITINO_AFTER="$(ls -di "$SRU/.git" 2>/dev/null | awk '{print $1}')"

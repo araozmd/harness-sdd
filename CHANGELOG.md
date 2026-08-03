@@ -4,6 +4,65 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.52.0] — 2026-08-03
+
+### Added — ✨ the cascade audits whether the upgrade was landed (E24-F02)
+
+`harness-install.sh --umbrella` printed `✅ umbrella cascade complete` after it had *written*
+files, with no opinion about whether any of it was committed. The `~/repos/viernes` cascade
+produced exactly that green finish and five children each carrying 26–29 uncommitted files.
+
+E24-F01 made the consumer notice; this closes the producing side, so the guard is a backstop
+rather than the normal way anyone finds out. One operator upgrading N repos in one command is
+precisely where N-way manual follow-up gets skipped.
+
+The cascade now ends with a per-target audit and exits **3** when anything is unlanded —
+deliberately not the generic failure code `1`, because "the install broke" and "the install
+succeeded and is unlanded" are different outcomes and conflating them loses the only
+information that makes the code actionable. A target that is not a git work tree is reported
+and never counted, as is one whose body is **git-ignored** — with nothing under `.harness/` in
+the index, `git status` returns no entries even immediately after the cascade wrote the whole
+body, so the audit would otherwise print `landed` over a body that was never committed. The discriminator is git's **complete ignored set** over the owned pathspecs, minus the short
+local-only list the installer seeds itself. Three narrower probes were tried first and each
+missed a real case: `ls-files`-empty (a fresh cascade also has nothing tracked — identical
+state, opposite meaning), `check-ignore .harness` (ignoring `.harness/tools/` leaves the
+parent un-ignored), and witness-file sampling (an ignored subtree containing no witness, like
+`.harness/docs/`, slips through). Each was a narrower sample that invited the next gap, so the
+question was inverted: subtract a known-small deliberate set from the complete one, and new
+body subtrees are covered automatically. The local-only list is not static: `telemetry.log` is
+configurable and `install_one` seeds a relative override into `.harness/.gitignore` itself, so
+the subtraction reads the same config key the installer read — otherwise a target using the
+documented override reports "cannot verify" forever. The audit's git reads run under
+`GIT_OPTIONAL_LOCKS=0`: `install_one` recopies the body, so a plain `git status` rewrites
+`.git/index` to refresh its stat cache — a real write, on every idempotent cascade. The
+closing line states what was actually established — `N of M verified committed, K not
+verifiable` — rather than over-claiming. `--dry-run` skips the audit, as it writes nothing.
+
+**It reports; it never commits.** Committing into N repos the operator did not ask you to
+commit into is a far larger claim on their working tree, and the constraints it would have to
+honour — never stage unrelated work, never touch a foreign branch — are the accidents this
+epic exists to prevent. The brief left the commit path open and asked for the smaller change
+that fully fixes the problem; report-and-exit does, because the defect was being *told* the
+upgrade was complete when it was not.
+
+### Changed — ♻️ one definition of "what the harness owns"
+
+The path set the drift guard checks moved out of `init.sh` into **`tools/harness-owned-paths.sh`**,
+which both `init.sh` and the new audit call. E99-F10 needed four corrections to that set in a
+single week — `.codex`/`.gemini` claimed wholesale, symlinked ledgers, non-regular ledger
+entries, wildcard basenames — and every one was a false positive that failed the *mandatory*
+gate on a file the operator owns. A second inline copy in the installer would have had to
+relearn all four.
+
+The logic is **moved, not rewritten**: the 27 existing drift-guard assertions pass unchanged,
+which is the extraction's regression contract. On top of that, R8 is *differential* — it
+perturbs a project-owned path, a body path, root glue, and a user file in the `.agents/` tree,
+and requires `init.sh` and the audit to agree on all four **and** to be right. Asserting that
+both files merely reference the helper would prove nothing about agreement.
+
+`init.sh` degrades to a warning if the helper is absent (a torn install must not halt the
+harness every session), consistent with every other ambiguous case in that guard.
+
 ## [0.51.2] — 2026-08-02
 
 ### Fixed — 🐛 a fresh seed no longer inherits the harness's own `blocking_severities` (E99)
@@ -98,7 +157,7 @@ being read as an fnmatch wildcard that claims the operator's `project-role.toml`
 shared shell-quoting helper now escapes the root and every pathspec alike, so a stamp named
 `operator's-role.toml` no longer produces a `list them` command that cannot parse.
 
-Pinned by seven cases in `tests/test_init_drift_guard.sh` (19 → 30 assertions), each
+Pinned by seven cases in `tests/test_init_drift_guard.sh` (18 → 27 assertions), each
 asserting its own fixture preconditions. That discipline earned its keep here: the first
 draft of the SIGPIPE case used 1,200 files (~70KB), stayed under the pipe buffer, and
 **survived** the mutation that restores `head -n 10` — it was asserting nothing. It now
