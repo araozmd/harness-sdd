@@ -460,4 +460,40 @@ run_gate "$T/symledger"
   || fail "E99-F10/R4-symlink: an operator's role file was claimed through a SYMLINKED ledger and failed the mandatory gate: $GATE_OUT"
 pass "a symlinked ownership ledger claims nothing (R4) [R4_symlinked_ledger_is_rejected]"
 
+# ── E99-F10 / R4: a ledger entry must be a REGULAR FILE ───────────────────────────
+# R4_non_regular_ledger_entry_is_rejected
+# The installer writes byte copies and nothing else, so anything that is not a regular file
+# is not a stamp. `-e` accepted a DIRECTORY, whose basename was then promoted to an owned
+# pathspec — failing the mandatory gate on the operator's own role file of that name. `-f`
+# is the general form: it rejects directory, fifo, socket and device in one test.
+mkdir -p "$T/dirstamp"
+git -C "$T/dirstamp" init -q .
+git -C "$T/dirstamp" config user.email "test@harness.local"
+git -C "$T/dirstamp" config user.name "harness test"
+CODEX_HOME="$T/dirstamp/.codex-home" HOME="$T/dirstamp/.home" \
+  sh "$SRC/harness-install.sh" --agents=codex "$T/dirstamp" >/dev/null 2>&1 \
+  || fail "E99-F10/R4-regular: codex install exited non-zero"
+printf 'name = "ours"\n' > "$T/dirstamp/.codex/agents/project-role.toml"
+mkdir -p "$T/dirstamp/.harness/.model-agents/codex/project-role.toml"
+: > "$T/dirstamp/.harness/.model-agents/codex/project-role.toml/keep"
+git -C "$T/dirstamp" add -A
+git -C "$T/dirstamp" commit -q -m "installed harness (codex), our own role, a directory ledger entry"
+# Preconditions: the entry really is a directory, and a real stamp file still exists beside
+# it — so a fix that rejected the WHOLE ledger would be caught by the control below.
+[ -d "$T/dirstamp/.harness/.model-agents/codex/project-role.toml" ] \
+  || fail "E99-F10/R4-regular: fixture precondition broken — the ledger entry is not a directory"
+[ -f "$T/dirstamp/.harness/.model-agents/codex/builder.toml" ] \
+  || fail "E99-F10/R4-regular: fixture precondition broken — no real stamp file beside it"
+printf 'name = "ours, edited"\n' > "$T/dirstamp/.codex/agents/project-role.toml"
+run_gate "$T/dirstamp"
+[ "$GATE_RC" = "0" ] \
+  || fail "E99-F10/R4-regular: a DIRECTORY ledger entry claimed the operator's role file and failed the mandatory gate: $GATE_OUT"
+pass "a non-regular ledger entry claims nothing (R4) [R4_non_regular_ledger_entry_is_rejected]"
+# positive control: the real stamp beside it still claims its role file
+echo "# unlanded" >> "$T/dirstamp/.codex/agents/builder.toml"
+run_gate "$T/dirstamp"
+[ "$GATE_RC" != "0" ] \
+  || fail "E99-F10/R4-regular control: a REAL stamp's role file PASSED — the fix rejected the whole ledger"
+pass "…while a real stamp beside it still does (R4 control) [R4_non_regular_ledger_entry_is_rejected]"
+
 echo "All init drift-guard tests passed."

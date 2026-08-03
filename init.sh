@@ -141,8 +141,14 @@ if [ -f "$HARNESS_DIR/.harness-version" ]; then
         [ -L "$_stamp_dir" ] && continue                 # this tool's ledger is untrusted
         [ -d "$_stamp_dir" ] || continue
         for _stamp in "$_stamp_dir"/*; do
-          [ -e "$_stamp" ] || continue                   # unmatched glob
           [ -L "$_stamp" ] && continue                   # an individual stamp is untrusted
+          # A REGULAR FILE, not merely something that exists. The installer writes byte
+          # copies and nothing else, so `-f` is the general form of "this is a stamp": it
+          # rejects a directory, fifo, socket and device in one test. `-e` accepted all of
+          # them, and a directory named `project-role.toml` inside the ledger was therefore
+          # promoted to an owned pathspec — failing the mandatory gate on the operator's
+          # own role file of that name. `-L` is tested first because `-f` follows symlinks.
+          [ -f "$_stamp" ] || continue
           HARNESS_GLUE+=( ".$_tool/agents/${_stamp##*/}" )
         done
       done

@@ -43,7 +43,13 @@ close. The guard now mirrors the installer's own three-level refusal
 (`harness-install.sh:2606-2618`) rather than trusting a ledger the installer itself would
 not write to.
 
-Pinned by four cases in `tests/test_init_drift_guard.sh` (19 → 25 assertions), each
+Round 2 added the general form of the same rule: a ledger entry must be a **regular file**.
+`-e` accepted a directory named `project-role.toml`, promoted its basename to an owned
+pathspec, and failed the gate on the operator's role file of that name. The installer writes
+byte copies and nothing else, so `-f` rejects directory, fifo, socket and device in one test
+rather than adding another special case.
+
+Pinned by five cases in `tests/test_init_drift_guard.sh` (19 → 27 assertions), each
 asserting its own fixture preconditions. That discipline earned its keep here: the first
 draft of the SIGPIPE case used 1,200 files (~70KB), stayed under the pipe buffer, and
 **survived** the mutation that restores `head -n 10` — it was asserting nothing. It now
