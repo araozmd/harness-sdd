@@ -29,7 +29,10 @@ state, opposite meaning), `check-ignore .harness` (ignoring `.harness/tools/` le
 parent un-ignored), and witness-file sampling (an ignored subtree containing no witness, like
 `.harness/docs/`, slips through). Each was a narrower sample that invited the next gap, so the
 question was inverted: subtract a known-small deliberate set from the complete one, and new
-body subtrees are covered automatically. The audit's git reads run under
+body subtrees are covered automatically. The local-only list is not static: `telemetry.log` is
+configurable and `install_one` seeds a relative override into `.harness/.gitignore` itself, so
+the subtraction reads the same config key the installer read — otherwise a target using the
+documented override reports "cannot verify" forever. The audit's git reads run under
 `GIT_OPTIONAL_LOCKS=0`: `install_one` recopies the body, so a plain `git status` rewrites
 `.git/index` to refresh its stat cache — a real write, on every idempotent cascade. The
 closing line states what was actually established — `N of M verified committed, K not

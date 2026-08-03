@@ -141,6 +141,32 @@ emit_local_only() {
     '(^|/)__pycache__/' \
     '\.pyc$' \
     '(^|/)state/tasks\.json\.lock$'
+
+  # The telemetry log path is CONFIGURABLE, so the list above cannot be fixed. When
+  # `telemetry.log` is overridden to a relative path, install_one adds THAT path to
+  # `.harness/.gitignore` itself — and a caller subtracting only the hard-coded defaults
+  # would then see a legitimately-ignored file it does not recognise and report the whole
+  # target unverifiable, permanently. Read the same key the installer read.
+  #
+  # Mirrors install_one's own conditions exactly: the default and an ABSOLUTE override need
+  # no entry (the former is listed above; the latter lives outside the repo and is never
+  # ignored). Scoped to the top-level `telemetry:` section so an unrelated `log:` key
+  # elsewhere in the file cannot be mistaken for it.
+  _cfg="$hdir/harness.config.yaml"
+  [ -f "$_cfg" ] || return 0
+  _tlog="$(awk '
+    /^telemetry:[[:space:]]*(#.*)?$/ { t=1; next }
+    t && /^[^[:space:]#]/ { t=0 }
+    t && /^[[:space:]]+log:/ {
+      sub(/^[[:space:]]+log:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+      gsub(/^"|"$/, ""); print; exit
+    }
+  ' "$_cfg" 2>/dev/null)"
+  case "$_tlog" in
+    ""|telemetry.jsonl|/*) return 0 ;;
+  esac
+  # Escape every ERE metacharacter so the path is matched as data, not as a pattern.
+  printf '(^|/)%s$\n' "$(printf '%s' "$_tlog" | sed 's/[][\\.^$*+?(){}|/]/\\&/g')"
 }
 
 case "$mode" in

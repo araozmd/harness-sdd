@@ -690,4 +690,36 @@ printf '%s' "$AU_OUT" | grep -qE "unlanded +child-h" \
 [ "$AU_RC" = "3" ] || fail "R2-shapes control: a fresh cascade did not exit 3 (rc=$AU_RC)"
 pass "…and a fresh un-ignored body is still unlanded (R2 control) [R2_ignored_owned_subtree_is_not_landed]"
 
+# ── R2: a CONFIGURED telemetry log override must not make a target unverifiable ────────
+# R2_configured_telemetry_override_is_subtracted
+# `telemetry.log` is configurable, and install_one adds a relative override to
+# `.harness/.gitignore` itself. A subtraction list carrying only the hard-coded defaults
+# therefore sees a legitimately-ignored file it does not recognise and reports the target
+# unverifiable FOREVER — the audit never runs there again. Fails safe (under-claims rather
+# than over-claims) but silently exempts the target. Reported as P2 on PR #103 round 4.
+mk_umb "$AU/tlog" child-u
+cascade "$AU/tlog"
+python3 - "$AU/tlog/child-u/.harness/harness.config.yaml" <<'PYCFG'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace("log: telemetry.jsonl", "log: custom/my.jsonl", 1)
+open(p, "w").write(s)
+PYCFG
+cascade "$AU/tlog"                       # re-run so install_one seeds the override ignore
+mkdir -p "$AU/tlog/child-u/.harness/custom"
+printf '{}\n' > "$AU/tlog/child-u/.harness/custom/my.jsonl"
+land "$AU/tlog/child-u"
+# Preconditions: the override really is ignored, and it really is the configured value —
+# otherwise this case cannot distinguish the fix from the fixed-list version.
+grep -q 'custom/my.jsonl' "$AU/tlog/child-u/.harness/.gitignore" \
+  || fail "R2-tlog: fixture precondition broken — install_one did not ignore the configured override"
+git -C "$AU/tlog/child-u" check-ignore -q .harness/custom/my.jsonl \
+  || fail "R2-tlog: fixture precondition broken — the override is not actually ignored"
+cascade "$AU/tlog"
+printf '%s' "$AU_OUT" | grep -qE "no vcs +child-u" \
+  && fail "R2-tlog: a CONFIGURED telemetry override made the target unverifiable — the subtraction must read telemetry.log: $AU_OUT"
+printf '%s' "$AU_OUT" | grep -qE "landed +child-u" \
+  || fail "R2-tlog: a fully landed target with a telemetry override was not reported landed: $AU_OUT"
+pass "a configured telemetry.log override is subtracted, not treated as unverifiable (R2) [R2_configured_telemetry_override_is_subtracted]"
+
 echo "All umbrella tests passed."
