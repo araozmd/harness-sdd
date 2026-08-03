@@ -808,4 +808,36 @@ printf '%s' "$AU_OUT" | grep -qE "landed +child-x" \
   || fail "R2-tlws: a fully landed target with a whitespace override was not reported landed: $AU_OUT"
 pass "a telemetry override containing whitespace is subtracted (R2) [R2_telemetry_override_with_whitespace]"
 
+# ── R2: a newline inside an ignored path must not collapse into a false clean ──────────
+# R2_newline_in_ignored_path_is_not_landed
+# `tr '\0' '\n'` on `-z` output splits a path containing a literal newline into two lines;
+# the second loses its `!! ` prefix and is dropped by the sed, so if the FIRST fragment
+# matches a local-only pattern the whole record is subtracted and the target reads `landed`.
+# A false CLEAN — not the over-count I first claimed in the commit that introduced it.
+# Reported as P2 on PR #105 round 1.
+mk_umb "$AU/nlpath" child-y
+cascade "$AU/nlpath"
+# A path whose first line is EXACTLY a local-only pattern, so a naive split subtracts it.
+_nlname="$(printf 'telemetry.jsonl\nshadow')"
+if ( cd "$AU/nlpath/child-y/.harness" && printf 'x\n' > "$_nlname" ) 2>/dev/null; then
+  # Ignore it by a GLOB matching its tail, not by name: `.gitignore` is line-based and
+  # cannot express a newline, and a directory-wide rule makes git collapse the whole
+  # directory to one entry — neither produces the individual `!!` record this case needs.
+  printf '*shadow\n' >> "$AU/nlpath/child-y/.harness/.gitignore"
+  land "$AU/nlpath/child-y"
+  # Preconditions: the file exists with a newline in its name AND git reports it ignored.
+  [ -e "$AU/nlpath/child-y/.harness/$_nlname" ] \
+    || fail "R2-nl: fixture precondition broken — the newline-named file does not exist"
+  git -C "$AU/nlpath/child-y" status --porcelain -z -uall --ignored=matching -- .harness/ \
+    | tr '\0' '\n' | grep -qE '^!! (.*/)?telemetry\.jsonl$' \
+    || fail "R2-nl: fixture precondition broken — the naive split does not produce a subtractable first fragment, so this case cannot reproduce the defect"
+  cascade "$AU/nlpath"
+  printf '%s' "$AU_OUT" | grep -qE "landed +child-y" \
+    && fail "R2-nl: FALSE CLEAN — a newline inside an ignored path collapsed into a subtracted record: $AU_OUT"
+  pass "a newline inside an ignored path does not collapse into a false clean (R2) [R2_newline_in_ignored_path_is_not_landed]"
+else
+  # Some filesystems reject newlines in names. Skipping is honest; silently passing is not.
+  echo "ok - SKIPPED R2_newline_in_ignored_path_is_not_landed (filesystem rejects newline in a filename)"
+fi
+
 echo "All umbrella tests passed."

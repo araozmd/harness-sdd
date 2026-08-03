@@ -19,6 +19,14 @@ quoting grammar rather than reimplementing its C-style unescaping — which `cor
 also influences, so a hand-rolled unescaper would have had a second configuration knob to get
 wrong.
 
+Embedded newlines are neutralised **before** the NUL delimiters are split, because doing it
+the other way round is a false-clean of its own: a path containing a literal newline splits
+into two lines, the second loses its `!! ` prefix and is dropped, and if the first fragment
+matches a local-only pattern the whole record is subtracted and the target reads `landed`.
+Under `-z` a newline can only appear *inside* a path, so mapping newlines to `\001` first is
+unambiguous and keeps every record whole — without NUL-aware tooling, which POSIX `awk`
+cannot provide (BSD `awk` will not take NUL as `RS`).
+
 Filed from PR #103 round 6 and fixed here rather than in a seventh review round, because it
 fails **safe**: it under-claims (`cannot verify`) and cannot produce the false `landed` the
 audit exists to prevent.

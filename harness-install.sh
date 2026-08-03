@@ -5181,9 +5181,18 @@ audit_one() {
   # matched and the target reported "cannot verify" forever. `-z` emits raw paths, which
   # sidesteps git's whole quoting grammar rather than reimplementing its C-style unescaping
   # (which `core.quotePath` also influences). The NUL delimiters are turned into newlines
-  # for the line-oriented filter below; a path containing a literal newline would then
-  # over-count, which is the safe direction — it can only make a target look unverifiable,
-  # never landed.
+  # for the line-oriented filter below — but embedded newlines are neutralised FIRST.
+  #
+  # `tr '\0' '\n'` alone was wrong, and not in the safe direction I first claimed: it splits
+  # a path containing a literal newline into two lines, the second loses the `!! ` prefix and
+  # is dropped by the sed, and if the FIRST fragment happens to match a local-only pattern
+  # (`telemetry.jsonl` followed by a newline, say) the whole record is subtracted and the
+  # target reports `landed`. A false CLEAN, not an over-count.
+  #
+  # Under `-z` a newline can ONLY appear inside a path — records are NUL-terminated and git
+  # emits no newline delimiters — so mapping newlines to \001 before splitting on NUL is
+  # unambiguous, keeps each record whole, and needs no NUL-aware tooling (BSD awk cannot take
+  # NUL as RS, and this installer is POSIX sh with no new dependencies).
   _lo="$("$SRC/tools/harness-owned-paths.sh" local-only "$_t/.harness" 2>/dev/null || true)"
   _lo_alt="$(printf '%s' "$_lo" | tr '\n' '|' | sed 's/|$//')"
   [ -n "$_lo_alt" ] || _lo_alt='$^'        # match nothing rather than everything if empty
@@ -5193,7 +5202,7 @@ audit_one() {
 $_spec
 ISPEC
     GIT_OPTIONAL_LOCKS=0 git -C "$_t" status --porcelain -z -uall --ignored=matching -- "$@" 2>/dev/null \
-      | tr '\0' '\n' | sed -n 's/^!! //p' | grep -Ev "$_lo_alt" | grep -c '' || true
+      | tr '\n' '\001' | tr '\0' '\n' | sed -n 's/^!! //p' | grep -Ev "$_lo_alt" | grep -c '' || true
   )
   if [ "${_ign:-0}" -gt 0 ]; then
     printf '   no vcs    %-26s (%s owned path(s) git-ignored — cannot verify)\n' "$_label" "$_ign"
