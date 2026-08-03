@@ -78,6 +78,7 @@ when one is present, rather than by emptying the child and hoping nobody enters 
 | F01 | `init.sh` drift guard: refuse to run on an unlanded harness | pending | true | — |
 | F02 | The cascade lands the upgrade (or reports that it did not) | pending | true | F01 |
 | F03 | Thin the child: umbrella-resolved body with local fallback | pending | true | F01, F02 |
+| F04 | Migrate existing children to the thin layout (+ `--standalone`) | pending | true | F03 |
 
 ## Notes
 **Sequencing is deliberate.** F01 is the cheapest change and the only one that fixes
@@ -93,6 +94,20 @@ design against is a false positive on a legitimately-customized target — proje
 files (`harness.config.yaml`, `init.project.sh`, `specs/`, `state/`, `progress/`) are
 *expected* to differ and must never trip it. Only the HARNESS-OWNED set
 (the `manifest.txt` list at `harness-install.sh:2199`) is in scope.
+
+**F03 split into F03 + F04 at spec time (E21).** The decision is recorded as `ADR-0004`:
+a child keeps every body path, and in an umbrella install the *prose* tier (`AGENTS.md`,
+`agents/`, `docs/`, `specs/_templates/`, `glossary.md`) holds a pointer stub while the
+*program-read* tier (`init.sh`, `store/`, `tools/`) stays a full local copy. The tier line
+is drawn by **what reads the file** — a program cannot follow a prose pointer — which is
+also why "delete the child's copy" was never available: the generated front-end glue
+resolves body paths inside the child's own `.harness/`.
+
+F03 carries the mechanism and changes only what a *fresh* child install writes. Migrating
+already-installed full-copy children — a destructive, pristine-only replacement — plus a
+`--standalone` flag to re-materialise a full body in a thin child, is **F04**. Specifying
+both together exceeded what one review pass covers, so the split is declared here rather
+than discovered at PR time.
 
 **F03 needs an ADR.** How a child locates its umbrella (env var, upward search, an explicit
 path in `harness.config.yaml`), and what happens when it finds none, is a durable
