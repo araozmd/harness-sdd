@@ -4,6 +4,38 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.51.2] — 2026-08-02
+
+### Fixed — 🐛 a fresh seed no longer inherits the harness's own `blocking_severities` (E99)
+
+`harness.config.yaml` is seeded into a target by **copying** the harness repo's own file, so
+any `pr_loop` value this repo sets for itself silently became every target's default. That
+was already handled for `enabled` — a target may not have the Codex GitHub App — and is now
+handled the same way for `blocking_severities`.
+
+This repo raises its own threshold to **`P0,P1,P2`**. Across E24-F01 (PR #98) and E99-F10
+(PR #100) — seven review rounds — every real defect arrived tagged **P2**, and none arrived
+as P0/P1 after the first round. Six of them let the drift guard claim a path the installer
+does not own, failing the *mandatory* `init.sh` gate on an operator's own file; one made the
+guard print `installed harness matches the commit` over an edited body. The gate said
+`merge` on nine findings that had to be fixed anyway, so the configuration and the actual
+review behaviour disagreed almost every round.
+
+That is a calibration mismatch, not a judgement call: Codex severities are tuned for
+application code, where a wrong output is one bad response. In a **gate**, a wrong output is
+the gate vouching for something it never checked. But the reasoning is a property of what
+this repo builds — for an ordinary product repo, blocking on P2 spends rounds on findings
+that never blocked anything, which is the cost E21 exists to control. So the raise is local
+and the shipped default stays `P0,P1`. `nit` remains non-blocking everywhere.
+
+The seed also drops the run of comment lines explaining a value it overwrites, so a target
+never reads a rationale sitting above a value that contradicts it. Comments on keys the seed
+keeps — including a target's own hand-written ones — survive untouched.
+
+Pinned by `test_pr_loop.sh` R15b, which asserts the **source** genuinely carries the raised
+value before checking the seeded one. Without that precondition the assertion would pass
+just as well against a source that was never raised, proving nothing about the forcing.
+
 ## [0.51.1] — 2026-08-02
 
 ### Fixed — 🐛 the drift guard over-claimed shared namespaces and lost its diagnostic on a large drift (E99-F10)

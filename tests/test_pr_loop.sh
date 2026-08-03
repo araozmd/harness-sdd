@@ -497,6 +497,28 @@ test_pr_loop_block_seeded() {                         # R15
   grep -qF 'opt-in' "$_c" || fail "R15: the seeded block does not document the opt-in gate"
   grep -qF 'Codex GitHub App' "$_c" || fail "R15: the seeded block does not state the Codex App precondition"
   pass "R15 fresh install seeds the five pr_loop keys, with enabled opt-in false"
+
+  # R15b: the seed is a COPY of the harness's own harness.config.yaml, so any pr_loop value
+  # this repo sets FOR ITSELF would silently become every target's default. Two keys are
+  # forced back: `enabled` (asserted above) and `blocking_severities`. This repo really does
+  # raise the latter to P0,P1,P2 — it builds gates, where a "P2" can mean the gate vouching
+  # for something it never checked — and that reasoning does not generalize to a product
+  # repo, where blocking on P2 spends rounds on findings that never blocked anything.
+  #
+  # Asserted against a SOURCE that genuinely carries the raised value, not against whatever
+  # the source happens to hold today: a bare `grep P0,P1` on the seeded file would pass just
+  # as well if the source were never raised at all, proving nothing about the forcing.
+  _srcsev="$(sed -n 's/^  blocking_severities:[[:space:]]*"\([^"]*\)".*/\1/p' "$SRC/harness.config.yaml" | head -n1)"
+  [ "$_srcsev" = "P0,P1,P2" ] \
+    || fail "R15b: precondition — the harness source no longer raises blocking_severities (got '$_srcsev'); this case cannot prove the seed forces it back"
+  _seedsev="$(sed -n 's/^  blocking_severities:[[:space:]]*"\([^"]*\)".*/\1/p' "$_c" | head -n1)"
+  [ "$_seedsev" = "P0,P1" ] \
+    || fail "R15b: a fresh seed inherited the harness's own raised blocking_severities (got '$_seedsev', want 'P0,P1')"
+  # ...and the harness's own rationale for raising it must not survive into the target, where
+  # it would sit above a value it contradicts.
+  ! grep -qF "P2 BLOCKS HERE" "$_c" \
+    || fail "R15b: the harness's own blocking_severities rationale leaked into the seeded config"
+  pass "R15b fresh install forces blocking_severities back to the shipped default"
 }
 
 test_pr_loop_block_migrated_idempotent() {            # R16
