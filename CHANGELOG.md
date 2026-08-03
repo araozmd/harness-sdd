@@ -32,8 +32,19 @@ The seed also drops the run of comment lines explaining a value it overwrites, s
 never reads a rationale sitting above a value that contradicts it. Comments on keys the seed
 keeps — including a target's own hand-written ones — survive untouched.
 
+The `/sdd-pr-loop` runbook now **reads** the key instead of asserting `P2`/`nit` never block.
+That was the one blocking finding on this change's own review, and it was the sharpest defect
+it could have shipped: classification is performed by the agent following that prose, so a
+raised config plus a runbook saying P2 is excluded means P2s never reach `blocking.json`, the
+gate reads the empty set as "reviewed, nothing blocking", and auto-merge proceeds over
+findings the repo just declared blocking — the threshold would have looked raised and behaved
+unchanged. Both maintained copies (the canonical body and the checked-in source-layout copy)
+were updated; the historical passages about PR #86/#89 stay as written, being accurate
+past-tense facts rather than instructions.
+
 Pinned by `test_pr_loop.sh` R15b, which asserts the **source** genuinely carries the raised
-value before checking the seeded one. Without that precondition the assertion would pass
+value before checking the seeded one, and R49b, which asserts both runbook copies read the key
+rather than hardcoding the answer. Without that precondition the assertion would pass
 just as well against a source that was never raised, proving nothing about the forcing.
 
 ## [0.51.1] — 2026-08-02

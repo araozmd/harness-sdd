@@ -1721,6 +1721,26 @@ test_source_layout_glue_present() {                   # R49
   grep -qF '.harness/agents/pr-fixer.md' "$SRC/.claude/agents/pr-fixer.md" \
     && fail "R49: source-layout shim resolves against .harness/ instead of the repo root"
   pass "R49 source-layout .claude/ glue exists and resolves from the repository root"
+
+  # R49b: the runbook must derive the non-blocking set FROM pr_loop.blocking_severities,
+  # never hardcode it. Classification and filtering are performed by the agent following
+  # this prose, so a runbook asserting "P2 never blocks" silently defeats a repo that
+  # configured P0,P1,P2 — the agent would omit real blocking findings from blocking.json
+  # and the gate could authorize a merge over them. Both copies are checked: the canonical
+  # body inside harness-install.sh and the checked-in source-layout copy, because the two
+  # are maintained separately and only one drifting is enough to reintroduce the defect.
+  for _rb in "$SRC/harness-install.sh" "$SRC/.claude/commands/sdd-pr-loop.md"; do
+    _n="$(basename "$_rb")"
+    grep -qF "P2\`/\`nit\` never block" "$_rb" \
+      && fail "R49b: $_n hardcodes that P2 never blocks, defeating a configured P0,P1,P2 threshold"
+    grep -qF "P2 and nit are excluded" "$_rb" \
+      && fail "R49b: $_n states P2 is excluded as a fact rather than reading blocking_severities"
+    grep -qF "read it, do not assume it" "$_rb" \
+      || fail "R49b: $_n does not tell the agent to read pr_loop.blocking_severities"
+    grep -qF "per-repo fact, so read the key" "$_rb" \
+      || fail "R49b: $_n does not scope the do-not-fix rule to the configured severities"
+  done
+  pass "R49b the runbook reads blocking_severities instead of hardcoding P2 as non-blocking"
 }
 
 test_docs_document_pr_loop() {                        # R50
