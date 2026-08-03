@@ -4,6 +4,49 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.52.0] — 2026-08-03
+
+### Added — ✨ the cascade audits whether the upgrade was landed (E24-F02)
+
+`harness-install.sh --umbrella` printed `✅ umbrella cascade complete` after it had *written*
+files, with no opinion about whether any of it was committed. The `~/repos/viernes` cascade
+produced exactly that green finish and five children each carrying 26–29 uncommitted files.
+
+E24-F01 made the consumer notice; this closes the producing side, so the guard is a backstop
+rather than the normal way anyone finds out. One operator upgrading N repos in one command is
+precisely where N-way manual follow-up gets skipped.
+
+The cascade now ends with a per-target audit and exits **3** when anything is unlanded —
+deliberately not the generic failure code `1`, because "the install broke" and "the install
+succeeded and is unlanded" are different outcomes and conflating them loses the only
+information that makes the code actionable. A target that is not a git work tree is reported
+and never counted. `--dry-run` skips the audit, as it writes nothing.
+
+**It reports; it never commits.** Committing into N repos the operator did not ask you to
+commit into is a far larger claim on their working tree, and the constraints it would have to
+honour — never stage unrelated work, never touch a foreign branch — are the accidents this
+epic exists to prevent. The brief left the commit path open and asked for the smaller change
+that fully fixes the problem; report-and-exit does, because the defect was being *told* the
+upgrade was complete when it was not.
+
+### Changed — ♻️ one definition of "what the harness owns"
+
+The path set the drift guard checks moved out of `init.sh` into **`tools/harness-owned-paths.sh`**,
+which both `init.sh` and the new audit call. E99-F10 needed four corrections to that set in a
+single week — `.codex`/`.gemini` claimed wholesale, symlinked ledgers, non-regular ledger
+entries, wildcard basenames — and every one was a false positive that failed the *mandatory*
+gate on a file the operator owns. A second inline copy in the installer would have had to
+relearn all four.
+
+The logic is **moved, not rewritten**: the 27 existing drift-guard assertions pass unchanged,
+which is the extraction's regression contract. On top of that, R8 is *differential* — it
+perturbs a project-owned path, a body path, root glue, and a user file in the `.agents/` tree,
+and requires `init.sh` and the audit to agree on all four **and** to be right. Asserting that
+both files merely reference the helper would prove nothing about agreement.
+
+`init.sh` degrades to a warning if the helper is absent (a torn install must not halt the
+harness every session), consistent with every other ambiguous case in that guard.
+
 ## [0.51.2] — 2026-08-02
 
 ### Fixed — 🐛 a fresh seed no longer inherits the harness's own `blocking_severities` (E99)

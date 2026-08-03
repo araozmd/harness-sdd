@@ -593,4 +593,31 @@ cascade "$AU/u4"                       # second run: install is idempotent, audi
   || fail "R9: the audit touched the target's git index"
 pass "the audit never modifies a target's git state (R9) [R9_audit_is_read_only]"
 
+# ── R2: an ADDED body file is caught even when git is configured to hide untracked ─────
+# R2_added_file_caught_under_hidden_untracked
+# An upgrade that ADDS a harness file leaves it untracked, and `status.showUntrackedFiles=no`
+# in a repo or global gitconfig suppresses untracked files entirely — so without an explicit
+# -uall the audit reports a fully committed target while an unlanded file sits in it. That is
+# the same silent false-clean the whole epic exists to end, and the generic "fresh cascade is
+# unlanded" cases cannot detect it (there, `?? .harness/` shows either way).
+mk_umb "$AU/u5" child-f
+cascade "$AU/u5"
+land "$AU/u5/child-f"
+git -C "$AU/u5/child-f" config status.showUntrackedFiles no
+# The added file goes in `.claude/commands/`, NOT `.harness/agents/`: install_one PRUNES
+# unknown files from the body directories, so a stray file there does not survive the
+# re-install this case performs — the fixture would silently stop reproducing anything. The
+# root generated-glue dirs are not pruned, and are equally harness-owned.
+printf '# added by an upgrade, never committed\n' > "$AU/u5/child-f/.claude/commands/added-command.md"
+# Preconditions: the target is otherwise clean, and the added file really is invisible
+# without -uall — otherwise this case cannot discriminate.
+[ -z "$(git -C "$AU/u5/child-f" status --porcelain -- .claude/)" ] \
+  || fail "R2-uall: fixture precondition broken — showUntrackedFiles=no did not hide the added file"
+[ -n "$(git -C "$AU/u5/child-f" status --porcelain -uall -- .claude/)" ] \
+  || fail "R2-uall: fixture precondition broken — even -uall does not see the added file"
+cascade "$AU/u5"
+[ "$AU_RC" = "3" ] \
+  || fail "R2-uall: an ADDED, uncommitted body file was hidden by status.showUntrackedFiles=no — the audit needs -uall (rc=$AU_RC): $AU_OUT"
+pass "an added body file is caught under status.showUntrackedFiles=no (R2) [R2_added_file_caught_under_hidden_untracked]"
+
 echo "All umbrella tests passed."
