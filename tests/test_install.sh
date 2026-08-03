@@ -978,6 +978,46 @@ grep -qF '.harness/AGENTS.md' "$TAG/GEMINI.md"       || fail "R1: antigravity-on
 rm -rf "$TAG"
 pass "--agents=antigravity writes GEMINI.md entrypoint (R1, Codex r1 P2)"
 
+# antigravity_only_installs_shared_units (E99-F09 R1/R2/R3, ADR-0003): Antigravity
+# discovers `.agents/skills/<name>/SKILL.md` with name+description frontmatter, and the
+# unit the harness already generates satisfies that contract — so an antigravity-only
+# target gets the SAME unit Codex gets, byte for byte, policy companion included.
+TAS="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+TCS_REF="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CODEX_HOME="$TAS/ch" sh "$SRC/harness-install.sh" --agents=antigravity "$TAS" >/dev/null \
+  || fail "R1: --agents=antigravity exited non-zero"
+CODEX_HOME="$TCS_REF/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCS_REF" >/dev/null \
+  || fail "R2 reference install (--agents=codex) exited non-zero"
+for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel; do
+  [ -f "$TAS/.agents/skills/$_c/SKILL.md" ] \
+    || fail "R1: antigravity-only install did not write the shared skill unit $_c"
+  # Antigravity's documented discovery contract: BOTH frontmatter fields, inside the
+  # leading `---` block. A body that merely contains the words elsewhere is not a skill.
+  sed -n '1,4p' "$TAS/.agents/skills/$_c/SKILL.md" | grep -qx -- '---' \
+    || fail "R1: shared skill unit $_c has no leading frontmatter fence"
+  sed -n '1,4p' "$TAS/.agents/skills/$_c/SKILL.md" | grep -q "^name: $_c\$" \
+    || fail "R1: shared skill unit $_c has no matching name: field"
+  sed -n '1,4p' "$TAS/.agents/skills/$_c/SKILL.md" | grep -q '^description: .' \
+    || fail "R1: shared skill unit $_c has no non-empty description: field"
+  # R3: the explicit-only policy is written even though codex is NOT selected — Codex
+  # discovers the directory itself, so a unit without it is implicitly invocable.
+  [ -f "$TAS/.agents/skills/$_c/agents/openai.yaml" ] \
+    || fail "R3: antigravity-only install omitted the explicit-only policy companion for $_c"
+  # R2: three separate installs, compared across runs. Regenerating a reference in-process
+  # would compare the generator with itself and pass even if nothing was installed.
+  cmp -s "$TAS/.agents/skills/$_c/SKILL.md" "$TCS_REF/.agents/skills/$_c/SKILL.md" \
+    || fail "R2: shared unit $_c differs between an antigravity-only and a codex-only install"
+  cmp -s "$TAS/.agents/skills/$_c/agents/openai.yaml" "$TCS_REF/.agents/skills/$_c/agents/openai.yaml" \
+    || fail "R2: policy companion $_c differs between an antigravity-only and a codex-only install"
+done
+TBS="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CODEX_HOME="$TBS/ch" sh "$SRC/harness-install.sh" --agents=antigravity,codex "$TBS" >/dev/null \
+  || fail "R2 both-selected install exited non-zero"
+cmp -s "$TAS/.agents/skills/sdd-next/SKILL.md" "$TBS/.agents/skills/sdd-next/SKILL.md" \
+  || fail "R2: selecting BOTH claimants produced a different shared unit"
+rm -rf "$TAS" "$TCS_REF" "$TBS"
+pass "an antigravity-only install writes the same shared skill units, policy included (R1, R2, R3)"
+
 # codex_only_stamps_project_skills: --agents=codex writes repository-local skills with
 # deterministic metadata wrapped around the canonical command bodies. It never creates
 # the deprecated machine-global prompt surface.
@@ -997,8 +1037,16 @@ for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-lo
     || fail "codex: $_c metadata has no policy block"
   grep -qx '  allow_implicit_invocation: false' "$_policy" \
     || fail "codex: $_c is not explicit-invocation-only"
-  grep -qF "all text accompanying the explicit \`\$$_c\` mention" "$_skill" \
-    || fail "codex: $_c does not map invocation text to the canonical argument term"
+  # The unit is shared, so the adapter must bind arguments for BOTH invocation spellings:
+  # Codex types `$sdd-next`, Antigravity types `/sdd-next` (E07-F01 spec → Commands).
+  # Naming only one spelling leaves the other's arguments unbound — the workflow then runs
+  # without the target the user asked for. (Codex r1 P2 #3705086021.)
+  _adapter="$(grep -F 'as the value of `$ARGUMENTS`' "$_skill")"
+  [ -n "$_adapter" ] || fail "codex: $_c has no adapter line binding \$ARGUMENTS"
+  printf '%s' "$_adapter" | grep -qF "\`\$$_c\`" \
+    || fail "codex: $_c adapter does not bind the \$$_c (Codex) invocation spelling"
+  printf '%s' "$_adapter" | grep -qF "\`/$_c\`" \
+    || fail "codex: $_c adapter does not bind the /$_c (Antigravity) invocation spelling"
   grep -qF 'as the value of `$ARGUMENTS`' "$_skill" \
     || fail "codex: $_c does not define the canonical \$ARGUMENTS mapping"
 done
@@ -1076,30 +1124,131 @@ rm -rf "$TCS"
 pass "selected Codex skill units preserve foreign bytes and update/reclaim only through last-written stamps"
 
 # test_sdd_fix_parallel_registry_cleanup (covered across each deselection block below)
-# codex_deselect_reclaims_pristine (§7): re-run dropping codex removes byte-pristine
-# skills and warns; a user-EDITED skill and Antigravity/user sibling trees survive.
+# codex_deselect_keeps_shared_unit (E99-F09 R4, §7 `codex)`): dropping codex while
+# ANTIGRAVITY IS STILL SELECTED must leave the skill units alone.
+#
+# THIS BLOCK'S VERDICT WAS DELIBERATELY INVERTED by E99-F09 (ADR-0003). It previously
+# asserted the units were REMOVED here, which was correct while `.agents/skills/` was
+# Codex's alone. It is now ONE SHARED UNIT PER COMMAND claimed by {codex, antigravity},
+# so removing it on codex-deselect deletes Antigravity's live command glue — the exact
+# data-loss case that parked PR #87. Do not "restore" the old assertions; the
+# last-claimant reclaim is covered by its own block below.
 TCD="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 CH="$TCD/ch"
 CODEX_HOME="$CH" sh "$SRC/harness-install.sh" --agents=antigravity,codex "$TCD" >/dev/null || fail "codex deselect setup failed"
+# Fixture preconditions, asserted: "still present afterwards" proves nothing about a
+# reclaim if the install never wrote the unit — and neither do the stamps.
 [ -f "$TCD/.agents/skills/sdd-next/SKILL.md" ] || fail "codex deselect setup: skills not stamped"
+[ -f "$TCD/.agents/skills/sdd-next/agents/openai.yaml" ] || fail "codex deselect setup: policy companion not stamped"
+[ -f "$TCD/.harness/.codex-skills/sdd-next/SKILL.md" ] || fail "codex deselect setup: ownership stamp missing"
+cp "$TCD/.agents/skills/sdd-next/SKILL.md" "$TCD/pre-deselect-skill.ref"
+cp "$TCD/.harness/.codex-skills/sdd-next/SKILL.md" "$TCD/pre-deselect-stamp.ref"
 printf '\n# user edit\n' >> "$TCD/.agents/skills/sdd-fix/SKILL.md"
 printf 'mine\n' > "$TCD/.agents/user-file.txt"
 _cwarn="$(CODEX_HOME="$CH" sh "$SRC/harness-install.sh" --agents=antigravity "$TCD" 2>&1 >/dev/null)" \
   || fail "codex deselect re-run exited non-zero"
-[ -f "$TCD/.agents/skills/sdd-next/SKILL.md" ] && fail "R3: deselected pristine Codex skill was not removed"
-[ -f "$TCD/.agents/skills/sdd-fix-parallel/SKILL.md" ] && fail "R3: deselected pristine parallel skill was not removed"
-[ -f "$TCD/.agents/skills/sdd-pr-loop/SKILL.md" ] && fail "R3: deselected pristine pr-loop skill was not removed"
-[ -f "$TCD/.agents/skills/sdd-fix/SKILL.md" ] || fail "R3: user-edited Codex skill must be preserved on deselect"
-grep -qF '# user edit' "$TCD/.agents/skills/sdd-fix/SKILL.md" || fail "R3: edited skill content was lost"
+# Compare against bytes captured BEFORE the run, not a freshly generated reference: §5
+# install runs before §7 reclaim, so a fresh reference also matches a unit that was
+# deleted and rewritten.
+cmp -s "$TCD/pre-deselect-skill.ref" "$TCD/.agents/skills/sdd-next/SKILL.md" \
+  || fail "R4: codex deselect changed a shared skill unit Antigravity still claims"
+[ -f "$TCD/.agents/skills/sdd-fix-parallel/SKILL.md" ] || fail "R4: codex deselect removed a shared parallel skill unit"
+[ -f "$TCD/.agents/skills/sdd-pr-loop/SKILL.md" ] || fail "R4: codex deselect removed the shared pr-loop skill unit"
+[ -f "$TCD/.agents/skills/sdd-next/agents/openai.yaml" ] \
+  || fail "R4: codex deselect stripped the explicit-only companion from a surviving shared unit"
+# The stamps must survive too: a reclaim that spared the live files but wiped the stamps
+# leaves every unit unprovable — read as "foreign or edited" and unreclaimable forever.
+cmp -s "$TCD/pre-deselect-stamp.ref" "$TCD/.harness/.codex-skills/sdd-next/SKILL.md" \
+  || fail "R4: codex deselect discarded the ownership stamp of a surviving shared unit"
+[ -f "$TCD/.agents/skills/sdd-fix/SKILL.md" ] || fail "R4: user-edited skill must be preserved on deselect"
+grep -qF '# user edit' "$TCD/.agents/skills/sdd-fix/SKILL.md" || fail "R4: edited skill content was lost"
 [ -f "$TCD/.agents/skills/sdd-fix/agents/openai.yaml" ] \
-  || fail "R3: edited skill unit lost its explicit-only companion on deselect"
+  || fail "R4: edited skill unit lost its explicit-only companion on deselect"
 [ -f "$TCD/.agents/rules/harness.md" ] || fail "R3/R9: Codex deselection damaged Antigravity rules"
 [ -f "$TCD/.agents/workflows/sdd-next.md" ] || fail "R3/R9: Codex deselection damaged Antigravity workflows"
 [ -f "$TCD/.agents/user-file.txt" ] || fail "R3: Codex deselection deleted a user sibling"
 printf '%s' "$_cwarn" | grep -qiF 'codex' || fail "R13: removal of codex glue was not warned about"
 grep -qx codex "$TCD/.harness/.agents" && fail "R8: codex must be dropped from .harness/.agents after deselect"
 rm -rf "$TCD"
-pass "codex deselect reclaims pristine project skills and preserves edited/sibling files"
+pass "codex deselect keeps the shared skill unit Antigravity still claims (R4)"
+
+# antigravity_deselect_keeps_shared_unit (E99-F09 R4, §7 `antigravity)`): the mirror
+# direction. The two reclaim paths are DIFFERENT CODE, so proving one says nothing about
+# the other — and the antigravity branch is the one that newly learned to touch skills.
+TAD="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CODEX_HOME="$TAD/ch" sh "$SRC/harness-install.sh" --agents=antigravity,codex "$TAD" >/dev/null \
+  || fail "antigravity deselect setup failed"
+[ -f "$TAD/.agents/skills/sdd-next/SKILL.md" ] || fail "antigravity deselect setup: skills not stamped"
+[ -f "$TAD/.harness/.codex-skills/sdd-next/SKILL.md" ] || fail "antigravity deselect setup: ownership stamp missing"
+cp "$TAD/.agents/skills/sdd-next/SKILL.md" "$TAD/pre.ref"
+CODEX_HOME="$TAD/ch" sh "$SRC/harness-install.sh" --agents=codex "$TAD" >/dev/null \
+  || fail "antigravity deselect re-run exited non-zero"
+cmp -s "$TAD/pre.ref" "$TAD/.agents/skills/sdd-next/SKILL.md" \
+  || fail "R4: antigravity deselect changed a shared skill unit Codex still claims"
+[ -f "$TAD/.agents/skills/sdd-next/agents/openai.yaml" ] \
+  || fail "R4: antigravity deselect removed the policy companion of a unit Codex still claims"
+[ -f "$TAD/.harness/.codex-skills/sdd-next/SKILL.md" ] \
+  || fail "R4: antigravity deselect discarded the ownership stamp of a surviving shared unit"
+[ -f "$TAD/.agents/rules/harness.md" ] && fail "R4 setup check: antigravity glue was not actually deselected"
+rm -rf "$TAD"
+pass "antigravity deselect keeps the shared skill unit Codex still claims (R4)"
+
+# last_claimant_reclaims_unit (E99-F09 R5): with NO claiming front-end left, the whole
+# unit goes. Paired with the two R4 blocks on the same fixture shape, so "removed" is
+# attributable to the deselect rather than to an install that never wrote anything.
+TLC="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CODEX_HOME="$TLC/ch" sh "$SRC/harness-install.sh" --agents=antigravity,codex "$TLC" >/dev/null \
+  || fail "last-claimant setup failed"
+[ -f "$TLC/.agents/skills/sdd-next/SKILL.md" ] || fail "last-claimant setup: skills not stamped"
+[ -d "$TLC/.harness/.codex-skills" ] || fail "last-claimant setup: ownership stamps missing"
+CODEX_HOME="$TLC/ch" sh "$SRC/harness-install.sh" --agents=claude "$TLC" >/dev/null \
+  || fail "last-claimant deselect exited non-zero"
+[ -e "$TLC/.agents/skills/sdd-next/SKILL.md" ] && fail "R5: last-claimant deselect left a pristine shared unit"
+[ -e "$TLC/.agents/skills/sdd-pr-loop/SKILL.md" ] && fail "R5: last-claimant deselect left the pristine pr-loop unit"
+[ -e "$TLC/.agents/skills" ] && fail "R5: last-claimant deselect did not prune the emptied skills dir"
+[ -e "$TLC/.harness/.codex-skills" ] && fail "R5: last-claimant deselect left stale ownership stamps"
+rm -rf "$TLC"
+pass "deselecting the last claiming front-end reclaims the whole shared unit (R5)"
+
+# antigravity_only_last_claimant (E99-F09 R5): an antigravity-ONLY target reclaims its
+# units on deselect. Without this the §7 `antigravity)` reclaim could be absent entirely
+# and the R5 block above would still pass through the `codex)` branch.
+TAO="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CODEX_HOME="$TAO/ch" sh "$SRC/harness-install.sh" --agents=antigravity "$TAO" >/dev/null \
+  || fail "antigravity-only reclaim setup failed"
+[ -f "$TAO/.agents/skills/sdd-next/SKILL.md" ] || fail "antigravity-only reclaim setup: unit not stamped"
+CODEX_HOME="$TAO/ch" sh "$SRC/harness-install.sh" --agents=claude "$TAO" >/dev/null \
+  || fail "antigravity-only reclaim exited non-zero"
+[ -e "$TAO/.agents/skills/sdd-next/SKILL.md" ] \
+  && fail "R5: antigravity-only deselect stranded a pristine shared unit"
+[ -e "$TAO/.harness/.codex-skills" ] && fail "R5: antigravity-only deselect left stale ownership stamps"
+rm -rf "$TAO"
+pass "an antigravity-only target reclaims its shared units on deselect (R5)"
+
+# foreign_unit_survives_antigravity_paths (E99-F09 R7): the ownership rules are unchanged,
+# but they are now reachable through the ANTIGRAVITY gate, which never exercised them
+# before. A foreign unit must survive both an antigravity-triggered install and an
+# antigravity-triggered last-claimant reclaim, bytes intact, with a warning.
+TFA="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+mkdir -p "$TFA/.agents/skills/sdd-next/agents"
+printf 'foreign antigravity-era skill\n' > "$TFA/.agents/skills/sdd-next/SKILL.md"
+cp "$TFA/.agents/skills/sdd-next/SKILL.md" "$TFA/foreign.ref"
+_fawarn="$(CODEX_HOME="$TFA/ch" sh "$SRC/harness-install.sh" --agents=antigravity "$TFA" 2>&1 >/dev/null)" \
+  || fail "foreign-unit antigravity install exited non-zero"
+cmp -s "$TFA/foreign.ref" "$TFA/.agents/skills/sdd-next/SKILL.md" \
+  || fail "R7: antigravity-triggered install overwrote a foreign skill unit"
+printf '%s\n' "$_fawarn" | grep -qF '.agents/skills/sdd-next' \
+  || fail "R7: antigravity-triggered install did not warn about the foreign skill unit"
+[ -f "$TFA/.agents/skills/sdd-new/SKILL.md" ] \
+  || fail "R7: a foreign sibling blocked the units the install DOES own"
+CODEX_HOME="$TFA/ch" sh "$SRC/harness-install.sh" --agents=claude "$TFA" >/dev/null \
+  || fail "foreign-unit antigravity reclaim exited non-zero"
+cmp -s "$TFA/foreign.ref" "$TFA/.agents/skills/sdd-next/SKILL.md" \
+  || fail "R7: antigravity-triggered reclaim deleted or altered a foreign skill unit"
+[ -e "$TFA/.agents/skills/sdd-new/SKILL.md" ] \
+  && fail "R7 control: the reclaim spared a unit it actually owned"
+rm -rf "$TFA"
+pass "a foreign skill unit survives antigravity-triggered install and reclaim (R7)"
 
 # Partial skill units on Codex deselection: a stamp-owned SKILL.md remains reclaimable
 # when its companion metadata is missing or edited. An edited, unproven companion is

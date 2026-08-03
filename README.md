@@ -90,10 +90,10 @@ approves) → `builder` → `reviewer`.
 | CLI | Entry file | Sub-agents |
 |---|---|---|
 | **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` (+ `pr-fixer`) + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-fix-parallel`, `/sdd-next`, `/sdd-pr-loop` |
-| **Codex** | `AGENTS.md` (native) | `.codex/agents/*.toml` roles + repository-local `$sdd-*` skills in `.agents/skills/` (including gated `$sdd-pr-loop`) |
+| **Codex** | `AGENTS.md` (native) | `.codex/agents/*.toml` roles + repository-local `$sdd-*` skills in `.agents/skills/` — shared with Antigravity (including gated `$sdd-pr-loop`) |
 | **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
 | **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-test-concurrency` and `/sdd-pr-loop`; `/sdd-fix-parallel` is opt-in (verified by `/sdd-test-concurrency`) |
-| **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/agents/*` personas (+ `pr-fixer`) + `.agents/workflows/*`, including `/sdd-fix-parallel` and `/sdd-pr-loop` |
+| **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/skills/sdd-*/` shared skill units (its documented discovery surface) + `.agents/agents/*` personas (+ `pr-fixer`) + `.agents/workflows/*`, including `/sdd-fix-parallel` and `/sdd-pr-loop` |
 
 The tables and workflow prose use the portable `/sdd-*` spelling; in Codex, invoke the
 repository skills as `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`,
@@ -238,7 +238,7 @@ umbrella.manifest.example.yaml   cross-repo coordinator manifest template
 umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
 .opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next, /sdd-test-concurrency); /sdd-fix-parallel is opt-in
-.agents/                     Antigravity glue + explicit-only Codex skills (.agents/skills/sdd-*/{SKILL.md,agents/openai.yaml})
+.agents/                     Antigravity glue + shared explicit-only skill units (.agents/skills/sdd-*/{SKILL.md,agents/openai.yaml})
 .codex/agents/               six Codex role TOMLs (always present when Codex is selected; model optional)
 ```
 
@@ -298,10 +298,11 @@ changed. Deselecting an agent removes only the harness-generated glue (your own
 untouched — Antigravity glue uses a freshly generated reference, while Codex skills and
 roles require their last-written ownership stamps; edited files survive).
 
-> **Codex is repository-local.** Selecting `codex` creates `$sdd-next`, `$sdd-new`,
-> `$sdd-plan`, `$sdd-drill`, `$sdd-fix`, and `$sdd-fix-parallel` as
-> `.agents/skills/<name>/SKILL.md`, plus `$sdd-pr-loop` only while its opt-in gate is
-> enabled. Each skill also carries `agents/openai.yaml`, disables implicit invocation,
+> **Skill units are repository-local and shared.** Selecting `codex` **or** `antigravity`
+> creates `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`, and
+> `$sdd-fix-parallel` as `.agents/skills/<name>/SKILL.md`, plus `$sdd-pr-loop` only while
+> its opt-in gate is enabled. Both front-ends read that surface, so one unit serves both
+> and it is reclaimed only when the last of them is deselected (ADR-0003). Each skill also carries `agents/openai.yaml`, disables implicit invocation,
 > and maps text accompanying the explicit `$skill` mention to the canonical workflow's
 > `$ARGUMENTS`. It also registers all six standard roles in `.codex/agents/`; inherited
 > or unpinned roles simply omit `model`. Last-written ownership stamps prevent selected
