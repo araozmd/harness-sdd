@@ -149,7 +149,12 @@ if [ -f "$HARNESS_DIR/.harness-version" ]; then
           # promoted to an owned pathspec — failing the mandatory gate on the operator's
           # own role file of that name. `-L` is tested first because `-f` follows symlinks.
           [ -f "$_stamp" ] || continue
-          HARNESS_GLUE+=( ".$_tool/agents/${_stamp##*/}" )
+          # `:(literal)` — a ledger basename is DATA, not a pattern. Without it a stamp
+          # named `project-*.toml` is read as an fnmatch wildcard and claims every
+          # `.codex/agents/project-*.toml`, so the operator's own `project-role.toml` fails
+          # the mandatory gate although no stamp of that name exists. Verified against git
+          # 2.55.0: the literal form matches 0 files there, the bare form matches 1.
+          HARNESS_GLUE+=( ":(literal).$_tool/agents/${_stamp##*/}" )
         done
       done
       HARNESS_OWNED=( "${HARNESS_BODY[@]}" "${HARNESS_GLUE[@]}" )
@@ -196,13 +201,17 @@ if [ -f "$HARNESS_DIR/.harness-version" ]; then
           # `opencode.json` AND dropped every `:(exclude)`, so eleven drifted files under
           # .codex/agents/ would trip the gate and then be invisible to the one command
           # offered for inspecting them.
-          # The ROOT is quoted too, not just the pathspecs: on a repo path containing
-          # whitespace an unquoted -C value reaches git as its first word only, so the one
-          # command offered for inspection exits 128 when pasted. Single-quote it and escape
-          # any embedded single quote the POSIX way ('\'').
+          # EVERY interpolated value goes through the same escaper — the root AND each
+          # pathspec. The root needs it because a repo path containing whitespace reaches
+          # git as its first word only (exit 128 when pasted). The pathspecs need it because
+          # a LEDGER-DERIVED entry carries an operator-chosen basename: a stamp named
+          # `operator's-role.toml` closed the quote early and the advertised command died
+          # with `unexpected EOF while looking for matching quote` — on the one line whose
+          # entire purpose is to be pasted. One helper, so the two cannot diverge again.
+          _shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
           DRIFT_SPEC=""
-          for _p in "${HARNESS_OWNED[@]}"; do DRIFT_SPEC="$DRIFT_SPEC '$_p'"; done
-          DRIFT_ROOT="'$(printf '%s' "$PROJECT_ROOT" | sed "s/'/'\\\\''/g")'"
+          for _p in "${HARNESS_OWNED[@]}"; do DRIFT_SPEC="$DRIFT_SPEC $(_shq "$_p")"; done
+          DRIFT_ROOT="$(_shq "$PROJECT_ROOT")"
           echo "   list them:  git -C $DRIFT_ROOT status --porcelain -uall --$DRIFT_SPEC"
           echo "   land them, or re-run with HARNESS_SKIP_DRIFT_CHECK=1 to proceed anyway."
           fail "the installed harness is not committed — $DRIFT_N harness-owned path(s) differ from what this branch records. Agents would run on a body no commit describes."

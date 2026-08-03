@@ -496,4 +496,63 @@ run_gate "$T/dirstamp"
   || fail "E99-F10/R4-regular control: a REAL stamp's role file PASSED — the fix rejected the whole ledger"
 pass "…while a real stamp beside it still does (R4 control) [R4_non_regular_ledger_entry_is_rejected]"
 
+# ── E99-F10 / R4: a ledger basename is DATA, not a git pattern ────────────────────
+# R4_ledger_basename_is_a_literal_pathspec
+# A stamp named `project-*.toml` was appended as a bare pathspec, which git reads as an
+# fnmatch wildcard — claiming every `.codex/agents/project-*.toml`, so the operator's own
+# `project-role.toml` failed the mandatory gate although no stamp of that name exists.
+mkdir -p "$T/wildcard"
+git -C "$T/wildcard" init -q .
+git -C "$T/wildcard" config user.email "test@harness.local"
+git -C "$T/wildcard" config user.name "harness test"
+CODEX_HOME="$T/wildcard/.codex-home" HOME="$T/wildcard/.home" \
+  sh "$SRC/harness-install.sh" --agents=codex "$T/wildcard" >/dev/null 2>&1 \
+  || fail "E99-F10/R4-literal: codex install exited non-zero"
+printf 'name = "ours"\n' > "$T/wildcard/.codex/agents/project-role.toml"
+: > "$T/wildcard/.harness/.model-agents/codex/project-*.toml"
+git -C "$T/wildcard" add -A
+git -C "$T/wildcard" commit -q -m "installed harness (codex), our own role, a wildcard-named stamp"
+# Preconditions: the wildcard stamp is a real regular file (so it clears the -f gate and the
+# case actually exercises pattern-vs-literal), and no stamp names the operator's file.
+[ -f "$T/wildcard/.harness/.model-agents/codex/project-*.toml" ] \
+  || fail "E99-F10/R4-literal: fixture precondition broken — the wildcard stamp is not a regular file"
+[ ! -e "$T/wildcard/.harness/.model-agents/codex/project-role.toml" ] \
+  || fail "E99-F10/R4-literal: fixture precondition broken — a stamp names the operator's file"
+printf 'name = "ours, edited"\n' > "$T/wildcard/.codex/agents/project-role.toml"
+run_gate "$T/wildcard"
+[ "$GATE_RC" = "0" ] \
+  || fail "E99-F10/R4-literal: a wildcard-named stamp claimed the operator's role file and failed the mandatory gate: $GATE_OUT"
+pass "a ledger basename is matched literally, not as a pattern (R4) [R4_ledger_basename_is_a_literal_pathspec]"
+
+# ── E99-F10 / R3: every derived pathspec is shell-escaped, not just the root ───────
+# R3_recovery_command_escapes_derived_pathspecs
+# A ledger-derived entry carries an operator-chosen basename. A stamp named
+# `operator's-role.toml` closed the quote early, so the advertised command died with
+# `unexpected EOF while looking for matching quote` — on the one line meant to be pasted.
+mkdir -p "$T/quote"
+git -C "$T/quote" init -q .
+git -C "$T/quote" config user.email "test@harness.local"
+git -C "$T/quote" config user.name "harness test"
+CODEX_HOME="$T/quote/.codex-home" HOME="$T/quote/.home" \
+  sh "$SRC/harness-install.sh" --agents=codex "$T/quote" >/dev/null 2>&1 \
+  || fail "E99-F10/R3-quote: codex install exited non-zero"
+: > "$T/quote/.harness/.model-agents/codex/operator's-role.toml"
+printf 'name = "ours"\n' > "$T/quote/.codex/agents/operator's-role.toml"
+git -C "$T/quote" add -A
+git -C "$T/quote" commit -q -m "installed harness (codex) + an apostrophe in a stamp name"
+[ -f "$T/quote/.harness/.model-agents/codex/operator's-role.toml" ] \
+  || fail "E99-F3-quote: fixture precondition broken — the apostrophe stamp is not a regular file"
+echo "# unlanded" >> "$T/quote/.harness/agents/builder.md"
+run_gate "$T/quote"
+[ "$GATE_RC" != "0" ] || fail "E99-F10/R3-quote: drift PASSED the gate: $GATE_OUT"
+RECO="$(printf '%s\n' "$GATE_OUT" | sed -n 's/^   list them:  //p')"
+[ -n "$RECO" ] || fail "E99-F10/R3-quote: no recovery command printed: $GATE_OUT"
+# The assertion is that it RUNS. String-matching would pass on a command that cannot parse.
+RECO_OUT="$(cd / && eval "$RECO" 2>&1)" && RECO_RC=0 || RECO_RC=$?
+[ "$RECO_RC" = "0" ] \
+  || fail "E99-F10/R3-quote: the printed recovery command failed to run (rc=$RECO_RC) with an apostrophe in a ledger name: $RECO_OUT"
+printf '%s' "$RECO_OUT" | grep -q "builder.md" \
+  || fail "E99-F10/R3-quote: the recovery command ran but did not list the drifted file: $RECO_OUT"
+pass "every derived pathspec is shell-escaped, so the command still runs (R3) [R3_recovery_command_escapes_derived_pathspecs]"
+
 echo "All init drift-guard tests passed."

@@ -49,7 +49,13 @@ pathspec, and failed the gate on the operator's role file of that name. The inst
 byte copies and nothing else, so `-f` rejects directory, fifo, socket and device in one test
 rather than adding another special case.
 
-Pinned by five cases in `tests/test_init_drift_guard.sh` (19 → 27 assertions), each
+Round 3 closed the remaining shape — not *which* ledger entries count, but how their names
+are **interpolated**. A basename is data: `:(literal)` stops a stamp named `project-*.toml`
+being read as an fnmatch wildcard that claims the operator's `project-role.toml`, and one
+shared shell-quoting helper now escapes the root and every pathspec alike, so a stamp named
+`operator's-role.toml` no longer produces a `list them` command that cannot parse.
+
+Pinned by seven cases in `tests/test_init_drift_guard.sh` (19 → 30 assertions), each
 asserting its own fixture preconditions. That discipline earned its keep here: the first
 draft of the SIGPIPE case used 1,200 files (~70KB), stayed under the pipe buffer, and
 **survived** the mutation that restores `head -n 10` — it was asserting nothing. It now
