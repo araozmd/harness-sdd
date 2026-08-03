@@ -4,6 +4,55 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.54.0] — 2026-08-03
+
+### Added — ✨ the thin child: an umbrella-resolved body (E24-F03)
+
+Every child in an umbrella carried a full copy of the harness body — 26–29 files per child,
+byte-identical, each able to diverge on its own and each producing its own diff on every
+upgrade.
+
+**Deleting the copy was never on the table.** The generated front-end glue resolves body
+paths inside the *child's own* `.harness/` (`opencode.json` interpolates
+`{file:./.harness/agents/<role>.md}`; the Codex role TOMLs say "Read
+`.harness/agents/<role>.md`"), so a body file can only be **redirected**, never removed —
+and a redirect only works where the consumer reads prose. `init.sh` `exec`s `tools/` and
+parses `store/`; a program cannot follow a pointer.
+
+[`ADR-0004`](specs/adr/0004-umbrella-resolved-body-via-pointer-stubs.md) therefore draws the
+tier line by **what reads the file**:
+
+- **Prose tier** — `AGENTS.md`, `agents/`, `docs/`, `specs/_templates/`, `specs/glossary.md`
+  — becomes a one-screen **pointer stub at the same path** in a child that resolves an
+  umbrella. Every path a consumer opens still exists; only the content is a redirect.
+- **Program tier** — `init.sh`, `store/`, `tools/`, and the example files an operator copies
+  from — stays a full local copy in every layout. So does all generated front-end glue.
+- **`umbrella.root`** in the child's `harness.config.yaml` records the linkage, written by
+  the cascade (`../../`). An upward filesystem search would bind a child to whatever
+  ancestor happened to match.
+
+**Standalone entry is unchanged and is the acceptance bar.** A child entered on its own —
+CI, a lone clone, a PR reviewer's checkout — runs `init.sh`, its verification gate, and its
+PR loop, because all three read the program tier. With the umbrella unreachable `init.sh`
+reports it and still exits **zero**; it is a supported state, not a broken environment.
+
+Because a stub's text depends on the umbrella path rather than the version, upgrading the
+umbrella leaves child stubs **byte-identical** — the N-identical-diffs problem this feature
+exists to solve.
+
+### Unchanged on purpose
+
+- **Single-repo installs.** No `umbrella.root` ⇒ the complete body is installed locally,
+  exactly as before. This release is additive; nothing about an existing single-repo target
+  changes.
+- **Already-installed children keep their full copy.** A cascade never silently converts
+  one — that is destructive, needs a pristine check, and is **E24-F04**. `manifest.txt`
+  records which layout a target holds, and the cascade says so when it leaves a full body
+  alone.
+- **E24-F01's drift guard and E24-F02's landing audit.** Stubs are ordinary tracked files
+  at the same pathspecs, so neither needed a line changed — asserted as a regression
+  contract, not assumed.
+
 ## [0.53.0] — 2026-08-03
 
 ### Added — ✨ Antigravity claims the shared skill unit (E99-F09)

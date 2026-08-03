@@ -77,6 +77,61 @@ audit entirely, as it writes nothing. Re-run any time to pick up newly-added chi
 idempotent and never clobbers a bootstrap-filled manifest entry. Bootstrap then fills
 each entry's `test_command`/`delegate_cmd` and the coordinator's `integration_command`.
 
+## The thin child (v0.54.0+)
+
+Every child used to carry a full copy of the harness body — 26–29 files per child,
+byte-identical, each able to diverge and each producing its own diff on every upgrade.
+
+**Deleting the copy was never available.** The generated front-end glue resolves body paths
+inside the *child's own* `.harness/` — `opencode.json` interpolates
+`{file:./.harness/agents/<role>.md}`, the Codex role TOMLs say "Read
+`.harness/agents/<role>.md`" — so a body file can only be **redirected**, never removed. And
+a redirect only works where the consumer reads prose. `init.sh` `exec`s `tools/` and parses
+`store/`; a program cannot follow a pointer.
+
+So the tier line is drawn by **what reads the file**
+([`ADR-0004`](../specs/adr/0004-umbrella-resolved-body-via-pointer-stubs.md)):
+
+| Tier | Paths | In a child of an umbrella |
+|---|---|---|
+| **Prose** — an agent reads it | `AGENTS.md`, `agents/`, `docs/`, `specs/_templates/`, `specs/glossary.md` | a one-screen **pointer stub** at the same path |
+| **Program** — `init.sh`/CI parse or exec it | `init.sh`, `store/`, `tools/`, the example files | a full **local copy**, always |
+
+Generated front-end glue (`.claude/`, `.agents/`, `.opencode/`, `.codex/`) is program tier
+and always local.
+
+The cascade records the linkage as `umbrella.root` in each child's `harness.config.yaml`
+(`../../`), written by the component that already knows the answer. An upward filesystem
+search would bind a child to whatever ancestor happens to match — in CI or a home
+directory, silently and wrongly.
+
+### Standalone entry still works — that is the acceptance bar
+
+A child entered on its own runs `init.sh`, runs its verification gate, and runs its PR
+loop, because all three read the program tier. With the umbrella unreachable `init.sh`
+says so and **still exits zero**:
+
+```
+ℹ️  umbrella at ../../ is not reachable — the prose body (agent prompts, docs) is remote
+   and unavailable here; init.sh, verification and the PR loop are unaffected
+```
+
+What degrades is only an *agent session started inside a child that has been separated
+from its umbrella*: it reads a stub naming a path it cannot open. The stub says exactly
+that, and names the recovery step, rather than dangling.
+
+### What this does and does not change
+
+- A **single-repo** install is untouched: no `umbrella.root`, so the complete body is
+  installed locally exactly as before. This is additive.
+- An **already-installed child keeps its full copy.** A cascade never silently converts
+  one — that is destructive, needs a pristine check, and is **E24-F04**. `manifest.txt`
+  records which layout a target holds, and the cascade reports when it left a full body
+  alone.
+- Upgrading the umbrella no longer rewrites the prose body in N children: a stub's text
+  depends on the umbrella path, not the version, so it is byte-identical across upgrades.
+  `init.sh`, `store/` and `tools/` are still local copies and do still change.
+
 ## Shared spec repository (opt-in)
 By default the umbrella is a throwaway parent directory — the coordinator's `.harness/`
 (specs, `state/tasks.json`, progress) then lives only on whoever ran the cascade. For a
