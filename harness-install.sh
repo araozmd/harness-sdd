@@ -2027,6 +2027,31 @@ install_one() {
     rm -rf "$_dst"
     cp -R "$_src" "$_dst"
   }
+  # stub_dir_recursive <src-dir> <body-rel-prefix> <umbrella-root> — mirror a directory as
+  # stubs, RECURSIVELY, including nested directories and dotfiles.
+  #
+  # The shape must match what `cp -R` produces on the full-copy path. An immediate-files-only
+  # loop silently drops any nested subtree a prose directory grows later — the thin child
+  # ends up missing a file the full install has, with no error anywhere. (Codex r2 P2
+  # #3705758419; reproduced with docs/nested/deep.md before fixing.)
+  #
+  # Globs, not `find | while read`: a glob is newline-safe by construction, and this repo has
+  # already been bitten by paths containing newlines. `.[!.]*` picks up dotfiles without ever
+  # matching `.` or `..`; the `-e` guard skips the pattern itself when nothing matches.
+  stub_dir_recursive() {
+    _sdr_src="$1"; _sdr_rel="$2"; _sdr_root="$3"
+    mkdir -p "$H/$_sdr_rel"
+    for _sdr_f in "$_sdr_src"/* "$_sdr_src"/.[!.]*; do
+      [ -e "$_sdr_f" ] || continue
+      _sdr_base="${_sdr_f##*/}"
+      if [ -d "$_sdr_f" ]; then
+        stub_dir_recursive "$_sdr_f" "$_sdr_rel/$_sdr_base" "$_sdr_root"
+      elif [ -f "$_sdr_f" ]; then
+        gen_body_stub "$_sdr_rel/$_sdr_base" "$_sdr_root" "$H/$_sdr_rel/$_sdr_base"
+      fi
+    done
+  }
+
   # stub_tree <relpath> <umbrella-root> — mirror one prose-tier path as pointer stubs,
   # preserving the SOURCE's shape so every path a consumer opens still exists.
   stub_tree() {
@@ -2034,11 +2059,7 @@ install_one() {
     if [ ! -e "$_st_src" ]; then die "source missing: $_st_rel"; fi
     rm -rf "$_st_dst"
     if [ -d "$_st_src" ]; then
-      mkdir -p "$_st_dst"
-      for _st_f in "$_st_src"/*; do
-        [ -f "$_st_f" ] || continue
-        gen_body_stub "$_st_rel/${_st_f##*/}" "$_st_root" "$_st_dst/${_st_f##*/}"
-      done
+      stub_dir_recursive "$_st_src" "$_st_rel" "$_st_root"
     else
       gen_body_stub "$_st_rel" "$_st_root" "$_st_dst"
     fi

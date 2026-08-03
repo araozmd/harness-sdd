@@ -950,6 +950,43 @@ cmp -s "$AU/f03-ver.ref" "$KA/.harness-version" \
   && fail "R7 control: the version stamp did NOT change — the re-run did nothing, so the stub comparison proves nothing"
 pass "R7 stubs_survive_version_bump (with a positive control on the standalone tier)"
 
+# ── R2 (shape fidelity): nested dirs and dotfiles inside a prose tier are mirrored ─────
+# The thin layout must produce the same SHAPE as `cp -R` does on the full path. An
+# immediate-files-only loop silently drops any nested subtree a prose directory grows
+# later — the child ends up missing a file the full install has, with no error anywhere.
+# Fixtures go in a PRIVATE source copy so the shared checkout is never mutated.
+# (Codex r2 P2 #3705758419.)
+SC2="$AU/f03-shape-src"
+mkdir -p "$SC2"
+for _sd in harness-install.sh VERSION AGENTS.md init.sh agents docs store tools specs \
+           harness.config.yaml umbrella.manifest.example.yaml umbrella.gitignore.example; do
+  [ -e "$SRC/$_sd" ] && cp -R "$SRC/$_sd" "$SC2/"
+done
+mkdir -p "$SC2/docs/nested/deeper"
+echo "nested body" > "$SC2/docs/nested/deep.md"
+echo "deeper body" > "$SC2/docs/nested/deeper/x.md"
+echo "hidden body" > "$SC2/agents/.hidden.md"
+mk_umb "$AU/f03c" kid-d
+AU_OUT="$(CODEX_HOME="$AU/f03c/.ch" HOME="$AU/f03c/.home" sh "$SC2/harness-install.sh" \
+  --umbrella "$AU/f03c" --agents=claude 2>&1)" || true
+KD="$AU/f03c/kid-d/.harness"
+# Precondition: this really is a thin child, or "the nested file is a stub" is vacuous.
+is_stub "$KD/AGENTS.md" || fail "R2-shape setup: the child is not thin"
+for _p in docs/nested/deep.md docs/nested/deeper/x.md agents/.hidden.md; do
+  [ -f "$KD/$_p" ] || fail "R2-shape: $_p is missing from a thin child but present in a full install"
+  is_stub "$KD/$_p" || fail "R2-shape: $_p was mirrored but is not a stub"
+done
+grep -qF '../../.harness/docs/nested/deeper/x.md' "$KD/docs/nested/deeper/x.md" \
+  || fail "R2-shape: a nested stub does not name its own resolved path"
+# The control: the SAME source, installed standalone, keeps those files as real bodies —
+# which is what makes "missing from the thin child" a divergence rather than a source quirk.
+mkdir -p "$AU/f03c-full"   # the installer requires an EXISTING target directory
+CODEX_HOME="$AU/f03c/.ch2" HOME="$AU/f03c/.home2" sh "$SC2/harness-install.sh" \
+  --agents=claude "$AU/f03c-full" >/dev/null 2>&1 || fail "R2-shape control: standalone install failed"
+grep -qF 'deeper body' "$AU/f03c-full/.harness/docs/nested/deeper/x.md" \
+  || fail "R2-shape control: the full install did not preserve the nested file either"
+pass "R2 nested dirs and dotfiles keep their shape in a thin child"
+
 # ── R9: an existing full-copy child is left alone ──────────────────────────────────────
 # Converting one is destructive, needs a pristine check, and is E24-F04 — never a side
 # effect of a routine cascade. Asserted on BYTES: a swap to stubs leaves every path present.
