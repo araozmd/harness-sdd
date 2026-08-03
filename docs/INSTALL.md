@@ -132,6 +132,16 @@ pr_loop:
   merge_strategy: "merge"        # merge | squash
 ```
 
+**The seed forces two of these back to the shipped defaults** even though it is otherwise a
+copy of the harness's own `harness.config.yaml`: `enabled` (the loop needs the Codex GitHub
+App, so defaulting it on would ship a command that can only fail its preflight) and
+`blocking_severities`. The harness repo raises the latter to `P0,P1,P2` for itself because
+it builds **gates**, where a finding tagged P2 can still mean the gate vouching for
+something it never checked, or halting all agent work on a legitimate file. That reasoning
+is a property of what that repo builds — for an ordinary product repo, blocking on P2
+spends review rounds on findings that never blocked anything. Raise it yourself if your
+project has the same shape; nothing stops you.
+
 An upgrade appends the same block byte-for-byte; an absent block (or key) behaves exactly
 as the defaults above, so an existing config that predates the block stays **off** until
 you add it. Each policy key takes a per-run env override —

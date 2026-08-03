@@ -439,15 +439,45 @@ EOF
 # same reason `test_command` is blanked on seed. The replacement line is BYTE-IDENTICAL to
 # the one migrate_config appends, which is what keeps seeded and migrated blocks convergent
 # (E18-F01 R15/R17). A no-op when the block or the key is absent — absent already means off.
+# The seeded config is a COPY of this repo's harness.config.yaml, so any pr_loop value the
+# harness sets FOR ITSELF would otherwise become every target's default. Two keys are
+# therefore forced back to the shipped defaults on seed:
+#
+#   enabled              -> false   the loop needs the Codex GitHub App; defaulting it on
+#                                   would ship a command that can only fail its preflight.
+#   blocking_severities  -> P0,P1   this repo raises it to P0,P1,P2 because it builds GATES,
+#                                   where a "P2" is the gate vouching for something it never
+#                                   checked or halting all agent work — consequences no
+#                                   application-code severity scale is calibrated for. That
+#                                   reasoning is a property of what THIS repo builds, not a
+#                                   universal default: for an ordinary product repo, blocking
+#                                   on P2 spends review rounds on findings that never blocked
+#                                   anything, which is the exact cost E21 exists to control.
+#
+# Any comment lines the harness wrote to explain its own choice are dropped with the value,
+# so a seeded target reads the shipped default and its rationale, not this repo's.
 seed_pr_loop_optin() {
   awk '
-    /^pr_loop:[[:space:]]*(#.*)?$/ { p=1; print; next }
-    p && /^[^[:space:]#]/ { p=0 }
+    function flush(  i) { for (i = 1; i <= cn; i++) print cbuf[i]; cn = 0 }
+    /^pr_loop:[[:space:]]*(#.*)?$/ { p = 1; print; next }
+    p && /^[^[:space:]#]/ { flush(); p = 0 }
+    # Buffer comment lines inside the block: a run of them immediately above a key may be
+    # explaining a value this seed is about to overwrite, and prose left standing under a
+    # replaced value is worse than no prose. Which it was is only known at the next line.
+    p && /^[[:space:]]*#/ { cbuf[++cn] = $0; next }
     p && /^[[:space:]]+enabled:/ {
+      cn = 0                                   # drop the harness'"'"'s own rationale with the value
       print "  enabled: false                 # opt-in master gate; ONLY `true` stamps /sdd-pr-loop glue"
       next
     }
+    p && /^[[:space:]]+blocking_severities:/ {
+      cn = 0
+      print "  blocking_severities: \"P0,P1\"   # comma-separated severities that block a merge"
+      next
+    }
+    p { flush(); print; next }                 # a kept key keeps its comments
     { print }
+    END { flush() }
   ' "$1" > "$1.prltmp" && mv "$1.prltmp" "$1"
 }
 
@@ -3498,8 +3528,12 @@ To re-check the round files offline at any point (no `gh`, no network), run
 `sh .harness/tools/wait-for-codex.sh evaluate "$round_dir"` — exit `0` findings,
 `3` clean, `1` pending, applying exactly the rules above.
 
-Then filter to the **blocking severities only** (`pr_loop.blocking_severities`, default
-`P0,P1`; `P2`/`nit` never block). Save into the round dir:
+Then filter to the **blocking severities only**. The set is whatever
+`pr_loop.blocking_severities` lists — **read it, do not assume it**. The shipped default is
+`P0,P1`, but a repo may raise it (a harness that ships *gates* has good reason to: there, a
+finding tagged P2 can still mean the gate vouching for something it never checked). Whatever
+is NOT in that list is non-blocking for this repo; `nit` is not in any default. Save into the
+round dir:
 
 ```
 comments.json     # all comments with a severity tag attached
@@ -3570,10 +3604,16 @@ is empty — because an empty set means two opposite things, "reviewed, nothing 
 "no review landed", and only the first may merge.
 
 **Do not fix non-blocking findings to make the PR look clean.** `blocking.json` is already
-filtered to `pr_loop.blocking_severities`; P2 and nit are excluded **by configuration, not by
-oversight**. A P2 comment sitting on a PR the gate calls `merge` is not unfinished work — it is
-work this loop was told not to do. If it deserves attention it deserves its own PR, where it
-gets reviewed on its own diff instead of extending a review that already converged.
+filtered to `pr_loop.blocking_severities`; whatever that key omits is excluded **by
+configuration, not by oversight**. A non-blocking comment sitting on a PR the gate calls
+`merge` is not unfinished work — it is work this loop was told not to do. If it deserves
+attention it deserves its own PR, where it gets reviewed on its own diff instead of extending
+a review that already converged.
+
+**Which severities those are is a per-repo fact, so read the key.** Under the default `P0,P1`
+this rule is about P2 and nit. In a repo that configures `P0,P1,P2`, P2 findings **are**
+blocking and this paragraph does not apply to them — treating them as excluded there would
+silently defeat the configured threshold and could authorize a merge over real blocking work.
 
 That instruction exists because the loop stopped honouring it. On PR #89 every round reported zero
 blocking findings and the loop still spent three rounds and three commits on P2s; on PR #86

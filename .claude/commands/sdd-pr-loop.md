@@ -313,8 +313,12 @@ To re-check the round files offline at any point (no `gh`, no network), run
 `sh tools/wait-for-codex.sh evaluate "$round_dir"` — exit `0` findings,
 `3` clean, `1` pending, applying exactly the rules above.
 
-Then filter to the **blocking severities only** (`pr_loop.blocking_severities`, default
-`P0,P1`; `P2`/`nit` never block). Save into the round dir:
+Then filter to the **blocking severities only**. The set is whatever
+`pr_loop.blocking_severities` lists — **read it, do not assume it**. The shipped default is
+`P0,P1`, but a repo may raise it (a harness that ships *gates* has good reason to: there, a
+finding tagged P2 can still mean the gate vouching for something it never checked). Whatever
+is NOT in that list is non-blocking for this repo; `nit` is not in any default. Save into the
+round dir:
 
 ```
 comments.json     # all comments with a severity tag attached
@@ -385,10 +389,17 @@ is empty — because an empty set means two opposite things, "reviewed, nothing 
 "no review landed", and only the first may merge.
 
 **Do not fix non-blocking findings to make the PR look clean.** `blocking.json` is already
-filtered to `pr_loop.blocking_severities`; P2 and nit are excluded **by configuration, not by
-oversight**. A P2 comment sitting on a PR the gate calls `merge` is not unfinished work — it is
-work this loop was told not to do. If it deserves attention it deserves its own PR, where it
-gets reviewed on its own diff instead of extending a review that already converged.
+filtered to `pr_loop.blocking_severities`; whatever that key omits is excluded **by
+configuration, not by oversight**. A non-blocking comment sitting on a PR the gate calls
+`merge` is not unfinished work — it is work this loop was told not to do. If it deserves
+attention it deserves its own PR, where it gets reviewed on its own diff instead of extending
+a review that already converged.
+
+**Which severities those are is a per-repo fact, so read the key.** Under the default `P0,P1`
+this rule is about P2 and nit. In a repo that configures `P0,P1,P2` — as this one does — P2
+findings **are** blocking and this paragraph does not apply to them; treating them as excluded
+would silently defeat the configured threshold and could authorize a merge over real blocking
+work.
 
 That instruction exists because the loop stopped honouring it. On PR #89 every round reported zero
 blocking findings and the loop still spent three rounds and three commits on P2s; on PR #86

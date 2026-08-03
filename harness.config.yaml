@@ -247,7 +247,23 @@ pr_loop:
   enabled: true                  # opt-in master gate; ONLY `true` stamps /sdd-pr-loop glue
   auto_merge: true               # merge once every gate is green and threads are Codex-only
   max_rounds: 4                  # round cap; the cap round labels the PR needs-human
-  blocking_severities: "P0,P1"   # comma-separated severities that block a merge
+  # P2 BLOCKS HERE. The shipped default is "P0,P1"; this repo raises it deliberately.
+  # Across E24-F01 (PR #98) and E99-F10 (PR #100) — 7 review rounds — every single real
+  # defect arrived tagged P2 and NOT ONE arrived as P0/P1 after the first round. Six of
+  # them let `init.sh`'s drift guard claim a path the installer does not own, failing the
+  # MANDATORY gate on an operator's own file; one made the guard print
+  # "installed harness matches the commit" over an edited body.
+  #
+  # The mismatch is a calibration one, not a judgement call. Codex severities are tuned for
+  # application code, where a wrong output is one bad response. In a GATE, a wrong output is
+  # the gate vouching for something it never checked, or halting all agent work on a
+  # legitimate file — neither is a P2 in consequence, whatever it is in form. With the
+  # default the gate said `merge` on nine findings that had to be fixed anyway, so the
+  # config and the actual review behaviour disagreed almost every round.
+  #
+  # `nit` stays non-blocking on purpose: blocking on style would recreate the round-burning
+  # this whole discipline exists to prevent.
+  blocking_severities: "P0,P1,P2"   # comma-separated severities that block a merge
   merge_strategy: "merge"        # merge | squash
 
 # Change-size discipline (E21-F01) — ADVISORY in two tiers, never a hard block.

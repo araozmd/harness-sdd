@@ -2,8 +2,12 @@
 # pr-gate.sh — given the round cache and the round budget, what is the next action? (E99)
 #
 # The pr-loop already classifies every Codex finding by severity and filters it down to
-# `blocking.json` using `pr_loop.blocking_severities` (default P0,P1 — P2 and nit NEVER
-# block). That classification was correct. What was missing is that the ACTION taken on
+# `blocking.json` using `pr_loop.blocking_severities`. WHICH severities those are is a
+# per-repo configuration fact, not a constant: the shipped default is P0,P1, and a repo that
+# ships GATES may legitimately raise it (this harness sets P0,P1,P2 for itself, because a
+# finding tagged P2 there can still mean the gate vouching for something it never checked).
+# This tool never re-derives that set — it consumes the already-filtered file. That
+# classification was correct. What was missing is that the ACTION taken on
 # the result was left to the driving agent's prose reading of the runbook, and the agent
 # drifted: on PR #89 every round reported zero blocking findings and the loop still spent
 # three rounds and three commits "fixing" P2s, and on PR #86 rounds 6-8 were clean and the
@@ -21,8 +25,10 @@
 #
 # Verdicts (printed on stdout, one word) and exit codes:
 #   0  merge        zero blocking findings — STOP. Do not open another round, do not fix
-#                   non-blocking findings. (Remaining P2/nit comments are advisory: they may
-#                   be answered in a LATER PR, never by extending this loop.)
+#                   non-blocking findings. (Whatever severities `blocking_severities` omits
+#                   are advisory: they may be answered in a LATER PR, never by extending this
+#                   loop. Under the default that means P2 and nit; read the key, do not
+#                   assume it.)
 #   6  fix          blocking findings remain and there is budget — fix them per-comment
 #   7  escalate     blocking findings remain and this is the last productive round —
 #                   one combined pass (the `max_rounds - 1` behavior)
