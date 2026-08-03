@@ -492,4 +492,105 @@ grep -q "Umbrella mode" "$SRC/agents/orchestrator.md" \
   || fail "orchestrator.md missing additive 'Umbrella mode' section (R9-R17)"
 pass "orchestrator.md has additive Umbrella mode loop (R9-R17)"
 
+# ══ E24-F02: the landing audit ═════════════════════════════════════════════════════════
+# The cascade used to print its green banner after WRITING files, with no opinion about
+# whether any of it was committed. These cases are BEHAVIORAL: they run a real cascade into
+# real git children and read the exit code.
+
+AU="$(mktemp -d 2>/dev/null || mktemp -d -t harness-audit)"
+trap 'rm -rf "$AU"' EXIT
+
+# mk_umb <dir> <child>... — an umbrella with git children, each with one commit.
+mk_umb() {
+  _u="$1"; shift
+  mkdir -p "$_u"
+  for _ch in "$@"; do
+    mkdir -p "$_u/$_ch"
+    git -C "$_u/$_ch" init -q .
+    git -C "$_u/$_ch" config user.email "test@harness.local"
+    git -C "$_u/$_ch" config user.name "harness test"
+    echo seed > "$_u/$_ch/README.md"
+    git -C "$_u/$_ch" add -A
+    git -C "$_u/$_ch" commit -q -m init
+  done
+}
+cascade() {  # cascade <umbrella> [extra args...] -> AU_OUT / AU_RC
+  _u="$1"; shift
+  AU_OUT="$(CODEX_HOME="$_u/.ch" HOME="$_u/.home" sh "$SRC/harness-install.sh" --umbrella "$_u" --agents=claude "$@" 2>&1)" && AU_RC=0 || AU_RC=$?
+}
+land() { git -C "$1" add -A && git -C "$1" commit -q -m "land the harness"; }
+
+# ── R1/R2/R3/R4: an unlanded cascade is audited, named, counted, and exits 3 ────────────
+# R1_audit_covers_all_targets / R2_unlanded_exits_nonzero / R3_unlanded_code_is_distinct /
+# R4_summary_names_and_counts
+mk_umb "$AU/u1" child-a child-b
+cascade "$AU/u1"
+[ "$AU_RC" = "3" ] \
+  || fail "R2/R3: an unlanded cascade exited $AU_RC, want 3 (distinct from the generic failure code 1)"
+printf '%s' "$AU_OUT" | grep -q "landing audit" || fail "R1: no landing audit ran: $AU_OUT"
+for _c in child-a child-b; do
+  printf '%s' "$AU_OUT" | grep -qE "unlanded +$_c +[0-9]+ harness-owned path" \
+    || fail "R4: the summary does not name $_c with a drifted-path count: $AU_OUT"
+done
+pass "an unlanded cascade names every child with a count and exits 3 (R1-R4) [R1_audit_covers_all_targets/R2_unlanded_exits_nonzero/R3_unlanded_code_is_distinct/R4_summary_names_and_counts]"
+
+# ── R6: committing the harness makes the same cascade pass ─────────────────────────────
+# R6_all_landed_exits_zero — paired with R2 above ON THE SAME FIXTURE, so "exit 0" cannot be
+# reached by an audit that simply never runs.
+land "$AU/u1/child-a"; land "$AU/u1/child-b"
+cascade "$AU/u1"
+[ "$AU_RC" = "0" ] || fail "R6: a fully landed cascade exited $AU_RC, want 0: $AU_OUT"
+printf '%s' "$AU_OUT" | grep -q "every target committed" \
+  || fail "R6: no confirming line on a fully landed cascade: $AU_OUT"
+printf '%s' "$AU_OUT" | grep -qE "landed +child-a" \
+  || fail "R6: child-a not reported as landed: $AU_OUT"
+pass "a fully landed cascade prints the confirming line and exits 0 (R6) [R6_all_landed_exits_zero]"
+
+# ── R5: a non-git target is reported, never counted as unlanded ─────────────────────────
+# R5_non_git_reported_not_failed — the umbrella ROOT is non-git by default, which is exactly
+# this case. Control: a git child in the SAME cascade is still audited and still fails, so a
+# pass here cannot come from an audit that skips everything.
+mk_umb "$AU/u2" child-c
+cascade "$AU/u2"
+printf '%s' "$AU_OUT" | grep -qE "no git +\(coordinator\)" \
+  || fail "R5: the non-git umbrella root was not reported as 'no git': $AU_OUT"
+[ "$AU_RC" = "3" ] || fail "R5 control: the unlanded git child did not fail the cascade (rc=$AU_RC)"
+land "$AU/u2/child-c"
+cascade "$AU/u2"
+[ "$AU_RC" = "0" ] \
+  || fail "R5: the non-git coordinator was counted as unlanded — a non-git target cannot be unlanded (rc=$AU_RC): $AU_OUT"
+pass "a non-git target is reported and never counted as unlanded (R5) [R5_non_git_reported_not_failed]"
+
+# ── R7: --dry-run writes nothing and never audits ───────────────────────────────────────
+# R7_dry_run_skips_audit — control: the same umbrella WITHOUT --dry-run does audit and exits 3.
+mk_umb "$AU/u3" child-d
+cascade "$AU/u3" --dry-run
+[ "$AU_RC" = "0" ] || fail "R7: --dry-run exited $AU_RC, want 0: $AU_OUT"
+printf '%s' "$AU_OUT" | grep -q "landing audit" \
+  && fail "R7: --dry-run ran the landing audit: $AU_OUT"
+[ -d "$AU/u3/child-d/.harness" ] \
+  && fail "R7: --dry-run wrote .harness/ into a child"
+cascade "$AU/u3"
+[ "$AU_RC" = "3" ] \
+  || fail "R7 control: the same umbrella without --dry-run did not audit and fail (rc=$AU_RC)"
+pass "--dry-run writes nothing and skips the audit (R7) [R7_dry_run_skips_audit]"
+
+# ── R9: the audit never modifies a target's git state ───────────────────────────────────
+# R9_audit_is_read_only — HEAD, the full unfiltered porcelain, and the index mtime must all
+# be unchanged. Asserting "no new commit" alone would pass on an audit that staged without
+# committing, which is exactly the accident this epic exists to prevent.
+mk_umb "$AU/u4" child-e
+cascade "$AU/u4"                       # first run installs (and reports unlanded)
+_head_before="$(git -C "$AU/u4/child-e" rev-parse HEAD)"
+_status_before="$(git -C "$AU/u4/child-e" status --porcelain)"
+_idx_before="$(ls -l "$AU/u4/child-e/.git/index" 2>/dev/null || echo none)"
+cascade "$AU/u4"                       # second run: install is idempotent, audit runs again
+[ "$(git -C "$AU/u4/child-e" rev-parse HEAD)" = "$_head_before" ] \
+  || fail "R9: the audit created a commit in the target"
+[ "$(git -C "$AU/u4/child-e" status --porcelain)" = "$_status_before" ] \
+  || fail "R9: the audit changed the target's working tree or index"
+[ "$(ls -l "$AU/u4/child-e/.git/index" 2>/dev/null || echo none)" = "$_idx_before" ] \
+  || fail "R9: the audit touched the target's git index"
+pass "the audit never modifies a target's git state (R9) [R9_audit_is_read_only]"
+
 echo "All umbrella tests passed."

@@ -98,7 +98,7 @@ being read as an fnmatch wildcard that claims the operator's `project-role.toml`
 shared shell-quoting helper now escapes the root and every pathspec alike, so a stamp named
 `operator's-role.toml` no longer produces a `list them` command that cannot parse.
 
-Pinned by seven cases in `tests/test_init_drift_guard.sh` (19 → 30 assertions), each
+Pinned by seven cases in `tests/test_init_drift_guard.sh` (18 → 27 assertions), each
 asserting its own fixture preconditions. That discipline earned its keep here: the first
 draft of the SIGPIPE case used 1,200 files (~70KB), stayed under the pipe buffer, and
 **survived** the mutation that restores `head -n 10` — it was asserting nothing. It now

@@ -5120,6 +5120,87 @@ if [ "$SHARED_REPO" = 1 ]; then
   echo "   shared spec repo: $UMB tracks .harness/ + umbrella docs; product repos git-ignored."
 fi
 
+# (e) landing audit (E24-F02) — "complete" must mean STATE REACHED, not files written.
+#
+# The cascade used to print its green banner after WRITING files, with no opinion about
+# whether any of it was committed. A real five-child cascade produced exactly that banner
+# and left 26-29 uncommitted files in every child, indefinitely: agents there then read
+# agent prompts no commit describes, and three children ran the change-size classifier
+# against a committed config with no change_size block while migrate_config had already
+# appended it on disk. Nothing failed. That is the defect.
+#
+# E24-F01 made the CONSUMER notice (init.sh refuses to run on an unlanded harness). This is
+# the producing side, so the guard is a backstop rather than the normal way anyone finds out
+# — one operator upgrading N repos in one command is exactly where N-way manual follow-up
+# gets skipped.
+#
+# It REPORTS; it never commits. Committing into N repos the operator did not ask you to
+# commit into is a far larger claim on their working tree, and the constraints it would have
+# to honour (never stage unrelated work, never touch a foreign branch) are the accidents this
+# whole epic exists to prevent.
+echo "── landing audit ──"
+
+# audit_one <target-dir> <label> — print this target's line; echo "unlanded" on stdout's
+# LAST line only when it is. Kept as a function so the pathspec list can be expanded through
+# positional parameters inside a subshell: `git status` has no --pathspec-from-file, and the
+# specs carry `:(exclude)` / `:(glob)` / `:(literal)` magic plus a target path that may
+# contain spaces, so neither word-splitting nor xargs is safe here.
+audit_one() {
+  _t="$1"; _label="$2"
+  if ! git -C "$_t" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf '   no git    %-26s (not a work tree — cannot verify)\n' "$_label"
+    return 0
+  fi
+  _spec="$("$SRC/tools/harness-owned-paths.sh" all "$_t/.harness" 2>/dev/null || true)"
+  if [ -z "$_spec" ]; then
+    printf '   no spec   %-26s (ownership helper unavailable — cannot verify)\n' "$_label"
+    return 0
+  fi
+  # -uall for the reason E99-F10 established: an upgrade that ADDS a body file leaves it
+  # untracked, and status.showUntrackedFiles=no would hide exactly the divergence being audited.
+  # rev-parse + status only — nothing that touches the index, a ref, or the working tree.
+  _n=$(
+    set --
+    while IFS= read -r _p; do [ -n "$_p" ] && set -- "$@" "$_p"; done <<SPEC
+$_spec
+SPEC
+    git -C "$_t" status --porcelain -uall -- "$@" 2>/dev/null | grep -c '' || true
+  )
+  if [ "${_n:-0}" -gt 0 ]; then
+    printf '   unlanded  %-26s %s harness-owned path(s)\n' "$_label" "$_n"
+    return 1
+  fi
+  printf '   landed    %-26s\n' "$_label"
+  return 0
+}
+
+_audit_unlanded=0
+_audit_total=0
+# Fed from a here-document, not a pipe: `... | while read` runs its body in a SUBSHELL in
+# POSIX sh, so every counter incremented in there would die at the `done`.
+while IFS= read -r _c; do
+  [ -n "$_c" ] || continue
+  _audit_total=$((_audit_total + 1))
+  if [ "$_c" = "." ]; then
+    audit_one "$UMB" "(coordinator)" || _audit_unlanded=$((_audit_unlanded + 1))
+  else
+    audit_one "$UMB/$_c" "$_c" || _audit_unlanded=$((_audit_unlanded + 1))
+  fi
+done <<AUDIT
+.
+$INSTALLED_CHILDREN
+AUDIT
+
 echo "══════════════════════════════════════════════════"
-ok "umbrella cascade complete (v$VERSION)"
+if [ "$_audit_unlanded" -gt 0 ]; then
+  echo "   coordinator: $UMB/.harness   manifest: $MANIFEST"
+  echo "❌ install: the cascade wrote an upgrade that is NOT COMMITTED in $_audit_unlanded of $_audit_total target(s)." >&2
+  echo "   Commit the harness files in each, or agents there run on a body no commit describes." >&2
+  echo "   Nothing was committed for you — this installer never writes to a target's git state." >&2
+  # Exit 3, deliberately NOT the generic die() code 1: "the install broke" and "the install
+  # succeeded and is unlanded" are different outcomes, and a wrapper or CI job that cannot
+  # tell them apart loses the only information that makes the code actionable.
+  exit 3
+fi
+ok "umbrella cascade complete (v$VERSION) — every target committed"
 echo "   coordinator: $UMB/.harness   manifest: $MANIFEST"

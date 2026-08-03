@@ -555,4 +555,78 @@ printf '%s' "$RECO_OUT" | grep -q "builder.md" \
   || fail "E99-F10/R3-quote: the recovery command ran but did not list the drifted file: $RECO_OUT"
 pass "every derived pathspec is shell-escaped, so the command still runs (R3) [R3_recovery_command_escapes_derived_pathspecs]"
 
+# ── E24-F02 / R8: init.sh and the cascade audit resolve the SAME path set ─────────────
+# R8_shared_ownership_is_differential
+# Asserting that both files MENTION tools/harness-owned-paths.sh proves nothing about
+# agreement — a stale inline copy could sit beside the reference and still drift. This is
+# DIFFERENTIAL: perturb one path at a time and require the two verdicts to match across a
+# matrix that includes both answers. A second definition that drifts fails the matrix even
+# though both callers still reference the helper.
+mk_target "$T/diff"
+# The cascade audit is the installer's; drive the same question directly through the shared
+# helper the way harness-install.sh does, from the same project root init.sh uses.
+audit_verdict() {   # -> "drift" | "clean"
+  # `_av_t` is captured BEFORE the subshell: `set --` there replaces the positional
+  # parameters with the pathspecs, so a `git -C "$1"` inside would target a pathspec rather
+  # than the repo. (This exact slip is why harness-install.sh's audit_one saves `_t="$1"`
+  # on its first line — and why this differential is worth having: it caught the mistake.)
+  _av_t="$1"
+  _spec="$(sh "$SRC/tools/harness-owned-paths.sh" all "$_av_t/.harness")"
+  _n=$(
+    set --
+    while IFS= read -r _p; do [ -n "$_p" ] && set -- "$@" "$_p"; done <<SPEC
+$_spec
+SPEC
+    git -C "$_av_t" status --porcelain -uall -- "$@" 2>/dev/null | grep -c '' || true
+  )
+  [ "${_n:-0}" -gt 0 ] && echo drift || echo clean
+}
+gate_verdict() {    # -> "drift" | "clean"
+  run_gate "$1"
+  [ "$GATE_RC" = "0" ] && echo clean || echo drift
+}
+# path                                   expected
+# --------------------------------------------------------
+#  a project-owned file                  both must IGNORE
+#  a body file                           both must FLAG
+#  root generated glue                   both must FLAG
+#  a user file in the .agents/ tree      both must IGNORE
+mkdir -p "$T/diff/.agents/skills/mine"
+_dm_paths=".harness/harness.config.yaml .harness/agents/builder.md .claude/agents/builder.md .agents/skills/mine/SKILL.md"
+_dm_want="clean drift drift clean"
+_i=1
+for _p in $_dm_paths; do
+  _want="$(printf '%s' "$_dm_want" | cut -d' ' -f"$_i")"
+  git -C "$T/diff" checkout -q -- . 2>/dev/null || true
+  rm -rf "$T/diff/.agents/skills/mine"; mkdir -p "$T/diff/.agents/skills/mine"
+  mkdir -p "$(dirname "$T/diff/$_p")"
+  printf '# perturbed\n' >> "$T/diff/$_p"
+  _g="$(gate_verdict "$T/diff")"
+  _a="$(audit_verdict "$T/diff")"
+  [ "$_g" = "$_a" ] \
+    || fail "R8: init.sh says '$_g' and the cascade audit says '$_a' for $_p — the two definitions have diverged"
+  [ "$_g" = "$_want" ] \
+    || fail "R8: for $_p both agreed on '$_g' but the correct answer is '$_want' — they agree on the WRONG set"
+  _i=$((_i + 1))
+done
+git -C "$T/diff" checkout -q -- . 2>/dev/null || true
+rm -rf "$T/diff/.agents/skills/mine"
+pass "init.sh and the cascade audit agree across the ownership matrix (R8) [R8_shared_ownership_is_differential]"
+
+# ── E24-F02: a torn install (no ownership helper) warns instead of hard-failing ────────
+# R8_missing_helper_degrades
+# init.sh runs before every agent step, so a missing helper must not halt the harness every
+# session. Control: the same target WITH the helper still fails on the same perturbation.
+mk_target "$T/nohelper"
+echo "# unlanded edit" >> "$T/nohelper/.harness/agents/builder.md"
+run_gate "$T/nohelper"
+[ "$GATE_RC" != "0" ] || fail "R8-degrade control: the drifted target PASSED before the helper was removed"
+rm -f "$T/nohelper/.harness/tools/harness-owned-paths.sh"
+run_gate "$T/nohelper"
+[ "$GATE_RC" = "0" ] \
+  || fail "R8-degrade: a missing ownership helper hard-failed the gate (rc=$GATE_RC): $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -qi "harness-owned-paths.sh missing" \
+  || fail "R8-degrade: the missing helper was not reported: $GATE_OUT"
+pass "a missing ownership helper warns and does not halt the gate (R8) [R8_missing_helper_degrades]"
+
 echo "All init drift-guard tests passed."
