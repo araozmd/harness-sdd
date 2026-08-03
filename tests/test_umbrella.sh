@@ -863,10 +863,17 @@ for _p in $PROSE_TIER $LOCAL_TIER; do
 done
 grep -qF 'You are the **Builder**' "$TF/.harness/agents/builder.md" \
   || fail "R5 control: agents/builder.md is not the real body"
-# The sentinel must be absent from the WHOLE tree, not from a sampled file: a per-file
-# probe is only ever as complete as the last bug report.
-[ "$(grep -rlF "$SENTINEL" "$TF/.harness" 2>/dev/null | wc -l | tr -d ' ')" = "0" ] \
-  || fail "R5: a single-repo install wrote a stub somewhere in .harness/"
+# No file ANYWHERE in the tree may be a stub — a per-file probe is only ever as complete
+# as the last bug report. The predicate is "line 1 IS the sentinel", not "contains it":
+# `init.sh` legitimately carries the literal string in its own layout detection, and a
+# substring scan reads that as a stub. Being a stub was always a line-1 property; the
+# loose form only looked equivalent until init.sh learned to detect one.
+_f03_stubs=0
+for _f in $(find "$TF/.harness" -type f); do
+  is_stub "$_f" && { echo "   unexpected stub: $_f" >&2; _f03_stubs=$((_f03_stubs + 1)); }
+done
+[ "$_f03_stubs" = "0" ] \
+  || fail "R5: a single-repo install wrote $_f03_stubs stub(s) in .harness/"
 pass "R5 single_repo_body_is_complete — no umbrella.root ⇒ full body, no sentinel anywhere"
 
 # ── R1/R2/R3/R4: a fresh cascade child is thin ─────────────────────────────────────────
