@@ -439,6 +439,15 @@
           "autonomous": false,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F09-antigravity-skills/"
+        },
+        {
+          "id": "E99-F10",
+          "title": "Drift guard follow-ups: SIGPIPE on a large sample, .codex/agents/ over-claim, unquoted root",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F10-drift-guard-followups/"
         }
       ]
     },
@@ -664,7 +673,7 @@
         {
           "id": "E24-F01",
           "title": "init.sh drift guard: refuse to run on an unlanded harness",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
@@ -686,7 +695,7 @@
           "title": "Thin the child: umbrella-resolved body with local fallback",
           "status": "pending",
           "sdd": true,
-          "autonomous": false,
+          "autonomous": true,
           "depends_on": [
             "E24-F01",
             "E24-F02"
