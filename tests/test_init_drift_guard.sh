@@ -239,17 +239,19 @@ pass "untracked drift is caught even under status.showUntrackedFiles=no (R2) [R2
 # so drift confined to .codex/agents/ tripped the gate and was then invisible to the one
 # command offered for inspecting it. Reported as P2 on PR #98.
 mk_target "$T/reco"
-mkdir -p "$T/reco/.codex/agents"
 i=1
 while [ "$i" -le 12 ]; do
-  printf '# drifted %s\n' "$i" > "$T/reco/.codex/agents/role-$i.toml"
+  printf '# drifted %s\n' "$i" > "$T/reco/.claude/commands/generated-$i.md"
   i=$((i + 1))
 done
 run_gate "$T/reco"
-[ "$GATE_RC" != "0" ] || fail "R3-regression: drift confined to .codex/agents/ PASSED the gate: $GATE_OUT"
+[ "$GATE_RC" != "0" ] || fail "R3-regression: drift confined to .claude/commands/ PASSED the gate: $GATE_OUT"
 RECO="$(printf '%s\n' "$GATE_OUT" | grep 'list them:' || true)"
 [ -n "$RECO" ] || fail "R3-regression: no recovery command printed: $GATE_OUT"
-for want in ".codex/agents/" ".gemini/agents/" "opencode.json" ":(exclude).harness/state/"; do
+# `.codex/agents/`/`.gemini/agents/` are deliberately NOT expected here: since E99-F10 they
+# are claimed per-file from the installer's ownership ledger, and a claude-only target has
+# no such ledger — so their absence from this command is correct, not a gap.
+for want in ".claude/commands/" ".opencode/command/" "opencode.json" ":(exclude).harness/state/"; do
   case "$RECO" in
     *"$want"*) : ;;
     *) fail "R3-regression: recovery command omits '$want' — it does not reproduce the checked set: $RECO" ;;
@@ -335,5 +337,90 @@ printf '%s' "$GATE_OUT" | grep -qi "not version-controlled" \
   || fail "R9-regression: an ignored body did not produce the warn-only branch: $GATE_OUT"
 [ "$GATE_RC" = "0" ] || fail "R9-regression: the warn-only branch must not fail the gate: $GATE_OUT"
 pass "an ignored body warns instead of falsely reporting clean (R9) [R9_ignored_body_is_not_masked_by_tracked_glue]"
+
+# ── E99-F10 / R4: `.codex/agents/` is shared with the operator ────────────────────
+# R4_codex_agents_namespace_is_shared
+# The installer calls this namespace "shared with the operator" and preserves foreign or
+# edited role files. A directory-wide pathspec failed the MANDATORY gate on a project's own
+# role file. Owned membership now comes from the installer's ledger,
+# .harness/.model-agents/codex/, so this needs no duplicated MODEL_ROLES list.
+mkdir -p "$T/cx"
+git -C "$T/cx" init -q .
+git -C "$T/cx" config user.email "test@harness.local"
+git -C "$T/cx" config user.name "harness test"
+CODEX_HOME="$T/cx/.codex-home" HOME="$T/cx/.home" \
+  sh "$SRC/harness-install.sh" --agents=codex "$T/cx" >/dev/null 2>&1 \
+  || fail "E99-F10/R4: codex install exited non-zero"
+printf 'name = "ours"\n' > "$T/cx/.codex/agents/project-role.toml"
+git -C "$T/cx" add -A
+git -C "$T/cx" commit -q -m "installed harness (codex) + our own role"
+# Preconditions: the ledger exists, and it does NOT claim the operator's file.
+[ -d "$T/cx/.harness/.model-agents/codex" ] \
+  || fail "E99-F10/R4: fixture precondition broken — no codex ownership ledger was written"
+[ ! -e "$T/cx/.harness/.model-agents/codex/project-role.toml" ] \
+  || fail "E99-F10/R4: fixture precondition broken — the ledger claims the operator's file"
+printf 'name = "ours, edited"\n' > "$T/cx/.codex/agents/project-role.toml"
+run_gate "$T/cx"
+[ "$GATE_RC" = "0" ] \
+  || fail "E99-F10/R4: an operator's own .codex/agents/project-role.toml failed the MANDATORY gate: $GATE_OUT"
+pass "an operator's own Codex role file does not trip the guard (R4) [R4_codex_agents_namespace_is_shared]"
+# positive control: a role file the ledger DOES claim is still checked
+echo "# unlanded" >> "$T/cx/.codex/agents/builder.toml"
+run_gate "$T/cx"
+[ "$GATE_RC" != "0" ] \
+  || fail "E99-F10/R4 control: drift in a LEDGER-OWNED .codex/agents/builder.toml PASSED — the guard claims nothing"
+pass "…while a ledger-owned Codex role file still is (R4 control) [R4_codex_agents_namespace_is_shared]"
+
+# ── E99-F10 / R2: a huge drift must print its diagnostic, not die at 141 ───────────
+# R2_large_drift_prints_diagnostic
+# `printf | head -n 10` early-closes the pipe; under `set -o pipefail` + `set -e` the
+# upstream printf takes SIGPIPE (141) and the gate aborts BEFORE the elision count, the
+# recovery command, and the fail() message. The gate still fails closed — it just fails
+# uninformatively at exactly the moment the diagnostic matters most.
+mk_target "$T/huge"
+i=1
+while [ "$i" -le 3000 ]; do
+  : > "$T/huge/.harness/agents/generated-role-with-a-deliberately-long-name-$i.md"
+  i=$((i + 1))
+done
+# PRECONDITION, asserted rather than assumed: the porcelain output must exceed the pipe
+# buffer, or `head` never early-closes and this case passes without exercising anything.
+# Measured on this platform: ~70KB (1200 files) does NOT trip SIGPIPE; ~176KB (3000) does.
+# A first draft of this test used 1200 and survived mutation M12 — it was asserting nothing.
+DRIFT_BYTES="$(git -C "$T/huge" status --porcelain -uall -- .harness/ | wc -c | tr -d ' ')"
+[ "$DRIFT_BYTES" -gt 131072 ] \
+  || fail "E99-F10/R2: fixture precondition broken — drift output is only ${DRIFT_BYTES}B, below the pipe buffer, so SIGPIPE cannot occur"
+run_gate "$T/huge"
+[ "$GATE_RC" != "0" ] || fail "E99-F10/R2: a 1200-file drift PASSED the gate: $GATE_OUT"
+[ "$GATE_RC" != "141" ] \
+  || fail "E99-F10/R2: the gate died of SIGPIPE (141) while capping the sample — no diagnostic printed"
+printf '%s' "$GATE_OUT" | grep -qi "not committed" \
+  || fail "E99-F10/R2: no fail() diagnostic printed on a large drift (rc=$GATE_RC): $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -q "more" \
+  || fail "E99-F10/R2: no elision marker printed on a large drift: $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -q "list them:" \
+  || fail "E99-F10/R2: no recovery command printed on a large drift: $GATE_OUT"
+pass "a drift larger than the pipe buffer still prints its full diagnostic (R2) [R2_large_drift_prints_diagnostic]"
+
+# ── E99-F10 / R3: the recovery command survives a path containing whitespace ───────
+# R3_recovery_command_quotes_the_root
+# An unquoted -C value reaches git as its first word only, so the printed command exits 128
+# when pasted — on the one PR where the operator most needs to paste it.
+WS="$T/with space/repo"
+mkdir -p "$WS"
+mk_target "$WS"
+echo "# unlanded edit" >> "$WS/.harness/agents/builder.md"
+run_gate "$WS"
+[ "$GATE_RC" != "0" ] || fail "E99-F10/R3: drift in a whitespace path PASSED the gate: $GATE_OUT"
+RECO="$(printf '%s\n' "$GATE_OUT" | sed -n 's/^   list them:  //p')"
+[ -n "$RECO" ] || fail "E99-F10/R3: no recovery command printed: $GATE_OUT"
+# The real assertion: the printed command must actually RUN. Anything less tests the string,
+# not the promise — and the promise is that this line can be copied and pasted.
+RECO_OUT="$(cd / && eval "$RECO" 2>&1)" && RECO_RC=0 || RECO_RC=$?
+[ "$RECO_RC" = "0" ] \
+  || fail "E99-F10/R3: the printed recovery command failed to run (rc=$RECO_RC) from a whitespace path: $RECO_OUT"
+printf '%s' "$RECO_OUT" | grep -q "builder.md" \
+  || fail "E99-F10/R3: the recovery command ran but did not list the drifted file: $RECO_OUT"
+pass "the recovery command runs verbatim from a path containing whitespace (R3) [R3_recovery_command_quotes_the_root]"
 
 echo "All init drift-guard tests passed."

@@ -108,8 +108,31 @@ if [ -f "$HARNESS_DIR/.harness-version" ]; then
         ".agents/rules/" ".agents/agents/" ".agents/workflows/"
         ":(glob).agents/skills/sdd-*/**"
         ".opencode/command/" ".opencode/agent/pr-fixer.md"
-        ".codex/agents/" ".gemini/agents/" "opencode.json"
+        "opencode.json"
       )
+      # `.codex/agents/` and `.gemini/agents/` are the SAME shape of trap as `.agents/`, and
+      # the first narrowing missed both: the installer describes the Codex role namespace as
+      # shared with the operator and deliberately preserves foreign or edited role files
+      # (harness-install.sh "Codex's project-local role namespace is shared with the
+      # operator"). A directory-wide pathspec fails the MANDATORY gate on a project's own
+      # `.codex/agents/project-role.toml`, halting every agent step.
+      #
+      # Resolve them from the installer's own ownership ledger instead of enumerating role
+      # names here. `.harness/.model-agents/<tool>/` holds a byte copy of each per-role file
+      # the installer last wrote, so its listing IS the owned set — it needs no duplicated
+      # knowledge of MODEL_ROLES and it stays correct when that list changes. No stamps ⇒
+      # claim nothing for that tool: either nothing was generated (the `inherit` default
+      # creates no `.gemini/agents/` at all) or ownership is unprovable, and in both cases
+      # claiming nothing is the fail-safe direction — a false negative costs a missed drift,
+      # a false positive halts the harness.
+      for _tool in codex gemini; do
+        _stamp_dir="$HARNESS_DIR/.model-agents/$_tool"
+        [ -d "$_stamp_dir" ] || continue
+        for _stamp in "$_stamp_dir"/*; do
+          [ -e "$_stamp" ] || continue                    # unmatched glob
+          HARNESS_GLUE+=( ".$_tool/agents/${_stamp##*/}" )
+        done
+      done
       HARNESS_OWNED=( "${HARNESS_BODY[@]}" "${HARNESS_GLUE[@]}" )
 
       # ORDER IS LOAD-BEARING (R9 before R2). In a repo where nothing is tracked yet,
@@ -139,7 +162,14 @@ if [ -f "$HARNESS_DIR/.harness-version" ]; then
           # R2/R3: name the count, show a bounded sample, and hand over the command that
           # lists the rest. 29 paths inline is noise; a count with no paths is unactionable.
           DRIFT_N="$(printf '%s\n' "$DRIFT" | wc -l | tr -d ' ')"
-          printf '%s\n' "$DRIFT" | head -n 10 | sed 's/^/     /'
+          # `sed -n '1,10p'`, NOT `head -n 10`. head closes its input after ten lines, so on
+          # a drift larger than the pipe buffer the upstream printf takes SIGPIPE and exits
+          # 141 — and under this script's `set -o pipefail` + `set -e` that aborts the whole
+          # gate right here, before the elision count, the recovery command, or the fail()
+          # diagnostic ever print. Reproduced with 1,800 untracked files: exit 141, no
+          # message, at exactly the moment the operator most needs one. sed reads its input
+          # to EOF, so nothing early-closes.
+          printf '%s\n' "$DRIFT" | sed -n '1,10p' | sed 's/^/     /'
           [ "$DRIFT_N" -le 10 ] || echo "     … $((DRIFT_N - 10)) more …"
           # Reproduce the ACTUAL pathspec set. A hand-written approximation drifts from
           # HARNESS_OWNED silently: an earlier version printed `.harness/ .claude/ .agents/`,
@@ -147,9 +177,14 @@ if [ -f "$HARNESS_DIR/.harness-version" ]; then
           # `opencode.json` AND dropped every `:(exclude)`, so eleven drifted files under
           # .codex/agents/ would trip the gate and then be invisible to the one command
           # offered for inspecting them.
+          # The ROOT is quoted too, not just the pathspecs: on a repo path containing
+          # whitespace an unquoted -C value reaches git as its first word only, so the one
+          # command offered for inspection exits 128 when pasted. Single-quote it and escape
+          # any embedded single quote the POSIX way ('\'').
           DRIFT_SPEC=""
           for _p in "${HARNESS_OWNED[@]}"; do DRIFT_SPEC="$DRIFT_SPEC '$_p'"; done
-          echo "   list them:  git -C $PROJECT_ROOT status --porcelain -uall --$DRIFT_SPEC"
+          DRIFT_ROOT="'$(printf '%s' "$PROJECT_ROOT" | sed "s/'/'\\\\''/g")'"
+          echo "   list them:  git -C $DRIFT_ROOT status --porcelain -uall --$DRIFT_SPEC"
           echo "   land them, or re-run with HARNESS_SKIP_DRIFT_CHECK=1 to proceed anyway."
           fail "the installed harness is not committed — $DRIFT_N harness-owned path(s) differ from what this branch records. Agents would run on a body no commit describes."
         fi

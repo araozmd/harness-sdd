@@ -4,6 +4,43 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.51.1] — 2026-08-02
+
+### Fixed — 🐛 the drift guard over-claimed shared namespaces and lost its diagnostic on a large drift (E99-F10)
+
+Three follow-ups against the E24-F01 guard, filed from PR #98 round 3 rather than fixed in
+a fourth review round.
+
+**`.codex/agents/` and `.gemini/agents/` are shared with the operator.** The installer says
+so explicitly — "Codex's project-local role namespace is shared with the operator" — and
+preserves foreign or edited role files. The guard claimed both directories wholesale, so a
+project's own `.codex/agents/project-role.toml` failed the **mandatory** gate and halted
+every agent step. That is the same false-positive class the `.agents/` narrowing fixed one
+round earlier, in the two directories that narrowing did not reach.
+
+They are now claimed **per file**, resolved from the installer's own ownership ledger at
+`.harness/.model-agents/<tool>/` — a byte copy of each per-role file it last wrote. That
+listing *is* the owned set, so `init.sh` needs no duplicated `MODEL_ROLES` list and stays
+correct when that list changes. No ledger ⇒ nothing claimed for that tool, which is the
+fail-safe direction: a missed drift costs a warning, a false positive costs the harness.
+
+**A drift larger than the pipe buffer printed no diagnostic at all.** `printf | head -n 10`
+early-closes the pipe; the upstream `printf` takes SIGPIPE and exits 141, and under
+`set -o pipefail` + `set -e` that aborted the gate *before* the elision count, the recovery
+command, and the `fail()` message. Measured on macOS: ~70KB of porcelain output does not
+trip it, ~176KB does. `sed -n '1,10p'` reads to EOF, so nothing early-closes.
+
+**The recovery command could not be pasted from a path containing whitespace.** `$PROJECT_ROOT`
+was interpolated unquoted, so git received only its first word as `-C` and exited 128 — on
+the one line whose entire purpose is to be copied. Now single-quoted, with embedded quotes
+escaped.
+
+Pinned by three cases in `tests/test_init_drift_guard.sh` (19 → 24 assertions), each
+asserting its own fixture preconditions. That discipline earned its keep here: the first
+draft of the SIGPIPE case used 1,200 files (~70KB), stayed under the pipe buffer, and
+**survived** the mutation that restores `head -n 10` — it was asserting nothing. It now
+measures the porcelain output and fails if the fixture ever drops below the threshold.
+
 ## [0.51.0] — 2026-08-02
 
 ### Added — ✨ `init.sh` refuses to run on an unlanded harness (E24-F01)

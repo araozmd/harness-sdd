@@ -515,11 +515,20 @@ rest. The fix is normally just to commit the upgrade.
 files the installer seeds once and never clobbers (`harness.config.yaml`,
 `init.project.sh`, `specs/product.md`, `specs/epics/`, `state/`, `progress/`), plus the
 generated front-end glue at the project root — `.claude/agents/`, `.claude/commands/`,
-`.opencode/command/`, `.opencode/agent/pr-fixer.md`, `.codex/agents/`, `.gemini/agents/`,
-`opencode.json`, and, inside the **user-owned** `.agents/` tree, only the parts the
-installer regenerates: `.agents/rules/`, `.agents/agents/`, `.agents/workflows/` and the
-`.agents/skills/sdd-*/` units. Your own edits to project-owned files — and your own files
-elsewhere under `.agents/` — never trip it. That is the whole point of the split.
+`.opencode/command/`, `.opencode/agent/pr-fixer.md`, `opencode.json`, and, inside the
+**user-owned** `.agents/` tree, only the parts the installer regenerates:
+`.agents/rules/`, `.agents/agents/`, `.agents/workflows/` and the `.agents/skills/sdd-*/`
+units.
+
+`.codex/agents/` and `.gemini/agents/` are namespaces you **share** with the installer — it
+preserves role files it did not write. So they are claimed **per file**, from the
+installer's own ownership ledger at `.harness/.model-agents/<tool>/`: a role file the
+installer last wrote is checked; your own `project-role.toml` beside it is not. No ledger
+means nothing is claimed for that tool.
+
+Your own edits to project-owned files — and your own files elsewhere under `.agents/`,
+`.codex/agents/` or `.gemini/agents/` — never trip it. That is the whole point of the
+split.
 
 **When the check does not apply**, it stays quiet rather than failing:
 
