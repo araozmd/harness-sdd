@@ -452,7 +452,7 @@
         {
           "id": "E99-F11",
           "title": "Landing audit: match git-quoted paths when a telemetry override contains whitespace",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],

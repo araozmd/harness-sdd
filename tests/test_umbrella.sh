@@ -773,4 +773,39 @@ printf '%s' "$AU_OUT" | grep -qE "landed +child-w" \
   || fail "R2-tlq: a single-quoted telemetry.log override was not subtracted: $AU_OUT"
 pass "the telemetry override is read in both YAML quote forms (R2) [R2_telemetry_override_single_quoted]"
 
+# ── R2: a telemetry override containing WHITESPACE is still subtracted ─────────────────
+# R2_telemetry_override_with_whitespace
+# git QUOTES any path containing whitespace (or non-ASCII, backslashes, control chars) in
+# porcelain output — `".harness/custom/my log.jsonl"` — while the subtraction patterns are
+# built from raw config values, so the quoted form never matched and the target reported
+# `cannot verify` forever. Filed as E99-F11 from PR #103 round 6; fixed with `-z`, which
+# emits raw paths instead of reimplementing git's C-style unescaping.
+mk_umb "$AU/tlws" child-x
+cascade "$AU/tlws"
+python3 - "$AU/tlws/child-x/.harness/harness.config.yaml" <<'PYCFG' \
+  || fail "R2-tlws: could not rewrite telemetry.log in the fixture config"
+import sys
+p = sys.argv[1]
+s = open(p).read()
+assert "log: telemetry.jsonl" in s, "telemetry.log anchor not found in " + p
+open(p, "w").write(s.replace("log: telemetry.jsonl", 'log: "custom/my log.jsonl"', 1))
+PYCFG
+cascade "$AU/tlws"
+mkdir -p "$AU/tlws/child-x/.harness/custom"
+printf '{}\n' > "$AU/tlws/child-x/.harness/custom/my log.jsonl"
+land "$AU/tlws/child-x"
+# Preconditions: the path really contains whitespace, really is ignored, and git really does
+# QUOTE it in default porcelain — that quoting IS the defect under test.
+git -C "$AU/tlws/child-x" check-ignore -q ".harness/custom/my log.jsonl" \
+  || fail "R2-tlws: fixture precondition broken — the whitespace override is not ignored"
+git -C "$AU/tlws/child-x" status --porcelain -uall --ignored=matching -- .harness/ \
+  | grep -q '^!! "' \
+  || fail "R2-tlws: fixture precondition broken — git did not quote the whitespace path, so this case cannot reproduce the defect"
+cascade "$AU/tlws"
+printf '%s' "$AU_OUT" | grep -qE "no vcs +child-x" \
+  && fail "R2-tlws: a whitespace telemetry override was not subtracted — the probe needs -z: $AU_OUT"
+printf '%s' "$AU_OUT" | grep -qE "landed +child-x" \
+  || fail "R2-tlws: a fully landed target with a whitespace override was not reported landed: $AU_OUT"
+pass "a telemetry override containing whitespace is subtracted (R2) [R2_telemetry_override_with_whitespace]"
+
 echo "All umbrella tests passed."

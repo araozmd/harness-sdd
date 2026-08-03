@@ -5175,6 +5175,15 @@ audit_one() {
   # question: take git's COMPLETE ignored set over the owned pathspecs and subtract the
   # short, deliberate local-only list. New body subtrees are then covered automatically; only
   # a new deliberate ignore needs maintenance, in the one file that owns that knowledge.
+  # `-z` below, not the default porcelain: git QUOTES any path containing whitespace,
+  # non-ASCII bytes, backslashes or control characters — `".harness/custom/my log.jsonl"` —
+  # and the subtraction patterns are built from raw config values, so a quoted path never
+  # matched and the target reported "cannot verify" forever. `-z` emits raw paths, which
+  # sidesteps git's whole quoting grammar rather than reimplementing its C-style unescaping
+  # (which `core.quotePath` also influences). The NUL delimiters are turned into newlines
+  # for the line-oriented filter below; a path containing a literal newline would then
+  # over-count, which is the safe direction — it can only make a target look unverifiable,
+  # never landed.
   _lo="$("$SRC/tools/harness-owned-paths.sh" local-only "$_t/.harness" 2>/dev/null || true)"
   _lo_alt="$(printf '%s' "$_lo" | tr '\n' '|' | sed 's/|$//')"
   [ -n "$_lo_alt" ] || _lo_alt='$^'        # match nothing rather than everything if empty
@@ -5183,8 +5192,8 @@ audit_one() {
     while IFS= read -r _p; do [ -n "$_p" ] && set -- "$@" "$_p"; done <<ISPEC
 $_spec
 ISPEC
-    GIT_OPTIONAL_LOCKS=0 git -C "$_t" status --porcelain -uall --ignored=matching -- "$@" 2>/dev/null \
-      | sed -n 's/^!! //p' | grep -Ev "$_lo_alt" | grep -c '' || true
+    GIT_OPTIONAL_LOCKS=0 git -C "$_t" status --porcelain -z -uall --ignored=matching -- "$@" 2>/dev/null \
+      | tr '\0' '\n' | sed -n 's/^!! //p' | grep -Ev "$_lo_alt" | grep -c '' || true
   )
   if [ "${_ign:-0}" -gt 0 ]; then
     printf '   no vcs    %-26s (%s owned path(s) git-ignored — cannot verify)\n' "$_label" "$_ign"
