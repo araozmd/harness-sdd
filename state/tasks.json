@@ -659,12 +659,12 @@
     {
       "id": "E24",
       "title": "Upgrade integrity: an unlanded upgrade must not run silently",
-      "status": "planned",
+      "status": "in-progress",
       "features": [
         {
           "id": "E24-F01",
           "title": "init.sh drift guard: refuse to run on an unlanded harness",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],

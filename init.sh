@@ -34,6 +34,91 @@ for role in orchestrator architect builder reviewer scout; do
 done
 ok "harness structure intact"
 
+# 1b. Drift guard (E24-F01) — the installed harness must be the COMMITTED harness.
+#
+#     harness-install.sh stamps VERSION into .harness/.harness-version, but that stamp is
+#     read only by the NEXT installer run (upgrade-vs-fresh detection). At runtime nothing
+#     ever checked whether the body an agent is about to read was committed, so an upgrade
+#     that was written but never landed was indistinguishable from one that was landed.
+#     That is not hypothetical: a v0.50.x umbrella cascade left 26-29 uncommitted files in
+#     each of five children, and every Builder and Reviewer spawned there afterwards read
+#     agent prompts no commit describes.
+#
+#     ONE CHECK, NOT TWO. `.harness-version` is itself a tracked file inside the
+#     harness-owned tree and every upgrade rewrites it, so a half-applied upgrade shows up
+#     as an uncommitted change to the stamp via the same dirty-tree check that catches the
+#     prompts. There is no second signal available here: init.sh has no access to the
+#     harness SOURCE it was installed from, so it cannot compare installed-vs-latest at all.
+#
+#     FALSE POSITIVES ARE THE DOMINANT RISK. This gate runs before every agent step, so a
+#     misfire halts the whole harness and the guard gets disabled within a week. Every
+#     ambiguous case therefore degrades to a silent skip or a warning, never to a failure:
+#     no install (R6), no git (R7), nothing tracked (R9). Only an unambiguously
+#     half-applied write fails.
+#
+#     The guard REPORTS; it never repairs. No auto-commit, no auto-reinstall, no writes.
+if [ -f "$HARNESS_DIR/.harness-version" ]; then
+  # R7: a target that is not a git work tree cannot have anything "unlanded". Silent.
+  if git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if [ -n "${HARNESS_SKIP_DRIFT_CHECK:-}" ]; then
+      # R8: loud. An overridden gate that says nothing is a gate nobody remembers
+      # overriding. Deliberately checked AFTER the install/git tests, so an override set
+      # globally does not announce a skip of a check that never applied here.
+      echo "ℹ️  harness drift check skipped (HARNESS_SKIP_DRIFT_CHECK is set)"
+    else
+      # R4/R5: scope is decided by OWNERSHIP, expressed as ".harness/ minus the
+      # project-owned paths, plus the generated front-end glue at the project root".
+      # Deliberately NOT an enumeration of the ~29 harness-owned files: that would
+      # duplicate harness-install.sh's knowledge in a second place and drift from it on
+      # the next feature that adds a body file. The project-owned set is short, stable,
+      # and documented in the install manifest ("PROJECT-OWNED (seeded once, never
+      # clobbered on upgrade)").
+      #
+      # .harness/telemetry.jsonl needs no exclusion — the installer seeds .harness/.gitignore
+      # for it, so git never reports it. umbrella.manifest.yaml is project-owned and is
+      # simply never listed. A pathspec matching nothing is not an error, so the root-level
+      # glue is listed unconditionally regardless of which front-ends were selected.
+      #
+      # A bash array, not `set --`: init.sh sources .harness/init.project.sh at the end,
+      # and a sourced hook inherits the caller's positional parameters. Clobbering them
+      # with a pathspec list would be an invisible action at a distance.
+      HARNESS_OWNED=(
+        ".harness/"
+        ":(exclude).harness/harness.config.yaml"
+        ":(exclude).harness/init.project.sh"
+        ":(exclude).harness/specs/product.md"
+        ":(exclude).harness/specs/epics/"
+        ":(exclude).harness/state/"
+        ":(exclude).harness/progress/"
+        ".claude/agents/" ".claude/commands/" ".agents/"
+        ".codex/agents/" ".gemini/agents/" "opencode.json"
+      )
+
+      # ORDER IS LOAD-BEARING (R9 before R2). In a repo where nothing is tracked yet,
+      # `git status --porcelain -- .harness/` reports `?? .harness/` — non-empty. Running
+      # status first would read an un-version-controlled install as DRIFT and hard-fail it,
+      # which is exactly the false positive R9 exists to prevent. ls-files decides first.
+      if [ "$(git -C "$PROJECT_ROOT" ls-files -- "${HARNESS_OWNED[@]}" | wc -l | tr -d ' ')" = "0" ]; then
+        echo "⚠️  installed harness is not version-controlled here — cannot verify it matches a commit (warn-only)"
+      else
+        DRIFT="$(git -C "$PROJECT_ROOT" status --porcelain -- "${HARNESS_OWNED[@]}")"
+        if [ -z "$DRIFT" ]; then
+          ok "installed harness matches the commit"                       # R10
+        else
+          # R2/R3: name the count, show a bounded sample, and hand over the command that
+          # lists the rest. 29 paths inline is noise; a count with no paths is unactionable.
+          DRIFT_N="$(printf '%s\n' "$DRIFT" | wc -l | tr -d ' ')"
+          printf '%s\n' "$DRIFT" | head -n 10 | sed 's/^/     /'
+          [ "$DRIFT_N" -le 10 ] || echo "     … $((DRIFT_N - 10)) more …"
+          echo "   list them:  git -C $PROJECT_ROOT status --porcelain -- .harness/ .claude/ .agents/"
+          echo "   land them, or re-run with HARNESS_SKIP_DRIFT_CHECK=1 to proceed anyway."
+          fail "the installed harness is not committed — $DRIFT_N harness-owned path(s) differ from what this branch records. Agents would run on a body no commit describes."
+        fi
+      fi
+    fi
+  fi
+fi
+
 # 2. TaskStore presence + schema validation (local backend).
 #    Syntactically-valid JSON is not enough: an unsupported status or a missing
 #    required field (e.g. spec_path) must halt here, not surface later as corrupt

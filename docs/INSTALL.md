@@ -492,6 +492,47 @@ The harness body and `.claude/` glue are refreshed; the pointer block is replace
 place (never duplicated); your `product.md`, `tasks.json`, epics and progress are left
 untouched. `.harness/.harness-version` records the installed version.
 
+### Commit the upgrade — `init.sh` now checks that you did
+
+An upgrade the installer **wrote** is not an upgrade the repo **runs** until it is
+committed. Between those two moments, agents read a body no commit describes: the working
+tree has the new prompts and the new config keys, the branch has the old ones, and nothing
+used to notice. A cascade across five children once left 26–29 uncommitted files in each,
+invisibly, for days.
+
+Since **v0.51.0**, `init.sh` verifies that the harness-owned paths match what the branch
+records, and **fails the gate** when they do not:
+
+```
+❌ init: the installed harness is not committed — 29 harness-owned path(s) differ from
+   what this branch records. Agents would run on a body no commit describes.
+```
+
+It prints the drifted paths (capped at 10) and the `git status` command that lists the
+rest. The fix is normally just to commit the upgrade.
+
+**What counts as harness-owned:** everything under `.harness/` *except* the project-owned
+files the installer seeds once and never clobbers (`harness.config.yaml`,
+`init.project.sh`, `specs/product.md`, `specs/epics/`, `state/`, `progress/`), plus the
+generated front-end glue at the project root (`.claude/agents/`, `.claude/commands/`,
+`.agents/`, `.codex/agents/`, `.gemini/agents/`, `opencode.json`). Your own edits to
+project-owned files never trip it — that is the whole point of the split.
+
+**When the check does not apply**, it stays quiet rather than failing:
+
+| Situation | Behavior |
+|---|---|
+| No `.harness/.harness-version` (not an installed harness — e.g. the harness source itself) | silent skip |
+| The project is not a git work tree | silent skip |
+| `.harness/` exists but nothing in it is tracked | **warns**, does not fail |
+
+**Override:** `HARNESS_SKIP_DRIFT_CHECK=1 ./init.sh` proceeds anyway and says that it did.
+It is an environment variable, per invocation — deliberately not a `harness.config.yaml`
+key, because a config key gets set once during a bad afternoon and silently disables the
+guard forever.
+
+The guard only ever reports. It never commits, re-installs, or writes anything.
+
 ## Umbrella mode (cascade install)
 
 For a cross-repo product (see [`UMBRELLA.md`](./UMBRELLA.md)) one invocation can
