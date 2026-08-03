@@ -423,4 +423,41 @@ printf '%s' "$RECO_OUT" | grep -q "builder.md" \
   || fail "E99-F10/R3: the recovery command ran but did not list the drifted file: $RECO_OUT"
 pass "the recovery command runs verbatim from a path containing whitespace (R3) [R3_recovery_command_quotes_the_root]"
 
+# ── E99-F10 / R4: a SYMLINKED ownership ledger is not a ledger ────────────────────
+# R4_symlinked_ledger_is_rejected
+# `-d` and the glob both follow symlinks, so a symlinked .model-agents/<tool> enumerates an
+# EXTERNAL directory and turns arbitrary basenames there into "owned" pathspecs — failing
+# the mandatory gate on an operator role file no valid stamp claims. The installer already
+# refuses to trust these components; the guard must inherit that boundary.
+mkdir -p "$T/symledger"
+git -C "$T/symledger" init -q .
+git -C "$T/symledger" config user.email "test@harness.local"
+git -C "$T/symledger" config user.name "harness test"
+CODEX_HOME="$T/symledger/.codex-home" HOME="$T/symledger/.home" \
+  sh "$SRC/harness-install.sh" --agents=codex "$T/symledger" >/dev/null 2>&1 \
+  || fail "E99-F10/R4-symlink: codex install exited non-zero"
+printf 'name = "ours"\n' > "$T/symledger/.codex/agents/project-role.toml"
+git -C "$T/symledger" add -A
+git -C "$T/symledger" commit -q -m "installed harness (codex) + our own role"
+# An external directory whose basenames collide with the operator's own role file.
+mkdir -p "$T/evil-ledger"
+: > "$T/evil-ledger/project-role.toml"
+rm -rf "$T/symledger/.harness/.model-agents/codex"
+ln -s "$T/evil-ledger" "$T/symledger/.harness/.model-agents/codex"
+# Preconditions: the ledger really is a symlink, and the external dir really does name the
+# operator's file — otherwise this case cannot reproduce the escalation it exists for.
+[ -L "$T/symledger/.harness/.model-agents/codex" ] \
+  || fail "E99-F10/R4-symlink: fixture precondition broken — the ledger is not a symlink"
+[ -e "$T/evil-ledger/project-role.toml" ] \
+  || fail "E99-F10/R4-symlink: fixture precondition broken — the external dir does not name the operator's file"
+# The ledger swap is itself drift under .harness/, so commit it: the question under test is
+# whether the OPERATOR'S file gets claimed through the symlink, not whether the swap shows.
+git -C "$T/symledger" add -A
+git -C "$T/symledger" commit -q -m "symlinked ledger"
+printf 'name = "ours, edited"\n' > "$T/symledger/.codex/agents/project-role.toml"
+run_gate "$T/symledger"
+[ "$GATE_RC" = "0" ] \
+  || fail "E99-F10/R4-symlink: an operator's role file was claimed through a SYMLINKED ledger and failed the mandatory gate: $GATE_OUT"
+pass "a symlinked ownership ledger claims nothing (R4) [R4_symlinked_ledger_is_rejected]"
+
 echo "All init drift-guard tests passed."

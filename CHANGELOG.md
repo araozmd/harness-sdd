@@ -35,7 +35,15 @@ was interpolated unquoted, so git received only its first word as `-C` and exite
 the one line whose entire purpose is to be copied. Now single-quoted, with embedded quotes
 escaped.
 
-Pinned by three cases in `tests/test_init_drift_guard.sh` (19 → 24 assertions), each
+Review round 1 added a fourth: a **symlinked ownership ledger** is not a ledger. `-d` and
+the glob both follow symlinks, so a symlinked `.model-agents/<tool>` enumerated an external
+directory and turned arbitrary basenames there into owned pathspecs — failing the mandatory
+gate on an operator role file no stamp claims, which is the very class this fix exists to
+close. The guard now mirrors the installer's own three-level refusal
+(`harness-install.sh:2606-2618`) rather than trusting a ledger the installer itself would
+not write to.
+
+Pinned by four cases in `tests/test_init_drift_guard.sh` (19 → 25 assertions), each
 asserting its own fixture preconditions. That discipline earned its keep here: the first
 draft of the SIGPIPE case used 1,200 files (~70KB), stayed under the pipe buffer, and
 **survived** the mutation that restores `head -n 10` — it was asserting nothing. It now

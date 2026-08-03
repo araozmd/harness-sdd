@@ -125,11 +125,24 @@ if [ -f "$HARNESS_DIR/.harness-version" ]; then
       # creates no `.gemini/agents/` at all) or ownership is unprovable, and in both cases
       # claiming nothing is the fail-safe direction — a false negative costs a missed drift,
       # a false positive halts the harness.
+      #
+      # REJECT A SYMLINKED LEDGER. `-d` and the glob below both follow symlinks, so a
+      # symlinked `.model-agents` or `.model-agents/<tool>` would enumerate an EXTERNAL
+      # directory and turn arbitrary basenames there into "installer-owned" pathspecs —
+      # failing the mandatory gate on an operator's `.codex/agents/project-role.toml` that
+      # no valid stamp claims. The installer already refuses to trust these exact
+      # components (`model_agent_stamp_tree_is_symlinked` /
+      # `model_agent_stamp_destination_is_symlinked`, harness-install.sh:2606-2618); the
+      # guard inherits that trust boundary rather than inventing a weaker one. `-L` detects
+      # live and dangling links without dereferencing them.
       for _tool in codex gemini; do
+        [ -L "$HARNESS_DIR/.model-agents" ] && break     # the whole ledger tree is untrusted
         _stamp_dir="$HARNESS_DIR/.model-agents/$_tool"
+        [ -L "$_stamp_dir" ] && continue                 # this tool's ledger is untrusted
         [ -d "$_stamp_dir" ] || continue
         for _stamp in "$_stamp_dir"/*; do
-          [ -e "$_stamp" ] || continue                    # unmatched glob
+          [ -e "$_stamp" ] || continue                   # unmatched glob
+          [ -L "$_stamp" ] && continue                   # an individual stamp is untrusted
           HARNESS_GLUE+=( ".$_tool/agents/${_stamp##*/}" )
         done
       done
