@@ -5198,13 +5198,27 @@ ISPEC
   # this call, so tracked-file mtimes all change and status rewrites `.git/index` to refresh
   # its stat cache. That is a real write, on every idempotent landed cascade. The variable is
   # git's documented way to suppress exactly that opportunistic write.
+  # A status that FAILED is not a status that found nothing. `git status` can exit non-zero
+  # on a corrupt or unreadable index, and piping it straight into `grep -c` discarded that:
+  # the count came back 0 and the audit printed `landed` over a target it never inspected —
+  # a false CLEAN, the one output this audit must never produce. Check the exit status and
+  # emit a sentinel instead of a count.
   _n=$(
     set --
     while IFS= read -r _p; do [ -n "$_p" ] && set -- "$@" "$_p"; done <<SPEC
 $_spec
 SPEC
-    GIT_OPTIONAL_LOCKS=0 git -C "$_t" status --porcelain -uall -- "$@" 2>/dev/null | grep -c '' || true
+    if _st="$(GIT_OPTIONAL_LOCKS=0 git -C "$_t" status --porcelain -uall -- "$@" 2>/dev/null)"; then
+      # An empty status is 0 changes; `printf '' | grep -c ''` would say 1.
+      if [ -z "$_st" ]; then printf '0\n'; else printf '%s\n' "$_st" | grep -c '' || true; fi
+    else
+      printf 'ERR\n'
+    fi
   )
+  if [ "$_n" = "ERR" ]; then
+    printf '   no read   %-26s (git status failed — cannot verify)\n' "$_label"
+    return 2
+  fi
   if [ "${_n:-0}" -gt 0 ]; then
     printf '   unlanded  %-26s %s harness-owned path(s)\n' "$_label" "$_n"
     return 1

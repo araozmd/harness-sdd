@@ -157,11 +157,15 @@ emit_local_only() {
   _tlog="$(awk '
     /^telemetry:[[:space:]]*(#.*)?$/ { t=1; next }
     t && /^[^[:space:]#]/ { t=0 }
+    # Quote stripping happens in the sed below, NOT here: embedding a literal single quote
+    # inside this single-quoted awk program needs the '\'' dance, and getting that subtly
+    # wrong is how the double-quote-only version shipped. YAML accepts both forms and the
+    # installer strips both, so the helper must too.
     t && /^[[:space:]]+log:/ {
       sub(/^[[:space:]]+log:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
-      gsub(/^"|"$/, ""); print; exit
+      print; exit
     }
-  ' "$_cfg" 2>/dev/null)"
+  ' "$_cfg" 2>/dev/null | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'\$//")"
   case "$_tlog" in
     ""|telemetry.jsonl|/*) return 0 ;;
   esac

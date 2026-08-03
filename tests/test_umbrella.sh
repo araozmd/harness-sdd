@@ -699,11 +699,15 @@ pass "…and a fresh un-ignored body is still unlanded (R2 control) [R2_ignored_
 # than over-claims) but silently exempts the target. Reported as P2 on PR #103 round 4.
 mk_umb "$AU/tlog" child-u
 cascade "$AU/tlog"
-python3 - "$AU/tlog/child-u/.harness/harness.config.yaml" <<'PYCFG'
+python3 - "$AU/tlog/child-u/.harness/harness.config.yaml" <<'PYCFG' \
+  || fail "R2-tlog: could not rewrite telemetry.log in the fixture config"
 import sys
 p = sys.argv[1]
-s = open(p).read().replace("log: telemetry.jsonl", "log: custom/my.jsonl", 1)
-open(p, "w").write(s)
+s = open(p).read()
+# ASSERT the anchor. A silent no-op here leaves the default config in place, the case then
+# tests nothing, and it passes — which is exactly what happened while writing this suite.
+assert "log: telemetry.jsonl" in s, "telemetry.log anchor not found in " + p
+open(p, "w").write(s.replace("log: telemetry.jsonl", "log: custom/my.jsonl", 1))
 PYCFG
 cascade "$AU/tlog"                       # re-run so install_one seeds the override ignore
 mkdir -p "$AU/tlog/child-u/.harness/custom"
@@ -721,5 +725,52 @@ printf '%s' "$AU_OUT" | grep -qE "no vcs +child-u" \
 printf '%s' "$AU_OUT" | grep -qE "landed +child-u" \
   || fail "R2-tlog: a fully landed target with a telemetry override was not reported landed: $AU_OUT"
 pass "a configured telemetry.log override is subtracted, not treated as unverifiable (R2) [R2_configured_telemetry_override_is_subtracted]"
+
+# ── R2: a FAILED git status is not a status that found nothing ─────────────────────────
+# R2_failed_status_is_not_landed
+# `git status` exits non-zero on a corrupt or unreadable index. Piping it straight into
+# `grep -c` discarded that: the count came back 0 and the audit printed `landed` over a
+# target it never inspected. A false CLEAN is the one output this audit must never produce.
+# Reported as P2 on PR #103 round 5.
+mk_umb "$AU/corrupt" child-v
+cascade "$AU/corrupt"
+land "$AU/corrupt/child-v"
+printf 'CORRUPT' > "$AU/corrupt/child-v/.git/index"
+# Precondition: status really does fail here — otherwise the case proves nothing.
+git -C "$AU/corrupt/child-v" status --porcelain -uall -- .harness/ >/dev/null 2>&1 \
+  && fail "R2-failstatus: fixture precondition broken — git status still succeeds on the corrupt index"
+cascade "$AU/corrupt"
+printf '%s' "$AU_OUT" | grep -qE "landed +child-v" \
+  && fail "R2-failstatus: FALSE CLEAN — a target whose git status FAILED was reported landed: $AU_OUT"
+printf '%s' "$AU_OUT" | grep -qE "no read +child-v" \
+  || fail "R2-failstatus: a failed git status was not reported as unverifiable: $AU_OUT"
+pass "a failed git status is reported unverifiable, never landed (R2) [R2_failed_status_is_not_landed]"
+
+# ── R2: the telemetry override is read in BOTH YAML quote forms ────────────────────────
+# R2_telemetry_override_single_quoted
+# YAML accepts `log: 'x'` as well as `log: "x"`, and install_one strips both before seeding
+# the ignore. The helper stripped only double quotes, so a single-quoted override produced a
+# pattern containing literal apostrophes, matched nothing, and the target read unverifiable
+# forever. Reported as P2 on PR #103 round 5.
+mk_umb "$AU/tlq" child-w
+cascade "$AU/tlq"
+python3 - "$AU/tlq/child-w/.harness/harness.config.yaml" <<'PYCFG' \
+  || fail "R2-tlq: could not rewrite telemetry.log in the fixture config"
+import sys
+p = sys.argv[1]
+s = open(p).read()
+assert "log: telemetry.jsonl" in s, "telemetry.log anchor not found in " + p
+open(p, "w").write(s.replace("log: telemetry.jsonl", "log: 'custom/my.jsonl'", 1))
+PYCFG
+cascade "$AU/tlq"
+mkdir -p "$AU/tlq/child-w/.harness/custom"
+printf '{}\n' > "$AU/tlq/child-w/.harness/custom/my.jsonl"
+land "$AU/tlq/child-w"
+git -C "$AU/tlq/child-w" check-ignore -q .harness/custom/my.jsonl \
+  || fail "R2-tlq: fixture precondition broken — the single-quoted override is not ignored"
+cascade "$AU/tlq"
+printf '%s' "$AU_OUT" | grep -qE "landed +child-w" \
+  || fail "R2-tlq: a single-quoted telemetry.log override was not subtracted: $AU_OUT"
+pass "the telemetry override is read in both YAML quote forms (R2) [R2_telemetry_override_single_quoted]"
 
 echo "All umbrella tests passed."
