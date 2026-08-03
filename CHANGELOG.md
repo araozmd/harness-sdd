@@ -20,7 +20,13 @@ The cascade now ends with a per-target audit and exits **3** when anything is un
 deliberately not the generic failure code `1`, because "the install broke" and "the install
 succeeded and is unlanded" are different outcomes and conflating them loses the only
 information that makes the code actionable. A target that is not a git work tree is reported
-and never counted. `--dry-run` skips the audit, as it writes nothing.
+and never counted, as is one whose body is **git-ignored** — with nothing under `.harness/` in
+the index, `git status` returns no entries even immediately after the cascade wrote the whole
+body, so the audit would otherwise print `landed` over a body that was never committed. The
+discriminator is `check-ignore`, deliberately not "is anything tracked": a fresh cascade also
+has nothing tracked yet, and that is the primary case this feature exists to catch. The
+closing line states what was actually established — `N of M verified committed, K not
+verifiable` — rather than over-claiming. `--dry-run` skips the audit, as it writes nothing.
 
 **It reports; it never commits.** Committing into N repos the operator did not ask you to
 commit into is a far larger claim on their working tree, and the constraints it would have to

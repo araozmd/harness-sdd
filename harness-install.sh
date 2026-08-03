@@ -5149,12 +5149,32 @@ audit_one() {
   _t="$1"; _label="$2"
   if ! git -C "$_t" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     printf '   no git    %-26s (not a work tree — cannot verify)\n' "$_label"
-    return 0
+    return 2
   fi
   _spec="$("$SRC/tools/harness-owned-paths.sh" all "$_t/.harness" 2>/dev/null || true)"
   if [ -z "$_spec" ]; then
     printf '   no spec   %-26s (ownership helper unavailable — cannot verify)\n' "$_label"
-    return 0
+    return 2
+  fi
+  # Is the body IGNORED? That is the discriminator — not "is anything tracked".
+  #
+  # A target that gitignores `.harness/` while tracking the root glue has nothing under
+  # .harness/ in the index, so `git status` reports no entries even immediately after the
+  # cascade wrote the whole body: the audit would print `landed` and then claim "every
+  # target committed" over a body that was never committed at all. A false CLEAN is the
+  # worst output this audit can emit — it is the exact claim the audit exists to make
+  # trustworthy.
+  #
+  # But an `ls-files`-empty probe (the shape init.sh uses for its own warn-only branch)
+  # cannot be reused here: a FRESH cascade into a git repo also has nothing tracked under
+  # .harness/ yet, and that is the primary case this whole feature exists to catch. The two
+  # states are identical to `ls-files` and opposite in meaning, so ask the question that
+  # actually separates them — `check-ignore` — instead of the one that happens to be true
+  # in both. Ignored ⇒ unverifiable; merely untracked ⇒ unlanded, reported by the -uall
+  # status below.
+  if git -C "$_t" check-ignore -q .harness 2>/dev/null; then
+    printf '   no vcs    %-26s (body is git-ignored — cannot verify)\n' "$_label"
+    return 2
   fi
   # -uall for the reason E99-F10 established: an upgrade that ADDS a body file leaves it
   # untracked, and status.showUntrackedFiles=no would hide exactly the divergence being audited.
@@ -5175,17 +5195,25 @@ SPEC
 }
 
 _audit_unlanded=0
+_audit_unverified=0
 _audit_total=0
 # Fed from a here-document, not a pipe: `... | while read` runs its body in a SUBSHELL in
 # POSIX sh, so every counter incremented in there would die at the `done`.
 while IFS= read -r _c; do
   [ -n "$_c" ] || continue
   _audit_total=$((_audit_total + 1))
+  # 0 landed, 1 unlanded, 2 unverifiable — counted separately so the closing line can
+  # state what was actually established rather than over-claiming.
+  _rc=0
   if [ "$_c" = "." ]; then
-    audit_one "$UMB" "(coordinator)" || _audit_unlanded=$((_audit_unlanded + 1))
+    audit_one "$UMB" "(coordinator)" || _rc=$?
   else
-    audit_one "$UMB/$_c" "$_c" || _audit_unlanded=$((_audit_unlanded + 1))
+    audit_one "$UMB/$_c" "$_c" || _rc=$?
   fi
+  case "$_rc" in
+    1) _audit_unlanded=$((_audit_unlanded + 1)) ;;
+    2) _audit_unverified=$((_audit_unverified + 1)) ;;
+  esac
 done <<AUDIT
 .
 $INSTALLED_CHILDREN
@@ -5202,5 +5230,11 @@ if [ "$_audit_unlanded" -gt 0 ]; then
   # tell them apart loses the only information that makes the code actionable.
   exit 3
 fi
-ok "umbrella cascade complete (v$VERSION) — every target committed"
+if [ "$_audit_unverified" -gt 0 ]; then
+  # Say only what was established. "every target committed" over a target whose body could
+  # not be inspected is the same over-claim, one level up, that this whole epic is about.
+  ok "umbrella cascade complete (v$VERSION) — $((_audit_total - _audit_unverified)) of $_audit_total target(s) verified committed, $_audit_unverified not verifiable"
+else
+  ok "umbrella cascade complete (v$VERSION) — every target committed"
+fi
 echo "   coordinator: $UMB/.harness   manifest: $MANIFEST"

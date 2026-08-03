@@ -540,8 +540,15 @@ pass "an unlanded cascade names every child with a count and exits 3 (R1-R4) [R1
 land "$AU/u1/child-a"; land "$AU/u1/child-b"
 cascade "$AU/u1"
 [ "$AU_RC" = "0" ] || fail "R6: a fully landed cascade exited $AU_RC, want 0: $AU_OUT"
-printf '%s' "$AU_OUT" | grep -q "every target committed" \
+# The confirming line states what was ESTABLISHED. The default umbrella root is non-git, so
+# it is unverifiable and the honest form is "N of M verified committed, K not verifiable" —
+# "every target committed" is reserved for a cascade where every target really was checked.
+# Asserting the generic "cascade complete" plus the per-child `landed` rows below keeps this
+# case about the verdict rather than about which of the two accurate wordings applies.
+printf '%s' "$AU_OUT" | grep -q "cascade complete" \
   || fail "R6: no confirming line on a fully landed cascade: $AU_OUT"
+printf '%s' "$AU_OUT" | grep -qE "verified committed|every target committed" \
+  || fail "R6: the confirming line does not state what was verified: $AU_OUT"
 printf '%s' "$AU_OUT" | grep -qE "landed +child-a" \
   || fail "R6: child-a not reported as landed: $AU_OUT"
 pass "a fully landed cascade prints the confirming line and exits 0 (R6) [R6_all_landed_exits_zero]"
@@ -619,5 +626,43 @@ cascade "$AU/u5"
 [ "$AU_RC" = "3" ] \
   || fail "R2-uall: an ADDED, uncommitted body file was hidden by status.showUntrackedFiles=no — the audit needs -uall (rc=$AU_RC): $AU_OUT"
 pass "an added body file is caught under status.showUntrackedFiles=no (R2) [R2_added_file_caught_under_hidden_untracked]"
+
+# ── R2: an IGNORED body must not be reported as landed ─────────────────────────────────
+# R2_ignored_body_is_not_reported_landed
+# A target that gitignores `.harness/` while tracking the root glue has nothing under
+# .harness/ in the index, so `git status` returns no entries even immediately after the
+# cascade wrote the entire body — the audit printed `landed` and the run claimed "every
+# target committed" over a body that was never committed at all. Reported as P1 on PR #103.
+#
+# The discriminator is `check-ignore`, NOT "is anything tracked": a FRESH cascade into a git
+# repo also has nothing tracked under .harness/ yet, and that is the primary case this
+# feature exists to catch. The control below pins exactly that distinction.
+mk_umb "$AU/u6" child-g
+printf '.harness/\n' > "$AU/u6/child-g/.gitignore"
+git -C "$AU/u6/child-g" add -A && git -C "$AU/u6/child-g" commit -q -m "ignore the harness body"
+cascade "$AU/u6"
+land "$AU/u6/child-g"          # commits the ROOT GLUE; .harness/ stays ignored
+# Precondition: this is the asymmetry under test — nothing tracked under .harness/, glue tracked.
+[ "$(git -C "$AU/u6/child-g" ls-files -- .harness/ | wc -l | tr -d ' ')" = "0" ] \
+  || fail "R2-ignored: fixture precondition broken — something under .harness/ is tracked"
+[ "$(git -C "$AU/u6/child-g" ls-files -- .claude/ | wc -l | tr -d ' ')" != "0" ] \
+  || fail "R2-ignored: fixture precondition broken — no root glue is tracked"
+cascade "$AU/u6"
+printf '%s' "$AU_OUT" | grep -qE "landed +child-g" \
+  && fail "R2-ignored: FALSE CLEAN — a git-ignored body was reported as landed: $AU_OUT"
+printf '%s' "$AU_OUT" | grep -qE "no vcs +child-g" \
+  || fail "R2-ignored: an ignored body was not reported as unverifiable: $AU_OUT"
+printf '%s' "$AU_OUT" | grep -q "every target committed" \
+  && fail "R2-ignored: the closing line over-claimed 'every target committed' with an unverifiable target: $AU_OUT"
+pass "a git-ignored body is reported unverifiable, never landed (R2) [R2_ignored_body_is_not_reported_landed]"
+# Control: a fresh, NOT-ignored body is also untracked — and must be UNLANDED, not
+# unverifiable. A fix that keyed on "nothing tracked" instead of "ignored" passes the case
+# above and fails here, silently exempting every fresh cascade.
+mk_umb "$AU/u7" child-h
+cascade "$AU/u7"
+printf '%s' "$AU_OUT" | grep -qE "unlanded +child-h" \
+  || fail "R2-ignored control: a fresh untracked (not ignored) body was not reported unlanded — the probe keyed on tracked-ness, not ignored-ness: $AU_OUT"
+[ "$AU_RC" = "3" ] || fail "R2-ignored control: a fresh cascade did not exit 3 (rc=$AU_RC)"
+pass "…while a fresh, un-ignored body is still unlanded (R2 control) [R2_ignored_body_is_not_reported_landed]"
 
 echo "All umbrella tests passed."
