@@ -638,68 +638,56 @@ cascade "$AU/u5"
   || fail "R2-uall: an ADDED, uncommitted body file was hidden by status.showUntrackedFiles=no — the audit needs -uall (rc=$AU_RC): $AU_OUT"
 pass "an added body file is caught under status.showUntrackedFiles=no (R2) [R2_added_file_caught_under_hidden_untracked]"
 
-# ── R2: an IGNORED body must not be reported as landed ─────────────────────────────────
-# R2_ignored_body_is_not_reported_landed
-# A target that gitignores `.harness/` while tracking the root glue has nothing under
-# .harness/ in the index, so `git status` returns no entries even immediately after the
-# cascade wrote the entire body — the audit printed `landed` and the run claimed "every
-# target committed" over a body that was never committed at all. Reported as P1 on PR #103.
+
+# ── R2: ANY ignored owned subtree must not be reported as landed ───────────────────────
+# R2_ignored_owned_subtree_is_not_landed
+# Three narrower probes shipped and each missed a shape: `check-ignore .harness` missed
+# `.harness/tools/`, and witness-file sampling then missed `.harness/docs/` and
+# `.claude/commands/` (no witness lived in them). Each fix was a narrower sample that invited
+# the next gap, so the probe was inverted: git's COMPLETE ignored set over the owned
+# pathspecs, minus the harness's own deliberate local-only list.
 #
-# The discriminator is `check-ignore`, NOT "is anything tracked": a FRESH cascade into a git
-# repo also has nothing tracked under .harness/ yet, and that is the primary case this
-# feature exists to catch. The control below pins exactly that distinction.
-mk_umb "$AU/u6" child-g
-printf '.harness/\n' > "$AU/u6/child-g/.gitignore"
-git -C "$AU/u6/child-g" add -A && git -C "$AU/u6/child-g" commit -q -m "ignore the harness body"
-cascade "$AU/u6"
-land "$AU/u6/child-g"          # commits the ROOT GLUE; .harness/ stays ignored
-# Precondition: this is the asymmetry under test — nothing tracked under .harness/, glue tracked.
-[ "$(git -C "$AU/u6/child-g" ls-files -- .harness/ | wc -l | tr -d ' ')" = "0" ] \
-  || fail "R2-ignored: fixture precondition broken — something under .harness/ is tracked"
-[ "$(git -C "$AU/u6/child-g" ls-files -- .claude/ | wc -l | tr -d ' ')" != "0" ] \
-  || fail "R2-ignored: fixture precondition broken — no root glue is tracked"
-cascade "$AU/u6"
-printf '%s' "$AU_OUT" | grep -qE "landed +child-g" \
-  && fail "R2-ignored: FALSE CLEAN — a git-ignored body was reported as landed: $AU_OUT"
-printf '%s' "$AU_OUT" | grep -qE "no vcs +child-g" \
-  || fail "R2-ignored: an ignored body was not reported as unverifiable: $AU_OUT"
-printf '%s' "$AU_OUT" | grep -q "every target committed" \
-  && fail "R2-ignored: the closing line over-claimed 'every target committed' with an unverifiable target: $AU_OUT"
-pass "a git-ignored body is reported unverifiable, never landed (R2) [R2_ignored_body_is_not_reported_landed]"
-# Control: a fresh, NOT-ignored body is also untracked — and must be UNLANDED, not
-# unverifiable. A fix that keyed on "nothing tracked" instead of "ignored" passes the case
-# above and fails here, silently exempting every fresh cascade.
+# This case is therefore a MATRIX over ignore shapes rather than one fixture. A sampling
+# probe passes for whichever shapes it happens to cover and fails the rest — which is exactly
+# how the previous two fixes looked green.
+_shape_n=0
+for _ign in '.harness/' '.harness/tools/' '.harness/docs/' '.claude/commands/'; do
+  _shape_n=$((_shape_n + 1))
+  _u="$AU/shape$_shape_n"
+  mk_umb "$_u" child-s
+  printf '%s\n' "$_ign" > "$_u/child-s/.gitignore"
+  git -C "$_u/child-s" add -A && git -C "$_u/child-s" commit -q -m "ignore $_ign"
+  cascade "$_u"
+  land "$_u/child-s"                     # commit everything git will accept
+  # Precondition: the ignore really does hide installed files from the index.
+  [ "$(git -C "$_u/child-s" ls-files -- "$_ign" 2>/dev/null | wc -l | tr -d ' ')" = "0" ] \
+    || fail "R2-shapes: fixture precondition broken — files under '$_ign' are tracked"
+  cascade "$_u"
+  printf '%s' "$AU_OUT" | grep -qE "landed +child-s" \
+    && fail "R2-shapes: FALSE CLEAN — '$_ign' ignored, yet reported landed: $AU_OUT"
+  printf '%s' "$AU_OUT" | grep -qE "no vcs +child-s" \
+    || fail "R2-shapes: '$_ign' ignored but not reported unverifiable: $AU_OUT"
+done
+pass "every ignored owned subtree shape is unverifiable, never landed (R2) [R2_ignored_owned_subtree_is_not_landed]"
+# Control 1: a HEALTHY target must still read `landed`. The harness seeds its own ignores
+# (`__pycache__/`, `telemetry.jsonl`), so a probe that merely counted ignored paths would
+# call every healthy target unverifiable and never fail a real cascade again.
+mk_umb "$AU/healthy" child-t
+cascade "$AU/healthy"
+land "$AU/healthy/child-t"
+cascade "$AU/healthy"
+printf '%s' "$AU_OUT" | grep -qE "landed +child-t" \
+  || fail "R2-shapes control: a HEALTHY landed target was not reported landed — the local-only subtraction is missing: $AU_OUT"
+[ "$AU_RC" = "0" ] || fail "R2-shapes control: a healthy landed cascade exited $AU_RC, want 0"
+pass "…while a healthy target is still landed (R2 control) [R2_ignored_owned_subtree_is_not_landed]"
+# Control 2: a fresh, un-ignored body is UNLANDED, not unverifiable — a probe keyed on
+# tracked-ness rather than ignored-ness passes the matrix above and silently exempts every
+# fresh cascade.
 mk_umb "$AU/u7" child-h
 cascade "$AU/u7"
 printf '%s' "$AU_OUT" | grep -qE "unlanded +child-h" \
-  || fail "R2-ignored control: a fresh untracked (not ignored) body was not reported unlanded — the probe keyed on tracked-ness, not ignored-ness: $AU_OUT"
-[ "$AU_RC" = "3" ] || fail "R2-ignored control: a fresh cascade did not exit 3 (rc=$AU_RC)"
-pass "…while a fresh, un-ignored body is still unlanded (R2 control) [R2_ignored_body_is_not_reported_landed]"
-
-# ── R2: a PARTIALLY ignored body must not be reported as landed ────────────────────────
-# R2_partially_ignored_body_is_not_landed
-# Ignoring a subtree (`.harness/tools/`) leaves `.harness` itself un-ignored, so a
-# `check-ignore .harness` probe answers "not ignored" while every installed tool is
-# suppressed from `status` — landed, over a body missing from the index. Reported as P1 on
-# PR #103 round 2, after the whole-body case was already fixed.
-mk_umb "$AU/u8" child-i
-printf '.harness/tools/\n' > "$AU/u8/child-i/.gitignore"
-git -C "$AU/u8/child-i" add -A && git -C "$AU/u8/child-i" commit -q -m "ignore one body subtree"
-cascade "$AU/u8"
-land "$AU/u8/child-i"                  # commit everything git will accept
-# Preconditions: the parent really is un-ignored while the subtree really is — that asymmetry
-# IS the case. Without both, this passes for the wrong reason.
-git -C "$AU/u8/child-i" check-ignore -q .harness \
-  && fail "R2-partial: fixture precondition broken — .harness itself is ignored, this is the whole-body case"
-git -C "$AU/u8/child-i" check-ignore -q .harness/tools \
-  || fail "R2-partial: fixture precondition broken — .harness/tools is not ignored"
-[ "$(git -C "$AU/u8/child-i" ls-files -- .harness/tools/ | wc -l | tr -d ' ')" = "0" ] \
-  || fail "R2-partial: fixture precondition broken — something under .harness/tools/ is tracked"
-cascade "$AU/u8"
-printf '%s' "$AU_OUT" | grep -qE "landed +child-i" \
-  && fail "R2-partial: FALSE CLEAN — a partially ignored body was reported as landed: $AU_OUT"
-printf '%s' "$AU_OUT" | grep -qE "no vcs +child-i" \
-  || fail "R2-partial: a partially ignored body was not reported as unverifiable: $AU_OUT"
-pass "a partially ignored body is reported unverifiable, never landed (R2) [R2_partially_ignored_body_is_not_landed]"
+  || fail "R2-shapes control: a fresh untracked (not ignored) body was not reported unlanded: $AU_OUT"
+[ "$AU_RC" = "3" ] || fail "R2-shapes control: a fresh cascade did not exit 3 (rc=$AU_RC)"
+pass "…and a fresh un-ignored body is still unlanded (R2 control) [R2_ignored_owned_subtree_is_not_landed]"
 
 echo "All umbrella tests passed."

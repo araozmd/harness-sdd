@@ -22,13 +22,14 @@ succeeded and is unlanded" are different outcomes and conflating them loses the 
 information that makes the code actionable. A target that is not a git work tree is reported
 and never counted, as is one whose body is **git-ignored** — with nothing under `.harness/` in
 the index, `git status` returns no entries even immediately after the cascade wrote the whole
-body, so the audit would otherwise print `landed` over a body that was never committed. The
-discriminator is a set of concrete **witness files** spread across body subtrees, deliberately
-not "is anything tracked" (a fresh cascade also has nothing tracked yet, and that is the
-primary case this feature exists to catch), not `check-ignore .harness` (ignoring
-`.harness/tools/` leaves the parent un-ignored while every tool is suppressed), and not
-`status --ignored=matching` (the installer seeds ignores for its own local-only files, so
-every healthy target would read as ignored). The audit's git reads run under
+body, so the audit would otherwise print `landed` over a body that was never committed. The discriminator is git's **complete ignored set** over the owned pathspecs, minus the short
+local-only list the installer seeds itself. Three narrower probes were tried first and each
+missed a real case: `ls-files`-empty (a fresh cascade also has nothing tracked — identical
+state, opposite meaning), `check-ignore .harness` (ignoring `.harness/tools/` leaves the
+parent un-ignored), and witness-file sampling (an ignored subtree containing no witness, like
+`.harness/docs/`, slips through). Each was a narrower sample that invited the next gap, so the
+question was inverted: subtract a known-small deliberate set from the complete one, and new
+body subtrees are covered automatically. The audit's git reads run under
 `GIT_OPTIONAL_LOCKS=0`: `install_one` recopies the body, so a plain `git status` rewrites
 `.git/index` to refresh its stat cache — a real write, on every idempotent cascade. The
 closing line states what was actually established — `N of M verified committed, K not

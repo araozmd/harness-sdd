@@ -16,7 +16,7 @@
 # Usage:
 #   harness-owned-paths.sh body    <harness-dir>   the installed body, minus project-owned
 #   harness-owned-paths.sh all     <harness-dir>   body + generated front-end glue
-#   harness-owned-paths.sh witness <harness-dir>   a few concrete files that MUST be tracked
+#   harness-owned-paths.sh local-only <harness-dir>  EREs for paths the harness ITSELF ignores
 #
 #   <harness-dir> is the directory holding the harness (a target's `.harness/`, or the
 #   repository root in the harness source layout). Pathspecs are printed RELATIVE TO THE
@@ -30,7 +30,7 @@ set -eu
 mode="${1:-}"
 hdir="${2:-}"
 case "$mode" in
-  body|all|witness) ;;
+  body|all|local-only) ;;
   *) echo "usage: $0 <body|all> <harness-dir>" >&2; exit 2 ;;
 esac
 [ -n "$hdir" ] || { echo "usage: $0 <body|all> <harness-dir>" >&2; exit 2; }
@@ -113,32 +113,39 @@ emit_glue() {
   done
 }
 
-# ── witness files ────────────────────────────────────────────────────────────────────────
-# A handful of CONCRETE body files that must be version-controlled for the body to be
-# verifiable at all. Callers use them to ask "is this body actually under git?" — a question
-# the pathspec lists above cannot answer:
+# ── the harness's own intentional ignores ────────────────────────────────────────────────
+# Extended regexes matching paths INSIDE the owned set that the harness deliberately keeps
+# out of version control — the installer seeds them into `.harness/.gitignore` itself.
 #
-#   * `ls-files`-empty is ambiguous. A body that is git-IGNORED and a body from a FRESH
-#     install look identical (nothing tracked) and mean opposite things.
-#   * `check-ignore .harness` misses a partially-ignored body: ignoring `.harness/tools/`
-#     leaves the parent un-ignored while every installed tool is suppressed from `status`.
-#   * `status --ignored=matching` over the owned set is too broad in the other direction —
-#     the installer SEEDS ignores for its own local-only files (`telemetry.jsonl`,
-#     `.pr-loop/`, `state/tasks.json.lock`), so every healthy target reports ignored paths.
+# A caller asking "is any owned path git-ignored?" (the only complete way to detect a body
+# that git cannot see) must subtract these, or every healthy target answers yes. Three
+# narrower probes were tried first and each missed a real case:
 #
-# These four are spread across distinct body subtrees deliberately, so a subtree-level ignore
-# rule is caught by at least one of them. They are the harness's own identity files; if the
-# enumeration ever goes stale, it fails SAFE — a caller sees fewer witnesses, not wrong ones.
-emit_witness() {
-  printf '%sAGENTS.md\n'                      "$pfx"
-  printf '%sinit.sh\n'                        "$pfx"
-  printf '%sagents/builder.md\n'              "$pfx"
-  printf '%stools/harness-owned-paths.sh\n'   "$pfx"
+#   ls-files-empty        a FRESH install also has nothing tracked — identical state to an
+#                         ignored body, opposite meaning.
+#   check-ignore .harness misses a partially-ignored body (`.harness/tools/`).
+#   witness files         samples a few paths, so an ignored subtree containing none of them
+#                         (`.harness/docs/`, `.claude/commands/`) slips through. Adding a
+#                         witness per subtree is a treadmill: the set is only ever as
+#                         complete as the last bug report.
+#
+# Subtracting a KNOWN-SMALL intentional set from the COMPLETE ignored set inverts that: new
+# body subtrees are covered automatically, and only a new deliberate ignore needs an entry
+# here — beside the pathspecs it belongs with.
+emit_local_only() {
+  printf '%s\n' \
+    '(^|/)telemetry\.jsonl$' \
+    '(^|/)jira\.pat$' \
+    '(^|/)\.pr-loop/' \
+    '(^|/)\.opencode-parallel$' \
+    '(^|/)__pycache__/' \
+    '\.pyc$' \
+    '(^|/)state/tasks\.json\.lock$'
 }
 
 case "$mode" in
-  witness) emit_witness ;;
-  body)    emit_body ;;
-  all)     emit_body; emit_glue ;;
+  local-only) emit_local_only ;;
+  body)       emit_body ;;
+  all)        emit_body; emit_glue ;;
 esac
 exit 0

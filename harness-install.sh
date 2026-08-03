@@ -5156,35 +5156,38 @@ audit_one() {
     printf '   no spec   %-26s (ownership helper unavailable — cannot verify)\n' "$_label"
     return 2
   fi
-  # Is the body actually under git? Probe concrete WITNESS files, not a pathspec.
+  # Is ANY owned path git-ignored? Ask git for the COMPLETE set, then subtract the ignores
+  # the harness deliberately seeds itself.
   #
-  # A body that is git-ignored has nothing in the index, so `git status` reports no entries
-  # even immediately after the cascade wrote all of it: the audit would print `landed` and
-  # claim the target committed over a body that was never committed. A false CLEAN is the
-  # worst output this audit can emit.
+  # A body git cannot see has nothing in the index, so `git status` reports no entries even
+  # immediately after the cascade wrote all of it: the audit would print `landed` and claim
+  # the target committed over a body that was never committed. A false CLEAN is the worst
+  # output this audit can emit.
   #
-  # Three probes were tried and rejected, each failing in a way the witnesses do not:
-  #   * `ls-files`-empty (init.sh's own shape) — a FRESH cascade also has nothing tracked
-  #     yet, and that is the primary case this feature exists to catch. Identical states,
-  #     opposite meanings.
-  #   * `check-ignore .harness` — misses a partially-ignored body: ignoring `.harness/tools/`
-  #     leaves the parent un-ignored while every installed tool is suppressed from `status`.
-  #   * `status --ignored=matching` over the owned set — too broad the other way: the
-  #     installer SEEDS ignores for its own local-only files (telemetry.jsonl, .pr-loop/,
-  #     state/tasks.json.lock), so every healthy target reported ignored paths and no fresh
-  #     cascade was ever counted unlanded.
-  _ignored=0
-  while IFS= read -r _w; do
-    [ -n "$_w" ] || continue
-    [ -e "$_t/$_w" ] || continue                  # not installed here — nothing to say
-    if GIT_OPTIONAL_LOCKS=0 git -C "$_t" check-ignore -q "$_w" 2>/dev/null; then
-      _ignored=$((_ignored + 1))
-    fi
-  done <<WSPEC
-$("$SRC/tools/harness-owned-paths.sh" witness "$_t/.harness" 2>/dev/null || true)
-WSPEC
-  if [ "$_ignored" -gt 0 ]; then
-    printf '   no vcs    %-26s (body is git-ignored — cannot verify)\n' "$_label"
+  # THREE narrower probes were tried across three review rounds, and each missed a real case:
+  #   ls-files-empty          a FRESH cascade also has nothing tracked — identical state to
+  #                           an ignored body, opposite meaning; broke the primary case.
+  #   check-ignore .harness   misses a partially-ignored body (`.harness/tools/`).
+  #   witness files           samples a few paths, so an ignored subtree containing none of
+  #                           them (`.harness/docs/`, `.claude/commands/`) slipped through.
+  #
+  # Each fix was a narrower sample and each invited the next gap, so this one inverts the
+  # question: take git's COMPLETE ignored set over the owned pathspecs and subtract the
+  # short, deliberate local-only list. New body subtrees are then covered automatically; only
+  # a new deliberate ignore needs maintenance, in the one file that owns that knowledge.
+  _lo="$("$SRC/tools/harness-owned-paths.sh" local-only "$_t/.harness" 2>/dev/null || true)"
+  _lo_alt="$(printf '%s' "$_lo" | tr '\n' '|' | sed 's/|$//')"
+  [ -n "$_lo_alt" ] || _lo_alt='$^'        # match nothing rather than everything if empty
+  _ign=$(
+    set --
+    while IFS= read -r _p; do [ -n "$_p" ] && set -- "$@" "$_p"; done <<ISPEC
+$_spec
+ISPEC
+    GIT_OPTIONAL_LOCKS=0 git -C "$_t" status --porcelain -uall --ignored=matching -- "$@" 2>/dev/null \
+      | sed -n 's/^!! //p' | grep -Ev "$_lo_alt" | grep -c '' || true
+  )
+  if [ "${_ign:-0}" -gt 0 ]; then
+    printf '   no vcs    %-26s (%s owned path(s) git-ignored — cannot verify)\n' "$_label" "$_ign"
     return 2
   fi
   # -uall for the reason E99-F10 established: an upgrade that ADDS a body file leaves it
