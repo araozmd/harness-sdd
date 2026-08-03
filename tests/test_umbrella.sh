@@ -588,16 +588,27 @@ pass "--dry-run writes nothing and skips the audit (R7) [R7_dry_run_skips_audit]
 # committing, which is exactly the accident this epic exists to prevent.
 mk_umb "$AU/u4" child-e
 cascade "$AU/u4"                       # first run installs (and reports unlanded)
+land "$AU/u4/child-e"                  # commit it: the write under test is the stat-cache
+git -C "$AU/u4/child-e" status --porcelain >/dev/null   # settle the cache before measuring
 _head_before="$(git -C "$AU/u4/child-e" rev-parse HEAD)"
-_status_before="$(git -C "$AU/u4/child-e" status --porcelain)"
-_idx_before="$(ls -l "$AU/u4/child-e/.git/index" 2>/dev/null || echo none)"
+_status_before="$(GIT_OPTIONAL_LOCKS=0 git -C "$AU/u4/child-e" status --porcelain)"
+# BYTE-COMPARE the index, not `ls -l` it. mtime via ls has one-second resolution, and the
+# write this guards against — git refreshing its stat cache after install_one recopies the
+# body — completes well inside a second, so the original `ls -l` comparison could not see it
+# and did not. Copy the file and `cmp`: exact, portable, no stat(1) format differences.
+cp "$AU/u4/child-e/.git/index" "$AU/u4/index.before" 2>/dev/null || true
 cascade "$AU/u4"                       # second run: install is idempotent, audit runs again
+# The index comparison MUST come first, before any other git command in this block. A plain
+# `git status` refreshes the stat cache and rewrites .git/index itself — so verifying with it
+# first would destroy the very evidence being checked. (The first draft did exactly that and
+# reported a violation that was its own measurement.) Every later probe here is read-only or
+# runs under GIT_OPTIONAL_LOCKS=0.
+cmp -s "$AU/u4/index.before" "$AU/u4/child-e/.git/index" \
+  || fail "R9: the audit rewrote the target's git index (byte-compare) — needs GIT_OPTIONAL_LOCKS=0"
 [ "$(git -C "$AU/u4/child-e" rev-parse HEAD)" = "$_head_before" ] \
   || fail "R9: the audit created a commit in the target"
-[ "$(git -C "$AU/u4/child-e" status --porcelain)" = "$_status_before" ] \
+[ "$(GIT_OPTIONAL_LOCKS=0 git -C "$AU/u4/child-e" status --porcelain)" = "$_status_before" ] \
   || fail "R9: the audit changed the target's working tree or index"
-[ "$(ls -l "$AU/u4/child-e/.git/index" 2>/dev/null || echo none)" = "$_idx_before" ] \
-  || fail "R9: the audit touched the target's git index"
 pass "the audit never modifies a target's git state (R9) [R9_audit_is_read_only]"
 
 # ── R2: an ADDED body file is caught even when git is configured to hide untracked ─────
@@ -664,5 +675,31 @@ printf '%s' "$AU_OUT" | grep -qE "unlanded +child-h" \
   || fail "R2-ignored control: a fresh untracked (not ignored) body was not reported unlanded — the probe keyed on tracked-ness, not ignored-ness: $AU_OUT"
 [ "$AU_RC" = "3" ] || fail "R2-ignored control: a fresh cascade did not exit 3 (rc=$AU_RC)"
 pass "…while a fresh, un-ignored body is still unlanded (R2 control) [R2_ignored_body_is_not_reported_landed]"
+
+# ── R2: a PARTIALLY ignored body must not be reported as landed ────────────────────────
+# R2_partially_ignored_body_is_not_landed
+# Ignoring a subtree (`.harness/tools/`) leaves `.harness` itself un-ignored, so a
+# `check-ignore .harness` probe answers "not ignored" while every installed tool is
+# suppressed from `status` — landed, over a body missing from the index. Reported as P1 on
+# PR #103 round 2, after the whole-body case was already fixed.
+mk_umb "$AU/u8" child-i
+printf '.harness/tools/\n' > "$AU/u8/child-i/.gitignore"
+git -C "$AU/u8/child-i" add -A && git -C "$AU/u8/child-i" commit -q -m "ignore one body subtree"
+cascade "$AU/u8"
+land "$AU/u8/child-i"                  # commit everything git will accept
+# Preconditions: the parent really is un-ignored while the subtree really is — that asymmetry
+# IS the case. Without both, this passes for the wrong reason.
+git -C "$AU/u8/child-i" check-ignore -q .harness \
+  && fail "R2-partial: fixture precondition broken — .harness itself is ignored, this is the whole-body case"
+git -C "$AU/u8/child-i" check-ignore -q .harness/tools \
+  || fail "R2-partial: fixture precondition broken — .harness/tools is not ignored"
+[ "$(git -C "$AU/u8/child-i" ls-files -- .harness/tools/ | wc -l | tr -d ' ')" = "0" ] \
+  || fail "R2-partial: fixture precondition broken — something under .harness/tools/ is tracked"
+cascade "$AU/u8"
+printf '%s' "$AU_OUT" | grep -qE "landed +child-i" \
+  && fail "R2-partial: FALSE CLEAN — a partially ignored body was reported as landed: $AU_OUT"
+printf '%s' "$AU_OUT" | grep -qE "no vcs +child-i" \
+  || fail "R2-partial: a partially ignored body was not reported as unverifiable: $AU_OUT"
+pass "a partially ignored body is reported unverifiable, never landed (R2) [R2_partially_ignored_body_is_not_landed]"
 
 echo "All umbrella tests passed."

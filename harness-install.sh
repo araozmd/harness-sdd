@@ -5156,35 +5156,51 @@ audit_one() {
     printf '   no spec   %-26s (ownership helper unavailable — cannot verify)\n' "$_label"
     return 2
   fi
-  # Is the body IGNORED? That is the discriminator — not "is anything tracked".
+  # Is the body actually under git? Probe concrete WITNESS files, not a pathspec.
   #
-  # A target that gitignores `.harness/` while tracking the root glue has nothing under
-  # .harness/ in the index, so `git status` reports no entries even immediately after the
-  # cascade wrote the whole body: the audit would print `landed` and then claim "every
-  # target committed" over a body that was never committed at all. A false CLEAN is the
-  # worst output this audit can emit — it is the exact claim the audit exists to make
-  # trustworthy.
+  # A body that is git-ignored has nothing in the index, so `git status` reports no entries
+  # even immediately after the cascade wrote all of it: the audit would print `landed` and
+  # claim the target committed over a body that was never committed. A false CLEAN is the
+  # worst output this audit can emit.
   #
-  # But an `ls-files`-empty probe (the shape init.sh uses for its own warn-only branch)
-  # cannot be reused here: a FRESH cascade into a git repo also has nothing tracked under
-  # .harness/ yet, and that is the primary case this whole feature exists to catch. The two
-  # states are identical to `ls-files` and opposite in meaning, so ask the question that
-  # actually separates them — `check-ignore` — instead of the one that happens to be true
-  # in both. Ignored ⇒ unverifiable; merely untracked ⇒ unlanded, reported by the -uall
-  # status below.
-  if git -C "$_t" check-ignore -q .harness 2>/dev/null; then
+  # Three probes were tried and rejected, each failing in a way the witnesses do not:
+  #   * `ls-files`-empty (init.sh's own shape) — a FRESH cascade also has nothing tracked
+  #     yet, and that is the primary case this feature exists to catch. Identical states,
+  #     opposite meanings.
+  #   * `check-ignore .harness` — misses a partially-ignored body: ignoring `.harness/tools/`
+  #     leaves the parent un-ignored while every installed tool is suppressed from `status`.
+  #   * `status --ignored=matching` over the owned set — too broad the other way: the
+  #     installer SEEDS ignores for its own local-only files (telemetry.jsonl, .pr-loop/,
+  #     state/tasks.json.lock), so every healthy target reported ignored paths and no fresh
+  #     cascade was ever counted unlanded.
+  _ignored=0
+  while IFS= read -r _w; do
+    [ -n "$_w" ] || continue
+    [ -e "$_t/$_w" ] || continue                  # not installed here — nothing to say
+    if GIT_OPTIONAL_LOCKS=0 git -C "$_t" check-ignore -q "$_w" 2>/dev/null; then
+      _ignored=$((_ignored + 1))
+    fi
+  done <<WSPEC
+$("$SRC/tools/harness-owned-paths.sh" witness "$_t/.harness" 2>/dev/null || true)
+WSPEC
+  if [ "$_ignored" -gt 0 ]; then
     printf '   no vcs    %-26s (body is git-ignored — cannot verify)\n' "$_label"
     return 2
   fi
   # -uall for the reason E99-F10 established: an upgrade that ADDS a body file leaves it
   # untracked, and status.showUntrackedFiles=no would hide exactly the divergence being audited.
-  # rev-parse + status only — nothing that touches the index, a ref, or the working tree.
+  #
+  # GIT_OPTIONAL_LOCKS=0 because R9 says this audit never writes a target's git state, and a
+  # plain `git status` does: install_one removes and recopies the body immediately before
+  # this call, so tracked-file mtimes all change and status rewrites `.git/index` to refresh
+  # its stat cache. That is a real write, on every idempotent landed cascade. The variable is
+  # git's documented way to suppress exactly that opportunistic write.
   _n=$(
     set --
     while IFS= read -r _p; do [ -n "$_p" ] && set -- "$@" "$_p"; done <<SPEC
 $_spec
 SPEC
-    git -C "$_t" status --porcelain -uall -- "$@" 2>/dev/null | grep -c '' || true
+    GIT_OPTIONAL_LOCKS=0 git -C "$_t" status --porcelain -uall -- "$@" 2>/dev/null | grep -c '' || true
   )
   if [ "${_n:-0}" -gt 0 ]; then
     printf '   unlanded  %-26s %s harness-owned path(s)\n' "$_label" "$_n"
