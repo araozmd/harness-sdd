@@ -4,6 +4,37 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.52.1] — 2026-08-03
+
+### Fixed — 🐛 the landing audit reads git-quoted paths (E99-F11)
+
+git **quotes** any path containing whitespace, non-ASCII bytes, backslashes or control
+characters in porcelain output — `".harness/custom/my log.jsonl"` — while the audit's
+subtraction patterns are built from raw config values. A `telemetry.log` override containing
+a space therefore never matched, was never subtracted, and the target reported
+`no vcs (cannot verify)` **permanently**: the audit never ran there again.
+
+Fixed with `git status -z`, which emits raw NUL-delimited paths. That sidesteps git's entire
+quoting grammar rather than reimplementing its C-style unescaping — which `core.quotePath`
+also influences, so a hand-rolled unescaper would have had a second configuration knob to get
+wrong.
+
+Embedded newlines are neutralised **before** the NUL delimiters are split, because doing it
+the other way round is a false-clean of its own: a path containing a literal newline splits
+into two lines, the second loses its `!! ` prefix and is dropped, and if the first fragment
+matches a local-only pattern the whole record is subtracted and the target reads `landed`.
+Under `-z` a newline can only appear *inside* a path, so mapping newlines to `\001` first is
+unambiguous and keeps every record whole — without NUL-aware tooling, which POSIX `awk`
+cannot provide (BSD `awk` will not take NUL as `RS`).
+
+Filed from PR #103 round 6 and fixed here rather than in a seventh review round, because it
+fails **safe**: it under-claims (`cannot verify`) and cannot produce the false `landed` the
+audit exists to prevent.
+
+Pinned by `R2_telemetry_override_with_whitespace`, whose preconditions assert that git really
+does quote the path in default porcelain — that quoting *is* the defect, so a fixture where it
+does not occur would prove nothing. Mutation M33 (revert to quoted porcelain) dies to it.
+
 ## [0.52.0] — 2026-08-03
 
 ### Added — ✨ the cascade audits whether the upgrade was landed (E24-F02)

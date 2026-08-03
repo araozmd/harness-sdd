@@ -5175,16 +5175,45 @@ audit_one() {
   # question: take git's COMPLETE ignored set over the owned pathspecs and subtract the
   # short, deliberate local-only list. New body subtrees are then covered automatically; only
   # a new deliberate ignore needs maintenance, in the one file that owns that knowledge.
+  # `-z` below, not the default porcelain: git QUOTES any path containing whitespace,
+  # non-ASCII bytes, backslashes or control characters — `".harness/custom/my log.jsonl"` —
+  # and the subtraction patterns are built from raw config values, so a quoted path never
+  # matched and the target reported "cannot verify" forever. `-z` emits raw paths, which
+  # sidesteps git's whole quoting grammar rather than reimplementing its C-style unescaping
+  # (which `core.quotePath` also influences). The NUL delimiters are turned into newlines
+  # for the line-oriented filter below — but embedded newlines are neutralised FIRST.
+  #
+  # `tr '\0' '\n'` alone was wrong, and not in the safe direction I first claimed: it splits
+  # a path containing a literal newline into two lines, the second loses the `!! ` prefix and
+  # is dropped by the sed, and if the FIRST fragment happens to match a local-only pattern
+  # (`telemetry.jsonl` followed by a newline, say) the whole record is subtracted and the
+  # target reports `landed`. A false CLEAN, not an over-count.
+  #
+  # Under `-z` a newline can ONLY appear inside a path — records are NUL-terminated and git
+  # emits no newline delimiters — so mapping newlines to \001 before splitting on NUL is
+  # unambiguous, keeps each record whole, and needs no NUL-aware tooling (BSD awk cannot take
+  # NUL as RS, and this installer is POSIX sh with no new dependencies).
+  #
+  # LC_ALL=C for the whole pipeline because these are RAW BYTES, not text. A filename may
+  # hold bytes that are not valid in the ambient locale; a multibyte-aware `grep` may then
+  # refuse to match — or drop — the line, silently changing the count, and BSD `sed` fails
+  # outright with an illegal byte sequence. Byte semantics are what every stage here wants,
+  # and the repo already takes the same precaution in tools/run-tests.sh.
   _lo="$("$SRC/tools/harness-owned-paths.sh" local-only "$_t/.harness" 2>/dev/null || true)"
   _lo_alt="$(printf '%s' "$_lo" | tr '\n' '|' | sed 's/|$//')"
   [ -n "$_lo_alt" ] || _lo_alt='$^'        # match nothing rather than everything if empty
   _ign=$(
+    # ONE locale for the whole pipeline, not per command. Every stage below consumes raw
+    # bytes, and prefixing only some of them is how the previous attempt left `sed` in the
+    # ambient locale after fixing both greps — on BSD sed that is an illegal-byte-sequence
+    # failure, not a mismatch. Export once; nothing here wants text semantics.
+    LC_ALL=C; export LC_ALL
     set --
     while IFS= read -r _p; do [ -n "$_p" ] && set -- "$@" "$_p"; done <<ISPEC
 $_spec
 ISPEC
-    GIT_OPTIONAL_LOCKS=0 git -C "$_t" status --porcelain -uall --ignored=matching -- "$@" 2>/dev/null \
-      | sed -n 's/^!! //p' | grep -Ev "$_lo_alt" | grep -c '' || true
+    GIT_OPTIONAL_LOCKS=0 git -C "$_t" status --porcelain -z -uall --ignored=matching -- "$@" 2>/dev/null \
+      | tr '\n' '\001' | tr '\0' '\n' | sed -n 's/^!! //p' | grep -Ev "$_lo_alt" | grep -c '' || true
   )
   if [ "${_ign:-0}" -gt 0 ]; then
     printf '   no vcs    %-26s (%s owned path(s) git-ignored — cannot verify)\n' "$_label" "$_ign"
@@ -5204,6 +5233,11 @@ ISPEC
   # a false CLEAN, the one output this audit must never produce. Check the exit status and
   # emit a sentinel instead of a count.
   _n=$(
+    # Same byte locale as the ignore probe. This query uses DEFAULT porcelain, which quotes
+    # unusual paths and is therefore ASCII — but only while `core.quotePath` is on, and that
+    # is a config the operator can turn off. With it off, raw bytes reach `grep -c` here too,
+    # and a dropped line under-counts, which tips a divergent target toward `landed`.
+    LC_ALL=C; export LC_ALL
     set --
     while IFS= read -r _p; do [ -n "$_p" ] && set -- "$@" "$_p"; done <<SPEC
 $_spec

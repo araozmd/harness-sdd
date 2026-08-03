@@ -773,4 +773,71 @@ printf '%s' "$AU_OUT" | grep -qE "landed +child-w" \
   || fail "R2-tlq: a single-quoted telemetry.log override was not subtracted: $AU_OUT"
 pass "the telemetry override is read in both YAML quote forms (R2) [R2_telemetry_override_single_quoted]"
 
+# ── R2: a telemetry override containing WHITESPACE is still subtracted ─────────────────
+# R2_telemetry_override_with_whitespace
+# git QUOTES any path containing whitespace (or non-ASCII, backslashes, control chars) in
+# porcelain output — `".harness/custom/my log.jsonl"` — while the subtraction patterns are
+# built from raw config values, so the quoted form never matched and the target reported
+# `cannot verify` forever. Filed as E99-F11 from PR #103 round 6; fixed with `-z`, which
+# emits raw paths instead of reimplementing git's C-style unescaping.
+mk_umb "$AU/tlws" child-x
+cascade "$AU/tlws"
+python3 - "$AU/tlws/child-x/.harness/harness.config.yaml" <<'PYCFG' \
+  || fail "R2-tlws: could not rewrite telemetry.log in the fixture config"
+import sys
+p = sys.argv[1]
+s = open(p).read()
+assert "log: telemetry.jsonl" in s, "telemetry.log anchor not found in " + p
+open(p, "w").write(s.replace("log: telemetry.jsonl", 'log: "custom/my log.jsonl"', 1))
+PYCFG
+cascade "$AU/tlws"
+mkdir -p "$AU/tlws/child-x/.harness/custom"
+printf '{}\n' > "$AU/tlws/child-x/.harness/custom/my log.jsonl"
+land "$AU/tlws/child-x"
+# Preconditions: the path really contains whitespace, really is ignored, and git really does
+# QUOTE it in default porcelain — that quoting IS the defect under test.
+git -C "$AU/tlws/child-x" check-ignore -q ".harness/custom/my log.jsonl" \
+  || fail "R2-tlws: fixture precondition broken — the whitespace override is not ignored"
+git -C "$AU/tlws/child-x" status --porcelain -uall --ignored=matching -- .harness/ \
+  | grep -q '^!! "' \
+  || fail "R2-tlws: fixture precondition broken — git did not quote the whitespace path, so this case cannot reproduce the defect"
+cascade "$AU/tlws"
+printf '%s' "$AU_OUT" | grep -qE "no vcs +child-x" \
+  && fail "R2-tlws: a whitespace telemetry override was not subtracted — the probe needs -z: $AU_OUT"
+printf '%s' "$AU_OUT" | grep -qE "landed +child-x" \
+  || fail "R2-tlws: a fully landed target with a whitespace override was not reported landed: $AU_OUT"
+pass "a telemetry override containing whitespace is subtracted (R2) [R2_telemetry_override_with_whitespace]"
+
+# ── R2: a newline inside an ignored path must not collapse into a false clean ──────────
+# R2_newline_in_ignored_path_is_not_landed
+# `tr '\0' '\n'` on `-z` output splits a path containing a literal newline into two lines;
+# the second loses its `!! ` prefix and is dropped by the sed, so if the FIRST fragment
+# matches a local-only pattern the whole record is subtracted and the target reads `landed`.
+# A false CLEAN — not the over-count I first claimed in the commit that introduced it.
+# Reported as P2 on PR #105 round 1.
+mk_umb "$AU/nlpath" child-y
+cascade "$AU/nlpath"
+# A path whose first line is EXACTLY a local-only pattern, so a naive split subtracts it.
+_nlname="$(printf 'telemetry.jsonl\nshadow')"
+if ( cd "$AU/nlpath/child-y/.harness" && printf 'x\n' > "$_nlname" ) 2>/dev/null; then
+  # Ignore it by a GLOB matching its tail, not by name: `.gitignore` is line-based and
+  # cannot express a newline, and a directory-wide rule makes git collapse the whole
+  # directory to one entry — neither produces the individual `!!` record this case needs.
+  printf '*shadow\n' >> "$AU/nlpath/child-y/.harness/.gitignore"
+  land "$AU/nlpath/child-y"
+  # Preconditions: the file exists with a newline in its name AND git reports it ignored.
+  [ -e "$AU/nlpath/child-y/.harness/$_nlname" ] \
+    || fail "R2-nl: fixture precondition broken — the newline-named file does not exist"
+  git -C "$AU/nlpath/child-y" status --porcelain -z -uall --ignored=matching -- .harness/ \
+    | tr '\0' '\n' | grep -qE '^!! (.*/)?telemetry\.jsonl$' \
+    || fail "R2-nl: fixture precondition broken — the naive split does not produce a subtractable first fragment, so this case cannot reproduce the defect"
+  cascade "$AU/nlpath"
+  printf '%s' "$AU_OUT" | grep -qE "landed +child-y" \
+    && fail "R2-nl: FALSE CLEAN — a newline inside an ignored path collapsed into a subtracted record: $AU_OUT"
+  pass "a newline inside an ignored path does not collapse into a false clean (R2) [R2_newline_in_ignored_path_is_not_landed]"
+else
+  # Some filesystems reject newlines in names. Skipping is honest; silently passing is not.
+  echo "ok - SKIPPED R2_newline_in_ignored_path_is_not_landed (filesystem rejects newline in a filename)"
+fi
+
 echo "All umbrella tests passed."
