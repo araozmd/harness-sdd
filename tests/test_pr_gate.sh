@@ -69,8 +69,13 @@ mk clean '[]'
 [ "$(verdict "$WORK/clean" 3 4)" = merge ] || fail "R1: clean round-3 is not 'merge'"
 pass "R1 zero blocking findings ⇒ merge at any round"
 
-# ── R2: a P2-only PR is CLEAN, because blocking.json is already severity-filtered ──
+# ── R2: a non-blocking-only PR is CLEAN, because blocking.json is already filtered ──
 # Guards the exact drift: non-blocking chatter must never turn into another round of work.
+# The fixture uses P2/nit because those are non-blocking under the SHIPPED default; the
+# property under test is "empty blocking.json ⇒ merge whatever comments.json holds", which
+# holds for any configured threshold. This tool consumes the filtered file and never
+# re-derives the severity set, so a repo configuring P0,P1,P2 changes what the LOOP writes
+# into blocking.json, not what this gate does with it.
 mk p2only '[]'
 cat >"$WORK/p2only/comments.json" <<'JSON'
 [{"id":1,"severity":"P2","body":"nit: rename this"},
