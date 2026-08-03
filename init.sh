@@ -219,11 +219,21 @@ UMBRELLA_ROOT="$(awk '
     gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
   }
 ' harness.config.yaml 2>/dev/null)"
+#      RECORDING an umbrella is not the same as RESOLVING one. A child that already held a
+#      full body when the cascade reached it keeps that body (converting it is destructive
+#      and is E24-F04) and still gets `umbrella.root` written. Reporting "the prose body is
+#      remote" there would be plainly false — `agents/`, `docs/` and the templates are all
+#      sitting right here. So read the LAYOUT off disk, from the same stub sentinel the
+#      installer writes, before saying anything about where the body lives.
 if [ -n "${UMBRELLA_ROOT:-}" ]; then
-  if [ -f "$UMBRELLA_ROOT/.harness/.harness-version" ]; then
-    echo "ℹ️  harness body resolves from the umbrella at $UMBRELLA_ROOT (prose tier is stubs)"
+  if head -n 1 AGENTS.md 2>/dev/null | grep -qxF '<!-- harness:umbrella-stub -->'; then
+    if [ -f "$UMBRELLA_ROOT/.harness/.harness-version" ]; then
+      echo "ℹ️  harness body resolves from the umbrella at $UMBRELLA_ROOT (prose tier is stubs)"
+    else
+      echo "ℹ️  umbrella at $UMBRELLA_ROOT is not reachable — the prose body (agent prompts, docs) is remote and unavailable here; init.sh, verification and the PR loop are unaffected"
+    fi
   else
-    echo "ℹ️  umbrella at $UMBRELLA_ROOT is not reachable — the prose body (agent prompts, docs) is remote and unavailable here; init.sh, verification and the PR loop are unaffected"
+    echo "ℹ️  umbrella.root recorded ($UMBRELLA_ROOT), but this target holds a full local body — nothing resolves remotely"
   fi
 fi
 

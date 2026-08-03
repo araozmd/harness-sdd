@@ -668,4 +668,41 @@ printf '%s' "$GATE_OUT" | grep -qi "environment ready" \
   || fail "R6: the gate did not reach its ready verdict with the umbrella gone: $GATE_OUT"
 pass "a thin child passes with its umbrella unreachable, and says so (E24-F03 R6) [thin_child_without_umbrella_passes]"
 
+# ── E24-F03 R6 (cont.): a FULL-COPY child must never claim its prose is remote ───
+# The cascade records umbrella.root on a child it left full-copy (converting one is E24-F04),
+# so "umbrella.root is set" does NOT mean "the body is remote". Reporting it as remote here
+# would be false with agents/, docs/ and the templates sitting locally. (Codex r1 P2 #3705599510.)
+U6F="$T/fullchild"
+mkdir -p "$U6F/kid"
+git -C "$U6F/kid" init -q .
+git -C "$U6F/kid" config user.email "test@harness.local"
+git -C "$U6F/kid" config user.name  "harness test"
+echo seed > "$U6F/kid/README.md"
+git -C "$U6F/kid" add -A
+git -C "$U6F/kid" commit -q -m init
+# Install standalone FIRST so the child owns a real body, then cascade over it.
+CODEX_HOME="$U6F/.ch" HOME="$U6F/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude "$U6F/kid" >/dev/null 2>&1 \
+  || fail "R6-full setup: standalone install failed"
+CODEX_HOME="$U6F/.ch" HOME="$U6F/.home" \
+  sh "$SRC/harness-install.sh" --umbrella "$U6F" --agents=claude >/dev/null 2>&1 || true
+# Fixture preconditions: real prose AND a recorded umbrella. Without BOTH this case is vacuous.
+head -n 1 "$U6F/kid/.harness/AGENTS.md" | grep -qxF '<!-- harness:umbrella-stub -->' \
+  && fail "R6-full setup: the cascade converted the full-copy child (that is E24-F04's job)"
+grep -q '^  root: "\.\./\.\./"' "$U6F/kid/.harness/harness.config.yaml" \
+  || fail "R6-full setup: umbrella.root was not recorded on the full-copy child"
+git -C "$U6F/kid" add -A
+git -C "$U6F/kid" commit -q -m "installed harness"
+
+mv "$U6F/.harness" "$U6F/.harness-detached"
+run_gate "$U6F/kid"
+[ "$GATE_RC" = 0 ] || fail "R6-full: a full-copy child failed the gate (rc=$GATE_RC): $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -qi "remote and unavailable" \
+  && fail "R6-full: init.sh called the prose body remote on a child that holds it locally: $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -qi "full local body" \
+  || fail "R6-full: the full-copy layout was not reported: $GATE_OUT"
+grep -qF 'You are the **Builder**' "$U6F/kid/.harness/agents/builder.md" \
+  || fail "R6-full: the child's local prose body is not actually present — the case is vacuous"
+pass "a full-copy child with an unreachable umbrella is not reported as remote (E24-F03 R6) [full_copy_child_not_reported_remote]"
+
 echo "All init drift-guard tests passed."

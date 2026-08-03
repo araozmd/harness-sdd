@@ -915,10 +915,28 @@ pass "R8 manifest_records_layout"
 # Positive control in the SAME run: without it this passes on a re-run that did nothing.
 cp "$KA/agents/builder.md" "$AU/f03-stub.ref"
 cp "$KA/.harness-version" "$AU/f03-ver.ref"
-_v_orig="$(cat "$SRC/VERSION")"
-printf '99.99.99\n' > "$SRC/VERSION"
-cascade "$AU/f03"
-printf '%s\n' "$_v_orig" > "$SRC/VERSION"          # restore before any assertion can exit
+# The bumped installer is a PRIVATE COPY of the source, never the shared checkout.
+# `tools/run-tests.sh` runs suites concurrently (--jobs 8) and its own header warns that a
+# suite writing to a shared path fails intermittently under it: other suites invoke
+# harness-install.sh (stamping VERSION into their fixtures) and test_pr_loop.sh R54 asserts
+# CHANGELOG carries a heading for exactly the current VERSION. Writing 99.99.99 into
+# $SRC/VERSION would make BOTH of those flaky, for a window this test does not control.
+# (Codex r1 P1 #3705599506.)
+SRCCOPY="$AU/f03-src"
+mkdir -p "$SRCCOPY"
+# Copy the installer and every path it reads. `.git` and the round cache are excluded:
+# they are large and irrelevant, and the installer never reads them.
+for _sd in harness-install.sh VERSION AGENTS.md init.sh agents docs store tools specs \
+           harness.config.yaml umbrella.manifest.example.yaml umbrella.gitignore.example; do
+  [ -e "$SRC/$_sd" ] && cp -R "$SRC/$_sd" "$SRCCOPY/"
+done
+printf '99.99.99\n' > "$SRCCOPY/VERSION"
+AU_OUT="$(CODEX_HOME="$AU/f03/.ch" HOME="$AU/f03/.home" sh "$SRCCOPY/harness-install.sh" \
+  --umbrella "$AU/f03" --agents=claude 2>&1)" || true
+# The point of the private copy: the shared checkout must be untouched, so a suite running
+# concurrently can never observe 99.99.99. Guard it, or the isolation silently regresses.
+grep -qx '99.99.99' "$SRC/VERSION" \
+  && fail "R7: the synthetic bump leaked into the shared checkout's VERSION — concurrent suites will flake"
 cmp -s "$AU/f03-stub.ref" "$KA/agents/builder.md" \
   || fail "R7: a VERSION bump rewrote a thin child's stub"
 cmp -s "$AU/f03-ver.ref" "$KA/.harness-version" \
