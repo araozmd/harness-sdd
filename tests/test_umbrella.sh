@@ -966,16 +966,24 @@ mkdir -p "$SC2/docs/nested/deeper"
 echo "nested body" > "$SC2/docs/nested/deep.md"
 echo "deeper body" > "$SC2/docs/nested/deeper/x.md"
 echo "hidden body" > "$SC2/agents/.hidden.md"
+# `zzz.md` sorts AFTER the nested directory ON PURPOSE. POSIX sh has no locals, so a
+# recursion that clobbers its parent's frame writes every sibling processed after a nested
+# directory beneath it — `docs/zzz.md` became `docs/aaa/zzz.md` and vanished from its own
+# path. A fixture whose only nested dir sorts last cannot see that. (Codex r4 P2 #3705960408.)
+echo "sibling body" > "$SC2/docs/zzz.md"
 mk_umb "$AU/f03c" kid-d
 AU_OUT="$(CODEX_HOME="$AU/f03c/.ch" HOME="$AU/f03c/.home" sh "$SC2/harness-install.sh" \
   --umbrella "$AU/f03c" --agents=claude 2>&1)" || true
 KD="$AU/f03c/kid-d/.harness"
 # Precondition: this really is a thin child, or "the nested file is a stub" is vacuous.
 is_stub "$KD/AGENTS.md" || fail "R2-shape setup: the child is not thin"
-for _p in docs/nested/deep.md docs/nested/deeper/x.md agents/.hidden.md; do
+for _p in docs/nested/deep.md docs/nested/deeper/x.md agents/.hidden.md docs/zzz.md; do
   [ -f "$KD/$_p" ] || fail "R2-shape: $_p is missing from a thin child but present in a full install"
   is_stub "$KD/$_p" || fail "R2-shape: $_p was mirrored but is not a stub"
 done
+# ...and it must not have been written INSIDE the nested directory instead.
+[ -e "$KD/docs/nested/zzz.md" ] \
+  && fail "R2-shape: a sibling after a nested dir was written beneath it — recursion clobbered the parent frame"
 grep -qF '../../.harness/docs/nested/deeper/x.md' "$KD/docs/nested/deeper/x.md" \
   || fail "R2-shape: a nested stub does not name its own resolved path"
 # The control: the SAME source, installed standalone, keeps those files as real bodies —

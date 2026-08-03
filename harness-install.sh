@@ -2045,7 +2045,12 @@ install_one() {
       [ -e "$_sdr_f" ] || continue
       _sdr_base="${_sdr_f##*/}"
       if [ -d "$_sdr_f" ]; then
-        stub_dir_recursive "$_sdr_f" "$_sdr_rel/$_sdr_base" "$_sdr_root"
+        # SUBSHELL, not a bare call. POSIX sh has no local variables, so a recursive call
+        # would overwrite this frame's `_sdr_rel`/`_sdr_src`/`_sdr_root` and every sibling
+        # processed AFTER the nested directory would be written beneath it: with
+        # `docs/aaa/x.md` and `docs/zzz.md`, the child got `docs/aaa/zzz.md` and no
+        # `docs/zzz.md` at all. Reproduced before fixing. (Codex r4 P2 #3705960408.)
+        ( stub_dir_recursive "$_sdr_f" "$_sdr_rel/$_sdr_base" "$_sdr_root" ) || return 1
       elif [ -f "$_sdr_f" ]; then
         gen_body_stub "$_sdr_rel/$_sdr_base" "$_sdr_root" "$H/$_sdr_rel/$_sdr_base"
       fi
