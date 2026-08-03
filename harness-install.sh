@@ -5193,6 +5193,12 @@ audit_one() {
   # emits no newline delimiters — so mapping newlines to \001 before splitting on NUL is
   # unambiguous, keeps each record whole, and needs no NUL-aware tooling (BSD awk cannot take
   # NUL as RS, and this installer is POSIX sh with no new dependencies).
+  #
+  # LC_ALL=C on the filters because these are RAW BYTES, not text. A filename may hold bytes
+  # that are not valid in the ambient locale, and a multibyte-aware `grep` may then refuse to
+  # match — or drop — the line, which silently changes the count and can subtract a record
+  # that should have been kept. Byte semantics are what this filter actually wants, and the
+  # repo already takes the same precaution in tools/run-tests.sh.
   _lo="$("$SRC/tools/harness-owned-paths.sh" local-only "$_t/.harness" 2>/dev/null || true)"
   _lo_alt="$(printf '%s' "$_lo" | tr '\n' '|' | sed 's/|$//')"
   [ -n "$_lo_alt" ] || _lo_alt='$^'        # match nothing rather than everything if empty
@@ -5202,7 +5208,8 @@ audit_one() {
 $_spec
 ISPEC
     GIT_OPTIONAL_LOCKS=0 git -C "$_t" status --porcelain -z -uall --ignored=matching -- "$@" 2>/dev/null \
-      | tr '\n' '\001' | tr '\0' '\n' | sed -n 's/^!! //p' | grep -Ev "$_lo_alt" | grep -c '' || true
+      | tr '\n' '\001' | tr '\0' '\n' | sed -n 's/^!! //p' \
+      | LC_ALL=C grep -Ev "$_lo_alt" | LC_ALL=C grep -c '' || true
   )
   if [ "${_ign:-0}" -gt 0 ]; then
     printf '   no vcs    %-26s (%s owned path(s) git-ignored — cannot verify)\n' "$_label" "$_ign"
