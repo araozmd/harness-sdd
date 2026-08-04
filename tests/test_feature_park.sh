@@ -77,6 +77,15 @@ _codes="$(jqx "','.join(b['code'] for b in d.get('blocked',[]))")"
 case "$_codes" in *parked*) ;; *) fail "R1: no 'parked' blocker record (codes=$_codes): $NX_OUT" ;; esac
 _detail="$(jqx "[b['detail'] for b in d['blocked'] if b['code']=='parked'][0]")"
 case "$_detail" in *"blocked on a Meta review cycle"*) ;; *) fail "R1: the park detail does not carry the reason: [$_detail]" ;; esac
+# R2, made OBSERVABLE. featureRoute is called with the park in place and must still return
+# the real route. Nulling the route when parked yields identical selection behaviour, so
+# without this assertion the "blocker, not route" rule is unfalsifiable — a mutation that
+# nulled it survived the whole suite. `architect` is the route this feature has UNPARKED,
+# asserted as the control above.
+case "$_detail" in
+  *"route when unparked: architect"*) ;;
+  *) fail "R2: the park suppressed the underlying route — a park must be a BLOCKER, not a route: [$_detail]" ;;
+esac
 pass "E06-F07 R1 parked_feature_is_blocked"
 
 mkboard "" '"E01-F01"'

@@ -374,7 +374,17 @@ function featureBlockers(feature, featureById, cycles, requireApproval) {
   // NOT reflected in featureRoute(): that is what makes "unparking restores exactly the
   // prior routing" true by construction, with no prior state to record or restore.
   // Listed before unmet-dependency because the park is the fact the reader needs first.
-  if (feature.parked) records.push({ subject: feature.id, code: 'parked', detail: parkDetail(feature) });
+  // The detail names the route the feature would take once unparked. That is the question
+  // an operator actually has while reading a park ("is this still classified as needing a
+  // spec?") — the mislabelling it answers is the defect this whole feature exists to fix.
+  // It is also what makes "a park is a blocker, NOT a route" observable: featureRoute is
+  // called here with the park in place and must still return the real route. Nulling the
+  // route when parked produces identical selection behaviour, so without this line that
+  // design rule had no consequence any test could see.
+  if (feature.parked) {
+    const wouldRoute = featureRoute(feature, requireApproval) || 'none';
+    records.push({ subject: feature.id, code: 'parked', detail: `${parkDetail(feature)} [route when unparked: ${wouldRoute}]` });
+  }
   const unmet = sortedUnique((feature.depends_on || []).filter((id) => !featureById.has(id) || featureById.get(id).status !== 'done'));
   if (unmet.length) {
     // A parked dependency is named inline (E06-F07): without it a stalled chain reports a
