@@ -641,6 +641,7 @@ models:
   orchestrator: inherit
   architect: reasoning
   builder: standard
+  builder-heavy: reasoning   # the escalation tier — see below
   reviewer: standard
   scout: cheap
   doc-critic: cheap
@@ -656,6 +657,33 @@ written for a newer harness can never block an upgrade on an older installer.
 `inherit` compiles to **key omission** on every front-end. The literal string `inherit`
 is never written anywhere: it is unknown on Codex and a hard error on OpenCode, while an
 absent key means "use the session model" on all five.
+
+### `builder-heavy` — the escalation tier
+
+There are **two** Builder role names. `builder-heavy` has the *same instruction body* as
+`builder` — `agents/builder-heavy.md` is a pointer at `agents/builder.md`, not a second
+prompt — and differs only in the tier it resolves to. That lets you retry a task that a
+standard Builder is struggling with on a more capable model **without** paying that cost
+on every easy task, which is what raising `models.builder` would do.
+
+Escalation is therefore a pure **routing** decision: something picks a role name, and the
+front-end's generated agent definition supplies the model. That is what makes it work
+everywhere — Codex, OpenCode and Gemini read the model from the generated definition and
+cannot override it per spawn, so a per-spawn override would silently do nothing on three
+of the five front-ends. See [ADR-0002](../specs/adr/0002-builder-heavy-is-a-tier-not-a-second-prompt.md).
+
+Two things worth knowing:
+
+- **It ships on `inherit`, like every other role — so out of the box it is *not* heavier
+  than `builder`.** Give it a tier (`reasoning` is the intended one) before it does
+  anything for you. Shipping a heavier default would stamp a model key into every fresh
+  target, which is exactly the inertness this block promises.
+- **Nothing routes to it automatically yet.** Today you invoke it by hand. A deterministic
+  escalation rule — a complexity tag and a two-rejection trigger — is a separate feature.
+
+An **upgraded** target keeps whatever `models:` block it already had, so it will not grow
+a `builder-heavy:` line. Nothing breaks: an unlisted role falls through to
+`models.default`, exactly like any other. Add the key yourself when you want to set it.
 
 ### What each tier stamps
 

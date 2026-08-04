@@ -4,6 +4,67 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.56.0] — 2026-08-04
+
+### Added — ✨ the `builder-heavy` role (E17-F02)
+
+E17-F01 gave every role a configurable tier, but there was still exactly **one** Builder.
+Wanting a struggling task retried on a more capable model meant raising `models.builder`,
+which raises it for *every* task — the cost lands on the many easy ones rather than the few
+hard ones.
+
+There are now **two** Builder role names. `builder-heavy` has the **same instruction body**
+as `builder` — `agents/builder-heavy.md` is a pointer at `agents/builder.md`, not a second
+prompt — and differs only in the tier it resolves to:
+
+```yaml
+models:
+  builder: standard
+  builder-heavy: reasoning   # same body, heavier model
+```
+
+Escalation is therefore a pure **routing** decision: pick a role name, and the front-end's
+generated agent definition supplies the model. That is what makes it universal — Codex,
+OpenCode and Gemini read the model from the generated definition and cannot override it per
+spawn, so a per-spawn override would silently no-op on three of the five front-ends. See
+[ADR-0002](specs/adr/0002-builder-heavy-is-a-tier-not-a-second-prompt.md).
+
+All five selected front-ends emit it. **It ships on `inherit`,** so out of the box it is not
+heavier than `builder` — give it a tier first. Nothing routes to it automatically yet;
+deterministic escalation is a separate feature. An upgraded target keeps its existing
+`models:` block and does not grow a `builder-heavy:` line: an unlisted role falls through to
+`models.default`, exactly like any other.
+
+### Fixed — 🐛 adding a role locked already-installed OpenCode targets out (E17-F02)
+
+`opencode.json` is a single generated file, so adding a role changes its bytes for **every**
+target. The installer decides whether it may rewrite that file by comparing against
+`.harness/.opencode.stamp` — which was kept **only** when the body carried a model key, on
+the reasoning that a model-free body is "already reproducible from `gen_opencode_json`". That
+is true only for the installer *version* that wrote it, which adding a role falsifies.
+
+The result: an **untouched, unconfigured** OpenCode target was misreported as user-edited,
+refused the upgrade, and never received the new role. Deselection failed the same way,
+leaving a stale `opencode.json` behind and calling it edited. Configured targets were fine —
+they had a stamp — so it only bit the majority.
+
+Making the stamp unconditional does **not** fix this on its own: with no stamp yet on disk
+and a new-shape reference, nothing matches, so the file is never written, so it never gains
+the stamp that would let it be written. Both halves ship together — the pristine test now
+also accepts the body the **previous release** generated (derived from the current one, so
+the two cannot diverge), and the stamp is written on **every** run that writes
+`opencode.json`, which makes that legacy candidate a one-off rather than the first of a
+growing list.
+
+A genuinely edited `opencode.json` is still refused and left byte-identical. A target still
+on the pre-`doc-critic` five-role shape is knowingly not covered; delete `opencode.json` and
+re-run.
+
+This revises one clause of E17-F01 R11 — an unconfigured target now carries
+`.harness/.opencode.stamp`. What R11 protects is unchanged: the stamp holds no model state,
+it is removed on deselect, and an all-`inherit` target stays identical to one whose `models:`
+block was stripped.
+
 ## [0.55.0] — 2026-08-04
 
 ### Added — ✨ a feature-level park (E06-F07)
