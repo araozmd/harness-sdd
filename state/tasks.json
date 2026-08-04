@@ -466,6 +466,17 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F12-grep-flavour-probe/"
+        },
+        {
+          "id": "E99-F13",
+          "title": "Preserve `#` inside a quoted umbrella.root in both config readers",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [
+            "E24-F03"
+          ],
+          "spec_path": "specs/epics/E99-maintenance/F13-umbrella-root-hash/"
         }
       ]
     },
@@ -711,7 +722,7 @@
         {
           "id": "E24-F03",
           "title": "Thin the child: umbrella-resolved body with local fallback",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
@@ -719,6 +730,17 @@
             "E24-F02"
           ],
           "spec_path": "specs/epics/E24-upgrade-integrity/F03-thin-child-body/"
+        },
+        {
+          "id": "E24-F04",
+          "title": "Migrate existing children to the thin layout (+ --standalone)",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E24-F03"
+          ],
+          "spec_path": "specs/epics/E24-upgrade-integrity/F04-thin-child-migration/"
         }
       ]
     }

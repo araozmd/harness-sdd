@@ -629,4 +629,80 @@ printf '%s' "$GATE_OUT" | grep -qi "harness-owned-paths.sh missing" \
   || fail "R8-degrade: the missing helper was not reported: $GATE_OUT"
 pass "a missing ownership helper warns and does not halt the gate (R8) [R8_missing_helper_degrades]"
 
+# ── E24-F03 R6: a thin child stands alone, with or without its umbrella ──────────
+# The acceptance bar of the whole feature. Both cases run on the SAME fixture so "exit 0"
+# cannot come from a check that never executed — and the umbrella is MOVED AWAY rather
+# than the key omitted, because omitting it exercises the full-copy path (R5) instead and
+# would pass with R6 unimplemented.
+U6="$T/thin"
+mkdir -p "$U6/kid"
+git -C "$U6/kid" init -q .
+git -C "$U6/kid" config user.email "test@harness.local"
+git -C "$U6/kid" config user.name  "harness test"
+echo seed > "$U6/kid/README.md"
+git -C "$U6/kid" add -A
+git -C "$U6/kid" commit -q -m init
+CODEX_HOME="$U6/.ch" HOME="$U6/.home" \
+  sh "$SRC/harness-install.sh" --umbrella "$U6" --agents=claude >/dev/null 2>&1 || true
+# Fixture preconditions: this really is a THIN child of a resolvable umbrella.
+head -n 1 "$U6/kid/.harness/agents/builder.md" | grep -qxF '<!-- harness:umbrella-stub -->' \
+  || fail "R6 setup: the cascade did not produce a thin child"
+[ -f "$U6/.harness/.harness-version" ] || fail "R6 setup: the umbrella body is missing"
+git -C "$U6/kid" add -A
+git -C "$U6/kid" commit -q -m "installed harness"
+
+run_gate "$U6/kid"
+[ "$GATE_RC" = 0 ] || fail "R6: a thin child with its umbrella PRESENT failed the gate (rc=$GATE_RC): $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -qi "resolves from the umbrella" \
+  || fail "R6: the reachable umbrella was not reported: $GATE_OUT"
+pass "a thin child reports its resolved umbrella and passes (E24-F03 R6) [thin_child_with_umbrella_reports]"
+
+# Now separate it from its umbrella — the lone clone / CI / PR-reviewer case.
+mv "$U6/.harness" "$U6/.harness-detached"
+run_gate "$U6/kid"
+[ "$GATE_RC" = 0 ] \
+  || fail "R6: a thin child whose umbrella is unreachable FAILED the gate — standalone entry is the acceptance bar (rc=$GATE_RC): $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -qi "not reachable" \
+  || fail "R6: an unreachable umbrella was not reported: $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -qi "environment ready" \
+  || fail "R6: the gate did not reach its ready verdict with the umbrella gone: $GATE_OUT"
+pass "a thin child passes with its umbrella unreachable, and says so (E24-F03 R6) [thin_child_without_umbrella_passes]"
+
+# ── E24-F03 R6 (cont.): a FULL-COPY child must never claim its prose is remote ───
+# The cascade records umbrella.root on a child it left full-copy (converting one is E24-F04),
+# so "umbrella.root is set" does NOT mean "the body is remote". Reporting it as remote here
+# would be false with agents/, docs/ and the templates sitting locally. (Codex r1 P2 #3705599510.)
+U6F="$T/fullchild"
+mkdir -p "$U6F/kid"
+git -C "$U6F/kid" init -q .
+git -C "$U6F/kid" config user.email "test@harness.local"
+git -C "$U6F/kid" config user.name  "harness test"
+echo seed > "$U6F/kid/README.md"
+git -C "$U6F/kid" add -A
+git -C "$U6F/kid" commit -q -m init
+# Install standalone FIRST so the child owns a real body, then cascade over it.
+CODEX_HOME="$U6F/.ch" HOME="$U6F/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude "$U6F/kid" >/dev/null 2>&1 \
+  || fail "R6-full setup: standalone install failed"
+CODEX_HOME="$U6F/.ch" HOME="$U6F/.home" \
+  sh "$SRC/harness-install.sh" --umbrella "$U6F" --agents=claude >/dev/null 2>&1 || true
+# Fixture preconditions: real prose AND a recorded umbrella. Without BOTH this case is vacuous.
+head -n 1 "$U6F/kid/.harness/AGENTS.md" | grep -qxF '<!-- harness:umbrella-stub -->' \
+  && fail "R6-full setup: the cascade converted the full-copy child (that is E24-F04's job)"
+grep -q '^  root: "\.\./\.\./"' "$U6F/kid/.harness/harness.config.yaml" \
+  || fail "R6-full setup: umbrella.root was not recorded on the full-copy child"
+git -C "$U6F/kid" add -A
+git -C "$U6F/kid" commit -q -m "installed harness"
+
+mv "$U6F/.harness" "$U6F/.harness-detached"
+run_gate "$U6F/kid"
+[ "$GATE_RC" = 0 ] || fail "R6-full: a full-copy child failed the gate (rc=$GATE_RC): $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -qi "remote and unavailable" \
+  && fail "R6-full: init.sh called the prose body remote on a child that holds it locally: $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -qi "full local body" \
+  || fail "R6-full: the full-copy layout was not reported: $GATE_OUT"
+grep -qF 'You are the **Builder**' "$U6F/kid/.harness/agents/builder.md" \
+  || fail "R6-full: the child's local prose body is not actually present — the case is vacuous"
+pass "a full-copy child with an unreachable umbrella is not reported as remote (E24-F03 R6) [full_copy_child_not_reported_remote]"
+
 echo "All init drift-guard tests passed."

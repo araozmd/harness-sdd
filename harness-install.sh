@@ -518,6 +518,141 @@ _cfg_umbrella_manifest_value() {
   ' "$1"
 }
 
+# set_umbrella_root <file> <value> — write `root:` inside the top-level `umbrella:`
+# section, replacing an existing key or appending one at the end of the section.
+# Section-scoped like every other config writer here, and idempotent (E24-F03 R1).
+#
+# The cascade calls this so a child's config RECORDS its umbrella: §1 needs the value on
+# the very first install, before the config seed/preserve stage has run, and a later
+# single-target re-run of the installer in that child must reach the same layout without
+# the cascade's env var.
+set_umbrella_root() {
+  [ -f "$1" ] || return 0
+  awk -v v="$2" '
+    /^umbrella:[[:space:]]*(#.*)?$/ { u=1; print; next }
+    # Leaving the section: emit the key here if it was never seen, so an older config
+    # without `root:` gains one instead of silently ignoring the cascade.
+    u && /^[^[:space:]#]/ { if (!seen) { print "  root: \"" v "\""; seen=1 } u=0 }
+    u && /^[[:space:]]+root:/ { print "  root: \"" v "\""; seen=1; next }
+    { print }
+    END { if (u && !seen) print "  root: \"" v "\"" }
+  ' "$1" > "$1.umbtmp" && mv "$1.umbtmp" "$1"
+}
+
+# _cfg_umbrella_root_value <file> — print the umbrella.root value (unquoted,
+# comment-stripped) from inside the top-level `umbrella:` section; empty if unset.
+# Same scoping as _cfg_umbrella_manifest_value above (E24-F03).
+_cfg_umbrella_root_value() {
+  [ -f "$1" ] || return 0
+  awk '
+    /^umbrella:[[:space:]]*(#.*)?$/ { u=1; next }
+    u && /^[^[:space:]#]/ { u=0 }
+    u && /^[[:space:]]+root:/ {
+      sub(/^[[:space:]]+root:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+      gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+    }
+  ' "$1"
+}
+
+# ── E24-F03 / ADR-0004: the umbrella-resolved body ───────────────────────────────────
+# THE TIER LINE IS DRAWN BY WHAT READS THE FILE, not by what looks duplicated.
+#
+# The generated front-end glue resolves body paths inside the CHILD'S OWN `.harness/`
+# (opencode.json interpolates `{file:./.harness/agents/<role>.md}`; the Codex role TOMLs
+# say "Read .harness/agents/<role>.md"), so a body file can never be ABSENT from a child —
+# only REDIRECTED. And a redirect only works where the consumer reads prose:
+#
+#   PROSE      an agent reads it and can follow a reference  ⇒ stub-able
+#   PROGRAM    init.sh execs/parses it; CI runs it           ⇒ ALWAYS a local copy
+#
+# The example files are program-read in spirit: an operator COPIES FROM them to stand up
+# an umbrella, so a stub in their place would be actively wrong.
+#
+# When a new body file's tier is unclear it belongs in the LOCAL list. The wrong answer
+# there costs one copy; the wrong answer the other way breaks a standalone child at parse
+# time, which is the failure this whole epic exists to prevent.
+HARNESS_BODY_PROSE='AGENTS.md agents docs specs/_templates specs/glossary.md'
+HARNESS_BODY_LOCAL='init.sh store tools umbrella.manifest.example.yaml umbrella.gitignore.example'
+
+# The first line of every generated stub. It is the ONLY ownership signal used to tell a
+# stub from a real body file — never file size, never a grep for prose.
+HARNESS_STUB_SENTINEL='<!-- harness:umbrella-stub -->'
+
+# umbrella_body_dir <harness-dir> — print the umbrella's `.harness` dir when this target
+# is a child that can resolve one; print NOTHING otherwise (⇒ every caller falls back to
+# the full local copy, which is the single-repo behaviour and is not a failure).
+#
+# "Resolves" is deliberately strict. A directory that merely exists is not an installed
+# body, so `.harness-version` must be present — otherwise a child whose umbrella has been
+# moved away would stub its whole prose tier against a path holding nothing. And the
+# component is refused when it is a SYMLINK, matching the boundary every other ownership
+# path in this installer already draws.
+umbrella_body_dir() {
+  _ubd_h="$1"
+  # The cascade's value wins on a FRESH child, where §1 runs before any config exists.
+  # It is exported only by the cascade child loop, and the same run persists it into the
+  # child's config (set_umbrella_root), so a later standalone re-run reads it from there.
+  _ubd_root="${HARNESS_UMBRELLA_ROOT:-}"
+  [ -n "$_ubd_root" ] || _ubd_root="$(_cfg_umbrella_root_value "$_ubd_h/harness.config.yaml")"
+  [ -n "$_ubd_root" ] || return 0
+  case "$_ubd_root" in
+    /*) _ubd_abs="$_ubd_root" ;;
+    *)  _ubd_abs="$_ubd_h/$_ubd_root" ;;
+  esac
+  [ -L "$_ubd_abs" ] && return 0
+  [ -d "$_ubd_abs" ] || return 0
+  _ubd_body="$_ubd_abs/.harness"
+  [ -L "$_ubd_body" ] && return 0
+  [ -d "$_ubd_body" ] || return 0
+  [ -f "$_ubd_body/.harness-version" ] || return 0
+  ( CDPATH= cd -- "$_ubd_body" && pwd -P )
+}
+
+# gen_body_stub <body-relpath> <umbrella-root-as-written> <dest> — write the pointer stub.
+#
+# The text depends ONLY on the body-relative path and the configured umbrella root. It
+# never interpolates VERSION and never reads the file it replaces, which is what makes
+# "an umbrella upgrade leaves child stubs byte-identical" true by construction rather
+# than by test (E24-F03 R7).
+gen_body_stub() {
+  _gbs_rel="$1"; _gbs_root="$2"; _gbs_dest="$3"
+  _gbs_target="${_gbs_root%/}/.harness/$_gbs_rel"
+  mkdir -p "$(dirname "$_gbs_dest")"
+  {
+    printf '%s\n' "$HARNESS_STUB_SENTINEL"
+    printf '# Umbrella-resolved: `%s`\n\n' "$_gbs_rel"
+    printf 'This repository resolves its harness body from its umbrella. The authoritative\n'
+    printf 'copy of this file — not this stub — is:\n\n'
+    printf '    %s\n\n' "$_gbs_target"
+    printf 'Read that file and follow it exactly.\n\n'
+    printf '**If that path does not exist**, you are in a checkout separated from its umbrella\n'
+    printf '(a lone clone, a CI job, a PR reviewer'"'"'s tree). That is a supported state, not a\n'
+    printf 'broken one: `.harness/init.sh`, this repository'"'"'s verification gate and its PR loop\n'
+    printf 'all still work here — only the prose body is remote. To materialise a full local\n'
+    printf 'copy, run the harness installer against this repository.\n'
+  } > "$_gbs_dest"
+}
+
+# child_is_full_copy <harness-dir> — true when this target already holds REAL prose-tier
+# files (not stubs). E24-F03 R9: a fresh cascade must never silently swap an existing
+# child's 29 body files for stubs — that conversion is destructive, needs a pristine
+# check, and is E24-F04's job. Detected by the sentinel alone.
+child_is_full_copy() {
+  _cfc_h="$1"
+  for _cfc_rel in $HARNESS_BODY_PROSE; do
+    _cfc_p="$_cfc_h/$_cfc_rel"
+    if [ -f "$_cfc_p" ]; then
+      head -n 1 "$_cfc_p" 2>/dev/null | grep -qxF "$HARNESS_STUB_SENTINEL" || return 0
+    elif [ -d "$_cfc_p" ]; then
+      for _cfc_f in "$_cfc_p"/*; do
+        [ -f "$_cfc_f" ] || continue
+        head -n 1 "$_cfc_f" 2>/dev/null | grep -qxF "$HARNESS_STUB_SENTINEL" || return 0
+      done
+    fi
+  done
+  return 1
+}
+
 # _cfg_telemetry_log <file> — print the telemetry.log value (unquoted, comment-stripped)
 # from inside the top-level `telemetry:` section; empty if unset. Same scoping as the
 # python reader's _configured_log, so the installer ignores exactly what the writer uses.
@@ -1892,16 +2027,132 @@ install_one() {
     rm -rf "$_dst"
     cp -R "$_src" "$_dst"
   }
-  copy AGENTS.md
-  copy init.sh
-  copy agents
-  copy docs
-  copy store
-  copy tools
-  copy specs/_templates
-  copy specs/glossary.md
-  copy umbrella.manifest.example.yaml
-  copy umbrella.gitignore.example
+  # stub_files_in <dir-under-$H> <umbrella-root> — walk a tree ALREADY MATERIALISED by
+  # `cp -R` and replace each REGULAR file's contents with a pointer stub, in place.
+  #
+  # Note the direction: this does not build the shape, it only thins what `cp -R` built.
+  # That inversion is the point — see stub_tree below.
+  #
+  # Globs, not `find | while read`: a glob is newline-safe by construction, and this repo has
+  # already been bitten by paths containing newlines. `find -exec` cannot help here because
+  # `gen_body_stub` is a shell function, not a command. The `-e` guard skips a pattern that
+  # matched nothing (it expands to itself); three mutually disjoint patterns are needed so
+  # that no entry is visited — or recursed into — twice:
+  #   *        every name not starting with `.`
+  #   .[!.]*   dotfiles whose second character is not a dot   (`.x`, `.hidden`)
+  #   ..?*     double-dot names with at least one more char   (`..draft.md`), never `..`
+  # `.??*` in place of the second looks like a simplification and is not: it requires three
+  # characters, so it omits a two-character dotfile like `.x`. (Codex r5 P2 #3706053982.)
+  #
+  # A missed name is now a THINNING miss, not a SHAPE miss: the file is still present with
+  # `cp -R`'s own content, merely not stubbed. That is the whole safety win of the inversion.
+  stub_files_in() {
+    _sfi_dir="$1"; _sfi_root="$2"
+    for _sfi_f in "$_sfi_dir"/* "$_sfi_dir"/.[!.]* "$_sfi_dir"/..?*; do
+      [ -e "$_sfi_f" ] || continue
+      if [ -L "$_sfi_f" ]; then
+        # `cp -R` preserves a symlink as a symlink; so must we. Descending instead would
+        # follow it — `[ -d ]` dereferences — and a self- or ancestor-referencing link like
+        # `docs/self -> .` expands into `docs/self/self/...` until the OS resolution limit.
+        # Reproduced end-to-end: 264 entries under a child's docs/ against 8 in a control,
+        # with the cascade still reporting its ordinary status. Stubbing it would be just as
+        # wrong the other way — the write would land on the link's TARGET.
+        # (Codex r6 P2 #3710311338.)
+        continue
+      elif [ -d "$_sfi_f" ]; then
+        # SUBSHELL, not a bare call. POSIX sh has no local variables, so a recursive call
+        # would overwrite this frame's `_sfi_dir`/`_sfi_root` and every sibling processed
+        # AFTER a nested directory would be handled with the wrong frame.
+        # (Codex r4 P2 #3705960408.)
+        ( stub_files_in "$_sfi_f" "$_sfi_root" ) || return 1
+      elif [ -f "$_sfi_f" ]; then
+        # `rm -f` first: `cp -R` may preserve a read-only mode, and gen_body_stub writes
+        # with `>`, which cannot open a 0444 file.
+        #
+        # BOTH are checked. `set -e` does not help here: this function runs as the left
+        # operand of `||` in the recursion above, and POSIX shells suppress `set -e` for the
+        # whole of that operand — so an unchecked failure would be swallowed and the loop
+        # would carry on to `install complete`. (Codex r7 P2 #3711176789.)
+        #
+        # These two checks are DEFENCE IN DEPTH and are deliberately not claimed as tested:
+        # the `chmod -R u+w` in stub_tree removes the only trigger a portable fixture can
+        # build, and deleting these `|| return 1`s leaves the suite green. What remains
+        # reachable is environmental — a full disk, a read-only mount, ENAMETOOLONG — which
+        # the suite cannot create without root or platform-specific tricks. Kept because the
+        # failure they guard against is silent, and silence is what made r7 expensive.
+        rm -f "$_sfi_f" || return 1
+        gen_body_stub "${_sfi_f#"$H"/}" "$_sfi_root" "$_sfi_f" || return 1
+      fi
+    done
+  }
+
+  # stub_tree <relpath> <umbrella-root> — mirror one prose-tier path as pointer stubs,
+  # preserving the SOURCE's shape so every path a consumer opens still exists.
+  #
+  # THE SHAPE IS PRODUCED BY `cp -R`, NOT REIMPLEMENTED. The requirement is literally "the
+  # same shape the full-copy path produces", and the full-copy path is `cp -R` — so the
+  # honest way to satisfy it is to make the same call and then thin the result, rather than
+  # to re-derive `cp -R`'s traversal semantics in POSIX sh.
+  #
+  # The earlier implementation walked the SOURCE and created entries itself, which meant
+  # rediscovering those semantics one filesystem shape at a time: nested directories
+  # (r2 #3705758419), recursion frames (r4 #3705960408), `..name` and two-character dot
+  # names (r5 #3706053982), then directory symlinks (r6 #3710311338) — four blocking
+  # findings in one function, each a shape the walk had not anticipated, with FIFOs,
+  # hardlinks and permission bits still unexamined. Copying first ends THAT class: whatever
+  # `cp -R` does with an exotic entry, the child gets byte-for-byte, because it IS the
+  # full-copy path. Only the thinning is ours.
+  #
+  # It does not end every class, and the honest record is that it opened a smaller one:
+  # `cp -R` carries the SOURCE's modes across, so a `0555` directory or a `0444` file — which
+  # the old source-walk never reproduced, because it built the destination fresh — arrived
+  # unwritable and the thinning could not overwrite it (r7 #3711176789). The `chmod` below
+  # closes that categorically, and unlike the shape class it has a single precondition
+  # (the copy must be writable) rather than one bug per filesystem feature.
+  stub_tree() {
+    _st_rel="$1"; _st_root="$2"; _st_src="$SRC/$_st_rel"; _st_dst="$H/$_st_rel"
+    if [ ! -e "$_st_src" ]; then die "source missing: $_st_rel"; fi
+    mkdir -p "$(dirname "$_st_dst")"
+    rm -rf "$_st_dst"
+    cp -R "$_st_src" "$_st_dst"
+    if [ -L "$_st_dst" ]; then
+      :                       # a symlinked tier root: left exactly as the full path leaves it
+    elif [ -d "$_st_dst" ]; then
+      # `chmod -R` does NOT follow symlinks encountered during traversal — verified against a
+      # tree holding a link to an external 0444 file, which kept its mode — so this cannot
+      # reach outside the copy. A stub is new content anyway; inheriting the source file's
+      # read-only bit onto a pointer would only make the next upgrade harder.
+      chmod -R u+w "$_st_dst" || die "cannot make the copied prose tier writable: $_st_rel"
+      stub_files_in "$_st_dst" "$_st_root" \
+        || die "failed to stub the prose tier: $_st_rel"
+    else
+      rm -f "$_st_dst" || die "cannot replace the copied prose file: $_st_rel"
+      gen_body_stub "$_st_rel" "$_st_root" "$_st_dst" \
+        || die "failed to stub the prose file: $_st_rel"
+    fi
+  }
+
+  # The PROGRAM-READ tier is copied unconditionally, in every layout. init.sh execs
+  # tools/ and parses store/; a pointer is not a schema (ADR-0004).
+  for _body_rel in $HARNESS_BODY_LOCAL; do copy "$_body_rel"; done
+
+  # The PROSE tier is stubbed only for a child that resolves an umbrella AND is not
+  # already carrying a real body. Otherwise it is copied, exactly as before — which is
+  # every single-repo install, and every already-installed child (R9: converting one is
+  # destructive and belongs to E24-F04, not to a routine re-run).
+  _umb_body="$(umbrella_body_dir "$H")"
+  _umb_root_cfg="${HARNESS_UMBRELLA_ROOT:-$(_cfg_umbrella_root_value "$H/harness.config.yaml")}"
+  BODY_LAYOUT=full
+  if [ -n "$_umb_body" ] && ! child_is_full_copy "$H"; then
+    BODY_LAYOUT=thin
+    for _body_rel in $HARNESS_BODY_PROSE; do stub_tree "$_body_rel" "$_umb_root_cfg"; done
+    ok "prose body resolved from the umbrella at $_umb_root_cfg (stubs; init.sh, store/, tools/ stay local)"
+  else
+    for _body_rel in $HARNESS_BODY_PROSE; do copy "$_body_rel"; done
+    if [ -n "$_umb_body" ]; then
+      info "child already holds a full body — left as-is (converting it is E24-F04)"
+    fi
+  fi
   chmod +x "$H/init.sh" 2>/dev/null || true
   chmod +x "$H/tools/telemetry-report.py" 2>/dev/null || true
   chmod +x "$H/tools/sync-board.mjs" 2>/dev/null || true
@@ -1945,6 +2196,19 @@ install_one() {
     # the F01 umbrella.manifest / verification.integration_command) to the preserved
     # config without altering existing values or comments.
     migrate_config "$H/harness.config.yaml"
+  fi
+
+  # ── 2a. persist the umbrella linkage (E24-F03 R1) ───────────────────────────
+  # The cascade passes the umbrella root by env because §1 needs it BEFORE this stage
+  # exists to read. Record it now, so the child's own config carries it: a later
+  # single-target re-run in that child, and `init.sh`'s report, both read it from here
+  # with no env var in sight. Skipped entirely when the value already matches, so an
+  # ordinary re-run leaves the file byte-identical.
+  if [ -n "${HARNESS_UMBRELLA_ROOT:-}" ]; then
+    if [ "$(_cfg_umbrella_root_value "$H/harness.config.yaml")" != "$HARNESS_UMBRELLA_ROOT" ]; then
+      set_umbrella_root "$H/harness.config.yaml" "$HARNESS_UMBRELLA_ROOT"
+      info "recorded umbrella.root: $HARNESS_UMBRELLA_ROOT"
+    fi
   fi
 
   # ── 2b. apply the resolved builder backend (E20-F01) ────────────────────────
@@ -2275,6 +2539,17 @@ MODEL ROUTING:
   Gemini remains conditional on a concrete model. Selected Codex always has all six roles;
   inherited or unpinned roles omit model, while concrete pins add it role by role. Codex
   role replacement/reclamation requires a matching last-written ownership stamp.
+
+BODY LAYOUT  (E24-F03 / ADR-0004):
+  This target holds the ${BODY_LAYOUT} body layout.
+  full  every body path is a local copy — single-repo installs, and every child that
+        already carried a full body when this ran (converting one is destructive and
+        is E24-F04, never a side effect of a re-run).
+  thin  the PROSE tier is pointer stubs resolved from umbrella.root; the PROGRAM tier
+        is still a local copy, because init.sh execs and parses it.
+    prose (stub-able) : AGENTS.md agents/ docs/ specs/_templates/ specs/glossary.md
+    program (local)   : init.sh store/ tools/ + the example files an operator copies from
+  Every generated front-end glue file is PROGRAM tier and always local.
 
 PROJECT-OWNED  (seeded once, never clobbered on upgrade):
   .harness/harness.config.yaml   (verification commands + store backend + change_size budget)
@@ -5132,7 +5407,52 @@ for child in "$UMB"/*/; do
     continue
   fi
   echo "── child: $name ──"
+  # E24-F03 R1: tell the child where its umbrella is.
+  #
+  # DERIVED FROM THE PHYSICAL PATH, never hard-coded. A hard-coded `../../` is right only
+  # when the child is a real directory at depth 1: this loop deliberately accepts a
+  # SYMLINKED child (see the source-identity check above, which resolves `child_abs` with
+  # `pwd -P` precisely because a child may be a link). For one of those, `..` from the
+  # child's `.harness/` is resolved by the kernel against the link's TARGET, so `../../`
+  # lands outside the umbrella entirely — the child then installs a full body AND persists
+  # an unreachable `umbrella.root`. Reproduced before fixing. (Codex r3 P2 #3705849222.)
+  #
+  # A RELATIVE value keeps the whole umbrella tree movable, so it stays the normal case;
+  # the absolute physical path is the fallback for a child that resolves outside the
+  # umbrella, where no relative path would survive the link anyway.
+  #
+  # Set and UNSET explicitly rather than `VAR=v install_one …`: a variable assignment
+  # prefixing a FUNCTION call persists after the function returns in POSIX sh, so the
+  # prefix form would leave every later target — including a coordinator re-install —
+  # believing it is a child of something.
+  _umb_phys="$(CDPATH= cd -- "$UMB" && pwd -P)"
+  case "$child_abs" in
+    "$_umb_phys"/*)
+      # One `../` to leave `.harness/`, then one per component of the child's path under
+      # the umbrella (normally just the child's own directory name).
+      _crel="${child_abs#"$_umb_phys"/}"
+      _ucomp=1
+      while : ; do
+        case "$_crel" in
+          */*) _crel="${_crel#*/}"; _ucomp=$((_ucomp + 1)) ;;
+          *)   break ;;
+        esac
+      done
+      HARNESS_UMBRELLA_ROOT=""
+      _ui=0
+      while [ "$_ui" -le "$_ucomp" ]; do
+        HARNESS_UMBRELLA_ROOT="../$HARNESS_UMBRELLA_ROOT"
+        _ui=$((_ui + 1))
+      done
+      ;;
+    *)
+      # The child resolves outside the umbrella (a symlink to a repo elsewhere). Record the
+      # absolute physical umbrella path — umbrella_body_dir accepts either form.
+      HARNESS_UMBRELLA_ROOT="$_umb_phys"
+      ;;
+  esac
   install_one "$UMB/$name"   # R10
+  unset HARNESS_UMBRELLA_ROOT
   manifest_upsert "$MANIFEST" "$name"   # R12, R14
   INSTALLED_CHILDREN="$INSTALLED_CHILDREN$name
 "

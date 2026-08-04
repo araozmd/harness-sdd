@@ -202,6 +202,41 @@ EOF
   fi
 fi
 
+# 2a2. Umbrella-resolved body (E24-F03, ADR-0004). REPORT ONLY — this can never fail the
+#      gate. A child separated from its umbrella (a lone clone, CI, a PR reviewer's tree)
+#      is a SUPPORTED state: init.sh, the verification gate and the PR loop all still work
+#      there, because they read the program tier, which is always a full local copy. Only
+#      the prose body is remote. Saying so here is what turns "this file is a pointer to
+#      nowhere" from a mystery into a fact the reader already knows.
+#
+#      Section-scoped read: `root:` is taken only from inside the top-level `umbrella:`
+#      block, so an unrelated `root:` elsewhere in the config can never be mistaken for it.
+UMBRELLA_ROOT="$(awk '
+  /^umbrella:[[:space:]]*(#.*)?$/ { u=1; next }
+  u && /^[^[:space:]#]/ { u=0 }
+  u && /^[[:space:]]+root:/ {
+    sub(/^[[:space:]]+root:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+    gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+  }
+' harness.config.yaml 2>/dev/null)"
+#      RECORDING an umbrella is not the same as RESOLVING one. A child that already held a
+#      full body when the cascade reached it keeps that body (converting it is destructive
+#      and is E24-F04) and still gets `umbrella.root` written. Reporting "the prose body is
+#      remote" there would be plainly false — `agents/`, `docs/` and the templates are all
+#      sitting right here. So read the LAYOUT off disk, from the same stub sentinel the
+#      installer writes, before saying anything about where the body lives.
+if [ -n "${UMBRELLA_ROOT:-}" ]; then
+  if head -n 1 AGENTS.md 2>/dev/null | grep -qxF '<!-- harness:umbrella-stub -->'; then
+    if [ -f "$UMBRELLA_ROOT/.harness/.harness-version" ]; then
+      echo "ℹ️  harness body resolves from the umbrella at $UMBRELLA_ROOT (prose tier is stubs)"
+    else
+      echo "ℹ️  umbrella at $UMBRELLA_ROOT is not reachable — the prose body (agent prompts, docs) is remote and unavailable here; init.sh, verification and the PR loop are unaffected"
+    fi
+  else
+    echo "ℹ️  umbrella.root recorded ($UMBRELLA_ROOT), but this target holds a full local body — nothing resolves remotely"
+  fi
+fi
+
 # 2b. Umbrella mode (additive, opt-in). Engaged ONLY when harness.config.yaml has a
 #     non-empty `umbrella.manifest` AND that file exists. Inert otherwise, so a
 #     single-repo target is completely unaffected. The check is NON-FATAL: it warns
