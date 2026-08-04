@@ -981,6 +981,16 @@ echo "dotdot body" > "$SC2/docs/..draft.md"
 mkdir -p "$SC2/docs/..dd"
 echo "dotdot dir body" > "$SC2/docs/..dd/inner.md"
 echo "short dot body" > "$SC2/docs/.q"
+# SYMLINKS. `cp -R` preserves a link as a link, so the thin child must too. A walk that
+# tests `[ -d ]` before `[ -L ]` dereferences instead and descends: `docs/self -> .`
+# expanded into `docs/self/self/...` up to the OS resolution limit — 264 entries under the
+# child's docs/ against 8 in a control — and the cascade still reported its ordinary
+# status, so nothing surfaced the corruption. `dangling` is here because a broken link is
+# the case where `[ -e ]` is false while `[ -L ]` is true. (Codex r6 P2 #3710311338.)
+ln -s . "$SC2/docs/self"
+ln -s nested "$SC2/docs/link-to-dir"
+ln -s zzz.md "$SC2/docs/link-to-file"
+ln -s no-such-target "$SC2/docs/dangling"
 mk_umb "$AU/f03c" kid-d
 AU_OUT="$(CODEX_HOME="$AU/f03c/.ch" HOME="$AU/f03c/.home" sh "$SC2/harness-install.sh" \
   --umbrella "$AU/f03c" --agents=claude 2>&1)" || true
@@ -997,6 +1007,27 @@ done
   && fail "R2-shape: a sibling after a nested dir was written beneath it — recursion clobbered the parent frame"
 grep -qF '../../.harness/docs/nested/deeper/x.md' "$KD/docs/nested/deeper/x.md" \
   || fail "R2-shape: a nested stub does not name its own resolved path"
+# Every symlink survives AS A LINK, pointing where it pointed — never stubbed (the write
+# would land on the target) and never descended into.
+for _l in self:. link-to-dir:nested link-to-file:zzz.md dangling:no-such-target; do
+  _ln="${_l%%:*}"; _lt="${_l#*:}"
+  [ -L "$KD/docs/$_ln" ] \
+    || fail "R2-shape: docs/$_ln is not a symlink in the thin child — cp -R keeps it one"
+  [ "$(readlink "$KD/docs/$_ln")" = "$_lt" ] \
+    || fail "R2-shape: docs/$_ln points at '$(readlink "$KD/docs/$_ln")', want '$_lt'"
+done
+# `is_stub docs/link-to-file` is deliberately NOT asserted either way: it reads THROUGH the
+# link to `zzz.md`, which is itself correctly stubbed, so it is true for a reason that has
+# nothing to do with the link. `dangling` is the clean probe instead — had the stub write
+# followed it, its target would have been created.
+[ -e "$KD/docs/no-such-target" ] \
+  && fail "R2-shape: stubbing followed docs/dangling and created its target"
+# The runaway CANNOT be probed by path existence. `[ -e docs/self/self ]` is true on a
+# perfectly correct tree — and so is `docs/self/self/self/self` — because `-e` resolves the
+# path THROUGH the preserved link. Verified against a directory holding exactly one link and
+# one file. The honest probes are the two below, which use `find`: it does not follow
+# symlinks, so it reports the tree as stored rather than as traversable.
+_thin_n="$(find "$KD/docs" | wc -l | tr -d ' ')"
 # The control: the SAME source, installed standalone, keeps those files as real bodies —
 # which is what makes "missing from the thin child" a divergence rather than a source quirk.
 mkdir -p "$AU/f03c-full"   # the installer requires an EXISTING target directory
@@ -1012,7 +1043,30 @@ for _c in '..draft.md:dotdot body' '..dd/inner.md:dotdot dir body' '.q:short dot
   grep -qF "$_cb" "$AU/f03c-full/.harness/docs/$_cp" \
     || fail "R2-shape control: the full install did not preserve docs/$_cp — the thin-child assertion for it proves nothing"
 done
-pass "R2 nested dirs and dotfiles keep their shape in a thin child"
+# Symlink control: the full path keeps these as links, which is what makes "the thin child
+# keeps them as links" a fidelity claim rather than an arbitrary choice.
+for _l in self:. link-to-dir:nested link-to-file:zzz.md dangling:no-such-target; do
+  _ln="${_l%%:*}"; _lt="${_l#*:}"
+  [ -L "$AU/f03c-full/.harness/docs/$_ln" ] \
+    || fail "R2-shape control: the full install did not keep docs/$_ln a symlink — the thin-child link assertion proves nothing"
+  [ "$(readlink "$AU/f03c-full/.harness/docs/$_ln")" = "$_lt" ] \
+    || fail "R2-shape control: the full install's docs/$_ln points somewhere unexpected"
+done
+# THE WHOLE REQUIREMENT, stated once: thin and full must contain the SAME SET OF PATHS.
+# Every individual assertion above is a sample of this; the set comparison is the property
+# itself, and it catches shapes nobody thought to enumerate — which is exactly how this
+# function accumulated four blocking findings. `find` does not follow symlinks, so a
+# self-referencing link cannot loop here.
+( cd "$KD" && find docs | sort ) > "$AU/f03c-thin.paths"
+( cd "$AU/f03c-full/.harness" && find docs | sort ) > "$AU/f03c-full.paths"
+diff "$AU/f03c-full.paths" "$AU/f03c-thin.paths" >/dev/null \
+  || fail "R2-shape: thin and full installs disagree on docs/ paths:
+$(diff "$AU/f03c-full.paths" "$AU/f03c-thin.paths" | head -20)"
+# Precondition on that comparison: it is only meaningful if the fixture actually reached
+# both installs. An empty-vs-empty diff would pass while proving nothing.
+[ "$_thin_n" -ge 12 ] \
+  || fail "R2-shape: only $_thin_n entries under the thin child's docs/ — the fixture did not land, so the path-set comparison is vacuous"
+pass "R2 nested dirs, dot-name shapes and symlinks keep their shape in a thin child"
 
 # ── R1/R2: a SYMLINKED child resolves its umbrella too ─────────────────────────────────
 # The cascade deliberately accepts a symlinked child. `..` from such a child's .harness/ is

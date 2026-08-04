@@ -2027,56 +2027,81 @@ install_one() {
     rm -rf "$_dst"
     cp -R "$_src" "$_dst"
   }
-  # stub_dir_recursive <src-dir> <body-rel-prefix> <umbrella-root> — mirror a directory as
-  # stubs, RECURSIVELY, including nested directories and dotfiles.
+  # stub_files_in <dir-under-$H> <umbrella-root> — walk a tree ALREADY MATERIALISED by
+  # `cp -R` and replace each REGULAR file's contents with a pointer stub, in place.
   #
-  # The shape must match what `cp -R` produces on the full-copy path. An immediate-files-only
-  # loop silently drops any nested subtree a prose directory grows later — the thin child
-  # ends up missing a file the full install has, with no error anywhere. (Codex r2 P2
-  # #3705758419; reproduced with docs/nested/deep.md before fixing.)
+  # Note the direction: this does not build the shape, it only thins what `cp -R` built.
+  # That inversion is the point — see stub_tree below.
   #
   # Globs, not `find | while read`: a glob is newline-safe by construction, and this repo has
-  # already been bitten by paths containing newlines. The `-e` guard skips a pattern that
-  # matched nothing (it expands to itself).
-  #
-  # THREE patterns are needed, and they are chosen to be mutually disjoint so no entry is
-  # visited — or recursed into — twice:
+  # already been bitten by paths containing newlines. `find -exec` cannot help here because
+  # `gen_body_stub` is a shell function, not a command. The `-e` guard skips a pattern that
+  # matched nothing (it expands to itself); three mutually disjoint patterns are needed so
+  # that no entry is visited — or recursed into — twice:
   #   *        every name not starting with `.`
   #   .[!.]*   dotfiles whose second character is not a dot   (`.x`, `.hidden`)
   #   ..?*     double-dot names with at least one more char   (`..draft.md`), never `..`
-  # Dropping the second in favour of `.??*` looks like a simplification and is not: `.??*`
-  # requires three characters, so it silently omits a two-character dotfile like `.x`. Both
-  # gaps are the same bug in opposite directions — a name `cp -R` copies on the full path
-  # that the thin child never mirrors. (Codex r5 P2 #3706053982; every pattern's membership
-  # reproduced against a real directory before changing this line.)
-  stub_dir_recursive() {
-    _sdr_src="$1"; _sdr_rel="$2"; _sdr_root="$3"
-    mkdir -p "$H/$_sdr_rel"
-    for _sdr_f in "$_sdr_src"/* "$_sdr_src"/.[!.]* "$_sdr_src"/..?*; do
-      [ -e "$_sdr_f" ] || continue
-      _sdr_base="${_sdr_f##*/}"
-      if [ -d "$_sdr_f" ]; then
+  # `.??*` in place of the second looks like a simplification and is not: it requires three
+  # characters, so it omits a two-character dotfile like `.x`. (Codex r5 P2 #3706053982.)
+  #
+  # A missed name is now a THINNING miss, not a SHAPE miss: the file is still present with
+  # `cp -R`'s own content, merely not stubbed. That is the whole safety win of the inversion.
+  stub_files_in() {
+    _sfi_dir="$1"; _sfi_root="$2"
+    for _sfi_f in "$_sfi_dir"/* "$_sfi_dir"/.[!.]* "$_sfi_dir"/..?*; do
+      [ -e "$_sfi_f" ] || continue
+      if [ -L "$_sfi_f" ]; then
+        # `cp -R` preserves a symlink as a symlink; so must we. Descending instead would
+        # follow it — `[ -d ]` dereferences — and a self- or ancestor-referencing link like
+        # `docs/self -> .` expands into `docs/self/self/...` until the OS resolution limit.
+        # Reproduced end-to-end: 264 entries under a child's docs/ against 8 in a control,
+        # with the cascade still reporting its ordinary status. Stubbing it would be just as
+        # wrong the other way — the write would land on the link's TARGET.
+        # (Codex r6 P2 #3710311338.)
+        continue
+      elif [ -d "$_sfi_f" ]; then
         # SUBSHELL, not a bare call. POSIX sh has no local variables, so a recursive call
-        # would overwrite this frame's `_sdr_rel`/`_sdr_src`/`_sdr_root` and every sibling
-        # processed AFTER the nested directory would be written beneath it: with
-        # `docs/aaa/x.md` and `docs/zzz.md`, the child got `docs/aaa/zzz.md` and no
-        # `docs/zzz.md` at all. Reproduced before fixing. (Codex r4 P2 #3705960408.)
-        ( stub_dir_recursive "$_sdr_f" "$_sdr_rel/$_sdr_base" "$_sdr_root" ) || return 1
-      elif [ -f "$_sdr_f" ]; then
-        gen_body_stub "$_sdr_rel/$_sdr_base" "$_sdr_root" "$H/$_sdr_rel/$_sdr_base"
+        # would overwrite this frame's `_sfi_dir`/`_sfi_root` and every sibling processed
+        # AFTER a nested directory would be handled with the wrong frame.
+        # (Codex r4 P2 #3705960408.)
+        ( stub_files_in "$_sfi_f" "$_sfi_root" ) || return 1
+      elif [ -f "$_sfi_f" ]; then
+        # `rm -f` first: `cp -R` may preserve a read-only mode, and gen_body_stub writes
+        # with `>`, which would fail on a 0444 file.
+        rm -f "$_sfi_f"
+        gen_body_stub "${_sfi_f#"$H"/}" "$_sfi_root" "$_sfi_f"
       fi
     done
   }
 
   # stub_tree <relpath> <umbrella-root> — mirror one prose-tier path as pointer stubs,
   # preserving the SOURCE's shape so every path a consumer opens still exists.
+  #
+  # THE SHAPE IS PRODUCED BY `cp -R`, NOT REIMPLEMENTED. The requirement is literally "the
+  # same shape the full-copy path produces", and the full-copy path is `cp -R` — so the
+  # honest way to satisfy it is to make the same call and then thin the result, rather than
+  # to re-derive `cp -R`'s traversal semantics in POSIX sh.
+  #
+  # The earlier implementation walked the SOURCE and created entries itself, which meant
+  # rediscovering those semantics one filesystem shape at a time: nested directories
+  # (r2 #3705758419), recursion frames (r4 #3705960408), `..name` and two-character dot
+  # names (r5 #3706053982), then directory symlinks (r6 #3710311338) — four blocking
+  # findings in one function, each a shape the walk had not anticipated, with FIFOs,
+  # hardlinks and permission bits still unexamined. Copying first ends that class: whatever
+  # `cp -R` does with an exotic entry, the child gets byte-for-byte, because it IS the
+  # full-copy path. Only the thinning is ours.
   stub_tree() {
     _st_rel="$1"; _st_root="$2"; _st_src="$SRC/$_st_rel"; _st_dst="$H/$_st_rel"
     if [ ! -e "$_st_src" ]; then die "source missing: $_st_rel"; fi
+    mkdir -p "$(dirname "$_st_dst")"
     rm -rf "$_st_dst"
-    if [ -d "$_st_src" ]; then
-      stub_dir_recursive "$_st_src" "$_st_rel" "$_st_root"
+    cp -R "$_st_src" "$_st_dst"
+    if [ -L "$_st_dst" ]; then
+      :                       # a symlinked tier root: left exactly as the full path leaves it
+    elif [ -d "$_st_dst" ]; then
+      stub_files_in "$_st_dst" "$_st_root"
     else
+      rm -f "$_st_dst"
       gen_body_stub "$_st_rel" "$_st_root" "$_st_dst"
     fi
   }
