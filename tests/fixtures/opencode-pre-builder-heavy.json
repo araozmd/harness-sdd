@@ -1,0 +1,12 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [".harness/AGENTS.md"],
+  "agent": {
+    "orchestrator": { "mode": "primary",  "description": "The Leader: routes the next task, delegates. Never writes code.", "prompt": "{file:./.harness/agents/orchestrator.md}" },
+    "architect":    { "mode": "subagent", "description": "Spec Author: writes the 4-file spec (EARS).",                     "prompt": "{file:./.harness/agents/architect.md}" },
+    "builder":      { "mode": "subagent", "description": "Implementer: writes code from an approved spec.",                 "prompt": "{file:./.harness/agents/builder.md}" },
+    "reviewer":     { "mode": "subagent", "description": "Evaluator: verifies against the spec, runs tests.",               "prompt": "{file:./.harness/agents/reviewer.md}" },
+    "scout":        { "mode": "subagent", "description": "Read-only recon; writes findings to progress/.",                  "prompt": "{file:./.harness/agents/scout.md}" },
+    "doc-critic":   { "mode": "subagent", "description": "Advisory doc review pass over planning docs + specs. Documents only, never code.", "prompt": "{file:./.harness/agents/doc-critic.md}" }
+  }
+}
