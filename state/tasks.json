@@ -89,7 +89,7 @@
     {
       "id": "E06",
       "title": "Planning tier (rolling-wave inception + per-epic drill-down)",
-      "status": "done",
+      "status": "in-progress",
       "features": [
         {
           "id": "E06-F01",
@@ -155,6 +155,15 @@
             "E06-F03"
           ],
           "spec_path": "specs/epics/E06-planning-tier/F06-drift-check/"
+        },
+        {
+          "id": "E06-F07",
+          "title": "Feature-level park: hold a real feature before it has been specced",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E06-planning-tier/F07-feature-park/"
         }
       ]
     },
