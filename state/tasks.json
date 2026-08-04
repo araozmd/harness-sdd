@@ -515,7 +515,7 @@
         {
           "id": "E17-F03",
           "title": "Deterministic escalation to `builder-heavy` (complexity tag + two-rejection rule)",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
