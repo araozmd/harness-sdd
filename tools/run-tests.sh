@@ -56,6 +56,47 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# ── grep-flavour probe (E99-F12) — WARN ONLY, once, before any suite runs ─────────────
+#
+# Every script here and most of the suites shell out to `grep`. On a machine where `grep`
+# has been replaced — increasingly common, since it is a popular Homebrew/`cargo install`
+# swap — local results can diverge from CI in a way NO SUITE HERE CAN CATCH, because the
+# suites run under the same `grep` they would have to be testing. The cost is already on
+# the record: two E99-F11 findings could not be reproduced or refuted locally, and both
+# fixes shipped on documented `LC_ALL` semantics rather than on evidence.
+#
+# BEHAVIOURAL, NOT A VERSION STRING. The brand is a proxy; the divergence is the fact. A
+# probe that feeds one invalid UTF-8 byte sequence through `grep` and demands the line back
+# tests exactly what bites — and it costs one subprocess, needs no `--version` (some builds
+# print it to stderr, some exit non-zero), and would also catch a future GNU/BSD regression
+# that a name check would wave through. `--version` is read ONLY to make the message
+# actionable, and its failure is silent.
+#
+# Run under the runner's own `LC_ALL=C`, which is the locale the suites actually see. The
+# replacement that motivated this (ugrep 7.5.0) drops the line under every locale, C
+# included, so this is not a locale misconfiguration the operator can dismiss.
+#
+# NEVER fails the run. A hard failure over a working `grep` would be a far worse false
+# positive than the problem it reports, and a grep that cannot be found at all stays silent
+# — the suites fail loudly on their own, and "your grep drops lines" would be a lie.
+if command -v grep >/dev/null 2>&1; then
+  # `if ... ; then` on the assignment: reads the same with or without `set -e`, and a grep
+  # that exits non-zero here is itself a symptom, not a reason to abort the run.
+  if _gf_n="$(printf 'a\303(b\n' | grep -c '' 2>/dev/null)"; then :; else _gf_n=""; fi
+  if [ "$_gf_n" != "1" ]; then
+    # `1{s/…/g;p;}`, NOT `1s/…/gp`: the `p` FLAG on an `s` command prints only when the
+    # substitution actually matched, so a version line with no control characters — the
+    # normal case — printed nothing and the warning silently lost its most useful half.
+    if _gf_v="$(grep --version 2>/dev/null | sed -n '1{s/[[:cntrl:]]//g;p;}')"; then :; else _gf_v=""; fi
+    _gf_sfx=""
+    if [ -n "$_gf_v" ]; then _gf_sfx=" [reports: $_gf_v]"; fi
+    printf '⚠️  grep (%s) drops lines containing invalid UTF-8 — it is neither GNU nor BSD grep, so suites here can pass or fail for reasons unrelated to the code (warn-only)%s\n' \
+      "$(command -v grep)" "$_gf_sfx" >&2
+    unset _gf_v _gf_sfx
+  fi
+  unset _gf_n
+fi
+
 # Resolve suites relative to the repo/harness root this script lives in, so the runner works
 # from any cwd — the Reviewer does not always invoke it from the root.
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"

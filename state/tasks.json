@@ -470,7 +470,7 @@
         {
           "id": "E99-F12",
           "title": "init.sh should report a non-GNU/BSD grep so local runs are not silently unlike CI",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],

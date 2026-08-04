@@ -4,6 +4,34 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.54.2] — 2026-08-04
+
+### Added — ✨ `tools/run-tests.sh` reports a `grep` that is neither GNU nor BSD (E99-F12)
+
+Every harness script and most of the 29 suites shell out to `grep`. On a machine where
+`grep` has been replaced — an increasingly common Homebrew/`cargo install` swap — local
+behaviour can diverge from CI in a way **no suite here can surface**, because the suites
+run under the same `grep` they would have to be testing.
+
+`tools/run-tests.sh` now feeds one invalid UTF-8 byte sequence through `grep` before any
+suite runs and demands the line back. If it does not come back, it prints **one line** on
+stderr naming the resolved `grep` and, when readable, its version:
+
+```
+⚠️  grep (/opt/homebrew/bin/grep) drops lines containing invalid UTF-8 — it is neither GNU
+    nor BSD grep, so suites here can pass or fail for reasons unrelated to the code
+    (warn-only) [reports: ugrep 7.5.0 …]
+```
+
+**Behavioural, not a version string.** The brand is a proxy; the divergence is the fact. A
+probe costs one subprocess, needs no `--version` (some builds print it to stderr, some exit
+non-zero — it is read only to make the message actionable, and its failure is silent), and
+would also catch a future GNU/BSD regression that a name check would wave through. It runs
+under the runner's own `LC_ALL=C`, the locale the suites actually see.
+
+**It never fails the run**, and an absent `grep` stays silent — a hard failure over a
+working `grep` would be a worse false positive than the problem it reports.
+
 ## [0.54.1] — 2026-08-04
 
 ### Fixed — 🐛 a `#` inside a quoted `umbrella.root` is data, not a comment (E99-F13)
