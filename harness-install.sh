@@ -2067,9 +2067,21 @@ install_one() {
         ( stub_files_in "$_sfi_f" "$_sfi_root" ) || return 1
       elif [ -f "$_sfi_f" ]; then
         # `rm -f` first: `cp -R` may preserve a read-only mode, and gen_body_stub writes
-        # with `>`, which would fail on a 0444 file.
-        rm -f "$_sfi_f"
-        gen_body_stub "${_sfi_f#"$H"/}" "$_sfi_root" "$_sfi_f"
+        # with `>`, which cannot open a 0444 file.
+        #
+        # BOTH are checked. `set -e` does not help here: this function runs as the left
+        # operand of `||` in the recursion above, and POSIX shells suppress `set -e` for the
+        # whole of that operand — so an unchecked failure would be swallowed and the loop
+        # would carry on to `install complete`. (Codex r7 P2 #3711176789.)
+        #
+        # These two checks are DEFENCE IN DEPTH and are deliberately not claimed as tested:
+        # the `chmod -R u+w` in stub_tree removes the only trigger a portable fixture can
+        # build, and deleting these `|| return 1`s leaves the suite green. What remains
+        # reachable is environmental — a full disk, a read-only mount, ENAMETOOLONG — which
+        # the suite cannot create without root or platform-specific tricks. Kept because the
+        # failure they guard against is silent, and silence is what made r7 expensive.
+        rm -f "$_sfi_f" || return 1
+        gen_body_stub "${_sfi_f#"$H"/}" "$_sfi_root" "$_sfi_f" || return 1
       fi
     done
   }
@@ -2087,9 +2099,16 @@ install_one() {
   # (r2 #3705758419), recursion frames (r4 #3705960408), `..name` and two-character dot
   # names (r5 #3706053982), then directory symlinks (r6 #3710311338) — four blocking
   # findings in one function, each a shape the walk had not anticipated, with FIFOs,
-  # hardlinks and permission bits still unexamined. Copying first ends that class: whatever
+  # hardlinks and permission bits still unexamined. Copying first ends THAT class: whatever
   # `cp -R` does with an exotic entry, the child gets byte-for-byte, because it IS the
   # full-copy path. Only the thinning is ours.
+  #
+  # It does not end every class, and the honest record is that it opened a smaller one:
+  # `cp -R` carries the SOURCE's modes across, so a `0555` directory or a `0444` file — which
+  # the old source-walk never reproduced, because it built the destination fresh — arrived
+  # unwritable and the thinning could not overwrite it (r7 #3711176789). The `chmod` below
+  # closes that categorically, and unlike the shape class it has a single precondition
+  # (the copy must be writable) rather than one bug per filesystem feature.
   stub_tree() {
     _st_rel="$1"; _st_root="$2"; _st_src="$SRC/$_st_rel"; _st_dst="$H/$_st_rel"
     if [ ! -e "$_st_src" ]; then die "source missing: $_st_rel"; fi
@@ -2099,10 +2118,17 @@ install_one() {
     if [ -L "$_st_dst" ]; then
       :                       # a symlinked tier root: left exactly as the full path leaves it
     elif [ -d "$_st_dst" ]; then
-      stub_files_in "$_st_dst" "$_st_root"
+      # `chmod -R` does NOT follow symlinks encountered during traversal — verified against a
+      # tree holding a link to an external 0444 file, which kept its mode — so this cannot
+      # reach outside the copy. A stub is new content anyway; inheriting the source file's
+      # read-only bit onto a pointer would only make the next upgrade harder.
+      chmod -R u+w "$_st_dst" || die "cannot make the copied prose tier writable: $_st_rel"
+      stub_files_in "$_st_dst" "$_st_root" \
+        || die "failed to stub the prose tier: $_st_rel"
     else
-      rm -f "$_st_dst"
-      gen_body_stub "$_st_rel" "$_st_root" "$_st_dst"
+      rm -f "$_st_dst" || die "cannot replace the copied prose file: $_st_rel"
+      gen_body_stub "$_st_rel" "$_st_root" "$_st_dst" \
+        || die "failed to stub the prose file: $_st_rel"
     fi
   }
 

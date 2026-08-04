@@ -498,7 +498,10 @@ pass "orchestrator.md has additive Umbrella mode loop (R9-R17)"
 # real git children and read the exit code.
 
 AU="$(mktemp -d 2>/dev/null || mktemp -d -t harness-audit)"
-trap 'rm -rf "$AU"' EXIT
+# `chmod -R u+w` before the sweep: the R2 shape fixture deliberately creates a 0555
+# directory holding a 0444 file, and `rm -rf` cannot unlink through it. Without this the
+# suite leaves temp trees behind and prints permission errors from the trap.
+trap 'chmod -R u+w "$AU" 2>/dev/null; rm -rf "$AU"' EXIT
 
 # mk_umb <dir> <child>... — an umbrella with git children, each with one commit.
 mk_umb() {
@@ -991,6 +994,16 @@ ln -s . "$SC2/docs/self"
 ln -s nested "$SC2/docs/link-to-dir"
 ln -s zzz.md "$SC2/docs/link-to-file"
 ln -s no-such-target "$SC2/docs/dangling"
+# READ-ONLY MODES. `cp -R` carries the source's modes across, so a 0555 directory holding a
+# 0444 file arrives in the child unwritable and the thinning cannot overwrite it — the child
+# kept `SECRET REAL BODY` while the cascade printed `install complete`. Note this is a
+# regression the copy-then-thin inversion INTRODUCED: the earlier source-walk built the
+# destination fresh and so never reproduced these modes. Verified by running this very
+# fixture against both implementations. (Codex r7 P2 #3711176789.)
+mkdir -p "$SC2/docs/rodir"
+echo "SECRET REAL BODY" > "$SC2/docs/rodir/locked.md"
+chmod 0444 "$SC2/docs/rodir/locked.md"
+chmod 0555 "$SC2/docs/rodir"
 mk_umb "$AU/f03c" kid-d
 AU_OUT="$(CODEX_HOME="$AU/f03c/.ch" HOME="$AU/f03c/.home" sh "$SC2/harness-install.sh" \
   --umbrella "$AU/f03c" --agents=claude 2>&1)" || true
@@ -998,7 +1011,7 @@ KD="$AU/f03c/kid-d/.harness"
 # Precondition: this really is a thin child, or "the nested file is a stub" is vacuous.
 is_stub "$KD/AGENTS.md" || fail "R2-shape setup: the child is not thin"
 for _p in docs/nested/deep.md docs/nested/deeper/x.md agents/.hidden.md docs/zzz.md \
-          docs/..draft.md docs/..dd/inner.md docs/.q; do
+          docs/..draft.md docs/..dd/inner.md docs/.q docs/rodir/locked.md; do
   [ -f "$KD/$_p" ] || fail "R2-shape: $_p is missing from a thin child but present in a full install"
   is_stub "$KD/$_p" || fail "R2-shape: $_p was mirrored but is not a stub"
 done
@@ -1043,6 +1056,14 @@ for _c in '..draft.md:dotdot body' '..dd/inner.md:dotdot dir body' '.q:short dot
   grep -qF "$_cb" "$AU/f03c-full/.harness/docs/$_cp" \
     || fail "R2-shape control: the full install did not preserve docs/$_cp — the thin-child assertion for it proves nothing"
 done
+# The read-only file's REAL CONTENT must appear nowhere in the thin child — the symptom of
+# the silent-thinning bug was the body surviving, not the stub being absent. Stated over the
+# whole tree rather than one path, since a partially-thinned child is the actual hazard.
+grep -rqF 'SECRET REAL BODY' "$KD" \
+  && fail "R2-shape: real body content survived into a thin child — thinning failed silently"
+# ...and the full install MUST still contain it, or the grep above passes vacuously.
+grep -qF 'SECRET REAL BODY' "$AU/f03c-full/.harness/docs/rodir/locked.md" \
+  || fail "R2-shape control: the full install did not keep the read-only file's body — the absence assertion above proves nothing"
 # Symlink control: the full path keeps these as links, which is what makes "the thin child
 # keeps them as links" a fidelity claim rather than an arbitrary choice.
 for _l in self:. link-to-dir:nested link-to-file:zzz.md dangling:no-such-target; do
