@@ -18,7 +18,7 @@ Two things select the heavy role:
 | trigger | source |
 |---|---|
 | `complexity: complex` in the feature spec's frontmatter | the Architect, at spec time — heavy from round 1 |
-| `round > escalation.after_rejections` | the **existing** build↔review counter; default `2` |
+| `round > escalation.after_rejections` | the **existing** build↔review counter — fires only once escalation is enabled; `2` is the suggested opt-in value |
 
 ```yaml
 escalation:

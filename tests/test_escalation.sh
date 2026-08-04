@@ -369,6 +369,15 @@ docs_agree_with_the_shipped_default() {
   # Positive control: the docs DO describe the current meaning, so the sweep above is not
   # passing merely because escalation went undocumented.
   grep -qi 'disables BOTH triggers' "$SRC/docs/WORKFLOW.md"     || fail "R6: docs/WORKFLOW.md does not state that 0 disables both triggers"
+  # The FIRST version of this guard checked only the pre-opt-in *phrasing* and missed three
+  # docs still calling the default `2` — caught a round later (#3716898786). So also pin the
+  # VALUE: any line mentioning both `after_rejections` and "default" must say 0. The docs
+  # legitimately suggest 2 as an opt-in, which is why this keys off "default", not the digit.
+  for _d in "$SRC/docs/WORKFLOW.md" "$SRC/CHANGELOG.md" "$SRC/harness.config.yaml" \
+            "$SRC/agents/orchestrator.md" "$SRC/harness-install.sh"; do
+    _bad="$(grep -i 'after_rejections' "$_d" | grep -i 'default' | grep -v '0' || true)"
+    [ -z "$_bad" ] || fail "R6: $_d states a non-zero default for after_rejections: $_bad"
+  done
   pass "the shipped default is off, behaves off, and the docs say so (R6)"
 }
 
