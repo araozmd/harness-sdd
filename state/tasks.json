@@ -722,7 +722,7 @@
         {
           "id": "E24-F03",
           "title": "Thin the child: umbrella-resolved body with local fallback",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
