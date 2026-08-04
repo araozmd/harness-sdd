@@ -27,14 +27,21 @@ For a child under an umbrella whose path contains `#`, the truncated root resolv
 nothing: `init.sh` reports the umbrella unreachable, and a later standalone installer run
 **replaces the child's stubs with full copies** — silently undoing E24-F03 for that tree.
 
-`set_umbrella_root` writes `"<path>"` with **no escaping of any kind**, so on a line where
-nothing but whitespace follows the **last** quote, the value is everything between the
-first quote and that one. Both readers — `harness-install.sh` `_cfg_umbrella_root_value()`
-and `init.sh`'s inline awk — now read it that way, which keeps a `#` *and* a `"` that the
-installer put in the path (matching to the *first* closing quote would truncate
-`/tmp/a"b` to `/tmp/a`). A line that fails the remainder test carries a real trailing
-comment and falls through to the previous comment-strip path, so an **unquoted** value
-still honours ` # comment` and existing hand-written configs are unaffected.
+`set_umbrella_root` writes `"<path>"` with **no escaping of any kind**, which makes
+`"/a" # b"` genuinely ambiguous — value `/a` with comment `# b"`, or value `/a" # b`. Both
+readers — `harness-install.sh` `_cfg_umbrella_root_value()` and `init.sh`'s inline awk —
+now **rank** the two readings rather than trying to cover both with one predicate:
+
+1. **The machine-written form wins**: `"<path>"` with nothing but whitespace after the
+   closing quote. Unambiguous by construction — at most one quote on the line can have a
+   whitespace-only remainder, since any earlier candidate has a quote in its remainder. So
+   a `#` *and* a `"` that the installer put in the path both survive.
+2. **Otherwise a trailing comment is honoured**, taking the *first* quote followed by
+   optional whitespace and `#`, so the comment begins as early as the line allows and is
+   never swallowed into the value.
+
+An **unquoted** value still ends at its first `#`, unchanged, so existing hand-written
+configs are unaffected.
 
 The two implementations stay duplicated on purpose (`init.sh` must remain
 standalone-executable) and are now pinned identical by a test.
