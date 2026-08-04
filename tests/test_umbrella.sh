@@ -1251,6 +1251,27 @@ F13T_INIT="$(printf '%s\n' "$F13T_OUT" | sed -n 's/.*harness body resolves from 
   || fail "E99-F13/quoted+comment init.sh: reported [$F13T_INIT], want [$F13ROOT]: $F13T_OUT"
 pass "E99-F13 quoted_root_with_trailing_comment — both readers keep the '#' inside the quotes"
 
+# ── A comment containing BOTH `#` and `"` must not extend the value ────────────────────
+# This pins the direction of the reader's second pass, which is load-bearing: on
+# `root: "<v>" # a " # b` more than one quote qualifies as the closing one, and taking the
+# LAST swallows ` # a ` into the value. Read through init.sh's UNREACHABLE message, which
+# prints the parsed root verbatim and needs no resolvable path.
+#
+# Direction in the FIRST pass needs no test: a quote whose remainder is whitespace-only is
+# unique by construction, since any earlier candidate has a quote in its remainder.
+F13D="$AU/f13-comment-direction"
+cp -R "$F13E/realrepo" "$F13D"
+awk '/^  root: /{ print "  root: \"/nonexistent/keep#me\" # a \" # b"; next } { print }' \
+  "$F13D/.harness/harness.config.yaml" > "$F13D/.harness/hc.t" \
+  && mv "$F13D/.harness/hc.t" "$F13D/.harness/harness.config.yaml"
+grep -qF 'root: "/nonexistent/keep#me" # a " # b' "$F13D/.harness/harness.config.yaml" \
+  || fail "E99-F13/comment-direction precondition: the fixture line was not written as intended"
+F13D_OUT="$(cd "$F13D/.harness" && ./init.sh 2>&1)" \
+  || fail "E99-F13/comment-direction: init.sh exited non-zero: $F13D_OUT"
+printf '%s' "$F13D_OUT" | grep -qF 'umbrella at /nonexistent/keep#me is not reachable' \
+  || fail "E99-F13/comment-direction: a quote inside the comment was taken as the closing quote, extending the value: $F13D_OUT"
+pass "E99-F13 comment_containing_a_quote_does_not_extend_the_value"
+
 # ── An UNQUOTED value must still honour a trailing ` # comment` ────────────────────────
 # The quoted-scalar branch must not have taken that path over, or a hand-edited config
 # breaks. Read through init.sh's UNREACHABLE message, which also prints the parsed root —
