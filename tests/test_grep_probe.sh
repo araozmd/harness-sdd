@@ -25,6 +25,21 @@ WARN='drops lines containing invalid UTF-8'
 command -v python3 >/dev/null 2>&1 \
   || fail "python3 is absent — init.sh hard-fails without it, so this suite does not skip"
 
+# ── Resolve a REAL interpreter BEFORE anything shadows PATH (Codex #3713371931) ────────
+# `python3` is very often a pyenv/asdf/rbenv-style shim: a shell script that re-execs
+# through a version manager. If the grep double below launched `python3` by NAME, it would
+# resolve through the PATH this suite has just shadowed — and any shell script in that
+# chain that calls `grep` lands straight back in the double, which launches `python3`
+# again. That is an unbounded process chain, and because `tools/run-tests.sh` auto-
+# discovers every `tests/test_*.sh`, it would hang the whole gate rather than one suite.
+#
+# `sys.executable` is the escape hatch: run ONCE here, under the pristine ambient PATH, it
+# reports the interpreter binary the shim ultimately exec's. The double then calls that
+# absolute path and never consults PATH for an interpreter at all.
+PY_REAL="$(python3 -c 'import sys; print(sys.executable)' 2>/dev/null || true)"
+[ -n "$PY_REAL" ] && [ -x "$PY_REAL" ] \
+  || fail "could not resolve a real python3 interpreter (sys.executable=[$PY_REAL])"
+
 # ── The test double: a minimal but REAL grep ──────────────────────────────────────────
 # It supports the `-c <pattern>` form the probe uses plus plain matching, reads stdin or
 # files, and differs between the two controls ONLY in whether it silently discards lines
@@ -84,11 +99,27 @@ else:
         sys.stdout.buffer.write(line + b"\n")
 sys.exit(0 if matched else 1)
 PY
+# The interpreter is named by ABSOLUTE PATH, and PATH is reset for the child, so nothing
+# this double runs can resolve back through the shadowed PATH into the double itself.
 cat > "$T/bin/grep" <<EOF
 #!/bin/sh
-exec python3 "$T/bin/grep.py" "\$@"
+PATH=/usr/bin:/bin
+export PATH
+exec "$PY_REAL" "$T/bin/grep.py" "\$@"
 EOF
 chmod +x "$T/bin/grep"
+
+# ── ARM THE TRAP ──────────────────────────────────────────────────────────────────────
+# A `python3` planted in the shim dir must be IGNORED by the double. This is not one extra
+# case: it is armed for the whole file, so EVERY control and case below doubles as a
+# regression test for the recursion above. If the double ever goes back to launching
+# `python3` by name, this decoy answers and the suite fails loudly instead of hanging.
+printf '#!/bin/sh\necho "the grep double resolved python3 through the shadowed PATH" >&2\nexit 97\n' \
+  > "$T/bin/python3"
+chmod +x "$T/bin/python3"
+_decoy="$(PATH="$T/bin:$PATH" sh -c 'command -v python3' 2>/dev/null || true)"
+[ "$_decoy" = "$T/bin/python3" ] \
+  || fail "precondition: the decoy python3 does not shadow PATH (resolved [$_decoy]) — every case below would pass without proving the double avoids PATH"
 
 printf '#!/bin/sh\nexit 0\n' > "$T/test_noop.sh"
 
@@ -99,17 +130,18 @@ run_probe() {
 }
 
 # ── FIXTURE PRECONDITIONS ─────────────────────────────────────────────────────────────
-# Assert the double is faithful in BOTH settings before trusting either control.
-_keep="$(printf 'a\303(b\n' | SHIM_DROP_INVALID=0 "$T/bin/grep" -c '' || true)"
+# Assert the double is faithful in BOTH settings before trusting either control. Run under
+# the SHADOWED PATH, exactly as the probe will run it, so these also exercise the decoy.
+_keep="$(printf 'a\303(b\n' | PATH="$T/bin:$PATH" SHIM_DROP_INVALID=0 "$T/bin/grep" -c '' || true)"
 [ "$_keep" = "1" ] \
   || fail "precondition: the non-dropping shim did not return the invalid-UTF-8 line (got [$_keep]) — it is not a faithful grep, so the negative control proves nothing"
-_drop="$(printf 'a\303(b\n' | SHIM_DROP_INVALID=1 "$T/bin/grep" -c '' || true)"
+_drop="$(printf 'a\303(b\n' | PATH="$T/bin:$PATH" SHIM_DROP_INVALID=1 "$T/bin/grep" -c '' || true)"
 [ "$_drop" = "1" ] \
   && fail "precondition: the dropping shim RETURNED the invalid-UTF-8 line — the positive control cannot fire"
 # ...and both settings must agree on an ordinary line, or the "dropping" shim is simply
 # broken and every difference below is an artifact rather than the behaviour under test.
 for _d in 0 1; do
-  _clean="$(printf 'hello\n' | SHIM_DROP_INVALID="$_d" "$T/bin/grep" -c '' || true)"
+  _clean="$(printf 'hello\n' | PATH="$T/bin:$PATH" SHIM_DROP_INVALID="$_d" "$T/bin/grep" -c '' || true)"
   [ "$_clean" = "1" ] \
     || fail "precondition: the shim (SHIM_DROP_INVALID=$_d) mishandles a CLEAN line (got [$_clean]) — it is not a grep, it is broken"
 done
