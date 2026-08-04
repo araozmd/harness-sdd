@@ -151,6 +151,35 @@ def _fallback_errors(data):
                         isinstance(x, str) for x in dep
                     ):
                         errors.append("%s.depends_on: expected array of strings" % fw)
+                # Optional (additive, E06-F07) feature park. Mirrored here so a machine
+                # WITHOUT jsonschema does not accept a board the schema rejects — two
+                # validators disagreeing is worse than either one being strict. `reason`
+                # is required and non-empty because presence means parked, and a park
+                # with no legible reason is the exact defect the field exists to fix.
+                if "parked" in ft:
+                    park = ft["parked"]
+                    if not isinstance(park, dict):
+                        errors.append("%s.parked: expected object" % fw)
+                    else:
+                        reason = park.get("reason")
+                        if not isinstance(reason, str) or not reason:
+                            errors.append(
+                                "%s.parked.reason: expected a non-empty string" % fw
+                            )
+                        unblocked = park.get("unblocked_by")
+                        if "unblocked_by" in park and (
+                            not isinstance(unblocked, str) or not unblocked
+                        ):
+                            errors.append(
+                                "%s.parked.unblocked_by: expected a non-empty string" % fw
+                            )
+                    # A park means "not yet workable"; `done` means finished. Unreachable
+                    # via set-status (which refuses a transition while parked), so it can
+                    # only be hand-edited in — and left legal it defeats the targeting
+                    # contract, because select() short-circuits a done target to
+                    # `target-complete` before any blocker is computed.
+                    if ft.get("status") == "done":
+                        errors.append("%s: a done feature cannot be parked" % fw)
                 # Umbrella mode (optional): mirror the slice checks from the JSON
                 # schema so corrupted cross-repo state is rejected even without
                 # jsonschema installed. Absent `slices` ⇒ single-repo, unaffected.

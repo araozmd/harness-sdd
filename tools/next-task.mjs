@@ -239,6 +239,24 @@ function validateBoard(board) {
       assertOptionalBoolean(feature.autonomous, `${feature.id}.autonomous`);
       if (feature.owner !== undefined && typeof feature.owner !== 'string') throw new Error(`${feature.id}.owner must be a string`);
       assertDependencies(feature.depends_on, `${feature.id}.depends_on`);
+      // E06-F07: this selector carries its OWN validator, independent of the shared one
+      // init.sh runs — so the park has to be checked here too, or a board reaching the
+      // selector through --tasks (or edited after init.sh) is consumed unvalidated. The
+      // consequences were concrete: `"parked": null` is falsy, so the park was silently
+      // IGNORED and the feature selected; a string or `{}` produced a blocker reading
+      // "undefined". Every one of those boards is already rejected by the schema and the
+      // shared validator, so the selector was the only component disagreeing.
+      if (feature.parked !== undefined) {
+        assertObject(feature.parked, `${feature.id}.parked`);
+        assertString(feature.parked.reason, `${feature.id}.parked.reason`);
+        if (feature.parked.unblocked_by !== undefined) assertString(feature.parked.unblocked_by, `${feature.id}.parked.unblocked_by`);
+        // A park means "not yet workable"; `done` means finished. The combination is
+        // meaningless, and it is unreachable through the sanctioned path (set-status
+        // refuses a transition while parked), so it can only arrive by hand-editing.
+        // Left legal, it would also defeat the targeting contract: select() short-circuits
+        // a done target to `target-complete` before any blocker is computed.
+        if (feature.status === 'done') throw new Error(`${feature.id} is done and cannot be parked`);
+      }
       const slices = [];
       if (feature.slices !== undefined) {
         if (!Array.isArray(feature.slices) || feature.slices.length === 0) throw new Error(`${feature.id}.slices must be a non-empty array`);
@@ -358,13 +376,42 @@ function featureRoute(feature, requireApproval) {
   return null;
 }
 
+// parkDetail — the reason a feature is held, plus what would release it when recorded.
+// `reason` is guaranteed non-empty by the schema, so this never renders an empty park.
+function parkDetail(feature) {
+  const park = feature.parked;
+  return park.unblocked_by ? `${park.reason} (unblocked by: ${park.unblocked_by})` : park.reason;
+}
+
 function featureBlockers(feature, featureById, cycles, requireApproval) {
   const records = [];
   if (cycles.has(feature.id)) records.push({ subject: feature.id, code: 'dependency-cycle', detail: cycles.get(feature.id) });
   if (feature.epic.status === 'draft') records.push({ subject: feature.id, code: 'gated-epic', detail: `epic ${feature.epic.id} is draft` });
+  // E06-F07: a park is a BLOCKER, never a route. Pushed here — beside `gated-epic`, the
+  // codebase's existing answer to "exists, understood, not actionable" — and deliberately
+  // NOT reflected in featureRoute(): that is what makes "unparking restores exactly the
+  // prior routing" true by construction, with no prior state to record or restore.
+  // Listed before unmet-dependency because the park is the fact the reader needs first.
+  // The detail names the route the feature would take once unparked. That is the question
+  // an operator actually has while reading a park ("is this still classified as needing a
+  // spec?") — the mislabelling it answers is the defect this whole feature exists to fix.
+  // It is also what makes "a park is a blocker, NOT a route" observable: featureRoute is
+  // called here with the park in place and must still return the real route. Nulling the
+  // route when parked produces identical selection behaviour, so without this line that
+  // design rule had no consequence any test could see.
+  if (feature.parked) {
+    const wouldRoute = featureRoute(feature, requireApproval) || 'none';
+    records.push({ subject: feature.id, code: 'parked', detail: `${parkDetail(feature)} [route when unparked: ${wouldRoute}]` });
+  }
   const unmet = sortedUnique((feature.depends_on || []).filter((id) => !featureById.has(id) || featureById.get(id).status !== 'done'));
   if (unmet.length) {
-    const detail = unmet.map((id) => `${id}=${featureById.has(id) ? featureById.get(id).status : 'missing'}`).join(', ');
+    // A parked dependency is named inline (E06-F07): without it a stalled chain reports a
+    // generic `unmet-dependency` and the reason is invisible one hop away.
+    const detail = unmet.map((id) => {
+      if (!featureById.has(id)) return `${id}=missing`;
+      const dep = featureById.get(id);
+      return dep.parked ? `${id}=${dep.status} (parked: ${parkDetail(dep)})` : `${id}=${dep.status}`;
+    }).join(', ');
     records.push({ subject: feature.id, code: 'unmet-dependency', detail: `blocking dependencies: ${detail}` });
   }
   if (feature.status === 'spec-ready' && requireApproval && feature.autonomous !== true) {

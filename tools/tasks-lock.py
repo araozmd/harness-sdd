@@ -578,6 +578,45 @@ def _find_status_span(text, target_id):
     return None
 
 
+def _refuse_if_parked(text, target_id):
+    """A park holds against a status transition (E06-F07).
+
+    A park that a transition silently clears is not a park — it is a suggestion, which is
+    exactly the advisory-prose failure the field exists to end. So `set-status` refuses,
+    names the reason (so the operator does not have to go read the board to learn why
+    their write bounced), and points at the unpark step. Unparking is a separate explicit
+    act via the existing `apply --mutator` escape hatch, after which the ordinary
+    transition succeeds — no new write verb.
+
+    READ-ONLY. It parses `text` only to inspect; it never reserializes, so the
+    minimal-diff text patch that follows is completely unaffected. A board too malformed
+    to parse is left to the post-transform schema validation, which reports it properly
+    instead of being masked by a park message here.
+
+    Epics carry no `parked` (features only, by decision), so an epic id simply falls
+    through.
+    """
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return
+    if not isinstance(data, dict):
+        return
+    for ep in data.get("epics") or []:
+        if not isinstance(ep, dict):
+            continue
+        for ft in ep.get("features") or []:
+            if not isinstance(ft, dict) or ft.get("id") != target_id:
+                continue
+            park = ft.get("parked")
+            if isinstance(park, dict) and park.get("reason"):
+                _die(
+                    "%s is parked (%s) — unpark it before changing status"
+                    % (target_id, park["reason"])
+                )
+            return
+
+
 def _set_status_text_transform(target_id, status):
     """Build a TEXT transform that changes ONLY the target's status value.
 
@@ -591,6 +630,7 @@ def _set_status_text_transform(target_id, status):
     """
 
     def transform(text):
+        _refuse_if_parked(text, target_id)  # E06-F07: a park outranks a transition
         span = _find_status_span(text, target_id)
         if span is None:
             _die("id %r not found in board" % target_id)

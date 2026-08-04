@@ -159,7 +159,7 @@
         {
           "id": "E06-F07",
           "title": "Feature-level park: hold a real feature before it has been specced",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
