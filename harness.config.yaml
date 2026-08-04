@@ -311,3 +311,18 @@ change_size:
   # it meaningless, so extend these rather than letting a repo's tests count as production.
   test_paths: []           # extra test-file patterns, e.g. - "(^|/)spec/"
   generated_paths: []      # extra generated/vendored patterns, excluded from the budget entirely
+
+# Deterministic Builder escalation (E17-F03). After this many Reviewer rejections,
+# subsequent builds spawn `builder-heavy` instead of `builder`. The counter is the
+# EXISTING build<->review round (agents/orchestrator.md), so this adds no second
+# source of truth. `0` DISABLES rejection-based escalation entirely.
+#
+# INERT until you configure `models.builder-heavy` above: while it reads `inherit`,
+# builder-heavy resolves to the SAME model as builder, so escalating changes nothing
+# but the role name in progress/history.md and telemetry. A spec may also start heavy
+# from round 1 by setting `complexity: complex` in its frontmatter.
+#
+# Under `execution.builder.backend: delegate` escalation is INAPPLICABLE — the external
+# executor picks its own model — and the harness never escalates on that path.
+escalation:
+  after_rejections: 2

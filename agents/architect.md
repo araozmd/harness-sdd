@@ -179,6 +179,30 @@ findings inline, then proceed to the hand-off. If the critic invocation errors o
 out, proceed best-effort and append a note to `progress/<run>/` recording the skipped or
 failed review.
 
+## The `complexity` tag (E17-F03)
+
+Your `.spec.md` frontmatter carries `complexity: standard | complex`. It decides which
+Builder the Orchestrator spawns on **round 1**: `complex` starts on `builder-heavy`, the
+same instruction body at a heavier model tier (ADR-0002). Omit it, or leave it `standard`,
+and the build starts on the ordinary Builder — which is what every spec written before this
+feature does, with no warning and no failure.
+
+**Set `complex` on a stated basis, never on a feeling.** The epic this comes from forbids
+ad-hoc judgment as the escalation mechanism; a tag chosen by vibe reintroduces exactly that,
+one step earlier. Write `complex` only when you can point at a signal you already produced,
+and **say which one in the spec's Context**:
+
+- the feature pressed against `change_size.max_requirements` — it nearly split, or it did;
+- it must honor an ADR whose constraints reach across several files;
+- the plan names a defect class the harness has already paid for (a body and its copy
+  diverging, a validator that disagrees with a schema, a byte contract compared in more than
+  one place);
+- speccing it required resolving a contradiction between two existing components.
+
+If none of those is true, leave it `standard`. A struggling build still escalates on its own
+after the configured number of Reviewer rejections — the tag is a head start, not the only
+route, so guessing high buys nothing and spends a heavier model on easy work.
+
 ## Hand-off
 
 When all four files are written (plus, for a sliced feature, the pinned contract

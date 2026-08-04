@@ -431,6 +431,36 @@ change_size:
   generated_paths: []      # extra generated/vendored patterns, excluded from the budget entirely
 EOF
   fi
+
+  # --- escalation block (E17-F03 deterministic Builder escalation) ---
+  # Top-level, append-only at EOF. Keep this text BYTE-IDENTICAL to the tail of the source
+  # harness.config.yaml: a FRESH install copies the config and never migrates, an UPGRADE
+  # only migrates, and the two must converge on the same bytes. Seeding only one of the two
+  # is precisely the defect E17-F02's mutation battery caught.
+  #
+  # Defaulting this ON is safe by construction: E17-F02 ships `models.builder-heavy: inherit`,
+  # which resolves to key omission, so on a target that configured nothing the heavy role
+  # resolves to the SAME model as `builder`. The default is inert until an operator sets a
+  # tier — which is exactly when they want it.
+  if ! grep -Eq '^escalation:[[:space:]]*(#.*)?$' "$_cfg"; then
+    cat >> "$_cfg" <<'EOF'
+
+# Deterministic Builder escalation (E17-F03). After this many Reviewer rejections,
+# subsequent builds spawn `builder-heavy` instead of `builder`. The counter is the
+# EXISTING build<->review round (agents/orchestrator.md), so this adds no second
+# source of truth. `0` DISABLES rejection-based escalation entirely.
+#
+# INERT until you configure `models.builder-heavy` above: while it reads `inherit`,
+# builder-heavy resolves to the SAME model as builder, so escalating changes nothing
+# but the role name in progress/history.md and telemetry. A spec may also start heavy
+# from round 1 by setting `complexity: complex` in its frontmatter.
+#
+# Under `execution.builder.backend: delegate` escalation is INAPPLICABLE — the external
+# executor picks its own model — and the harness never escalates on that path.
+escalation:
+  after_rejections: 2
+EOF
+  fi
 }
 
 # seed_pr_loop_optin <file> — force `pr_loop.enabled` to the OPT-IN default (`false`) in a

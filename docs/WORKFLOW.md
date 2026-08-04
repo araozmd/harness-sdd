@@ -621,3 +621,44 @@ So:
    addresses → re-review; this build↔review loop repeats until green. On **approve**
    → `done`. Each round is recorded in `progress/history.md`.
 7. History updated. Orchestrator picks the next task.
+
+### Which Builder runs — deterministic escalation
+
+There are **two** Builder role names. `builder-heavy` is the *same instruction body* at a
+heavier model tier ([ADR-0002](../specs/adr/0002-builder-heavy-is-a-tier-not-a-second-prompt.md)),
+so picking between them is routing, never behaviour. The Orchestrator does not decide by
+judgement — it asks a tool, so the same recorded state always yields the same answer:
+
+```sh
+tools/builder-role.sh <complexity> <round> [--backend <in-session|delegate>] [--config <path>]
+# → builder | builder-heavy
+```
+
+Two things can select the heavy role:
+
+| trigger | where it comes from |
+|---|---|
+| `complexity: complex` in the feature spec's frontmatter | the Architect, at spec time — starts heavy on round 1 |
+| `round > escalation.after_rejections` | the **existing** build↔review counter; default `2`, so the first build after two rejections |
+
+```yaml
+escalation:
+  after_rejections: 2   # 0 disables rejection-based escalation entirely
+```
+
+Notes that matter in practice:
+
+- **It is inert until you configure `models.builder-heavy`.** While that reads `inherit` —
+  the shipped default — the heavy role resolves to the *same model* as `builder`, so
+  escalating changes nothing but the role name recorded in `progress/history.md` and
+  telemetry. Set a tier to make it bite.
+- **`0` disables; it does not invert.** A threshold of `0` means "never escalate on
+  rejections", leaving `complexity: complex` as the only route.
+- **Absent means standard, silently.** A spec written before this feature carries no tag and
+  routes to `builder` with no warning. A value outside `standard | complex` also resolves to
+  `standard`, but says so on stderr — a typo should be visible, never fatal.
+- **Under `execution.builder.backend: delegate` escalation is inapplicable.** The external
+  executor picks its own model, so the harness never escalates there and records that the
+  rule did not apply, rather than claiming an escalation that had no effect.
+- **Escalation is one-way within a feature.** `round` only increases; there is no demotion
+  rule.
