@@ -34,6 +34,7 @@
                 "autonomous": { "type": "boolean" },
                 "depends_on": { "type": "array", "items": { "type": "string" } },
                 "parked": {
+                  "$comment": "A park may NOT accompany status 'done' — see the if/then below. A park means 'not yet workable'; done means finished, and select() short-circuits a done target to target-complete before any blocker is computed, so a done+parked feature would report complete rather than blocked.",
                   "type": "object",
                   "description": "Optional (additive, E06-F07). Hold a real feature that is not yet workable — external blocking, where depends_on covers only board-internal blocking. PRESENCE MEANS PARKED: the selector emits a `parked` blocker and never selects it, while leaving featureRoute untouched, so unparking restores the prior routing exactly. A FIELD, not a status value: a park can arrive after speccing, so it must compose with every status rather than replace one. `reason` is required and non-empty — a park with no legible reason is the defect this fixes. Features only; slice parks are deliberately out of scope.",
                   "required": ["reason"],
@@ -64,6 +65,14 @@
                 }
               },
               "allOf": [
+                {
+                  "$comment": "Cross-field (E06-F07): a `done` feature may not carry a park. A park means 'not yet workable'; done means finished. It is also unreachable through the sanctioned path — tasks-lock set-status refuses a transition while parked — so it can only arrive by hand-editing, and left legal it would defeat the targeting contract: select() short-circuits a done target to `target-complete` before any blocker is computed, so the park would never be reported.",
+                  "if": {
+                    "required": ["parked"],
+                    "properties": { "status": { "const": "done" } }
+                  },
+                  "then": { "properties": { "status": { "not": { "const": "done" } } } }
+                },
                 {
                   "$comment": "Cross-field: a sliced feature may only be `done` when every slice is done AND merged. Single-repo features (no slices) are unaffected — the `if` is false without slices.",
                   "if": {

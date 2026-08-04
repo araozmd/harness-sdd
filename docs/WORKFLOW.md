@@ -364,7 +364,8 @@ can read is the thing this replaces. `unblocked_by` is optional.
 | `tasks-lock.py set-status` | **refuses** — unpark first |
 
 **It is a field, not a status.** A park can arrive *after* speccing, so it composes
-with every status rather than replacing one, and unparking restores exactly the
+with every status except `done` — a finished feature is not "not yet workable", and
+that combination is rejected by every validator — and unparking restores exactly the
 routing the feature had — `featureRoute` never sees the park at all.
 
 To unpark, remove the `parked` object (an `apply` mutation); the ordinary

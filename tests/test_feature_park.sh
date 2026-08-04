@@ -197,6 +197,63 @@ for _mode in "" "--no-jsonschema"; do
   validate "$T/tasks.json" $_mode
   [ "$V_RC" = "0" ] && fail "R3 ($_label): a non-object parked was accepted: $V_OUT"
 done
+# ── R3 (Codex #3713988129/#3713988137): the SELECTOR's own validator agrees ─────────
+# next-task.mjs carries a validator independent of the shared one init.sh runs, so a board
+# reaching it through --tasks was consumed unvalidated. Consequences were concrete:
+# `"parked": null` is falsy, so the park was silently IGNORED and the feature SELECTED;
+# a string or {} produced a blocker whose detail read "undefined".
+for _bad in 'null' '"a string"' '{}' '{ "reason": "" }' '{ "unblocked_by": "x" }'; do
+  mkboard ", \"parked\": $_bad" ''
+  next
+  [ "$NX_RC" = "0" ] \
+    && fail "R3/selector: a malformed park ($_bad) was accepted by next-task.mjs instead of input-error: $NX_OUT"
+  case "$NX_OUT" in
+    *input-error*|*parked*) ;;
+    *) fail "R3/selector: a malformed park ($_bad) failed for some unrelated reason: $NX_OUT" ;;
+  esac
+done
+# control, same shape: a WELL-FORMED park is still accepted and still blocks
+mkboard "$PARK" '"E01-F01"'
+next
+[ "$NX_RC" = "0" ] \
+  || fail "R3/selector control: a well-formed park was rejected too, so the rejections above are not attributable to malformedness: $NX_OUT"
+pass "E06-F07 R3 selector_validator_rejects_a_malformed_park"
+
+# ── R3: a `done` feature cannot be parked (all three validators) ────────────────────
+# A park means "not yet workable"; done means finished. Left legal it also defeats R4:
+# select() short-circuits a done TARGET to `target-complete` before any blocker exists,
+# so the park would never be reported.
+mkboard "$PARK" ''
+python3 - "$T/tasks.json" <<'PYX'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p))
+d["epics"][0]["features"][0]["status"] = "done"
+json.dump(d, open(p, "w"), indent=2)
+PYX
+next --feature E01-F01
+[ "$NX_RC" = "0" ] && fail "R3/done: the selector accepted a done+parked feature: $NX_OUT"
+case "$NX_OUT" in *"cannot be parked"*) ;; *) fail "R3/done: selector rejection does not name the rule: $NX_OUT" ;; esac
+for _mode in "" "--no-jsonschema"; do
+  _label="jsonschema"; [ -n "$_mode" ] && _label="zero-dep fallback"
+  validate "$T/tasks.json" $_mode
+  [ "$V_RC" = "0" ] && fail "R3/done ($_label): a done+parked board was accepted: $V_OUT"
+done
+# control: the SAME board, done but UNPARKED, is valid everywhere
+mkboard '' ''
+python3 - "$T/tasks.json" <<'PYX'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p))
+d["epics"][0]["features"][0]["status"] = "done"
+json.dump(d, open(p, "w"), indent=2)
+PYX
+for _mode in "" "--no-jsonschema"; do
+  validate "$T/tasks.json" $_mode
+  [ "$V_RC" = "0" ] || fail "R3/done control: a done UNPARKED board was rejected, so the rejections above are not attributable to the park: $V_OUT"
+done
+next --feature E01-F01
+[ "$NX_RC" = "0" ] || fail "R3/done control: the selector rejected a done unparked feature: $NX_OUT"
+pass "E06-F07 R3 done_feature_cannot_be_parked"
+
 pass "E06-F07 R3 empty_reason_is_invalid"
 pass "E06-F07 R3 fallback_validator_agrees"
 

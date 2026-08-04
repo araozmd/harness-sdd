@@ -239,6 +239,24 @@ function validateBoard(board) {
       assertOptionalBoolean(feature.autonomous, `${feature.id}.autonomous`);
       if (feature.owner !== undefined && typeof feature.owner !== 'string') throw new Error(`${feature.id}.owner must be a string`);
       assertDependencies(feature.depends_on, `${feature.id}.depends_on`);
+      // E06-F07: this selector carries its OWN validator, independent of the shared one
+      // init.sh runs — so the park has to be checked here too, or a board reaching the
+      // selector through --tasks (or edited after init.sh) is consumed unvalidated. The
+      // consequences were concrete: `"parked": null` is falsy, so the park was silently
+      // IGNORED and the feature selected; a string or `{}` produced a blocker reading
+      // "undefined". Every one of those boards is already rejected by the schema and the
+      // shared validator, so the selector was the only component disagreeing.
+      if (feature.parked !== undefined) {
+        assertObject(feature.parked, `${feature.id}.parked`);
+        assertString(feature.parked.reason, `${feature.id}.parked.reason`);
+        if (feature.parked.unblocked_by !== undefined) assertString(feature.parked.unblocked_by, `${feature.id}.parked.unblocked_by`);
+        // A park means "not yet workable"; `done` means finished. The combination is
+        // meaningless, and it is unreachable through the sanctioned path (set-status
+        // refuses a transition while parked), so it can only arrive by hand-editing.
+        // Left legal, it would also defeat the targeting contract: select() short-circuits
+        // a done target to `target-complete` before any blocker is computed.
+        if (feature.status === 'done') throw new Error(`${feature.id} is done and cannot be parked`);
+      }
       const slices = [];
       if (feature.slices !== undefined) {
         if (!Array.isArray(feature.slices) || feature.slices.length === 0) throw new Error(`${feature.id}.slices must be a non-empty array`);

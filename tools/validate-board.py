@@ -173,6 +173,13 @@ def _fallback_errors(data):
                             errors.append(
                                 "%s.parked.unblocked_by: expected a non-empty string" % fw
                             )
+                    # A park means "not yet workable"; `done` means finished. Unreachable
+                    # via set-status (which refuses a transition while parked), so it can
+                    # only be hand-edited in — and left legal it defeats the targeting
+                    # contract, because select() short-circuits a done target to
+                    # `target-complete` before any blocker is computed.
+                    if ft.get("status") == "done":
+                        errors.append("%s: a done feature cannot be parked" % fw)
                 # Umbrella mode (optional): mirror the slice checks from the JSON
                 # schema so corrupted cross-repo state is rejected even without
                 # jsonschema installed. Absent `slices` ⇒ single-repo, unaffected.
