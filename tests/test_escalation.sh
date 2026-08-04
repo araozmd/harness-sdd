@@ -349,6 +349,29 @@ the_tool_does_not_infer_resolution() {
   pass "the rule never infers model resolution; the opt-in is the operator's assertion (R12)"
 }
 
+# ── R6: the docs and the shipped config must agree on the default ───────────────
+# Three review rounds in, the recurring defect on this PR was not the code — it was PROSE
+# describing an older version of the rule. #3716846165 caught docs/WORKFLOW.md still telling
+# operators that `0` left `complexity: complex` live, which the tool had stopped doing two
+# commits earlier. A doc that contradicts the tool is worse than a missing doc: the operator
+# acts on it. So pin the one fact most likely to drift.
+docs_agree_with_the_shipped_default() {
+  _shipped="$(awk '/^escalation:/{e=1;next} e&&/^[^ #]/{e=0} e&&/^  after_rejections:/{sub(/^  after_rejections:[[:space:]]*/,"");sub(/[[:space:]]*#.*$/,"");print;exit}' "$SRC/harness.config.yaml")"
+  [ -n "$_shipped" ] || fail "R6: could not read the shipped escalation.after_rejections"
+  [ "$_shipped" = 0 ]     || fail "R6: the shipped default is '$_shipped' — escalation must ship OFF (0)"
+  # The tool must actually behave that way with the shipped config, not merely record it.
+  [ "$(role '' 99 --config "$SRC/harness.config.yaml")" = builder ]     || fail "R6: the shipped config escalated — the default is not off in practice"
+  [ "$(role complex 1 --config "$SRC/harness.config.yaml")" = builder ]     || fail "R6: the shipped config escalated a complex tag — 0 must disable BOTH triggers"
+  # And no operator-facing doc may still claim 0 leaves a trigger live.
+  for _d in "$SRC/docs/WORKFLOW.md" "$SRC/harness.config.yaml" "$SRC/agents/orchestrator.md"; do
+    grep -qi 'disables rejection-based\|leaving `complexity: complex` as the only route' "$_d"       && fail "R6: $_d still documents the pre-opt-in meaning of 0"
+  done
+  # Positive control: the docs DO describe the current meaning, so the sweep above is not
+  # passing merely because escalation went undocumented.
+  grep -qi 'disables BOTH triggers' "$SRC/docs/WORKFLOW.md"     || fail "R6: docs/WORKFLOW.md does not state that 0 disables both triggers"
+  pass "the shipped default is off, behaves off, and the docs say so (R6)"
+}
+
 # ── usage errors ────────────────────────────────────────────────────────────────
 usage_errors_are_loud() {
   # A malformed COMPLEXITY is a human typo and must never fail a build (R2). A malformed
@@ -375,6 +398,7 @@ prose_records_the_choice
 telemetry_contract_intact
 escalation_is_opt_in_and_off_by_default
 the_tool_does_not_infer_resolution
+docs_agree_with_the_shipped_default
 usage_errors_are_loud
 
 echo "test_escalation.sh: all cases passed"

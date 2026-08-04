@@ -173,9 +173,9 @@ esac
 # `round` is ALREADY one more than the number of rejections: round 1 is the first build,
 # round 3 is the first build after two rejections. So "after N rejections" is `round > N`.
 # Stated once here so it is never re-derived at a call site.
-# 0 DISABLES the round arm. It does not mean "escalate on every round" — which is exactly what
-# a bare `round > 0` comparison would do, turning an operator's off-switch into
-# always-escalate. The guard is the whole point of the key's `0` semantics.
+# `_threshold -gt 0` is re-checked here even though §2 already returned for the disabled case:
+# it keeps this comparison correct on its own terms, because a bare `round > 0` would be true
+# for EVERY round and would turn the off-switch into always-escalate.
 # Escalation off ⇒ no threshold ⇒ this arm cannot fire and has nothing to announce.
 if [ "$_threshold" -gt 0 ] && [ "$_round" -gt "$_threshold" ]; then
   echo builder-heavy

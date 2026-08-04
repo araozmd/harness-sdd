@@ -22,7 +22,8 @@ Two things select the heavy role:
 
 ```yaml
 escalation:
-  after_rejections: 2   # 0 disables rejection-based escalation entirely
+  after_rejections: 0   # shipped default — 0 disables BOTH triggers
+  # after_rejections: 2 # a typical opt-in
 ```
 
 **The rule is a tool, not prose.** `tools/builder-role.sh` takes the complexity, the round
@@ -54,8 +55,9 @@ answer each time. The opt-in is your assertion, not the harness's deduction.
 
 Details worth knowing:
 
-- **`0` disables; it does not invert.** A bare `round > 0` is true for every round, which
-  would turn the off-switch into always-escalate.
+- **`0` disables BOTH triggers**, `complexity: complex` included — it is the master switch,
+  not just a round threshold. It also does not *invert*: a bare `round > 0` is true for every
+  round, which would turn the off-switch into always-escalate.
 - **A declined `complexity: complex` tag is reported.** The operator expressed intent and
   would otherwise get a silent no-op. The round trigger stays quiet while escalation is off —
   with no threshold configured there is no round it "would have" exceeded.

@@ -639,11 +639,12 @@ Two things can select the heavy role:
 | trigger | where it comes from |
 |---|---|
 | `complexity: complex` in the feature spec's frontmatter | the Architect, at spec time — starts heavy on round 1 |
-| `round > escalation.after_rejections` | the **existing** build↔review counter; default `2`, so the first build after two rejections |
+| `round > escalation.after_rejections` | the **existing** build↔review counter — **only while escalation is enabled**; at the suggested `2`, the first build after two rejections |
 
 ```yaml
 escalation:
-  after_rejections: 2   # 0 disables rejection-based escalation entirely
+  after_rejections: 0   # SHIPPED DEFAULT — 0 disables BOTH triggers
+  # after_rejections: 2 # a typical opt-in: escalate from the third build onward
 ```
 
 Notes that matter in practice:
@@ -661,8 +662,12 @@ Notes that matter in practice:
   to infer it, because the determination lives in the installer's per-front-end resolver and
   re-deriving it elsewhere produced a new wrong answer each time. The opt-in is your
   assertion, not the harness's deduction.
-- **`0` disables; it does not invert.** A threshold of `0` means "never escalate on
-  rejections", leaving `complexity: complex` as the only route.
+- **`0` disables BOTH triggers — including `complexity: complex`.** It is the master switch,
+  not just a round threshold. A tagged spec on a target that has not opted in routes to
+  `builder` and the tool says why on stderr. (Leaving the tag live at `0` would escalate into
+  the same unresolvable heavy role the opt-in exists to prevent.) `0` also does not *invert*:
+  a bare `round > 0` would be true for every round, turning the off-switch into
+  always-escalate.
 - **Absent means standard, silently.** A spec written before this feature carries no tag and
   routes to `builder` with no warning. A value outside `standard | complex` also resolves to
   `standard`, but says so on stderr — a typo should be visible, never fatal.
