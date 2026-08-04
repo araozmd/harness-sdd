@@ -971,13 +971,24 @@ echo "hidden body" > "$SC2/agents/.hidden.md"
 # directory beneath it — `docs/zzz.md` became `docs/aaa/zzz.md` and vanished from its own
 # path. A fixture whose only nested dir sorts last cannot see that. (Codex r4 P2 #3705960408.)
 echo "sibling body" > "$SC2/docs/zzz.md"
+# Dotfile NAME SHAPES are a matrix, not one case: `*` skips every dot name, `.[!.]*` skips
+# every `..name`, and `.??*` skips every two-character dot name. Each pattern alone leaves a
+# file that `cp -R` copies and the thin child drops. `..dd/` is a DIRECTORY on purpose — an
+# unmatched dir is never recursed into, so its whole subtree vanishes, not just one entry.
+# `.q` is the two-character case that fails the moment `.[!.]*` is "simplified" to `.??*`.
+# (Codex r5 P2 #3706053982.)
+echo "dotdot body" > "$SC2/docs/..draft.md"
+mkdir -p "$SC2/docs/..dd"
+echo "dotdot dir body" > "$SC2/docs/..dd/inner.md"
+echo "short dot body" > "$SC2/docs/.q"
 mk_umb "$AU/f03c" kid-d
 AU_OUT="$(CODEX_HOME="$AU/f03c/.ch" HOME="$AU/f03c/.home" sh "$SC2/harness-install.sh" \
   --umbrella "$AU/f03c" --agents=claude 2>&1)" || true
 KD="$AU/f03c/kid-d/.harness"
 # Precondition: this really is a thin child, or "the nested file is a stub" is vacuous.
 is_stub "$KD/AGENTS.md" || fail "R2-shape setup: the child is not thin"
-for _p in docs/nested/deep.md docs/nested/deeper/x.md agents/.hidden.md docs/zzz.md; do
+for _p in docs/nested/deep.md docs/nested/deeper/x.md agents/.hidden.md docs/zzz.md \
+          docs/..draft.md docs/..dd/inner.md docs/.q; do
   [ -f "$KD/$_p" ] || fail "R2-shape: $_p is missing from a thin child but present in a full install"
   is_stub "$KD/$_p" || fail "R2-shape: $_p was mirrored but is not a stub"
 done
@@ -993,6 +1004,14 @@ CODEX_HOME="$AU/f03c/.ch2" HOME="$AU/f03c/.home2" sh "$SC2/harness-install.sh" \
   --agents=claude "$AU/f03c-full" >/dev/null 2>&1 || fail "R2-shape control: standalone install failed"
 grep -qF 'deeper body' "$AU/f03c-full/.harness/docs/nested/deeper/x.md" \
   || fail "R2-shape control: the full install did not preserve the nested file either"
+# Same control for each dot-name shape. Without this, "the thin child has docs/..draft.md"
+# could be satisfied by a source that never had it — and the divergence it exists to catch
+# is defined against what the FULL install produces, so the full side must be asserted too.
+for _c in '..draft.md:dotdot body' '..dd/inner.md:dotdot dir body' '.q:short dot body'; do
+  _cp="${_c%%:*}"; _cb="${_c#*:}"
+  grep -qF "$_cb" "$AU/f03c-full/.harness/docs/$_cp" \
+    || fail "R2-shape control: the full install did not preserve docs/$_cp — the thin-child assertion for it proves nothing"
+done
 pass "R2 nested dirs and dotfiles keep their shape in a thin child"
 
 # ── R1/R2: a SYMLINKED child resolves its umbrella too ─────────────────────────────────

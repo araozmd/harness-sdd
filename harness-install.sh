@@ -2036,12 +2036,23 @@ install_one() {
   # #3705758419; reproduced with docs/nested/deep.md before fixing.)
   #
   # Globs, not `find | while read`: a glob is newline-safe by construction, and this repo has
-  # already been bitten by paths containing newlines. `.[!.]*` picks up dotfiles without ever
-  # matching `.` or `..`; the `-e` guard skips the pattern itself when nothing matches.
+  # already been bitten by paths containing newlines. The `-e` guard skips a pattern that
+  # matched nothing (it expands to itself).
+  #
+  # THREE patterns are needed, and they are chosen to be mutually disjoint so no entry is
+  # visited — or recursed into — twice:
+  #   *        every name not starting with `.`
+  #   .[!.]*   dotfiles whose second character is not a dot   (`.x`, `.hidden`)
+  #   ..?*     double-dot names with at least one more char   (`..draft.md`), never `..`
+  # Dropping the second in favour of `.??*` looks like a simplification and is not: `.??*`
+  # requires three characters, so it silently omits a two-character dotfile like `.x`. Both
+  # gaps are the same bug in opposite directions — a name `cp -R` copies on the full path
+  # that the thin child never mirrors. (Codex r5 P2 #3706053982; every pattern's membership
+  # reproduced against a real directory before changing this line.)
   stub_dir_recursive() {
     _sdr_src="$1"; _sdr_rel="$2"; _sdr_root="$3"
     mkdir -p "$H/$_sdr_rel"
-    for _sdr_f in "$_sdr_src"/* "$_sdr_src"/.[!.]*; do
+    for _sdr_f in "$_sdr_src"/* "$_sdr_src"/.[!.]* "$_sdr_src"/..?*; do
       [ -e "$_sdr_f" ] || continue
       _sdr_base="${_sdr_f##*/}"
       if [ -d "$_sdr_f" ]; then
