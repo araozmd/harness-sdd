@@ -26,7 +26,7 @@ your-project/
 │   ├── SKILL.md                         # adapter + canonical workflow
 │   └── agents/openai.yaml               # explicit-only invocation policy
 ├── .gemini/agents/*.md                 # per-role model routing only — created ONLY when a tier resolves
-├── .codex/agents/*.toml                # six selected Codex roles; model optional, never ~/.codex
+├── .codex/agents/*.toml                # seven selected Codex roles; model optional, never ~/.codex
 └── .harness/                           # the whole harness body
     ├── .harness-version  manifest.txt
     ├── .opencode.stamp                  # byte copy of the last opencode.json the installer wrote
@@ -704,7 +704,7 @@ A pin is written **verbatim** in that front-end's own vocabulary and overrides t
 built-in alias for every role on that tier. It is **required** for `codex` and `opencode`,
 which have no floating alias — an unpinned tier there stamps no **model**, and the
 installer prints one advisory line naming the exact `pin.` key to set. It is the `model`
-key that is omitted, not the role artifact: selecting Codex always registers all six
+key that is omitted, not the role artifact: selecting Codex always registers all seven
 `.codex/agents/*.toml` regardless of any pin (see "Where the values land" below).
 
 - `opencode` **must** be `provider/model`. A value without a `/` would abort your OpenCode
@@ -731,8 +731,9 @@ model list, so every other pin value is passed through untouched.
 | `codex` | `.codex/agents/<role>.toml` | optional `model = "…"` (role always registered, project-local) |
 
 `.gemini/agents/` remains conditional on at least one concrete Gemini value.
-`.codex/agents/` is different: selecting Codex always registers exactly the six standard
-roles with `name`, `description`, and `developer_instructions`. An inherited role or an
+`.codex/agents/` is different: selecting Codex always registers exactly the seven standard
+roles — the six long-standing ones plus `builder-heavy` — with `name`, `description`, and
+`developer_instructions`. An inherited role or an
 unpinned Codex tier omits `model`; a concrete pin adds `model` only to the roles that
 resolve to it. Only selected front-ends (`--agents`) are stamped.
 

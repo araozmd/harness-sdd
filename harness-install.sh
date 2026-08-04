@@ -3212,7 +3212,7 @@ EOF
   emit_agent doc-critic "Read, Grep, Glob, Write" \
     "Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code."
   # pr-fixer (E18-F01 R10): the /sdd-pr-loop worker sub-agent, spawned once per blocking
-  # Codex comment. GATED on the opt-in pr_loop.enabled — unlike the six roles above it is
+  # Codex comment. GATED on the opt-in pr_loop.enabled — unlike the seven roles above it is
   # NOT stamped by default. It rides the SAME emit_agent path (one shim, pointing at
   # the canonical .harness/agents/pr-fixer.md — the role body is never duplicated).
   if pr_loop_enabled; then

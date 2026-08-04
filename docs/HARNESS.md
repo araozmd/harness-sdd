@@ -69,7 +69,7 @@ checks for them, so a target without either still passes the environment gate. T
 the key on and re-running the installer stamps the command and its `pr-fixer` sub-agent
 into every selected front-end; turning it back off reclaims all of it.
 
-Selecting Codex also registers exactly six project-local roles in `.codex/agents/`.
+Selecting Codex also registers exactly seven project-local roles in `.codex/agents/`.
 Inherited or unpinned roles remain registered without a `model` key; a concrete Codex
 pin adds `model` only where it resolves. Shared skill units are explicit-only through
 `agents/openai.yaml`, which is written wherever the unit is; their adapter maps text accompanying an explicit `$skill` mention
