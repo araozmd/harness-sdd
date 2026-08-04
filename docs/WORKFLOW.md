@@ -648,13 +648,19 @@ escalation:
 
 Notes that matter in practice:
 
-- **`models.builder-heavy` arms it; `after_rejections` only sets the threshold.** While the
-  heavy role has no tier — the shipped `inherit`, or an absent key falling through to an
-  `inherit` default — **neither trigger fires**, and a trigger that matched is reported on
-  stderr. This is not merely a no-op being skipped: escalating to an untiered role stamps no
-  model, so a repo that set `models.builder: standard` and left `builder-heavy: inherit`
-  would have its struggling build **downgraded** from the configured Builder model to the
-  session default. Set `models.builder-heavy` to a real tier to turn escalation on.
+- **It is opt-in and ships off.** `after_rejections` is both the threshold and the master
+  switch: `0` (the default) means neither trigger fires. Set a positive number to turn
+  escalation on — 2 is the suggested value.
+- **Before enabling it, make sure the heavy role actually resolves to a model on your
+  front-end.** Otherwise escalation is a *downgrade*: a role that resolves to nothing runs on
+  the session model, abandoning whatever `models.builder` was set to, exactly when the build
+  was struggling. On `claude` / `gemini` / `antigravity` a built-in tier alias is enough; on
+  `codex` / `opencode` a tier alone stamps **nothing** — you must also set the matching
+  `pin.<front-end>.<tier>`.
+- **The harness does not try to verify that for you.** Two review rounds killed two attempts
+  to infer it, because the determination lives in the installer's per-front-end resolver and
+  re-deriving it elsewhere produced a new wrong answer each time. The opt-in is your
+  assertion, not the harness's deduction.
 - **`0` disables; it does not invert.** A threshold of `0` means "never escalate on
   rejections", leaving `complexity: complex` as the only route.
 - **Absent means standard, silently.** A spec written before this feature carries no tag and

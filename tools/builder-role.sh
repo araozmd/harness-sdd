@@ -105,33 +105,50 @@ _cfg_scalar() {
   ' "$_config" 2>/dev/null | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'\$//"
 }
 
-# ── 2. Is escalation ARMED? ──────────────────────────────────────────────────────
-# Escalating to a role with NO configured tier does not make the build heavier — it makes it
-# resolve to the session model. On a target that set `models.builder: standard` and left
-# `models.builder-heavy: inherit` (the shipped default), that is a DOWNGRADE: the build would
-# abandon the operator's configured Builder model precisely when it was struggling. Verified
-# on an installed Claude target — builder got `model: sonnet`, builder-heavy got no model key.
-# (Codex #3716706727.)
+# ── 2. Is escalation ENABLED? ───────────────────────────────────────────────────
+# `escalation.after_rejections` is BOTH the threshold and the master switch: 0 (the shipped
+# default) means escalation is off entirely — neither trigger fires.
 #
-# So escalation fires only when the heavy role has an effective tier that is not `inherit`:
-# `models.builder-heavy`, else `models.default`, else `inherit`. This is what makes "inert
-# until you configure it" literally true rather than true-only-for-a-fully-unconfigured-target,
-# which is what the first version of this feature claimed.
-_heavy_tier="$(_cfg_scalar models builder-heavy)"
-[ -n "$_heavy_tier" ] || _heavy_tier="$(_cfg_scalar models default)"
-_armed=1
-case "$_heavy_tier" in
-  ''|inherit) _armed=0 ;;
+# WHY AN EXPLICIT OPT-IN AND NOT AN INFERENCE. Two review rounds killed two successive
+# attempts to *infer* whether escalating would actually help:
+#
+#   1. "builder-heavy: inherit resolves like builder, so escalating is a no-op" — true only
+#      for a FULLY unconfigured target. Set `models.builder: standard` and the Builder shim
+#      gets a model while the heavy role gets none: escalation DOWNGRADES to the session
+#      model. (Codex #3716706727.)
+#   2. "arm when the heavy tier is not `inherit`" — true only where a tier implies a model.
+#      Codex and OpenCode stamp nothing for an UNPINNED tier, so `models.builder: standard` +
+#      `pin.codex.standard` + `builder-heavy: reasoning` with no `pin.codex.reasoning` gives
+#      builder.toml `model = "gpt-5"` and builder-heavy.toml no model at all — the same
+#      downgrade, one level deeper. (Codex #3716777878.)
+#
+# Both attempts were this tool re-deriving a subset of the installer's `resolve_model`, which
+# owns per-front-end alias tables and pin requirements. Reproducing that here would keep
+# producing a new defect per front-end. So the tool no longer guesses: enabling escalation is
+# the operator asserting they configured a heavier tier that actually resolves on their
+# front-end. The harness cannot verify that assertion from here, and says so in the docs
+# rather than pretending to.
+_threshold=0
+_cfgval="$(_cfg_scalar escalation after_rejections)"
+case "$_cfgval" in
+  '') : ;;                         # absent block or absent key ⇒ off, silently (R7)
+  *[!0-9]*)
+    echo "⚠️  escalation.after_rejections = '$_cfgval' is not a non-negative integer — escalation stays off" >&2 ;;
+  *) _threshold="$_cfgval" ;;
 esac
 
-# _escalate <trigger> — honour an escalation trigger, or decline it because no heavy tier is
-# configured. Declining is reported: the operator expressed intent (a tag, or a threshold they
-# left in place) and needs to know why nothing happened.
+# _escalate <trigger> — honour a trigger, or decline it because escalation is off.
+#
+# Only the COMPLEXITY trigger can be declined, and that asymmetry is deliberate. A
+# `complexity: complex` tag is an operator who expressed intent and gets a silent no-op
+# otherwise, so declining it must be reported. The round trigger has nothing to report when
+# escalation is off: with no threshold configured there is no round it "would have" exceeded,
+# and inventing a phantom threshold just to warn about it would be noise on every build.
 _escalate() {
-  if [ "$_armed" = 1 ]; then
+  if [ "$_threshold" -gt 0 ]; then
     echo builder-heavy
   else
-    echo "ℹ️  $1 would escalate, but models.builder-heavy has no tier (it resolves to 'inherit') — escalating would drop to the session model, so using 'builder'. Set models.builder-heavy to enable escalation." >&2
+    echo "ℹ️  $1, but escalation.after_rejections is 0 (off) — using 'builder'. Set it to a positive number, and give models.builder-heavy a tier that actually resolves on your front-end (codex/opencode need a matching pin.<front-end>.<tier>)." >&2
     echo builder
   fi
   exit 0
@@ -143,7 +160,7 @@ _escalate() {
 # resolves the SAFE direction (standard, i.e. no escalation) and says so, without failing.
 case "$_complexity" in
   complex)
-    _escalate "spec complexity=complex" ;;
+    _escalate "the spec is tagged complexity=complex" ;;
   ''|standard)
     : ;;
   *)
@@ -152,23 +169,17 @@ case "$_complexity" in
 esac
 
 # ── 4. Round vs threshold ────────────────────────────────────────────────────────
+# 0 is handled above (escalation off). A positive threshold means `round > N`.
 # `round` is ALREADY one more than the number of rejections: round 1 is the first build,
 # round 3 is the first build after two rejections. So "after N rejections" is `round > N`.
 # Stated once here so it is never re-derived at a call site.
-_threshold=2
-_cfgval="$(_cfg_scalar escalation after_rejections)"
-case "$_cfgval" in
-  '') : ;;                         # absent block or absent key ⇒ the default, silently (R7)
-  *[!0-9]*)
-    echo "⚠️  escalation.after_rejections = '$_cfgval' is not a non-negative integer — using the default 2" >&2 ;;
-  *) _threshold="$_cfgval" ;;
-esac
-
 # 0 DISABLES the round arm. It does not mean "escalate on every round" — which is exactly what
 # a bare `round > 0` comparison would do, turning an operator's off-switch into
 # always-escalate. The guard is the whole point of the key's `0` semantics.
+# Escalation off ⇒ no threshold ⇒ this arm cannot fire and has nothing to announce.
 if [ "$_threshold" -gt 0 ] && [ "$_round" -gt "$_threshold" ]; then
-  _escalate "round $_round > escalation.after_rejections=$_threshold"
+  echo builder-heavy
+  exit 0
 fi
 
 echo builder

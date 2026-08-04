@@ -36,21 +36,29 @@ It reuses the round counter that already exists — no second counter, no new st
 TaskStore field — so a feature whose first two rounds ran in a previous session still resolves
 correctly.
 
-**`models.builder-heavy` arms it; `after_rejections` only sets the threshold.** While the
-heavy role has no tier — the shipped `inherit`, or an absent key falling through to an
-`inherit` default — **neither trigger fires**, and a trigger that matched is reported on
-stderr. That is what makes defaulting the threshold on safe.
+**It is opt-in and ships OFF** (`after_rejections: 0`). One key is both the master switch and
+the threshold: `0` disables both triggers, any positive value enables escalation at that
+threshold.
 
-This is stronger than "the two roles resolve alike, so escalating is a no-op", which is what
-an earlier draft claimed: that holds only for a *fully* unconfigured target. A repo that set
-`models.builder: standard` and left `builder-heavy: inherit` gets `model: sonnet` on the
-Builder shim and **no model key** on the heavy one, so escalating would have **downgraded** a
-struggling build to the session default. Arming on the heavy tier closes that.
+**Before enabling it, make sure `models.builder-heavy` actually resolves to a model on your
+front-end** — otherwise escalation is a *downgrade*, not an upgrade: a role that resolves to
+nothing runs on the session model, abandoning whatever `models.builder` was set to, exactly
+when the build was struggling. `claude`/`gemini`/`antigravity` need only a tier alias;
+`codex`/`opencode` stamp **nothing** for a tier without a matching `pin.<front-end>.<tier>`.
+
+The harness deliberately does **not** infer this for you. Two review rounds killed two
+attempts to — "`builder-heavy: inherit` resolves like `builder`" (false once `models.builder`
+is set) and "arm on a non-`inherit` tier" (false on the pinned front-ends). Both were the
+routing tool re-deriving the installer's per-front-end resolver, which produced a new wrong
+answer each time. The opt-in is your assertion, not the harness's deduction.
 
 Details worth knowing:
 
 - **`0` disables; it does not invert.** A bare `round > 0` is true for every round, which
   would turn the off-switch into always-escalate.
+- **A declined `complexity: complex` tag is reported.** The operator expressed intent and
+  would otherwise get a silent no-op. The round trigger stays quiet while escalation is off —
+  with no threshold configured there is no round it "would have" exceeded.
 - **Absent means standard, silently.** Specs written before this feature carry no tag and
   route to `builder` with no warning. A value outside `standard | complex` also resolves to
   `standard` but says so on stderr — a typo should be visible, never fatal.

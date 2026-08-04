@@ -21,12 +21,10 @@ pass() { echo "ok - $1"; }
 TOOL="$SRC/tools/builder-role.sh"
 [ -f "$TOOL" ] || fail "setup: tools/builder-role.sh does not exist"
 
-# Escalation only fires when models.builder-heavy has a tier (R12) — escalating to an
-# untiered role resolves to the SESSION model, which on a target that configured
-# models.builder is a DOWNGRADE. So the default config for these helpers is an ARMED one;
-# `--config` passed by a caller comes later on the command line and wins (last flag wins),
-# which is how the unarmed cases below opt out.
-ARMED="$T/armed.yaml"
+# Escalation is OPT-IN and off by default (R12). So the default config for these helpers is
+# one that has opted IN; `--config` passed by a caller comes later on the command line and
+# wins (last flag wins), which is how the off cases below opt out.
+ARMED="$T/enabled.yaml"
 printf 'models:\n  default: inherit\n  builder: standard\n  builder-heavy: reasoning\nescalation:\n  after_rejections: 2\n' > "$ARMED"
 
 # role <complexity> <round> [extra args…] — stdout only.
@@ -45,11 +43,10 @@ mkcfg() {
   printf 'models:\n  builder-heavy: reasoning\nescalation:\n  after_rejections: %s\n' "$2" > "$_p"
   printf '%s\n' "$_p"
 }
-# mkcfg_unarmed <name> — a config whose heavy role has NO tier: the shipped default, and the
-# shape of Codex #3716706727's target once it set models.builder.
-mkcfg_unarmed() {
+# mkcfg_off <name> — escalation NOT opted into: the shipped default.
+mkcfg_off() {
   _p="$T/$1.yaml"
-  printf 'models:\n  default: inherit\n  builder: standard\n  builder-heavy: inherit\nescalation:\n  after_rejections: 2\n' > "$_p"
+  printf 'models:\n  default: inherit\n  builder: standard\n  builder-heavy: reasoning\nescalation:\n  after_rejections: 0\n' > "$_p"
   printf '%s\n' "$_p"
 }
 
@@ -157,8 +154,8 @@ config_seeded_in_both_paths() {
     || fail "R6: fresh install exited non-zero"
   grep -Eq '^escalation:[[:space:]]*(#.*)?$' "$_fresh/.harness/harness.config.yaml" \
     || fail "R6: a fresh install has no top-level escalation: block"
-  grep -Eq '^  after_rejections: 2' "$_fresh/.harness/harness.config.yaml" \
-    || fail "R6: a fresh install does not seed after_rejections: 2"
+  grep -Eq '^  after_rejections: 0' "$_fresh/.harness/harness.config.yaml" \
+    || fail "R6: a fresh install does not seed after_rejections: 0 (escalation must ship OFF)"
 
   # The UPGRADE path: strip the block and re-install. Seeding only the shipped config makes
   # a fresh target and an upgraded one diverge, and nothing else in the suite would notice —
@@ -171,12 +168,12 @@ config_seeded_in_both_paths() {
   grep -Eq '^escalation:' "$_c" && fail "R6: setup — the escalation block was not stripped"
   CODEX_HOME="$T/ch2" sh "$SRC/harness-install.sh" --agents=claude "$_up" >/dev/null 2>&1 \
     || fail "R6: re-install after stripping exited non-zero"
-  grep -Eq '^  after_rejections: 2' "$_c" \
-    || fail "R6: migrate_config did not re-seed escalation.after_rejections"
-  pass "escalation.after_rejections: 2 is seeded on both the fresh and the upgrade path (R6)"
+  grep -Eq '^  after_rejections: 0' "$_c" \
+    || fail "R6: migrate_config did not re-seed escalation.after_rejections: 0"
+  pass "escalation.after_rejections: 0 is seeded on both the fresh and the upgrade path (R6)"
 }
 
-# ── R6: 0 disables, and does not invert ─────────────────────────────────────────
+# ── R6: 0 disables (both triggers), and does not invert ─────────────────────────
 zero_disables_not_always_escalates() {
   _c0="$(mkcfg t0 0)"
   # `round > 0` is true for EVERY round ≥ 1, so a naive implementation turns the operator's
@@ -190,10 +187,13 @@ zero_disables_not_always_escalates() {
   _c2="$(mkcfg t2 2)"
   [ "$(role '' 99 --config "$_c2")" = builder-heavy ] \
     || fail "R6: control — round 99 at threshold 2 did not escalate, so the 0 case proves nothing"
-  # `complexity: complex` remains a live route even with the round arm disabled.
-  [ "$(role complex 1 --config "$_c0")" = builder-heavy ] \
-    || fail "R6: threshold 0 also disabled the complexity route"
-  pass "threshold 0 disables the round arm without inverting it; complex still routes (R6)"
+  # 0 is the master switch, so the complexity route goes off with it — same downgrade
+  # hazard, same answer. (This assertion was the OPPOSITE before review: escalating a
+  # `complex` spec into an unresolvable heavy role is exactly the downgrade #3716706727 and
+  # #3716777878 describe, so 0 must silence both triggers.)
+  [ "$(role complex 1 --config "$_c0")" = builder ] \
+    || fail "R6: threshold 0 left the complexity route live"
+  pass "threshold 0 disables both triggers without inverting the comparison (R6)"
 }
 
 # ── R7: an unconfigured target is standard and silent ───────────────────────────
@@ -209,17 +209,14 @@ unconfigured_is_silent_and_standard() {
     || fail "R7: a missing config did not route to builder"
   [ -z "$(err '' 1 --config "$T/does-not-exist.yaml")" ] \
     || fail "R7: a missing config produced a warning"
-  # A bare config has no models: block either, so the heavy role has no tier and escalation
-  # correctly declines (R12). The default THRESHOLD still applies — proven by arming the same
-  # config's heavy role and watching round 3 escalate while round 2 does not.
+  # A config with no escalation block has not opted in, so escalation is OFF (R12) — the
+  # default is 0, not 2. Proven both ways: off here, on once the key is present.
   [ "$(role '' 3 --config "$_bare")" = builder ] \
-    || fail "R7: an untiered heavy role escalated"
-  _bare_armed="$T/bare-armed.yaml"
-  printf 'store:\n  tasks: local\nmodels:\n  builder-heavy: reasoning\n' > "$_bare_armed"
-  [ "$(role '' 3 --config "$_bare_armed")" = builder-heavy ] \
-    || fail "R7: the default threshold did not apply when the escalation block is absent"
-  [ "$(role '' 2 --config "$_bare_armed")" = builder ] \
-    || fail "R7: the default threshold was not 2 when the escalation block is absent"
+    || fail "R7: a config with no escalation block escalated"
+  _bare_on="$T/bare-on.yaml"
+  printf 'store:\n  tasks: local\nescalation:\n  after_rejections: 2\n' > "$_bare_on"
+  [ "$(role '' 3 --config "$_bare_on")" = builder-heavy ] \
+    || fail "R7: control — opting in did not enable escalation, so the off case proves nothing"
   pass "no escalation block ⇒ builder, silently, with the default still in force (R7)"
 }
 
@@ -283,47 +280,73 @@ telemetry_contract_intact() {
   pass "telemetry keeps phase=builder with a separate role key; the whitelist is unchanged (R11)"
 }
 
-# ── R12: escalation is armed only by a configured heavy tier ────────────────────
-# The regression this closes: with `models.builder: standard` and `models.builder-heavy:
-# inherit` (the shipped default), escalating spawns a role with NO model key — so the build
-# abandons the operator's configured Builder model for the session default, exactly when it
-# was struggling. A downgrade wearing an escalation's name. (Codex #3716706727.)
-escalation_requires_a_configured_heavy_tier() {
-  _un="$(mkcfg_unarmed u1)"
-  # POSITIVE CONTROL FIRST: these very inputs escalate on an ARMED config, in this run.
-  # Without it, "returns builder" would also be satisfied by escalation being broken outright.
-  [ "$(role '' 3)" = builder-heavy ]        || fail "R12: control — round 3 is not heavy on an armed config"
-  [ "$(role complex 1)" = builder-heavy ]   || fail "R12: control — complex is not heavy on an armed config"
-  # Both triggers must decline while the heavy role has no tier.
-  [ "$(role '' 3 --config "$_un")" = builder ] \
-    || fail "R12: the round trigger escalated to an untiered heavy role (a downgrade)"
-  [ "$(role complex 1 --config "$_un")" = builder ] \
-    || fail "R12: the complexity trigger escalated to an untiered heavy role (a downgrade)"
-  [ "$(role '' 99 --config "$_un")" = builder ] \
-    || fail "R12: a very high round escalated to an untiered heavy role"
-  # A declined trigger must SAY so — the operator expressed intent and gets no silent no-op.
-  printf '%s' "$(err '' 3 --config "$_un")" | grep -qi 'builder-heavy' \
-    || fail "R12: declining to escalate produced no advisory naming models.builder-heavy"
-  printf '%s' "$(err complex 1 --config "$_un")" | grep -qi 'builder-heavy' \
-    || fail "R12: a declined complexity trigger produced no advisory"
-  [ "$(rc '' 3 --config "$_un")" = 0 ] || fail "R12: declining to escalate failed the build"
-  # A trigger that did NOT match stays silent — the advisory is about a declined escalation,
-  # not about the tier being unset.
-  [ -z "$(err '' 1 --config "$_un")" ] \
-    || fail "R12: an untiered config warned on a round that would not have escalated anyway"
-  # models.default arms it too: the heavy role falls through to it like any other role.
-  _viadefault="$T/viadefault.yaml"
-  printf 'models:\n  default: reasoning\n  builder: standard\n' > "$_viadefault"
-  [ "$(role '' 3 --config "$_viadefault")" = builder-heavy ] \
-    || fail "R12: a heavy tier inherited from models.default did not arm escalation"
-  # And a fully all-inherit target is now LITERALLY inert, which is what the feature claims.
-  _allinherit="$T/allinherit.yaml"
-  printf 'models:\n  default: inherit\n  builder: inherit\n  builder-heavy: inherit\n' > "$_allinherit"
-  [ "$(role '' 99 --config "$_allinherit")" = builder ] \
-    || fail "R12: an all-inherit target escalated — 'inert until configured' is not true"
-  [ "$(role complex 9 --config "$_allinherit")" = builder ] \
-    || fail "R12: an all-inherit target escalated on the complexity tag"
-  pass "escalation fires only when models.builder-heavy has a tier; declines are reported (R12)"
+# ── R12: escalation is opt-in, and off by default ───────────────────────────────
+# Two review rounds killed two attempts to INFER whether escalating would help:
+#   #3716706727  "builder-heavy: inherit resolves like builder" — false once models.builder
+#                is set: the Builder shim gets a model, the heavy role gets none.
+#   #3716777878  "arm on a non-inherit tier" — false on codex/opencode, where a tier stamps
+#                NOTHING without a matching pin.<front-end>.<tier>.
+# Both were this tool re-deriving the installer's resolve_model. It no longer tries: enabling
+# escalation is an explicit operator act, which cannot be wrong on any front-end.
+escalation_is_opt_in_and_off_by_default() {
+  _off="$(mkcfg_off o1)"
+  # POSITIVE CONTROL FIRST: these very inputs escalate once opted in, in this run. Without
+  # it, "returns builder" would also be satisfied by escalation being broken outright.
+  [ "$(role '' 3)" = builder-heavy ]      || fail "R12: control — round 3 is not heavy when opted in"
+  [ "$(role complex 1)" = builder-heavy ] || fail "R12: control — complex is not heavy when opted in"
+  # 0 disables BOTH triggers — not just the round arm.
+  [ "$(role '' 3 --config "$_off")" = builder ] \
+    || fail "R12: the round trigger escalated while escalation was off"
+  [ "$(role complex 1 --config "$_off")" = builder ] \
+    || fail "R12: the complexity trigger escalated while escalation was off"
+  [ "$(role '' 99 --config "$_off")" = builder ] \
+    || fail "R12: a very high round escalated while escalation was off"
+  # A declined COMPLEXITY tag must say so — the operator expressed intent and would
+  # otherwise get a silent no-op.
+  printf '%s' "$(err complex 1 --config "$_off")" | grep -qi 'after_rejections' \
+    || fail "R12: a declined complexity trigger produced no advisory naming the key to set"
+  [ "$(rc complex 1 --config "$_off")" = 0 ] || fail "R12: declining to escalate failed the build"
+  # The ROUND arm stays silent while escalation is off, deliberately: with no threshold
+  # configured there is no round it "would have" exceeded, and warning anyway would put a
+  # line on every build of every target that never opted in.
+  [ -z "$(err '' 3 --config "$_off")" ] \
+    || fail "R12: the round arm warned while escalation was off — that is noise, not signal"
+  [ -z "$(err '' 99 --config "$_off")" ] \
+    || fail "R12: the round arm warned at a high round while escalation was off"
+  # And a non-matching trigger is silent when escalation is ON, too.
+  [ -z "$(err '' 1)" ] || fail "R12: warned on a round that would not have escalated anyway"
+  # The shipped default is off: a config with the block but no opt-in behaves like $_off.
+  [ "$(role '' 99 --config "$(mkcfg z0 0)")" = builder ] \
+    || fail "R12: an explicit 0 escalated"
+  pass "escalation is opt-in; 0 disables both triggers and declines are reported (R12)"
+}
+
+# ── R12: the tool does not try to predict model resolution ──────────────────────
+# The regression guard for BOTH review findings: a tier name alone must not be treated as
+# evidence that escalating would upgrade anything. This is what a third attempt to infer
+# would break.
+the_tool_does_not_infer_resolution() {
+  # A codex-shaped config: builder pinned, heavy tier named but UNPINNED — so the installer
+  # stamps a model for builder and none for builder-heavy. Escalation stays off because
+  # nobody opted in, NOT because the tool worked out that the pin was missing.
+  _codexish="$T/codexish.yaml"
+  printf 'models:\n  default: inherit\n  builder: standard\n  builder-heavy: reasoning\n  pin.codex.standard: "gpt-5"\n' > "$_codexish"
+  [ "$(role '' 99 --config "$_codexish")" = builder ] \
+    || fail "R12: a config that never opted in escalated"
+  # And the decisive half: once the operator DOES opt in, the tool obeys — it does not
+  # second-guess the pin. Re-deriving resolve_model here is what produced two defects.
+  printf 'escalation:\n  after_rejections: 2\n' >> "$_codexish"
+  [ "$(role '' 99 --config "$_codexish")" = builder-heavy ] \
+    || fail "R12: the tool refused an opted-in escalation by inferring resolution"
+  # The rule must never READ the models: section. Assert on that precisely rather than on
+  # any mention of the words: the tool legitimately PRINTS `builder-heavy` (it is the answer)
+  # and legitimately names models.builder-heavy and pin.<front-end>.<tier> in the advisory it
+  # writes for the operator. What it may not do is parse them and decide.
+  grep -q '_cfg_scalar models' "$TOOL" \
+    && fail "R12: the tool reads the models: section — it is inferring model resolution again"
+  grep -qE '_cfg_scalar +(escalation)' "$TOOL" \
+    || fail "R12: control — the tool no longer reads escalation config, so the check above is vacuous"
+  pass "the rule never infers model resolution; the opt-in is the operator's assertion (R12)"
 }
 
 # ── usage errors ────────────────────────────────────────────────────────────────
@@ -350,7 +373,8 @@ durable_state_only
 delegate_never_escalates
 prose_records_the_choice
 telemetry_contract_intact
-escalation_requires_a_configured_heavy_tier
+escalation_is_opt_in_and_off_by_default
+the_tool_does_not_infer_resolution
 usage_errors_are_loud
 
 echo "test_escalation.sh: all cases passed"

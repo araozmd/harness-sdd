@@ -282,13 +282,15 @@ and never override the answer because you disagree with it.
 Escalation is **one-way within a feature** by construction: `round` only increases and the
 tag does not change mid-feature. There is no demotion rule — do not invent one.
 
-**`models.builder-heavy` arms it — `escalation.after_rejections` only sets the threshold.**
-While the heavy role has no tier (the shipped `inherit`, or an absent key falling through to
-an `inherit` default) **neither trigger fires**, and the tool says so on stderr when one
-matched. Escalating to an untiered role stamps no model at all, so on a target that
-configured `models.builder` it would abandon that model for the session default exactly when
-the build was struggling — a downgrade wearing an escalation's name. Surface the advisory and
-carry on; it is telling the operator to set a tier, not reporting a failure.
+**Escalation is OPT-IN and ships OFF.** `escalation.after_rejections` is both the threshold
+and the master switch: `0` — the shipped default — means neither trigger fires. When it is
+off and a spec carries `complexity: complex`, the tool says so on stderr; surface that and
+carry on, it is telling the operator to enable escalation, not reporting a failure.
+
+**The harness does not check whether escalating would actually help, and neither should
+you.** Whether `models.builder-heavy` resolves to a real model depends on the front-end and
+its pins, which only the installer's resolver knows. Enabling escalation is the operator
+asserting they configured it. Do not add a judgement of your own on top.
 
 **Record which Builder ran and why (R10/R11).** The `progress/history.md` line names the role
 and the trigger, e.g.
