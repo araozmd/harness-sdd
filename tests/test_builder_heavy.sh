@@ -84,7 +84,32 @@ pointer_body_duplicates_nothing() {
               grep -qF -- "$_l" "$_p" && printf '%s\n' "$_l"
             done || true)"
   [ -z "$_dup" ] || fail "R1: builder-heavy.md duplicates Builder body text: $_dup"
-  pass "agents/builder-heavy.md points at builder.md and duplicates no instruction text (R1)"
+
+  # The pointer must RESOLVE in an installed target, not merely mention a filename. Every
+  # generated wrapper tells the agent to "resolve every relative path against .harness/",
+  # so a `./builder.md` link resolves to .harness/builder.md — which does not exist, and
+  # the role would run having never loaded the body it exists to share. Same for the ADR:
+  # specs/adr/ is NOT in HARNESS_BODY_PROSE, so a ../specs/adr/... link is dead in every
+  # target. Assert the RULE (no relative-link syntax survives into an installed body),
+  # not the two samples of it. (Codex #3714991251.)
+  grep -nE '\]\((\./|\.\./)' "$_p" \
+    && fail "R1: builder-heavy.md uses a relative markdown link — wrappers resolve paths against .harness/, so it will not resolve in a target"
+  _rt="$(mk r1t)"; run "$_rt" claude
+  [ -f "$_rt/.harness/agents/builder-heavy.md" ] || fail "R1: setup — no installed pointer body"
+  # Every harness-root-relative path the installed body names must exist under .harness/.
+  # Positive control: the loop must actually inspect at least one path, or an empty sweep
+  # would satisfy this assertion by finding nothing to check.
+  _seen=0
+  for _ref in $(grep -oE '`[a-z_][a-z0-9_/.-]*\.(md|yaml|sh)`' "$_rt/.harness/agents/builder-heavy.md" | tr -d '`' | sort -u); do
+    case "$_ref" in specs/adr/*) continue ;; esac   # harness-source-only, stated as such
+    _seen=$((_seen + 1))
+    [ -e "$_rt/.harness/$_ref" ] \
+      || fail "R1: the installed pointer names '$_ref', but .harness/$_ref does not exist"
+  done
+  [ "$_seen" -ge 1 ] || fail "R1: the reference sweep inspected no path — it proves nothing"
+  grep -qF 'agents/builder.md' "$_rt/.harness/agents/builder-heavy.md" \
+    || fail "R1: the installed pointer does not name agents/builder.md"
+  pass "agents/builder-heavy.md points at builder.md, resolves under .harness/, duplicates nothing (R1)"
 }
 
 # ── R3: an absent key falls through to models.default ───────────────────────────

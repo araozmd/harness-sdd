@@ -1,8 +1,14 @@
 # Agent: Builder (heavy tier)
 
-**This role has no instruction body of its own. Read [`builder.md`](./builder.md) and
-follow it exactly.** Everything the Builder does, `builder-heavy` does — same worklist,
-same DO-NOT-TOUCH discipline, same self-check, same hand-off.
+**This role has no instruction body of its own. Read `agents/builder.md` and follow it
+exactly.** Everything the Builder does, `builder-heavy` does — same worklist, same
+DO-NOT-TOUCH discipline, same self-check, same hand-off.
+
+Paths here are harness-root-relative, like every other role body: in this source repo
+`agents/builder.md`; in an installed target the generated wrapper resolves it against
+`.harness/`, giving `.harness/agents/builder.md`. Do not write `./builder.md` — that
+resolves to `.harness/builder.md`, which does not exist, and the role would run without
+ever loading the Builder instructions it exists to share.
 
 ## Why a second name exists
 
@@ -17,14 +23,15 @@ front-ends: Codex, OpenCode and Gemini resolve the model from the generated agen
 definition and cannot override it per spawn, so a per-spawn override would silently
 no-op on three of the five.
 
-See [`ADR-0002`](../specs/adr/0002-builder-heavy-is-a-tier-not-a-second-prompt.md).
+This is settled by **ADR-0002** (`specs/adr/0002-builder-heavy-is-a-tier-not-a-second-prompt.md`
+in the harness source repo — the harness's own ADRs are not part of the installed body).
 
 ## Do not fork this file
 
 If a heavy variant ever needs genuinely different *behavior* rather than a different
 *model*, that contradicts ADR-0002. Revisit the ADR through the human gate — do not
 quietly add instructions here. Two Builder prompts maintained independently is the
-drift the ADR rejected, and the harness has already recorded what that costs.
+divergence the ADR rejected, and the harness has already recorded what that costs.
 
 Nothing routes to this role automatically yet; selecting it is a manual act until the
 deterministic escalation rule lands (E17-F03).
