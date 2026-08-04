@@ -239,7 +239,7 @@ umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
 .opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next, /sdd-test-concurrency); /sdd-fix-parallel is opt-in
 .agents/                     Antigravity glue + shared explicit-only skill units (.agents/skills/sdd-*/{SKILL.md,agents/openai.yaml})
-.codex/agents/               six Codex role TOMLs (always present when Codex is selected; model optional)
+.codex/agents/               seven Codex role TOMLs (always present when Codex is selected; model optional)
 ```
 
 ### Codex PR review loop
@@ -304,7 +304,7 @@ roles require their last-written ownership stamps; edited files survive).
 > its opt-in gate is enabled. Both front-ends read that surface, so one unit serves both
 > and it is reclaimed only when the last of them is deselected (ADR-0003). Each skill also carries `agents/openai.yaml`, disables implicit invocation,
 > and maps text accompanying the explicit `$skill` mention to the canonical workflow's
-> `$ARGUMENTS`. It also registers all six standard roles in `.codex/agents/`; inherited
+> `$ARGUMENTS`. It also registers all seven standard roles in `.codex/agents/`; inherited
 > or unpinned roles simply omit `model`. Last-written ownership stamps prevent selected
 > installs or cleanup from replacing foreign or edited skill units and role files. No
 > current install needs `HOME`/`CODEX_HOME` or writes global prompts. Ungated legacy

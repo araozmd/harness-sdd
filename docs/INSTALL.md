@@ -26,10 +26,10 @@ your-project/
 │   ├── SKILL.md                         # adapter + canonical workflow
 │   └── agents/openai.yaml               # explicit-only invocation policy
 ├── .gemini/agents/*.md                 # per-role model routing only — created ONLY when a tier resolves
-├── .codex/agents/*.toml                # six selected Codex roles; model optional, never ~/.codex
+├── .codex/agents/*.toml                # seven selected Codex roles; model optional, never ~/.codex
 └── .harness/                           # the whole harness body
     ├── .harness-version  manifest.txt
-    ├── .opencode.stamp                  # byte copy of the last generated opencode.json (model routing only)
+    ├── .opencode.stamp                  # byte copy of the last opencode.json the installer wrote
     ├── .model-agents/                   # byte copies of the last .gemini/.codex per-role files (model routing only)
     ├── AGENTS.md agents/ docs/ store/ tools/ specs/_templates/ init.sh harness.config.yaml
     ├── .gitignore                       # seeded: keeps the local-only telemetry log out of VCS
@@ -641,6 +641,7 @@ models:
   orchestrator: inherit
   architect: reasoning
   builder: standard
+  builder-heavy: reasoning   # the escalation tier — see below
   reviewer: standard
   scout: cheap
   doc-critic: cheap
@@ -656,6 +657,33 @@ written for a newer harness can never block an upgrade on an older installer.
 `inherit` compiles to **key omission** on every front-end. The literal string `inherit`
 is never written anywhere: it is unknown on Codex and a hard error on OpenCode, while an
 absent key means "use the session model" on all five.
+
+### `builder-heavy` — the escalation tier
+
+There are **two** Builder role names. `builder-heavy` has the *same instruction body* as
+`builder` — `agents/builder-heavy.md` is a pointer at `agents/builder.md`, not a second
+prompt — and differs only in the tier it resolves to. That lets you retry a task that a
+standard Builder is struggling with on a more capable model **without** paying that cost
+on every easy task, which is what raising `models.builder` would do.
+
+Escalation is therefore a pure **routing** decision: something picks a role name, and the
+front-end's generated agent definition supplies the model. That is what makes it work
+everywhere — Codex, OpenCode and Gemini read the model from the generated definition and
+cannot override it per spawn, so a per-spawn override would silently do nothing on three
+of the five front-ends. See [ADR-0002](../specs/adr/0002-builder-heavy-is-a-tier-not-a-second-prompt.md).
+
+Two things worth knowing:
+
+- **It ships on `inherit`, like every other role — so out of the box it is *not* heavier
+  than `builder`.** Give it a tier (`reasoning` is the intended one) before it does
+  anything for you. Shipping a heavier default would stamp a model key into every fresh
+  target, which is exactly the inertness this block promises.
+- **Nothing routes to it automatically yet.** Today you invoke it by hand. A deterministic
+  escalation rule — a complexity tag and a two-rejection trigger — is a separate feature.
+
+An **upgraded** target keeps whatever `models:` block it already had, so it will not grow
+a `builder-heavy:` line. Nothing breaks: an unlisted role falls through to
+`models.default`, exactly like any other. Add the key yourself when you want to set it.
 
 ### What each tier stamps
 
@@ -676,7 +704,7 @@ A pin is written **verbatim** in that front-end's own vocabulary and overrides t
 built-in alias for every role on that tier. It is **required** for `codex` and `opencode`,
 which have no floating alias — an unpinned tier there stamps no **model**, and the
 installer prints one advisory line naming the exact `pin.` key to set. It is the `model`
-key that is omitted, not the role artifact: selecting Codex always registers all six
+key that is omitted, not the role artifact: selecting Codex always registers all seven
 `.codex/agents/*.toml` regardless of any pin (see "Where the values land" below).
 
 - `opencode` **must** be `provider/model`. A value without a `/` would abort your OpenCode
@@ -703,8 +731,9 @@ model list, so every other pin value is passed through untouched.
 | `codex` | `.codex/agents/<role>.toml` | optional `model = "…"` (role always registered, project-local) |
 
 `.gemini/agents/` remains conditional on at least one concrete Gemini value.
-`.codex/agents/` is different: selecting Codex always registers exactly the six standard
-roles with `name`, `description`, and `developer_instructions`. An inherited role or an
+`.codex/agents/` is different: selecting Codex always registers exactly the seven standard
+roles — the six long-standing ones plus `builder-heavy` — with `name`, `description`, and
+`developer_instructions`. An inherited role or an
 unpinned Codex tier omits `model`; a concrete pin adds `model` only to the roles that
 resolve to it. Only selected front-ends (`--agents`) are stamped.
 
@@ -719,8 +748,13 @@ resolve to it. Only selected front-ends (`--agents`) are stamped.
 
 `opencode.json` is the one config file the harness does not regenerate on a plain re-run.
 It is re-stamped **only** when it is byte-identical to `.harness/.opencode.stamp` (the
-last body the installer wrote) or to a freshly generated model-free body; anything else
-is treated as yours, left untouched, and reported. `.harness/.model-agents/` is the same
+last body the installer wrote), to a freshly generated model-free body, or to the body the
+previous release generated; anything else is treated as yours, left untouched, and
+reported. That third comparison is what lets a role added by a new release reach a target
+installed by an older one — without it an already-installed `opencode.json` would be
+misreported as edited forever. The stamp is now written on **every** run that writes
+`opencode.json`, not only when a role resolves to a concrete model, so future shape changes
+are provable from the stamp alone. `.harness/.model-agents/` is the same
 device for the `.gemini/agents/` and `.codex/agents/` trees: it remembers the exact bytes
 last written there. Returning Codex roles to `inherit` regenerates stamp-matching TOMLs
 without their old `model` keys; a foreign or edited role is preserved and diagnosed.

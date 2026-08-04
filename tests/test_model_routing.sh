@@ -26,7 +26,7 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
 ALL=claude,gemini,opencode,antigravity,codex
-ROLES="orchestrator architect builder reviewer scout doc-critic"
+ROLES="orchestrator architect builder builder-heavy reviewer scout doc-critic"
 
 # mk <name> — make a target dir under $T and print its path.
 mk() { _d="$T/$1"; mkdir -p "$_d"; printf '%s\n' "$_d"; }
@@ -187,7 +187,7 @@ test_builtin_tier_aliases() {
 # ── R7: unpinned tier on codex/opencode omits the key + ONE info line ────────────
 test_unpinned_codex_opencode_omits() {
   _t="$(mk r7)"; run "$_t" "$ALL"
-  # every role on `cheap` ⇒ six resolutions per front-end, one advisory line each
+  # every role on `cheap` ⇒ seven resolutions per front-end, one advisory line each
   for _r in $ROLES; do set_tier "$_t" "$_r" cheap; done
   _e="$(run_err "$_t" "$ALL")"
   printf '%s\n' "$_e" | grep -q 'pin.codex.cheap'    || fail "R7: no advisory naming models.pin.codex.cheap"
@@ -286,7 +286,7 @@ test_opencode_json_model_member() {
   return 0
 }
 
-# ── R15: gemini per-role files, all six roles, pointer body ──────────────────────
+# ── R15: gemini per-role files, all seven roles, pointer body ────────────────────
 test_gemini_agent_files() {
   _t="$(mk r15)"; run "$_t" gemini
   set_tier "$_t" architect reasoning
@@ -354,8 +354,10 @@ test_codex_selected_preserves_foreign_and_edited() {
     && fail "E23 review: installer claimed a last-written stamp for a foreign role"
   printf '%s\n' "$_e" | grep -qF '.codex/agents/orchestrator.toml' \
     || fail "E23 review: selected foreign role preservation was not diagnosed"
-  [ "$(find "$_t/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "6" ] \
-    || fail "E23 review: preserving one foreign role did not leave exactly six registrations"
+  [ "$(find "$_t/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "7" ] \
+    || fail "E23 review: preserving one foreign role did not leave exactly seven registrations"
+  [ -f "$_t/.codex/agents/builder-heavy.toml" ] \
+    || fail "E17-F02 R10: builder-heavy.toml missing after preserving one foreign role"
 
   # A role the harness DID write has a last-written stamp. Once edited, a selected
   # re-install must leave it byte-for-byte untouched even when routing changes.
@@ -533,8 +535,10 @@ test_new_trees_conditional() {
   # (a) everything on inherit
   _t="$(mk r17a)"; run "$_t" gemini,codex
   [ -d "$_t/.gemini/agents" ] && fail "R17: all-inherit created .gemini/agents/"
-  [ "$(find "$_t/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "6" ] \
-    || fail "R6: all-inherit Codex did not create exactly six role TOMLs"
+  [ "$(find "$_t/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "7" ] \
+    || fail "R6: all-inherit Codex did not create exactly seven role TOMLs"
+  [ -f "$_t/.codex/agents/builder-heavy.toml" ] \
+    || fail "E17-F02 R10: all-inherit Codex did not register builder-heavy"
   grep -q '^model = ' "$_t/.codex/agents/"*.toml \
     && fail "R7: all-inherit Codex role gained a model key"
   # (b) a real tier without a Codex pin remains model-less, while Gemini resolves.
@@ -542,8 +546,10 @@ test_new_trees_conditional() {
   set_tier "$_t2" architect reasoning
   run "$_t2" gemini,codex
   [ -d "$_t2/.gemini/agents" ] || fail "R17: a resolvable gemini tier must create .gemini/agents/"
-  [ "$(find "$_t2/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "6" ] \
-    || fail "R6: unpinned Codex did not retain exactly six role TOMLs"
+  [ "$(find "$_t2/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "7" ] \
+    || fail "R6: unpinned Codex did not retain exactly seven role TOMLs"
+  [ -f "$_t2/.codex/agents/builder-heavy.toml" ] \
+    || fail "E17-F02 R10: unpinned Codex did not retain builder-heavy"
   grep -q '^model = ' "$_t2/.codex/agents/"*.toml \
     && fail "R7: unpinned Codex tier stamped a model key"
   return 0
@@ -697,7 +703,17 @@ test_opencode_json_restamp_rules() {
   # (a) a pre-existing PRISTINE model-free body gains the model members
   _ta="$(mk r20a)"; run "$_ta" opencode
   grep -q '"model"' "$_ta/opencode.json" && fail "R20a: setup — the model-free body already has a model member"
-  [ -f "$_ta/.harness/.opencode.stamp" ] && fail "R20a: a model-free body must leave no stamp file"
+  # E17-F02 REVISES this clause: the stamp is now written on EVERY run that writes
+  # opencode.json. A model-free body is reproducible only by the installer VERSION that
+  # generated it, so "no stamp for a model-free body" is what locked already-installed
+  # targets out of a newly added role. What must remain true — and is asserted instead —
+  # is that an unconfigured target's stamp holds no model state.
+  [ -f "$_ta/.harness/.opencode.stamp" ] \
+    || fail "R20a/E17-F02: a model-free write did not record .opencode.stamp"
+  grep -q '"model"' "$_ta/.harness/.opencode.stamp" \
+    && fail "R20a: a model-free body stamped a model member"
+  cmp -s "$_ta/opencode.json" "$_ta/.harness/.opencode.stamp" \
+    || fail "R20a/E17-F02: the model-free stamp is not a byte copy of opencode.json"
   set_tier "$_ta" builder standard
   set_pin "$_ta" opencode standard "anthropic/claude-sonnet-4-5"
   run "$_ta" opencode
@@ -843,7 +859,7 @@ test_deselect_preserves_user_edits() {
 
 # ── R11/R17: every role back to `inherit` reconciles previously stamped models ──
 test_return_to_inherit_reconciles() {
-  # (a) Gemini remains conditional; Codex regenerates the same six model-less roles.
+  # (a) Gemini remains conditional; Codex regenerates the same seven model-less roles.
   _t="$(mk r11rec)"; run "$_t" gemini,codex
   set_tier "$_t" architect reasoning
   set_tier "$_t" scout cheap
@@ -859,8 +875,10 @@ test_return_to_inherit_reconciles() {
   run "$_t" gemini,codex
   [ -e "$_t/.gemini/agents" ] && fail "R11rec: .gemini/agents/ survived a switch back to inherit"
   [ -e "$_t/.gemini" ]        && fail "R11rec: the harness-created .gemini/ dir survived"
-  [ "$(find "$_t/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "6" ] \
-    || fail "R8: pin→inherit did not retain exactly six Codex roles"
+  [ "$(find "$_t/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "7" ] \
+    || fail "R8: pin→inherit did not retain exactly seven Codex roles"
+  [ -f "$_t/.codex/agents/builder-heavy.toml" ] \
+    || fail "E17-F02 R10: pin→inherit did not retain builder-heavy"
   grep -q '^model = ' "$_t/.codex/agents/"*.toml \
     && fail "R8: pin→inherit left a Codex model key behind"
   # The still-selected front-ends keep the rest of their glue.
@@ -932,7 +950,7 @@ pass "antigravity personas carry model: beside description (R13)"
 test_opencode_json_model_member
 pass "opencode agent.<role> carries a \"model\" member (R14)"
 test_gemini_agent_files
-pass "gemini .gemini/agents/<role>.md created for all six roles with a pointer body (R15)"
+pass "gemini .gemini/agents/<role>.md created for all seven roles with a pointer body (R15)"
 test_codex_agent_files_project_local
 pass "codex .codex/agents/<role>.toml is project-local; \$CODEX_HOME is never touched (R16)"
 test_codex_selected_preserves_foreign_and_edited
@@ -944,9 +962,9 @@ pass "model-agent stamp symlinks are never followed for routing or deselection"
 test_gemini_unsafe_stamp_keeps_live_generation_bytes
 pass "unsafe Gemini stamp trees do not change selected live-role generation bytes"
 test_new_trees_conditional
-pass "Gemini remains conditional; selected Codex always registers six model-optional roles (R6, R7, R17)"
+pass "Gemini remains conditional; selected Codex always registers seven model-optional roles (R6, R7, R17)"
 test_return_to_inherit_reconciles
-pass "every role back to inherit reclaims Gemini and regenerates six model-less Codex roles (R8, R11, R17)"
+pass "every role back to inherit reclaims Gemini and regenerates seven model-less Codex roles (R8, R11, R17)"
 test_selection_gating
 pass "an unselected front-end is never stamped, even with a full models: block (R18)"
 test_restamp_after_config_change

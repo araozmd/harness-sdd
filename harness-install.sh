@@ -275,13 +275,16 @@ models:
   orchestrator: inherit
   architect: inherit      # try: reasoning
   builder: inherit        # try: standard
+  builder-heavy: inherit  # try: reasoning — the escalation tier (E17-F02); same body as
+                          # `builder`, differs only by the model it resolves to (ADR-0002).
+                          # Left `inherit` it is NOT heavier than `builder`.
   reviewer: inherit       # try: standard
   scout: inherit          # try: cheap
   doc-critic: inherit     # try: cheap
   # Exact-value escape hatch: `pin.<front-end>.<tier>`, written VERBATIM in that
   # front-end's own vocabulary. REQUIRED for codex and opencode, which have no
   # floating tier alias — an unpinned tier there stamps no MODEL. The role artifact
-  # itself is still written (selecting Codex always registers all six
+  # itself is still written (selecting Codex always registers all seven
   # .codex/agents/*.toml); only the `model` key is omitted, as for the `inherit` tier.
   #   opencode MUST be "provider/model" (an invalid value aborts your OpenCode run)
   #   codex    MUST be a bare model id (the provider comes from `model_provider`)
@@ -911,7 +914,7 @@ antigravity ANTIGRAVITY_AGENT ANTIGRAVITY_CONVERSATION_ID
 # ONLY files a deselection may delete, so a selective re-run never removes a user's
 # own agents/commands sharing the same dir (Codex r2 P1). Keep in sync with the
 # emit_agent calls and the command-copy loops in install_one().
-HARNESS_CLAUDE_SHIMS="orchestrator architect builder reviewer scout doc-critic pr-fixer"
+HARNESS_CLAUDE_SHIMS="orchestrator architect builder builder-heavy reviewer scout doc-critic pr-fixer"
 HARNESS_SDD_CMDS="sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel"
 
 # E18-F01: the pr_loop glue is GATED on the OPT-IN `pr_loop.enabled`, so it is emitted
@@ -939,18 +942,20 @@ PR_FIXER_DESC="Fixes exactly ONE Codex review comment in an isolated context: re
 # against what is on disk (remove_if_pristine), so a non-deterministic stamp would make a
 # previously-installed file permanently unremovable.
 #
-# The six roles the installer already emits an agent definition for. Adding a future role
-# variant (e.g. E17-F02's `builder-heavy`) is ONE new name here + one `models:` line — no
-# config migration, because the map is flat and keyed off role names.
-MODEL_ROLES="orchestrator architect builder reviewer scout doc-critic"
+# The seven roles the installer emits an agent definition for. Adding a further role
+# variant is ONE new name here + one `models:` line — no config migration, because the map
+# is flat and keyed off role names and an unlisted role falls through to `models.default`.
+# `builder-heavy` (E17-F02) is that shape in practice: same instruction body as `builder`,
+# differing only by the tier resolve_model returns for it (ADR-0002).
+MODEL_ROLES="orchestrator architect builder builder-heavy reviewer scout doc-critic"
 
 # Set to 1 to force every resolution to EMPTY (used to regenerate the "model-free" body
 # an older opencode.json is compared against). Never set outside that narrow window.
 MODELS_OFF=0
 # Run-scoped stderr de-duplication ledger (set in install_one). resolve_model runs inside
-# `$(...)` subshells, so an in-memory flag would not survive; the marker file does. Six
-# roles × five front-ends is 30 resolutions per run — without this the output degenerates
-# into thirty identical advisory lines.
+# `$(...)` subshells, so an in-memory flag would not survive; the marker file does. Seven
+# roles × five front-ends is 35 resolutions per run — without this the output degenerates
+# into thirty-five identical advisory lines.
 MODEL_DIAG=""
 
 # _models_cfg — path of the target config the resolver reads. Empty before install_one
@@ -2541,7 +2546,7 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .agents/skills/sdd-*/agents/openai.yaml
                                       explicit-only invocation policy — written wherever the
                                       unit is, since Codex discovers the directory itself
-  .codex/agents/*.toml                six selected Codex role definitions (model optional)
+  .codex/agents/*.toml                seven selected Codex role definitions (model optional)
   .harness/.codex-skills/             last-written skill-unit ownership stamps (historical
                                       name; it stamps shared units — ADR-0003)
   CLAUDE.md / AGENTS.md / GEMINI.md  -> only the harness:begin..end block
@@ -2570,12 +2575,13 @@ MODEL ROUTING:
   .gemini/agents/*               per-role Gemini agent definitions (regenerated)
   .codex/agents/*                per-role Codex agent definitions, PROJECT-LOCAL
                                  (never written to \$CODEX_HOME / ~/.codex)
-  .harness/.opencode.stamp       byte copy of the last generated opencode.json, kept
-                                 only while it carries a model key (enables re-stamping)
+  .harness/.opencode.stamp       byte copy of the last opencode.json the installer wrote
+                                 (enables re-stamping, and proves ownership across a
+                                 generated-shape change such as a new role)
   .harness/.model-agents/        byte copies of the last generated .gemini/.codex per-role
                                  files, kept only while those files exist (lets a switch
                                  back to \`inherit\` reclaim them instead of orphaning them)
-  Gemini remains conditional on a concrete model. Selected Codex always has all six roles;
+  Gemini remains conditional on a concrete model. Selected Codex always has all seven roles;
   inherited or unpinned roles omit model, while concrete pins add it role by role. Codex
   role replacement/reclamation requires a matching last-written ownership stamp.
 
@@ -2729,6 +2735,25 @@ $MARK_END"
     _ocm="$(resolve_model opencode "$1")"
     if [ -n "$_ocm" ]; then printf '"model": "%s", ' "$_ocm"; fi
   }
+  # gen_opencode_legacy <dest> — the model-free body as the PREVIOUS release generated it.
+  # DERIVED from the current model-free body by dropping the one line E17-F02 added, so the
+  # two can never diverge: hand-building this body is the error-prone path (a version differing
+  # by a single blank line fails IDENTICALLY to the bug it is meant to fix — same warning,
+  # same stale role set, no signal). Consumed by the §5g re-stamp test and the §7 removal
+  # test, which is why it lives beside gen_opencode_json rather than in either caller.
+  #
+  # This exists ONCE. It is not the start of a list: from E17-F02 onward every write of
+  # opencode.json also writes .harness/.opencode.stamp (§5g), so a future shape change is
+  # recognised by the stamp alone and needs no further legacy candidate. A target still on
+  # the PRE-doc-critic five-role shape is knowingly not covered — that addition carried this
+  # same defect, and such a target can delete opencode.json and re-run.
+  gen_opencode_legacy() {
+    _ocl_tmp="$(mktemp 2>/dev/null || mktemp -t harness-ocl)"
+    MODELS_OFF=1; gen_opencode_json "$_ocl_tmp"; MODELS_OFF=0
+    grep -v '"builder-heavy":' "$_ocl_tmp" > "$1"
+    rm -f "$_ocl_tmp"
+  }
+
   gen_opencode_json() {
     _oc_m_orchestrator="$(_oc_model orchestrator)"
     _oc_m_architect="$(_oc_model architect)"
@@ -2736,6 +2761,7 @@ $MARK_END"
     _oc_m_reviewer="$(_oc_model reviewer)"
     _oc_m_scout="$(_oc_model scout)"
     _oc_m_doc_critic="$(_oc_model doc-critic)"
+    _oc_m_builder_heavy="$(_oc_model builder-heavy)"
     cat > "$1" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
@@ -2744,6 +2770,7 @@ $MARK_END"
     "orchestrator": { "mode": "primary",  "description": "The Leader: routes the next task, delegates. Never writes code.", ${_oc_m_orchestrator}"prompt": "{file:./.harness/agents/orchestrator.md}" },
     "architect":    { "mode": "subagent", "description": "Spec Author: writes the 4-file spec (EARS).",                     ${_oc_m_architect}"prompt": "{file:./.harness/agents/architect.md}" },
     "builder":      { "mode": "subagent", "description": "Implementer: writes code from an approved spec.",                 ${_oc_m_builder}"prompt": "{file:./.harness/agents/builder.md}" },
+    "builder-heavy":{ "mode": "subagent", "description": "Implementer at the escalation tier; same body as builder.",       ${_oc_m_builder_heavy}"prompt": "{file:./.harness/agents/builder-heavy.md}" },
     "reviewer":     { "mode": "subagent", "description": "Evaluator: verifies against the spec, runs tests.",               ${_oc_m_reviewer}"prompt": "{file:./.harness/agents/reviewer.md}" },
     "scout":        { "mode": "subagent", "description": "Read-only recon; writes findings to progress/.",                  ${_oc_m_scout}"prompt": "{file:./.harness/agents/scout.md}" },
     "doc-critic":   { "mode": "subagent", "description": "Advisory doc review pass over planning docs + specs. Documents only, never code.", ${_oc_m_doc_critic}"prompt": "{file:./.harness/agents/doc-critic.md}" }
@@ -2853,6 +2880,7 @@ EOF
 orchestrator	The Leader. Reads state, runs init.sh, routes the next task, delegates to architect/builder/reviewer/scout. Never writes code.
 architect	The Spec Author. Writes the 4-file spec in EARS. No production code.
 builder	The Implementer. Writes code from an APPROVED spec, one task at a time.
+builder-heavy	The Implementer at the escalation tier. Same instruction body and same discipline as `builder`; differs only by the model it resolves to (ADR-0002).
 reviewer	The Evaluator. Verifies against the spec, runs tests, approves or rejects.
 scout	Read-only codebase reconnaissance. Writes findings to progress/.
 doc-critic	Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code.
@@ -2958,6 +2986,20 @@ EOF
   model_agent_stamp_destination_is_symlinked() {
     model_agent_stamp_tree_is_symlinked "$1" \
       || [ -L "$H/.model-agents/$1/$2" ]
+  }
+
+  # opencode_stamp_is_symlinked — true iff .harness/.opencode.stamp is a symlink (live or
+  # dangling). `cmp`, `cp` and redirection all FOLLOW a symlink, so an operator-planted (or
+  # hostile) link would both lend a foreign file's bytes to the ownership comparison and let
+  # a `cp` overwrite that file's external target. `test -L` detects the link without
+  # dereferencing it. Same rule the .model-agents and .codex/agents stamps already apply.
+  #
+  # This guard became LOAD-BEARING when the stamp write turned unconditional (E17-F02):
+  # before that, an all-`inherit` target ran `rm -f` on this path, which UNLINKS a symlink
+  # instead of writing through it, so the hazard could not arise. Verified against v0.55.0.
+  # (Codex #3715169411.)
+  opencode_stamp_is_symlinked() {
+    [ -L "$H/.opencode.stamp" ]
   }
 
   stamp_model_agent() {
@@ -3167,6 +3209,13 @@ EOF
     "The Spec Author. Writes the 4-file spec in EARS. No production code."
   emit_agent builder "Read, Write, Edit, Bash, Grep, Glob" \
     "The Implementer. Writes code from an APPROVED spec, one task at a time."
+  # builder-heavy (E17-F02): the escalation tier. The tool list is copied EXACTLY from
+  # `builder` above — ADR-0002 says the two variants differ only by resolved model, so a
+  # different tool list would be a behavioral difference the ADR forbids. Both shims point
+  # at their own canonical body, and .harness/agents/builder-heavy.md is itself a pointer
+  # at builder.md, so the instruction text still exists in exactly one place.
+  emit_agent builder-heavy "Read, Write, Edit, Bash, Grep, Glob" \
+    "The Implementer at the escalation tier. Same instruction body and same discipline as \`builder\`; differs only by the model it resolves to (ADR-0002)."
   emit_agent reviewer "Read, Bash, Grep, Glob, Edit" \
     "The Evaluator. Verifies against the spec, runs tests, approves or rejects."
   emit_agent scout "Read, Grep, Glob, Bash" \
@@ -3177,7 +3226,7 @@ EOF
   emit_agent doc-critic "Read, Grep, Glob, Write" \
     "Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code."
   # pr-fixer (E18-F01 R10): the /sdd-pr-loop worker sub-agent, spawned once per blocking
-  # Codex comment. GATED on the opt-in pr_loop.enabled — unlike the six roles above it is
+  # Codex comment. GATED on the opt-in pr_loop.enabled — unlike the seven roles above it is
   # NOT stamped by default. It rides the SAME emit_agent path (one shim, pointing at
   # the canonical .harness/agents/pr-fixer.md — the role body is never duplicated).
   if pr_loop_enabled; then
@@ -4735,7 +4784,7 @@ EOF
   fi
 
   # ── 5f. Codex per-role agent definitions (gated only on selected `codex`) ──────
-  # Role registration is independent from model routing: all six project-local TOMLs
+  # Role registration is independent from model routing: all seven project-local TOMLs
   # always exist for selected Codex. `gen_codex_agent` omits `model` when the role
   # inherits or its tier is unpinned, and adds it only for a concrete resolved pin.
   if agent_selected codex; then
@@ -4800,24 +4849,47 @@ EOF
     else
       _oc_free="$(mktemp 2>/dev/null || mktemp -t harness-ocf)"
       MODELS_OFF=1; gen_opencode_json "$_oc_free"; MODELS_OFF=0
-      if { [ -f "$H/.opencode.stamp" ] && cmp -s "$TARGET/opencode.json" "$H/.opencode.stamp"; } \
-         || cmp -s "$TARGET/opencode.json" "$_oc_free"; then
+      # E17-F02: a THIRD candidate — the body the PREVIOUS release generated. Without it,
+      # adding a role to the `agent:` map locks every already-installed target out
+      # permanently: on-disk is the old shape, no stamp exists yet (pre-E17-F02 the stamp
+      # was kept only for bodies carrying a model key), the generated reference is the new
+      # shape, so nothing matches, so the file is never rewritten, so it never gains the
+      # stamp that would let it be rewritten. Verified against v0.55.0.
+      _oc_legacy="$(mktemp 2>/dev/null || mktemp -t harness-ocl)"
+      gen_opencode_legacy "$_oc_legacy"
+      if { [ -f "$H/.opencode.stamp" ] && ! opencode_stamp_is_symlinked \
+           && cmp -s "$TARGET/opencode.json" "$H/.opencode.stamp"; } \
+         || cmp -s "$TARGET/opencode.json" "$_oc_free" \
+         || cmp -s "$TARGET/opencode.json" "$_oc_legacy"; then
         cat "$_oc_new" > "$TARGET/opencode.json"
         _oc_written=1
         info "opencode.json regenerated (pristine harness stamp; model routing applied)"
       else
         echo "⚠️  opencode.json differs from the generated stamp (edited) — left untouched; model routing changes were NOT applied" >&2
       fi
-      rm -f "$_oc_free"
+      rm -f "$_oc_free" "$_oc_legacy"
     fi
-    # The stamp exists only to make a re-stamp possible once a model key is present; a
-    # model-free body is already reproducible from gen_opencode_json, so no stamp is kept
-    # for it (that keeps R11 true: an unconfigured target grows no new file).
+    # The stamp records WHAT WE LAST WROTE, unconditionally (E17-F02). It used to be kept
+    # only for bodies carrying a model key, on the reasoning that "a model-free body is
+    # already reproducible from gen_opencode_json" — true only for the installer VERSION
+    # that wrote it, which adding a role falsifies. Stamping every write is what makes the
+    # legacy candidate above a one-off rather than the first entry in a growing list: from
+    # here on, a shape change is provable from the stamp alone. Same mechanism, and the
+    # same reason, as the Codex role TOMLs — a fresh body cannot prove a same-named file is
+    # ours. This REVISES E17-F01 R11 in one clause: an unconfigured target now carries
+    # .harness/.opencode.stamp. R11's substance holds — the stamp is harness-owned metadata
+    # inside .harness/ (beside .agents and .harness-version), it is removed on deselect
+    # (§7), and an all-`inherit` target stays diff -r-identical to one whose models: block
+    # was stripped, because both grow the same stamp.
     if [ "$_oc_written" = 1 ]; then
-      if grep -q '"model":' "$TARGET/opencode.json"; then
-        cp "$TARGET/opencode.json" "$H/.opencode.stamp"
+      if opencode_stamp_is_symlinked; then
+        # NEVER `cp` through the link: that overwrites its target, which may be outside the
+        # repository entirely. Leave both the link and its target untouched and say so — the
+        # next run simply re-derives pristineness from the generated bodies, exactly as a
+        # target with no stamp does.
+        echo "⚠️  .harness/.opencode.stamp is a symlink — ownership stamp not written (link and its target left unchanged)" >&2
       else
-        rm -f "$H/.opencode.stamp"
+        cp "$TARGET/opencode.json" "$H/.opencode.stamp"
       fi
     fi
     rm -f "$_oc_new"
@@ -4895,15 +4967,22 @@ EOF
           if [ -f "$TARGET/opencode.json" ]; then
             _ref="$(mktemp 2>/dev/null || mktemp -t harness-oc)"
             gen_opencode_json "$_ref"
-            if { [ -f "$H/.opencode.stamp" ] && cmp -s "$TARGET/opencode.json" "$H/.opencode.stamp"; } \
-               || cmp -s "$TARGET/opencode.json" "$_ref"; then
+            # E17-F02: also accept the body a PREVIOUS release generated, or deselecting on
+            # a target installed before this release would misreport a pristine file as
+            # edited and leave it behind. Same candidate, same reason, as §5g.
+            _ref_legacy="$(mktemp 2>/dev/null || mktemp -t harness-ocl)"
+            gen_opencode_legacy "$_ref_legacy"
+            if { [ -f "$H/.opencode.stamp" ] && ! opencode_stamp_is_symlinked \
+                 && cmp -s "$TARGET/opencode.json" "$H/.opencode.stamp"; } \
+               || cmp -s "$TARGET/opencode.json" "$_ref" \
+               || cmp -s "$TARGET/opencode.json" "$_ref_legacy"; then
               rm -f "$TARGET/opencode.json"
               rm -f "$H/.opencode.stamp"
               echo "⚠️  removed deselected agent 'opencode' glue: opencode.json (pristine generated)" >&2
             else
               echo "⚠️  opencode.json differs from the generated stamp (edited) — left in place (deselected 'opencode' not removed)" >&2
             fi
-            rm -f "$_ref"
+            rm -f "$_ref" "$_ref_legacy"
           fi
           ;;
         antigravity)

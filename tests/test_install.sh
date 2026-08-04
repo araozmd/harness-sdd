@@ -667,7 +667,7 @@ grep -qF "$AG_SENTINEL" "$T/.agents/rules/harness.md" && fail "antigravity rule 
 # with no copied role body. Bare-file persona discovery is unconfirmed, so these assert shape
 # (correct plural dir, description, defers to canonical role, sentinel absent) — NOT that the
 # persona registers as an Antigravity subagent.
-for r in orchestrator architect builder reviewer scout doc-critic; do
+for r in orchestrator architect builder builder-heavy reviewer scout doc-critic; do
   [ -f "$T/.agents/agents/$r.md" ]                       || fail "antigravity persona $r missing (R4)"
   grep -qE '^description:' "$T/.agents/agents/$r.md"      || fail "antigravity persona $r has no description (R4)"
   grep -qF ".harness/agents/$r.md" "$T/.agents/agents/$r.md" || fail "antigravity persona $r does not defer to .harness/agents/$r.md (R5)"
@@ -1527,7 +1527,7 @@ grep -qF '.agents/skills/sdd-*/SKILL.md' "$TDOC/.harness/manifest.txt" \
   || fail "R10: installed manifest omits Codex skills"
 grep -qF 'agents/openai.yaml' "$TDOC/.harness/manifest.txt" \
   || fail "R10: installed manifest omits explicit-only Codex skill metadata"
-grep -qF 'six selected Codex role' "$TDOC/.harness/manifest.txt" \
+grep -qF 'seven selected Codex role' "$TDOC/.harness/manifest.txt" \
   || fail "R10: installed manifest does not describe always-present Codex roles"
 grep -qF 'Current installs never create or overwrite' "$TDOC/.harness/manifest.txt" \
   || fail "R10: installed manifest does not retire global prompt writes"
@@ -1787,7 +1787,7 @@ pass "checkbox picker tui_select + tui_capable probe exist; non-TTY falls back t
 # either makes a fresh target and an upgraded target diverge, so both are asserted here,
 # in the same change as the installer edit. CODEX_HOME is sandboxed suite-wide (above)
 # and per-run below, so no assertion can write into the developer's real ~/.codex.
-MODEL_ROLE_NAMES="orchestrator architect builder reviewer scout doc-critic"
+MODEL_ROLE_NAMES="orchestrator architect builder builder-heavy reviewer scout doc-critic"
 
 test_models_block_seeded() {   # R1
   _mt="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
@@ -1876,11 +1876,27 @@ test_no_models_block_is_byte_identical() {   # R11
   grep -q '"model"' "$_ta/opencode.json"    && fail "R11: unconfigured install stamped a model member in opencode.json"
   grep -rq '^model:' "$_ta/.agents/agents"  && fail "R11: unconfigured install stamped a model: in .agents/agents"
   [ -d "$_ta/.gemini/agents" ]              && fail "R11: unconfigured install created .gemini/agents/"
-  [ "$(find "$_ta/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "6" ] \
-    || fail "R6: unconfigured selected Codex did not register exactly six roles"
+  [ "$(find "$_ta/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "7" ] \
+    || fail "R6: unconfigured selected Codex did not register exactly seven roles"
+  # E17-F02 R10: the count alone is satisfied by ANY seventh file — including a foreign or
+  # stale one left behind by the very reclaim path these suites exist to police. Name it.
+  [ -f "$_ta/.codex/agents/builder-heavy.toml" ] \
+    || fail "R6/E17-F02 R10: the seventh Codex role is not builder-heavy"
   grep -q '^model = ' "$_ta/.codex/agents/"*.toml \
     && fail "R7: unconfigured Codex role gained a model key"
-  [ -f "$_ta/.harness/.opencode.stamp" ]    && fail "R11: unconfigured install created .harness/.opencode.stamp"
+  # E17-F02 REVISES this clause. The stamp is now written on every run that writes
+  # opencode.json, not only when a model key is present, because a model-free body is
+  # reproducible only by the installer VERSION that wrote it — which is what locked
+  # already-installed targets out of a newly added role. R11's substance is unchanged and
+  # is still asserted by the `diff -r` above: both targets grow the SAME stamp, so an
+  # all-inherit target stays identical to one whose models: block was stripped. What the
+  # stamp may never contain is model state on an unconfigured target:
+  [ -f "$_ta/.harness/.opencode.stamp" ] \
+    || fail "R11/E17-F02: an all-inherit install did not record the opencode.json it wrote"
+  grep -q '"model"' "$_ta/.harness/.opencode.stamp" \
+    && fail "R11: unconfigured install stamped a model member into .harness/.opencode.stamp"
+  cmp -s "$_ta/opencode.json" "$_ta/.harness/.opencode.stamp" \
+    || fail "R11/E17-F02: .opencode.stamp is not a byte copy of the opencode.json on disk"
   [ -d "$_ta/.harness/.model-agents/gemini" ] \
     && fail "R11: unconfigured install created Gemini model-agent stamps"
   # And prove the RESOLVER itself treats a config with no models: block as `inherit`
