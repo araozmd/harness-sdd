@@ -548,8 +548,13 @@ _cfg_umbrella_root_value() {
     /^umbrella:[[:space:]]*(#.*)?$/ { u=1; next }
     u && /^[^[:space:]#]/ { u=0 }
     u && /^[[:space:]]+root:/ {
-      sub(/^[[:space:]]+root:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
-      gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+      sub(/^[[:space:]]+root:[[:space:]]*/, "")
+      # A `#` INSIDE a quoted scalar is DATA, not the start of a comment — and the installer
+      # writes this value double-quoted every time (set_umbrella_root), so stripping comments
+      # before quotes truncated a value the harness had produced itself (E99-F13). Take the
+      # quoted span whole; whatever follows the closing quote is the comment.
+      if (match($0, /^"[^"]*"/) || match($0, /^'\''[^'\'']*'\''/)) { print substr($0, 2, RLENGTH - 2); exit }
+      sub(/[[:space:]]*#.*$/, ""); gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
     }
   ' "$1"
 }
