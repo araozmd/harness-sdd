@@ -479,7 +479,7 @@
         {
           "id": "E99-F13",
           "title": "Preserve `#` inside a quoted umbrella.root in both config readers",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [

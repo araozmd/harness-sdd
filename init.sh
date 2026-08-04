@@ -215,8 +215,47 @@ UMBRELLA_ROOT="$(awk '
   /^umbrella:[[:space:]]*(#.*)?$/ { u=1; next }
   u && /^[^[:space:]#]/ { u=0 }
   u && /^[[:space:]]+root:/ {
-    sub(/^[[:space:]]+root:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
-    gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+    sub(/^[[:space:]]+root:[[:space:]]*/, "")
+    # ONE RULE, stated once, instead of a special case per metacharacter. Three review
+    # rounds landed on this function because each fix answered a sample rather than the
+    # requirement, and every patch traded one gap for the next:
+    #   E99-F13    strip comments before quotes  -> `"/a#b"`      read as `/a`
+    #   r1 #3712741520  stop at the FIRST quote  -> `"/a"b"`      read as `/a`
+    #   r2 #3712898952  require a bare remainder -> `"/a#b" # c`  read as `/a`
+    #
+    # The requirement: `set_umbrella_root` writes `"<path>"` — outer quotes it adds
+    # itself, the path verbatim between them, NO escaping of any kind — and an operator
+    # may add a trailing comment. So the closing quote is THE LAST QUOTE ON THE LINE
+    # FOLLOWED BY NOTHING BUT OPTIONAL WHITESPACE AND AN OPTIONAL `#` COMMENT. Everything
+    # between it and the opening quote is the value, `#` and `"` alike. Scanning from the
+    # right is what makes that true: the first candidate it accepts is the last one.
+    # The format has NO escaping, so `"/a" # b"` is genuinely ambiguous — value `/a` with
+    # comment `# b"`, or value `/a" # b`. Rank the two readings instead of hoping one
+    # predicate covers both: the machine-written form is authoritative, a comment is a
+    # courtesy for a hand-edited file.
+    q = substr($0, 1, 1)
+    if (q == "\"" || q == "'\''") {
+      # PASS 1 — exactly what set_umbrella_root writes: `"<path>"`, nothing after it.
+      # At most ONE quote can qualify (an earlier one would have a quote in its
+      # remainder, which is not whitespace), so this pass cannot be ambiguous and its
+      # direction cannot matter.
+      for (i = length($0); i > 1; i--)
+        if (substr($0, i, 1) == q && substr($0, i + 1) ~ /^[[:space:]]*$/) {
+          print substr($0, 2, i - 2); exit
+        }
+      # PASS 2 — hand-edited: a trailing comment follows the closing quote. Several
+      # quotes CAN qualify here (`"/a" # b" # c`), so direction is load-bearing: take the
+      # FIRST, so the comment begins as early as the line allows and is never swallowed
+      # into the value.
+      for (i = 2; i <= length($0); i++)
+        if (substr($0, i, 1) == q && substr($0, i + 1) ~ /^[[:space:]]*#/) {
+          print substr($0, 2, i - 2); exit
+        }
+    }
+    # Unquoted (or opened with a quote that never closes): a plain scalar, where a
+    # comment starts at the first `#`. Unchanged from before E99-F13 — existing
+    # hand-written configs depend on exactly this.
+    sub(/[[:space:]]*#.*$/, ""); gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
   }
 ' harness.config.yaml 2>/dev/null)"
 #      RECORDING an umbrella is not the same as RESOLVING one. A child that already held a

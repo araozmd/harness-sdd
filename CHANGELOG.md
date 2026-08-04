@@ -4,6 +4,51 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.54.1] — 2026-08-04
+
+### Fixed — 🐛 a `#` inside a quoted `umbrella.root` is data, not a comment (E99-F13)
+
+Both readers of `umbrella.root` stripped YAML comments **before** they stripped quotes:
+
+```awk
+sub(/^[[:space:]]+root:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+gsub(/^"|"$|^'|'$/, ""); print; exit
+```
+
+`set_umbrella_root` writes the value **double-quoted, every time**, so the harness was
+truncating a value it had produced itself:
+
+```
+written:  root: "/tmp/umb#root"
+parsed:   /tmp/umb
+```
+
+For a child under an umbrella whose path contains `#`, the truncated root resolves to
+nothing: `init.sh` reports the umbrella unreachable, and a later standalone installer run
+**replaces the child's stubs with full copies** — silently undoing E24-F03 for that tree.
+
+`set_umbrella_root` writes `"<path>"` with **no escaping of any kind**, which makes
+`"/a" # b"` genuinely ambiguous — value `/a` with comment `# b"`, or value `/a" # b`. Both
+readers — `harness-install.sh` `_cfg_umbrella_root_value()` and `init.sh`'s inline awk —
+now **rank** the two readings rather than trying to cover both with one predicate:
+
+1. **The machine-written form wins**: `"<path>"` with nothing but whitespace after the
+   closing quote. Unambiguous by construction — at most one quote on the line can have a
+   whitespace-only remainder, since any earlier candidate has a quote in its remainder. So
+   a `#` *and* a `"` that the installer put in the path both survive.
+2. **Otherwise a trailing comment is honoured**, taking the *first* quote followed by
+   optional whitespace and `#`, so the comment begins as early as the line allows and is
+   never swallowed into the value.
+
+An **unquoted** value still ends at its first `#`, unchanged, so existing hand-written
+configs are unaffected.
+
+The two implementations stay duplicated on purpose (`init.sh` must remain
+standalone-executable) and are now pinned identical by a test.
+
+Split out of PR #109's round-7 review rather than folded into it: this is a defect of the
+shared config parser, not of prose-tier thinning.
+
 ## [0.54.0] — 2026-08-03
 
 ### Added — ✨ the thin child: an umbrella-resolved body (E24-F03)
