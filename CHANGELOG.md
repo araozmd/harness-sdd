@@ -27,11 +27,17 @@ For a child under an umbrella whose path contains `#`, the truncated root resolv
 nothing: `init.sh` reports the umbrella unreachable, and a later standalone installer run
 **replaces the child's stubs with full copies** — silently undoing E24-F03 for that tree.
 
-Both readers — `harness-install.sh` `_cfg_umbrella_root_value()` and `init.sh`'s inline awk
-— now take a quoted scalar whole and treat only what follows the closing quote as a
-comment. An **unquoted** value still honours a trailing ` # comment`, so existing
-hand-written configs are unaffected. The two implementations stay duplicated on purpose
-(`init.sh` must remain standalone-executable) and are now pinned identical by a test.
+`set_umbrella_root` writes `"<path>"` with **no escaping of any kind**, so on a line where
+nothing but whitespace follows the **last** quote, the value is everything between the
+first quote and that one. Both readers — `harness-install.sh` `_cfg_umbrella_root_value()`
+and `init.sh`'s inline awk — now read it that way, which keeps a `#` *and* a `"` that the
+installer put in the path (matching to the *first* closing quote would truncate
+`/tmp/a"b` to `/tmp/a`). A line that fails the remainder test carries a real trailing
+comment and falls through to the previous comment-strip path, so an **unquoted** value
+still honours ` # comment` and existing hand-written configs are unaffected.
+
+The two implementations stay duplicated on purpose (`init.sh` must remain
+standalone-executable) and are now pinned identical by a test.
 
 Split out of PR #109's round-7 review rather than folded into it: this is a defect of the
 shared config parser, not of prose-tier thinning.
