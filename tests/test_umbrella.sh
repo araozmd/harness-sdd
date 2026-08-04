@@ -1224,6 +1224,33 @@ F13_INIT="$(printf '%s\n' "$F13_INIT_OUT" | sed -n 's/.*harness body resolves fr
   || fail "E99-F13: the two readers disagree on the SAME config — installer [$F13_INST] vs init.sh [$F13_INIT]"
 pass "E99-F13 quoted_umbrella_root_keeps_metachars — both readers round-trip '#' AND '\"' in the recorded root"
 
+# ── A QUOTED value with a TRAILING COMMENT keeps the `#` inside the quotes ─────────────
+# Codex #3712898952. The machine never writes this form, so the value is hand-written onto
+# a copy of the thin child — but it is pointed at the SAME resolvable umbrella, so both
+# readers stay observable exactly as above rather than degrading to an unreachable message.
+# Rewritten with awk, not sed: the replacement carries `#` and `"`.
+F13T="$AU/f13-quoted-comment"
+cp -R "$F13E/realrepo" "$F13T"
+awk -v r="$F13ROOT" '/^  root: /{ print "  root: \"" r "\"   # a hand-written trailing comment"; next } { print }' \
+  "$F13T/.harness/harness.config.yaml" > "$F13T/.harness/hc.t" \
+  && mv "$F13T/.harness/hc.t" "$F13T/.harness/harness.config.yaml"
+grep -q '# a hand-written trailing comment' "$F13T/.harness/harness.config.yaml" \
+  || fail "E99-F13/quoted+comment precondition: the trailing comment was never written into the config"
+
+F13T_RERUN="$(CODEX_HOME="$AU/f13t.ch" HOME="$AU/f13t.home" sh "$SRC/harness-install.sh" --agents=claude "$F13T" 2>&1)" || true
+is_stub "$F13T/.harness/agents/builder.md" \
+  || fail "E99-F13/quoted+comment installer: the re-run replaced the stubs — the trailing comment truncated the value at the '#' INSIDE the quotes: $F13T_RERUN"
+F13T_INST="$(printf '%s\n' "$F13T_RERUN" | sed -n 's/.*prose body resolved from the umbrella at \(.*\) (stubs.*/\1/p')"
+[ "$F13T_INST" = "$F13ROOT" ] \
+  || fail "E99-F13/quoted+comment installer: reported [$F13T_INST], want [$F13ROOT]: $F13T_RERUN"
+
+F13T_OUT="$(cd "$F13T/.harness" && ./init.sh 2>&1)" \
+  || fail "E99-F13/quoted+comment init.sh: exited non-zero: $F13T_OUT"
+F13T_INIT="$(printf '%s\n' "$F13T_OUT" | sed -n 's/.*harness body resolves from the umbrella at \(.*\) (prose tier is stubs).*/\1/p')"
+[ "$F13T_INIT" = "$F13ROOT" ] \
+  || fail "E99-F13/quoted+comment init.sh: reported [$F13T_INIT], want [$F13ROOT]: $F13T_OUT"
+pass "E99-F13 quoted_root_with_trailing_comment — both readers keep the '#' inside the quotes"
+
 # ── An UNQUOTED value must still honour a trailing ` # comment` ────────────────────────
 # The quoted-scalar branch must not have taken that path over, or a hand-edited config
 # breaks. Read through init.sh's UNREACHABLE message, which also prints the parsed root —
