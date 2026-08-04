@@ -2988,6 +2988,20 @@ EOF
       || [ -L "$H/.model-agents/$1/$2" ]
   }
 
+  # opencode_stamp_is_symlinked — true iff .harness/.opencode.stamp is a symlink (live or
+  # dangling). `cmp`, `cp` and redirection all FOLLOW a symlink, so an operator-planted (or
+  # hostile) link would both lend a foreign file's bytes to the ownership comparison and let
+  # a `cp` overwrite that file's external target. `test -L` detects the link without
+  # dereferencing it. Same rule the .model-agents and .codex/agents stamps already apply.
+  #
+  # This guard became LOAD-BEARING when the stamp write turned unconditional (E17-F02):
+  # before that, an all-`inherit` target ran `rm -f` on this path, which UNLINKS a symlink
+  # instead of writing through it, so the hazard could not arise. Verified against v0.55.0.
+  # (Codex #3715169411.)
+  opencode_stamp_is_symlinked() {
+    [ -L "$H/.opencode.stamp" ]
+  }
+
   stamp_model_agent() {
     if model_agent_stamp_destination_is_symlinked "$1" "$2"; then
       echo "⚠️  .harness/.model-agents/$1/$2 has a symlinked stamp component — ownership stamp not written" >&2
@@ -4843,7 +4857,8 @@ EOF
       # stamp that would let it be rewritten. Verified against v0.55.0.
       _oc_legacy="$(mktemp 2>/dev/null || mktemp -t harness-ocl)"
       gen_opencode_legacy "$_oc_legacy"
-      if { [ -f "$H/.opencode.stamp" ] && cmp -s "$TARGET/opencode.json" "$H/.opencode.stamp"; } \
+      if { [ -f "$H/.opencode.stamp" ] && ! opencode_stamp_is_symlinked \
+           && cmp -s "$TARGET/opencode.json" "$H/.opencode.stamp"; } \
          || cmp -s "$TARGET/opencode.json" "$_oc_free" \
          || cmp -s "$TARGET/opencode.json" "$_oc_legacy"; then
         cat "$_oc_new" > "$TARGET/opencode.json"
@@ -4867,7 +4882,15 @@ EOF
     # (§7), and an all-`inherit` target stays diff -r-identical to one whose models: block
     # was stripped, because both grow the same stamp.
     if [ "$_oc_written" = 1 ]; then
-      cp "$TARGET/opencode.json" "$H/.opencode.stamp"
+      if opencode_stamp_is_symlinked; then
+        # NEVER `cp` through the link: that overwrites its target, which may be outside the
+        # repository entirely. Leave both the link and its target untouched and say so — the
+        # next run simply re-derives pristineness from the generated bodies, exactly as a
+        # target with no stamp does.
+        echo "⚠️  .harness/.opencode.stamp is a symlink — ownership stamp not written (link and its target left unchanged)" >&2
+      else
+        cp "$TARGET/opencode.json" "$H/.opencode.stamp"
+      fi
     fi
     rm -f "$_oc_new"
   fi
@@ -4949,7 +4972,8 @@ EOF
             # edited and leave it behind. Same candidate, same reason, as §5g.
             _ref_legacy="$(mktemp 2>/dev/null || mktemp -t harness-ocl)"
             gen_opencode_legacy "$_ref_legacy"
-            if { [ -f "$H/.opencode.stamp" ] && cmp -s "$TARGET/opencode.json" "$H/.opencode.stamp"; } \
+            if { [ -f "$H/.opencode.stamp" ] && ! opencode_stamp_is_symlinked \
+                 && cmp -s "$TARGET/opencode.json" "$H/.opencode.stamp"; } \
                || cmp -s "$TARGET/opencode.json" "$_ref" \
                || cmp -s "$TARGET/opencode.json" "$_ref_legacy"; then
               rm -f "$TARGET/opencode.json"

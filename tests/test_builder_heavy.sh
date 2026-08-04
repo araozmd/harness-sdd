@@ -317,6 +317,47 @@ deselect_reclaims_builder_heavy() {
   pass "every front-end reclaims builder-heavy and its stamp on deselect (R7)"
 }
 
+# ── R5b: a symlinked .opencode.stamp is never followed, for read OR write ───────
+# E17-F02 made the stamp write UNCONDITIONAL, which turned a previously-unreachable hazard
+# into a live one: the old all-`inherit` path ran `rm -f` on this location, and `rm -f`
+# UNLINKS a symlink rather than writing through it. `cp` and `cmp` both follow. Verified
+# against v0.55.0, which was safe for exactly that reason. (Codex #3715169411.)
+opencode_stamp_symlink_is_never_followed() {
+  _t="$(mk r5b)"; _out="$T/r5b-outside"; mkdir -p "$_out"
+  run "$_t" opencode
+  # POSITIVE CONTROL FIRST: with a REAL file the stamp is written and matches. Without
+  # this, "the sentinel survived" would also be satisfied by the stamp write never
+  # happening at all — which is the behaviour the feature exists to remove.
+  [ -f "$_t/.harness/.opencode.stamp" ] && [ ! -L "$_t/.harness/.opencode.stamp" ] \
+    || fail "R5b: setup — an ordinary run did not write a regular-file stamp"
+  cmp -s "$_t/opencode.json" "$_t/.harness/.opencode.stamp" \
+    || fail "R5b: setup — the ordinary stamp is not a byte copy of opencode.json"
+
+  # (a) WRITE: never `cp` through the link — that overwrites a file outside the target.
+  printf 'SENTINEL\n' > "$_out/secret.txt"
+  rm -f "$_t/.harness/.opencode.stamp"
+  ln -s "$_out/secret.txt" "$_t/.harness/.opencode.stamp"
+  _e="$(run_err "$_t" opencode)"
+  grep -qx 'SENTINEL' "$_out/secret.txt" \
+    || fail "R5b: the unconditional stamp write followed a symlink and overwrote its external target"
+  [ -L "$_t/.harness/.opencode.stamp" ] \
+    || fail "R5b: the symlinked stamp was removed rather than left untouched"
+  printf '%s\n' "$_e" | grep -q '.opencode.stamp is a symlink' \
+    || fail "R5b: no warning named the symlinked stamp"
+
+  # (b) READ: a symlinked stamp must not lend a foreign file's bytes to the ownership
+  # comparison. Point it at a foreign body and make opencode.json match that body — a
+  # followed symlink would call the pair pristine and rewrite the operator's file.
+  printf 'not the opencode body\n' > "$_out/foreign.json"
+  rm -f "$_t/.harness/.opencode.stamp"
+  ln -s "$_out/foreign.json" "$_t/.harness/.opencode.stamp"
+  cp "$_out/foreign.json" "$_t/opencode.json"
+  run_err "$_t" opencode >/dev/null 2>&1 || true
+  cmp -s "$_out/foreign.json" "$_t/opencode.json" \
+    || fail "R5b: a symlinked stamp authorized a rewrite of a foreign opencode.json"
+  pass "a symlinked .opencode.stamp is never followed for read or write (R5b)"
+}
+
 pointer_body_duplicates_nothing
 absent_key_falls_through_to_default
 every_front_end_emits_builder_heavy
@@ -324,6 +365,7 @@ the_two_builders_resolve_independently
 opencode_upgrade_gains_the_new_role
 opencode_upgrade_is_idempotent
 opencode_edited_file_is_still_refused
+opencode_stamp_symlink_is_never_followed
 opencode_deselect_reclaims_a_prior_release_file
 deselect_reclaims_builder_heavy
 
