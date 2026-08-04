@@ -648,10 +648,13 @@ escalation:
 
 Notes that matter in practice:
 
-- **It is inert until you configure `models.builder-heavy`.** While that reads `inherit` —
-  the shipped default — the heavy role resolves to the *same model* as `builder`, so
-  escalating changes nothing but the role name recorded in `progress/history.md` and
-  telemetry. Set a tier to make it bite.
+- **`models.builder-heavy` arms it; `after_rejections` only sets the threshold.** While the
+  heavy role has no tier — the shipped `inherit`, or an absent key falling through to an
+  `inherit` default — **neither trigger fires**, and a trigger that matched is reported on
+  stderr. This is not merely a no-op being skipped: escalating to an untiered role stamps no
+  model, so a repo that set `models.builder: standard` and left `builder-heavy: inherit`
+  would have its struggling build **downgraded** from the configured Builder model to the
+  session default. Set `models.builder-heavy` to a real tier to turn escalation on.
 - **`0` disables; it does not invert.** A threshold of `0` means "never escalate on
   rejections", leaving `complexity: complex` as the only route.
 - **Absent means standard, silently.** A spec written before this feature carries no tag and

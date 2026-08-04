@@ -36,10 +36,16 @@ It reuses the round counter that already exists — no second counter, no new st
 TaskStore field — so a feature whose first two rounds ran in a previous session still resolves
 correctly.
 
-**It is inert until you configure `models.builder-heavy`.** While that reads `inherit` (the
-shipped default) the heavy role resolves to the *same* model as `builder`, so escalating
-changes nothing but the role recorded in `progress/history.md` and telemetry. Defaulting the
-threshold on is therefore safe: it starts mattering exactly when an operator sets a tier.
+**`models.builder-heavy` arms it; `after_rejections` only sets the threshold.** While the
+heavy role has no tier — the shipped `inherit`, or an absent key falling through to an
+`inherit` default — **neither trigger fires**, and a trigger that matched is reported on
+stderr. That is what makes defaulting the threshold on safe.
+
+This is stronger than "the two roles resolve alike, so escalating is a no-op", which is what
+an earlier draft claimed: that holds only for a *fully* unconfigured target. A repo that set
+`models.builder: standard` and left `builder-heavy: inherit` gets `model: sonnet` on the
+Builder shim and **no model key** on the heavy one, so escalating would have **downgraded** a
+struggling build to the session default. Arming on the heavy tier closes that.
 
 Details worth knowing:
 

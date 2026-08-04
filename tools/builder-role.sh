@@ -89,14 +89,61 @@ if [ "$_backend" = delegate ]; then
   exit 0
 fi
 
-# ── 2. Complexity ────────────────────────────────────────────────────────────────
+# _cfg_scalar <section> <key> — print the scalar at <section>.<key>, or empty. Scoped to the
+# TOP-LEVEL section so a same-named key elsewhere in the file cannot be mistaken for it.
+# Strips a trailing comment and either quote style. Same shape tools/harness-owned-paths.sh
+# uses for telemetry.log.
+_cfg_scalar() {
+  [ -n "$_config" ] && [ -f "$_config" ] || return 0
+  awk -v sect="$1" -v key="$2" '
+    $0 ~ "^" sect ":[[:space:]]*(#.*)?$" { s=1; next }
+    s && /^[^[:space:]#]/ { s=0 }
+    s && $0 ~ "^[[:space:]]+" key ":" {
+      sub("^[[:space:]]+" key ":[[:space:]]*", ""); sub(/[[:space:]]*#.*$/, "")
+      print; exit
+    }
+  ' "$_config" 2>/dev/null | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'\$//"
+}
+
+# ── 2. Is escalation ARMED? ──────────────────────────────────────────────────────
+# Escalating to a role with NO configured tier does not make the build heavier — it makes it
+# resolve to the session model. On a target that set `models.builder: standard` and left
+# `models.builder-heavy: inherit` (the shipped default), that is a DOWNGRADE: the build would
+# abandon the operator's configured Builder model precisely when it was struggling. Verified
+# on an installed Claude target — builder got `model: sonnet`, builder-heavy got no model key.
+# (Codex #3716706727.)
+#
+# So escalation fires only when the heavy role has an effective tier that is not `inherit`:
+# `models.builder-heavy`, else `models.default`, else `inherit`. This is what makes "inert
+# until you configure it" literally true rather than true-only-for-a-fully-unconfigured-target,
+# which is what the first version of this feature claimed.
+_heavy_tier="$(_cfg_scalar models builder-heavy)"
+[ -n "$_heavy_tier" ] || _heavy_tier="$(_cfg_scalar models default)"
+_armed=1
+case "$_heavy_tier" in
+  ''|inherit) _armed=0 ;;
+esac
+
+# _escalate <trigger> — honour an escalation trigger, or decline it because no heavy tier is
+# configured. Declining is reported: the operator expressed intent (a tag, or a threshold they
+# left in place) and needs to know why nothing happened.
+_escalate() {
+  if [ "$_armed" = 1 ]; then
+    echo builder-heavy
+  else
+    echo "ℹ️  $1 would escalate, but models.builder-heavy has no tier (it resolves to 'inherit') — escalating would drop to the session model, so using 'builder'. Set models.builder-heavy to enable escalation." >&2
+    echo builder
+  fi
+  exit 0
+}
+
+# ── 3. Complexity ────────────────────────────────────────────────────────────────
 # Closed vocabulary. ABSENT is silent (R7: a pre-existing spec must produce no warning), but
 # a value that is neither `standard` nor `complex` is a typo the operator should see — so it
 # resolves the SAFE direction (standard, i.e. no escalation) and says so, without failing.
 case "$_complexity" in
   complex)
-    echo builder-heavy
-    exit 0 ;;
+    _escalate "spec complexity=complex" ;;
   ''|standard)
     : ;;
   *)
@@ -104,37 +151,24 @@ case "$_complexity" in
     : ;;
 esac
 
-# ── 3. Round vs threshold ────────────────────────────────────────────────────────
+# ── 4. Round vs threshold ────────────────────────────────────────────────────────
 # `round` is ALREADY one more than the number of rejections: round 1 is the first build,
 # round 3 is the first build after two rejections. So "after N rejections" is `round > N`.
 # Stated once here so it is never re-derived at a call site.
 _threshold=2
-if [ -n "$_config" ] && [ -f "$_config" ]; then
-  # Scoped to the top-level `escalation:` section so an `after_rejections:` key elsewhere in
-  # the file cannot be mistaken for it — the same reader shape tools/harness-owned-paths.sh
-  # uses for telemetry.log. Strips a trailing comment and either quote style.
-  _cfgval="$(awk '
-    /^escalation:[[:space:]]*(#.*)?$/ { e=1; next }
-    e && /^[^[:space:]#]/ { e=0 }
-    e && /^[[:space:]]+after_rejections:/ {
-      sub(/^[[:space:]]+after_rejections:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
-      print; exit
-    }
-  ' "$_config" 2>/dev/null | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'\$//")"
-  case "$_cfgval" in
-    '') : ;;                       # absent block or absent key ⇒ the default, silently (R7)
-    *[!0-9]*)
-      echo "⚠️  escalation.after_rejections = '$_cfgval' is not a non-negative integer — using the default 2" >&2 ;;
-    *) _threshold="$_cfgval" ;;
-  esac
-fi
+_cfgval="$(_cfg_scalar escalation after_rejections)"
+case "$_cfgval" in
+  '') : ;;                         # absent block or absent key ⇒ the default, silently (R7)
+  *[!0-9]*)
+    echo "⚠️  escalation.after_rejections = '$_cfgval' is not a non-negative integer — using the default 2" >&2 ;;
+  *) _threshold="$_cfgval" ;;
+esac
 
 # 0 DISABLES the round arm. It does not mean "escalate on every round" — which is exactly what
 # a bare `round > 0` comparison would do, turning an operator's off-switch into
 # always-escalate. The guard is the whole point of the key's `0` semantics.
 if [ "$_threshold" -gt 0 ] && [ "$_round" -gt "$_threshold" ]; then
-  echo builder-heavy
-  exit 0
+  _escalate "round $_round > escalation.after_rejections=$_threshold"
 fi
 
 echo builder

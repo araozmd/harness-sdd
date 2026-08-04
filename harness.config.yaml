@@ -317,10 +317,16 @@ change_size:
 # EXISTING build<->review round (agents/orchestrator.md), so this adds no second
 # source of truth. `0` DISABLES rejection-based escalation entirely.
 #
-# INERT until you configure `models.builder-heavy` above: while it reads `inherit`,
-# builder-heavy resolves to the SAME model as builder, so escalating changes nothing
-# but the role name in progress/history.md and telemetry. A spec may also start heavy
-# from round 1 by setting `complexity: complex` in its frontmatter.
+# ESCALATION IS ARMED BY `models.builder-heavy` ABOVE, NOT BY THIS KEY. While that role
+# has no tier — the shipped `inherit`, or an absent key falling through to an `inherit`
+# default — neither trigger fires, and a trigger that matched says so on stderr. That is
+# deliberate: escalating to an untiered role stamps NO model, so on a target that set
+# `models.builder` it would abandon the configured Builder model for the session default
+# exactly when the build was struggling. A downgrade wearing an escalation's name.
+# Set `models.builder-heavy` to a real tier to turn escalation on.
+#
+# A spec may also start heavy from round 1 by setting `complexity: complex` in its
+# frontmatter — subject to the same arming rule.
 #
 # Under `execution.builder.backend: delegate` escalation is INAPPLICABLE — the external
 # executor picks its own model — and the harness never escalates on that path.

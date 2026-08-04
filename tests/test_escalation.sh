@@ -21,20 +21,35 @@ pass() { echo "ok - $1"; }
 TOOL="$SRC/tools/builder-role.sh"
 [ -f "$TOOL" ] || fail "setup: tools/builder-role.sh does not exist"
 
+# Escalation only fires when models.builder-heavy has a tier (R12) — escalating to an
+# untiered role resolves to the SESSION model, which on a target that configured
+# models.builder is a DOWNGRADE. So the default config for these helpers is an ARMED one;
+# `--config` passed by a caller comes later on the command line and wins (last flag wins),
+# which is how the unarmed cases below opt out.
+ARMED="$T/armed.yaml"
+printf 'models:\n  default: inherit\n  builder: standard\n  builder-heavy: reasoning\nescalation:\n  after_rejections: 2\n' > "$ARMED"
+
 # role <complexity> <round> [extra args…] — stdout only.
-role() { _c="$1"; _r="$2"; shift 2; sh "$TOOL" "$_c" "$_r" "$@" 2>/dev/null; }
+role() { _c="$1"; _r="$2"; shift 2; sh "$TOOL" "$_c" "$_r" --config "$ARMED" "$@" 2>/dev/null; }
 # err <complexity> <round> [extra args…] — stderr only.
-err()  { _c="$1"; _r="$2"; shift 2; sh "$TOOL" "$_c" "$_r" "$@" 2>&1 >/dev/null; }
+err()  { _c="$1"; _r="$2"; shift 2; sh "$TOOL" "$_c" "$_r" --config "$ARMED" "$@" 2>&1 >/dev/null; }
 # rc <complexity> <round> [extra args…] — exit status only.
 # The `|| _s=$?` is load-bearing: this suite runs under `set -e`, so a bare invocation that
 # exits non-zero would kill the command substitution before it could echo anything, and the
 # caller would compare against an empty string instead of the status it asked for.
-rc()   { _c="$1"; _r="$2"; shift 2; _s=0; sh "$TOOL" "$_c" "$_r" "$@" >/dev/null 2>&1 || _s=$?; echo "$_s"; }
+rc()   { _c="$1"; _r="$2"; shift 2; _s=0; sh "$TOOL" "$_c" "$_r" --config "$ARMED" "$@" >/dev/null 2>&1 || _s=$?; echo "$_s"; }
 
 # mkcfg <name> <after_rejections> — a config carrying only the escalation block.
 mkcfg() {
   _p="$T/$1.yaml"
-  printf 'escalation:\n  after_rejections: %s\n' "$2" > "$_p"
+  printf 'models:\n  builder-heavy: reasoning\nescalation:\n  after_rejections: %s\n' "$2" > "$_p"
+  printf '%s\n' "$_p"
+}
+# mkcfg_unarmed <name> — a config whose heavy role has NO tier: the shipped default, and the
+# shape of Codex #3716706727's target once it set models.builder.
+mkcfg_unarmed() {
+  _p="$T/$1.yaml"
+  printf 'models:\n  default: inherit\n  builder: standard\n  builder-heavy: inherit\nescalation:\n  after_rejections: 2\n' > "$_p"
   printf '%s\n' "$_p"
 }
 
@@ -107,7 +122,7 @@ the_rule_is_pure() {
   # It must not consult the repository it happens to be run from: same answer from a
   # directory with no harness, no progress/, no git.
   _empty="$T/empty"; mkdir -p "$_empty"
-  _out="$(cd "$_empty" && sh "$TOOL" '' 3 2>/dev/null)"
+  _out="$(cd "$_empty" && sh "$TOOL" '' 3 --config "$ARMED" 2>/dev/null)"
   [ "$_out" = builder-heavy ] || fail "R4: the answer changed when run from an unrelated directory"
   # And it must not read the spec body or history. Assert on EXECUTABLE content only:
   # the tool's own comments necessarily name progress/history.md to explain that it never
@@ -194,9 +209,17 @@ unconfigured_is_silent_and_standard() {
     || fail "R7: a missing config did not route to builder"
   [ -z "$(err '' 1 --config "$T/does-not-exist.yaml")" ] \
     || fail "R7: a missing config produced a warning"
-  # The default still applies with no block — round 3 escalates.
-  [ "$(role '' 3 --config "$_bare")" = builder-heavy ] \
-    || fail "R7: the default threshold did not apply when the block is absent"
+  # A bare config has no models: block either, so the heavy role has no tier and escalation
+  # correctly declines (R12). The default THRESHOLD still applies — proven by arming the same
+  # config's heavy role and watching round 3 escalate while round 2 does not.
+  [ "$(role '' 3 --config "$_bare")" = builder ] \
+    || fail "R7: an untiered heavy role escalated"
+  _bare_armed="$T/bare-armed.yaml"
+  printf 'store:\n  tasks: local\nmodels:\n  builder-heavy: reasoning\n' > "$_bare_armed"
+  [ "$(role '' 3 --config "$_bare_armed")" = builder-heavy ] \
+    || fail "R7: the default threshold did not apply when the escalation block is absent"
+  [ "$(role '' 2 --config "$_bare_armed")" = builder ] \
+    || fail "R7: the default threshold was not 2 when the escalation block is absent"
   pass "no escalation block ⇒ builder, silently, with the default still in force (R7)"
 }
 
@@ -206,8 +229,8 @@ durable_state_only() {
   # previous session resolves identically — there is no session memory to lose. Prove the
   # tool keeps none: same inputs, run from a directory with no progress/ and no git.
   _iso="$T/iso"; mkdir -p "$_iso"
-  _first="$(cd "$_iso" && sh "$TOOL" '' 3 2>/dev/null)"
-  _second="$(cd "$_iso" && sh "$TOOL" '' 3 2>/dev/null)"
+  _first="$(cd "$_iso" && sh "$TOOL" '' 3 --config "$ARMED" 2>/dev/null)"
+  _second="$(cd "$_iso" && sh "$TOOL" '' 3 --config "$ARMED" 2>/dev/null)"
   [ "$_first" = builder-heavy ] && [ "$_second" = builder-heavy ] \
     || fail "R8: a round-3 build did not escalate outside a harness tree"
   [ -d "$_iso/progress" ] && fail "R8: the tool created state next to itself"
@@ -260,6 +283,49 @@ telemetry_contract_intact() {
   pass "telemetry keeps phase=builder with a separate role key; the whitelist is unchanged (R11)"
 }
 
+# ── R12: escalation is armed only by a configured heavy tier ────────────────────
+# The regression this closes: with `models.builder: standard` and `models.builder-heavy:
+# inherit` (the shipped default), escalating spawns a role with NO model key — so the build
+# abandons the operator's configured Builder model for the session default, exactly when it
+# was struggling. A downgrade wearing an escalation's name. (Codex #3716706727.)
+escalation_requires_a_configured_heavy_tier() {
+  _un="$(mkcfg_unarmed u1)"
+  # POSITIVE CONTROL FIRST: these very inputs escalate on an ARMED config, in this run.
+  # Without it, "returns builder" would also be satisfied by escalation being broken outright.
+  [ "$(role '' 3)" = builder-heavy ]        || fail "R12: control — round 3 is not heavy on an armed config"
+  [ "$(role complex 1)" = builder-heavy ]   || fail "R12: control — complex is not heavy on an armed config"
+  # Both triggers must decline while the heavy role has no tier.
+  [ "$(role '' 3 --config "$_un")" = builder ] \
+    || fail "R12: the round trigger escalated to an untiered heavy role (a downgrade)"
+  [ "$(role complex 1 --config "$_un")" = builder ] \
+    || fail "R12: the complexity trigger escalated to an untiered heavy role (a downgrade)"
+  [ "$(role '' 99 --config "$_un")" = builder ] \
+    || fail "R12: a very high round escalated to an untiered heavy role"
+  # A declined trigger must SAY so — the operator expressed intent and gets no silent no-op.
+  printf '%s' "$(err '' 3 --config "$_un")" | grep -qi 'builder-heavy' \
+    || fail "R12: declining to escalate produced no advisory naming models.builder-heavy"
+  printf '%s' "$(err complex 1 --config "$_un")" | grep -qi 'builder-heavy' \
+    || fail "R12: a declined complexity trigger produced no advisory"
+  [ "$(rc '' 3 --config "$_un")" = 0 ] || fail "R12: declining to escalate failed the build"
+  # A trigger that did NOT match stays silent — the advisory is about a declined escalation,
+  # not about the tier being unset.
+  [ -z "$(err '' 1 --config "$_un")" ] \
+    || fail "R12: an untiered config warned on a round that would not have escalated anyway"
+  # models.default arms it too: the heavy role falls through to it like any other role.
+  _viadefault="$T/viadefault.yaml"
+  printf 'models:\n  default: reasoning\n  builder: standard\n' > "$_viadefault"
+  [ "$(role '' 3 --config "$_viadefault")" = builder-heavy ] \
+    || fail "R12: a heavy tier inherited from models.default did not arm escalation"
+  # And a fully all-inherit target is now LITERALLY inert, which is what the feature claims.
+  _allinherit="$T/allinherit.yaml"
+  printf 'models:\n  default: inherit\n  builder: inherit\n  builder-heavy: inherit\n' > "$_allinherit"
+  [ "$(role '' 99 --config "$_allinherit")" = builder ] \
+    || fail "R12: an all-inherit target escalated — 'inert until configured' is not true"
+  [ "$(role complex 9 --config "$_allinherit")" = builder ] \
+    || fail "R12: an all-inherit target escalated on the complexity tag"
+  pass "escalation fires only when models.builder-heavy has a tier; declines are reported (R12)"
+}
+
 # ── usage errors ────────────────────────────────────────────────────────────────
 usage_errors_are_loud() {
   # A malformed COMPLEXITY is a human typo and must never fail a build (R2). A malformed
@@ -284,6 +350,7 @@ durable_state_only
 delegate_never_escalates
 prose_records_the_choice
 telemetry_contract_intact
+escalation_requires_a_configured_heavy_tier
 usage_errors_are_loud
 
 echo "test_escalation.sh: all cases passed"

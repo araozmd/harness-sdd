@@ -438,10 +438,12 @@ EOF
   # only migrates, and the two must converge on the same bytes. Seeding only one of the two
   # is precisely the defect E17-F02's mutation battery caught.
   #
-  # Defaulting this ON is safe by construction: E17-F02 ships `models.builder-heavy: inherit`,
-  # which resolves to key omission, so on a target that configured nothing the heavy role
-  # resolves to the SAME model as `builder`. The default is inert until an operator sets a
-  # tier — which is exactly when they want it.
+  # Defaulting this ON is safe because the rule is ARMED by `models.builder-heavy`, not by
+  # this key: while that role has no tier, neither trigger fires. An earlier version of this
+  # feature claimed inertness from "heavy resolves to the same model as builder", which holds
+  # only for a FULLY unconfigured target — a target that set `models.builder` and left
+  # `builder-heavy: inherit` would have been DOWNGRADED to the session model on escalation.
+  # (Codex #3716706727.)
   if ! grep -Eq '^escalation:[[:space:]]*(#.*)?$' "$_cfg"; then
     cat >> "$_cfg" <<'EOF'
 
@@ -450,10 +452,16 @@ EOF
 # EXISTING build<->review round (agents/orchestrator.md), so this adds no second
 # source of truth. `0` DISABLES rejection-based escalation entirely.
 #
-# INERT until you configure `models.builder-heavy` above: while it reads `inherit`,
-# builder-heavy resolves to the SAME model as builder, so escalating changes nothing
-# but the role name in progress/history.md and telemetry. A spec may also start heavy
-# from round 1 by setting `complexity: complex` in its frontmatter.
+# ESCALATION IS ARMED BY `models.builder-heavy` ABOVE, NOT BY THIS KEY. While that role
+# has no tier — the shipped `inherit`, or an absent key falling through to an `inherit`
+# default — neither trigger fires, and a trigger that matched says so on stderr. That is
+# deliberate: escalating to an untiered role stamps NO model, so on a target that set
+# `models.builder` it would abandon the configured Builder model for the session default
+# exactly when the build was struggling. A downgrade wearing an escalation's name.
+# Set `models.builder-heavy` to a real tier to turn escalation on.
+#
+# A spec may also start heavy from round 1 by setting `complexity: complex` in its
+# frontmatter — subject to the same arming rule.
 #
 # Under `execution.builder.backend: delegate` escalation is INAPPLICABLE — the external
 # executor picks its own model — and the harness never escalates on that path.
