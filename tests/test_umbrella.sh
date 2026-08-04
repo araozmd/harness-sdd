@@ -1152,8 +1152,11 @@ pass "R9 existing_full_copy_child_untouched"
 # The value under test is never hand-written: the cascade derives and records it. A
 # SYMLINKED child is used because that is the layout whose recorded root is ABSOLUTE —
 # the relative `../../` an ordinary child gets cannot carry the umbrella path at all.
+# BOTH metacharacters in ONE fixture, because the first fix traded one for the other:
+# matching to the FIRST closing quote kept the `#` and truncated `/tmp/a"b` to `/tmp/a`
+# (Codex #3712741520). A fixture carrying only `#` cannot tell those two apart.
 F13E="$AU/f13-elsewhere"
-F13U="$AU/f13#hash"                 # the `#` is the point: it lands in the recorded root
+F13U="$AU/f13#hash\"q"              # `#` AND `"` land verbatim in the recorded root
 mkdir -p "$F13E/realrepo"
 git -C "$F13E/realrepo" init -q .
 git -C "$F13E/realrepo" config user.email "test@harness.local"
@@ -1172,7 +1175,11 @@ F13H="$F13E/realrepo/.harness"
 F13ROOT="$(sed -n 's/^  root: "\(.*\)"$/\1/p' "$F13H/harness.config.yaml")"
 case "$F13ROOT" in
   *'#'*) ;;
-  *) fail "E99-F13 precondition: the recorded umbrella.root [$F13ROOT] carries no '#', so nothing below exercises the truncation" ;;
+  *) fail "E99-F13 precondition: the recorded umbrella.root [$F13ROOT] carries no '#', so nothing below exercises the comment truncation" ;;
+esac
+case "$F13ROOT" in
+  *'"'*) ;;
+  *) fail "E99-F13 precondition: the recorded umbrella.root [$F13ROOT] carries no '\"', so nothing below exercises the closing-quote truncation" ;;
 esac
 [ -f "$F13ROOT/.harness/.harness-version" ] \
   || fail "E99-F13 precondition: the recorded root [$F13ROOT] does not resolve to an installed umbrella body"
@@ -1215,7 +1222,7 @@ F13_INIT="$(printf '%s\n' "$F13_INIT_OUT" | sed -n 's/.*harness body resolves fr
 # They have drifted apart once already by being edited separately.
 [ "$F13_INST" = "$F13_INIT" ] \
   || fail "E99-F13: the two readers disagree on the SAME config — installer [$F13_INST] vs init.sh [$F13_INIT]"
-pass "E99-F13 quoted_umbrella_root_keeps_hash — both readers round-trip a '#' in the recorded root"
+pass "E99-F13 quoted_umbrella_root_keeps_metachars — both readers round-trip '#' AND '\"' in the recorded root"
 
 # ── An UNQUOTED value must still honour a trailing ` # comment` ────────────────────────
 # The quoted-scalar branch must not have taken that path over, or a hand-edited config

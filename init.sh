@@ -216,11 +216,15 @@ UMBRELLA_ROOT="$(awk '
   u && /^[^[:space:]#]/ { u=0 }
   u && /^[[:space:]]+root:/ {
     sub(/^[[:space:]]+root:[[:space:]]*/, "")
-    # A `#` INSIDE a quoted scalar is DATA, not the start of a comment — and the installer
-    # writes this value double-quoted every time (set_umbrella_root), so stripping comments
-    # before quotes truncated a value the harness had produced itself (E99-F13). Take the
-    # quoted span whole; whatever follows the closing quote is the comment.
-    if (match($0, /^"[^"]*"/) || match($0, /^'\''[^'\'']*'\''/)) { print substr($0, 2, RLENGTH - 2); exit }
+    # set_umbrella_root writes this value as `"<path>"` — outer quotes it adds itself, the
+    # path verbatim between them, NO escaping of any kind. So on a line where nothing but
+    # whitespace follows the LAST quote, the value is everything between the first quote
+    # and that one: a `#` in there is data (E99-F13), and so is a `"` (E99-F13 r1, Codex
+    # #3712741520 — matching to the FIRST closing quote truncated `/tmp/a"b` to `/tmp/a`).
+    # Greedy `.*` finds the last quote; the remainder test is what keeps a real trailing
+    # comment out of the value, so a line that fails it falls through to the old path.
+    if (match($0, /^".*"/)  && substr($0, RLENGTH + 1) ~ /^[[:space:]]*$/) { print substr($0, 2, RLENGTH - 2); exit }
+    if (match($0, /^'\''.*'\''/) && substr($0, RLENGTH + 1) ~ /^[[:space:]]*$/) { print substr($0, 2, RLENGTH - 2); exit }
     sub(/[[:space:]]*#.*$/, ""); gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
   }
 ' harness.config.yaml 2>/dev/null)"
