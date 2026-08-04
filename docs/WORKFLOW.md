@@ -335,11 +335,50 @@ blocked E2-F1 [unmet-dependency]: blocking dependencies: E2-F2=pending
 no actionable work: selection blocked; see reasons above
 ```
 
-Other reasons distinguish a draft parent (`gated-epic`), human approval
-(`human-gate`), scoped ownership (`owner-excluded` / `owner-unresolved`), and a
-truly empty or all-done board (`no-candidates`). This output is informational and
-read-only. It explains the current selection policy; it does not relax a gate,
-pick a fallback, or introduce a new TaskStore status.
+Other reasons distinguish a draft parent (`gated-epic`), a park (`parked`, below),
+human approval (`human-gate`), scoped ownership (`owner-excluded` /
+`owner-unresolved`), and a truly empty or all-done board (`no-candidates`). This
+output is informational and read-only. It explains the current selection policy;
+it does not relax a gate, pick a fallback, or introduce a new TaskStore status.
+
+## Parking a feature (`parked`)
+
+`depends_on` expresses board-internal blocking. A **park** expresses everything
+else — a review cycle, a product decision, anything that makes a real feature not
+yet workable:
+
+```jsonc
+{ "id": "E14-F13", "status": "pending", "sdd": true,
+  "parked": { "reason": "blocked on the Meta review cycle",
+              "unblocked_by": "review closes + the 3 pricing decisions land" } }
+```
+
+**Presence means parked**, and `reason` is required and non-empty — a park nobody
+can read is the thing this replaces. `unblocked_by` is optional.
+
+| | |
+|---|---|
+| `/sdd-next` | skips it and reports `blocked <id> [parked]: <reason>` |
+| targeting it | returns blocked with the same record, never selected |
+| its dependents | report the park inline: `E14-F13=pending (parked: <reason>)` |
+| `tasks-lock.py set-status` | **refuses** — unpark first |
+
+**It is a field, not a status.** A park can arrive *after* speccing, so it composes
+with every status rather than replacing one, and unparking restores exactly the
+routing the feature had — `featureRoute` never sees the park at all.
+
+To unpark, remove the `parked` object (an `apply` mutation); the ordinary
+transition then succeeds. A status change is deliberately refused while parked: a
+park that a transition silently clears is a suggestion, not a park.
+
+> **Known gap.** A parked feature is listed only when the board has *no* actionable
+> work, because a `selected` result carries no blocker list. Parking something and
+> forgetting it therefore remains possible; a dedicated report would change what a
+> `selected` envelope contains and belongs in its own feature.
+
+**`autonomous` is not a park.** It means "do not auto-approve my spec, do not
+auto-build"; it has never meant "do not spec it", and the Architect route at
+`pending` never consults it.
 
 ## The human-in-the-loop gate
 

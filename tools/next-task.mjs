@@ -358,13 +358,32 @@ function featureRoute(feature, requireApproval) {
   return null;
 }
 
+// parkDetail — the reason a feature is held, plus what would release it when recorded.
+// `reason` is guaranteed non-empty by the schema, so this never renders an empty park.
+function parkDetail(feature) {
+  const park = feature.parked;
+  return park.unblocked_by ? `${park.reason} (unblocked by: ${park.unblocked_by})` : park.reason;
+}
+
 function featureBlockers(feature, featureById, cycles, requireApproval) {
   const records = [];
   if (cycles.has(feature.id)) records.push({ subject: feature.id, code: 'dependency-cycle', detail: cycles.get(feature.id) });
   if (feature.epic.status === 'draft') records.push({ subject: feature.id, code: 'gated-epic', detail: `epic ${feature.epic.id} is draft` });
+  // E06-F07: a park is a BLOCKER, never a route. Pushed here — beside `gated-epic`, the
+  // codebase's existing answer to "exists, understood, not actionable" — and deliberately
+  // NOT reflected in featureRoute(): that is what makes "unparking restores exactly the
+  // prior routing" true by construction, with no prior state to record or restore.
+  // Listed before unmet-dependency because the park is the fact the reader needs first.
+  if (feature.parked) records.push({ subject: feature.id, code: 'parked', detail: parkDetail(feature) });
   const unmet = sortedUnique((feature.depends_on || []).filter((id) => !featureById.has(id) || featureById.get(id).status !== 'done'));
   if (unmet.length) {
-    const detail = unmet.map((id) => `${id}=${featureById.has(id) ? featureById.get(id).status : 'missing'}`).join(', ');
+    // A parked dependency is named inline (E06-F07): without it a stalled chain reports a
+    // generic `unmet-dependency` and the reason is invisible one hop away.
+    const detail = unmet.map((id) => {
+      if (!featureById.has(id)) return `${id}=missing`;
+      const dep = featureById.get(id);
+      return dep.parked ? `${id}=${dep.status} (parked: ${parkDetail(dep)})` : `${id}=${dep.status}`;
+    }).join(', ');
     records.push({ subject: feature.id, code: 'unmet-dependency', detail: `blocking dependencies: ${detail}` });
   }
   if (feature.status === 'spec-ready' && requireApproval && feature.autonomous !== true) {

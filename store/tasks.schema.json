@@ -33,6 +33,15 @@
                 "sdd": { "type": "boolean" },
                 "autonomous": { "type": "boolean" },
                 "depends_on": { "type": "array", "items": { "type": "string" } },
+                "parked": {
+                  "type": "object",
+                  "description": "Optional (additive, E06-F07). Hold a real feature that is not yet workable — external blocking, where depends_on covers only board-internal blocking. PRESENCE MEANS PARKED: the selector emits a `parked` blocker and never selects it, while leaving featureRoute untouched, so unparking restores the prior routing exactly. A FIELD, not a status value: a park can arrive after speccing, so it must compose with every status rather than replace one. `reason` is required and non-empty — a park with no legible reason is the defect this fixes. Features only; slice parks are deliberately out of scope.",
+                  "required": ["reason"],
+                  "properties": {
+                    "reason": { "type": "string", "minLength": 1 },
+                    "unblocked_by": { "type": "string", "minLength": 1 }
+                  }
+                },
                 "spec_path": { "type": "string" },
                 "slices": {
                   "type": "array",

@@ -4,6 +4,42 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.55.0] — 2026-08-04
+
+### Added — ✨ a feature-level park (E06-F07)
+
+`depends_on` expresses board-internal blocking. Nothing expressed **external** blocking — a
+review cycle, a product decision — so an operator holding a real feature had to use
+`sdd:false + autonomous:false`, the *gated quick-fix* lane, which mislabels a feature needing
+a full spec as a fix needing none. They wrote a prose correction inside the board entry
+warning the next reader not to skip the spec. **A board entry that needs a note saying its own
+field is lying is the defect.**
+
+A feature may now carry:
+
+```jsonc
+"parked": { "reason": "blocked on the Meta review cycle",
+            "unblocked_by": "review closes + the 3 pricing decisions land" }
+```
+
+**Presence means parked**; `reason` is required and non-empty, because a park nobody can read
+is exactly what this replaces. `/sdd-next` skips it and reports `blocked <id> [parked]:
+<reason>`, targeting it returns blocked, and its dependents name the park inline
+(`E14-F13=pending (parked: …)`) so a stalled chain explains itself one hop away.
+`tasks-lock.py set-status` refuses a transition on a parked feature — a park a transition
+silently clears is a suggestion, not a park.
+
+**A field, not a status value**, because a park can arrive *after* speccing and a status-based
+park has nowhere to record where to return to. It mirrors `gated-epic` including what that
+does *not* do: `featureRoute` is never touched, so unparking restores the prior routing by
+construction rather than by bookkeeping.
+
+**`autonomous` was deliberately not repointed.** Making `autonomous:false` gate the Architect
+is the obvious one-line fix and it is wrong: measured on this board it would have silently
+parked five live features, including the one `/sdd-next` selects.
+
+Additive — a board with no `parked` key is unaffected.
+
 ## [0.54.2] — 2026-08-04
 
 ### Added — ✨ `tools/run-tests.sh` reports a `grep` that is neither GNU nor BSD (E99-F12)
