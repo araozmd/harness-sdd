@@ -506,7 +506,7 @@
         {
           "id": "E17-F02",
           "title": "The `builder-heavy` role: a seventh role at a heavier tier",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],

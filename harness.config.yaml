@@ -223,13 +223,16 @@ models:
   orchestrator: inherit
   architect: inherit      # try: reasoning
   builder: inherit        # try: standard
+  builder-heavy: inherit  # try: reasoning — the escalation tier (E17-F02); same body as
+                          # `builder`, differs only by the model it resolves to (ADR-0002).
+                          # Left `inherit` it is NOT heavier than `builder`.
   reviewer: inherit       # try: standard
   scout: inherit          # try: cheap
   doc-critic: inherit     # try: cheap
   # Exact-value escape hatch: `pin.<front-end>.<tier>`, written VERBATIM in that
   # front-end's own vocabulary. REQUIRED for codex and opencode, which have no
   # floating tier alias — an unpinned tier there stamps no MODEL. The role artifact
-  # itself is still written (selecting Codex always registers all six
+  # itself is still written (selecting Codex always registers all seven
   # .codex/agents/*.toml); only the `model` key is omitted, as for the `inherit` tier.
   #   opencode MUST be "provider/model" (an invalid value aborts your OpenCode run)
   #   codex    MUST be a bare model id (the provider comes from `model_provider`)

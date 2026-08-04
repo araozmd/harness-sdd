@@ -29,7 +29,7 @@ your-project/
 ├── .codex/agents/*.toml                # six selected Codex roles; model optional, never ~/.codex
 └── .harness/                           # the whole harness body
     ├── .harness-version  manifest.txt
-    ├── .opencode.stamp                  # byte copy of the last generated opencode.json (model routing only)
+    ├── .opencode.stamp                  # byte copy of the last opencode.json the installer wrote
     ├── .model-agents/                   # byte copies of the last .gemini/.codex per-role files (model routing only)
     ├── AGENTS.md agents/ docs/ store/ tools/ specs/_templates/ init.sh harness.config.yaml
     ├── .gitignore                       # seeded: keeps the local-only telemetry log out of VCS
@@ -719,8 +719,13 @@ resolve to it. Only selected front-ends (`--agents`) are stamped.
 
 `opencode.json` is the one config file the harness does not regenerate on a plain re-run.
 It is re-stamped **only** when it is byte-identical to `.harness/.opencode.stamp` (the
-last body the installer wrote) or to a freshly generated model-free body; anything else
-is treated as yours, left untouched, and reported. `.harness/.model-agents/` is the same
+last body the installer wrote), to a freshly generated model-free body, or to the body the
+previous release generated; anything else is treated as yours, left untouched, and
+reported. That third comparison is what lets a role added by a new release reach a target
+installed by an older one — without it an already-installed `opencode.json` would be
+misreported as edited forever. The stamp is now written on **every** run that writes
+`opencode.json`, not only when a role resolves to a concrete model, so future shape changes
+are provable from the stamp alone. `.harness/.model-agents/` is the same
 device for the `.gemini/agents/` and `.codex/agents/` trees: it remembers the exact bytes
 last written there. Returning Codex roles to `inherit` regenerates stamp-matching TOMLs
 without their old `model` keys; a foreign or edited role is preserved and diagnosed.
