@@ -4,6 +4,75 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.57.0] — 2026-08-04
+
+### Added — ✨ deterministic escalation to `builder-heavy` (E17-F03)
+
+v0.56.0 gave the harness a second Builder role. **Nothing called it** — an operator who
+wanted a struggling task retried on a stronger model was still noticing the struggle by hand.
+This is the caller, and it escalates on a **rule**, never on an agent's opinion that a task
+"looks hard".
+
+Two things select the heavy role:
+
+| trigger | source |
+|---|---|
+| `complexity: complex` in the feature spec's frontmatter | the Architect, at spec time — heavy from round 1 |
+| `round > escalation.after_rejections` | the **existing** build↔review counter — fires only once escalation is enabled; `2` is the suggested opt-in value |
+
+```yaml
+escalation:
+  after_rejections: 0   # shipped default — 0 disables BOTH triggers
+  # after_rejections: 2 # a typical opt-in
+```
+
+**The rule is a tool, not prose.** `tools/builder-role.sh` takes the complexity, the round
+and the backend and prints `builder` or `builder-heavy`. That is the whole reason it can be
+called deterministic: a rule only a language model evaluates cannot be shown to give the same
+answer twice, and the repo's prose-verification pattern can do no better than grep a role file
+for a sentence. The Orchestrator asks the tool and obeys it. Same shape as `pr-gate.sh`,
+`pr-stack-guard.sh` and `change-size.sh`.
+
+It reuses the round counter that already exists — no second counter, no new status value, no
+TaskStore field — so a feature whose first two rounds ran in a previous session still resolves
+correctly.
+
+**It is opt-in and ships OFF** (`after_rejections: 0`). One key is both the master switch and
+the threshold: `0` disables both triggers, any positive value enables escalation at that
+threshold.
+
+**Before enabling it, make sure `models.builder-heavy` actually resolves to a model on your
+front-end** — otherwise escalation is a *downgrade*, not an upgrade: a role that resolves to
+nothing runs on the session model, abandoning whatever `models.builder` was set to, exactly
+when the build was struggling. `claude`/`gemini`/`antigravity` need only a tier alias;
+`codex`/`opencode` stamp **nothing** for a tier without a matching `pin.<front-end>.<tier>`.
+
+The harness deliberately does **not** infer this for you. Two review rounds killed two
+attempts to — "`builder-heavy: inherit` resolves like `builder`" (false once `models.builder`
+is set) and "arm on a non-`inherit` tier" (false on the pinned front-ends). Both were the
+routing tool re-deriving the installer's per-front-end resolver, which produced a new wrong
+answer each time. The opt-in is your assertion, not the harness's deduction.
+
+Details worth knowing:
+
+- **`0` disables BOTH triggers**, `complexity: complex` included — it is the master switch,
+  not just a round threshold. It also does not *invert*: a bare `round > 0` is true for every
+  round, which would turn the off-switch into always-escalate.
+- **A declined `complexity: complex` tag is reported.** The operator expressed intent and
+  would otherwise get a silent no-op. The round trigger stays quiet while escalation is off —
+  with no threshold configured there is no round it "would have" exceeded.
+- **Absent means standard, silently.** Specs written before this feature carry no tag and
+  route to `builder` with no warning. A value outside `standard | complex` also resolves to
+  `standard` but says so on stderr — a typo should be visible, never fatal.
+- **Under `execution.builder.backend: delegate`, escalation is inapplicable.** The external
+  executor picks its own model, so the harness never escalates there and records that the rule
+  did not apply rather than claiming an escalation that had no effect.
+- **Telemetry keeps `phase: "builder"`** and carries the spawned role in a separate `role`
+  key. Emitting `phase: "builder-heavy"` would be dropped by `telemetry-report.py`'s `PHASES`
+  whitelist *and* under-report the build↔review round count, which is computed as the max
+  round over `builder`/`reviewer` phases.
+- Escalation is one-way within a feature; there is no demotion rule.
+
 ## [0.56.0] — 2026-08-04
 
 ### Added — ✨ the `builder-heavy` role (E17-F02)

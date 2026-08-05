@@ -621,3 +621,58 @@ So:
    addresses → re-review; this build↔review loop repeats until green. On **approve**
    → `done`. Each round is recorded in `progress/history.md`.
 7. History updated. Orchestrator picks the next task.
+
+### Which Builder runs — deterministic escalation
+
+There are **two** Builder role names. `builder-heavy` is the *same instruction body* at a
+heavier model tier ([ADR-0002](../specs/adr/0002-builder-heavy-is-a-tier-not-a-second-prompt.md)),
+so picking between them is routing, never behaviour. The Orchestrator does not decide by
+judgement — it asks a tool, so the same recorded state always yields the same answer:
+
+```sh
+tools/builder-role.sh <complexity> <round> [--backend <in-session|delegate>] [--config <path>]
+# → builder | builder-heavy
+```
+
+Two things can select the heavy role:
+
+| trigger | where it comes from |
+|---|---|
+| `complexity: complex` in the feature spec's frontmatter | the Architect, at spec time — starts heavy on round 1 |
+| `round > escalation.after_rejections` | the **existing** build↔review counter — **only while escalation is enabled**; at the suggested `2`, the first build after two rejections |
+
+```yaml
+escalation:
+  after_rejections: 0   # SHIPPED DEFAULT — 0 disables BOTH triggers
+  # after_rejections: 2 # a typical opt-in: escalate from the third build onward
+```
+
+Notes that matter in practice:
+
+- **It is opt-in and ships off.** `after_rejections` is both the threshold and the master
+  switch: `0` (the default) means neither trigger fires. Set a positive number to turn
+  escalation on — 2 is the suggested value.
+- **Before enabling it, make sure the heavy role actually resolves to a model on your
+  front-end.** Otherwise escalation is a *downgrade*: a role that resolves to nothing runs on
+  the session model, abandoning whatever `models.builder` was set to, exactly when the build
+  was struggling. On `claude` / `gemini` / `antigravity` a built-in tier alias is enough; on
+  `codex` / `opencode` a tier alone stamps **nothing** — you must also set the matching
+  `pin.<front-end>.<tier>`.
+- **The harness does not try to verify that for you.** Two review rounds killed two attempts
+  to infer it, because the determination lives in the installer's per-front-end resolver and
+  re-deriving it elsewhere produced a new wrong answer each time. The opt-in is your
+  assertion, not the harness's deduction.
+- **`0` disables BOTH triggers — including `complexity: complex`.** It is the master switch,
+  not just a round threshold. A tagged spec on a target that has not opted in routes to
+  `builder` and the tool says why on stderr. (Leaving the tag live at `0` would escalate into
+  the same unresolvable heavy role the opt-in exists to prevent.) `0` also does not *invert*:
+  a bare `round > 0` would be true for every round, turning the off-switch into
+  always-escalate.
+- **Absent means standard, silently.** A spec written before this feature carries no tag and
+  routes to `builder` with no warning. A value outside `standard | complex` also resolves to
+  `standard`, but says so on stderr — a typo should be visible, never fatal.
+- **Under `execution.builder.backend: delegate` escalation is inapplicable.** The external
+  executor picks its own model, so the harness never escalates there and records that the
+  rule did not apply, rather than claiming an escalation that had no effect.
+- **Escalation is one-way within a feature.** `round` only increases; there is no demotion
+  rule.

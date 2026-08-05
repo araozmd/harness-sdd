@@ -431,6 +431,47 @@ change_size:
   generated_paths: []      # extra generated/vendored patterns, excluded from the budget entirely
 EOF
   fi
+
+  # --- escalation block (E17-F03 deterministic Builder escalation) ---
+  # Top-level, append-only at EOF. Keep this text BYTE-IDENTICAL to the tail of the source
+  # harness.config.yaml: a FRESH install copies the config and never migrates, an UPGRADE
+  # only migrates, and the two must converge on the same bytes. Seeding only one of the two
+  # is precisely the defect E17-F02's mutation battery caught.
+  #
+  # Seeded OFF (0). Two review rounds killed two attempts to INFER whether escalating would
+  # help — "heavy: inherit resolves like builder" (#3716706727) and "arm on a non-inherit
+  # tier" (#3716777878, which misses that codex/opencode stamp nothing for an unpinned tier).
+  # Both were this installer's `resolve_model` being re-derived elsewhere. Enabling escalation
+  # is now an explicit operator act, so an unconfigured target cannot be downgraded by it.
+  if ! grep -Eq '^escalation:[[:space:]]*(#.*)?$' "$_cfg"; then
+    cat >> "$_cfg" <<'EOF'
+
+# Deterministic Builder escalation (E17-F03) — OPT-IN, and OFF by default.
+# After this many Reviewer rejections, subsequent builds spawn `builder-heavy` instead of
+# `builder`. The counter is the EXISTING build<->review round (agents/orchestrator.md), so
+# this adds no second source of truth. A spec may also start heavy from round 1 with
+# `complexity: complex` in its frontmatter.
+#
+# `0` (the default) turns escalation OFF ENTIRELY — neither trigger fires. Set it to a
+# positive number to turn escalation on; 2 is the suggested value.
+#
+# BEFORE YOU ENABLE IT, make sure `models.builder-heavy` above actually resolves to a model
+# on YOUR front-end — otherwise escalation is a DOWNGRADE, not an upgrade: a role that
+# resolves to nothing runs on the session model, abandoning whatever `models.builder` was
+# set to, exactly when the build was struggling.
+#   claude / gemini / antigravity  a built-in tier alias is enough
+#   codex / opencode               a tier alone stamps NOTHING — you must also set the
+#                                  matching `pin.<front-end>.<tier>` in the models: block
+# The harness deliberately does NOT try to infer this for you: that determination lives in
+# the installer's per-front-end resolver, and re-deriving it here produced two wrong
+# answers in review before this key became an explicit opt-in.
+#
+# Under `execution.builder.backend: delegate` escalation is INAPPLICABLE — the external
+# executor picks its own model — and the harness never escalates on that path.
+escalation:
+  after_rejections: 0
+EOF
+  fi
 }
 
 # seed_pr_loop_optin <file> — force `pr_loop.enabled` to the OPT-IN default (`false`) in a

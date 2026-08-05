@@ -5,6 +5,9 @@ epic: E00-<epic-slug>
 status: pending          # pending → spec-ready → in-progress → in-review → done
 sdd: true                # false = quick task, skip full SDD
 autonomous: false        # true = may bypass the human approval gate
+complexity: standard     # standard | complex — `complex` builds start on `builder-heavy`
+                         # (E17-F03). OMIT IT and it means standard; anything unrecognized
+                         # also means standard, reported but never fatal.
 depends_on: []
 owner: <handle>
 ---

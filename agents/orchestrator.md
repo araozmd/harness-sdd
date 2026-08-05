@@ -43,7 +43,7 @@ next, and delegate to the specialist agents.
    | `pending` + `sdd: false` + `autonomous: true` | **Set the feature to `in-progress` first** (so the Builder's Loop A precondition holds — see `agents/builder.md`), then spawn **Builder** directly for a quick task (skip full SDD — there is no spec to gate). On finish, set `in-review`. Same status arc as a normal feature, minus the Architect. |
    | `pending` + `sdd: false` + `autonomous: false` (e.g. `/sdd-fix --gated`) | **PAUSE at the human gate.** Do not auto-run. The fix is parked (not actionable) until a human approves it — by moving it to `in-progress`, or by re-stamping `autonomous: true`. Mirrors the `spec-ready` PAUSE semantics: parked, not actionable until a human acts. |
    | `spec-ready` | **PAUSE.** A human must review specs and move to `in-progress`. Do not proceed unless the task is marked `autonomous: true`. |
-   | `in-progress` | Spawn **Builder** with the approved specs only. On finish, set `in-review`. |
+   | `in-progress` | Spawn the Builder role that **`tools/builder-role.sh` returns** (see **Which Builder** below) with the approved specs only. On finish, set `in-review`. |
    | `in-review` | Spawn **Reviewer**. If it approves → `done`. If it rejects → back to `in-progress` with the Reviewer's feedback file (see **Build↔review rounds** below). |
    | needs research | Spawn **Scout** (read-only) first; it writes findings to `progress/`. |
 
@@ -254,6 +254,65 @@ this `progress/` history; it adds **no** status value and **no** schema field. T
 same counter is stamped on the `builder`/`reviewer` telemetry phase records:
 `round` starts at **1** on the first build and **increments by 1** on every
 `in-review` → `in-progress` bounce (best-effort — see "## Telemetry").
+
+### Which Builder — ask the tool, do not decide (E17-F03)
+
+There are two Builder role names. `builder-heavy` is the **same instruction body** at a
+heavier model tier (ADR-0002), so choosing between them is pure routing. **You do not make
+that choice.** Before every Builder spawn, ask:
+
+```sh
+role="$(sh "$HARNESS_DIR/tools/builder-role.sh" "<complexity>" "<round>" \
+          --backend "<execution.builder.backend>" \
+          --config "$HARNESS_DIR/harness.config.yaml")"
+```
+
+- `<complexity>` — the `complexity:` value from **the feature's own `.spec.md` frontmatter**.
+  Pass it verbatim; pass the empty string when the key is absent. Do not substitute your
+  reading of how hard the feature looks: an Orchestrator that decides a task "seems complex"
+  is the ad-hoc judgment this rule exists to replace.
+- `<round>` — the **existing** build↔review counter from step 5. There is no second counter
+  and no schema field; if you cannot determine the round, it is 1.
+
+Then spawn **exactly the role it printed**. It exits 0 for every resolvable answer and writes
+advisories to stderr — an unrecognized `complexity`, a malformed threshold, or escalation
+being inapplicable under `delegate`. Surface those advisories; never treat one as a failure,
+and never override the answer because you disagree with it.
+
+Escalation is **one-way within a feature** by construction: `round` only increases and the
+tag does not change mid-feature. There is no demotion rule — do not invent one.
+
+**Escalation is OPT-IN and ships OFF.** `escalation.after_rejections` is both the threshold
+and the master switch: `0` — the shipped default — means neither trigger fires. When it is
+off and a spec carries `complexity: complex`, the tool says so on stderr; surface that and
+carry on, it is telling the operator to enable escalation, not reporting a failure.
+
+**The harness does not check whether escalating would actually help, and neither should
+you.** Whether `models.builder-heavy` resolves to a real model depends on the front-end and
+its pins, which only the installer's resolver knows. Enabling escalation is the operator
+asserting they configured it. Do not add a judgement of your own on top.
+
+**Record which Builder ran and why (R10/R11).** The `progress/history.md` line names the role
+and the trigger, e.g.
+
+```
+E17-F03 | in-progress → in-review (builder-heavy round 3: escalated after 2 rejections)
+E21-F05 | in-progress → in-review (builder-heavy round 1: spec complexity=complex)
+```
+
+The telemetry `phase` record keeps **`"phase": "builder"`** and carries the spawned role in a
+separate `"role"` field:
+
+```json
+{"schema_version":1,"type":"phase","feature":"E17-F03","phase":"builder","role":"builder-heavy","round":3,...}
+```
+
+**Do not write `"phase": "builder-heavy"`.** `tools/telemetry-report.py` filters `phase`
+against a fixed `PHASES` whitelist and drops anything else, so those records would vanish
+from every report; and it computes the build↔review round count as the max `round` over
+`builder`/`reviewer` phases, so a feature whose later rounds ran heavy would under-report how
+many rounds it actually took. The extra `role` key is additive and ignored by existing
+consumers.
 
 ### The pre-PR change-size handoff (E21-F02)
 
