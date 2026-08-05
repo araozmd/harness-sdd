@@ -3140,13 +3140,38 @@ EOF
     grep -qx "$1" "$_UNSTAMPED_FILE" 2>/dev/null
   }
 
-  # unstamp_if_builder_role <file.toml> — mark codex unstamped, but ONLY for the two roles
-  # the verdict actually compares. A foreign `scout.toml` says nothing about whether
-  # escalating raises the Builder's model, and blocking on it would be over-broad.
-  unstamp_if_builder_role() {
-    case "$1" in
-      builder.toml|builder-heavy.toml) mark_unstamped codex ;;
-    esac
+  # verify_codex_builder_roles_stamped — did the two roles the verdict compares actually end
+  # up carrying what `resolve_model` just returned?
+  #
+  # OUTCOME-BASED, and that is the whole point. The first version of this marked `unstamped`
+  # at each refusal SITE inside install_codex_agent — and missed one: §5f's own per-file
+  # pre-check `continue`s BEFORE install_codex_agent is ever called, so a symlinked
+  # builder-heavy.toml still produced `armed` over a live role with no model.
+  # (Codex #3717604849, reproduced.) A list of refusal sites is something a future branch can
+  # silently fall outside of; comparing the live file against a freshly generated one cannot.
+  # Any path that leaves them different is caught — including paths that do not exist yet.
+  #
+  # It re-derives nothing: it calls the installer's own `gen_codex_agent` and `cmp`, the same
+  # way the verdict calls `resolve_model` rather than reimplementing it.
+  #
+  # Scoped to `builder`/`builder-heavy`: a hand-edited `scout.toml` says nothing about whether
+  # escalating raises the Builder's model, and blocking on it would fire on the wrong signal.
+  verify_codex_builder_roles_stamped() {
+    if codex_agent_tree_is_symlinked; then mark_unstamped codex; return 0; fi
+    _vcb_tmp="$(mktemp 2>/dev/null || mktemp -t harness-vcb)"
+    for _vcb_r in builder builder-heavy; do
+      _vcb_dest="$TARGET/.codex/agents/$_vcb_r.toml"
+      # A symlinked destination is never FOLLOWED for the comparison: `cmp` reads through a
+      # link and could otherwise report a foreign file as byte-identical to ours.
+      if [ -L "$_vcb_dest" ] || [ ! -f "$_vcb_dest" ]; then
+        mark_unstamped codex
+        continue
+      fi
+      _vcb_desc="$(ag_personas | awk -F'	' -v r="$_vcb_r" '$1==r {print $2; exit}')"
+      gen_codex_agent "$_vcb_r" "$_vcb_desc" "$_vcb_tmp"
+      cmp -s "$_vcb_dest" "$_vcb_tmp" || mark_unstamped codex
+    done
+    rm -f "$_vcb_tmp"
   }
 
   # write_escalation_arming — record, for the front-ends selected on THIS run, whether
@@ -3275,12 +3300,10 @@ EOF
     if codex_agent_destination_is_symlinked "$_ica_file"; then
       echo "⚠️  .codex/agents/$_ica_file has a symlinked destination component — selected Codex install left it unchanged" >&2
       discard_codex_agent_stamp "$_ica_file"
-      unstamp_if_builder_role "$_ica_file"
       return 0
     fi
     if model_agent_stamp_destination_is_symlinked codex "$_ica_file"; then
       echo "⚠️  .harness/.model-agents/codex/$_ica_file has a symlinked stamp component — selected Codex install left the live role and stamp unchanged" >&2
-      unstamp_if_builder_role "$_ica_file"
       return 0
     fi
     _ica_safe=0
@@ -3294,7 +3317,6 @@ EOF
     fi
     if [ "$_ica_safe" = 0 ]; then
       echo "⚠️  .codex/agents/$_ica_file is foreign or edited — selected Codex install left it unchanged" >&2
-      unstamp_if_builder_role "$_ica_file"
       return 0
     fi
     mkdir -p "$TARGET/.codex/agents"
@@ -5024,7 +5046,6 @@ EOF
     _codex_agent_tmp="$(mktemp 2>/dev/null || mktemp -t harness-codex-agent)"
     if codex_agent_tree_is_symlinked; then
       echo "⚠️  .codex/agents has a symlinked destination component — selected Codex install left role definitions unchanged" >&2
-      mark_unstamped codex
       ag_personas | while IFS='	' read -r _cxr _cxd; do
         [ -n "$_cxr" ] || continue
         discard_codex_agent_stamp "$_cxr.toml"
@@ -5042,6 +5063,9 @@ EOF
       done
     fi
     rm -f "$_codex_agent_tmp"
+    # Whatever the loop above did or declined to do, this asks the only question the arming
+    # verdict cares about: are the two Builder roles on disk what we just generated?
+    verify_codex_builder_roles_stamped
     ok "Codex per-role agent definitions installed (.codex/agents/ — project-local)"
   fi
 
@@ -5126,9 +5150,10 @@ EOF
         cp "$TARGET/opencode.json" "$H/.opencode.stamp"
       fi
     fi
-    # An opencode.json the installer declined to rewrite keeps whatever `agent:` models it
-    # already had, so `resolve_model`'s answer describes a file that was never written.
-    [ "$_oc_written" = 1 ] || mark_unstamped opencode
+    # Same question, asked the same way: is the live opencode.json what we just generated?
+    # Outcome rather than intent — this also catches a write that silently did not land,
+    # which `_oc_written` alone would report as success.
+    cmp -s "$TARGET/opencode.json" "$_oc_new" 2>/dev/null || mark_unstamped opencode
     rm -f "$_oc_new"
   fi
 

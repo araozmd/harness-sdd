@@ -597,6 +597,39 @@ unstamped_artifacts_block_arming() {
   [ "$(head -n 1 "$_t/.harness/.escalation-arming")" = blocked ] \
     || fail "F05-R12: an unstamped codex front-end still armed"
 
+  # ── leg 2b: a SYMLINKED builder-heavy.toml ──────────────────────────────────
+  # §5f's own per-file pre-check `continue`s BEFORE install_codex_agent is reached, so a
+  # guard that marked `unstamped` at each refusal site inside that function missed this path
+  # entirely and still produced `armed` over a live role with no model (Codex #3717604849).
+  # The check is now outcome-based — live file vs a freshly generated one — which is what
+  # makes this leg and leg 2 the same question rather than two special cases.
+  _t="$T/unstamped-sym"; install_to "$_t" "$T/ch-usy" --agents=codex
+  _c="$_t/.harness/harness.config.yaml"
+  set_models "$_c" builder standard
+  set_models "$_c" builder-heavy reasoning
+  set_models "$_c" 'pin.codex.standard' '"gpt-5"'
+  set_models "$_c" 'pin.codex.reasoning' '"gpt-5-codex"'
+  install_to "$_t" "$T/ch-usy" --agents=codex
+  [ "$(verdict_for "$_t" codex)" = raise ] \
+    || fail "F05-R12: control — a pristine codex target is '$(verdict_for "$_t" codex)', not raise"
+  _foreign="$T/foreign-builder-heavy.toml"
+  printf 'name = "builder-heavy"\n# foreign, no model key\n' > "$_foreign"
+  rm -f "$_t/.codex/agents/builder-heavy.toml"
+  ln -s "$_foreign" "$_t/.codex/agents/builder-heavy.toml"
+  _out="$(CODEX_HOME="$T/ch-usy" sh "$SRC/harness-install.sh" --agents=codex "$_t" 2>&1)" \
+    || fail "F05-R12: install over a symlinked builder-heavy.toml exited non-zero"
+  printf '%s' "$_out" | grep -q 'builder-heavy.toml is a symlinked destination' \
+    || fail "F05-R12: precondition — the installer did not decline the symlinked builder-heavy.toml"
+  [ "$(verdict_for "$_t" codex)" = unstamped ] \
+    || fail "F05-R12: a symlinked builder-heavy.toml gave '$(verdict_for "$_t" codex)', not unstamped"
+  [ "$(head -n 1 "$_t/.harness/.escalation-arming")" = blocked ] \
+    || fail "F05-R12: a symlinked builder-heavy role still armed"
+  # The symlink and its target must be untouched — the comparison must not follow the link.
+  [ -L "$_t/.codex/agents/builder-heavy.toml" ] \
+    || fail "F05-R12: the symlinked role was replaced"
+  [ "$(cat "$_foreign")" = "$(printf 'name = "builder-heavy"\n# foreign, no model key')" ] \
+    || fail "F05-R12: the symlink's target was written through"
+
   # ── leg 3: the ledger is SCOPED — a foreign non-Builder role must not block ──
   # Over-blocking is a real failure mode too: a hand-edited scout.toml says nothing about
   # whether escalating raises the *Builder's* model, and disabling escalation over it would
