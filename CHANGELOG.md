@@ -183,8 +183,9 @@ spawn, so a per-spawn override would silently no-op on three of the five front-e
 [ADR-0002](specs/adr/0002-builder-heavy-is-a-tier-not-a-second-prompt.md).
 
 All five selected front-ends emit it. **It ships on `inherit`,** so out of the box it is not
-heavier than `builder` — give it a tier first. Nothing routes to it automatically yet;
-deterministic escalation is a separate feature. An upgraded target keeps its existing
+heavier than `builder` — give it a tier first. As of v0.56.0 nothing routed to it
+automatically: deterministic escalation arrived in v0.57.0 and became automatic-when-armed in
+v0.58.0. An upgraded target keeps its existing
 `models:` block and does not grow a `builder-heavy:` line: an unlisted role falls through to
 `models.default`, exactly like any other.
 

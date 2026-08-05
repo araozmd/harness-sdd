@@ -884,6 +884,20 @@ no_doc_claims_the_harness_cannot_check() {
     [ -z "$_bad" ] || fail "F05-R11: $_d still says escalation is manual-only: $_bad"
   done
 
+  # The CHANGELOG is deliberately NOT in either sweep above: it is a dated historical record,
+  # and an entry describing what v0.56.0 shipped is *correct* even when superseded. Sweeping
+  # the whole file would fire on every accurate historical entry — the "guard that has to
+  # special-case a disclaimer" shape, which the E17-F03 review already established loses.
+  # What DOES matter is that the NEWEST entry never reads as a stale current statement, so
+  # scope the check to it: everything above the second `## [` heading.
+  _newest="$T/changelog-newest"
+  awk '/^## \[/ { n++ } n == 1' "$SRC/CHANGELOG.md" > "$_newest"
+  [ -s "$_newest" ] || fail "F05-R11: could not extract the newest CHANGELOG entry"
+  grep -q '0.58.0' "$_newest" \
+    || fail "F05-R11: control — the extracted newest CHANGELOG entry is not this release's"
+  _bad="$(grep -in 'Nothing routes to it automatically\|you invoke it by hand\|deliberately does .*infer\|the opt-in is your assertion' "$_newest" || true)"
+  [ -z "$_bad" ] || fail "F05-R11: the newest CHANGELOG entry carries a superseded claim: $_bad"
+
   # Positive control #1: the docs describe the mechanism that replaced it.
   _seen=0
   for _d in "$SRC/harness.config.yaml" "$SRC/docs/WORKFLOW.md" "$SRC/agents/orchestrator.md" \
