@@ -849,7 +849,7 @@ docs_agree_with_the_shipped_default() {
   # Nor may any line stating the DEFAULT still say 0. The docs legitimately mention 0 as the
   # off-switch, which is why this keys off "default"/"shipped" rather than the digit alone.
   for _d in "$SRC/docs/WORKFLOW.md" "$SRC/CHANGELOG.md" "$SRC/harness.config.yaml" \
-            "$SRC/agents/orchestrator.md" "$SRC/harness-install.sh"; do
+            "$SRC/agents/orchestrator.md" "$SRC/harness-install.sh" "$SRC/docs/INSTALL.md"; do
     _bad="$(grep -i 'after_rejections' "$_d" | grep -iE 'default|shipped value' | grep -v '2' || true)"
     [ -z "$_bad" ] || fail "F05-R11: $_d states a non-2 default for after_rejections: $_bad"
   done
@@ -866,19 +866,32 @@ no_doc_claims_the_harness_cannot_check() {
   # deliberately does not work out whether escalating would help and that they must verify it
   # themselves. It now does work it out. A claim repeated in six files is six defects.
   for _d in "$SRC/harness.config.yaml" "$SRC/harness-install.sh" "$SRC/tools/builder-role.sh" \
-            "$SRC/agents/orchestrator.md" "$SRC/docs/WORKFLOW.md" "$SRC/CHANGELOG.md"; do
+            "$SRC/agents/orchestrator.md" "$SRC/docs/WORKFLOW.md" "$SRC/CHANGELOG.md" \
+            "$SRC/docs/INSTALL.md"; do
     # Several phrasings of the same superseded claim, because it was written differently in
     # each of the six files — matching only one spelling is how a sweep misses five sites.
     _bad="$(grep -in 'deliberately does .*infer\|does not try to infer\|not infer this for you\|cannot verify that assertion\|BEFORE YOU ENABLE IT\|the opt-in is your assertion' "$_d" || true)"
     [ -z "$_bad" ] || fail "F05-R11: $_d still says the harness cannot check whether escalating helps: $_bad"
   done
+  # A SECOND superseded claim, and the one the round-4 review caught: E17-F02's docs said
+  # nothing routed to `builder-heavy` automatically. E17-F03 falsified that (the rule shipped)
+  # and E17-F05 doubly so (it is on by default when armed). The first version of this sweep
+  # knew only the "harness cannot check" phrasing, so docs/INSTALL.md kept telling operators
+  # to invoke the heavy Builder by hand while the test stayed green. One sweep, both classes.
+  for _d in "$SRC/harness.config.yaml" "$SRC/agents/orchestrator.md" "$SRC/docs/WORKFLOW.md" \
+            "$SRC/docs/INSTALL.md" "$SRC/tools/builder-role.sh"; do
+    _bad="$(grep -in 'Nothing routes to it automatically\|you invoke it by hand\|is a separate feature' "$_d" || true)"
+    [ -z "$_bad" ] || fail "F05-R11: $_d still says escalation is manual-only: $_bad"
+  done
+
   # Positive control #1: the docs describe the mechanism that replaced it.
   _seen=0
-  for _d in "$SRC/harness.config.yaml" "$SRC/docs/WORKFLOW.md" "$SRC/agents/orchestrator.md"; do
+  for _d in "$SRC/harness.config.yaml" "$SRC/docs/WORKFLOW.md" "$SRC/agents/orchestrator.md" \
+            "$SRC/docs/INSTALL.md"; do
     grep -q 'escalation-arming' "$_d" && _seen=$((_seen + 1))
   done
-  [ "$_seen" -ge 3 ] \
-    || fail "F05-R11: only $_seen of 3 operator-facing docs mention .harness/.escalation-arming"
+  [ "$_seen" -ge 4 ] \
+    || fail "F05-R11: only $_seen of 4 operator-facing docs mention .harness/.escalation-arming"
   # Positive control #2: the STATED LIMIT is documented. The verdict proves the model
   # changes, not that it is stronger — over-claiming that is the failure mode this feature
   # is one round away from, so the honest sentence is pinned rather than trusted.
@@ -886,7 +899,7 @@ no_doc_claims_the_harness_cannot_check() {
     grep -qi 'not check.*STRONGER\|DOES NOT CHECK' "$_d" \
       || fail "F05-R11: $_d does not state that the verdict proves change, not strength"
   done
-  pass "the superseded 'the harness cannot check this' claim is gone from all six sites (F05-R11)"
+  pass "both superseded claims are gone from all seven operator-facing sites (F05-R11)"
 }
 
 # ── usage errors ────────────────────────────────────────────────────────────────
