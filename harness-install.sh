@@ -3180,7 +3180,7 @@ EOF
   # Format — first line is exactly one word so the consuming rule needs no parser:
   #
   #     armed|blocked
-  #     <front-end>=<raise|none|same|neither>     one per selected front-end
+  #     <front-end>=<raise|none|same|neither|unstamped>   one per selected front-end
   #
   # `armed` iff EVERY selected front-end is `raise`. A conservative AND, because
   # tools/builder-role.sh cannot know which front-end it is running under: the config does not
