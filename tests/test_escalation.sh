@@ -734,14 +734,26 @@ rule_requires_armed_artifact() {
 
   # An empty file, garbage, and the substring bait: `disarmed` CONTAINS `armed`, so a
   # `case … *armed*)` or a `grep armed` implementation arms on it.
-  for _bad in '' 'garbage' 'disarmed' 'ARMED' 'armed extra'; do
+  # The whitespace variants are the fail-open a `tr -d '[:space:]'` normalization allows:
+  # `armed `, ` armed` and even `a r m e d` / `ar med` all collapse to `armed`, so a file the
+  # installer could not have written would arm the target (Codex #3723207550). The first line
+  # is compared RAW. Tabs included — `[:space:]` covers them and a space-only test would miss
+  # a tab-normalizing implementation.
+  for _bad in '' 'garbage' 'disarmed' 'ARMED' 'armed extra' 'armed ' ' armed' 'a r m e d' 'ar med' '	armed'; do
     _d="$T/fix-bad$(printf '%s' "$_bad" | tr -cd '[:alnum:]')x"; mkdir -p "$_d"
     printf 'models:\n  builder-heavy: reasoning\nescalation:\n  after_rejections: 2\n' > "$_d/harness.config.yaml"
     printf '%s\n' "$_bad" > "$_d/.escalation-arming"
     [ "$(role '' 99 --config "$_d/harness.config.yaml")" = builder ] \
       || fail "F05-R6: a first line of '$_bad' armed the rule"
   done
-  pass "only an exact 'armed' first line escalates; blocked/absent/garbage do not (F05-R6)"
+  # Positive control LAST, so the loop above cannot have passed by the tool losing the ability
+  # to arm at all: the exact string still works.
+  _okd="$T/fix-exact-ok"; mkdir -p "$_okd"
+  printf 'models:\n  builder-heavy: reasoning\nescalation:\n  after_rejections: 2\n' > "$_okd/harness.config.yaml"
+  printf 'armed\n' > "$_okd/.escalation-arming"
+  [ "$(role '' 99 --config "$_okd/harness.config.yaml")" = builder-heavy ] \
+    || fail "F05-R6: control — an exact 'armed' stopped arming, so the reject cases prove nothing"
+  pass "only an exact 'armed' first line escalates; whitespace variants and garbage do not (F05-R6)"
 }
 
 # ── F05-R7: both gates are required, on both triggers ───────────────────────────

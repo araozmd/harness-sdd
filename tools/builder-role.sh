@@ -177,7 +177,16 @@ fi
 _armed=0
 _blocked_by=""
 if [ -n "$_arming" ] && [ ! -L "$_arming" ] && [ -f "$_arming" ] && [ -r "$_arming" ]; then
-  case "$(head -n 1 "$_arming" 2>/dev/null | tr -d '[:space:]')" in
+  # The first line is compared RAW — no whitespace normalization. `opencode_parallel_wanted`
+  # in the installer does `tr -d '[:space:]'` and this deliberately does NOT copy it: that
+  # marker decides whether to install a command, while this one decides which MODEL runs a
+  # build, and the contract here is fail-closed — only an exact `armed` opens the gate.
+  # Stripping whitespace lets `armed `, ` armed`, and even `a r m e d` or `ar med` through,
+  # so a file that the installer could not have written would arm the target
+  # (Codex #3723207550, reproduced). `$( )` already strips the trailing newline, so a
+  # well-formed `armed\n` still matches; anything else fails closed, which is the only
+  # direction this gate is allowed to fail.
+  case "$(head -n 1 "$_arming" 2>/dev/null)" in
     armed) _armed=1 ;;
     *)
       # Every non-`raise` detail line, joined — this is what tells the operator WHICH
