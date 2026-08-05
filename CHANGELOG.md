@@ -30,6 +30,7 @@ codex=none
 | `none` | heavy resolves to **nothing** while `builder` resolves — **the downgrade** |
 | `same` | both resolve to the identical model — a no-op that would still record a role change |
 | `neither` | both inherit the session model |
+| `unstamped` | the installer **declined to rewrite** that front-end's live artifact, so the resolved model is not the one it will run |
 
 The first line is `armed` only when **every** selected front-end is `raise`. That AND is
 conservative on purpose: `tools/builder-role.sh` cannot know which front-end it is running
@@ -75,6 +76,14 @@ Details worth knowing:
   naming the front-end. Three distinct messages, because "escalation is off" is not actionable.
 - Anything other than an exact `armed` first line leaves the gate shut. There is no error path
   that can arm.
+- **A verdict describes what the front-end will RUN, not what the config asks for.** Where the
+  installer declines to rewrite an artifact it does not own — an edited `opencode.json`, a
+  foreign/edited/symlinked `.codex/agents/builder*.toml` — `resolve_model` still reports the
+  *desired* model while the role on disk keeps whatever it had. Those front-ends are recorded
+  `unstamped` and block arming. `claude`, `gemini` and `antigravity` write their per-role
+  artifacts unconditionally and so can never reach this state. The ledger is scoped to
+  `builder`/`builder-heavy`: a hand-edited `scout.toml` says nothing about whether escalating
+  raises the Builder's model and does not disarm the target.
 
 ## [0.57.0] — 2026-08-04
 

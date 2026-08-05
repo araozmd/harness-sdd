@@ -2671,8 +2671,13 @@ MODEL ROUTING:
   .harness/.escalation-arming    whether escalating to \`builder-heavy\` would actually change
                                  the model, computed from resolve_model at install time and
                                  read by tools/builder-role.sh. First line \`armed\`/\`blocked\`,
-                                 then one \`<front-end>=<raise|none|same|neither>\` per selected
-                                 front-end. ABSENT means escalation is OFF — either this
+                                 then one \`<front-end>=<verdict>\` per selected front-end,
+                                 where <verdict> is raise|none|same|neither|unstamped.
+                                 \`unstamped\` means the installer DECLINED to rewrite that
+                                 front-end's live artifact (edited opencode.json, foreign or
+                                 symlinked .codex/agents/builder*.toml), so the resolved model
+                                 is not the one it will run.
+                                 ABSENT means escalation is OFF — either this
                                  installer has not run here, or no role resolves to a model.
                                  Written only while at least one role resolves (the same gate
                                  .gemini/agents/ uses) and removed when none does.
@@ -3108,6 +3113,42 @@ EOF
     [ -L "$H/.escalation-arming" ]
   }
 
+  # ── the model-routing stamp ledger (E17-F05) ─────────────────────────────────
+  # The verdict must describe what the front-end WILL ACTUALLY RUN, not merely what the
+  # config asks for. Those two diverge whenever the installer declines to rewrite a live
+  # artifact it does not own — an edited `opencode.json`, or a foreign/edited/symlinked
+  # `.codex/agents/builder*.toml`. In every such case `resolve_model` still reports the
+  # DESIRED model while the role on disk keeps whatever it had, so the verdict would read
+  # `armed` for a front-end that will run the build with no heavy model at all: the same
+  # downgrade this feature exists to prevent, arriving through a different door.
+  # (Codex #3717508457, reproduced on an opencode target — the installer printed
+  # "model routing changes were NOT applied" and the verdict still read `armed`.)
+  #
+  # Only codex and opencode can reach this ledger. claude (§5), gemini (§5e) and antigravity
+  # write their per-role artifacts unconditionally, with no refusal branch, so a selected one
+  # of those is always stamped with what `resolve_model` just returned.
+  #
+  # A FILE, not a shell variable, and that is load-bearing: §5f iterates
+  # `ag_personas | while … read`, a PIPELINE, whose body POSIX sh runs in a SUBSHELL — a
+  # variable assigned in there dies at `done` and the ledger would silently always read
+  # empty, which fails OPEN (armed). The file survives the subshell.
+  _UNSTAMPED_FILE="$(mktemp 2>/dev/null || mktemp -t harness-unstamped)"
+  mark_unstamped() {
+    grep -qx "$1" "$_UNSTAMPED_FILE" 2>/dev/null || printf '%s\n' "$1" >> "$_UNSTAMPED_FILE"
+  }
+  fe_unstamped() {
+    grep -qx "$1" "$_UNSTAMPED_FILE" 2>/dev/null
+  }
+
+  # unstamp_if_builder_role <file.toml> — mark codex unstamped, but ONLY for the two roles
+  # the verdict actually compares. A foreign `scout.toml` says nothing about whether
+  # escalating raises the Builder's model, and blocking on it would be over-broad.
+  unstamp_if_builder_role() {
+    case "$1" in
+      builder.toml|builder-heavy.toml) mark_unstamped codex ;;
+    esac
+  }
+
   # write_escalation_arming — record, for the front-ends selected on THIS run, whether
   # escalating to `builder-heavy` would actually change the model (E17-F05).
   #
@@ -3167,7 +3208,13 @@ EOF
     for _ea_k in $AGENT_KEYS; do
       agent_selected "$_ea_k" || continue
       _ea_seen=1
-      _ea_v="$(escalation_verdict "$_ea_k")"
+      # `unstamped` outranks whatever resolve_model would say: the config's answer is about
+      # a file this run did not write, so it describes a model the front-end will not use.
+      if fe_unstamped "$_ea_k"; then
+        _ea_v=unstamped
+      else
+        _ea_v="$(escalation_verdict "$_ea_k")"
+      fi
       [ "$_ea_v" = raise ] || _ea_armed=0
       _ea_body="$_ea_body$_ea_k=$_ea_v
 "
@@ -3228,10 +3275,12 @@ EOF
     if codex_agent_destination_is_symlinked "$_ica_file"; then
       echo "⚠️  .codex/agents/$_ica_file has a symlinked destination component — selected Codex install left it unchanged" >&2
       discard_codex_agent_stamp "$_ica_file"
+      unstamp_if_builder_role "$_ica_file"
       return 0
     fi
     if model_agent_stamp_destination_is_symlinked codex "$_ica_file"; then
       echo "⚠️  .harness/.model-agents/codex/$_ica_file has a symlinked stamp component — selected Codex install left the live role and stamp unchanged" >&2
+      unstamp_if_builder_role "$_ica_file"
       return 0
     fi
     _ica_safe=0
@@ -3245,6 +3294,7 @@ EOF
     fi
     if [ "$_ica_safe" = 0 ]; then
       echo "⚠️  .codex/agents/$_ica_file is foreign or edited — selected Codex install left it unchanged" >&2
+      unstamp_if_builder_role "$_ica_file"
       return 0
     fi
     mkdir -p "$TARGET/.codex/agents"
@@ -4974,6 +5024,7 @@ EOF
     _codex_agent_tmp="$(mktemp 2>/dev/null || mktemp -t harness-codex-agent)"
     if codex_agent_tree_is_symlinked; then
       echo "⚠️  .codex/agents has a symlinked destination component — selected Codex install left role definitions unchanged" >&2
+      mark_unstamped codex
       ag_personas | while IFS='	' read -r _cxr _cxd; do
         [ -n "$_cxr" ] || continue
         discard_codex_agent_stamp "$_cxr.toml"
@@ -5075,6 +5126,9 @@ EOF
         cp "$TARGET/opencode.json" "$H/.opencode.stamp"
       fi
     fi
+    # An opencode.json the installer declined to rewrite keeps whatever `agent:` models it
+    # already had, so `resolve_model`'s answer describes a file that was never written.
+    [ "$_oc_written" = 1 ] || mark_unstamped opencode
     rm -f "$_oc_new"
   fi
 
@@ -5084,6 +5138,7 @@ EOF
   # verdict calls resolve_model again and would otherwise be the first caller for a
   # front-end that generates nothing, moving a diagnostic to a confusing place.
   write_escalation_arming
+  rm -f "$_UNSTAMPED_FILE"
 
   # ── 7. selection persistence + add/remove reconciliation (E08-F01) ───────────
   # Persist the resolved selection beside .harness-version as harness-owned metadata

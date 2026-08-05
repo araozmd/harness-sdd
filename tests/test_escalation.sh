@@ -431,7 +431,7 @@ arming_artifact_shape() {
   head -n 1 "$_f" | grep -Eq '^(armed|blocked)$' \
     || fail "F05-R2: the first line is not exactly 'armed' or 'blocked': $(head -n 1 "$_f")"
   # Every remaining line is <front-end>=<verdict>, and there is one per SELECTED front-end.
-  _bad="$(sed -n '2,$p' "$_f" | grep -Ev '^(claude|gemini|opencode|antigravity|codex)=(raise|none|same|neither)$' || true)"
+  _bad="$(sed -n '2,$p' "$_f" | grep -Ev '^(claude|gemini|opencode|antigravity|codex)=(raise|none|same|neither|unstamped)$' || true)"
   [ -z "$_bad" ] || fail "F05-R2: malformed detail line(s): $_bad"
   [ "$(sed -n '2,$p' "$_f" | wc -l | tr -d ' ')" = 2 ] \
     || fail "F05-R2: expected one detail line per selected front-end (2), got $(sed -n '2,$p' "$_f" | wc -l | tr -d ' ')"
@@ -539,6 +539,85 @@ and_across_front_ends() {
   [ "$(head -n 1 "$_b/.harness/.escalation-arming")" = armed ] \
     || fail "F05-R3: control — an all-raise two-front-end target did not arm"
   pass "the verdict is a conservative AND, in both front-end orders (F05-R3)"
+}
+
+# ── F05-R12: a front-end whose live artifact was NOT rewritten is `unstamped` ───
+# The verdict must describe what the front-end WILL RUN, not what the config asks for.
+# Whenever the installer declines to rewrite an artifact it does not own, those diverge:
+# `resolve_model` reports the desired model while the role on disk keeps whatever it had.
+# (Codex #3717508457 — reproduced on an opencode target where the installer printed
+# "model routing changes were NOT applied" and the verdict still read `armed`.)
+unstamped_artifacts_block_arming() {
+  # ── leg 1: an edited opencode.json the installer refuses to rewrite ──────────
+  _t="$T/unstamped-oc"; install_to "$_t" "$T/ch-uoc" --agents=opencode
+  _c="$_t/.harness/harness.config.yaml"
+  set_models "$_c" builder standard
+  set_models "$_c" builder-heavy reasoning
+  set_models "$_c" 'pin.opencode.standard' '"anthropic/claude-sonnet-4"'
+  set_models "$_c" 'pin.opencode.reasoning' '"anthropic/claude-opus-4"'
+  install_to "$_t" "$T/ch-uoc" --agents=opencode
+  # POSITIVE CONTROL FIRST: this very target arms while the artifact IS being written.
+  # Without it, "blocked" below is also satisfied by opencode never arming at all.
+  [ "$(verdict_for "$_t" opencode)" = raise ] \
+    || fail "F05-R12: control — a pristine opencode target is '$(verdict_for "$_t" opencode)', not raise"
+  [ "$(head -n 1 "$_t/.harness/.escalation-arming")" = armed ] \
+    || fail "F05-R12: control — a pristine opencode target did not arm"
+
+  # Edit it, so the installer declines to rewrite it and the on-disk models go stale.
+  printf '{ "_operator_edited": true }\n' > "$_t/opencode.json"
+  _out="$(CODEX_HOME="$T/ch-uoc" sh "$SRC/harness-install.sh" --agents=opencode "$_t" 2>&1)" \
+    || fail "F05-R12: install over an edited opencode.json exited non-zero"
+  # Fixture precondition: the installer must actually have DECLINED. If it rewrote the file
+  # there is no divergence to detect and the case proves nothing.
+  printf '%s' "$_out" | grep -q 'model routing changes were NOT applied' \
+    || fail "F05-R12: precondition — the installer did not decline to rewrite opencode.json"
+  [ "$(verdict_for "$_t" opencode)" = unstamped ] \
+    || fail "F05-R12: an unrewritten opencode.json gave '$(verdict_for "$_t" opencode)', not unstamped"
+  [ "$(head -n 1 "$_t/.harness/.escalation-arming")" = blocked ] \
+    || fail "F05-R12: an unstamped opencode front-end still armed — the config's model is not the one it will run"
+
+  # ── leg 2: a foreign .codex/agents/builder-heavy.toml ────────────────────────
+  _t="$T/unstamped-cx"; install_to "$_t" "$T/ch-ucx" --agents=codex
+  _c="$_t/.harness/harness.config.yaml"
+  set_models "$_c" builder standard
+  set_models "$_c" builder-heavy reasoning
+  set_models "$_c" 'pin.codex.standard' '"gpt-5"'
+  set_models "$_c" 'pin.codex.reasoning' '"gpt-5-codex"'
+  install_to "$_t" "$T/ch-ucx" --agents=codex
+  [ "$(verdict_for "$_t" codex)" = raise ] \
+    || fail "F05-R12: control — a pristine codex target is '$(verdict_for "$_t" codex)', not raise"
+
+  printf 'name = "builder-heavy"\n# hand-edited by the operator\n' > "$_t/.codex/agents/builder-heavy.toml"
+  _out="$(CODEX_HOME="$T/ch-ucx" sh "$SRC/harness-install.sh" --agents=codex "$_t" 2>&1)" \
+    || fail "F05-R12: install over a foreign builder-heavy.toml exited non-zero"
+  printf '%s' "$_out" | grep -q 'builder-heavy.toml is foreign or edited' \
+    || fail "F05-R12: precondition — the installer did not decline to rewrite builder-heavy.toml"
+  [ "$(verdict_for "$_t" codex)" = unstamped ] \
+    || fail "F05-R12: a foreign builder-heavy.toml gave '$(verdict_for "$_t" codex)', not unstamped"
+  [ "$(head -n 1 "$_t/.harness/.escalation-arming")" = blocked ] \
+    || fail "F05-R12: an unstamped codex front-end still armed"
+
+  # ── leg 3: the ledger is SCOPED — a foreign non-Builder role must not block ──
+  # Over-blocking is a real failure mode too: a hand-edited scout.toml says nothing about
+  # whether escalating raises the *Builder's* model, and disabling escalation over it would
+  # be a guard that fires on the wrong signal.
+  _t="$T/unstamped-scope"; install_to "$_t" "$T/ch-usc" --agents=codex
+  _c="$_t/.harness/harness.config.yaml"
+  set_models "$_c" builder standard
+  set_models "$_c" builder-heavy reasoning
+  set_models "$_c" 'pin.codex.standard' '"gpt-5"'
+  set_models "$_c" 'pin.codex.reasoning' '"gpt-5-codex"'
+  install_to "$_t" "$T/ch-usc" --agents=codex
+  printf 'name = "scout"\n# hand-edited by the operator\n' > "$_t/.codex/agents/scout.toml"
+  _out="$(CODEX_HOME="$T/ch-usc" sh "$SRC/harness-install.sh" --agents=codex "$_t" 2>&1)" \
+    || fail "F05-R12: install over a foreign scout.toml exited non-zero"
+  printf '%s' "$_out" | grep -q 'scout.toml is foreign or edited' \
+    || fail "F05-R12: precondition — the installer did not decline to rewrite scout.toml"
+  [ "$(verdict_for "$_t" codex)" = raise ] \
+    || fail "F05-R12: a foreign scout.toml blocked arming — the ledger is not scoped to the Builder roles"
+  [ "$(head -n 1 "$_t/.harness/.escalation-arming")" = armed ] \
+    || fail "F05-R12: a foreign non-Builder role disarmed the target"
+  pass "a front-end whose live artifact was not rewritten reads unstamped and blocks (F05-R12)"
 }
 
 # ── F05-R4: written when something resolves, absent otherwise, reclaimed ────────
@@ -808,6 +887,7 @@ verdict_comes_from_resolve_model
 arming_artifact_shape
 verdict_truth_table
 and_across_front_ends
+unstamped_artifacts_block_arming
 artifact_written_and_reclaimed
 symlinked_arming_is_refused
 rule_requires_armed_artifact

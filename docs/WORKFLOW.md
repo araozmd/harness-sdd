@@ -666,6 +666,12 @@ Notes that matter in practice:
   codex=none
   ```
 
+  A fifth verdict, `unstamped`, means the installer **declined to rewrite that front-end's
+  live artifact** — an edited `opencode.json`, or a foreign/edited/symlinked
+  `.codex/agents/builder*.toml`. The resolved model then describes a file that was never
+  written, so it is not the one that front-end will run, and the verdict refuses to vouch
+  for it. Restore the artifact (or let the installer own it) and re-run.
+
   `none` is the case that matters: the heavy role resolves to **nothing** while `builder`
   resolves to something, so escalating would abandon your configured Builder model for the
   session default — a *downgrade*, arriving exactly when the build was struggling. On
