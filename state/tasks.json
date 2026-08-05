@@ -515,7 +515,7 @@
         {
           "id": "E17-F03",
           "title": "Deterministic escalation to `builder-heavy` (complexity tag + two-rejection rule)",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
@@ -531,6 +531,17 @@
           "autonomous": false,
           "depends_on": [],
           "spec_path": "specs/epics/E17-model-routing/F04-worker-roster/"
+        },
+        {
+          "id": "E17-F05",
+          "title": "Installer-stamped escalation arming, so the automatic default can return",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E17-F03"
+          ],
+          "spec_path": "specs/epics/E17-model-routing/F05-installer-stamped-arming/"
         }
       ]
     },
