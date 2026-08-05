@@ -438,38 +438,49 @@ EOF
   # only migrates, and the two must converge on the same bytes. Seeding only one of the two
   # is precisely the defect E17-F02's mutation battery caught.
   #
-  # Seeded OFF (0). Two review rounds killed two attempts to INFER whether escalating would
-  # help — "heavy: inherit resolves like builder" (#3716706727) and "arm on a non-inherit
-  # tier" (#3716777878, which misses that codex/opencode stamp nothing for an unpinned tier).
-  # Both were this installer's `resolve_model` being re-derived elsewhere. Enabling escalation
-  # is now an explicit operator act, so an unconfigured target cannot be downgraded by it.
+  # Seeded at 2 (E17-F05). E17-F03 had to seed 0 because two review rounds killed two attempts
+  # to INFER whether escalating would help — "heavy: inherit resolves like builder"
+  # (#3716706727) and "arm on a non-inherit tier" (#3716777878, which misses that
+  # codex/opencode stamp nothing for an unpinned tier). Both were this installer's
+  # `resolve_model` being re-derived elsewhere. It is no longer re-derived anywhere: this
+  # installer records the verdict in `.harness/.escalation-arming` (§6b) and the rule reads it,
+  # so a positive default cannot downgrade a target the resolver says is unarmed.
+  #
+  # THIS ONLY SEEDS WHEN THE BLOCK IS ABSENT. A target already carrying `after_rejections: 0`
+  # keeps it: the installer cannot distinguish a leftover E17-F03 default from a deliberate
+  # veto, and rewriting an operator-owned value is worse than the gap. Such targets get
+  # automatic escalation only after editing the key themselves — stated in the CHANGELOG.
   if ! grep -Eq '^escalation:[[:space:]]*(#.*)?$' "$_cfg"; then
     cat >> "$_cfg" <<'EOF'
 
-# Deterministic Builder escalation (E17-F03) — OPT-IN, and OFF by default.
+# Deterministic Builder escalation (E17-F03), armed by the installer (E17-F05).
 # After this many Reviewer rejections, subsequent builds spawn `builder-heavy` instead of
 # `builder`. The counter is the EXISTING build<->review round (agents/orchestrator.md), so
 # this adds no second source of truth. A spec may also start heavy from round 1 with
 # `complexity: complex` in its frontmatter.
 #
-# `0` (the default) turns escalation OFF ENTIRELY — neither trigger fires. Set it to a
-# positive number to turn escalation on; 2 is the suggested value.
+# `0` turns escalation OFF ENTIRELY — neither trigger fires. It is your hard veto, and
+# nothing below overrides it. The shipped value is 2.
 #
-# BEFORE YOU ENABLE IT, make sure `models.builder-heavy` above actually resolves to a model
-# on YOUR front-end — otherwise escalation is a DOWNGRADE, not an upgrade: a role that
-# resolves to nothing runs on the session model, abandoning whatever `models.builder` was
-# set to, exactly when the build was struggling.
+# ESCALATION NEEDS A SECOND YES, AND THE INSTALLER SUPPLIES IT. `harness-install.sh` asks its
+# own model resolver what `builder` and `builder-heavy` resolve to on every front-end it
+# stamps, and records the comparison in `.harness/.escalation-arming`. Escalation fires only
+# while that verdict reads `armed` — i.e. `builder-heavy` resolves to a DIFFERENT model on
+# every selected front-end. Otherwise the harness declines and names the front-end to fix,
+# because escalating into a role that resolves to nothing is a DOWNGRADE: it abandons
+# whatever `models.builder` was set to, exactly when the build was struggling.
 #   claude / gemini / antigravity  a built-in tier alias is enough
 #   codex / opencode               a tier alone stamps NOTHING — you must also set the
 #                                  matching `pin.<front-end>.<tier>` in the models: block
-# The harness deliberately does NOT try to infer this for you: that determination lives in
-# the installer's per-front-end resolver, and re-deriving it here produced two wrong
-# answers in review before this key became an explicit opt-in.
+# The verdict is computed at INSTALL time, so re-run the installer after changing any of it.
+# WHAT THIS DOES NOT CHECK: that the model is STRONGER, or that it exists at all. The harness
+# has no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours;
+# what the check closes is the silent downgrade to no model at all.
 #
 # Under `execution.builder.backend: delegate` escalation is INAPPLICABLE — the external
 # executor picks its own model — and the harness never escalates on that path.
 escalation:
-  after_rejections: 0
+  after_rejections: 2
 EOF
   fi
 }
@@ -1111,6 +1122,41 @@ models_any() {
     if [ -n "$(resolve_model "$1" "$_ma_role")" ]; then return 0; fi
   done
   return 1
+}
+
+# escalation_verdict <front-end> — would escalating from `builder` to `builder-heavy`
+# actually change the model on this front-end? Prints exactly one of:
+#
+#   raise    heavy resolves to a non-empty value that DIFFERS from builder's
+#   none     heavy resolves to NOTHING while builder resolves to something  ← the downgrade
+#   same     both resolve to the identical non-empty value
+#   neither  neither resolves — both inherit the session model
+#
+# WHY THIS LIVES HERE AND NOT IN tools/builder-role.sh (E17-F05). Two E17-F03 review rounds
+# killed two attempts to answer this question from the CONFIG: "heavy: inherit resolves like
+# builder" (#3716706727) and "arm on a non-inherit tier" (#3716777878, which misses that
+# codex/opencode stamp nothing for an unpinned tier). Both were re-derivations of a subset of
+# `resolve_model`, which owns the per-front-end alias tables and the pin rules — so each
+# approximation was wrong on a different front-end. This function re-derives NOTHING: it calls
+# `resolve_model` and compares the two strings it gets back. That is the entire feature.
+#
+# WHAT IT DOES NOT PROVE. `resolve_model` returns opaque vendor strings, and the harness has
+# no model list and deliberately invents none (E17-F01). So `raise` means the model CHANGES,
+# not that it is STRONGER — `pin.claude.reasoning: haiku` reads as `raise`. Ranking lives in
+# the tier vocabulary the operator chose. What this closes is the downgrade-to-nothing case,
+# which is the one an operator cannot see coming; it is not a model-strength check and no
+# doc may say it is.
+#
+# The four arms are total over (empty × empty), so no default arm silently absorbs a
+# combination. Locals are prefixed because POSIX sh has none.
+escalation_verdict() {
+  _ev_b="$(resolve_model "$1" builder)"
+  _ev_h="$(resolve_model "$1" builder-heavy)"
+  if   [ -n "$_ev_h" ] && [ "$_ev_h" != "$_ev_b" ]; then printf 'raise\n'
+  elif [ -z "$_ev_h" ] && [ -n "$_ev_b" ];          then printf 'none\n'
+  elif [ -z "$_ev_h" ] && [ -z "$_ev_b" ];          then printf 'neither\n'
+  else                                                   printf 'same\n'
+  fi
 }
 
 # agent_known <key> — true (exit 0) iff <key> is a registered agent key (R7, R10).
@@ -2622,6 +2668,14 @@ MODEL ROUTING:
   .harness/.model-agents/        byte copies of the last generated .gemini/.codex per-role
                                  files, kept only while those files exist (lets a switch
                                  back to \`inherit\` reclaim them instead of orphaning them)
+  .harness/.escalation-arming    whether escalating to \`builder-heavy\` would actually change
+                                 the model, computed from resolve_model at install time and
+                                 read by tools/builder-role.sh. First line \`armed\`/\`blocked\`,
+                                 then one \`<front-end>=<raise|none|same|neither>\` per selected
+                                 front-end. ABSENT means escalation is OFF — either this
+                                 installer has not run here, or no role resolves to a model.
+                                 Written only while at least one role resolves (the same gate
+                                 .gemini/agents/ uses) and removed when none does.
   Gemini remains conditional on a concrete model. Selected Codex always has all seven roles;
   inherited or unpinned roles omit model, while concrete pins add it role by role. Codex
   role replacement/reclamation requires a matching last-written ownership stamp.
@@ -3041,6 +3095,94 @@ EOF
   # (Codex #3715169411.)
   opencode_stamp_is_symlinked() {
     [ -L "$H/.opencode.stamp" ]
+  }
+
+  # escalation_arming_is_symlinked — true iff .harness/.escalation-arming is a symlink (live
+  # or dangling). Same rule, and the same reason, as opencode_stamp_is_symlinked: redirection
+  # FOLLOWS a link, so writing through one would overwrite a file that may be outside the
+  # repository. Here the guard is load-bearing beyond hygiene — this artifact decides which
+  # MODEL runs a build, so a followed link is a path by which something outside `.harness/`
+  # could assert `armed`. Both the write AND the removal are refused: `rm -f` would unlink the
+  # symlink, silently un-arming a target through a path the operator never asked about.
+  escalation_arming_is_symlinked() {
+    [ -L "$H/.escalation-arming" ]
+  }
+
+  # write_escalation_arming — record, for the front-ends selected on THIS run, whether
+  # escalating to `builder-heavy` would actually change the model (E17-F05).
+  #
+  # Format — first line is exactly one word so the consuming rule needs no parser:
+  #
+  #     armed|blocked
+  #     <front-end>=<raise|none|same|neither>     one per selected front-end
+  #
+  # `armed` iff EVERY selected front-end is `raise`. A conservative AND, because
+  # tools/builder-role.sh cannot know which front-end it is running under: the config does not
+  # say, and the five are chosen at install time, not at build time. Passing the front-end as
+  # an argument would only move the guess into agents/orchestrator.md, where it is prose and
+  # untestable. The cost, stated: a mixed target where four front-ends would raise and one
+  # lacks a pin gets no escalation ANYWHERE — deliberate, since the AND never downgrades
+  # anyone, and the detail lines name the offender so the fix is one pin and one re-run.
+  #
+  # Only `raise` arms. `same`/`neither` are not harmful — neither downgrades — but arming on
+  # them would spend a build round, a progress/history.md line and a telemetry record
+  # announcing an escalation that provably cannot change the outcome: the build re-runs on the
+  # identical model and fails the identical way, while the operator reads that a heavier
+  # Builder was tried. A misleading record is worse than a legible decline.
+  #
+  # GATED on `models_any`, the same gate `.gemini/agents/` uses (E17-F01 R11): a target with
+  # every role on `inherit` — the shipped default — must not grow a file a never-configured
+  # target lacks. When nothing resolves, an existing artifact is REMOVED rather than left
+  # stale, which is the reclamation reclaim_model_agents performs for the per-role stamps.
+  #
+  # Detail lines are emitted in $AGENT_KEYS order, not selection order, so re-installing the
+  # same target twice yields a byte-identical file.
+  write_escalation_arming() {
+    if escalation_arming_is_symlinked; then
+      echo "⚠️  .harness/.escalation-arming is a symlink — escalation arming verdict not written (link and its target left unchanged)" >&2
+      return 0
+    fi
+
+    _ea_any=0
+    for _ea_k in $AGENT_KEYS; do
+      agent_selected "$_ea_k" || continue
+      if models_any "$_ea_k"; then _ea_any=1; fi
+    done
+
+    # Nothing resolves anywhere ⇒ no verdict to record. Absence and "blocked" both mean
+    # escalation is off and both have the same remedy (configure models.builder-heavy, re-run
+    # the installer), so folding them together costs nothing and keeps an unconfigured target
+    # byte-identical to what it was before this feature existed.
+    if [ "$_ea_any" = 0 ]; then
+      if [ -f "$H/.escalation-arming" ]; then
+        rm -f "$H/.escalation-arming"
+        info "escalation arming verdict reclaimed (no role resolves to a model any more)"
+      fi
+      return 0
+    fi
+
+    _ea_body=""
+    _ea_armed=1
+    _ea_seen=0
+    for _ea_k in $AGENT_KEYS; do
+      agent_selected "$_ea_k" || continue
+      _ea_seen=1
+      _ea_v="$(escalation_verdict "$_ea_k")"
+      [ "$_ea_v" = raise ] || _ea_armed=0
+      _ea_body="$_ea_body$_ea_k=$_ea_v
+"
+    done
+    # No front-end selected at all cannot happen on a real run, but an AND over an empty set
+    # is vacuously true — which would arm a target nothing was checked for. Guard it.
+    [ "$_ea_seen" = 1 ] || _ea_armed=0
+
+    if [ "$_ea_armed" = 1 ]; then _ea_first=armed; else _ea_first=blocked; fi
+    { printf '%s\n' "$_ea_first"; printf '%s' "$_ea_body"; } > "$H/.escalation-arming"
+    if [ "$_ea_armed" = 1 ]; then
+      ok "escalation armed — builder-heavy resolves to a different model on every selected front-end"
+    else
+      info "escalation NOT armed — see .harness/.escalation-arming for which front-end blocked it"
+    fi
   }
 
   stamp_model_agent() {
@@ -4935,6 +5077,13 @@ EOF
     fi
     rm -f "$_oc_new"
   fi
+
+  # ── 6b. escalation arming verdict (E17-F05) ─────────────────────────────────
+  # Placed AFTER every per-front-end artifact has been generated (§5e/§5f/§6) so that
+  # resolve_model's run-scoped warn-once ledger has already emitted its diagnostics: the
+  # verdict calls resolve_model again and would otherwise be the first caller for a
+  # front-end that generates nothing, moving a diagnostic to a confusing place.
+  write_escalation_arming
 
   # ── 7. selection persistence + add/remove reconciliation (E08-F01) ───────────
   # Persist the resolved selection beside .harness-version as harness-owned metadata

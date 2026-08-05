@@ -17,6 +17,7 @@
 # Usage:
 #   tools/builder-role.sh <complexity> <round> [--backend <in-session|delegate>]
 #                                              [--config <harness.config.yaml>]
+#                                              [--arming <.escalation-arming>]
 #
 #   <complexity>  the feature spec's `complexity:` frontmatter value. EMPTY is legal and
 #                 means `standard` — specs written before this feature carry no tag.
@@ -33,15 +34,16 @@
 #   0  a role name was resolved (the normal case, including every coerced one)
 #   4  usage error — wrong argument count, or a non-numeric round
 #
-# PURITY IS THE POINT. This reads its arguments and, at most, ONE scalar from the config. It
-# never reads progress/history.md, never opens the spec body, never calls git, and keeps no
-# state between runs. That is what makes "identical inputs, identical answer" testable; a
-# tool that could consult prose could not be proven deterministic.
+# PURITY IS THE POINT. This reads its arguments, at most ONE scalar from the config, and the
+# installer's arming verdict (see below). It never reads progress/history.md, never opens the
+# spec body, never calls git, and keeps no state between runs. That is what makes "identical
+# inputs, identical answer" testable; a tool that could consult prose could not be proven
+# deterministic.
 
 set -eu
 
 usage() {
-  echo "usage: builder-role.sh <complexity> <round> [--backend <in-session|delegate>] [--config <path>]" >&2
+  echo "usage: builder-role.sh <complexity> <round> [--backend <in-session|delegate>] [--config <path>] [--arming <path>]" >&2
   exit 4
 }
 
@@ -49,12 +51,14 @@ _complexity=""
 _round=""
 _backend="in-session"
 _config=""
+_arming=""
 _positional=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --backend) [ $# -ge 2 ] || usage; _backend="$2"; shift 2 ;;
     --config)  [ $# -ge 2 ] || usage; _config="$2";  shift 2 ;;
+    --arming)  [ $# -ge 2 ] || usage; _arming="$2";  shift 2 ;;
     --help|-h) usage ;;
     --*) echo "builder-role.sh: unknown option '$1'" >&2; usage ;;
     *)
@@ -106,11 +110,14 @@ _cfg_scalar() {
 }
 
 # ── 2. Is escalation ENABLED? ───────────────────────────────────────────────────
-# `escalation.after_rejections` is BOTH the threshold and the master switch: 0 (the shipped
-# default) means escalation is off entirely — neither trigger fires.
+# Escalation needs TWO independent yeses, and this section reads the first of them.
 #
-# WHY AN EXPLICIT OPT-IN AND NOT AN INFERENCE. Two review rounds killed two successive
-# attempts to *infer* whether escalating would actually help:
+# `escalation.after_rejections` is BOTH the threshold and the master switch: `0` means
+# escalation is off entirely — neither trigger fires — and it is the operator's hard veto,
+# which nothing below can overrule. The shipped default is 2.
+#
+# WHY THE SECOND GATE EXISTS. Two E17-F03 review rounds killed two successive attempts to
+# *infer*, from the config, whether escalating would actually help:
 #
 #   1. "builder-heavy: inherit resolves like builder, so escalating is a no-op" — true only
 #      for a FULLY unconfigured target. Set `models.builder: standard` and the Builder shim
@@ -123,11 +130,17 @@ _cfg_scalar() {
 #      downgrade, one level deeper. (Codex #3716777878.)
 #
 # Both attempts were this tool re-deriving a subset of the installer's `resolve_model`, which
-# owns per-front-end alias tables and pin requirements. Reproducing that here would keep
-# producing a new defect per front-end. So the tool no longer guesses: enabling escalation is
-# the operator asserting they configured a heavier tier that actually resolves on their
-# front-end. The harness cannot verify that assertion from here, and says so in the docs
-# rather than pretending to.
+# owns the per-front-end alias tables and the pin rules — so each approximation was wrong on a
+# different front-end. E17-F05 stopped approximating and asked the component that owns the
+# answer: `harness-install.sh` calls `resolve_model` for both roles on every front-end it
+# stamps and records the comparison in `.harness/.escalation-arming`. This tool READS that
+# verdict. It still derives nothing about models itself — which is why it still must never
+# parse the `models:` section.
+#
+# The verdict proves the model CHANGES, not that it is STRONGER: the installer has no model
+# list and invents none (E17-F01), so `pin.claude.reasoning: haiku` reads as armed. What the
+# gate closes is the downgrade-to-nothing case above, which is the one an operator cannot see
+# coming.
 _threshold=0
 _cfgval="$(_cfg_scalar escalation after_rejections)"
 case "$_cfgval" in
@@ -137,20 +150,66 @@ case "$_cfgval" in
   *) _threshold="$_cfgval" ;;
 esac
 
-# _escalate <trigger> — honour a trigger, or decline it because escalation is off.
+# ── 2b. The arming verdict — the SECOND gate ────────────────────────────────────
+# `.harness/.escalation-arming`, written by harness-install.sh. First line is exactly one
+# word, `armed` or `blocked`, so no parser is needed for the DECISION; the remaining
+# `<front-end>=<verdict>` lines are read for the advisory only.
 #
-# Only the COMPLEXITY trigger can be declined, and that asymmetry is deliberate. A
-# `complexity: complex` tag is an operator who expressed intent and gets a silent no-op
-# otherwise, so declining it must be reported. The round trigger has nothing to report when
-# escalation is off: with no threshold configured there is no round it "would have" exceeded,
-# and inventing a phantom threshold just to warn about it would be noise on every build.
+# Located rather than searched for, so purity holds: `--arming` if given, else beside the
+# config file (both live in `.harness/`). With no `--config` there is no artifact and
+# escalation is off — which is already the behaviour for a missing config, so the two agree
+# instead of interacting.
+#
+# ABSENT means OFF. Two situations produce absence — a target that has not re-run the
+# installer since this release, and one where no role resolves to a model at all — and both
+# have the same remedy, so they share one message. Escalating on absence would be exactly the
+# unverified guess this gate exists to delete.
+#
+# A SYMLINK reads as absent. The installer refuses to write through one; following it here
+# would let something outside `.harness/` assert `armed` and change which model runs a build.
+#
+# Anything that is not EXACTLY `armed` leaves the gate shut: `blocked`, an empty file, garbage,
+# an unreadable file. There is deliberately no error path that can arm.
+if [ -z "$_arming" ] && [ -n "$_config" ]; then
+  _arming="$(dirname "$_config")/.escalation-arming"
+fi
+
+_armed=0
+_blocked_by=""
+if [ -n "$_arming" ] && [ ! -L "$_arming" ] && [ -f "$_arming" ] && [ -r "$_arming" ]; then
+  case "$(head -n 1 "$_arming" 2>/dev/null | tr -d '[:space:]')" in
+    armed) _armed=1 ;;
+    *)
+      # Every non-`raise` detail line, joined — this is what tells the operator WHICH
+      # front-end to fix. `(unspecified)` keeps the blocked branch distinguishable from the
+      # absent branch even when the file carries no usable detail.
+      _blocked_by="$(sed -n '2,$p' "$_arming" 2>/dev/null | grep -v '=raise$' | tr '\n' ' ' | sed -e 's/[[:space:]]*$//')"
+      [ -n "$_blocked_by" ] || _blocked_by="(unspecified)" ;;
+  esac
+fi
+
+# _escalate <trigger> — honour a trigger, or decline it, saying which gate refused.
+#
+# THREE outcomes, and the distinction is the point: an operator who set `0` chose this, an
+# operator with no verdict needs to re-run the installer, and an operator who is `blocked`
+# needs to fix a NAMED front-end. Collapsing them into one message would leave the second and
+# third indistinguishable, which is the difference between an actionable line and noise.
+#
+# Both triggers route through here, so the complexity trigger cannot bypass the arming gate —
+# the same reason E17-F03 made `0` silence both.
 _escalate() {
-  if [ "$_threshold" -gt 0 ]; then
-    echo builder-heavy
-  else
+  if [ "$_threshold" -le 0 ]; then
+    # Reachable only from the complexity arm: the round arm requires a positive threshold.
     echo "ℹ️  $1, but escalation.after_rejections is 0 (off) — using 'builder'. Set it to a positive number, and give models.builder-heavy a tier that actually resolves on your front-end (codex/opencode need a matching pin.<front-end>.<tier>)." >&2
-    echo builder
+  elif [ "$_armed" = 1 ]; then
+    echo builder-heavy
+    exit 0
+  elif [ -n "$_blocked_by" ]; then
+    echo "ℹ️  $1, but the installer recorded that escalating would NOT raise the model — blocked by: $_blocked_by. Give that front-end's models.builder-heavy a tier that resolves to a different model (codex/opencode also need a matching pin.<front-end>.<tier>), then re-run harness-install.sh. Using 'builder'." >&2
+  else
+    echo "ℹ️  $1, but no escalation verdict is recorded (.harness/.escalation-arming is absent) — re-run harness-install.sh after giving models.builder-heavy a tier that resolves on your front-end. Using 'builder'." >&2
   fi
+  echo builder
   exit 0
 }
 
@@ -173,13 +232,17 @@ esac
 # `round` is ALREADY one more than the number of rejections: round 1 is the first build,
 # round 3 is the first build after two rejections. So "after N rejections" is `round > N`.
 # Stated once here so it is never re-derived at a call site.
-# `_threshold -gt 0` is re-checked here even though §2 already returned for the disabled case:
-# it keeps this comparison correct on its own terms, because a bare `round > 0` would be true
-# for EVERY round and would turn the off-switch into always-escalate.
-# Escalation off ⇒ no threshold ⇒ this arm cannot fire and has nothing to announce.
+# `_threshold -gt 0` is load-bearing, not redundant: a bare `round > 0` would be true for
+# EVERY round and would turn the off-switch into always-escalate.
+#
+# Escalation off (`0`) ⇒ this arm cannot fire and has nothing to announce — unchanged from
+# E17-F03, because with no threshold configured there is no round it "would have" exceeded.
+# But when the threshold IS set and the round DID exceed it, a decline is real signal at the
+# one moment it matters — a struggling build — so it goes through `_escalate` and is reported
+# rather than silently swallowed. That is bounded: it fires on a rejected feature, not on
+# every build of every target.
 if [ "$_threshold" -gt 0 ] && [ "$_round" -gt "$_threshold" ]; then
-  echo builder-heavy
-  exit 0
+  _escalate "round $_round exceeds escalation.after_rejections=$_threshold"
 fi
 
 echo builder

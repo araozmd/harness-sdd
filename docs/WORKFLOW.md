@@ -630,7 +630,8 @@ so picking between them is routing, never behaviour. The Orchestrator does not d
 judgement — it asks a tool, so the same recorded state always yields the same answer:
 
 ```sh
-tools/builder-role.sh <complexity> <round> [--backend <in-session|delegate>] [--config <path>]
+tools/builder-role.sh <complexity> <round> [--backend <in-session|delegate>] \
+                      [--config <path>] [--arming <path>]
 # → builder | builder-heavy
 ```
 
@@ -639,33 +640,51 @@ Two things can select the heavy role:
 | trigger | where it comes from |
 |---|---|
 | `complexity: complex` in the feature spec's frontmatter | the Architect, at spec time — starts heavy on round 1 |
-| `round > escalation.after_rejections` | the **existing** build↔review counter — **only while escalation is enabled**; at the suggested `2`, the first build after two rejections |
+| `round > escalation.after_rejections` | the **existing** build↔review counter — at the shipped `2`, the first build after two rejections |
+
+Both triggers need a **second yes**: the installer's arming verdict (below).
 
 ```yaml
 escalation:
-  after_rejections: 0   # SHIPPED DEFAULT — 0 disables BOTH triggers
-  # after_rejections: 2 # a typical opt-in: escalate from the third build onward
+  after_rejections: 2   # the shipped value — 0 disables BOTH triggers
 ```
 
 Notes that matter in practice:
 
-- **It is opt-in and ships off.** `after_rejections` is both the threshold and the master
-  switch: `0` (the default) means neither trigger fires. Set a positive number to turn
-  escalation on — 2 is the suggested value.
-- **Before enabling it, make sure the heavy role actually resolves to a model on your
-  front-end.** Otherwise escalation is a *downgrade*: a role that resolves to nothing runs on
-  the session model, abandoning whatever `models.builder` was set to, exactly when the build
-  was struggling. On `claude` / `gemini` / `antigravity` a built-in tier alias is enough; on
-  `codex` / `opencode` a tier alone stamps **nothing** — you must also set the matching
-  `pin.<front-end>.<tier>`.
-- **The harness does not try to verify that for you.** Two review rounds killed two attempts
-  to infer it, because the determination lives in the installer's per-front-end resolver and
-  re-deriving it elsewhere produced a new wrong answer each time. The opt-in is your
-  assertion, not the harness's deduction.
+- **Escalation needs two independent yeses.** A positive `after_rejections` — which is both
+  the threshold and your master switch — **and** an `armed` verdict in
+  `.harness/.escalation-arming`. Either one alone routes to `builder`.
+- **The installer computes the verdict; you do not have to.** `harness-install.sh` asks its
+  own model resolver what `builder` and `builder-heavy` resolve to on every front-end it
+  stamps, and records the comparison. `armed` means `builder-heavy` resolves to a **different**
+  model on every selected front-end. Anything else is `blocked`, and the file names the
+  front-end that blocked it:
+
+  ```
+  blocked
+  claude=raise
+  codex=none
+  ```
+
+  `none` is the case that matters: the heavy role resolves to **nothing** while `builder`
+  resolves to something, so escalating would abandon your configured Builder model for the
+  session default — a *downgrade*, arriving exactly when the build was struggling. On
+  `claude` / `gemini` / `antigravity` a built-in tier alias is enough; on `codex` / `opencode`
+  a tier alone stamps **nothing** — you must also set the matching `pin.<front-end>.<tier>`.
+  The verdict is computed at **install time**, so re-run the installer after changing any of
+  it.
+- **The verdict is a conservative AND across selected front-ends.** The rule cannot know
+  which front-end it is running under, so one misconfigured front-end disables escalation
+  everywhere. That never downgrades anyone, and the `blocked` line tells you which one to fix.
+- **WHAT IT DOES NOT CHECK: that the model is STRONGER, or that it exists.** The harness has
+  no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours —
+  what the check closes is the silent downgrade to no model at all.
+- **An absent verdict means off.** Either the installer has not run since v0.58.0, or no role
+  resolves to a model. Same remedy: configure `models.builder-heavy` and re-run the installer.
 - **`0` disables BOTH triggers — including `complexity: complex`.** It is the master switch,
   not just a round threshold. A tagged spec on a target that has not opted in routes to
   `builder` and the tool says why on stderr. (Leaving the tag live at `0` would escalate into
-  the same unresolvable heavy role the opt-in exists to prevent.) `0` also does not *invert*:
+  the same unresolvable heavy role the veto exists to prevent.) `0` also does not *invert*:
   a bare `round > 0` would be true for every round, turning the off-switch into
   always-escalate.
 - **Absent means standard, silently.** A spec written before this feature carries no tag and
