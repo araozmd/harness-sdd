@@ -2,7 +2,7 @@
 id: E21-F04
 title: Stacked-PR lane for reviewability of safely-splittable features
 epic: E21-change-size-discipline
-status: pending          # pending → spec-ready → in-progress → in-review → done
+status: done             # pending → spec-ready → in-progress → in-review → done
 sdd: true
 autonomous: false        # re-gated after WITHDRAWN (PR #78) — goes through the human gate
 depends_on: [E18-F01, E21-F03]

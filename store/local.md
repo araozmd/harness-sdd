@@ -116,6 +116,17 @@ Orchestrator's exclusive ownership of state writes.
     epic-done rollup and the drift-check demotion (below) — `set_status` is the **one**
     write path for both feature and epic status; backends MUST implement the epic case.
 
+  Since **v0.59.0** both "keep in sync" clauses above are **enforced**, not merely asked
+  for: `init.sh` runs `tools/validate-board.py … --spec-root .`, which fails the gate when a
+  spec's or `epic.md`'s frontmatter `status` disagrees with the board, naming the file and
+  both values. The same pass resolves `spec_path` — an `sdd: true` feature past `pending`
+  must point at a directory holding a readable `*.spec.md`. It does **not** fire for the
+  `sdd: false` quick-fix lane (no Architect runs, so there is no spec by construction), for a
+  feature still at `pending`, or for a feature inside a `draft` epic (already warn-only). A
+  spec that declares no `status` is skipped — the contract is "keep in sync", not "must
+  declare". The check runs only at the gate, never inside the `set_status` write path, which
+  stays a pure function of the board data.
+
 ### Ownership & scoped selection (optional `owner` — E10-F01)
 Both **epic** objects and **feature** objects carry an **optional** string `owner`
 field in the schema. It is **additive and backward-compatible**: it is not in any

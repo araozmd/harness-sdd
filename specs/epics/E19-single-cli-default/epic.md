@@ -1,7 +1,7 @@
 ---
 id: E19
 title: "Installer: single-CLI (host) agent default"
-status: pending          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: done             # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 

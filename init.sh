@@ -181,9 +181,15 @@ if grep -q "tasks: local" harness.config.yaml 2>/dev/null; then
   # stays zero-dependency while accepting/rejecting exactly what the write lock
   # does. Same stderr contract as before (draft warning, then two-space-prefixed
   # errors) and non-zero on invalid.
-  python3 tools/validate-board.py state/tasks.json store/tasks.schema.json \
-    || fail "state/tasks.json failed schema validation (see errors above)"
-  ok "TaskStore (local) valid against schema"
+  # `--spec-root .` additionally checks the board against what is on disk (E99-F14):
+  # an `sdd` feature past `pending` whose `spec_path` leads nowhere a Reviewer can
+  # read, and any spec/epic file whose frontmatter `status` disagrees with the board.
+  # store/local.md makes both a contract; until now nothing verified either, and each
+  # cost a review round on PR #122. The flag is opt-in in the validator, so passing it
+  # here is what arms the check for a real harness tree.
+  python3 tools/validate-board.py state/tasks.json store/tasks.schema.json --spec-root . \
+    || fail "state/tasks.json failed schema validation or disagrees with the specs on disk (see errors above)"
+  ok "TaskStore (local) valid against schema and consistent with specs/"
 
   # Dependency cycles are planning diagnostics, not schema failures. Run this
   # only after canonical validation succeeds, capture the helper status before

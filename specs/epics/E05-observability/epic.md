@@ -1,3 +1,10 @@
+---
+id: E05
+title: Harness observability & review quality
+status: done             # pending → in-progress → done (rollup of its features)
+owner: araozmd
+---
+
 # Epic E05 — Harness observability & review quality
 
 ## Problem

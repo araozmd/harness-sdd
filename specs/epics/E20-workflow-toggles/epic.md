@@ -1,7 +1,7 @@
 ---
 id: E20
 title: "Installer: workflow toggles beyond front-end selection"
-status: pending          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: done             # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 

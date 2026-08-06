@@ -89,7 +89,7 @@
     {
       "id": "E06",
       "title": "Planning tier (rolling-wave inception + per-epic drill-down)",
-      "status": "in-progress",
+      "status": "done",
       "features": [
         {
           "id": "E06-F01",
@@ -490,7 +490,7 @@
         {
           "id": "E99-F14",
           "title": "init.sh should validate spec_path existence and spec/board status agreement",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
