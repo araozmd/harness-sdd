@@ -26,6 +26,7 @@ a review round on PR #122:
 | `sdd: true`, past `pending` | path missing, or dir holds no spec | ❌ names the id and the path |
 | `sdd: true`, past `pending` | a spec is there but declares another feature's `id` | ❌ **resolving is not belonging** — a sibling directory whose spec carries the same status otherwise passes every check, and the Reviewer implements the wrong spec |
 | any | a spec or `epic.md` that cannot be read or decoded | ❌ distinct from "declares no status", which is a documented skip |
+| any | `spec_path` that is absolute or contains `..` | ❌ `os.path.join` discards the root for the first and walks out of it for the second — the gate would certify a spec that is not in this repository |
 | `sdd: false` (quick-fix lane) | anything | ✅ — no Architect ran, so there is no spec by construction |
 | `sdd: true`, `pending` | anything | ✅ — not authored yet |
 | feature inside a `draft` epic | no spec | ✅ — already warn-only; the `next()` draft gate keeps it unselectable |

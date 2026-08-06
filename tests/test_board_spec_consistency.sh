@@ -116,6 +116,60 @@ run_root "$T/r4b.json" "$D"
 [ "$RC" -ne 0 ] || fail "R4: control failed to fire — the pending pass is vacuous"
 pass "R4 pending needs no spec; advancing ONLY the status to spec-ready fires"
 
+# ══ R20 — a spec_path may not escape the harness root ════════════════════════════════
+# (Codex #3731166711.) `os.path.join(root, spec_path)` DISCARDS root for an absolute path
+# and walks out of it for one containing `..`. With a matching spec at the far end, the gate
+# would certify the board as consistent while the Reviewer reads a spec that is not in this
+# repository. The escape is reported for every feature, not only authored ones: it is not
+# "no spec yet", it is a malformed pointer.
+#
+# Containment is to the ROOT, deliberately NOT to `<root>/specs` — see case (c). Leaving the
+# repository is the defect; sitting outside `specs/` is a convention the schema has never
+# stated, and enforcing it here would fail-stop schema-valid boards at a MANDATORY gate.
+Y2="$T/r20"; mkdir -p "$Y2"
+OUTSIDE="$T/r20-outside/F1-a"; mkdir -p "$OUTSIDE"
+printf -- '---\nid: E1-F1\nstatus: done\n---\n\n# outside\n' >"$OUTSIDE/E1-F1.spec.md"
+# (a) `..` escape — pointed at a real directory holding a real, matching, correctly-owned
+#     spec, so every OTHER rule in this file would pass it.
+board "$T/r20a.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"../r20-outside/F1-a/"}'
+run_root "$T/r20a.json" "$Y2"
+[ "$RC" -ne 0 ] || fail "R20: a spec_path containing .. escaped the tree undetected"
+saw "escapes the harness root" || fail "R20: the .. escape was not reported as an escape"
+# (b) absolute path — os.path.join discards the root entirely.
+cat >"$T/r20b.json" <<JSON
+{"project":"fx","epics":[{"id":"E1","title":"one","status":"planned","features":[
+ {"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"$OUTSIDE/"}]}]}
+JSON
+run_root "$T/r20b.json" "$Y2"
+[ "$RC" -ne 0 ] || fail "R20: an absolute spec_path escaped the tree undetected"
+saw "escapes the harness root" || fail "R20: the absolute path was not reported as an escape"
+# (c) a sibling of specs/ under the same root is NOT an escape, and must stay green.
+#     It is still inside the repository, still has to declare this feature's id and still
+#     has to agree with the board — nothing is certified sight-unseen. Rejecting it would
+#     impose a layout the schema never required (`spec_path` is only `"type": "string"`),
+#     and would halt every agent in a target whose board predates the convention.
+mkdir -p "$Y2/elsewhere/F1-a"
+printf -- '---\nid: E1-F1\nstatus: done\n---\n' >"$Y2/elsewhere/F1-a/E1-F1.spec.md"
+board "$T/r20c.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"elsewhere/F1-a/"}'
+run_root "$T/r20c.json" "$Y2"
+[ "$RC" -eq 0 ] || fail "R20: an in-repo path outside specs/ was rejected: $(cat "$T/err")"
+# ...and it is not exempt from the other rules either: change ONLY its declared status and
+# it fires, so (c)'s green is coverage, not a bypass.
+printf -- '---\nid: E1-F1\nstatus: in-review\n---\n' >"$Y2/elsewhere/F1-a/E1-F1.spec.md"
+run_root "$T/r20c.json" "$Y2"
+[ "$RC" -ne 0 ] || fail "R20: a path outside specs/ escaped the status rule as well"
+# (d) an sdd:false entry is NOT exempt — an escaping pointer is malformed regardless.
+board "$T/r20d.json" '{"id":"E1-F1","title":"a","status":"done","sdd":false,"depends_on":[],"spec_path":"../r20-outside/F1-a/"}'
+run_root "$T/r20d.json" "$Y2"
+[ "$RC" -ne 0 ] || fail "R20: an escaping spec_path was excused because sdd was false"
+# Control: the SAME spec content, relocated under specs/, is clean — so R20 fires on the
+# containment and not on the spec it finds there.
+mkspec "$Y2" "specs/epics/E1-one/F1-a/E1-F1.spec.md" "done"
+board "$T/r20e.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}'
+run_root "$T/r20e.json" "$Y2"
+[ "$RC" -eq 0 ] || fail "R20: control — an in-tree spec_path failed: $(cat "$T/err")"
+pass "R20 absolute and .. paths escape the root; an in-repo path outside specs/ does not"
+
 # ══ R19 — a resolvable spec_path must also BELONG to the board entry ═════════════════
 # (Codex #3731050919.) The sibling-directory case: the path resolves, a *.spec.md is there,
 # and the statuses agree — so every other rule passes — while the spec is a DIFFERENT
@@ -186,7 +240,7 @@ run_root "$T/r18.json" "$U"
 # the suite order-sensitive, and the failure reads as a code defect rather than a test one.
 V2="$T/r18b"; mkdir -p "$V2/specs/epics/E1-one"
 printf -- '---\nid: E1\nstatus: \200\200draft\n---\n' >"$V2/specs/epics/E1-one/epic.md"
-board "$T/r18b.json" '{"id":"E1-F1","title":"a","status":"pending","sdd":false,"depends_on":[],"spec_path":"x/"}'
+board "$T/r18b.json" '{"id":"E1-F1","title":"a","status":"pending","sdd":false,"depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}'
 run_root "$T/r18b.json" "$V2"
 [ "$RC" -ne 0 ] || fail "R18: an undecodable epic.md passed"
 saw "cannot be read or decoded" || fail "R18: the epic.md error did not say it was unreadable"
@@ -304,7 +358,7 @@ pass "R14 quoted frontmatter values compare by their contents"
 # by reading the contract, not assumed from the feature case.
 J="$T/r9"; mkdir -p "$J/specs/epics/E1-one"
 printf -- '---\nid: E1\nstatus: draft\n---\n\n# epic\n' >"$J/specs/epics/E1-one/epic.md"
-board "$T/r9.json" '{"id":"E1-F1","title":"a","status":"pending","sdd":false,"depends_on":[],"spec_path":"x/"}'
+board "$T/r9.json" '{"id":"E1-F1","title":"a","status":"pending","sdd":false,"depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}'
 run_root "$T/r9.json" "$J"
 [ "$RC" -ne 0 ] || fail "R9: an epic.md declaring draft against a planned board passed"
 saw "epic.md" || fail "R9: error did not name epic.md"

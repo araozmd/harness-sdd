@@ -123,7 +123,10 @@ Orchestrator's exclusive ownership of state writes.
   must point at a directory holding a readable `*.spec.md` **that declares that feature's
   `id`**, because a path pointing at a sibling feature's directory otherwise satisfies every
   other rule while handing the Reviewer the wrong spec. A spec that cannot be read or
-  decoded is reported as such, never treated as one that simply declares nothing. It does
+  decoded is reported as such, never treated as one that simply declares nothing, and a
+  `spec_path` that is absolute or escapes the repository via `..` is rejected outright
+  (containment is to the harness root, not to `specs/` — the schema has never required
+  that layout). It does
   **not** fire for the
   `sdd: false` quick-fix lane (no Architect runs, so there is no spec by construction), for a
   feature still at `pending`, or for a feature inside a `draft` epic (already warn-only). A

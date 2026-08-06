@@ -341,6 +341,43 @@ def _declared(front, key):
     return front.get(key) or None
 
 
+def _resolve_under_root(root, spec_path):
+    """The absolute spec directory for `spec_path`, or None when it escapes `root`.
+
+    `os.path.join(root, spec_path)` silently DISCARDS `root` when `spec_path` is absolute,
+    and walks out of it when `spec_path` contains `..`. Either way a hand-edited or migrated
+    board can aim the gate at a directory outside the harness: with a matching spec there,
+    `init.sh` certifies the board as consistent while the Reviewer reads a spec that is not
+    in this repository at all.
+
+    Containment is to the HARNESS ROOT, deliberately not to `<root>/specs`. Leaving the
+    repository is the defect; sitting somewhere other than `specs/` is a convention, and
+    `store/tasks.schema.json` has never constrained `spec_path` beyond `"type": "string"`.
+    Enforcing the convention here would fail-stop schema-valid boards that predate this rule
+    — two shipped suites use short in-repo paths like `a/` — and at a MANDATORY gate an
+    unstated convention that halts all agent work is a worse failure than the odd layout it
+    would have tidied. A spec outside `specs/` is still inside the repository, still has to
+    declare this feature's id, and still has to agree with the board.
+
+    The containment test is LEXICAL (`normpath`), not `realpath`. The question this rule
+    asks is what the BOARD asked for, and resolving symlinks would answer a different one.
+    Nothing in the harness needs the other answer: the umbrella mode that could plausibly
+    have introduced a symlinked spec tree stubs prose files as regular files carrying a
+    sentinel, and `specs/epics/` is not in the stub-able prose tier at all — a thin child's
+    spec tree is always local.
+    """
+    if os.path.isabs(spec_path):
+        return None
+    # abspath, NOT normpath: init.sh passes `--spec-root .`, and `normpath(".")` is `"."`,
+    # which no joined relative path is ever prefixed by — so a normpath comparison calls
+    # every path an escape in the one configuration that actually ships.
+    base = os.path.abspath(root)
+    target = os.path.abspath(os.path.join(base, spec_path))
+    if target == base or target.startswith(base + os.sep):
+        return target
+    return None
+
+
 def _spec_files(directory):
     """Every `*.spec.md` in `directory`, sorted.
 
@@ -412,7 +449,18 @@ def spec_consistency_errors(data, root):
             if not isinstance(fid, str) or not isinstance(fstatus, str):
                 continue
 
-            fdir = os.path.join(root, spec_path)
+            fdir = _resolve_under_root(root, spec_path)
+            if fdir is None:
+                # Unconditional — not gated on `authored`. An escaping spec_path is not
+                # "no spec yet", it is a malformed pointer, and it is exactly as wrong on
+                # an sdd:false or pending entry as on an authored one.
+                errors.append(
+                    "%s: spec_path escapes the harness root: %s — it must be a relative "
+                    "path inside the repository, or the gate would certify a spec that "
+                    "is not in it" % (fid, spec_path)
+                )
+                continue
+
             # A DRAFT epic is an inception sketch. The harness already declares that a
             # non-`pending` feature inside one is WARN-ONLY (see _emit_draft_warnings:
             # the next() draft gate keeps it unselectable), so demanding an authored
