@@ -120,7 +120,11 @@ Orchestrator's exclusive ownership of state writes.
   for: `init.sh` runs `tools/validate-board.py … --spec-root .`, which fails the gate when a
   spec's or `epic.md`'s frontmatter `status` disagrees with the board, naming the file and
   both values. The same pass resolves `spec_path` — an `sdd: true` feature past `pending`
-  must point at a directory holding a readable `*.spec.md`. It does **not** fire for the
+  must point at a directory holding a readable `*.spec.md` **that declares that feature's
+  `id`**, because a path pointing at a sibling feature's directory otherwise satisfies every
+  other rule while handing the Reviewer the wrong spec. A spec that cannot be read or
+  decoded is reported as such, never treated as one that simply declares nothing. It does
+  **not** fire for the
   `sdd: false` quick-fix lane (no Architect runs, so there is no spec by construction), for a
   feature still at `pending`, or for a feature inside a `draft` epic (already warn-only). A
   spec that declares no `status` is skipped — the contract is "keep in sync", not "must
