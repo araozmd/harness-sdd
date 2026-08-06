@@ -359,20 +359,25 @@ def _resolve_under_root(root, spec_path):
     would have tidied. A spec outside `specs/` is still inside the repository, still has to
     declare this feature's id, and still has to agree with the board.
 
-    The containment test is LEXICAL (`normpath`), not `realpath`. The question this rule
-    asks is what the BOARD asked for, and resolving symlinks would answer a different one.
-    Nothing in the harness needs the other answer: the umbrella mode that could plausibly
-    have introduced a symlinked spec tree stubs prose files as regular files carrying a
-    sentinel, and `specs/epics/` is not in the stub-able prose tier at all — a thin child's
-    spec tree is always local.
+    Containment is compared on RESOLVED paths (`realpath`), on both sides. An earlier
+    version compared lexically, reasoning that the question was "what did the board ask
+    for" and that no legitimate harness layout symlinks a spec tree. Both halves of that
+    were beside the point: a lexical test accepts `specs/epics/<F>/ -> /tmp/elsewhere`,
+    which is IN-root by spelling and outside the repository in fact, so the gate certifies
+    a Reviewer-facing spec that is not in this repo — the very escape this rule exists to
+    stop. What matters is where the read actually lands, not how it is written.
+
+    Resolving the root too is not optional: on macOS `/tmp` is itself a symlink to
+    `/private/tmp`, so resolving only one side would report an escape for every tree under
+    a temporary directory.
     """
     if os.path.isabs(spec_path):
         return None
-    # abspath, NOT normpath: init.sh passes `--spec-root .`, and `normpath(".")` is `"."`,
+    # realpath, NOT normpath: init.sh passes `--spec-root .`, and `normpath(".")` is `"."`,
     # which no joined relative path is ever prefixed by — so a normpath comparison calls
     # every path an escape in the one configuration that actually ships.
-    base = os.path.abspath(root)
-    target = os.path.abspath(os.path.join(base, spec_path))
+    base = os.path.realpath(root)
+    target = os.path.realpath(os.path.join(base, spec_path))
     if target == base or target.startswith(base + os.sep):
         return target
     return None

@@ -158,6 +158,24 @@ run_root "$T/r20c.json" "$Y2"
 printf -- '---\nid: E1-F1\nstatus: in-review\n---\n' >"$Y2/elsewhere/F1-a/E1-F1.spec.md"
 run_root "$T/r20c.json" "$Y2"
 [ "$RC" -ne 0 ] || fail "R20: a path outside specs/ escaped the status rule as well"
+# (c2) a SYMLINK out of the tree is an escape too (Codex #3731306972). It is in-root by
+#      spelling and outside the repository in fact, which a lexical comparison accepts —
+#      what matters is where the read actually lands, not how the path is written.
+mkdir -p "$Y2/specs/epics/E1-sym"
+ln -s "$OUTSIDE" "$Y2/specs/epics/E1-sym/F1-a"
+board "$T/r20f.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"specs/epics/E1-sym/F1-a/"}'
+run_root "$T/r20f.json" "$Y2"
+[ "$RC" -ne 0 ] || fail "R20: a symlink pointing outside the repository was accepted"
+saw "escapes the harness root" || fail "R20: the symlink escape was not reported as an escape"
+# ...and a symlink that stays INSIDE the repository is not an escape, so the rule tests
+# where the path lands rather than merely rejecting symlinks.
+mkdir -p "$Y2/specs/real/F1-a"
+printf -- '---\nid: E1-F1\nstatus: done\n---\n' >"$Y2/specs/real/F1-a/E1-F1.spec.md"
+mkdir -p "$Y2/specs/epics/E1-in"
+ln -s "$Y2/specs/real/F1-a" "$Y2/specs/epics/E1-in/F1-a"
+board "$T/r20g.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"specs/epics/E1-in/F1-a/"}'
+run_root "$T/r20g.json" "$Y2"
+[ "$RC" -eq 0 ] || fail "R20: an in-repo symlink was rejected: $(cat "$T/err")"
 # (d) an sdd:false entry is NOT exempt — an escaping pointer is malformed regardless.
 board "$T/r20d.json" '{"id":"E1-F1","title":"a","status":"done","sdd":false,"depends_on":[],"spec_path":"../r20-outside/F1-a/"}'
 run_root "$T/r20d.json" "$Y2"
