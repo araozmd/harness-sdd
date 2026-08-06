@@ -448,6 +448,14 @@ def spec_consistency_errors(data, root):
                     )
                 continue
 
+            # `owned` counts specs that PROVE they belong to this board entry by declaring
+            # the feature's id. Without it, a spec_path pointing at a SIBLING feature's
+            # directory whose spec happens to carry the same status passes every check
+            # above — the path resolves, a *.spec.md is there, the statuses agree — and the
+            # gate reports a consistent environment while the Reviewer opens and implements
+            # the wrong feature's spec. Resolving is not the same as belonging.
+            owned = 0
+            misowned = False
             for spec_file in specs:
                 front = _frontmatter(spec_file)
                 if front is _UNREADABLE:
@@ -461,6 +469,22 @@ def spec_consistency_errors(data, root):
                         % (fid, os.path.relpath(spec_file, root))
                     )
                     continue
+
+                declared_id = _declared(front, "id")
+                if declared_id is not None and declared_id != fid:
+                    # This file belongs to a different feature. Report the ownership
+                    # failure and do NOT compare its status: a status drawn from another
+                    # feature's spec is meaningless either way it comes out.
+                    errors.append(
+                        "%s: spec declares id '%s' (%s) — spec_path points at another "
+                        "feature's spec, which a Reviewer would open and implement"
+                        % (fid, declared_id, os.path.relpath(spec_file, root))
+                    )
+                    misowned = True
+                    continue
+                if declared_id == fid:
+                    owned += 1
+
                 declared = _declared(front, "status")
                 if declared is not None and declared != fstatus:
                     errors.append(
@@ -473,6 +497,15 @@ def spec_consistency_errors(data, root):
                             os.path.relpath(spec_file, root),
                         )
                     )
+
+            if authored and owned == 0 and not misowned:
+                # Nothing under the path claims this feature. Suppressed when a misowned
+                # spec was already reported, because that message says the same thing more
+                # precisely and naming it twice makes the gate output harder to act on.
+                errors.append(
+                    "%s: no spec under %s declares id '%s' — the directory is not proven "
+                    "to belong to this board entry" % (fid, spec_path, fid)
+                )
 
     return errors
 

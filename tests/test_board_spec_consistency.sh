@@ -13,9 +13,9 @@
 #
 # A gate that fires is easy to write; a gate that fires ONLY when it should is the whole
 # job, because `init.sh` is MANDATORY — a false positive halts every agent in the repo.
-# So each rule that is expected to STAY SILENT (R3, R4, R7, R8, R10, R11) is paired with a
-# fixture that differs in exactly ONE variable and DOES fire. Silence on a fixture that
-# could never have fired proves nothing.
+# So each rule that is expected to STAY SILENT (R3, R4, R7, R8, R10, R11, R16, R18, R19) is
+# paired with a fixture that differs in exactly ONE variable and DOES fire. Silence on a
+# fixture that could never have fired proves nothing.
 #
 # R15 asserts the real repository is consistent. On its own that assertion is worthless —
 # it would pass just as well against a validator that returned no errors ever. It is
@@ -54,11 +54,14 @@ run_bare() {  # run_bare <board.json>   — no --spec-root
 saw() { grep -F "$1" "$T/err" >/dev/null 2>&1; }
 
 # Build a spec tree rooted at $1 with a spec file at $2 declaring frontmatter status $3.
+# Every fixture feature below is `E1-F1`, so the spec declares that id: since R19 a spec
+# must prove it belongs to the board entry, and a placeholder id would make every fixture
+# fail ownership rather than test the rule it was written for.
 mkspec() {  # mkspec <root> <relative spec file path> <status line body>
   mkdir -p "$(dirname "$1/$2")"
   {
     echo "---"
-    echo "id: X"
+    echo "id: E1-F1"
     echo "status: $3"
     echo "---"
     echo
@@ -112,6 +115,54 @@ board "$T/r4b.json" '{"id":"E1-F1","title":"a","status":"spec-ready","sdd":true,
 run_root "$T/r4b.json" "$D"
 [ "$RC" -ne 0 ] || fail "R4: control failed to fire — the pending pass is vacuous"
 pass "R4 pending needs no spec; advancing ONLY the status to spec-ready fires"
+
+# ══ R19 — a resolvable spec_path must also BELONG to the board entry ═════════════════
+# (Codex #3731050919.) The sibling-directory case: the path resolves, a *.spec.md is there,
+# and the statuses agree — so every other rule passes — while the spec is a DIFFERENT
+# feature's, which a Reviewer would open and implement. Resolving is not belonging.
+W="$T/r19"
+mkspec "$W" "specs/epics/E1-one/F2-b/E1-F2.spec.md" "done"
+python3 - "$W/specs/epics/E1-one/F2-b/E1-F2.spec.md" <<'PY'
+import io, sys
+p = sys.argv[1]
+t = io.open(p, encoding="utf-8").read().replace("id: E1-F1", "id: E1-F2")
+io.open(p, "w", encoding="utf-8").write(t)
+PY
+# E1-F1's spec_path points at E1-F2's directory, and the two statuses MATCH — so the
+# status rule alone can never catch this.
+board "$T/r19.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"specs/epics/E1-one/F2-b/"}'
+run_root "$T/r19.json" "$W"
+[ "$RC" -ne 0 ] || fail "R19: a spec_path pointing at a sibling feature's spec passed"
+saw "declares id 'E1-F2'" || fail "R19: the error did not name the id the spec actually declares"
+# Control: the SAME directory, with the spec's id corrected to this feature, is clean —
+# proving R19 failed on ownership and not on the fixture's shape.
+python3 - "$W/specs/epics/E1-one/F2-b/E1-F2.spec.md" <<'PY'
+import io, sys
+p = sys.argv[1]
+t = io.open(p, encoding="utf-8").read().replace("id: E1-F2", "id: E1-F1")
+io.open(p, "w", encoding="utf-8").write(t)
+PY
+run_root "$T/r19.json" "$W"
+[ "$RC" -eq 0 ] || fail "R19: control — a correctly-owned spec at the same path failed: $(cat "$T/err")"
+# A spec that declares NO id cannot prove ownership either, for an authored feature.
+X2="$T/r19b"
+mkspec "$X2" "specs/epics/E1-one/F1-a/E1-F1.spec.md" "done"
+python3 - "$X2/specs/epics/E1-one/F1-a/E1-F1.spec.md" <<'PY'
+import io, sys
+p = sys.argv[1]
+t = io.open(p, encoding="utf-8").read().replace("id: E1-F1\n", "")
+io.open(p, "w", encoding="utf-8").write(t)
+PY
+board "$T/r19b.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}'
+run_root "$T/r19b.json" "$X2"
+[ "$RC" -ne 0 ] || fail "R19: an authored feature whose spec declares no id passed"
+saw "not proven to belong" || fail "R19: the error did not say ownership was unproven"
+# ...but the same undeclared id under a NON-authored feature stays silent, exactly as an
+# undeclared status does.
+board "$T/r19c.json" '{"id":"E1-F1","title":"a","status":"done","sdd":false,"depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}'
+run_root "$T/r19c.json" "$X2"
+[ "$RC" -eq 0 ] || fail "R19: ownership was demanded of an sdd:false feature: $(cat "$T/err")"
+pass "R19 a spec must declare the feature's id; a sibling's spec and an unproven one both fire"
 
 # ══ R18 — a spec that cannot be READ is a failure, not "declares no status" ══════════
 # (Codex #3731050923.) The glob has already satisfied the "an authored spec exists" rule by
@@ -221,10 +272,13 @@ pass "R7 inline comments are stripped, and a real mismatch behind one still fire
 # ══ R8 — nothing to compare is not a violation ════════════════════════════════════════
 H="$T/r8"; mkdir -p "$H/specs/epics/E1-one/F1-a"
 printf '# no frontmatter at all\n' >"$H/specs/epics/E1-one/F1-a/E1-F1.spec.md"
-board "$T/r8.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}'
+# sdd:false: R8's claim is about the STATUS comparison. Ownership (R19) is a separate
+# rule that a spec with no frontmatter legitimately fails, and leaving it in scope here
+# would make R8 pass or fail for the wrong reason.
+board "$T/r8.json" '{"id":"E1-F1","title":"a","status":"done","sdd":false,"depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}'
 run_root "$T/r8.json" "$H"
 [ "$RC" -eq 0 ] || fail "R8: a spec with no frontmatter was treated as drift: $(cat "$T/err")"
-printf -- '---\nid: X\ntitle: t\n---\n\n# no status key\n' >"$H/specs/epics/E1-one/F1-a/E1-F1.spec.md"
+printf -- '---\nid: E1-F1\ntitle: t\n---\n\n# no status key\n' >"$H/specs/epics/E1-one/F1-a/E1-F1.spec.md"
 run_root "$T/r8.json" "$H"
 [ "$RC" -eq 0 ] || fail "R8: frontmatter without a status key was treated as drift: $(cat "$T/err")"
 # Control: add ONLY a disagreeing status key — it fires.
