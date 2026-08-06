@@ -113,6 +113,22 @@ run_root "$T/r4b.json" "$D"
 [ "$RC" -ne 0 ] || fail "R4: control failed to fire — the pending pass is vacuous"
 pass "R4 pending needs no spec; advancing ONLY the status to spec-ready fires"
 
+# ══ R17 — a spec_path naming a FILE is unresolved, not "a directory with no spec" ════
+# Found by mutation: relaxing `isdir` to `exists` keeps every pass/fail verdict identical
+# and changes only the diagnostic — a file-shaped spec_path would be reported as a
+# directory that happens to hold no spec. At a mandatory gate the operator acts on the
+# message, so the message is part of the contract.
+B2="$T/r17"; mkdir -p "$B2/specs/epics/E1-one"
+printf 'not a directory\n' >"$B2/specs/epics/E1-one/F1-a"
+board "$T/r17.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"specs/epics/E1-one/F1-a"}'
+run_root "$T/r17.json" "$B2"
+[ "$RC" -ne 0 ] || fail "R17: a spec_path naming a regular file passed"
+saw "does not exist" || fail "R17: a file-shaped spec_path was not reported as unresolved"
+if saw "no *.spec.md"; then
+  fail "R17: a regular file was described as a directory holding no spec"
+fi
+pass "R17 a spec_path naming a file reports as unresolved, not as an empty spec directory"
+
 # ══ R16 — a DRAFT epic's features are exempt from the existence rule ═════════════════
 # The harness already treats a non-pending feature inside a draft epic as WARN-ONLY (the
 # next() draft gate keeps it unselectable). Demanding an authored spec for one would
