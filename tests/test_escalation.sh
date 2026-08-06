@@ -905,8 +905,15 @@ no_doc_claims_the_harness_cannot_check() {
   _newest="$T/changelog-newest"
   awk '/^## \[/ { n++ } n == 1' "$SRC/CHANGELOG.md" > "$_newest"
   [ -s "$_newest" ] || fail "F05-R11: could not extract the newest CHANGELOG entry"
-  grep -q '0.58.0' "$_newest" \
-    || fail "F05-R11: control — the extracted newest CHANGELOG entry is not this release's"
+  # The control proves the awk above really grabbed the CURRENT release's entry rather than
+  # an empty or stale slice. It is derived from VERSION, never a frozen literal: a hardcoded
+  # version here fails on the next release for a reason that has nothing to do with
+  # escalation, which is exactly what it did when v0.59.0 landed (it read `0.58.0`).
+  _cl_expect="$(tr -d ' \t\r\n' < "$SRC/VERSION")"
+  [ -n "$_cl_expect" ] || fail "F05-R11: VERSION is empty — cannot anchor the CHANGELOG control"
+  _cl_actual="$(awk 'match($0, /^## \[[^]]+\]/) { print substr($0, RSTART + 4, RLENGTH - 5); exit }' "$SRC/CHANGELOG.md")"
+  [ "$_cl_actual" = "$_cl_expect" ] \
+    || fail "F05-R11: control — newest CHANGELOG entry is [$_cl_actual], VERSION is [$_cl_expect]"
   _bad="$(grep -in 'Nothing routes to it automatically\|you invoke it by hand\|deliberately does .*infer\|the opt-in is your assertion' "$_newest" || true)"
   [ -z "$_bad" ] || fail "F05-R11: the newest CHANGELOG entry carries a superseded claim: $_bad"
 
