@@ -535,7 +535,7 @@
         {
           "id": "E17-F05",
           "title": "Installer-stamped escalation arming, so the automatic default can return",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [

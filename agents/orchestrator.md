@@ -282,15 +282,19 @@ and never override the answer because you disagree with it.
 Escalation is **one-way within a feature** by construction: `round` only increases and the
 tag does not change mid-feature. There is no demotion rule — do not invent one.
 
-**Escalation is OPT-IN and ships OFF.** `escalation.after_rejections` is both the threshold
-and the master switch: `0` — the shipped default — means neither trigger fires. When it is
-off and a spec carries `complexity: complex`, the tool says so on stderr; surface that and
-carry on, it is telling the operator to enable escalation, not reporting a failure.
+**Escalation needs TWO yeses, and neither is yours to give.** A positive
+`escalation.after_rejections` — both the threshold and the operator's master switch, shipped
+at `2`, where `0` disables both triggers — **and** an `armed` verdict in
+`.harness/.escalation-arming`. When either gate is shut and a spec carries
+`complexity: complex`, the tool says which one on stderr; surface that and carry on. It is
+telling the operator what to configure, not reporting a failure.
 
-**The harness does not check whether escalating would actually help, and neither should
-you.** Whether `models.builder-heavy` resolves to a real model depends on the front-end and
-its pins, which only the installer's resolver knows. Enabling escalation is the operator
-asserting they configured it. Do not add a judgement of your own on top.
+**The installer answers "would escalating actually help?" — you never estimate it.**
+`harness-install.sh` asks its own resolver what `builder` and `builder-heavy` resolve to on
+every front-end it stamps and records the comparison in `.harness/.escalation-arming`. That
+file decides. Do not read it yourself, do not reason about `models:` or its pins, and do not
+add a judgement on top: two E17-F03 review rounds killed two attempts to work this out
+anywhere other than the resolver, and each was wrong on a different front-end.
 
 **Record which Builder ran and why (R10/R11).** The `progress/history.md` line names the role
 and the trigger, e.g.

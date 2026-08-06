@@ -4,6 +4,87 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.58.0] — 2026-08-04
+
+### Added — ✨ installer-stamped escalation arming (E17-F05)
+
+v0.57.0 shipped escalation **off** (`after_rejections: 0`) because it could not tell whether
+escalating would actually raise the model — and getting that wrong is not a no-op, it is a
+**downgrade** arriving exactly when a build is struggling. This release buys the automatic
+default back by asking the one component that knows.
+
+**`harness-install.sh` now records the verdict.** It already calls `resolve_model` for every
+role × selected front-end while generating the per-front-end artifacts, so it already knows
+what `builder` and `builder-heavy` resolve to. It writes the comparison to
+`.harness/.escalation-arming`:
+
+```
+blocked
+claude=raise
+codex=none
+```
+
+| verdict | meaning |
+|---|---|
+| `raise` | `builder-heavy` resolves to a **different** model — escalating changes something |
+| `none` | heavy resolves to **nothing** while `builder` resolves — **the downgrade** |
+| `same` | both resolve to the identical model — a no-op that would still record a role change |
+| `neither` | both inherit the session model |
+| `unstamped` | the installer **declined to rewrite** that front-end's live artifact, so the resolved model is not the one it will run |
+
+The first line is `armed` only when **every** selected front-end is `raise`. That AND is
+conservative on purpose: `tools/builder-role.sh` cannot know which front-end it is running
+under, so one misconfigured front-end disables escalation everywhere rather than downgrading
+anyone. The detail lines name the offender, so the fix is one pin and one re-run.
+
+**Escalation now needs two independent yeses:** a positive `escalation.after_rejections`
+**and** an `armed` verdict. Either alone routes to `builder`, on both triggers.
+
+**The default returns to `2`.** `0` keeps its meaning as your hard veto, which no verdict
+overrides.
+
+**Nothing re-derives model resolution.** That was the whole defect behind both v0.57.0 review
+findings — the routing tool re-implementing a subset of `resolve_model`, wrong on a different
+front-end each time. `escalation_verdict` calls `resolve_model` and compares two strings; the
+rule reads the recorded answer and still never parses the `models:` section.
+
+**What this does NOT check: that the model is stronger, or that it exists.** The harness has
+no model list and deliberately invents none, so `pin.claude.reasoning: haiku` arms. Ranking
+lives in the tier vocabulary you chose. What is closed is the silent downgrade to *no model
+at all* — the case an operator cannot see coming.
+
+### ⚠️ Upgrade note — a target already carrying `after_rejections: 0` keeps it
+
+`migrate_config` seeds the `escalation:` block **only when it is absent**. A target installed
+under v0.57.0 already has the block with `0`, and the installer will not rewrite it: it cannot
+distinguish a leftover v0.57.0 default from a deliberate veto, and clobbering an operator-owned
+value is worse than the gap. **Those targets must edit `after_rejections` themselves** to get
+automatic escalation. Fresh installs get `2`.
+
+Details worth knowing:
+
+- **The artifact is written only while at least one role resolves to a model** — the same gate
+  `.gemini/agents/` uses — so a fully-`inherit` target grows nothing it did not have before,
+  and switching every role back to `inherit` **removes** it rather than leaving a stale verdict.
+- **A symlinked `.harness/.escalation-arming` is never followed**, for read, write, or removal.
+  Here that guard is load-bearing rather than hygienic: this file decides which model runs a
+  build, so a followed link is a path by which something outside `.harness/` could assert
+  `armed`.
+- **An absent verdict means off** — either the installer has not run since this release, or no
+  role resolves. Both have the same remedy, and the tool says so.
+- **The decline says which gate refused**: your `0`, a missing verdict, or a `blocked` verdict
+  naming the front-end. Three distinct messages, because "escalation is off" is not actionable.
+- Anything other than an exact `armed` first line leaves the gate shut. There is no error path
+  that can arm.
+- **A verdict describes what the front-end will RUN, not what the config asks for.** Where the
+  installer declines to rewrite an artifact it does not own — an edited `opencode.json`, a
+  foreign/edited/symlinked `.codex/agents/builder*.toml` — `resolve_model` still reports the
+  *desired* model while the role on disk keeps whatever it had. Those front-ends are recorded
+  `unstamped` and block arming. `claude`, `gemini` and `antigravity` write their per-role
+  artifacts unconditionally and so can never reach this state. The ledger is scoped to
+  `builder`/`builder-heavy`: a hand-edited `scout.toml` says nothing about whether escalating
+  raises the Builder's model and does not disarm the target.
+
 ## [0.57.0] — 2026-08-04
 
 ### Added — ✨ deterministic escalation to `builder-heavy` (E17-F03)
@@ -18,13 +99,16 @@ Two things select the heavy role:
 | trigger | source |
 |---|---|
 | `complexity: complex` in the feature spec's frontmatter | the Architect, at spec time — heavy from round 1 |
-| `round > escalation.after_rejections` | the **existing** build↔review counter — fires only once escalation is enabled; `2` is the suggested opt-in value |
+| `round > escalation.after_rejections` | the **existing** build↔review counter — in v0.57.0 this fired only once escalation was enabled; `2` was the suggested opt-in value |
 
 ```yaml
 escalation:
-  after_rejections: 0   # shipped default — 0 disables BOTH triggers
-  # after_rejections: 2 # a typical opt-in
+  after_rejections: 0   # what v0.57.0 seeded — 0 disables BOTH triggers
+  # after_rejections: 2 # a typical opt-in at the time
 ```
+
+> Superseded by **v0.58.0**, which seeds `2` and gates escalation on an installer-computed
+> verdict instead of on an opt-in. The rest of this entry describes v0.57.0 as it shipped.
 
 **The rule is a tool, not prose.** `tools/builder-role.sh` takes the complexity, the round
 and the backend and prints `builder` or `builder-heavy`. That is the whole reason it can be
@@ -37,21 +121,21 @@ It reuses the round counter that already exists — no second counter, no new st
 TaskStore field — so a feature whose first two rounds ran in a previous session still resolves
 correctly.
 
-**It is opt-in and ships OFF** (`after_rejections: 0`). One key is both the master switch and
+**In v0.57.0 it was opt-in and shipped OFF** (`after_rejections: 0`). One key is both the master switch and
 the threshold: `0` disables both triggers, any positive value enables escalation at that
 threshold.
 
-**Before enabling it, make sure `models.builder-heavy` actually resolves to a model on your
-front-end** — otherwise escalation is a *downgrade*, not an upgrade: a role that resolves to
+**In v0.57.0, before enabling it you had to make sure `models.builder-heavy` actually resolved
+to a model on your front-end** — otherwise escalation is a *downgrade*, not an upgrade: a role that resolves to
 nothing runs on the session model, abandoning whatever `models.builder` was set to, exactly
 when the build was struggling. `claude`/`gemini`/`antigravity` need only a tier alias;
 `codex`/`opencode` stamp **nothing** for a tier without a matching `pin.<front-end>.<tier>`.
 
-The harness deliberately does **not** infer this for you. Two review rounds killed two
+v0.57.0 deliberately left that determination to the operator. Two review rounds killed two
 attempts to — "`builder-heavy: inherit` resolves like `builder`" (false once `models.builder`
 is set) and "arm on a non-`inherit` tier" (false on the pinned front-ends). Both were the
 routing tool re-deriving the installer's per-front-end resolver, which produced a new wrong
-answer each time. The opt-in is your assertion, not the harness's deduction.
+answer each time. **v0.58.0 closed this** by asking the resolver itself at install time.
 
 Details worth knowing:
 
@@ -99,8 +183,9 @@ spawn, so a per-spawn override would silently no-op on three of the five front-e
 [ADR-0002](specs/adr/0002-builder-heavy-is-a-tier-not-a-second-prompt.md).
 
 All five selected front-ends emit it. **It ships on `inherit`,** so out of the box it is not
-heavier than `builder` — give it a tier first. Nothing routes to it automatically yet;
-deterministic escalation is a separate feature. An upgraded target keeps its existing
+heavier than `builder` — give it a tier first. As of v0.56.0 nothing routed to it
+automatically: deterministic escalation arrived in v0.57.0 and became automatic-when-armed in
+v0.58.0. An upgraded target keeps its existing
 `models:` block and does not grow a `builder-heavy:` line: an unlisted role falls through to
 `models.default`, exactly like any other.
 

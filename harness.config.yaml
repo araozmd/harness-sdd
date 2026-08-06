@@ -312,27 +312,31 @@ change_size:
   test_paths: []           # extra test-file patterns, e.g. - "(^|/)spec/"
   generated_paths: []      # extra generated/vendored patterns, excluded from the budget entirely
 
-# Deterministic Builder escalation (E17-F03) — OPT-IN, and OFF by default.
+# Deterministic Builder escalation (E17-F03), armed by the installer (E17-F05).
 # After this many Reviewer rejections, subsequent builds spawn `builder-heavy` instead of
 # `builder`. The counter is the EXISTING build<->review round (agents/orchestrator.md), so
 # this adds no second source of truth. A spec may also start heavy from round 1 with
 # `complexity: complex` in its frontmatter.
 #
-# `0` (the default) turns escalation OFF ENTIRELY — neither trigger fires. Set it to a
-# positive number to turn escalation on; 2 is the suggested value.
+# `0` turns escalation OFF ENTIRELY — neither trigger fires. It is your hard veto, and
+# nothing below overrides it. The shipped value is 2.
 #
-# BEFORE YOU ENABLE IT, make sure `models.builder-heavy` above actually resolves to a model
-# on YOUR front-end — otherwise escalation is a DOWNGRADE, not an upgrade: a role that
-# resolves to nothing runs on the session model, abandoning whatever `models.builder` was
-# set to, exactly when the build was struggling.
+# ESCALATION NEEDS A SECOND YES, AND THE INSTALLER SUPPLIES IT. `harness-install.sh` asks its
+# own model resolver what `builder` and `builder-heavy` resolve to on every front-end it
+# stamps, and records the comparison in `.harness/.escalation-arming`. Escalation fires only
+# while that verdict reads `armed` — i.e. `builder-heavy` resolves to a DIFFERENT model on
+# every selected front-end. Otherwise the harness declines and names the front-end to fix,
+# because escalating into a role that resolves to nothing is a DOWNGRADE: it abandons
+# whatever `models.builder` was set to, exactly when the build was struggling.
 #   claude / gemini / antigravity  a built-in tier alias is enough
 #   codex / opencode               a tier alone stamps NOTHING — you must also set the
 #                                  matching `pin.<front-end>.<tier>` in the models: block
-# The harness deliberately does NOT try to infer this for you: that determination lives in
-# the installer's per-front-end resolver, and re-deriving it here produced two wrong
-# answers in review before this key became an explicit opt-in.
+# The verdict is computed at INSTALL time, so re-run the installer after changing any of it.
+# WHAT THIS DOES NOT CHECK: that the model is STRONGER, or that it exists at all. The harness
+# has no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours;
+# what the check closes is the silent downgrade to no model at all.
 #
 # Under `execution.builder.backend: delegate` escalation is INAPPLICABLE — the external
 # executor picks its own model — and the harness never escalates on that path.
 escalation:
-  after_rejections: 0
+  after_rejections: 2
