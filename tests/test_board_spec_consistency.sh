@@ -113,6 +113,34 @@ run_root "$T/r4b.json" "$D"
 [ "$RC" -ne 0 ] || fail "R4: control failed to fire — the pending pass is vacuous"
 pass "R4 pending needs no spec; advancing ONLY the status to spec-ready fires"
 
+# ══ R18 — a spec that cannot be READ is a failure, not "declares no status" ══════════
+# (Codex #3731050923.) The glob has already satisfied the "an authored spec exists" rule by
+# the time the file is opened, so an undecodable spec that reported the same "nothing
+# declared" answer as R8's legitimate skip would sail through a contract whose entire
+# content is "a Reviewer can open this".
+U="$T/r18"; mkdir -p "$U/specs/epics/E1-one/F1-a"
+# Invalid UTF-8: a lone 0x80 continuation byte, which cannot begin a UTF-8 sequence.
+printf -- '---\nid: E1-F1\nstatus: \200\200done\n---\n' >"$U/specs/epics/E1-one/F1-a/E1-F1.spec.md"
+board "$T/r18.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}'
+run_root "$T/r18.json" "$U"
+[ "$RC" -ne 0 ] || fail "R18: an undecodable spec passed as though it declared nothing"
+saw "cannot be read or decoded" || fail "R18: the error did not say the file was unreadable"
+# Control: the SAME board and path, with a decodable spec, is clean — so R18's failure is
+# the decoding and not the fixture.
+mkspec "$U" "specs/epics/E1-one/F1-a/E1-F1.spec.md" "done"
+run_root "$T/r18.json" "$U"
+[ "$RC" -eq 0 ] || fail "R18: control — a readable spec at the same path failed: $(cat "$T/err")"
+# An unreadable epic.md is held to the same rule. This block builds its OWN board rather
+# than reusing a later R-id's — a fixture that depends on a file another block writes makes
+# the suite order-sensitive, and the failure reads as a code defect rather than a test one.
+V2="$T/r18b"; mkdir -p "$V2/specs/epics/E1-one"
+printf -- '---\nid: E1\nstatus: \200\200draft\n---\n' >"$V2/specs/epics/E1-one/epic.md"
+board "$T/r18b.json" '{"id":"E1-F1","title":"a","status":"pending","sdd":false,"depends_on":[],"spec_path":"x/"}'
+run_root "$T/r18b.json" "$V2"
+[ "$RC" -ne 0 ] || fail "R18: an undecodable epic.md passed"
+saw "cannot be read or decoded" || fail "R18: the epic.md error did not say it was unreadable"
+pass "R18 an unreadable spec or epic.md fails; the same path with readable bytes is clean"
+
 # ══ R17 — a spec_path naming a FILE is unresolved, not "a directory with no spec" ════
 # Found by mutation: relaxing `isdir` to `exists` keeps every pass/fail verdict identical
 # and changes only the diagnostic — a file-shaped spec_path would be reported as a

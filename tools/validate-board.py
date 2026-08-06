@@ -287,36 +287,58 @@ def _fallback_errors(data):
 #     unless exactly one directory matches — guessing is not a contract.
 
 
-def _frontmatter_status(path):
-    """Return a spec/epic file's frontmatter `status`, or None if there is none.
+# A file that could not be read or decoded. Deliberately a DISTINCT answer from "declares
+# nothing": an omitted `status` is a documented skip, while a spec that cannot be opened is
+# the exact failure the existence rule exists to catch. Collapsing the two let an
+# undecodable spec satisfy a contract whose whole content is "a Reviewer can read this".
+_UNREADABLE = object()
 
-    None means "nothing to compare" — not "invalid". Callers treat it as a skip.
 
-    Inline comments are stripped because EVERY epic.md in this repo writes
-    `status: done             # draft -> planned -> in-progress -> done`. Comparing
-    against the raw line reports 19 drifts where 7 exist, and a false positive at a
-    MANDATORY gate halts all agent work.
+def _frontmatter(path):
+    """Parse a leading `---` block into `{key: value}`.
+
+    Returns `_UNREADABLE` when the file cannot be read or decoded, `{}` when there is no
+    frontmatter, and otherwise the declared scalars. Every read of a spec/epic file goes
+    through here, so the read-failure case is handled in ONE place rather than once per
+    caller — two callers each with their own `except` is how the two answers drifted apart
+    in the first place.
     """
     try:
         with io.open(path, encoding="utf-8") as fh:
             text = fh.read()
-    except (OSError, UnicodeDecodeError):
-        return None
+    except (OSError, UnicodeDecodeError, ValueError):
+        return _UNREADABLE
     if not text.startswith("---"):
-        return None
+        return {}
     end = text.find("\n---", 3)
     block = text[3:end] if end != -1 else text[3:]
-    m = re.search(r"^status:[ \t]*(.*)$", block, re.M)
-    if not m:
-        return None
-    raw = m.group(1).strip()
+    out = {}
+    for m in re.finditer(r"^([A-Za-z_][A-Za-z0-9_-]*):[ \t]*(.*)$", block, re.M):
+        out[m.group(1)] = _scalar(m.group(2))
+    return out
+
+
+def _scalar(raw):
+    """One YAML scalar: quotes unwrapped, an inline comment stripped.
+
+    Inline comments matter because EVERY epic.md in this repo writes
+    `status: done             # draft -> planned -> in-progress -> done`. Comparing against
+    the raw line reports 19 divergences where 6 exist, and a false positive at a MANDATORY
+    gate halts all agent work.
+    """
+    raw = raw.strip()
     if raw[:1] in ('"', "'"):
         # Quoted: the value is what is inside the quotes, '#' included.
         closing = raw.find(raw[0], 1)
-        value = raw[1:closing] if closing != -1 else raw[1:]
-    else:
-        value = re.sub(r"\s+#.*$", "", raw).strip()
-    return value or None
+        return raw[1:closing] if closing != -1 else raw[1:]
+    return re.sub(r"\s+#.*$", "", raw).strip()
+
+
+def _declared(front, key):
+    """The declared value of `key`, or None when nothing was declared."""
+    if front is _UNREADABLE:
+        return None
+    return front.get(key) or None
 
 
 def _spec_files(directory):
@@ -356,7 +378,15 @@ def spec_consistency_errors(data, root):
             if len(edirs) == 1:
                 epic_md = os.path.join(edirs[0], "epic.md")
                 if os.path.isfile(epic_md):
-                    declared = _frontmatter_status(epic_md)
+                    front = _frontmatter(epic_md)
+                    if front is _UNREADABLE:
+                        errors.append(
+                            "%s: epic.md cannot be read or decoded (%s) — its status "
+                            "could not be compared against the board"
+                            % (eid, os.path.relpath(epic_md, root))
+                        )
+                        front = {}
+                    declared = _declared(front, "status")
                     if declared is not None and declared != estatus:
                         errors.append(
                             "%s: epic.md frontmatter status '%s' disagrees with board "
@@ -419,7 +449,19 @@ def spec_consistency_errors(data, root):
                 continue
 
             for spec_file in specs:
-                declared = _frontmatter_status(spec_file)
+                front = _frontmatter(spec_file)
+                if front is _UNREADABLE:
+                    # The glob already satisfied the "an authored spec exists" rule, so
+                    # without this the file's unreadability would be indistinguishable
+                    # from it simply declaring no status — and the gate would pass a spec
+                    # no Reviewer can open, which is the whole contract.
+                    errors.append(
+                        "%s: spec file cannot be read or decoded: %s — the contract is "
+                        "that a Reviewer can open it"
+                        % (fid, os.path.relpath(spec_file, root))
+                    )
+                    continue
+                declared = _declared(front, "status")
                 if declared is not None and declared != fstatus:
                     errors.append(
                         "%s: spec frontmatter status '%s' disagrees with board status "
