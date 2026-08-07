@@ -116,8 +116,20 @@ Orchestrator's exclusive ownership of state writes.
     epic-done rollup and the drift-check demotion (below) — `set_status` is the **one**
     write path for both feature and epic status; backends MUST implement the epic case.
 
-  Since **v0.59.0** both "keep in sync" clauses above are **enforced**, not merely asked
-  for: `init.sh` runs `tools/validate-board.py … --spec-root .`, which fails the gate when a
+  Since **v0.59.0** both "keep in sync" clauses above are **maintained and enforced**,
+  not merely asked for.
+
+  **`set_status` does the syncing itself.** A feature transition rewrites the `status:` in
+  that feature's `*.spec.md`, and an epic transition rewrites its `epic.md`, in the same
+  locked critical section as the board write — so the two records move together or not at
+  all. If a document cannot be read, the write **aborts and the board does not move**,
+  because a board that advanced without its document is exactly the divergence the gate
+  fail-stops on. The sync is deliberately narrow: it updates a `status:` that is **already
+  declared**, never adds a frontmatter block, never creates a file, and never touches a spec
+  declaring a different feature's `id`. `apply --mutator` is not synced — it may rewrite
+  arbitrary structure, so there is no single (id, status) to follow.
+
+  **`init.sh` verifies it** by running `tools/validate-board.py … --spec-root .`, which fails the gate when a
   spec's or `epic.md`'s frontmatter `status` disagrees with the board, naming the file and
   both values. The same pass resolves `spec_path` — an `sdd: true` feature past `pending`
   must point at a directory holding a readable `*.spec.md` **that declares that feature's

@@ -491,4 +491,88 @@ grep -F "disagrees with board status" "$T/mut.err" >/dev/null \
   || fail "R15b: the mutated board failed for some other reason: $(cat "$T/mut.err")"
 pass "R15 the live board agrees with the live specs, and a mutated copy of it fails"
 
+# ══ R21–R24 — the WRITER half: set-status carries the frontmatter ════════════════════
+# (Codex #3731306966, P1.) Arming the gate above without this would have made every
+# SANCTIONED transition fail the next mandatory init.sh: `set-status` wrote only the board,
+# so `/sdd-drill`'s `set-status <epic> planned` and every Orchestrator feature move left the
+# document behind and halted all agent work until an undocumented second edit.
+#
+# These live here rather than in test_board_lock.sh on purpose: the gate and the writer are
+# two halves of ONE contract, and splitting them is how the contract went unenforced for
+# months in the first place.
+FX="$T/writer"
+mkdir -p "$FX/state" "$FX/store" "$FX/tools" "$FX/specs/epics/E1-one/F1-a"
+cp "$SRC/tools/tasks-lock.py" "$SRC/tools/validate-board.py" "$FX/tools/"
+cp "$SRC/store/tasks.schema.json" "$FX/store/"
+cat >"$FX/state/tasks.json" <<'JSON'
+{"project":"fx","epics":[{"id":"E1","title":"one","status":"planned","features":[
+ {"id":"E1-F1","title":"a","status":"in-progress","sdd":true,"autonomous":true,
+  "depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}]}]}
+JSON
+printf -- '---\nid: E1-F1\nstatus: in-progress    # pending -> in-review -> done\n---\n\n# spec\n' \
+  >"$FX/specs/epics/E1-one/F1-a/E1-F1.spec.md"
+printf -- '---\nid: E1\nstatus: planned          # draft -> planned -> done\n---\n\n# epic\n' \
+  >"$FX/specs/epics/E1-one/epic.md"
+
+set_status() { HARNESS_DIR="$FX" python3 "$FX/tools/tasks-lock.py" set-status "$1" "$2" >"$T/sl.out" 2>"$T/sl.err"; }
+fx_status() { sed -n 's/^status:[ \t]*\([^ \t#]*\).*$/\1/p' "$1" | head -1; }
+
+# R21 — a feature transition moves both records, and the gate stays green.
+set_status E1-F1 in-review || fail "R21: set-status failed: $(cat "$T/sl.err")"
+[ "$(fx_status "$FX/specs/epics/E1-one/F1-a/E1-F1.spec.md")" = "in-review" ] \
+  || fail "R21: the spec frontmatter did not follow the board"
+run_root "$FX/state/tasks.json" "$FX"
+[ "$RC" -eq 0 ] || fail "R21: the gate failed after a sanctioned transition: $(cat "$T/err")"
+# The inline comment survives — a status write must not reflow the block.
+grep -F 'pending -> in-review -> done' "$FX/specs/epics/E1-one/F1-a/E1-F1.spec.md" >/dev/null \
+  || fail "R21: the inline comment was destroyed by the sync"
+# VACUITY CONTROL: move ONLY the board, exactly as set-status used to, and the gate fires.
+# Without this, R21's green would be indistinguishable from a gate that never checks.
+python3 - "$FX/state/tasks.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["epics"][0]["features"][0]["status"] = "done"
+json.dump(d, open(sys.argv[1], "w"))
+PY
+run_root "$FX/state/tasks.json" "$FX"
+[ "$RC" -ne 0 ] || fail "R21: control — a board-only move did not fail the gate"
+set_status E1-F1 in-review || fail "R21: could not restore: $(cat "$T/sl.err")"
+pass "R21 a feature transition carries its spec, keeps the gate green, and preserves comments"
+
+# R22 — the epic path, which is what /sdd-drill drives.
+set_status E1 in-progress || fail "R22: epic set-status failed: $(cat "$T/sl.err")"
+[ "$(fx_status "$FX/specs/epics/E1-one/epic.md")" = "in-progress" ] \
+  || fail "R22: epic.md did not follow the board"
+run_root "$FX/state/tasks.json" "$FX"
+[ "$RC" -eq 0 ] || fail "R22: the gate failed after an epic transition: $(cat "$T/err")"
+pass "R22 an epic transition carries epic.md — the /sdd-drill path"
+
+# R23 — the writer's scope is narrow: it syncs a status that is ALREADY declared, and never
+# adopts a document that is not its own.
+OTHER="$FX/specs/epics/E1-one/F1-a/E1-F2.spec.md"
+printf -- '---\nid: E1-F2\nstatus: pending\n---\n' >"$OTHER"
+NOFM="$FX/specs/epics/E1-one/F1-a/plain.spec.md"
+printf -- '# no frontmatter\n' >"$NOFM"
+set_status E1-F1 done || fail "R23: set-status failed: $(cat "$T/sl.err")"
+[ "$(fx_status "$OTHER")" = "pending" ] \
+  || fail "R23: the writer rewrote a spec declaring ANOTHER feature's id"
+grep -qF -- '---' "$NOFM" && fail "R23: the writer invented a frontmatter block"
+[ ! -f "$FX/specs/epics/E1-one/F1-a/E1-F1.spec.md.tmp" ] || fail "R23: left a temp file behind"
+pass "R23 the writer syncs only a declared status, never another feature's spec or a new block"
+
+# R24 — transactional: if a document cannot be read, the BOARD is not moved either.
+# A board that advanced without its document is precisely the divergence the gate
+# fail-stops on, so the write must abort before it, not after.
+rm -f "$OTHER" "$NOFM"
+printf -- '---\nid: E1-F1\nstatus: \200\200done\n---\n' >"$FX/specs/epics/E1-one/F1-a/E1-F1.spec.md"
+BEFORE="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['epics'][0]['features'][0]['status'])" "$FX/state/tasks.json")"
+if set_status E1-F1 in-progress; then
+  fail "R24: set-status succeeded despite an unreadable spec"
+fi
+AFTER="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['epics'][0]['features'][0]['status'])" "$FX/state/tasks.json")"
+[ "$BEFORE" = "$AFTER" ] \
+  || fail "R24: the board moved ($BEFORE -> $AFTER) while its spec could not be synced"
+grep -F "sync" "$T/sl.err" >/dev/null || fail "R24: the failure did not mention the sync"
+pass "R24 an unsyncable document aborts the write — the board never moves alone"
+
 echo "all board/spec consistency checks passed"

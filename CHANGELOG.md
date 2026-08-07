@@ -45,6 +45,24 @@ ID convention and use `<slug>.spec.md`. Inline YAML comments are stripped before
 because every `epic.md` writes `status: done   # draft → planned → …` — reading the raw line
 reports drift on nearly every epic, and a false positive at a mandatory gate halts all work.
 
+### Added — ✍️ `set_status` now maintains the contract it always promised
+
+Enforcing "keep the frontmatter `status` in sync" without teaching the writer to do it would
+have broken every sanctioned transition: `tools/tasks-lock.py set-status` wrote **only** the
+board, so `/sdd-drill` running `set-status <epic> planned` — or any Orchestrator feature move
+— would leave the document behind and turn the next mandatory `init.sh` red until someone
+made an undocumented second edit. **A gate that enforces a contract nothing maintains does
+not make the contract true; it breaks the workflow.**
+
+`set-status` now rewrites the corresponding `*.spec.md` or `epic.md` `status:` inside the
+same locked critical section as the board write, using the validator's **own** frontmatter
+parser so the reader and the writer cannot disagree. Inline comments and their column are
+preserved, so a one-word transition stays a one-word diff. The sync is narrow by design: it
+updates a status that is **already declared**, never adds a frontmatter block, never creates
+a file, and never touches a spec declaring another feature's `id`. If a document cannot be
+read the write **aborts with the board untouched**, and a failure of the board replace rolls
+the documents back — the two records move together or not at all.
+
 ### Fixed — 🐛 the divergence itself
 
 All 26 disagreements are corrected, so a fresh clone is green. Each was resolved toward the
