@@ -13,9 +13,9 @@
 #
 # A gate that fires is easy to write; a gate that fires ONLY when it should is the whole
 # job, because `init.sh` is MANDATORY — a false positive halts every agent in the repo.
-# So each rule that is expected to STAY SILENT (R3, R4, R7, R8, R10, R11, R16, R18, R19) is
-# paired with a fixture that differs in exactly ONE variable and DOES fire. Silence on a
-# fixture that could never have fired proves nothing.
+# So each rule that is expected to STAY SILENT (R3, R4, R7, R8, R10, R11, R16, R18, R19,
+# R20c, R25, R26) is paired with a fixture that differs in exactly ONE variable and DOES
+# fire. Silence on a fixture that could never have fired proves nothing.
 #
 # R15 asserts the real repository is consistent. On its own that assertion is worthless —
 # it would pass just as well against a validator that returned no errors ever. It is
@@ -516,6 +516,9 @@ printf -- '---\nid: E1\nstatus: planned          # draft -> planned -> done\n---
 
 set_status() { HARNESS_DIR="$FX" python3 "$FX/tools/tasks-lock.py" set-status "$1" "$2" >"$T/sl.out" 2>"$T/sl.err"; }
 fx_status() { sed -n 's/^status:[ \t]*\([^ \t#]*\).*$/\1/p' "$1" | head -1; }
+board_status() {  # board_status <board.json> — the first feature's status, parsed not grepped
+  python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['epics'][0]['features'][0]['status'])" "$1"
+}
 
 # R21 — a feature transition moves both records, and the gate stays green.
 set_status E1-F1 in-review || fail "R21: set-status failed: $(cat "$T/sl.err")"
@@ -574,5 +577,95 @@ AFTER="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['epics']
   || fail "R24: the board moved ($BEFORE -> $AFTER) while its spec could not be synced"
 grep -F "sync" "$T/sl.err" >/dev/null || fail "R24: the failure did not mention the sync"
 pass "R24 an unsyncable document aborts the write — the board never moves alone"
+
+# ══ R25 — containment is re-checked per FILE, not inherited from the directory ═══════
+# (Codex #3733506521.) R20 resolves the spec DIRECTORY; a matched `*.spec.md` inside a
+# perfectly legitimate directory can still be a symlink whose target is outside the
+# repository — in-repo by listing, external in fact.
+Z3="$T/r25"; mkdir -p "$Z3/specs/epics/E1-one/F1-a"
+OUT3="$T/r25-outside"; mkdir -p "$OUT3"
+printf -- '---\nid: E1-F1\nstatus: done\n---\n' >"$OUT3/E1-F1.spec.md"
+ln -s "$OUT3/E1-F1.spec.md" "$Z3/specs/epics/E1-one/F1-a/E1-F1.spec.md"
+board "$T/r25.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}'
+run_root "$T/r25.json" "$Z3"
+[ "$RC" -ne 0 ] || fail "R25: a spec FILE symlinked out of the repository was accepted"
+saw "spec file escapes the harness root" || fail "R25: the file escape was not reported"
+# The message must name the path as the BOARD spells it, not as ../../../private/var/…:
+# a gate's diagnostic is what the operator acts on (see R17).
+saw "specs/epics/E1-one/F1-a/E1-F1.spec.md" \
+  || fail "R25: the escape was reported with an unreadable resolved path"
+# Control: replace ONLY the symlink with a real file — clean.
+rm "$Z3/specs/epics/E1-one/F1-a/E1-F1.spec.md"
+mkspec "$Z3" "specs/epics/E1-one/F1-a/E1-F1.spec.md" "done"
+run_root "$T/r25.json" "$Z3"
+[ "$RC" -eq 0 ] || fail "R25: control — a real in-repo spec file failed: $(cat "$T/err")"
+pass "R25 a spec FILE symlinked out of the repo is an escape; a real file at the same path is not"
+
+# ══ R26 — a duplicate `status:`/`id:` is ambiguous, and NEITHER side guesses ══════════
+# (Codex #3733506524.) The parser keeps the LAST occurrence; the writer rewrote the FIRST
+# and stopped. A sanctioned transition therefore advanced the board while the gate still
+# read the old value — a divergence manufactured by the two halves meant to prevent it.
+A4="$T/r26"; mkdir -p "$A4/specs/epics/E1-one/F1-a"
+printf -- '---\nid: E1-F1\nstatus: done\nstatus: done\n---\n' \
+  >"$A4/specs/epics/E1-one/F1-a/E1-F1.spec.md"
+board "$T/r26.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}'
+run_root "$T/r26.json" "$A4"
+[ "$RC" -ne 0 ] || fail "R26: a duplicate status: declaration was accepted"
+saw "more than once" || fail "R26: the ambiguity was not reported as such"
+# Control: drop ONE of the two identical lines — clean. The values never disagreed, so a
+# rule that fired on the VALUES rather than the duplication would stay silent here.
+mkspec "$A4" "specs/epics/E1-one/F1-a/E1-F1.spec.md" "done"
+run_root "$T/r26.json" "$A4"
+[ "$RC" -eq 0 ] || fail "R26: control — a single status declaration failed: $(cat "$T/err")"
+# The WRITER refuses it too, and the board does not move.
+FX2="$T/r26w"
+mkdir -p "$FX2/state" "$FX2/store" "$FX2/tools" "$FX2/specs/epics/E1-one/F1-a"
+cp "$SRC/tools/tasks-lock.py" "$SRC/tools/validate-board.py" "$FX2/tools/"
+cp "$SRC/store/tasks.schema.json" "$FX2/store/"
+cat >"$FX2/state/tasks.json" <<'JSON'
+{"project":"fx","epics":[{"id":"E1","title":"one","status":"planned","features":[
+ {"id":"E1-F1","title":"a","status":"in-progress","sdd":true,"autonomous":true,
+  "depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}]}]}
+JSON
+printf -- '---\nid: E1-F1\nstatus: in-progress\nstatus: in-progress\n---\n' \
+  >"$FX2/specs/epics/E1-one/F1-a/E1-F1.spec.md"
+if HARNESS_DIR="$FX2" python3 "$FX2/tools/tasks-lock.py" set-status E1-F1 in-review \
+     >"$T/w.out" 2>"$T/w.err"; then
+  fail "R26: set-status rewrote a file whose effective status is ambiguous"
+fi
+[ "$(board_status "$FX2/state/tasks.json")" = "in-progress" ] \
+  || fail "R26: the board moved despite the writer refusing the document"
+pass "R26 a duplicated status/id is ambiguous — the gate reports it and the writer refuses"
+
+# ══ R27 — a partial frontmatter write is rolled back, board included ══════════════════
+# (Codex #3733506522.) With two eligible specs and the SECOND unwritable, the exception
+# escaped before the written-list was returned, so nothing could be undone: the board
+# stayed put while the first document advanced — the exact divergence the sync prevents,
+# manufactured by the sync.
+FX3="$T/r27"
+mkdir -p "$FX3/state" "$FX3/store" "$FX3/tools" "$FX3/specs/epics/E1-one/F1-a"
+cp "$SRC/tools/tasks-lock.py" "$SRC/tools/validate-board.py" "$FX3/tools/"
+cp "$SRC/store/tasks.schema.json" "$FX3/store/"
+cat >"$FX3/state/tasks.json" <<'JSON'
+{"project":"fx","epics":[{"id":"E1","title":"one","status":"planned","features":[
+ {"id":"E1-F1","title":"a","status":"in-progress","sdd":true,"autonomous":true,
+  "depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}]}]}
+JSON
+FIRST="$FX3/specs/epics/E1-one/F1-a/a-E1-F1.spec.md"
+SECOND="$FX3/specs/epics/E1-one/F1-a/z-E1-F1.spec.md"
+printf -- '---\nid: E1-F1\nstatus: in-progress\n---\n' >"$FIRST"
+printf -- '---\nid: E1-F1\nstatus: in-progress\n---\n' >"$SECOND"
+chmod 444 "$SECOND"
+if HARNESS_DIR="$FX3" python3 "$FX3/tools/tasks-lock.py" set-status E1-F1 in-review \
+     >"$T/w2.out" 2>"$T/w2.err"; then
+  chmod 644 "$SECOND"
+  fail "R27: set-status succeeded with an unwritable spec in the directory"
+fi
+chmod 644 "$SECOND"
+[ "$(fx_status "$FIRST")" = "in-progress" ] \
+  || fail "R27: the first spec kept a write that the failed transition should have undone"
+[ "$(board_status "$FX3/state/tasks.json")" = "in-progress" ] \
+  || fail "R27: the board moved while a document could not be written"
+pass "R27 a mid-way write failure rolls the earlier documents back and leaves the board put"
 
 echo "all board/spec consistency checks passed"

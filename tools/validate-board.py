@@ -293,6 +293,15 @@ def _fallback_errors(data):
 # undecodable spec satisfy a contract whose whole content is "a Reviewer can read this".
 _UNREADABLE = object()
 
+# A key declared MORE THAN ONCE in one frontmatter block. Which occurrence is "effective"
+# is not a question with a right answer, and the two halves of this feature answered it
+# differently: the parser below keeps the LAST match, while the writer in tasks-lock.py
+# rewrote the FIRST and stopped. A sanctioned transition therefore advanced the board and
+# left the value the gate reads unchanged — manufacturing the very divergence both sides
+# exist to prevent. Neither side picks a winner now; the ambiguity is reported and the
+# write refuses.
+_AMBIGUOUS = object()
+
 
 def _frontmatter(path):
     """Parse a leading `---` block into `{key: value}`.
@@ -314,7 +323,8 @@ def _frontmatter(path):
     block = text[3:end] if end != -1 else text[3:]
     out = {}
     for m in re.finditer(r"^([A-Za-z_][A-Za-z0-9_-]*):[ \t]*(.*)$", block, re.M):
-        out[m.group(1)] = _scalar(m.group(2))
+        key = m.group(1)
+        out[key] = _AMBIGUOUS if key in out else _scalar(m.group(2))
     return out
 
 
@@ -335,10 +345,19 @@ def _scalar(raw):
 
 
 def _declared(front, key):
-    """The declared value of `key`, or None when nothing was declared."""
+    """The declared value of `key`, None when nothing was declared, `_AMBIGUOUS` when it
+    was declared more than once."""
     if front is _UNREADABLE:
         return None
-    return front.get(key) or None
+    value = front.get(key)
+    if value is _AMBIGUOUS:
+        return _AMBIGUOUS
+    return value or None
+
+
+def _contains(root_real, target_real):
+    """True when an already-resolved `target_real` lies at or under `root_real`."""
+    return target_real == root_real or target_real.startswith(root_real + os.sep)
 
 
 def _resolve_under_root(root, spec_path):
@@ -378,9 +397,7 @@ def _resolve_under_root(root, spec_path):
     # every path an escape in the one configuration that actually ships.
     base = os.path.realpath(root)
     target = os.path.realpath(os.path.join(base, spec_path))
-    if target == base or target.startswith(base + os.sep):
-        return target
-    return None
+    return target if _contains(base, target) else None
 
 
 def _spec_files(directory):
@@ -405,6 +422,12 @@ def spec_consistency_errors(data, root):
     if not isinstance(data, dict):
         return errors
 
+    # Resolved ONCE. Every path this function reports is derived from `_resolve_under_root`,
+    # which returns a realpath — so displaying it relative to an UNRESOLVED root prints
+    # `../../../private/var/...` on any platform where the root sits under a symlink (macOS
+    # /var, every mktemp fixture). A gate's message is the thing an operator acts on.
+    root_real = os.path.realpath(root)
+
     for ep in data.get("epics") or []:
         if not isinstance(ep, dict):
             continue
@@ -425,10 +448,18 @@ def spec_consistency_errors(data, root):
                         errors.append(
                             "%s: epic.md cannot be read or decoded (%s) — its status "
                             "could not be compared against the board"
-                            % (eid, os.path.relpath(epic_md, root))
+                            % (eid, os.path.relpath(epic_md, root_real))
                         )
                         front = {}
                     declared = _declared(front, "status")
+                    if declared is _AMBIGUOUS:
+                        errors.append(
+                            "%s: epic.md declares 'status' more than once (%s) — which "
+                            "one is effective is ambiguous, so it cannot be compared "
+                            "with the board"
+                            % (eid, os.path.relpath(epic_md, root_real))
+                        )
+                        declared = None
                     if declared is not None and declared != estatus:
                         errors.append(
                             "%s: epic.md frontmatter status '%s' disagrees with board "
@@ -437,7 +468,7 @@ def spec_consistency_errors(data, root):
                                 eid,
                                 declared,
                                 estatus,
-                                os.path.relpath(epic_md, root),
+                                os.path.relpath(epic_md, root_real),
                             )
                         )
 
@@ -510,6 +541,18 @@ def spec_consistency_errors(data, root):
             owned = 0
             misowned = False
             for spec_file in specs:
+                # Containment is re-checked per FILE, not inherited from the directory.
+                # Resolving only the directory leaves a matched `*.spec.md` free to be a
+                # symlink whose target is outside the repository — in-repo by listing,
+                # external in fact — and the gate would certify a spec that is not here.
+                if not _contains(root_real, os.path.realpath(spec_file)):
+                    errors.append(
+                        "%s: spec file escapes the harness root: %s — it resolves outside "
+                        "the repository, so the gate would certify a spec that is not in it"
+                        % (fid, os.path.relpath(spec_file, root_real))
+                    )
+                    continue
+
                 front = _frontmatter(spec_file)
                 if front is _UNREADABLE:
                     # The glob already satisfied the "an authored spec exists" rule, so
@@ -519,11 +562,27 @@ def spec_consistency_errors(data, root):
                     errors.append(
                         "%s: spec file cannot be read or decoded: %s — the contract is "
                         "that a Reviewer can open it"
-                        % (fid, os.path.relpath(spec_file, root))
+                        % (fid, os.path.relpath(spec_file, root_real))
                     )
                     continue
 
                 declared_id = _declared(front, "id")
+                if declared_id is _AMBIGUOUS:
+                    errors.append(
+                        "%s: spec declares 'id' more than once (%s) — which one is "
+                        "effective is ambiguous, so ownership cannot be proven"
+                        % (fid, os.path.relpath(spec_file, root_real))
+                    )
+                    misowned = True
+                    continue
+                declared_status = _declared(front, "status")
+                if declared_status is _AMBIGUOUS:
+                    errors.append(
+                        "%s: spec declares 'status' more than once (%s) — which one is "
+                        "effective is ambiguous, so it cannot be compared with the board"
+                        % (fid, os.path.relpath(spec_file, root_real))
+                    )
+                    continue
                 if declared_id is not None and declared_id != fid:
                     # This file belongs to a different feature. Report the ownership
                     # failure and do NOT compare its status: a status drawn from another
@@ -531,23 +590,22 @@ def spec_consistency_errors(data, root):
                     errors.append(
                         "%s: spec declares id '%s' (%s) — spec_path points at another "
                         "feature's spec, which a Reviewer would open and implement"
-                        % (fid, declared_id, os.path.relpath(spec_file, root))
+                        % (fid, declared_id, os.path.relpath(spec_file, root_real))
                     )
                     misowned = True
                     continue
                 if declared_id == fid:
                     owned += 1
 
-                declared = _declared(front, "status")
-                if declared is not None and declared != fstatus:
+                if declared_status is not None and declared_status != fstatus:
                     errors.append(
                         "%s: spec frontmatter status '%s' disagrees with board status "
                         "'%s' (%s)"
                         % (
                             fid,
-                            declared,
+                            declared_status,
                             fstatus,
-                            os.path.relpath(spec_file, root),
+                            os.path.relpath(spec_file, root_real),
                         )
                     )
 

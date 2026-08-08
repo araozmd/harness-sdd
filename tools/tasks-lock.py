@@ -750,9 +750,16 @@ def _frontmatter_targets(vb, hdir, data, target_id, status):
                 continue          # sdd:false / not authored yet — nothing to carry
             candidates = vb._spec_files(fdir)
 
+        root_real = os.path.realpath(hdir)
         for path in candidates:
             if not os.path.isfile(path):
                 continue
+            # Never write THROUGH a symlink that leaves the repository. The directory
+            # having passed containment does not make each file in it contained.
+            if not vb._contains(root_real, os.path.realpath(path)):
+                raise ValueError(
+                    "refusing to sync %s — it resolves outside the harness root" % path
+                )
             front = vb._frontmatter(path)
             if front is vb._UNREADABLE:
                 # Refuse rather than guess. Rewriting a file we could not parse risks
@@ -760,6 +767,14 @@ def _frontmatter_targets(vb, hdir, data, target_id, status):
                 # caller is about to be blamed for at the next gate.
                 raise ValueError(
                     "cannot read %s to keep its frontmatter status in sync" % path
+                )
+            # A key declared twice has no effective value to agree ON. Picking one is how
+            # the writer and the gate came to disagree; refusing is the only answer that
+            # cannot manufacture a divergence, and it aborts before the board moves.
+            if front.get("status") is vb._AMBIGUOUS or front.get("id") is vb._AMBIGUOUS:
+                raise ValueError(
+                    "refusing to sync %s — it declares 'status' or 'id' more than once, "
+                    "so which value is effective is ambiguous" % path
                 )
             declared_id = front.get("id") or None
             if not is_epic and declared_id is not None and declared_id != target_id:
@@ -777,14 +792,25 @@ def _frontmatter_targets(vb, hdir, data, target_id, status):
 
 
 def _apply_frontmatter(targets):
-    """Write each target, returning [(path, original_text)] for rollback."""
+    """Write each target, returning [(path, original_text)] for rollback.
+
+    A failure part-way through rolls back what THIS call already wrote before re-raising.
+    Without that, the exception escaped before `written` was ever returned, so the caller
+    held nothing to undo: a directory with two eligible specs and a read-only second one
+    left the first document advanced while the board stayed put — precisely the divergence
+    this synchronisation exists to prevent, manufactured by the thing preventing it.
+    """
     written = []
-    for path, new_text in targets:
-        with io.open(path, encoding="utf-8") as fh:
-            original = fh.read()
-        with io.open(path, "w", encoding="utf-8") as fh:
-            fh.write(new_text)
-        written.append((path, original))
+    try:
+        for path, new_text in targets:
+            with io.open(path, encoding="utf-8") as fh:
+                original = fh.read()
+            with io.open(path, "w", encoding="utf-8") as fh:
+                fh.write(new_text)
+            written.append((path, original))
+    except Exception:
+        _rollback_frontmatter(written)
+        raise
     return written
 
 
