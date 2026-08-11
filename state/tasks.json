@@ -546,7 +546,7 @@
         {
           "id": "E17-F04",
           "title": "Worker roster: invocable CLIs as versioned data",
-          "status": "pending",
+          "status": "spec-ready",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
