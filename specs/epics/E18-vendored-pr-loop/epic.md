@@ -1,7 +1,7 @@
 ---
 id: E18
 title: "Harness self-sufficiency: vendored PR review loop"
-status: pending          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: done             # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 

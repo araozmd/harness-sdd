@@ -2,7 +2,7 @@
 id: E23-F01
 title: Modern Codex skills and inherited role registration
 epic: E23-codex-native-compatibility
-status: pending
+status: done
 sdd: true
 autonomous: true
 depends_on: []

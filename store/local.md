@@ -116,6 +116,36 @@ Orchestrator's exclusive ownership of state writes.
     epic-done rollup and the drift-check demotion (below) — `set_status` is the **one**
     write path for both feature and epic status; backends MUST implement the epic case.
 
+  Since **v0.59.0** both "keep in sync" clauses above are **maintained and enforced**,
+  not merely asked for.
+
+  **`set_status` does the syncing itself.** A feature transition rewrites the `status:` in
+  that feature's `*.spec.md`, and an epic transition rewrites its `epic.md`, in the same
+  locked critical section as the board write — so the two records move together or not at
+  all. If a document cannot be read, the write **aborts and the board does not move**,
+  because a board that advanced without its document is exactly the divergence the gate
+  fail-stops on. The sync is deliberately narrow: it updates a `status:` that is **already
+  declared**, never adds a frontmatter block, never creates a file, and never touches a spec
+  declaring a different feature's `id`. `apply --mutator` is not synced — it may rewrite
+  arbitrary structure, so there is no single (id, status) to follow.
+
+  **`init.sh` verifies it** by running `tools/validate-board.py … --spec-root .`, which fails the gate when a
+  spec's or `epic.md`'s frontmatter `status` disagrees with the board, naming the file and
+  both values. The same pass resolves `spec_path` — an `sdd: true` feature past `pending`
+  must point at a directory holding a readable `*.spec.md` **that declares that feature's
+  `id`**, because a path pointing at a sibling feature's directory otherwise satisfies every
+  other rule while handing the Reviewer the wrong spec. A spec that cannot be read or
+  decoded is reported as such, never treated as one that simply declares nothing, and a
+  `spec_path` that is absolute or escapes the repository via `..` is rejected outright
+  (containment is to the harness root, not to `specs/` — the schema has never required
+  that layout). It does
+  **not** fire for the
+  `sdd: false` quick-fix lane (no Architect runs, so there is no spec by construction), for a
+  feature still at `pending`, or for a feature inside a `draft` epic (already warn-only). A
+  spec that declares no `status` is skipped — the contract is "keep in sync", not "must
+  declare". The check runs only at the gate, never inside the `set_status` write path, which
+  stays a pure function of the board data.
+
 ### Ownership & scoped selection (optional `owner` — E10-F01)
 Both **epic** objects and **feature** objects carry an **optional** string `owner`
 field in the schema. It is **additive and backward-compatible**: it is not in any

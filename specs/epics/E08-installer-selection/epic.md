@@ -1,7 +1,7 @@
 ---
 id: E08
 title: "Installer: selectable agent targets"
-status: pending          # pending → in-progress → done (rollup of its features)
+status: done             # pending → in-progress → done (rollup of its features)
 owner: araozmd
 ---
 

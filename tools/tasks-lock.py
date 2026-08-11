@@ -82,7 +82,9 @@
 import argparse
 import errno
 import fcntl
+import glob
 import importlib.util
+import io
 import json
 import math
 import os
@@ -316,7 +318,7 @@ def _acquire(lock_fd, lockfile, timeout):
             time.sleep(_POLL_INTERVAL_SECONDS)
 
 
-def _load_shared_validator():
+def _load_shared_validator(want_module=False):
     """Import the SINGLE canonical validator shared with init.sh.
 
     `tools/validate-board.py` is the one source of truth for what a valid board
@@ -339,7 +341,12 @@ def _load_shared_validator():
     if not hasattr(module, "validate"):
         _die("shared validator %s does not define validate(data, schema)"
              % validator_path)
-    return module.validate
+    # The frontmatter sync below reads spec/epic files with the validator's OWN parser
+    # (`_frontmatter`, `_spec_files`, `_resolve_under_root`) rather than a second copy.
+    # The gate and the writer must agree byte-for-byte on what a file declares — a writer
+    # that parsed frontmatter its own way would reintroduce exactly the divergence this
+    # whole feature exists to remove.
+    return module if want_module else module.validate
 
 
 def _load_schema(schema_path):
@@ -657,7 +664,166 @@ def _mutator_text_transform(mutate):
     return transform
 
 
-def run(transform, timeout):
+# ---------------------------------------------------------------------------
+# Frontmatter synchronisation (E99-F14).
+#
+# `store/local.md` has always said a status write must "keep the feature's `.spec.md`
+# frontmatter `status` in sync" (and the epic's `epic.md`). Nothing did it — the contract
+# was an instruction to a human reader, and the documents drifted for months.
+#
+# Arming `init.sh`'s consistency gate WITHOUT this would have made every sanctioned
+# transition fail the next mandatory gate: `/sdd-drill` running `set-status <epic> planned`,
+# or any Orchestrator feature move, would leave the document behind and halt all agent work
+# until someone made an undocumented second edit. A gate that enforces a contract nothing
+# maintains does not make the contract true — it breaks the workflow. So the ONE supported
+# write path now maintains it.
+#
+# Scope, deliberately narrow. This syncs a `status:` that is ALREADY declared; it never adds
+# a frontmatter block, never creates a file, and never touches a spec that declares a
+# different feature's `id` (that spec belongs to someone else, and the gate reports it).
+# Absent frontmatter stays absent, matching the gate's own "keep in sync, not must declare".
+
+
+def _rewrite_status(text, new_status):
+    """Return `text` with its frontmatter `status:` set to `new_status`, or None.
+
+    None means "nothing to do": no frontmatter block, or no `status:` key in it. The inline
+    comment and its column are preserved, because every `epic.md` writes
+    `status: done             # draft -> planned -> ...` and reflowing that on every
+    transition would turn a one-word change into a noisy diff.
+    """
+    if not text.startswith("---"):
+        return None
+    end = text.find("\n---", 3)
+    if end == -1:
+        return None
+    head, tail = text[:end], text[end:]
+    lines = head.split("\n")
+    for i, line in enumerate(lines):
+        m = re.match(r"^status:[ \t]*(.*)$", line)
+        if not m:
+            continue
+        raw = m.group(1)
+        hash_at = raw.find("#")
+        if hash_at != -1:
+            column = len("status: ") + hash_at
+            body = "status: " + new_status
+            pad = max(1, column - len(body))
+            lines[i] = body + " " * pad + raw[hash_at:]
+        else:
+            lines[i] = "status: " + new_status
+        return "\n".join(lines) + tail
+    return None
+
+
+def _frontmatter_targets(vb, hdir, data, target_id, status):
+    """[(path, new_text)] for the documents this status write must carry along."""
+    targets = []
+    is_epic = "-" not in target_id
+    for ep in data.get("epics") or []:
+        if not isinstance(ep, dict):
+            continue
+        if is_epic:
+            if ep.get("id") != target_id:
+                continue
+            dirs = sorted(
+                glob.glob(os.path.join(glob.escape(hdir), "specs", "epics",
+                                       "%s-*" % target_id))
+            )
+            dirs = [d for d in dirs if os.path.isdir(d)]
+            if len(dirs) != 1:
+                continue          # ambiguous or absent — the gate skips it too
+            candidates = [os.path.join(dirs[0], "epic.md")]
+        else:
+            match = None
+            for ft in ep.get("features") or []:
+                if isinstance(ft, dict) and ft.get("id") == target_id:
+                    match = ft
+                    break
+            if match is None:
+                continue
+            spec_path = match.get("spec_path")
+            if not isinstance(spec_path, str) or not spec_path:
+                continue
+            fdir = vb._resolve_under_root(hdir, spec_path)
+            if fdir is None or not os.path.isdir(fdir):
+                continue          # sdd:false / not authored yet — nothing to carry
+            candidates = vb._spec_files(fdir)
+
+        root_real = os.path.realpath(hdir)
+        for path in candidates:
+            if not os.path.isfile(path):
+                continue
+            # Never write THROUGH a symlink that leaves the repository. The directory
+            # having passed containment does not make each file in it contained.
+            if not vb._contains(root_real, os.path.realpath(path)):
+                raise ValueError(
+                    "refusing to sync %s — it resolves outside the harness root" % path
+                )
+            front = vb._frontmatter(path)
+            if front is vb._UNREADABLE:
+                # Refuse rather than guess. Rewriting a file we could not parse risks
+                # corrupting it, and silently skipping it would leave the divergence the
+                # caller is about to be blamed for at the next gate.
+                raise ValueError(
+                    "cannot read %s to keep its frontmatter status in sync" % path
+                )
+            # A key declared twice has no effective value to agree ON. Picking one is how
+            # the writer and the gate came to disagree; refusing is the only answer that
+            # cannot manufacture a divergence, and it aborts before the board moves.
+            if front.get("status") is vb._AMBIGUOUS or front.get("id") is vb._AMBIGUOUS:
+                raise ValueError(
+                    "refusing to sync %s — it declares 'status' or 'id' more than once, "
+                    "so which value is effective is ambiguous" % path
+                )
+            declared_id = front.get("id") or None
+            if not is_epic and declared_id is not None and declared_id != target_id:
+                continue          # another feature's spec — not ours to rewrite
+            if not front.get("status"):
+                continue          # declares none; the gate does not require one
+            if front.get("status") == status:
+                continue          # already in agreement
+            with io.open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            new_text = _rewrite_status(text, status)
+            if new_text is not None and new_text != text:
+                targets.append((path, new_text))
+    return targets
+
+
+def _apply_frontmatter(targets):
+    """Write each target, returning [(path, original_text)] for rollback.
+
+    A failure part-way through rolls back what THIS call already wrote before re-raising.
+    Without that, the exception escaped before `written` was ever returned, so the caller
+    held nothing to undo: a directory with two eligible specs and a read-only second one
+    left the first document advanced while the board stayed put — precisely the divergence
+    this synchronisation exists to prevent, manufactured by the thing preventing it.
+    """
+    written = []
+    try:
+        for path, new_text in targets:
+            with io.open(path, encoding="utf-8") as fh:
+                original = fh.read()
+            with io.open(path, "w", encoding="utf-8") as fh:
+                fh.write(new_text)
+            written.append((path, original))
+    except Exception:
+        _rollback_frontmatter(written)
+        raise
+    return written
+
+
+def _rollback_frontmatter(written):
+    for path, original in written:
+        try:
+            with io.open(path, "w", encoding="utf-8") as fh:
+                fh.write(original)
+        except OSError:
+            pass
+
+
+def run(transform, timeout, sync_id=None, sync_status=None):
     hdir = _harness_dir()
     tasks_path = os.path.join(hdir, TASKS_REL)
     lock_path = os.path.join(hdir, LOCK_REL)
@@ -666,7 +832,8 @@ def run(transform, timeout):
     if not os.path.exists(tasks_path):
         _die("board not found at %s (HARNESS_DIR=%s)" % (tasks_path, hdir))
 
-    validate = _load_shared_validator()
+    vb = _load_shared_validator(want_module=True)
+    validate = vb.validate
     schema = _load_schema(schema_path)
 
     # Open (creating if needed) the sibling lockfile. It only ever anchors the
@@ -693,6 +860,19 @@ def run(transform, timeout):
             errs = validate(reparsed, schema)  # schema check (shared with init.sh)
             if errs:
                 raise ValueError("; ".join(errs))
+
+            # Carry the frontmatter along, INSIDE the lock and BEFORE the board is
+            # replaced (E99-F14). Ordering is deliberate: a failure here must leave the
+            # board untouched, because a board that moved without its document is exactly
+            # the divergence `init.sh` now fail-stops on. Anything written here is rolled
+            # back if the board replace itself fails, so the two records move together or
+            # not at all.
+            fm_written = []
+            if sync_id is not None:
+                fm_targets = _frontmatter_targets(
+                    vb, hdir, reparsed, sync_id, sync_status
+                )
+                fm_written = _apply_frontmatter(fm_targets)
 
             # Atomic write: temp in the same dir, then os.replace (R4 — no torn
             # file). If the process dies mid-write, the original is untouched.
@@ -732,6 +912,7 @@ def run(transform, timeout):
                     os.unlink(tmp_path)
                 except OSError:
                     pass
+                _rollback_frontmatter(fm_written)
                 raise
         finally:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)  # release before returning (R3)
@@ -784,7 +965,15 @@ def main(argv):
         parser.error("unknown command")
 
     try:
-        run(transform, args.timeout)
+        # Only `set-status` carries the frontmatter: it is the one path that knows WHICH
+        # object moved and to what. `apply --mutator` may rewrite arbitrary structure, so
+        # there is no single (id, status) to follow, and guessing would be worse than the
+        # gate reporting the divergence.
+        if args.cmd == "set-status":
+            run(transform, args.timeout,
+                sync_id=args.id, sync_status=args.status)
+        else:
+            run(transform, args.timeout)
     except SystemExit:
         raise
     except json.JSONDecodeError as exc:

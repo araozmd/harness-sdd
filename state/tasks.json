@@ -68,7 +68,7 @@
       "features": [
         {
           "id": "E05-F01",
-          "title": "Reviewer cross-file consistency + explicit build↔review rounds",
+          "title": "Reviewer cross-file consistency + explicit build\u2194review rounds",
           "status": "done",
           "sdd": true,
           "autonomous": true,
@@ -89,7 +89,7 @@
     {
       "id": "E06",
       "title": "Planning tier (rolling-wave inception + per-epic drill-down)",
-      "status": "in-progress",
+      "status": "done",
       "features": [
         {
           "id": "E06-F01",
@@ -276,13 +276,13 @@
     },
     {
       "id": "E13",
-      "title": "Monday board integration (draft — not current use case)",
+      "title": "Monday board integration (draft \u2014 not current use case)",
       "status": "draft",
       "features": []
     },
     {
       "id": "E14",
-      "title": "Azure Boards integration (draft — not current use case)",
+      "title": "Azure Boards integration (draft \u2014 not current use case)",
       "status": "draft",
       "features": []
     },
@@ -490,11 +490,22 @@
         {
           "id": "E99-F14",
           "title": "init.sh should validate spec_path existence and spec/board status agreement",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F14-board-spec-consistency/"
+        },
+        {
+          "id": "E99-F15",
+          "title": "one choke point for every spec/epic filesystem read",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [
+            "E99-F14"
+          ],
+          "spec_path": "specs/epics/E99-maintenance/F15-read-containment-chokepoint/"
         }
       ]
     },

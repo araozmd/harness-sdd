@@ -2,7 +2,7 @@
 id: E08-F01
 title: Interactive agent-target selection (checkbox + re-prompt on update)
 epic: E08-installer-selection
-status: pending          # pending → spec-ready → in-progress → in-review → done
+status: done             # pending → spec-ready → in-progress → in-review → done
 sdd: true                # full SDD — installer body change
 autonomous: false        # parks at the human spec-approval gate
 depends_on: []

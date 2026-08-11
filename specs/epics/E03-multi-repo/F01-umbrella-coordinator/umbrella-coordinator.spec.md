@@ -2,7 +2,7 @@
 id: E03-F01
 title: Umbrella coordinator
 epic: E03
-status: pending          # pending → spec-ready → in-progress → in-review → done
+status: done             # pending → spec-ready → in-progress → in-review → done
 sdd: true                # false = quick task, skip full SDD
 autonomous: false        # true = may bypass the human approval gate
 depends_on: []

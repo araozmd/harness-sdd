@@ -4,6 +4,82 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.59.0] — 2026-08-06
+
+### Added — ✅ the board must agree with the specs on disk (E99-F14)
+
+`store/local.md` states two contracts that **nothing verified**. Both drifted, and both cost
+a review round on PR #122:
+
+1. **`spec_path` was only type-checked, never resolved.** E17-F05 shipped `in-review` with a
+   `spec_path` naming a directory that did not exist. A Reviewer following the board could
+   not open the spec, and `init.sh` stayed green.
+2. **Frontmatter `status` was never compared to the board.** On `main` before this release,
+   **20 feature specs and 6 `epic.md` files** disagreed with the board — including two
+   (`E17-F02`, `E17-F03`) whose divergence the previous release's review had already named.
+
+`tools/validate-board.py` gains a `--spec-root <dir>` pass, and `init.sh` passes `--spec-root .`:
+
+| the board says | on disk | verdict |
+|---|---|---|
+| `sdd: true`, past `pending` | `spec_path` resolves to a dir holding a `*.spec.md` | ✅ |
+| `sdd: true`, past `pending` | path missing, or dir holds no spec | ❌ names the id and the path |
+| `sdd: true`, past `pending` | a spec is there but declares another feature's `id` | ❌ **resolving is not belonging** — a sibling directory whose spec carries the same status otherwise passes every check, and the Reviewer implements the wrong spec |
+| any | a spec or `epic.md` that cannot be read or decoded | ❌ distinct from "declares no status", which is a documented skip |
+| any | `spec_path` that is absolute or contains `..` | ❌ `os.path.join` discards the root for the first and walks out of it for the second — the gate would certify a spec that is not in this repository |
+| any | a `spec_path` **or a matched `*.spec.md`** that resolves outside the repository via symlink | ❌ containment is checked on resolved paths, per directory **and** per file |
+| any | a spec/`epic.md` declaring `status` or `id` **more than once** | ❌ which occurrence is effective has no right answer, so the gate reports it and `set_status` refuses to write it |
+| `sdd: false` (quick-fix lane) | anything | ✅ — no Architect ran, so there is no spec by construction |
+| `sdd: true`, `pending` | anything | ✅ — not authored yet |
+| feature inside a `draft` epic | no spec | ✅ — already warn-only; the `next()` draft gate keeps it unselectable |
+| a spec/`epic.md` declaring a `status` | a different board status | ❌ names the file and **both** values |
+| a spec declaring no `status` | — | ✅ — the contract is "keep in sync", not "must declare" |
+
+**The check is deliberately not part of `validate()`.** That function is imported by
+`tools/tasks-lock.py` and runs in-process *while the write lock is held*; a board write can
+originate from a linked worktree that tasks-lock remaps onto the primary checkout, so a
+relative `spec_path` resolved there would be resolved against the wrong tree and fail-stop a
+legitimate write. `--spec-root` is opt-in with **no cwd fallback**, so a validator handed a
+throwaway fixture board can never resolve that board's paths against the current repository.
+
+Spec files are matched as `*.spec.md`, not `<ID>.spec.md`: 18 feature directories predate the
+ID convention and use `<slug>.spec.md`. Inline YAML comments are stripped before comparing,
+because every `epic.md` writes `status: done   # draft → planned → …` — reading the raw line
+reports drift on nearly every epic, and a false positive at a mandatory gate halts all work.
+
+### Added — ✍️ `set_status` now maintains the contract it always promised
+
+Enforcing "keep the frontmatter `status` in sync" without teaching the writer to do it would
+have broken every sanctioned transition: `tools/tasks-lock.py set-status` wrote **only** the
+board, so `/sdd-drill` running `set-status <epic> planned` — or any Orchestrator feature move
+— would leave the document behind and turn the next mandatory `init.sh` red until someone
+made an undocumented second edit. **A gate that enforces a contract nothing maintains does
+not make the contract true; it breaks the workflow.**
+
+`set-status` now rewrites the corresponding `*.spec.md` or `epic.md` `status:` inside the
+same locked critical section as the board write, using the validator's **own** frontmatter
+parser so the reader and the writer cannot disagree. Inline comments and their column are
+preserved, so a one-word transition stays a one-word diff. The sync is narrow by design: it
+updates a status that is **already declared**, never adds a frontmatter block, never creates
+a file, and never touches a spec declaring another feature's `id`. If a document cannot be
+read the write **aborts with the board untouched**, and a failure of the board replace rolls
+the documents back — the two records move together or not at all.
+
+### Fixed — 🐛 the divergence itself
+
+All 26 disagreements are corrected, so a fresh clone is green. Each was resolved toward the
+**true** value rather than blindly toward the board: 25 stale frontmatter statuses were moved
+forward, and **`E06`** was the opposite case — all seven of its features are `done` and its
+`epic.md` already said so, but the board still read `in-progress` because the epic-done rollup
+never fired, so the **board** was rolled to `done`. `E05`'s `epic.md`, which carried no
+frontmatter at all, was given one so the guard covers all 24 epics rather than silently
+skipping one.
+
+**Not addressed, and not a divergence:** an epic whose board status and `epic.md` *agree* but
+are both stale relative to their features (`E17` reads `pending` with four of five features
+`done`). This feature verifies **agreement between the two records**, not the correctness of
+the rollup that produced them.
+
 ## [0.58.0] — 2026-08-04
 
 ### Added — ✨ installer-stamped escalation arming (E17-F05)
