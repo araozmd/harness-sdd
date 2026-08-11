@@ -4,6 +4,40 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.59.1] — 2026-08-11
+
+### Fixed — 🐛 one choke point for every spec/epic filesystem read (E99-F15)
+
+The containment rule shipped in 0.59.0 — *a path the board names must resolve inside this
+repository* — was reported by review **four times, at four different read sites**, across
+four consecutive rounds of one PR: `spec_path` itself, the spec directory, the matched
+`*.spec.md`, and finally `epic.md` reached through a symlinked `specs/epics/<id>-*`
+directory. Every fix was correct and every fix was a patch at one site, because **nothing
+about adding a read site made a containment check necessary**.
+
+The fourth site was still open, and it was not theoretical: with
+`specs/epics/E1-one -> /tmp/outside`, `init.sh` returned green and flipping the *external*
+`epic.md`'s status changed the verdict — the gate read and trusted a document outside the
+repository.
+
+`tools/validate-board.py` now has **one** resolve-then-contain-then-open entry point, and
+the harness root is its first required argument, so a new read site cannot be written
+without saying what is supposed to contain it:
+
+| read site | before | now |
+|---|---|---|
+| `spec_path` (absolute, `..`, symlinked dir) | per-site check | the one rule |
+| the matched `*.spec.md` | per-site check | the one rule |
+| `epic.md` via a symlinked epic directory | **unguarded** | ❌ named as an escape |
+| the writer in `tools/tasks-lock.py` | its own copy of the check | reads through the same entry point, and re-checks containment before it writes |
+
+Behaviour is otherwise unchanged: all 28 existing R-ids in
+`tests/test_board_spec_consistency.sh` pass untouched. R29 covers the `epic.md` escape
+(and confirms an *in-repo* symlinked epic directory is still fine — the rule is where the
+read lands, not whether a symlink was involved); R30 replaces the entry point and requires
+the verdict to change for both documents, so a read site that kept its own `open()` fails
+the suite.
+
 ## [0.59.0] — 2026-08-06
 
 ### Added — ✅ the board must agree with the specs on disk (E99-F14)

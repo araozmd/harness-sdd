@@ -716,9 +716,32 @@ def _rewrite_status(text, new_status):
     return None
 
 
+def _write_contained(vb, root_real, path, text):
+    """Write `text` to `path`, refusing when it resolves outside `root_real`.
+
+    The write-side twin of `vb._read_contained`, and deliberately a separate function
+    rather than a reuse of it: the read helper answers "may I open this", and a writer
+    that borrowed it would be asking the wrong question a moment before doing something
+    the answer does not cover. Containment is re-established HERE rather than inherited
+    from the read, because a write is a second resolution of the same name and the whole
+    lesson of this rule is that a path is contained at the moment it is resolved, not
+    once and forever.
+    """
+    if not vb._contains(root_real, os.path.realpath(path)):
+        raise ValueError(
+            "refusing to sync %s — it resolves outside the harness root" % path
+        )
+    with io.open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
 def _frontmatter_targets(vb, hdir, data, target_id, status):
-    """[(path, new_text)] for the documents this status write must carry along."""
+    """[(path, original_text, new_text)] for the documents this status write must carry
+    along. The ORIGINAL text is carried out of here because it was already read through
+    the choke point — re-reading it in the writer would be a read site the containment
+    rule never sees."""
     targets = []
+    root_real = os.path.realpath(hdir)
     is_epic = "-" not in target_id
     for ep in data.get("epics") or []:
         if not isinstance(ep, dict):
@@ -750,17 +773,20 @@ def _frontmatter_targets(vb, hdir, data, target_id, status):
                 continue          # sdd:false / not authored yet — nothing to carry
             candidates = vb._spec_files(fdir)
 
-        root_real = os.path.realpath(hdir)
         for path in candidates:
             if not os.path.isfile(path):
                 continue
-            # Never write THROUGH a symlink that leaves the repository. The directory
-            # having passed containment does not make each file in it contained.
-            if not vb._contains(root_real, os.path.realpath(path)):
+            # Read through the SAME choke point the gate reads through, once, and keep the
+            # text: this is both the containment check (never write THROUGH a symlink that
+            # leaves the repository — the directory having passed containment does not make
+            # each file in it contained) and the only read of this file, so the rewrite
+            # below cannot reach a path the check never saw.
+            text = vb._read_contained(root_real, path)
+            if text is vb._ESCAPED:
                 raise ValueError(
                     "refusing to sync %s — it resolves outside the harness root" % path
                 )
-            front = vb._frontmatter(path)
+            front = text if text is vb._UNREADABLE else vb._parse_frontmatter(text)
             if front is vb._UNREADABLE:
                 # Refuse rather than guess. Rewriting a file we could not parse risks
                 # corrupting it, and silently skipping it would leave the divergence the
@@ -783,15 +809,13 @@ def _frontmatter_targets(vb, hdir, data, target_id, status):
                 continue          # declares none; the gate does not require one
             if front.get("status") == status:
                 continue          # already in agreement
-            with io.open(path, encoding="utf-8") as fh:
-                text = fh.read()
             new_text = _rewrite_status(text, status)
             if new_text is not None and new_text != text:
-                targets.append((path, new_text))
+                targets.append((path, text, new_text))
     return targets
 
 
-def _apply_frontmatter(targets):
+def _apply_frontmatter(vb, root_real, targets):
     """Write each target, returning [(path, original_text)] for rollback.
 
     A failure part-way through rolls back what THIS call already wrote before re-raising.
@@ -802,24 +826,20 @@ def _apply_frontmatter(targets):
     """
     written = []
     try:
-        for path, new_text in targets:
-            with io.open(path, encoding="utf-8") as fh:
-                original = fh.read()
-            with io.open(path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+        for path, original, new_text in targets:
+            _write_contained(vb, root_real, path, new_text)
             written.append((path, original))
     except Exception:
-        _rollback_frontmatter(written)
+        _rollback_frontmatter(vb, root_real, written)
         raise
     return written
 
 
-def _rollback_frontmatter(written):
+def _rollback_frontmatter(vb, root_real, written):
     for path, original in written:
         try:
-            with io.open(path, "w", encoding="utf-8") as fh:
-                fh.write(original)
-        except OSError:
+            _write_contained(vb, root_real, path, original)
+        except (OSError, ValueError):
             pass
 
 
@@ -872,7 +892,9 @@ def run(transform, timeout, sync_id=None, sync_status=None):
                 fm_targets = _frontmatter_targets(
                     vb, hdir, reparsed, sync_id, sync_status
                 )
-                fm_written = _apply_frontmatter(fm_targets)
+                fm_written = _apply_frontmatter(
+                    vb, os.path.realpath(hdir), fm_targets
+                )
 
             # Atomic write: temp in the same dir, then os.replace (R4 — no torn
             # file). If the process dies mid-write, the original is untouched.
@@ -912,7 +934,7 @@ def run(transform, timeout, sync_id=None, sync_status=None):
                     os.unlink(tmp_path)
                 except OSError:
                     pass
-                _rollback_frontmatter(fm_written)
+                _rollback_frontmatter(vb, os.path.realpath(hdir), fm_written)
                 raise
         finally:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)  # release before returning (R3)

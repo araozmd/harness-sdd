@@ -700,4 +700,116 @@ run_root "$T/r28c.json" "$B4"
 [ "$RC" -eq 0 ] || fail "R28: an empty spec_path was demanded of a pending feature"
 pass "R28 an empty spec_path fails for an authored feature and is silent for the rest"
 
+# ══ R29 — epic.md is contained too, symlinked directory and all ══════════════════════
+# (Codex #3741652119 — the FOURTH containment finding on this one function, at the fourth
+# read site.) The board records no epic path, so `epic.md` is resolved by CONVENTION from
+# `specs/epics/<id>-*`: the glob that finds it never leaves the tree, which made this site
+# look in-repo by construction and is why it outlived the three fixes before it. A
+# symlinked epic directory puts the document outside the repository anyway — and the
+# original reproduction confirmed the gate did not merely resolve it but READ and TRUSTED
+# it: flipping the EXTERNAL epic.md's status changed the verdict.
+Z5="$T/r29"; mkdir -p "$Z5/specs/epics"
+OUT5="$T/r29-outside/E1-one"; mkdir -p "$OUT5"
+printf -- '---\nstatus: planned\n---\n' >"$OUT5/epic.md"
+ln -s "$OUT5" "$Z5/specs/epics/E1-one"
+mkspec "$Z5" "specs/epics/E1-one/F1-a/E1-F1.spec.md" "done"
+board "$T/r29.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}'
+run_root "$T/r29.json" "$Z5"
+[ "$RC" -ne 0 ] || fail "R29: an epic.md reached through a symlinked epic directory was accepted"
+saw "epic.md escapes the harness root" || fail "R29: the epic.md escape was not reported"
+# As with R25, the path is named the way the tree spells it — not ../../../private/var/….
+saw "specs/epics/E1-one/epic.md" \
+  || fail "R29: the escape was reported with an unreadable resolved path"
+# The external document's CONTENT must no longer reach the verdict. Before this rule the
+# gate compared against it: `status: planned` there vs `status: planned` on the board was
+# silently "consistent", which is how an external file came to certify the board.
+rm "$Z5/specs/epics/E1-one"
+mkdir -p "$Z5/specs/epics/E1-one/F1-a"
+printf -- '---\nstatus: planned\n---\n' >"$Z5/specs/epics/E1-one/epic.md"
+mkspec "$Z5" "specs/epics/E1-one/F1-a/E1-F1.spec.md" "done"
+run_root "$T/r29.json" "$Z5"
+[ "$RC" -eq 0 ] || fail "R29: control — a real in-repo epic.md failed: $(cat "$T/err")"
+# An in-repo symlinked epic directory is NOT an escape: the rule is where the read lands,
+# not whether a symlink was involved (the same distinction R20 draws for spec_path).
+rm -rf "$Z5/specs/epics/E1-one"
+mkdir -p "$Z5/specs/real-E1/F1-a"
+printf -- '---\nstatus: planned\n---\n' >"$Z5/specs/real-E1/epic.md"
+mkspec "$Z5" "specs/real-E1/F1-a/E1-F1.spec.md" "done"
+ln -s "$Z5/specs/real-E1" "$Z5/specs/epics/E1-one"
+run_root "$T/r29.json" "$Z5"
+[ "$RC" -eq 0 ] || fail "R29: an epic dir symlinked INSIDE the repository was rejected: $(cat "$T/err")"
+# The WRITER refuses it too, and the board does not move — the write side reaches epic.md
+# by the same convention (the /sdd-drill epic transition, R22).
+FX5="$T/r29w"
+mkdir -p "$FX5/state" "$FX5/store" "$FX5/tools" "$FX5/specs/epics"
+cp "$SRC/tools/tasks-lock.py" "$SRC/tools/validate-board.py" "$FX5/tools/"
+cp "$SRC/store/tasks.schema.json" "$FX5/store/"
+cat >"$FX5/state/tasks.json" <<'JSON'
+{"project":"fx","epics":[{"id":"E1","title":"one","status":"planned","features":[]}]}
+JSON
+OUT5W="$T/r29w-outside/E1-one"; mkdir -p "$OUT5W"
+printf -- '---\nstatus: planned\n---\n' >"$OUT5W/epic.md"
+ln -s "$OUT5W" "$FX5/specs/epics/E1-one"
+if HARNESS_DIR="$FX5" python3 "$FX5/tools/tasks-lock.py" set-status E1 in-progress \
+     >"$T/w5.out" 2>"$T/w5.err"; then
+  fail "R29: set-status wrote through an epic directory symlinked out of the repository"
+fi
+grep -F "outside the harness root" "$T/w5.err" >/dev/null \
+  || fail "R29: the writer's refusal did not name containment: $(cat "$T/w5.err")"
+[ "$(fx_status "$OUT5W/epic.md")" = "planned" ] \
+  || fail "R29: the external epic.md was rewritten"
+[ "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['epics'][0]['status'])" \
+      "$FX5/state/tasks.json")" = "planned" ] \
+  || fail "R29: the board moved while its epic document could not be synced"
+pass "R29 epic.md is contained too — a symlinked epic dir escapes, an in-repo one does not"
+
+# ══ R30 — ONE choke point: no spec/epic document is read anywhere else ═══════════════
+# The point of this feature, and the thing the four per-site patches never gave: it is not
+# enough that today's four read sites are contained, because nothing made a FIFTH one
+# arrive contained. `_read_contained` is now the only function that opens these documents,
+# so this test replaces it and requires the verdict to change for BOTH documents. A read
+# site that kept its own `io.open` would go on comparing statuses through it and the
+# expected error would not appear — the assertion is unreachable by any other path.
+Z6="$T/r30"; mkdir -p "$Z6/specs/epics/E1-one/F1-a"
+printf -- '---\nstatus: planned\n---\n' >"$Z6/specs/epics/E1-one/epic.md"
+mkspec "$Z6" "specs/epics/E1-one/F1-a/E1-F1.spec.md" "done"
+board "$T/r30.json" '{"id":"E1-F1","title":"a","status":"done","sdd":true,"depends_on":[],"spec_path":"specs/epics/E1-one/F1-a/"}'
+run_root "$T/r30.json" "$Z6"
+[ "$RC" -eq 0 ] || fail "R30: precondition — the unstubbed fixture must be clean: $(cat "$T/err")"
+python3 - "$VALIDATOR" "$T/r30.json" "$Z6" >"$T/r30.out" 2>"$T/r30.err" <<'PY' \
+  || fail "R30: the choke-point probe errored: $(cat "$T/r30.err")"
+import importlib.util, json, sys
+
+path, board_path, root = sys.argv[1], sys.argv[2], sys.argv[3]
+spec = importlib.util.spec_from_file_location("vb", path)
+vb = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(vb)
+
+opened = []
+
+
+def stub(root_real, target):
+    opened.append(target)
+    return vb._ESCAPED
+
+
+vb._read_contained = stub
+errors = vb.spec_consistency_errors(json.load(open(board_path)), root)
+print(json.dumps({"opened": opened, "errors": errors}))
+PY
+python3 - "$T/r30.out" <<'PY' || fail "R30: not every spec/epic read goes through the choke point"
+import json, sys
+
+got = json.load(open(sys.argv[1]))
+opened = [p for p in got["opened"]]
+assert any(p.endswith("epic.md") for p in opened), "epic.md was read without the choke point"
+assert any(p.endswith(".spec.md") for p in opened), "the spec was read without the choke point"
+errs = " ".join(got["errors"])
+assert "epic.md escapes the harness root" in errs, \
+    "epic.md's content still reached the verdict from somewhere else: %s" % errs
+assert "spec file escapes the harness root" in errs, \
+    "the spec's content still reached the verdict from somewhere else: %s" % errs
+PY
+pass "R30 every spec/epic read routes through the one contained-read entry point"
+
 echo "all board/spec consistency checks passed"
