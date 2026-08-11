@@ -302,21 +302,61 @@ _UNREADABLE = object()
 # write refuses.
 _AMBIGUOUS = object()
 
+# A path that resolves OUTSIDE the harness root. Distinct from `_UNREADABLE`: the file is
+# perfectly readable, and that is the problem — reading it would let the gate certify a
+# document that is not in this repository.
+_ESCAPED = object()
 
-def _frontmatter(path):
-    """Parse a leading `---` block into `{key: value}`.
 
-    Returns `_UNREADABLE` when the file cannot be read or decoded, `{}` when there is no
-    frontmatter, and otherwise the declared scalars. Every read of a spec/epic file goes
-    through here, so the read-failure case is handled in ONE place rather than once per
+def _read_contained(root_real, path):
+    """Resolve `path`, refuse it when it leaves `root_real`, and only then read it.
+
+    THE one entry point for reading a spec or epic document. Returns the file's text, or
+    `_ESCAPED` when the resolved path lands outside the root, or `_UNREADABLE` when it
+    cannot be opened or decoded.
+
+    It exists because containment kept being added per read SITE. `tools/validate-board.py`
+    grew four of them across four consecutive review rounds of PR #124 — the `spec_path`
+    itself, the spec directory, the matched `*.spec.md`, and finally `epic.md` reached
+    through a symlinked `specs/epics/<id>-*` directory — and each was found by review
+    rather than prevented by design, because nothing about adding a read site made a
+    containment check necessary. Now something does: `root_real` is the FIRST REQUIRED
+    argument of the only function that opens these documents, so a new read site cannot be
+    written without saying what is supposed to contain it, and cannot be written to skip
+    the check without deleting this helper.
+
+    `root_real` must already be resolved (`os.path.realpath`). Resolving BOTH sides is not
+    optional: on macOS `/tmp` is itself a symlink to `/private/tmp`, so resolving only the
+    target would report an escape for every tree under a temporary directory.
+    """
+    real = os.path.realpath(path)
+    if not _contains(root_real, real):
+        return _ESCAPED
+    try:
+        with io.open(real, encoding="utf-8") as fh:
+            return fh.read()
+    except (OSError, UnicodeDecodeError, ValueError):
+        return _UNREADABLE
+
+
+def _frontmatter(root_real, path):
+    """Parse a contained document's leading `---` block into `{key: value}`.
+
+    Returns `_ESCAPED` / `_UNREADABLE` straight from `_read_contained`, `{}` when there is
+    no frontmatter, and otherwise the declared scalars. Every read of a spec/epic file goes
+    through here, so both failure cases are handled in ONE place rather than once per
     caller — two callers each with their own `except` is how the two answers drifted apart
     in the first place.
     """
-    try:
-        with io.open(path, encoding="utf-8") as fh:
-            text = fh.read()
-    except (OSError, UnicodeDecodeError, ValueError):
-        return _UNREADABLE
+    text = _read_contained(root_real, path)
+    if text is _ESCAPED or text is _UNREADABLE:
+        return text
+    return _parse_frontmatter(text)
+
+
+def _parse_frontmatter(text):
+    """The pure parse, split out so the writer in `tasks-lock.py` can reuse the text it
+    already read through the choke point instead of opening the file a second time."""
     if not text.startswith("---"):
         return {}
     end = text.find("\n---", 3)
@@ -347,7 +387,7 @@ def _scalar(raw):
 def _declared(front, key):
     """The declared value of `key`, None when nothing was declared, `_AMBIGUOUS` when it
     was declared more than once."""
-    if front is _UNREADABLE:
+    if front is _UNREADABLE or front is _ESCAPED:
         return None
     value = front.get(key)
     if value is _AMBIGUOUS:
@@ -443,7 +483,21 @@ def spec_consistency_errors(data, root):
             if len(edirs) == 1:
                 epic_md = os.path.join(edirs[0], "epic.md")
                 if os.path.isfile(epic_md):
-                    front = _frontmatter(epic_md)
+                    front = _frontmatter(root_real, epic_md)
+                    if front is _ESCAPED:
+                        # The board records no epic path, so this one is resolved by
+                        # CONVENTION from `specs/epics/<id>-*` — which makes it look
+                        # in-repo by construction and is exactly why it was the read site
+                        # that stayed unguarded longest. A symlinked epic directory puts
+                        # the document outside the repository while the glob that found it
+                        # never left.
+                        errors.append(
+                            "%s: epic.md escapes the harness root: %s — it resolves "
+                            "outside the repository, so the gate would certify an epic "
+                            "document that is not in it"
+                            % (eid, os.path.relpath(epic_md, root_real))
+                        )
+                        front = {}
                     if front is _UNREADABLE:
                         errors.append(
                             "%s: epic.md cannot be read or decoded (%s) — its status "
@@ -556,19 +610,19 @@ def spec_consistency_errors(data, root):
             owned = 0
             misowned = False
             for spec_file in specs:
-                # Containment is re-checked per FILE, not inherited from the directory.
-                # Resolving only the directory leaves a matched `*.spec.md` free to be a
-                # symlink whose target is outside the repository — in-repo by listing,
-                # external in fact — and the gate would certify a spec that is not here.
-                if not _contains(root_real, os.path.realpath(spec_file)):
+                # Containment is re-checked per FILE, not inherited from the directory —
+                # a matched `*.spec.md` is free to be a symlink whose target is outside the
+                # repository, in-repo by listing and external in fact. The check is no
+                # longer written HERE, though: it is what `_frontmatter` does before it
+                # opens anything, so this site gets it by construction.
+                front = _frontmatter(root_real, spec_file)
+                if front is _ESCAPED:
                     errors.append(
                         "%s: spec file escapes the harness root: %s — it resolves outside "
                         "the repository, so the gate would certify a spec that is not in it"
                         % (fid, os.path.relpath(spec_file, root_real))
                     )
                     continue
-
-                front = _frontmatter(spec_file)
                 if front is _UNREADABLE:
                     # The glob already satisfied the "an authored spec exists" rule, so
                     # without this the file's unreadability would be indistinguishable

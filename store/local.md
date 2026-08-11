@@ -138,7 +138,13 @@ Orchestrator's exclusive ownership of state writes.
   decoded is reported as such, never treated as one that simply declares nothing, and a
   `spec_path` that is absolute or escapes the repository via `..` is rejected outright
   (containment is to the harness root, not to `specs/` — the schema has never required
-  that layout). It does
+  that layout). Containment is not a property of `spec_path` alone: **every** read of a
+  spec or `epic.md` resolves the path and checks it before opening, so a directory, a
+  matched `*.spec.md`, or a `specs/epics/<id>-*` directory that is a symlink out of the
+  repository is an escape too — in-repo by spelling, external in fact. One helper in
+  `tools/validate-board.py` does the resolve-contain-open, and the writer in
+  `tools/tasks-lock.py` reads through it and re-checks containment before writing, so a
+  new read or write site cannot arrive without the rule. It does
   **not** fire for the
   `sdd: false` quick-fix lane (no Architect runs, so there is no spec by construction), for a
   feature still at `pending`, or for a feature inside a `draft` epic (already warn-only). A
