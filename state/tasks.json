@@ -490,7 +490,7 @@
         {
           "id": "E99-F14",
           "title": "init.sh should validate spec_path existence and spec/board status agreement",
-          "status": "in-review",
+          "status": "done",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
