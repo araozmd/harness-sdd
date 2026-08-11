@@ -499,7 +499,7 @@
         {
           "id": "E99-F15",
           "title": "one choke point for every spec/epic filesystem read",
-          "status": "in-review",
+          "status": "done",
           "sdd": false,
           "autonomous": true,
           "depends_on": [
