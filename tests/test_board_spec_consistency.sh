@@ -668,4 +668,36 @@ chmod 644 "$SECOND"
   || fail "R27: the board moved while a document could not be written"
 pass "R27 a mid-way write failure rolls the earlier documents back and leaves the board put"
 
+# ══ R28 — an EMPTY spec_path is unresolved, not exempt ═══════════════════════════════
+# (Codex #3741652118.) `store/tasks.schema.json` declares `spec_path` as `"type": "string"`,
+# and `""` satisfies that — so it is NOT a schema error, and skipping it here let an
+# authored feature opt out of every rule in this file by naming nothing at all.
+B4="$T/r28"; mkdir -p "$B4/specs/epics"
+cat >"$T/r28.json" <<'JSON'
+{"project":"fx","epics":[{"id":"E1","title":"one","status":"planned","features":[
+ {"id":"E1-F1","title":"a","status":"in-review","sdd":true,"depends_on":[],"spec_path":""}]}]}
+JSON
+run_root "$T/r28.json" "$B4"
+[ "$RC" -ne 0 ] || fail "R28: an authored feature with an empty spec_path passed"
+saw "spec_path is empty" || fail "R28: the empty path was not reported as empty"
+# The board is schema-VALID: prove the empty string is accepted upstream, so this rule is
+# the only thing standing between it and a green gate.
+run_bare "$T/r28.json"
+[ "$RC" -eq 0 ] || fail "R28: precondition — an empty spec_path must be schema-valid"
+# Controls: the same empty path is silent for the two non-authored classes, exactly as a
+# missing directory is (R3, R4).
+cat >"$T/r28b.json" <<'JSON'
+{"project":"fx","epics":[{"id":"E1","title":"one","status":"planned","features":[
+ {"id":"E1-F1","title":"a","status":"done","sdd":false,"depends_on":[],"spec_path":""}]}]}
+JSON
+run_root "$T/r28b.json" "$B4"
+[ "$RC" -eq 0 ] || fail "R28: an empty spec_path was demanded of an sdd:false feature"
+cat >"$T/r28c.json" <<'JSON'
+{"project":"fx","epics":[{"id":"E1","title":"one","status":"planned","features":[
+ {"id":"E1-F1","title":"a","status":"pending","sdd":true,"depends_on":[],"spec_path":""}]}]}
+JSON
+run_root "$T/r28c.json" "$B4"
+[ "$RC" -eq 0 ] || fail "R28: an empty spec_path was demanded of a pending feature"
+pass "R28 an empty spec_path fails for an authored feature and is silent for the rest"
+
 echo "all board/spec consistency checks passed"

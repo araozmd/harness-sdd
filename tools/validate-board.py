@@ -478,11 +478,38 @@ def spec_consistency_errors(data, root):
             fid = ft.get("id")
             fstatus = ft.get("status")
             spec_path = ft.get("spec_path")
-            # A missing/non-string spec_path or status is already a schema error;
-            # re-reporting it here would double every message.
-            if not isinstance(spec_path, str) or not spec_path:
+            # A missing or NON-STRING spec_path is a genuine schema error (`"type":
+            # "string"`), so re-reporting it here would double every message.
+            if not isinstance(spec_path, str):
                 continue
             if not isinstance(fid, str) or not isinstance(fstatus, str):
+                continue
+
+            # `authored` is needed before the empty-path check below, so it is computed
+            # here rather than after it.
+            #
+            # A DRAFT epic is an inception sketch. The harness already declares that a
+            # non-`pending` feature inside one is WARN-ONLY (see _emit_draft_warnings:
+            # the next() draft gate keeps it unselectable), so demanding an authored
+            # spec for it here would hard-fail through a side door the exact board state
+            # the harness has decided to tolerate. The status-agreement rule below still
+            # applies — a spec that DOES exist and disagrees is real drift either way.
+            authored = (
+                ft.get("sdd") is True
+                and fstatus != "pending"
+                and estatus != "draft"
+            )
+
+            if not spec_path:
+                # An EMPTY spec_path is NOT a schema error — `"type": "string"` accepts
+                # `""` — so skipping it here let an authored feature opt out of every rule
+                # below by naming nothing at all. The comment this replaced asserted the
+                # schema already caught it; it did not.
+                if authored:
+                    errors.append(
+                        "%s: spec_path is empty — an sdd feature at status '%s' must name "
+                        "a spec directory a Reviewer can open" % (fid, fstatus)
+                    )
                 continue
 
             fdir = _resolve_under_root(root, spec_path)
@@ -496,18 +523,6 @@ def spec_consistency_errors(data, root):
                     "is not in it" % (fid, spec_path)
                 )
                 continue
-
-            # A DRAFT epic is an inception sketch. The harness already declares that a
-            # non-`pending` feature inside one is WARN-ONLY (see _emit_draft_warnings:
-            # the next() draft gate keeps it unselectable), so demanding an authored
-            # spec for it here would hard-fail through a side door the exact board state
-            # the harness has decided to tolerate. The status-agreement rule below still
-            # applies — a spec that DOES exist and disagrees is real drift either way.
-            authored = (
-                ft.get("sdd") is True
-                and fstatus != "pending"
-                and estatus != "draft"
-            )
 
             if not os.path.isdir(fdir):
                 if authored:
