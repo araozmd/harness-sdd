@@ -692,7 +692,7 @@
         {
           "id": "E21-F05",
           "title": "The stacked-PR lane: doctrine, seams, and role contracts",
-          "status": "pending",
+          "status": "spec-ready",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
