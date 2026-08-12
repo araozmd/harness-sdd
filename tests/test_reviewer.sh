@@ -98,4 +98,24 @@ grep -qF '"pending", "spec-ready", "in-progress", "in-review", "done"' store/tas
   || fail "R13: feature status enum in schema changed"
 pass "R13 status_enum_intact"
 
+# ── R16: the mutation-mandate suite still EXISTS and is still discoverable ───────
+# (E99-F67. Numbered R16, not R14/R15: those two ids are already taken by the unmerged
+# branch `fix/E99-F58-mutation-revert-discipline`, and reusing them would collide the
+# day it lands. The gap is deliberate and this comment is the record of why.)
+#
+# This assertion lives HERE, in a different suite, on purpose. `tools/run-tests.sh`
+# discovers `tests/test_*.sh` by glob, so renaming the mandate suite out of that glob
+# removes it from the verification command AND from the run's suite count, and the
+# runner reports "all N suites passed" — a green result that means the Reviewer's
+# checks 3b/3c are no longer verified by anything. A self-check inside that file cannot
+# catch its own absence: it is only ever evaluated in the world where it still runs.
+_MM="tests/test_reviewer_mutation_mandate.sh"
+[ -f "$_MM" ] \
+  || fail "R16: $_MM is missing — the Reviewer's checks 3b/3c (agents/reviewer.md) are no longer pinned by anything"
+case "$_MM" in
+  tests/test_*.sh) : ;;
+  *) fail "R16: $_MM is outside the tests/test_*.sh glob that tools/run-tests.sh discovers, so it no longer runs" ;;
+esac
+pass "R16 mutation_mandate_suite_present_and_discoverable"
+
 echo "All reviewer tests passed."

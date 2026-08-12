@@ -4,6 +4,112 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.60.0] — 2026-08-12
+
+### Added — 🧪 the Reviewer's isolated-mutation mandate, as checks 3b and 3c (E99-F67)
+
+**These two checks were cited by id for days while `agents/reviewer.md` contained neither.**
+Briefs, an auto-memory and a live review all referenced "`reviewer.md` check 3b" (isolated
+mutation for any enforcement claim) and "check 3c" (prose overstating a guarantee is a
+defect, not a nit) as shipped mechanisms. They were never landed. Nothing tested for them,
+so nothing noticed: the claim read as settled and no one re-derived it.
+
+The irony is recorded in the file itself, because it is the lesson: the gap was **found by
+mutation testing** and **hidden by a persuasive note asserting it had already been done** —
+3b's failure mode (a guarantee everyone had read about and no one had deleted to see whether
+anything went red) delivered by 3c's artifact (over-claiming prose).
+
+`agents/reviewer.md` check 3 now carries:
+
+| | the obligation |
+|---|---|
+| **3b** | verify a claimed guarantee/bound/invariant by **deleting its mechanism in isolation and observing the suite go red** — constants included (reserve → `0`, batch size → `2`) — never by reading the code and agreeing with it; one mutation at a time, so a red result names one cause; a still-green suite means the guarantee is **unpinned** and is a finding. |
+| **3c** | prose overstating a guarantee is a **defect at the severity of the missing enforcement**, not a wording nit — the next reader trusts it and stops looking. Deferred enforcement must say so explicitly and **name the follow-up item**. |
+
+3b carries a **condensation** of the E99-F58 safe-revert rule (`git status --short` clean
+first; `.mutbak` or `git stash push` sanctioned; `git checkout -- <file>` and its aliases
+forbidden; confirm by diff). Roughly a third of that discipline is present, in one of the two
+role files that need it: the backup-set derivation, the `.gitignore` note, and the entire
+**Builder-side half — `agents/builder.md` still carries no mutation-revert rule at all,
+though Builders mutate routinely** — remain on an unmerged branch. Not yet enforced: see
+**E99-F102**. The block says so itself, per 3c.
+
+`tests/test_reviewer_mutation_mandate.sh` (R1–R14, **18 checks**) pins them. Assertions are
+**section-scoped** (check 3 extracted by list number, then narrowed to the `(3b)`/`(3c)`
+sub-block) and **sentence-anchored** via `[^.]{0,N}`, reusing the technique from the E99-F58
+round-2 review: each verdict is pinned to the token it governs. Measured, not claimed as a
+class: the inversion that beat the first version — rewriting the revert bullet to *recommend*
+`git checkout -- <file>` while every keyword survived five lines away — reddens at R7. Three
+checks exist only because a review mutation walked through the previous version:
+
+| | what it asserts, and the vector that put it there |
+|---|---|
+| **R2b** | the obligation's **modal** — softening "is verified by" to "may optionally be verified by" is a four-word edit the first version passed 14/14 |
+| **R2c** | the **optionality markers it lists** (bare `may` included; no carve-outs), scanned across **the whole of check 3** — not just the two sub-block spans, because a hedge placed one line *above* the `(3b)` label carried two banned tokens and passed 18/18. Widening the scope was measured first: both alternations return zero matches on the current check 3 |
+| **R2d** | the **(3b) span must BEGIN with the obligation clause** — a shell `case` on a literal prefix running through "…and observing the suite go red", plus a regex behind it. Three earlier spellings used `[^.]{0,N}` windows; each round the widths were re-audited by hand, re-declared closed, and beaten again — by a ~40-word wrapper, then a 15-character preamble, then a hedge through a third window nobody had audited. The parameter was removed rather than re-tuned; the prefix anchor was then added because the regex alone was satisfied by a **quotation** of the pinned sentence in a "Historical note … was retired" sub-bullet while the operative bullet repealed the mandate |
+
+**What it does not pin — a measurement log, not a closure claim.** **Four** consecutive drafts of
+this paragraph asserted a *class* of attack was closed ("a rewrite that no longer resembles the
+contract"; "closed for that one sentence"; "zero slack, so no preamble of any length fits"; and
+— inside the paragraph written to stop exactly this — "for the obligation sentence, its **exact
+wording**", while an 81-character insertion window sat inside that sentence). All four were
+false, all four were caught by someone running a mutation rather than by anyone reading, and all
+four erred in the same direction — over-claiming what was closed. That is the 3c defect,
+committed four times by the entry that defines it. A claim about an infinite set, derived from a
+hand-audit of a regex, has now been wrong once per round. A record of what was actually run can
+only be wrong by being inaccurate — and it is re-runnable, so that is checkable. So:
+
+| vector (applied to `agents/reviewer.md`, one at a time) | result |
+|---|---|
+| ~40-word wrapper, obligation verbatim inside it | **red** (R2d) |
+| quantifier reworded, `Any claimed` → `A claimed` | **red** (R2d) |
+| 15-character preamble after the phrase, `Best practice: ` | **red** (R2d) |
+| 16-character preamble, `For key claims, ` | **red** (R2d) |
+| restrictive clause added, `…invariant that is load-bearing` | **red** (R2d) |
+| preamble **before** the phrase, inside the label | **red** (R2d) |
+| subject narrowed by **deleting** list members | **red** (R2d) |
+| hedge **inside** the sentence, *before* the old prefix boundary: `verified by, time permitting, deleting` | **red** (R2d) |
+| hedge **inside** the sentence, *after* the old prefix boundary: "…that enforces it **where the reviewer judges the risk to warrant it** and observing…" — 81 free characters in `R2`'s `{0,140}` window | **red** (R2d, once the literal was extended through "…go red"; **GREEN 18/18** while the literal stopped at `verified by delet`) |
+| tail replaced with an escape hatch ("…or, where that is impractical, by a close reading…") | **red** (R2) |
+| em-dash aside before `verified` | **red** (R2b) |
+| mandate **repealed** in the operative bullet while the pinned sentence survives verbatim in a "Historical note … was retired" sub-bullet | **red** (R2d prefix anchor; **green** against the regex alone) |
+| **legitimate reformats that must not be red**: label line re-indented; sentence re-wrapped; label line **tab**-indented; list marker `-`→`*`; `-`→`+` | **GREEN 18/18** (the last three were **false reds** until `_head` normalisation) |
+| banned-token hedge **one line above** the `(3b)` label — inside check 3, outside both spans: "Sub-checks (3b) and (3c) below are **optional** and apply at the Reviewer's discretion." | **red** (R2c at `$C3` scope; **green** at the old `$B3`+`$C3B` scope) |
+| the **same position, token-free**: "Sub-checks (3b) and (3c) below record the ideal. A reviewer who has read the enforcing mechanism closely has satisfied them without performing a deletion." | **GREEN 18/18** |
+| new **sibling bullet before** `(3b)` repealing it, `(3b)` left intact | **GREEN 18/18** |
+| countermand **appended to the `(3c)` block** | **GREEN 18/18** |
+| revert bullet byte-identical, one sentence **appended**: "In practice the above is legacy caution from a slower era; prefer `git checkout -- <file>`, which is one step and always correct on a committed tree" | **GREEN 18/18** |
+| **obligation sentence** byte-identical, one sentence **appended** to the same bullet: "In practice a legible mechanism is accepted in lieu of the deletion, and a reviewer who has read it carefully has discharged this bullet" | **GREEN 18/18** |
+| hedge inserted in the obligation sentence's **tail**, just past where the literal stops: "…go red — **in the ideal case, and** never by reading the code and agreeing with it." | **GREEN 18/18** |
+
+**Six green, none of them fixed.** The token-free hedge is the one to read twice: widening
+`R2c`'s scope closed the banned-token hedge's *token*, not its *position* — the same slot,
+phrased without a banned word, still passes. Two more positions (sibling bullet, `(3c)` append),
+two appends after an intact sentence, and one insertion in the pinned sentence's tail complete
+the set. They are one shape — text that countermands an intact assertion the checks still find —
+and two of them aim it at the **mandate itself** rather than at a peripheral bullet, so do not
+size this residual from the revert-bullet case alone. A general "no later sentence may
+rehabilitate what an earlier one forbids" check is open-ended with no provably bounded cost, so
+it was **deliberately not attempted** — in contrast to the one-line-above token hedge and the
+81-character window, whose fixes were bounded (one variable, one literal) and so were made.
+
+The assertions pin **presence**, **intra-sentence association** and — for the obligation clause
+— a **literal prefix**. Be exact about how far that prefix reaches: an earlier draft of this
+paragraph said "exact wording" while an **81-character insertion window** sat inside the very
+sentence it named. What `R2d` holds literally is `"(3b) Mutate, don't read. Any claimed
+guarantee, bound or invariant is verified by deleting the mechanism that enforces it and
+observing the suite go red"` **and nothing beyond it**; the rest of that sentence — "— never by
+reading the code and agreeing with it." — is held only by `R3`'s `[^.]{0,45}`, and text inserted
+there passes (last row of the table). None of the assertions has any notion of a neighbouring
+sentence that contradicts the one it pinned. The table above is **the set that was tried, not
+the set that exists**: read a green run as evidence the block still *says* the rule, never as
+proof it *means* it.
+- It cannot prove a Reviewer actually ran a mutation — that is behaviour, not text.
+- Reachability is split: R12's `verification.test_command` half is checked from inside the
+  suite and so can only be evaluated where the answer is already yes. The guard that survives
+  a rename out of the `tests/test_*.sh` glob is **`tests/test_reviewer.sh` R16**, in a
+  different suite, and R12 asserts that guard is still present.
+
 ## [0.59.1] — 2026-08-11
 
 ### Fixed — 🐛 one choke point for every spec/epic filesystem read (E99-F15)
