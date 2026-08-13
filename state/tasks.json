@@ -506,6 +506,15 @@
             "E99-F14"
           ],
           "spec_path": "specs/epics/E99-maintenance/F15-read-containment-chokepoint/"
+        },
+        {
+          "id": "E99-F16",
+          "title": "the harness cannot spawn its own mandatory doc-critic checkpoint",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F16-source-doc-critic-shim/"
         }
       ]
     },
