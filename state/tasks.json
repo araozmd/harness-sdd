@@ -510,11 +510,20 @@
         {
           "id": "E99-F16",
           "title": "the harness cannot spawn its own mandatory doc-critic checkpoint",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F16-source-doc-critic-shim/"
+        },
+        {
+          "id": "E99-F17",
+          "title": "the park suite's R7 precondition breaks on the first real park",
+          "status": "in-progress",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F17-park-test-live-board/"
         }
       ]
     },
