@@ -177,3 +177,144 @@ no-parks board as a fixture rather than borrowing the repo's), and is out of sco
    a missing JSON key — a different fix from the one the table implies. Still out of scope;
    `register_ok()` models both mechanisms so the distinction survives in the suite.
 3. **`test_feature_park.sh` is already red on `main`** — see above.
+
+---
+
+# Round 4 — `register_ok` rewritten as record + shared validator (Codex #3786832831)
+
+## Why a rewrite and not a fourth patch
+
+Three consecutive review rounds found the **same defect class in three different branches
+of one function** — an assertion that named something stronger than it checked:
+
+| round | branch | what it actually checked | what it claimed |
+|---|---|---|---|
+| 1 | `claude` | file exists | "the role is spawnable" |
+| 2 | `opencode` JSON | key is present | ditto — and round 1's patch left a **comment saying the OpenCode branch already checked mode and prompt**, false about the code two lines below it |
+| 3 | `.opencode/agent/<role>.md` | file exists | ditto — a **zero-byte file** would have satisfied the whole suite the moment `pr-fixer:opencode` was retired |
+
+Patching one branch at a time reproduced the bug once per branch, because the branches had
+no shared contract: each one decided for itself how much to check. Three instances is this
+repo's stated threshold for rewriting the rule. So the branches are gone.
+
+## The structure
+
+`registration_probe <role> <front-end>` (python3, invoked from the shell wrapper
+`register_ok`, which keeps the reasons in `REGISTER_WHY` for the failure message):
+
+- **Every mechanism extracts the same record.** `Rec = namedtuple("Rec", "present name
+  targets harness_rooted mode described")`. Three extractors — `claude-shim`,
+  `opencode-json`, `opencode-file` — and nothing else. A namedtuple was chosen over a dict
+  on purpose: a mechanism that forgets a field **raises**, it does not answer fewer
+  questions than its siblings.
+- **One validator asks the record five questions**: Present, Identity, Target, Mode,
+  Described. There is no per-mechanism branch in the validator at all.
+- **A record field that nothing asks about is a hard error.** `CHECKS` declares, per entry,
+  which `Rec` fields it consumes, and the union is asserted equal to `Rec._fields`. Adding
+  a field without adding a check exits 2 → `fail`, not a silent pass. (Mutation **S1**.)
+- **Adding a front-end is a table edit**: `MECHANISMS` (front-end → mechanisms),
+  `EXTRACTORS` (mechanism → extractor), `SITES` (mechanism → path for messages). A
+  mechanism named in `MECHANISMS` with no extractor is a `KeyError`, not a skip.
+- **Exit codes are three-valued**: 0 spawnable, 1 not (with per-mechanism reasons), **2 the
+  suite itself is misconfigured** — unknown front-end, unasked field, non-record. Two is a
+  hard `fail`, so a broken probe can never read as "not registered".
+
+### The two traps that survived the rewrite, explicitly
+
+1. **Containment vs equality.** `{file:./.harness/agents/x.md}` *contains* `agents/x.md`, so
+   a containment test accepts the installed prompt verbatim. `targets` is therefore a list
+   of **normalized, delimited** references compared for **equality**, and the reference
+   regex carries two trailing lookaheads so `agents/x.md.bak` extracts as *no reference*
+   rather than as `agents/x.md` (mutation **C4**). `harness_rooted` is kept as a separate,
+   broader field — true if `.harness/` appears anywhere in the registration text — so an
+   installed-style body is rejected even when its stray `.harness/` path is not a role file
+   (this is what the old `! grep -qF ".harness/"` did; it was not weakened).
+2. **The orchestrator.** `expected_mode()` encodes the mode **the installer actually emits
+   per site** — `primary` for `orchestrator` in `opencode.json` (harness-install.sh's
+   `agent:` map), `subagent` everywhere else, including every file-based agent
+   (`gen_oc_agent` hardcodes it). An earlier tightening demanded `subagent` universally and
+   **failed the correct orchestrator config**; that is the defect this suite exists to
+   prevent, so the reasoning is inline at `expected_mode()`.
+
+### Fields fixed BY THE MECHANISM, said out loud
+
+The brief's rule — *comments must not claim more than the code does* — cuts both ways, so
+each such field says so at its assignment:
+
+- `claude-shim.mode` is `"subagent"` **by construction**: `.claude/agents/` has no mode key;
+  every file there *is* a spawnable sub-agent. The Mode check is a **tautology** for this
+  mechanism and detects nothing in the claude tree. It is filled rather than skipped so the
+  coverage assertion can force the *next* mechanism to answer the question.
+- `opencode-json.name` and `opencode-file.name` are the role **by construction** (the JSON
+  key / the filename is the identity, and the lookup was keyed on it), so Identity cannot
+  fail there; it is the **Target** check that ties those registrations to the role.
+  Identity is a real check for exactly one mechanism — `claude-shim`, where Claude Code
+  addresses the sub-agent by a frontmatter `name` that can disagree with the filename.
+
+**Fifth question added: Described.** `tests/test_pr_loop.sh:481` requires a file-based
+OpenCode agent to carry a `description`. All three mechanisms already carry one, so asking
+it uniformly costs nothing and removes one more thing a stub registration can fake.
+
+## Mutation matrix
+
+Applied in a throwaway `git worktree add --detach`, one at a time, restored between each;
+the working checkout was never mutated and the worktree was removed clean.
+**Baseline green; 18 of 18 behaved as intended, none needed a second mutation to fail.**
+
+| # | mechanism | mutation | result |
+|---|---|---|---|
+| C1 | claude-shim | delete `.claude/agents/doc-critic.md` | FAIL — `Present: no registration at .claude/agents/doc-critic.md` |
+| C2 | claude-shim | frontmatter `name: doccritic` | FAIL — `Identity: declares name 'doccritic', expected 'doc-critic'` |
+| C3 | claude-shim | body repointed at `.harness/agents/doc-critic.md` | FAIL — `Target: resolves against .harness/` |
+| C4 | claude-shim | body target `agents/doc-critic.md.bak` (containment would accept) | FAIL — `Target: points at no well-formed role-file reference` |
+| C5 | claude-shim | drop `description:` from the scout shim | FAIL — `Described: carries no description` |
+| J1 | opencode-json | delete the `doc-critic` entry | FAIL — `Present` (both mechanisms reported) |
+| J2 | opencode-json | `mode: primary` on `builder` | FAIL — `Mode: mode is 'primary', expected 'subagent'` |
+| J3 | opencode-json | doc-critic prompt → `{file:./agents/scout.md}` | FAIL — `Target: points at ['agents/scout.md']` |
+| J4 | opencode-json | prompt in the INSTALLED form `{file:./.harness/agents/doc-critic.md}` | FAIL — `Target: resolves against .harness/` |
+| J5 | opencode-json | empty `description` on `builder` | FAIL — `Described` |
+| J6 | opencode-json | **orchestrator flipped to `subagent`** | FAIL — `Mode: mode is 'subagent', expected 'primary'` |
+| **F1** | **opencode-file** | **zero-byte `.opencode/agent/pr-fixer.md`, `pr-fixer:opencode` exemption AND the `.opencode` absence guard removed** | **FAIL** — `Target` + `Mode` + `Described`, all three |
+| F2 | opencode-file | **well-formed** file-based agent, same two removals | **PASS** |
+| F3 | opencode-file | well-formed but `mode: primary` | FAIL — `Mode` |
+| F4 | opencode-file | body points at `.harness/agents/pr-fixer.md` | FAIL — `Target: resolves against .harness/` |
+| F5 | opencode-file | no `description` | FAIL — `Described` |
+| F6 | opencode-file | body points at `agents/reviewer.md` | FAIL — `Target: points at ['agents/reviewer.md']` |
+| F7 | xfail machinery | well-formed file **but `KNOWN_GAPS` line left in place** | FAIL — `the KNOWN_GAPS exemption 'pr-fixer:opencode' is obsolete; DELETE that line` |
+| S1 | structure | add a `model` field to `Rec` with no `CHECKS` entry | FAIL (exit 2) — `registration record fields unasked/unknown: ['model']` |
+
+**F1 is round 3's finding, proved closed**; F2 proves the fix does not merely reject
+everything. **F7 proves the xfail self-expiry still fires** at the exact moment the gap is
+retired. The `orchestrator` control **passes at baseline** with its legitimate
+`mode: primary`, and J6 proves that pass is a real assertion rather than a permissive one.
+
+## Verification
+
+- `./init.sh` — green.
+- `sh tools/run-tests.sh` — **all 36 suites passed**.
+- `dash tests/test_source_shims.sh` — green (POSIX-clean, not just `sh`-on-macOS-clean).
+- `harness-install.sh`, `agents/*.md`, `state/tasks.json`, `VERSION`, `CHANGELOG.md`
+  untouched — one file changed, `tests/test_source_shims.sh`.
+
+## Findings this round that the brief did not anticipate
+
+1. **The over-claiming was in a failure MESSAGE too, not only in comments.** The first cut
+   of `check_mode` printed *"a caller cannot spawn what is not a subagent"* for every mode
+   mismatch — including `orchestrator`, where the expected mode is `primary` and that
+   sentence is the exact opposite of the truth. Caught by mutation J6 reading its own
+   output. `check_mode` now branches its reason on which mode was wanted. Same defect
+   class as rounds 1–3, one layer out: the diagnostic asserting more than the check knows.
+2. **The `.opencode` absence guard and the `pr-fixer:opencode` xfail must be retired
+   TOGETHER, and only one of them says so.** Creating `.opencode/agent/pr-fixer.md` trips
+   the section-1 absence check ~70 lines before the xfail fires (mutations F1–F6 had to
+   remove both to reach the code under test). The absence-check message already names both
+   deletions; the `KNOWN_GAPS` comment does not. Left as is — the message the author will
+   actually hit first is the complete one — but noted because it is invisible from the
+   `KNOWN_GAPS` side.
+3. **`mode` is not uniformly meaningful, and pretending otherwise would have been the next
+   round's finding.** Claude's mechanism has no mode concept at all. The honest options
+   were "skip the question for that mechanism" (which is what rounds 1–3 kept doing, one
+   question at a time) or "answer it by construction and label it a tautology". The second
+   keeps the record shape uniform — which is what makes the coverage assertion able to
+   force a *future* mechanism to answer — at the cost of one check that provably detects
+   nothing in one tree. That trade-off is stated at the assignment rather than hidden.

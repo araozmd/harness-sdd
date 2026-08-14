@@ -94,15 +94,15 @@ for _fe in .codex .gemini .agents .opencode; do
   # `.opencode` is the one entry with a KNOWN remedy, so it gets its own message. Its
   # KNOWN_GAPS xfail (`pr-fixer:opencode`) can ONLY be fixed by creating
   # `.opencode/agent/pr-fixer.md` — which trips this absence check ~70 lines before the
-  # xfail's own self-expiry message fires. Sending that author to "extend register_ok()"
-  # is a dead end: register_ok() already models `.opencode/agent/` (see its opencode
-  # branch). The xfail design promises "it fails the moment someone fixes it and the
+  # xfail's own self-expiry message fires. Sending that author to "add the mechanism" is a
+  # dead end: `opencode-file` is already one of the mechanisms registration_probe validates
+  # in full. The xfail design promises "it fails the moment someone fixes it and the
   # message says to delete the line"; without this, that promise breaks on the one entry
   # whose fix is least obvious.
   if [ "$_fe" = ".opencode" ]; then
-    [ -e "$SRC/$_fe" ] && fail "source now has .opencode/ — if you are retiring the 'pr-fixer:opencode' known gap, register_ok() ALREADY covers .opencode/agent/<role>.md and needs no change: just delete '.opencode' from this absence list and delete that KNOWN_GAPS line"
+    [ -e "$SRC/$_fe" ] && fail "source now has .opencode/ — if you are retiring the 'pr-fixer:opencode' known gap, the 'opencode-file' mechanism in registration_probe ALREADY validates .opencode/agent/<role>.md in full and needs no change: just delete '.opencode' from this absence list and delete that KNOWN_GAPS line"
   else
-    [ -e "$SRC/$_fe" ] && fail "source now registers roles in $_fe/ — that front-end is not covered by this suite's per-role loop; extend register_ok() and this enumeration (a new front-end silently uncovered is exactly the E99-F16 bug)"
+    [ -e "$SRC/$_fe" ] && fail "source now registers roles in $_fe/ — that front-end is not covered by this suite's per-role loop; add it to registration_probe's MECHANISMS/EXTRACTORS and to this enumeration (a new front-end silently uncovered is exactly the E99-F16 bug)"
   fi
 done
 pass "source registers roles in exactly two front-ends (.claude/agents/, opencode.json)"
@@ -140,65 +140,307 @@ is_known_gap() {
   return 1
 }
 
-# register_ok <role> <front-end> — is <role> spawnable in <front-end> from the source tree?
-register_ok() {
-  case "$2" in
-    claude)
-      # NOT existence-only. A shim can exist and still be unspawnable two ways, and both
-      # are live risks at the next KNOWN_GAPS retirement (lift `builder-heavy` from the
-      # installer heredoc and you get exactly this): Claude Code addresses a sub-agent by
-      # its frontmatter `name`, so a name that disagrees with the filename is a file that
-      # cannot be spawned; and an installed-style body resolving against `.harness/` points
-      # at a path that does not exist in the source tree — the precise mistake
-      # progress/inbox/E99-F16.md warns about. The OpenCode branch below checks the
-      # equivalent three things for its own mechanism.
-      [ -f "$SRC/.claude/agents/$1.md" ] || return 1
-      grep -qE "^name:[ ]*$1[ ]*$" "$SRC/.claude/agents/$1.md" || return 1
-      grep -qF "agents/$1.md" "$SRC/.claude/agents/$1.md" || return 1
-      ! grep -qF ".harness/" "$SRC/.claude/agents/$1.md"
-      ;;
-    opencode)
-      # OpenCode supports TWO registration mechanisms and the installer uses both: the
-      # `agent:` map in opencode.json for the model-routed roles, and a file-based
-      # `.opencode/agent/<role>.md` for pr-fixer (which tests/test_pr_loop.sh:482 asserts
-      # must NEVER appear in opencode.json). Either one makes the role spawnable, so
-      # either satisfies this check.
-      #
-      # NOT key-membership-only, for the same reason the claude branch is not
-      # existence-only: an entry can be present and unspawnable. `mode: primary` makes the
-      # role a top-level agent rather than something a caller can spawn, and a prompt
-      # pointing into `.harness/` resolves nowhere in this checkout. Membership alone left
-      # `builder`, `reviewer` and `scout` free to break both ways while this gate stayed
-      # green — the strict checks lived only in the doc-critic-specific section below, so
-      # the asymmetry this suite exists to close had simply moved to the other side.
-      python3 - "$SRC/opencode.json" "$1" <<'PY' || [ -f "$SRC/.opencode/agent/$1.md" ]
-import json, sys
-with open(sys.argv[1]) as fh:
-    cfg = json.load(fh)
-role = sys.argv[2]
-entry = cfg.get("agent", {}).get(role)
-if not isinstance(entry, dict):
-    sys.exit(1)
-# The two front-ends model the Orchestrator differently and BOTH are correct: Claude
-# registers it as a spawnable shim, while OpenCode makes it the top-level `primary` agent
-# (the installer emits exactly that -- see harness-install.sh's `agent:` map). Demanding
-# `subagent` for every role failed on `orchestrator` the first time this check was
-# tightened -- a test that rejects a correct config, which is the defect this suite is
-# supposed to prevent, not commit. So encode the mode the installer actually uses.
-expected_mode = "primary" if role == "orchestrator" else "subagent"
-if entry.get("mode") != expected_mode:
-    sys.exit(1)
-# Source-rooted, and explicitly NOT the installed form. "{file:./.harness/agents/<role>.md}"
-# contains "agents/<role>.md" as a substring, so a containment test would accept the
-# installed prompt verbatim — the same trap the claude branch pair exists for.
-prompt = entry.get("prompt") or ""
-if ".harness/" in prompt:
-    sys.exit(1)
-sys.exit(0 if prompt == "{file:./agents/%s.md}" % role else 1)
+# registration_probe <role> <front-end> — the record extractor + the shared validator.
+#
+# WHY THIS IS ONE VALIDATOR AND NOT A `case` WITH A BRANCH PER FRONT-END. Three consecutive
+# review rounds found the SAME defect in three different branches of the function that used
+# to live here — an assertion that named something stronger than it actually checked:
+#
+#   round 1  the claude branch was existence-only (a shim can exist and be unspawnable:
+#            Claude addresses a sub-agent by its frontmatter `name`, and an installed-style
+#            body resolving against `.harness/` points nowhere in this checkout);
+#   round 2  the opencode.json branch was key-membership-only (`mode: primary` or a
+#            `.harness/` prompt kept the gate green), AND round 1's patch left a comment
+#            claiming that branch already checked mode and prompt — it did not;
+#   round 3  the file-based `.opencode/agent/<role>.md` fallback was existence-only, so a
+#            ZERO-BYTE file would have satisfied the whole suite the moment the
+#            `pr-fixer:opencode` known gap was retired.
+#
+# One defect class, three sites, three patches: patching a branch at a time reproduced the
+# bug once per branch. So the branches are gone. Every registration MECHANISM now extracts
+# the SAME normalized record, and ONE validator asks that record the same questions. A new
+# mechanism has to produce a record, and a record it cannot under-fill: `Rec` is a
+# namedtuple (a missing field raises) and the check table is asserted to consume EVERY
+# field (a new field with no check is a hard error, not a silently unasked question).
+#
+# The four questions, plus one:
+#   Present     — is there a registration at all?
+#   Identity    — does it name THIS role?
+#   Target      — does it point at the SOURCE `agents/<role>.md`, and NOT at
+#                 `.harness/agents/<role>.md`? (The installed form CONTAINS the source form
+#                 as a substring, so containment alone accepts the installed prompt
+#                 verbatim — hence a normalized, delimited reference compared for equality
+#                 plus a separate `.harness/` guard.)
+#   Mode        — is it registered as the kind of agent the installer actually emits here?
+#   Described   — does it carry a description? tests/test_pr_loop.sh:481 requires one of a
+#                 file-based OpenCode agent; all three mechanisms already carry one, so it
+#                 costs nothing to ask uniformly and it is one more thing a zero-byte or
+#                 stub registration cannot fake.
+#
+# Exit 0 = spawnable through at least one of the front-end's mechanisms. Exit 1 = not, with
+# the per-mechanism reasons on stdout. Exit 2 = this suite is misconfigured (unknown
+# front-end, or a mechanism that did not answer every question) — a hard failure, never a
+# quiet "not registered".
+registration_probe() {
+  python3 - "$SRC" "$1" "$2" <<'PY'
+import json, os, re, sys
+from collections import namedtuple
+
+SRC, ROLE, FE = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# ── The record: one shape, produced by every mechanism ────────────────────────────────
+# `targets` is the list of role-file references the registration makes, normalized so the
+# source form and the installed form are DISTINGUISHABLE rather than one containing the
+# other. `harness_rooted` is deliberately separate and broader: it is true if the
+# registration text mentions `.harness/` ANYWHERE, so an installed-style body is rejected
+# even when its stray `.harness/` path is not a role file.
+Rec = namedtuple("Rec", "present name targets harness_rooted mode described")
+ABSENT = Rec(present=False, name="", targets=[], harness_rooted=False, mode="", described=False)
+
+# A role-file reference, DELIMITED. The trailing lookaheads are what make this an equality
+# test rather than a containment test: `agents/x.md.bak` yields no reference at all (the
+# second lookahead rejects `.` + alphanumeric), while a sentence-ending `agents/x.md.` is
+# still a reference. The leading class swallows any prefix, so `./.harness/agents/x.md`
+# extracts WHOLE and then fails the equality below instead of matching as a substring.
+ROLE_REF = re.compile(r"[A-Za-z0-9._/-]*agents/[A-Za-z0-9._-]+\.md(?![A-Za-z0-9_/-])(?!\.[A-Za-z0-9])")
+
+def role_refs(text):
+    out = []
+    for ref in ROLE_REF.findall(text):
+        out.append(ref[2:] if ref.startswith("./") else ref)
+    return out
+
+def frontmatter(text):
+    """Top-level `key: value` pairs of a leading `---` block. Nested keys (an indented
+    `permission:` map, as harness-install.sh's gen_oc_agent emits) are skipped, not
+    flattened. An unterminated block yields nothing rather than a guess."""
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return {}
+    fm = {}
+    for ln in lines[1:]:
+        if ln.strip() == "---":
+            return fm
+        if ln[:1] in ("", " ", "\t", "-"):
+            continue
+        if ":" in ln:
+            k, v = ln.split(":", 1)
+            fm[k.strip()] = v.strip()
+    return {}
+
+def read(path):
+    try:
+        with open(path) as fh:
+            return fh.read()
+    except (IOError, OSError):
+        return None
+
+# ── The mechanisms ────────────────────────────────────────────────────────────────────
+# Each returns a Rec. Where a field is fixed BY THE MECHANISM rather than read from the
+# registration, that is said here explicitly — the comment must not claim the check does
+# work it cannot do (round 2's second finding was exactly such a comment).
+
+def m_claude_shim():
+    # `.claude/agents/<role>.md`. Identity is a REAL check here: Claude Code addresses a
+    # sub-agent by its frontmatter `name`, which can disagree with the filename.
+    text = read(os.path.join(SRC, ".claude", "agents", ROLE + ".md"))
+    if text is None:
+        return ABSENT
+    fm = frontmatter(text)
+    return Rec(
+        present=True,
+        name=fm.get("name", ""),
+        targets=role_refs(text),
+        harness_rooted=".harness/" in text,
+        # BY CONSTRUCTION, not read from the file: this mechanism has no mode key — every
+        # file under .claude/agents/ IS a spawnable sub-agent. The Mode check below is
+        # therefore a tautology for this mechanism and detects nothing in the claude tree.
+        # The field is filled rather than skipped so the record shape stays uniform and the
+        # coverage assertion can force the NEXT mechanism to answer this question.
+        mode="subagent",
+        described=bool(fm.get("description", "")),
+    )
+
+def m_opencode_json():
+    # The `agent:` map in opencode.json — the model-routed roles.
+    raw = read(os.path.join(SRC, "opencode.json"))
+    if raw is None:
+        return ABSENT
+    try:
+        cfg = json.loads(raw)
+    except ValueError:
+        return ABSENT
+    entry = cfg.get("agent", {}).get(ROLE)
+    if not isinstance(entry, dict):
+        return ABSENT
+    prompt = entry.get("prompt") or ""
+    # The prompt must be the whole `{file:...}` pointer, not merely contain one: anything
+    # else is handed through verbatim so it can only fail the equality in check_target.
+    m = re.match(r"^\{file:(?:\./)?([^}]*)\}$", prompt)
+    return Rec(
+        present=True,
+        # BY CONSTRUCTION: the JSON key IS the identity, and the lookup above was keyed on
+        # it. Nothing else in the entry declares a name, so this check cannot fail here —
+        # it is the Target check that ties the entry to this particular role.
+        name=ROLE,
+        targets=[m.group(1)] if m else [prompt],
+        harness_rooted=".harness/" in json.dumps(entry),
+        mode=entry.get("mode") or "",
+        described=bool((entry.get("description") or "").strip()),
+    )
+
+def m_opencode_file():
+    # `.opencode/agent/<role>.md` — the file-based OpenCode agent. This is the mechanism
+    # the installer uses for pr-fixer (harness-install.sh's gen_oc_agent), which
+    # tests/test_pr_loop.sh:482 asserts must NEVER appear in opencode.json. Absent from the
+    # source today; modeled so that retiring the `pr-fixer:opencode` known gap is checked
+    # rather than merely counted.
+    text = read(os.path.join(SRC, ".opencode", "agent", ROLE + ".md"))
+    if text is None:
+        return ABSENT
+    fm = frontmatter(text)
+    return Rec(
+        present=True,
+        # BY CONSTRUCTION: OpenCode addresses a file-based agent by its FILENAME and the
+        # body declares no name, so this check cannot fail here either.
+        name=ROLE,
+        targets=role_refs(text),
+        harness_rooted=".harness/" in text,
+        mode=fm.get("mode", ""),
+        described=bool(fm.get("description", "")),
+    )
+
+MECHANISMS = {
+    "claude":   ("claude-shim",),
+    # Either mechanism makes the role spawnable in OpenCode, so either satisfies the
+    # front-end — but each is validated in FULL, so "the other one exists" can no longer
+    # stand in for "this one is usable".
+    "opencode": ("opencode-json", "opencode-file"),
+}
+EXTRACTORS = {
+    "claude-shim":   m_claude_shim,
+    "opencode-json": m_opencode_json,
+    "opencode-file": m_opencode_file,
+}
+SITES = {
+    "claude-shim":   ".claude/agents/%s.md" % ROLE,
+    "opencode-json": "opencode.json agent.%s" % ROLE,
+    "opencode-file": ".opencode/agent/%s.md" % ROLE,
+}
+
+def expected_mode(mech):
+    """The mode the INSTALLER actually emits for this role at this site — the ground truth,
+    not a wish. harness-install.sh's `agent:` map emits `mode: primary` for orchestrator and
+    `mode: subagent` for every other opencode.json role; gen_oc_agent hardcodes
+    `mode: subagent` for every file-based agent.
+
+    The orchestrator is the case to protect. The two front-ends model it differently and
+    BOTH are correct: Claude registers it as a spawnable shim while OpenCode makes it the
+    top-level `primary` agent. The first time this check was tightened it demanded
+    `subagent` universally and FAILED that correct configuration — a test rejecting a
+    correct config is the defect this suite exists to prevent, not to commit."""
+    if mech == "opencode-json" and ROLE == "orchestrator":
+        return "primary"
+    return "subagent"
+
+# ── The shared validator ──────────────────────────────────────────────────────────────
+# Each check returns None (satisfied) or a reason. The tuple's first element names the Rec
+# fields the check consumes; the assertion below proves the table consumes ALL of them, so
+# a mechanism cannot introduce a field that nothing asks about.
+
+def check_present(mech, rec):
+    if not rec.present:
+        return "no registration at %s" % SITES[mech]
+    return None
+
+def check_identity(mech, rec):
+    if rec.name != ROLE:
+        return "declares name %r, expected %r (this is the handle callers spawn it by)" % (rec.name, ROLE)
+    return None
+
+def check_target(mech, rec):
+    want = "agents/%s.md" % ROLE
+    if rec.harness_rooted:
+        return "resolves against .harness/ — that is the INSTALLED form; in this checkout the role files live at agents/"
+    if want not in rec.targets:
+        return "points at %s, expected the source role file %s" % (
+            rec.targets or "no well-formed role-file reference", want)
+    return None
+
+def check_mode(mech, rec):
+    want = expected_mode(mech)
+    if rec.mode == want:
+        return None
+    # The reason must not claim more than expected_mode() decided. For every role but the
+    # orchestrator's opencode.json entry the wanted mode IS `subagent` and the consequence
+    # is "a caller cannot spawn it"; for that one entry the wanted mode is `primary` and the
+    # consequence is the opposite, so do not print the subagent sentence there.
+    if want == "subagent":
+        return "mode is %r, expected 'subagent' — a caller cannot spawn what is not a subagent" % (rec.mode,)
+    return "mode is %r, expected %r — this is the front-end's TOP-LEVEL agent here" % (rec.mode, want)
+
+def check_described(mech, rec):
+    if not rec.described:
+        return "carries no description"
+    return None
+
+CHECKS = (
+    ("present",                 "Present",   check_present),
+    ("name",                    "Identity",  check_identity),
+    ("targets harness_rooted",  "Target",    check_target),
+    ("mode",                    "Mode",      check_mode),
+    ("described",               "Described", check_described),
+)
+
+_covered = set()
+for _fields, _q, _fn in CHECKS:
+    _covered.update(_fields.split())
+if _covered != set(Rec._fields):
+    print("registration record fields unasked/unknown: %s — every Rec field must be consumed "
+          "by a CHECKS entry, or a mechanism can answer fewer questions than its siblings"
+          % sorted(_covered ^ set(Rec._fields)))
+    sys.exit(2)
+
+def validate(mech, rec):
+    reasons = []
+    for _fields, question, fn in CHECKS:
+        why = fn(mech, rec)
+        if why:
+            reasons.append("%s: %s" % (question, why))
+            if question == "Present":
+                break          # the other four would just restate "there is nothing there"
+    return reasons
+
+mechs = MECHANISMS.get(FE)
+if mechs is None:
+    print("unknown front-end %r — MECHANISMS has no entry for it" % FE)
+    sys.exit(2)
+
+failures = []
+for mech in mechs:
+    rec = EXTRACTORS[mech]()
+    if not isinstance(rec, Rec):
+        print("mechanism %r did not produce a registration record" % mech)
+        sys.exit(2)
+    reasons = validate(mech, rec)
+    if not reasons:
+        sys.exit(0)
+    failures.extend("[%s] %s" % (mech, r) for r in reasons)
+print("; ".join(failures))
+sys.exit(1)
 PY
-      ;;
-    *) fail "register_ok: unknown front-end '$2'" ;;
-  esac
+}
+
+# register_ok <role> <front-end> — is <role> spawnable in <front-end> from the source tree?
+# Thin wrapper: keeps the probe's reasons in REGISTER_WHY for the failure message, and
+# turns a misconfigured suite (exit 2) into a hard failure rather than "not registered".
+REGISTER_WHY=''
+register_ok() {
+  _rc=0
+  REGISTER_WHY="$(registration_probe "$1" "$2" 2>&1)" || _rc=$?
+  [ "$_rc" -eq 0 ] && return 0
+  [ "$_rc" -eq 2 ] && fail "register_ok('$1','$2'): $REGISTER_WHY"
+  return 1
 }
 
 command -v python3 >/dev/null 2>&1 \
@@ -213,7 +455,7 @@ for _role in $SPAWNED; do
       fi
     else
       register_ok "$_role" "$_fe" \
-        || fail "'$_role' is spawned as a sub-agent but is NOT registered for $_fe in the source checkout — it cannot be spawned where the harness runs on itself (this is the E99-F16 class of bug; the installer registers it for every consumer, so only the source is broken)"
+        || fail "'$_role' is spawned as a sub-agent but is NOT registered for $_fe in the source checkout — it cannot be spawned where the harness runs on itself (this is the E99-F16 class of bug; the installer registers it for every consumer, so only the source is broken) — $REGISTER_WHY"
     fi
   done
 done
