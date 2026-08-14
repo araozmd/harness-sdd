@@ -173,27 +173,30 @@ Two things from the pattern are deliberately **rejected**:
   structure" that E21-F01 never defined. Even a decision to *deprecate* the lane needs that
   section to read accurately first.
 
-- **F06 is written but deliberately NOT SEEDED on the board.** Its brief exists at
-  `progress/inbox/E21-F06.md`; there is no `state/tasks.json` row and no feature-table entry,
-  and that is the decision rather than an oversight.
+- **F06 is seeded and PARKED — the board has the vocabulary for exactly this.**
+  `store/tasks.schema.json` defines a feature-level `parked` object (`reason`, optional
+  `unblocked_by`), and `featureBlockers()` in `tools/next-task.mjs` emits a `parked` blocker
+  and never selects the feature **while leaving `featureRoute` untouched, so unparking restores
+  the prior routing exactly**. Verified: `node tools/next-task.mjs --feature E21-F06` reports
+  `parked` with `[route when unparked: architect]`.
 
-  Seeding it would have created a feature the selector routes to and the Architect must refuse.
-  `tools/next-task.mjs` returns any `pending`, `sdd: true` feature whose `depends_on` is
-  satisfied, so the moment F05 reached `done` it would have returned F06 — while F06's own brief
-  says *do not spec this until the product decision is answered*. `autonomous: false` cannot
-  supply that gate: the documented human gate fires at **`spec-ready`**, i.e. *after* the
-  Architect has already written the spec the brief says not to write.
+  This corrects an earlier claim in this file that the board had no park vocabulary. It does.
+  Un-seeding F06 on that mistaken basis would have removed the follow-up from the TaskStore
+  entirely, so `/sdd-next` could never surface this half of the split and the decision could
+  have been silently forgotten — which is the failure the park exists to prevent.
 
-  And the rejection path has no board vocabulary either. A "no" answer leaves nothing to write:
-  the status set is `pending → spec-ready → in-progress → in-review → done`, with **no `parked`
-  and no `declined`**, so a rejected F06 would sit `pending` and actionable forever. This is the
-  same limitation that made re-spec-in-place the right call for F05 above — there is no
-  `withdrawn` — and it is recorded twice now because it is the board's gap, not this epic's.
+  Seeding it *unparked* would have been the opposite error: `next-task.mjs` returns any
+  `pending`/`sdd: true` feature whose `depends_on` is met, so the moment F05 reached `done` it
+  would have routed F06 to the Architect — while F06's brief says do not spec it until the
+  product decision is answered. `autonomous: false` cannot supply that gate, because the human
+  gate fires at `spec-ready`, i.e. *after* the spec the brief says not to write.
 
-  **Release condition:** when the question below is answered *yes*, seed F06 from its existing
-  brief (`depends_on: [E21-F05]`, gated). Answered *no*, delete the brief and seed a small
-  feature that deprecates the lane in `docs/WORKFLOW.md` — which F05 will already have made
-  accurate — and decides what becomes of `tools/pr-stack-guard.sh`.
+  **Release condition** (recorded in the park's `unblocked_by`): answered *yes* ⇒ unpark and the
+  routing resumes; answered *no* ⇒ replace it with a small feature that deprecates the lane in
+  `docs/WORKFLOW.md` — which F05 will already have made accurate — and decides what becomes of
+  `tools/pr-stack-guard.sh`. Note the residual: a park says *not yet workable*, not *declined*;
+  the status set still has no terminal disposition for a feature the project decides against,
+  which is the same gap that made re-spec-in-place the right call for F05 above.
 
 - **The question F06 waits on, and it decides whether F06 exists at all.** The **sibling-feature
   model already delivers budget-sized reviews** — this epic's actual goal — with zero new
