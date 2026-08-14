@@ -161,7 +161,13 @@ C3="$(check3)"
 D3="$(printf '%s\n' "$C3" | span '**(3d)' '**(3e)' | flat)"
 E3="$(printf '%s\n' "$C3" | span '**(3e)' ''       | flat)"
 BSEC="$(section "$BUILDER_HEADING" | flat)"
-BNS="$(section "$BUILDER_HEADING" | span '- **Namespace every scratch file' '- **Check the free disk' | flat)"
+# ⚠️ The span markers carry NO list marker. Spelling them `- **Namespace…` was a FALSE RED
+# on probe X2, a repo-wide markdown reformat of `-` to `*`: the bullet still existed and
+# still said everything it had to, and R6 failed claiming it was absent. `head_of()` below
+# already tolerates either marker; the span has to as well, or the tolerance is decorative.
+# A false red conceals no hole, but it is exactly what pushes the next maintainer to relax
+# the check.
+BNS="$(section "$BUILDER_HEADING" | span '**Namespace every scratch file' '**Check the free disk' | flat)"
 
 # head_of — a block's opening text with leading whitespace (INCLUDING TABS) and a `-`/`+`
 # list marker stripped. Used only by the prefix anchors below. This normalises LIST SYNTAX
