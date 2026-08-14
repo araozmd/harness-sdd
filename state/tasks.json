@@ -510,7 +510,7 @@
         {
           "id": "E99-F16",
           "title": "the harness cannot spawn its own mandatory doc-critic checkpoint",
-          "status": "in-progress",
+          "status": "pending",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
