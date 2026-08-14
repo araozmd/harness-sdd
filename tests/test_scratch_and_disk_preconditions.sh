@@ -51,9 +51,13 @@
 #
 # #133 had FOUR consecutive drafts of this paragraph assert that a CLASS of edit was closed,
 # and all four were false in the same direction: over-claiming. So no claim about a class is
-# made here. What follows is what was RUN and what CAME BACK. Mutations were applied one at
-# a time to the file named, restoring from a `.mutbak` copy in between and confirming the
-# restore by diff; "red" = `sh tools/run-tests.sh` exit 1.
+# made here. What follows is what was RUN and what CAME BACK. Mutations were applied to
+# `agents/reviewer.md` or `agents/builder.md` ONE AT A TIME, backed up with `cp <file>
+# <file>.mutbak` and restored with `mv`, never `git checkout -- <file>`, with every restore
+# confirmed by a diff rather than by a test run. Free space was 426.0 GiB before the campaign
+# and 426.0 GiB after, and 12 of 14 vectors came back red — so this was NOT a mass-failure
+# run and its output is readable as evidence (which is check (3e), applied to itself).
+# "red" = the suite exits 1.
 #
 #   vector                                                          result
 #   ── STRAIGHT DELETIONS (the rule removed) ───────────────────────────────────
@@ -61,42 +65,65 @@
 #   M2  (3e) block deleted from agents/reviewer.md                   red (R1)
 #   M3  `## Scratch files and campaign preconditions` section
 #       deleted from agents/builder.md                               red (R6)
-#   ── HARDER: HEADING AND VOCABULARY KEPT, OBLIGATION DROPPED ─────────────────
-#   M4  (3d) keeps its label and every noun (scratchpad, feature id,
-#       role, collision, runner, the whole incident narrative) but
-#       the path template and the write-obligation are replaced by
-#       "Scratch files from different lanes have collided before."   red (R2 —
-#                                                                    the template
-#                                                                    literal is gone)
-#   M5  M4's twin that ALSO keeps the template literal, quoting it
-#       as an illustration inside the narrative while the obligation
-#       sentence is gone: "…wrote its own scratchpad/mut.py rather
-#       than scratchpad/<feature-id>-<role>/mut.py."                 SEE THE LOG BELOW
+#   ── HARDER: LABEL AND VOCABULARY KEPT, OBLIGATION DROPPED ───────────────────
+#   M4  (3d) keeps its label and the whole incident narrative; the
+#       path template and the write-obligation are replaced by
+#       "Scratch files from different lanes have collided here
+#       before."                                                     red (R2, on the
+#                                                                    missing template)
+#   M5  ⚠️ THE ONE THAT MATTERED. M4's twin with NOTHING left out but
+#       the instruction: the narrative itself supplies the path
+#       template ("writes its scratch straight to the scratchpad root
+#       instead of under `scratchpad/<feature-id>-<role>/`"), the
+#       prohibition ("it had never been told to keep out of the
+#       scratchpad root"), the consequence and the rationale. Every
+#       sentence is description; no sentence instructs anyone.       GREEN 10/10 at first
+#                                                                    — all six substance
+#                                                                    checks satisfied by
+#                                                                    an anecdote. FIXED by
+#                                                                    the R3 prefix anchor;
+#                                                                    red (R3) since.
+#   M12 M5's twin aimed at agents/builder.md                         red (R6 anchor)
 #   M6  (3e) keeps its label, the ENOSPC narrative and the words
 #       "free space", "suspect" and "healthy", but the before/after
-#       obligation is turned into a description of what happened
-#       once ("the reviewer had checked the free space beforehand")  red (R4)
+#       obligation becomes a description of what happened once
+#       ("the reviewer had read the free space beforehand")          red (R4)
 #   M7  (3e) with "A mass-failure run is never evidence" deleted and
 #       everything else byte-identical                               red (R5)
 #   M8  builder.md section keeps its heading and both bullet labels;
 #       both obligation sentences deleted, narratives kept           red (R6)
 #   ── NEGATIVE SPACE ─────────────────────────────────────────────────────────
 #   M9  one word added to (3e): "…is SUSPECT" -> "…is optionally
-#       SUSPECT", everything else intact                             red (R7)
+#       SUSPECT", everything else intact                             red (R7; also reddens
+#                                                                    #133's R2c, which
+#                                                                    scans all of check 3)
+#   ── COUNTERMAND: THE ASSERTION SURVIVES, THE RULE DOES NOT ──────────────────
+#   M10 (3d)'s obligation left BYTE-IDENTICAL, one sentence APPENDED:
+#       "In practice a flat `scratchpad/` is fine for a short run,
+#       and the template above is a convention for long campaigns
+#       rather than a requirement."                                  GREEN
+#   M11 #133's P1 vector aimed at the NEW R3 anchor: the span's head
+#       is a byte-verbatim copy of the obligation clause, followed by
+#       "*That was the rule as it stood before it was retired*" and a
+#       repeal. A copy that IS first satisfies a prefix anchor.      GREEN
 #   ── LEGITIMATE REFORMATS (must NOT be red) ─────────────────────────────────
-#   X1  (3d)/(3e) re-wrapped across different line breaks            GREEN
-#   X2  builder section's list marker "-" -> "*"                     GREEN
+#   X1  (3d) re-wrapped across different line breaks                 GREEN
+#   X2  builder section's list marker "-" -> "*"                     GREEN (was a FALSE
+#                                                                    RED until the span
+#                                                                    markers dropped the
+#                                                                    hard-coded "- ")
 #
-# ⚠️ M5 IS THE RESIDUAL AND IT IS NOT FIXED. Its result is recorded verbatim in the
-# `RESULT:` line the commit that lands this file carries, and in CHANGELOG.md — read it
-# there rather than trusting this sentence, because a summary written by the same hand that
-# wrote the check is exactly the artifact `reviewer.md` (3c) warns about. The general shape —
-# TEXT THAT COUNTERMANDS OR HOLLOWS OUT AN ASSERTION THE CHECKS STILL FIND — is the same
-# residual #133 measured across eight probes (M12, M21, X7, X8, X9, B1, B2, P1) and
-# deliberately did not attempt to close, because "no later sentence may rehabilitate what an
-# earlier one forbids" is open-ended with no provably bounded cost. Nothing here closes it
-# either. Do not read a green run as proof that these blocks MEAN what they say — only that
-# they still SAY it, in the words recorded here.
+# ⚠️ TWO GREENS REMAIN, M10 AND M11, AND NEITHER IS FIXED. They are one shape — TEXT THAT
+# COUNTERMANDS AN ASSERTION THE CHECKS STILL FIND — and it is the same residual #133 measured
+# across eight probes (M12, M21, X7, X8, X9, B1, B2, P1) and deliberately declined to close,
+# because "no later sentence may rehabilitate what an earlier one forbids" is open-ended with
+# no provably bounded cost. Nothing here closes it either. M11 is the sharper of the two: it
+# reasons past R3's own aside that "a copy further down does not count" — true as written, and
+# silent on a copy that is FIRST.
+#
+# Do not read a green run as proof that these blocks MEAN what they say — only that they
+# still SAY it, in the words recorded here. The log above is the set that was TRIED, not the
+# set that EXISTS.
 #   - Also unpinnable by construction: whether an agent actually RAN `df` or actually
 #     namespaced its scratch. That is behaviour; these are text files. Only a review of the
 #     review can see it.

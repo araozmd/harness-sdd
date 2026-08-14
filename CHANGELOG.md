@@ -49,20 +49,38 @@ by heading, using the extraction recipe `builder.md` itself prescribes) and
 **sentence-anchored** via `[^.]{0,N}`, and the same two assertion helpers run against **both**
 role files, so deleting the rule from either one reddens.
 
-**Measured, not claimed.** Nine mutations and two legitimate reformats were run one at a time
-against the role files. Straight deletion of any of the three blocks reddens; so does keeping
-a label and its whole narrative while dropping the obligation (M4, M6, M8), deleting the
-"never evidence" line alone (M7), and hedging `SUSPECT` with one word (M9). **One residual is
-open and unfixed: M5** — `(3d)` with its label, its narrative and the path template all
-intact, quoted as an illustration, while the write-obligation sentence is gone, **stays
-green**. It is the same "text that hollows out an assertion the checks still find" shape that
-E99-F67 measured across eight probes and declined to close as unbounded. The suite header
-records it as a measurement log rather than a closure claim, because four consecutive drafts
-of the equivalent paragraph in #133 over-claimed what they closed.
+**Measured, not claimed.** Twelve mutations and two legitimate reformats were run one at a
+time against the role files, backed up with `cp` and restored with `mv` (never `git checkout
+-- <file>`), each restore confirmed by a diff. Free space was 426.0 GiB before and after, and
+12 of 14 vectors came back red — so this was not a mass-failure run, which is (3e) applied to
+itself. Straight deletion of any of the three blocks reddens; so does keeping a label and its
+whole narrative while dropping the obligation (M4, M6, M8, M12), deleting the "never
+evidence" line alone (M7), and hedging `SUSPECT` with one word (M9).
 
-A false pass was caught while writing R9 and is recorded in the suite: grepping the CHANGELOG
-for the bare token `3d` passed **before this entry existed**, satisfied by "`test_board_lock.sh`
-gains R13dup". R9 now searches the parenthesised label.
+**The measurement changed the design.** Probe **M5** rewrote `(3d)` so that *no sentence
+instructed anyone* — the incident narrative alone supplied the path template, the
+"never … scratchpad root" phrase, the consequence and the rationale — and it was **green on
+all six substance checks**. The obligation had been deleted and nothing noticed. Rather than
+widen each regex until M5 stopped fitting (the method E99-F67 spent three rounds proving
+wrong), the obligation clause is now pinned as a **literal prefix** in both files, so it must
+be what the block *starts* with. M5 and M12 redden against it.
+
+**Two residuals are open and unfixed**, both the same shape — text that countermands an
+assertion the checks still find. **M10**: `(3d)`'s obligation left byte-identical with one
+sentence appended repealing it. **M11**: E99-F67's P1 vector aimed at the new anchor — a
+byte-verbatim copy of the clause placed *first*, so it becomes the span's head, with the
+repeal below. Both stay green. This is the residual #133 measured across eight probes and
+declined to close as unbounded, and nothing here closes it. The suite header is a measurement
+log, not a closure claim, because four consecutive drafts of the equivalent paragraph in #133
+were false in the over-claiming direction.
+
+Two defects in the suite itself were caught by running it rather than by reading it, and both
+are recorded in the file. **A false PASS:** R9 originally grepped the CHANGELOG for the bare
+token `3d` and passed **before this entry existed**, satisfied by "`test_board_lock.sh` gains
+R13dup"; it now searches the parenthesised label. **A false RED:** probe X2 reformatted the
+`builder.md` list markers from `-` to `*` and R6 failed claiming the bullet was absent, because
+the span markers hard-coded `- **` while the marker normaliser tolerated both. A false red
+conceals no hole, but it is what teaches the next maintainer to relax a check.
 
 ## [0.60.0] — 2026-08-12
 
