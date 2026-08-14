@@ -519,7 +519,7 @@
         {
           "id": "E99-F17",
           "title": "the park suite's R7 precondition breaks on the first real park",
-          "status": "in-review",
+          "status": "done",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
