@@ -14,6 +14,55 @@ saying "it works" means nothing until you prove it. AI-generated code is often
 3. **Behavior, not just unit tests.** Where the feature has a UI or API, exercise
    it the way a user would (e.g. Playwright MCP: click through the running app;
    curl the endpoints; inspect DB state). Looking right ≠ working.
+   - **(3b) Mutate, don't read.** Any claimed guarantee, bound or invariant is verified
+     by **deleting the mechanism that enforces it and observing the suite go red** —
+     never by reading the code and agreeing with it. **Constants count as mechanisms**:
+     set the reserve to `0`, set the batch size to `2`, raise the cap past its limit,
+     remove the guard clause. If the suite stays green after the deletion, the guarantee
+     is **unpinned** — the code can still be correct today, but nothing stops the next
+     edit from removing it, and the test that "covers" it is decoration. Report that as
+     a finding.
+     - **In isolation, one mutation at a time.** Restore between mutations so a red
+       result names exactly **one** cause. A batch of mutations that goes red tells you
+       only that *something* is pinned, which is not what you were asked.
+     - **Reading is not verification.** Agreeing with a mechanism you can see in the
+       diff measures its readability, not the suite's grip on it. This is the single
+       most common way an unpinned guarantee gets approved: the code is right there, it
+       plainly does what it says, and nothing would notice if it vanished.
+     - **Revert safely.** Commit every real change before the first mutation:
+       `git status --short` must be clean, or list only files the campaign will not
+       touch. **Sanctioned — use exactly one of two:** (a) a backup copy —
+       `cp <file> <file>.mutbak` before that file's first mutation, `mv <file>.mutbak
+       <file>` to restore; (b) `git stash push -- <file>`, whose entry stays recoverable
+       in `git stash list`, so drop it only once the file is confirmed correct.
+       **Forbidden as the revert — never use it: `git checkout -- <file>`** (and its
+       aliases `git restore <file>`, `git checkout HEAD -- <file>`), which restores the
+       file to HEAD and discards the mutation *and* every uncommitted line beside it.
+       Confirm the restore with a diff, not a test run.
+     - **This bullet is a CONDENSATION, and the rest is not enforced anywhere.** The
+       full discipline — deriving the backup set from the mutation list rather than the
+       diff, keeping `*.mutbak` out of `.gitignore` so the residue stays visible, and
+       the **Builder-side half, which `agents/builder.md` still lacks entirely even
+       though Builders mutate routinely** — was written on an E99-F58 branch that was
+       never merged. Not yet enforced: see **E99-F102**.
+   - **(3c) Prose overstating a guarantee is a DEFECT, not a nit.** A comment, a
+     docstring, a `.md` line or a test name that claims more than the code enforces is a
+     **required fix at the same severity as the missing enforcement itself** — not a
+     wording nit to note and move past. The next reader trusts it and **stops looking**,
+     so an over-claiming sentence does not merely fail to help: it removes the reader who
+     would otherwise have found the hole. Enforcement that is deliberately **deferred
+     must say so explicitly, in the same sentence, and name the follow-up item** that
+     will land it (e.g. "not yet enforced — see E99-F67"), so the claim and its gap
+     travel together.
+   - **Why these two are here — and the irony is load-bearing.** This mandate was
+     itself **found by mutation testing**, and then **hidden for days by a persuasive
+     note asserting it had already been landed**. Several briefs cited "`reviewer.md`
+     check 3b/3c" as a shipped mechanism; this file contained neither, and nobody
+     re-checked because the claim read as settled. That is exactly the failure mode 3b
+     exists to catch, one layer up — a guarantee everyone had read about and no one had
+     deleted to see whether anything went red — wrapped in exactly the over-claiming
+     prose 3c calls a defect. The rule applies to the harness's own contracts, not only
+     to the code under review.
 4. **Conventions.** Architecture and style match `specs/product.md` and the
    `.plan.md`. Nothing on the "DO NOT TOUCH" list was changed.
 5. **Cross-file consistency.** Tests passing proves nothing about a contradiction
