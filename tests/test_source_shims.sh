@@ -1,0 +1,526 @@
+#!/bin/sh
+# test_source_shims.sh — E99-F16: the SOURCE checkout can spawn the roles it claims to.
+#
+# WHY THIS SUITE EXISTS AT ALL. `tests/test_install.sh` already asserts that every
+# *installed* target can spawn the doc-critic (shim present, `Write` granted, architect
+# carries `Task`). It inspects a freshly installed tree and nothing else. So this repo
+# shipped `agents/architect.md`'s **mandatory** R12 doc-critic checkpoint while being
+# structurally unable to run it on its own specs — no `.claude/agents/doc-critic.md`, no
+# `Task` on the source architect shim, no `doc-critic` in the source `opencode.json` — and
+# every suite stayed green. The cost is on the record: on E17-F04 the skipped checkpoint,
+# run afterwards by hand, returned 14 findings including a test that would have failed a
+# correct implementation; on E21-F05 it returned a not-gate-ready verdict with two blocking
+# findings that reproduced.
+#
+# So every assertion here targets the SOURCE tree — `$SRC`, never a `mktemp` install.
+#
+# THREE THINGS ARE REQUIRED AND ANY ONE ALONE LEAVES THE CHECKPOINT UNRUNNABLE: the
+# callee's shim, the caller's `Task` tool, and the OpenCode registration. They are asserted
+# separately, with separate messages, for that reason.
+#
+# NOT ASSERTED, DELIBERATELY: that a source shim is byte-identical to (or a superset of)
+# the installed one. They resolve against different roots by design — the installed shim
+# points at `.harness/agents/<role>.md`, the source shim at `agents/<role>.md` — so that
+# comparison would be wrong rather than strict. What IS asserted is that each source shim
+# resolves against the SOURCE tree and NOT against `.harness/`.
+#
+# ALSO NOT ASSERTED: any exact `VERSION` string, and any diff of a DO-NOT-TOUCH file
+# against `main`. Both are recurring anti-patterns in this repo's permanent suite.
+
+set -eu
+LC_ALL=C; export LC_ALL
+
+SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+fail() { echo "FAIL: $1" >&2; exit 1; }
+pass() { echo "ok - $1"; }
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# The maintained classification.
+#
+# WHY A MAINTAINED LIST RATHER THAN DERIVATION. The general rule this suite enforces is
+# "every role that is spawned as a sub-agent is registered in every front-end the source
+# repo registers roles for at all". That rule needs the set of *spawned* roles, and that
+# set is NOT reliably derivable from the role files: `agents/architect.md` names its callee
+# in prose (``spawn the **Doc-critic** (`agents/doc-critic.md`) as a sub-agent``), but the
+# Orchestrator spawns builder/reviewer/scout without ever citing their file paths, the
+# pr-loop spawns `pr-fixer` from a slash-command body rather than a role file, and
+# `agents/orchestrator.md` also contains generic sentences like "Spawn each sub-agent with
+# a clean context" that any loose pattern would swallow. A regex tuned until it reproduces
+# the answer we already know is not a derivation — it is the answer, laundered, and it
+# would be exactly the "expected value reachable by another path" defect. A maintained list
+# is the honest answer.
+#
+# A maintained list rots, so the ROT is what is machine-checked: SPAWNED and NOT_SPAWNED
+# must together account for EVERY `agents/*.md` file. Adding a new role file fails this
+# suite until its author classifies it — which is the moment the classification is cheap
+# and the knowledge is present.
+SPAWNED='architect builder builder-heavy doc-critic orchestrator pr-fixer reviewer scout'
+
+# Skill-driven: these are reached through slash commands (`/sdd-plan`, `/sdd-drill`,
+# `/sdd-fix`, `/sdd-new`), which load the role file into the CURRENT session. Nothing
+# spawns them as a sub-agent, so they correctly have no shim in either front-end.
+NOT_SPAWNED='driller fixer inception planner'
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# Known gaps: real, same class, and OUT OF SCOPE for E99-F16 (they are different
+# capabilities with different callers — E17-F03's escalation tier and the pr-loop's fixer —
+# and folding them in would have made that fix a survey).
+#
+# These are asserted as STILL BEING GAPS, not skipped. An entry that is merely exempted
+# outlives its reason silently; an entry asserted to still be broken fails the moment
+# someone fixes it, and the failure message says to delete the line. That is the only way
+# an exemption list stays honest.
+#
+# Format: <role>:<front-end>, one per line.
+KNOWN_GAPS='builder-heavy:claude
+builder-heavy:opencode
+pr-fixer:opencode'
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# 1. The front-end enumeration, machine-checked rather than assumed.
+#
+# This suite knows about exactly two source registration sites: `.claude/agents/` and
+# `opencode.json`. `.codex/`, `.gemini/`, `.agents/` and `.opencode/` are absent from the
+# source by design — they are generated by the installer FOR CONSUMERS. If one of them ever
+# appears here, this suite's per-role loop below would silently stop covering a front-end,
+# which is the precise shape of the bug this feature exists to prevent. So assert their
+# absence and make the next author extend the loop.
+[ -d "$SRC/.claude/agents" ] \
+  || fail "source front-end enumeration: .claude/agents/ is missing entirely"
+[ -f "$SRC/opencode.json" ] \
+  || fail "source front-end enumeration: opencode.json is missing entirely"
+for _fe in .codex .gemini .agents .opencode; do
+  # `.opencode` is the one entry with a KNOWN remedy, so it gets its own message. Its
+  # KNOWN_GAPS xfail (`pr-fixer:opencode`) can ONLY be fixed by creating
+  # `.opencode/agent/pr-fixer.md` — which trips this absence check ~70 lines before the
+  # xfail's own self-expiry message fires. Sending that author to "add the mechanism" is a
+  # dead end: `opencode-file` is already one of the mechanisms registration_probe validates
+  # in full. The xfail design promises "it fails the moment someone fixes it and the
+  # message says to delete the line"; without this, that promise breaks on the one entry
+  # whose fix is least obvious.
+  if [ "$_fe" = ".opencode" ]; then
+    [ -e "$SRC/$_fe" ] && fail "source now has .opencode/ — if you are retiring the 'pr-fixer:opencode' known gap, the 'opencode-file' mechanism in registration_probe ALREADY validates .opencode/agent/<role>.md in full and needs no change: just delete '.opencode' from this absence list and delete that KNOWN_GAPS line"
+  else
+    [ -e "$SRC/$_fe" ] && fail "source now registers roles in $_fe/ — that front-end is not covered by this suite's per-role loop; add it to registration_probe's MECHANISMS/EXTRACTORS and to this enumeration (a new front-end silently uncovered is exactly the E99-F16 bug)"
+  fi
+done
+pass "source registers roles in exactly two front-ends (.claude/agents/, opencode.json)"
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# 2. The classification accounts for every role file.
+_unclassified=''
+for _f in "$SRC"/agents/*.md; do
+  [ -f "$_f" ] || continue
+  _role="$(basename "$_f" .md)"
+  _seen=0
+  for _k in $SPAWNED $NOT_SPAWNED; do
+    [ "$_k" = "$_role" ] && _seen=1
+  done
+  [ "$_seen" -eq 1 ] || _unclassified="$_unclassified $_role"
+done
+[ -z "$_unclassified" ] \
+  || fail "agents/ role file(s) not classified by this suite:$_unclassified — add each to SPAWNED (another role or slash command spawns it as a sub-agent, so it needs a shim in every front-end) or NOT_SPAWNED (skill-driven, loaded into the current session)"
+
+# ...and names nothing that does not exist, so a rename cannot leave a dead exemption.
+for _role in $SPAWNED $NOT_SPAWNED; do
+  [ -f "$SRC/agents/$_role.md" ] \
+    || fail "this suite classifies '$_role' but agents/$_role.md does not exist — it was renamed or removed; update SPAWNED/NOT_SPAWNED (and KNOWN_GAPS)"
+done
+pass "SPAWNED + NOT_SPAWNED account for every agents/*.md, and name nothing stale"
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# 3. The general rule: every SPAWNED role is registered in every front-end.
+
+# is_known_gap <role> <front-end>
+is_known_gap() {
+  for _g in $KNOWN_GAPS; do
+    [ "$_g" = "$1:$2" ] && return 0
+  done
+  return 1
+}
+
+# registration_probe <role> <front-end> — the record extractor + the shared validator.
+#
+# WHY THIS IS ONE VALIDATOR AND NOT A `case` WITH A BRANCH PER FRONT-END. Three consecutive
+# review rounds found the SAME defect in three different branches of the function that used
+# to live here — an assertion that named something stronger than it actually checked:
+#
+#   round 1  the claude branch was existence-only (a shim can exist and be unspawnable:
+#            Claude addresses a sub-agent by its frontmatter `name`, and an installed-style
+#            body resolving against `.harness/` points nowhere in this checkout);
+#   round 2  the opencode.json branch was key-membership-only (`mode: primary` or a
+#            `.harness/` prompt kept the gate green), AND round 1's patch left a comment
+#            claiming that branch already checked mode and prompt — it did not;
+#   round 3  the file-based `.opencode/agent/<role>.md` fallback was existence-only, so a
+#            ZERO-BYTE file would have satisfied the whole suite the moment the
+#            `pr-fixer:opencode` known gap was retired.
+#
+# One defect class, three sites, three patches: patching a branch at a time reproduced the
+# bug once per branch. So the branches are gone. Every registration MECHANISM now extracts
+# the SAME normalized record, and ONE validator asks that record the same questions. A new
+# mechanism has to produce a record, and a record it cannot under-fill: `Rec` is a
+# namedtuple (a missing field raises) and the check table is asserted to consume EVERY
+# field (a new field with no check is a hard error, not a silently unasked question).
+#
+# The four questions, plus one:
+#   Present     — is there a registration at all?
+#   Identity    — does it name THIS role?
+#   Target      — does it point at the SOURCE `agents/<role>.md`, and NOT at
+#                 `.harness/agents/<role>.md`? (The installed form CONTAINS the source form
+#                 as a substring, so containment alone accepts the installed prompt
+#                 verbatim — hence a normalized, delimited reference compared for equality
+#                 plus a separate `.harness/` guard.)
+#   Mode        — is it registered as the kind of agent the installer actually emits here?
+#   Described   — does it carry a description? tests/test_pr_loop.sh:481 requires one of a
+#                 file-based OpenCode agent; all three mechanisms already carry one, so it
+#                 costs nothing to ask uniformly and it is one more thing a zero-byte or
+#                 stub registration cannot fake.
+#
+# Exit 0 = spawnable through at least one of the front-end's mechanisms. Exit 1 = not, with
+# the per-mechanism reasons on stdout. Exit 2 = this suite is misconfigured (unknown
+# front-end, or a mechanism that did not answer every question) — a hard failure, never a
+# quiet "not registered".
+registration_probe() {
+  python3 - "$SRC" "$1" "$2" <<'PY'
+import json, os, re, sys
+from collections import namedtuple
+
+SRC, ROLE, FE = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# ── The record: one shape, produced by every mechanism ────────────────────────────────
+# `targets` is the list of role-file references the registration makes, normalized so the
+# source form and the installed form are DISTINGUISHABLE rather than one containing the
+# other. `harness_rooted` is deliberately separate and broader: it is true if the
+# registration text mentions `.harness/` ANYWHERE, so an installed-style body is rejected
+# even when its stray `.harness/` path is not a role file.
+Rec = namedtuple("Rec", "present name targets harness_rooted mode described")
+ABSENT = Rec(present=False, name="", targets=[], harness_rooted=False, mode="", described=False)
+
+# A role-file reference, DELIMITED. The trailing lookaheads are what make this an equality
+# test rather than a containment test: `agents/x.md.bak` yields no reference at all (the
+# second lookahead rejects `.` + alphanumeric), while a sentence-ending `agents/x.md.` is
+# still a reference. The leading class swallows any prefix, so `./.harness/agents/x.md`
+# extracts WHOLE and then fails the equality below instead of matching as a substring.
+ROLE_REF = re.compile(r"[A-Za-z0-9._/-]*agents/[A-Za-z0-9._-]+\.md(?![A-Za-z0-9_/-])(?!\.[A-Za-z0-9])")
+
+def role_refs(text):
+    out = []
+    for ref in ROLE_REF.findall(text):
+        out.append(ref[2:] if ref.startswith("./") else ref)
+    return out
+
+def frontmatter(text):
+    """Top-level `key: value` pairs of a leading `---` block. Nested keys (an indented
+    `permission:` map, as harness-install.sh's gen_oc_agent emits) are skipped, not
+    flattened. An unterminated block yields nothing rather than a guess."""
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return {}
+    fm = {}
+    for ln in lines[1:]:
+        if ln.strip() == "---":
+            return fm
+        if ln[:1] in ("", " ", "\t", "-"):
+            continue
+        if ":" in ln:
+            k, v = ln.split(":", 1)
+            fm[k.strip()] = v.strip()
+    return {}
+
+def read(path):
+    try:
+        with open(path) as fh:
+            return fh.read()
+    except (IOError, OSError):
+        return None
+
+# ── The mechanisms ────────────────────────────────────────────────────────────────────
+# Each returns a Rec. Where a field is fixed BY THE MECHANISM rather than read from the
+# registration, that is said here explicitly — the comment must not claim the check does
+# work it cannot do (round 2's second finding was exactly such a comment).
+
+def m_claude_shim():
+    # `.claude/agents/<role>.md`. Identity is a REAL check here: Claude Code addresses a
+    # sub-agent by its frontmatter `name`, which can disagree with the filename.
+    text = read(os.path.join(SRC, ".claude", "agents", ROLE + ".md"))
+    if text is None:
+        return ABSENT
+    fm = frontmatter(text)
+    return Rec(
+        present=True,
+        name=fm.get("name", ""),
+        targets=role_refs(text),
+        harness_rooted=".harness/" in text,
+        # BY CONSTRUCTION, not read from the file: this mechanism has no mode key — every
+        # file under .claude/agents/ IS a spawnable sub-agent. The Mode check below is
+        # therefore a tautology for this mechanism and detects nothing in the claude tree.
+        # The field is filled rather than skipped so the record shape stays uniform and the
+        # coverage assertion can force the NEXT mechanism to answer this question.
+        mode="subagent",
+        described=bool(fm.get("description", "")),
+    )
+
+def m_opencode_json():
+    # The `agent:` map in opencode.json — the model-routed roles.
+    raw = read(os.path.join(SRC, "opencode.json"))
+    if raw is None:
+        return ABSENT
+    try:
+        cfg = json.loads(raw)
+    except ValueError:
+        return ABSENT
+    entry = cfg.get("agent", {}).get(ROLE)
+    if not isinstance(entry, dict):
+        return ABSENT
+    prompt = entry.get("prompt") or ""
+    # The prompt must be the whole `{file:...}` pointer, not merely contain one: anything
+    # else is handed through verbatim so it can only fail the equality in check_target.
+    m = re.match(r"^\{file:(?:\./)?([^}]*)\}$", prompt)
+    return Rec(
+        present=True,
+        # BY CONSTRUCTION: the JSON key IS the identity, and the lookup above was keyed on
+        # it. Nothing else in the entry declares a name, so this check cannot fail here —
+        # it is the Target check that ties the entry to this particular role.
+        name=ROLE,
+        targets=[m.group(1)] if m else [prompt],
+        harness_rooted=".harness/" in json.dumps(entry),
+        mode=entry.get("mode") or "",
+        described=bool((entry.get("description") or "").strip()),
+    )
+
+def m_opencode_file():
+    # `.opencode/agent/<role>.md` — the file-based OpenCode agent. This is the mechanism
+    # the installer uses for pr-fixer (harness-install.sh's gen_oc_agent), which
+    # tests/test_pr_loop.sh:482 asserts must NEVER appear in opencode.json. Absent from the
+    # source today; modeled so that retiring the `pr-fixer:opencode` known gap is checked
+    # rather than merely counted.
+    text = read(os.path.join(SRC, ".opencode", "agent", ROLE + ".md"))
+    if text is None:
+        return ABSENT
+    fm = frontmatter(text)
+    return Rec(
+        present=True,
+        # BY CONSTRUCTION: OpenCode addresses a file-based agent by its FILENAME and the
+        # body declares no name, so this check cannot fail here either.
+        name=ROLE,
+        targets=role_refs(text),
+        harness_rooted=".harness/" in text,
+        mode=fm.get("mode", ""),
+        described=bool(fm.get("description", "")),
+    )
+
+MECHANISMS = {
+    "claude":   ("claude-shim",),
+    # Either mechanism makes the role spawnable in OpenCode, so either satisfies the
+    # front-end — but each is validated in FULL, so "the other one exists" can no longer
+    # stand in for "this one is usable".
+    "opencode": ("opencode-json", "opencode-file"),
+}
+EXTRACTORS = {
+    "claude-shim":   m_claude_shim,
+    "opencode-json": m_opencode_json,
+    "opencode-file": m_opencode_file,
+}
+SITES = {
+    "claude-shim":   ".claude/agents/%s.md" % ROLE,
+    "opencode-json": "opencode.json agent.%s" % ROLE,
+    "opencode-file": ".opencode/agent/%s.md" % ROLE,
+}
+
+def expected_mode(mech):
+    """The mode the INSTALLER actually emits for this role at this site — the ground truth,
+    not a wish. harness-install.sh's `agent:` map emits `mode: primary` for orchestrator and
+    `mode: subagent` for every other opencode.json role; gen_oc_agent hardcodes
+    `mode: subagent` for every file-based agent.
+
+    The orchestrator is the case to protect. The two front-ends model it differently and
+    BOTH are correct: Claude registers it as a spawnable shim while OpenCode makes it the
+    top-level `primary` agent. The first time this check was tightened it demanded
+    `subagent` universally and FAILED that correct configuration — a test rejecting a
+    correct config is the defect this suite exists to prevent, not to commit."""
+    if mech == "opencode-json" and ROLE == "orchestrator":
+        return "primary"
+    return "subagent"
+
+# ── The shared validator ──────────────────────────────────────────────────────────────
+# Each check returns None (satisfied) or a reason. The tuple's first element names the Rec
+# fields the check consumes; the assertion below proves the table consumes ALL of them, so
+# a mechanism cannot introduce a field that nothing asks about.
+
+def check_present(mech, rec):
+    if not rec.present:
+        return "no registration at %s" % SITES[mech]
+    return None
+
+def check_identity(mech, rec):
+    if rec.name != ROLE:
+        return "declares name %r, expected %r (this is the handle callers spawn it by)" % (rec.name, ROLE)
+    return None
+
+def check_target(mech, rec):
+    want = "agents/%s.md" % ROLE
+    if rec.harness_rooted:
+        return "resolves against .harness/ — that is the INSTALLED form; in this checkout the role files live at agents/"
+    if want not in rec.targets:
+        return "points at %s, expected the source role file %s" % (
+            rec.targets or "no well-formed role-file reference", want)
+    return None
+
+def check_mode(mech, rec):
+    want = expected_mode(mech)
+    if rec.mode == want:
+        return None
+    # The reason must not claim more than expected_mode() decided. For every role but the
+    # orchestrator's opencode.json entry the wanted mode IS `subagent` and the consequence
+    # is "a caller cannot spawn it"; for that one entry the wanted mode is `primary` and the
+    # consequence is the opposite, so do not print the subagent sentence there.
+    if want == "subagent":
+        return "mode is %r, expected 'subagent' — a caller cannot spawn what is not a subagent" % (rec.mode,)
+    return "mode is %r, expected %r — this is the front-end's TOP-LEVEL agent here" % (rec.mode, want)
+
+def check_described(mech, rec):
+    if not rec.described:
+        return "carries no description"
+    return None
+
+CHECKS = (
+    ("present",                 "Present",   check_present),
+    ("name",                    "Identity",  check_identity),
+    ("targets harness_rooted",  "Target",    check_target),
+    ("mode",                    "Mode",      check_mode),
+    ("described",               "Described", check_described),
+)
+
+_covered = set()
+for _fields, _q, _fn in CHECKS:
+    _covered.update(_fields.split())
+if _covered != set(Rec._fields):
+    print("registration record fields unasked/unknown: %s — every Rec field must be consumed "
+          "by a CHECKS entry, or a mechanism can answer fewer questions than its siblings"
+          % sorted(_covered ^ set(Rec._fields)))
+    sys.exit(2)
+
+def validate(mech, rec):
+    reasons = []
+    for _fields, question, fn in CHECKS:
+        why = fn(mech, rec)
+        if why:
+            reasons.append("%s: %s" % (question, why))
+            if question == "Present":
+                break          # the other four would just restate "there is nothing there"
+    return reasons
+
+mechs = MECHANISMS.get(FE)
+if mechs is None:
+    print("unknown front-end %r — MECHANISMS has no entry for it" % FE)
+    sys.exit(2)
+
+failures = []
+for mech in mechs:
+    rec = EXTRACTORS[mech]()
+    if not isinstance(rec, Rec):
+        print("mechanism %r did not produce a registration record" % mech)
+        sys.exit(2)
+    reasons = validate(mech, rec)
+    if not reasons:
+        sys.exit(0)
+    failures.extend("[%s] %s" % (mech, r) for r in reasons)
+print("; ".join(failures))
+sys.exit(1)
+PY
+}
+
+# register_ok <role> <front-end> — is <role> spawnable in <front-end> from the source tree?
+# Thin wrapper: keeps the probe's reasons in REGISTER_WHY for the failure message, and
+# turns a misconfigured suite (exit 2) into a hard failure rather than "not registered".
+REGISTER_WHY=''
+register_ok() {
+  _rc=0
+  REGISTER_WHY="$(registration_probe "$1" "$2" 2>&1)" || _rc=$?
+  [ "$_rc" -eq 0 ] && return 0
+  [ "$_rc" -eq 2 ] && fail "register_ok('$1','$2'): $REGISTER_WHY"
+  return 1
+}
+
+command -v python3 >/dev/null 2>&1 \
+  || fail "python3 is absent — init.sh hard-fails without it, so this suite does not skip"
+
+for _role in $SPAWNED; do
+  for _fe in claude opencode; do
+    if is_known_gap "$_role" "$_fe"; then
+      # xfail: assert the gap is still a gap.
+      if register_ok "$_role" "$_fe"; then
+        fail "'$_role' is now registered for $_fe — the KNOWN_GAPS exemption '$_role:$_fe' is obsolete; DELETE that line so the general rule covers it"
+      fi
+    else
+      register_ok "$_role" "$_fe" \
+        || fail "'$_role' is spawned as a sub-agent but is NOT registered for $_fe in the source checkout — it cannot be spawned where the harness runs on itself (this is the E99-F16 class of bug; the installer registers it for every consumer, so only the source is broken) — $REGISTER_WHY"
+    fi
+  done
+done
+pass "every spawned role is registered in every source front-end (known gaps excepted)"
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# 4. The doc-critic checkpoint specifically — all three preconditions, asserted apart.
+#
+# The general rule above proves the doc-critic shim FILE exists and that opencode.json
+# names it. It does not prove the shim can do its job, nor that its CALLER can reach it.
+
+CRITIC="$SRC/.claude/agents/doc-critic.md"
+[ -f "$CRITIC" ] \
+  || fail "R12: .claude/agents/doc-critic.md is missing — agents/architect.md makes the doc-critic checkpoint mandatory before spec-ready, so it is silently skipped on every spec this harness writes for itself"
+
+# (a) The callee's capability. The critic writes progress/<run>/doc-critic-<checkpoint>.md
+# (agents/doc-critic.md, "Output summary"), so Write is mandatory — the same assertion
+# tests/test_install.sh makes on the installed shim.
+grep -qE '^tools:.*\bWrite\b' "$CRITIC" \
+  || fail "R12: source doc-critic shim lacks the Write tool — cannot record its progress/<run>/doc-critic-<checkpoint>.md note"
+
+# (b) The callee resolves against the SOURCE tree, not .harness/. Not a byte-compare with
+# the installed shim: they point at different roots on purpose.
+grep -qF 'agents/doc-critic.md' "$CRITIC" \
+  || fail "R12: source doc-critic shim does not point at its canonical role file agents/doc-critic.md"
+grep -qF '.harness/' "$CRITIC" \
+  && fail "R12: source doc-critic shim resolves against .harness/ — that is the INSTALLED shim's body; in this checkout the role files live at agents/, so every path it hands the critic would be wrong"
+
+# (c) The CALLER's capability. Without Task the architect cannot spawn any sub-agent, so
+# the shim above is unreachable and R12 stays unrunnable. tests/test_install.sh:584 asserts
+# exactly this on an installed target; the source failed it.
+ARCH="$SRC/.claude/agents/architect.md"
+grep -qE '^tools:.*\bTask\b' "$ARCH" \
+  || fail "R12: source architect shim lacks the Task tool — it cannot spawn the doc-critic checkpoint that agents/architect.md makes mandatory, so the shim exists but is unreachable"
+
+# (d) The OpenCode registration points at the source role file, not .harness/.
+python3 - "$SRC/opencode.json" <<'PY' || fail "R12: opencode.json's doc-critic entry is missing, is not a subagent, or its prompt does not point at ./agents/doc-critic.md (see stderr)"
+import json, sys
+with open(sys.argv[1]) as fh:
+    cfg = json.load(fh)
+a = cfg.get("agent", {}).get("doc-critic")
+if a is None:
+    sys.stderr.write("opencode.json has no doc-critic agent\n"); sys.exit(1)
+if a.get("mode") != "subagent":
+    sys.stderr.write("doc-critic mode is %r, expected 'subagent'\n" % (a.get("mode"),)); sys.exit(1)
+p = a.get("prompt", "")
+if p != "{file:./agents/doc-critic.md}":
+    sys.stderr.write("doc-critic prompt is %r, expected {file:./agents/doc-critic.md} "
+                     "(the source tree's role file, not .harness/)\n" % (p,)); sys.exit(1)
+PY
+
+pass "R12 doc-critic checkpoint is runnable in the source checkout (shim + Write + architect Task + opencode registration)"
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# 5. The prose contract the whole feature hangs on: agents/architect.md must still make
+# the checkpoint mandatory. If that requirement is ever dropped, the assertions above are
+# enforcing a capability nobody needs — and the next reader deserves to be told that
+# rather than to keep maintaining it. Grep the NAMED SECTION, not the whole file: several
+# other files and sections mention the doc-critic, and a whole-file grep would be satisfied
+# by any of them.
+_sec="$(awk 'BEGIN{h="Doc-critic checkpoint before"} /^#+ /{k=(index($0,h)>0);next} k' "$SRC/agents/architect.md")"
+[ -n "$_sec" ] \
+  || fail "agents/architect.md no longer has a '## Doc-critic checkpoint before \`spec-ready\` (R12)' section — if the checkpoint was removed, this suite's section 4 is enforcing a dead requirement and should be revisited"
+printf '%s\n' "$_sec" | grep -qF 'target-type=feature-spec' \
+  || fail "agents/architect.md's R12 section no longer spawns the doc-critic with target-type=feature-spec"
+pass "agents/architect.md still mandates the R12 doc-critic checkpoint this suite enforces"
+
+echo "PASS: test_source_shims.sh"

@@ -26,6 +26,11 @@
       "description": "Read-only codebase reconnaissance; writes findings to progress/.",
       "mode": "subagent",
       "prompt": "{file:./agents/scout.md}"
+    },
+    "doc-critic": {
+      "description": "Advisory doc review pass over planning docs + specs. Documents only, never code.",
+      "mode": "subagent",
+      "prompt": "{file:./agents/doc-critic.md}"
     }
   }
 }
