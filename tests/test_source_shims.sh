@@ -91,7 +91,19 @@ pr-fixer:opencode'
 [ -f "$SRC/opencode.json" ] \
   || fail "source front-end enumeration: opencode.json is missing entirely"
 for _fe in .codex .gemini .agents .opencode; do
-  [ -e "$SRC/$_fe" ] && fail "source now registers roles in $_fe/ — that front-end is not covered by this suite's per-role loop; extend register_ok() and this enumeration (a new front-end silently uncovered is exactly the E99-F16 bug)"
+  # `.opencode` is the one entry with a KNOWN remedy, so it gets its own message. Its
+  # KNOWN_GAPS xfail (`pr-fixer:opencode`) can ONLY be fixed by creating
+  # `.opencode/agent/pr-fixer.md` — which trips this absence check ~70 lines before the
+  # xfail's own self-expiry message fires. Sending that author to "extend register_ok()"
+  # is a dead end: register_ok() already models `.opencode/agent/` (see its opencode
+  # branch). The xfail design promises "it fails the moment someone fixes it and the
+  # message says to delete the line"; without this, that promise breaks on the one entry
+  # whose fix is least obvious.
+  if [ "$_fe" = ".opencode" ]; then
+    [ -e "$SRC/$_fe" ] && fail "source now has .opencode/ — if you are retiring the 'pr-fixer:opencode' known gap, register_ok() ALREADY covers .opencode/agent/<role>.md and needs no change: just delete '.opencode' from this absence list and delete that KNOWN_GAPS line"
+  else
+    [ -e "$SRC/$_fe" ] && fail "source now registers roles in $_fe/ — that front-end is not covered by this suite's per-role loop; extend register_ok() and this enumeration (a new front-end silently uncovered is exactly the E99-F16 bug)"
+  fi
 done
 pass "source registers roles in exactly two front-ends (.claude/agents/, opencode.json)"
 
@@ -132,7 +144,18 @@ is_known_gap() {
 register_ok() {
   case "$2" in
     claude)
-      [ -f "$SRC/.claude/agents/$1.md" ]
+      # NOT existence-only. A shim can exist and still be unspawnable two ways, and both
+      # are live risks at the next KNOWN_GAPS retirement (lift `builder-heavy` from the
+      # installer heredoc and you get exactly this): Claude Code addresses a sub-agent by
+      # its frontmatter `name`, so a name that disagrees with the filename is a file that
+      # cannot be spawned; and an installed-style body resolving against `.harness/` points
+      # at a path that does not exist in the source tree — the precise mistake
+      # progress/inbox/E99-F16.md warns about. The OpenCode branch below already checks
+      # key + mode + exact source-rooted prompt; this branch was the weaker half.
+      [ -f "$SRC/.claude/agents/$1.md" ] || return 1
+      grep -qE "^name:[ ]*$1[ ]*$" "$SRC/.claude/agents/$1.md" || return 1
+      grep -qF "agents/$1.md" "$SRC/.claude/agents/$1.md" || return 1
+      ! grep -qF ".harness/" "$SRC/.claude/agents/$1.md"
       ;;
     opencode)
       # OpenCode supports TWO registration mechanisms and the installer uses both: the
