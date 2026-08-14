@@ -42,9 +42,11 @@ saying "it works" means nothing until you prove it. AI-generated code is often
      - **This bullet is a CONDENSATION, and the rest is not enforced anywhere.** The
        full discipline — deriving the backup set from the mutation list rather than the
        diff, keeping `*.mutbak` out of `.gitignore` so the residue stays visible, and
-       the **Builder-side half, which `agents/builder.md` still lacks entirely even
+       the **Builder-side revert half, which `agents/builder.md` still lacks entirely even
        though Builders mutate routinely** — was written on an E99-F58 branch that was
-       never merged. Not yet enforced: see **E99-F102**.
+       never merged. Not yet enforced: see **E99-F102**. (Narrowed by E99-F73: that file now
+       carries a `## Scratch files and campaign preconditions` section, so "lacks entirely"
+       is true of the **revert** half only. Read it as scoped, not as stale.)
    - **(3c) Prose overstating a guarantee is a DEFECT, not a nit.** A comment, a
      docstring, a `.md` line or a test name that claims more than the code enforces is a
      **required fix at the same severity as the missing enforcement itself** — not a
@@ -63,6 +65,28 @@ saying "it works" means nothing until you prove it. AI-generated code is often
      deleted to see whether anything went red — wrapped in exactly the over-claiming
      prose 3c calls a defect. The rule applies to the harness's own contracts, not only
      to the code under review.
+   - **(3d) Namespace every scratch file by feature id and role.** Everything a campaign
+     writes outside the repo under review — the mutation runner, a probe script, a captured
+     log — is written under `scratchpad/<feature-id>-<role>/` (e.g.
+     `scratchpad/E10-F03-reviewer/mut.py`); **never at the scratchpad root, and never under
+     a bare generic name**. Parallel lanes are the normal operating mode, so an
+     unnamespaced path is a **shared** path: while an E10-F03 Reviewer was mid-campaign, a
+     different agent working a different repo wrote its own `scratchpad/mut.py`, overwrote
+     the running runner and crashed the campaign. Nothing warned either side — **the
+     collision is silent, and the recovery depended on one agent noticing**. A campaign
+     whose runner was replaced under it has produced no result: discard the run, and start
+     again under a namespaced path.
+   - **(3e) A campaign is evidence only if the machine stayed healthy for all of it.** Read
+     the free space on the volume holding the repo and the scratchpad **before the first
+     mutation, and read it again before you trust the results**, and report both figures
+     with the findings. During an E10-F03 round-3 review the volume hit ENOSPC at 0 bytes
+     free — a concurrent agent's `npm install` transiently took ~18 GB — and a whole M1-M8
+     run came back PARSE-FAIL and failing across the board, which is **the exact shape of a
+     set of real kills**: the outage forged the signal the campaign was looking for. So **a
+     run in which most mutations fail, or fail to parse, is SUSPECT until the environment is
+     confirmed healthy** — re-read the free space, repair the machine, and run it again.
+     **A mass-failure run is never evidence**; it is an aborted run, and it is reported as
+     one.
 4. **Conventions.** Architecture and style match `specs/product.md` and the
    `.plan.md`. Nothing on the "DO NOT TOUCH" list was changed.
 5. **Cross-file consistency.** Tests passing proves nothing about a contradiction

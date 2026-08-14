@@ -118,4 +118,20 @@ case "$_MM" in
 esac
 pass "R16 mutation_mandate_suite_present_and_discoverable"
 
+# ── R17: the campaign-precondition suite still EXISTS and is still discoverable ──
+# (E99-F73. Same construction and same reason as R16 one block up: `tools/run-tests.sh`
+# discovers `tests/test_*.sh` by glob, so renaming that suite out of the glob removes it
+# from the verification command AND from the run's suite count while the runner reports
+# "all N suites passed" — a green result meaning the Reviewer's checks 3d/3e and the
+# matching `agents/builder.md` section are no longer verified by anything. A self-check
+# inside that file cannot catch its own absence.)
+_CP="tests/test_scratch_and_disk_preconditions.sh"
+[ -f "$_CP" ] \
+  || fail "R17: $_CP is missing — the scratch-namespacing and free-disk preconditions (agents/reviewer.md 3d/3e, agents/builder.md) are no longer pinned by anything"
+case "$_CP" in
+  tests/test_*.sh) : ;;
+  *) fail "R17: $_CP is outside the tests/test_*.sh glob that tools/run-tests.sh discovers, so it no longer runs" ;;
+esac
+pass "R17 campaign_precondition_suite_present_and_discoverable"
+
 echo "All reviewer tests passed."
