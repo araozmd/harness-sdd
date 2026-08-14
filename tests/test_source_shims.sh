@@ -150,8 +150,8 @@ register_ok() {
       # its frontmatter `name`, so a name that disagrees with the filename is a file that
       # cannot be spawned; and an installed-style body resolving against `.harness/` points
       # at a path that does not exist in the source tree — the precise mistake
-      # progress/inbox/E99-F16.md warns about. The OpenCode branch below already checks
-      # key + mode + exact source-rooted prompt; this branch was the weaker half.
+      # progress/inbox/E99-F16.md warns about. The OpenCode branch below checks the
+      # equivalent three things for its own mechanism.
       [ -f "$SRC/.claude/agents/$1.md" ] || return 1
       grep -qE "^name:[ ]*$1[ ]*$" "$SRC/.claude/agents/$1.md" || return 1
       grep -qF "agents/$1.md" "$SRC/.claude/agents/$1.md" || return 1
@@ -163,11 +163,38 @@ register_ok() {
       # `.opencode/agent/<role>.md` for pr-fixer (which tests/test_pr_loop.sh:482 asserts
       # must NEVER appear in opencode.json). Either one makes the role spawnable, so
       # either satisfies this check.
+      #
+      # NOT key-membership-only, for the same reason the claude branch is not
+      # existence-only: an entry can be present and unspawnable. `mode: primary` makes the
+      # role a top-level agent rather than something a caller can spawn, and a prompt
+      # pointing into `.harness/` resolves nowhere in this checkout. Membership alone left
+      # `builder`, `reviewer` and `scout` free to break both ways while this gate stayed
+      # green — the strict checks lived only in the doc-critic-specific section below, so
+      # the asymmetry this suite exists to close had simply moved to the other side.
       python3 - "$SRC/opencode.json" "$1" <<'PY' || [ -f "$SRC/.opencode/agent/$1.md" ]
 import json, sys
 with open(sys.argv[1]) as fh:
     cfg = json.load(fh)
-sys.exit(0 if sys.argv[2] in cfg.get("agent", {}) else 1)
+role = sys.argv[2]
+entry = cfg.get("agent", {}).get(role)
+if not isinstance(entry, dict):
+    sys.exit(1)
+# The two front-ends model the Orchestrator differently and BOTH are correct: Claude
+# registers it as a spawnable shim, while OpenCode makes it the top-level `primary` agent
+# (the installer emits exactly that -- see harness-install.sh's `agent:` map). Demanding
+# `subagent` for every role failed on `orchestrator` the first time this check was
+# tightened -- a test that rejects a correct config, which is the defect this suite is
+# supposed to prevent, not commit. So encode the mode the installer actually uses.
+expected_mode = "primary" if role == "orchestrator" else "subagent"
+if entry.get("mode") != expected_mode:
+    sys.exit(1)
+# Source-rooted, and explicitly NOT the installed form. "{file:./.harness/agents/<role>.md}"
+# contains "agents/<role>.md" as a substring, so a containment test would accept the
+# installed prompt verbatim — the same trap the claude branch pair exists for.
+prompt = entry.get("prompt") or ""
+if ".harness/" in prompt:
+    sys.exit(1)
+sys.exit(0 if prompt == "{file:./agents/%s.md}" % role else 1)
 PY
       ;;
     *) fail "register_ok: unknown front-end '$2'" ;;
