@@ -54,10 +54,19 @@
 # made here. What follows is what was RUN and what CAME BACK. Mutations were applied to
 # `agents/reviewer.md` or `agents/builder.md` ONE AT A TIME, backed up with `cp <file>
 # <file>.mutbak` and restored with `mv`, never `git checkout -- <file>`, with every restore
-# confirmed by a diff rather than by a test run. Free space was 426.0 GiB before the campaign
-# and 426.0 GiB after, and 12 of 14 vectors came back red — so this was NOT a mass-failure
-# run and its output is readable as evidence (which is check (3e), applied to itself).
-# "red" = the suite exits 1.
+# confirmed by a diff rather than by a test run. "red" = the suite exits 1.
+#
+# THE COUNT, STATED AS MEASURED: 17 vectors — 15 mutations and 2 legitimate reformats.
+# 13 of the 15 mutations came back red; the 2 that stayed GREEN are M10 and M11, declared
+# below. Both reformats were green, as required. (An earlier draft of this line said "12 of
+# 14 vectors came back red". That was wrong twice: 12 was the number that behaved AS
+# INTENDED — reds plus the two reformats — which is a different statistic from the reds, and
+# it erred in the INFLATING direction, inside the one sentence that applies (3e) to this
+# file. Counted from the summary table below, not from memory.)
+#
+# Free space was 429.2 GiB before the campaign and 429.2 GiB after, and the run was mostly
+# red for reasons the table names one by one — so this was NOT a mass-failure run and its
+# output is readable as evidence. That is check (3e), applied to itself.
 #
 #   vector                                                          result
 #   ── STRAIGHT DELETIONS (the rule removed) ───────────────────────────────────
@@ -84,6 +93,26 @@
 #                                                                    the R3 prefix anchor;
 #                                                                    red (R3) since.
 #   M12 M5's twin aimed at agents/builder.md                         red (R6 anchor)
+#   ── THE SAME HOLLOWING, AIMED AT THE *DISK* RULE ───────────────────────────
+#   ⚠️ These three were GREEN for one round. R3 anchored the SCRATCH obligation and the
+#   DISK obligation was left with only `disk_checks()`'s six sentence-anchored greps —
+#   i.e. left in exactly the configuration M5 had just defeated for its sibling. Raised
+#   as a blocking review finding, not found by the author.
+#   V1c (3e) rewritten as a pure past-tense post-mortem: "Nobody
+#       had read the free space … before the first mutation, and
+#       nobody re-read it again before you trust the results", with
+#       both verdict rules surviving only as the title and closing
+#       line of a quoted incident report. Label kept; no sentence
+#       instructs anyone.                                            red (R5b) — was
+#                                                                    GREEN 11/11
+#   V1d V1c PLUS the label neutered: "(3e) The E10-F03 round-3
+#       ENOSPC incident, for the record." No obligation in the body
+#       OR the label.                                                red (R5b) — was
+#                                                                    GREEN 11/11
+#   V2c the same treatment of builder.md's disk bullet, label
+#       included. With V1d, NEITHER role file then contained a disk
+#       obligation anywhere, and the suite still passed.             red (R6) — was
+#                                                                    GREEN 11/11
 #   M6  (3e) keeps its label, the ENOSPC narrative and the words
 #       "free space", "suspect" and "healthy", but the before/after
 #       obligation becomes a description of what happened once

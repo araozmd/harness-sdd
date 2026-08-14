@@ -41,7 +41,9 @@ no rule for *how* to get a mutated file back, and it names the follow-up — **n
 enforced, see E99-F102**. The `reviewer.md` (3b) record of that same gap is unchanged and
 still accurate.
 
-`tests/test_scratch_and_disk_preconditions.sh` (R1–R10, **10 checks**) pins them, with
+`tests/test_scratch_and_disk_preconditions.sh` (R1–R10, **11 checks** — counted with
+`grep -c '^ok - '` on a green run, which is one more than the rule-id count because `R6b` is
+a distinct check) pins them, with
 `tests/test_reviewer.sh` **R17** as the cross-suite guard that reddens if the new suite is
 renamed out of the `tests/test_*.sh` glob. Assertions are **section-scoped** (`reviewer.md`
 narrowed to check 3 by list number then to the `(3d)`/`(3e)` sub-block; `builder.md` narrowed
@@ -49,21 +51,37 @@ by heading, using the extraction recipe `builder.md` itself prescribes) and
 **sentence-anchored** via `[^.]{0,N}`, and the same two assertion helpers run against **both**
 role files, so deleting the rule from either one reddens.
 
-**Measured, not claimed.** Twelve mutations and two legitimate reformats were run one at a
-time against the role files, backed up with `cp` and restored with `mv` (never `git checkout
--- <file>`), each restore confirmed by a diff. Free space was 426.0 GiB before and after, and
-12 of 14 vectors came back red — so this was not a mass-failure run, which is (3e) applied to
-itself. Straight deletion of any of the three blocks reddens; so does keeping a label and its
-whole narrative while dropping the obligation (M4, M6, M8, M12), deleting the "never
-evidence" line alone (M7), and hedging `SUSPECT` with one word (M9).
+**Measured, not claimed.** 17 vectors were run one at a time against the role files —
+15 mutations and 2 legitimate reformats — backed up with `cp` and restored with `mv` (never
+`git checkout -- <file>`), each restore confirmed by a diff. **13 of the 15 mutations came
+back red**; the 2 that stayed green are M10 and M11, declared below, and both reformats were
+green as required. Free space was 429.2 GiB before and after, so this was not a mass-failure
+run — (3e) applied to itself. Straight deletion of any of the three blocks reddens; so does
+keeping a label and its whole narrative while dropping the obligation (M4, M6, M8, M12),
+deleting the "never evidence" line alone (M7), and hedging `SUSPECT` with one word (M9).
 
-**The measurement changed the design.** Probe **M5** rewrote `(3d)` so that *no sentence
-instructed anyone* — the incident narrative alone supplied the path template, the
+**The measurement changed the design, twice.** Probe **M5** rewrote `(3d)` so that *no
+sentence instructed anyone* — the incident narrative alone supplied the path template, the
 "never … scratchpad root" phrase, the consequence and the rationale — and it was **green on
 all six substance checks**. The obligation had been deleted and nothing noticed. Rather than
 widen each regex until M5 stopped fitting (the method E99-F67 spent three rounds proving
-wrong), the obligation clause is now pinned as a **literal prefix** in both files, so it must
-be what the block *starts* with. M5 and M12 redden against it.
+wrong), the obligation clause is pinned as a **literal prefix**, so it must be what the block
+*starts* with.
+
+That fix was then applied to **only one of the two rules**, and review caught it. `(3e)` and
+the Builder's disk bullet were left with nothing but the six sentence-anchored greps of
+`disk_checks()` — the exact configuration M5 had just defeated for the sibling rule. Probes
+**V1c** (`(3e)` rewritten as a past-tense post-mortem, the two verdict rules surviving only
+as the title and closing line of a quoted incident report), **V1d** (V1c with the label
+neutered too) and **V2c** (the same against `builder.md`) were **all green**: after V1d and
+V2c together, *neither role file contained a disk-precondition obligation anywhere — not in
+the body, not even in the label* — and the suite still reported success. Half of its stated
+purpose was decoration against the one vector this shape is known to lose to. Both disk
+obligations are now anchored the same way; M5, M12, V1c, V1d and V2c all redden.
+
+The four anchor failure messages previously named the copy placement the anchor *defeats* and
+were silent on the one it *loses to*, so they read as "the copy vector is handled". They now
+disclose M11 inline — the same shape as a blocking finding in #133.
 
 **Two residuals are open and unfixed**, both the same shape — text that countermands an
 assertion the checks still find. **M10**: `(3d)`'s obligation left byte-identical with one
@@ -73,6 +91,15 @@ repeal below. Both stay green. This is the residual #133 measured across eight p
 declined to close as unbounded, and nothing here closes it. The suite header is a measurement
 log, not a closure claim, because four consecutive drafts of the equivalent paragraph in #133
 were false in the over-claiming direction.
+
+**A defect measured against `origin/main` is measured against a moving target.** This branch
+originally reported `tests/test_feature_park.sh` as failing "pre-existing on main", proven by
+running the suite against a `git archive` of the merge-base `6e96c02`. The claim was
+substantively true and the proof was real, but by the time it was read `origin/main` had moved
+to `c7ed6c0` (**PR #132**, `fix/E99-F17-park-test-live-board`) — which is literally the fix, so
+the proof no longer reproduced and a board item seeded from the report had to be retired. The
+branch is rebased onto `c7ed6c0` and the gate is 36/36. **Record the SHA you measured at**:
+that is the only thing that makes this kind of staleness detectable rather than confusing.
 
 Two defects in the suite itself were caught by running it rather than by reading it, and both
 are recorded in the file. **A false PASS:** R9 originally grepped the CHANGELOG for the bare
