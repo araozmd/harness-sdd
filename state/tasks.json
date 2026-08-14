@@ -555,7 +555,7 @@
         {
           "id": "E17-F04",
           "title": "Worker roster: invocable CLIs as versioned data",
-          "status": "pending",
+          "status": "spec-ready",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
@@ -700,7 +700,7 @@
         },
         {
           "id": "E21-F05",
-          "title": "The stacked-PR lane: doctrine, seams, and role contracts",
+          "title": "The stacked-PR lane's doctrine document",
           "status": "pending",
           "sdd": true,
           "autonomous": false,
@@ -708,6 +708,21 @@
             "E21-F04"
           ],
           "spec_path": "specs/epics/E21-change-size-discipline/F05-stacked-pr-doctrine/"
+        },
+        {
+          "id": "E21-F06",
+          "title": "The increment contract: delimitation, ownership, review scope",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E21-F05"
+          ],
+          "spec_path": "specs/epics/E21-change-size-discipline/F06-increment-contract/",
+          "parked": {
+            "reason": "product decision open: the sibling-feature model already delivers budget-sized reviews with no new machinery, so stacking buys only wall-clock overlap - and under siblings no PR targets a non-default base, leaving E21-F04's merged pr-stack-guard.sh with no caller. Whether that is worth a delimiter convention, four role contracts and a manual restack burden decides whether this feature is built at all.",
+            "unblocked_by": "a recorded decision on progress/inbox/E21-F06.md's opening question; answered yes, unpark; answered no, replace with a lane-deprecation feature"
+          }
         }
       ]
     },

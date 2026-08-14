@@ -110,7 +110,8 @@ Two things from the pattern are deliberately **rejected**:
 | F02 | Pre-PR change-size check on the Reviewer → PR handoff | done | true | E21-F01 |
 | F03 | `/sdd-pr-loop`: per-round finding trend + "split, don't re-review" at the round cap | done | true | E18-F01 |
 | F04 | Stacked-PR lane for an atomic feature that exceeds the budget | done (re-spec'd as **merge-order safety**) | true | E18-F01, E21-F03 |
-| F05 | The stacked-PR lane: doctrine, seams, and role contracts | pending (gated) | true | E21-F04 |
+| F05 | The stacked-PR lane's doctrine document | pending (gated) | true | E21-F04 |
+| F06 | The increment contract: delimitation, ownership, review scope | pending (**parked** — product decision open) | true | E21-F05 |
 
 ## Notes
 - **F04 was withdrawn during review of PR #78 (2026-07-28).** Its premise was wrong. The lane
@@ -145,6 +146,76 @@ Two things from the pattern are deliberately **rejected**:
   intent brief is `progress/inbox/E21-F05.md`, salvaged from the abandoned PR #81 — that PR's
   F04 specs were superseded by the re-spec merged as #86, but the F05 brief had never landed
   anywhere and would have been lost when #81 was closed.
+
+- **F05 was re-drilled on 2026-08-13 and split into F05 + F06 — the SECOND time this epic's own
+  budget rule fired on this epic.** Specced completely, F05 came to **13 R-ids** against
+  `change_size.max_requirements: 12`, so the Architect stopped and reported the seams rather
+  than emitting an over-budget spec.
+
+  Codex's round-1 review of PR #129 returned **three P1 findings**, all verified against the
+  cited files and none disputed — and **all three, plus every role-file contradiction, lived in
+  the increment contract**: the spec told the **Builder** to open an increment's PR (which
+  `agents/reviewer.md:34-38` uses as its *worked example* of a contract violation and says to
+  hard reject); it left **no path for the Reviewer to approve a non-final increment**, since the
+  traceability rule rejects until every `R-id` has a passing test and the approve verdict sets
+  the whole feature `done`; and it named **`depends_on` as the seam rule**, which sequences
+  *sibling board features* and therefore cannot delimit increments inside one feature.
+
+  **None of the three touched the doctrine.** So the cut follows the findings, exactly as it did
+  for F04 — with the halves reversed. There the mechanism was independently sound and the
+  doctrine burned; here the doctrine is sound and the contracts burn. **F05** keeps its id and
+  narrows to the doctrine document (`docs/WORKFLOW.md` only, ~6 R-ids); **F06** carries the
+  increment contract (~7 R-ids, four role files) and depends on F05.
+
+  **F05 ships regardless of what happens to the lane**, which is why it was kept first: the lane
+  section currently states things that are *false on `main`* — that no stacking documentation is
+  stamped when the loop is disabled (`HARNESS_BODY_PROSE` copies `docs/` unconditionally), a
+  pointer to a `'Restack procedure'` heading that does not exist, and a citation to a "wave
+  structure" that E21-F01 never defined. Even a decision to *deprecate* the lane needs that
+  section to read accurately first.
+
+- **F06 is seeded and PARKED — the board has the vocabulary for exactly this.**
+  `store/tasks.schema.json` defines a feature-level `parked` object (`reason`, optional
+  `unblocked_by`), and `featureBlockers()` in `tools/next-task.mjs` emits a `parked` blocker
+  and never selects the feature **while leaving `featureRoute` untouched, so unparking restores
+  the prior routing exactly**. Verified: `node tools/next-task.mjs --feature E21-F06` reports
+  `parked` with `[route when unparked: architect]`.
+
+  This corrects an earlier claim in this file that the board had no park vocabulary. It does.
+  Un-seeding F06 on that mistaken basis would have removed the follow-up from the TaskStore
+  entirely, so `/sdd-next` could never surface this half of the split and the decision could
+  have been silently forgotten — which is the failure the park exists to prevent.
+
+  Seeding it *unparked* would have been the opposite error: `next-task.mjs` returns any
+  `pending`/`sdd: true` feature whose `depends_on` is met, so the moment F05 reached `done` it
+  would have routed F06 to the Architect — while F06's brief says do not spec it until the
+  product decision is answered. `autonomous: false` cannot supply that gate, because the human
+  gate fires at `spec-ready`, i.e. *after* the spec the brief says not to write.
+
+  **Release condition** (recorded in the park's `unblocked_by`): answered *yes* ⇒ unpark and the
+  routing resumes; answered *no* ⇒ replace it with a small feature that deprecates the lane in
+  `docs/WORKFLOW.md` — which F05 will already have made accurate — and decides what becomes of
+  `tools/pr-stack-guard.sh`. Note the residual: a park says *not yet workable*, not *declined*;
+  the status set still has no terminal disposition for a feature the project decides against,
+  which is the same gap that made re-spec-in-place the right call for F05 above.
+
+- **The question F06 waits on, and it decides whether F06 exists at all.** The **sibling-feature
+  model already delivers budget-sized reviews** — this epic's actual goal — with zero new
+  machinery, via the `depends_on` split F01 already specifies. Stacking adds exactly one thing
+  over it: **wall-clock overlap**. And the corollary cuts the other way: under siblings *no PR
+  ever targets a non-default base*, so `tools/pr-stack-guard.sh` never fires and **F04's merged
+  mechanism has no caller** — the state it was withdrawn for once already. Whether that
+  serialisation is worth a delimiter convention, four role contracts, a manual restack burden
+  and a merge-order guard is a **product judgement**, recorded here rather than settled by an
+  Architect.
+
+- **The board decision (no `increments[]`) is under pressure and was deliberately NOT reversed.**
+  Adding it would make the delimiter, the review scope and the `done` trigger directly
+  expressible and would likely bring F06 under budget — but it duplicates ~80% of `slices[]`
+  across `store/tasks.schema.json`, `store/local.md`, both mirror adapters,
+  `tools/sync-board.mjs` and `tools/next-task.mjs`, and selection is *code* now (**ADR-0001**),
+  so it lands in the surface that ADR exists to protect. Reversing it is a **re-drill**, not a
+  spec edit.
 - **Ordering.** F01 defines the budget; F02 consumes it, so F02 depends on F01 to avoid two
   sources of truth for the same numbers. F03 and F04 edit `/sdd-pr-loop` glue that **E18-F01
   has not merged yet** — they are correctly blocked, and must not be started against a `main`
