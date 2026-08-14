@@ -195,6 +195,7 @@ BSEC="$(section "$BUILDER_HEADING" | flat)"
 # A false red conceals no hole, but it is exactly what pushes the next maintainer to relax
 # the check.
 BNS="$(section "$BUILDER_HEADING" | span '**Namespace every scratch file' '**Check the free disk' | flat)"
+BDK="$(section "$BUILDER_HEADING" | span '**Check the free disk' '' | flat)"
 
 # head_of — a block's opening text with leading whitespace (INCLUDING TABS) and a `-`/`+`
 # list marker stripped. Used only by the prefix anchors below. This normalises LIST SYNTAX
@@ -318,7 +319,7 @@ pass "R2 reviewer_3d_namespaces_scratch_by_feature_and_role"
 _h="$(head_of "$D3")"
 case "$_h" in
   "(3d) Namespace every scratch file by feature id and role. Everything a campaign writes outside the repo under review — the mutation runner, a probe script, a captured log — is written under scratchpad/<feature-id>-<role>/"*) : ;;
-  *) fail "R3: reviewer.md (3d) does not OPEN with its obligation. After the list marker the block must BEGIN with, literally: \"(3d) Namespace every scratch file by feature id and role. Everything a campaign writes outside the repo under review — the mutation runner, a probe script, a captured log — is written under scratchpad/<feature-id>-<role>/\" — nothing before it, nothing inserted anywhere in it, and a copy of it further down the block does not count. ⚠️ IF YOU REACHED THIS BY LEGITIMATELY REWORDING THAT CLAUSE, EDIT THIS LITERAL IN THE SAME COMMIT — do NOT relax it into a '[^.]{0,N}' window. Probe M5 showed that every other assertion in this suite is satisfied by an incident NARRATIVE with the instruction removed, and the window-widening method is how the equivalent check in tests/test_reviewer_mutation_mandate.sh was walked around three rounds running." ;;
+  *) fail "R3: reviewer.md (3d) does not OPEN with its obligation. After the list marker the block must BEGIN with, literally: \"(3d) Namespace every scratch file by feature id and role. Everything a campaign writes outside the repo under review — the mutation runner, a probe script, a captured log — is written under scratchpad/<feature-id>-<role>/\" — nothing before it, nothing inserted anywhere in it, and a copy of it further down the block does not count. ⚠️ A VERBATIM COPY PLACED FIRST DOES SATISFY THIS ANCHOR, with a repeal below it (probe M11, unfixed — see the header log); this anchor stops the block being hollowed into a narrative, not every way of countermanding it. ⚠️ IF YOU REACHED THIS BY LEGITIMATELY REWORDING THAT CLAUSE, EDIT THIS LITERAL IN THE SAME COMMIT — do NOT relax it into a '[^.]{0,N}' window. Probe M5 showed that every other assertion in this suite is satisfied by an incident NARRATIVE with the instruction removed, and the window-widening method is how the equivalent check in tests/test_reviewer_mutation_mandate.sh was walked around three rounds running." ;;
 esac
 pass "R3 reviewer_3d_opens_with_the_obligation"
 
@@ -328,7 +329,30 @@ pass "R4 reviewer_3e_free_space_precondition_and_recheck"
 
 printf '%s\n' "$E3" | grep -qiE 'mass[- ]failure run is never evidence' \
   || fail "R5: reviewer.md (3e) lost the 'a mass-failure run is never evidence' bright line"
-pass "R5 reviewer_3e_mass_failure_is_never_evidence"
+
+# ── R5b: (3e) must OPEN with its obligation, literally — the same anchor as R3 ────
+# THIS WAS MISSING FOR ONE ROUND AND IT MATTERED. R3 was added after probe M5 showed that
+# `scratch_checks()`'s six sentence-anchored greps are all satisfiable by a past-tense
+# incident NARRATIVE with the instruction removed. `disk_checks()` is built the same way out
+# of the same materials, and was left with no anchor — i.e. left in exactly the configuration
+# M5 had just defeated. Three probes confirmed it, all GREEN before this check existed:
+#   V1c  (3e) rewritten as a pure post-mortem: the obligations become "Nobody had read the
+#        free space … before the first mutation, and nobody re-read it again before you trust
+#        the results", and the two verdict rules survive only as the title and closing line
+#        of a quoted incident report. No sentence instructs anyone.
+#   V1d  V1c with the LABEL neutered too — "(3e) The E10-F03 round-3 ENOSPC incident, for the
+#        record." — so not even the heading carries an obligation.
+#   V2c  the same treatment of the Builder's disk bullet (see R6).
+# After V1d and V2c together, NEITHER role file contained a disk-precondition obligation
+# anywhere, and this suite still printed "All scratch/disk precondition tests passed."
+# Half of its stated purpose was decoration against the one vector this shape is known to
+# lose to. That is (3b)'s own verdict — an unpinned guarantee — applied to this file.
+_he="$(head_of "$E3")"
+case "$_he" in
+  "(3e) A campaign is evidence only if the machine stayed healthy for all of it. Read the free space on the volume holding the repo and the scratchpad before the first mutation, and read it again before you trust the results"*) : ;;
+  *) fail "R5b: reviewer.md (3e) does not OPEN with its obligation. After the list marker the block must BEGIN with, literally: \"(3e) A campaign is evidence only if the machine stayed healthy for all of it. Read the free space on the volume holding the repo and the scratchpad before the first mutation, and read it again before you trust the results\" — nothing before it, nothing inserted anywhere in it, and a copy of it further down the block does not count. ⚠️ A VERBATIM COPY PLACED FIRST DOES SATISFY THIS ANCHOR, with a repeal below it (probe M11, unfixed — see the header log); this anchor stops the block being hollowed into a narrative, not every way of countermanding it. ⚠️ IF YOU REACHED THIS BY LEGITIMATELY REWORDING THAT CLAUSE, EDIT THIS LITERAL IN THE SAME COMMIT — do NOT relax it into a '[^.]{0,N}' window (see R3's note and probes M5/V1c/V1d)." ;;
+esac
+pass "R5 reviewer_3e_mass_failure_is_never_evidence_and_opens_with_the_obligation"
 
 # ── R6: the SAME two rules in agents/builder.md ──────────────────────────────────
 # Builders mutate routinely (the Principles section sends them to revert a fix in place and
@@ -346,7 +370,18 @@ disk_checks    "$BSEC" "R6: builder.md '$BUILDER_HEADING'"
 _hb="$(head_of "$BNS")"
 case "$_hb" in
   "Namespace every scratch file by feature id and role. Everything you write outside the repo — a mutation runner, a probe script, a captured log — goes under scratchpad/<feature-id>-<role>/"*) : ;;
-  *) fail "R6: the builder.md scratch bullet does not OPEN with its obligation. After the list marker it must BEGIN with, literally: \"Namespace every scratch file by feature id and role. Everything you write outside the repo — a mutation runner, a probe script, a captured log — goes under scratchpad/<feature-id>-<role>/\" — nothing before it, nothing inserted anywhere in it, and a copy further down does not count. ⚠️ IF YOU REWORDED IT LEGITIMATELY, EDIT THIS LITERAL IN THE SAME COMMIT — do NOT relax it into a '[^.]{0,N}' window (see R3's note and probe M5)." ;;
+  *) fail "R6: the builder.md scratch bullet does not OPEN with its obligation. After the list marker it must BEGIN with, literally: \"Namespace every scratch file by feature id and role. Everything you write outside the repo — a mutation runner, a probe script, a captured log — goes under scratchpad/<feature-id>-<role>/\" — nothing before it, nothing inserted anywhere in it, and a copy further down does not count. ⚠️ A VERBATIM COPY PLACED FIRST DOES SATISFY THIS ANCHOR, with a repeal below it (probe M11, unfixed — see the header log); this anchor stops the bullet being hollowed into a narrative, not every way of countermanding it. ⚠️ IF YOU REWORDED IT LEGITIMATELY, EDIT THIS LITERAL IN THE SAME COMMIT — do NOT relax it into a '[^.]{0,N}' window (see R3's note and probe M5)." ;;
+esac
+# The Builder's DISK bullet gets the same anchor, for the reason spelled out at R5b: without
+# it, probe V2c hollowed this bullet into a past-tense anecdote — label included — and stayed
+# green. The literal differs from the Reviewer's (3e) because this file addresses "you" and
+# that one addresses "the campaign", so it is pinned per-file rather than shared.
+[ -n "$BDK" ] \
+  || fail "R6: the builder.md section has no '- **Check the free disk' bullet to anchor — the two rules must stay separable, or the prefix anchor below silently stops covering anything"
+_hbd="$(head_of "$BDK")"
+case "$_hbd" in
+  "Check the free disk before the run, and again before you trust it. Read the free space on the volume holding the repo and the scratchpad before the first mutation, and read it again before you trust the results"*) : ;;
+  *) fail "R6: the builder.md disk bullet does not OPEN with its obligation. After the list marker it must BEGIN with, literally: \"Check the free disk before the run, and again before you trust it. Read the free space on the volume holding the repo and the scratchpad before the first mutation, and read it again before you trust the results\" — nothing before it, nothing inserted anywhere in it, and a copy further down does not count. ⚠️ A VERBATIM COPY PLACED FIRST DOES SATISFY THIS ANCHOR, with a repeal below it (probe M11, unfixed — see the header log). ⚠️ IF YOU REWORDED IT LEGITIMATELY, EDIT THIS LITERAL IN THE SAME COMMIT — do NOT relax it into a '[^.]{0,N}' window (see R5b's note and probe V2c)." ;;
 esac
 pass "R6 builder.md_carries_both_preconditions"
 

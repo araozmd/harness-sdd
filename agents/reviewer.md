@@ -42,9 +42,11 @@ saying "it works" means nothing until you prove it. AI-generated code is often
      - **This bullet is a CONDENSATION, and the rest is not enforced anywhere.** The
        full discipline — deriving the backup set from the mutation list rather than the
        diff, keeping `*.mutbak` out of `.gitignore` so the residue stays visible, and
-       the **Builder-side half, which `agents/builder.md` still lacks entirely even
+       the **Builder-side revert half, which `agents/builder.md` still lacks entirely even
        though Builders mutate routinely** — was written on an E99-F58 branch that was
-       never merged. Not yet enforced: see **E99-F102**.
+       never merged. Not yet enforced: see **E99-F102**. (Narrowed by E99-F73: that file now
+       carries a `## Scratch files and campaign preconditions` section, so "lacks entirely"
+       is true of the **revert** half only. Read it as scoped, not as stale.)
    - **(3c) Prose overstating a guarantee is a DEFECT, not a nit.** A comment, a
      docstring, a `.md` line or a test name that claims more than the code enforces is a
      **required fix at the same severity as the missing enforcement itself** — not a
