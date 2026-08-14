@@ -699,17 +699,6 @@
             "E21-F04"
           ],
           "spec_path": "specs/epics/E21-change-size-discipline/F05-stacked-pr-doctrine/"
-        },
-        {
-          "id": "E21-F06",
-          "title": "The increment contract: delimitation, ownership, review scope",
-          "status": "pending",
-          "sdd": true,
-          "autonomous": false,
-          "depends_on": [
-            "E21-F05"
-          ],
-          "spec_path": "specs/epics/E21-change-size-discipline/F06-increment-contract/"
         }
       ]
     },

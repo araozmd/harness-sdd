@@ -111,7 +111,6 @@ Two things from the pattern are deliberately **rejected**:
 | F03 | `/sdd-pr-loop`: per-round finding trend + "split, don't re-review" at the round cap | done | true | E18-F01 |
 | F04 | Stacked-PR lane for an atomic feature that exceeds the budget | done (re-spec'd as **merge-order safety**) | true | E18-F01, E21-F03 |
 | F05 | The stacked-PR lane's doctrine document | pending (gated) | true | E21-F04 |
-| F06 | The increment contract: delimitation, ownership, review scope | pending (gated) | true | E21-F05 |
 
 ## Notes
 - **F04 was withdrawn during review of PR #78 (2026-07-28).** Its premise was wrong. The lane
@@ -174,7 +173,29 @@ Two things from the pattern are deliberately **rejected**:
   structure" that E21-F01 never defined. Even a decision to *deprecate* the lane needs that
   section to read accurately first.
 
-- **F06 opens with a question that decides whether it is built at all.** The **sibling-feature
+- **F06 is written but deliberately NOT SEEDED on the board.** Its brief exists at
+  `progress/inbox/E21-F06.md`; there is no `state/tasks.json` row and no feature-table entry,
+  and that is the decision rather than an oversight.
+
+  Seeding it would have created a feature the selector routes to and the Architect must refuse.
+  `tools/next-task.mjs` returns any `pending`, `sdd: true` feature whose `depends_on` is
+  satisfied, so the moment F05 reached `done` it would have returned F06 — while F06's own brief
+  says *do not spec this until the product decision is answered*. `autonomous: false` cannot
+  supply that gate: the documented human gate fires at **`spec-ready`**, i.e. *after* the
+  Architect has already written the spec the brief says not to write.
+
+  And the rejection path has no board vocabulary either. A "no" answer leaves nothing to write:
+  the status set is `pending → spec-ready → in-progress → in-review → done`, with **no `parked`
+  and no `declined`**, so a rejected F06 would sit `pending` and actionable forever. This is the
+  same limitation that made re-spec-in-place the right call for F05 above — there is no
+  `withdrawn` — and it is recorded twice now because it is the board's gap, not this epic's.
+
+  **Release condition:** when the question below is answered *yes*, seed F06 from its existing
+  brief (`depends_on: [E21-F05]`, gated). Answered *no*, delete the brief and seed a small
+  feature that deprecates the lane in `docs/WORKFLOW.md` — which F05 will already have made
+  accurate — and decides what becomes of `tools/pr-stack-guard.sh`.
+
+- **The question F06 waits on, and it decides whether F06 exists at all.** The **sibling-feature
   model already delivers budget-sized reviews** — this epic's actual goal — with zero new
   machinery, via the `depends_on` split F01 already specifies. Stacking adds exactly one thing
   over it: **wall-clock overlap**. And the corollary cuts the other way: under siblings *no PR
