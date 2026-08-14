@@ -161,6 +161,15 @@ C3="$(check3)"
 D3="$(printf '%s\n' "$C3" | span '**(3d)' '**(3e)' | flat)"
 E3="$(printf '%s\n' "$C3" | span '**(3e)' ''       | flat)"
 BSEC="$(section "$BUILDER_HEADING" | flat)"
+BNS="$(section "$BUILDER_HEADING" | span '- **Namespace every scratch file' '- **Check the free disk' | flat)"
+
+# head_of — a block's opening text with leading whitespace (INCLUDING TABS) and a `-`/`+`
+# list marker stripped. Used only by the prefix anchors below. This normalises LIST SYNTAX
+# around the sentence; it introduces no window over the sentence itself. (`flat()`'s
+# `sed 's/[*`]//g'` already deletes a `*` marker outright, so only `-` and `+` survive to be
+# stripped here. A tab-indented or re-markered block would otherwise be a FALSE RED, which is
+# exactly what teaches the next maintainer to relax a check.)
+head_of() { printf '%s' "$1" | sed 's/^[[:space:]]*//; s/^[-+][[:space:]]*//'; }
 
 # ── R1: the citations resolve — 3d and 3e are labelled, under check 3 ────────────
 printf '%s\n' "$C3" | grep -qF '(3d)' \
@@ -248,9 +257,37 @@ disk_checks() {
     || fail "$_w: the disk rule does not record WHY a mass failure is dangerous — that it has the exact shape of a set of REAL KILLS. Without that, the rule reads as generic machine hygiene and gets skipped"
 }
 
-# ── R2/R3: the Reviewer's (3d) ───────────────────────────────────────────────────
+# ── R2: the Reviewer's (3d) ──────────────────────────────────────────────────────
 scratch_checks "$D3" "R2: reviewer.md (3d)"
 pass "R2 reviewer_3d_namespaces_scratch_by_feature_and_role"
+
+# ── R3: the scratch rule must OPEN with its obligation, literally ────────────────
+# WHY A PREFIX ANCHOR AND NOT A WIDER REGEX. Every assertion in `scratch_checks()` is
+# satisfiable by DESCRIPTION rather than instruction, and that is measured, not feared:
+# probe M5 rewrote (3d) so that no sentence told the reader to do anything — the incident
+# narrative alone supplied the path template ("writes its scratch straight to the scratchpad
+# root instead of under `scratchpad/<feature-id>-<role>/`"), the prohibition ("it had never
+# been told to keep out of the scratchpad root"), the consequence and the rationale — and it
+# was GREEN on all six. The obligation had been deleted and nothing noticed.
+#
+# The tempting repair is to tighten each window until M5 stops fitting. That is precisely the
+# METHOD `tests/test_reviewer_mutation_mandate.sh` spent three rounds discovering to be
+# wrong: windows re-sized by hand, each time declared closed, each time walked around by the
+# next probe. So there is no new window here. The obligation clause is pinned as a LITERAL
+# PREFIX via a shell `case` — no pattern language, one string to read — which is satisfied
+# only by what the block STARTS with, so a copy of the wording quoted further down does not
+# count.
+#
+# WHAT THIS DOES NOT CLOSE. #133's probe P1 defeated the same construction by making a decoy
+# bullet that itself carries the label and quotes the clause verbatim into the span's HEAD,
+# so the operative text below it is free to repeal the rule. That vector was re-run here as
+# M11 and the result is in the header log. Read it there.
+_h="$(head_of "$D3")"
+case "$_h" in
+  "(3d) Namespace every scratch file by feature id and role. Everything a campaign writes outside the repo under review — the mutation runner, a probe script, a captured log — is written under scratchpad/<feature-id>-<role>/"*) : ;;
+  *) fail "R3: reviewer.md (3d) does not OPEN with its obligation. After the list marker the block must BEGIN with, literally: \"(3d) Namespace every scratch file by feature id and role. Everything a campaign writes outside the repo under review — the mutation runner, a probe script, a captured log — is written under scratchpad/<feature-id>-<role>/\" — nothing before it, nothing inserted anywhere in it, and a copy of it further down the block does not count. ⚠️ IF YOU REACHED THIS BY LEGITIMATELY REWORDING THAT CLAUSE, EDIT THIS LITERAL IN THE SAME COMMIT — do NOT relax it into a '[^.]{0,N}' window. Probe M5 showed that every other assertion in this suite is satisfied by an incident NARRATIVE with the instruction removed, and the window-widening method is how the equivalent check in tests/test_reviewer_mutation_mandate.sh was walked around three rounds running." ;;
+esac
+pass "R3 reviewer_3d_opens_with_the_obligation"
 
 # ── R4/R5: the Reviewer's (3e) ───────────────────────────────────────────────────
 disk_checks "$E3" "R4: reviewer.md (3e)"
@@ -268,6 +305,16 @@ pass "R5 reviewer_3e_mass_failure_is_never_evidence"
   || fail "R6: agents/builder.md has no '## $BUILDER_HEADING' section — the Builder mutates routinely and writes scratch files, so pinning these rules only in reviewer.md leaves the other half of the collision surface unruled"
 scratch_checks "$BSEC" "R6: builder.md '$BUILDER_HEADING'"
 disk_checks    "$BSEC" "R6: builder.md '$BUILDER_HEADING'"
+[ -n "$BNS" ] \
+  || fail "R6: the builder.md section has no '- **Namespace every scratch file' bullet to anchor — the two rules must stay separable, or the prefix anchor below silently stops covering anything"
+# Same prefix anchor as R3, for the same measured reason (M5), against the Builder's copy.
+# The wording differs from the Reviewer's on purpose — that file addresses "the campaign",
+# this one addresses "you" — so the literal is per-file rather than shared.
+_hb="$(head_of "$BNS")"
+case "$_hb" in
+  "Namespace every scratch file by feature id and role. Everything you write outside the repo — a mutation runner, a probe script, a captured log — goes under scratchpad/<feature-id>-<role>/"*) : ;;
+  *) fail "R6: the builder.md scratch bullet does not OPEN with its obligation. After the list marker it must BEGIN with, literally: \"Namespace every scratch file by feature id and role. Everything you write outside the repo — a mutation runner, a probe script, a captured log — goes under scratchpad/<feature-id>-<role>/\" — nothing before it, nothing inserted anywhere in it, and a copy further down does not count. ⚠️ IF YOU REWORDED IT LEGITIMATELY, EDIT THIS LITERAL IN THE SAME COMMIT — do NOT relax it into a '[^.]{0,N}' window (see R3's note and probe M5)." ;;
+esac
 pass "R6 builder.md_carries_both_preconditions"
 
 # ── R6b: builder.md declares its GAP rather than implying completeness (3c) ──────
