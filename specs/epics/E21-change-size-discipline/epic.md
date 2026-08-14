@@ -111,6 +111,7 @@ Two things from the pattern are deliberately **rejected**:
 | F03 | `/sdd-pr-loop`: per-round finding trend + "split, don't re-review" at the round cap | done | true | E18-F01 |
 | F04 | Stacked-PR lane for an atomic feature that exceeds the budget | done (re-spec'd as **merge-order safety**) | true | E18-F01, E21-F03 |
 | F05 | The stacked-PR lane's doctrine document | pending (gated) | true | E21-F04 |
+| F06 | The increment contract: delimitation, ownership, review scope | pending (**parked** — product decision open) | true | E21-F05 |
 
 ## Notes
 - **F04 was withdrawn during review of PR #78 (2026-07-28).** Its premise was wrong. The lane
