@@ -4,6 +4,66 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.61.0] — 2026-08-14
+
+### Added — ✨ two campaign preconditions for parallel lanes (E99-F73)
+
+Parallel lanes are the normal operating mode now, and both of these were written from an
+incident where a concurrent lane silently destroyed another agent's work.
+
+**Scratch collision.** While the E10-F03 round-2 Reviewer was running a mutation campaign in
+`viernes-bookings-calendar`, a different agent working E99-F54 in `viernes-bookings-api`
+wrote an unrelated script to the same path — `scratchpad/mut.py` — overwriting the running
+runner mid-campaign and crashing it. No repo damage (the collision stayed inside the
+scratchpad; the repo was verified byte-clean). The hazard is that **nothing warned either
+agent**: recovery depended on one of them noticing.
+
+**ENOSPC during a campaign.** During the E10-F03 round-3 review the volume hit 0 bytes free,
+because a concurrent agent's `npm install` transiently took ~18 GB. The backups survived
+(md5-verified and restored, with no repo damage). The hazard is **the signal, not the
+outage**: the whole M1–M8 run came back PARSE-FAIL and failing across the board, which is the
+exact shape of a set of real kills. A broken machine forged the evidence a campaign looks
+for.
+
+`agents/reviewer.md` check 3 now carries, beside 3b/3c:
+
+| | the obligation |
+|---|---|
+| **(3d)** | every scratch file a campaign writes goes under **`scratchpad/<feature-id>-<role>/`** — never at the scratchpad root, never under a bare generic name. Feature id *and* role: either alone still collides. A run whose runner was replaced under it **produced no result** — discard it. |
+| **(3e)** | read the **free space before the first mutation and again before the results are trusted**, and report both figures. A run in which most mutations fail, or fail to parse, is **SUSPECT until the environment is confirmed healthy**. **A mass-failure run is never evidence** — it is an aborted run. |
+
+`agents/builder.md` gains a `## Scratch files and campaign preconditions` section carrying
+**the same two rules** — Builders mutate routinely (the Principles section sends them to
+revert a fix in place and watch the test fail), so pinning this only Reviewer-side would
+leave half the collision surface unruled. That section **declares its own limit** rather than
+implying completeness: it is not the mutation-revert discipline, `builder.md` still carries
+no rule for *how* to get a mutated file back, and it names the follow-up — **not yet
+enforced, see E99-F102**. The `reviewer.md` (3b) record of that same gap is unchanged and
+still accurate.
+
+`tests/test_scratch_and_disk_preconditions.sh` (R1–R10, **10 checks**) pins them, with
+`tests/test_reviewer.sh` **R17** as the cross-suite guard that reddens if the new suite is
+renamed out of the `tests/test_*.sh` glob. Assertions are **section-scoped** (`reviewer.md`
+narrowed to check 3 by list number then to the `(3d)`/`(3e)` sub-block; `builder.md` narrowed
+by heading, using the extraction recipe `builder.md` itself prescribes) and
+**sentence-anchored** via `[^.]{0,N}`, and the same two assertion helpers run against **both**
+role files, so deleting the rule from either one reddens.
+
+**Measured, not claimed.** Nine mutations and two legitimate reformats were run one at a time
+against the role files. Straight deletion of any of the three blocks reddens; so does keeping
+a label and its whole narrative while dropping the obligation (M4, M6, M8), deleting the
+"never evidence" line alone (M7), and hedging `SUSPECT` with one word (M9). **One residual is
+open and unfixed: M5** — `(3d)` with its label, its narrative and the path template all
+intact, quoted as an illustration, while the write-obligation sentence is gone, **stays
+green**. It is the same "text that hollows out an assertion the checks still find" shape that
+E99-F67 measured across eight probes and declined to close as unbounded. The suite header
+records it as a measurement log rather than a closure claim, because four consecutive drafts
+of the equivalent paragraph in #133 over-claimed what they closed.
+
+A false pass was caught while writing R9 and is recorded in the suite: grepping the CHANGELOG
+for the bare token `3d` passed **before this entry existed**, satisfied by "`test_board_lock.sh`
+gains R13dup". R9 now searches the parenthesised label.
+
 ## [0.60.0] — 2026-08-12
 
 ### Added — 🧪 the Reviewer's isolated-mutation mandate, as checks 3b and 3c (E99-F67)

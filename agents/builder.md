@@ -90,6 +90,35 @@ comes from.)
   ends up naming a guarantee it cannot detect. This is the same defect as above, in the
   shape it most often takes for agent/contract files.
 
+## Scratch files and campaign preconditions
+
+You mutate routinely — the Principles above send you to revert a fix in place and watch the
+test fail with the real symptom — and you write scratch files while you do it. Two
+preconditions travel with every such run. They are **not** the whole mutation-revert
+discipline: this file still carries no rule for *how* to get the mutated file back. Not yet
+enforced — see **E99-F102**.
+
+- **Namespace every scratch file by feature id and role.** Everything you write outside the
+  repo — a mutation runner, a probe script, a captured log — goes under
+  `scratchpad/<feature-id>-<role>/` (e.g. `scratchpad/E99-F73-builder/probe.sh`); **never at
+  the scratchpad root, and never under a bare generic name**. Parallel lanes are the normal
+  operating mode, so an unnamespaced path is a **shared** path: while a Reviewer was
+  mid-campaign, a second agent working a different repo wrote its own `scratchpad/mut.py`,
+  overwrote the running runner and crashed the campaign. Nothing warned either side — **the
+  collision is silent, and the recovery depended on one agent noticing**. A run whose runner
+  was replaced under it has produced no result: discard it, and start again under a
+  namespaced path.
+- **Check the free disk before the run, and again before you trust it.** Read the free space
+  on the volume holding the repo and the scratchpad **before the first mutation, and read it
+  again before you trust the results**, and record both figures beside the run. An E10-F03
+  review hit ENOSPC at 0 bytes free — a concurrent agent's `npm install` transiently took
+  ~18 GB — and a whole M1-M8 run came back PARSE-FAIL and failing across the board, which is
+  **the exact shape of a set of real kills**: the outage forged the signal the run was
+  looking for. So **a run in which most mutations fail, or fail to parse, is SUSPECT until
+  the environment is confirmed healthy** — re-read the free space, repair the machine, and
+  run it again. **A mass-failure run is never evidence**; it is an aborted run, and it is
+  reported as one.
+
 ## Hand-off
 
 When every task is ticked and your self-check passes, report completion to the
