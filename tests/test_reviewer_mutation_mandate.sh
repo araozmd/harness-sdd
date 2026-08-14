@@ -128,14 +128,29 @@
 #   B1   hedge inserted in the obligation sentence's TAIL, just
 #        past where the literal stops: "…go red — IN THE IDEAL
 #        CASE, AND never by reading the code and agreeing with it." GREEN 18/18
+#   B2   the same slot as B1 but with NO SEPARATOR, glued to the
+#        literal's last word so the operative clause itself reads
+#        with the carve-out: "…and observing the suite go red WHERE
+#        THE ENFORCING MECHANISM IS NOT ALREADY LEGIBLE — never by
+#        reading…"                                                  GREEN 18/18
+#   P1   M20's repeal technique with the verbatim quote placed
+#        FIRST: a decoy bullet that itself carries "**(3b)" and
+#        quotes the obligation clause byte-for-byte becomes the
+#        span's head and satisfies the prefix anchor; the operative
+#        bullet below then repeals the mandate.                     GREEN 18/18
 #
-# SIX GREEN, and none of them fixed. X7 is the one to read twice: widening R2c's scope to
+# ⚠️ B2 and P1 were found by the round-7 CERTIFICATION, i.e. after the round-6 fix that
+# closed M23 — which is the point of keeping this a log. P1 in particular reasons past the
+# R2d aside below ("a copy that is not first is not the prefix"): true as written, and
+# silent on a copy that IS first.
+#
+# EIGHT GREEN, and none of them fixed. X7 is the one to read twice: widening R2c's scope to
 # $C3 closed M22's TOKEN, not M22's POSITION — the same slot, phrased without a banned
 # word, still passes. X8 and X9 are two more positions; M12 and M21 append rather than
 # prepend; B1 lands inside the pinned sentence but past where the literal stops. They are
-# one shape — text that countermands an intact assertion the checks still find — and M21
-# and B1 aim it at the mandate itself rather than at a peripheral bullet, so do not size
-# this residual from M12 alone. A general "no later sentence may rehabilitate what an
+# one shape — text that countermands an intact assertion the checks still find — and M21,
+# B1 and B2 aim it at the mandate itself rather than at a peripheral bullet, while P1 aims
+# it through the span's own head, so do not size this residual from M12 alone. A general "no later sentence may rehabilitate what an
 # earlier one forbids" check is open-ended with no provably bounded cost, so the round-2
 # review declined to block on it and it was deliberately not attempted. (Contrast M22 and
 # M23, whose fixes WERE bounded — one variable, one literal — and so were made.)
@@ -154,7 +169,7 @@
 # probe B1 ("go red — IN THE IDEAL CASE, AND never by reading the code…") is green 18/18.
 #
 # None of the assertions has any notion of a neighbouring sentence that contradicts the
-# one it pinned — M12, M21, X7, X8 and X9 are five positions of that tried so far — and
+# one it pinned — M12, M21, X7, X8, X9, B1, B2 and P1 are eight positions tried so far — and
 # the log above is the set that was tried, not the set that exists. Do not read a green
 # run as proof that the block MEANS what it says — only that it still SAYS it, in the
 # words recorded here.
@@ -199,10 +214,19 @@ span() {
   '
 }
 
-# flat — one line, markdown emphasis removed, whitespace squeezed. Wrapping is a
-# formatting choice; the contract is the sentence. Squeezing is also what makes the
-# `[^.]{0,N}` sentence anchors below work across a line break.
-flat() { sed 's/[*`]//g' | tr '\n' ' ' | tr -s ' '; }
+# flat — one line, markdown emphasis removed, runs of BLANKS (spaces AND tabs) squeezed
+# to one space. Wrapping is a formatting choice; the contract is the sentence. Squeezing
+# is also what makes the `[^.]{0,N}` sentence anchors below work across a line break.
+#
+# ⚠️ It said "whitespace squeezed" while running `tr -s ' '`, which squeezes SPACES ONLY,
+# so a TAB used as a continuation indent inside the obligation sentence survived into the
+# flattened span and was a FALSE RED at R2b (round-7 probe X11). That is the same
+# imprecision the `_head` comment below carried until round 7 — one screen away, and it
+# outlived the fix to its twin. It is corrected here rather than logged because the fix is
+# BOUNDED and costs nothing today (`grep -Pc '\t' agents/reviewer.md` = 0), which is the
+# same test this suite applied to M22's and M23's fixes. A false RED conceals no hole, but
+# it is exactly what teaches the next maintainer to relax a check.
+flat() { sed 's/[*`]//g' | tr '\n' ' ' | sed 's/[[:blank:]][[:blank:]]*/ /g'; }
 
 C3="$(check3)"
 [ -n "$C3" ] || fail "R1: could not extract check 3 from $REVIEWER — the '## What you check' list is not numbered as expected"
@@ -293,8 +317,8 @@ pass "R2c check3_carries_no_optionality"
 # answer to that one.
 #
 # WHAT THE REWORDS IN THE LOG DID, measured (no claim is made about rewords not tried):
-# the eight vectors listed under "against R2d" in the header — including "A claimed" for
-# "Any claimed" (M13), a benign-looking edit — each returned red. The intended repair
+# the vectors listed under "EDITS TO THE OBLIGATION CLAUSE" in the header — ten of which
+# return red at R2d, including "A claimed" for "Any claimed" (M13), a benign-looking edit. The intended repair
 # when a red is legitimate is to EDIT THIS CHECK to the new wording in the same commit;
 # the failure message says so, because a reader who sees only CI output would otherwise
 # reach for the cheapest-looking repair, which is to relax it back into a window.
