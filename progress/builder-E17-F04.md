@@ -106,3 +106,68 @@ is not what made them fail.
   (b) the tools the installer needs still do. A hard-coded `/usr/bin:/bin` would have been
   machine-specific; inheriting the raw `PATH` would have made presence a property of the
   developer's laptop.
+
+---
+
+## Round 2 — the two blocking review findings
+
+Feature re-confirmed `in-progress` in `state/tasks.json` before any edit. Branch
+`feat/E17-F04-worker-roster`, worked in the primary checkout (no worktree for the fix).
+**`harness-install.sh` is unchanged** — the Reviewer was right that both findings are test
+gaps, and I re-derived that myself rather than taking it on report (below).
+
+### Both premises verified independently, before implementing
+
+Ran the Reviewer's exact two mutations against the **round-1 tip** (`7bc7e42`) in a detached
+worktree: `tests/test_worker_roster.sh` **exit 0** and `tests/test_install.sh` **exit 0** for
+each. So both mutations really did survive, and each really is a defect and not a no-op:
+
+- **B1** — `generated_by` ← `"$0"`: the same script reached by two invocation paths emitted
+  `"/abs/…/harness-install.sh"` vs `"./harness-install.sh"` from **identical roster inputs**.
+  That is R9 byte-identity broken by something that is not one of R9's three inputs, and it
+  also falsifies the emitter's own stated reason for shipping no JSON escaper ("every value
+  is a harness-authored literal"). Premise holds, mechanism as stated.
+- **B2** — `: > "$H/workers.stamp"` as the first line of `write_worker_roster`: a **gate-off**
+  install measurably landed `.harness/workers.stamp`. The stated mechanism holds exactly:
+  `comm`-ing the gate-off inventory against the gate-**on** one can only see what the *gate*
+  adds, so an artifact written on both paths cancels out of the delta. Nothing I disagreed
+  with; the Reviewer had already ruled out the direct comparison for the right reason (it
+  would mean diffing against `main`, banned here).
+
+### What changed (tests + docs only)
+
+| finding | change |
+|---|---|
+| B1 | `rq.py` gained a `generated_by` query; `test_roster_is_valid_json` asserts the **value** equals the fixed literal, with a message naming the no-escaper decision it underwrites. |
+| B1 | `test_R9_rerun_is_byte_identical`'s two identical-input installs now reach the same file by **different invocation paths** — `sh <abs>/harness-install.sh` vs `cd <src> && sh ./harness-install.sh`. Pinned in two places on purpose: either case can be rewritten without silently voiding the guarantee. |
+| B1 | `hrun` and the new `hrun_relative` funnel into one `sandbox_run <invocation> …`, so the suite still spawns processes in exactly one place. **Anchored**: R9 proves the two shapes really produce different `$0` (probe script through the same `sandbox_run`), so a later "simplification" of the `rel` branch fails loudly instead of quietly making R9 compare two identical command lines. |
+| B2 | `test_R2_absent_key_writes_nothing` gained a positive, self-contained assertion on the gate-off target **alone**: `find "$_off" -iname '*worker*'` must be empty. The `comm` delta is kept — the two measurements are blind to different things, and the comment now says which is which. |
+| nit | `docs/INSTALL.md`'s illustrative `antigravity` entry was **unreachable** (it has a `HOST_MARKERS` row, so it always earns `host-detectable`, which the tag table two paragraphs below states); the example now carries `["host-detectable", "non-interactive"]`. |
+| nit | `E17-F04.tests.md` Status column: 18 × ⬜ → ✅, per E17-F02/F03/F05. Nothing else in the contract touched. |
+
+### Mutation results — attributable kills
+
+Detached `git worktree add --detach` at the **committed** round-2 tip (`d5d6a38`), runner
+under `scratchpad/E17-F04-builder/` (namespaced). Every mutation asserts its anchor matches
+**exactly once** before applying, and every run neutralises **every other case's invocation**
+so a kill cannot come from an earlier `fail()`. Free disk on the repo volume: **424 GB
+before, 423 GB after** — no mass-failure run, no ENOSPC. Worktree removed after.
+
+| mutation | isolated case | result |
+|---|---|---|
+| *(none — control)* | `roster_is_valid_json` | **PASS** |
+| *(none — control)* | `R9_rerun_is_byte_identical` | **PASS** |
+| *(none — control)* | `R2_absent_key_writes_nothing` | **PASS** |
+| `generated_by` → `"$0"` | `roster_is_valid_json` | **KILLED** — `FAIL: json: generated_by is '/…/harness-install.sh', expected the fixed literal 'harness-install.sh' — an invocation-dependent value such as $0 makes the roster carry environment-derived content…` |
+| `generated_by` → `"$0"` | `R9_rerun_is_byte_identical` | **KILLED** — `FAIL: R9: two runs with identical roster inputs produced different bytes — the only thing that differed was HOW the same installer was invoked…`, diff showing `"/…/harness-install.sh"` vs `"./harness-install.sh"` |
+| `: > "$H/workers.stamp"` first line of `write_worker_roster` | `R2_absent_key_writes_nothing` | **KILLED** — `FAIL: R2: the roster gate is off but the target carries roster-named artifacts: …/tgt-r2off/.harness/workers.stamp` |
+
+The three unmutated isolated runs pass, so the isolation itself is not what made the mutated
+runs fail.
+
+### Self-check
+
+`./init.sh` green. `sh tools/run-tests.sh` → **all 38 suites passed**.
+`tests/test_worker_roster.sh` alone: 16/16 ok (no new case names — the `.tests.md` matrix
+stays 1:1, the new assertions live inside the cases that already claim those rules).
+No test freezes an exact `VERSION` string; no test diffs a DO-NOT-TOUCH file against `main`.
