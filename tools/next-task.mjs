@@ -14,6 +14,20 @@ const EPIC_STATUSES = new Set(['draft', 'planned', 'pending', 'in-progress', 'do
 const FEATURE_STATUSES = new Set(['pending', 'spec-ready', 'in-progress', 'in-review', 'done']);
 const SLICE_STATUSES = new Set([...FEATURE_STATUSES, 'failed']);
 const BLOCKED_SUMMARY = 'no actionable work: selection blocked; see reasons above';
+// E99-F77: a park may name WHO releases it. `gate: "owner"` is the one case the board
+// could not express — the automatable slice is finished and every remaining requirement
+// is a person's (a console attestation, a deploy approval, a signature). `in-progress`
+// routes a Builder at work that does not exist, `in-review` routes a Reviewer at an
+// approved slice, `done` is false; so the item was selected, skipped by hand, and the
+// reason re-derived from progress/history.md every session.
+// A DISCRIMINATOR on the existing park, not a second mechanism: everything that already
+// honours a park — both validators, set-status's refusal, the inline naming a dependent
+// gets — honours this unchanged. A parallel `owner_gated` field would have to be taught
+// to each of them separately, and any one that learned only the park would keep routing
+// a gated item, which is precisely the bug being fixed.
+const OWNER_GATE = 'owner';
+const PARK_GATES = new Set([OWNER_GATE]);
+const isOwnerGated = (feature) => Boolean(feature.parked) && feature.parked.gate === OWNER_GATE;
 
 class ExpectedError extends Error {
   constructor(code, detail) {
@@ -250,6 +264,14 @@ function validateBoard(board) {
         assertObject(feature.parked, `${feature.id}.parked`);
         assertString(feature.parked.reason, `${feature.id}.parked.reason`);
         if (feature.parked.unblocked_by !== undefined) assertString(feature.parked.unblocked_by, `${feature.id}.parked.unblocked_by`);
+        // E99-F77: an unrecognised gate is REJECTED, not degraded to a plain park. The
+        // reason code is the deliverable; a typo that quietly reads as `parked` would
+        // report the wrong one, which is worse than no gate at all. Checked here as well
+        // as in the shared validator for the E06-F07 reason: a board arriving through
+        // --tasks reaches this selector without passing the shared validator at all.
+        if (feature.parked.gate !== undefined && !PARK_GATES.has(feature.parked.gate)) {
+          throw new Error(`${feature.id}.parked.gate ${JSON.stringify(feature.parked.gate)} is unsupported (expected one of: ${[...PARK_GATES].join(', ')})`);
+        }
         // A park means "not yet workable"; `done` means finished. The combination is
         // meaningless, and it is unreachable through the sanctioned path (set-status
         // refuses a transition while parked), so it can only arrive by hand-editing.
@@ -401,7 +423,14 @@ function featureBlockers(feature, featureById, cycles, requireApproval) {
   // design rule had no consequence any test could see.
   if (feature.parked) {
     const wouldRoute = featureRoute(feature, requireApproval) || 'none';
-    records.push({ subject: feature.id, code: 'parked', detail: `${parkDetail(feature)} [route when unparked: ${wouldRoute}]` });
+    // E99-F77: an owner gate reports as `gated-owner`, beside `gated-epic` and
+    // `human-gate` in the E16-F01 vocabulary, so the Orchestrator can tell "come back
+    // when the board moves" from "no agent will ever advance this" WITHOUT reading
+    // progress/history.md. The route is still named — the release condition changes who
+    // acts, not where the feature resumes.
+    records.push(isOwnerGated(feature)
+      ? { subject: feature.id, code: 'gated-owner', detail: `owner gate: ${parkDetail(feature)} [a person must act, not an agent; route when released: ${wouldRoute}]` }
+      : { subject: feature.id, code: 'parked', detail: `${parkDetail(feature)} [route when unparked: ${wouldRoute}]` });
   }
   const unmet = sortedUnique((feature.depends_on || []).filter((id) => !featureById.has(id) || featureById.get(id).status !== 'done'));
   if (unmet.length) {
@@ -410,7 +439,10 @@ function featureBlockers(feature, featureById, cycles, requireApproval) {
     const detail = unmet.map((id) => {
       if (!featureById.has(id)) return `${id}=missing`;
       const dep = featureById.get(id);
-      return dep.parked ? `${id}=${dep.status} (parked: ${parkDetail(dep)})` : `${id}=${dep.status}`;
+      if (!dep.parked) return `${id}=${dep.status}`;
+      // E99-F77: name the gate KIND one hop away too. "parked" tells a reader to wait;
+      // "owner gate" tells them waiting will never clear it.
+      return `${id}=${dep.status} (${isOwnerGated(dep) ? 'owner gate' : 'parked'}: ${parkDetail(dep)})`;
     }).join(', ');
     records.push({ subject: feature.id, code: 'unmet-dependency', detail: `blocking dependencies: ${detail}` });
   }

@@ -4,6 +4,58 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.62.0] — 2026-08-16
+
+### Added — ✨ `parked.gate: "owner"`, a park the OWNER releases (E99-F77)
+
+The board had no way to say **"blocked on a person"**, and the gap mis-routed the same
+feature at least four times. E10-F03 is the worked example: its automatable slice is
+complete and Reviewer-approved across three rounds, but it cannot be `done` — R1/R8/R11 are
+console-only owner attestations, R2/R7 have no supported `gcloud` read path, R4 stage/prod
+needs a deploy, OQ3 needs a DNS host that does not exist. **Every available status was a
+lie**: `in-progress` routes a Builder at work that does not exist, `in-review` routes a
+Reviewer at an already-approved slice, `done` is false. So the deterministic selector kept
+choosing it and each Orchestrator re-derived from `progress/history.md` why to skip —
+exactly the tribal knowledge the TaskStore exists to remove.
+
+```jsonc
+"parked": { "gate": "owner",
+            "reason": "R1/R8/R11 are console-only owner attestations",
+            "unblocked_by": "the owner attests in the Google + Azure consoles" }
+```
+
+`/sdd-next` skips it and reports
+`blocked E10-F03 [gated-owner]: owner gate: <reason> (unblocked by: …) [a person must act,
+not an agent; route when released: reviewer]`. A dependent one hop away reads
+`E10-F04=pending (owner gate: <reason>)` — "parked" tells a reader to wait; "owner gate"
+tells them waiting will never clear it. `tasks-lock.py set-status` refuses and says *a
+person must act first, then unpark it*, so `done` cannot be walked to while the
+attestations are outstanding.
+
+**A discriminator on the existing park (E06-F07), not a second mechanism.** Everything that
+already honours a park — the JSON schema, the zero-dependency validator, the selector's own
+validator, the `set-status` refusal, the inline naming a dependent gets — honours this on
+day one. The two alternatives were weighed and rejected: a **`blocked` status** cannot
+compose (E10-F03 is `in-review`-*and*-gated, and a status erases where to return to — the
+same argument that made the park a field) and touches every status enum and switch in the
+harness; an **`owner_gated` boolean** carries no reason, so it needs a companion note field
+and is then a duplicate park — and two mechanisms meaning "held, do not route" is how a tool
+that honours one and not the other ends up routing a gated item, which is the defect itself.
+
+The gate enum is **closed**: an unrecognised value is a validation error in all three
+validators, never a silent downgrade to a plain park. The reason code *is* the deliverable,
+and a typo that quietly reads as `parked` reports the wrong one.
+
+`agents/orchestrator.md`'s reason-code table gains rows for **both** `gated-owner` and
+`parked` — the latter had been missing since E06-F07 landed, so the one table an Orchestrator
+reads to interpret a blocker did not document the park at all.
+
+Additive: `gate` is an optional key inside an already-optional object. A board with no
+`parked` key, or a park with no `gate`, is byte-identical to before — asserted in the suite
+against this repo's own live board under both validator paths, not assumed.
+
+New suite `tests/test_owner_gate.sh` (10 cases, every one paired with a control).
+
 ## [0.61.0] — 2026-08-14
 
 ### Added — ✨ two campaign preconditions for parallel lanes (E99-F73)

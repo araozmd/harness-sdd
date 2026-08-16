@@ -43,6 +43,10 @@ import sys
 EPIC_STATUS = {"draft", "planned", "pending", "in-progress", "done"}
 FEAT_STATUS = {"pending", "spec-ready", "in-progress", "in-review", "done"}
 SLICE_STATUS = {"pending", "spec-ready", "in-progress", "in-review", "done", "failed"}
+# Park gates (E99-F77). A CLOSED set: an unrecognised gate is an error, never a silent
+# downgrade to an ordinary park, because the reason code the selector emits is the whole
+# deliverable and a typo that reads as `parked` reports the wrong one.
+PARK_GATES = {"owner"}
 
 
 def validate(data, schema):
@@ -175,6 +179,14 @@ def _fallback_errors(data):
                         ):
                             errors.append(
                                 "%s.parked.unblocked_by: expected a non-empty string" % fw
+                            )
+                        # Optional (additive, E99-F77) gate discriminator. Same
+                        # mirroring rule as the park itself: the zero-dependency path
+                        # must not accept a board the JSON schema rejects.
+                        if "gate" in park and park.get("gate") not in PARK_GATES:
+                            errors.append(
+                                "%s.parked.gate '%s': not one of %s"
+                                % (fw, park.get("gate"), sorted(PARK_GATES))
                             )
                     # A park means "not yet workable"; `done` means finished. Unreachable
                     # via set-status (which refuses a transition while parked), so it can

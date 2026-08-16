@@ -617,6 +617,16 @@ def _refuse_if_parked(text, target_id):
                 continue
             park = ft.get("parked")
             if isinstance(park, dict) and park.get("reason"):
+                # E99-F77: an owner gate refuses with the SAME force but a different
+                # instruction. "unpark it" alone invites the operator to clear the gate
+                # and carry on, which for an owner gate would walk the feature to `done`
+                # while the attestations it is waiting on are still outstanding. Name who
+                # has to act first; the unpark step is still how you proceed afterwards.
+                if park.get("gate") == "owner":
+                    _die(
+                        "%s is owner-gated (%s) — a person must act first, then unpark it "
+                        "before changing status" % (target_id, park["reason"])
+                    )
                 _die(
                     "%s is parked (%s) — unpark it before changing status"
                     % (target_id, park["reason"])

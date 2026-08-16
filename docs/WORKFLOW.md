@@ -336,7 +336,8 @@ no actionable work: selection blocked; see reasons above
 ```
 
 Other reasons distinguish a draft parent (`gated-epic`), a park (`parked`, below),
-human approval (`human-gate`), scoped ownership (`owner-excluded` /
+an owner gate (`gated-owner`, below), human approval (`human-gate`), scoped
+ownership (`owner-excluded` /
 `owner-unresolved`), and a truly empty or all-done board (`no-candidates`). This
 output is informational and read-only. It explains the current selection policy;
 it does not relax a gate, pick a fallback, or introduce a new TaskStore status.
@@ -380,6 +381,48 @@ park that a transition silently clears is a suggestion, not a park.
 **`autonomous` is not a park.** It means "do not auto-approve my spec, do not
 auto-build"; it has never meant "do not spec it", and the Architect route at
 `pending` never consults it.
+
+### Blocked on the owner (`parked.gate: "owner"`)
+
+A park says "not workable *yet*". Some features are not workable **by any agent,
+ever**: the automatable slice is finished and every remaining requirement is a
+person's — a console attestation, a deploy approval, a signature, a decision.
+E10-F03 is the worked example, and before this existed every status was a lie —
+`in-progress` routed a Builder at work that did not exist, `in-review` routed a
+Reviewer at an already-approved slice, and `done` was false. So selection kept
+choosing it and each Orchestrator re-derived from `progress/history.md` why to skip
+it: exactly the tribal knowledge the TaskStore exists to remove.
+
+```jsonc
+{ "id": "E10-F03", "status": "in-review", "sdd": true,
+  "parked": { "gate": "owner",
+              "reason": "R1/R8/R11 are console-only owner attestations; R4 stage/prod needs a deploy",
+              "unblocked_by": "the owner attests in the Google + Azure consoles" } }
+```
+
+`gate` is a **discriminator on the park**, not a second field and not a status
+value:
+
+| | |
+|---|---|
+| `/sdd-next` | skips it and reports `blocked <id> [gated-owner]: owner gate: <reason> … [a person must act, not an agent; route when released: <route>]` |
+| its dependents | report `E10-F04=pending (owner gate: <reason>)` — "parked" would tell a reader to wait; "owner gate" tells them waiting will never clear it |
+| `tasks-lock.py set-status` | **refuses**, and says *a person must act first, then unpark it* — so `done` cannot be walked to while the attestations are outstanding |
+| an unknown `gate` value | a **validation error** in all three validators, never a silent downgrade to a plain park — the reason code is the deliverable |
+
+Everything a plain park already guarantees still holds: `reason` is required and
+non-empty, the underlying route is never suppressed, and it composes with every
+status but `done`. Releasing it is the same two explicit acts — the owner does the
+thing, then someone removes the `parked` object.
+
+**Why not a `blocked` status.** A status cannot compose: E10-F03 is
+`in-review`-*and*-owner-gated, and a status would erase where to return to — the
+same argument that made the park a field. It would also touch every status enum,
+transition table and switch in the harness. **Why not an `owner_gated` boolean.** A
+bare boolean carries no reason (the thing that makes a gate legible), so it needs a
+companion note — at which point it is a duplicate park; and two mechanisms meaning
+"held, do not route" is how a tool that honours one and not the other ends up
+routing a gated item.
 
 ## The human-in-the-loop gate
 
