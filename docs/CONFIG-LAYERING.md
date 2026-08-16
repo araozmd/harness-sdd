@@ -99,3 +99,9 @@ Two caveats:
 - **Don't commit per-tool MCP scratch dirs (e.g. `.playwright-mcp/`), scheduler locks, or
   telemetry** — these are runtime scratch. (The harness also seeds a `.harness/.gitignore`
   for the local-only `telemetry.jsonl`; see [`INSTALL.md`](./INSTALL.md).)
+- **Don't commit the worker roster.** `.harness/workers.json` — written only while the
+  opt-in `workers.roster` is on — describes **which CLIs your machine can invoke**, so it
+  is per-developer by construction, exactly like the telemetry log. The installer ignores
+  it unconditionally, on every install, gate or no gate. See
+  [`INSTALL.md`](./INSTALL.md#worker-roster-workersroster--opt-in-local-only) for the
+  file's contract.
