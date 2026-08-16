@@ -26,6 +26,18 @@ const BLOCKED_SUMMARY = 'no actionable work: selection blocked; see reasons abov
 // to each of them separately, and any one that learned only the park would keep routing
 // a gated item, which is precisely the bug being fixed.
 const OWNER_GATE = 'owner';
+// THE CLOSED ENUM IS THE GUARD, AND THAT IS TRUE ONLY WHILE THIS SET HAS ONE MEMBER.
+// Measured, not asserted: loosening `isOwnerGated` below from `=== OWNER_GATE` to
+// `!== undefined` left all 10 cases of tests/test_owner_gate.sh green (E99-F77 mutation
+// M3) — the two are genuinely equivalent today, because validateBoard rejects every gate
+// value except exactly `owner` BEFORE any blocker is computed. A sweep of 20
+// JSON-expressible values (including null, [], {}, "__proto__", "constructor") produced a
+// hard input-error for all but `owner`. Deleting the enum check instead (M4) killed the
+// suite immediately, and M3+M4 together killed it — so the enforcement lives there.
+// ⚠️ THE EQUIVALENCE EXPIRES THE MOMENT A SECOND GATE IS ADDED HERE. With `vendor` beside
+// `owner`, the strict comparison becomes load-bearing and NO test currently catches its
+// loosening. If you add one, add an assertion that a non-owner gate does NOT report as
+// `gated-owner`, or you inherit a hole this comment is the only record of.
 const PARK_GATES = new Set([OWNER_GATE]);
 const isOwnerGated = (feature) => Boolean(feature.parked) && feature.parked.gate === OWNER_GATE;
 
