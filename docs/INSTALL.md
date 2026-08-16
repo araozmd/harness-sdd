@@ -394,7 +394,8 @@ version: asking a CLI its version means running it.
   "workers": [
     {"key": "claude", "command": "claude",
      "capabilities": ["harness-selected", "host-detectable", "non-interactive"]},
-    {"key": "antigravity", "command": "agy", "capabilities": ["non-interactive"]},
+    {"key": "antigravity", "command": "agy",
+     "capabilities": ["host-detectable", "non-interactive"]},
     {"key": "gemini", "command": "gemini", "capabilities": []}
   ]
 }

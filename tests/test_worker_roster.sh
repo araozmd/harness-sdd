@@ -18,10 +18,13 @@
 # leaves a trace and takes a failing exit status. A stub that merely exited 0 would let
 # such an implementation pass.
 #
-# ENVIRONMENT DISCIPLINE. Every installer invocation goes through `hrun`, the ONE place
-# this suite names the installer: `env -i` with nothing but the case's PATH, a sandboxed
-# HOME and a sandboxed CODEX_HOME (never the developer's real ~/.codex), stdin from
-# /dev/null. No check freezes the exact VERSION string or diffs a file against `main`.
+# ENVIRONMENT DISCIPLINE. Every installer invocation goes through `hrun`/`hrun_relative`,
+# which both funnel into `sandbox_run` — the ONE place this suite spawns anything: `env -i`
+# with nothing but the case's PATH, a sandboxed HOME and a sandboxed CODEX_HOME (never the
+# developer's real ~/.codex), stdin from /dev/null. The two wrappers differ ONLY in how the
+# installer is NAMED on the command line (absolute path vs `./harness-install.sh` from the
+# source directory), which is what R9 needs to pin that `$0` is not a roster input.
+# No check freezes the exact VERSION string or diffs a file against `main`.
 #
 # Depends on python3 (a hard prerequisite of the harness — init.sh fails without it), which
 # is what parses the roster: `grep` cannot tell a valid JSON document from a plausible one.
@@ -98,13 +101,48 @@ stub_bin() {
   printf '%s\n' "$_sb_d"
 }
 
-# hrun <target> <bindir> -- <extra installer args…> — the ONE gateway to the installer.
+# sandbox_run <invocation> <bindir> <script-dir> <script-name> <args…> — the ONE place this
+# suite spawns a process. <invocation> selects how the script is NAMED on the command line,
+# and nothing else:
+#
+#   abs — `sh <script-dir>/<script-name>`               ⇒ the script sees an absolute $0
+#   rel — `cd <script-dir> && sh ./<script-name>`       ⇒ the script sees $0 = ./<name>
+#
+# Same file, same environment, same resolved source directory: harness-install.sh derives
+# its own SRC as `cd "$(dirname "$0")" && pwd`, which is the same absolute path under both.
+# The ONLY observable difference is the literal $0. That is deliberate — $0 is not one of
+# R9's three roster inputs, so no byte of the roster may depend on it, and a fixture that
+# only ever spelled the installer one way could not tell.
+sandbox_run() {
+  _sr_inv="$1"; _sr_bin="$2"; _sr_dir="$3"; _sr_name="$4"; shift 4
+  mkdir -p "$T/home" "$T/ch"
+  case "$_sr_inv" in
+    abs)
+      env -i PATH="$_sr_bin:$BASE_PATH" HOME="$T/home" CODEX_HOME="$T/ch" \
+        sh "$_sr_dir/$_sr_name" "$@" </dev/null
+      ;;
+    rel)
+      env -i PATH="$_sr_bin:$BASE_PATH" HOME="$T/home" CODEX_HOME="$T/ch" \
+        sh -c 'cd "$1" || exit 1; _n="$2"; shift 2; exec sh "./$_n" "$@"' \
+        _ "$_sr_dir" "$_sr_name" "$@" </dev/null
+      ;;
+    *) fail "sandbox_run: unknown invocation '$_sr_inv'" ;;
+  esac
+}
+
+# hrun <target> <bindir> -- <extra installer args…> — the installer, named absolutely.
 hrun() {
   _hr_target="$1"; _hr_bin="$2"; shift 2
   if [ "${1:-}" = "--" ]; then shift; fi
-  mkdir -p "$T/home" "$T/ch"
-  env -i PATH="$_hr_bin:$BASE_PATH" HOME="$T/home" CODEX_HOME="$T/ch" \
-    sh "$SRC/harness-install.sh" "$_hr_target" "$@" </dev/null
+  sandbox_run abs "$_hr_bin" "$SRC" harness-install.sh "$_hr_target" "$@"
+}
+
+# hrun_relative — the SAME installer file, reached by a different invocation path. Used by
+# R9 only, to hold every roster input fixed while varying something that is NOT an input.
+hrun_relative() {
+  _hr_target="$1"; _hr_bin="$2"; shift 2
+  if [ "${1:-}" = "--" ]; then shift; fi
+  sandbox_run rel "$_hr_bin" "$SRC" harness-install.sh "$_hr_target" "$@"
 }
 
 # ── the roster reader ────────────────────────────────────────────────────────
@@ -132,6 +170,8 @@ if query == "schema":
     print("%s:%r" % (type(v).__name__, v))
 elif query == "toplevel":
     print(",".join(sorted(doc.keys())))
+elif query == "generated_by":
+    print(doc.get("generated_by", "__ABSENT__"))
 elif query == "vocab":
     print(",".join(doc.get("capability_vocabulary", [])))
 elif query == "keys":
@@ -221,8 +261,13 @@ test_R1_enabled_writes_roster() {
 # changed": a gate-off target is NOT byte-identical to a pre-feature one and cannot be
 # (the seeded `workers.roster: false` key and the unconditional `.gitignore` line are both
 # documented as always-present), so a "nothing changed" assertion would fail a correct
-# implementation. Instead the gate-off and gate-on inventories are compared: the gate may
-# add EXACTLY `.harness/workers.json` and nothing else.
+# implementation. Two independent measurements carry "nothing else added", because neither
+# is sufficient alone:
+#   (i)  ON the gate-off target: no roster-NAMED path exists anywhere in it. Self-contained,
+#        and the only one that can see an artifact written on BOTH gate paths.
+#   (ii) BETWEEN the gate-off and gate-on targets: flipping the gate adds EXACTLY
+#        `.harness/workers.json` and removes nothing. Sees any extra artifact the gate adds,
+#        roster-named or not — but is blind to anything common to both runs.
 test_R2_absent_key_writes_nothing() {
   # (a) the truth table, on the installer's own extracted gate.
   {
@@ -266,6 +311,21 @@ PEOF
   hrun "$_off" "$_b" >"$T/r2off.log" 2>&1 || { cat "$T/r2off.log" >&2; fail "R2: gate-off install exited non-zero"; }
   [ ! -e "$_off/$ROSTER_REL" ] \
     || fail "R2: the roster gate is off but $ROSTER_REL exists"
+
+  # …AND NOTHING ELSE ROSTER-SHAPED, measured on the gate-off target ALONE. The gate-on/
+  # gate-off inventory delta below is a comparison between two POST-feature targets, so it
+  # can only ever see what the GATE adds: an artifact the roster code drops on BOTH paths
+  # (say a stamp written before the gate is even consulted) appears in both inventories and
+  # cancels out of the delta, leaving R2's "nothing else added" clause unenforced.
+  # The direct comparison — a gate-off target against a pre-feature one — is not available:
+  # it would mean diffing against `main`, which is banned here because it breaks on every
+  # later legitimate change. So assert it positively and self-containedly instead: R2's two
+  # permitted always-present items are a LINE INSIDE .harness/.gitignore and a KEY INSIDE
+  # harness.config.yaml, neither of which is a roster-NAMED path, so a correct gate-off
+  # install leaves no `*worker*` file or directory anywhere in the target.
+  _stray="$(find "$_off" -iname '*worker*' | LC_ALL=C sort | tr '\n' ' ')"
+  [ -z "$_stray" ] \
+    || fail "R2: the roster gate is off but the target carries roster-named artifacts: $_stray — with the gate off the installer may add exactly the workers.roster config key and the .gitignore line, both of which live INSIDE an existing file"
 
   # the two documented always-present items
   grep -qxF '  roster: false' "$_off/.harness/harness.config.yaml" \
@@ -524,12 +584,35 @@ test_R9_rerun_is_byte_identical() {
   # keys. BYTE identity (cmp), not field-by-field equivalence — ordering bugs (detection
   # order instead of AGENT_KEYS order, unsorted capabilities) are exactly what a semantic
   # comparison hides, and they are why R9 exists.
+  #
+  # THE TWO RUNS REACH THE SAME SCRIPT BY DIFFERENT INVOCATION PATHS (abs vs rel), so the
+  # installer's own $0 differs between them while all three roster inputs stay fixed. Two
+  # runs spelled identically cannot see an invocation-dependent value in the file at all —
+  # and `generated_by` is exactly such a value if someone writes `"$0"` there instead of the
+  # fixed literal (plan → Data model). That would be a *fourth* input to R9, and it is also
+  # the invariant under the emitter's decision to ship NO JSON escaper: every value it
+  # writes is a harness-authored literal, which an invocation path is not.
+  #
+  # ANCHOR: the two shapes must really produce different $0 values, or the cmp below is
+  # between two identical command lines and pins nothing. Proven on a probe script through
+  # the SAME sandbox_run machinery the installs go through, so a later "simplification" of
+  # the rel branch back to an absolute path fails here instead of silently voiding R9.
+  mkdir -p "$T/argv0"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$0"\n' > "$T/argv0/argv0-probe.sh"
+  chmod +x "$T/argv0/argv0-probe.sh"
+  _a0abs="$(sandbox_run abs "$_b" "$T/argv0" argv0-probe.sh)"
+  _a0rel="$(sandbox_run rel "$_b" "$T/argv0" argv0-probe.sh)"
+  [ "$_a0abs" != "$_a0rel" ] \
+    || fail "R9: the abs and rel invocation shapes both gave \$0='$_a0abs' — the two installs below would differ in nothing, so the byte-identity check could not see an invocation-dependent value in the roster"
+  [ "$_a0rel" = "./argv0-probe.sh" ] \
+    || fail "R9: the rel invocation shape gave \$0='$_a0rel', expected './argv0-probe.sh'"
+
   hrun "$_d" "$_b" >"$T/r9a.log" 2>&1 || { cat "$T/r9a.log" >&2; fail "R9: first install exited non-zero"; }
   cp "$_d/$ROSTER_REL" "$T/r9-run1.json"
-  hrun "$_d" "$_b" >"$T/r9b.log" 2>&1 || { cat "$T/r9b.log" >&2; fail "R9: second install exited non-zero"; }
+  hrun_relative "$_d" "$_b" >"$T/r9b.log" 2>&1 || { cat "$T/r9b.log" >&2; fail "R9: second (relatively-invoked) install exited non-zero"; }
   cp "$_d/$ROSTER_REL" "$T/r9-run2.json"
   cmp -s "$T/r9-run1.json" "$T/r9-run2.json" \
-    || fail "R9: two runs with identical roster inputs produced different bytes: $(diff "$T/r9-run1.json" "$T/r9-run2.json" | head -n 8)"
+    || fail "R9: two runs with identical roster inputs produced different bytes — the only thing that differed was HOW the same installer was invoked (\`sh $SRC/harness-install.sh\` vs \`cd $SRC && sh ./harness-install.sh\`), which is not a roster input: $(diff "$T/r9-run1.json" "$T/r9-run2.json" | head -n 8)"
 
   # THE PATH-REORDERING CONTROL. With the resolved-path field dropped (spec → Recorded
   # decision 4), WHICH PATH component wins a lookup is no longer a roster input — input (c)
@@ -651,6 +734,17 @@ test_roster_is_valid_json() {
     || fail "json: the populated fixture stubbed all five keys but the roster holds $(rq "$_d/$ROSTER_REL" nworkers) entries"
   [ "$(rq "$_d/$ROSTER_REL" toplevel)" = "capability_vocabulary,generated_by,schema,workers" ] \
     || fail "json: the roster's top-level keys are {$(rq "$_d/$ROSTER_REL" toplevel)}, expected exactly {capability_vocabulary,generated_by,schema,workers}"
+
+  # THE KEY SET IS NOT THE CONTRACT — `generated_by`'s VALUE is a fixed literal. This is the
+  # one field whose obvious lazy implementation (`"$0"`) is environment-derived, and the
+  # emitter ships NO JSON escaper precisely because every value it writes is a
+  # harness-authored literal from a closed set (harness-install.sh, the comment above
+  # write_worker_roster). An invocation path is not that: it can hold `"` or `\`, it varies
+  # between two otherwise identical installs, and the key-set check above cannot see any of
+  # it. R9's abs-vs-rel pair pins the same invariant from the byte-identity side; this
+  # pins the value itself, so the guarantee survives either case being rewritten.
+  [ "$(rq "$_d/$ROSTER_REL" generated_by)" = "harness-install.sh" ] \
+    || fail "json: generated_by is '$(rq "$_d/$ROSTER_REL" generated_by)', expected the fixed literal 'harness-install.sh' — an invocation-dependent value such as \$0 makes the roster carry environment-derived content, which is exactly the thing the emitter's no-escaper decision rests on being impossible"
 
   # The empty case: gate ON and NOTHING resolves. An empty roster MEANS something — this
   # machine can invoke none of the harness's front-ends — and a consumer must be able to
