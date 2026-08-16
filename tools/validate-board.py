@@ -47,6 +47,11 @@ SLICE_STATUS = {"pending", "spec-ready", "in-progress", "in-review", "done", "fa
 # downgrade to an ordinary park, because the reason code the selector emits is the whole
 # deliverable and a typo that reads as `parked` reports the wrong one.
 PARK_GATES = {"owner"}
+# Landing attestation (E99-F102). Also a CLOSED set: `ancestor` means tasks-lock
+# resolved the ref and PROVED it reachable from the default branch, `unchecked`
+# means nothing was proved, `declared` means the work has no commit at all. A
+# fourth value would read as a check that nothing performs.
+LANDED_VERIFIED = {"ancestor", "unchecked", "declared"}
 
 
 def validate(data, schema):
@@ -195,6 +200,31 @@ def _fallback_errors(data):
                     # `target-complete` before any blocker is computed.
                     if ft.get("status") == "done":
                         errors.append("%s: a done feature cannot be parked" % fw)
+                # Optional (additive, E99-F102) landing attestation. Same mirroring
+                # rule as the park: the zero-dependency path must not accept a board
+                # the JSON schema rejects. `ref` is required and non-empty because an
+                # attestation nobody can re-check is the defect the field exists to
+                # fix, and `verified` is a CLOSED set for the same reason
+                # `parked.gate` is — an unrecognised value would read as "somebody
+                # checked something" while naming no check that ever ran.
+                if "landed" in ft:
+                    landed = ft["landed"]
+                    if not isinstance(landed, dict):
+                        errors.append("%s.landed: expected object" % fw)
+                    else:
+                        ref = landed.get("ref")
+                        if not isinstance(ref, str) or not ref:
+                            errors.append(
+                                "%s.landed.ref: expected a non-empty string" % fw
+                            )
+                        if landed.get("verified") not in LANDED_VERIFIED:
+                            errors.append(
+                                "%s.landed.verified '%s': not one of %s"
+                                % (fw, landed.get("verified"), sorted(LANDED_VERIFIED))
+                            )
+                        for k in ("repo", "base"):
+                            if k in landed and not isinstance(landed[k], str):
+                                errors.append("%s.landed.%s: expected string" % (fw, k))
                 # Umbrella mode (optional): mirror the slice checks from the JSON
                 # schema so corrupted cross-repo state is rejected even without
                 # jsonschema installed. Absent `slices` ⇒ single-repo, unaffected.

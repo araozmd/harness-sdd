@@ -119,6 +119,44 @@ Orchestrator's exclusive ownership of state writes.
   Since **v0.59.0** both "keep in sync" clauses above are **maintained and enforced**,
   not merely asked for.
 
+  **Since v0.63.0 a `done` transition on a SINGLE-REPO feature requires landing evidence**
+  (E99-F102):
+
+  ```
+  python3 .harness/tools/tasks-lock.py set-status <id> done --evidence <sha|url|none:why>
+  ```
+
+  `done` is what stops the selector routing an item, so a feature marked `done` whose work
+  never merged is both unshipped **and** unreachable — an audit of 148 `done` features
+  across seven repos found three (E99-F58, E99-F59, E09-F02), each on a never-pushed local
+  branch or a closed, unmerged PR, and each found by accident rather than by any check.
+  A **sliced** feature already had to attest this (the schema refuses `done` unless every
+  slice is `done` **and** `merged`); this extends the same attestation to the single-repo
+  feature, which had none — which is why all three instances are single-repo features.
+  A sliced feature therefore still needs no `--evidence`: its slices carry it.
+
+  What the helper does with the value:
+  - a **commit sha** is resolved against the repo holding the harness dir, its parent, and
+    that parent's child repositories, then checked with `git merge-base --is-ancestor`
+    against the default branch. Provably **not** an ancestor ⇒ the write is **REFUSED** and
+    the board is left byte-identical. Recorded as `landed.verified: "ancestor"` when it is.
+  - **anything else** (a PR URL, a tag) is transcribed verbatim and recorded
+    `verified: "unchecked"`, with a warning: nothing was proved.
+  - **`none:<why>`** records `verified: "declared"` — for work with no commit at all (a
+    console action, a supersession). The reason after the colon is required.
+
+  The refusal is narrow on purpose: **only** when ancestry is checkable and false. An
+  offline machine, a sha that belongs to a repository this checkout cannot see, and a board
+  in a repo with **no remote** (an umbrella root usually has none — its local `main` is then
+  the base) all still succeed — a guard that blocked them would be routed around, and a
+  routed-around guard is worth less than none. What it does **not** wave through: where an
+  `origin` exists, "merged" means `origin/HEAD` (or `origin/main`), so a commit sitting on
+  your local `main` that was never pushed is refused. That is the E99-F58 shape verbatim;
+  push it, or say `none:<why>`. What is not optional is
+  saying *something*: the record lands on the feature as
+  `"landed": {"ref": …, "verified": …}`, so re-auditing the board is one `git merge-base`
+  per row, and the weak claims (`unchecked`, `declared`) are greppable rather than invisible.
+
   **`set_status` does the syncing itself.** A feature transition rewrites the `status:` in
   that feature's `*.spec.md`, and an epic transition rewrites its `epic.md`, in the same
   locked critical section as the board write — so the two records move together or not at
@@ -266,7 +304,9 @@ rather than declaring `done` by fiat — but it **does persist** the derived res
 - A feature becomes `done` **only when every slice is `done` and `merged`** **and** the
   feature-level integration check (`verification.integration_command`) has passed.
 - **When those conditions hold, the coordinator writes the derived `done` onto the
-  feature** through `tasks-lock.py set-status <feature-id> done`. This persistence is required:
+  feature** through `tasks-lock.py set-status <feature-id> done` (no `--evidence`: the
+  per-slice `merged` flags this rollup already requires ARE the landing attestation the
+  single-repo path asks for with the flag — see `set_status` above). This persistence is required:
   feature-level `next()` gates `depends_on` on the *stored* feature status, so a
   dependent feature (e.g. `E03-F02` depends_on `E03-F01`) stays blocked until the
   upstream feature's `done` is actually written.

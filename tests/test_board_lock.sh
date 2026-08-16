@@ -381,7 +381,8 @@ echo "flock(1) must never be invoked by the board lock helper" >&2
 exit 97
 EOF
 chmod +x "$_shadow/flock"
-HARNESS_DIR="$T" PATH="$_shadow:$PATH" python3 "$HELPER" set-status E01-F01 done --timeout 3 \
+HARNESS_DIR="$T" PATH="$_shadow:$PATH" python3 "$HELPER" set-status E01-F01 done \
+  --evidence "none: lock-portability fixture, no work to land" --timeout 3 \
   || fail "R9: helper failed when a poisoned flock(1) shadowed PATH (it must not call flock(1))"
 [ "$(status_of "$T/state/tasks.json" E01-F01)" = "done" ] \
   || fail "R9: helper did not apply the write (poisoned flock(1) on PATH)"
@@ -411,7 +412,8 @@ make_fixture "$T2/.harness"
 mkdir -p "$T2/.harness/tools"
 cp "$HELPER" "$T2/.harness/tools/tasks-lock.py"
 cp "$VALIDATOR" "$T2/.harness/tools/validate-board.py"   # shared validator sibling
-( cd / && env -u HARNESS_DIR python3 "$T2/.harness/tools/tasks-lock.py" set-status E01-F02 done ) \
+( cd / && env -u HARNESS_DIR python3 "$T2/.harness/tools/tasks-lock.py" set-status E01-F02 done \
+    --evidence "none: self-location fixture, no work to land" ) \
   || fail "R10a: helper failed to self-locate the .harness/ installed-layout board"
 [ "$(status_of "$T2/.harness/state/tasks.json" E01-F02)" = "done" ] \
   || fail "R10a: installed-layout self-located write did not apply to .harness/state/tasks.json"
@@ -935,7 +937,7 @@ else
       || fail "R12sgdp: transition did not land on the separate-git-dir primary's own board"
     # Also prove serial works from an unrelated cwd (self-location path), still no override.
     ( cd / && env -u HARNESS_DIR python3 "$MAIN/tools/tasks-lock.py" \
-        set-status E01-F02 done ) \
+        set-status E01-F02 done --evidence "none: worktree-layout fixture, no work to land" ) \
       || fail "R12sgdp: serial set-status from an arbitrary cwd was rejected under separate-git-dir primary"
     [ "$(status_of "$MAIN/state/tasks.json" E01-F02)" = "done" ] \
       || fail "R12sgdp: second serial transition did not persist on the primary board"

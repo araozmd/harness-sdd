@@ -40,6 +40,11 @@ const OWNER_GATE = 'owner';
 // `gated-owner`, or you inherit a hole this comment is the only record of.
 const PARK_GATES = new Set([OWNER_GATE]);
 const isOwnerGated = (feature) => Boolean(feature.parked) && feature.parked.gate === OWNER_GATE;
+// E99-F102 landing attestation. CLOSED, like the park gates and for the same reason: the
+// three values say who proved what — `ancestor` = tasks-lock resolved the ref and proved
+// it reachable from the default branch, `unchecked` = nothing was proved, `declared` =
+// there is no commit to prove. A fourth value would be a check nothing performs.
+const LANDED_VERIFIED = new Set(['ancestor', 'unchecked', 'declared']);
 
 class ExpectedError extends Error {
   constructor(code, detail) {
@@ -290,6 +295,20 @@ function validateBoard(board) {
         // Left legal, it would also defeat the targeting contract: select() short-circuits
         // a done target to `target-complete` before any blocker is computed.
         if (feature.status === 'done') throw new Error(`${feature.id} is done and cannot be parked`);
+      }
+      // E99-F102: the landing attestation, checked here for the same reason the park is
+      // — a board arriving through --tasks never passes the shared validator, so a
+      // selector that accepted `"landed": {"verified": "probably"}` would be the one
+      // component reading an attestation nobody performed as if somebody had.
+      if (feature.landed !== undefined) {
+        assertObject(feature.landed, `${feature.id}.landed`);
+        assertString(feature.landed.ref, `${feature.id}.landed.ref`);
+        if (!LANDED_VERIFIED.has(feature.landed.verified)) {
+          throw new Error(`${feature.id}.landed.verified ${JSON.stringify(feature.landed.verified)} is unsupported (expected one of: ${[...LANDED_VERIFIED].join(', ')})`);
+        }
+        for (const k of ['repo', 'base']) {
+          if (feature.landed[k] !== undefined) assertString(feature.landed[k], `${feature.id}.landed.${k}`);
+        }
       }
       const slices = [];
       if (feature.slices !== undefined) {

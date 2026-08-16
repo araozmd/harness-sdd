@@ -4,6 +4,82 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.63.0] — 2026-08-16
+
+### Added — ✨ `done` must carry evidence the work LANDED (E99-F102)
+
+`done` is what stops the selector routing an item. So a feature marked `done` whose work
+never merged is **both unshipped and unreachable** — nothing will ever pick it up again,
+while downstream briefs cite it as a landed mechanism and reviewers act on the citation.
+An audit of **148 `done` features across seven repositories** found three: `E99-F58` and
+`E99-F59` are `done` on the viernes board with 2 commits each on **never-pushed local
+branches** in this repo (`b86e7cf`/`cfabbbd`, `5f0296f`, VERSION-era 0.47.x against a main
+now past 0.62.0), and `E09-F02` is `done` with its only PR (viernes-infra #24) **closed
+unmerged**. Every one of them was found by accident. The recursion is the point: the
+mutation-revert mandate that would have caught this class is itself an instance of it.
+
+```jsonc
+{ "id": "E99-F77", "status": "done",
+  "landed": { "ref": "68d3638", "verified": "ancestor", "repo": "harness-sdd", "base": "origin/main" } }
+```
+
+```
+tasks-lock.py set-status <id> done --evidence <sha|url|none:why>
+```
+
+**An extension of the slice attestation, not a second mechanism.** A **sliced** feature
+already could not be `done` unless every slice was `done` **and** `merged` — enforced by
+the schema cross-field, the zero-dependency validator and the selector. The **single-repo**
+feature had no such attestation, and that is exactly why all three instances are
+single-repo features. So `--evidence` is required for a single-repo `done` and **not** for
+a sliced one, whose per-slice `merged` flags already are the record.
+
+What the value does, and what it deliberately does not do:
+
+| `--evidence` | outcome |
+|---|---|
+| sha that IS an ancestor of the default branch | accepted, `verified: "ancestor"`, with the repo and base it was checked against |
+| sha that is provably NOT an ancestor | **REFUSED**, board left byte-identical |
+| sha that resolves nowhere nearby | accepted with a **warning**, `verified: "unchecked"` |
+| any other string (a PR URL, a tag) | accepted with a warning, `verified: "unchecked"` |
+| `none:<why>` | accepted, `verified: "declared"` — work with no commit; the reason is required |
+| omitted, sliced feature | accepted — the slices carry it |
+| omitted, single-repo feature | **REFUSED** |
+
+The refusal is **narrow on purpose**: only when ancestry is *checkable and false*. An
+offline machine, a sha from a repository this checkout cannot see, and a remoteless board
+(an umbrella root usually has none; its local `main` is then the base) all still succeed —
+a guard that blocked them would be routed around, and a routed-around guard is worth less
+than none. It does not wave through mark-before-push: with an `origin`, "merged" means
+`origin/HEAD`. Both halves are asserted, each against a control.
+
+What was weighed. **Refuse everything unverifiable** — rejected: it blocks the umbrella
+(no remote), any offline run and all no-code work, so the first agent to hit it uses
+`apply --mutator` and the guard is gone. **Warn only** — rejected as the status quo with a
+louder voice: nothing about the three instances would have changed. **Record the ref at
+`done` time** — adopted, because the audit measured that the expensive half is not the
+ancestry check (one `git merge-base`) but *resolving a sha for a feature id at all*: three
+boards mint `E<nn>-F<nn>` ids into the same commit corpus (this repo's own board, the
+viernes umbrella board, and the pre-rebrand `lia` boards), so id-grep is unsound in both
+directions and 17 of 148 features had no commit evidence anywhere. A recorded ref makes a
+re-audit one command per row.
+
+**Additive to every existing board.** `landed` is optional in the schema and never
+required by it — only by the write path — so the 148 already-`done` features stay valid and
+stay unattested. This is a **breaking change to the `set-status` CLI** for single-repo
+`done` transitions (0.x SemVer ⇒ MINOR); three in-repo suites were updated to pass
+`--evidence`, and `tests/test_owner_gate.sh`'s R5 pair is *stronger* for it — both halves
+now carry evidence, so the difference between the refusal and its control is the gate alone.
+
+New suite `tests/test_landed_evidence.sh` (11 cases, every one paired with a control). Two
+of them exist because a mutation survived without them: deleting the `verified` enum check
+from the zero-dependency validator left the suite green (the schema was answering for the
+fallback), and deleting the child-repository scan left it green too (every other case
+resolves the sha in the harness dir's own parent, so the umbrella layout the viernes board
+actually uses went unexercised). One mutation SURVIVES — loosening the sliced-feature test
+to `slices is not None` is outcome-equivalent while `slices: []` stays schema-illegal — and
+is disclosed in `tools/tasks-lock.py` rather than papered over.
+
 ## [0.62.0] — 2026-08-16
 
 ### Added — ✨ `parked.gate: "owner"`, a park the OWNER releases (E99-F77)

@@ -22,9 +22,11 @@
 # runs it AFTER this process returns (i.e. after the lock is released, R7).
 #
 # Usage:
-#   tasks-lock.py set-status <id> <status> [--timeout SECONDS]
+#   tasks-lock.py set-status <id> <status> [--evidence REF] [--timeout SECONDS]
 #       Set the status of the object <id> addresses (feature id `E06-F06` or
 #       epic id `E06`) in state/tasks.json, under the lock.
+#       Moving a SINGLE-REPO feature to `done` requires --evidence (E99-F102);
+#       see "Landing evidence" below.
 #   tasks-lock.py apply --mutator <path> [--timeout SECONDS]
 #       Run an external mutator on the freshly-read board (used for tests and
 #       for callers that express a different single mutation). The mutator is a
@@ -65,6 +67,42 @@
 # This makes the standard worktree layout work automatically, exotic layouts fail
 # safe (loud + actionable) instead of corrupting board state, and the F03
 # coordinator's HARNESS_DIR injection makes ALL layouts correct.
+#
+# ── Landing evidence on `done` (E99-F102) ────────────────────────────────────
+# `done` is what stops the selector routing an item, so a feature marked `done`
+# whose work never merged is both unshipped AND unreachable — nothing will pick
+# it up again, and downstream briefs cite it as a landed mechanism. An audit of
+# 148 `done` features across seven repos found three such items (E99-F58,
+# E99-F59, E09-F02), each discovered by accident rather than by any check.
+#
+# A SLICED feature already had to attest this: the schema refuses `done` unless
+# every slice is `done` AND `merged`. This EXTENDS that attestation to the
+# single-repo feature, which had none — which is why all three instances are
+# single-repo features. `set-status <feature> done` therefore requires
+# `--evidence REF`, where REF is one of:
+#
+#   <sha>          a commit id (7-40 hex). RESOLVED against the repo holding the
+#                  harness dir, its parent, and any sibling child repos, then
+#                  checked with `git merge-base --is-ancestor <sha> <default>`.
+#   <anything>     a PR URL, a tag, a branch — recorded verbatim, NOT proved.
+#   none:<why>     work with no commit at all (a console action, a supersession).
+#
+# The refusal is deliberately NARROW: the write is refused ONLY when ancestry is
+# CHECKABLE AND FALSE (the sha resolves, and it is provably not reachable from
+# the default branch — the exact shape of the three instances). Everything else
+# is recorded and, where nothing was proved, WARNED about. A guard that blocked an
+# offline machine, a sha belonging to a repository this checkout cannot see, or a
+# remoteless board (an umbrella root usually has no remote — its local `main` is
+# then the base) would be routed around, and a routed-around guard is worth less
+# than none. It does NOT wave through mark-before-push: where an `origin` exists,
+# "merged" means `origin/HEAD`, so a commit sitting on a local `main` that was
+# never pushed is refused — the E99-F58 shape verbatim.
+# What is NOT optional is saying something: the record
+# lands on the board as `landed: {ref, verified}`, so re-auditing is one
+# `git merge-base` per row instead of the three-pass commit archaeology that
+# found these — and `verified: "unchecked"`/`"declared"` rows are greppable,
+# which is the difference between a claim that is weak and a claim that is
+# invisible.
 #
 # Standard-layout resolution (case 2): we preserve the source-vs-installed layout
 # by computing the harness subpath as the helper's self-located dir RELATIVE to
@@ -634,7 +672,265 @@ def _refuse_if_parked(text, target_id):
             return
 
 
-def _set_status_text_transform(target_id, status):
+# ---------------------------------------------------------------------------
+# Landing evidence (E99-F102). See the "Landing evidence on `done`" block in the
+# module header for WHY; this section is the HOW.
+
+_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+_DECLARED_PREFIX = "none:"
+# Tried in order; the first that resolves is the default branch. `origin/HEAD` is
+# authoritative when the remote published it; the rest cover a repo whose HEAD was
+# never fetched and a board in a repo with NO REMOTE AT ALL (the viernes umbrella),
+# where `main` is simply the local default branch.
+_DEFAULT_REF_CANDIDATES = ("origin/main", "origin/master", "main", "master")
+
+
+def _git_rc(args, cwd):
+    """Run `git <args>` in <cwd>; return the exit code, or None if git could not run.
+
+    `_git` above collapses every non-zero exit to None, which is right for
+    discovery but wrong here: `merge-base --is-ancestor` reports "not an
+    ancestor" as exit 1 and a broken invocation (bad object, not a repo) as
+    something else, and conflating them would turn "this work never merged" into
+    "we could not check", i.e. exactly the silent pass this feature exists to end.
+    """
+    try:
+        out = subprocess.run(
+            ["git"] + list(args),
+            cwd=cwd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.returncode
+
+
+def _repo_candidates(hdir):
+    """Repositories in which an evidence sha might resolve, nearest first.
+
+    (1) the harness dir itself (source layout: the harness repo root);
+    (2) its parent (installed layout: the product repo holding `.harness/`);
+    (3) the immediate children of (2) that are themselves work trees — an
+        umbrella board lives in the umbrella root while the work lands in
+        `./<child>/`, so without this the ONE layout the harness ships for
+        multi-repo projects could never verify anything.
+
+    Directory probing only (`.git` present, as a dir OR a file so linked
+    worktrees count); no git process is spawned to build the list.
+    """
+    seen = []
+
+    def add(path):
+        if not path:
+            return
+        real = os.path.realpath(path)
+        if real in seen:
+            return
+        if os.path.exists(os.path.join(real, ".git")):
+            seen.append(real)
+
+    hdir = os.path.realpath(hdir)
+    add(hdir)
+    parent = os.path.dirname(hdir)
+    add(parent)
+    for root in (parent, hdir):
+        try:
+            entries = sorted(os.listdir(root))
+        except OSError:
+            continue
+        for name in entries:
+            if name.startswith("."):
+                continue
+            add(os.path.join(root, name))
+    return seen
+
+
+def _default_ref(repo):
+    """The repo's default branch ref, or None when it cannot be determined."""
+    head = _git(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], cwd=repo)
+    if head:
+        return head[len("refs/remotes/") :] if head.startswith("refs/remotes/") else head
+    for ref in _DEFAULT_REF_CANDIDATES:
+        if _git_rc(["rev-parse", "--verify", "--quiet", ref + "^{commit}"], cwd=repo) == 0:
+            return ref
+    return None
+
+
+def _verify_sha(ref, hdir):
+    """Classify a sha against every candidate repo.
+
+    Returns a `landed` record, or calls `_die` when ancestry is CHECKABLE AND
+    FALSE. "Checkable" means one repo both resolved the object and produced a
+    default ref; a repo where the object is unknown simply does not vote. One
+    repo proving ancestry wins over another's negative — a sha can legitimately
+    be an ancestor in the repo that owns the work and unknown in its siblings.
+    """
+    refuted = None
+    for repo in _repo_candidates(hdir):
+        if _git_rc(["cat-file", "-e", ref + "^{commit}"], cwd=repo) != 0:
+            continue  # object unknown here — this repo has no opinion
+        base = _default_ref(repo)
+        if base is None:
+            continue  # resolvable but nothing to compare against
+        rc = _git_rc(["merge-base", "--is-ancestor", ref, base], cwd=repo)
+        if rc == 0:
+            return {
+                "ref": ref,
+                "verified": "ancestor",
+                "repo": os.path.basename(repo),
+                "base": base,
+            }
+        if rc == 1 and refuted is None:
+            refuted = (os.path.basename(repo), base)
+    if refuted is not None:
+        _die(
+            "commit %s is NOT an ancestor of %s in %s — the work is not merged, so "
+            "`done` would be false. Merge it and pass the merge commit, or pass "
+            "--evidence none:<why> if this feature has no commit to point at."
+            % (ref, refuted[1], refuted[0])
+        )
+    sys.stderr.write(
+        "tasks-lock: warning: evidence %s could not be resolved in any repository "
+        "near %s — recording it UNCHECKED. Nothing here proved the work merged.\n"
+        % (ref, hdir)
+    )
+    return {"ref": ref, "verified": "unchecked"}
+
+
+def _landing_record(evidence, hdir):
+    """Turn a --evidence value into the `landed` record, or die refusing the write."""
+    evidence = evidence.strip()
+    if not evidence:
+        _die("--evidence must not be empty")
+    if evidence.startswith(_DECLARED_PREFIX):
+        why = evidence[len(_DECLARED_PREFIX) :].strip()
+        if not why:
+            _die(
+                "--evidence none:<why> needs a reason after the colon — "
+                "'no commit' with no explanation is the say-so this replaces"
+            )
+        return {"ref": evidence, "verified": "declared"}
+    if _SHA_RE.match(evidence):
+        return _verify_sha(evidence, hdir)
+    sys.stderr.write(
+        "tasks-lock: warning: evidence %r is not a commit id, so nothing was "
+        "checked — recording it UNCHECKED. A sha is checked against the default "
+        "branch; a URL is only transcribed.\n" % evidence
+    )
+    return {"ref": evidence, "verified": "unchecked"}
+
+
+def _feature_entry(text, target_id):
+    """(is_feature, feature_dict) for `target_id`, from a READ-ONLY parse.
+
+    (False, None) for an epic id, an unparseable board, or an id that is not on
+    the board at all — every one of those is somebody else's error to report, and
+    masking it behind an evidence message would be worse than letting the
+    existing path fail-stop on it.
+    """
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return False, None
+    if not isinstance(data, dict):
+        return False, None
+    for ep in data.get("epics") or []:
+        if not isinstance(ep, dict):
+            continue
+        for ft in ep.get("features") or []:
+            if isinstance(ft, dict) and ft.get("id") == target_id:
+                return True, ft
+    return False, None
+
+
+def _resolve_landing(text, target_id, status, evidence, hdir):
+    """The `done`-transition precondition. Returns a `landed` record or None."""
+    is_feature, feature = _feature_entry(text, target_id)
+    if evidence is not None and status != "done":
+        _die("--evidence records a landing; it applies only to a `done` transition")
+    if status != "done" or not is_feature:
+        # Epics roll up from their features, each of which carried its own
+        # evidence; requiring it again at the epic would be a second attestation
+        # of the same facts.
+        if evidence is not None and not is_feature:
+            _die("--evidence applies to a feature; %s is not one" % target_id)
+        return None
+    # Measured, not asserted: loosening this to `feature.get("slices") is not None`
+    # left all 11 cases of tests/test_landed_evidence.sh green (mutation M5) — the two
+    # are genuinely equivalent in OUTCOME today, because the only inputs that separate
+    # them (`"slices": []`, or a non-list) are rejected by the schema in the same locked
+    # critical section, so the write fail-stops either way; only the error text differs.
+    # ⚠️ The equivalence expires if `slices: []` ever becomes legal. Then the loose form
+    # would exempt a feature with NO slices from evidence entirely, and no test here
+    # catches that — this comment is the only record of it.
+    sliced = isinstance(feature.get("slices"), list) and feature["slices"]
+    if evidence is None:
+        if sliced:
+            # The slice invariant (every slice done+merged, enforced by the schema
+            # and both validators) IS this attestation for a multi-repo feature.
+            return None
+        _die(
+            "%s: `done` needs evidence the work landed — pass --evidence <sha> "
+            "(checked against the default branch, and REFUSED if it is not an "
+            "ancestor), or --evidence <url> to transcribe an unverifiable "
+            "reference, or --evidence none:<why> when there is no commit. "
+            "A `done` nobody can re-check is how E99-F58/E99-F59/E09-F02 sat "
+            "unshipped and unroutable on this board." % target_id
+        )
+    return _landing_record(evidence, hdir)
+
+
+def _write_landed(text, target_id, record):
+    """Patch `landed` into the feature object, replacing any existing record.
+
+    Text surgery, not a re-serialize, for the same reason the status patch is
+    (R6): every other byte — indentation, inline vs multiline arrays, the
+    trailing newline — stays verbatim. The result is json.loads + schema
+    validated by the caller before the atomic replace, so a malformed insert
+    fail-stops instead of landing.
+    """
+    blob = json.dumps(record, separators=(", ", ": "), sort_keys=True)
+    in_string = _string_mask(text)
+    span = _find_status_span(text, target_id)
+    if span is None:
+        _die("id %r not found in board" % target_id)
+    status_start = span[0]
+    obj = _scan_object_span(text, status_start, in_string)
+    if obj is None:
+        _die("could not delimit the object for %r while recording evidence" % target_id)
+    obj_start, obj_end = obj
+
+    existing = _depth1_value_start(text, in_string, obj_start, obj_end, "landed")
+    if existing is not None:
+        old = _scan_object_span(text, existing, in_string)
+        if old is None or old[0] != existing:
+            _die(
+                "%s.landed is not an object; refusing to overwrite it blind" % target_id
+            )
+        return text[: old[0]] + blob + text[old[1] :]
+
+    # Insert immediately after the status member. `end + 1` steps past the closing
+    # quote of the status VALUE (the span brackets the value between the quotes).
+    at = span[1] + 1
+    line_start = text.rfind("\n", 0, status_start) + 1
+    prefix = text[line_start:status_start]
+    indent = prefix[: len(prefix) - len(prefix.lstrip())]
+    # `span` brackets the value token INSIDE its quotes, so `prefix` ends at the
+    # opening quote: `          "status": "`.
+    if re.match(r'^\s*"status"\s*:\s*"$', prefix):
+        # `status` opens its own line (the pretty-printed board): match its
+        # indentation, so the diff is one ADDED line rather than one very long
+        # rewritten one.
+        return text[:at] + ",\n" + indent + '"landed": ' + blob + text[at:]
+    # Several members share the line (the compact fixtures, and hand-written
+    # boards): stay on it — a newline here would reflow a line nobody asked to
+    # reformat.
+    return text[:at] + ', "landed": ' + blob + text[at:]
+
+
+def _set_status_text_transform(target_id, status, evidence=None):
     """Build a TEXT transform that changes ONLY the target's status value.
 
     Unlike a parse → mutate → re-serialize round-trip (which reformats every
@@ -648,11 +944,17 @@ def _set_status_text_transform(target_id, status):
 
     def transform(text):
         _refuse_if_parked(text, target_id)  # E06-F07: a park outranks a transition
+        # E99-F102: resolved BEFORE the patch, so a refusal leaves the board byte-
+        # identical — the write is never half-applied and then rejected.
+        landed = _resolve_landing(text, target_id, status, evidence, _harness_dir())
         span = _find_status_span(text, target_id)
         if span is None:
             _die("id %r not found in board" % target_id)
         start, end, _old = span
-        return text[:start] + status + text[end:]
+        patched = text[:start] + status + text[end:]
+        if landed is not None:
+            patched = _write_landed(patched, target_id, landed)
+        return patched
 
     return transform
 
@@ -963,6 +1265,16 @@ def main(argv):
     p_set.add_argument("id")
     p_set.add_argument("status")
     p_set.add_argument(
+        "--evidence",
+        default=None,
+        help=(
+            "landing evidence for a `done` transition (E99-F102): a commit sha "
+            "(checked against the default branch and REFUSED when it is provably "
+            "not an ancestor), any other reference (transcribed, unchecked), or "
+            "none:<why> for work with no commit"
+        ),
+    )
+    p_set.add_argument(
         "--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS
     )
 
@@ -989,7 +1301,7 @@ def main(argv):
 
     if args.cmd == "set-status":
         # Minimal-diff text transform: patches only the target's status token.
-        transform = _set_status_text_transform(args.id, args.status)
+        transform = _set_status_text_transform(args.id, args.status, args.evidence)
     elif args.cmd == "apply":
         # External mutators may change arbitrary structure → parse+re-serialize.
         transform = _mutator_text_transform(_import_mutator(args.mutator))

@@ -48,6 +48,17 @@
                   }
                 },
                 "spec_path": { "type": "string" },
+                "landed": {
+                  "$comment": "Optional (additive, E99-F102). The single-repo analogue of the slice-level `merged`+`pr` pair, which is the mechanism this EXTENDS rather than duplicates: a SLICED feature may already only be `done` when every slice is `done` AND `merged` (see the cross-field below), so multi-repo work already had to attest its landing. A single-repo feature had no such attestation, and that is exactly the gap the three known instances fell through — E99-F58, E99-F59 and E09-F02 are all `done` on a board while their only commits sit on a never-pushed local branch or a closed, unmerged PR. `ref` is required and non-empty for the same reason `parked.reason` is: an attestation nobody can re-check is the defect this fixes, and `ref` is what makes the re-check one `git merge-base --is-ancestor` instead of an archaeology pass over three colliding id namespaces. `verified` is a CLOSED enum, like `parked.gate`: `ancestor` = tasks-lock RESOLVED the ref and proved it reachable from the default branch; `unchecked` = the ref could not be resolved here (no such object locally, no default ref, no git) so NOTHING was proved; `declared` = a `none:<why>` ref, i.e. work with no commit at all (an AWS/console action, a supersession). Absent ⇒ a legacy or hand-edited entry, byte-identical to before — this field is never required by the schema, only by the write path.",
+                  "type": "object",
+                  "required": ["ref", "verified"],
+                  "properties": {
+                    "ref": { "type": "string", "minLength": 1 },
+                    "verified": { "enum": ["ancestor", "unchecked", "declared"] },
+                    "repo": { "type": "string" },
+                    "base": { "type": "string" }
+                  }
+                },
                 "slices": {
                   "type": "array",
                   "minItems": 1,

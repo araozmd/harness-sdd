@@ -424,6 +424,69 @@ companion note — at which point it is a duplicate park; and two mechanisms mea
 "held, do not route" is how a tool that honours one and not the other ends up
 routing a gated item.
 
+### `done` needs evidence the work landed (`landed`)
+
+`done` is what stops the selector routing an item. So a feature marked `done` whose
+work never merged is both **unshipped and unreachable** — nothing will ever pick it
+up again, while downstream briefs cite it as a landed mechanism. An audit of 148
+`done` features across seven repositories found three: `E99-F58` and `E99-F59` sat
+on never-pushed local branches, `E09-F02` on a closed, unmerged PR. All three were
+found **by accident**.
+
+A **sliced** feature already had to attest this — the schema refuses `done` unless
+every slice is `done` *and* `merged`. The single-repo feature had no such
+attestation, which is exactly why all three instances are single-repo features. So
+the same attestation, one level up:
+
+```
+python3 .harness/tools/tasks-lock.py set-status <id> done --evidence <sha|url|none:why>
+```
+
+```jsonc
+{ "id": "E99-F77", "status": "done",
+  "landed": { "ref": "68d3638", "verified": "ancestor", "repo": "harness-sdd", "base": "origin/main" } }
+```
+
+| the `--evidence` value | what happens |
+|---|---|
+| a commit **sha** that is an ancestor of the default branch | accepted, recorded `verified: "ancestor"` with the repo and base it was checked against |
+| a commit **sha** that is provably **not** an ancestor | **REFUSED** — the board is left byte-identical |
+| a sha that resolves **nowhere** nearby (offline, other repo, no remote) | accepted with a **warning**, recorded `verified: "unchecked"` — nothing was proved |
+| a URL / tag / any other string | accepted with a warning, recorded `verified: "unchecked"` |
+| `none:<why>` | accepted, recorded `verified: "declared"` — for work with no commit (a console action, a supersession). The reason is required |
+| omitted, on a **sliced** feature | fine — its per-slice `merged` flags are the attestation |
+| omitted, on a **single-repo** feature | **REFUSED**, naming the three instances |
+
+**The refusal is narrow on purpose:** only when ancestry is *checkable and false*.
+A guard that also blocked an offline machine, a sha belonging to a repository this
+checkout cannot see, or a remoteless board (an umbrella root usually has no remote —
+its local `main` is then the base) would be routed around, and a routed-around guard
+is worth less than none. It does **not** wave through mark-before-push: where an
+`origin` exists, "merged" means `origin/HEAD`, so a commit sitting on your local
+`main` that was never pushed is refused — that is the E99-F58 shape verbatim. Push
+it, or say `none:<why>`. What is not optional is saying
+*something*. The `landed` record turns a re-audit into one `git merge-base` per row
+instead of commit archaeology across colliding id namespaces, and it makes the weak
+claims **greppable**:
+
+```
+python3 - <<'PY'
+import json
+b = json.load(open('.harness/state/tasks.json'))
+for e in b['epics']:
+    for f in e.get('features', []):
+        if f.get('status') == 'done' and (f.get('landed') or {}).get('verified') != 'ancestor':
+            print(f['id'], (f.get('landed') or {}).get('verified', 'NO RECORD'))
+PY
+```
+
+**What this does not do.** It does not retro-attest the boards that already exist:
+`landed` is never *required* by the schema, only by the write path, so every board
+that predates it stays valid and every `done` on it stays unattested. It also does
+not stop `apply --mutator` (the same escape hatch a park has), and `verified:
+"declared"` is exactly as strong as the person who typed it — the difference is
+that it is now written down and countable.
+
 ## The human-in-the-loop gate
 
 When `harness.config.yaml` has `require_spec_approval: true` (default), the

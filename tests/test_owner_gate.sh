@@ -200,13 +200,16 @@ done
 pass "E99-F77 R4 an_unrecognised_gate_is_rejected_not_downgraded"
 
 # ── R5: `done` is not reachable by accident — set-status refuses and names the gate ───
+# Both calls carry E99-F102 landing evidence so the ONLY difference between the refusal
+# and the control is the gate: without it, `done` bounces on the missing evidence and the
+# case would "pass" against an implementation with no owner gate at all.
 mkdir -p "$T/hd/state" "$T/hd/store" "$T/hd/tools"
 cp "$SRC/store/tasks.schema.json" "$T/hd/store/"
 cp "$SRC/tools/validate-board.py" "$T/hd/tools/"
 mkboard "$GATE" ''
 cp "$T/tasks.json" "$T/hd/state/tasks.json"
 _before="$(cat "$T/hd/state/tasks.json")"
-SS_OUT="$(HARNESS_DIR="$T/hd" python3 "$SRC/tools/tasks-lock.py" set-status E01-F01 done 2>&1)" && SS_RC=0 || SS_RC=$?
+SS_OUT="$(HARNESS_DIR="$T/hd" python3 "$SRC/tools/tasks-lock.py" set-status E01-F01 done --evidence "none: owner-gate fixture, no work to land" 2>&1)" && SS_RC=0 || SS_RC=$?
 [ "$SS_RC" = "0" ] && fail "R5: set-status walked an OWNER-GATED feature to done: $SS_OUT"
 case "$SS_OUT" in
   *"$REASON"*) ;;
@@ -224,7 +227,7 @@ esac
 # control, SAME harness dir: the identical transition succeeds once the gate is removed
 mkboard '' ''
 cp "$T/tasks.json" "$T/hd/state/tasks.json"
-SS_OUT="$(HARNESS_DIR="$T/hd" python3 "$SRC/tools/tasks-lock.py" set-status E01-F01 done 2>&1)" && SS_RC=0 || SS_RC=$?
+SS_OUT="$(HARNESS_DIR="$T/hd" python3 "$SRC/tools/tasks-lock.py" set-status E01-F01 done --evidence "none: owner-gate fixture, no work to land" 2>&1)" && SS_RC=0 || SS_RC=$?
 [ "$SS_RC" = "0" ] \
   || fail "R5 control: the same transition failed on an UNGATED feature (rc=$SS_RC), so the refusal above is not attributable to the gate: $SS_OUT"
 _status_now="$(python3 -c "import json;print(json.load(open('$T/hd/state/tasks.json'))['epics'][0]['features'][0]['status'])")"

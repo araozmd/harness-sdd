@@ -249,6 +249,24 @@ The build↔review handoff is **not a single pass** — it is an explicit loop t
 3. Repeat steps 1–2 for as many rounds as it takes; the loop exits **only on an
    approve verdict** (or when you escalate a stuck feature to a human).
 
+**Writing that `done` needs evidence the work LANDED** (E99-F102). An approve verdict
+says the work is *correct*; it does not say the work is *merged*, and `done` is what
+stops the selector routing the item — so a `done` whose branch never merged is both
+unshipped and unreachable, and the next brief will cite it as a shipped mechanism.
+Three such features were found on one board, all by accident. So for a **single-repo**
+feature the transition carries its own proof:
+
+```
+python3 "$HARNESS_DIR/tools/tasks-lock.py" set-status <id> done --evidence <sha|url|none:why>
+```
+
+A **sha** is checked with `git merge-base --is-ancestor` against the default branch and
+the write is **REFUSED** if it is provably not an ancestor; anything else is transcribed
+and marked `unchecked`; `none:<why>` is for work with no commit at all (a console action,
+a supersession). Prefer the **merge commit** — it is the thing that is actually an
+ancestor. A **sliced** feature needs no flag: its per-slice `merged` flags already are the
+attestation. Full contract in `store/local.md` (`set_status`) and `docs/WORKFLOW.md`.
+
 **Each round is recorded.** Append **one line per round** to `progress/history.md`
 so the iteration is observable — e.g. `E0x-Fyy in-review → reject (round N)` and,
 on the final round, `E0x-Fyy in-review → approve`. The round counter lives only in
