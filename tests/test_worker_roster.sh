@@ -298,7 +298,15 @@ PEOF
   _probe unrecognized    'workers:\n  roster: yes\n'                disabled
   _probe wrong_case      'workers:\n  roster: True\n'               disabled
   _probe decoy_section   'ci:\n  roster: true\nworkers:\n  roster: false\n' disabled
+  # A `#` inside a QUOTED scalar is part of the value, not a comment: `"true#disabled"` is a
+  # valid YAML string and an unrecognized value, so R2 keeps the gate OFF. Comment-stripping
+  # that ignores quoting truncates it to `true` and turns the roster ON.
+  _probe quoted_hash     'workers:\n  roster: "true#disabled"\n'    disabled
   _probe literal_true    'workers:\n  roster: true\n'               enabled
+  # …and the two enabling forms the quote-aware parse must NOT regress: a genuine trailing
+  # comment is still stripped, and a quoted `true` still enables.
+  _probe trailing_comment 'workers:\n  roster: true  # opt in\n'     enabled
+  _probe quoted_true     'workers:\n  roster: "true"\n'             enabled
   # A config file that does not exist at all is the pre-install state; it must be OFF too.
   rm -rf "$T/gate-nofile"; mkdir -p "$T/gate-nofile"
   [ "$(sh "$T/gate-probe.sh" "$T/gatefns.sh" "$T/gate-nofile")" = "disabled" ] \

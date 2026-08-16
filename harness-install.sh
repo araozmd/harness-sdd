@@ -889,6 +889,12 @@ pr_loop_enabled() {
 # file does not exist. Section-scoped exactly like _cfg_pr_loop_value, so a same-named key
 # nested under ANOTHER section can never change roster behavior. Commented example lines
 # never match — the `#` precedes the key.
+#
+# A `#` INSIDE a quoted scalar is part of the value, not the start of a comment (YAML says
+# so). Stripping `#.*$` unconditionally would reduce `roster: "true#disabled"` — a valid but
+# unrecognized value that R2 requires to stay OFF — to the literal `true` and turn the gate
+# ON. So a quoted value is closed at its own quote and never comment-stripped, while an
+# unquoted one still loses a genuine trailing `# comment`.
 _cfg_workers_value() {
   [ -f "$1" ] || return 0
   awk -v k="$2" '
@@ -896,8 +902,11 @@ _cfg_workers_value() {
     /^workers:[[:space:]]*(#.*)?$/ { w=1; next }
     w && /^[^[:space:]#]/ { w=0 }
     w && $0 ~ re {
-      sub(/^[[:space:]]+[^:]*:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
-      gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+      sub(/^[[:space:]]+[^:]*:[[:space:]]*/, "")
+      if ($0 ~ /^"/)            { sub(/^"/, ""); sub(/".*$/, "") }
+      else if ($0 ~ /^'\''/)    { sub(/^'\''/, ""); sub(/'\''.*$/, "") }
+      else                      { sub(/[[:space:]]*#.*$/, "") }
+      print; exit
     }
   ' "$1"
 }
