@@ -38,6 +38,62 @@ as a requirements source — the spec's Context section corrects a false premise
   unchanged; `tests/test_install.sh` gained only the two additive assertions the plan lists.
 - No R-id renumbered.
 
+## Mutation campaign — 27 mutations, 27 killed
+
+Run in a detached `git worktree` at the committed tip, under
+`scratchpad/E17-F04-builder/` (namespaced per `agents/builder.md`). Free disk on the repo
+volume: **424 GB before, 424 GB after** — no mass-failure run, no ENOSPC.
+
+Every mutation broke exactly one production rule a new assertion claims to protect. The
+runner asserts its anchor matches **exactly once** before applying, restores the file from
+git after each, and every mutation applied cleanly (no PARSE-FAIL, no NOT-APPLIED).
+
+| # | what was broken | killed by |
+|---|---|---|
+| M1 | `write_worker_roster` never called | R1 |
+| M2 | gate accepts any non-empty value | R2 truth table (`explicit_false`) |
+| M3 | the gate also drops a second artifact | R2 inventory delta |
+| M4 | reclamation does not remove | R3 |
+| M5 | reclamation is silent | R3 |
+| M6 | `"schema": "1"` (string) | R4 |
+| M7 | entries emitted alphabetically, not in `AGENT_KEYS` order | R5 |
+| M8 | **the `path` field reintroduced** | R5 field-set equality |
+| M9 | `command` echoes the key | R5 (`agy`) |
+| M10 | **the `agent_selected` filter copied from `write_escalation_arming`** | R5 unselected |
+| M11 | presence never checked | R6 |
+| M12 | a fourth tag in `capability_vocabulary` | R4/R7 closed |
+| M13 | a tag outside the vocabulary on every entry | R4/R7 closed |
+| M14 | `harness-selected` true for every rostered key | R5 unselected / R7 evidence |
+| M15 | `host-detectable` claimed unconditionally | R7 evidence |
+| M16 | an **unverified** `non-interactive` claim shipped for `gemini` | R7 evidence |
+| M17 | capabilities unsorted | R7/R9 |
+| M18 | `harness-selected` derived from a **write outcome** | R7 refused-write |
+| M19 | **a rostered CLI executed** (`--version`) | R8 witness |
+| M20 | per-run content in the file | R9 byte-identity |
+| M21 | existing roster kept instead of overwritten | R10 |
+| M22 | `workers.json` dropped from `_ignores` | R11 + `test_install.sh` |
+| M23 | symlink guard removed | R12 |
+| M24 | gate checked **before** the symlink guard | R12 gate-off control |
+| M25 | trailing comma after the last entry | `roster_is_valid_json` |
+| M26 | reclaim-on-empty (the `write_escalation_arming` behavior) | `roster_is_valid_json` empty half |
+| M27 | migrated `workers:` block drifts from the seeded one | `test_install.sh` convergence |
+
+**One mutation appeared to survive and did not.** M18's first form *added* a
+`write_worker_roster` call ahead of the unstamped-ledger teardown without removing the §6c
+one — so the original call re-ran after the ledger was gone and overwrote the mutated
+output. That is a defective mutation, not a surviving one: the diagnosis was that the
+mutation had not applied as intended, and confirming it required checking that the mechanism
+the mutation described was the mechanism that actually ran. With the setup corrected (move
+the call, remove the original), M18 is **KILLED** by
+`R7_selected_tag_survives_a_refused_write` with the message that names the rule.
+
+**Re-attribution pass.** Four mutations (M11, M21, M22, M25) were first killed by an
+*earlier* case, because `fail()` aborts the suite. A kill by an unrelated assertion does not
+prove the named case protects the rule, so each was re-run with every other case's
+invocation neutralised. All four are killed by the case that **names** the rule, with the
+right message — and the five isolated suites all **pass** unmutated, so the isolation itself
+is not what made them fail.
+
 ## Notes for the Reviewer
 
 - `worker_roster_enabled` is deliberately **config-only** — there is no
