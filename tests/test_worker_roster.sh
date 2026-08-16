@@ -323,6 +323,10 @@ PEOF
   # permitted always-present items are a LINE INSIDE .harness/.gitignore and a KEY INSIDE
   # harness.config.yaml, neither of which is a roster-NAMED path, so a correct gate-off
   # install leaves no `*worker*` file or directory anywhere in the target.
+  # The precondition is precisely "THE INSTALLER creates no worker-named path" — not "nothing
+  # ever does". /sdd-pr-loop writes a `<round_dir>/worker` file into a target, but only at
+  # AGENT RUNTIME, so it cannot reach a fixture that only ever runs the installer. Do not
+  # relax this sweep on account of that path; a red here is the installer, and is real.
   _stray="$(find "$_off" -iname '*worker*' | LC_ALL=C sort | tr '\n' ' ')"
   [ -z "$_stray" ] \
     || fail "R2: the roster gate is off but the target carries roster-named artifacts: $_stray — with the gate off the installer may add exactly the workers.roster config key and the .gitignore line, both of which live INSIDE an existing file"
