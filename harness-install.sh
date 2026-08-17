@@ -1,8 +1,8 @@
 #!/bin/sh
 # harness-install.sh — install or upgrade the agent harness into a target repo.
 #
-#   ./harness-install.sh [--agents=<csv>] [--builder-backend=<value>] [--pr-loop=<true|false>] [--with-opencode-parallel=<true|false>] <target-repo-path>
-#   ./harness-install.sh --umbrella <umbrella-dir> [--shared-repo] [--recursive] [--dry-run|--list]
+#   ./harness-install.sh [--agents=<csv>] [--builder-backend=<value>] [--pr-loop=<true|false>] [--with-opencode-parallel=<true|false>] [--thin|--standalone] <target-repo-path>
+#   ./harness-install.sh --umbrella <umbrella-dir> [--shared-repo] [--recursive] [--thin] [--dry-run|--list]
 #
 # Idempotent: run once to install, re-run to upgrade.
 #
@@ -87,6 +87,27 @@
 # and auto-populates umbrella.manifest.yaml. Single-target mode (no --umbrella) is
 # unchanged. Pass --dry-run (alias --list) with --umbrella to preview exactly which
 # coordinator + git children would be touched, writing nothing.
+#
+# Body layout (--thin / --standalone, E24-F04, see docs/UMBRELLA.md → "Migrating an
+# existing child"). A child of an umbrella holds its prose tier either as a full local copy
+# or as pointer stubs resolved from umbrella.root (E24-F03 / ADR-0004). These two flags are
+# the ONLY way to move a target between those layouts; neither is ever implied.
+#   --thin        one-time consent to CONVERT a full-copy child to the thin layout. The
+#                 conversion is pristine-only and all-or-nothing: every prose-tier path must
+#                 be byte-identical to the umbrella's copy of the same relative path, or
+#                 nothing in that target converts and every differing path is named. Once a
+#                 child IS thin, every later run keeps it thin with no flag and no prompt —
+#                 the flag is consent per child, not a permanent ceremony. Without it, a run
+#                 against a full-copy child REPORTS whether it would convert and converts
+#                 nothing. Valid in single-target and umbrella mode. A target that records no
+#                 umbrella.root has nothing to resolve, so the flag is inert and silent there;
+#                 a recorded root that does not resolve warns and keeps the full copy, and
+#                 never fails the install.
+#   --standalone  the reverse, and the documented way back: re-materialise the full prose
+#                 body from THIS installer's source over a thin target's stubs, and clear that
+#                 target's umbrella.root. Single-target only; rejected with --umbrella and
+#                 with --thin, before anything is written. It is not a permanent opt-out —
+#                 a later explicit --thin run converts the target again.
 #
 # Shared spec repository (--shared-repo, umbrella mode only, see docs/UMBRELLA.md):
 # OPT-IN. After the cascade, make the umbrella ROOT its own git repo that tracks the
@@ -757,6 +778,88 @@ gen_body_stub() {
     printf 'all still work here — only the prose body is remote. To materialise a full local\n'
     printf 'copy, run the harness installer against this repository.\n'
   } > "$_gbs_dest"
+}
+
+# prose_tier_blockers <harness-dir> <umbrella-body-dir> — print one HARNESS-DIR-RELATIVE
+# path per prose-tier path that BLOCKS converting <harness-dir> to the thin layout; print
+# NOTHING when the whole tier is convertible. E24-F04 R1/R2/R3.
+#
+# THE REFERENCE IS THE UMBRELLA BODY'S COPY, NOT $SRC. The question a conversion asks is
+# "if I drop this content and point at the umbrella, does the child lose anything?", and the
+# umbrella's copy is the thing the stub will name. In a cascade the two happen to coincide
+# (install_one "$UMB" runs before the child loop); a single-target --thin run in a child
+# proves they are not the same reference.
+#
+# CALL `diff`, DO NOT WALK THE TREES. The predicate needed is "are these two trees
+# identical", which is `diff -r`'s exit status. stub_tree is the precedent AND the scar:
+# reimplementing `cp -R`'s traversal in POSIX sh cost four blocking findings, one per
+# filesystem shape, and was fixed by calling the tool and post-processing its result.
+#
+# `-q` IS MANDATORY, NOT AN OPTIMISATION. Two HARNESS_BODY_PROSE entries are regular files,
+# not directories: `AGENTS.md` and `specs/glossary.md`. `diff -r` on two REGULAR FILES prints
+# the hunks and no filename at all, so without `-q` those two entries could never be named
+# and R3 would be satisfiable only by a fixture that happens to edit an `agents/*.md`.
+#
+# FAIL CLOSED. Where byte-identity cannot be ESTABLISHED — a path present on one side only,
+# an entry missing outright, `diff` absent from PATH, output this function cannot parse —
+# the entry BLOCKS. Absence of evidence of an edit is not evidence of its absence. A
+# child-local extra file inside the prose tier is the sharpest case: stub_tree begins with
+# `rm -rf` + `cp -R "$SRC/<rel>"`, so a conversion would DELETE it.
+prose_tier_blockers() {
+  _ptb_h="$1"; _ptb_u="$2"
+  # Defence in depth, deliberately not claimed as tested: a portable fixture cannot remove
+  # `diff` from PATH without also removing it from the harness running the test.
+  if ! command -v diff >/dev/null 2>&1; then
+    for _ptb_rel in $HARNESS_BODY_PROSE; do
+      printf '%s (no `diff` on PATH — byte-identity cannot be established)\n' "$_ptb_rel"
+    done
+    return 0
+  fi
+  for _ptb_rel in $HARNESS_BODY_PROSE; do
+    _ptb_a="$_ptb_h/$_ptb_rel"
+    _ptb_b="$_ptb_u/$_ptb_rel"
+    # A WHOLE entry absent on one side is diff's exit 2 with its message on STDERR, so a
+    # stdout-only capture would name nothing. Answer it here, where the path is in hand.
+    if [ ! -e "$_ptb_a" ] || [ ! -e "$_ptb_b" ]; then
+      printf '%s\n' "$_ptb_rel"
+      continue
+    fi
+    # CAPTURE INSIDE AN `if`. This script runs under `set -eu` and `diff` exits non-zero
+    # in exactly the case this feature exists for, so a bare `_out="$(diff -rq A B)"` would
+    # kill the run the moment a child differs.
+    if _ptb_out="$(diff -rq "$_ptb_a" "$_ptb_b" 2>&1)"; then
+      continue
+    fi
+    printf '%s\n' "$_ptb_out" | while IFS= read -r _ptb_line; do
+      [ -n "$_ptb_line" ] || continue
+      case "$_ptb_line" in
+        # `Only in <dir>: <name>` CARRIES THE DIRECTORY AND THE BASENAME SEPARATELY — the
+        # joined path never appears in it, so this form MUST be normalised or R3's
+        # "name every differing path" is unsatisfiable.
+        "Only in "*": "*)
+          _ptb_d="${_ptb_line#Only in }"
+          _ptb_n="${_ptb_d#*: }"
+          _ptb_d="${_ptb_d%%: *}"
+          _ptb_p="$_ptb_d/$_ptb_n"
+          ;;
+        # `Files <a> and <b> differ` already carries a full path; take the child's side.
+        "Files "*" and "*" differ")
+          _ptb_p="${_ptb_line#Files }"
+          _ptb_p="${_ptb_p%% and *}"
+          ;;
+        # Anything else (a file-vs-directory clash, a diff error) is still a blocker, and
+        # the line still has to carry the path — so synthesise it from the tier entry.
+        *)
+          _ptb_p="$_ptb_a"
+          ;;
+      esac
+      case "$_ptb_p" in
+        "$_ptb_h"/*) printf '%s\n' "${_ptb_p#"$_ptb_h"/}" ;;
+        "$_ptb_u"/*) printf '%s\n' "${_ptb_p#"$_ptb_u"/}" ;;
+        *)           printf '%s\n' "$_ptb_rel" ;;
+      esac
+    done
+  done
 }
 
 # child_is_full_copy <harness-dir> — true when this target already holds REAL prose-tier
@@ -2451,21 +2554,80 @@ install_one() {
   # tools/ and parses store/; a pointer is not a schema (ADR-0004).
   for _body_rel in $HARNESS_BODY_LOCAL; do copy "$_body_rel"; done
 
-  # The PROSE tier is stubbed only for a child that resolves an umbrella AND is not
-  # already carrying a real body. Otherwise it is copied, exactly as before — which is
-  # every single-repo install, and every already-installed child (R9: converting one is
-  # destructive and belongs to E24-F04, not to a routine re-run).
+  # The PROSE tier: a four-way branch over ONE question — which layout does this target end
+  # this run in? (E24-F03 shipped the first two arms; E24-F04 the last two.)
+  #
+  # THE ORDERING IS LOAD-BEARING AND MUST NOT CHANGE. prose_tier_blockers reads the target's
+  # ON-DISK prose tier, and §1 has not written to it yet — HARNESS_BODY_LOCAL is copied
+  # first, the prose tier last. Moving the check after the copy compares the installer
+  # against itself and yields a green, meaningless "always convertible".
   _umb_body="$(umbrella_body_dir "$H")"
   _umb_root_cfg="${HARNESS_UMBRELLA_ROOT:-$(_cfg_umbrella_root_value "$H/harness.config.yaml")}"
   BODY_LAYOUT=full
-  if [ -n "$_umb_body" ] && ! child_is_full_copy "$H"; then
+  if [ "$STANDALONE" = 1 ]; then
+    # (1) --standalone (R9, R11): the ORDINARY full-copy branch, unconditionally, whatever
+    # umbrella_body_dir says. No new copy path exists or is needed — the full-copy path has
+    # always materialised the whole body from $SRC, so a --standalone run from a newer
+    # installer correctly lands the newer body, and a target that was ALREADY full-copy
+    # takes this same branch and comes out the same way.
+    for _body_rel in $HARNESS_BODY_PROSE; do copy "$_body_rel"; done
+    ok "prose body materialised locally from this installer (--standalone; umbrella.root cleared below)"
+  elif [ -n "$_umb_body" ] && ! child_is_full_copy "$H"; then
+    # (2) E24-F03's maintenance branch — a target that IS thin stays thin. DELIBERATELY
+    # REACHABLE WITH NO FLAG (R5): the layout on disk carries the consent that --thin gave
+    # once, so gating this arm behind THIN_OPT_IN would un-thin every existing child on the
+    # next unflagged cascade. A --thin run against an already-thin child lands HERE, never
+    # in arm (3), which is what makes R7 (idempotence) hold by construction: gen_body_stub's
+    # text depends only on the body-relative path and the configured umbrella root.
     BODY_LAYOUT=thin
     for _body_rel in $HARNESS_BODY_PROSE; do stub_tree "$_body_rel" "$_umb_root_cfg"; done
     ok "prose body resolved from the umbrella at $_umb_root_cfg (stubs; init.sh, store/, tools/ stay local)"
+  elif [ -n "$_umb_body" ]; then
+    # (3) A FULL-COPY child of a reachable umbrella — the state E24-F03 left alone and this
+    # feature migrates. Compute the blockers IDENTICALLY whether or not the flag was passed,
+    # so the preview can never diverge from the action it previews.
+    _f04_blockers="$(prose_tier_blockers "$H" "$_umb_body")"
+    if [ -z "$_f04_blockers" ] && [ "$THIN_OPT_IN" = 1 ]; then
+      # Converted. stub_tree is REUSED VERBATIM: a converted child has to be
+      # byte-indistinguishable from a fresh thin one, and the only way to guarantee that is
+      # to run the same function. BODY_LAYOUT=thin is what makes manifest.txt record it (R8).
+      BODY_LAYOUT=thin
+      for _body_rel in $HARNESS_BODY_PROSE; do stub_tree "$_body_rel" "$_umb_root_cfg"; done
+      ok "child already holds a full body — CONVERTED to the thin layout (--thin): its prose tier now resolves from the umbrella at $_umb_root_cfg"
+    else
+      for _body_rel in $HARNESS_BODY_PROSE; do copy "$_body_rel"; done
+      if [ -n "$_f04_blockers" ]; then
+        # ALL-OR-NOTHING (R2), and every blocking path is named (R3). Identical content with
+        # and without the flag — only the verb differs.
+        if [ "$THIN_OPT_IN" = 1 ]; then
+          info "child already holds a full body — NOT converted to the thin layout: these prose-tier paths differ from the umbrella's copy"
+        else
+          info "child already holds a full body — it would NOT convert to the thin layout: these prose-tier paths differ from the umbrella's copy"
+        fi
+        printf '%s\n' "$_f04_blockers" | while IFS= read -r _f04_b; do
+          [ -n "$_f04_b" ] || continue
+          info "  differs: $_f04_b"
+        done
+        # Naming a path the operator can no longer read without saying where it went is
+        # worse than not naming it: the full-copy branch re-installs the whole prose tier
+        # from source on EVERY run and always has, on both branches.
+        info "  those paths were re-installed from source by this run, as every install of this tier does — 'git diff' in this repository still shows what they held"
+      else
+        info "child already holds a full body — it WOULD convert to the thin layout; re-run with --thin to convert it"
+      fi
+    fi
   else
+    # (4) No umbrella body resolves ⇒ the full local copy, which is every single-repo
+    # install and every coordinator.
     for _body_rel in $HARNESS_BODY_PROSE; do copy "$_body_rel"; done
-    if [ -n "$_umb_body" ]; then
-      info "child already holds a full body — left as-is (converting it is E24-F04)"
+    # R6: a RECORDED umbrella.root that does not resolve is the one case worth a word. With
+    # nothing to compare against, byte-identity cannot be established, so nothing converts —
+    # and this is a warning, never an install failure: a child entered on its own is a
+    # supported state (E24-F03). Silent when NO umbrella.root is recorded at all: a
+    # coordinator and a single-repo target are not children, and a warning that fires on
+    # every cascade's coordinator trains people to ignore the one that matters.
+    if [ "$THIN_OPT_IN" = 1 ] && [ -n "$_umb_root_cfg" ]; then
+      echo "⚠️  --thin: umbrella.root is recorded ($_umb_root_cfg) but does not resolve to an installed harness body — nothing converted, this target keeps its full local body" >&2
     fi
   fi
   chmod +x "$H/init.sh" 2>/dev/null || true
@@ -2519,7 +2681,23 @@ install_one() {
   # single-target re-run in that child, and `init.sh`'s report, both read it from here
   # with no env var in sight. Skipped entirely when the value already matches, so an
   # ordinary re-run leaves the file byte-identical.
-  if [ -n "${HARNESS_UMBRELLA_ROOT:-}" ]; then
+  #
+  # --standalone CLEARS it (E24-F04 R10). `umbrella.root` means exactly one thing — resolve
+  # my prose body from here — and after --standalone that statement is false, so leaving the
+  # key set records a relationship that no longer holds and init.sh keeps reporting a linkage
+  # that governs nothing. It costs nothing structurally: umbrella MEMBERSHIP comes from the
+  # cascade's directory discovery and umbrella.manifest.yaml, so a detached child keeps its
+  # manifest entry, its slices and its dispatch. It is NOT a permanent opt-out — the shipped
+  # config seeds `root: ""`, so "cleared" is indistinguishable from "never set", and a later
+  # explicit --thin run converts the target again. Durability comes from the LAYOUT.
+  # Same skip-when-it-already-matches discipline as the record path, so a re-run of
+  # --standalone on an already-detached target leaves the file byte-identical.
+  if [ "$STANDALONE" = 1 ]; then
+    if [ -n "$(_cfg_umbrella_root_value "$H/harness.config.yaml")" ]; then
+      set_umbrella_root "$H/harness.config.yaml" ""
+      info "cleared umbrella.root (--standalone) — this target now carries its own full prose body"
+    fi
+  elif [ -n "${HARNESS_UMBRELLA_ROOT:-}" ]; then
     if [ "$(_cfg_umbrella_root_value "$H/harness.config.yaml")" != "$HARNESS_UMBRELLA_ROOT" ]; then
       set_umbrella_root "$H/harness.config.yaml" "$HARNESS_UMBRELLA_ROOT"
       info "recorded umbrella.root: $HARNESS_UMBRELLA_ROOT"
@@ -2876,16 +3054,25 @@ MODEL ROUTING:
   inherited or unpinned roles omit model, while concrete pins add it role by role. Codex
   role replacement/reclamation requires a matching last-written ownership stamp.
 
-BODY LAYOUT  (E24-F03 / ADR-0004):
+BODY LAYOUT  (E24-F03 + E24-F04 / ADR-0004):
   This target holds the ${BODY_LAYOUT} body layout.
   full  every body path is a local copy — single-repo installs, and every child that
-        already carried a full body when this ran (converting one is destructive and
-        is E24-F04, never a side effect of a re-run).
+        already carried a full body when this ran.
   thin  the PROSE tier is pointer stubs resolved from umbrella.root; the PROGRAM tier
         is still a local copy, because init.sh execs and parses it.
     prose (stub-able) : AGENTS.md agents/ docs/ specs/_templates/ specs/glossary.md
     program (local)   : init.sh store/ tools/ + the example files an operator copies from
   Every generated front-end glue file is PROGRAM tier and always local.
+  Moving between the two layouts is ALWAYS an explicit request — never a side effect:
+    full -> thin   re-run the installer with --thin (once per child; after that the thin
+                   layout is maintained with no flag). The conversion is pristine-only and
+                   all-or-nothing: every prose-tier path must be byte-identical to the
+                   umbrella's copy, or nothing converts and every differing path is named.
+                   Without the flag the run REPORTS whether it would convert and converts
+                   nothing. See docs/UMBRELLA.md -> "Migrating an existing child".
+    thin -> full   re-run the installer with --standalone: the full prose body is
+                   materialised from that installer's own source and umbrella.root is
+                   cleared. That is the documented way back for a child being detached.
 
 PROJECT-OWNED  (seeded once, never clobbered on upgrade):
   .harness/harness.config.yaml   (verification commands + store backend + change_size budget)
@@ -5841,6 +6028,13 @@ RECURSIVE=0
 DRY_RUN=0
 SHARED_REPO=0
 POSITIONAL=""
+# ── E24-F04: the two layout flags ────────────────────────────────────────────────────
+# THE FLAG DECIDES WHETHER TO ACT, NEVER WHAT TO COMPUTE. `prose_tier_blockers` runs at the
+# same point over the same inputs whether or not --thin was passed; the flag only chooses
+# between "convert" and "report what would have happened". One code path, so the preview
+# cannot diverge from the action it previews — which is the whole value of the preview.
+THIN_OPT_IN=0
+STANDALONE=0
 # Diagnostic only (E19-F01): report what `--agents=host` WOULD resolve to for a target,
 # then exit 0 without touching anything. Single-target mode only.
 PRINT_AGENTS=0
@@ -5931,6 +6125,20 @@ while [ "$#" -gt 0 ]; do
       UMBRELLA="$2"
       shift 2
       ;;
+    --thin)
+      # One-time consent to convert a FULL-COPY child of a reachable umbrella to the thin
+      # layout (E24-F04 R1). Never implied, never remembered as a flag: after the first
+      # conversion the LAYOUT ON DISK carries the consent, and the F03 maintenance branch
+      # keeps it thin unflagged.
+      THIN_OPT_IN=1
+      shift
+      ;;
+    --standalone)
+      # The reverse (E24-F04 R9/R10): re-materialise the full prose body from this
+      # installer's source and clear umbrella.root. Single-target only.
+      STANDALONE=1
+      shift
+      ;;
     --shared-repo)
       # Opt-in: version-control the umbrella root (git init + ignore product children).
       # Umbrella mode only; validated below. See docs/UMBRELLA.md "Shared spec repository".
@@ -5985,6 +6193,19 @@ case "${OPENCODE_PARALLEL_OVERRIDE:-}" in
   ""|true|false) ;;
   *) die "unknown --with-opencode-parallel value '$OPENCODE_PARALLEL_OVERRIDE' — legal values are 'true' and 'false'" ;;
 esac
+
+# Same place, same reason, for the two layout flags (E24-F04 R12): a contradictory
+# combination aborts non-zero HERE — after the parse loop, before target resolution, before
+# umbrella discovery and before any install_one — so nothing anywhere has been created or
+# modified when it fires. `--standalone` names ONE target and re-materialises its body;
+# "re-materialise every child of the umbrella" is not a request anyone has made, and
+# `--standalone --thin` asks for the two opposite layouts in a single run.
+if [ "$STANDALONE" = 1 ]; then
+  [ -z "$UMBRELLA" ] \
+    || die "--standalone is single-target only — it re-materialises ONE target's body; not valid with --umbrella"
+  [ "$THIN_OPT_IN" = 0 ] \
+    || die "--standalone and --thin ask for opposite body layouts — pass at most one"
+fi
 
 # ── single-target mode (no --umbrella): behave exactly as before ──────────────
 if [ -z "$UMBRELLA" ]; then

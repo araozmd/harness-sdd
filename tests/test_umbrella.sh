@@ -1287,4 +1287,368 @@ printf '%s' "$F13Q_OUT" | grep -qF 'umbrella at /nonexistent/plain is not reacha
   || fail "E99-F13/unquoted: an unquoted root stopped honouring its trailing comment: $F13Q_OUT"
 pass "E99-F13 unquoted_root_still_strips_trailing_comment"
 
+# ══ E24-F04 — migrate existing children to the thin layout (+ --standalone) ════════════
+# The DESTRUCTIVE half of ADR-0004: replacing a prose tier with pointer stubs in a repo
+# that already exists. Every case below builds a REAL full-copy child of a REAL reachable
+# umbrella and reads what the installer did to it on disk.
+#
+# The whole prose tier, swept — never sampled. R2's claim is about the paths the operator
+# did NOT edit, so "no path in the tier became a stub" has to be a sweep of the tree.
+F04_TIER='AGENTS.md agents docs specs/_templates specs/glossary.md'
+
+# f04_no_stub_in_tier <harness-dir> <context> — fail if ANY file under the prose tier is a
+# stub. The predicate is "line 1 IS the sentinel" (is_stub), matching E24-F03's control.
+f04_no_stub_in_tier() {
+  _fn_h="$1"; _fn_ctx="$2"; _fn_n=0
+  for _fn_rel in $F04_TIER; do
+    [ -e "$_fn_h/$_fn_rel" ] || fail "$_fn_ctx: prose-tier path $_fn_rel is missing entirely"
+    for _fn_f in $(find "$_fn_h/$_fn_rel" -type f); do
+      is_stub "$_fn_f" && { echo "   unexpected stub: $_fn_f" >&2; _fn_n=$((_fn_n + 1)); }
+    done
+  done
+  [ "$_fn_n" = "0" ] || fail "$_fn_ctx: $_fn_n prose-tier path(s) were converted to stubs"
+}
+
+# f04_all_stubs_in_tier <harness-dir> <context> — the converse sweep.
+f04_all_stubs_in_tier() {
+  _fa_h="$1"; _fa_ctx="$2"; _fa_n=0
+  for _fa_rel in $F04_TIER; do
+    [ -e "$_fa_h/$_fa_rel" ] || fail "$_fa_ctx: prose-tier path $_fa_rel is missing entirely"
+    for _fa_f in $(find "$_fa_h/$_fa_rel" -type f); do
+      is_stub "$_fa_f" || { echo "   not a stub: $_fa_f" >&2; _fa_n=$((_fa_n + 1)); }
+    done
+  done
+  [ "$_fa_n" = "0" ] || fail "$_fa_ctx: $_fa_n prose-tier path(s) are still full body files"
+}
+
+# f04_phys <dir> — the PHYSICAL path of <dir>. The cascade resolves the umbrella with
+# `pwd -P` before installing, so every path it prints is physical while `mktemp -d` hands
+# this suite the symlinked form (/var/... vs /private/var/... on macOS). Matching the
+# logical path against the installer's output silently matches nothing.
+f04_phys() { ( CDPATH= cd -- "$1" && pwd -P ); }
+
+# f04_seg <output> <target-path> — the slice of a cascade's output belonging to ONE target,
+# from that target's `harness install … → <path>` banner up to the next banner.
+#
+# WITHOUT THIS, a per-child assertion in a multi-child cascade is satisfied by ANY child's
+# line: "the preview line is present" would pass while it was printed for the wrong repo.
+# The leading space in the match is what keeps `…/kid` from matching `…/freshkid`.
+f04_seg() {
+  _fs_t="$(f04_phys "$2")"
+  printf '%s\n' "$1" | awk -v t=" $_fs_t" '
+    index($0, "harness install v") > 0 { k = (index($0, t) > 0); next }
+    k
+  '
+}
+
+# f04_fullchild <umbrella-dir> <child> — a FULL-COPY child of a REACHABLE umbrella, built
+# the way the product builds one:
+#   1. SINGLE-TARGET FIRST — no umbrella.root is ever written, so the child gets the
+#      complete local body.
+#   2. THEN the cascade — which records umbrella.root and, per E24-F03 R9, leaves the full
+#      body alone.
+#
+# DO NOT INVERT THOSE TWO STEPS. Cascading first and re-installing single-target does NOT
+# produce a full-copy child: umbrella_body_dir prefers HARNESS_UMBRELLA_ROOT but falls back
+# to the CHILD'S OWN config, which §2a has already persisted — so the single-target run
+# resolves the umbrella and re-stubs. And "fixing" that by hand-editing the child's config
+# replaces the product's own state machine with a fixture.
+f04_fullchild() {
+  _fc_u="$1"; _fc_c="$2"
+  mk_umb "$_fc_u" "$_fc_c"
+  CODEX_HOME="$_fc_u/.ch" HOME="$_fc_u/.home" \
+    sh "$SRC/harness-install.sh" --agents=claude "$_fc_u/$_fc_c" >/dev/null 2>&1 \
+    || fail "F04 fixture: single-target install into $_fc_u/$_fc_c failed"
+  cascade "$_fc_u"
+  # PRECONDITION, re-asserted on every fixture: a conversion test whose fixture was never
+  # full-copy proves nothing at all.
+  f04_no_stub_in_tier "$_fc_u/$_fc_c/.harness" "F04 fixture ($_fc_c)"
+  grep -qF 'You are the **Builder**' "$_fc_u/$_fc_c/.harness/agents/builder.md" \
+    || fail "F04 fixture: $_fc_c/.harness/agents/builder.md is not the real body"
+  grep -q '^  root: "\.\./\.\./"' "$_fc_u/$_fc_c/.harness/harness.config.yaml" \
+    || fail "F04 fixture: umbrella.root was not recorded on $_fc_c"
+  [ -f "$_fc_u/.harness/.harness-version" ] \
+    || fail "F04 fixture: the umbrella body under $_fc_u is not installed"
+}
+
+# ── R1: --thin converts a pristine full-copy child ─────────────────────────────────────
+# thin_converts_pristine_child / converted_equals_fresh_thin / thin_leaves_coordinator_full
+F04A="$AU/f04a"
+f04_fullchild "$F04A" kid
+# A never-installed sibling in the SAME umbrella: the fresh-thin CONTROL R1's equality claim
+# is measured against. "Contains the sentinel" is satisfiable by a body that was never
+# written; "identical to what a fresh thin install produces" is not — and it is the
+# requirement.
+mk_umb "$F04A" freshkid
+cascade "$F04A" --thin
+KID="$F04A/kid/.harness"
+FRESH="$F04A/freshkid/.harness"
+
+f04_all_stubs_in_tier "$KID" "R1"
+for _p in $LOCAL_TIER; do
+  [ -f "$KID/$_p" ] || fail "R1: program-tier $_p vanished from the converted child"
+  is_stub "$KID/$_p" && fail "R1: the conversion stubbed program-tier $_p — init.sh parses it"
+done
+printf '%s' "$(f04_seg "$AU_OUT" "$F04A/kid")" | grep -q 'CONVERTED to the thin layout' \
+  || fail "R1: the converted child's own output slice never reported the conversion: $AU_OUT"
+pass "R1 thin_converts_pristine_child — --thin converts a pristine full-copy child's whole prose tier"
+
+for _p in $F04_TIER; do
+  diff -r "$KID/$_p" "$FRESH/$_p" >/dev/null 2>&1 \
+    || fail "R1: converted $_p differs from a FRESHLY cascaded thin child's — a converted child must be byte-indistinguishable from a fresh one"
+done
+# Control: the two children really are distinct installs, so the comparison is not a path
+# compared with itself.
+[ "$KID" != "$FRESH" ] || fail "R1 control: the fixture compared one child with itself"
+is_stub "$FRESH/agents/builder.md" \
+  || fail "R1 control: the fresh-thin comparand is not thin — the equality assertion is vacuous"
+pass "R1 converted_equals_fresh_thin — the converted tier is byte-identical to a fresh thin child's"
+
+f04_no_stub_in_tier "$F04A/.harness" "R1 coordinator"
+grep -q 'This target holds the full body layout' "$F04A/.harness/manifest.txt" \
+  || fail "R1: the coordinator's manifest stopped reporting the full layout under --thin"
+pass "R1 thin_leaves_coordinator_full — --thin never converts the coordinator"
+
+grep -q 'This target holds the thin body layout' "$KID/manifest.txt" \
+  || fail "R8: a converted child's manifest does not record the thin layout"
+pass "R8 converted_manifest_says_thin"
+
+# ── R5: an already-thin child stays thin with NO flag ──────────────────────────────────
+# thin_maintained_without_flag — the regression lock on E24-F03's maintenance branch. It
+# fails loudly if --thin is implemented by gating that branch behind the flag.
+cp "$KID/agents/builder.md" "$AU/f04a-stub.ref"
+cascade "$F04A"
+printf '%s\n' "$AU_OUT" | grep -F "harness install v" | grep -qF "$(f04_phys "$F04A/kid") " \
+  || fail "R5 control: the unflagged cascade never ran install_one for the thin child — everything below would prove nothing: $AU_OUT"
+f04_all_stubs_in_tier "$KID" "R5"
+cmp -s "$AU/f04a-stub.ref" "$KID/agents/builder.md" \
+  || fail "R5: an unflagged cascade rewrote an already-thin child's stub"
+grep -q 'This target holds the thin body layout' "$KID/manifest.txt" \
+  || fail "R5: an unflagged cascade moved an already-thin child out of the thin layout"
+pass "R5 thin_maintained_without_flag — an already-thin child stays thin with no flag"
+
+# ── R7: --thin on an already-thin child leaves every prose path byte-identical ──────────
+# thin_is_idempotent — asserted on BYTES CAPTURED BEFORE THE RUN, never on "the run said
+# nothing changed".
+F04AREF="$AU/f04a-tier.ref"
+mkdir -p "$F04AREF/specs"
+for _p in $F04_TIER; do cp -R "$KID/$_p" "$F04AREF/$_p"; done
+cascade "$F04A" --thin
+printf '%s\n' "$AU_OUT" | grep -F "harness install v" | grep -qF "$(f04_phys "$F04A/kid") " \
+  || fail "R7 control: the --thin cascade never ran install_one for the thin child: $AU_OUT"
+for _p in $F04_TIER; do
+  diff -r "$F04AREF/$_p" "$KID/$_p" >/dev/null 2>&1 \
+    || fail "R7: --thin against an already-thin child rewrote $_p"
+done
+pass "R7 thin_is_idempotent — --thin on a thin child leaves every prose path byte-identical"
+
+# ── R2/R3: one edited prose file blocks the WHOLE tier, and every blocker is named ──────
+# thin_all_or_nothing_on_edit / thin_names_every_blocker
+F04B="$AU/f04b"
+f04_fullchild "$F04B" edited
+# A PRISTINE sibling in the same umbrella and the same run. Without it, "nothing converted"
+# is equally explained by a --thin that does not work at all.
+f04_fullchild "$F04B" pristine
+printf '\nlocal edit\n' >> "$F04B/edited/.harness/agents/builder.md"
+printf '\nlocal edit\n' >> "$F04B/edited/.harness/docs/WORKFLOW.md"
+cascade "$F04B" --thin
+f04_no_stub_in_tier "$F04B/edited/.harness" "R2 (one edited file must block the WHOLE tier)"
+grep -q 'This target holds the full body layout' "$F04B/edited/.harness/manifest.txt" \
+  || fail "R2: a blocked child's manifest does not report the full layout"
+f04_all_stubs_in_tier "$F04B/pristine/.harness" "R2 control (the pristine sibling must convert in the same run)"
+pass "R2 thin_all_or_nothing_on_edit — one edited prose file leaves the whole tier unconverted"
+
+F04B_SEG="$(f04_seg "$AU_OUT" "$F04B/edited")"
+for _p in agents/builder.md docs/WORKFLOW.md; do
+  printf '%s\n' "$F04B_SEG" | grep -qF "differs: $_p" \
+    || fail "R3: the refusal did not name the differing path $_p: $F04B_SEG"
+done
+printf '%s\n' "$F04B_SEG" | grep -qF 'git diff' \
+  || fail "R3: the refusal names paths without saying that this run re-installed them from source: $F04B_SEG"
+# The pristine sibling must NOT be named as blocked — a report that fires for every child
+# would satisfy the two assertions above without discriminating anything.
+printf '%s\n' "$(f04_seg "$AU_OUT" "$F04B/pristine")" | grep -q 'differs: ' \
+  && fail "R3: the pristine sibling was reported as blocked"
+pass "R3 thin_names_every_blocker — both seeded differing paths are named, the pristine sibling is not"
+
+# ── R2/R3: the shapes `diff` will not hand over ────────────────────────────────────────
+# thin_extra_file_blocks / thin_blocker_paths_are_normalised
+#
+# THREE shapes, one fixture, because each defeats a different naive implementation:
+#   agents/extra-local.md   `Only in <dir>: <name>` — the JOINED path never appears in
+#                           diff's output, so it has to be built
+#   AGENTS.md               a REGULAR-FILE tier entry — `diff -r` on two files prints the
+#                           hunks and NO filename, so `-q` is what makes it nameable
+#   specs/_templates        a whole tier entry absent on one side — diff exits 2 with its
+#                           message on STDERR, so a stdout-only capture names nothing
+F04C="$AU/f04c"
+f04_fullchild "$F04C" extra
+KC4="$F04C/extra/.harness"
+printf 'a child-local note the umbrella does not have\n' > "$KC4/agents/extra-local.md"
+printf '\nlocally appended\n' >> "$KC4/AGENTS.md"
+rm -rf "$KC4/specs/_templates"
+cascade "$F04C" --thin
+f04_no_stub_in_tier "$KC4" "R2 (a child-only extra prose file must block the tier)"
+pass "R2 thin_extra_file_blocks — a path present on one side only blocks the conversion"
+
+F04C_SEG="$(f04_seg "$AU_OUT" "$F04C/extra")"
+for _p in agents/extra-local.md AGENTS.md specs/_templates; do
+  printf '%s\n' "$F04C_SEG" | grep -qF "differs: $_p" \
+    || fail "R3: the refusal did not name $_p as a tier-relative path — diff's own wording never contains it: $F04C_SEG"
+done
+# The blockers are TIER-RELATIVE, never diff's own absolute-path wording.
+printf '%s\n' "$F04C_SEG" | grep -q "differs: $(f04_phys "$KC4")" \
+  && fail "R3: a blocker was emitted as an absolute path instead of a tier-relative one: $F04C_SEG"
+pass "R3 thin_blocker_paths_are_normalised — Only-in, regular-file and missing-entry shapes all name the joined path"
+
+# ── R4: no --thin converts nothing, and says it would ──────────────────────────────────
+# unflagged_previews_only — the on-disk half is TRIVIALLY TRUE (it is today's shipped
+# behavior), so it is asserted for the record and the discriminating proof is the preview
+# line, in this child's OWN output slice, plus the mutation row.
+F04D="$AU/f04d"
+f04_fullchild "$F04D" kid
+mk_umb "$F04D" freshkid
+cascade "$F04D"
+f04_no_stub_in_tier "$F04D/kid/.harness" "R4 (an unflagged run must convert nothing)"
+F04D_SEG="$(f04_seg "$AU_OUT" "$F04D/kid")"
+printf '%s\n' "$F04D_SEG" | grep -q 'WOULD convert to the thin layout' \
+  || fail "R4: an unflagged run against a convertible full-copy child did not report that it would convert: $F04D_SEG"
+printf '%s\n' "$F04D_SEG" | grep -q '\-\-thin' \
+  || fail "R4: the preview does not name the flag that would perform the conversion: $F04D_SEG"
+# The fresh sibling is thin, not full-copy, so it must NOT carry the preview — otherwise
+# "the line is present" is reachable without the full-copy branch running at all.
+printf '%s\n' "$(f04_seg "$AU_OUT" "$F04D/freshkid")" | grep -q 'WOULD convert to the thin layout' \
+  && fail "R4: the preview fired for a child that is already thin"
+pass "R4 unflagged_previews_only — an unflagged run converts nothing and reports what it would convert"
+
+# ── R4: an unflagged run on a BLOCKED child names the same paths R3 names ──────────────
+# unflagged_preview_names_blockers — one code path, so the preview cannot drift from the
+# action it previews.
+printf '\nlocal edit\n' >> "$F04D/kid/.harness/agents/orchestrator.md"
+printf 'child-only\n' > "$F04D/kid/.harness/docs/LOCAL-NOTE.md"
+cascade "$F04D"
+F04D_SEG2="$(f04_seg "$AU_OUT" "$F04D/kid")"
+for _p in agents/orchestrator.md docs/LOCAL-NOTE.md; do
+  printf '%s\n' "$F04D_SEG2" | grep -qF "differs: $_p" \
+    || fail "R4: the UNFLAGGED preview did not name the blocking path $_p: $F04D_SEG2"
+done
+printf '%s\n' "$F04D_SEG2" | grep -q 'WOULD convert to the thin layout' \
+  && fail "R4: a blocked child was reported as convertible"
+f04_no_stub_in_tier "$F04D/kid/.harness" "R4 (blocked, unflagged)"
+pass "R4 unflagged_preview_names_blockers — the unflagged report names exactly the paths the flagged refusal does"
+
+# ── R6: --thin against an unreachable umbrella warns, converts nothing, exits 0 ─────────
+# thin_unreachable_umbrella_is_not_fatal
+#
+# "MOVE THE UMBRELLA" DOES NOT PRODUCE AN UNREACHABLE UMBRELLA: the cascade records a
+# RELATIVE root (`../../`), so renaming the umbrella dir moves the child with it and the
+# root still resolves — the case would quietly exercise the ordinary path. What actually
+# breaks resolution while leaving a non-empty umbrella.root is removing the umbrella's
+# installed-body marker.
+#
+# The fixture starts as a FULL-COPY child of a REACHABLE umbrella. Starting from an
+# already-thin child is the trap: the copy branch re-materialises a full body, so "the body
+# is still full-copy" would pass with R6 unimplemented.
+F04E="$AU/f04e"
+f04_fullchild "$F04E" kid
+rm -f "$F04E/.harness/.harness-version"
+# Single-target, NOT a cascade: a cascade would re-install the coordinator and restore the
+# very marker this case removes.
+F04E_OUT="$(CODEX_HOME="$F04E/.ch" HOME="$F04E/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude --thin "$F04E/kid" 2>&1)" && F04E_RC=0 || F04E_RC=$?
+[ "$F04E_RC" = "0" ] \
+  || fail "R6: --thin with an unreachable umbrella exited $F04E_RC — refusing to convert is a warning, never an install failure: $F04E_OUT"
+printf '%s\n' "$F04E_OUT" | grep -q 'umbrella.root is recorded' \
+  || fail "R6: the unreachable umbrella was not reported: $F04E_OUT"
+f04_no_stub_in_tier "$F04E/kid/.harness" "R6 (nothing may convert with the umbrella unreachable)"
+grep -qF 'You are the **Builder**' "$F04E/kid/.harness/agents/builder.md" \
+  || fail "R6: the child's full local body was not kept in place"
+grep -q '^  root: "\.\./\.\./"' "$F04E/kid/.harness/harness.config.yaml" \
+  || fail "R6: umbrella.root was cleared by a run that only refused to convert"
+pass "R6 thin_unreachable_umbrella_is_not_fatal — warns, converts nothing, keeps the full copy, exits 0"
+
+# ── R9/R10/R11: --standalone, the documented way back ──────────────────────────────────
+# standalone_materialises_body / standalone_clears_umbrella_root / standalone_is_idempotent
+F04F="$AU/f04f"
+mk_umb "$F04F" kid
+cascade "$F04F"
+SK="$F04F/kid/.harness"
+f04_all_stubs_in_tier "$SK" "R9 fixture (a fresh cascade child must be thin)"
+# R10's CONTROL: another key in the same section, plus a hand-editable value elsewhere in
+# the file. A writer that "cleared" the key by truncating the umbrella: section, or by
+# rewriting the config from the shipped template, would otherwise pass.
+sed -e 's|^  manifest: .*|  manifest: "../umbrella.manifest.yaml"|' \
+    -e 's|^  test_command: .*|  test_command: "echo f04-hand-edited"|' \
+    "$SK/harness.config.yaml" > "$SK/hc.t" && mv "$SK/hc.t" "$SK/harness.config.yaml"
+grep -q '^  manifest: "\.\./umbrella\.manifest\.yaml"' "$SK/harness.config.yaml" \
+  || fail "R10 setup: the control key was not seeded"
+
+F04F_OUT="$(CODEX_HOME="$F04F/.ch" HOME="$F04F/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude --standalone "$F04F/kid" 2>&1)" && F04F_RC=0 || F04F_RC=$?
+[ "$F04F_RC" = "0" ] || fail "R9: --standalone exited $F04F_RC: $F04F_OUT"
+f04_no_stub_in_tier "$SK" "R9 (--standalone must replace every stub with the real body)"
+grep -qF 'You are the **Builder**' "$SK/agents/builder.md" \
+  || fail "R9: agents/builder.md was not materialised from the installer's own source"
+grep -qF 'harness-sdd' "$SK/AGENTS.md" \
+  || fail "R9: the regular-file tier entry AGENTS.md was not materialised"
+grep -q 'This target holds the full body layout' "$SK/manifest.txt" \
+  || fail "R9: a re-materialised target's manifest does not report the full layout"
+pass "R9 standalone_materialises_body — every stub is replaced by the real body file"
+
+grep -q '^  root: ""$' "$SK/harness.config.yaml" \
+  || fail "R10: --standalone did not clear umbrella.root: $(grep '^  root:' "$SK/harness.config.yaml")"
+grep -q '^  manifest: "\.\./umbrella\.manifest\.yaml"' "$SK/harness.config.yaml" \
+  || fail "R10: clearing umbrella.root also rewrote umbrella.manifest — the writer is not section-scoped"
+grep -q '^  test_command: "echo f04-hand-edited"' "$SK/harness.config.yaml" \
+  || fail "R10: clearing umbrella.root discarded a hand-edited value elsewhere in the config"
+pass "R10 standalone_clears_umbrella_root — the key is cleared, its neighbours are untouched"
+
+# R11 is NOT "the bytes did not change": --standalone takes the ordinary copy branch, so a
+# stale or edited target legitimately comes out re-installed from source. The claim is the
+# LAYOUT, the cleared key and exit 0.
+F04G_OUT="$(CODEX_HOME="$F04F/.ch" HOME="$F04F/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude --standalone "$F04F/kid" 2>&1)" && F04G_RC=0 || F04G_RC=$?
+[ "$F04G_RC" = "0" ] || fail "R11: --standalone on an already-full-copy target exited $F04G_RC: $F04G_OUT"
+f04_no_stub_in_tier "$SK" "R11 (--standalone on a full-copy target keeps it full-copy)"
+grep -q '^  root: ""$' "$SK/harness.config.yaml" \
+  || fail "R11: umbrella.root is no longer cleared after a second --standalone run"
+grep -q 'This target holds the full body layout' "$SK/manifest.txt" \
+  || fail "R11: the target left the full-copy layout on a repeat --standalone run"
+pass "R11 standalone_is_idempotent — a full-copy target stays full-copy, key stays cleared, exit 0"
+
+# ── docs contract: docs/UMBRELLA.md documents the migration and the reverse ─────────────
+# f04_docs_contract. FENCE-AWARE extraction: the bare house awk idiom stops at the first
+# `#` inside a fenced block, and T12 adds new fences to this very file — a `#` comment in
+# one would truncate the span and make every assertion below pass over text it never read.
+F04DOC="$SRC/docs/UMBRELLA.md"
+f04_span() { awk -v h="$2" '/^```/{f=!f} !f && /^## /{k=(index($0,h)>0);next} k' "$1"; }
+
+F04MIG="$(f04_span "$F04DOC" 'Migrating an existing child')"
+[ -n "$F04MIG" ] || fail "f04_docs_contract: docs/UMBRELLA.md has no 'Migrating an existing child' section"
+# The migration COMMAND, and the absence assertion that matters: EVERY cascade invocation
+# in that section carries --thin. An unflagged cascade presented as step one is the wrong
+# doc a reviewer is most likely to write, and it destroys the differences it reports.
+F04N_ALL="$(printf '%s\n' "$F04MIG" | grep -o 'harness-install\.sh --umbrella' | wc -l | tr -d ' ')"
+F04N_THIN="$(printf '%s\n' "$F04MIG" | grep -o 'harness-install\.sh --umbrella [^ ]* --thin' | wc -l | tr -d ' ')"
+[ "$F04N_ALL" -ge 1 ] \
+  || fail "f04_docs_contract: the migration section never names 'harness-install.sh --umbrella … --thin'"
+[ "$F04N_ALL" = "$F04N_THIN" ] \
+  || fail "f04_docs_contract: $F04N_ALL cascade invocation(s) in the migration section, only $F04N_THIN carry --thin — an unflagged cascade is being presented as a migration step, and that branch overwrites the prose tier from source"
+printf '%s\n' "$F04MIG" | grep -qi 'until it converges' \
+  || fail "f04_docs_contract: the migration procedure does not say to re-run until it converges"
+printf '%s\n' "$F04MIG" | grep -qi 'whole or not at all' \
+  || fail "f04_docs_contract: the all-or-nothing rule is not stated in the migration section"
+printf '%s\n' "$F04MIG" | grep -qi 'does not resolve to an installed harness body' \
+  || fail "f04_docs_contract: the unreachable-umbrella behavior is not documented in the migration section"
+
+F04STA="$(f04_span "$F04DOC" 'the way back')"
+[ -n "$F04STA" ] || fail "f04_docs_contract: docs/UMBRELLA.md has no '--standalone — the way back' section"
+printf '%s\n' "$F04STA" | grep -q 'harness-install\.sh --standalone' \
+  || fail "f04_docs_contract: the --standalone section never shows the command"
+printf '%s\n' "$F04STA" | grep -qi 'cleared' \
+  || fail "f04_docs_contract: the --standalone section does not say umbrella.root is cleared"
+printf '%s\n' "$F04STA" | grep -qi 'not a permanent opt-out' \
+  || fail "f04_docs_contract: the --standalone section oversells the flag — clearing the key is not a permanent opt-out"
+pass "f04_docs_contract — docs/UMBRELLA.md documents the migration command, the all-or-nothing rule and the reverse"
+
 echo "All umbrella tests passed."

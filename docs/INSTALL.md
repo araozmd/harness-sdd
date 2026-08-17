@@ -704,6 +704,29 @@ or a child's project-owned files. With `--umbrella` absent, the installer behave
 exactly as the single-target form below — only an additive, value-preserving config
 **migration** is layered in (see next section).
 
+### Body layout — `--thin` and `--standalone`
+
+A child of an umbrella holds its **prose** tier (`AGENTS.md`, `agents/`, `docs/`,
+`specs/_templates/`, `specs/glossary.md`) either as a full local copy or as pointer stubs
+resolved from `umbrella.root`. The **program** tier (`init.sh`, `store/`, `tools/`, the
+example files) and every generated front-end glue file are always local copies. These two
+flags are the only way to move a target between the two layouts — neither is ever implied,
+and no target's layout changes without one of them.
+
+| Flag | Mode | Effect |
+|---|---|---|
+| `--thin` | single-target **and** `--umbrella` | one-time consent to **convert** a full-copy child to the thin layout. Pristine-only and all-or-nothing: every prose-tier path must be byte-identical to the umbrella's copy, or nothing in that target converts and every differing path is named. Once a child is thin it stays thin with no flag. Without the flag, a run against a full-copy child **reports** whether it would convert and converts nothing. Inert and silent on a target with no `umbrella.root`; a recorded root that does not resolve warns, keeps the full copy, and does not fail the install. |
+| `--standalone` | single-target only | the reverse: re-materialise the full prose body from **this installer's** source over a thin target's stubs, and clear that target's `umbrella.root`. Rejected with `--umbrella` and with `--thin`, before anything is written. Not a permanent opt-out — a later explicit `--thin` converts the target again. |
+
+```bash
+./harness-install.sh --umbrella /path/to/umbrella-dir --thin   # migrate every child (re-run until it converges)
+./harness-install.sh --thin /path/to/child                     # migrate exactly one child
+./harness-install.sh --standalone /path/to/child               # detach one child, full body restored
+```
+
+The full procedure, the refusal report and what clearing `umbrella.root` does and does not
+buy are in [`UMBRELLA.md`](./UMBRELLA.md#migrating-an-existing-child---thin).
+
 ## Per-role model routing (`models:`) — opt-in
 
 Every sub-agent normally inherits whatever model the host CLI session runs, so the

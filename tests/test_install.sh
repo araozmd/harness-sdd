@@ -2131,4 +2131,84 @@ test_opencode_model_helper() {
 test_opencode_model_helper
 pass "OpenCode model helper is installed as an executable tool under .harness/tools (E22-F01)"
 
+# ── E24-F04 R6 (negative control): --thin on a single-repo target is inert AND SILENT ───
+# thin_on_single_repo_is_silent_noop.
+#
+# WHY THIS IS THE CONTROL AND NOT A NICETY. R6's requirement is that the warning is
+# CONDITIONAL on a recorded-but-unresolvable umbrella.root. A warning that fired
+# unconditionally would satisfy a presence-only assertion in test_umbrella.sh and be wrong
+# on every coordinator and every single-repo install. So this case pairs the silence with a
+# POSITIVE control in the same suite, on the same target, differing in exactly one fact:
+# whether umbrella.root is recorded at all. Rewriting the key to an absolute path that does
+# not exist is one of the sanctioned ways to make it unresolvable (a RELATIVE root moves
+# with the target, so "move the umbrella" does not produce one).
+test_thin_on_single_repo_is_silent_noop() {
+  _t4="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_t4/ch" HOME="$_t4/home" sh "$SRC/harness-install.sh" --agents=claude "$_t4" >/dev/null 2>&1 \
+    || fail "E24-F04 R6-control: the baseline single-repo install exited non-zero"
+  grep -q '^  root: ""$' "$_t4/.harness/harness.config.yaml" \
+    || fail "E24-F04 R6-control setup: the fresh single-repo config does not carry the empty umbrella.root seed"
+
+  _o4="$(CODEX_HOME="$_t4/ch" HOME="$_t4/home" sh "$SRC/harness-install.sh" --agents=claude --thin "$_t4" 2>&1)" \
+    && _r4=0 || _r4=$?
+  [ "$_r4" = "0" ] || fail "E24-F04 R6-control: --thin on a single-repo target exited $_r4: $_o4"
+  printf '%s\n' "$_o4" | grep -q 'umbrella.root is recorded' \
+    && fail "E24-F04 R6-control: --thin warned about an umbrella on a target that records NO umbrella.root — the warning is unconditional: $_o4"
+  # Inert as well as silent: nothing may have been stubbed.
+  head -n 1 "$_t4/.harness/agents/builder.md" | grep -qxF '<!-- harness:umbrella-stub -->' \
+    && fail "E24-F04 R6-control: --thin stubbed a single-repo target's body — there is no umbrella to resolve"
+  grep -qF 'You are the **Builder**' "$_t4/.harness/agents/builder.md" \
+    || fail "E24-F04 R6-control: the single-repo body is not the real one — the silence assertion is vacuous"
+
+  # POSITIVE CONTROL, same target, one differing fact: record an unresolvable umbrella.root.
+  sed -e 's|^  root: ""$|  root: "/nonexistent/e24f04/umbrella"|' \
+      "$_t4/.harness/harness.config.yaml" > "$_t4/.harness/hc.t" \
+      && mv "$_t4/.harness/hc.t" "$_t4/.harness/harness.config.yaml"
+  _o5="$(CODEX_HOME="$_t4/ch" HOME="$_t4/home" sh "$SRC/harness-install.sh" --agents=claude --thin "$_t4" 2>&1)" \
+    && _r5=0 || _r5=$?
+  [ "$_r5" = "0" ] \
+    || fail "E24-F04 R6: a recorded-but-unresolvable umbrella.root made --thin FAIL the install (rc=$_r5): $_o5"
+  printf '%s\n' "$_o5" | grep -q 'umbrella.root is recorded' \
+    || fail "E24-F04 R6 control: --thin stayed silent even with an unresolvable umbrella.root recorded — the silence above proves nothing: $_o5"
+  rm -rf "$_t4"
+  pass "--thin is inert and silent with no umbrella.root, and warns only once one is recorded (E24-F04 R6) [thin_on_single_repo_is_silent_noop]"
+}
+test_thin_on_single_repo_is_silent_noop
+
+# ── E24-F04 R12: --standalone's flag conflicts abort BEFORE anything is written ─────────
+# standalone_flag_conflicts. Both targets are FRESH directories, so "nothing was written"
+# is checkable as "no .harness exists" rather than as a byte comparison.
+test_standalone_flag_conflicts() {
+  _t6="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  mkdir -p "$_t6/umb/kid" "$_t6/solo"
+
+  _o6="$(CODEX_HOME="$_t6/ch" HOME="$_t6/home" \
+    sh "$SRC/harness-install.sh" --agents=claude --standalone --umbrella "$_t6/umb" 2>&1)" && _r6=0 || _r6=$?
+  [ "$_r6" != "0" ] || fail "E24-F04 R12: --standalone with --umbrella was accepted: $_o6"
+  printf '%s\n' "$_o6" | grep -q -- '--standalone is single-target only' \
+    || fail "E24-F04 R12: the --standalone/--umbrella rejection does not say why: $_o6"
+  [ ! -e "$_t6/umb/.harness" ] \
+    || fail "E24-F04 R12: --standalone --umbrella wrote a coordinator body before aborting"
+  [ ! -e "$_t6/umb/kid/.harness" ] \
+    || fail "E24-F04 R12: --standalone --umbrella wrote into a child before aborting"
+
+  _o7="$(CODEX_HOME="$_t6/ch" HOME="$_t6/home" \
+    sh "$SRC/harness-install.sh" --agents=claude --standalone --thin "$_t6/solo" 2>&1)" && _r7=0 || _r7=$?
+  [ "$_r7" != "0" ] || fail "E24-F04 R12: --standalone with --thin was accepted: $_o7"
+  printf '%s\n' "$_o7" | grep -q -- 'opposite body layouts' \
+    || fail "E24-F04 R12: the --standalone/--thin rejection does not say why: $_o7"
+  [ ! -e "$_t6/solo/.harness" ] \
+    || fail "E24-F04 R12: --standalone --thin wrote into the target before aborting"
+
+  # CONTROL: the same target, the same installer, one flag fewer — it must install. Without
+  # this, both rejections above are satisfied by an installer that is simply broken.
+  CODEX_HOME="$_t6/ch" HOME="$_t6/home" sh "$SRC/harness-install.sh" --agents=claude "$_t6/solo" >/dev/null 2>&1 \
+    || fail "E24-F04 R12 control: the same target refused an ORDINARY install — the aborts above prove nothing"
+  [ -f "$_t6/solo/.harness/.harness-version" ] \
+    || fail "E24-F04 R12 control: the ordinary install produced no body"
+  rm -rf "$_t6"
+  pass "--standalone with --umbrella and with --thin both abort before writing (E24-F04 R12) [standalone_flag_conflicts]"
+}
+test_standalone_flag_conflicts
+
 echo "All install tests passed."
