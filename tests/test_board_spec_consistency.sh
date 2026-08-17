@@ -514,7 +514,8 @@ printf -- '---\nid: E1-F1\nstatus: in-progress    # pending -> in-review -> done
 printf -- '---\nid: E1\nstatus: planned          # draft -> planned -> done\n---\n\n# epic\n' \
   >"$FX/specs/epics/E1-one/epic.md"
 
-set_status() { HARNESS_DIR="$FX" python3 "$FX/tools/tasks-lock.py" set-status "$1" "$2" >"$T/sl.out" 2>"$T/sl.err"; }
+# E99-F102: forward any extra flags (a `done` transition now carries --evidence).
+set_status() { _id="$1"; _st="$2"; shift 2; HARNESS_DIR="$FX" python3 "$FX/tools/tasks-lock.py" set-status "$_id" "$_st" "$@" >"$T/sl.out" 2>"$T/sl.err"; }
 fx_status() { sed -n 's/^status:[ \t]*\([^ \t#]*\).*$/\1/p' "$1" | head -1; }
 board_status() {  # board_status <board.json> — the first feature's status, parsed not grepped
   python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['epics'][0]['features'][0]['status'])" "$1"
@@ -556,7 +557,8 @@ OTHER="$FX/specs/epics/E1-one/F1-a/E1-F2.spec.md"
 printf -- '---\nid: E1-F2\nstatus: pending\n---\n' >"$OTHER"
 NOFM="$FX/specs/epics/E1-one/F1-a/plain.spec.md"
 printf -- '# no frontmatter\n' >"$NOFM"
-set_status E1-F1 done || fail "R23: set-status failed: $(cat "$T/sl.err")"
+set_status E1-F1 done --evidence "none: frontmatter-sync fixture, no work to land" \
+  || fail "R23: set-status failed: $(cat "$T/sl.err")"
 [ "$(fx_status "$OTHER")" = "pending" ] \
   || fail "R23: the writer rewrote a spec declaring ANOTHER feature's id"
 grep -qF -- '---' "$NOFM" && fail "R23: the writer invented a frontmatter block"

@@ -192,7 +192,11 @@ _hp=$!
 # wait until the holder actually holds the lock
 until [ -f "$T/held.flag" ]; do sleep 0.05; done
 _start="$(python3 -c 'import time;print(time.time())')"
-if HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 done --timeout 1 2>"$T/terr.txt"; then
+# E99-F102: pass evidence that resolves cleanly, so the ACQUISITION is the only thing
+# left that can fail. Without it this case would pass only because the refusal happens to
+# sit behind the lock today — an ordering the verification follow-up has to change.
+if HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 done \
+     --evidence "none: lock-timeout fixture, no work to land" --timeout 1 2>"$T/terr.txt"; then
   kill "$_hp" 2>/dev/null || true
   fail "R5: acquisition against a held lock did NOT exit non-zero (silent proceed?)"
 fi
@@ -381,7 +385,10 @@ echo "flock(1) must never be invoked by the board lock helper" >&2
 exit 97
 EOF
 chmod +x "$_shadow/flock"
-HARNESS_DIR="$T" PATH="$_shadow:$PATH" python3 "$HELPER" set-status E01-F01 done --timeout 3 \
+# E99-F102: a `done` transition needs landing evidence. `none:<why>` is the honest value
+# for a fixture board with no work to point at, and it keeps this case about flock(1).
+HARNESS_DIR="$T" PATH="$_shadow:$PATH" python3 "$HELPER" set-status E01-F01 done \
+  --evidence "none: flock-shadow fixture, no work to land" --timeout 3 \
   || fail "R9: helper failed when a poisoned flock(1) shadowed PATH (it must not call flock(1))"
 [ "$(status_of "$T/state/tasks.json" E01-F01)" = "done" ] \
   || fail "R9: helper did not apply the write (poisoned flock(1) on PATH)"
@@ -411,7 +418,8 @@ make_fixture "$T2/.harness"
 mkdir -p "$T2/.harness/tools"
 cp "$HELPER" "$T2/.harness/tools/tasks-lock.py"
 cp "$VALIDATOR" "$T2/.harness/tools/validate-board.py"   # shared validator sibling
-( cd / && env -u HARNESS_DIR python3 "$T2/.harness/tools/tasks-lock.py" set-status E01-F02 done ) \
+( cd / && env -u HARNESS_DIR python3 "$T2/.harness/tools/tasks-lock.py" set-status E01-F02 done \
+    --evidence "none: self-location fixture, no work to land" ) \
   || fail "R10a: helper failed to self-locate the .harness/ installed-layout board"
 [ "$(status_of "$T2/.harness/state/tasks.json" E01-F02)" = "done" ] \
   || fail "R10a: installed-layout self-located write did not apply to .harness/state/tasks.json"
@@ -467,7 +475,12 @@ def _imp(name, *a, **k):
         raise ImportError("blocked: simulate zero-dep install path")
     return _real(name, *a, **k)
 builtins.__import__ = _imp
-sys.argv = ["tasks-lock.py", "set-status", "E01-F01", "done"]
+# E99-F102: a SLICED feature's evidence is bound per slice repository, so this fixture
+# declares one per slice repo. Both are `none:<why>` — the point here is the slices
+# invariant on the fallback path, and the fixture repos hold no work to point at.
+sys.argv = ["tasks-lock.py", "set-status", "E01-F01", "done",
+            "--evidence", "repo-a=none:fixture board, no work to land",
+            "--evidence", "repo-b=none:fixture board, no work to land"]
 try:
     runpy.run_path("$HELPER", run_name="__main__")
     sys.exit(0)
@@ -935,7 +948,7 @@ else
       || fail "R12sgdp: transition did not land on the separate-git-dir primary's own board"
     # Also prove serial works from an unrelated cwd (self-location path), still no override.
     ( cd / && env -u HARNESS_DIR python3 "$MAIN/tools/tasks-lock.py" \
-        set-status E01-F02 done ) \
+        set-status E01-F02 done --evidence "none: worktree-layout fixture, no work to land" ) \
       || fail "R12sgdp: serial set-status from an arbitrary cwd was rejected under separate-git-dir primary"
     [ "$(status_of "$MAIN/state/tasks.json" E01-F02)" = "done" ] \
       || fail "R12sgdp: second serial transition did not persist on the primary board"

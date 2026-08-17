@@ -22,9 +22,13 @@
 # runs it AFTER this process returns (i.e. after the lock is released, R7).
 #
 # Usage:
-#   tasks-lock.py set-status <id> <status> [--timeout SECONDS]
+#   tasks-lock.py set-status <id> <status> [--evidence REF]... [--timeout SECONDS]
 #       Set the status of the object <id> addresses (feature id `E06-F06` or
 #       epic id `E06`) in state/tasks.json, under the lock.
+#       Moving ANY feature to `done` requires --evidence (E99-F102): once for a
+#       single-repo feature, and once per slice repository — in the bound form
+#       `--evidence <repo>=<ref>` — for a SLICED one. The evidence is RECORDED,
+#       not verified; see "Landing evidence on `done`" below.
 #   tasks-lock.py apply --mutator <path> [--timeout SECONDS]
 #       Run an external mutator on the freshly-read board (used for tests and
 #       for callers that express a different single mutation). The mutator is a
@@ -634,7 +638,325 @@ def _refuse_if_parked(text, target_id):
             return
 
 
-def _set_status_text_transform(target_id, status):
+# ---------------------------------------------------------------------------
+# Landing evidence on `done` (E99-F102) — THE CONTRACT HALF.
+#
+# `done` is what stops the selector routing an item, so a feature marked `done`
+# whose work never merged is both unshipped AND unreachable — nothing will pick it
+# up again, and downstream briefs cite it as a landed mechanism. An audit of 148
+# `done` features across seven repos found FOUR such items — E99-F58 and E99-F59
+# (commits on never-pushed local branches), E09-F02 and E99-F29 (their only PRs
+# closed UNMERGED) — none of them found by a check. E99-F29 is the harm already in
+# the corpus: the board title of E99-F32, the feature that actually shipped the
+# Spanish outcome, cites E99-F29 as landed.
+#
+# ⚠️ WHAT THIS HALF DOES NOT DO — read this before trusting a record it writes.
+# This change records the attestation and enforces its SHAPE. It performs NO
+# verification: it never runs git, never opens a network connection, never resolves
+# a repository, and never decides whether a commit is reachable from a default
+# branch. Every ref therefore lands as `verified: "unchecked"` (or `"declared"` for
+# `none:<why>`), and `repo`/`base` are simply absent. **It cannot emit
+# `verified` = ancestor, by construction** — that value is not in `_VERIFIED_RANK`
+# and appears nowhere in this module's code. Verification arrives in the follow-up
+# (E99-F102b), which turns `unchecked` into a verdict.
+#
+# That split is deliberate, and it is why this half ships first. Five successive
+# review rounds found the same defect class in the verification code — the guard
+# cannot verify, so it lets `done` through anyway: a default branch guessed by name,
+# one sha attesting many slices, a stale local tip, a slice repository located by
+# directory basename, an unrecognised hash format. Every one of those is a way to
+# get a WRONG or MISSING verdict. A half that never issues a verdict cannot have
+# them: the worst it can do is record honestly that nothing was checked, which is
+# already strictly better than the say-so it replaces, because
+# `verified: "unchecked"` is greppable and a silent `done` is not.
+#
+# ── why `slices[]` is NOT the attestation ────────────────────────────────────
+# A sliced feature LOOKS attested: the schema refuses `done` unless every slice is
+# `done` AND `merged`. But nothing in this harness ever WRITES `slice.merged` —
+# every occurrence in tools/ is a read or a type assertion, and `store/local.md`
+# tells the agent to set it through `apply --mutator`. It is hand-typed, i.e.
+# exactly the say-so this flag replaces. E09-F02 is the proof: a SLICED feature,
+# three slices all `merged: true`, whose first slice's own `pr` field points at
+# viernes-infra#24 — closed, unmerged. So `--evidence` is required for EVERY feature
+# `done`, sliced or not; exempting the weaker mechanism from the stronger one would
+# ship that hole documented as safe. The slice invariant still applies
+# independently — a sliced feature must satisfy BOTH.
+#
+# ── and why ONE ref cannot attest a SLICED feature ───────────────────────────
+# A single feature-level value names no repository, so it attests no particular
+# slice: one slice's merge commit would carry the whole feature to `done` while
+# another slice sat unmerged. Evidence for a sliced feature is therefore BOUND PER
+# SLICE REPOSITORY — `--evidence <repo>=<ref>`, repeated once per slice repo. A bare
+# `--evidence <ref>` on a sliced feature is REFUSED (naming the required form and the
+# repos), a binding naming a repo the feature has no slice in is REFUSED, a repeated
+# binding is REFUSED, and a missing binding is REFUSED naming the repos still owed.
+# The binding is what makes the follow-up's per-repository check EXPRESSIBLE at all;
+# here it is enforced as a shape, and the record carries one entry per repository so
+# the eventual verdict has somewhere to land.
+#
+# `set-status <feature> done` requires `--evidence REF` (single-repo feature) or
+# `--evidence <repo>=REF` repeated once per slice repo (sliced feature), where REF is:
+#
+#   <anything>     a sha, a PR URL, a tag — recorded VERBATIM and unverified.
+#   none:<why>     work with no commit at all (a console action, a supersession).
+#
+# Note what is deliberately absent: this half does not parse or classify the ref. It
+# does not ask whether a string looks like a commit id, precisely because "looks like
+# a commit id" is a verification question (round 5 found the 40-hex assumption
+# missing SHA-256's 64-char ids), and the answer belongs with the code that resolves
+# objects. Everything that is not `none:<why>` is transcribed and marked unchecked.
+
+_DECLARED_PREFIX = "none:"
+# How much a `verified` value proves, weakest first. A sliced feature's feature-level
+# record rolls up to the WEAKEST of its slices. Only two values can be produced here,
+# and the proved one is deliberately NOT in this table: nothing in this half earns it,
+# so nothing in this half can select it — the follow-up adds the value together with
+# the check that justifies it. The board SCHEMA still knows all three, because a board
+# written by the follow-up (or by hand) must remain readable here.
+_VERIFIED_RANK = {"unchecked": 0, "declared": 1}
+# A `--evidence` value may bind its ref to a slice repository: `<repo>=<ref>`. The
+# repo side is deliberately a strict, narrow character class — a URL
+# (`.../pull/1?a=b`) and a `none: why = x` reason both contain `=` but neither has a
+# prefix that matches, so they are still read as plain refs and nothing silently
+# reinterprets an unsliced feature's evidence as a binding.
+_BINDING_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)=(.+)$", re.S)
+
+
+def _classify(ref, repo_name=None):
+    """Turn one --evidence value into a landing record. PURE: no I/O, no verdict.
+
+    `repo_name` is the slice repository the value was bound to (None for a
+    single-repo feature). Everything that is not `none:<why>` is transcribed and
+    recorded unchecked, with a warning that says so — a claim nobody checked must
+    never read as a proof.
+    """
+    ref = ref.strip()
+    if not ref:
+        _die(
+            "--evidence must not be empty"
+            if repo_name is None
+            else "--evidence %s=<ref>: the ref is empty" % repo_name
+        )
+    if ref.startswith(_DECLARED_PREFIX):
+        why = ref[len(_DECLARED_PREFIX) :].strip()
+        if not why:
+            _die(
+                "--evidence none:<why> needs a reason after the colon — "
+                "'no commit' with no explanation is the say-so this replaces"
+            )
+        record = {"ref": ref, "verified": "declared"}
+    else:
+        sys.stderr.write(
+            "tasks-lock: warning: evidence %r is recorded but NOT verified — this "
+            "harness does not yet check that a ref reached a default branch, so it "
+            "is stored as UNCHECKED. Nothing here proved the work merged.\n" % ref
+        )
+        record = {"ref": ref, "verified": "unchecked"}
+    if repo_name is not None:
+        record["repo"] = repo_name
+    return record
+
+
+def _landing_record(evidence):
+    """The single-repo feature's record."""
+    return _classify(evidence)
+
+
+def _split_binding(arg):
+    """`<repo>=<ref>` ⇒ (repo, ref); anything else ⇒ (None, arg). See `_BINDING_RE`."""
+    m = _BINDING_RE.match(arg.strip())
+    if m is None:
+        return None, arg
+    return m.group(1), m.group(2)
+
+
+def _slice_repos(feature):
+    """The slice repositories of `feature`, in board order, de-duplicated.
+
+    Empty ⇒ treat the feature as single-repo. A `slices` array malformed enough to
+    yield no repository names is not silently trusted either way: the board that
+    results is schema-validated before the atomic replace, so it fail-stops there
+    with a message about the real defect.
+    """
+    repos = []
+    slices = feature.get("slices") if isinstance(feature, dict) else None
+    if not isinstance(slices, list):
+        return repos
+    for sl in slices:
+        if not isinstance(sl, dict):
+            continue
+        repo = sl.get("repo")
+        if isinstance(repo, str) and repo and repo not in repos:
+            repos.append(repo)
+    return repos
+
+
+def _sliced_landing_record(target_id, evidence_list, slice_repos):
+    """Bind every slice repository to its OWN evidence. Returns the feature record.
+
+    The feature-level `verified` rolls up to the WEAKEST slice (`_VERIFIED_RANK`), so
+    the feature can never read stronger than the least-attested slice it covers.
+    """
+    listed = ", ".join(slice_repos)
+    bindings = {}
+    for arg in evidence_list:
+        repo, ref = _split_binding(arg)
+        if repo is None:
+            _die(
+                "%s is sliced across %d repositories (%s), so evidence must name the "
+                "repository it landed in: pass --evidence <repo>=<ref> once per slice "
+                "repository. %r names none, and one slice's merge commit cannot attest "
+                "another slice's work — that is how a feature goes `done` with a slice "
+                "still unmerged."
+                % (target_id, len(slice_repos), listed, arg)
+            )
+        if repo not in slice_repos:
+            _die(
+                "%s has no slice in repository %r — its slice repositories are: %s"
+                % (target_id, repo, listed)
+            )
+        if repo in bindings:
+            _die(
+                "two --evidence values bind repository %r; each slice repository "
+                "takes exactly one" % repo
+            )
+        bindings[repo] = ref
+    missing = [r for r in slice_repos if r not in bindings]
+    if missing:
+        _die(
+            "%s: no landing evidence for %s. Every slice repository needs its own "
+            "--evidence <repo>=<ref> (a ref, or none:<why>); the slice `merged` flags "
+            "are hand-typed and E09-F02 proves they can read `merged: true` against a "
+            "closed, unmerged PR." % (target_id, ", ".join(missing))
+        )
+    records = [_classify(bindings[r], r) for r in slice_repos]
+    verified = min(records, key=lambda r: _VERIFIED_RANK[r["verified"]])["verified"]
+    return {
+        "ref": "; ".join("%s=%s" % (r["repo"], r["ref"]) for r in records),
+        "verified": verified,
+        "slices": records,
+    }
+
+
+def _feature_entry(text, target_id):
+    """(is_feature, feature_dict) for `target_id`, from a READ-ONLY parse.
+
+    (False, None) for an epic id, an unparseable board, or an id that is not on the
+    board at all — every one of those is somebody else's error to report, and masking
+    it behind an evidence message would be worse than letting the existing path
+    fail-stop on it.
+    """
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return False, None
+    if not isinstance(data, dict):
+        return False, None
+    for ep in data.get("epics") or []:
+        if not isinstance(ep, dict):
+            continue
+        for ft in ep.get("features") or []:
+            if isinstance(ft, dict) and ft.get("id") == target_id:
+                return True, ft
+    return False, None
+
+
+def _resolve_landing(text, target_id, status, evidence_list):
+    """The `done`-transition precondition. Returns a `landed` record or None.
+
+    PURE — parse, bind, shape. It reads the board text it is handed and nothing else,
+    which is what lets it run inside the existing critical section without adding a
+    single external call to it.
+    """
+    is_feature, feature = _feature_entry(text, target_id)
+    if evidence_list and status != "done":
+        _die("--evidence records a landing; it applies only to a `done` transition")
+    if status != "done" or not is_feature:
+        # Epics roll up from their features, each of which carried its own evidence;
+        # requiring it again at the epic would be a second attestation of the same facts.
+        if evidence_list and not is_feature:
+            _die("--evidence applies to a feature; %s is not one" % target_id)
+        return None
+    slice_repos = _slice_repos(feature)
+    if not evidence_list:
+        _die(
+            "%s: `done` needs evidence the work landed — pass %s. It is recorded, not "
+            "yet verified, and that record is what makes a re-audit possible: a `done` "
+            "nobody can re-check is how E99-F58/E99-F59/E09-F02/E99-F29 sat unshipped "
+            "and unroutable on this board — E09-F02 with every slice hand-marked "
+            "`merged: true` against a closed, unmerged PR."
+            % (
+                target_id,
+                (
+                    "--evidence <repo>=<ref> once for each of its slice "
+                    "repositories (%s)" % ", ".join(slice_repos)
+                )
+                if slice_repos
+                else "--evidence <ref|none:why>",
+            )
+        )
+    if slice_repos:
+        return _sliced_landing_record(target_id, evidence_list, slice_repos)
+    if len(evidence_list) > 1:
+        _die(
+            "%s has no slices, so it takes exactly one --evidence (got %d). "
+            "Repeated evidence binds one value per SLICE repository."
+            % (target_id, len(evidence_list))
+        )
+    bound_repo, _ref = _split_binding(evidence_list[0])
+    if bound_repo is not None:
+        _die(
+            "--evidence <repo>=<ref> binds evidence to a SLICE repository, but %s "
+            "has no slices — pass --evidence <ref|none:why>" % target_id
+        )
+    return _landing_record(evidence_list[0])
+
+
+def _write_landed(text, target_id, record):
+    """Patch `landed` into the feature object, replacing any existing record.
+
+    Text surgery, not a re-serialize, for the same reason the status patch is (R6):
+    every other byte — indentation, inline vs multiline arrays, the trailing newline —
+    stays verbatim. The result is json.loads + schema validated by the caller before
+    the atomic replace, so a malformed insert fail-stops instead of landing.
+    """
+    blob = json.dumps(record, separators=(", ", ": "), sort_keys=True)
+    in_string = _string_mask(text)
+    span = _find_status_span(text, target_id)
+    if span is None:
+        _die("id %r not found in board" % target_id)
+    status_start = span[0]
+    obj = _scan_object_span(text, status_start, in_string)
+    if obj is None:
+        _die("could not delimit the object for %r while recording evidence" % target_id)
+    obj_start, obj_end = obj
+
+    existing = _depth1_value_start(text, in_string, obj_start, obj_end, "landed")
+    if existing is not None:
+        old = _scan_object_span(text, existing, in_string)
+        if old is None or old[0] != existing:
+            _die(
+                "%s.landed is not an object; refusing to overwrite it blind" % target_id
+            )
+        return text[: old[0]] + blob + text[old[1] :]
+
+    # Insert immediately after the status member. `end + 1` steps past the closing
+    # quote of the status VALUE (the span brackets the value between the quotes).
+    at = span[1] + 1
+    line_start = text.rfind("\n", 0, status_start) + 1
+    prefix = text[line_start:status_start]
+    indent = prefix[: len(prefix) - len(prefix.lstrip())]
+    if re.match(r'^\s*"status"\s*:\s*"$', prefix):
+        # `status` opens its own line (the pretty-printed board): match its
+        # indentation, so the diff is one ADDED line rather than one very long
+        # rewritten one.
+        return text[:at] + ",\n" + indent + '"landed": ' + blob + text[at:]
+    # Several members share the line (the compact fixtures, and hand-written boards):
+    # stay on it — a newline here would reflow a line nobody asked to reformat.
+    return text[:at] + ', "landed": ' + blob + text[at:]
+
+
+def _set_status_text_transform(target_id, status, evidence_list=()):
     """Build a TEXT transform that changes ONLY the target's status value.
 
     Unlike a parse → mutate → re-serialize round-trip (which reformats every
@@ -644,15 +966,28 @@ def _set_status_text_transform(target_id, status):
     leaves all surrounding bytes untouched. The caller still json.loads + schema-
     validates the RESULT before the atomic replace, so an invalid outcome (bad
     id, illegal status, sliced-done invariant) still fail-stops (R4).
+
+    The landing resolution (E99-F102) runs here, inside the critical section, and is
+    safe there precisely because it is PURE: it reads the board text it was handed and
+    makes no external call of any kind, so it adds no unbounded work to the lock. A
+    later half that verifies refs must NOT simply extend this function — verification
+    talks to git and the network, and holding this lock across those probes starves
+    concurrent writers; it belongs before the lock, with a re-validation inside it.
     """
 
     def transform(text):
         _refuse_if_parked(text, target_id)  # E06-F07: a park outranks a transition
+        # Resolved BEFORE the patch, so a refusal leaves the board byte-identical —
+        # the write is never half-applied and then rejected.
+        landed = _resolve_landing(text, target_id, status, list(evidence_list))
         span = _find_status_span(text, target_id)
         if span is None:
             _die("id %r not found in board" % target_id)
         start, end, _old = span
-        return text[:start] + status + text[end:]
+        patched = text[:start] + status + text[end:]
+        if landed is not None:
+            patched = _write_landed(patched, target_id, landed)
+        return patched
 
     return transform
 
@@ -963,6 +1298,17 @@ def main(argv):
     p_set.add_argument("id")
     p_set.add_argument("status")
     p_set.add_argument(
+        "--evidence",
+        action="append",
+        default=None,
+        help=(
+            "landing evidence for a `done` transition (E99-F102): any reference "
+            "(recorded verbatim and marked unchecked — this half verifies nothing), "
+            "or none:<why> for work with no commit. A SLICED feature takes the bound "
+            "form --evidence <repo>=<ref>, REPEATED once per slice repository"
+        ),
+    )
+    p_set.add_argument(
         "--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS
     )
 
@@ -989,7 +1335,9 @@ def main(argv):
 
     if args.cmd == "set-status":
         # Minimal-diff text transform: patches only the target's status token.
-        transform = _set_status_text_transform(args.id, args.status)
+        transform = _set_status_text_transform(
+            args.id, args.status, args.evidence or []
+        )
     elif args.cmd == "apply":
         # External mutators may change arbitrary structure → parse+re-serialize.
         transform = _mutator_text_transform(_import_mutator(args.mutator))

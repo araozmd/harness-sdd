@@ -249,6 +249,35 @@ The build↔review handoff is **not a single pass** — it is an explicit loop t
 3. Repeat steps 1–2 for as many rounds as it takes; the loop exits **only on an
    approve verdict** (or when you escalate a stuck feature to a human).
 
+**Writing that `done` needs a landing record** (E99-F102). An approve verdict says the
+work is *correct*; it does not say the work is *merged*, and `done` is what stops the
+selector routing the item — so a `done` whose branch never merged is both unshipped and
+unreachable, and the next brief will cite it as a shipped mechanism. **Four** such
+features were found on one board, all by accident, and one of them (`E99-F29`) is already
+cited as landed by another feature's board entry. So every feature transition to `done`
+carries its reference:
+
+```
+python3 "$HARNESS_DIR/tools/tasks-lock.py" set-status <id> done --evidence <ref|none:why>
+# a SLICED feature: one binding per slice repository
+python3 "$HARNESS_DIR/tools/tasks-lock.py" set-status <id> done \
+    --evidence <repo-a>=<ref> --evidence <repo-b>=none:<why>
+```
+
+Prefer the **merge commit** — it is the thing that is actually on the default branch, and
+it is what a later re-check will resolve. `none:<why>` is for work with no commit at all (a
+console action, a supersession). **A sliced feature is not exempt, and one ref cannot
+answer for it**: its per-slice `merged` flags are hand-typed and nothing in the harness
+verifies them (E09-F02 carries `merged: true` on a slice whose own `pr` is a closed,
+unmerged PR), so it must satisfy the slice invariant **and** carry `--evidence <repo>=<ref>`
+once per slice repository.
+
+⚠️ **The reference is recorded, not verified.** This version runs no git and checks
+nothing: every ref lands as `verified: "unchecked"` (or `"declared"`), and the helper says
+so. Do not read a `landed` record as proof that the work merged — read it as the pointer
+that makes checking possible. Full contract in `store/local.md` (`set_status`) and
+`docs/WORKFLOW.md`.
+
 **Each round is recorded.** Append **one line per round** to `progress/history.md`
 so the iteration is observable — e.g. `E0x-Fyy in-review → reject (round N)` and,
 on the final round, `E0x-Fyy in-review → approve`. The round counter lives only in
