@@ -884,30 +884,55 @@ pr_loop_enabled() {
   return 1
 }
 
-# _cfg_workers_value <file> <key> — print the `workers.<key>` scalar (unquoted,
-# comment-stripped) from inside the TOP-LEVEL `workers:` section; empty if unset or if the
-# file does not exist. Section-scoped exactly like _cfg_pr_loop_value, so a same-named key
-# nested under ANOTHER section can never change roster behavior. Commented example lines
-# never match — the `#` precedes the key.
+# _cfg_workers_roster_is_true <file> — exit 0 ONLY when <file> has a top-level `workers:`
+# section whose DIRECT child `roster:` key carries one of the three literal enabling forms
+# `true`, `"true"` or `'true'` (each with an optional real trailing ` # comment`). Any other
+# line, any other value, an absent key, an absent section, a missing file: exit 1.
 #
-# A `#` INSIDE a quoted scalar is part of the value, not the start of a comment (YAML says
-# so). Stripping `#.*$` unconditionally would reduce `roster: "true#disabled"` — a valid but
-# unrecognized value that R2 requires to stay OFF — to the literal `true` and turn the gate
-# ON. So a quoted value is closed at its own quote and never comment-stripped, while an
-# unquoted one still loses a genuine trailing `# comment`.
-_cfg_workers_value() {
-  [ -f "$1" ] || return 0
-  awk -v k="$2" '
-    BEGIN { gsub(/\./, "[.]", k); re = "^[[:space:]]+" k ":" }
-    /^workers:[[:space:]]*(#.*)?$/ { w=1; next }
-    w && /^[^[:space:]#]/ { w=0 }
-    w && $0 ~ re {
-      sub(/^[[:space:]]+[^:]*:[[:space:]]*/, "")
-      if ($0 ~ /^"/)            { sub(/^"/, ""); sub(/".*$/, "") }
-      else if ($0 ~ /^'\''/)    { sub(/^'\''/, ""); sub(/'\''.*$/, "") }
-      else                      { sub(/[[:space:]]*#.*$/, "") }
-      print; exit
+# WHITELIST, NOT A DECODER. The previous shape of this helper decoded the scalar and
+# compared the result to `true`, and lost that game once per review round — a `#` inside a
+# quoted scalar, a `roster:` nested under `workers.options`, a doubled-quote escape
+# (`roster: 'true''#disabled'` decodes to the string `true'#disabled`), and after those,
+# block scalars (`roster: >`), tags (`roster: !!str true`), anchors, tabs… Each fix taught
+# the decoder one more corner of YAML and left the next corner open, because a hand-rolled
+# awk YAML decoder cannot be completed. The contract does not need one: R2 says ONLY the
+# literal `true` enables the roster and EVERYTHING else — including anything malformed or
+# unexpected — leaves it OFF. That is a positive match that FAILS CLOSED. A shape nobody
+# anticipated is not decoded and compared; it simply does not match, so it is OFF.
+#
+# Two rules carry it, and both are load-bearing:
+#   1. DIRECT CHILDREN ONLY. The indent of the section's first key line (blank and
+#      comment-only lines skipped) is the direct-child indent; deeper lines belong to some
+#      nested mapping and are ignored entirely, so `workers.options.roster: true` leaves
+#      `workers.roster` absent — and absent is OFF.
+#   2. The first direct `roster:` line decides, and it enables only on a FULL-LINE match of
+#      the whitelist. `#` may only start a comment when whitespace precedes it, so neither
+#      `true#disabled` nor `"true"#x` can shed a suffix and pass as `true`.
+# Section-scoped like _cfg_pr_loop_value, so a same-named key under ANOTHER top-level
+# section can never change roster behavior; commented example lines never match either.
+#
+# DO NOT REPLACE THIS WITH A DECODE-AND-COMPARE, and do not widen the three accepted forms.
+# Every new YAML shape that "ought" to work belongs OFF unless the spec says otherwise.
+_cfg_workers_roster_is_true() {
+  [ -f "$1" ] || return 1
+  awk -v q="'" '
+    BEGIN {
+      ok = "^[[:space:]]*roster:[[:space:]]+(true|\"true\"|" q "true" q ")([[:space:]]*$|[[:space:]]+#)"
+      cind = -1
     }
+    /^workers:[[:space:]]*(#.*)?$/ { w=1; cind=-1; next }
+    w {
+      if ($0 ~ /^[[:space:]]*(#.*)?$/) next          # blank or comment-only: no indent signal
+      if ($0 ~ /^[^[:space:]]/) { w=0; next }        # a new top-level key ends the section
+      match($0, /^[[:space:]]*/); ind = RLENGTH
+      if (cind < 0) cind = ind                       # first key line fixes the child indent
+      if (ind < cind) { w=0; next }                  # dedented back out of the section
+      if (ind > cind) next                           # deeper: a descendant, not workers.roster
+      if ($0 !~ /^[[:space:]]*roster:/) next         # some other direct child
+      if ($0 ~ ok) hit = 1                           # …and ONLY the whitelist enables
+      exit
+    }
+    END { exit(hit ? 0 : 1) }
   ' "$1"
 }
 
@@ -923,10 +948,7 @@ _cfg_workers_value() {
 # (⇒ default: disabled).
 worker_roster_enabled() {
   [ -n "${H:-}" ] || return 1
-  if [ "$(_cfg_workers_value "$H/harness.config.yaml" roster)" = "true" ]; then
-    return 0
-  fi
-  return 1
+  _cfg_workers_roster_is_true "$H/harness.config.yaml"
 }
 
 # _mc_insert_after <file> <header-regex> <line>  — insert <line> immediately after the

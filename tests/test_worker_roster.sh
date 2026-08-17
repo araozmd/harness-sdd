@@ -271,10 +271,10 @@ test_R1_enabled_writes_roster() {
 test_R2_absent_key_writes_nothing() {
   # (a) the truth table, on the installer's own extracted gate.
   {
-    sed -n '/^_cfg_workers_value() {$/,/^}$/p' "$SRC/harness-install.sh"
+    sed -n '/^_cfg_workers_roster_is_true() {$/,/^}$/p' "$SRC/harness-install.sh"
     sed -n '/^worker_roster_enabled() {$/,/^}$/p' "$SRC/harness-install.sh"
   } > "$T/gatefns.sh"
-  grep -q '^_cfg_workers_value() {$'  "$T/gatefns.sh" || fail "R2: _cfg_workers_value is not extractable at column 0"
+  grep -q '^_cfg_workers_roster_is_true() {$'  "$T/gatefns.sh" || fail "R2: _cfg_workers_roster_is_true is not extractable at column 0"
   grep -q '^worker_roster_enabled() {$' "$T/gatefns.sh" || fail "R2: worker_roster_enabled is not extractable at column 0"
   cat > "$T/gate-probe.sh" <<'PEOF'
 set -eu
@@ -289,7 +289,7 @@ PEOF
     printf '%b' "$2" > "$_pd/harness.config.yaml"
     _got="$(sh "$T/gate-probe.sh" "$T/gatefns.sh" "$_pd")"
     [ "$_got" = "$3" ] \
-      || fail "R2: gate case '$1' resolved '$_got', expected '$3' — only the literal \`true\` may enable the roster"
+      || fail "R2: gate case '$1' resolved '$_got', expected '$3' — the gate is a WHITELIST that fails closed: only a DIRECT child of top-level \`workers:\` named \`roster:\` whose value is one of the literals true / \"true\" / 'true' (plus an optional real trailing # comment) may enable the roster; every other shape, nested or malformed alike, stays OFF"
   }
   _probe absent_block    'telemetry:\n  enabled: true\n'            disabled
   _probe absent_key      'workers:\n'                               disabled
@@ -302,11 +302,31 @@ PEOF
   # valid YAML string and an unrecognized value, so R2 keeps the gate OFF. Comment-stripping
   # that ignores quoting truncates it to `true` and turns the roster ON.
   _probe quoted_hash     'workers:\n  roster: "true#disabled"\n'    disabled
+  # ── the whitelist class ────────────────────────────────────────────────────────────
+  # Every row below is a YAML shape that a decode-then-compare gate mis-decodes into the
+  # literal `true` (or would, one variant at a time, as each new corner of YAML is taught to
+  # it). The gate is instead a positive full-line match on three literal forms under the
+  # DIRECT-child indent of `workers:`, so none of these match and all of them stay OFF.
+  # `workers.options.roster` is a key of the `options` mapping, so `workers.roster` is ABSENT.
+  _probe nested_mapping  'workers:\n  options:\n    roster: true\n' disabled
+  # `'true''#disabled'` is a single YAML scalar: the doubled quote is an ESCAPED `'`, so the
+  # value is the string `true'#disabled` — unrecognized, hence OFF. Closing the scalar at the
+  # first inner quote instead reads `true` and turns the roster ON.
+  _probe doubled_quote   "workers:\n  roster: 'true''#disabled'\n"  disabled
+  # A folded block scalar, a tag and a trailing token: all unrecognized, none of them `true`.
+  _probe block_scalar    'workers:\n  roster: >\n    true\n'        disabled
+  _probe tagged_scalar   'workers:\n  roster: !!str true\n'         disabled
+  _probe trailing_junk   'workers:\n  roster: true yes\n'           disabled
   _probe literal_true    'workers:\n  roster: true\n'               enabled
-  # …and the two enabling forms the quote-aware parse must NOT regress: a genuine trailing
-  # comment is still stripped, and a quoted `true` still enables.
+  # …and the enabling forms the whitelist must NOT regress: a genuine trailing comment (one
+  # preceded by whitespace) is tolerated, and both quoted spellings of `true` still enable.
   _probe trailing_comment 'workers:\n  roster: true  # opt in\n'     enabled
   _probe quoted_true     'workers:\n  roster: "true"\n'             enabled
+  _probe squoted_true    "workers:\n  roster: 'true'\n"             enabled
+  # A comment line and a sibling key before `roster:` must not shift the direct-child indent
+  # off the real one — otherwise rule 1 would disable a legitimately enabled roster.
+  _probe comment_then_key 'workers:\n  # opt in below\n  roster: true\n' enabled
+  _probe sibling_first   'workers:\n  other: 1\n  roster: true\n'   enabled
   # A config file that does not exist at all is the pre-install state; it must be OFF too.
   rm -rf "$T/gate-nofile"; mkdir -p "$T/gate-nofile"
   [ "$(sh "$T/gate-probe.sh" "$T/gatefns.sh" "$T/gate-nofile")" = "disabled" ] \
