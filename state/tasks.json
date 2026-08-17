@@ -818,7 +818,7 @@
         {
           "id": "E24-F04",
           "title": "Migrate existing children to the thin layout (+ --standalone)",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
