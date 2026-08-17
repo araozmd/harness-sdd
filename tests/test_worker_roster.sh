@@ -695,6 +695,41 @@ STALE
     || fail "R10: the stale 'gemini' entry survived a re-run on a PATH where gemini does not resolve — the roster was merged, not overwritten from freshly detected state"
   [ "$(rq "$_d/$ROSTER_REL" command claude)" = "claude" ] \
     || fail "R10: the freshly detected 'claude' entry is missing after the overwrite"
+
+  # …and R10 still holds when the existing roster is NOT WRITABLE. A first install under a
+  # restrictive umask leaves the file mode 0444, and a bare `>` cannot truncate it.
+  #
+  # ASSERT THE OUTCOME, NEVER THE SHELL'S REACTION. The bare redirection fails in two
+  # different ways depending on the interpreter — dash/zsh abort on the `set -eu`
+  # redirection error, bash/macOS `sh` carries on with the stale file — so a check written
+  # against either one alone silently passes on the other half of the shells. Both are R10
+  # violations, and both are caught by demanding the SAME end state as above: exit 0 and a
+  # roster holding freshly detected content.
+  _d="$(target r10ro)"
+  set_gate "$_d" true
+  _b="$(stub_bin r10ro claude)"
+  hrun "$_d" "$_b" >"$T/r10ro-first.log" 2>&1 \
+    || { cat "$T/r10ro-first.log" >&2; fail "R10: setup failed — the first install exited non-zero"; }
+  cat > "$_d/$ROSTER_REL" <<'STALE'
+{
+  "schema": 1,
+  "generated_by": "harness-install.sh",
+  "capability_vocabulary": ["harness-selected", "host-detectable", "non-interactive"],
+  "workers": [
+    {"key": "gemini", "command": "gemini", "capabilities": []}
+  ]
+}
+STALE
+  chmod 0444 "$_d/$ROSTER_REL"
+  [ ! -w "$_d/$ROSTER_REL" ] \
+    || fail "R10: setup failed — the roster is still writable after chmod 0444, so the read-only path is not under test"
+
+  hrun "$_d" "$_b" >"$T/r10ro.log" 2>&1 \
+    || { cat "$T/r10ro.log" >&2; fail "R10: the installer exited non-zero re-running against a READ-ONLY roster — a destination the installer owns outright must be replaced, not written through"; }
+  [ "$(rq "$_d/$ROSTER_REL" command gemini)" = "__NOENTRY__" ] \
+    || fail "R10: the stale entry survived a re-run against a READ-ONLY roster — the write silently failed and the roster was left as it was, while the installer reported success"
+  [ "$(rq "$_d/$ROSTER_REL" command claude)" = "claude" ] \
+    || fail "R10: the freshly detected 'claude' entry is missing after overwriting a READ-ONLY roster"
 }
 
 # ── R11 ──────────────────────────────────────────────────────────────────────

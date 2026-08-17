@@ -3534,6 +3534,21 @@ host-detectable"
 
     # Overwritten unconditionally from freshly detected state (R10): the file is derived
     # data the installer owns outright, so nothing here merges with what was on disk.
+    #
+    # UNLINK FIRST — `>` alone cannot discharge R10. A first install under a restrictive
+    # umask (say 0222) leaves workers.json mode 0444, and the redirection below then fails
+    # outright. What that failure DOES is shell-dependent, and BOTH outcomes are wrong:
+    # under dash and zsh the redirection error trips `set -eu` (line 101) and aborts the
+    # install midway, after other artifacts have already been rewritten; under bash — which
+    # is macOS `sh`, the shell this suite runs under — a redirection failure on a COMPOUND
+    # command does not exit the shell, so the install continues, the STALE roster survives,
+    # and the info() below reports a write that never happened. The second is the quieter
+    # failure and the worse one: R10 is violated with a success message printed over it.
+    # Removing the destination first sidesteps both. The containing .harness/ is writable
+    # even when the file is not (unlink needs no write bit on the file), a symlinked
+    # destination was already refused above (R12), and the file is the harness's own
+    # derived data — so this can only ever unlink a regular file the installer owns.
+    rm -f "$H/workers.json"
     {
       printf '{\n'
       printf '  "schema": 1,\n'
