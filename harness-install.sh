@@ -795,10 +795,16 @@ gen_body_stub() {
 # reimplementing `cp -R`'s traversal in POSIX sh cost four blocking findings, one per
 # filesystem shape, and was fixed by calling the tool and post-processing its result.
 #
-# `-q` IS MANDATORY, NOT AN OPTIMISATION. Two HARNESS_BODY_PROSE entries are regular files,
-# not directories: `AGENTS.md` and `specs/glossary.md`. `diff -r` on two REGULAR FILES prints
-# the hunks and no filename at all, so without `-q` those two entries could never be named
-# and R3 would be satisfiable only by a fixture that happens to edit an `agents/*.md`.
+# `-q` IS MANDATORY, NOT AN OPTIMISATION — and the reason is worth stating precisely,
+# because the obvious version of it is not the one that bites. Without `-q`:
+#   - on two REGULAR FILES (`AGENTS.md`, `specs/glossary.md` are entries, not directories)
+#     diff prints the hunks and NO FILENAME AT ALL. Survivable here only because the
+#     fail-closed arm below synthesises the tier entry, which for a regular-file entry
+#     happens to BE the answer.
+#   - on two DIRECTORIES it prints `diff -r <a>/<rel> <b>/<rel>` before the hunks — a form
+#     this parser does not recognise, so a NESTED path (`agents/builder.md`) collapses to
+#     the tier entry (`agents`) and R3's "name every differing path" is broken. Measured,
+#     not assumed; it is what the mutation `diff -rq loses its -q` actually kills.
 #
 # FAIL CLOSED. Where byte-identity cannot be ESTABLISHED — a path present on one side only,
 # an entry missing outright, `diff` absent from PATH, output this function cannot parse —

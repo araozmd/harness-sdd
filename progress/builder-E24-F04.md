@@ -88,4 +88,65 @@ Fixture discipline actually applied:
 
 ## Mutation proof
 
-Recorded below in "Mutation results" after the first commit.
+Run **after** committing `3c15e10`, in a throwaway `git worktree add --detach` at that
+commit (`scratchpad/E24-F04-builder/wt`, created by this run and removed after it — no
+other worktree was touched). Every mutation was applied by an anchor-count-checked patcher
+that **exits non-zero unless the anchor occurs exactly once and the file changed**, so no
+result below was read from an unapplied mutation. Free space on the volume holding both the
+repo and the scratchpad: **425 GiB before the campaign, 425 GiB after** — no ENOSPC window.
+
+`tests/test_umbrella.sh` is a straight-line suite: it aborts at the first failing case, so
+a row *after* the killer is unobserved in that run. Where that happened I ran a **direct
+probe** (`probe-unreached.sh`) against the same mutant, and I ran that probe against the
+**unmutated tip first** — all three of its lines read PASS there, so it is a valid
+instrument and not a generator of the answer I wanted.
+
+| # | Mutation | Killed by | Message | Stayed green |
+|---|---|---|---|---|
+| M1 | `prose_tier_blockers` always prints nothing | `thin_all_or_nothing_on_edit` (R2) | `R2 (one edited file must block the WHOLE tier): 30 prose-tier path(s) were converted to stubs` | R1 ×3, R8, **R5**, **R7** all printed `ok` before the abort. R3's kill confirmed by probe: `R3-probe: SILENT` (no `differs: agents/builder.md`) |
+| M2 | a path present on only one side is ignored (both the whole-entry pre-check and the `Only in` branch) | `thin_extra_file_blocks` (R2) | `R2 (a child-only extra prose file must block the tier ON ITS OWN): 30 prose-tier path(s) were converted to stubs` | R1 ×3, R5, R7, **R2 edit-case**, **R3 names-case** |
+| M3 | the `Only in <dir>: <name>` normalisation removed, diff's raw wording emitted | the one-sided-blocker assertion inside `thin_extra_file_blocks` | `R2: the one-sided path was not reported as the blocker — the tier may have been blocked for another reason` | R1 ×3, R5, R7, R2 edit-case, R3 names-case. The on-disk R2 claim still held (the tier stayed unconverted); what died is the *naming*, which is R3's contract |
+| M4 | `diff -rq` loses its `-q` | `thin_names_every_blocker` (R3) | `R3: the refusal did not name the differing path agents/builder.md` | R1 ×3, R5, R7, R2 edit-case |
+| M5 | the E24-F03 maintenance branch gated behind `THIN_OPT_IN` | E24-F03's own `thin_child_prose_tier_is_stubbed` | `R2: prose-tier AGENTS.md is not a stub in a fresh cascade child` | R1's kill-freedom confirmed by probe: `R1-probe: CONVERTED`. R5's kill confirmed by probe: `R5-probe: UN-THINNED` |
+| M6 | `--thin` converts one path at a time, skipping only the blocking entries | `thin_all_or_nothing_on_edit` (R2) | `R2 (one edited file must block the WHOLE tier): 11 prose-tier path(s) were converted to stubs` | R1 ×3, R8, R5, R7 |
+| M7 | the unflagged path converts anyway | E24-F03's own `existing_full_copy_child_untouched` | `R9: the cascade converted an existing full-copy child's body to stubs` | R1's kill-freedom confirmed by probe: `R1-probe: CONVERTED` |
+| M8 | the unreachable-umbrella path calls `die` | `thin_unreachable_umbrella_is_not_fatal` (R6) | `R6: --thin with an unreachable umbrella exited 1 — refusing to convert is a warning, never an install failure` | everything before it, including R1 ×3, R5, R7, R2 ×2, R3 ×2, R4 ×2 |
+| M9 | `--standalone` leaves `umbrella.root` set | `standalone_clears_umbrella_root` (R10) | `R10: --standalone did not clear umbrella.root:   root: "../../"` | **R9** (`standalone_materialises_body`) printed `ok` immediately before |
+| M10 | the `--standalone` + `--umbrella` / `--thin` rejections removed | `standalone_flag_conflicts` (R12, `test_install.sh`) | `E24-F04 R12: --standalone with --umbrella was accepted` | R6's negative control green in the same suite; `test_umbrella.sh` **fully green, 70 `ok`** — R9 and R1 unaffected |
+| M11 | the conversion writes its own stub text instead of calling `stub_tree` | `converted_equals_fresh_thin` (R1) | `R1: converted AGENTS.md differs from a FRESHLY cascaded thin child's — a converted child must be byte-indistinguishable from a fresh one` | `thin_converts_pristine_child` printed `ok` first — i.e. the sentinel sweep passed and only the byte-equality caught it, which is exactly why that control exists |
+
+**No mutation survived.** Three findings worth passing on:
+
+1. **M6's first run was invalid and was re-run.** The mutant also changed the conversion's
+   `ok` line, so it killed R1's output assertion for a reason unrelated to all-or-nothing.
+   Rewritten to reproduce that line byte-for-byte; the corrected mutant is the row above.
+2. **M4's kill is the nested-path shape, not the regular-file shape the `.plan.md`
+   predicts.** Measured on this box, `diff -r` on two *directories* prints
+   `diff --color -r <a> <b>` before the hunks, and my parser's fail-closed `*)` arm turns
+   that into the *tier entry* (`agents`) — so `agents/builder.md` is lost and R3 dies. But
+   `diff -r` on two *regular files* prints hunks with no filename, and there the same
+   fail-closed arm synthesises `AGENTS.md`, which **is** the right answer for a
+   regular-file tier entry. So `-q` is load-bearing for **paths nested inside a directory
+   tier entry**; the plan's stated reason (the two regular-file entries "could never be
+   named") is narrower than written, because the fallback covers them. `-q` is still
+   required and still tested — the reason recorded in the code comment is the plan's, and a
+   reviewer may want it corrected to this one.
+3. **Two mutations (M5, M7) are caught by E24-F03's assertions before F04's own.** That is
+   the correct and stronger outcome — both mutations break a guarantee F03 already shipped
+   — but it means R5's and R4's own cases are unobserved in those runs, which is why the
+   probe rows are recorded above rather than left implicit.
+
+## Anything I could not satisfy
+
+- Nothing in the spec was skipped or narrowed. All 19 tasks are ticked and all 12 R-ids
+  have a passing test.
+- One constraint from `.plan.md` is **deliberately untested and says so in the code**:
+  `prose_tier_blockers`' "fail closed when `diff` is not on `PATH`". `.plan.md` already
+  records that a portable fixture cannot remove `diff` from `PATH` without removing it from
+  the harness running the test, so it is defence in depth in the same spirit as
+  `stub_files_in`'s write checks.
+- One incidental repo rule bit this feature and is worth knowing: **`harness-install.sh` may
+  not contain the word "drift"** (case-insensitively) — `tests/test_drift_check.sh` R18 and
+  `tests/test_installer_toggles.sh` R13 both fail the chain on it. Two comments used it in
+  its ordinary English sense; they say "diverge" now.
+
