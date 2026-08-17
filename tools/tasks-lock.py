@@ -1501,10 +1501,44 @@ def _write_landed(text, target_id, record):
 # a title, a park — because none of it affects which repository a ref is checked in.
 
 
-def _landing_shape(text, target_id):
-    """The inputs that decide WHAT gets probed: (is_feature, ordered slice repos)."""
+def _manifest_witness(hdir, repos):
+    """What the MANIFEST told the plan about exactly the repositories it probed.
+
+    The manifest is the authority for row 3 and the locator for row 4, so it is part of
+    what a resolution ASSUMED and therefore part of what must be re-validated. Without
+    this the fingerprint pinned only the slice NAMES: repoint `alpha` at a different
+    checkout while the probe is in flight and the names still match, so a proof computed
+    against the old checkout was written for a repository the board no longer points at.
+    Reproduced before it was fixed — `verified: "ancestor"` landed while the manifest
+    named a checkout that had never seen the commit.
+
+    Two deliberate choices:
+
+    * The witness covers ONLY the repositories this feature has slices in, not the whole
+      file. An unrelated repo's path changing did not affect this resolution, and the
+      shape fingerprint's whole discipline is to pin the inputs that decided what was
+      probed — nothing more, or ordinary concurrent edits would abort unrelated writes.
+    * It is the (repo, path) PAIRS rather than a content hash. Both detect a change; only
+      the pairs let the abort message name WHICH repository moved and to where, and the
+      set is one feature's slice repos, so there is nothing to compress.
+
+    The manifest STATE travels with it: absent → present flips whether row 3 can refuse at
+    all, so a resolution made under "no authority" must not be written under one.
+    """
+    state, mapping = _manifest_repos(hdir)
+    return (state, tuple((r, mapping.get(r)) for r in repos))
+
+
+def _landing_shape(text, target_id, hdir):
+    """The inputs that decide WHAT gets probed, and what the answer was computed against.
+
+    (is_feature, ordered slice repos, manifest witness). The witness is None for a feature
+    with no slices: that path never consults the manifest, so a manifest appearing or
+    vanishing must not abort a write it could not have influenced.
+    """
     is_feature, feature = _feature_entry(text, target_id)
-    return (is_feature, tuple(_slice_repos(feature) if is_feature else ()))
+    repos = tuple(_slice_repos(feature) if is_feature else ())
+    return (is_feature, repos, _manifest_witness(hdir, repos) if repos else None)
 
 
 def _landing_plan(target_id, status, evidence_list, hdir):
@@ -1520,23 +1554,37 @@ def _landing_plan(target_id, status, evidence_list, hdir):
     except OSError:
         text = ""
     return {
-        "shape": _landing_shape(text, target_id),
+        "shape": _landing_shape(text, target_id, hdir),
         "record": _resolve_landing(text, target_id, status, evidence_list, hdir),
     }
 
 
 def _shape_str(shape):
-    is_feature, repos = shape
+    is_feature, repos, witness = shape
     if not is_feature:
         return "not a feature on this board"
     if not repos:
         return "a single-repo feature"
-    return "a feature sliced across %s" % ", ".join(repos)
+    where = ""
+    if witness is not None:
+        state, pairs = witness
+        where = " with manifest %s: %s" % (
+            state,
+            ", ".join("%s=%s" % (r, p if p else "<unlocatable>") for r, p in pairs),
+        )
+    return "a feature sliced across %s%s" % (", ".join(repos), where)
 
 
-def _check_plan_still_applies(text, target_id, plan):
-    """Re-validate the pre-lock resolution against the authoritative in-lock read."""
-    shape = _landing_shape(text, target_id)
+def _check_plan_still_applies(text, target_id, plan, hdir):
+    """Re-validate the pre-lock resolution against the authoritative in-lock read.
+
+    An ABORT here is not a refusal of the claim: nothing is written, and the operator
+    re-runs — which converges, because the re-run both plans and re-validates against the
+    new state. That is why a manifest that has become absent or unreadable aborts rather
+    than degrading: degrading would write a record justified by an authority that no
+    longer exists, while aborting costs one re-run and can never record something false.
+    """
+    shape = _landing_shape(text, target_id, hdir)
     if shape == plan["shape"]:
         return plan["record"]
     _die(
@@ -1570,7 +1618,7 @@ def _set_status_text_transform(target_id, status, plan=None):
         # still answers for the board being written, so a refusal leaves the board
         # byte-identical and no external call runs in-lock.
         landed = (
-            _check_plan_still_applies(text, target_id, plan)
+            _check_plan_still_applies(text, target_id, plan, _harness_dir())
             if plan is not None
             else None
         )

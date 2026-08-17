@@ -60,6 +60,9 @@
 #   R17 evidence resolution (which talks to the NETWORK) runs OUTSIDE the board lock,
 #       and R17b: the pre-lock resolution is re-validated in-lock, so moving it out
 #       did not trade starvation for a TOCTOU
+#   R17c the fingerprint covers what the MANIFEST told the plan, not just the slice names —
+#       repointing a repo's `path` mid-probe aborts the write instead of recording a proof
+#       computed against the old checkout
 #   R19 the documented ORDER agrees with the mechanism: `done` is written after the work
 #       LANDS, never on the approve verdict (prose contract, section-scoped)
 #   R20 the MANIFEST says where a slice's repository is — an ALIASED `path` is followed,
@@ -97,14 +100,71 @@ set -eu
 
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-landed)"
-trap 'rm -rf "$T"' EXIT
 
-fail() { echo "FAIL: $1" >&2; exit 1; }
+# `set -e` kills this script SILENTLY when a fixture step fails — no assertion runs, so the
+# output ends after the last `ok` and the reader is left guessing. Measured while proving the
+# fixture guard load-bearing: removing a bare remote's explicit HEAD aborted the run at a
+# later `git remote set-head --auto` with no message at all. Name the most likely cause on
+# the way out, so an aborted run says so instead of looking like a truncated pass.
+_FAILED=""
+_cleanup() {
+  _rc=$?
+  rm -rf "$T"
+  if [ "$_rc" -ne 0 ] && [ -z "$_FAILED" ]; then
+    echo "FAIL: the suite ABORTED at a fixture step (set -e), not at an assertion — the" >&2
+    echo "      commonest cause is a git fixture whose branch was ASSUMED rather than set;" >&2
+    echo "      re-run with 'sh -x tests/test_landed_evidence.sh' to locate the step." >&2
+  fi
+  exit "$_rc"
+}
+trap _cleanup EXIT
+
+fail() { _FAILED=1; echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
 command -v git >/dev/null 2>&1 || fail "git is absent — ancestry cannot be checked"
 command -v node >/dev/null 2>&1 || fail "node is absent — next-task.mjs cannot run"
 command -v python3 >/dev/null 2>&1 || fail "python3 is absent"
+
+# ── HERMETIC FIXTURES: no fixture may inherit the host's default branch ───────────────
+# A suite that depends on the developer's global git config is a suite whose green means
+# "on this machine". This one did: two bare remotes were created with `git init --bare` and
+# never had their HEAD set, so on a host with `init.defaultBranch=main` they published
+# `main` and R10/R16 passed — while on git's historical default they publish an unborn
+# `master`, `_default_ref` (which deliberately never guesses a branch NAME) finds nothing to
+# compare against, and a local-only commit was recorded `unchecked` instead of REFUSED.
+# Measured: `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=init.defaultBranch
+# GIT_CONFIG_VALUE_0=master sh tests/test_landed_evidence.sh` exited 1 at R10.
+#
+# So the host's value is overridden with a SENTINEL that is neither `main` nor `master`.
+# Every fixture must now name its own branch explicitly; any that forgets gets a branch
+# nobody looks for and fails immediately, on THIS machine, instead of only on someone
+# else's. The sentinel is the guard: it makes the dependency impossible to reintroduce
+# silently, because inheriting it is never accidentally correct.
+FIXTURE_BRANCH_SENTINEL="fixture-forgot-to-set-head"
+GIT_CONFIG_COUNT=1
+GIT_CONFIG_KEY_0=init.defaultBranch
+GIT_CONFIG_VALUE_0="$FIXTURE_BRANCH_SENTINEL"
+export GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+# ...and PROVE the override reached git. `GIT_CONFIG_*` needs git >= 2.31; on an older git
+# it is silently ignored, which would put the suite straight back to host-dependence with
+# no symptom. Assert at SETUP, where the message names the real cause.
+( cd "$T" && git init -q sentinel-probe )
+[ "$(cd "$T/sentinel-probe" && git symbolic-ref HEAD)" = "refs/heads/$FIXTURE_BRANCH_SENTINEL" ] \
+  || fail "the init.defaultBranch override did not take effect (git $(git --version | awk '{print $3}') may predate GIT_CONFIG_*) — every fixture below would silently inherit the host's default branch, so a green run here would only mean 'on this machine'"
+rm -rf "$T/sentinel-probe"
+
+# mkbare <name> [branch] — a bare remote whose published HEAD is EXPLICIT, then ASSERTED.
+# `git init --bare` does not set HEAD to anything a later push changes: pushing `main` into
+# a bare repo whose HEAD names an unborn `master` leaves HEAD on `master`, and that symref
+# is exactly what `ls-remote --symref` reports as the remote's default branch.
+mkbare() {
+  _b="${2:-main}"
+  ( cd "$T" && git init -q --bare "$1" )
+  ( cd "$T/$1" && git symbolic-ref HEAD "refs/heads/$_b" )
+  [ "$(cd "$T/$1" && git symbolic-ref HEAD)" = "refs/heads/$_b" ] \
+    || fail "fixture $1: the bare remote publishes $(cd "$T/$1" && git symbolic-ref HEAD), not refs/heads/$_b — the remote's default branch is what every ancestry check here compares against"
+}
 
 LOCK="$SRC/tools/tasks-lock.py"
 VALIDATE="$SRC/tools/validate-board.py"
@@ -544,7 +604,7 @@ pass "E99-F102 R9 the_field_is_additive_legacy_boards_still_validate"
 mkrepo B
 HDB="$T/repoB/hd"
 BOARDB="$HDB/state/tasks.json"
-( cd "$T" && git init -q --bare remote.git )
+mkbare remote.git
 ( cd "$T/repoB" && git_q remote add origin "$T/remote.git" && git_q push origin main )
 UNPUSHED_PARENT="$(cd "$T/repoB" && git rev-parse HEAD)"
 ( cd "$T/repoB" && : > local-only.txt && git_q add -A && git_q commit -m "local only, never pushed" )
@@ -679,7 +739,7 @@ pass "E99-F102 R12 regression_e09f02_a_sliced_feature_over_a_closed_pr"
 mkrepo C
 HDC="$T/repoC/hd"
 BOARDC="$HDC/state/tasks.json"
-( cd "$T" && git init -q --bare trunkremote.git && cd trunkremote.git && git symbolic-ref HEAD refs/heads/trunk )
+mkbare trunkremote.git trunk
 ( cd "$T/repoC" && git_q remote add origin "$T/trunkremote.git" )
 # `trunk` IS the default and carries the base commit; `main` exists on the remote too and
 # carries a commit that is NOT on trunk — the decoy the name-guess would have selected.
@@ -974,7 +1034,7 @@ pass "E99-F102 R15 a_remoteless_default_is_resolved_authoritatively_or_not_at_al
 # around or switch off.
 mkdir -p "$T/staleclone/hd/state" "$T/staleclone/hd/store" "$T/staleclone/hd/tools"
 cp "$SCHEMA" "$T/staleclone/hd/store/"; cp "$VALIDATE" "$T/staleclone/hd/tools/"
-( cd "$T" && git init -q --bare staleremote.git )
+mkbare staleremote.git
 ( cd "$T/staleclone" && git init -q . && git symbolic-ref HEAD refs/heads/main )
 : > "$T/staleclone/seed.txt"; ( cd "$T/staleclone" && git_q add -A && git_q commit -m base )
 ( cd "$T/staleclone" && git_q remote add origin "$T/staleremote.git" && git_q push origin main )
@@ -1271,6 +1331,135 @@ set_status "$W/.harness" E01-F02 in-progress --timeout 1
 await_bg "$LP_BG" "$T/lp4.rc"
 [ "$(cat "$T/lp4.rc")" = "0" ] \
   || fail "R17b control: an unrelated concurrent write aborted the sliced transition (rc=$(cat "$T/lp4.rc")) — the fingerprint is over-broad: $(cat "$T/lp4.out")"
+# ── R17c: the fingerprint must cover the MANIFEST, not just the slice NAMES ───────────
+# Review round 1 on this PR. The manifest is the authority for row 3 and the locator for
+# row 4, so it is part of what a resolution ASSUMED — and therefore part of what has to be
+# re-validated. It was not: the fingerprint pinned only the slice names, so repointing a
+# repo's `path` while the probe was in flight left the names matching and the write went
+# ahead. Reproduced before the fix: `verified: "ancestor"`, computed against the old
+# checkout, was written while the manifest named a checkout that had never seen the commit.
+Y="$T/mtoc"
+mkdir -p "$Y/.harness/state" "$Y/.harness/store" "$Y/.harness/tools" "$T/real-alpha" "$T/decoy-alpha"
+cp "$SCHEMA" "$Y/.harness/store/"; cp "$VALIDATE" "$Y/.harness/tools/"
+( cd "$Y" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+: > "$Y/README.md"; ( cd "$Y" && git_q add -A && git_q commit -m board )
+( cd "$T/real-alpha" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+: > "$T/real-alpha/src.txt"; ( cd "$T/real-alpha" && git_q add -A && git_q commit -m "the work" )
+Y_LANDED="$(cd "$T/real-alpha" && git rev-parse main)"
+( cd "$T/decoy-alpha" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+: > "$T/decoy-alpha/other.txt"; ( cd "$T/decoy-alpha" && git_q add -A && git_q commit -m unrelated )
+( cd "$T/decoy-alpha" && git cat-file -e "$Y_LANDED^{commit}" 2>/dev/null ) \
+  && fail "R17c setup: the decoy already has the evidence commit, so a swap would prove nothing"
+cat > "$Y/.harness/harness.config.yaml" <<'EOF'
+store:
+  backend: local
+umbrella:
+  manifest: ../umbrella.manifest.yaml
+EOF
+ymanifest() {  # ymanifest <dir-under-T> [extra]
+  cat > "$Y/umbrella.manifest.yaml" <<EOF
+repos:
+  alpha:
+    path: ../$1
+    init: ./init.sh
+    test_command: "true"${2:-}
+EOF
+}
+yboard() {
+  cat > "$Y/.harness/state/tasks.json" <<'EOF'
+{ "project": "mtoc", "epics": [ { "id": "E01", "title": "e", "status": "in-progress",
+  "features": [ { "id": "E01-F01", "title": "f", "status": "in-review", "sdd": true,
+    "spec_path": "s/",
+    "slices": [ { "id": "E01-F01@alpha", "repo": "alpha", "status": "done", "merged": true } ] } ] } ] }
+EOF
+}
+# A second shim: sleep on `for-each-ref` and then DELEGATE to the real git, so the probe is
+# slow but its verdict is genuine (R17's shim fails the call, which would answer row 6).
+YSENT="$T/mtoc-probe"
+mkdir -p "$T/bin2"
+cat > "$T/bin2/git" <<EOF
+#!/bin/sh
+for a in "\$@"; do
+  if [ "\$a" = "for-each-ref" ]; then : > "$YSENT"; sleep 3; break; fi
+done
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$T/bin2/git"
+ywait() {
+  rm -f "$YSENT"
+  _i=0
+  while [ ! -f "$YSENT" ]; do
+    _i=$((_i + 1))
+    [ "$_i" -gt 150 ] && fail "R17c: the probe never ran — this case would be vacuous"
+    sleep 0.1
+  done
+}
+ystart() {
+  ( set +e
+    PATH="$T/bin2:$PATH" HARNESS_DIR="$Y/.harness" python3 "$LOCK" set-status E01-F01 done \
+      --evidence "alpha=$Y_LANDED" >"$T/y.out" 2>&1
+    echo $? > "$T/y.rc" ) &
+  Y_BG=$!
+}
+
+# THE KILL: repoint `alpha` at a checkout that has never seen the commit, mid-probe.
+ymanifest real-alpha; yboard; rm -f "$T/y.rc"
+ystart; ywait
+ymanifest decoy-alpha
+await_bg "$Y_BG" "$T/y.rc"
+[ "$(cat "$T/y.rc")" = "0" ] && fail "R17c: a proof resolved against one checkout was written after the manifest repointed that repository at another — the fingerprint covers the slice NAMES but not what the manifest said they were: $(cat "$T/y.out")"
+grep -q "changed between the evidence check and the write" "$T/y.out" \
+  || fail "R17c: the abort does not say the resolution no longer applies: $(cat "$T/y.out")"
+grep -q "decoy-alpha" "$T/y.out" \
+  || fail "R17c: the abort does not name WHERE the repository moved to — the witness is a hash or a bare flag, and the operator cannot see what changed: $(cat "$T/y.out")"
+[ "$(field "$Y/.harness/state/tasks.json" "d['status']")" = "in-review" ] \
+  || fail "R17c: the feature moved despite the abort"
+[ "$(field "$Y/.harness/state/tasks.json" "'landed' in d")" = "False" ] \
+  || fail "R17c: a record justified by the OLD checkout was written anyway"
+
+# CONTROL 1 — the identical run with NO swap must SUCCEED, so R17c is about the swap and
+# not about the manifest path being unusable.
+ymanifest real-alpha; yboard; rm -f "$T/y.rc"
+ystart; ywait
+await_bg "$Y_BG" "$T/y.rc"
+[ "$(cat "$T/y.rc")" = "0" ] || fail "R17c control-1: the same run without a swap FAILED (rc=$(cat "$T/y.rc")): $(cat "$T/y.out")"
+[ "$(field "$Y/.harness/state/tasks.json" "d['landed']['slices'][0]['verified']")" = "ancestor" ] \
+  || fail "R17c control-1: the unswapped run did not verify"
+
+# CONTROL 2 — an UNRELATED manifest edit (a repository this feature has no slice in) must
+# NOT abort. The witness pins the inputs this resolution used, not the whole file; pinning
+# the file would abort ordinary concurrent edits and teach operators to re-run blindly.
+ymanifest real-alpha; yboard; rm -f "$T/y.rc"
+ystart; ywait
+ymanifest real-alpha '
+  unrelated-repo:
+    path: ../somewhere-else
+    init: ./init.sh
+    test_command: "true"'
+await_bg "$Y_BG" "$T/y.rc"
+[ "$(cat "$T/y.rc")" = "0" ] \
+  || fail "R17c control-2: adding an UNRELATED repository to the manifest aborted the write (rc=$(cat "$T/y.rc")) — the witness is over-broad: $(cat "$T/y.out")"
+[ "$(field "$Y/.harness/state/tasks.json" "d['landed']['slices'][0]['verified']")" = "ancestor" ] \
+  || fail "R17c control-2: the transition did not land"
+
+# CONTROL 3 — the manifest DISAPPEARING mid-probe aborts too. A record resolved under an
+# authority that no longer exists must not be written; the abort costs one re-run, and the
+# re-run converges because it both plans and re-validates under the new state.
+ymanifest real-alpha; yboard; rm -f "$T/y.rc"
+ystart; ywait
+rm -f "$Y/umbrella.manifest.yaml"
+await_bg "$Y_BG" "$T/y.rc"
+[ "$(cat "$T/y.rc")" = "0" ] \
+  && fail "R17c control-3: the manifest vanished mid-probe and the proof it authorised was written anyway: $(cat "$T/y.out")"
+[ "$(field "$Y/.harness/state/tasks.json" "'landed' in d")" = "False" ] \
+  || fail "R17c control-3: a record was written after its authority disappeared"
+# ...and the re-run CONVERGES rather than aborting forever: with no manifest there is no
+# authority, so the same command now degrades to row 4 and completes.
+yboard
+set_status "$Y/.harness" E01-F01 done --evidence "alpha=$Y_LANDED"
+[ "$SS_RC" = "0" ] || fail "R17c control-3: the re-run after the manifest vanished ALSO aborted (rc=$SS_RC) — the abort must converge, not livelock: $SS_OUT"
+pass "E99-F102 R17c the_fingerprint_covers_what_the_manifest_told_the_plan"
+
 pass "E99-F102 R17 evidence_resolution_runs_outside_the_lock_and_is_revalidated_inside_it"
 
 # ── R19: the documented ORDER must not defeat the mechanism ───────────────────────────

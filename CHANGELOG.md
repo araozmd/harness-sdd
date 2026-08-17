@@ -301,7 +301,36 @@ repositories, so there is no single commit for it.)
 **Additive.** `landed` and `commit` are optional in the schema; boards written by v0.64.0
 stay valid, and their `unchecked` rows stay `unchecked` until something rewrites them.
 
-The suite mirrors the table: **21 cases**, every refusal paired with a control that must
+**The fingerprint covers the manifest, not just the slice names.** The pre-lock resolution
+is re-validated under the lock against a fingerprint of what it assumed — and since the
+manifest is the authority for row 3 and the locator for row 4, it is part of that. It was
+not: repointing a repo's `path` while the probe was in flight left the slice names matching,
+so a proof computed against the old checkout was written for a repository the board no
+longer pointed at (reproduced: `verified: "ancestor"` landed while the manifest named a
+checkout that had never seen the commit). The witness is the `(repo, path)` pairs for
+**exactly this feature's slice repos** — not the whole file, or an unrelated repo's edit
+would abort ordinary concurrent writes; and pairs rather than a content hash, because both
+detect the change but only pairs let the abort name *which* repository moved and *where*.
+A manifest that has become absent or unreadable also aborts: an abort is **not** a refusal —
+nothing is written and the re-run converges (it plans and re-validates under the same new
+state) — whereas degrading would write a record justified by an authority that no longer
+exists.
+
+**The suite no longer depends on the developer's git config.** Two bare remotes were created
+without setting `HEAD`, so on a host with `init.defaultBranch=main` they published `main`
+and the suite was green — while on git's historical default they publish an unborn `master`,
+`_default_ref` (which never guesses a branch NAME) finds nothing to compare against, and a
+local-only commit was recorded `unchecked` instead of REFUSED. Measured: forcing
+`init.defaultBranch=master` exited **1** at R10. Every fixture now names its own branch, and
+the suite **overrides `init.defaultBranch` with a sentinel** that is neither `main` nor
+`master`, so inheriting it is never accidentally correct and the dependency cannot be
+reintroduced silently — with a setup-time assertion that the override actually reached git
+(`GIT_CONFIG_*` needs git ≥ 2.31 and is otherwise ignored). A `set -e` abort at a fixture
+step now says so instead of looking like a truncated pass. Measured both ways: the pre-fix
+state is **green here and red on a `master` host**; with the sentinel, the same omission is
+**red here**.
+
+The suite mirrors the table: **22 cases**, every refusal paired with a control that must
 SUCCEED. The contract half's `R18` — which proved that half performed **no** I/O — is
 deliberately **retired rather than weakened**: that claim is false here by design, and its
 successor is `R17`, which allows I/O but proves none of it happens **inside** the board lock.
