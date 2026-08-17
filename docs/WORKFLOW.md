@@ -274,10 +274,11 @@ stateDiagram-v2
     pending --> in_progress: sdd:false · autonomous:false (--gated) ⏸ HUMAN GATE — parked until a human approves
     spec_ready --> in_progress: human approves ⏸ HUMAN GATE (skipped if autonomous:true)
     in_progress --> in_review: Builder writes code from approved specs
-    in_review --> done: Reviewer approves
+    in_review --> in_review: Reviewer approves · open the PR · still not done
+    in_review --> done: the PR MERGES · set-status done --evidence <merge commit>
     in_review --> in_progress: Reviewer rejects · feedback → progress/
     done --> [*]
-    note right of done: Reviewer verdict only — append to progress/history.md
+    note right of done: written after the work LANDS, never on the approval — append to progress/history.md
 ```
 
 ## Ownership & scoped selection (`owner` + `/sdd-next --mine`)
@@ -423,6 +424,97 @@ bare boolean carries no reason (the thing that makes a gate legible), so it need
 companion note — at which point it is a duplicate park; and two mechanisms meaning
 "held, do not route" is how a tool that honours one and not the other ends up
 routing a gated item.
+
+### `done` needs a landing record (`landed`)
+
+`done` is what stops the selector routing an item. So a feature marked `done` whose
+work never merged is both **unshipped and unreachable** — nothing will ever pick it
+up again, while downstream briefs cite it as a landed mechanism. An audit of 148
+`done` features across seven repositories found **four**: `E99-F58` and `E99-F59`
+sat on never-pushed local branches; `E09-F02` and `E99-F29` on PRs that were closed
+**unmerged**. All four were found **by accident**, and the harm is already in the
+corpus — the board entry for `E99-F32`, the feature that actually shipped the
+Spanish Managed Login, cites `E99-F29` as landed.
+
+```
+# single-repo feature
+python3 .harness/tools/tasks-lock.py set-status <id> done --evidence <ref|none:why>
+# SLICED feature: repeat --evidence once per slice repository
+python3 .harness/tools/tasks-lock.py set-status <id> done \
+    --evidence viernes-infra=<ref> --evidence viernes-users=none:<why>
+```
+
+```jsonc
+{ "id": "E99-F77", "status": "done",
+  "landed": { "ref": "68d3638", "verified": "unchecked" } }
+
+// a SLICED feature: one record per repository, and the feature-level `verified`
+// rolls up to the WEAKEST slice.
+{ "id": "E09-F02", "status": "done",
+  "landed": { "ref": "viernes-infra=abc1234; viernes-users=none: superseded",
+              "verified": "declared",
+              "slices": [ { "repo": "viernes-infra", "ref": "abc1234", "verified": "unchecked" },
+                          { "repo": "viernes-users", "ref": "none: superseded", "verified": "declared" } ] } }
+```
+
+**When `done` is written: after the work LANDS.** An approve verdict says the work
+is *correct*, not that it is *merged*. So the order on the main path is: approve →
+open the PR (the feature stays `in-review`) → **observe the merge** → then
+`set-status done --evidence <merge commit>`. Writing `done` on the approval instead
+re-creates the exact failure this record exists to prevent — the PR is later closed
+unmerged or abandoned and the feature sits `done`, unselectable, with work that never
+shipped — and it also makes the record useless, because the only ref that exists at
+approval time is an unmerged branch tip.
+
+⚠️ **There is no board state yet for "approved, awaiting merge".** A feature left
+`in-review` is *not* inert: the selector routes `in-review` to `reviewer`, so
+`/sdd-next` will keep offering an already-approved feature for review. Until a
+first-class hold exists, **park** it while the PR is open (`parked.reason: "PR #N
+open, awaiting merge"`) — a parked feature is reported as blocked and never
+selected — then unpark and write `done` with the merge commit. `set-status` refuses
+any transition while a park is in place, so the unpark comes first.
+
+`none:<why>` remains the one legitimate `done` with nothing to merge (a console
+action, a supersession). Use it when there is **nothing** to merge — never when
+there is something that has not merged *yet*.
+
+⚠️ **Recorded, not verified — yet.** The helper does **not** check the reference. It
+runs no git, opens no connection, resolves no repository, and never decides whether a
+commit reached a default branch. Every ref is stored as `verified: "unchecked"` (or
+`"declared"` for `none:<why>`), with a warning saying so; `repo`/`base` are absent;
+and `verified: "ancestor"` is something this version **cannot** write. Verification
+is a separate, later change. What you get today is that the claim is **on the board
+and greppable** rather than nowhere — re-auditing becomes a scan instead of commit
+archaeology across four colliding id namespaces.
+
+**Every feature needs it, sliced or not.** A sliced feature *looks* attested — the
+schema refuses `done` unless every slice is `done` *and* `merged` — but **nothing in
+the harness ever writes `slice.merged`**. Every occurrence in `tools/` is a read or
+a type assertion; the agent sets it by hand through `apply --mutator`. `E09-F02` is
+the proof: a sliced feature whose three slices are all `merged: true` while the
+first slice's own `pr` field points at `viernes-infra#24` — closed, unmerged.
+Exempting the weaker mechanism from the stronger one would ship that hole documented
+as safe, so a sliced feature satisfies **both**: every slice `done`+`merged`, *and*
+evidence — **one binding per slice repository**.
+
+| the `--evidence` value | what happens |
+|---|---|
+| any reference (a sha, a PR URL, a tag) | accepted with a **warning**, recorded `verified: "unchecked"` |
+| `none:<why>` | accepted, recorded `verified: "declared"` — work with no commit (a console action, a supersession). The reason is required |
+| omitted, on **any** feature (sliced included) | **REFUSED**, board left byte-identical |
+| **unbound** (`<ref>`, no `<repo>=`) on a **sliced** feature | **REFUSED** — it names no repository, so it attests no particular slice |
+| bound to a repo the feature has **no slice in**, **repeated** for one repo, or **missing** for a slice repo | **REFUSED**, naming the repository |
+| `<repo>=<ref>` on a feature with **no** slices | **REFUSED** — it would record a repository the feature does not have |
+| on any **non-`done`** transition | **REFUSED** — the record means one thing |
+
+The value is deliberately **not** classified further: asking whether a string "looks
+like a commit id" is a verification question — the 40-hex assumption it invites
+misses SHA-256's 64-character ids — and it belongs with the code that resolves
+objects. Everything that is not `none:<why>` is transcribed verbatim.
+
+**The record is additive.** `landed` is optional in the schema and never required by
+it, only by the write path, so every board written before this existed stays valid
+and stays unattested.
 
 ## The human-in-the-loop gate
 
@@ -698,8 +790,11 @@ So:
 6. Reviewer runs tests + Playwright, verifies every R-id. On **reject** it writes
    file-based feedback to `progress/<run>/review.md` → `in-progress` → Builder
    addresses → re-review; this build↔review loop repeats until green. On **approve**
-   → `done`. Each round is recorded in `progress/history.md`.
-7. History updated. Orchestrator picks the next task.
+   the feature stays `in-review` and the PR is opened. Each round is recorded in
+   `progress/history.md`.
+7. The PR **merges** → `set-status done --evidence <merge commit>`. `done` is written
+   after the work lands, never on the approval (see "`done` needs a landing record").
+8. History updated. Orchestrator picks the next task.
 
 ### Which Builder runs — deterministic escalation
 

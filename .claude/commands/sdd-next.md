@@ -17,7 +17,9 @@ Act as the **Orchestrator** (`agents/orchestrator.md`).
      spawn **builder** with the specs, then `in-review`. (A `spec-ready` feature
      *without* `autonomous:true` is parked at the human gate — not actionable.)
    - `in-progress` → spawn **builder** with the approved specs only, then `in-review`.
-   - `in-review` → spawn **reviewer**; approve → `done`, reject → back to `in-progress`.
+   - `in-review` → spawn **reviewer**; approve → open the PR and LEAVE it `in-review`
+     (`done` is written only after the work merges — see `agents/orchestrator.md`
+     “Writing `done`”), reject → back to `in-progress`.
 4. Append what happened to `progress/history.md`.
 
 Map `$ARGUMENTS` to the selector's closed scope flags:
