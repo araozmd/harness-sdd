@@ -787,8 +787,12 @@ gen_body_stub() {
 # THE REFERENCE IS THE UMBRELLA BODY'S COPY, NOT $SRC. The question a conversion asks is
 # "if I drop this content and point at the umbrella, does the child lose anything?", and the
 # umbrella's copy is the thing the stub will name. In a cascade the two happen to coincide
-# (install_one "$UMB" runs before the child loop); a single-target --thin run in a child
-# proves they are not the same reference.
+# (install_one "$UMB" runs before the child loop), so passing $SRC here passes every
+# cascade-built case. The run that separates them — and the ONLY one that does — is
+# tests/test_umbrella.sh::thin_reference_is_the_umbrella_body: a child still byte-identical
+# to $SRC, an umbrella edited ahead of it, converted single-target. Under the $SRC reference
+# that child converts, and its prose tier is deleted and redirected at umbrella content it
+# never held.
 #
 # CALL `diff`, DO NOT WALK THE TREES. The predicate needed is "are these two trees
 # identical", which is `diff -r`'s exit status. stub_tree is the precedent AND the scar:
@@ -807,8 +811,10 @@ gen_body_stub() {
 #     not assumed; it is what the mutation `diff -rq loses its -q` actually kills.
 #
 # FAIL CLOSED. Where byte-identity cannot be ESTABLISHED — a path present on one side only,
-# an entry missing outright, `diff` absent from PATH, output this function cannot parse —
-# the entry BLOCKS. Absence of evidence of an edit is not evidence of its absence. A
+# an entry missing outright, `diff` absent from PATH, a non-zero `diff` that printed nothing,
+# output this function cannot parse — the entry BLOCKS. `diff`'s EXIT STATUS is the contract
+# and its lines only name the paths; deriving the decision from the parsed lines alone fails
+# OPEN. Absence of evidence of an edit is not evidence of its absence. A
 # child-local extra file inside the prose tier is the sharpest case: stub_tree begins with
 # `rm -rf` + `cp -R "$SRC/<rel>"`, so a conversion would DELETE it.
 prose_tier_blockers() {
@@ -836,6 +842,15 @@ prose_tier_blockers() {
     if _ptb_out="$(diff -rq "$_ptb_a" "$_ptb_b" 2>&1)"; then
       continue
     fi
+    # THE EXIT STATUS IS THE CONTRACT — the parsed lines only NAME the paths. Without this
+    # line the block decision would be derived entirely from what the loop below manages to
+    # parse, so a non-zero exit that produced NO OUTPUT would yield no blocker at all: the
+    # tier would be reported convertible on the strength of a comparison that said it was
+    # not. That is failing OPEN in a destructive path, and it contradicts the fail-closed
+    # rule stated above. Deliberately not claimed as tested, for the same reason as the
+    # `diff`-absent arm: the system `diff` does not produce that combination, and a fixture
+    # that shimmed one onto PATH would be testing the shim, not this installer.
+    [ -n "$_ptb_out" ] || { printf '%s\n' "$_ptb_rel"; continue; }
     printf '%s\n' "$_ptb_out" | while IFS= read -r _ptb_line; do
       [ -n "$_ptb_line" ] || continue
       case "$_ptb_line" in
