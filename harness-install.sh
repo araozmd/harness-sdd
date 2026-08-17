@@ -886,8 +886,9 @@ pr_loop_enabled() {
 
 # _cfg_workers_roster_is_true <file> — exit 0 ONLY when <file> has a top-level `workers:`
 # section whose DIRECT child `roster:` key carries one of the three literal enabling forms
-# `true`, `"true"` or `'true'` (each with an optional real trailing ` # comment`). Any other
-# line, any other value, an absent key, an absent section, a missing file: exit 1.
+# `true`, `"true"` or `'true'` (each with an optional real trailing ` # comment`), and whose
+# section is free of tab indentation. Any other line, any other value, a tab anywhere in the
+# section's indentation, an absent key, an absent section, a missing file: exit 1.
 #
 # WHITELIST, NOT A DECODER. The previous shape of this helper decoded the scalar and
 # compared the result to `true`, and lost that game once per review round — a `#` inside a
@@ -914,12 +915,28 @@ pr_loop_enabled() {
 # with the key set, it is a MALFORMED document a real parser refuses outright. `[[:space:]]`
 # spans the tab, which would have accepted exactly that and enabled the roster on a file
 # nothing else can load. Matching literal spaces closes the axis in one move rather than one
-# whitespace character at a time, and NOTHING skips a tab-polluted line: measuring its indent
-# with spaces yields 0, so `workers:\n\tjunk: 1\n  roster: true` fixes the direct-child indent
-# at 0 and the `roster:` line reads as a descendant — OFF, which is what a malformed document
-# deserves. Skipping such a line instead would let the next well-formed line set the indent and
-# ENABLE the roster on that same unparseable file, i.e. fail OPEN on exactly the input this
-# rule exists to reject.
+# whitespace character at a time.
+#
+# THE TAB RULE COVERS THE WHOLE SECTION, NOT JUST THE PREFIX BEFORE THE KEY. A tab in the
+# indentation of ANY line of the `workers:` section makes the document unparseable, so the
+# section is malformed and the gate is OFF wherever that line sits relative to `roster:` —
+# before it (`workers:\n\tjunk: 1\n  roster: true`) or after it
+# (`workers:\n  roster: true\n\tjunk: 1`) alike. One malformed-document class must not have
+# two answers depending on line order, which is what stopping at the first `roster:` line
+# produced. So the scan CANNOT stop the moment it has a value: it records the FIRST direct
+# `roster:` line's verdict, then keeps reading to the END of the section (a new top-level
+# key, a dedent back out, or EOF) before answering. Nothing skips a tab-polluted line
+# either: measuring its indent with spaces yields 0, so `workers:\n\tjunk: 1\n  roster: true`
+# ALSO fixes the direct-child indent at 0 and makes the `roster:` line read as a descendant —
+# two independent reasons for OFF on one unparseable file. Skipping such a line instead would
+# let the next well-formed line set the indent, i.e. fail OPEN on exactly the input this rule
+# exists to reject. A tab on a blank or comment-only line is not indentation of anything and
+# is left alone, as those lines carry no indent signal to begin with.
+#
+# SCOPED TO THE SECTION, NOT TO THE FILE. This reads one key; it is not a document validator.
+# A tab in some OTHER top-level section leaves `workers:` alone, because vetoing on any tab
+# anywhere in the file would turn one stray tab in an unrelated block into a silent global
+# opt-out — a denial of service on the gate that no message here could explain.
 # Section-scoped like _cfg_pr_loop_value, so a same-named key under ANOTHER top-level
 # section can never change roster behavior; commented example lines never match either.
 #
@@ -937,14 +954,16 @@ _cfg_workers_roster_is_true() {
       if ($0 ~ /^[[:space:]]*(#.*)?$/) next          # blank or comment-only: no indent signal
       if ($0 ~ /^[^[:space:]]/) { w=0; next }        # a new top-level key ends the section
       match($0, /^ */); ind = RLENGTH                # indent is SPACES — a tab cannot indent YAML
+      if (substr($0, ind + 1, 1) == "\t") tab = 1    # …and one tab voids the WHOLE section
       if (cind < 0) cind = ind                       # first key line fixes the child indent
       if (ind < cind) { w=0; next }                  # dedented back out of the section
       if (ind > cind) next                           # deeper: a descendant, not workers.roster
       if ($0 !~ /^ *roster:/) next                   # some other direct child
+      if (seen) next                                 # the FIRST direct roster: already decided
+      seen = 1
       if ($0 ~ ok) hit = 1                           # …and ONLY the whitelist enables
-      exit
     }
-    END { exit(hit ? 0 : 1) }
+    END { exit((hit && !tab) ? 0 : 1) }
   ' "$1"
 }
 

@@ -324,6 +324,21 @@ PEOF
   # the child indent itself and ENABLE the roster on a file no parser will load — failing OPEN
   # on exactly the input the tab rule exists to reject.
   _probe tab_polluted     'workers:\n\tjunk: 1\n  roster: true\n'      disabled
+  # SAME MALFORMED CLASS, OPPOSITE LINE ORDER, SAME ANSWER. A real parser refuses the file
+  # whether the tab sits before or after the key, so the tab rule covers the WHOLE section,
+  # not just the prefix the scan happens to read before it has a value. Answering at the
+  # first `roster:` line and stopping there resolves this row ENABLED while `tab_polluted`
+  # above resolves DISABLED — one document class with two answers, decided by line order.
+  _probe tab_after_key    'workers:\n  roster: true\n\tjunk: 1\n'      disabled
+  # …but the rule is SCOPED TO THE SECTION, not to the file: this gate reads one key, it does
+  # not validate the document. A tab in an unrelated top-level block — on either side of
+  # `workers:` — leaves a clean `workers:` section enabled, because vetoing on any tab
+  # anywhere would make one stray tab elsewhere a silent global opt-out from the roster.
+  _probe tab_other_after  'workers:\n  roster: true\nci:\n\tjunk: 1\n' enabled
+  _probe tab_other_before 'ci:\n\tjunk: 1\nworkers:\n  roster: true\n' enabled
+  # THE FIRST DIRECT `roster:` DECIDES, and finishing the section must not have changed that:
+  # a later duplicate cannot promote a `false` first key into an enabled gate.
+  _probe first_roster_wins 'workers:\n  roster: false\n  roster: true\n' disabled
   # …and the space-indented control still enables, so the rules above did not simply turn the
   # gate off for everyone.
   _probe space_indent_ctl 'workers:\n  roster: true\n'                enabled
