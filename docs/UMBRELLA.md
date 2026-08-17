@@ -282,13 +282,21 @@ set `done` prematurely while a slice or the integration gate is red):
   `depends_on` gates on the *stored* status, so a dependent feature stays blocked until
   the upstream `done` is actually persisted). The schema enforces this cross-field
   invariant — a feature cannot be stored `done` while any slice is not `done`+`merged`.
+  The manifest is also what **locates** each slice's repository for that check: `path:` is
+  resolved against the manifest file's own directory, so the sibling layout the example uses
+  (`../viernes-bff`) and any key that is not a directory name both work. A slice naming a
+  repository the manifest does not declare is **refused** — the same fact `next-task.mjs`
+  already halts on as `manifest-error`; one that is declared but not present in this
+  checkout simply degrades to `unchecked`.
+
   That write also carries a **landing record, bound per slice repository** (E99-F102):
   `tasks-lock.py set-status <id> done --evidence <repo>=<ref>`, repeated **once per slice
   repo**. The `merged` flags this rollup reads are hand-typed and nothing verifies them
   (`E09-F02` carries `merged: true` on a slice whose own `pr` is a closed, unmerged PR),
   and a single unbound ref would let one slice's merge commit answer for all of them — so
   an unbound value on a sliced feature is refused, as is a missing binding. The reference
-  is **recorded, not checked** in this version; see `docs/WORKFLOW.md`.
+  is **checked** against that repository's default branch; see `docs/WORKFLOW.md` for the
+  decision table, including what happens when the check is impossible.
 - **Failure** — if the integration command exits **non-zero**, keep the feature out of
   `done` and surface the integration failure.
 

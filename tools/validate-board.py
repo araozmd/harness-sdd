@@ -230,11 +230,24 @@ def _fallback_errors(data):
                         # selector meant a board could pass init.sh AND this file and
                         # then make every next-task.mjs run die with `input-error` —
                         # three acceptance surfaces, one of them unreachable.
-                        for k in ("repo", "base"):
+                        for k in ("repo", "base", "commit"):
                             if k in landed and (not isinstance(landed[k], str) or not landed[k]):
                                 errors.append(
                                     "%s.landed.%s: expected a non-empty string" % (fw, k)
                                 )
+                        # E99-F129: `ref` may be a MOVING target (a branch resolves just
+                        # as a sha does), so a proof names the immutable id it was
+                        # computed on. Scoped to the unsliced case: a sliced feature's
+                        # `ref` is a joined summary and each slice carries its own.
+                        if (
+                            landed.get("verified") == "ancestor"
+                            and "slices" not in landed
+                            and not landed.get("commit")
+                        ):
+                            errors.append(
+                                "%s.landed.verified 'ancestor': no `commit` — a proof "
+                                "must name the immutable id it was checked on" % fw
+                            )
                         # PER-SLICE landing (E99-F102). A sliced feature's evidence
                         # is bound to each slice repository — one entry per repo, so a
                         # per-repository verdict has somewhere to land. Mirrored
@@ -262,6 +275,17 @@ def _fallback_errors(data):
                                         errors.append(
                                             "%s.%s: expected a non-empty string" % (lw, k)
                                         )
+                                if "commit" in lrec and (
+                                    not isinstance(lrec["commit"], str) or not lrec["commit"]
+                                ):
+                                    errors.append(
+                                        "%s.commit: expected a non-empty string" % lw
+                                    )
+                                if lrec.get("verified") == "ancestor" and not lrec.get("commit"):
+                                    errors.append(
+                                        "%s.verified 'ancestor': no `commit` — a proof "
+                                        "must name the immutable id it was checked on" % lw
+                                    )
                                 if lrec.get("verified") not in LANDED_VERIFIED:
                                     errors.append(
                                         "%s.verified '%s': not one of %s"

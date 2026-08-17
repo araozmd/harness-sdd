@@ -54,6 +54,7 @@
                   "required": ["ref", "verified"],
                   "properties": {
                     "ref": { "type": "string", "minLength": 1 },
+                    "commit": { "$comment": "Optional (additive, E99-F129). The IMMUTABLE commit id `ref` resolved to when the record was written, and the id ancestry was actually computed on. `ref` is what the operator claimed and may be a MOVING target — a branch name resolves just as a sha does, and recording only that would be an attestation that decays the moment the branch moves. Present exactly when this checkout resolved the object, so its presence is the signal that a lookup happened; required wherever `verified` is `ancestor`, because an attestation nobody can re-check is the defect this feature exists to remove.", "type": "string", "minLength": 1 },
                     "verified": { "enum": ["ancestor", "unchecked", "declared"] },
                     "repo": { "type": "string", "minLength": 1 },
                     "base": { "type": "string", "minLength": 1 },
@@ -67,13 +68,30 @@
                         "properties": {
                           "repo": { "type": "string", "minLength": 1 },
                           "ref": { "type": "string", "minLength": 1 },
+                          "commit": { "type": "string", "minLength": 1 },
                           "verified": { "enum": ["ancestor", "unchecked", "declared"] },
                           "base": { "type": "string", "minLength": 1 }
-                        }
+                        },
+                        "allOf": [
+                          {
+                            "$comment": "A per-slice `ancestor` must name the immutable id it was proved for (E99-F129).",
+                            "if": { "required": ["verified"], "properties": { "verified": { "const": "ancestor" } } },
+                            "then": { "required": ["commit"] }
+                          }
+                        ]
                       }
                     }
                   },
                   "allOf": [
+                    {
+                      "$comment": "A feature-level `ancestor` on a SINGLE-REPO feature must name the immutable id it was proved for (E99-F129). Scoped to the unsliced case on purpose: a sliced feature's `ref` is a joined summary of several repositories, so there is no one commit for it — each slice carries its own under `slices[].commit`.",
+                      "if": {
+                        "required": ["verified"],
+                        "properties": { "verified": { "const": "ancestor" } },
+                        "not": { "required": ["slices"] }
+                      },
+                      "then": { "required": ["commit"] }
+                    },
                     {
                       "$comment": "The feature-level rollup can never be STRONGER than its slices: if any slice is not `ancestor`, the feature is not `ancestor` either. The write path today cannot produce `ancestor` at all, so this rule exists for the two ways one can still appear: a hand-edited board, and the verification follow-up. Without it, a board could claim a proof over an `unchecked` slice — the same false attestation the per-slice binding exists to prevent, re-entered by hand. Expressible in draft-07 via `contains`, so all three acceptance surfaces (this schema, validate-board.py's zero-dependency fallback, next-task.mjs) can agree on it.",
                       "if": {

@@ -308,8 +308,14 @@ function validateBoard(board) {
         if (!LANDED_VERIFIED.has(feature.landed.verified)) {
           throw new Error(`${feature.id}.landed.verified ${JSON.stringify(feature.landed.verified)} is unsupported (expected one of: ${[...LANDED_VERIFIED].join(', ')})`);
         }
-        for (const k of ['repo', 'base']) {
+        for (const k of ['repo', 'base', 'commit']) {
           if (feature.landed[k] !== undefined) assertString(feature.landed[k], `${feature.id}.landed.${k}`);
+        }
+        // E99-F129: `ref` may be a moving target (a branch resolves just as a sha does),
+        // so a proof names the immutable id it was computed on. Unsliced only — a sliced
+        // feature's `ref` is a joined summary and each slice carries its own.
+        if (feature.landed.verified === 'ancestor' && feature.landed.slices === undefined && !feature.landed.commit) {
+          throw new Error(`${feature.id}.landed.verified ancestor has no commit: a proof must name the immutable id it was checked on`);
         }
         // A SLICED feature's evidence is bound per slice repository, so the record
         // carries one entry per repo — where a per-repository verdict will land.
@@ -325,6 +331,10 @@ function validateBoard(board) {
             assertObject(rec, ls);
             assertString(rec.repo, `${ls}.repo`);
             assertString(rec.ref, `${ls}.ref`);
+            if (rec.commit !== undefined) assertString(rec.commit, `${ls}.commit`);
+            if (rec.verified === 'ancestor' && !rec.commit) {
+              throw new Error(`${ls}.verified ancestor has no commit: a proof must name the immutable id it was checked on`);
+            }
             if (!LANDED_VERIFIED.has(rec.verified)) {
               throw new Error(`${ls}.verified ${JSON.stringify(rec.verified)} is unsupported (expected one of: ${[...LANDED_VERIFIED].join(', ')})`);
             }

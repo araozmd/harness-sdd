@@ -147,13 +147,55 @@ Orchestrator's exclusive ownership of state writes.
   it before the `done` write. `none:<why>` stays the one legitimate `done` with nothing to
   merge; it is not a way to close work that has simply not merged **yet**.
 
-  ⚠️ **Recorded, NOT verified.** This helper does not check the reference. It runs no git,
-  opens no connection, resolves no repository, and never decides whether a commit reached a
-  default branch — so every ref is stored as `landed.verified: "unchecked"` (or `"declared"`
-  for `none:<why>`), with a warning saying exactly that, and `repo`/`base` are absent. It
-  **cannot** write `verified: "ancestor"`. Verification is a separate, later change; what
-  you get today is that the claim is **on the board and greppable** instead of nowhere, so
-  re-auditing is a scan rather than commit archaeology across four colliding id namespaces.
+  **Each ref is now VERIFIED, per one decision table.** The question verification actually
+  asks is *what happens when verification is impossible?* — and answering it per input, as
+  fixes accumulate, is how the first attempt collected five rounds of the same defect. It is
+  answered once, here, and `tools/tasks-lock.py` implements these rows in order:
+
+  | # | situation | outcome |
+  |---|---|---|
+  | 1 | `none:<why>` | `declared` |
+  | 2 | the ref resolves to no git object anywhere | `unchecked` + warning |
+  | 3 | a binding names a repo the **manifest does not contain** | **REFUSED** |
+  | 4 | the manifest names it, but the directory is absent/unreadable here | `unchecked` |
+  | 5 | the repo is located, but the object is unknown in it | `unchecked` |
+  | 6 | no default branch can be determined | `unchecked` |
+  | 7 | ancestry is checkable and TRUE | `ancestor` |
+  | 8 | ancestry is FALSE **and** the base tip is confirmed current | **REFUSED** |
+  | 9 | ancestry is FALSE but the tip could **not** be confirmed | `unchecked` |
+
+  **The asymmetry that decides every row.** A *false attestation* is worse than none: the
+  record gains the authority of a check that never happened, and every later reader treats
+  it as settled — so `ancestor` comes only from row 7. A *false refusal* is worse than a
+  silent pass: a guard that rejects genuinely merged work gets routed around or switched
+  off — so refusal is reserved for the two provably-wrong claims, row 8 and row 3.
+
+  Rows 3 and 4 are the distinction that matters most in practice: a **malformed claim** (the
+  board names a repository the project does not declare — checkable with no I/O, and a board
+  `next-task.mjs` already halts on) is refused, while **not being able to see a repository
+  from here** is this checkout's limitation and degrades. Row 3 applies only where a
+  manifest is configured and readable; with no manifest there is no authority to call a
+  claim malformed, so resolution falls back to a best-effort search and every miss degrades.
+
+  Rows 8 and 9 are the stale-tip rule: `refs/remotes/origin/*` is a local snapshot, so a
+  refusal is confirmed against the remote's real tip before it is issued, and an
+  unconfirmable one degrades rather than blocking. The accept side is deliberately not
+  probed: a wrong `ancestor` from a stale local tip needs a rewritten remote, while a wrong
+  refusal needs only an ordinary merge.
+
+  **Where a repository lives is the manifest's answer**, resolved against the manifest
+  file's own directory — the shipped example uses siblings (`../viernes-bff`), and nothing
+  requires a key to equal a directory name. **What an object id looks like is git's answer**:
+  every non-`none:` ref is handed to `git rev-parse --verify <ref>^{commit}`, so a sha of any
+  width, a tag and a branch all resolve and no hand-written pattern can exclude the next
+  thing git learns. Because a branch **moves**, the record keeps both `ref` (what you
+  claimed, verbatim) and `commit` (the immutable id it resolved to, which is what ancestry
+  was computed on and what a re-audit re-checks); the validators require `commit` wherever
+  `verified` is `ancestor`.
+
+  All of it runs **before** the board lock is taken, with a shape fingerprint re-validated
+  inside it — the probes are network calls, and holding the sole write lock across them
+  starves concurrent writers out of their own transitions.
 
   **Every feature, sliced or not.** A sliced feature *looks* attested — the schema refuses
   `done` unless every slice is `done` **and** `merged` — but **nothing in the harness ever

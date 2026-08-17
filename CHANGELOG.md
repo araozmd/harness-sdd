@@ -102,6 +102,7 @@ New suite `tests/test_pr_round_outcome.sh` (parses and runs under `/bin/dash`).
 
 ## [0.65.0] — 2026-08-17
 
+<<<<<<< HEAD
 ### Added — ✨ an explicit repository resolver (E99-F129c)
 
 `tools/repo-resolve.py` answers one question — **which repository is a claim about, and
@@ -218,6 +219,93 @@ inside a double-quoted string are command substitution in every POSIX shell, and
 parses eagerly where bash defers — so a suite that only ever ran under bash had never
 actually been parsed by the shell Debian and Ubuntu call `sh`. It lands **unused by design**: this is the first of
 two staged changes, and the verification rows consume it next.
+=======
+### Added — ✨ the landing record becomes a VERDICT (E99-F129)
+
+v0.64.0 made `done` carry a landing record and deliberately verified nothing: every ref
+landed as `verified: "unchecked"`. This turns that record into a checked claim — the ref is
+resolved with git, tested against the repository's default branch, and a claim that is
+**provably wrong** is refused.
+
+**One question, answered once.** Verification is not a feature; it is a single question
+asked of every ref: *what happens when verification is impossible?* The first attempt
+answered it per input, as fixes accumulated, and five review rounds each found the same
+shape again — a default branch guessed by name, one sha attesting many slices, a stale local
+tip, a slice repository located by directory basename, an unrecognised hash format. Every
+one was another input for which "I cannot check" silently became "fine, proceed". So the
+answer is a **table**, written before the code, carried in `tools/tasks-lock.py`'s header and
+`store/local.md`, and mirrored row-for-row by the suite:
+
+| # | situation | outcome | what the row costs |
+|---|---|---|---|
+| 1 | `none:<why>` | `declared` | no-code work stays expressible; the reason is required |
+| 2 | the ref resolves to no git object anywhere | `unchecked` + warning | an offline machine, or a repo this checkout cannot see, is never blocked |
+| 3 | a binding names a repo the **manifest does not contain** | **REFUSED** | a board that would be refused here is one `next-task.mjs` already halts on |
+| 4 | the manifest names it, directory absent/unreadable here | `unchecked` | a partial checkout keeps working |
+| 5 | the repo is located, the object is unknown in it | `unchecked` | an unfetched clone is not an accusation |
+| 6 | no default branch can be determined | `unchecked` | nothing is invented to compare against |
+| 7 | ancestry is checkable and TRUE | `ancestor` | the only source of a proof |
+| 8 | ancestry is FALSE **and** the base tip is confirmed current | **REFUSED** | the guard's whole point |
+| 9 | ancestry is FALSE, tip **not** confirmed | `unchecked` | a stale view never rejects merged work |
+
+**The asymmetry that decides every row, stated in the code:** a *false attestation* is worse
+than no attestation — the record gains the authority of a check that never happened, and
+every later reader treats it as settled — so `ancestor` comes only from row 7. A *false
+refusal* is worse than a silent pass — a guard that rejects genuinely merged work gets
+routed around, switched off, or worked around with `none:<why>`, after which it protects
+nothing — so refusal is reserved for the two provably-wrong claims: rows 8 and 3.
+
+**Rows 3 and 4 are the distinction the previous attempt was missing.** A **malformed claim**
+(the board names a repository the project does not declare — checkable with no I/O at all)
+is refused; **not being able to see a repository from here** is this checkout's limitation
+and degrades. Row 3 applies only where a manifest is configured and readable: with none
+there is no authority to call a claim malformed, so resolution falls back to a best-effort
+search and every miss degrades.
+
+**Newly enforced here** (rows 3, 4, and the two fixes below). **Carried from the earlier
+attempt, already built and reviewed there**: per-slice ancestry checked in the slice's OWN
+repository (row 7/8 scoping); default-branch **discovery** — the published symref, else
+`ls-remote --symref`, else an explicit `harness.defaultBranch` or a repository's single
+branch, never a name guess (row 6); remote-tip confirmation before a definitive refusal
+(rows 8/9); and probes resolved **before** the board lock with a shape fingerprint
+re-validated inside it — holding the sole write lock across bounded network probes starved
+concurrent writers out of their own transitions.
+
+**A repository's location is the manifest's answer** (round-5 P1). The previous code scanned
+the harness dir's parent for a child whose basename equalled the manifest key, so the
+shipped example's sibling layout (`path: ../viernes-bff`) and any aliased key resolved
+**nowhere** — and unmerged evidence for such a slice was accepted as `unchecked`, reaching
+`done` unexamined. Paths now resolve against the **manifest file's own directory**, which is
+what `umbrella.manifest.example.yaml` has always documented. Measured on a fixture whose key
+(`alpha`) is deliberately not its directory (`../elsewhere/alpha-checkout`): the landed
+commit verifies and the unmerged one is refused. Both readers of that file — this helper and
+`next-task.mjs`, which parses it independently — are held to the same answer by a test.
+
+**What an object id is, is git's answer** (round-5 P2). `^[0-9a-fA-F]{7,40}$` silently
+excluded SHA-256's 64-character ids: they fell through to "not a commit id" and were
+recorded unchecked, so an unmerged sha256 commit reached `done` unexamined. Nothing
+pattern-matches an id now — every non-`none:` value goes to
+`git rev-parse --verify <ref>^{commit}` and git decides. Proven on a real
+`--object-format=sha256` repository, not a synthetic 64-character string.
+
+Two consequences of asking git, handled deliberately: a **branch name resolves too**, and a
+branch **moves**. So the record keeps both, and they mean different things — `ref` is what
+the operator claimed, verbatim; **`commit`** (new, additive) is the immutable id it resolved
+to, which is what ancestry was computed on and what a re-audit must re-check. `commit` is
+present exactly when this checkout resolved the object, and all three acceptance surfaces
+now **require** it wherever `verified` is `ancestor`, because an attestation nobody can
+re-check is the defect this whole feature exists to remove. (Scoped to the unsliced record
+and to each slice record: a sliced feature's `ref` is a joined summary of several
+repositories, so there is no single commit for it.)
+
+**Additive.** `landed` and `commit` are optional in the schema; boards written by v0.64.0
+stay valid, and their `unchecked` rows stay `unchecked` until something rewrites them.
+
+The suite mirrors the table: **21 cases**, every refusal paired with a control that must
+SUCCEED. The contract half's `R18` — which proved that half performed **no** I/O — is
+deliberately **retired rather than weakened**: that claim is false here by design, and its
+successor is `R17`, which allows I/O but proves none of it happens **inside** the board lock.
+>>>>>>> 4a05fa4 (:closed_lock_with_key: E99-F129: turn the landing record into a VERDICT — one decision table, nine rows)
 
 ## [0.64.0] — 2026-08-17
 
