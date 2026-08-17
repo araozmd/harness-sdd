@@ -847,9 +847,10 @@ prose_tier_blockers() {
     # parse, so a non-zero exit that produced NO OUTPUT would yield no blocker at all: the
     # tier would be reported convertible on the strength of a comparison that said it was
     # not. That is failing OPEN in a destructive path, and it contradicts the fail-closed
-    # rule stated above. Deliberately not claimed as tested, for the same reason as the
-    # `diff`-absent arm: the system `diff` does not produce that combination, and a fixture
-    # that shimmed one onto PATH would be testing the shim, not this installer.
+    # rule stated above. Deliberately not claimed as tested: the system `diff` does not
+    # produce that combination, and a fixture that shimmed one onto PATH would have a WEAK
+    # CONTROL — a shim that always exits non-zero with no output is indistinguishable from
+    # an installer that blocks everything, which is the outcome the fixture would assert.
     [ -n "$_ptb_out" ] || { printf '%s\n' "$_ptb_rel"; continue; }
     printf '%s\n' "$_ptb_out" | while IFS= read -r _ptb_line; do
       [ -n "$_ptb_line" ] || continue
