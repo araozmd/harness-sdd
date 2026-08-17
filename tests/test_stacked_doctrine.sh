@@ -146,12 +146,27 @@ test_outcome_stated_mechanically() {
   # say `main` again leaves some *other* sentence mentioning the default branch, and a bare
   # presence check passes on prose that no longer states the outcome mechanically. That is
   # the expected value reachable by a second path, and it is why this is a conjunction.
-  _mech="$(printf '%s\n' "$_open" | awk 'BEGIN{RS=""} index($0,"still open")>0{n++} END{print n+0}')"
+  # Sentence scope, not paragraph scope: measured, a PARAGRAPH-scoped conjunction ALSO
+  # survives, because the mutated paragraph keeps a later sentence that happens to mention
+  # the default branch. Sentences are recovered by unwrapping the paragraph (prose wraps at
+  # ~92 columns, so a sentence spans lines) and splitting on ". ".
+  printf '%s\n' "$_open" \
+    | awk 'BEGIN{RS=""} {gsub(/\n/," "); n=split($0, s, /\. /); for(i=1;i<=n;i++) if (s[i] != "") print s[i]}' \
+    > "$T/lane-open-sentences"
+  _mech="$(grep -o 'still open' "$T/lane-open-sentences" | wc -l | tr -d ' ')"
   [ "$_mech" -ge 1 ] \
-    || fail "R3: no paragraph in the lane's opening says [still open] — the mechanical statement is that the LATER increments are still open when an earlier one merges; that is the whole outcome the lane delivers"
-  _mechbad="$(printf '%s\n' "$_open" | awk 'BEGIN{RS=""} index($0,"still open")>0 && index($0,"default branch")==0{n++} END{print n+0}')"
+    || fail "R3: no sentence in the lane's opening says [still open] — the mechanical statement is that the LATER increments are still open when an earlier one merges; that is the whole outcome the lane delivers"
+  _mechbad="$(awk 'index($0,"still open")>0 && index($0,"default branch")==0{n++} END{print n+0}' "$T/lane-open-sentences")"
   [ "$_mechbad" = "0" ] \
-    || fail "R3: $_mechbad paragraph(s) in the lane's opening state the outcome ([still open]) WITHOUT naming the [default branch] — merging an increment publishes that increment's work to the default branch, and the loop computes that branch rather than assuming it is called 'main'"
+    || fail "R3: $_mechbad sentence(s) in the lane's opening state the outcome ([still open]) WITHOUT naming the [default branch] — the two belong in ONE sentence: merging an increment publishes that increment's work to the default branch while the later increments are still open. A neighbouring sentence mentioning the default branch does not make the outcome sentence true"
+  # And the anti-anchor the plan names outright: the opening says `default branch`, NOT
+  # `main`. The loop computes the default branch and targets are not all called `main`.
+  # Matched in its backticked form, so `remains`/`domain` cannot satisfy it by accident.
+  # The backticks below are literal markdown, not a command substitution.
+  # shellcheck disable=SC2016
+  if printf '%s\n' "$_open" | grep -q '`main`'; then
+    fail "R3: the lane's opening paragraphs name the branch \`main\` — docs/WORKFLOW.md ships into targets whose default branch is called something else; say [default branch]"
+  fi
   # A banned TOKEN, not a claim: it cannot be paraphrased around. Scoped to the lane
   # because tools/pr-stack-guard.sh's header states the doctrine in the denial form and is
   # DO NOT TOUCH — so this makes no repo-wide uniqueness claim.
