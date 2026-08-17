@@ -119,3 +119,32 @@ enforces merge **order**, not atomicity. This version:
 - Scopes the lane to safely-splittable features only.
 - Explicitly calls out the unsolved case (atomic delivery of unsafely-intermediate
   capabilities) as out of scope.
+
+**Superseded by E21-F05 (2026-08-17).** (Kept as a paragraph rather than a subheading on
+purpose: the section-extraction helper that reads this record stops at the next heading of
+any level, so a subheading here would hide the note from its own test.)
+
+**E21-F05** ("The stacked-PR lane's doctrine document") rewrote the `## Stacked-PR lane`
+section of `docs/WORKFLOW.md` that this feature shipped. Nothing below edits F04's
+requirement text — a `done` feature's requirements are a historical record. This note
+records which of them the shipped document no longer matches, so a reader of F04 is not
+left with a spec its own deliverable contradicts.
+
+- **R6** — *superseded, in two parts.* The denial sentence R6 asked for is replaced by a
+  mechanical statement of the outcome (merging an increment publishes that increment's
+  work to the default branch while the later increments are still open), and R6's
+  wave-boundary guidance is deleted: it attributed a decomposition structure to E21-F01,
+  which defines none. The replacement subsection is `### Where to cut`.
+- **R7** — *retained in substance, heading renamed.* The manual restack procedure itself
+  is unchanged — the `git rebase --onto` steps and the warning against the bare two-arg
+  form stand exactly as F04 shipped them. Only the heading changed, to the section name
+  `harness-install.sh`'s shipped diagnostic already points readers at.
+- **R8's documentation clause** — *superseded as factually wrong.* R8 stated that with
+  `pr_loop.enabled: false` no stacking documentation is stamped. `docs/` is part of
+  `HARNESS_BODY_PROSE` and is copied with no `pr_loop` condition, so every install has
+  always carried this section. The document now says so.
+
+**F04-R8's behavioral half is untouched and still holds:** where `pr_loop.enabled` is
+`false` there is no guard invocation and no stacking-specific merge logic, and
+`tests/test_pr_loop.sh::test_stacking_inert_when_disabled` still asserts it. E21-F05
+changed no behavior at all — it changed one shipped document.
