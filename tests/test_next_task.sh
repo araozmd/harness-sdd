@@ -11,6 +11,17 @@ PASS=0
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { PASS=$((PASS + 1)); echo "PASS: $*"; }
 STATE_BEFORE=$(cksum "$ROOT/state/tasks.json")
+# Same before/after shape for the files R17 protects, and for the same reason. The
+# invariant is "this SUITE did not modify them", which is a statement about what runs
+# between these two readings — not about how the working tree compares to HEAD. Measuring
+# it with `git diff` instead conflates the suite's writes with ordinary uncommitted work,
+# so any Builder editing the schema failed R17 with "selector changed a protected file"
+# while the selector had changed nothing (E99-F118).
+PROTECTED="$ROOT/store/tasks.schema.json $ROOT/tools/task-diagnostics.py $ROOT/init.sh"
+protected_cksums() {
+  for _f in $PROTECTED; do cksum "$_f"; done
+}
+PROTECTED_BEFORE=$(protected_cksums)
 
 write_config() {
   approval=$1 identity=${2-} manifest=${3-}
@@ -539,9 +550,21 @@ PY
 pass "R15 distribution wiring"
 
 # Protected invariants: implementation tests must not replace these files/contracts.
-git diff --quiet -- "$ROOT/store/tasks.schema.json" \
-  "$ROOT/tools/task-diagnostics.py" "$ROOT/init.sh" ||
+[ "$(protected_cksums)" = "$PROTECTED_BEFORE" ] ||
   fail "selector changed a protected schema/helper/init file"
+# Negative space (E99-F118): pin that this guard is never measured against the working
+# tree again. Asserting the cksum form is PRESENT would not catch an edit that adds a
+# tree comparison beside it, and the tree comparison is the whole defect — it reports
+# ordinary uncommitted work as "the selector changed a protected file", i.e. a MANDATORY
+# gate failing on a Builder's own in-progress edit.
+#
+# The needle is assembled from two pieces on purpose: spelled out in full, this line
+# would match ITSELF and the check would fail on a clean tree. (It did, when first
+# written — the same way an earlier R14 diagnostic failed on its own message.)
+_wt_probe="git diff"
+if grep -q "$_wt_probe .*store/tasks\.schema\.json" "$0"; then
+  fail "the protected-file invariant is measuring the WORKING TREE again (E99-F118): compare cksums taken before and after the suite, not the tree against HEAD"
+fi
 [ "$(cksum "$ROOT/state/tasks.json")" = "$STATE_BEFORE" ] ||
   fail "selector suite changed the shared TaskStore"
 pass "R17 schema, state, diagnostic helper, and init invariants"
