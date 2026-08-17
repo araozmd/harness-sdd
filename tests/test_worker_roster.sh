@@ -316,7 +316,15 @@ PEOF
   # and the space after `roster:` are literal spaces, so both shapes stay OFF.
   _probe tab_indent       'workers:\n\troster: true\n'                disabled
   _probe tab_separator    'workers:\n  roster:\ttrue\n'               disabled
-  # …and the space-indented control still enables, so the rule above did not simply turn the
+  # A tab ANYWHERE in the section's indentation makes the document unparseable, so the whole
+  # section — including its space-indented lines — must stay OFF. This row pins HOW: the tab
+  # line is measured, not skipped. Measured with spaces its indent is 0, which fixes the
+  # direct-child indent at 0, so the following `  roster: true` reads as a descendant and never
+  # decides. Skipping tab lines instead (as "malformed, never a key") lets `  roster: true` set
+  # the child indent itself and ENABLE the roster on a file no parser will load — failing OPEN
+  # on exactly the input the tab rule exists to reject.
+  _probe tab_polluted     'workers:\n\tjunk: 1\n  roster: true\n'      disabled
+  # …and the space-indented control still enables, so the rules above did not simply turn the
   # gate off for everyone.
   _probe space_indent_ctl 'workers:\n  roster: true\n'                enabled
   # ── the whitelist class ────────────────────────────────────────────────────────────

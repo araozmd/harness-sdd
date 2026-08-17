@@ -914,8 +914,12 @@ pr_loop_enabled() {
 # with the key set, it is a MALFORMED document a real parser refuses outright. `[[:space:]]`
 # spans the tab, which would have accepted exactly that and enabled the roster on a file
 # nothing else can load. Matching literal spaces closes the axis in one move rather than one
-# whitespace character at a time, and a tab-indented line inside the section is skipped
-# entirely — it cannot set the direct-child indent and it can never match.
+# whitespace character at a time, and NOTHING skips a tab-polluted line: measuring its indent
+# with spaces yields 0, so `workers:\n\tjunk: 1\n  roster: true` fixes the direct-child indent
+# at 0 and the `roster:` line reads as a descendant — OFF, which is what a malformed document
+# deserves. Skipping such a line instead would let the next well-formed line set the indent and
+# ENABLE the roster on that same unparseable file, i.e. fail OPEN on exactly the input this
+# rule exists to reject.
 # Section-scoped like _cfg_pr_loop_value, so a same-named key under ANOTHER top-level
 # section can never change roster behavior; commented example lines never match either.
 #
@@ -932,7 +936,6 @@ _cfg_workers_roster_is_true() {
     w {
       if ($0 ~ /^[[:space:]]*(#.*)?$/) next          # blank or comment-only: no indent signal
       if ($0 ~ /^[^[:space:]]/) { w=0; next }        # a new top-level key ends the section
-      if ($0 ~ /^ *\t/) next                         # TAB in the indent: malformed YAML, never a key
       match($0, /^ */); ind = RLENGTH                # indent is SPACES — a tab cannot indent YAML
       if (cind < 0) cind = ind                       # first key line fixes the child indent
       if (ind < cind) { w=0; next }                  # dedented back out of the section
