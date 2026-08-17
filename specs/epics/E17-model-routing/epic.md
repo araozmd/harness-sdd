@@ -1,7 +1,7 @@
 ---
 id: E17
 title: Cost-aware execution & model routing
-status: pending          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: done             # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 ---
 
 # E17 — Cost-aware execution & model routing

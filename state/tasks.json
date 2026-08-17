@@ -530,7 +530,7 @@
     {
       "id": "E17",
       "title": "Cost-aware execution & model routing",
-      "status": "pending",
+      "status": "done",
       "features": [
         {
           "id": "E17-F01",
@@ -564,7 +564,7 @@
         {
           "id": "E17-F04",
           "title": "Worker roster: invocable CLIs as versioned data",
-          "status": "in-review",
+          "status": "done",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
