@@ -222,9 +222,17 @@ def _fallback_errors(data):
                                 "%s.landed.verified '%s': not one of %s"
                                 % (fw, landed.get("verified"), sorted(LANDED_VERIFIED))
                             )
+                        # Non-empty, not merely a string: an empty `repo`/`base` names
+                        # nothing, and the selector's own assertString has always
+                        # rejected it. Leaving the two validators laxer than the
+                        # selector meant a board could pass init.sh AND this file and
+                        # then make every next-task.mjs run die with `input-error` —
+                        # three acceptance surfaces, one of them unreachable.
                         for k in ("repo", "base"):
-                            if k in landed and not isinstance(landed[k], str):
-                                errors.append("%s.landed.%s: expected string" % (fw, k))
+                            if k in landed and (not isinstance(landed[k], str) or not landed[k]):
+                                errors.append(
+                                    "%s.landed.%s: expected a non-empty string" % (fw, k)
+                                )
                 # Umbrella mode (optional): mirror the slice checks from the JSON
                 # schema so corrupted cross-repo state is rejected even without
                 # jsonschema installed. Absent `slices` ⇒ single-repo, unaffected.

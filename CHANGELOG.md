@@ -64,6 +64,26 @@ a guard that blocked them would be routed around, and a routed-around guard is w
 than none. It does not wave through mark-before-push: with an `origin`, "merged" means
 `origin/HEAD`. Both halves are asserted, each against a control.
 
+**`origin/HEAD` means the branch the remote actually publishes, never a name we assume.**
+The first draft fell back to a hard-coded `origin/main` whenever `refs/remotes/origin/HEAD`
+was missing. Review reproduced the consequence on a remote whose default is `trunk`: with
+the symref absent, a commit that existed **only** on `origin/main` was recorded
+`verified: "ancestor"` — this feature emitting a **false attestation**, which is worse than
+the say-so it replaces, because the record now carries the authority of a check that never
+happened. The wrong base cuts both ways: work that *had* landed on `trunk` would read as
+provably-not-an-ancestor and be **refused**. So the order is now: the published symref, else
+`git ls-remote --symref origin HEAD` (bounded at 5s, every failure mapping to `None`), else
+nothing — and a repo with **no `origin` at all** still falls back to local `main`/`master`,
+which is the umbrella case and has no remote to be wrong about. An undiscoverable default
+degrades to `unchecked`; it never blocks the write. Pinned by **R13**, whose controls cover
+the trunk-tip accept, the base actually used, and an unreachable remote.
+
+`landed.repo` and `landed.base` are **non-empty** in the schema and the zero-dependency
+validator, matching the selector's long-standing `assertString`. They disagreed: a board
+carrying `"repo": ""` passed `init.sh` and `validate-board.py` and then made **every**
+`next-task.mjs` run die with `input-error` — legal by two acceptance surfaces, unusable by
+the third. Both halves are pinned separately (reverting either one alone reddens R8).
+
 ⚠️ **What it therefore does NOT close, measured.** A sha is only checked where it
 *resolves* — the harness dir's repo, its parent, and that parent's children. `E99-F58` and
 `E99-F59` are recorded on a board whose tree does not contain `~/repos/harness-sdd`, so

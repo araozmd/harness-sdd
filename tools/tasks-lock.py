@@ -698,11 +698,11 @@ def _refuse_if_parked(text, target_id):
 
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 _DECLARED_PREFIX = "none:"
-# Tried in order; the first that resolves is the default branch. `origin/HEAD` is
-# authoritative when the remote published it; the rest cover a repo whose HEAD was
-# never fetched and a board in a repo with NO REMOTE AT ALL (the viernes umbrella),
-# where `main` is simply the local default branch.
-_DEFAULT_REF_CANDIDATES = ("origin/main", "origin/master", "main", "master")
+# Used ONLY for a repo with no `origin` remote at all — a board in a bare checkout,
+# and the viernes umbrella, where `main` is simply the local default branch and
+# there is no remote to be wrong about. A repo that HAS an origin never guesses:
+# see `_default_ref`.
+_LOCAL_DEFAULT_CANDIDATES = ("main", "master")
 
 
 def _git_rc(args, cwd):
@@ -768,13 +768,49 @@ def _repo_candidates(hdir):
 
 
 def _default_ref(repo):
-    """The repo's default branch ref, or None when it cannot be determined."""
+    """The repo's default branch ref, or None when it cannot be determined.
+
+    NEVER guesses a remote's default branch by name. The first draft fell back to
+    `origin/main` whenever `refs/remotes/origin/HEAD` was missing, which review
+    reproduced against a remote whose HEAD is `trunk`: with `origin/HEAD` deleted,
+    a commit present only on `origin/main` was recorded `verified: "ancestor"`
+    though it had never reached the default branch. That is this feature emitting
+    a FALSE attestation — worse than the say-so it replaces, because the record
+    now carries the authority of a check that never happened. The same wrong base
+    also refuses in the other direction: work that did land on `trunk` reads as
+    provably-not-an-ancestor and the write is REJECTED.
+
+    So the order is: what the remote published, else what the remote says now,
+    else nothing. `None` is not a failure — the caller records `unchecked` with a
+    warning, which is the honest answer to "I could not tell".
+    """
     head = _git(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], cwd=repo)
     if head:
         return head[len("refs/remotes/") :] if head.startswith("refs/remotes/") else head
-    for ref in _DEFAULT_REF_CANDIDATES:
-        if _git_rc(["rev-parse", "--verify", "--quiet", ref + "^{commit}"], cwd=repo) == 0:
-            return ref
+
+    if _git(["remote", "get-url", "origin"], cwd=repo) is None:
+        # No origin at all: nothing published a default and nothing can. The local
+        # default branch is the only meaning "merged" can carry here.
+        for ref in _LOCAL_DEFAULT_CANDIDATES:
+            if _git_rc(["rev-parse", "--verify", "--quiet", ref + "^{commit}"], cwd=repo) == 0:
+                return ref
+        return None
+
+    # An origin exists but never published its HEAD locally (an older clone, a
+    # narrow fetch refspec). Ask it rather than assume. `_git` is bounded at 5s
+    # and maps every failure — offline, no auth, no such remote — to None, so an
+    # unreachable remote degrades to `unchecked` instead of blocking the write.
+    symref = _git(["ls-remote", "--symref", "origin", "HEAD"], cwd=repo)
+    for line in (symref or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[0] == "ref:" and parts[2] == "HEAD":
+            branch = parts[1]
+            if branch.startswith("refs/heads/"):
+                ref = "origin/" + branch[len("refs/heads/") :]
+                # Only usable if we actually have that ref locally to compare against.
+                if _git_rc(["rev-parse", "--verify", "--quiet", ref + "^{commit}"], cwd=repo) == 0:
+                    return ref
+            return None
     return None
 
 

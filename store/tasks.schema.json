@@ -55,8 +55,8 @@
                   "properties": {
                     "ref": { "type": "string", "minLength": 1 },
                     "verified": { "enum": ["ancestor", "unchecked", "declared"] },
-                    "repo": { "type": "string" },
-                    "base": { "type": "string" }
+                    "repo": { "type": "string", "minLength": 1 },
+                    "base": { "type": "string", "minLength": 1 }
                   }
                 },
                 "slices": {

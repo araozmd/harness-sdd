@@ -309,6 +309,23 @@ for _k in repo base; do
     && fail "R8: the selector accepted a non-string landed.$_k"
 done
 
+# ...and EMPTY, not just mistyped (review round 2). The schema typed `repo`/`base` as plain
+# strings and the fallback only checked `isinstance(..., str)`, while the selector's
+# `assertString` has always rejected "". So a board carrying `"repo": ""` passed init.sh
+# and validate-board.py and then made EVERY next-task.mjs run die with `input-error` — a
+# board legal by two of the three acceptance surfaces and unusable by the third. The three
+# now agree, on the non-empty side: an empty repo name or base ref names nothing, which is
+# the same reason `ref` carries minLength 1.
+for _k in repo base; do
+  mkbad "{ \"ref\": \"abc1234\", \"verified\": \"ancestor\", \"$_k\": \"\" }"
+  python3 "$VALIDATE" "$T/bad.json" "$SCHEMA" >/dev/null 2>&1 \
+    && fail "R8: the shared validator accepted an EMPTY landed.$_k — the selector rejects it, so this board validates and then breaks every selector run"
+  python3 "$T/nojs.py" >/dev/null 2>&1 \
+    && fail "R8: the ZERO-DEPENDENCY validator accepted an EMPTY landed.$_k"
+  ( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" >/dev/null 2>&1 ) \
+    && fail "R8: the selector accepted an EMPTY landed.$_k"
+done
+
 # CONTROL: the same shape with a legal value passes BOTH — otherwise the assertions above
 # would hold against a validator that rejects every `landed` record.
 mkbad '{ "ref": "abc1234", "verified": "unchecked" }'
@@ -489,5 +506,71 @@ set_status "$HD" E09-F02 done --evidence "none: superseded by E11; PR #24 closed
 _v="$(python3 -c "import json;print(json.load(open('$HD/state/tasks.json'))['epics'][0]['features'][0]['landed']['verified'])")"
 [ "$_v" = "declared" ] || fail "R12 control: the attestation recorded '$_v', not the honest 'declared'"
 pass "E99-F102 R12 regression_e09f02_a_sliced_feature_over_a_closed_pr"
+
+
+# ── R13: the remote's default branch is DISCOVERED, never guessed by name ─────────────
+# Review round 2. The first draft fell back to a hard-coded `origin/main` whenever
+# `refs/remotes/origin/HEAD` was missing. On a remote whose default is `trunk` that
+# records a commit which never reached the default branch as `verified: "ancestor"` —
+# this feature emitting a FALSE attestation, which is worse than the say-so it replaces,
+# because the record now carries the authority of a check that never happened.
+mkrepo C
+HDC="$T/repoC/hd"
+BOARDC="$HDC/state/tasks.json"
+( cd "$T" && git init -q --bare trunkremote.git && cd trunkremote.git && git symbolic-ref HEAD refs/heads/trunk )
+( cd "$T/repoC" && git_q remote add origin "$T/trunkremote.git" )
+# `trunk` IS the default and carries the base commit; `main` exists on the remote too and
+# carries a commit that is NOT on trunk — the decoy the name-guess would have selected.
+( cd "$T/repoC" && git_q checkout -b trunk && git_q push origin trunk )
+TRUNK_TIP="$(cd "$T/repoC" && git rev-parse HEAD)"
+( cd "$T/repoC" && git_q checkout main && : > "$T/repoC/main-only.txt" && git_q add -A && git_q commit -m "on main, NOT on trunk" && git_q push origin main )
+MAIN_ONLY="$(cd "$T/repoC" && git rev-parse HEAD)"
+( cd "$T/repoC" && git_q fetch origin && git_q remote set-head origin --auto )
+# Delete the published symref — and note WHICH command does that. `update-ref -d` follows
+# the symref and deletes its TARGET, so it removes `origin/trunk` and leaves `origin/HEAD`
+# dangling: a different state, which still satisfies a naive "is origin/HEAD gone?" check
+# while exercising none of this. Written that way first and it passed vacuously. Hence
+# `symbolic-ref -d`, plus an assertion that BOTH remote branches survived.
+( cd "$T/repoC" && git symbolic-ref -d refs/remotes/origin/HEAD >/dev/null 2>&1 || true )
+if ( cd "$T/repoC" && git symbolic-ref --quiet refs/remotes/origin/HEAD >/dev/null 2>&1 ); then
+  fail "R13 setup: origin/HEAD is still present, so the discovery path is not being exercised"
+fi
+( cd "$T/repoC" && git rev-parse --verify --quiet 'origin/trunk^{commit}' >/dev/null ) \
+  || fail "R13 setup: origin/trunk was deleted — the symref was dereferenced, so this fixture is the dangling-ref state, not the missing-HEAD state"
+( cd "$T/repoC" && git rev-parse --verify --quiet 'origin/main^{commit}' >/dev/null ) \
+  || fail "R13 setup: origin/main is absent, so the decoy the name-guess would pick does not exist"
+
+mkboard "$HDC"
+BEFORE="$(cat "$BOARDC")"
+set_status "$HDC" E01-F01 done --evidence "$MAIN_ONLY"
+# The exact false attestation, reproduced against the pre-fix helper before this was
+# written: it recorded {"verified": "ancestor", "base": "origin/main"} for this commit.
+if [ "$SS_RC" = "0" ]; then
+  _v="$(field "$BOARDC" "d['landed']['verified']")"
+  [ "$_v" = "ancestor" ] && fail "R13: a commit absent from the remote default branch (trunk) was attested as 'ancestor' — the default was guessed by NAME as $(field "$BOARDC" "d['landed']['base']")"
+  fail "R13: the write was accepted as '$_v'; discovery can see trunk, so this commit is provably not merged and must be REFUSED"
+fi
+[ "$BEFORE" = "$(cat "$BOARDC")" ] || fail "R13: the board moved despite the refusal"
+
+# CONTROL 1: a commit that IS on trunk is accepted, and the record NAMES trunk — so R13 is
+# not passing merely because repoC became unverifiable when the symref went away.
+mkboard "$HDC"
+set_status "$HDC" E01-F01 done --evidence "$TRUNK_TIP"
+[ "$SS_RC" = "0" ] || fail "R13 control 1: a commit on the REAL default branch was refused (rc=$SS_RC): $SS_OUT"
+[ "$(field "$BOARDC" "d['landed']['verified']")" = "ancestor" ] \
+  || fail "R13 control 1: the trunk-tip landing recorded $(field "$BOARDC" "d['landed']['verified']"), not ancestor"
+[ "$(field "$BOARDC" "d['landed']['base']")" = "origin/trunk" ] \
+  || fail "R13 control 1: the check used $(field "$BOARDC" "d['landed']['base']"), not the discovered origin/trunk"
+
+# CONTROL 2: an UNREACHABLE remote degrades to `unchecked` — it never blocks the write.
+# This is the property the name-guess was protecting and the reason the fix cannot simply
+# refuse whenever origin/HEAD is missing: an offline machine must still be able to record.
+( cd "$T/repoC" && git_q remote set-url origin "$T/does-not-exist.git" )
+mkboard "$HDC"
+set_status "$HDC" E01-F01 done --evidence "$TRUNK_TIP"
+[ "$SS_RC" = "0" ] || fail "R13 control 2: an unreachable remote BLOCKED the write (rc=$SS_RC) — undiscoverable must degrade, not block: $SS_OUT"
+[ "$(field "$BOARDC" "d['landed']['verified']")" = "unchecked" ] \
+  || fail "R13 control 2: expected 'unchecked' with an unreachable remote, got $(field "$BOARDC" "d['landed']['verified']")"
+pass "E99-F102 R13 the_remote_default_branch_is_discovered_not_guessed"
 
 echo "All landing-evidence tests passed."
