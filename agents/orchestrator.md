@@ -198,14 +198,16 @@ Emit each candidate record exactly as:
 Sort candidate ids numerically by epic then feature, with feature before slice and
 slice repository suffixes lexical. For one subject, emit **all applicable**
 non-owner reasons in this fixed order, then owner reasons: `dependency-cycle`,
-`gated-epic`, `unmet-dependency`, `human-gate`, `owner-excluded`,
-`owner-unresolved`. Sort every dependency named within a detail by the same
-canonical id order.
+`gated-epic`, `parked`/`gated-owner`, `unmet-dependency`, `human-gate`,
+`owner-excluded`, `owner-unresolved`. Sort every dependency named within a detail
+by the same canonical id order.
 
 | Reason code | When it applies | Exact human template |
 |---|---|---|
 | `dependency-cycle` | Subject participates in a same-kind feature or slice cycle. Emit the canonical full closed witness in addition to any unmet blocker. | `dependency cycle (<kind>): <id> -> ... -> <id>` |
 | `gated-epic` | An unfinished feature belongs to a `draft` epic. | `epic <id> is draft` |
+| `parked` | The feature carries a `parked` object with no `gate` — externally blocked, not workable *yet* (E06-F07). | `<reason> [(unblocked by: <text>)] [route when unparked: <route>]` |
+| `gated-owner` | The feature carries `parked.gate: "owner"` — the automatable work is finished and every remaining requirement is a **person's** (a console attestation, a deploy approval, a signature). **No agent advances it, so do not route one:** hand the reason to the human, leave the status alone, and move to the next candidate (E99-F77). | `owner gate: <reason> [(unblocked by: <text>)] [a person must act, not an agent; route when released: <route>]` |
 | `unmet-dependency` | A dependency is missing, not `done`, or a slice dependency is done but not merged. Name all blockers; use the actual status for a known non-done node. | `blocking dependencies: <id>=missing, <id>=<status>, <id>=done-but-unmerged` |
 | `human-gate` | A non-autonomous feature is parked at `spec-ready`, or a non-autonomous `sdd: false` quick fix remains `pending`. | Exactly `spec-ready requires approval` or `gated quick fix requires approval` |
 | `owner-excluded` | Only under resolved `--mine`, and only for an **otherwise actionable** candidate whose effective owner does not match. | Exactly `effective owner=<literal>` or `effective owner=unowned` |

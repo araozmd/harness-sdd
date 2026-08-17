@@ -190,12 +190,18 @@ Candidate records have the exact shape
 `blocked <id> [<reason-code>]: <human text>`. Sort candidates by numeric epic and
 feature id, feature before slice, and lexical slice suffix. Emit all applicable
 non-owner reasons for a subject in this order: `dependency-cycle`, `gated-epic`,
-`unmet-dependency`, `human-gate`; then scoped owner reasons
+`parked`/`gated-owner`, `unmet-dependency`, `human-gate`; then scoped owner reasons
 `owner-excluded`, `owner-unresolved`.
 
 - `dependency-cycle`: `dependency cycle (<kind>): <id> -> ... -> <id>`, using the
   canonical closed feature or slice witness.
 - `gated-epic`: `epic <id> is draft`.
+- `parked`: `<reason> [(unblocked by: <text>)] [route when unparked: <route>]`, for a
+  `parked` object with no `gate` — externally blocked, not workable *yet* (E06-F07).
+- `gated-owner`: `owner gate: <reason> [(unblocked by: <text>)] [a person must act, not
+  an agent; route when released: <route>]`, for `parked.gate: "owner"` — the automatable
+  work is finished and every remaining requirement is a person's (E99-F77). Do not route
+  an agent at it; the two codes are mutually exclusive and occupy the same position.
 - `unmet-dependency`: `blocking dependencies: <id>=missing,
   <id>=<status>, <id>=done-but-unmerged`; name every blocker in canonical order.
   Missing and cross-kind ids use `missing` and never become cycle nodes.
