@@ -469,8 +469,12 @@ def _imp(name, *a, **k):
         raise ImportError("blocked: simulate zero-dep install path")
     return _real(name, *a, **k)
 builtins.__import__ = _imp
+# E99-F102: a SLICED feature's evidence is bound per slice repository, so this fixture
+# declares one per slice repo. Both are `none:<why>` — the point here is the slices
+# invariant on the fallback path, and the fixture repos do not exist to be checked.
 sys.argv = ["tasks-lock.py", "set-status", "E01-F01", "done",
-            "--evidence", "none:fixture board, no repository to check against"]
+            "--evidence", "repo-a=none:fixture board, no repository to check against",
+            "--evidence", "repo-b=none:fixture board, no repository to check against"]
 try:
     runpy.run_path("$HELPER", run_name="__main__")
     sys.exit(0)

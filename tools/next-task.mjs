@@ -309,6 +309,31 @@ function validateBoard(board) {
         for (const k of ['repo', 'base']) {
           if (feature.landed[k] !== undefined) assertString(feature.landed[k], `${feature.id}.landed.${k}`);
         }
+        // Round 3: a SLICED feature's evidence is bound per slice repository and
+        // checked in that repository, so the record carries one entry per repo.
+        // Checked here for the same reason the rest of `landed` is — a board arriving
+        // through --tasks never passes the shared validator — and held to the same
+        // acceptance surface as the schema and validate-board.py.
+        if (feature.landed.slices !== undefined) {
+          if (!Array.isArray(feature.landed.slices) || feature.landed.slices.length === 0) {
+            throw new Error(`${feature.id}.landed.slices must be a non-empty array`);
+          }
+          for (const [li, rec] of feature.landed.slices.entries()) {
+            const ls = `${feature.id}.landed.slices[${li}]`;
+            assertObject(rec, ls);
+            assertString(rec.repo, `${ls}.repo`);
+            assertString(rec.ref, `${ls}.ref`);
+            if (!LANDED_VERIFIED.has(rec.verified)) {
+              throw new Error(`${ls}.verified ${JSON.stringify(rec.verified)} is unsupported (expected one of: ${[...LANDED_VERIFIED].join(', ')})`);
+            }
+            if (rec.base !== undefined) assertString(rec.base, `${ls}.base`);
+          }
+          // The rollup is never stronger than its slices: one unproved slice and the
+          // feature-level record cannot read `ancestor`.
+          if (feature.landed.verified === 'ancestor' && feature.landed.slices.some((rec) => rec.verified !== 'ancestor')) {
+            throw new Error(`${feature.id}.landed.verified ancestor claims more than was proved: a slice landing is not ancestor`);
+          }
+        }
       }
       const slices = [];
       if (feature.slices !== undefined) {

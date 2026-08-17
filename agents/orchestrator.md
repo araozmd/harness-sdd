@@ -259,17 +259,23 @@ feature transition to `done` carries its own proof:
 
 ```
 python3 "$HARNESS_DIR/tools/tasks-lock.py" set-status <id> done --evidence <sha|url|none:why>
+# a SLICED feature: one binding per slice repository, each checked in THAT repository
+python3 "$HARNESS_DIR/tools/tasks-lock.py" set-status <id> done \
+    --evidence <repo-a>=<sha> --evidence <repo-b>=none:<why>
 ```
 
 A **sha** is checked with `git merge-base --is-ancestor` against the default branch and
 the write is **REFUSED** if it is provably not an ancestor; anything else is transcribed
 and marked `unchecked`; `none:<why>` is for work with no commit at all (a console action,
 a supersession). Prefer the **merge commit** — it is the thing that is actually an
-ancestor. **A sliced feature is not exempt**: its per-slice `merged` flags are hand-typed
-and nothing in the harness verifies them (E09-F02 carries `merged: true` on a slice whose
-own `pr` is a closed, unmerged PR), so a sliced feature must satisfy the slice invariant
-**and** carry feature-level evidence. Full contract in `store/local.md` (`set_status`)
-and `docs/WORKFLOW.md`.
+ancestor. **A sliced feature is not exempt, and one sha cannot answer for it**: its
+per-slice `merged` flags are hand-typed and nothing in the harness verifies them (E09-F02
+carries `merged: true` on a slice whose own `pr` is a closed, unmerged PR), so it must
+satisfy the slice invariant **and** carry `--evidence <repo>=<ref>` once per slice
+repository. A bare, unbound value on a sliced feature is refused: it names no repository,
+and one slice's merge commit carrying the whole feature to `done` while another slice sits
+unmerged is precisely the failure being prevented. Full contract in `store/local.md`
+(`set_status`) and `docs/WORKFLOW.md`.
 
 **Each round is recorded.** Append **one line per round** to `progress/history.md`
 so the iteration is observable — e.g. `E0x-Fyy in-review → reject (round N)` and,

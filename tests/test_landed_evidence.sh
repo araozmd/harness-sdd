@@ -14,6 +14,7 @@
 #   R4  an unresolvable ref is accepted but recorded `unchecked` — never `ancestor`
 #   R5  `none:` needs a reason; `none:<why>` records `declared`
 #   R6  a SLICED feature is NOT exempt — the slice flags are hand-typed, so it needs BOTH
+#       invariants, and its evidence is BOUND per slice repository (`<repo>=<ref>`)
 #   R7  --evidence is refused on a non-`done` transition (the record means one thing)
 #   R8  an unrecognised `verified` (and a bad `repo`/`base` type) is an error in ALL THREE
 #       validators, on the jsonschema AND the zero-dependency path
@@ -24,8 +25,22 @@
 #   R11 an UMBRELLA board (`.harness/` in one repo) verifies a sha in a CHILD repo
 #   R12 REGRESSION, E09-F02 verbatim: a sliced feature, every slice hand-marked
 #       `merged: true`, whose first slice's own `pr` is a CLOSED UNMERGED PR
+#   R13 the remote's default branch is DISCOVERED, never guessed by name
+#   R14 a SLICED feature's evidence is bound to, and verified IN, each slice's OWN
+#       repository — one slice's merge commit can never attest another slice's work
+#   R15 a REMOTELESS repository resolves an AUTHORITATIVE local default or none at
+#       all; existence of a branch called `main` is not authority
 #
-# Five of these exist because a mutation survived without them. R6/R12 (review round 1: the
+# R14 and R15 are review round 3, and both were REPRODUCED against the shipped code before
+# they were written: R14 as a two-child umbrella where alpha's merge sha carried the whole
+# feature to `done` (`{"verified": "ancestor", "repo": "alpha"}`) while beta's work sat on an
+# unmerged branch under a hand-typed `merged: true`; R15 as a remoteless repository whose
+# real default is `trunk` and which also has a `main`, where a commit present only on `main`
+# was recorded `{"verified": "ancestor", "base": "main"}`. Both are FALSE attestations — the
+# one failure mode this feature must never produce, because the record then carries the
+# authority of a check that never happened.
+#
+# Seven of these exist because a mutation survived without them. R6/R12 (review round 1: the
 # first draft EXEMPTED sliced features on the theory that `slice.merged` attested the
 # landing — E09-F02 replayed through it exited 0 with no record at all). R8's zero-dependency
 # and repo/base assertions (M6, and the Reviewer's H2/H3 — the schema was answering for the
@@ -58,7 +73,15 @@ git_q() { git -c user.email=t@example.com -c user.name=tester "$@" >/dev/null 2>
 # the fixture does not depend on the host's init.defaultBranch.
 #
 #   $BASE  a commit on main            → an ancestor
-#   $SIDE  a commit on a side branch   → NOT an ancestor (the E99-F58 shape)
+#   $SIDE  a commit NOT on main        → NOT an ancestor (the E99-F58 shape)
+#
+# The repo is left in the REMOTELESS UMBRELLA SHAPE — no remote, exactly ONE local branch —
+# because that is the only local configuration whose default branch is authoritative (R15),
+# and it is the shape the viernes umbrella root actually has (measured: no remote, one
+# branch `main`). So $SIDE is committed on a DETACHED head and kept alive by a ref outside
+# refs/heads/: it stays a real, resolvable, unmerged commit without adding a second branch
+# that would make "which branch is the default?" undecidable. The name is lower-case
+# because a slice `repo` must match `[a-z0-9-]+`, and R6 binds evidence to this repo by name.
 mkrepo() {
   R="$T/repo$1"
   mkdir -p "$R"
@@ -69,9 +92,20 @@ mkrepo() {
   : > "$R/seed.txt"
   ( cd "$R" && git_q add -A && git_q commit -m base )
   BASE="$(cd "$R" && git rev-parse HEAD)"
-  ( cd "$R" && git_q checkout -b side && : > "$R/side.txt" && git_q add -A && git_q commit -m side )
+  ( cd "$R" && git_q checkout --detach main && : > "$R/side.txt" && git_q add -A && git_q commit -m side )
   SIDE="$(cd "$R" && git rev-parse HEAD)"
-  ( cd "$R" && git_q checkout main )
+  ( cd "$R" && git_q update-ref refs/evidence/side "$SIDE" && git_q checkout main )
+  # Assert the state INTENDED, including what must still be PRESENT: a fixture that
+  # quietly lost the unmerged object, or grew a second branch, would make the refusal
+  # assertions below pass for the wrong reason.
+  [ "$(cd "$R" && git for-each-ref --format='%(refname:short)' refs/heads/ | wc -l | tr -d ' ')" = "1" ] \
+    || fail "mkrepo $1: expected exactly ONE local branch (the remoteless umbrella shape)"
+  ( cd "$R" && git cat-file -e "$SIDE^{commit}" ) \
+    || fail "mkrepo $1: the unmerged commit \$SIDE is gone — it must stay resolvable"
+  ( cd "$R" && git merge-base --is-ancestor "$SIDE" main ) \
+    && fail "mkrepo $1: \$SIDE is ON main, so it cannot exercise the refusal"
+  ( cd "$R" && git remote | grep -q . ) && fail "mkrepo $1: unexpected remote"
+  :
 }
 
 # mkboard <harness-dir> [slices-json]
@@ -105,9 +139,13 @@ set_status() {
 }
 field() { python3 -c "import json,sys;d=json.load(open('$1'))['epics'][0]['features'][0];print($2)"; }
 
-mkrepo A
-HD="$T/repoA/hd"
+mkrepo a
+HD="$T/repoa/hd"
 BOARD="$HD/state/tasks.json"
+# `mkrepo` reassigns $BASE/$SIDE, and R10/R13 build more repositories, so keep repoa's own
+# pair under names nothing else writes — R15's control-2 comes back to this repository.
+A_BASE="$BASE"
+A_SIDE="$SIDE"
 
 # ── R1: no evidence ⇒ no `done`. Two controls, because two things could produce it ─────
 mkboard "$HD"
@@ -154,7 +192,7 @@ pass "E99-F102 R2 a_non_ancestor_commit_is_refused"
 [ "$(field "$BOARD" "d['landed']['ref']")" = "$BASE" ] || fail "R3: the recorded ref is not the sha that was checked"
 [ "$(field "$BOARD" "d['landed'].get('base','')")" = "main" ] \
   || fail "R3: the record does not name the base it was checked against (got $(field "$BOARD" "d['landed'].get('base','')"))"
-[ "$(field "$BOARD" "d['landed'].get('repo','')")" = "repoA" ] \
+[ "$(field "$BOARD" "d['landed'].get('repo','')")" = "repoa" ] \
   || fail "R3: the record does not name the repository the check ran in"
 # The write is a minimal-diff text patch, not a re-serialize: everything else is byte-identical.
 python3 - "$BOARD" <<'PY' || fail "R3: recording the evidence reformatted unrelated board bytes"
@@ -181,6 +219,17 @@ mkboard "$HD"
 set_status "$HD" E01-F01 done --evidence "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 [ "$SS_RC" = "0" ] || fail "R4 control: an unknown sha was refused — 'we could not check' is not 'it did not merge': $SS_OUT"
 [ "$(field "$BOARD" "d['landed']['verified']")" = "unchecked" ] || fail "R4 control: an unknown sha was not recorded unchecked"
+# CONTROL: a URL carrying a QUERY STRING is still ONE ref, never a `<repo>=<ref>` binding.
+# `?utm=1` contains `=`, and reading it as a binding would either bounce a legitimate URL or
+# record the landing against a repository nobody checked. The bound form is recognised only
+# when everything before the FIRST `=` is a bare repository name.
+mkboard "$HD"
+set_status "$HD" E01-F01 done --evidence "https://github.com/example/repo/pull/42?utm=1"
+[ "$SS_RC" = "0" ] || fail "R4 control: a URL with a query string was refused — it was parsed as a malformed repo binding: $SS_OUT"
+[ "$(field "$BOARD" "d['landed']['ref']")" = "https://github.com/example/repo/pull/42?utm=1" ] \
+  || fail "R4 control: the recorded ref is not the URL that was passed (it was split on the '=')"
+[ "$(field "$BOARD" "'repo' in d['landed']")" = "False" ] \
+  || fail "R4 control: a query-string URL was recorded against a repository — nothing checked one"
 pass "E99-F102 R4 an_unresolvable_reference_is_unchecked_never_ancestor"
 
 # ── R5: the explicit no-commit declaration needs a reason ─────────────────────────────
@@ -200,9 +249,13 @@ pass "E99-F102 R5 a_no_commit_declaration_requires_its_reason"
 # harness ever WRITES `slice.merged` — every occurrence in tools/ is a read or a type
 # assertion — so it is hand-typed, i.e. the say-so `--evidence` replaces. Exempting the
 # weaker mechanism from the stronger one shipped a hole documented as safe (see R12).
+#
+# Round 3 added the second half: the evidence a sliced feature carries is BOUND to a slice
+# repository (`--evidence <repo>=<ref>`) and checked THERE. The slice here names `repoa`,
+# which is this fixture's own repository, so the binding resolves and ancestry is real.
 SLICES=',
           "slices": [
-            { "id": "E01-F01@web", "repo": "web", "status": "done", "merged": true }
+            { "id": "E01-F01@repoa", "repo": "repoa", "status": "done", "merged": true }
           ]'
 mkboard "$HD" "$SLICES"
 BEFORE="$(cat "$BOARD")"
@@ -210,21 +263,23 @@ set_status "$HD" E01-F01 done
 [ "$SS_RC" = "0" ] && fail "R6: a SLICED feature reached done with no evidence — its slice flags are hand-typed, and E09-F02 proves they can read \`merged: true\` against a closed unmerged PR: $SS_OUT"
 [ "$BEFORE" = "$(cat "$BOARD")" ] || fail "R6: the board moved despite the refusal"
 
-# CONTROL 1: the identical sliced board WITH evidence succeeds — so the refusal above is
-# about the missing evidence, not about sliced features being unwritable.
-set_status "$HD" E01-F01 done --evidence "$BASE"
-[ "$SS_RC" = "0" ] || fail "R6 control-1: a sliced feature WITH evidence was refused too (rc=$SS_RC): $SS_OUT"
+# CONTROL 1: the identical sliced board WITH bound evidence succeeds — so the refusal above
+# is about the missing evidence, not about sliced features being unwritable.
+set_status "$HD" E01-F01 done --evidence "repoa=$BASE"
+[ "$SS_RC" = "0" ] || fail "R6 control-1: a sliced feature WITH bound evidence was refused too (rc=$SS_RC): $SS_OUT"
 [ "$(field "$BOARD" "d['landed']['verified']")" = "ancestor" ] || fail "R6 control-1: the sliced landing was not recorded"
+[ "$(field "$BOARD" "d['landed']['slices'][0]['repo']")" = "repoa" ] \
+  || fail "R6 control-1: the record does not bind the landing to the slice repository"
 
 # CONTROL 2: the two invariants are INDEPENDENT — evidence does not buy off an unmerged
 # slice. Without this, satisfying one could silently satisfy the other.
 SLICES_UNMERGED=',
           "slices": [
-            { "id": "E01-F01@web", "repo": "web", "status": "done", "merged": false }
+            { "id": "E01-F01@repoa", "repo": "repoa", "status": "done", "merged": false }
           ]'
 mkboard "$HD" "$SLICES_UNMERGED"
 BEFORE="$(cat "$BOARD")"
-set_status "$HD" E01-F01 done --evidence "$BASE"
+set_status "$HD" E01-F01 done --evidence "repoa=$BASE"
 [ "$SS_RC" = "0" ] && fail "R6 control-2: an UNMERGED slice was waved through because the feature carried evidence — the slice invariant must hold independently: $SS_OUT"
 [ "$BEFORE" = "$(cat "$BOARD")" ] || fail "R6 control-2: the board moved despite the refusal"
 pass "E99-F102 R6 a_sliced_feature_needs_evidence_too"
@@ -326,6 +381,40 @@ for _k in repo base; do
     && fail "R8: the selector accepted an EMPTY landed.$_k"
 done
 
+# ...and the PER-SLICE landing records (round 3). tasks-lock now WRITES `landed.slices` on
+# every sliced feature, so a shape the selector rejects would take down every `next-task.mjs`
+# run after the first sliced `done` — the three surfaces have to agree on this sub-record
+# exactly as they do on the outer one. The last case is the rollup rule: the feature-level
+# record can never claim more than its slices proved, which is the P1-A false attestation
+# re-entered by hand.
+for _bad in \
+  '{ "ref": "a", "verified": "ancestor", "slices": [] }' \
+  '{ "ref": "a", "verified": "ancestor", "slices": [ { "repo": "web", "verified": "ancestor" } ] }' \
+  '{ "ref": "a", "verified": "ancestor", "slices": [ { "repo": "web", "ref": "b", "verified": "probably" } ] }' \
+  '{ "ref": "a", "verified": "ancestor", "slices": [ { "repo": "", "ref": "b", "verified": "ancestor" } ] }' \
+  '{ "ref": "a", "verified": "ancestor", "slices": [ { "repo": "web", "ref": "b", "verified": "ancestor", "base": 17 } ] }' \
+  '{ "ref": "a", "verified": "ancestor", "slices": [ { "repo": "web", "ref": "b", "verified": "unchecked" } ] }' \
+; do
+  mkbad "$_bad"
+  python3 "$VALIDATE" "$T/bad.json" "$SCHEMA" >/dev/null 2>&1 \
+    && fail "R8: the shared validator accepted an illegal landed.slices record: $_bad"
+  python3 "$T/nojs.py" >/dev/null 2>&1 \
+    && fail "R8: the ZERO-DEPENDENCY validator accepted an illegal landed.slices record: $_bad"
+  ( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" >/dev/null 2>&1 ) \
+    && fail "R8: the selector accepted an illegal landed.slices record: $_bad"
+done
+
+# CONTROL: a LEGAL per-slice record — same shape, rollup honestly weakened to the weakest
+# slice — passes all three. Without it the six refusals above would hold against a validator
+# that simply rejects every `landed.slices`.
+mkbad '{ "ref": "web=b; api=c", "verified": "unchecked", "slices": [ { "repo": "web", "ref": "b", "verified": "ancestor", "base": "main" }, { "repo": "api", "ref": "c", "verified": "unchecked" } ] }'
+python3 "$VALIDATE" "$T/bad.json" "$SCHEMA" >/dev/null 2>&1 \
+  || fail "R8 control: the shared validator rejected a LEGAL per-slice landing record"
+python3 "$T/nojs.py" >/dev/null 2>&1 \
+  || fail "R8 control: the zero-dependency validator rejected a LEGAL per-slice landing record"
+( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" >/dev/null 2>&1 ) \
+  || fail "R8 control: the selector rejected a LEGAL per-slice landing record"
+
 # CONTROL: the same shape with a legal value passes BOTH — otherwise the assertions above
 # would hold against a validator that rejects every `landed` record.
 mkbad '{ "ref": "abc1234", "verified": "unchecked" }'
@@ -415,8 +504,8 @@ set_status "$HDB" E01-F01 done --evidence "$UNPUSHED_PARENT"
 [ "$(field "$BOARDB" "d['landed']['base']")" = "origin/main" ] \
   || fail "R10 control: the check did not use the remote default branch (base=$(field "$BOARDB" "d['landed']['base']"))"
 # ...and WITHOUT a remote (an umbrella board's own repo usually has none) the local default
-# branch is the base — asserted by R2/R3 above on repoA, which has no origin:
-( cd "$T/repoA" && git remote | grep -q . ) && fail "R10: repoA unexpectedly has a remote — R2/R3 were not exercising the remoteless path"
+# branch is the base — asserted by R2/R3 above on repoa, which has no origin:
+( cd "$T/repoa" && git remote | grep -q . ) && fail "R10: repoa unexpectedly has a remote — R2/R3 were not exercising the remoteless path"
 pass "E99-F102 R10 merged_means_the_remote_default_branch_when_there_is_one"
 
 # ── R11: the UMBRELLA layout — the board is in one repo, the work lands in another ────
@@ -436,9 +525,15 @@ cp "$VALIDATE" "$U/.harness/tools/validate-board.py" 2>/dev/null || { mkdir -p "
 : > "$U/child/src.txt"
 ( cd "$U/child" && git_q add -A && git_q commit -m "child work" )
 CHILD_MAIN="$(cd "$U/child" && git rev-parse HEAD)"
-( cd "$U/child" && git_q checkout -b feature && : > "$U/child/wip.txt" && git_q add -A && git_q commit -m "child WIP, never merged" )
+# Same shape as mkrepo: the unmerged commit is kept OUT of refs/heads/ so the child stays
+# in the remoteless single-branch configuration whose default branch is authoritative (R15).
+( cd "$U/child" && git_q checkout --detach main && : > "$U/child/wip.txt" && git_q add -A && git_q commit -m "child WIP, never merged" )
 CHILD_ORPHAN="$(cd "$U/child" && git rev-parse HEAD)"
-( cd "$U/child" && git_q checkout main )
+( cd "$U/child" && git_q update-ref refs/evidence/wip "$CHILD_ORPHAN" && git_q checkout main )
+[ "$(cd "$U/child" && git for-each-ref --format='%(refname:short)' refs/heads/ | wc -l | tr -d ' ')" = "1" ] \
+  || fail "R11 setup: the child repo has more than one branch, so its default is undecidable"
+( cd "$U/child" && git cat-file -e "$CHILD_ORPHAN^{commit}" ) \
+  || fail "R11 setup: the unmerged child commit is gone — it must stay resolvable"
 
 mkboard "$U/.harness"
 set_status "$U/.harness" E01-F01 done --evidence "$CHILD_MAIN"
@@ -499,9 +594,21 @@ set_status "$HD" E09-F02 done
 [ "$SS_RC" = "0" ] && fail "R12: E09-F02 reached done unattested — the exact board entry, and the exact hole, this feature was rejected for in review round 1: $SS_OUT"
 [ "$BEFORE" = "$(cat "$HD/state/tasks.json")" ] || fail "R12: the board moved despite the refusal"
 
-# CONTROL: the same entry with evidence lands, and the record says what was proved — so R12
-# is not passing merely because a three-slice board is unwritable.
+# ...and round 3's half of the same instance: ONE unbound declaration cannot answer for
+# THREE repositories. E09-F02's three slices landed (or did not) independently — that is the
+# whole reason its first slice's PR could be closed unmerged while the others were fine — so
+# a single value that names no repository attests none of them.
 set_status "$HD" E09-F02 done --evidence "none: superseded by E11; PR #24 closed unmerged"
+[ "$SS_RC" = "0" ] && fail "R12: a single unbound --evidence attested a THREE-repository feature: $SS_OUT"
+[ "$BEFORE" = "$(cat "$HD/state/tasks.json")" ] || fail "R12: the board moved despite the refusal"
+
+# CONTROL: the same entry with one declaration PER SLICE REPOSITORY lands, and the record
+# says what was proved — so R12 is not passing merely because a three-slice board is
+# unwritable.
+set_status "$HD" E09-F02 done \
+  --evidence "viernes-infra=none: superseded by E11; PR #24 closed unmerged" \
+  --evidence "viernes-bookings-api=none: superseded by E11" \
+  --evidence "viernes-users=none: superseded by E11"
 [ "$SS_RC" = "0" ] || fail "R12 control: E09-F02 could not be attested at all (rc=$SS_RC): $SS_OUT"
 _v="$(python3 -c "import json;print(json.load(open('$HD/state/tasks.json'))['epics'][0]['features'][0]['landed']['verified'])")"
 [ "$_v" = "declared" ] || fail "R12 control: the attestation recorded '$_v', not the honest 'declared'"
@@ -572,5 +679,232 @@ set_status "$HDC" E01-F01 done --evidence "$TRUNK_TIP"
 [ "$(field "$BOARDC" "d['landed']['verified']")" = "unchecked" ] \
   || fail "R13 control 2: expected 'unchecked' with an unreachable remote, got $(field "$BOARDC" "d['landed']['verified']")"
 pass "E99-F102 R13 the_remote_default_branch_is_discovered_not_guessed"
+
+# ── R14: a SLICED feature's evidence is bound to, and checked in, EACH slice's repo ────
+# Review round 3, REPRODUCED against the shipped code first: an umbrella with two children,
+# `alpha` merged and `beta` sitting on a branch that never merged under a hand-typed
+# `merged: true`. Passing alpha's sha as the single feature-level --evidence exited 0 and
+# wrote {"verified": "ancestor", "repo": "alpha"} onto the FEATURE — the whole feature went
+# `done` on one slice's merge commit, which is the unmerged-slice failure this feature
+# exists to prevent, now stamped with the authority of a git check performed on somebody
+# else's work. Evidence therefore names its repository and is verified THERE.
+V="$T/multi"
+mkdir -p "$V/.harness/state" "$V/.harness/store" "$V/.harness/tools"
+cp "$SCHEMA" "$V/.harness/store/"
+cp "$VALIDATE" "$V/.harness/tools/"
+( cd "$V" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+: > "$V/README.md"; ( cd "$V" && git_q add -A && git_q commit -m "umbrella board only" )
+for _r in alpha beta; do
+  mkdir -p "$V/$_r"
+  ( cd "$V/$_r" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+  : > "$V/$_r/src.txt"
+  ( cd "$V/$_r" && git_q add -A && git_q commit -m "$_r landed" )
+done
+ALPHA_MAIN="$(cd "$V/alpha" && git rev-parse main)"
+BETA_MAIN="$(cd "$V/beta" && git rev-parse main)"
+( cd "$V/beta" && git_q checkout --detach main && : > "$V/beta/wip.txt" && git_q add -A && git_q commit -m "beta WIP, never merged" )
+BETA_ORPHAN="$(cd "$V/beta" && git rev-parse HEAD)"
+( cd "$V/beta" && git_q update-ref refs/evidence/wip "$BETA_ORPHAN" && git_q checkout main )
+# Assert the fixture is the shape the case needs — including what must be PRESENT.
+( cd "$V/beta" && git cat-file -e "$BETA_ORPHAN^{commit}" ) || fail "R14 setup: beta's unmerged commit is gone"
+( cd "$V/beta" && git merge-base --is-ancestor "$BETA_ORPHAN" main ) && fail "R14 setup: beta's 'unmerged' commit is on main"
+( cd "$V/alpha" && git cat-file -e "$BETA_MAIN^{commit}" 2>/dev/null ) && fail "R14 setup: beta's commit is visible in alpha, so the cross-repo case would prove nothing"
+[ "$ALPHA_MAIN" = "$BETA_MAIN" ] && fail "R14 setup: the two children share a commit id"
+HDV="$V/.harness"
+BOARDV="$HDV/state/tasks.json"
+TWO=',
+          "slices": [
+            { "id": "E01-F01@alpha", "repo": "alpha", "status": "done", "merged": true },
+            { "id": "E01-F01@beta", "repo": "beta", "status": "done", "merged": true }
+          ]'
+
+# (a) the bare form is REFUSED on a sliced feature, and the refusal names the form and the
+#     repositories that owe evidence — the operator must not have to guess the new shape.
+mkboard "$HDV" "$TWO"
+BEFORE="$(cat "$BOARDV")"
+set_status "$HDV" E01-F01 done --evidence "$ALPHA_MAIN"
+[ "$SS_RC" = "0" ] && fail "R14a: one slice's merge sha carried a TWO-repository feature to done — this is the reproduction: $SS_OUT"
+[ "$BEFORE" = "$(cat "$BOARDV")" ] || fail "R14a: the board moved despite the refusal"
+case "$SS_OUT" in
+  *"<repo>=<ref>"*) ;;
+  *) fail "R14a: the refusal does not name the required form: $SS_OUT" ;;
+esac
+case "$SS_OUT" in
+  *alpha*beta*) ;;
+  *) fail "R14a: the refusal does not list the slice repositories: $SS_OUT" ;;
+esac
+
+# (b) THE KILL: bound evidence per repo, where beta's ref never merged IN BETA ⇒ REFUSED,
+#     naming beta. Pre-fix there was no way to express this at all.
+mkboard "$HDV" "$TWO"
+BEFORE="$(cat "$BOARDV")"
+set_status "$HDV" E01-F01 done --evidence "alpha=$ALPHA_MAIN" --evidence "beta=$BETA_ORPHAN"
+[ "$SS_RC" = "0" ] && fail "R14b: a feature went done while its beta slice's commit was provably unmerged in beta: $SS_OUT"
+[ "$BEFORE" = "$(cat "$BOARDV")" ] || fail "R14b: the board moved despite the refusal"
+case "$SS_OUT" in
+  *beta*) ;;
+  *) fail "R14b: the refusal does not name the slice repository that failed: $SS_OUT" ;;
+esac
+
+# CONTROL for (a) and (b) — the SAME command, differing only in beta's ref, must SUCCEED,
+# and the record must carry one entry per repository with the base each was checked against.
+set_status "$HDV" E01-F01 done --evidence "alpha=$ALPHA_MAIN" --evidence "beta=$BETA_MAIN"
+[ "$SS_RC" = "0" ] || fail "R14 control: two genuinely landed slices were refused (rc=$SS_RC) — the guard is refusing sliced features unconditionally: $SS_OUT"
+[ "$(field "$BOARDV" "d['status']")" = "done" ] || fail "R14 control: the attested sliced transition did not land"
+[ "$(field "$BOARDV" "d['landed']['verified']")" = "ancestor" ] \
+  || fail "R14 control: two ancestor slices rolled up to $(field "$BOARDV" "d['landed']['verified']"), not ancestor"
+[ "$(field "$BOARDV" "len(d['landed']['slices'])")" = "2" ] \
+  || fail "R14 control: the record does not carry one entry per slice repository"
+[ "$(field "$BOARDV" "[s['repo'] for s in d['landed']['slices']]")" = "['alpha', 'beta']" ] \
+  || fail "R14 control: the per-slice records do not name their repositories"
+[ "$(field "$BOARDV" "d['landed']['slices'][1]['ref']")" = "$BETA_MAIN" ] \
+  || fail "R14 control: beta's record does not carry beta's own ref"
+[ "$(field "$BOARDV" "[s['verified'] for s in d['landed']['slices']]")" = "['ancestor', 'ancestor']" ] \
+  || fail "R14 control: a genuinely landed slice was not recorded as ancestor"
+[ "$(field "$BOARDV" "d['landed']['slices'][0]['base']")" = "main" ] \
+  || fail "R14 control: the per-slice record does not name the base it was checked against"
+# What tasks-lock WRITES must pass the other two acceptance surfaces, or the first sliced
+# `done` breaks every later init.sh / next-task.mjs run.
+python3 "$VALIDATE" "$BOARDV" "$SCHEMA" >/dev/null 2>&1 \
+  || fail "R14 control: the shared validator REJECTS the record tasks-lock just wrote"
+( cd "$SRC" && node tools/next-task.mjs --tasks "$BOARDV" --config "$T/config.yaml" >/dev/null 2>&1 ) \
+  || fail "R14 control: the SELECTOR rejects the record tasks-lock just wrote — every /sdd-next after a sliced done would die"
+
+# (c) each ref is checked in the repository its binding NAMES, not in whatever repository
+#     happens to know the object. Give alpha a sha that exists ONLY in beta: it must come
+#     back `unchecked` (alpha has never seen it), and the feature-level rollup must fall to
+#     the weakest slice. Pre-fix that same sha, passed unbound, resolved in beta and was
+#     recorded `ancestor` for the whole feature.
+mkboard "$HDV" "$TWO"
+set_status "$HDV" E01-F01 done --evidence "alpha=$BETA_MAIN" --evidence "beta=$BETA_MAIN"
+[ "$SS_RC" = "0" ] || fail "R14c: an unresolvable-in-alpha ref BLOCKED the write — 'we could not check' is not 'it did not merge': $SS_OUT"
+[ "$(field "$BOARDV" "d['landed']['slices'][0]['verified']")" = "unchecked" ] \
+  || fail "R14c: a commit that exists only in BETA was recorded $(field "$BOARDV" "d['landed']['slices'][0]['verified']") for the ALPHA slice — evidence is being verified in whatever repo resolves it"
+[ "$(field "$BOARDV" "d['landed']['verified']")" = "unchecked" ] \
+  || fail "R14c: the feature-level record reads $(field "$BOARDV" "d['landed']['verified']") while a slice was unproved — the rollup must never claim more than the weakest slice"
+
+# (d) a MISSING binding is refused, naming the repository still owed. Control: adding it
+#     (the R14 control above) succeeds, so this is about coverage, not about the flag.
+mkboard "$HDV" "$TWO"
+BEFORE="$(cat "$BOARDV")"
+set_status "$HDV" E01-F01 done --evidence "alpha=$ALPHA_MAIN"
+[ "$SS_RC" = "0" ] && fail "R14d: a two-repository feature went done with evidence for ONE repository: $SS_OUT"
+[ "$BEFORE" = "$(cat "$BOARDV")" ] || fail "R14d: the board moved despite the refusal"
+case "$SS_OUT" in
+  *beta*) ;;
+  *) fail "R14d: the refusal does not name the repository whose evidence is missing: $SS_OUT" ;;
+esac
+
+# (e) a binding naming a repository the feature has no slice in is refused (a typo must not
+#     silently satisfy coverage), and a repeated binding for one repository is refused (the
+#     second value would otherwise decide, silently discarding the first).
+set_status "$HDV" E01-F01 done --evidence "alpha=$ALPHA_MAIN" --evidence "gamma=$BETA_MAIN"
+[ "$SS_RC" = "0" ] && fail "R14e: evidence bound to a repository the feature has no slice in was accepted: $SS_OUT"
+case "$SS_OUT" in
+  *gamma*) ;;
+  *) fail "R14e: the refusal does not name the unknown repository: $SS_OUT" ;;
+esac
+set_status "$HDV" E01-F01 done --evidence "alpha=$ALPHA_MAIN" --evidence "alpha=$BETA_MAIN" --evidence "beta=$BETA_MAIN"
+[ "$SS_RC" = "0" ] && fail "R14e: two --evidence values for the SAME repository were accepted, so one silently won: $SS_OUT"
+
+# (f) `none:<why>` stays expressible PER SLICE — ops work with no commit must have a legal
+#     path in a sliced feature too, or the guard gets routed around. The rollup weakens.
+mkboard "$HDV" "$TWO"
+set_status "$HDV" E01-F01 done --evidence "alpha=none: AWS console action, no commit" --evidence "beta=$BETA_MAIN"
+[ "$SS_RC" = "0" ] || fail "R14f: a per-slice no-commit declaration was refused (rc=$SS_RC): $SS_OUT"
+[ "$(field "$BOARDV" "d['landed']['slices'][0]['verified']")" = "declared" ] \
+  || fail "R14f: a per-slice none:<why> was not recorded as declared"
+[ "$(field "$BOARDV" "d['landed']['verified']")" = "declared" ] \
+  || fail "R14f: the rollup reads $(field "$BOARDV" "d['landed']['verified']") with one declared slice — it must never read stronger than its weakest slice"
+
+# (g) the single-repo path is UNCHANGED, in both directions: an unsliced feature still takes
+#     one bare value, and it REFUSES the bound form rather than silently ignoring the repo
+#     name (which would attest against a repository nobody checked).
+mkboard "$HDV"
+set_status "$HDV" E01-F01 done --evidence "alpha=$ALPHA_MAIN"
+[ "$SS_RC" = "0" ] && fail "R14g: a repo-bound value was accepted on a feature with NO slices: $SS_OUT"
+mkboard "$HDV"
+set_status "$HDV" E01-F01 done --evidence "$ALPHA_MAIN" --evidence "$BETA_MAIN"
+[ "$SS_RC" = "0" ] && fail "R14g: two --evidence values were accepted on a feature with NO slices: $SS_OUT"
+mkboard "$HDV"
+set_status "$HDV" E01-F01 done --evidence "$ALPHA_MAIN"
+[ "$SS_RC" = "0" ] || fail "R14g control: the single-repo path stopped working (rc=$SS_RC): $SS_OUT"
+[ "$(field "$BOARDV" "d['landed']['verified']")" = "ancestor" ] || fail "R14g control: the single-repo landing was not recorded as ancestor"
+[ "$(field "$BOARDV" "'slices' in d['landed']")" = "False" ] || fail "R14g control: an unsliced feature grew a per-slice record"
+pass "E99-F102 R14 sliced_evidence_is_bound_and_verified_per_slice_repository"
+
+# ── R15: a REMOTELESS repo resolves an AUTHORITATIVE default, or none at all ───────────
+# Review round 3, REPRODUCED against the shipped code first: with no `origin`, the helper
+# took the first of ("main", "master") that EXISTED. In a remoteless repository whose real
+# default is `trunk` and which ALSO has a `main`, it selected `main` merely because it was
+# there, and a commit present only on `main` — never on trunk — was recorded
+# {"verified": "ancestor", "base": "main"}. Existence is not authority. Note what CANNOT be
+# used instead: this repo's own HEAD is on `trunk` here, so HEAD would answer correctly in
+# this fixture and disastrously in the common one — standing on the feature branch you just
+# finished would make that branch "the default" and attest your unmerged commit as landed.
+mkdir -p "$T/trunkless/hd/state" "$T/trunkless/hd/store" "$T/trunkless/hd/tools"
+cp "$SCHEMA" "$T/trunkless/hd/store/"; cp "$VALIDATE" "$T/trunkless/hd/tools/"
+( cd "$T/trunkless" && git init -q . && git symbolic-ref HEAD refs/heads/trunk )
+: > "$T/trunkless/seed.txt"; ( cd "$T/trunkless" && git_q add -A && git_q commit -m "trunk base" )
+TL_TRUNK="$(cd "$T/trunkless" && git rev-parse trunk)"
+( cd "$T/trunkless" && git_q checkout -b main && : > "$T/trunkless/main-only.txt" && git_q add -A && git_q commit -m "on main, NOT on trunk" && git_q checkout trunk )
+TL_MAIN_ONLY="$(cd "$T/trunkless" && git rev-parse main)"
+( cd "$T/trunkless" && git remote | grep -q . ) && fail "R15 setup: the fixture has a remote, so it is not exercising the remoteless path"
+( cd "$T/trunkless" && git merge-base --is-ancestor "$TL_MAIN_ONLY" trunk ) \
+  && fail "R15 setup: the main-only commit IS on trunk, so the decoy proves nothing"
+( cd "$T/trunkless" && git rev-parse --verify --quiet 'main^{commit}' >/dev/null ) \
+  || fail "R15 setup: there is no 'main' branch, so the name-guess would have had nothing to pick"
+HDT="$T/trunkless/hd"
+BOARDT="$HDT/state/tasks.json"
+
+mkboard "$HDT"
+set_status "$HDT" E01-F01 done --evidence "$TL_MAIN_ONLY"
+[ "$SS_RC" = "0" ] || fail "R15: an undecidable default BLOCKED the write (rc=$SS_RC) — unchecked must degrade, never block: $SS_OUT"
+_v="$(field "$BOARDT" "d['landed']['verified']")"
+[ "$_v" = "ancestor" ] && fail "R15: a commit absent from the real default branch (trunk) was attested as 'ancestor' with base $(field "$BOARDT" "d['landed'].get('base','')") — the default was guessed by NAME"
+[ "$_v" = "unchecked" ] || fail "R15: expected 'unchecked' where no default branch is authoritative, got '$_v'"
+[ "$(field "$BOARDT" "'base' in d['landed']")" = "False" ] \
+  || fail "R15: the record names a base although nothing was checked against one"
+case "$SS_OUT" in
+  *harness.defaultBranch*) ;;
+  *) fail "R15: the warning does not tell the operator how to declare the default branch: $SS_OUT" ;;
+esac
+# ...and it is not that `trunk` was silently preferred instead: with two branches and no
+# declaration NOTHING is decidable here, so the trunk tip is equally unchecked.
+mkboard "$HDT"
+set_status "$HDT" E01-F01 done --evidence "$TL_TRUNK"
+[ "$(field "$BOARDT" "d['landed']['verified']")" = "unchecked" ] \
+  || fail "R15: the trunk tip was attested although no default branch is decidable — a second name is still a name"
+
+# CONTROL 1 — the SAME repository, the SAME commits, differing only by an EXPLICIT
+# declaration of the default branch: the check becomes real again in BOTH directions. This
+# is what rules out "repo is simply unverifiable" as the explanation for the two results
+# above, and it is the escape hatch the warning names.
+( cd "$T/trunkless" && git_q config harness.defaultBranch trunk )
+mkboard "$HDT"
+BEFORE="$(cat "$BOARDT")"
+set_status "$HDT" E01-F01 done --evidence "$TL_MAIN_ONLY"
+[ "$SS_RC" = "0" ] && fail "R15 control-1: with the default branch DECLARED as trunk, a commit that never reached trunk was still accepted: $SS_OUT"
+[ "$BEFORE" = "$(cat "$BOARDT")" ] || fail "R15 control-1: the board moved despite the refusal"
+mkboard "$HDT"
+set_status "$HDT" E01-F01 done --evidence "$TL_TRUNK"
+[ "$SS_RC" = "0" ] || fail "R15 control-1: a commit ON the declared default branch was refused (rc=$SS_RC): $SS_OUT"
+[ "$(field "$BOARDT" "d['landed']['verified']")" = "ancestor" ] \
+  || fail "R15 control-1: a commit on the declared default recorded $(field "$BOARDT" "d['landed']['verified']"), not ancestor"
+[ "$(field "$BOARDT" "d['landed']['base']")" = "trunk" ] \
+  || fail "R15 control-1: the record names $(field "$BOARDT" "d['landed']['base']"), not the DECLARED trunk"
+
+# CONTROL 2 — the shape the viernes umbrella root actually has (measured: no remote, exactly
+# ONE local branch): there the default is authoritative by exhaustion, so the guard keeps its
+# teeth with no declaration at all. Both directions, in the same repository.
+mkboard "$HD"
+set_status "$HD" E01-F01 done --evidence "$A_SIDE"
+[ "$SS_RC" = "0" ] && fail "R15 control-2: an unmerged commit was accepted in a remoteless single-branch repo — the umbrella shape lost its teeth: $SS_OUT"
+mkboard "$HD"
+set_status "$HD" E01-F01 done --evidence "$A_BASE"
+[ "$SS_RC" = "0" ] || fail "R15 control-2: a merged commit was refused in a remoteless single-branch repo (rc=$SS_RC): $SS_OUT"
+[ "$(field "$BOARD" "d['landed']['base']")" = "main" ] \
+  || fail "R15 control-2: the single-branch default was not used as the base (got $(field "$BOARD" "d['landed'].get('base','')"))"
+pass "E99-F102 R15 a_remoteless_default_is_resolved_authoritatively_or_not_at_all"
 
 echo "All landing-evidence tests passed."

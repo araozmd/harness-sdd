@@ -122,7 +122,11 @@ Orchestrator's exclusive ownership of state writes.
   **Since v0.63.0 a `done` transition on a feature requires landing evidence** (E99-F102):
 
   ```
+  # single-repo feature
   python3 .harness/tools/tasks-lock.py set-status <id> done --evidence <sha|url|none:why>
+  # SLICED feature — one binding per slice repository, each checked in THAT repository
+  python3 .harness/tools/tasks-lock.py set-status <id> done \
+      --evidence <repo-a>=<sha|url|none:why> --evidence <repo-b>=<sha|url|none:why>
   ```
 
   `done` is what stops the selector routing an item, so a feature marked `done` whose work
@@ -140,7 +144,20 @@ Orchestrator's exclusive ownership of state writes.
   feature with three slices all `merged: true`, whose first slice's own `pr` points at
   `viernes-infra#24` — closed, unmerged. Exempting the weaker mechanism from the stronger
   one would ship that hole documented as safe, so the sliced feature satisfies **both**
-  invariants: every slice `done`+`merged`, **and** a feature-level `--evidence`.
+  invariants: every slice `done`+`merged`, **and** `--evidence`.
+
+  **A sliced feature's evidence is BOUND PER SLICE REPOSITORY** — `--evidence <repo>=<ref>`,
+  repeated once per slice repo — and each ref is checked **in the repository its binding
+  names**. Requiring *some* evidence was necessary but not sufficient: with one unbound
+  value, resolved in whichever nearby repository knew the object, **one slice's merge commit
+  carried the whole feature to `done`** while another slice sat unmerged (measured on a
+  two-child umbrella: `{"verified": "ancestor", "repo": "alpha"}` written onto a feature
+  whose `beta` work had never left its branch). So: a bare `--evidence <ref>` on a sliced
+  feature is **REFUSED** (it names no repository, so it attests nothing in particular), a
+  binding for a repo the feature has no slice in is **REFUSED**, and a missing binding is
+  **REFUSED** naming the repos still owed. The record carries one entry per repository under
+  `landed.slices`, and the feature-level `verified` rolls up to the **weakest** slice — so
+  `ancestor` at the feature level means *every* slice proved ancestry in its own repository.
 
   What the helper does with the value:
   - a **commit sha** is resolved against the repo holding the harness dir, its parent, and
@@ -154,12 +171,25 @@ Orchestrator's exclusive ownership of state writes.
 
   The refusal is narrow on purpose: **only** when ancestry is checkable and false. An
   offline machine, a sha that belongs to a repository this checkout cannot see, and a board
-  in a repo with **no remote** (an umbrella root usually has none — its local `main` is then
-  the base) all still succeed — a guard that blocked them would be routed around, and a
-  routed-around guard is worth less than none. What it does **not** wave through: where an
-  `origin` exists, "merged" means `origin/HEAD` (or `origin/main`), so a commit sitting on
-  your local `main` that was never pushed is refused — the same shape as E99-F58's two
-  orphan commits. Push it, or say `none:<why>`.
+  in a repo with **no remote** all still succeed — a guard that blocked them would be routed
+  around, and a routed-around guard is worth less than none. What it does **not** wave
+  through: where an `origin` exists, "merged" means the branch the remote **publishes** as
+  its HEAD, so a commit sitting on your local `main` that was never pushed is refused — the
+  same shape as E99-F58's two orphan commits. Push it, or say `none:<why>`.
+
+  **The default branch is never guessed by name — neither the remote's nor a local one.**
+  With an `origin`, it is `refs/remotes/origin/HEAD`, else what `ls-remote --symref` says
+  now. With **no** `origin`, the only authoritative local signals are (1) an explicit
+  `git config harness.defaultBranch <branch>` in that repository, and (2) *exactly one*
+  local branch, where "the default" has no other candidate to be — the shape a umbrella root
+  actually has. Anything else (several branches, no declaration) is undecidable and records
+  `unchecked`, which never blocks the write. `HEAD` is deliberately **not** consulted in a
+  working checkout: it doubles as "the branch you happen to be on", so trusting it would
+  attest the unmerged commit under your feet as landed. Picking the first of
+  `main`/`master` that merely *exists* did exactly that — measured, on a remoteless repo
+  whose real default is `trunk`: a commit that never reached trunk was recorded
+  `{"verified": "ancestor", "base": "main"}`. A **false** attestation is worse than none,
+  because the record then carries the authority of a check that never happened.
 
   ⚠️ **Scope, measured.** "Refused" holds only where the sha **resolves**: the harness dir's
   repo, its parent, and that parent's children. E99-F58/E99-F59 are on a board whose tree
@@ -169,7 +199,8 @@ Orchestrator's exclusive ownership of state writes.
   umbrella children) and records-and-warns on two. That is the intended cost of the narrow
   refusal, not a claim that all four are now caught. What is not optional is
   saying *something*: the record lands on the feature as
-  `"landed": {"ref": …, "verified": …}`, so re-auditing the board is one `git merge-base`
+  `"landed": {"ref": …, "verified": …}` (plus `"slices": [{"repo": …, "ref": …,
+  "verified": …}]` on a sliced feature), so re-auditing the board is one `git merge-base`
   per row, and the weak claims (`unchecked`, `declared`) are greppable rather than invisible.
 
   **`set_status` does the syncing itself.** A feature transition rewrites the `status:` in
@@ -304,8 +335,9 @@ behaves exactly as a single-repo feature does today — the field is purely addi
   occurrence in `tools/` reads it (`next-task.mjs`, `validate-board.py`, the schema
   cross-field) — so the boolean is only ever as true as the agent that typed it. E09-F02
   carries `merged: true` on a slice whose own `pr` is a closed, unmerged PR. That is why a
-  sliced feature's `done` still needs its own `--evidence` (see `set_status` above) and why
-  a *slice*-level `--evidence` equivalent is worth its own feature.
+  sliced feature's `done` still needs `--evidence` **bound to each slice repository**
+  (`--evidence <repo>=<ref>`, see `set_status` above): the git-verified per-slice record is
+  the check this hand-typed boolean never was.
 
   ```
   # installed layout; use tools/tasks-lock.py in this source repository
@@ -326,9 +358,10 @@ rather than declaring `done` by fiat — but it **does persist** the derived res
 - A feature becomes `done` **only when every slice is `done` and `merged`** **and** the
   feature-level integration check (`verification.integration_command`) has passed.
 - **When those conditions hold, the coordinator writes the derived `done` onto the
-  feature** through `tasks-lock.py set-status <feature-id> done --evidence <ref>` — the
-  rollup does **not** exempt it from the evidence requirement, because the per-slice
-  `merged` flags it checks are hand-typed and unverified (see `set_status` above).
+  feature** through `tasks-lock.py set-status <feature-id> done --evidence <repo>=<ref> …`,
+  once per slice repository — the rollup does **not** exempt it from the evidence
+  requirement, because the per-slice `merged` flags it checks are hand-typed and unverified
+  (see `set_status` above), and each merge commit must be proved in its own repository.
   This persistence is required:
   feature-level `next()` gates `depends_on` on the *stored* feature status, so a
   dependent feature (e.g. `E03-F02` depends_on `E03-F01`) stays blocked until the

@@ -233,6 +233,58 @@ def _fallback_errors(data):
                                 errors.append(
                                     "%s.landed.%s: expected a non-empty string" % (fw, k)
                                 )
+                        # PER-SLICE landing (E99-F102 round 3). A sliced feature's
+                        # evidence is bound to each slice repository and checked
+                        # there, so the record carries one entry per repo. Mirrored
+                        # here for the same reason the rest of `landed` is: a machine
+                        # without jsonschema must not accept a board the schema
+                        # rejects. COVERAGE (an entry per slices[].repo) is the write
+                        # path's job — it is not expressible in draft-07, and a check
+                        # the schema cannot state would put this file and the schema
+                        # on different acceptance surfaces, which is the drift these
+                        # mirrors exist to prevent.
+                        if "slices" in landed:
+                            lsl = landed["slices"]
+                            if not isinstance(lsl, list) or not lsl:
+                                errors.append(
+                                    "%s.landed.slices: expected a non-empty array" % fw
+                                )
+                                lsl = []
+                            for li, lrec in enumerate(lsl):
+                                lw = "%s.landed.slices[%d]" % (fw, li)
+                                if not isinstance(lrec, dict):
+                                    errors.append("%s: expected object" % lw)
+                                    continue
+                                for k in ("repo", "ref"):
+                                    if not isinstance(lrec.get(k), str) or not lrec.get(k):
+                                        errors.append(
+                                            "%s.%s: expected a non-empty string" % (lw, k)
+                                        )
+                                if lrec.get("verified") not in LANDED_VERIFIED:
+                                    errors.append(
+                                        "%s.verified '%s': not one of %s"
+                                        % (lw, lrec.get("verified"), sorted(LANDED_VERIFIED))
+                                    )
+                                if "base" in lrec and (
+                                    not isinstance(lrec["base"], str) or not lrec["base"]
+                                ):
+                                    errors.append(
+                                        "%s.base: expected a non-empty string" % lw
+                                    )
+                            # The rollup can never be STRONGER than its slices: one
+                            # unproved slice and the feature is not `ancestor`. A
+                            # hand-edited board that claimed otherwise would re-enter
+                            # by hand exactly the false attestation the per-slice
+                            # binding removes.
+                            if landed.get("verified") == "ancestor" and any(
+                                not isinstance(r, dict) or r.get("verified") != "ancestor"
+                                for r in lsl
+                            ):
+                                errors.append(
+                                    "%s.landed.verified 'ancestor': a slice landing is "
+                                    "not 'ancestor', so the feature-level record claims "
+                                    "more than was proved" % fw
+                                )
                 # Umbrella mode (optional): mirror the slice checks from the JSON
                 # schema so corrupted cross-repo state is rejected even without
                 # jsonschema installed. Absent `slices` ⇒ single-repo, unaffected.

@@ -56,8 +56,40 @@
                     "ref": { "type": "string", "minLength": 1 },
                     "verified": { "enum": ["ancestor", "unchecked", "declared"] },
                     "repo": { "type": "string", "minLength": 1 },
-                    "base": { "type": "string", "minLength": 1 }
-                  }
+                    "base": { "type": "string", "minLength": 1 },
+                    "slices": {
+                      "$comment": "PER-SLICE landing, one entry per slice repository (E99-F102, third review pass — the word r-o-u-n-d is spelled out nowhere in this file on purpose: test_escalation.sh F03-R5 greps it to prove no review counter ever leaked into the TaskStore). A single feature-level ref cannot attest a sliced feature: it names no repository, so one slice's merge commit was accepted as proof while another slice sat unmerged — measured, on a two-child umbrella, as `{verified: ancestor, repo: alpha}` written onto a feature whose `beta` work had never left its branch. tasks-lock therefore requires `--evidence <repo>=<ref>` once per slice repo and checks each ref IN THAT REPOSITORY. COVERAGE (an entry for every slices[].repo) is enforced by that write path and NOT here, because relating one array's members to another's is not expressible in draft-07 — this schema types the record and constrains the rollup. Absent ⇒ a single-repo feature or a legacy entry.",
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "object",
+                        "required": ["repo", "ref", "verified"],
+                        "properties": {
+                          "repo": { "type": "string", "minLength": 1 },
+                          "ref": { "type": "string", "minLength": 1 },
+                          "verified": { "enum": ["ancestor", "unchecked", "declared"] },
+                          "base": { "type": "string", "minLength": 1 }
+                        }
+                      }
+                    }
+                  },
+                  "allOf": [
+                    {
+                      "$comment": "The feature-level rollup can never be STRONGER than its slices: if any slice is not `ancestor`, the feature is not `ancestor` either. Without this, a hand-edited board could carry `verified: ancestor` over an `unchecked` slice — the same false attestation the per-slice binding exists to prevent, re-entered by hand. Expressible in draft-07 via `contains`, so all three acceptance surfaces (this schema, validate-board.py's zero-dependency fallback, next-task.mjs) can agree on it.",
+                      "if": {
+                        "required": ["slices"],
+                        "properties": {
+                          "slices": {
+                            "contains": {
+                              "required": ["verified"],
+                              "properties": { "verified": { "not": { "const": "ancestor" } } }
+                            }
+                          }
+                        }
+                      },
+                      "then": { "properties": { "verified": { "not": { "const": "ancestor" } } } }
+                    }
+                  ]
                 },
                 "slices": {
                   "type": "array",

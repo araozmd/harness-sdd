@@ -443,15 +443,27 @@ the proof: a sliced feature whose three slices are all `merged: true` while the
 first slice's own `pr` field points at `viernes-infra#24` — closed, unmerged.
 Exempting the weaker, unverified mechanism from the stronger, git-verified one would
 ship that hole documented as safe, so a sliced feature satisfies **both**: every
-slice `done`+`merged`, *and* feature-level evidence.
+slice `done`+`merged`, *and* evidence — **one binding per slice repository**.
 
 ```
+# single-repo feature
 python3 .harness/tools/tasks-lock.py set-status <id> done --evidence <sha|url|none:why>
+# SLICED feature: repeat --evidence once per slice repo; each ref is checked THERE
+python3 .harness/tools/tasks-lock.py set-status <id> done \
+    --evidence viernes-infra=<sha> --evidence viernes-users=none:<why>
 ```
 
 ```jsonc
 { "id": "E99-F77", "status": "done",
   "landed": { "ref": "68d3638", "verified": "ancestor", "repo": "harness-sdd", "base": "origin/main" } }
+
+// a SLICED feature: one record per repository, and the feature-level `verified`
+// rolls up to the WEAKEST slice — `ancestor` only when every slice proved it.
+{ "id": "E09-F02", "status": "done",
+  "landed": { "ref": "viernes-infra=abc1234; viernes-users=none: superseded",
+              "verified": "declared",
+              "slices": [ { "repo": "viernes-infra", "ref": "abc1234", "verified": "ancestor", "base": "origin/main" },
+                          { "repo": "viernes-users", "ref": "none: superseded", "verified": "declared" } ] } }
 ```
 
 | the `--evidence` value | what happens |
@@ -462,15 +474,27 @@ python3 .harness/tools/tasks-lock.py set-status <id> done --evidence <sha|url|no
 | a URL / tag / any other string | accepted with a warning, recorded `verified: "unchecked"` |
 | `none:<why>` | accepted, recorded `verified: "declared"` — for work with no commit (a console action, a supersession). The reason is required |
 | omitted, on **any** feature (sliced included) | **REFUSED**, naming the four instances |
+| **unbound** (`<ref>`, no `<repo>=`) on a **sliced** feature | **REFUSED** — it names no repository, so it attests no particular slice. One slice's merge commit carrying the whole feature to `done` is the failure this exists to stop |
+| bound to a repo the feature has **no slice in**, or **missing** for a slice repo | **REFUSED**, naming the unknown repo / the repos still owed |
 
 **The refusal is narrow on purpose:** only when ancestry is *checkable and false*.
 A guard that also blocked an offline machine, a sha belonging to a repository this
-checkout cannot see, or a remoteless board (an umbrella root usually has no remote —
-its local `main` is then the base) would be routed around, and a routed-around guard
-is worth less than none. It does **not** wave through mark-before-push: where an
-`origin` exists, "merged" means `origin/HEAD`, so a commit sitting on your local
-`main` that was never pushed is refused — the same shape as E99-F58's two orphan
-commits. Push it, or say `none:<why>`.
+checkout cannot see, or a remoteless board would be routed around, and a
+routed-around guard is worth less than none. It does **not** wave through
+mark-before-push: where an `origin` exists, "merged" means `origin/HEAD`, so a commit
+sitting on your local `main` that was never pushed is refused — the same shape as
+E99-F58's two orphan commits. Push it, or say `none:<why>`.
+
+**The default branch is discovered, never guessed by name.** With an `origin`:
+`refs/remotes/origin/HEAD`, else `ls-remote --symref`. With **no** `origin`: an
+explicit `git config harness.defaultBranch <branch>`, else the repository's *only*
+local branch (nothing else "the default" could name — the shape an umbrella root has),
+else **nothing**, which records `unchecked` and never blocks. A working checkout's
+`HEAD` is deliberately not used: it doubles as "the branch you are standing on", so it
+would attest the unmerged commit under your feet. Taking the first of `main`/`master`
+that merely *exists* did exactly that on a remoteless repo whose real default is
+`trunk` — a commit that never reached trunk was recorded `verified: "ancestor"`,
+`base: "main"`. A false attestation is worse than none.
 
 ⚠️ **Scope, measured.** "Refused" only applies where the sha **resolves**: the harness
 dir's repo, its parent, and that parent's children. `E99-F58`/`E99-F59` are recorded on

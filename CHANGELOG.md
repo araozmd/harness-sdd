@@ -32,6 +32,8 @@ this class is itself an instance of it.
 
 ```
 tasks-lock.py set-status <id> done --evidence <sha|url|none:why>
+# a SLICED feature: one binding per slice repository, each checked in THAT repository
+tasks-lock.py set-status <id> done --evidence <repo-a>=<sha> --evidence <repo-b>=none:<why>
 ```
 
 **Every feature, sliced or not — `slices[]` is NOT an attestation.** The first draft of this
@@ -46,6 +48,27 @@ draft: **exit 0, no record written**. Exempting the weaker, unverified mechanism
 stronger, git-verified one would have shipped the hole documented as safe. The two
 invariants are now independent and a sliced feature must satisfy **both**.
 
+**…and one sha cannot attest a sliced feature: evidence is BOUND PER SLICE REPOSITORY.**
+Requiring evidence was necessary but not sufficient, and review round 3 reproduced the
+remainder against the shipped code: with a single feature-level value, resolved in
+*whichever* nearby repository happened to know that object, **one slice's merge commit
+carried the whole feature to `done`** while another slice sat unmerged under a hand-typed
+`merged: true`. Measured on a two-child umbrella (`alpha` landed, `beta` on a branch that
+never merged): passing alpha's sha exited **0** and wrote
+`{"verified": "ancestor", "repo": "alpha"}` onto the FEATURE — the exact unmerged-slice
+failure this feature exists to prevent, now carrying the authority of a git check performed
+on a different repository's work. So a sliced feature takes `--evidence <repo>=<ref>`,
+repeated once per slice repo, and **each ref is verified in the repository its binding
+names**. The record grows `landed.slices` (one entry per repository, with the base each was
+checked against), and the feature-level `verified` **rolls up to the weakest slice** — so
+`ancestor` at the feature level means *every* slice proved ancestry in its own repository.
+That rollup rule is enforced on all three acceptance surfaces (schema `contains`,
+`validate-board.py`, `next-task.mjs`), so a hand-edited board cannot re-enter by typing what
+the CLI refuses to write. Coverage — an entry for every `slices[].repo` — is enforced by the
+**write path** and deliberately not by the schema: relating one array's members to another's
+is not expressible in draft-07, and a check the schema cannot state would put the three
+surfaces on different acceptance surfaces, which is the drift the mirrors exist to prevent.
+
 What the value does, and what it deliberately does not do:
 
 | `--evidence` | outcome |
@@ -56,10 +79,13 @@ What the value does, and what it deliberately does not do:
 | any other string (a PR URL, a tag) | accepted with a warning, `verified: "unchecked"` |
 | `none:<why>` | accepted, `verified: "declared"` — work with no commit; the reason is required |
 | omitted, on **any** feature | **REFUSED** |
+| **unbound** (`<ref>` with no `<repo>=`) on a **sliced** feature | **REFUSED** — it names no repository, so it attests no particular slice |
+| `<repo>=<ref>` where the feature has no slice in `<repo>`, or a slice repo left unbound | **REFUSED**, naming the unknown repo / the repos still owed |
+| `<repo>=<ref>` on a feature with **no** slices | **REFUSED** — the repo name would be recorded against a repository nobody checked |
 
 The refusal is **narrow on purpose**: only when ancestry is *checkable and false*. An
 offline machine, a sha from a repository this checkout cannot see, and a remoteless board
-(an umbrella root usually has none; its local `main` is then the base) all still succeed —
+all still succeed —
 a guard that blocked them would be routed around, and a routed-around guard is worth less
 than none. It does not wave through mark-before-push: with an `origin`, "merged" means
 `origin/HEAD`. Both halves are asserted, each against a control.
@@ -73,10 +99,31 @@ the say-so it replaces, because the record now carries the authority of a check 
 happened. The wrong base cuts both ways: work that *had* landed on `trunk` would read as
 provably-not-an-ancestor and be **refused**. So the order is now: the published symref, else
 `git ls-remote --symref origin HEAD` (bounded at 5s, every failure mapping to `None`), else
-nothing — and a repo with **no `origin` at all** still falls back to local `main`/`master`,
-which is the umbrella case and has no remote to be wrong about. An undiscoverable default
-degrades to `unchecked`; it never blocks the write. Pinned by **R13**, whose controls cover
-the trunk-tip accept, the base actually used, and an unreachable remote.
+nothing. An undiscoverable default degrades to `unchecked`; it never blocks the write.
+Pinned by **R13**, whose controls cover the trunk-tip accept, the base actually used, and an
+unreachable remote.
+
+**…and neither does a LOCAL default get guessed by name.** Round 2 fixed the remote side and
+left the same defect in the remoteless one: with no `origin`, the helper took the first of
+`main`/`master` that merely **existed**. Round 3 reproduced it — a remoteless repository
+whose real default is `trunk` and which also carries a `main`: a commit present only on
+`main`, never on trunk, was recorded `{"verified": "ancestor", "base": "main"}`. Existence is
+not authority. Two local signals are: an explicit **`git config harness.defaultBranch
+<branch>`**, and **exactly one local branch**, where "the default" has no other candidate to
+be — the shape the viernes umbrella root actually has (measured: no remote, one branch
+`main`), so the board this guard was built for keeps its teeth with no declaration. Anything
+else is undecidable and records `unchecked` with a warning naming the config. Note what is
+**not** used: the repository's own `HEAD`. In a working checkout it doubles as "the branch
+you happen to be on", and the most common way to reach this code is standing on the feature
+branch you just finished — trusting HEAD would make that branch "the default" and attest the
+unmerged commit under your feet, turning the guard's flagship refusal into a proof of the
+opposite. The cost is stated plainly: a remoteless repository with several branches and no
+declaration now records `unchecked` where it previously (sometimes correctly, sometimes
+falsely) refused. That is the right trade — a **false** attestation is worse than none,
+because the record then carries the authority of a check that never happened, while
+`unchecked` is greppable and never blocks. Pinned by **R15**, whose controls cover the
+declaration restoring the check in both directions and the single-branch umbrella shape
+keeping its teeth.
 
 `landed.repo` and `landed.base` are **non-empty** in the schema and the zero-dependency
 validator, matching the selector's long-standing `assertString`. They disagreed: a board
@@ -116,7 +163,7 @@ stay unattested. This is a **breaking change to the `set-status` CLI** for every
 `--evidence`, and `tests/test_owner_gate.sh`'s R5 pair is *stronger* for it — both halves
 now carry evidence, so the difference between the refusal and its control is the gate alone.
 
-New suite `tests/test_landed_evidence.sh` (12 cases, every one paired with a control). Five
+New suite `tests/test_landed_evidence.sh` (15 cases, every one paired with a control). Seven
 of them exist only because a mutation survived without them: **R6/R12** (the sliced
 exemption above — R12 replays the live `E09-F02` entry verbatim); **R8**'s zero-dependency
 and `repo`/`base` assertions (deleting the fallback's `verified` enum check, and both type
@@ -125,10 +172,24 @@ import-blocked assertions (a fallback made to *require* `landed` on every `done`
 suite green, so on a machine without `jsonschema` it would have rejected all 148 live rows
 undetected); and **R11** (deleting the child-repository scan left it green — every other
 case resolves the sha in the harness dir's own parent, so the umbrella layout the viernes
-board actually uses went unexercised). The one previously-disclosed survivor (loosening the
-sliced test to `slices is not None`) is **gone by construction**: the branch it mutated no
-longer exists. It was independently confirmed equivalent first — 8 separating inputs across
-both validator paths, identical in exit code and board bytes.
+board actually uses went unexercised); and round 3's **R14**/**R15**, each written only after
+the defect it names was reproduced against the shipped code. The one previously-disclosed
+survivor (loosening the sliced test to `slices is not None`) is **gone by construction**: the
+branch it mutated no longer exists. It was independently confirmed equivalent first — 8
+separating inputs across both validator paths, identical in exit code and board bytes.
+
+Round 3's own mutation campaign: **12 mutations, 12 killed, 0 survivors** — the per-slice
+binding removed (R6/R14a), a slice's ref checked in whatever repo resolves it (R14c), the
+rollup taking the strongest slice instead of the weakest (R14c), the local default guessed
+by name again (R15), the single-branch resolution dropped (R2/R14b), and the new
+`landed.slices` shape and rollup rule deleted from each of the three acceptance surfaces
+**independently** (R8, once per surface — the M6 lesson: with `jsonschema` installed the
+schema answers for the fallback, so the zero-dependency path is probed with the import
+blocked), and the `<repo>=<ref>` split loosened to "anything before the first `=`", which
+turns a PR URL's `?utm=1` into a repository binding (R4's control). Because the suite stops
+at its first failure, the five `tasks-lock` mutations were re-run against a trimmed copy
+carrying only R14/R15, so each kill is attributable to the case that claims it rather than
+to an earlier one.
 
 ## [0.63.0] — 2026-08-16
 
