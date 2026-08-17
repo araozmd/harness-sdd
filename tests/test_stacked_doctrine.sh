@@ -40,6 +40,9 @@
 #   `ships with the harness body`                   (R8) — `### Opt-in and inert-when-disabled`
 #   BANNED in the lane: `atomic` (R3), `wave` + `E21-F01` (R5), `(R<n>)` (R7),
 #   `separate independent features` (R2), `documentation is stamped` (R8).
+#   BANNED in `### When to use what`: `safely shippable` (R1) — the token counts are blind to
+#   a PARAPHRASE, and a decision-table row describing the criterion in its own words is a
+#   second statement of it. The lane rows point at `Entry condition` instead.
 #
 # Anti-patterns this suite does NOT commit, all previously paid for in this repo:
 # no assertion on a VERSION value in any form; no diff of any file against `main`; no
@@ -101,6 +104,27 @@ test_entry_condition_stated_once() {
     [ "$_n" = "1" ] \
       || fail "R1: the anchor [$_a] occurs $_n time(s) in the '$LANE' section, want exactly 1 — the entry condition is stated in ONE subsection and every other part of the lane points at it; a condition stated twice will disagree with itself"
   done
+  # The token counts above are blind to a PARAPHRASE, and the decision table is where the
+  # paraphrase lives: a row reading "intermediate increments are safely shippable" restates
+  # condition 1 and silently drops condition 2, so a reader routing through the table enters
+  # the lane having met half the condition — with both token counts still at 1. The table
+  # must POINT at `Entry condition`, never restate it.
+  _wtu="$(sect "$WF" '### When to use what')"
+  [ -n "$_wtu" ] \
+    || fail "R1: docs/WORKFLOW.md has no '### When to use what' subsection in the $LANE section — the decision table that must point at '### Entry condition' is extracted by that heading"
+  _para="$(printf '%s\n' "$_wtu" | grep -o 'safely shippable' | wc -l | tr -d ' ')"
+  [ "$_para" = "0" ] \
+    || fail "R1: '### When to use what' paraphrases the entry condition $_para time(s) as [safely shippable] — that phrase restates only the independently-safe half and drops [verification.test_command], so the table lets a reader enter the lane on half the condition; name **Entry condition** instead of restating it"
+  # Rows that route INTO or AWAY FROM the lane are exactly those saying `this lane`; the
+  # single-PR and parallel-independent-PR rows do not, and are none of this assertion's
+  # business. The >=2 floor keeps the per-row check from passing vacuously if the rows are
+  # reworded out of existence.
+  _lrows="$(printf '%s\n' "$_wtu" | grep -o 'this lane' | wc -l | tr -d ' ')"
+  [ "$_lrows" -ge 2 ] \
+    || fail "R1: '### When to use what' has $_lrows row(s) saying [this lane], want at least 2 — the table must route both INTO the lane and AWAY from it, and with fewer rows the pointer check below asserts nothing"
+  _lbad="$(printf '%s\n' "$_wtu" | awk 'index($0,"this lane")>0 && index($0,"Entry condition")==0{n++} END{print n+0}')"
+  [ "$_lbad" = "0" ] \
+    || fail "R1: $_lbad row(s) of '### When to use what' route into or away from [this lane] without naming [Entry condition] — a qualifying row that describes the criterion in its own words is a second statement of the condition, and it will disagree with '### Entry condition'; make the row point at the subsection"
   pass "E21-F05 R1 entry_condition_stated_once"
 }
 

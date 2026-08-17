@@ -592,8 +592,8 @@ in one visible step is **an open problem this epic does not solve**.
 | Scenario | Mechanism |
 |---|---|
 | Feature fits the single-PR review budget | Open one PR against `main` — the default lane |
-| Feature exceeds the budget but intermediate increments are safely shippable | Open a **stacked PR** per increment — this lane |
-| Feature exceeds the budget and intermediate increments are NOT safely shippable | Not a candidate for this lane — do **not** stack it. See **Entry condition** above for what to do instead |
+| Feature exceeds the budget and meets **Entry condition** | Open a **stacked PR** per increment — this lane |
+| Feature exceeds the budget and does not meet **Entry condition** | Not a candidate for this lane — do **not** stack it. See **Entry condition** above for what to do instead |
 | Increments are truly independent (no shared code, no order dependency) | Open **parallel independent PRs** — stacking adds unnecessary ordering |
 
 ### Creating stacked increments
