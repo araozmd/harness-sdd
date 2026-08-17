@@ -705,6 +705,21 @@ STALE
   # against either one alone silently passes on the other half of the shells. Both are R10
   # violations, and both are caught by demanding the SAME end state as above: exit 0 and a
   # roster holding freshly detected content.
+  #
+  # ROOT CANNOT RUN THIS SCENARIO AT ALL, so it is skipped rather than adapted. Root bypasses
+  # the permission bits: `test -w` reports a 0444 file writable, AND — the part that decides
+  # the shape of this guard — the bare redirection SUCCEEDS against it. So under root there
+  # is no failing write to observe, and the rows below would not be "mis-guarded", they would
+  # be VACUOUS: they would pass identically with or without the `rm -f` they exist to pin.
+  # Dropping the `test -w` guard would therefore make the suite green under root while
+  # testing nothing, which is strictly worse than not running. Announce the skip instead —
+  # a silently skipped case reads as a passing one. (CI and container images commonly run as
+  # uid 0; that is the environment this exists for.)
+  if [ "$(id -u)" = "0" ]; then
+    echo "skip - R10 read-only rows: running as uid 0, which bypasses the 0444 bits — the failing write this pins cannot occur, so the rows would be vacuous rather than green" >&2
+    return 0
+  fi
+
   _d="$(target r10ro)"
   set_gate "$_d" true
   _b="$(stub_bin r10ro claude)"
