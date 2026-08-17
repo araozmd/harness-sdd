@@ -274,10 +274,11 @@ stateDiagram-v2
     pending --> in_progress: sdd:false · autonomous:false (--gated) ⏸ HUMAN GATE — parked until a human approves
     spec_ready --> in_progress: human approves ⏸ HUMAN GATE (skipped if autonomous:true)
     in_progress --> in_review: Builder writes code from approved specs
-    in_review --> done: Reviewer approves
+    in_review --> in_review: Reviewer approves · open the PR · still not done
+    in_review --> done: the PR MERGES · set-status done --evidence <merge commit>
     in_review --> in_progress: Reviewer rejects · feedback → progress/
     done --> [*]
-    note right of done: Reviewer verdict only — append to progress/history.md
+    note right of done: written after the work LANDS, never on the approval — append to progress/history.md
 ```
 
 ## Ownership & scoped selection (`owner` + `/sdd-next --mine`)
@@ -455,6 +456,27 @@ python3 .harness/tools/tasks-lock.py set-status <id> done \
               "slices": [ { "repo": "viernes-infra", "ref": "abc1234", "verified": "unchecked" },
                           { "repo": "viernes-users", "ref": "none: superseded", "verified": "declared" } ] } }
 ```
+
+**When `done` is written: after the work LANDS.** An approve verdict says the work
+is *correct*, not that it is *merged*. So the order on the main path is: approve →
+open the PR (the feature stays `in-review`) → **observe the merge** → then
+`set-status done --evidence <merge commit>`. Writing `done` on the approval instead
+re-creates the exact failure this record exists to prevent — the PR is later closed
+unmerged or abandoned and the feature sits `done`, unselectable, with work that never
+shipped — and it also makes the record useless, because the only ref that exists at
+approval time is an unmerged branch tip.
+
+⚠️ **There is no board state yet for "approved, awaiting merge".** A feature left
+`in-review` is *not* inert: the selector routes `in-review` to `reviewer`, so
+`/sdd-next` will keep offering an already-approved feature for review. Until a
+first-class hold exists, **park** it while the PR is open (`parked.reason: "PR #N
+open, awaiting merge"`) — a parked feature is reported as blocked and never
+selected — then unpark and write `done` with the merge commit. `set-status` refuses
+any transition while a park is in place, so the unpark comes first.
+
+`none:<why>` remains the one legitimate `done` with nothing to merge (a console
+action, a supersession). Use it when there is **nothing** to merge — never when
+there is something that has not merged *yet*.
 
 ⚠️ **Recorded, not verified — yet.** The helper does **not** check the reference. It
 runs no git, opens no connection, resolves no repository, and never decides whether a
@@ -768,8 +790,11 @@ So:
 6. Reviewer runs tests + Playwright, verifies every R-id. On **reject** it writes
    file-based feedback to `progress/<run>/review.md` → `in-progress` → Builder
    addresses → re-review; this build↔review loop repeats until green. On **approve**
-   → `done`. Each round is recorded in `progress/history.md`.
-7. History updated. Orchestrator picks the next task.
+   the feature stays `in-review` and the PR is opened. Each round is recorded in
+   `progress/history.md`.
+7. The PR **merges** → `set-status done --evidence <merge commit>`. `done` is written
+   after the work lands, never on the approval (see "`done` needs a landing record").
+8. History updated. Orchestrator picks the next task.
 
 ### Which Builder runs — deterministic escalation
 

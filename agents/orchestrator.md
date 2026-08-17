@@ -44,7 +44,7 @@ next, and delegate to the specialist agents.
    | `pending` + `sdd: false` + `autonomous: false` (e.g. `/sdd-fix --gated`) | **PAUSE at the human gate.** Do not auto-run. The fix is parked (not actionable) until a human approves it — by moving it to `in-progress`, or by re-stamping `autonomous: true`. Mirrors the `spec-ready` PAUSE semantics: parked, not actionable until a human acts. |
    | `spec-ready` | **PAUSE.** A human must review specs and move to `in-progress`. Do not proceed unless the task is marked `autonomous: true`. |
    | `in-progress` | Spawn the Builder role that **`tools/builder-role.sh` returns** (see **Which Builder** below) with the approved specs only. On finish, set `in-review`. |
-   | `in-review` | Spawn **Reviewer**. If it approves → `done`. If it rejects → back to `in-progress` with the Reviewer's feedback file (see **Build↔review rounds** below). |
+   | `in-review` | Spawn **Reviewer**. If it approves → open the PR; the feature stays `in-review` and reaches `done` only after the work MERGES (see **Writing `done`** below). If it rejects → back to `in-progress` with the Reviewer's feedback file (see **Build↔review rounds** below). |
    | needs research | Spawn **Scout** (read-only) first; it writes findings to `progress/`. |
 
    The table routes on **feature** status and applies only to features that passed
@@ -245,17 +245,54 @@ The build↔review handoff is **not a single pass** — it is an explicit loop t
 2. `in-review` → Reviewer verdict. **Reject** → the Reviewer writes **actionable,
    file-based feedback** to `progress/<run>/review.md` → set the feature back to
    `in-progress` → the Builder addresses that specific feedback → **re-review**.
-   **Approve** → `done`.
+   **Approve** → exit the loop and open the PR. An approve is **not** `done`: see
+   "Writing `done`" below, because `done` is written after the work LANDS.
 3. Repeat steps 1–2 for as many rounds as it takes; the loop exits **only on an
    approve verdict** (or when you escalate a stuck feature to a human).
 
-**Writing that `done` needs a landing record** (E99-F102). An approve verdict says the
-work is *correct*; it does not say the work is *merged*, and `done` is what stops the
-selector routing the item — so a `done` whose branch never merged is both unshipped and
-unreachable, and the next brief will cite it as a shipped mechanism. **Four** such
-features were found on one board, all by accident, and one of them (`E99-F29`) is already
-cited as landed by another feature's board entry. So every feature transition to `done`
-carries its reference:
+**Each round is recorded.** Append **one line per round** to `progress/history.md`
+so the iteration is observable — e.g. `E0x-Fyy in-review → reject (round N)` and,
+on the final round, `E0x-Fyy in-review → approve`. The round counter lives only in
+this `progress/` history; it adds **no** status value and **no** schema field. The
+same counter is stamped on the `builder`/`reviewer` telemetry phase records:
+`round` starts at **1** on the first build and **increments by 1** on every
+`in-review` → `in-progress` bounce (best-effort — see "## Telemetry").
+
+### Writing `done`: after the work lands, not on the approval
+
+An approve verdict says the work is *correct*; it does not say the work is **merged**, and
+`done` is what stops the selector routing the item — so a `done` whose branch never merged
+is both unshipped and unreachable, and the next brief will cite it as a shipped mechanism.
+**Four** such features were found on one board, all by accident, and one of them
+(`E99-F29`) is already cited as landed by another feature's board entry.
+
+**So `done` is written only once the work is ON the default branch** — after the PR merges,
+never on the approval and never before the PR is opened. Writing it earlier re-creates the
+exact failure this record exists to prevent: the PR is later closed unmerged or abandoned,
+and the feature sits `done`, unselectable, with work that never shipped. It also makes the
+record itself useless — at approval time the only ref that exists is an unmerged branch tip,
+so "prefer the merge commit" below cannot be followed, and a later re-check of that ref
+finds it is not on the default branch.
+
+The order on the main path is therefore:
+
+1. Reviewer approves → the feature stays `in-review`.
+2. Run the change-size handoff and open the PR (see below).
+3. **Observe the merge.**
+4. Then `set-status <id> done --evidence <merge-commit>`, and record the round in
+   `progress/history.md`.
+
+⚠️ **Between (1) and (3) the board has no state that means "approved, awaiting merge".**
+Measured: a feature left `in-review` is *not* inert — `tools/next-task.mjs` routes
+`in-review` to `reviewer`, so `/sdd-next` will offer the already-approved feature for review
+again, every session (`route reviewer for <id> at status in-review`). Until a first-class
+hold exists, use the **park** (E06-F07) while the PR is open — a parked feature is reported
+`blocked … [route when unparked: reviewer]` and is never selected — then unpark it and write
+`done` with the merge commit. Note `set-status` refuses any transition while a park is in
+place, so the unpark comes first. If you do not park it, do not blindly re-review it on the
+next `/sdd-next`: check `progress/history.md` for the approval first.
+
+Then the transition carries its reference:
 
 ```
 python3 "$HARNESS_DIR/tools/tasks-lock.py" set-status <id> done --evidence <ref|none:why>
@@ -264,9 +301,18 @@ python3 "$HARNESS_DIR/tools/tasks-lock.py" set-status <id> done \
     --evidence <repo-a>=<ref> --evidence <repo-b>=none:<why>
 ```
 
-Prefer the **merge commit** — it is the thing that is actually on the default branch, and
-it is what a later re-check will resolve. `none:<why>` is for work with no commit at all (a
-console action, a supersession). **A sliced feature is not exempt, and one ref cannot
+Pass the **merge commit** — it is the thing that is actually on the default branch, and it
+is what a later re-check will resolve. Following step (3) above is what makes that possible;
+a branch tip captured at approval time is not on the default branch and never becomes so.
+
+**`done` without a merge is still legitimate in exactly one shape**: `none:<why>` — work
+with no commit to point at (an AWS/console action, a supersession, a decision recorded and
+closed). That path is unchanged and deliberately kept open, because a guard with no legal
+route for no-code work gets routed around. What it is *not* is a way to close a feature
+whose code is sitting in an unmerged PR. Use it when there is **nothing to merge**;
+never when there is something that has not merged **yet**.
+
+**A sliced feature is not exempt, and one ref cannot
 answer for it**: its per-slice `merged` flags are hand-typed and nothing in the harness
 verifies them (E09-F02 carries `merged: true` on a slice whose own `pr` is a closed,
 unmerged PR), so it must satisfy the slice invariant **and** carry `--evidence <repo>=<ref>`
@@ -277,14 +323,6 @@ nothing: every ref lands as `verified: "unchecked"` (or `"declared"`), and the h
 so. Do not read a `landed` record as proof that the work merged — read it as the pointer
 that makes checking possible. Full contract in `store/local.md` (`set_status`) and
 `docs/WORKFLOW.md`.
-
-**Each round is recorded.** Append **one line per round** to `progress/history.md`
-so the iteration is observable — e.g. `E0x-Fyy in-review → reject (round N)` and,
-on the final round, `E0x-Fyy in-review → approve`. The round counter lives only in
-this `progress/` history; it adds **no** status value and **no** schema field. The
-same counter is stamped on the `builder`/`reviewer` telemetry phase records:
-`round` starts at **1** on the first build and **increments by 1** on every
-`in-review` → `in-progress` bounce (best-effort — see "## Telemetry").
 
 ### Which Builder — ask the tool, do not decide (E17-F03)
 

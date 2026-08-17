@@ -136,6 +136,17 @@ Orchestrator's exclusive ownership of state writes.
   check. E99-F32's board entry cites E99-F29 as landed, which is the harm this exists to
   stop, already in the corpus.
 
+  **Write it only once the work has LANDED.** An approve verdict says the work is correct,
+  not that it merged. The order is: approve → open the PR (the feature stays `in-review`) →
+  observe the merge → then `set_status(<id>, done, evidence=<merge commit>)`. Writing `done`
+  on the approval re-creates the failure this record exists to prevent (an abandoned PR
+  leaves a `done`, unselectable feature whose work never shipped) and makes the record
+  itself unusable, since the only ref that exists then is an unmerged branch tip. There is
+  no board state for "approved, awaiting merge" yet, and `in-review` is not inert — the
+  selector routes it to a Reviewer — so **park** the feature while the PR is open and unpark
+  it before the `done` write. `none:<why>` stays the one legitimate `done` with nothing to
+  merge; it is not a way to close work that has simply not merged **yet**.
+
   ⚠️ **Recorded, NOT verified.** This helper does not check the reference. It runs no git,
   opens no connection, resolves no repository, and never decides whether a commit reached a
   default branch — so every ref is stored as `landed.verified: "unchecked"` (or `"declared"`

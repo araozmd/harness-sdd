@@ -22,6 +22,8 @@
 #   R14 the BINDING contract: bare ref on a sliced feature, unknown repo, duplicate
 #       binding, missing coverage, per-slice `none:`, and the unsliced path unchanged
 #   R18 THE SEAM ITSELF: this half performs no I/O and can produce no proof
+#   R19 the documented ORDER agrees with the mechanism: `done` is written after the work
+#       LANDS, never on the approve verdict (prose contract, section-scoped)
 # Absent on purpose (they belong to the verification half): R2, R3, R10, R11, R13, R15,
 # R16, R17 and the "checked in THAT repository" half of R14.
 #
@@ -637,5 +639,94 @@ for _ev in "$SHAISH" "https://github.com/example/repo/pull/1" "none: no commit a
   esac
 done
 pass "E99-F102 R18 the_contract_half_performs_no_io_and_claims_no_proof"
+
+# ── R19: the documented ORDER must not defeat the mechanism ───────────────────────────
+# The harness used to instruct *approve → set-status done → open the PR*. At `done` time the
+# only ref that exists is an unmerged branch tip, so the record was unverifiable by
+# construction — and a PR later closed or abandoned left the feature `done` and unselectable
+# with work that never shipped, which is the failure this whole feature exists to prevent.
+# A mechanism and a process that contradict each other is worse than either alone, so the
+# contract is asserted here beside the code it constrains.
+#
+# These are PROSE assertions, so each one greps the SECTION it names, extracted by heading —
+# a whole-file grep is satisfied by any unrelated occurrence elsewhere in the file (including
+# one this very change added), and its failure message would then name a guarantee it cannot
+# detect. Every extraction is checked non-empty FIRST, because a renamed heading would
+# otherwise make every assertion below it pass against an empty string.
+ORCH="$SRC/agents/orchestrator.md"
+section() {  # section <file> <heading-substring>
+  # FENCE-AWARE on purpose. A naive `/^#+ /` heading test also matches a shell COMMENT
+  # inside a fenced block — `# a SLICED feature: …` in this very section — and silently
+  # TRUNCATES the extraction there. That is worse than extracting nothing: the section is
+  # still non-empty, so an emptiness guard passes while every assertion below runs against
+  # the first few paragraphs only. Measured while writing this case: the section came back
+  # 37 lines long and the `none:<why>` assertion failed against text that was present.
+  SECTION_HEADING="$2" awk '
+    BEGIN { h = ENVIRON["SECTION_HEADING"] }
+    /^```/ { fence = !fence; if (keep) print; next }
+    !fence && /^#+ / { keep = (index($0, h) > 0); next }
+    keep
+  ' "$1"
+}
+
+_done_sec="$(section "$ORCH" 'Writing `done`')"
+[ -n "$(printf '%s' "$_done_sec" | tr -d '[:space:]')" ] \
+  || fail "R19: orchestrator.md has no 'Writing \`done\`' section — the heading was renamed or removed, so every assertion below it would pass vacuously"
+# ANTI-TRUNCATION: assert a marker from the END of the section as well as its start. A
+# truncated extraction is non-empty, so an emptiness check alone would let every assertion
+# below run against a prefix — which is exactly what happened while this case was written.
+printf '%s\n' "$_done_sec" | grep -qi 'recorded, not verified' \
+  || fail "R19: the 'Writing \`done\`' section extraction does not reach its final paragraph — it was TRUNCATED, so every assertion below it would run against a prefix"
+printf '%s\n' "$_done_sec" | grep -qi 'merge' \
+  || fail "R19: the 'Writing \`done\`' section never mentions the merge — it is supposed to say that \`done\` waits for it"
+printf '%s\n' "$_done_sec" | grep -qiE 'after the (PR )?merge|after the work lands|only once the work is' \
+  || fail "R19: the 'Writing \`done\`' section does not say \`done\` is written AFTER the work lands — an approval-time ref is an unmerged branch tip, so the record it produces can never be re-checked"
+# Key on a phrase that occurs ONLY in the prose claim. `none:<why>` itself also appears in
+# this section's code fence (`--evidence <repo-b>=none:<why>`), so a token grep survives the
+# deletion of the sentence that gives it meaning — measured: that mutation SURVIVED.
+printf '%s\n' "$_done_sec" | grep -qi 'nothing to merge' \
+  || fail "R19: the 'Writing \`done\`' section no longer distinguishes 'nothing to merge' (the legitimate none:<why> case) from 'has not merged yet' — without that line none:<why> becomes the escape hatch that closes unmerged work
+# The interim state is named, WITH the consequence measured from the shipped selector: an
+# `in-review` feature is re-offered to a Reviewer, so telling an operator to leave it there
+# without saying so would hand them a loop.
+printf '%s\n' "$_done_sec" | grep -qi 'in-review' \
+  || fail "R19: the section does not say what the feature's status is between approval and merge"
+# Likewise: 'park' alone is too weak — it survives deleting the paragraph's first line.
+# `awaiting merge` and `unpark` occur only in the interim-state paragraph itself.
+printf '%s\n' "$_done_sec" | grep -qi 'awaiting merge' \
+  || fail "R19: the section does not name the interim state (approved, awaiting merge) — the documented order leaves the feature somewhere, and not saying where is how an operator invents the old shortcut"
+printf '%s\n' "$_done_sec" | grep -qi 'unpark' \
+  || fail "R19: the section names no hold for the open-PR window — without it the documented order leaves an approved feature being re-offered for review every session, since the selector routes in-review to a Reviewer"
+
+# ...and the two places that ROUTE on the approval must agree with it. This is the assertion
+# that would have caught the original defect: the loop said 'Approve → `done`' while the PR
+# handoff below it opened the PR afterwards.
+_loop_sec="$(section "$ORCH" 'Build↔review rounds')"
+[ -n "$(printf '%s' "$_loop_sec" | tr -d '[:space:]')" ] \
+  || fail "R19: could not extract the 'Build↔review rounds' section from orchestrator.md"
+printf '%s\n' "$_loop_sec" | grep -qi 'approve' \
+  || fail "R19: the extracted 'Build↔review rounds' section does not mention an approve verdict — the extraction is wrong, so the assertion below proves nothing"
+printf '%s\n' "$_loop_sec" | grep -qE '\*\*Approve\*\* → `done`' \
+  && fail "R19: the build↔review loop still promises \`done\` on the approve verdict, while the PR is opened afterwards — so the ref recorded at that moment is an unmerged branch tip, and an abandoned PR leaves the feature done and unselectable"
+grep -qE '^ *\| `in-review` \|.*approves → `done`' "$ORCH" \
+  && fail "R19: the route table still sends an approve verdict straight to \`done\`"
+# CONTROL: the route table row EXISTS and still routes in-review to the Reviewer — otherwise
+# the negative assertion above would pass against a file that lost the row entirely.
+grep -qE '^ *\| `in-review` \|.*Reviewer' "$ORCH" \
+  || fail "R19 control: the route table has no in-review row routing to the Reviewer, so the assertion above proves nothing"
+
+# The same order in the other two contracts, each scoped to its own section.
+_wf_sec="$(section "$SRC/docs/WORKFLOW.md" 'needs a landing record')"
+[ -n "$(printf '%s' "$_wf_sec" | tr -d '[:space:]')" ] \
+  || fail "R19: could not extract the landing-record section from docs/WORKFLOW.md"
+printf '%s\n' "$_wf_sec" | grep -qiE 'after the (PR )?merge|after the work lands|observe the merge' \
+  || fail "R19: docs/WORKFLOW.md's landing-record section does not state that \`done\` is written after the work lands"
+# The state diagram is the part a reader trusts fastest, so it must not still draw the
+# approve edge onto `done`.
+grep -qF 'in_review --> done: Reviewer approves' "$SRC/docs/WORKFLOW.md" \
+  && fail "R19: the state diagram still draws 'in-review --> done: Reviewer approves' — the diagram would contradict the prose beside it"
+grep -qE 'in_review --> done' "$SRC/docs/WORKFLOW.md" \
+  || fail "R19 control: the state diagram has no in-review → done edge at all, so the assertion above proves nothing"
+pass "E99-F102 R19 done_is_documented_as_written_after_the_work_lands"
 
 echo "All landing-evidence tests passed."

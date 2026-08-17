@@ -98,6 +98,35 @@ rejected it, so a board carrying `"repo": ""` would pass `init.sh` and then make
 `next-task.mjs` run die with `input-error` — legal by two acceptance surfaces and unusable
 by the third.
 
+**The documented workflow now writes `done` after the merge, not on the approval.** The
+harness previously instructed *approve → `set-status done` → open the PR*. That order
+defeats this mechanism twice over: at `done` time the only ref that exists is an unmerged
+branch tip, so the "prefer the merge commit" instruction could not be followed and every
+record would be unverifiable by construction (and, once verification lands, actively
+**refused** as not-an-ancestor); and a PR later closed or abandoned leaves the feature
+`done` and unselectable with work that never shipped — precisely the failure the record
+exists to prevent. The order is now approve → open the PR (the feature stays `in-review`) →
+**observe the merge** → `set-status done --evidence <merge commit>`, corrected in
+`agents/orchestrator.md` (the route table, the build↔review loop, and its own
+`### Writing \`done\`` section), `docs/WORKFLOW.md` (including the state diagram, whose
+approve edge no longer lands on `done`), `store/local.md` and `.claude/commands/sdd-next.md`
+(plus the installer's embedded copy). Pinned by **R19**, which greps the sections by
+heading rather than the whole file. `none:<why>` is unchanged and remains the one legitimate
+`done` with nothing to merge.
+
+⚠️ **Known gap, stated rather than papered over: there is no board state for "approved,
+awaiting merge".** Measured on the shipped selector: a feature left `in-review` is *not*
+inert — `featureRoute` maps `in-review` to `reviewer`, so `/sdd-next` re-offers an
+already-approved feature for review every session (`route reviewer for <id> at status
+in-review`). The **park** (E06-F07) does hold it (`blocked … [route when unparked:
+reviewer]`, never selected) and is what the docs now tell you to use, but it costs two
+`apply --mutator` round-trips and reports an in-flight PR indistinguishably from
+externally-blocked work — `set-status` refuses any transition while parked, so the unpark
+must come first. Making that ergonomic (a first-class hold the selector reports distinctly)
+is a **lifecycle** change touching the selector, the diagnostics and their suites; it is
+deliberately **not** in this change, which only stops instructing an order that defeats the
+mechanism.
+
 **Additive to every existing board.** `landed` is optional in the schema and never required
 by it — only by the write path — so the 148 already-`done` features stay valid and stay
 unattested. This is a **breaking change to the `set-status` CLI** for every feature `done`
@@ -116,8 +145,9 @@ does spawn); it greps the helper's comment-stripped source for ancestry machiner
 asserts that none of the three ref shapes can produce the proved value. The suite needs no
 `git` at all — which is itself the claim being made.
 
-Measured: **20 mutations, each applied with an asserted replacement count, 20 killed, 0
-survivors** — including one per acceptance surface for the record shape and the rollup rule
+Measured: **27 mutations, each applied with an asserted replacement count, 27 killed, 0
+survivors** (20 on the contract itself, 7 on the documented order and R19's own
+anti-vacuity guards) — including one per acceptance surface for the record shape and the rollup rule
 (with `jsonschema` import-blocked, because with it installed the schema answers for the
 fallback and a deleted fallback check leaves the suite green).
 
