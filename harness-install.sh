@@ -906,8 +906,16 @@ pr_loop_enabled() {
 #      nested mapping and are ignored entirely, so `workers.options.roster: true` leaves
 #      `workers.roster` absent — and absent is OFF.
 #   2. The first direct `roster:` line decides, and it enables only on a FULL-LINE match of
-#      the whitelist. `#` may only start a comment when whitespace precedes it, so neither
+#      the whitelist. `#` may only start a comment when a SPACE precedes it, so neither
 #      `true#disabled` nor `"true"#x` can shed a suffix and pass as `true`.
+#
+# INDENTATION AND SEPARATION ARE SPACES, NEVER TABS — and that is a YAML rule, not a style
+# preference: a tab may not indent a mapping, so `workers:\n\troster: true` is not a document
+# with the key set, it is a MALFORMED document a real parser refuses outright. `[[:space:]]`
+# spans the tab, which would have accepted exactly that and enabled the roster on a file
+# nothing else can load. Matching literal spaces closes the axis in one move rather than one
+# whitespace character at a time, and a tab-indented line inside the section is skipped
+# entirely — it cannot set the direct-child indent and it can never match.
 # Section-scoped like _cfg_pr_loop_value, so a same-named key under ANOTHER top-level
 # section can never change roster behavior; commented example lines never match either.
 #
@@ -917,18 +925,19 @@ _cfg_workers_roster_is_true() {
   [ -f "$1" ] || return 1
   awk -v q="'" '
     BEGIN {
-      ok = "^[[:space:]]*roster:[[:space:]]+(true|\"true\"|" q "true" q ")([[:space:]]*$|[[:space:]]+#)"
+      ok = "^ *roster: +(true|\"true\"|" q "true" q ")( *$| +#)"
       cind = -1
     }
     /^workers:[[:space:]]*(#.*)?$/ { w=1; cind=-1; next }
     w {
       if ($0 ~ /^[[:space:]]*(#.*)?$/) next          # blank or comment-only: no indent signal
       if ($0 ~ /^[^[:space:]]/) { w=0; next }        # a new top-level key ends the section
-      match($0, /^[[:space:]]*/); ind = RLENGTH
+      if ($0 ~ /^ *\t/) next                         # TAB in the indent: malformed YAML, never a key
+      match($0, /^ */); ind = RLENGTH                # indent is SPACES — a tab cannot indent YAML
       if (cind < 0) cind = ind                       # first key line fixes the child indent
       if (ind < cind) { w=0; next }                  # dedented back out of the section
       if (ind > cind) next                           # deeper: a descendant, not workers.roster
-      if ($0 !~ /^[[:space:]]*roster:/) next         # some other direct child
+      if ($0 !~ /^ *roster:/) next                   # some other direct child
       if ($0 ~ ok) hit = 1                           # …and ONLY the whitelist enables
       exit
     }

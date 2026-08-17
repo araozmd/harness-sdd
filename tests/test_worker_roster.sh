@@ -310,6 +310,15 @@ PEOF
   # zero preceding whitespace lets both of these shed their suffix and read as `true`.
   _probe bare_hash        'workers:\n  roster: true#disabled\n'     disabled
   _probe quoted_then_hash 'workers:\n  roster: "true"#x\n'          disabled
+  # TABS ARE NOT INDENTATION IN YAML — a tab-indented mapping key makes the whole document
+  # malformed, so a real parser refuses the file rather than reading the key. An indent class
+  # spanning the tab would enable the roster on a file nothing else can load. Both the indent
+  # and the space after `roster:` are literal spaces, so both shapes stay OFF.
+  _probe tab_indent       'workers:\n\troster: true\n'                disabled
+  _probe tab_separator    'workers:\n  roster:\ttrue\n'               disabled
+  # …and the space-indented control still enables, so the rule above did not simply turn the
+  # gate off for everyone.
+  _probe space_indent_ctl 'workers:\n  roster: true\n'                enabled
   # ── the whitelist class ────────────────────────────────────────────────────────────
   # Every row below is a YAML shape that a decode-then-compare gate mis-decodes into the
   # literal `true` (or would, one variant at a time, as each new corner of YAML is taught to
