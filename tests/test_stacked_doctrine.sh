@@ -140,10 +140,18 @@ test_outcome_stated_mechanically() {
   _open="$(sect "$WF" "## $LANE")"
   [ -n "$_open" ] \
     || fail "R3: the '$LANE' section has no opening paragraphs between its '##' heading and the first '###' — that is where the lane's outcome is stated"
-  printf '%s\n' "$_open" | grep -q 'default branch' \
-    || fail "R3: the lane's opening paragraphs do not say [default branch] — the outcome is mechanical (merging an increment publishes that increment's work to the default branch), and the loop computes the default branch rather than assuming 'main'"
-  printf '%s\n' "$_open" | grep -q 'still open' \
-    || fail "R3: the lane's opening paragraphs do not say [still open] — the mechanical statement is that the LATER increments are still open when an earlier one merges"
+  # The two anchors are asserted as a CONJUNCTION over one PARAGRAPH (`awk` RS="" splits on
+  # blank lines), not as two independent presence checks over the whole opening. Measured:
+  # the loose form SURVIVES the mutation that matters — rewriting the outcome sentence to
+  # say `main` again leaves some *other* sentence mentioning the default branch, and a bare
+  # presence check passes on prose that no longer states the outcome mechanically. That is
+  # the expected value reachable by a second path, and it is why this is a conjunction.
+  _mech="$(printf '%s\n' "$_open" | awk 'BEGIN{RS=""} index($0,"still open")>0{n++} END{print n+0}')"
+  [ "$_mech" -ge 1 ] \
+    || fail "R3: no paragraph in the lane's opening says [still open] — the mechanical statement is that the LATER increments are still open when an earlier one merges; that is the whole outcome the lane delivers"
+  _mechbad="$(printf '%s\n' "$_open" | awk 'BEGIN{RS=""} index($0,"still open")>0 && index($0,"default branch")==0{n++} END{print n+0}')"
+  [ "$_mechbad" = "0" ] \
+    || fail "R3: $_mechbad paragraph(s) in the lane's opening state the outcome ([still open]) WITHOUT naming the [default branch] — merging an increment publishes that increment's work to the default branch, and the loop computes that branch rather than assuming it is called 'main'"
   # A banned TOKEN, not a claim: it cannot be paraphrased around. Scoped to the lane
   # because tools/pr-stack-guard.sh's header states the doctrine in the denial form and is
   # DO NOT TOUCH — so this makes no repo-wide uniqueness claim.
