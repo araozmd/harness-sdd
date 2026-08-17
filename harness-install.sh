@@ -2526,8 +2526,15 @@ install_one() {
     done
   }
 
-  # stub_tree <relpath> <umbrella-root> — mirror one prose-tier path as pointer stubs,
-  # preserving the SOURCE's shape so every path a consumer opens still exists.
+  # stub_tree <relpath> <umbrella-root> <source-root> — mirror one prose-tier path as
+  # pointer stubs, preserving the SOURCE's shape so every path a consumer opens still exists.
+  #
+  # <source-root> IS A PARAMETER, NOT `$SRC`, because the two callers do not answer to the
+  # same authority. Materialising a fresh thin child has only one candidate shape — this
+  # installer's `$SRC`. CONVERTING an existing child has two, and they are not the same
+  # tree: the conversion's pristine check is made against the UMBRELLA BODY, so the write
+  # has to be as well or the child is judged on one tree and rebuilt from another. See the
+  # call site in branch (3). (Codex r1 P1 #3799465968.)
   #
   # THE SHAPE IS PRODUCED BY `cp -R`, NOT REIMPLEMENTED. The requirement is literally "the
   # same shape the full-copy path produces", and the full-copy path is `cp -R` — so the
@@ -2550,11 +2557,21 @@ install_one() {
   # closes that categorically, and unlike the shape class it has a single precondition
   # (the copy must be writable) rather than one bug per filesystem feature.
   stub_tree() {
-    _st_rel="$1"; _st_root="$2"; _st_src="$SRC/$_st_rel"; _st_dst="$H/$_st_rel"
+    _st_rel="$1"; _st_root="$2"; _st_from="$3"
+    _st_src="$_st_from/$_st_rel"; _st_dst="$H/$_st_rel"
     if [ ! -e "$_st_src" ]; then die "source missing: $_st_rel"; fi
     mkdir -p "$(dirname "$_st_dst")"
+    # STAGE, THEN SWAP — the destination is never removed before the source has been read.
+    # With <source-root> a parameter, the source CAN be the destination: a hand-written
+    # `umbrella.root: "../"` resolves a target's umbrella body to its own `.harness`, and
+    # `rm -rf "$_st_dst"` followed by `cp -R "$_st_src"` would then delete the tier and copy
+    # from what it had just deleted. Defence in depth, deliberately not claimed as tested —
+    # the fixture for it is a hand-edited config, i.e. a state the product never writes.
+    _st_tmp="$_st_dst.harness-stub-staging.$$"
+    rm -rf "$_st_tmp"
+    cp -R "$_st_src" "$_st_tmp"
     rm -rf "$_st_dst"
-    cp -R "$_st_src" "$_st_dst"
+    mv "$_st_tmp" "$_st_dst"
     if [ -L "$_st_dst" ]; then
       :                       # a symlinked tier root: left exactly as the full path leaves it
     elif [ -d "$_st_dst" ]; then
@@ -2602,7 +2619,12 @@ install_one() {
     # in arm (3), which is what makes R7 (idempotence) hold by construction: gen_body_stub's
     # text depends only on the body-relative path and the configured umbrella root.
     BODY_LAYOUT=thin
-    for _body_rel in $HARNESS_BODY_PROSE; do stub_tree "$_body_rel" "$_umb_root_cfg"; done
+    # SOURCE ROOT `$SRC`: this arm materialises a thin tier where there was none to judge —
+    # a fresh child, or one already thin — so there is no pristine comparison whose
+    # reference it could disagree with. It also runs on cascades whose umbrella body may be
+    # OLDER than this installer, where stub_tree's `source missing` would turn a routine
+    # maintenance run into a hard failure. Branch (3) is the one with two references.
+    for _body_rel in $HARNESS_BODY_PROSE; do stub_tree "$_body_rel" "$_umb_root_cfg" "$SRC"; done
     ok "prose body resolved from the umbrella at $_umb_root_cfg (stubs; init.sh, store/, tools/ stay local)"
   elif [ -n "$_umb_body" ]; then
     # (3) A FULL-COPY child of a reachable umbrella — the state E24-F03 left alone and this
@@ -2610,11 +2632,31 @@ install_one() {
     # so the preview can never diverge from the action it previews.
     _f04_blockers="$(prose_tier_blockers "$H" "$_umb_body")"
     if [ -z "$_f04_blockers" ] && [ "$THIN_OPT_IN" = 1 ]; then
-      # Converted. stub_tree is REUSED VERBATIM: a converted child has to be
-      # byte-indistinguishable from a fresh thin one, and the only way to guarantee that is
-      # to run the same function. BODY_LAYOUT=thin is what makes manifest.txt record it (R8).
+      # Converted. stub_tree is REUSED — same function, so the stub text and the thinning
+      # are the fresh-thin child's — but its SOURCE ROOT IS THE UMBRELLA BODY, the same tree
+      # prose_tier_blockers just compared this child against, and NOT `$SRC`.
+      #
+      # The two references are not interchangeable, and each mismatch was measured on this
+      # branch before it was fixed (Codex r1 P1 #3799465968):
+      #   - a path the child AND the umbrella hold and `$SRC` does not — a shared house
+      #     addition under `agents/`, exactly what an umbrella is for — is pristine by the
+      #     comparison, then DELETED by a copy from `$SRC` while the run prints CONVERTED.
+      #     Silent data loss: the refusal branch's "re-installed from source by this run"
+      #     disclosure is on the OTHER branch and never printed here.
+      #   - a path `$SRC` holds and the umbrella does not gets a stub naming a file the
+      #     umbrella cannot supply, and that stub's own text then misdiagnoses it as "a
+      #     checkout separated from its umbrella".
+      #
+      # This does NOT weaken R1's "a converted child is byte-indistinguishable from a fresh
+      # thin one". The branch is reached only when the child's prose tier is byte-identical
+      # to the umbrella's, so copying from the umbrella reproduces the shape the child
+      # already holds; and a fresh sibling under the same umbrella is materialised from the
+      # `$SRC` that installed that umbrella. The two coincide wherever they can be compared,
+      # and where they cannot, the converted child matches what its stubs point at.
+      #
+      # BODY_LAYOUT=thin is what makes manifest.txt record it (R8).
       BODY_LAYOUT=thin
-      for _body_rel in $HARNESS_BODY_PROSE; do stub_tree "$_body_rel" "$_umb_root_cfg"; done
+      for _body_rel in $HARNESS_BODY_PROSE; do stub_tree "$_body_rel" "$_umb_root_cfg" "$_umb_body"; done
       ok "child already holds a full body — CONVERTED to the thin layout (--thin): its prose tier now resolves from the umbrella at $_umb_root_cfg"
     else
       for _body_rel in $HARNESS_BODY_PROSE; do copy "$_body_rel"; done

@@ -1632,6 +1632,69 @@ F04I_N="$(printf '%s\n' 2>/dev/null "$F04I_OUT" | grep -o 'differs: [^ ]*' | wc 
   || fail "R3: $F04I_N blocking path(s) were named, want exactly the one seeded on the umbrella side: $F04I_OUT"
 pass "R3 thin_umbrella_side_path_is_named — a path the umbrella holds and the child does not is named with its joined path"
 
+# ── R1/R2: the CONVERTED TREE is built from the umbrella body, never from $SRC ──────────
+# thin_converted_tree_comes_from_the_umbrella
+#
+# The case above pins the reference the pristine COMPARISON uses. This one pins the
+# reference the WRITE uses, and they have to be ONE tree: `prose_tier_blockers` judged the
+# child against the umbrella body while `stub_tree` rebuilt the tier with `rm -rf` + `cp -R`
+# from `$SRC`. Wherever those two trees disagree — and a shared umbrella exists precisely so
+# that they CAN — a conversion that reports success is wrong in BOTH directions:
+#   agents/shared-extra.md   held by the child AND the umbrella, absent from `$SRC` — a
+#                            shared house addition, the thing an umbrella is for. Pristine
+#                            by the comparison, DELETED by a copy from `$SRC`, and the run
+#                            still prints CONVERTED. Silent: the "re-installed from source
+#                            by this run" disclosure belongs to the REFUSAL branch and is
+#                            never printed on this one.
+#   agents/pr-fixer.md       held by `$SRC`, absent from the umbrella AND the child.
+#                            Recreated as a stub naming `../../.harness/agents/pr-fixer.md`,
+#                            which the umbrella cannot supply — and that stub's own text
+#                            then misreads the dangling target as "a checkout separated
+#                            from its umbrella".
+#
+# ONE child carries both directions, and it has to: each seeded difference is SHARED by the
+# child and the umbrella, so neither blocks, and the two assertions name disjoint paths. A
+# second child in this umbrella is impossible — direction 2 is seeded by REMOVING a path
+# from the umbrella, which would block any sibling that still holds it.
+#
+# THE CONVERSION IS ASSERTED FIRST, and that is load-bearing: "agents/shared-extra.md
+# survived" is satisfied for free by any change that simply refuses to convert.
+F04J="$AU/f04j"
+f04_fullchild "$F04J" kid
+KJ4="$F04J/kid/.harness"
+F04J_ADD=agents/shared-extra.md
+F04J_DROP=agents/pr-fixer.md
+printf 'a shared house note, held by the umbrella and the child alike\n' > "$F04J/.harness/$F04J_ADD"
+cp "$F04J/.harness/$F04J_ADD" "$KJ4/$F04J_ADD"
+rm -f "$F04J/.harness/$F04J_DROP" "$KJ4/$F04J_DROP"
+# PRECONDITIONS. Each seeded path must be one-sided against `$SRC` and IDENTICAL between the
+# child and the umbrella — otherwise it blocks the tier and neither direction is reached.
+[ -e "$SRC/$F04J_ADD" ] \
+  && fail "R1/R2 control: the installer's own \$SRC holds $F04J_ADD, so this fixture no longer separates the two candidate write references"
+cmp -s "$F04J/.harness/$F04J_ADD" "$KJ4/$F04J_ADD" \
+  || fail "R1/R2 control: the shared addition is not byte-identical on the two sides, so it would block the conversion for an unrelated reason"
+[ -e "$SRC/$F04J_DROP" ] \
+  || fail "R1/R2 control: \$SRC does not hold $F04J_DROP, so a converted tree built from \$SRC would have nothing to recreate and the second direction is vacuous"
+[ -e "$F04J/.harness/$F04J_DROP" ] \
+  && fail "R1/R2 control: $F04J_DROP is still in the umbrella body — the second direction needs the umbrella to lack it"
+[ -e "$KJ4/$F04J_DROP" ] \
+  && fail "R1/R2 control: $F04J_DROP is still in the child — one-sided against \$SRC means absent from BOTH sides of the comparison"
+# SINGLE-TARGET, NEVER A CASCADE, for the same reason as the two cases above: both
+# differences live in the COORDINATOR's own prose tier, and a cascade re-installs the
+# coordinator from $SRC first, erasing both.
+F04J_OUT="$(CODEX_HOME="$F04J/.ch" HOME="$F04J/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude --thin "$F04J/kid" 2>&1)" && F04J_RC=0 || F04J_RC=$?
+[ "$F04J_RC" = "0" ] || fail "R1: single-target --thin exited $F04J_RC: $F04J_OUT"
+printf '%s\n' 2>/dev/null "$F04J_OUT" | grep -q 'CONVERTED to the thin layout' \
+  || fail "R1 control: the child did not convert at all, so nothing below discriminates — a refusal leaves every prose path in place and satisfies the survival assertion for free: $F04J_OUT"
+is_stub "$KJ4/agents/builder.md" \
+  || fail "R1 control: the run reported a conversion but agents/builder.md is not a stub: $F04J_OUT"
+is_stub "$KJ4/$F04J_ADD" \
+  || fail "R2: the conversion did not leave $F04J_ADD as a stub — the child and the umbrella both held it byte-identically and \$SRC does not, so it was judged pristine and then destroyed by a converted tree rebuilt from \$SRC, while the run reported CONVERTED and named nothing"
+[ -e "$KJ4/$F04J_DROP" ] \
+  && fail "R2: the conversion created $F04J_DROP, which \$SRC holds and the umbrella does not — the stub names ../../.harness/$F04J_DROP, a file the umbrella cannot supply, and its own text misreads that dangling target as a checkout separated from its umbrella"
+pass "R1/R2 thin_converted_tree_comes_from_the_umbrella — the converted tree's shape comes from the umbrella body: a shared path \$SRC lacks survives as a stub, a \$SRC path the umbrella lacks is not recreated"
+
 # ── R4: no --thin converts nothing, and says it would ──────────────────────────────────
 # unflagged_previews_only — the on-disk half is TRIVIALLY TRUE (it is today's shipped
 # behavior), so it is asserted for the record and the discriminating proof is the preview
