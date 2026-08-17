@@ -40,6 +40,13 @@ const OWNER_GATE = 'owner';
 // `gated-owner`, or you inherit a hole this comment is the only record of.
 const PARK_GATES = new Set([OWNER_GATE]);
 const isOwnerGated = (feature) => Boolean(feature.parked) && feature.parked.gate === OWNER_GATE;
+// E99-F102 landing attestation. CLOSED, like the park gates and for the same reason: the
+// three values say who proved what. Today only two are writable — `unchecked` (recorded,
+// nothing checked it: tasks-lock performs no verification yet) and `declared` (there is no
+// commit to prove). `ancestor` (resolved and proved reachable from the default branch) is
+// accepted so a board from the verification follow-up, or a hand edit, still parses. A
+// fourth value would be a check nothing performs.
+const LANDED_VERIFIED = new Set(['ancestor', 'unchecked', 'declared']);
 
 class ExpectedError extends Error {
   constructor(code, detail) {
@@ -290,6 +297,45 @@ function validateBoard(board) {
         // Left legal, it would also defeat the targeting contract: select() short-circuits
         // a done target to `target-complete` before any blocker is computed.
         if (feature.status === 'done') throw new Error(`${feature.id} is done and cannot be parked`);
+      }
+      // E99-F102: the landing attestation, checked here for the same reason the park is
+      // — a board arriving through --tasks never passes the shared validator, so a
+      // selector that accepted `"landed": {"verified": "probably"}` would be the one
+      // component reading an attestation nobody performed as if somebody had.
+      if (feature.landed !== undefined) {
+        assertObject(feature.landed, `${feature.id}.landed`);
+        assertString(feature.landed.ref, `${feature.id}.landed.ref`);
+        if (!LANDED_VERIFIED.has(feature.landed.verified)) {
+          throw new Error(`${feature.id}.landed.verified ${JSON.stringify(feature.landed.verified)} is unsupported (expected one of: ${[...LANDED_VERIFIED].join(', ')})`);
+        }
+        for (const k of ['repo', 'base']) {
+          if (feature.landed[k] !== undefined) assertString(feature.landed[k], `${feature.id}.landed.${k}`);
+        }
+        // A SLICED feature's evidence is bound per slice repository, so the record
+        // carries one entry per repo — where a per-repository verdict will land.
+        // Checked here for the same reason the rest of `landed` is — a board arriving
+        // through --tasks never passes the shared validator — and held to the same
+        // acceptance surface as the schema and validate-board.py.
+        if (feature.landed.slices !== undefined) {
+          if (!Array.isArray(feature.landed.slices) || feature.landed.slices.length === 0) {
+            throw new Error(`${feature.id}.landed.slices must be a non-empty array`);
+          }
+          for (const [li, rec] of feature.landed.slices.entries()) {
+            const ls = `${feature.id}.landed.slices[${li}]`;
+            assertObject(rec, ls);
+            assertString(rec.repo, `${ls}.repo`);
+            assertString(rec.ref, `${ls}.ref`);
+            if (!LANDED_VERIFIED.has(rec.verified)) {
+              throw new Error(`${ls}.verified ${JSON.stringify(rec.verified)} is unsupported (expected one of: ${[...LANDED_VERIFIED].join(', ')})`);
+            }
+            if (rec.base !== undefined) assertString(rec.base, `${ls}.base`);
+          }
+          // The rollup is never stronger than its slices: one unproved slice and the
+          // feature-level record cannot read `ancestor`.
+          if (feature.landed.verified === 'ancestor' && feature.landed.slices.some((rec) => rec.verified !== 'ancestor')) {
+            throw new Error(`${feature.id}.landed.verified ancestor claims more than was proved: a slice landing is not ancestor`);
+          }
+        }
       }
       const slices = [];
       if (feature.slices !== undefined) {

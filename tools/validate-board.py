@@ -47,6 +47,13 @@ SLICE_STATUS = {"pending", "spec-ready", "in-progress", "in-review", "done", "fa
 # downgrade to an ordinary park, because the reason code the selector emits is the whole
 # deliverable and a typo that reads as `parked` reports the wrong one.
 PARK_GATES = {"owner"}
+# Landing attestation (E99-F102). Also a CLOSED set. Today the write path can only
+# produce two of the three: `unchecked` (the ref was recorded and nothing checked it —
+# tasks-lock performs no verification yet) and `declared` (the work has no commit at
+# all). `ancestor` means a ref was resolved and PROVED reachable from the default
+# branch; it is accepted so a board written by the verification follow-up, or by hand,
+# still validates. A fourth value would read as a check that nothing performs.
+LANDED_VERIFIED = {"ancestor", "unchecked", "declared"}
 
 
 def validate(data, schema):
@@ -195,6 +202,91 @@ def _fallback_errors(data):
                     # `target-complete` before any blocker is computed.
                     if ft.get("status") == "done":
                         errors.append("%s: a done feature cannot be parked" % fw)
+                # Optional (additive, E99-F102) landing attestation. Same mirroring
+                # rule as the park: the zero-dependency path must not accept a board
+                # the JSON schema rejects. `ref` is required and non-empty because an
+                # attestation nobody can re-check is the defect the field exists to
+                # fix, and `verified` is a CLOSED set for the same reason
+                # `parked.gate` is — an unrecognised value would read as "somebody
+                # checked something" while naming no check that ever ran.
+                if "landed" in ft:
+                    landed = ft["landed"]
+                    if not isinstance(landed, dict):
+                        errors.append("%s.landed: expected object" % fw)
+                    else:
+                        ref = landed.get("ref")
+                        if not isinstance(ref, str) or not ref:
+                            errors.append(
+                                "%s.landed.ref: expected a non-empty string" % fw
+                            )
+                        if landed.get("verified") not in LANDED_VERIFIED:
+                            errors.append(
+                                "%s.landed.verified '%s': not one of %s"
+                                % (fw, landed.get("verified"), sorted(LANDED_VERIFIED))
+                            )
+                        # Non-empty, not merely a string: an empty `repo`/`base` names
+                        # nothing, and the selector's own assertString has always
+                        # rejected it. Leaving the two validators laxer than the
+                        # selector meant a board could pass init.sh AND this file and
+                        # then make every next-task.mjs run die with `input-error` —
+                        # three acceptance surfaces, one of them unreachable.
+                        for k in ("repo", "base"):
+                            if k in landed and (not isinstance(landed[k], str) or not landed[k]):
+                                errors.append(
+                                    "%s.landed.%s: expected a non-empty string" % (fw, k)
+                                )
+                        # PER-SLICE landing (E99-F102). A sliced feature's evidence
+                        # is bound to each slice repository — one entry per repo, so a
+                        # per-repository verdict has somewhere to land. Mirrored
+                        # here for the same reason the rest of `landed` is: a machine
+                        # without jsonschema must not accept a board the schema
+                        # rejects. COVERAGE (an entry per slices[].repo) is the write
+                        # path's job — it is not expressible in draft-07, and a check
+                        # the schema cannot state would put this file and the schema
+                        # on different acceptance surfaces, which is the drift these
+                        # mirrors exist to prevent.
+                        if "slices" in landed:
+                            lsl = landed["slices"]
+                            if not isinstance(lsl, list) or not lsl:
+                                errors.append(
+                                    "%s.landed.slices: expected a non-empty array" % fw
+                                )
+                                lsl = []
+                            for li, lrec in enumerate(lsl):
+                                lw = "%s.landed.slices[%d]" % (fw, li)
+                                if not isinstance(lrec, dict):
+                                    errors.append("%s: expected object" % lw)
+                                    continue
+                                for k in ("repo", "ref"):
+                                    if not isinstance(lrec.get(k), str) or not lrec.get(k):
+                                        errors.append(
+                                            "%s.%s: expected a non-empty string" % (lw, k)
+                                        )
+                                if lrec.get("verified") not in LANDED_VERIFIED:
+                                    errors.append(
+                                        "%s.verified '%s': not one of %s"
+                                        % (lw, lrec.get("verified"), sorted(LANDED_VERIFIED))
+                                    )
+                                if "base" in lrec and (
+                                    not isinstance(lrec["base"], str) or not lrec["base"]
+                                ):
+                                    errors.append(
+                                        "%s.base: expected a non-empty string" % lw
+                                    )
+                            # The rollup can never be STRONGER than its slices: one
+                            # unproved slice and the feature is not `ancestor`. The
+                            # write path cannot produce that value at all today, so this
+                            # guards the two ways one can still appear — a hand edit, and
+                            # the verification follow-up.
+                            if landed.get("verified") == "ancestor" and any(
+                                not isinstance(r, dict) or r.get("verified") != "ancestor"
+                                for r in lsl
+                            ):
+                                errors.append(
+                                    "%s.landed.verified 'ancestor': a slice landing is "
+                                    "not 'ancestor', so the feature-level record claims "
+                                    "more than was proved" % fw
+                                )
                 # Umbrella mode (optional): mirror the slice checks from the JSON
                 # schema so corrupted cross-repo state is rejected even without
                 # jsonschema installed. Absent `slices` ⇒ single-repo, unaffected.

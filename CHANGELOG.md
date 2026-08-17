@@ -4,7 +4,7 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
-## [0.64.0] — 2026-08-17
+## [0.65.0] — 2026-08-17
 
 ### Added — ✨ migrate an existing child to the thin layout, and back (E24-F04)
 
@@ -53,6 +53,154 @@ reverse — as two explicit flags on `harness-install.sh`.
 `docs/INSTALL.md` gains both flags; the install manifest's `BODY LAYOUT` block explains the
 transition and the reverse. Covered by new cases in `tests/test_umbrella.sh`,
 `tests/test_install.sh` and `tests/test_init_drift_guard.sh`.
+
+## [0.64.0] — 2026-08-17
+
+### Added — ✨ `done` must carry a landing record (E99-F102, contract half)
+
+`done` is what stops the selector routing an item. So a feature marked `done` whose work
+never merged is **both unshipped and unreachable** — nothing will ever pick it up again,
+while downstream briefs cite it as a landed mechanism and reviewers act on the citation.
+An audit of **148 `done` features across seven repositories** found **four**:
+
+| feature | board says | reality |
+|---|---|---|
+| `E99-F58` | done | `b86e7cf` + `cfabbbd` on a **never-pushed** local branch here |
+| `E99-F59` | done | `5f0296f` on a **never-pushed** local branch here |
+| `E09-F02` | done, **all three slices `merged: true`** | its only PR, viernes-infra #24, **closed unmerged** |
+| `E99-F29` | done | PR viernes-infra #31 **closed unmerged**; `origin/main` still emits `'en'` |
+
+Every one was found by accident, and the harm is already in the corpus: the board entry for
+`E99-F32` — the feature that actually shipped the Spanish Managed Login — **cites `E99-F29`
+as landed**.
+
+```
+tasks-lock.py set-status <id> done --evidence <ref|none:why>
+# a SLICED feature: one binding per slice repository
+tasks-lock.py set-status <id> done --evidence <repo-a>=<ref> --evidence <repo-b>=none:<why>
+```
+
+⚠️ **What this records, and what it does NOT check.** This change is the **contract**: it
+requires the attestation, parses it, binds it per repository, and enforces the record's
+shape across all three acceptance surfaces. It performs **no verification** — it never runs
+git, never opens a network connection, never resolves a repository, and never decides
+whether a commit is reachable from a default branch. Every ref therefore lands as
+`verified: "unchecked"` (or `"declared"` for `none:<why>`), with a warning saying so, and
+`repo`/`base` are absent. **It cannot record `verified: "ancestor"`, by construction** —
+that value is not in the writer's rank table and the literal appears nowhere in
+`tools/tasks-lock.py`'s code. Verification is the follow-up, and it is what turns
+`unchecked` into a verdict.
+
+**Why ship the contract first.** Five review passes over a combined
+contract-plus-verification change found the same defect class every time, at a flat rate,
+and all of it on the verification side: a default branch guessed by name, one sha attesting
+many slices, a stale local tip, a slice repository located by directory basename, an
+unrecognised hash format. Every one is a way to reach a **wrong or missing verdict** —
+*the guard cannot verify, so it lets `done` through anyway*. A half that never issues a
+verdict cannot issue a wrong one. The worst this can do is record honestly that nothing was
+checked, which is already strictly better than the say-so it replaces, because
+`verified: "unchecked"` is greppable on the board and a silent `done` is not. It also makes
+the follow-up reviewable on its own terms: everything left in it is I/O.
+
+**Every feature, sliced or not — `slices[]` is NOT an attestation.** A sliced feature
+*looks* attested: the schema refuses `done` unless every slice is `done` **and** `merged`.
+But **nothing in the harness ever WRITES `slice.merged`** — every occurrence in `tools/` is
+a read or a type assertion, and `store/local.md` has the agent set it through
+`apply --mutator`. It is hand-typed, i.e. exactly the say-so this replaces, and `E09-F02` is
+the proof: three slices all `merged: true`, the first slice's own `pr` pointing at that
+closed PR. The two invariants are independent and a sliced feature must satisfy **both**.
+
+**A sliced feature's evidence is bound per slice repository** — `--evidence <repo>=<ref>`,
+repeated once per slice repo. A single feature-level value names no repository, so it
+attests no particular slice: one slice's merge commit would carry the whole feature to
+`done` while another sat unmerged. A bare ref on a sliced feature is **REFUSED** (naming the
+form and the repos), as are an unknown repository, a repeated binding, and a missing one
+(naming the repos still owed). `none:<why>` stays expressible per slice. The binding is also
+what makes a *per-repository* verdict expressible at all when verification lands; here the
+record keeps the repositories apart so that verdict has somewhere to go.
+
+| `--evidence` | outcome |
+|---|---|
+| any reference (a sha, a PR URL, a tag) | accepted with a **warning**, recorded `verified: "unchecked"` — recorded, not proved |
+| `none:<why>` | accepted, recorded `verified: "declared"`; the reason is required |
+| omitted, on **any** feature (sliced included) | **REFUSED**, board byte-identical |
+| **unbound** (`<ref>`, no `<repo>=`) on a **sliced** feature | **REFUSED** — it names no repository, so it attests no particular slice |
+| `<repo>=<ref>` for a repo the feature has no slice in, or a slice repo left unbound | **REFUSED**, naming the unknown repo / the repos still owed |
+| `<repo>=<ref>` on a feature with **no** slices | **REFUSED** — the repo name would be recorded against a repository the feature does not have |
+| on any **non-`done`** transition | **REFUSED** — the record means one thing |
+
+Note what is deliberately absent: this half never asks whether a string *looks like* a
+commit id. That is a verification question — the 40-hex assumption it invites misses
+SHA-256's 64-character ids entirely — and it belongs with the code that resolves objects.
+Everything that is not `none:<why>` is transcribed verbatim and marked unchecked.
+
+**The record, and the one rule that outlives the split.** `landed` is
+`{ref, verified, repo?, base?}` plus `landed.slices` (one `{repo, ref, verified, base?}` per
+slice repository), with `verified` a **closed enum** and `repo`/`base` **non-empty** —
+mirrored and agreeing across `store/tasks.schema.json`, `tools/validate-board.py` (including
+its zero-dependency fallback) and `tools/next-task.mjs`. The **rollup rule** — a feature-level
+`ancestor` is illegal if any slice is not `ancestor` — is enforced on all three even though
+nothing here can write that value, because it is what stops a proof being re-entered by
+hand, and it must already be in place when the follow-up starts writing verdicts.
+`repo`/`base` being non-empty matters for the same reason: a plain-string schema and an
+`isinstance(..., str)` fallback both accept `""`, while the selector's `assertString` always
+rejected it, so a board carrying `"repo": ""` would pass `init.sh` and then make **every**
+`next-task.mjs` run die with `input-error` — legal by two acceptance surfaces and unusable
+by the third.
+
+**The documented workflow now writes `done` after the merge, not on the approval.** The
+harness previously instructed *approve → `set-status done` → open the PR*. That order
+defeats this mechanism twice over: at `done` time the only ref that exists is an unmerged
+branch tip, so the "prefer the merge commit" instruction could not be followed and every
+record would be unverifiable by construction (and, once verification lands, actively
+**refused** as not-an-ancestor); and a PR later closed or abandoned leaves the feature
+`done` and unselectable with work that never shipped — precisely the failure the record
+exists to prevent. The order is now approve → open the PR (the feature stays `in-review`) →
+**observe the merge** → `set-status done --evidence <merge commit>`, corrected in
+`agents/orchestrator.md` (the route table, the build↔review loop, and its own
+`### Writing \`done\`` section), `docs/WORKFLOW.md` (including the state diagram, whose
+approve edge no longer lands on `done`), `store/local.md` and `.claude/commands/sdd-next.md`
+(plus the installer's embedded copy). Pinned by **R19**, which greps the sections by
+heading rather than the whole file. `none:<why>` is unchanged and remains the one legitimate
+`done` with nothing to merge.
+
+⚠️ **Known gap, stated rather than papered over: there is no board state for "approved,
+awaiting merge".** Measured on the shipped selector: a feature left `in-review` is *not*
+inert — `featureRoute` maps `in-review` to `reviewer`, so `/sdd-next` re-offers an
+already-approved feature for review every session (`route reviewer for <id> at status
+in-review`). The **park** (E06-F07) does hold it (`blocked … [route when unparked:
+reviewer]`, never selected) and is what the docs now tell you to use, but it costs two
+`apply --mutator` round-trips and reports an in-flight PR indistinguishably from
+externally-blocked work — `set-status` refuses any transition while parked, so the unpark
+must come first. Making that ergonomic (a first-class hold the selector reports distinctly)
+is a **lifecycle** change touching the selector, the diagnostics and their suites; it is
+deliberately **not** in this change, which only stops instructing an order that defeats the
+mechanism.
+
+**Additive to every existing board.** `landed` is optional in the schema and never required
+by it — only by the write path — so the 148 already-`done` features stay valid and stay
+unattested. This is a **breaking change to the `set-status` CLI** for every feature `done`
+transition (0.x SemVer ⇒ MINOR); three in-repo suites were updated to pass `--evidence`, and
+`tests/test_owner_gate.sh`'s R5 pair is *stronger* for it — both halves now carry evidence,
+so the difference between the refusal and its control is the gate alone.
+
+New suite `tests/test_landed_evidence.sh` (10 cases, every one paired with a control that
+must SUCCEED — "the transition was refused" is the easy outcome to produce, and a suite
+without the pairing would pass against a `set-status` that simply exits 1). Its numbering is
+deliberately **sparse** — R1, R4-R9, R12, R14, R18 — so the follow-up's verification cases
+can slot into the gaps and the two halves can be read against each other. **R18 guards the
+seam itself**, three ways: it runs a complete `done` transition with every child-process
+entry point booby-trapped (and proves the trap is armed by tripping it on a program that
+does spawn); it greps the helper's comment-stripped source for ancestry machinery; and it
+asserts that none of the three ref shapes can produce the proved value. The suite needs no
+`git` at all — which is itself the claim being made.
+
+Measured: **27 mutations, each applied with an asserted replacement count, 27 killed, 0
+survivors** (20 on the contract itself, 7 on the documented order and R19's own
+anti-vacuity guards) — including one per acceptance surface for the record shape and the rollup rule
+(with `jsonschema` import-blocked, because with it installed the schema answers for the
+fallback and a deleted fallback check leaves the suite green).
+
 
 ## [0.63.1] — 2026-08-17
 

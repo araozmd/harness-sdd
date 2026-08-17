@@ -4077,7 +4077,9 @@ relative paths against `.harness/`.
    - `pending` + sdd:true → spawn **architect**, then `spec-ready` and PAUSE (human gate).
    - `spec-ready` + autonomous:true → set `in-progress`, spawn **builder**, then `in-review`.
    - `in-progress` → spawn **builder** with the approved specs only, then `in-review`.
-   - `in-review` → spawn **reviewer**; approve → `done`, reject → back to `in-progress`.
+   - `in-review` → spawn **reviewer**; approve → open the PR and LEAVE it `in-review`
+     (`done` is written only after the work merges — see `agents/orchestrator.md`
+     “Writing `done`”), reject → back to `in-progress`.
 4. Append what happened to `.harness/progress/history.md`.
 
 `$ARGUMENTS` may carry either a specific feature id or a scope token; forward it verbatim

@@ -119,6 +119,68 @@ Orchestrator's exclusive ownership of state writes.
   Since **v0.59.0** both "keep in sync" clauses above are **maintained and enforced**,
   not merely asked for.
 
+  **Since v0.64.0 a `done` transition on a feature requires a landing record** (E99-F102):
+
+  ```
+  # single-repo feature
+  python3 .harness/tools/tasks-lock.py set-status <id> done --evidence <ref|none:why>
+  # SLICED feature — one binding per slice repository
+  python3 .harness/tools/tasks-lock.py set-status <id> done \
+      --evidence <repo-a>=<ref> --evidence <repo-b>=none:<why>
+  ```
+
+  `done` is what stops the selector routing an item, so a feature marked `done` whose work
+  never merged is both unshipped **and** unreachable — an audit of 148 `done` features
+  across seven repos found **four** (E99-F58, E99-F59 on never-pushed local branches;
+  E09-F02, E99-F29 on closed, unmerged PRs), each found by accident rather than by any
+  check. E99-F32's board entry cites E99-F29 as landed, which is the harm this exists to
+  stop, already in the corpus.
+
+  **Write it only once the work has LANDED.** An approve verdict says the work is correct,
+  not that it merged. The order is: approve → open the PR (the feature stays `in-review`) →
+  observe the merge → then `set_status(<id>, done, evidence=<merge commit>)`. Writing `done`
+  on the approval re-creates the failure this record exists to prevent (an abandoned PR
+  leaves a `done`, unselectable feature whose work never shipped) and makes the record
+  itself unusable, since the only ref that exists then is an unmerged branch tip. There is
+  no board state for "approved, awaiting merge" yet, and `in-review` is not inert — the
+  selector routes it to a Reviewer — so **park** the feature while the PR is open and unpark
+  it before the `done` write. `none:<why>` stays the one legitimate `done` with nothing to
+  merge; it is not a way to close work that has simply not merged **yet**.
+
+  ⚠️ **Recorded, NOT verified.** This helper does not check the reference. It runs no git,
+  opens no connection, resolves no repository, and never decides whether a commit reached a
+  default branch — so every ref is stored as `landed.verified: "unchecked"` (or `"declared"`
+  for `none:<why>`), with a warning saying exactly that, and `repo`/`base` are absent. It
+  **cannot** write `verified: "ancestor"`. Verification is a separate, later change; what
+  you get today is that the claim is **on the board and greppable** instead of nowhere, so
+  re-auditing is a scan rather than commit archaeology across four colliding id namespaces.
+
+  **Every feature, sliced or not.** A sliced feature *looks* attested — the schema refuses
+  `done` unless every slice is `done` **and** `merged` — but **nothing in the harness ever
+  writes `slice.merged`**: every occurrence in `tools/` is a read or a type assertion, and
+  the `set_slice_merged` contract below has the agent set it through `apply --mutator`. It
+  is hand-typed, i.e. the say-so `--evidence` replaces. **E09-F02 is the proof**: three
+  slices all `merged: true`, whose first slice's own `pr` points at `viernes-infra#24` —
+  closed, unmerged. So a sliced feature satisfies **both** invariants.
+
+  **A sliced feature's evidence is BOUND PER SLICE REPOSITORY** — `--evidence <repo>=<ref>`,
+  repeated once per slice repo. One feature-level value names no repository, so it attests
+  no particular slice: one slice's merge commit would carry the whole feature to `done`
+  while another sat unmerged. A bare ref on a sliced feature is **REFUSED** (naming the form
+  and the repos), as are a binding for a repo the feature has no slice in, a repeated
+  binding, and a missing one (naming the repos still owed). `none:<why>` is expressible per
+  slice. The record carries one entry per repository under `landed.slices`, and the
+  feature-level `verified` rolls up to the **weakest** slice.
+
+  What the helper does with the value:
+  - **`none:<why>`** records `verified: "declared"` — work with no commit at all (a console
+    action, a supersession). The reason after the colon is required.
+  - **anything else** (a sha, a PR URL, a tag) is transcribed verbatim and recorded
+    `verified: "unchecked"`, with a warning: nothing was proved. It is deliberately not
+    classified further — "does this look like a commit id?" is a question only the code that
+    resolves objects can answer, and that code does not exist here yet.
+  - `--evidence` on any **non-`done`** transition is **REFUSED**: the record means one thing.
+
   **`set_status` does the syncing itself.** A feature transition rewrites the `status:` in
   that feature's `*.spec.md`, and an epic transition rewrites its `epic.md`, in the same
   locked critical section as the board write — so the two records move together or not at
@@ -247,6 +309,13 @@ behaves exactly as a single-repo feature does today — the field is purely addi
   mutator exposing `mutate(data) -> data` and run it through the same guarded
   persist primitive:
 
+  ⚠️ **`merged` is hand-typed and nothing verifies it.** No harness tool writes it — every
+  occurrence in `tools/` reads it (`next-task.mjs`, `validate-board.py`, the schema
+  cross-field) — so the boolean is only ever as true as the agent that typed it. E09-F02
+  carries `merged: true` on a slice whose own `pr` is a closed, unmerged PR. That is why a
+  sliced feature's `done` still needs `--evidence` **bound to each slice repository** (see
+  `set_status` above), and why the record keeps the repositories apart.
+
   ```
   # installed layout; use tools/tasks-lock.py in this source repository
   python3 .harness/tools/tasks-lock.py apply --mutator <temporary-mutator.py>
@@ -266,7 +335,10 @@ rather than declaring `done` by fiat — but it **does persist** the derived res
 - A feature becomes `done` **only when every slice is `done` and `merged`** **and** the
   feature-level integration check (`verification.integration_command`) has passed.
 - **When those conditions hold, the coordinator writes the derived `done` onto the
-  feature** through `tasks-lock.py set-status <feature-id> done`. This persistence is required:
+  feature** through `tasks-lock.py set-status <feature-id> done --evidence <repo>=<ref> …`,
+  once per slice repository — the rollup does **not** exempt it from the evidence
+  requirement, because the per-slice `merged` flags it checks are hand-typed and unverified
+  (see `set_status` above). This persistence is required:
   feature-level `next()` gates `depends_on` on the *stored* feature status, so a
   dependent feature (e.g. `E03-F02` depends_on `E03-F01`) stays blocked until the
   upstream feature's `done` is actually written.
