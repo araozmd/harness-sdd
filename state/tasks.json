@@ -710,7 +710,7 @@
         {
           "id": "E21-F05",
           "title": "The stacked-PR lane's doctrine document",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
