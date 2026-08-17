@@ -68,7 +68,7 @@
       "features": [
         {
           "id": "E05-F01",
-          "title": "Reviewer cross-file consistency + explicit build\u2194review rounds",
+          "title": "Reviewer cross-file consistency + explicit build↔review rounds",
           "status": "done",
           "sdd": true,
           "autonomous": true,
@@ -276,13 +276,13 @@
     },
     {
       "id": "E13",
-      "title": "Monday board integration (draft \u2014 not current use case)",
+      "title": "Monday board integration (draft — not current use case)",
       "status": "draft",
       "features": []
     },
     {
       "id": "E14",
-      "title": "Azure Boards integration (draft \u2014 not current use case)",
+      "title": "Azure Boards integration (draft — not current use case)",
       "status": "draft",
       "features": []
     },
@@ -729,9 +729,20 @@
           ],
           "spec_path": "specs/epics/E21-change-size-discipline/F06-increment-contract/",
           "parked": {
-            "reason": "product decision open: the sibling-feature model already delivers budget-sized reviews with no new machinery, so stacking buys only wall-clock overlap - and under siblings no PR targets a non-default base, leaving E21-F04's merged pr-stack-guard.sh with no caller. Whether that is worth a delimiter convention, four role contracts and a manual restack burden decides whether this feature is built at all.",
-            "unblocked_by": "a recorded decision on progress/inbox/E21-F06.md's opening question; answered yes, unpark; answered no, replace with a lane-deprecation feature"
+            "reason": "DECIDED NO (gate, 2026-08-17): the lane does not earn its keep. The sibling-feature model already delivers budget-sized reviews with zero new machinery; stacking adds only wall-clock overlap, and 0 of the repo's last 100 PRs targeted a non-default base, so E21-F04's merged pr-stack-guard.sh has never once fired. The cost - a delimiter convention, four role contracts that must agree, a manual restack burden - lands on the harness's most consistency-fragile surface. This feature is NOT to be built. It is superseded by E21-F07, which deprecates the lane instead. The board has no `declined` terminal status, so the decision is recorded here rather than as a status; do not read this park as 'not yet workable'.",
+            "unblocked_by": "nothing - this is a terminal decision, not a wait. Reopening it would require overturning the 2026-08-17 gate decision recorded above and would be a re-drill, not an unpark."
           }
+        },
+        {
+          "id": "E21-F07",
+          "title": "Deprecate the stacked-PR lane and reclaim its machinery",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E21-F05"
+          ],
+          "spec_path": "specs/epics/E21-change-size-discipline/F07-lane-deprecation/"
         }
       ]
     },
