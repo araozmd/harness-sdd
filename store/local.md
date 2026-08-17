@@ -119,8 +119,7 @@ Orchestrator's exclusive ownership of state writes.
   Since **v0.59.0** both "keep in sync" clauses above are **maintained and enforced**,
   not merely asked for.
 
-  **Since v0.63.0 a `done` transition on a SINGLE-REPO feature requires landing evidence**
-  (E99-F102):
+  **Since v0.63.0 a `done` transition on a feature requires landing evidence** (E99-F102):
 
   ```
   python3 .harness/tools/tasks-lock.py set-status <id> done --evidence <sha|url|none:why>
@@ -128,12 +127,20 @@ Orchestrator's exclusive ownership of state writes.
 
   `done` is what stops the selector routing an item, so a feature marked `done` whose work
   never merged is both unshipped **and** unreachable — an audit of 148 `done` features
-  across seven repos found three (E99-F58, E99-F59, E09-F02), each on a never-pushed local
-  branch or a closed, unmerged PR, and each found by accident rather than by any check.
-  A **sliced** feature already had to attest this (the schema refuses `done` unless every
-  slice is `done` **and** `merged`); this extends the same attestation to the single-repo
-  feature, which had none — which is why all three instances are single-repo features.
-  A sliced feature therefore still needs no `--evidence`: its slices carry it.
+  across seven repos found **four** (E99-F58, E99-F59 on never-pushed local branches;
+  E09-F02, E99-F29 on closed, unmerged PRs), each found by accident rather than by any
+  check. E99-F32's board entry cites E99-F29 as landed, which is the harm this exists to
+  stop, already in the corpus.
+
+  **Every feature, sliced or not.** A sliced feature *looks* attested — the schema refuses
+  `done` unless every slice is `done` **and** `merged` — but **nothing in the harness ever
+  writes `slice.merged`**: every occurrence in `tools/` is a read or a type assertion, and
+  the `set_slice_merged` contract below has the agent set it through `apply --mutator`. It
+  is hand-typed, i.e. the say-so `--evidence` replaces. **E09-F02 is the proof**: a sliced
+  feature with three slices all `merged: true`, whose first slice's own `pr` points at
+  `viernes-infra#24` — closed, unmerged. Exempting the weaker mechanism from the stronger
+  one would ship that hole documented as safe, so the sliced feature satisfies **both**
+  invariants: every slice `done`+`merged`, **and** a feature-level `--evidence`.
 
   What the helper does with the value:
   - a **commit sha** is resolved against the repo holding the harness dir, its parent, and
@@ -151,8 +158,16 @@ Orchestrator's exclusive ownership of state writes.
   the base) all still succeed — a guard that blocked them would be routed around, and a
   routed-around guard is worth less than none. What it does **not** wave through: where an
   `origin` exists, "merged" means `origin/HEAD` (or `origin/main`), so a commit sitting on
-  your local `main` that was never pushed is refused. That is the E99-F58 shape verbatim;
-  push it, or say `none:<why>`. What is not optional is
+  your local `main` that was never pushed is refused — the same shape as E99-F58's two
+  orphan commits. Push it, or say `none:<why>`.
+
+  ⚠️ **Scope, measured.** "Refused" holds only where the sha **resolves**: the harness dir's
+  repo, its parent, and that parent's children. E99-F58/E99-F59 are on a board whose tree
+  does not contain `~/repos/harness-sdd`, so from that board their orphan tips resolve
+  nowhere and are **accepted as `unchecked`** (measured: rc=0; with the repo symlinked in as
+  a child, rc=1 refused). Of the four known instances this refuses two (E09-F02, E99-F29 —
+  umbrella children) and records-and-warns on two. That is the intended cost of the narrow
+  refusal, not a claim that all four are now caught. What is not optional is
   saying *something*: the record lands on the feature as
   `"landed": {"ref": …, "verified": …}`, so re-auditing the board is one `git merge-base`
   per row, and the weak claims (`unchecked`, `declared`) are greppable rather than invisible.
@@ -285,6 +300,13 @@ behaves exactly as a single-repo feature does today — the field is purely addi
   mutator exposing `mutate(data) -> data` and run it through the same guarded
   persist primitive:
 
+  ⚠️ **`merged` is hand-typed and nothing verifies it.** No harness tool writes it — every
+  occurrence in `tools/` reads it (`next-task.mjs`, `validate-board.py`, the schema
+  cross-field) — so the boolean is only ever as true as the agent that typed it. E09-F02
+  carries `merged: true` on a slice whose own `pr` is a closed, unmerged PR. That is why a
+  sliced feature's `done` still needs its own `--evidence` (see `set_status` above) and why
+  a *slice*-level `--evidence` equivalent is worth its own feature.
+
   ```
   # installed layout; use tools/tasks-lock.py in this source repository
   python3 .harness/tools/tasks-lock.py apply --mutator <temporary-mutator.py>
@@ -304,9 +326,10 @@ rather than declaring `done` by fiat — but it **does persist** the derived res
 - A feature becomes `done` **only when every slice is `done` and `merged`** **and** the
   feature-level integration check (`verification.integration_command`) has passed.
 - **When those conditions hold, the coordinator writes the derived `done` onto the
-  feature** through `tasks-lock.py set-status <feature-id> done` (no `--evidence`: the
-  per-slice `merged` flags this rollup already requires ARE the landing attestation the
-  single-repo path asks for with the flag — see `set_status` above). This persistence is required:
+  feature** through `tasks-lock.py set-status <feature-id> done --evidence <ref>` — the
+  rollup does **not** exempt it from the evidence requirement, because the per-slice
+  `merged` flags it checks are hand-typed and unverified (see `set_status` above).
+  This persistence is required:
   feature-level `next()` gates `depends_on` on the *stored* feature status, so a
   dependent feature (e.g. `E03-F02` depends_on `E03-F01`) stays blocked until the
   upstream feature's `done` is actually written.

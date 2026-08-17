@@ -13,19 +13,26 @@
 #   R3  an ancestor sha is accepted and recorded as `ancestor` (with the repo + base)
 #   R4  an unresolvable ref is accepted but recorded `unchecked` — never `ancestor`
 #   R5  `none:` needs a reason; `none:<why>` records `declared`
-#   R6  a SLICED feature needs no flag — its per-slice `merged` flags are the attestation
+#   R6  a SLICED feature is NOT exempt — the slice flags are hand-typed, so it needs BOTH
 #   R7  --evidence is refused on a non-`done` transition (the record means one thing)
-#   R8  an unrecognised `verified` is a validation error in BOTH validators
-#   R9  additive: a board with no `landed` still validates everywhere, incl. the live one
+#   R8  an unrecognised `verified` (and a bad `repo`/`base` type) is an error in ALL THREE
+#       validators, on the jsonschema AND the zero-dependency path
+#   R9  additive: a board with no `landed` still validates everywhere — asserted on BOTH
+#       validator paths, incl. this repo's own live board
 #   R10 with an origin remote, "merged" means the REMOTE default branch (mark-before-push
 #       is refused), and the umbrella case (no remote at all) still verifies against local
 #   R11 an UMBRELLA board (`.harness/` in one repo) verifies a sha in a CHILD repo
+#   R12 REGRESSION, E09-F02 verbatim: a sliced feature, every slice hand-marked
+#       `merged: true`, whose first slice's own `pr` is a CLOSED UNMERGED PR
 #
-# Two of these cases exist because a mutation survived without them: R8's zero-dependency
-# assertions (M6 — the schema was answering for the fallback) and R11 (M8 — every other
-# case resolved the sha in the harness dir's own parent, so the umbrella layout the viernes
-# board actually uses was never exercised). One mutation SURVIVES and is disclosed in
-# tools/tasks-lock.py beside `sliced =` (M5, an outcome-equivalent loosening).
+# Five of these exist because a mutation survived without them. R6/R12 (review round 1: the
+# first draft EXEMPTED sliced features on the theory that `slice.merged` attested the
+# landing — E09-F02 replayed through it exited 0 with no record at all). R8's zero-dependency
+# and repo/base assertions (M6, and the Reviewer's H2/H3 — the schema was answering for the
+# fallback). R9's import-blocked assertions (the Reviewer's H1: a fallback that REQUIRED
+# `landed` on every `done` would have taken down all 148 live rows undetected). R11 (M8 —
+# every other case resolved the sha in the harness dir's own parent, so the umbrella layout
+# the viernes board actually uses went unexercised).
 set -eu
 
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
@@ -106,7 +113,7 @@ BOARD="$HD/state/tasks.json"
 mkboard "$HD"
 BEFORE="$(cat "$BOARD")"
 set_status "$HD" E01-F01 done
-[ "$SS_RC" = "0" ] && fail "R1: a single-repo feature reached 'done' with NO evidence — this is the state E99-F58/F59/E09-F02 sat in: $SS_OUT"
+[ "$SS_RC" = "0" ] && fail "R1: a feature reached 'done' with NO evidence — this is the state E99-F58/E99-F59/E09-F02/E99-F29 sat in: $SS_OUT"
 [ "$BEFORE" = "$(cat "$BOARD")" ] || fail "R1: the board was modified despite the refusal"
 case "$SS_OUT" in
   *evidence*) ;;
@@ -187,27 +194,40 @@ set_status "$HD" E01-F01 done --evidence "none: AWS console teardown, no commit 
 [ "$(field "$BOARD" "d['landed']['verified']")" = "declared" ] || fail "R5 control: a none:<why> was not recorded as declared"
 pass "E99-F102 R5 a_no_commit_declaration_requires_its_reason"
 
-# ── R6: a SLICED feature already carries the attestation (the mechanism this extends) ──
+# ── R6: a SLICED feature is NOT exempt ────────────────────────────────────────────────
+# The first draft of this feature exempted sliced features, on the theory that their
+# per-slice `merged` flags already attested the landing. They do not: NOTHING in the
+# harness ever WRITES `slice.merged` — every occurrence in tools/ is a read or a type
+# assertion — so it is hand-typed, i.e. the say-so `--evidence` replaces. Exempting the
+# weaker mechanism from the stronger one shipped a hole documented as safe (see R12).
 SLICES=',
           "slices": [
             { "id": "E01-F01@web", "repo": "web", "status": "done", "merged": true }
           ]'
 mkboard "$HD" "$SLICES"
+BEFORE="$(cat "$BOARD")"
 set_status "$HD" E01-F01 done
-[ "$SS_RC" = "0" ] || fail "R6: a fully done+merged SLICED feature was refused for want of --evidence — the per-slice merged flags ARE the attestation, and duplicating it would be the second mechanism this deliberately avoids: $SS_OUT"
+[ "$SS_RC" = "0" ] && fail "R6: a SLICED feature reached done with no evidence — its slice flags are hand-typed, and E09-F02 proves they can read \`merged: true\` against a closed unmerged PR: $SS_OUT"
+[ "$BEFORE" = "$(cat "$BOARD")" ] || fail "R6: the board moved despite the refusal"
 
-# CONTROL: the same sliced feature with an UNMERGED slice must still be refused — otherwise
-# "slices need no evidence" would just be a hole.
+# CONTROL 1: the identical sliced board WITH evidence succeeds — so the refusal above is
+# about the missing evidence, not about sliced features being unwritable.
+set_status "$HD" E01-F01 done --evidence "$BASE"
+[ "$SS_RC" = "0" ] || fail "R6 control-1: a sliced feature WITH evidence was refused too (rc=$SS_RC): $SS_OUT"
+[ "$(field "$BOARD" "d['landed']['verified']")" = "ancestor" ] || fail "R6 control-1: the sliced landing was not recorded"
+
+# CONTROL 2: the two invariants are INDEPENDENT — evidence does not buy off an unmerged
+# slice. Without this, satisfying one could silently satisfy the other.
 SLICES_UNMERGED=',
           "slices": [
             { "id": "E01-F01@web", "repo": "web", "status": "done", "merged": false }
           ]'
 mkboard "$HD" "$SLICES_UNMERGED"
 BEFORE="$(cat "$BOARD")"
-set_status "$HD" E01-F01 done
-[ "$SS_RC" = "0" ] && fail "R6 control: a sliced feature with an UNMERGED slice reached done — the slice invariant is not holding, so the R6 exemption is a hole: $SS_OUT"
-[ "$BEFORE" = "$(cat "$BOARD")" ] || fail "R6 control: the board moved despite the refusal"
-pass "E99-F102 R6 a_sliced_feature_is_attested_by_its_slices"
+set_status "$HD" E01-F01 done --evidence "$BASE"
+[ "$SS_RC" = "0" ] && fail "R6 control-2: an UNMERGED slice was waved through because the feature carried evidence — the slice invariant must hold independently: $SS_OUT"
+[ "$BEFORE" = "$(cat "$BOARD")" ] || fail "R6 control-2: the board moved despite the refusal"
+pass "E99-F102 R6 a_sliced_feature_needs_evidence_too"
 
 # ── R7: the record means ONE thing — it is not accepted on other transitions ──────────
 mkboard "$HD"
@@ -276,6 +296,19 @@ mkbad '{ "verified": "ancestor" }'
 python3 "$T/nojs.py" >/dev/null 2>&1 \
   && fail "R8: the zero-dependency validator accepted a landing record with NO ref"
 
+# H2/H3 (Reviewer): `repo` and `base` are typed in the schema, so the fallback and the
+# selector must type them too, or "the fallback matches the schema's acceptance surface" is
+# a claim with no test behind it. Both survived deletion until these three lines existed.
+for _k in repo base; do
+  mkbad "{ \"ref\": \"abc1234\", \"verified\": \"ancestor\", \"$_k\": 17 }"
+  python3 "$VALIDATE" "$T/bad.json" "$SCHEMA" >/dev/null 2>&1 \
+    && fail "R8: the shared validator accepted a non-string landed.$_k"
+  python3 "$T/nojs.py" >/dev/null 2>&1 \
+    && fail "R8: the ZERO-DEPENDENCY validator accepted a non-string landed.$_k"
+  ( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" >/dev/null 2>&1 ) \
+    && fail "R8: the selector accepted a non-string landed.$_k"
+done
+
 # CONTROL: the same shape with a legal value passes BOTH — otherwise the assertions above
 # would hold against a validator that rejects every `landed` record.
 mkbad '{ "ref": "abc1234", "verified": "unchecked" }'
@@ -283,6 +316,13 @@ python3 "$VALIDATE" "$T/bad.json" "$SCHEMA" >/dev/null 2>&1 \
   || fail "R8 control: the shared validator rejected a LEGAL landing record"
 python3 "$T/nojs.py" >/dev/null 2>&1 \
   || fail "R8 control: the zero-dependency validator rejected a LEGAL landing record"
+mkbad '{ "ref": "abc1234", "verified": "ancestor", "repo": "viernes-web", "base": "origin/main" }'
+python3 "$VALIDATE" "$T/bad.json" "$SCHEMA" >/dev/null 2>&1 \
+  || fail "R8 control: the shared validator rejected a legal repo/base pair"
+python3 "$T/nojs.py" >/dev/null 2>&1 \
+  || fail "R8 control: the zero-dependency validator rejected a legal repo/base pair"
+( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" >/dev/null 2>&1 ) \
+  || fail "R8 control: the selector rejected a legal repo/base pair"
 ( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" >/dev/null 2>&1 ) \
   || { ( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" ) 2>&1 | head -3 >&2; fail "R8 control: the selector rejected a LEGAL landing record"; }
 pass "E99-F102 R8 an_unrecognised_verified_is_rejected_by_both_validators"
@@ -309,6 +349,32 @@ python3 "$VALIDATE" "$T/old.json" "$SCHEMA" >/dev/null 2>&1 \
 # ...and this repository's OWN live board, which is entirely un-attested, still validates.
 python3 "$VALIDATE" "$SRC/state/tasks.json" "$SCHEMA" >/dev/null 2>&1 \
   || fail "R9: the live board no longer validates — the change is not additive"
+
+# ...on the ZERO-DEPENDENCY path too. Same two-path hazard R8 hit, and it survived a
+# mutation until this existed (Reviewer H1: making _fallback_errors REQUIRE `landed` on
+# every `done` left this suite green, because additivity was only ever asserted through
+# jsonschema — so on a machine without it, a fallback that rejected un-attested boards
+# would take down all 148 live rows and nothing here would notice).
+cat > "$T/nojs_arg.py" <<EOF
+import runpy, sys, builtins
+_real = builtins.__import__
+def _imp(name, *a, **k):
+    if name == "jsonschema":
+        raise ImportError("blocked: simulate the zero-dependency install path")
+    return _real(name, *a, **k)
+builtins.__import__ = _imp
+sys.argv = ["validate-board.py", sys.argv[1], "$SCHEMA"]
+runpy.run_path("$VALIDATE", run_name="__main__")
+EOF
+python3 "$T/nojs_arg.py" "$T/old.json" >/dev/null 2>&1 \
+  || fail "R9: the ZERO-DEPENDENCY validator rejected a legacy board with no landing record — on a machine without jsonschema this would reject every board written before the field existed"
+python3 "$T/nojs_arg.py" "$SRC/state/tasks.json" >/dev/null 2>&1 \
+  || fail "R9: the ZERO-DEPENDENCY validator rejected this repo's own live board"
+# CONTROL: the import-blocked probe is not vacuously green — it still rejects a board the
+# fallback is supposed to reject. (Re-seed bad.json: the last R8 case left a LEGAL one there.)
+mkbad '{ "ref": "abc1234", "verified": "probably" }'
+python3 "$T/nojs_arg.py" "$T/bad.json" >/dev/null 2>&1 \
+  && fail "R9 control: the import-blocked probe accepted a KNOWN-BAD board, so its two green assertions above prove nothing"
 pass "E99-F102 R9 the_field_is_additive_legacy_boards_still_validate"
 
 # ── R10: what "merged" means with, and without, a remote ──────────────────────────────
@@ -373,5 +439,55 @@ set_status "$U/.harness" E01-F01 done --evidence "$CHILD_ORPHAN"
 [ "$SS_RC" = "0" ] && fail "R11 control: an UNMERGED child-repo commit was accepted from the umbrella board: $SS_OUT"
 [ "$BEFORE" = "$(cat "$U/.harness/state/tasks.json")" ] || fail "R11 control: the board moved despite the refusal"
 pass "E99-F102 R11 an_umbrella_board_verifies_a_child_repository"
+
+# ── R12: REGRESSION — E09-F02, the instance the first draft waved through ─────────────
+# Not a synthetic shape: this is the live viernes board entry, verbatim except the status,
+# which is rewound so the transition can be replayed. Three slices, every one hand-marked
+# `merged: true`, and the FIRST slice's own `pr` field points at a PR that was CLOSED
+# UNMERGED on 2026-07-25. Through the exempting first draft this exited 0 and wrote no
+# record at all. The datum that exposed it — the slice `pr` — is the one the exemption
+# treated as sufficient.
+cat > "$HD/state/tasks.json" <<'EOF'
+{
+  "project": "e09f02-regression",
+  "epics": [
+    {
+      "id": "E09", "title": "Platform consolidation", "status": "in-progress",
+      "features": [
+        {
+          "id": "E09-F02",
+          "title": "Reconcile lia-infra into one shared viernes-infra",
+          "status": "in-review",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E09-platform-consolidation/F02-infra-reconciliation/",
+          "slices": [
+            { "id": "E09-F02@viernes-infra", "repo": "viernes-infra", "status": "done",
+              "merged": true, "depends_on": [],
+              "pr": "https://github.com/viernes-ai/viernes-infra/pull/24" },
+            { "id": "E09-F02@viernes-bookings-api", "repo": "viernes-bookings-api",
+              "status": "done", "merged": true, "depends_on": ["E09-F02@viernes-infra"] },
+            { "id": "E09-F02@viernes-users", "repo": "viernes-users", "status": "done",
+              "merged": true, "depends_on": ["E09-F02@viernes-infra"] }
+          ]
+        }
+      ]
+    }
+  ]
+}
+EOF
+BEFORE="$(cat "$HD/state/tasks.json")"
+set_status "$HD" E09-F02 done
+[ "$SS_RC" = "0" ] && fail "R12: E09-F02 reached done unattested — the exact board entry, and the exact hole, this feature was rejected for in review round 1: $SS_OUT"
+[ "$BEFORE" = "$(cat "$HD/state/tasks.json")" ] || fail "R12: the board moved despite the refusal"
+
+# CONTROL: the same entry with evidence lands, and the record says what was proved — so R12
+# is not passing merely because a three-slice board is unwritable.
+set_status "$HD" E09-F02 done --evidence "none: superseded by E11; PR #24 closed unmerged"
+[ "$SS_RC" = "0" ] || fail "R12 control: E09-F02 could not be attested at all (rc=$SS_RC): $SS_OUT"
+_v="$(python3 -c "import json;print(json.load(open('$HD/state/tasks.json'))['epics'][0]['features'][0]['landed']['verified'])")"
+[ "$_v" = "declared" ] || fail "R12 control: the attestation recorded '$_v', not the honest 'declared'"
+pass "E99-F102 R12 regression_e09f02_a_sliced_feature_over_a_closed_pr"
 
 echo "All landing-evidence tests passed."

@@ -72,14 +72,25 @@
 # `done` is what stops the selector routing an item, so a feature marked `done`
 # whose work never merged is both unshipped AND unreachable — nothing will pick
 # it up again, and downstream briefs cite it as a landed mechanism. An audit of
-# 148 `done` features across seven repos found three such items (E99-F58,
-# E99-F59, E09-F02), each discovered by accident rather than by any check.
+# 148 `done` features across seven repos found FOUR such items — E99-F58 and
+# E99-F59 (commits on never-pushed local branches), E09-F02 and E99-F29 (their
+# only PRs closed UNMERGED) — none of them found by a check. E99-F29 is the harm
+# in the corpus: the board title of E99-F32, the feature that actually shipped
+# the Spanish outcome, cites E99-F29 as landed.
 #
-# A SLICED feature already had to attest this: the schema refuses `done` unless
-# every slice is `done` AND `merged`. This EXTENDS that attestation to the
-# single-repo feature, which had none — which is why all three instances are
-# single-repo features. `set-status <feature> done` therefore requires
-# `--evidence REF`, where REF is one of:
+# ── why `slices[]` is NOT the attestation ────────────────────────────────────
+# A sliced feature LOOKS attested: the schema refuses `done` unless every slice
+# is `done` AND `merged`. But nothing in this harness ever WRITES `slice.merged`
+# — every occurrence in tools/ is a read or a type assertion, and `store/local.md`
+# tells the agent to set it through `apply --mutator`. It is hand-typed, i.e.
+# exactly the say-so this flag replaces. E09-F02 is the proof: a SLICED feature,
+# three slices all `merged: true`, whose first slice's own `pr` field points at
+# viernes-infra#24 — closed, unmerged. So `--evidence` is required for EVERY
+# feature `done`, sliced or not; exempting the weaker mechanism from the stronger
+# one would have shipped that hole documented as safe. The slice invariant still
+# applies independently — a sliced feature must satisfy BOTH.
+#
+# `set-status <feature> done` requires `--evidence REF`, where REF is one of:
 #
 #   <sha>          a commit id (7-40 hex). RESOLVED against the repo holding the
 #                  harness dir, its parent, and any sibling child repos, then
@@ -88,15 +99,24 @@
 #   none:<why>     work with no commit at all (a console action, a supersession).
 #
 # The refusal is deliberately NARROW: the write is refused ONLY when ancestry is
-# CHECKABLE AND FALSE (the sha resolves, and it is provably not reachable from
-# the default branch — the exact shape of the three instances). Everything else
+# CHECKABLE AND FALSE (the sha resolves HERE, and is provably not reachable from
+# the default branch). Everything else
 # is recorded and, where nothing was proved, WARNED about. A guard that blocked an
 # offline machine, a sha belonging to a repository this checkout cannot see, or a
 # remoteless board (an umbrella root usually has no remote — its local `main` is
 # then the base) would be routed around, and a routed-around guard is worth less
 # than none. It does NOT wave through mark-before-push: where an `origin` exists,
 # "merged" means `origin/HEAD`, so a commit sitting on a local `main` that was
-# never pushed is refused — the E99-F58 shape verbatim.
+# never pushed is refused — the same shape as E99-F58's two orphan commits.
+#
+# ⚠️ SCOPE, measured: "refused" holds only where the sha RESOLVES, which means the
+# harness dir's repo, its parent, and that parent's children. E99-F58/E99-F59 live
+# on the viernes umbrella board while their commits are in ~/repos/harness-sdd —
+# OUTSIDE that tree — so from that board their orphan tips resolve nowhere and are
+# ACCEPTED as `unchecked` (measured: rc=0; with harness-sdd symlinked in as a
+# child, rc=1 REFUSED). On the board where they actually live, this guard warns and
+# records; it does not catch them. It catches E09-F02 and E99-F29, whose repos are
+# umbrella children. Two of four refused, two of four recorded-and-warned.
 # What is NOT optional is saying something: the record
 # lands on the board as `landed: {ref, verified}`, so re-auditing is one
 # `git merge-base` per row instead of the three-pass commit archaeology that
@@ -857,27 +877,27 @@ def _resolve_landing(text, target_id, status, evidence, hdir):
         if evidence is not None and not is_feature:
             _die("--evidence applies to a feature; %s is not one" % target_id)
         return None
-    # Measured, not asserted: loosening this to `feature.get("slices") is not None`
-    # left all 11 cases of tests/test_landed_evidence.sh green (mutation M5) — the two
-    # are genuinely equivalent in OUTCOME today, because the only inputs that separate
-    # them (`"slices": []`, or a non-list) are rejected by the schema in the same locked
-    # critical section, so the write fail-stops either way; only the error text differs.
-    # ⚠️ The equivalence expires if `slices: []` ever becomes legal. Then the loose form
-    # would exempt a feature with NO slices from evidence entirely, and no test here
-    # catches that — this comment is the only record of it.
-    sliced = isinstance(feature.get("slices"), list) and feature["slices"]
+    # EVERY feature, sliced or not (revised after review round 1 — see the module
+    # header's "why `slices[]` is NOT the attestation"). The first draft exempted a
+    # sliced feature on the theory that its per-slice `merged` flags already attested
+    # the landing. They do not: nothing in this harness ever WRITES `slice.merged` —
+    # every occurrence in tools/ is a read or a type assertion, and `store/local.md`
+    # tells the agent to set it through `apply --mutator`, i.e. by hand. E09-F02 is
+    # the proof: three slices all `merged: true`, and the first one's own `pr` field
+    # points at viernes-infra#24, CLOSED UNMERGED. Replayed through the exempting
+    # draft it exited 0 with no record at all. Exempting the weaker, unverified
+    # mechanism from the stronger, git-verified one is backwards, and it would have
+    # shipped that hole documented as safe.
     if evidence is None:
-        if sliced:
-            # The slice invariant (every slice done+merged, enforced by the schema
-            # and both validators) IS this attestation for a multi-repo feature.
-            return None
         _die(
             "%s: `done` needs evidence the work landed — pass --evidence <sha> "
             "(checked against the default branch, and REFUSED if it is not an "
             "ancestor), or --evidence <url> to transcribe an unverifiable "
             "reference, or --evidence none:<why> when there is no commit. "
-            "A `done` nobody can re-check is how E99-F58/E99-F59/E09-F02 sat "
-            "unshipped and unroutable on this board." % target_id
+            "A `done` nobody can re-check is how E99-F58/E99-F59/E09-F02/E99-F29 "
+            "sat unshipped and unroutable on this board — E09-F02 with every "
+            "slice hand-marked `merged: true` against a closed, unmerged PR."
+            % target_id
         )
     return _landing_record(evidence, hdir)
 

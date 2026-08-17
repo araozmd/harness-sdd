@@ -429,14 +429,21 @@ routing a gated item.
 `done` is what stops the selector routing an item. So a feature marked `done` whose
 work never merged is both **unshipped and unreachable** — nothing will ever pick it
 up again, while downstream briefs cite it as a landed mechanism. An audit of 148
-`done` features across seven repositories found three: `E99-F58` and `E99-F59` sat
-on never-pushed local branches, `E09-F02` on a closed, unmerged PR. All three were
-found **by accident**.
+`done` features across seven repositories found **four**: `E99-F58` and `E99-F59`
+sat on never-pushed local branches; `E09-F02` and `E99-F29` on PRs that were closed
+**unmerged**. All four were found **by accident**, and the harm is already in the
+corpus — the board entry for `E99-F32`, the feature that actually shipped the
+Spanish Managed Login, cites `E99-F29` as landed.
 
-A **sliced** feature already had to attest this — the schema refuses `done` unless
-every slice is `done` *and* `merged`. The single-repo feature had no such
-attestation, which is exactly why all three instances are single-repo features. So
-the same attestation, one level up:
+**Every feature needs it, sliced or not.** A sliced feature *looks* attested — the
+schema refuses `done` unless every slice is `done` *and* `merged` — but **nothing in
+the harness ever writes `slice.merged`**. Every occurrence in `tools/` is a read or
+a type assertion; the agent sets it by hand through `apply --mutator`. `E09-F02` is
+the proof: a sliced feature whose three slices are all `merged: true` while the
+first slice's own `pr` field points at `viernes-infra#24` — closed, unmerged.
+Exempting the weaker, unverified mechanism from the stronger, git-verified one would
+ship that hole documented as safe, so a sliced feature satisfies **both**: every
+slice `done`+`merged`, *and* feature-level evidence.
 
 ```
 python3 .harness/tools/tasks-lock.py set-status <id> done --evidence <sha|url|none:why>
@@ -454,8 +461,7 @@ python3 .harness/tools/tasks-lock.py set-status <id> done --evidence <sha|url|no
 | a sha that resolves **nowhere** nearby (offline, other repo, no remote) | accepted with a **warning**, recorded `verified: "unchecked"` — nothing was proved |
 | a URL / tag / any other string | accepted with a warning, recorded `verified: "unchecked"` |
 | `none:<why>` | accepted, recorded `verified: "declared"` — for work with no commit (a console action, a supersession). The reason is required |
-| omitted, on a **sliced** feature | fine — its per-slice `merged` flags are the attestation |
-| omitted, on a **single-repo** feature | **REFUSED**, naming the three instances |
+| omitted, on **any** feature (sliced included) | **REFUSED**, naming the four instances |
 
 **The refusal is narrow on purpose:** only when ancestry is *checkable and false*.
 A guard that also blocked an offline machine, a sha belonging to a repository this
@@ -463,8 +469,17 @@ checkout cannot see, or a remoteless board (an umbrella root usually has no remo
 its local `main` is then the base) would be routed around, and a routed-around guard
 is worth less than none. It does **not** wave through mark-before-push: where an
 `origin` exists, "merged" means `origin/HEAD`, so a commit sitting on your local
-`main` that was never pushed is refused — that is the E99-F58 shape verbatim. Push
-it, or say `none:<why>`. What is not optional is saying
+`main` that was never pushed is refused — the same shape as E99-F58's two orphan
+commits. Push it, or say `none:<why>`.
+
+⚠️ **Scope, measured.** "Refused" only applies where the sha **resolves**: the harness
+dir's repo, its parent, and that parent's children. `E99-F58`/`E99-F59` are recorded on
+a board whose tree does not contain `~/repos/harness-sdd`, so from that board their
+orphan tips resolve nowhere and are **accepted as `unchecked`** (measured: `rc=0`; with
+that repo symlinked in as a child, `rc=1`, refused). Of the four known instances this
+refuses two — `E09-F02` and `E99-F29`, whose repos are umbrella children — and
+records-and-warns on the other two. That is the price of the narrow refusal, not a
+claim that all four are now caught. What is not optional is saying
 *something*. The `landed` record turns a re-audit into one `git merge-base` per row
 instead of commit archaeology across colliding id namespaces, and it makes the weak
 claims **greppable**:

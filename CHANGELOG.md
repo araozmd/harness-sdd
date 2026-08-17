@@ -11,12 +11,19 @@ All notable changes to the harness body are recorded here. Versions follow
 `done` is what stops the selector routing an item. So a feature marked `done` whose work
 never merged is **both unshipped and unreachable** — nothing will ever pick it up again,
 while downstream briefs cite it as a landed mechanism and reviewers act on the citation.
-An audit of **148 `done` features across seven repositories** found three: `E99-F58` and
-`E99-F59` are `done` on the viernes board with 2 commits each on **never-pushed local
-branches** in this repo (`b86e7cf`/`cfabbbd`, `5f0296f`, VERSION-era 0.47.x against a main
-now past 0.62.0), and `E09-F02` is `done` with its only PR (viernes-infra #24) **closed
-unmerged**. Every one of them was found by accident. The recursion is the point: the
-mutation-revert mandate that would have caught this class is itself an instance of it.
+An audit of **148 `done` features across seven repositories** found **four**:
+
+| feature | board says | reality |
+|---|---|---|
+| `E99-F58` | done | `b86e7cf` + `cfabbbd` on a **never-pushed** local branch here (VERSION-era 0.47.0) |
+| `E99-F59` | done | `5f0296f` on a **never-pushed** local branch here (VERSION-era 0.47.1) |
+| `E09-F02` | done, **all three slices `merged: true`** | its only PR, viernes-infra #24, **closed unmerged** |
+| `E99-F29` | done | PR viernes-infra #31 **closed unmerged**; `origin/main:lib/branding-settings.ts` still emits `'en'` |
+
+Every one was found by accident, and the harm is already in the corpus: the board entry for
+`E99-F32` — the feature that actually shipped the Spanish Managed Login — **cites `E99-F29`
+as landed**. The recursion is the point: the mutation-revert mandate that would have caught
+this class is itself an instance of it.
 
 ```jsonc
 { "id": "E99-F77", "status": "done",
@@ -27,12 +34,17 @@ mutation-revert mandate that would have caught this class is itself an instance 
 tasks-lock.py set-status <id> done --evidence <sha|url|none:why>
 ```
 
-**An extension of the slice attestation, not a second mechanism.** A **sliced** feature
-already could not be `done` unless every slice was `done` **and** `merged` — enforced by
-the schema cross-field, the zero-dependency validator and the selector. The **single-repo**
-feature had no such attestation, and that is exactly why all three instances are
-single-repo features. So `--evidence` is required for a single-repo `done` and **not** for
-a sliced one, whose per-slice `merged` flags already are the record.
+**Every feature, sliced or not — `slices[]` is NOT an attestation.** The first draft of this
+change exempted sliced features, on the theory that the schema's "every slice `done` **and**
+`merged`" cross-field already attested the landing. It does not, and review round 1 proved
+it twice over: **nothing in the harness ever WRITES `slice.merged`** (every occurrence in
+`tools/` is a read or a type assertion; `store/local.md` has the agent set it through
+`apply --mutator`), so the boolean is hand-typed — exactly the say-so this flag replaces —
+and **`E09-F02` is a sliced feature** whose three slices are all `merged: true` while the
+first slice's own `pr` points at that closed PR. Replayed verbatim through the exempting
+draft: **exit 0, no record written**. Exempting the weaker, unverified mechanism from the
+stronger, git-verified one would have shipped the hole documented as safe. The two
+invariants are now independent and a sliced feature must satisfy **both**.
 
 What the value does, and what it deliberately does not do:
 
@@ -43,8 +55,7 @@ What the value does, and what it deliberately does not do:
 | sha that resolves nowhere nearby | accepted with a **warning**, `verified: "unchecked"` |
 | any other string (a PR URL, a tag) | accepted with a warning, `verified: "unchecked"` |
 | `none:<why>` | accepted, `verified: "declared"` — work with no commit; the reason is required |
-| omitted, sliced feature | accepted — the slices carry it |
-| omitted, single-repo feature | **REFUSED** |
+| omitted, on **any** feature | **REFUSED** |
 
 The refusal is **narrow on purpose**: only when ancestry is *checkable and false*. An
 offline machine, a sha from a repository this checkout cannot see, and a remoteless board
@@ -53,32 +64,51 @@ a guard that blocked them would be routed around, and a routed-around guard is w
 than none. It does not wave through mark-before-push: with an `origin`, "merged" means
 `origin/HEAD`. Both halves are asserted, each against a control.
 
+⚠️ **What it therefore does NOT close, measured.** A sha is only checked where it
+*resolves* — the harness dir's repo, its parent, and that parent's children. `E99-F58` and
+`E99-F59` are recorded on a board whose tree does not contain `~/repos/harness-sdd`, so
+from that board their orphan tips resolve nowhere and are **accepted as `unchecked`**
+(rc=0; symlink the repo in as a child and it is rc=1, refused). Of the four instances this
+refuses two and records-and-warns on two. That is the intended price of the narrow
+refusal — stated here because three earlier drafts of this entry read as "E99-F58 is now
+caught", and on the board where it lives it is not.
+
 What was weighed. **Refuse everything unverifiable** — rejected: it blocks the umbrella
 (no remote), any offline run and all no-code work, so the first agent to hit it uses
 `apply --mutator` and the guard is gone. **Warn only** — rejected as the status quo with a
-louder voice: nothing about the three instances would have changed. **Record the ref at
+louder voice: nothing about the four instances would have changed. **Record the ref at
 `done` time** — adopted, because the audit measured that the expensive half is not the
-ancestry check (one `git merge-base`) but *resolving a sha for a feature id at all*: three
-boards mint `E<nn>-F<nn>` ids into the same commit corpus (this repo's own board, the
-viernes umbrella board, and the pre-rebrand `lia` boards), so id-grep is unsound in both
-directions and 17 of 148 features had no commit evidence anywhere. A recorded ref makes a
+ancestry check (one `git merge-base`) but *resolving a sha for a feature id at all*. **At
+least four boards mint `E<nn>-F<nn>` ids into the same commit corpus** (this repo's own
+board — whose *own* `E09-F02` is `done` and landed as `a78ee74`, so a naive id-grep marks
+the umbrella's `E09-F02` PASS — the viernes umbrella board, the pre-rebrand `lia` boards,
+and per-repo local numbering such as `viernes-bookings-calendar`'s `E99-F29`, which is what
+produced this audit's one false PASS). A date floor does not separate them: `E06-F03` is
+minted three times, two of them one day apart. So id-grep is unsound in both directions —
+17 of 148 features had no commit evidence at all, and the designed `@lia-` quarantine turned
+out near-inert (5 of 44 pre-July id-bearing commits carry the tag). A recorded ref makes a
 re-audit one command per row.
 
 **Additive to every existing board.** `landed` is optional in the schema and never
 required by it — only by the write path — so the 148 already-`done` features stay valid and
-stay unattested. This is a **breaking change to the `set-status` CLI** for single-repo
-`done` transitions (0.x SemVer ⇒ MINOR); three in-repo suites were updated to pass
+stay unattested. This is a **breaking change to the `set-status` CLI** for every feature
+`done` transition (0.x SemVer ⇒ MINOR); three in-repo suites were updated to pass
 `--evidence`, and `tests/test_owner_gate.sh`'s R5 pair is *stronger* for it — both halves
 now carry evidence, so the difference between the refusal and its control is the gate alone.
 
-New suite `tests/test_landed_evidence.sh` (11 cases, every one paired with a control). Two
-of them exist because a mutation survived without them: deleting the `verified` enum check
-from the zero-dependency validator left the suite green (the schema was answering for the
-fallback), and deleting the child-repository scan left it green too (every other case
-resolves the sha in the harness dir's own parent, so the umbrella layout the viernes board
-actually uses went unexercised). One mutation SURVIVES — loosening the sliced-feature test
-to `slices is not None` is outcome-equivalent while `slices: []` stays schema-illegal — and
-is disclosed in `tools/tasks-lock.py` rather than papered over.
+New suite `tests/test_landed_evidence.sh` (12 cases, every one paired with a control). Five
+of them exist only because a mutation survived without them: **R6/R12** (the sliced
+exemption above — R12 replays the live `E09-F02` entry verbatim); **R8**'s zero-dependency
+and `repo`/`base` assertions (deleting the fallback's `verified` enum check, and both type
+checks, left the suite green — the schema was answering for the fallback); **R9**'s
+import-blocked assertions (a fallback made to *require* `landed` on every `done` left the
+suite green, so on a machine without `jsonschema` it would have rejected all 148 live rows
+undetected); and **R11** (deleting the child-repository scan left it green — every other
+case resolves the sha in the harness dir's own parent, so the umbrella layout the viernes
+board actually uses went unexercised). The one previously-disclosed survivor (loosening the
+sliced test to `slices is not None`) is **gone by construction**: the branch it mutated no
+longer exists. It was independently confirmed equivalent first — 8 separating inputs across
+both validator paths, identical in exit code and board bytes.
 
 ## [0.62.0] — 2026-08-16
 

@@ -253,8 +253,9 @@ The build↔review handoff is **not a single pass** — it is an explicit loop t
 says the work is *correct*; it does not say the work is *merged*, and `done` is what
 stops the selector routing the item — so a `done` whose branch never merged is both
 unshipped and unreachable, and the next brief will cite it as a shipped mechanism.
-Three such features were found on one board, all by accident. So for a **single-repo**
-feature the transition carries its own proof:
+**Four** such features were found on one board, all by accident, and one of them
+(`E99-F29`) is already cited as landed by another feature's board entry. So every
+feature transition to `done` carries its own proof:
 
 ```
 python3 "$HARNESS_DIR/tools/tasks-lock.py" set-status <id> done --evidence <sha|url|none:why>
@@ -264,8 +265,11 @@ A **sha** is checked with `git merge-base --is-ancestor` against the default bra
 the write is **REFUSED** if it is provably not an ancestor; anything else is transcribed
 and marked `unchecked`; `none:<why>` is for work with no commit at all (a console action,
 a supersession). Prefer the **merge commit** — it is the thing that is actually an
-ancestor. A **sliced** feature needs no flag: its per-slice `merged` flags already are the
-attestation. Full contract in `store/local.md` (`set_status`) and `docs/WORKFLOW.md`.
+ancestor. **A sliced feature is not exempt**: its per-slice `merged` flags are hand-typed
+and nothing in the harness verifies them (E09-F02 carries `merged: true` on a slice whose
+own `pr` is a closed, unmerged PR), so a sliced feature must satisfy the slice invariant
+**and** carry feature-level evidence. Full contract in `store/local.md` (`set_status`)
+and `docs/WORKFLOW.md`.
 
 **Each round is recorded.** Append **one line per round** to `progress/history.md`
 so the iteration is observable — e.g. `E0x-Fyy in-review → reject (round N)` and,
