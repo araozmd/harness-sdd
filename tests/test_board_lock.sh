@@ -469,7 +469,8 @@ def _imp(name, *a, **k):
         raise ImportError("blocked: simulate zero-dep install path")
     return _real(name, *a, **k)
 builtins.__import__ = _imp
-sys.argv = ["tasks-lock.py", "set-status", "E01-F01", "done"]
+sys.argv = ["tasks-lock.py", "set-status", "E01-F01", "done",
+            "--evidence", "none:fixture board, no repository to check against"]
 try:
     runpy.run_path("$HELPER", run_name="__main__")
     sys.exit(0)
