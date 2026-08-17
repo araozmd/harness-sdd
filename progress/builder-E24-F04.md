@@ -279,3 +279,152 @@ Restored (the mutant only ever existed in the scratch copy) and re-confirmed gre
 Nothing. Each finding's stated mechanism was probed before it was implemented, and each one
 behaved as the review described — including Finding 3, where the review's correction confirms
 round 1's own code comment against round 1's plan.
+
+---
+
+# Round 3 — the two new findings
+
+Both are round 1's species again: the suite green while the destructive path stubs a child that
+is **not** pristine. Both premises were probed on a `cp -R` copy **before** anything was written,
+and both held exactly as the review described.
+
+## Finding 4 — `specs/glossary.md` had no differential test, and byte-strictness was pinned nowhere
+
+Two survivors, each a one-line edit, each leaving 71 `ok` green:
+
+- the prose sweep iterating a hardcoded `AGENTS.md agents docs specs/_templates` instead of
+  `$HARNESS_BODY_PROSE` — the dropped entry is never compared, so a child that edited it converts
+- `diff -rq` → `diff -rqw` — byte identity relaxed to identity-modulo-whitespace, so a child whose
+  edit is a CRLF round-trip converts
+
+**Premise check (my own, `scratchpad/E24-F04-builder/probe.head.sh`).** A full-copy child of a
+reachable umbrella whose **only** difference is a trailing space on line 1 of
+`specs/glossary.md`, converted single-target:
+
+| Installer | `differs:` lines | On disk |
+|---|---|---|
+| pristine | `differs: specs/glossary.md` | NOT-converted |
+| `diff -rqw` | *(none at all)* | **CONVERTED — prose tier deleted and stubbed** |
+| hardcoded sweep | *(none at all)* | **CONVERTED — prose tier deleted and stubbed** |
+
+So the finding's premise holds, including the data-loss half.
+
+**Fix** (`tests/test_umbrella.sh`, the existing `shapes` child — one seeded line):
+
+```sh
+awk 'NR == 1 { printf "%s \n", $0; next } { print }' "$KS4/specs/glossary.md" > "$AU/f04c-glossary.tmp"
+cat "$AU/f04c-glossary.tmp" > "$KS4/specs/glossary.md"
+```
+
+A **trailing space on line 1**, never new text: new text differs under `-w` too and would kill
+only one of the two mutations. Two preconditions guard the fixture against silently degrading
+into the `AGENTS.md` shape — the edit must be a real byte difference (`cmp -s` must fail) **and**
+invisible to `diff -qw` — both measured against the umbrella's own copy, which is the reference
+the conversion uses.
+
+**Where the assertion went, and why not in the `:1510` loop.** The review's remedy said to add
+`specs/glossary.md` to that naming loop. The predicate is identical either way, but the loop's
+failure message is *"diff's own wording never contains it"* — true of the three shapes it covers,
+**false** of this one, since `Files <a> and <b> differ` carries this path already. A message that
+misdiagnoses is how the next maintainer stops looking, so it is asserted immediately after the
+loop as its own case, `thin_comparison_is_byte_identity`, with a message that names both
+mechanisms it can fail by. Same fixture, same segment, same kill.
+
+## Finding 5 — the umbrella-side one-sided path was unpinned
+
+**Premise check (probe 2).** Same fixture, umbrella given `agents/newfile.md` that the child has
+never held:
+
+| Installer | refusal names | On disk |
+|---|---|---|
+| pristine | `differs: agents/newfile.md` | NOT-converted |
+| umbrella arm deleted | `differs: agents` | NOT-converted (**fails closed** — naming precision, not data loss) |
+
+Exactly as described.
+
+**Fix:** a new case, `thin_umbrella_side_path_is_named`, in **its own umbrella** (`$AU/f04i`).
+`$F04C`'s umbrella serves both `extra` and `shapes`, and `extra`'s whole value is that a
+child-local one-sided path is its **only** difference — an umbrella-side file seeded there would
+block `extra` for a second reason and dissolve that case. Single-target, like
+`thin_reference_is_the_umbrella_body` and for the same reason. Two controls: the path must **not**
+exist in the child (or the umbrella arm is never reached), and **exactly one** blocker must be
+named (or "the path was named" is equally explained by a run that names every tier entry it
+walks).
+
+## Mutation proof — all three, attributed in both directions
+
+Applied with `sed` to a `tar`-cloned copy under `scratchpad/E24-F04-builder/`; **the repo's own
+`harness-install.sh` was never edited to test it**. Each mutant was confirmed applied by `diff`
+against the base copy and `sh -n`. Free space on the volume: **425 GiB before the campaign,
+431 GiB after** — no ENOSPC, so the failures below are real kills, not an outage.
+
+| # | Mutation | Full suite | Killing assertion |
+|---|---|---|---|
+| M1 | `842: diff -rq` → `diff -rqw` | **exit 1 — killed**, after 63 `ok` | `thin_comparison_is_byte_identity` |
+| M2 | `830: for _ptb_rel in $HARNESS_BODY_PROSE` → hardcoded `AGENTS.md agents docs specs/_templates` | **exit 1 — killed**, after 63 `ok` | `thin_comparison_is_byte_identity` |
+| M3 | `880:` the `"$_ptb_u"/*)` arm deleted (falls through to the fail-closed `*)`) | **exit 1 — killed**, after 65 `ok` | `thin_umbrella_side_path_is_named` |
+
+Killing messages, verbatim:
+
+```
+FAIL: R2/R3: a WHITESPACE-ONLY edit to specs/glossary.md was not reported as a blocker —
+either the comparison is identity-modulo-whitespace rather than BYTE identity, or the prose
+sweep never compared that entry at all; under either, a child whose ONLY difference is that
+edit CONVERTS and its prose tier is deleted: …
+
+FAIL: R3: a path the UMBRELLA holds and the child does not was not named as a tier-relative
+path — the refusal names the tier entry `agents`, pointing the operator at a directory
+instead of the file: …
+```
+
+**Attribution.** A single failing run cannot tell a kill from a mask, so both directions were
+run:
+
+| Suite variant | M1 | M2 | M3 |
+|---|---|---|---|
+| control, pristine installer | green, 73 `ok` | green, 73 `ok` | green, 73 `ok` |
+| full suite | **killed** at the new case, every earlier case `ok` | **killed** at the new case | **killed** at the new case |
+| complement — the whole F04 suite with **only the two new cases** removed, fixtures left in place | **green, 71 `ok`** | **green, 71 `ok`** | **green, 71 `ok`** |
+
+The complement row reproduces the review's finding exactly (each mutant survives everything that
+existed before) and proves each kill is attributable to the new case alone. The full-suite row's
+`ok` prefix proves no earlier case masks it. The mutants only ever existed in the scratch copies.
+
+## Also in this round
+
+- `harness-install.sh:850-853` — narrowed the round-2 guard's disclosure, per the review's note.
+  `diff` is invoked in exactly one place, so "a shim would be testing the shim" was weaker than
+  it read. The honest reason is a **weak control**: a shim that always exits non-zero with no
+  output is indistinguishable from an installer that blocks everything, which is the outcome such
+  a fixture would assert. Comment only; no code change.
+- `E24-F04.tests.md` — the R3 row at `:16` no longer claims `specs/glossary.md`; that entry now
+  has its own row, and a third row covers the umbrella-side one-sided path. Three mutation rows
+  added (`-w`, the hardcoded sweep, the umbrella arm), and the pre-existing `diff -rq loses its
+  -q` row was corrected to name the case it actually kills — the **nested** path
+  `agents/builder.md` in `thin_names_every_blocker`, not the regular-file entries, which round 2
+  measured as still named via the fail-closed arm. Two anti-tautology bullets record why a
+  whitespace-only edit is the only thing that pins byte identity and why the umbrella-side case
+  needs its own umbrella.
+
+## Verification, round 3
+
+- `./init.sh` → `environment ready — agents may proceed`
+- `sh tools/run-tests.sh` → **all 40 suites passed (--jobs 8)**
+- `sh tests/test_umbrella.sh` → **73 `ok`** (71 + the two new cases); also green under `dash`,
+  and `dash -n` clean
+- `sh -n harness-install.sh`, `bash -n init.sh` clean; `harness-install.sh` still contains no
+  case-insensitive "drift"
+- `sh tools/change-size.sh` → production **270** lines / 4 files, tier **ok** (round 2 was 269;
+  the +1 is the narrowed comment)
+- `VERSION` unchanged at **0.64.0** — this round adds two tests and doc corrections inside the
+  feature 0.64.0 already describes. No test asserts the literal value, and none diffs against
+  `main`.
+- Counting idiom: the new "exactly one blocker" control uses `grep -o … | wc -l | tr -d ' '`,
+  never a possibly-zero `grep -c` bound under `set -eu`. BSD `awk`/`grep`/`diff` only.
+
+## Anything I disagree with
+
+Nothing substantive. One deviation, stated above and deliberate: the `specs/glossary.md`
+assertion is its own case rather than an entry in the `:1510` loop, because that loop's failure
+message would misdiagnose this shape. The predicate, the fixture and the measured kills are
+exactly the ones the review verified.
