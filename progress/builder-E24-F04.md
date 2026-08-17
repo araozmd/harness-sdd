@@ -150,3 +150,132 @@ instrument and not a generator of the answer I wanted.
   `tests/test_installer_toggles.sh` R13 both fail the chain on it. Two comments used it in
   its ordinary English sense; they say "diverge" now.
 
+
+---
+
+# Round 2 — the Reviewer's REJECT, answered
+
+`progress/E24-F04/review.md` carried two blocking findings and one required amendment. I
+reproduced all three premises before touching anything; **all three hold**, and I disagree
+with none of them. Free space on the volume holding the repo and the scratchpad: **425 GiB
+before the run, 425 GiB after** — no ENOSPC window, so the results below are trustworthy.
+Everything scratch lives under `scratchpad/E24-F04-builder/`.
+
+## Finding 1 (BLOCKING) — the pristine reference was unpinned
+
+**Premise, verified end to end before implementing.** Built a full-copy child of a reachable
+umbrella with the product's own steps (single-target install, then `--umbrella`), appended one
+line to the **umbrella's** `.harness/agents/builder.md`, then ran single-target
+`harness-install.sh --thin <umb>/kid`:
+
+- real code → `NOT converted … differs: agents/builder.md`, child's body left in place
+- `prose_tier_blockers "$H" "$SRC"` → `CONVERTED to the thin layout`, and the child's
+  `agents/builder.md` line 1 became `<!-- harness:umbrella-stub -->`
+
+So the Reviewer's account is exact: the mutant deletes a stale-but-pristine child's prose tier
+and redirects it at umbrella content that child never held.
+
+**Landed:** `tests/test_umbrella.sh::thin_reference_is_the_umbrella_body` (new block, after the
+three-shape case), built on the existing `f04_fullchild` fixture in its own umbrella `f04h`. It
+asserts, in order:
+
+1. **precondition** — the child is byte-identical to the installer's `$SRC` copy (`cmp -s`), so
+   the two candidate references genuinely disagree; without this the case discriminates nothing
+2. the divergence really took (`cmp -s` umbrella vs child now differs)
+3. single-target `--thin` exits 0 and **names** `differs: agents/builder.md`
+4. no path in the tier became a stub
+5. **exactly one** blocker is named — this is what stops "a reference that blocks every child"
+   from satisfying (3)
+6. the child's own `agents/builder.md` is still byte-identical to `$SRC` afterwards
+
+`tests/test_umbrella.sh` is run **single-target, never as a cascade**: a cascade re-installs the
+coordinator first and would erase the umbrella-side edit, collapsing the case back onto `$SRC`.
+
+The matrix row and the mutation row are in `E24-F04.tests.md`, together with an anti-tautology
+bullet saying why every other fixture in the suite is blind to this rule.
+
+## Finding 2 (BLOCKING) — `prose_tier_blockers` failed OPEN
+
+**Premise, verified with a shim.** Extracted the real function out of `harness-install.sh` and
+ran it with a `diff` on `PATH` that exits 1 and prints nothing:
+
+- before: `RESULT: NO BLOCKERS` — the tier reported convertible on the strength of a comparison
+  that said it was not
+- after: all five tier entries block
+
+**Landed:** the one-line guard the review specified, plus the comment that says why it is not
+claimed as tested — the system `diff` does not produce that combination, and a fixture that
+shimmed one onto `PATH` would be testing the shim, not this installer. Same shape as the
+`diff`-absent arm two lines above. The function's header comment now states the contract
+correctly: *the exit status is the contract, and the parsed lines only NAME the paths.*
+`.tasks.md` T5 carries the same correction.
+
+## Finding 3 (REQUIRED) — the plan's `-q` reasoning was false
+
+**Premise, measured.** Two directories without `-q` emit `diff -r <a>/builder.md <b>/builder.md`
+ahead of the hunks — a form the parser does not recognise — so `agents/builder.md` collapses to
+`agents`. Two regular files emit `1c1 / < x / --- / > y`, which the `*)` arm turns into the tier
+entry, and for a regular-file entry that **is** the right answer. So `AGENTS.md` and
+`specs/glossary.md` **are** named without `-q`; the plan said the opposite.
+
+**Amended:** `E24-F04.plan.md` → *The comparison* now states both arms with the measurement, and
+says explicitly why the distinction is worth the words — a reader who checks the regular-file
+claim, finds it false and stops there deletes the flag protecting every nested path. The same
+false reason in `.tasks.md` T4 is corrected too. `harness-install.sh:798-807` already carried the
+corrected account and is unchanged.
+
+## The Reviewer's note about `remove_if_pristine`
+
+Agreed and acted on by **not** acting: the pristine rule stays a third byte-identity comparison.
+`remove_if_pristine` is a single-file `cmp -s`-against-a-stamp deletion predicate and cannot
+answer "which paths differ against a remote reference"; *Recorded decision E* sanctions the
+separate rule, and `.plan.md` → DO NOT TOUCH forbids refactoring the three call-shapes into one
+helper.
+
+## Mutation proof for the new case
+
+Mutation: `prose_tier_blockers "$H" "$_umb_body"` → `prose_tier_blockers "$H" "$SRC"`, applied to
+a `cp -R` copy of the repo (`scratchpad/E24-F04-builder/srcmut`) — **the repo's own
+`harness-install.sh` was never edited to test it**. Confirmed applied by re-reading the line and
+`sh -n`.
+
+Attribution was arranged in both directions, since a single suite run cannot tell a kill from a
+mask:
+
+| Suite variant | Installer | Result |
+|---|---|---|
+| trimmed: every other F04 case's invocations **and their `pass` echoes** removed, new case only | pristine | green (`ok - R2 thin_reference_is_the_umbrella_body`) |
+| trimmed: same | `$SRC` mutant | **exit 1 — killed** |
+| complement: the whole F04 suite with **only** the new case removed | `$SRC` mutant | **green, all 40 assertions** |
+
+The killing message, verbatim:
+
+```
+FAIL: R2: the child is byte-identical to the installer's $SRC but NOT to the umbrella body,
+and --thin did not block on agents/builder.md — the conversion's pristine reference is $SRC,
+not the umbrella's copy, so a child that is merely STALE is converted and redirected at
+content it never held: …
+```
+
+The complement row is the important one: it reproduces the Reviewer's finding exactly (the
+mutant survives everything that existed before) and proves the kill is attributable to the new
+case alone rather than to a fixture it shares.
+
+Restored (the mutant only ever existed in the scratch copy) and re-confirmed green.
+
+## Verification, round 2
+
+- `./init.sh` → `environment ready — agents may proceed`
+- `sh tools/run-tests.sh` → **all 40 suites passed (--jobs 8)**
+- `sh tests/test_umbrella.sh` → 24 `ok` lines including the new case; also green under `dash`
+- `sh -n harness-install.sh`, `bash -n init.sh` clean; `harness-install.sh` still contains no
+  case-insensitive "drift" (`grep -ci` → 0)
+- `sh tools/change-size.sh` → production 269 lines / 4 files, tier **ok**
+- `VERSION` unchanged at 0.64.0 — this round adds one guard line, one test and doc corrections,
+  all inside the feature 0.64.0 already describes. No test asserts the literal value.
+
+## Anything I disagree with
+
+Nothing. Each finding's stated mechanism was probed before it was implemented, and each one
+behaved as the review described — including Finding 3, where the review's correction confirms
+round 1's own code comment against round 1's plan.
