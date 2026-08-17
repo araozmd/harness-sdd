@@ -1520,6 +1520,43 @@ printf '%s\n' 2>/dev/null "$F04C_SEG" | grep -q 'Only in ' \
 f04_no_stub_in_tier "$KS4" "R3 (the three-shape child must not convert either)"
 pass "R3 thin_blocker_paths_are_normalised — Only-in, regular-file and missing-entry shapes all name the joined path"
 
+# ── R2/R3: the pristine REFERENCE is the UMBRELLA'S copy, never the installer's $SRC ────
+# thin_reference_is_the_umbrella_body
+#
+# EVERY OTHER CASE IN THIS SUITE INSTALLS THE UMBRELLA AND THE CHILD FROM THE SAME $SRC, so
+# the two candidate references coincide and `prose_tier_blockers "$H" "$SRC"` passes all of
+# them. This case is the one that separates them: the child stays byte-identical to $SRC and
+# only the UMBRELLA's copy is made to differ — an umbrella ahead of a stale child, which is
+# the ordinary state after an umbrella upgrade. Against the $SRC reference the tier looks
+# pristine and the child is CONVERTED: its prose tier is deleted and its `agents/builder.md`
+# redirected at umbrella content it never held. That is the data loss R2 exists to prevent.
+F04H="$AU/f04h"
+f04_fullchild "$F04H" kid
+KH4="$F04H/kid/.harness"
+# PRECONDITION — the two references must genuinely DISAGREE, or this case proves nothing.
+cmp -s "$SRC/agents/builder.md" "$KH4/agents/builder.md" \
+  || fail "R2 reference control: the child's agents/builder.md already differs from the installer's own \$SRC copy — the two candidate references are not distinguishable in this fixture, so nothing below discriminates between them"
+printf '\nan umbrella-only line the child has never held\n' >> "$F04H/.harness/agents/builder.md"
+cmp -s "$F04H/.harness/agents/builder.md" "$KH4/agents/builder.md" \
+  && fail "R2 reference control: appending to the umbrella's copy did not make it differ from the child's"
+# SINGLE-TARGET, NEVER A CASCADE: a cascade re-installs the coordinator first and would
+# restore the umbrella-side difference this case seeds, collapsing it back onto $SRC.
+F04H_OUT="$(CODEX_HOME="$F04H/.ch" HOME="$F04H/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude --thin "$F04H/kid" 2>&1)" && F04H_RC=0 || F04H_RC=$?
+[ "$F04H_RC" = "0" ] || fail "R2: single-target --thin exited $F04H_RC: $F04H_OUT"
+printf '%s\n' 2>/dev/null "$F04H_OUT" | grep -qF 'differs: agents/builder.md' \
+  || fail "R2: the child is byte-identical to the installer's \$SRC but NOT to the umbrella body, and --thin did not block on agents/builder.md — the conversion's pristine reference is \$SRC, not the umbrella's copy, so a child that is merely STALE is converted and redirected at content it never held: $F04H_OUT"
+f04_no_stub_in_tier "$KH4" "R2 (a child differing from the UMBRELLA's copy must not convert — the reference is the umbrella body, not \$SRC)"
+# EXACTLY ONE blocker. Without this, "the tier blocked" is equally explained by a reference
+# that blocks every child, which would satisfy the assertion above while discriminating
+# nothing — the pristine siblings elsewhere in this suite would then be the failing half.
+F04H_N="$(printf '%s\n' 2>/dev/null "$F04H_OUT" | grep -o 'differs: [^ ]*' | wc -l | tr -d ' ')"
+[ "$F04H_N" = "1" ] \
+  || fail "R2: $F04H_N blocking path(s) were named, want exactly the one seeded on the umbrella side: $F04H_OUT"
+cmp -s "$SRC/agents/builder.md" "$KH4/agents/builder.md" \
+  || fail "R2: the refused run did not leave the child's own agents/builder.md in place"
+pass "R2 thin_reference_is_the_umbrella_body — a child matching \$SRC but not the umbrella blocks, naming the umbrella-side path"
+
 # ── R4: no --thin converts nothing, and says it would ──────────────────────────────────
 # unflagged_previews_only — the on-disk half is TRIVIALLY TRUE (it is today's shipped
 # behavior), so it is asserted for the record and the discriminating proof is the preview
