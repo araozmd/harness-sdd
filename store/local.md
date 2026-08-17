@@ -177,6 +177,28 @@ Orchestrator's exclusive ownership of state writes.
   its HEAD, so a commit sitting on your local `main` that was never pushed is refused — the
   same shape as E99-F58's two orphan commits. Push it, or say `none:<why>`.
 
+  **A refusal is confirmed against the remote before it is issued.** `refs/remotes/origin/*`
+  is a local *snapshot*: after your PR merges, a clone that has not fetched still points
+  `origin/main` at the older commit, so an ancestry test against it reports "not merged"
+  about work that is already on the default branch — measured on a commit that *was* the
+  remote's `main` tip, refused with the same message as one that never left the laptop. That
+  false refusal is the mirror of a false attestation and the more corrosive direction: a
+  guard that rejects legitimate merged work gets routed around. So the helper asks the
+  remote for the branch's real tip first. If the remote cannot be asked, or has moved to a
+  commit this checkout does not have, the record is `unchecked` with a warning telling you
+  to `git fetch` — never a block. A **local** base (a single-branch remoteless repo, or an
+  explicit `harness.defaultBranch`) is not a snapshot of anything and stays definitive.
+
+  **All of that runs before the lock is taken.** Discovering a default branch and confirming
+  a refusal are network calls (bounded at 5s each, once per slice repository). Run inside
+  the critical section they held `state/tasks.json.lock` for the whole probe, and a
+  concurrent writer with a bounded acquisition was starved out and **lost its transition** —
+  the no-lost-update guarantee the lock exists for, defeated by the guard on top of it. The
+  resolution therefore happens first and is only *re-validated* under the lock, against a
+  fingerprint of the feature's slice set; if that changed underneath, the write **aborts**
+  (board byte-identical, "re-run") rather than record evidence resolved for other
+  repositories. Everything else on the board may change freely meanwhile.
+
   **The default branch is never guessed by name — neither the remote's nor a local one.**
   With an `origin`, it is `refs/remotes/origin/HEAD`, else what `ls-remote --symref` says
   now. With **no** `origin`, the only authoritative local signals are (1) an explicit

@@ -192,7 +192,12 @@ _hp=$!
 # wait until the holder actually holds the lock
 until [ -f "$T/held.flag" ]; do sleep 0.05; done
 _start="$(python3 -c 'import time;print(time.time())')"
-if HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 done --timeout 1 2>"$T/terr.txt"; then
+# E99-F102 round 4: a `done` with NO evidence is now refused BEFORE the lock is taken
+# (evidence resolution makes bounded network calls, so it must not run inside the critical
+# section). This case is about the LOCK, so it passes evidence that resolves cleanly and
+# leaves the acquisition as the only thing that can fail.
+if HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 done \
+     --evidence "none: lock-timeout fixture, no work to land" --timeout 1 2>"$T/terr.txt"; then
   kill "$_hp" 2>/dev/null || true
   fail "R5: acquisition against a held lock did NOT exit non-zero (silent proceed?)"
 fi

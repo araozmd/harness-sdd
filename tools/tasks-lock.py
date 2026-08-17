@@ -131,6 +131,34 @@
 # "merged" means `origin/HEAD`, so a commit sitting on a local `main` that was
 # never pushed is refused — the same shape as E99-F58's two orphan commits.
 #
+# ── and the refusal is only as fresh as the ref it compared against (round 4) ─
+# A REFUSAL is confirmed against the remote before it is issued. `refs/remotes/
+# origin/*` is a local SNAPSHOT: after a PR merges, a clone that has not fetched
+# still points `origin/main` at the older commit, and `merge-base --is-ancestor`
+# then reports "not merged" about work that is already on the default branch —
+# measured, on a commit that WAS literally the remote's main tip, with the same
+# message and rc as a commit that never left the laptop. That is a FALSE REFUSAL,
+# the mirror of the false attestation and the more corrosive direction in
+# practice: a guard that rejects legitimate merged work is one people route around
+# or switch off. So `_confirm_refutation` asks the remote for the branch's real tip
+# first; if the remote cannot be asked, or has moved somewhere this checkout does
+# not have, the answer is `unchecked` — never a block. A LOCAL base (a single-
+# branch remoteless repo, an explicit `harness.defaultBranch`) is not a snapshot of
+# anything and stays definitive.
+#
+# ── every one of those probes runs OUTSIDE the lock (round 4) ────────────────
+# Discovering a default branch and confirming a refusal are NETWORK calls, bounded
+# at 5s each and repeated once per slice repository. Run inside the critical
+# section they made the sole supported write path hold `state/tasks.json.lock` for
+# the whole probe: measured, a concurrent writer with a 1s bounded acquisition was
+# starved out and ITS TRANSITION WAS LOST — the no-lost-update guarantee (R1) the
+# lock exists for, defeated by the guard built on top of it. Evidence is therefore
+# resolved BEFORE the lock (`_landing_plan`) and only RE-VALIDATED inside it
+# (`_check_plan_still_applies`), which is also why that re-validation exists: the
+# repositories to probe are read from the board the lock protects, so the
+# resolution carries a shape fingerprint and the write ABORTS rather than record
+# evidence resolved for a different slice set.
+#
 # ⚠️ SCOPE, measured: "refused" holds only where the sha RESOLVES, which means the
 # harness dir's repo, its parent, and that parent's children. E99-F58/E99-F59 live
 # on the viernes umbrella board while their commits are in ~/repos/harness-sdd —
@@ -959,6 +987,7 @@ def _check_ancestry(ref, repos):
     """
     refuted = None
     unbased = []
+    stale = []
     for repo in repos:
         if _git_rc(["cat-file", "-e", ref + "^{commit}"], cwd=repo) != 0:
             continue  # object unknown here — this repo has no opinion
@@ -968,21 +997,113 @@ def _check_ancestry(ref, repos):
             continue  # resolvable but nothing authoritative to compare against
         rc = _git_rc(["merge-base", "--is-ancestor", ref, base], cwd=repo)
         if rc == 0:
-            return (os.path.basename(repo), base), None, unbased
-        if rc == 1 and refuted is None:
-            refuted = (os.path.basename(repo), base)
-    return None, refuted, unbased
+            return (os.path.basename(repo), base), None, unbased, stale
+        if rc != 1:
+            continue  # the invocation itself failed — not an answer either way
+        # rc == 1: not reachable from the LOCAL tip of `base`. That is not yet a
+        # refusal — see `_confirm_refutation`.
+        verdict, detail = _confirm_refutation(repo, ref, base)
+        if verdict == "ancestor":
+            return (os.path.basename(repo), base), None, unbased, stale
+        if verdict == "refuted":
+            if refuted is None:
+                refuted = (os.path.basename(repo), base)
+            continue
+        stale.append((os.path.basename(repo), base, detail))
+    return None, refuted, unbased, stale
 
 
-def _warn_unchecked(ref, where, unbased):
+def _remote_tip(repo, base):
+    """What the REMOTE currently has for the branch `base` tracks, or None.
+
+    None means "not askable": `base` is not a remote-tracking ref (a declared or
+    single local branch cannot be stale against anything), or the remote could not
+    be reached. Bounded by `_git_out`'s 5s timeout, and — like every other network
+    call here — run BEFORE the board lock is taken (see `_landing_plan`).
+    """
+    if not base.startswith("origin/"):
+        return None
+    branch = "refs/heads/" + base[len("origin/") :]
+    out = _git_out(["ls-remote", "origin", branch], cwd=repo)
+    for line in (out or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == branch:
+            return parts[0]
+    return None
+
+
+def _confirm_refutation(repo, ref, base):
+    """A local "not an ancestor" is only a REFUSAL if the local tip is CURRENT.
+
+    Round 4. The branch NAME can be right while its TIP is stale: the PR merged on
+    the remote, this clone has not fetched since, so `refs/remotes/origin/main`
+    still points at an older commit and `merge-base --is-ancestor` reports "not
+    merged" about work that IS on the default branch. Reproduced: a commit that was
+    literally the remote's `main` tip was refused with the same message as a commit
+    that had never left the laptop. That is a FALSE REFUSAL — the mirror of the
+    false attestation, and the more corrosive direction in practice, because a guard
+    that rejects legitimate merged work is one people route around or switch off.
+
+    So before refusing, ask the remote for the branch's real tip:
+
+      * tip == the local tip        ⇒ the comparison was against current history;
+                                      the refusal stands ("refuted").
+      * tip is newer AND present locally ⇒ answer against the REAL tip, either way.
+      * tip is newer and NOT present locally ⇒ this checkout cannot prove it either
+                                      way ("stale"): the caller records `unchecked`
+                                      and tells the operator to fetch. Never a block.
+      * the remote cannot be asked  ⇒ also "stale". Inability to reach the remote
+                                      must degrade, never block — the same narrowness
+                                      that keeps an offline machine working.
+
+    Scope: ONLY a remote-tracking base (`origin/…`) can be stale, because it is
+    explicitly a local SNAPSHOT of a ref that lives somewhere else. A local branch —
+    a single-branch remoteless repository's only branch, or one named by an explicit
+    `harness.defaultBranch` — is not a cache of anything: its tip is the whole of the
+    truth this repository has to offer, so a refusal against it is already definitive
+    and must stay that way. Treating those as unconfirmable would have degraded the
+    remoteless refusal (E99-F58's shape) to `unchecked` — measured, by R2 reddening.
+
+    Returns (verdict, detail) with verdict in {"refuted", "ancestor", "stale"}.
+    """
+    if not base.startswith("origin/"):
+        return "refuted", None
+    tip = _remote_tip(repo, base)
+    if tip is None:
+        return "stale", "the remote could not be asked for its current tip"
+    local = _git(["rev-parse", "--verify", "--quiet", base + "^{commit}"], cwd=repo)
+    if local == tip:
+        return "refuted", None
+    if not _is_commit(repo, tip):
+        return "stale", (
+            "the remote has moved to %s, which this checkout does not have" % tip[:12]
+        )
+    rc = _git_rc(["merge-base", "--is-ancestor", ref, tip], cwd=repo)
+    if rc == 0:
+        return "ancestor", None
+    if rc == 1:
+        return "refuted", None
+    return "stale", "the ancestry check against the remote tip could not be run"
+
+
+def _warn_unchecked(ref, where, unbased, stale=()):
+    for repo_name, base, detail in stale or ():
+        sys.stderr.write(
+            "tasks-lock: warning: evidence %s is not reachable from the LOCAL %s in "
+            "%s, but that refusal could not be confirmed against the remote (%s) — "
+            "recording it UNCHECKED rather than refusing work that may already be "
+            "merged. Run `git -C %s fetch origin` and re-run for a definitive "
+            "answer.\n" % (ref, base, repo_name, detail, repo_name)
+        )
+    if stale:
+        return
     if unbased:
         sys.stderr.write(
             "tasks-lock: warning: evidence %s resolves in %s, but that repository "
-            "names no default branch this checkout can trust (no origin/HEAD, no "
-            "reachable remote, more than one local branch, and no `git config %s`) "
-            "— recording it UNCHECKED. Nothing here proved the work merged; declare "
-            "the default branch to get a real check.\n"
-            % (ref, ", ".join(unbased), _DECLARED_DEFAULT_CONFIG)
+            "names no default branch this checkout can trust (nothing published or "
+            "reachable, and no `git config %s`) — recording it UNCHECKED. Nothing "
+            "here proved the work merged; declare the default branch to get a real "
+            "check.\n" % (ref, ", ".join(unbased), _DECLARED_DEFAULT_CONFIG)
         )
         return
     sys.stderr.write(
@@ -998,7 +1119,7 @@ def _verify_sha(ref, hdir):
     FALSE. "Checkable" means one repo both resolved the object and produced a
     default ref; a repo where the object is unknown simply does not vote.
     """
-    winner, refuted, unbased = _check_ancestry(ref, _repo_candidates(hdir))
+    winner, refuted, unbased, stale = _check_ancestry(ref, _repo_candidates(hdir))
     if winner is not None:
         return {
             "ref": ref,
@@ -1013,7 +1134,7 @@ def _verify_sha(ref, hdir):
             "--evidence none:<why> if this feature has no commit to point at."
             % (ref, refuted[1], refuted[0])
         )
-    _warn_unchecked(ref, "any repository near %s" % hdir, unbased)
+    _warn_unchecked(ref, "any repository near %s" % hdir, unbased, stale)
     return {"ref": ref, "verified": "unchecked"}
 
 
@@ -1033,7 +1154,7 @@ def _verify_sha_in_repo(ref, repo_name, hdir):
             % (repo_name, hdir, ref)
         )
         return {"repo": repo_name, "ref": ref, "verified": "unchecked"}
-    winner, refuted, unbased = _check_ancestry(ref, dirs)
+    winner, refuted, unbased, stale = _check_ancestry(ref, dirs)
     if winner is not None:
         return {
             "repo": repo_name,
@@ -1049,7 +1170,7 @@ def _verify_sha_in_repo(ref, repo_name, hdir):
             "slice has no commit to point at."
             % (repo_name, ref, refuted[1], repo_name)
         )
-    _warn_unchecked(ref, "repository %s" % repo_name, unbased)
+    _warn_unchecked(ref, "repository %s" % repo_name, unbased, stale)
     return {"repo": repo_name, "ref": ref, "verified": "unchecked"}
 
 
@@ -1265,6 +1386,87 @@ def _resolve_landing(text, target_id, status, evidence_list, hdir):
     return _landing_record(evidence_list[0], hdir)
 
 
+# ── the landing PLAN: resolved BEFORE the lock, re-validated INSIDE it ────────
+#
+# Round 4, P1. Evidence resolution talks to the NETWORK — `ls-remote` to discover a
+# remote's default branch, and (since round 4) again to confirm a refusal against the
+# remote's current tip. `_git`/`_git_out` bound each call at 5s, but a SLICED feature
+# probes once per slice repository, so three unreachable slice remotes cost ~15s.
+# Running that inside the critical section made the SOLE supported write path hold
+# `tasks.json.lock` for the whole probe: measured, a concurrent writer with a 1s
+# bounded acquisition was starved out and its transition was LOST, which is exactly
+# the no-lost-update guarantee (R1) the lock exists to provide, defeated by the guard
+# added on top of it.
+#
+# So the network work happens BEFORE `run()` takes the lock, and the lock still holds
+# only the pure re-read → patch → validate → atomic-replace it always did.
+#
+# The ordering constraint that creates: WHICH repositories to probe is read from the
+# board, and the board is what the lock protects. A pre-lock read is therefore a
+# read of possibly-stale state, and trading a starvation bug for a TOCTOU bug would be
+# no trade at all. The guard is a SHAPE FINGERPRINT: `(is_feature, slice repos in
+# order)` — precisely the inputs that decided what was probed and what the record must
+# cover. It is recomputed from the authoritative in-lock re-read and compared. Equal ⇒
+# the resolution answers for the board being written. Different ⇒ ABORT, byte-identical
+# board, message telling the operator to re-run; we do NOT silently write a record
+# resolved for a different slice set, and we do NOT re-probe the network under the lock.
+# Anything else about the board may change freely — another feature's status, a title, a
+# park — because none of it affects which repository an evidence ref is checked in.
+
+
+def _landing_shape(text, target_id):
+    """The inputs that decide WHAT gets probed: (is_feature, ordered slice repos)."""
+    is_feature, feature = _feature_entry(text, target_id)
+    return (is_feature, tuple(_slice_repos(feature) if is_feature else ()))
+
+
+def _landing_plan(target_id, status, evidence_list, hdir):
+    """Resolve the landing OUTSIDE the lock, and fingerprint what it assumed.
+
+    Returns {"shape": …, "record": … | None}. Refusals (`_die`) happen here, before
+    any lock is taken — an refusal never contends for the lock at all. A board that
+    cannot be read yet simply yields an empty shape and no record; `run()` reports the
+    missing board itself, exactly as before.
+    """
+    try:
+        with open(os.path.join(hdir, TASKS_REL)) as fh:
+            text = fh.read()
+    except OSError:
+        text = ""
+    return {
+        "shape": _landing_shape(text, target_id),
+        "record": _resolve_landing(text, target_id, status, evidence_list, hdir),
+    }
+
+
+def _check_plan_still_applies(text, target_id, plan):
+    """Re-validate the pre-lock resolution against the authoritative in-lock read."""
+    shape = _landing_shape(text, target_id)
+    if shape == plan["shape"]:
+        return plan["record"]
+    _die(
+        "%s changed between the evidence check and the write — it was resolved as %s "
+        "and the board now reads %s. Nothing was written; re-run. (Evidence is "
+        "resolved before the lock is taken so network probes cannot starve other "
+        "writers; this is the guard that stops a record resolved for one slice set "
+        "landing on another.)"
+        % (
+            target_id,
+            _shape_str(plan["shape"]),
+            _shape_str(shape),
+        )
+    )
+
+
+def _shape_str(shape):
+    is_feature, repos = shape
+    if not is_feature:
+        return "not a feature on this board"
+    if not repos:
+        return "a single-repo feature"
+    return "a feature sliced across %s" % ", ".join(repos)
+
+
 def _write_landed(text, target_id, record):
     """Patch `landed` into the feature object, replacing any existing record.
 
@@ -1313,7 +1515,7 @@ def _write_landed(text, target_id, record):
     return text[:at] + ', "landed": ' + blob + text[at:]
 
 
-def _set_status_text_transform(target_id, status, evidence_list=()):
+def _set_status_text_transform(target_id, status, plan=None):
     """Build a TEXT transform that changes ONLY the target's status value.
 
     Unlike a parse → mutate → re-serialize round-trip (which reformats every
@@ -1323,14 +1525,21 @@ def _set_status_text_transform(target_id, status, evidence_list=()):
     leaves all surrounding bytes untouched. The caller still json.loads + schema-
     validates the RESULT before the atomic replace, so an invalid outcome (bad
     id, illegal status, sliced-done invariant) still fail-stops (R4).
+
+    `plan` is the PRE-LOCK landing resolution (`_landing_plan`). Everything this
+    transform does is pure and local — no child process, no network — so the lock is
+    held only for the re-read → patch → validate → replace it always covered.
     """
 
     def transform(text):
         _refuse_if_parked(text, target_id)  # E06-F07: a park outranks a transition
-        # E99-F102: resolved BEFORE the patch, so a refusal leaves the board byte-
-        # identical — the write is never half-applied and then rejected.
-        landed = _resolve_landing(
-            text, target_id, status, list(evidence_list), _harness_dir()
+        # E99-F102: the record was resolved BEFORE the lock (round 4, P1); here we
+        # only re-validate that it still answers for the board we are writing, so a
+        # refusal leaves the board byte-identical and no network call runs in-lock.
+        landed = (
+            _check_plan_still_applies(text, target_id, plan)
+            if plan is not None
+            else None
         )
         span = _find_status_span(text, target_id)
         if span is None:
@@ -1688,10 +1897,15 @@ def main(argv):
         )
 
     if args.cmd == "set-status":
-        # Minimal-diff text transform: patches only the target's status token.
-        transform = _set_status_text_transform(
-            args.id, args.status, args.evidence or []
+        # Resolve the landing BEFORE any lock is taken (round 4, P1): evidence
+        # resolution makes bounded NETWORK calls, and holding the sole write lock
+        # across them starved concurrent writers out of their own transitions. The
+        # transform re-validates the resolution against the in-lock re-read.
+        plan = _landing_plan(
+            args.id, args.status, args.evidence or [], _harness_dir()
         )
+        # Minimal-diff text transform: patches only the target's status token.
+        transform = _set_status_text_transform(args.id, args.status, plan)
     elif args.cmd == "apply":
         # External mutators may change arbitrary structure → parse+re-serialize.
         transform = _mutator_text_transform(_import_mutator(args.mutator))

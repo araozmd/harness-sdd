@@ -30,6 +30,12 @@
 #       repository — one slice's merge commit can never attest another slice's work
 #   R15 a REMOTELESS repository resolves an AUTHORITATIVE local default or none at
 #       all; existence of a branch called `main` is not authority
+#   R16 a STALE local tip never produces a FALSE REFUSAL — the branch name can be
+#       right while its tip is old, and refusing merged work is what gets a guard
+#       switched off; unconfirmable degrades to `unchecked`, never to a block
+#   R17 evidence resolution (which talks to the NETWORK) runs OUTSIDE the board lock,
+#       and R17b: the pre-lock resolution is re-validated in-lock, so moving it out
+#       did not trade starvation for a TOCTOU
 #
 # R14 and R15 are review round 3, and both were REPRODUCED against the shipped code before
 # they were written: R14 as a two-child umbrella where alpha's merge sha carried the whole
@@ -39,6 +45,14 @@
 # was recorded `{"verified": "ancestor", "base": "main"}`. Both are FALSE attestations — the
 # one failure mode this feature must never produce, because the record then carries the
 # authority of a check that never happened.
+#
+# R16 and R17 are review round 4, reproduced the same way. R17 in particular is
+# DETERMINISTIC rather than a wall-clock race: a `git` shim earlier on PATH makes every
+# `ls-remote` announce itself through a sentinel file and then sleep, so the test acts at a
+# moment it KNOWS a network probe is in flight. Its rc plumbing is deliberate too — a
+# background subshell under `set -e` dies AT the failing command, before it can record its
+# exit code, and `$(cat <missing>)` then compares unequal to every expected value: that is
+# how R17b passed vacuously once, and why `set +e` and `await_bg` exist below.
 #
 # Seven of these exist because a mutation survived without them. R6/R12 (review round 1: the
 # first draft EXEMPTED sliced features on the theory that `slice.merged` attested the
@@ -906,5 +920,316 @@ set_status "$HD" E01-F01 done --evidence "$A_BASE"
 [ "$(field "$BOARD" "d['landed']['base']")" = "main" ] \
   || fail "R15 control-2: the single-branch default was not used as the base (got $(field "$BOARD" "d['landed'].get('base','')"))"
 pass "E99-F102 R15 a_remoteless_default_is_resolved_authoritatively_or_not_at_all"
+
+# ── R16: a stale local TIP must not produce a FALSE REFUSAL ───────────────────────────
+# Review round 4, REPRODUCED against the shipped code first. Distinct from R13's stale
+# NAME: here `origin/HEAD` names `main` and main really IS the default — what is stale is
+# the local tracking ref's TIP. The PR merged on the remote, this clone has not fetched
+# since, so `refs/remotes/origin/main` still points at an older commit and
+# `merge-base --is-ancestor` reported "the work is not merged" about a commit that was
+# LITERALLY the remote's main tip — the same message, and the same rc=1, as a commit that
+# had never left the laptop. That is the mirror of the false attestation and the more
+# corrosive direction: a guard that rejects legitimate merged work is one people route
+# around or switch off.
+mkdir -p "$T/staleclone/hd/state" "$T/staleclone/hd/store" "$T/staleclone/hd/tools"
+cp "$SCHEMA" "$T/staleclone/hd/store/"; cp "$VALIDATE" "$T/staleclone/hd/tools/"
+( cd "$T" && git init -q --bare staleremote.git )
+( cd "$T/staleclone" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+: > "$T/staleclone/seed.txt"; ( cd "$T/staleclone" && git_q add -A && git_q commit -m base )
+( cd "$T/staleclone" && git_q remote add origin "$T/staleremote.git" && git_q push origin main )
+( cd "$T/staleclone" && git_q remote set-head origin --auto )
+STALE_AT="$(cd "$T/staleclone" && git rev-parse origin/main)"
+# the work: committed here, then MERGED on the remote…
+( cd "$T/staleclone" && : > feature.txt && git_q add -A && git_q commit -m "the feature" )
+SC_MERGED="$(cd "$T/staleclone" && git rev-parse HEAD)"
+( cd "$T/staleclone" && git_q push origin main )
+# …and a clone that has not fetched since: rewind the tracking ref to where it was.
+( cd "$T/staleclone" && git_q update-ref refs/remotes/origin/main "$STALE_AT" )
+# …plus a commit that genuinely never merged, for the control.
+( cd "$T/staleclone" && git_q checkout --detach main && : > wip.txt && git_q add -A && git_q commit -m "never merged" )
+SC_UNMERGED="$(cd "$T/staleclone" && git rev-parse HEAD)"
+( cd "$T/staleclone" && git_q update-ref refs/evidence/wip "$SC_UNMERGED" && git_q checkout main )
+# Assert the fixture is the state INTENDED — including what must still be PRESENT.
+[ "$(cd "$T/staleclone" && git rev-parse origin/main)" = "$STALE_AT" ] \
+  || fail "R16 setup: the tracking ref is not stale, so nothing here is exercised"
+[ "$(cd "$T/staleremote.git" && git rev-parse main)" = "$SC_MERGED" ] \
+  || fail "R16 setup: the remote's main is not the merged commit"
+[ "$(cd "$T/staleclone" && git symbolic-ref refs/remotes/origin/HEAD)" = "refs/remotes/origin/main" ] \
+  || fail "R16 setup: origin/HEAD is absent or wrong — this case is about a stale TIP, not a stale NAME"
+( cd "$T/staleclone" && git merge-base --is-ancestor "$SC_MERGED" origin/main ) \
+  && fail "R16 setup: the merged commit IS reachable from the stale ref, so the false refusal cannot arise"
+HDS="$T/staleclone/hd"
+BOARDS="$HDS/state/tasks.json"
+
+mkboard "$HDS"
+set_status "$HDS" E01-F01 done --evidence "$SC_MERGED"
+[ "$SS_RC" = "0" ] || fail "R16: work that IS the remote default branch's tip was REFUSED because the local tracking ref had not been fetched — a false refusal is what gets a guard switched off: $SS_OUT"
+[ "$(field "$BOARDS" "d['landed']['verified']")" = "ancestor" ] \
+  || fail "R16: the remotely-merged commit was recorded $(field "$BOARDS" "d['landed']['verified']"), not ancestor"
+
+# CONTROL 1 — the SAME repository in the SAME stale state, differing only in the commit: a
+# commit that genuinely never reached the remote is STILL REFUSED. Without this, R16 would
+# pass against an implementation that simply stopped refusing.
+mkboard "$HDS"
+BEFORE="$(cat "$BOARDS")"
+set_status "$HDS" E01-F01 done --evidence "$SC_UNMERGED"
+[ "$SS_RC" = "0" ] && fail "R16 control-1: an unmerged commit was accepted — confirming the tip against the remote must not turn the refusal off: $SS_OUT"
+[ "$BEFORE" = "$(cat "$BOARDS")" ] || fail "R16 control-1: the board moved despite the refusal"
+case "$SS_OUT" in
+  *"NOT an ancestor"*) ;;
+  *) fail "R16 control-1: the refusal does not say the work is unmerged: $SS_OUT" ;;
+esac
+
+# CONTROL 2 — the remote has moved somewhere this checkout does NOT have. Then neither
+# answer is provable here, so BOTH degrade to `unchecked`: never a false attestation, and
+# never a false refusal. This is the narrowness, and it is what makes the fix safe offline.
+( cd "$T" && git clone -q "$T/staleremote.git" other )
+( cd "$T/other" && : > later.txt && git_q add -A && git_q commit -m "someone else's later merge" && git_q push origin main )
+AHEAD_TIP="$(cd "$T/staleremote.git" && git rev-parse main)"
+( cd "$T/staleclone" && git cat-file -e "$AHEAD_TIP^{commit}" 2>/dev/null ) \
+  && fail "R16 control-2: the stale clone already has the newer remote tip, so it is not the unfetched state"
+mkboard "$HDS"
+set_status "$HDS" E01-F01 done --evidence "$SC_UNMERGED"
+[ "$SS_RC" = "0" ] || fail "R16 control-2: an unprovable refusal BLOCKED the write — inability to confirm must degrade, never block: $SS_OUT"
+[ "$(field "$BOARDS" "d['landed']['verified']")" = "unchecked" ] \
+  || fail "R16 control-2: expected 'unchecked' when the remote has moved beyond this checkout, got $(field "$BOARDS" "d['landed']['verified']")"
+case "$SS_OUT" in
+  *fetch*) ;;
+  *) fail "R16 control-2: the warning does not tell the operator how to get a definitive answer: $SS_OUT" ;;
+esac
+
+# CONTROL 3 — fetch, and the definitive answers come back in BOTH directions. This rules
+# out "the repository became permanently unverifiable" as the explanation for control 2.
+( cd "$T/staleclone" && git_q fetch origin )
+mkboard "$HDS"
+set_status "$HDS" E01-F01 done --evidence "$SC_MERGED"
+[ "$SS_RC" = "0" ] || fail "R16 control-3: after fetching, the merged commit was refused (rc=$SS_RC): $SS_OUT"
+[ "$(field "$BOARDS" "d['landed']['verified']")" = "ancestor" ] || fail "R16 control-3: the merged commit is not ancestor after a fetch"
+mkboard "$HDS"
+BEFORE="$(cat "$BOARDS")"
+set_status "$HDS" E01-F01 done --evidence "$SC_UNMERGED"
+[ "$SS_RC" = "0" ] && fail "R16 control-3: after fetching, an unmerged commit was still accepted: $SS_OUT"
+[ "$BEFORE" = "$(cat "$BOARDS")" ] || fail "R16 control-3: the board moved despite the refusal"
+
+# CONTROL 4 — an UNREACHABLE remote degrades too (it must never block), and this is the
+# only reason the fix cannot simply refuse whenever the tip cannot be confirmed.
+( cd "$T/staleclone" && git_q update-ref refs/remotes/origin/main "$STALE_AT" )
+( cd "$T/staleclone" && git_q remote set-url origin "$T/does-not-exist-either.git" )
+mkboard "$HDS"
+set_status "$HDS" E01-F01 done --evidence "$SC_UNMERGED"
+[ "$SS_RC" = "0" ] || fail "R16 control-4: an unreachable remote BLOCKED the write (rc=$SS_RC): $SS_OUT"
+[ "$(field "$BOARDS" "d['landed']['verified']")" = "unchecked" ] \
+  || fail "R16 control-4: expected 'unchecked' with an unreachable remote, got $(field "$BOARDS" "d['landed']['verified']")"
+pass "E99-F102 R16 a_stale_local_tip_never_produces_a_false_refusal"
+
+# ── R17: network probes must NOT run inside the board lock ────────────────────────────
+# Review round 4, P1, REPRODUCED against the shipped code first: evidence resolution ran
+# inside the critical section, so a sliced `done` whose slice remotes are unreachable held
+# `tasks.json.lock` through one bounded `ls-remote` PER SLICE REPO. Measured on two slices:
+# a concurrent writer with a 1s bounded acquisition was refused the lock and ITS TRANSITION
+# WAS LOST — the no-lost-update guarantee (R1) that the lock exists to provide, defeated by
+# the guard built on top of it.
+#
+# Deterministic, not a wall-clock race: a `git` shim earlier on PATH makes every
+# `ls-remote` touch a sentinel and then sleep, so the test knows EXACTLY when a network
+# probe is in flight and can act while it is.
+W="$T/lockprobe"
+mkdir -p "$W/.harness/state" "$W/.harness/store" "$W/.harness/tools"
+cp "$SCHEMA" "$W/.harness/store/"; cp "$VALIDATE" "$W/.harness/tools/"
+( cd "$W" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+: > "$W/README.md"; ( cd "$W" && git_q add -A && git_q commit -m board )
+for _r in alpha beta; do
+  mkdir -p "$W/$_r"
+  ( cd "$W/$_r" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+  : > "$W/$_r/src.txt"; ( cd "$W/$_r" && git_q add -A && git_q commit -m "$_r work" )
+  # An origin that was never fetched: no refs/remotes/origin/HEAD is cached, so the
+  # default branch has to be ASKED for — the probe this case is about.
+  ( cd "$W/$_r" && git_q remote add origin "$T/nowhere-$_r.git" )
+  ( cd "$W/$_r" && git symbolic-ref --quiet refs/remotes/origin/HEAD >/dev/null 2>&1 ) \
+    && fail "R17 setup: $_r has a cached origin/HEAD, so no remote probe would run"
+done
+LP_ALPHA="$(cd "$W/alpha" && git rev-parse main)"
+LP_BETA="$(cd "$W/beta" && git rev-parse main)"
+REAL_GIT="$(command -v git)"
+SENT="$T/probe-in-flight"
+mkdir -p "$T/bin"
+cat > "$T/bin/git" <<EOF
+#!/bin/sh
+for a in "\$@"; do
+  if [ "\$a" = "ls-remote" ]; then
+    : > "$SENT"
+    sleep 3
+    exit 1
+  fi
+done
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$T/bin/git"
+
+lp_board() {
+  cat > "$W/.harness/state/tasks.json" <<EOF
+{
+  "project": "lock-probe",
+  "epics": [
+    { "id": "E01", "title": "e", "status": "in-progress",
+      "features": [
+        { "id": "E01-F01", "title": "sliced", "status": "in-review", "sdd": true, "spec_path": "s/",
+          "slices": [
+            { "id": "E01-F01@alpha", "repo": "alpha", "status": "done", "merged": true },
+            { "id": "E01-F01@beta", "repo": "beta", "status": "done", "merged": true }
+          ] },
+        { "id": "E01-F02", "title": "another writer's feature", "status": "pending",
+          "sdd": true, "spec_path": "s2/" }
+      ] }
+  ]
+}
+EOF
+}
+# wait_probe: bounded poll for the sentinel. Never "sleep and hope" — if the probe never
+# runs the case is VACUOUS, and that is a failure, not a pass.
+wait_probe() {
+  rm -f "$SENT"
+  _i=0
+  while [ ! -f "$SENT" ]; do
+    _i=$((_i + 1))
+    [ "$_i" -gt 150 ] && fail "R17: the ls-remote probe never ran — this case would be vacuous"
+    sleep 0.1
+  done
+}
+# await_bg <pid> <rc-file>: reap the background writer AND wait for its recorded exit code
+# to exist. `$(cat <missing>)` yields the empty string, which compares unequal to every
+# expected rc — so a background job that had not finished would make an `= "0"` assertion
+# pass with nothing behind it. Absent rc ⇒ loud failure, never a silent green.
+await_bg() {
+  wait "$1" 2>/dev/null || true
+  _i=0
+  while [ ! -f "$2" ]; do
+    _i=$((_i + 1))
+    [ "$_i" -gt 150 ] && fail "R17: the background writer never recorded an exit code in $2 — any assertion on it would be vacuous"
+    sleep 0.1
+  done
+}
+
+lp_board
+rm -f "$SENT"
+( set +e   # `set -e` would kill this subshell AT the failing command, before it could
+            # record the exit code — which is how R17b passed vacuously once already.
+  PATH="$T/bin:$PATH" HARNESS_DIR="$W/.harness" python3 "$LOCK" set-status E01-F01 done \
+    --evidence "alpha=$LP_ALPHA" --evidence "beta=$LP_BETA" >"$T/lp.out" 2>&1
+  echo $? > "$T/lp.rc" ) &
+LP_BG=$!
+wait_probe
+# THE ASSERTION: while a network probe is in flight, an unrelated writer still gets the
+# lock, with a bounded timeout far shorter than the probe.
+set_status "$W/.harness" E01-F02 in-progress --timeout 1
+[ "$SS_RC" = "0" ] || fail "R17: a concurrent writer was starved out while evidence resolution ran a network probe (rc=$SS_RC) — the sole supported write path held the lock across ~2 bounded ls-remotes, so the other writer's transition was LOST: $SS_OUT"
+await_bg "$LP_BG" "$T/lp.rc"
+[ "$(cat "$T/lp.rc")" = "0" ] || fail "R17: the sliced transition itself failed (rc=$(cat "$T/lp.rc")): $(cat "$T/lp.out")"
+[ "$(field "$W/.harness/state/tasks.json" "d['status']")" = "done" ] \
+  || fail "R17: the sliced transition did not land"
+[ "$(python3 -c "import json;print(json.load(open('$W/.harness/state/tasks.json'))['epics'][0]['features'][1]['status'])")" = "in-progress" ] \
+  || fail "R17: the concurrent writer's transition was LOST — it reported success but the board does not carry it"
+
+# CONTROL — the same command, same fixture, differing ONLY in whether something holds the
+# lock: it MUST fail. Without this, the assertion above would pass against a helper that
+# never locks at all, which is the opposite defect (R1: lost updates).
+cat > "$T/holder.py" <<'PY'
+import fcntl, os, sys, time
+fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o644)
+fcntl.flock(fd, fcntl.LOCK_EX)
+open(sys.argv[2], "w").close()
+time.sleep(float(sys.argv[3]))
+PY
+rm -f "$T/held"
+python3 "$T/holder.py" "$W/.harness/state/tasks.json.lock" "$T/held" 3 &
+HOLD_BG=$!
+_i=0
+while [ ! -f "$T/held" ]; do
+  _i=$((_i + 1))
+  [ "$_i" -gt 100 ] && fail "R17 control: the lock holder never started"
+  sleep 0.1
+done
+set_status "$W/.harness" E01-F01 in-review --timeout 1
+[ "$SS_RC" = "0" ] && fail "R17 control: a writer acquired the lock while another process HELD it — the probe cannot detect lock contention, so the assertion above proves nothing"
+case "$SS_OUT" in
+  *"could not acquire advisory lock"*) ;;
+  *) fail "R17 control: a blocked writer failed for some reason OTHER than the lock: $SS_OUT" ;;
+esac
+# …and, with the lock STILL held: a refusal that needs no lock does not queue for one.
+# Evidence is resolved before the lock, so a missing-evidence `done` reports the EVIDENCE
+# problem rather than a lock timeout — the same command as the control above, differing
+# only in what is wrong with it.
+set_status "$W/.harness" E01-F01 done --timeout 1
+[ "$SS_RC" = "0" ] && fail "R17: a `done` with no evidence was accepted: $SS_OUT"
+case "$SS_OUT" in
+  *"needs evidence"*) ;;
+  *) fail "R17: a refusal that needs no lock reported a LOCK failure instead — evidence is not being resolved before the lock is taken: $SS_OUT" ;;
+esac
+wait "$HOLD_BG" 2>/dev/null || true
+
+# ── R17b: resolving before the lock must not become a TOCTOU ──────────────────────────
+# The set of slice repositories to probe is read from the board, and the board is what the
+# lock protects. So the pre-lock resolution is fingerprinted and re-validated against the
+# authoritative in-lock re-read: if this feature's slice set changed underneath, the write
+# ABORTS rather than recording evidence resolved for a different set of repositories.
+lp_board
+rm -f "$SENT"
+( set +e   # `set -e` would kill this subshell AT the failing command, before it could
+            # record the exit code — which is how R17b passed vacuously once already.
+  PATH="$T/bin:$PATH" HARNESS_DIR="$W/.harness" python3 "$LOCK" set-status E01-F01 done \
+    --evidence "alpha=$LP_ALPHA" --evidence "beta=$LP_BETA" >"$T/lp2.out" 2>&1
+  echo $? > "$T/lp2.rc" ) &
+LP_BG=$!
+wait_probe
+# While the probe is in flight (and the lock is free), change the feature's slice set.
+python3 - "$W/.harness/state/tasks.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+f = d['epics'][0]['features'][0]
+f['slices'] = [ { "id": "E01-F01@alpha", "repo": "alpha", "status": "done", "merged": True },
+                { "id": "E01-F01@gamma", "repo": "gamma", "status": "done", "merged": True } ]
+open(p, 'w').write(json.dumps(d, indent=2) + "\n")
+PY
+await_bg "$LP_BG" "$T/lp2.rc"
+[ "$(cat "$T/lp2.rc")" = "0" ] && fail "R17b: evidence resolved for {alpha, beta} was written onto a feature now sliced across {alpha, gamma} — the pre-lock resolution traded starvation for a TOCTOU: $(cat "$T/lp2.out")"
+grep -q "changed between the evidence check and the write" "$T/lp2.out" \
+  || fail "R17b: the abort does not say the board changed under the resolution: $(cat "$T/lp2.out")"
+[ "$(field "$W/.harness/state/tasks.json" "d['status']")" = "in-review" ] \
+  || fail "R17b: the feature moved despite the abort"
+[ "$(field "$W/.harness/state/tasks.json" "'landed' in d")" = "False" ] \
+  || fail "R17b: a landing record resolved for the OLD slice set was written anyway"
+
+# CONTROL — the identical run with NO concurrent change must succeed, so R17b is about the
+# change and not about the pre-lock path being broken.
+lp_board
+rm -f "$SENT"
+( set +e   # `set -e` would kill this subshell AT the failing command, before it could
+            # record the exit code — which is how R17b passed vacuously once already.
+  PATH="$T/bin:$PATH" HARNESS_DIR="$W/.harness" python3 "$LOCK" set-status E01-F01 done \
+    --evidence "alpha=$LP_ALPHA" --evidence "beta=$LP_BETA" >"$T/lp3.out" 2>&1
+  echo $? > "$T/lp3.rc" ) &
+LP_BG=$!
+wait_probe
+await_bg "$LP_BG" "$T/lp3.rc"
+[ "$(cat "$T/lp3.rc")" = "0" ] || fail "R17b control: the same run without a concurrent change FAILED (rc=$(cat "$T/lp3.rc")): $(cat "$T/lp3.out")"
+[ "$(field "$W/.harness/state/tasks.json" "d['status']")" = "done" ] || fail "R17b control: the transition did not land"
+# ...and a change that does NOT touch the slice set must not abort — the fingerprint is the
+# resolution's own inputs, not "the board must be frozen".
+lp_board
+rm -f "$SENT"
+( set +e   # `set -e` would kill this subshell AT the failing command, before it could
+            # record the exit code — which is how R17b passed vacuously once already.
+  PATH="$T/bin:$PATH" HARNESS_DIR="$W/.harness" python3 "$LOCK" set-status E01-F01 done \
+    --evidence "alpha=$LP_ALPHA" --evidence "beta=$LP_BETA" >"$T/lp4.out" 2>&1
+  echo $? > "$T/lp4.rc" ) &
+LP_BG=$!
+wait_probe
+set_status "$W/.harness" E01-F02 in-progress --timeout 1
+[ "$SS_RC" = "0" ] || fail "R17b control: the unrelated concurrent write was refused: $SS_OUT"
+await_bg "$LP_BG" "$T/lp4.rc"
+[ "$(cat "$T/lp4.rc")" = "0" ] \
+  || fail "R17b control: an unrelated concurrent write aborted the sliced transition (rc=$(cat "$T/lp4.rc")) — the fingerprint is over-broad: $(cat "$T/lp4.out")"
+pass "E99-F102 R17 evidence_resolution_runs_outside_the_lock_and_is_revalidated_inside_it"
 
 echo "All landing-evidence tests passed."

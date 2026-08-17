@@ -476,6 +476,8 @@ python3 .harness/tools/tasks-lock.py set-status <id> done \
 | omitted, on **any** feature (sliced included) | **REFUSED**, naming the four instances |
 | **unbound** (`<ref>`, no `<repo>=`) on a **sliced** feature | **REFUSED** — it names no repository, so it attests no particular slice. One slice's merge commit carrying the whole feature to `done` is the failure this exists to stop |
 | bound to a repo the feature has **no slice in**, or **missing** for a slice repo | **REFUSED**, naming the unknown repo / the repos still owed |
+| a sha the **local** tracking ref does not contain, where the remote's real tip does | accepted — the refusal is confirmed against the remote first, so a clone that has not fetched since the merge does not reject landed work |
+| a sha the local tracking ref does not contain, where the remote **cannot be asked** or has moved beyond this checkout | accepted with a warning, `verified: "unchecked"` — and a `git fetch` hint. Unconfirmable never blocks |
 
 **The refusal is narrow on purpose:** only when ancestry is *checkable and false*.
 A guard that also blocked an offline machine, a sha belonging to a repository this
@@ -495,6 +497,17 @@ would attest the unmerged commit under your feet. Taking the first of `main`/`ma
 that merely *exists* did exactly that on a remoteless repo whose real default is
 `trunk` — a commit that never reached trunk was recorded `verified: "ancestor"`,
 `base: "main"`. A false attestation is worse than none.
+
+**A refusal is confirmed against the remote, and none of it runs inside the lock.**
+`refs/remotes/origin/*` is a local snapshot, so a clone that has not fetched since
+your PR merged would otherwise reject work that is already on the default branch —
+a false *refusal*, which is the direction that gets a guard switched off. The helper
+asks the remote for the branch's real tip before refusing; unaskable, or moved beyond
+this checkout, degrades to `unchecked` with a `git fetch` hint. Because those probes
+are network calls (bounded at 5s, one per slice repo), evidence is resolved **before**
+`state/tasks.json.lock` is taken — holding it across the probes starved concurrent
+writers out and lost their transitions — and only re-validated under the lock against
+a fingerprint of the feature's slice set, which aborts the write if it changed.
 
 ⚠️ **Scope, measured.** "Refused" only applies where the sha **resolves**: the harness
 dir's repo, its parent, and that parent's children. `E99-F58`/`E99-F59` are recorded on

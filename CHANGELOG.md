@@ -125,6 +125,53 @@ because the record then carries the authority of a check that never happened, wh
 declaration restoring the check in both directions and the single-branch umbrella shape
 keeping its teeth.
 
+**…and a refusal is only as fresh as the ref it compared against.** Round 4, a third
+variant of the same family and the first one that errs toward *rejecting* good work.
+`refs/remotes/origin/*` is a local **snapshot**: after a PR merges, a clone that has not
+fetched still points `origin/main` at the older commit, so `merge-base --is-ancestor`
+answers about stale history. Reproduced: a commit that was **literally the remote's `main`
+tip** was refused — same rc, same message — as a commit that had never left the laptop. A
+false **refusal** is the mirror of a false attestation, and in practice the more corrosive
+direction: an attestation nobody re-checks sits quietly, while a guard that rejects
+legitimate merged work is one people route around or switch off. So before issuing a
+definitive refusal the helper asks the remote for the branch's real tip
+(`git ls-remote origin refs/heads/<branch>`): tip equal to the local one ⇒ the refusal
+stands; tip newer and present locally ⇒ answer against the *real* tip, either way; tip
+newer and absent, or the remote unaskable ⇒ **`unchecked`** with a `git fetch` hint —
+unconfirmable degrades, never blocks, which is what keeps an offline machine working. A
+**local** base (a single-branch remoteless repo, an explicit `harness.defaultBranch`) is
+not a snapshot of anything, so it stays definitive — a distinction the suite itself
+forced: applying the freshness check to local bases degraded E99-F58's own shape to
+`unchecked`, and R2 reddened. Deliberately **not** extended to the accept direction: for a
+*stale* local tip to produce a wrong `ancestor` the remote would have to have been
+rewritten, whereas a wrong refusal needs only an ordinary merge — the common case — and
+probing on every accept would put a 5s network call on the happy path.
+
+**None of those probes may run inside the board lock.** Round 4, P1. Discovering a default
+branch and confirming a refusal are network calls, bounded at 5s each and repeated **once
+per slice repository**. Inside the critical section they made the sole supported write path
+hold `state/tasks.json.lock` for the entire probe. Measured on a two-slice feature with
+unreachable slice remotes: a concurrent writer with a 1s bounded acquisition was refused
+the lock and **its transition was lost** — the no-lost-update guarantee (R1) the lock
+exists to provide, defeated by the guard built on top of it. Evidence is now resolved
+**before** the lock, and the lock again covers only the pure re-read → patch → validate →
+atomic-replace.
+
+That creates an ordering constraint, and trading a starvation bug for a TOCTOU bug would
+be no trade at all: *which* repositories to probe is read from the board, and the board is
+what the lock protects. So the pre-lock resolution carries a **shape fingerprint** — the
+feature's `(is_feature, ordered slice repos)`, exactly the inputs that decided what was
+probed and what the record must cover. It is recomputed from the authoritative in-lock
+re-read and compared: equal ⇒ the resolution answers for the board being written;
+different ⇒ **abort**, board byte-identical, "re-run" — never a silent write of evidence
+resolved for a different slice set, and never a re-probe under the lock. Everything else on
+the board may change freely meanwhile (asserted: an unrelated concurrent write does *not*
+abort the transition). Pinned by **R17**/**R17b**, which are deterministic rather than
+wall-clock races: a `git` shim earlier on `PATH` makes every `ls-remote` announce itself
+through a sentinel and then sleep, so the test acts at a moment it *knows* a probe is in
+flight, and the paired control (an explicit `flock` holder) proves the probe can still
+detect a genuinely held lock.
+
 `landed.repo` and `landed.base` are **non-empty** in the schema and the zero-dependency
 validator, matching the selector's long-standing `assertString`. They disagreed: a board
 carrying `"repo": ""` passed `init.sh` and `validate-board.py` and then made **every**
@@ -163,7 +210,7 @@ stay unattested. This is a **breaking change to the `set-status` CLI** for every
 `--evidence`, and `tests/test_owner_gate.sh`'s R5 pair is *stronger* for it — both halves
 now carry evidence, so the difference between the refusal and its control is the gate alone.
 
-New suite `tests/test_landed_evidence.sh` (15 cases, every one paired with a control). Seven
+New suite `tests/test_landed_evidence.sh` (17 cases, every one paired with a control). Nine
 of them exist only because a mutation survived without them: **R6/R12** (the sliced
 exemption above — R12 replays the live `E09-F02` entry verbatim); **R8**'s zero-dependency
 and `repo`/`base` assertions (deleting the fallback's `verified` enum check, and both type
@@ -178,6 +225,15 @@ survivor (loosening the sliced test to `slices is not None`) is **gone by constr
 branch it mutated no longer exists. It was independently confirmed equivalent first — 8
 separating inputs across both validator paths, identical in exit code and board bytes.
 
+Round 4 added **R16** (the stale tip, with controls for the genuinely-unmerged commit, a
+remote that has moved beyond this checkout, a post-fetch definitive answer in both
+directions, and an unreachable remote) and **R17**/**R17b** (the lock, and the fingerprint
+that keeps moving the probes out of it from becoming a TOCTOU). R17b also caught a **vacuous
+assertion in its own first draft**: a background subshell under `set -e` dies *at* the
+failing command, before it can record its exit code, and `$(cat <missing-file>)` then
+compares unequal to every expected value — so the check passed with nothing behind it. It
+now captures the rc explicitly and a bounded `await_bg` fails loudly if it is never written.
+
 Round 3's own mutation campaign: **12 mutations, 12 killed, 0 survivors** — the per-slice
 binding removed (R6/R14a), a slice's ref checked in whatever repo resolves it (R14c), the
 rollup taking the strongest slice instead of the weakest (R14c), the local default guessed
@@ -190,6 +246,12 @@ turns a PR URL's `?utm=1` into a repository binding (R4's control). Because the 
 at its first failure, the five `tasks-lock` mutations were re-run against a trimmed copy
 carrying only R14/R15, so each kill is attributable to the case that claims it rather than
 to an earlier one.
+
+Round 4 re-ran that campaign with five more, **17 mutations, 17 killed, 0 survivors**:
+evidence resolution moved back inside the lock (R17), the in-lock re-validation removed
+(R17b), a local "not an ancestor" refusing without confirming the tip (R16), an
+unconfirmable refusal refusing anyway (R16's unreachable-remote control), and the freshness
+check wrongly applied to local bases (R2).
 
 ## [0.63.0] — 2026-08-16
 
