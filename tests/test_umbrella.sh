@@ -1478,13 +1478,16 @@ pass "R3 thin_names_every_blocker — both seeded differing paths are named, the
 # ── R2/R3: the shapes `diff` will not hand over ────────────────────────────────────────
 # thin_extra_file_blocks / thin_blocker_paths_are_normalised
 #
-# THREE shapes, one fixture, because each defeats a different naive implementation:
+# FOUR shapes, one fixture, because each defeats a different naive implementation:
 #   agents/extra-local.md   `Only in <dir>: <name>` — the JOINED path never appears in
 #                           diff's output, so it has to be built
 #   AGENTS.md               a REGULAR-FILE tier entry — `diff -r` on two files prints the
 #                           hunks and NO filename, so `-q` is what makes it nameable
 #   specs/_templates        a whole tier entry absent on one side — diff exits 2 with its
 #                           message on STDERR, so a stdout-only capture names nothing
+#   specs/glossary.md       a WHITESPACE-ONLY edit — the comparison is BYTE identity, and
+#                           it is the one prose-tier entry no other fixture ever seeds
+#                           (see thin_comparison_is_byte_identity below)
 # TWO children, and the split is load-bearing. `extra` carries the child-only file as its
 # ONLY difference, so R2's extra-file claim is independently falsifiable: putting all three
 # shapes in one child would leave the tier blocked by the OTHER two even with the one-sided
@@ -1498,6 +1501,18 @@ printf 'a child-local note the umbrella does not have\n' > "$KC4/agents/extra-lo
 printf 'a child-local note the umbrella does not have\n' > "$KS4/agents/extra-local.md"
 printf '\nlocally appended\n' >> "$KS4/AGENTS.md"
 rm -rf "$KS4/specs/_templates"
+# A TRAILING SPACE ON LINE 1 — a whitespace-only edit, and it must stay whitespace-only.
+# New text on a new line would differ under `diff -w` too and would pin nothing.
+awk 'NR == 1 { printf "%s \n", $0; next } { print }' "$KS4/specs/glossary.md" > "$AU/f04c-glossary.tmp"
+cat "$AU/f04c-glossary.tmp" > "$KS4/specs/glossary.md"
+# PRECONDITIONS for thin_comparison_is_byte_identity below. The edit must be a real BYTE
+# difference and must NOT survive `-w`, or the case degenerates into the AGENTS.md shape
+# and stops saying anything about byte identity. Measured against the umbrella's own copy,
+# which is the reference the conversion uses.
+cmp -s "$KS4/specs/glossary.md" "$F04C/.harness/specs/glossary.md" \
+  && fail "R3 control: the seeded specs/glossary.md edit is not a byte difference at all — the byte-identity case below would be vacuous"
+diff -qw "$KS4/specs/glossary.md" "$F04C/.harness/specs/glossary.md" >/dev/null 2>&1 \
+  || fail "R3 control: the seeded specs/glossary.md edit is NOT whitespace-only, so it would also be caught by an identity-modulo-whitespace comparison and pins nothing about BYTE identity"
 cascade "$F04C" --thin
 f04_no_stub_in_tier "$KC4" "R2 (a child-only extra prose file must block the tier ON ITS OWN)"
 grep -q 'This target holds the full body layout' "$KC4/manifest.txt" \
@@ -1519,6 +1534,25 @@ printf '%s\n' 2>/dev/null "$F04C_SEG" | grep -q 'Only in ' \
   && fail "R3: diff's raw 'Only in <dir>: <name>' wording was emitted — that form never contains the joined path: $F04C_SEG"
 f04_no_stub_in_tier "$KS4" "R3 (the three-shape child must not convert either)"
 pass "R3 thin_blocker_paths_are_normalised — Only-in, regular-file and missing-entry shapes all name the joined path"
+
+# ── R2/R3: the comparison is BYTE identity, never identity-modulo-whitespace ────────────
+# thin_comparison_is_byte_identity — asserted SEPARATELY from the loop above, because the
+# loop's failure message ("diff's own wording never contains it") is true of those three
+# shapes and false of this one: `Files <a> and <b> differ` carries this path already. The
+# predicate is the same; only the diagnosis differs, and a message that misdiagnoses is
+# how the next maintainer stops looking.
+#
+# WHAT IT PINS. The whole safety argument of this feature is "a child's prose tier is
+# deleted and stubbed ONLY when it is byte-identical to the umbrella's" — and `diff -rq`
+# → `diff -rqw` is a one-character edit that relaxes that to identity-modulo-whitespace
+# and converts this child. A CRLF round-trip through an editor is the realistic form.
+# It is also the only difference this suite ever seeds on `specs/glossary.md`, so it is
+# what stops the prose sweep from being written as a hardcoded tier list that drops that
+# entry: dropped, the entry is never compared and the child converts on the strength of a
+# comparison that never ran. Both mutations leave every other case in this suite green.
+printf '%s\n' 2>/dev/null "$F04C_SEG" | grep -qF 'differs: specs/glossary.md' \
+  || fail "R2/R3: a WHITESPACE-ONLY edit to specs/glossary.md was not reported as a blocker — either the comparison is identity-modulo-whitespace rather than BYTE identity, or the prose sweep never compared that entry at all; under either, a child whose ONLY difference is that edit CONVERTS and its prose tier is deleted: $F04C_SEG"
+pass "R2/R3 thin_comparison_is_byte_identity — a whitespace-only edit to specs/glossary.md blocks the tier and is named"
 
 # ── R2/R3: the pristine REFERENCE is the UMBRELLA'S copy, never the installer's $SRC ────
 # thin_reference_is_the_umbrella_body
@@ -1556,6 +1590,47 @@ F04H_N="$(printf '%s\n' 2>/dev/null "$F04H_OUT" | grep -o 'differs: [^ ]*' | wc 
 cmp -s "$SRC/agents/builder.md" "$KH4/agents/builder.md" \
   || fail "R2: the refused run did not leave the child's own agents/builder.md in place"
 pass "R2 thin_reference_is_the_umbrella_body — a child matching \$SRC but not the umbrella blocks, naming the umbrella-side path"
+
+# ── R3: a path present on the UMBRELLA side only is named with its JOINED path ──────────
+# thin_umbrella_side_path_is_named
+#
+# EVERY OTHER one-sided fixture in this suite seeds the extra file on the CHILD side
+# (`extra`/`shapes`), which diff reports as `Only in <child>/…` and a DIFFERENT arm of the
+# normalisation strips. The umbrella-side arm — an umbrella AHEAD of the child, which is
+# Recorded decision E's state and the ordinary one after an umbrella upgrade — is the
+# direction this feature exists for, and it is the one no fixture reached. Neutralised,
+# that arm falls through to the fail-closed `*)` case: the tier still blocks (so this is
+# naming precision, not data loss) but the refusal degrades from `differs:
+# agents/newfile.md` to `differs: agents` and the operator is pointed at a directory
+# instead of at the file R3 requires be named.
+#
+# ITS OWN UMBRELLA, deliberately. $F04C's umbrella serves BOTH `extra` and `shapes`, and
+# `extra`'s whole value is that a child-local one-sided path is its ONLY difference — an
+# umbrella-side file seeded there would block `extra` for a second reason and dissolve
+# that case.
+F04I="$AU/f04i"
+f04_fullchild "$F04I" kid
+KI4="$F04I/kid/.harness"
+printf 'an umbrella-only note the child has never held\n' > "$F04I/.harness/agents/newfile.md"
+# PRECONDITION — one-sided means one-sided. If the child holds the path too, this is an
+# ordinary two-sided comparison and the umbrella arm is never reached.
+[ -e "$KI4/agents/newfile.md" ] \
+  && fail "R3 control: the umbrella-only path exists in the child as well, so nothing below exercises the umbrella side of the normalisation"
+# SINGLE-TARGET, NEVER A CASCADE, for the same reason as the case above: a cascade
+# re-installs the coordinator first, and the umbrella-side difference is seeded inside the
+# coordinator's own prose tier.
+F04I_OUT="$(CODEX_HOME="$F04I/.ch" HOME="$F04I/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude --thin "$F04I/kid" 2>&1)" && F04I_RC=0 || F04I_RC=$?
+[ "$F04I_RC" = "0" ] || fail "R3: single-target --thin exited $F04I_RC: $F04I_OUT"
+printf '%s\n' 2>/dev/null "$F04I_OUT" | grep -qF 'differs: agents/newfile.md' \
+  || fail "R3: a path the UMBRELLA holds and the child does not was not named as a tier-relative path — the refusal names the tier entry \`agents\`, pointing the operator at a directory instead of the file: $F04I_OUT"
+f04_no_stub_in_tier "$KI4" "R3 (a one-sided path on the UMBRELLA side must block the tier too)"
+# EXACTLY ONE blocker. Without this, "the umbrella-side path was named" is equally
+# explained by a run that names every tier entry it walks.
+F04I_N="$(printf '%s\n' 2>/dev/null "$F04I_OUT" | grep -o 'differs: [^ ]*' | wc -l | tr -d ' ')"
+[ "$F04I_N" = "1" ] \
+  || fail "R3: $F04I_N blocking path(s) were named, want exactly the one seeded on the umbrella side: $F04I_OUT"
+pass "R3 thin_umbrella_side_path_is_named — a path the umbrella holds and the child does not is named with its joined path"
 
 # ── R4: no --thin converts nothing, and says it would ──────────────────────────────────
 # unflagged_previews_only — the on-disk half is TRIVIALLY TRUE (it is today's shipped
