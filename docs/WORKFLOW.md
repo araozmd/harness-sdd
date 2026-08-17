@@ -558,25 +558,42 @@ an existing round offline (no `gh`, no network) with
 
 ## Stacked-PR lane — incremental review of safely-splittable features
 
-When a feature legitimately exceeds the single-PR review budget yet its intermediate
-increments are **safely shippable** — each wave can land on `main` without breaking
-anything, and only the combined work delivers the full capability — stacking PRs lets
-each increment be a separate PR whose base is the previous increment's branch. The
-reviewer reads only that increment's own diff (budget-sized), and the stack merges in
-**order**: increment 1, then 2, then 3.
+This lane bounds the **size of each review**. A feature that legitimately exceeds the
+single-PR review budget is opened as one PR per increment, each PR's base being the
+previous increment's branch, so a reviewer reads only that increment's own diff
+(budget-sized). The stack merges in **order**: increment 1, then 2, then 3.
 
-**Stacking provides incremental *review*, not atomic delivery.** Merging increment A
-publishes wave 1 to `main` while B and C are still open. A feature whose intermediate
-states are unsafe to ship needs a different mechanism (feature flags, an aggregate
-landing strategy) and is explicitly out of scope for this lane.
+The outcome is mechanical: merging an increment publishes that increment's work to the
+**default branch** while the later increments are **still open**. The lane changes
+nothing else about how or when work reaches the default branch.
+
+The lane is available only to work that meets the two conditions in **Entry condition**
+below. That subsection is this document's only statement of the condition, and its only
+list of what to do instead — a condition stated twice is a condition that will eventually
+disagree with itself.
+
+### Entry condition
+
+Both conditions are checked **before the first increment PR** is opened:
+
+1. Every increment is **independently safe** on the default branch — merging it on its
+   own leaves the default branch in a state the project is willing to ship.
+2. Every increment passes `verification.test_command` on its own, without any code from a
+   later increment.
+
+A feature that cannot meet both is **not a candidate** for this lane — do not stack it.
+Use **feature flags** to gate the incomplete work until the whole capability is present,
+or an aggregate landing strategy that reviews the parts separately and lands them
+together. Getting a feature whose intermediate states are unsafe onto the default branch
+in one visible step is **an open problem this epic does not solve**.
 
 ### When to use what
 
 | Scenario | Mechanism |
 |---|---|
 | Feature fits the single-PR review budget | Open one PR against `main` — the default lane |
-| Feature exceeds the budget but intermediate increments are safely shippable | Open a **stacked PR** per increment — this lane |
-| Feature exceeds the budget and intermediate increments are NOT safely shippable | Do **not** stack. Use **feature flags** to gate the incomplete work, or split into **separate independent features** that can ship on their own |
+| Feature exceeds the budget and meets **Entry condition** | Open a **stacked PR** per increment — this lane |
+| Feature exceeds the budget and does not meet **Entry condition** | Not a candidate for this lane — do **not** stack it. See **Entry condition** above for what to do instead |
 | Increments are truly independent (no shared code, no order dependency) | Open **parallel independent PRs** — stacking adds unnecessary ordering |
 
 ### Creating stacked increments
@@ -586,27 +603,32 @@ increment's branch:
 
 ```bash
 # Increment 1 targets main (default):
-gh pr create --base main --title "feat: wave 1 — ..."
+gh pr create --base main --title "feat: increment 1 — ..."
 
 # Increment 2 targets increment 1's branch:
-gh pr create --base feat/wave-1 --title "feat: wave 2 — ..."
+gh pr create --base feat/increment-1 --title "feat: increment 2 — ..."
 
 # Increment 3 targets increment 2's branch:
-gh pr create --base feat/wave-2 --title "feat: wave 3 — ..."
+gh pr create --base feat/increment-2 --title "feat: increment 3 — ..."
 ```
 
 The pr-loop detects stacked PRs automatically: a PR whose `baseRefName` is not the
 default branch is a stacked PR. The merge-order guard (`tools/pr-stack-guard.sh`) then
 prevents merging a child while its parent is still open.
 
-### Wave-boundary guidance
+### Where to cut
 
-Align increments with the wave structure from the feature's decomposition (E21-F01).
-Each increment should correspond to one wave: a self-contained, independently-reviewable
-chunk that is safe to land on `main` on its own. The per-increment diff should stay
-within the `change_size` budget thresholds so the reviewer can read it in one pass.
+Cut where the work already has a seam, and cut so that **each increment satisfies
+Entry condition on its own** — that is the test an increment boundary has to pass, and it
+is the only one. Keep each increment's diff inside the `change_size` budget thresholds
+(see **Change-size discipline** in this document) so the reviewer can read it in one pass.
 
-### Manual restack procedure (R7)
+The harness records no stacking-specific seam vocabulary. An increment is nothing more
+than a branch whose PR targets the previous increment's branch; neither the TaskStore nor
+the specs name the cuts for you, so the seam is a judgement the Architect makes and the
+Builder can check against the two conditions above.
+
+### Restack procedure
 
 When an earlier increment takes review fixes (the parent branch is rebased), each child
 increment must be rebased onto the updated parent branch. The pr-loop detects the base
@@ -616,28 +638,42 @@ automatically. The Builder does it by hand:
 ```bash
 # After increment 1 (parent) is rebased and force-pushed:
 # For each child, rebase onto the updated parent:
-git checkout feat/wave-2
-git rebase --onto feat/wave-1 old-base-commit   # or: git rebase feat/wave-1
+git checkout feat/increment-2
+git rebase --onto feat/increment-1 old-base-commit   # or: git rebase feat/increment-1
 git push --force-with-lease
 
-git checkout feat/wave-3
-git rebase --onto feat/wave-2 old-base-commit
+git checkout feat/increment-3
+git rebase --onto feat/increment-2 old-base-commit
 git push --force-with-lease
 ```
 
 The `old-base-commit` is the parent's head SHA before it was rebased. **Do not substitute
-the bare two-arg form** (`git rebase feat/wave-N`): when the parent was rebased or
+the bare two-arg form** (`git rebase feat/increment-N`): when the parent was rebased or
 force-pushed, that shorthand replays the child's copies of the *old* parent commits along
 with the child-only commits, producing conflicts and duplicated changes. Recover the old
 parent tip from the parent's reflog or the `baseRefOid` recorded in the round cache, and
 always use `git rebase --onto`.
 
+### What the board shows
+
+While a stack is in flight the board holds **one** feature record: the board's unit is
+the feature, not the increment. The increment order lives in the PRs' `baseRefName` —
+each PR names the branch it targets, and that chain is the order.
+
+The harness writes **no per-increment** board record. `state/tasks.json` has nowhere to
+say "increment 2 of 3", so a reader who needs to know how far a stack has got reads the
+PRs, not the board.
+
 ### Opt-in and inert-when-disabled
 
-The stacked-PR lane is opt-in — a feature that does not explicitly create a PR with a
-non-default base follows the existing single-PR default lane unchanged (R9). Where
-`pr_loop.enabled` is `false`, the stacking lane is inert: no guard invocation, no
-stacking-specific merge logic, no stacking documentation is stamped (R8).
+The stacked-PR lane is opt-in: a PR whose base is the default branch follows the existing
+single-PR default lane unchanged.
+
+This section **ships with the harness body** regardless of `pr_loop.enabled` — the
+harness has one body, not a per-flag variant of it, so every install carries this lane's
+documentation whatever the flag says. What the flag gates is the lane's *behavior*: where
+`pr_loop.enabled` is `false`, `/sdd-pr-loop` is not installed, so the merge-order guard
+has no caller and no stacking-specific merge logic runs.
 
 ## Context hygiene
 

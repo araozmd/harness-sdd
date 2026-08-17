@@ -4,6 +4,41 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.63.1] — 2026-08-17
+
+### Fixed — 🐛 the stacked-PR lane's doctrine reads accurately (E21-F05)
+
+`docs/WORKFLOW.md`'s `## Stacked-PR lane` section said four things that were false or
+dangling, and stated its entry condition twice in two places that disagreed about what to
+do instead. Corrected — that section and nothing else. No behavior changes: no new key, no
+new command, no capability a target gains on upgrade, which is why this is a PATCH.
+
+- **The entry condition is stated once.** A new `### Entry condition` subsection is the
+  lane's only statement of the two conditions — every increment is independently safe on
+  the default branch, and every increment passes `verification.test_command` on its own —
+  both checked before the first increment PR is opened, together with the refusal and the
+  alternatives for a feature the lane cannot serve. The opening paragraphs and the
+  `### When to use what` table now point at it instead of restating it differently.
+- **The outcome is stated mechanically**, in terms of what merging an increment publishes
+  to the default branch and what is still open, rather than in the delivery vocabulary
+  that got the predecessor spec withdrawn.
+- **`### Wave-boundary guidance` → `### Where to cut`.** The old text attributed a
+  decomposition structure to E21-F01, which defines none. The seam guidance now points at
+  the lane's own entry condition and the `change_size` budget — not at an epic id, which
+  resolves to nothing in a target repo.
+- **`### Manual restack procedure (R7)` → `### Restack procedure`**, the section name
+  `harness-install.sh`'s shipped diagnostic already pointed readers at and which until now
+  matched no heading in the file. The procedure itself is unchanged.
+- **New `### What the board shows`:** one feature record while a stack is in flight, the
+  increment order in the PRs' `baseRefName`, and no per-increment board record.
+- **The gate no longer claims to withhold documentation.** `docs/` is part of
+  `HARNESS_BODY_PROSE` and is copied with no `pr_loop` condition, so this section always
+  shipped; the text now says so and names what `pr_loop.enabled` actually gates.
+- Lane vocabulary swept: no `wave`, no `E21-F01`, and no bare spec-requirement ids leaking
+  into a user-facing document.
+
+`tests/test_stacked_doctrine.sh` (new, auto-discovered) carries one case per requirement.
+
 ## [0.63.0] — 2026-08-16
 
 ### Added — ✨ worker roster: invocable CLIs as versioned data (E17-F04)
