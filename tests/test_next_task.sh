@@ -17,9 +17,12 @@ STATE_BEFORE=$(cksum "$ROOT/state/tasks.json")
 # it with `git diff` instead conflates the suite's writes with ordinary uncommitted work,
 # so any Builder editing the schema failed R17 with "selector changed a protected file"
 # while the selector had changed nothing (E99-F118).
-PROTECTED="$ROOT/store/tasks.schema.json $ROOT/tools/task-diagnostics.py $ROOT/init.sh"
+# Quoted arguments, never a space-delimited scalar: `for _f in $PROTECTED` splits an
+# absolute path at any whitespace in it, so a checkout under e.g. `/tmp/harness review/`
+# made the suite die at `cksum: /tmp/harness: No such file or directory` before running
+# a single case.
 protected_cksums() {
-  for _f in $PROTECTED; do cksum "$_f"; done
+  cksum "$ROOT/store/tasks.schema.json" "$ROOT/tools/task-diagnostics.py" "$ROOT/init.sh"
 }
 PROTECTED_BEFORE=$(protected_cksums)
 
