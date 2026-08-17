@@ -56,7 +56,6 @@ unconditionally, and left entirely alone — with a warning — if the path is a
 New suite `tests/test_worker_roster.sh` (R1–R12 + JSON validity); `tests/test_install.sh`
 gains the installer-wiring and seeded-vs-migrated convergence assertions.
 
-
 ## [0.62.0] — 2026-08-16
 
 ### Added — ✨ `parked.gate: "owner"`, a park the OWNER releases (E99-F77)
@@ -108,7 +107,6 @@ Additive: `gate` is an optional key inside an already-optional object. A board w
 against this repo's own live board under both validator paths, not assumed.
 
 New suite `tests/test_owner_gate.sh` (10 cases, every one paired with a control).
-
 
 ## [0.61.0] — 2026-08-14
 

@@ -302,6 +302,14 @@ PEOF
   # valid YAML string and an unrecognized value, so R2 keeps the gate OFF. Comment-stripping
   # that ignores quoting truncates it to `true` and turns the roster ON.
   _probe quoted_hash     'workers:\n  roster: "true#disabled"\n'    disabled
+  # …and the UNQUOTED forms, which reach a DIFFERENT branch. `quoted_hash` above is rejected
+  # by the quote alternatives before the comment rule is ever consulted, so it pins nothing
+  # about that rule. What the whitelist actually requires is that a `#` only opens a comment
+  # when WHITESPACE precedes it: in `true#disabled` the `#` is part of a plain YAML scalar,
+  # so the value is `true#disabled` — unrecognized, hence OFF. Relaxing the rule to allow
+  # zero preceding whitespace lets both of these shed their suffix and read as `true`.
+  _probe bare_hash        'workers:\n  roster: true#disabled\n'     disabled
+  _probe quoted_then_hash 'workers:\n  roster: "true"#x\n'          disabled
   # ── the whitelist class ────────────────────────────────────────────────────────────
   # Every row below is a YAML shape that a decode-then-compare gate mis-decodes into the
   # literal `true` (or would, one variant at a time, as each new corner of YAML is taught to
@@ -715,7 +723,17 @@ STALE
   # testing nothing, which is strictly worse than not running. Announce the skip instead —
   # a silently skipped case reads as a passing one. (CI and container images commonly run as
   # uid 0; that is the environment this exists for.)
+  #
+  # AND THE SKIP ITSELF IS PINNED, because the announcement below cannot be relied on to
+  # surface it: tools/run-tests.sh — the configured verification.test_command — captures each
+  # suite's stderr to a log and prints it ONLY on failure, so on a green run this message is
+  # discarded. Unpinned, an always-taken skip would leave the suite green while the read-only
+  # rows ran nowhere. R10RO_SKIPPED lets the driver assert that the skip was taken only as
+  # uid 0. It re-reads `id -u`, so it is a control rather than an independent oracle — it
+  # cannot catch a wholesale rewrite of the uid test, but it does kill the single-point
+  # mutation (forcing the branch always-true) that is the realistic way this rots.
   if [ "$(id -u)" = "0" ]; then
+    R10RO_SKIPPED=1
     echo "skip - R10 read-only rows: running as uid 0, which bypasses the 0444 bits — the failing write this pins cannot occur, so the rows would be vacuous rather than green" >&2
     return 0
   fi
@@ -869,7 +887,10 @@ test_R8_never_executes_a_rostered_cli
 pass "R8_never_executes_a_rostered_cli: presence is PATH resolution alone — no stub ran, on a run proven to have reached detection (R8)"
 test_R9_rerun_is_byte_identical
 pass "R9_rerun_is_byte_identical: identical roster inputs ⇒ byte-identical rosters, PATH reordering included (R9)"
+R10RO_SKIPPED=0
 test_R10_rerun_overwrites_from_fresh_state
+[ "$R10RO_SKIPPED" = "0" ] || [ "$(id -u)" = "0" ] \
+  || fail "R10: the read-only rows were SKIPPED as uid $(id -u) — the uid-0 skip fired for a user whose permission bits are NOT bypassed, so the rows that pin the read-only overwrite ran nowhere"
 pass "R10_rerun_overwrites_from_fresh_state: a distinguishable stale roster is overwritten from freshly detected state (R10)"
 test_R11_roster_is_gitignored
 pass "R11_roster_is_gitignored: the roster path is ignored by .harness/.gitignore, ubiquitously and behaviorally (R11)"
