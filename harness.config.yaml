@@ -340,3 +340,23 @@ change_size:
 # executor picks its own model — and the harness never escalates on that path.
 escalation:
   after_rejections: 2
+
+# Worker roster (E17-F04) — OPT-IN, local-only, and INERT by default.
+# `true` ⇒ every install writes `.harness/workers.json`: which of the harness's front-end
+# CLIs THIS MACHINE can invoke, recorded as versioned data (`schema: 1`) so an external
+# router can read one file instead of re-probing the environment every time. Nothing in
+# the harness itself consumes it.
+#
+# PRESENCE IS A `PATH` LOOKUP ONLY. The harness NEVER executes a rostered CLI, for any
+# purpose — version detection included, which is why CLI version requirements are
+# documented in comments here rather than checked. A data file cannot spawn a process.
+#
+# ONLY the literal `true` enables it: an absent block, an absent key, an empty value and
+# any other value all mean OFF — and while it is off an existing roster is RECLAIMED
+# (removed) on the next install, so flipping this back to false leaves nothing behind.
+#
+# The roster describes ONE MACHINE, is regenerated (overwritten) on every install, and is
+# gitignored — the same local-only treatment telemetry.jsonl gets, for the same reason:
+# committing it would put one developer's CLI set into a shared repo.
+workers:
+  roster: false

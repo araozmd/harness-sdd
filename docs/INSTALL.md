@@ -34,6 +34,7 @@ your-project/
     ├── AGENTS.md agents/ docs/ store/ tools/ specs/_templates/ init.sh harness.config.yaml
     ├── .gitignore                       # seeded: keeps the local-only telemetry log out of VCS
     ├── telemetry.jsonl                  # created on first run — local-only, gitignored (E05-F02)
+    ├── workers.json                     # only while workers.roster — local-only, gitignored (E17-F04)
     ├── specs/product.md  specs/epics/   # YOURS — seeded once, never overwritten
     ├── state/tasks.json                 # YOURS — bootstrap task seeded
     └── progress/
@@ -360,6 +361,83 @@ workers concurrently. OpenCode support is **not assumed** — it is verified by 
 ```bash
 ./harness-install.sh --agents=opencode --with-opencode-parallel=true /path/to/your-project
 ```
+
+## Worker roster (`workers.roster`) — opt-in, local-only
+
+**What it is.** With `workers.roster: true`, every install writes
+`.harness/workers.json`: **which of the harness's front-end CLIs this machine can
+invoke**, recorded once as versioned data. It exists so an external router — the kind of
+kit that farms work out across several coding CLIs — can read one file instead of
+re-probing your environment every time. **Nothing inside the harness consumes it.**
+
+**Opt-in and inert by default.** A fresh install seeds `roster: false`, and only the
+literal `true` turns it on — an absent block, an absent key, an empty value and any other
+value all mean off:
+
+```yaml
+workers:
+  roster: false   # true ⇒ the installer writes .harness/workers.json
+```
+
+Flip it back to `false` and re-run: the installer **removes** the file and says so, so
+turning the feature off leaves nothing behind.
+
+**The harness never executes a rostered CLI.** Presence is a `PATH` lookup — `command -v`,
+used as a boolean, with its output discarded. That is also why the roster records no
+version: asking a CLI its version means running it.
+
+```json
+{
+  "schema": 1,
+  "generated_by": "harness-install.sh",
+  "capability_vocabulary": ["harness-selected", "host-detectable", "non-interactive"],
+  "workers": [
+    {"key": "claude", "command": "claude",
+     "capabilities": ["harness-selected", "host-detectable", "non-interactive"]},
+    {"key": "gemini", "command": "gemini", "capabilities": []},
+    {"key": "antigravity", "command": "agy",
+     "capabilities": ["host-detectable", "non-interactive"]}
+  ]
+}
+```
+
+| field | meaning |
+|---|---|
+| `schema` | the format version. **`1`** here; any change to the entry shape or to the vocabulary below is a bump, so a consumer can detect a format change instead of guessing |
+| `capability_vocabulary` | the **closed** set of tags, declared alongside the data. Under `schema: 1` it is exactly these three, always in full — never just the tags this machine happened to produce |
+| `workers[]` | one entry per agent key whose command resolved on `PATH`, in the installer's own key order |
+| `workers[].key` | the agent key — the same token `--agents` and `.harness/.agents` use |
+| `workers[].command` | the invocation name that resolved (note `agy` for `antigravity`) |
+| `workers[].capabilities` | a sorted subset of the vocabulary |
+
+| tag | means | the evidence the harness already holds |
+|---|---|---|
+| `harness-selected` | this install selected the CLI as a harness front-end | the key is in the resolved selection |
+| `host-detectable` | `--agents=host` can recognize a session this CLI launched | the key has a host-marker row |
+| `non-interactive` | the CLI has a scriptable, prompt-in entrypoint | a recorded, verified entrypoint (`claude -p`, `codex exec`, `opencode run`, `agy -p`) |
+
+Every tag points at a fact the harness can show you. There is deliberately **no** taxonomy
+of what each CLI is *good at* — that would be the harness asserting things it has not
+measured, in a file it stamps as a versioned contract. An entry with an empty capability
+list is a meaningful answer, not a bug: *this machine can invoke it, and the harness can
+vouch for nothing further.*
+
+Three things to know before you build on it:
+
+- **An entry records no filesystem path.** A consumer that needs the executable's location
+  must run its own `command -v` regardless — the roster is a snapshot of one install-time
+  moment, and the CLI may have moved, been upgraded or been removed since. Reinstating the
+  field would be a `schema` bump, not an additive tweak.
+- **Selection is a capability, never a filter.** A CLI you did *not* select still gets an
+  entry — telling a router about CLIs this install did not wire up is the whole point —
+  carrying whatever it earned, minus `harness-selected`. The tag says *selected*, not
+  *stamped*: the installer has refusal branches that leave a selected front-end's glue
+  unwritten (a hand-edited `opencode.json`, an edited Codex role), and the roster has no
+  ledger that would know.
+- **It describes one machine.** The file is per-target, regenerated (overwritten) on every
+  install, and **gitignored** — the same local-only treatment `telemetry.jsonl` gets, for
+  the same reason. If the path is a symlink the installer writes nothing, removes nothing,
+  and warns.
 
 ## The second question — `execution.builder.backend`
 
@@ -833,7 +911,7 @@ POSIX `sh`, zero deps.
 |---|---|---|
 | harness-owned | `.harness/{AGENTS.md,agents,docs,store,tools,specs/_templates,init.sh}`, `.claude/*` | overwritten |
 | project-owned | `.harness/{harness.config.yaml,specs/product.md,specs/epics,state/tasks.json,progress}` | preserved (config also append-migrated) |
-| runtime/local | `.harness/{telemetry.jsonl,.gitignore}`, project-root `.gitignore` | gitignored; both `.gitignore`s append-seeded (never clobbered), logs/personal state never committed |
+| runtime/local | `.harness/{telemetry.jsonl,workers.json,.gitignore}`, project-root `.gitignore` | gitignored; both `.gitignore`s append-seeded (never clobbered), logs/personal state never committed. `workers.json` is installer-OWNED derived data: rewritten every run while `workers.roster` is on, removed when it is off |
 | merge-region | `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` | only the marked block |
 
 The installer also **append-seeds the project-root `.gitignore`** with per-developer

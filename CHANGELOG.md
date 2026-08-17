@@ -4,7 +4,7 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
-## [0.63.0] — 2026-08-16
+## [0.64.0] — 2026-08-17
 
 ### Added — ✨ `done` must carry evidence the work LANDED (E99-F102)
 
@@ -129,6 +129,58 @@ board actually uses went unexercised). The one previously-disclosed survivor (lo
 sliced test to `slices is not None`) is **gone by construction**: the branch it mutated no
 longer exists. It was independently confirmed equivalent first — 8 separating inputs across
 both validator paths, identical in exit code and board bytes.
+
+## [0.63.0] — 2026-08-16
+
+### Added — ✨ worker roster: invocable CLIs as versioned data (E17-F04)
+
+`harness-install.sh` can now write **`.harness/workers.json`**: which of the harness's
+front-end CLIs *this machine* can invoke, recorded once as versioned data so an external
+router (the epic's `multi-cli-orchestrator`) reads one file instead of re-probing the
+environment every time. **Nothing in the harness consumes it** — this feature writes the
+answer down and stops there.
+
+**Opt-in, and inert until you say otherwise.** A new `workers:` block seeds
+`roster: false`; only the literal `true` enables it (an absent block, an absent key, an
+empty value and any other value all mean off). Flipping it back to `false` **reclaims** the
+file on the next install, so nothing is left behind. Migrated targets grow the same block,
+byte-identical to the one a fresh install seeds.
+
+**The harness never executes a rostered CLI.** Presence is `command -v` — a `PATH` lookup
+used as a boolean, with its stdout discarded. Version *detection* is out of scope for the
+same reason: asking a CLI its version means running it.
+
+The file carries `schema: 1`, a fixed three-tag `capability_vocabulary`, and one entry per
+resolving key in `AGENT_KEYS` order:
+
+```json
+{"key": "antigravity", "command": "agy",
+ "capabilities": ["harness-selected", "host-detectable", "non-interactive"]}
+```
+
+| tag | means | the evidence the harness already holds |
+|---|---|---|
+| `harness-selected` | this install selected the CLI as a harness front-end | membership in the resolved selection |
+| `host-detectable` | `--agents=host` can recognize a session it launched | the key has a `HOST_MARKERS` row |
+| `non-interactive` | the CLI has a scriptable, prompt-in entrypoint | a verified entry in the new `WORKER_INVOKE` table |
+
+Two design points worth knowing before you read the file:
+
+- **An entry records no filesystem path**, deliberately. A consumer that needs the
+  executable's location must run its own `command -v` regardless, because the roster is a
+  snapshot of one install-time moment. Reinstating the field is a `schema` bump, not an
+  additive tweak.
+- **Selection is a capability, never a filter.** A CLI you did *not* select still gets an
+  entry — telling a router about it is the whole point — carrying whatever it earned, minus
+  `harness-selected`. And the tag says *selected*, not *stamped*: the installer has refusal
+  branches that leave a selected front-end's glue unwritten, and the roster has no ledger
+  that would know.
+
+The roster is per-target, regenerated (overwritten) on every install, gitignored
+unconditionally, and left entirely alone — with a warning — if the path is a symlink.
+
+New suite `tests/test_worker_roster.sh` (R1–R12 + JSON validity); `tests/test_install.sh`
+gains the installer-wiring and seeded-vs-migrated convergence assertions.
 
 ## [0.62.0] — 2026-08-16
 

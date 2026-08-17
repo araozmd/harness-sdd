@@ -483,6 +483,38 @@ escalation:
   after_rejections: 2
 EOF
   fi
+
+  # --- workers block (E17-F04 worker roster) ---
+  # Top-level, append-only at EOF, OPT-IN and INERT: seeded `false`, so a migrated target
+  # grows the discoverable knob and NO roster file. Keep this text BYTE-IDENTICAL to the
+  # tail of the source harness.config.yaml — a FRESH install copies the config verbatim and
+  # never migrates, an UPGRADE only migrates, and the two must converge on the same bytes
+  # (tests/test_install.sh asserts it). Presence check tolerates a trailing comment on the
+  # `workers:` line so a target that annotated it never gets a duplicate block.
+  if ! grep -Eq '^workers:[[:space:]]*(#.*)?$' "$_cfg"; then
+    cat >> "$_cfg" <<'EOF'
+
+# Worker roster (E17-F04) — OPT-IN, local-only, and INERT by default.
+# `true` ⇒ every install writes `.harness/workers.json`: which of the harness's front-end
+# CLIs THIS MACHINE can invoke, recorded as versioned data (`schema: 1`) so an external
+# router can read one file instead of re-probing the environment every time. Nothing in
+# the harness itself consumes it.
+#
+# PRESENCE IS A `PATH` LOOKUP ONLY. The harness NEVER executes a rostered CLI, for any
+# purpose — version detection included, which is why CLI version requirements are
+# documented in comments here rather than checked. A data file cannot spawn a process.
+#
+# ONLY the literal `true` enables it: an absent block, an absent key, an empty value and
+# any other value all mean OFF — and while it is off an existing roster is RECLAIMED
+# (removed) on the next install, so flipping this back to false leaves nothing behind.
+#
+# The roster describes ONE MACHINE, is regenerated (overwritten) on every install, and is
+# gitignored — the same local-only treatment telemetry.jsonl gets, for the same reason:
+# committing it would put one developer's CLI set into a shared repo.
+workers:
+  roster: false
+EOF
+  fi
 }
 
 # seed_pr_loop_optin <file> — force `pr_loop.enabled` to the OPT-IN default (`false`) in a
@@ -852,6 +884,104 @@ pr_loop_enabled() {
   return 1
 }
 
+# _cfg_workers_roster_is_true <file> — exit 0 ONLY when <file> has a top-level `workers:`
+# section whose DIRECT child `roster:` key carries one of the three literal enabling forms
+# `true`, `"true"` or `'true'` (each with an optional real trailing ` # comment`), and whose
+# section is free of tab indentation. Any other line, any other value, a tab anywhere in the
+# section's indentation, an absent key, an absent section, a missing file: exit 1.
+#
+# WHITELIST, NOT A DECODER. The previous shape of this helper decoded the scalar and
+# compared the result to `true`, and lost that game once per review round — a `#` inside a
+# quoted scalar, a `roster:` nested under `workers.options`, a doubled-quote escape
+# (`roster: 'true''#disabled'` decodes to the string `true'#disabled`), and after those,
+# block scalars (`roster: >`), tags (`roster: !!str true`), anchors, tabs… Each fix taught
+# the decoder one more corner of YAML and left the next corner open, because a hand-rolled
+# awk YAML decoder cannot be completed. The contract does not need one: R2 says ONLY the
+# literal `true` enables the roster and EVERYTHING else — including anything malformed or
+# unexpected — leaves it OFF. That is a positive match that FAILS CLOSED. A shape nobody
+# anticipated is not decoded and compared; it simply does not match, so it is OFF.
+#
+# Two rules carry it, and both are load-bearing:
+#   1. DIRECT CHILDREN ONLY. The indent of the section's first key line (blank and
+#      comment-only lines skipped) is the direct-child indent; deeper lines belong to some
+#      nested mapping and are ignored entirely, so `workers.options.roster: true` leaves
+#      `workers.roster` absent — and absent is OFF.
+#   2. The first direct `roster:` line decides, and it enables only on a FULL-LINE match of
+#      the whitelist. `#` may only start a comment when a SPACE precedes it, so neither
+#      `true#disabled` nor `"true"#x` can shed a suffix and pass as `true`.
+#
+# INDENTATION AND SEPARATION ARE SPACES, NEVER TABS — and that is a YAML rule, not a style
+# preference: a tab may not indent a mapping, so `workers:\n\troster: true` is not a document
+# with the key set, it is a MALFORMED document a real parser refuses outright. `[[:space:]]`
+# spans the tab, which would have accepted exactly that and enabled the roster on a file
+# nothing else can load. Matching literal spaces closes the axis in one move rather than one
+# whitespace character at a time.
+#
+# THE TAB RULE COVERS THE WHOLE SECTION, NOT JUST THE PREFIX BEFORE THE KEY. A tab in the
+# indentation of ANY line of the `workers:` section makes the document unparseable, so the
+# section is malformed and the gate is OFF wherever that line sits relative to `roster:` —
+# before it (`workers:\n\tjunk: 1\n  roster: true`) or after it
+# (`workers:\n  roster: true\n\tjunk: 1`) alike. One malformed-document class must not have
+# two answers depending on line order, which is what stopping at the first `roster:` line
+# produced. So the scan CANNOT stop the moment it has a value: it records the FIRST direct
+# `roster:` line's verdict, then keeps reading to the END of the section (a new top-level
+# key, a dedent back out, or EOF) before answering. Nothing skips a tab-polluted line
+# either: measuring its indent with spaces yields 0, so `workers:\n\tjunk: 1\n  roster: true`
+# ALSO fixes the direct-child indent at 0 and makes the `roster:` line read as a descendant —
+# two independent reasons for OFF on one unparseable file. Skipping such a line instead would
+# let the next well-formed line set the indent, i.e. fail OPEN on exactly the input this rule
+# exists to reject. A tab on a blank or comment-only line is not indentation of anything and
+# is left alone, as those lines carry no indent signal to begin with.
+#
+# SCOPED TO THE SECTION, NOT TO THE FILE. This reads one key; it is not a document validator.
+# A tab in some OTHER top-level section leaves `workers:` alone, because vetoing on any tab
+# anywhere in the file would turn one stray tab in an unrelated block into a silent global
+# opt-out — a denial of service on the gate that no message here could explain.
+# Section-scoped like _cfg_pr_loop_value, so a same-named key under ANOTHER top-level
+# section can never change roster behavior; commented example lines never match either.
+#
+# DO NOT REPLACE THIS WITH A DECODE-AND-COMPARE, and do not widen the three accepted forms.
+# Every new YAML shape that "ought" to work belongs OFF unless the spec says otherwise.
+_cfg_workers_roster_is_true() {
+  [ -f "$1" ] || return 1
+  awk -v q="'" '
+    BEGIN {
+      ok = "^ *roster: +(true|\"true\"|" q "true" q ")( *$| +#)"
+      cind = -1
+    }
+    /^workers:[[:space:]]*(#.*)?$/ { w=1; cind=-1; next }
+    w {
+      if ($0 ~ /^[[:space:]]*(#.*)?$/) next          # blank or comment-only: no indent signal
+      if ($0 ~ /^[^[:space:]]/) { w=0; next }        # a new top-level key ends the section
+      match($0, /^ */); ind = RLENGTH                # indent is SPACES — a tab cannot indent YAML
+      if (substr($0, ind + 1, 1) == "\t") tab = 1    # …and one tab voids the WHOLE section
+      if (cind < 0) cind = ind                       # first key line fixes the child indent
+      if (ind < cind) { w=0; next }                  # dedented back out of the section
+      if (ind > cind) next                           # deeper: a descendant, not workers.roster
+      if ($0 !~ /^ *roster:/) next                   # some other direct child
+      if (seen) next                                 # the FIRST direct roster: already decided
+      seen = 1
+      if ($0 ~ ok) hit = 1                           # …and ONLY the whitelist enables
+    }
+    END { exit((hit && !tab) ? 0 : 1) }
+  ' "$1"
+}
+
+# worker_roster_enabled — exit 0 ONLY when `workers.roster` resolves to the literal `true`
+# (E17-F04 R1/R2). The gate is OPT-IN, modelled on pr_loop_enabled: an absent block, an
+# absent key, an empty value and any other value alike mean OFF, and NO roster is written.
+#
+# DELIBERATELY CONFIG-ONLY — there is no env override twin of HARNESS_PR_LOOP_ENABLED here.
+# The roster describes this machine and is regenerated on every run, so a per-run env
+# override would let one scripted run leave behind a file the target's own config says
+# should not exist. The spec names exactly one gate; this reads exactly that one.
+# Reads the target config through $H, which is empty before install_one sets it
+# (⇒ default: disabled).
+worker_roster_enabled() {
+  [ -n "${H:-}" ] || return 1
+  _cfg_workers_roster_is_true "$H/harness.config.yaml"
+}
+
 # _mc_insert_after <file> <header-regex> <line>  — insert <line> immediately after the
 # first line matching <header-regex>, leaving every other line byte-for-byte intact.
 _mc_insert_after() {
@@ -960,6 +1090,60 @@ claude CLAUDECODE CLAUDE_CODE_ENTRYPOINT
 codex CODEX_THREAD_ID
 opencode OPENCODE OPENCODE_PID
 antigravity ANTIGRAVITY_AGENT ANTIGRAVITY_CONVERSATION_ID
+"
+#
+# ── the worker roster: how each agent key is INVOKED (E17-F04) ────────────────
+# Consumed ONLY by write_worker_roster, i.e. only by the `.harness/workers.json` roster.
+# It answers a question no other table here asks — "what would you TYPE to run this CLI,
+# and can it be driven headlessly" — which is why it exists at all rather than being
+# folded into AGENT_KEYS or HOST_MARKERS.
+#
+# PLACEMENT IS LOAD-BEARING, and so is this header. It sits AFTER the closing quote of
+# HOST_MARKERS, and its provenance header below reads `# WORKER_INVOKE PROVENANCE` rather
+# than a bare `# PROVENANCE`. tests/test_agents_host.sh finds the host-evidence block by
+# the POSITIONAL range `/^# PROVENANCE/,/^HOST_MARKERS="$/` and treats ANY `#   <agent-key>
+# …` line inside it as host evidence for that key. The entries below are exactly that
+# shape, so above the table — or under a bare `# PROVENANCE` header — they would be
+# absorbed into the host-evidence range and R8's guard could be satisfied by text that is
+# not host evidence at all. Do not move this block, and do not rename its header.
+#
+#     <agent-key> <command-name> [<capability> …]
+#
+# ONLY NON-DERIVABLE CAPABILITIES BELONG IN A ROW. `harness-selected` is derived from
+# membership in $SELECTED and `host-detectable` from having a HOST_MARKERS row above, so
+# restating either here would make this a THIRD table describing the same five front-ends
+# — the body-and-its-copy divergence this repo has already paid for. `non-interactive` is
+# the one genuinely new fact, and the command name the one genuinely new datum.
+#
+# PRESENCE IS NEVER EXECUTION (R8). The command name below is looked up with
+# `command -v <name> >/dev/null 2>&1` and used as a BOOLEAN — its stdout is discarded and
+# no rostered CLI is ever run, for version detection or anything else. A roster entry
+# records no filesystem path either (spec E17-F04 → Recorded decision 4); adding one is a
+# `schema` bump, not a tweak.
+#
+# WORKER_INVOKE PROVENANCE — one entry per key, recording the entrypoint each
+# `non-interactive` claim was verified with. Same discipline the HOST_MARKERS block imposes
+# above: an UNVERIFIED claim must never ship, so a key with nothing observed carries no tag.
+#
+#   claude      `claude -p <prompt>` — scriptable, prompt-in, prints and exits.
+#   codex       `codex exec` — the same non-interactive entrypoint the HOST_MARKERS
+#               provenance above already records for codex-cli 0.145.0.
+#   opencode    `opencode run` — ditto, opencode 1.18.5.
+#   antigravity `agy -p` — ditto, agy 1.1.8.
+#
+# NO `non-interactive` CLAIM — unverified, and that is an ACCEPTED outcome, not a defect:
+# the entry still ships (this machine can invoke it), with the harness vouching for nothing
+# further.
+#   gemini      the gemini CLI is not installed on the verification machine, so no
+#               entrypoint could be observed for it — the same reason it has no
+#               HOST_MARKERS row. Claiming one anyway is exactly the defect the
+#               HOST_MARKERS R8 rule exists to prevent.
+WORKER_INVOKE="
+claude claude non-interactive
+gemini gemini
+opencode opencode non-interactive
+antigravity agy non-interactive
+codex codex non-interactive
 "
 #
 # Harness-OWNED generated basenames (stems; all files are <stem>.md). These are the
@@ -2530,7 +2714,14 @@ EOF
   # clone entirely. They stay tracked and are excluded from the change-size budget by the
   # built-in `generated` classifier in tools/change-size.sh instead. Bytecode is different:
   # it is machine-local, never shared, and nothing reads it from a clone.
+  # Also ignore the worker roster (E17-F04). `.harness/workers.json` describes THIS
+  # MACHINE's invocable CLIs, so committing it would put one developer's local CLI set
+  # into a shared repo — the same reason telemetry.jsonl is ignored. UNCONDITIONAL, like
+  # every entry here and unlike the roster's own opt-in write gate: `.harness/.gitignore`
+  # is append-only on upgrade, so a GATED line could never be removed once the gate had
+  # been on. That makes a gate here incoherent rather than conservative (R11).
   _ignores='telemetry.jsonl
+workers.json
 jira.pat
 state/tasks.json.lock
 .pr-loop/
@@ -3255,6 +3446,174 @@ EOF
     else
       info "escalation NOT armed — see .harness/.escalation-arming for which front-end blocked it"
     fi
+  }
+
+  # ── the worker roster (E17-F04) ──────────────────────────────────────────────
+  # `.harness/workers.json` answers ONE question, once, as versioned data: which of the
+  # harness's front-end CLIs can THIS MACHINE invoke, and what can the harness vouch for
+  # about each. An external router (the epic's `multi-cli-orchestrator`) reads it instead of
+  # rediscovering the answer every time. Nothing in the harness consumes it.
+  #
+  # MODELLED ON write_escalation_arming — WITH TWO DELIBERATE DIVERGENCES, both of which
+  # fail silently if carried across:
+  #   1. NO `agent_selected … || continue` FILTER. The roster's whole point is telling a
+  #      router about CLIs this install did NOT wire up, so selection is recorded as the
+  #      `harness-selected` CAPABILITY and is never a filter (R5). On a machine where every
+  #      front-end is selected a filtered roster is byte-identical to a correct one, which
+  #      is why only tests/test_worker_roster.sh's narrowed-selection fixture can catch it.
+  #   2. RECLAMATION IS TRIGGERED BY THE GATE, AND ONLY THE GATE. write_escalation_arming
+  #      also reclaims when its detection comes back empty, because an empty arming file
+  #      means nothing. An empty roster MEANS something — this machine can invoke none of
+  #      the harness's front-ends — and a consumer must be able to tell that from "no roster
+  #      was ever written". So gate on + nothing resolves ⇒ a well-formed `"workers": []`.
+
+  # worker_roster_is_symlinked — true iff .harness/workers.json is a symlink (live or
+  # dangling). Same rule and same reason as escalation_arming_is_symlinked: redirection
+  # FOLLOWS a link, so writing through one would overwrite a file that may be outside the
+  # repository. Both the write AND the reclamation are refused (R12) — `rm -f` would unlink
+  # the symlink, destroying an operator's link through a path they never asked about.
+  worker_roster_is_symlinked() {
+    [ -L "$H/workers.json" ]
+  }
+
+  # worker_roster_detect — one row per rostered key, on stdout, in $AGENT_KEYS order:
+  #
+  #     <key> <command> [<capability> …]        capabilities sorted, may be empty
+  #
+  # PRESENCE IS A `PATH` LOOKUP AND NOTHING ELSE (R8): `command -v <name> >/dev/null 2>&1`,
+  # used as a BOOLEAN. No rostered CLI is executed — not for version detection, not for
+  # anything — and the lookup's stdout is DISCARDED rather than captured. That discard is
+  # load-bearing (R5, spec → Recorded decision 4): the value is relative whenever the
+  # matching PATH component is relative, it is environment-derived content in a JSON file,
+  # and it can hold bytes a JSON string cannot represent. An entry records no filesystem
+  # path; recording one re-opens six closed review findings and needs a `schema` bump.
+  #
+  # $AGENT_KEYS ORDER, CAPABILITIES SORTED — not detection order, not PATH order. These are
+  # the degrees of freedom that are NOT roster inputs, and removing them is what makes R9's
+  # byte-identity hold for equal inputs.
+  worker_roster_detect() {
+    for _wr_k in $AGENT_KEYS; do
+      _wr_row="$(printf '%s\n' "$WORKER_INVOKE" | awk -v k="$_wr_k" '$1 == k { print; exit }')"
+      [ -n "$_wr_row" ] || continue
+      _wr_cmd="$(printf '%s\n' "$_wr_row" | awk '{ print $2 }')"
+      [ -n "$_wr_cmd" ] || continue
+      command -v "$_wr_cmd" >/dev/null 2>&1 || continue
+
+      # The table carries ONLY the non-derivable tags (today: `non-interactive`).
+      _wr_caps="$(printf '%s\n' "$_wr_row" | awk '{ for (i = 3; i <= NF; i++) print $i }')"
+      # `harness-selected` is derived from $SELECTED — the SELECTION, not a write outcome.
+      # The installer has refusal branches that leave a selected front-end's glue unwritten
+      # (a hand-edited opencode.json, an edited/symlinked Codex role), and the roster has no
+      # ledger that would know, so this tag claims exactly what it can prove and no more.
+      # Do NOT reach for the §6b unstamped ledger here: it is scoped to model-routing
+      # artifacts, only codex/opencode can reach it, and it is removed before this runs.
+      if agent_selected "$_wr_k"; then
+        _wr_caps="$_wr_caps
+harness-selected"
+      fi
+      # `host-detectable` is derived from having a HOST_MARKERS row — read, never edited.
+      if printf '%s\n' "$HOST_MARKERS" | awk -v k="$_wr_k" '$1 == k { f = 1 } END { exit !f }'; then
+        _wr_caps="$_wr_caps
+host-detectable"
+      fi
+
+      _wr_out="$_wr_k $_wr_cmd"
+      for _wr_c in $(printf '%s\n' "$_wr_caps" | awk 'NF' | LC_ALL=C sort); do
+        _wr_out="$_wr_out $_wr_c"
+      done
+      printf '%s\n' "$_wr_out"
+    done
+  }
+
+  # write_worker_roster — symlink guard → gate → detect → emit, in that order.
+  #
+  # JSON EMISSION — THE INVARIANT THAT REPLACES AN ESCAPER. Every value written below is a
+  # HARNESS-AUTHORED LITERAL from a closed set: `key` from $AGENT_KEYS, `command` and the
+  # non-derivable tags from $WORKER_INVOKE, the derived tags from the fixed vocabulary, and
+  # `generated_by` the fixed literal `harness-install.sh` (never `$0` — an
+  # invocation-dependent path would be environment-derived JSON content AND a fourth input
+  # to R9's byte-identity). All are `[a-z-]+` tokens spelled out in this file, so none can
+  # hold `"`, `\` or a C0 control character and NO escaping is required. An escaper over
+  # inputs that provably need none is code no fixture could distinguish from its absence.
+  # ADDING A FIELD CARRYING ENVIRONMENT-DERIVED CONTENT RE-INCURS CLASS-WIDE JSON ESCAPING
+  # (`"`, `\`, and C0 U+0000–U+001F) — follow tools/change-size.sh's `_json_escape`, the
+  # artifact E99-F08 shipped after a hand-rolled emitter handled control characters one
+  # reported bug at a time, and NEVER tools/pr-round-trend.sh's `sed` version, which covers
+  # only `\` and `"`. Such a field is a `schema` change anyway, so the obligation lands
+  # where a fixture can test it.
+  #
+  # STRUCTURE still needs care, independently of content: no trailing comma after the last
+  # workers[] entry, and a well-formed `"workers": []` when nothing resolved.
+  write_worker_roster() {
+    if worker_roster_is_symlinked; then
+      echo "⚠️  .harness/workers.json is a symlink — worker roster not written (link and its target left unchanged)" >&2
+      return 0
+    fi
+
+    if ! worker_roster_enabled; then
+      # The GATE is the whole reclamation trigger (R3). "Nothing resolved" is not one.
+      if [ -f "$H/workers.json" ]; then
+        rm -f "$H/workers.json"
+        info "worker roster reclaimed (.harness/workers.json removed — workers.roster is not enabled)"
+      fi
+      return 0
+    fi
+
+    _wr_rows="$(mktemp 2>/dev/null || mktemp -t harness-roster)"
+    worker_roster_detect > "$_wr_rows"
+    _wr_count="$(awk 'END { print NR + 0 }' "$_wr_rows")"
+
+    # Overwritten unconditionally from freshly detected state (R10): the file is derived
+    # data the installer owns outright, so nothing here merges with what was on disk.
+    #
+    # UNLINK FIRST — `>` alone cannot discharge R10. A first install under a restrictive
+    # umask (say 0222) leaves workers.json mode 0444, and the redirection below then fails
+    # outright. What that failure DOES is shell-dependent, and BOTH outcomes are wrong:
+    # under dash and zsh the redirection error trips `set -eu` (line 101) and aborts the
+    # install midway, after other artifacts have already been rewritten; under bash — which
+    # is macOS `sh`, the shell this suite runs under — a redirection failure on a COMPOUND
+    # command does not exit the shell, so the install continues, the STALE roster survives,
+    # and the info() below reports a write that never happened. The second is the quieter
+    # failure and the worse one: R10 is violated with a success message printed over it.
+    # Removing the destination first sidesteps both. The containing .harness/ is writable
+    # even when the file is not (unlink needs no write bit on the file), a symlinked
+    # destination was already refused above (R12), and the file is the harness's own
+    # derived data — so this can only ever unlink a regular file the installer owns.
+    rm -f "$H/workers.json"
+    {
+      printf '{\n'
+      printf '  "schema": 1,\n'
+      printf '  "generated_by": "harness-install.sh",\n'
+      printf '  "capability_vocabulary": ["harness-selected", "host-detectable", "non-interactive"],\n'
+      if [ "$_wr_count" -gt 0 ]; then
+        printf '  "workers": [\n'
+        _wr_n=0
+        while IFS= read -r _wr_line; do
+          [ -n "$_wr_line" ] || continue
+          _wr_n=$((_wr_n + 1))
+          [ "$_wr_n" -eq 1 ] || printf ',\n'
+          _wr_ek=""; _wr_ec=""; _wr_ecaps=""; _wr_i=0
+          for _wr_f in $_wr_line; do
+            _wr_i=$((_wr_i + 1))
+            case "$_wr_i" in
+              1) _wr_ek="$_wr_f" ;;
+              2) _wr_ec="$_wr_f" ;;
+              *) if [ -z "$_wr_ecaps" ]; then _wr_ecaps="\"$_wr_f\""
+                 else _wr_ecaps="$_wr_ecaps, \"$_wr_f\""; fi ;;
+            esac
+          done
+          printf '    {"key": "%s", "command": "%s", "capabilities": [%s]}' \
+            "$_wr_ek" "$_wr_ec" "$_wr_ecaps"
+        done < "$_wr_rows"
+        printf '\n  ]\n'
+      else
+        printf '  "workers": []\n'
+      fi
+      printf '}\n'
+    } > "$H/workers.json"
+
+    rm -f "$_wr_rows"
+    info "worker roster written (.harness/workers.json — $_wr_count invocable front-end CLI(s) on this machine)"
   }
 
   stamp_model_agent() {
@@ -5164,6 +5523,13 @@ EOF
   # front-end that generates nothing, moving a diagnostic to a confusing place.
   write_escalation_arming
   rm -f "$_UNSTAMPED_FILE"
+
+  # ── 6c. worker roster (E17-F04) ─────────────────────────────────────────────
+  # Placed after §2 (so the target's harness.config.yaml exists and the gate is readable)
+  # and after the selection is resolved (so `harness-selected` has its evidence). It reads
+  # $AGENT_KEYS, $WORKER_INVOKE, $HOST_MARKERS and $SELECTED and writes one derived data
+  # file; it stamps nothing, executes nothing, and no other stage depends on it.
+  write_worker_roster
 
   # ── 7. selection persistence + add/remove reconciliation (E08-F01) ───────────
   # Persist the resolved selection beside .harness-version as harness-owned metadata

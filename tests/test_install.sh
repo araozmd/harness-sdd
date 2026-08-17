@@ -96,6 +96,70 @@ test_change_size_block_seeded() {
   done
 }
 
+# E17-F04: the worker roster's INSTALLER WIRING. The roster itself (detection, the entry
+# shape, the capability derivation) is owned by tests/test_worker_roster.sh; what belongs
+# here is the rule this repo has been bitten by repeatedly — every new installer-generated
+# artifact must be asserted in this suite. Three things must be true of a fresh install:
+# the ubiquitous .gitignore line (R11), the seeded opt-in config key (R1/R2), and NO roster
+# file, because the gate is off by default.
+#
+# workers_block <config> — the `workers:` block WITH its comment header, from the anchor
+# comment to the `roster:` scalar. Anchored on the comment rather than the `workers:` line
+# because the seeded and migrated texts must converge INCLUDING their documentation, and
+# bounded at the scalar so trailing content (which migration can only append at EOF) never
+# enters the comparison.
+workers_block() {
+  awk '/^# Worker roster \(E17-F04\)/ { w = 1 } w { print } w && /^  roster:/ { exit }' "$1"
+}
+
+test_worker_roster_wiring_installed() {
+  _c="$T/.harness/harness.config.yaml"
+  grep -Eq '^workers:[[:space:]]*(#.*)?$' "$_c" \
+    || fail "installed harness.config.yaml has no top-level workers: block (E17-F04 R1/R2)"
+  grep -qxF '  roster: false' "$_c" \
+    || fail "installed harness.config.yaml does not seed workers.roster: false — the roster gate is OPT-IN (E17-F04 R2)"
+  # R11 is deliberately UBIQUITOUS, not gated: .harness/.gitignore is append-only on
+  # upgrade, so a gated line could never be reclaimed once the gate had been on.
+  [ "$(grep -cxF 'workers.json' "$T/.harness/.gitignore")" = "1" ] \
+    || fail ".harness/.gitignore carries $(grep -cxF 'workers.json' "$T/.harness/.gitignore") 'workers.json' lines, expected exactly 1 — one developer's local CLI set must never be committable (E17-F04 R11)"
+  # …and the opt-in default really is off: a fresh install writes no roster at all.
+  [ ! -e "$T/.harness/workers.json" ] \
+    || fail "a fresh install wrote .harness/workers.json — workers.roster is opt-in and seeds false (E17-F04 R2)"
+}
+
+# E17-F04 R1/R2: the block a FRESH install seeds and the block migrate_config APPENDS must
+# be byte-identical. A fresh install copies harness.config.yaml verbatim and never
+# migrates; an upgrade only migrates. Maintained separately, the two texts diverge and a
+# target's documentation depends on when it was installed — the exact defect class this
+# feature's spec cites as its reason for being tagged complex.
+test_workers_block_seeded_migrated_converge() {
+  _wc="$T/workers-converge"
+  rm -rf "$_wc"; mkdir -p "$_wc"
+  sh "$SRC/harness-install.sh" "$_wc" >/dev/null 2>&1 || fail "workers convergence: seed install failed"
+  _wcfg="$_wc/.harness/harness.config.yaml"
+  workers_block "$_wcfg" > "$_wc/blk-seeded.txt"
+  [ -s "$_wc/blk-seeded.txt" ] \
+    || fail "workers convergence: the SEEDED workers: block could not be captured — its comment header anchor is missing from the source harness.config.yaml"
+
+  # Strip the whole block INCLUDING its comment header, so migration has to re-supply both.
+  awk '/^# Worker roster \(E17-F04\)/ { skip = 1 } skip && /^  roster:/ { skip = 0; next } !skip' \
+    "$_wcfg" > "$_wcfg.stripped" && mv "$_wcfg.stripped" "$_wcfg"
+  grep -Eq '^workers:' "$_wcfg" && fail "workers convergence: setup failed — the workers: block was not stripped"
+
+  sh "$SRC/harness-install.sh" "$_wc" >/dev/null 2>&1 || fail "workers convergence: migrate install failed"
+  workers_block "$_wcfg" > "$_wc/blk-migrated.txt"
+  [ -s "$_wc/blk-migrated.txt" ] \
+    || fail "workers convergence: migrate_config appended no workers: block to a config that lacked one"
+  cmp -s "$_wc/blk-seeded.txt" "$_wc/blk-migrated.txt" \
+    || fail "workers convergence: the MIGRATED workers: block is NOT byte-identical to the seeded one: $(diff "$_wc/blk-seeded.txt" "$_wc/blk-migrated.txt" | head -n 8)"
+
+  # …and a further run must not append a second copy.
+  sh "$SRC/harness-install.sh" "$_wc" >/dev/null 2>&1 || fail "workers convergence: idempotence install failed"
+  [ "$(grep -cE '^workers:[[:space:]]*(#.*)?$' "$_wcfg")" = "1" ] \
+    || fail "workers convergence: the config carries $(grep -cE '^workers:' "$_wcfg") top-level workers: headers, expected exactly 1"
+  rm -rf "$_wc"
+}
+
 test_entrypoints_reference_local_overrides() {
   test_entrypoints_reference_agents_local
   test_local_override_guidance_is_conditional
@@ -360,6 +424,8 @@ test_e99_throughput_helpers_installed_contract
 grep -qxF 'jira.pat' "$T/.harness/.gitignore"      || fail ".harness/.gitignore does not ignore the default Jira PAT file (jira.pat) — a PAT could be committed" # R16
 test_progress_run_dirs_gitignored   # E99-F06
 test_change_size_block_seeded       # E21-F01
+test_worker_roster_wiring_installed # E17-F04
+test_workers_block_seeded_migrated_converge # E17-F04
 [ -x "$T/.harness/init.sh" ]                   || fail ".harness/init.sh not executable"     # R1
 [ -f "$T/.harness/specs/product.md" ]          || fail "product.md stub not seeded"          # R6
 [ -f "$T/.harness/state/tasks.json" ]          || fail "bootstrap tasks.json missing"        # R6
