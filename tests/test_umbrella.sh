@@ -1287,6 +1287,10 @@ printf '%s' "$F13Q_OUT" | grep -qF 'umbrella at /nonexistent/plain is not reacha
   || fail "E99-F13/unquoted: an unquoted root stopped honouring its trailing comment: $F13Q_OUT"
 pass "E99-F13 unquoted_root_still_strips_trailing_comment"
 
+# NOTE ON `2>/dev/null` BELOW: every output assertion here is `printf … | grep -q …`, and
+# `grep -q` exits at the first match while `printf` is still writing — which makes bash emit
+# `printf: write error: Broken pipe` on the suite's stderr. The redirect silences exactly
+# that; `printf`'s only other failure mode here would be the same EPIPE.
 # ══ E24-F04 — migrate existing children to the thin layout (+ --standalone) ════════════
 # The DESTRUCTIVE half of ADR-0004: replacing a prose tier with pointer stubs in a repo
 # that already exists. Every case below builds a REAL full-copy child of a REAL reachable
@@ -1335,7 +1339,7 @@ f04_phys() { ( CDPATH= cd -- "$1" && pwd -P ); }
 # The leading space in the match is what keeps `…/kid` from matching `…/freshkid`.
 f04_seg() {
   _fs_t="$(f04_phys "$2")"
-  printf '%s\n' "$1" | awk -v t=" $_fs_t" '
+  printf '%s\n' 2>/dev/null "$1" | awk -v t=" $_fs_t" '
     index($0, "harness install v") > 0 { k = (index($0, t) > 0); next }
     k
   '
@@ -1389,7 +1393,7 @@ for _p in $LOCAL_TIER; do
   [ -f "$KID/$_p" ] || fail "R1: program-tier $_p vanished from the converted child"
   is_stub "$KID/$_p" && fail "R1: the conversion stubbed program-tier $_p — init.sh parses it"
 done
-printf '%s' "$(f04_seg "$AU_OUT" "$F04A/kid")" | grep -q 'CONVERTED to the thin layout' \
+printf '%s' 2>/dev/null "$(f04_seg "$AU_OUT" "$F04A/kid")" | grep -q 'CONVERTED to the thin layout' \
   || fail "R1: the converted child's own output slice never reported the conversion: $AU_OUT"
 pass "R1 thin_converts_pristine_child — --thin converts a pristine full-copy child's whole prose tier"
 
@@ -1418,7 +1422,7 @@ pass "R8 converted_manifest_says_thin"
 # fails loudly if --thin is implemented by gating that branch behind the flag.
 cp "$KID/agents/builder.md" "$AU/f04a-stub.ref"
 cascade "$F04A"
-printf '%s\n' "$AU_OUT" | grep -F "harness install v" | grep -qF "$(f04_phys "$F04A/kid") " \
+printf '%s\n' 2>/dev/null "$AU_OUT" | grep -F 2>/dev/null "harness install v" | grep -qF "$(f04_phys "$F04A/kid") " \
   || fail "R5 control: the unflagged cascade never ran install_one for the thin child — everything below would prove nothing: $AU_OUT"
 f04_all_stubs_in_tier "$KID" "R5"
 cmp -s "$AU/f04a-stub.ref" "$KID/agents/builder.md" \
@@ -1434,7 +1438,7 @@ F04AREF="$AU/f04a-tier.ref"
 mkdir -p "$F04AREF/specs"
 for _p in $F04_TIER; do cp -R "$KID/$_p" "$F04AREF/$_p"; done
 cascade "$F04A" --thin
-printf '%s\n' "$AU_OUT" | grep -F "harness install v" | grep -qF "$(f04_phys "$F04A/kid") " \
+printf '%s\n' 2>/dev/null "$AU_OUT" | grep -F 2>/dev/null "harness install v" | grep -qF "$(f04_phys "$F04A/kid") " \
   || fail "R7 control: the --thin cascade never ran install_one for the thin child: $AU_OUT"
 for _p in $F04_TIER; do
   diff -r "$F04AREF/$_p" "$KID/$_p" >/dev/null 2>&1 \
@@ -1460,14 +1464,14 @@ pass "R2 thin_all_or_nothing_on_edit — one edited prose file leaves the whole 
 
 F04B_SEG="$(f04_seg "$AU_OUT" "$F04B/edited")"
 for _p in agents/builder.md docs/WORKFLOW.md; do
-  printf '%s\n' "$F04B_SEG" | grep -qF "differs: $_p" \
+  printf '%s\n' 2>/dev/null "$F04B_SEG" | grep -qF "differs: $_p" \
     || fail "R3: the refusal did not name the differing path $_p: $F04B_SEG"
 done
-printf '%s\n' "$F04B_SEG" | grep -qF 'git diff' \
+printf '%s\n' 2>/dev/null "$F04B_SEG" | grep -qF 'git diff' \
   || fail "R3: the refusal names paths without saying that this run re-installed them from source: $F04B_SEG"
 # The pristine sibling must NOT be named as blocked — a report that fires for every child
 # would satisfy the two assertions above without discriminating anything.
-printf '%s\n' "$(f04_seg "$AU_OUT" "$F04B/pristine")" | grep -q 'differs: ' \
+printf '%s\n' 2>/dev/null "$(f04_seg "$AU_OUT" "$F04B/pristine")" | grep -q 'differs: ' \
   && fail "R3: the pristine sibling was reported as blocked"
 pass "R3 thin_names_every_blocker — both seeded differing paths are named, the pristine sibling is not"
 
@@ -1481,24 +1485,39 @@ pass "R3 thin_names_every_blocker — both seeded differing paths are named, the
 #                           hunks and NO filename, so `-q` is what makes it nameable
 #   specs/_templates        a whole tier entry absent on one side — diff exits 2 with its
 #                           message on STDERR, so a stdout-only capture names nothing
+# TWO children, and the split is load-bearing. `extra` carries the child-only file as its
+# ONLY difference, so R2's extra-file claim is independently falsifiable: putting all three
+# shapes in one child would leave the tier blocked by the OTHER two even with the one-sided
+# case ignored entirely, and the case would pass while being wrong.
 F04C="$AU/f04c"
 f04_fullchild "$F04C" extra
+f04_fullchild "$F04C" shapes
 KC4="$F04C/extra/.harness"
+KS4="$F04C/shapes/.harness"
 printf 'a child-local note the umbrella does not have\n' > "$KC4/agents/extra-local.md"
-printf '\nlocally appended\n' >> "$KC4/AGENTS.md"
-rm -rf "$KC4/specs/_templates"
+printf 'a child-local note the umbrella does not have\n' > "$KS4/agents/extra-local.md"
+printf '\nlocally appended\n' >> "$KS4/AGENTS.md"
+rm -rf "$KS4/specs/_templates"
 cascade "$F04C" --thin
-f04_no_stub_in_tier "$KC4" "R2 (a child-only extra prose file must block the tier)"
-pass "R2 thin_extra_file_blocks — a path present on one side only blocks the conversion"
+f04_no_stub_in_tier "$KC4" "R2 (a child-only extra prose file must block the tier ON ITS OWN)"
+grep -q 'This target holds the full body layout' "$KC4/manifest.txt" \
+  || fail "R2: a child blocked by a one-sided path does not report the full layout"
+printf '%s\n' 2>/dev/null "$(f04_seg "$AU_OUT" "$F04C/extra")" | grep -qF 'differs: agents/extra-local.md' \
+  || fail "R2: the one-sided path was not reported as the blocker — the tier may have been blocked for another reason"
+pass "R2 thin_extra_file_blocks — a path present on one side only blocks the conversion by itself"
 
-F04C_SEG="$(f04_seg "$AU_OUT" "$F04C/extra")"
+F04C_SEG="$(f04_seg "$AU_OUT" "$F04C/shapes")"
 for _p in agents/extra-local.md AGENTS.md specs/_templates; do
-  printf '%s\n' "$F04C_SEG" | grep -qF "differs: $_p" \
+  printf '%s\n' 2>/dev/null "$F04C_SEG" | grep -qF "differs: $_p" \
     || fail "R3: the refusal did not name $_p as a tier-relative path — diff's own wording never contains it: $F04C_SEG"
 done
-# The blockers are TIER-RELATIVE, never diff's own absolute-path wording.
-printf '%s\n' "$F04C_SEG" | grep -q "differs: $(f04_phys "$KC4")" \
+# The blockers are TIER-RELATIVE, never diff's own absolute-path wording, and never diff's
+# split `Only in <dir>: <name>` form.
+printf '%s\n' 2>/dev/null "$F04C_SEG" | grep -q "differs: $(f04_phys "$KS4")" \
   && fail "R3: a blocker was emitted as an absolute path instead of a tier-relative one: $F04C_SEG"
+printf '%s\n' 2>/dev/null "$F04C_SEG" | grep -q 'Only in ' \
+  && fail "R3: diff's raw 'Only in <dir>: <name>' wording was emitted — that form never contains the joined path: $F04C_SEG"
+f04_no_stub_in_tier "$KS4" "R3 (the three-shape child must not convert either)"
 pass "R3 thin_blocker_paths_are_normalised — Only-in, regular-file and missing-entry shapes all name the joined path"
 
 # ── R4: no --thin converts nothing, and says it would ──────────────────────────────────
@@ -1511,13 +1530,13 @@ mk_umb "$F04D" freshkid
 cascade "$F04D"
 f04_no_stub_in_tier "$F04D/kid/.harness" "R4 (an unflagged run must convert nothing)"
 F04D_SEG="$(f04_seg "$AU_OUT" "$F04D/kid")"
-printf '%s\n' "$F04D_SEG" | grep -q 'WOULD convert to the thin layout' \
+printf '%s\n' 2>/dev/null "$F04D_SEG" | grep -q 'WOULD convert to the thin layout' \
   || fail "R4: an unflagged run against a convertible full-copy child did not report that it would convert: $F04D_SEG"
-printf '%s\n' "$F04D_SEG" | grep -q '\-\-thin' \
+printf '%s\n' 2>/dev/null "$F04D_SEG" | grep -q '\-\-thin' \
   || fail "R4: the preview does not name the flag that would perform the conversion: $F04D_SEG"
 # The fresh sibling is thin, not full-copy, so it must NOT carry the preview — otherwise
 # "the line is present" is reachable without the full-copy branch running at all.
-printf '%s\n' "$(f04_seg "$AU_OUT" "$F04D/freshkid")" | grep -q 'WOULD convert to the thin layout' \
+printf '%s\n' 2>/dev/null "$(f04_seg "$AU_OUT" "$F04D/freshkid")" | grep -q 'WOULD convert to the thin layout' \
   && fail "R4: the preview fired for a child that is already thin"
 pass "R4 unflagged_previews_only — an unflagged run converts nothing and reports what it would convert"
 
@@ -1529,10 +1548,10 @@ printf 'child-only\n' > "$F04D/kid/.harness/docs/LOCAL-NOTE.md"
 cascade "$F04D"
 F04D_SEG2="$(f04_seg "$AU_OUT" "$F04D/kid")"
 for _p in agents/orchestrator.md docs/LOCAL-NOTE.md; do
-  printf '%s\n' "$F04D_SEG2" | grep -qF "differs: $_p" \
+  printf '%s\n' 2>/dev/null "$F04D_SEG2" | grep -qF "differs: $_p" \
     || fail "R4: the UNFLAGGED preview did not name the blocking path $_p: $F04D_SEG2"
 done
-printf '%s\n' "$F04D_SEG2" | grep -q 'WOULD convert to the thin layout' \
+printf '%s\n' 2>/dev/null "$F04D_SEG2" | grep -q 'WOULD convert to the thin layout' \
   && fail "R4: a blocked child was reported as convertible"
 f04_no_stub_in_tier "$F04D/kid/.harness" "R4 (blocked, unflagged)"
 pass "R4 unflagged_preview_names_blockers — the unflagged report names exactly the paths the flagged refusal does"
@@ -1558,7 +1577,7 @@ F04E_OUT="$(CODEX_HOME="$F04E/.ch" HOME="$F04E/.home" \
   sh "$SRC/harness-install.sh" --agents=claude --thin "$F04E/kid" 2>&1)" && F04E_RC=0 || F04E_RC=$?
 [ "$F04E_RC" = "0" ] \
   || fail "R6: --thin with an unreachable umbrella exited $F04E_RC — refusing to convert is a warning, never an install failure: $F04E_OUT"
-printf '%s\n' "$F04E_OUT" | grep -q 'umbrella.root is recorded' \
+printf '%s\n' 2>/dev/null "$F04E_OUT" | grep -q 'umbrella.root is recorded' \
   || fail "R6: the unreachable umbrella was not reported: $F04E_OUT"
 f04_no_stub_in_tier "$F04E/kid/.harness" "R6 (nothing may convert with the umbrella unreachable)"
 grep -qF 'You are the **Builder**' "$F04E/kid/.harness/agents/builder.md" \
@@ -1628,26 +1647,26 @@ F04MIG="$(f04_span "$F04DOC" 'Migrating an existing child')"
 # The migration COMMAND, and the absence assertion that matters: EVERY cascade invocation
 # in that section carries --thin. An unflagged cascade presented as step one is the wrong
 # doc a reviewer is most likely to write, and it destroys the differences it reports.
-F04N_ALL="$(printf '%s\n' "$F04MIG" | grep -o 'harness-install\.sh --umbrella' | wc -l | tr -d ' ')"
-F04N_THIN="$(printf '%s\n' "$F04MIG" | grep -o 'harness-install\.sh --umbrella [^ ]* --thin' | wc -l | tr -d ' ')"
+F04N_ALL="$(printf '%s\n' 2>/dev/null "$F04MIG" | grep -o 'harness-install\.sh --umbrella' | wc -l | tr -d ' ')"
+F04N_THIN="$(printf '%s\n' 2>/dev/null "$F04MIG" | grep -o 'harness-install\.sh --umbrella [^ ]* --thin' | wc -l | tr -d ' ')"
 [ "$F04N_ALL" -ge 1 ] \
   || fail "f04_docs_contract: the migration section never names 'harness-install.sh --umbrella … --thin'"
 [ "$F04N_ALL" = "$F04N_THIN" ] \
   || fail "f04_docs_contract: $F04N_ALL cascade invocation(s) in the migration section, only $F04N_THIN carry --thin — an unflagged cascade is being presented as a migration step, and that branch overwrites the prose tier from source"
-printf '%s\n' "$F04MIG" | grep -qi 'until it converges' \
+printf '%s\n' 2>/dev/null "$F04MIG" | grep -qi 'until it converges' \
   || fail "f04_docs_contract: the migration procedure does not say to re-run until it converges"
-printf '%s\n' "$F04MIG" | grep -qi 'whole or not at all' \
+printf '%s\n' 2>/dev/null "$F04MIG" | grep -qi 'whole or not at all' \
   || fail "f04_docs_contract: the all-or-nothing rule is not stated in the migration section"
-printf '%s\n' "$F04MIG" | grep -qi 'does not resolve to an installed harness body' \
+printf '%s\n' 2>/dev/null "$F04MIG" | grep -qi 'does not resolve to an installed harness body' \
   || fail "f04_docs_contract: the unreachable-umbrella behavior is not documented in the migration section"
 
 F04STA="$(f04_span "$F04DOC" 'the way back')"
 [ -n "$F04STA" ] || fail "f04_docs_contract: docs/UMBRELLA.md has no '--standalone — the way back' section"
-printf '%s\n' "$F04STA" | grep -q 'harness-install\.sh --standalone' \
+printf '%s\n' 2>/dev/null "$F04STA" | grep -q 'harness-install\.sh --standalone' \
   || fail "f04_docs_contract: the --standalone section never shows the command"
-printf '%s\n' "$F04STA" | grep -qi 'cleared' \
+printf '%s\n' 2>/dev/null "$F04STA" | grep -qi 'cleared' \
   || fail "f04_docs_contract: the --standalone section does not say umbrella.root is cleared"
-printf '%s\n' "$F04STA" | grep -qi 'not a permanent opt-out' \
+printf '%s\n' 2>/dev/null "$F04STA" | grep -qi 'not a permanent opt-out' \
   || fail "f04_docs_contract: the --standalone section oversells the flag — clearing the key is not a permanent opt-out"
 pass "f04_docs_contract — docs/UMBRELLA.md documents the migration command, the all-or-nothing rule and the reverse"
 
