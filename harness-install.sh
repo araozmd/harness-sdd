@@ -884,6 +884,34 @@ body_link_travels() {
 # $_umb_body the same way). It is ONE function because R3's "name every differing path" has
 # to mean the same thing for both producers of blocker paths — the symlink sweep and the
 # diff parser — and two copies of this `case` would be free to diverge.
+# rm_owned_tree <path>… — remove a tree THIS INSTALLER MATERIALISED, making it writable first.
+#
+# THE RULE, STATED ONCE, BECAUSE IT WAS A HABIT AND HABITS GET SKIPPED. `cp -R` carries the
+# SOURCE's modes across, so any tree this installer copied from a source whose modes it does
+# not control can contain a directory it cannot unlink through — `0555` is enough — and the
+# `rm -rf` then fails. That fact was already known here: two sites had grown their own
+# `chmod -R u+w` first. Five had not, and the one that mattered was the cleanup after a
+# SUCCESSFUL conversion, where the failure lands after the tier has already been swapped.
+# Measured (Codex #3805383748): the child ends CONVERTED on disk, `set -e` kills the run
+# before the manifest is written so it still claims `full body layout`, and
+# `.harness-prose-replaced.<pid>` is left inside `.harness`.
+#
+# WHERE IT APPLIES, and the boundary is the PROVENANCE OF THE MODES, not the location:
+#   YES  `copy`'s destination, `stage_tree`'s staging copies, the parked originals, and the
+#        link-free comparison copies — every one of them arrives via `cp -R` from `$SRC` or
+#        from the umbrella body, carrying whatever modes that tree had.
+#   NO   `$CMDDIR` and the Codex skill temp dir — written by this installer's own heredocs and
+#        generators, so their modes are its umask and a `chmod` there would be noise.
+#
+# `chmod -R` does not follow symlinks encountered during traversal, so it cannot reach outside
+# the tree it is given. Its own failure is deliberately ignored: it is a best-effort widening,
+# and the `rm` that follows is the operation whose exit status actually matters.
+rm_owned_tree() {
+  [ "$#" -gt 0 ] || return 0
+  chmod -R u+w "$@" 2>/dev/null || :
+  rm -rf "$@"
+}
+
 #
 # IT STRIPS `$_ptb_ra`/`$_ptb_rb`, NOT `$_ptb_h`/`$_ptb_u`: those two name the roots of the
 # trees CURRENTLY BEING COMPARED, which are the child's and the umbrella's for an ordinary
@@ -937,8 +965,7 @@ _prose_entry_symlinks() {
 # which is exactly the old behaviour and is still fail-closed: the entry blocks either way.
 _ptb_delink() {
   [ -n "$_ptb_tmp" ] || return 1
-  chmod -R u+w "$_ptb_tmp" 2>/dev/null || :
-  rm -rf "$_ptb_tmp/h" "$_ptb_tmp/u" || return 1
+  rm_owned_tree "$_ptb_tmp/h" "$_ptb_tmp/u" || return 1
   mkdir -p "$(dirname -- "$_ptb_tmp/h/$_ptb_rel")" "$(dirname -- "$_ptb_tmp/u/$_ptb_rel")" \
     || return 1
   # `cp -R` does NOT follow symlinks, so copying a tree that holds `docs/self -> .` copies the
@@ -1122,7 +1149,7 @@ prose_tier_blockers() {
     # differing path exactly once. (Codex #3802057859.)
     _ptb_entry_blockers | sort -u
   done
-  [ -z "$_ptb_tmp" ] || { chmod -R u+w "$_ptb_tmp" 2>/dev/null || :; rm -rf "$_ptb_tmp"; }
+  [ -z "$_ptb_tmp" ] || rm_owned_tree "$_ptb_tmp"
 }
 
 # child_is_full_copy <harness-dir> — true when this target already holds REAL prose-tier
@@ -2705,7 +2732,7 @@ install_one() {
     _src="$SRC/$1"; _dst="$H/$1"
     if [ ! -e "$_src" ]; then die "source missing: $1"; fi
     mkdir -p "$(dirname "$_dst")"
-    rm -rf "$_dst"
+    rm_owned_tree "$_dst"
     cp -R "$_src" "$_dst"
   }
   # stub_files_in <dir> <umbrella-root> <strip-root> — walk a tree ALREADY MATERIALISED by
@@ -2957,7 +2984,7 @@ install_one() {
   #
   # The undo list is built most-recent-first, so the rollback runs LIFO.
   thin_prose_tier() {
-    rm -rf "$_prose_stg" "$_prose_old"
+    rm_owned_tree "$_prose_stg" "$_prose_old"
     mkdir -p "$_prose_stg" "$_prose_old"
     # THE AUTHORITY DECIDES THE SET OF ENTRIES, not just their contents — and BOTH loops
     # below walk that same set, or the swap phase would try to move a path the build phase
@@ -2972,7 +2999,7 @@ install_one() {
     done
     for _tpt_rel in $_tpt_set; do
       if ! stage_tree "$_tpt_rel"; then
-        rm -rf "$_prose_stg" "$_prose_old"
+        rm_owned_tree "$_prose_stg" "$_prose_old"
         die "could not build the thin prose tier ($_tpt_rel) — nothing was replaced, this target keeps the body it had"
       fi
     done
@@ -2986,10 +3013,10 @@ install_one() {
         prose_swap_back "$_tpt_undo" \
           || die "could not install the thin prose tier ($_tpt_rel) AND the rollback of $_tpt_undo failed — this target's prose tier is now MIXED; the stubs are under $_prose_stg and the original files under $_prose_old, and both are kept for you to restore by hand"
       done
-      rm -rf "$_prose_stg" "$_prose_old"
+      rm_owned_tree "$_prose_stg" "$_prose_old"
       die "could not install the thin prose tier ($_tpt_rel) — every path already swapped was rolled back, this target keeps the body it had"
     done
-    rm -rf "$_prose_stg" "$_prose_old"
+    rm_owned_tree "$_prose_stg" "$_prose_old"
   }
 
   # The PROGRAM-READ tier is copied unconditionally, in every layout. init.sh execs

@@ -1325,6 +1325,35 @@ f04_all_stubs_in_tier() {
   [ "$_fa_n" = "0" ] || fail "$_fa_ctx: $_fa_n prose-tier path(s) are still full body files"
 }
 
+# modes_bind_this_uid — true when THIS user is actually constrained by directory mode bits.
+#
+# A BEHAVIOURAL PROBE, DELIBERATELY NOT `id -u`. Some fixtures below need a real filesystem
+# REFUSAL as their trigger, and root never gets one: `0555` does not stop it unlinking or
+# moving anything, so the run those fixtures require to FAIL succeeds instead and the suite
+# fails as root. That is not a cosmetic problem — AGENTS.md rule 1 makes this suite the gate
+# for all agent work, so a suite that cannot pass as root breaks the gate in every root
+# container and many CI images. (Codex #3805383759.)
+#
+# Asking the FILESYSTEM beats asking for the uid on two counts: it is an INDEPENDENT oracle
+# rather than a second reading of the same number, and it also covers the non-root user who
+# is nonetheless unconstrained — a mount that ignores modes, an ACL that grants override.
+# The probe reproduces the exact shape the fixtures rely on: a `0555` directory with a file
+# inside it, which `rm -rf` must not be able to empty.
+modes_bind_this_uid() {
+  _mbu="$AU/.mode-probe.$$"
+  chmod -R u+w "$_mbu" 2>/dev/null || :
+  rm -rf "$_mbu" 2>/dev/null || :
+  mkdir -p "$_mbu/ro" || return 1
+  : > "$_mbu/ro/f" || return 1
+  chmod 0555 "$_mbu/ro" || return 1
+  if rm -rf "$_mbu" 2>/dev/null; then
+    return 1
+  fi
+  chmod -R u+w "$_mbu" 2>/dev/null || :
+  rm -rf "$_mbu" 2>/dev/null || :
+  return 0
+}
+
 # f04_phys <dir> — the PHYSICAL path of <dir>. The cascade resolves the umbrella with
 # `pwd -P` before installing, so every path it prints is physical while `mktemp -d` hands
 # this suite the symlinked form (/var/... vs /private/var/... on macOS). Matching the
@@ -2272,10 +2301,65 @@ pass "R2 thin_refuses_self_referential_umbrella_root — a root resolving to the
 # rule forbids. Measured on the sequential implementation with this fixture: 20 stubs and 10
 # real files in one child. (Codex r2 P2 #3799616454.)
 #
-# THE ONLY PORTABLE MID-WRITE FAILURE this suite can build is a read-only directory INSIDE
-# the child's prose tier. `.harness/specs` holds tier entries 4 and 5 of 5, so entries 1-3
-# have already been swapped by the time the write reaches it, and moving `specs/_templates`
-# out of a 0555 directory is refused. It needs no root and no platform tricks.
+# ── the swap half, with a trigger that needs NO permissions ─────────────────────────────
+# THE FAILURE IS STRUCTURAL, NOT A MODE BIT. `prose_swap_in` opens with
+# `mkdir -p "$(dirname "$_pi_dst")"`, and for tier entry 4 of 5 that directory is
+# `.harness/specs`. `mkdir -p` over a REGULAR FILE fails with EEXIST/ENOTDIR — which is not a
+# permission check, so root cannot bypass it — while entries 1-3 have already been swapped.
+# The previous trigger was a `0555` directory, and root moves straight through it: as root the
+# write SUCCEEDED, the control below fired, and the suite failed. A skip would have fixed the
+# gate while testing the rollback on no root box at all; this tests it on every box.
+#
+# IT RUNS ON THE MAINTENANCE ARM, which is what makes the trigger reachable: the conversion arm
+# would first compare the tier against the umbrella and refuse outright, because a `specs` that
+# is a file has no `specs/_templates` under it to be pristine.
+#
+# WHAT MAKES THE ROLLBACK OBSERVABLE ON A TIER THAT IS ALREADY STUBS: entries 1-3 are given a
+# MARKER LINE first. A rolled-back run restores the operator's exact bytes, marker included; a
+# run that left the swap in place would show freshly written stubs without it. The marker is
+# APPENDED so line 1 stays the sentinel and the child still reads as thin — overwrite line 1
+# and `child_is_full_copy` sends the run to the conversion arm instead.
+F04Q="$AU/f04q"
+mk_umb "$F04Q" kid
+cascade "$F04Q" --thin
+KQ4="$F04Q/kid/.harness"
+f04_all_stubs_in_tier "$KQ4" "R2 swap-half fixture (the child must be thin, or this run takes another arm)"
+F04Q_MARKED='AGENTS.md agents/builder.md docs/WORKFLOW.md'
+for _q in $F04Q_MARKED; do
+  printf 'OPERATOR-MARKER-DO-NOT-LOSE\n' >> "$KQ4/$_q"
+  is_stub "$KQ4/$_q" \
+    || fail "R2 swap-half control: marking $_q destroyed the stub sentinel on line 1, so the child no longer reads as thin and the run would take the conversion arm"
+done
+rm -rf "$KQ4/specs"
+printf 'this is a regular file, not a directory\n' > "$KQ4/specs"
+[ -f "$KQ4/specs" ] \
+  || fail "R2 swap-half control: .harness/specs is not a regular file, so mkdir -p will succeed and the write will not fail"
+F04Q_OUT="$(CODEX_HOME="$F04Q/.ch" HOME="$F04Q/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude "$F04Q/kid" 2>&1)" && F04Q_RC=0 || F04Q_RC=$?
+[ "$F04Q_RC" = "0" ] \
+  && fail "R2 swap-half control: the install SUCCEEDED with .harness/specs a regular file, so the swap never failed and nothing below discriminates: $F04Q_OUT"
+printf '%s\n' 2>/dev/null "$F04Q_OUT" | grep -qF 'could not install the thin prose tier' \
+  || fail "R2 swap-half control: the run failed somewhere other than the prose-tier SWAP, so no swap was ever rolled back: $F04Q_OUT"
+# THE CLAIM: every entry already swapped is back, byte for byte, including content this run
+# did not write and could not reconstruct.
+for _q in $F04Q_MARKED; do
+  grep -qF 'OPERATOR-MARKER-DO-NOT-LOSE' "$KQ4/$_q" \
+    || fail "R2: after a swap that failed at entry 4 of 5, $_q lost the bytes it held before the run — the rollback did not restore it, so the tier is part-written: $F04Q_OUT"
+done
+[ "$(head -n 1 "$KQ4/specs")" = 'this is a regular file, not a directory' ] \
+  || fail "R2: the failed run modified .harness/specs, which it never successfully swapped"
+F04Q_DEBRIS="$(ls -d "$KQ4"/.harness-prose-* 2>/dev/null || true)"
+[ -z "$F04Q_DEBRIS" ] \
+  || fail "R2: the rolled-back run left staging directories inside .harness: $F04Q_DEBRIS"
+
+# ── the same half again, on a PRISTINE FULL COPY — richer, but mode-dependent ───────────
+# This is the product's actual claim (R2 is about CONVERSIONS): a full-copy child that fails
+# part-way must still be byte-identical to the umbrella afterwards. No permission-free trigger
+# reaches it — the conversion arm requires a pristine tier, which forecloses every structural
+# shape — so it runs only where mode bits bind, and the deterministic half above is what
+# carries the rollback on the boxes where they do not.
+F04L_SKIPPED=0
+if modes_bind_this_uid; then
 F04L="$AU/f04l"
 f04_fullchild "$F04L" kid
 KL4="$F04L/kid/.harness"
@@ -2304,6 +2388,10 @@ done
 F04L_DEBRIS="$(ls -d "$KL4"/.harness-prose-* 2>/dev/null || true)"
 [ -z "$F04L_DEBRIS" ] \
   || fail "R2: the rolled-back run left staging directories inside .harness: $F04L_DEBRIS"
+else
+  F04L_SKIPPED=1
+  echo "skip - R2 full-copy swap half: mode bits do not bind this user (uid $(id -u)), so a 0555 directory cannot make the write fail and the rows would assert a refusal that never happens; the structural swap half above covers the rollback here" >&2
+fi
 
 # THE OTHER HALF OF THE WRITE, and it needs its own trigger. The check above fails while
 # entries are being SWAPPED IN; this one fails while they are still being BUILT. They are
@@ -2322,7 +2410,17 @@ F04L_DEBRIS="$(ls -d "$KL4"/.harness-prose-* 2>/dev/null || true)"
 # file inside `specs/_templates` — tier entry 4 of 5 — makes `cp -R` fail with entries 1-3
 # already staged, needs no root, and leaves a staging tree `rm -rf` can still remove, which a
 # 0000 DIRECTORY would not.
-F04M="$AU/f04m"
+#
+# AND IT IS MODE-DEPENDENT TOO, which the swap half's finding did not mention: root reads a
+# `0000` file, so as root `cp -R` succeeds, the build never fails, and the control below fires.
+# Unlike the swap half there is no structural substitute — `stage_tree` can only be made to
+# fail through the umbrella body's contents, and every shape that survives the entry-set's
+# `[ -e ]` filter is one `cp -R` copies happily (a socket would do it on BSD, but I cannot
+# verify GNU `cp` here and trading a root dependence for an untested libc dependence is not a
+# fix). So this half announces a skip where modes do not bind, and says so.
+F04N_SKIPPED=0
+if modes_bind_this_uid; then
+F04M="$AU/f04m2"
 mk_umb "$F04M" kid
 cascade "$F04M"
 [ -f "$F04M/.harness/.harness-version" ] \
@@ -2351,7 +2449,109 @@ for _p in $F04_TIER; do
   [ -e "$F04M/fresh/.harness/$_p" ] \
     && fail "R2: the thin prose tier failed to BUILD and yet $_p was written — the tier is part-written while the run reports that nothing was replaced: $F04M_OUT"
 done
-pass "R2 thin_partial_failure_leaves_tier_whole — a write that fails part-way leaves the tier whole in both halves: a failed swap rolls the earlier swaps back, and a failed build writes nothing at all"
+else
+  F04N_SKIPPED=1
+  echo "skip - R2 build half: mode bits do not bind this user (uid $(id -u)), so an unreadable file cannot make \`cp -R\` fail and the rows would assert a failure that never happens" >&2
+fi
+# THE SKIPS ARE PINNED, because the announcements above cannot be relied on to surface: the
+# configured verification.test_command captures each suite's stderr and prints it only on
+# failure, so on a green run these lines are discarded. Unpinned, a skip that became
+# always-taken would leave the suite green while both mode-dependent halves ran nowhere.
+# These re-read `id -u`, so they are controls rather than independent oracles — they cannot
+# catch a wholesale rewrite of the probe, but they do kill the single-point mutation (forcing
+# the branch always-true) that is the realistic way this rots. The probe itself asks the
+# filesystem, which is the stronger question; this only asks that its answer was plausible.
+for _sk in "F04L_SKIPPED=$F04L_SKIPPED" "F04N_SKIPPED=$F04N_SKIPPED"; do
+  [ "${_sk#*=}" = "0" ] || [ "$(id -u)" = "0" ] \
+    || fail "R2: ${_sk%%=*} fired as uid $(id -u) — a user whose mode bits are NOT bypassed was told they were, so a half that could have run was skipped instead"
+done
+pass "R2 thin_partial_failure_leaves_tier_whole — a write that fails part-way leaves the tier whole in both halves: a failed swap rolls the earlier swaps back (on a permission-free structural trigger, plus a richer full-copy variant where modes bind), and a failed build writes nothing at all"
+
+# ── R2/R8: the cleanup after a SUCCEEDING conversion cannot wedge the child ─────────────
+# thin_cleanup_removes_readonly_parked_tree
+#
+# The case above is about a write that FAILS. This one is about a write that SUCCEEDS and is
+# then undone by its own housekeeping. `cp -R` carries the source's modes, so a prose tier
+# holding a `0555` directory produces a PARKED ORIGINAL holding one, and the final
+# `rm -rf` of that parked tree cannot unlink through it. Under `set -e` the run then dies
+# AFTER the tier has been swapped — measured, and each of these is a separate wrong thing
+# (Codex #3805383748):
+#   exit 1, with `rm: … Directory not empty` as the only explanation
+#   the tier CONVERTED on disk
+#   `manifest.txt` still saying `full body layout`, because the run died before it
+#   `.harness-prose-replaced.<pid>` left inside `.harness`
+# The report also predicted that subsequent installs would fail on the same debris. They do
+# NOT: `$_prose_old` carries the PID, so a later run creates its own and never touches it.
+# Measured over two further `--thin` runs, both exit 0. The debris simply accumulates and
+# `init.sh` still reports the child healthy, which makes the wedge silent rather than loud.
+#
+# THE MODE IS ON THE CHILD'S SIDE ONLY, which is what keeps the tier convertible: `diff -rq`
+# compares content, not permission bits, so a `0555` directory is still byte-identical to the
+# umbrella's and the conversion proceeds — reaching the cleanup, which is the point.
+F04R_SKIPPED=0
+if modes_bind_this_uid; then
+  F04R="$AU/f04r"
+  F04R_SRC="$AU/f04r-src"
+  mkdir -p "$F04R_SRC"
+  for _rd in harness-install.sh VERSION AGENTS.md init.sh agents docs store tools specs \
+             harness.config.yaml umbrella.manifest.example.yaml umbrella.gitignore.example; do
+    [ -e "$SRC/$_rd" ] && cp -R "$SRC/$_rd" "$F04R_SRC/"
+  done
+  # A NESTED directory under a prose entry, because the tier ROOT must stay writable: moving
+  # `docs` aside needs write access to `docs` itself, so a read-only ROOT fails the SWAP and
+  # never reaches the cleanup this case is about.
+  #
+  # THE MODE IS SET ON THE SOURCE, not on the installed child, and that is not a shortcut: it
+  # is how the shape actually arises. `cp -R` carries the source's modes across, so every
+  # install of such a source plants a read-only directory in the target — which is what makes
+  # the second install below a real idempotence claim rather than a contrived one.
+  mkdir -p "$F04R_SRC/docs/nested"
+  echo "nested body" > "$F04R_SRC/docs/nested/deep.md"
+  chmod 0555 "$F04R_SRC/docs/nested"
+  mk_umb "$F04R" kid
+  CODEX_HOME="$F04R/.ch" HOME="$F04R/.home" \
+    sh "$F04R_SRC/harness-install.sh" --agents=claude "$F04R/kid" >/dev/null 2>&1 \
+    || fail "R2 cleanup fixture: the FIRST install from a source holding a read-only directory failed"
+  KR4="$F04R/kid/.harness"
+  [ -d "$KR4/docs/nested" ] \
+    || fail "R2 cleanup fixture: the doctored source did not put a nested directory under docs/"
+  [ -w "$KR4/docs/nested" ] \
+    && fail "R2 cleanup control: the installed docs/nested is writable, so cp -R did not carry the source's mode across and nothing below has anything to trip on"
+  # THE ORDINARY COPY PATH FIRST, because it is where this rule bites hardest and it is NOT the
+  # cited site: `copy` also `rm -rf`s a tree it laid down with `cp -R`, so a source carrying a
+  # read-only directory made the installer NON-IDEMPOTENT — install 1 exit 0, install 2 exit 1,
+  # measured. One helper rather than one more `chmod` at one more call site is what fixes both.
+  F04R_OUT2="$(CODEX_HOME="$F04R/.ch" HOME="$F04R/.home" \
+    sh "$F04R_SRC/harness-install.sh" --agents=claude "$F04R/kid" 2>&1)" && F04R_RC2=0 || F04R_RC2=$?
+  [ "$F04R_RC2" = "0" ] \
+    || fail "R2: re-installing over a target whose body holds a read-only directory exited $F04R_RC2 — the installer is not idempotent for such a source: $F04R_OUT2"
+  CODEX_HOME="$F04R/.ch" HOME="$F04R/.home" \
+    sh "$F04R_SRC/harness-install.sh" --umbrella "$F04R" --agents=claude >/dev/null 2>&1 || true
+  f04_no_stub_in_tier "$KR4" "R2 cleanup fixture (the child must be a FULL COPY to convert)"
+  # PRECONDITION: the tier is STILL convertible — without it the run refuses and never cleans up.
+  diff -rq "$KR4/docs" "$F04R/.harness/docs" >/dev/null 2>&1 \
+    || fail "R2 cleanup control: the child's docs/ already differs from the umbrella's BY CONTENT, so the run would refuse before reaching the cleanup"
+  F04R_OUT="$(CODEX_HOME="$F04R/.ch" HOME="$F04R/.home" \
+    sh "$F04R_SRC/harness-install.sh" --agents=claude --thin "$F04R/kid" 2>&1)" && F04R_RC=0 || F04R_RC=$?
+  chmod -R u+w "$KR4" 2>/dev/null || :
+  [ "$F04R_RC" = "0" ] \
+    || fail "R2: a conversion whose parked original holds a read-only directory exited $F04R_RC — the tier is already swapped by then, so the run fails after changing the child: $F04R_OUT"
+  # ALL FOUR CONSEQUENCES, not just the exit status: a run that merely stopped failing while
+  # still leaving debris or a lying manifest would satisfy an exit-code-only assertion.
+  f04_all_stubs_in_tier "$KR4" "R2 (the conversion must still convert the whole tier)"
+  grep -q 'This target holds the thin body layout' "$KR4/manifest.txt" \
+    || fail "R2/R8: the child converted but its manifest does not record the thin layout — the run died before writing it, so the manifest disagrees with the tier on disk: $(grep -o 'holds the [a-z]* body layout' "$KR4/manifest.txt" 2>/dev/null)"
+  F04R_DEBRIS="$(ls -d "$KR4"/.harness-prose-* 2>/dev/null || true)"
+  [ -z "$F04R_DEBRIS" ] \
+    || fail "R2: the conversion left its parked originals inside .harness: $F04R_DEBRIS"
+  chmod -R u+w "$F04R_SRC" 2>/dev/null || :
+  pass "R2/R8 thin_cleanup_removes_readonly_parked_tree — a conversion whose parked original holds a read-only directory still exits 0, records the thin layout and leaves no debris, and an ordinary re-install over the same shape stays idempotent"
+else
+  F04R_SKIPPED=1
+  echo "skip - R2/R8 thin_cleanup_removes_readonly_parked_tree: mode bits do not bind this user (uid $(id -u)), so \`rm -rf\` cannot fail on a 0555 directory and the wedge this pins cannot occur here" >&2
+fi
+[ "$F04R_SKIPPED" = "0" ] || [ "$(id -u)" = "0" ] \
+  || fail "R2: the cleanup case was SKIPPED as uid $(id -u) — the probe told a constrained user their mode bits were bypassed, so the case ran nowhere"
 
 # ── R9/R10/R11: --standalone, the documented way back ──────────────────────────────────
 # standalone_materialises_body / standalone_clears_umbrella_root / standalone_is_idempotent
