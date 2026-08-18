@@ -301,8 +301,37 @@ _rc=0; sh "$RUN" --jobs 4 >/dev/null 2>&1 || _rc=$?
 printf '# known-broken under dash: test_ghost.sh — E99-F999\n' >"$WORK/t/tests/dash-allowlist.txt"
 _rc=0; sh "$RUN" --jobs 4 >/dev/null 2>&1 || _rc=$?
 [ "$_rc" -eq 4 ] || fail "R17: an allowlist entry naming a non-existent suite was accepted (got $_rc)"
+# ...and VALIDATION IS FILE-WIDE, so a subset run catches the stale entry too. Narrowing
+# this to the selection would let the list rot: only a full run would ever complain.
+_rc=0; sh "$RUN" --jobs 4 "$WORK/t/tests/test_a.sh" >/dev/null 2>&1 || _rc=$?
+[ "$_rc" -eq 4 ] \
+  || fail "R17: a stale allowlist entry went unreported on a subset run (got $_rc) — the list can rot"
 rm -f "$WORK/t/tests/dash-allowlist.txt"
 pass "R17 the dash allowlist fails closed: no unnamed and no stale exemptions"
+
+# ── R17b: the exemption set is the allowlist INTERSECTED WITH THE SELECTION ───
+# Applied file-wide, the warning does not merely miscount — it asserts "ran under
+# /bin/sh" about a suite that never ran at all, in the one line this feature exists to
+# make trustworthy. Asserted on the ABSENCE OF THE SUITE'S NAME, not on the number: a
+# count-based guard passes for the wrong reason too easily.
+printf '# known-broken under dash: test_b.sh — E99-F999\n' >"$WORK/t/tests/dash-allowlist.txt"
+out="$(sh "$RUN" --jobs 4 "$WORK/t/tests/test_a.sh" 2>&1)" \
+  || fail "R17b: selecting one suite with another allowlisted exited non-zero"
+echo "$out" | grep -q 'test_b.sh' \
+  && fail "R17b: reported an UNSELECTED suite as exempt — it never ran: $out"
+echo "$out" | grep -q 'exempt' \
+  && fail "R17b: claimed an exemption on a run where no selected suite was exempt: $out"
+# Positive control — without it, the two assertions above would also pass if the warning
+# had simply been broken or removed. A selected exempt suite must still be named AND
+# counted, so the silence above is specifically about the intersection.
+out="$(sh "$RUN" --jobs 4 "$WORK/t/tests/test_b.sh" 2>&1)" \
+  || fail "R17b control: selecting the allowlisted suite exited non-zero"
+echo "$out" | grep -q 'test_b.sh' \
+  || fail "R17b control: a SELECTED exempt suite was not named — the warning is broken: $out"
+echo "$out" | grep -q '1 exempt' \
+  || fail "R17b control: a SELECTED exempt suite was not counted: $out"
+rm -f "$WORK/t/tests/dash-allowlist.txt"
+pass "R17b exemptions follow the selection; validation stays file-wide"
 
 # R18: the shipped allowlist is EMPTY of entries. Every suite in this repo runs under the
 # strict shell today; if that ever changes, the entry — and this assertion — must be

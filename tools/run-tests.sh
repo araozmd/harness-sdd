@@ -201,6 +201,19 @@ strict_id="$(shell_ident "$strict_sh")" || strict_id=""
 #
 # An allowlisted suite is exempt from EXECUTING under dash. It is NOT exempt from the
 # `-n` pre-flight below, and it still runs under the host `sh`.
+#
+# TWO DIFFERENT SCOPES, deliberately (Codex #153 r1 P2):
+#
+#   VALIDATION is FILE-WIDE. Every entry is parsed and checked against the disk no matter
+#   which suites this invocation selected. A stale entry is a maintenance defect in the
+#   list itself, so narrowing this to the selection would make it invisible to anyone
+#   running a subset — the list could rot indefinitely and only a full run would say so.
+#
+#   EXEMPTION is SELECTION-SCOPED (computed below, once the selection is known). Warning
+#   about or counting a suite that was never selected does not merely miscount: it prints
+#   "ran under /bin/sh" about a suite that DID NOT RUN AT ALL. A false statement in the
+#   one line this whole feature exists to make trustworthy is worse than the ambiguity it
+#   set out to remove.
 allow_file="$root/tests/dash-allowlist.txt"
 allowed=""
 if [ -f "$allow_file" ]; then
@@ -231,6 +244,23 @@ if [ -f "$allow_file" ]; then
     fi
     allowed="$allowed $_a_suite"
   done < "$allow_file"
+fi
+
+# The exemption set: the allowlist INTERSECTED with the suites this run actually selected.
+# Everything downstream — which interpreter each child uses, the warning, the count — reads
+# `exempt`, never `allowed`, so nothing can be reported about a suite that never ran.
+exempt=""
+if [ -n "$allowed" ]; then
+  for _s in "$@"; do
+    _sb="$(basename "$_s")"
+    case " $allowed " in
+      *" $_sb "*)
+        case " $exempt " in
+          *" $_sb "*) ;;                        # a suite named twice is still one exemption
+          *) exempt="$exempt $_sb" ;;
+        esac ;;
+    esac
+  done
 fi
 
 # ── `-n` pre-flight, over EVERY suite in this run AND every tool ──────────────────────
@@ -301,7 +331,7 @@ printf '%s\n' "$@" | xargs -P "$jobs" -I _SUITE_ sh -c '
   else
     echo $? >"$work/$base.rc"
   fi
-' _ _SUITE_ "$work" "$strict_sh" "$fallback_sh" "$allowed" "$shim" || true
+' _ _SUITE_ "$work" "$strict_sh" "$fallback_sh" "$exempt" "$shim" || true
 
 failed=0
 failed_names=""
@@ -324,15 +354,15 @@ done
 # An exemption is never allowed to be invisible: if anything ran under the host shell
 # instead of the strict one, it is named, every run, on stderr...
 exempt_note=""
-if [ -n "$allowed" ]; then
+if [ -n "$exempt" ]; then
   printf '⚠️  exempt from the dash gate (ran under %s, not %s):%s — see %s\n' \
-    "$fallback_sh" "$strict_sh" "$allowed" "$allow_file" >&2
+    "$fallback_sh" "$strict_sh" "$exempt" "$allow_file" >&2
   # ...and COUNTED in the summary itself, on stdout. The warning above is on stderr, and a
   # caller that captures only stdout would otherwise read "all N suites passed (/bin/dash)"
   # while some of those N never faced dash at all — the exact invisible skip this list is
   # supposed to prevent.
   _n_exempt=0
-  for _e in $allowed; do _n_exempt=$((_n_exempt + 1)); done
+  for _e in $exempt; do _n_exempt=$((_n_exempt + 1)); done
   exempt_note="$(printf ', %d exempt' "$_n_exempt")"
 fi
 

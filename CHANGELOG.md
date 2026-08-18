@@ -324,6 +324,13 @@ a malformed entry rather than guessing. An exemption buys exemption from EXECUTI
 else: the suite still runs under the host `sh`, still gets its parse pre-flight, and is counted
 on the stdout summary (`, N exempt`) — not only in a stderr warning a caller may never capture.
 
+**Two scopes, on purpose.** Allowlist *validation* is file-wide: every entry is parsed and
+checked against the disk on every invocation, so a stale entry is reported even by someone
+running a single suite (narrowing it to the selection would let the list rot until the next full
+run). *Exemption* is intersected with the selected suites: applied file-wide it reported
+`ran under /bin/sh` about a suite that had not run at all, which is a false statement in the one
+line this feature exists to make trustworthy.
+
 Sequenced deliberately after E99-F134 so the list could start empty rather than as a list of
 excuses.
 
