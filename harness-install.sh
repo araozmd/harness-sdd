@@ -1088,7 +1088,11 @@ _ptb_entry_blockers() {
   # CAPTURE INSIDE AN `if`. This script runs under `set -eu` and `diff` exits non-zero
   # in exactly the case this feature exists for, so a bare `_out="$(diff -rq A B)"` would
   # kill the run the moment a child differs.
-  if _ptb_out="$(diff -rq "$_ptb_a" "$_ptb_b" 2>&1)"; then
+  # `diff -q` is human-readable output, so force POSIX's stable message locale. The parser
+  # below still treats the exit status as authoritative and anchors every recognised form
+  # on the TWO EXACT roots passed to diff; splitting on the first ` and ` / `: ` would be
+  # ambiguous because both strings are legal in an absolute parent path.
+  if _ptb_out="$(LC_ALL=C diff -rq "$_ptb_a" "$_ptb_b" 2>&1)"; then
     return 0
   fi
   # THE EXIT STATUS IS THE CONTRACT — the parsed lines only NAME the paths. Without this
@@ -1107,16 +1111,35 @@ _ptb_entry_blockers() {
       # `Only in <dir>: <name>` CARRIES THE DIRECTORY AND THE BASENAME SEPARATELY — the
       # joined path never appears in it, so this form MUST be normalised or R3's
       # "name every differing path" is unsatisfiable.
-      "Only in "*": "*)
-        _ptb_d="${_ptb_line#Only in }"
-        _ptb_n="${_ptb_d#*: }"
-        _ptb_d="${_ptb_d%%: *}"
-        _ptb_p="$_ptb_d/$_ptb_n"
+      "Only in $_ptb_a: "*)
+        _ptb_n="${_ptb_line#"Only in $_ptb_a: "}"
+        _ptb_p="$_ptb_a/$_ptb_n"
         ;;
-      # `Files <a> and <b> differ` already carries a full path; take the child's side.
-      "Files "*" and "*" differ")
-        _ptb_p="${_ptb_line#Files }"
-        _ptb_p="${_ptb_p%% and *}"
+      "Only in $_ptb_b: "*)
+        _ptb_n="${_ptb_line#"Only in $_ptb_b: "}"
+        _ptb_p="$_ptb_b/$_ptb_n"
+        ;;
+      "Only in $_ptb_a/"*": "*)
+        _ptb_rest="${_ptb_line#"Only in $_ptb_a/"}"
+        _ptb_d="${_ptb_rest%: *}"
+        _ptb_n="${_ptb_rest##*: }"
+        _ptb_p="$_ptb_a/$_ptb_d/$_ptb_n"
+        ;;
+      "Only in $_ptb_b/"*": "*)
+        _ptb_rest="${_ptb_line#"Only in $_ptb_b/"}"
+        _ptb_d="${_ptb_rest%: *}"
+        _ptb_n="${_ptb_rest##*: }"
+        _ptb_p="$_ptb_b/$_ptb_d/$_ptb_n"
+        ;;
+      # Anchor both sides on the exact arguments. A parent directory may itself contain
+      # ` and `, so the prose separator alone cannot identify where the child path ends.
+      "Files $_ptb_a and $_ptb_b differ")
+        _ptb_p="$_ptb_a"
+        ;;
+      "Files $_ptb_a/"*" and $_ptb_b/"*" differ")
+        _ptb_rest="${_ptb_line#"Files $_ptb_a/"}"
+        _ptb_n="${_ptb_rest%%" and $_ptb_b/"*}"
+        _ptb_p="$_ptb_a/$_ptb_n"
         ;;
       # Anything else (a file-vs-directory clash, a diff error) is still a blocker, and
       # the line still has to carry the path — so synthesise it from the tier entry.
@@ -2746,7 +2769,7 @@ install_one() {
   # that path, and the recursion carries it down unchanged.
   #
   # Note the direction: this does not build the shape, it only thins what `cp -R` built.
-  # That inversion is the point — see stub_tree below.
+  # That inversion is the point — see thin_prose_tier below.
   #
   # Globs, not `find | while read`: a glob is newline-safe by construction, and this repo has
   # already been bitten by paths containing newlines. `find -exec` cannot help here because

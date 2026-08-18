@@ -1661,6 +1661,29 @@ F04I_N="$(printf '%s\n' 2>/dev/null "$F04I_OUT" | grep -o 'differs: [^ ]*' | wc 
   || fail "R3: $F04I_N blocking path(s) were named, want exactly the one seeded on the umbrella side: $F04I_OUT"
 pass "R3 thin_umbrella_side_path_is_named — a path the umbrella holds and the child does not is named with its joined path"
 
+# ── R3: blocker paths do not depend on delimiters in the absolute parent path ─────────
+# thin_blocker_paths_ignore_parent_delimiters
+#
+# `diff -q` describes changes as human prose. Both separators it uses (` and ` for a
+# two-sided difference, `: ` for an Only-in difference) are legal inside the ABSOLUTE
+# parent path. Splitting at the first separator truncates that parent and makes the
+# fail-closed normaliser report only `agents` / `docs`, even though the comparison still
+# correctly blocks conversion. The parser must anchor on the two roots it already knows.
+F04J="$AU/f04j parent and pair: marker"
+f04_fullchild "$F04J" kid
+KJ4="$F04J/kid/.harness"
+printf '\na two-sided edit below a delimiter-bearing parent\n' >> "$KJ4/agents/builder.md"
+printf 'a child-only file below a delimiter-bearing parent\n' > "$KJ4/docs/extra-local.md"
+F04J_OUT="$(CODEX_HOME="$F04J/.ch" HOME="$F04J/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude --thin "$F04J/kid" 2>&1)" && F04J_RC=0 || F04J_RC=$?
+[ "$F04J_RC" = "0" ] || fail "R3 delimiter-parent: single-target --thin exited $F04J_RC: $F04J_OUT"
+for _p in agents/builder.md docs/extra-local.md; do
+  printf '%s\n' 2>/dev/null "$F04J_OUT" | grep -qF "differs: $_p" \
+    || fail "R3: a diff delimiter inside the absolute parent path hid the exact blocker $_p: $F04J_OUT"
+done
+f04_no_stub_in_tier "$KJ4" "R3 (delimiter-bearing absolute parents must not weaken blocker reporting)"
+pass "R3 thin_blocker_paths_ignore_parent_delimiters — known roots, not prose separators, delimit exact paths"
+
 # ── R2/R3: a SYMLINK is compared as a PATH, never read through to its content ───────────
 # thin_symlink_shapes_block
 #

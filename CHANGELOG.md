@@ -14,7 +14,7 @@ nobody was going to re-create five child repos to opt in. This adds the migratio
 reverse — as two explicit flags on `harness-install.sh`.
 
 - **`--thin` converts a full-copy child of a reachable umbrella** to pointer stubs, using
-  the same `stub_tree` a fresh thin install uses, so a converted child is
+  the same `thin_prose_tier` path a fresh thin install uses, so a converted child is
   byte-indistinguishable from a fresh one. Valid in single-target and `--umbrella` mode.
 - **Pristine-only, and all-or-nothing.** A path is stubbed only when it is byte-identical
   to the umbrella body's copy of the same relative path — the copy the stub will point at.

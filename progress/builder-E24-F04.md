@@ -456,3 +456,13 @@ repair commits: `./init.sh` green, `sh -n harness-install.sh` green, `tests/test
 green, and `sh tools/run-tests.sh` reports **all 43 suites passed** under
 `/bin/dash [PROGRAM:dash PROJECT:dash-16]` with `--jobs 8`. Change-size versus the latest
 `origin/main`: **799 production lines / 4 files**, tier **ok**.
+
+### Independent-review repair
+
+The final read-only review found one P2: `diff -rq` was forced to fail closed, but its exact-path
+diagnostics still split English prose at the first ` and ` / `: `. A parent path containing those
+legal strings reduced `agents/builder.md` and `docs/extra-local.md` to the tier roots `agents` and
+`docs`. A new integration fixture reproduced that exact output before the fix. The parser now
+runs `diff` under `LC_ALL=C` and anchors both recognised message forms on the two exact roots it
+passed to `diff`; the same fixture and the complete umbrella suite pass. The review's P3 was also
+correct: the changelog named the removed `stub_tree` helper and now names `thin_prose_tier`.
