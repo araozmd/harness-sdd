@@ -5,6 +5,12 @@ set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 DOC="$ROOT/docs/RATIONALE.md"
+# E99-F131: the ONE fence rule. Both ledger slicers below reset on `/^## /`, so a fenced
+# block whose lines begin with `#` would end the section early and every row assertion after
+# it would run against a prefix — non-empty, and therefore invisible to a mere emptiness
+# check. docs/RATIONALE.md carries no fences today; this is the same "green by luck of
+# content" state R9/R9b were in before they were fixed.
+FENCE_AWK="$(cat "$ROOT/tests/lib/fence.awk")"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
@@ -39,9 +45,10 @@ ledger_shape() {
   has '## Deletion ledger' "$DOC" "missing deletion ledger section"
   has '| Mechanism | Layer | Why it exists now | Evidence to reconsider or remove | Repository pointers |' \
     "$DOC" "ledger header differs from contract"
-  _rows="$(awk '
-    /^## Deletion ledger$/ { ledger=1; next }
-    ledger && /^## / { exit }
+  _rows="$(awk "$FENCE_AWK"'
+    fence_delim($0) { next }
+    !fence && /^## Deletion ledger$/ { ledger=1; next }
+    !fence && ledger && /^## / { exit }
     ledger && /^\| (C[1-8]|D([1-9]|1[0-3])) / { count++ }
     END { print count+0 }
   ' "$DOC")"
@@ -94,9 +101,10 @@ durable_inventory() {
 }
 
 row_evidence_completeness() {
-  awk '
-    /^## Deletion ledger$/ { ledger=1; next }
-    ledger && /^## / { exit }
+  awk "$FENCE_AWK"'
+    fence_delim($0) { next }
+    !fence && /^## Deletion ledger$/ { ledger=1; next }
+    !fence && ledger && /^## / { exit }
     ledger && /^\| (C[1-8]|D([1-9]|1[0-3])) / {
       n=split($0, cell, "|")
       if (n != 7) {

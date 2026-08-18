@@ -896,29 +896,44 @@ for _s in "$ROOT"/tests/test_*.sh; do
   grep -qE 'function[[:space:]]+fence_delim' "$_s" \
     && fail "R9d: $(basename "$_s") defines fence_delim() inline instead of loading tests/lib/fence.awk — that is a second copy of the rule, which is exactly the drift this check exists to prevent"
 done
-# …and per-SLICER, not per-file. The call check above proves only that SOME slicer in the
-# suite calls the shared rule: a file with two extractors can have one reverted while the
-# other keeps the grep satisfied. Measured — reverting `sect()` in test_stacked_doctrine.sh
-# while leaving `span()` alone left every check green. That is the same
-# proxy-instead-of-property defect for the third time in this file's history: first the path
-# STRING stood in for the call, then ONE call stood in for all of them.
+# …and per-SLICER, not per-file, and NOT by banning spellings. The call check above proves
+# only that SOME slicer in the suite calls the shared rule, and a ban on one toggle spelling
+# is a treadmill: `{f=!f}` was banned, `{f=1-f}` is the same toggle and slips straight past.
+# Both were measured on this repo's own sect()/span() pair. That is four spellings of one
+# defect on this item — a PATH STRING for the call, ONE call for all of them, then one banned
+# idiom for every idiom — and each was a proxy standing in for the property.
 #
-# So ban the superseded IDIOM itself, which is what a reverted slicer must reintroduce: a
-# self-negating toggle driven by a bare fence pattern (`/^```/{f=!f}`). A blanket ban on
-# matching a fence was tried earlier and correctly rejected — test_pr_loop.sh's `/^```bash$/`
-# pulls a block out of markdown IT generated, which is legitimate — so this matches the
-# TOGGLE, not the match. The delimiter run is built into a variable so this assertion cannot
-# match its own source line, the technique R10 of
-# tests/test_scratch_and_disk_preconditions.sh established. Shell COMMENT lines are excluded
-# before matching: three lines in this very file quote the superseded form while explaining
-# it, and a check that forbids naming the thing it forbids is one the next maintainer deletes
-# rather than obeys. A commented-out toggle is not an executing one.
-_BT='```'
-for _s in "$ROOT"/tests/test_*.sh; do
-  grep -v '^[[:space:]]*#' "$_s" \
-    | grep -qE "/\^$_BT[^/]*/.*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*![[:space:]]*[A-Za-z_]" \
-    && fail "R9d: $(basename "$_s") drives a fence toggle from a bare backtick pattern instead of calling fence_delim() from tests/lib/fence.awk — that is the superseded rule reintroduced, and it mis-tracks tilde, indented and long-run delimiters exactly as before"
-done
+# The property is: every heading slicer calls the shared rule. So assert exactly that, per
+# awk PROGRAM. Both the heading reset and the `fence_delim(...)` call live inside the same
+# single-quoted awk program in every slicer here, so a program that resets on a heading and
+# does not call it is a slicer running its own fence logic — whatever that logic is spelled
+# like. python3 does the scan because the suite already depends on it (see `field()`), and a
+# spelling-agnostic structural check is worth more than a regex that must be extended each
+# time someone writes the same bug differently.
+python3 - "$ROOT" <<'PYEOF' || fail "R9d: a heading slicer does not call fence_delim() from tests/lib/fence.awk (see the message above) — it is running its own fence logic, which is the second copy this check exists to prevent"
+import glob, os, re, sys
+root = sys.argv[1]
+# A MARKDOWN heading reset is GENERIC — `/^#+ /` or `/^## /` with nothing after the space.
+# A literal banner slices a YAML comment instead, where `#` at column 0 IS the intended
+# sentinel and there are no fenced blocks; three suites do that legitimately and must not
+# be dragged in. That distinction came out of this PR's eight-suite audit.
+HEADING_RESETS = ("/^#+ /", "/^## /")
+bad = []
+for path in sorted(glob.glob(os.path.join(root, "tests", "test_*.sh"))):
+    src = open(path, encoding="utf-8").read()
+    # every single-quoted segment; in this codebase an awk program is exactly one of these
+    for m in re.finditer(r"'([^']*)'", src, re.S):
+        prog = m.group(1)
+        # only a segment that is actually an awk PROGRAM — the same quoting shape is used by
+        # python heredocs and by ordinary quoted prose, and neither slices markdown.
+        if "awk" not in src[max(0, m.start() - 120):m.start()]:
+            continue
+        if any(h in prog for h in HEADING_RESETS) and "fence_delim(" not in prog:
+            bad.append((os.path.basename(path), " ".join(prog.split())[:90]))
+for name, snippet in bad:
+    sys.stderr.write("  %s: slicer resets on a heading without calling fence_delim(): %s\n" % (name, snippet))
+sys.exit(1 if bad else 0)
+PYEOF
 pass "R9d the shared fence rule handles tilde / indented / long-run delimiters, each proven against the superseded toggle"
 
 echo "All change-size tests passed."
