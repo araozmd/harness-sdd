@@ -604,8 +604,16 @@ def manifest_repos(hdir):
         if key_indent is None:
             key_indent = indent
         if indent == key_indent:
+            if key in repos:
+                # A DUPLICATE key is a malformed authority. `setdefault` silently kept the
+                # first and let the later `path:` win, so a conflicted or partial edit
+                # resolved confidently against the LAST checkout — and `next-task.mjs`
+                # rejects duplicates outright, so the two readers of one file disagreed
+                # about whether the manifest was usable at all. Same family as
+                # unreadable≠absent: an authority that contradicts itself is not one.
+                return "unreadable", {}
             current = key
-            repos.setdefault(current, None)
+            repos[current] = None
         elif current is not None and key == "path" and value:
             repos[current] = os.path.normpath(
                 os.path.join(mdir, value.strip('"').strip("'"))
@@ -734,10 +742,18 @@ def default_branch(repo):
 
 def _capture(outcome, repo_name, identity, state, mapping, cand, chosen=None):
     """Build the Witness from exactly what `resolve()` consulted (see `Witness`)."""
+    # Exclude every candidate that IS the chosen repository, not merely the one directory
+    # that was picked. A sibling linked worktree is a different path over the same store,
+    # so fingerprinting it as an unrelated candidate made any commit in the chosen repo
+    # flip the re-check to false while a fresh resolve was unchanged — a FALSE ALARM that
+    # breaks the not-promised clause by the back door. `same_repository()` already knows
+    # this (common git dir), and using it here is what stops the two notions disagreeing.
+    # It is the layout this tool actually runs in: harness-sdd is worked through linked
+    # worktrees. Called at RESOLVE time, where child processes are allowed.
     others = tuple(
         (lex, _storage_fingerprint(lex))
         for lex, _real in cand
-        if chosen is None or os.path.realpath(lex) != os.path.realpath(chosen)
+        if chosen is None or not same_repository(lex, chosen)
     )
     return Witness(
         outcome=outcome, repo=repo_name,

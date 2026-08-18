@@ -187,6 +187,24 @@ cp "$U/manifest.good" "$U/umbrella.manifest.yaml"
 ask "$ALIAS_MAIN" alpha "$HD" "r.outcome"
 [ "$ASK_OUT" = "resolved" ] || fail "C3 control: the same binding did not resolve once the manifest was readable again (got $ASK_OUT)"
 
+# A DUPLICATE key is a malformed authority too. `setdefault` kept the first and let the
+# later `path:` win, so a conflicted or partial edit resolved confidently against the LAST
+# checkout — while `tools/next-task.mjs` rejects duplicates outright, so the two readers of
+# one file disagreed about whether it was usable at all.
+cp "$U/umbrella.manifest.yaml" "$U/manifest.good2"
+printf 'repos:\n  alpha:\n    path: ../aliased-elsewhere\n  alpha:\n    path: ../decoy-elsewhere\n' \
+  > "$U/umbrella.manifest.yaml"
+ask "$ALIAS_MAIN" alpha "$HD" "r.outcome"
+[ "$ASK_OUT" = "unreadable" ] \
+  || fail "C3: a manifest declaring the same repository TWICE returned $ASK_OUT — the later path silently wins, so a conflicted edit resolves against the wrong checkout, and next-task.mjs rejects the same file outright"
+# CONTROL: the same shape with DISTINCT keys is usable — so the refusal is about the
+# duplicate, not about a two-entry manifest.
+printf 'repos:\n  alpha:\n    path: ../aliased-elsewhere\n  beta:\n    path: ../decoy-elsewhere\n' \
+  > "$U/umbrella.manifest.yaml"
+ask "$ALIAS_MAIN" alpha "$HD" "r.outcome"
+[ "$ASK_OUT" = "resolved" ] || fail "C3 control: a two-entry manifest with DISTINCT keys was rejected (got $ASK_OUT)"
+cp "$U/manifest.good2" "$U/umbrella.manifest.yaml"
+
 # CONTROL: with no manifest configured there is no authority, so nothing is 'undeclared'.
 mv "$U/umbrella.manifest.yaml" "$U/manifest.parked"
 ask "$ALIAS_MAIN" undeclared "$HD" "r.outcome"
@@ -493,8 +511,11 @@ if action == "acquire":
     subprocess.run(["git", "update-ref", "refs/heads/copied", ref],
                    cwd=os.environ["BYSTANDER"], stdout=-3, stderr=-3)
 elif action == "advance-chosen":
+    # UNIQUE content every time. This action runs more than once, and a second identical
+    # write leaves nothing to commit — git exits non-zero, the store never moves, and the
+    # assertion passes without exercising anything. Measured: it made a mutation survive.
     d = r.directory
-    open(os.path.join(d, "more.txt"), "w").close()
+    open(os.path.join(d, "more-%s.txt" % os.urandom(4).hex()), "w").write("x")
     for c in (["add", "-A"], ["commit", "-m", "someone else's merge"]):
         subprocess.run(["git", "-c", "user.email=t@e", "-c", "user.name=t"] + c,
                        cwd=d, stdout=-3, stderr=-3)
@@ -512,6 +533,18 @@ mem() { SRC="$SRC" OWNER="$MEM/owner" BYSTANDER="$MEM/bystander" python3 "$T/mem
 # and every later case would start from an `ambiguous` fixture.)
 [ "$(mem advance-chosen)" = "True None" ] \
   || fail "C9: the CHOSEN repository's branch advancing aborted the re-check ($(mem advance-chosen)) — that is an ordinary merge, and aborting on it would make the guard fire constantly"
+# ...and the not-promised clause must survive the layout this tool actually runs in.
+# harness-sdd is worked through LINKED WORKTREES, and a sibling worktree of the chosen
+# repository is a different path over the SAME store — fingerprinting it as an unrelated
+# candidate made any commit in the chosen repo flip the re-check to false while a fresh
+# resolve was unchanged. A false alarm, and it breaks the clause by the back door.
+( cd "$MEM/owner" && git_q worktree add "$MEM/owner-wt" -b owner-wt-branch )
+[ -f "$MEM/owner-wt/.git" ] || fail "C9 setup: the sibling worktree has no gitfile, so the layout is not exercised"
+[ "$(mem none)" = "True None" ] \
+  || fail "C9: an unchanged world stopped holding once a sibling worktree of the CHOSEN repository existed ($(mem none))"
+[ "$(mem advance-chosen)" = "True None" ] \
+  || fail "C9: with a sibling linked worktree present, the CHOSEN repository's own branch advancing flipped the re-check to false ($(mem advance-chosen)) — a sibling worktree is the same repository over a different path, and treating it as a bystander re-breaks the not-promised clause"
+( cd "$MEM/owner" && git_q worktree remove --force "$MEM/owner-wt" )
 case "$(mem acquire)" in
   False*) ;;
   *) fail "C9: a neighbouring repository ACQUIRED the ref between resolve and the re-check and the witness still said 'unchanged' — every path and identity is identical, but a fresh resolve would now be ambiguous: $(mem acquire)" ;;

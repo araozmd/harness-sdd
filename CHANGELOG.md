@@ -78,7 +78,16 @@ The contract it publishes (and now owns):
   resolved by reading `commondir` — file reads only, so it stays lock-safe while reaching
   the same store `same_repository()` reasons about. It states what it does **not** see:
   objects borrowed via `objects/info/alternates` (the file is fingerprinted, the borrowed
-  store is not), and any change leaving both listing and mtimes identical.
+  store is not), and any change leaving both listing and mtimes identical. Candidates are
+  excluded from that membership check by REPOSITORY, not by directory: a sibling linked
+  worktree is another path over the same store, and fingerprinting it as an unrelated
+  neighbour made any commit in the chosen repository flip the re-check to false while a
+  fresh resolve was unchanged — a false alarm that broke the not-promised clause by the
+  back door, in the layout this tool actually runs in.
+- **A manifest that declares the same repository twice is `unreadable`.** The later `path:`
+  silently won, so a conflicted or partial edit resolved confidently against the *last*
+  checkout — while `next-task.mjs` rejects duplicate keys outright, so the two readers of
+  one file disagreed about whether it was usable at all.
 - **An unreadable manifest is not an absent one.** `absent` means no authority exists, and
   only that licenses a basename search; `unreadable` (a partial write, tab indentation)
   means the authority exists and cannot be read, where a search can return a confident
