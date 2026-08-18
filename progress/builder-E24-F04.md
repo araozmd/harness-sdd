@@ -428,3 +428,31 @@ Nothing substantive. One deviation, stated above and deliberate: the `specs/glos
 assertion is its own case rather than an entry in the `:1510` loop, because that loop's failure
 message would misdiagnose this shape. The predicate, the fixture and the measured kills are
 exactly the ones the review verified.
+
+## PR repair checkpoint — 2026-08-18
+
+Four live Codex threads were audited against the branch, not inferred from their unresolved
+state. The self-referential `umbrella.root` refusal and the `--standalone` recovery instruction
+were already present and covered. The remaining two portability gaps were closed in
+`be8d160`: harness-owned cleanup now makes its own tree writable before removal, and the
+mid-swap rollback test asserts the structural outcome even when uid 0 makes mode bits
+non-binding.
+
+Two fresh mutations pin those changes:
+
+- deleting `chmod -R u+w` from `rm_owned_tree` makes the read-only reinstall case fail at the
+  expected permission-denied cleanup, while the pristine installer passes;
+- neutralising the swap-back helper while forcing the test's mode probe to report non-binding
+  makes the structural rollback marker fail because `AGENTS.md` loses the operator bytes.
+
+Both mutants were restored byte-clean. `aa9eaaa` also repairs a pre-existing red baseline in
+`tests/test_inception.sh`: its zero-dependency fallback now accepts the same five epic states as
+the authoritative schema. The failure reproduced on `origin/main` before that one-line test-only
+change.
+
+Latest-main integration was repeated after PRs #148, #154, and #153 landed. Their releases remain
+0.67.0 and 0.68.0; E24-F04 is restamped **0.69.0**. Final local verification at `60aed02` plus the
+repair commits: `./init.sh` green, `sh -n harness-install.sh` green, `tests/test_inception.sh`
+green, and `sh tools/run-tests.sh` reports **all 43 suites passed** under
+`/bin/dash [PROGRAM:dash PROJECT:dash-16]` with `--jobs 8`. Change-size versus the latest
+`origin/main`: **799 production lines / 4 files**, tier **ok**.
