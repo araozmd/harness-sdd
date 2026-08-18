@@ -4,7 +4,7 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
-## [0.68.0] — 2026-08-18
+## [0.69.0] — 2026-08-18
 
 ### Added — ✨ migrate an existing child to the thin layout, and back (E24-F04)
 
@@ -54,6 +54,53 @@ reverse — as two explicit flags on `harness-install.sh`.
 transition and the reverse. Covered by new cases in `tests/test_umbrella.sh`,
 `tests/test_install.sh` and `tests/test_init_drift_guard.sh`.
 
+## [0.68.0] — 2026-08-18
+
+### Added — ✨ the gate runs the strictest available shell, and says which one (E99-F135)
+
+`tools/run-tests.sh` invoked `sh`. On Debian/Ubuntu `sh` **is** dash, so every bashism in a
+suite was already a live defect for those users — and invisible from a Mac, where `sh` is bash
+in POSIX mode. `all 42 suites passed` was therefore a claim about the developer's machine.
+
+The runner now probes for the strictest shell it can actually find (dash → posh → ash → sh),
+**executes** the suites under it, and prints it: `all 42 suites passed (/bin/dash [PROGRAM:dash
+PROJECT:dash-16], --jobs 8)`.
+
+**Executing matters, parsing is not enough.** `local`, `[[ ]]`, arrays, `echo -e` and `${x^^}`
+all parse cleanly under dash and fail at RUNTIME, so a `-n` check alone would have shipped a
+green meaning "it parses on Debian". The `-n` pre-flight is kept as well — it is nearly free and
+catches the class at the cheapest point — and it runs over **every** suite, including exempt
+ones. New exit code **3** = a suite or tool did not parse; nothing was executed.
+
+**The allowlist ships EMPTY, and that is the point.** `tests/dash-allowlist.txt` exists so that
+if a suite ever cannot run under the strict shell, the exemption is NAMED and attributable
+(`# known-broken under dash: <suite> — <issue id>`) rather than a suite that quietly stopped
+running. An unnamed skip is the invisible debt this gate exists to end, so the runner exits 4 on
+a malformed entry rather than guessing. An exemption buys exemption from EXECUTING and nothing
+else: the suite still runs under the host `sh`, still gets its parse pre-flight, and is counted
+on the stdout summary (`, N exempt`) — not only in a stderr warning a caller may never capture.
+
+**Two scopes, on purpose.** Allowlist *validation* is file-wide: every entry is parsed and
+checked against the disk on every invocation, so a stale entry is reported even by someone
+running a single suite (narrowing it to the selection would let the list rot until the next full
+run). *Exemption* is intersected with the selected suites: applied file-wide it reported
+`ran under /bin/sh` about a suite that had not run at all, which is a false statement in the one
+line this feature exists to make trustworthy.
+
+Sequenced deliberately after E99-F134 so the list could start empty rather than as a list of
+excuses.
+
+### Fixed — 🐛 the pr-loop sandbox trusted `command -v` (E99-F135)
+
+`tests/test_pr_loop.sh`'s `mk_sandbox_bin` linked `command -v env` into a sandbox PATH. **dash
+returns the first NAME match on PATH regardless of the execute bit; bash skips
+non-executables.** With a mode-0644 `env` earlier on PATH, dash linked the unusable one and
+`env … sh` died with 126 — one assertion, in one suite, green under bash. It also did
+`ln -sf printf <bin>/printf`, a symlink to itself, broken under every shell and unnoticed
+because nothing exec'd it. Replaced with a PATH walk that demands `-f` and `-x`.
+
+Found by running the suites under dash for the first time — which is the whole argument for
+this change.
 ## [0.67.0] — 2026-08-18
 
 ### Added — ✨ the landing record becomes a VERDICT (E99-F129)
@@ -251,7 +298,6 @@ The suite mirrors the table and the identity contract: **25 cases**, every refus
 SUCCEED. The contract half's `R18` — which proved that half performed **no** I/O — is
 deliberately **retired rather than weakened**: that claim is false here by design, and its
 successor is `R17`, which allows I/O but proves none of it happens **inside** the board lock.
-
 ## [0.66.0] — 2026-08-18
 
 ### Added — ✨ a round's outcome is stated, and the trend counts what was acted on (E99-F126 + E99-F116)

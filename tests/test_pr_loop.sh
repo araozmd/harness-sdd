@@ -748,13 +748,44 @@ test_watcher_installed_executable_posix() {           # R21
 }
 
 # ── stubbed-gh + sandboxed-PATH helpers ───────────────────────────────────────
+# first_exec <name> — the first PATH entry that is a REAL EXECUTABLE FILE, or nothing.
+#
+# `command -v` is NOT good enough here, and how it is not good enough DEPENDS ON THE
+# SHELL — which is precisely the kind of green this suite must not produce:
+#
+#   - dash answers with the first NAME match whether or not it is executable. A 0644
+#     `~/.local/bin/env` sitting earlier on PATH is therefore reported as "the" env,
+#     mk_sandbox_bin symlinks it, and every `env ... sh "$W"` in the sandbox dies with
+#     exit 126 "Permission denied". bash's `command -v` skips non-executables and finds
+#     /usr/bin/env, so the identical tree was GREEN under bash-as-/bin/sh (macOS) and RED
+#     under dash (Debian/Ubuntu /bin/sh) — the suite was reporting on the developer's
+#     PATH, not on the watcher.
+#   - for a BUILTIN it prints a bare word (`printf` -> `printf`), and `ln -sf printf
+#     <bin>/printf` is a symlink to ITSELF. That one is broken under every shell; it went
+#     unnoticed only because nothing in the sandbox shells out to printf.
+#
+# Both failures produce a sandbox that LOOKS populated and is not, so resolve the PATH
+# here and demand -f -x rather than trusting any shell's lookup.
+first_exec() {
+  _fe_n="$1"; _fe_hit=""; _fe_oifs="$IFS"
+  IFS=:
+  set -f                      # PATH entries are literal paths, never globs
+  for _fe_d in $PATH; do
+    [ -n "$_fe_d" ] || _fe_d=.
+    if [ -f "$_fe_d/$_fe_n" ] && [ -x "$_fe_d/$_fe_n" ]; then _fe_hit="$_fe_d/$_fe_n"; break; fi
+  done
+  set +f
+  IFS="$_fe_oifs"
+  printf '%s' "$_fe_hit"
+}
+
 # mk_sandbox_bin <dir> — a PATH dir holding ONLY the utilities the watcher needs, so a
 # test can prove `gh`/`jq` are genuinely absent instead of asserting it in prose.
 mk_sandbox_bin() {
   mkdir -p "$1"
   for _u in sh dash bash env mkdir rm cat cut sleep grep sed date basename dirname \
             cmp ls touch mv cp sort uniq head tail tr wc printf; do
-    _p="$(command -v "$_u" 2>/dev/null || true)"
+    _p="$(first_exec "$_u")"
     if [ -n "$_p" ]; then ln -sf "$_p" "$1/$_u"; fi
   done
 }
@@ -822,7 +853,9 @@ STUB
 # mk_dummy_jq <bin-dir> — a `jq` that only has to EXIST (preflight does `command -v jq`).
 mk_dummy_jq() { printf '#!/bin/sh\nexit 0\n' > "$1/jq"; chmod +x "$1/jq"; }
 # link_real_jq <bin-dir> — the real jq, for the wait-mode tests that actually run filters.
-link_real_jq() { ln -sf "$(command -v jq)" "$1/jq"; }
+# Resolved through first_exec for the same reason as the sandbox: a non-executable `jq`
+# earlier on PATH is reported by dash's `command -v` and would be linked in as a 126.
+link_real_jq() { ln -sf "$(first_exec jq)" "$1/jq"; }
 
 # mk_stub_payload <dir> <kind> — canned GitHub responses. `.page.json` files are what a
 # `--paginate --slurp` fetch returns (an array of pages), which the watcher flattens.

@@ -1,0 +1,27 @@
+# dash-allowlist.txt — suites exempt from EXECUTING under the strict shell (E99-F135).
+#
+# THIS FILE IS EMPTY OF ENTRIES, AND THAT IS THE POINT. Every suite in tests/ runs, and
+# passes, under dash today. The list exists so that if one ever cannot, the exemption is
+# NAMED and attributable instead of being a suite that quietly stopped running.
+#
+# Format — one entry per line, exactly:
+#
+#     # known-broken under dash: <suite> — <issue id>
+#
+# e.g.  # known-broken under dash: test_example.sh — E99-F999
+#
+# Rules enforced by tools/run-tests.sh (it exits 4 rather than guessing):
+#   - an entry with no " — <issue id>" is a usage error, not an exemption. An unnamed
+#     skip is the invisible debt this whole gate exists to end.
+#   - an entry naming a suite that does not exist is a usage error. Prune it: the list is
+#     allowed to shrink and nothing else.
+#   - anything not named here runs under the strict shell. Fail-closed, always.
+#
+# An entry buys exemption from EXECUTING under dash and nothing more:
+#   - the suite still RUNS, under the host `sh`;
+#   - the suite still gets its `-n` parse pre-flight under the strict shell;
+#   - the runner prints a warning naming every exempt suite on every run.
+#
+# Before adding one, try to fix the suite instead. A bashism in a `#!/bin/sh` suite is
+# already a live defect for every Debian/Ubuntu user, where `sh` IS dash — the exemption
+# only hides it from the person who could fix it.

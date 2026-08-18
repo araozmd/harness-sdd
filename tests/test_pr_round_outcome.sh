@@ -470,9 +470,15 @@ test_the_tool_stays_advisory() {
 # heading does. The naive one-liner therefore ended the section at the first commented line
 # of the first code block and silently returned a fragment — an extractor that under-reads is
 # as bad as a whole-file grep, in the opposite direction.
+# E99-F131: THE ONE fence rule, loaded from tests/lib/fence.awk. This slicer used to
+# hand-roll `/^```/{fence=!fence}`, which sees only a column-0 backtick run and therefore
+# mis-tracks a tilde fence, an indented fence, and a shorter run inside a longer one — the
+# same under-read this function's own comment warns about, one level down. R9d of
+# tests/test_change_size.sh fails any heading slicer that does not call the shared rule.
+FENCE_AWK="$(cat "$SRC/tests/lib/fence.awk")"
 section() {
-  awk -v h="$2" '
-    /^```/    { fence = !fence; if (k) print; next }
+  awk -v h="$2" "$FENCE_AWK"'
+    fence_delim($0) { if (k) print; next }
     !fence && /^#+ / { k = (index($0, h) > 0); next }
     k
   ' "$1"
