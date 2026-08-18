@@ -531,7 +531,7 @@ evidence — **one binding per slice repository**.
 | omitted, on **any** feature (sliced included) | **REFUSED**, board left byte-identical |
 | **unbound** (`<ref>`, no `<repo>=`) on a **sliced** feature | **REFUSED** — it names no repository, so it attests no particular slice |
 | bound to a repo the feature has **no slice in**, **repeated** for one repo, or **missing** for a slice repo | **REFUSED**, naming the repository |
-| `<repo>=<ref>` on a feature with **no** slices | **REFUSED** — it would record a repository the feature does not have |
+| `<repo>=<ref>` on a feature with **no** slices | **accepted**, and it is the only remedy for an ambiguous ref — the name is resolved and checked, so the record names a repository that was actually consulted |
 | on any **non-`done`** transition | **REFUSED** — the record means one thing |
 
 The value is never pattern-matched: asking whether a string "looks like a commit id"

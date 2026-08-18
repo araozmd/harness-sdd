@@ -1436,7 +1436,7 @@ def _check_plan_still_applies(text, target_id, plan, hdir):
     return plan["record"]
 
 
-def _set_status_text_transform(target_id, status, plan=None):
+def _set_status_text_transform(target_id, status, plan=None, hdir=None):
     """Build a TEXT transform that changes ONLY the target's status value.
 
     Unlike a parse → mutate → re-serialize round-trip (which reformats every
@@ -1450,6 +1450,16 @@ def _set_status_text_transform(target_id, status, plan=None):
     `plan` is the PRE-LOCK landing resolution (`_landing_plan`). Everything this
     transform does is pure and local — no child process, no network — so the lock is
     held only for the re-read → patch → validate → replace it always covered.
+
+    `hdir` is that same PRE-LOCK harness directory, passed in rather than re-derived,
+    and it is what makes the sentence above true. `_harness_dir()` is not free: on a
+    checkout with no `HARNESS_DIR` set it runs `_in_linked_worktree()`, which spawns up
+    to four `git rev-parse` calls, each bounded at five seconds. Called from inside this
+    closure it ran INSIDE the critical section, so a slow git or filesystem could hold
+    the sole board lock for ~20s — past the default 10s bounded acquisition — and starve
+    a concurrent writer out of its own transition. That is precisely the lost-update
+    failure the pre-lock landing plan exists to prevent, reintroduced by the guard built
+    on top of it. Resolving it once before `run()` costs the same calls outside the lock.
     """
 
     def transform(text):
@@ -1458,7 +1468,9 @@ def _set_status_text_transform(target_id, status, plan=None):
         # still answers for the board being written, so a refusal leaves the board
         # byte-identical and no external call runs in-lock.
         landed = (
-            _check_plan_still_applies(text, target_id, plan, _harness_dir())
+            _check_plan_still_applies(
+                text, target_id, plan, hdir if hdir is not None else _harness_dir()
+            )
             if plan is not None
             else None
         )
@@ -1821,10 +1833,12 @@ def main(argv):
         # bounded NETWORK calls, and holding the sole write lock across them starved
         # concurrent writers out of their own transitions. The transform re-validates
         # the resolution against the in-lock re-read.
-        plan = _landing_plan(
-            args.id, args.status, args.evidence or [], _harness_dir()
-        )
-        transform = _set_status_text_transform(args.id, args.status, plan)
+        # Resolve the harness dir ONCE, here, outside the lock: the transform closes over
+        # it instead of re-deriving it in-lock, where its `git rev-parse` probes could
+        # hold the board lock past a concurrent writer's acquisition timeout.
+        hdir = _harness_dir()
+        plan = _landing_plan(args.id, args.status, args.evidence or [], hdir)
+        transform = _set_status_text_transform(args.id, args.status, plan, hdir)
     elif args.cmd == "apply":
         # External mutators may change arbitrary structure → parse+re-serialize.
         transform = _mutator_text_transform(_import_mutator(args.mutator))
