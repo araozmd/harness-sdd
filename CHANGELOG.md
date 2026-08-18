@@ -58,6 +58,24 @@ The contract it publishes (and now owns):
 - **Uncertainty is a value you cannot spend.** `Resolution.directory` and `.base` *raise*
   when the resolution does not have them, so "I could not tell" cannot slide into "yes".
 - **The witness comes back with the resolution**, so a call path cannot omit it.
+- **`resolve()` captures what it depended on, as a `Witness`.** The promise below was
+  never wrong, but the LIST of inputs it entails was maintained in two places — and only
+  `resolve()` actually knew. Three findings were the same shape: the re-check compared the
+  wrong field, then too few things, then too few things again (a neighbouring repository
+  that *acquires* the ref between resolve and the locked re-check leaves every path and
+  identity identical while a fresh resolve would answer `ambiguous`). So the capture moved
+  to where each dependency is **used**: `Witness.still_holds(hdir)` is the entry point, and
+  a dimension `resolve()` consults and forgets to witness is now a dimension it did not
+  consult. Ref membership is captured as a conservative, filesystem-only fingerprint of each
+  **non-chosen** candidate's refs and objects — sound in the direction that matters (a
+  repository cannot gain a commit without writing to them) and deliberately over-reporting,
+  since the cost is a re-run. The chosen repository is excluded precisely so the
+  not-promised clause survives: its own branch advancing is somebody else's merge.
+- **An unreadable manifest is not an absent one.** `absent` means no authority exists, and
+  only that licenses a basename search; `unreadable` (a partial write, tab indentation)
+  means the authority exists and cannot be read, where a search can return a confident
+  `resolved` for the **wrong** repository. New outcome `unreadable`, and the binding is
+  refused.
 - **`revalidate()` has a stated promise**: *a fresh `resolve()` with the same inputs would
   return the same outcome, the same repository, and the same certainty.* It had a name and
   an intuition instead, and two findings fell straight out of the gap — it compared the

@@ -134,7 +134,8 @@ AMBIGUOUS = "ambiguous"        # several repositories answer to this ref
 UNDECLARED = "undeclared"      # a binding names a repo the manifest does not contain
 UNLOCATABLE = "unlocatable"    # named or declared, but not readable from here
 UNKNOWN = "unknown"            # located, but nothing there resolves the ref
-OUTCOMES = (RESOLVED, AMBIGUOUS, UNDECLARED, UNLOCATABLE, UNKNOWN)
+UNREADABLE = "unreadable"      # the authority exists and could not be read
+OUTCOMES = (RESOLVED, AMBIGUOUS, UNDECLARED, UNLOCATABLE, UNKNOWN, UNREADABLE)
 
 # ── how we know what the default branch is (see I3) ───────────────────────────
 BASE_PUBLISHED = "published"                    # name AND tip agree with the remote
@@ -220,6 +221,97 @@ class Identity(object):
         return "Identity(%r -> %r)" % (self.lexical, self.real)
 
 
+def _storage_fingerprint(directory):
+    """A conservative, FILESYSTEM-ONLY change detector for a repository's refs/objects.
+
+    A repository cannot gain a commit without writing to its object store or its refs, so
+    stat-ing those is sound in the only direction that matters: if nothing here moved, the
+    repository cannot have acquired anything. It OVER-reports — unrelated local activity
+    looks like a change — and that is the deliberate side to err on, because the cost is a
+    re-run while the cost of under-reporting is spending a verdict whose uniqueness has
+    lapsed. Missing entries are recorded as None so an appearing/disappearing store shows
+    up as a change rather than as equality.
+    """
+    out = []
+    git_dir = os.path.join(directory, ".git")
+    for rel in ("", "refs", "packed-refs", "objects", os.path.join("objects", "pack")):
+        target = os.path.join(git_dir, rel) if rel else git_dir
+        try:
+            st = os.stat(target)
+            out.append((rel, st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((rel, None, None))
+    return tuple(out)
+
+
+class Witness(object):
+    """What a resolution DEPENDED ON, captured by `resolve()` at the point of use.
+
+    `revalidate()` used to re-derive this list by inspecting a finished `Resolution`, and
+    three review findings were the same shape: it compared the wrong field, then too few
+    things, then too few things again. The contract sentence was never wrong — "a fresh
+    resolve() would return the same answer" already entails all of them — but the list of
+    inputs was maintained in two places, and only one of them actually knew. So the
+    capture moved to where the dependency is USED. A dimension `resolve()` consults and
+    forgets to witness is now a dimension it did not consult.
+
+    `still_holds()` is filesystem-only and spawns no child process, so a caller may run it
+    while holding a lock.
+
+    What it deliberately does NOT promise (unchanged): the CHOSEN repository's default
+    branch advancing. That is somebody else's merge, it happens constantly, and ancestry is
+    monotone under fast-forward. This is why the storage fingerprints cover only the
+    candidates that were NOT chosen: their ref membership is what uniqueness depends on,
+    while the chosen repository's own refs moving changes the world without changing which
+    repository this answer is about.
+    """
+
+    __slots__ = ("outcome", "repo", "binding", "identity", "manifest_state",
+                 "manifest_entry", "candidates", "others")
+
+    def __init__(self, outcome, repo, binding, identity, manifest_state,
+                 manifest_entry, candidates, others):
+        self.outcome = outcome
+        self.repo = repo
+        self.binding = binding
+        self.identity = identity
+        self.manifest_state = manifest_state
+        self.manifest_entry = manifest_entry
+        self.candidates = tuple(candidates)
+        self.others = tuple(others)
+
+    def still_holds(self, hdir):
+        """Would a fresh `resolve()` give the same outcome, repository and certainty?
+
+        Returns (True, None) or (False, what changed).
+        """
+        # same REPOSITORY
+        if self.identity is not None and not self.identity.revalidate():
+            return False, "%s now resolves to %s, not %s" % (
+                self.identity.lexical, os.path.realpath(self.identity.lexical),
+                self.identity.real)
+        # same AUTHORITY
+        state, mapping = manifest_repos(hdir)
+        if state != self.manifest_state:
+            return False, "the manifest went from %s to %s" % (self.manifest_state, state)
+        if self.binding is not None and state == "present":
+            if mapping.get(self.binding) != self.manifest_entry:
+                return False, "the manifest now puts %s at %s, not %s" % (
+                    self.binding, mapping.get(self.binding), self.manifest_entry)
+        # same CERTAINTY — the search space, by path AND identity...
+        if self.candidates and tuple(candidates(hdir, pairs=True)) != self.candidates:
+            return False, ("the nearby repositories changed (a path or an identity), so "
+                           "this answer may no longer be the only one")
+        # ...and by REF MEMBERSHIP: a neighbour that acquires this ref makes a unique
+        # answer ambiguous while every path and identity above stays identical.
+        for lexical, fingerprint in self.others:
+            if _storage_fingerprint(lexical) != fingerprint:
+                return False, ("%s changed its refs or objects, so it may now hold this "
+                               "ref too and the answer may no longer be the only one"
+                               % lexical)
+        return True, None
+
+
 class Resolution(object):
     """The answer, with its own uncertainty attached. See the header.
 
@@ -230,13 +322,13 @@ class Resolution(object):
 
     __slots__ = ("outcome", "repo", "binding", "identity", "detail", "candidates",
                  "manifest_state", "_directory", "_base", "base_evidence",
-                 "has_origin", "commit", "base_tip")
+                 "has_origin", "commit", "base_tip", "_witness")
 
     def __init__(self, outcome, repo=None, binding=None, directory=None,
                  identity=None, detail=None,
                  candidates=(), manifest_state="absent", base=None,
                  base_evidence=BASE_NONE, has_origin=False, commit=None,
-                 base_tip=None):
+                 base_tip=None, witness=None):
         assert outcome in OUTCOMES, outcome
         assert base_evidence in BASE_EVIDENCE, base_evidence
         self.outcome = outcome
@@ -259,6 +351,7 @@ class Resolution(object):
         # so a caller holding that object can answer against the REAL tip instead of our
         # copy of it; `None` when the remote was not, or could not be, asked.
         self.base_tip = base_tip
+        self._witness = witness
 
     @property
     def certain(self):
@@ -316,20 +409,13 @@ class Resolution(object):
         return False
 
     def witness(self):
-        """Everything about IDENTITY this resolution assumed, as one comparable value.
+        """The `Witness` captured while resolving. See that class for the contract.
 
-        A caller re-checks a resolution by comparing witnesses, so it never assembles the
-        parts itself — the omission that let a new call path silently lose the manifest
-        from its fingerprint is not expressible here, because the witness comes back with
-        the resolution or not at all.
+        It comes back WITH the resolution or not at all, and it is built by `resolve()` at
+        the point each dependency is used — so neither "the call path forgot the witness"
+        nor "the re-check forgot a dimension" is expressible.
         """
-        return (
-            self.outcome,
-            self.repo,
-            self.identity.as_tuple() if self.identity else None,
-            self.manifest_state,
-            self.candidates,
-        )
+        return self._witness
 
 
 # ── the manifest: what it says, and where it says it from ─────────────────────
@@ -545,6 +631,21 @@ def default_branch(repo):
 # ── the one entry point ───────────────────────────────────────────────────────
 
 
+def _capture(outcome, repo_name, identity, state, mapping, cand, chosen=None):
+    """Build the Witness from exactly what `resolve()` consulted (see `Witness`)."""
+    others = tuple(
+        (lex, _storage_fingerprint(lex))
+        for lex, _real in cand
+        if chosen is None or os.path.realpath(lex) != os.path.realpath(chosen)
+    )
+    return Witness(
+        outcome=outcome, repo=repo_name,
+        binding=repo_name, identity=identity, manifest_state=state,
+        manifest_entry=mapping.get(repo_name) if repo_name is not None else None,
+        candidates=cand, others=others,
+    )
+
+
 def resolve(ref, repo_name, hdir):
     """WHICH repository is this claim about? Returns a `Resolution`, never a guess.
 
@@ -555,10 +656,24 @@ def resolve(ref, repo_name, hdir):
 
     if repo_name is not None:
         cand = ()          # a binding did no search, so there is no uniqueness to witness
+        if state == "unreadable":
+            # UNREADABLE IS NOT ABSENT. `absent` means no authority exists, and only that
+            # licenses a search; `unreadable` means the authority exists and this checkout
+            # cannot read it (a partial write, tab indentation). Falling back to a basename
+            # search there can return a confident `resolved` for the WRONG repository —
+            # precisely the guess I1 exists to forbid. Preserve the uncertainty instead.
+            return Resolution(
+                UNREADABLE, repo=repo_name, binding=repo_name, manifest_state=state,
+                witness=_capture(UNREADABLE, repo_name, None, state, mapping, cand),
+                detail="the umbrella manifest is configured but could not be read, so "
+                       "there is no authority for where %r is — and a search would be a "
+                       "guess" % repo_name,
+            )
         if state == "present":
             if repo_name not in mapping:
                 return Resolution(
                     UNDECLARED, repo=repo_name, binding=repo_name, manifest_state=state,
+                    witness=_capture(UNDECLARED, repo_name, None, state, mapping, cand),
                     detail="%s is not declared in the umbrella manifest" % repo_name,
                 )
             lexical = mapping[repo_name]
@@ -567,6 +682,9 @@ def resolve(ref, repo_name, hdir):
                     UNLOCATABLE, repo=repo_name, binding=repo_name,
                     manifest_state=state,
                     identity=Identity(lexical) if lexical else None,
+                    witness=_capture(UNLOCATABLE, repo_name,
+                                     Identity(lexical) if lexical else None,
+                                     state, mapping, cand),
                     detail="%s is declared but cannot be read from this checkout"
                            % repo_name,
                 )
@@ -577,6 +695,7 @@ def resolve(ref, repo_name, hdir):
                 return Resolution(
                     UNLOCATABLE, repo=repo_name, binding=repo_name,
                     manifest_state=state,
+                    witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand),
                     detail="no repository named %r is visible near %s" % (repo_name, hdir),
                 )
     else:
@@ -588,6 +707,9 @@ def resolve(ref, repo_name, hdir):
         return Resolution(
             UNKNOWN, repo=repo_name, binding=repo_name, manifest_state=state,
             candidates=cand,
+            witness=_capture(UNKNOWN, repo_name,
+                             Identity(dirs[0]) if (repo_name is not None and dirs) else None,
+                             state, mapping, cand),
             identity=Identity(dirs[0]) if (repo_name is not None and dirs) else None,
             detail="%s does not name a commit in %s"
                    % (ref, repo_name or ("any repository near %s" % hdir)),
@@ -601,6 +723,7 @@ def resolve(ref, repo_name, hdir):
         if len(distinct) > 1:
             return Resolution(
                 AMBIGUOUS, manifest_state=state, candidates=cand,
+                witness=_capture(AMBIGUOUS, None, None, state, mapping, cand),
                 detail="%s resolves in %d different repositories (%s)"
                        % (ref, len(distinct),
                           ", ".join(os.path.basename(d) for d in distinct)),
@@ -619,54 +742,19 @@ def resolve(ref, repo_name, hdir):
         candidates=cand,
         base=base, base_evidence=evidence, has_origin=has_origin,
         base_tip=advertised, commit=resolve_commit(chosen, ref),
+        witness=_capture(RESOLVED, repo_name, Identity(chosen), state, mapping, cand,
+                         chosen=chosen),
     )
 
 
 def revalidate(resolution, hdir):
-    """Would a fresh `resolve()` with the same inputs give the same answer?
+    """Would a fresh `resolve()` give the same answer? Delegates to the captured Witness.
 
-    True iff the outcome, the repository and the CERTAINTY would all be the same. See
-    "what `revalidate()` asserts, exactly" in the header for the promise and — just as
-    important — for what it deliberately does not promise. Filesystem and one file read
-    only: no child process, so a caller may run this while holding a lock.
-
-    Returns (True, None) or (False, what changed).
+    Kept as the callable entry point; the LIST of what matters lives in `Witness`, built by
+    `resolve()` where each dependency is used, so this function can no longer disagree with
+    it about which inputs were relevant.
     """
-    # 1. SAME REPOSITORY — the chosen directory still resolves where it did.
-    if resolution.identity is not None and not resolution.identity.revalidate():
-        return False, "%s now resolves to %s, not %s" % (
-            resolution.identity.lexical,
-            os.path.realpath(resolution.identity.lexical),
-            resolution.identity.real,
-        )
-
-    state, mapping = manifest_repos(hdir)
-
-    # 2. SAME AUTHORITY — absent↔present flips whether a claim can be malformed at all.
-    if state != resolution.manifest_state:
-        return False, "the manifest went from %s to %s" % (resolution.manifest_state, state)
-
-    # 3. SAME AUTHORITY, for a BOUND request only. `binding` is what the caller asked for;
-    #    `repo` is only the name to record, and for a search it is the chosen directory's
-    #    basename — reading THAT as a manifest key made every unbound resolution under an
-    #    aliased manifest (`alpha: {path: child}`) fail to revalidate, which is fail-safe
-    #    but useless on the very layout the manifest exists for.
-    if resolution.binding is not None and state == "present":
-        now = mapping.get(resolution.binding)
-        was = resolution.identity.lexical if resolution.identity else None
-        if now != was:
-            return False, "the manifest now puts %s at %s, not %s" % (
-                resolution.binding, now, was)
-
-    # 4. SAME CERTAINTY — uniqueness is what made an unbound answer certain, so the
-    #    candidate set must be unchanged in PATHS **and IDENTITIES**. Comparing only the
-    #    chosen repository let a NON-selected candidate be retargeted at a repository that
-    #    also holds the ref: nothing the old check looked at moved, while a fresh resolve
-    #    would now answer `ambiguous`.
-    if resolution.candidates:
-        if tuple(candidates(hdir, pairs=True)) != resolution.candidates:
-            return False, (
-                "the nearby repositories changed (a path or an identity), so this answer "
-                "may no longer be the only one"
-            )
-    return True, None
+    w = resolution.witness()
+    if w is None:
+        return False, "this resolution carries no witness"
+    return w.still_holds(hdir)

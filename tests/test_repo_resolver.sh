@@ -170,6 +170,23 @@ ask "$ALIAS_MAIN" undeclared "$HD" "r.outcome"
 [ "$ASK_OUT" = "undeclared" ] || fail "C3: a repository the manifest does not contain returned $ASK_OUT, not 'undeclared' — a malformed claim and an unreadable checkout must not be the same answer"
 ask "$ALIAS_MAIN" ghost "$HD" "r.outcome"
 [ "$ASK_OUT" = "unlocatable" ] || fail "C3: a DECLARED but absent repository returned $ASK_OUT, not 'unlocatable'"
+# UNREADABLE IS NOT ABSENT. A configured manifest that cannot be parsed (a partial write,
+# tab indentation) means the authority EXISTS and this checkout cannot read it — which does
+# not license a basename search, because a search there can return a confident `resolved`
+# for the WRONG repository. Only `absent` licenses a search.
+cp "$U/umbrella.manifest.yaml" "$U/manifest.good"
+printf 'repos:\n\talpha:\n\t\tpath: ../aliased-elsewhere\n' > "$U/umbrella.manifest.yaml"
+ask "$ALIAS_MAIN" alpha "$HD" "r.outcome"
+[ "$ASK_OUT" = "unreadable" ] \
+  || fail "C3: a configured-but-unreadable manifest returned $ASK_OUT — treating it like 'absent' falls back to a basename search, which is the guess I1 forbids"
+ask "$ALIAS_MAIN" alpha "$HD" "str(bool(r))"
+[ "$ASK_OUT" = "False" ] || fail "C3: an unreadable authority produced a TRUTHY resolution"
+# CONTROL: the same binding, same repositories, with the manifest READABLE again resolves —
+# so the refusal is about the authority being unreadable, not about this fixture.
+cp "$U/manifest.good" "$U/umbrella.manifest.yaml"
+ask "$ALIAS_MAIN" alpha "$HD" "r.outcome"
+[ "$ASK_OUT" = "resolved" ] || fail "C3 control: the same binding did not resolve once the manifest was readable again (got $ASK_OUT)"
+
 # CONTROL: with no manifest configured there is no authority, so nothing is 'undeclared'.
 mv "$U/umbrella.manifest.yaml" "$U/manifest.parked"
 ask "$ALIAS_MAIN" undeclared "$HD" "r.outcome"
@@ -313,10 +330,10 @@ pass "E99-F129c C6 uncertainty_is_a_value_you_cannot_spend"
 # The defect this closes structurally: a witness assembled beside a resolution can be
 # forgotten by the next call path — and was, by the very path added to fix an earlier
 # identity defect. A witness that IS the resolution's own value cannot be.
-ask "$ALIAS_MAIN" alpha "$HD" "str(r.witness()[3])"
+ask "$ALIAS_MAIN" alpha "$HD" "str(r.witness().manifest_state)"
 [ "$ASK_OUT" = "present" ] \
   || fail "C7: a BOUND resolution's witness does not carry the manifest state (got $ASK_OUT) — this is the omission that let a bound claim skip the manifest fingerprint entirely"
-ask "$CHILD_MAIN" - "$HD" "str(len(r.witness()[4]) > 0)"
+ask "$CHILD_MAIN" - "$HD" "str(len(r.witness().candidates) > 0)"
 [ "$ASK_OUT" = "True" ] \
   || fail "C7: an UNBOUND resolution's witness does not carry the candidate set that made the choice unambiguous"
 # CONTROL: the witness actually DISCRIMINATES — two different resolutions must not share
@@ -328,7 +345,11 @@ rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
 hd = os.environ["RES_HDIR"]
 a = rr.resolve(os.environ["ALIAS"], "alpha", hd)
 b = rr.resolve(os.environ["CHILD"], "child", hd)
-print("same" if a.witness() == b.witness() else "different")
+wa, wb = a.witness(), b.witness()
+key = lambda w: (w.outcome, w.repo, w.binding,
+                 w.identity.as_tuple() if w.identity else None,
+                 w.manifest_state, w.manifest_entry, w.candidates, w.others)
+print("same" if key(wa) == key(wb) else "different")
 PY
 grep -q "^different" "$T/c7.out" || fail "C7 control: two resolutions of DIFFERENT repositories share a witness, so comparing witnesses would detect nothing: $(cat "$T/c7.out")"
 pass "E99-F129c C7 the_witness_comes_back_with_the_resolution"
@@ -438,5 +459,63 @@ EOF
 [ "$(rev advance-base)" = "True None" ] \
   || fail "C8: the default branch advancing aborted the resolution ($(rev advance-base)) — that is an ordinary merge by someone else, not a change of WHICH repository this is about"
 pass "E99-F129c C8 revalidate_asserts_the_same_answer_not_an_unchanged_world"
+
+# ── C9: uniqueness depends on REF MEMBERSHIP, which the witness must capture ──────────
+# Round 4. A neighbouring repository that ACQUIRES the same commit between resolve() and
+# the locked re-check leaves every path and every identity identical — nothing the earlier
+# checks looked at moves — while a fresh resolve would now answer `ambiguous`. It is the
+# third "witnessed too few things" finding, which is why the capture moved INTO resolve():
+# a dimension it consults and forgets to witness is now a dimension it did not consult.
+MEM="$T/member"
+mkdir -p "$MEM/.harness"
+mkrepo "$MEM"
+mkrepo "$MEM/owner"
+mkrepo "$MEM/bystander"
+# Distinct content per repository: identical empty commits made in the same second collide
+# on one sha, which would make every repo "hold" the ref and mask what this case measures.
+echo owner > "$MEM/owner/who.txt"; ( cd "$MEM/owner" && git_q add -A && git_q commit -m owner-work )
+echo bystander > "$MEM/bystander/who.txt"; ( cd "$MEM/bystander" && git_q add -A && git_q commit -m bystander-work )
+MEM_REF="$(cd "$MEM/owner" && git rev-parse HEAD)"
+( cd "$MEM/bystander" && git cat-file -e "$MEM_REF^{commit}" 2>/dev/null ) \
+  && fail "C9 setup: the bystander already holds the ref, so acquiring it would prove nothing"
+cat > "$T/mem.py" <<'PY'
+import importlib.util, os, subprocess, sys
+spec = importlib.util.spec_from_file_location(
+    "rr", os.path.join(os.environ["SRC"], "tools/repo-resolve.py"))
+rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+hd, ref, action = sys.argv[1:4]
+r = rr.resolve(ref, None, hd)
+if r.outcome != "resolved":
+    print("SETUP-NOT-RESOLVED %s" % r.outcome); raise SystemExit(0)
+if action == "acquire":
+    subprocess.run(["git", "fetch", "-q", os.environ["OWNER"], "main"],
+                   cwd=os.environ["BYSTANDER"], stdout=-3, stderr=-3)
+    subprocess.run(["git", "update-ref", "refs/heads/copied", ref],
+                   cwd=os.environ["BYSTANDER"], stdout=-3, stderr=-3)
+elif action == "advance-chosen":
+    d = r.directory
+    open(os.path.join(d, "more.txt"), "w").close()
+    for c in (["add", "-A"], ["commit", "-m", "someone else's merge"]):
+        subprocess.run(["git", "-c", "user.email=t@e", "-c", "user.name=t"] + c,
+                       cwd=d, stdout=-3, stderr=-3)
+ok, why = rr.revalidate(r, hd)
+print("%s %s" % (ok, why))
+PY
+mem() { SRC="$SRC" OWNER="$MEM/owner" BYSTANDER="$MEM/bystander" python3 "$T/mem.py" "$MEM/.harness" "$MEM_REF" "$1"; }
+# CONTROL FIRST: an unchanged world holds — without it the refusal below could hold against
+# a witness that always says no.
+[ "$(mem none)" = "True None" ] || fail "C9 control: an unchanged world did not hold ($(mem none))"
+# The clause it must NOT break, checked BEFORE the destructive case: the CHOSEN
+# repository's own branch advancing is somebody else's merge, not a change of which
+# repository this answer is about. (Order matters — a fetched OBJECT survives deleting the
+# ref that brought it, so once the bystander has acquired the commit it holds it for good
+# and every later case would start from an `ambiguous` fixture.)
+[ "$(mem advance-chosen)" = "True None" ] \
+  || fail "C9: the CHOSEN repository's branch advancing aborted the re-check ($(mem advance-chosen)) — that is an ordinary merge, and aborting on it would make the guard fire constantly"
+case "$(mem acquire)" in
+  False*) ;;
+  *) fail "C9: a neighbouring repository ACQUIRED the ref between resolve and the re-check and the witness still said 'unchanged' — every path and identity is identical, but a fresh resolve would now be ambiguous: $(mem acquire)" ;;
+esac
+pass "E99-F129c C9 uniqueness_depends_on_ref_membership_and_the_witness_captures_it"
 
 echo "All repository-resolver tests passed."
