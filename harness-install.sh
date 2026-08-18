@@ -832,11 +832,46 @@ body_link_travels() {
   case "$_blt_t" in /*) return 1 ;; esac
   _blt_rp="$( CDPATH= cd -- "$_blt_root" 2>/dev/null && pwd -P )" || _blt_rp=''
   [ -n "$_blt_rp" ] || return 1
-  # The link's own directory, then the target's — never the target itself, which is allowed
-  # to be absent (`docs/dangling -> no-such-target` is a shape the full copy also produces).
-  _blt_dp="$( CDPATH= cd -- "$(dirname -- "$_blt_l")" 2>/dev/null \
-    && CDPATH= cd -- "$(dirname -- "$_blt_t")" 2>/dev/null && pwd -P )" || _blt_dp=''
-  [ -n "$_blt_dp" ] || return 1
+  _blt_d="$(dirname -- "$_blt_l")"
+  # (1) THE COMPLETE TARGET, resolved from the link's own directory, whenever the filesystem
+  # can resolve it at all — which is every target that IS a directory, INCLUDING one made of
+  # nothing but traversal (`..`, `../..`, `../../`). This branch exists because the first
+  # version of this predicate resolved only `dirname(target)`, and a target whose LAST
+  # component is `..` has its escape entirely in the part that `dirname` throws away.
+  # Measured on `docs/link -> ../..` (Codex #3804812828): judged travelling, kept by both the
+  # fresh and the maintenance arm, and it then names the UMBRELLA repo root at the umbrella
+  # and the CHILD repo root in the child — two different repositories, which is exactly the
+  # position dependence this predicate exists to reject. `../../` (trailing slash) is the same
+  # defect wearing a different spelling, which is why the decision is taken from the
+  # FILESYSTEM's resolution and not from the shape of the string.
+  _blt_dp="$( CDPATH= cd -- "$_blt_d" 2>/dev/null \
+    && CDPATH= cd -- "$_blt_t" 2>/dev/null && pwd -P )" || _blt_dp=''
+  if [ -z "$_blt_dp" ]; then
+    # (2) The target is not a directory: a FILE, or ABSENT — and absent has to keep working,
+    # because `docs/dangling -> no-such-target` is a shape the full copy also produces and
+    # E24-F03 requires a thin child to keep it. Only here is it sound to resolve the PARENT
+    # and treat the final component as a NAME, and only when it genuinely is one: a final
+    # `.` or `..` that did not resolve above is traversal this cannot account for, so it
+    # fails closed. `basename` is what reads that component, because it normalises the
+    # trailing-slash spellings a `case` on the raw string would miss.
+    #
+    # DELIBERATELY NOT CLAIMED AS TESTED, and the analysis is worth recording rather than
+    # discovering again: with branch (1) in place this guard looks unreachable. Reaching it
+    # needs `cd "$target"` to fail while `cd "$(dirname "$target")"` succeeds and the final
+    # component is `.` or `..` — but `a/..` resolves whenever `a` does, so the two `cd`s
+    # succeed and fail together. It is kept because it is what makes branch (2)'s inference
+    # (a parent inside the root plus a NAME is inside the root) true on its own terms rather
+    # than by leaning on branch (1) being exhaustive; delete branch (1)'s complete-target
+    # resolution and this is the line that stops the escape becoming silent again.
+    case "$(basename -- "$_blt_t")" in
+      .|..) return 1 ;;
+    esac
+    _blt_dp="$( CDPATH= cd -- "$_blt_d" 2>/dev/null \
+      && CDPATH= cd -- "$(dirname -- "$_blt_t")" 2>/dev/null && pwd -P )" || _blt_dp=''
+    [ -n "$_blt_dp" ] || return 1
+    # A parent inside the root plus a plain NAME is inside the root; that inference is what
+    # makes this branch sound, and it is why the `.`/`..` refusal above is not optional.
+  fi
   case "$_blt_dp" in
     "$_blt_rp"|"$_blt_rp"/*) return 0 ;;
   esac

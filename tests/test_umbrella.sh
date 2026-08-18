@@ -1842,12 +1842,39 @@ f04_all_stubs_in_tier "$KM4" "R5 fixture (the child must already be THIN, or thi
 cp "$UM4/agents/builder.md" "$F04M/shared-builder.md"
 rm -f "$UM4/agents/builder.md"; ln -s ../../shared-builder.md "$UM4/agents/builder.md"
 ln -s . "$UM4/docs/self"
+# THE TWO TRAVERSAL-ONLY TARGETS, and they are a PAIR: one `..` apart, opposite answers.
+#   docs/up   -> ..      the harness dir itself — the mirror root, so it means the same thing
+#                        in the child and MUST survive as a link
+#   docs/link -> ../..   one level further, the REPOSITORY root — the umbrella's at the
+#                        umbrella, the child's in the child, so it must never be planted
+# The second is the shape that resolving only `dirname(target)` got wrong: `dirname("../..")`
+# is `..`, which still lands inside the staging root, so the escape lived entirely in the
+# component that was thrown away. (Codex #3804812828.)
+ln -s .. "$UM4/docs/up"
+ln -s ../.. "$UM4/docs/link"
 # PRECONDITIONS: both links RESOLVE where they stand, so nothing here is broken going in and
 # any breakage after the run belongs to the run.
 [ -L "$UM4/agents/builder.md" ] || fail "R5 control: the umbrella's agents/builder.md is not a symlink"
 [ -r "$UM4/agents/builder.md" ] \
   || fail "R5 control: the umbrella's own link is already dangling AT THE UMBRELLA — the child's would then be broken for a reason that has nothing to do with the copy"
 [ -L "$UM4/docs/self" ] || fail "R5 control: the umbrella's docs/self is not a symlink"
+for _mu in up link; do
+  [ -L "$UM4/docs/$_mu" ] || fail "R5 control: the umbrella's docs/$_mu is not a symlink"
+  [ -d "$UM4/docs/$_mu" ] \
+    || fail "R5 control: the umbrella's docs/$_mu does not resolve to a directory at the umbrella — it is broken going in, so anything the child ends up with says nothing"
+done
+# THE PRECONDITION THAT MAKES THIS A DEFECT AND NOT A STYLE CHOICE: `docs/link` names two
+# DIFFERENT repositories depending on where the link sits. Computed, not asserted by eye.
+F04M_LU="$( CDPATH= cd -- "$UM4/docs" && CDPATH= cd -- ../.. && pwd -P )"
+F04M_LK="$( CDPATH= cd -- "$KM4/docs" && CDPATH= cd -- ../.. && pwd -P )"
+[ "$F04M_LU" != "$F04M_LK" ] \
+  || fail "R5 control: '../..' resolves to the same place ($F04M_LU) from the umbrella's docs/ and the child's, so this fixture cannot show position dependence at all"
+# …while `docs/up` names the SAME THING in both places — the harness dir — which is what makes
+# it a control for the rule rather than a second instance of the defect.
+F04M_UU="$( CDPATH= cd -- "$UM4/docs" && CDPATH= cd -- .. && pwd -P )"
+F04M_UK="$( CDPATH= cd -- "$KM4/docs" && CDPATH= cd -- .. && pwd -P )"
+[ "$F04M_UU" = "$( f04_phys "$UM4" )" ] && [ "$F04M_UK" = "$( f04_phys "$KM4" )" ] \
+  || fail "R5 control: '..' does not name each side's own harness dir ($F04M_UU / $F04M_UK), so the surviving-link control below is not the boundary case it claims to be"
 
 # NO FLAG. --thin would prove less: an already-thin child lands on this same arm either way,
 # and the unflagged run is the one an operator gets from every routine cascade.
@@ -1875,11 +1902,52 @@ grep -qF '../../.harness/agents/builder.md' "$KM4/agents/builder.md" \
   || fail "R5: docs/self is no longer a symlink in the child — the rule is 'a link that cannot travel', not 'every link', and stubbing this one breaks the E24-F03 shape guarantee"
 [ "$(readlink "$KM4/docs/self")" = "." ] \
   || fail "R5: docs/self points at '$(readlink "$KM4/docs/self")' in the child, want '.'"
+# THE TRAVERSAL PAIR, and it is one assertion about a boundary rather than two about links.
+[ -L "$KM4/docs/link" ] \
+  && fail "R5: the run kept docs/link -> ../.. in the child, where it names $F04M_LK; at the umbrella the same link names $F04M_LU — a different repository, which is the whole reason a link is not allowed to travel"
+is_stub "$KM4/docs/link" \
+  || fail "R5: docs/link is neither a link nor a stub after the run"
+grep -qF '../../.harness/docs/link' "$KM4/docs/link" \
+  || fail "R5: the stub that replaced docs/link does not name the authoritative path"
+[ -L "$KM4/docs/up" ] \
+  || fail "R5: docs/up -> .. was stubbed too — it resolves to each side's OWN harness dir, so it means the same thing in the child and must survive; refusing it as well would make the rule 'refuse traversal' rather than 'refuse position dependence', and one `..` is the whole difference between these two paths"
+[ "$(readlink "$KM4/docs/up")" = ".." ] \
+  || fail "R5: docs/up points at '$(readlink "$KM4/docs/up")' in the child, want '..'"
 # NOTHING IN THE TIER DANGLES — stated over the tree rather than the one seeded path, since a
 # partially reproduced link set is the actual hazard.
 for _ml in $(find "$KM4/AGENTS.md" "$KM4/agents" "$KM4/docs" "$KM4/specs" -type l 2>/dev/null); do
   [ -e "$_ml" ] || fail "R5: the maintenance run left a dangling link in the child's prose tier: $_ml -> $(readlink "$_ml")"
 done
+
+# ── the same rule, on the FRESH arm ─────────────────────────────────────────────────────
+# Everything above is arm (2). The predicate lives in the tier WRITER, below every arm, so a
+# child that has NEVER been installed must answer identically — and it is a different code
+# path to get there: a fresh cascade child is thinned on first contact, with no existing tier
+# to maintain. It needs a DOCTORED INSTALLER SOURCE rather than a doctored umbrella, because a
+# cascade re-installs the coordinator from source first and would wipe a link added by hand.
+F04M_SRC="$AU/f04m-src"
+mkdir -p "$F04M_SRC"
+for _md in harness-install.sh VERSION AGENTS.md init.sh agents docs store tools specs \
+           harness.config.yaml umbrella.manifest.example.yaml umbrella.gitignore.example; do
+  [ -e "$SRC/$_md" ] && cp -R "$SRC/$_md" "$F04M_SRC/"
+done
+ln -s ../.. "$F04M_SRC/docs/link"
+ln -s .. "$F04M_SRC/docs/up"
+F04N="$AU/f04n"
+mk_umb "$F04N" kid
+F04N_OUT="$(CODEX_HOME="$F04N/.ch" HOME="$F04N/.home" \
+  sh "$F04M_SRC/harness-install.sh" --umbrella "$F04N" --agents=claude --thin 2>&1)" || true
+KN4="$F04N/kid/.harness"
+# Precondition: the doctored source really did carry the link through to the umbrella body,
+# or the fresh child has nothing to have got wrong.
+[ -L "$F04N/.harness/docs/link" ] \
+  || fail "R5 fresh control: the umbrella body has no docs/link, so the fresh child was never offered the shape: $F04N_OUT"
+is_stub "$KN4/AGENTS.md" || fail "R5 fresh control: the cascade child is not thin: $F04N_OUT"
+[ -L "$KN4/docs/link" ] \
+  && fail "R5: a FRESH thin child kept docs/link -> ../.., which names the child's own repository root instead of the umbrella's — the rule has to hold on the arm that materialises a tier as much as on the one that maintains it"
+is_stub "$KN4/docs/link" || fail "R5: a fresh child's docs/link is neither a link nor a stub"
+[ -L "$KN4/docs/up" ] \
+  || fail "R5: a fresh child stubbed docs/up -> .. as well — the boundary control fails on the fresh arm"
 pass "R2/R5 thin_maintained_link_does_not_travel — an umbrella link that escapes its entry is stubbed, not planted, on the arm that judges nothing (with an in-entry link kept as a link)"
 
 # ── R1/R2: the CONVERTED TREE is built from the umbrella body, never from $SRC ──────────
