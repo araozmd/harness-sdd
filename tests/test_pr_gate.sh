@@ -333,6 +333,56 @@ echo "$out" | grep -q '1 exempt' \
 rm -f "$WORK/t/tests/dash-allowlist.txt"
 pass "R17b exemptions follow the selection; validation stays file-wide"
 
+# ── R17c: an exemption must go INTO a genuinely different interpreter ─────────
+# Falling back to the host `sh` unconditionally was wrong in both directions, and the
+# second one is the case that matters:
+#   * macOS with no dash → the strict shell IS /bin/sh, so the warning read
+#     "ran under /bin/sh, not /bin/sh" — a self-contradiction printed as a finding.
+#   * Debian/Ubuntu → /bin/sh IS dash, so an allowlisted, genuinely dash-incompatible
+#     suite still ran under dash and still failed while being reported exempt. The one
+#     host where the exemption exists to help is the one where it did nothing.
+# Assert the INVARIANT rather than a specific shell, because which shells exist is a
+# property of the host and this must hold on all of them: the warning may never name the
+# same interpreter on both sides of "ran under X, not Y".
+#
+# ⚠️ THIS TESTS THE RULE, NOT THIS HOST — and the first version of it did the opposite.
+# Asserting the invariant against a plain run passes here for an irrelevant reason: on
+# macOS `/bin/sh` is bash, so even the WRONG selection yields a fallback that differs from
+# dash, and the mutation survived. The defect only manifests where the host `sh` IS the
+# strict shell, so the test has to CREATE that condition rather than hope for it.
+#
+# So: drive the selection block itself under a PATH whose only shell is dash. `sh` then
+# resolves to the strict shell, and a correct selector must refuse it — either finding a
+# genuinely more permissive shell or reporting none.
+_sel="$WORK/sel.sh"
+sed -n '/^_realsh() {/,/^# .fallback_sh. may legitimately/p' "$RUN" >"$_sel" \
+  || fail "R17c: could not extract the fallback-selection block from run-tests.sh"
+[ -s "$_sel" ] || fail "R17c: the extracted fallback-selection block is empty — the anchors moved"
+_onlydash="$WORK/onlydash"
+mkdir -p "$_onlydash"
+_dash="$(command -v dash 2>/dev/null)" || _dash=""
+if [ -n "$_dash" ]; then
+  ln -sf "$_dash" "$_onlydash/sh"
+  {
+    echo 'strict_sh="$(command -v sh)"'
+    cat "$_sel"
+    echo 'printf "%s|%s\n" "$strict_sh" "$fallback_sh"'
+  } >"$WORK/probe.sh"
+  _got="$(PATH="$_onlydash:/usr/bin:/bin/NO_SHELLS" "$_dash" "$WORK/probe.sh" 2>/dev/null)" || _got=""
+  _s="${_got%%|*}"; _f="${_got##*|}"
+  [ -n "$_s" ] || fail "R17c: the selection probe produced no strict shell"
+  [ "$_f" = "$_s" ] \
+    && fail "R17c: on a host whose only shell IS the strict one, the selector still chose it as the FALLBACK ($_f) — an allowlisted suite would run under the very shell it is exempt from, while being reported exempt"
+  if [ -n "$_f" ]; then
+    _fr="$(readlink -f "$_f" 2>/dev/null || printf '%s' "$_f")"
+    _sr="$(readlink -f "$_s" 2>/dev/null || printf '%s' "$_s")"
+    [ "$_fr" = "$_sr" ] \
+      && fail "R17c: the fallback resolves to the SAME interpreter as the strict shell ($_fr) under a different name — comparing spellings is not comparing interpreters"
+  fi
+fi
+rm -f "$WORK/t/tests/dash-allowlist.txt"
+pass "R17c an exemption goes into a genuinely different shell, or is reported unhonourable"
+
 # R18: the shipped allowlist is EMPTY of entries. Every suite in this repo runs under the
 # strict shell today; if that ever changes, the entry — and this assertion — must be
 # changed deliberately, with an issue id attached.

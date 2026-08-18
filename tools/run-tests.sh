@@ -153,9 +153,41 @@ for _cand in dash posh ash sh; do
 done
 [ -n "$strict_sh" ] || strict_sh="/bin/sh"      # never leave the runner without a shell
 
-# fallback_sh — where an ALLOWLISTED suite runs: the host's own `sh`, i.e. the status quo.
-fallback_sh="$(command -v sh 2>/dev/null)" || fallback_sh=""
-[ -n "$fallback_sh" ] || fallback_sh="/bin/sh"
+# fallback_sh — where an ALLOWLISTED suite runs. It must be a GENUINELY DIFFERENT, more
+# permissive interpreter than `strict_sh`, or the exemption buys nothing and the report lies.
+#
+# Taking the host's `sh` unconditionally was wrong in both directions:
+#   * macOS with no dash → strict_sh IS /bin/sh, so the warning read
+#     "ran under /bin/sh, not /bin/sh" — a self-contradiction printed as a finding.
+#   * Debian/Ubuntu → /bin/sh IS dash, so an allowlisted, genuinely dash-incompatible suite
+#     still ran under dash and still failed, while being reported as exempt. The one host
+#     where the exemption actually matters is the one where it did nothing.
+#
+# So prefer the shells that ACCEPT what dash rejects — bash, ksh, zsh — and compare by
+# resolved identity, not by spelling: /bin/sh and /usr/bin/sh can be the same interpreter
+# under two names, and a string compare would call them different.
+_realsh() {                                     # resolve a shell path as far as we cheaply can
+  _rs_p="$1"
+  if command -v readlink >/dev/null 2>&1; then
+    _rs_r="$(readlink -f "$_rs_p" 2>/dev/null)" || _rs_r=""
+    [ -n "$_rs_r" ] && { printf '%s\n' "$_rs_r"; return 0; }
+  fi
+  printf '%s\n' "$_rs_p"
+}
+_strict_real="$(_realsh "$strict_sh")"
+fallback_sh=""
+for _fb in bash ksh zsh sh; do
+  _p="$(command -v "$_fb" 2>/dev/null)" || _p=""
+  [ -n "$_p" ] || continue
+  [ "$(_realsh "$_p")" = "$_strict_real" ] && continue   # same interpreter ⇒ no exemption in it
+  _rc=0; "$_p" -c 'exit 41' 2>/dev/null || _rc=$?
+  [ "$_rc" -eq 41 ] || continue
+  fallback_sh="$_p"
+  break
+done
+# `fallback_sh` may legitimately end up EMPTY — a host whose only shell is the strict one.
+# That is reported where the exemption is reported, never papered over: an exemption that
+# cannot be honoured must not be counted as one.
 
 # shell_ident <path> — an identification string for a shell, or NOTHING when none could be
 # ESTABLISHED. It never guesses and never hardcodes: an invented version in the summary
@@ -323,7 +355,11 @@ printf '%s\n' "$@" | xargs -P "$jobs" -I _SUITE_ sh -c '
   base="$(basename "$suite")"
   run="$strict"
   case " $allow " in
-    *" $base "*) run="$fallback" ;;
+    # An empty `fallback` means no interpreter on this host is more permissive than the
+    # strict one, so there is nothing to be exempt INTO — run under the strict shell and let
+    # the result stand. The summary reports the exemption as not honoured rather than
+    # silently claiming a leniency that was never applied.
+    *" $base "*) [ -z "$fallback" ] || run="$fallback" ;;
     *) [ -z "$shim" ] || { PATH="$shim:$PATH"; export PATH; } ;;
   esac
   if "$run" "$suite" >"$work/$base.log" 2>&1; then
@@ -354,7 +390,15 @@ done
 # An exemption is never allowed to be invisible: if anything ran under the host shell
 # instead of the strict one, it is named, every run, on stderr...
 exempt_note=""
-if [ -n "$exempt" ]; then
+if [ -n "$exempt" ] && [ -z "$fallback_sh" ]; then
+  # The exemption could NOT be honoured: this host has no interpreter more permissive than
+  # the strict one, so the suite ran under the strict shell anyway. Saying "exempt" here
+  # would claim a leniency that was never applied — and on the host where `sh` IS dash that
+  # is precisely the case where an allowlisted suite still fails. Report the truth and count
+  # nothing; the suite's own result already stands on its own.
+  printf '⚠️  exemption NOT honoured (no shell on this host is more permissive than %s, so these ran under it anyway):%s — see %s\n' \
+    "$strict_sh" "$exempt" "$allow_file" >&2
+elif [ -n "$exempt" ]; then
   printf '⚠️  exempt from the dash gate (ran under %s, not %s):%s — see %s\n' \
     "$fallback_sh" "$strict_sh" "$exempt" "$allow_file" >&2
   # ...and COUNTED in the summary itself, on stdout. The warning above is on stderr, and a
