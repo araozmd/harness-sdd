@@ -52,6 +52,10 @@
 #                         Only `findings` and `clean` are rounds that were actually reviewed
 #                         and may enter the rate; `timeout` and `unresolved` are reported
 #                         SEPARATELY, never folded into the rate and never dropped.
+#                         A round that leaves the rate does so into one of TWO named buckets,
+#                         never one — see "(d) bucket it" below. `not_reviewed` means the
+#                         review did not resolve; `uncounted` means it may well have, and the
+#                         thing that failed is the round's own cache. Opposite remedies.
 #   round-<n>/acted.json  what the round ACTUALLY treated as blocking, one row per finding,
 #                         each carrying its own `severity` and an `override` flag. The MERGE
 #                         gate keeps reading the conservative configured `blocking.json` —
@@ -131,7 +135,8 @@ EVALUATOR="$(dirname -- "$0")/wait-for-codex.sh"
 # cosmetic ordering bug: on a twelve-round PR — the exact case this tool exists for — it can
 # invert the verdict and tell the human to keep reviewing.
 series=""; rounds=""; n_rounds=0
-notrev=""; n_notrev=0          # rounds that were never reviewed — reported, never in the rate
+notrev=""; n_notrev=0          # rounds the review never resolved for — reported, never in the rate
+uncounted=""; n_uncounted=0    # rounds with no number to trend, where the REVIEW is not what failed
 unrec=""; n_unrec=0            # counted rounds whose outcome nobody recorded (legacy cache)
 overrides=0; override_sevs=""  # findings acted on DESPITE sitting outside blocking_severities
 TAB="$(printf '\t')"
@@ -210,16 +215,37 @@ for _n in $_ordered; do
   fi
 
   # (d) bucket it
+  #
+  # THREE ways out of the rate, and they are NOT interchangeable. The first version of this
+  # fix had two of them share `not_reviewed`, which repeated at one level down the exact
+  # defect the whole item exists to end: one bucket standing for two states, with the report
+  # confidently asserting the wrong one. A round carrying `outcome=findings` whose count file
+  # is missing was printed under "NEVER REVIEWED" and sent the operator to check the Codex
+  # GitHub App and the watcher ceiling — while the recorded outcome PROVES a review landed
+  # and the component that actually failed is classification. Healthy component inspected,
+  # broken step unnamed.
+  #
+  #   not_reviewed  the review provably did not resolve (timeout / unresolved).
+  #                 Remedy: the App, the watcher, the ceiling. Something upstream is broken
+  #                 or Codex is slow.
+  #   uncounted     the round has no number to trend, and the review is NOT the thing that
+  #                 failed. Two row states, one remedy — re-derive/re-classify THIS ROUND'S
+  #                 CACHE:
+  #                   reviewed-uncounted  an outcome proves a review landed; the count file
+  #                                       is missing or unparseable.
+  #                   no-record           nothing on disk says what happened. Not a claim
+  #                                       that the review failed — a claim that we cannot
+  #                                       tell, which is why it may not sit under a header
+  #                                       that says "never reviewed".
+  #   (in the rate) everything else.
   case "$_outcome" in
     clean)
       [ -n "$_c" ] || _c=0                        # a clean round legitimately writes no set
       rounds="$rounds $_n"; series="$series $_c"; n_rounds=$((n_rounds + 1)) ;;
     findings)
       if [ -z "$_c" ]; then
-        # Reviewed, but the count was never written (or is unparseable). There is no number
-        # to trend; say so rather than substituting zero.
-        notrev="$notrev$_n${TAB}uncounted${TAB}$_src
-"; n_notrev=$((n_notrev + 1))
+        uncounted="$uncounted$_n${TAB}reviewed-uncounted${TAB}$_src
+"; n_uncounted=$((n_uncounted + 1))
       else
         rounds="$rounds $_n"; series="$series $_c"; n_rounds=$((n_rounds + 1))
       fi ;;
@@ -235,8 +261,8 @@ for _n in $_ordered; do
         rounds="$rounds $_n"; series="$series $_c"; n_rounds=$((n_rounds + 1))
         unrec="$unrec $_n"; n_unrec=$((n_unrec + 1))
       else
-        notrev="$notrev$_n${TAB}unknown${TAB}unknown
-"; n_notrev=$((n_notrev + 1))
+        uncounted="$uncounted$_n${TAB}no-record${TAB}unknown
+"; n_uncounted=$((n_uncounted + 1))
       fi ;;
   esac
 done
@@ -324,6 +350,13 @@ if [ "$format" = json ]; then
     [ "$_f" = 1 ] || printf ','
     printf '{"round":%d,"outcome":"%s","source":"%s"}' "$_rn" "$_oc" "$_sr"; _f=0
   done
+  printf '],"uncounted":['
+  _f=1
+  printf '%s' "$uncounted" | while IFS="$TAB" read -r _rn _st _sr; do
+    [ -n "${_rn:-}" ] || continue
+    [ "$_f" = 1 ] || printf ','
+    printf '{"round":%d,"status":"%s","source":"%s"}' "$_rn" "$_st" "$_sr"; _f=0
+  done
   printf '],"unrecorded_rounds":['
   _f=1; for _v in $unrec; do [ "$_f" = 1 ] || printf ','; printf '%s' "$_v"; _f=0; done
   printf '],"overrides":%d,"override_severities":[' "$overrides"
@@ -355,6 +388,30 @@ _print_not_reviewed() {
   printf '     tools/wait-for-codex.sh preflight before spending one.\n'
 }
 
+# A DIFFERENT block, with a different remedy, on purpose. Everything here failed to produce a
+# number; none of it is a round the review failed to reach, and the one thing this block must
+# never do is send the operator to the Codex App for a review that already landed.
+_print_uncounted() {
+  [ "$n_uncounted" -gt 0 ] || return 0
+  printf '  !! %d round(s) were NOT COUNTED — the round cache is incomplete:\n' "$n_uncounted"
+  printf '%s' "$uncounted" | while IFS="$TAB" read -r _rn _st _sr; do
+    [ -n "${_rn:-}" ] || continue
+    case "$_st" in
+      reviewed-uncounted)
+        printf '       round %-3s a review DID land (outcome: %s) — its finding count is missing or unparseable\n' \
+          "$_rn" "$_sr" ;;
+      *)
+        printf '       round %-3s no record: no outcome, no readable count — nothing on disk says what happened\n' \
+          "$_rn" ;;
+    esac
+  done
+  printf '     What failed here is the round CACHE, not necessarily its review — so these do\n'
+  printf '     not belong with the block above and they do not take its remedy. Re-derive each\n'
+  printf '     one offline with `tools/wait-for-codex.sh evaluate <round-dir>`, then re-run the\n'
+  printf '     classification step for that round dir (or rebuild it from the gh API). Until\n'
+  printf '     then it is evidence of nothing, in either direction.\n'
+}
+
 _print_unrecorded() {
   [ "$n_unrec" -gt 0 ] || return 0
   printf '  !! no outcome was recorded for round(s):%s\n' "$unrec"
@@ -367,6 +424,7 @@ _print_unrecorded() {
 if [ "$n_rounds" -eq 0 ]; then
   printf 'no reviewed round with a readable finding count under %s — nothing to trend\n' "$cache"
   _print_not_reviewed
+  _print_uncounted
   exit 0
 fi
 
@@ -414,5 +472,6 @@ case "$verdict" in
 esac
 printf '\n'
 _print_not_reviewed
+_print_uncounted
 _print_unrecorded
 exit 0

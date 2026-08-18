@@ -4600,13 +4600,21 @@ a verdict, the rounds that were never reviewed, and where the findings concentra
 | `non-converging` | the last 3 **reviewed** rounds each produced a blocking finding | more rounds will not help — see the remedy it prints |
 | `insufficient` | fewer than 3 **reviewed** rounds with a readable count | no conclusion yet |
 
-**Only rounds that were actually reviewed enter the rate.** A round whose `outcome` is
-`timeout` or `unresolved` is neither counted nor dropped: it is printed in its own
-`NEVER REVIEWED` block (and `not_reviewed[]` under `--format json`). Read that block first —
-a PR that is failing to get reviewed does not need another round, it needs the watcher or the
-Codex App fixed. A round with **no** `outcome` on disk (a cache written before this file
-existed) is named under `unrecorded_rounds[]`: it is still counted so an old cache still
-trends, but its verdict is flagged as possibly optimistic rather than quietly trusted.
+**Only rounds that were actually reviewed enter the rate.** A round that leaves the rate is
+neither counted nor dropped — it is reported, in **one of two blocks that must not be
+confused**, because they have opposite remedies:
+
+| block | JSON | means | remedy |
+|---|---|---|---|
+| `NEVER REVIEWED` | `not_reviewed[]` | `outcome` is `timeout`/`unresolved` — the review did not resolve | the watcher, the ceiling, the Codex App. Another round buys nothing until that is fixed |
+| `NOT COUNTED` | `uncounted[]` | there is no number to trend, and the review is **not** what failed: either an `outcome` proves a review landed and the count file is missing/unparseable (`reviewed-uncounted`), or nothing on disk says what happened (`no-record`) | re-derive the round with `wait-for-codex.sh evaluate`, re-run step 3 for that round dir, or rebuild it from the gh API |
+
+Read `NEVER REVIEWED` first; it is the only one of the two that says something is wrong
+upstream. A `reviewed-uncounted` round sent to that remedy is an operator inspecting a healthy
+component while the broken step goes unnamed. A round with **no** `outcome` on disk but a
+readable count (a cache written before this file existed) is different again: it is named
+under `unrecorded_rounds[]`, still counted so an old cache still trends, but its verdict is
+flagged as possibly optimistic rather than quietly trusted.
 
 **Severity overrides show up as overrides.** The count comes from `acted.json`, so a P2 you
 judged blocking is in the rate — and the report says how many of the findings were overrides

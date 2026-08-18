@@ -298,6 +298,80 @@ test_the_remedy_fits_the_diff() {
   pass "E99-F126/F116 the_remedy_fits_the_diff: split only where there is a seam to cut"
 }
 
+test_an_uncounted_round_is_not_a_missing_review() {
+  have_jq || { skip "an_uncounted_round_is_not_a_missing_review (jq not installed)"; return 0; }
+  # The defect this whole item exists to end, recursed one level: one bucket standing for two
+  # states, with the report confidently asserting the wrong one. A round whose `outcome` says
+  # `findings` but whose count file is missing was filed under `not_reviewed` and printed as
+  # "NEVER REVIEWED", sending the operator to check the Codex GitHub App and the watcher —
+  # while the recorded outcome PROVES a review landed and the step that actually failed is
+  # classification. Healthy component inspected, broken step unnamed.
+  #
+  # ONE cache carries BOTH states, so the two blocks are proven distinct in the same run: if
+  # they are ever merged back together, the wording assertions below cannot all hold at once.
+  _c="$T/buckets"
+  mkdir -p "$_c/round-1" "$_c/round-2" "$_c/round-3" "$_c/round-4" "$_c/round-5"
+  printf 'findings\n' > "$_c/round-1/outcome"; findings_json 2 src/one.ts > "$_c/round-1/acted.json"
+  printf 'timeout\n'  > "$_c/round-2/outcome"                      # the review did NOT resolve
+  printf 'findings\n' > "$_c/round-3/outcome"; printf '{ truncated' > "$_c/round-3/acted.json"
+  printf 'findings\n' > "$_c/round-4/outcome"; findings_json 2 src/one.ts > "$_c/round-4/acted.json"
+  #                     round-5: nothing on disk at all
+
+  # ── the buckets are separate, and each round is in the right one ────────────────
+  [ "$(jqf "$_c" '.not_reviewed | length')" = "1" ] \
+    || fail "E99-F126: not_reviewed holds $(jqf "$_c" '.not_reviewed | length') rounds — only the round whose REVIEW failed belongs there"
+  [ "$(jqf "$_c" '.not_reviewed[0].round')" = "2" ] \
+    || fail "E99-F126: not_reviewed names round $(jqf "$_c" '.not_reviewed[0].round'), expected only the timed-out round 2"
+  [ "$(jqf "$_c" '[.uncounted[].round] | join(",")')" = "3,5" ] \
+    || fail "E99-F126: uncounted holds rounds $(jqf "$_c" '[.uncounted[].round] | join(",")'), expected 3 and 5"
+  [ "$(jqf "$_c" '.uncounted[] | select(.round == 3) | .status')" = "reviewed-uncounted" ] \
+    || fail "E99-F126: round 3 has outcome=findings on disk and is reported as '$(jqf "$_c" '.uncounted[] | select(.round==3) | .status')' — a review provably landed there"
+  [ "$(jqf "$_c" '.uncounted[] | select(.round == 5) | .status')" = "no-record" ] \
+    || fail "E99-F126: round 5 has nothing on disk and is reported as '$(jqf "$_c" '.uncounted[] | select(.round==5) | .status')' — the tool must not claim to know"
+  # Neither bucket enters the rate. That part of the old behaviour was right.
+  [ "$(jqf "$_c" '.series | join(",")')" = "2,2" ] \
+    || fail "E99-F126: the rate is $(jqf "$_c" '.series|join(",")'), expected 2,2 — an uncounted round is not evidence of convergence"
+
+  # ── the WORDING, which is what actually misdirects an operator ──────────────────
+  _out="$(sh "$TREND" --cache "$_c")"
+  _nr_line="$(printf '%s\n' "$_out" | grep 'round 3' || true)"
+  printf '%s' "$_nr_line" | grep -q 'review DID land' \
+    || fail "E99-F126: round 3's line does not say a review landed — its recorded outcome proves one did: '$_nr_line'"
+  printf '%s\n' "$_out" | grep -q 'NEVER REVIEWED' \
+    || fail "E99-F126: the genuinely unreviewed round 2 lost its NEVER REVIEWED header — the contrast this test rests on is gone"
+  printf '%s\n' "$_out" | grep -q 'NOT COUNTED' \
+    || fail "E99-F126: there is no separate NOT COUNTED block — an uncounted round is being reported as an unreviewed one"
+  # The two headers must not be the same string, or "distinct buckets" is cosmetic.
+  [ "$(printf '%s\n' "$_out" | grep -c 'NEVER REVIEWED')" = "1" ] \
+    || fail "E99-F126: the NEVER REVIEWED header appears more than once — the uncounted block is reusing it"
+  # The upstream remedy belongs to exactly ONE block. If the uncounted rounds are merged back
+  # in, this remedy is printed for a round whose review already landed.
+  _codex_hits="$(printf '%s\n' "$_out" | grep -c 'Codex GitHub App' || true)"
+  [ "${_codex_hits:-0}" = "1" ] \
+    || fail "E99-F126: the 'check the Codex GitHub App' remedy is printed $_codex_hits times — it belongs only to the block for rounds whose review did not resolve"
+  printf '%s\n' "$_out" | grep -q 'round CACHE, not necessarily its review' \
+    || fail "E99-F126: the NOT COUNTED block does not direct the operator at the failed cache/classification step"
+  printf '%s\n' "$_out" | grep -q 'wait-for-codex.sh evaluate' \
+    || fail "E99-F126: the NOT COUNTED block names no way to re-derive the round offline"
+
+  # ── the contrast: a cache with ONLY the reviewed-uncounted round must not print the
+  # unreviewed header or its remedy at all. This is the assertion that fails the moment the
+  # two buckets collapse back into one, whichever direction the collapse goes.
+  _u="$T/buckets-uncounted-only"
+  mkdir -p "$_u/round-1"
+  printf 'findings\n' > "$_u/round-1/outcome"; printf '{ truncated' > "$_u/round-1/acted.json"
+  _uout="$(sh "$TREND" --cache "$_u")"
+  printf '%s\n' "$_uout" | grep -q 'NEVER REVIEWED' \
+    && fail "E99-F126: a round whose outcome file records a LANDED review is still reported as NEVER REVIEWED" || :
+  printf '%s\n' "$_uout" | grep -q 'Codex GitHub App' \
+    && fail "E99-F126: an operator with an uncounted round is still sent to inspect the Codex App — the healthy component" || :
+  printf '%s\n' "$_uout" | grep -q 'NOT COUNTED' \
+    || fail "E99-F126: the uncounted round is not reported at all — it was dropped, which is the other half of this defect"
+  sh "$TREND" --cache "$_u" >/dev/null 2>&1 \
+    || fail "E99-F126: the tool exited non-zero on a cache of only uncounted rounds — it must never block"
+  pass "E99-F126 an_uncounted_round_is_not_a_missing_review: NEVER REVIEWED and NOT COUNTED are separate blocks with separate remedies"
+}
+
 test_the_tool_stays_advisory() {
   have_jq || { skip "the_tool_stays_advisory (jq not installed)"; return 0; }
   # Every new report path must still exit 0. A trend that can fail a run is a gate, and this
@@ -427,6 +501,15 @@ check_runbook() { # check_runbook <file> <label>
   # from an incomplete last round.
   printf '%s' "$_s4b" | grep -qF 'does not exist yet' \
     || fail "$_l: step 4b does not say that the current round's acted.json is not written yet"
+  # Both buckets, and their OPPOSITE remedies, must be described where the operator reads
+  # the trend. A runbook that documents only `not_reviewed` teaches the very misreading the
+  # tool was just fixed to stop making.
+  printf '%s' "$_s4b" | grep -qF 'not_reviewed[]' \
+    || fail "$_l: the trend section does not name the not_reviewed bucket"
+  printf '%s' "$_s4b" | grep -qF 'uncounted[]' \
+    || fail "$_l: the trend section does not name the uncounted bucket — an operator reading it will take a landed review for a missing one"
+  printf '%s' "$_s4b" | grep -qF 'reviewed-uncounted' \
+    || fail "$_l: the trend section does not distinguish a reviewed-but-uncounted round from one that was never reviewed"
   _sh="$(section "$_f" 'Handover summary')"
   [ -n "$_sh" ] || fail "$_l: the handover-summary section is missing"
   printf '%s' "$_sh" | grep -qF 'pr-round-trend.sh' \
@@ -494,6 +577,7 @@ test_legacy_cache_derives_the_timeout_it_never_recorded
 test_an_unrecorded_outcome_is_never_silently_clean
 test_the_trend_counts_what_was_acted_on
 test_the_merge_gate_still_reads_the_configured_filter
+test_an_uncounted_round_is_not_a_missing_review
 test_the_remedy_fits_the_diff
 test_the_tool_stays_advisory
 test_the_runbook_writes_what_the_trend_reads

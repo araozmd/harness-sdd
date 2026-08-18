@@ -65,8 +65,23 @@ whose four findings all landed in one function — the operator overrode it by h
 disputed the same verdict on the record. The downgrade requires **both** a supplied width and a
 single concentrating file, so with no flags the output is byte-identical to before.
 
-New JSON fields on `--format json`: `not_reviewed[]`, `unrecorded_rounds[]`, `overrides`,
-`override_severities[]`, `remedy`. Every existing field keeps its meaning.
+**A round that leaves the rate does so into one of two named buckets, never one.** The first
+cut of this fix reproduced its own defect one level down: a round carrying `outcome=findings`
+whose count file was missing landed in `not_reviewed` and printed under **NEVER REVIEWED**,
+sending the operator to check the Codex GitHub App and the watcher ceiling — while the
+recorded outcome *proves* a review landed and the component that actually failed is
+classification. Healthy component inspected, broken step unnamed. `not_reviewed[]` now means
+only "the review did not resolve" (`timeout`/`unresolved`, remedy: the App/watcher). The new
+`uncounted[]` means "there is no number to trend and the review is not what failed" — either
+`reviewed-uncounted` (an outcome proves a review landed; the count file is missing or
+unparseable) or `no-record` (nothing on disk says what happened, which is a claim that we
+cannot tell, not a claim that the review failed). Its remedy names the round's own cache:
+re-derive it with `wait-for-codex.sh evaluate`, re-run classification for that round dir, or
+rebuild it from the gh API. Both stay out of the rate — an uncounted round is not evidence of
+convergence either way.
+
+New JSON fields on `--format json`: `not_reviewed[]`, `uncounted[]`, `unrecorded_rounds[]`,
+`overrides`, `override_severities[]`, `remedy`. Every existing field keeps its meaning.
 
 New suite `tests/test_pr_round_outcome.sh` (parses and runs under `/bin/dash`).
 
