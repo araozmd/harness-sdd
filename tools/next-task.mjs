@@ -40,12 +40,12 @@ const OWNER_GATE = 'owner';
 // `gated-owner`, or you inherit a hole this comment is the only record of.
 const PARK_GATES = new Set([OWNER_GATE]);
 const isOwnerGated = (feature) => Boolean(feature.parked) && feature.parked.gate === OWNER_GATE;
-// E99-F102 landing attestation. CLOSED, like the park gates and for the same reason: the
-// three values say who proved what. Today only two are writable — `unchecked` (recorded,
-// nothing checked it: tasks-lock performs no verification yet) and `declared` (there is no
-// commit to prove). `ancestor` (resolved and proved reachable from the default branch) is
-// accepted so a board from the verification follow-up, or a hand edit, still parses. A
-// fourth value would be a check nothing performs.
+// E99-F102 + E99-F129 landing attestation. CLOSED, like the park gates and for the same
+// reason: the three values say who proved what, and all three are WRITABLE. `ancestor` =
+// the ref resolved and ancestry against the repository's default branch came back true;
+// `declared` = a `none:<why>` ref, work with no commit to prove; `unchecked` = the check
+// was impossible from this checkout and the record says so instead of blocking. A fourth
+// value would be a check nothing performs.
 const LANDED_VERIFIED = new Set(['ancestor', 'unchecked', 'declared']);
 
 class ExpectedError extends Error {

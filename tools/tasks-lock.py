@@ -1796,10 +1796,13 @@ def main(argv):
         action="append",
         default=None,
         help=(
-            "landing evidence for a `done` transition (E99-F102): any reference "
-            "(recorded verbatim and marked unchecked — this half verifies nothing), "
-            "or none:<why> for work with no commit. A SLICED feature takes the bound "
-            "form --evidence <repo>=<ref>, REPEATED once per slice repository"
+            "landing evidence for a `done` transition (E99-F102): any reference git "
+            "can resolve — it is CHECKED against the repository's default branch and "
+            "refused if the work provably has not merged — or none:<why> for work "
+            "with no commit. Where the check is impossible the record degrades to "
+            "`unchecked` with a warning; see the decision table in store/local.md. A "
+            "SLICED feature takes the bound form --evidence <repo>=<ref>, REPEATED "
+            "once per slice repository"
         ),
     )
     p_set.add_argument(

@@ -247,11 +247,16 @@ Orchestrator's exclusive ownership of state writes.
 
   What the helper does with the value:
   - **`none:<why>`** records `verified: "declared"` — work with no commit at all (a console
-    action, a supersession). The reason after the colon is required.
-  - **anything else** (a sha, a PR URL, a tag) is transcribed verbatim and recorded
-    `verified: "unchecked"`, with a warning: nothing was proved. It is deliberately not
-    classified further — "does this look like a commit id?" is a question only the code that
-    resolves objects can answer, and that code does not exist here yet.
+    action, a supersession). The reason after the colon is required. This is row 1, and it is
+    the only value that reaches a verdict without git being consulted at all.
+  - **anything else** (a sha, a tag, a branch, a PR URL) goes through the decision table
+    above — it is **resolved and checked**, not transcribed. Which row it lands on is the
+    whole answer: `ancestor` only from row 7, **REFUSED** on rows 3 and 8, `unchecked` on the
+    rest. Do not read "accepted" as "proved" or "not `ancestor`" as "rejected"; read the row.
+  - A record is never *partly* proved. `verified: "ancestor"` names the `commit` ancestry ran
+    on, the `repo` it ran in and the `base` it ran against, and all three validators refuse
+    the value without them — a claim missing any of them cannot be re-checked by anybody,
+    which is the defect this exists to remove rather than a milder version of it.
   - `--evidence` on any **non-`done`** transition is **REFUSED**: the record means one thing.
 
   **`set_status` does the syncing itself.** A feature transition rewrites the `status:` in

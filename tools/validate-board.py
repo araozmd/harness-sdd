@@ -47,12 +47,13 @@ SLICE_STATUS = {"pending", "spec-ready", "in-progress", "in-review", "done", "fa
 # downgrade to an ordinary park, because the reason code the selector emits is the whole
 # deliverable and a typo that reads as `parked` reports the wrong one.
 PARK_GATES = {"owner"}
-# Landing attestation (E99-F102). Also a CLOSED set. Today the write path can only
-# produce two of the three: `unchecked` (the ref was recorded and nothing checked it —
-# tasks-lock performs no verification yet) and `declared` (the work has no commit at
-# all). `ancestor` means a ref was resolved and PROVED reachable from the default
-# branch; it is accepted so a board written by the verification follow-up, or by hand,
-# still validates. A fourth value would read as a check that nothing performs.
+# Landing attestation (E99-F102 + E99-F129). Also a CLOSED set. All three are WRITABLE:
+# `ancestor` = the ref resolved and ancestry was computed against the repository's default
+# branch and came back true (row 7 of the decision table in tools/tasks-lock.py);
+# `declared` = a `none:<why>` ref, work with no commit at all; `unchecked` = the check was
+# impossible here (the object is not in this checkout, no default branch could be
+# determined, the remote could not be asked), recorded with a warning rather than blocking.
+# A fourth value would read as a check that nothing performs.
 LANDED_VERIFIED = {"ancestor", "unchecked", "declared"}
 
 
@@ -309,10 +310,11 @@ def _fallback_errors(data):
                                         "%s.base: expected a non-empty string" % lw
                                     )
                             # The rollup can never be STRONGER than its slices: one
-                            # unproved slice and the feature is not `ancestor`. The
-                            # write path cannot produce that value at all today, so this
-                            # guards the two ways one can still appear — a hand edit, and
-                            # the verification follow-up.
+                            # unproved slice and the feature is not `ancestor`. The write
+                            # path already enforces this itself (the feature-level value
+                            # is the MINIMUM of the slice ranks), so what this guards is
+                            # the other way in: a hand-edited or imported board, where the
+                            # false attestation would be re-entered by hand.
                             if landed.get("verified") == "ancestor" and any(
                                 not isinstance(r, dict) or r.get("verified") != "ancestor"
                                 for r in lsl

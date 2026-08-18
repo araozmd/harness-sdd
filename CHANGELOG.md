@@ -78,11 +78,21 @@ Two consequences of asking git, handled deliberately: a **branch name resolves t
 branch **moves**. So the record keeps both, and they mean different things — `ref` is what
 the operator claimed, verbatim; **`commit`** (new, additive) is the immutable id it resolved
 to, which is what ancestry was computed on and what a re-audit must re-check. `commit` is
-present exactly when this checkout resolved the object, and all three acceptance surfaces
-now **require** it wherever `verified` is `ancestor`, because an attestation nobody can
-re-check is the defect this whole feature exists to remove. (Scoped to the unsliced record
-and to each slice record: a sliced feature's `ref` is a joined summary of several
-repositories, so there is no single commit for it.)
+present exactly when this checkout resolved the object.
+
+**A proof names the FULL proof set** (round-5 P2). All three acceptance surfaces require, of
+every `ancestor` record, the three things a re-check needs: **`commit`** (WHAT was checked —
+`ref` may be a branch, which moves), **`repo`** (WHERE — a commit id proves nothing until you
+know which repository to look for it in) and **`base`** (AGAINST WHAT — "ancestor of" has a
+second operand). Only `commit` was required at first, so a hand-edited or imported board
+could assert `{"ref":"x","commit":"deadbeef","verified":"ancestor"}` and be **accepted** by
+all three — a claim nobody can re-run `git merge-base --is-ancestor` on, which is the defect
+this whole feature exists to remove rather than a milder form of it. Per-slice records gained
+`base` for the same reason (`repo` was already required of every slice). Scoped to the
+unsliced feature-level record and to each slice record: a **sliced** feature's `ref` is a
+joined summary across repositories, so there is no single commit/repo/base for it and each
+slice carries its own — a carve-out held in place by its own test, because the failure mode
+of over-reaching is that every sliced `done` the tool writes fails its own validation.
 
 **A second dimension: WHICH repository is the claim about?** The nine rows decide a verdict
 for a *(ref, repository)* pair and silently presumed that pair was settled. It is not — it
@@ -174,6 +184,18 @@ reintroduced silently — with a setup-time assertion that the override actually
 step now says so instead of looking like a truncated pass. Measured both ways: the pre-fix
 state is **green here and red on a `master` host**; with the sentinel, the same omission is
 **red here**.
+
+**The installed interfaces no longer describe the half that was replaced** (round-5 P2). The
+0.64.0 contract half verified nothing, and several places still said so: `store/local.md`
+told the reader that anything other than `none:<why>` "is transcribed verbatim and recorded
+`verified: "unchecked"` … that code does not exist here yet"; `set-status --help` said
+"(recorded verbatim and marked unchecked — this half verifies nothing)"; and the three
+acceptance surfaces' own comments (`store/tasks.schema.json`, `tools/validate-board.py`,
+`tools/next-task.mjs`) each claimed the write path could not produce `ancestor`. The harm is
+concrete: an operator reading either INSTALLED interface is told an unmerged but resolvable
+ref will be accepted as `unchecked`, when row 8 now **refuses** it — and concludes the tool
+is broken. Swept rather than spot-fixed, after the same class appeared in two consecutive
+rounds.
 
 The suite mirrors the table and the identity contract: **25 cases**, every refusal paired with a control that must
 SUCCEED. The contract half's `R18` — which proved that half performed **no** I/O — is
