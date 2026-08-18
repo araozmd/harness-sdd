@@ -2008,4 +2008,138 @@ else
 fi
 pass "E99-F102 R21 git_resolves_the_ref_and_the_record_names_the_immutable_id"
 
+# ── R25: an `ancestor` names the FULL proof set, on all three surfaces ────────────────
+# Review round 5. `commit` was required wherever `verified` is `ancestor`; `repo` and `base`
+# were not. MEASURED on the shipped validators, with an otherwise-valid board:
+#
+#   {"ref":"x","commit":"deadbeef","verified":"ancestor"}                            ACCEPTED
+#   {"ref":"x","verified":"ancestor"}                                                rejected
+#   {"ref":"x","commit":"deadbeef","repo":"r","base":"origin/main",...:"ancestor"}   ACCEPTED
+#
+# The first line is the defect. `deadbeef` alone is an id with no repository to look it up
+# in and no second operand to be an ancestor OF, so `git merge-base --is-ancestor` cannot be
+# re-run on it by anyone — and this feature's whole thesis is that an attestation nobody can
+# re-check is the defect, not a weaker form of a proof. A proof therefore names all three:
+# WHAT was checked (`commit` — `ref` may be a branch, which moves), WHERE (`repo`), and
+# AGAINST WHAT (`base`).
+#
+# Every case runs against ALL THREE acceptance surfaces, because a board one accepts and
+# another refuses is the drift these mirrors exist to prevent — and the schema and the
+# fallback are DIFFERENT CODE, so a rule added to one is not a rule.
+#
+# The refusals are asserted PER KEY and the message is grepped for that key. "the board was
+# rejected" is producible by any validation error at all, including one this fixture
+# introduced by accident, and an assertion satisfiable by a path other than the one its
+# message names is worse than no assertion — it stops the next maintainer looking.
+
+# refuse3 <label> <landed-json> <missing-key> — refused by schema, fallback AND selector.
+refuse3() {
+  _lbl="$1"; _json="$2"; _key="$3"
+  mkbad "$_json"
+  _o="$(python3 "$VALIDATE" "$T/bad.json" "$SCHEMA" 2>&1)" \
+    && fail "R25: the SCHEMA path ACCEPTED $_lbl — a proof naming no $_key cannot be re-checked: $_json"
+  case "$_o" in *"$_key"*) ;; *) fail "R25: the schema path rejected $_lbl, but not over the missing '$_key' — the case passes for the wrong reason: $_o" ;; esac
+  _o="$(python3 "$T/nojs.py" 2>&1)" \
+    && fail "R25: the ZERO-DEPENDENCY validator ACCEPTED $_lbl — a machine without jsonschema would take a board the schema refuses: $_json"
+  case "$_o" in *"$_key"*) ;; *) fail "R25: the fallback rejected $_lbl, but not over the missing '$_key': $_o" ;; esac
+  _o="$( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" 2>&1 )" \
+    && fail "R25: the SELECTOR ACCEPTED $_lbl — a board arriving through --tasks never passes the shared validator: $_json"
+  case "$_o" in *"$_key"*) ;; *) fail "R25: the selector rejected $_lbl, but not over the missing '$_key': $_o" ;; esac
+}
+
+# accept3 <label> <landed-json> — accepted by all three. The control against over-reach.
+accept3() {
+  _lbl="$1"; _json="$2"
+  mkbad "$_json"
+  python3 "$VALIDATE" "$T/bad.json" "$SCHEMA" >/dev/null 2>&1 \
+    || fail "R25 control: the SCHEMA path rejected $_lbl — the new requirement has over-reached: $(python3 "$VALIDATE" "$T/bad.json" "$SCHEMA" 2>&1 | head -3)"
+  python3 "$T/nojs.py" >/dev/null 2>&1 \
+    || fail "R25 control: the ZERO-DEPENDENCY validator rejected $_lbl: $(python3 "$T/nojs.py" 2>&1 | head -3)"
+  ( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" >/dev/null 2>&1 ) \
+    || fail "R25 control: the SELECTOR rejected $_lbl: $( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" 2>&1 | head -3 )"
+}
+
+# (a) the Codex case, verbatim: a proof that names NEITHER the repository NOR the base.
+refuse3 "a proofless ancestor (no repo, no base)" \
+  '{ "ref": "x", "commit": "deadbeef", "verified": "ancestor" }' repo
+# ...and each half of it alone, so the rule is not satisfiable by supplying only one.
+refuse3 "an ancestor naming no repository" \
+  '{ "ref": "x", "commit": "deadbeef", "base": "origin/main", "verified": "ancestor" }' repo
+refuse3 "an ancestor naming no base" \
+  '{ "ref": "x", "commit": "deadbeef", "repo": "r", "verified": "ancestor" }' base
+refuse3 "an ancestor naming no commit" \
+  '{ "ref": "x", "repo": "r", "base": "origin/main", "verified": "ancestor" }' commit
+
+# CONTROL: the FULLY-PROVED record is still accepted everywhere. Without it the four
+# refusals above would hold just as well against a validator that rejects every `ancestor`.
+accept3 "a fully-proved ancestor" \
+  '{ "ref": "x", "commit": "deadbeef", "repo": "r", "base": "origin/main", "verified": "ancestor" }'
+# CONTROL: the weaker verdicts are untouched — `unchecked`/`declared` never claimed a proof,
+# so they owe none. A rule that also demanded repo/base of them would refuse rows 1-6 and 9
+# of the decision table, i.e. every degraded record the write path produces.
+accept3 "an unchecked record with no repo or base" '{ "ref": "x", "verified": "unchecked" }'
+accept3 "a declared record with no repo or base" '{ "ref": "none:console", "verified": "declared" }'
+
+# (b) the PER-SLICE records carry the same set. `repo` is already required of every slice
+# record, proved or not, so what was missing there is `base`.
+refuse3 "a slice-level ancestor naming no base" \
+  '{ "ref": "web=b", "verified": "ancestor", "slices": [ { "repo": "web", "ref": "b", "commit": "c0ffee", "verified": "ancestor" } ] }' base
+refuse3 "a slice-level ancestor naming no commit" \
+  '{ "ref": "web=b", "verified": "ancestor", "slices": [ { "repo": "web", "ref": "b", "base": "main", "verified": "ancestor" } ] }' commit
+accept3 "a fully-proved slice-level ancestor" \
+  '{ "ref": "web=b", "verified": "ancestor", "slices": [ { "repo": "web", "ref": "b", "commit": "c0ffee", "base": "main", "verified": "ancestor" } ] }'
+
+# (c) THE CARVE-OUT, and the control that stops this fix over-reaching. A SLICED feature's
+# feature-level `ref` is a JOINED SUMMARY across repositories — there is no single commit,
+# repository or base for it, and each slice carries its own — so the feature-level record
+# must still validate with none of the three. The schema `$comment` says exactly this, and
+# it is still true; requiring them there would make every sliced `done` the tool writes
+# unvalidatable. Asserted with the rollup at its STRONGEST (`ancestor`), which is the only
+# case in which the requirement could have been applied by mistake.
+accept3 "a SLICED feature-level ancestor with no commit/repo/base of its own" \
+  '{ "ref": "web=b; api=c", "verified": "ancestor", "slices": [ { "repo": "web", "ref": "b", "commit": "c0ffee", "base": "main", "verified": "ancestor" }, { "repo": "api", "ref": "c", "commit": "dec0de", "base": "main", "verified": "ancestor" } ] }'
+
+# (d) THE RECORD THE WRITE PATH ACTUALLY PRODUCES still validates — measured, not assumed.
+# A schema stricter than its own tool's output is the worst outcome available here: every
+# future `done` would write a board that fails its own validation, and the failure would
+# surface at the atomic replace, long after the operator believed the record was accepted.
+# So a REAL `set-status ... done --evidence` is run and its board is put through all three.
+mkrepo r25
+HD25="$T/repor25/hd"
+BOARD25="$HD25/state/tasks.json"
+R25_BASE="$BASE"
+mkboard "$HD25"
+set_status "$HD25" E01-F01 done --evidence "$R25_BASE"
+[ "$SS_RC" = "0" ] || fail "R25: the write path could not record a REAL ancestor landing (rc=$SS_RC): $SS_OUT"
+[ "$(field "$BOARD25" "d['landed']['verified']")" = "ancestor" ] \
+  || fail "R25: the fixture did not produce an 'ancestor' record, so it cannot test the rule: $(field "$BOARD25" "d['landed']")"
+cp "$BOARD25" "$T/bad.json"
+python3 "$VALIDATE" "$T/bad.json" "$SCHEMA" >/dev/null 2>&1 \
+  || fail "R25: the SCHEMA rejects the record tasks-lock itself writes — every future \`done\` would fail its own validation: $(python3 "$VALIDATE" "$T/bad.json" "$SCHEMA" 2>&1 | head -3)"
+python3 "$T/nojs.py" >/dev/null 2>&1 \
+  || fail "R25: the ZERO-DEPENDENCY validator rejects the record tasks-lock itself writes: $(python3 "$T/nojs.py" 2>&1 | head -3)"
+( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" >/dev/null 2>&1 ) \
+  || fail "R25: the SELECTOR rejects the record tasks-lock itself writes: $( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" 2>&1 | head -3 )"
+
+# ...and the SLICED write path too, which produces the other record shape entirely (a joined
+# `ref`, no feature-level commit/repo/base, one proved entry per slice repository).
+mkboard "$HD25" ',
+          "slices": [
+            { "id": "E01-F01@repor25", "repo": "repor25", "status": "done", "merged": true }
+          ]'
+set_status "$HD25" E01-F01 done --evidence "repor25=$R25_BASE"
+[ "$SS_RC" = "0" ] || fail "R25: the SLICED write path could not record a real landing (rc=$SS_RC): $SS_OUT"
+[ "$(field "$BOARD25" "d['landed']['slices'][0]['verified']")" = "ancestor" ] \
+  || fail "R25: the sliced fixture did not produce a proved slice record: $(field "$BOARD25" "d['landed']")"
+[ -n "$(field "$BOARD25" "d['landed']['slices'][0].get('base','')")" ] \
+  || fail "R25: the write path emits a proved slice record with NO base, so the schema requirement is stricter than the tool's own output"
+cp "$BOARD25" "$T/bad.json"
+python3 "$VALIDATE" "$T/bad.json" "$SCHEMA" >/dev/null 2>&1 \
+  || fail "R25: the SCHEMA rejects the SLICED record tasks-lock itself writes: $(python3 "$VALIDATE" "$T/bad.json" "$SCHEMA" 2>&1 | head -3)"
+python3 "$T/nojs.py" >/dev/null 2>&1 \
+  || fail "R25: the ZERO-DEPENDENCY validator rejects the SLICED record tasks-lock itself writes: $(python3 "$T/nojs.py" 2>&1 | head -3)"
+( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" >/dev/null 2>&1 ) \
+  || fail "R25: the SELECTOR rejects the SLICED record tasks-lock itself writes: $( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" 2>&1 | head -3 )"
+pass "E99-F102 R25 an_ancestor_names_the_full_proof_set_on_all_three_surfaces"
+
 echo "All landing-evidence tests passed."

@@ -74,9 +74,9 @@
                         },
                         "allOf": [
                           {
-                            "$comment": "A per-slice `ancestor` must name the immutable id it was proved for (E99-F129).",
+                            "$comment": "A per-slice `ancestor` must name the FULL proof set (E99-F129): the immutable `commit` ancestry was computed on, the `repo` it was computed in (already required above for every slice record), and the `base` it was computed against. Any one of them missing and the claim is unre-checkable — which is the defect this feature exists to remove, not a lesser form of it. The write path emits all three together (`_verify` row 7 returns ref/commit/verified/repo/base in one literal), so this requires nothing the tool does not already produce.",
                             "if": { "required": ["verified"], "properties": { "verified": { "const": "ancestor" } } },
-                            "then": { "required": ["commit"] }
+                            "then": { "required": ["commit", "base"] }
                           }
                         ]
                       }
@@ -84,13 +84,13 @@
                   },
                   "allOf": [
                     {
-                      "$comment": "A feature-level `ancestor` on a SINGLE-REPO feature must name the immutable id it was proved for (E99-F129). Scoped to the unsliced case on purpose: a sliced feature's `ref` is a joined summary of several repositories, so there is no one commit for it — each slice carries its own under `slices[].commit`.",
+                      "$comment": "A feature-level `ancestor` on a SINGLE-REPO feature must name the FULL proof set (E99-F129): `commit` (the immutable id ancestry was computed on — `ref` may be a branch, which MOVES), `repo` (the repository it was computed IN — a sha proves nothing until you know where to look for it), and `base` (what it was computed AGAINST — `ancestor of` is meaningless without the second operand). Requiring only `commit` left a record that named neither the repository nor the base, i.e. an attestation nobody can re-check, which is exactly what this feature exists to remove. Scoped to the unsliced case on purpose: a sliced feature's `ref` is a joined summary of several repositories, so there is no one commit/repo/base for it — each slice carries its own under `slices[]`.",
                       "if": {
                         "required": ["verified"],
                         "properties": { "verified": { "const": "ancestor" } },
                         "not": { "required": ["slices"] }
                       },
-                      "then": { "required": ["commit"] }
+                      "then": { "required": ["commit", "repo", "base"] }
                     },
                     {
                       "$comment": "The feature-level rollup can never be STRONGER than its slices: if any slice is not `ancestor`, the feature is not `ancestor` either. The write path today cannot produce `ancestor` at all, so this rule exists for the two ways one can still appear: a hand-edited board, and the verification follow-up. Without it, a board could claim a proof over an `unchecked` slice — the same false attestation the per-slice binding exists to prevent, re-entered by hand. Expressible in draft-07 via `contains`, so all three acceptance surfaces (this schema, validate-board.py's zero-dependency fallback, next-task.mjs) can agree on it.",

@@ -235,19 +235,23 @@ def _fallback_errors(data):
                                 errors.append(
                                     "%s.landed.%s: expected a non-empty string" % (fw, k)
                                 )
-                        # E99-F129: `ref` may be a MOVING target (a branch resolves just
-                        # as a sha does), so a proof names the immutable id it was
-                        # computed on. Scoped to the unsliced case: a sliced feature's
-                        # `ref` is a joined summary and each slice carries its own.
-                        if (
-                            landed.get("verified") == "ancestor"
-                            and "slices" not in landed
-                            and not landed.get("commit")
-                        ):
-                            errors.append(
-                                "%s.landed.verified 'ancestor': no `commit` — a proof "
-                                "must name the immutable id it was checked on" % fw
-                            )
+                        # E99-F129: an `ancestor` names the FULL proof set, or it is not
+                        # re-checkable and the record carries authority nothing earned.
+                        # `commit` because `ref` may be a MOVING target (a branch resolves
+                        # just as a sha does); `repo` because a commit id proves nothing
+                        # until you know which repository to look for it in; `base`
+                        # because "ancestor of" has a second operand. Scoped to the
+                        # unsliced case: a sliced feature's `ref` is a joined summary of
+                        # several repositories and each slice carries its own set.
+                        if landed.get("verified") == "ancestor" and "slices" not in landed:
+                            for k in ("commit", "repo", "base"):
+                                if not landed.get(k):
+                                    errors.append(
+                                        "%s.landed.verified 'ancestor': no `%s` — a proof "
+                                        "must name the commit it was checked on, the "
+                                        "repository it was checked in, and the base it "
+                                        "was checked against" % (fw, k)
+                                    )
                         # PER-SLICE landing (E99-F102). A sliced feature's evidence
                         # is bound to each slice repository — one entry per repo, so a
                         # per-repository verdict has somewhere to land. Mirrored
@@ -281,11 +285,18 @@ def _fallback_errors(data):
                                     errors.append(
                                         "%s.commit: expected a non-empty string" % lw
                                     )
-                                if lrec.get("verified") == "ancestor" and not lrec.get("commit"):
-                                    errors.append(
-                                        "%s.verified 'ancestor': no `commit` — a proof "
-                                        "must name the immutable id it was checked on" % lw
-                                    )
+                                # Same full proof set as the unsliced feature-level record
+                                # (E99-F129); `repo` is already required above for EVERY
+                                # slice record, proved or not, so only these two are added
+                                # here.
+                                if lrec.get("verified") == "ancestor":
+                                    for k in ("commit", "base"):
+                                        if not lrec.get(k):
+                                            errors.append(
+                                                "%s.verified 'ancestor': no `%s` — a proof "
+                                                "must name the commit it was checked on "
+                                                "and the base it was checked against" % (lw, k)
+                                            )
                                 if lrec.get("verified") not in LANDED_VERIFIED:
                                     errors.append(
                                         "%s.verified '%s': not one of %s"

@@ -311,11 +311,18 @@ function validateBoard(board) {
         for (const k of ['repo', 'base', 'commit']) {
           if (feature.landed[k] !== undefined) assertString(feature.landed[k], `${feature.id}.landed.${k}`);
         }
-        // E99-F129: `ref` may be a moving target (a branch resolves just as a sha does),
-        // so a proof names the immutable id it was computed on. Unsliced only — a sliced
-        // feature's `ref` is a joined summary and each slice carries its own.
-        if (feature.landed.verified === 'ancestor' && feature.landed.slices === undefined && !feature.landed.commit) {
-          throw new Error(`${feature.id}.landed.verified ancestor has no commit: a proof must name the immutable id it was checked on`);
+        // E99-F129: an `ancestor` names the FULL proof set — `commit` (`ref` may be a
+        // MOVING branch), `repo` (a commit id proves nothing until you know where to look
+        // for it) and `base` (`ancestor of` has a second operand). Any one missing and the
+        // claim cannot be re-checked, which is the defect, not a milder form of it.
+        // Unsliced only — a sliced feature's `ref` is a joined summary of several
+        // repositories and each slice carries its own set.
+        if (feature.landed.verified === 'ancestor' && feature.landed.slices === undefined) {
+          for (const k of ['commit', 'repo', 'base']) {
+            if (!feature.landed[k]) {
+              throw new Error(`${feature.id}.landed.verified ancestor has no ${k}: a proof must name the commit it was checked on, the repository it was checked in, and the base it was checked against`);
+            }
+          }
         }
         // A SLICED feature's evidence is bound per slice repository, so the record
         // carries one entry per repo — where a per-repository verdict will land.
@@ -332,8 +339,14 @@ function validateBoard(board) {
             assertString(rec.repo, `${ls}.repo`);
             assertString(rec.ref, `${ls}.ref`);
             if (rec.commit !== undefined) assertString(rec.commit, `${ls}.commit`);
-            if (rec.verified === 'ancestor' && !rec.commit) {
-              throw new Error(`${ls}.verified ancestor has no commit: a proof must name the immutable id it was checked on`);
+            // The same full proof set as an unsliced feature-level record; `repo` is
+            // already required above for every slice record, proved or not.
+            if (rec.verified === 'ancestor') {
+              for (const k of ['commit', 'base']) {
+                if (!rec[k]) {
+                  throw new Error(`${ls}.verified ancestor has no ${k}: a proof must name the commit it was checked on and the base it was checked against`);
+                }
+              }
             }
             if (!LANDED_VERIFIED.has(rec.verified)) {
               throw new Error(`${ls}.verified ${JSON.stringify(rec.verified)} is unsupported (expected one of: ${[...LANDED_VERIFIED].join(', ')})`);
