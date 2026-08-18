@@ -625,8 +625,19 @@ _ORCH_SECTION='The pre-PR change-size handoff'
 # its section — an emptiness check alone cannot tell a whole section from its first paragraph.
 # The fence DELIMITER lines are still printed when they fall inside the kept region; only
 # their heading-ness is suppressed.
-_outside="$(awk '
-  /^```/ { fence = !fence }
+#
+# `fence_delim()` comes from tests/lib/fence.awk — ONE copy, shared by every suite that
+# slices markdown, because "is this line a fence?" is exactly the question the harness has
+# now got wrong twice. It implements the real CommonMark rule (tilde as well as backtick,
+# 0-3 spaces of indent, an opener longer than three closed only by a run at least as long),
+# which `/^```/ { fence = !fence }` does not: orchestrator.md carries three INDENTED
+# ```` ```json ```` fences that the naive toggle mis-tracks today. That is latent rather than
+# live — those blocks are properly paired and hold no column-0 `#` — but "green by luck of
+# current content" is the precise condition this whole check exists to remove, so it is fixed
+# on the same argument. R9d below exercises each delimiter form.
+FENCE_AWK="$(cat "$ROOT/tests/lib/fence.awk")"
+_outside="$(awk "$FENCE_AWK"'
+  fence_delim($0) { if (!skip) print; next }
   !fence && /^## Targeted parallel-fix worker mode/ { skip = 1; next }
   !fence && /^## / { skip = 0 }
   !skip
@@ -656,9 +667,9 @@ printf '%s\n' "$_outside" | grep -qF 'tools/change-size.sh' \
 # belong to it. Each extractor stops at the first heading that could not be part of its own
 # section, which is why the two differ.
 export CS_ORCH_SECTION="$_ORCH_SECTION"
-_main_cs="$(awk '
+_main_cs="$(awk "$FENCE_AWK"'
   BEGIN { h = ENVIRON["CS_ORCH_SECTION"] }
-  /^```/ { fence = !fence; if (keep) print; next }
+  fence_delim($0) { if (keep) print; next }
   !fence && /^#+ / { keep = (index($0, h) > 0); next }
   keep
 ' "$_ORCH")"
@@ -684,8 +695,8 @@ printf '%s\n' "$_main_cs" | grep -qi 'never blocks\|advisory' \
   || fail "R9b: the main-path handoff does not state that the check is advisory and never blocks"
 # The parallel-fix section must NOT be weakened on the way: its --repo caveat is load-bearing
 # because HARNESS_DIR locates the script, not the tree under measurement.
-_inside="$(awk '
-  /^```/ { fence = !fence }
+_inside="$(awk "$FENCE_AWK"'
+  fence_delim($0) { if (keep) print; next }
   !fence && /^## Targeted parallel-fix worker mode/ { keep = 1; next }
   !fence && /^## / { keep = 0 }
   keep
@@ -711,8 +722,8 @@ printf '%s\n' "$_inside" | grep -qF 'not the tree under measurement' \
 # unrelated reasons, and a whole-file grep would pass no matter what the section said. (This is
 # the same reasoning `_main_cs` above now applies to orchestrator.md; it was written here first
 # and simply never carried across.)
-_rev_cs="$(awk '
-  /^```/ { fence = !fence }
+_rev_cs="$(awk "$FENCE_AWK"'
+  fence_delim($0) { if (keep) print; next }
   !fence && /^## Change-size check before the PR handoff/ { keep = 1; next }
   !fence && /^## / { keep = 0 }
   keep
@@ -760,5 +771,123 @@ grep -qF 'path other than the one the failure message names' "$_BUILDER" \
 grep -qF 'the fix in place and confirming the test fails' "$_BUILDER" \
   || fail "R9c: builder.md poses the question but no longer requires PROVING the answer by mutation — the lens is not reliable as a reasoning exercise"
 pass "R9c builder.md carries the section-scoping rule and the reachable-another-way lens"
+
+# ── R9d: the shared fence rule is CommonMark's, per DELIMITER FORM ────────────────────────
+# The first fix for this defect tracked fences with a column-0 three-backtick toggle. That is
+# not the rule: a fence may be TILDE, may be INDENTED up to three spaces, and an opener longer
+# than three is closed only by a run of the same character at least as long — so a shorter run
+# inside it is content, not a delimiter. Under any of those the block is mis-tracked and a `#`
+# line inside it is read as a heading again, which is the same truncation (silent green) or
+# over-inclusion (vacuous scope) the extractors above exist to prevent.
+#
+# LATENT, NOT LIVE, at the time this was written, and worth saying plainly: orchestrator.md's
+# three indented ```` ```json ```` fences and docs/WORKFLOW.md's one are properly paired and
+# contain no column-0 `#`, so the naive toggle's mis-tracking changed no result. But "correct
+# only because of what the files happen to contain today" is precisely the condition R9/R9b
+# were in before this feature, and fixing one while declining the other would be incoherent.
+#
+# Each form is asserted BEHAVIOURALLY — the fixture is sliced by the real extraction program —
+# and each is PAIRED WITH A CONTROL that runs the same program against the superseded toggle.
+# The control is the load-bearing half: a fixture that both implementations extract whole does
+# not exercise the form it is named for, and the assertion above it would prove nothing.
+_fx="$T/fence-forms"
+mkdir -p "$_fx"
+_NAIVE_AWK="$(cat "$ROOT/tests/lib/fence-naive.awk")"
+
+# ONE extraction program, two preludes. Both fence.awk and fence-naive.awk expose the same
+# `fence_delim(line)` interface, so the only variable between the two runs is the fence rule.
+_slice() {  # _slice <awk-prelude> <file>
+  awk "$1"'
+    fence_delim($0) { if (keep) print; next }
+    !fence && /^#+ / { keep = (index($0, "Target section") > 0); next }
+    keep
+  ' "$2"
+}
+
+cat > "$_fx/tilde.md" <<'FIXEOF'
+### Target section
+
+~~~sh
+# a column-0 shell comment inside a TILDE fence
+echo INSIDE-tilde
+~~~
+
+END-MARKER-tilde
+
+### Next section
+
+DECOY-tilde
+FIXEOF
+
+cat > "$_fx/indent.md" <<'FIXEOF'
+### Target section
+
+   ```sh
+# a column-0 shell comment inside a 3-space-INDENTED fence
+echo INSIDE-indent
+   ```
+
+END-MARKER-indent
+
+### Next section
+
+DECOY-indent
+FIXEOF
+
+cat > "$_fx/long.md" <<'FIXEOF'
+### Target section
+
+````sh
+```
+# a column-0 shell comment after a SHORTER run inside a longer fence
+echo INSIDE-long
+````
+
+END-MARKER-long
+
+### Next section
+
+DECOY-long
+FIXEOF
+
+for _form in tilde indent long; do
+  _got="$(_slice "$FENCE_AWK" "$_fx/$_form.md")"
+  _naive="$(_slice "$_NAIVE_AWK" "$_fx/$_form.md")"
+  printf '%s\n' "$_got" | grep -qF "END-MARKER-$_form" \
+    || fail "R9d ($_form): the shared fence rule TRUNCATED the section — the $_form delimiter was mis-tracked, so the column-0 '#' inside the block was read as a heading and every assertion below such a slice would run against a prefix"
+  printf '%s\n' "$_got" | grep -qF "DECOY-$_form" \
+    && fail "R9d ($_form): the shared fence rule OVER-INCLUDED past the section's end — a scope this wide makes the assertions using it unable to fail"
+  printf '%s\n' "$_got" | grep -qF "INSIDE-$_form" \
+    || fail "R9d ($_form): the fenced block's own content was swallowed — the rule must suppress a delimiter's heading-ness, not delete the block"
+  printf '%s\n' "$_naive" | grep -qF "END-MARKER-$_form" \
+    && fail "R9d ($_form) CONTROL: the superseded toggle extracts this fixture whole too, so the fixture does not exercise the $_form delimiter form and the assertion above it proves nothing"
+done
+
+# STRUCTURAL: one copy of the rule, loaded — not five hand-rolled toggles that drift apart.
+# A second copy is how this defect reached six extractors before anyone noticed.
+#
+# Checked POSITIVELY (each slicing suite loads the shared file), not as a ban on the naive
+# spelling. A ban was written first and rejected on measurement: matching a fence delimiter is
+# a legitimate operation in its own right — tests/test_pr_loop.sh's `/^```bash$/` pulls a block
+# out of markdown IT generated, where the delimiter spelling is fixed and known — so the ban
+# flagged a correct suite, and it also matched prose ABOUT the wrong idiom, including the
+# comment a few lines above. A check that reds on correct code is what teaches the next
+# maintainer to relax it.
+for _s in test_change_size test_source_shims test_scratch_and_disk_preconditions \
+          test_landed_evidence test_stacked_doctrine; do
+  grep -qF 'tests/lib/fence.awk' "$ROOT/tests/$_s.sh" \
+    || fail "R9d: tests/$_s.sh slices markdown by heading but no longer loads tests/lib/fence.awk — it has grown its own fence rule, which is the drift this check exists to prevent"
+done
+# …and nothing may define the function inline: copying the body in would satisfy the loop
+# above only if the path string were left behind as a comment, and defeat it silently
+# otherwise. This is the general form of the same question. Spelled as a regex with an
+# explicit whitespace class so this line does not match itself — the technique R10 of
+# tests/test_scratch_and_disk_preconditions.sh established, and the first draft of this
+# assertion needed it: `-qF` on the literal declaration flagged THIS suite.
+for _s in "$ROOT"/tests/test_*.sh; do
+  grep -qE 'function[[:space:]]+fence_delim' "$_s" \
+    && fail "R9d: $(basename "$_s") defines fence_delim() inline instead of loading tests/lib/fence.awk — that is a second copy of the rule, which is exactly the drift this check exists to prevent"
+done
+pass "R9d the shared fence rule handles tilde / indented / long-run delimiters, each proven against the superseded toggle"
 
 echo "All change-size tests passed."

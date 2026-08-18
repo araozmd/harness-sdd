@@ -522,8 +522,11 @@ pass "R12 doc-critic checkpoint is runnable in the source checkout (shim + Write
 # NON-EMPTY — so the guard below would pass while the grep under it ran against a prefix.
 # That is the E99-F102-part-A failure shape; the anti-truncation control after it is the half
 # an emptiness check cannot provide.
-_sec="$(awk 'BEGIN{h="Doc-critic checkpoint before"}
-  /^```/ { fence = !fence; if (k) print; next }
+# The rule itself lives in tests/lib/fence.awk — ONE copy, shared by every suite that slices
+# markdown, and it is CommonMark's (tilde, 0-3 spaces of indent, long runs) rather than a
+# three-backtick toggle. tests/test_change_size.sh R9d exercises each delimiter form.
+_sec="$(awk "$(cat "$SRC/tests/lib/fence.awk")"'BEGIN{h="Doc-critic checkpoint before"}
+  fence_delim($0) { if (k) print; next }
   !fence && /^#+ /{k=(index($0,h)>0);next}
   k' "$SRC/agents/architect.md")"
 [ -n "$_sec" ] \

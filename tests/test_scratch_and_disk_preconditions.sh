@@ -207,9 +207,13 @@ span() {
 # today, but it is the file most likely to gain one (it prescribes copy-pasteable recipes),
 # and a truncated slice is still NON-EMPTY — so `[ -n "$BSEC" ]` below would pass while every
 # substance check ran against the first paragraph. Measured shape, E99-F102 part A.
+# The rule itself lives in tests/lib/fence.awk — ONE copy, shared by every suite that slices
+# markdown, and it is CommonMark's (tilde, 0-3 spaces of indent, long runs) rather than a
+# three-backtick toggle. tests/test_change_size.sh R9d exercises each delimiter form.
+_FENCE_AWK="$(cat "$SRC/tests/lib/fence.awk")"
 section() {
-  awk -v h="$1" '
-    /^```/ { fence = !fence; if (k) print; next }
+  awk -v h="$1" "$_FENCE_AWK"'
+    fence_delim($0) { if (k) print; next }
     !fence && /^#+ / { k = (index($0, h) > 0); next }
     k
   ' "$BUILDER"
