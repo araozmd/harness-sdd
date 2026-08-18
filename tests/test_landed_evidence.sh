@@ -661,9 +661,16 @@ section() {  # section <file> <heading-substring>
   # still non-empty, so an emptiness guard passes while every assertion below runs against
   # the first few paragraphs only. Measured while writing this case: the section came back
   # 37 lines long and the `none:<why>` assertion failed against text that was present.
-  SECTION_HEADING="$2" awk '
+  # The fence rule itself now lives in tests/lib/fence.awk — ONE copy, shared by every suite
+  # that slices markdown (E99-F131). The toggle written here originally was `/^```/`, which is
+  # not the CommonMark rule: a fence may be TILDE, may be INDENTED up to three spaces, and an
+  # opener longer than three is closed only by a run at least as long. orchestrator.md — the
+  # file this very function slices — carries three indented ```` ```json ```` fences the old
+  # toggle mis-tracked. Latent rather than live (they are paired and hold no column-0 `#`), but
+  # green-by-luck-of-content is the exact condition this function exists to remove.
+  SECTION_HEADING="$2" awk "$(cat "$SRC/tests/lib/fence.awk")"'
     BEGIN { h = ENVIRON["SECTION_HEADING"] }
-    /^```/ { fence = !fence; if (keep) print; next }
+    fence_delim($0) { if (keep) print; next }
     !fence && /^#+ / { keep = (index($0, h) > 0); next }
     keep
   ' "$1"

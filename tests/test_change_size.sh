@@ -614,11 +614,43 @@ pass "R9 reviewer + orchestrator carry the advisory handoff rule"
 # can fail when the instruction is fix-lane-only.
 _ORCH="$ROOT/agents/orchestrator.md"
 _ORCH_SECTION='The pre-PR change-size handoff'
-_outside="$(awk '
-  /^## Targeted parallel-fix worker mode/ { skip = 1; next }
-  /^## / { skip = 0 }
+# ⚠️ EVERY heading-driven extractor below is FENCE-AWARE, and that is not decoration.
+# A naive `/^#+ /` (or `/^## /`) test also matches a shell COMMENT inside a fenced block —
+# orchestrator.md already carries one (`# a SLICED feature: …`, in the `Writing \`done\``
+# section) — and the slice then ENDS THERE. The result is worse than extracting nothing: a
+# truncated section is still NON-EMPTY, so the emptiness guard below passes while every
+# assertion under it runs against a prefix. That exact failure was measured during E99-F102
+# part A (a 37-line prefix, green suite, assertions enforcing a third of what they named), so
+# each extractor is paired with an ANTI-TRUNCATION CONTROL keyed on a marker from the END of
+# its section — an emptiness check alone cannot tell a whole section from its first paragraph.
+# The fence DELIMITER lines are still printed when they fall inside the kept region; only
+# their heading-ness is suppressed.
+#
+# `fence_delim()` comes from tests/lib/fence.awk — ONE copy, shared by every suite that
+# slices markdown, because "is this line a fence?" is exactly the question the harness has
+# now got wrong twice. It implements the real CommonMark rule (tilde as well as backtick,
+# 0-3 spaces of indent, an opener longer than three closed only by a run at least as long),
+# which `/^```/ { fence = !fence }` does not: orchestrator.md carries three INDENTED
+# ```` ```json ```` fences that the naive toggle mis-tracks today. That is latent rather than
+# live — those blocks are properly paired and hold no column-0 `#` — but "green by luck of
+# current content" is the precise condition this whole check exists to remove, so it is fixed
+# on the same argument. R9d below exercises each delimiter form.
+FENCE_AWK="$(cat "$ROOT/tests/lib/fence.awk")"
+_outside="$(awk "$FENCE_AWK"'
+  fence_delim($0) { if (!skip) print; next }
+  !fence && /^## Targeted parallel-fix worker mode/ { skip = 1; next }
+  !fence && /^## / { skip = 0 }
   !skip
 ' "$_ORCH")"
+# CONTROL (excision): `$_outside` is only a meaningful scope if the worker-mode section was
+# actually REMOVED from it. Without this, a mis-scoped extractor that returned the whole file
+# would satisfy the fix-lane-only question below no matter where the instruction lived — the
+# assertion would pass and its failure message would name a guarantee it cannot detect.
+printf '%s\n' "$_outside" | grep -qF 'worker board transitions remain lock-safe' \
+  && fail "R9b control: the parallel-fix worker mode was NOT excised from the whole-file scope — the fix-lane-only assertion below would pass no matter where the change-size instruction lives"
+# CONTROL (no over-drop): the excision must end at the section, not run to EOF.
+printf '%s\n' "$_outside" | grep -qF 'exits 0 with a "no telemetry yet" notice' \
+  || fail "R9b control: the whole-file-minus-worker-mode scope does not reach the end of orchestrator.md — the excision swallowed everything after the section, so the assertion below is measuring a prefix"
 printf '%s\n' "$_outside" | grep -qF 'tools/change-size.sh' \
   || fail "R9b: orchestrator.md runs the change-size check ONLY inside the parallel-fix worker mode — the main in-review → PR path never reaches it"
 # Everything about WHAT the main-path handoff must say is asserted against the SECTION, not
@@ -635,13 +667,20 @@ printf '%s\n' "$_outside" | grep -qF 'tools/change-size.sh' \
 # belong to it. Each extractor stops at the first heading that could not be part of its own
 # section, which is why the two differ.
 export CS_ORCH_SECTION="$_ORCH_SECTION"
-_main_cs="$(awk '
+_main_cs="$(awk "$FENCE_AWK"'
   BEGIN { h = ENVIRON["CS_ORCH_SECTION"] }
-  /^#+ / { keep = (index($0, h) > 0); next }
+  fence_delim($0) { if (keep) print; next }
+  !fence && /^#+ / { keep = (index($0, h) > 0); next }
   keep
 ' "$_ORCH")"
 [ -n "$(printf '%s' "$_main_cs" | tr -d '[:space:]')" ] \
   || fail "R9b: could not extract the '$_ORCH_SECTION' section from orchestrator.md — the heading was renamed or removed, so every assertion below it would pass vacuously"
+# ANTI-TRUNCATION: the emptiness guard above cannot distinguish the whole section from its
+# first two lines. This section's LAST sentence hands the tier to the PR body and cites the
+# Reviewer's half — the very half `_rev_cs` below cross-checks — so if the extraction does not
+# reach it, the `_rev_cs` citation assertions are being paired against a section nobody read.
+printf '%s\n' "$_main_cs" | grep -qF 'your PR body carries it forward' \
+  || fail "R9b: the '$_ORCH_SECTION' extraction does not reach its final sentence — it was TRUNCATED, so every assertion below runs against a prefix (a truncated section is still non-empty, so the guard above cannot catch this)"
 printf '%s\n' "$_main_cs" | grep -qF 'tools/change-size.sh' \
   || fail "R9b: the main-path handoff section does not actually invoke tools/change-size.sh — it only talks about it"
 # Deliberately NOT narrowed to a single fixed phrase. "PR body" occurs three times in this
@@ -656,11 +695,17 @@ printf '%s\n' "$_main_cs" | grep -qi 'never blocks\|advisory' \
   || fail "R9b: the main-path handoff does not state that the check is advisory and never blocks"
 # The parallel-fix section must NOT be weakened on the way: its --repo caveat is load-bearing
 # because HARNESS_DIR locates the script, not the tree under measurement.
-_inside="$(awk '
-  /^## Targeted parallel-fix worker mode/ { keep = 1; next }
-  /^## / { keep = 0 }
+_inside="$(awk "$FENCE_AWK"'
+  fence_delim($0) { if (keep) print; next }
+  !fence && /^## Targeted parallel-fix worker mode/ { keep = 1; next }
+  !fence && /^## / { keep = 0 }
   keep
 ' "$_ORCH")"
+[ -n "$(printf '%s' "$_inside" | tr -d '[:space:]')" ] \
+  || fail "R9b: could not extract the 'Targeted parallel-fix worker mode' section from orchestrator.md — the heading was renamed or removed, so every assertion below it would pass vacuously"
+# ANTI-TRUNCATION, same reasoning as `_main_cs`: key on the section's CLOSING sentence.
+printf '%s\n' "$_inside" | grep -qF 'worker board transitions remain lock-safe' \
+  || fail "R9b: the 'Targeted parallel-fix worker mode' extraction does not reach its final sentence — it was TRUNCATED, so the --repo caveat assertions below run against a prefix"
 printf '%s\n' "$_inside" | grep -qF -- '--repo' \
   || fail "R9b: the parallel-fix worker mode lost its --repo caveat — a worker spawned from the canonical primary would measure the coordinator's bookkeeping branch"
 # …and the REASON, not just the flag. `--repo` appears several times in that section, so the flag
@@ -677,11 +722,19 @@ printf '%s\n' "$_inside" | grep -qF 'not the tree under measurement' \
 # unrelated reasons, and a whole-file grep would pass no matter what the section said. (This is
 # the same reasoning `_main_cs` above now applies to orchestrator.md; it was written here first
 # and simply never carried across.)
-_rev_cs="$(awk '
-  /^## Change-size check before the PR handoff/ { keep = 1; next }
-  /^## / { keep = 0 }
+_rev_cs="$(awk "$FENCE_AWK"'
+  fence_delim($0) { if (keep) print; next }
+  !fence && /^## Change-size check before the PR handoff/ { keep = 1; next }
+  !fence && /^## / { keep = 0 }
   keep
 ' "$ROOT/agents/reviewer.md")"
+[ -n "$(printf '%s' "$_rev_cs" | tr -d '[:space:]')" ] \
+  || fail "R9b: could not extract the 'Change-size check before the PR handoff' section from reviewer.md — the heading was renamed or removed, so every assertion below it would pass vacuously"
+# ANTI-TRUNCATION: this section's last paragraph IS the cross-file half being asserted (it
+# names the Orchestrator and cites its section), and it sits after a fenced `sh` block. An
+# extraction that stops at the fence is non-empty and would make both greps below vacuous.
+printf '%s\n' "$_rev_cs" | grep -qF 'on the assumption the Orchestrator will re-derive it' \
+  || fail "R9b: the reviewer.md change-size section extraction does not reach its final sentence — it was TRUNCATED, so the cross-file citation assertions below run against a prefix"
 printf '%s\n' "$_rev_cs" | grep -qi 'orchestrator' \
   || fail "R9b: reviewer.md's change-size section never mentions the Orchestrator's half of the handoff"
 printf '%s\n' "$_rev_cs" | grep -qF "$_ORCH_SECTION" \
@@ -718,5 +771,169 @@ grep -qF 'path other than the one the failure message names' "$_BUILDER" \
 grep -qF 'the fix in place and confirming the test fails' "$_BUILDER" \
   || fail "R9c: builder.md poses the question but no longer requires PROVING the answer by mutation — the lens is not reliable as a reasoning exercise"
 pass "R9c builder.md carries the section-scoping rule and the reachable-another-way lens"
+
+# ── R9d: the shared fence rule is CommonMark's, per DELIMITER FORM ────────────────────────
+# The first fix for this defect tracked fences with a column-0 three-backtick toggle. That is
+# not the rule: a fence may be TILDE, may be INDENTED up to three spaces, and an opener longer
+# than three is closed only by a run of the same character at least as long — so a shorter run
+# inside it is content, not a delimiter. Under any of those the block is mis-tracked and a `#`
+# line inside it is read as a heading again, which is the same truncation (silent green) or
+# over-inclusion (vacuous scope) the extractors above exist to prevent.
+#
+# LATENT, NOT LIVE, at the time this was written, and worth saying plainly: orchestrator.md's
+# three indented ```` ```json ```` fences and docs/WORKFLOW.md's one are properly paired and
+# contain no column-0 `#`, so the naive toggle's mis-tracking changed no result. But "correct
+# only because of what the files happen to contain today" is precisely the condition R9/R9b
+# were in before this feature, and fixing one while declining the other would be incoherent.
+#
+# Each form is asserted BEHAVIOURALLY — the fixture is sliced by the real extraction program —
+# and each is PAIRED WITH A CONTROL that runs the same program against the superseded toggle.
+# The control is the load-bearing half: a fixture that both implementations extract whole does
+# not exercise the form it is named for, and the assertion above it would prove nothing.
+_fx="$T/fence-forms"
+mkdir -p "$_fx"
+_NAIVE_AWK="$(cat "$ROOT/tests/lib/fence-naive.awk")"
+
+# ONE extraction program, two preludes. Both fence.awk and fence-naive.awk expose the same
+# `fence_delim(line)` interface, so the only variable between the two runs is the fence rule.
+_slice() {  # _slice <awk-prelude> <file>
+  awk "$1"'
+    fence_delim($0) { if (keep) print; next }
+    !fence && /^#+ / { keep = (index($0, "Target section") > 0); next }
+    keep
+  ' "$2"
+}
+
+cat > "$_fx/tilde.md" <<'FIXEOF'
+### Target section
+
+~~~sh
+# a column-0 shell comment inside a TILDE fence
+echo INSIDE-tilde
+~~~
+
+END-MARKER-tilde
+
+### Next section
+
+DECOY-tilde
+FIXEOF
+
+cat > "$_fx/indent.md" <<'FIXEOF'
+### Target section
+
+   ```sh
+# a column-0 shell comment inside a 3-space-INDENTED fence
+echo INSIDE-indent
+   ```
+
+END-MARKER-indent
+
+### Next section
+
+DECOY-indent
+FIXEOF
+
+cat > "$_fx/long.md" <<'FIXEOF'
+### Target section
+
+````sh
+```
+# a column-0 shell comment after a SHORTER run inside a longer fence
+echo INSIDE-long
+````
+
+END-MARKER-long
+
+### Next section
+
+DECOY-long
+FIXEOF
+
+for _form in tilde indent long; do
+  _got="$(_slice "$FENCE_AWK" "$_fx/$_form.md")"
+  _naive="$(_slice "$_NAIVE_AWK" "$_fx/$_form.md")"
+  printf '%s\n' "$_got" | grep -qF "END-MARKER-$_form" \
+    || fail "R9d ($_form): the shared fence rule TRUNCATED the section — the $_form delimiter was mis-tracked, so the column-0 '#' inside the block was read as a heading and every assertion below such a slice would run against a prefix"
+  printf '%s\n' "$_got" | grep -qF "DECOY-$_form" \
+    && fail "R9d ($_form): the shared fence rule OVER-INCLUDED past the section's end — a scope this wide makes the assertions using it unable to fail"
+  printf '%s\n' "$_got" | grep -qF "INSIDE-$_form" \
+    || fail "R9d ($_form): the fenced block's own content was swallowed — the rule must suppress a delimiter's heading-ness, not delete the block"
+  printf '%s\n' "$_naive" | grep -qF "END-MARKER-$_form" \
+    && fail "R9d ($_form) CONTROL: the superseded toggle extracts this fixture whole too, so the fixture does not exercise the $_form delimiter form and the assertion above it proves nothing"
+done
+
+# STRUCTURAL: one copy of the rule, loaded — not five hand-rolled toggles that drift apart.
+# A second copy is how this defect reached six extractors before anyone noticed.
+#
+# Checked POSITIVELY (each slicing suite loads the shared file), not as a ban on the naive
+# spelling. A ban was written first and rejected on measurement: matching a fence delimiter is
+# a legitimate operation in its own right — tests/test_pr_loop.sh's `/^```bash$/` pulls a block
+# out of markdown IT generated, where the delimiter spelling is fixed and known — so the ban
+# flagged a correct suite, and it also matched prose ABOUT the wrong idiom, including the
+# comment a few lines above. A check that reds on correct code is what teaches the next
+# maintainer to relax it.
+for _s in test_change_size test_source_shims test_scratch_and_disk_preconditions \
+          test_landed_evidence test_stacked_doctrine; do
+  grep -qF 'tests/lib/fence.awk' "$ROOT/tests/$_s.sh" \
+    || fail "R9d: tests/$_s.sh slices markdown by heading but no longer loads tests/lib/fence.awk — it has grown its own fence rule, which is the drift this check exists to prevent"
+  # …and LOADING it is not USING it. Checking only for the path made the one-copy invariant
+  # unpinned: revert a slicer to the superseded `/^```/{f=!f}` toggle while leaving the
+  # FENCE_AWK assignment in place and this loop still passed. Measured — the check said `ok`
+  # over a suite that had grown its own rule back. So require the CALL, which is the thing
+  # that actually makes the shared rule govern the extraction. Spelled as the exact call form
+  # rather than the bare name so a mention in prose or in this very assertion cannot satisfy it.
+  grep -qF 'fence_delim($0)' "$ROOT/tests/$_s.sh" \
+    || fail "R9d: tests/$_s.sh loads tests/lib/fence.awk but never CALLS fence_delim(\$0) — the shared rule is referenced and not used, so its slicer is running some other fence logic. That is the same second copy the path check was meant to prevent, wearing the path as a disguise"
+done
+# …and nothing may define the function inline: copying the body in would satisfy the loop
+# above only if the path string were left behind as a comment, and defeat it silently
+# otherwise. This is the general form of the same question. Spelled as a regex with an
+# explicit whitespace class so this line does not match itself — the technique R10 of
+# tests/test_scratch_and_disk_preconditions.sh established, and the first draft of this
+# assertion needed it: `-qF` on the literal declaration flagged THIS suite.
+for _s in "$ROOT"/tests/test_*.sh; do
+  grep -qE 'function[[:space:]]+fence_delim' "$_s" \
+    && fail "R9d: $(basename "$_s") defines fence_delim() inline instead of loading tests/lib/fence.awk — that is a second copy of the rule, which is exactly the drift this check exists to prevent"
+done
+# …and per-SLICER, not per-file, and NOT by banning spellings. The call check above proves
+# only that SOME slicer in the suite calls the shared rule, and a ban on one toggle spelling
+# is a treadmill: `{f=!f}` was banned, `{f=1-f}` is the same toggle and slips straight past.
+# Both were measured on this repo's own sect()/span() pair. That is four spellings of one
+# defect on this item — a PATH STRING for the call, ONE call for all of them, then one banned
+# idiom for every idiom — and each was a proxy standing in for the property.
+#
+# The property is: every heading slicer calls the shared rule. So assert exactly that, per
+# awk PROGRAM. Both the heading reset and the `fence_delim(...)` call live inside the same
+# single-quoted awk program in every slicer here, so a program that resets on a heading and
+# does not call it is a slicer running its own fence logic — whatever that logic is spelled
+# like. python3 does the scan because the suite already depends on it (see `field()`), and a
+# spelling-agnostic structural check is worth more than a regex that must be extended each
+# time someone writes the same bug differently.
+python3 - "$ROOT" <<'PYEOF' || fail "R9d: a heading slicer does not call fence_delim() from tests/lib/fence.awk (see the message above) — it is running its own fence logic, which is the second copy this check exists to prevent"
+import glob, os, re, sys
+root = sys.argv[1]
+# A MARKDOWN heading reset is GENERIC — `/^#+ /` or `/^## /` with nothing after the space.
+# A literal banner slices a YAML comment instead, where `#` at column 0 IS the intended
+# sentinel and there are no fenced blocks; three suites do that legitimately and must not
+# be dragged in. That distinction came out of this PR's eight-suite audit.
+HEADING_RESETS = ("/^#+ /", "/^## /")
+bad = []
+for path in sorted(glob.glob(os.path.join(root, "tests", "test_*.sh"))):
+    src = open(path, encoding="utf-8").read()
+    # every single-quoted segment; in this codebase an awk program is exactly one of these
+    for m in re.finditer(r"'([^']*)'", src, re.S):
+        prog = m.group(1)
+        # only a segment that is actually an awk PROGRAM — the same quoting shape is used by
+        # python heredocs and by ordinary quoted prose, and neither slices markdown.
+        if "awk" not in src[max(0, m.start() - 120):m.start()]:
+            continue
+        if any(h in prog for h in HEADING_RESETS) and "fence_delim(" not in prog:
+            bad.append((os.path.basename(path), " ".join(prog.split())[:90]))
+for name, snippet in bad:
+    sys.stderr.write("  %s: slicer resets on a heading without calling fence_delim(): %s\n" % (name, snippet))
+sys.exit(1 if bad else 0)
+PYEOF
+pass "R9d the shared fence rule handles tilde / indented / long-run delimiters, each proven against the superseded toggle"
 
 echo "All change-size tests passed."

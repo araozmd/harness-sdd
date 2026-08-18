@@ -63,17 +63,27 @@ WF="$SRC/docs/WORKFLOW.md"
 LANE='Stacked-PR lane'
 F04SPEC="$SRC/specs/epics/E21-change-size-discipline/F04-stacked-pr-lane/F04-stacked-pr-lane.spec.md"
 
+# The fence rule, ONE copy, shared with every other suite that slices markdown (E99-F131).
+# Both helpers below used to spell it `/^```/{f=!f}`, which is not the CommonMark rule — a
+# fence may be TILDE, may be INDENTED up to three spaces, and an opener longer than three is
+# closed only by a run at least as long. docs/WORKFLOW.md, the file both helpers slice, holds
+# EIGHT column-0 heading-looking lines inside true fences (so fence-awareness is load-bearing
+# here today) and one indented fence at ~837 the old toggle mis-tracked. That one was latent —
+# properly paired, no column-0 `#` inside — but a second, subtly different copy of this rule is
+# how the defect spread in the first place. tests/test_change_size.sh R9d exercises each form.
+FENCE_AWK="$(cat "$SRC/tests/lib/fence.awk")"
+
 # sect <file> <heading-text> — ONE section body; stops at the next heading of ANY level.
 # FENCE-AWARE: `#` opens a comment in every shell fence in these docs, so the bare house
 # idiom treats `# Increment 1 targets main` as a heading and stops extracting there.
-sect() { awk -v h="$2" '/^```/{f=!f} !f && /^#+ /{k=(index($0,h)>0);next} k' "$1"; }
+sect() { awk -v h="$2" "$FENCE_AWK"'fence_delim($0){if(k)print;next} !fence && /^#+ /{k=(index($0,h)>0);next} k' "$1"; }
 
 # span <file> <h2-heading-text> — a WHOLE `## ` section INCLUDING its `###` subsections;
 # stops at the next `## `. Used for every lane-wide sweep and every uniqueness count.
 # ALSO fence-aware: no shell comment in this file begins with `## ` TODAY, but this feature
 # rewrites those very fences (T4, T6), and a `## ` comment introduced inside one would
 # truncate the span and make three bans pass vacuously.
-span() { awk -v h="$2" '/^```/{f=!f} !f && /^## /{k=(index($0,h)>0);next} k' "$1"; }
+span() { awk -v h="$2" "$FENCE_AWK"'fence_delim($0){if(k)print;next} !fence && /^## /{k=(index($0,h)>0);next} k' "$1"; }
 
 # lane_count <pattern> [-i] — OCCURRENCES of <pattern> in the lane span. Never `grep -c`.
 lane_count() {
