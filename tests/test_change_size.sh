@@ -896,6 +896,29 @@ for _s in "$ROOT"/tests/test_*.sh; do
   grep -qE 'function[[:space:]]+fence_delim' "$_s" \
     && fail "R9d: $(basename "$_s") defines fence_delim() inline instead of loading tests/lib/fence.awk — that is a second copy of the rule, which is exactly the drift this check exists to prevent"
 done
+# …and per-SLICER, not per-file. The call check above proves only that SOME slicer in the
+# suite calls the shared rule: a file with two extractors can have one reverted while the
+# other keeps the grep satisfied. Measured — reverting `sect()` in test_stacked_doctrine.sh
+# while leaving `span()` alone left every check green. That is the same
+# proxy-instead-of-property defect for the third time in this file's history: first the path
+# STRING stood in for the call, then ONE call stood in for all of them.
+#
+# So ban the superseded IDIOM itself, which is what a reverted slicer must reintroduce: a
+# self-negating toggle driven by a bare fence pattern (`/^```/{f=!f}`). A blanket ban on
+# matching a fence was tried earlier and correctly rejected — test_pr_loop.sh's `/^```bash$/`
+# pulls a block out of markdown IT generated, which is legitimate — so this matches the
+# TOGGLE, not the match. The delimiter run is built into a variable so this assertion cannot
+# match its own source line, the technique R10 of
+# tests/test_scratch_and_disk_preconditions.sh established. Shell COMMENT lines are excluded
+# before matching: three lines in this very file quote the superseded form while explaining
+# it, and a check that forbids naming the thing it forbids is one the next maintainer deletes
+# rather than obeys. A commented-out toggle is not an executing one.
+_BT='```'
+for _s in "$ROOT"/tests/test_*.sh; do
+  grep -v '^[[:space:]]*#' "$_s" \
+    | grep -qE "/\^$_BT[^/]*/.*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*![[:space:]]*[A-Za-z_]" \
+    && fail "R9d: $(basename "$_s") drives a fence toggle from a bare backtick pattern instead of calling fence_delim() from tests/lib/fence.awk — that is the superseded rule reintroduced, and it mis-tracks tilde, indented and long-run delimiters exactly as before"
+done
 pass "R9d the shared fence rule handles tilde / indented / long-run delimiters, each proven against the superseded toggle"
 
 echo "All change-size tests passed."
