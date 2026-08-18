@@ -64,7 +64,7 @@ except ImportError:
 # Fallback structural check (subset: required fields + status enums + id patterns).
 errors = []
 FEAT = {"pending","spec-ready","in-progress","in-review","done"}
-EPIC = {"pending","in-progress","done"}
+EPIC = {"draft","planned","pending","in-progress","done"}
 for ei, ep in enumerate(data.get("epics", [])):
     if not re.match(r"^E[0-9]+$", ep.get("id","")): errors.append("epic[%d].id" % ei)
     if ep.get("status") not in EPIC: errors.append("epic[%d].status" % ei)
