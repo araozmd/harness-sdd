@@ -518,4 +518,67 @@ case "$(mem acquire)" in
 esac
 pass "E99-F129c C9 uniqueness_depends_on_ref_membership_and_the_witness_captures_it"
 
+# ── C10: the fingerprint observes where git actually WRITES ───────────────────────────
+# Round 5. `_storage_fingerprint` stat'd five PARENT paths (.git, refs, packed-refs,
+# objects, objects/pack) while its comment claimed "a repository cannot gain a commit
+# without writing to its object store or its refs, so stat-ing those is sound". The
+# reasoning was right and the paths did not implement it: a loose ref is written inside
+# refs/heads/ and a loose object inside objects/<xx>/, and neither moves the stat'd parent.
+# Measured: rewriting a loose ref left the fingerprint byte-identical. A comment asserting a
+# guarantee the code lacks is worse than none — it invites the next reader to trust it.
+cat > "$T/fp.py" <<'PY'
+import importlib.util, os, subprocess, sys
+spec = importlib.util.spec_from_file_location(
+    "rr", os.path.join(os.environ["SRC"], "tools/repo-resolve.py"))
+rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+d, action = sys.argv[1:3]
+before = rr._storage_fingerprint(d)
+if before is None:
+    print("NO-FINGERPRINT"); raise SystemExit(0)
+def git(*a):
+    subprocess.run(["git", "-c", "user.email=t@e", "-c", "user.name=t"] + list(a),
+                   cwd=d, stdout=-3, stderr=-3)
+if action == "loose-ref":
+    head = os.path.join(rr._git_storage_root(d)[1], "refs", "heads", "main")
+    sha = open(head).read().strip()
+    open(head, "w").write(sha + "\n")
+elif action == "loose-object":
+    # `hash-object -w` writes a loose object and touches NO ref. A commit would also move
+    # refs/heads, so the ref walk would catch it and this case would pass while the object
+    # dimension did nothing — measured: deleting the fan-out stats left it green.
+    subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=d,
+                   input=os.urandom(16), stdout=-3, stderr=-3)
+elif action == "new-ref":
+    # A UNIQUE name each time: this action runs against more than one fixture, and a
+    # second `git branch another` fails silently as "already exists", which would leave
+    # the store untouched and read as a fingerprint that missed the write.
+    git("branch", "b-" + os.urandom(4).hex())
+print("CHANGED" if rr._storage_fingerprint(d) != before else "IDENTICAL")
+PY
+fp() { SRC="$SRC" python3 "$T/fp.py" "$1" "$2"; }
+FPR="$T/fprepo"
+mkrepo "$FPR"
+# CONTROL FIRST: an untouched repository fingerprints identically — without this, every
+# "CHANGED" below would hold against a fingerprint that is simply never stable.
+[ "$(fp "$FPR" none)" = "IDENTICAL" ] \
+  || fail "C10 control: an untouched repository did not fingerprint identically ($(fp "$FPR" none)) — a detector that never matches detects nothing"
+[ "$(fp "$FPR" loose-ref)" = "CHANGED" ] \
+  || fail "C10: rewriting a LOOSE REF went unseen — it is written inside refs/heads/, which the parent refs/ mtime does not follow"
+[ "$(fp "$FPR" new-ref)" = "CHANGED" ] || fail "C10: creating a branch went unseen"
+# Written with `hash-object -w`, which moves NO ref: this case must be carried by the
+# object dimension alone, or it passes on the ref walk and the fan-out stats are dead code.
+[ "$(fp "$FPR" loose-object)" = "CHANGED" ] \
+  || fail "C10: a new LOOSE OBJECT written without touching any ref went unseen — it lands in objects/<xx>/, which the parent objects/ mtime does not follow"
+# GITFILE / LINKED WORKTREE: `.git` is a FILE there, and the shared refs live in the common
+# dir. `same_repository()` reasons about common git dirs via git; this must reach the same
+# place by reading `commondir`, or the two disagree about where a repository's refs are.
+( cd "$FPR" && git_q worktree add "$T/fp-wt" -b fp-branch )
+[ -f "$T/fp-wt/.git" ] || fail "C10 setup: the linked worktree has no gitfile, so the layout is not being exercised"
+[ "$(fp "$T/fp-wt" none)" = "IDENTICAL" ] \
+  || fail "C10: a linked worktree could not be fingerprinted at all ($(fp "$T/fp-wt" none)) — `.git` is a FILE there, and a fingerprint that returns nothing sees nothing"
+[ "$(fp "$T/fp-wt" new-ref)" = "CHANGED" ] \
+  || fail "C10: a ref written through a linked worktree went unseen — its shared refs live in the COMMON dir, which is where the fingerprint must look"
+( cd "$FPR" && git_q worktree remove --force "$T/fp-wt" )
+pass "E99-F129c C10 the_fingerprint_observes_where_git_actually_writes"
+
 echo "All repository-resolver tests passed."

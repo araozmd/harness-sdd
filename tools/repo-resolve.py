@@ -221,27 +221,128 @@ class Identity(object):
         return "Identity(%r -> %r)" % (self.lexical, self.real)
 
 
-def _storage_fingerprint(directory):
-    """A conservative, FILESYSTEM-ONLY change detector for a repository's refs/objects.
+def _git_storage_root(directory):
+    """(gitdir, commondir) for a work tree, resolved with FILE READS ONLY.
 
-    A repository cannot gain a commit without writing to its object store or its refs, so
-    stat-ing those is sound in the only direction that matters: if nothing here moved, the
-    repository cannot have acquired anything. It OVER-reports — unrelated local activity
-    looks like a change — and that is the deliberate side to err on, because the cost is a
-    re-run while the cost of under-reporting is spending a verdict whose uniqueness has
-    lapsed. Missing entries are recorded as None so an appearing/disappearing store shows
-    up as a change rather than as equality.
+    `.git` may be a DIRECTORY (ordinary checkout) or a FILE containing `gitdir: <path>`
+    (a linked worktree, or `git init --separate-git-dir`). A linked worktree splits its
+    refs: per-worktree ones (HEAD, refs/bisect) live in its own git dir, while the shared
+    ones (refs/heads, refs/remotes) and ALL objects live in the COMMON dir, which git
+    records in `<gitdir>/commondir`.
+
+    `same_repository()` asks git for the same notion with `rev-parse --git-common-dir`;
+    this reads the file git wrote, because a fingerprint has to be recomputable inside a
+    lock where no child process may run. Both must agree on where a repository's refs
+    actually live, or one of them is looking at the wrong place.
     """
-    out = []
-    git_dir = os.path.join(directory, ".git")
-    for rel in ("", "refs", "packed-refs", "objects", os.path.join("objects", "pack")):
-        target = os.path.join(git_dir, rel) if rel else git_dir
+    entry = os.path.join(directory, ".git")
+    if os.path.isdir(entry):
+        gitdir = entry
+    elif os.path.isfile(entry):
         try:
-            st = os.stat(target)
-            out.append((rel, st.st_mtime_ns, st.st_size))
+            with io.open(entry, encoding="utf-8") as fh:
+                text = fh.read().strip()
+        except (OSError, ValueError):
+            return None
+        if not text.startswith("gitdir:"):
+            return None
+        gitdir = os.path.normpath(
+            os.path.join(directory, text.split(":", 1)[1].strip()))
+    else:
+        return None
+    common = gitdir
+    marker = os.path.join(gitdir, "commondir")
+    if os.path.isfile(marker):
+        try:
+            with io.open(marker, encoding="utf-8") as fh:
+                common = os.path.normpath(os.path.join(gitdir, fh.read().strip()))
+        except (OSError, ValueError):
+            return None
+    return gitdir, common
+
+
+def _stat_of(path):
+    try:
+        st = os.stat(path)
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
+def _storage_fingerprint(directory):
+    """A FILESYSTEM-ONLY change detector over where a repository keeps refs and objects.
+
+    THE PROPERTY IT IMPLEMENTS: a repository cannot come to hold a commit without writing
+    into its object store, and cannot come to hold a NAME for one without writing into its
+    ref store. So this observes those two stores directly — and, importantly, at the level
+    git actually writes:
+
+      * refs: the whole `refs/` tree is WALKED, every directory and every file, because a
+        loose ref is written inside `refs/heads/…` and that touches only its own
+        directory — the parent `refs/` mtime does not move. Plus `packed-refs`.
+      * objects: every fan-out directory `objects/<xx>` is stat'd, because a loose object
+        lands inside one of them and `objects/` itself does not change; plus the listing
+        of `objects/pack`, because a fetch usually arrives as a new pack file.
+
+    An earlier version stat'd only the five PARENTS (`.git`, `refs`, `packed-refs`,
+    `objects`, `objects/pack`) while its comment claimed exactly the property above. The
+    reasoning was right and the paths did not implement it: rewriting a loose ref left the
+    fingerprint byte-identical. A comment asserting a guarantee the code does not have is
+    worse than no comment, because it invites the next reader to trust it instead of
+    re-deriving it — so this docstring now ends with what it does NOT see.
+
+    Both the COMMON dir (shared refs, all objects) and the per-worktree dir (HEAD and its
+    private refs) are covered, via `_git_storage_root`, so gitfile and linked-worktree
+    layouts are not blind spots.
+
+    It over-reports by design: unrelated local activity in a neighbouring repository looks
+    like a change. A false alarm costs a re-run; a miss spends an answer whose uniqueness
+    has lapsed.
+
+    ⚠️ WHAT IT DOES NOT SEE, precisely:
+      * objects borrowed through `objects/info/alternates` — the store lives in another
+        repository entirely, and following that chain is more filesystem walking than a
+        lock-held check should do. The alternates FILE is fingerprinted, so the borrowing
+        being set up or changed is visible; objects appearing in the borrowed store are not.
+      * a change that leaves both the directory listing and every mtime/size identical.
+      * anything about the ref's own history — this answers "did this store change", never
+        "is this commit here". That question needs git, and git may not be run here.
+    """
+    roots = _git_storage_root(directory)
+    if roots is None:
+        return None
+    gitdir, common = roots
+    parts = [("gitentry", _stat_of(os.path.join(directory, ".git")))]
+    for label, base in (("common", common), ("private", gitdir)):
+        if label == "private" and os.path.realpath(gitdir) == os.path.realpath(common):
+            continue                       # ordinary checkout: one store, not two
+        refs_root = os.path.join(base, "refs")
+        for root, dirs, files in os.walk(refs_root):
+            dirs.sort()
+            rel = os.path.relpath(root, base)
+            parts.append((label, "refsdir", rel, tuple(sorted(files)),
+                          _stat_of(root)))
+            for name in sorted(files):
+                parts.append((label, "ref", rel, name,
+                              _stat_of(os.path.join(root, name))))
+        for name in ("packed-refs", "HEAD", os.path.join("objects", "info", "alternates")):
+            parts.append((label, name, _stat_of(os.path.join(base, name))))
+        objects = os.path.join(base, "objects")
+        try:
+            entries = sorted(os.listdir(objects))
         except OSError:
-            out.append((rel, None, None))
-    return tuple(out)
+            entries = []
+        for name in entries:
+            if len(name) == 2:             # a loose-object fan-out directory
+                parts.append((label, "fanout", name,
+                              _stat_of(os.path.join(objects, name))))
+        pack = os.path.join(objects, "pack")
+        try:
+            packs = tuple(sorted(os.listdir(pack)))
+        except OSError:
+            packs = ()
+        parts.append((label, "packs", packs, _stat_of(pack)))
+    return tuple(parts)
 
 
 class Witness(object):

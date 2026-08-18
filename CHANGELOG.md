@@ -71,6 +71,14 @@ The contract it publishes (and now owns):
   repository cannot gain a commit without writing to them) and deliberately over-reporting,
   since the cost is a re-run. The chosen repository is excluded precisely so the
   not-promised clause survives: its own branch advancing is somebody else's merge.
+  The fingerprint observes where git actually **writes**: the whole `refs/` tree is walked
+  (a loose ref goes inside `refs/heads/…`, which the parent's mtime does not follow) and
+  every `objects/<xx>` fan-out directory is stat'd (a loose object lands inside one), plus
+  `packed-refs` and the `objects/pack` listing. Gitfile and linked-worktree layouts are
+  resolved by reading `commondir` — file reads only, so it stays lock-safe while reaching
+  the same store `same_repository()` reasons about. It states what it does **not** see:
+  objects borrowed via `objects/info/alternates` (the file is fingerprinted, the borrowed
+  store is not), and any change leaving both listing and mtimes identical.
 - **An unreadable manifest is not an absent one.** `absent` means no authority exists, and
   only that licenses a basename search; `unreadable` (a partial write, tab indentation)
   means the authority exists and cannot be read, where a search can return a confident
