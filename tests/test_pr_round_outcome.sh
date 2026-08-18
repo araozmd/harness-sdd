@@ -372,6 +372,78 @@ test_an_uncounted_round_is_not_a_missing_review() {
   pass "E99-F126 an_uncounted_round_is_not_a_missing_review: NEVER REVIEWED and NOT COUNTED are separate blocks with separate remedies"
 }
 
+# extract_fn <runbook> <section-heading> <fn-name> — a shell function lifted out of the prose.
+extract_fn() {
+  section "$1" "$2" \
+    | awk -v f="$3" 'index($0, f "() {") == 1 { p = 1 } p { print } p && /^\}$/ { exit }'
+}
+
+test_a_landed_outcome_survives_an_unreadable_cache() {
+  have_jq || { skip "a_landed_outcome_survives_an_unreadable_cache (jq not installed)"; return 0; }
+  # The bucket split is undone at the WRITE path if a later step clobbers a recorded
+  # `findings` with `unresolved`. Two steps did: step 3's unreadable-headRefOid abort and
+  # step 5's `pr-gate.sh` exit 4. Neither observed the review — one failed to read pr.json,
+  # the other failed to read blocking.json — and an exit code about UNREADABLE INPUT carries
+  # no information about whether Codex answered. Overwriting there destroys the evidence and
+  # then misreports it as NEVER REVIEWED, sending the operator to a healthy component.
+  _fn="$(extract_fn "$SRC/.claude/commands/sdd-pr-loop.md" 'Record the round' outcome_mark_unresolved)"
+  printf '%s' "$_fn" | grep -qF 'outcome_mark_unresolved() {' \
+    || fail "evidence: outcome_mark_unresolved could not be extracted from the runbook — the preserving write path is prose only"
+  _d="$T/evidence"; mkdir -p "$_d"
+  _f="$T/evidence/fn.sh"; printf '%s\n' "$_fn" > "$_f"
+  # shellcheck disable=SC1090
+  . "$_f"
+
+  # A review that landed SURVIVES a step that only failed to read the cache.
+  for _o in findings clean; do
+    mkdir -p "$_d/$_o"; printf '%s\n' "$_o" > "$_d/$_o/outcome"
+    outcome_mark_unresolved "$_d/$_o"
+    [ "$(cat "$_d/$_o/outcome")" = "$_o" ] \
+      || fail "evidence: a recorded '$_o' was overwritten with '$(cat "$_d/$_o/outcome")' by a step that never observed the review"
+  done
+  # Everything else is still demoted — the guard must not become "never write unresolved".
+  mkdir -p "$_d/timeout"; printf 'timeout\n' > "$_d/timeout/outcome"
+  outcome_mark_unresolved "$_d/timeout"
+  [ "$(cat "$_d/timeout/outcome")" = "unresolved" ] \
+    || fail "evidence: a round whose review never resolved was not demoted to unresolved"
+  mkdir -p "$_d/absent"
+  outcome_mark_unresolved "$_d/absent"
+  [ "$(cat "$_d/absent/outcome" 2>/dev/null)" = "unresolved" ] \
+    || fail "evidence: a round with no outcome at all was not marked unresolved"
+
+  # End to end, on the report an operator actually reads. Round 2 is the gate-exit-4 shape:
+  # the watcher recorded `findings`, classification left blocking.json unreadable.
+  _c="$T/evidence-cache"
+  mkdir -p "$_c/round-1" "$_c/round-2" "$_c/round-3"
+  printf 'findings\n' > "$_c/round-1/outcome"; findings_json 2 src/one.ts > "$_c/round-1/acted.json"
+  printf 'findings\n' > "$_c/round-2/outcome"; printf '{ truncated' > "$_c/round-2/blocking.json"
+  printf 'findings\n' > "$_c/round-3/outcome"; findings_json 2 src/one.ts > "$_c/round-3/acted.json"
+  outcome_mark_unresolved "$_c/round-2"          # what step 5 now does on gate exit 4
+  [ "$(cat "$_c/round-2/outcome")" = "findings" ] \
+    || fail "evidence: gate exit 4 clobbered the landed outcome — the round will report as NEVER REVIEWED"
+  [ "$(jqf "$_c" '.uncounted[] | select(.round == 2) | .status')" = "reviewed-uncounted" ] \
+    || fail "evidence: after a gate exit 4 the round is '$(jqf "$_c" '.uncounted[] | select(.round==2) | .status')', expected reviewed-uncounted"
+  [ "$(jqf "$_c" '.not_reviewed | length')" = "0" ] \
+    || fail "evidence: a round whose review landed was filed under not_reviewed after an unreadable-input abort"
+  _out="$(sh "$TREND" --cache "$_c")"
+  printf '%s\n' "$_out" | grep 'round 2' | grep -q 'review DID land' \
+    || fail "evidence: the report does not say a review landed for the round whose outcome file records one"
+  printf '%s\n' "$_out" | grep -q 'NEVER REVIEWED' \
+    && fail "evidence: the operator is told a review never landed for a round the outcome file says was reviewed" || :
+  printf '%s\n' "$_out" | grep -q 'Codex GitHub App' \
+    && fail "evidence: the operator is sent to the Codex App — the healthy component — for a failed classification" || :
+
+  # The CONTRAST that keeps the rule from degenerating into "never demote": exit 9 IS an
+  # observation (the gate ran wait-for-codex.sh evaluate and nothing resolved), so it may
+  # replace, and that round DOES belong under NEVER REVIEWED with the upstream remedy.
+  printf 'unresolved\n' > "$_c/round-2/outcome"   # what step 5 does on gate exit 9
+  [ "$(jqf "$_c" '.not_reviewed[0].round')" = "2" ] \
+    || fail "evidence: an exit-9 demotion no longer reaches not_reviewed — exit 9 must still be able to replace a recorded outcome"
+  sh "$TREND" --cache "$_c" | grep -q 'NEVER REVIEWED' \
+    || fail "evidence: an exit-9 round lost the NEVER REVIEWED header, so the two exit codes are no longer distinguishable in the report"
+  pass "evidence a_landed_outcome_survives_an_unreadable_cache: exit 4 preserves, exit 9 replaces"
+}
+
 test_the_tool_stays_advisory() {
   have_jq || { skip "the_tool_stays_advisory (jq not installed)"; return 0; }
   # Every new report path must still exit 0. A trend that can fail a run is a gate, and this
@@ -409,6 +481,7 @@ section() {
 check_runbook() { # check_runbook <file> <label>
   _f="$1"; _l="$2"
   _s2b="$(section "$_f" 'Record the round')"
+  _s3_headok="$(section "$_f" 'Parse and classify comments')"
   [ -n "$_s2b" ] \
     || fail "$_l: no section instructs the loop to record the round's outcome — the trend would read a file nobody writes"
   printf '%s' "$_s2b" | grep -qF '$round_dir/outcome' \
@@ -419,6 +492,24 @@ check_runbook() { # check_runbook <file> <label>
   done
   printf '%s' "$_s2b" | grep -q 'omitting `blocking.json`' \
     || fail "$_l: the outcome section does not warn against 'fixing' the timeout by omitting blocking.json"
+  # An outcome file is evidence. The later `unresolved` writers must be able to tell an exit
+  # code that OBSERVED the review from one that merely failed to read the cache, or the
+  # not_reviewed/uncounted distinction is undone one step upstream by the thing that writes it.
+  printf '%s' "$_s2b" | grep -qF 'outcome_mark_unresolved() {' \
+    || fail "$_l: the outcome section defines no preserving writer — a later step will clobber a landed review with 'unresolved'"
+  printf '%s' "$_s2b" | grep -qF 'findings|clean) : ;;' \
+    || fail "$_l: the preserving writer does not exempt a recorded findings/clean outcome"
+  printf '%s' "$_s2b" | grep -q 'may not overwrite' \
+    || fail "$_l: the outcome section does not state the principle that a step which did not observe the review may not overwrite it"
+
+  _s5="$(section "$_f" 'Branch on round')"
+  [ -n "$_s5" ] || fail "$_l: the gate-branch section is missing"
+  printf '%s' "$_s5" | grep -qF 'outcome_mark_unresolved "$round_dir"' \
+    || fail "$_l: the gate's unreadable-input path still writes unresolved unconditionally — a landed review is clobbered and reported as NEVER REVIEWED"
+  printf '%s' "$_s5" | grep -q 'Exit `9` is an OBSERVATION' \
+    || fail "$_l: the gate-branch section does not distinguish exit 9 (observed) from exit 4 (unreadable input)"
+  printf '%s' "$_s3_headok" | grep -qF 'outcome_mark_unresolved "$round_dir"' \
+    || fail "$_l: step 3's unreadable-headRefOid abort still overwrites the outcome unconditionally"
 
   # ── THE ORDERING (Codex round 1, P2) ──────────────────────────────────────────
   # `acted.json` is recorded at DISPATCH, never at classification. The first version of this
@@ -578,6 +669,7 @@ test_an_unrecorded_outcome_is_never_silently_clean
 test_the_trend_counts_what_was_acted_on
 test_the_merge_gate_still_reads_the_configured_filter
 test_an_uncounted_round_is_not_a_missing_review
+test_a_landed_outcome_survives_an_unreadable_cache
 test_the_remedy_fits_the_diff
 test_the_tool_stays_advisory
 test_the_runbook_writes_what_the_trend_reads

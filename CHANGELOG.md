@@ -80,6 +80,21 @@ re-derive it with `wait-for-codex.sh evaluate`, re-run classification for that r
 rebuild it from the gh API. Both stay out of the rate — an uncounted round is not evidence of
 convergence either way.
 
+**An outcome file is evidence, and a step that did not observe the review may not overwrite
+it.** The bucket split above is undone at the write path if a later step clobbers a recorded
+`findings` with `unresolved`, and two steps did exactly that. The rule the runbook now states
+as a principle, and applies at both sites: before overwriting an outcome, ask whether the exit
+code being reacted to actually carries information about whether a review landed.
+`pr-gate.sh` exit **9** does — the gate ran `wait-for-codex.sh evaluate` against the round's
+own files and nothing resolved — so it may replace. `pr-gate.sh` exit **4** (`blocking.json`
+missing or not a JSON array) and a `pr.json` too broken to yield a `headRefOid` do **not**:
+they are statements about the *cache*, not about Codex, and a review may have landed and been
+recorded seconds earlier. Both now call a new `outcome_mark_unresolved` helper that leaves a
+recorded `findings`/`clean` alone, so the round reads as `reviewed-uncounted` — a review
+landed, the count is missing — instead of being reported as NEVER REVIEWED and sending the
+operator to inspect a healthy Codex App. The `case` at step 2b keeps its bare writes: the
+watcher IS the observer and it is the first write to the file.
+
 New JSON fields on `--format json`: `not_reviewed[]`, `uncounted[]`, `unrecorded_rounds[]`,
 `overrides`, `override_severities[]`, `remedy`. Every existing field keeps its meaning.
 

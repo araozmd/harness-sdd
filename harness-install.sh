@@ -4475,6 +4475,42 @@ unreadable-`headRefOid` path in step 3 (`head_ok=0`) and a `pr-gate.sh` `unresol
 (exit `9`). Every round in the cache ends with exactly one of `findings`, `clean`, `timeout`,
 `unresolved` on disk.
 
+**An outcome file is EVIDENCE, and a step that did not observe the review may not overwrite
+it.** Two later steps also want to write `unresolved` — step 3 when it cannot read
+`headRefOid`, step 5 when the gate reports unreadable input. Before any of them overwrites a
+recorded outcome, ask the only question that matters: *does the exit code I am reacting to
+actually carry information about whether a review landed?*
+
+- **It does** when the step observed the review state itself. `.harness/tools/pr-gate.sh` exit `9`
+  (`unresolved`) is the one such case: the gate ran `wait-for-codex.sh evaluate` against this
+  round's own files and nothing resolved. That may replace a recorded outcome.
+- **It does not** when the step merely failed to READ something. `.harness/tools/pr-gate.sh` exit `4`
+  (`blocking.json` missing or not a JSON array) and a `pr.json` too broken to yield a
+  `headRefOid` are statements about the **cache**, not about Codex. A review may well have
+  landed and been recorded seconds earlier.
+
+Overwriting in the second case destroys the evidence and then misreports it: the trend files
+the round under **NEVER REVIEWED** and sends the operator to check the Codex GitHub App and
+the watcher ceiling — for a round where a review demonstrably landed, and where the step that
+actually failed is classification. So the later sites use this, never a bare `echo`:
+
+```bash
+# outcome_mark_unresolved <round-dir> — record `unresolved` ONLY when nothing has already
+# observed a review. A recorded `findings`/`clean` is evidence and survives; the round then
+# reads as `reviewed-uncounted` (a review landed, the count is missing), which is both true
+# and the remedy the operator needs.
+outcome_mark_unresolved() {
+  case "$(head -n 1 "$1/outcome" 2>/dev/null | tr -d ' \t\r\n')" in
+    findings|clean) : ;;                      # a review landed — do not overwrite evidence
+    *) echo unresolved > "$1/outcome" ;;
+  esac
+}
+```
+
+The `case` in step 2b above needs no such guard: the watcher IS the observer, its exit code is
+the observation, and it is the FIRST write to the file — there is no evidence there yet to
+destroy.
+
 **Why a file for something the length of `blocking.json` seemed to imply.** It did not imply
 it. "Reviewed, nothing blocked" and "no review ever landed" are both `[]`, byte for byte.
 Measured on araozmd/harness-sdd#141: the rounds went 2 blocking → round 2 **watcher timeout**
@@ -4538,7 +4574,9 @@ fi
 ```
 
 With `head_ok=0` there is no `fresh-comments.json` to classify and therefore no
-`blocking.json` and no `acted.json`: write `echo unresolved > "$round_dir/outcome"` and take
+`blocking.json` and no `acted.json`: call `outcome_mark_unresolved "$round_dir"` — **not** a
+bare `echo`, because a `pr.json` you could not read is a statement about the cache and not
+about Codex, so a `findings`/`clean` the watcher already recorded must survive it — and take
 the `needs-human` terminal state of step 5's cap row (label, hand over, return failure). Only
 `head_ok=1` with an empty `blocking.json` means "zero fresh blocking findings".
 
@@ -4664,10 +4702,14 @@ value, so the Ready-to-merge section reads `round-$round/pr.json` from the corre
 (The one thing that may follow a `merge` verdict without merging is an explicit, recorded
 **override** — see "When you judge the badge wrong" below. It does not change what the gate
 said, only what this round does about one finding, and it is never taken silently.)
-`fix` (6), `escalate` (7) and `needs-human` (8) select the rows below. `unresolved` (9) — no
-Codex review landed for this round — and unreadable input (4) both take the `needs-human`
-terminal state **after `echo unresolved > "$round_dir/outcome"`**; never read an empty
-`blocking.json` as clean.
+`fix` (6), `escalate` (7) and `needs-human` (8) select the rows below. `unresolved` (9) and
+unreadable input (4) both take the `needs-human` terminal state, but they must **not** write
+the same thing. Exit `9` is an OBSERVATION — the gate ran `wait-for-codex.sh evaluate` against
+this round's own files and nothing resolved — so `echo unresolved > "$round_dir/outcome"` may
+replace whatever is there. Exit `4` is a failure to READ `blocking.json` and says nothing
+about whether Codex answered, so it calls `outcome_mark_unresolved "$round_dir"` and a
+recorded `findings`/`clean` survives: that round is `reviewed-uncounted`, not unreviewed.
+Never read an empty `blocking.json` as clean.
 
 The gate answers the budget question from `blocking.json` alone when findings remain, and
 proves a review actually landed (via `wait-for-codex.sh evaluate`) only when the blocking set
