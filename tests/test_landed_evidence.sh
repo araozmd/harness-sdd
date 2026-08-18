@@ -2142,4 +2142,64 @@ python3 "$T/nojs.py" >/dev/null 2>&1 \
   || fail "R25: the SELECTOR rejects the SLICED record tasks-lock itself writes: $( cd "$SRC" && node tools/next-task.mjs --tasks "$T/bad.json" --config "$T/config.yaml" 2>&1 | head -3 )"
 pass "E99-F102 R25 an_ancestor_names_the_full_proof_set_on_all_three_surfaces"
 
+
+# ── R26: an ACCEPT against an UNCONFIRMED base is not a proof (round 6, P1) ───────────
+# The predecessor confirmed the tip only on the REFUSAL side, on the stated grounds that
+# "for a stale local tip to produce a wrong `ancestor` the remote would have to have been
+# REWRITTEN". That is false, and the counter-example is ordinary rather than adversarial:
+# a project RENAMES its default branch and leaves the old one in place. The cached
+# `refs/remotes/origin/HEAD` still names the old branch, work merged only there is
+# trivially reachable from it, and `done` is recorded for a feature that never landed on
+# the current default. No force-push, no adversary — just a rename.
+T="$(mktemp -d)"
+( cd "$T" && git init -q --bare renamed.git )
+mkdir -p "$T/work"
+( cd "$T/work" && git init -q . && git symbolic-ref HEAD refs/heads/main \
+    && : > seed.txt && git_q add -A && git_q commit -m base \
+    && git_q remote add origin "$T/renamed.git" && git_q push -q origin main )
+# The OLD default branch diverges from that shared base and gets work of its own.
+( cd "$T/work" && git_q checkout -q -b master && : > a.txt && git_q add -A \
+    && git_q commit -m "on the OLD default branch" && git_q push -q origin master )
+OLD_ONLY="$(cd "$T/work" && git rev-parse HEAD)"
+# The project migrates: `main` is the default now, and `master` is LEFT IN PLACE.
+( cd "$T/work" && git_q checkout -q main && : > b.txt && git_q add -A \
+    && git_q commit -m "the real default branch moves on" && git_q push -q origin main )
+( cd "$T/renamed.git" && git symbolic-ref HEAD refs/heads/main )
+# A clone whose cached origin/HEAD still points at the OLD default, and which cannot
+# reach the remote to learn otherwise.
+( cd "$T" && git clone -q "$T/renamed.git" stale )
+HDR="$T/stale/hd"; BOARDR="$HDR/state/tasks.json"
+mkdir -p "$HDR/state" "$HDR/store" "$HDR/tools"
+cp "$SCHEMA" "$HDR/store/"; cp "$VALIDATE" "$HDR/tools/"
+( cd "$T/stale" && git_q fetch -q origin && git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master )
+( cd "$T/stale" && git_q remote set-url origin "$T/gone.git" )
+( cd "$T/stale" && git merge-base --is-ancestor "$OLD_ONLY" refs/remotes/origin/master ) \
+  || fail "R26 setup: the commit is not reachable from the stale cached default — the fixture proves nothing"
+( cd "$T/stale" && git merge-base --is-ancestor "$OLD_ONLY" refs/remotes/origin/main ) \
+  && fail "R26 setup: the commit IS on the real default branch — the fixture proves nothing"
+mkboard "$HDR"
+set_status "$HDR" E01-F01 done --evidence "$OLD_ONLY"
+[ "$SS_RC" = "0" ] \
+  || fail "R26: an unconfirmable base BLOCKED the write (rc=$SS_RC) — inability to confirm must degrade, never refuse: $SS_OUT"
+[ "$(field "$BOARDR" "d['landed']['verified']")" = "unchecked" ] \
+  || fail "R26: recorded '$(field "$BOARDR" "d['landed']['verified']")' for a commit reachable ONLY from a cached, unconfirmed default branch — reachability from a branch that may no longer BE the default proves nothing about where the work landed"
+case "$SS_OUT" in
+  *"cannot confirm"*) ;;
+  *) fail "R26: the warning does not say the default branch could not be confirmed: $SS_OUT" ;;
+esac
+# CONTROL — with the remote REACHABLE, the same repository answers definitively in both
+# directions, so R26 is about confirmability and not about the fixture being broken.
+( cd "$T/stale" && git_q remote set-url origin "$T/renamed.git" )
+mkboard "$HDR"
+set_status "$HDR" E01-F01 done --evidence "$OLD_ONLY"
+[ "$SS_RC" = "0" ] && fail "R26 control: a commit absent from the REAL default was accepted once the remote was reachable: $SS_OUT"
+REAL_TIP="$(cd "$T/work" && git rev-parse main)"
+mkboard "$HDR"
+set_status "$HDR" E01-F01 done --evidence "$REAL_TIP"
+[ "$SS_RC" = "0" ] || fail "R26 control: a commit ON the real default was refused (rc=$SS_RC): $SS_OUT"
+[ "$(field "$BOARDR" "d['landed']['verified']")" = "ancestor" ] \
+  || fail "R26 control: a commit on the confirmed default is not 'ancestor'"
+rm -rf "$T"
+pass "E99-F102 R26 an_accept_against_an_unconfirmed_base_is_not_a_proof"
+
 echo "All landing-evidence tests passed."

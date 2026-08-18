@@ -754,11 +754,17 @@ def _refuse_if_parked(text, target_id):
 # never left the laptop. So a refusal is confirmed against the remote's real tip
 # first, and an unconfirmable one degrades (row 9) instead of blocking.
 #
-# What this does NOT attempt, deliberately: confirming the tip on the ACCEPT side.
-# For a stale local tip to produce a wrong `ancestor` the remote would have to have
-# been rewritten; a wrong refusal needs only an ordinary merge, which is the common
-# case. Probing on every accept would put a bounded network call on the happy path
-# for an adversarial case, so row 7 answers from the local tip.
+# The ACCEPT side is symmetric, and an earlier version of this comment was WRONG about
+# why it need not be. It claimed "for a stale local tip to produce a wrong `ancestor`
+# the remote would have to have been rewritten", and that is false: a project that
+# RENAMES its default branch (master → main) and leaves the old branch in place is
+# neither a rewrite nor adversarial, and it makes a cached `origin/HEAD` point at a
+# branch that is no longer the default. Work merged only to the old branch is then
+# trivially reachable from it, and `done` gets recorded for a feature that never landed
+# on the current default. So row 7 requires `base_confirmed` too, escalating to the
+# remote's advertised tip when we hold it and degrading to `unchecked` when we do not.
+# This adds NO network call to the happy path: a base the remote just published is
+# already confirmed, so an online run is unaffected.
 #
 # ── WHICH REPOSITORY IS THIS CLAIM ABOUT? deliberately NOT answered here ─────
 #
@@ -1022,10 +1028,48 @@ def _verify(ref, repo_name, hdir, witnesses=None):
             commit=commit,
         )
 
+    _proved = {"ref": ref, "commit": commit, "verified": "ancestor",
+               "repo": named, "base": base}
+
     rc = _git_rc(["merge-base", "--is-ancestor", commit, base], cwd=repo)
-    if rc == 0:                                        # ROW 7
-        return {"ref": ref, "commit": commit, "verified": "ancestor",
-                "repo": named, "base": base}
+    if rc == 0:                                        # ROW 7 — reachable from `base`…
+        # …but reachable from WHICH base? An `ancestor` proved against a base this checkout
+        # cannot confirm is a proof about a branch that may no longer be the default one.
+        #
+        # The predecessor asserted this could not matter: "for a stale local tip to produce a
+        # wrong `ancestor` the remote would have to have been REWRITTEN". That is false, and
+        # the counter-example is ordinary rather than adversarial: a project renames its
+        # default branch (master → main) and LEAVES the old branch in place. Our cached
+        # `refs/remotes/origin/HEAD` still points at `master`, work merged only to `master`
+        # is trivially reachable from it, and `done` is recorded for a feature that never
+        # landed on the current default branch. No rewrite, no force-push, no adversary.
+        #
+        # `base_confirmed` already answers exactly this and the accept path simply never
+        # asked. It costs nothing on the happy path — a base the remote published moments
+        # ago IS confirmed, so CI and any online run are unaffected; only a base we could
+        # not confirm now degrades, which is the governing asymmetry applied honestly: a
+        # FALSE ATTESTATION is worse than no attestation.
+        if res.base_confirmed:
+            return _proved
+        # Not confirmed — but the remote may have advertised its real tip, and holding that
+        # object lets us answer against the CURRENT default instead of our copy of a former
+        # one. This is the same escalation the refusal path already uses, and it keeps the
+        # common stale-tip case a PROOF rather than a degrade.
+        _tip = res.base_tip
+        if _tip and rr.resolve_commit(repo, _tip) and \
+                _git_rc(["merge-base", "--is-ancestor", commit, _tip], cwd=repo) == 0:
+            return _proved
+        return _unchecked(
+            ref,
+            repo_name,
+            "evidence %s IS reachable from %s in %s, but this checkout cannot confirm that "
+            "%s is still the default branch (%s) — a project that renames its default and "
+            "keeps the old branch would make that reachability prove nothing about where "
+            "the work actually landed. Run `git -C %s fetch origin` and re-run for a "
+            "definitive answer"
+            % (ref, base, named, base, res.base_evidence, repo),
+            commit=commit,
+        )
     if rc != 1:
         # The invocation itself failed (a broken object, an unreadable repo). "We could
         # not check" is not "it did not merge", so this degrades rather than refusing.
