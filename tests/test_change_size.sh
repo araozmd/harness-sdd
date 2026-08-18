@@ -877,6 +877,14 @@ for _s in test_change_size test_source_shims test_scratch_and_disk_preconditions
           test_landed_evidence test_stacked_doctrine; do
   grep -qF 'tests/lib/fence.awk' "$ROOT/tests/$_s.sh" \
     || fail "R9d: tests/$_s.sh slices markdown by heading but no longer loads tests/lib/fence.awk — it has grown its own fence rule, which is the drift this check exists to prevent"
+  # …and LOADING it is not USING it. Checking only for the path made the one-copy invariant
+  # unpinned: revert a slicer to the superseded `/^```/{f=!f}` toggle while leaving the
+  # FENCE_AWK assignment in place and this loop still passed. Measured — the check said `ok`
+  # over a suite that had grown its own rule back. So require the CALL, which is the thing
+  # that actually makes the shared rule govern the extraction. Spelled as the exact call form
+  # rather than the bare name so a mention in prose or in this very assertion cannot satisfy it.
+  grep -qF 'fence_delim($0)' "$ROOT/tests/$_s.sh" \
+    || fail "R9d: tests/$_s.sh loads tests/lib/fence.awk but never CALLS fence_delim(\$0) — the shared rule is referenced and not used, so its slicer is running some other fence logic. That is the same second copy the path check was meant to prevent, wearing the path as a disguise"
 done
 # …and nothing may define the function inline: copying the body in would satisfy the loop
 # above only if the path string were left behind as a comment, and defeat it silently
