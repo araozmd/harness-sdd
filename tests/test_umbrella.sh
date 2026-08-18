@@ -1676,16 +1676,20 @@ printf '\na two-sided edit below a delimiter-bearing parent\n' >> "$KP4/agents/b
 mkdir -p "$KP4/docs/sub"
 mkdir -p "$F04P/.harness/docs/sub"
 printf 'a child-only file whose own name carries diff syntax\n' > "$KP4/docs/sub/note: local.md"
+printf 'a file where the umbrella holds a directory\n' > "$KP4/docs/type-clash"
+mkdir -p "$F04P/.harness/docs/type-clash"
 [ -d "$KP4/docs/sub" ] && [ -d "$F04P/.harness/docs/sub" ] \
   || fail "R3 delimiter-parent control: docs/sub must exist on both sides so the filename, not its parent directory, is the one-sided path"
 [ ! -e "$F04P/.harness/docs/sub/note: local.md" ] \
   || fail "R3 delimiter-parent control: note: local.md exists on both sides, so the Only-in filename parser is not exercised"
+[ -f "$KP4/docs/type-clash" ] && [ -d "$F04P/.harness/docs/type-clash" ] \
+  || fail "R3 type-clash control: docs/type-clash must be a child file and an umbrella directory"
 F04P_OUT="$(CODEX_HOME="$F04P/.ch" HOME="$F04P/.home" \
   sh "$SRC/harness-install.sh" --agents=claude --thin "$F04P/kid" 2>&1)" && F04P_RC=0 || F04P_RC=$?
 [ "$F04P_RC" = "0" ] || fail "R3 delimiter-parent: single-target --thin exited $F04P_RC: $F04P_OUT"
-for _p in agents/builder.md 'docs/sub/note: local.md'; do
+for _p in agents/builder.md 'docs/sub/note: local.md' docs/type-clash; do
   printf '%s\n' 2>/dev/null "$F04P_OUT" | grep -qF "differs: $_p" \
-    || fail "R3: a diff delimiter inside the absolute parent path hid the exact blocker $_p: $F04P_OUT"
+    || fail "R3: the blocker was reduced to its tier instead of naming the exact path $_p: $F04P_OUT"
 done
 f04_no_stub_in_tier "$KP4" "R3 (delimiter-bearing absolute parents must not weaken blocker reporting)"
 pass "R3 thin_blocker_paths_ignore_parent_delimiters — exact paths are derived independently of diff's prose separators"
@@ -2678,7 +2682,14 @@ pass "R11 standalone_is_idempotent — a full-copy target stays full-copy, key s
 # `#` inside a fenced block, and T12 adds new fences to this very file — a `#` comment in
 # one would truncate the span and make every assertion below pass over text it never read.
 F04DOC="$SRC/docs/UMBRELLA.md"
-f04_span() { awk -v h="$2" '/^```/{f=!f} !f && /^## /{k=(index($0,h)>0);next} k' "$1"; }
+F04_FENCE_AWK="$(cat "$SRC/tests/lib/fence.awk")"
+f04_span() {
+  awk -v h="$2" "$F04_FENCE_AWK"'
+    fence_delim($0) { if (k) print; next }
+    !fence && /^## / { k = (index($0, h) > 0); next }
+    k
+  ' "$1"
+}
 
 F04MIG="$(f04_span "$F04DOC" 'Migrating an existing child')"
 [ -n "$F04MIG" ] || fail "f04_docs_contract: docs/UMBRELLA.md has no 'Migrating an existing child' section"

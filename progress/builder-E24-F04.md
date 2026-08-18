@@ -474,3 +474,11 @@ non-zero but every `Only in` line was skipped, so the child converted. The perma
 tier-root fallback to block conversion. Both new cases and the complete umbrella suite pass. The
 review's P3 was also correct: the changelog named the removed `stub_tree` helper and now names
 `thin_prose_tier`.
+
+The next focused re-review found the same diagnostic boundary in a third shape: a nested path
+existing as a file on one side and a directory on the other. The independent walk now names that
+collision before deciding whether to recurse, and the delimiter fixture asserts
+`docs/type-clash` exactly. Integrating the repair also activated E99-F135's changed-shell gate on
+this now-modified suite; its older Markdown section extractor used the superseded bare-backtick
+toggle, so it now loads `tests/lib/fence.awk` and calls the shared CommonMark rule. Both the full
+umbrella and change-size suites pass.

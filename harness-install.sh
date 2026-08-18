@@ -998,6 +998,12 @@ _ptb_one_sided_walk() (
     _pos_other="$_pos_r/$_pos_rel"
     if [ ! -e "$_pos_other" ] && [ ! -L "$_pos_other" ]; then
       _ptb_relpath "$_pos_p"
+    elif { [ -d "$_pos_p" ] && [ ! -d "$_pos_other" ]; } \
+      || { [ ! -d "$_pos_p" ] && [ -d "$_pos_other" ]; }; then
+      # Both names exist, but one is a directory and the other is not. `diff` describes
+      # that collision in another human sentence, so name it here at the exact path before
+      # deciding whether recursion is possible.
+      _ptb_relpath "$_pos_p"
     elif [ -d "$_pos_p" ] && [ ! -L "$_pos_p" ] \
       && [ -d "$_pos_other" ] && [ ! -L "$_pos_other" ]; then
       _ptb_one_sided_walk "$_pos_p" "$_pos_other" || exit 1
