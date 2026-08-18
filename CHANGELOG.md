@@ -298,6 +298,47 @@ New JSON fields on `--format json`: `not_reviewed[]`, `uncounted[]`, `unrecorded
 
 New suite `tests/test_pr_round_outcome.sh` (parses and runs under `/bin/dash`).
 
+## [0.68.0] — 2026-08-18
+
+### Added — ✨ the gate runs the strictest available shell, and says which one (E99-F135)
+
+`tools/run-tests.sh` invoked `sh`. On Debian/Ubuntu `sh` **is** dash, so every bashism in a
+suite was already a live defect for those users — and invisible from a Mac, where `sh` is bash
+in POSIX mode. `all 42 suites passed` was therefore a claim about the developer's machine.
+
+The runner now probes for the strictest shell it can actually find (dash → posh → ash → sh),
+**executes** the suites under it, and prints it: `all 42 suites passed (/bin/dash [PROGRAM:dash
+PROJECT:dash-16], --jobs 8)`.
+
+**Executing matters, parsing is not enough.** `local`, `[[ ]]`, arrays, `echo -e` and `${x^^}`
+all parse cleanly under dash and fail at RUNTIME, so a `-n` check alone would have shipped a
+green meaning "it parses on Debian". The `-n` pre-flight is kept as well — it is nearly free and
+catches the class at the cheapest point — and it runs over **every** suite, including exempt
+ones. New exit code **3** = a suite or tool did not parse; nothing was executed.
+
+**The allowlist ships EMPTY, and that is the point.** `tests/dash-allowlist.txt` exists so that
+if a suite ever cannot run under the strict shell, the exemption is NAMED and attributable
+(`# known-broken under dash: <suite> — <issue id>`) rather than a suite that quietly stopped
+running. An unnamed skip is the invisible debt this gate exists to end, so the runner exits 4 on
+a malformed entry rather than guessing. An exemption buys exemption from EXECUTING and nothing
+else: the suite still runs under the host `sh`, still gets its parse pre-flight, and is counted
+on the stdout summary (`, N exempt`) — not only in a stderr warning a caller may never capture.
+
+Sequenced deliberately after E99-F134 so the list could start empty rather than as a list of
+excuses.
+
+### Fixed — 🐛 the pr-loop sandbox trusted `command -v` (E99-F135)
+
+`tests/test_pr_loop.sh`'s `mk_sandbox_bin` linked `command -v env` into a sandbox PATH. **dash
+returns the first NAME match on PATH regardless of the execute bit; bash skips
+non-executables.** With a mode-0644 `env` earlier on PATH, dash linked the unusable one and
+`env … sh` died with 126 — one assertion, in one suite, green under bash. It also did
+`ln -sf printf <bin>/printf`, a symlink to itself, broken under every shell and unnoticed
+because nothing exec'd it. Replaced with a PATH walk that demands `-f` and `-x`.
+
+Found by running the suites under dash for the first time — which is the whole argument for
+this change.
+
 ## [0.65.0] — 2026-08-17
 
 ### Added — ✨ an explicit repository resolver (E99-F129c)
