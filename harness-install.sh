@@ -4419,8 +4419,8 @@ The watcher polls every `HARNESS_POLL_INTERVAL` seconds (default **60**) up to
   has nothing to say).
 - `trigger-ts.txt` — the freshness anchor, resolved once at startup.
 
-When the watcher exits, the harness re-invokes you. **Branch on its exit code** — never
-re-poll by hand:
+When the watcher exits, the harness re-invokes you. **Record its exit code as the round's
+`outcome` (step 2b) and then branch on it** — never re-poll by hand:
 
 | Exit | Meaning | Next |
 |---|---|---|
@@ -4455,6 +4455,41 @@ GraphQL/REST spelling split completely.
 
 > **No background tool available?** The watcher still runs in the foreground and exits
 > with the same codes — it just blocks until resolution or ceiling.
+
+### 2b. Record the round's OUTCOME — at every terminal state, including the aborts
+
+The moment the watcher exits, write **one word** to `$round_dir/outcome`. Do it on **every**
+path out of step 2, including the ones that abort the round without classifying anything.
+
+```bash
+case "$watcher_rc" in
+  0)   echo findings   > "$round_dir/outcome" ;;   # review landed WITH findings
+  3)   echo clean      > "$round_dir/outcome" ;;   # review landed, zero findings
+  2|5) echo timeout    > "$round_dir/outcome" ;;   # ceiling hit / no Codex activity at all
+  *)   echo unresolved > "$round_dir/outcome" ;;   # usage / precondition error (exit 4)
+esac
+```
+
+Write `unresolved` on the two **later** aborts that never reach a classification either: the
+unreadable-`headRefOid` path in step 3 (`head_ok=0`) and a `pr-gate.sh` `unresolved` verdict
+(exit `9`). Every round in the cache ends with exactly one of `findings`, `clean`, `timeout`,
+`unresolved` on disk.
+
+**Why a file for something the length of `blocking.json` seemed to imply.** It did not imply
+it. "Reviewed, nothing blocked" and "no review ever landed" are both `[]`, byte for byte.
+Measured on araozmd/harness-sdd#141: the rounds went 2 blocking → round 2 **watcher timeout**
+(exit `2`, zero Codex activity) → 2 blocking, the timed-out round was recorded as `[]`, and
+`pr-round-trend.sh` answered *"converging — the finding rate is coming down. One more round is
+rational."* Deleting that one file changed the verdict. The flat 2,2 was the honest signal and
+the tool never saw it — so the bias ran toward "spend another round" exactly when review was
+**not landing**, and recording a timeout as a clean round was silently rewarded.
+
+**Do NOT "solve" that by omitting `blocking.json` on a timeout.** Then *absent* means two
+things as well ("timed out" and "aborted before classifying"), and the trend would answer
+`insufficient` — quietly hiding a run that is failing to get reviewed at all. **A timeout is
+information: it is recorded, and it is reported.** `.harness/tools/pr-round-trend.sh` keeps
+`timeout` and `unresolved` rounds out of the finding **rate** and prints them in their own
+block.
 
 ### 3. Parse and classify comments
 
@@ -4503,9 +4538,9 @@ fi
 ```
 
 With `head_ok=0` there is no `fresh-comments.json` to classify and therefore no
-`blocking.json`: take the `needs-human` terminal state of step 5's cap row (label, hand
-over, return failure). Only `head_ok=1` with an empty `blocking.json` means "zero fresh
-blocking findings".
+`blocking.json` and no `acted.json`: write `echo unresolved > "$round_dir/outcome"` and take
+the `needs-human` terminal state of step 5's cap row (label, hand over, return failure). Only
+`head_ok=1` with an empty `blocking.json` means "zero fresh blocking findings".
 
 To re-check the round files offline at any point (no `gh`, no network), run
 `sh .harness/tools/wait-for-codex.sh evaluate "$round_dir"` — exit `0` findings,
@@ -4520,9 +4555,37 @@ round dir:
 
 ```
 comments.json     # all comments with a severity tag attached
-blocking.json     # filtered to the blocking severities only
+blocking.json     # filtered to the CONFIGURED blocking severities — the MERGE GATE reads this
+acted.json        # what this round ACTUALLY treated as blocking — the TREND reads this
 status.json       # statusCheckRollup snapshot
 ```
+
+**`blocking.json` and `acted.json` answer different questions. Write both.** `blocking.json`
+is unchanged: the `pr_loop.blocking_severities` filter, and the only finding set
+`.harness/tools/pr-gate.sh` reads. That decision stays conservative and this step does not
+touch it.
+
+`acted.json` records what this round **actually treated as blocking** — one row per finding,
+**severity preserved per row**, plus an `override` flag that is `true` when the severity is
+*not* in `pr_loop.blocking_severities`. Start it from `blocking.json`, then add a row for
+every finding you judged blocking anyway:
+
+```bash
+jq 'map({id, path, line, severity: (.severity // "P?"), override: false})' \
+  "$round_dir/blocking.json" > "$round_dir/acted.json"
+# For EVERY finding you hand to a fixer (or fix in-session) whose severity is NOT in
+# pr_loop.blocking_severities, append its row with "override": true. One row per finding.
+```
+
+**The rule is simple: if you fix it, it goes in `acted.json`.** This step's own instructions
+tell you to read the finding, not the badge — a P2 can be substantively blocking — and the
+trend has to see the work you actually did. On viernes-ai/viernes-web PR #85 three consecutive
+Codex **P2**s were each judged blocking and fixed while P2 sat outside the configured filter,
+so every `blocking.json` was empty and `pr-round-trend.sh` reported *"no round with a readable
+blocking.json — nothing to trend"* while the PR was in its third round of genuinely blocking
+findings. The one tool built to detect non-convergence was silent through a textbook
+non-converging run. Writing `acted.json` is what keeps that from repeating; it changes nothing
+about which findings the merge gate will let through.
 
 ### 4. Stall detection
 
@@ -4538,18 +4601,36 @@ failure: *different* findings arriving at a steady rate, round after round, beca
 is larger than one review pass can cover.
 
 ```bash
-sh .harness/tools/pr-round-trend.sh --cache ".harness/.pr-loop/$pr_number"
+# Pass the diff width when it is measurable — see "which remedy" below. Both flags are
+# optional; without them the tool keeps its default (split) remedy.
+_cs="$(sh .harness/tools/change-size.sh --format json 2>/dev/null || echo '{}')"
+_df="$(printf '%s' "$_cs" | jq -r '.total_files // empty' 2>/dev/null || true)"
+_dl="$(printf '%s' "$_cs" | jq -r '.total_lines // empty' 2>/dev/null || true)"
+sh .harness/tools/pr-round-trend.sh --cache ".harness/.pr-loop/$pr_number" \
+   ${_df:+--diff-files "$_df"} ${_dl:+--diff-lines "$_dl"}
 ```
 
-It reads only `round-*/blocking.json`, which this loop already writes — no `gh`, no network,
-no new state. It reports the per-round blocking count, a verdict, and where the findings
-concentrate:
+It reads only `round-*/outcome`, `round-*/acted.json` and `round-*/blocking.json` — files
+this loop already writes — no `gh`, no network, no new state. It reports the per-round count,
+a verdict, the rounds that were never reviewed, and where the findings concentrate:
 
 | verdict | meaning | what it implies |
 |---|---|---|
 | `converging` | the rate is coming down | one more round is rational |
-| `non-converging` | the last 3 rounds each produced a blocking finding | **split the PR — do not re-review it** |
-| `insufficient` | fewer than 3 rounds with a readable `blocking.json` | no conclusion yet |
+| `non-converging` | the last 3 **reviewed** rounds each produced a blocking finding | more rounds will not help — see the remedy it prints |
+| `insufficient` | fewer than 3 **reviewed** rounds with a readable count | no conclusion yet |
+
+**Only rounds that were actually reviewed enter the rate.** A round whose `outcome` is
+`timeout` or `unresolved` is neither counted nor dropped: it is printed in its own
+`NEVER REVIEWED` block (and `not_reviewed[]` under `--format json`). Read that block first —
+a PR that is failing to get reviewed does not need another round, it needs the watcher or the
+Codex App fixed. A round with **no** `outcome` on disk (a cache written before this file
+existed) is named under `unrecorded_rounds[]`: it is still counted so an old cache still
+trends, but its verdict is flagged as possibly optimistic rather than quietly trusted.
+
+**Severity overrides show up as overrides.** The count comes from `acted.json`, so a P2 you
+judged blocking is in the rate — and the report says how many of the findings were overrides
+and at which severity. The merge gate is unaffected: it still reads `blocking.json`.
 
 A flat rate does not mean the fixes are bad. It means the reviewer is sampling a surface
 larger than one pass can cover, so another round buys another *sample*, not more confidence —
@@ -4557,6 +4638,14 @@ and a clean round would be indistinguishable from one that happened to land some
 On the PR that motivated this (17,202 additions, twelve rounds), the rate never decayed:
 `1 3 1 2 1 3 1 2 2 1 2 1`. Rounds 5–12 cost roughly 2M input tokens and 8 hours to keep
 rediscovering that the diff was too big.
+
+**Which remedy a non-converging verdict prints.** "Split this PR" is right for a 17,202-line
+diff and unfollowable on a small one — and unfollowable advice teaches operators to ignore the
+tool. When the caller supplies `--diff-files` **and** every finding sits in a single file, the
+tool says so and recommends changing the region's shape instead of splitting. Without
+`--diff-files` it cannot know how wide the diff is, so it keeps the split remedy. (viernes-web
+PR #85: 2 files, ~150 lines, all four findings in one function, `SPLIT THIS PR` — the operator
+overrode it by hand and wrote the reasoning into the handover.)
 
 This is **advisory and it never blocks**: the tool exits 0 at every verdict, it does not
 change when the cap fires, and it never merges or fails a PR on its own. Carry the verdict
@@ -4579,7 +4668,8 @@ counter**, and go to step 6 then "ready to merge". Breaking preserves the succes
 value, so the Ready-to-merge section reads `round-$round/pr.json` from the correct round.
 `fix` (6), `escalate` (7) and `needs-human` (8) select the rows below. `unresolved` (9) — no
 Codex review landed for this round — and unreadable input (4) both take the `needs-human`
-terminal state; never read an empty `blocking.json` as clean.
+terminal state **after `echo unresolved > "$round_dir/outcome"`**; never read an empty
+`blocking.json` as clean.
 
 The gate answers the budget question from `blocking.json` alone when findings remain, and
 proves a review actually landed (via `wait-for-codex.sh evaluate`) only when the blocking set
@@ -4943,11 +5033,15 @@ exactly which workers tried and where they got stuck), and return failure. Reach
 `max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, a
 stacked-PR merge-order guard refusal (exit `6`), or a merge that would not land.
 
-**Say what the human should conclude.** Include the step-4b trend output. A `converging`
-verdict means the loop simply ran out of rounds and resuming is reasonable. A
-`non-converging` verdict means more rounds will not help: state plainly that the PR should
-be **split**, show the per-round series, and list the files the findings concentrate on as
-candidate seams. Without this, the observed human response to the cap is to post
+**Say what the human should conclude.** Include the step-4b trend output **verbatim,
+including its `NEVER REVIEWED` block** — a cap reached because reviews kept timing out is a
+completely different hand-over from a cap reached on a flat finding rate, and the human cannot
+tell them apart from the round count. A `converging` verdict means the loop simply ran out of
+rounds and resuming is reasonable. A `non-converging` verdict means more rounds will not help:
+state plainly what the tool's remedy line says — **split** the PR when the findings spread
+across files, or change the shape of the one region they all land in when they do not — show
+the per-round series, and list the files the findings concentrate on. Without this, the
+observed human response to the cap is to post
 `@codex review` again — which on the PR that motivated this feature happened eight more
 times, for roughly 2M input tokens and 8 hours, before anyone concluded the diff was too
 large to review in one pass.
@@ -4967,7 +5061,9 @@ merge did not land, that is this state, and it is a failure.
     issue-comments.json       # paginated issue-comment stream (clean-banner scan)
     reactions.json            # reactions on the @codex trigger comment (👍 = clean)
     trigger-ts.txt            # freshness anchor
+    outcome                   # ONE WORD: findings | clean | timeout | unresolved (step 2b)
     fresh-comments.json, comments.json, blocking.json, status.json
+    acted.json                # what the round treated as blocking (severity + override per row)
     worker, role
     fix-<comment-id>.md       # one per fix
   round-2/ ...
