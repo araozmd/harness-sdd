@@ -913,6 +913,34 @@ rm_owned_tree() {
 }
 
 #
+# _ptb_print_path <path> — render one pathname as ONE diagnostic record. A literal newline
+# cannot travel through the newline-delimited blocker stream without becoming two bogus
+# paths, so escape backslash and the C0 separators operators need to recognise. Pass the raw
+# value through the environment: awk `-v` interprets backslash escapes in assignments and
+# would turn a literal `\n` in a filename into the very newline this function must preserve.
+_ptb_print_path() {
+  _PTB_PRINT_PATH="$1"
+  export _PTB_PRINT_PATH
+  if LC_ALL=C awk 'BEGIN {
+    p = ENVIRON["_PTB_PRINT_PATH"]
+    out = ""
+    for (i = 1; i <= length(p); i++) {
+      c = substr(p, i, 1)
+      if (c == "\\") out = out "\\\\"
+      else if (c == "\n") out = out "\\n"
+      else if (c == "\r") out = out "\\r"
+      else if (c == "\t") out = out "\\t"
+      else out = out c
+    }
+    print out
+  }'; then
+    unset _PTB_PRINT_PATH
+    return 0
+  fi
+  unset _PTB_PRINT_PATH
+  return 1
+}
+
 # IT STRIPS `$_ptb_ra`/`$_ptb_rb`, NOT `$_ptb_h`/`$_ptb_u`: those two name the roots of the
 # trees CURRENTLY BEING COMPARED, which are the child's and the umbrella's for an ordinary
 # entry and the link-free copies of them for an entry that holds symlinks (see _ptb_delink).
@@ -920,19 +948,35 @@ rm_owned_tree() {
 # directory at the operator.
 _ptb_relpath() {
   case "$1" in
-    "$_ptb_ra"/*) printf '%s\n' "${1#"$_ptb_ra"/}" ;;
-    "$_ptb_rb"/*) printf '%s\n' "${1#"$_ptb_rb"/}" ;;
-    *)            printf '%s\n' "$_ptb_rel" ;;
+    "$_ptb_ra"/*) _ptb_print_path "${1#"$_ptb_ra"/}" ;;
+    "$_ptb_rb"/*) _ptb_print_path "${1#"$_ptb_rb"/}" ;;
+    *)            _ptb_print_path "$_ptb_rel" ;;
   esac
 }
 
-# _prose_entry_symlinks <path-a> <path-b> — print every symlink AT or UNDER the two paths, one
-# absolute path per line; print nothing when there is none; return NON-ZERO when the sweep
-# could not complete. `find` is used rather than `diff --no-dereference` because the latter is
-# GNU-only from diffutils 3.3 and would make every entry unconvertible on a box without it.
-_prose_entry_symlinks() {
-  find "$1" "$2" -type l 2>/dev/null || return 1
-}
+# _ptb_symlink_walk <path>… — print every symlink AT or UNDER the paths after normalising and
+# escaping it, before any newline-delimited stream can split a legal pathname. Quoted globs
+# preserve embedded whitespace/newlines; the dot patterns cover every hidden entry except
+# `.` and `..`. Recursion runs in a subshell because POSIX sh has no local variables.
+_ptb_symlink_walk() (
+  for _psw_root do
+    if [ -L "$_psw_root" ]; then
+      _ptb_relpath "$_psw_root"
+      continue
+    fi
+    [ -e "$_psw_root" ] || continue
+    [ -d "$_psw_root" ] || continue
+    [ -r "$_psw_root" ] && [ -x "$_psw_root" ] || exit 1
+    for _psw_p in "$_psw_root"/* "$_psw_root"/.[!.]* "$_psw_root"/..?*; do
+      [ -e "$_psw_p" ] || [ -L "$_psw_p" ] || continue
+      if [ -L "$_psw_p" ]; then
+        _ptb_relpath "$_psw_p"
+      elif [ -d "$_psw_p" ]; then
+        _ptb_symlink_walk "$_psw_p" || exit 1
+      fi
+    done
+  done
+)
 
 # _ptb_delink — REPOINT the current entry's comparison at LINK-FREE COPIES of its two sides,
 # so `diff -r` can still name every OTHER differing path inside an entry that holds a symlink.
@@ -979,16 +1023,17 @@ _ptb_delink() {
   _ptb_ra="$_ptb_tmp/h"; _ptb_rb="$_ptb_tmp/u"
 }
 
-# _ptb_one_sided_walk <left-dir> <right-dir> — name paths present below LEFT but absent
-# below RIGHT. `diff -q` reports these as `Only in <dir>: <name>`, a human sentence that
-# cannot be parsed unambiguously: `: ` is legal in BOTH the directory and the basename.
+# _ptb_exact_walk <left-dir> <right-dir> — derive exact names while every raw pathname is
+# still a quoted shell value: paths present only below LEFT, file/directory collisions, and
+# two-sided non-directory differences. `diff -q` otherwise reports these in human sentences
+# whose separators and record newlines are all legal pathname bytes.
 #
 # This walk decides ONLY THE NAME, never whether conversion is safe. `diff`'s exit status
 # below remains the byte-identity authority. Quoted globs keep embedded whitespace/newlines
 # intact while the two dot patterns cover every hidden entry except `.` and `..`. Recursion
 # runs in a subshell because POSIX sh has no local variables; without it, a nested call would
 # overwrite the parent loop's roots.
-_ptb_one_sided_walk() (
+_ptb_exact_walk() (
   _pos_l="$1"; _pos_r="$2"
   [ -d "$_pos_l" ] && [ -d "$_pos_r" ] || exit 0
   [ -r "$_pos_l" ] && [ -x "$_pos_l" ] || exit 1
@@ -1006,7 +1051,9 @@ _ptb_one_sided_walk() (
       _ptb_relpath "$_pos_p"
     elif [ -d "$_pos_p" ] && [ ! -L "$_pos_p" ] \
       && [ -d "$_pos_other" ] && [ ! -L "$_pos_other" ]; then
-      _ptb_one_sided_walk "$_pos_p" "$_pos_other" || exit 1
+      _ptb_exact_walk "$_pos_p" "$_pos_other" || exit 1
+    elif ! LC_ALL=C diff -q "$_pos_p" "$_pos_other" >/dev/null 2>&1; then
+      _ptb_relpath "$_pos_p"
     fi
   done
 )
@@ -1026,27 +1073,19 @@ _ptb_one_sided_walk() (
 # that child converts, and its prose tier is deleted and redirected at umbrella content it
 # never held.
 #
-# CALL `diff`, DO NOT WALK THE TREES. The predicate needed is "are these two trees
-# identical", which is `diff -r`'s exit status. stage_tree is the precedent AND the scar:
-# reimplementing `cp -R`'s traversal in POSIX sh cost four blocking findings, one per
-# filesystem shape, and was fixed by calling the tool and post-processing its result.
+# CALL `diff` FOR THE DECISION. The predicate needed is "are these two trees identical",
+# which remains `diff -r`'s exit status. The quoted walk above derives only exact diagnostic
+# names before they enter a line-oriented stream; it cannot make a child convertible.
 #
-# `-q` IS MANDATORY, NOT AN OPTIMISATION — and the reason is worth stating precisely,
-# because the obvious version of it is not the one that bites. Without `-q`:
-#   - on two REGULAR FILES (`AGENTS.md`, `specs/glossary.md` are entries, not directories)
-#     diff prints the hunks and NO FILENAME AT ALL. Survivable here only because the
-#     fail-closed arm below synthesises the tier entry, which for a regular-file entry
-#     happens to BE the answer.
-#   - on two DIRECTORIES it prints `diff -r <a>/<rel> <b>/<rel>` before the hunks — a form
-#     this parser does not recognise, so a NESTED path (`agents/builder.md`) collapses to
-#     the tier entry (`agents`) and R3's "name every differing path" is broken. Measured,
-#     not assumed; it is what the mutation `diff -rq loses its -q` actually kills.
+# `-q` now only prevents needless hunk generation. No diagnostic wording or record boundary
+# is parsed: both the per-file naming probes and the whole-entry authority discard stdout and
+# stderr, so a locale or pathname can never change the safety verdict through prose.
 #
 # FAIL CLOSED. Where byte-identity cannot be ESTABLISHED — a path present on one side only,
-# an entry missing outright, `diff` absent from PATH, a non-zero `diff` that printed nothing,
-# output this function cannot parse — the entry BLOCKS. `diff`'s EXIT STATUS is the contract
-# and its lines only name the paths; deriving the decision from the parsed lines alone fails
-# OPEN. Absence of evidence of an edit is not evidence of its absence. A
+# an entry missing outright, `diff` absent from PATH, a naming walk that cannot complete, or
+# a `diff` trouble status — the entry BLOCKS. `diff`'s EXIT STATUS is the contract; exact
+# diagnostics can narrow the reported path but can never override it. Absence of evidence of
+# an edit is not evidence of its absence. A
 # child-local extra file inside the prose tier is the sharpest case: the conversion replaces
 # the whole tier entry with a `cp -R` of the umbrella's, so it would DELETE that file.
 #
@@ -1063,10 +1102,10 @@ _ptb_one_sided_walk() (
 # the umbrella a regular file — is not a redirect but is still a false pristine: the child's
 # link is judged identical, then deleted and replaced by a stub while the run reports success.
 # `diff --no-dereference` names both correctly and is what this box's diff offers, but it is
-# not portable — GNU diffutils only grew it in 3.3 — and on a box without it `diff` errors,
-# the fail-closed `*)` arm fires for every entry, and NO child could ever convert, silently
-# and forever. A `find -type l` sweep needs no capability probe and behaves identically on
-# BSD and GNU. WHAT IT COSTS: a child and umbrella holding the SAME symlink with the SAME
+# not portable — GNU diffutils only grew it in 3.3 — and on a box without it every comparison
+# would fail closed, so NO child could ever convert. The quoted symlink sweep needs no
+# capability probe and preserves every legal pathname byte. WHAT IT COSTS: a child and
+# umbrella holding the SAME symlink with the SAME
 # target — provably safe — is refused too. That is this feature's stated posture (anything
 # not provably safe stays full-copy), and it is the same boundary `umbrella_body_dir` and R12
 # already draw around a symlinked root and a symlinked roster.
@@ -1089,8 +1128,7 @@ _ptb_one_sided_walk() (
 #
 # _ptb_entry_blockers <no args> — ONE entry's blockers, reading $_ptb_rel/$_ptb_h/$_ptb_u from
 # its caller. It is a function so that the caller can pipe the WHOLE entry through one
-# `sort -u`; the merge cannot live inside, because the two producers are a pipeline and a loop
-# that both have to write to the same stream.
+# `sort -u`; the encoded symlink and exact-name producers both write to that stream.
 _ptb_entry_blockers() {
   _ptb_a="$_ptb_h/$_ptb_rel"
   _ptb_b="$_ptb_u/$_ptb_rel"
@@ -1101,86 +1139,47 @@ _ptb_entry_blockers() {
     printf '%s\n' "$_ptb_rel"
     return 0
   fi
-  # THE SYMLINK SWEEP (see the rule above). Fail closed on a `find` that could not complete:
+  # THE SYMLINK SWEEP (see the rule above). Fail closed on a walk that could not complete:
   # a side this cannot read is not a side whose shape has been established, and the entry
   # path itself is the honest thing to name.
-  if ! _ptb_lnks="$(_prose_entry_symlinks "$_ptb_a" "$_ptb_b")"; then
-    _ptb_lnks="$_ptb_a"
+  if ! _ptb_lnks="$(_ptb_symlink_walk "$_ptb_a" "$_ptb_b")"; then
+    _ptb_lnks="$(_ptb_print_path "$_ptb_rel")"
   fi
   if [ -n "$_ptb_lnks" ]; then
     # When BOTH sides hold the link, the two absolute paths normalise to the SAME
     # tier-relative one; the caller's `sort -u` is what keeps that one problem one line.
-    printf '%s\n' "$_ptb_lnks" | while IFS= read -r _ptb_line; do
-      [ -n "$_ptb_line" ] || continue
-      _ptb_relpath "$_ptb_line"
-    done
+    printf '%s\n' "$_ptb_lnks"
     # The links are named; now compare what is left of the entry, on copies `diff` can walk.
     _ptb_delink || return 0
   fi
-  # Derive one-sided names independently of `diff`'s ambiguous `Only in` prose. Run both
-  # directions; the caller's `sort -u` merges any overlap with the symlink producer. On a
-  # traversal failure, keep the comparison fail-closed and let an `Only in` line below fall
-  # back to the tier entry rather than pretending an exact path was established.
-  _ptb_ones=''; _ptb_ones_ok=1
+  # Derive exact names independently of `diff`'s human prose. Run both directions so
+  # one-sided paths from either tree are covered; `sort -u` merges two-sided overlap and
+  # overlap with the symlink producer. A traversal failure can never make the tier clean.
+  _ptb_exact=''; _ptb_exact_ok=1
   if [ -d "$_ptb_a" ] && [ -d "$_ptb_b" ]; then
-    if ! _ptb_ones="$(
-      _ptb_one_sided_walk "$_ptb_a" "$_ptb_b" || exit 1
-      _ptb_one_sided_walk "$_ptb_b" "$_ptb_a" || exit 1
+    if ! _ptb_exact="$(
+      _ptb_exact_walk "$_ptb_a" "$_ptb_b" || exit 1
+      _ptb_exact_walk "$_ptb_b" "$_ptb_a" || exit 1
     )"; then
-      _ptb_ones_ok=0
+      _ptb_exact_ok=0
     fi
-    [ -z "$_ptb_ones" ] || printf '%s\n' "$_ptb_ones"
+    [ -z "$_ptb_exact" ] || printf '%s\n' "$_ptb_exact"
   fi
   # CAPTURE INSIDE AN `if`. This script runs under `set -eu` and `diff` exits non-zero
   # in exactly the case this feature exists for, so a bare `_out="$(diff -rq A B)"` would
   # kill the run the moment a child differs.
-  # `diff -q` is human-readable output, so force POSIX's stable message locale. The parser
-  # below still treats the exit status as authoritative and anchors every recognised form
-  # on the TWO EXACT roots passed to diff; splitting on the first ` and ` / `: ` would be
-  # ambiguous because both strings are legal in an absolute parent path.
-  if _ptb_out="$(LC_ALL=C diff -rq "$_ptb_a" "$_ptb_b" 2>&1)"; then
+  # Discard diff's human prose: even its record newline is legal in a pathname. Status 0 is
+  # identity, 1 is an ordinary difference, and >1 is trouble. Only status 1 plus a complete,
+  # non-empty exact-name walk may rely on those names; every other non-zero shape falls back
+  # to the tier entry and remains fail-closed.
+  if LC_ALL=C diff -rq "$_ptb_a" "$_ptb_b" >/dev/null 2>&1; then
     return 0
+  else
+    _ptb_diff_rc=$?
   fi
-  # THE EXIT STATUS IS THE CONTRACT — the parsed lines only NAME the paths. Without this
-  # line the block decision would be derived entirely from what the loop below manages to
-  # parse, so a non-zero exit that produced NO OUTPUT would yield no blocker at all: the
-  # tier would be reported convertible on the strength of a comparison that said it was
-  # not. That is failing OPEN in a destructive path, and it contradicts the fail-closed
-  # rule stated above. Deliberately not claimed as tested: the system `diff` does not
-  # produce that combination, and a fixture that shimmed one onto PATH would have a WEAK
-  # CONTROL — a shim that always exits non-zero with no output is indistinguishable from
-  # an installer that blocks everything, which is the outcome the fixture would assert.
-  [ -n "$_ptb_out" ] || { printf '%s\n' "$_ptb_rel"; return 0; }
-  printf '%s\n' "$_ptb_out" | while IFS= read -r _ptb_line; do
-    [ -n "$_ptb_line" ] || continue
-    case "$_ptb_line" in
-      # Exact one-sided paths were emitted by _ptb_one_sided_walk. Never parse this human
-      # sentence: no choice of first/last `: ` is correct for every legal pathname.
-      "Only in "*)
-        # Non-empty is load-bearing for fail-closed behavior. If the independent walk is
-        # accidentally neutralised while diff still says the trees differ, skipping this
-        # line would yield NO blocker and permit a destructive conversion.
-        [ "$_ptb_ones_ok" = "1" ] && [ -n "$_ptb_ones" ] && continue
-        _ptb_p="$_ptb_a"
-        ;;
-      # Anchor both sides on the exact arguments. A parent directory may itself contain
-      # ` and `, so the prose separator alone cannot identify where the child path ends.
-      "Files $_ptb_a and $_ptb_b differ")
-        _ptb_p="$_ptb_a"
-        ;;
-      "Files $_ptb_a/"*" and $_ptb_b/"*" differ")
-        _ptb_rest="${_ptb_line#"Files $_ptb_a/"}"
-        _ptb_n="${_ptb_rest%%" and $_ptb_b/"*}"
-        _ptb_p="$_ptb_a/$_ptb_n"
-        ;;
-      # Anything else (a file-vs-directory clash, a diff error) is still a blocker, and
-      # the line still has to carry the path — so synthesise it from the tier entry.
-      *)
-        _ptb_p="$_ptb_a"
-        ;;
-    esac
-    _ptb_relpath "$_ptb_p"
-  done
+  [ "$_ptb_diff_rc" = "1" ] && [ "$_ptb_exact_ok" = "1" ] && [ -n "$_ptb_exact" ] \
+    && return 0
+  _ptb_print_path "$_ptb_rel"
 }
 
 prose_tier_blockers() {
@@ -2969,7 +2968,9 @@ install_one() {
   # prose_swap_in / prose_swap_back <relpath> — the COMMIT half, and its undo. A swap is
   # `mv` the live path aside, `mv` the staged one in; the undo is those two in reverse. The
   # displaced original is PARKED, never `rm -rf`'d, precisely so the undo has something to
-  # put back — a commit that deleted first could not be rolled back at all.
+  # put back — a commit that deleted first could not be rolled back at all. prose_swap_in
+  # returns 2 when the staged move AND the current entry's restore fail; unlike an ordinary
+  # failure, that outcome must preserve both recovery trees for manual repair.
   prose_swap_in() {
     _pi_rel="$1"; _pi_dst="$H/$_pi_rel"; _pi_old="$_prose_old/$_pi_rel"
     mkdir -p "$(dirname "$_pi_dst")" "$(dirname "$_pi_old")" || return 1
@@ -2982,7 +2983,7 @@ install_one() {
     # Undo THIS entry here, so the caller's undo list never has to carry the entry that
     # failed — the two halves of one swap are only ever half-done inside this function.
     if [ -e "$_pi_old" ] || [ -L "$_pi_old" ]; then
-      mv "$_pi_old" "$_pi_dst" || return 1
+      mv "$_pi_old" "$_pi_dst" || return 2
     fi
     return 1
   }
@@ -3063,11 +3064,18 @@ install_one() {
       if prose_swap_in "$_tpt_rel"; then
         _tpt_done="$_tpt_rel $_tpt_done"
         continue
+      else
+        # Capture inside the branch: after `fi`, POSIX shells report the compound
+        # command's status rather than reliably preserving prose_swap_in's status 2.
+        _tpt_swap_rc=$?
       fi
       for _tpt_undo in $_tpt_done; do
         prose_swap_back "$_tpt_undo" \
           || die "could not install the thin prose tier ($_tpt_rel) AND the rollback of $_tpt_undo failed — this target's prose tier is now MIXED; the stubs are under $_prose_stg and the original files under $_prose_old, and both are kept for you to restore by hand"
       done
+      if [ "$_tpt_swap_rc" = "2" ]; then
+        die "could not install the thin prose tier ($_tpt_rel) — current entry $_tpt_rel could not be restored; every earlier path was rolled back, the staged replacement is under $_prose_stg and the original entry under $_prose_old, and both are kept for you to restore by hand"
+      fi
       rm_owned_tree "$_prose_stg" "$_prose_old"
       die "could not install the thin prose tier ($_tpt_rel) — every path already swapped was rolled back, this target keeps the body it had"
     done
@@ -3179,7 +3187,10 @@ install_one() {
         fi
         printf '%s\n' "$_f04_blockers" | while IFS= read -r _f04_b; do
           [ -n "$_f04_b" ] || continue
-          info "  differs: $_f04_b"
+          # `info` uses `echo`, whose treatment of backslashes is implementation-defined.
+          # Blocker paths escape literal newlines as `\n`; re-expanding that here would
+          # split the one safe record back into two bogus paths on shells whose echo does it.
+          printf '     differs: %s\n' "$_f04_b"
         done
         # Naming a path the operator can no longer read without saying where it went is
         # worse than not naming it: the full-copy branch re-installs the whole prose tier

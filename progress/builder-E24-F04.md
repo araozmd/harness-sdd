@@ -484,3 +484,48 @@ toggle, so it now loads `tests/lib/fence.awk` and calls the shared CommonMark ru
 umbrella and change-size suites pass. The final aggregate at `c8a0e50` reports **all 43 suites
 passed** under `/bin/dash [PROGRAM:dash PROJECT:dash-16]` with `--jobs 8`; the independent
 focused re-review returned no findings.
+
+### Hosted-review repair — round 8
+
+The first hosted review of the integrated head found two P2s, both reproduced before repair.
+First, a blocker pathname containing a literal newline travelled through the newline-delimited
+diagnostic stream as two false records. `_ptb_print_path` now renders backslash and C0 separators
+without changing the comparison itself, and the final reporter uses `printf` because shell `echo`
+may reinterpret the safe `\n` representation. The fixture asserts one exact
+`docs/sub/line\nbreak.md` record; before the repair it observed `docs/sub/line` and `break.md`.
+
+Second, if a staged move failed after parking the current live entry and restoring that entry also
+failed, `prose_swap_in` returned the ordinary failure code. Its caller then removed both recovery
+trees, including the only surviving original. The swap now returns a distinct status for that
+outcome. Earlier completed swaps still roll back, but the staged and replaced trees are both kept
+and named for manual recovery. A permission-free doctored-installer case forces both failures on
+`docs`, verifies earlier operator bytes are restored, and verifies the current original and staged
+replacement survive in their respective recovery trees.
+
+Final verification after both hosted repairs: `./init.sh`, POSIX syntax under `sh` and `dash`,
+`git diff --check`, the complete umbrella suite, and the complete change-size suite are green.
+`sh tools/run-tests.sh` reports **all 43 suites passed** under
+`/bin/dash [PROGRAM:dash PROJECT:dash-16]` with `--jobs 8`. Change-size against current
+`origin/main`: **874 production lines / 4 files**, tier **ok** after the focused simplification.
+
+### Focused review after hosted round 8
+
+The committed repair was held locally for one more independent review before push. It found that
+the first pathname encoder sat after two other line-oriented producers: `find` had already split a
+newline-bearing symlink, and `diff` had already split a two-sided newline-bearing file. The
+one-sided fixture therefore proved only the quoted-glob arm. It also found that the rollback
+fixture matched `return [12]` and rewrote either form to `return 2`, so reverting the production
+tri-state producer would be silently repaired by the test itself.
+
+The regression now carries all three newline shapes: a one-sided file, a two-sided differing file,
+and a two-sided symlink. The pre-fix run failed on the two-sided file. Exact names and symlink names
+are now derived recursively while each raw pathname remains a quoted shell value and are escaped
+before `sort` or any other line-oriented consumer. Whole-entry `diff -r` remains the only
+convertibility decision: status 0 converts, status 1 may use a complete non-empty exact-name walk,
+and every walk failure or diff trouble falls back closed to the tier entry. The strengthened
+umbrella suite is green.
+
+The rollback mutation now matches only the required production `return 2`; it injects the two move
+failures without allowing a reverted `return 1` to reach the recovery branch. The production flow
+itself was independently confirmed correct: status 2 is captured inside `else`, prior swaps roll
+back LIFO, the exceptional path preserves both trees, and ordinary status 1 still cleans them.

@@ -1665,10 +1665,10 @@ pass "R3 thin_umbrella_side_path_is_named — a path the umbrella holds and the 
 # thin_blocker_paths_ignore_parent_delimiters
 #
 # `diff -q` describes changes as human prose. Both separators it uses (` and ` for a
-# two-sided difference, `: ` for an Only-in difference) are legal inside the ABSOLUTE
-# parent path. Splitting at the first separator truncates that parent and makes the
-# fail-closed normaliser report only `agents` / `docs`, even though the comparison still
-# correctly blocks conversion. The parser must anchor on the two roots it already knows.
+# two-sided difference, `: ` for an Only-in difference) and its record newline are legal
+# pathname bytes. The fixture exercises a one-sided file, a two-sided differing file and a
+# two-sided symlink with literal newlines, so encoding only one producer cannot satisfy it.
+# Exact names must be derived while each pathname is still one quoted shell value.
 F04P="$AU/f04p parent and pair: marker"
 f04_fullchild "$F04P" kid
 KP4="$F04P/kid/.harness"
@@ -1676,12 +1676,32 @@ printf '\na two-sided edit below a delimiter-bearing parent\n' >> "$KP4/agents/b
 mkdir -p "$KP4/docs/sub"
 mkdir -p "$F04P/.harness/docs/sub"
 printf 'a child-only file whose own name carries diff syntax\n' > "$KP4/docs/sub/note: local.md"
+F04P_NL_ONE_REL="$(printf 'docs/sub/one-sided-line\nbreak.md')"
+F04P_NL_ONE_SHOW='docs/sub/one-sided-line\nbreak.md'
+F04P_NL_TWO_REL="$(printf 'docs/sub/two-sided-line\nbreak.md')"
+F04P_NL_TWO_SHOW='docs/sub/two-sided-line\nbreak.md'
+F04P_NL_LINK_REL="$(printf 'docs/sub/link-line\nbreak.md')"
+F04P_NL_LINK_SHOW='docs/sub/link-line\nbreak.md'
+printf 'a child-only file whose name contains a literal newline\n' > "$KP4/$F04P_NL_ONE_REL"
+printf 'child bytes under a two-sided literal-newline name\n' > "$KP4/$F04P_NL_TWO_REL"
+printf 'umbrella bytes under a two-sided literal-newline name\n' > "$F04P/.harness/$F04P_NL_TWO_REL"
+printf 'same link target bytes\n' > "$KP4/docs/sub/link-target.md"
+cp "$KP4/docs/sub/link-target.md" "$F04P/.harness/docs/sub/link-target.md"
+ln -s link-target.md "$KP4/$F04P_NL_LINK_REL"
+ln -s link-target.md "$F04P/.harness/$F04P_NL_LINK_REL"
 printf 'a file where the umbrella holds a directory\n' > "$KP4/docs/type-clash"
 mkdir -p "$F04P/.harness/docs/type-clash"
 [ -d "$KP4/docs/sub" ] && [ -d "$F04P/.harness/docs/sub" ] \
   || fail "R3 delimiter-parent control: docs/sub must exist on both sides so the filename, not its parent directory, is the one-sided path"
 [ ! -e "$F04P/.harness/docs/sub/note: local.md" ] \
   || fail "R3 delimiter-parent control: note: local.md exists on both sides, so the Only-in filename parser is not exercised"
+[ -f "$KP4/$F04P_NL_ONE_REL" ] && [ ! -e "$F04P/.harness/$F04P_NL_ONE_REL" ] \
+  || fail "R3 newline control: the literal-newline path must exist only in the child"
+[ -f "$KP4/$F04P_NL_TWO_REL" ] && [ -f "$F04P/.harness/$F04P_NL_TWO_REL" ] \
+  && ! diff -q "$KP4/$F04P_NL_TWO_REL" "$F04P/.harness/$F04P_NL_TWO_REL" >/dev/null 2>&1 \
+  || fail "R3 newline control: the two-sided literal-newline files must both exist and differ"
+[ -L "$KP4/$F04P_NL_LINK_REL" ] && [ -L "$F04P/.harness/$F04P_NL_LINK_REL" ] \
+  || fail "R3 newline control: the literal-newline symlink must exist on both sides"
 [ -f "$KP4/docs/type-clash" ] && [ -d "$F04P/.harness/docs/type-clash" ] \
   || fail "R3 type-clash control: docs/type-clash must be a child file and an umbrella directory"
 F04P_OUT="$(CODEX_HOME="$F04P/.ch" HOME="$F04P/.home" \
@@ -1690,6 +1710,10 @@ F04P_OUT="$(CODEX_HOME="$F04P/.ch" HOME="$F04P/.home" \
 for _p in agents/builder.md 'docs/sub/note: local.md' docs/type-clash; do
   printf '%s\n' 2>/dev/null "$F04P_OUT" | grep -qF "differs: $_p" \
     || fail "R3: the blocker was reduced to its tier instead of naming the exact path $_p: $F04P_OUT"
+done
+for _p in "$F04P_NL_ONE_SHOW" "$F04P_NL_TWO_SHOW" "$F04P_NL_LINK_SHOW"; do
+  printf '%s\n' 2>/dev/null "$F04P_OUT" | grep -qF "differs: $_p" \
+    || fail "R3: the literal-newline blocker was split across output records instead of being named once as $_p: $F04P_OUT"
 done
 f04_no_stub_in_tier "$KP4" "R3 (delimiter-bearing absolute parents must not weaken blocker reporting)"
 pass "R3 thin_blocker_paths_ignore_parent_delimiters — exact paths are derived independently of diff's prose separators"
@@ -1706,7 +1730,7 @@ for _md in harness-install.sh VERSION AGENTS.md init.sh agents docs store tools 
 done
 awk '
   { print }
-  $0 == "_ptb_one_sided_walk() (" { print "  exit 0 # mutation: exact one-sided name producer neutralised" }
+  $0 == "_ptb_exact_walk() (" { print "  exit 0 # mutation: exact one-sided name producer neutralised" }
 ' "$F04P_MUTSRC/harness-install.sh" > "$F04P_MUTSRC/harness-install.mut"
 mv "$F04P_MUTSRC/harness-install.mut" "$F04P_MUTSRC/harness-install.sh"
 [ "$(grep -c 'mutation: exact one-sided name producer neutralised' "$F04P_MUTSRC/harness-install.sh")" = "1" ] \
@@ -2415,6 +2439,65 @@ done
 F04Q_DEBRIS="$(ls -d "$KQ4"/.harness-prose-* 2>/dev/null || true)"
 [ -z "$F04Q_DEBRIS" ] \
   || fail "R2: the rolled-back run left staging directories inside .harness: $F04Q_DEBRIS"
+
+# ── a failed restore of the CURRENT entry preserves both recovery trees ────────────────
+# prose_swap_in normally restores the entry it just parked before returning failure; the
+# caller's undo list therefore contains only EARLIER successful swaps. If that current-entry
+# restore also fails, treating it like an ordinary failure and deleting both temp trees
+# destroys the only surviving original. A doctored installer deterministically makes `docs`
+# the current entry: its live original is parked, the staged move is refused, and the restore
+# is refused. No permissions or uid assumptions are involved.
+F04T="$AU/f04t"
+mk_umb "$F04T" kid
+cascade "$F04T" --thin
+KT4="$F04T/kid/.harness"
+f04_all_stubs_in_tier "$KT4" "R2 current-restore fixture (the child must start thin)"
+printf 'EARLIER-ROLLBACK-MARKER\n' >> "$KT4/AGENTS.md"
+printf 'EARLIER-ROLLBACK-MARKER\n' >> "$KT4/agents/builder.md"
+printf 'CURRENT-ORIGINAL-MARKER\n' >> "$KT4/docs/WORKFLOW.md"
+
+F04T_SRC="$AU/f04t-mut-src"
+mkdir -p "$F04T_SRC"
+for _md in harness-install.sh VERSION AGENTS.md init.sh agents docs store tools specs \
+           harness.config.yaml umbrella.manifest.example.yaml umbrella.gitignore.example; do
+  [ -e "$SRC/$_md" ] && cp -R "$SRC/$_md" "$F04T_SRC/"
+done
+awk '
+  $0 == "    if mv \"$_prose_stg/$_pi_rel\" \"$_pi_dst\"; then" {
+    print "    if [ \"$_pi_rel\" != \"docs\" ] && mv \"$_prose_stg/$_pi_rel\" \"$_pi_dst\"; then # mutation: staged docs move fails"
+    next
+  }
+  $0 ~ /^      mv "\$_pi_old" "\$_pi_dst" \|\| return 2$/ {
+    print "      [ \"$_pi_rel\" != \"docs\" ] && mv \"$_pi_old\" \"$_pi_dst\" || return 2 # mutation: current docs restore fails"
+    next
+  }
+  { print }
+' "$F04T_SRC/harness-install.sh" > "$F04T_SRC/harness-install.mut"
+mv "$F04T_SRC/harness-install.mut" "$F04T_SRC/harness-install.sh"
+[ "$(grep -c 'mutation: staged docs move fails' "$F04T_SRC/harness-install.sh")" = "1" ] \
+  && [ "$(grep -c 'mutation: current docs restore fails' "$F04T_SRC/harness-install.sh")" = "1" ] \
+  || fail "R2 current-restore control: the doctored installer did not inject both failures exactly once"
+
+F04T_OUT="$(CODEX_HOME="$F04T/.ch" HOME="$F04T/.home" \
+  sh "$F04T_SRC/harness-install.sh" --agents=claude "$F04T/kid" 2>&1)" && F04T_RC=0 || F04T_RC=$?
+[ "$F04T_RC" != "0" ] || fail "R2 current-restore control: the doctored install succeeded, so neither injected failure was observed"
+printf '%s\n' 2>/dev/null "$F04T_OUT" | grep -qF 'current entry docs could not be restored' \
+  || fail "R2: a failed restore of the current entry was reported as an ordinary rolled-back failure: $F04T_OUT"
+for _p in AGENTS.md agents/builder.md; do
+  grep -qF 'EARLIER-ROLLBACK-MARKER' "$KT4/$_p" \
+    || fail "R2: current-entry restore failed and the caller did not roll back the earlier entry $_p"
+done
+[ ! -e "$KT4/docs" ] \
+  || fail "R2 current-restore control: docs still exists live, so the original was not left parked and the destructive cleanup path was not reached"
+F04T_OLD="$(find "$KT4" -maxdepth 1 -type d -name '.harness-prose-replaced.*' -print | head -n 1)"
+F04T_STG="$(find "$KT4" -maxdepth 1 -type d -name '.harness-prose-staging.*' -print | head -n 1)"
+[ -n "$F04T_OLD" ] && [ -n "$F04T_STG" ] \
+  || fail "R2: current-entry restore failed but one or both recovery trees were deleted: $F04T_OUT"
+grep -qF 'CURRENT-ORIGINAL-MARKER' "$F04T_OLD/docs/WORKFLOW.md" \
+  || fail "R2: the preserved originals tree does not contain the current entry's operator bytes"
+is_stub "$F04T_STG/docs/WORKFLOW.md" \
+  || fail "R2: the preserved staging tree does not contain the replacement for the current entry"
+pass "R2 thin_current_restore_failure_preserves_recovery — earlier swaps roll back and both current-entry recovery trees survive"
 
 # ── the same half again, on a PRISTINE FULL COPY — richer, but mode-dependent ───────────
 # This is the product's actual claim (R2 is about CONVERSIONS): a full-copy child that fails
