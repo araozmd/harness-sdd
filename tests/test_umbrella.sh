@@ -1761,6 +1761,156 @@ grep -q '^  root: "\.\./\.\./"' "$F04E/kid/.harness/harness.config.yaml" \
   || fail "R6: umbrella.root was cleared by a run that only refused to convert"
 pass "R6 thin_unreachable_umbrella_is_not_fatal — warns, converts nothing, keeps the full copy, exits 0"
 
+# ── R2/R6: a SELF-REFERENTIAL umbrella.root is refused, in every spelling ───────────────
+# thin_refuses_self_referential_umbrella_root
+#
+# `umbrella.root: "../"` on a target that is not a child resolves to that target's OWN
+# `.harness`, and that path passed every strictness rule umbrella_body_dir had: a directory,
+# not a symlink, holding `.harness-version`. prose_tier_blockers then compared the tier with
+# ITSELF, found no blocker, and --thin reported CONVERTED while replacing every prose file
+# with a stub whose authoritative path is `../.harness/<rel>` — i.e. each stub named ITSELF.
+# Measured on a plain single-target install plus that one edit: 30 stubs, 0 real prose files
+# left, exit 0, and a ✅ line saying it had converted. (Codex r2 P1 #3799616443.)
+#
+# NO UMBRELLA IS INSTALLED ABOVE THE TARGET, deliberately. The resolved body IS the target's
+# own, so an ordinary single-target install plus one hand edit is the whole fixture — and a
+# hand edit is exactly how this key gets a bad value, since the product only ever writes the
+# cascade's own `../../`.
+#
+# FOUR SPELLINGS, because the refusal must compare RESOLVED PHYSICAL paths and not the
+# configured string: `../`, `./../`, the absolute path, and a route through a symlink. Only
+# the first is killed by a string comparison against `../`; the other three are what make
+# `pwd -P` on both sides load-bearing.
+F04K="$AU/f04k"
+mk_umb "$F04K" tgt
+CODEX_HOME="$F04K/.ch" HOME="$F04K/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude "$F04K/tgt" >/dev/null 2>&1 \
+  || fail "R2 self-ref fixture: the single-target install failed"
+KK4="$F04K/tgt/.harness"
+f04_no_stub_in_tier "$KK4" "R2 self-ref fixture (the target must start full-copy)"
+# PRECONDITIONS. The root about to be written must resolve to an INSTALLED body — otherwise
+# this is R6's unreachable-umbrella case wearing a different config value, and it would pass
+# with the self-reference refusal absent entirely.
+[ -f "$KK4/.harness-version" ] \
+  || fail "R2 self-ref control: the target carries no installed-body marker, so a self-referential root would be refused as UNREACHABLE and this case would prove nothing"
+[ -e "$F04K/.harness" ] \
+  && fail "R2 self-ref control: a real umbrella body exists above the target, so the root under test could resolve to something other than the target itself"
+ln -sfn . "$F04K/tgt/f04k-self"
+for _s in '../' './../' "$(f04_phys "$F04K/tgt")" '../f04k-self/'; do
+  sed "s|^  root: .*|  root: \"$_s\"|" "$KK4/harness.config.yaml" > "$KK4/hc.t" \
+    && mv "$KK4/hc.t" "$KK4/harness.config.yaml"
+  grep -qF "root: \"$_s\"" "$KK4/harness.config.yaml" \
+    || fail "R2 self-ref setup: the root spelling $_s was not written to the config"
+  F04K_OUT="$(CODEX_HOME="$F04K/.ch" HOME="$F04K/.home" \
+    sh "$SRC/harness-install.sh" --agents=claude --thin "$F04K/tgt" 2>&1)" && F04K_RC=0 || F04K_RC=$?
+  [ "$F04K_RC" = "0" ] \
+    || fail "R2: --thin with a self-referential umbrella.root ($_s) exited $F04K_RC — a nonsense root is a warning, never an install failure: $F04K_OUT"
+  printf '%s\n' 2>/dev/null "$F04K_OUT" | grep -q 'CONVERTED to the thin layout' \
+    && fail "R2: umbrella.root ($_s) resolves to the target's OWN .harness and --thin CONVERTED it — every prose file is now a stub naming itself, so the child has no readable prose body at all: $F04K_OUT"
+  f04_no_stub_in_tier "$KK4" "R2 (self-referential umbrella.root: $_s)"
+  # The refusal must come from the ROOT, not from blocking paths. Compared against itself
+  # the tier is pristine by construction, so a `differs:` line here would mean the fixture
+  # stopped being convertible and the guard was never the reason anything survived.
+  printf '%s\n' 2>/dev/null "$F04K_OUT" | grep -q 'differs: ' \
+    && fail "R2 self-ref control: the run refused by naming blocking paths instead of refusing the root — this tier is byte-identical to itself, so it would convert if the root were honoured: $F04K_OUT"
+  printf '%s\n' 2>/dev/null "$F04K_OUT" | grep -qF 'cannot be its own umbrella' \
+    || fail "R2: the self-referential root ($_s) was not reported — an operator who hand-wrote it is told nothing: $F04K_OUT"
+done
+grep -qF 'You are the **Builder**' "$KK4/agents/builder.md" \
+  || fail "R2: the target's real prose body did not survive a self-referential umbrella.root"
+pass "R2 thin_refuses_self_referential_umbrella_root — a root resolving to the target's own .harness is refused in all four spellings, and the full body survives"
+
+# ── R2: a failure PART-WAY THROUGH the write leaves the tier WHOLE ──────────────────────
+# thin_partial_failure_leaves_tier_whole
+#
+# R2's all-or-nothing rule is about the tier, not only about the pristine check: a write
+# that converted entries 1-3 and then died on entry 4 produced exactly the mixed layout the
+# rule forbids. Measured on the sequential implementation with this fixture: 20 stubs and 10
+# real files in one child. (Codex r2 P2 #3799616454.)
+#
+# THE ONLY PORTABLE MID-WRITE FAILURE this suite can build is a read-only directory INSIDE
+# the child's prose tier. `.harness/specs` holds tier entries 4 and 5 of 5, so entries 1-3
+# have already been swapped by the time the write reaches it, and moving `specs/_templates`
+# out of a 0555 directory is refused. It needs no root and no platform tricks.
+F04L="$AU/f04l"
+f04_fullchild "$F04L" kid
+KL4="$F04L/kid/.harness"
+chmod 0555 "$KL4/specs"
+F04L_OUT="$(CODEX_HOME="$F04L/.ch" HOME="$F04L/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude --thin "$F04L/kid" 2>&1)" && F04L_RC=0 || F04L_RC=$?
+chmod -R u+w "$KL4/specs"
+[ "$F04L_RC" = "0" ] \
+  && fail "R2 control: --thin SUCCEEDED with a read-only specs/ directory, so the write never failed and nothing below discriminates: $F04L_OUT"
+# The failure has to be the PROSE-TIER WRITE's, reached with earlier entries already
+# swapped. An abort before the write would leave the tier whole for free and satisfy every
+# assertion below while proving nothing about all-or-nothing.
+printf '%s\n' 2>/dev/null "$F04L_OUT" | grep -qF 'could not install the thin prose tier' \
+  || fail "R2 control: the run failed somewhere other than the prose-tier write, so no swap was ever rolled back: $F04L_OUT"
+f04_no_stub_in_tier "$KL4" "R2 (a write that fails part-way must convert NOTHING)"
+# BYTES, not presence. The child was byte-identical to the umbrella's copy before the run —
+# that is what made it convertible — so it must still be, entry for entry, in both
+# directions. This is what catches a rollback that restores a path but not its contents,
+# and a partial write that left one entry stubbed.
+for _p in $F04_TIER; do
+  diff -r "$F04L/.harness/$_p" "$KL4/$_p" >/dev/null 2>&1 \
+    || fail "R2: after a write that failed part-way, the child's $_p no longer matches the umbrella's copy it was byte-identical to — the tier was left changed"
+done
+# A rolled-back run leaves `.harness` as it found it: no staging debris for the operator to
+# find, and nothing for the landing audit or the drift guard to trip over.
+F04L_DEBRIS="$(ls -d "$KL4"/.harness-prose-* 2>/dev/null || true)"
+[ -z "$F04L_DEBRIS" ] \
+  || fail "R2: the rolled-back run left staging directories inside .harness: $F04L_DEBRIS"
+
+# THE OTHER HALF OF THE WRITE, and it needs its own trigger. The check above fails while
+# entries are being SWAPPED IN; this one fails while they are still being BUILT. They are
+# different arms and only one mechanism covers each: the swap is undone by the rollback, the
+# build is a no-op on the child because nothing is swapped until ALL of it has been built.
+# Collapse the two phases back into one loop — build entry N, swap entry N, then start
+# N+1 — and the rollback does not cover the build at all: four entries land and the fifth
+# does not, while the run still says nothing was replaced. Verified against exactly that
+# mutant, which every other case in this suite survives.
+#
+# A SOURCE TREE MISSING ONE PROSE ENTRY is the only portable way to make the build fail.
+# It is COPIED, never edited in place, and it is copied WHOLE — no list of the installer's
+# own source files is duplicated here, so it cannot rot when that list changes.
+F04M="$AU/f04m"
+mk_umb "$F04M" kid
+cascade "$F04M"
+[ -f "$F04M/.harness/.harness-version" ] \
+  || fail "R2 build-half fixture: the umbrella body was not installed"
+F04MSRC="$AU/f04m-src"
+mkdir -p "$F04MSRC"
+for _e in "$SRC"/* "$SRC"/.[!.]*; do
+  [ -e "$_e" ] || continue
+  case "${_e##*/}" in .git|.pr-loop) continue ;; esac
+  cp -R "$_e" "$F04MSRC/"
+done
+rm -f "$F04MSRC/specs/glossary.md"
+[ -e "$F04MSRC/specs/glossary.md" ] \
+  && fail "R2 build-half control: the doctored source still holds specs/glossary.md, so its build cannot fail"
+[ -f "$F04MSRC/agents/builder.md" ] \
+  || fail "R2 build-half control: the doctored source is missing more than the one entry seeded — a failure would not be attributable"
+# A FRESH child, so "the tier was not written" is observable as ABSENCE. An already-thin
+# child cannot serve: the stubs a partial re-run would write are byte-identical to the ones
+# already there, so the two outcomes are indistinguishable on disk.
+#
+# `HARNESS_UMBRELLA_ROOT` rather than `--umbrella`: it is the cascade's own interface to
+# install_one, and a real cascade cannot be used here because the doctored source dies
+# installing the COORDINATOR first — its full-copy branch copies the very entry that is
+# missing, so the run would never reach a child at all.
+mk_umb "$F04M" fresh
+F04M_OUT="$(HARNESS_UMBRELLA_ROOT='../../' CODEX_HOME="$F04M/.ch" HOME="$F04M/.home" \
+  sh "$F04MSRC/harness-install.sh" --agents=claude "$F04M/fresh" 2>&1)" && F04M_RC=0 || F04M_RC=$?
+[ "$F04M_RC" = "0" ] \
+  && fail "R2 build-half control: the doctored install SUCCEEDED, so the build never failed: $F04M_OUT"
+printf '%s\n' 2>/dev/null "$F04M_OUT" | grep -qF 'could not build the thin prose tier' \
+  || fail "R2 build-half control: the run failed somewhere other than building the prose tier: $F04M_OUT"
+for _p in $F04_TIER; do
+  [ -e "$F04M/fresh/.harness/$_p" ] \
+    && fail "R2: the thin prose tier failed to BUILD and yet $_p was written — the tier is part-written while the run reports that nothing was replaced: $F04M_OUT"
+done
+pass "R2 thin_partial_failure_leaves_tier_whole — a write that fails part-way leaves the tier whole in both halves: a failed swap rolls the earlier swaps back, and a failed build writes nothing at all"
+
 # ── R9/R10/R11: --standalone, the documented way back ──────────────────────────────────
 # standalone_materialises_body / standalone_clears_umbrella_root / standalone_is_idempotent
 F04F="$AU/f04f"

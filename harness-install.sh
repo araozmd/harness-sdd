@@ -734,6 +734,25 @@ HARNESS_STUB_SENTINEL='<!-- harness:umbrella-stub -->'
 # moved away would stub its whole prose tier against a path holding nothing. And the
 # component is refused when it is a SYMLINK, matching the boundary every other ownership
 # path in this installer already draws.
+#
+# A TARGET IS NOT ITS OWN UMBRELLA, and this is the third strictness rule, not a special
+# case of the conversion. `umbrella.root: "../"` — one plausible hand edit — resolves to
+# the target's OWN `.harness`, which passes every check above: it is a directory, it is not
+# a symlink, and it certainly holds `.harness-version`. Measured on a normal single-target
+# install plus that one edit: `prose_tier_blockers` then compares the tier with ITSELF,
+# finds no blocker, and `--thin` reports `CONVERTED` while replacing all 30 prose files
+# with stubs whose authoritative path is `../.harness/<rel>` — i.e. each stub names ITSELF.
+# Zero real prose files survive. Staging the write (see the prose tier below) prevents the
+# destructive ORDERING but not that outcome; only refusing the root does.
+#
+# REFUSED HERE, not at the conversion, because the nonsense is the ROOT, not the flag. The
+# fresh/maintenance thin arm has the same problem — it would stub the tier against the same
+# self-naming path — and so would any future caller. Refusing here sends every one of them
+# down the full-local-copy arm, which is the same fallback a missing `.harness-version`
+# already gets: the target keeps a real, readable prose body and the run still exits 0.
+#
+# PHYSICAL PATHS ON BOTH SIDES (`pwd -P`), never the configured string, so `../`, `./../`,
+# an absolute spelling and a symlinked route all reach the same answer.
 umbrella_body_dir() {
   _ubd_h="$1"
   # The cascade's value wins on a FRESH child, where §1 runs before any config exists.
@@ -752,7 +771,14 @@ umbrella_body_dir() {
   [ -L "$_ubd_body" ] && return 0
   [ -d "$_ubd_body" ] || return 0
   [ -f "$_ubd_body/.harness-version" ] || return 0
-  ( CDPATH= cd -- "$_ubd_body" && pwd -P )
+  _ubd_phys="$( CDPATH= cd -- "$_ubd_body" 2>/dev/null && pwd -P )" || _ubd_phys=''
+  [ -n "$_ubd_phys" ] || return 0
+  _ubd_self="$( CDPATH= cd -- "$_ubd_h" 2>/dev/null && pwd -P )" || _ubd_self=''
+  if [ -n "$_ubd_self" ] && [ "$_ubd_phys" = "$_ubd_self" ]; then
+    echo "⚠️  umbrella.root ($_ubd_root) resolves to this target's OWN .harness — a target cannot be its own umbrella, and converting against it would leave every prose file a stub pointing at itself; ignoring the key and keeping the full local body" >&2
+    return 0
+  fi
+  printf '%s\n' "$_ubd_phys"
 }
 
 # gen_body_stub <body-relpath> <umbrella-root-as-written> <dest> — write the pointer stub.
@@ -795,7 +821,7 @@ gen_body_stub() {
 # never held.
 #
 # CALL `diff`, DO NOT WALK THE TREES. The predicate needed is "are these two trees
-# identical", which is `diff -r`'s exit status. stub_tree is the precedent AND the scar:
+# identical", which is `diff -r`'s exit status. stage_tree is the precedent AND the scar:
 # reimplementing `cp -R`'s traversal in POSIX sh cost four blocking findings, one per
 # filesystem shape, and was fixed by calling the tool and post-processing its result.
 #
@@ -815,8 +841,8 @@ gen_body_stub() {
 # output this function cannot parse — the entry BLOCKS. `diff`'s EXIT STATUS is the contract
 # and its lines only name the paths; deriving the decision from the parsed lines alone fails
 # OPEN. Absence of evidence of an edit is not evidence of its absence. A
-# child-local extra file inside the prose tier is the sharpest case: stub_tree begins with
-# `rm -rf` + `cp -R "$SRC/<rel>"`, so a conversion would DELETE it.
+# child-local extra file inside the prose tier is the sharpest case: the conversion replaces
+# the whole tier entry with a `cp -R` of the umbrella's, so it would DELETE that file.
 prose_tier_blockers() {
   _ptb_h="$1"; _ptb_u="$2"
   # Defence in depth, deliberately not claimed as tested: a portable fixture cannot remove
@@ -2467,8 +2493,15 @@ install_one() {
     rm -rf "$_dst"
     cp -R "$_src" "$_dst"
   }
-  # stub_files_in <dir-under-$H> <umbrella-root> — walk a tree ALREADY MATERIALISED by
+  # stub_files_in <dir> <umbrella-root> <strip-root> — walk a tree ALREADY MATERIALISED by
   # `cp -R` and replace each REGULAR file's contents with a pointer stub, in place.
+  #
+  # <strip-root> IS A PARAMETER because the tree being thinned is no longer the tree the
+  # consumer will open: the whole prose tier is now stubbed inside a STAGING root and moved
+  # into `$H` only once all of it succeeded. The stub TEXT must still name the body-relative
+  # path (`agents/builder.md`), never the staged one, or a converted child would stop being
+  # byte-identical to a fresh thin one — so the caller passes the root whose removal yields
+  # that path, and the recursion carries it down unchanged.
   #
   # Note the direction: this does not build the shape, it only thins what `cp -R` built.
   # That inversion is the point — see stub_tree below.
@@ -2487,7 +2520,7 @@ install_one() {
   # A missed name is now a THINNING miss, not a SHAPE miss: the file is still present with
   # `cp -R`'s own content, merely not stubbed. That is the whole safety win of the inversion.
   stub_files_in() {
-    _sfi_dir="$1"; _sfi_root="$2"
+    _sfi_dir="$1"; _sfi_root="$2"; _sfi_top="$3"
     for _sfi_f in "$_sfi_dir"/* "$_sfi_dir"/.[!.]* "$_sfi_dir"/..?*; do
       [ -e "$_sfi_f" ] || continue
       if [ -L "$_sfi_f" ]; then
@@ -2504,7 +2537,7 @@ install_one() {
         # would overwrite this frame's `_sfi_dir`/`_sfi_root` and every sibling processed
         # AFTER a nested directory would be handled with the wrong frame.
         # (Codex r4 P2 #3705960408.)
-        ( stub_files_in "$_sfi_f" "$_sfi_root" ) || return 1
+        ( stub_files_in "$_sfi_f" "$_sfi_root" "$_sfi_top" ) || return 1
       elif [ -f "$_sfi_f" ]; then
         # `rm -f` first: `cp -R` may preserve a read-only mode, and gen_body_stub writes
         # with `>`, which cannot open a 0444 file.
@@ -2515,19 +2548,42 @@ install_one() {
         # would carry on to `install complete`. (Codex r7 P2 #3711176789.)
         #
         # These two checks are DEFENCE IN DEPTH and are deliberately not claimed as tested:
-        # the `chmod -R u+w` in stub_tree removes the only trigger a portable fixture can
+        # the `chmod -R u+w` in stage_tree removes the only trigger a portable fixture can
         # build, and deleting these `|| return 1`s leaves the suite green. What remains
         # reachable is environmental — a full disk, a read-only mount, ENAMETOOLONG — which
         # the suite cannot create without root or platform-specific tricks. Kept because the
         # failure they guard against is silent, and silence is what made r7 expensive.
         rm -f "$_sfi_f" || return 1
-        gen_body_stub "${_sfi_f#"$H"/}" "$_sfi_root" "$_sfi_f" || return 1
+        gen_body_stub "${_sfi_f#"$_sfi_top"/}" "$_sfi_root" "$_sfi_f" || return 1
       fi
     done
   }
 
-  # stub_tree <relpath> <umbrella-root> <source-root> — mirror one prose-tier path as
-  # pointer stubs, preserving the SOURCE's shape so every path a consumer opens still exists.
+  # ── The thin prose tier is written ALL AT ONCE, or not at all (E24-F04 R2) ────────────
+  # Two directories under `$H`, both created and destroyed inside one call:
+  #   $_prose_stg   the finished stub tier, built entry by entry, MIRRORING its layout
+  #                 under `$H` so the stub text names the body-relative path
+  #   $_prose_old   what each swap displaced, kept until every swap has succeeded
+  #
+  # WHY THIS EXISTS. The tier used to be written one entry at a time, each one copying,
+  # thinning and swapping before the next began, so a failure on entry 4 left entries 1-3
+  # converted and 4-5 full copies — the mixed layout R2 exists to forbid, and "not a state
+  # anyone can reason about". Reproduced, not assumed: `chmod 0555` on a full-copy child's
+  # `.harness/specs`, then `--thin`, and the run dies in `cp` on `specs/_templates` with
+  # `AGENTS.md`, `agents/` and `docs/` already stubbed. (Codex r2 P2 #3799616454.)
+  #
+  # `.harness-prose-*.$$` LIVES INSIDE `$H`, so `mv` is a rename on one filesystem rather
+  # than a copy, and so a crash leaves the debris where the operator already looks.
+  _prose_stg="$H/.harness-prose-staging.$$"
+  _prose_old="$H/.harness-prose-replaced.$$"
+
+  # stage_tree <relpath> <umbrella-root> <source-root> — build ONE prose-tier path's
+  # FINISHED replacement under $_prose_stg, preserving the SOURCE's shape so every path a
+  # consumer opens still exists. THE DESTINATION IS NOT TOUCHED — not written, not removed,
+  # not even read — which is what makes a staging failure a no-op on the child.
+  #
+  # It RETURNS non-zero where it used to `die`: the caller holds the other stages and has
+  # to clean them up, and an `exit` from here would leave them behind inside `.harness`.
   #
   # <source-root> IS A PARAMETER, NOT `$SRC`, because the two callers do not answer to the
   # same authority. Materialising a fresh thin child has only one candidate shape — this
@@ -2556,37 +2612,103 @@ install_one() {
   # unwritable and the thinning could not overwrite it (r7 #3711176789). The `chmod` below
   # closes that categorically, and unlike the shape class it has a single precondition
   # (the copy must be writable) rather than one bug per filesystem feature.
-  stub_tree() {
+  stage_tree() {
     _st_rel="$1"; _st_root="$2"; _st_from="$3"
-    _st_src="$_st_from/$_st_rel"; _st_dst="$H/$_st_rel"
-    if [ ! -e "$_st_src" ]; then die "source missing: $_st_rel"; fi
-    mkdir -p "$(dirname "$_st_dst")"
-    # STAGE, THEN SWAP — the destination is never removed before the source has been read.
-    # With <source-root> a parameter, the source CAN be the destination: a hand-written
-    # `umbrella.root: "../"` resolves a target's umbrella body to its own `.harness`, and
-    # `rm -rf "$_st_dst"` followed by `cp -R "$_st_src"` would then delete the tier and copy
-    # from what it had just deleted. Defence in depth, deliberately not claimed as tested —
-    # the fixture for it is a hand-edited config, i.e. a state the product never writes.
-    _st_tmp="$_st_dst.harness-stub-staging.$$"
-    rm -rf "$_st_tmp"
-    cp -R "$_st_src" "$_st_tmp"
-    rm -rf "$_st_dst"
-    mv "$_st_tmp" "$_st_dst"
-    if [ -L "$_st_dst" ]; then
+    _st_src="$_st_from/$_st_rel"; _st_new="$_prose_stg/$_st_rel"
+    if [ ! -e "$_st_src" ]; then echo "❌ install: source missing: $_st_rel" >&2; return 1; fi
+    mkdir -p "$(dirname "$_st_new")" || return 1
+    cp -R "$_st_src" "$_st_new" || return 1
+    if [ -L "$_st_new" ]; then
       :                       # a symlinked tier root: left exactly as the full path leaves it
-    elif [ -d "$_st_dst" ]; then
+    elif [ -d "$_st_new" ]; then
       # `chmod -R` does NOT follow symlinks encountered during traversal — verified against a
       # tree holding a link to an external 0444 file, which kept its mode — so this cannot
       # reach outside the copy. A stub is new content anyway; inheriting the source file's
       # read-only bit onto a pointer would only make the next upgrade harder.
-      chmod -R u+w "$_st_dst" || die "cannot make the copied prose tier writable: $_st_rel"
-      stub_files_in "$_st_dst" "$_st_root" \
-        || die "failed to stub the prose tier: $_st_rel"
+      chmod -R u+w "$_st_new" || return 1
+      stub_files_in "$_st_new" "$_st_root" "$_prose_stg" || return 1
     else
-      rm -f "$_st_dst" || die "cannot replace the copied prose file: $_st_rel"
-      gen_body_stub "$_st_rel" "$_st_root" "$_st_dst" \
-        || die "failed to stub the prose file: $_st_rel"
+      rm -f "$_st_new" || return 1
+      gen_body_stub "$_st_rel" "$_st_root" "$_st_new" || return 1
     fi
+  }
+
+  # prose_swap_in / prose_swap_back <relpath> — the COMMIT half, and its undo. A swap is
+  # `mv` the live path aside, `mv` the staged one in; the undo is those two in reverse. The
+  # displaced original is PARKED, never `rm -rf`'d, precisely so the undo has something to
+  # put back — a commit that deleted first could not be rolled back at all.
+  prose_swap_in() {
+    _pi_rel="$1"; _pi_dst="$H/$_pi_rel"; _pi_old="$_prose_old/$_pi_rel"
+    mkdir -p "$(dirname "$_pi_dst")" "$(dirname "$_pi_old")" || return 1
+    if [ -e "$_pi_dst" ] || [ -L "$_pi_dst" ]; then
+      mv "$_pi_dst" "$_pi_old" || return 1
+    fi
+    if mv "$_prose_stg/$_pi_rel" "$_pi_dst"; then
+      return 0
+    fi
+    # Undo THIS entry here, so the caller's undo list never has to carry the entry that
+    # failed — the two halves of one swap are only ever half-done inside this function.
+    if [ -e "$_pi_old" ] || [ -L "$_pi_old" ]; then
+      mv "$_pi_old" "$_pi_dst" || return 1
+    fi
+    return 1
+  }
+  prose_swap_back() {
+    _pb_rel="$1"; _pb_dst="$H/$_pb_rel"; _pb_old="$_prose_old/$_pb_rel"
+    if [ -e "$_pb_dst" ] || [ -L "$_pb_dst" ]; then
+      mv "$_pb_dst" "$_prose_stg/$_pb_rel" || return 1
+    fi
+    if [ -e "$_pb_old" ] || [ -L "$_pb_old" ]; then
+      mv "$_pb_old" "$_pb_dst" || return 1
+    fi
+    return 0
+  }
+
+  # thin_prose_tier <umbrella-root> <source-root> — write the WHOLE prose tier as pointer
+  # stubs, or leave it exactly as it was. THE ONE ENTRY POINT for both thin arms, which is
+  # also what keeps a CONVERTED child byte-indistinguishable from a fresh thin one: the two
+  # differ only in <source-root>.
+  #
+  # THE TWO HALVES FAIL DIFFERENTLY, and each is pinned by its own trigger in
+  # `test_umbrella.sh::thin_partial_failure_leaves_tier_whole`:
+  #   TESTED  a failed SWAP, with earlier entries already in place — a `0555` `.harness/specs`
+  #           refuses the `mv` of entry 4 of 5, and the rollback puts entries 1-3 back.
+  #   TESTED  a failed BUILD — an installer source with one prose entry removed, against a
+  #           fresh child — which writes nothing at all, because no entry is swapped until
+  #           every entry has been built. That is structural, not a code path: there is
+  #           nothing to undo. Collapse the two loops into one and it stops being true.
+  #   NOT     `SIGKILL` or a power loss inside the swap window. Nothing here survives that;
+  #           what this design does is shrink the window from "copy, chmod and rewrite ~30
+  #           files" to a handful of renames.
+  #   NOT     a rollback that itself fails. That leaves the tier mixed — the one outcome this
+  #           function cannot prevent — so it KEEPS both directories and names them, rather
+  #           than deleting the operator's only copy of the originals.
+  #
+  # The undo list is built most-recent-first, so the rollback runs LIFO.
+  thin_prose_tier() {
+    _tpt_root="$1"; _tpt_from="$2"
+    rm -rf "$_prose_stg" "$_prose_old"
+    mkdir -p "$_prose_stg" "$_prose_old"
+    for _tpt_rel in $HARNESS_BODY_PROSE; do
+      if ! stage_tree "$_tpt_rel" "$_tpt_root" "$_tpt_from"; then
+        rm -rf "$_prose_stg" "$_prose_old"
+        die "could not build the thin prose tier ($_tpt_rel) — nothing was replaced, this target keeps the body it had"
+      fi
+    done
+    _tpt_done=''
+    for _tpt_rel in $HARNESS_BODY_PROSE; do
+      if prose_swap_in "$_tpt_rel"; then
+        _tpt_done="$_tpt_rel $_tpt_done"
+        continue
+      fi
+      for _tpt_undo in $_tpt_done; do
+        prose_swap_back "$_tpt_undo" \
+          || die "could not install the thin prose tier ($_tpt_rel) AND the rollback of $_tpt_undo failed — this target's prose tier is now MIXED; the stubs are under $_prose_stg and the original files under $_prose_old, and both are kept for you to restore by hand"
+      done
+      rm -rf "$_prose_stg" "$_prose_old"
+      die "could not install the thin prose tier ($_tpt_rel) — every path already swapped was rolled back, this target keeps the body it had"
+    done
+    rm -rf "$_prose_stg" "$_prose_old"
   }
 
   # The PROGRAM-READ tier is copied unconditionally, in every layout. init.sh execs
@@ -2622,9 +2744,9 @@ install_one() {
     # SOURCE ROOT `$SRC`: this arm materialises a thin tier where there was none to judge —
     # a fresh child, or one already thin — so there is no pristine comparison whose
     # reference it could disagree with. It also runs on cascades whose umbrella body may be
-    # OLDER than this installer, where stub_tree's `source missing` would turn a routine
+    # OLDER than this installer, where stage_tree's `source missing` would turn a routine
     # maintenance run into a hard failure. Branch (3) is the one with two references.
-    for _body_rel in $HARNESS_BODY_PROSE; do stub_tree "$_body_rel" "$_umb_root_cfg" "$SRC"; done
+    thin_prose_tier "$_umb_root_cfg" "$SRC"
     ok "prose body resolved from the umbrella at $_umb_root_cfg (stubs; init.sh, store/, tools/ stay local)"
   elif [ -n "$_umb_body" ]; then
     # (3) A FULL-COPY child of a reachable umbrella — the state E24-F03 left alone and this
@@ -2632,9 +2754,9 @@ install_one() {
     # so the preview can never diverge from the action it previews.
     _f04_blockers="$(prose_tier_blockers "$H" "$_umb_body")"
     if [ -z "$_f04_blockers" ] && [ "$THIN_OPT_IN" = 1 ]; then
-      # Converted. stub_tree is REUSED — same function, so the stub text and the thinning
-      # are the fresh-thin child's — but its SOURCE ROOT IS THE UMBRELLA BODY, the same tree
-      # prose_tier_blockers just compared this child against, and NOT `$SRC`.
+      # Converted. thin_prose_tier is REUSED — same function, so the stub text and the
+      # thinning are the fresh-thin child's — but its SOURCE ROOT IS THE UMBRELLA BODY, the
+      # same tree prose_tier_blockers just compared this child against, and NOT `$SRC`.
       #
       # The two references are not interchangeable, and each mismatch was measured on this
       # branch before it was fixed (Codex r1 P1 #3799465968):
@@ -2656,7 +2778,7 @@ install_one() {
       #
       # BODY_LAYOUT=thin is what makes manifest.txt record it (R8).
       BODY_LAYOUT=thin
-      for _body_rel in $HARNESS_BODY_PROSE; do stub_tree "$_body_rel" "$_umb_root_cfg" "$_umb_body"; done
+      thin_prose_tier "$_umb_root_cfg" "$_umb_body"
       ok "child already holds a full body — CONVERTED to the thin layout (--thin): its prose tier now resolves from the umbrella at $_umb_root_cfg"
     else
       for _body_rel in $HARNESS_BODY_PROSE; do copy "$_body_rel"; done
