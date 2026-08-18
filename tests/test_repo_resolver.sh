@@ -33,8 +33,13 @@ _cleanup() {
   _rc=$?
   rm -rf "$T"
   if [ "$_rc" -ne 0 ] && [ -z "$_FAILED" ]; then
-    echo "FAIL: the suite ABORTED at a fixture step (set -e), not at an assertion —" >&2
-    echo "      commonly a git fixture whose branch was ASSUMED rather than set." >&2
+    echo "FAIL: the suite ABORTED without reaching an assertion (set -e, or a PARSE" >&2
+    echo "      error under a stricter shell than the one you ran it with)." >&2
+    echo "      This message is a GUESS at the cause, not a diagnosis. Things that have" >&2
+    echo "      actually caused it here: a git fixture whose branch was assumed rather" >&2
+    echo "      than set; backticks inside a double-quoted string (command substitution" >&2
+    echo "      in every POSIX shell — dash fails at parse time where bash only warns)." >&2
+    echo "      Locate it with: sh -x \"$0\", and parse-check with: dash -n \"$0\"." >&2
   fi
   exit "$_rc"
 }
@@ -295,9 +300,9 @@ grep -q "^base: raised" "$T/c6.out" || fail "C6: a caller could read a base that
 # default-truthy value makes `if r:` read as success for `ambiguous` and `unknown` alike —
 # the exact slide from "I could not tell" to "yes" this module exists to prevent.
 ask "main" - "$HD" "str(bool(r))"
-[ "$ASK_OUT" = "False" ] || fail "C6: an AMBIGUOUS resolution is truthy, so `if r:` reads uncertainty as success"
+[ "$ASK_OUT" = "False" ] || fail 'C6: an AMBIGUOUS resolution is truthy, so "if r:" reads uncertainty as success'
 ask "nonesuch" child "$HD" "str(bool(r))"
-[ "$ASK_OUT" = "False" ] || fail "C6: an UNKNOWN resolution is truthy, so `if r:` reads uncertainty as success"
+[ "$ASK_OUT" = "False" ] || fail 'C6: an UNKNOWN resolution is truthy, so "if r:" reads uncertainty as success'
 # CONTROL: a resolution that DID resolve is truthy — otherwise the two assertions above
 # would hold against an object that is simply always falsy.
 ask "$CHILD_MAIN" - "$HD" "str(bool(r))"

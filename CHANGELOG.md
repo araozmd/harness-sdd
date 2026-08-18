@@ -67,7 +67,10 @@ while marking it `cached` / **not confirmed**.
 
 New suite `tests/test_repo_resolver.sh` (7 cases, each paired with a control that must come
 out *differently* on the same fixture; 4 mutations against the tip and truthiness rules, 4
-killed, 0 survivors). It lands **unused by design**: this is the first of
+killed, 0 survivors). It is verified under **dash** as well as the host `sh`: backticks
+inside a double-quoted string are command substitution in every POSIX shell, and dash
+parses eagerly where bash defers — so a suite that only ever ran under bash had never
+actually been parsed by the shell Debian and Ubuntu call `sh`. It lands **unused by design**: this is the first of
 two staged changes, and the verification rows consume it next.
 
 ## [0.64.0] — 2026-08-17
