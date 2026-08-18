@@ -147,13 +147,92 @@ Orchestrator's exclusive ownership of state writes.
   it before the `done` write. `none:<why>` stays the one legitimate `done` with nothing to
   merge; it is not a way to close work that has simply not merged **yet**.
 
-  ⚠️ **Recorded, NOT verified.** This helper does not check the reference. It runs no git,
-  opens no connection, resolves no repository, and never decides whether a commit reached a
-  default branch — so every ref is stored as `landed.verified: "unchecked"` (or `"declared"`
-  for `none:<why>`), with a warning saying exactly that, and `repo`/`base` are absent. It
-  **cannot** write `verified: "ancestor"`. Verification is a separate, later change; what
-  you get today is that the claim is **on the board and greppable** instead of nowhere, so
-  re-auditing is a scan rather than commit archaeology across four colliding id namespaces.
+  **Each ref is now VERIFIED, per one decision table.** The question verification actually
+  asks is *what happens when verification is impossible?* — and answering it per input, as
+  fixes accumulate, is how the first attempt collected five rounds of the same defect. It is
+  answered once, here, and `tools/tasks-lock.py` implements these rows in order:
+
+  | # | situation | outcome |
+  |---|---|---|
+  | 1 | `none:<why>` | `declared` |
+  | 2 | the ref resolves to no git object anywhere | `unchecked` + warning |
+  | 3 | a binding names a repo the **manifest does not contain** | **REFUSED** |
+  | 4 | the manifest names it, but the directory is absent/unreadable here | `unchecked` |
+  | 5 | the repo is located, but the object is unknown in it | `unchecked` |
+  | 6 | no default branch can be determined | `unchecked` |
+  | 7 | ancestry is checkable and TRUE **against a confirmed base** | `ancestor` |
+  | 8 | ancestry is FALSE **and** the base tip is confirmed current | **REFUSED** |
+  | 9 | ancestry is FALSE but the tip could **not** be confirmed | `unchecked` |
+
+  **The asymmetry that decides every row.** A *false attestation* is worse than none: the
+  record gains the authority of a check that never happened, and every later reader treats
+  it as settled — so `ancestor` comes only from row 7. A *false refusal* is worse than a
+  silent pass: a guard that rejects genuinely merged work gets routed around or switched
+  off — so refusal is reserved for the two provably-wrong claims, row 8 and row 3.
+
+  Rows 3 and 4 are the distinction that matters most in practice: a **malformed claim** (the
+  board names a repository the project does not declare — checkable with no I/O, and a board
+  `next-task.mjs` already halts on) is refused, while **not being able to see a repository
+  from here** is this checkout's limitation and degrades. Row 3 applies only where a
+  manifest is configured and readable; with no manifest there is no authority to call a
+  claim malformed, so resolution falls back to a best-effort search and every miss degrades.
+
+  Rows 7, 8 and 9 are the stale-tip rule: `refs/remotes/origin/*` is a local snapshot, so a
+  refusal is confirmed against the remote's real tip before it is issued, and an
+  unconfirmable one degrades rather than blocking. **The accept side is symmetric.** An
+  earlier version of this paragraph said it need not be, on the grounds that a wrong
+  `ancestor` would require a rewritten remote — that is false. A project that RENAMES its
+  default branch and leaves the old one in place makes a cached `origin/HEAD` name a branch
+  that is no longer the default, and work merged only there is trivially reachable from it.
+  No rewrite, no adversary. So row 7 also requires a base this checkout can confirm,
+  escalating to the remote's advertised tip when it holds that object and degrading to
+  `unchecked` when it cannot. This costs nothing on the happy path: a base the remote just
+  published is already confirmed.
+
+  **WHICH repository is the claim about?** The nine rows decide a verdict for a
+  *(ref, repository)* pair and presume that pair is settled. It is not — it is established
+  by a search, a path out of a manifest, and an assumption that a ref names one repository —
+  and that presumption produced four separate defects before it was written down. So it has
+  its own contract:
+
+  - **A binding names the repository; an unbound ref must be unambiguous.** `<repo>=<ref>`
+    is legal on **any** feature now, sliced or not. Without one, the ref is searched across
+    the nearby repositories and must resolve in exactly **one**; two or more is a
+    **REFUSED** ambiguous claim, naming both remedies (pass the immutable commit id, or
+    bind it). Never "take the first": the harness dir and its parent are searched *before*
+    the children, so the first hit is the umbrella's own bookkeeping repository — the one
+    repository that never holds feature work. Measured: `--evidence main` on an umbrella
+    recorded `{"verified": "ancestor", "repo": "umb"}` for a feature whose work is in a
+    child. This is a row-3-style refusal (a malformed claim, with a legal remedy), not a
+    row-8 one, so it cannot reject merged work.
+  - **A repository's identity is its `realpath`**, kept beside the lexical path. `../alpha`
+    reads identically before and after the symlink is retargeted while the repository
+    underneath changes; keeping both catches the manifest being rewritten *and* the link
+    moving. Two candidates are the *same* repository when their common git dir matches, so
+    linked worktrees do not read as ambiguity. What this does **not** cover, deliberately:
+    a repository replaced in place. The fingerprint is a coherence check against concurrent
+    harness activity over a sub-second window, not a defence against a checkout being
+    swapped under a running process; hashing the base tip in would abort whenever anyone
+    else's merge advanced the default branch, and a guard that aborts routinely stops being
+    read.
+  - **The single-repo path carries the same discipline.** It did not: only sliced features
+    had a fingerprint. It now records the chosen repository *and* the candidate set that
+    made the choice unambiguous, so a repository appearing beside the board between the
+    plan and the write aborts instead of silently changing what the claim meant.
+
+  **Where a repository lives is the manifest's answer**, resolved against the manifest
+  file's own directory — the shipped example uses siblings (`../viernes-bff`), and nothing
+  requires a key to equal a directory name. **What an object id looks like is git's answer**:
+  every non-`none:` ref is handed to `git rev-parse --verify <ref>^{commit}`, so a sha of any
+  width, a tag and a branch all resolve and no hand-written pattern can exclude the next
+  thing git learns. Because a branch **moves**, the record keeps both `ref` (what you
+  claimed, verbatim) and `commit` (the immutable id it resolved to, which is what ancestry
+  was computed on and what a re-audit re-checks); the validators require `commit` wherever
+  `verified` is `ancestor`.
+
+  All of it runs **before** the board lock is taken, with a shape fingerprint re-validated
+  inside it — the probes are network calls, and holding the sole write lock across them
+  starves concurrent writers out of their own transitions.
 
   **Every feature, sliced or not.** A sliced feature *looks* attested — the schema refuses
   `done` unless every slice is `done` **and** `merged` — but **nothing in the harness ever
@@ -174,11 +253,16 @@ Orchestrator's exclusive ownership of state writes.
 
   What the helper does with the value:
   - **`none:<why>`** records `verified: "declared"` — work with no commit at all (a console
-    action, a supersession). The reason after the colon is required.
-  - **anything else** (a sha, a PR URL, a tag) is transcribed verbatim and recorded
-    `verified: "unchecked"`, with a warning: nothing was proved. It is deliberately not
-    classified further — "does this look like a commit id?" is a question only the code that
-    resolves objects can answer, and that code does not exist here yet.
+    action, a supersession). The reason after the colon is required. This is row 1, and it is
+    the only value that reaches a verdict without git being consulted at all.
+  - **anything else** (a sha, a tag, a branch, a PR URL) goes through the decision table
+    above — it is **resolved and checked**, not transcribed. Which row it lands on is the
+    whole answer: `ancestor` only from row 7, **REFUSED** on rows 3 and 8, `unchecked` on the
+    rest. Do not read "accepted" as "proved" or "not `ancestor`" as "rejected"; read the row.
+  - A record is never *partly* proved. `verified: "ancestor"` names the `commit` ancestry ran
+    on, the `repo` it ran in and the `base` it ran against, and all three validators refuse
+    the value without them — a claim missing any of them cannot be re-checked by anybody,
+    which is the defect this exists to remove rather than a milder version of it.
   - `--evidence` on any **non-`done`** transition is **REFUSED**: the record means one thing.
 
   **`set_status` does the syncing itself.** A feature transition rewrites the `status:` in

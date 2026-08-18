@@ -193,8 +193,10 @@ _hp=$!
 until [ -f "$T/held.flag" ]; do sleep 0.05; done
 _start="$(python3 -c 'import time;print(time.time())')"
 # E99-F102: pass evidence that resolves cleanly, so the ACQUISITION is the only thing
-# left that can fail. Without it this case would pass only because the refusal happens to
-# sit behind the lock today — an ordering the verification follow-up has to change.
+# left that can fail. Without it this case would pass only because of where the refusal
+# sits relative to the lock — and E99-F129 moved evidence resolution OUT of the locked
+# section (it makes network calls; holding the sole write lock across them starves every
+# concurrent writer), so that ordering has already changed once.
 if HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 done \
      --evidence "none: lock-timeout fixture, no work to land" --timeout 1 2>"$T/terr.txt"; then
   kill "$_hp" 2>/dev/null || true

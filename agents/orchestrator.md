@@ -318,11 +318,14 @@ verifies them (E09-F02 carries `merged: true` on a slice whose own `pr` is a clo
 unmerged PR), so it must satisfy the slice invariant **and** carry `--evidence <repo>=<ref>`
 once per slice repository.
 
-⚠️ **The reference is recorded, not verified.** This version runs no git and checks
-nothing: every ref lands as `verified: "unchecked"` (or `"declared"`), and the helper says
-so. Do not read a `landed` record as proof that the work merged — read it as the pointer
-that makes checking possible. Full contract in `store/local.md` (`set_status`) and
-`docs/WORKFLOW.md`.
+**The reference is CHECKED.** The helper resolves it with git and tests it against the
+repository's default branch, so a ref that is provably not merged is **REFUSED** and the
+board is left byte-identical — which is the other reason step (3) above matters: run it
+before the merge and the check will (correctly) reject you. Where the check is impossible —
+the object is not here, no default branch can be determined, the remote cannot be asked —
+the record degrades to `verified: "unchecked"` with a warning and the write proceeds; only
+two situations refuse, and both are provably-wrong claims. The full decision table is in
+`store/local.md` (`set_status`) and `docs/WORKFLOW.md`.
 
 ### Which Builder — ask the tool, do not decide (E17-F03)
 

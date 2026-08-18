@@ -815,6 +815,31 @@ def resolve(ref, repo_name, hdir):
                     witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand),
                     detail="no repository named %r is visible near %s" % (repo_name, hdir),
                 )
+            # A BINDING names a repository; with no manifest to say WHERE that is, the name is
+            # matched against directory basenames — and a basename is not unique. The harness
+            # parent and a nested child can both be called `foo` (`/work/foo` and
+            # `/work/foo/foo`), and taking the first would prove an unrelated `main` while the
+            # intended repository's work sat unmerged. That is I1 exactly, and the check below
+            # skipped it because it only ever ran for UNBOUND requests: a binding was assumed
+            # to have removed the ambiguity, when here it has only renamed it.
+            #
+            # Refuse instead — the row-3 kind of refusal, malformed and with a legal remedy
+            # (declare the repository in a manifest, which is what says where it is).
+            if len(dirs) > 1:
+                _distinct = []
+                for _d in dirs:
+                    if not any(same_repository(_d, _k) for _k in _distinct):
+                        _distinct.append(_d)
+                if len(_distinct) > 1:
+                    return Resolution(
+                        AMBIGUOUS, repo=repo_name, binding=repo_name, manifest_state=state,
+                        witness=_capture(AMBIGUOUS, repo_name, None, state, mapping, cand),
+                        detail="%r names %d different repositories near %s (%s) and no "
+                               "manifest says which one is meant"
+                               % (repo_name, len(_distinct), hdir,
+                                  ", ".join(_distinct)),
+                    )
+                dirs = _distinct
     else:
         cand = tuple(candidates(hdir, pairs=True))
         dirs = [lex for lex, _real in cand]
