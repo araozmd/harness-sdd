@@ -802,8 +802,45 @@ gen_body_stub() {
     printf '(a lone clone, a CI job, a PR reviewer'"'"'s tree). That is a supported state, not a\n'
     printf 'broken one: `.harness/init.sh`, this repository'"'"'s verification gate and its PR loop\n'
     printf 'all still work here — only the prose body is remote. To materialise a full local\n'
-    printf 'copy, run the harness installer against this repository.\n'
+    printf 'copy, run the harness installer against this repository with `--standalone`.\n'
   } > "$_gbs_dest"
+}
+
+# body_link_travels <link-path> <mirror-root> — true when the SYMLINK at <link-path> still
+# MEANS THE SAME THING once the tree it sits in is moved somewhere else. E24-F04 R2.
+#
+# A thin tier is `cp -R`'d from the UMBRELLA's body and lands in the CHILD, so every link in
+# it is re-read from a different directory. A RELATIVE target is resolved from the link's own
+# directory, so it travels intact exactly while it stays INSIDE the tree being moved, and an
+# ABSOLUTE one names the umbrella's own filesystem from the child. `<mirror-root>` is the
+# staging root, which mirrors `$H`'s layout entry for entry — so "resolves inside the staging
+# root" is the same statement as "resolves inside the child's harness dir" once it is swapped
+# in, which is the property that has to hold.
+#
+# RESOLVED BY THE FILESYSTEM (`cd` + `pwd -P`), never by lexical `..` arithmetic: a `..`
+# stripped from a string is the wrong answer whenever an intervening component is itself a
+# link, and this installer has already paid four blocking findings for re-deriving path
+# semantics in POSIX sh instead of asking the tool.
+#
+# FAIL CLOSED — anything unreadable, unresolvable or absolute answers "does not travel", and
+# the caller's response to that is to write an ordinary pointer stub, which is always
+# readable. There is no destructive branch on either side of this predicate.
+body_link_travels() {
+  _blt_l="$1"; _blt_root="$2"
+  _blt_t="$(readlink "$_blt_l" 2>/dev/null)" || return 1
+  [ -n "$_blt_t" ] || return 1
+  case "$_blt_t" in /*) return 1 ;; esac
+  _blt_rp="$( CDPATH= cd -- "$_blt_root" 2>/dev/null && pwd -P )" || _blt_rp=''
+  [ -n "$_blt_rp" ] || return 1
+  # The link's own directory, then the target's — never the target itself, which is allowed
+  # to be absent (`docs/dangling -> no-such-target` is a shape the full copy also produces).
+  _blt_dp="$( CDPATH= cd -- "$(dirname -- "$_blt_l")" 2>/dev/null \
+    && CDPATH= cd -- "$(dirname -- "$_blt_t")" 2>/dev/null && pwd -P )" || _blt_dp=''
+  [ -n "$_blt_dp" ] || return 1
+  case "$_blt_dp" in
+    "$_blt_rp"|"$_blt_rp"/*) return 0 ;;
+  esac
+  return 1
 }
 
 # _ptb_relpath <abs-path> — the HARNESS-DIR-RELATIVE form of a path that `diff` or `find`
@@ -812,17 +849,78 @@ gen_body_stub() {
 # $_umb_body the same way). It is ONE function because R3's "name every differing path" has
 # to mean the same thing for both producers of blocker paths — the symlink sweep and the
 # diff parser — and two copies of this `case` would be free to diverge.
+#
+# IT STRIPS `$_ptb_ra`/`$_ptb_rb`, NOT `$_ptb_h`/`$_ptb_u`: those two name the roots of the
+# trees CURRENTLY BEING COMPARED, which are the child's and the umbrella's for an ordinary
+# entry and the link-free copies of them for an entry that holds symlinks (see _ptb_delink).
+# Both spellings have to yield the same harness-relative path or R3 would name a temporary
+# directory at the operator.
 _ptb_relpath() {
   case "$1" in
-    "$_ptb_h"/*) printf '%s\n' "${1#"$_ptb_h"/}" ;;
-    "$_ptb_u"/*) printf '%s\n' "${1#"$_ptb_u"/}" ;;
-    *)           printf '%s\n' "$_ptb_rel" ;;
+    "$_ptb_ra"/*) printf '%s\n' "${1#"$_ptb_ra"/}" ;;
+    "$_ptb_rb"/*) printf '%s\n' "${1#"$_ptb_rb"/}" ;;
+    *)            printf '%s\n' "$_ptb_rel" ;;
   esac
+}
+
+# _prose_entry_symlinks <path-a> <path-b> — print every symlink AT or UNDER the two paths, one
+# absolute path per line; print nothing when there is none; return NON-ZERO when the sweep
+# could not complete. `find` is used rather than `diff --no-dereference` because the latter is
+# GNU-only from diffutils 3.3 and would make every entry unconvertible on a box without it.
+_prose_entry_symlinks() {
+  find "$1" "$2" -type l 2>/dev/null || return 1
+}
+
+# _ptb_delink — REPOINT the current entry's comparison at LINK-FREE COPIES of its two sides,
+# so `diff -r` can still name every OTHER differing path inside an entry that holds a symlink.
+#
+# WHY A COPY AND NOT A CLEVERER `diff` — and the reason is NOT the one the thinning walk has.
+# MEASURED, because the inherited claim did not survive being checked. Two trees that BOTH
+# hold `docs/self -> .`:
+#   this box's `diff -rq` prints `diff: <path>/self: Directory loop detected` for EACH side,
+#   on stderr, and carries on. It does not hang and it does not run to the resolution limit —
+#   that outcome belongs to the GLOB-AND-RECURSE thinning walk (E24-F03, 264 entries), which
+#   is a different traversal, and repeating it about `diff` would have been folklore.
+#   With the link on ONE side only, `diff -r` does not descend at all: the path is `Only in`.
+# The damage is therefore not a hang, it is the NAMING. Those two lines are not a form this
+# parser recognises, so the fail-closed `*)` arm fires and the whole entry collapses to
+# `docs` — R3's per-path promise degrades to entry granularity, and the operator is told a
+# directory differs instead of which file does. Loop detection is also a courtesy of this
+# implementation, not a POSIX guarantee, so a `diff` without it fares worse.
+# The rule that follows is unchanged — never hand `diff` a tree that holds a link — but the
+# previous shape bought it by skipping `diff` for the WHOLE entry, which silently dropped
+# every other blocker in it, against R3's promise to name each one (Codex #3802057859).
+# Removing the links from a COPY buys the same protection — the tree `diff` walks provably
+# holds none — without giving up the comparison.
+#
+# The links themselves are already named by the sweep, so deleting them from BOTH copies loses
+# no blocker; where a link and a real path collide, the two producers name the same
+# harness-relative path and the caller's `sort -u` merges them into one.
+#
+# Returns NON-ZERO when the copies cannot be built or when a side has nothing left to compare
+# (the entry itself was the link) — the caller then falls back to naming the links alone,
+# which is exactly the old behaviour and is still fail-closed: the entry blocks either way.
+_ptb_delink() {
+  [ -n "$_ptb_tmp" ] || return 1
+  chmod -R u+w "$_ptb_tmp" 2>/dev/null || :
+  rm -rf "$_ptb_tmp/h" "$_ptb_tmp/u" || return 1
+  mkdir -p "$(dirname -- "$_ptb_tmp/h/$_ptb_rel")" "$(dirname -- "$_ptb_tmp/u/$_ptb_rel")" \
+    || return 1
+  # `cp -R` does NOT follow symlinks, so copying a tree that holds `docs/self -> .` copies the
+  # link, never the cycle — the same property stage_tree already relies on.
+  cp -R "$_ptb_a" "$_ptb_tmp/h/$_ptb_rel" || return 1
+  cp -R "$_ptb_b" "$_ptb_tmp/u/$_ptb_rel" || return 1
+  chmod -R u+w "$_ptb_tmp" 2>/dev/null || :
+  find "$_ptb_tmp/h" "$_ptb_tmp/u" -type l -exec rm -f {} + >/dev/null 2>&1 || return 1
+  [ -e "$_ptb_tmp/h/$_ptb_rel" ] && [ -e "$_ptb_tmp/u/$_ptb_rel" ] || return 1
+  _ptb_a="$_ptb_tmp/h/$_ptb_rel"; _ptb_b="$_ptb_tmp/u/$_ptb_rel"
+  _ptb_ra="$_ptb_tmp/h"; _ptb_rb="$_ptb_tmp/u"
 }
 
 # prose_tier_blockers <harness-dir> <umbrella-body-dir> — print one HARNESS-DIR-RELATIVE
 # path per prose-tier path that BLOCKS converting <harness-dir> to the thin layout; print
-# NOTHING when the whole tier is convertible. E24-F04 R1/R2/R3.
+# NOTHING when the whole tier is convertible. E24-F04 R1/R2/R3. This comment documents it and
+# its per-entry helper `_ptb_entry_blockers`, which is defined first and called from its loop.
 #
 # THE REFERENCE IS THE UMBRELLA BODY'S COPY, NOT $SRC. The question a conversion asks is
 # "if I drop this content and point at the umbrella, does the child lose anything?", and the
@@ -879,12 +977,95 @@ _ptb_relpath() {
 # not provably safe stays full-copy), and it is the same boundary `umbrella_body_dir` and R12
 # already draw around a symlinked root and a symlinked roster.
 #
-# THE SWEEP RUNS BEFORE `diff`, AND SHORT-CIRCUITS IT. `diff -r` handed a tree containing
-# `docs/self -> .` descends through it until the OS resolution limit — the same shape
-# tests/test_umbrella.sh already pins for the thinning walk — so an entry known to hold
-# symlinks is never passed to it. The entry is blocked and every link in it is named; other
-# differences inside that same entry are not named in the SAME run, which is the one thing
-# given up here and costs the operator a second run after the link is dealt with.
+# THIS FUNCTION IS NOT WHERE THE LINK RULE IS ENFORCED FOR THE WRITE, and the difference is
+# not an oversight — it is the two questions being different. This one asks "can byte-identity
+# be ESTABLISHED", and a link makes the answer no, so a CONVERSION (which destroys a real
+# body) refuses outright. The WRITER asks "does this link mean the same thing at the child's
+# path", which is answerable, and it answers it in `body_link_travels`, inside `stage_tree` and
+# `stub_files_in` — BELOW every arm, so an arm that never judges anything (the maintenance one)
+# cannot opt out of it. Putting the rule only here is precisely the shape that shipped the
+# dangling link Codex #3802057839 measured.
+#
+# THE SWEEP RUNS BEFORE `diff`, AND REDIRECTS IT RATHER THAN SKIPPING IT. `diff -r` must never
+# be handed a tree that holds a link — what that costs is measured in _ptb_delink, and it is
+# the NAMING rather than a hang — so when the sweep finds one, `diff` is pointed at link-free
+# COPIES of the two sides instead. Both producers then contribute, and the caller merges their
+# output with `sort -u`, because R3 promises the operator EVERY differing path in the tier and
+# an entry holding one link plus one edit has two of them.
+#
+# _ptb_entry_blockers <no args> — ONE entry's blockers, reading $_ptb_rel/$_ptb_h/$_ptb_u from
+# its caller. It is a function so that the caller can pipe the WHOLE entry through one
+# `sort -u`; the merge cannot live inside, because the two producers are a pipeline and a loop
+# that both have to write to the same stream.
+_ptb_entry_blockers() {
+  _ptb_a="$_ptb_h/$_ptb_rel"
+  _ptb_b="$_ptb_u/$_ptb_rel"
+  _ptb_ra="$_ptb_h"; _ptb_rb="$_ptb_u"
+  # A WHOLE entry absent on one side is diff's exit 2 with its message on STDERR, so a
+  # stdout-only capture would name nothing. Answer it here, where the path is in hand.
+  if [ ! -e "$_ptb_a" ] || [ ! -e "$_ptb_b" ]; then
+    printf '%s\n' "$_ptb_rel"
+    return 0
+  fi
+  # THE SYMLINK SWEEP (see the rule above). Fail closed on a `find` that could not complete:
+  # a side this cannot read is not a side whose shape has been established, and the entry
+  # path itself is the honest thing to name.
+  if ! _ptb_lnks="$(_prose_entry_symlinks "$_ptb_a" "$_ptb_b")"; then
+    _ptb_lnks="$_ptb_a"
+  fi
+  if [ -n "$_ptb_lnks" ]; then
+    # When BOTH sides hold the link, the two absolute paths normalise to the SAME
+    # tier-relative one; the caller's `sort -u` is what keeps that one problem one line.
+    printf '%s\n' "$_ptb_lnks" | while IFS= read -r _ptb_line; do
+      [ -n "$_ptb_line" ] || continue
+      _ptb_relpath "$_ptb_line"
+    done
+    # The links are named; now compare what is left of the entry, on copies `diff` can walk.
+    _ptb_delink || return 0
+  fi
+  # CAPTURE INSIDE AN `if`. This script runs under `set -eu` and `diff` exits non-zero
+  # in exactly the case this feature exists for, so a bare `_out="$(diff -rq A B)"` would
+  # kill the run the moment a child differs.
+  if _ptb_out="$(diff -rq "$_ptb_a" "$_ptb_b" 2>&1)"; then
+    return 0
+  fi
+  # THE EXIT STATUS IS THE CONTRACT — the parsed lines only NAME the paths. Without this
+  # line the block decision would be derived entirely from what the loop below manages to
+  # parse, so a non-zero exit that produced NO OUTPUT would yield no blocker at all: the
+  # tier would be reported convertible on the strength of a comparison that said it was
+  # not. That is failing OPEN in a destructive path, and it contradicts the fail-closed
+  # rule stated above. Deliberately not claimed as tested: the system `diff` does not
+  # produce that combination, and a fixture that shimmed one onto PATH would have a WEAK
+  # CONTROL — a shim that always exits non-zero with no output is indistinguishable from
+  # an installer that blocks everything, which is the outcome the fixture would assert.
+  [ -n "$_ptb_out" ] || { printf '%s\n' "$_ptb_rel"; return 0; }
+  printf '%s\n' "$_ptb_out" | while IFS= read -r _ptb_line; do
+    [ -n "$_ptb_line" ] || continue
+    case "$_ptb_line" in
+      # `Only in <dir>: <name>` CARRIES THE DIRECTORY AND THE BASENAME SEPARATELY — the
+      # joined path never appears in it, so this form MUST be normalised or R3's
+      # "name every differing path" is unsatisfiable.
+      "Only in "*": "*)
+        _ptb_d="${_ptb_line#Only in }"
+        _ptb_n="${_ptb_d#*: }"
+        _ptb_d="${_ptb_d%%: *}"
+        _ptb_p="$_ptb_d/$_ptb_n"
+        ;;
+      # `Files <a> and <b> differ` already carries a full path; take the child's side.
+      "Files "*" and "*" differ")
+        _ptb_p="${_ptb_line#Files }"
+        _ptb_p="${_ptb_p%% and *}"
+        ;;
+      # Anything else (a file-vs-directory clash, a diff error) is still a blocker, and
+      # the line still has to carry the path — so synthesise it from the tier entry.
+      *)
+        _ptb_p="$_ptb_a"
+        ;;
+    esac
+    _ptb_relpath "$_ptb_p"
+  done
+}
+
 prose_tier_blockers() {
   _ptb_h="$1"; _ptb_u="$2"
   # Defence in depth, deliberately not claimed as tested: a portable fixture cannot remove
@@ -895,72 +1076,18 @@ prose_tier_blockers() {
     done
     return 0
   fi
+  # Created up front rather than on first use because _ptb_entry_blockers runs in a PIPELINE,
+  # i.e. a subshell, and a temp root it created there could be neither reused nor removed by
+  # this function. An empty value simply means the link-free comparison is unavailable and
+  # every entry falls back to naming its links alone.
+  _ptb_tmp="$(mktemp -d 2>/dev/null || mktemp -d -t harness-ptb)" || _ptb_tmp=''
   for _ptb_rel in $HARNESS_BODY_PROSE; do
-    _ptb_a="$_ptb_h/$_ptb_rel"
-    _ptb_b="$_ptb_u/$_ptb_rel"
-    # A WHOLE entry absent on one side is diff's exit 2 with its message on STDERR, so a
-    # stdout-only capture would name nothing. Answer it here, where the path is in hand.
-    if [ ! -e "$_ptb_a" ] || [ ! -e "$_ptb_b" ]; then
-      printf '%s\n' "$_ptb_rel"
-      continue
-    fi
-    # THE SYMLINK SWEEP (see the rule above). Fail closed on a `find` that could not complete:
-    # a side this cannot read is not a side whose shape has been established, and the entry
-    # path itself is the honest thing to name.
-    if ! _ptb_lnks="$(find "$_ptb_a" "$_ptb_b" -type l 2>/dev/null)"; then
-      _ptb_lnks="$_ptb_a"
-    fi
-    if [ -n "$_ptb_lnks" ]; then
-      # `sort -u`: when BOTH sides hold the link, the two absolute paths normalise to the
-      # SAME tier-relative one, and naming it twice would read as two separate problems.
-      printf '%s\n' "$_ptb_lnks" | while IFS= read -r _ptb_line; do
-        [ -n "$_ptb_line" ] || continue
-        _ptb_relpath "$_ptb_line"
-      done | sort -u
-      continue
-    fi
-    # CAPTURE INSIDE AN `if`. This script runs under `set -eu` and `diff` exits non-zero
-    # in exactly the case this feature exists for, so a bare `_out="$(diff -rq A B)"` would
-    # kill the run the moment a child differs.
-    if _ptb_out="$(diff -rq "$_ptb_a" "$_ptb_b" 2>&1)"; then
-      continue
-    fi
-    # THE EXIT STATUS IS THE CONTRACT — the parsed lines only NAME the paths. Without this
-    # line the block decision would be derived entirely from what the loop below manages to
-    # parse, so a non-zero exit that produced NO OUTPUT would yield no blocker at all: the
-    # tier would be reported convertible on the strength of a comparison that said it was
-    # not. That is failing OPEN in a destructive path, and it contradicts the fail-closed
-    # rule stated above. Deliberately not claimed as tested: the system `diff` does not
-    # produce that combination, and a fixture that shimmed one onto PATH would have a WEAK
-    # CONTROL — a shim that always exits non-zero with no output is indistinguishable from
-    # an installer that blocks everything, which is the outcome the fixture would assert.
-    [ -n "$_ptb_out" ] || { printf '%s\n' "$_ptb_rel"; continue; }
-    printf '%s\n' "$_ptb_out" | while IFS= read -r _ptb_line; do
-      [ -n "$_ptb_line" ] || continue
-      case "$_ptb_line" in
-        # `Only in <dir>: <name>` CARRIES THE DIRECTORY AND THE BASENAME SEPARATELY — the
-        # joined path never appears in it, so this form MUST be normalised or R3's
-        # "name every differing path" is unsatisfiable.
-        "Only in "*": "*)
-          _ptb_d="${_ptb_line#Only in }"
-          _ptb_n="${_ptb_d#*: }"
-          _ptb_d="${_ptb_d%%: *}"
-          _ptb_p="$_ptb_d/$_ptb_n"
-          ;;
-        # `Files <a> and <b> differ` already carries a full path; take the child's side.
-        "Files "*" and "*" differ")
-          _ptb_p="${_ptb_line#Files }"
-          _ptb_p="${_ptb_p%% and *}"
-          ;;
-        # Anything else (a file-vs-directory clash, a diff error) is still a blocker, and
-        # the line still has to carry the path — so synthesise it from the tier entry.
-        *)
-          _ptb_p="$_ptb_a"
-          ;;
-      esac
-      _ptb_relpath "$_ptb_p"
-    done
+    # ONE `sort -u` PER ENTRY, over BOTH producers: the symlink sweep and the `diff` parse
+    # each name paths, a path can legitimately be named by both, and R3 asks for every
+    # differing path exactly once. (Codex #3802057859.)
+    _ptb_entry_blockers | sort -u
   done
+  [ -z "$_ptb_tmp" ] || { chmod -R u+w "$_ptb_tmp" 2>/dev/null || :; rm -rf "$_ptb_tmp"; }
 }
 
 # child_is_full_copy <harness-dir> — true when this target already holds REAL prose-tier
@@ -2575,15 +2702,40 @@ install_one() {
   stub_files_in() {
     _sfi_dir="$1"; _sfi_root="$2"; _sfi_top="$3"
     for _sfi_f in "$_sfi_dir"/* "$_sfi_dir"/.[!.]* "$_sfi_dir"/..?*; do
-      [ -e "$_sfi_f" ] || continue
+      # `-e` DEREFERENCES, so it is false for a symlink whose target is not there — and after
+      # `cp -R` from the umbrella, an escaping link is EXACTLY that: it resolved at the
+      # umbrella and does not resolve here. On its own this guard therefore skipped the one
+      # shape the rule below exists for, and the child kept the dangling link. `-L` is what
+      # makes a link visible to this loop at all; an unmatched glob is neither.
+      { [ -e "$_sfi_f" ] || [ -L "$_sfi_f" ]; } || continue
       if [ -L "$_sfi_f" ]; then
-        # `cp -R` preserves a symlink as a symlink; so must we. Descending instead would
-        # follow it — `[ -d ]` dereferences — and a self- or ancestor-referencing link like
-        # `docs/self -> .` expands into `docs/self/self/...` until the OS resolution limit.
-        # Reproduced end-to-end: 264 entries under a child's docs/ against 8 in a control,
-        # with the cascade still reporting its ordinary status. Stubbing it would be just as
-        # wrong the other way — the write would land on the link's TARGET.
+        # NEVER DESCEND — `[ -d ]` dereferences, and a self- or ancestor-referencing link
+        # like `docs/self -> .` expands into `docs/self/self/...` until the OS resolution
+        # limit. Reproduced end-to-end: 264 entries under a child's docs/ against 8 in a
+        # control, with the cascade still reporting its ordinary status.
         # (Codex r6 P2 #3710311338.)
+        #
+        # THEN THE ONE QUESTION THIS TREE IS ALLOWED TO ASK OF A LINK: does it still mean the
+        # same thing at the child's path? `cp -R` preserves a link as a link, which is right
+        # while it TRAVELS (`docs/self -> .`, `docs/link-to-dir -> nested`) — the child gets
+        # the shape the full copy would give it. It is WRONG the moment the target leaves the
+        # tree: the umbrella's `agents/builder.md -> ../../shared-builder.md` re-resolves from
+        # the CHILD's directory and lands on a path that does not exist, so the child's
+        # builder prompt is a dangling link and the run still prints its ordinary success.
+        # Measured on an already-thin child maintained by an unflagged install
+        # (Codex #3802057839).
+        #
+        # A link that does not travel is REPLACED BY THE ORDINARY STUB — the same stub every
+        # other prose path here gets, naming `<umbrella>/.harness/<rel>`. That is the correct
+        # answer rather than a fallback: the umbrella's own link resolves properly AT the
+        # umbrella, so redirecting the reader there hands them exactly what the umbrella
+        # meant. It is not the "write lands on the TARGET" hazard r6 named either — the link
+        # is UNLINKED first, so the write lands on its own path.
+        if body_link_travels "$_sfi_f" "$_sfi_top"; then
+          continue
+        fi
+        rm -f "$_sfi_f" || return 1
+        gen_body_stub "${_sfi_f#"$_sfi_top"/}" "$_sfi_root" "$_sfi_f" || return 1
         continue
       elif [ -d "$_sfi_f" ]; then
         # SUBSHELL, not a bare call. POSIX sh has no local variables, so a recursive call
@@ -2668,7 +2820,22 @@ install_one() {
     mkdir -p "$(dirname "$_st_new")" || return 1
     cp -R "$_st_src" "$_st_new" || return 1
     if [ -L "$_st_new" ]; then
-      :                       # a symlinked tier root: left exactly as the full path leaves it
+      # A SYMLINKED TIER ROOT gets the SAME rule as a link nested inside one (see
+      # stub_files_in): kept as a link while it travels, replaced by the ordinary stub when it
+      # does not. Stating the rule in ONE predicate and applying it at BOTH places a thin tier
+      # is built is deliberate — the previous shape stated it only where a CONVERSION is
+      # judged, and the maintenance arm, which never judges anything, planted the umbrella's
+      # link in the child unchanged.
+      #
+      # WHAT IT COSTS, stated because it is a real narrowing: an escaping root link to a
+      # DIRECTORY becomes one stub naming the umbrella's path rather than a mirrored subtree,
+      # so the paths beneath it are reached through that one redirect. Mirroring them through
+      # a link that resolves somewhere else in the child is the alternative, and it is the
+      # defect this rule exists to stop.
+      if ! body_link_travels "$_st_new" "$_prose_stg"; then
+        rm -f "$_st_new" || return 1
+        gen_body_stub "$_st_rel" "$_umb_root_cfg" "$_st_new" || return 1
+      fi
     elif [ -d "$_st_new" ]; then
       # `chmod -R` does NOT follow symlinks encountered during traversal — verified against a
       # tree holding a link to an external 0444 file, which kept its mode — so this cannot

@@ -907,8 +907,8 @@ pass "R4 thin_child_standalone_tier_is_local"
 is_stub "$KA/agents/builder.md" || fail "R3: stub has no sentinel on line 1"
 grep -qF '../../.harness/agents/builder.md' "$KA/agents/builder.md" \
   || fail "R3: stub does not name the resolved path of its authoritative copy"
-grep -qiF 'run the harness installer against this repository' "$KA/agents/builder.md" \
-  || fail "R3: stub does not name the recovery step"
+grep -qiF 'run the harness installer against this repository with `--standalone`' "$KA/agents/builder.md" \
+  || fail "R3: stub does not name the recovery step WITH the flag that performs it — an unflagged re-install of a thin child is maintained thin, so the bare instruction cannot materialise the full local copy it promises"
 ( cd "$KA" && grep -qF 'You are the **Builder**' ../../.harness/agents/builder.md ) \
   || fail "R3: the path the stub names does not resolve to the real body"
 pass "R3 stub_contract"
@@ -1660,14 +1660,21 @@ pass "R3 thin_umbrella_side_path_is_named — a path the umbrella holds and the 
 #
 # SINGLE-TARGET, NEVER A CASCADE — a cascade re-installs the coordinator first and would
 # restore the umbrella's regular file, collapsing two of the three shapes.
+#
+# THE FOURTH CHILD, `mixed`, IS A DIFFERENT CLAIM and runs last, after the umbrella has been
+# restored: an entry that holds a symlink AND an ordinary edit must name BOTH. The sweep used
+# to short-circuit `diff` for the whole entry, so the edit went unnamed while the refusal told
+# the operator these were all the differing paths (Codex #3802057859).
 F04G="$AU/f04g"
 f04_fullchild "$F04G" regular
 f04_fullchild "$F04G" linked
 f04_fullchild "$F04G" plain
+f04_fullchild "$F04G" mixed
 UG4="$F04G/.harness"
 KG4R="$F04G/regular/.harness"
 KG4L="$F04G/linked/.harness"
 KG4P="$F04G/plain/.harness"
+KG4M="$F04G/mixed/.harness"
 
 # ── direction 1: the link is the CHILD's, and the umbrella is untouched ─────────────────
 mkdir -p "$F04G/plain/ext-kid"
@@ -1740,7 +1747,140 @@ F04G_CTL="$(CODEX_HOME="$F04G/.ch" HOME="$F04G/.home" \
 printf '%s\n' 2>/dev/null "$F04G_CTL" | grep -q 'CONVERTED to the thin layout' \
   || fail "R2 symlink control: with the umbrella's agents/builder.md restored to a REGULAR file of the very same bytes, 'regular' STILL did not convert — the refusal above is not attributable to the symlink: $F04G_CTL"
 f04_all_stubs_in_tier "$KG4R" "R2 symlink control (the restored-shape run must convert the whole tier)"
-pass "R2/R3 thin_symlink_shapes_block — a child-side link, an umbrella-side link and two links with different targets all block though \`diff\` reads through them (with a same-bytes positive control)"
+
+# ── direction 4 (`mixed`): a link AND an edit in the SAME entry — BOTH are named ────────
+# TWO ENTRIES, each carrying one link and one ordinary difference, because the two link
+# shapes stress different halves of the fix:
+#   agents/  an ESCAPING umbrella-side link (agents/custom.md) + a child-side EDIT
+#            (agents/orchestrator.md)
+#   docs/    a CYCLIC link ON BOTH SIDES (docs/self -> .) + a child-side EDIT
+#            (docs/WORKFLOW.md)
+#
+# `docs/self` IS ON BOTH SIDES DELIBERATELY, and the reason is measured rather than inherited.
+# A one-sided cyclic link makes `diff -r` do nothing special at all — it reports `Only in` and
+# never descends — so a fixture with the link on the umbrella alone cannot tell a
+# cycle-protected comparison from an unprotected one. It is the two-sided shape that reaches
+# the hazard: this box's `diff` then prints `Directory loop detected` per side, which this
+# parser does not recognise, so the fail-closed arm collapses the whole entry to `docs` and
+# R3's per-path naming degrades to entry granularity. That is what a fix which simply deleted
+# the short-circuit would ship, and it is what the `exactly four` assertion below catches.
+printf '%s\n' 'shared house prompt' > "$F04G/ext-umb/custom.md"
+ln -s ../../ext-umb/custom.md "$UG4/agents/custom.md"
+ln -s . "$UG4/docs/self"
+ln -s . "$KG4M/docs/self"
+printf '\nEDITED BY THE OPERATOR\n' >> "$KG4M/agents/orchestrator.md"
+printf '\nEDITED BY THE OPERATOR\n' >> "$KG4M/docs/WORKFLOW.md"
+# PRECONDITIONS: the shapes are what they claim, and the edits are REAL differences that a
+# link-free comparison of those same entries would report on its own.
+[ -L "$UG4/agents/custom.md" ] || fail "R3 mixed control: the umbrella's agents/custom.md is not a symlink"
+for _mc in "$UG4/docs/self" "$KG4M/docs/self"; do
+  [ -L "$_mc" ] || fail "R3 mixed control: $_mc is not a symlink"
+  [ "$(readlink "$_mc")" = "." ] \
+    || fail "R3 mixed control: $_mc does not point at its own directory, so it is not the cyclic shape this case is about"
+done
+# …and the link is on BOTH sides, which is the only arrangement `diff -r` descends into.
+[ -L "$UG4/docs/self" ] && [ -L "$KG4M/docs/self" ] \
+  || fail "R3 mixed control: docs/self is one-sided, so \`diff -r\` reports it as \`Only in\` and never reaches the loop — the cycle claim would be untested"
+diff -q "$KG4M/agents/orchestrator.md" "$UG4/agents/orchestrator.md" >/dev/null 2>&1 \
+  && fail "R3 mixed control: agents/orchestrator.md is still identical to the umbrella's — the second blocker is not in the fixture"
+diff -q "$KG4M/docs/WORKFLOW.md" "$UG4/docs/WORKFLOW.md" >/dev/null 2>&1 \
+  && fail "R3 mixed control: docs/WORKFLOW.md is still identical to the umbrella's — the second blocker is not in the fixture"
+F04G_M="$(CODEX_HOME="$F04G/.ch" HOME="$F04G/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude --thin "$F04G/mixed" 2>&1)" && F04G_RC=0 || F04G_RC=$?
+[ "$F04G_RC" = "0" ] \
+  || fail "R3: --thin on 'mixed' exited $F04G_RC — an entry holding a cyclic symlink on both sides must still be compared, without \`diff\` being walked into it: $F04G_M"
+for _m in agents/custom.md agents/orchestrator.md docs/self docs/WORKFLOW.md; do
+  printf '%s\n' 2>/dev/null "$F04G_M" | grep -qF "differs: $_m" \
+    || fail "R3: 'mixed' did not name $_m — an entry holding a symlink must still have the REST of it compared, or the refusal names some of the differing paths while promising all of them: $F04G_M"
+done
+# EXACTLY FOUR, deduplicated — and this is the assertion that carries the cycle claim. Both
+# producers can legitimately name the same path (`docs/self` is swept from BOTH sides and
+# normalises to one), and naming it twice reads as two separate problems. It is also what a
+# comparison walked into the loop fails: `diff` then emits `Directory loop detected`, the
+# fail-closed arm synthesises the tier entry, and a FIFTH blocker `docs` appears — an entry
+# named where a file was promised. A sweep that simply refused every path it walked would
+# equally "name all four" and would disable the feature rather than guard it.
+F04G_N="$(printf '%s\n' 2>/dev/null "$F04G_M" | grep -o 'differs: [^ ]*' | wc -l | tr -d ' ')"
+[ "$F04G_N" = "4" ] \
+  || fail "R3: $F04G_N blocking path(s) were named for 'mixed', want exactly the four seeded ones: $F04G_M"
+f04_no_stub_in_tier "$KG4M" "R3 ('mixed': the tier must stay whole while anything in it blocks)"
+# The cycle is not merely survivable, it is UNWALKED: the child's docs/ must not have grown
+# `self/self/...`. `find` does not follow symlinks, so it reports the tree as stored.
+F04G_D="$(find "$KG4M/docs" | wc -l | tr -d ' ')"
+[ "$F04G_D" -lt 100 ] \
+  || fail "R3: the child's docs/ holds $F04G_D entries after the run — something walked through the cyclic link"
+pass "R2/R3 thin_symlink_shapes_block — a child-side link, an umbrella-side link and two links with different targets all block though \`diff\` reads through them (with a same-bytes positive control), and an entry holding a link plus an edit names both"
+
+# ── R2/R5: the link rule holds on the arm that JUDGES NOTHING ──────────────────────────
+# thin_maintained_link_does_not_travel
+#
+# The case above is about the CONVERSION, which refuses. This one is about MAINTENANCE, which
+# has nothing to refuse: the child is already thin, the run carries no flag, and it never asks
+# whether anything is pristine — it just rebuilds the tier from the umbrella. So a guard that
+# lives in the pristine check does not run here at all, and the umbrella's link was `cp -R`'d
+# straight into the child, where its relative target resolves from the CHILD's directory.
+# Measured before the fix: an ordinary install printed its usual success line and left
+# `agents/builder.md` a dangling link, i.e. the child's builder prompt unreadable.
+# (Codex #3802057839.)
+#
+# TWO LINKS, ONE RUN, AND THE SECOND IS THE CONTROL. The rule is not "refuse symlinks" — E24-F03
+# requires a thin child to keep the shapes a full copy would give it, `docs/self -> .` among
+# them. It is "a link is reproduced only where it still means the same thing at the child's
+# path". So this fixture seeds one link that CANNOT travel (escapes its entry) and one that
+# CAN (resolves inside its own entry), and asserts opposite outcomes for them in the same run.
+# Without the control, "the child holds no link" would be satisfied by a fix that stubbed every
+# link and silently broke that E24-F03 shape guarantee.
+F04M="$AU/f04m"
+mk_umb "$F04M" kid
+cascade "$F04M" --thin   # exit 3 is the landing audit on an uncommitted child, not a failure
+UM4="$F04M/.harness"
+KM4="$F04M/kid/.harness"
+f04_all_stubs_in_tier "$KM4" "R5 fixture (the child must already be THIN, or this run would take the conversion arm and its guard)"
+
+# The umbrella gains both links AFTER the child is thin — this is the umbrella-side change an
+# ordinary maintenance run then has to carry.
+cp "$UM4/agents/builder.md" "$F04M/shared-builder.md"
+rm -f "$UM4/agents/builder.md"; ln -s ../../shared-builder.md "$UM4/agents/builder.md"
+ln -s . "$UM4/docs/self"
+# PRECONDITIONS: both links RESOLVE where they stand, so nothing here is broken going in and
+# any breakage after the run belongs to the run.
+[ -L "$UM4/agents/builder.md" ] || fail "R5 control: the umbrella's agents/builder.md is not a symlink"
+[ -r "$UM4/agents/builder.md" ] \
+  || fail "R5 control: the umbrella's own link is already dangling AT THE UMBRELLA — the child's would then be broken for a reason that has nothing to do with the copy"
+[ -L "$UM4/docs/self" ] || fail "R5 control: the umbrella's docs/self is not a symlink"
+
+# NO FLAG. --thin would prove less: an already-thin child lands on this same arm either way,
+# and the unflagged run is the one an operator gets from every routine cascade.
+F04M_OUT="$(CODEX_HOME="$F04M/.ch" HOME="$F04M/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude "$F04M/kid" 2>&1)" && F04M_RC=0 || F04M_RC=$?
+[ "$F04M_RC" = "0" ] || fail "R5: the maintenance run exited $F04M_RC: $F04M_OUT"
+printf '%s\n' 2>/dev/null "$F04M_OUT" | grep -q 'resolved from the umbrella' \
+  || fail "R5: the run did not take the MAINTENANCE arm, so this case is measuring some other branch: $F04M_OUT"
+
+# THE ESCAPING LINK: never planted, and what replaces it is the ordinary stub — readable, and
+# naming the umbrella's own path, where the umbrella's link resolves correctly.
+[ -L "$KM4/agents/builder.md" ] \
+  && fail "R5: the maintenance run planted the UMBRELLA's symlink in the child — its target is relative to the umbrella's directory, so in the child it names $(cd "$KM4/agents" 2>/dev/null && pwd -P)/$(readlink "$KM4/agents/builder.md" 2>/dev/null)"
+[ -r "$KM4/agents/builder.md" ] \
+  || fail "R5: the child's agents/builder.md is not readable after an ordinary maintenance run"
+is_stub "$KM4/agents/builder.md" \
+  || fail "R5: the child's agents/builder.md is neither a link nor a stub after the run"
+grep -qF '../../.harness/agents/builder.md' "$KM4/agents/builder.md" \
+  || fail "R5: the stub that replaced the umbrella's link does not name the authoritative path"
+( cd "$KM4" && grep -qF 'You are the **Builder**' ../../.harness/agents/builder.md ) \
+  || fail "R5: the path that stub names does not resolve to the real body THROUGH the umbrella's own link — the redirect only works if the umbrella's link resolves at the umbrella"
+# THE CONTROL, same run, same tier: a link that resolves inside its own entry still travels,
+# so it survives as a link exactly as E24-F03 requires and a full copy would produce.
+[ -L "$KM4/docs/self" ] \
+  || fail "R5: docs/self is no longer a symlink in the child — the rule is 'a link that cannot travel', not 'every link', and stubbing this one breaks the E24-F03 shape guarantee"
+[ "$(readlink "$KM4/docs/self")" = "." ] \
+  || fail "R5: docs/self points at '$(readlink "$KM4/docs/self")' in the child, want '.'"
+# NOTHING IN THE TIER DANGLES — stated over the tree rather than the one seeded path, since a
+# partially reproduced link set is the actual hazard.
+for _ml in $(find "$KM4/AGENTS.md" "$KM4/agents" "$KM4/docs" "$KM4/specs" -type l 2>/dev/null); do
+  [ -e "$_ml" ] || fail "R5: the maintenance run left a dangling link in the child's prose tier: $_ml -> $(readlink "$_ml")"
+done
+pass "R2/R5 thin_maintained_link_does_not_travel — an umbrella link that escapes its entry is stubbed, not planted, on the arm that judges nothing (with an in-entry link kept as a link)"
 
 # ── R1/R2: the CONVERTED TREE is built from the umbrella body, never from $SRC ──────────
 # thin_converted_tree_comes_from_the_umbrella
@@ -2152,6 +2292,17 @@ mk_umb "$F04F" kid
 cascade "$F04F"
 SK="$F04F/kid/.harness"
 f04_all_stubs_in_tier "$SK" "R9 fixture (a fresh cascade child must be thin)"
+# WHAT THE STUB'S OWN RECOVERY TEXT PRESCRIBES, run as written. That text is stamped into
+# EVERY stub in every child, so it is the instruction most operators will actually follow, and
+# an unflagged re-install of a thin child lands on the MAINTENANCE arm and leaves it thin — the
+# promised full local copy never appears. The flag is the reverse operation; the text has to
+# name it. (Codex #3802057876.)
+F04F_PLAIN="$(CODEX_HOME="$F04F/.ch" HOME="$F04F/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude "$F04F/kid" 2>&1)" && F04F_RC=0 || F04F_RC=$?
+[ "$F04F_RC" = "0" ] || fail "R9: an unflagged re-install of a thin child exited $F04F_RC: $F04F_PLAIN"
+f04_all_stubs_in_tier "$SK" "R9 (an UNFLAGGED re-install must leave a thin child THIN — if it materialised the body on its own, the stub's text would need no flag and the assertion below would be measuring nothing)"
+grep -qiF 'with `--standalone`' "$SK/agents/builder.md" \
+  || fail "R9/R3: the stub's recovery text does not name --standalone, and the unflagged run it prescribes has just left this target thin: $(grep -i 'installer against' "$SK/agents/builder.md")"
 # R10's CONTROL: another key in the same section, plus a hand-editable value elsewhere in
 # the file. A writer that "cleared" the key by truncating the umbrella: section, or by
 # rewriting the config from the shipped template, would otherwise pass.
