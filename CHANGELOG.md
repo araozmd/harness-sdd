@@ -38,9 +38,23 @@ The contract it publishes (and now owns):
   comparison, using filesystem calls only so a caller may re-check it while holding a lock.
   Not covered, deliberately: a repository replaced in place.
 - **I3 — the default branch carries its evidence**: `published` (the remote, asked just
-  now), `cached` (`origin/HEAD` — a snapshot of a *former* answer, never confirmed),
-  `declared`, `sole-branch`, `none`. `base_confirmed` folds the rules into one boolean so no
-  caller re-derives them differently.
+  now — name **and** tip), `published-stale-tip` (the remote named this branch, but our copy
+  of it is behind the tip it advertised), `cached` (`origin/HEAD` — a snapshot of a *former*
+  answer, never confirmed), `declared`, `sole-branch`, `none`. `base_confirmed` folds the
+  rules into one boolean so no caller re-derives them differently.
+  Confirming the *name* is not confirming the *tip*: `ls-remote --symref` advertises both in
+  one call, and reading only the symref line left a base marked confirmed while the tracking
+  ref was behind — an ancestry check against that stale copy **refuses work that is already
+  merged**, and a false refusal is worse than a silent pass. The advertised sha comes back as
+  `base_tip`, so a caller that happens to hold that object can answer against the real tip;
+  callers need not distinguish the two `published*` values to stay correct, because
+  `base_confirmed` already says no. The resolver never fetches: a resolver that mutates the
+  repository it inspects is a new hazard, and it would spend a timing budget its caller did
+  not agree to.
+- **Uncertainty is falsy as well as unreadable.** `resolve()` always returns an object, so a
+  default-truthy `Resolution` made `if r:` read as success for `ambiguous` and `unknown`
+  alike — the same slide the raising accessors exist to prevent, one level cheaper.
+  `__bool__`/`__nonzero__` now follow `certain`.
 - **Uncertainty is a value you cannot spend.** `Resolution.directory` and `.base` *raise*
   when the resolution does not have them, so "I could not tell" cannot slide into "yes".
 - **The witness comes back with the resolution**, so a call path cannot omit it.
@@ -52,7 +66,8 @@ was previously attested as being on the default branch. The resolver answers
 while marking it `cached` / **not confirmed**.
 
 New suite `tests/test_repo_resolver.sh` (7 cases, each paired with a control that must come
-out *differently* on the same fixture). It lands **unused by design**: this is the first of
+out *differently* on the same fixture; 4 mutations against the tip and truthiness rules, 4
+killed, 0 survivors). It lands **unused by design**: this is the first of
 two staged changes, and the verification rows consume it next.
 
 ## [0.64.0] — 2026-08-17

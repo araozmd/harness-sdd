@@ -56,7 +56,16 @@
 # I3 — IS THE ANSWER CURRENT, AND BY WHAT EVIDENCE?
 #   A resolution carries HOW it knows what the default branch is, because the answers are
 #   not equally trustworthy and the caller's decision depends on which one it got:
-#     `published`   the remote said so JUST NOW (`ls-remote --symref`).
+#     `published`   the remote said so JUST NOW, name AND tip: `ls-remote --symref`
+#                   advertises both, so both are established or neither is.
+#     `published-stale-tip`
+#                   the remote NAMED this branch as its default, but our copy of it is
+#                   behind the tip the remote advertised. The name is confirmed; the tip
+#                   is not, and an ancestry answer computed against our stale copy would
+#                   REFUSE work that is already merged. Callers need not distinguish this
+#                   from the other unconfirmed sources to stay correct — `base_confirmed`
+#                   already says no — but the value is separate so a warning can say WHY,
+#                   and so a caller that happens to hold `base_tip` can do better.
 #     `cached`      `refs/remotes/origin/HEAD` — a local snapshot of a FORMER answer. A
 #                   remote that moves its default while the old branch still exists leaves
 #                   this pointing at the old one, and a commit reachable only from the
@@ -93,12 +102,14 @@ UNKNOWN = "unknown"            # located, but nothing there resolves the ref
 OUTCOMES = (RESOLVED, AMBIGUOUS, UNDECLARED, UNLOCATABLE, UNKNOWN)
 
 # ── how we know what the default branch is (see I3) ───────────────────────────
-BASE_PUBLISHED = "published"
+BASE_PUBLISHED = "published"                    # name AND tip agree with the remote
+BASE_PUBLISHED_STALE_TIP = "published-stale-tip"  # name confirmed; our copy is behind
 BASE_CACHED = "cached"
 BASE_DECLARED = "declared"
 BASE_SOLE_BRANCH = "sole-branch"
 BASE_NONE = "none"
-BASE_EVIDENCE = (BASE_PUBLISHED, BASE_CACHED, BASE_DECLARED, BASE_SOLE_BRANCH, BASE_NONE)
+BASE_EVIDENCE = (BASE_PUBLISHED, BASE_PUBLISHED_STALE_TIP, BASE_CACHED,
+                 BASE_DECLARED, BASE_SOLE_BRANCH, BASE_NONE)
 
 DECLARED_DEFAULT_CONFIG = "harness.defaultBranch"
 
@@ -184,11 +195,12 @@ class Resolution(object):
 
     __slots__ = ("outcome", "repo", "identity", "detail", "candidates",
                  "manifest_state", "_directory", "_base", "base_evidence",
-                 "has_origin", "commit")
+                 "has_origin", "commit", "base_tip")
 
     def __init__(self, outcome, repo=None, directory=None, identity=None, detail=None,
                  candidates=(), manifest_state="absent", base=None,
-                 base_evidence=BASE_NONE, has_origin=False, commit=None):
+                 base_evidence=BASE_NONE, has_origin=False, commit=None,
+                 base_tip=None):
         assert outcome in OUTCOMES, outcome
         assert base_evidence in BASE_EVIDENCE, base_evidence
         self.outcome = outcome
@@ -202,10 +214,27 @@ class Resolution(object):
         self.base_evidence = base_evidence
         self.has_origin = has_origin
         self.commit = commit
+        # The sha the remote advertised for its default branch, when it was asked. Carried
+        # so a caller holding that object can answer against the REAL tip instead of our
+        # copy of it; `None` when the remote was not, or could not be, asked.
+        self.base_tip = base_tip
 
     @property
     def certain(self):
         return self.outcome == RESOLVED
+
+    def __bool__(self):
+        """`if resolution:` means "did this resolve", never "did I get an object".
+
+        The whole design goal is that a caller cannot slide from "I could not tell" to
+        "yes", and `if r:` is exactly that slide: `resolve()` ALWAYS returns an object, so
+        a default-truthy value would read as success for `ambiguous` and `unknown` alike.
+        `.directory`/`.base` already protect anyone who USES the resolution; this protects
+        the one who only asks whether there is one.
+        """
+        return self.certain
+
+    __nonzero__ = __bool__      # Python 2 name, matching this file's style
 
     @property
     def directory(self):
@@ -238,6 +267,11 @@ class Resolution(object):
             return True
         if self.base_evidence in (BASE_DECLARED, BASE_SOLE_BRANCH):
             return not self.has_origin
+        # `published-stale-tip` deliberately does NOT confirm. The remote named this branch
+        # as its default, but our copy of it is behind what the remote advertised, and an
+        # ancestry answer computed against a stale tip REFUSES work that is already merged.
+        # A false refusal is worse than a silent pass — a guard that rejects merged work
+        # gets switched off — so this degrades and the caller records `unchecked`.
         return False
 
     def witness(self):
@@ -409,7 +443,7 @@ def same_repository(a, b):
 
 
 def default_branch(repo):
-    """(base, evidence, has_origin) — WHAT the default branch is and HOW we know.
+    """(base, evidence, has_origin, advertised_tip) — WHAT it is and HOW WELL we know it.
 
     Order: what the remote says NOW, then the local cache of what it used to say, then
     what this repository can establish about itself. The cache is deliberately NOT first:
@@ -421,33 +455,47 @@ def default_branch(repo):
     has_origin = _git(["remote", "get-url", "origin"], cwd=repo) is not None
 
     if has_origin:
+        # ONE call answers both halves of the question. `--symref` prints the symbolic
+        # target AND the sha the remote advertises for HEAD:
+        #     ref: refs/heads/main<TAB>HEAD
+        #     5f0296f…<TAB>HEAD
+        # Reading only the first line confirms the branch NAME and says nothing about the
+        # TIP, which are different claims: with the name right and our tracking ref behind,
+        # an ancestry check runs against a stale tip and REFUSES work that is already
+        # merged. The sha is free here, so both are established or neither is.
         symref = _git(["ls-remote", "--symref", "origin", "HEAD"], cwd=repo, timeout=10)
+        branch_ref = None
+        advertised = None
         for line in (symref or "").splitlines():
             parts = line.split()
             if len(parts) >= 3 and parts[0] == "ref:" and parts[2] == "HEAD":
-                branch = parts[1]
-                if branch.startswith("refs/heads/"):
-                    ref = "origin/" + branch[len("refs/heads/"):]
-                    if resolve_commit(repo, ref):      # usable only if we have it locally
-                        return ref, BASE_PUBLISHED, has_origin
-                break
+                if parts[1].startswith("refs/heads/"):
+                    branch_ref = "origin/" + parts[1][len("refs/heads/"):]
+            elif len(parts) >= 2 and parts[1] == "HEAD":
+                advertised = parts[0]
+        if branch_ref:
+            local = resolve_commit(repo, branch_ref)   # usable only if we have it locally
+            if local:
+                if advertised and local != advertised:
+                    return branch_ref, BASE_PUBLISHED_STALE_TIP, has_origin, advertised
+                return branch_ref, BASE_PUBLISHED, has_origin, advertised
 
     cached = _git(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], cwd=repo)
     if cached:
         ref = cached[len("refs/remotes/"):] if cached.startswith("refs/remotes/") else cached
         if resolve_commit(repo, ref):
-            return ref, BASE_CACHED, has_origin
+            return ref, BASE_CACHED, has_origin, None
 
     declared = _git(["config", "--get", DECLARED_DEFAULT_CONFIG], cwd=repo)
     if declared and resolve_commit(repo, declared):
-        return declared, BASE_DECLARED, has_origin
+        return declared, BASE_DECLARED, has_origin, None
 
     if not has_origin:
         names = _git_lines(["for-each-ref", "--format=%(refname:short)", "refs/heads/"], cwd=repo)
         if names is not None and len(names) == 1 and resolve_commit(repo, names[0]):
-            return names[0], BASE_SOLE_BRANCH, has_origin
+            return names[0], BASE_SOLE_BRANCH, has_origin, None
 
-    return None, BASE_NONE, has_origin
+    return None, BASE_NONE, has_origin, None
 
 
 # ── the one entry point ───────────────────────────────────────────────────────
@@ -512,7 +560,7 @@ def resolve(ref, repo_name, hdir):
         hits = distinct
 
     chosen = hits[0]
-    base, evidence, has_origin = default_branch(chosen)
+    base, evidence, has_origin, advertised = default_branch(chosen)
     return Resolution(
         RESOLVED,
         repo=repo_name or os.path.basename(os.path.realpath(chosen)),
@@ -521,7 +569,7 @@ def resolve(ref, repo_name, hdir):
         manifest_state=state,
         candidates=tuple(dirs) if repo_name is None else (),
         base=base, base_evidence=evidence, has_origin=has_origin,
-        commit=resolve_commit(chosen, ref),
+        base_tip=advertised, commit=resolve_commit(chosen, ref),
     )
 
 

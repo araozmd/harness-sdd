@@ -237,6 +237,36 @@ ask "$OLD_ONLY" - "$CR/.harness" "r.base + ' ' + r.base_evidence + ' ' + str(r.b
 ask "$CHILD_MAIN" - "$HD" "r.base + ' ' + r.base_evidence + ' ' + str(r.base_confirmed)"
 [ "$ASK_OUT" = "main sole-branch True" ] \
   || fail "C5 control: a remoteless single-branch repository answered '$ASK_OUT' — with no remote to disagree, its only branch is confirmed"
+# ...and `published` must confirm the TIP, not just the NAME. `ls-remote --symref` returns
+# both in one call; reading only the symref line confirms which branch is the default and
+# says nothing about whether our copy of it is current. With the name right and the
+# tracking ref behind, an ancestry check runs against a stale tip and REFUSES work that is
+# already merged — a false refusal, which the governing asymmetry ranks worse than a silent
+# pass. Measured before the split: evidence `published`, confirmed True, tracking ref behind.
+mkbare tipremote.git main
+TC="$T/tipclone"
+mkrepo "$TC"
+( cd "$TC" && git_q remote add origin "$T/tipremote.git" && git_q push origin main )
+TIP_OLD="$(cd "$TC" && git rev-parse main)"
+( cd "$T" && git clone -q "$T/tipremote.git" tipother )
+( cd "$T/tipother" && : > later.txt && git_q add -A && git_q commit -m "merged by someone else" && git_q push origin main )
+TIP_NEW="$(cd "$T/tipother" && git rev-parse HEAD)"
+[ "$TIP_OLD" = "$TIP_NEW" ] && fail "C5 setup: the remote did not advance, so there is no stale tip"
+[ "$(cd "$TC" && git rev-parse origin/main)" = "$TIP_OLD" ] \
+  || fail "C5 setup: the local tracking ref already followed the remote, so it is not stale"
+mkdir -p "$TC/.harness"
+ask "$TIP_OLD" - "$TC/.harness" "r.base + ' ' + r.base_evidence + ' ' + str(r.base_confirmed)"
+[ "$ASK_OUT" = "origin/main published-stale-tip False" ] \
+  || fail "C5: the remote NAMED this branch but our copy is behind its advertised tip, and the resolver answered '$ASK_OUT' — confirming the name while the tip is stale lets a caller refuse work that is already merged"
+ask "$TIP_OLD" - "$TC/.harness" "r.base_tip"
+[ "$ASK_OUT" = "$TIP_NEW" ] \
+  || fail "C5: the advertised tip was not carried back (got $ASK_OUT) — it comes free in the same call, and a caller holding that object can answer against the REAL tip"
+# CONTROL: fetch, and the SAME repository on the SAME remote confirms — so the answer above
+# is about the tip being stale, not about this fixture being unconfirmable.
+( cd "$TC" && git_q fetch origin )
+ask "$TIP_NEW" - "$TC/.harness" "r.base + ' ' + r.base_evidence + ' ' + str(r.base_confirmed)"
+[ "$ASK_OUT" = "origin/main published True" ] \
+  || fail "C5 control: after fetching, the name AND tip agree with the remote and the base must be confirmed (got $ASK_OUT)"
 pass "E99-F129c C5 the_default_branch_carries_its_own_evidence"
 
 # ── C6: uncertainty is a value you cannot spend ───────────────────────────────────────
@@ -261,6 +291,17 @@ except rr.Uncertain:
 PY
 grep -q "^directory: raised" "$T/c6.out" || fail "C6: a caller could read a repository off a resolution that never found one — 'I could not tell' must not be spendable as 'yes': $(cat "$T/c6.out")"
 grep -q "^base: raised" "$T/c6.out" || fail "C6: a caller could read a base that was never determined: $(cat "$T/c6.out")"
+# ...including the cheapest question of all. `resolve()` ALWAYS returns an object, so a
+# default-truthy value makes `if r:` read as success for `ambiguous` and `unknown` alike —
+# the exact slide from "I could not tell" to "yes" this module exists to prevent.
+ask "main" - "$HD" "str(bool(r))"
+[ "$ASK_OUT" = "False" ] || fail "C6: an AMBIGUOUS resolution is truthy, so `if r:` reads uncertainty as success"
+ask "nonesuch" child "$HD" "str(bool(r))"
+[ "$ASK_OUT" = "False" ] || fail "C6: an UNKNOWN resolution is truthy, so `if r:` reads uncertainty as success"
+# CONTROL: a resolution that DID resolve is truthy — otherwise the two assertions above
+# would hold against an object that is simply always falsy.
+ask "$CHILD_MAIN" - "$HD" "str(bool(r))"
+[ "$ASK_OUT" = "True" ] || fail "C6 control: a RESOLVED resolution is falsy, so truthiness tracks nothing"
 pass "E99-F129c C6 uncertainty_is_a_value_you_cannot_spend"
 
 # ── C7: the witness comes back WITH the resolution ────────────────────────────────────
