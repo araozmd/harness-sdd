@@ -2577,20 +2577,16 @@ install_one() {
   _prose_stg="$H/.harness-prose-staging.$$"
   _prose_old="$H/.harness-prose-replaced.$$"
 
-  # stage_tree <relpath> <umbrella-root> <source-root> — build ONE prose-tier path's
-  # FINISHED replacement under $_prose_stg, preserving the SOURCE's shape so every path a
-  # consumer opens still exists. THE DESTINATION IS NOT TOUCHED — not written, not removed,
-  # not even read — which is what makes a staging failure a no-op on the child.
+  # stage_tree <relpath> — build ONE prose-tier path's FINISHED replacement under
+  # $_prose_stg, preserving the AUTHORITY's shape so every path a consumer opens still
+  # exists. THE DESTINATION IS NOT TOUCHED — not written, not removed, not even read —
+  # which is what makes a staging failure a no-op on the child.
   #
   # It RETURNS non-zero where it used to `die`: the caller holds the other stages and has
   # to clean them up, and an `exit` from here would leave them behind inside `.harness`.
   #
-  # <source-root> IS A PARAMETER, NOT `$SRC`, because the two callers do not answer to the
-  # same authority. Materialising a fresh thin child has only one candidate shape — this
-  # installer's `$SRC`. CONVERTING an existing child has two, and they are not the same
-  # tree: the conversion's pristine check is made against the UMBRELLA BODY, so the write
-  # has to be as well or the child is judged on one tree and rebuilt from another. See the
-  # call site in branch (3). (Codex r1 P1 #3799465968.)
+  # IT TAKES NO SOURCE ROOT. It reads `$_umb_body` and `$_umb_root_cfg` — THE PROSE
+  # AUTHORITY — directly, and that absence is the point: see the rule above the branch.
   #
   # THE SHAPE IS PRODUCED BY `cp -R`, NOT REIMPLEMENTED. The requirement is literally "the
   # same shape the full-copy path produces", and the full-copy path is `cp -R` — so the
@@ -2613,8 +2609,8 @@ install_one() {
   # closes that categorically, and unlike the shape class it has a single precondition
   # (the copy must be writable) rather than one bug per filesystem feature.
   stage_tree() {
-    _st_rel="$1"; _st_root="$2"; _st_from="$3"
-    _st_src="$_st_from/$_st_rel"; _st_new="$_prose_stg/$_st_rel"
+    _st_rel="$1"
+    _st_src="$_umb_body/$_st_rel"; _st_new="$_prose_stg/$_st_rel"
     if [ ! -e "$_st_src" ]; then echo "❌ install: source missing: $_st_rel" >&2; return 1; fi
     mkdir -p "$(dirname "$_st_new")" || return 1
     cp -R "$_st_src" "$_st_new" || return 1
@@ -2626,10 +2622,10 @@ install_one() {
       # reach outside the copy. A stub is new content anyway; inheriting the source file's
       # read-only bit onto a pointer would only make the next upgrade harder.
       chmod -R u+w "$_st_new" || return 1
-      stub_files_in "$_st_new" "$_st_root" "$_prose_stg" || return 1
+      stub_files_in "$_st_new" "$_umb_root_cfg" "$_prose_stg" || return 1
     else
       rm -f "$_st_new" || return 1
-      gen_body_stub "$_st_rel" "$_st_root" "$_st_new" || return 1
+      gen_body_stub "$_st_rel" "$_umb_root_cfg" "$_st_new" || return 1
     fi
   }
 
@@ -2664,10 +2660,30 @@ install_one() {
     return 0
   }
 
-  # thin_prose_tier <umbrella-root> <source-root> — write the WHOLE prose tier as pointer
-  # stubs, or leave it exactly as it was. THE ONE ENTRY POINT for both thin arms, which is
-  # also what keeps a CONVERTED child byte-indistinguishable from a fresh thin one: the two
-  # differ only in <source-root>.
+  # thin_prose_tier — write the WHOLE prose tier as pointer stubs, or leave it exactly as it
+  # was. THE ONE ENTRY POINT for every thin arm, and IT TAKES NO ARGUMENTS AT ALL: there is
+  # one prose authority (`$_umb_body`, named as `$_umb_root_cfg`), it is resolved once above
+  # the branch, and no caller gets to nominate another. That is also what makes a CONVERTED
+  # child byte-indistinguishable from a fresh thin one — the two arms now run the same
+  # function over the same tree, so the equality is structural rather than a coincidence of
+  # cascade ordering.
+  #
+  # WHERE THE AUTHORITY IS SILENT, SO IS THIS FUNCTION. `$HARNESS_BODY_PROSE` is THIS
+  # installer's list of tier entries, and the umbrella body may be older than this installer
+  # and simply not have one of them yet. Three answers were available and only one is right:
+  #   die         — turns every routine maintenance run against an older umbrella into a hard
+  #                 failure, including the runs that would upgrade it. Fail-closed protects
+  #                 against DESTROYING on an unestablished premise; refusing to write is
+  #                 already that protection, and killing the run adds nothing but a wedge.
+  #   fall back   — re-introduces `$SRC` as a second authority for that entry, and the stub it
+  #     to `$SRC`   would write names a file the umbrella cannot supply: a dangling pointer
+  #                 whose own text then misdiagnoses it as "a checkout separated from its
+  #                 umbrella". This is exactly the defect Codex #3800164980 names.
+  #   SKIP IT     — the entry is left EXACTLY as it was found: an existing stub survives, an
+  #                 absent path stays absent, nothing is deleted and nothing is invented. The
+  #                 run says so on stderr, naming the path, and exits 0.
+  # Skipping does not weaken R2: all-or-nothing is about the entries this run acts on, and an
+  # entry the authority does not hold is not one of them.
   #
   # THE TWO HALVES FAIL DIFFERENTLY, and each is pinned by its own trigger in
   # `test_umbrella.sh::thin_partial_failure_leaves_tier_whole`:
@@ -2686,17 +2702,27 @@ install_one() {
   #
   # The undo list is built most-recent-first, so the rollback runs LIFO.
   thin_prose_tier() {
-    _tpt_root="$1"; _tpt_from="$2"
     rm -rf "$_prose_stg" "$_prose_old"
     mkdir -p "$_prose_stg" "$_prose_old"
+    # THE AUTHORITY DECIDES THE SET OF ENTRIES, not just their contents — and BOTH loops
+    # below walk that same set, or the swap phase would try to move a path the build phase
+    # never staged.
+    _tpt_set=''
     for _tpt_rel in $HARNESS_BODY_PROSE; do
-      if ! stage_tree "$_tpt_rel" "$_tpt_root" "$_tpt_from"; then
+      if [ -e "$_umb_body/$_tpt_rel" ]; then
+        _tpt_set="$_tpt_set $_tpt_rel"
+        continue
+      fi
+      echo "⚠️  the umbrella at $_umb_root_cfg does not hold the prose-tier path '$_tpt_rel' — this run left that path exactly as it found it, because a stub may only name a file the umbrella can supply; upgrade the umbrella and re-run to pick it up" >&2
+    done
+    for _tpt_rel in $_tpt_set; do
+      if ! stage_tree "$_tpt_rel"; then
         rm -rf "$_prose_stg" "$_prose_old"
         die "could not build the thin prose tier ($_tpt_rel) — nothing was replaced, this target keeps the body it had"
       fi
     done
     _tpt_done=''
-    for _tpt_rel in $HARNESS_BODY_PROSE; do
+    for _tpt_rel in $_tpt_set; do
       if prose_swap_in "$_tpt_rel"; then
         _tpt_done="$_tpt_rel $_tpt_done"
         continue
@@ -2717,6 +2743,27 @@ install_one() {
 
   # The PROSE tier: a four-way branch over ONE question — which layout does this target end
   # this run in? (E24-F03 shipped the first two arms; E24-F04 the last two.)
+  #
+  # ── THE PROSE AUTHORITY RULE, stated ONCE for every arm ──────────────────────────────
+  # WHEREVER A THIN PROSE TIER IS BUILT OR REBUILT FOR A TARGET WITH A RESOLVABLE UMBRELLA,
+  # THE UMBRELLA BODY IS THE AUTHORITY — for the pristine COMPARISON, for the WRITE, and for
+  # the SET of entries. `$SRC` is the authority for exactly one thing, the FULL LOCAL COPY
+  # (arms 1 and 4), where there is no umbrella in the answer at all.
+  #
+  # This is stated here rather than on an arm because it was found one arm at a time, three
+  # rounds running, and each per-arm fix left the next arm free to disagree:
+  #   compare   `prose_tier_blockers "$H" "$SRC"`  — a merely STALE child converts and is
+  #             redirected at umbrella content it never held. (r1 local review.)
+  #   write     branch (3) rebuilding from `$SRC`  — a shared path the child and umbrella
+  #             both hold is judged pristine, then DELETED while the run prints CONVERTED.
+  #             (Codex r1 P1 #3799465968.)
+  #   maintain  branch (2) rebuilding from `$SRC`  — the very next ordinary install then
+  #             deletes the stub branch (3) had just created from the umbrella, and
+  #             recreates a `$SRC`-only path as a stub the umbrella cannot resolve.
+  #             Measured on this shape: one `--thin` then one unflagged run, and
+  #             `agents/shared-extra.md` is gone. (Codex r3 P1 #3800164980.)
+  # The rule is now ENFORCED BY SHAPE, not by comment: `thin_prose_tier` takes NO source
+  # argument, so a fifth arm cannot pass a different tree without deleting this design.
   #
   # THE ORDERING IS LOAD-BEARING AND MUST NOT CHANGE. prose_tier_blockers reads the target's
   # ON-DISK prose tier, and §1 has not written to it yet — HARNESS_BODY_LOCAL is copied
@@ -2741,12 +2788,18 @@ install_one() {
     # in arm (3), which is what makes R7 (idempotence) hold by construction: gen_body_stub's
     # text depends only on the body-relative path and the configured umbrella root.
     BODY_LAYOUT=thin
-    # SOURCE ROOT `$SRC`: this arm materialises a thin tier where there was none to judge —
-    # a fresh child, or one already thin — so there is no pristine comparison whose
-    # reference it could disagree with. It also runs on cascades whose umbrella body may be
-    # OLDER than this installer, where stage_tree's `source missing` would turn a routine
-    # maintenance run into a hard failure. Branch (3) is the one with two references.
-    thin_prose_tier "$_umb_root_cfg" "$SRC"
+    # THE SAME AUTHORITY AS BRANCH (3), and it has to be: this arm is where an already-thin
+    # child is MAINTAINED, so it inherits whatever branch (3) built and must not undo it.
+    # The earlier reading — "this arm materialises a tier where there was nothing to judge,
+    # so it has no comparison to disagree with" — stopped being true the moment branch (3)
+    # could produce a stub for an umbrella-only path: this run then meets a tier it did not
+    # write, and rebuilding it from `$SRC` silently deletes exactly that stub.
+    #
+    # The half of that reading which SURVIVES is the older-umbrella worry, and it is
+    # answered per entry inside thin_prose_tier rather than by choosing a second tree: an
+    # entry the umbrella does not hold is skipped and reported, never re-sourced and never
+    # fatal.
+    thin_prose_tier
     ok "prose body resolved from the umbrella at $_umb_root_cfg (stubs; init.sh, store/, tools/ stay local)"
   elif [ -n "$_umb_body" ]; then
     # (3) A FULL-COPY child of a reachable umbrella — the state E24-F03 left alone and this
@@ -2754,9 +2807,8 @@ install_one() {
     # so the preview can never diverge from the action it previews.
     _f04_blockers="$(prose_tier_blockers "$H" "$_umb_body")"
     if [ -z "$_f04_blockers" ] && [ "$THIN_OPT_IN" = 1 ]; then
-      # Converted. thin_prose_tier is REUSED — same function, so the stub text and the
-      # thinning are the fresh-thin child's — but its SOURCE ROOT IS THE UMBRELLA BODY, the
-      # same tree prose_tier_blockers just compared this child against, and NOT `$SRC`.
+      # Converted. thin_prose_tier is REUSED — same function, same tree: the umbrella body,
+      # which is also what prose_tier_blockers just compared this child against.
       #
       # The two references are not interchangeable, and each mismatch was measured on this
       # branch before it was fixed (Codex r1 P1 #3799465968):
@@ -2770,15 +2822,13 @@ install_one() {
       #     checkout separated from its umbrella".
       #
       # This does NOT weaken R1's "a converted child is byte-indistinguishable from a fresh
-      # thin one". The branch is reached only when the child's prose tier is byte-identical
-      # to the umbrella's, so copying from the umbrella reproduces the shape the child
-      # already holds; and a fresh sibling under the same umbrella is materialised from the
-      # `$SRC` that installed that umbrella. The two coincide wherever they can be compared,
-      # and where they cannot, the converted child matches what its stubs point at.
+      # thin one" — it is what MAKES it true. A fresh sibling takes branch (2), which now
+      # runs this same function over this same tree, so the two are equal by construction
+      # instead of by the cascade happening to install the umbrella from `$SRC` first.
       #
       # BODY_LAYOUT=thin is what makes manifest.txt record it (R8).
       BODY_LAYOUT=thin
-      thin_prose_tier "$_umb_root_cfg" "$_umb_body"
+      thin_prose_tier
       ok "child already holds a full body — CONVERTED to the thin layout (--thin): its prose tier now resolves from the umbrella at $_umb_root_cfg"
     else
       for _body_rel in $HARNESS_BODY_PROSE; do copy "$_body_rel"; done
