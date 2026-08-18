@@ -221,4 +221,220 @@ sh "$WORK/t/tools/run-tests.sh" "$WORK/t/tests/test_a.sh" >/dev/null 2>&1 \
 sh "$WORK/t/tools/run-tests.sh" --jobs 0 >/dev/null 2>&1 && fail "R12: --jobs 0 accepted"
 pass "R12 explicit suite list honoured; bad --jobs rejected"
 
+# ── R13-R17: the strict-shell gate (E99-F135) ─────────────────────────────────
+# Every suite declares `#!/bin/sh`, and `sh` is bash on macOS and dash on Debian/Ubuntu.
+# The runner therefore executes the suites under the strictest shell it can probe, parse-
+# checks everything first, and NAMES the shell it used. These assertions are about all
+# three, and about the allowlist failing closed.
+RUN="$WORK/t/tools/run-tests.sh"
+DASH="$(command -v dash 2>/dev/null || true)"
+
+# R13: the summary names the shell — path AND identification — and stays one line.
+# `all N suites passed` alone is ambiguous precisely because `sh` differs per machine.
+out="$(sh "$RUN" --jobs 4 2>&1)" || fail "R13: green run exited non-zero"
+[ "$(echo "$out" | wc -l | tr -d ' ')" -eq 1 ] || fail "R13: the summary is no longer one line: $out"
+echo "$out" | grep -q 'all 2 suites passed' || fail "R13: the summary lost its 'all N suites passed' prefix"
+# The shell must be an absolute PATH, so the reader can check it themselves.
+echo "$out" | grep -q ' (/' || fail "R13: the summary names no absolute shell path: $out"
+# ...and an identification, in brackets, that is either established or honestly absent.
+echo "$out" | grep -qE '\[[^]]+\]' || fail "R13: the summary carries no shell identification: $out"
+pass "R13 the summary names the shell it used (path + identification), in one line"
+
+if [ -z "$DASH" ]; then
+  skip_msg="dash not installed; the strict shell falls back to sh"
+  echo "skip - R14-R16 ($skip_msg)"
+else
+  # R14: a RUNTIME bashism fails the run and NAMES the suite. `[[ ]]` PARSES under dash
+  # and fails only when executed — which is the whole reason a parse gate alone is not
+  # enough. Under bash-as-sh this suite passes, so it is exactly the environment-dependent
+  # green the gate exists to convert into a stated one.
+  printf '#!/bin/sh\n[[ -n "x" ]] && exit 0\nexit 1\n' >"$WORK/t/tests/test_runtime.sh"
+  if out="$(sh "$RUN" --jobs 4 2>&1)"; then
+    fail "R14: a suite using [[ ]] passed — it was not executed under a strict shell"
+  fi
+  echo "$out" | grep -q 'test_runtime.sh' || fail "R14: the runtime-bashism suite was not named: $out"
+  rm -f "$WORK/t/tests/test_runtime.sh"
+  pass "R14 a RUNTIME bashism fails the run and names the suite"
+
+  # R15: a PARSE error is caught by the pre-flight BEFORE anything executes. Proven by
+  # side effect, not by reading the message: a second suite writes a marker when it runs,
+  # and the marker must not exist.
+  printf '#!/bin/sh\nif true; then\n  echo hi\n' >"$WORK/t/tests/test_parse.sh"
+  printf '#!/bin/sh\ntouch "%s"\nexit 0\n' "$WORK/ran.marker" >"$WORK/t/tests/test_marker.sh"
+  rm -f "$WORK/ran.marker"
+  _rc=0; out="$(sh "$RUN" --jobs 4 2>&1)" || _rc=$?
+  [ "$_rc" -eq 3 ] || fail "R15: a parse error did not exit 3 (got $_rc)"
+  echo "$out" | grep -q 'test_parse.sh' || fail "R15: the unparseable suite was not named: $out"
+  [ ! -f "$WORK/ran.marker" ] || fail "R15: suites executed despite the pre-flight failing"
+  pass "R15 the -n pre-flight fails the run before any suite executes"
+
+  # R16: an ALLOWLISTED suite is exempt from EXECUTING under dash — never from parsing
+  # under it. An exemption that also skipped the parse check would be the unnamed skip
+  # this list exists to prevent.
+  printf '# known-broken under dash: test_parse.sh — E99-F999\n' >"$WORK/t/tests/dash-allowlist.txt"
+  rm -f "$WORK/ran.marker"
+  _rc=0; out="$(sh "$RUN" --jobs 4 2>&1)" || _rc=$?
+  [ "$_rc" -eq 3 ] || fail "R16: an allowlisted suite skipped the parse pre-flight (got $_rc)"
+  echo "$out" | grep -q 'test_parse.sh' || fail "R16: the allowlisted unparseable suite was not named: $out"
+  [ ! -f "$WORK/ran.marker" ] || fail "R16: suites executed despite an allowlisted parse failure"
+  rm -f "$WORK/t/tests/test_parse.sh"
+
+  # R16b: and the exemption is never silent — every run names what did not face the gate,
+  # on stderr, AND counts it in the summary on STDOUT. A caller that captures only stdout
+  # must not read "all N suites passed (dash)" when some of those N never faced dash.
+  printf '#!/bin/sh\nexit 0\n' >"$WORK/t/tests/test_parse.sh"
+  out="$(sh "$RUN" --jobs 4 2>&1)" || fail "R16b: the allowlisted green tree exited non-zero"
+  echo "$out" | grep -q 'test_parse.sh' \
+    || fail "R16b: an exempt suite ran without being named — that is an invisible skip: $out"
+  sout="$(sh "$RUN" --jobs 4 2>/dev/null)" || fail "R16b: the allowlisted green tree exited non-zero"
+  echo "$sout" | grep -q '1 exempt' \
+    || fail "R16b: stdout alone does not disclose the exemption: $sout"
+  rm -f "$WORK/t/tests/test_parse.sh" "$WORK/t/tests/test_marker.sh" "$WORK/ran.marker"
+  pass "R16 an allowlisted suite still gets the parse pre-flight, and is named on every run"
+fi
+
+# R17: the allowlist fails CLOSED. An entry that names no issue, or names a suite that
+# does not exist, is a usage error — never a silent exemption.
+printf '# known-broken under dash: test_a.sh\n' >"$WORK/t/tests/dash-allowlist.txt"
+_rc=0; sh "$RUN" --jobs 4 >/dev/null 2>&1 || _rc=$?
+[ "$_rc" -eq 4 ] || fail "R17: an allowlist entry with no issue id was accepted (got $_rc)"
+printf '# known-broken under dash: test_ghost.sh — E99-F999\n' >"$WORK/t/tests/dash-allowlist.txt"
+_rc=0; sh "$RUN" --jobs 4 >/dev/null 2>&1 || _rc=$?
+[ "$_rc" -eq 4 ] || fail "R17: an allowlist entry naming a non-existent suite was accepted (got $_rc)"
+# ...and VALIDATION IS FILE-WIDE, so a subset run catches the stale entry too. Narrowing
+# this to the selection would let the list rot: only a full run would ever complain.
+_rc=0; sh "$RUN" --jobs 4 "$WORK/t/tests/test_a.sh" >/dev/null 2>&1 || _rc=$?
+[ "$_rc" -eq 4 ] \
+  || fail "R17: a stale allowlist entry went unreported on a subset run (got $_rc) — the list can rot"
+rm -f "$WORK/t/tests/dash-allowlist.txt"
+pass "R17 the dash allowlist fails closed: no unnamed and no stale exemptions"
+
+# ── R17b: the exemption set is the allowlist INTERSECTED WITH THE SELECTION ───
+# Applied file-wide, the warning does not merely miscount — it asserts "ran under
+# /bin/sh" about a suite that never ran at all, in the one line this feature exists to
+# make trustworthy. Asserted on the ABSENCE OF THE SUITE'S NAME, not on the number: a
+# count-based guard passes for the wrong reason too easily.
+printf '# known-broken under dash: test_b.sh — E99-F999\n' >"$WORK/t/tests/dash-allowlist.txt"
+out="$(sh "$RUN" --jobs 4 "$WORK/t/tests/test_a.sh" 2>&1)" \
+  || fail "R17b: selecting one suite with another allowlisted exited non-zero"
+echo "$out" | grep -q 'test_b.sh' \
+  && fail "R17b: reported an UNSELECTED suite as exempt — it never ran: $out"
+echo "$out" | grep -q 'exempt' \
+  && fail "R17b: claimed an exemption on a run where no selected suite was exempt: $out"
+# Positive control — without it, the two assertions above would also pass if the warning
+# had simply been broken or removed. A selected exempt suite must still be named AND
+# counted, so the silence above is specifically about the intersection.
+out="$(sh "$RUN" --jobs 4 "$WORK/t/tests/test_b.sh" 2>&1)" \
+  || fail "R17b control: selecting the allowlisted suite exited non-zero"
+echo "$out" | grep -q 'test_b.sh' \
+  || fail "R17b control: a SELECTED exempt suite was not named — the warning is broken: $out"
+echo "$out" | grep -q '1 exempt' \
+  || fail "R17b control: a SELECTED exempt suite was not counted: $out"
+rm -f "$WORK/t/tests/dash-allowlist.txt"
+pass "R17b exemptions follow the selection; validation stays file-wide"
+
+# ── R17c: an exemption must go INTO a genuinely different interpreter ─────────
+# Falling back to the host `sh` unconditionally was wrong in both directions, and the
+# second one is the case that matters:
+#   * macOS with no dash → the strict shell IS /bin/sh, so the warning read
+#     "ran under /bin/sh, not /bin/sh" — a self-contradiction printed as a finding.
+#   * Debian/Ubuntu → /bin/sh IS dash, so an allowlisted, genuinely dash-incompatible
+#     suite still ran under dash and still failed while being reported exempt. The one
+#     host where the exemption exists to help is the one where it did nothing.
+# Assert the INVARIANT rather than a specific shell, because which shells exist is a
+# property of the host and this must hold on all of them: the warning may never name the
+# same interpreter on both sides of "ran under X, not Y".
+#
+# ⚠️ THIS TESTS THE RULE, NOT THIS HOST — and the first version of it did the opposite.
+# Asserting the invariant against a plain run passes here for an irrelevant reason: on
+# macOS `/bin/sh` is bash, so even the WRONG selection yields a fallback that differs from
+# dash, and the mutation survived. The defect only manifests where the host `sh` IS the
+# strict shell, so the test has to CREATE that condition rather than hope for it.
+#
+# So: drive the selection block itself under a PATH whose only shell is dash. `sh` then
+# resolves to the strict shell, and a correct selector must refuse it — either finding a
+# genuinely more permissive shell or reporting none.
+_sel="$WORK/sel.sh"
+sed -n '/^_realsh() {/,/^# .fallback_sh. may legitimately/p' "$RUN" >"$_sel" \
+  || fail "R17c: could not extract the fallback-selection block from run-tests.sh"
+[ -s "$_sel" ] || fail "R17c: the extracted fallback-selection block is empty — the anchors moved"
+_onlydash="$WORK/onlydash"
+mkdir -p "$_onlydash"
+_dash="$(command -v dash 2>/dev/null)" || _dash=""
+if [ -n "$_dash" ]; then
+  ln -sf "$_dash" "$_onlydash/sh"
+  {
+    echo 'strict_sh="$(command -v sh)"'
+    cat "$_sel"
+    echo 'printf "%s|%s\n" "$strict_sh" "$fallback_sh"'
+  } >"$WORK/probe.sh"
+  _got="$(PATH="$_onlydash:/usr/bin:/bin/NO_SHELLS" "$_dash" "$WORK/probe.sh" 2>/dev/null)" || _got=""
+  _s="${_got%%|*}"; _f="${_got##*|}"
+  [ -n "$_s" ] || fail "R17c: the selection probe produced no strict shell"
+  [ "$_f" = "$_s" ] \
+    && fail "R17c: on a host whose only shell IS the strict one, the selector still chose it as the FALLBACK ($_f) — an allowlisted suite would run under the very shell it is exempt from, while being reported exempt"
+  if [ -n "$_f" ]; then
+    _fr="$(readlink -f "$_f" 2>/dev/null || printf '%s' "$_f")"
+    _sr="$(readlink -f "$_s" 2>/dev/null || printf '%s' "$_s")"
+    [ "$_fr" = "$_sr" ] \
+      && fail "R17c: the fallback resolves to the SAME interpreter as the strict shell ($_fr) under a different name — comparing spellings is not comparing interpreters"
+  fi
+fi
+rm -f "$WORK/t/tests/dash-allowlist.txt"
+pass "R17c an exemption goes into a genuinely different shell, or is reported unhonourable"
+
+# ── R17d: the selected shell path must be ABSOLUTE before anything embeds it ──
+# `command -v` reports the hit as PATH spelled it, so a PATH with a relative component
+# (`PATH=relbin:/usr/bin`) yields `relbin/dash`. The probes still pass — they run from the
+# caller's directory — but that string is embedded in the generated `sh` shim and handed to
+# children, and a suite doing `cd /` before invoking `sh` then fails rc 127 while being
+# perfectly valid. A green summary would name a shell the children could not reach.
+# Tested against the RULE with a genuinely relative input, since a normal PATH makes this
+# assertion vacuous — the same trap R17c fell into on its first draft.
+#
+# ⚠️ And the SECOND draft fell into the next one along: it extracted `_abs()` alone and
+# exercised the helper, which keeps passing when the helper is perfectly correct and simply
+# never CALLED. Deleting the call sites left this green. That is the same
+# proxy-instead-of-property defect as R9d's path-mention check in test_change_size.sh — a
+# guard that verifies a component rather than the behaviour that component exists to produce.
+# So extract the WHOLE selection region, helper and loop together, and assert the value that
+# actually gets stored.
+_absf="$WORK/abs.sh"
+sed -n '/^_abs() {/,/^\[ -n "\$strict_sh" \] || strict_sh=/p' "$RUN" >"$_absf" \
+  || fail "R17d: could not extract the shell-selection region from run-tests.sh"
+[ -s "$_absf" ] || fail "R17d: the extracted selection region is empty — the anchors moved"
+grep -q '^strict_sh=""' "$_absf" \
+  || fail "R17d: the extracted region does not contain the strict-shell loop — the anchors moved"
+_rb="$WORK/relbin"
+mkdir -p "$_rb"
+_dash2="$(command -v dash 2>/dev/null)" || _dash2=""
+if [ -n "$_dash2" ]; then
+  ln -sf "$_dash2" "$_rb/dash"
+  {
+    cat "$_absf"
+    echo 'printf "%s|%s\n" "$(command -v dash)" "$strict_sh"'
+  } >"$WORK/absprobe.sh"
+  _out2="$(cd "$WORK" && PATH="relbin:/usr/bin:/bin" "$_dash2" "$WORK/absprobe.sh" 2>/dev/null)" || _out2=""
+  [ -n "$_out2" ] || fail "R17d: the selection probe produced no output"
+  _raw="${_out2%%|*}"; _res="${_out2##*|}"
+  case "$_raw" in
+    /*) : ;;   # this host resolved it absolutely already; nothing to prove here
+    *)  case "$_res" in
+          /*) : ;;
+          *)  fail "R17d: a relative PATH hit ($_raw) was STORED as-is in strict_sh ($_res) — that string is embedded in the sh shim, so any suite that changes directory before invoking sh gets rc 127 from a shell that is present and working" ;;
+        esac ;;
+  esac
+fi
+pass "R17d a relative PATH hit is made absolute before it is stored or embedded"
+
+# R18: the shipped allowlist is EMPTY of entries. Every suite in this repo runs under the
+# strict shell today; if that ever changes, the entry — and this assertion — must be
+# changed deliberately, with an issue id attached.
+if [ -f "$SRC/tests/dash-allowlist.txt" ]; then
+  _entries="$(grep -c '^# known-broken under dash:' "$SRC/tests/dash-allowlist.txt" || true)"
+  [ "$_entries" = "0" ] \
+    || fail "R18: the shipped dash allowlist carries $_entries entr(y|ies) — every one is a suite not facing the gate"
+fi
+pass "R18 the shipped dash allowlist is empty"
+
 echo "test_pr_gate.sh: all assertions passed"
