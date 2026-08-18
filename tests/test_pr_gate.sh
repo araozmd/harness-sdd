@@ -383,6 +383,50 @@ fi
 rm -f "$WORK/t/tests/dash-allowlist.txt"
 pass "R17c an exemption goes into a genuinely different shell, or is reported unhonourable"
 
+# ── R17d: the selected shell path must be ABSOLUTE before anything embeds it ──
+# `command -v` reports the hit as PATH spelled it, so a PATH with a relative component
+# (`PATH=relbin:/usr/bin`) yields `relbin/dash`. The probes still pass — they run from the
+# caller's directory — but that string is embedded in the generated `sh` shim and handed to
+# children, and a suite doing `cd /` before invoking `sh` then fails rc 127 while being
+# perfectly valid. A green summary would name a shell the children could not reach.
+# Tested against the RULE with a genuinely relative input, since a normal PATH makes this
+# assertion vacuous — the same trap R17c fell into on its first draft.
+#
+# ⚠️ And the SECOND draft fell into the next one along: it extracted `_abs()` alone and
+# exercised the helper, which keeps passing when the helper is perfectly correct and simply
+# never CALLED. Deleting the call sites left this green. That is the same
+# proxy-instead-of-property defect as R9d's path-mention check in test_change_size.sh — a
+# guard that verifies a component rather than the behaviour that component exists to produce.
+# So extract the WHOLE selection region, helper and loop together, and assert the value that
+# actually gets stored.
+_absf="$WORK/abs.sh"
+sed -n '/^_abs() {/,/^\[ -n "\$strict_sh" \] || strict_sh=/p' "$RUN" >"$_absf" \
+  || fail "R17d: could not extract the shell-selection region from run-tests.sh"
+[ -s "$_absf" ] || fail "R17d: the extracted selection region is empty — the anchors moved"
+grep -q '^strict_sh=""' "$_absf" \
+  || fail "R17d: the extracted region does not contain the strict-shell loop — the anchors moved"
+_rb="$WORK/relbin"
+mkdir -p "$_rb"
+_dash2="$(command -v dash 2>/dev/null)" || _dash2=""
+if [ -n "$_dash2" ]; then
+  ln -sf "$_dash2" "$_rb/dash"
+  {
+    cat "$_absf"
+    echo 'printf "%s|%s\n" "$(command -v dash)" "$strict_sh"'
+  } >"$WORK/absprobe.sh"
+  _out2="$(cd "$WORK" && PATH="relbin:/usr/bin:/bin" "$_dash2" "$WORK/absprobe.sh" 2>/dev/null)" || _out2=""
+  [ -n "$_out2" ] || fail "R17d: the selection probe produced no output"
+  _raw="${_out2%%|*}"; _res="${_out2##*|}"
+  case "$_raw" in
+    /*) : ;;   # this host resolved it absolutely already; nothing to prove here
+    *)  case "$_res" in
+          /*) : ;;
+          *)  fail "R17d: a relative PATH hit ($_raw) was STORED as-is in strict_sh ($_res) — that string is embedded in the sh shim, so any suite that changes directory before invoking sh gets rc 127 from a shell that is present and working" ;;
+        esac ;;
+  esac
+fi
+pass "R17d a relative PATH hit is made absolute before it is stored or embedded"
+
 # R18: the shipped allowlist is EMPTY of entries. Every suite in this repo runs under the
 # strict shell today; if that ever changes, the entry — and this assertion — must be
 # changed deliberately, with an issue id attached.

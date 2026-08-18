@@ -141,10 +141,28 @@ total=$#
 # Order is by strictness, not preference: dash and posh reject the bash extensions the
 # suites must not rely on; `sh` is the floor — where it is bash (macOS) the run is weaker,
 # which is exactly why the shell gets NAMED in the summary instead of being assumed.
+# _abs <path> — make a shell path ABSOLUTE before anything stores or embeds it.
+#
+# `command -v` reports the hit as PATH spelled it, so a PATH carrying a relative component
+# (`PATH=relbin:/usr/bin`) yields `relbin/dash`. The probes below happen to work, because they
+# run from the caller's directory — but that same relative string is later embedded in the
+# generated `sh` shim and handed to children, and any suite that does `cd /` before invoking
+# `sh` then fails with rc 127 while being perfectly valid. Resolve it once, here, so the
+# relative form never survives to a place where the working directory has changed.
+_abs() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *)  _a_d="$(dirname "$1")"; _a_b="$(basename "$1")"
+        _a_r="$(cd "$_a_d" 2>/dev/null && pwd)" || _a_r=""
+        if [ -n "$_a_r" ]; then printf '%s/%s\n' "$_a_r" "$_a_b"; else printf '%s\n' "$1"; fi ;;
+  esac
+}
+
 strict_sh=""
 for _cand in dash posh ash sh; do
   _p="$(command -v "$_cand" 2>/dev/null)" || _p=""
   [ -n "$_p" ] || continue
+  _p="$(_abs "$_p")"
   _rc=0; "$_p" -c 'exit 41' 2>/dev/null || _rc=$?
   [ "$_rc" -eq 41 ] || continue                 # it did not run a script and return its status
   "$_p" -n /dev/null 2>/dev/null || continue    # it cannot parse-check, so the pre-flight is impossible
@@ -179,6 +197,7 @@ fallback_sh=""
 for _fb in bash ksh zsh sh; do
   _p="$(command -v "$_fb" 2>/dev/null)" || _p=""
   [ -n "$_p" ] || continue
+  _p="$(_abs "$_p")"                                     # same reason as the strict loop above
   [ "$(_realsh "$_p")" = "$_strict_real" ] && continue   # same interpreter ⇒ no exemption in it
   _rc=0; "$_p" -c 'exit 41' 2>/dev/null || _rc=$?
   [ "$_rc" -eq 41 ] || continue
