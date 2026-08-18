@@ -806,6 +806,20 @@ gen_body_stub() {
   } > "$_gbs_dest"
 }
 
+# _ptb_relpath <abs-path> — the HARNESS-DIR-RELATIVE form of a path that `diff` or `find`
+# just named, falling back to the tier entry when it belongs to neither side. Reads
+# prose_tier_blockers' loop variables directly (POSIX sh has no locals; stage_tree reads
+# $_umb_body the same way). It is ONE function because R3's "name every differing path" has
+# to mean the same thing for both producers of blocker paths — the symlink sweep and the
+# diff parser — and two copies of this `case` would be free to diverge.
+_ptb_relpath() {
+  case "$1" in
+    "$_ptb_h"/*) printf '%s\n' "${1#"$_ptb_h"/}" ;;
+    "$_ptb_u"/*) printf '%s\n' "${1#"$_ptb_u"/}" ;;
+    *)           printf '%s\n' "$_ptb_rel" ;;
+  esac
+}
+
 # prose_tier_blockers <harness-dir> <umbrella-body-dir> — print one HARNESS-DIR-RELATIVE
 # path per prose-tier path that BLOCKS converting <harness-dir> to the thin layout; print
 # NOTHING when the whole tier is convertible. E24-F04 R1/R2/R3.
@@ -843,6 +857,34 @@ gen_body_stub() {
 # OPEN. Absence of evidence of an edit is not evidence of its absence. A
 # child-local extra file inside the prose tier is the sharpest case: the conversion replaces
 # the whole tier entry with a `cp -R` of the umbrella's, so it would DELETE that file.
+#
+# A SYMLINK ANYWHERE IN THE ENTRY BLOCKS IT, ON EITHER SIDE, and that is not fussiness —
+# `diff` DEREFERENCES. Two paths that differ STRUCTURALLY while resolving to the same bytes
+# are reported identical, so the entry is judged pristine and the conversion `cp -R`s the
+# UMBRELLA's link into the child. A relative target resolves from the link's own directory,
+# so the child ends up with a link that resolves from the UMBRELLA's location: outside its
+# tree, or broken. Measured on a real full-copy child (Codex #3801551083) — both of these
+# printed CONVERTED and left `agents/builder.md` unreadable:
+#   child REGULAR FILE vs umbrella SYMLINK to identical content
+#   BOTH symlinks, DIFFERENT targets, identical content
+# BOTH SIDES ARE SWEPT, not just the umbrella's. The mirror shape — the CHILD holds the link,
+# the umbrella a regular file — is not a redirect but is still a false pristine: the child's
+# link is judged identical, then deleted and replaced by a stub while the run reports success.
+# `diff --no-dereference` names both correctly and is what this box's diff offers, but it is
+# not portable — GNU diffutils only grew it in 3.3 — and on a box without it `diff` errors,
+# the fail-closed `*)` arm fires for every entry, and NO child could ever convert, silently
+# and forever. A `find -type l` sweep needs no capability probe and behaves identically on
+# BSD and GNU. WHAT IT COSTS: a child and umbrella holding the SAME symlink with the SAME
+# target — provably safe — is refused too. That is this feature's stated posture (anything
+# not provably safe stays full-copy), and it is the same boundary `umbrella_body_dir` and R12
+# already draw around a symlinked root and a symlinked roster.
+#
+# THE SWEEP RUNS BEFORE `diff`, AND SHORT-CIRCUITS IT. `diff -r` handed a tree containing
+# `docs/self -> .` descends through it until the OS resolution limit — the same shape
+# tests/test_umbrella.sh already pins for the thinning walk — so an entry known to hold
+# symlinks is never passed to it. The entry is blocked and every link in it is named; other
+# differences inside that same entry are not named in the SAME run, which is the one thing
+# given up here and costs the operator a second run after the link is dealt with.
 prose_tier_blockers() {
   _ptb_h="$1"; _ptb_u="$2"
   # Defence in depth, deliberately not claimed as tested: a portable fixture cannot remove
@@ -860,6 +902,21 @@ prose_tier_blockers() {
     # stdout-only capture would name nothing. Answer it here, where the path is in hand.
     if [ ! -e "$_ptb_a" ] || [ ! -e "$_ptb_b" ]; then
       printf '%s\n' "$_ptb_rel"
+      continue
+    fi
+    # THE SYMLINK SWEEP (see the rule above). Fail closed on a `find` that could not complete:
+    # a side this cannot read is not a side whose shape has been established, and the entry
+    # path itself is the honest thing to name.
+    if ! _ptb_lnks="$(find "$_ptb_a" "$_ptb_b" -type l 2>/dev/null)"; then
+      _ptb_lnks="$_ptb_a"
+    fi
+    if [ -n "$_ptb_lnks" ]; then
+      # `sort -u`: when BOTH sides hold the link, the two absolute paths normalise to the
+      # SAME tier-relative one, and naming it twice would read as two separate problems.
+      printf '%s\n' "$_ptb_lnks" | while IFS= read -r _ptb_line; do
+        [ -n "$_ptb_line" ] || continue
+        _ptb_relpath "$_ptb_line"
+      done | sort -u
       continue
     fi
     # CAPTURE INSIDE AN `if`. This script runs under `set -eu` and `diff` exits non-zero
@@ -901,11 +958,7 @@ prose_tier_blockers() {
           _ptb_p="$_ptb_a"
           ;;
       esac
-      case "$_ptb_p" in
-        "$_ptb_h"/*) printf '%s\n' "${_ptb_p#"$_ptb_h"/}" ;;
-        "$_ptb_u"/*) printf '%s\n' "${_ptb_p#"$_ptb_u"/}" ;;
-        *)           printf '%s\n' "$_ptb_rel" ;;
-      esac
+      _ptb_relpath "$_ptb_p"
     done
   done
 }
