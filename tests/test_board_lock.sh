@@ -476,7 +476,7 @@ def _imp(name, *a, **k):
     return _real(name, *a, **k)
 builtins.__import__ = _imp
 # E99-F102: a SLICED feature's evidence is bound per slice repository, so this fixture
-# declares one per slice repo. Both are `none:<why>` — the point here is the slices
+# declares one per slice repo. Both are \`none:<why>\` — the point here is the slices
 # invariant on the fallback path, and the fixture repos hold no work to point at.
 sys.argv = ["tasks-lock.py", "set-status", "E01-F01", "done",
             "--evidence", "repo-a=none:fixture board, no work to land",
