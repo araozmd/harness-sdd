@@ -4,6 +4,57 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.65.0] — 2026-08-17
+
+### Added — ✨ an explicit repository resolver (E99-F129c)
+
+`tools/repo-resolve.py` answers one question — **which repository is a claim about, and
+may that answer be trusted?** — and returns a value that makes its own uncertainty
+impossible to ignore. It contains no ancestry logic, no verdicts and no board writes.
+
+**Why it is a module and not a few helpers.** Landing verification decides, for a
+*(ref, repository)* pair, whether work merged; nine rows enumerate those verdicts.
+Establishing the **pair** is a different question, and it was implicit machinery threaded
+through the write path — a search order here, a manifest read there, a fingerprint
+assembled somewhere else. Correctness was by convention across ~9 functions, and every new
+call path had to remember to participate in all of them. It kept not being remembered, in
+six separate review findings: a slice repository located by directory basename; the
+manifest missing from the plan→write fingerprint; an unbound ref silently taking the first
+of several candidates; a lexical path a retargeted symlink walks past; **a new call path,
+added to fix the third of those, which omitted the fingerprint again**; and
+`refs/remotes/origin/HEAD` trusted as the remote's answer when it is only a cache of a
+former one. The last two are the argument: a witness assembled *beside* a resolution can be
+forgotten by the next path, while a witness that **is** the resolution cannot; and "is this
+base still the default branch?" is a question about identity, not about ancestry.
+
+The contract it publishes (and now owns):
+
+- **I1 — search only when unambiguous.** A binding names the repository; without one the
+  ref must resolve in exactly one, and two or more is `AMBIGUOUS` — a value the caller must
+  handle, never a repository it can use. Never "the first": the search order starts at the
+  harness dir's own repository, which never holds feature work. Linked worktrees of one
+  repository are one repository (`--git-common-dir`), not an ambiguity.
+- **I2 — identity is the lexical path *and* its realpath**, as one value with one
+  comparison, using filesystem calls only so a caller may re-check it while holding a lock.
+  Not covered, deliberately: a repository replaced in place.
+- **I3 — the default branch carries its evidence**: `published` (the remote, asked just
+  now), `cached` (`origin/HEAD` — a snapshot of a *former* answer, never confirmed),
+  `declared`, `sole-branch`, `none`. `base_confirmed` folds the rules into one boolean so no
+  caller re-derives them differently.
+- **Uncertainty is a value you cannot spend.** `Resolution.directory` and `.base` *raise*
+  when the resolution does not have them, so "I could not tell" cannot slide into "yes".
+- **The witness comes back with the resolution**, so a call path cannot omit it.
+
+Measured, on a remote that moved its default `main` → `trunk` while `main` still existed:
+the cached symref still said `main`, and a commit reachable only from the *former* default
+was previously attested as being on the default branch. The resolver answers
+`origin/trunk` / `published`, and — when the remote is unreachable — falls back to the cache
+while marking it `cached` / **not confirmed**.
+
+New suite `tests/test_repo_resolver.sh` (7 cases, each paired with a control that must come
+out *differently* on the same fixture). It lands **unused by design**: this is the first of
+two staged changes, and the verification rows consume it next.
+
 ## [0.64.0] — 2026-08-17
 
 ### Added — ✨ `done` must carry a landing record (E99-F102, contract half)
