@@ -8,6 +8,14 @@ saying "it works" means nothing until you prove it. AI-generated code is often
 
 1. **Environment.** Run `./init.sh` and the configured `test_command`,
    `lint_command`, `typecheck_command`. Any failure → reject.
+   - **Ask what the green is a statement ABOUT.** A suite is run by *some* interpreter,
+     against *some* host state, and a pass is a claim about that pairing — not about the
+     code alone. `tools/run-tests.sh` therefore names the shell it used in its summary
+     (`all 42 suites passed (/bin/dash [...], --jobs 8)`); read it. A green produced by a
+     weaker shell than the suites claim (`#!/bin/sh` run by bash) says less than it looks
+     like it says, and three environment-dependent greens in two days — a stale compiled
+     `.js` shadowing its `.ts`, fixtures inheriting the host's `init.defaultBranch`, two
+     suites that never parsed under dash — all had this shape.
 2. **Traceability.** For every `R-id` in `<feature>.spec.md`, confirm
    `<feature>.tests.md` has a test AND that test actually exists and passes.
    A requirement without a passing test = reject.

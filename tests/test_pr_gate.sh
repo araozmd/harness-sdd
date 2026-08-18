@@ -221,4 +221,97 @@ sh "$WORK/t/tools/run-tests.sh" "$WORK/t/tests/test_a.sh" >/dev/null 2>&1 \
 sh "$WORK/t/tools/run-tests.sh" --jobs 0 >/dev/null 2>&1 && fail "R12: --jobs 0 accepted"
 pass "R12 explicit suite list honoured; bad --jobs rejected"
 
+# ── R13-R17: the strict-shell gate (E99-F135) ─────────────────────────────────
+# Every suite declares `#!/bin/sh`, and `sh` is bash on macOS and dash on Debian/Ubuntu.
+# The runner therefore executes the suites under the strictest shell it can probe, parse-
+# checks everything first, and NAMES the shell it used. These assertions are about all
+# three, and about the allowlist failing closed.
+RUN="$WORK/t/tools/run-tests.sh"
+DASH="$(command -v dash 2>/dev/null || true)"
+
+# R13: the summary names the shell — path AND identification — and stays one line.
+# `all N suites passed` alone is ambiguous precisely because `sh` differs per machine.
+out="$(sh "$RUN" --jobs 4 2>&1)" || fail "R13: green run exited non-zero"
+[ "$(echo "$out" | wc -l | tr -d ' ')" -eq 1 ] || fail "R13: the summary is no longer one line: $out"
+echo "$out" | grep -q 'all 2 suites passed' || fail "R13: the summary lost its 'all N suites passed' prefix"
+# The shell must be an absolute PATH, so the reader can check it themselves.
+echo "$out" | grep -q ' (/' || fail "R13: the summary names no absolute shell path: $out"
+# ...and an identification, in brackets, that is either established or honestly absent.
+echo "$out" | grep -qE '\[[^]]+\]' || fail "R13: the summary carries no shell identification: $out"
+pass "R13 the summary names the shell it used (path + identification), in one line"
+
+if [ -z "$DASH" ]; then
+  skip_msg="dash not installed; the strict shell falls back to sh"
+  echo "skip - R14-R16 ($skip_msg)"
+else
+  # R14: a RUNTIME bashism fails the run and NAMES the suite. `[[ ]]` PARSES under dash
+  # and fails only when executed — which is the whole reason a parse gate alone is not
+  # enough. Under bash-as-sh this suite passes, so it is exactly the environment-dependent
+  # green the gate exists to convert into a stated one.
+  printf '#!/bin/sh\n[[ -n "x" ]] && exit 0\nexit 1\n' >"$WORK/t/tests/test_runtime.sh"
+  if out="$(sh "$RUN" --jobs 4 2>&1)"; then
+    fail "R14: a suite using [[ ]] passed — it was not executed under a strict shell"
+  fi
+  echo "$out" | grep -q 'test_runtime.sh' || fail "R14: the runtime-bashism suite was not named: $out"
+  rm -f "$WORK/t/tests/test_runtime.sh"
+  pass "R14 a RUNTIME bashism fails the run and names the suite"
+
+  # R15: a PARSE error is caught by the pre-flight BEFORE anything executes. Proven by
+  # side effect, not by reading the message: a second suite writes a marker when it runs,
+  # and the marker must not exist.
+  printf '#!/bin/sh\nif true; then\n  echo hi\n' >"$WORK/t/tests/test_parse.sh"
+  printf '#!/bin/sh\ntouch "%s"\nexit 0\n' "$WORK/ran.marker" >"$WORK/t/tests/test_marker.sh"
+  rm -f "$WORK/ran.marker"
+  _rc=0; out="$(sh "$RUN" --jobs 4 2>&1)" || _rc=$?
+  [ "$_rc" -eq 3 ] || fail "R15: a parse error did not exit 3 (got $_rc)"
+  echo "$out" | grep -q 'test_parse.sh' || fail "R15: the unparseable suite was not named: $out"
+  [ ! -f "$WORK/ran.marker" ] || fail "R15: suites executed despite the pre-flight failing"
+  pass "R15 the -n pre-flight fails the run before any suite executes"
+
+  # R16: an ALLOWLISTED suite is exempt from EXECUTING under dash — never from parsing
+  # under it. An exemption that also skipped the parse check would be the unnamed skip
+  # this list exists to prevent.
+  printf '# known-broken under dash: test_parse.sh — E99-F999\n' >"$WORK/t/tests/dash-allowlist.txt"
+  rm -f "$WORK/ran.marker"
+  _rc=0; out="$(sh "$RUN" --jobs 4 2>&1)" || _rc=$?
+  [ "$_rc" -eq 3 ] || fail "R16: an allowlisted suite skipped the parse pre-flight (got $_rc)"
+  echo "$out" | grep -q 'test_parse.sh' || fail "R16: the allowlisted unparseable suite was not named: $out"
+  [ ! -f "$WORK/ran.marker" ] || fail "R16: suites executed despite an allowlisted parse failure"
+  rm -f "$WORK/t/tests/test_parse.sh"
+
+  # R16b: and the exemption is never silent — every run names what did not face the gate,
+  # on stderr, AND counts it in the summary on STDOUT. A caller that captures only stdout
+  # must not read "all N suites passed (dash)" when some of those N never faced dash.
+  printf '#!/bin/sh\nexit 0\n' >"$WORK/t/tests/test_parse.sh"
+  out="$(sh "$RUN" --jobs 4 2>&1)" || fail "R16b: the allowlisted green tree exited non-zero"
+  echo "$out" | grep -q 'test_parse.sh' \
+    || fail "R16b: an exempt suite ran without being named — that is an invisible skip: $out"
+  sout="$(sh "$RUN" --jobs 4 2>/dev/null)" || fail "R16b: the allowlisted green tree exited non-zero"
+  echo "$sout" | grep -q '1 exempt' \
+    || fail "R16b: stdout alone does not disclose the exemption: $sout"
+  rm -f "$WORK/t/tests/test_parse.sh" "$WORK/t/tests/test_marker.sh" "$WORK/ran.marker"
+  pass "R16 an allowlisted suite still gets the parse pre-flight, and is named on every run"
+fi
+
+# R17: the allowlist fails CLOSED. An entry that names no issue, or names a suite that
+# does not exist, is a usage error — never a silent exemption.
+printf '# known-broken under dash: test_a.sh\n' >"$WORK/t/tests/dash-allowlist.txt"
+_rc=0; sh "$RUN" --jobs 4 >/dev/null 2>&1 || _rc=$?
+[ "$_rc" -eq 4 ] || fail "R17: an allowlist entry with no issue id was accepted (got $_rc)"
+printf '# known-broken under dash: test_ghost.sh — E99-F999\n' >"$WORK/t/tests/dash-allowlist.txt"
+_rc=0; sh "$RUN" --jobs 4 >/dev/null 2>&1 || _rc=$?
+[ "$_rc" -eq 4 ] || fail "R17: an allowlist entry naming a non-existent suite was accepted (got $_rc)"
+rm -f "$WORK/t/tests/dash-allowlist.txt"
+pass "R17 the dash allowlist fails closed: no unnamed and no stale exemptions"
+
+# R18: the shipped allowlist is EMPTY of entries. Every suite in this repo runs under the
+# strict shell today; if that ever changes, the entry — and this assertion — must be
+# changed deliberately, with an issue id attached.
+if [ -f "$SRC/tests/dash-allowlist.txt" ]; then
+  _entries="$(grep -c '^# known-broken under dash:' "$SRC/tests/dash-allowlist.txt" || true)"
+  [ "$_entries" = "0" ] \
+    || fail "R18: the shipped dash allowlist carries $_entries entr(y|ies) — every one is a suite not facing the gate"
+fi
+pass "R18 the shipped dash allowlist is empty"
+
 echo "test_pr_gate.sh: all assertions passed"
