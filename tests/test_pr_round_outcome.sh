@@ -391,15 +391,30 @@ check_runbook() { # check_runbook <file> <label>
     || fail "$_l: the dispatch section does not pin the call to the moment of disposal — without that, 'record what you acted on' drifts back to 'record what you plan to act on'"
   grep -qF '#### Record what this round acted on — at DISPATCH, never in advance' "$_f" \
     || fail "$_l: the dispatch section's heading no longer says the record is written at dispatch, never in advance"
-  # One call per disposal path: the per-comment fixer row, the combined escalation row, and
-  # the cap row (a finding declared blocking is acted on whether or not it was fixed — leave
-  # the cap row out and the last round reads as a quiet zero, which is exactly the trailing
-  # zero that turns a flat series back into `converging`).
-  _n_calls="$(printf '%s\n' "$_sd" | grep -c 'acted_append' || true)"
-  [ "${_n_calls:-0}" -ge 4 ] \
-    || fail "$_l: only $_n_calls acted_append mentions in the dispatch section — the definition plus the fixer, escalation and cap rows need at least 4"
+  # One call per disposal path, checked ROW BY ROW. A count of `acted_append` mentions across
+  # the section is not enough: deleting the cap row's call still leaves the definition, its
+  # usage comment and two rows behind, so a threshold passes while a whole disposal path goes
+  # unrecorded. Each row is named and checked on its own line.
+  #
+  # The cap row is the one that most looks droppable and least is. It fixes nothing, but a
+  # finding DECLARED blocking in the hand-over is acted on all the same — leave those rows out
+  # and the last round reads as a quiet zero, which is exactly the trailing zero that turns a
+  # flat series back into `converging` on the report that exists to stop that. viernes-web
+  # PR #85's real handover recorded 1,1,1,1 with round 4 a declared residual.
+  _row_fix="$(printf '%s\n' "$_sd" | grep '^| below `max_rounds - 1` |' || true)"
+  _row_esc="$(printf '%s\n' "$_sd" | grep '^| `max_rounds - 1` |' || true)"
+  _row_cap="$(printf '%s\n' "$_sd" | grep '^| `max_rounds` (cap) |' || true)"
+  [ -n "$_row_fix" ] || fail "$_l: the per-comment fixer row is missing from the dispatch table"
+  [ -n "$_row_esc" ] || fail "$_l: the combined-escalation row is missing from the dispatch table"
+  [ -n "$_row_cap" ] || fail "$_l: the cap row is missing from the dispatch table"
+  printf '%s' "$_row_fix" | grep -qF 'acted_append' \
+    || fail "$_l: the per-comment fixer row dispatches findings without recording them"
+  printf '%s' "$_row_esc" | grep -qF 'acted_append' \
+    || fail "$_l: the combined-escalation row dispatches findings without recording them"
+  printf '%s' "$_row_cap" | grep -qF 'acted_append' \
+    || fail "$_l: the cap row declares surviving blocking comments without recording them — the last round then reads as a zero and a flat series flips back to 'converging'"
   printf '%s' "$_sd" | grep -q 'acted on whether or not it was fixed' \
-    || fail "$_l: the cap row may drop its surviving comments — a declared-blocking finding must still be recorded"
+    || fail "$_l: nothing states that a declared-blocking finding counts as acted on — the cap row's call reads as optional"
   printf '%s' "$_sd" | grep -qF 'in-session' \
     || fail "$_l: the front-end-without-pr-fixer path is not held to the same record"
 
