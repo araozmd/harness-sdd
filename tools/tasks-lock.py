@@ -718,7 +718,7 @@ def _refuse_if_parked(text, target_id):
 #   4  manifest names it, directory absent/unreadable here    unchecked
 #   5  repo located, object unknown in it                     unchecked
 #   6  default branch undeterminable                          unchecked
-#   7  ancestry checkable and TRUE                            ancestor
+#   7  ancestry TRUE against a CONFIRMED base                  ancestor
 #   8  ancestry FALSE and the base tip is confirmed current   REFUSE
 #   9  ancestry FALSE, tip NOT confirmed                      unchecked
 #

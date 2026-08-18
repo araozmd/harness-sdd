@@ -491,7 +491,7 @@ answered once, and `tools/tasks-lock.py` implements these rows in order:
 | 4 | the manifest names it, but the directory is absent/unreadable here | `unchecked` |
 | 5 | the repo is located, but the object is unknown in it | `unchecked` |
 | 6 | no default branch can be determined | `unchecked` |
-| 7 | ancestry is checkable and TRUE | `ancestor` |
+| 7 | ancestry is checkable and TRUE **against a confirmed base** | `ancestor` |
 | 8 | ancestry is FALSE **and** the base tip is confirmed current | **REFUSED** |
 | 9 | ancestry is FALSE but the tip could **not** be confirmed | `unchecked` |
 

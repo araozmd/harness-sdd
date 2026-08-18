@@ -30,7 +30,7 @@ answer is a **table**, written before the code, carried in `tools/tasks-lock.py`
 | 4 | the manifest names it, directory absent/unreadable here | `unchecked` | a partial checkout keeps working |
 | 5 | the repo is located, the object is unknown in it | `unchecked` | an unfetched clone is not an accusation |
 | 6 | no default branch can be determined | `unchecked` | nothing is invented to compare against |
-| 7 | ancestry is checkable and TRUE | `ancestor` | the only source of a proof |
+| 7 | ancestry is checkable and TRUE **against a confirmed base** | `ancestor` | the only source of a proof |
 | 8 | ancestry is FALSE **and** the base tip is confirmed current | **REFUSED** | the guard's whole point |
 | 9 | ancestry is FALSE, tip **not** confirmed | `unchecked` | a stale view never rejects merged work |
 

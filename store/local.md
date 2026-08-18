@@ -160,7 +160,7 @@ Orchestrator's exclusive ownership of state writes.
   | 4 | the manifest names it, but the directory is absent/unreadable here | `unchecked` |
   | 5 | the repo is located, but the object is unknown in it | `unchecked` |
   | 6 | no default branch can be determined | `unchecked` |
-  | 7 | ancestry is checkable and TRUE | `ancestor` |
+  | 7 | ancestry is checkable and TRUE **against a confirmed base** | `ancestor` |
   | 8 | ancestry is FALSE **and** the base tip is confirmed current | **REFUSED** |
   | 9 | ancestry is FALSE but the tip could **not** be confirmed | `unchecked` |
 
@@ -177,11 +177,17 @@ Orchestrator's exclusive ownership of state writes.
   manifest is configured and readable; with no manifest there is no authority to call a
   claim malformed, so resolution falls back to a best-effort search and every miss degrades.
 
-  Rows 8 and 9 are the stale-tip rule: `refs/remotes/origin/*` is a local snapshot, so a
+  Rows 7, 8 and 9 are the stale-tip rule: `refs/remotes/origin/*` is a local snapshot, so a
   refusal is confirmed against the remote's real tip before it is issued, and an
-  unconfirmable one degrades rather than blocking. The accept side is deliberately not
-  probed: a wrong `ancestor` from a stale local tip needs a rewritten remote, while a wrong
-  refusal needs only an ordinary merge.
+  unconfirmable one degrades rather than blocking. **The accept side is symmetric.** An
+  earlier version of this paragraph said it need not be, on the grounds that a wrong
+  `ancestor` would require a rewritten remote — that is false. A project that RENAMES its
+  default branch and leaves the old one in place makes a cached `origin/HEAD` name a branch
+  that is no longer the default, and work merged only there is trivially reachable from it.
+  No rewrite, no adversary. So row 7 also requires a base this checkout can confirm,
+  escalating to the remote's advertised tip when it holds that object and degrading to
+  `unchecked` when it cannot. This costs nothing on the happy path: a base the remote just
+  published is already confirmed.
 
   **WHICH repository is the claim about?** The nine rows decide a verdict for a
   *(ref, repository)* pair and presume that pair is settled. It is not — it is established

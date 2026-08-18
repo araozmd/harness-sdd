@@ -614,4 +614,48 @@ mkrepo "$FPR"
 ( cd "$FPR" && git_q worktree remove --force "$T/fp-wt" )
 pass "E99-F129c C10 the_fingerprint_observes_where_git_actually_writes"
 
+# ── C11: a BINDING with no manifest is still resolved by BASENAME, and a basename is
+#         not unique (round 7, P1) ─────────────────────────────────────────────────────
+# A binding names the repository, so C2's ambiguity check was skipped for it — on the
+# assumption that naming had removed the ambiguity. With no manifest to say WHERE the name
+# points, resolution falls back to matching directory basenames, and there the binding has
+# only RENAMED the ambiguity: a harness parent and a nested child can both be called `foo`.
+# Taking the first would prove the parent's unrelated `main` while the intended child's work
+# sat unmerged — the exact I1 failure, reached by the one path that believed it was immune.
+NEST="$T/nest"
+mkdir -p "$NEST/.harness"
+mkrepo "$NEST"                      # …/nest            (basename "nest")
+mkrepo "$NEST/nest"                 # …/nest/nest       (same basename, different repository)
+NESTED_MAIN="$(cd "$NEST/nest" && git rev-parse main)"
+HDN="$NEST/.harness"
+ask "main" nest "$HDN" "r.outcome"
+[ "$ASK_OUT" = "ambiguous" ] \
+  || fail "C11: a binding whose basename names TWO different repositories returned $ASK_OUT — with no manifest the name is matched against basenames, so taking the first proves an unrelated repository's main"
+ask "main" nest "$HDN" "r.detail"
+case "$ASK_OUT" in
+  *"no manifest"*) ;;
+  *) fail "C11: the refusal does not name the remedy (declare the repository in a manifest): $ASK_OUT" ;;
+esac
+# CONTROL 1 — an unambiguous binding on the same fixture still resolves, so C11 is about
+# ambiguity and not about bound resolution being refused wholesale.
+mkrepo "$NEST/solo"
+ask "main" solo "$HDN" "r.outcome"
+[ "$ASK_OUT" = "resolved" ] \
+  || fail "C11 control-1: an unambiguous binding returned $ASK_OUT — the fix must not refuse every bound request"
+# CONTROL 2 — a MANIFEST settles it, which is the documented remedy. With one, the name is
+# located by declaration rather than by basename and the ambiguity cannot arise.
+cat > "$NEST/umbrella.manifest.yaml" <<YAML
+repos:
+  nest:
+    path: ./nest
+YAML
+cat > "$HDN/harness.config.yaml" <<YAML
+umbrella:
+  manifest: ../umbrella.manifest.yaml
+YAML
+ask "$NESTED_MAIN" nest "$HDN" "r.outcome + ' ' + os.path.basename(os.path.realpath(r.directory))"
+[ "$ASK_OUT" = "resolved nest" ] \
+  || fail "C11 control-2: with a manifest declaring where nest lives, the binding did not resolve to it (got $ASK_OUT)"
+pass "E99-F129c C11 a_bound_basename_is_not_unique_without_a_manifest"
+
 echo "All repository-resolver tests passed."
