@@ -516,9 +516,20 @@ pass "R12 doc-critic checkpoint is runnable in the source checkout (shim + Write
 # rather than to keep maintaining it. Grep the NAMED SECTION, not the whole file: several
 # other files and sections mention the doc-critic, and a whole-file grep would be satisfied
 # by any of them.
-_sec="$(awk 'BEGIN{h="Doc-critic checkpoint before"} /^#+ /{k=(index($0,h)>0);next} k' "$SRC/agents/architect.md")"
+# FENCE-AWARE: a bare `/^#+ /` heading test also matches a shell COMMENT inside a fenced
+# block, and the slice then ends there. architect.md carries no fence today, but its sibling
+# role files do (orchestrator.md's `# a SLICED feature: …`), and a truncated slice is still
+# NON-EMPTY — so the guard below would pass while the grep under it ran against a prefix.
+# That is the E99-F102-part-A failure shape; the anti-truncation control after it is the half
+# an emptiness check cannot provide.
+_sec="$(awk 'BEGIN{h="Doc-critic checkpoint before"}
+  /^```/ { fence = !fence; if (k) print; next }
+  !fence && /^#+ /{k=(index($0,h)>0);next}
+  k' "$SRC/agents/architect.md")"
 [ -n "$_sec" ] \
   || fail "agents/architect.md no longer has a '## Doc-critic checkpoint before \`spec-ready\` (R12)' section — if the checkpoint was removed, this suite's section 4 is enforcing a dead requirement and should be revisited"
+printf '%s\n' "$_sec" | grep -qF 'recording the skipped or' \
+  || fail "the architect.md R12 section extraction does not reach its final sentence (the best-effort/progress-note fallback) — it was TRUNCATED, so the grep below runs against a prefix"
 printf '%s\n' "$_sec" | grep -qF 'target-type=feature-spec' \
   || fail "agents/architect.md's R12 section no longer spawns the doc-critic with target-type=feature-spec"
 pass "agents/architect.md still mandates the R12 doc-critic checkpoint this suite enforces"

@@ -614,11 +614,32 @@ pass "R9 reviewer + orchestrator carry the advisory handoff rule"
 # can fail when the instruction is fix-lane-only.
 _ORCH="$ROOT/agents/orchestrator.md"
 _ORCH_SECTION='The pre-PR change-size handoff'
+# ⚠️ EVERY heading-driven extractor below is FENCE-AWARE, and that is not decoration.
+# A naive `/^#+ /` (or `/^## /`) test also matches a shell COMMENT inside a fenced block —
+# orchestrator.md already carries one (`# a SLICED feature: …`, in the `Writing \`done\``
+# section) — and the slice then ENDS THERE. The result is worse than extracting nothing: a
+# truncated section is still NON-EMPTY, so the emptiness guard below passes while every
+# assertion under it runs against a prefix. That exact failure was measured during E99-F102
+# part A (a 37-line prefix, green suite, assertions enforcing a third of what they named), so
+# each extractor is paired with an ANTI-TRUNCATION CONTROL keyed on a marker from the END of
+# its section — an emptiness check alone cannot tell a whole section from its first paragraph.
+# The fence DELIMITER lines are still printed when they fall inside the kept region; only
+# their heading-ness is suppressed.
 _outside="$(awk '
-  /^## Targeted parallel-fix worker mode/ { skip = 1; next }
-  /^## / { skip = 0 }
+  /^```/ { fence = !fence }
+  !fence && /^## Targeted parallel-fix worker mode/ { skip = 1; next }
+  !fence && /^## / { skip = 0 }
   !skip
 ' "$_ORCH")"
+# CONTROL (excision): `$_outside` is only a meaningful scope if the worker-mode section was
+# actually REMOVED from it. Without this, a mis-scoped extractor that returned the whole file
+# would satisfy the fix-lane-only question below no matter where the instruction lived — the
+# assertion would pass and its failure message would name a guarantee it cannot detect.
+printf '%s\n' "$_outside" | grep -qF 'worker board transitions remain lock-safe' \
+  && fail "R9b control: the parallel-fix worker mode was NOT excised from the whole-file scope — the fix-lane-only assertion below would pass no matter where the change-size instruction lives"
+# CONTROL (no over-drop): the excision must end at the section, not run to EOF.
+printf '%s\n' "$_outside" | grep -qF 'exits 0 with a "no telemetry yet" notice' \
+  || fail "R9b control: the whole-file-minus-worker-mode scope does not reach the end of orchestrator.md — the excision swallowed everything after the section, so the assertion below is measuring a prefix"
 printf '%s\n' "$_outside" | grep -qF 'tools/change-size.sh' \
   || fail "R9b: orchestrator.md runs the change-size check ONLY inside the parallel-fix worker mode — the main in-review → PR path never reaches it"
 # Everything about WHAT the main-path handoff must say is asserted against the SECTION, not
@@ -637,11 +658,18 @@ printf '%s\n' "$_outside" | grep -qF 'tools/change-size.sh' \
 export CS_ORCH_SECTION="$_ORCH_SECTION"
 _main_cs="$(awk '
   BEGIN { h = ENVIRON["CS_ORCH_SECTION"] }
-  /^#+ / { keep = (index($0, h) > 0); next }
+  /^```/ { fence = !fence; if (keep) print; next }
+  !fence && /^#+ / { keep = (index($0, h) > 0); next }
   keep
 ' "$_ORCH")"
 [ -n "$(printf '%s' "$_main_cs" | tr -d '[:space:]')" ] \
   || fail "R9b: could not extract the '$_ORCH_SECTION' section from orchestrator.md — the heading was renamed or removed, so every assertion below it would pass vacuously"
+# ANTI-TRUNCATION: the emptiness guard above cannot distinguish the whole section from its
+# first two lines. This section's LAST sentence hands the tier to the PR body and cites the
+# Reviewer's half — the very half `_rev_cs` below cross-checks — so if the extraction does not
+# reach it, the `_rev_cs` citation assertions are being paired against a section nobody read.
+printf '%s\n' "$_main_cs" | grep -qF 'your PR body carries it forward' \
+  || fail "R9b: the '$_ORCH_SECTION' extraction does not reach its final sentence — it was TRUNCATED, so every assertion below runs against a prefix (a truncated section is still non-empty, so the guard above cannot catch this)"
 printf '%s\n' "$_main_cs" | grep -qF 'tools/change-size.sh' \
   || fail "R9b: the main-path handoff section does not actually invoke tools/change-size.sh — it only talks about it"
 # Deliberately NOT narrowed to a single fixed phrase. "PR body" occurs three times in this
@@ -657,10 +685,16 @@ printf '%s\n' "$_main_cs" | grep -qi 'never blocks\|advisory' \
 # The parallel-fix section must NOT be weakened on the way: its --repo caveat is load-bearing
 # because HARNESS_DIR locates the script, not the tree under measurement.
 _inside="$(awk '
-  /^## Targeted parallel-fix worker mode/ { keep = 1; next }
-  /^## / { keep = 0 }
+  /^```/ { fence = !fence }
+  !fence && /^## Targeted parallel-fix worker mode/ { keep = 1; next }
+  !fence && /^## / { keep = 0 }
   keep
 ' "$_ORCH")"
+[ -n "$(printf '%s' "$_inside" | tr -d '[:space:]')" ] \
+  || fail "R9b: could not extract the 'Targeted parallel-fix worker mode' section from orchestrator.md — the heading was renamed or removed, so every assertion below it would pass vacuously"
+# ANTI-TRUNCATION, same reasoning as `_main_cs`: key on the section's CLOSING sentence.
+printf '%s\n' "$_inside" | grep -qF 'worker board transitions remain lock-safe' \
+  || fail "R9b: the 'Targeted parallel-fix worker mode' extraction does not reach its final sentence — it was TRUNCATED, so the --repo caveat assertions below run against a prefix"
 printf '%s\n' "$_inside" | grep -qF -- '--repo' \
   || fail "R9b: the parallel-fix worker mode lost its --repo caveat — a worker spawned from the canonical primary would measure the coordinator's bookkeeping branch"
 # …and the REASON, not just the flag. `--repo` appears several times in that section, so the flag
@@ -678,10 +712,18 @@ printf '%s\n' "$_inside" | grep -qF 'not the tree under measurement' \
 # the same reasoning `_main_cs` above now applies to orchestrator.md; it was written here first
 # and simply never carried across.)
 _rev_cs="$(awk '
-  /^## Change-size check before the PR handoff/ { keep = 1; next }
-  /^## / { keep = 0 }
+  /^```/ { fence = !fence }
+  !fence && /^## Change-size check before the PR handoff/ { keep = 1; next }
+  !fence && /^## / { keep = 0 }
   keep
 ' "$ROOT/agents/reviewer.md")"
+[ -n "$(printf '%s' "$_rev_cs" | tr -d '[:space:]')" ] \
+  || fail "R9b: could not extract the 'Change-size check before the PR handoff' section from reviewer.md — the heading was renamed or removed, so every assertion below it would pass vacuously"
+# ANTI-TRUNCATION: this section's last paragraph IS the cross-file half being asserted (it
+# names the Orchestrator and cites its section), and it sits after a fenced `sh` block. An
+# extraction that stops at the fence is non-empty and would make both greps below vacuous.
+printf '%s\n' "$_rev_cs" | grep -qF 'on the assumption the Orchestrator will re-derive it' \
+  || fail "R9b: the reviewer.md change-size section extraction does not reach its final sentence — it was TRUNCATED, so the cross-file citation assertions below run against a prefix"
 printf '%s\n' "$_rev_cs" | grep -qi 'orchestrator' \
   || fail "R9b: reviewer.md's change-size section never mentions the Orchestrator's half of the handoff"
 printf '%s\n' "$_rev_cs" | grep -qF "$_ORCH_SECTION" \

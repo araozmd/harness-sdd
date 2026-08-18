@@ -202,7 +202,18 @@ span() {
 # for exactly this situation ("A test that asserts a PROSE contract must grep the SECTION it
 # names"); using the documented recipe means a reader can check this extraction against the
 # rule it implements without reverse-engineering it.
-section() { awk -v h="$1" '/^#+ /{k=(index($0,h)>0);next} k' "$BUILDER"; }
+# FENCE-AWARE, which the recipe in builder.md is not yet: a bare `/^#+ /` test also matches a
+# shell COMMENT inside a fenced block, and the slice ends there. builder.md carries no fence
+# today, but it is the file most likely to gain one (it prescribes copy-pasteable recipes),
+# and a truncated slice is still NON-EMPTY — so `[ -n "$BSEC" ]` below would pass while every
+# substance check ran against the first paragraph. Measured shape, E99-F102 part A.
+section() {
+  awk -v h="$1" '
+    /^```/ { fence = !fence; if (k) print; next }
+    !fence && /^#+ / { k = (index($0, h) > 0); next }
+    k
+  ' "$BUILDER"
+}
 
 # flat — one line, markdown emphasis removed, runs of BLANKS (spaces AND tabs) squeezed to
 # one space. Wrapping is a formatting choice; the contract is the sentence. Squeezing is
@@ -389,6 +400,11 @@ pass "R5 reviewer_3e_mass_failure_is_never_evidence_and_opens_with_the_obligatio
 # alone leaves half the agents that cause collisions ungoverned. E99-F73 named both files.
 [ -n "$BSEC" ] \
   || fail "R6: agents/builder.md has no '## $BUILDER_HEADING' section — the Builder mutates routinely and writes scratch files, so pinning these rules only in reviewer.md leaves the other half of the collision surface unruled"
+# ANTI-TRUNCATION: the guard above cannot tell a whole section from its first paragraph, and
+# every check below would then run against that prefix. Key on the section's CLOSING sentence.
+# (`$BSEC` is flattened, so match the words, not the markdown emphasis around them.)
+printf '%s\n' "$BSEC" | grep -qF 'mass-failure run is never evidence' \
+  || fail "R6: the builder.md '$BUILDER_HEADING' extraction does not reach its final sentence — it was TRUNCATED, so every check below runs against a prefix"
 scratch_checks "$BSEC" "R6: builder.md '$BUILDER_HEADING'"
 disk_checks    "$BSEC" "R6: builder.md '$BUILDER_HEADING'"
 [ -n "$BNS" ] \
