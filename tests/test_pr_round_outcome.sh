@@ -346,19 +346,115 @@ check_runbook() { # check_runbook <file> <label>
   printf '%s' "$_s2b" | grep -q 'omitting `blocking.json`' \
     || fail "$_l: the outcome section does not warn against 'fixing' the timeout by omitting blocking.json"
 
+  # ── THE ORDERING (Codex round 1, P2) ──────────────────────────────────────────
+  # `acted.json` is recorded at DISPATCH, never at classification. The first version of this
+  # feature told step 3 to pre-compute it from blocking.json and then append override rows
+  # "for every finding you hand to a fixer" — but at step 3 nothing has been handed to
+  # anyone, the gate has not been asked, and its answer can be `merge`, after which step 5
+  # forbids fixing non-blocking findings outright. So a COMPLIANT loop could never produce
+  # an override row, and F116 stayed broken in practice while the runbook read as if it were
+  # fixed. These two assertions are a pair: one forbids the old location, the other requires
+  # the new one. Deleting either half restores the defect with the suite still green.
   _s3="$(section "$_f" 'Parse and classify comments')"
   [ -n "$_s3" ] || fail "$_l: the classification section is missing"
   printf '%s' "$_s3" | grep -qF 'acted.json' \
-    || fail "$_l: the classification section never tells the loop to write acted.json"
+    || fail "$_l: the classification section never mentions acted.json — it must say the set is NOT written here"
+  printf '%s' "$_s3" | grep -qE 'Do NOT write .?acted\.json.? here' \
+    || fail "$_l: the classification section does not forbid writing acted.json at classification time"
+  printf '%s' "$_s3" | grep -qF '> "$round_dir/acted.json"' \
+    && fail "$_l: the classification section WRITES acted.json — that is the pre-gate ordering this fix removed; a compliant loop can never act on a finding the gate excluded, so the override row could never exist" || :
   printf '%s' "$_s3" | grep -qF '"override": true' \
-    || fail "$_l: the classification section does not tell the loop to flag a severity override"
-  printf '%s' "$_s3" | grep -qF 'severity' \
-    || fail "$_l: the classification section does not require severity to survive per row"
+    && fail "$_l: the classification section still builds override rows before anything is dispatched" || :
+
+  # Two honest moves when the badge is wrong, and neither of them is silence. This is what
+  # makes an override reachable by a loop that follows its own rules.
+  _sov="$(section "$_f" 'When you judge the badge wrong')"
+  [ -n "$_sov" ] \
+    || fail "$_l: nothing tells the loop what to do when a finding outside blocking_severities is substantively blocking — the override path is unreachable and F116 stays broken in practice"
+  printf '%s' "$_sov" | grep -qF 'pr_loop.blocking_severities' \
+    || fail "$_l: the override clause never names raising the configured threshold as the first move"
+  printf '%s' "$_sov" | grep -qF 'acted_append' \
+    || fail "$_l: the override clause does not require the override to be recorded"
+  printf '%s' "$_sov" | grep -qF 'Recording is not permission' \
+    || fail "$_l: the override clause reads as a licence — it must say the record does not authorize the work"
+
+  # The dispatch section: the helper is defined here, and every path that disposes of a
+  # finding calls it.
+  _sd="$(section "$_f" 'Record what this round acted on')"
+  [ -n "$_sd" ] \
+    || fail "$_l: no section records the acted-on set at dispatch — the trend would read a file nobody writes"
+  printf '%s' "$_sd" | grep -qF 'acted_append() {' \
+    || fail "$_l: the dispatch section does not define acted_append"
+  printf '%s' "$_sd" | grep -qF '$round_dir/acted.json' \
+    || fail "$_l: the dispatch section never names \$round_dir/acted.json"
+  printf '%s' "$_sd" | grep -qF 'at the MOMENT a finding is disposed of as blocking' \
+    || fail "$_l: the dispatch section does not pin the call to the moment of disposal — without that, 'record what you acted on' drifts back to 'record what you plan to act on'"
+  grep -qF '#### Record what this round acted on — at DISPATCH, never in advance' "$_f" \
+    || fail "$_l: the dispatch section's heading no longer says the record is written at dispatch, never in advance"
+  # One call per disposal path: the per-comment fixer row, the combined escalation row, and
+  # the cap row (a finding declared blocking is acted on whether or not it was fixed — leave
+  # the cap row out and the last round reads as a quiet zero, which is exactly the trailing
+  # zero that turns a flat series back into `converging`).
+  _n_calls="$(printf '%s\n' "$_sd" | grep -c 'acted_append' || true)"
+  [ "${_n_calls:-0}" -ge 4 ] \
+    || fail "$_l: only $_n_calls acted_append mentions in the dispatch section — the definition plus the fixer, escalation and cap rows need at least 4"
+  printf '%s' "$_sd" | grep -q 'acted on whether or not it was fixed' \
+    || fail "$_l: the cap row may drop its surviving comments — a declared-blocking finding must still be recorded"
+  printf '%s' "$_sd" | grep -qF 'in-session' \
+    || fail "$_l: the front-end-without-pr-fixer path is not held to the same record"
 
   _s4b="$(section "$_f" 'Convergence trend')"
   [ -n "$_s4b" ] || fail "$_l: the convergence-trend section is missing"
   printf '%s' "$_s4b" | grep -qF -- '--diff-files' \
     || fail "$_l: the trend step never passes the diff width, so the remedy can never be conditioned on it"
+  # Step 4b runs BEFORE dispatch, so the current round has no acted.json yet. If the loop
+  # never re-reads the trend after dispatch, a terminal message reports a verdict computed
+  # from an incomplete last round.
+  printf '%s' "$_s4b" | grep -qF 'does not exist yet' \
+    || fail "$_l: step 4b does not say that the current round's acted.json is not written yet"
+  _sh="$(section "$_f" 'Handover summary')"
+  [ -n "$_sh" ] || fail "$_l: the handover-summary section is missing"
+  printf '%s' "$_sh" | grep -qF 'pr-round-trend.sh' \
+    || fail "$_l: the handover summary never re-runs the trend, so a terminal message carries the pre-dispatch verdict"
+}
+
+# extract_acted_append <runbook> — the helper's source, lifted out of the runbook.
+extract_acted_append() {
+  section "$1" 'Record what this round acted on' \
+    | awk '/^acted_append\(\) \{/ { p = 1 } p { print } p && /^\}$/ { exit }'
+}
+
+test_the_runbook_helper_actually_works() {
+  have_jq || { skip "the_runbook_helper_actually_works (jq not installed)"; return 0; }
+  # A runbook snippet nobody executes is a snippet nobody has checked. Lift acted_append out
+  # of the prose, run it, and assert it produces the exact rows tools/pr-round-trend.sh reads
+  # — otherwise the ordering could be perfectly documented and still write nothing usable.
+  _src_fn="$(extract_acted_append "$SRC/.claude/commands/sdd-pr-loop.md")"
+  printf '%s' "$_src_fn" | grep -qF 'acted_append() {' \
+    || fail "ordering: acted_append could not be extracted from the runbook"
+  round_dir="$T/helper/round-1"; mkdir -p "$round_dir"
+  _f="$T/helper/fn.sh"; printf '%s\n' "$_src_fn" > "$_f"
+  # shellcheck disable=SC1090
+  . "$_f"
+  acted_append 3786922846 src/page.tsx 187 P2 override
+  acted_append 42 src/other.ts 9 P1 configured
+  [ -f "$round_dir/acted.json" ] || fail "ordering: the runbook's acted_append wrote no acted.json"
+  jq -e 'length == 2' "$round_dir/acted.json" >/dev/null \
+    || fail "ordering: two dispatches produced $(jq -c length "$round_dir/acted.json") rows — the helper overwrites instead of appending"
+  jq -e '.[0].override == true and .[0].severity == "P2" and .[0].id == 3786922846 and .[0].path == "src/page.tsx"' \
+    "$round_dir/acted.json" >/dev/null \
+    || fail "ordering: the override row is not the shape the trend reads: $(jq -c '.[0]' "$round_dir/acted.json")"
+  jq -e '.[1].override == false and .[1].severity == "P1"' "$round_dir/acted.json" >/dev/null \
+    || fail "ordering: a configured-severity dispatch was recorded as an override"
+  # And the tool must actually read what the runbook wrote — the two halves of this feature
+  # meeting in the middle, on a file neither of them mocked.
+  printf 'findings\n' > "$round_dir/outcome"
+  [ "$(jqf "$T/helper" '.overrides')" = "1" ] \
+    || fail "ordering: pr-round-trend.sh counted $(jqf "$T/helper" '.overrides') overrides in the rows the runbook's own helper produced"
+  [ "$(jqf "$T/helper" '.series | join(",")')" = "2" ] \
+    || fail "ordering: the trend did not take its count from the helper-written acted.json"
+  unset round_dir
+  pass "ordering the_runbook_helper_actually_works: the runbook's acted_append appends rows the trend reads"
 }
 
 test_the_runbook_writes_what_the_trend_reads() {
@@ -386,5 +482,6 @@ test_the_merge_gate_still_reads_the_configured_filter
 test_the_remedy_fits_the_diff
 test_the_tool_stays_advisory
 test_the_runbook_writes_what_the_trend_reads
+test_the_runbook_helper_actually_works
 
 echo "ok - test_pr_round_outcome.sh: all cases passed"

@@ -357,35 +357,16 @@ round dir:
 ```
 comments.json     # all comments with a severity tag attached
 blocking.json     # filtered to the CONFIGURED blocking severities — the MERGE GATE reads this
-acted.json        # what this round ACTUALLY treated as blocking — the TREND reads this
 status.json       # statusCheckRollup snapshot
 ```
 
-**`blocking.json` and `acted.json` answer different questions. Write both.** `blocking.json`
-is unchanged: the `pr_loop.blocking_severities` filter, and the only finding set
-`tools/pr-gate.sh` reads. That decision stays conservative and this step does not touch it.
-
-`acted.json` records what this round **actually treated as blocking** — one row per finding,
-**severity preserved per row**, plus an `override` flag that is `true` when the severity is
-*not* in `pr_loop.blocking_severities`. Start it from `blocking.json`, then add a row for
-every finding you judged blocking anyway:
-
-```bash
-jq 'map({id, path, line, severity: (.severity // "P?"), override: false})' \
-  "$round_dir/blocking.json" > "$round_dir/acted.json"
-# For EVERY finding you hand to a fixer (or fix in-session) whose severity is NOT in
-# pr_loop.blocking_severities, append its row with "override": true. One row per finding.
-```
-
-**The rule is simple: if you fix it, it goes in `acted.json`.** This step's own instructions
-tell you to read the finding, not the badge — a P2 can be substantively blocking — and the
-trend has to see the work you actually did. On viernes-ai/viernes-web PR #85 three consecutive
-Codex **P2**s were each judged blocking and fixed while P2 sat outside the configured filter,
-so every `blocking.json` was empty and `pr-round-trend.sh` reported *"no round with a readable
-blocking.json — nothing to trend"* while the PR was in its third round of genuinely blocking
-findings. The one tool built to detect non-convergence was silent through a textbook
-non-converging run. Writing `acted.json` is what keeps that from repeating; it changes nothing
-about which findings the merge gate will let through.
+**Do NOT write `acted.json` here.** The round's acted-on set is recorded at **dispatch**, in
+step 5, and this step must not pre-compute it. Classification answers "what did the
+configuration block?"; that answer is `blocking.json` and it is complete. Whether any finding
+is *acted on* is not known yet — the gate has not been asked, and its answer can be `merge`,
+in which case the round acts on nothing at all. A set written here would record **intent**,
+and the round can contradict it two steps later. `acted.json` has to mean *these findings
+were acted on* or it is not an honest input to a convergence rate.
 
 ### 4. Stall detection
 
@@ -432,6 +413,13 @@ trends, but its verdict is flagged as possibly optimistic rather than quietly tr
 judged blocking is in the rate — and the report says how many of the findings were overrides
 and at which severity. The merge gate is unaffected: it still reads `blocking.json`.
 
+**This round's `acted.json` does not exist yet.** It is written at dispatch, in step 5, which
+has not run — so the trend sees earlier rounds through what they *acted on* and the current
+round through its `blocking.json`. That is the right reading here (nothing has been acted on
+yet), and it means the verdict at this point is final for every earlier round and provisional
+for this one. **Re-run the trend when you build the handover summary**, after the round has
+disposed of its findings; that later verdict is the one that goes into a terminal message.
+
 A flat rate does not mean the fixes are bad. It means the reviewer is sampling a surface
 larger than one pass can cover, so another round buys another *sample*, not more confidence —
 and a clean round would be indistinguishable from one that happened to land somewhere quiet.
@@ -466,6 +454,9 @@ gate_rc=$?
 the review is finished: leave this step entirely, **break the loop before advancing the round
 counter**, and go to step 6 then "ready to merge". Breaking preserves the successful `round`
 value, so the Ready-to-merge section reads `round-$round/pr.json` from the correct round.
+(The one thing that may follow a `merge` verdict without merging is an explicit, recorded
+**override** — see "When you judge the badge wrong" below. It does not change what the gate
+said, only what this round does about one finding, and it is never taken silently.)
 `fix` (6), `escalate` (7) and `needs-human` (8) select the rows below. `unresolved` (9) — no
 Codex review landed for this round — and unreadable input (4) both take the `needs-human`
 terminal state **after `echo unresolved > "$round_dir/outcome"`**; never read an empty
@@ -494,25 +485,82 @@ blocking findings and the loop still spent three rounds and three commits on P2s
 rounds 6-8 were clean and it ran to round 12. Across this repo 20 of 43 Codex-fix commits
 addressed P2s — roughly half the fix budget spent on findings that never blocked anything.
 
+#### When you judge the badge wrong
+
+`pr_loop.blocking_severities` is a **threshold**, and a threshold can be wrong about one
+finding. On viernes-ai/viernes-web PR #85 a Codex **P2** was a live claim-steal race;
+merging on the gate's word would have shipped it. That is not the paragraph above — you are
+not making the PR look clean, you are answering a defect — and there are exactly **two**
+honest moves. *Fix it quietly and say nothing* is neither, and it is what actually happened.
+
+1. **Raise the threshold.** Add the severity to `pr_loop.blocking_severities` and re-run the
+   round. The gate then blocks on its own authority and nothing is overridden. Prefer this
+   whenever the repo will keep producing findings at that severity — a threshold you override
+   every round is a threshold that is simply set wrong.
+2. **Override this one finding.** Act on it despite the `merge` verdict, and record it with
+   `acted_append … override` below. You are declining the gate's verdict **for this round's
+   fix work only**: the gate is asked again next round with the same conservative filter, and
+   `blocking.json` is never edited to dress an override up as configuration.
+
+**Recording is not permission.** An `override` row does not authorize the work — it makes the
+work *countable*. That is the entire point: three **unrecorded** overrides is how PR #85 spent
+four rounds while `pr-round-trend.sh` reported *"no round with a readable blocking.json —
+nothing to trend"*, and the one tool built to detect non-convergence stayed silent through a
+textbook non-converging run. A non-zero `overrides:` line in that report is a question for the
+configuration, not a licence to keep going.
+
 Branching on the budget first is the ordering bug this replaces: at the cap round the
 `max_rounds` row stopped with `needs-human` before anything consulted the findings, so a
 **clean final round could never merge** — the loop handed a green PR to a human. Only a cap
 round that still has blocking findings is a hand-over.
 
+#### Record what this round acted on — at DISPATCH, never in advance
+
+```bash
+# acted_append <id> <path> <line> <severity> <configured|override>
+#
+# Call it at the MOMENT a finding is disposed of as blocking: immediately before handing it
+# to a pr-fixer, before starting an in-session fix, or as the cap row lists it as a surviving
+# blocking comment. One call, one row, one finding.
+acted_append() {
+  _a="$round_dir/acted.json"
+  [ -s "$_a" ] || printf '[]\n' > "$_a"
+  case "${5:-configured}" in override) _ov=true ;; *) _ov=false ;; esac
+  jq --argjson id "$1" --arg p "$2" --argjson l "${3:-0}" --arg s "$4" --argjson o "$_ov" \
+     '. + [{id:$id, path:$p, line:$l, severity:$s, override:$o}]' "$_a" > "$_a.tmp" \
+    && mv "$_a.tmp" "$_a"
+}
+```
+
+`acted.json` means **these findings were acted on**, and `tools/pr-round-trend.sh` uses it as
+the round's finding count precisely because that is a claim about what happened rather than
+about what a filter would have kept. So it is appended by the code paths that *do* the acting
+— the three rows below and the in-session variant under them — and by nothing else. A round
+that disposes of no finding writes no `acted.json`, and the trend reads its `blocking.json`
+instead; a round that acted writes one row per finding, `override: true` on each one whose
+severity `pr_loop.blocking_severities` excludes.
+
+**A finding declared blocking is acted on whether or not it was fixed.** The cap row does not
+fix anything, but naming a comment in the `needs-human` hand-over is this round's disposition
+of it, and leaving those rows out would make the cap round read as a quiet zero — the trailing
+zero that turns a flat series back into `converging` on exactly the report that exists to stop
+that.
+
 | Round | Behavior |
 |---|---|
-| below `max_rounds - 1` | For each blocking comment, spawn one **`pr-fixer`** sub-agent, passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
-| `max_rounds - 1` | Build **one combined fix prompt** (all blocking comments concatenated) and escalate to a **different worker** if the host CLI offers one; where no router exists, run one combined **in-session** pass instead. Then push. |
-| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. Post the handover summary listing every round, the blocking comments that survived, and the cache path — **and the step-4b trend verdict**. When it is `non-converging`, the message must say **split this PR**, not "re-review it", and must show the per-round series and the concentration list that make the case. Return failure. |
+| below `max_rounds - 1` | For each blocking comment: **`acted_append` it first**, then spawn one **`pr-fixer`** sub-agent, passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
+| `max_rounds - 1` | **`acted_append` every comment going into the prompt**, then build **one combined fix prompt** (all blocking comments concatenated) and escalate to a **different worker** if the host CLI offers one; where no router exists, run one combined **in-session** pass instead. Then push. |
+| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. **`acted_append` every blocking comment that survived** — the cap round disposes of them by declaring them, not by fixing them. Post the handover summary listing every round, the surviving comments, and the cache path — **and the trend verdict, re-run after these rows exist**. When it is `non-converging`, the message must say what the tool's remedy line says, and must show the per-round series and the concentration list that make the case. Return failure. |
 
 At the default `max_rounds: 4` that is rounds 1–2 per-comment, round 3 combined
 escalation, round 4 `needs-human`. A `max_rounds` below `3` simply has no per-comment
 fixer rounds.
 
 **Front-ends without a `pr-fixer` sub-agent** (codex, gemini) do not spawn one: apply each
-blocking comment's fix **in-session**, under the same discipline — one comment, one
-targeted fix, one commit, one `fix-<comment_id>.md` note — then push once at the end of
-the round.
+blocking comment's fix **in-session**, under the same discipline — one `acted_append` call,
+one comment, one targeted fix, one commit, one `fix-<comment_id>.md` note — then push once at
+the end of the round. The absence of a sub-agent changes who writes the code; it does not
+change what the round records about the work it did.
 
 **Always write the worker file for this round** so the handover summary stays
 reconstructible from cache:
@@ -599,6 +647,15 @@ for d in .pr-loop/"$pr_number"/round-*/; do
 done
 for d in .pr-loop/"$pr_number"/round-*/; do cat "$d/worker" 2>/dev/null; done \
   | sort | uniq -c
+```
+
+**Re-run the trend here**, not just at step 4b. Every round has now disposed of its findings,
+so every `acted.json` that is ever going to exist exists — including the current round's, which
+step 4b could not see. The verdict that goes into either terminal message is this one:
+
+```bash
+sh "$HARNESS_DIR/tools/pr-round-trend.sh" --cache ".pr-loop/$pr_number" \
+   ${_df:+--diff-files "$_df"} ${_dl:+--diff-lines "$_dl"}
 ```
 
 Save the rendered summary to `.pr-loop/<pr>/handover-summary.md` and post it on
@@ -864,7 +921,9 @@ merge did not land, that is this state, and it is a failure.
     trigger-ts.txt            # freshness anchor
     outcome                   # ONE WORD: findings | clean | timeout | unresolved (step 2b)
     fresh-comments.json, comments.json, blocking.json, status.json
-    acted.json                # what the round treated as blocking (severity + override per row)
+    acted.json                # appended at DISPATCH (step 5): one row per finding this round
+                              # acted on, severity + override per row. Absent when the round
+                              # acted on nothing.
     worker, role
     fix-<comment-id>.md       # one per fix
   round-2/ ...

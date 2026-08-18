@@ -4,6 +4,72 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.66.0] — 2026-08-18
+
+### Added — ✨ a round's outcome is stated, and the trend counts what was acted on (E99-F126 + E99-F116)
+
+`tools/pr-round-trend.sh` read exactly one file per round, `round-<n>/blocking.json`, and
+took its **length** as the round's finding count. That file answers neither question the
+trend asks, and the two failures that follow are one defect surface.
+
+**An empty array meant two opposite things.** "Reviewed, nothing blocked" and "no review ever
+landed" are both `[]`, byte for byte. Measured on araozmd/harness-sdd#141: the rounds went 2
+blocking → round 2 **watcher timeout** (exit `2`, zero Codex activity) → 2 blocking; recording
+the timed-out round as `[]` produced *"converging — the finding rate is coming down. One more
+round is rational."* and deleting that one file changed the verdict to `insufficient`. The
+flat 2,2 was the honest signal and the tool never saw it, so the bias ran toward "spend
+another round" **exactly when review was not landing** — the case where another round is most
+wasteful — and recording a timeout as a clean round was silently rewarded. The loop already
+guards this two-meanings-of-empty hazard at the MERGE gate (`tools/pr-gate.sh` consults
+`wait-for-codex.sh evaluate` for precisely this reason); it did not guard it here.
+
+**The rate was blind to a severity override.** `blocking.json` is filtered to the configured
+`pr_loop.blocking_severities`. On viernes-ai/viernes-web PR #85 three consecutive Codex **P2**s
+were each judged blocking and fixed while P2 sat outside that filter, so every `blocking.json`
+was empty and the tool reported *"no round with a readable blocking.json — nothing to trend"*
+through a textbook non-converging run. The one tool built to detect non-convergence was silent.
+
+Two files the loop now writes and the trend now reads:
+
+- **`round-<n>/outcome`** — one word: `findings` | `clean` | `timeout` | `unresolved`. Written
+  at **every** terminal state, including the ones that previously just aborted. Only
+  `findings`/`clean` enter the finding **rate**. `timeout`/`unresolved` are reported in their
+  own `NEVER REVIEWED` block and in `not_reviewed[]` — neither folded into the rate nor
+  dropped, because omitting them would answer `insufficient` and hide a run that is failing to
+  get reviewed at all.
+- **`round-<n>/acted.json`** — one row per finding the round **acted on**, `severity` preserved
+  per row plus an `override` flag. Appended at **dispatch** (immediately before a finding goes
+  to a `pr-fixer`, before an in-session fix, or as the cap row declares a surviving comment) —
+  never at classification time, where the gate has not been asked yet and its answer can be
+  `merge`. A set written at classification would record *intent*, and a round can contradict
+  it two steps later; `acted.json` has to mean *these findings were acted on* or it is not an
+  honest input to a convergence rate.
+
+`blocking.json` and `tools/pr-gate.sh` are **unchanged**: whether a P2 may block a MERGE stays
+a separate, deliberately conservative decision from whether it counts as review work. The
+runbook now names the two honest moves when the badge is wrong — raise the threshold, or
+override this one finding and record it — and says plainly that recording is not permission,
+it is what makes the work countable.
+
+**Backward compatible, and honest about it.** A cache written before this change has neither
+file. Derivation order: a recorded `outcome` → a non-empty finding set ⇒ `findings`
+(self-proving) → an empty set with `pr.json` on disk ⇒ ask `wait-for-codex.sh evaluate`, the
+same offline probe the merge gate uses, which catches the #141 shape in an **old** cache too →
+otherwise `unknown`: still counted so a legacy cache keeps trending, but named in
+`unrecorded_rounds[]` with the verdict flagged as possibly optimistic. Never silently clean.
+
+**The non-converging remedy is conditioned on the diff.** New optional `--diff-files` /
+`--diff-lines` (fed from `tools/change-size.sh`). "SPLIT THIS PR" is right for the
+17,202-addition diff this tool was built on and unfollowable on PR #85's 2-file/~150-line diff
+whose four findings all landed in one function — the operator overrode it by hand, and E17-F04
+disputed the same verdict on the record. The downgrade requires **both** a supplied width and a
+single concentrating file, so with no flags the output is byte-identical to before.
+
+New JSON fields on `--format json`: `not_reviewed[]`, `unrecorded_rounds[]`, `overrides`,
+`override_severities[]`, `remedy`. Every existing field keeps its meaning.
+
+New suite `tests/test_pr_round_outcome.sh` (parses and runs under `/bin/dash`).
+
 ## [0.65.0] — 2026-08-17
 
 ### Added — ✨ an explicit repository resolver (E99-F129c)

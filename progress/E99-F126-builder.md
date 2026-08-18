@@ -47,8 +47,34 @@ clean.
 - The `viernes-web` fixture was **not** modified (no file under it has today's mtime; its
   hand-written `blocking.json` files still hold 1 finding each).
 
-## Not done, deliberately
+## Round 2 — Codex findings on PR #152
 
-`VERSION` is not bumped and `CHANGELOG.md` gets no entry — this touches the installed body,
-so a bump is owed, but the release stamp was scoped out of this task. Whoever cuts the
-release owes a **MINOR** (new backward-compatible capability) plus a `CHANGELOG` heading.
+**P1 — `VERSION`.** Stamped **0.66.0** (MINOR: the `outcome`/`acted.json` cache files, the new
+JSON fields, `--diff-files`/`--diff-lines`) with the matching `CHANGELOG.md` entry.
+
+**P2 — the ordering, and it was right.** The first cut had step 3 pre-compute `acted.json`
+from `blocking.json` at classification time and then "append an override row for every
+finding you hand to a fixer". A *compliant* loop can never reach that append: the gate reads
+the empty `blocking.json`, answers `merge`, and step 5 forbids fixing non-blocking findings.
+So the override record could not be produced by a loop obeying its own rules, and F116 stayed
+broken in practice while the runbook read as though it were fixed.
+
+Fixed by moving the record to the **disposal** path and by making the override reachable:
+
+- step 3 now says **do not write `acted.json` here**, and says why (the gate has not been
+  asked; a set written here records *intent*, and the round can contradict it two steps later);
+- a new `#### Record what this round acted on — at DISPATCH, never in advance` defines
+  `acted_append <id> <path> <line> <severity> <configured|override>`, called at the moment a
+  finding is disposed of as blocking;
+- all three dispatch rows call it — per-comment fixer, combined escalation, and the **cap
+  row**, because a finding *declared* blocking in the hand-over is acted on whether or not it
+  was fixed. Without the cap row the last round reads as a quiet zero, which is precisely the
+  trailing zero that flips a flat series back to `converging`;
+- a new `#### When you judge the badge wrong` names the two honest moves — raise
+  `pr_loop.blocking_severities`, or override this one finding **and record it** — and states
+  that recording is not permission, it is what makes the work countable;
+- step 4b now says this round's `acted.json` does not exist yet (it runs before dispatch), and
+  the handover section **re-runs the trend** once every round has disposed of its findings.
+
+Both runbook copies carry it; the drift check (normalise the `.harness/` paths, diff the two)
+shows only the pre-existing deltas.
