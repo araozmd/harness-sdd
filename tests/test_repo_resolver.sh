@@ -333,4 +333,110 @@ PY
 grep -q "^different" "$T/c7.out" || fail "C7 control: two resolutions of DIFFERENT repositories share a witness, so comparing witnesses would detect nothing: $(cat "$T/c7.out")"
 pass "E99-F129c C7 the_witness_comes_back_with_the_resolution"
 
+# ── C8: what `revalidate()` asserts — the contract, not an intuition ──────────────────
+# It promises: a fresh resolve() with the same inputs would give the same OUTCOME, the same
+# REPOSITORY and the same CERTAINTY. Both round-3 findings were answers to that unstated
+# sentence — one compared the wrong thing, one compared too few things — so each case below
+# is a clause of it, and the last is what it deliberately does NOT promise.
+REV="$T/rev"
+mkdir -p "$REV/.harness"
+mkrepo "$REV"
+mkrepo "$REV/child"
+REV_CHILD="$(cd "$REV/child" && git rev-parse main)"
+mkrepo "$T/rev-sidecar-real"
+mkrepo "$T/rev-sidecar-decoy"
+ln -sfn "$T/rev-sidecar-real" "$REV/sidecar"
+cat > "$REV/.harness/harness.config.yaml" <<'EOF'
+store:
+  backend: local
+umbrella:
+  manifest: ../umbrella.manifest.yaml
+EOF
+# The manifest key is ALIASED: `alpha` is not the directory name. An unbound resolution
+# picks `child` by search, so its `repo` is a BASENAME — reading that as a manifest key is
+# what made this case never revalidate.
+cat > "$REV/umbrella.manifest.yaml" <<'EOF'
+repos:
+  alpha:
+    path: child
+    init: ./init.sh
+    test_command: "true"
+EOF
+cat > "$T/rev.py" <<'PY'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location(
+    "rr", os.path.join(os.environ["SRC"], "tools/repo-resolve.py"))
+rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+ref, repo, hdir, action = sys.argv[1:5]
+r = rr.resolve(ref, None if repo == "-" else repo, hdir)
+if action == "retarget-sidecar":
+    link = os.path.join(os.environ["REV"], "sidecar")
+    os.remove(link); os.symlink(os.environ["DECOY"], link)
+elif action == "retarget-chosen":
+    link = os.path.join(os.environ["REV"], "child")
+    os.rename(link, link + "-moved"); os.symlink(os.environ["DECOY"], link)
+elif action == "repoint-manifest":
+    open(os.path.join(os.environ["REV"], "umbrella.manifest.yaml"), "w").write(
+        "repos:\n  alpha:\n    path: %s\n" % os.environ["DECOY"])
+elif action == "repoint-other-key":
+    open(os.path.join(os.environ["REV"], "umbrella.manifest.yaml"), "a").write(
+        "  unrelated:\n    path: %s\n" % os.environ["DECOY"])
+elif action == "advance-base":
+    d = r.directory
+    open(os.path.join(d, "more.txt"), "w").close()
+    for c in (["add", "-A"], ["commit", "-m", "someone else's merge"]):
+        __import__("subprocess").run(
+            ["git", "-c", "user.email=t@e", "-c", "user.name=t"] + c,
+            cwd=d, stdout=-3, stderr=-3)
+ok, why = rr.revalidate(r, hdir)
+print("%s %s" % (ok, why))
+PY
+rev() { SRC="$SRC" REV="$REV" DECOY="${2:-$T/rev-sidecar-decoy}" python3 "$T/rev.py" "$REV_CHILD" "${3:--}" "$REV/.harness" "$1"; }
+
+# CLAUSE: an UNCHANGED world revalidates. Without this the three refusals below would all
+# hold against a revalidate that simply always says no — which is exactly what it did.
+[ "$(rev none)" = "True None" ] \
+  || fail "C8: an UNCHANGED world did not revalidate ($(rev none)) — an unbound resolution's \`repo\` is the chosen directory's BASENAME, and reading it as a manifest key makes the guard useless on the aliased layout the manifest exists for"
+# CLAUSE: same REPOSITORY — the chosen one moving is detected.
+case "$(rev retarget-chosen)" in
+  False*) ;;
+  *) fail "C8: retargeting the CHOSEN repository was not detected: $(rev retarget-chosen)" ;;
+esac
+( cd "$REV" && rm -f child && mv child-moved child ) 2>/dev/null || true
+# CLAUSE: same CERTAINTY — a NON-SELECTED candidate becoming a different repository can
+# turn a unique answer ambiguous, so it must be detected even though the chosen repo, the
+# manifest and the candidate PATHS are all unchanged.
+case "$(rev retarget-sidecar)" in
+  False*) ;;
+  *) fail "C8: retargeting a NON-SELECTED candidate went undetected — uniqueness is what made this answer certain, and a fresh resolve could now be ambiguous" ;;
+esac
+ln -sfn "$T/rev-sidecar-real" "$REV/sidecar"
+# CLAUSE: same AUTHORITY, for a BOUND request — and scoped to the key that was asked for.
+case "$(rev repoint-manifest "$T/rev-sidecar-decoy" alpha)" in
+  False*) ;;
+  *) fail "C8: repointing the BOUND key in the manifest went undetected" ;;
+esac
+cat > "$REV/umbrella.manifest.yaml" <<'EOF'
+repos:
+  alpha:
+    path: child
+    init: ./init.sh
+    test_command: "true"
+EOF
+[ "$(rev repoint-other-key "$T/rev-sidecar-decoy" alpha)" = "True None" ] \
+  || fail "C8: adding an UNRELATED manifest key aborted a bound resolution ($(rev repoint-other-key "$T/rev-sidecar-decoy" alpha)) — the witness must cover what this resolution used, or ordinary edits abort unrelated writes"
+cat > "$REV/umbrella.manifest.yaml" <<'EOF'
+repos:
+  alpha:
+    path: child
+    init: ./init.sh
+    test_command: "true"
+EOF
+# ...and what it does NOT promise: the default branch ADVANCING. That is somebody else's
+# merge, it happens constantly, and ancestry is monotone under fast-forward — aborting on
+# it would make the guard fire so often it would be switched off.
+[ "$(rev advance-base)" = "True None" ] \
+  || fail "C8: the default branch advancing aborted the resolution ($(rev advance-base)) — that is an ordinary merge by someone else, not a change of WHICH repository this is about"
+pass "E99-F129c C8 revalidate_asserts_the_same_answer_not_an_unchanged_world"
+
 echo "All repository-resolver tests passed."

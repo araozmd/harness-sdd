@@ -58,6 +58,21 @@ The contract it publishes (and now owns):
 - **Uncertainty is a value you cannot spend.** `Resolution.directory` and `.base` *raise*
   when the resolution does not have them, so "I could not tell" cannot slide into "yes".
 - **The witness comes back with the resolution**, so a call path cannot omit it.
+- **`revalidate()` has a stated promise**: *a fresh `resolve()` with the same inputs would
+  return the same outcome, the same repository, and the same certainty.* It had a name and
+  an intuition instead, and two findings fell straight out of the gap — it compared the
+  **wrong** thing (reading the chosen directory's basename as a manifest key, so an unbound
+  resolution under an aliased manifest could never revalidate: fail-safe, but useless on the
+  layout the manifest exists for) and **too few** things (only the chosen repository, so
+  retargeting a *non-selected* candidate left it saying "unchanged" while a fresh resolve
+  would answer `ambiguous`). Everything it checks now follows from that sentence — the
+  chosen identity, the manifest's state, the manifest entry for a **bound** request, and the
+  candidate set in paths **and identities**. What it deliberately does not promise: the
+  default branch advancing (somebody else's merge, constant in a busy repository, and
+  ancestry is monotone under fast-forward — aborting on it would make the guard fire so
+  often it would be switched off). `binding` is now its own field: `repo` is the name to
+  record, and a single field whose meaning depended on how you arrived is how the first of
+  those findings happened.
 
 Measured, on a remote that moved its default `main` → `trunk` while `main` still existed:
 the cached symref still said `main`, and a commit reachable only from the *former* default

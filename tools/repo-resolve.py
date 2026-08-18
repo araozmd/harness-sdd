@@ -82,6 +82,41 @@
 #   not treat an unconfirmed base as grounds to REFUSE, because refusing on a stale view
 #   rejects work that is already merged.
 #
+# ── what `revalidate()` asserts, exactly ─────────────────────────────────────
+#
+# `resolve()` is expensive and talks to the network, so a caller runs it BEFORE taking a
+# lock and re-checks it INSIDE one. That re-check needs a promise, and it did not have
+# one — it had a name and an intuition. Two findings came straight out of the gap: it
+# compared the WRONG thing (it read the chosen directory's basename as a manifest key, so
+# an unbound resolution under an aliased manifest could never revalidate), and it compared
+# TOO FEW things (only the chosen repository, so retargeting a NON-selected candidate left
+# it saying "unchanged" while a fresh resolve would now report `ambiguous`). Both are
+# answers to a question nobody had stated, so here it is:
+#
+#   revalidate(r, hdir) is True iff a fresh resolve() with the SAME inputs would return
+#   the same OUTCOME, the same REPOSITORY, and the same CERTAINTY.
+#
+# Everything it checks follows from that sentence, and nothing else belongs in it:
+#   * the chosen repository is still that repository        (same repository)
+#   * for a BOUND request, the manifest still puts that KEY there   (same authority)
+#   * the manifest's state is unchanged                     (absent↔present flips whether
+#                                                            a claim can be malformed)
+#   * the candidate set — paths AND identities — is unchanged (same CERTAINTY: uniqueness
+#                                                            is what made an unbound answer
+#                                                            unambiguous, and a candidate
+#                                                            that is now a different
+#                                                            repository can make it not)
+#
+# What it deliberately does NOT promise, because these change the WORLD without changing
+# the ANSWER:
+#   * the default branch advancing. That is somebody else's merge, it happens constantly
+#     in a busy repository, and ancestry is monotone under fast-forward — aborting on it
+#     would make the guard fire so often it would be switched off. Whether the base is
+#     CURRENT is a separate question, answered at resolve() time by `base_evidence` and
+#     `base_confirmed`, not here.
+#   * file contents, working-tree state, or anything about the ref's own history.
+# It also spawns NO child process, so a caller may run it while holding a lock.
+#
 # ── uncertainty is a value, not an omission ──────────────────────────────────
 # `Resolution.directory` and `.base` RAISE if you read them when they do not exist. That
 # is deliberate: the failure this module exists to prevent is a caller treating "I could
@@ -193,18 +228,24 @@ class Resolution(object):
     "yes" by forgetting a branch.
     """
 
-    __slots__ = ("outcome", "repo", "identity", "detail", "candidates",
+    __slots__ = ("outcome", "repo", "binding", "identity", "detail", "candidates",
                  "manifest_state", "_directory", "_base", "base_evidence",
                  "has_origin", "commit", "base_tip")
 
-    def __init__(self, outcome, repo=None, directory=None, identity=None, detail=None,
+    def __init__(self, outcome, repo=None, binding=None, directory=None,
+                 identity=None, detail=None,
                  candidates=(), manifest_state="absent", base=None,
                  base_evidence=BASE_NONE, has_origin=False, commit=None,
                  base_tip=None):
         assert outcome in OUTCOMES, outcome
         assert base_evidence in BASE_EVIDENCE, base_evidence
         self.outcome = outcome
+        # `repo` is the NAME TO RECORD — for a bound request the key, for a search the
+        # chosen directory's basename. `binding` is what the CALLER ASKED FOR, or None.
+        # They are separate fields on purpose: a single field whose meaning depended on how
+        # you arrived is exactly how revalidate came to read a basename as a manifest key.
         self.repo = repo
+        self.binding = binding
         self.identity = identity
         self.detail = detail
         self.candidates = tuple(candidates)
@@ -387,7 +428,7 @@ def manifest_repos(hdir):
     return "present", repos
 
 
-def candidates(hdir):
+def candidates(hdir, pairs=False):
     """Repositories to search when no manifest names one — nearest first, deduplicated.
 
     (1) the harness dir; (2) its parent; (3) that parent's immediate children. Directory
@@ -408,7 +449,7 @@ def candidates(hdir):
             return
         if os.path.exists(os.path.join(real, ".git")):
             reals.append(real)
-            seen.append(path)
+            seen.append((path, real))
 
     hdir = os.path.realpath(hdir)
     add(hdir)
@@ -422,7 +463,10 @@ def candidates(hdir):
         for name in entries:
             if not name.startswith("."):
                 add(os.path.join(root, name))
-    return seen
+    # With `pairs`, each entry is (lexical, realpath). Uniqueness is what makes an unbound
+    # answer certain, so a re-check needs each candidate's IDENTITY, not just its spelling:
+    # a candidate that is now a different repository can turn a unique answer ambiguous.
+    return seen if pairs else [lex for lex, _real in seen]
 
 
 def same_repository(a, b):
@@ -510,16 +554,18 @@ def resolve(ref, repo_name, hdir):
     state, mapping = manifest_repos(hdir)
 
     if repo_name is not None:
+        cand = ()          # a binding did no search, so there is no uniqueness to witness
         if state == "present":
             if repo_name not in mapping:
                 return Resolution(
-                    UNDECLARED, repo=repo_name, manifest_state=state,
+                    UNDECLARED, repo=repo_name, binding=repo_name, manifest_state=state,
                     detail="%s is not declared in the umbrella manifest" % repo_name,
                 )
             lexical = mapping[repo_name]
             if not lexical or not os.path.exists(os.path.join(lexical, ".git")):
                 return Resolution(
-                    UNLOCATABLE, repo=repo_name, manifest_state=state,
+                    UNLOCATABLE, repo=repo_name, binding=repo_name,
+                    manifest_state=state,
                     identity=Identity(lexical) if lexical else None,
                     detail="%s is declared but cannot be read from this checkout"
                            % repo_name,
@@ -529,17 +575,19 @@ def resolve(ref, repo_name, hdir):
             dirs = [c for c in candidates(hdir) if os.path.basename(c) == repo_name]
             if not dirs:
                 return Resolution(
-                    UNLOCATABLE, repo=repo_name, manifest_state=state,
+                    UNLOCATABLE, repo=repo_name, binding=repo_name,
+                    manifest_state=state,
                     detail="no repository named %r is visible near %s" % (repo_name, hdir),
                 )
     else:
-        dirs = candidates(hdir)
+        cand = tuple(candidates(hdir, pairs=True))
+        dirs = [lex for lex, _real in cand]
 
     hits = [d for d in dirs if resolve_commit(d, ref)]
     if not hits:
         return Resolution(
-            UNKNOWN, repo=repo_name, manifest_state=state,
-            candidates=tuple(dirs) if repo_name is None else (),
+            UNKNOWN, repo=repo_name, binding=repo_name, manifest_state=state,
+            candidates=cand,
             identity=Identity(dirs[0]) if (repo_name is not None and dirs) else None,
             detail="%s does not name a commit in %s"
                    % (ref, repo_name or ("any repository near %s" % hdir)),
@@ -552,7 +600,7 @@ def resolve(ref, repo_name, hdir):
                 distinct.append(h)
         if len(distinct) > 1:
             return Resolution(
-                AMBIGUOUS, manifest_state=state, candidates=tuple(dirs),
+                AMBIGUOUS, manifest_state=state, candidates=cand,
                 detail="%s resolves in %d different repositories (%s)"
                        % (ref, len(distinct),
                           ", ".join(os.path.basename(d) for d in distinct)),
@@ -564,38 +612,61 @@ def resolve(ref, repo_name, hdir):
     return Resolution(
         RESOLVED,
         repo=repo_name or os.path.basename(os.path.realpath(chosen)),
+        binding=repo_name,
         directory=chosen,
         identity=Identity(chosen),
         manifest_state=state,
-        candidates=tuple(dirs) if repo_name is None else (),
+        candidates=cand,
         base=base, base_evidence=evidence, has_origin=has_origin,
         base_tip=advertised, commit=resolve_commit(chosen, ref),
     )
 
 
 def revalidate(resolution, hdir):
-    """Does this resolution still describe the world? Filesystem + one file read only.
+    """Would a fresh `resolve()` with the same inputs give the same answer?
 
-    Safe to call while holding a lock: it re-reads the manifest text and re-resolves the
-    recorded paths, but spawns no child process and touches no network. Returns
-    (True, None) or (False, what changed).
+    True iff the outcome, the repository and the CERTAINTY would all be the same. See
+    "what `revalidate()` asserts, exactly" in the header for the promise and — just as
+    important — for what it deliberately does not promise. Filesystem and one file read
+    only: no child process, so a caller may run this while holding a lock.
+
+    Returns (True, None) or (False, what changed).
     """
+    # 1. SAME REPOSITORY — the chosen directory still resolves where it did.
     if resolution.identity is not None and not resolution.identity.revalidate():
         return False, "%s now resolves to %s, not %s" % (
             resolution.identity.lexical,
             os.path.realpath(resolution.identity.lexical),
             resolution.identity.real,
         )
+
     state, mapping = manifest_repos(hdir)
+
+    # 2. SAME AUTHORITY — absent↔present flips whether a claim can be malformed at all.
     if state != resolution.manifest_state:
         return False, "the manifest went from %s to %s" % (resolution.manifest_state, state)
-    if resolution.repo is not None and state == "present":
-        now = mapping.get(resolution.repo)
+
+    # 3. SAME AUTHORITY, for a BOUND request only. `binding` is what the caller asked for;
+    #    `repo` is only the name to record, and for a search it is the chosen directory's
+    #    basename — reading THAT as a manifest key made every unbound resolution under an
+    #    aliased manifest (`alpha: {path: child}`) fail to revalidate, which is fail-safe
+    #    but useless on the very layout the manifest exists for.
+    if resolution.binding is not None and state == "present":
+        now = mapping.get(resolution.binding)
         was = resolution.identity.lexical if resolution.identity else None
         if now != was:
             return False, "the manifest now puts %s at %s, not %s" % (
-                resolution.repo, now, was)
+                resolution.binding, now, was)
+
+    # 4. SAME CERTAINTY — uniqueness is what made an unbound answer certain, so the
+    #    candidate set must be unchanged in PATHS **and IDENTITIES**. Comparing only the
+    #    chosen repository let a NON-selected candidate be retargeted at a repository that
+    #    also holds the ref: nothing the old check looked at moved, while a fresh resolve
+    #    would now answer `ambiguous`.
     if resolution.candidates:
-        if tuple(candidates(hdir)) != resolution.candidates:
-            return False, "the set of nearby repositories changed"
+        if tuple(candidates(hdir, pairs=True)) != resolution.candidates:
+            return False, (
+                "the nearby repositories changed (a path or an identity), so this answer "
+                "may no longer be the only one"
+            )
     return True, None
