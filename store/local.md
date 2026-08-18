@@ -183,6 +183,37 @@ Orchestrator's exclusive ownership of state writes.
   probed: a wrong `ancestor` from a stale local tip needs a rewritten remote, while a wrong
   refusal needs only an ordinary merge.
 
+  **WHICH repository is the claim about?** The nine rows decide a verdict for a
+  *(ref, repository)* pair and presume that pair is settled. It is not — it is established
+  by a search, a path out of a manifest, and an assumption that a ref names one repository —
+  and that presumption produced four separate defects before it was written down. So it has
+  its own contract:
+
+  - **A binding names the repository; an unbound ref must be unambiguous.** `<repo>=<ref>`
+    is legal on **any** feature now, sliced or not. Without one, the ref is searched across
+    the nearby repositories and must resolve in exactly **one**; two or more is a
+    **REFUSED** ambiguous claim, naming both remedies (pass the immutable commit id, or
+    bind it). Never "take the first": the harness dir and its parent are searched *before*
+    the children, so the first hit is the umbrella's own bookkeeping repository — the one
+    repository that never holds feature work. Measured: `--evidence main` on an umbrella
+    recorded `{"verified": "ancestor", "repo": "umb"}` for a feature whose work is in a
+    child. This is a row-3-style refusal (a malformed claim, with a legal remedy), not a
+    row-8 one, so it cannot reject merged work.
+  - **A repository's identity is its `realpath`**, kept beside the lexical path. `../alpha`
+    reads identically before and after the symlink is retargeted while the repository
+    underneath changes; keeping both catches the manifest being rewritten *and* the link
+    moving. Two candidates are the *same* repository when their common git dir matches, so
+    linked worktrees do not read as ambiguity. What this does **not** cover, deliberately:
+    a repository replaced in place. The fingerprint is a coherence check against concurrent
+    harness activity over a sub-second window, not a defence against a checkout being
+    swapped under a running process; hashing the base tip in would abort whenever anyone
+    else's merge advanced the default branch, and a guard that aborts routinely stops being
+    read.
+  - **The single-repo path carries the same discipline.** It did not: only sliced features
+    had a fingerprint. It now records the chosen repository *and* the candidate set that
+    made the choice unambiguous, so a repository appearing beside the board between the
+    plan and the write aborts instead of silently changing what the claim meant.
+
   **Where a repository lives is the manifest's answer**, resolved against the manifest
   file's own directory — the shipped example uses siblings (`../viernes-bff`), and nothing
   requires a key to equal a directory name. **What an object id looks like is git's answer**:

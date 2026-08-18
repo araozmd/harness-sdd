@@ -298,6 +298,37 @@ re-check is the defect this whole feature exists to remove. (Scoped to the unsli
 and to each slice record: a sliced feature's `ref` is a joined summary of several
 repositories, so there is no single commit for it.)
 
+**A second dimension: WHICH repository is the claim about?** The nine rows decide a verdict
+for a *(ref, repository)* pair and silently presumed that pair was settled. It is not — it
+is established by a search order, a path out of a manifest, and an assumption that a ref
+names one repository — and that presumption produced findings four separate times before it
+was written down. It now has its own stated contract beside the rows:
+
+- **A binding names the repository; an unbound ref must be unambiguous.** `<repo>=<ref>` is
+  legal on **any** feature (the contract half refused it on single-repo features because
+  nothing verified the name; the name is checked now, and a binding is the only way to
+  disambiguate). An unbound ref that resolves in two or more repositories is **REFUSED**,
+  naming both remedies. Never "take the first": the harness dir and its parent are searched
+  *before* the children, so the first hit is the umbrella's own bookkeeping repository —
+  the one that never holds feature work. Measured: `--evidence main` recorded
+  `{"verified": "ancestor", "repo": "umb"}` for a feature whose work was in a child.
+- **Identity is the `realpath`, kept beside the lexical path.** A lexical path is not an
+  identity: retargeting a symlink leaves the manifest text identical while the repository
+  underneath changes, and the old witness walked straight past it. Two candidates are the
+  *same* repository when their common git dir matches, so linked worktrees are not
+  ambiguity. Not covered, deliberately: a repository replaced in place — the fingerprint is
+  a coherence check over a sub-second window, not a defence against a swapped checkout, and
+  hashing the base tip in would abort whenever anyone else's merge advanced the branch.
+- **The single-repo path now carries the same discipline** — the chosen repository *and*
+  the candidate set that made the choice unambiguous, so a repository appearing beside the
+  board between plan and write aborts instead of re-deciding silently.
+
+**Row 8 vs row 9, one misapplication fixed:** a declared local default was treated as
+definitive even with an `origin` configured but unreachable. Discovery only falls back to a
+local signal *after* `ls-remote` fails, so in that state what "merged" means was never
+established — that is row 9. Measured: a commit already on the remote's `main` was REFUSED
+in an offline clone.
+
 **Additive.** `landed` and `commit` are optional in the schema; boards written by v0.64.0
 stay valid, and their `unchecked` rows stay `unchecked` until something rewrites them.
 
@@ -330,7 +361,7 @@ step now says so instead of looking like a truncated pass. Measured both ways: t
 state is **green here and red on a `master` host**; with the sentinel, the same omission is
 **red here**.
 
-The suite mirrors the table: **22 cases**, every refusal paired with a control that must
+The suite mirrors the table and the identity contract: **25 cases**, every refusal paired with a control that must
 SUCCEED. The contract half's `R18` — which proved that half performed **no** I/O — is
 deliberately **retired rather than weakened**: that claim is false here by design, and its
 successor is `R17`, which allows I/O but proves none of it happens **inside** the board lock.

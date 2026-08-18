@@ -713,6 +713,64 @@ def _refuse_if_parked(text, target_id):
 # case. Probing on every accept would put a bounded network call on the happy path
 # for an adversarial case, so row 7 answers from the local tip.
 #
+# ── WHICH REPOSITORY IS THIS CLAIM ABOUT? the identity contract ──────────────
+#
+# The nine rows above enumerate VERIFICATION OUTCOMES for a (ref, repository) pair.
+# They presume that pair is already settled. It is not — it is established by a search
+# order, a path out of a manifest, and an assumption that a ref names one repository —
+# and that presumption has produced findings four separate times: a slice repo located
+# by directory basename; the manifest missing from the plan→write fingerprint; a ref
+# resolving in several candidates and silently taking the first; and a lexical path in
+# the witness that a retargeted symlink walks straight past. Those are not rows. They
+# are one missing dimension, so it is stated here, before the code, like the rows.
+#
+# I1 — WHEN MAY A REF BE RESOLVED BY SEARCH?
+#   A BINDING (`<repo>=<ref>`) names the repository, so no search happens. The bound
+#   form is legal on ANY feature now, sliced or not: while nothing verified the name it
+#   was refused on a single-repo feature (it would have recorded a repository nobody
+#   checked), but the name is checked here, and a binding is the operator's only way to
+#   say WHICH repository an ambiguous ref belongs to.
+#   Without a binding the ref is searched across the nearby repositories, and the search
+#   must land on EXACTLY ONE. If two or more resolve it, the claim is AMBIGUOUS and is
+#   REFUSED — naming the candidates and the two remedies (pass the immutable commit id,
+#   or bind it). Not "take the first": `_repo_candidates()` tries the harness dir and its
+#   parent BEFORE the children, so the first hit is the umbrella's own bookkeeping
+#   repository — the one repository that never contains feature work. Measured, on an
+#   umbrella whose board repo and child both have `main`: `--evidence main` recorded
+#   `{"verified": "ancestor", "repo": "umb"}`, attesting a board-keeping commit for a
+#   feature whose work is in the child. Any ordering here is a guess; the only answer
+#   that is not a guess is to require the claim to be unambiguous. This refusal is the
+#   row-3 kind — a malformed claim, checkable and with a legal remedy — not the row-8
+#   kind, so it does not risk rejecting merged work.
+#
+# I2 — WHAT IS A REPOSITORY'S IDENTITY?
+#   For the fingerprint: the REALPATH of the work tree, with the lexical path kept beside
+#   it. A lexical path is not an identity — `path: ../alpha` where `alpha` is a symlink
+#   reads identically before and after the link is retargeted, while the repository
+#   underneath is a different one. Keeping both catches both moves: the manifest text
+#   changing (lexical differs) and the link changing (realpath differs).
+#   For deciding whether two candidates are "two repositories": the realpath of the
+#   repository's COMMON GIT DIR, so linked worktrees of one repository collapse to one
+#   candidate instead of reading as ambiguity and refusing a claim that is not ambiguous.
+#   What realpath does NOT cover, stated rather than implied: a repository REPLACED IN
+#   PLACE — same realpath, different objects. That is deliberate. The fingerprint is a
+#   coherence check against concurrent HARNESS activity across a sub-second window, not a
+#   defence against an adversary swapping a checkout under a running process. The
+#   stronger identity — hashing the base tip into the witness — would abort whenever
+#   anyone else's merge advanced the default branch, i.e. routinely, in exactly the busy
+#   repositories this is meant to serve; and a guard that aborts routinely is one people
+#   stop reading.
+#
+# I3 — DOES THE SINGLE-REPO PATH NEED THE SAME DISCIPLINE?
+#   Yes, and it did not have it: the fingerprint covered only sliced features, so an
+#   unsliced resolution carried no identity stability at all. The witness now covers
+#   both — for a sliced feature the manifest's (repo → lexical, realpath) entries; for an
+#   unsliced one the chosen repository AND the candidate set that made the choice
+#   unambiguous, so a repository appearing beside the board between plan and write aborts
+#   instead of silently changing what the claim was about. Both are recomputed inside the
+#   lock with filesystem calls only — no child process, no network — so the lock still
+#   holds nothing but the pure re-read → patch → validate → replace.
+#
 # ── how a ref becomes an object: ask git, never a regex ──────────────────────
 # The predecessor pattern-matched `^[0-9a-fA-F]{7,40}$` to decide what was worth
 # resolving, which silently skipped SHA-256's 64-character ids — they fell through to
@@ -948,7 +1006,26 @@ def _manifest_repos(hdir):
     return "present", repos
 
 
-def _repo_candidates(hdir):
+def _repo_identity(path):
+    """A repository's identity for the fingerprint: (lexical path, realpath). See I2."""
+    return (path, os.path.realpath(path))
+
+
+def _same_repository(a, b):
+    """True iff two candidate directories are the SAME repository (I2).
+
+    Two linked worktrees are two directories and one repository; comparing paths would
+    read them as an ambiguity and refuse a claim that is not ambiguous. `--git-common-dir`
+    is what git itself uses to answer this.
+    """
+    ca = _git(["rev-parse", "--git-common-dir"], cwd=a)
+    cb = _git(["rev-parse", "--git-common-dir"], cwd=b)
+    if ca is None or cb is None:
+        return False
+    return os.path.realpath(os.path.join(a, ca)) == os.path.realpath(os.path.join(b, cb))
+
+
+def _repo_candidates(hdir, pairs=False):
     """Repositories to search when NO manifest declares one — best effort, nearest first.
 
     (1) the harness dir itself (source layout: the harness repo root); (2) its parent
@@ -956,15 +1033,17 @@ def _repo_candidates(hdir):
     of (2) that are work trees. Directory probing only; no git process is spawned.
     """
     seen = []
+    reals = []
 
     def add(path):
         if not path:
             return
         real = os.path.realpath(path)
-        if real in seen:
+        if real in reals:
             return
         if os.path.exists(os.path.join(real, ".git")):
-            seen.append(real)
+            reals.append(real)
+            seen.append((path, real))
 
     hdir = os.path.realpath(hdir)
     add(hdir)
@@ -979,7 +1058,7 @@ def _repo_candidates(hdir):
             if name.startswith("."):
                 continue
             add(os.path.join(root, name))
-    return seen
+    return seen if pairs else [real for _lex, real in seen]
 
 
 def _locate_repo(repo_name, hdir):
@@ -1099,6 +1178,17 @@ def _confirm_refutation(repo, commit, base):
     Returns (verdict, detail) with verdict in {"refuted", "ancestor", "stale"}.
     """
     if not base.startswith("origin/"):
+        # A LOCAL base is definitive only when there is no remote for it to be stale
+        # against. With an `origin` configured, a local base means discovery could not
+        # reach the remote (`_default_ref` only falls back to a local signal after
+        # `ls-remote` fails), so what "merged" means was never established — that is row
+        # 9, not row 8. Measured: a commit already on the remote's `main` was REFUSED in
+        # an offline clone carrying `harness.defaultBranch=main`.
+        if _git(["remote", "get-url", "origin"], cwd=repo) is not None:
+            return "stale", (
+                "an `origin` is configured but could not be consulted, so this local "
+                "base may not be what the remote calls its default branch"
+            )
         return "refuted", None
     tip = _remote_tip(repo, base)
     if tip is None:
@@ -1136,7 +1226,19 @@ def _unchecked(ref, repo_name, why, commit=None):
     return record
 
 
-def _verify_in_repos(ref, repo_name, dirs, hdir):
+def _refuse_ambiguous(ref, hits):
+    """I1: an unbound ref that resolves in more than one repository attests nothing."""
+    _die(
+        "evidence %s resolves in %d different repositories (%s), so it does not say "
+        "WHICH one this feature landed in — and taking the first would take the harness "
+        "dir's own repository, which is searched before the children and is the one "
+        "repository that never holds feature work. Pass the immutable commit id (which "
+        "normally exists in only one of them), or bind the claim: --evidence <repo>=<ref>."
+        % (ref, len(hits), ", ".join(os.path.basename(h) for h in hits))
+    )
+
+
+def _verify_in_repos(ref, repo_name, dirs, hdir, trace=None):
     """Rows 2/5/6/7/8/9 over a candidate list. Returns a record, or _die()s on 8.
 
     One repository proving ancestry wins over another's negative: a sha is legitimately
@@ -1146,7 +1248,22 @@ def _verify_in_repos(ref, repo_name, dirs, hdir):
     unbased = []         # row 6: object known here, no default branch nameable
     stale = []           # row 9: ancestry false, tip unconfirmed
     resolved = None      # any commit id we managed to resolve, for the record
-    for repo in dirs:
+
+    # I1 — IDENTITY BEFORE VERDICT. Establish WHICH repository the claim is about before
+    # asking any of the nine rows about it. An unbound ref that resolves in several
+    # repositories is ambiguous, and no ordering of the candidates can settle it.
+    hits = [r for r in dirs if _resolve_commit(r, ref) is not None]
+    if repo_name is None and len(hits) > 1:
+        distinct = []
+        for h in hits:
+            if not any(_same_repository(h, d) for d in distinct):
+                distinct.append(h)
+        if len(distinct) > 1:
+            _refuse_ambiguous(ref, distinct)
+        hits = distinct
+    if hits and trace is not None:
+        trace.append((repo_name or "", ) + _repo_identity(hits[0]))
+    for repo in (hits or dirs):
         commit = _resolve_commit(repo, ref)
         if commit is None:
             continue                                   # rows 2/5: unknown here
@@ -1231,7 +1348,7 @@ def _verify_in_repos(ref, repo_name, dirs, hdir):
     )
 
 
-def _classify(ref, repo_name=None, hdir=None):
+def _classify(ref, repo_name=None, hdir=None, trace=None):
     """One --evidence value → one landing record. THE DECISION TABLE, in order.
 
     `repo_name` is the slice repository the value was bound to (None for a single-repo
@@ -1256,7 +1373,7 @@ def _classify(ref, repo_name=None, hdir=None):
             record["repo"] = repo_name
         return record
     if repo_name is None:
-        return _verify_in_repos(ref, None, _repo_candidates(hdir), hdir)
+        return _verify_in_repos(ref, None, _repo_candidates(hdir), hdir, trace)
     dirs, row = _locate_repo(repo_name, hdir)
     if row == "3":                                     # ROW 3 — malformed claim, REFUSED
         _die(
@@ -1273,12 +1390,12 @@ def _classify(ref, repo_name=None, hdir=None):
             "repository %s is declared but cannot be read from this checkout, so "
             "evidence %s for that slice was NOT checked" % (repo_name, ref),
         )
-    return _verify_in_repos(ref, repo_name, dirs, hdir)
+    return _verify_in_repos(ref, repo_name, dirs, hdir, trace)
 
 
-def _landing_record(evidence, hdir):
+def _landing_record(evidence, hdir, trace=None):
     """The single-repo feature's record."""
-    return _classify(evidence, None, hdir)
+    return _classify(evidence, None, hdir, trace)
 
 
 def _split_binding(arg):
@@ -1310,7 +1427,7 @@ def _slice_repos(feature):
     return repos
 
 
-def _sliced_landing_record(target_id, evidence_list, slice_repos, hdir):
+def _sliced_landing_record(target_id, evidence_list, slice_repos, hdir, trace=None):
     """Bind every slice repository to its OWN evidence. Returns the feature record.
 
     The feature-level `verified` rolls up to the WEAKEST slice (`_VERIFIED_RANK`), so
@@ -1348,7 +1465,7 @@ def _sliced_landing_record(target_id, evidence_list, slice_repos, hdir):
             "are hand-typed and E09-F02 proves they can read `merged: true` against a "
             "closed, unmerged PR." % (target_id, ", ".join(missing))
         )
-    records = [_classify(bindings[r], r, hdir) for r in slice_repos]
+    records = [_classify(bindings[r], r, hdir, trace) for r in slice_repos]
     verified = min(records, key=lambda r: _VERIFIED_RANK[r["verified"]])["verified"]
     return {
         "ref": "; ".join("%s=%s" % (r["repo"], r["ref"]) for r in records),
@@ -1380,7 +1497,7 @@ def _feature_entry(text, target_id):
     return False, None
 
 
-def _resolve_landing(text, target_id, status, evidence_list, hdir):
+def _resolve_landing(text, target_id, status, evidence_list, hdir, trace=None):
     """The `done`-transition precondition. Returns a `landed` record or None.
 
     NOT pure: the per-ref verdicts run git (and, on the refusal path, ask the remote).
@@ -1415,20 +1532,21 @@ def _resolve_landing(text, target_id, status, evidence_list, hdir):
             )
         )
     if slice_repos:
-        return _sliced_landing_record(target_id, evidence_list, slice_repos, hdir)
+        return _sliced_landing_record(target_id, evidence_list, slice_repos, hdir, trace)
     if len(evidence_list) > 1:
         _die(
             "%s has no slices, so it takes exactly one --evidence (got %d). "
             "Repeated evidence binds one value per SLICE repository."
             % (target_id, len(evidence_list))
         )
-    bound_repo, _ref = _split_binding(evidence_list[0])
+    bound_repo, bound_ref = _split_binding(evidence_list[0])
     if bound_repo is not None:
-        _die(
-            "--evidence <repo>=<ref> binds evidence to a SLICE repository, but %s "
-            "has no slices — pass --evidence <ref|none:why>" % target_id
-        )
-    return _landing_record(evidence_list[0], hdir)
+        # I1: legal on a single-repo feature, and the ONLY way to disambiguate a ref that
+        # resolves in more than one nearby repository. The contract half refused this
+        # because nothing verified the name; here the name is resolved and checked, so
+        # recording it is a statement about a repository that was actually consulted.
+        return _classify(bound_ref, bound_repo, hdir, trace)
+    return _landing_record(evidence_list[0], hdir, trace)
 
 
 def _write_landed(text, target_id, record):
@@ -1526,19 +1644,58 @@ def _manifest_witness(hdir, repos):
     all, so a resolution made under "no authority" must not be written under one.
     """
     state, mapping = _manifest_repos(hdir)
+    # This witness owns exactly one question: did the MANIFEST TEXT change? The realpath
+    # dimension — the same text now pointing somewhere else — belongs to the identity
+    # witness below, which also covers the single-repo path. Keeping a realpath here as
+    # well made the two redundant: a mutation campaign could kill NEITHER, because either
+    # alone caught the swap, and a guard no test can distinguish is a guard no test
+    # protects. One question per witness.
     return (state, tuple((r, mapping.get(r)) for r in repos))
 
 
-def _landing_shape(text, target_id, hdir):
+def _identity_witness(hdir, repos, used):
+    """I3: what this resolution decided the claim was ABOUT, recomputable without I/O.
+
+    `used` is what resolution actually consulted — (label, lexical, realpath) — and for a
+    single-repo feature the CANDIDATE SET is carried too, because that set is what made
+    the choice unambiguous: a repository appearing beside the board between plan and write
+    changes what an unbound ref means, and must abort rather than quietly re-decide.
+    Everything here is filesystem-only, so the in-lock re-check spawns nothing.
+    """
+    used_now = tuple(sorted((label, lex, os.path.realpath(lex)) for label, lex, _r in used))
+    if repos:
+        return ("sliced", used_now, ())
+    return ("single", used_now, tuple(_repo_candidates(hdir, pairs=True)))
+
+
+_UNSET = object()
+
+
+def _landing_shape(text, target_id, hdir, used=(), manifest=_UNSET):
     """The inputs that decide WHAT gets probed, and what the answer was computed against.
 
-    (is_feature, ordered slice repos, manifest witness). The witness is None for a feature
-    with no slices: that path never consults the manifest, so a manifest appearing or
-    vanishing must not abort a write it could not have influenced.
+    (is_feature, ordered slice repos, manifest witness, identity witness). The manifest
+    witness stays scoped to sliced features — that path is the only one that consults it,
+    so a manifest appearing or vanishing must not abort a write it could not influence —
+    while the IDENTITY witness (I3) covers both paths.
     """
     is_feature, feature = _feature_entry(text, target_id)
     repos = tuple(_slice_repos(feature) if is_feature else ())
-    return (is_feature, repos, _manifest_witness(hdir, repos) if repos else None)
+    # `manifest` is passed in by the PLAN, captured BEFORE resolution ran. It must be the
+    # value the resolution actually used, not whatever the file says once resolution has
+    # finished: reading it afterwards would collapse the very window this guard covers —
+    # measured, when a refactor moved the capture after the probe and R17c reddened.
+    mwit = (
+        (_manifest_witness(hdir, repos) if repos else None)
+        if manifest is _UNSET
+        else manifest
+    )
+    return (
+        is_feature,
+        repos,
+        mwit,
+        _identity_witness(hdir, repos, used) if is_feature else None,
+    )
 
 
 def _landing_plan(target_id, status, evidence_list, hdir):
@@ -1553,24 +1710,39 @@ def _landing_plan(target_id, status, evidence_list, hdir):
             text = fh.read()
     except OSError:
         text = ""
+    # Capture what the manifest says BEFORE resolution consults it, so the fingerprint
+    # records the state the answer was computed under (see `_landing_shape`).
+    _is_feature, _feature = _feature_entry(text, target_id)
+    _repos = tuple(_slice_repos(_feature) if _is_feature else ())
+    manifest_before = _manifest_witness(hdir, _repos) if _repos else None
+    trace = []
+    record = _resolve_landing(text, target_id, status, evidence_list, hdir, trace)
     return {
-        "shape": _landing_shape(text, target_id, hdir),
-        "record": _resolve_landing(text, target_id, status, evidence_list, hdir),
+        "shape": _landing_shape(
+            text, target_id, hdir, trace, manifest=manifest_before
+        ),
+        "record": record,
+        "used": tuple(trace),
     }
 
 
 def _shape_str(shape):
-    is_feature, repos, witness = shape
+    is_feature, repos, witness, identity = shape
     if not is_feature:
         return "not a feature on this board"
     if not repos:
-        return "a single-repo feature"
+        seen = ""
+        if identity is not None and identity[1]:
+            seen = " resolved in %s" % ", ".join(real for _l, _x, real in identity[1])
+        return "a single-repo feature%s" % seen
     where = ""
     if witness is not None:
         state, pairs = witness
         where = " with manifest %s: %s" % (
             state,
-            ", ".join("%s=%s" % (r, p if p else "<unlocatable>") for r, p in pairs),
+            ", ".join(
+                "%s=%s" % (r, lex if lex else "<unlocatable>") for r, lex in pairs
+            ),
         )
     return "a feature sliced across %s%s" % (", ".join(repos), where)
 
@@ -1584,7 +1756,7 @@ def _check_plan_still_applies(text, target_id, plan, hdir):
     than degrading: degrading would write a record justified by an authority that no
     longer exists, while aborting costs one re-run and can never record something false.
     """
-    shape = _landing_shape(text, target_id, hdir)
+    shape = _landing_shape(text, target_id, hdir, plan.get("used", ()))
     if shape == plan["shape"]:
         return plan["record"]
     _die(

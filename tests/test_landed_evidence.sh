@@ -932,12 +932,25 @@ set_status "$HDV" E01-F01 done --evidence "alpha=none: AWS console action, no co
 [ "$(field "$BOARDV" "d['landed']['verified']")" = "declared" ] \
   || fail "R14f: the rollup reads $(field "$BOARDV" "d['landed']['verified']") with one declared slice — it must never read stronger than its weakest slice"
 
-# (g) the single-repo path is UNCHANGED, in both directions: an unsliced feature still takes
-#     one bare value, and it REFUSES the bound form rather than silently ignoring the repo
-#     name (which would attest against a repository nobody checked).
+# (g) the single-repo path. It still takes one bare value — and, since E99-F129, it also
+#     ACCEPTS the bound form: with the repository name resolved and CHECKED rather than
+#     merely transcribed, a binding is the operator's way to say WHICH repository an
+#     otherwise-ambiguous ref belongs to (identity contract I1). The contract half refused
+#     it precisely because nothing verified the name; that reason is gone.
 mkboard "$HDV"
 set_status "$HDV" E01-F01 done --evidence "alpha=$ALPHA_MAIN"
-[ "$SS_RC" = "0" ] && fail "R14g: a repo-bound value was accepted on a feature with NO slices: $SS_OUT"
+[ "$SS_RC" = "0" ] || fail "R14g: the bound form was refused on a single-repo feature — it is the only way to disambiguate a ref that resolves in several nearby repositories: $SS_OUT"
+[ "$(field "$BOARDV" "d['landed']['repo']")" = "alpha" ] \
+  || fail "R14g: a bound single-repo landing did not record the repository it was checked in"
+[ "$(field "$BOARDV" "d['landed']['verified']")" = "ancestor" ] \
+  || fail "R14g: the bound single-repo landing was not verified in the repository it named"
+# ...and a binding naming a repository that cannot be found degrades honestly (row 4)
+# rather than silently attesting against something else.
+mkboard "$HDV"
+set_status "$HDV" E01-F01 done --evidence "nosuchrepo=$ALPHA_MAIN"
+[ "$SS_RC" = "0" ] || fail "R14g: a binding to an unlocatable repository BLOCKED the write: $SS_OUT"
+[ "$(field "$BOARDV" "d['landed']['verified']")" = "unchecked" ] \
+  || fail "R14g: a binding to a repository that cannot be found must degrade, not claim a proof"
 mkboard "$HDV"
 set_status "$HDV" E01-F01 done --evidence "$ALPHA_MAIN" --evidence "$BETA_MAIN"
 [ "$SS_RC" = "0" ] && fail "R14g: two --evidence values were accepted on a feature with NO slices: $SS_OUT"
@@ -1461,6 +1474,215 @@ set_status "$Y/.harness" E01-F01 done --evidence "alpha=$Y_LANDED"
 pass "E99-F102 R17c the_fingerprint_covers_what_the_manifest_told_the_plan"
 
 pass "E99-F102 R17 evidence_resolution_runs_outside_the_lock_and_is_revalidated_inside_it"
+
+# ── R22: WHICH repository is the claim about? (identity contract I1) ──────────────────
+# Round 2. The nine rows decide a verdict for a (ref, repository) pair and presume the pair
+# is settled; it was not. An unbound ref was resolved by SEARCH and the first hit won — and
+# `_repo_candidates()` tries the harness dir and its parent BEFORE the children, so the
+# first hit is the umbrella's own bookkeeping repository, the one repository that never
+# holds feature work. Measured on an umbrella whose board repo and child both have `main`:
+# `--evidence main` recorded {"verified": "ancestor", "repo": "umb"} — an attestation about
+# a board-keeping commit, standing in for the feature's work.
+AMB="$T/ambig"
+mkdir -p "$AMB/.harness/state" "$AMB/.harness/store" "$AMB/.harness/tools"
+cp "$SCHEMA" "$AMB/.harness/store/"; cp "$VALIDATE" "$AMB/.harness/tools/"
+( cd "$AMB" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+: > "$AMB/board-note.txt"; ( cd "$AMB" && git_q add -A && git_q commit -m "umbrella bookkeeping" )
+AMB_UMB="$(cd "$AMB" && git rev-parse main)"
+mkdir -p "$AMB/child"
+( cd "$AMB/child" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+: > "$AMB/child/src.txt"; ( cd "$AMB/child" && git_q add -A && git_q commit -m "the actual work" )
+AMB_CHILD="$(cd "$AMB/child" && git rev-parse main)"
+[ "$AMB_UMB" = "$AMB_CHILD" ] && fail "R22 setup: the two repositories share a commit id, so 'which one' would be undetectable"
+( cd "$AMB/child" && git cat-file -e "$AMB_UMB^{commit}" 2>/dev/null ) \
+  && fail "R22 setup: the child can see the umbrella's commit, so the case is not testing ambiguity"
+HDA="$AMB/.harness"
+BOARDA="$HDA/state/tasks.json"
+
+# `main` exists in BOTH: the claim does not say which, and no ordering can settle it.
+mkboard "$HDA"
+BEFORE="$(cat "$BOARDA")"
+set_status "$HDA" E01-F01 done --evidence "main"
+[ "$SS_RC" = "0" ] && fail "R22: an ambiguous ref was resolved by taking the first candidate — with the harness dir searched first that attests the umbrella's own bookkeeping commit for this feature: $SS_OUT"
+[ "$BEFORE" = "$(cat "$BOARDA")" ] || fail "R22: the board moved despite the refusal"
+case "$SS_OUT" in
+  *"resolves in"*) ;;
+  *) fail "R22: the refusal does not say the claim is ambiguous: $SS_OUT" ;;
+esac
+
+# CONTROL 1 — the FIRST remedy the refusal names: an immutable commit id normally exists in
+# only one of them, so it is unambiguous and verifies. This is also the control that rules
+# out "the guard now refuses every unbound ref".
+mkboard "$HDA"
+set_status "$HDA" E01-F01 done --evidence "$AMB_CHILD"
+[ "$SS_RC" = "0" ] || fail "R22 control-1: an UNAMBIGUOUS commit id was refused (rc=$SS_RC) — the guard is refusing unbound refs wholesale: $SS_OUT"
+[ "$(field "$BOARDA" "d['landed']['repo']")" = "child" ] \
+  || fail "R22 control-1: the record names $(field "$BOARDA" "d['landed']['repo']"), not the repository the commit actually lives in"
+
+# CONTROL 2 — the SECOND remedy: bind the claim. The same ambiguous ref, now saying which.
+mkboard "$HDA"
+set_status "$HDA" E01-F01 done --evidence "child=main"
+[ "$SS_RC" = "0" ] || fail "R22 control-2: binding the ambiguous ref to a repository was still refused (rc=$SS_RC) — the refusal names a remedy that does not work: $SS_OUT"
+[ "$(field "$BOARDA" "d['landed']['commit']")" = "$AMB_CHILD" ] \
+  || fail "R22 control-2: the bound claim resolved to $(field "$BOARDA" "d['landed']['commit']"), not the child's commit"
+
+# CONTROL 3 — ambiguity is about REPOSITORIES, not directories: two linked worktrees of ONE
+# repository must not read as ambiguous, or the guard would refuse ordinary layouts.
+( cd "$AMB/child" && git_q worktree add "$AMB/child-wt" -b wt-branch )
+[ -e "$AMB/child-wt/.git" ] || fail "R22 setup: the linked worktree was not created"
+mkboard "$HDA"
+set_status "$HDA" E01-F01 done --evidence "$AMB_CHILD"
+[ "$SS_RC" = "0" ] || fail "R22 control-3: a commit visible through a repository AND its own linked worktree was refused as ambiguous — two directories, one repository: $SS_OUT"
+( cd "$AMB/child" && git_q worktree remove --force "$AMB/child-wt" )
+# CONTROL 4 — I3: the SINGLE-REPO path needs the same identity stability the sliced path
+# has. The candidate set is what made an unbound ref unambiguous, so a repository appearing
+# beside the board between the plan and the write changes what the claim is ABOUT and must
+# abort — not quietly re-decide. Same plan→write window: hold the lock.
+symboard_amb() { mkboard "$HDA"; }
+symboard_amb; rm -f "$T/amb.rc" "$T/held3"
+cat > "$T/holder.py" <<'PY2'
+import fcntl, os, sys, time
+fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o644)
+fcntl.flock(fd, fcntl.LOCK_EX)
+open(sys.argv[2], "w").close()
+time.sleep(float(sys.argv[3]))
+PY2
+python3 "$T/holder.py" "$HDA/state/tasks.json.lock" "$T/held3" 4 &
+AMB_HOLD=$!
+_i=0; while [ ! -f "$T/held3" ]; do _i=$((_i+1)); [ "$_i" -gt 100 ] && fail "R22 control-4: the lock holder never started"; sleep 0.1; done
+( set +e
+  HARNESS_DIR="$HDA" python3 "$LOCK" set-status E01-F01 done --evidence "$AMB_CHILD"     >"$T/amb.out" 2>&1
+  echo $? > "$T/amb.rc" ) &
+AMB_BG=$!
+sleep 1.5                      # the plan has chosen a repository; the write is queued
+mkdir -p "$AMB/newcomer" && ( cd "$AMB/newcomer" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+: > "$AMB/newcomer/x.txt"; ( cd "$AMB/newcomer" && git_q add -A && git_q commit -m "appeared mid-write" )
+wait "$AMB_HOLD" 2>/dev/null || true
+await_bg "$AMB_BG" "$T/amb.rc"
+[ "$(cat "$T/amb.rc")" = "0" ]   && fail "R22 control-4: a repository appeared beside the board between the plan and the write, changing what an unbound ref could mean, and the verdict was written anyway — the single-repo path carries no identity witness: $(cat "$T/amb.out")"
+[ "$(field "$BOARDA" "'landed' in d")" = "False" ] || fail "R22 control-4: a record was written despite the abort"
+rm -rf "$AMB/newcomer"
+# ...and with the search space unchanged, the identical run SUCCEEDS — so control-4 is about
+# the newcomer, not about the single-repo path being unwritable while the lock is contended.
+symboard_amb; rm -f "$T/amb.rc" "$T/held3"
+python3 "$T/holder.py" "$HDA/state/tasks.json.lock" "$T/held3" 3 &
+AMB_HOLD=$!
+_i=0; while [ ! -f "$T/held3" ]; do _i=$((_i+1)); [ "$_i" -gt 100 ] && fail "R22 control-4: the lock holder never started"; sleep 0.1; done
+( set +e
+  HARNESS_DIR="$HDA" python3 "$LOCK" set-status E01-F01 done --evidence "$AMB_CHILD"     >"$T/amb2.out" 2>&1
+  echo $? > "$T/amb.rc" ) &
+AMB_BG=$!
+wait "$AMB_HOLD" 2>/dev/null || true
+await_bg "$AMB_BG" "$T/amb.rc"
+[ "$(cat "$T/amb.rc")" = "0" ]   || fail "R22 control-4 control: the same queued write FAILED with no newcomer (rc=$(cat "$T/amb.rc")): $(cat "$T/amb2.out")"
+pass "E99-F102 R22 an_ambiguous_ref_is_refused_and_both_remedies_work"
+
+# ── R23: a repository's identity is its REALPATH, not its spelling (I2/I3) ────────────
+# Round 2. The witness stored the lexical path, so retargeting a symlink between the plan
+# and the write left the fingerprint matching while the repository underneath changed. The
+# window is the plan→write boundary, so it is opened by HOLDING THE LOCK rather than by
+# slowing the probe — that is where the guard is supposed to look.
+SYM="$T/symid"
+mkdir -p "$SYM/.harness/state" "$SYM/.harness/store" "$SYM/.harness/tools" "$T/id-real" "$T/id-decoy"
+cp "$SCHEMA" "$SYM/.harness/store/"; cp "$VALIDATE" "$SYM/.harness/tools/"
+( cd "$SYM" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+: > "$SYM/r.txt"; ( cd "$SYM" && git_q add -A && git_q commit -m board )
+( cd "$T/id-real" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+: > "$T/id-real/src.txt"; ( cd "$T/id-real" && git_q add -A && git_q commit -m work )
+ID_LANDED="$(cd "$T/id-real" && git rev-parse main)"
+( cd "$T/id-decoy" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+: > "$T/id-decoy/o.txt"; ( cd "$T/id-decoy" && git_q add -A && git_q commit -m unrelated )
+( cd "$T/id-decoy" && git cat-file -e "$ID_LANDED^{commit}" 2>/dev/null ) \
+  && fail "R23 setup: the decoy already has the commit, so the swap would prove nothing"
+ln -sfn "$T/id-real" "$T/id-link"
+cat > "$SYM/.harness/harness.config.yaml" <<'EOF'
+store:
+  backend: local
+umbrella:
+  manifest: ../umbrella.manifest.yaml
+EOF
+cat > "$SYM/umbrella.manifest.yaml" <<'EOF'
+repos:
+  alpha:
+    path: ../id-link
+    init: ./init.sh
+    test_command: "true"
+EOF
+symboard() {
+  cat > "$SYM/.harness/state/tasks.json" <<'EOF'
+{ "project": "symid", "epics": [ { "id": "E01", "title": "e", "status": "in-progress",
+  "features": [ { "id": "E01-F01", "title": "f", "status": "in-review", "sdd": true,
+    "spec_path": "s/",
+    "slices": [ { "id": "E01-F01@alpha", "repo": "alpha", "status": "done", "merged": true } ] } ] } ] }
+EOF
+}
+# hold the lock, so the plan completes and the WRITE waits — the exact boundary at issue
+symrun() {  # symrun <retarget-to|"">
+  symboard; rm -f "$T/sym.rc" "$T/held2"
+  python3 "$T/holder.py" "$SYM/.harness/state/tasks.json.lock" "$T/held2" 4 &
+  SYM_HOLD=$!
+  _i=0; while [ ! -f "$T/held2" ]; do _i=$((_i+1)); [ "$_i" -gt 100 ] && fail "R23: the lock holder never started"; sleep 0.1; done
+  ( set +e
+    HARNESS_DIR="$SYM/.harness" python3 "$LOCK" set-status E01-F01 done \
+      --evidence "alpha=$ID_LANDED" >"$T/sym.out" 2>&1
+    echo $? > "$T/sym.rc" ) &
+  SYM_BG=$!
+  sleep 1.5                      # the plan has finished; the write is queued on the lock
+  [ -n "$1" ] && ln -sfn "$1" "$T/id-link"
+  wait "$SYM_HOLD" 2>/dev/null || true
+  await_bg "$SYM_BG" "$T/sym.rc"
+}
+
+symrun "$T/id-decoy"
+[ "$(cat "$T/sym.rc")" = "0" ] && fail "R23: the symlink was retargeted between the plan and the write and the verdict computed against the OLD checkout was written anyway — a lexical path is not an identity: $(cat "$T/sym.out")"
+grep -q "changed between the evidence check and the write" "$T/sym.out" \
+  || fail "R23: the abort does not say the resolution no longer applies: $(cat "$T/sym.out")"
+[ "$(field "$SYM/.harness/state/tasks.json" "'landed' in d")" = "False" ] \
+  || fail "R23: a record computed against the pre-swap checkout was written"
+
+# CONTROL — the identical run with NO retarget must SUCCEED, so R23 is about the swap and
+# not about holding the lock or about symlinked paths being unusable.
+ln -sfn "$T/id-real" "$T/id-link"
+symrun ""
+[ "$(cat "$T/sym.rc")" = "0" ] || fail "R23 control: the same run without a retarget FAILED (rc=$(cat "$T/sym.rc")) — a symlinked manifest path must work: $(cat "$T/sym.out")"
+[ "$(field "$SYM/.harness/state/tasks.json" "d['landed']['slices'][0]['verified']")" = "ancestor" ] \
+  || fail "R23 control: the unswapped run did not verify through the symlink"
+pass "E99-F102 R23 identity_is_the_realpath_not_the_spelling"
+
+# ── R24: an unreachable `origin` makes a LOCAL base unconfirmable — row 9, not row 8 ──
+# Round 2. A declared local default was treated as definitive even when an `origin` was
+# configured but unreachable. But `_default_ref` only falls back to a local signal AFTER
+# `ls-remote` fails, so in that state what "merged" means was never established: refusing
+# there rejects work that is already on the remote's default branch. Measured: a commit
+# that WAS on the remote's `main` was refused in an offline clone.
+OFF="$T/offline"
+mkdir -p "$OFF/hd/state" "$OFF/hd/store" "$OFF/hd/tools"
+cp "$SCHEMA" "$OFF/hd/store/"; cp "$VALIDATE" "$OFF/hd/tools/"
+( cd "$OFF" && git init -q . && git symbolic-ref HEAD refs/heads/main )
+: > "$OFF/seed.txt"; ( cd "$OFF" && git_q add -A && git_q commit -m base )
+( cd "$OFF" && : > merged.txt && git_q add -A && git_q commit -m "merged on the remote" )
+OFF_MERGED="$(cd "$OFF" && git rev-parse HEAD)"
+( cd "$OFF" && git_q checkout --detach HEAD~1 && git_q branch -f main HEAD && git_q checkout main )
+( cd "$OFF" && git_q update-ref refs/evidence/merged "$OFF_MERGED" )
+( cd "$OFF" && git_q config harness.defaultBranch main )
+( cd "$OFF" && git merge-base --is-ancestor "$OFF_MERGED" main ) \
+  && fail "R24 setup: the commit is already on the local main, so nothing would be refused"
+mkboard "$OFF/hd"
+# no origin yet: the local base IS the whole truth here, so the refusal is definitive (row 8)
+set_status "$OFF/hd" E01-F01 done --evidence "$OFF_MERGED"
+[ "$SS_RC" = "0" ] && fail "R24 baseline: with NO remote at all, a commit absent from the only branch must still be REFUSED (row 8): $SS_OUT"
+# now configure an UNREACHABLE origin — the same local base can no longer be confirmed
+( cd "$OFF" && git_q remote add origin "$T/not-a-real-remote.git" )
+mkboard "$OFF/hd"
+set_status "$OFF/hd" E01-F01 done --evidence "$OFF_MERGED"
+[ "$SS_RC" = "0" ] || fail "R24: an `origin` is configured but unreachable, so the declared LOCAL base may not be what the remote calls its default — refusing there rejects work that is already merged (row 8 applied where row 9 belongs): $SS_OUT"
+[ "$(field "$OFF/hd/state/tasks.json" "d['landed']['verified']")" = "unchecked" ] \
+  || fail "R24: expected unchecked when the base could not be confirmed, got $(field "$OFF/hd/state/tasks.json" "d['landed']['verified']")"
+case "$SS_OUT" in
+  *origin*) ;;
+  *) fail "R24: the warning does not say WHY the base could not be confirmed: $SS_OUT" ;;
+esac
+pass "E99-F102 R24 an_unreachable_origin_makes_a_local_base_unconfirmable"
 
 # ── R19: the documented ORDER must not defeat the mechanism ───────────────────────────
 # The harness used to instruct *approve → set-status done → open the PR*. At `done` time the
