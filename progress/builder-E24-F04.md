@@ -481,4 +481,6 @@ collision before deciding whether to recurse, and the delimiter fixture asserts
 `docs/type-clash` exactly. Integrating the repair also activated E99-F135's changed-shell gate on
 this now-modified suite; its older Markdown section extractor used the superseded bare-backtick
 toggle, so it now loads `tests/lib/fence.awk` and calls the shared CommonMark rule. Both the full
-umbrella and change-size suites pass.
+umbrella and change-size suites pass. The final aggregate at `c8a0e50` reports **all 43 suites
+passed** under `/bin/dash [PROGRAM:dash PROJECT:dash-16]` with `--jobs 8`; the independent
+focused re-review returned no findings.
