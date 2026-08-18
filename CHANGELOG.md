@@ -109,6 +109,30 @@ was written down. It now has its own stated contract beside the rows:
   the candidate set that made the choice unambiguous, so a repository appearing beside the
   board between plan and write aborts instead of re-deciding silently.
 
+**That contract is not implemented here.** `tools/tasks-lock.py` **consumes**
+`tools/repo-resolve.py` (0.65.0) rather than carrying a second copy of it: ~350 lines of
+inline repository search, manifest reading, default-branch discovery and remote-tip
+confirmation are **deleted**, and what remains is one `resolve()` call dispatched on
+`.outcome`, then ancestry. Two of the findings above are now answered *by construction*
+instead of by code that has to keep remembering:
+
+- `refs/remotes/origin/HEAD` can never drive a refusal. A row-8 refusal is gated on
+  `Resolution.base_confirmed`, which is `False` for a `cached` base **inside the resolver**;
+  there is deliberately no code here that re-derives it. Mutating only the resolver — making
+  `cached` confirmable — flips the same command from `unchecked` to REFUSED, which is the
+  proof that the rule has exactly one home.
+- The plan→write fingerprint cannot be omitted by a call path. It is no longer assembled
+  beside the resolution: `resolve()` returns a `Witness` captured where each dependency was
+  used, and every resolution's witness is collected. The bound-but-**unsliced** path — which
+  previously skipped the manifest witness, because the old fingerprint scoped it to sliced
+  features — now aborts when its repository is repointed mid-write, with no new code for
+  that case.
+
+What is left in the board writer is what only it can know: the nine rows, the ancestry call
+(which needs an **exit code**, deliberately not offered by the resolver, so "not an ancestor"
+and "the invocation failed" cannot be confused), the shape fingerprint over the **board's**
+slice set, and the refusal wording.
+
 **Row 8 vs row 9, one misapplication fixed:** a declared local default was treated as
 definitive even with an `origin` configured but unreachable. Discovery only falls back to a
 local signal *after* `ls-remote` fails, so in that state what "merged" means was never
@@ -124,10 +148,13 @@ manifest is the authority for row 3 and the locator for row 4, it is part of tha
 not: repointing a repo's `path` while the probe was in flight left the slice names matching,
 so a proof computed against the old checkout was written for a repository the board no
 longer pointed at (reproduced: `verified: "ancestor"` landed while the manifest named a
-checkout that had never seen the commit). The witness is the `(repo, path)` pairs for
-**exactly this feature's slice repos** — not the whole file, or an unrelated repo's edit
-would abort ordinary concurrent writes; and pairs rather than a content hash, because both
-detect the change but only pairs let the abort name *which* repository moved and *where*.
+checkout that had never seen the commit). The witness pins **exactly what this
+resolution consulted** — the manifest's state and the entry the binding resolved through,
+not the whole file, or an unrelated repo's edit would abort ordinary concurrent writes; and
+the entry itself rather than a content hash, because both detect the change but only the
+entry lets the abort name *which* repository moved and *where*. (It is captured by
+`resolve()` at the point of use, so this is now one clause of the resolver's
+`Witness.still_holds` rather than a separate list this file maintains.)
 A manifest that has become absent or unreadable also aborts: an abort is **not** a refusal —
 nothing is written and the re-run converges (it plans and re-validates under the same new
 state) — whereas degrading would write a record justified by an authority that no longer
@@ -136,7 +163,8 @@ exists.
 **The suite no longer depends on the developer's git config.** Two bare remotes were created
 without setting `HEAD`, so on a host with `init.defaultBranch=main` they published `main`
 and the suite was green — while on git's historical default they publish an unborn `master`,
-`_default_ref` (which never guesses a branch NAME) finds nothing to compare against, and a
+default-branch discovery (which never guesses a branch NAME) finds nothing to compare
+against, and a
 local-only commit was recorded `unchecked` instead of REFUSED. Measured: forcing
 `init.defaultBranch=master` exited **1** at R10. Every fixture now names its own branch, and
 the suite **overrides `init.defaultBranch` with a sentinel** that is neither `main` nor
