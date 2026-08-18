@@ -979,6 +979,32 @@ _ptb_delink() {
   _ptb_ra="$_ptb_tmp/h"; _ptb_rb="$_ptb_tmp/u"
 }
 
+# _ptb_one_sided_walk <left-dir> <right-dir> — name paths present below LEFT but absent
+# below RIGHT. `diff -q` reports these as `Only in <dir>: <name>`, a human sentence that
+# cannot be parsed unambiguously: `: ` is legal in BOTH the directory and the basename.
+#
+# This walk decides ONLY THE NAME, never whether conversion is safe. `diff`'s exit status
+# below remains the byte-identity authority. Quoted globs keep embedded whitespace/newlines
+# intact while the two dot patterns cover every hidden entry except `.` and `..`. Recursion
+# runs in a subshell because POSIX sh has no local variables; without it, a nested call would
+# overwrite the parent loop's roots.
+_ptb_one_sided_walk() (
+  _pos_l="$1"; _pos_r="$2"
+  [ -d "$_pos_l" ] && [ -d "$_pos_r" ] || exit 0
+  [ -r "$_pos_l" ] && [ -x "$_pos_l" ] || exit 1
+  for _pos_p in "$_pos_l"/* "$_pos_l"/.[!.]* "$_pos_l"/..?*; do
+    [ -e "$_pos_p" ] || [ -L "$_pos_p" ] || continue
+    _pos_rel="${_pos_p#"$_pos_l"/}"
+    _pos_other="$_pos_r/$_pos_rel"
+    if [ ! -e "$_pos_other" ] && [ ! -L "$_pos_other" ]; then
+      _ptb_relpath "$_pos_p"
+    elif [ -d "$_pos_p" ] && [ ! -L "$_pos_p" ] \
+      && [ -d "$_pos_other" ] && [ ! -L "$_pos_other" ]; then
+      _ptb_one_sided_walk "$_pos_p" "$_pos_other" || exit 1
+    fi
+  done
+)
+
 # prose_tier_blockers <harness-dir> <umbrella-body-dir> — print one HARNESS-DIR-RELATIVE
 # path per prose-tier path that BLOCKS converting <harness-dir> to the thin layout; print
 # NOTHING when the whole tier is convertible. E24-F04 R1/R2/R3. This comment documents it and
@@ -1085,6 +1111,20 @@ _ptb_entry_blockers() {
     # The links are named; now compare what is left of the entry, on copies `diff` can walk.
     _ptb_delink || return 0
   fi
+  # Derive one-sided names independently of `diff`'s ambiguous `Only in` prose. Run both
+  # directions; the caller's `sort -u` merges any overlap with the symlink producer. On a
+  # traversal failure, keep the comparison fail-closed and let an `Only in` line below fall
+  # back to the tier entry rather than pretending an exact path was established.
+  _ptb_ones=''; _ptb_ones_ok=1
+  if [ -d "$_ptb_a" ] && [ -d "$_ptb_b" ]; then
+    if ! _ptb_ones="$(
+      _ptb_one_sided_walk "$_ptb_a" "$_ptb_b" || exit 1
+      _ptb_one_sided_walk "$_ptb_b" "$_ptb_a" || exit 1
+    )"; then
+      _ptb_ones_ok=0
+    fi
+    [ -z "$_ptb_ones" ] || printf '%s\n' "$_ptb_ones"
+  fi
   # CAPTURE INSIDE AN `if`. This script runs under `set -eu` and `diff` exits non-zero
   # in exactly the case this feature exists for, so a bare `_out="$(diff -rq A B)"` would
   # kill the run the moment a child differs.
@@ -1108,28 +1148,14 @@ _ptb_entry_blockers() {
   printf '%s\n' "$_ptb_out" | while IFS= read -r _ptb_line; do
     [ -n "$_ptb_line" ] || continue
     case "$_ptb_line" in
-      # `Only in <dir>: <name>` CARRIES THE DIRECTORY AND THE BASENAME SEPARATELY — the
-      # joined path never appears in it, so this form MUST be normalised or R3's
-      # "name every differing path" is unsatisfiable.
-      "Only in $_ptb_a: "*)
-        _ptb_n="${_ptb_line#"Only in $_ptb_a: "}"
-        _ptb_p="$_ptb_a/$_ptb_n"
-        ;;
-      "Only in $_ptb_b: "*)
-        _ptb_n="${_ptb_line#"Only in $_ptb_b: "}"
-        _ptb_p="$_ptb_b/$_ptb_n"
-        ;;
-      "Only in $_ptb_a/"*": "*)
-        _ptb_rest="${_ptb_line#"Only in $_ptb_a/"}"
-        _ptb_d="${_ptb_rest%: *}"
-        _ptb_n="${_ptb_rest##*: }"
-        _ptb_p="$_ptb_a/$_ptb_d/$_ptb_n"
-        ;;
-      "Only in $_ptb_b/"*": "*)
-        _ptb_rest="${_ptb_line#"Only in $_ptb_b/"}"
-        _ptb_d="${_ptb_rest%: *}"
-        _ptb_n="${_ptb_rest##*: }"
-        _ptb_p="$_ptb_b/$_ptb_d/$_ptb_n"
+      # Exact one-sided paths were emitted by _ptb_one_sided_walk. Never parse this human
+      # sentence: no choice of first/last `: ` is correct for every legal pathname.
+      "Only in "*)
+        # Non-empty is load-bearing for fail-closed behavior. If the independent walk is
+        # accidentally neutralised while diff still says the trees differ, skipping this
+        # line would yield NO blocker and permit a destructive conversion.
+        [ "$_ptb_ones_ok" = "1" ] && [ -n "$_ptb_ones" ] && continue
+        _ptb_p="$_ptb_a"
         ;;
       # Anchor both sides on the exact arguments. A parent directory may itself contain
       # ` and `, so the prose separator alone cannot identify where the child path ends.

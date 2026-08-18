@@ -1669,20 +1669,57 @@ pass "R3 thin_umbrella_side_path_is_named — a path the umbrella holds and the 
 # parent path. Splitting at the first separator truncates that parent and makes the
 # fail-closed normaliser report only `agents` / `docs`, even though the comparison still
 # correctly blocks conversion. The parser must anchor on the two roots it already knows.
-F04J="$AU/f04j parent and pair: marker"
-f04_fullchild "$F04J" kid
-KJ4="$F04J/kid/.harness"
-printf '\na two-sided edit below a delimiter-bearing parent\n' >> "$KJ4/agents/builder.md"
-printf 'a child-only file below a delimiter-bearing parent\n' > "$KJ4/docs/extra-local.md"
-F04J_OUT="$(CODEX_HOME="$F04J/.ch" HOME="$F04J/.home" \
-  sh "$SRC/harness-install.sh" --agents=claude --thin "$F04J/kid" 2>&1)" && F04J_RC=0 || F04J_RC=$?
-[ "$F04J_RC" = "0" ] || fail "R3 delimiter-parent: single-target --thin exited $F04J_RC: $F04J_OUT"
-for _p in agents/builder.md docs/extra-local.md; do
-  printf '%s\n' 2>/dev/null "$F04J_OUT" | grep -qF "differs: $_p" \
-    || fail "R3: a diff delimiter inside the absolute parent path hid the exact blocker $_p: $F04J_OUT"
+F04P="$AU/f04p parent and pair: marker"
+f04_fullchild "$F04P" kid
+KP4="$F04P/kid/.harness"
+printf '\na two-sided edit below a delimiter-bearing parent\n' >> "$KP4/agents/builder.md"
+mkdir -p "$KP4/docs/sub"
+mkdir -p "$F04P/.harness/docs/sub"
+printf 'a child-only file whose own name carries diff syntax\n' > "$KP4/docs/sub/note: local.md"
+[ -d "$KP4/docs/sub" ] && [ -d "$F04P/.harness/docs/sub" ] \
+  || fail "R3 delimiter-parent control: docs/sub must exist on both sides so the filename, not its parent directory, is the one-sided path"
+[ ! -e "$F04P/.harness/docs/sub/note: local.md" ] \
+  || fail "R3 delimiter-parent control: note: local.md exists on both sides, so the Only-in filename parser is not exercised"
+F04P_OUT="$(CODEX_HOME="$F04P/.ch" HOME="$F04P/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude --thin "$F04P/kid" 2>&1)" && F04P_RC=0 || F04P_RC=$?
+[ "$F04P_RC" = "0" ] || fail "R3 delimiter-parent: single-target --thin exited $F04P_RC: $F04P_OUT"
+for _p in agents/builder.md 'docs/sub/note: local.md'; do
+  printf '%s\n' 2>/dev/null "$F04P_OUT" | grep -qF "differs: $_p" \
+    || fail "R3: a diff delimiter inside the absolute parent path hid the exact blocker $_p: $F04P_OUT"
 done
-f04_no_stub_in_tier "$KJ4" "R3 (delimiter-bearing absolute parents must not weaken blocker reporting)"
-pass "R3 thin_blocker_paths_ignore_parent_delimiters — known roots, not prose separators, delimit exact paths"
+f04_no_stub_in_tier "$KP4" "R3 (delimiter-bearing absolute parents must not weaken blocker reporting)"
+pass "R3 thin_blocker_paths_ignore_parent_delimiters — exact paths are derived independently of diff's prose separators"
+
+# The independent name walk is NOT the safety decision. Neutralise it in a real installer
+# source: `diff` still exits non-zero, and the conversion must remain blocked even though the
+# best available diagnostic falls back to the tier root. This pins the non-empty check on the
+# Only-in arm; without it, the line is skipped, no blocker is emitted, and the child converts.
+F04P_MUTSRC="$AU/f04p-mut-src"
+mkdir -p "$F04P_MUTSRC"
+for _md in harness-install.sh VERSION AGENTS.md init.sh agents docs store tools specs \
+           harness.config.yaml umbrella.manifest.example.yaml umbrella.gitignore.example; do
+  [ -e "$SRC/$_md" ] && cp -R "$SRC/$_md" "$F04P_MUTSRC/"
+done
+awk '
+  { print }
+  $0 == "_ptb_one_sided_walk() (" { print "  exit 0 # mutation: exact one-sided name producer neutralised" }
+' "$F04P_MUTSRC/harness-install.sh" > "$F04P_MUTSRC/harness-install.mut"
+mv "$F04P_MUTSRC/harness-install.mut" "$F04P_MUTSRC/harness-install.sh"
+[ "$(grep -c 'mutation: exact one-sided name producer neutralised' "$F04P_MUTSRC/harness-install.sh")" = "1" ] \
+  || fail "R2 one-sided fail-closed control: the doctored installer did not neutralise exactly one helper"
+mkdir -p "$KP4/docs/sub" "$F04P/.harness/docs/sub"
+printf 'reseeded for the fail-closed mutation\n' > "$KP4/docs/sub/note: local.md"
+[ -f "$KP4/docs/sub/note: local.md" ] \
+  || fail "R2 one-sided fail-closed control: the one-sided file disappeared before the mutation run"
+[ ! -e "$F04P/.harness/docs/sub/note: local.md" ] \
+  || fail "R2 one-sided fail-closed control: the mutation path is not one-sided"
+F04P_MUT_OUT="$(CODEX_HOME="$F04P/.ch" HOME="$F04P/.home" \
+  sh "$F04P_MUTSRC/harness-install.sh" --agents=claude --thin "$F04P/kid" 2>&1)" && F04P_MUT_RC=0 || F04P_MUT_RC=$?
+[ "$F04P_MUT_RC" = "0" ] || fail "R2 one-sided fail-closed mutation exited $F04P_MUT_RC: $F04P_MUT_OUT"
+printf '%s\n' 2>/dev/null "$F04P_MUT_OUT" | grep -q 'CONVERTED to the thin layout' \
+  && fail "R2: neutralising the one-sided name producer let a diff-confirmed one-sided child convert: $F04P_MUT_OUT"
+f04_no_stub_in_tier "$KP4" "R2 (a silent one-sided name producer must fall back closed, never permit conversion)"
+pass "R2 thin_one_sided_name_failure_stays_closed — a silent exact-name producer falls back to the tier root and never converts"
 
 # ── R2/R3: a SYMLINK is compared as a PATH, never read through to its content ───────────
 # thin_symlink_shapes_block

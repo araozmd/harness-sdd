@@ -460,9 +460,17 @@ green, and `sh tools/run-tests.sh` reports **all 43 suites passed** under
 ### Independent-review repair
 
 The final read-only review found one P2: `diff -rq` was forced to fail closed, but its exact-path
-diagnostics still split English prose at the first ` and ` / `: `. A parent path containing those
-legal strings reduced `agents/builder.md` and `docs/extra-local.md` to the tier roots `agents` and
-`docs`. A new integration fixture reproduced that exact output before the fix. The parser now
-runs `diff` under `LC_ALL=C` and anchors both recognised message forms on the two exact roots it
-passed to `diff`; the same fixture and the complete umbrella suite pass. The review's P3 was also
-correct: the changelog named the removed `stub_tree` helper and now names `thin_prose_tier`.
+diagnostics still split human prose at ` and ` / `: `. A delimiter-bearing parent reduced exact
+paths to tier roots; anchoring on the two comparison roots fixed that first shape, but the focused
+re-review correctly found the remaining ambiguity when a nested one-sided filename itself contains
+`: `. No prose parser can separate both legal fields in every pathname.
+
+The final fix keeps `LC_ALL=C diff` as the byte-identity authority but derives one-sided names with
+a quoted, dotfile-aware POSIX shell walk. The strengthened fixture puts the directory on both sides
+and only `docs/sub/note: local.md` on the child, so the filename is independently falsifiable. A
+mutation that neutralised the new walk exposed an initial fail-open coupling: `diff` remained
+non-zero but every `Only in` line was skipped, so the child converted. The permanent
+`thin_one_sided_name_failure_stays_closed` case now makes the helper silent and requires the
+tier-root fallback to block conversion. Both new cases and the complete umbrella suite pass. The
+review's P3 was also correct: the changelog named the removed `stub_tree` helper and now names
+`thin_prose_tier`.
