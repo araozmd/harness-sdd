@@ -27,8 +27,9 @@
 #       epic id `E06`) in state/tasks.json, under the lock.
 #       Moving ANY feature to `done` requires --evidence (E99-F102): once for a
 #       single-repo feature, and once per slice repository — in the bound form
-#       `--evidence <repo>=<ref>` — for a SLICED one. The evidence is RECORDED,
-#       not verified; see "Landing evidence on `done`" below.
+#       `--evidence <repo>=<ref>` — for a SLICED one. Each ref is RESOLVED and
+#       checked against the default branch per the decision table below; the write is
+#       REFUSED only where the claim is provably wrong.
 #   tasks-lock.py apply --mutator <path> [--timeout SECONDS]
 #       Run an external mutator on the freshly-read board (used for tests and
 #       for callers that express a different single mutation). The mutator is a
@@ -353,6 +354,53 @@ def _load_shared_validator(want_module=False):
     return module if want_module else module.validate
 
 
+_REPO_RESOLVER = None
+
+
+def _load_repo_resolver():
+    """Import the SINGLE repository resolver, `tools/repo-resolve.py`.
+
+    Same mechanism, and the same reason, as `_load_shared_validator` above: the file is
+    hyphenated (so `import` cannot name it) and must be found by ABSOLUTE path from this
+    file's own directory, which works in both the source (`tools/`) and installed
+    (`.harness/tools/`) layouts regardless of `sys.path` or cwd. Cached, because a sliced
+    `done` resolves once per slice repository and re-executing a module per slice would be
+    both slower and a second copy of its state.
+
+    A MISSING resolver is a fail-stop, never a degrade. Everything this helper knows about
+    which repository a claim is about now comes from here; a board write path that silently
+    lost its resolver would carry on emitting `landed` records with no idea what they were
+    computed against — which is precisely the false attestation this feature exists to
+    prevent, produced by the machinery meant to prevent it.
+
+    Loaded LAZILY: `none:<why>` evidence (row 1) reaches a verdict with no resolution at
+    all, and `apply --mutator` never resolves anything, so those paths must not acquire a
+    hard dependency on a file they never read.
+    """
+    global _REPO_RESOLVER
+    if _REPO_RESOLVER is not None:
+        return _REPO_RESOLVER
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "repo-resolve.py")
+    spec = importlib.util.spec_from_file_location("_repo_resolve", path)
+    if spec is None or spec.loader is None:
+        _die("could not load the repository resolver from %s — landing evidence cannot be "
+             "resolved without it, and recording a verdict anyway would attest a check "
+             "that never ran" % path)
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:                       # noqa: BLE001 - reported, not swallowed
+        _die("could not load the repository resolver from %s (%s) — landing evidence "
+             "cannot be resolved without it" % (path, exc))
+    for name in ("resolve", "resolve_commit", "Uncertain", "RESOLVED",
+                 "DECLARED_DEFAULT_CONFIG"):
+        if not hasattr(module, name):
+            _die("repository resolver %s does not define %s — it is not the module this "
+                 "write path was built against" % (path, name))
+    _REPO_RESOLVER = module
+    return module
+
+
 def _load_schema(schema_path):
     with open(schema_path) as fh:
         return json.load(fh)
@@ -639,7 +687,7 @@ def _refuse_if_parked(text, target_id):
 
 
 # ---------------------------------------------------------------------------
-# Landing evidence on `done` (E99-F102) — THE CONTRACT HALF.
+# Landing evidence on `done` (E99-F102 contract + E99-F129 verification).
 #
 # `done` is what stops the selector routing an item, so a feature marked `done`
 # whose work never merged is both unshipped AND unreachable — nothing will pick it
@@ -650,25 +698,128 @@ def _refuse_if_parked(text, target_id):
 # the corpus: the board title of E99-F32, the feature that actually shipped the
 # Spanish outcome, cites E99-F29 as landed.
 #
-# ⚠️ WHAT THIS HALF DOES NOT DO — read this before trusting a record it writes.
-# This change records the attestation and enforces its SHAPE. It performs NO
-# verification: it never runs git, never opens a network connection, never resolves
-# a repository, and never decides whether a commit is reachable from a default
-# branch. Every ref therefore lands as `verified: "unchecked"` (or `"declared"` for
-# `none:<why>`), and `repo`/`base` are simply absent. **It cannot emit
-# `verified` = ancestor, by construction** — that value is not in `_VERIFIED_RANK`
-# and appears nowhere in this module's code. Verification arrives in the follow-up
-# (E99-F102b), which turns `unchecked` into a verdict.
+# ⚠️ THE ONE QUESTION, ANSWERED ONCE — the decision table (E99-F129).
 #
-# That split is deliberate, and it is why this half ships first. Five successive
-# review rounds found the same defect class in the verification code — the guard
-# cannot verify, so it lets `done` through anyway: a default branch guessed by name,
-# one sha attesting many slices, a stale local tip, a slice repository located by
-# directory basename, an unrecognised hash format. Every one of those is a way to
-# get a WRONG or MISSING verdict. A half that never issues a verdict cannot have
-# them: the worst it can do is record honestly that nothing was checked, which is
-# already strictly better than the say-so it replaces, because
-# `verified: "unchecked"` is greppable and a silent `done` is not.
+# Verification is not a feature; it is a single question asked of every ref: WHAT
+# HAPPENS WHEN VERIFICATION IS IMPOSSIBLE? The predecessor answered it per input, as
+# fixes accumulated, and five review rounds each found the same shape again — a
+# default branch guessed by name, one sha attesting many slices, a stale local tip, a
+# slice repository located by directory basename, an unrecognised hash format. Each
+# was one more input for which "I cannot check" silently became "fine, proceed". So
+# the answer is a TABLE, written before the code, and the code below is that table in
+# order. `store/local.md` and the CHANGELOG carry the same table; the suite mirrors it
+# row for row, each with a control.
+#
+#   #  situation                                              outcome
+#   ── ────────────────────────────────────────────────────── ───────────────────
+#   1  `none:<why>`                                           declared
+#   2  ref resolves to no git object anywhere                 unchecked + warning
+#   3  binding names a repo the MANIFEST does not contain     REFUSE
+#   4  manifest names it, directory absent/unreadable here    unchecked
+#   5  repo located, object unknown in it                     unchecked
+#   6  default branch undeterminable                          unchecked
+#   7  ancestry TRUE against a CONFIRMED base                  ancestor
+#   8  ancestry FALSE and the base tip is confirmed current   REFUSE
+#   9  ancestry FALSE, tip NOT confirmed                      unchecked
+#
+# THE GOVERNING ASYMMETRY, and the reason the table leans the way it does:
+#
+#   * A FALSE ATTESTATION is worse than no attestation. The record then carries the
+#     authority of a check that never happened, and every later reader — a brief, a
+#     re-audit, a dependent feature — treats it as settled. So `ancestor` is emitted
+#     ONLY from row 7, where ancestry was actually computed against a base this
+#     checkout could name.
+#   * A FALSE REFUSAL is worse than a silent pass. A guard that rejects genuinely
+#     merged work is one that gets routed around, switched off, or worked around with
+#     `none:<why>` — after which it protects nothing at all. So refusal is reserved
+#     for the two situations where the claim is provably wrong: row 8 (the work is
+#     demonstrably not on a base we confirmed is current) and row 3 (the claim names
+#     a repository the project does not declare — malformed, and checkable with no
+#     I/O at all).
+#
+# Rows 3 and 4 are the distinction that was missing: a MALFORMED CLAIM is the
+# operator's error and is refused; NOT BEING ABLE TO SEE A REPOSITORY FROM HERE is
+# this checkout's limitation and degrades. Row 3 is not a new policy — `next-task.mjs`
+# already raises `manifest-error` for a slice naming a repository absent from the
+# manifest, so a board that would be refused here is one the selector already halts
+# on. Row 3 applies ONLY where a manifest is configured AND readable: with no manifest
+# there is no authority to call the claim malformed, so repository resolution falls
+# back to a best-effort search and every miss degrades to row 4/5.
+#
+# Rows 8 and 9 are the stale-tip lesson. `refs/remotes/origin/*` is a local SNAPSHOT:
+# after a PR merges, a clone that has not fetched still points `origin/main` at an
+# older commit, and an ancestry test against it reports "not merged" about work that
+# IS on the default branch. Measured against the predecessor: a commit that was
+# literally the remote's main tip was refused with the same message as one that had
+# never left the laptop. So a refusal is confirmed against the remote's real tip
+# first, and an unconfirmable one degrades (row 9) instead of blocking.
+#
+# The ACCEPT side is symmetric, and an earlier version of this comment was WRONG about
+# why it need not be. It claimed "for a stale local tip to produce a wrong `ancestor`
+# the remote would have to have been rewritten", and that is false: a project that
+# RENAMES its default branch (master → main) and leaves the old branch in place is
+# neither a rewrite nor adversarial, and it makes a cached `origin/HEAD` point at a
+# branch that is no longer the default. Work merged only to the old branch is then
+# trivially reachable from it, and `done` gets recorded for a feature that never landed
+# on the current default. So row 7 requires `base_confirmed` too, escalating to the
+# remote's advertised tip when we hold it and degrading to `unchecked` when we do not.
+# This adds NO network call to the happy path: a base the remote just published is
+# already confirmed, so an online run is unaffected.
+#
+# ── WHICH REPOSITORY IS THIS CLAIM ABOUT? deliberately NOT answered here ─────
+#
+# The nine rows above enumerate VERIFICATION OUTCOMES for a (ref, repository) pair. They
+# presume that pair is already settled. Establishing it — a search order, a path out of a
+# manifest, an assumption that a ref names one repository — is a DIFFERENT question, and
+# answering it inline, here, beside the rows, produced findings in five separate review
+# rounds: a slice repository located by directory BASENAME so an aliased path resolved
+# nowhere; the manifest missing from the plan→write fingerprint; an unbound ref resolving
+# in several repositories and silently taking the FIRST (which, because the harness dir is
+# searched before the children, is the umbrella's own bookkeeping repository — the one that
+# never holds feature work); a lexical path in the witness that a retargeted symlink walks
+# straight past; and `refs/remotes/origin/HEAD` trusted as if it were the remote's answer
+# when it is only a CACHE of a former answer.
+#
+# So this file does not answer it. `tools/repo-resolve.py` does, and carries its own
+# contract (I1 binding-vs-search, I2 identity, I3 how current the base is). It returns a
+# `Resolution` whose uncertainty cannot be read past — `.directory` and `.base` RAISE
+# rather than default, and `.base_confirmed` folds "may this base be trusted as CURRENT?"
+# into ONE boolean so no caller re-derives it differently. In particular a `cached` base is
+# never confirmed THERE, which is why no row-8 refusal below can rest on one, and why there
+# is deliberately no code here that re-checks it. Everything below dispatches on
+# `.outcome` and computes ancestry; that is all it knows how to do.
+#
+# The plan→write re-check comes WITH the resolution instead of being assembled beside it:
+# `Resolution.witness()` is captured by `resolve()` at the point each dependency is USED,
+# and `Witness.still_holds()` is filesystem-only (no child process), so the guard below can
+# run it while holding the board lock. A dimension the resolver consults and forgets to
+# witness is a dimension it did not consult — which is what ends the "the new call path
+# forgot the fingerprint again" family of findings, rather than another hand-maintained
+# list in this file that the next call path can forget in its turn.
+#
+# ONE refusal on that axis still belongs here, because it is a VERDICT rather than a
+# resolution: an unbound ref that resolves in several repositories (`AMBIGUOUS`) attests
+# nothing and is refused, naming both remedies. That is the row-3 KIND of refusal — a
+# malformed claim, checkable, with a legal remedy — not the row-8 kind, so it carries no
+# risk of rejecting merged work.
+#
+# ── how a ref becomes an object: ask git, never a regex ──────────────────────
+# The predecessor pattern-matched `^[0-9a-fA-F]{7,40}$` to decide what was worth
+# resolving, which silently skipped SHA-256's 64-character ids — they fell through to
+# "not a commit id" and were recorded unchecked. Nothing here pattern-matches an
+# object id. Every non-`none:` value is handed to `git rev-parse --verify <ref>^{commit}`
+# and git decides what is an object; anything git will not resolve is row 2.
+#
+# A consequence to be deliberate about: a BRANCH NAME resolves too, and a branch is a
+# MOVING target — recording `main` as the landing would be an attestation that decays
+# the moment the branch moves. So the record keeps BOTH, and they mean different
+# things: `ref` is what the operator claimed, verbatim (unchanged from the contract
+# half, and what a human recognises); `commit` is the immutable id that ref resolved
+# to AT RECORD TIME, and it is what ancestry was actually computed on and what a later
+# re-audit must re-check. `commit` is present exactly when this checkout resolved the
+# object, so its presence is itself the signal that something was looked up; the schema
+# additionally requires it wherever `verified` is the proved value, because an
+# attestation nobody can re-check is the defect this whole feature exists to remove.
 #
 # ── why `slices[]` is NOT the attestation ────────────────────────────────────
 # A sliced feature LOOKS attested: the schema refuses `done` unless every slice is
@@ -697,23 +848,16 @@ def _refuse_if_parked(text, target_id):
 # `set-status <feature> done` requires `--evidence REF` (single-repo feature) or
 # `--evidence <repo>=REF` repeated once per slice repo (sliced feature), where REF is:
 #
-#   <anything>     a sha, a PR URL, a tag — recorded VERBATIM and unverified.
+#   <anything>     anything git can resolve to a commit (a sha of any width, a tag,
+#                  a branch) is VERIFIED per the table above; anything it cannot is
+#                  transcribed and recorded unchecked (row 2).
 #   none:<why>     work with no commit at all (a console action, a supersession).
-#
-# Note what is deliberately absent: this half does not parse or classify the ref. It
-# does not ask whether a string looks like a commit id, precisely because "looks like
-# a commit id" is a verification question (round 5 found the 40-hex assumption
-# missing SHA-256's 64-char ids), and the answer belongs with the code that resolves
-# objects. Everything that is not `none:<why>` is transcribed and marked unchecked.
 
 _DECLARED_PREFIX = "none:"
 # How much a `verified` value proves, weakest first. A sliced feature's feature-level
-# record rolls up to the WEAKEST of its slices. Only two values can be produced here,
-# and the proved one is deliberately NOT in this table: nothing in this half earns it,
-# so nothing in this half can select it — the follow-up adds the value together with
-# the check that justifies it. The board SCHEMA still knows all three, because a board
-# written by the follow-up (or by hand) must remain readable here.
-_VERIFIED_RANK = {"unchecked": 0, "declared": 1}
+# record rolls up to the WEAKEST of its slices, so `ancestor` at the feature level
+# means EVERY slice proved ancestry in its OWN repository — never that one of them did.
+_VERIFIED_RANK = {"unchecked": 0, "declared": 1, "ancestor": 2}
 # A `--evidence` value may bind its ref to a slice repository: `<repo>=<ref>`. The
 # repo side is deliberately a strict, narrow character class — a URL
 # (`.../pull/1?a=b`) and a `none: why = x` reason both contain `=` but neither has a
@@ -722,13 +866,267 @@ _VERIFIED_RANK = {"unchecked": 0, "declared": 1}
 _BINDING_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)=(.+)$", re.S)
 
 
-def _classify(ref, repo_name=None):
-    """Turn one --evidence value into a landing record. PURE: no I/O, no verdict.
+# ── the one git call this file still makes for itself ────────────────────────
+#
+# Everything else that runs git about a REPOSITORY (resolving a ref, finding a default
+# branch, asking the remote what it publishes) lives in `tools/repo-resolve.py`. What is
+# left here is ancestry, and ancestry needs something the resolver deliberately does not
+# offer: an EXIT CODE. `repo-resolve._git` collapses every non-zero exit to None, which is
+# right for "did this resolve?" and fatal for `merge-base --is-ancestor`, whose whole
+# answer is in the rc.
 
-    `repo_name` is the slice repository the value was bound to (None for a
-    single-repo feature). Everything that is not `none:<why>` is transcribed and
-    recorded unchecked, with a warning that says so — a claim nobody checked must
-    never read as a proof.
+
+def _git_rc(args, cwd):
+    """Run `git <args>` in <cwd>; return the exit code, or None if git could not run.
+
+    A helper that collapses every non-zero exit to None is right for discovery
+    and wrong here: `merge-base --is-ancestor` reports "not an ancestor" as exit 1 and
+    a broken invocation (bad object, not a repo) as something else, and conflating them
+    would turn "this work never merged" into "we could not check" — the silent pass
+    this whole feature exists to end.
+    """
+    try:
+        out = subprocess.run(
+            ["git"] + list(args),
+            cwd=cwd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.returncode
+
+
+# ── the table itself ─────────────────────────────────────────────────────────
+
+
+def _warn(msg):
+    sys.stderr.write("tasks-lock: warning: %s\n" % msg)
+
+
+def _unchecked(ref, repo_name, why, commit=None):
+    """A row that could not reach a verdict: recorded, warned about, never a proof."""
+    _warn("%s — recording it UNCHECKED. Nothing here proved the work merged." % why)
+    record = {"ref": ref, "verified": "unchecked"}
+    if commit is not None:
+        record["commit"] = commit
+    if repo_name is not None:
+        record["repo"] = repo_name
+    return record
+
+
+def _refuse_ambiguous(detail):
+    """I1: an unbound ref that resolves in more than one repository attests nothing.
+
+    `detail` comes from the resolution and already names the ref AND the repositories it
+    found, so nothing is passed in beside it — a second copy of either here is a second
+    place they could disagree. The two REMEDIES are this file's to state, because they are
+    about the evidence flag rather than about repository resolution.
+    """
+    _die(
+        "evidence %s, so it does not say WHICH one this feature landed in — and taking "
+        "the first would take the harness dir's own repository, which is searched before "
+        "the children and is the one repository that never holds feature work. Pass the "
+        "immutable commit id (which normally exists in only one of them), or bind the "
+        "claim: --evidence <repo>=<ref>." % detail
+    )
+
+
+def _refuse_unmerged(ref, commit, base, binding, named):
+    """ROW 8 — the only ancestry refusal, and the one place it is worded.
+
+    Name the repository the OPERATOR named (the manifest key / slice repo) rather than the
+    directory it happens to live in, and show the resolved id only when it differs from
+    what was typed — for a plain sha the parenthetical is noise, for a branch name it is
+    the whole point.
+    """
+    shown = ref if commit.startswith(ref) or ref == commit else "%s → %s" % (ref, commit[:12])
+    _die(
+        "%s%s is NOT an ancestor of %s in %s, and %s is confirmed current — the work "
+        "is not merged, so `done` would be false. Merge it and pass the merge commit, "
+        "or pass %snone:<why> if there is no commit to point at."
+        % (
+            "slice repository %s: " % binding if binding else "",
+            shown,
+            base,
+            named,
+            base,
+            "--evidence %s=" % binding if binding else "--evidence ",
+        )
+    )
+
+
+def _verify(ref, repo_name, hdir, witnesses=None):
+    """Rows 2-9 for ONE (ref, repository) claim. Returns a record, or _die()s on 3 and 8.
+
+    WHICH repository the claim is about is not decided here — `tools/repo-resolve.py`
+    decides it, once, and hands back a `Resolution` plus the `Witness` that says what that
+    answer depended on. This function is the DECISION TABLE and nothing else: one
+    dispatch on the outcome, then ancestry.
+    """
+    rr = _load_repo_resolver()
+    res = rr.resolve(ref, repo_name, hdir)
+    if witnesses is not None and res.witness() is not None:
+        # Collected for the plan→write guard below. It is appended per RESOLUTION, so a
+        # call path cannot acquire a resolution without also acquiring its witness.
+        witnesses.append(res.witness())
+
+    if res.outcome == rr.UNDECLARED:                   # ROW 3 — malformed claim, REFUSED
+        _die(
+            "%s is not declared in the umbrella manifest, so evidence bound to it "
+            "attests nothing: the manifest is what says where a repository lives, and a "
+            "slice naming a repository it does not contain is a board `next-task.mjs` "
+            "already halts on (manifest-error). Add it to the manifest, or correct the "
+            "binding." % repo_name
+        )
+    if res.outcome == rr.UNREADABLE:
+        # The manifest is CONFIGURED and could not be read. That is this checkout's
+        # limitation, not a malformed claim, so it degrades like row 4 rather than
+        # refusing like row 3 — and it must not fall back to a search, which would answer
+        # confidently for a repository the authority never named.
+        return _unchecked(
+            ref,
+            repo_name,
+            "the umbrella manifest is configured but could not be read from this "
+            "checkout, so there is no authority for where %s is and evidence %s was NOT "
+            "checked (a search there would be a guess, not a verdict)" % (repo_name, ref),
+        )
+    if res.outcome == rr.AMBIGUOUS:                    # I1
+        _refuse_ambiguous(res.detail)
+    if res.outcome == rr.UNLOCATABLE:                  # ROW 4 — cannot see it from here
+        return _unchecked(
+            ref,
+            repo_name,
+            "repository %s is declared but cannot be read from this checkout, so "
+            "evidence %s for that slice was NOT checked" % (repo_name, ref),
+        )
+    if res.outcome != rr.RESOLVED:                     # ROWS 2 / 5
+        return _unchecked(
+            ref,
+            repo_name,
+            "evidence %s could not be resolved to a commit in %s"
+            % (ref, ("repository %s" % repo_name) if repo_name else
+               ("any repository near %s" % hdir)),
+        )
+
+    repo = res.directory
+    commit = res.commit
+    # The NAME TO RECORD: the binding for a bound request, the chosen directory's basename
+    # for a search. The resolver computes it, so the two notions cannot drift apart here.
+    named = res.repo
+
+    try:
+        base = res.base
+    except rr.Uncertain:                               # ROW 6
+        return _unchecked(
+            ref,
+            repo_name,
+            "evidence %s resolves in %s, but that repository names no default branch "
+            "this checkout can trust (nothing published or reachable, and no `git config "
+            "%s`)" % (ref, named, rr.DECLARED_DEFAULT_CONFIG),
+            commit=commit,
+        )
+
+    _proved = {"ref": ref, "commit": commit, "verified": "ancestor",
+               "repo": named, "base": base}
+
+    rc = _git_rc(["merge-base", "--is-ancestor", commit, base], cwd=repo)
+    if rc == 0:                                        # ROW 7 — reachable from `base`…
+        # …but reachable from WHICH base? An `ancestor` proved against a base this checkout
+        # cannot confirm is a proof about a branch that may no longer be the default one.
+        #
+        # The predecessor asserted this could not matter: "for a stale local tip to produce a
+        # wrong `ancestor` the remote would have to have been REWRITTEN". That is false, and
+        # the counter-example is ordinary rather than adversarial: a project renames its
+        # default branch (master → main) and LEAVES the old branch in place. Our cached
+        # `refs/remotes/origin/HEAD` still points at `master`, work merged only to `master`
+        # is trivially reachable from it, and `done` is recorded for a feature that never
+        # landed on the current default branch. No rewrite, no force-push, no adversary.
+        #
+        # `base_confirmed` already answers exactly this and the accept path simply never
+        # asked. It costs nothing on the happy path — a base the remote published moments
+        # ago IS confirmed, so CI and any online run are unaffected; only a base we could
+        # not confirm now degrades, which is the governing asymmetry applied honestly: a
+        # FALSE ATTESTATION is worse than no attestation.
+        if res.base_confirmed:
+            return _proved
+        # Not confirmed — but the remote may have advertised its real tip, and holding that
+        # object lets us answer against the CURRENT default instead of our copy of a former
+        # one. This is the same escalation the refusal path already uses, and it keeps the
+        # common stale-tip case a PROOF rather than a degrade.
+        _tip = res.base_tip
+        if _tip and rr.resolve_commit(repo, _tip) and \
+                _git_rc(["merge-base", "--is-ancestor", commit, _tip], cwd=repo) == 0:
+            return _proved
+        return _unchecked(
+            ref,
+            repo_name,
+            "evidence %s IS reachable from %s in %s, but this checkout cannot confirm that "
+            "%s is still the default branch (%s) — a project that renames its default and "
+            "keeps the old branch would make that reachability prove nothing about where "
+            "the work actually landed. Run `git -C %s fetch origin` and re-run for a "
+            "definitive answer"
+            % (ref, base, named, base, res.base_evidence, repo),
+            commit=commit,
+        )
+    if rc != 1:
+        # The invocation itself failed (a broken object, an unreadable repo). "We could
+        # not check" is not "it did not merge", so this degrades rather than refusing.
+        return _unchecked(
+            ref,
+            repo_name,
+            "the ancestry check for evidence %s against %s in %s could not be run"
+            % (ref, base, named),
+            commit=commit,
+        )
+
+    # Ancestry is LOCALLY false. Whether that is a refusal depends on whether the base we
+    # measured against can be trusted as CURRENT — `base_confirmed` is the resolver's one
+    # answer to that (a `cached` origin/HEAD is never confirmed THERE, by construction, so
+    # nothing here re-derives it).
+    if res.base_confirmed:                             # ROW 8
+        _refuse_unmerged(ref, commit, base, repo_name, named)
+
+    # Otherwise our copy of the base may simply be behind. `base_tip` is the sha the REMOTE
+    # advertised for its default branch; when this checkout actually holds that object we
+    # can answer against the real tip instead of our stale copy of it. The record's `base`
+    # stays the BRANCH ref either way — that is what "merged" means, and the tip is only
+    # how we read it.
+    tip = res.base_tip
+    if tip is None:
+        detail = (
+            "an `origin` is configured but could not be consulted, so this local base "
+            "may not be what the remote calls its default branch"
+            if res.has_origin
+            else "the remote could not be asked for its current tip"
+        )
+    elif rr.resolve_commit(repo, tip) is None:
+        detail = "the remote has moved to %s, which this checkout does not have" % tip[:12]
+    else:
+        rc = _git_rc(["merge-base", "--is-ancestor", commit, tip], cwd=repo)
+        if rc == 0:                                    # ROW 7, via the remote's real tip
+            return {"ref": ref, "commit": commit, "verified": "ancestor",
+                    "repo": named, "base": base}
+        if rc == 1:                                    # ROW 8
+            _refuse_unmerged(ref, commit, base, repo_name, named)
+        detail = "the ancestry check against the remote tip could not be run"
+    return _unchecked(                                 # ROW 9
+        ref,
+        repo_name,
+        "evidence %s is not reachable from the LOCAL %s in %s, but that refusal "
+        "could not be confirmed against the remote (%s), so refusing it might reject "
+        "work that IS merged. Run `git -C %s fetch origin` and re-run for a "
+        "definitive answer" % (ref, base, named, detail, repo),
+        commit=commit,
+    )
+
+
+def _classify(ref, repo_name=None, hdir=None, witnesses=None):
+    """One --evidence value → one landing record. THE DECISION TABLE, in order.
+
+    `repo_name` is the repository the value was BOUND to (`<repo>=<ref>`), or None — in
+    which case the resolver searches the nearby repositories and refuses ambiguity.
     """
     ref = ref.strip()
     if not ref:
@@ -737,29 +1135,23 @@ def _classify(ref, repo_name=None):
             if repo_name is None
             else "--evidence %s=<ref>: the ref is empty" % repo_name
         )
-    if ref.startswith(_DECLARED_PREFIX):
-        why = ref[len(_DECLARED_PREFIX) :].strip()
+    if ref.startswith(_DECLARED_PREFIX):               # ROW 1
+        why = ref[len(_DECLARED_PREFIX):].strip()
         if not why:
             _die(
                 "--evidence none:<why> needs a reason after the colon — "
                 "'no commit' with no explanation is the say-so this replaces"
             )
         record = {"ref": ref, "verified": "declared"}
-    else:
-        sys.stderr.write(
-            "tasks-lock: warning: evidence %r is recorded but NOT verified — this "
-            "harness does not yet check that a ref reached a default branch, so it "
-            "is stored as UNCHECKED. Nothing here proved the work merged.\n" % ref
-        )
-        record = {"ref": ref, "verified": "unchecked"}
-    if repo_name is not None:
-        record["repo"] = repo_name
-    return record
+        if repo_name is not None:
+            record["repo"] = repo_name
+        return record
+    return _verify(ref, repo_name, hdir, witnesses)
 
 
-def _landing_record(evidence):
+def _landing_record(evidence, hdir, witnesses=None):
     """The single-repo feature's record."""
-    return _classify(evidence)
+    return _classify(evidence, None, hdir, witnesses)
 
 
 def _split_binding(arg):
@@ -791,7 +1183,7 @@ def _slice_repos(feature):
     return repos
 
 
-def _sliced_landing_record(target_id, evidence_list, slice_repos):
+def _sliced_landing_record(target_id, evidence_list, slice_repos, hdir, witnesses=None):
     """Bind every slice repository to its OWN evidence. Returns the feature record.
 
     The feature-level `verified` rolls up to the WEAKEST slice (`_VERIFIED_RANK`), so
@@ -829,7 +1221,7 @@ def _sliced_landing_record(target_id, evidence_list, slice_repos):
             "are hand-typed and E09-F02 proves they can read `merged: true` against a "
             "closed, unmerged PR." % (target_id, ", ".join(missing))
         )
-    records = [_classify(bindings[r], r) for r in slice_repos]
+    records = [_classify(bindings[r], r, hdir, witnesses) for r in slice_repos]
     verified = min(records, key=lambda r: _VERIFIED_RANK[r["verified"]])["verified"]
     return {
         "ref": "; ".join("%s=%s" % (r["repo"], r["ref"]) for r in records),
@@ -861,12 +1253,12 @@ def _feature_entry(text, target_id):
     return False, None
 
 
-def _resolve_landing(text, target_id, status, evidence_list):
+def _resolve_landing(text, target_id, status, evidence_list, hdir, witnesses=None):
     """The `done`-transition precondition. Returns a `landed` record or None.
 
-    PURE — parse, bind, shape. It reads the board text it is handed and nothing else,
-    which is what lets it run inside the existing critical section without adding a
-    single external call to it.
+    NOT pure: the per-ref verdicts run git (and, on the refusal path, ask the remote).
+    That is exactly why this is called from `_landing_plan` BEFORE the board lock is
+    taken, never from inside the critical section — see the plan/fingerprint block below.
     """
     is_feature, feature = _feature_entry(text, target_id)
     if evidence_list and status != "done":
@@ -896,20 +1288,22 @@ def _resolve_landing(text, target_id, status, evidence_list):
             )
         )
     if slice_repos:
-        return _sliced_landing_record(target_id, evidence_list, slice_repos)
+        return _sliced_landing_record(target_id, evidence_list, slice_repos, hdir,
+                                      witnesses)
     if len(evidence_list) > 1:
         _die(
             "%s has no slices, so it takes exactly one --evidence (got %d). "
             "Repeated evidence binds one value per SLICE repository."
             % (target_id, len(evidence_list))
         )
-    bound_repo, _ref = _split_binding(evidence_list[0])
+    bound_repo, bound_ref = _split_binding(evidence_list[0])
     if bound_repo is not None:
-        _die(
-            "--evidence <repo>=<ref> binds evidence to a SLICE repository, but %s "
-            "has no slices — pass --evidence <ref|none:why>" % target_id
-        )
-    return _landing_record(evidence_list[0])
+        # I1: legal on a single-repo feature, and the ONLY way to disambiguate a ref that
+        # resolves in more than one nearby repository. The contract half refused this
+        # because nothing verified the name; here the name is resolved and checked, so
+        # recording it is a statement about a repository that was actually consulted.
+        return _classify(bound_ref, bound_repo, hdir, witnesses)
+    return _landing_record(evidence_list[0], hdir, witnesses)
 
 
 def _write_landed(text, target_id, record):
@@ -956,7 +1350,137 @@ def _write_landed(text, target_id, record):
     return text[:at] + ', "landed": ' + blob + text[at:]
 
 
-def _set_status_text_transform(target_id, status, evidence_list=()):
+# ── the landing PLAN: resolved BEFORE the lock, re-validated INSIDE it ────────
+#
+# Verification talks to the NETWORK — `ls-remote` to discover a default branch, and
+# again to confirm a refusal. Each call is bounded, but a SLICED feature probes once
+# per slice repository, so three unreachable slice remotes cost ~15s. Run inside the
+# critical section, that made the SOLE supported write path hold `tasks.json.lock` for
+# the whole probe: measured on the predecessor, a concurrent writer with a 1s bounded
+# acquisition was starved out and ITS TRANSITION WAS LOST — the no-lost-update
+# guarantee (R1) the lock exists for, defeated by the guard built on top of it.
+#
+# So the probes run BEFORE `run()` takes the lock, and the lock still covers only the
+# pure re-read → patch → validate → atomic-replace it always did. The contract half
+# left a note saying exactly this must happen when I/O returned; this is that.
+#
+# The ordering constraint it creates: WHICH repositories to probe is read from the
+# board, and the board is what the lock protects. Trading a starvation bug for a
+# TOCTOU bug would be no trade at all, so the pre-lock resolution carries a SHAPE
+# FINGERPRINT — `(is_feature, slice repos in order)`, precisely the board inputs that
+# decided what was probed and what the record must cover. It is recomputed from the
+# authoritative in-lock re-read and compared. Equal ⇒ the resolution answers for the
+# board being written. Different ⇒ ABORT, byte-identical board, "re-run"; we never
+# silently write a record resolved for a different slice set, and never re-probe under
+# the lock. Anything else about the board may change freely — another feature's status,
+# a title, a park — because none of it affects which repository a ref is checked in.
+#
+# The OTHER half — would a fresh resolution still give the same answer? — is not
+# fingerprinted here at all. It rides along with each `Resolution` as a `Witness`, built
+# by `resolve()` at the point it consults the manifest, the chosen repository and the
+# candidate set. That split is the fix for a defect this file kept re-committing: a
+# witness assembled BESIDE a resolution has to be remembered by every call path, and the
+# fifth review round found a NEW call path that had forgotten it — the defect reappearing
+# on the code written to address it. A witness that IS part of the resolution cannot be
+# forgotten, because there is no way to obtain the answer without it. `still_holds()`
+# spawns no child process, so it runs inside the lock exactly like the shape check.
+
+
+def _landing_shape(text, target_id):
+    """The BOARD inputs that decide WHAT gets probed: (is_feature, ordered slice repos).
+
+    This is the half of the plan→write guard that only the board can answer, and it is why
+    a shape still exists at all: WHICH repositories are probed is read from the board, and
+    the board is what the lock protects. Everything the RESOLUTION assumed — the manifest's
+    state, the manifest entry a binding resolved through, the chosen repository's identity,
+    the candidate set that made an unbound answer unique — travels with the resolution
+    instead, as `Witness` objects captured where each dependency was used. That is the
+    whole point of the split: a hand-maintained list here could be (and repeatedly was)
+    forgotten by the next call path, while a witness that IS part of the resolution cannot.
+    """
+    is_feature, feature = _feature_entry(text, target_id)
+    return is_feature, tuple(_slice_repos(feature) if is_feature else ())
+
+
+def _landing_plan(target_id, status, evidence_list, hdir):
+    """Resolve the landing OUTSIDE the lock, and keep what it depended on.
+
+    Returns {"shape": …, "record": … | None, "witnesses": (…)}. Refusals happen here,
+    before any lock is taken — a refusal never contends for the lock at all. A board that
+    cannot be read yet yields an empty shape and no record; `run()` reports the missing
+    board itself.
+
+    There is deliberately no "capture the manifest BEFORE resolution" step any more. That
+    existed because the witness was assembled AFTER the probe, from a file the probe might
+    already have raced; the resolver now captures the manifest at the point it USES it, so
+    the state the answer was computed under is the state that is witnessed, by
+    construction rather than by call ordering.
+    """
+    try:
+        with open(os.path.join(hdir, TASKS_REL)) as fh:
+            text = fh.read()
+    except OSError:
+        text = ""
+    witnesses = []
+    record = _resolve_landing(text, target_id, status, evidence_list, hdir, witnesses)
+    return {
+        "shape": _landing_shape(text, target_id),
+        "record": record,
+        "witnesses": tuple(witnesses),
+    }
+
+
+def _shape_str(shape):
+    is_feature, repos = shape
+    if not is_feature:
+        return "not a feature on this board"
+    if not repos:
+        return "a single-repo feature"
+    return "a feature sliced across %s" % ", ".join(repos)
+
+
+def _check_plan_still_applies(text, target_id, plan, hdir):
+    """Re-validate the pre-lock resolution against the authoritative in-lock read.
+
+    Two questions, and they have different owners. Did the BOARD change what would be
+    probed? — the shape, recomputed here from the in-lock text. Would a fresh `resolve()`
+    still give the same answer? — `Witness.still_holds`, which is the resolver's own
+    promise and covers the manifest's state, the entry a binding resolved through, the
+    chosen repository's identity, and the candidate set that made an unbound answer unique.
+    Both are filesystem-only: no child process, no network, so the lock still holds nothing
+    but the pure re-read → patch → validate → replace.
+
+    An ABORT here is not a refusal of the claim: nothing is written, and the operator
+    re-runs — which converges, because the re-run both plans and re-validates against the
+    new state. That is why a manifest that has become absent or unreadable aborts rather
+    than degrading: degrading would write a record justified by an authority that no
+    longer exists, while aborting costs one re-run and can never record something false.
+    """
+    tail = (
+        " Nothing was written; re-run. (Evidence is resolved before the lock is taken so "
+        "network probes cannot starve other writers; this is the guard that stops a record "
+        "resolved under one set of assumptions landing under another.)"
+    )
+    shape = _landing_shape(text, target_id)
+    if shape != plan["shape"]:
+        _die(
+            "%s changed between the evidence check and the write — it was resolved as %s "
+            "and the board now reads %s.%s"
+            % (target_id, _shape_str(plan["shape"]), _shape_str(shape), tail)
+        )
+    for witness in plan.get("witnesses", ()):
+        holds, why = witness.still_holds(hdir)
+        if not holds:
+            # Quote the resolver's own reason verbatim: it names WHAT moved and to where,
+            # which is what an operator needs to decide whether to re-run or to go look.
+            _die(
+                "%s changed between the evidence check and the write — %s.%s"
+                % (target_id, why, tail)
+            )
+    return plan["record"]
+
+
+def _set_status_text_transform(target_id, status, plan=None, hdir=None):
     """Build a TEXT transform that changes ONLY the target's status value.
 
     Unlike a parse → mutate → re-serialize round-trip (which reformats every
@@ -967,19 +1491,33 @@ def _set_status_text_transform(target_id, status, evidence_list=()):
     validates the RESULT before the atomic replace, so an invalid outcome (bad
     id, illegal status, sliced-done invariant) still fail-stops (R4).
 
-    The landing resolution (E99-F102) runs here, inside the critical section, and is
-    safe there precisely because it is PURE: it reads the board text it was handed and
-    makes no external call of any kind, so it adds no unbounded work to the lock. A
-    later half that verifies refs must NOT simply extend this function — verification
-    talks to git and the network, and holding this lock across those probes starves
-    concurrent writers; it belongs before the lock, with a re-validation inside it.
+    `plan` is the PRE-LOCK landing resolution (`_landing_plan`). Everything this
+    transform does is pure and local — no child process, no network — so the lock is
+    held only for the re-read → patch → validate → replace it always covered.
+
+    `hdir` is that same PRE-LOCK harness directory, passed in rather than re-derived,
+    and it is what makes the sentence above true. `_harness_dir()` is not free: on a
+    checkout with no `HARNESS_DIR` set it runs `_in_linked_worktree()`, which spawns up
+    to four `git rev-parse` calls, each bounded at five seconds. Called from inside this
+    closure it ran INSIDE the critical section, so a slow git or filesystem could hold
+    the sole board lock for ~20s — past the default 10s bounded acquisition — and starve
+    a concurrent writer out of its own transition. That is precisely the lost-update
+    failure the pre-lock landing plan exists to prevent, reintroduced by the guard built
+    on top of it. Resolving it once before `run()` costs the same calls outside the lock.
     """
 
     def transform(text):
         _refuse_if_parked(text, target_id)  # E06-F07: a park outranks a transition
-        # Resolved BEFORE the patch, so a refusal leaves the board byte-identical —
-        # the write is never half-applied and then rejected.
-        landed = _resolve_landing(text, target_id, status, list(evidence_list))
+        # The record was resolved BEFORE the lock; here we only re-validate that it
+        # still answers for the board being written, so a refusal leaves the board
+        # byte-identical and no external call runs in-lock.
+        landed = (
+            _check_plan_still_applies(
+                text, target_id, plan, hdir if hdir is not None else _harness_dir()
+            )
+            if plan is not None
+            else None
+        )
         span = _find_status_span(text, target_id)
         if span is None:
             _die("id %r not found in board" % target_id)
@@ -1302,10 +1840,13 @@ def main(argv):
         action="append",
         default=None,
         help=(
-            "landing evidence for a `done` transition (E99-F102): any reference "
-            "(recorded verbatim and marked unchecked — this half verifies nothing), "
-            "or none:<why> for work with no commit. A SLICED feature takes the bound "
-            "form --evidence <repo>=<ref>, REPEATED once per slice repository"
+            "landing evidence for a `done` transition (E99-F102): any reference git "
+            "can resolve — it is CHECKED against the repository's default branch and "
+            "refused if the work provably has not merged — or none:<why> for work "
+            "with no commit. Where the check is impossible the record degrades to "
+            "`unchecked` with a warning; see the decision table in store/local.md. A "
+            "SLICED feature takes the bound form --evidence <repo>=<ref>, REPEATED "
+            "once per slice repository"
         ),
     )
     p_set.add_argument(
@@ -1335,9 +1876,16 @@ def main(argv):
 
     if args.cmd == "set-status":
         # Minimal-diff text transform: patches only the target's status token.
-        transform = _set_status_text_transform(
-            args.id, args.status, args.evidence or []
-        )
+        # Resolve the landing BEFORE any lock is taken: evidence verification makes
+        # bounded NETWORK calls, and holding the sole write lock across them starved
+        # concurrent writers out of their own transitions. The transform re-validates
+        # the resolution against the in-lock re-read.
+        # Resolve the harness dir ONCE, here, outside the lock: the transform closes over
+        # it instead of re-deriving it in-lock, where its `git rev-parse` probes could
+        # hold the board lock past a concurrent writer's acquisition timeout.
+        hdir = _harness_dir()
+        plan = _landing_plan(args.id, args.status, args.evidence or [], hdir)
+        transform = _set_status_text_transform(args.id, args.status, plan, hdir)
     elif args.cmd == "apply":
         # External mutators may change arbitrary structure → parse+re-serialize.
         transform = _mutator_text_transform(_import_mutator(args.mutator))

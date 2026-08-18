@@ -40,12 +40,12 @@ const OWNER_GATE = 'owner';
 // `gated-owner`, or you inherit a hole this comment is the only record of.
 const PARK_GATES = new Set([OWNER_GATE]);
 const isOwnerGated = (feature) => Boolean(feature.parked) && feature.parked.gate === OWNER_GATE;
-// E99-F102 landing attestation. CLOSED, like the park gates and for the same reason: the
-// three values say who proved what. Today only two are writable — `unchecked` (recorded,
-// nothing checked it: tasks-lock performs no verification yet) and `declared` (there is no
-// commit to prove). `ancestor` (resolved and proved reachable from the default branch) is
-// accepted so a board from the verification follow-up, or a hand edit, still parses. A
-// fourth value would be a check nothing performs.
+// E99-F102 + E99-F129 landing attestation. CLOSED, like the park gates and for the same
+// reason: the three values say who proved what, and all three are WRITABLE. `ancestor` =
+// the ref resolved and ancestry against the repository's default branch came back true;
+// `declared` = a `none:<why>` ref, work with no commit to prove; `unchecked` = the check
+// was impossible from this checkout and the record says so instead of blocking. A fourth
+// value would be a check nothing performs.
 const LANDED_VERIFIED = new Set(['ancestor', 'unchecked', 'declared']);
 
 class ExpectedError extends Error {
@@ -308,8 +308,21 @@ function validateBoard(board) {
         if (!LANDED_VERIFIED.has(feature.landed.verified)) {
           throw new Error(`${feature.id}.landed.verified ${JSON.stringify(feature.landed.verified)} is unsupported (expected one of: ${[...LANDED_VERIFIED].join(', ')})`);
         }
-        for (const k of ['repo', 'base']) {
+        for (const k of ['repo', 'base', 'commit']) {
           if (feature.landed[k] !== undefined) assertString(feature.landed[k], `${feature.id}.landed.${k}`);
+        }
+        // E99-F129: an `ancestor` names the FULL proof set — `commit` (`ref` may be a
+        // MOVING branch), `repo` (a commit id proves nothing until you know where to look
+        // for it) and `base` (`ancestor of` has a second operand). Any one missing and the
+        // claim cannot be re-checked, which is the defect, not a milder form of it.
+        // Unsliced only — a sliced feature's `ref` is a joined summary of several
+        // repositories and each slice carries its own set.
+        if (feature.landed.verified === 'ancestor' && feature.landed.slices === undefined) {
+          for (const k of ['commit', 'repo', 'base']) {
+            if (!feature.landed[k]) {
+              throw new Error(`${feature.id}.landed.verified ancestor has no ${k}: a proof must name the commit it was checked on, the repository it was checked in, and the base it was checked against`);
+            }
+          }
         }
         // A SLICED feature's evidence is bound per slice repository, so the record
         // carries one entry per repo — where a per-repository verdict will land.
@@ -325,6 +338,16 @@ function validateBoard(board) {
             assertObject(rec, ls);
             assertString(rec.repo, `${ls}.repo`);
             assertString(rec.ref, `${ls}.ref`);
+            if (rec.commit !== undefined) assertString(rec.commit, `${ls}.commit`);
+            // The same full proof set as an unsliced feature-level record; `repo` is
+            // already required above for every slice record, proved or not.
+            if (rec.verified === 'ancestor') {
+              for (const k of ['commit', 'base']) {
+                if (!rec[k]) {
+                  throw new Error(`${ls}.verified ancestor has no ${k}: a proof must name the commit it was checked on and the base it was checked against`);
+                }
+              }
+            }
             if (!LANDED_VERIFIED.has(rec.verified)) {
               throw new Error(`${ls}.verified ${JSON.stringify(rec.verified)} is unsupported (expected one of: ${[...LANDED_VERIFIED].join(', ')})`);
             }

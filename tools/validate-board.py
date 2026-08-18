@@ -47,12 +47,13 @@ SLICE_STATUS = {"pending", "spec-ready", "in-progress", "in-review", "done", "fa
 # downgrade to an ordinary park, because the reason code the selector emits is the whole
 # deliverable and a typo that reads as `parked` reports the wrong one.
 PARK_GATES = {"owner"}
-# Landing attestation (E99-F102). Also a CLOSED set. Today the write path can only
-# produce two of the three: `unchecked` (the ref was recorded and nothing checked it —
-# tasks-lock performs no verification yet) and `declared` (the work has no commit at
-# all). `ancestor` means a ref was resolved and PROVED reachable from the default
-# branch; it is accepted so a board written by the verification follow-up, or by hand,
-# still validates. A fourth value would read as a check that nothing performs.
+# Landing attestation (E99-F102 + E99-F129). Also a CLOSED set. All three are WRITABLE:
+# `ancestor` = the ref resolved and ancestry was computed against the repository's default
+# branch and came back true (row 7 of the decision table in tools/tasks-lock.py);
+# `declared` = a `none:<why>` ref, work with no commit at all; `unchecked` = the check was
+# impossible here (the object is not in this checkout, no default branch could be
+# determined, the remote could not be asked), recorded with a warning rather than blocking.
+# A fourth value would read as a check that nothing performs.
 LANDED_VERIFIED = {"ancestor", "unchecked", "declared"}
 
 
@@ -230,11 +231,28 @@ def _fallback_errors(data):
                         # selector meant a board could pass init.sh AND this file and
                         # then make every next-task.mjs run die with `input-error` —
                         # three acceptance surfaces, one of them unreachable.
-                        for k in ("repo", "base"):
+                        for k in ("repo", "base", "commit"):
                             if k in landed and (not isinstance(landed[k], str) or not landed[k]):
                                 errors.append(
                                     "%s.landed.%s: expected a non-empty string" % (fw, k)
                                 )
+                        # E99-F129: an `ancestor` names the FULL proof set, or it is not
+                        # re-checkable and the record carries authority nothing earned.
+                        # `commit` because `ref` may be a MOVING target (a branch resolves
+                        # just as a sha does); `repo` because a commit id proves nothing
+                        # until you know which repository to look for it in; `base`
+                        # because "ancestor of" has a second operand. Scoped to the
+                        # unsliced case: a sliced feature's `ref` is a joined summary of
+                        # several repositories and each slice carries its own set.
+                        if landed.get("verified") == "ancestor" and "slices" not in landed:
+                            for k in ("commit", "repo", "base"):
+                                if not landed.get(k):
+                                    errors.append(
+                                        "%s.landed.verified 'ancestor': no `%s` — a proof "
+                                        "must name the commit it was checked on, the "
+                                        "repository it was checked in, and the base it "
+                                        "was checked against" % (fw, k)
+                                    )
                         # PER-SLICE landing (E99-F102). A sliced feature's evidence
                         # is bound to each slice repository — one entry per repo, so a
                         # per-repository verdict has somewhere to land. Mirrored
@@ -262,6 +280,24 @@ def _fallback_errors(data):
                                         errors.append(
                                             "%s.%s: expected a non-empty string" % (lw, k)
                                         )
+                                if "commit" in lrec and (
+                                    not isinstance(lrec["commit"], str) or not lrec["commit"]
+                                ):
+                                    errors.append(
+                                        "%s.commit: expected a non-empty string" % lw
+                                    )
+                                # Same full proof set as the unsliced feature-level record
+                                # (E99-F129); `repo` is already required above for EVERY
+                                # slice record, proved or not, so only these two are added
+                                # here.
+                                if lrec.get("verified") == "ancestor":
+                                    for k in ("commit", "base"):
+                                        if not lrec.get(k):
+                                            errors.append(
+                                                "%s.verified 'ancestor': no `%s` — a proof "
+                                                "must name the commit it was checked on "
+                                                "and the base it was checked against" % (lw, k)
+                                            )
                                 if lrec.get("verified") not in LANDED_VERIFIED:
                                     errors.append(
                                         "%s.verified '%s': not one of %s"
@@ -274,10 +310,11 @@ def _fallback_errors(data):
                                         "%s.base: expected a non-empty string" % lw
                                     )
                             # The rollup can never be STRONGER than its slices: one
-                            # unproved slice and the feature is not `ancestor`. The
-                            # write path cannot produce that value at all today, so this
-                            # guards the two ways one can still appear — a hand edit, and
-                            # the verification follow-up.
+                            # unproved slice and the feature is not `ancestor`. The write
+                            # path already enforces this itself (the feature-level value
+                            # is the MINIMUM of the slice ranks), so what this guards is
+                            # the other way in: a hand-edited or imported board, where the
+                            # false attestation would be re-entered by hand.
                             if landed.get("verified") == "ancestor" and any(
                                 not isinstance(r, dict) or r.get("verified") != "ancestor"
                                 for r in lsl

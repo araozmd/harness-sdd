@@ -478,14 +478,39 @@ any transition while a park is in place, so the unpark comes first.
 action, a supersession). Use it when there is **nothing** to merge — never when
 there is something that has not merged *yet*.
 
-⚠️ **Recorded, not verified — yet.** The helper does **not** check the reference. It
-runs no git, opens no connection, resolves no repository, and never decides whether a
-commit reached a default branch. Every ref is stored as `verified: "unchecked"` (or
-`"declared"` for `none:<why>`), with a warning saying so; `repo`/`base` are absent;
-and `verified: "ancestor"` is something this version **cannot** write. Verification
-is a separate, later change. What you get today is that the claim is **on the board
-and greppable** rather than nowhere — re-auditing becomes a scan instead of commit
-archaeology across four colliding id namespaces.
+**Each ref is VERIFIED, per one decision table.** The question verification really asks
+is *what happens when it is impossible?* Answering that per input, as fixes accumulate,
+is how the first attempt collected five review rounds of the same defect — so it is
+answered once, and `tools/tasks-lock.py` implements these rows in order:
+
+| # | situation | outcome |
+|---|---|---|
+| 1 | `none:<why>` | `declared` |
+| 2 | the ref resolves to no git object anywhere | `unchecked` + warning |
+| 3 | a binding names a repo the **manifest does not contain** | **REFUSED** |
+| 4 | the manifest names it, but the directory is absent/unreadable here | `unchecked` |
+| 5 | the repo is located, but the object is unknown in it | `unchecked` |
+| 6 | no default branch can be determined | `unchecked` |
+| 7 | ancestry is checkable and TRUE **against a confirmed base** | `ancestor` |
+| 8 | ancestry is FALSE **and** the base tip is confirmed current | **REFUSED** |
+| 9 | ancestry is FALSE but the tip could **not** be confirmed | `unchecked` |
+
+**The asymmetry that decides every row.** A *false attestation* is worse than none — the
+record gains the authority of a check that never happened — so `ancestor` comes only from
+row 7. A *false refusal* is worse than a silent pass — a guard that rejects genuinely
+merged work gets routed around or switched off — so refusal is reserved for the two
+provably-wrong claims: row 8, and row 3. Rows 3 and 4 are the distinction that matters
+most: a **malformed claim** (the board names a repository the project does not declare) is
+refused; **not being able to see a repository from here** degrades. Row 3 applies only
+where a manifest is configured and readable.
+
+**Where a repository lives is the manifest's answer**, resolved against the manifest
+file's own directory — the shipped example uses siblings (`../viernes-bff`) and nothing
+requires a key to equal a directory name. **What an object id is, is git's answer**: every
+non-`none:` ref goes to `git rev-parse --verify <ref>^{commit}`, so a sha of any width, a
+tag and a branch all resolve. Because a branch **moves**, the record keeps both `ref` (what
+you claimed) and `commit` (the immutable id it resolved to, which ancestry was computed on
+and a re-audit re-checks).
 
 **Every feature needs it, sliced or not.** A sliced feature *looks* attested — the
 schema refuses `done` unless every slice is `done` *and* `merged` — but **nothing in
@@ -499,18 +524,19 @@ evidence — **one binding per slice repository**.
 
 | the `--evidence` value | what happens |
 |---|---|
-| any reference (a sha, a PR URL, a tag) | accepted with a **warning**, recorded `verified: "unchecked"` |
+| a ref git RESOLVES, reachable from the default branch | accepted, recorded `verified: "ancestor"` with the repo, base and immutable `commit` |
+| a ref git resolves that is **not** reachable, where the base tip is confirmed current | **REFUSED** — the board is left byte-identical |
+| a ref git cannot resolve here (a PR URL, an unfetched sha, an unreadable repo) | accepted with a **warning**, recorded `verified: "unchecked"` |
 | `none:<why>` | accepted, recorded `verified: "declared"` — work with no commit (a console action, a supersession). The reason is required |
 | omitted, on **any** feature (sliced included) | **REFUSED**, board left byte-identical |
 | **unbound** (`<ref>`, no `<repo>=`) on a **sliced** feature | **REFUSED** — it names no repository, so it attests no particular slice |
 | bound to a repo the feature has **no slice in**, **repeated** for one repo, or **missing** for a slice repo | **REFUSED**, naming the repository |
-| `<repo>=<ref>` on a feature with **no** slices | **REFUSED** — it would record a repository the feature does not have |
+| `<repo>=<ref>` on a feature with **no** slices | **accepted**, and it is the only remedy for an ambiguous ref — the name is resolved and checked, so the record names a repository that was actually consulted |
 | on any **non-`done`** transition | **REFUSED** — the record means one thing |
 
-The value is deliberately **not** classified further: asking whether a string "looks
-like a commit id" is a verification question — the 40-hex assumption it invites
-misses SHA-256's 64-character ids — and it belongs with the code that resolves
-objects. Everything that is not `none:<why>` is transcribed verbatim.
+The value is never pattern-matched: asking whether a string "looks like a commit id"
+is what made the 40-hex assumption miss SHA-256's 64-character ids. Git is asked
+instead, and whatever it will not resolve is row 2.
 
 **The record is additive.** `landed` is optional in the schema and never required by
 it, only by the write path, so every board written before this existed stays valid
