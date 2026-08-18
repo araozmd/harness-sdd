@@ -4,6 +4,125 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.65.0] — 2026-08-17
+
+### Added — ✨ an explicit repository resolver (E99-F129c)
+
+`tools/repo-resolve.py` answers one question — **which repository is a claim about, and
+may that answer be trusted?** — and returns a value that makes its own uncertainty
+impossible to ignore. It contains no ancestry logic, no verdicts and no board writes.
+
+**Why it is a module and not a few helpers.** Landing verification decides, for a
+*(ref, repository)* pair, whether work merged; nine rows enumerate those verdicts.
+Establishing the **pair** is a different question, and it was implicit machinery threaded
+through the write path — a search order here, a manifest read there, a fingerprint
+assembled somewhere else. Correctness was by convention across ~9 functions, and every new
+call path had to remember to participate in all of them. It kept not being remembered, in
+six separate review findings: a slice repository located by directory basename; the
+manifest missing from the plan→write fingerprint; an unbound ref silently taking the first
+of several candidates; a lexical path a retargeted symlink walks past; **a new call path,
+added to fix the third of those, which omitted the fingerprint again**; and
+`refs/remotes/origin/HEAD` trusted as the remote's answer when it is only a cache of a
+former one. The last two are the argument: a witness assembled *beside* a resolution can be
+forgotten by the next path, while a witness that **is** the resolution cannot; and "is this
+base still the default branch?" is a question about identity, not about ancestry.
+
+The contract it publishes (and now owns):
+
+- **I1 — search only when unambiguous.** A binding names the repository; without one the
+  ref must resolve in exactly one, and two or more is `AMBIGUOUS` — a value the caller must
+  handle, never a repository it can use. Never "the first": the search order starts at the
+  harness dir's own repository, which never holds feature work. Linked worktrees of one
+  repository are one repository (`--git-common-dir`), not an ambiguity.
+- **I2 — identity is the lexical path *and* its realpath**, as one value with one
+  comparison, using filesystem calls only so a caller may re-check it while holding a lock.
+  Not covered, deliberately: a repository replaced in place.
+- **I3 — the default branch carries its evidence**: `published` (the remote, asked just
+  now — name **and** tip), `published-stale-tip` (the remote named this branch, but our copy
+  of it is behind the tip it advertised), `cached` (`origin/HEAD` — a snapshot of a *former*
+  answer, never confirmed), `declared`, `sole-branch`, `none`. `base_confirmed` folds the
+  rules into one boolean so no caller re-derives them differently.
+  Confirming the *name* is not confirming the *tip*: `ls-remote --symref` advertises both in
+  one call, and reading only the symref line left a base marked confirmed while the tracking
+  ref was behind — an ancestry check against that stale copy **refuses work that is already
+  merged**, and a false refusal is worse than a silent pass. The advertised sha comes back as
+  `base_tip`, so a caller that happens to hold that object can answer against the real tip;
+  callers need not distinguish the two `published*` values to stay correct, because
+  `base_confirmed` already says no. The resolver never fetches: a resolver that mutates the
+  repository it inspects is a new hazard, and it would spend a timing budget its caller did
+  not agree to.
+- **Uncertainty is falsy as well as unreadable.** `resolve()` always returns an object, so a
+  default-truthy `Resolution` made `if r:` read as success for `ambiguous` and `unknown`
+  alike — the same slide the raising accessors exist to prevent, one level cheaper.
+  `__bool__`/`__nonzero__` now follow `certain`.
+- **Uncertainty is a value you cannot spend.** `Resolution.directory` and `.base` *raise*
+  when the resolution does not have them, so "I could not tell" cannot slide into "yes".
+- **The witness comes back with the resolution**, so a call path cannot omit it.
+- **`resolve()` captures what it depended on, as a `Witness`.** The promise below was
+  never wrong, but the LIST of inputs it entails was maintained in two places — and only
+  `resolve()` actually knew. Three findings were the same shape: the re-check compared the
+  wrong field, then too few things, then too few things again (a neighbouring repository
+  that *acquires* the ref between resolve and the locked re-check leaves every path and
+  identity identical while a fresh resolve would answer `ambiguous`). So the capture moved
+  to where each dependency is **used**: `Witness.still_holds(hdir)` is the entry point, and
+  a dimension `resolve()` consults and forgets to witness is now a dimension it did not
+  consult. Ref membership is captured as a conservative, filesystem-only fingerprint of each
+  **non-chosen** candidate's refs and objects — sound in the direction that matters (a
+  repository cannot gain a commit without writing to them) and deliberately over-reporting,
+  since the cost is a re-run. The chosen repository is excluded precisely so the
+  not-promised clause survives: its own branch advancing is somebody else's merge.
+  The fingerprint observes where git actually **writes**: the whole `refs/` tree is walked
+  (a loose ref goes inside `refs/heads/…`, which the parent's mtime does not follow) and
+  every `objects/<xx>` fan-out directory is stat'd (a loose object lands inside one), plus
+  `packed-refs` and the `objects/pack` listing. Gitfile and linked-worktree layouts are
+  resolved by reading `commondir` — file reads only, so it stays lock-safe while reaching
+  the same store `same_repository()` reasons about. It states what it does **not** see:
+  objects borrowed via `objects/info/alternates` (the file is fingerprinted, the borrowed
+  store is not), and any change leaving both listing and mtimes identical. Candidates are
+  excluded from that membership check by REPOSITORY, not by directory: a sibling linked
+  worktree is another path over the same store, and fingerprinting it as an unrelated
+  neighbour made any commit in the chosen repository flip the re-check to false while a
+  fresh resolve was unchanged — a false alarm that broke the not-promised clause by the
+  back door, in the layout this tool actually runs in.
+- **A manifest that declares the same repository twice is `unreadable`.** The later `path:`
+  silently won, so a conflicted or partial edit resolved confidently against the *last*
+  checkout — while `next-task.mjs` rejects duplicate keys outright, so the two readers of
+  one file disagreed about whether it was usable at all.
+- **An unreadable manifest is not an absent one.** `absent` means no authority exists, and
+  only that licenses a basename search; `unreadable` (a partial write, tab indentation)
+  means the authority exists and cannot be read, where a search can return a confident
+  `resolved` for the **wrong** repository. New outcome `unreadable`, and the binding is
+  refused.
+- **`revalidate()` has a stated promise**: *a fresh `resolve()` with the same inputs would
+  return the same outcome, the same repository, and the same certainty.* It had a name and
+  an intuition instead, and two findings fell straight out of the gap — it compared the
+  **wrong** thing (reading the chosen directory's basename as a manifest key, so an unbound
+  resolution under an aliased manifest could never revalidate: fail-safe, but useless on the
+  layout the manifest exists for) and **too few** things (only the chosen repository, so
+  retargeting a *non-selected* candidate left it saying "unchanged" while a fresh resolve
+  would answer `ambiguous`). Everything it checks now follows from that sentence — the
+  chosen identity, the manifest's state, the manifest entry for a **bound** request, and the
+  candidate set in paths **and identities**. What it deliberately does not promise: the
+  default branch advancing (somebody else's merge, constant in a busy repository, and
+  ancestry is monotone under fast-forward — aborting on it would make the guard fire so
+  often it would be switched off). `binding` is now its own field: `repo` is the name to
+  record, and a single field whose meaning depended on how you arrived is how the first of
+  those findings happened.
+
+Measured, on a remote that moved its default `main` → `trunk` while `main` still existed:
+the cached symref still said `main`, and a commit reachable only from the *former* default
+was previously attested as being on the default branch. The resolver answers
+`origin/trunk` / `published`, and — when the remote is unreachable — falls back to the cache
+while marking it `cached` / **not confirmed**.
+
+New suite `tests/test_repo_resolver.sh` (7 cases, each paired with a control that must come
+out *differently* on the same fixture; 4 mutations against the tip and truthiness rules, 4
+killed, 0 survivors). It is verified under **dash** as well as the host `sh`: backticks
+inside a double-quoted string are command substitution in every POSIX shell, and dash
+parses eagerly where bash defers — so a suite that only ever ran under bash had never
+actually been parsed by the shell Debian and Ubuntu call `sh`. It lands **unused by design**: this is the first of
+two staged changes, and the verification rows consume it next.
+
 ## [0.64.0] — 2026-08-17
 
 ### Added — ✨ `done` must carry a landing record (E99-F102, contract half)
