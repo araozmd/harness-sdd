@@ -580,6 +580,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F138-migrated-from-viernes/"
+        },
+        {
+          "id": "E99-F140",
+          "title": "[migrated from viernes 2026-08-19, was the residual half of viernes E99-F113] `wait-for-codex.sh` EXIT 5 CONFLATES TWO FAULTS WITH OPPOSITE REMEDIES, and the operator cannot tell them apart without reading the message prose. The same exit 5 is returned when (a) the Codex GitHub App is absent from / has no access to the repository, whose remedy is to install or authorize the App - or to accept manual review and set `pr_loop.enabled: false` for that repo so the loop does not run and strand a PR - and when (b) the preflight cannot resolve a repo slug, whose remedy is simply to re-run from the child repo instead of the umbrella coordinator. Nothing about the two is alike except the number. THE SECOND CASE IS NOT HYPOTHETICAL: running a pr-loop step from an umbrella root rather than the child repo has bitten the viernes project repeatedly, and it is the most likely explanation for the one incident that produced this item. FIX: split the exit code (or otherwise make the two machine-distinguishable) so a caller can branch on the fault rather than grep the prose. \u26a0\ufe0f THE ORIGINATING DIAGNOSIS WAS WRONG, WHICH IS ITSELF THE ARGUMENT FOR THIS FIX. Viernes E99-F113 asserted that `viernes-users` had no Codex App, on the strength of an exit 5 against its PR #32 on 2026-08-14. Re-measured 2026-08-19: the App IS installed there - a full two-round review ran on viernes-users PR #36, with `chatgpt-codex-connector[bot]` posting a COMMENTED review and then a clean banner against commit 5b1de1d473 - and it is installed on all six viernes repos, every one with bot activity inside 24 hours (viernes-web 16 comments, viernes-bff 19, viernes-users 11, viernes-bookings-api 23, viernes-bookings-calendar 35, viernes-infra 30). So an ambiguous exit code sent a real project chasing an App-installation problem that did not exist, and the item sat on a board for five days on a false premise. That is the cost this fix removes. \u26a0\ufe0f MEASUREMENT TRAP WORTH RECORDING IN THE FIX'S OWN TESTS: the REST API reports the reviewer's login as `chatgpt-codex-connector[bot]`, WITH the `[bot]` suffix, while the GraphQL `author.login` reports it WITHOUT. Three separate attempts to survey App presence returned a confident 0 for all six repos - including the one already proven to have activity - because they filtered on equality with the unsuffixed name, or used `search/issues?q=...+commenter:chatgpt-codex-connector`, which also returns 0. Any detection logic here must match by prefix, not equality, or it will diagnose 'App absent' on a repo whose App is working. Raised by the Orchestrator while closing viernes E99-F113 on evidence.",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F140-wait-for-codex-exit5-ambiguity/"
         }
       ]
     },
