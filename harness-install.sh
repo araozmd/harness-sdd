@@ -882,8 +882,8 @@ body_link_travels() {
 # just named, falling back to the tier entry when it belongs to neither side. Reads
 # prose_tier_blockers' loop variables directly (POSIX sh has no locals; stage_tree reads
 # $_umb_body the same way). It is ONE function because R3's "name every differing path" has
-# to mean the same thing for both producers of blocker paths — the symlink sweep and the
-# diff parser — and two copies of this `case` would be free to diverge.
+# to mean the same thing for both producers of blocker paths — the unsafe-node sweep and the
+# exact walk — and two copies of this `case` would be free to diverge.
 # rm_owned_tree <path>… — remove a tree THIS INSTALLER MATERIALISED, making it writable first.
 #
 # THE RULE, STATED ONCE, BECAUSE IT WAS A HABIT AND HABITS GET SKIPPED. `cp -R` carries the
@@ -898,7 +898,7 @@ body_link_travels() {
 #
 # WHERE IT APPLIES, and the boundary is the PROVENANCE OF THE MODES, not the location:
 #   YES  `copy`'s destination, `stage_tree`'s staging copies, the parked originals, and the
-#        link-free comparison copies — every one of them arrives via `cp -R` from `$SRC` or
+#        sanitised comparison copies — every one of them arrives via `cp -R` from `$SRC` or
 #        from the umbrella body, carrying whatever modes that tree had.
 #   NO   `$CMDDIR` and the Codex skill temp dir — written by this installer's own heredocs and
 #        generators, so their modes are its umask and a `chmod` there would be noise.
@@ -954,7 +954,8 @@ _ptb_print_path() {
 
 # IT STRIPS `$_ptb_ra`/`$_ptb_rb`, NOT `$_ptb_h`/`$_ptb_u`: those two name the roots of the
 # trees CURRENTLY BEING COMPARED, which are the child's and the umbrella's for an ordinary
-# entry and the link-free copies of them for an entry that holds symlinks (see _ptb_delink).
+# entry and the regular-node-only copies of them for an entry that holds unsafe nodes (see
+# _ptb_sanitize).
 # Both spellings have to yield the same harness-relative path or R3 would name a temporary
 # directory at the operator.
 _ptb_relpath() {
@@ -965,32 +966,40 @@ _ptb_relpath() {
   esac
 }
 
-# _ptb_symlink_walk <path>… — print every symlink AT or UNDER the paths after normalising and
-# escaping it, before any newline-delimited stream can split a legal pathname. Quoted globs
-# preserve embedded whitespace/newlines; the dot patterns cover every hidden entry except
-# `.` and `..`. Recursion runs in a subshell because POSIX sh has no local variables.
-_ptb_symlink_walk() (
-  for _psw_root do
-    if [ -L "$_psw_root" ]; then
-      _ptb_relpath "$_psw_root"
+# _ptb_unsafe_walk <path>… — print every symlink or non-regular, non-directory node AT or
+# UNDER the paths after normalising and escaping it, before any newline-delimited stream can
+# split a legal pathname. Besides symlinks, FIFOs/sockets/devices cannot be handed to `diff`:
+# it may open them and block indefinitely. Quoted globs preserve embedded whitespace/newlines;
+# the dot patterns cover every hidden entry except `.` and `..`. Recursion runs in a subshell
+# because POSIX sh has no local variables.
+_ptb_unsafe_walk() (
+  for _puw_root do
+    if [ -L "$_puw_root" ]; then
+      _ptb_relpath "$_puw_root"
       continue
     fi
-    [ -e "$_psw_root" ] || continue
-    [ -d "$_psw_root" ] || continue
-    [ -r "$_psw_root" ] && [ -x "$_psw_root" ] || exit 1
-    for _psw_p in "$_psw_root"/* "$_psw_root"/.[!.]* "$_psw_root"/..?*; do
-      [ -e "$_psw_p" ] || [ -L "$_psw_p" ] || continue
-      if [ -L "$_psw_p" ]; then
-        _ptb_relpath "$_psw_p"
-      elif [ -d "$_psw_p" ]; then
-        _ptb_symlink_walk "$_psw_p" || exit 1
-      fi
-    done
+    [ -e "$_puw_root" ] || continue
+    if [ -d "$_puw_root" ]; then
+      [ -r "$_puw_root" ] && [ -x "$_puw_root" ] || exit 1
+      for _puw_p in "$_puw_root"/* "$_puw_root"/.[!.]* "$_puw_root"/..?*; do
+        [ -e "$_puw_p" ] || [ -L "$_puw_p" ] || continue
+        if [ -L "$_puw_p" ]; then
+          _ptb_relpath "$_puw_p"
+        elif [ -d "$_puw_p" ]; then
+          _ptb_unsafe_walk "$_puw_p" || exit 1
+        elif [ ! -f "$_puw_p" ]; then
+          _ptb_relpath "$_puw_p"
+        fi
+      done
+    elif [ ! -f "$_puw_root" ]; then
+      _ptb_relpath "$_puw_root"
+    fi
   done
 )
 
-# _ptb_delink — REPOINT the current entry's comparison at LINK-FREE COPIES of its two sides,
-# so `diff -r` can still name every OTHER differing path inside an entry that holds a symlink.
+# _ptb_sanitize — REPOINT the current entry's comparison at REGULAR-NODE-ONLY COPIES of its
+# two sides, so `diff -r` can still name every OTHER differing path inside an entry that holds
+# an unsafe node.
 #
 # WHY A COPY AND NOT A CLEVERER `diff` — and the reason is NOT the one the thinning walk has.
 # MEASURED, because the inherited claim did not survive being checked. Two trees that BOTH
@@ -1011,24 +1020,27 @@ _ptb_symlink_walk() (
 # Removing the links from a COPY buys the same protection — the tree `diff` walks provably
 # holds none — without giving up the comparison.
 #
-# The links themselves are already named by the sweep, so deleting them from BOTH copies loses
-# no blocker; where a link and a real path collide, the two producers name the same
-# harness-relative path and the caller's `sort -u` merges them into one.
+# Unsafe nodes are already named by the sweep, so deleting them from BOTH copies loses no
+# blocker; where one collides with a regular path, the two producers name the same
+# harness-relative path and the caller's `sort -u` merges them into one. Removing FIFOs,
+# sockets and devices is also what guarantees neither the leaf nor recursive `diff` can open
+# one and block (Codex #3809428890).
 #
 # Returns NON-ZERO when the copies cannot be built or when a side has nothing left to compare
-# (the entry itself was the link) — the caller then falls back to naming the links alone,
+# (the entry itself was unsafe) — the caller then falls back to naming the unsafe nodes alone,
 # which is exactly the old behaviour and is still fail-closed: the entry blocks either way.
-_ptb_delink() {
+_ptb_sanitize() {
   [ -n "$_ptb_tmp" ] || return 1
   rm_owned_tree "$_ptb_tmp/h" "$_ptb_tmp/u" || return 1
   mkdir -p "$(dirname -- "$_ptb_tmp/h/$_ptb_rel")" "$(dirname -- "$_ptb_tmp/u/$_ptb_rel")" \
     || return 1
-  # `cp -R` does NOT follow symlinks, so copying a tree that holds `docs/self -> .` copies the
-  # link, never the cycle — the same property stage_tree already relies on.
+  # `cp -R` does NOT follow symlinks or read FIFOs, so it reproduces their directory entries
+  # without traversing a cycle or blocking on a writer — the same property stage_tree relies on.
   cp -R "$_ptb_a" "$_ptb_tmp/h/$_ptb_rel" || return 1
   cp -R "$_ptb_b" "$_ptb_tmp/u/$_ptb_rel" || return 1
   chmod -R u+w "$_ptb_tmp" 2>/dev/null || :
-  find "$_ptb_tmp/h" "$_ptb_tmp/u" -type l -exec rm -f {} + >/dev/null 2>&1 || return 1
+  find "$_ptb_tmp/h" "$_ptb_tmp/u" ! -type d ! -type f -exec rm -f {} + \
+    >/dev/null 2>&1 || return 1
   [ -e "$_ptb_tmp/h/$_ptb_rel" ] && [ -e "$_ptb_tmp/u/$_ptb_rel" ] || return 1
   _ptb_a="$_ptb_tmp/h/$_ptb_rel"; _ptb_b="$_ptb_tmp/u/$_ptb_rel"
   _ptb_ra="$_ptb_tmp/h"; _ptb_rb="$_ptb_tmp/u"
@@ -1063,6 +1075,9 @@ _ptb_exact_walk() (
     elif [ -d "$_pos_p" ] && [ ! -L "$_pos_p" ] \
       && [ -d "$_pos_other" ] && [ ! -L "$_pos_other" ]; then
       _ptb_exact_walk "$_pos_p" "$_pos_other" || exit 1
+    elif [ ! -f "$_pos_p" ] || [ ! -f "$_pos_other" ]; then
+      # Defence in depth against a special node appearing after the pre-sweep. Never open it.
+      _ptb_relpath "$_pos_p"
     elif ! LC_ALL=C diff -q "$_pos_p" "$_pos_other" >/dev/null 2>&1; then
       _ptb_relpath "$_pos_p"
     fi
@@ -1114,7 +1129,7 @@ _ptb_exact_walk() (
 # link is judged identical, then deleted and replaced by a stub while the run reports success.
 # `diff --no-dereference` names both correctly and is what this box's diff offers, but it is
 # not portable — GNU diffutils only grew it in 3.3 — and on a box without it every comparison
-# would fail closed, so NO child could ever convert. The quoted symlink sweep needs no
+# would fail closed, so NO child could ever convert. The quoted unsafe-node sweep needs no
 # capability probe and preserves every legal pathname byte. WHAT IT COSTS: a child and
 # umbrella holding the SAME symlink with the SAME
 # target — provably safe — is refused too. That is this feature's stated posture (anything
@@ -1131,11 +1146,11 @@ _ptb_exact_walk() (
 # dangling link Codex #3802057839 measured.
 #
 # THE SWEEP RUNS BEFORE `diff`, AND REDIRECTS IT RATHER THAN SKIPPING IT. `diff -r` must never
-# be handed a tree that holds a link — what that costs is measured in _ptb_delink, and it is
-# the NAMING rather than a hang — so when the sweep finds one, `diff` is pointed at link-free
-# COPIES of the two sides instead. Both producers then contribute, and the caller merges their
-# output with `sort -u`, because R3 promises the operator EVERY differing path in the tier and
-# an entry holding one link plus one edit has two of them.
+# be handed a tree that holds a link or another special node: links corrupt structural identity,
+# while FIFOs can block forever waiting for a writer. When the sweep finds one, `diff` is pointed
+# at regular-node-only COPIES of the two sides instead. Both producers then contribute, and the
+# caller merges their output with `sort -u`, because R3 promises the operator EVERY differing
+# path in the tier and an entry holding one unsafe node plus one edit has two of them.
 #
 # _ptb_entry_blockers <no args> — ONE entry's blockers, reading $_ptb_rel/$_ptb_h/$_ptb_u from
 # its caller. It is a function so that the caller can pipe the WHOLE entry through one
@@ -1150,18 +1165,18 @@ _ptb_entry_blockers() {
     printf '%s\n' "$_ptb_rel"
     return 0
   fi
-  # THE SYMLINK SWEEP (see the rule above). Fail closed on a walk that could not complete:
+# THE UNSAFE-NODE SWEEP (see the rule above). Fail closed on a walk that could not complete:
   # a side this cannot read is not a side whose shape has been established, and the entry
   # path itself is the honest thing to name.
-  if ! _ptb_lnks="$(_ptb_symlink_walk "$_ptb_a" "$_ptb_b")"; then
-    _ptb_lnks="$(_ptb_print_path "$_ptb_rel")"
+  if ! _ptb_unsafe="$(_ptb_unsafe_walk "$_ptb_a" "$_ptb_b")"; then
+    _ptb_unsafe="$(_ptb_print_path "$_ptb_rel")"
   fi
-  if [ -n "$_ptb_lnks" ]; then
-    # When BOTH sides hold the link, the two absolute paths normalise to the SAME
+  if [ -n "$_ptb_unsafe" ]; then
+    # When BOTH sides hold the unsafe node, the two absolute paths normalise to the SAME
     # tier-relative one; the caller's `sort -u` is what keeps that one problem one line.
-    printf '%s\n' "$_ptb_lnks"
-    # The links are named; now compare what is left of the entry, on copies `diff` can walk.
-    _ptb_delink || return 0
+    printf '%s\n' "$_ptb_unsafe"
+    # Unsafe nodes are named; compare what remains on copies `diff` can safely walk/read.
+    _ptb_sanitize || return 0
   fi
   # Derive exact names independently of `diff`'s human prose. Run both directions so
   # one-sided paths from either tree are covered; `sort -u` merges two-sided overlap and
@@ -1205,11 +1220,11 @@ prose_tier_blockers() {
   fi
   # Created up front rather than on first use because _ptb_entry_blockers runs in a PIPELINE,
   # i.e. a subshell, and a temp root it created there could be neither reused nor removed by
-  # this function. An empty value simply means the link-free comparison is unavailable and
-  # every entry falls back to naming its links alone.
+  # this function. An empty value simply means the sanitised comparison is unavailable and
+  # every entry falls back to naming its unsafe nodes alone.
   _ptb_tmp="$(mktemp -d 2>/dev/null || mktemp -d -t harness-ptb)" || _ptb_tmp=''
   for _ptb_rel in $HARNESS_BODY_PROSE; do
-    # ONE `sort -u` PER ENTRY, over BOTH producers: the symlink sweep and the `diff` parse
+    # ONE `sort -u` PER ENTRY, over BOTH producers: the unsafe-node sweep and exact walk
     # each name paths, a path can legitimately be named by both, and R3 asks for every
     # differing path exactly once. (Codex #3802057859.)
     _ptb_entry_blockers | sort -u

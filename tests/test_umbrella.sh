@@ -1668,7 +1668,9 @@ pass "R3 thin_umbrella_side_path_is_named — a path the umbrella holds and the 
 # two-sided difference, `: ` for an Only-in difference) and its record newline are legal
 # pathname bytes. The fixture exercises a one-sided file, a two-sided differing file and a
 # two-sided symlink with literal newlines, so encoding only one producer cannot satisfy it.
-# Exact names must be derived while each pathname is still one quoted shell value.
+# It also puts the same FIFO on both sides: `diff` opens matching named pipes and waits for a
+# writer, so the bounded subprocess proves special nodes are named without being read. Exact
+# names must be derived while each pathname is still one quoted shell value.
 F04P="$AU/f04p parent and pair: marker"
 f04_fullchild "$F04P" kid
 KP4="$F04P/kid/.harness"
@@ -1689,6 +1691,7 @@ printf 'same link target bytes\n' > "$KP4/docs/sub/link-target.md"
 cp "$KP4/docs/sub/link-target.md" "$F04P/.harness/docs/sub/link-target.md"
 ln -s link-target.md "$KP4/$F04P_NL_LINK_REL"
 ln -s link-target.md "$F04P/.harness/$F04P_NL_LINK_REL"
+mkfifo "$KP4/docs/sub/review-fifo" "$F04P/.harness/docs/sub/review-fifo"
 printf 'a file where the umbrella holds a directory\n' > "$KP4/docs/type-clash"
 mkdir -p "$F04P/.harness/docs/type-clash"
 [ -d "$KP4/docs/sub" ] && [ -d "$F04P/.harness/docs/sub" ] \
@@ -1702,12 +1705,31 @@ mkdir -p "$F04P/.harness/docs/type-clash"
   || fail "R3 newline control: the two-sided literal-newline files must both exist and differ"
 [ -L "$KP4/$F04P_NL_LINK_REL" ] && [ -L "$F04P/.harness/$F04P_NL_LINK_REL" ] \
   || fail "R3 newline control: the literal-newline symlink must exist on both sides"
+[ -p "$KP4/docs/sub/review-fifo" ] && [ -p "$F04P/.harness/docs/sub/review-fifo" ] \
+  || fail "R2 special-node control: review-fifo must be a named pipe on both sides"
 [ -f "$KP4/docs/type-clash" ] && [ -d "$F04P/.harness/docs/type-clash" ] \
   || fail "R3 type-clash control: docs/type-clash must be a child file and an umbrella directory"
-F04P_OUT="$(CODEX_HOME="$F04P/.ch" HOME="$F04P/.home" \
-  sh "$SRC/harness-install.sh" --agents=claude --thin "$F04P/kid" 2>&1)" && F04P_RC=0 || F04P_RC=$?
+F04P_OUT="$(F04P_CODEX_HOME="$F04P/.ch" F04P_HOME="$F04P/.home" \
+  python3 - "$SRC/harness-install.sh" "$F04P/kid" <<'PY'
+import os, subprocess, sys
+env = os.environ.copy()
+env["CODEX_HOME"] = env.pop("F04P_CODEX_HOME")
+env["HOME"] = env.pop("F04P_HOME")
+try:
+    result = subprocess.run(
+        ["sh", sys.argv[1], "--agents=claude", "--thin", sys.argv[2]],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
+except subprocess.TimeoutExpired as exc:
+    if exc.stdout:
+        sys.stdout.buffer.write(exc.stdout)
+    print("TIMEOUT: installer blocked while comparing a named pipe")
+    sys.exit(124)
+sys.stdout.buffer.write(result.stdout)
+sys.exit(result.returncode)
+PY
+)" && F04P_RC=0 || F04P_RC=$?
 [ "$F04P_RC" = "0" ] || fail "R3 delimiter-parent: single-target --thin exited $F04P_RC: $F04P_OUT"
-for _p in agents/builder.md 'docs/sub/note: local.md' docs/type-clash; do
+for _p in agents/builder.md 'docs/sub/note: local.md' docs/sub/review-fifo docs/type-clash; do
   printf '%s\n' 2>/dev/null "$F04P_OUT" | grep -qF "differs: $_p" \
     || fail "R3: the blocker was reduced to its tier instead of naming the exact path $_p: $F04P_OUT"
 done

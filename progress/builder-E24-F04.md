@@ -561,3 +561,20 @@ Post-review verification on the directory-only cleanup: `./init.sh`, syntax unde
 `dash`, `git diff --check`, umbrella and change-size suites all green; the authoritative gate
 reports **all 43 suites passed** under `/bin/dash [PROGRAM:dash PROJECT:dash-16]` with `--jobs 8`.
 Final change-size is **877 production lines / 4 files**, tier **ok**.
+
+### Hosted review — round 10
+
+Round 10 found one P2: when both comparison trees held a FIFO at the same prose path,
+`diff -q` opened the named pipes and waited indefinitely for a writer. The regression adds a
+matching `docs/sub/review-fifo` and runs the installer in a 10-second bounded subprocess. Before
+the repair it exited 124 with the fixture's timeout diagnostic.
+
+The pre-diff sweep now treats every symlink or non-regular, non-directory node as unsafe. It
+names each exact path, copies both sides, removes unsafe nodes from the copies, and only then
+runs the exact and recursive comparisons. A leaf-level regular-file check supplies race defence
+so a special node created after the sweep is named rather than opened. The complete umbrella
+suite passes with the FIFO named exactly and without blocking. Final verification: `./init.sh`,
+syntax under `sh` and `dash`, `git diff --check`, umbrella and change-size suites are green; the
+authoritative gate reports **all 43 suites passed** under
+`/bin/dash [PROGRAM:dash PROJECT:dash-16]` with `--jobs 8`. Change-size is
+**892 production lines / 4 files**, tier **ok**.
