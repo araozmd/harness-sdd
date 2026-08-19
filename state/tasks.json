@@ -68,7 +68,7 @@
       "features": [
         {
           "id": "E05-F01",
-          "title": "Reviewer cross-file consistency + explicit build↔review rounds",
+          "title": "Reviewer cross-file consistency + explicit build\u2194review rounds",
           "status": "done",
           "sdd": true,
           "autonomous": true,
@@ -276,13 +276,13 @@
     },
     {
       "id": "E13",
-      "title": "Monday board integration (draft — not current use case)",
+      "title": "Monday board integration (draft \u2014 not current use case)",
       "status": "draft",
       "features": []
     },
     {
       "id": "E14",
-      "title": "Azure Boards integration (draft — not current use case)",
+      "title": "Azure Boards integration (draft \u2014 not current use case)",
       "status": "draft",
       "features": []
     },
@@ -580,6 +580,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F138-migrated-from-viernes/"
+        },
+        {
+          "id": "E99-F139",
+          "title": "[migrated from viernes 2026-08-18, was E99-F82] THREE LIMITS OF ANCHORED PROSE ASSERTIONS, found by the E99-F58 round-2 Reviewer's own mutations. None is the round-1 defect (an assertion matching pre-feature text and pinning nothing) - these are the residual after that was fixed, and all three apply to E99-F59's anchor too. (1) REWRAP FRAGILITY, the one concrete fix: five assertions - A2, A4, A6, A8, A13 - still grep the UNFOLDED file for multi-word literals, so mutation Y5, a SEMANTICS-PRESERVING re-wrap at width 62, turns them red claiming content is 'missing' when it is merely wrapped. It FAILS CLOSED so it blocks nothing, but it would send someone hunting a deletion that never happened after any formatter run. Fix: route those five through the existing `$_flat` folded form, like the other fourteen. (2) NEGATION IMMUNITY (Y1/Y2, both SURVIVED): `Not strictly forbidden as the revert, but avoid: git checkout -- <file>` still matches the FORBIDDEN anchor, because grep sees co-occurrence, not polarity. Inherent to grep-on-prose; the question to settle is whether a contract file deserves a stronger check than co-occurrence, or whether this is an accepted bound to be STATED rather than silently carried. (3) PLACEMENT UNPINNED (Y3, SURVIVED): the whole mutation-revert block relocates to an appendix and the suite stays green - the rule's VISIBILITY at the point of use is what makes it followed, and nothing asserts it. Related: E99-F75 (the vacuous- grep sweep) and E99-F76 (R11 pins the added paragraph, not the corrected line) are the same family; consider solving all three together. Raised by the E99-F58 round-2 Reviewer, all non-blocking.",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F139-anchored-prose-assertion-limits/"
         }
       ]
     },
