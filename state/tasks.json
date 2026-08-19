@@ -68,7 +68,7 @@
       "features": [
         {
           "id": "E05-F01",
-          "title": "Reviewer cross-file consistency + explicit build↔review rounds",
+          "title": "Reviewer cross-file consistency + explicit build\u2194review rounds",
           "status": "done",
           "sdd": true,
           "autonomous": true,
@@ -276,13 +276,13 @@
     },
     {
       "id": "E13",
-      "title": "Monday board integration (draft — not current use case)",
+      "title": "Monday board integration (draft \u2014 not current use case)",
       "status": "draft",
       "features": []
     },
     {
       "id": "E14",
-      "title": "Azure Boards integration (draft — not current use case)",
+      "title": "Azure Boards integration (draft \u2014 not current use case)",
       "status": "draft",
       "features": []
     },
@@ -580,6 +580,51 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F138-migrated-from-viernes/"
+        },
+        {
+          "id": "E99-F140",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 BASE-CHANGE DETECTION FAILS *OPEN* WHEN THE PRIOR ROUND'S `pr.json` IS UNREADABLE, AND THE CODE'S OWN COMMENT CLAIMS THE OPPOSITE. In the `/sdd-pr-loop` body (step 0b), the stacked-PR guard reads `prior_base_name` and `prior_base_oid` out of `round-$((round-1))/pr.json` with `jq \u2026 2>/dev/null || echo ''`, then wraps the whole comparison in `if [ -n \"$prior_base_name\" ] && [ \"$prior_base_name\" != \"$default_branch\" ] && [ -n \"$prior_base_oid\" ]`. If that file is missing, truncated, or lacks either field, both substitutions are empty and the guard is SILENTLY SKIPPED \u2014 while the round-directory scan has already advanced the counter. A rebased parent then goes unnoticed and the child can pass review and auto-merge without the restack ancestry check that block exists to enforce. \u26a0\ufe0f THE CONTRADICTION IS INSIDE THE SAME BLOCK: three lines further down sits the comment 'Fail closed on either side of the comparison being unreadable \u2014 a missing prior cache or a transient API failure must not silently bypass the detection', guarding only the CURRENT oid. The prior side does exactly what the comment forbids. \u26a0\ufe0f PRESENT IN 0.68.0 \u2014 verified by reading `.claude/commands/sdd-pr-loop.md:93-95` in this repo, not inferred from the 0.63.0 install where it was found. Fix: treat an unreadable prior snapshot as fail-closed (restart from round 1, or needs-human), the same way the current-oid branch already does. Found by Codex on viernes-web#95.",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F140-pr-loop-finding/"
+        },
+        {
+          "id": "E99-F141",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 `gh pr merge` EXITING 0 DOES NOT PROVE THE PR MERGED, SO THE LOOP CAN REPORT A LANDING THAT NEVER HAPPENED. The 'Ready to merge' section sets `merged=1` directly from the exit status of `gh pr merge \u2026 --merge --delete-branch`, then runs local cleanup and reports success. Under a MERGE QUEUE (or with auto-merge enabled on the repo) that command may instead enqueue the PR or turn auto-merge on and return 0 \u2014 `gh` 2.96.0's own help says so. A PR later rejected from the queue is then recorded as landed, its local branch is deleted, and the loop returns success. \u26a0\ufe0f THIS IS THE ONE FAILURE MODE THE LOOP'S OWN DOCTRINE SAYS MUST NEVER BE REPORTED AS SUCCESS: 'a merge that auto-merge was asked to land and did not land is never reported as success.' The code does not hold that line because it never observes the merged state. Fix: after the merge call, poll `gh pr view --json state,mergedAt` until MERGED is observed (or a bounded timeout elapses) before setting `merged=1` and cleaning up; on timeout, needs-human. Found by Codex on viernes-bff#50.",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F141-pr-loop-finding/"
+        },
+        {
+          "id": "E99-F142",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 (REPORTED TWICE, INDEPENDENTLY) \u2014 A ROUND DIRECTORY'S MERE EXISTENCE IS TREATED AS THAT ROUND HAVING COMPLETED, SO AN INTERRUPTED RUN BURNS BUDGET SILENTLY. The resume scan at the top of the runbook walks `.harness/.pr-loop/<pr>/round-*/` and sets `round` to one past the highest directory found. But `mkdir -p \"$round_dir\"` happens BEFORE preflight, before the trigger is posted and long before any verdict \u2014 so a run that dies at a transient `gh` auth failure, or is interrupted while its background watcher is still polling, leaves a directory that the next invocation counts as a finished round. Consequences: the cached watcher result is never classified; the PR loses a round from a budget that exists to bound review cost; and repeated retries can push `round` past `max_rounds` so the loop is skipped entirely WITHOUT ever reaching a clean or needs-human verdict \u2014 the resume logic was added precisely to stop budget being silently granted, and this lets it be silently CONSUMED instead. Fix: write a completion marker at a round's terminal verdict and advance only past marked rounds (or create the directory after preflight succeeds), and reconstruct or re-classify the highest cached round rather than skipping it. Found by Codex on viernes-users#38 and viernes-bff#50 as separate findings with the same root cause.",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F142-pr-loop-finding/"
+        },
+        {
+          "id": "E99-F143",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 WITH `auto_merge: false`, AN UNRESOLVED HUMAN THREAD IS REPORTED AS A FAILURE INSTEAD OF THE DOCUMENTED HAND-BACK. The thread-ownership gate sets `merge_ok=0` and instructs 'If `merge_ok=0`, stop here \u2014 go straight to the needs-human terminal state', which returns FAILURE. But when auto_merge is off, the loop's own contract is that finishing green-but-unmerged is a SUCCESS: 'stop after posting the all-gates-green summary and hand back to the human \u2014 resolve threads if you like, but do not merge \u2026 that hand-back COMPLETES the loop: return success. It is the one terminal state where an unmerged PR is the intended outcome.' A human comment on a thread is completely ordinary in that mode, so the common case is mislabelled a failure. \u26a0\ufe0f THE ORDERING IS THE BUG: the thread gate exists to authorise a MERGE, and with auto_merge off there is no merge to authorise. Fix: branch on `auto_merge == false` and take the success hand-back BEFORE evaluating merge authorization. Found by Codex on viernes-bff#50.",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F143-pr-loop-finding/"
+        },
+        {
+          "id": "E99-F144",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP \u2014 THE MERGE STEP NEVER RE-VERIFIES THAT THE REVIEWED HEAD IS STILL THE HEAD, SO A PUSH AFTER A CLEAN REVIEW CAN INHERIT THAT REVIEW'S VERDICT. NOT reported by Codex \u2014 hit for real while driving the loop across six repos on 2026-08-19, and worth recording because the failure is silent and the artefact looks correct afterwards. The 'Ready to merge' path re-reads CI live but takes the findings from the CACHED `round-N/blocking.json`. Nothing compares `round-N/pr.json`'s `headRefOid` against the PR's current head at merge time. So if a fix is pushed after a round came back clean \u2014 exactly what happens when a sibling PR's finding applies to this one \u2014 the stale round's 'blocking=0' authorises merging a commit NOBODY REVIEWED. Observed on viernes-bookings-api#122: reviewed `ffcb7d48`, merged `efb22dd3`. \u26a0\ufe0f THE LOOP ALREADY HAS THIS DISCIPLINE FOR COMMENTS AND NOT FOR COMMITS: step 3 filters inline comments by `commit_id == headRefOid` AND `created_at >= trigger` precisely so a re-anchored stale thread cannot count \u2014 the same staleness reasoning simply is not applied to the head the merge lands. Fix: at the top of the merge path, re-read `gh pr view --json headRefOid` and require it to equal the round's reviewed head; on a mismatch demand a fresh round rather than merging, and fail closed if the current head cannot be read. \u26a0\ufe0f ALSO WORTH A LINE IN THE RUNBOOK: with N PRs carrying an IDENTICAL diff, a clean gate on one is weak evidence \u2014 a P1 landed on a sibling minutes after one of them had already merged. Hold identical PRs until every review is in.",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F144-pr-loop-finding/"
         }
       ]
     },
