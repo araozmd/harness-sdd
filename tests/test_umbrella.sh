@@ -1740,6 +1740,88 @@ done
 f04_no_stub_in_tier "$KP4" "R3 (delimiter-bearing absolute parents must not weaken blocker reporting)"
 pass "R3 thin_blocker_paths_ignore_parent_delimiters — exact paths are derived independently of diff's prose separators"
 
+# RACE DEFENCE, deterministically: mutate the initial unsafe-node sweep so that, on `docs`, it
+# creates the same FIFO on both sides immediately AFTER its observation point and then reports
+# nothing. The exact walk must signal that it observed the new FIFO and force the authoritative
+# recursive comparison onto private sanitised copies. Naming it at the leaf is not enough: the
+# later `diff -rq` over the originals opens the matching pipes and hangs. Keep this bounded
+# independently of the stable-node control above.
+F04P_RACESRC="$AU/f04p-race-src"
+mkdir -p "$F04P_RACESRC"
+for _md in harness-install.sh VERSION AGENTS.md init.sh agents docs store tools specs \
+           harness.config.yaml umbrella.manifest.example.yaml umbrella.gitignore.example; do
+  [ -e "$SRC/$_md" ] && cp -R "$SRC/$_md" "$F04P_RACESRC/"
+done
+awk '
+  /^_ptb_unsafe_walk\(\) \($/ {
+    print "_ptb_unsafe_walk() ("
+    print "  # mutation: introduce a matching FIFO immediately after the sweep"
+    print "  case \"$1\" in"
+    print "    */docs)"
+    print "      mkdir -p \"$1/sub\" \"$2/sub\" || exit 1"
+    print "      rm -f \"$1/sub/post-sweep-fifo\" \"$2/sub/post-sweep-fifo\" || exit 1"
+    print "      mkfifo \"$1/sub/post-sweep-fifo\" \"$2/sub/post-sweep-fifo\" || exit 1"
+    print "      ;;"
+    print "  esac"
+    print "  return 0"
+    skip = 1
+    next
+  }
+  skip && /^\)$/ { print; skip = 0; next }
+  !skip { print }
+' "$F04P_RACESRC/harness-install.sh" > "$F04P_RACESRC/harness-install.mut"
+mv "$F04P_RACESRC/harness-install.mut" "$F04P_RACESRC/harness-install.sh"
+[ "$(grep -c 'mutation: introduce a matching FIFO immediately after the sweep' "$F04P_RACESRC/harness-install.sh")" = "1" ] \
+  || fail "R2 race control: unsafe-sweep mutation did not apply exactly once"
+# BSD `diff -r` may reject a FIFO without opening it while GNU diff can open it. Make the
+# forbidden call deterministic across hosts: the shim records only an authoritative recursive
+# comparison that can still see the post-sweep FIFO, then returns trouble. A correct repair
+# hands it sanitised copies and falls through to the real implementation.
+F04P_RACE_BIN="$AU/f04p-race-bin"
+F04P_RACE_MARKER="$AU/f04p-unsafe-recursive-diff"
+F04P_REAL_DIFF="$(command -v diff)"
+mkdir -p "$F04P_RACE_BIN"
+cat > "$F04P_RACE_BIN/diff" <<'SH'
+#!/bin/sh
+if [ "$1" = "-rq" ] \
+  && { [ -p "$2/sub/post-sweep-fifo" ] || [ -p "$3/sub/post-sweep-fifo" ]; }; then
+  : > "$F04P_RACE_MARKER"
+  exit 97
+fi
+exec "$F04P_REAL_DIFF" "$@"
+SH
+chmod +x "$F04P_RACE_BIN/diff"
+F04P_RACE_OUT="$(F04P_CODEX_HOME="$F04P/.ch" F04P_HOME="$F04P/.home" \
+  F04P_RACE_PATH="$F04P_RACE_BIN:$PATH" F04P_RACE_MARKER="$F04P_RACE_MARKER" \
+  F04P_REAL_DIFF="$F04P_REAL_DIFF" \
+  python3 - "$F04P_RACESRC/harness-install.sh" "$F04P/kid" <<'PY'
+import os, subprocess, sys
+env = os.environ.copy()
+env["CODEX_HOME"] = env.pop("F04P_CODEX_HOME")
+env["HOME"] = env.pop("F04P_HOME")
+env["PATH"] = env.pop("F04P_RACE_PATH")
+try:
+    result = subprocess.run(
+        ["sh", sys.argv[1], "--agents=claude", "--thin", sys.argv[2]],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
+except subprocess.TimeoutExpired as exc:
+    if exc.stdout:
+        sys.stdout.buffer.write(exc.stdout)
+    print("TIMEOUT: recursive diff opened a FIFO first observed by the exact walk")
+    sys.exit(124)
+sys.stdout.buffer.write(result.stdout)
+sys.exit(result.returncode)
+PY
+)" && F04P_RACE_RC=0 || F04P_RACE_RC=$?
+[ "$F04P_RACE_RC" = "0" ] \
+  || fail "R2 race defence: single-target --thin exited $F04P_RACE_RC: $F04P_RACE_OUT"
+[ ! -e "$F04P_RACE_MARKER" ] \
+  || fail "R2 race defence: authoritative recursive diff still received originals containing a FIFO first observed by the exact walk: $F04P_RACE_OUT"
+printf '%s\n' 2>/dev/null "$F04P_RACE_OUT" | grep -qF 'differs: docs/sub/post-sweep-fifo' \
+  || fail "R2/R3 race defence: an unsafe node missed by the initial sweep was not named exactly: $F04P_RACE_OUT"
+f04_no_stub_in_tier "$KP4" "R2 race defence (a special node first observed later must block without being opened)"
+pass "R2 thin_post_sweep_special_node_is_sanitised — an exact-walk special-node signal moves recursive diff to private safe copies"
+
 # The independent name walk is NOT the safety decision. Neutralise it in a real installer
 # source: `diff` still exits non-zero, and the conversion must remain blocked even though the
 # best available diagnostic falls back to the tier root. This pins the non-empty check on the

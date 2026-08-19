@@ -1058,6 +1058,7 @@ _ptb_sanitize() {
 # overwrite the parent loop's roots.
 _ptb_exact_walk() (
   _pos_l="$1"; _pos_r="$2"
+  _pos_unsafe=0
   [ -d "$_pos_l" ] && [ -d "$_pos_r" ] || exit 0
   [ -r "$_pos_l" ] && [ -x "$_pos_l" ] || exit 1
   for _pos_p in "$_pos_l"/* "$_pos_l"/.[!.]* "$_pos_l"/..?*; do
@@ -1074,14 +1075,43 @@ _ptb_exact_walk() (
       _ptb_relpath "$_pos_p"
     elif [ -d "$_pos_p" ] && [ ! -L "$_pos_p" ] \
       && [ -d "$_pos_other" ] && [ ! -L "$_pos_other" ]; then
-      _ptb_exact_walk "$_pos_p" "$_pos_other" || exit 1
-    elif [ ! -f "$_pos_p" ] || [ ! -f "$_pos_other" ]; then
-      # Defence in depth against a special node appearing after the pre-sweep. Never open it.
+      if _ptb_exact_walk "$_pos_p" "$_pos_other"; then
+        :
+      else
+        _pos_child_rc=$?
+        [ "$_pos_child_rc" = "2" ] && _pos_unsafe=1 || exit 1
+      fi
+    elif [ -L "$_pos_p" ] || [ -L "$_pos_other" ] \
+      || [ ! -f "$_pos_p" ] || [ ! -f "$_pos_other" ]; then
+      # Defence in depth against an unsafe node appearing after the pre-sweep. Never open it,
+      # and return the distinct status that moves the later recursive verdict to safe copies.
       _ptb_relpath "$_pos_p"
+      _pos_unsafe=1
     elif ! LC_ALL=C diff -q "$_pos_p" "$_pos_other" >/dev/null 2>&1; then
       _ptb_relpath "$_pos_p"
     fi
   done
+  [ "$_pos_unsafe" = "0" ] || exit 2
+)
+
+# _ptb_exact_both <left> <right> — run the quoted exact walk in both directions, preserving
+# status 2 when either side observed an unsafe node after the initial sweep. Continue through
+# both directions so R3 still receives every exact path, not merely the first race witness.
+_ptb_exact_both() (
+  _peb_unsafe=0
+  if _ptb_exact_walk "$1" "$2"; then
+    :
+  else
+    _peb_rc=$?
+    [ "$_peb_rc" = "2" ] && _peb_unsafe=1 || exit 1
+  fi
+  if _ptb_exact_walk "$2" "$1"; then
+    :
+  else
+    _peb_rc=$?
+    [ "$_peb_rc" = "2" ] && _peb_unsafe=1 || exit 1
+  fi
+  [ "$_peb_unsafe" = "0" ] || exit 2
 )
 
 # prose_tier_blockers <harness-dir> <umbrella-body-dir> — print one HARNESS-DIR-RELATIVE
@@ -1183,13 +1213,29 @@ _ptb_entry_blockers() {
   # overlap with the symlink producer. A traversal failure can never make the tier clean.
   _ptb_exact=''; _ptb_exact_ok=1
   if [ -d "$_ptb_a" ] && [ -d "$_ptb_b" ]; then
-    if ! _ptb_exact="$(
-      _ptb_exact_walk "$_ptb_a" "$_ptb_b" || exit 1
-      _ptb_exact_walk "$_ptb_b" "$_ptb_a" || exit 1
-    )"; then
-      _ptb_exact_ok=0
+    if _ptb_exact="$(_ptb_exact_both "$_ptb_a" "$_ptb_b")"; then
+      _ptb_exact_rc=0
+    else
+      _ptb_exact_rc=$?
     fi
     [ -z "$_ptb_exact" ] || printf '%s\n' "$_ptb_exact"
+    if [ "$_ptb_exact_rc" = "2" ]; then
+      # The pre-sweep raced with a newly introduced unsafe node. Its exact name is already in
+      # the output above; sanitize a snapshot now so the authoritative recursive diff below
+      # cannot open the original. Re-run naming to retain every ordinary difference too.
+      _ptb_sanitize || return 0
+      if _ptb_after="$(_ptb_exact_both "$_ptb_a" "$_ptb_b")"; then
+        _ptb_after_rc=0
+      else
+        _ptb_after_rc=$?
+      fi
+      [ -z "$_ptb_after" ] || printf '%s\n' "$_ptb_after"
+      # A private sanitised copy must contain only directories and regular files. If that
+      # invariant cannot be established, keep the named blockers and never invoke `diff`.
+      [ "$_ptb_after_rc" = "0" ] || return 0
+    elif [ "$_ptb_exact_rc" != "0" ]; then
+      _ptb_exact_ok=0
+    fi
   fi
   # CAPTURE INSIDE AN `if`. This script runs under `set -eu` and `diff` exits non-zero
   # in exactly the case this feature exists for, so a bare `_out="$(diff -rq A B)"` would

@@ -578,3 +578,15 @@ syntax under `sh` and `dash`, `git diff --check`, umbrella and change-size suite
 authoritative gate reports **all 43 suites passed** under
 `/bin/dash [PROGRAM:dash PROJECT:dash-16]` with `--jobs 8`. Change-size is
 **892 production lines / 4 files**, tier **ok**.
+
+The final focused review then found a race after the stable-node repair: the exact leaf walk
+would avoid opening a FIFO introduced after the initial sweep, but the authoritative recursive
+`diff` still received the originals. A deterministic mutation now injects a matching FIFO at
+the sweep boundary, and a cross-platform `diff` shim records any recursive call that can see it.
+The prior repair failed with that marker present. The exact walk now returns distinct status 2
+after naming every observed unsafe path; the entry handler sanitises private copies, repeats
+exact naming there, and only then permits the recursive verdict. The strengthened umbrella suite
+passes and the forbidden-call marker remains absent. Change-size remains within tier **ok** at
+**938 production lines / 4 files**. Final syntax/init/change-size verification is green and the
+authoritative aggregate again reports **all 43 suites passed** under
+`/bin/dash [PROGRAM:dash PROJECT:dash-16]` with `--jobs 8`.
