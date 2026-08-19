@@ -903,13 +903,24 @@ body_link_travels() {
 #   NO   `$CMDDIR` and the Codex skill temp dir — written by this installer's own heredocs and
 #        generators, so their modes are its umask and a `chmod` there would be noise.
 #
-# `chmod -R` does not follow symlinks encountered during traversal, so it cannot reach outside
-# the tree it is given. Its own failure is deliberately ignored: it is a best-effort widening,
-# and the `rm` that follows is the operation whose exit status actually matters.
+# `chmod -R` does not follow symlinks ENCOUNTERED during traversal, but GNU chmod follows a
+# symlink supplied as a command-line operand. A regular file may also be a hard link to an
+# external inode. Neither kind needs writable file bits to be unlinked: permission on its
+# parent directory is what controls removal. Therefore only DIRECTORY nodes in a real
+# installer-owned tree are widened. chmod/find failure is deliberately ignored: widening is
+# best effort, and the `rm` that follows is the operation whose exit status actually matters.
 rm_owned_tree() {
-  [ "$#" -gt 0 ] || return 0
-  chmod -R u+w "$@" 2>/dev/null || :
-  rm -rf "$@"
+  for _rot_path do
+    if [ -L "$_rot_path" ]; then
+      rm -f "$_rot_path" || return 1
+      continue
+    fi
+    if [ -d "$_rot_path" ]; then
+      find "$_rot_path" -type d -exec chmod u+w {} + 2>/dev/null || :
+    fi
+    rm -rf "$_rot_path" || return 1
+  done
+  return 0
 }
 
 #

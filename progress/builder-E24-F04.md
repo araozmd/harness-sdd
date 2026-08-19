@@ -506,7 +506,7 @@ Final verification after both hosted repairs: `./init.sh`, POSIX syntax under `s
 `git diff --check`, the complete umbrella suite, and the complete change-size suite are green.
 `sh tools/run-tests.sh` reports **all 43 suites passed** under
 `/bin/dash [PROGRAM:dash PROJECT:dash-16]` with `--jobs 8`. Change-size against current
-`origin/main`: **874 production lines / 4 files**, tier **ok** after the focused simplification.
+`origin/main`: **877 production lines / 4 files**, tier **ok** after the final security repair.
 
 ### Focused review after hosted round 8
 
@@ -529,3 +529,35 @@ The rollback mutation now matches only the required production `return 2`; it in
 failures without allowing a reverted `return 1` to reach the recovery branch. The production flow
 itself was independently confirmed correct: status 2 is captured inside `else`, prior swaps roll
 back LIFO, the exceptional path preserves both trees, and ordinary status 1 still cleans them.
+
+### Hosted review — round 9
+
+Round 9 returned one P1 against the shared cleanup helper. `chmod -R` ignores symlinks found
+during traversal, but GNU chmod follows a symlink supplied as a command-line operand. An existing
+installer destination such as `.harness/tools -> /external/tree` therefore let the writable-tree
+cleanup alter external user-owned modes before `rm -rf` safely removed only the link.
+
+A platform-independent regression shims `chmod` to reproduce that GNU behavior only when the live
+destination symlink is passed. Before the repair, its external probe changed from 0400 to 0600.
+`rm_owned_tree` now handles each operand separately: it unlinks a top-level symlink without calling
+chmod, while real installer-owned trees retain recursive best-effort widening followed by removal.
+The fixture verifies the external bytes and mode survive and the destination is replaced by the
+real local `tools` directory.
+
+Round-9 verification: `./init.sh`, `sh -n`, `dash -n`, `git diff --check`, the complete umbrella
+suite and change-size suite are green; `sh tools/run-tests.sh` reports **all 43 suites passed**
+under `/bin/dash [PROGRAM:dash PROJECT:dash-16]` with `--jobs 8`. Change-size remains
+**877 production lines / 4 files**, tier **ok** after the hard-link follow-up.
+
+The focused security re-review found the same outside-target mode mutation through a regular-file
+hard link: `.harness/init.sh` can share an external inode, and the symlink-only repair still passed
+that file to chmod. The fixture now adds an actual hard link to a second external 0400 probe; the
+pre-fix run changed it to 0600. Cleanup now widens **directory nodes only**—the only nodes whose
+write bit matters for removing children. Top-level symlinks are unlinked directly, regular files
+are removed without chmod, nested hard-linked files are never chmodded, and the original
+read-only-directory cleanup behavior remains intact.
+
+Post-review verification on the directory-only cleanup: `./init.sh`, syntax under `sh` and
+`dash`, `git diff --check`, umbrella and change-size suites all green; the authoritative gate
+reports **all 43 suites passed** under `/bin/dash [PROGRAM:dash PROJECT:dash-16]` with `--jobs 8`.
+Final change-size is **877 production lines / 4 files**, tier **ok**.
