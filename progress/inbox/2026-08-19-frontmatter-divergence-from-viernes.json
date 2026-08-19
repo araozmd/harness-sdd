@@ -1,0 +1,26 @@
+{
+  "migrated_from": "viernes umbrella board (.harness/state/tasks.json)",
+  "migrated_on": "2026-08-19",
+  "why": "The DATA half was reconciled on the viernes board; the MECHANISM that lets it rot belongs to the harness, which owns both the frontmatter contract and init.sh",
+  "items": [
+    {
+      "id": "E99-F141",
+      "title": "[migrated from viernes 2026-08-19, the mechanism half of viernes E99-F64] SPEC FRONTMATTER CARRIES ROUTING FIELDS THAT NOTHING KEEPS IN SYNC WITH THE TaskStore, SO THEY ROT BY CONSTRUCTION. A feature spec's frontmatter carries `status:`, `autonomous:` and `sdd:`, and `state/tasks.json` carries the same three. The frontmatter is written ONCE at spec-authoring time and never updated as the feature moves, while the TaskStore is the single source of truth every routing decision is actually read from. Nothing compares them and nothing warns. ⚠️ THIS HAS ALREADY CHANGED ROUTING DECISIONS. On viernes, E10-F03's spec said `autonomous: false` while the board said `autonomous: true`, and that contradiction is what two deliberate 2026-07-25 /sdd-next skips leaned on. Measured again on 2026-08-19 the viernes board had 16 live divergences, every one on `autonomous`, every one `spec=false / board=true`. FIX, and the choice matters: either (a) make `init.sh` WARN on divergence — NOT fail, because a hard gate would red-line a board over pre-existing rows that are merely stale, which is how a useful check gets disabled wholesale; or (b) drop `status:`/`autonomous:`/`sdd:` from spec frontmatter entirely, so there is exactly ONE place a routing decision can be read from and the divergence becomes unrepresentable. (b) is the stronger fix and (a) is the cheaper one; whichever ships, the other should be recorded as considered. ⚠️ IF YOU CHOOSE (b), DO NOT DELETE THE TRAILING COMMENTS. On viernes, 4 of the 16 divergent rows carried an inline rationale that exists NOWHERE ELSE — `# LIVE-AWS, higher-risk — owner-supervised execution`, `# GATED — owner approves the palette/spec before build`, `# LIVE-AWS, user-visible cutover — owner-gated execution`, `# planning artifact, but the human still approves the manifest before F02+ build on it`. The TaskStore has no field that can hold any of that. Deleting the key would delete the only written record of WHY a human gated the feature, and an unexplained gate is its own defect: viernes E99-F86/F87 sat unstarted across several sessions behind a `⛔ Owner-gated — do not start` label whose rationale existed in no commit, no board and no history file, and which turned out on inspection to be handoff prose copied forward. A rationale with no home is how that happens. Whatever replaces the field must preserve the prose, or the migration must relocate it into the TaskStore first. ⚠️ ALSO NOTE WHAT THE VIERNES RE-MEASUREMENT FOUND, because it bears on priority: all 16 divergences were on features already at `done`, which are never routed — so the live routing hazard the item was raised for had already drained away, and what remained was inert data drift plus an unclosed mechanism. The mechanism is the part worth fixing; the urgency is lower than the original report implies. Raised by the E10-F03 round-1 Reviewer as an advisory; the data half was reconciled on the viernes board on 2026-08-19.",
+      "status": "pending",
+      "sdd": false,
+      "autonomous": true,
+      "depends_on": [],
+      "spec_path": "specs/epics/E99-maintenance/F141-frontmatter-taskstore-divergence/"
+    }
+  ],
+  "addenda": [
+    {
+      "on": "2026-08-19",
+      "note": "Viernes E99-F64 had two halves. The DATA half — reconcile the divergent rows — was done on the viernes board and does not travel: all 16 spec files were aligned to the TaskStore, with the four rationale comments preserved and annotated rather than overwritten. The MECHANISM half is this item: the harness owns the frontmatter contract and init.sh, so only it can stop the rot recurring. Same reasoning as #155/#156/#157."
+    },
+    {
+      "on": "2026-08-19",
+      "note": "Numbering: E99-F139 is claimed by the open #156 and E99-F140 by the open #157. This is F141 so it collides with neither, whichever of those lands."
+    }
+  ]
+}
