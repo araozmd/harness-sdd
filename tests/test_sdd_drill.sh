@@ -240,10 +240,18 @@ pass "R19 portable_contract"
 # ── R20: WORKFLOW.md places /sdd-drill between /sdd-plan + /sdd-next, only flip ────
 # R20_workflow_doc
 grep -qF '/sdd-drill' docs/WORKFLOW.md        || fail "R20: WORKFLOW.md does not mention /sdd-drill"
-# Section-scoped (Codex #169 round-2): the fix lane's own "re-stamp autonomous: true"
-# prose elsewhere in WORKFLOW.md would satisfy a whole-file fold after the drill
-# contract lost its stamp sentence.
-_r20_sect() { awk 'BEGIN{h="Per-epic drill-down"} /^#+ /{k=(index($0,h)>0);next} k' docs/WORKFLOW.md | tr '\n' ' '; }
+# Section-scoped AND fence-aware (Codex #169 rounds 2-3): the fix lane's own "re-stamp
+# autonomous: true" prose elsewhere in WORKFLOW.md would satisfy a whole-file fold, and
+# a fenced example quoting the heading would re-open the slice on quoted text — the ONE
+# fence rule lives in tests/lib/fence.awk and is composed here, never re-derived.
+_R20_FENCE="$(cat "$(dirname -- "$0")/lib/fence.awk")"
+_r20_sect() {
+  awk "$_R20_FENCE"'
+    fence_delim($0) { next }
+    !fence && /^#+ / { k = (index($0, "Per-epic drill-down") > 0); next }
+    !fence && k { print }
+  ' docs/WORKFLOW.md | tr '\n' ' '
+}
 _r20_sect | grep -qiE 'flips? .{0,20}epic[^.]{0,10}draft → planned' || fail "R20: WORKFLOW.md drill section does not make /sdd-drill the draft-to-planned flip"
 _r20_sect | grep -qiE 'stamp[^.]{0,10}autonomous: true' || fail "R20: WORKFLOW.md drill section does not mention the autonomous: true stamp"
 grep -qF '/sdd-plan' docs/WORKFLOW.md         || fail "R20: WORKFLOW.md does not mention /sdd-plan"
