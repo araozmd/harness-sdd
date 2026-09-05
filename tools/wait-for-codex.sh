@@ -12,10 +12,11 @@
 #   session to classify and fix. True minute-by-minute monitoring, no manual nudge,
 #   survives turns.
 #
-# Usage (three modes, one evaluation routine):
+# Usage (four modes, one evaluation routine):
 #   wait-for-codex.sh <pr-number> <trigger-comment-id> <round-dir>   # wait (poll GitHub)
 #   wait-for-codex.sh preflight <pr-number>                          # static checks only
 #   wait-for-codex.sh evaluate  <round-dir>                          # offline re-evaluation
+#   wait-for-codex.sh classify  <round-dir> [blocking-severities]    # offline classification
 #
 #   pr-number:          the open PR
 #   trigger-comment-id: id of the `@codex review` issue comment (for the 👍 case)
@@ -37,6 +38,9 @@
 #   4  → usage / precondition error (includes an unresolvable trigger timestamp and a
 #        non-positive HARNESS_POLL_INTERVAL).
 #   5  → preflight check failed, or no Codex activity within HARNESS_FIRST_RESPONSE.
+#   6  → `classify` only: FAIL-CLOSED — the head oid or the findings stream could not be
+#        read, so no blocking.json exists and the caller must take the needs-human path,
+#        never the merge path.
 #
 # Always (re)writes pr.json, review-comments.json, issue-comments.json, reactions.json
 # into round-dir on every poll, so the caller reads the same sources the command body
@@ -61,7 +65,22 @@ wfc_usage() {
   echo "usage: $0 <pr-number> <trigger-comment-id> <round-dir>" >&2
   echo "       $0 preflight <pr-number>" >&2
   echo "       $0 evaluate <round-dir>" >&2
+  echo "       $0 classify <round-dir> [blocking-severities]" >&2
 }
+
+# Severity extraction, shared by every classify stream. FIRST MATCH WINS BY POSITION in
+# the body — jq's `match(…; "g")` returns matches in string order, so `.[0]` is the
+# earliest — and every tag is WORD-BOUNDARY anchored, so a "nit" inside "monitor" or a
+# "P1" inside "P12" can never tag a finding. Default is P2 when no tag matches (the
+# conservative direction: an untagged Codex finding blocks under a raised severity set
+# rather than slipping past the gate). This exists precisely because every hand-rolled
+# reimplementation of this rule got one of those two properties wrong (E99-F149 /
+# lessons.md): the rule now lives HERE and nowhere else.
+WFC_SEV_DEF='def wfc_sev:
+  ( (.body // "") | [match("(?i)\\b(p0|p1|p2|nit)\\b"; "g")] ) as $m
+  | if ($m | length) > 0
+    then ($m[0].string | ascii_upcase | if . == "NIT" then "nit" else . end)
+    else "P2" end;'
 
 # wfc_int <value> <default> — echo <value> when it is a non-negative integer, else <default>.
 wfc_int() {
@@ -275,6 +294,105 @@ case "${1:-}" in
       clean)    exit 3 ;;
       *)        exit 1 ;;
     esac
+    ;;
+  classify)
+    # ── classify mode (E99-F149: classification is CODE, not per-lane prose) ──────
+    # PURE and OFFLINE like `evaluate`: reads only the round files, invokes no `gh`.
+    # Writes into <round-dir>:
+    #   fresh-comments.json  inline comments on the head commit, created at/after the
+    #                        trigger (all authors — the thread-ownership gate owns
+    #                        human threads; this file preserves the raw fresh stream)
+    #   comments.json        the CODEX-authored subset of fresh-comments.json, each with
+    #                        a `severity` field attached (P0|P1|P2|nit)
+    #   blocking.json        comments.json filtered to [blocking-severities]
+    #                        (default "P0,P1") — the MERGE GATE reads this
+    #   body-findings.json   ADVISORY: fresh Codex review bodies / issue comments that
+    #                        carry a severity tag. They have no path:line, so nothing
+    #                        can act on them — they are surfaced, never blocking. This
+    #                        is the E99-F149 fix: the freshness rule applies to EVERY
+    #                        stream, and un-actionable streams cannot block a round.
+    #   status.json          the statusCheckRollup snapshot from pr.json
+    # Exit 0 on success (blocking.json written, possibly `[]`); exit 6 FAIL-CLOSED when
+    # the head oid or the findings stream is unreadable — no blocking.json is left
+    # behind, and the caller must go to needs-human, never to merge.
+    CL_DIR="${2:-}"
+    CL_SET="${3:-P0,P1}"
+    if [ -z "$CL_DIR" ]; then wfc_usage; exit 4; fi
+    if [ ! -d "$CL_DIR" ]; then
+      echo "wait-for-codex classify: round dir not found: $CL_DIR" >&2
+      exit 4
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+      echo "wait-for-codex classify: \`jq\` is not on PATH — install jq (https://jqlang.github.io/jq/)" >&2
+      exit 4
+    fi
+    CL_TS=""
+    if [ -f "$CL_DIR/trigger-ts.txt" ]; then CL_TS="$(cat "$CL_DIR/trigger-ts.txt")"; fi
+
+    # A head oid we could not READ is not a head oid (fail closed): filtering on "" would
+    # match nothing and hand the gate an empty blocking.json — "zero findings" forged by
+    # a truncated pr.json. Same rule for the findings stream itself.
+    CL_HEAD="$(jq -r '.headRefOid // ""' "$CL_DIR/pr.json" 2>/dev/null || echo '')"
+    if [ -z "$CL_HEAD" ]; then
+      rm -f "$CL_DIR/fresh-comments.json" "$CL_DIR/comments.json" "$CL_DIR/blocking.json"
+      echo "wait-for-codex classify: could not read headRefOid from pr.json — fail closed (needs-human, not merging)" >&2
+      exit 6
+    fi
+    if [ ! -f "$CL_DIR/review-comments.json" ]; then
+      rm -f "$CL_DIR/fresh-comments.json" "$CL_DIR/comments.json" "$CL_DIR/blocking.json"
+      echo "wait-for-codex classify: review-comments.json missing — fail closed (needs-human, not merging)" >&2
+      exit 6
+    fi
+
+    # Freshness: commit_id == head AND created_at >= trigger (no-op anchor when empty —
+    # an empty anchor admits MORE findings, which errs toward review, never toward merge).
+    if ! jq --arg h "$CL_HEAD" --arg since "$CL_TS" '
+        [ .[]? | select((.commit_id // "") == $h)
+               | select($since == "" or ((.created_at // "") >= $since)) ]' \
+        "$CL_DIR/review-comments.json" > "$CL_DIR/fresh-comments.json" 2>/dev/null; then
+      rm -f "$CL_DIR/fresh-comments.json" "$CL_DIR/comments.json" "$CL_DIR/blocking.json"
+      echo "wait-for-codex classify: review-comments.json unreadable — fail closed (needs-human, not merging)" >&2
+      exit 6
+    fi
+
+    # Codex-authored findings with severities attached; then the configured blocking set.
+    jq --arg bot "$WFC_BOT" --arg botr "$WFC_BOT_REST" "$WFC_SEV_DEF"'
+      [ .[]? | select((.user.login // "") == $bot or (.user.login // "") == $botr)
+             | . + {severity: wfc_sev} ]' \
+      "$CL_DIR/fresh-comments.json" > "$CL_DIR/comments.json"
+    jq --arg set "$CL_SET" '
+      ($set | split(",") | map(gsub("\\s+"; "") | ascii_upcase) | map(select(. != ""))) as $bl
+      | [ .[]? | select((.severity | ascii_upcase) as $s | $bl | index($s)) ]' \
+      "$CL_DIR/comments.json" > "$CL_DIR/blocking.json"
+
+    # Advisory body findings: the same author + freshness rules over the review bodies
+    # and the issue-comment stream; only entries that actually carry a severity tag.
+    {
+      jq --arg bot "$WFC_BOT" --arg botr "$WFC_BOT_REST" --arg since "$CL_TS" '
+        [ .reviews[]? | select((.author.login // "") == $bot or (.author.login // "") == $botr)
+                      | select($since == "" or ((.submittedAt // "") >= $since))
+                      | {stream: "review-body", created_at: (.submittedAt // ""), body: (.body // "")} ]' \
+        "$CL_DIR/pr.json" 2>/dev/null || echo '[]'
+      if [ -f "$CL_DIR/issue-comments.json" ]; then
+        jq --arg bot "$WFC_BOT" --arg botr "$WFC_BOT_REST" --arg since "$CL_TS" '
+          [ .[]? | select((.user.login // "") == $bot or (.user.login // "") == $botr)
+                 | select($since == "" or ((.created_at // "") >= $since))
+                 | {stream: "issue-comment", created_at: (.created_at // ""), body: (.body // "")} ]' \
+          "$CL_DIR/issue-comments.json" 2>/dev/null || echo '[]'
+      else
+        echo '[]'
+      fi
+    } | jq -s "$WFC_SEV_DEF"'
+      add | [ .[]? | select((.body // "") | test("(?i)\\b(p0|p1|p2|nit)\\b"))
+                   | . + {severity: wfc_sev} ]' > "$CL_DIR/body-findings.json"
+
+    jq '.statusCheckRollup // []' "$CL_DIR/pr.json" > "$CL_DIR/status.json" 2>/dev/null \
+      || echo '[]' > "$CL_DIR/status.json"
+
+    _cl_n="$(jq 'length' "$CL_DIR/blocking.json" 2>/dev/null || echo '?')"
+    _cl_b="$(jq 'length' "$CL_DIR/body-findings.json" 2>/dev/null || echo 0)"
+    echo "wait-for-codex classify: blocking=$_cl_n (severities: $CL_SET); advisory body findings=$_cl_b" >&2
+    exit 0
     ;;
   ''|-h|--help)
     wfc_usage; exit 4 ;;

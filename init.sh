@@ -440,6 +440,34 @@ if [ -n "$ADR_NS_DIRS" ]; then
   fi
 fi
 
+# 2z. Escalation visibility (2026-09-04). `escalation.after_rejections > 0` READS as
+#     active in the config, but the feature fires only when `.harness/.escalation-arming`
+#     says `armed` — and that file is written by the installer, so a target that set the
+#     threshold without re-running it (or whose builder-heavy resolves to no different
+#     model) carries a silently-inert safety feature. E99-F25 went three rejection rounds
+#     on the base builder for exactly this reason. One line here makes the state visible
+#     at every session start; builder-role.sh remains the enforcement point.
+ESC_THRESHOLD="$(awk '
+  /^escalation:[[:space:]]*(#.*)?$/ { e=1; next }
+  e && /^[^[:space:]#]/ { e=0 }
+  e && /^[[:space:]]+after_rejections:/ {
+    sub(/^[[:space:]]+after_rejections:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+    print; exit
+  }' harness.config.yaml 2>/dev/null || true)"
+case "$ESC_THRESHOLD" in
+  ''|0|*[!0-9]*) : ;;   # off / absent / malformed (builder-role.sh warns on malformed) — not noteworthy
+  *)
+    ESC_ARMING="$HARNESS_DIR/.escalation-arming"
+    # A symlinked arming file reads as absent — same refusal builder-role.sh applies.
+    if [ ! -L "$ESC_ARMING" ] && [ -f "$ESC_ARMING" ] \
+       && [ "$(head -n 1 "$ESC_ARMING" 2>/dev/null)" = "armed" ]; then
+      echo "ℹ️  escalation: ARMED (builder-heavy after $ESC_THRESHOLD rejections)"
+    else
+      echo "⚠️  escalation: configured (after_rejections: $ESC_THRESHOLD) but DISARMED — .escalation-arming is absent or not 'armed', so builder-heavy will never fire. Configure models.builder-heavy and re-run the installer. (warn-only)"
+    fi
+    ;;
+esac
+
 # 3. Project-specific checks.
 #    Project-authored gates live in `.harness/init.project.sh` — seeded once by
 #    harness-install.sh and NEVER clobbered on upgrade, unlike THIS file (which is

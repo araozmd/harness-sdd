@@ -264,14 +264,32 @@ def latest_session_start(records):
     return latest
 
 
+def transition_records(records, since=None):
+    """`transition` records (written structurally by tasks-lock.py at every status
+    write), optionally scoped to at/after `since`. Sorted by timestamp."""
+    out = []
+    for r in records:
+        if r.get("type") != "transition":
+            continue
+        ts = parse_ts(r.get("at"))
+        if ts is None:
+            continue
+        if since is not None and ts < since:
+            continue
+        out.append((ts, r))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
 def report_session(records, out):
     marker = latest_session_start(records)
     phases = phase_records(records)
     closes = gate_closes(records)
+    transitions = transition_records(records, since=marker)
     if marker is not None:
         phases = [p for p in phases if p["start"] >= marker]
         closes = [c for c in closes if c["when"] is not None and c["when"] >= marker]
-    if not phases and not closes:
+    if not phases and not closes and not transitions:
         out.append("_%s_" % NO_DATA)
         out.append("")
         return
@@ -281,6 +299,34 @@ def report_session(records, out):
         out.append("_Scope: records at/after the latest session-start marker "
                    "(%s)._" % marker.strftime("%Y-%m-%dT%H:%M:%SZ"))
         out.append("")
+    # Make STALENESS visible: a report silently summarizing a two-day-old session reads
+    # as current — worse than empty, because it looks like data. Print the actual time
+    # range the summarized records span, so the reader can see at a glance whether this
+    # is today's session or a stale one.
+    stamps = ([p["start"] for p in phases]
+              + [c["when"] for c in closes if c["when"] is not None]
+              + [t[0] for t in transitions])
+    stamps = [s for s in stamps if s is not None]
+    if stamps:
+        lo, hi = min(stamps), max(stamps)
+        out.append("_Records span %s → %s._"
+                   % (lo.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                      hi.strftime("%Y-%m-%dT%H:%M:%SZ")))
+        out.append("")
+    if transitions:
+        out.append("- Status transitions (structural, via tasks-lock): %d"
+                   % len(transitions))
+        seen_feats = []
+        for _, r in transitions:
+            f = r.get("feature")
+            if f and f not in seen_feats:
+                seen_feats.append(f)
+        out.append("  - features touched: %s" % ", ".join(seen_feats))
+        out.append("")
+    if not phases and not closes:
+        # Transitions alone still tell the story of the session — never hide them
+        # behind the phase table's absence.
+        return
     # per-phase durations
     out.append("| phase | count | total duration |")
     out.append("|---|---|---|")
