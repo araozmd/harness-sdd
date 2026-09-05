@@ -1003,6 +1003,39 @@ _ptb_unsafe_walk() (
   done
 )
 
+# _ptb_snapshot_specials <path>… — name every symlink / non-regular, non-directory node
+# in the SNAPSHOT copies, INDEPENDENTLY of _ptb_unsafe_walk. Deliberately a second walker
+# rather than a reuse: the snapshot namer exists to catch what the live sweep MISSED —
+# a node introduced between the sweep and the copy (the post-sweep race), or a sweep that
+# is itself broken. Deriving the names by re-running the same sweep would inherit the
+# same blindness and name nothing (proven by the race-defence control, which mutates the
+# sweep to plant a FIFO and report clean). Same fail-closed shape: an unreadable
+# directory exits 1, and every name renders through _ptb_relpath.
+_ptb_snapshot_specials() (
+  for _pss_root do
+    if [ -L "$_pss_root" ]; then
+      _ptb_relpath "$_pss_root"
+      continue
+    fi
+    [ -e "$_pss_root" ] || continue
+    if [ -d "$_pss_root" ]; then
+      [ -r "$_pss_root" ] && [ -x "$_pss_root" ] || exit 1
+      for _pss_p in "$_pss_root"/* "$_pss_root"/.[!.]* "$_pss_root"/..?*; do
+        [ -e "$_pss_p" ] || [ -L "$_pss_p" ] || continue
+        if [ -L "$_pss_p" ]; then
+          _ptb_relpath "$_pss_p"
+        elif [ -d "$_pss_p" ]; then
+          _ptb_snapshot_specials "$_pss_p" || exit 1
+        elif [ ! -f "$_pss_p" ]; then
+          _ptb_relpath "$_pss_p"
+        fi
+      done
+    elif [ ! -f "$_pss_root" ]; then
+      _ptb_relpath "$_pss_root"
+    fi
+  done
+)
+
 # _ptb_sanitize — REPOINT the current entry's comparison at REGULAR-NODE-ONLY COPIES of its
 # two sides, so `diff -r` can still name every OTHER differing path inside an entry that holds
 # an unsafe node.
@@ -1048,10 +1081,12 @@ _ptb_sanitize() {
   chmod -R u+w "$_ptb_tmp" 2>/dev/null || :
   _ptb_a="$_ptb_tmp/h/$_ptb_rel"; _ptb_b="$_ptb_tmp/u/$_ptb_rel"
   _ptb_ra="$_ptb_tmp/h"; _ptb_rb="$_ptb_tmp/u"
-  # The live-tree sweep and the copies have distinct observation points. Name unsafe nodes
-  # found in the snapshot too, so one introduced during `cp -R` can never be silently removed
-  # and mistaken for a pristine entry. These records join the caller's single `sort -u`.
-  if ! _ptb_snap_unsafe="$(_ptb_unsafe_walk "$_ptb_a" "$_ptb_b")"; then
+  # The live-tree sweep and the copies have distinct observation points. Name every
+  # special node present in the SNAPSHOT — via the INDEPENDENT walker, never by
+  # re-running the sweep whose miss this exists to catch — so a node introduced between
+  # the sweep and `cp -R` can never be silently removed by the `find` below and
+  # mistaken for a pristine entry. These records join the caller's single `sort -u`.
+  if ! _ptb_snap_unsafe="$(_ptb_snapshot_specials "$_ptb_a" "$_ptb_b")"; then
     _ptb_print_path "$_ptb_rel"
     return 1
   fi
