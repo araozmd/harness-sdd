@@ -3273,7 +3273,11 @@ install_one() {
     for _tpt_rel in $( [ "$_tpt_mode" = "convert" ] && printf '%s' "$_tpt_set" ); do
       _tpt_old="$_prose_old/$_tpt_rel"; _tpt_umb="$_umb_body/$_tpt_rel"
       [ -e "$_tpt_old" ] || [ -L "$_tpt_old" ] || continue
-      if [ -n "$(find "$_tpt_old" ! -type d ! -type f 2>/dev/null | head -n 1)" ] \
+      # BOTH sides are swept before diff runs (Codex #149 round-15): a FIFO planted on
+      # the UMBRELLA side after the pristine snapshot would otherwise be opened by
+      # `diff -rq`, which blocks awaiting a writer. A special node on either side is
+      # itself the raced state — refuse without ever opening anything.
+      if [ -n "$(find "$_tpt_old" "$_tpt_umb" ! -type d ! -type f 2>/dev/null | head -n 1)" ] \
          || ! diff -rq "$_tpt_old" "$_tpt_umb" >/dev/null 2>&1; then
         _tpt_raced="$_tpt_rel"
         break
