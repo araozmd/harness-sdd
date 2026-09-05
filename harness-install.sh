@@ -1260,7 +1260,10 @@ _ptb_entry_blockers() {
   # writer can change the live tree after any observation; private regular-node-only copies
   # give the exact walk and authoritative recursive diff one immutable view and close the final
   # post-walk race (Codex #3809738603). The sanitizer names any unsafe node the snapshot adds.
-  _ptb_sanitize || return 0
+  _ptb_sanitize || { _ptb_print_path "$_ptb_rel"; return 0; }   # fail CLOSED: a snapshot
+                                  # that could not be built is not a clean entry — name it
+                                  # (Codex #149 P1: cp -R fails on an unreadable child file
+                                  # the sweep cannot see, and silence here reads as pristine)
   # Derive exact names independently of `diff`'s human prose. Run both directions so
   # one-sided paths from either tree are covered; `sort -u` merges two-sided overlap and
   # overlap with the symlink producer. A traversal failure can never make the tier clean.
@@ -1276,7 +1279,10 @@ _ptb_entry_blockers() {
       # The pre-sweep raced with a newly introduced unsafe node. Its exact name is already in
       # the output above; sanitize a snapshot now so the authoritative recursive diff below
       # cannot open the original. Re-run naming to retain every ordinary difference too.
-      _ptb_sanitize || return 0
+      _ptb_sanitize || { _ptb_print_path "$_ptb_rel"; return 0; }   # fail CLOSED: a snapshot
+                                  # that could not be built is not a clean entry — name it
+                                  # (Codex #149 P1: cp -R fails on an unreadable child file
+                                  # the sweep cannot see, and silence here reads as pristine)
       if _ptb_after="$(_ptb_exact_both "$_ptb_a" "$_ptb_b")"; then
         _ptb_after_rc=0
       else
@@ -3194,7 +3200,12 @@ install_one() {
   #           than deleting the operator's only copy of the originals.
   #
   # The undo list is built most-recent-first, so the rollback runs LIFO.
-  thin_prose_tier() {
+  thin_prose_tier() { # [convert] — pass 'convert' ONLY from the full-copy conversion
+                      # branch: its pristine verdict is what the TOCTOU recheck below
+                      # re-validates, and only there does a parked original hold real
+                      # (deletable) content. Stub-refresh runs park harness-owned stubs
+                      # whose bytes differ from the umbrella by design.
+    _tpt_mode="${1:-refresh}"
     rm_owned_tree "$_prose_stg" "$_prose_old"
     mkdir -p "$_prose_stg" "$_prose_old"
     # THE AUTHORITY DECIDES THE SET OF ENTRIES, not just their contents — and BOTH loops
@@ -3234,6 +3245,31 @@ install_one() {
       rm_owned_tree "$_prose_stg" "$_prose_old"
       die "could not install the thin prose tier ($_tpt_rel) — every path already swapped was rolled back, this target keeps the body it had"
     done
+    # TOCTOU recheck (Codex #149 P2): the pristine verdict observed the live tree at
+    # time T; the swap parked the originals at T+Δ. A write landing in that window is
+    # now sitting in _prose_old about to be discarded as "pristine". Re-compare every
+    # parked original against the umbrella copy the verdict compared it to; any
+    # difference (or any special node, which diff could hang on or misread) rolls the
+    # whole conversion back and refuses, naming the path. Nothing is lost either way —
+    # the originals only ever leave _prose_old on success.
+    _tpt_raced=''
+    for _tpt_rel in $( [ "$_tpt_mode" = "convert" ] && printf '%s' "$_tpt_set" ); do
+      _tpt_old="$_prose_old/$_tpt_rel"; _tpt_umb="$_umb_body/$_tpt_rel"
+      [ -e "$_tpt_old" ] || [ -L "$_tpt_old" ] || continue
+      if [ -n "$(find "$_tpt_old" ! -type d ! -type f 2>/dev/null | head -n 1)" ] \
+         || ! diff -rq "$_tpt_old" "$_tpt_umb" >/dev/null 2>&1; then
+        _tpt_raced="$_tpt_rel"
+        break
+      fi
+    done
+    if [ -n "$_tpt_raced" ]; then
+      for _tpt_undo in $_tpt_done; do
+        prose_swap_back "$_tpt_undo" \
+          || die "a concurrent write raced the thin conversion ($_tpt_raced) AND the rollback of $_tpt_undo failed — the stubs are under $_prose_stg and the original files under $_prose_old, both kept for you to restore by hand"
+      done
+      rm_owned_tree "$_prose_stg" "$_prose_old"
+      die "a concurrent write changed '$_tpt_raced' between the pristine verdict and the swap — the conversion was rolled back and this target keeps the body it had; re-run when the tree is quiet"
+    fi
     rm_owned_tree "$_prose_stg" "$_prose_old"
   }
 
@@ -3328,7 +3364,7 @@ install_one() {
       #
       # BODY_LAYOUT=thin is what makes manifest.txt record it (R8).
       BODY_LAYOUT=thin
-      thin_prose_tier
+      thin_prose_tier convert
       ok "child already holds a full body — CONVERTED to the thin layout (--thin): its prose tier now resolves from the umbrella at $_umb_root_cfg"
     else
       for _body_rel in $HARNESS_BODY_PROSE; do copy "$_body_rel"; done
