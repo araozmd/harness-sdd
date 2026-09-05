@@ -264,14 +264,58 @@ def latest_session_start(records):
     return latest
 
 
+def transition_round_count(transitions):
+    """Build/review rounds derived from the transition stream: a feature's first move
+    to in-progress opens round 1; each in-review -> in-progress bounce opens the next.
+    A round already ACTIVE at session start is counted from its `in-progress ->
+    in-review` transition — a session that begins mid-round would otherwise report 0
+    for a round it demonstrably ran (Codex #160 round-5). Max across features,
+    matching the phase-based counter's semantics."""
+    rounds_by_feature = {}
+    for _, r in transitions:
+        if r.get("kind") == "epic":
+            continue
+        subj = r.get("subject") or r.get("feature")
+        if not subj:
+            continue
+        if r.get("to") == "in-progress":
+            if r.get("from") == "in-review":
+                rounds_by_feature[subj] = rounds_by_feature.get(subj, 1) + 1
+            else:
+                rounds_by_feature.setdefault(subj, 1)
+        elif r.get("to") == "in-review" and r.get("from") == "in-progress":
+            # Evidence of an active round even when its opening transition predates
+            # this session's scope.
+            rounds_by_feature.setdefault(subj, 1)
+    return max(rounds_by_feature.values()) if rounds_by_feature else 0
+
+
+def transition_records(records, since=None):
+    """`transition` records (written structurally by tasks-lock.py at every status
+    write), optionally scoped to at/after `since`. Sorted by timestamp."""
+    out = []
+    for r in records:
+        if r.get("type") != "transition":
+            continue
+        ts = parse_ts(r.get("at"))
+        if ts is None:
+            continue
+        if since is not None and ts < since:
+            continue
+        out.append((ts, r))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
 def report_session(records, out):
     marker = latest_session_start(records)
     phases = phase_records(records)
     closes = gate_closes(records)
+    transitions = transition_records(records, since=marker)
     if marker is not None:
         phases = [p for p in phases if p["start"] >= marker]
         closes = [c for c in closes if c["when"] is not None and c["when"] >= marker]
-    if not phases and not closes:
+    if not phases and not closes and not transitions:
         out.append("_%s_" % NO_DATA)
         out.append("")
         return
@@ -281,6 +325,44 @@ def report_session(records, out):
         out.append("_Scope: records at/after the latest session-start marker "
                    "(%s)._" % marker.strftime("%Y-%m-%dT%H:%M:%SZ"))
         out.append("")
+    # Make STALENESS visible: a report silently summarizing a two-day-old session reads
+    # as current — worse than empty, because it looks like data. Print the actual time
+    # range the summarized records span, so the reader can see at a glance whether this
+    # is today's session or a stale one.
+    stamps = ([p["start"] for p in phases]
+              + [c["when"] for c in closes if c["when"] is not None]
+              + [t[0] for t in transitions])
+    stamps = [s for s in stamps if s is not None]
+    if stamps:
+        lo, hi = min(stamps), max(stamps)
+        out.append("_Records span %s → %s._"
+                   % (lo.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                      hi.strftime("%Y-%m-%dT%H:%M:%SZ")))
+        out.append("")
+    if transitions:
+        out.append("- Status transitions (structural, via tasks-lock): %d"
+                   % len(transitions))
+        # `subject` + `kind` are authoritative; `feature` is the pre-kind spelling kept
+        # for feature records only. An epic rollup must read as an epic, not a feature.
+        seen = []
+        for _, r in transitions:
+            subj = r.get("subject") or r.get("feature")
+            if not subj:
+                continue
+            label = ("epic %s" % subj) if r.get("kind") == "epic" else subj
+            if label not in seen:
+                seen.append(label)
+        if seen:
+            out.append("  - board targets touched: %s" % ", ".join(seen))
+        out.append("")
+    if not phases and not closes:
+        # Transitions alone still tell the story of the session — never hide them behind
+        # the phase table's absence. In particular the ROUND COUNT survives: this is the
+        # 0%-phase-compliance case structural telemetry exists for.
+        out.append("- Build/review rounds (derived from transitions): %d"
+                   % transition_round_count(transitions))
+        out.append("")
+        return
     # per-phase durations
     out.append("| phase | count | total duration |")
     out.append("|---|---|---|")
@@ -299,6 +381,11 @@ def report_session(records, out):
               if p["phase"] in ("builder", "reviewer")
               and isinstance(p["round"], int) and not isinstance(p["round"], bool)]
     round_count = max(rounds) if rounds else 0
+    # PARTIAL prompt-level telemetry must never undercount what the structural stream
+    # already proves (Codex #160 round-4): an architect-only phase log with two
+    # structurally recorded rounds used to report 0. The two sources are combined by
+    # max — each is a lower bound on the rounds that actually happened.
+    round_count = max(round_count, transition_round_count(transitions))
     out.append("- Build/review rounds: %d" % round_count)
     mean, median, nhuman, nauto = human_latency_stats(closes)
     if mean is None:

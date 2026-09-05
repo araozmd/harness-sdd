@@ -609,6 +609,7 @@ def spec_consistency_errors(data, root):
     # /var, every mktemp fixture). A gate's message is the thing an operator acts on.
     root_real = os.path.realpath(root)
 
+
     for ep in data.get("epics") or []:
         if not isinstance(ep, dict):
             continue
@@ -827,6 +828,26 @@ def spec_consistency_errors(data, root):
                     "%s: no spec under %s declares id '%s' — the directory is not proven "
                     "to belong to this board entry" % (fid, spec_path, fid)
                 )
+
+    # A WRONG spec root gets a NAMED diagnosis leading the detail (2026-09-04). A human
+    # invoking this by hand from the project root (where init.sh lives at .harness/
+    # init.sh) passes `--spec-root .` and gets a per-feature "spec_path does not exist"
+    # error for every sdd:true feature on the board — a wall of lines that all share one
+    # cause: the root simply is not the directory holding specs/. init.sh runs FROM the
+    # harness dir, which is why its own invocation is clean. The per-feature errors stay
+    # (each names its feature id and path — that contract stands, and a healthy root
+    # with one dangling spec must keep reading exactly as before); this line is PREPENDED
+    # only when missing-spec errors exist AND the root holds no specs/epics/ at all.
+    if errors and not os.path.isdir(os.path.join(root, "specs", "epics")):
+        if any("spec_path does not exist" in e for e in errors):
+            errors.insert(
+                0,
+                "--spec-root %s holds no specs/epics/ directory, so every authored "
+                "spec below is reported missing for the SAME reason. If you invoked "
+                "this by hand, pass the directory that HOLDS specs/ (the harness dir "
+                "— .harness/ in an installed consumer, the repo root in the harness "
+                "source), exactly as init.sh does." % root_real,
+            )
 
     return errors
 

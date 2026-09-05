@@ -24,6 +24,11 @@ trap 'rm -rf "$T"' EXIT
 
 # Suite-wide CODEX_HOME sandbox (belt) — install_at() also sets a per-target one (braces).
 export CODEX_HOME="$T/codex-home"
+# E25-F01: non-Claude front-ends are parked by default on FRESH targets, so a bare
+# installer run now stamps claude only. This suite's fixtures predate the flip and
+# assert artifacts across the full matrix; pin the pre-flip selection explicitly
+# (an explicit --agents in any call still wins over this env seed).
+export HARNESS_AGENTS="claude,gemini,opencode,antigravity,codex"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
@@ -1287,6 +1292,173 @@ test_evaluate_is_offline() {                          # R29
   pass "R29 evaluate is offline (PATH without gh) and exits 0/1/3"
 }
 
+# E99-F149: severity classification is CODE (`classify` mode), not per-lane prose. The
+# rule that every hand-rolled copy got wrong — first match wins BY POSITION, word-boundary
+# anchored — is asserted here against adversarial bodies, together with the freshness/
+# author rules on every stream and the fail-closed exits.
+test_classify_offline_contract() {
+  if ! have_jq; then skip "test_classify_offline_contract (jq not installed)"; return 0; fi
+  _f="$(mk_fixture classify)"
+  cat > "$_f/pr.json" <<EOF
+{"headRefOid":"$FX_HEAD",
+ "reviews":[
+   {"author":{"login":"chatgpt-codex-connector"},"submittedAt":"2026-06-01T01:00:00Z","body":"summary names a P1 in prose"},
+   {"author":{"login":"human-dev"},"submittedAt":"2026-06-01T01:00:00Z","body":"human P0 opinion"}],
+ "statusCheckRollup":[{"name":"ci","conclusion":"SUCCESS"}]}
+EOF
+  cat > "$_f/issue-comments.json" <<EOF
+[{"user":{"login":"human-dev"},"created_at":"2026-06-01T02:00:00Z","body":"I think this is P1!"},
+ {"user":{"login":"chatgpt-codex-connector[bot]"},"created_at":"2026-05-01T02:00:00Z","body":"STALE P0 before trigger"}]
+EOF
+  cat > "$_f/review-comments.json" <<EOF
+[{"id":1,"user":{"login":"chatgpt-codex-connector[bot]"},"commit_id":"$FX_HEAD","created_at":"2026-06-01T01:00:00Z","body":"![P1 Badge](https://img.shields.io/badge/P1-red) null deref"},
+ {"id":2,"user":{"login":"chatgpt-codex-connector"},"commit_id":"$FX_HEAD","created_at":"2026-06-01T01:00:00Z","body":"monitor unit nit: rename"},
+ {"id":3,"user":{"login":"chatgpt-codex-connector"},"commit_id":"$FX_HEAD","created_at":"2026-06-01T01:00:00Z","body":"untagged, and P12 must not tag it"},
+ {"id":4,"user":{"login":"chatgpt-codex-connector"},"commit_id":"OLDHEAD","created_at":"2026-06-01T01:00:00Z","body":"P0 on a non-head commit"},
+ {"id":5,"user":{"login":"chatgpt-codex-connector"},"commit_id":"$FX_HEAD","created_at":"2026-05-01T01:00:00Z","body":"P0 stale re-anchored"},
+ {"id":6,"user":{"login":"human-dev"},"commit_id":"$FX_HEAD","created_at":"2026-06-01T01:00:00Z","body":"human P0 inline"},
+ {"id":7,"user":{"login":"chatgpt-codex-connector"},"commit_id":"$FX_HEAD","created_at":"2026-06-01T01:00:00Z","body":"nit first, then a scary P0 later in the body"}]
+EOF
+  # Offline by construction: same no-gh sandbox as evaluate.
+  _eb="$T/fx/bin"
+  if [ ! -x "$_eb/jq" ]; then mk_sandbox_bin "$_eb"; link_real_jq "$_eb"; fi
+  ( PATH="$_eb" sh "$W" classify "$_f" "P0,P1,P2" ) 2>"$T/.classify.err" \
+    || fail "classify exited non-zero on a well-formed round dir"
+  [ -e "$_eb/gh" ] && fail "classify offline sandbox leaked a gh binary"
+  # Severity attach: badge → P1; word-boundary → 'monitor unit' never matches, 'nit:' does;
+  # P12 never tags (default P2); first match BY POSITION → id 7 is nit, not P0.
+  _sv="$(jq -r 'map("\(.id):\(.severity)") | join(",")' "$_f/comments.json")"
+  [ "$_sv" = "1:P1,2:nit,3:P2,7:nit" ] \
+    || fail "classify severity attach wrong (got: $_sv; want 1:P1,2:nit,3:P2,7:nit)"
+  # Freshness + author: non-head (4), pre-trigger (5) and human (6) are never Codex findings.
+  _bl="$(jq -c '[.[].id]' "$_f/blocking.json")"
+  [ "$_bl" = "[1,3]" ] || fail "classify blocking set wrong for P0,P1,P2 (got: $_bl; want [1,3])"
+  # The configured set is read, not assumed: the shipped default P0,P1 blocks only id 1.
+  ( PATH="$_eb" sh "$W" classify "$_f" ) 2>/dev/null || fail "classify default-set run failed"
+  _bl="$(jq -c '[.[].id]' "$_f/blocking.json")"
+  [ "$_bl" = "[1]" ] || fail "classify default P0,P1 wrong (got: $_bl; want [1])"
+  # Body streams are ADVISORY: fresh Codex review body counted, human + stale bot excluded —
+  # and nothing from them reaches blocking.json (the E99-F149 fix).
+  _bf="$(jq -r 'length' "$_f/body-findings.json")"
+  [ "$_bf" = "1" ] || fail "classify body-findings wrong (got: $_bf; want 1 — fresh Codex review body only)"
+  jq -e '.[0].stream == "review-body"' "$_f/body-findings.json" >/dev/null \
+    || fail "classify body-findings entry does not name its stream"
+  # Fail closed: unreadable head ⇒ exit 6 and NO stale blocking.json left behind.
+  _g="$(mk_fixture classify-nohead)"
+  echo '{"reviews":[]}' > "$_g/pr.json"
+  echo '[{"id":9}]' > "$_g/blocking.json"
+  _rc=0; ( PATH="$_eb" sh "$W" classify "$_g" ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 6 ] || fail "classify with unreadable head must exit 6 (got $_rc)"
+  [ -f "$_g/blocking.json" ] && fail "classify left a stale blocking.json standing on fail-closed exit"
+  # Fail closed: missing findings stream ⇒ exit 6 (absence is 'unknown', never 'zero').
+  _h="$(mk_fixture classify-nostream)"
+  rm -f "$_h/review-comments.json"
+  _rc=0; ( PATH="$_eb" sh "$W" classify "$_h" ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 6 ] || fail "classify with a missing findings stream must exit 6 (got $_rc)"
+  pass "classify: severities by position + word boundary, fresh Codex-only blocking, advisory body streams, fail-closed exits (E99-F149)"
+}
+
+# E99-F141/F144: merge receipts are CODE. `merge-verify pre` refuses a head that moved
+# after the reviewed round; `merge-verify post` refuses a merge that is not observably
+# MERGED (gh pr merge exit 0 can mean merely enqueued). Both fail closed on unreadable
+# state. Driven with a fake `gh` so every branch is deterministic and offline.
+test_merge_verify_receipts() {
+  if ! have_jq; then skip "test_merge_verify_receipts (jq not installed)"; return 0; fi
+  _mv="$T/merge-verify"; mkdir -p "$_mv/bin" "$_mv/r"
+  mk_sandbox_bin "$_mv/bin"; link_real_jq "$_mv/bin"
+  cat > "$_mv/bin/gh" <<'GH'
+#!/bin/sh
+# fake gh: answers `pr view <n> --json <fields>` from $FAKE_HEAD / $FAKE_STATE.
+case "$*" in
+  *"--json headRefOid"*) [ -n "$FAKE_HEAD" ] && printf '%s\n' "$FAKE_HEAD" ;;
+  *"--json state,mergedAt,mergeCommit"*) [ -n "$FAKE_STATE" ] && printf '%s\n' "$FAKE_STATE" ;;
+esac
+exit 0
+GH
+  chmod +x "$_mv/bin/gh"
+  printf '{"headRefOid":"aaaa111"}\n' > "$_mv/r/pr.json"
+  _rc=0; ( PATH="$_mv/bin" FAKE_HEAD=aaaa111 sh "$W" merge-verify "$_mv/r" 9 pre ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 0 ] || fail "F141/F144: pre receipt failed on an unmoved head (rc=$_rc)"
+  _rc=0; ( PATH="$_mv/bin" FAKE_HEAD=bbbb222 sh "$W" merge-verify "$_mv/r" 9 pre ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 7 ] || fail "F144: a MOVED head must fail the pre receipt with 7 (got $_rc) — a push after review would inherit its verdict"
+  _rc=0; ( PATH="$_mv/bin" FAKE_HEAD= sh "$W" merge-verify "$_mv/r" 9 pre ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 7 ] || fail "F144: an unreadable current head must fail closed (got $_rc)"
+  rm -f "$_mv/r/pr.json"
+  _rc=0; ( PATH="$_mv/bin" FAKE_HEAD=aaaa111 sh "$W" merge-verify "$_mv/r" 9 pre ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 7 ] || fail "F144: an unreadable reviewed head must fail closed (got $_rc)"
+  _out=""; _rc=0
+  _out="$( PATH="$_mv/bin" FAKE_STATE='MERGED 2026-09-05T00:00:00Z deadbeefcafe' sh "$W" merge-verify "$_mv/r" 9 post 2>/dev/null )" || _rc=$?
+  [ "$_rc" = 0 ] && [ "$_out" = "deadbeefcafe" ] \
+    || fail "F141: post receipt on a MERGED PR must pass and print the merge oid (rc=$_rc out=$_out)"
+  # The post receipt POLLS (a queue legitimately keeps the PR OPEN for a while) but is
+  # BOUNDED: with a tiny ceiling an ever-OPEN PR must still fail closed with 7.
+  _rc=0; ( PATH="$_mv/bin" FAKE_STATE='OPEN  ' HARNESS_MERGE_VERIFY_INTERVAL=1 HARNESS_MERGE_VERIFY_CEILING=2 \
+           sh "$W" merge-verify "$_mv/r" 9 post ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 7 ] || fail "F141: a PR still OPEN at the bounded ceiling must fail the post receipt with 7 (got $_rc)"
+  # CLOSED = rejected from the queue: fail FAST, no waiting out the ceiling.
+  _t0="$(date +%s)"
+  _rc=0; ( PATH="$_mv/bin" FAKE_STATE='CLOSED  ' HARNESS_MERGE_VERIFY_INTERVAL=5 HARNESS_MERGE_VERIFY_CEILING=60 \
+           sh "$W" merge-verify "$_mv/r" 9 post ) >/dev/null 2>&1 || _rc=$?
+  _t1="$(date +%s)"
+  [ "$_rc" = 7 ] || fail "F141: a CLOSED-unmerged PR must fail the post receipt with 7 (got $_rc)"
+  [ $(( _t1 - _t0 )) -lt 10 ] || fail "F141: a CLOSED PR must fail fast, not wait out the ceiling"
+  _rc=0; ( PATH="$_mv/bin" FAKE_STATE= HARNESS_MERGE_VERIFY_INTERVAL=1 HARNESS_MERGE_VERIFY_CEILING=2 \
+           sh "$W" merge-verify "$_mv/r" 9 post ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 7 ] || fail "F141: unreadable merge state must fail closed (got $_rc)"
+  pass "F141/F144 merge receipts: pre pins the reviewed head, post polls bounded and proves the landing, both fail closed"
+}
+
+# The code-ified fail-open batch is WIRED into both command bodies (E99-F141-F152).
+test_body_codified_batch_wired() {
+  for _b in "$SRC/.claude/commands/sdd-pr-loop.md" "$BODY"; do
+    grep -qF 'merge-verify "$round_dir" "$pr_number" pre' "$_b" \
+      || fail "batch: $_b does not run the pre merge receipt (F144)"
+    grep -qF 'merge-verify "$round_dir" "$pr_number" post' "$_b" \
+      || fail "batch: $_b does not run the post merge receipt (F141)"
+    grep -qF '[ -f "${_d}outcome" ] || continue' "$_b" \
+      || fail "batch: $_b resume scan still counts outcome-less round dirs (F142/F150)"
+    grep -qF 'not a round FINISHED' "$_b" \
+      || fail "batch: $_b treats outcome as a terminal marker — an observed-but-undisposed round must be RE-ENTERED, not skipped (#3940992239)"
+    grep -qF '"$round_dir/disposed"' "$_b" \
+      || fail "batch: $_b never writes the disposed marker at a terminal disposition"
+    grep -qF -- '--match-head-commit "$reviewed_head"' "$_b" \
+      || fail "batch: $_b merges without pinning the reviewed head atomically (#3940992232)"
+    grep -qF 'exit 1     # TERMINAL' "$_b" \
+      || fail "batch: $_b checkout-verification failure is not terminal (#3940992230)"
+    grep -qF 'gh pr checkout "$pr_number"' "$_b" \
+      || fail "batch: $_b verifies the checkout by branch NAME — fork PRs and name collisions need gh pr checkout + OID equality (#3941050994)"
+    grep -qF 'HEAD 2>/dev/null)" != "$pr_head_oid" ]' "$_b" \
+      || fail "batch: $_b never proves the tree HEAD equals the PR head oid (#3941050994)"
+    grep -qF 'Do **NOT** write `disposed` here' "$_b" \
+      || fail "batch: $_b writes disposed at the merge-verdict break — an interrupt would strand a green round (#3941050997)"
+    grep -qF 'skip ONLY the trigger and the watcher' "$_b" \
+      || fail "batch: $_b resume path skips §0c — cached findings could be fixed on an unrelated checkout (#3941162094)"
+    grep -qF 'git branch --show-current 2>/dev/null)" ]' "$_b" \
+      || fail "batch: $_b accepts a detached HEAD at the right OID — the later push would fail or land elsewhere (#3941162092)"
+    grep -qF 'git status --porcelain --untracked-files=no' "$_b" \
+      || fail "batch: $_b checks out a PR over a dirty tracked worktree — pre-existing edits would be swept into fixer commits (#3941215212)"
+    grep -qF -- '--is-ancestor "$pr_head_oid" HEAD' "$_b" \
+      || fail "batch: $_b rejects an interrupted round's own local-ahead fixer commits (#3941215215)"
+    grep -qF 'echo handback > "$round_dir/disposed"' "$_b" \
+      || fail "batch: $_b hand-back marker is untyped — a resumed run would re-review a completed hand-back (#3941215219)"
+    grep -qF 'already completed its auto_merge:false hand-back at this head' "$_b" \
+      || fail "batch: $_b resume never short-circuits a completed hand-back (#3941215219)"
+    grep -qF 'merge` verdict the gate returned in THIS invocation' "$_b" \
+      || fail "batch: $_b Ready-to-merge does not require this invocation's verdict (F150)"
+    grep -qF 'gh pr checks "$pr_number" --required' "$_b" \
+      || fail "batch: $_b still derives required checks from the rollup (F152)"
+    grep -qF 'sequentially, never concurrently' "$_b" \
+      || fail "batch: $_b still dispatches fixers in parallel over one checkout (F146)"
+    grep -qF 'The working tree must BE the PR' "$_b" \
+      || fail "batch: $_b never verifies the checkout is the PR being fixed (F147)"
+    grep -qF 'take the hand-back, return success' "$_b" \
+      || fail "batch: $_b still fails an auto_merge:false run over a human thread (F143)"
+    grep -qF 'post it only when a terminal state actually lands' "$_b" \
+      || fail "batch: $_b still posts the success summary before the gates (F151)"
+  done
+  pass "codified batch wired into both bodies (F141-F152 carriers)"
+}
+
 test_failed_findings_fetch_is_never_clean() {         # R55
   if ! have_jq; then skip "test_failed_findings_fetch_is_never_clean (jq not installed)"; return 0; fi
   # review-comments.json is the authoritative findings stream. If its fetch fails while a
@@ -1377,54 +1549,41 @@ test_body_classification_rules() {                    # R39
 }
 
 test_body_unreadable_head_fails_closed() {            # R39 (fail-closed head oid)
-  # `pr.json` missing or truncated makes jq exit non-zero with empty output; a `pr.json`
-  # with no `headRefOid` makes `jq -r` print `null` and exit 0. Either way the freshness
-  # filter matches NOTHING, so fresh-comments.json — hence blocking.json — comes out `[]`,
-  # which step 6 reads as "zero blocking findings ⇒ all gates green ⇒ merge".
-  need_body "R39: the body does not test the head-oid read's exit status" \
-    'if ! head=$(jq -r'
-  need_body "R39: the body does not guard the head-oid VALUE as well as the status" \
-    '|| [ -z "$head" ]; then'
-  need_body "R39: head_ok no longer starts fail-closed at 0" \
-    'head_ok=0            # fail closed'
-  need_body "R39: the body does not state that an unreadable head is not a clean round" \
-    'A head oid you could not read is not a head oid.'
+  # The fail-closed head-oid rule used to live as an inline bash snippet in the body; it
+  # now lives in `wait-for-codex.sh classify` (E99-F149 — classification is code, not
+  # per-lane prose). The BODY must still state the rule, invoke the shipped classifier,
+  # and route its fail-closed exit to needs-human; the TOOL must fail closed on every
+  # corruption shape of pr.json — missing, truncated, key-less and null-key — never
+  # leaving a fresh/blocking file that reads as "zero findings ⇒ all gates green ⇒ merge".
+  need_body "R39: the body no longer runs the shipped classifier" \
+    'wait-for-codex.sh classify'
+  need_body "R39: the body does not state that an unreadable head fails closed" \
+    'A head oid it could not read is not a head oid'
+  need_body "R39: the body does not route the classifier fail-closed exit to needs-human" \
+    '`classify_rc` = 6'
   if ! have_jq; then
     skip "test_body_unreadable_head_fails_closed classifier (jq not installed)"
     return 0
   fi
-  # Run the body's OWN snippet (extracted verbatim from its fenced block), so this locks
-  # the shipped shell and not a paraphrase of it, under both `sh -u` and `sh -e -u`.
   _hd="$T/headoid"; mkdir -p "$_hd"
-  awk '/^```bash$/                 { buf=""; inblk=1; next }
-       inblk && /^```$/            { if (buf ~ /head_ok=0/) {
-                                       printf "%s", buf; exit } inblk=0; next }
-       inblk                       { buf = buf $0 "\n" }' "$BODY" > "$_hd/snippet.sh"
-  grep -q 'headRefOid' "$_hd/snippet.sh" \
-    || fail "R39: could not extract the freshness-filter snippet from the body"
-  cat > "$_hd/harness.sh" <<'SH'
-. "$SNIPPET"
-printf 'head_ok=%s\n' "${head_ok:-unset}"
-if [ -f "$round_dir/fresh-comments.json" ]; then
-  printf 'fresh=%s\n' "$(tr -d ' \n' < "$round_dir/fresh-comments.json")"
-else
-  printf 'fresh=ABSENT\n'
-fi
-SH
+  _eb="$T/fx/bin"
+  if [ ! -x "$_eb/jq" ]; then mk_sandbox_bin "$_eb"; link_real_jq "$_eb"; fi
   # One genuinely fresh P1, plus the two the freshness rule must keep dropping: a stale
   # thread GitHub re-anchored to head, and a comment filed on an older commit.
   cat > "$_hd/findings.json" <<'JSON'
-[{"id":1,"commit_id":"deadbeef","created_at":"2026-07-02T00:00:00Z","body":"![P1 Badge](u) boom"},
- {"id":2,"commit_id":"deadbeef","created_at":"2026-06-01T00:00:00Z","body":"P1 stale, re-anchored"},
- {"id":3,"commit_id":"c0ffee00","created_at":"2026-07-02T00:00:00Z","body":"P1 on an older commit"}]
+[{"id":1,"user":{"login":"chatgpt-codex-connector"},"commit_id":"deadbeef","created_at":"2026-07-02T00:00:00Z","body":"![P1 Badge](u) boom"},
+ {"id":2,"user":{"login":"chatgpt-codex-connector"},"commit_id":"deadbeef","created_at":"2026-06-01T00:00:00Z","body":"P1 stale, re-anchored"},
+ {"id":3,"user":{"login":"chatgpt-codex-connector"},"commit_id":"c0ffee00","created_at":"2026-07-02T00:00:00Z","body":"P1 on an older commit"}]
 JSON
-  # _mk_head_round <dir> <pr.json contents, or @none> — plus a stale fresh-comments.json from an
-  # earlier poll, which a failed read must clear rather than hand on as "zero findings".
+  # _mk_head_round <dir> <pr.json contents, or @none> — plus stale fresh-comments.json and
+  # blocking.json from an earlier poll, which a failed read must CLEAR rather than hand on
+  # as "zero findings".
   _mk_head_round() {
     rm -rf "$1"; mkdir -p "$1"
     printf '2026-07-01T00:00:00Z\n' > "$1/trigger-ts.txt"
     cp "$_hd/findings.json" "$1/review-comments.json"
     printf '[]\n' > "$1/fresh-comments.json"
+    printf '[{"id":99}]\n' > "$1/blocking.json"
     [ "$2" = '@none' ] || printf '%s' "$2" > "$1/pr.json"
   }
   for _c in missing truncated nokey nullkey; do
@@ -1434,32 +1593,29 @@ JSON
       nokey)     _pr='{"reviews":[],"comments":[]}' ;;   # parses, no headRefOid
       nullkey)   _pr='{"headRefOid":null}' ;;            # jq -r prints "null", exits 0
     esac
-    for _opt in '' '-e'; do
-      _mk_head_round "$_hd/r" "$_pr"
-      SNIPPET="$_hd/snippet.sh" round_dir="$_hd/r" \
-        sh $_opt -u "$_hd/harness.sh" > "$_hd/out" 2>"$_hd/err" \
-        || fail "R39: the snippet aborted under 'sh $_opt -u' on a $_c pr.json instead of failing closed"
-      grep -qxF 'head_ok=0' "$_hd/out" \
-        || fail "R39: a $_c pr.json passed as a readable head under 'sh $_opt -u' ($(cat "$_hd/out"))"
-      grep -qxF 'fresh=ABSENT' "$_hd/out" \
-        || fail "R39: a $_c pr.json still produced a fresh-comments.json ($(cat "$_hd/out")) — an empty one reads as a merge"
-    done
+    _mk_head_round "$_hd/r" "$_pr"
+    _rc=0; ( PATH="$_eb" sh "$W" classify "$_hd/r" ) >/dev/null 2>&1 || _rc=$?
+    [ "$_rc" = 6 ] \
+      || fail "R39: a $_c pr.json must fail closed with exit 6 (got $_rc)"
+    [ -f "$_hd/r/blocking.json" ] \
+      && fail "R39: a $_c pr.json left a stale blocking.json standing — an old one reads as a merge"
+    [ -f "$_hd/r/fresh-comments.json" ] \
+      && fail "R39: a $_c pr.json left a stale fresh-comments.json standing"
   done
   # …and both sides of the distinction on a head oid that WAS read: zero fresh findings
   # must still read as a genuine zero, and a fresh finding must survive intact.
   _mk_head_round "$_hd/r" '{"headRefOid":"deadbeef"}'
-  SNIPPET="$_hd/snippet.sh" round_dir="$_hd/r" sh -u "$_hd/harness.sh" > "$_hd/out" 2>/dev/null \
-    || fail "R39: the snippet failed on a valid pr.json"
-  grep -qxF 'head_ok=1' "$_hd/out" || fail "R39: a readable head was rejected ($(cat "$_hd/out"))"
-  grep -qF '"id":1' "$_hd/out"  || fail "R39: the fresh head finding was dropped ($(cat "$_hd/out"))"
-  grep -qF '"id":2' "$_hd/out"  && fail "R39: a stale re-anchored thread leaked back in"
-  grep -qF '"id":3' "$_hd/out"  && fail "R39: a comment filed on an older commit leaked in"
+  ( PATH="$_eb" sh "$W" classify "$_hd/r" "P0,P1" ) >/dev/null 2>&1 \
+    || fail "R39: classify failed on a valid pr.json"
+  grep -qF '"id": 1' "$_hd/r/blocking.json" || grep -qF '"id":1' "$_hd/r/blocking.json" \
+    || fail "R39: the fresh head finding was dropped ($(cat "$_hd/r/blocking.json"))"
+  grep -qF '"id": 2' "$_hd/r/blocking.json" && fail "R39: a stale re-anchored thread leaked back in"
+  grep -qF '"id": 3' "$_hd/r/blocking.json" && fail "R39: a comment filed on an older commit leaked in"
   _mk_head_round "$_hd/r" '{"headRefOid":"feedface"}'          # head nobody filed against
-  SNIPPET="$_hd/snippet.sh" round_dir="$_hd/r" sh -u "$_hd/harness.sh" > "$_hd/out" 2>/dev/null \
-    || fail "R39: the snippet failed on a valid pr.json with zero fresh findings"
-  grep -qxF 'head_ok=1' "$_hd/out" || fail "R39: a readable head with zero findings was rejected"
-  grep -qxF 'fresh=[]' "$_hd/out" \
-    || fail "R39: zero fresh findings must stay readable as zero ($(cat "$_hd/out"))"
+  ( PATH="$_eb" sh "$W" classify "$_hd/r" "P0,P1" ) >/dev/null 2>&1 \
+    || fail "R39: classify failed on a valid pr.json with zero fresh findings"
+  [ "$(tr -d ' \n' < "$_hd/r/blocking.json")" = "[]" ] \
+    || fail "R39: zero fresh findings must stay readable as zero ($(cat "$_hd/r/blocking.json"))"
   pass "R39b an unreadable/headless pr.json fails closed ⇒ no empty blocking.json authorizes a merge"
 }
 
@@ -1685,8 +1841,8 @@ test_body_squash_prep_cannot_hang() {                 # R43 (squash path)
     'never ask Codex for it'
   need_body "R43: body does not write the squash message itself" 'squash-message.txt'
   need_body "R43: the squash merge is not guarded on a non-empty message" 'if [ -s "$msg" ]'
-  need_body "R43: the squash merge has no default-body fallback" \
-    'gh pr merge "$pr_number" --squash --delete-branch && merged=1'
+  need_body "R43: the squash merge has no default-body fallback (with the atomic head pin + F141 post receipt chained)" \
+    'gh pr merge "$pr_number" --squash --delete-branch --match-head-commit "$reviewed_head" && merge_oid='
   pass "R43 squash prep composes the message locally and degrades to the default body"
 }
 
@@ -1710,7 +1866,7 @@ test_body_terminal_return_values_agree() {            # R41/R42/R44 — cross-st
   need_body "R41: a merge that did not land is not barred from reporting success" \
     'is never reported as success'
   need_body "R44: the auto_merge-false hand-back does not return success" \
-    'hand-back **completes** the loop: **return success**'
+    'hand-back **completes** the loop: write `echo handback > "$round_dir/disposed"`'
   need_body "R44: the auto_merge-false hand-back is not kept out of needs-human" \
     'never route it to needs-human'
   need_body "R42: the needs-human state does not claim every path returns failure" \
@@ -1721,7 +1877,7 @@ test_body_terminal_return_values_agree() {            # R41/R42/R44 — cross-st
 import sys
 s = open(sys.argv[1]).read()
 ok_hdr, nh_hdr = s.index("### Ready to merge (success)"), s.index("### Needs-human (failure)")
-ok_ret = s.index("hand-back **completes** the loop: **return success**")
+ok_ret = s.index("hand-back **completes** the loop: write")
 fail_ret = s.index("handover summary, and **return failure**")
 # the auto_merge:false success and the failed-merge failure are both stated in the
 # success section (that is where the merge is attempted) ...
@@ -1956,6 +2112,9 @@ test_clean_via_thumbs_reaction
 test_bot_login_exact_match
 test_bot_login_lookalike_cannot_signal_clean
 test_evaluate_is_offline
+test_classify_offline_contract
+test_merge_verify_receipts
+test_body_codified_batch_wired
 test_failed_findings_fetch_is_never_clean
 test_cache_root_and_gitignore
 
@@ -2146,152 +2305,55 @@ test_round_trend_json_escapes_paths
 test_round_trend_usage_errors
 test_installed_command_carries_the_trend
 
-# ══ E21-F04: Stacked-PR lane (R1–R5, R8, R9) ════════════════════════════════════
+# ══ E21-F07: the stacked-PR lane is DEPRECATED and reclaimed ═══════════════════
+# The E21-F06 gate answered "does the lane earn its keep?" with NO (0 of the last 100
+# PRs targeted a non-default base; the guard never fired). These tests pin the removal:
+# the machinery is gone, the docs say so, and the default-branch lane is untouched.
 
-test_stack_guard_parent_open() {                       # R3
-  # Verify pr-stack-guard.sh exits 6 when the base branch matches an open PR's head.
-  _g="$T/guard-parent-open"; mkdir -p "$_g"
-  printf '{"baseRefName":"feat/wave-1"}\n' > "$_g/pr.json"
-  printf '[{"number":42,"headRefName":"feat/wave-1"}]\n' > "$_g/open-prs.json"
-  if ! have_jq; then skip "test_stack_guard_parent_open (jq not installed)"; return 0; fi
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>/dev/null || _rc=$?
-  [ "$_rc" = 6 ] || fail "R3: pr-stack-guard must exit 6 when base matches an open PR's head (got $_rc)"
-  grep -qF 'feat/wave-1' "$_g/out" || fail "R3: the diagnostic does not name the base branch"
-  grep -qF '#42' "$_g/out" || fail "R3: the diagnostic does not name the open parent PR number"
-  # The SAFE case: base is the default branch — must exit 0.
-  printf '{"baseRefName":"main"}\n' > "$_g/pr.json"
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >/dev/null 2>&1 || _rc=$?
-  [ "$_rc" = 0 ] || fail "R3: a PR targeting the default branch must exit 0 (got $_rc)"
-  pass "R3 pr-stack-guard exits 6 when parent is open, 0 when base is default"
+test_lane_deprecation_reclaimed() {                    # F07 R2/R3/R4/R5
+  # R4: no live reference anywhere in the tree — a dead gate in a merge path reads as
+  # load-bearing whether or not it is. History (CHANGELOG, F04's superseded spec, the
+  # WORKFLOW deprecation notice, this suite) is allowed; code and role surfaces are not.
+  [ ! -e "$SRC/tools/pr-stack-guard.sh" ] \
+    || fail "F07 R1: tools/pr-stack-guard.sh still ships in the source tree"
+  _live="$(grep -rl "pr-stack-guard" "$SRC/tools" "$SRC/agents" "$SRC/init.sh" \
+             "$SRC/harness-install.sh" "$SRC/.claude" 2>/dev/null || true)"
+  [ -z "$_live" ] || fail "F07 R4: live pr-stack-guard reference remains in: $_live"
+  # R2: neither command body carries stacked machinery — but BOTH keep the fail-closed
+  # base check (Codex #163 P1): with the guard gone, a leftover non-default-base PR
+  # would auto-merge into a stale parent branch and read as a success.
+  for _b in "$SRC/.claude/commands/sdd-pr-loop.md" "$BODY"; do
+    grep -qE "Base-change detection|merge-order guard|guard_deferred|restack" "$_b" \
+      && fail "F07 R2: stacked machinery still present in $_b"
+    grep -qF '[ "$base_ref" != "$default_branch" ]' "$_b" \
+      || fail "F07 R2: $_b lost the fail-closed non-default-base merge refusal"
+    grep -qF "stacked lane deprecated, E21-F07" "$_b" \
+      || fail "F07 R2: $_b's base refusal does not name the deprecation"
+  done
+  # R3: the WORKFLOW notice names the sibling split and drops the lane how-to,
+  # asserted fence-aware over the section only (never a whole-file grep).
+  _wf="$SRC/docs/WORKFLOW.md"
+  _sect="$(awk "$(cat "$SRC/tests/lib/fence.awk")"'
+    fence_delim($0) { next }
+    !fence && /^## Stacked-PR lane/ { s=1; next }
+    !fence && s && /^## / { exit }
+    s { print }' "$_wf")"
+  printf '%s\n' "$_sect" | grep -q "DEPRECATED" >/dev/null 2>&1 || true
+  printf '%s\n' "$_sect" | grep -q "sibling" \
+    || fail "F07 R3: the deprecation notice does not name the sibling-feature split"
+  printf '%s\n' "$_sect" | grep -qiE "restack procedure|delimiter convention" \
+    && fail "F07 R3: the lane how-to survived in WORKFLOW.md"
+  grep -q "DEPRECATED (E21-F07)" "$_wf" \
+    || fail "F07 R3: WORKFLOW.md does not mark the lane deprecated"
+  # R5: the F04 spec records the supersession append-only (original prose retained).
+  _f04="$SRC/specs/epics/E21-change-size-discipline/F04-stacked-pr-lane/F04-stacked-pr-lane.spec.md"
+  grep -q "Superseded (append-only) — E21-F07" "$_f04" \
+    || fail "F07 R5: E21-F04 spec does not record the supersession"
+  grep -q "merge-order" "$_f04" \
+    || fail "F07 R5: the original F04 prose was not retained (append-only violated)"
+  pass "F07 lane deprecation: machinery reclaimed, docs honest, spec superseded (R1-R5)"
 }
 
-test_stack_guard_unreadable_base() {                   # R4
-  # Verify pr-stack-guard.sh fails closed on unreadable base or unparseable input.
-  _g="$T/guard-fail"; mkdir -p "$_g"
-  printf '[]\n' > "$_g/open-prs.json"
-  if ! have_jq; then skip "test_stack_guard_unreadable_base (jq not installed)"; return 0; fi
-  # No .baseRefName field at all
-  printf '{"someKey":"someValue"}\n' > "$_g/pr.json"
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>&1 || _rc=$?
-  [ "$_rc" != 0 ] || fail "R4: a pr.json with no .baseRefName must exit non-zero (got $_rc)"
-  [ "$_rc" != 6 ] || fail "R4: an unreadable base must NOT exit 6 (that would mean 'stacked')"
-  # baseRefName is null
-  printf '{"baseRefName":null}\n' > "$_g/pr.json"
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>&1 || _rc=$?
-  [ "$_rc" != 0 ] || fail "R4: a null baseRefName must exit non-zero (got $_rc)"
-  [ "$_rc" != 6 ] || fail "R4: a null baseRefName must NOT exit 6"
-  # Unparseable open-prs.json
-  printf '{"baseRefName":"feat/x"}\n' > "$_g/pr.json"
-  printf 'not json\n' > "$_g/open-prs.json"
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>&1 || _rc=$?
-  [ "$_rc" != 0 ] || fail "R4: an unparseable open-prs.json must exit non-zero (got $_rc)"
-  [ "$_rc" != 6 ] || fail "R4: an unparseable open-prs.json must NOT exit 6"
-  # Missing pr.json file
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/no-such.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>&1 || _rc=$?
-  [ "$_rc" = 4 ] || fail "R4: a missing pr.json must exit 4 (got $_rc)"
-  pass "R4 pr-stack-guard fails closed (non-zero, not 6) on unreadable/unparseable input"
-}
-
-test_stacked_pr_base_detection() {                     # R1
-  # Verify the pr-loop body fetches and uses baseRefName for stacked PR detection.
-  grep -qF 'baseRefName' "$BODY" \
-    || fail "R1: the pr-loop body does not reference baseRefName"
-  grep -qF 'baseRefName,baseRefOid' "$BODY" \
-    || fail "R1: the pr-loop body does not describe the expanded watcher JSON fields"
-  # The watcher itself must fetch these fields (T2).
-  grep -qF 'baseRefName,baseRefOid' "$SRC/tools/wait-for-codex.sh" \
-    || fail "R1: the watcher does not fetch baseRefName and baseRefOid"
-  # The body must describe the base-change detection for stacked PRs.
-  grep -qiF 'base-change detection' "$BODY" \
-    || fail "R1: the body does not describe base-change detection"
-  grep -qiF 'baseref' "$BODY" \
-    || fail "R1: the body does not reference baseRefName or baseRefOid for change detection"
-  pass "R1 pr-loop fetches and uses baseRefName + baseRefOid for stacked PRs"
-}
-
-test_stacked_pr_refuse_child_merge() {                 # R2
-  # Verify the pr-loop body refuses to merge a child PR whose parent is still open.
-  grep -qiF 'pr-stack-guard.sh' "$BODY" \
-    || fail "R2: the body does not invoke pr-stack-guard.sh before merging"
-  grep -qiF 'merge refused' "$BODY" \
-    || fail "R2: the body does not describe the parent-open refusal case"
-  grep -qF 'needs-human' "$BODY" \
-    || fail "R2: the body does not route the guard refusal to needs-human"
-  grep -qF 'guard_ok' "$BODY" \
-    || fail "R2: the body does not track the guard outcome via guard_ok"
-  # The merge bash block must check guard_ok before merging.
-  grep -qF 'guard_ok' "$BODY" \
-    && grep -qF 'if [ "${guard_ok:-1}" != "1" ]' "$BODY" \
-    || fail "R2: the merge block does not gate on guard_ok"
-  pass "R2 pr-loop refuses to merge a child PR whose parent is still open"
-}
-
-test_stacked_pr_base_change_invalidation() {           # R5
-  # Verify the pr-loop body detects baseRefOid changes and restarts round counter.
-  grep -qiF 'baseRefOid changed' "$BODY" \
-    || fail "R5: the body does not describe the base-change invalidation message"
-  grep -qiF 'restarting from round 1' "$BODY" \
-    || fail "R5: the body does not describe restarting the round counter from 1"
-  grep -qiF 'base-change detection' "$BODY" \
-    || fail "R5: the base-change detection step is not present in the body"
-  # The detection must happen before triggering a new round (step 0b).
-  python3 - "$BODY" <<'PY' || fail "R5: base-change detection is not ordered before the @codex review trigger"
-import sys
-s = open(sys.argv[1]).read()
-assert s.lower().index("base-change detection") < s.index('gh pr comment "$pr_number" --body "@codex review"')
-PY
-  pass "R5 pr-loop invalidates prior round cache on baseRefOid change, restarts at 1"
-}
-
-test_stacking_inert_when_disabled() {                  # R8
-  # When pr_loop.enabled is false, the stacking lane is inert. The pr-loop body
-  # (which invokes the guard) is not installed. The guard script itself lives in
-  # tools/ and is harmless without the body that invokes it.
-  _i="$T/inert-stack"
-  install_at "$_i"
-  # A gate-off install stamps no pr-loop body at all — no guard invocation possible.
-  _body="$_i/.claude/commands/sdd-pr-loop.md"
-  [ -e "$_body" ] && fail "R8: a gate-off install stamped a pr-loop body (the gate should be opt-in false)"
-  # The guard is inert because nothing invokes it — the pr-loop body is the only
-  # caller, and it is absent. Verify the guard script can be installed without
-  # activating any stacking logic.
-  pass "R8 stacking lane inert when pr_loop.enabled is false"
-}
-
-test_stacked_pr_opt_in() {                             # R9
-  # A PR targeting the default branch follows the existing single-PR path with no
-  # guard invocation and no base-change detection.
-  # The guard script exits 0 (not stacked) when baseRefName is the default branch.
-  _g="$T/opt-in"; mkdir -p "$_g"
-  printf '{"baseRefName":"main"}\n' > "$_g/pr.json"
-  printf '[]\n' > "$_g/open-prs.json"
-  if ! have_jq; then skip "test_stacked_pr_opt_in (jq not installed)"; return 0; fi
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >/dev/null 2>&1 || _rc=$?
-  [ "$_rc" = 0 ] || fail "R9: a PR targeting main must exit 0 (got $_rc)"
-  # The body must state that the default lane is unchanged.
-  grep -qF 'single-PR default lane' "$BODY" \
-    || grep -qF 'default branch' "$BODY" \
-    || fail "R9: the body does not reference the default/single-PR lane"
-  # The guard script must not be invoked when the base IS the default branch
-  # (the existing merge path is unchanged).
-  grep -qF 'default branch' "$SRC/tools/pr-stack-guard.sh" \
-    || fail "R9: the guard script does not handle the default-branch case"
-  pass "R9 single-PR default lane unchanged (opt-in stacking)"
-}
-
-test_stack_guard_parent_open
-test_stack_guard_unreadable_base
-test_stacked_pr_base_detection
-test_stacked_pr_refuse_child_merge
-test_stacked_pr_base_change_invalidation
-test_stacking_inert_when_disabled
-test_stacked_pr_opt_in
+test_lane_deprecation_reclaimed
 
 echo "All pr-loop tests passed."

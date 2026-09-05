@@ -22,6 +22,8 @@ comment you were meant to fix.
 
 ## Runbook
 
+0. If `progress/lessons.md` exists, skim it — it names gotchas that already cost rounds
+   (shell/CI portability, probe idioms). Apply any that touch your file.
 1. Read the cited file (`path`) and the surrounding context. If the comment cites a diff
    hunk, also run `git show HEAD -- <path>` for the current state.
 2. Decide the **smallest** change that resolves the comment. **Do not refactor adjacent

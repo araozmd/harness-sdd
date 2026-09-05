@@ -85,6 +85,7 @@
 # layout) we fall through to the case-3 decision — never crash, never block.
 
 import argparse
+from datetime import datetime, timezone
 import errno
 import fcntl
 import glob
@@ -1723,7 +1724,88 @@ def _rollback_frontmatter(vb, root_real, written):
         try:
             _write_contained(vb, root_real, path, original)
         except (OSError, ValueError):
+            # Intentional swallow (E99-F128): this runs inside the board-replace failure
+            # path, called from an `except Exception:` block that RE-RAISES the original
+            # error. If rolling one file back fails too, raising here would mask the
+            # primary failure the caller is about to report — the best-effort restore of
+            # the remaining files matters more than a second, shadowing traceback.
             pass
+
+
+def _telemetry_cfg(hdir):
+    """(enabled, log_path) from harness.config.yaml's top-level `telemetry:` block.
+    Zero-dep minimal parse, mirroring tools/telemetry-report.py's _configured_log
+    exactly so writer and reader always resolve the same file. Absent block or file
+    => enabled with the default path."""
+    enabled = True
+    log = None
+    cfg = os.path.join(hdir, "harness.config.yaml")
+    try:
+        with open(cfg) as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        lines = []
+    in_block = False
+    for ln in lines:
+        if re.match(r"^telemetry:\s*(#.*)?$", ln):
+            in_block = True
+            continue
+        if in_block and re.match(r"^[^\s#]", ln):
+            break
+        if in_block:
+            m = re.match(r"^\s+enabled:\s*(\S+)", ln)
+            if m and m.group(1).rstrip("#").strip().lower() == "false":
+                enabled = False
+            m = re.match(r"^\s+log:\s*(.*)$", ln)
+            if m:
+                val = re.sub(r"\s*#.*$", "", m.group(1)).strip()
+                val = re.sub(r"^['\"]|['\"]$", "", val).strip()
+                if val:
+                    log = val if os.path.isabs(val) else os.path.join(hdir, val)
+    return enabled, (log or os.path.join(hdir, "telemetry.jsonl"))
+
+
+def _telemetry_transition(hdir, feature_id, old_status, new_status):
+    """Best-effort append one `transition` record to the telemetry log.
+
+    This is the STRUCTURAL half of telemetry (2026-09-04 refactor): every status write
+    already passes through this lock, which knows the feature id, both statuses and the
+    wall clock — so phase/round boundaries are recorded as a property of the system
+    instead of a prompt-compliance hope (the observed compliance of the prompt-level
+    stamps was ~0%). NEVER blocking, NEVER on the critical path: any failure here is
+    swallowed, because a telemetry write must not delay or alter a gate or a build.
+    """
+    try:
+        enabled, log = _telemetry_cfg(hdir)
+        if not enabled:
+            return
+        # An epic rollup (`set-status E## done`) passes an EPIC id here; filing it
+        # under `feature` made the report list epics as features touched (Codex #160
+        # P2). `kind` + `subject` name the target explicitly; `feature` is kept, for
+        # feature transitions only, so existing readers keep working.
+        kind = "epic" if "-" not in feature_id else "feature"
+        rec = {
+            "schema_version": 1,
+            "type": "transition",
+            "kind": kind,
+            "subject": feature_id,
+            "from": old_status,
+            "to": new_status,
+            "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if kind == "feature":
+            rec["feature"] = feature_id
+        # A configured `telemetry.log` may carry a directory component
+        # (`custom/events.jsonl`) that no install step creates; without this,
+        # open() raises FileNotFoundError, the best-effort handler swallows it,
+        # and every transition silently produces no record (Codex #160 round-5).
+        _log_dir = os.path.dirname(log)
+        if _log_dir:
+            os.makedirs(_log_dir, exist_ok=True)
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, sort_keys=True) + "\n")
+    except Exception:
+        pass  # best-effort by contract — telemetry never breaks a board write
 
 
 def run(transform, timeout, sync_id=None, sync_status=None):
@@ -1753,6 +1835,24 @@ def run(transform, timeout, sync_id=None, sync_status=None):
             # read-modify-write (R6) and does not enlarge Git diffs.
             with open(tasks_path) as fh:
                 original_text = fh.read()
+
+            # Capture the OLD status before the mutation, for the structural telemetry
+            # record below. Best-effort: an unparseable board fails the transform anyway.
+            old_status = None
+            if sync_id is not None:
+                try:
+                    for _ep in json.loads(original_text).get("epics") or []:
+                        if _ep.get("id") == sync_id:
+                            old_status = _ep.get("status")
+                            break
+                        for _ft in _ep.get("features") or []:
+                            if isinstance(_ft, dict) and _ft.get("id") == sync_id:
+                                old_status = _ft.get("status")
+                                break
+                        if old_status is not None:
+                            break
+                except Exception:
+                    pass
 
             serialized = transform(original_text)  # the single mutation (R1)
 
@@ -1824,6 +1924,11 @@ def run(transform, timeout, sync_id=None, sync_status=None):
     finally:
         os.close(lock_fd)
 
+    # Structural telemetry — reached only when the write above fully succeeded, AFTER
+    # the lock is released (a telemetry append must never extend the lock hold).
+    if sync_id is not None and sync_status is not None:
+        _telemetry_transition(hdir, sync_id, old_status, sync_status)
+
 
 def main(argv):
     parser = argparse.ArgumentParser(
@@ -1859,6 +1964,29 @@ def main(argv):
         "--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS
     )
 
+    # add-feature — the Fixer's seeding contract (agents/fixer.md R8/R9) as a guarded
+    # subcommand. Seeding was the one routine board mutation with no first-class path:
+    # every lane hand-wrote a Python mutator for it, which is exactly where a schema
+    # mistake would land, in the least-guarded spot. Append-only, next-sequential id
+    # strictly above the max (never reuse a vacated F##), sdd: false, pending.
+    p_addf = sub.add_parser(
+        "add-feature",
+        help="append one sdd:false fix row to an epic (Fixer seeding contract)",
+    )
+    p_addf.add_argument("--epic", default="E99",
+                        help="epic id to append under (default: E99)")
+    p_addf.add_argument("--title", required=True,
+                        help="one-line fix intent")
+    p_addf.add_argument("--slug", default=None,
+                        help="spec_path slug; derived from the title when omitted. "
+                             "Sanitized to [a-z0-9-] either way — a slug is a single "
+                             "path component, never a path")
+    p_addf.add_argument("--gated", action="store_true",
+                        help="stamp autonomous: false (park at the human gate)")
+    p_addf.add_argument(
+        "--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS
+    )
+
     args = parser.parse_args(argv)
 
     # Bounded-acquisition contract (R5): argparse's float() accepts `nan`/`inf`,
@@ -1889,6 +2017,81 @@ def main(argv):
     elif args.cmd == "apply":
         # External mutators may change arbitrary structure → parse+re-serialize.
         transform = _mutator_text_transform(_import_mutator(args.mutator))
+    elif args.cmd == "add-feature":
+        allocated = {}  # the assigned id, carried out of the locked transform
+        # Resolved here, outside the lock, for the same reason set-status does it: the
+        # closure must not run `git rev-parse` probes while holding the board lock.
+        hdir = _harness_dir()
+
+        def _seed(data):
+            epic = None
+            for ep in data.get("epics") or []:
+                if isinstance(ep, dict) and ep.get("id") == args.epic:
+                    epic = ep
+                    break
+            if epic is None:
+                raise ValueError(
+                    "epic %s not found — create it first (the Fixer's "
+                    "create-on-first-use step, agents/fixer.md R5)" % args.epic
+                )
+            feats = epic.setdefault("features", [])
+            # Next-sequential strictly above the max — a gap left by a removed fix
+            # is never refilled (R8).
+            max_n = 0
+            for ft in feats:
+                m = re.match(r"^%s-F(\d+)$" % re.escape(args.epic),
+                             str(ft.get("id", "")) if isinstance(ft, dict) else "")
+                if m:
+                    max_n = max(max_n, int(m.group(1)))
+            new_id = "%s-F%02d" % (args.epic, max_n + 1)
+            # ONE sanitizer for both slug sources. A custom --slug interpolated verbatim
+            # is a path component: `--slug '../../tmp/owned'` would persist a spec_path
+            # that escapes the harness root, which validate-board.py then rejects — so
+            # the very next mandatory init.sh hard-fails and the board needs manual
+            # repair (Codex #160 P2). Sanitizing custom input through the same rule as
+            # the derived slug reduces it to [a-z0-9-], which cannot traverse.
+            slug = re.sub(
+                r"[^a-z0-9]+", "-", (args.slug or args.title).lower()
+            ).strip("-")[:40]
+            slug = slug.strip("-") or "fix"
+            # Epic dir name, three sources in order (Codex #160 P2: the bare-id
+            # fallback wrote specs/epics/E99/ for the FIRST fix of a fresh E99, while
+            # the epic document and the Fixer contract use specs/epics/E99-maintenance/
+            # — wrong on precisely the create-on-first-use path):
+            #   1) the directory the existing rows already record;
+            #   2) the specs/epics/<epic>-*/ directory on disk, when exactly one
+            #      matches (the same convention validate-board.py resolves epics by);
+            #   3) the Fixer contract's required default for E99 (`E99-maintenance`,
+            #      fixer.md R8 table), else the bare epic id.
+            epic_dir = None
+            for ft in feats:
+                sp = ft.get("spec_path") if isinstance(ft, dict) else None
+                m = re.match(r"^specs/epics/([^/]+)/", sp or "")
+                if m:
+                    epic_dir = m.group(1)
+                    break
+            if epic_dir is None:
+                _dirs = sorted(glob.glob(os.path.join(
+                    glob.escape(hdir), "specs", "epics", "%s-*" % args.epic)))
+                _dirs = [d for d in _dirs if os.path.isdir(d)]
+                if len(_dirs) == 1:
+                    epic_dir = os.path.basename(_dirs[0])
+            if epic_dir is None:
+                epic_dir = "E99-maintenance" if args.epic == "E99" else args.epic
+            feats.append({
+                "id": new_id,
+                "title": args.title,
+                "status": "pending",
+                "sdd": False,
+                "autonomous": not args.gated,
+                "depends_on": [],
+                # Recorded; the directory is NOT created (fixer.md R8 table).
+                "spec_path": "specs/epics/%s/F%02d-%s/" % (epic_dir, max_n + 1, slug),
+            })
+            allocated["id"] = new_id
+            return data
+
+        transform = _mutator_text_transform(_seed)
     else:  # pragma: no cover - argparse enforces
         parser.error("unknown command")
 
@@ -1902,6 +2105,10 @@ def main(argv):
                 sync_id=args.id, sync_status=args.status)
         else:
             run(transform, args.timeout)
+        if args.cmd == "add-feature":
+            # The allocated id is the caller's handle on the seeded row — print it
+            # (and nothing else) on stdout so scripts can capture it directly.
+            print(allocated.get("id", ""))
     except SystemExit:
         raise
     except json.JSONDecodeError as exc:

@@ -266,3 +266,10 @@ If you find the Builder failed because a rule was missing or ambiguous, you may
 **update the harness itself** — tighten `AGENTS.md`, an agent prompt, or a template
 — so the same mistake can't recur. The harness is files in the repo; improving it
 is part of your job.
+
+**Earned lessons.** Read `progress/lessons.md` before you review — it names failure
+shapes that already cost rounds. When your review surfaces a lesson that would have
+prevented the round (a probe idiom, an environment gotcha, a class of over-claim),
+append one dated line (`- [YYYY-MM-DD reviewer] …`). A finding that is a *lesson* goes
+there; only a finding that is *work* (recurring, blocks progress, or fails open) is
+worth a board row — see the Fixer's severity bar.

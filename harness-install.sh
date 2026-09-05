@@ -2356,13 +2356,13 @@ precheck_baseline() {
     if [ -n "$_pb_host" ]; then
       printf '%s\n' "$_pb_host"
     else
-      normalize_keys "$AGENT_KEYS"
+      fresh_default_set   # E25-F01: fresh + undetected ⇒ claude-only baseline
     fi
   fi
 }
 
 # host_fallback_keeps_selection <target> — true when an UNDETECTED `host` run would preserve
-# <target>'s persisted selection (R14) rather than falling back to ALL (R13).
+# <target>'s persisted selection (R14) rather than falling back to a default (R13).
 #
 # That is the case only when the target is an EXISTING INSTALL *and* carries a selection:
 # the version stamp is the spec's definition of "existing install", and a stamped install
@@ -2373,8 +2373,18 @@ host_fallback_keeps_selection() {
   [ -f "$1/.harness/.harness-version" ] && [ -f "$1/.harness/.agents" ]
 }
 
+# fresh_default_set — the selection a FRESH target gets when nothing chose one
+# (E25-F01): `claude` only. Non-Claude front-ends are PARKED BY DEFAULT — every key
+# stays legal via an explicit --agents/HARNESS_AGENTS opt-in, and existing installs'
+# recorded selections are untouched (R4). A default flip, deliberately not a deletion:
+# reversible, and it produces the opt-in evidence a later removal would need
+# (docs/RATIONALE.md, "float, don't pin").
+fresh_default_set() { printf 'claude\n'; }
+
 # host_fallback_set <target> — the set an UNDETECTED `host` run resolves to for <target>:
-# its persisted selection on an existing install (R14), ALL otherwise (R13).
+# its persisted selection on an existing install (R14), the legacy ALL for a stamped
+# install with no recorded selection, and the claude-only fresh default otherwise
+# (E25-F01, was ALL).
 #
 # This is the SINGLE source of the undetected-fallback answer, and since E19-F02 it has
 # exactly ONE caller: the undetected arm of resolve_agents's `host` branch.
@@ -2385,8 +2395,9 @@ host_fallback_keeps_selection() {
 # fresh DETECTED target this helper answers ALL while the run would install the one
 # detected key, so the preview would advertise the pre-F02 default the feature replaced.
 # Nothing is lost by the repoint — for an UNDETECTED target the two helpers agree in every
-# shape (persisted selection on a stamped install that has one, ALL otherwise, including
-# the orphan-metadata corner where a `.harness/.agents` carries no version stamp).
+# shape (persisted selection on a stamped install that has one, legacy ALL on a stamped
+# install without one, and the claude-only fresh default otherwise — including the
+# orphan-metadata corner where a `.harness/.agents` carries no version stamp).
 #
 # It cannot affect a run that never names `host`: its one call site is gated on `host` —
 # resolve_agents reaches that arm only when the override value is exactly `host`. The
@@ -2395,8 +2406,12 @@ host_fallback_keeps_selection() {
 host_fallback_set() {
   if host_fallback_keeps_selection "$1"; then
     precheck_baseline "$1"
+  elif [ -f "$1/.harness/.harness-version" ]; then
+    normalize_keys "$AGENT_KEYS"   # legacy pre-E08 install (stamp, no recorded
+                                   # selection): its long-standing ALL answer is
+                                   # unchanged — E25-F01 flips FRESH targets only (R4)
   else
-    normalize_keys "$AGENT_KEYS"
+    fresh_default_set
   fi
 }
 
@@ -2445,7 +2460,9 @@ override_host_kind() {
 #      TTY this runs the arrow-key + spacebar checkbox picker (tui_select); when
 #      raw mode is unavailable it gracefully falls back to the numbered
 #      toggle_select. Both resolve the identical SELECTED set from the same baseline.
-#   3. No-TTY default (R6): else → ALL keys (back-compat: stamp everything).
+#   3. No-TTY default (R6): else → the claude-only fresh default on a FRESH target
+#      (E25-F01: non-Claude front-ends are parked by default); an EXISTING install
+#      keeps this arm's long-standing ALL answer byte-for-byte.
 # Sets the global SELECTED to a sorted, newline-separated key list.
 resolve_agents() {
   _t="$1"
@@ -2474,8 +2491,13 @@ resolve_agents() {
         SELECTED="$(host_fallback_set "$_t")"
         if host_fallback_keeps_selection "$_t"; then
           info "agents: host undetected — keeping this install's selection ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
+        elif [ -f "$_t/.harness/.harness-version" ]; then
+          # Legacy pre-E08 install (stamp, no recorded selection): the applied answer is
+          # ALL — the report must say what was actually selected, never claim the fresh
+          # claude-only park applied when it did not (Codex #167 P2).
+          info "agents: host undetected — legacy install with no recorded selection, keeping all front-ends ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
         else
-          info "agents: host undetected — selecting all front-ends ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
+          info "agents: host undetected — fresh target, selecting claude only (non-Claude front-ends are parked by default; opt in with --agents=<csv>)"
         fi
       fi
     else
@@ -2493,7 +2515,15 @@ resolve_agents() {
     fi
     info "agents: interactive selection ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
   else
-    SELECTED="$(normalize_keys "$AGENT_KEYS")"
+    # No override, no TTY (E25-F01): a FRESH target gets the claude-only default; an
+    # EXISTING install keeps this arm's long-standing answer (ALL) byte-for-byte —
+    # narrowing an upgrade's surface silently is not this feature (R4).
+    if [ -f "$_t/.harness/.harness-version" ]; then
+      SELECTED="$(normalize_keys "$AGENT_KEYS")"
+    else
+      SELECTED="$(fresh_default_set)"
+      info "agents: fresh target, no selection given — claude only (non-Claude front-ends are parked by default; opt in with --agents=<csv>)"
+    fi
   fi
 }
 
@@ -3315,7 +3345,6 @@ install_one() {
   chmod +x "$H/tools/wait-for-codex.sh" 2>/dev/null || true   # E18-F01 /sdd-pr-loop background Codex watcher
   chmod +x "$H/tools/change-size.sh" 2>/dev/null || true   # E21-F02 advisory pre-PR change-size check
   chmod +x "$H/tools/pr-round-trend.sh" 2>/dev/null || true   # E21-F03 pr-loop convergence trend
-  chmod +x "$H/tools/pr-stack-guard.sh" 2>/dev/null || true   # E21-F04 stacked-PR merge-order guard
   chmod +x "$H/tools/pr-gate.sh" 2>/dev/null || true   # E99 deterministic pr-loop merge/fix/budget verdict
   chmod +x "$H/tools/run-tests.sh" 2>/dev/null || true   # E99 concurrent suite runner, failures-only output
   chmod +x "$H/tools/opencode-model-helper.sh" 2>/dev/null || true   # E22-F01 OpenCode model pin helper
@@ -3512,6 +3541,18 @@ EOF
   if [ ! -f "$H/progress/history.md" ]; then
     printf '# Project history\n\n> Append one line per completed feature (Reviewer verdict).\n' > "$H/progress/history.md"
   fi
+  if [ ! -f "$H/progress/lessons.md" ]; then
+    cat > "$H/progress/lessons.md" <<'LESSONS_EOF'
+# Earned lessons (append-only)
+
+> One entry per lesson that cost a review round, a rejection, or a debugging session to
+> learn. Every role reads this file at session start; any lane may append. Never rewrite
+> or delete an entry — supersede it with a newer one. Format:
+>
+>     - [YYYY-MM-DD <lane>] <the lesson, one or two lines, imperative>
+LESSONS_EOF
+    info "seeded progress/lessons.md (earned-lessons ledger)"
+  fi
   if [ ! -f "$H/progress/.gitkeep" ]; then : > "$H/progress/.gitkeep"; fi
 
   # Telemetry is local-only runtime data. In an installed consumer the harness body
@@ -3604,6 +3645,11 @@ $_tlog" ;;                                       # relative override → also ig
     # latter would suppress the former — and without the directory re-inclusion git never
     # descends into progress/inbox/, silently ignoring every brief. Append-only either way:
     # a target's own entries are never rewritten or reordered.
+    # Guard the trailing newline first: appending to a file whose last line lacks one would
+    # fuse the first pattern onto it, corrupting both entries silently.
+    if [ -s "$H/.gitignore" ] && [ "$(tail -c 1 "$H/.gitignore" | wc -l)" -eq 0 ]; then
+      printf '\n' >> "$H/.gitignore"
+    fi
     printf '%s\n' "$_ignores" | while IFS= read -r _pat; do
       [ -n "$_pat" ] || continue
       grep -qxF "$_pat" "$H/.gitignore" || printf '%s\n' "$_pat" >> "$H/.gitignore"
@@ -3619,12 +3665,13 @@ $_tlog" ;;                                       # relative override → also ig
   # .gitignore with TARGETED, append-only ignores (never clobbering existing entries), so a
   # shared repo stays free of one developer's local state. Full model:
   # .harness/docs/CONFIG-LAYERING.md.
-  # *.mutbak is the Reviewer's mutation-campaign backup copy: with four of them in the tree,
-  # change-size.sh reported production 1104 lines / 2 files against a true 42/1, a 26x
-  # overstatement. Since E99-F58 made mutation campaigns routine, .mutbak files in a working
-  # tree are the EXPECTED state during review, so this misfires more often from here, not less.
-  # It is per-developer review scratch that no clone should ever receive — which is precisely
-  # what distinguishes it from the agent surfaces below. (E99-F71/F89.)
+  # *.mutbak is deliberately NOT seeded (2026-09-04 reversal of E99-F71's ignore). The
+  # ignore contradicted reviewer.md's own discipline: mutation backups must stay VISIBLE in
+  # `git status` so a killed mid-campaign lane leaves detectable residue (the E99-F207
+  # incident-class). The 26x change-size overstatement E99-F71 fixed is now handled at the
+  # measurer instead — tools/change-size.sh classifies `\.mutbak$` as generated — so the
+  # budget never sees them while git always does. The migration below WARNS about a bare
+  # `*.mutbak` line an earlier version seeded (never deletes — provenance is unprovable).
   #
   # NOTE what is deliberately NOT here: .agents/, .codex/ and .opencode/. An earlier revision
   # ignored them as "installer output", and Codex raised a correct P1: the documented install
@@ -3641,8 +3688,7 @@ $_tlog" ;;                                       # relative override → also ig
 .claude/worktrees/
 AGENTS.local.md
 CLAUDE.local.md
-AGENTS.override.md
-*.mutbak'
+AGENTS.override.md'
   if [ ! -f "$TARGET/.gitignore" ]; then
     { printf '# Personal/runtime agent state — never commit (see .harness/docs/CONFIG-LAYERING.md).\n'
       printf '%s\n' "$_root_ignores"
@@ -3650,10 +3696,25 @@ AGENTS.override.md
       printf '#.playwright-mcp/\n'; } > "$TARGET/.gitignore"
     info "seeded project-root .gitignore (personal/runtime agent state)"
   else
+    # A file whose last line lacks a trailing newline would FUSE the first appended
+    # pattern onto it (`secret.envAGENTS.local.md`) — corrupting both entries silently.
+    # Guard once, before any append.
+    if [ -s "$TARGET/.gitignore" ] && [ "$(tail -c 1 "$TARGET/.gitignore" | wc -l)" -eq 0 ]; then
+      printf '\n' >> "$TARGET/.gitignore"
+    fi
     printf '%s\n' "$_root_ignores" | while IFS= read -r _pat; do
       [ -n "$_pat" ] || continue
       grep -qxF "$_pat" "$TARGET/.gitignore" || printf '%s\n' "$_pat" >> "$TARGET/.gitignore"
     done
+    # Migration (2026-09-04, WARN-ONLY): an earlier version seeded a bare `*.mutbak`
+    # ignore, which hides mutation residue from `git status` and defeats reviewer.md's
+    # visibility rule. The installer cannot prove any given line's provenance — an
+    # operator may have added the same rule for their own workflow — and this file is
+    # append-only for user entries, so nothing is deleted: the contradiction is NAMED
+    # and the removal is the operator's one-line call.
+    if grep -qxF '*.mutbak' "$TARGET/.gitignore"; then
+      echo "⚠️  .gitignore ignores '*.mutbak' — this hides mutation-campaign residue from git status, defeating reviewer.md's visibility rule (an earlier harness seeded it; change-size.sh now classifies .mutbak instead). If the rule is not deliberately yours, delete that line. (warn-only)" >&2
+    fi
     info "project-root .gitignore ensured (personal/runtime agent state)"
   fi
   ok "project workspace ready (.harness/specs, state, progress)"
@@ -5104,18 +5165,51 @@ Use a `while` loop so the round counter can be restarted. `round_dir=.harness/.p
 `max_rounds` is a budget for the **PR**, not for one invocation of this command. Resume the
 counter from the highest round already in the cache, so re-running `/sdd-pr-loop` cannot
 silently grant a fresh budget — PR #86 reached round 12 against `max_rounds: 4` exactly that
-way, and the `needs-human` hand-off that should have fired at round 4 never did. The
-base-change restart below moves the stale rounds to `stale-<ts>/`, so it correctly
-re-derives round 1 on its own.
+way, and the `needs-human` hand-off that should have fired at round 4 never did.
 
 ```bash
-round=1
+round=1; resume_round=""
 for _d in .harness/.pr-loop/$pr_number/round-*/; do
   [ -d "$_d" ] || continue                       # unmatched glob — no cache yet
+  # A round COUNTS toward the budget only when it recorded an outcome (E99-F142/F150):
+  # `mkdir -p` runs before preflight, so a run that died pre-verdict leaves a directory
+  # that must not burn budget — and an interrupted CAP round must not shove `round`
+  # past `max_rounds` into the merge flow with no verdict at all.
+  [ -f "${_d}outcome" ] || continue
   _n="${_d%/}"; _n="${_n##*/round-}"
   case "$_n" in ''|*[!0-9]*) continue ;; esac
-  [ "$_n" -ge "$round" ] && round=$((_n + 1))
+  if [ "$_n" -ge "$round" ]; then round="$_n"; resume_round="${_d%/}"; fi
 done
+# A COMPLETED HAND-BACK IS TERMINAL for its head (Codex #165 round-4): with
+# `auto_merge: false` the loop deliberately finishes green-and-unmerged, so a
+# re-invocation must not burn budget re-reviewing it — unless the head has moved.
+if [ -n "$resume_round" ] \
+   && [ "$(head -n 1 "$resume_round/disposed" 2>/dev/null | tr -d ' \t\r\n')" = "handback" ]; then
+  _hb_head="$(jq -r '.headRefOid // ""' "$resume_round/pr.json" 2>/dev/null || echo '')"
+  _hb_now="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo '')"
+  if [ -n "$_hb_head" ] && [ "$_hb_head" = "$_hb_now" ]; then
+    echo "sdd-pr-loop: PR #$pr_number already completed its auto_merge:false hand-back at this head — nothing to do" >&2
+    exit 0
+  fi
+fi
+# `outcome` marks a review OBSERVED, not a round FINISHED (Codex #165): it is written the
+# moment the watcher exits — before classification, fixing, or the gate. A round is
+# finished only when `disposed` exists (written at each terminal disposition below). An
+# observed-but-undisposed findings/clean round is RE-ENTERED: its review is already paid
+# for and cached, so skipping it would burn a fresh review on unchanged code — and at the
+# cap it would discard a cached clean verdict into the no-verdict needs-human path.
+if [ -n "$resume_round" ]; then
+  if [ ! -f "$resume_round/disposed" ] \
+     && grep -qE '^(findings|clean)$' "$resume_round/outcome" 2>/dev/null; then
+    : # RE-ENTER this round: skip ONLY the trigger and the watcher (steps 1-2).
+      # Step 0 preflight and §0c checkout verification ALWAYS re-run first — the tree
+      # may have moved between invocations, and cached findings handed to fixers on an
+      # unrelated checkout would push there (Codex #165 round-3 P1). Then resume at
+      # step 2b/3 on the cached files (`evaluate` and `classify` are offline).
+  else
+    round=$(( round + 1 ))
+  fi
+fi
 while [ "$round" -le "$max_rounds" ]; do
   round_dir=".harness/.pr-loop/$pr_number/round-$round"
   mkdir -p "$round_dir"
@@ -5133,91 +5227,67 @@ report its one-line diagnostic verbatim — do not post `@codex review`, do not 
 not fall back to a hand-rolled check. A repo without the Codex GitHub App should leave
 `pr_loop.enabled` at its opt-in default of `false` rather than run this loop.
 
-### 0b. Base-change detection (stacked PRs only)
+### 0c. The working tree must BE the PR (E99-F146 / E99-F147)
 
-On round 2+, before triggering a new Codex review, check whether the base branch has
-changed since the last round — when a stacked PR's parent is rebased (review fixes), the
-child's `baseRefOid` moves, and the child must be re-reviewed from scratch (R5).
+The loop reviews the REMOTE PR, but every fixer round commits and pushes from the LOCAL
+checkout — nothing else ties the two together. When `$ARGUMENTS` names a PR number,
+verify the tie before any round; the failure is silent and double-sided otherwise (the
+reviewed PR looks unfixed while an unrelated branch quietly receives the commits):
 
 ```bash
-# Only stacked PRs (base != default branch) get base-change detection. A PR targeting the
-# default branch naturally sees baseRefOid move as other PRs merge; restarting review on
-# every such change would destroy the ordinary single-PR lane.
-default_branch="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo '')"
-# Fetch the current baseRefName fresh — a stacked child may have been retargeted before
-# the first review round, and round 1 must validate stack ancestry too.
-base_ref="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo '')"
-if [ -n "$default_branch" ] && [ -n "$base_ref" ] && [ "$base_ref" != "$default_branch" ]; then
-  prior_round_dir=".harness/.pr-loop/$pr_number/round-$(( round - 1 ))"
-  prior_base_name="$(jq -r '.baseRefName // ""' "$prior_round_dir/pr.json" 2>/dev/null || echo '')"
-  prior_base_oid="$(jq -r '.baseRefOid // ""' "$prior_round_dir/pr.json" 2>/dev/null || echo '')"
-  if [ -n "$prior_base_name" ] && [ "$prior_base_name" != "$default_branch" ] && [ -n "$prior_base_oid" ]; then
-    current_base_oid="$(gh pr view "$pr_number" --json baseRefOid --jq '.baseRefOid' 2>/dev/null || echo '')"
-    # Fail closed on either side of the comparison being unreadable — a missing
-    # prior cache or a transient API failure must not silently bypass the detection.
-    if [ -z "$current_base_oid" ]; then
-      echo "base-change detection: could not read current baseRefOid — restarting from round 1" >&2
-      stale_dir=".harness/.pr-loop/$pr_number/stale-$(date -u +%s)"
-      mkdir -p "$stale_dir"
-      for d in .harness/.pr-loop/$pr_number/round-*/; do
-        [ -d "$d" ] && mv "$d" "$stale_dir/"
-      done
-      round=1
-      continue
-    elif [ "$current_base_oid" != "$prior_base_oid" ]; then
-      echo "baseRefOid changed (${prior_base_oid:0:7} -> ${current_base_oid:0:7}) — parent rebased" >&2
-      # Verify the child has actually been restacked onto the new parent tip before
-      # restarting review. An unrestacked child would be reviewed with superseded parent
-      # commits in its diff. The restack procedure is in docs/WORKFLOW.md.
-      head_ref_oid="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo '')"
-      # Fail closed when the head OID is unreadable — an empty head OID must not bypass
-      # the ancestry check, because an unrestacked child could then be reviewed with
-      # superseded parent commits and merged after its parent lands.
-      if [ -z "$head_ref_oid" ]; then
-        echo "base-change detection: could not read headRefOid — refusing to restart review" >&2
-        gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-        return 1
-      fi
-      if command -v git >/dev/null 2>&1; then
-        # Fetch the refs before checking ancestry — in a fresh or shallow clone, or
-        # after a force-push, the OIDs from GitHub may not exist locally and
-        # `git merge-base` would exit 128 (error) instead of 1 (non-ancestor).
-        git fetch origin --no-tags --depth=50 2>/dev/null || true
-        if ! git merge-base --is-ancestor "$current_base_oid" "$head_ref_oid" 2>/dev/null; then
-          echo "child has not been restacked onto the new parent tip — restack before restarting review" >&2
-          echo "See docs/WORKFLOW.md 'Restack procedure'" >&2
-          # Archive the cache and pause, not restart. The child needs a manual rebase.
-          stale_dir=".harness/.pr-loop/$pr_number/stale-$(date -u +%s)"
-          mkdir -p "$stale_dir"
-          for d in .harness/.pr-loop/$pr_number/round-*/; do
-            [ -d "$d" ] && mv "$d" "$stale_dir/"
-          done
-          # Do not continue the loop — the child needs human intervention to restack.
-          # Set needs-human and exit.
-          gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-          return 1
-        fi
-      fi
-      echo "parent rebased; discarding prior round cache, restarting from round 1" >&2
-      # Move the stale round directories out of the active cache path so stall/trend
-      # evaluation cannot accidentally consume them. The handover summary still reports
-      # their existence, but the active round-1 starts fresh.
-      stale_dir=".harness/.pr-loop/$pr_number/stale-$(date -u +%s)"
-      mkdir -p "$stale_dir"
-      for d in .harness/.pr-loop/$pr_number/round-*/; do
-        [ -d "$d" ] && mv "$d" "$stale_dir/"
-      done
-      round=1
-      continue
-    fi
-  fi
+# The receipt is the HEAD OID, never a branch name (Codex #165 round-2 P1): an unrelated
+# local branch can share the PR's headRefName, and a fork PR's head is not on `origin`
+# at all. `gh pr checkout` resolves both (it fetches the PR's actual head, fork or not);
+# the OID equality afterwards is what proves the tree IS the reviewed PR.
+pr_head_oid="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo '')"
+if [ -z "$pr_head_oid" ]; then
+  echo "cannot resolve the PR's head oid — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL — a warning that falls through would preserve the exact
+             # failure this section closes (fixes pushed from an unrelated tree)
+fi
+# A DIRTY tracked worktree fails closed first (Codex #165 round-4 P1): an
+# uncommitted edit survives `gh pr checkout`, and a fixer later running
+# `git add <path>` on an assigned file would sweep the pre-existing change into its
+# fix commit and push it to the PR. Untracked files are fine — fixers add specific
+# tracked paths only.
+if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+  echo "working tree has uncommitted tracked changes — they would be swept into fixer commits; commit/stash them first — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL
+fi
+# ALWAYS run the checkout — object equality alone is not a binding (Codex #165
+# round-3 P1): a detached HEAD or an unrelated local branch can sit at the right OID
+# while the later plain `git push` fails, or lands on a different ref entirely.
+# `gh pr checkout` binds branch, upstream and push destination (fork-safe) and is
+# idempotent when the tree is already on the PR branch.
+if ! gh pr checkout "$pr_number" 2>/dev/null; then
+  echo "could not check out PR #$pr_number (conflicting local changes?) — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL, same reason
+fi
+if [ -z "$(git branch --show-current 2>/dev/null)" ]; then
+  echo "working tree is detached after checkout — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL
+fi
+if [ "$(git rev-parse HEAD 2>/dev/null)" != "$pr_head_oid" ] \
+   && ! git merge-base --is-ancestor "$pr_head_oid" HEAD 2>/dev/null; then
+  # Exact equality OR the PR head as an ANCESTOR of HEAD. The ancestor case is an
+  # interrupted round's own local fixer commits, not yet pushed (fixers commit
+  # locally; the coordinator pushes at round end) — rejecting them would strand the
+  # promised re-entry at needs-human and discard legitimate fix work (Codex #165
+  # round-4). Anything else is an unrelated tree and fails closed.
+  echo "working tree is neither at the PR head $pr_head_oid nor locally ahead of it — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL — OID-verified even after a successful checkout
 fi
 ```
 
-If the base changed, discard prior round-cache data for merge-gate evaluation and restart
-the round counter from 1. This detection activates only when the PR's `baseRefName` is
-not the default branch — a PR targeting `main` has `baseRefOid` that tracks the default
-branch's head, which changes on every merge anyway, so the check is inert there.
+**Fixers share ONE checkout and ONE index — dispatch them SEQUENTIALLY** (E99-F146).
+Concurrent fixers overwrite each other's edits to shared files, contend on
+`.git/index.lock`, and sweep one another's staged changes into misattributed commits.
+One fixer at a time, one commit each; the round still pushes once at the end.
 
 ### 1. Trigger the review
 
@@ -5390,73 +5460,64 @@ block.
 
 ### 3. Parse and classify comments
 
-Walk **`review-comments.json` (the inline findings)** + `pr.json` `reviews[*].body` +
-`issue-comments.json` looking for severity tags. Codex tags severity as a **badge image**,
-not bare text — e.g. `![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)`.
-Match `P0|P1|P2|nit` **case-insensitively anywhere in the body** (this catches both the
-badge alt-text/URL form and any bare-text form); **first match wins**; **default to `P2`**
-when nothing matches.
-
-**Only FRESH inline comments count for this round** — the same freshness guard the watcher
-applies (see step 2). An inline comment counts only when it is filed against the head
-commit **and** its `created_at >= trigger.created_at`; otherwise a stale thread GitHub
-re-anchored to head slips back into `blocking.json` and defeats the guard. The watcher
-persists the anchor to `trigger-ts.txt`; apply it when reading the unfiltered
-`review-comments.json`:
-
-**A head oid you could not read is not a head oid.** A `pr.json` that is missing or
-truncated makes `jq` exit non-zero with empty output; a `pr.json` that parses but carries
-no `headRefOid` makes `jq -r` print `null` and exit **0**. Either way `$head` is not the
-head commit, every comment fails `commit_id == $h`, and `fresh-comments.json` — hence
-`blocking.json` — comes out `[]`, which step 6 reads as "zero blocking findings ⇒ all
-gates green ⇒ merge". So guard the **value** as well as the exit status and fail closed:
-an unreadable head aborts the round as `needs-human`, it is not a clean round. (`since`
-needs no such guard — an empty `since` disables the freshness filter and admits *more*
-findings, which errs toward review rather than toward the merge.)
+Classification is **code, not prose** (E99-F149): every lane used to hand-roll the same
+jq and every copy got a rule subtly wrong. Run the shipped classifier — it is pure and
+offline (reads only the round files, invokes no `gh`):
 
 ```bash
-since=$(cat "$round_dir/trigger-ts.txt" 2>/dev/null)  # empty ⇒ filter off ⇒ admits MORE
-head_ok=0            # fail closed: only a head oid we actually READ may filter findings
-if ! head=$(jq -r '.headRefOid // ""' "$round_dir/pr.json") || [ -z "$head" ]; then
-  # Head oid UNKNOWN: pr.json missing, truncated, or without a headRefOid. Filtering on ""
-  # would match nothing and hand the gate an empty blocking.json. Testing the status on the
-  # `if` itself reads the same whether or not the host shell runs with `set -e`, and
-  # `[ -z "$head" ]` catches the absent/null key that `jq -r` reports with exit status 0.
-  rm -f "$round_dir/fresh-comments.json"   # never leave a previous round's file standing
-  echo "could not read headRefOid from pr.json — needs-human, not merging" >&2
-else
-  head_ok=1          # the filter below is anchored to a head oid that was really read
-  jq --arg h "$head" --arg since "$since" '
-    [ .[] | select((.commit_id // "") == $h)
-          | select($since == "" or ((.created_at // "") >= $since)) ]' \
-    "$round_dir/review-comments.json" > "$round_dir/fresh-comments.json"
-fi
-# classify severities from fresh-comments.json (not the raw review-comments.json)
+blocking_set="$(<read pr_loop.blocking_severities from harness.config.yaml>)"  # e.g. "P0,P1"
+sh .harness/tools/wait-for-codex.sh classify "$round_dir" "$blocking_set"
+classify_rc=$?
 ```
 
-With `head_ok=0` there is no `fresh-comments.json` to classify and therefore no
-`blocking.json` and no `acted.json`: call `outcome_mark_unresolved "$round_dir"` — **not** a
-bare `echo`, because a `pr.json` you could not read is a statement about the cache and not
-about Codex, so a `findings`/`clean` the watcher already recorded must survive it — and take
-the `needs-human` terminal state of step 5's cap row (label, hand over, return failure). Only
-`head_ok=1` with an empty `blocking.json` means "zero fresh blocking findings".
+The set is whatever `pr_loop.blocking_severities` lists — **read it, do not assume it**.
+The shipped default is `P0,P1`, but a repo may raise it (a harness that ships *gates* has
+good reason to: there, a finding tagged P2 can still mean the gate vouching for something
+it never checked). Whatever is NOT in that list is non-blocking for this repo; `nit` is
+not in any default.
+
+What the classifier implements (the behavioral contract, owned and tested in
+`tools/wait-for-codex.sh` + the harness's own suite — do **not** re-implement it inline):
+
+- It scans **`review-comments.json` (the inline findings)**, plus `pr.json`
+  `reviews[*].body` and `issue-comments.json` as **advisory** streams. Codex tags
+  severity as a **badge image**, not bare text — e.g.
+  `![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)`. It matches
+  `P0|P1|P2|nit` **case-insensitively** and **word-boundary anchored** anywhere in the
+  body (this catches both the badge alt-text/URL form and any bare-text form);
+  **first match wins** by position; **default to `P2`** when nothing matches.
+- **Only FRESH Codex inline comments count for this round** — the same freshness guard
+  the watcher applies (see step 2): filed against the head commit **and**
+  `created_at >= trigger.created_at` (read from `trigger-ts.txt`), **and** authored by
+  the Codex bot. A stale thread GitHub re-anchored to head, a human comment that merely
+  mentions "P1", or a bot comment on another commit can never enter `blocking.json`.
+- Fresh Codex `reviews[*].body` / `issue-comments.json` entries carrying a severity tag
+  land in `body-findings.json` — **advisory, never blocking**: they have no `path:line`,
+  so nothing could act on them, and an unactionable blocker would wedge the round.
+- **A head oid it could not read is not a head oid — it fails closed.** On a missing or
+  truncated `pr.json` (or a missing findings stream) it exits **6**, removes any stale
+  `blocking.json`, and writes nothing.
+
+It writes into the round dir:
+
+```
+fresh-comments.json  # inline comments on head, at/after the trigger (raw fresh stream)
+comments.json        # the Codex-authored subset, each with a severity attached
+blocking.json        # filtered to the CONFIGURED blocking severities — the MERGE GATE reads this
+body-findings.json   # advisory severity-tagged review bodies / issue comments (never blocking)
+status.json          # statusCheckRollup snapshot
+```
+
+With `classify_rc` = 6 there is no `blocking.json` and no `acted.json`: call
+`outcome_mark_unresolved "$round_dir"` — **not** a bare `echo`, because a `pr.json` you
+could not read is a statement about the cache and not about Codex, so a `findings`/`clean`
+the watcher already recorded must survive it — and take the `needs-human` terminal state of
+step 5's cap row (label, hand over, return failure). Only `classify_rc` = 0 with an empty
+`blocking.json` means "zero fresh blocking findings".
 
 To re-check the round files offline at any point (no `gh`, no network), run
 `sh .harness/tools/wait-for-codex.sh evaluate "$round_dir"` — exit `0` findings,
-`3` clean, `1` pending, applying exactly the rules above.
-
-Then filter to the **blocking severities only**. The set is whatever
-`pr_loop.blocking_severities` lists — **read it, do not assume it**. The shipped default is
-`P0,P1`, but a repo may raise it (a harness that ships *gates* has good reason to: there, a
-finding tagged P2 can still mean the gate vouching for something it never checked). Whatever
-is NOT in that list is non-blocking for this repo; `nit` is not in any default. Save into the
-round dir:
-
-```
-comments.json     # all comments with a severity tag attached
-blocking.json     # filtered to the CONFIGURED blocking severities — the MERGE GATE reads this
-status.json       # statusCheckRollup snapshot
-```
+`3` clean, `1` pending, applying exactly the watcher's resolution rules.
 
 **Do NOT write `acted.json` here.** The round's acted-on set is recorded at **dispatch**, in
 step 5, and this step must not pre-compute it. Classification answers "what did the
@@ -5558,7 +5619,10 @@ gate_rc=$?
 
 **The gate's verdict is binding, and it is asked exactly ONCE per round.** `merge` (0) means
 the review is finished: leave this step entirely, **break the loop before advancing the round
-counter**, and go to step 6 then "ready to merge". Breaking preserves the successful `round`
+counter**, and go to step 6. Do **NOT** write `disposed` here: the merge path writes it
+only after its terminal action completes (the verified merge, or the `auto_merge:
+false` hand-back), so an interruption anywhere in between RE-ENTERS this round on its
+cached green verdict instead of stranding it (Codex #165 round-2) then "ready to merge". Breaking preserves the successful `round`
 value, so the Ready-to-merge section reads `round-$round/pr.json` from the correct round.
 (The one thing that may follow a `merge` verdict without merging is an explicit, recorded
 **override** — see "When you judge the badge wrong" below. It does not change what the gate
@@ -5657,9 +5721,9 @@ that.
 
 | Round | Behavior |
 |---|---|
-| below `max_rounds - 1` | For each blocking comment: **`acted_append` it first**, then spawn one **`pr-fixer`** sub-agent, passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
+| below `max_rounds - 1` | For each blocking comment: **`acted_append` it first**, then spawn one **`pr-fixer`** sub-agent **at a time — sequentially, never concurrently** (§0c: one shared checkout and index), passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
 | `max_rounds - 1` | **`acted_append` every comment going into the prompt**, then build **one combined fix prompt** (all blocking comments concatenated) and escalate to a **different worker** if the host CLI offers one; where no router exists, run one combined **in-session** pass instead. Then push. |
-| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. **`acted_append` every blocking comment that survived** — the cap round disposes of them by declaring them, not by fixing them. Post the handover summary listing every round, the surviving comments, and the cache path — **and the trend verdict, re-run after these rows exist**. When it is `non-converging`, the message must say what the tool's remedy line says, and must show the per-round series and the concentration list that make the case. Return failure. |
+| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. **`acted_append` every blocking comment that survived** — the cap round disposes of them by declaring them, not by fixing them — then write `echo handover > "$round_dir/disposed"`. Post the handover summary listing every round, the surviving comments, and the cache path — **and the trend verdict, re-run after these rows exist**. When it is `non-converging`, the message must say what the tool's remedy line says, and must show the per-round series and the concentration list that make the case. Return failure. |
 
 At the default `max_rounds: 4` that is rounds 1–2 per-comment, round 3 combined
 escalation, round 4 `needs-human`. A `max_rounds` below `3` simply has no per-comment
@@ -5684,7 +5748,10 @@ echo "<role>"   > "$round_dir/role"     # implementation | fix | escalation
 After the fix commits land, re-fetch the PR JSON and check the gates **before** triggering
 another Codex round:
 
-- CI green (`statusCheckRollup[*].conclusion == "SUCCESS"` for required checks)
+- CI green — **required checks only**, via `gh pr checks "$pr_number" --required`.
+  The rollup does not mark which entries are REQUIRED, so a failing or hanging
+  *optional* job (a nightly, an advisory scanner) must never stall or hand off a PR
+  whose required checks are all green (E99-F152).
 - Tests / typecheck / lint green (subsets of CI)
 
 **Do not ask the gate again.** It was asked once, at step 5, and its verdict is what routed
@@ -5735,6 +5802,7 @@ GitHub's default squash body, so the squash path always reaches its merge.
 After the per-round gates and fixes complete:
 
 ```bash
+echo fixed > "$round_dir/disposed"    # this round's disposition is COMPLETE (fixes pushed, checks read)
 round=$(( round + 1 ))
 done
 ```
@@ -5774,7 +5842,18 @@ Save the rendered summary to `.harness/.pr-loop/<pr>/handover-summary.md` and po
 
 ### Ready to merge (success)
 
-Post a summary comment on the PR:
+**Enter this section ONLY on a `merge` verdict the gate returned in THIS invocation**
+(step 5, `pr-gate.sh` exit 0). A resume whose scan already put `round` past
+`max_rounds` skipped the while loop and holds NO verdict — an interrupted cap round
+with blocking findings would otherwise fall through here and auto-merge (E99-F150).
+No verdict of this run's own ⇒ the cap row's `needs-human` terminal state, never this
+section.
+
+**Build** the summary now — but post it only when a terminal state actually lands
+(after `merged=1` below, or with the `auto_merge: false` hand-back). Posting first
+leaves a contradictory "all gates green" comment sitting above a failure hand-off,
+misleading both humans skimming the thread and automation watching comments
+(E99-F151).
 
 ```
 sdd-pr-loop: all gates green ✅
@@ -5794,8 +5873,12 @@ review thread resolved before merge, but this loop may only auto-resolve threads
 owns** (opened by the Codex bot). Auto-resolving a human reviewer's unresolved
 conversation would silently bypass the merge gate that keeps human feedback meaningful.
 So: fetch each unresolved thread with its participants; if **any** non-Codex participant
-appears on an unresolved thread, **stop and go to the needs-human terminal state — resolve
-nothing and do not merge**. Only when every remaining unresolved thread is Codex-owned do
+appears on an unresolved thread, **resolve nothing and do not merge** — and pick the
+terminal state by the config, not reflexively (E99-F143): with `auto_merge` **true**
+this is the **needs-human** terminal state; with `auto_merge` **false** the loop's own
+contract below already hands an unmerged green PR back to the human as **success**, and
+an unresolved human thread is exactly the feedback that hand-back exists to deliver —
+take the hand-back, return success. Only when every remaining unresolved thread is Codex-owned do
 you resolve them (via the GraphQL `resolveReviewThread` mutation — there is no REST/`gh pr`
 equivalent) and proceed.
 
@@ -5882,93 +5965,62 @@ UNRESOLVED
 fi
 ```
 
-**If `merge_ok=0`, stop here** — go straight to the needs-human terminal state and run
-**none** of the merge commands below.
+**If `merge_ok=0`, run none of the merge commands below — and route by config, not
+reflexively** (E99-F143): with `auto_merge` **true** this is the needs-human terminal
+state; with `auto_merge` **false** and zero blocking findings it is the success
+hand-back described next — the unresolved human thread is exactly the feedback that
+hand-back exists to deliver.
 
 While `pr_loop.auto_merge` is **false**, stop after posting the all-gates-green summary
 and hand back to the human — resolve threads if you like, but **do not merge**. That
-hand-back **completes** the loop: **return success**. It is the one terminal state where an
+hand-back **completes** the loop: write `echo handback > "$round_dir/disposed"` — the TYPED marker is what lets the
+next invocation recognize a completed hand-back instead of spending budget
+re-reviewing a deliberately-unmerged green PR — and **return success**. It is the one terminal state where an
 unmerged PR is the intended outcome, so never route it to needs-human.
 
 Where `pr_loop.auto_merge` is **true**, merge with the configured `merge_strategy`,
-deleting the remote branch in the same call. **First, invoke the stacked-PR merge-order
-guard (R2):** before `gh pr merge`, fetch the open-PR list and call the offline guard to
-verify this PR is not stacked on an unmerged parent. On exit 6, refuse the merge and
-enter the `needs-human` terminal state with the guard's diagnostic naming the parent PR.
-The guard is called with JSON the pr-loop already fetches; the only additional network
-call is a lightweight `gh pr list`.
-
-```bash
-# Stacked-PR merge-order guard (E21-F04 R2). Fail closed on every error: a guard that
-# cannot prove safety must not authorize a merge.
-default_branch="${default_branch:-$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo '')}"
-guard_ok=1
-guard_deferred=0
-# Fetch the current baseRefName immediately before authorizing the merge — the PR may
-# have been retargeted after the round cache was written, and a stale cached default-
-# branch value would bypass the guard entirely for a newly stacked child.
-if ! base_ref="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null)" || [ -z "$base_ref" ]; then
-  guard_ok=0
-  echo "sdd-pr-loop: merge refused — could not read current baseRefName" >&2
-  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-elif [ "$base_ref" = "$default_branch" ]; then
-  : # targeting the default branch — not stacked, guard_ok stays 1
-elif [ -n "$base_ref" ]; then
-  open_prs_json=".harness/.pr-loop/$pr_number/open-prs.json"
-  if ! gh pr list --state open --json number,headRefName --limit 1000 > "$open_prs_json" 2>/dev/null; then
-    guard_ok=0
-    echo "sdd-pr-loop: merge refused — could not fetch open PR list" >&2
-    gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-  else
-    # Refresh pr.json with the current base before evaluating the guard — a PR
-    # retargeted after the round cache was written would otherwise be evaluated
-    # with stale data.
-    gh pr view "$pr_number" --json reviews,comments,statusCheckRollup,headRefOid,baseRefName,baseRefOid > ".harness/.pr-loop/$pr_number/round-$round/pr.json" 2>/dev/null || echo '{}' > ".harness/.pr-loop/$pr_number/round-$round/pr.json"
-    guard_rc=0
-    sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" || guard_rc=$?
-    if [ "$guard_rc" = 0 ]; then
-      : # guard_ok stays 1
-    elif [ "$guard_rc" = 6 ]; then
-      guard_ok=0
-      guard_deferred=1
-      echo "sdd-pr-loop: merge deferred — parent PR is still open (guard exit 6)" >&2
-      sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" 2>&1 >&2
-    else
-      guard_ok=0
-      echo "sdd-pr-loop: merge refused — stack guard returned exit $guard_rc" >&2
-      sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" 2>&1 >&2
-      gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-    fi
-  fi
-fi
-```
+deleting the remote branch in the same call.
 
 Track whether the merge command itself
 **succeeded** (`merged`) — separate from `merge_ok`, which only recorded thread
 eligibility — so cleanup never runs on a failed or pending merge:
 
 ```bash
+# The reviewed head, re-read from THIS round's cache and passed to every merge variant
+# via --match-head-commit, so receipt and merge are ATOMIC (Codex #165 P1): a push
+# landing between `merge-verify pre` and `gh pr merge` cannot slip an unreviewed head
+# into the merge — GitHub itself rejects the mismatch.
+reviewed_head="$(jq -r '.headRefOid // ""' "$round_dir/pr.json" 2>/dev/null || echo '')"
 merged=0
-if [ "${guard_ok:-1}" != "1" ]; then
-  if [ "${guard_deferred:-0}" = "1" ]; then
-    # Exit 6 from pr-stack-guard.sh — parent is still open, which is a normal
-    # waiting state in a healthy stack. Report it and exit gracefully without
-    # needs-human; the child retries after the parent lands.
-    echo "sdd-pr-loop: merge deferred — parent PR is still open" >&2
-  else
-    echo "merge-order guard refused — needs-human, not merging" >&2
-  fi
+# Fail-closed base check (E21-F07 / Codex #163 P1): the stacked lane is deprecated, so a
+# PR whose base is NOT the default branch must never auto-merge — `gh pr merge` merges
+# into the CURRENT base, so a leftover stacked child would land in a stale parent branch,
+# have its head deleted, and be reported as a success while absent from the default
+# branch. Read both names fresh; an unreadable value refuses the merge, never allows it.
+default_branch="${default_branch:-$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo '')}"
+base_ref="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo '')"
+if [ -z "$default_branch" ] || [ -z "$base_ref" ] || [ "$base_ref" != "$default_branch" ]; then
+  echo "sdd-pr-loop: merge refused — base '$base_ref' is not the default branch '$default_branch' (stacked lane deprecated, E21-F07); retarget the PR — needs-human" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+elif [ -z "$reviewed_head" ]; then
+  echo "sdd-pr-loop: merge refused — reviewed head unreadable from the round cache — needs-human" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+elif ! sh .harness/tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" pre; then
+  # E99-F144: a push AFTER the clean review must not inherit its verdict — the receipt
+  # compares the PR's current head against the head this round actually reviewed.
+  echo "sdd-pr-loop: merge refused — head moved since the reviewed round (unreviewed commits) — needs-human" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
 elif [ "${merge_ok:-0}" != "1" ]; then
   echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
 elif [ "${merge_strategy:-merge}" = "squash" ]; then
   msg=".harness/.pr-loop/$pr_number/squash-message.txt"
   if [ -s "$msg" ]; then
-    gh pr merge "$pr_number" --squash --delete-branch --body-file "$msg" && merged=1
+    gh pr merge "$pr_number" --squash --delete-branch --body-file "$msg" --match-head-commit "$reviewed_head" && merge_oid="$(sh .harness/tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
   else                        # no message composed — squash with GitHub's default body
-    gh pr merge "$pr_number" --squash --delete-branch && merged=1
+    gh pr merge "$pr_number" --squash --delete-branch --match-head-commit "$reviewed_head" && merge_oid="$(sh .harness/tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
   fi
 else
-  gh pr merge "$pr_number" --merge --delete-branch && merged=1
+  gh pr merge "$pr_number" --merge --delete-branch --match-head-commit "$reviewed_head" && merge_oid="$(sh .harness/tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
 fi
 ```
 
@@ -5978,6 +6030,8 @@ never merely because thread eligibility was satisfied:
 
 ```bash
 if [ "${merged:-0}" = "1" ]; then
+  echo merged > "$round_dir/disposed"   # terminal action VERIFIED (post receipt) — only
+                                        # now is the round finished; an interrupt re-enters
   default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
   branch=$(gh pr view "$pr_number" --json headRefName --jq '.headRefName')
   git checkout "$default_branch" >/dev/null 2>&1 || true
@@ -5987,8 +6041,15 @@ if [ "${merged:-0}" = "1" ]; then
 fi
 ```
 
-If `gh pr merge` fails (branch-protection race, a required review not yet registered, a
-re-opened thread), retry once after 30s. If it still fails the PR will not land: take the
+`merged=1` requires the **post receipt**: `gh pr merge` exiting 0 can mean *enqueued*
+under a merge queue or repo-level auto-merge, and a PR later rejected from the queue
+would be recorded as landed with its branch already deleted (E99-F141). The receipt's
+stdout is the merge commit oid — pass it to `tasks-lock.py set-status <id> done
+--evidence` as the landing evidence.
+
+If `gh pr merge` fails — or exits 0 but fails the post receipt (same state: NOT landed) —
+(branch-protection race, a required review not yet registered, a re-opened thread),
+retry once after 30s. If it still fails the PR will not land: take the
 needs-human terminal state below — label `needs-human`, post the error alongside the
 handover summary, and **return failure**. A merge that auto-merge was asked to land and did
 not land is never reported as success.
@@ -5997,8 +6058,7 @@ not land is never reported as success.
 
 Apply the `needs-human` label, post the **same handover summary** block (so the human sees
 exactly which workers tried and where they got stuck), and return failure. Reached by: the
-`max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, a
-stacked-PR merge-order guard refusal (exit `6`), or a merge that would not land.
+`max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, a merge that would not land.
 
 **Say what the human should conclude.** Include the step-4b trend output **verbatim,
 including its `NEVER REVIEWED` block** — a cap reached because reviews kept timing out is a
@@ -6029,6 +6089,7 @@ merge did not land, that is this state, and it is a failure.
     reactions.json            # reactions on the @codex trigger comment (👍 = clean)
     trigger-ts.txt            # freshness anchor
     outcome                   # ONE WORD: findings | clean | timeout | unresolved (step 2b)
+    disposed                  # terminal disposition, TYPED: fixed | merged | handback | handover
     fresh-comments.json, comments.json, blocking.json, status.json
     acted.json                # appended at DISPATCH (step 5): one row per finding this round
                               # acted on, severity + override per row. Absent when the round
@@ -6835,6 +6896,41 @@ EOF
       echo "⚠️  pr_loop.enabled is not true — reclaimed /sdd-pr-loop glue:$_prl_gone" >&2
     fi
   fi
+
+  # ── stale slash-command references (2026-09-04, warn-only) ──────────────────
+  # A target's hand-written prose (CLAUDE.md outside the harness block, AGENTS.md,
+  # GEMINI.md) can keep invoking a command a past harness version installed — the
+  # observed case is `/pr-loop`, the pre-E18 name of `/sdd-pr-loop`: sessions read the
+  # entrypoint, follow the stale reference, and hunt for a skill that no longer exists.
+  # The harness owns only its marked block, so it cannot rewrite user prose — but it CAN
+  # name the divergence. Scan for /sdd-* tokens not in the current generation set ($CMDDIR is
+  # the complete, version-authoritative command list), plus the known-renamed /pr-loop.
+  for _sr_f in CLAUDE.md AGENTS.md GEMINI.md; do
+    [ -f "$TARGET/$_sr_f" ] || continue
+    _sr_refs="$(grep -oE '/(sdd-[a-z-]+|pr-loop)\b' "$TARGET/$_sr_f" 2>/dev/null | sort -u || true)"
+    [ -n "$_sr_refs" ] || continue
+    printf '%s\n' "$_sr_refs" | while IFS= read -r _sr_tok; do
+      _sr_name="${_sr_tok#/}"
+      if [ "$_sr_name" = "pr-loop" ]; then
+        echo "⚠️  $_sr_f references \`/pr-loop\`, which this harness does not install — the current command is \`/sdd-pr-loop\` (gated by pr_loop.enabled). Update the reference. (warn-only)" >&2
+        continue
+      fi
+      # A gated-OFF command is unavailable even though $CMDDIR holds its body — the
+      # bodies are generated unconditionally as the reclamation reference, so the
+      # existence check alone would suppress this warning exactly when the gate-off
+      # pass has removed the command from every installed surface (Codex #160 round-5).
+      _sr_gated=0
+      for _sr_prc in $HARNESS_PR_LOOP_CMDS; do
+        [ "$_sr_name" = "$_sr_prc" ] && _sr_gated=1
+      done
+      if [ "$_sr_gated" = 1 ] && ! pr_loop_enabled; then
+        echo "⚠️  $_sr_f references \`$_sr_tok\`, but pr_loop.enabled is not true, so that command is not installed on any surface. Enable the gate or update the reference. (warn-only)" >&2
+        continue
+      fi
+      [ -f "$CMDDIR/$_sr_name.md" ] \
+        || echo "⚠️  $_sr_f references \`$_sr_tok\`, which v$VERSION does not generate — a stale reference sends sessions hunting for a missing skill. Update or remove it. (warn-only)" >&2
+    done
+  done
 
   # CMDDIR cleanup (deferred from §5c and §7b): the antigravity deselect compare and the
   # gate-off pass above need the temp command bodies as their pristine reference.

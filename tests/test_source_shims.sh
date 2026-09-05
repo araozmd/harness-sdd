@@ -73,8 +73,7 @@ NOT_SPAWNED='driller fixer inception planner'
 # an exemption list stays honest.
 #
 # Format: <role>:<front-end>, one per line.
-KNOWN_GAPS='builder-heavy:claude
-builder-heavy:opencode
+KNOWN_GAPS='builder-heavy:opencode
 pr-fixer:opencode'
 
 # ─────────────────────────────────────────────────────────────────────────────────────

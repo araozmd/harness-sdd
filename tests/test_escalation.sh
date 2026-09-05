@@ -17,6 +17,11 @@ SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 trap 'rm -rf "$T"' EXIT
 export CODEX_HOME="$T/codex-home"
+# E25-F01: non-Claude front-ends are parked by default on FRESH targets, so a bare
+# installer run now stamps claude only. This suite's fixtures predate the flip and
+# assert artifacts across the full matrix; pin the pre-flip selection explicitly
+# (an explicit --agents in any call still wins over this env seed).
+export HARNESS_AGENTS="claude,gemini,opencode,antigravity,codex"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
@@ -975,5 +980,33 @@ decline_reasons_are_distinguishable
 docs_agree_with_the_shipped_default
 no_doc_claims_the_harness_cannot_check
 usage_errors_are_loud
+
+# ── init.sh visibility line: quoted thresholds normalize like _cfg_scalar ────────────
+# `after_rejections: "2"` is valid YAML that builder-role.sh accepts; an unstripped
+# quote in init.sh's own extraction silently took the malformed-value branch and the
+# mandatory startup check printed NOTHING for an active threshold — recreating the
+# invisible escalation state the line exists to name (Codex #160 P2).
+init_visibility_strips_quotes() {
+  _iv="$T/init-vis"
+  install_to "$_iv" "$T/ch-iv" --agents=claude
+  for _q in '"2"' "'2'" '2'; do
+    if grep -q '^  after_rejections:' "$_iv/.harness/harness.config.yaml"; then
+      awk -v v="$_q" '/^  after_rejections:/ { print "  after_rejections: " v; next } { print }' \
+        "$_iv/.harness/harness.config.yaml" > "$_iv/.harness/harness.config.yaml.t" \
+        && mv "$_iv/.harness/harness.config.yaml.t" "$_iv/.harness/harness.config.yaml"
+    else
+      printf 'escalation:\n  after_rejections: %s\n' "$_q" >> "$_iv/.harness/harness.config.yaml"
+    fi
+    # Through its own shebang (bash): init.sh declares `set -o pipefail`, which a
+    # POSIX `sh` (dash under the strict runner) rejects at line 1 — the run would
+    # abort before ever reaching the escalation block and this test would flake by
+    # host shell rather than test the extraction.
+    _out="$(cd "$_iv" && ./.harness/init.sh 2>&1 || true)"
+    printf '%s\n' "$_out" | grep -q 'escalation:' \
+      || fail "init.sh printed no escalation line for after_rejections: $_q — output was: $_out"
+  done
+}
+init_visibility_strips_quotes
+pass "init.sh escalation line fires for quoted and bare thresholds alike"
 
 echo "test_escalation.sh: all cases passed"

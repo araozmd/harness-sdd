@@ -4,7 +4,7 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
-## [0.69.0] — 2026-08-18
+## [0.74.0] — 2026-09-05
 
 ### Added — ✨ migrate an existing child to the thin layout, and back (E24-F04)
 
@@ -53,6 +53,162 @@ reverse — as two explicit flags on `harness-install.sh`.
 `docs/INSTALL.md` gains both flags; the install manifest's `BODY LAYOUT` block explains the
 transition and the reverse. Covered by new cases in `tests/test_umbrella.sh`,
 `tests/test_install.sh` and `tests/test_init_drift_guard.sh`.
+## [0.72.0] — 2026-09-05
+
+### Changed — 🔧 Claude-first selection defaults (E25-F01)
+
+Non-Claude front-ends (codex, gemini, opencode, antigravity) are **parked by
+default on FRESH targets**: the scripted no-override run, the undetected-`host`
+fallback, and the interactive picker's pre-checked baseline all resolve to `claude`
+only (each previously answered ALL). A default flip, deliberately not a removal —
+every key stays legal via an explicit `--agents=<csv>` / `HARNESS_AGENTS` opt-in, an
+existing install's recorded selection is preserved byte-for-byte, and the legacy
+stamped-install-without-a-selection arm keeps its long-standing ALL answer. Rationale
+and the evidence bar for any later true removal: `docs/RATIONALE.md` → the ablation
+doctrine ("float, don't pin"). Every active target was already Claude-only (both
+umbrellas, 2026-09-05), and the multi-front-end matrix is the installer's largest
+complexity share; the flip produces the opt-in evidence a deletion decision needs.
+
+## [0.71.0] — 2026-09-05
+
+### Added — ✨ merge receipts are code: `wait-for-codex.sh merge-verify` (E99-F141 + E99-F144)
+
+Two fail-open holes in the merge step, both observed live, closed at one call site.
+`merge-verify pre` refuses the merge when the PR's current head is not the head the
+round actually reviewed — a push after a clean review silently inherited its verdict
+(hit for real across six repos, 2026-08-19). `merge-verify post` refuses to report a
+landing unless the PR is observably MERGED (state + mergedAt + mergeCommit) — under a
+merge queue or repo auto-merge, `gh pr merge` exiting 0 can mean merely *enqueued*, and
+a PR later rejected from the queue was recorded as landed with its branch deleted. Both
+fail closed on unreadable state; the post receipt prints the merge commit oid — the
+exact landing evidence `tasks-lock.py set-status done --evidence` wants. Both command
+bodies chain the receipts around every `gh pr merge` variant.
+
+### Fixed — 🐛 the pr-loop's remaining fail-open batch (E99-F142/F143/F146/F147/F150/F151/F152)
+
+- **Round budget** (F142/F150): the resume scan counts a round only when it recorded an
+  `outcome` — `mkdir -p` runs before preflight, so a run that died pre-verdict left a
+  directory that silently burned budget, and an interrupted CAP round shoved `round`
+  past `max_rounds` straight into the merge flow with no gate verdict at all. The
+  Ready-to-merge section now also requires a `merge` verdict from THIS invocation.
+- **Checkout discipline** (F146/F147): a new §0c verifies the working tree IS the PR
+  being fixed (checkout the PR head, fail closed on mismatch) — fix commits landed on
+  unrelated branches silently — and fixers dispatch **sequentially**: they share one
+  checkout and one index, and concurrent fixers swept each other's staged changes into
+  misattributed commits.
+- **Terminal-state honesty** (F143/F151): with `auto_merge: false`, an unresolved human
+  thread at all-gates-green takes the documented success hand-back instead of a false
+  failure; and the success summary is *built* early but *posted* only when a terminal
+  state actually lands — no more "all gates green ✅" sitting above a failure hand-off.
+- **Required checks** (F152): CI gating uses `gh pr checks --required`; the
+  statusCheckRollup does not mark which entries are required, so a flaky optional job
+  stalled PRs whose required checks were green.
+
+## [0.70.0] — 2026-09-05
+
+### Removed — 🔥 the stacked-PR lane (E21-F07)
+
+The E21-F06 gate answered "does the lane earn its keep?" with **NO** (2026-08-17):
+measured, 0 of the repository's last 100 PRs targeted a non-default base, so the
+E21-F04 merge-order guard **never fired once**, while the lane's cost — a delimiter
+convention plus four role contracts that had to agree — landed on the harness's most
+consistency-fragile surface. The sibling-feature split (`depends_on`-sequenced
+features, E21-F01 R4) covers the over-budget case with zero machinery.
+
+Removed per the ablation doctrine (a dead gate in a merge path is indistinguishable
+from a live one): `tools/pr-stack-guard.sh`; the `/sdd-pr-loop` base-change-detection
+step, merge-order guard block and `guard_deferred` terminal branch (source copy and
+installer heredoc alike); the WORKFLOW.md lane how-to (now a short deprecation notice
+naming the sibling split); and the stacked test suites. An **upgrade reclaims the
+orphaned `.harness/tools/pr-stack-guard.sh`** from existing targets (`tools/` is
+mirrored on install). The E21-F04 spec records the supersession append-only.
+
+MINOR, not MAJOR: no capability a target relied on is removed — the guard's only call
+sites were conditioned on `baseRefName != default_branch`, which no PR used, and the
+default-branch lane's decisions are byte-identical (pinned by test). Inert when
+`pr_loop.enabled` is false, as before. This also retires E99-F140 (the base-change
+detection's fail-open read of a prior round) and E99-F148 (exit-6's contradictory
+terminal states) by removing their subject.
+
+## [0.69.0] — 2026-09-04
+
+The ablation-campaign release: driven by two full external session reports on v0.6x, whose
+verdict was uniform — every mechanism that earned its keep was **code**, every one that
+failed was **prose asking an agent to behave**. This release moves the five proven prose
+failures into code, shifts the two dominant review-finding classes left into the Builder,
+and puts a price bar on board rows.
+
+### Added — ✨ `wait-for-codex.sh classify` (E99-F149: classification is code, not prose)
+
+Every pr-loop lane hand-rolled the same severity jq, and every copy got a rule subtly
+wrong (one tested `nit` before defaulting, so substrings inside longer words mis-tagged).
+The rule now lives in ONE tested place: first match wins **by position**, word-boundary
+anchored, default P2, Codex-authored + head-commit + `created_at >= trigger` freshness on
+**every** stream — so a stale thread, a human "P1" comment, or a bot comment on another
+commit can never block a round. Unactionable severity tags in review bodies / issue
+comments land in an advisory `body-findings.json`, never in `blocking.json`. Fail-closed:
+an unreadable head oid or findings stream exits 6 and removes any stale `blocking.json`.
+The `/sdd-pr-loop` body now invokes the tool instead of embedding the shell.
+
+### Added — ✨ `tasks-lock.py add-feature` + structural telemetry
+
+Seeding an `sdd: false` row was the one routine board write with no first-class path —
+lanes hand-wrote Python mutators, the exact spot a schema mistake would land. The Fixer's
+R8/R9 contract is now a locked, validated subcommand that prints the allocated id.
+And every `set-status` write appends a `transition` telemetry record at the lock choke
+point — phase/round boundaries exist as a property of the system instead of a
+prompt-compliance hope (observed compliance of the prompt stamps: ~0%). Kill-switch
+honored, never blocking, and `telemetry-report.py session` now prints the time range it
+covers (a stale session must LOOK stale) plus the transition count.
+
+### Added — ✨ `progress/lessons.md`, the earned-lessons ledger
+
+Both session reports converged on the same request: the single most valuable artifact of
+a run was a hand-written "standing rules that cost rounds" note that only survived
+because someone remembered to write it. It is now first-class: seeded once by the
+installer (never clobbered — asserted by an upgrade re-run test), read by every role at
+session start, appendable by any lane, append-only.
+
+### Added — ✨ builder shift-left + the board-row bar
+
+Across five features and eight review passes, **every** finding fell into exactly two
+classes: a prose guarantee no test pins, and a constant no test constrains. The Builder
+now self-checks both before hand-off (name the pinning test, or weaken the claim; delete
+the constant, watch a test die) — reviewer.md §3b/§3c caught these a full round later.
+And the Fixer now applies a bar before seeding E99 rows: **recurring, blocking, or
+fail-open** → a row; anything else → one dated line in `lessons.md`. A board row costs a
+full build→review→PR cycle; a lesson costs a sentence.
+
+### Fixed — 🐛 batched small fixes
+
+- `change-size.sh` GEN_RE covers `coverage/` (a repo generating into a non-ignored
+  coverage dir booked ~20k phantom production lines) and `\.mutbak$`.
+- The `*.mutbak` gitignore seed is REVERSED (it contradicted reviewer.md's residue-
+  visibility rule — the E99-F207 incident class); upgrades WARN about an existing line
+  by name (never delete it — provenance is unprovable and the file is append-only for
+  user entries), and the change-size classifier absorbs the E99-F71 inflation instead.
+- Installer `.gitignore` appends no longer fuse onto a final line lacking a trailing
+  newline.
+- `init.sh` prints the escalation arming state (`ARMED` / `DISARMED`) whenever
+  `escalation.after_rejections > 0` — a configured-but-inert safety feature was
+  invisible (E99-F25 ran three rejection rounds on the base builder).
+- `validate-board.py` diagnoses a wrong `--spec-root` in ONE line naming the cause,
+  instead of a per-feature error wall.
+- The installer warns on stale slash-command references in target prose (`/pr-loop`,
+  or any `/sdd-*` the current version does not generate).
+- `_rollback_frontmatter`'s intentional swallow now says why (E99-F128).
+- Orchestrator PR bodies must inline what they cite — `progress/` paths are gitignored
+  and dangle for every other reader; plus a compactness note for hosts that cap PR
+  descriptions (Azure DevOps: 4000 chars).
+
+### Changed — 🚜 board triage + big-rock drafts
+
+The 19 pending E99 rows were consolidated to 10 actionable (same-mechanism rows absorbed
+into carrier rows via parks, prose-fix batches formed; F128/F149 ride this release).
+Three draft epics seed the campaign's next phases: E25 (Claude-Code-only front-end
+scope), E26 (self-host the harness repo), E27 (escalation tier: delete vs cascade).
+`docs/ABLATION.md` records the protocol for the prompt-diet experiment: delete, run,
+measure, restore only what repeated failure proves.
 
 ## [0.68.0] — 2026-08-18
 

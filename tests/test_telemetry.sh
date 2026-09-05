@@ -22,6 +22,11 @@ trap 'rm -rf "$T"' EXIT
 # Sandbox Codex's GLOBAL prompts dir (§5d) so ALL-default installs below never touch
 # the developer's real ~/.codex. (See test_install.sh for the same guard.)
 export CODEX_HOME="$T/codex-home"
+# E25-F01: non-Claude front-ends are parked by default on FRESH targets, so a bare
+# installer run now stamps claude only. This suite's fixtures predate the flip and
+# assert artifacts across the full matrix; pin the pre-flip selection explicitly
+# (an explicit --agents in any call still wins over this env seed).
+export HARNESS_AGENTS="claude,gemini,opencode,antigravity,codex"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
@@ -375,6 +380,116 @@ grep -qE '^telemetry:' "$CONFIG" || fail "config: telemetry block missing"
 grep -qE '^[[:space:]]*enabled:' "$CONFIG" || fail "config: telemetry.enabled missing (kill-switch)"
 grep -qE '^[[:space:]]*log:[[:space:]]*telemetry\.jsonl' "$CONFIG" || fail "config: telemetry.log default missing"
 # verification.test_command now delegates to tools/run-tests.sh, which DISCOVERS every
+# ── structural transitions (2026-09-04): tasks-lock.py derives telemetry at the ────
+# status-write choke point, so records exist as a property of the system rather than a
+# prompt-compliance hope (observed compliance of the prompt-level stamps was ~0%).
+_tlb="$T/tlock"
+mkdir -p "$_tlb/state" "$_tlb/store" "$_tlb/tools"
+cp tools/tasks-lock.py tools/validate-board.py "$_tlb/tools/"
+[ -f tools/repo-resolve.py ] && cp tools/repo-resolve.py "$_tlb/tools/"
+cp store/tasks.schema.json "$_tlb/store/"
+cat > "$_tlb/state/tasks.json" <<'EOF'
+{"project":"t","epics":[{"id":"E01","title":"t","status":"in-progress","features":[
+ {"id":"E01-F01","title":"t","status":"pending","sdd":false,"autonomous":true,"depends_on":[],"spec_path":"specs/epics/E01-t/F01-t/"}]}]}
+EOF
+HARNESS_DIR="$_tlb" python3 "$_tlb/tools/tasks-lock.py" set-status E01-F01 in-progress >/dev/null \
+  || fail "structural: set-status failed in the sandbox board"
+[ -f "$_tlb/telemetry.jsonl" ] \
+  || fail "structural: no telemetry.jsonl written by a status transition"
+python3 - "$_tlb/telemetry.jsonl" <<'PY' || fail "structural: transition record wrong shape"
+import json, sys
+recs = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+r = [x for x in recs if x.get("type") == "transition"]
+assert len(r) == 1, r
+r = r[0]
+assert r["feature"] == "E01-F01" and r["from"] == "pending" and r["to"] == "in-progress"
+assert r["schema_version"] == 1 and r["at"].endswith("Z")
+PY
+pass "structural transition record derived at the tasks-lock choke point"
+
+# An EPIC rollup is recorded as an epic, never filed as a feature (Codex #160 P2):
+# kind/subject are authoritative, and the `feature` key appears on feature records only.
+HARNESS_DIR="$_tlb" python3 "$_tlb/tools/tasks-lock.py" set-status E01 planned >/dev/null \
+  || fail "structural: epic set-status failed in the sandbox board"
+python3 - "$_tlb/telemetry.jsonl" <<'PY' || fail "structural: epic transition mis-filed as a feature"
+import json, sys
+recs = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+ep = [r for r in recs if r.get("type") == "transition" and r.get("subject") == "E01"]
+assert ep, "no epic transition recorded"
+assert ep[0]["kind"] == "epic" and "feature" not in ep[0], ep[0]
+ft = [r for r in recs if r.get("type") == "transition" and r.get("subject") == "E01-F01"]
+assert ft and ft[0]["kind"] == "feature" and ft[0]["feature"] == "E01-F01", ft
+PY
+pass "structural telemetry distinguishes epic rollups from feature transitions"
+
+# A transition-ONLY session still reports its round count (Codex #160 P2): this is the
+# 0%-phase-compliance case structural telemetry exists for, and dropping `Build/review
+# rounds` there would gut the required session summary exactly when it matters.
+_trlog="$T/transitions-only.jsonl"
+{
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E07-F01","feature":"E07-F01","from":"pending","to":"in-progress","at":"2026-09-05T10:00:00Z"}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E07-F01","feature":"E07-F01","from":"in-progress","to":"in-review","at":"2026-09-05T11:00:00Z"}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E07-F01","feature":"E07-F01","from":"in-review","to":"in-progress","at":"2026-09-05T12:00:00Z"}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"epic","subject":"E07","from":"in-progress","to":"done","at":"2026-09-05T13:00:00Z"}'
+} > "$_trlog"
+_trout="$(python3 "$REPORT" session --log "$_trlog")"
+printf '%s\n' "$_trout" | grep -q 'Build/review rounds (derived from transitions): 2' \
+  || fail "transition-only session did not derive the round count (one bounce = 2 rounds); got: $_trout"
+printf '%s\n' "$_trout" | grep -q 'epic E07' \
+  || fail "transition-only session did not label the epic rollup as an epic"
+pass "transition-only session reports a derived round count and labels epics"
+
+# PARTIAL phase telemetry must not undercount rounds the structural stream proves
+# (Codex #160 round-4): an architect-only phase log plus two structurally recorded
+# rounds used to report `Build/review rounds: 0`. The counter is the MAX of both
+# sources — each is a lower bound on what actually happened.
+_prlog="$T/partial-phases.jsonl"
+{
+  printf '%s\n' '{"schema_version":1,"type":"phase","feature":"E07-F01","phase":"architect","round":1,"start":"2026-09-05T09:00:00Z","end":"2026-09-05T09:30:00Z","duration_s":1800,"outcome":"done","slice":null,"cost":null}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E07-F01","feature":"E07-F01","from":"pending","to":"in-progress","at":"2026-09-05T10:00:00Z"}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E07-F01","feature":"E07-F01","from":"in-progress","to":"in-review","at":"2026-09-05T11:00:00Z"}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E07-F01","feature":"E07-F01","from":"in-review","to":"in-progress","at":"2026-09-05T12:00:00Z"}'
+} > "$_prlog"
+python3 "$REPORT" session --log "$_prlog" | grep -q 'Build/review rounds: 2' \
+  || fail "partial phase telemetry undercounted rounds (architect-only phases + 2 structural rounds must report 2)"
+pass "partial phase telemetry combines with the structural stream (max of both sources)"
+
+# A round already ACTIVE at session start counts (Codex #160 round-5): a session whose
+# first structural event is `in-progress → in-review` demonstrably ran that round, and
+# the bounce after it opens round 2.
+_midlog="$T/mid-round.jsonl"
+{
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E08-F01","feature":"E08-F01","from":"in-progress","to":"in-review","at":"2026-09-05T10:00:00Z"}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E08-F01","feature":"E08-F01","from":"in-review","to":"in-progress","at":"2026-09-05T11:00:00Z"}'
+} > "$_midlog"
+python3 "$REPORT" session --log "$_midlog" | grep -q 'Build/review rounds (derived from transitions): 2' \
+  || fail "a session starting mid-round reported the wrong round count (in-progress→in-review must count the active round)"
+pass "rounds already active at session start are counted from their in-review transition"
+
+# Kill-switch honored, and an unwritable log NEVER blocks the board write.
+printf 'telemetry:\n  enabled: false\n' > "$_tlb/harness.config.yaml"
+rm -f "$_tlb/telemetry.jsonl"
+HARNESS_DIR="$_tlb" python3 "$_tlb/tools/tasks-lock.py" set-status E01-F01 in-review >/dev/null \
+  || fail "structural: set-status failed under telemetry.enabled: false"
+[ -f "$_tlb/telemetry.jsonl" ] && fail "structural: telemetry.enabled: false still wrote a record"
+printf 'telemetry:\n  log: /nonexistent-dir-harness-test/t.jsonl\n' > "$_tlb/harness.config.yaml"
+HARNESS_DIR="$_tlb" python3 "$_tlb/tools/tasks-lock.py" set-status E01-F01 in-progress >/dev/null \
+  || fail "structural: an unwritable telemetry log BLOCKED a board write (must be best-effort)"
+pass "structural telemetry kill-switch + never-blocking guarantees"
+
+# A configured relative log path with a directory component gets its parent CREATED
+# (Codex #160 round-5): without it, open() raises, the best-effort handler swallows,
+# and every transition silently writes nothing — invisible precisely because the
+# contract forbids failing loudly.
+printf 'telemetry:\n  log: custom/events.jsonl\n' > "$_tlb/harness.config.yaml"
+HARNESS_DIR="$_tlb" python3 "$_tlb/tools/tasks-lock.py" set-status E01-F01 in-review >/dev/null \
+  || fail "structural: set-status failed under a custom telemetry.log"
+[ -s "$_tlb/custom/events.jsonl" ] \
+  || fail "structural: configured log dir was not created — transitions silently unrecorded"
+grep -q '"type": "transition"' "$_tlb/custom/events.jsonl" \
+  || fail "structural: no transition record in the configured custom log"
+pass "structural telemetry creates the configured log's parent directory"
+
 # tests/test_*.sh. The intent of this check is "this suite is not orphaned", so accept
 # either spelling: an explicit mention, or the discovering runner plus the file existing.
 _tc_value() {  # echo the test_command scalar only — never the surrounding comments

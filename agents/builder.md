@@ -69,6 +69,10 @@ comes from.)
 
 ## Principles
 
+- **Read `progress/lessons.md` before you start.** It is the distilled cost of previous
+  rounds — each line exists because a lane paid for it. When something surprising costs
+  you a rejection or a debugging session, append one dated line (`- [YYYY-MM-DD builder]
+  …`); never rewrite or delete existing entries.
 - **Stay inside the spec.** If the spec is wrong or incomplete, do NOT improvise a
   redesign — record the gap in `progress/` and hand back to the Orchestrator so the
   Architect can revise. Drifting from the spec is how long runs go off the rails.
@@ -89,6 +93,15 @@ comes from.)
   the file (including one your own change just added), so the assertion's failure message
   ends up naming a guarantee it cannot detect. This is the same defect as above, in the
   shape it most often takes for agent/contract files.
+- **Every guarantee you write in prose names the test that pins it.** Before hand-off,
+  for each claim in a docstring, comment, or progress note ("never replaces the walk",
+  "bounded per run", "catches any writer"), name the test that fails if the claim is
+  false. No test → either write one or weaken the claim to what the code actually does.
+  Review rounds are dominated by exactly this gap; close it yourself in minutes.
+- **Every constant you introduce must kill a test when deleted.** For each new constant
+  or tunable, delete (or perturb) the line and confirm a test dies before you restore it.
+  A constant no test constrains is an unpinned degree of freedom — the Reviewer's
+  mutation campaign will find it a round later; find it now.
 
 ## Scratch files and campaign preconditions
 
