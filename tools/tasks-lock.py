@@ -638,7 +638,7 @@ def _find_status_span(text, target_id):
     return None
 
 
-def _refuse_if_parked(text, target_id, _refuse_target_status=None):
+def _refuse_if_parked(text, target_id, _refuse_target_status=None, _refuse_declared_only=False):
     """A park holds against a status transition (E06-F07).
 
     A park that a transition silently clears is not a park — it is a suggestion, which is
@@ -677,6 +677,18 @@ def _refuse_if_parked(text, target_id, _refuse_target_status=None):
                 # re-open building or reviewing), and every other park still holds done.
                 if park.get("gate") == "merge":
                     if _refuse_target_status == "done":
+                        # The park's own claim is "a PR exists and is awaited" — evidence
+                        # that DECLARES no commit (`none:<why>`) contradicts it and would
+                        # close the feature before the merge it awaits (Codex #171 P1).
+                        # `unchecked` still records (a shallow clone is not a reason to
+                        # block the write); categorical no-commit evidence is.
+                        if _refuse_declared_only:
+                            _die(
+                                "%s is awaiting merge (%s) — `--evidence none:<why>` "
+                                "declares work with NO commit, which contradicts the "
+                                "park's own in-flight PR; pass the merge ref itself"
+                                % (target_id, park["reason"])
+                            )
                         return
                     _die(
                         "%s is awaiting merge (%s) — the only sanctioned transition is "
@@ -1494,7 +1506,7 @@ def _check_plan_still_applies(text, target_id, plan, hdir):
     return plan["record"]
 
 
-def _set_status_text_transform(target_id, status, plan=None, hdir=None):
+def _set_status_text_transform(target_id, status, plan=None, hdir=None, evidence=None):
     """Build a TEXT transform that changes ONLY the target's status value.
 
     Unlike a parse → mutate → re-serialize round-trip (which reformats every
@@ -1520,8 +1532,12 @@ def _set_status_text_transform(target_id, status, plan=None, hdir=None):
     on top of it. Resolving it once before `run()` costs the same calls outside the lock.
     """
 
+    _declared_only = bool(evidence) and all(
+        isinstance(_e, str) and _e.split("=", 1)[-1].startswith("none:") for _e in evidence
+    )
+
     def transform(text):
-        _refuse_if_parked(text, target_id, status)  # E06-F07: a park outranks a transition (one exit: merge-gate + done, E99-F130)
+        _refuse_if_parked(text, target_id, status, _declared_only)  # E06-F07: a park outranks a transition (one exit: merge-gate + done with real evidence, E99-F130)
         # The record was resolved BEFORE the lock; here we only re-validate that it
         # still answers for the board being written, so a refusal leaves the board
         # byte-identical and no external call runs in-lock.
@@ -2063,7 +2079,8 @@ def main(argv):
         # hold the board lock past a concurrent writer's acquisition timeout.
         hdir = _harness_dir()
         plan = _landing_plan(args.id, args.status, args.evidence or [], hdir)
-        transform = _set_status_text_transform(args.id, args.status, plan, hdir)
+        transform = _set_status_text_transform(args.id, args.status, plan, hdir,
+                                               evidence=args.evidence or [])
     elif args.cmd == "apply":
         # External mutators may change arbitrary structure → parse+re-serialize.
         transform = _mutator_text_transform(_import_mutator(args.mutator))

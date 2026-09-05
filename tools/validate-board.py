@@ -188,6 +188,14 @@ def _fallback_errors(data):
                             errors.append(
                                 "%s.parked.unblocked_by: expected a non-empty string" % fw
                             )
+                        # Optional (additive, E99-F130) PR receipt. Mirrored for the
+                        # same reason as every park field: the zero-dependency path and
+                        # the JSON schema must agree on the TaskStore contract.
+                        pr = park.get("pr")
+                        if "pr" in park and (not isinstance(pr, str) or not pr):
+                            errors.append(
+                                "%s.parked.pr: expected a non-empty string" % fw
+                            )
                         # Optional (additive, E99-F77) gate discriminator. Same
                         # mirroring rule as the park itself: the zero-dependency path
                         # must not accept a board the JSON schema rejects.

@@ -288,6 +288,10 @@ function validateBoard(board) {
         assertObject(feature.parked, `${feature.id}.parked`);
         assertString(feature.parked.reason, `${feature.id}.parked.reason`);
         if (feature.parked.unblocked_by !== undefined) assertString(feature.parked.unblocked_by, `${feature.id}.parked.unblocked_by`);
+        // E99-F130: the PR receipt mirrors the schema (non-empty string) for the same
+        // reason as every park field — a board arriving through --tasks reaches this
+        // selector without the shared validator, and the validators must not disagree.
+        if (feature.parked.pr !== undefined) assertString(feature.parked.pr, `${feature.id}.parked.pr`);
         // E99-F77: an unrecognised gate is REJECTED, not degraded to a plain park. The
         // reason code is the deliverable; a typo that quietly reads as `parked` would
         // report the wrong one, which is worse than no gate at all. Checked here as well

@@ -1373,14 +1373,28 @@ HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 in-progress >/dev/null 2>&
   && fail "F130: a non-done transition passed through the merge gate"
 HARNESS_DIR="$T" python3 "$HELPER" await-merge E01-F02 >/dev/null 2>&1 \
   && fail "F130: await-merge accepted a feature that is not in-review"
-HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 done --evidence "none:F130 lifecycle test" >/dev/null 2>&1 \
+# `none:<why>` DECLARES no commit — which contradicts the park's own in-flight PR, so
+# the merge-gate exit refuses it (Codex #171 P1). A real-but-unresolvable ref degrades
+# to `unchecked` with a warning, which is the honest record from a fixture with no git.
+HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 done --evidence "none:no commit" >/dev/null 2>&1 \
+  && fail "F130: none:<why> evidence closed a merge park — the park asserts a PR exists"
+HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 done --evidence deadbeefdeadbeefdeadbeefdeadbeefdeadbeef >/dev/null 2>&1 \
   || fail "F130: the sanctioned done-through-merge-gate exit failed"
 python3 - "$T/state/tasks.json" <<'PY' || fail "F130: done did not clear the park or record the landing"
 import json, sys
 f = json.load(open(sys.argv[1]))["epics"][0]["features"][0]
 assert f["status"] == "done" and "parked" not in f, f
-assert f["landed"]["verified"] == "declared", f.get("landed")
+assert f["landed"]["verified"] == "unchecked", f.get("landed")
 PY
+# …and the fallback validators mirror the schema on the PR receipt's type.
+cat > "$T/badpr.py" <<'EOF'
+def mutate(data):
+    f = data["epics"][0]["features"][1]
+    f["parked"] = {"gate": "merge", "reason": "x", "pr": 42}
+    return data
+EOF
+HARNESS_DIR="$T" python3 "$HELPER" apply --mutator "$T/badpr.py" >/dev/null 2>&1 \
+  && fail "F130: a numeric parked.pr passed validation — fallback and schema disagree"
 # An OWNER park still holds `done` — the exit belongs to the merge gate alone.
 cat > "$T/own.py" <<'EOF'
 def mutate(data):
