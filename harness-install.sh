@@ -3093,7 +3093,7 @@ install_one() {
   stage_tree() {
     _st_rel="$1"
     _st_src="$_umb_body/$_st_rel"; _st_new="$_prose_stg/$_st_rel"
-    if [ ! -e "$_st_src" ]; then echo "❌ install: source missing: $_st_rel" >&2; return 1; fi
+    if [ ! -L "$_st_src" ] && [ ! -e "$_st_src" ]; then echo "❌ install: source missing: $_st_rel" >&2; return 1; fi
     mkdir -p "$(dirname "$_st_new")" || return 1
     cp -R "$_st_src" "$_st_new" || return 1
     if [ -L "$_st_new" ]; then
@@ -3213,7 +3213,11 @@ install_one() {
     # never staged.
     _tpt_set=''
     for _tpt_rel in $HARNESS_BODY_PROSE; do
-      if [ -e "$_umb_body/$_tpt_rel" ]; then
+      # `-L` first (Codex #149 P2): `-e` DEREFERENCES, so an umbrella entry that is a
+      # dangling symlink would be excluded as "missing" — the child then keeps a stale
+      # directory instead of preserving the umbrella's filesystem shape, and the
+      # body_link_travels judgement below never runs on it.
+      if [ -L "$_umb_body/$_tpt_rel" ] || [ -e "$_umb_body/$_tpt_rel" ]; then
         _tpt_set="$_tpt_set $_tpt_rel"
         continue
       fi
