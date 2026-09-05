@@ -600,7 +600,13 @@
           "id": "E99-F140",
           "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 BASE-CHANGE DETECTION FAILS *OPEN* WHEN THE PRIOR ROUND'S `pr.json` IS UNREADABLE, AND THE CODE'S OWN COMMENT CLAIMS THE OPPOSITE. In the `/sdd-pr-loop` body (step 0b), the stacked-PR guard reads `prior_base_name` and `prior_base_oid` out of `round-$((round-1))/pr.json` with `jq \u2026 2>/dev/null || echo ''`, then wraps the whole comparison in `if [ -n \"$prior_base_name\" ] && [ \"$prior_base_name\" != \"$default_branch\" ] && [ -n \"$prior_base_oid\" ]`. If that file is missing, truncated, or lacks either field, both substitutions are empty and the guard is SILENTLY SKIPPED \u2014 while the round-directory scan has already advanced the counter. A rebased parent then goes unnoticed and the child can pass review and auto-merge without the restack ancestry check that block exists to enforce. \u26a0\ufe0f THE CONTRADICTION IS INSIDE THE SAME BLOCK: three lines further down sits the comment 'Fail closed on either side of the comparison being unreadable \u2014 a missing prior cache or a transient API failure must not silently bypass the detection', guarding only the CURRENT oid. The prior side does exactly what the comment forbids. \u26a0\ufe0f PRESENT IN 0.68.0 \u2014 verified by reading `.claude/commands/sdd-pr-loop.md:93-95` in this repo, not inferred from the 0.63.0 install where it was found. Fix: treat an unreadable prior snapshot as fail-closed (restart from round 1, or needs-human), the same way the current-oid branch already does. Found by Codex on viernes-web#95. || \u26a0\ufe0f CORROBORATED AND WIDENED BY THREE MORE REPORTS (rounds 3-4, 2026-08-19). (a) viernes-users#38: on ROUND 1 `prior_round_dir` points at a nonexistent `round-0`, so the fields are empty and the SAME condition skips both the current-base lookup and the ancestry check \u2014 the runbook's own promise that 'round 1 must validate stack ancestry too' is therefore never kept, for every stacked PR, not just after cache corruption. (b) viernes-bff#50: if `gh repo view` or the `baseRefName` query transiently fails, `default_branch` or `base_ref` come back empty and the PR is treated as OUTSIDE the stacked lane entirely \u2014 a rebased parent then goes undetected, and after the child is retargeted that stale review can authorise a materially different default-branch diff. (c) viernes-infra#46 reported the round-1 case again. Fix accordingly: fetch base and head and verify ancestry whenever no readable prior snapshot exists, and stop or retry \u2014 never skip \u2014 when either value is unreadable. \u27c2 [resolved by removal: E21-F07 deleted the base-change detection step entirely (v0.70.0)]",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "5e22273129b4ff4be52a495340a5198a2def0911", "ref": "5e22273129b4ff4be52a495340a5198a2def0911", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "5e22273129b4ff4be52a495340a5198a2def0911",
+            "ref": "5e22273129b4ff4be52a495340a5198a2def0911",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
@@ -609,7 +615,8 @@
         {
           "id": "E99-F141",
           "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 `gh pr merge` EXITING 0 DOES NOT PROVE THE PR MERGED, SO THE LOOP CAN REPORT A LANDING THAT NEVER HAPPENED. The 'Ready to merge' section sets `merged=1` directly from the exit status of `gh pr merge \u2026 --merge --delete-branch`, then runs local cleanup and reports success. Under a MERGE QUEUE (or with auto-merge enabled on the repo) that command may instead enqueue the PR or turn auto-merge on and return 0 \u2014 `gh` 2.96.0's own help says so. A PR later rejected from the queue is then recorded as landed, its local branch is deleted, and the loop returns success. \u26a0\ufe0f THIS IS THE ONE FAILURE MODE THE LOOP'S OWN DOCTRINE SAYS MUST NEVER BE REPORTED AS SUCCESS: 'a merge that auto-merge was asked to land and did not land is never reported as success.' The code does not hold that line because it never observes the merged state. Fix: after the merge call, poll `gh pr view --json state,mergedAt` until MERGED is observed (or a bounded timeout elapses) before setting `merged=1` and cleaning up; on timeout, needs-human. Found by Codex on viernes-bff#50. \u27c2 [absorbs E99-F144: merge-step verification = mergedAt/mergeCommit observed AND headRefOid unchanged since the reviewed round]",
-          "status": "in-progress",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "ref": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
@@ -617,21 +624,19 @@
         },
         {
           "id": "E99-F142",
-          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 (REPORTED TWICE, INDEPENDENTLY) \u2014 A ROUND DIRECTORY'S MERE EXISTENCE IS TREATED AS THAT ROUND HAVING COMPLETED, SO AN INTERRUPTED RUN BURNS BUDGET SILENTLY. The resume scan at the top of the runbook walks `.harness/.pr-loop/<pr>/round-*/` and sets `round` to one past the highest directory found. But `mkdir -p \"$round_dir\"` happens BEFORE preflight, before the trigger is posted and long before any verdict \u2014 so a run that dies at a transient `gh` auth failure, or is interrupted while its background watcher is still polling, leaves a directory that the next invocation counts as a finished round. Consequences: the cached watcher result is never classified; the PR loses a round from a budget that exists to bound review cost; and repeated retries can push `round` past `max_rounds` so the loop is skipped entirely WITHOUT ever reaching a clean or needs-human verdict \u2014 the resume logic was added precisely to stop budget being silently granted, and this lets it be silently CONSUMED instead. Fix: write a completion marker at a round's terminal verdict and advance only past marked rounds (or create the directory after preflight succeeds), and reconstruct or re-classify the highest cached round rather than skipping it. Found by Codex on viernes-users#38 and viernes-bff#50 as separate findings with the same root cause. || \u26a0\ufe0f CORROBORATED A THIRD TIME, AND ONCE BY DEMONSTRATION RATHER THAN REVIEW. While driving this loop on 2026-08-19 the operator evaluated viernes-bookings-calendar#63's round-3 directory WHILE ITS WATCHER WAS STILL POLLING, read zero findings from the half-written cache, and merged on that. The watcher then exited reporting findings on head. The late finding happened to be a P2 on vendored upstream text, so the outcome was unchanged \u2014 but the reasoning was wrong, and a P1 would have been merged over. That is this exact defect from the other side: nothing in the cache distinguishes 'this round finished' from 'this round is mid-flight', so both a resuming invocation AND an operator reading the directory can mistake one for the other. A completion marker fixes both readings. Codex also reported it a third time on #63 itself ('Count only completed review rounds when resuming').",
-          "status": "pending",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 (REPORTED TWICE, INDEPENDENTLY) \u2014 A ROUND DIRECTORY'S MERE EXISTENCE IS TREATED AS THAT ROUND HAVING COMPLETED, SO AN INTERRUPTED RUN BURNS BUDGET SILENTLY. The resume scan at the top of the runbook walks `.harness/.pr-loop/<pr>/round-*/` and sets `round` to one past the highest directory found. But `mkdir -p \"$round_dir\"` happens BEFORE preflight, before the trigger is posted and long before any verdict \u2014 so a run that dies at a transient `gh` auth failure, or is interrupted while its background watcher is still polling, leaves a directory that the next invocation counts as a finished round. Consequences: the cached watcher result is never classified; the PR loses a round from a budget that exists to bound review cost; and repeated retries can push `round` past `max_rounds` so the loop is skipped entirely WITHOUT ever reaching a clean or needs-human verdict \u2014 the resume logic was added precisely to stop budget being silently granted, and this lets it be silently CONSUMED instead. Fix: write a completion marker at a round's terminal verdict and advance only past marked rounds (or create the directory after preflight succeeds), and reconstruct or re-classify the highest cached round rather than skipping it. Found by Codex on viernes-users#38 and viernes-bff#50 as separate findings with the same root cause. || \u26a0\ufe0f CORROBORATED A THIRD TIME, AND ONCE BY DEMONSTRATION RATHER THAN REVIEW. While driving this loop on 2026-08-19 the operator evaluated viernes-bookings-calendar#63's round-3 directory WHILE ITS WATCHER WAS STILL POLLING, read zero findings from the half-written cache, and merged on that. The watcher then exited reporting findings on head. The late finding happened to be a P2 on vendored upstream text, so the outcome was unchanged \u2014 but the reasoning was wrong, and a P1 would have been merged over. That is this exact defect from the other side: nothing in the cache distinguishes 'this round finished' from 'this round is mid-flight', so both a resuming invocation AND an operator reading the directory can mistake one for the other. A completion marker fixes both readings. Codex also reported it a third time on #63 itself ('Count only completed review rounds when resuming'). \u27c2 [fixed via carrier in the code-ification batch, merged #165]",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "ref": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F142-pr-loop-finding/",
-          "parked": {
-            "reason": "absorbed into E99-F150 (2026-09-04 triage, board-row bar): same mechanism \u2014 the resume scan trusts directory existence; F150 is the P1 superset (budget exhaustion falls through to merge with no verdict). Fix lands with E99-F150; this row is kept for the finding text only.",
-            "unblocked_by": "E99-F150 done"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F142-pr-loop-finding/"
         },
         {
           "id": "E99-F143",
           "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 WITH `auto_merge: false`, AN UNRESOLVED HUMAN THREAD IS REPORTED AS A FAILURE INSTEAD OF THE DOCUMENTED HAND-BACK. The thread-ownership gate sets `merge_ok=0` and instructs 'If `merge_ok=0`, stop here \u2014 go straight to the needs-human terminal state', which returns FAILURE. But when auto_merge is off, the loop's own contract is that finishing green-but-unmerged is a SUCCESS: 'stop after posting the all-gates-green summary and hand back to the human \u2014 resolve threads if you like, but do not merge \u2026 that hand-back COMPLETES the loop: return success. It is the one terminal state where an unmerged PR is the intended outcome.' A human comment on a thread is completely ordinary in that mode, so the common case is mislabelled a failure. \u26a0\ufe0f THE ORDERING IS THE BUG: the thread gate exists to authorise a MERGE, and with auto_merge off there is no merge to authorise. Fix: branch on `auto_merge == false` and take the success hand-back BEFORE evaluating merge authorization. Found by Codex on viernes-bff#50. \u27c2 [batch carrier: absorbs E99-F151 (summary ordering), E99-F152 (gh pr checks --required) \u2014 four prose corrections to sdd-pr-loop.md in one PR]",
-          "status": "in-progress",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "ref": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
@@ -639,16 +644,13 @@
         },
         {
           "id": "E99-F144",
-          "title": "[migrated from viernes 2026-08-19] PR-LOOP \u2014 THE MERGE STEP NEVER RE-VERIFIES THAT THE REVIEWED HEAD IS STILL THE HEAD, SO A PUSH AFTER A CLEAN REVIEW CAN INHERIT THAT REVIEW'S VERDICT. NOT reported by Codex \u2014 hit for real while driving the loop across six repos on 2026-08-19, and worth recording because the failure is silent and the artefact looks correct afterwards. The 'Ready to merge' path re-reads CI live but takes the findings from the CACHED `round-N/blocking.json`. Nothing compares `round-N/pr.json`'s `headRefOid` against the PR's current head at merge time. So if a fix is pushed after a round came back clean \u2014 exactly what happens when a sibling PR's finding applies to this one \u2014 the stale round's 'blocking=0' authorises merging a commit NOBODY REVIEWED. Observed on viernes-bookings-api#122: reviewed `ffcb7d48`, merged `efb22dd3`. \u26a0\ufe0f THE LOOP ALREADY HAS THIS DISCIPLINE FOR COMMENTS AND NOT FOR COMMITS: step 3 filters inline comments by `commit_id == headRefOid` AND `created_at >= trigger` precisely so a re-anchored stale thread cannot count \u2014 the same staleness reasoning simply is not applied to the head the merge lands. Fix: at the top of the merge path, re-read `gh pr view --json headRefOid` and require it to equal the round's reviewed head; on a mismatch demand a fresh round rather than merging, and fail closed if the current head cannot be read. \u26a0\ufe0f ALSO WORTH A LINE IN THE RUNBOOK: with N PRs carrying an IDENTICAL diff, a clean gate on one is weak evidence \u2014 a P1 landed on a sibling minutes after one of them had already merged. Hold identical PRs until every review is in. || \u26a0\ufe0f INDEPENDENTLY CONFIRMED BY CODEX TWICE, on viernes-bff#50 ('Bind the merge to the reviewed head') and viernes-web#95 ('Revalidate the reviewed head before merging') \u2014 filed here BEFORE either landed, from the live incident. \u26a0\ufe0f AND THERE IS A ONE-FLAG FIX THE ORIGINAL WRITE-UP MISSED: `gh pr merge --match-head-commit SHA` exists in `gh` 2.96.0 precisely to require the expected head commit, so the merge can be bound atomically rather than by a read-then-merge comparison that still races. Prefer the flag; keep the explicit comparison as the diagnostic that explains WHY a merge was refused. \u26a0\ufe0f viernes-web#95 also notes the sharper variant: the pre-merge refresh OVERWRITES the cached `pr.json` with the new head before merging, so the evidence of the head having moved is destroyed by the very step that should have caught it.",
-          "status": "pending",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP \u2014 THE MERGE STEP NEVER RE-VERIFIES THAT THE REVIEWED HEAD IS STILL THE HEAD, SO A PUSH AFTER A CLEAN REVIEW CAN INHERIT THAT REVIEW'S VERDICT. NOT reported by Codex \u2014 hit for real while driving the loop across six repos on 2026-08-19, and worth recording because the failure is silent and the artefact looks correct afterwards. The 'Ready to merge' path re-reads CI live but takes the findings from the CACHED `round-N/blocking.json`. Nothing compares `round-N/pr.json`'s `headRefOid` against the PR's current head at merge time. So if a fix is pushed after a round came back clean \u2014 exactly what happens when a sibling PR's finding applies to this one \u2014 the stale round's 'blocking=0' authorises merging a commit NOBODY REVIEWED. Observed on viernes-bookings-api#122: reviewed `ffcb7d48`, merged `efb22dd3`. \u26a0\ufe0f THE LOOP ALREADY HAS THIS DISCIPLINE FOR COMMENTS AND NOT FOR COMMITS: step 3 filters inline comments by `commit_id == headRefOid` AND `created_at >= trigger` precisely so a re-anchored stale thread cannot count \u2014 the same staleness reasoning simply is not applied to the head the merge lands. Fix: at the top of the merge path, re-read `gh pr view --json headRefOid` and require it to equal the round's reviewed head; on a mismatch demand a fresh round rather than merging, and fail closed if the current head cannot be read. \u26a0\ufe0f ALSO WORTH A LINE IN THE RUNBOOK: with N PRs carrying an IDENTICAL diff, a clean gate on one is weak evidence \u2014 a P1 landed on a sibling minutes after one of them had already merged. Hold identical PRs until every review is in. || \u26a0\ufe0f INDEPENDENTLY CONFIRMED BY CODEX TWICE, on viernes-bff#50 ('Bind the merge to the reviewed head') and viernes-web#95 ('Revalidate the reviewed head before merging') \u2014 filed here BEFORE either landed, from the live incident. \u26a0\ufe0f AND THERE IS A ONE-FLAG FIX THE ORIGINAL WRITE-UP MISSED: `gh pr merge --match-head-commit SHA` exists in `gh` 2.96.0 precisely to require the expected head commit, so the merge can be bound atomically rather than by a read-then-merge comparison that still races. Prefer the flag; keep the explicit comparison as the diagnostic that explains WHY a merge was refused. \u26a0\ufe0f viernes-web#95 also notes the sharper variant: the pre-merge refresh OVERWRITES the cached `pr.json` with the new head before merging, so the evidence of the head having moved is destroyed by the very step that should have caught it. \u27c2 [fixed via carrier in the code-ification batch, merged #165]",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "ref": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F144-pr-loop-finding/",
-          "parked": {
-            "reason": "absorbed into E99-F141 (2026-09-04 triage, board-row bar): same call site \u2014 the merge step must verify BOTH that the PR actually merged and that the reviewed head is still the head. Fix lands with E99-F141; this row is kept for the finding text only.",
-            "unblocked_by": "E99-F141 done"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F144-pr-loop-finding/"
         },
         {
           "id": "E99-F145",
@@ -666,7 +668,8 @@
         {
           "id": "E99-F146",
           "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 CONCURRENT pr-fixerS SHARE ONE CHECKOUT AND ONE INDEX. Below the escalation round the runbook spawns one sub-agent PER blocking comment, and the Agent-tool guidance encourages launching independent agents together \u2014 but every fixer runs `git add` and `git commit` in the SAME working tree. Concurrent fixers can overwrite each other's edits to one file, contend on `.git/index.lock`, or sweep another fixer's staged changes into their own commit, so the single push at the end of the round carries missing or misattributed fixes. \u26a0\ufe0f THE ONE-COMMENT-ONE-COMMIT CONTRACT IS WHAT BREAKS: pr-fixer's whole discipline is 'one comment, one fix, one commit, one return', and that is unenforceable while they interleave in a shared index. Fix: state that fixers run SEQUENTIALLY, or give each an isolated worktree+branch (the harness already has `tools/fix-worktree.sh` and an `isolation: worktree` concept to build on). Found on viernes-users#38. \u27c2 [absorbs E99-F147: checkout discipline first (verify/worktree the PR head), then per-fixer isolation or serialization]",
-          "status": "in-progress",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "ref": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
@@ -674,22 +677,25 @@
         },
         {
           "id": "E99-F147",
-          "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 THE LOOP NEVER CHECKS OUT THE PR IT IS FIXING, SO FIX COMMITS AND `git push` CAN LAND ON AN UNRELATED BRANCH. The runbook takes a PR NUMBER from `$ARGUMENTS` and, when that is absent, resolves the current branch's PR \u2014 but when a number IS given it never verifies that the local HEAD is that PR's head. It then reviews the remote PR, and the fixer rounds `git add`/`git commit`/`git push` in whatever checkout the operator happened to be sitting in. \u26a0\ufe0f THE FAILURE IS SILENT AND DOUBLE-SIDED: the reviewed PR is left unchanged (its findings look unfixed and the round appears to stall or exhaust its budget), while an unrelated feature branch quietly receives commits attributed to someone else's review. Fix: before any fixer runs, check out the selected PR's head \u2014 or fail unless local HEAD equals its `headRefOid` \u2014 or run the fixers in an isolated worktree tied to the verified head. Reported independently on viernes-users#38 and viernes-bff#50.",
-          "status": "pending",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 THE LOOP NEVER CHECKS OUT THE PR IT IS FIXING, SO FIX COMMITS AND `git push` CAN LAND ON AN UNRELATED BRANCH. The runbook takes a PR NUMBER from `$ARGUMENTS` and, when that is absent, resolves the current branch's PR \u2014 but when a number IS given it never verifies that the local HEAD is that PR's head. It then reviews the remote PR, and the fixer rounds `git add`/`git commit`/`git push` in whatever checkout the operator happened to be sitting in. \u26a0\ufe0f THE FAILURE IS SILENT AND DOUBLE-SIDED: the reviewed PR is left unchanged (its findings look unfixed and the round appears to stall or exhaust its budget), while an unrelated feature branch quietly receives commits attributed to someone else's review. Fix: before any fixer runs, check out the selected PR's head \u2014 or fail unless local HEAD equals its `headRefOid` \u2014 or run the fixers in an isolated worktree tied to the verified head. Reported independently on viernes-users#38 and viernes-bff#50. \u27c2 [fixed via carrier in the code-ification batch, merged #165]",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "ref": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F147-pr-loop-finding/",
-          "parked": {
-            "reason": "absorbed into E99-F146 (2026-09-04 triage, board-row bar): same discipline \u2014 the loop must first check out (or worktree) the PR head it is fixing; fixer isolation then builds on that checkout. Fix lands with E99-F146; this row is kept for the finding text only.",
-            "unblocked_by": "E99-F146 done"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F147-pr-loop-finding/"
         },
         {
           "id": "E99-F148",
           "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 (REPORTED THREE TIMES) \u2014 STACK-GUARD EXIT 6 HAS TWO CONTRADICTORY TERMINAL STATES IN THE SAME DOCUMENT. When `pr-stack-guard.sh` returns 6 because a parent PR is still open, the `guard_deferred` branch says to report it and 'exit gracefully without needs-human; the child retries after the parent lands'. The merge-order instructions above it and the Needs-human section below it both classify exit 6 as a needs-human FAILURE. \u26a0\ufe0f EXIT 6 IS THE NORMAL WAITING STATE OF A HEALTHY STACK, not an error, so the needs-human reading escalates every well-formed stacked child before its parent lands. And because the deferred branch only prints and leaves `merged=0` without an explicit return, an `auto_merge: true` run can also fall through and report SUCCESS while nothing merged. Pick one behaviour \u2014 a real deferred/retryable terminal state \u2014 and make all three places agree. Found on viernes-users#38, viernes-bff#50 and viernes-web#95. \u27c2 [resolved by removal: E21-F07 deleted stack-guard exit 6 and both its terminal states (v0.70.0)]",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "5e22273129b4ff4be52a495340a5198a2def0911", "ref": "5e22273129b4ff4be52a495340a5198a2def0911", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "5e22273129b4ff4be52a495340a5198a2def0911",
+            "ref": "5e22273129b4ff4be52a495340a5198a2def0911",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
@@ -714,7 +720,8 @@
         {
           "id": "E99-F150",
           "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 AN EXHAUSTED CACHED ROUND BUDGET FALLS THROUGH TO THE MERGE FLOW WITH NO GATE VERDICT AT ALL. If a previous invocation created the CAP round's directory and then stopped or was interrupted, the resume scan sets `round` to `max_rounds + 1`. The `while [ \"$round\" -le \"$max_rounds\" ]` body is therefore never entered: no review is triggered, `pr-gate.sh` is never consulted, and no verdict exists \u2014 and execution proceeds to the ready-to-merge flow anyway. With the default `auto_merge: true`, a PR whose cap round was incomplete OR STILL HAD BLOCKING FINDINGS can be merged, provided it has no unresolved threads. \u26a0\ufe0f THIS IS THE ROUND-CAP FAILING OPEN: the cap exists to force a needs-human hand-off, and this path skips straight past it to a merge. Closely related to F142 (a round directory's existence is treated as completion) \u2014 same cache-trust root, but this one ends in an unreviewed MERGE rather than a lost round. Fix: route `round > max_rounds` directly to the needs-human terminal state instead of falling through. Found on viernes-web#95. \u27c2 [absorbs E99-F142: fix = a round counts only when its verdict artifact exists, not when its directory does]",
-          "status": "in-progress",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "ref": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
@@ -722,29 +729,23 @@
         },
         {
           "id": "E99-F151",
-          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 THE 'all gates green \u2705' COMMENT IS POSTED BEFORE THE GATES THAT CAN STILL FAIL. The Ready-to-merge section posts the success summary first, and only afterwards enumerates review threads, resolves them, runs the stacked-PR merge-order guard, and calls `gh pr merge`. Any of those can route to needs-human or fail, leaving a PR carrying a contradictory 'all gates green' comment immediately above its failure hand-off \u2014 misleading a human skimming the thread, and any automation watching comments. Fix: BUILD the summary there (it is needed for both terminal states) but POST it only after a merge actually lands, or after the intentional `auto_merge: false` hand-back. Found on viernes-users#38.",
-          "status": "pending",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 THE 'all gates green \u2705' COMMENT IS POSTED BEFORE THE GATES THAT CAN STILL FAIL. The Ready-to-merge section posts the success summary first, and only afterwards enumerates review threads, resolves them, runs the stacked-PR merge-order guard, and calls `gh pr merge`. Any of those can route to needs-human or fail, leaving a PR carrying a contradictory 'all gates green' comment immediately above its failure hand-off \u2014 misleading a human skimming the thread, and any automation watching comments. Fix: BUILD the summary there (it is needed for both terminal states) but POST it only after a merge actually lands, or after the intentional `auto_merge: false` hand-back. Found on viernes-users#38. \u27c2 [fixed via carrier in the code-ification batch, merged #165]",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "ref": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F151-pr-loop-finding/",
-          "parked": {
-            "reason": "absorbed into E99-F143 (2026-09-04 triage, board-row bar): batched sdd-pr-loop.md prose correction \u2014 success comment posted before the gates it claims. Fix lands with E99-F143; this row is kept for the finding text only.",
-            "unblocked_by": "E99-F143 done"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F151-pr-loop-finding/"
         },
         {
           "id": "E99-F152",
-          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 THE 'required checks' GATE CANNOT BE IMPLEMENTED FROM `statusCheckRollup`, AND `gh` ALREADY SHIPS THE RIGHT QUERY. Step 6 says to check 'CI green (`statusCheckRollup[*].conclusion == \"SUCCESS\"` for required checks)', but the rollup does not mark which entries are REQUIRED. So the instruction cannot do what it says: an optional check that fails or hangs \u2014 a nightly, an advisory scanner, a flaky integration job \u2014 stalls or hands off a PR whose required checks are all green. `gh pr checks --required` ('Only show checks that are required', `gh` 2.96.0) answers the actual question, with its own watch/exit semantics. \u26a0\ufe0f OBSERVED IN PRACTICE on the viernes rollout: PRs routinely carried a pending `mutation` or advisory check while every required gate was green. Found on viernes-bff#50.",
-          "status": "pending",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 THE 'required checks' GATE CANNOT BE IMPLEMENTED FROM `statusCheckRollup`, AND `gh` ALREADY SHIPS THE RIGHT QUERY. Step 6 says to check 'CI green (`statusCheckRollup[*].conclusion == \"SUCCESS\"` for required checks)', but the rollup does not mark which entries are REQUIRED. So the instruction cannot do what it says: an optional check that fails or hangs \u2014 a nightly, an advisory scanner, a flaky integration job \u2014 stalls or hands off a PR whose required checks are all green. `gh pr checks --required` ('Only show checks that are required', `gh` 2.96.0) answers the actual question, with its own watch/exit semantics. \u26a0\ufe0f OBSERVED IN PRACTICE on the viernes rollout: PRs routinely carried a pending `mutation` or advisory check while every required gate was green. Found on viernes-bff#50. \u27c2 [fixed via carrier in the code-ification batch, merged #165]",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "ref": "e904bb5c5807b02c9d915141bbf5934fd2bc420e", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F152-pr-loop-finding/",
-          "parked": {
-            "reason": "absorbed into E99-F143 (2026-09-04 triage, board-row bar): batched sdd-pr-loop.md prose correction \u2014 required-checks gate must use `gh pr checks --required`. Fix lands with E99-F143; this row is kept for the finding text only.",
-            "unblocked_by": "E99-F143 done"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F152-pr-loop-finding/"
         }
       ]
     },
@@ -958,7 +959,13 @@
           "id": "E21-F07",
           "title": "Deprecate the stacked-PR lane and reclaim its machinery",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "5e22273129b4ff4be52a495340a5198a2def0911", "ref": "5e22273129b4ff4be52a495340a5198a2def0911", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "5e22273129b4ff4be52a495340a5198a2def0911",
+            "ref": "5e22273129b4ff4be52a495340a5198a2def0911",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": false,
           "depends_on": [

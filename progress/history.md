@@ -219,3 +219,4 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-09-05T13:15:56Z E21-F07 spec authored + approved via the operator's 2026-09-05 'proceed autonomously' plan approval; moving to build (lane deprecation)
 - 2026-09-05T14:27:38Z E21-F07 done (merged #163, 5e22273; 2 Codex rounds: 1 P1 fixed, then clean); E99-F140/F148 resolved by removal; E25 drilled (planned, F01 seeded)
 - 2026-09-05T14:28:29Z E99-F141/F143/F146/F150 (with absorbed F144/F151/F152, F142, F147) → in-progress under the operator-approved code-ification batch
+- 2026-09-05T16:30:06Z pr-loop code-ification batch merged (#165, e904bb5c; rounds 5,2,2,3, 12/12 findings fixed+pinned, operator-policy override at cap): E99-F141/F142/F143/F144/F146/F147/F150/F151/F152 done with ancestor evidence
