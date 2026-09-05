@@ -742,6 +742,15 @@ models:
 warning on stderr, resolves as `inherit`, and never fails the install — so a config
 written for a newer harness can never block an upgrade on an older installer.
 
+**Umbrella cascade (E27-F01).** A child whose key resolves to `inherit` (or is absent)
+takes the **coordinator's** `models:` value — same role → default order, and absent
+child `pin.*` keys fall back to the coordinator's pins — before the built-in default. A
+child's own explicit non-`inherit` value always wins. So one edit to the umbrella's
+`.harness/harness.config.yaml` re-tiers (and re-arms escalation for) every child on the
+next cascade run, and the install output prints one `models cascade:` line per affected
+child naming each role's tier and source (`own` | `umbrella`). Single-repo installs and
+the coordinator itself are untouched.
+
 `inherit` compiles to **key omission** on every front-end. The literal string `inherit`
 is never written anywhere: it is unknown on Codex and a hard error on OpenCode, while an
 absent key means "use the session model" on all five.
