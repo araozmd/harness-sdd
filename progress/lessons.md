@@ -34,3 +34,4 @@
   — substring matches inside longer words mis-tag severities. First match wins **by
   position**, and matches must be word-boundary anchored. (Now enforced in
   `tools/wait-for-codex.sh classify` — use it, never re-implement.)
+- [2026-09-05 builder] A board chore that rolls an epic/feature `done` without syncing the spec frontmatter breaks ./init.sh for EVERY later lane (E25-F01: board `done`, spec `in-review`) — the transition write path must update both, and a red init.sh at session start is worth checking against main before blaming your own diff.

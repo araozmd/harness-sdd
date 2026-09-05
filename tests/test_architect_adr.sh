@@ -47,7 +47,7 @@ pass "R2 brief_hook"
 # R3_cite_section
 grep -qF '## Architecture alignment' "$ARCH"     || fail "R3: role does not name the ## Architecture alignment section"
 grep -qi 'ADR-NNNN\|ADR-' "$ARCH"                || fail "R3: role does not reference ADR-NNNN"
-grep -qi 'touch' "$ARCH"                         || fail "R3: role does not state the feature touches ADRs"
+tr '\n' ' ' < "$ARCH" | grep -qiE 'ADR-NNNN[^.]{0,40}touches' || fail "R3: role does not state the feature touches ADRs"
 grep -qi 'honor\|how' "$ARCH"                    || fail "R3: role does not require a 'how honored' line"
 pass "R3 cite_section"
 
@@ -75,7 +75,7 @@ pass "R6 template_section"
 
 # ── R7: legacy detection: present = exists AND non-empty/non-template ─────────────
 # R7_present_detection
-grep -qi 'present' "$ARCH"                       || fail "R7: role does not define 'present'"
+tr '\n' ' ' < "$ARCH" | grep -qiE 'present[^.]{0,60}real content' || fail "R7: role does not define 'present'"
 grep -qi 'non-empty\|not empty\|real content' "$ARCH" || fail "R7: role does not require non-empty content"
 grep -qi 'template\|stub' "$ARCH"                || fail "R7: role does not treat a template stub as absent"
 pass "R7 present_detection"
@@ -83,7 +83,7 @@ pass "R7 present_detection"
 # ── R8: absent ⇒ note + proceed, no fabricated citation, no failure, section optional
 # R8_graceful_absent
 grep -qi 'absent\|no.*architecture' "$ARCH"      || fail "R8: role does not address the absent case"
-grep -qi 'proceed' "$ARCH"                       || fail "R8: role does not say proceed when absent"
+tr '\n' ' ' < "$ARCH" | grep -qiE 'absent[^.]{0,40}proceed' || fail "R8: role does not say proceed when absent"
 grep -qi 'not.*fail\|no failure\|never.*fail' "$ARCH" || fail "R8: role does not state it never fails for lack of architecture"
 grep -qi 'not.*fabricat\|no.*fabricat\|no.*invented' "$ARCH" || fail "R8: role does not forbid fabricating a citation"
 pass "R8 graceful_absent"

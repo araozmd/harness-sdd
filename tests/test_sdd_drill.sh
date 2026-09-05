@@ -26,9 +26,9 @@ pass() { echo "ok - $1"; }
 # ── R1: portable Driller role file ───────────────────────────────────────────────
 # R1_driller_role_exists
 [ -f "$ROLE" ]                                || fail "R1: $ROLE missing"
-grep -qi 'decompose'  "$ROLE"                 || fail "R1: role does not say it decomposes"
-grep -qi 'draft'      "$ROLE"                 || fail "R1: role does not mention draft epic"
-grep -qi 'feature'    "$ROLE"                 || fail "R1: role does not mention features"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'decompose[^.]{0,15}never spec' || fail "R1: role does not say it decomposes-never-specs"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'decompose[^.]{0,15}one draft epic' || fail "R1: role does not decompose one draft epic"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'one draft epic[^.]{0,25}feature entries' || fail "R1: role does not turn the draft epic into feature entries"
 grep -qi 'ADR\|adr'   "$ROLE"                 || fail "R1: role does not mention ADRs"
 grep -qi 'AGENTS.md-compatible\|portable' "$ROLE" || fail "R1: role not stated as portable"
 pass "R1 driller_role_exists"
@@ -52,11 +52,11 @@ pass "R3 text_only_options"
 # ── R4: <epic-id> required; empty arg ⇒ STOP and ask — role AND command ───────────
 # R4_epic_id_required
 grep -qi '<epic-id>\|epic id\|epic-id' "$ROLE" || fail "R4: role does not name the epic-id arg"
-grep -qi 'required'  "$ROLE"                  || fail "R4: role does not state epic-id required"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'required[^.]{0,10}<epic-id>' || fail "R4: role does not state epic-id required"
 grep -qi 'empty\|ask' "$ROLE"                 || fail "R4: role does not handle empty arg"
 grep -qF 'STOP' "$ROLE"                       || fail "R4: role does not STOP on empty arg"
 grep -qi '<epic-id>\|epic id\|epic-id' "$CMD"  || fail "R4: command does not name the epic-id arg"
-grep -qi 'required'  "$CMD"                    || fail "R4: command does not state epic-id required"
+tr '\n' ' ' < "$CMD" | grep -qiE '<epic-id>[^.]{0,10}required' || fail "R4: command does not state epic-id required"
 grep -qi 'empty\|ask' "$CMD"                   || fail "R4: command does not handle empty arg"
 grep -qF 'STOP' "$CMD"                         || fail "R4: command does not STOP on empty arg"
 pass "R4 epic_id_required"
@@ -65,8 +65,8 @@ pass "R4 epic_id_required"
 # R5_precondition_guard
 grep -qi 'not.*draft\|must be .*draft\|not-`draft`\|not `draft`' "$ROLE" || fail "R5: role does not require draft target"
 grep -qi 'STOP\|refuse' "$ROLE"               || fail "R5: role does not STOP/refuse by default"
-grep -qi 'amend'  "$ROLE"                     || fail "R5: role does not mention amend opt-in"
-grep -qi 'append' "$ROLE"                     || fail "R5: role does not state amend appends"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'explicit[^.]{0,5}amend[^.]{0,10}opt-in' || fail "R5: role does not mention the explicit amend opt-in"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'amend mode[^.]{0,10}appends' || fail "R5: role does not state amend appends"
 grep -qi 'above\|max' "$ROLE"                 || fail "R5: role does not state append above max"
 grep -qi 'without renumber\|not re-flip\|renumber\|re-flip' "$ROLE" || fail "R5: role does not forbid renumber/re-flip"
 pass "R5 precondition_guard"
@@ -77,13 +77,13 @@ grep -qF 'epic.md' "$ROLE"                    || fail "R6: role does not read ep
 grep -qF 'specs/vision.md' "$ROLE"            || fail "R6: role does not read specs/vision.md"
 grep -qF 'specs/architecture.md' "$ROLE"      || fail "R6: role does not read specs/architecture.md"
 grep -qi 'specs/adr/\|ADR' "$ROLE"            || fail "R6: role does not read the ADRs"
-grep -qi 'input' "$ROLE"                      || fail "R6: role does not state these are inputs"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'inputs[^.]{0,15}feature breakdown' || fail "R6: role does not state these are the inputs to the feature breakdown"
 pass "R6 reads_inputs"
 
 # ── R7: role seeds pending features, sdd, intra-epic ids/depends_on, no reuse + fixture
 # R7_seed_features
 grep -qi 'status: "pending"\|pending' "$ROLE" || fail "R7: role does not seed pending features"
-grep -qi 'sdd' "$ROLE"                        || fail "R7: role does not state sdd"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'sdd[^.]{0,15}true[^.]{0,30}Architect' || fail "R7: role does not seed sdd: true for the Architect to spec"
 grep -qF 'depends_on' "$ROLE"                 || fail "R7: role does not state depends_on"
 grep -qF 'spec_path' "$ROLE"                  || fail "R7: role does not state spec_path"
 grep -qi 'next-sequential\|above' "$ROLE"     || fail "R7: role does not state next-sequential/above"
@@ -163,21 +163,21 @@ grep -qF 'specs/adr/' "$ROLE"                 || fail "R11: role does not pin th
 grep -qi 'NNNN\|4-digit\|zero-pad' "$ROLE"    || fail "R11: role does not state 4-digit numbering"
 grep -qi 'above\|max' "$ROLE"                 || fail "R11: role does not state above-max"
 grep -qi 'no reuse\|never reuse' "$ROLE"      || fail "R11: role does not state no-reuse"
-grep -qi 'delta' "$ROLE"                      || fail "R11: role does not mention deltas"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'per-epic[^.]{0,10}ADR deltas' || fail "R11: role does not mention per-epic ADR deltas"
 grep -qi 'not rewrite\|not renumber\|existing ADR' "$ROLE" || fail "R11: role does not forbid rewriting F02 ADRs"
 pass "R11 adr_delta"
 
 # ── R12: role scopes deltas to per-epic decisions; never feature-level design ─────
 # R12_adr_boundary
 grep -qi 'per-epic' "$ROLE"                   || fail "R12: role does not scope deltas to per-epic"
-grep -qi 'delta' "$ROLE"                      || fail "R12: role does not mention deltas"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'per-epic[^.]{0,10}ADR deltas' || fail "R12: role does not mention per-epic ADR deltas"
 grep -qi 'feature-level' "$ROLE"              || fail "R12: role does not name feature-level design"
 grep -qi 'Architect\|F04' "$ROLE"             || fail "R12: role does not name the Architect/F04 boundary"
 pass "R12 adr_boundary"
 
 # ── R13: approve branch — epic draft → planned + stamp every feature autonomous:true
 # R13_approve_branch
-grep -qi 'approve' "$ROLE"                    || fail "R13: role does not mention approve"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'approve[^.]{0,25}draft → planned' || fail "R13: role does not tie approve to the draft-to-planned flip"
 grep -qi 'draft .* planned\|draft → planned\|draft -> planned' "$ROLE" || fail "R13: role does not name draft → planned"
 grep -qi 'autonomous: true' "$ROLE"           || fail "R13: role does not stamp autonomous: true"
 grep -qi 'every\|all\|all-or-nothing' "$ROLE" || fail "R13: role does not state all-or-nothing stamping"
@@ -186,7 +186,7 @@ pass "R13 approve_branch"
 # ── R14: keep-gated branch — epic planned, every feature stays autonomous:false ───
 # R14_keep_gated_branch
 grep -qi 'keep gated\|gated' "$ROLE"          || fail "R14: role does not mention keep gated"
-grep -qi 'planned' "$ROLE"                    || fail "R14: role does not mention planned"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'planned[^.]{0,40}autonomous: false' || fail "R14: role does not flip to planned while leaving autonomous: false"
 grep -qi 'autonomous: false' "$ROLE"          || fail "R14: role does not leave features autonomous: false"
 grep -qi 'not leave\|never leave\|drilled' "$ROLE" || fail "R14: role does not forbid leaving a drilled epic in draft"
 pass "R14 keep_gated_branch"
@@ -195,7 +195,7 @@ pass "R14 keep_gated_branch"
 # R15_single_gate
 grep -qi 'one\|single' "$ROLE"                || fail "R15: role does not state one/single decision"
 grep -qi 'epic\|epic-level' "$ROLE"           || fail "R15: role does not state epic-level granularity"
-grep -qi 'autonomous' "$ROLE"                 || fail "R15: role does not realize the gate via autonomous"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'realized[^.]{0,70}autonomous[^.]{0,15}flag' || fail "R15: role does not realize the gate via the existing autonomous flag"
 grep -qi 'no new status' "$ROLE"              || fail "R15: role does not state no new status"
 grep -qi 'no new approval mechanism\|no schema change' "$ROLE" || fail "R15: role does not state no new mechanism/schema change"
 pass "R15 single_gate"
@@ -231,18 +231,29 @@ pass "R18 backward_compatible"
 
 # ── R19: contract lives in the portable role file (not solely .claude/ glue) ──────
 # R19_portable_contract — consumer rules present in agents/driller.md itself.
-grep -qi 'decompose' "$ROLE"                  || fail "R19: consumer rule 'decompose' not in the portable role"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'decompose[^.]{0,15}one draft epic' || fail "R19: consumer rule 'decompose' not in the portable role"
 grep -qi 'draft .* planned\|draft → planned\|draft -> planned' "$ROLE" || fail "R19: 'draft → planned' not in the portable role"
-grep -qi 'autonomous' "$ROLE"                 || fail "R19: 'autonomous' not in the portable role"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'stamp[^.]{0,15}autonomous: true' || fail "R19: the autonomous: true stamp not in the portable role"
 grep -qi 'never.*spec\|decompose.*never spec' "$ROLE" || fail "R19: 'decomposes-never-specs' not in the portable role"
 pass "R19 portable_contract"
 
 # ── R20: WORKFLOW.md places /sdd-drill between /sdd-plan + /sdd-next, only flip ────
 # R20_workflow_doc
 grep -qF '/sdd-drill' docs/WORKFLOW.md        || fail "R20: WORKFLOW.md does not mention /sdd-drill"
-grep -qi 'draft' docs/WORKFLOW.md             || fail "R20: WORKFLOW.md does not mention draft"
-grep -qi 'planned' docs/WORKFLOW.md           || fail "R20: WORKFLOW.md does not mention planned"
-grep -qi 'autonomous' docs/WORKFLOW.md        || fail "R20: WORKFLOW.md does not mention autonomous"
+# Section-scoped AND fence-aware (Codex #169 rounds 2-3): the fix lane's own "re-stamp
+# autonomous: true" prose elsewhere in WORKFLOW.md would satisfy a whole-file fold, and
+# a fenced example quoting the heading would re-open the slice on quoted text — the ONE
+# fence rule lives in tests/lib/fence.awk and is composed here, never re-derived.
+_R20_FENCE="$(cat "$(dirname -- "$0")/lib/fence.awk")"
+_r20_sect() {
+  awk "$_R20_FENCE"'
+    fence_delim($0) { next }
+    !fence && /^#+ / { k = (index($0, "Per-epic drill-down") > 0); next }
+    !fence && k { print }
+  ' docs/WORKFLOW.md | tr '\n' ' '
+}
+_r20_sect | grep -qiE 'flips? .{0,20}epic[^.]{0,10}draft → planned' || fail "R20: WORKFLOW.md drill section does not make /sdd-drill the draft-to-planned flip"
+_r20_sect | grep -qiE 'stamp[^.]{0,10}autonomous: true' || fail "R20: WORKFLOW.md drill section does not mention the autonomous: true stamp"
 grep -qF '/sdd-plan' docs/WORKFLOW.md         || fail "R20: WORKFLOW.md does not mention /sdd-plan"
 grep -qF '/sdd-next' docs/WORKFLOW.md         || fail "R20: WORKFLOW.md does not mention /sdd-next"
 grep -qi 'only step that flips\|only.*flip' docs/WORKFLOW.md || fail "R20: WORKFLOW.md does not state the only-flip step"
@@ -311,8 +322,8 @@ pass "E21-F01 R1/R2 change_size_defaults_in_source_config"
 # Both tiers named, and the non-blocking property stated — the property most likely to be
 # lost when someone later "tightens" the rule.
 grep -qF 'change_size' docs/WORKFLOW.md   || fail "E21-F01 R9: WORKFLOW.md does not document change_size"
-grep -qi 'advise'   docs/WORKFLOW.md      || fail "E21-F01 R9: WORKFLOW.md does not name the advise tier"
-grep -qi 'escalate' docs/WORKFLOW.md      || fail "E21-F01 R9: WORKFLOW.md does not name the escalate tier"
+tr '\n' ' ' < docs/WORKFLOW.md | grep -qiE 'advise[^.]{0,10}advise_lines' || fail "E21-F01 R9: WORKFLOW.md does not name the advise tier"
+tr '\n' ' ' < docs/WORKFLOW.md | grep -qiE 'escalate[^.]{0,10}escalate_lines' || fail "E21-F01 R9: WORKFLOW.md does not name the escalate tier"
 grep -qi 'Neither tier blocks\|neither blocks\|never a hard' docs/WORKFLOW.md \
   || fail "E21-F01 R9: WORKFLOW.md does not state that the budget never blocks"
 pass "E21-F01 R9 change_size_documented"

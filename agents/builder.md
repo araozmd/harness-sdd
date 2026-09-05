@@ -93,6 +93,15 @@ comes from.)
   the file (including one your own change just added), so the assertion's failure message
   ends up naming a guarantee it cannot detect. This is the same defect as above, in the
   shape it most often takes for agent/contract files.
+- **A prose-contract assertion anchors TWO co-occurring tokens across folded newlines,
+  inside the extracted section.** A bare single-word `grep -qi '<word>'` over an
+  agent/doc file passes on the STALE file whenever the word predates the change (it
+  usually does — 'bare', 'never', 'flag' occur everywhere). Compose this with the
+  section rule above — extract first, then fold and anchor:
+  `awk 'BEGIN{h="<heading>"} /^#+ /{k=(index($0,h)>0);next} k' "$f" | tr '\n' ' ' |
+  grep -qiE 'tokenA[^.]{0,60}tokenB'` — a whole-file fold would stay green when the
+  pair also occurs in another section. Verify the assertion FAILS on the pre-change
+  blob before you trust it.
 - **Every guarantee you write in prose names the test that pins it.** Before hand-off,
   for each claim in a docstring, comment, or progress note ("never replaces the walk",
   "bounded per run", "catches any writer"), name the test that fails if the claim is

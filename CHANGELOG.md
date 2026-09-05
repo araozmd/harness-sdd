@@ -4,6 +4,28 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.72.1] — 2026-09-05
+
+### Fixed — 🐛 verification hygiene: assertions that can actually fail (E99-F75/F76/F88)
+
+An assertion that passes on the STALE file pins nothing. The suite-wide audit replaced
+every bare single-word `grep -qi '<word>'` prose-contract assertion (~60 call sites
+across 14 suites) with anchored two-token folded-newline pins, each class-checked; the
+convention is now a Builder principle. `agents/scout.md` and `agents/doc-critic.md`
+finally received the two-namespace ADR corrections E99-F59 shipped only downstream,
+and R11 pins their CORRECTED LINES (mutation-verified per file). And the
+mutation-evidence contract is hardened (E99-F88): a mutation counts as evidence only
+when the applied edit is byte-for-byte the edit the contract names, the runner prints
+the applied diff, and a mislabeled mutant is an instrument failure, never a kill —
+pinned fence-aware in the mutation-mandate suite. (The finding's classifier half had
+already shipped as `wait-for-codex.sh classify` in 0.69.0.)
+
+This release also carries the first executed run of the `docs/ABLATION.md` protocol
+(record: `progress/ablation-2026-09-05.md`): both fixes were built by REAL Builder
+sub-agents — one on the stock 1,499-word role prose, one on the 121-word skeleton —
+with no observed discipline loss on the skeleton run; per the protocol, 2-3 more mixed
+runs before any prompt diet lands on main.
+
 ## [0.72.0] — 2026-09-05
 
 ### Changed — 🔧 Claude-first selection defaults (E25-F01)

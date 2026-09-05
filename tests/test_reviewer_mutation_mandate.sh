@@ -516,4 +516,47 @@ grep -qF "$(tr -d ' \n\r\t' < VERSION)" "$_self" \
   && fail "R14: this suite contains the current VERSION string — a permanent suite must not freeze it"
 pass "R14 suite_hygiene"
 
+# ── R15: mutation EVIDENCE is the literal edit the contract names (E99-F88) ──────
+# On E14-F08 a mutation-runner entry LABELLED as the contract's `InlineError` mutation
+# applied a DIFFERENT edit; the mislabeled mutant went red under the contract's title
+# and certified an assertion that could NOT detect the real defect — a broken assertion
+# passed review, label standing in for evidence. The (3b) block must therefore
+# (a) count a mutation as evidence only when the applied edit is BYTE-FOR-BYTE the edit
+# the contract names, (b) require the runner to PRINT THE APPLIED DIFF into the run
+# record, naming the concrete command, so label and evidence can be compared, and
+# (c) classify a mutant whose printed diff does not match its label as an INSTRUMENT
+# FAILURE, never a kill.
+#
+# EXTRACTION IS FENCE-AWARE (tests/lib/fence.awk, E99-F131 — per the F75 convention),
+# unlike check3() above: the check-3 slice guards its `^3. `/`^4. ` boundaries with
+# fence_delim() and DROPS fenced content from the scanned text, so a `4. ` line inside
+# a future fenced example cannot truncate the slice, and a fenced QUOTATION of this
+# contract cannot satisfy the pins. Each assertion is two-token anchored via `[^.]{0,N}`
+# sentence windows (E99-F75) and was verified to FAIL against the pre-E99-F88 (3b)
+# block, which contains none of the anchor pairs (measured: with the new sub-bullet
+# reverted in place, R15 goes red at its first assertion while R1-R14 stay green).
+# The dot in `<file>.mutbak` ends a `[^.]` window, so the
+# contract sentence was worded with both anchor pairs BEFORE the parenthetical command
+# and the command itself is pinned separately, by fixed string.
+FENCE_AWK="$(cat "$SRC/tests/lib/fence.awk")"
+_EV="$(awk "$FENCE_AWK"'
+  fence_delim($0) { next }
+  fence            { next }
+  /^3\. / { k = 1 }
+  /^4\. / { k = 0 }
+  k
+' "$REVIEWER" | span '**(3b)' '**(3c)' | flat)"
+[ -n "$_EV" ] || fail "R15: fence-aware extraction of the (3b) block returned empty"
+printf '%s\n' "$_EV" | grep -qiE 'counts as evidence only when[^.]{0,40}byte-for-byte[^.]{0,30}the contract names' \
+  || fail "R15: (3b) does not state, in one sentence, that a mutation COUNTS AS EVIDENCE ONLY WHEN the applied edit is BYTE-FOR-BYTE the edit the contract names — a red under the right title with a different edit behind it certifies nothing (E14-F08)"
+printf '%s\n' "$_EV" | grep -qiE 'must print[^.]{0,25}applied diff[^.]{0,30}run record' \
+  || fail "R15: (3b) does not REQUIRE the runner to print the APPLIED DIFF into the RUN RECORD, in one sentence — without the printed diff, label and evidence can never be compared after the fact"
+printf '%s\n' "$_EV" | grep -qF 'diff <file>.mutbak <file>' \
+  || fail "R15: (3b) does not name the concrete diff command (diff <file>.mutbak <file>) — 'print the diff' with no mechanic attached is advice, not an instruction"
+printf '%s\n' "$_EV" | grep -qiE 'printed diff[^.]{0,30}not match its label[^.]{0,30}instrument failure' \
+  || fail "R15: (3b) does not classify a mutant whose PRINTED DIFF does not match its LABEL as an INSTRUMENT FAILURE, in one sentence"
+printf '%s\n' "$_EV" | grep -qiE 'instrument failure[^.]{0,45}never as a kill' \
+  || fail "R15: (3b) does not forbid recording an instrument failure AS A KILL — a mislabeled mutant that goes red is exactly how a broken assertion passes review"
+pass "R15 3b_mutation_evidence_is_the_literal_named_edit"
+
 echo "All reviewer mutation-mandate tests passed."

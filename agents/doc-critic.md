@@ -16,7 +16,7 @@ The generating agent spawns you as a sub-agent with a clean context and a single
 
 | `target-type` | Checkpoint | Documents reviewed |
 |---|---|---|
-| `plan-output` | After `/sdd-plan` | `specs/vision.md`, `specs/architecture.md`, each ADR at `specs/adr/NNNN-*.md`, and every seeded `specs/epics/<id>-<slug>/epic.md` |
+| `plan-output` | After `/sdd-plan` | `specs/vision.md`, `specs/architecture.md`, each ADR under the `NNNN-*.md` glob in the platform space `specs/adr/` or a product space `specs/<product>/adr/` — qualified as `<ns>/ADR-NNNN` or `<ns> ADR-NNNN` in cross-references — and every seeded `specs/epics/<id>-<slug>/epic.md` |
 | `epic-decomposition` | After `/sdd-drill` | The target `specs/epics/<id>-<slug>/epic.md`, its feature table, the per-feature inbox briefs under `progress/inbox/`, and any ADR deltas appended by the drill |
 | `feature-spec` | After the Architect drafts a four-file spec | The four files for one feature: `<feature>.spec.md`, `<feature>.plan.md`, `<feature>.tasks.md`, `<feature>.tests.md` |
 
