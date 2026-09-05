@@ -280,13 +280,23 @@ test_print_agents_contract() {
     || fail "R23/F02 R1: line 2 is not the detected-host baseline ($(sed -n '2p' "$_x/a.out"))"
   [ "$(find "$_t" | sort)" = "$_before" ] \
     || fail "R11/R23: --print-agents created or modified a file in the target"
-  # (a2) the same fresh dir, no marker ⇒ the sorted all-keys line.
+  # (a2) the same fresh dir, no marker ⇒ the claude-only fresh default (E25-F01: the
+  # old sorted-all expectation was exactly the parked default this feature replaced).
   hrun "$_x" -- --print-agents "$_t" >"$_x/a2.out" 2>/dev/null \
     || fail "R23: --print-agents exited non-zero on an undetected fresh dir"
-  sed -n '2p' "$_x/a2.out" | grep -qx 'baseline=antigravity claude codex gemini opencode' \
-    || fail "R23: line 2 is not the sorted baseline ($(sed -n '2p' "$_x/a2.out"))"
+  sed -n '2p' "$_x/a2.out" | grep -qx 'baseline=claude' \
+    || fail "R23/E25-F01: line 2 is not the fresh claude-only baseline ($(sed -n '2p' "$_x/a2.out"))"
   [ "$(find "$_t" | sort)" = "$_before" ] \
     || fail "R11/R23: --print-agents created or modified a file in the target"
+  # (a3) the sorted MULTI-key rendering (a2 used to prove) now proven on a PERSISTED
+  # multi-selection — an installed target, so the fresh default cannot mask it.
+  _m="$_x/multi"; mkdir -p "$_m"
+  hrun "$_x" -- --agents=claude,gemini,codex "$_m" >/dev/null 2>&1 \
+    || fail "R23: multi-key setup install failed"
+  hrun "$_x" -- --print-agents "$_m" >"$_x/a3.out" 2>/dev/null \
+    || fail "R23: --print-agents exited non-zero on a multi-key install"
+  sed -n '2p' "$_x/a3.out" | grep -qx 'baseline=claude codex gemini' \
+    || fail "R23: multi-key baseline is not sorted/spaced ($(sed -n '2p' "$_x/a3.out"))"
   # (b) … and an INSTALLED target, on both TTY-less runs.
   _i="$_x/installed"; mkdir -p "$_i"
   hrun "$_x" -- --agents=claude "$_i" >/dev/null 2>&1 || fail "R23: setup install failed"
@@ -332,7 +342,10 @@ test_host_mode_stamps_detected_only() {
   return 0
 }
 
-# ── R13 — undetected + no existing install ⇒ ALL (today's no-TTY default) ─────
+# ── R13 — undetected + no existing install ⇒ claude only (E25-F01) ────────────
+# Non-Claude front-ends are parked by default on FRESH targets: the undetected-host
+# fallback and the bare no-TTY default agree on `claude`, and the non-Claude glue is
+# NOT stamped. Every key stays available via an explicit --agents opt-in (R15 suite).
 test_host_undetected_fresh_is_all() {
   _x="$(sandbox freshall)"; _t="$_x/host"; _r="$_x/ref"; mkdir -p "$_t" "$_r"
   hrun "$_x" -- --agents=host "$_t" >/dev/null 2>&1 \
@@ -340,11 +353,16 @@ test_host_undetected_fresh_is_all() {
   # The reference: a no-override non-TTY run, i.e. exactly today's behavior.
   hrun "$_x" -- "$_r" >/dev/null 2>&1 || fail "R13: reference install failed"
   [ "$(command cat "$_t/.harness/.agents")" = "$(command cat "$_r/.harness/.agents")" ] \
-    || fail "R13: undetected host on a fresh target did not resolve to the ALL default"
-  for _f in CLAUDE.md GEMINI.md opencode.json AGENTS.md; do
+    || fail "R13: undetected host and the bare no-TTY default disagree on a fresh target"
+  [ "$(tr '\n' ' ' <"$_t/.harness/.agents")" = "claude " ] \
+    || fail "R13/E25-F01: a fresh undetected-host install did not resolve to claude only ($(tr '\n' ' ' <"$_t/.harness/.agents"))"
+  for _f in CLAUDE.md AGENTS.md; do
     [ -f "$_t/$_f" ] || fail "R13: undetected host fresh install is missing $_f"
   done
-  [ -d "$_t/.agents" ] || fail "R13: undetected host fresh install is missing .agents/"
+  for _f in GEMINI.md opencode.json; do
+    [ -f "$_t/$_f" ] && fail "R13/E25-F01: fresh default stamped parked front-end glue ($_f)"
+  done
+  [ -d "$_t/.agents" ] && fail "R13/E25-F01: fresh default created the parked .agents/ tree"
   return 0
 }
 
@@ -381,9 +399,11 @@ test_host_undetected_orphan_agents_is_all() {
     || fail "R13: undetected --agents=host on orphan metadata exited non-zero"
   hrun "$_x" -- "$_r" >/dev/null 2>&1 || fail "R13: reference install failed"
   [ "$(command cat "$_t/.harness/.agents")" = "$(command cat "$_r/.harness/.agents")" ] \
-    || fail "R13: an orphan .harness/.agents narrowed a target with no existing install ($(tr '\n' ' ' <"$_t/.harness/.agents"))"
+    || fail "R13: an orphan .harness/.agents changed the fresh-target answer ($(tr '\n' ' ' <"$_t/.harness/.agents"))"
+  [ "$(tr '\n' ' ' <"$_t/.harness/.agents")" = "claude " ] \
+    || fail "R13/E25-F01: orphan metadata did not get the fresh claude-only default"
   for _f in GEMINI.md opencode.json; do
-    [ -f "$_t/$_f" ] || fail "R13: the orphan-metadata host install is missing $_f"
+    [ -f "$_t/$_f" ] && fail "R13/E25-F01: orphan-metadata fresh install stamped parked glue ($_f)"
   done
   # …and the anti-widening property is untouched: WITH the stamp, the same shape is kept.
   _s="$_x/stamped"; mkdir -p "$_s"
@@ -515,10 +535,13 @@ test_additive_no_host_unchanged() {
   _x="$(sandbox additive)"; _a="$_x/all"; _c="$_x/claudeonly"; mkdir -p "$_a" "$_c"
   # A present marker must NOT influence a run that did not ask for host resolution.
   hrun "$_x" CLAUDECODE=1 -- "$_a" >/dev/null 2>&1 || fail "R22: no-override run exited non-zero"
-  [ "$(tr '\n' ' ' <"$_a/.harness/.agents")" = "antigravity claude codex gemini opencode " ] \
-    || fail "R22: a no-override non-TTY run with CLAUDECODE set no longer stamps ALL"
-  [ -f "$_a/GEMINI.md" ] && [ -f "$_a/opencode.json" ] && [ -d "$_a/.agents" ] \
-    || fail "R22: a no-override non-TTY run stopped stamping every front-end"
+  # E25-F01 changed the fresh no-override answer to claude-only; R22's own property —
+  # a present marker must NOT influence a run that never named `host` — survives as:
+  # marker or not, the fresh no-override answer is the SAME claude-only default.
+  [ "$(tr '\n' ' ' <"$_a/.harness/.agents")" = "claude " ] \
+    || fail "R22/E25-F01: a no-override non-TTY fresh run did not get the claude-only default ($(tr '\n' ' ' <"$_a/.harness/.agents"))"
+  [ -f "$_a/GEMINI.md" ] || [ -f "$_a/opencode.json" ] || [ -d "$_a/.agents" ] \
+    && fail "R22/E25-F01: a fresh no-override run stamped parked front-end glue"
   hrun "$_x" CLAUDECODE=1 -- --agents=claude "$_c" >/dev/null 2>&1 \
     || fail "R22: --agents=claude exited non-zero"
   [ "$(tr '\n' ' ' <"$_c/.harness/.agents")" = "claude " ] \
@@ -527,8 +550,8 @@ test_additive_no_host_unchanged() {
   _d="$_x/decl"; mkdir -p "$_d"
   hrun "$_x" HARNESS_HOST_AGENT=claude -- "$_d" >/dev/null 2>&1 \
     || fail "R22: HARNESS_HOST_AGENT-only run exited non-zero"
-  [ "$(tr '\n' ' ' <"$_d/.harness/.agents")" = "antigravity claude codex gemini opencode " ] \
-    || fail "R22: HARNESS_HOST_AGENT narrowed a run that never named 'host'"
+  [ "$(command cat "$_d/.harness/.agents")" = "$(command cat "$_a/.harness/.agents")" ] \
+    || fail "R22: HARNESS_HOST_AGENT influenced a run that never named 'host'"
   return 0
 }
 
@@ -542,11 +565,11 @@ test_host_reports_resolution() {
     || fail "R25: the detected resolution line does not name the key"
   [ "$(printf '%s\n' "$_o" | grep -c 'agents: host')" = "1" ] \
     || fail "R25: the host branch printed more than one report line"
-  # Undetected, fresh ⇒ the ALL fallback …
+  # Undetected, fresh ⇒ the claude-only fallback (E25-F01), named with the opt-in …
   _o2="$(hrun "$_x" -- --agents=host "$_u" 2>&1)" || fail "R25: undetected fresh run failed"
   printf '%s\n' "$_o2" | grep -q 'host undetected' \
     || fail "R25: an undetected host run printed no resolution line"
-  printf '%s\n' "$_o2" | grep -q 'all front-ends' \
+  printf '%s\n' "$_o2" | grep -q 'parked by default' \
     || fail "R25: the fresh undetected fallback is not named in the report line"
   # … and undetected on an existing install ⇒ the kept-selection fallback. The two
   # cases MUST be distinguishable in the text.
@@ -781,18 +804,18 @@ test_baseline_fresh_is_host_only() {
   return 0
 }
 
-# ── R2 — no existing install + undetected ⇒ ALL ──────────────────────────────
-# The detection MISS keeps today's behavior byte-for-byte; it is the designed degradation
-# for every front-end with no verified marker, not a gap.
+# ── R2 — no existing install + undetected ⇒ claude only (E25-F01) ────────────
+# The detection MISS lands on the parked-by-default fresh baseline: the picker opens
+# pre-checked to claude, one keystroke re-adds any other front-end before confirming.
 test_baseline_fresh_undetected_is_all() {
   _x="$(sandbox f2freshall)"; _t="$_x/t"; mkdir -p "$_t"
   _got="$(baseline_of "$_x" "$_t")"
-  [ "$_got" = "$ALL_KEYS" ] \
-    || fail "R2: an undetected fresh target does not pre-check ALL (got '$_got', want '$ALL_KEYS')"
+  [ "$_got" = "claude" ] \
+    || fail "R2/E25-F01: an undetected fresh target does not pre-check claude only (got '$_got')"
   # Ambiguity (two front-ends' markers at once) is a MISS, so it lands here too.
   _got="$(baseline_of "$_x" "$_t" CLAUDECODE=1 OPENCODE=1)"
-  [ "$_got" = "$ALL_KEYS" ] \
-    || fail "R2: competing markers on a fresh target did not fall back to ALL (got '$_got')"
+  [ "$_got" = "claude" ] \
+    || fail "R2/E25-F01: competing markers on a fresh target did not land on the claude-only baseline (got '$_got')"
   return 0
 }
 
@@ -812,21 +835,23 @@ test_baseline_upgrade_keeps_persisted() {
   return 0
 }
 
-# ── R5 — no TTY + no override ⇒ ALL, exactly as before this feature ──────────
-# CI back-compat is non-negotiable: a scripted run has no human to correct a wrong guess,
-# so the narrowing axis is explicit-vs-implicit, and this path never consults the helper.
+# ── R5 — no TTY + no override on a FRESH target ⇒ claude only (E25-F01) ──────
+# The scripted fresh default is now the parked-by-default claude-only set; a scripted
+# run that needs more names it explicitly (--agents/HARNESS_AGENTS, which still win).
+# An EXISTING install's scripted answer is unchanged — pinned separately below.
 test_no_tty_default_unchanged() {
   _x="$(sandbox f2nottty)"; _t="$_x/t"; mkdir -p "$_t"
   hrun "$_x" CLAUDECODE=1 -- "$_t" >/dev/null 2>&1 \
     || fail "R5: a no-override non-TTY install with a marker set exited non-zero"
-  [ "$(tr '\n' ' ' <"$_t/.harness/.agents" | sed 's/[[:space:]]*$//')" = "$ALL_KEYS" ] \
-    || fail "R5: a no-override non-TTY run no longer persists ALL ($(tr '\n' ' ' <"$_t/.harness/.agents"))"
-  for _f in CLAUDE.md GEMINI.md opencode.json AGENTS.md; do
+  [ "$(tr '\n' ' ' <"$_t/.harness/.agents" | sed 's/[[:space:]]*$//')" = "claude" ] \
+    || fail "R5/E25-F01: a fresh no-override non-TTY run did not persist claude only ($(tr '\n' ' ' <"$_t/.harness/.agents"))"
+  for _f in CLAUDE.md AGENTS.md; do
     [ -f "$_t/$_f" ] || fail "R5: the no-TTY default stopped stamping $_f"
   done
-  [ -d "$_t/.agents" ]      || fail "R5: the no-TTY default stopped stamping the antigravity .agents/ tree"
-  [ -f "$_t/.agents/skills/sdd-next/SKILL.md" ] \
-    || fail "R5: the no-TTY default stopped stamping Codex project skills"
+  for _f in GEMINI.md opencode.json; do
+    [ -f "$_t/$_f" ] && fail "R5/E25-F01: the fresh no-TTY default stamped parked glue ($_f)"
+  done
+  [ -d "$_t/.agents" ] && fail "R5/E25-F01: the fresh no-TTY default stamped the parked .agents/ tree"
   [ -d "$_x/ch/prompts" ] && fail "R5: the no-TTY default created retired global Codex prompts"
   # Source: that branch still assigns ALL directly and never reaches precheck_baseline.
   _tail="$(sed -n '/^resolve_agents() {/,/^}/p' "$INST" | sed -n '/^  else$/,/^}/p')"

@@ -13,6 +13,11 @@ trap 'rm -rf "$T"' EXIT
 # Sandbox CODEX_HOME under the temp dir for the WHOLE suite. Current Codex installs must
 # never write there; migration cases below seed legacy prompts explicitly.
 export CODEX_HOME="$T/codex-home"
+# E25-F01: non-Claude front-ends are parked by default on FRESH targets, so a bare
+# installer run now stamps claude only. This suite's fixtures predate the flip and
+# assert artifacts across the full matrix; pin the pre-flip selection explicitly
+# (an explicit --agents in any call still wins over this env seed).
+export HARNESS_AGENTS="claude,gemini,opencode,antigravity,codex"
 
 # E18-F01: `pr_loop.enabled` is an OPT-IN gate — a fresh install seeds `false` and stamps
 # no /sdd-pr-loop glue at all. This suite's job is the COMMAND-SURFACE contract (generated
@@ -494,6 +499,27 @@ grep -q 'my-own-entry.claude' "$_mb/.gitignore" \
   && fail "gitignore append fused a harness pattern onto the user's last line"
 rm -rf "$_mb"
 pass "existing *.mutbak ignore preserved + warned about; gitignore appends survive a missing trailing newline"
+
+# E25-F01: a FRESH target with no selection gets claude only — non-Claude front-ends
+# are parked by default (flip, not removal: explicit --agents still stamps any key, and
+# an existing install's recorded selection is untouched — pinned in test_agents_host).
+# HARNESS_AGENTS= (empty) clears this suite's pre-flip seed: empty means "no override".
+_fd="$(mktemp -d 2>/dev/null || mktemp -d -t harness-fd)"
+CODEX_HOME="$T/codex-home" HARNESS_AGENTS= sh "$SRC/harness-install.sh" "$_fd" >/dev/null 2>&1 \
+  || fail "E25-F01: fresh no-selection install failed"
+[ "$(tr '\n' ' ' <"$_fd/.harness/.agents")" = "claude " ] \
+  || fail "E25-F01: fresh default is not claude only (got: $(tr '\n' ' ' <"$_fd/.harness/.agents"))"
+[ -f "$_fd/CLAUDE.md" ] || fail "E25-F01: fresh default is missing CLAUDE.md"
+for _p in GEMINI.md opencode.json .agents .codex .opencode; do
+  [ -e "$_fd/$_p" ] && fail "E25-F01: fresh default stamped parked front-end surface ($_p)"
+done
+# Explicit opt-in still stamps a parked front-end (the park is a default, not a removal).
+_fo="$(mktemp -d 2>/dev/null || mktemp -d -t harness-fo)"
+CODEX_HOME="$T/codex-home" HARNESS_AGENTS= sh "$SRC/harness-install.sh" --agents=claude,gemini "$_fo" >/dev/null 2>&1 \
+  || fail "E25-F01: explicit opt-in install failed"
+[ -f "$_fo/GEMINI.md" ] || fail "E25-F01: explicit --agents=claude,gemini did not stamp GEMINI.md — the park must never disable the opt-in"
+rm -rf "$_fd" "$_fo"
+pass "E25-F01: fresh default is claude-only; parked front-ends stay one explicit opt-in away"
 
 # E21-F07 R1: the stacked-PR merge-order guard is reclaimed. A fresh install ships no
 # pr-stack-guard.sh, and an upgrade over a target still carrying the orphaned file

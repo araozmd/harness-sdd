@@ -1819,13 +1819,13 @@ precheck_baseline() {
     if [ -n "$_pb_host" ]; then
       printf '%s\n' "$_pb_host"
     else
-      normalize_keys "$AGENT_KEYS"
+      fresh_default_set   # E25-F01: fresh + undetected ⇒ claude-only baseline
     fi
   fi
 }
 
 # host_fallback_keeps_selection <target> — true when an UNDETECTED `host` run would preserve
-# <target>'s persisted selection (R14) rather than falling back to ALL (R13).
+# <target>'s persisted selection (R14) rather than falling back to a default (R13).
 #
 # That is the case only when the target is an EXISTING INSTALL *and* carries a selection:
 # the version stamp is the spec's definition of "existing install", and a stamped install
@@ -1836,8 +1836,18 @@ host_fallback_keeps_selection() {
   [ -f "$1/.harness/.harness-version" ] && [ -f "$1/.harness/.agents" ]
 }
 
+# fresh_default_set — the selection a FRESH target gets when nothing chose one
+# (E25-F01): `claude` only. Non-Claude front-ends are PARKED BY DEFAULT — every key
+# stays legal via an explicit --agents/HARNESS_AGENTS opt-in, and existing installs'
+# recorded selections are untouched (R4). A default flip, deliberately not a deletion:
+# reversible, and it produces the opt-in evidence a later removal would need
+# (docs/RATIONALE.md, "float, don't pin").
+fresh_default_set() { printf 'claude\n'; }
+
 # host_fallback_set <target> — the set an UNDETECTED `host` run resolves to for <target>:
-# its persisted selection on an existing install (R14), ALL otherwise (R13).
+# its persisted selection on an existing install (R14), the legacy ALL for a stamped
+# install with no recorded selection, and the claude-only fresh default otherwise
+# (E25-F01, was ALL).
 #
 # This is the SINGLE source of the undetected-fallback answer, and since E19-F02 it has
 # exactly ONE caller: the undetected arm of resolve_agents's `host` branch.
@@ -1848,8 +1858,9 @@ host_fallback_keeps_selection() {
 # fresh DETECTED target this helper answers ALL while the run would install the one
 # detected key, so the preview would advertise the pre-F02 default the feature replaced.
 # Nothing is lost by the repoint — for an UNDETECTED target the two helpers agree in every
-# shape (persisted selection on a stamped install that has one, ALL otherwise, including
-# the orphan-metadata corner where a `.harness/.agents` carries no version stamp).
+# shape (persisted selection on a stamped install that has one, legacy ALL on a stamped
+# install without one, and the claude-only fresh default otherwise — including the
+# orphan-metadata corner where a `.harness/.agents` carries no version stamp).
 #
 # It cannot affect a run that never names `host`: its one call site is gated on `host` —
 # resolve_agents reaches that arm only when the override value is exactly `host`. The
@@ -1858,8 +1869,12 @@ host_fallback_keeps_selection() {
 host_fallback_set() {
   if host_fallback_keeps_selection "$1"; then
     precheck_baseline "$1"
+  elif [ -f "$1/.harness/.harness-version" ]; then
+    normalize_keys "$AGENT_KEYS"   # legacy pre-E08 install (stamp, no recorded
+                                   # selection): its long-standing ALL answer is
+                                   # unchanged — E25-F01 flips FRESH targets only (R4)
   else
-    normalize_keys "$AGENT_KEYS"
+    fresh_default_set
   fi
 }
 
@@ -1908,7 +1923,9 @@ override_host_kind() {
 #      TTY this runs the arrow-key + spacebar checkbox picker (tui_select); when
 #      raw mode is unavailable it gracefully falls back to the numbered
 #      toggle_select. Both resolve the identical SELECTED set from the same baseline.
-#   3. No-TTY default (R6): else → ALL keys (back-compat: stamp everything).
+#   3. No-TTY default (R6): else → the claude-only fresh default on a FRESH target
+#      (E25-F01: non-Claude front-ends are parked by default); an EXISTING install
+#      keeps this arm's long-standing ALL answer byte-for-byte.
 # Sets the global SELECTED to a sorted, newline-separated key list.
 resolve_agents() {
   _t="$1"
@@ -1938,7 +1955,7 @@ resolve_agents() {
         if host_fallback_keeps_selection "$_t"; then
           info "agents: host undetected — keeping this install's selection ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
         else
-          info "agents: host undetected — selecting all front-ends ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
+          info "agents: host undetected — fresh target, selecting claude only (non-Claude front-ends are parked by default; opt in with --agents=<csv>)"
         fi
       fi
     else
@@ -1956,7 +1973,15 @@ resolve_agents() {
     fi
     info "agents: interactive selection ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
   else
-    SELECTED="$(normalize_keys "$AGENT_KEYS")"
+    # No override, no TTY (E25-F01): a FRESH target gets the claude-only default; an
+    # EXISTING install keeps this arm's long-standing answer (ALL) byte-for-byte —
+    # narrowing an upgrade's surface silently is not this feature (R4).
+    if [ -f "$_t/.harness/.harness-version" ]; then
+      SELECTED="$(normalize_keys "$AGENT_KEYS")"
+    else
+      SELECTED="$(fresh_default_set)"
+      info "agents: fresh target, no selection given — claude only (non-Claude front-ends are parked by default; opt in with --agents=<csv>)"
+    fi
   fi
 }
 

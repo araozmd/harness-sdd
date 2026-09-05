@@ -22,6 +22,11 @@ trap 'rm -rf "$T"' EXIT
 # Sandbox Codex's GLOBAL prompts dir (§5d) so ALL-default installs below never touch
 # the developer's real ~/.codex. (See test_install.sh for the same guard.)
 export CODEX_HOME="$T/codex-home"
+# E25-F01: non-Claude front-ends are parked by default on FRESH targets, so a bare
+# installer run now stamps claude only. This suite's fixtures predate the flip and
+# assert artifacts across the full matrix; pin the pre-flip selection explicitly
+# (an explicit --agents in any call still wins over this env seed).
+export HARNESS_AGENTS="claude,gemini,opencode,antigravity,codex"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
