@@ -1779,14 +1779,22 @@ def _telemetry_transition(hdir, feature_id, old_status, new_status):
         enabled, log = _telemetry_cfg(hdir)
         if not enabled:
             return
+        # An epic rollup (`set-status E## done`) passes an EPIC id here; filing it
+        # under `feature` made the report list epics as features touched (Codex #160
+        # P2). `kind` + `subject` name the target explicitly; `feature` is kept, for
+        # feature transitions only, so existing readers keep working.
+        kind = "epic" if "-" not in feature_id else "feature"
         rec = {
             "schema_version": 1,
             "type": "transition",
-            "feature": feature_id,
+            "kind": kind,
+            "subject": feature_id,
             "from": old_status,
             "to": new_status,
             "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
+        if kind == "feature":
+            rec["feature"] = feature_id
         with open(log, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, sort_keys=True) + "\n")
     except Exception:

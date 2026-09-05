@@ -454,6 +454,10 @@ ESC_THRESHOLD="$(awk '
     sub(/^[[:space:]]+after_rejections:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
     print; exit
   }' harness.config.yaml 2>/dev/null || true)"
+# Strip a surrounding quote of EITHER kind, the same normalization _cfg_scalar applies:
+# `after_rejections: "2"` is valid YAML, and an unstripped quote would silently take the
+# malformed-value branch below — recreating the invisible state this check exists to name.
+ESC_THRESHOLD="$(printf '%s' "$ESC_THRESHOLD" | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'\$//")"
 case "$ESC_THRESHOLD" in
   ''|0|*[!0-9]*) : ;;   # off / absent / malformed (builder-role.sh warns on malformed) — not noteworthy
   *)

@@ -402,6 +402,21 @@ assert r["schema_version"] == 1 and r["at"].endswith("Z")
 PY
 pass "structural transition record derived at the tasks-lock choke point"
 
+# An EPIC rollup is recorded as an epic, never filed as a feature (Codex #160 P2):
+# kind/subject are authoritative, and the `feature` key appears on feature records only.
+HARNESS_DIR="$_tlb" python3 "$_tlb/tools/tasks-lock.py" set-status E01 planned >/dev/null \
+  || fail "structural: epic set-status failed in the sandbox board"
+python3 - "$_tlb/telemetry.jsonl" <<'PY' || fail "structural: epic transition mis-filed as a feature"
+import json, sys
+recs = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+ep = [r for r in recs if r.get("type") == "transition" and r.get("subject") == "E01"]
+assert ep, "no epic transition recorded"
+assert ep[0]["kind"] == "epic" and "feature" not in ep[0], ep[0]
+ft = [r for r in recs if r.get("type") == "transition" and r.get("subject") == "E01-F01"]
+assert ft and ft[0]["kind"] == "feature" and ft[0]["feature"] == "E01-F01", ft
+PY
+pass "structural telemetry distinguishes epic rollups from feature transitions"
+
 # Kill-switch honored, and an unwritable log NEVER blocks the board write.
 printf 'telemetry:\n  enabled: false\n' > "$_tlb/harness.config.yaml"
 rm -f "$_tlb/telemetry.jsonl"

@@ -316,12 +316,18 @@ def report_session(records, out):
     if transitions:
         out.append("- Status transitions (structural, via tasks-lock): %d"
                    % len(transitions))
-        seen_feats = []
+        # `subject` + `kind` are authoritative; `feature` is the pre-kind spelling kept
+        # for feature records only. An epic rollup must read as an epic, not a feature.
+        seen = []
         for _, r in transitions:
-            f = r.get("feature")
-            if f and f not in seen_feats:
-                seen_feats.append(f)
-        out.append("  - features touched: %s" % ", ".join(seen_feats))
+            subj = r.get("subject") or r.get("feature")
+            if not subj:
+                continue
+            label = ("epic %s" % subj) if r.get("kind") == "epic" else subj
+            if label not in seen:
+                seen.append(label)
+        if seen:
+            out.append("  - board targets touched: %s" % ", ".join(seen))
         out.append("")
     if not phases and not closes:
         # Transitions alone still tell the story of the session — never hide them

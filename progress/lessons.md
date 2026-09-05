@@ -18,6 +18,10 @@
 - [2026-09-04 product-queue] A timeout cap can hide a missing cache: when a step's time
   is capped, the cap firing looks identical to the step being fast. Verify the cache
   exists, don't infer it from elapsed time.
+- [2026-09-05 builder] Never invoke a bash-shebang script via `sh` inside a test suite —
+  under the strict runner the suite runs in dash, and `set -o pipefail` (or any bashism)
+  aborts the script at startup, making the test flake by host shell. Run it through its
+  own shebang (`./script`).
 - [2026-09-04 pr-loop] A hand-rolled severity classifier tested `nit` before defaulting
   — substring matches inside longer words mis-tag severities. First match wins **by
   position**, and matches must be word-boundary anchored. (Now enforced in

@@ -51,7 +51,7 @@ n_lines 10  > "$R/src/util.js"       # production
 n_lines 300 > "$R/tests/app.test.js" # test  — must NOT count as production
 n_lines 200 > "$R/specs/design.md"   # doc   — must NOT count as production
 n_lines 900 > "$R/vendor/lib.js"     # generated — excluded entirely
-n_lines 100 > "$R/coverage/lcov.info"   # generated — coverage output into a NON-ignored dir
+n_lines 100 > "$R/coverage/lcov.info"   # generated — coverage OUTPUT into a NON-ignored dir
 n_lines 60  > "$R/src/app.js.mutbak"    # generated — mutation backup, deliberately NOT gitignored
 git -C "$R" add -A && git -C "$R" commit -qm work
 
@@ -64,9 +64,29 @@ _get() { printf '%s' "$out" | sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p"; }
   || fail "R1: production_files=$(_get production_files), expected 2"
 [ "$(_get test_lines)" = "300" ]      || fail "R1: test_lines=$(_get test_lines), expected 300"
 [ "$(_get doc_lines)" = "200" ]       || fail "R1: doc_lines=$(_get doc_lines), expected 200"
-[ "$(_get generated_lines)" = "1060" ] || fail "R1: generated_lines=$(_get generated_lines), expected 1060 (vendor 900 + coverage 100 + .mutbak 60 — coverage/ and unignored mutation backups must classify as generated)"
+[ "$(_get generated_lines)" = "1060" ] || fail "R1: generated_lines=$(_get generated_lines), expected 1060 (vendor 900 + coverage output 100 + .mutbak 60 — coverage OUTPUT and unignored mutation backups classify as generated)"
 [ "$(_get total_lines)" = "1610" ]    || fail "R1: total_lines=$(_get total_lines), expected 1610"
-pass "R1 classification: production excludes tests, docs and generated files (incl. coverage/ + unignored .mutbak)"
+pass "R1 classification: production excludes tests, docs and generated files (incl. coverage output + unignored .mutbak)"
+
+# ── R1b: coverage/ is matched by OUTPUT SHAPE, never by bare directory name ──────────────
+# A consumer whose real product lives under coverage/ (a coverage service or library) must
+# never have its change zeroed out of the budget by a name collision (Codex #160 P2): only
+# report files (.info/.html/.json/.xml/.txt directly under coverage/) and the lcov-report/
+# + tmp/ subtrees are output; source under coverage/ counts as production.
+RC1="$T/repo-coverage"; mkrepo "$RC1"
+git -C "$RC1" checkout -q -b feature
+mkdir -p "$RC1/coverage/lib" "$RC1/coverage/lcov-report"
+n_lines 30 > "$RC1/coverage/service.js"        # production — source at coverage/ root
+n_lines 25 > "$RC1/coverage/lib/parse.js"      # production — source in a coverage/ subdir
+n_lines 90 > "$RC1/coverage/lcov.info"         # generated — report file
+n_lines 40 > "$RC1/coverage/lcov-report/i.html" # generated — report subtree
+git -C "$RC1" add -A && git -C "$RC1" commit -qm work
+_jc="$("$TOOL" --repo "$RC1" --base main --format json)"
+[ "$(printf '%s' "$_jc" | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')" = "55" ] \
+  || fail "R1b: production under coverage/ was misclassified (expected 55, got $(printf '%s' "$_jc" | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')) — a name collision zeroes a real product's budget"
+[ "$(printf '%s' "$_jc" | sed -n 's/.*"generated_lines":\([0-9]*\).*/\1/p')" = "130" ] \
+  || fail "R1b: coverage OUTPUT not classified generated (expected 130, got $(printf '%s' "$_jc" | sed -n 's/.*"generated_lines":\([0-9]*\).*/\1/p'))"
+pass "R1b coverage output classifies as generated while source under coverage/ stays production"
 
 # ── R1b: literal-dot escapes in the classifiers survive into awk ─────────────────────────
 # `awk -v re='...\.'` runs the value through awk's string-escape decoding, so `\.` arrives as
