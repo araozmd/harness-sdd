@@ -34,6 +34,23 @@ heavier altitude and **never** touch any epic other than the reserved maintenanc
 6. **Hand the seeded fix off** to the existing `sdd: false → Builder → Reviewer` loop
    **in-session** — you do not stop at seeding.
 
+## The board-row bar — a row is *work*, not a *note*
+
+A board row costs a full Builder → Reviewer → PR → Codex cycle — historically ~4× the
+cost of the finding itself. So when you ingest findings (review fallout, another
+session's report, a migration batch), seed a row **only** when the finding clears at
+least one of:
+
+1. **Recurring** — observed at least twice, or structurally certain to recur;
+2. **Blocking** — it stops a lane from finishing work today;
+3. **Fail-open** — it silently produces wrong results or false receipts (the worst
+   class: it *looks* like data).
+
+Everything below the bar is a **lesson, not a fix**: append one dated line to
+`progress/lessons.md` and move on. Trivial one-word/typo-grade findings may be batched —
+many findings, one row, one PR — instead of one row each. A human explicitly asking you
+to seed a specific fix always clears the bar by definition.
+
 ## Options & mockups — text only, at most 3 (R3)
 
 Run a short, **adaptive** Q&A front-end. Where the fix's shape forks and you offer
@@ -152,20 +169,31 @@ is **brief-only, never a spec**.
 
 ## Persist and validate under the board lock (R11)
 
-Express the epic create (when needed) and fix append as temporary Python mutators,
-each exposing `mutate(data) -> data`, and execute each structural mutation through
-the sole supported board-write path:
+**The fix append has a first-class path — use it, never a hand-written mutator:**
 
 ```sh
 # installed layout; use tools/tasks-lock.py in this source repository
+python3 .harness/tools/tasks-lock.py add-feature --title "<one-line fix intent>" [--gated]
+```
+
+It implements this file's R8/R9 contract exactly (append-only, next-sequential id
+strictly above max, the field table above, `--gated` → `autonomous: false`) under the
+lock with schema validation, and prints the allocated id on stdout. Hand-written
+seeding mutators were the one routine board write with no guarded path — the exact
+spot a schema mistake would land.
+
+Only the epic **create** (first use of `E99`) still needs a temporary Python mutator
+exposing `mutate(data) -> data`, executed through the same sole supported board-write
+path:
+
+```sh
 python3 .harness/tools/tasks-lock.py apply --mutator <temporary-mutator.py>
 ```
 
-Each mutator MUST re-check `E99` and allocate the next feature id from the fresh
-board passed to `mutate`; do not persist structure derived only from an unlocked
-read. The helper locks, re-reads, validates JSON plus the schema, and atomically
-replaces the board. The helper **re-validates** after each guarded write; this is
-the required **re-validation after
+A mutator MUST re-check `E99` against the fresh board passed to `mutate`; do not
+persist structure derived only from an unlocked read. The helper locks, re-reads,
+validates JSON plus the schema, and atomically replaces the board. The helper
+**re-validates** after each guarded write; this is the required **re-validation after
 each write**. Do not hand-edit `state/tasks.json`.
 
 **If** either helper call exits non-zero, **then** report the failure and do not
