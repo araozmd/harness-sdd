@@ -18,6 +18,11 @@
 - [2026-09-04 product-queue] A timeout cap can hide a missing cache: when a step's time
   is capped, the cap firing looks identical to the step being fast. Verify the cache
   exists, don't infer it from elapsed time.
+- [2026-09-05 builder] This repo's root `harness.config.yaml` is the SEED TEMPLATE fresh
+  installs copy verbatim — a repo-local choice written there silently changes the shipped
+  default for every future consumer (6 suites red). Repo-local model tiering lives in the
+  `.claude/agents/*.md` shim `model:` keys instead; same pattern as the pr-loop
+  severities (repo raises P2 locally, seed stays P0,P1).
 - [2026-09-05 builder] Never invoke a bash-shebang script via `sh` inside a test suite —
   under the strict runner the suite runs in dash, and `set -o pipefail` (or any bashism)
   aborts the script at startup, making the test flake by host shell. Run it through its
