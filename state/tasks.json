@@ -559,7 +559,8 @@
         {
           "id": "E99-F128",
           "title": "[migrated from viernes 2026-08-18] UPSTREAM NIT (harness-sdd): `_rollback_frontmatter`'s empty `except (OSError, ValueError): pass` carries no explanatory comment, and GitHub's code-quality bot flags it on EVERY repo that vendors the harness. Found on viernes-bff #47 during E99-F125 and confirmed byte-identical in `~/repos/harness-sdd/tools/tasks-lock.py` main, so it is upstream code, not authored in any child repo. THE SWALLOW IS INTENTIONAL AND CORRECT: it sits in the rollback path of a failed frontmatter write, called from an `except Exception:` block that re-raises \u2014 if rollback of one file fails, the remaining files must still be attempted and, crucially, the ORIGINAL exception must be the one that propagates. Letting the rollback's own error escape would mask the real failure with a secondary one. So the fix is a COMMENT saying that, not a code change. \u26a0\ufe0f FIX IT UPSTREAM IN harness-sdd AND RE-INSTALL \u2014 do NOT edit the vendored `.harness/tools/tasks-lock.py` in a child repo, which would recreate exactly the hand-synced-body divergence E99-F117 closed and would be silently reverted by the next installer run. \u26a0\ufe0f WHY IT IS WORTH DOING rather than dismissing: it is a MERGE-BLOCKING unresolved review thread in six repos every time the harness body changes, so the cost repeats on every future upgrade PR. Low value as a code change, real value as removed recurring friction. While there, sweep the file for other bare `pass` handlers and comment them the same way \u2014 the bot will find those on the next pass otherwise. \u27c2 [fix riding the 2026-09-04 refactor PR: explanatory comment added to _rollback_frontmatter's intentional swallow]",
-          "status": "pending",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "5790e6b6fccea0df644c85e87099179561072bfc", "ref": "5790e6b6fccea0df644c85e87099179561072bfc", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -693,7 +694,8 @@
         {
           "id": "E99-F149",
           "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 SEVERITY CLASSIFICATION READS THE WHOLE ISSUE-COMMENT STREAM, SO A STALE OR HUMAN COMMENT CAN BLOCK A ROUND. Step 3 walks `review-comments.json` + `reviews[*].body` + `issue-comments.json` looking for severity tags, but the freshness rule (`commit_id == headRefOid` AND `created_at >= trigger`) is applied ONLY to the inline comments. `issue-comments.json` is the entire issue stream, so an older Codex review \u2014 or a HUMAN comment that merely mentions 'P1' \u2014 is classified into the current round. \u26a0\ufe0f IT THEN BLOCKS, AND IT CANNOT BE FIXED: such an entry has no `path`/`line`, which is exactly what pr-fixer needs, so the round stalls or burns budget on something no fixer can act on. Fix: filter EVERY source by the two Codex identities and the trigger timestamp before classifying, not just the inline stream. Found on viernes-bff#50. \u27c2 [fix riding the 2026-09-04 refactor PR: classification code-ified as `wait-for-codex.sh classify` with the freshness rule applied to ALL streams, issue comments included]",
-          "status": "pending",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "5790e6b6fccea0df644c85e87099179561072bfc", "ref": "5790e6b6fccea0df644c85e87099179561072bfc", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
