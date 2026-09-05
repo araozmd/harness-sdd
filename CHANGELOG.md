@@ -4,6 +4,22 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.72.0] — 2026-09-05
+
+### Changed — 🔧 Claude-first selection defaults (E25-F01)
+
+Non-Claude front-ends (codex, gemini, opencode, antigravity) are **parked by
+default on FRESH targets**: the scripted no-override run, the undetected-`host`
+fallback, and the interactive picker's pre-checked baseline all resolve to `claude`
+only (each previously answered ALL). A default flip, deliberately not a removal —
+every key stays legal via an explicit `--agents=<csv>` / `HARNESS_AGENTS` opt-in, an
+existing install's recorded selection is preserved byte-for-byte, and the legacy
+stamped-install-without-a-selection arm keeps its long-standing ALL answer. Rationale
+and the evidence bar for any later true removal: `docs/RATIONALE.md` → the ablation
+doctrine ("float, don't pin"). Every active target was already Claude-only (both
+umbrellas, 2026-09-05), and the multi-front-end matrix is the installer's largest
+complexity share; the flip produces the opt-in evidence a deletion decision needs.
+
 ## [0.71.0] — 2026-09-05
 
 ### Added — ✨ merge receipts are code: `wait-for-codex.sh merge-verify` (E99-F141 + E99-F144)

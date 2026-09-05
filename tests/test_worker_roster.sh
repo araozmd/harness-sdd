@@ -31,6 +31,11 @@
 # Zero other dependencies; self-cleaning temp dir.
 
 set -eu
+# E25-F01: non-Claude front-ends are parked by default on FRESH targets, so a bare
+# installer run now stamps claude only. This suite's fixtures predate the flip and
+# assert artifacts across the full matrix; pin the pre-flip selection explicitly
+# (an explicit --agents in any call still wins over this env seed).
+export HARNESS_AGENTS="claude,gemini,opencode,antigravity,codex"
 
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-roster)"

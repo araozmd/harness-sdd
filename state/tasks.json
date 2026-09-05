@@ -1065,7 +1065,7 @@
         {
           "id": "E25-F01",
           "title": "Claude-first selection defaults: fresh-undetected + interactive default become claude-only; explicit --agents opt-in unchanged; recorded selections never clobbered; docs name the park",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
