@@ -48,13 +48,48 @@ silently grant a fresh budget — PR #86 reached round 12 against `max_rounds: 4
 way, and the `needs-human` hand-off that should have fired at round 4 never did.
 
 ```bash
-round=1
+round=1; resume_round=""
 for _d in .pr-loop/$pr_number/round-*/; do
   [ -d "$_d" ] || continue                       # unmatched glob — no cache yet
+  # A round COUNTS toward the budget only when it recorded an outcome (E99-F142/F150):
+  # `mkdir -p` runs before preflight, so a run that died pre-verdict leaves a directory
+  # that must not burn budget — and an interrupted CAP round must not shove `round`
+  # past `max_rounds` into the merge flow with no verdict at all.
+  [ -f "${_d}outcome" ] || continue
   _n="${_d%/}"; _n="${_n##*/round-}"
   case "$_n" in ''|*[!0-9]*) continue ;; esac
-  [ "$_n" -ge "$round" ] && round=$((_n + 1))
+  if [ "$_n" -ge "$round" ]; then round="$_n"; resume_round="${_d%/}"; fi
 done
+# A COMPLETED HAND-BACK IS TERMINAL for its head (Codex #165 round-4): with
+# `auto_merge: false` the loop deliberately finishes green-and-unmerged, so a
+# re-invocation must not burn budget re-reviewing it — unless the head has moved.
+if [ -n "$resume_round" ] \
+   && [ "$(head -n 1 "$resume_round/disposed" 2>/dev/null | tr -d ' \t\r\n')" = "handback" ]; then
+  _hb_head="$(jq -r '.headRefOid // ""' "$resume_round/pr.json" 2>/dev/null || echo '')"
+  _hb_now="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo '')"
+  if [ -n "$_hb_head" ] && [ "$_hb_head" = "$_hb_now" ]; then
+    echo "sdd-pr-loop: PR #$pr_number already completed its auto_merge:false hand-back at this head — nothing to do" >&2
+    exit 0
+  fi
+fi
+# `outcome` marks a review OBSERVED, not a round FINISHED (Codex #165): it is written the
+# moment the watcher exits — before classification, fixing, or the gate. A round is
+# finished only when `disposed` exists (written at each terminal disposition below). An
+# observed-but-undisposed findings/clean round is RE-ENTERED: its review is already paid
+# for and cached, so skipping it would burn a fresh review on unchanged code — and at the
+# cap it would discard a cached clean verdict into the no-verdict needs-human path.
+if [ -n "$resume_round" ]; then
+  if [ ! -f "$resume_round/disposed" ] \
+     && grep -qE '^(findings|clean)$' "$resume_round/outcome" 2>/dev/null; then
+    : # RE-ENTER this round: skip ONLY the trigger and the watcher (steps 1-2).
+      # Step 0 preflight and §0c checkout verification ALWAYS re-run first — the tree
+      # may have moved between invocations, and cached findings handed to fixers on an
+      # unrelated checkout would push there (Codex #165 round-3 P1). Then resume at
+      # step 2b/3 on the cached files (`evaluate` and `classify` are offline).
+  else
+    round=$(( round + 1 ))
+  fi
+fi
 while [ "$round" -le "$max_rounds" ]; do
   round_dir=".pr-loop/$pr_number/round-$round"
   mkdir -p "$round_dir"
@@ -71,6 +106,68 @@ the PR exists and is OPEN. It posts **nothing**. On a non-zero exit (`5`), **STO
 report its one-line diagnostic verbatim — do not post `@codex review`, do not poll, do
 not fall back to a hand-rolled check. A repo without the Codex GitHub App should leave
 `pr_loop.enabled` at its opt-in default of `false` rather than run this loop.
+
+### 0c. The working tree must BE the PR (E99-F146 / E99-F147)
+
+The loop reviews the REMOTE PR, but every fixer round commits and pushes from the LOCAL
+checkout — nothing else ties the two together. When `$ARGUMENTS` names a PR number,
+verify the tie before any round; the failure is silent and double-sided otherwise (the
+reviewed PR looks unfixed while an unrelated branch quietly receives the commits):
+
+```bash
+# The receipt is the HEAD OID, never a branch name (Codex #165 round-2 P1): an unrelated
+# local branch can share the PR's headRefName, and a fork PR's head is not on `origin`
+# at all. `gh pr checkout` resolves both (it fetches the PR's actual head, fork or not);
+# the OID equality afterwards is what proves the tree IS the reviewed PR.
+pr_head_oid="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo '')"
+if [ -z "$pr_head_oid" ]; then
+  echo "cannot resolve the PR's head oid — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL — a warning that falls through would preserve the exact
+             # failure this section closes (fixes pushed from an unrelated tree)
+fi
+# A DIRTY tracked worktree fails closed first (Codex #165 round-4 P1): an
+# uncommitted edit survives `gh pr checkout`, and a fixer later running
+# `git add <path>` on an assigned file would sweep the pre-existing change into its
+# fix commit and push it to the PR. Untracked files are fine — fixers add specific
+# tracked paths only.
+if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+  echo "working tree has uncommitted tracked changes — they would be swept into fixer commits; commit/stash them first — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL
+fi
+# ALWAYS run the checkout — object equality alone is not a binding (Codex #165
+# round-3 P1): a detached HEAD or an unrelated local branch can sit at the right OID
+# while the later plain `git push` fails, or lands on a different ref entirely.
+# `gh pr checkout` binds branch, upstream and push destination (fork-safe) and is
+# idempotent when the tree is already on the PR branch.
+if ! gh pr checkout "$pr_number" 2>/dev/null; then
+  echo "could not check out PR #$pr_number (conflicting local changes?) — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL, same reason
+fi
+if [ -z "$(git branch --show-current 2>/dev/null)" ]; then
+  echo "working tree is detached after checkout — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL
+fi
+if [ "$(git rev-parse HEAD 2>/dev/null)" != "$pr_head_oid" ] \
+   && ! git merge-base --is-ancestor "$pr_head_oid" HEAD 2>/dev/null; then
+  # Exact equality OR the PR head as an ANCESTOR of HEAD. The ancestor case is an
+  # interrupted round's own local fixer commits, not yet pushed (fixers commit
+  # locally; the coordinator pushes at round end) — rejecting them would strand the
+  # promised re-entry at needs-human and discard legitimate fix work (Codex #165
+  # round-4). Anything else is an unrelated tree and fails closed.
+  echo "working tree is neither at the PR head $pr_head_oid nor locally ahead of it — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL — OID-verified even after a successful checkout
+fi
+```
+
+**Fixers share ONE checkout and ONE index — dispatch them SEQUENTIALLY** (E99-F146).
+Concurrent fixers overwrite each other's edits to shared files, contend on
+`.git/index.lock`, and sweep one another's staged changes into misattributed commits.
+One fixer at a time, one commit each; the round still pushes once at the end.
 
 ### 1. Trigger the review
 
@@ -401,7 +498,10 @@ gate_rc=$?
 
 **The gate's verdict is binding, and it is asked exactly ONCE per round.** `merge` (0) means
 the review is finished: leave this step entirely, **break the loop before advancing the round
-counter**, and go to step 6 then "ready to merge". Breaking preserves the successful `round`
+counter**, and go to step 6. Do **NOT** write `disposed` here: the merge path writes it
+only after its terminal action completes (the verified merge, or the `auto_merge:
+false` hand-back), so an interruption anywhere in between RE-ENTERS this round on its
+cached green verdict instead of stranding it (Codex #165 round-2) then "ready to merge". Breaking preserves the successful `round`
 value, so the Ready-to-merge section reads `round-$round/pr.json` from the correct round.
 (The one thing that may follow a `merge` verdict without merging is an explicit, recorded
 **override** — see "When you judge the badge wrong" below. It does not change what the gate
@@ -501,9 +601,9 @@ that.
 
 | Round | Behavior |
 |---|---|
-| below `max_rounds - 1` | For each blocking comment: **`acted_append` it first**, then spawn one **`pr-fixer`** sub-agent, passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
+| below `max_rounds - 1` | For each blocking comment: **`acted_append` it first**, then spawn one **`pr-fixer`** sub-agent **at a time — sequentially, never concurrently** (§0c: one shared checkout and index), passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
 | `max_rounds - 1` | **`acted_append` every comment going into the prompt**, then build **one combined fix prompt** (all blocking comments concatenated) and escalate to a **different worker** if the host CLI offers one; where no router exists, run one combined **in-session** pass instead. Then push. |
-| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. **`acted_append` every blocking comment that survived** — the cap round disposes of them by declaring them, not by fixing them. Post the handover summary listing every round, the surviving comments, and the cache path — **and the trend verdict, re-run after these rows exist**. When it is `non-converging`, the message must say what the tool's remedy line says, and must show the per-round series and the concentration list that make the case. Return failure. |
+| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. **`acted_append` every blocking comment that survived** — the cap round disposes of them by declaring them, not by fixing them — then write `echo handover > "$round_dir/disposed"`. Post the handover summary listing every round, the surviving comments, and the cache path — **and the trend verdict, re-run after these rows exist**. When it is `non-converging`, the message must say what the tool's remedy line says, and must show the per-round series and the concentration list that make the case. Return failure. |
 
 At the default `max_rounds: 4` that is rounds 1–2 per-comment, round 3 combined
 escalation, round 4 `needs-human`. A `max_rounds` below `3` simply has no per-comment
@@ -528,7 +628,10 @@ echo "<role>"   > "$round_dir/role"     # implementation | fix | escalation
 After the fix commits land, re-fetch the PR JSON and check the gates **before** triggering
 another Codex round:
 
-- CI green (`statusCheckRollup[*].conclusion == "SUCCESS"` for required checks)
+- CI green — **required checks only**, via `gh pr checks "$pr_number" --required`.
+  The rollup does not mark which entries are REQUIRED, so a failing or hanging
+  *optional* job (a nightly, an advisory scanner) must never stall or hand off a PR
+  whose required checks are all green (E99-F152).
 - Tests / typecheck / lint green (subsets of CI)
 
 **Do not ask the gate again.** It was asked once, at step 5, and its verdict is what routed
@@ -579,6 +682,7 @@ GitHub's default squash body, so the squash path always reaches its merge.
 After the per-round gates and fixes complete:
 
 ```bash
+echo fixed > "$round_dir/disposed"    # this round's disposition is COMPLETE (fixes pushed, checks read)
 round=$(( round + 1 ))
 done
 ```
@@ -618,7 +722,18 @@ Save the rendered summary to `.pr-loop/<pr>/handover-summary.md` and post it on
 
 ### Ready to merge (success)
 
-Post a summary comment on the PR:
+**Enter this section ONLY on a `merge` verdict the gate returned in THIS invocation**
+(step 5, `pr-gate.sh` exit 0). A resume whose scan already put `round` past
+`max_rounds` skipped the while loop and holds NO verdict — an interrupted cap round
+with blocking findings would otherwise fall through here and auto-merge (E99-F150).
+No verdict of this run's own ⇒ the cap row's `needs-human` terminal state, never this
+section.
+
+**Build** the summary now — but post it only when a terminal state actually lands
+(after `merged=1` below, or with the `auto_merge: false` hand-back). Posting first
+leaves a contradictory "all gates green" comment sitting above a failure hand-off,
+misleading both humans skimming the thread and automation watching comments
+(E99-F151).
 
 ```
 sdd-pr-loop: all gates green ✅
@@ -638,8 +753,12 @@ review thread resolved before merge, but this loop may only auto-resolve threads
 owns** (opened by the Codex bot). Auto-resolving a human reviewer's unresolved
 conversation would silently bypass the merge gate that keeps human feedback meaningful.
 So: fetch each unresolved thread with its participants; if **any** non-Codex participant
-appears on an unresolved thread, **stop and go to the needs-human terminal state — resolve
-nothing and do not merge**. Only when every remaining unresolved thread is Codex-owned do
+appears on an unresolved thread, **resolve nothing and do not merge** — and pick the
+terminal state by the config, not reflexively (E99-F143): with `auto_merge` **true**
+this is the **needs-human** terminal state; with `auto_merge` **false** the loop's own
+contract below already hands an unmerged green PR back to the human as **success**, and
+an unresolved human thread is exactly the feedback that hand-back exists to deliver —
+take the hand-back, return success. Only when every remaining unresolved thread is Codex-owned do
 you resolve them (via the GraphQL `resolveReviewThread` mutation — there is no REST/`gh pr`
 equivalent) and proceed.
 
@@ -726,12 +845,17 @@ UNRESOLVED
 fi
 ```
 
-**If `merge_ok=0`, stop here** — go straight to the needs-human terminal state and run
-**none** of the merge commands below.
+**If `merge_ok=0`, run none of the merge commands below — and route by config, not
+reflexively** (E99-F143): with `auto_merge` **true** this is the needs-human terminal
+state; with `auto_merge` **false** and zero blocking findings it is the success
+hand-back described next — the unresolved human thread is exactly the feedback that
+hand-back exists to deliver.
 
 While `pr_loop.auto_merge` is **false**, stop after posting the all-gates-green summary
 and hand back to the human — resolve threads if you like, but **do not merge**. That
-hand-back **completes** the loop: **return success**. It is the one terminal state where an
+hand-back **completes** the loop: write `echo handback > "$round_dir/disposed"` — the TYPED marker is what lets the
+next invocation recognize a completed hand-back instead of spending budget
+re-reviewing a deliberately-unmerged green PR — and **return success**. It is the one terminal state where an
 unmerged PR is the intended outcome, so never route it to needs-human.
 
 Where `pr_loop.auto_merge` is **true**, merge with the configured `merge_strategy`,
@@ -742,6 +866,11 @@ Track whether the merge command itself
 eligibility — so cleanup never runs on a failed or pending merge:
 
 ```bash
+# The reviewed head, re-read from THIS round's cache and passed to every merge variant
+# via --match-head-commit, so receipt and merge are ATOMIC (Codex #165 P1): a push
+# landing between `merge-verify pre` and `gh pr merge` cannot slip an unreviewed head
+# into the merge — GitHub itself rejects the mismatch.
+reviewed_head="$(jq -r '.headRefOid // ""' "$round_dir/pr.json" 2>/dev/null || echo '')"
 merged=0
 # Fail-closed base check (E21-F07 / Codex #163 P1): the stacked lane is deprecated, so a
 # PR whose base is NOT the default branch must never auto-merge — `gh pr merge` merges
@@ -753,17 +882,25 @@ base_ref="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/de
 if [ -z "$default_branch" ] || [ -z "$base_ref" ] || [ "$base_ref" != "$default_branch" ]; then
   echo "sdd-pr-loop: merge refused — base '$base_ref' is not the default branch '$default_branch' (stacked lane deprecated, E21-F07); retarget the PR — needs-human" >&2
   gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+elif [ -z "$reviewed_head" ]; then
+  echo "sdd-pr-loop: merge refused — reviewed head unreadable from the round cache — needs-human" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+elif ! sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" pre; then
+  # E99-F144: a push AFTER the clean review must not inherit its verdict — the receipt
+  # compares the PR's current head against the head this round actually reviewed.
+  echo "sdd-pr-loop: merge refused — head moved since the reviewed round (unreviewed commits) — needs-human" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
 elif [ "${merge_ok:-0}" != "1" ]; then
   echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
 elif [ "${merge_strategy:-merge}" = "squash" ]; then
   msg=".pr-loop/$pr_number/squash-message.txt"
   if [ -s "$msg" ]; then
-    gh pr merge "$pr_number" --squash --delete-branch --body-file "$msg" && merged=1
+    gh pr merge "$pr_number" --squash --delete-branch --body-file "$msg" --match-head-commit "$reviewed_head" && merge_oid="$(sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
   else                        # no message composed — squash with GitHub's default body
-    gh pr merge "$pr_number" --squash --delete-branch && merged=1
+    gh pr merge "$pr_number" --squash --delete-branch --match-head-commit "$reviewed_head" && merge_oid="$(sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
   fi
 else
-  gh pr merge "$pr_number" --merge --delete-branch && merged=1
+  gh pr merge "$pr_number" --merge --delete-branch --match-head-commit "$reviewed_head" && merge_oid="$(sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
 fi
 ```
 
@@ -773,6 +910,8 @@ never merely because thread eligibility was satisfied:
 
 ```bash
 if [ "${merged:-0}" = "1" ]; then
+  echo merged > "$round_dir/disposed"   # terminal action VERIFIED (post receipt) — only
+                                        # now is the round finished; an interrupt re-enters
   default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
   branch=$(gh pr view "$pr_number" --json headRefName --jq '.headRefName')
   git checkout "$default_branch" >/dev/null 2>&1 || true
@@ -782,8 +921,15 @@ if [ "${merged:-0}" = "1" ]; then
 fi
 ```
 
-If `gh pr merge` fails (branch-protection race, a required review not yet registered, a
-re-opened thread), retry once after 30s. If it still fails the PR will not land: take the
+`merged=1` requires the **post receipt**: `gh pr merge` exiting 0 can mean *enqueued*
+under a merge queue or repo-level auto-merge, and a PR later rejected from the queue
+would be recorded as landed with its branch already deleted (E99-F141). The receipt's
+stdout is the merge commit oid — pass it to `tasks-lock.py set-status <id> done
+--evidence` as the landing evidence.
+
+If `gh pr merge` fails — or exits 0 but fails the post receipt (same state: NOT landed) —
+(branch-protection race, a required review not yet registered, a re-opened thread),
+retry once after 30s. If it still fails the PR will not land: take the
 needs-human terminal state below — label `needs-human`, post the error alongside the
 handover summary, and **return failure**. A merge that auto-merge was asked to land and did
 not land is never reported as success.
@@ -823,6 +969,7 @@ merge did not land, that is this state, and it is a failure.
     reactions.json            # reactions on the @codex trigger comment (👍 = clean)
     trigger-ts.txt            # freshness anchor
     outcome                   # ONE WORD: findings | clean | timeout | unresolved (step 2b)
+    disposed                  # terminal disposition, TYPED: fixed | merged | handback | handover
     fresh-comments.json, comments.json, blocking.json, status.json
     acted.json                # appended at DISPATCH (step 5): one row per finding this round
                               # acted on, severity + override per row. Absent when the round

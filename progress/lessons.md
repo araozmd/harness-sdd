@@ -23,6 +23,9 @@
   default for every future consumer (6 suites red). Repo-local model tiering lives in the
   `.claude/agents/*.md` shim `model:` keys instead; same pattern as the pr-loop
   severities (repo raises P2 locally, seed stays P0,P1).
+- [2026-09-05 builder] `run-tests.sh --jobs 8` occasionally fails 2-3 unrelated suites
+  under heavy box load; each passes standalone. Before chasing a "failure" in a suite
+  your diff never touched, re-run it alone — and only debug if it fails solo.
 - [2026-09-05 builder] Never invoke a bash-shebang script via `sh` inside a test suite —
   under the strict runner the suite runs in dash, and `set -o pipefail` (or any bashism)
   aborts the script at startup, making the test flake by host shell. Run it through its
