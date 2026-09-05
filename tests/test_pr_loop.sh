@@ -2211,10 +2211,16 @@ test_lane_deprecation_reclaimed() {                    # F07 R2/R3/R4/R5
   _live="$(grep -rl "pr-stack-guard" "$SRC/tools" "$SRC/agents" "$SRC/init.sh" \
              "$SRC/harness-install.sh" "$SRC/.claude" 2>/dev/null || true)"
   [ -z "$_live" ] || fail "F07 R4: live pr-stack-guard reference remains in: $_live"
-  # R2: neither command body carries stacked machinery.
+  # R2: neither command body carries stacked machinery — but BOTH keep the fail-closed
+  # base check (Codex #163 P1): with the guard gone, a leftover non-default-base PR
+  # would auto-merge into a stale parent branch and read as a success.
   for _b in "$SRC/.claude/commands/sdd-pr-loop.md" "$BODY"; do
     grep -qE "Base-change detection|merge-order guard|guard_deferred|restack" "$_b" \
       && fail "F07 R2: stacked machinery still present in $_b"
+    grep -qF '[ "$base_ref" != "$default_branch" ]' "$_b" \
+      || fail "F07 R2: $_b lost the fail-closed non-default-base merge refusal"
+    grep -qF "stacked lane deprecated, E21-F07" "$_b" \
+      || fail "F07 R2: $_b's base refusal does not name the deprecation"
   done
   # R3: the WORKFLOW notice names the sibling split and drops the lane how-to,
   # asserted fence-aware over the section only (never a whole-file grep).

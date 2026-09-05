@@ -743,7 +743,17 @@ eligibility — so cleanup never runs on a failed or pending merge:
 
 ```bash
 merged=0
-if [ "${merge_ok:-0}" != "1" ]; then
+# Fail-closed base check (E21-F07 / Codex #163 P1): the stacked lane is deprecated, so a
+# PR whose base is NOT the default branch must never auto-merge — `gh pr merge` merges
+# into the CURRENT base, so a leftover stacked child would land in a stale parent branch,
+# have its head deleted, and be reported as a success while absent from the default
+# branch. Read both names fresh; an unreadable value refuses the merge, never allows it.
+default_branch="${default_branch:-$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo '')}"
+base_ref="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo '')"
+if [ -z "$default_branch" ] || [ -z "$base_ref" ] || [ "$base_ref" != "$default_branch" ]; then
+  echo "sdd-pr-loop: merge refused — base '$base_ref' is not the default branch '$default_branch' (stacked lane deprecated, E21-F07); retarget the PR — needs-human" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+elif [ "${merge_ok:-0}" != "1" ]; then
   echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
 elif [ "${merge_strategy:-merge}" = "squash" ]; then
   msg=".pr-loop/$pr_number/squash-message.txt"
