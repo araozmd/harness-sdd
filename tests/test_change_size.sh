@@ -780,6 +780,15 @@ grep -qi 'section it names\|grep the SECTION' "$_BUILDER" \
   || fail "R9c: builder.md does not carry the rule that a prose-contract test must grep the SECTION it names, not the whole file"
 grep -qF 'index($0,h)' "$_BUILDER" \
   || fail "R9c: builder.md states the section-scoping rule but gives no extraction recipe — the rule is only followed when it is copy-pasteable"
+# E99-F75's sibling rule: two co-occurring tokens across folded newlines, composed WITH
+# the section extraction (a whole-file fold recreates the false positive the section rule
+# forbids). Pinned with the same distinctive-fixed-substring discipline this block teaches.
+awk 'BEGIN{h="Principles"} /^#+ /{k=(index($0,h)>0);next} k' "$_BUILDER" | tr '\n' ' ' \
+  | grep -qiE 'TWO co-occurring tokens[^.]{0,80}folded newlines' \
+  || fail "R9c/F75: builder.md Principles lost the two-token folded-newline convention"
+awk 'BEGIN{h="Principles"} /^#+ /{k=(index($0,h)>0);next} k' "$_BUILDER" | tr '\n' ' ' \
+  | grep -qiE 'FAILS on the pre-change +blob' \
+  || fail "R9c/F75: builder.md's two-token rule lost its verify-against-the-pre-change-blob clause"
 # The lens itself, matched as DISTINCTIVE FIXED substrings — one per operative clause.
 # The first version of this assertion was `grep -qi 'reachable\|other than the one'`, and it was
 # the fifth instance of the very pattern it guards: those are ordinary English words, so replacing

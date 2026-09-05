@@ -4,7 +4,7 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
-## [0.73.0] — 2026-09-05
+## [0.72.1] — 2026-09-05
 
 ### Fixed — 🐛 verification hygiene: assertions that can actually fail (E99-F75/F76/F88)
 
