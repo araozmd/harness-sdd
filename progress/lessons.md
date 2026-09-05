@@ -34,3 +34,7 @@
   — substring matches inside longer words mis-tag severities. First match wins **by
   position**, and matches must be word-boundary anchored. (Now enforced in
   `tools/wait-for-codex.sh classify` — use it, never re-implement.)
+- [2026-09-05 orchestrator] `tasks-lock.py set-status` SYNCS SPEC FRONTMATTER as a side
+  effect — commit the touched spec files WITH the board write, never `git add
+  state/tasks.json` alone. A later `reset --hard` on that branch destroyed the synced
+  frontmatter and broke init.sh's consistency gate on main for every downstream lane.
