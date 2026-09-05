@@ -330,8 +330,26 @@ def report_session(records, out):
             out.append("  - board targets touched: %s" % ", ".join(seen))
         out.append("")
     if not phases and not closes:
-        # Transitions alone still tell the story of the session — never hide them
-        # behind the phase table's absence.
+        # Transitions alone still tell the story of the session — never hide them behind
+        # the phase table's absence. In particular the ROUND COUNT survives: this is the
+        # 0%-phase-compliance case structural telemetry exists for, and the transition
+        # sequence carries the rounds (a feature's first move to in-progress opens round
+        # 1; each in-review → in-progress bounce opens the next). Reported as the max
+        # across features, matching the phase-based counter's semantics.
+        rounds_by_feature = {}
+        for _, r in transitions:
+            if r.get("kind") == "epic":
+                continue
+            subj = r.get("subject") or r.get("feature")
+            if not subj or r.get("to") != "in-progress":
+                continue
+            if r.get("from") == "in-review":
+                rounds_by_feature[subj] = rounds_by_feature.get(subj, 1) + 1
+            else:
+                rounds_by_feature.setdefault(subj, 1)
+        out.append("- Build/review rounds (derived from transitions): %d"
+                   % (max(rounds_by_feature.values()) if rounds_by_feature else 0))
+        out.append("")
         return
     # per-phase durations
     out.append("| phase | count | total duration |")

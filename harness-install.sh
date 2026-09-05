@@ -2789,8 +2789,8 @@ $_tlog" ;;                                       # relative override → also ig
   # `git status` so a killed mid-campaign lane leaves detectable residue (the E99-F207
   # incident-class). The 26x change-size overstatement E99-F71 fixed is now handled at the
   # measurer instead — tools/change-size.sh classifies `\.mutbak$` as generated — so the
-  # budget never sees them while git always does. The migration below also REMOVES a bare
-  # `*.mutbak` line an earlier version seeded.
+  # budget never sees them while git always does. The migration below WARNS about a bare
+  # `*.mutbak` line an earlier version seeded (never deletes — provenance is unprovable).
   #
   # NOTE what is deliberately NOT here: .agents/, .codex/ and .opencode/. An earlier revision
   # ignored them as "installer output", and Codex raised a correct P1: the documented install
@@ -2825,12 +2825,14 @@ AGENTS.override.md'
       [ -n "$_pat" ] || continue
       grep -qxF "$_pat" "$TARGET/.gitignore" || printf '%s\n' "$_pat" >> "$TARGET/.gitignore"
     done
-    # Migration (2026-09-04): drop the bare `*.mutbak` ignore an earlier version seeded —
-    # it hid mutation residue from `git status`, defeating reviewer.md's visibility rule.
+    # Migration (2026-09-04, WARN-ONLY): an earlier version seeded a bare `*.mutbak`
+    # ignore, which hides mutation residue from `git status` and defeats reviewer.md's
+    # visibility rule. The installer cannot prove any given line's provenance — an
+    # operator may have added the same rule for their own workflow — and this file is
+    # append-only for user entries, so nothing is deleted: the contradiction is NAMED
+    # and the removal is the operator's one-line call.
     if grep -qxF '*.mutbak' "$TARGET/.gitignore"; then
-      _mb_tmp="$TARGET/.gitignore.tmp.$$"
-      grep -vxF '*.mutbak' "$TARGET/.gitignore" > "$_mb_tmp" && mv "$_mb_tmp" "$TARGET/.gitignore"
-      info "removed the seeded '*.mutbak' ignore — mutation backups stay visible; change-size.sh classifies them instead"
+      echo "⚠️  .gitignore ignores '*.mutbak' — this hides mutation-campaign residue from git status, defeating reviewer.md's visibility rule (an earlier harness seeded it; change-size.sh now classifies .mutbak instead). If the rule is not deliberately yours, delete that line. (warn-only)" >&2
     fi
     info "project-root .gitignore ensured (personal/runtime agent state)"
   fi

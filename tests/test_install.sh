@@ -475,22 +475,25 @@ grep -qxF '.claude/worktrees/' "$T/.gitignore"          || fail "root .gitignore
 grep -qxF '*.mutbak' "$T/.gitignore" && fail "root .gitignore still seeds *.mutbak — mutation residue would be invisible in git status (contradicts reviewer.md)"
 grep -qF '\.mutbak$' "$SRC/tools/change-size.sh" \
   || fail "change-size.sh GEN_RE does not classify .mutbak — without the ignore, backups would inflate the tier again (E99-F71)"
-# Behavior: an already-seeded *.mutbak is removed on upgrade, and an append onto a file
-# with no trailing newline never fuses entries.
+# Behavior: an existing *.mutbak line is PRESERVED (provenance is unprovable, the file is
+# append-only for user entries — Codex #160 P2) but WARNED about by name; and an append
+# onto a file with no trailing newline never fuses entries.
 _mb="$(mktemp -d 2>/dev/null || mktemp -d -t harness-mb)"
 mkdir -p "$_mb"
 printf '*.mutbak\n' > "$_mb/.gitignore"
 printf 'my-own-entry' >> "$_mb/.gitignore"       # deliberately NO trailing newline
-CODEX_HOME="$T/codex-home" sh "$SRC/harness-install.sh" "$_mb" >/dev/null 2>&1 \
+CODEX_HOME="$T/codex-home" sh "$SRC/harness-install.sh" "$_mb" >/dev/null 2>"$_mb/.err" \
   || fail "mutbak-migration install run failed"
 grep -qxF '*.mutbak' "$_mb/.gitignore" \
-  && fail "upgrade did not remove the previously-seeded *.mutbak ignore"
+  || fail "an existing *.mutbak ignore was DELETED — the installer cannot prove provenance and must not remove user entries"
+grep -q "mutbak" "$_mb/.err" \
+  || fail "no warning named the *.mutbak ignore contradiction (reviewer.md visibility rule)"
 grep -qxF 'my-own-entry' "$_mb/.gitignore" \
   || fail "gitignore append fused onto a final line lacking a trailing newline (my-own-entry corrupted)"
 grep -q 'my-own-entry.claude' "$_mb/.gitignore" \
   && fail "gitignore append fused a harness pattern onto the user's last line"
 rm -rf "$_mb"
-pass "*.mutbak un-seeded + removed on upgrade; gitignore appends survive a missing trailing newline"
+pass "existing *.mutbak ignore preserved + warned about; gitignore appends survive a missing trailing newline"
 
 # Stale slash-command references in the target's own prose are NAMED at install time
 # (warn-only): /pr-loop (the pre-E18 name) and any /sdd-* the current version does not

@@ -417,6 +417,23 @@ assert ft and ft[0]["kind"] == "feature" and ft[0]["feature"] == "E01-F01", ft
 PY
 pass "structural telemetry distinguishes epic rollups from feature transitions"
 
+# A transition-ONLY session still reports its round count (Codex #160 P2): this is the
+# 0%-phase-compliance case structural telemetry exists for, and dropping `Build/review
+# rounds` there would gut the required session summary exactly when it matters.
+_trlog="$T/transitions-only.jsonl"
+{
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E07-F01","feature":"E07-F01","from":"pending","to":"in-progress","at":"2026-09-05T10:00:00Z"}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E07-F01","feature":"E07-F01","from":"in-progress","to":"in-review","at":"2026-09-05T11:00:00Z"}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E07-F01","feature":"E07-F01","from":"in-review","to":"in-progress","at":"2026-09-05T12:00:00Z"}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"epic","subject":"E07","from":"in-progress","to":"done","at":"2026-09-05T13:00:00Z"}'
+} > "$_trlog"
+_trout="$(python3 "$REPORT" session --log "$_trlog")"
+printf '%s\n' "$_trout" | grep -q 'Build/review rounds (derived from transitions): 2' \
+  || fail "transition-only session did not derive the round count (one bounce = 2 rounds); got: $_trout"
+printf '%s\n' "$_trout" | grep -q 'epic E07' \
+  || fail "transition-only session did not label the epic rollup as an epic"
+pass "transition-only session reports a derived round count and labels epics"
+
 # Kill-switch honored, and an unwritable log NEVER blocks the board write.
 printf 'telemetry:\n  enabled: false\n' > "$_tlb/harness.config.yaml"
 rm -f "$_tlb/telemetry.jsonl"

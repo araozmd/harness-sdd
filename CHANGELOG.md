@@ -58,8 +58,9 @@ full build→review→PR cycle; a lesson costs a sentence.
 - `change-size.sh` GEN_RE covers `coverage/` (a repo generating into a non-ignored
   coverage dir booked ~20k phantom production lines) and `\.mutbak$`.
 - The `*.mutbak` gitignore seed is REVERSED (it contradicted reviewer.md's residue-
-  visibility rule — the E99-F207 incident class); upgrades remove the previously seeded
-  line, and the change-size classifier absorbs the E99-F71 inflation instead.
+  visibility rule — the E99-F207 incident class); upgrades WARN about an existing line
+  by name (never delete it — provenance is unprovable and the file is append-only for
+  user entries), and the change-size classifier absorbs the E99-F71 inflation instead.
 - Installer `.gitignore` appends no longer fuse onto a final line lacking a trailing
   newline.
 - `init.sh` prints the escalation arming state (`ARMED` / `DISARMED`) whenever
