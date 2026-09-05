@@ -240,8 +240,12 @@ pass "R19 portable_contract"
 # ── R20: WORKFLOW.md places /sdd-drill between /sdd-plan + /sdd-next, only flip ────
 # R20_workflow_doc
 grep -qF '/sdd-drill' docs/WORKFLOW.md        || fail "R20: WORKFLOW.md does not mention /sdd-drill"
-tr '\n' ' ' < docs/WORKFLOW.md | grep -qiE 'flips an epic[^.]{0,10}draft → planned' || fail "R20: WORKFLOW.md does not make /sdd-drill the draft-to-planned flip"
-tr '\n' ' ' < docs/WORKFLOW.md | grep -qiE 'stamp[^.]{0,10}autonomous: true' || fail "R20: WORKFLOW.md does not mention the autonomous: true stamp"
+# Section-scoped (Codex #169 round-2): the fix lane's own "re-stamp autonomous: true"
+# prose elsewhere in WORKFLOW.md would satisfy a whole-file fold after the drill
+# contract lost its stamp sentence.
+_r20_sect() { awk 'BEGIN{h="Per-epic drill-down"} /^#+ /{k=(index($0,h)>0);next} k' docs/WORKFLOW.md | tr '\n' ' '; }
+_r20_sect | grep -qiE 'flips? .{0,20}epic[^.]{0,10}draft → planned' || fail "R20: WORKFLOW.md drill section does not make /sdd-drill the draft-to-planned flip"
+_r20_sect | grep -qiE 'stamp[^.]{0,10}autonomous: true' || fail "R20: WORKFLOW.md drill section does not mention the autonomous: true stamp"
 grep -qF '/sdd-plan' docs/WORKFLOW.md         || fail "R20: WORKFLOW.md does not mention /sdd-plan"
 grep -qF '/sdd-next' docs/WORKFLOW.md         || fail "R20: WORKFLOW.md does not mention /sdd-next"
 grep -qi 'only step that flips\|only.*flip' docs/WORKFLOW.md || fail "R20: WORKFLOW.md does not state the only-flip step"
