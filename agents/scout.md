@@ -45,9 +45,11 @@ This mode **preserves your read-only contract**: you still **write only to `prog
 **no** state change, and **never** write `state/tasks.json`. You **flag**; the Orchestrator
 acts (it alone owns `set_status` and any demotion).
 
-**Inputs** (all read-only): the **just-completed epic** (its new/changed `specs/adr/NNNN-*.md`,
-its `epic.md`, what its features changed), the remaining **`draft`/`planned`/`pending`** epics
-(their one-paragraph briefs), and `specs/architecture.md` / `specs/adr/*`.
+**Inputs** (all read-only): the **just-completed epic** (its new/changed ADRs from the
+platform space `specs/adr/` or a product space `specs/<product>/adr/` — qualified as
+`<ns>/ADR-NNNN` or `<ns> ADR-NNNN` in citations — its `epic.md`, what its features
+changed), the remaining **`draft`/`planned`/`pending`** epics (their one-paragraph
+briefs), and `specs/architecture.md` plus every `adr/` namespace under `specs/`.
 
 **Findings file** — write to `progress/<run>/scout-drift-<completed-epic>.md` with, **per
 remaining epic**, a verdict of **still-valid** or **stale**. For a **stale** verdict, name the

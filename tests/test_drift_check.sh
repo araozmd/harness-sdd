@@ -32,7 +32,7 @@ pass() { echo "ok - $1"; }
 
 # ── R1: store/local.md formalizes the epic-done rollup (no new status/schema) ─────
 # R1_epic_done_rollup_doc
-grep -qi 'epic' "$STORE"                                   || fail "R1: store does not mention epic"
+tr '\n' ' ' < "$STORE" | grep -qiE 'epic[^.]{0,40}derived and persisted' || fail "R1: store does not state the epic-done status is derived and persisted"
 grep -qi 'all features\|every feature'  "$STORE"          || fail "R1: store does not state all/every feature"
 grep -qi 'derive\|derived' "$STORE"                       || fail "R1: store does not state derive"
 grep -qi 'persist\|persisted' "$STORE"                    || fail "R1: store does not state persist"
@@ -45,37 +45,33 @@ pass "R1 epic_done_rollup_doc"
 grep -qi 'all.*feature.*done\|every.*feature.*done' "$ORCH" || fail "R2: orch does not state all/every feature done"
 grep -qF 'set_status' "$ORCH"                             || fail "R2: orch does not name set_status"
 grep -qi 're-validate\|revalidate' "$ORCH"                || fail "R2: orch does not state re-validate"
-grep -qi 'drift' "$ORCH"                                  || fail "R2: orch does not mention drift"
-grep -qi 'before' "$ORCH"                                 || fail "R2: orch does not state before selecting next"
-grep -qi 'next' "$ORCH"                                   || fail "R2: orch does not mention next"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'before selecting the next task[^.]{0,40}drift check' || fail "R2: orch does not trigger the drift check before selecting the next task"
 pass "R2 orch_rollup_then_drift"
 
 # ── R3: drift fires only on epic rollup to done; spawns read-only Scout drift mode ─
 # R3_drift_trigger
-grep -qi 'drift' "$ORCH"                                  || fail "R3: orch does not mention drift"
-grep -qi 'only' "$ORCH"                                   || fail "R3: orch does not state only"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'drift check fires only[^.]{0,40}done' || fail "R3: orch does not state the drift check fires only on an epic rolling up to done"
 grep -qi 'roll\|rollup' "$ORCH"                           || fail "R3: orch does not mention rollup"
-grep -qi 'done' "$ORCH"                                   || fail "R3: orch does not mention done"
-grep -qi 'Scout' "$ORCH"                                  || fail "R3: orch does not mention Scout"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'read-only Scout[^.]{0,40}drift-check mode' || fail "R3: orch does not spawn the read-only Scout in drift-check mode"
 grep -qi 'read-only' "$ORCH"                              || fail "R3: orch does not state read-only Scout"
 grep -qi 'draft\|planned\|pending' "$ORCH"                || fail "R3: orch does not name the re-validated set"
 pass "R3 drift_trigger"
 
 # ── R4: Scout drift-check mode: inputs + findings path + per-epic verdict + reason ─
 # R4_scout_findings_shape
-grep -qi 'drift' "$SCOUT"                                 || fail "R4: scout does not mention drift"
+tr '\n' ' ' < "$SCOUT" | grep -qiE 'rolls up[^.]{0,60}drift-check mode' || fail "R4: scout does not tie drift-check mode to the epic rollup"
 grep -qF 'progress/' "$SCOUT"                             || fail "R4: scout does not write to progress/"
 grep -qF 'scout-drift' "$SCOUT"                           || fail "R4: scout does not name scout-drift findings file"
 grep -qi 'per\|each' "$SCOUT"                             || fail "R4: scout does not state per/each epic"
 grep -qi 'still-valid\|valid' "$SCOUT"                    || fail "R4: scout does not state still-valid"
-grep -qi 'stale' "$SCOUT"                                 || fail "R4: scout does not state stale"
+tr '\n' ' ' < "$SCOUT" | grep -qiE 'still-valid[^.]{0,20}stale' || fail "R4: scout does not state the still-valid-or-stale verdict"
 grep -qi 'reason\|why' "$SCOUT"                           || fail "R4: scout does not state reason/why"
-grep -qi 'artifact' "$SCOUT"                              || fail "R4: scout does not state artifact"
+tr '\n' ' ' < "$SCOUT" | grep -qiE 'concrete signal[^.]{0,40}artifact' || fail "R4: scout does not require the concrete signal + artifact it points at"
 pass "R4 scout_findings_shape"
 
 # ── R5: Scout defines concrete S1/S2/S3 signals; stale only when ≥1 fires ─────────
 # R5_concrete_signals
-grep -qi 'contradict' "$SCOUT"                            || fail "R5: scout does not define S1 contradiction"
+tr '\n' ' ' < "$SCOUT" | grep -qiE 'contradict[^.]{0,60}assumption' || fail "R5: scout does not define S1 contradiction of a stated assumption"
 grep -qi 'removed\|renamed' "$SCOUT"                      || fail "R5: scout does not define S2 removed/renamed"
 grep -qi 'supersedes\|obsoletes' "$SCOUT"                 || fail "R5: scout does not define S3 supersedes/obsoletes"
 grep -qi 'at least one\|≥ *1\|one of\|only when' "$SCOUT"  || fail "R5: scout does not state the stale gate (≥1 fires)"
@@ -92,9 +88,7 @@ pass "R6 scout_read_only"
 # ── R7: orchestrator demotes stale planned/pending → draft + re-validates ─────────
 # R7_demote_to_draft  (static + fixture)
 grep -qi 'demote\|demotion' "$ORCH"                       || fail "R7: orch does not state demote"
-grep -qi 'planned' "$ORCH"                                || fail "R7: orch does not mention planned"
-grep -qi 'draft' "$ORCH"                                  || fail "R7: orch does not mention draft"
-grep -qi 'pending' "$ORCH"                                || fail "R7: orch does not mention pending"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'planned[^.]{0,30}pending[^.]{0,30}draft' || fail "R7: orch does not demote a stale planned/pending epic to draft"
 grep -qF 'set_status' "$ORCH"                             || fail "R7: orch does not name set_status"
 grep -qi 're-validate\|revalidate' "$ORCH"                || fail "R7: orch does not state re-validate"
 # Fixture (R7 + R16): a TEMP store carrying the required root `project` field, holding
@@ -146,7 +140,7 @@ pass "R7 demote_to_draft"
 
 # ── R8: Scout never writes state/tasks.json; Orchestrator alone applies demotion ──
 # R8_scout_flags_orch_acts
-grep -qi 'Scout' "$ORCH"                                  || fail "R8: orch does not mention Scout"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'Scout never writes[^.]{0,20}state/tasks' || fail "R8: orch does not state the Scout never writes state/tasks.json"
 grep -qi 'never\|not' "$ORCH"                             || fail "R8: orch does not state never/not"
 grep -qi 'state/tasks.json\|write' "$ORCH"                || fail "R8: orch does not name the Scout's forbidden write"
 grep -qi 'Orchestrator\|set_status' "$ORCH"               || fail "R8: orch does not name the actor"
@@ -156,9 +150,7 @@ pass "R8 scout_flags_orch_acts"
 # ── R9: considers planned/pending/draft; in-progress/done never demoted (orch+store)
 # R9_status_scope
 for f in "$ORCH" "$STORE"; do
-  grep -qi 'planned' "$f"      || fail "R9: $f does not mention planned"
-  grep -qi 'pending' "$f"      || fail "R9: $f does not mention pending"
-  grep -qi 'draft'   "$f"      || fail "R9: $f does not mention draft"
+  tr '\n' ' ' < "$f" | grep -qiE 'planned[^.]{0,30}pending[^.]{0,30}draft' || fail "R9: $f does not name the planned/pending-to-draft demotion scope"
   grep -qi 'never\|not' "$f"   || fail "R9: $f does not state never/not"
   grep -qi 'in-progress\|done' "$f" || fail "R9: $f does not exclude in-progress/done"
 done
@@ -166,19 +158,19 @@ pass "R9 status_scope"
 
 # ── R10: backward-only invariant; re-drill stays manual /sdd-drill ────────────────
 # R10_backward_only
-grep -qi 'backward' "$ORCH"                               || fail "R10: orch does not state backward"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'demotion[^.]{0,40}backward' || fail "R10: orch does not state demotion only moves an epic backward"
 grep -qi 'never\|not' "$ORCH"                             || fail "R10: orch does not state never/not"
 grep -qi 'forward\|advance' "$ORCH"                       || fail "R10: orch does not state forward/advance"
 grep -qi 'in-progress\|done' "$ORCH"                      || fail "R10: orch does not exclude in-progress/done"
 grep -qF '/sdd-drill' "$ORCH"                             || fail "R10: orch does not name /sdd-drill"
-grep -qi 'manual' "$ORCH"                                 || fail "R10: orch does not state re-drill is manual"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'manual[^.]{0,20}/sdd-drill' || fail "R10: orch does not state re-drill is a manual /sdd-drill step"
 pass "R10 backward_only"
 
 # ── R11: reports re-drill pointer + optional flag-only epic.md note, never rewrite ─
 # R11_redrill_pointer_flag
 grep -qF '/sdd-drill' "$ORCH"                             || fail "R11: orch does not name /sdd-drill pointer"
 grep -qi 'demoted on drift' "$ORCH"                       || fail "R11: orch does not name the 'demoted on drift' flag"
-grep -qi 'flag' "$ORCH"                                   || fail "R11: orch does not state flag-only"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'flag only[^.]{0,60}never rewrites' || fail "R11: orch does not state the epic.md note is flag-only and never rewrites content"
 grep -qi 'not\|never' "$ORCH"                             || fail "R11: orch does not state never"
 grep -qi 'rewrite\|content' "$ORCH"                       || fail "R11: orch does not forbid content rewrite"
 pass "R11 redrill_pointer_flag"
@@ -200,22 +192,21 @@ pass "R13 noop_no_arch"
 
 # ── R14: store documents both the epic-done rollup and the drift check ────────────
 # R14_store_doc
-grep -qi 'drift' "$STORE"                                 || fail "R14: store does not mention drift"
+tr '\n' ' ' < "$STORE" | grep -qiE 'drift check[^.]{0,40}rolling-wave' || fail "R14: store does not tie the drift check to stale rolling-wave plans"
 grep -qi 'demote\|demotion' "$STORE"                      || fail "R14: store does not state demote"
-grep -qi 'Scout' "$STORE"                                 || fail "R14: store does not mention Scout"
-grep -qi 'planned' "$STORE"                               || fail "R14: store does not mention planned"
-grep -qi 'draft' "$STORE"                                 || fail "R14: store does not mention draft"
+tr '\n' ' ' < "$STORE" | grep -qiE 'read-only Scout[^.]{0,20}drift-check' || fail "R14: store does not name the read-only Scout drift-check mode"
+tr '\n' ' ' < "$STORE" | grep -qiE 'planned[^.]{0,30}pending[^.]{0,30}draft' || fail "R14: store does not name the planned/pending-to-draft demotion"
 grep -qi 're-validate\|re-check\|re-validates' "$STORE"   || fail "R14: store does not state re-validate remaining epics"
 pass "R14 store_doc"
 
 # ── R15: WORKFLOW.md adds a distinct drift-check section ───────────────────────────
 # R15_workflow_doc
-grep -qi 'drift' "$WORKFLOW"                              || fail "R15: WORKFLOW does not mention drift"
-grep -qi 'Scout' "$WORKFLOW"                              || fail "R15: WORKFLOW does not mention Scout"
+tr '\n' ' ' < "$WORKFLOW" | grep -qiE 'drift[^.]{0,10}check closes' || fail "R15: WORKFLOW does not state the drift check closes the stale-plan loop"
+tr '\n' ' ' < "$WORKFLOW" | grep -qiE 'read-only Scout[^.]{0,20}drift-check' || fail "R15: WORKFLOW does not name the read-only Scout drift-check mode"
 grep -qi 'demote\|demotion\|demoted' "$WORKFLOW"          || fail "R15: WORKFLOW does not state demote"
-grep -qi 'draft' "$WORKFLOW"                              || fail "R15: WORKFLOW does not mention draft"
+tr '\n' ' ' < "$WORKFLOW" | grep -qiE 'planned[^.]{0,30}pending[^.]{0,30}draft' || fail "R15: WORKFLOW does not name the planned/pending-to-draft demotion"
 grep -qF '/sdd-drill' "$WORKFLOW"                         || fail "R15: WORKFLOW does not name /sdd-drill"
-grep -qi 'backward' "$WORKFLOW"                           || fail "R15: WORKFLOW does not state backward"
+tr '\n' ' ' < "$WORKFLOW" | grep -qiE 'demotion[^.]{0,40}backward' || fail "R15: WORKFLOW does not state demotion only moves an epic backward"
 pass "R15 workflow_doc"
 
 # ── R16: schema unchanged; admits draft/planned/pending/done; ./init.sh exits 0 ───
@@ -240,17 +231,17 @@ for f in .claude/commands/sdd-new.md .claude/commands/sdd-plan.md \
 done
 # the feature-level (sliced) rollup is still present in the store contract
 grep -qi 'Rollup rule' "$STORE"                          || fail "R17: store lost the feature-level Rollup rule"
-grep -qi 'slice' "$STORE"                                || fail "R17: store lost the sliced-feature rollup"
+tr '\n' ' ' < "$STORE" | grep -qiE 'sliced feature[^.]{0,40}derives' || fail "R17: store lost the sliced-feature derive rollup"
 ./init.sh >/dev/null 2>&1 || fail "R17: ./init.sh did not exit 0"
 pass "R17 backward_compatible"
 
 # ── R18: contract lives in portable files; no new slash command, no installer wiring
 # R18_portable_no_glue
-grep -qi 'drift' "$ORCH"                                  || fail "R18: drift rule not in the portable orchestrator role"
-grep -qi 'demote' "$ORCH"                                 || fail "R18: demote rule not in the portable orchestrator role"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'drift check fires only[^.]{0,40}done' || fail "R18: drift rule not in the portable orchestrator role"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'Orchestrator alone[^.]{0,80}applies the demotion' || fail "R18: demote rule not in the portable orchestrator role"
 grep -qi 'read-only' "$SCOUT"                            || fail "R18: read-only Scout rule not in the portable scout role"
 grep -qi 'nothing to re-validate' "$SCOUT"               || fail "R18: no-op note not in the portable scout role"
-grep -qi 'drift' "$STORE"                                || fail "R18: drift rule not in the portable store contract"
+tr '\n' ' ' < "$STORE" | grep -qiE 'drift check[^.]{0,40}rolling-wave' || fail "R18: drift rule not in the portable store contract"
 # F06 adds NO new sdd-drift slash command
 if ls .claude/commands/sdd-drift*.md >/dev/null 2>&1; then
   fail "R18: F06 added a .claude/commands/sdd-drift*.md slash command"

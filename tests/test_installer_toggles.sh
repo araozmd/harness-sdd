@@ -672,7 +672,7 @@ test_docs_document_backend_prompt() {
   done
   grep -qiE 're-run|rerun|running the installer' "$_doc" \
     || fail "R13: docs/INSTALL.md does not say that re-running the installer changes the value"
-  grep -qiE 'warn' "$_doc" \
+  tr '\n' ' ' < "$_doc" | grep -qiE 'writes[^.]{0,10}delegate[^.]{0,25}warning' \
     || fail "R13: docs/INSTALL.md does not document the warn-and-proceed delegate_cmd ruling"
   for _s in '--builder-backend' 'HARNESS_BUILDER_BACKEND' 'in-session' 'delegate'; do
     grep -qF -e "$_s" "$INST" || fail "R13: harness-install.sh's own text does not mention '$_s'"

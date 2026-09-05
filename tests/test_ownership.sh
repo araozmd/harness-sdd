@@ -179,7 +179,7 @@ grep -qi 'effective owner' "$ORCH" \
 # feature-wins fallback wording (R6).
 grep -qiE 'otherwise its parent epic|else .*parent epic|feature.?level (value )?.?wins' "$ORCH" \
   || fail "orchestrator contract lacks the feature-owner-else-epic-owner fallback [effective_owner_rule_documented]"
-grep -qi 'unowned' "$ORCH" \
+tr '\n' ' ' < "$ORCH" | grep -qiE 'otherwise the feature is[^.]{0,10}unowned' \
   || fail "orchestrator contract does not define the unowned case [effective_owner_rule_documented]"
 pass "effective-owner rule (feature else epic else unowned) documented [effective_owner_rule_documented]"
 
@@ -207,8 +207,8 @@ pass "identity resolution (@me/self→gh api user; else literal) documented [ide
 
 grep -qi 'fail closed' "$ORCH" \
   || fail "orchestrator contract lacks fail-closed on unresolved identity [unresolved_identity_fails_closed]"
-grep -qi 'unresolved' "$ORCH" \
-  || fail "orchestrator contract does not mention an unresolved identity [unresolved_identity_fails_closed]"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'unresolved[^.]{0,20}change[^.]{0,15}state' \
+  || fail "orchestrator contract does not fail closed (no state change) on an unresolved identity [unresolved_identity_fails_closed]"
 pass "unresolved identity under --mine fails closed (no widen, no state change) [unresolved_identity_fails_closed]"
 
 grep -qi 'no owned actionable' "$ORCH" \
@@ -247,7 +247,7 @@ pass "harness.config.yaml carries workflow.identity [identity_resolution_documen
 # ── Docs describe ownership (R14) ─────────────────────────────────────────────
 for doc in "$WORKFLOW" "$LOCAL"; do
   [ -f "$doc" ] || fail "$doc missing"
-  grep -qi 'owner' "$doc"             || fail "$doc does not describe the owner field [docs_describe_ownership]"
+  tr '\n' ' ' < "$doc" | grep -qiE 'optional[^.]{0,15}owner' || fail "$doc does not describe the optional owner field [docs_describe_ownership]"
   grep -qi 'effective owner' "$doc"   || fail "$doc does not describe the effective-owner rule [docs_describe_ownership]"
   grep -qi 'workflow.identity' "$doc" || fail "$doc does not describe workflow.identity [docs_describe_ownership]"
   grep -q -- '--mine' "$doc"          || fail "$doc does not describe /sdd-next --mine [docs_describe_ownership]"

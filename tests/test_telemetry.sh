@@ -125,7 +125,7 @@ pass "R5 phase_enum"
 
 # ── R6: round increments on review bounce (prose + fixture round 1/2) ────────────
 grep -qiE 'in-review.*in-progress|in-progress.*in-review' "$ORCH" || fail "R6: no bounce wording"
-grep -qi 'round' "$ORCH" || fail "R6: orchestrator does not mention round"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'round[^.]{0,10}= 1[^.]{0,15}first build' || fail "R6: orchestrator does not define the round counter"
 grep -qiE 'increment|\+1|increasing' "$ORCH" || fail "R6: orchestrator does not state round increments"
 python3 "$REPORT" session --log "$FIX" | grep -qF 'Build/review rounds: 2' \
   || fail "R6: session round count != 2"
@@ -157,7 +157,7 @@ printf '%s\n' "$_out" | grep -qE 'Human-gate latency \(n=1\).*mean 05:30:00' \
   || fail "R10: autonomous latency leaked into human stats"
 printf '%s\n' "$_out" | grep -qiE 'autonomous.*excluded.*: 1' \
   || fail "R10: autonomous transition not reported/excluded"
-grep -qi 'autonomous' "$ORCH" || fail "R10: orchestrator does not mention autonomous gate distinction"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'exclude autonomous spans' || fail "R10: orchestrator does not exclude autonomous spans from the human-gate stats"
 pass "R10 autonomous_excluded"
 
 # ── R11: unwritable/garbage path never blocks; prose says best-effort/never-block ─

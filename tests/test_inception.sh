@@ -20,9 +20,9 @@ pass() { echo "ok - $1"; }
 # ── R1: portable Inception role file ────────────────────────────────────────────
 # role_file_exists
 [ -f "$ROLE" ]              || fail "R1: $ROLE missing"
-grep -qi 'seed'    "$ROLE"  || fail "R1: role file does not mention seeding"
-grep -qi 'pending' "$ROLE"  || fail "R1: role file does not mention pending"
-grep -qi 'brief'   "$ROLE"  || fail "R1: role file does not mention the brief"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'seed[^.]{0,20}never spec' || fail "R1: role file does not state seed-never-spec"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'schema-passing[^.]{0,10}pending[^.]{0,10}entry' || fail "R1: role file does not produce a schema-passing pending entry"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'intent brief[^.]{0,20}progress/inbox' || fail "R1: role file does not write the intent brief under progress/inbox"
 # Portable, not Claude-specific: must not assume the Claude slash mechanism as THE
 # contract. It may *reference* /sdd-new as the example wrapper, but the role text
 # states it is for any AGENTS.md-compatible CLI.
@@ -135,7 +135,7 @@ pass "R9 new_epic_documented"
 # ── R10: next-sequential ids, no reuse ───────────────────────────────────────────
 # id_policy_documented
 grep -qi 'next.sequential\|next sequential' "$ROLE"     || fail "R10: role does not state next-sequential ids"
-grep -qi 'reuse' "$ROLE"                                || fail "R10: role does not state no-reuse rule"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'never reuse[^.]{0,15}vacated id' || fail "R10: role does not state the never-reuse-a-vacated-id rule"
 pass "R10 id_policy_documented"
 
 # ── R11: never writes any spec file ──────────────────────────────────────────────
@@ -198,7 +198,7 @@ pass "R15 completion_report"
 
 # ── R16: docs describe the pre-pending intake step ───────────────────────────────
 # docs_mention_intake
-grep -qi 'Inception' AGENTS.md                 || fail "R16: AGENTS.md does not name Inception"
+tr '\n' ' ' < AGENTS.md | grep -qiE 'Inception[^.]{0,40}front door' || fail "R16: AGENTS.md does not name Inception as the front door"
 grep -qi 'agents/\*.md.*Inception\|Inception.*Orchestrator' AGENTS.md \
   || fail "R16: AGENTS.md role list does not include Inception"
 grep -qF '/sdd-new' docs/WORKFLOW.md           || fail "R16: WORKFLOW.md does not show /sdd-new"
