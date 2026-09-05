@@ -69,8 +69,11 @@ done
 if [ -n "$resume_round" ]; then
   if [ ! -f "$resume_round/disposed" ] \
      && grep -qE '^(findings|clean)$' "$resume_round/outcome" 2>/dev/null; then
-    : # RE-ENTER this round: skip steps 0-2 and resume at step 2b/3 on the cached
-      # files (`evaluate` and `classify` are offline by construction)
+    : # RE-ENTER this round: skip ONLY the trigger and the watcher (steps 1-2).
+      # Step 0 preflight and §0c checkout verification ALWAYS re-run first — the tree
+      # may have moved between invocations, and cached findings handed to fixers on an
+      # unrelated checkout would push there (Codex #165 round-3 P1). Then resume at
+      # step 2b/3 on the cached files (`evaluate` and `classify` are offline).
   else
     round=$(( round + 1 ))
   fi
@@ -111,13 +114,21 @@ if [ -z "$pr_head_oid" ]; then
   exit 1     # TERMINAL — a warning that falls through would preserve the exact
              # failure this section closes (fixes pushed from an unrelated tree)
 fi
-if [ "$(git rev-parse HEAD 2>/dev/null)" != "$pr_head_oid" ]; then
-  if ! gh pr checkout "$pr_number" 2>/dev/null \
-     || [ "$(git rev-parse HEAD 2>/dev/null)" != "$pr_head_oid" ]; then
-    echo "could not put the working tree on the PR head $pr_head_oid (conflicting local changes?) — needs-human, not proceeding" >&2
-    gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-    exit 1   # TERMINAL, same reason — and OID-verified even after a successful checkout
-  fi
+# ALWAYS run the checkout — object equality alone is not a binding (Codex #165
+# round-3 P1): a detached HEAD or an unrelated local branch can sit at the right OID
+# while the later plain `git push` fails, or lands on a different ref entirely.
+# `gh pr checkout` binds branch, upstream and push destination (fork-safe) and is
+# idempotent when the tree is already on the PR branch.
+if ! gh pr checkout "$pr_number" 2>/dev/null; then
+  echo "could not check out PR #$pr_number (conflicting local changes?) — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL, same reason
+fi
+if [ -z "$(git branch --show-current 2>/dev/null)" ] \
+   || [ "$(git rev-parse HEAD 2>/dev/null)" != "$pr_head_oid" ]; then
+  echo "working tree is detached or not at the PR head $pr_head_oid — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL — OID-verified even after a successful checkout
 fi
 ```
 

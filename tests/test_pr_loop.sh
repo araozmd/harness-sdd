@@ -1426,6 +1426,10 @@ test_body_codified_batch_wired() {
       || fail "batch: $_b never proves the tree HEAD equals the PR head oid (#3941050994)"
     grep -qF 'Do **NOT** write `disposed` here' "$_b" \
       || fail "batch: $_b writes disposed at the merge-verdict break — an interrupt would strand a green round (#3941050997)"
+    grep -qF 'skip ONLY the trigger and the watcher' "$_b" \
+      || fail "batch: $_b resume path skips §0c — cached findings could be fixed on an unrelated checkout (#3941162094)"
+    grep -qF 'git branch --show-current 2>/dev/null)" ]' "$_b" \
+      || fail "batch: $_b accepts a detached HEAD at the right OID — the later push would fail or land elsewhere (#3941162092)"
     grep -qF 'merge` verdict the gate returned in THIS invocation' "$_b" \
       || fail "batch: $_b Ready-to-merge does not require this invocation's verdict (F150)"
     grep -qF 'gh pr checks "$pr_number" --required' "$_b" \
