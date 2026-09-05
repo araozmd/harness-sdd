@@ -12,7 +12,7 @@
 # and the repo's prose-verification pattern (see tests/test_reviewer.sh) can only grep role
 # files for required clauses, leaving the behavioral criterion as a documented MANUAL check.
 # Here the rule is executable, so it is testable and mutation-testable, and only the CALL
-# SITE rests on prose. Same shape as pr-gate.sh / pr-stack-guard.sh / change-size.sh.
+# SITE rests on prose. Same shape as pr-gate.sh / change-size.sh.
 #
 # Usage:
 #   tools/builder-role.sh <complexity> <round> [--backend <in-session|delegate>]

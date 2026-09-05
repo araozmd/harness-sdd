@@ -148,3 +148,14 @@ left with a spec its own deliverable contradicts.
 `false` there is no guard invocation and no stacking-specific merge logic, and
 `tests/test_pr_loop.sh::test_stacking_inert_when_disabled` still asserts it. E21-F05
 changed no behavior at all — it changed one shipped document.
+
+---
+
+## Superseded (append-only) — E21-F07, 2026-09-05
+
+This spec describes the stacked-PR lane as shipped. **E21-F07 removed the lane**: the
+E21-F06 gate answered "does the lane earn its keep?" with NO (the guard never fired in
+100 PRs; the sibling-feature split covers the need with zero machinery).
+`tools/pr-stack-guard.sh`, the `/sdd-pr-loop` base-change and merge-order blocks, and
+the WORKFLOW.md lane how-to are gone from the installed body as of v0.70.0. This spec
+stays as the historical record of what shipped; nothing below this line was edited.

@@ -2479,7 +2479,6 @@ install_one() {
   chmod +x "$H/tools/wait-for-codex.sh" 2>/dev/null || true   # E18-F01 /sdd-pr-loop background Codex watcher
   chmod +x "$H/tools/change-size.sh" 2>/dev/null || true   # E21-F02 advisory pre-PR change-size check
   chmod +x "$H/tools/pr-round-trend.sh" 2>/dev/null || true   # E21-F03 pr-loop convergence trend
-  chmod +x "$H/tools/pr-stack-guard.sh" 2>/dev/null || true   # E21-F04 stacked-PR merge-order guard
   chmod +x "$H/tools/pr-gate.sh" 2>/dev/null || true   # E99 deterministic pr-loop merge/fix/budget verdict
   chmod +x "$H/tools/run-tests.sh" 2>/dev/null || true   # E99 concurrent suite runner, failures-only output
   chmod +x "$H/tools/opencode-model-helper.sh" 2>/dev/null || true   # E22-F01 OpenCode model pin helper
@@ -4275,9 +4274,7 @@ Use a `while` loop so the round counter can be restarted. `round_dir=.harness/.p
 `max_rounds` is a budget for the **PR**, not for one invocation of this command. Resume the
 counter from the highest round already in the cache, so re-running `/sdd-pr-loop` cannot
 silently grant a fresh budget — PR #86 reached round 12 against `max_rounds: 4` exactly that
-way, and the `needs-human` hand-off that should have fired at round 4 never did. The
-base-change restart below moves the stale rounds to `stale-<ts>/`, so it correctly
-re-derives round 1 on its own.
+way, and the `needs-human` hand-off that should have fired at round 4 never did.
 
 ```bash
 round=1
@@ -4303,92 +4300,6 @@ the PR exists and is OPEN. It posts **nothing**. On a non-zero exit (`5`), **STO
 report its one-line diagnostic verbatim — do not post `@codex review`, do not poll, do
 not fall back to a hand-rolled check. A repo without the Codex GitHub App should leave
 `pr_loop.enabled` at its opt-in default of `false` rather than run this loop.
-
-### 0b. Base-change detection (stacked PRs only)
-
-On round 2+, before triggering a new Codex review, check whether the base branch has
-changed since the last round — when a stacked PR's parent is rebased (review fixes), the
-child's `baseRefOid` moves, and the child must be re-reviewed from scratch (R5).
-
-```bash
-# Only stacked PRs (base != default branch) get base-change detection. A PR targeting the
-# default branch naturally sees baseRefOid move as other PRs merge; restarting review on
-# every such change would destroy the ordinary single-PR lane.
-default_branch="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo '')"
-# Fetch the current baseRefName fresh — a stacked child may have been retargeted before
-# the first review round, and round 1 must validate stack ancestry too.
-base_ref="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo '')"
-if [ -n "$default_branch" ] && [ -n "$base_ref" ] && [ "$base_ref" != "$default_branch" ]; then
-  prior_round_dir=".harness/.pr-loop/$pr_number/round-$(( round - 1 ))"
-  prior_base_name="$(jq -r '.baseRefName // ""' "$prior_round_dir/pr.json" 2>/dev/null || echo '')"
-  prior_base_oid="$(jq -r '.baseRefOid // ""' "$prior_round_dir/pr.json" 2>/dev/null || echo '')"
-  if [ -n "$prior_base_name" ] && [ "$prior_base_name" != "$default_branch" ] && [ -n "$prior_base_oid" ]; then
-    current_base_oid="$(gh pr view "$pr_number" --json baseRefOid --jq '.baseRefOid' 2>/dev/null || echo '')"
-    # Fail closed on either side of the comparison being unreadable — a missing
-    # prior cache or a transient API failure must not silently bypass the detection.
-    if [ -z "$current_base_oid" ]; then
-      echo "base-change detection: could not read current baseRefOid — restarting from round 1" >&2
-      stale_dir=".harness/.pr-loop/$pr_number/stale-$(date -u +%s)"
-      mkdir -p "$stale_dir"
-      for d in .harness/.pr-loop/$pr_number/round-*/; do
-        [ -d "$d" ] && mv "$d" "$stale_dir/"
-      done
-      round=1
-      continue
-    elif [ "$current_base_oid" != "$prior_base_oid" ]; then
-      echo "baseRefOid changed (${prior_base_oid:0:7} -> ${current_base_oid:0:7}) — parent rebased" >&2
-      # Verify the child has actually been restacked onto the new parent tip before
-      # restarting review. An unrestacked child would be reviewed with superseded parent
-      # commits in its diff. The restack procedure is in docs/WORKFLOW.md.
-      head_ref_oid="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo '')"
-      # Fail closed when the head OID is unreadable — an empty head OID must not bypass
-      # the ancestry check, because an unrestacked child could then be reviewed with
-      # superseded parent commits and merged after its parent lands.
-      if [ -z "$head_ref_oid" ]; then
-        echo "base-change detection: could not read headRefOid — refusing to restart review" >&2
-        gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-        return 1
-      fi
-      if command -v git >/dev/null 2>&1; then
-        # Fetch the refs before checking ancestry — in a fresh or shallow clone, or
-        # after a force-push, the OIDs from GitHub may not exist locally and
-        # `git merge-base` would exit 128 (error) instead of 1 (non-ancestor).
-        git fetch origin --no-tags --depth=50 2>/dev/null || true
-        if ! git merge-base --is-ancestor "$current_base_oid" "$head_ref_oid" 2>/dev/null; then
-          echo "child has not been restacked onto the new parent tip — restack before restarting review" >&2
-          echo "See docs/WORKFLOW.md 'Restack procedure'" >&2
-          # Archive the cache and pause, not restart. The child needs a manual rebase.
-          stale_dir=".harness/.pr-loop/$pr_number/stale-$(date -u +%s)"
-          mkdir -p "$stale_dir"
-          for d in .harness/.pr-loop/$pr_number/round-*/; do
-            [ -d "$d" ] && mv "$d" "$stale_dir/"
-          done
-          # Do not continue the loop — the child needs human intervention to restack.
-          # Set needs-human and exit.
-          gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-          return 1
-        fi
-      fi
-      echo "parent rebased; discarding prior round cache, restarting from round 1" >&2
-      # Move the stale round directories out of the active cache path so stall/trend
-      # evaluation cannot accidentally consume them. The handover summary still reports
-      # their existence, but the active round-1 starts fresh.
-      stale_dir=".harness/.pr-loop/$pr_number/stale-$(date -u +%s)"
-      mkdir -p "$stale_dir"
-      for d in .harness/.pr-loop/$pr_number/round-*/; do
-        [ -d "$d" ] && mv "$d" "$stale_dir/"
-      done
-      round=1
-      continue
-    fi
-  fi
-fi
-```
-
-If the base changed, discard prior round-cache data for merge-gate evaluation and restart
-the round counter from 1. This detection activates only when the PR's `baseRefName` is
-not the default branch — a PR targeting `main` has `baseRefOid` that tracks the default
-branch's head, which changes on every merge anyway, so the check is inert there.
 
 ### 1. Trigger the review
 
@@ -5053,57 +4964,7 @@ hand-back **completes** the loop: **return success**. It is the one terminal sta
 unmerged PR is the intended outcome, so never route it to needs-human.
 
 Where `pr_loop.auto_merge` is **true**, merge with the configured `merge_strategy`,
-deleting the remote branch in the same call. **First, invoke the stacked-PR merge-order
-guard (R2):** before `gh pr merge`, fetch the open-PR list and call the offline guard to
-verify this PR is not stacked on an unmerged parent. On exit 6, refuse the merge and
-enter the `needs-human` terminal state with the guard's diagnostic naming the parent PR.
-The guard is called with JSON the pr-loop already fetches; the only additional network
-call is a lightweight `gh pr list`.
-
-```bash
-# Stacked-PR merge-order guard (E21-F04 R2). Fail closed on every error: a guard that
-# cannot prove safety must not authorize a merge.
-default_branch="${default_branch:-$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo '')}"
-guard_ok=1
-guard_deferred=0
-# Fetch the current baseRefName immediately before authorizing the merge — the PR may
-# have been retargeted after the round cache was written, and a stale cached default-
-# branch value would bypass the guard entirely for a newly stacked child.
-if ! base_ref="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null)" || [ -z "$base_ref" ]; then
-  guard_ok=0
-  echo "sdd-pr-loop: merge refused — could not read current baseRefName" >&2
-  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-elif [ "$base_ref" = "$default_branch" ]; then
-  : # targeting the default branch — not stacked, guard_ok stays 1
-elif [ -n "$base_ref" ]; then
-  open_prs_json=".harness/.pr-loop/$pr_number/open-prs.json"
-  if ! gh pr list --state open --json number,headRefName --limit 1000 > "$open_prs_json" 2>/dev/null; then
-    guard_ok=0
-    echo "sdd-pr-loop: merge refused — could not fetch open PR list" >&2
-    gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-  else
-    # Refresh pr.json with the current base before evaluating the guard — a PR
-    # retargeted after the round cache was written would otherwise be evaluated
-    # with stale data.
-    gh pr view "$pr_number" --json reviews,comments,statusCheckRollup,headRefOid,baseRefName,baseRefOid > ".harness/.pr-loop/$pr_number/round-$round/pr.json" 2>/dev/null || echo '{}' > ".harness/.pr-loop/$pr_number/round-$round/pr.json"
-    guard_rc=0
-    sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" || guard_rc=$?
-    if [ "$guard_rc" = 0 ]; then
-      : # guard_ok stays 1
-    elif [ "$guard_rc" = 6 ]; then
-      guard_ok=0
-      guard_deferred=1
-      echo "sdd-pr-loop: merge deferred — parent PR is still open (guard exit 6)" >&2
-      sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" 2>&1 >&2
-    else
-      guard_ok=0
-      echo "sdd-pr-loop: merge refused — stack guard returned exit $guard_rc" >&2
-      sh .harness/tools/pr-stack-guard.sh evaluate ".harness/.pr-loop/$pr_number/round-$round/pr.json" "$open_prs_json" --default-branch "$default_branch" 2>&1 >&2
-      gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-    fi
-  fi
-fi
-```
+deleting the remote branch in the same call.
 
 Track whether the merge command itself
 **succeeded** (`merged`) — separate from `merge_ok`, which only recorded thread
@@ -5111,15 +4972,16 @@ eligibility — so cleanup never runs on a failed or pending merge:
 
 ```bash
 merged=0
-if [ "${guard_ok:-1}" != "1" ]; then
-  if [ "${guard_deferred:-0}" = "1" ]; then
-    # Exit 6 from pr-stack-guard.sh — parent is still open, which is a normal
-    # waiting state in a healthy stack. Report it and exit gracefully without
-    # needs-human; the child retries after the parent lands.
-    echo "sdd-pr-loop: merge deferred — parent PR is still open" >&2
-  else
-    echo "merge-order guard refused — needs-human, not merging" >&2
-  fi
+# Fail-closed base check (E21-F07 / Codex #163 P1): the stacked lane is deprecated, so a
+# PR whose base is NOT the default branch must never auto-merge — `gh pr merge` merges
+# into the CURRENT base, so a leftover stacked child would land in a stale parent branch,
+# have its head deleted, and be reported as a success while absent from the default
+# branch. Read both names fresh; an unreadable value refuses the merge, never allows it.
+default_branch="${default_branch:-$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo '')}"
+base_ref="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo '')"
+if [ -z "$default_branch" ] || [ -z "$base_ref" ] || [ "$base_ref" != "$default_branch" ]; then
+  echo "sdd-pr-loop: merge refused — base '$base_ref' is not the default branch '$default_branch' (stacked lane deprecated, E21-F07); retarget the PR — needs-human" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
 elif [ "${merge_ok:-0}" != "1" ]; then
   echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
 elif [ "${merge_strategy:-merge}" = "squash" ]; then
@@ -5159,8 +5021,7 @@ not land is never reported as success.
 
 Apply the `needs-human` label, post the **same handover summary** block (so the human sees
 exactly which workers tried and where they got stuck), and return failure. Reached by: the
-`max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, a
-stacked-PR merge-order guard refusal (exit `6`), or a merge that would not land.
+`max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, a merge that would not land.
 
 **Say what the human should conclude.** Include the step-4b trend output **verbatim,
 including its `NEVER REVIEWED` block** — a cap reached because reviews kept timing out is a

@@ -674,124 +674,21 @@ is best-effort — if it is missing or corrupt, reconstruct it from the `gh` API
 an existing round offline (no `gh`, no network) with
 `sh tools/wait-for-codex.sh evaluate <round-dir>` — `0` findings, `3` clean, `1` pending.
 
-## Stacked-PR lane — incremental review of safely-splittable features
+## Stacked-PR lane — DEPRECATED (E21-F07)
 
-This lane bounds the **size of each review**. A feature that legitimately exceeds the
-single-PR review budget is opened as one PR per increment, each PR's base being the
-previous increment's branch, so a reviewer reads only that increment's own diff
-(budget-sized). The stack merges in **order**: increment 1, then 2, then 3.
+The stacked-PR lane shipped in E21-F04/F05 and was removed in E21-F07 after the E21-F06
+gate answered its opening question — *does the lane earn its keep?* — with **no**
+(2026-08-17). Measured, 0 of the repository's last 100 PRs targeted a non-default base,
+so the merge-order guard never fired; the lane's cost (an increment-naming rule plus
+four role contracts that had to agree) landed on the harness's most consistency-fragile
+surface.
 
-The outcome is mechanical: merging an increment publishes that increment's work to the
-**default branch** while the later increments are **still open**. The lane changes
-nothing else about how or when work reaches the default branch.
-
-The lane is available only to work that meets the two conditions in **Entry condition**
-below. That subsection is this document's only statement of the condition, and its only
-list of what to do instead — a condition stated twice is a condition that will eventually
-disagree with itself.
-
-### Entry condition
-
-Both conditions are checked **before the first increment PR** is opened:
-
-1. Every increment is **independently safe** on the default branch — merging it on its
-   own leaves the default branch in a state the project is willing to ship.
-2. Every increment passes `verification.test_command` on its own, without any code from a
-   later increment.
-
-A feature that cannot meet both is **not a candidate** for this lane — do not stack it.
-Use **feature flags** to gate the incomplete work until the whole capability is present,
-or an aggregate landing strategy that reviews the parts separately and lands them
-together. Getting a feature whose intermediate states are unsafe onto the default branch
-in one visible step is **an open problem this epic does not solve**.
-
-### When to use what
-
-| Scenario | Mechanism |
-|---|---|
-| Feature fits the single-PR review budget | Open one PR against `main` — the default lane |
-| Feature exceeds the budget and meets **Entry condition** | Open a **stacked PR** per increment — this lane |
-| Feature exceeds the budget and does not meet **Entry condition** | Not a candidate for this lane — do **not** stack it. See **Entry condition** above for what to do instead |
-| Increments are truly independent (no shared code, no order dependency) | Open **parallel independent PRs** — stacking adds unnecessary ordering |
-
-### Creating stacked increments
-
-Use `gh pr create --base <parent-branch>` to set each PR's base to the previous
-increment's branch:
-
-```bash
-# Increment 1 targets main (default):
-gh pr create --base main --title "feat: increment 1 — ..."
-
-# Increment 2 targets increment 1's branch:
-gh pr create --base feat/increment-1 --title "feat: increment 2 — ..."
-
-# Increment 3 targets increment 2's branch:
-gh pr create --base feat/increment-2 --title "feat: increment 3 — ..."
-```
-
-The pr-loop detects stacked PRs automatically: a PR whose `baseRefName` is not the
-default branch is a stacked PR. The merge-order guard (`tools/pr-stack-guard.sh`) then
-prevents merging a child while its parent is still open.
-
-### Where to cut
-
-Cut where the work already has a seam, and cut so that **each increment satisfies
-Entry condition on its own** — that is the test an increment boundary has to pass, and it
-is the only one. Keep each increment's diff inside the `change_size` budget thresholds
-(see **Change-size discipline** in this document) so the reviewer can read it in one pass.
-
-The harness records no stacking-specific seam vocabulary. An increment is nothing more
-than a branch whose PR targets the previous increment's branch; neither the TaskStore nor
-the specs name the cuts for you, so the seam is a judgement the Architect makes and the
-Builder can check against the two conditions above.
-
-### Restack procedure
-
-When an earlier increment takes review fixes (the parent branch is rebased), each child
-increment must be rebased onto the updated parent branch. The pr-loop detects the base
-change (`baseRefOid` shifts) and restarts review from round 1, but it does not rebase
-automatically. The Builder does it by hand:
-
-```bash
-# After increment 1 (parent) is rebased and force-pushed:
-# For each child, rebase onto the updated parent:
-git checkout feat/increment-2
-git rebase --onto feat/increment-1 old-base-commit   # or: git rebase feat/increment-1
-git push --force-with-lease
-
-git checkout feat/increment-3
-git rebase --onto feat/increment-2 old-base-commit
-git push --force-with-lease
-```
-
-The `old-base-commit` is the parent's head SHA before it was rebased. **Do not substitute
-the bare two-arg form** (`git rebase feat/increment-N`): when the parent was rebased or
-force-pushed, that shorthand replays the child's copies of the *old* parent commits along
-with the child-only commits, producing conflicts and duplicated changes. Recover the old
-parent tip from the parent's reflog or the `baseRefOid` recorded in the round cache, and
-always use `git rebase --onto`.
-
-### What the board shows
-
-While a stack is in flight the board holds **one** feature record: the board's unit is
-the feature, not the increment. The increment order lives in the PRs' `baseRefName` —
-each PR names the branch it targets, and that chain is the order.
-
-The harness writes **no per-increment** board record. `state/tasks.json` has nowhere to
-say "increment 2 of 3", so a reader who needs to know how far a stack has got reads the
-PRs, not the board.
-
-### Opt-in and inert-when-disabled
-
-The stacked-PR lane is opt-in: a PR whose base is the default branch follows the existing
-single-PR default lane unchanged.
-
-This section **ships with the harness body** regardless of `pr_loop.enabled` — the
-harness has one body, not a per-flag variant of it, so every install carries this lane's
-documentation whatever the flag says. What the flag gates is the lane's *behavior*: where
-`pr_loop.enabled` is `false`, `/sdd-pr-loop` is not installed, so the merge-order guard
-has no caller and no stacking-specific merge logic runs.
+**Use the sibling-feature split instead**: an over-budget feature is split into sibling
+features sequenced by `depends_on` (`agents/driller.md`, E21-F01 R4) — each its own board
+feature, its own PR against the default branch, its own review. That is the supported
+answer to a feature that exceeds the change-size budget, and it needs no machinery this
+document has to keep accurate. Git history preserves the removed lane if the decision is
+ever revisited.
 
 ## Context hygiene
 
