@@ -1385,11 +1385,22 @@ GH
   _out="$( PATH="$_mv/bin" FAKE_STATE='MERGED 2026-09-05T00:00:00Z deadbeefcafe' sh "$W" merge-verify "$_mv/r" 9 post 2>/dev/null )" || _rc=$?
   [ "$_rc" = 0 ] && [ "$_out" = "deadbeefcafe" ] \
     || fail "F141: post receipt on a MERGED PR must pass and print the merge oid (rc=$_rc out=$_out)"
-  _rc=0; ( PATH="$_mv/bin" FAKE_STATE='OPEN  ' sh "$W" merge-verify "$_mv/r" 9 post ) >/dev/null 2>&1 || _rc=$?
-  [ "$_rc" = 7 ] || fail "F141: an OPEN (enqueued) PR must fail the post receipt with 7 (got $_rc)"
-  _rc=0; ( PATH="$_mv/bin" FAKE_STATE= sh "$W" merge-verify "$_mv/r" 9 post ) >/dev/null 2>&1 || _rc=$?
+  # The post receipt POLLS (a queue legitimately keeps the PR OPEN for a while) but is
+  # BOUNDED: with a tiny ceiling an ever-OPEN PR must still fail closed with 7.
+  _rc=0; ( PATH="$_mv/bin" FAKE_STATE='OPEN  ' HARNESS_MERGE_VERIFY_INTERVAL=1 HARNESS_MERGE_VERIFY_CEILING=2 \
+           sh "$W" merge-verify "$_mv/r" 9 post ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 7 ] || fail "F141: a PR still OPEN at the bounded ceiling must fail the post receipt with 7 (got $_rc)"
+  # CLOSED = rejected from the queue: fail FAST, no waiting out the ceiling.
+  _t0="$(date +%s)"
+  _rc=0; ( PATH="$_mv/bin" FAKE_STATE='CLOSED  ' HARNESS_MERGE_VERIFY_INTERVAL=5 HARNESS_MERGE_VERIFY_CEILING=60 \
+           sh "$W" merge-verify "$_mv/r" 9 post ) >/dev/null 2>&1 || _rc=$?
+  _t1="$(date +%s)"
+  [ "$_rc" = 7 ] || fail "F141: a CLOSED-unmerged PR must fail the post receipt with 7 (got $_rc)"
+  [ $(( _t1 - _t0 )) -lt 10 ] || fail "F141: a CLOSED PR must fail fast, not wait out the ceiling"
+  _rc=0; ( PATH="$_mv/bin" FAKE_STATE= HARNESS_MERGE_VERIFY_INTERVAL=1 HARNESS_MERGE_VERIFY_CEILING=2 \
+           sh "$W" merge-verify "$_mv/r" 9 post ) >/dev/null 2>&1 || _rc=$?
   [ "$_rc" = 7 ] || fail "F141: unreadable merge state must fail closed (got $_rc)"
-  pass "F141/F144 merge receipts: pre pins the reviewed head, post proves the landing, both fail closed"
+  pass "F141/F144 merge receipts: pre pins the reviewed head, post polls bounded and proves the landing, both fail closed"
 }
 
 # The code-ified fail-open batch is WIRED into both command bodies (E99-F141-F152).
@@ -1401,6 +1412,14 @@ test_body_codified_batch_wired() {
       || fail "batch: $_b does not run the post merge receipt (F141)"
     grep -qF '[ -f "${_d}outcome" ] || continue' "$_b" \
       || fail "batch: $_b resume scan still counts outcome-less round dirs (F142/F150)"
+    grep -qF 'not a round FINISHED' "$_b" \
+      || fail "batch: $_b treats outcome as a terminal marker — an observed-but-undisposed round must be RE-ENTERED, not skipped (#3940992239)"
+    grep -qF '"$round_dir/disposed"' "$_b" \
+      || fail "batch: $_b never writes the disposed marker at a terminal disposition"
+    grep -qF -- '--match-head-commit "$reviewed_head"' "$_b" \
+      || fail "batch: $_b merges without pinning the reviewed head atomically (#3940992232)"
+    grep -qF 'exit 1     # TERMINAL' "$_b" \
+      || fail "batch: $_b checkout-verification failure is not terminal (#3940992230)"
     grep -qF 'merge` verdict the gate returned in THIS invocation' "$_b" \
       || fail "batch: $_b Ready-to-merge does not require this invocation's verdict (F150)"
     grep -qF 'gh pr checks "$pr_number" --required' "$_b" \
@@ -1799,8 +1818,8 @@ test_body_squash_prep_cannot_hang() {                 # R43 (squash path)
     'never ask Codex for it'
   need_body "R43: body does not write the squash message itself" 'squash-message.txt'
   need_body "R43: the squash merge is not guarded on a non-empty message" 'if [ -s "$msg" ]'
-  need_body "R43: the squash merge has no default-body fallback (with the F141 post receipt chained)" \
-    'gh pr merge "$pr_number" --squash --delete-branch && merge_oid='
+  need_body "R43: the squash merge has no default-body fallback (with the atomic head pin + F141 post receipt chained)" \
+    'gh pr merge "$pr_number" --squash --delete-branch --match-head-commit "$reviewed_head" && merge_oid='
   pass "R43 squash prep composes the message locally and degrades to the default body"
 }
 

@@ -440,16 +440,37 @@ case "${1:-}" in
       fi
       exit 0
     fi
-    _mv_state="$(gh pr view "$MV_PR" --json state,mergedAt,mergeCommit \
-      --jq '"\(.state) \(.mergedAt // "") \(.mergeCommit.oid // "")"' 2>/dev/null || echo '')"
-    _mv_st="${_mv_state%% *}"; _mv_rest="${_mv_state#* }"
-    _mv_at="${_mv_rest%% *}"; _mv_oid="${_mv_rest#* }"
-    if [ "$_mv_st" != "MERGED" ] || [ -z "$_mv_at" ] || [ -z "$_mv_oid" ]; then
-      echo "merge-verify post: PR #$MV_PR is NOT observably merged (state='$_mv_st') — gh pr merge exiting 0 may only have enqueued it; do not report a landing" >&2
-      exit 7
-    fi
-    printf '%s\n' "$_mv_oid"
-    exit 0
+    # POLL, bounded (Codex #165 P2): under a merge queue `gh pr merge` legitimately
+    # enqueues and the PR stays OPEN for a while — a single sample would falsely hand a
+    # normally-merging PR to a human. Interval/ceiling are env-tunable; a CLOSED PR
+    # fails fast (rejected from the queue), and the ceiling still fails closed.
+    _mv_iv="$(wfc_int "${HARNESS_MERGE_VERIFY_INTERVAL:-10}" 10)"
+    [ "$_mv_iv" -gt 0 ] || _mv_iv=10
+    _mv_ceil="$(wfc_int "${HARNESS_MERGE_VERIFY_CEILING:-180}" 180)"
+    _mv_start="$(date +%s 2>/dev/null || true)"
+    case "$_mv_start" in ''|*[!0-9]*) _mv_start='' ;; esac
+    _mv_ticks=0
+    while :; do
+      _mv_state="$(gh pr view "$MV_PR" --json state,mergedAt,mergeCommit \
+        --jq '"\(.state) \(.mergedAt // "") \(.mergeCommit.oid // "")"' 2>/dev/null || echo '')"
+      _mv_st="${_mv_state%% *}"; _mv_rest="${_mv_state#* }"
+      _mv_at="${_mv_rest%% *}"; _mv_oid="${_mv_rest#* }"
+      if [ "$_mv_st" = "MERGED" ] && [ -n "$_mv_at" ] && [ -n "$_mv_oid" ]; then
+        printf '%s\n' "$_mv_oid"
+        exit 0
+      fi
+      if [ "$_mv_st" = "CLOSED" ]; then
+        echo "merge-verify post: PR #$MV_PR is CLOSED unmerged — rejected from the queue; do not report a landing" >&2
+        exit 7
+      fi
+      _mv_el="$(wfc_elapsed "$_mv_start" "$_mv_ticks")"
+      if [ $(( _mv_el + _mv_iv )) -gt "$_mv_ceil" ]; then
+        echo "merge-verify post: PR #$MV_PR is NOT observably merged after ${_mv_ceil}s (state='$_mv_st') — gh pr merge exiting 0 may only have enqueued it; do not report a landing" >&2
+        exit 7
+      fi
+      sleep "$_mv_iv"
+      _mv_ticks=$(( _mv_ticks + _mv_iv ))
+    done
     ;;
   ''|-h|--help)
     wfc_usage; exit 4 ;;
