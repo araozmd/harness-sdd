@@ -560,7 +560,13 @@
           "id": "E99-F128",
           "title": "[migrated from viernes 2026-08-18] UPSTREAM NIT (harness-sdd): `_rollback_frontmatter`'s empty `except (OSError, ValueError): pass` carries no explanatory comment, and GitHub's code-quality bot flags it on EVERY repo that vendors the harness. Found on viernes-bff #47 during E99-F125 and confirmed byte-identical in `~/repos/harness-sdd/tools/tasks-lock.py` main, so it is upstream code, not authored in any child repo. THE SWALLOW IS INTENTIONAL AND CORRECT: it sits in the rollback path of a failed frontmatter write, called from an `except Exception:` block that re-raises \u2014 if rollback of one file fails, the remaining files must still be attempted and, crucially, the ORIGINAL exception must be the one that propagates. Letting the rollback's own error escape would mask the real failure with a secondary one. So the fix is a COMMENT saying that, not a code change. \u26a0\ufe0f FIX IT UPSTREAM IN harness-sdd AND RE-INSTALL \u2014 do NOT edit the vendored `.harness/tools/tasks-lock.py` in a child repo, which would recreate exactly the hand-synced-body divergence E99-F117 closed and would be silently reverted by the next installer run. \u26a0\ufe0f WHY IT IS WORTH DOING rather than dismissing: it is a MERGE-BLOCKING unresolved review thread in six repos every time the harness body changes, so the cost repeats on every future upgrade PR. Low value as a code change, real value as removed recurring friction. While there, sweep the file for other bare `pass` handlers and comment them the same way \u2014 the bot will find those on the next pass otherwise. \u27c2 [fix riding the 2026-09-04 refactor PR: explanatory comment added to _rollback_frontmatter's intentional swallow]",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "5790e6b6fccea0df644c85e87099179561072bfc", "ref": "5790e6b6fccea0df644c85e87099179561072bfc", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "5790e6b6fccea0df644c85e87099179561072bfc",
+            "ref": "5790e6b6fccea0df644c85e87099179561072bfc",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -592,8 +598,9 @@
         },
         {
           "id": "E99-F140",
-          "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 BASE-CHANGE DETECTION FAILS *OPEN* WHEN THE PRIOR ROUND'S `pr.json` IS UNREADABLE, AND THE CODE'S OWN COMMENT CLAIMS THE OPPOSITE. In the `/sdd-pr-loop` body (step 0b), the stacked-PR guard reads `prior_base_name` and `prior_base_oid` out of `round-$((round-1))/pr.json` with `jq \u2026 2>/dev/null || echo ''`, then wraps the whole comparison in `if [ -n \"$prior_base_name\" ] && [ \"$prior_base_name\" != \"$default_branch\" ] && [ -n \"$prior_base_oid\" ]`. If that file is missing, truncated, or lacks either field, both substitutions are empty and the guard is SILENTLY SKIPPED \u2014 while the round-directory scan has already advanced the counter. A rebased parent then goes unnoticed and the child can pass review and auto-merge without the restack ancestry check that block exists to enforce. \u26a0\ufe0f THE CONTRADICTION IS INSIDE THE SAME BLOCK: three lines further down sits the comment 'Fail closed on either side of the comparison being unreadable \u2014 a missing prior cache or a transient API failure must not silently bypass the detection', guarding only the CURRENT oid. The prior side does exactly what the comment forbids. \u26a0\ufe0f PRESENT IN 0.68.0 \u2014 verified by reading `.claude/commands/sdd-pr-loop.md:93-95` in this repo, not inferred from the 0.63.0 install where it was found. Fix: treat an unreadable prior snapshot as fail-closed (restart from round 1, or needs-human), the same way the current-oid branch already does. Found by Codex on viernes-web#95. || \u26a0\ufe0f CORROBORATED AND WIDENED BY THREE MORE REPORTS (rounds 3-4, 2026-08-19). (a) viernes-users#38: on ROUND 1 `prior_round_dir` points at a nonexistent `round-0`, so the fields are empty and the SAME condition skips both the current-base lookup and the ancestry check \u2014 the runbook's own promise that 'round 1 must validate stack ancestry too' is therefore never kept, for every stacked PR, not just after cache corruption. (b) viernes-bff#50: if `gh repo view` or the `baseRefName` query transiently fails, `default_branch` or `base_ref` come back empty and the PR is treated as OUTSIDE the stacked lane entirely \u2014 a rebased parent then goes undetected, and after the child is retargeted that stale review can authorise a materially different default-branch diff. (c) viernes-infra#46 reported the round-1 case again. Fix accordingly: fetch base and head and verify ancestry whenever no readable prior snapshot exists, and stop or retry \u2014 never skip \u2014 when either value is unreadable.",
-          "status": "pending",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 BASE-CHANGE DETECTION FAILS *OPEN* WHEN THE PRIOR ROUND'S `pr.json` IS UNREADABLE, AND THE CODE'S OWN COMMENT CLAIMS THE OPPOSITE. In the `/sdd-pr-loop` body (step 0b), the stacked-PR guard reads `prior_base_name` and `prior_base_oid` out of `round-$((round-1))/pr.json` with `jq \u2026 2>/dev/null || echo ''`, then wraps the whole comparison in `if [ -n \"$prior_base_name\" ] && [ \"$prior_base_name\" != \"$default_branch\" ] && [ -n \"$prior_base_oid\" ]`. If that file is missing, truncated, or lacks either field, both substitutions are empty and the guard is SILENTLY SKIPPED \u2014 while the round-directory scan has already advanced the counter. A rebased parent then goes unnoticed and the child can pass review and auto-merge without the restack ancestry check that block exists to enforce. \u26a0\ufe0f THE CONTRADICTION IS INSIDE THE SAME BLOCK: three lines further down sits the comment 'Fail closed on either side of the comparison being unreadable \u2014 a missing prior cache or a transient API failure must not silently bypass the detection', guarding only the CURRENT oid. The prior side does exactly what the comment forbids. \u26a0\ufe0f PRESENT IN 0.68.0 \u2014 verified by reading `.claude/commands/sdd-pr-loop.md:93-95` in this repo, not inferred from the 0.63.0 install where it was found. Fix: treat an unreadable prior snapshot as fail-closed (restart from round 1, or needs-human), the same way the current-oid branch already does. Found by Codex on viernes-web#95. || \u26a0\ufe0f CORROBORATED AND WIDENED BY THREE MORE REPORTS (rounds 3-4, 2026-08-19). (a) viernes-users#38: on ROUND 1 `prior_round_dir` points at a nonexistent `round-0`, so the fields are empty and the SAME condition skips both the current-base lookup and the ancestry check \u2014 the runbook's own promise that 'round 1 must validate stack ancestry too' is therefore never kept, for every stacked PR, not just after cache corruption. (b) viernes-bff#50: if `gh repo view` or the `baseRefName` query transiently fails, `default_branch` or `base_ref` come back empty and the PR is treated as OUTSIDE the stacked lane entirely \u2014 a rebased parent then goes undetected, and after the child is retargeted that stale review can authorise a materially different default-branch diff. (c) viernes-infra#46 reported the round-1 case again. Fix accordingly: fetch base and head and verify ancestry whenever no readable prior snapshot exists, and stop or retry \u2014 never skip \u2014 when either value is unreadable. \u27c2 [resolved by removal: E21-F07 deleted the base-change detection step entirely (v0.70.0)]",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "5e22273129b4ff4be52a495340a5198a2def0911", "ref": "5e22273129b4ff4be52a495340a5198a2def0911", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
@@ -623,7 +630,7 @@
         },
         {
           "id": "E99-F143",
-          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 WITH `auto_merge: false`, AN UNRESOLVED HUMAN THREAD IS REPORTED AS A FAILURE INSTEAD OF THE DOCUMENTED HAND-BACK. The thread-ownership gate sets `merge_ok=0` and instructs 'If `merge_ok=0`, stop here \u2014 go straight to the needs-human terminal state', which returns FAILURE. But when auto_merge is off, the loop's own contract is that finishing green-but-unmerged is a SUCCESS: 'stop after posting the all-gates-green summary and hand back to the human \u2014 resolve threads if you like, but do not merge \u2026 that hand-back COMPLETES the loop: return success. It is the one terminal state where an unmerged PR is the intended outcome.' A human comment on a thread is completely ordinary in that mode, so the common case is mislabelled a failure. \u26a0\ufe0f THE ORDERING IS THE BUG: the thread gate exists to authorise a MERGE, and with auto_merge off there is no merge to authorise. Fix: branch on `auto_merge == false` and take the success hand-back BEFORE evaluating merge authorization. Found by Codex on viernes-bff#50. \u27c2 [batch carrier: absorbs E99-F148 (exit-6 states), E99-F151 (summary ordering), E99-F152 (gh pr checks --required) \u2014 four prose corrections to sdd-pr-loop.md in one PR]",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 WITH `auto_merge: false`, AN UNRESOLVED HUMAN THREAD IS REPORTED AS A FAILURE INSTEAD OF THE DOCUMENTED HAND-BACK. The thread-ownership gate sets `merge_ok=0` and instructs 'If `merge_ok=0`, stop here \u2014 go straight to the needs-human terminal state', which returns FAILURE. But when auto_merge is off, the loop's own contract is that finishing green-but-unmerged is a SUCCESS: 'stop after posting the all-gates-green summary and hand back to the human \u2014 resolve threads if you like, but do not merge \u2026 that hand-back COMPLETES the loop: return success. It is the one terminal state where an unmerged PR is the intended outcome.' A human comment on a thread is completely ordinary in that mode, so the common case is mislabelled a failure. \u26a0\ufe0f THE ORDERING IS THE BUG: the thread gate exists to authorise a MERGE, and with auto_merge off there is no merge to authorise. Fix: branch on `auto_merge == false` and take the success hand-back BEFORE evaluating merge authorization. Found by Codex on viernes-bff#50. \u27c2 [batch carrier: absorbs E99-F151 (summary ordering), E99-F152 (gh pr checks --required) \u2014 four prose corrections to sdd-pr-loop.md in one PR]",
           "status": "pending",
           "sdd": false,
           "autonomous": false,
@@ -680,22 +687,25 @@
         },
         {
           "id": "E99-F148",
-          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 (REPORTED THREE TIMES) \u2014 STACK-GUARD EXIT 6 HAS TWO CONTRADICTORY TERMINAL STATES IN THE SAME DOCUMENT. When `pr-stack-guard.sh` returns 6 because a parent PR is still open, the `guard_deferred` branch says to report it and 'exit gracefully without needs-human; the child retries after the parent lands'. The merge-order instructions above it and the Needs-human section below it both classify exit 6 as a needs-human FAILURE. \u26a0\ufe0f EXIT 6 IS THE NORMAL WAITING STATE OF A HEALTHY STACK, not an error, so the needs-human reading escalates every well-formed stacked child before its parent lands. And because the deferred branch only prints and leaves `merged=0` without an explicit return, an `auto_merge: true` run can also fall through and report SUCCESS while nothing merged. Pick one behaviour \u2014 a real deferred/retryable terminal state \u2014 and make all three places agree. Found on viernes-users#38, viernes-bff#50 and viernes-web#95.",
-          "status": "pending",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 (REPORTED THREE TIMES) \u2014 STACK-GUARD EXIT 6 HAS TWO CONTRADICTORY TERMINAL STATES IN THE SAME DOCUMENT. When `pr-stack-guard.sh` returns 6 because a parent PR is still open, the `guard_deferred` branch says to report it and 'exit gracefully without needs-human; the child retries after the parent lands'. The merge-order instructions above it and the Needs-human section below it both classify exit 6 as a needs-human FAILURE. \u26a0\ufe0f EXIT 6 IS THE NORMAL WAITING STATE OF A HEALTHY STACK, not an error, so the needs-human reading escalates every well-formed stacked child before its parent lands. And because the deferred branch only prints and leaves `merged=0` without an explicit return, an `auto_merge: true` run can also fall through and report SUCCESS while nothing merged. Pick one behaviour \u2014 a real deferred/retryable terminal state \u2014 and make all three places agree. Found on viernes-users#38, viernes-bff#50 and viernes-web#95. \u27c2 [resolved by removal: E21-F07 deleted stack-guard exit 6 and both its terminal states (v0.70.0)]",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "5e22273129b4ff4be52a495340a5198a2def0911", "ref": "5e22273129b4ff4be52a495340a5198a2def0911", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F148-pr-loop-finding/",
-          "parked": {
-            "reason": "absorbed into E99-F143 (2026-09-04 triage, board-row bar): batched sdd-pr-loop.md prose correction \u2014 contradictory exit-6 terminal states. Fix lands with E99-F143; this row is kept for the finding text only.",
-            "unblocked_by": "E99-F143 done"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F148-pr-loop-finding/"
         },
         {
           "id": "E99-F149",
           "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 SEVERITY CLASSIFICATION READS THE WHOLE ISSUE-COMMENT STREAM, SO A STALE OR HUMAN COMMENT CAN BLOCK A ROUND. Step 3 walks `review-comments.json` + `reviews[*].body` + `issue-comments.json` looking for severity tags, but the freshness rule (`commit_id == headRefOid` AND `created_at >= trigger`) is applied ONLY to the inline comments. `issue-comments.json` is the entire issue stream, so an older Codex review \u2014 or a HUMAN comment that merely mentions 'P1' \u2014 is classified into the current round. \u26a0\ufe0f IT THEN BLOCKS, AND IT CANNOT BE FIXED: such an entry has no `path`/`line`, which is exactly what pr-fixer needs, so the round stalls or burns budget on something no fixer can act on. Fix: filter EVERY source by the two Codex identities and the trigger timestamp before classifying, not just the inline stream. Found on viernes-bff#50. \u27c2 [fix riding the 2026-09-04 refactor PR: classification code-ified as `wait-for-codex.sh classify` with the freshness rule applied to ALL streams, issue comments included]",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "5790e6b6fccea0df644c85e87099179561072bfc", "ref": "5790e6b6fccea0df644c85e87099179561072bfc", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "5790e6b6fccea0df644c85e87099179561072bfc",
+            "ref": "5790e6b6fccea0df644c85e87099179561072bfc",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
@@ -947,7 +957,8 @@
         {
           "id": "E21-F07",
           "title": "Deprecate the stacked-PR lane and reclaim its machinery",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "5e22273129b4ff4be52a495340a5198a2def0911", "ref": "5e22273129b4ff4be52a495340a5198a2def0911", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
           "sdd": true,
           "autonomous": false,
           "depends_on": [
@@ -1042,8 +1053,18 @@
     {
       "id": "E25",
       "title": "Front-end scope: park non-Claude front-ends (codex/opencode/antigravity/gemini glue) behind a preserved branch/tag and make the installer Claude-Code-only by default \u2014 the multi-front-end matrix is the largest single share of installer complexity and test surface (2026-09-04 ablation campaign; E99-F145 is parked on this decision)",
-      "status": "draft",
-      "features": []
+      "status": "planned",
+      "features": [
+        {
+          "id": "E25-F01",
+          "title": "Claude-first selection defaults: fresh-undetected + interactive default become claude-only; explicit --agents opt-in unchanged; recorded selections never clobbered; docs name the park",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E25-frontend-scope/F01-claude-first-defaults/"
+        }
+      ]
     },
     {
       "id": "E26",
