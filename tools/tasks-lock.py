@@ -638,7 +638,7 @@ def _find_status_span(text, target_id):
     return None
 
 
-def _refuse_if_parked(text, target_id):
+def _refuse_if_parked(text, target_id, _refuse_target_status=None):
     """A park holds against a status transition (E06-F07).
 
     A park that a transition silently clears is not a park — it is a suggestion, which is
@@ -670,6 +670,19 @@ def _refuse_if_parked(text, target_id):
                 continue
             park = ft.get("parked")
             if isinstance(park, dict) and park.get("reason"):
+                # E99-F130: `gate: merge` is the awaiting-merge hold — `done` is not a
+                # transition AROUND the park, it is the park's own designed exit, so it
+                # passes; the transform clears the park in the same guarded write. Every
+                # OTHER transition still bounces (an in-flight PR is not a reason to
+                # re-open building or reviewing), and every other park still holds done.
+                if park.get("gate") == "merge":
+                    if _refuse_target_status == "done":
+                        return
+                    _die(
+                        "%s is awaiting merge (%s) — the only sanctioned transition is "
+                        "`set-status %s done --evidence <merge-ref>` once the PR lands"
+                        % (target_id, park["reason"], target_id)
+                    )
                 # E99-F77: an owner gate refuses with the SAME force but a different
                 # instruction. "unpark it" alone invites the operator to clear the gate
                 # and carry on, which for an owner gate would walk the feature to `done`
@@ -1508,7 +1521,7 @@ def _set_status_text_transform(target_id, status, plan=None, hdir=None):
     """
 
     def transform(text):
-        _refuse_if_parked(text, target_id)  # E06-F07: a park outranks a transition
+        _refuse_if_parked(text, target_id, status)  # E06-F07: a park outranks a transition (one exit: merge-gate + done, E99-F130)
         # The record was resolved BEFORE the lock; here we only re-validate that it
         # still answers for the board being written, so a refusal leaves the board
         # byte-identical and no external call runs in-lock.
@@ -1526,6 +1539,26 @@ def _set_status_text_transform(target_id, status, plan=None, hdir=None):
         patched = text[:start] + status + text[end:]
         if landed is not None:
             patched = _write_landed(patched, target_id, landed)
+        # E99-F130: a `done` through the merge gate CLEARS the park in the SAME write —
+        # the schema (rightly) forbids done+parked, so leaving it would fail-stop the
+        # transition its own gate sanctions. This is the one case where the minimal-diff
+        # text patch gives way to a parse→re-serialize (the mutator path's canonical
+        # form): removing an object key has no single-token text edit.
+        if status == "done":
+            try:
+                _mg = json.loads(patched)
+            except ValueError:
+                return patched  # post-transform validation reports it properly
+            _mg_hit = False
+            for _mg_ep in _mg.get("epics") or []:
+                for _mg_ft in (_mg_ep.get("features") or []):
+                    if (isinstance(_mg_ft, dict) and _mg_ft.get("id") == target_id
+                            and isinstance(_mg_ft.get("parked"), dict)
+                            and _mg_ft["parked"].get("gate") == "merge"):
+                        del _mg_ft["parked"]
+                        _mg_hit = True
+            if _mg_hit:
+                return json.dumps(_mg, indent=2) + "\n"
         return patched
 
     return transform
@@ -1987,6 +2020,23 @@ def main(argv):
         "--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS
     )
 
+    # await-merge (E99-F130) — the approved-awaiting-merge hold as one guarded write.
+    # An approved feature left at `in-review` is NOT inert: the selector hands it back
+    # to a Reviewer every session. The owner-gate workaround held it but cost two
+    # hand-written mutators and reported an in-flight PR indistinguishably from
+    # external blockage. This parks it with `gate: merge`; the selector reports
+    # `awaiting-merge`; `set-status <id> done --evidence` clears it when the PR lands.
+    p_await = sub.add_parser(
+        "await-merge",
+        help="park an approved (in-review) feature as awaiting its PR's merge",
+    )
+    p_await.add_argument("id")
+    p_await.add_argument("--pr", default=None,
+                         help="the PR it awaits (number or URL) — recorded on the park")
+    p_await.add_argument(
+        "--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS
+    )
+
     args = parser.parse_args(argv)
 
     # Bounded-acquisition contract (R5): argparse's float() accepts `nan`/`inf`,
@@ -2092,6 +2142,36 @@ def main(argv):
             return data
 
         transform = _mutator_text_transform(_seed)
+    elif args.cmd == "await-merge":
+        def _await(data):
+            for ep in data.get("epics") or []:
+                for ft in ep.get("features") or []:
+                    if isinstance(ft, dict) and ft.get("id") == args.id:
+                        if ft.get("status") != "in-review":
+                            raise ValueError(
+                                "%s is %r — only an APPROVED feature awaits a merge; "
+                                "await-merge requires status in-review"
+                                % (args.id, ft.get("status"))
+                            )
+                        if isinstance(ft.get("parked"), dict):
+                            raise ValueError(
+                                "%s is already parked (%s) — unpark it first"
+                                % (args.id, ft["parked"].get("reason", ""))
+                            )
+                        park = {
+                            "gate": "merge",
+                            "reason": "approved; PR open, awaiting merge"
+                                      + ((" (%s)" % args.pr) if args.pr else ""),
+                            "unblocked_by": "the PR merging — then "
+                                            "`set-status %s done --evidence <merge-ref>`"
+                                            % args.id,
+                        }
+                        if args.pr:
+                            park["pr"] = str(args.pr)
+                        ft["parked"] = park
+                        return data
+            raise ValueError("id %r not found in board" % args.id)
+        transform = _mutator_text_transform(_await)
     else:  # pragma: no cover - argparse enforces
         parser.error("unknown command")
 

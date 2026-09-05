@@ -46,7 +46,7 @@ SLICE_STATUS = {"pending", "spec-ready", "in-progress", "in-review", "done", "fa
 # Park gates (E99-F77). A CLOSED set: an unrecognised gate is an error, never a silent
 # downgrade to an ordinary park, because the reason code the selector emits is the whole
 # deliverable and a typo that reads as `parked` reports the wrong one.
-PARK_GATES = {"owner"}
+PARK_GATES = {"owner", "merge"}   # `merge` (E99-F130): approved, PR open, awaiting merge
 # Landing attestation (E99-F102 + E99-F129). Also a CLOSED set. All three are WRITABLE:
 # `ancestor` = the ref resolved and ancestry was computed against the repository's default
 # branch and came back true (row 7 of the decision table in tools/tasks-lock.py);

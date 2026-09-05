@@ -309,4 +309,30 @@ next --feature E01-F01
   || fail "R1/target control: targeting the UNGATED feature did not select it, so the block above proves nothing: $NX_OUT"
 pass "E99-F77 R1 targeting_an_owner_gated_feature_is_blocked"
 
+# ── E99-F130: the SECOND gate — `merge` reports as `awaiting-merge`, never selected, ──
+# and NEVER as `gated-owner`. This is the exact assertion the selector's own PARK_GATES
+# comment demanded the day a second member joined the set: the strict `=== OWNER_GATE`
+# comparison is now load-bearing, and cross-reporting either way is the hole it guards.
+MGATE=", \"parked\": { \"gate\": \"merge\", \"reason\": \"approved; PR open, awaiting merge (42)\", \"pr\": \"42\" }"
+mkboard "$MGATE" ''
+next --feature E01-F01
+case "$(codes)" in
+  *awaiting-merge*) ;;
+  *) fail "F130: no 'awaiting-merge' record for a merge-gated feature (codes=$(codes)): $NX_OUT" ;;
+esac
+case "$(codes)" in
+  *gated-owner*) fail "F130: a merge gate reported as gated-owner — the strict gate comparison has been loosened (codes=$(codes))" ;;
+esac
+[ "$(jqx "d['selected']")" = "None" ] \
+  || fail "F130: a merge-gated feature was selected: $NX_OUT"
+detail_for awaiting-merge | grep -q "set-status E01-F01 done --evidence" \
+  || fail "F130: the awaiting-merge record does not name its own exit (set-status done --evidence)"
+# …and the owner gate does not report as awaiting-merge (the other direction).
+mkboard "$GATE" ''
+next --feature E01-F01
+case "$(codes)" in
+  *awaiting-merge*) fail "F130: an owner gate reported as awaiting-merge (codes=$(codes))" ;;
+esac
+pass "E99-F130 merge gate reports awaiting-merge with its exit named; no cross-reporting with gated-owner"
+
 echo "All owner-gate tests passed."

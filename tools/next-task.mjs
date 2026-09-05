@@ -38,8 +38,13 @@ const OWNER_GATE = 'owner';
 // `owner`, the strict comparison becomes load-bearing and NO test currently catches its
 // loosening. If you add one, add an assertion that a non-owner gate does NOT report as
 // `gated-owner`, or you inherit a hole this comment is the only record of.
-const PARK_GATES = new Set([OWNER_GATE]);
+// E99-F130: `merge` joined the set — the strict comparisons below are now LOAD-BEARING,
+// exactly as the warning above predicted, and test_owner_gate.sh carries the demanded
+// assertion that a merge gate never reports as `gated-owner` (and vice versa).
+const MERGE_GATE = 'merge';
+const PARK_GATES = new Set([OWNER_GATE, MERGE_GATE]);
 const isOwnerGated = (feature) => Boolean(feature.parked) && feature.parked.gate === OWNER_GATE;
+const isMergeGated = (feature) => Boolean(feature.parked) && feature.parked.gate === MERGE_GATE;
 // E99-F102 + E99-F129 landing attestation. CLOSED, like the park gates and for the same
 // reason: the three values say who proved what, and all three are WRITABLE. `ancestor` =
 // the ref resolved and ancestry against the repository's default branch came back true;
@@ -509,9 +514,16 @@ function featureBlockers(feature, featureById, cycles, requireApproval) {
     // when the board moves" from "no agent will ever advance this" WITHOUT reading
     // progress/history.md. The route is still named — the release condition changes who
     // acts, not where the feature resumes.
-    records.push(isOwnerGated(feature)
-      ? { subject: feature.id, code: 'gated-owner', detail: `owner gate: ${parkDetail(feature)} [a person must act, not an agent; route when released: ${wouldRoute}]` }
-      : { subject: feature.id, code: 'parked', detail: `${parkDetail(feature)} [route when unparked: ${wouldRoute}]` });
+    // E99-F130: `awaiting-merge` is its OWN code — an in-flight PR is the signal an
+    // operator most needs to tell apart from external owner blockage, and `in-review`
+    // must not re-route an approved feature at a Reviewer. The way out is named inline.
+    if (isMergeGated(feature)) {
+      records.push({ subject: feature.id, code: 'awaiting-merge', detail: `approved, PR open — awaiting merge: ${parkDetail(feature)} [no agent action; when merged: set-status ${feature.id} done --evidence <merge-ref>]` });
+    } else {
+      records.push(isOwnerGated(feature)
+        ? { subject: feature.id, code: 'gated-owner', detail: `owner gate: ${parkDetail(feature)} [a person must act, not an agent; route when released: ${wouldRoute}]` }
+        : { subject: feature.id, code: 'parked', detail: `${parkDetail(feature)} [route when unparked: ${wouldRoute}]` });
+    }
   }
   const unmet = sortedUnique((feature.depends_on || []).filter((id) => !featureById.has(id) || featureById.get(id).status !== 'done'));
   if (unmet.length) {
@@ -522,8 +534,9 @@ function featureBlockers(feature, featureById, cycles, requireApproval) {
       const dep = featureById.get(id);
       if (!dep.parked) return `${id}=${dep.status}`;
       // E99-F77: name the gate KIND one hop away too. "parked" tells a reader to wait;
-      // "owner gate" tells them waiting will never clear it.
-      return `${id}=${dep.status} (${isOwnerGated(dep) ? 'owner gate' : 'parked'}: ${parkDetail(dep)})`;
+      // "owner gate" tells them waiting will never clear it; "awaiting merge" (E99-F130)
+      // tells them it clears itself the moment the dependency's PR lands.
+      return `${id}=${dep.status} (${isMergeGated(dep) ? 'awaiting merge' : isOwnerGated(dep) ? 'owner gate' : 'parked'}: ${parkDetail(dep)})`;
     }).join(', ');
     records.push({ subject: feature.id, code: 'unmet-dependency', detail: `blocking dependencies: ${detail}` });
   }
