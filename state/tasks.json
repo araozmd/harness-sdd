@@ -1162,7 +1162,7 @@
         {
           "id": "E26-F01",
           "title": "Installer --self mode: regenerate the source repo's own .claude glue from the target emitters (source-layout paths, repo model pins, real arming verdict)",
-          "status": "pending",
+          "status": "spec-ready",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
