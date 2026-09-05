@@ -26,7 +26,7 @@ cold_reader_rationale() {
   has 'as models improve' "$DOC" "missing model-improvement scope"
   has 'specification, verification, and trust' "$DOC" "missing shifting-value thesis"
   _sections="$(grep '^## ' "$DOC" | paste -sd '|' -)"
-  [ "$_sections" = '## Why a harness|## Two layers, one decision rule|## Deletion ledger|## How to use the ledger|## Evidence and limits' ] ||
+  [ "$_sections" = '## Why a harness|## Two layers, one decision rule|## Design principles — the ablation doctrine (2026-09)|## Deletion ledger|## How to use the ledger|## Evidence and limits' ] ||
     fail "rationale sections are missing, duplicated, or out of order"
   pass "cold_reader_rationale"
 }

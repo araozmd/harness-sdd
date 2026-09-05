@@ -44,6 +44,43 @@ classification or removing a mechanism, use representative tasks and compare the
 current and proposed harness in repeatable runs. Predeclare acceptable quality,
 safety, completion time, and cost thresholds. If the required evidence is absent, retain the mechanism.
 
+## Design principles — the ablation doctrine (2026-09)
+
+Adopted 2026-09-05 from the v0.69.0 ablation campaign, which was driven by two external
+session reports and by the Claude Code team's published practice (delete the system
+prompt on every model release; bring lines back one at a time; "describe the task, the
+guardrails, the exit criteria — then let the model cook"). These are standing design
+principles for every future harness change:
+
+1. **Code over prose for anything deterministic.** A step that must happen identically
+   every time is a tool, never an instruction to an agent. The empirical rule from two
+   full sessions: every mechanism that earned its keep was code; every one that failed
+   was prose asking an agent to behave. If a rule keeps being re-implemented by hand,
+   that is the signal to ship it as a tool (severity classification, board seeding,
+   telemetry all made this exact journey).
+2. **Ablate on every model generation; never accrete.** Prompt text is written against a
+   model that will not exist next quarter. The default motion is delete → run → measure →
+   restore only the line whose absence caused a *repeated, observed* failure
+   (`docs/ABLATION.md` is the protocol). Prose that explains *how to think* is a
+   hobbling candidate; prose that states a non-guessable fact or a guardrail earns its
+   place.
+3. **Verification is the constant; prompts and harness code are disposable.** Task +
+   guardrails + exit criteria + a way for the work to check itself outlive every prompt
+   revision. Tests and gates are the layer that is never ablated — and every gate fails
+   CLOSED, because a receipt that fails open is worse than no receipt.
+4. **Structural over compliance-dependent.** Any property the system needs must be a
+   property of a choke point (the board lock, the installer, a gate), not of an agent
+   remembering an instruction — observed prompt-stamp compliance under context pressure
+   was ~0%.
+5. **A board row is work, not a note.** Findings must clear a bar (recurring | blocking |
+   fail-open) to cost a build→review→PR cycle; everything else is one dated line in
+   `progress/lessons.md`, which every role reads. Lessons compound; unbounded backlogs
+   tax every future session.
+6. **Float, don't pin.** Anything version-shaped (model ids, command names) either
+   tracks upstream automatically (floating tier aliases) or is checked at install time
+   and named loudly when stale (the stale-reference warning). A pinned value that rots
+   silently is the same defect as a prompt written for a dead model.
+
 ## Deletion ledger
 
 This is a retention ledger, despite the deliberately challenging name. Each row
