@@ -76,17 +76,20 @@ pass "R1 classification: production excludes tests, docs and generated files (in
 RC1="$T/repo-coverage"; mkrepo "$RC1"
 git -C "$RC1" checkout -q -b feature
 mkdir -p "$RC1/coverage/lib" "$RC1/coverage/lcov-report"
-n_lines 30 > "$RC1/coverage/service.js"        # production — source at coverage/ root
-n_lines 25 > "$RC1/coverage/lib/parse.js"      # production — source in a coverage/ subdir
-n_lines 90 > "$RC1/coverage/lcov.info"         # generated — report file
-n_lines 40 > "$RC1/coverage/lcov-report/i.html" # generated — report subtree
+n_lines 30 > "$RC1/coverage/service.js"          # production — source at coverage/ root
+n_lines 25 > "$RC1/coverage/lib/parse.js"        # production — source in a coverage/ subdir
+n_lines 15 > "$RC1/coverage/package.json"        # production — product JSON at coverage/ root
+n_lines 5  > "$RC1/coverage/rules.json"          # production — product config JSON
+n_lines 90 > "$RC1/coverage/lcov.info"           # generated — report file
+n_lines 40 > "$RC1/coverage/lcov-report/i.html"  # generated — report subtree
+n_lines 10 > "$RC1/coverage/coverage-final.json" # generated — conventional JSON report name
 git -C "$RC1" add -A && git -C "$RC1" commit -qm work
 _jc="$("$TOOL" --repo "$RC1" --base main --format json)"
-[ "$(printf '%s' "$_jc" | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')" = "55" ] \
-  || fail "R1b: production under coverage/ was misclassified (expected 55, got $(printf '%s' "$_jc" | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')) — a name collision zeroes a real product's budget"
-[ "$(printf '%s' "$_jc" | sed -n 's/.*"generated_lines":\([0-9]*\).*/\1/p')" = "130" ] \
-  || fail "R1b: coverage OUTPUT not classified generated (expected 130, got $(printf '%s' "$_jc" | sed -n 's/.*"generated_lines":\([0-9]*\).*/\1/p'))"
-pass "R1b coverage output classifies as generated while source under coverage/ stays production"
+[ "$(printf '%s' "$_jc" | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')" = "75" ] \
+  || fail "R1b: production under coverage/ was misclassified (expected 75 incl. root JSON, got $(printf '%s' "$_jc" | sed -n 's/.*"production_lines":\([0-9]*\).*/\1/p')) — a name collision zeroes a real product's budget"
+[ "$(printf '%s' "$_jc" | sed -n 's/.*"generated_lines":\([0-9]*\).*/\1/p')" = "140" ] \
+  || fail "R1b: coverage OUTPUT not classified generated (expected 140 incl. coverage-final.json, got $(printf '%s' "$_jc" | sed -n 's/.*"generated_lines":\([0-9]*\).*/\1/p'))"
+pass "R1b coverage output (incl. conventional JSON report names) classifies as generated; source and product JSON under coverage/ stay production"
 
 # ── R1b: literal-dot escapes in the classifiers survive into awk ─────────────────────────
 # `awk -v re='...\.'` runs the value through awk's string-escape decoding, so `\.` arrives as

@@ -434,6 +434,21 @@ printf '%s\n' "$_trout" | grep -q 'epic E07' \
   || fail "transition-only session did not label the epic rollup as an epic"
 pass "transition-only session reports a derived round count and labels epics"
 
+# PARTIAL phase telemetry must not undercount rounds the structural stream proves
+# (Codex #160 round-4): an architect-only phase log plus two structurally recorded
+# rounds used to report `Build/review rounds: 0`. The counter is the MAX of both
+# sources — each is a lower bound on what actually happened.
+_prlog="$T/partial-phases.jsonl"
+{
+  printf '%s\n' '{"schema_version":1,"type":"phase","feature":"E07-F01","phase":"architect","round":1,"start":"2026-09-05T09:00:00Z","end":"2026-09-05T09:30:00Z","duration_s":1800,"outcome":"done","slice":null,"cost":null}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E07-F01","feature":"E07-F01","from":"pending","to":"in-progress","at":"2026-09-05T10:00:00Z"}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E07-F01","feature":"E07-F01","from":"in-progress","to":"in-review","at":"2026-09-05T11:00:00Z"}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E07-F01","feature":"E07-F01","from":"in-review","to":"in-progress","at":"2026-09-05T12:00:00Z"}'
+} > "$_prlog"
+python3 "$REPORT" session --log "$_prlog" | grep -q 'Build/review rounds: 2' \
+  || fail "partial phase telemetry undercounted rounds (architect-only phases + 2 structural rounds must report 2)"
+pass "partial phase telemetry combines with the structural stream (max of both sources)"
+
 # Kill-switch honored, and an unwritable log NEVER blocks the board write.
 printf 'telemetry:\n  enabled: false\n' > "$_tlb/harness.config.yaml"
 rm -f "$_tlb/telemetry.jsonl"

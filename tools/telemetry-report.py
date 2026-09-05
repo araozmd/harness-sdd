@@ -264,6 +264,24 @@ def latest_session_start(records):
     return latest
 
 
+def transition_round_count(transitions):
+    """Build/review rounds derived from the transition stream: a feature's first move
+    to in-progress opens round 1; each in-review -> in-progress bounce opens the next.
+    Max across features, matching the phase-based counter's semantics."""
+    rounds_by_feature = {}
+    for _, r in transitions:
+        if r.get("kind") == "epic":
+            continue
+        subj = r.get("subject") or r.get("feature")
+        if not subj or r.get("to") != "in-progress":
+            continue
+        if r.get("from") == "in-review":
+            rounds_by_feature[subj] = rounds_by_feature.get(subj, 1) + 1
+        else:
+            rounds_by_feature.setdefault(subj, 1)
+    return max(rounds_by_feature.values()) if rounds_by_feature else 0
+
+
 def transition_records(records, since=None):
     """`transition` records (written structurally by tasks-lock.py at every status
     write), optionally scoped to at/after `since`. Sorted by timestamp."""
@@ -332,23 +350,9 @@ def report_session(records, out):
     if not phases and not closes:
         # Transitions alone still tell the story of the session — never hide them behind
         # the phase table's absence. In particular the ROUND COUNT survives: this is the
-        # 0%-phase-compliance case structural telemetry exists for, and the transition
-        # sequence carries the rounds (a feature's first move to in-progress opens round
-        # 1; each in-review → in-progress bounce opens the next). Reported as the max
-        # across features, matching the phase-based counter's semantics.
-        rounds_by_feature = {}
-        for _, r in transitions:
-            if r.get("kind") == "epic":
-                continue
-            subj = r.get("subject") or r.get("feature")
-            if not subj or r.get("to") != "in-progress":
-                continue
-            if r.get("from") == "in-review":
-                rounds_by_feature[subj] = rounds_by_feature.get(subj, 1) + 1
-            else:
-                rounds_by_feature.setdefault(subj, 1)
+        # 0%-phase-compliance case structural telemetry exists for.
         out.append("- Build/review rounds (derived from transitions): %d"
-                   % (max(rounds_by_feature.values()) if rounds_by_feature else 0))
+                   % transition_round_count(transitions))
         out.append("")
         return
     # per-phase durations
@@ -369,6 +373,11 @@ def report_session(records, out):
               if p["phase"] in ("builder", "reviewer")
               and isinstance(p["round"], int) and not isinstance(p["round"], bool)]
     round_count = max(rounds) if rounds else 0
+    # PARTIAL prompt-level telemetry must never undercount what the structural stream
+    # already proves (Codex #160 round-4): an architect-only phase log with two
+    # structurally recorded rounds used to report 0. The two sources are combined by
+    # max — each is a lower bound on the rounds that actually happened.
+    round_count = max(round_count, transition_round_count(transitions))
     out.append("- Build/review rounds: %d" % round_count)
     mean, median, nhuman, nauto = human_latency_stats(closes)
     if mean is None:
