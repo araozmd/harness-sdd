@@ -838,7 +838,20 @@ body_link_travels() {
   # authoritative bytes to the generated stub text (Codex #3809738600). Refuse the alias
   # conservatively; the caller writes its ordinary pointer stub, which resolves the complete
   # chain at the umbrella instead of reproducing only its first hop in the child.
+  #
+  # PROBED AGAINST THE UMBRELLA TWIN AS WELL (Codex #3942215068): the tree being judged
+  # is built entry by entry, so an alias in an EARLIER entry whose target lives in a
+  # LATER one probes an incomplete tree here and the second link is invisible — kept,
+  # then its target is replaced by a pointer stub, and the child alias reads stub text
+  # where the umbrella alias reads the real bytes. The umbrella body is complete by
+  # definition, so the same relative walk there sees every hop. Both probes stand: the
+  # local one catches links already present in this tree, the umbrella one catches the
+  # not-yet-staged remainder.
   [ -L "$_blt_d/$_blt_t" ] && return 1
+  if [ -n "${_umb_body:-}" ]; then
+    _blt_rel="${_blt_l#"$_blt_root"/}"
+    [ -L "$_umb_body/$(dirname -- "$_blt_rel")/$_blt_t" ] && return 1
+  fi
   # (1) THE COMPLETE TARGET, resolved from the link's own directory, whenever the filesystem
   # can resolve it at all — which is every target that IS a directory, INCLUDING one made of
   # nothing but traversal (`..`, `../..`, `../../`). This branch exists because the first
