@@ -1193,6 +1193,11 @@ MODELS_OFF=0
 # roles × five front-ends is 35 resolutions per run — without this the output degenerates
 # into thirty-five identical advisory lines.
 MODEL_DIAG=""
+# Coordinator config for the E27-F01 models cascade: set per target in install_one from
+# umbrella_body_dir (so both the --umbrella loop and a standalone child re-run resolve
+# it, and the coordinator/single-repo resolve nothing). Like MODEL_DIAG it must survive
+# the `$(…)` subshells resolve_model runs in, which a plain global does.
+UMB_MODELS_CFG=""
 
 # _models_cfg — path of the target config the resolver reads. Empty before install_one
 # sets $H, in which case every lookup below yields empty (⇒ `inherit` ⇒ omission).
@@ -1210,23 +1215,59 @@ _model_warn_once() {
   return 0
 }
 
-# model_tier <role> — print the resolved TIER: `models.<role>`, else `models.default`,
-# else `inherit`. An unrecognized tier is a WARNING, not a fatal error (a config written
-# for a newer harness must never block an upgrade on an older installer): warn once
-# naming the role and the value, resolve as `inherit`, keep exit status 0.
-model_tier() {
-  _mt_cfg="$(_models_cfg)"
-  _mt_v="$(_cfg_models_value "$_mt_cfg" "$1")"
-  [ -n "$_mt_v" ] || _mt_v="$(_cfg_models_value "$_mt_cfg" default)"
-  [ -n "$_mt_v" ] || _mt_v="inherit"
-  case "$_mt_v" in
-    reasoning|standard|cheap|inherit) ;;
+# _model_tier_resolve <role> — resolve the role's TIER into two caller-shell variables:
+# `_mtr_tier` (reasoning|standard|cheap|inherit) and `_mtr_src` (own|umbrella|default).
+# Chain: target `models.<role>` → target `models.default` → when that yields `inherit`
+# (or nothing) AND the target resolves an umbrella (UMB_MODELS_CFG, E27-F01), the
+# COORDINATOR's `models.<role>` → `models.default` — a child's own explicit value always
+# wins — → the built-in `inherit`. An unrecognized tier at EITHER level is a WARNING,
+# not a fatal error (a config written for a newer harness must never block an upgrade
+# on an older installer): warn once naming the source, resolve that level as `inherit`,
+# keep exit status 0.
+_model_tier_resolve() {
+  _mtr_tier=""; _mtr_src=default
+  _mtr_cfg="$(_models_cfg)"
+  _mtr_v="$(_cfg_models_value "$_mtr_cfg" "$1")"
+  [ -n "$_mtr_v" ] || _mtr_v="$(_cfg_models_value "$_mtr_cfg" default)"
+  case "$_mtr_v" in
+    ''|reasoning|standard|cheap|inherit) ;;
     *)
-      _model_warn_once "tier:$1:$_mt_v" \
-        "⚠️  models.$1: unrecognized tier '$_mt_v' — treating it as 'inherit' (known tiers: reasoning standard cheap inherit)"
-      _mt_v="inherit" ;;
+      _model_warn_once "tier:$1:$_mtr_v" \
+        "⚠️  models.$1: unrecognized tier '$_mtr_v' — treating it as 'inherit' (known tiers: reasoning standard cheap inherit)"
+      _mtr_v="inherit" ;;
   esac
-  printf '%s\n' "$_mt_v"
+  if [ -n "$_mtr_v" ] && [ "$_mtr_v" != "inherit" ]; then
+    _mtr_tier="$_mtr_v"; _mtr_src=own
+    return 0
+  fi
+  if [ -n "${UMB_MODELS_CFG:-}" ] && [ -f "$UMB_MODELS_CFG" ]; then
+    _mtr_u="$(_cfg_models_value "$UMB_MODELS_CFG" "$1")"
+    [ -n "$_mtr_u" ] || _mtr_u="$(_cfg_models_value "$UMB_MODELS_CFG" default)"
+    case "$_mtr_u" in
+      ''|reasoning|standard|cheap|inherit) ;;
+      *)
+        _model_warn_once "utier:$1:$_mtr_u" \
+          "⚠️  umbrella models.$1: unrecognized tier '$_mtr_u' in the coordinator's config — treating it as 'inherit' (known tiers: reasoning standard cheap inherit)"
+        _mtr_u="inherit" ;;
+    esac
+    if [ -n "$_mtr_u" ] && [ "$_mtr_u" != "inherit" ]; then
+      _mtr_tier="$_mtr_u"; _mtr_src=umbrella
+      return 0
+    fi
+  fi
+  _mtr_tier="inherit"
+  # `default` when nothing anywhere said even `inherit`; `own` when the target wrote
+  # the literal — the distinction only feeds the R5 report line, never resolution.
+  [ "$_mtr_v" = "inherit" ] && _mtr_src=own
+  return 0
+}
+
+# model_tier <role> — print the resolved TIER (stdout contract unchanged: one line,
+# tier only — every caller captures it in `$(…)`). The resolution itself lives in
+# _model_tier_resolve so the E27-F01 report line can read `_mtr_src` without a subshell.
+model_tier() {
+  _model_tier_resolve "$1"
+  printf '%s\n' "$_mtr_tier"
 }
 
 # model_alias <front-end> <tier> — the built-in tier→native value table. Every entry is
@@ -1263,6 +1304,11 @@ resolve_model() {
   [ "$_rm_tier" = "inherit" ] && return 0
 
   _rm_pin="$(_cfg_models_value "$(_models_cfg)" "pin.$_rm_fe.$_rm_tier")"
+  # E27-F01: an absent child pin falls back to the coordinator's same pin key — BEFORE
+  # the guards below, so whichever pin wins is validated identically.
+  if [ -z "$_rm_pin" ] && [ -n "${UMB_MODELS_CFG:-}" ] && [ -f "$UMB_MODELS_CFG" ]; then
+    _rm_pin="$(_cfg_models_value "$UMB_MODELS_CFG" "pin.$_rm_fe.$_rm_tier")"
+  fi
   if [ -n "$_rm_pin" ]; then
     # A pin is otherwise written VERBATIM — but `inherit` is a TIER name, not a model id,
     # and R5 is absolute: the literal string `inherit` must never reach a generated
@@ -2311,6 +2357,11 @@ install_one() {
   MODEL_DIAG="$(mktemp 2>/dev/null || mktemp -t harness-mdl)"
   : > "$MODEL_DIAG"
 
+  # E27-F01 models cascade: reset per target; resolved after §1 (umbrella_body_dir
+  # normalizes a RELATIVE umbrella root against $H, so $H must exist first — on a
+  # fresh cascade child it does not until §1 copies the body).
+  UMB_MODELS_CFG=""
+
   # ── agent selection (E08-F01) ───────────────────────────────────────────────
   # Capture the PRIOR persisted selection (for add/remove reconciliation, R12/R13)
   # BEFORE anything is written this run, then resolve the new SELECTED set. This is
@@ -2515,6 +2566,17 @@ install_one() {
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"
+
+  # E27-F01 models cascade: resolve the coordinator's config ONCE per target, now that
+  # $H exists. umbrella_body_dir prefers the cascade's HARNESS_UMBRELLA_ROOT (a fresh
+  # child has no config yet) and falls back to the child's persisted umbrella.root, so
+  # a standalone child re-run cascades identically; the coordinator itself and every
+  # single-repo target resolve nothing and behave exactly as before. Placed before any
+  # resolve_model consumer (§5e/§5f/§6/§6b all come later).
+  _umc_body="$(umbrella_body_dir "$H")"
+  if [ -n "$_umc_body" ] && [ -f "$_umc_body/harness.config.yaml" ]; then
+    UMB_MODELS_CFG="$_umc_body/harness.config.yaml"
+  fi
 
   # ── 2. project workspace → .harness/  (seed once, never clobber) ────────────
   mkdir -p "$H/specs/epics" "$H/progress" "$H/state"
@@ -5789,6 +5851,30 @@ EOF
   # verdict calls resolve_model again and would otherwise be the first caller for a
   # front-end that generates nothing, moving a diagnostic to a confusing place.
   write_escalation_arming
+
+  # E27-F01 R5: when any role's tier came from the coordinator, say so — one line per
+  # target naming each non-inherit role's tier and source (own | umbrella), so a
+  # cascade run shows exactly which children a coordinator edit re-tiered. Calls
+  # _model_tier_resolve directly (no subshell) so _mtr_src is readable here.
+  if [ -n "$UMB_MODELS_CFG" ]; then
+    _mrep=""; _mrep_umb=0; _mrep_inh=0
+    for _mrep_role in $MODEL_ROLES; do
+      _model_tier_resolve "$_mrep_role"
+      if [ "$_mtr_tier" = "inherit" ]; then
+        _mrep_inh=$((_mrep_inh + 1))
+      else
+        _mrep="$_mrep $_mrep_role=$_mtr_tier($_mtr_src)"
+        [ "$_mtr_src" = "umbrella" ] && _mrep_umb=1
+      fi
+    done
+    if [ "$_mrep_umb" = 1 ]; then
+      if [ "$_mrep_inh" -gt 0 ]; then
+        info "models cascade:$_mrep — $_mrep_inh role(s) inherit"
+      else
+        info "models cascade:$_mrep"
+      fi
+    fi
+  fi
   rm -f "$_UNSTAMPED_FILE"
 
   # ── 6c. worker roster (E17-F04) ─────────────────────────────────────────────
