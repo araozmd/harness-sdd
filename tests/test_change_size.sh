@@ -783,11 +783,18 @@ grep -qF 'index($0,h)' "$_BUILDER" \
 # E99-F75's sibling rule: two co-occurring tokens across folded newlines, composed WITH
 # the section extraction (a whole-file fold recreates the false positive the section rule
 # forbids). Pinned with the same distinctive-fixed-substring discipline this block teaches.
-awk 'BEGIN{h="Principles"} /^#+ /{k=(index($0,h)>0);next} k' "$_BUILDER" | tr '\n' ' ' \
-  | grep -qiE 'TWO co-occurring tokens[^.]{0,80}folded newlines' \
+# Fence-aware via the ONE fence rule (Codex #169 cap): a fenced example quoting a
+# "## Principles" heading would re-open the hand-rolled slice on quoted text.
+_r9c_sect() {
+  awk "$FENCE_AWK"'
+    fence_delim($0) { next }
+    !fence && /^#+ / { k = (index($0, "Principles") > 0); next }
+    !fence && k { print }
+  ' "$_BUILDER" | tr '\n' ' '
+}
+_r9c_sect | grep -qiE 'TWO co-occurring tokens[^.]{0,80}folded newlines' \
   || fail "R9c/F75: builder.md Principles lost the two-token folded-newline convention"
-awk 'BEGIN{h="Principles"} /^#+ /{k=(index($0,h)>0);next} k' "$_BUILDER" | tr '\n' ' ' \
-  | grep -qiE 'FAILS on the pre-change +blob' \
+_r9c_sect | grep -qiE 'FAILS on the pre-change +blob' \
   || fail "R9c/F75: builder.md's two-token rule lost its verify-against-the-pre-change-blob clause"
 # The lens itself, matched as DISTINCTIVE FIXED substrings — one per operative clause.
 # The first version of this assertion was `grep -qi 'reachable\|other than the one'`, and it was
