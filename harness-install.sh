@@ -833,6 +833,12 @@ body_link_travels() {
   _blt_rp="$( CDPATH= cd -- "$_blt_root" 2>/dev/null && pwd -P )" || _blt_rp=''
   [ -n "$_blt_rp" ] || return 1
   _blt_d="$(dirname -- "$_blt_l")"
+  # A direct target that is itself a symlink has another relocation decision hidden behind
+  # it. Keeping the alias while stubbing an escaping second hop changes the alias from the
+  # authoritative bytes to the generated stub text (Codex #3809738600). Refuse the alias
+  # conservatively; the caller writes its ordinary pointer stub, which resolves the complete
+  # chain at the umbrella instead of reproducing only its first hop in the child.
+  [ -L "$_blt_d/$_blt_t" ] && return 1
   # (1) THE COMPLETE TARGET, resolved from the link's own directory, whenever the filesystem
   # can resolve it at all — which is every target that IS a directory, INCLUDING one made of
   # nothing but traversal (`..`, `../..`, `../../`). This branch exists because the first
@@ -1031,19 +1037,28 @@ _ptb_unsafe_walk() (
 # which is exactly the old behaviour and is still fail-closed: the entry blocks either way.
 _ptb_sanitize() {
   [ -n "$_ptb_tmp" ] || return 1
+  _ptb_src_a="$_ptb_a"; _ptb_src_b="$_ptb_b"
   rm_owned_tree "$_ptb_tmp/h" "$_ptb_tmp/u" || return 1
   mkdir -p "$(dirname -- "$_ptb_tmp/h/$_ptb_rel")" "$(dirname -- "$_ptb_tmp/u/$_ptb_rel")" \
     || return 1
   # `cp -R` does NOT follow symlinks or read FIFOs, so it reproduces their directory entries
   # without traversing a cycle or blocking on a writer — the same property stage_tree relies on.
-  cp -R "$_ptb_a" "$_ptb_tmp/h/$_ptb_rel" || return 1
-  cp -R "$_ptb_b" "$_ptb_tmp/u/$_ptb_rel" || return 1
+  cp -R "$_ptb_src_a" "$_ptb_tmp/h/$_ptb_rel" || return 1
+  cp -R "$_ptb_src_b" "$_ptb_tmp/u/$_ptb_rel" || return 1
   chmod -R u+w "$_ptb_tmp" 2>/dev/null || :
-  find "$_ptb_tmp/h" "$_ptb_tmp/u" ! -type d ! -type f -exec rm -f {} + \
-    >/dev/null 2>&1 || return 1
-  [ -e "$_ptb_tmp/h/$_ptb_rel" ] && [ -e "$_ptb_tmp/u/$_ptb_rel" ] || return 1
   _ptb_a="$_ptb_tmp/h/$_ptb_rel"; _ptb_b="$_ptb_tmp/u/$_ptb_rel"
   _ptb_ra="$_ptb_tmp/h"; _ptb_rb="$_ptb_tmp/u"
+  # The live-tree sweep and the copies have distinct observation points. Name unsafe nodes
+  # found in the snapshot too, so one introduced during `cp -R` can never be silently removed
+  # and mistaken for a pristine entry. These records join the caller's single `sort -u`.
+  if ! _ptb_snap_unsafe="$(_ptb_unsafe_walk "$_ptb_a" "$_ptb_b")"; then
+    _ptb_print_path "$_ptb_rel"
+    return 1
+  fi
+  [ -z "$_ptb_snap_unsafe" ] || printf '%s\n' "$_ptb_snap_unsafe"
+  find "$_ptb_tmp/h" "$_ptb_tmp/u" ! -type d ! -type f -exec rm -f {} + \
+    >/dev/null 2>&1 || return 1
+  [ -e "$_ptb_a" ] && [ -e "$_ptb_b" ] || return 1
 }
 
 # _ptb_exact_walk <left-dir> <right-dir> — derive exact names while every raw pathname is
@@ -1195,7 +1210,7 @@ _ptb_entry_blockers() {
     printf '%s\n' "$_ptb_rel"
     return 0
   fi
-# THE UNSAFE-NODE SWEEP (see the rule above). Fail closed on a walk that could not complete:
+  # THE UNSAFE-NODE SWEEP (see the rule above). Fail closed on a walk that could not complete:
   # a side this cannot read is not a side whose shape has been established, and the entry
   # path itself is the honest thing to name.
   if ! _ptb_unsafe="$(_ptb_unsafe_walk "$_ptb_a" "$_ptb_b")"; then
@@ -1205,9 +1220,12 @@ _ptb_entry_blockers() {
     # When BOTH sides hold the unsafe node, the two absolute paths normalise to the SAME
     # tier-relative one; the caller's `sort -u` is what keeps that one problem one line.
     printf '%s\n' "$_ptb_unsafe"
-    # Unsafe nodes are named; compare what remains on copies `diff` can safely walk/read.
-    _ptb_sanitize || return 0
   fi
+  # ALWAYS snapshot before either comparison, even when the live sweep was clean. An external
+  # writer can change the live tree after any observation; private regular-node-only copies
+  # give the exact walk and authoritative recursive diff one immutable view and close the final
+  # post-walk race (Codex #3809738603). The sanitizer names any unsafe node the snapshot adds.
+  _ptb_sanitize || return 0
   # Derive exact names independently of `diff`'s human prose. Run both directions so
   # one-sided paths from either tree are covered; `sort -u` merges two-sided overlap and
   # overlap with the symlink producer. A traversal failure can never make the tier clean.

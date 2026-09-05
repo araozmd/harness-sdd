@@ -2073,6 +2073,12 @@ ln -s . "$UM4/docs/self"
 # component that was thrown away. (Codex #3804812828.)
 ln -s .. "$UM4/docs/up"
 ln -s ../.. "$UM4/docs/link"
+# A TWO-HOP alias whose first hop stays inside the tier but whose eventual target escapes it.
+# Keeping `alias` while stubbing `escaped` changes what `alias` reads from authoritative bytes
+# to pointer text, so validating only the direct target's parent is insufficient.
+printf 'authoritative bytes beyond the moved tree\n' > "$F04M/outside.md"
+ln -s ../../outside.md "$UM4/docs/escaped"
+ln -s escaped "$UM4/docs/alias"
 # PRECONDITIONS: both links RESOLVE where they stand, so nothing here is broken going in and
 # any breakage after the run belongs to the run.
 [ -L "$UM4/agents/builder.md" ] || fail "R5 control: the umbrella's agents/builder.md is not a symlink"
@@ -2084,6 +2090,10 @@ for _mu in up link; do
   [ -d "$UM4/docs/$_mu" ] \
     || fail "R5 control: the umbrella's docs/$_mu does not resolve to a directory at the umbrella — it is broken going in, so anything the child ends up with says nothing"
 done
+[ -L "$UM4/docs/alias" ] && [ -L "$UM4/docs/escaped" ] \
+  || fail "R5 alias-chain control: docs/alias -> escaped -> ../../outside.md was not created"
+[ "$(cat "$UM4/docs/alias")" = 'authoritative bytes beyond the moved tree' ] \
+  || fail "R5 alias-chain control: the umbrella alias does not resolve to the external authoritative bytes before maintenance"
 # THE PRECONDITION THAT MAKES THIS A DEFECT AND NOT A STYLE CHOICE: `docs/link` names two
 # DIFFERENT repositories depending on where the link sits. Computed, not asserted by eye.
 F04M_LU="$( CDPATH= cd -- "$UM4/docs" && CDPATH= cd -- ../.. && pwd -P )"
@@ -2130,6 +2140,12 @@ is_stub "$KM4/docs/link" \
   || fail "R5: docs/link is neither a link nor a stub after the run"
 grep -qF '../../.harness/docs/link' "$KM4/docs/link" \
   || fail "R5: the stub that replaced docs/link does not name the authoritative path"
+[ -L "$KM4/docs/alias" ] \
+  && fail "R5: docs/alias was retained even though its direct target is an escaping symlink; in the child that alias reads the replacement stub instead of the external bytes it names at the umbrella"
+is_stub "$KM4/docs/alias" \
+  || fail "R5: docs/alias is neither a link nor a stub after the chained-target maintenance run"
+grep -qF '../../.harness/docs/alias' "$KM4/docs/alias" \
+  || fail "R5: the stub that replaced docs/alias does not name the authoritative umbrella path"
 [ -L "$KM4/docs/up" ] \
   || fail "R5: docs/up -> .. was stubbed too — it resolves to each side's OWN harness dir, so it means the same thing in the child and must survive; refusing it as well would make the rule 'refuse traversal' rather than 'refuse position dependence', and one `..` is the whole difference between these two paths"
 [ "$(readlink "$KM4/docs/up")" = ".." ] \
