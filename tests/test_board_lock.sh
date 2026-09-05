@@ -1277,6 +1277,48 @@ do
   require_locked_apply_contract "$_contract"
 done
 
+# ── add-feature: the Fixer's seeding contract (fixer.md R8/R9) as a guarded ───
+# subcommand — append-only, next-sequential id strictly above max (never refill a
+# gap), sdd:false/pending/autonomous default, --gated opt-out, missing epic refused.
+T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+make_fixture "$T"
+_id="$(HARNESS_DIR="$T" python3 "$HELPER" add-feature --epic E01 --title "Seeded fix one")" \
+  || fail "add-feature: exited non-zero on a valid epic"
+[ "$_id" = "E01-F03" ] || fail "add-feature: expected next-sequential E01-F03, got '$_id'"
+python3 - "$T/state/tasks.json" <<'PY' || fail "add-feature: seeded row violates the R8 field table"
+import json, sys
+d = json.load(open(sys.argv[1]))
+f = d["epics"][0]["features"][-1]
+assert f["id"] == "E01-F03" and f["status"] == "pending", f
+assert f["sdd"] is False and f["autonomous"] is True and f["depends_on"] == [], f
+assert f["spec_path"].startswith("specs/epics/") and f["spec_path"].endswith("/"), f
+PY
+# --gated stamps autonomous: false; a vacated high id is never refilled (strictly above max).
+cat > "$T/gapmut.py" <<'EOF'
+def mutate(data):
+    feats = data["epics"][0]["features"]
+    feats[:] = [f for f in feats if f["id"] != "E01-F02"]  # vacate F02 — the gap
+    return data
+EOF
+HARNESS_DIR="$T" python3 "$HELPER" apply --mutator "$T/gapmut.py" \
+  || fail "add-feature: gap-mutator apply failed"
+_id2="$(HARNESS_DIR="$T" python3 "$HELPER" add-feature --epic E01 --title "gated" --gated)" \
+  || fail "add-feature: --gated run exited non-zero"
+[ "$_id2" = "E01-F04" ] || fail "add-feature: refilled the vacated F02 instead of allocating above max (got '$_id2')"
+python3 - "$T/state/tasks.json" <<'PY' || fail "add-feature: --gated did not stamp autonomous: false"
+import json, sys
+f = json.load(open(sys.argv[1]))["epics"][0]["features"][-1]
+assert f["id"] == "E01-F04" and f["autonomous"] is False, f
+PY
+# A missing epic is refused with the board untouched — never invented.
+_before="$(cat "$T/state/tasks.json")"
+HARNESS_DIR="$T" python3 "$HELPER" add-feature --epic E77 --title "x" >/dev/null 2>&1 \
+  && fail "add-feature: seeding under a missing epic must fail"
+[ "$_before" = "$(cat "$T/state/tasks.json")" ] \
+  || fail "add-feature: a refused seed still mutated the board"
+rm -rf "$T"
+pass "add-feature seeds the R8/R9 row shape, allocates strictly above max, honors --gated, refuses a missing epic"
+
 grep -qF 'set_slice_status(feature, slice_id, status)' "$ROOT/store/local.md" \
   || fail "R1 contract: store/local.md lost the slice mutation contract"
 grep -qF 'tasks-lock.py apply --mutator' "$ROOT/store/local.md" \

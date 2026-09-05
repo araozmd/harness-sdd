@@ -45,12 +45,14 @@ n_lines() { i=1; while [ "$i" -le "$1" ]; do printf 'line %d\n' "$i"; i=$((i+1))
 
 R="$T/repo"; mkrepo "$R"
 git -C "$R" checkout -q -b feature
-mkdir -p "$R/src" "$R/tests" "$R/specs" "$R/vendor"
+mkdir -p "$R/src" "$R/tests" "$R/specs" "$R/vendor" "$R/coverage"
 n_lines 40  > "$R/src/app.js"        # production
 n_lines 10  > "$R/src/util.js"       # production
 n_lines 300 > "$R/tests/app.test.js" # test  — must NOT count as production
 n_lines 200 > "$R/specs/design.md"   # doc   — must NOT count as production
 n_lines 900 > "$R/vendor/lib.js"     # generated — excluded entirely
+n_lines 100 > "$R/coverage/lcov.info"   # generated — coverage output into a NON-ignored dir
+n_lines 60  > "$R/src/app.js.mutbak"    # generated — mutation backup, deliberately NOT gitignored
 git -C "$R" add -A && git -C "$R" commit -qm work
 
 # ── R1: classification — tests/docs/generated never inflate the production number ────────
@@ -62,9 +64,9 @@ _get() { printf '%s' "$out" | sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p"; }
   || fail "R1: production_files=$(_get production_files), expected 2"
 [ "$(_get test_lines)" = "300" ]      || fail "R1: test_lines=$(_get test_lines), expected 300"
 [ "$(_get doc_lines)" = "200" ]       || fail "R1: doc_lines=$(_get doc_lines), expected 200"
-[ "$(_get generated_lines)" = "900" ] || fail "R1: generated_lines=$(_get generated_lines), expected 900"
-[ "$(_get total_lines)" = "1450" ]    || fail "R1: total_lines=$(_get total_lines), expected 1450"
-pass "R1 classification: production excludes tests, docs and generated files"
+[ "$(_get generated_lines)" = "1060" ] || fail "R1: generated_lines=$(_get generated_lines), expected 1060 (vendor 900 + coverage 100 + .mutbak 60 — coverage/ and unignored mutation backups must classify as generated)"
+[ "$(_get total_lines)" = "1610" ]    || fail "R1: total_lines=$(_get total_lines), expected 1610"
+pass "R1 classification: production excludes tests, docs and generated files (incl. coverage/ + unignored .mutbak)"
 
 # ── R1b: literal-dot escapes in the classifiers survive into awk ─────────────────────────
 # `awk -v re='...\.'` runs the value through awk's string-escape decoding, so `\.` arrives as

@@ -375,6 +375,44 @@ grep -qE '^telemetry:' "$CONFIG" || fail "config: telemetry block missing"
 grep -qE '^[[:space:]]*enabled:' "$CONFIG" || fail "config: telemetry.enabled missing (kill-switch)"
 grep -qE '^[[:space:]]*log:[[:space:]]*telemetry\.jsonl' "$CONFIG" || fail "config: telemetry.log default missing"
 # verification.test_command now delegates to tools/run-tests.sh, which DISCOVERS every
+# ── structural transitions (2026-09-04): tasks-lock.py derives telemetry at the ────
+# status-write choke point, so records exist as a property of the system rather than a
+# prompt-compliance hope (observed compliance of the prompt-level stamps was ~0%).
+_tlb="$T/tlock"
+mkdir -p "$_tlb/state" "$_tlb/store" "$_tlb/tools"
+cp tools/tasks-lock.py tools/validate-board.py "$_tlb/tools/"
+[ -f tools/repo-resolve.py ] && cp tools/repo-resolve.py "$_tlb/tools/"
+cp store/tasks.schema.json "$_tlb/store/"
+cat > "$_tlb/state/tasks.json" <<'EOF'
+{"project":"t","epics":[{"id":"E01","title":"t","status":"in-progress","features":[
+ {"id":"E01-F01","title":"t","status":"pending","sdd":false,"autonomous":true,"depends_on":[],"spec_path":"specs/epics/E01-t/F01-t/"}]}]}
+EOF
+HARNESS_DIR="$_tlb" python3 "$_tlb/tools/tasks-lock.py" set-status E01-F01 in-progress >/dev/null \
+  || fail "structural: set-status failed in the sandbox board"
+[ -f "$_tlb/telemetry.jsonl" ] \
+  || fail "structural: no telemetry.jsonl written by a status transition"
+python3 - "$_tlb/telemetry.jsonl" <<'PY' || fail "structural: transition record wrong shape"
+import json, sys
+recs = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+r = [x for x in recs if x.get("type") == "transition"]
+assert len(r) == 1, r
+r = r[0]
+assert r["feature"] == "E01-F01" and r["from"] == "pending" and r["to"] == "in-progress"
+assert r["schema_version"] == 1 and r["at"].endswith("Z")
+PY
+pass "structural transition record derived at the tasks-lock choke point"
+
+# Kill-switch honored, and an unwritable log NEVER blocks the board write.
+printf 'telemetry:\n  enabled: false\n' > "$_tlb/harness.config.yaml"
+rm -f "$_tlb/telemetry.jsonl"
+HARNESS_DIR="$_tlb" python3 "$_tlb/tools/tasks-lock.py" set-status E01-F01 in-review >/dev/null \
+  || fail "structural: set-status failed under telemetry.enabled: false"
+[ -f "$_tlb/telemetry.jsonl" ] && fail "structural: telemetry.enabled: false still wrote a record"
+printf 'telemetry:\n  log: /nonexistent-dir-harness-test/t.jsonl\n' > "$_tlb/harness.config.yaml"
+HARNESS_DIR="$_tlb" python3 "$_tlb/tools/tasks-lock.py" set-status E01-F01 in-progress >/dev/null \
+  || fail "structural: an unwritable telemetry log BLOCKED a board write (must be best-effort)"
+pass "structural telemetry kill-switch + never-blocking guarantees"
+
 # tests/test_*.sh. The intent of this check is "this suite is not orphaned", so accept
 # either spelling: an explicit mention, or the discovering runner plus the file existing.
 _tc_value() {  # echo the test_command scalar only — never the surrounding comments
