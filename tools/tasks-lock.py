@@ -1795,6 +1795,13 @@ def _telemetry_transition(hdir, feature_id, old_status, new_status):
         }
         if kind == "feature":
             rec["feature"] = feature_id
+        # A configured `telemetry.log` may carry a directory component
+        # (`custom/events.jsonl`) that no install step creates; without this,
+        # open() raises FileNotFoundError, the best-effort handler swallows it,
+        # and every transition silently produces no record (Codex #160 round-5).
+        _log_dir = os.path.dirname(log)
+        if _log_dir:
+            os.makedirs(_log_dir, exist_ok=True)
         with open(log, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, sort_keys=True) + "\n")
     except Exception:

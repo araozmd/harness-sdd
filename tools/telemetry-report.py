@@ -267,17 +267,25 @@ def latest_session_start(records):
 def transition_round_count(transitions):
     """Build/review rounds derived from the transition stream: a feature's first move
     to in-progress opens round 1; each in-review -> in-progress bounce opens the next.
-    Max across features, matching the phase-based counter's semantics."""
+    A round already ACTIVE at session start is counted from its `in-progress ->
+    in-review` transition — a session that begins mid-round would otherwise report 0
+    for a round it demonstrably ran (Codex #160 round-5). Max across features,
+    matching the phase-based counter's semantics."""
     rounds_by_feature = {}
     for _, r in transitions:
         if r.get("kind") == "epic":
             continue
         subj = r.get("subject") or r.get("feature")
-        if not subj or r.get("to") != "in-progress":
+        if not subj:
             continue
-        if r.get("from") == "in-review":
-            rounds_by_feature[subj] = rounds_by_feature.get(subj, 1) + 1
-        else:
+        if r.get("to") == "in-progress":
+            if r.get("from") == "in-review":
+                rounds_by_feature[subj] = rounds_by_feature.get(subj, 1) + 1
+            else:
+                rounds_by_feature.setdefault(subj, 1)
+        elif r.get("to") == "in-review" and r.get("from") == "in-progress":
+            # Evidence of an active round even when its opening transition predates
+            # this session's scope.
             rounds_by_feature.setdefault(subj, 1)
     return max(rounds_by_feature.values()) if rounds_by_feature else 0
 

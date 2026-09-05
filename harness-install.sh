@@ -6016,6 +6016,18 @@ EOF
         echo "⚠️  $_sr_f references \`/pr-loop\`, which this harness does not install — the current command is \`/sdd-pr-loop\` (gated by pr_loop.enabled). Update the reference. (warn-only)" >&2
         continue
       fi
+      # A gated-OFF command is unavailable even though $CMDDIR holds its body — the
+      # bodies are generated unconditionally as the reclamation reference, so the
+      # existence check alone would suppress this warning exactly when the gate-off
+      # pass has removed the command from every installed surface (Codex #160 round-5).
+      _sr_gated=0
+      for _sr_prc in $HARNESS_PR_LOOP_CMDS; do
+        [ "$_sr_name" = "$_sr_prc" ] && _sr_gated=1
+      done
+      if [ "$_sr_gated" = 1 ] && ! pr_loop_enabled; then
+        echo "⚠️  $_sr_f references \`$_sr_tok\`, but pr_loop.enabled is not true, so that command is not installed on any surface. Enable the gate or update the reference. (warn-only)" >&2
+        continue
+      fi
       [ -f "$CMDDIR/$_sr_name.md" ] \
         || echo "⚠️  $_sr_f references \`$_sr_tok\`, which v$VERSION does not generate — a stale reference sends sessions hunting for a missing skill. Update or remove it. (warn-only)" >&2
     done

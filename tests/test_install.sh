@@ -499,7 +499,7 @@ pass "existing *.mutbak ignore preserved + warned about; gitignore appends survi
 # (warn-only): /pr-loop (the pre-E18 name) and any /sdd-* the current version does not
 # generate send sessions hunting for a missing skill.
 _sr="$(mktemp -d 2>/dev/null || mktemp -d -t harness-sr)"
-printf '# My project\nRun /pr-loop after tests. Also try /sdd-made-up-cmd.\nAnd /sdd-next is fine.\n' > "$_sr/CLAUDE.md"
+printf '# My project\nRun /pr-loop after tests. Also try /sdd-made-up-cmd.\nAnd /sdd-next is fine, as is /sdd-pr-loop while the gate is on.\n' > "$_sr/CLAUDE.md"
 CODEX_HOME="$T/codex-home" sh "$SRC/harness-install.sh" "$_sr" >/dev/null 2>"$_sr/.err" \
   || fail "stale-reference install run failed"
 grep -q 'references `/pr-loop`' "$_sr/.err" \
@@ -508,8 +508,20 @@ grep -q '/sdd-made-up-cmd' "$_sr/.err" \
   || fail "installer did not warn about an unknown /sdd-* reference in CLAUDE.md"
 grep -q 'references `/sdd-next`' "$_sr/.err" \
   && fail "installer warned about /sdd-next, which the current version DOES generate"
+# Gated-off commands are UNAVAILABLE even though $CMDDIR generates their body as the
+# reclamation reference (Codex #160 round-5): with pr_loop.enabled false, a /sdd-pr-loop
+# reference must warn — and with the gate on it must not.
+grep -q 'references `/sdd-pr-loop`' "$_sr/.err" \
+  && fail "installer warned about /sdd-pr-loop while the gate is ON (suite exports HARNESS_PR_LOOP_ENABLED=true)"
 rm -rf "$_sr"
-pass "stale slash-command references in target prose are named at install time (warn-only)"
+_srg="$(mktemp -d 2>/dev/null || mktemp -d -t harness-srg)"
+printf '# My project\nAfter tests run /sdd-pr-loop.\n' > "$_srg/CLAUDE.md"
+CODEX_HOME="$T/codex-home" HARNESS_PR_LOOP_ENABLED=false sh "$SRC/harness-install.sh" "$_srg" >/dev/null 2>"$_srg/.err" \
+  || fail "gated-off stale-reference install run failed"
+grep -q 'pr_loop.enabled is not true' "$_srg/.err" \
+  || fail "installer did not warn about a /sdd-pr-loop reference while the gate is OFF — the unconditional CMDDIR body suppressed the check"
+rm -rf "$_srg"
+pass "stale slash-command references in target prose are named at install time (warn-only), gate-aware for /sdd-pr-loop"
 for _p in __pycache__/ '*.pyc'; do
   grep -qxF "$_p" "$T/.harness/.gitignore" || fail ".harness/.gitignore missing bytecode ignore $_p (E99-F71/F89)"
 done

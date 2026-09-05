@@ -449,6 +449,18 @@ python3 "$REPORT" session --log "$_prlog" | grep -q 'Build/review rounds: 2' \
   || fail "partial phase telemetry undercounted rounds (architect-only phases + 2 structural rounds must report 2)"
 pass "partial phase telemetry combines with the structural stream (max of both sources)"
 
+# A round already ACTIVE at session start counts (Codex #160 round-5): a session whose
+# first structural event is `in-progress → in-review` demonstrably ran that round, and
+# the bounce after it opens round 2.
+_midlog="$T/mid-round.jsonl"
+{
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E08-F01","feature":"E08-F01","from":"in-progress","to":"in-review","at":"2026-09-05T10:00:00Z"}'
+  printf '%s\n' '{"schema_version":1,"type":"transition","kind":"feature","subject":"E08-F01","feature":"E08-F01","from":"in-review","to":"in-progress","at":"2026-09-05T11:00:00Z"}'
+} > "$_midlog"
+python3 "$REPORT" session --log "$_midlog" | grep -q 'Build/review rounds (derived from transitions): 2' \
+  || fail "a session starting mid-round reported the wrong round count (in-progress→in-review must count the active round)"
+pass "rounds already active at session start are counted from their in-review transition"
+
 # Kill-switch honored, and an unwritable log NEVER blocks the board write.
 printf 'telemetry:\n  enabled: false\n' > "$_tlb/harness.config.yaml"
 rm -f "$_tlb/telemetry.jsonl"
@@ -459,6 +471,19 @@ printf 'telemetry:\n  log: /nonexistent-dir-harness-test/t.jsonl\n' > "$_tlb/har
 HARNESS_DIR="$_tlb" python3 "$_tlb/tools/tasks-lock.py" set-status E01-F01 in-progress >/dev/null \
   || fail "structural: an unwritable telemetry log BLOCKED a board write (must be best-effort)"
 pass "structural telemetry kill-switch + never-blocking guarantees"
+
+# A configured relative log path with a directory component gets its parent CREATED
+# (Codex #160 round-5): without it, open() raises, the best-effort handler swallows,
+# and every transition silently writes nothing — invisible precisely because the
+# contract forbids failing loudly.
+printf 'telemetry:\n  log: custom/events.jsonl\n' > "$_tlb/harness.config.yaml"
+HARNESS_DIR="$_tlb" python3 "$_tlb/tools/tasks-lock.py" set-status E01-F01 in-review >/dev/null \
+  || fail "structural: set-status failed under a custom telemetry.log"
+[ -s "$_tlb/custom/events.jsonl" ] \
+  || fail "structural: configured log dir was not created — transitions silently unrecorded"
+grep -q '"type": "transition"' "$_tlb/custom/events.jsonl" \
+  || fail "structural: no transition record in the configured custom log"
+pass "structural telemetry creates the configured log's parent directory"
 
 # tests/test_*.sh. The intent of this check is "this suite is not orphaned", so accept
 # either spelling: an explicit mention, or the discovering runner plus the file existing.
