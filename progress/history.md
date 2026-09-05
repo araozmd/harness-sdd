@@ -220,3 +220,4 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-09-05T14:27:38Z E21-F07 done (merged #163, 5e22273; 2 Codex rounds: 1 P1 fixed, then clean); E99-F140/F148 resolved by removal; E25 drilled (planned, F01 seeded)
 - 2026-09-05T14:28:29Z E99-F141/F143/F146/F150 (with absorbed F144/F151/F152, F142, F147) → in-progress under the operator-approved code-ification batch
 - 2026-09-05T16:30:06Z pr-loop code-ification batch merged (#165, e904bb5c; rounds 5,2,2,3, 12/12 findings fixed+pinned, operator-policy override at cap): E99-F141/F142/F143/F144/F146/F147/F150/F151/F152 done with ancestor evidence
+- 2026-09-05T17:10:06Z E25-F01 done (merged #167, f536ab93; 2 rounds: 2 P2s then clean) — Claude-first defaults live; E99-F145 re-parked on opt-in evidence
