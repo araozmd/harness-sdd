@@ -4,6 +4,32 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.70.0] — 2026-09-05
+
+### Removed — 🔥 the stacked-PR lane (E21-F07)
+
+The E21-F06 gate answered "does the lane earn its keep?" with **NO** (2026-08-17):
+measured, 0 of the repository's last 100 PRs targeted a non-default base, so the
+E21-F04 merge-order guard **never fired once**, while the lane's cost — a delimiter
+convention plus four role contracts that had to agree — landed on the harness's most
+consistency-fragile surface. The sibling-feature split (`depends_on`-sequenced
+features, E21-F01 R4) covers the over-budget case with zero machinery.
+
+Removed per the ablation doctrine (a dead gate in a merge path is indistinguishable
+from a live one): `tools/pr-stack-guard.sh`; the `/sdd-pr-loop` base-change-detection
+step, merge-order guard block and `guard_deferred` terminal branch (source copy and
+installer heredoc alike); the WORKFLOW.md lane how-to (now a short deprecation notice
+naming the sibling split); and the stacked test suites. An **upgrade reclaims the
+orphaned `.harness/tools/pr-stack-guard.sh`** from existing targets (`tools/` is
+mirrored on install). The E21-F04 spec records the supersession append-only.
+
+MINOR, not MAJOR: no capability a target relied on is removed — the guard's only call
+sites were conditioned on `baseRefName != default_branch`, which no PR used, and the
+default-branch lane's decisions are byte-identical (pinned by test). Inert when
+`pr_loop.enabled` is false, as before. This also retires E99-F140 (the base-change
+detection's fail-open read of a prior round) and E99-F148 (exit-6's contradictory
+terminal states) by removing their subject.
+
 ## [0.69.0] — 2026-09-04
 
 The ablation-campaign release: driven by two full external session reports on v0.6x, whose

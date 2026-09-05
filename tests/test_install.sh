@@ -495,6 +495,23 @@ grep -q 'my-own-entry.claude' "$_mb/.gitignore" \
 rm -rf "$_mb"
 pass "existing *.mutbak ignore preserved + warned about; gitignore appends survive a missing trailing newline"
 
+# E21-F07 R1: the stacked-PR merge-order guard is reclaimed. A fresh install ships no
+# pr-stack-guard.sh, and an upgrade over a target still carrying the orphaned file
+# REMOVES it (tools/ is mirrored, not merged) — a dead gate left in a merge path reads
+# as load-bearing to the next reader.
+[ -e "$T/.harness/tools/pr-stack-guard.sh" ] \
+  && fail "F07 R1: fresh install still ships tools/pr-stack-guard.sh"
+_sg="$(mktemp -d 2>/dev/null || mktemp -d -t harness-sg)"
+CODEX_HOME="$T/codex-home" sh "$SRC/harness-install.sh" "$_sg" >/dev/null 2>&1 \
+  || fail "F07 R1: seed install failed"
+printf '#!/bin/sh\nexit 0\n' > "$_sg/.harness/tools/pr-stack-guard.sh"   # the orphan an old version installed
+CODEX_HOME="$T/codex-home" sh "$SRC/harness-install.sh" "$_sg" >/dev/null 2>&1 \
+  || fail "F07 R1: upgrade re-run failed"
+[ -e "$_sg/.harness/tools/pr-stack-guard.sh" ] \
+  && fail "F07 R1: upgrade left the orphaned pr-stack-guard.sh in the target"
+rm -rf "$_sg"
+pass "F07 R1: guard absent from fresh installs and reclaimed from upgraded targets"
+
 # Stale slash-command references in the target's own prose are NAMED at install time
 # (warn-only): /pr-loop (the pre-E18 name) and any /sdd-* the current version does not
 # generate send sessions hunting for a missing skill.

@@ -38,8 +38,8 @@
 #
 # SCOPE — read this before wiring it into a merge. A `merge` verdict answers ONE question:
 # "are there blocking findings left, and is there budget?" It is NOT a merge authorization.
-# The CI-green check and the stacked-PR guard (tools/pr-stack-guard.sh) are separate gates
-# and still apply before `gh pr merge`. This tool can only ever say "the review is done".
+# The CI-green check is a separate gate and still applies before `gh pr merge`. This
+# tool can only ever say "the review is done".
 #
 # Fails CLOSED: a missing, empty or unparseable blocking.json is never a `merge`. A gate that
 # cannot prove the review converged must not be the reason a PR merged.

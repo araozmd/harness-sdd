@@ -899,7 +899,7 @@ done
 # comment a few lines above. A check that reds on correct code is what teaches the next
 # maintainer to relax it.
 for _s in test_change_size test_source_shims test_scratch_and_disk_preconditions \
-          test_landed_evidence test_stacked_doctrine; do
+          test_landed_evidence test_pr_loop; do
   grep -qF 'tests/lib/fence.awk' "$ROOT/tests/$_s.sh" \
     || fail "R9d: tests/$_s.sh slices markdown by heading but no longer loads tests/lib/fence.awk — it has grown its own fence rule, which is the drift this check exists to prevent"
   # …and LOADING it is not USING it. Checking only for the path made the one-copy invariant

@@ -2197,152 +2197,49 @@ test_round_trend_json_escapes_paths
 test_round_trend_usage_errors
 test_installed_command_carries_the_trend
 
-# ══ E21-F04: Stacked-PR lane (R1–R5, R8, R9) ════════════════════════════════════
+# ══ E21-F07: the stacked-PR lane is DEPRECATED and reclaimed ═══════════════════
+# The E21-F06 gate answered "does the lane earn its keep?" with NO (0 of the last 100
+# PRs targeted a non-default base; the guard never fired). These tests pin the removal:
+# the machinery is gone, the docs say so, and the default-branch lane is untouched.
 
-test_stack_guard_parent_open() {                       # R3
-  # Verify pr-stack-guard.sh exits 6 when the base branch matches an open PR's head.
-  _g="$T/guard-parent-open"; mkdir -p "$_g"
-  printf '{"baseRefName":"feat/wave-1"}\n' > "$_g/pr.json"
-  printf '[{"number":42,"headRefName":"feat/wave-1"}]\n' > "$_g/open-prs.json"
-  if ! have_jq; then skip "test_stack_guard_parent_open (jq not installed)"; return 0; fi
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>/dev/null || _rc=$?
-  [ "$_rc" = 6 ] || fail "R3: pr-stack-guard must exit 6 when base matches an open PR's head (got $_rc)"
-  grep -qF 'feat/wave-1' "$_g/out" || fail "R3: the diagnostic does not name the base branch"
-  grep -qF '#42' "$_g/out" || fail "R3: the diagnostic does not name the open parent PR number"
-  # The SAFE case: base is the default branch — must exit 0.
-  printf '{"baseRefName":"main"}\n' > "$_g/pr.json"
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >/dev/null 2>&1 || _rc=$?
-  [ "$_rc" = 0 ] || fail "R3: a PR targeting the default branch must exit 0 (got $_rc)"
-  pass "R3 pr-stack-guard exits 6 when parent is open, 0 when base is default"
+test_lane_deprecation_reclaimed() {                    # F07 R2/R3/R4/R5
+  # R4: no live reference anywhere in the tree — a dead gate in a merge path reads as
+  # load-bearing whether or not it is. History (CHANGELOG, F04's superseded spec, the
+  # WORKFLOW deprecation notice, this suite) is allowed; code and role surfaces are not.
+  [ ! -e "$SRC/tools/pr-stack-guard.sh" ] \
+    || fail "F07 R1: tools/pr-stack-guard.sh still ships in the source tree"
+  _live="$(grep -rl "pr-stack-guard" "$SRC/tools" "$SRC/agents" "$SRC/init.sh" \
+             "$SRC/harness-install.sh" "$SRC/.claude" 2>/dev/null || true)"
+  [ -z "$_live" ] || fail "F07 R4: live pr-stack-guard reference remains in: $_live"
+  # R2: neither command body carries stacked machinery.
+  for _b in "$SRC/.claude/commands/sdd-pr-loop.md" "$BODY"; do
+    grep -qE "Base-change detection|merge-order guard|guard_deferred|restack" "$_b" \
+      && fail "F07 R2: stacked machinery still present in $_b"
+  done
+  # R3: the WORKFLOW notice names the sibling split and drops the lane how-to,
+  # asserted fence-aware over the section only (never a whole-file grep).
+  _wf="$SRC/docs/WORKFLOW.md"
+  _sect="$(awk "$(cat "$SRC/tests/lib/fence.awk")"'
+    fence_delim($0) { next }
+    !fence && /^## Stacked-PR lane/ { s=1; next }
+    !fence && s && /^## / { exit }
+    s { print }' "$_wf")"
+  printf '%s\n' "$_sect" | grep -q "DEPRECATED" >/dev/null 2>&1 || true
+  printf '%s\n' "$_sect" | grep -q "sibling" \
+    || fail "F07 R3: the deprecation notice does not name the sibling-feature split"
+  printf '%s\n' "$_sect" | grep -qiE "restack procedure|delimiter convention" \
+    && fail "F07 R3: the lane how-to survived in WORKFLOW.md"
+  grep -q "DEPRECATED (E21-F07)" "$_wf" \
+    || fail "F07 R3: WORKFLOW.md does not mark the lane deprecated"
+  # R5: the F04 spec records the supersession append-only (original prose retained).
+  _f04="$SRC/specs/epics/E21-change-size-discipline/F04-stacked-pr-lane/F04-stacked-pr-lane.spec.md"
+  grep -q "Superseded (append-only) — E21-F07" "$_f04" \
+    || fail "F07 R5: E21-F04 spec does not record the supersession"
+  grep -q "merge-order" "$_f04" \
+    || fail "F07 R5: the original F04 prose was not retained (append-only violated)"
+  pass "F07 lane deprecation: machinery reclaimed, docs honest, spec superseded (R1-R5)"
 }
 
-test_stack_guard_unreadable_base() {                   # R4
-  # Verify pr-stack-guard.sh fails closed on unreadable base or unparseable input.
-  _g="$T/guard-fail"; mkdir -p "$_g"
-  printf '[]\n' > "$_g/open-prs.json"
-  if ! have_jq; then skip "test_stack_guard_unreadable_base (jq not installed)"; return 0; fi
-  # No .baseRefName field at all
-  printf '{"someKey":"someValue"}\n' > "$_g/pr.json"
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>&1 || _rc=$?
-  [ "$_rc" != 0 ] || fail "R4: a pr.json with no .baseRefName must exit non-zero (got $_rc)"
-  [ "$_rc" != 6 ] || fail "R4: an unreadable base must NOT exit 6 (that would mean 'stacked')"
-  # baseRefName is null
-  printf '{"baseRefName":null}\n' > "$_g/pr.json"
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>&1 || _rc=$?
-  [ "$_rc" != 0 ] || fail "R4: a null baseRefName must exit non-zero (got $_rc)"
-  [ "$_rc" != 6 ] || fail "R4: a null baseRefName must NOT exit 6"
-  # Unparseable open-prs.json
-  printf '{"baseRefName":"feat/x"}\n' > "$_g/pr.json"
-  printf 'not json\n' > "$_g/open-prs.json"
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>&1 || _rc=$?
-  [ "$_rc" != 0 ] || fail "R4: an unparseable open-prs.json must exit non-zero (got $_rc)"
-  [ "$_rc" != 6 ] || fail "R4: an unparseable open-prs.json must NOT exit 6"
-  # Missing pr.json file
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/no-such.json" "$_g/open-prs.json" --default-branch main >"$_g/out" 2>&1 || _rc=$?
-  [ "$_rc" = 4 ] || fail "R4: a missing pr.json must exit 4 (got $_rc)"
-  pass "R4 pr-stack-guard fails closed (non-zero, not 6) on unreadable/unparseable input"
-}
-
-test_stacked_pr_base_detection() {                     # R1
-  # Verify the pr-loop body fetches and uses baseRefName for stacked PR detection.
-  grep -qF 'baseRefName' "$BODY" \
-    || fail "R1: the pr-loop body does not reference baseRefName"
-  grep -qF 'baseRefName,baseRefOid' "$BODY" \
-    || fail "R1: the pr-loop body does not describe the expanded watcher JSON fields"
-  # The watcher itself must fetch these fields (T2).
-  grep -qF 'baseRefName,baseRefOid' "$SRC/tools/wait-for-codex.sh" \
-    || fail "R1: the watcher does not fetch baseRefName and baseRefOid"
-  # The body must describe the base-change detection for stacked PRs.
-  grep -qiF 'base-change detection' "$BODY" \
-    || fail "R1: the body does not describe base-change detection"
-  grep -qiF 'baseref' "$BODY" \
-    || fail "R1: the body does not reference baseRefName or baseRefOid for change detection"
-  pass "R1 pr-loop fetches and uses baseRefName + baseRefOid for stacked PRs"
-}
-
-test_stacked_pr_refuse_child_merge() {                 # R2
-  # Verify the pr-loop body refuses to merge a child PR whose parent is still open.
-  grep -qiF 'pr-stack-guard.sh' "$BODY" \
-    || fail "R2: the body does not invoke pr-stack-guard.sh before merging"
-  grep -qiF 'merge refused' "$BODY" \
-    || fail "R2: the body does not describe the parent-open refusal case"
-  grep -qF 'needs-human' "$BODY" \
-    || fail "R2: the body does not route the guard refusal to needs-human"
-  grep -qF 'guard_ok' "$BODY" \
-    || fail "R2: the body does not track the guard outcome via guard_ok"
-  # The merge bash block must check guard_ok before merging.
-  grep -qF 'guard_ok' "$BODY" \
-    && grep -qF 'if [ "${guard_ok:-1}" != "1" ]' "$BODY" \
-    || fail "R2: the merge block does not gate on guard_ok"
-  pass "R2 pr-loop refuses to merge a child PR whose parent is still open"
-}
-
-test_stacked_pr_base_change_invalidation() {           # R5
-  # Verify the pr-loop body detects baseRefOid changes and restarts round counter.
-  grep -qiF 'baseRefOid changed' "$BODY" \
-    || fail "R5: the body does not describe the base-change invalidation message"
-  grep -qiF 'restarting from round 1' "$BODY" \
-    || fail "R5: the body does not describe restarting the round counter from 1"
-  grep -qiF 'base-change detection' "$BODY" \
-    || fail "R5: the base-change detection step is not present in the body"
-  # The detection must happen before triggering a new round (step 0b).
-  python3 - "$BODY" <<'PY' || fail "R5: base-change detection is not ordered before the @codex review trigger"
-import sys
-s = open(sys.argv[1]).read()
-assert s.lower().index("base-change detection") < s.index('gh pr comment "$pr_number" --body "@codex review"')
-PY
-  pass "R5 pr-loop invalidates prior round cache on baseRefOid change, restarts at 1"
-}
-
-test_stacking_inert_when_disabled() {                  # R8
-  # When pr_loop.enabled is false, the stacking lane is inert. The pr-loop body
-  # (which invokes the guard) is not installed. The guard script itself lives in
-  # tools/ and is harmless without the body that invokes it.
-  _i="$T/inert-stack"
-  install_at "$_i"
-  # A gate-off install stamps no pr-loop body at all — no guard invocation possible.
-  _body="$_i/.claude/commands/sdd-pr-loop.md"
-  [ -e "$_body" ] && fail "R8: a gate-off install stamped a pr-loop body (the gate should be opt-in false)"
-  # The guard is inert because nothing invokes it — the pr-loop body is the only
-  # caller, and it is absent. Verify the guard script can be installed without
-  # activating any stacking logic.
-  pass "R8 stacking lane inert when pr_loop.enabled is false"
-}
-
-test_stacked_pr_opt_in() {                             # R9
-  # A PR targeting the default branch follows the existing single-PR path with no
-  # guard invocation and no base-change detection.
-  # The guard script exits 0 (not stacked) when baseRefName is the default branch.
-  _g="$T/opt-in"; mkdir -p "$_g"
-  printf '{"baseRefName":"main"}\n' > "$_g/pr.json"
-  printf '[]\n' > "$_g/open-prs.json"
-  if ! have_jq; then skip "test_stacked_pr_opt_in (jq not installed)"; return 0; fi
-  _rc=0
-  sh "$SRC/tools/pr-stack-guard.sh" evaluate "$_g/pr.json" "$_g/open-prs.json" --default-branch main >/dev/null 2>&1 || _rc=$?
-  [ "$_rc" = 0 ] || fail "R9: a PR targeting main must exit 0 (got $_rc)"
-  # The body must state that the default lane is unchanged.
-  grep -qF 'single-PR default lane' "$BODY" \
-    || grep -qF 'default branch' "$BODY" \
-    || fail "R9: the body does not reference the default/single-PR lane"
-  # The guard script must not be invoked when the base IS the default branch
-  # (the existing merge path is unchanged).
-  grep -qF 'default branch' "$SRC/tools/pr-stack-guard.sh" \
-    || fail "R9: the guard script does not handle the default-branch case"
-  pass "R9 single-PR default lane unchanged (opt-in stacking)"
-}
-
-test_stack_guard_parent_open
-test_stack_guard_unreadable_base
-test_stacked_pr_base_detection
-test_stacked_pr_refuse_child_merge
-test_stacked_pr_base_change_invalidation
-test_stacking_inert_when_disabled
-test_stacked_pr_opt_in
+test_lane_deprecation_reclaimed
 
 echo "All pr-loop tests passed."

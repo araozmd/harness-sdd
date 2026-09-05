@@ -947,7 +947,7 @@
         {
           "id": "E21-F07",
           "title": "Deprecate the stacked-PR lane and reclaim its machinery",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
