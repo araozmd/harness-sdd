@@ -2660,6 +2660,18 @@ EOF
   if [ ! -f "$H/progress/history.md" ]; then
     printf '# Project history\n\n> Append one line per completed feature (Reviewer verdict).\n' > "$H/progress/history.md"
   fi
+  if [ ! -f "$H/progress/lessons.md" ]; then
+    cat > "$H/progress/lessons.md" <<'LESSONS_EOF'
+# Earned lessons (append-only)
+
+> One entry per lesson that cost a review round, a rejection, or a debugging session to
+> learn. Every role reads this file at session start; any lane may append. Never rewrite
+> or delete an entry — supersede it with a newer one. Format:
+>
+>     - [YYYY-MM-DD <lane>] <the lesson, one or two lines, imperative>
+LESSONS_EOF
+    info "seeded progress/lessons.md (earned-lessons ledger)"
+  fi
   if [ ! -f "$H/progress/.gitkeep" ]; then : > "$H/progress/.gitkeep"; fi
 
   # Telemetry is local-only runtime data. In an installed consumer the harness body
@@ -2752,6 +2764,11 @@ $_tlog" ;;                                       # relative override → also ig
     # latter would suppress the former — and without the directory re-inclusion git never
     # descends into progress/inbox/, silently ignoring every brief. Append-only either way:
     # a target's own entries are never rewritten or reordered.
+    # Guard the trailing newline first: appending to a file whose last line lacks one would
+    # fuse the first pattern onto it, corrupting both entries silently.
+    if [ -s "$H/.gitignore" ] && [ "$(tail -c 1 "$H/.gitignore" | wc -l)" -eq 0 ]; then
+      printf '\n' >> "$H/.gitignore"
+    fi
     printf '%s\n' "$_ignores" | while IFS= read -r _pat; do
       [ -n "$_pat" ] || continue
       grep -qxF "$_pat" "$H/.gitignore" || printf '%s\n' "$_pat" >> "$H/.gitignore"
@@ -2767,12 +2784,13 @@ $_tlog" ;;                                       # relative override → also ig
   # .gitignore with TARGETED, append-only ignores (never clobbering existing entries), so a
   # shared repo stays free of one developer's local state. Full model:
   # .harness/docs/CONFIG-LAYERING.md.
-  # *.mutbak is the Reviewer's mutation-campaign backup copy: with four of them in the tree,
-  # change-size.sh reported production 1104 lines / 2 files against a true 42/1, a 26x
-  # overstatement. Since E99-F58 made mutation campaigns routine, .mutbak files in a working
-  # tree are the EXPECTED state during review, so this misfires more often from here, not less.
-  # It is per-developer review scratch that no clone should ever receive — which is precisely
-  # what distinguishes it from the agent surfaces below. (E99-F71/F89.)
+  # *.mutbak is deliberately NOT seeded (2026-09-04 reversal of E99-F71's ignore). The
+  # ignore contradicted reviewer.md's own discipline: mutation backups must stay VISIBLE in
+  # `git status` so a killed mid-campaign lane leaves detectable residue (the E99-F207
+  # incident-class). The 26x change-size overstatement E99-F71 fixed is now handled at the
+  # measurer instead — tools/change-size.sh classifies `\.mutbak$` as generated — so the
+  # budget never sees them while git always does. The migration below also REMOVES a bare
+  # `*.mutbak` line an earlier version seeded.
   #
   # NOTE what is deliberately NOT here: .agents/, .codex/ and .opencode/. An earlier revision
   # ignored them as "installer output", and Codex raised a correct P1: the documented install
@@ -2789,8 +2807,7 @@ $_tlog" ;;                                       # relative override → also ig
 .claude/worktrees/
 AGENTS.local.md
 CLAUDE.local.md
-AGENTS.override.md
-*.mutbak'
+AGENTS.override.md'
   if [ ! -f "$TARGET/.gitignore" ]; then
     { printf '# Personal/runtime agent state — never commit (see .harness/docs/CONFIG-LAYERING.md).\n'
       printf '%s\n' "$_root_ignores"
@@ -2798,10 +2815,23 @@ AGENTS.override.md
       printf '#.playwright-mcp/\n'; } > "$TARGET/.gitignore"
     info "seeded project-root .gitignore (personal/runtime agent state)"
   else
+    # A file whose last line lacks a trailing newline would FUSE the first appended
+    # pattern onto it (`secret.envAGENTS.local.md`) — corrupting both entries silently.
+    # Guard once, before any append.
+    if [ -s "$TARGET/.gitignore" ] && [ "$(tail -c 1 "$TARGET/.gitignore" | wc -l)" -eq 0 ]; then
+      printf '\n' >> "$TARGET/.gitignore"
+    fi
     printf '%s\n' "$_root_ignores" | while IFS= read -r _pat; do
       [ -n "$_pat" ] || continue
       grep -qxF "$_pat" "$TARGET/.gitignore" || printf '%s\n' "$_pat" >> "$TARGET/.gitignore"
     done
+    # Migration (2026-09-04): drop the bare `*.mutbak` ignore an earlier version seeded —
+    # it hid mutation residue from `git status`, defeating reviewer.md's visibility rule.
+    if grep -qxF '*.mutbak' "$TARGET/.gitignore"; then
+      _mb_tmp="$TARGET/.gitignore.tmp.$$"
+      grep -vxF '*.mutbak' "$TARGET/.gitignore" > "$_mb_tmp" && mv "$_mb_tmp" "$TARGET/.gitignore"
+      info "removed the seeded '*.mutbak' ignore — mutation backups stay visible; change-size.sh classifies them instead"
+    fi
     info "project-root .gitignore ensured (personal/runtime agent state)"
   fi
   ok "project workspace ready (.harness/specs, state, progress)"
@@ -4529,73 +4559,64 @@ block.
 
 ### 3. Parse and classify comments
 
-Walk **`review-comments.json` (the inline findings)** + `pr.json` `reviews[*].body` +
-`issue-comments.json` looking for severity tags. Codex tags severity as a **badge image**,
-not bare text — e.g. `![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)`.
-Match `P0|P1|P2|nit` **case-insensitively anywhere in the body** (this catches both the
-badge alt-text/URL form and any bare-text form); **first match wins**; **default to `P2`**
-when nothing matches.
-
-**Only FRESH inline comments count for this round** — the same freshness guard the watcher
-applies (see step 2). An inline comment counts only when it is filed against the head
-commit **and** its `created_at >= trigger.created_at`; otherwise a stale thread GitHub
-re-anchored to head slips back into `blocking.json` and defeats the guard. The watcher
-persists the anchor to `trigger-ts.txt`; apply it when reading the unfiltered
-`review-comments.json`:
-
-**A head oid you could not read is not a head oid.** A `pr.json` that is missing or
-truncated makes `jq` exit non-zero with empty output; a `pr.json` that parses but carries
-no `headRefOid` makes `jq -r` print `null` and exit **0**. Either way `$head` is not the
-head commit, every comment fails `commit_id == $h`, and `fresh-comments.json` — hence
-`blocking.json` — comes out `[]`, which step 6 reads as "zero blocking findings ⇒ all
-gates green ⇒ merge". So guard the **value** as well as the exit status and fail closed:
-an unreadable head aborts the round as `needs-human`, it is not a clean round. (`since`
-needs no such guard — an empty `since` disables the freshness filter and admits *more*
-findings, which errs toward review rather than toward the merge.)
+Classification is **code, not prose** (E99-F149): every lane used to hand-roll the same
+jq and every copy got a rule subtly wrong. Run the shipped classifier — it is pure and
+offline (reads only the round files, invokes no `gh`):
 
 ```bash
-since=$(cat "$round_dir/trigger-ts.txt" 2>/dev/null)  # empty ⇒ filter off ⇒ admits MORE
-head_ok=0            # fail closed: only a head oid we actually READ may filter findings
-if ! head=$(jq -r '.headRefOid // ""' "$round_dir/pr.json") || [ -z "$head" ]; then
-  # Head oid UNKNOWN: pr.json missing, truncated, or without a headRefOid. Filtering on ""
-  # would match nothing and hand the gate an empty blocking.json. Testing the status on the
-  # `if` itself reads the same whether or not the host shell runs with `set -e`, and
-  # `[ -z "$head" ]` catches the absent/null key that `jq -r` reports with exit status 0.
-  rm -f "$round_dir/fresh-comments.json"   # never leave a previous round's file standing
-  echo "could not read headRefOid from pr.json — needs-human, not merging" >&2
-else
-  head_ok=1          # the filter below is anchored to a head oid that was really read
-  jq --arg h "$head" --arg since "$since" '
-    [ .[] | select((.commit_id // "") == $h)
-          | select($since == "" or ((.created_at // "") >= $since)) ]' \
-    "$round_dir/review-comments.json" > "$round_dir/fresh-comments.json"
-fi
-# classify severities from fresh-comments.json (not the raw review-comments.json)
+blocking_set="$(<read pr_loop.blocking_severities from harness.config.yaml>)"  # e.g. "P0,P1"
+sh .harness/tools/wait-for-codex.sh classify "$round_dir" "$blocking_set"
+classify_rc=$?
 ```
 
-With `head_ok=0` there is no `fresh-comments.json` to classify and therefore no
-`blocking.json` and no `acted.json`: call `outcome_mark_unresolved "$round_dir"` — **not** a
-bare `echo`, because a `pr.json` you could not read is a statement about the cache and not
-about Codex, so a `findings`/`clean` the watcher already recorded must survive it — and take
-the `needs-human` terminal state of step 5's cap row (label, hand over, return failure). Only
-`head_ok=1` with an empty `blocking.json` means "zero fresh blocking findings".
+The set is whatever `pr_loop.blocking_severities` lists — **read it, do not assume it**.
+The shipped default is `P0,P1`, but a repo may raise it (a harness that ships *gates* has
+good reason to: there, a finding tagged P2 can still mean the gate vouching for something
+it never checked). Whatever is NOT in that list is non-blocking for this repo; `nit` is
+not in any default.
+
+What the classifier implements (the behavioral contract, owned and tested in
+`tools/wait-for-codex.sh` + the harness's own suite — do **not** re-implement it inline):
+
+- It scans **`review-comments.json` (the inline findings)**, plus `pr.json`
+  `reviews[*].body` and `issue-comments.json` as **advisory** streams. Codex tags
+  severity as a **badge image**, not bare text — e.g.
+  `![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)`. It matches
+  `P0|P1|P2|nit` **case-insensitively** and **word-boundary anchored** anywhere in the
+  body (this catches both the badge alt-text/URL form and any bare-text form);
+  **first match wins** by position; **default to `P2`** when nothing matches.
+- **Only FRESH Codex inline comments count for this round** — the same freshness guard
+  the watcher applies (see step 2): filed against the head commit **and**
+  `created_at >= trigger.created_at` (read from `trigger-ts.txt`), **and** authored by
+  the Codex bot. A stale thread GitHub re-anchored to head, a human comment that merely
+  mentions "P1", or a bot comment on another commit can never enter `blocking.json`.
+- Fresh Codex `reviews[*].body` / `issue-comments.json` entries carrying a severity tag
+  land in `body-findings.json` — **advisory, never blocking**: they have no `path:line`,
+  so nothing could act on them, and an unactionable blocker would wedge the round.
+- **A head oid it could not read is not a head oid — it fails closed.** On a missing or
+  truncated `pr.json` (or a missing findings stream) it exits **6**, removes any stale
+  `blocking.json`, and writes nothing.
+
+It writes into the round dir:
+
+```
+fresh-comments.json  # inline comments on head, at/after the trigger (raw fresh stream)
+comments.json        # the Codex-authored subset, each with a severity attached
+blocking.json        # filtered to the CONFIGURED blocking severities — the MERGE GATE reads this
+body-findings.json   # advisory severity-tagged review bodies / issue comments (never blocking)
+status.json          # statusCheckRollup snapshot
+```
+
+With `classify_rc` = 6 there is no `blocking.json` and no `acted.json`: call
+`outcome_mark_unresolved "$round_dir"` — **not** a bare `echo`, because a `pr.json` you
+could not read is a statement about the cache and not about Codex, so a `findings`/`clean`
+the watcher already recorded must survive it — and take the `needs-human` terminal state of
+step 5's cap row (label, hand over, return failure). Only `classify_rc` = 0 with an empty
+`blocking.json` means "zero fresh blocking findings".
 
 To re-check the round files offline at any point (no `gh`, no network), run
 `sh .harness/tools/wait-for-codex.sh evaluate "$round_dir"` — exit `0` findings,
-`3` clean, `1` pending, applying exactly the rules above.
-
-Then filter to the **blocking severities only**. The set is whatever
-`pr_loop.blocking_severities` lists — **read it, do not assume it**. The shipped default is
-`P0,P1`, but a repo may raise it (a harness that ships *gates* has good reason to: there, a
-finding tagged P2 can still mean the gate vouching for something it never checked). Whatever
-is NOT in that list is non-blocking for this repo; `nit` is not in any default. Save into the
-round dir:
-
-```
-comments.json     # all comments with a severity tag attached
-blocking.json     # filtered to the CONFIGURED blocking severities — the MERGE GATE reads this
-status.json       # statusCheckRollup snapshot
-```
+`3` clean, `1` pending, applying exactly the watcher's resolution rules.
 
 **Do NOT write `acted.json` here.** The round's acted-on set is recorded at **dispatch**, in
 step 5, and this step must not pre-compute it. Classification answers "what did the
@@ -5974,6 +5995,29 @@ EOF
       echo "⚠️  pr_loop.enabled is not true — reclaimed /sdd-pr-loop glue:$_prl_gone" >&2
     fi
   fi
+
+  # ── stale slash-command references (2026-09-04, warn-only) ──────────────────
+  # A target's hand-written prose (CLAUDE.md outside the harness block, AGENTS.md,
+  # GEMINI.md) can keep invoking a command a past harness version installed — the
+  # observed case is `/pr-loop`, the pre-E18 name of `/sdd-pr-loop`: sessions read the
+  # entrypoint, follow the stale reference, and hunt for a skill that no longer exists.
+  # The harness owns only its marked block, so it cannot rewrite user prose — but it CAN
+  # name the divergence. Scan for /sdd-* tokens not in the current generation set ($CMDDIR is
+  # the complete, version-authoritative command list), plus the known-renamed /pr-loop.
+  for _sr_f in CLAUDE.md AGENTS.md GEMINI.md; do
+    [ -f "$TARGET/$_sr_f" ] || continue
+    _sr_refs="$(grep -oE '/(sdd-[a-z-]+|pr-loop)\b' "$TARGET/$_sr_f" 2>/dev/null | sort -u || true)"
+    [ -n "$_sr_refs" ] || continue
+    printf '%s\n' "$_sr_refs" | while IFS= read -r _sr_tok; do
+      _sr_name="${_sr_tok#/}"
+      if [ "$_sr_name" = "pr-loop" ]; then
+        echo "⚠️  $_sr_f references \`/pr-loop\`, which this harness does not install — the current command is \`/sdd-pr-loop\` (gated by pr_loop.enabled). Update the reference. (warn-only)" >&2
+        continue
+      fi
+      [ -f "$CMDDIR/$_sr_name.md" ] \
+        || echo "⚠️  $_sr_f references \`$_sr_tok\`, which v$VERSION does not generate — a stale reference sends sessions hunting for a missing skill. Update or remove it. (warn-only)" >&2
+    done
+  done
 
   # CMDDIR cleanup (deferred from §5c and §7b): the antigravity deselect compare and the
   # gate-off pass above need the temp command bodies as their pristine reference.
