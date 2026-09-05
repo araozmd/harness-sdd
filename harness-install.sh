@@ -1954,6 +1954,11 @@ resolve_agents() {
         SELECTED="$(host_fallback_set "$_t")"
         if host_fallback_keeps_selection "$_t"; then
           info "agents: host undetected — keeping this install's selection ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
+        elif [ -f "$_t/.harness/.harness-version" ]; then
+          # Legacy pre-E08 install (stamp, no recorded selection): the applied answer is
+          # ALL — the report must say what was actually selected, never claim the fresh
+          # claude-only park applied when it did not (Codex #167 P2).
+          info "agents: host undetected — legacy install with no recorded selection, keeping all front-ends ($(printf '%s' "$SELECTED" | tr '\n' ' '))"
         else
           info "agents: host undetected — fresh target, selecting claude only (non-Claude front-ends are parked by default; opt in with --agents=<csv>)"
         fi

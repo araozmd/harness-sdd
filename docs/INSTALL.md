@@ -187,10 +187,11 @@ it must be the **entire** value — `--agents=host,gemini` is rejected with a no
 and changes nothing.
 
 **Non-Claude front-ends are parked by default (E25-F01).** On a **fresh** target —
-no `.harness/.harness-version` yet — every no-selection path resolves to **`claude`
-only**: the scripted no-override run, the undetected-`host` fallback, and the
-interactive picker's pre-checked baseline (one keystroke re-adds any front-end before
-confirming). This is a default flip, not a removal: every key stays legal via an
+no `.harness/.harness-version` yet — every no-selection path **with an undetected
+host** resolves to **`claude` only**: the scripted no-override run, the
+undetected-`host` fallback, and the interactive picker's pre-checked baseline (one
+keystroke re-adds any front-end before confirming). When the host IS detected, the
+interactive baseline is that detected front-end, exactly as below. This is a default flip, not a removal: every key stays legal via an
 explicit `--agents=<csv>` / `HARNESS_AGENTS` opt-in (`codex`, `gemini`, `opencode`,
 `antigravity`), and an **existing** install's recorded selection is preserved exactly
 as before. The interactive first install still starts from the detected host — see
@@ -269,6 +270,9 @@ front-end pre-checked and the others unchecked**:
 [ ] codex
 ```
 
+When the host cannot be detected, the fresh baseline is `claude` alone — the
+parked-by-default answer every other no-selection path gives (E25-F01).
+
 It is a **pre-check, not a restriction**: the list is already on screen, so spacebar adds
 any other front-end before you confirm. Confirming as-is stamps the detected front-end's
 glue (plus the always-written `AGENTS.md`) and nothing else.
@@ -307,8 +311,9 @@ baseline=claude
 Two lines on stdout, exit 0, **nothing written anywhere**. `host=` is the detected key
 (empty when undetected) and `baseline=` is the set that would be **pre-checked** for that
 target — the same helper the picker seeds from, so the preview cannot disagree with what
-the picker will offer you. On an undetected fresh target it prints all five; on an
-installed target it prints that target's persisted selection. It is single-target only:
+the picker will offer you. On an undetected fresh target it prints `claude` (the
+parked-by-default fresh baseline, E25-F01); on an installed target it prints that
+target's persisted selection. It is single-target only:
 combined with `--umbrella` it exits non-zero with a usage message.
 
 `baseline=` answers "what will the picker check?", which is the same set an **undetected**
