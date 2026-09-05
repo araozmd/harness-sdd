@@ -4329,20 +4329,25 @@ verify the tie before any round; the failure is silent and double-sided otherwis
 reviewed PR looks unfixed while an unrelated branch quietly receives the commits):
 
 ```bash
-pr_head="$(gh pr view "$pr_number" --json headRefName --jq '.headRefName' 2>/dev/null || echo '')"
-cur="$(git branch --show-current 2>/dev/null || echo '')"
-if [ -z "$pr_head" ] || [ -z "$cur" ]; then
-  echo "cannot resolve the PR head or the current branch — needs-human, not proceeding" >&2
+# The receipt is the HEAD OID, never a branch name (Codex #165 round-2 P1): an unrelated
+# local branch can share the PR's headRefName, and a fork PR's head is not on `origin`
+# at all. `gh pr checkout` resolves both (it fetches the PR's actual head, fork or not);
+# the OID equality afterwards is what proves the tree IS the reviewed PR.
+pr_head_oid="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo '')"
+if [ -z "$pr_head_oid" ]; then
+  echo "cannot resolve the PR's head oid — needs-human, not proceeding" >&2
   gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
   exit 1     # TERMINAL — a warning that falls through would preserve the exact
              # failure this section closes (fixes pushed from an unrelated tree)
 fi
-if [ "$cur" != "$pr_head" ] && ! git checkout "$pr_head" 2>/dev/null; then
-  echo "could not check out '$pr_head' (conflicting local changes? unfetched branch?) — needs-human, not proceeding" >&2
-  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-  exit 1     # TERMINAL, same reason
+if [ "$(git rev-parse HEAD 2>/dev/null)" != "$pr_head_oid" ]; then
+  if ! gh pr checkout "$pr_number" 2>/dev/null \
+     || [ "$(git rev-parse HEAD 2>/dev/null)" != "$pr_head_oid" ]; then
+    echo "could not put the working tree on the PR head $pr_head_oid (conflicting local changes?) — needs-human, not proceeding" >&2
+    gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+    exit 1   # TERMINAL, same reason — and OID-verified even after a successful checkout
+  fi
 fi
-git pull --ff-only origin "$pr_head" >/dev/null 2>&1 || true   # fix the TIP, not a stale local
 ```
 
 **Fixers share ONE checkout and ONE index — dispatch them SEQUENTIALLY** (E99-F146).
@@ -4680,7 +4685,10 @@ gate_rc=$?
 
 **The gate's verdict is binding, and it is asked exactly ONCE per round.** `merge` (0) means
 the review is finished: leave this step entirely, **break the loop before advancing the round
-counter**, write `: > "$round_dir/disposed"` (the verdict IS this round's disposition), and go to step 6 then "ready to merge". Breaking preserves the successful `round`
+counter**, and go to step 6. Do **NOT** write `disposed` here: the merge path writes it
+only after its terminal action completes (the verified merge, or the `auto_merge:
+false` hand-back), so an interruption anywhere in between RE-ENTERS this round on its
+cached green verdict instead of stranding it (Codex #165 round-2) then "ready to merge". Breaking preserves the successful `round`
 value, so the Ready-to-merge section reads `round-$round/pr.json` from the correct round.
 (The one thing that may follow a `merge` verdict without merging is an explicit, recorded
 **override** — see "When you judge the badge wrong" below. It does not change what the gate
@@ -5031,7 +5039,8 @@ hand-back exists to deliver.
 
 While `pr_loop.auto_merge` is **false**, stop after posting the all-gates-green summary
 and hand back to the human — resolve threads if you like, but **do not merge**. That
-hand-back **completes** the loop: **return success**. It is the one terminal state where an
+hand-back **completes** the loop: write `: > "$round_dir/disposed"` and **return
+success**. It is the one terminal state where an
 unmerged PR is the intended outcome, so never route it to needs-human.
 
 Where `pr_loop.auto_merge` is **true**, merge with the configured `merge_strategy`,
@@ -5086,6 +5095,8 @@ never merely because thread eligibility was satisfied:
 
 ```bash
 if [ "${merged:-0}" = "1" ]; then
+  : > "$round_dir/disposed"    # terminal action VERIFIED (post receipt) — only now is
+                               # the round finished; an interrupt before this re-enters
   default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
   branch=$(gh pr view "$pr_number" --json headRefName --jq '.headRefName')
   git checkout "$default_branch" >/dev/null 2>&1 || true

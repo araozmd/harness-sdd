@@ -1420,6 +1420,12 @@ test_body_codified_batch_wired() {
       || fail "batch: $_b merges without pinning the reviewed head atomically (#3940992232)"
     grep -qF 'exit 1     # TERMINAL' "$_b" \
       || fail "batch: $_b checkout-verification failure is not terminal (#3940992230)"
+    grep -qF 'gh pr checkout "$pr_number"' "$_b" \
+      || fail "batch: $_b verifies the checkout by branch NAME — fork PRs and name collisions need gh pr checkout + OID equality (#3941050994)"
+    grep -qF 'HEAD 2>/dev/null)" != "$pr_head_oid" ]' "$_b" \
+      || fail "batch: $_b never proves the tree HEAD equals the PR head oid (#3941050994)"
+    grep -qF 'Do **NOT** write `disposed` here' "$_b" \
+      || fail "batch: $_b writes disposed at the merge-verdict break — an interrupt would strand a green round (#3941050997)"
     grep -qF 'merge` verdict the gate returned in THIS invocation' "$_b" \
       || fail "batch: $_b Ready-to-merge does not require this invocation's verdict (F150)"
     grep -qF 'gh pr checks "$pr_number" --required' "$_b" \
@@ -1843,7 +1849,7 @@ test_body_terminal_return_values_agree() {            # R41/R42/R44 — cross-st
   need_body "R41: a merge that did not land is not barred from reporting success" \
     'is never reported as success'
   need_body "R44: the auto_merge-false hand-back does not return success" \
-    'hand-back **completes** the loop: **return success**'
+    'hand-back **completes** the loop: write `: > "$round_dir/disposed"` and **return'
   need_body "R44: the auto_merge-false hand-back is not kept out of needs-human" \
     'never route it to needs-human'
   need_body "R42: the needs-human state does not claim every path returns failure" \
@@ -1854,7 +1860,7 @@ test_body_terminal_return_values_agree() {            # R41/R42/R44 — cross-st
 import sys
 s = open(sys.argv[1]).read()
 ok_hdr, nh_hdr = s.index("### Ready to merge (success)"), s.index("### Needs-human (failure)")
-ok_ret = s.index("hand-back **completes** the loop: **return success**")
+ok_ret = s.index("hand-back **completes** the loop: write")
 fail_ret = s.index("handover summary, and **return failure**")
 # the auto_merge:false success and the failed-merge failure are both stated in the
 # success section (that is where the merge is attempted) ...
