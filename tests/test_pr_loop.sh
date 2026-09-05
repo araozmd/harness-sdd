@@ -1430,6 +1430,14 @@ test_body_codified_batch_wired() {
       || fail "batch: $_b resume path skips §0c — cached findings could be fixed on an unrelated checkout (#3941162094)"
     grep -qF 'git branch --show-current 2>/dev/null)" ]' "$_b" \
       || fail "batch: $_b accepts a detached HEAD at the right OID — the later push would fail or land elsewhere (#3941162092)"
+    grep -qF 'git status --porcelain --untracked-files=no' "$_b" \
+      || fail "batch: $_b checks out a PR over a dirty tracked worktree — pre-existing edits would be swept into fixer commits (#3941215212)"
+    grep -qF -- '--is-ancestor "$pr_head_oid" HEAD' "$_b" \
+      || fail "batch: $_b rejects an interrupted round's own local-ahead fixer commits (#3941215215)"
+    grep -qF 'echo handback > "$round_dir/disposed"' "$_b" \
+      || fail "batch: $_b hand-back marker is untyped — a resumed run would re-review a completed hand-back (#3941215219)"
+    grep -qF 'already completed its auto_merge:false hand-back at this head' "$_b" \
+      || fail "batch: $_b resume never short-circuits a completed hand-back (#3941215219)"
     grep -qF 'merge` verdict the gate returned in THIS invocation' "$_b" \
       || fail "batch: $_b Ready-to-merge does not require this invocation's verdict (F150)"
     grep -qF 'gh pr checks "$pr_number" --required' "$_b" \
@@ -1853,7 +1861,7 @@ test_body_terminal_return_values_agree() {            # R41/R42/R44 — cross-st
   need_body "R41: a merge that did not land is not barred from reporting success" \
     'is never reported as success'
   need_body "R44: the auto_merge-false hand-back does not return success" \
-    'hand-back **completes** the loop: write `: > "$round_dir/disposed"` and **return'
+    'hand-back **completes** the loop: write `echo handback > "$round_dir/disposed"`'
   need_body "R44: the auto_merge-false hand-back is not kept out of needs-human" \
     'never route it to needs-human'
   need_body "R42: the needs-human state does not claim every path returns failure" \

@@ -4289,6 +4289,18 @@ for _d in .harness/.pr-loop/$pr_number/round-*/; do
   case "$_n" in ''|*[!0-9]*) continue ;; esac
   if [ "$_n" -ge "$round" ]; then round="$_n"; resume_round="${_d%/}"; fi
 done
+# A COMPLETED HAND-BACK IS TERMINAL for its head (Codex #165 round-4): with
+# `auto_merge: false` the loop deliberately finishes green-and-unmerged, so a
+# re-invocation must not burn budget re-reviewing it — unless the head has moved.
+if [ -n "$resume_round" ] \
+   && [ "$(head -n 1 "$resume_round/disposed" 2>/dev/null | tr -d ' \t\r\n')" = "handback" ]; then
+  _hb_head="$(jq -r '.headRefOid // ""' "$resume_round/pr.json" 2>/dev/null || echo '')"
+  _hb_now="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo '')"
+  if [ -n "$_hb_head" ] && [ "$_hb_head" = "$_hb_now" ]; then
+    echo "sdd-pr-loop: PR #$pr_number already completed its auto_merge:false hand-back at this head — nothing to do" >&2
+    exit 0
+  fi
+fi
 # `outcome` marks a review OBSERVED, not a round FINISHED (Codex #165): it is written the
 # moment the watcher exits — before classification, fixing, or the gate. A round is
 # finished only when `disposed` exists (written at each terminal disposition below). An
@@ -4343,6 +4355,16 @@ if [ -z "$pr_head_oid" ]; then
   exit 1     # TERMINAL — a warning that falls through would preserve the exact
              # failure this section closes (fixes pushed from an unrelated tree)
 fi
+# A DIRTY tracked worktree fails closed first (Codex #165 round-4 P1): an
+# uncommitted edit survives `gh pr checkout`, and a fixer later running
+# `git add <path>` on an assigned file would sweep the pre-existing change into its
+# fix commit and push it to the PR. Untracked files are fine — fixers add specific
+# tracked paths only.
+if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+  echo "working tree has uncommitted tracked changes — they would be swept into fixer commits; commit/stash them first — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL
+fi
 # ALWAYS run the checkout — object equality alone is not a binding (Codex #165
 # round-3 P1): a detached HEAD or an unrelated local branch can sit at the right OID
 # while the later plain `git push` fails, or lands on a different ref entirely.
@@ -4353,9 +4375,19 @@ if ! gh pr checkout "$pr_number" 2>/dev/null; then
   gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
   exit 1     # TERMINAL, same reason
 fi
-if [ -z "$(git branch --show-current 2>/dev/null)" ] \
-   || [ "$(git rev-parse HEAD 2>/dev/null)" != "$pr_head_oid" ]; then
-  echo "working tree is detached or not at the PR head $pr_head_oid — needs-human, not proceeding" >&2
+if [ -z "$(git branch --show-current 2>/dev/null)" ]; then
+  echo "working tree is detached after checkout — needs-human, not proceeding" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  exit 1     # TERMINAL
+fi
+if [ "$(git rev-parse HEAD 2>/dev/null)" != "$pr_head_oid" ] \
+   && ! git merge-base --is-ancestor "$pr_head_oid" HEAD 2>/dev/null; then
+  # Exact equality OR the PR head as an ANCESTOR of HEAD. The ancestor case is an
+  # interrupted round's own local fixer commits, not yet pushed (fixers commit
+  # locally; the coordinator pushes at round end) — rejecting them would strand the
+  # promised re-entry at needs-human and discard legitimate fix work (Codex #165
+  # round-4). Anything else is an unrelated tree and fails closed.
+  echo "working tree is neither at the PR head $pr_head_oid nor locally ahead of it — needs-human, not proceeding" >&2
   gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
   exit 1     # TERMINAL — OID-verified even after a successful checkout
 fi
@@ -4800,7 +4832,7 @@ that.
 |---|---|
 | below `max_rounds - 1` | For each blocking comment: **`acted_append` it first**, then spawn one **`pr-fixer`** sub-agent **at a time — sequentially, never concurrently** (§0c: one shared checkout and index), passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
 | `max_rounds - 1` | **`acted_append` every comment going into the prompt**, then build **one combined fix prompt** (all blocking comments concatenated) and escalate to a **different worker** if the host CLI offers one; where no router exists, run one combined **in-session** pass instead. Then push. |
-| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. **`acted_append` every blocking comment that survived** — the cap round disposes of them by declaring them, not by fixing them — then write `: > "$round_dir/disposed"`. Post the handover summary listing every round, the surviving comments, and the cache path — **and the trend verdict, re-run after these rows exist**. When it is `non-converging`, the message must say what the tool's remedy line says, and must show the per-round series and the concentration list that make the case. Return failure. |
+| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. **`acted_append` every blocking comment that survived** — the cap round disposes of them by declaring them, not by fixing them — then write `echo handover > "$round_dir/disposed"`. Post the handover summary listing every round, the surviving comments, and the cache path — **and the trend verdict, re-run after these rows exist**. When it is `non-converging`, the message must say what the tool's remedy line says, and must show the per-round series and the concentration list that make the case. Return failure. |
 
 At the default `max_rounds: 4` that is rounds 1–2 per-comment, round 3 combined
 escalation, round 4 `needs-human`. A `max_rounds` below `3` simply has no per-comment
@@ -4879,7 +4911,7 @@ GitHub's default squash body, so the squash path always reaches its merge.
 After the per-round gates and fixes complete:
 
 ```bash
-: > "$round_dir/disposed"    # this round's disposition is COMPLETE (fixes pushed, checks read)
+echo fixed > "$round_dir/disposed"    # this round's disposition is COMPLETE (fixes pushed, checks read)
 round=$(( round + 1 ))
 done
 ```
@@ -5050,8 +5082,9 @@ hand-back exists to deliver.
 
 While `pr_loop.auto_merge` is **false**, stop after posting the all-gates-green summary
 and hand back to the human — resolve threads if you like, but **do not merge**. That
-hand-back **completes** the loop: write `: > "$round_dir/disposed"` and **return
-success**. It is the one terminal state where an
+hand-back **completes** the loop: write `echo handback > "$round_dir/disposed"` — the TYPED marker is what lets the
+next invocation recognize a completed hand-back instead of spending budget
+re-reviewing a deliberately-unmerged green PR — and **return success**. It is the one terminal state where an
 unmerged PR is the intended outcome, so never route it to needs-human.
 
 Where `pr_loop.auto_merge` is **true**, merge with the configured `merge_strategy`,
@@ -5106,8 +5139,8 @@ never merely because thread eligibility was satisfied:
 
 ```bash
 if [ "${merged:-0}" = "1" ]; then
-  : > "$round_dir/disposed"    # terminal action VERIFIED (post receipt) — only now is
-                               # the round finished; an interrupt before this re-enters
+  echo merged > "$round_dir/disposed"   # terminal action VERIFIED (post receipt) — only
+                                        # now is the round finished; an interrupt re-enters
   default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
   branch=$(gh pr view "$pr_number" --json headRefName --jq '.headRefName')
   git checkout "$default_branch" >/dev/null 2>&1 || true
@@ -5165,7 +5198,7 @@ merge did not land, that is this state, and it is a failure.
     reactions.json            # reactions on the @codex trigger comment (👍 = clean)
     trigger-ts.txt            # freshness anchor
     outcome                   # ONE WORD: findings | clean | timeout | unresolved (step 2b)
-    disposed                  # PRESENT only once the round reached its terminal disposition
+    disposed                  # terminal disposition, TYPED: fixed | merged | handback | handover
     fresh-comments.json, comments.json, blocking.json, status.json
     acted.json                # appended at DISPATCH (step 5): one row per finding this round
                               # acted on, severity + override per row. Absent when the round
