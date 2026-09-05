@@ -222,3 +222,4 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-09-05T16:30:06Z pr-loop code-ification batch merged (#165, e904bb5c; rounds 5,2,2,3, 12/12 findings fixed+pinned, operator-policy override at cap): E99-F141/F142/F143/F144/F146/F147/F150/F151/F152 done with ancestor evidence
 - 2026-09-05T17:10:06Z E25-F01 done (merged #167, f536ab93; 2 rounds: 2 P2s then clean) — Claude-first defaults live; E99-F145 re-parked on opt-in evidence
 - 2026-09-05T21:39:16Z verification-hygiene batch merged (#169, 8f40e648; rounds 3,1,1,1; first docs/ABLATION.md A/B executed — record progress/ablation-2026-09-05.md): E99-F75/F76/F88 done; F138 resolved by removal (E21-F07)
+- 2026-09-05T23:37:09Z E27 + E26 drilled (planned; F01 cascade, F01/F02 self-host) during the Codex review-quota outage; implementation sequenced after #149/#171
