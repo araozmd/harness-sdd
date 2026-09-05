@@ -12,11 +12,12 @@
 #   session to classify and fix. True minute-by-minute monitoring, no manual nudge,
 #   survives turns.
 #
-# Usage (four modes, one evaluation routine):
+# Usage (five modes, one evaluation routine):
 #   wait-for-codex.sh <pr-number> <trigger-comment-id> <round-dir>   # wait (poll GitHub)
 #   wait-for-codex.sh preflight <pr-number>                          # static checks only
 #   wait-for-codex.sh evaluate  <round-dir>                          # offline re-evaluation
 #   wait-for-codex.sh classify  <round-dir> [blocking-severities]    # offline classification
+#   wait-for-codex.sh merge-verify <round-dir> <pr-number> <pre|post>  # merge-step receipts
 #
 #   pr-number:          the open PR
 #   trigger-comment-id: id of the `@codex review` issue comment (for the 👍 case)
@@ -41,6 +42,11 @@
 #   6  → `classify` only: FAIL-CLOSED — the head oid or the findings stream could not be
 #        read, so no blocking.json exists and the caller must take the needs-human path,
 #        never the merge path.
+#   7  → `merge-verify` only: the receipt FAILED — pre: the PR's current head is not the
+#        head the round reviewed (a push after the clean review would inherit its
+#        verdict, E99-F144); post: the PR is not actually MERGED (`gh pr merge` exiting 0
+#        can mean enqueued/auto-merge-armed, E99-F141). Both fail closed: an unreadable
+#        state is a failed receipt, never a pass.
 #
 # Always (re)writes pr.json, review-comments.json, issue-comments.json, reactions.json
 # into round-dir on every poll, so the caller reads the same sources the command body
@@ -66,6 +72,7 @@ wfc_usage() {
   echo "       $0 preflight <pr-number>" >&2
   echo "       $0 evaluate <round-dir>" >&2
   echo "       $0 classify <round-dir> [blocking-severities]" >&2
+  echo "       $0 merge-verify <round-dir> <pr-number> <pre|post>" >&2
 }
 
 # Severity extraction, shared by every classify stream. FIRST MATCH WINS BY POSITION in
@@ -392,6 +399,56 @@ case "${1:-}" in
     _cl_n="$(jq 'length' "$CL_DIR/blocking.json" 2>/dev/null || echo '?')"
     _cl_b="$(jq 'length' "$CL_DIR/body-findings.json" 2>/dev/null || echo 0)"
     echo "wait-for-codex classify: blocking=$_cl_n (severities: $CL_SET); advisory body findings=$_cl_b" >&2
+    exit 0
+    ;;
+  merge-verify)
+    # ── merge-verify mode (E99-F141 + E99-F144: merge receipts are code) ──────────
+    # pre  — BEFORE `gh pr merge`: the PR's CURRENT head must equal the head this
+    #        round's review actually examined (round-dir pr.json headRefOid). A commit
+    #        pushed after a clean review would otherwise inherit that review's verdict
+    #        silently; the artifact afterwards looks correct (E99-F144, hit live
+    #        2026-08-19 across six repos).
+    # post — AFTER `gh pr merge` exits 0: the PR must be observably MERGED (state,
+    #        mergedAt, mergeCommit all present). Under a merge queue or repo-level
+    #        auto-merge, `gh pr merge` may merely enqueue and still exit 0 — a PR later
+    #        rejected from the queue would be recorded as landed and its branch deleted
+    #        (E99-F141). On success it prints the merge commit oid on stdout — the
+    #        landing evidence the board's `set-status done --evidence` wants.
+    # Exit 0 = receipt holds; 7 = receipt FAILED (unreadable state included: a receipt
+    # that cannot be read never passes); 4 = usage.
+    MV_DIR="${2:-}"; MV_PR="${3:-}"; MV_PHASE="${4:-}"
+    case "$MV_PHASE" in pre|post) ;; *) wfc_usage; exit 4 ;; esac
+    if [ -z "$MV_DIR" ] || [ -z "$MV_PR" ]; then wfc_usage; exit 4; fi
+    if ! command -v gh >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+      echo "wait-for-codex merge-verify: gh and jq are required" >&2
+      exit 4
+    fi
+    if [ "$MV_PHASE" = pre ]; then
+      _mv_reviewed="$(jq -r '.headRefOid // ""' "$MV_DIR/pr.json" 2>/dev/null || echo '')"
+      if [ -z "$_mv_reviewed" ]; then
+        echo "merge-verify pre: could not read the reviewed headRefOid from $MV_DIR/pr.json — refusing (a receipt that cannot be read never passes)" >&2
+        exit 7
+      fi
+      _mv_now="$(gh pr view "$MV_PR" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo '')"
+      if [ -z "$_mv_now" ]; then
+        echo "merge-verify pre: could not read the PR's current head — refusing" >&2
+        exit 7
+      fi
+      if [ "$_mv_now" != "$_mv_reviewed" ]; then
+        echo "merge-verify pre: head moved since the reviewed round ($(printf '%.7s' "$_mv_reviewed") -> $(printf '%.7s' "$_mv_now")) — the new commits are UNREVIEWED; re-run the review round" >&2
+        exit 7
+      fi
+      exit 0
+    fi
+    _mv_state="$(gh pr view "$MV_PR" --json state,mergedAt,mergeCommit \
+      --jq '"\(.state) \(.mergedAt // "") \(.mergeCommit.oid // "")"' 2>/dev/null || echo '')"
+    _mv_st="${_mv_state%% *}"; _mv_rest="${_mv_state#* }"
+    _mv_at="${_mv_rest%% *}"; _mv_oid="${_mv_rest#* }"
+    if [ "$_mv_st" != "MERGED" ] || [ -z "$_mv_at" ] || [ -z "$_mv_oid" ]; then
+      echo "merge-verify post: PR #$MV_PR is NOT observably merged (state='$_mv_st') — gh pr merge exiting 0 may only have enqueued it; do not report a landing" >&2
+      exit 7
+    fi
+    printf '%s\n' "$_mv_oid"
     exit 0
     ;;
   ''|-h|--help)

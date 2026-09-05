@@ -218,3 +218,4 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 2026-08-17T08:00:00Z  E21-F07 seeded — deprecate the stacked-PR lane and reclaim its machinery: docs/WORKFLOW.md becomes a deprecation notice naming the sibling model, and tools/pr-stack-guard.sh plus its /sdd-pr-loop glue are REMOVED rather than left inert (a dead gate in a merge path is indistinguishable from a live one to the next reader; git preserves it if the decision is reversed).
 - 2026-09-05T13:15:56Z E21-F07 spec authored + approved via the operator's 2026-09-05 'proceed autonomously' plan approval; moving to build (lane deprecation)
 - 2026-09-05T14:27:38Z E21-F07 done (merged #163, 5e22273; 2 Codex rounds: 1 P1 fixed, then clean); E99-F140/F148 resolved by removal; E25 drilled (planned, F01 seeded)
+- 2026-09-05T14:28:29Z E99-F141/F143/F146/F150 (with absorbed F144/F151/F152, F142, F147) → in-progress under the operator-approved code-ification batch

@@ -609,7 +609,7 @@
         {
           "id": "E99-F141",
           "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 `gh pr merge` EXITING 0 DOES NOT PROVE THE PR MERGED, SO THE LOOP CAN REPORT A LANDING THAT NEVER HAPPENED. The 'Ready to merge' section sets `merged=1` directly from the exit status of `gh pr merge \u2026 --merge --delete-branch`, then runs local cleanup and reports success. Under a MERGE QUEUE (or with auto-merge enabled on the repo) that command may instead enqueue the PR or turn auto-merge on and return 0 \u2014 `gh` 2.96.0's own help says so. A PR later rejected from the queue is then recorded as landed, its local branch is deleted, and the loop returns success. \u26a0\ufe0f THIS IS THE ONE FAILURE MODE THE LOOP'S OWN DOCTRINE SAYS MUST NEVER BE REPORTED AS SUCCESS: 'a merge that auto-merge was asked to land and did not land is never reported as success.' The code does not hold that line because it never observes the merged state. Fix: after the merge call, poll `gh pr view --json state,mergedAt` until MERGED is observed (or a bounded timeout elapses) before setting `merged=1` and cleaning up; on timeout, needs-human. Found by Codex on viernes-bff#50. \u27c2 [absorbs E99-F144: merge-step verification = mergedAt/mergeCommit observed AND headRefOid unchanged since the reviewed round]",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
@@ -631,7 +631,7 @@
         {
           "id": "E99-F143",
           "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 WITH `auto_merge: false`, AN UNRESOLVED HUMAN THREAD IS REPORTED AS A FAILURE INSTEAD OF THE DOCUMENTED HAND-BACK. The thread-ownership gate sets `merge_ok=0` and instructs 'If `merge_ok=0`, stop here \u2014 go straight to the needs-human terminal state', which returns FAILURE. But when auto_merge is off, the loop's own contract is that finishing green-but-unmerged is a SUCCESS: 'stop after posting the all-gates-green summary and hand back to the human \u2014 resolve threads if you like, but do not merge \u2026 that hand-back COMPLETES the loop: return success. It is the one terminal state where an unmerged PR is the intended outcome.' A human comment on a thread is completely ordinary in that mode, so the common case is mislabelled a failure. \u26a0\ufe0f THE ORDERING IS THE BUG: the thread gate exists to authorise a MERGE, and with auto_merge off there is no merge to authorise. Fix: branch on `auto_merge == false` and take the success hand-back BEFORE evaluating merge authorization. Found by Codex on viernes-bff#50. \u27c2 [batch carrier: absorbs E99-F151 (summary ordering), E99-F152 (gh pr checks --required) \u2014 four prose corrections to sdd-pr-loop.md in one PR]",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
@@ -666,7 +666,7 @@
         {
           "id": "E99-F146",
           "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 CONCURRENT pr-fixerS SHARE ONE CHECKOUT AND ONE INDEX. Below the escalation round the runbook spawns one sub-agent PER blocking comment, and the Agent-tool guidance encourages launching independent agents together \u2014 but every fixer runs `git add` and `git commit` in the SAME working tree. Concurrent fixers can overwrite each other's edits to one file, contend on `.git/index.lock`, or sweep another fixer's staged changes into their own commit, so the single push at the end of the round carries missing or misattributed fixes. \u26a0\ufe0f THE ONE-COMMENT-ONE-COMMIT CONTRACT IS WHAT BREAKS: pr-fixer's whole discipline is 'one comment, one fix, one commit, one return', and that is unenforceable while they interleave in a shared index. Fix: state that fixers run SEQUENTIALLY, or give each an isolated worktree+branch (the harness already has `tools/fix-worktree.sh` and an `isolation: worktree` concept to build on). Found on viernes-users#38. \u27c2 [absorbs E99-F147: checkout discipline first (verify/worktree the PR head), then per-fixer isolation or serialization]",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
@@ -714,7 +714,7 @@
         {
           "id": "E99-F150",
           "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 AN EXHAUSTED CACHED ROUND BUDGET FALLS THROUGH TO THE MERGE FLOW WITH NO GATE VERDICT AT ALL. If a previous invocation created the CAP round's directory and then stopped or was interrupted, the resume scan sets `round` to `max_rounds + 1`. The `while [ \"$round\" -le \"$max_rounds\" ]` body is therefore never entered: no review is triggered, `pr-gate.sh` is never consulted, and no verdict exists \u2014 and execution proceeds to the ready-to-merge flow anyway. With the default `auto_merge: true`, a PR whose cap round was incomplete OR STILL HAD BLOCKING FINDINGS can be merged, provided it has no unresolved threads. \u26a0\ufe0f THIS IS THE ROUND-CAP FAILING OPEN: the cap exists to force a needs-human hand-off, and this path skips straight past it to a merge. Closely related to F142 (a round directory's existence is treated as completion) \u2014 same cache-trust root, but this one ends in an unreviewed MERGE rather than a lost round. Fix: route `round > max_rounds` directly to the needs-human terminal state instead of falling through. Found on viernes-web#95. \u27c2 [absorbs E99-F142: fix = a round counts only when its verdict artifact exists, not when its directory does]",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": false,
           "depends_on": [],

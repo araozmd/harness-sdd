@@ -51,6 +51,11 @@ way, and the `needs-human` hand-off that should have fired at round 4 never did.
 round=1
 for _d in .pr-loop/$pr_number/round-*/; do
   [ -d "$_d" ] || continue                       # unmatched glob — no cache yet
+  # A round COUNTS toward the budget only when it recorded an outcome (E99-F142/F150):
+  # `mkdir -p` runs before preflight, so a run that died pre-verdict leaves a directory
+  # that must not burn budget — and an interrupted CAP round must not shove `round`
+  # past `max_rounds` into the merge flow with no verdict at all.
+  [ -f "${_d}outcome" ] || continue
   _n="${_d%/}"; _n="${_n##*/round-}"
   case "$_n" in ''|*[!0-9]*) continue ;; esac
   [ "$_n" -ge "$round" ] && round=$((_n + 1))
@@ -71,6 +76,32 @@ the PR exists and is OPEN. It posts **nothing**. On a non-zero exit (`5`), **STO
 report its one-line diagnostic verbatim — do not post `@codex review`, do not poll, do
 not fall back to a hand-rolled check. A repo without the Codex GitHub App should leave
 `pr_loop.enabled` at its opt-in default of `false` rather than run this loop.
+
+### 0c. The working tree must BE the PR (E99-F146 / E99-F147)
+
+The loop reviews the REMOTE PR, but every fixer round commits and pushes from the LOCAL
+checkout — nothing else ties the two together. When `$ARGUMENTS` names a PR number,
+verify the tie before any round; the failure is silent and double-sided otherwise (the
+reviewed PR looks unfixed while an unrelated branch quietly receives the commits):
+
+```bash
+pr_head="$(gh pr view "$pr_number" --json headRefName --jq '.headRefName' 2>/dev/null || echo '')"
+cur="$(git branch --show-current 2>/dev/null || echo '')"
+if [ -z "$pr_head" ] || [ -z "$cur" ]; then
+  echo "cannot resolve the PR head or the current branch — needs-human, not proceeding" >&2
+  # STOP: label needs-human and return failure — never fix from an unverified tree.
+elif [ "$cur" != "$pr_head" ]; then
+  git checkout "$pr_head" 2>/dev/null \
+    || { echo "could not check out '$pr_head' — needs-human, not proceeding" >&2; }
+  # STOP on checkout failure, same as above.
+fi
+git pull --ff-only origin "$pr_head" >/dev/null 2>&1 || true   # fix the TIP, not a stale local
+```
+
+**Fixers share ONE checkout and ONE index — dispatch them SEQUENTIALLY** (E99-F146).
+Concurrent fixers overwrite each other's edits to shared files, contend on
+`.git/index.lock`, and sweep one another's staged changes into misattributed commits.
+One fixer at a time, one commit each; the round still pushes once at the end.
 
 ### 1. Trigger the review
 
@@ -501,7 +532,7 @@ that.
 
 | Round | Behavior |
 |---|---|
-| below `max_rounds - 1` | For each blocking comment: **`acted_append` it first**, then spawn one **`pr-fixer`** sub-agent, passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
+| below `max_rounds - 1` | For each blocking comment: **`acted_append` it first**, then spawn one **`pr-fixer`** sub-agent **at a time — sequentially, never concurrently** (§0c: one shared checkout and index), passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
 | `max_rounds - 1` | **`acted_append` every comment going into the prompt**, then build **one combined fix prompt** (all blocking comments concatenated) and escalate to a **different worker** if the host CLI offers one; where no router exists, run one combined **in-session** pass instead. Then push. |
 | `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. **`acted_append` every blocking comment that survived** — the cap round disposes of them by declaring them, not by fixing them. Post the handover summary listing every round, the surviving comments, and the cache path — **and the trend verdict, re-run after these rows exist**. When it is `non-converging`, the message must say what the tool's remedy line says, and must show the per-round series and the concentration list that make the case. Return failure. |
 
@@ -528,7 +559,10 @@ echo "<role>"   > "$round_dir/role"     # implementation | fix | escalation
 After the fix commits land, re-fetch the PR JSON and check the gates **before** triggering
 another Codex round:
 
-- CI green (`statusCheckRollup[*].conclusion == "SUCCESS"` for required checks)
+- CI green — **required checks only**, via `gh pr checks "$pr_number" --required`.
+  The rollup does not mark which entries are REQUIRED, so a failing or hanging
+  *optional* job (a nightly, an advisory scanner) must never stall or hand off a PR
+  whose required checks are all green (E99-F152).
 - Tests / typecheck / lint green (subsets of CI)
 
 **Do not ask the gate again.** It was asked once, at step 5, and its verdict is what routed
@@ -618,7 +652,18 @@ Save the rendered summary to `.pr-loop/<pr>/handover-summary.md` and post it on
 
 ### Ready to merge (success)
 
-Post a summary comment on the PR:
+**Enter this section ONLY on a `merge` verdict the gate returned in THIS invocation**
+(step 5, `pr-gate.sh` exit 0). A resume whose scan already put `round` past
+`max_rounds` skipped the while loop and holds NO verdict — an interrupted cap round
+with blocking findings would otherwise fall through here and auto-merge (E99-F150).
+No verdict of this run's own ⇒ the cap row's `needs-human` terminal state, never this
+section.
+
+**Build** the summary now — but post it only when a terminal state actually lands
+(after `merged=1` below, or with the `auto_merge: false` hand-back). Posting first
+leaves a contradictory "all gates green" comment sitting above a failure hand-off,
+misleading both humans skimming the thread and automation watching comments
+(E99-F151).
 
 ```
 sdd-pr-loop: all gates green ✅
@@ -638,8 +683,12 @@ review thread resolved before merge, but this loop may only auto-resolve threads
 owns** (opened by the Codex bot). Auto-resolving a human reviewer's unresolved
 conversation would silently bypass the merge gate that keeps human feedback meaningful.
 So: fetch each unresolved thread with its participants; if **any** non-Codex participant
-appears on an unresolved thread, **stop and go to the needs-human terminal state — resolve
-nothing and do not merge**. Only when every remaining unresolved thread is Codex-owned do
+appears on an unresolved thread, **resolve nothing and do not merge** — and pick the
+terminal state by the config, not reflexively (E99-F143): with `auto_merge` **true**
+this is the **needs-human** terminal state; with `auto_merge` **false** the loop's own
+contract below already hands an unmerged green PR back to the human as **success**, and
+an unresolved human thread is exactly the feedback that hand-back exists to deliver —
+take the hand-back, return success. Only when every remaining unresolved thread is Codex-owned do
 you resolve them (via the GraphQL `resolveReviewThread` mutation — there is no REST/`gh pr`
 equivalent) and proceed.
 
@@ -753,17 +802,22 @@ base_ref="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/de
 if [ -z "$default_branch" ] || [ -z "$base_ref" ] || [ "$base_ref" != "$default_branch" ]; then
   echo "sdd-pr-loop: merge refused — base '$base_ref' is not the default branch '$default_branch' (stacked lane deprecated, E21-F07); retarget the PR — needs-human" >&2
   gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+elif ! sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" pre; then
+  # E99-F144: a push AFTER the clean review must not inherit its verdict — the receipt
+  # compares the PR's current head against the head this round actually reviewed.
+  echo "sdd-pr-loop: merge refused — head moved since the reviewed round (unreviewed commits) — needs-human" >&2
+  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
 elif [ "${merge_ok:-0}" != "1" ]; then
   echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
 elif [ "${merge_strategy:-merge}" = "squash" ]; then
   msg=".pr-loop/$pr_number/squash-message.txt"
   if [ -s "$msg" ]; then
-    gh pr merge "$pr_number" --squash --delete-branch --body-file "$msg" && merged=1
+    gh pr merge "$pr_number" --squash --delete-branch --body-file "$msg" && merge_oid="$(sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
   else                        # no message composed — squash with GitHub's default body
-    gh pr merge "$pr_number" --squash --delete-branch && merged=1
+    gh pr merge "$pr_number" --squash --delete-branch && merge_oid="$(sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
   fi
 else
-  gh pr merge "$pr_number" --merge --delete-branch && merged=1
+  gh pr merge "$pr_number" --merge --delete-branch && merge_oid="$(sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
 fi
 ```
 
@@ -782,8 +836,15 @@ if [ "${merged:-0}" = "1" ]; then
 fi
 ```
 
-If `gh pr merge` fails (branch-protection race, a required review not yet registered, a
-re-opened thread), retry once after 30s. If it still fails the PR will not land: take the
+`merged=1` requires the **post receipt**: `gh pr merge` exiting 0 can mean *enqueued*
+under a merge queue or repo-level auto-merge, and a PR later rejected from the queue
+would be recorded as landed with its branch already deleted (E99-F141). The receipt's
+stdout is the merge commit oid — pass it to `tasks-lock.py set-status <id> done
+--evidence` as the landing evidence.
+
+If `gh pr merge` fails — or exits 0 but fails the post receipt (same state: NOT landed) —
+(branch-protection race, a required review not yet registered, a re-opened thread),
+retry once after 30s. If it still fails the PR will not land: take the
 needs-human terminal state below — label `needs-human`, post the error alongside the
 handover summary, and **return failure**. A merge that auto-merge was asked to land and did
 not land is never reported as success.

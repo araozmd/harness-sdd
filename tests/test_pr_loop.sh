@@ -1353,6 +1353,70 @@ EOF
   pass "classify: severities by position + word boundary, fresh Codex-only blocking, advisory body streams, fail-closed exits (E99-F149)"
 }
 
+# E99-F141/F144: merge receipts are CODE. `merge-verify pre` refuses a head that moved
+# after the reviewed round; `merge-verify post` refuses a merge that is not observably
+# MERGED (gh pr merge exit 0 can mean merely enqueued). Both fail closed on unreadable
+# state. Driven with a fake `gh` so every branch is deterministic and offline.
+test_merge_verify_receipts() {
+  if ! have_jq; then skip "test_merge_verify_receipts (jq not installed)"; return 0; fi
+  _mv="$T/merge-verify"; mkdir -p "$_mv/bin" "$_mv/r"
+  mk_sandbox_bin "$_mv/bin"; link_real_jq "$_mv/bin"
+  cat > "$_mv/bin/gh" <<'GH'
+#!/bin/sh
+# fake gh: answers `pr view <n> --json <fields>` from $FAKE_HEAD / $FAKE_STATE.
+case "$*" in
+  *"--json headRefOid"*) [ -n "$FAKE_HEAD" ] && printf '%s\n' "$FAKE_HEAD" ;;
+  *"--json state,mergedAt,mergeCommit"*) [ -n "$FAKE_STATE" ] && printf '%s\n' "$FAKE_STATE" ;;
+esac
+exit 0
+GH
+  chmod +x "$_mv/bin/gh"
+  printf '{"headRefOid":"aaaa111"}\n' > "$_mv/r/pr.json"
+  _rc=0; ( PATH="$_mv/bin" FAKE_HEAD=aaaa111 sh "$W" merge-verify "$_mv/r" 9 pre ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 0 ] || fail "F141/F144: pre receipt failed on an unmoved head (rc=$_rc)"
+  _rc=0; ( PATH="$_mv/bin" FAKE_HEAD=bbbb222 sh "$W" merge-verify "$_mv/r" 9 pre ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 7 ] || fail "F144: a MOVED head must fail the pre receipt with 7 (got $_rc) — a push after review would inherit its verdict"
+  _rc=0; ( PATH="$_mv/bin" FAKE_HEAD= sh "$W" merge-verify "$_mv/r" 9 pre ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 7 ] || fail "F144: an unreadable current head must fail closed (got $_rc)"
+  rm -f "$_mv/r/pr.json"
+  _rc=0; ( PATH="$_mv/bin" FAKE_HEAD=aaaa111 sh "$W" merge-verify "$_mv/r" 9 pre ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 7 ] || fail "F144: an unreadable reviewed head must fail closed (got $_rc)"
+  _out=""; _rc=0
+  _out="$( PATH="$_mv/bin" FAKE_STATE='MERGED 2026-09-05T00:00:00Z deadbeefcafe' sh "$W" merge-verify "$_mv/r" 9 post 2>/dev/null )" || _rc=$?
+  [ "$_rc" = 0 ] && [ "$_out" = "deadbeefcafe" ] \
+    || fail "F141: post receipt on a MERGED PR must pass and print the merge oid (rc=$_rc out=$_out)"
+  _rc=0; ( PATH="$_mv/bin" FAKE_STATE='OPEN  ' sh "$W" merge-verify "$_mv/r" 9 post ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 7 ] || fail "F141: an OPEN (enqueued) PR must fail the post receipt with 7 (got $_rc)"
+  _rc=0; ( PATH="$_mv/bin" FAKE_STATE= sh "$W" merge-verify "$_mv/r" 9 post ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 7 ] || fail "F141: unreadable merge state must fail closed (got $_rc)"
+  pass "F141/F144 merge receipts: pre pins the reviewed head, post proves the landing, both fail closed"
+}
+
+# The code-ified fail-open batch is WIRED into both command bodies (E99-F141-F152).
+test_body_codified_batch_wired() {
+  for _b in "$SRC/.claude/commands/sdd-pr-loop.md" "$BODY"; do
+    grep -qF 'merge-verify "$round_dir" "$pr_number" pre' "$_b" \
+      || fail "batch: $_b does not run the pre merge receipt (F144)"
+    grep -qF 'merge-verify "$round_dir" "$pr_number" post' "$_b" \
+      || fail "batch: $_b does not run the post merge receipt (F141)"
+    grep -qF '[ -f "${_d}outcome" ] || continue' "$_b" \
+      || fail "batch: $_b resume scan still counts outcome-less round dirs (F142/F150)"
+    grep -qF 'merge` verdict the gate returned in THIS invocation' "$_b" \
+      || fail "batch: $_b Ready-to-merge does not require this invocation's verdict (F150)"
+    grep -qF 'gh pr checks "$pr_number" --required' "$_b" \
+      || fail "batch: $_b still derives required checks from the rollup (F152)"
+    grep -qF 'sequentially, never concurrently' "$_b" \
+      || fail "batch: $_b still dispatches fixers in parallel over one checkout (F146)"
+    grep -qF 'The working tree must BE the PR' "$_b" \
+      || fail "batch: $_b never verifies the checkout is the PR being fixed (F147)"
+    grep -qF 'take the hand-back, return success' "$_b" \
+      || fail "batch: $_b still fails an auto_merge:false run over a human thread (F143)"
+    grep -qF 'post it only when a terminal state actually lands' "$_b" \
+      || fail "batch: $_b still posts the success summary before the gates (F151)"
+  done
+  pass "codified batch wired into both bodies (F141-F152 carriers)"
+}
+
 test_failed_findings_fetch_is_never_clean() {         # R55
   if ! have_jq; then skip "test_failed_findings_fetch_is_never_clean (jq not installed)"; return 0; fi
   # review-comments.json is the authoritative findings stream. If its fetch fails while a
@@ -1735,8 +1799,8 @@ test_body_squash_prep_cannot_hang() {                 # R43 (squash path)
     'never ask Codex for it'
   need_body "R43: body does not write the squash message itself" 'squash-message.txt'
   need_body "R43: the squash merge is not guarded on a non-empty message" 'if [ -s "$msg" ]'
-  need_body "R43: the squash merge has no default-body fallback" \
-    'gh pr merge "$pr_number" --squash --delete-branch && merged=1'
+  need_body "R43: the squash merge has no default-body fallback (with the F141 post receipt chained)" \
+    'gh pr merge "$pr_number" --squash --delete-branch && merge_oid='
   pass "R43 squash prep composes the message locally and degrades to the default body"
 }
 
@@ -2007,6 +2071,8 @@ test_bot_login_exact_match
 test_bot_login_lookalike_cannot_signal_clean
 test_evaluate_is_offline
 test_classify_offline_contract
+test_merge_verify_receipts
+test_body_codified_batch_wired
 test_failed_findings_fetch_is_never_clean
 test_cache_root_and_gitignore
 

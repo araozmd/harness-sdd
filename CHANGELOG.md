@@ -4,6 +4,41 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.71.0] — 2026-09-05
+
+### Added — ✨ merge receipts are code: `wait-for-codex.sh merge-verify` (E99-F141 + E99-F144)
+
+Two fail-open holes in the merge step, both observed live, closed at one call site.
+`merge-verify pre` refuses the merge when the PR's current head is not the head the
+round actually reviewed — a push after a clean review silently inherited its verdict
+(hit for real across six repos, 2026-08-19). `merge-verify post` refuses to report a
+landing unless the PR is observably MERGED (state + mergedAt + mergeCommit) — under a
+merge queue or repo auto-merge, `gh pr merge` exiting 0 can mean merely *enqueued*, and
+a PR later rejected from the queue was recorded as landed with its branch deleted. Both
+fail closed on unreadable state; the post receipt prints the merge commit oid — the
+exact landing evidence `tasks-lock.py set-status done --evidence` wants. Both command
+bodies chain the receipts around every `gh pr merge` variant.
+
+### Fixed — 🐛 the pr-loop's remaining fail-open batch (E99-F142/F143/F146/F147/F150/F151/F152)
+
+- **Round budget** (F142/F150): the resume scan counts a round only when it recorded an
+  `outcome` — `mkdir -p` runs before preflight, so a run that died pre-verdict left a
+  directory that silently burned budget, and an interrupted CAP round shoved `round`
+  past `max_rounds` straight into the merge flow with no gate verdict at all. The
+  Ready-to-merge section now also requires a `merge` verdict from THIS invocation.
+- **Checkout discipline** (F146/F147): a new §0c verifies the working tree IS the PR
+  being fixed (checkout the PR head, fail closed on mismatch) — fix commits landed on
+  unrelated branches silently — and fixers dispatch **sequentially**: they share one
+  checkout and one index, and concurrent fixers swept each other's staged changes into
+  misattributed commits.
+- **Terminal-state honesty** (F143/F151): with `auto_merge: false`, an unresolved human
+  thread at all-gates-green takes the documented success hand-back instead of a false
+  failure; and the success summary is *built* early but *posted* only when a terminal
+  state actually lands — no more "all gates green ✅" sitting above a failure hand-off.
+- **Required checks** (F152): CI gating uses `gh pr checks --required`; the
+  statusCheckRollup does not mark which entries are required, so a flaky optional job
+  stalled PRs whose required checks were green.
+
 ## [0.70.0] — 2026-09-05
 
 ### Removed — 🔥 the stacked-PR lane (E21-F07)
