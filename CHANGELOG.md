@@ -4,6 +4,86 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.69.0] — 2026-09-04
+
+The ablation-campaign release: driven by two full external session reports on v0.6x, whose
+verdict was uniform — every mechanism that earned its keep was **code**, every one that
+failed was **prose asking an agent to behave**. This release moves the five proven prose
+failures into code, shifts the two dominant review-finding classes left into the Builder,
+and puts a price bar on board rows.
+
+### Added — ✨ `wait-for-codex.sh classify` (E99-F149: classification is code, not prose)
+
+Every pr-loop lane hand-rolled the same severity jq, and every copy got a rule subtly
+wrong (one tested `nit` before defaulting, so substrings inside longer words mis-tagged).
+The rule now lives in ONE tested place: first match wins **by position**, word-boundary
+anchored, default P2, Codex-authored + head-commit + `created_at >= trigger` freshness on
+**every** stream — so a stale thread, a human "P1" comment, or a bot comment on another
+commit can never block a round. Unactionable severity tags in review bodies / issue
+comments land in an advisory `body-findings.json`, never in `blocking.json`. Fail-closed:
+an unreadable head oid or findings stream exits 6 and removes any stale `blocking.json`.
+The `/sdd-pr-loop` body now invokes the tool instead of embedding the shell.
+
+### Added — ✨ `tasks-lock.py add-feature` + structural telemetry
+
+Seeding an `sdd: false` row was the one routine board write with no first-class path —
+lanes hand-wrote Python mutators, the exact spot a schema mistake would land. The Fixer's
+R8/R9 contract is now a locked, validated subcommand that prints the allocated id.
+And every `set-status` write appends a `transition` telemetry record at the lock choke
+point — phase/round boundaries exist as a property of the system instead of a
+prompt-compliance hope (observed compliance of the prompt stamps: ~0%). Kill-switch
+honored, never blocking, and `telemetry-report.py session` now prints the time range it
+covers (a stale session must LOOK stale) plus the transition count.
+
+### Added — ✨ `progress/lessons.md`, the earned-lessons ledger
+
+Both session reports converged on the same request: the single most valuable artifact of
+a run was a hand-written "standing rules that cost rounds" note that only survived
+because someone remembered to write it. It is now first-class: seeded once by the
+installer (never clobbered — asserted by an upgrade re-run test), read by every role at
+session start, appendable by any lane, append-only.
+
+### Added — ✨ builder shift-left + the board-row bar
+
+Across five features and eight review passes, **every** finding fell into exactly two
+classes: a prose guarantee no test pins, and a constant no test constrains. The Builder
+now self-checks both before hand-off (name the pinning test, or weaken the claim; delete
+the constant, watch a test die) — reviewer.md §3b/§3c caught these a full round later.
+And the Fixer now applies a bar before seeding E99 rows: **recurring, blocking, or
+fail-open** → a row; anything else → one dated line in `lessons.md`. A board row costs a
+full build→review→PR cycle; a lesson costs a sentence.
+
+### Fixed — 🐛 batched small fixes
+
+- `change-size.sh` GEN_RE covers `coverage/` (a repo generating into a non-ignored
+  coverage dir booked ~20k phantom production lines) and `\.mutbak$`.
+- The `*.mutbak` gitignore seed is REVERSED (it contradicted reviewer.md's residue-
+  visibility rule — the E99-F207 incident class); upgrades WARN about an existing line
+  by name (never delete it — provenance is unprovable and the file is append-only for
+  user entries), and the change-size classifier absorbs the E99-F71 inflation instead.
+- Installer `.gitignore` appends no longer fuse onto a final line lacking a trailing
+  newline.
+- `init.sh` prints the escalation arming state (`ARMED` / `DISARMED`) whenever
+  `escalation.after_rejections > 0` — a configured-but-inert safety feature was
+  invisible (E99-F25 ran three rejection rounds on the base builder).
+- `validate-board.py` diagnoses a wrong `--spec-root` in ONE line naming the cause,
+  instead of a per-feature error wall.
+- The installer warns on stale slash-command references in target prose (`/pr-loop`,
+  or any `/sdd-*` the current version does not generate).
+- `_rollback_frontmatter`'s intentional swallow now says why (E99-F128).
+- Orchestrator PR bodies must inline what they cite — `progress/` paths are gitignored
+  and dangle for every other reader; plus a compactness note for hosts that cap PR
+  descriptions (Azure DevOps: 4000 chars).
+
+### Changed — 🚜 board triage + big-rock drafts
+
+The 19 pending E99 rows were consolidated to 10 actionable (same-mechanism rows absorbed
+into carrier rows via parks, prose-fix batches formed; F128/F149 ride this release).
+Three draft epics seed the campaign's next phases: E25 (Claude-Code-only front-end
+scope), E26 (self-host the harness repo), E27 (escalation tier: delete vs cascade).
+`docs/ABLATION.md` records the protocol for the prompt-diet experiment: delete, run,
+measure, restore only what repeated failure proves.
+
 ## [0.68.0] — 2026-08-18
 
 ### Added — ✨ the gate runs the strictest available shell, and says which one (E99-F135)

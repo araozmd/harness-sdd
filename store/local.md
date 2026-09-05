@@ -52,6 +52,8 @@ Orchestrator's exclusive ownership of state writes.
   python3 .harness/tools/tasks-lock.py set-status <id> <status>
   # source layout (this repo): helper at tools/, board at state/
   python3 tools/tasks-lock.py set-status <id> <status>
+  # seeding one sdd:false fix row (the Fixer's R8/R9 contract) — prints the allocated id
+  python3 tools/tasks-lock.py add-feature --title "<one-line fix intent>" [--gated]
   ```
 
   Run it from **any** cwd — the helper resolves the harness directory with this

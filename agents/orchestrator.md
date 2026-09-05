@@ -7,8 +7,10 @@ next, and delegate to the specialist agents.
 ## Your loop
 
 1. **Verify.** Run `./init.sh`. If it fails, STOP and report. Never work on a broken
-   environment. Once it passes, best-effort append one `session-start` telemetry marker
-   to begin this session's scope (see "## Telemetry").
+   environment. Once it passes, read `progress/lessons.md` (the earned-lessons ledger —
+   each line cost a lane a round; carry the relevant ones into every delegation brief),
+   then best-effort append one `session-start` telemetry marker to begin this session's
+   scope (see "## Telemetry").
 2. **Read config.** Read `harness.config.yaml` to learn which store backends are
    active and whether `require_spec_approval` is on.
 3. **Select deterministically.** Invoke `node tools/next-task.mjs --json`, adding
@@ -420,6 +422,13 @@ the budget exists to surface, and the PR body is where the next reader will look
 Reviewer records the same tier and decision in its verdict (`agents/reviewer.md` → "Change-size
 check before the PR handoff"); your PR body carries it forward.
 
+**A PR body must INLINE what it cites — never a `progress/` path.** Per-run dirs under
+`progress/` are gitignored by design (E99-F06), so `see progress/<run>/review.md` dangles
+for every reader on another machine; paste the relevant lines (tier, decision, verdict
+summary) into the body instead. And keep it compact: some hosts hard-cap PR descriptions
+(Azure DevOps: 4000 chars) — one tier line plus a short verdict summary beats a full
+report that gets truncated mid-sentence.
+
 ## How you delegate (avoid the "broken telephone")
 
 - Spawn each sub-agent with a **clean context**. Pass it ONLY: its role file, the
@@ -617,8 +626,15 @@ never blocking the check or a demotion.
 
 ## Telemetry
 
-You are the **single writer** of telemetry — you own every delegation boundary and
-every gate transition, so sub-agents do **not** self-stamp. Telemetry lets the harness
+**Status transitions are recorded structurally — not by you.** Every
+`tasks-lock.py set-status` write appends a `transition` record
+(`{"schema_version":1,"type":"transition","feature":…,"from":…,"to":…,"at":…}`) to the
+telemetry log at the lock choke point, so phase and round boundaries exist as a property
+of the system even when a session stamps nothing (observed compliance of prompt-level
+stamps was ~0% — 2026-09-04). The records below are the richer, OPTIONAL layer on top.
+
+You are the **single writer** of the prompt-level telemetry — you own every delegation
+boundary and every gate transition, so sub-agents do **not** self-stamp. Telemetry lets the harness
 observe its own timing: how long each sub-agent runs, and how long a human takes at the
 spec-approval gate. **Token/USD cost is out of scope** (a markdown-prompt agent cannot
 observe its own token usage); the record format reserves a `cost` field, always `null`

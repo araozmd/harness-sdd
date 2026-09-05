@@ -61,6 +61,22 @@ test_progress_run_dirs_gitignored() {
   rm -rf "$_g"
 }
 
+# Earned-lessons ledger: progress/lessons.md is PROJECT-OWNED — seeded once with the header,
+# appended to by lanes, and never clobbered or duplicated by an upgrade re-run. Asserted as
+# behavior (append a marker, re-run the installer, marker survives + single header), because
+# a string-presence check cannot see clobbering.
+test_lessons_ledger_seeded_and_preserved() {
+  _lf="$T/.harness/progress/lessons.md"
+  [ -f "$_lf" ] || fail "progress/lessons.md not seeded on fresh install (earned-lessons ledger missing)"
+  grep -q '^# Earned lessons' "$_lf" || fail "seeded progress/lessons.md missing its header"
+  echo '- [2026-01-01 test] marker lesson — must survive upgrade' >> "$_lf"
+  sh "$SRC/harness-install.sh" "$T" >/dev/null 2>&1 || fail "lessons ledger: upgrade re-run failed"
+  grep -qF 'marker lesson — must survive upgrade' "$_lf" \
+    || fail "progress/lessons.md appended entry LOST on upgrade re-run — ledger is being clobbered"
+  [ "$(grep -c '^# Earned lessons' "$_lf")" = "1" ] \
+    || fail "progress/lessons.md header duplicated on upgrade re-run — seed is not idempotent"
+}
+
 # E21-F01: the change_size budget must reach a consumer both as config (the numbers, which a
 # target may retune) and as prompt text in the INSTALLED role files (the rule, which it may
 # not). Config-only would ship numbers nobody reads; prompt-only would hard-code a per-repo
@@ -423,6 +439,8 @@ test_e99_throughput_helpers_installed_contract
 [ -f "$T/.harness/.gitignore" ]                    || fail ".harness/.gitignore not seeded (Jira PAT would not be ignored)" # R16
 grep -qxF 'jira.pat' "$T/.harness/.gitignore"      || fail ".harness/.gitignore does not ignore the default Jira PAT file (jira.pat) — a PAT could be committed" # R16
 test_progress_run_dirs_gitignored   # E99-F06
+test_lessons_ledger_seeded_and_preserved
+pass "progress/lessons.md seeded once, survives upgrade re-run (earned-lessons ledger)"
 test_change_size_block_seeded       # E21-F01
 test_worker_roster_wiring_installed # E17-F04
 test_workers_block_seeded_migrated_converge # E17-F04
@@ -450,9 +468,60 @@ done
 test_root_gitignore_seeds_local_prompt_files
 grep -qxF '.claude/' "$T/.gitignore"                    && fail "root .gitignore over-ignores the whole .claude/ dir"
 grep -qxF '.claude/worktrees/' "$T/.gitignore"          || fail "root .gitignore missing worktree runtime directory"
-# Machine-local review scratch and bytecode stay OUT of the untracked set, because that set
-# is exactly what tools/change-size.sh measures (E99-F71/F89).
-grep -qxF '*.mutbak' "$T/.gitignore" || fail "root .gitignore missing the *.mutbak ignore — mutation backups inflate the change-size tier (E99-F71)"
+# Mutation backups stay VISIBLE in git status (2026-09-04 reversal of the E99-F71 ignore):
+# reviewer.md requires *.mutbak residue detectable after a killed lane (E99-F207 class);
+# the change-size inflation E99-F71 fixed is handled by the measurer's GEN_RE instead.
+# The upgrade path must also REMOVE the line an earlier version seeded.
+grep -qxF '*.mutbak' "$T/.gitignore" && fail "root .gitignore still seeds *.mutbak — mutation residue would be invisible in git status (contradicts reviewer.md)"
+grep -qF '\.mutbak$' "$SRC/tools/change-size.sh" \
+  || fail "change-size.sh GEN_RE does not classify .mutbak — without the ignore, backups would inflate the tier again (E99-F71)"
+# Behavior: an existing *.mutbak line is PRESERVED (provenance is unprovable, the file is
+# append-only for user entries — Codex #160 P2) but WARNED about by name; and an append
+# onto a file with no trailing newline never fuses entries.
+_mb="$(mktemp -d 2>/dev/null || mktemp -d -t harness-mb)"
+mkdir -p "$_mb"
+printf '*.mutbak\n' > "$_mb/.gitignore"
+printf 'my-own-entry' >> "$_mb/.gitignore"       # deliberately NO trailing newline
+CODEX_HOME="$T/codex-home" sh "$SRC/harness-install.sh" "$_mb" >/dev/null 2>"$_mb/.err" \
+  || fail "mutbak-migration install run failed"
+grep -qxF '*.mutbak' "$_mb/.gitignore" \
+  || fail "an existing *.mutbak ignore was DELETED — the installer cannot prove provenance and must not remove user entries"
+grep -q "mutbak" "$_mb/.err" \
+  || fail "no warning named the *.mutbak ignore contradiction (reviewer.md visibility rule)"
+grep -qxF 'my-own-entry' "$_mb/.gitignore" \
+  || fail "gitignore append fused onto a final line lacking a trailing newline (my-own-entry corrupted)"
+grep -q 'my-own-entry.claude' "$_mb/.gitignore" \
+  && fail "gitignore append fused a harness pattern onto the user's last line"
+rm -rf "$_mb"
+pass "existing *.mutbak ignore preserved + warned about; gitignore appends survive a missing trailing newline"
+
+# Stale slash-command references in the target's own prose are NAMED at install time
+# (warn-only): /pr-loop (the pre-E18 name) and any /sdd-* the current version does not
+# generate send sessions hunting for a missing skill.
+_sr="$(mktemp -d 2>/dev/null || mktemp -d -t harness-sr)"
+printf '# My project\nRun /pr-loop after tests. Also try /sdd-made-up-cmd.\nAnd /sdd-next is fine, as is /sdd-pr-loop while the gate is on.\n' > "$_sr/CLAUDE.md"
+CODEX_HOME="$T/codex-home" sh "$SRC/harness-install.sh" "$_sr" >/dev/null 2>"$_sr/.err" \
+  || fail "stale-reference install run failed"
+grep -q 'references `/pr-loop`' "$_sr/.err" \
+  || fail "installer did not warn about a stale /pr-loop reference in CLAUDE.md"
+grep -q '/sdd-made-up-cmd' "$_sr/.err" \
+  || fail "installer did not warn about an unknown /sdd-* reference in CLAUDE.md"
+grep -q 'references `/sdd-next`' "$_sr/.err" \
+  && fail "installer warned about /sdd-next, which the current version DOES generate"
+# Gated-off commands are UNAVAILABLE even though $CMDDIR generates their body as the
+# reclamation reference (Codex #160 round-5): with pr_loop.enabled false, a /sdd-pr-loop
+# reference must warn — and with the gate on it must not.
+grep -q 'references `/sdd-pr-loop`' "$_sr/.err" \
+  && fail "installer warned about /sdd-pr-loop while the gate is ON (suite exports HARNESS_PR_LOOP_ENABLED=true)"
+rm -rf "$_sr"
+_srg="$(mktemp -d 2>/dev/null || mktemp -d -t harness-srg)"
+printf '# My project\nAfter tests run /sdd-pr-loop.\n' > "$_srg/CLAUDE.md"
+CODEX_HOME="$T/codex-home" HARNESS_PR_LOOP_ENABLED=false sh "$SRC/harness-install.sh" "$_srg" >/dev/null 2>"$_srg/.err" \
+  || fail "gated-off stale-reference install run failed"
+grep -q 'pr_loop.enabled is not true' "$_srg/.err" \
+  || fail "installer did not warn about a /sdd-pr-loop reference while the gate is OFF — the unconditional CMDDIR body suppressed the check"
+rm -rf "$_srg"
+pass "stale slash-command references in target prose are named at install time (warn-only), gate-aware for /sdd-pr-loop"
 for _p in __pycache__/ '*.pyc'; do
   grep -qxF "$_p" "$T/.harness/.gitignore" || fail ".harness/.gitignore missing bytecode ignore $_p (E99-F71/F89)"
 done

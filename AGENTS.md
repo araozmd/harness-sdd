@@ -51,7 +51,7 @@ Inception ─► Orchestrator → Architect → Builder → Reviewer    (Scout a
 | `specs/product.md` | Layer 0 — product constitution (stable, high-level) |
 | `specs/epics/<E>/<F>/*.md` | The 4-file feature specs (`.spec` `.plan` `.tasks` `.tests`) |
 | `state/tasks.json` | The TaskStore (local backend) — epic/feature/task state |
-| `progress/` | Per-run agent output + `history.md` changelog |
+| `progress/` | Per-run agent output + `history.md` changelog + `lessons.md` earned-lessons ledger (read it at session start; append-only) |
 | `store/` | Store contract + backend adapters (local, obsidian, jira) |
 | `docs/RATIONALE.md` | Why the harness exists + the two-layer deletion ledger |
 | `docs/SPEC-FORMAT.md` | The spec standard: EARS + the 4 files + traceability |

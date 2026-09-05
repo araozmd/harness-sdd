@@ -1277,6 +1277,79 @@ do
   require_locked_apply_contract "$_contract"
 done
 
+# ── add-feature: the Fixer's seeding contract (fixer.md R8/R9) as a guarded ───
+# subcommand — append-only, next-sequential id strictly above max (never refill a
+# gap), sdd:false/pending/autonomous default, --gated opt-out, missing epic refused.
+T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
+make_fixture "$T"
+_id="$(HARNESS_DIR="$T" python3 "$HELPER" add-feature --epic E01 --title "Seeded fix one")" \
+  || fail "add-feature: exited non-zero on a valid epic"
+[ "$_id" = "E01-F03" ] || fail "add-feature: expected next-sequential E01-F03, got '$_id'"
+python3 - "$T/state/tasks.json" <<'PY' || fail "add-feature: seeded row violates the R8 field table"
+import json, sys
+d = json.load(open(sys.argv[1]))
+f = d["epics"][0]["features"][-1]
+assert f["id"] == "E01-F03" and f["status"] == "pending", f
+assert f["sdd"] is False and f["autonomous"] is True and f["depends_on"] == [], f
+assert f["spec_path"].startswith("specs/epics/") and f["spec_path"].endswith("/"), f
+PY
+# --gated stamps autonomous: false; a vacated high id is never refilled (strictly above max).
+cat > "$T/gapmut.py" <<'EOF'
+def mutate(data):
+    feats = data["epics"][0]["features"]
+    feats[:] = [f for f in feats if f["id"] != "E01-F02"]  # vacate F02 — the gap
+    return data
+EOF
+HARNESS_DIR="$T" python3 "$HELPER" apply --mutator "$T/gapmut.py" \
+  || fail "add-feature: gap-mutator apply failed"
+_id2="$(HARNESS_DIR="$T" python3 "$HELPER" add-feature --epic E01 --title "gated" --gated)" \
+  || fail "add-feature: --gated run exited non-zero"
+[ "$_id2" = "E01-F04" ] || fail "add-feature: refilled the vacated F02 instead of allocating above max (got '$_id2')"
+python3 - "$T/state/tasks.json" <<'PY' || fail "add-feature: --gated did not stamp autonomous: false"
+import json, sys
+f = json.load(open(sys.argv[1]))["epics"][0]["features"][-1]
+assert f["id"] == "E01-F04" and f["autonomous"] is False, f
+PY
+# A missing epic is refused with the board untouched — never invented.
+_before="$(cat "$T/state/tasks.json")"
+HARNESS_DIR="$T" python3 "$HELPER" add-feature --epic E77 --title "x" >/dev/null 2>&1 \
+  && fail "add-feature: seeding under a missing epic must fail"
+[ "$_before" = "$(cat "$T/state/tasks.json")" ] \
+  || fail "add-feature: a refused seed still mutated the board"
+# A slug is a single path component, never a path (Codex #160 P2): a traversal slug is
+# sanitized to [a-z0-9-], so the persisted spec_path can never escape specs/epics/ —
+# an escaped path would fail validate-board at the next mandatory init.sh and brick
+# the board.
+HARNESS_DIR="$T" python3 "$HELPER" add-feature --epic E01 --title "t" \
+  --slug '../../../../tmp/owned' >/dev/null \
+  || fail "add-feature: a traversal --slug must be sanitized, not refused into a broken board"
+python3 - "$T/state/tasks.json" <<'PY' || fail "add-feature: a traversal --slug escaped into spec_path"
+import json, sys
+f = json.load(open(sys.argv[1]))["epics"][0]["features"][-1]
+assert ".." not in f["spec_path"] and f["spec_path"].startswith("specs/epics/"), f
+assert "/tmp/" not in f["spec_path"], f
+PY
+# Create-on-first-use (Codex #160 P2): an epic with NO rows and no disk dir must still
+# use the Fixer contract's required default directory for E99 — never the bare id.
+cat > "$T/freshmut.py" <<'EOF'
+def mutate(data):
+    data["epics"].append({"id": "E99", "title": "maintenance", "status": "pending",
+                          "features": []})
+    return data
+EOF
+HARNESS_DIR="$T" python3 "$HELPER" apply --mutator "$T/freshmut.py" \
+  || fail "add-feature: could not seed a fresh empty E99"
+HARNESS_DIR="$T" python3 "$HELPER" add-feature --title "first ever fix" >/dev/null \
+  || fail "add-feature: first fix into a fresh E99 failed"
+python3 - "$T/state/tasks.json" <<'PY' || fail "add-feature: first E99 fix did not use specs/epics/E99-maintenance/"
+import json, sys
+e99 = [e for e in json.load(open(sys.argv[1]))["epics"] if e["id"] == "E99"][0]
+f = e99["features"][-1]
+assert f["spec_path"].startswith("specs/epics/E99-maintenance/"), f["spec_path"]
+PY
+rm -rf "$T"
+pass "add-feature seeds the R8/R9 row shape, allocates strictly above max, honors --gated, refuses a missing epic, sanitizes slugs, defaults fresh E99 to E99-maintenance"
+
 grep -qF 'set_slice_status(feature, slice_id, status)' "$ROOT/store/local.md" \
   || fail "R1 contract: store/local.md lost the slice mutation contract"
 grep -qF 'tasks-lock.py apply --mutator' "$ROOT/store/local.md" \

@@ -1287,6 +1287,72 @@ test_evaluate_is_offline() {                          # R29
   pass "R29 evaluate is offline (PATH without gh) and exits 0/1/3"
 }
 
+# E99-F149: severity classification is CODE (`classify` mode), not per-lane prose. The
+# rule that every hand-rolled copy got wrong — first match wins BY POSITION, word-boundary
+# anchored — is asserted here against adversarial bodies, together with the freshness/
+# author rules on every stream and the fail-closed exits.
+test_classify_offline_contract() {
+  if ! have_jq; then skip "test_classify_offline_contract (jq not installed)"; return 0; fi
+  _f="$(mk_fixture classify)"
+  cat > "$_f/pr.json" <<EOF
+{"headRefOid":"$FX_HEAD",
+ "reviews":[
+   {"author":{"login":"chatgpt-codex-connector"},"submittedAt":"2026-06-01T01:00:00Z","body":"summary names a P1 in prose"},
+   {"author":{"login":"human-dev"},"submittedAt":"2026-06-01T01:00:00Z","body":"human P0 opinion"}],
+ "statusCheckRollup":[{"name":"ci","conclusion":"SUCCESS"}]}
+EOF
+  cat > "$_f/issue-comments.json" <<EOF
+[{"user":{"login":"human-dev"},"created_at":"2026-06-01T02:00:00Z","body":"I think this is P1!"},
+ {"user":{"login":"chatgpt-codex-connector[bot]"},"created_at":"2026-05-01T02:00:00Z","body":"STALE P0 before trigger"}]
+EOF
+  cat > "$_f/review-comments.json" <<EOF
+[{"id":1,"user":{"login":"chatgpt-codex-connector[bot]"},"commit_id":"$FX_HEAD","created_at":"2026-06-01T01:00:00Z","body":"![P1 Badge](https://img.shields.io/badge/P1-red) null deref"},
+ {"id":2,"user":{"login":"chatgpt-codex-connector"},"commit_id":"$FX_HEAD","created_at":"2026-06-01T01:00:00Z","body":"monitor unit nit: rename"},
+ {"id":3,"user":{"login":"chatgpt-codex-connector"},"commit_id":"$FX_HEAD","created_at":"2026-06-01T01:00:00Z","body":"untagged, and P12 must not tag it"},
+ {"id":4,"user":{"login":"chatgpt-codex-connector"},"commit_id":"OLDHEAD","created_at":"2026-06-01T01:00:00Z","body":"P0 on a non-head commit"},
+ {"id":5,"user":{"login":"chatgpt-codex-connector"},"commit_id":"$FX_HEAD","created_at":"2026-05-01T01:00:00Z","body":"P0 stale re-anchored"},
+ {"id":6,"user":{"login":"human-dev"},"commit_id":"$FX_HEAD","created_at":"2026-06-01T01:00:00Z","body":"human P0 inline"},
+ {"id":7,"user":{"login":"chatgpt-codex-connector"},"commit_id":"$FX_HEAD","created_at":"2026-06-01T01:00:00Z","body":"nit first, then a scary P0 later in the body"}]
+EOF
+  # Offline by construction: same no-gh sandbox as evaluate.
+  _eb="$T/fx/bin"
+  if [ ! -x "$_eb/jq" ]; then mk_sandbox_bin "$_eb"; link_real_jq "$_eb"; fi
+  ( PATH="$_eb" sh "$W" classify "$_f" "P0,P1,P2" ) 2>"$T/.classify.err" \
+    || fail "classify exited non-zero on a well-formed round dir"
+  [ -e "$_eb/gh" ] && fail "classify offline sandbox leaked a gh binary"
+  # Severity attach: badge → P1; word-boundary → 'monitor unit' never matches, 'nit:' does;
+  # P12 never tags (default P2); first match BY POSITION → id 7 is nit, not P0.
+  _sv="$(jq -r 'map("\(.id):\(.severity)") | join(",")' "$_f/comments.json")"
+  [ "$_sv" = "1:P1,2:nit,3:P2,7:nit" ] \
+    || fail "classify severity attach wrong (got: $_sv; want 1:P1,2:nit,3:P2,7:nit)"
+  # Freshness + author: non-head (4), pre-trigger (5) and human (6) are never Codex findings.
+  _bl="$(jq -c '[.[].id]' "$_f/blocking.json")"
+  [ "$_bl" = "[1,3]" ] || fail "classify blocking set wrong for P0,P1,P2 (got: $_bl; want [1,3])"
+  # The configured set is read, not assumed: the shipped default P0,P1 blocks only id 1.
+  ( PATH="$_eb" sh "$W" classify "$_f" ) 2>/dev/null || fail "classify default-set run failed"
+  _bl="$(jq -c '[.[].id]' "$_f/blocking.json")"
+  [ "$_bl" = "[1]" ] || fail "classify default P0,P1 wrong (got: $_bl; want [1])"
+  # Body streams are ADVISORY: fresh Codex review body counted, human + stale bot excluded —
+  # and nothing from them reaches blocking.json (the E99-F149 fix).
+  _bf="$(jq -r 'length' "$_f/body-findings.json")"
+  [ "$_bf" = "1" ] || fail "classify body-findings wrong (got: $_bf; want 1 — fresh Codex review body only)"
+  jq -e '.[0].stream == "review-body"' "$_f/body-findings.json" >/dev/null \
+    || fail "classify body-findings entry does not name its stream"
+  # Fail closed: unreadable head ⇒ exit 6 and NO stale blocking.json left behind.
+  _g="$(mk_fixture classify-nohead)"
+  echo '{"reviews":[]}' > "$_g/pr.json"
+  echo '[{"id":9}]' > "$_g/blocking.json"
+  _rc=0; ( PATH="$_eb" sh "$W" classify "$_g" ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 6 ] || fail "classify with unreadable head must exit 6 (got $_rc)"
+  [ -f "$_g/blocking.json" ] && fail "classify left a stale blocking.json standing on fail-closed exit"
+  # Fail closed: missing findings stream ⇒ exit 6 (absence is 'unknown', never 'zero').
+  _h="$(mk_fixture classify-nostream)"
+  rm -f "$_h/review-comments.json"
+  _rc=0; ( PATH="$_eb" sh "$W" classify "$_h" ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 6 ] || fail "classify with a missing findings stream must exit 6 (got $_rc)"
+  pass "classify: severities by position + word boundary, fresh Codex-only blocking, advisory body streams, fail-closed exits (E99-F149)"
+}
+
 test_failed_findings_fetch_is_never_clean() {         # R55
   if ! have_jq; then skip "test_failed_findings_fetch_is_never_clean (jq not installed)"; return 0; fi
   # review-comments.json is the authoritative findings stream. If its fetch fails while a
@@ -1377,54 +1443,41 @@ test_body_classification_rules() {                    # R39
 }
 
 test_body_unreadable_head_fails_closed() {            # R39 (fail-closed head oid)
-  # `pr.json` missing or truncated makes jq exit non-zero with empty output; a `pr.json`
-  # with no `headRefOid` makes `jq -r` print `null` and exit 0. Either way the freshness
-  # filter matches NOTHING, so fresh-comments.json — hence blocking.json — comes out `[]`,
-  # which step 6 reads as "zero blocking findings ⇒ all gates green ⇒ merge".
-  need_body "R39: the body does not test the head-oid read's exit status" \
-    'if ! head=$(jq -r'
-  need_body "R39: the body does not guard the head-oid VALUE as well as the status" \
-    '|| [ -z "$head" ]; then'
-  need_body "R39: head_ok no longer starts fail-closed at 0" \
-    'head_ok=0            # fail closed'
-  need_body "R39: the body does not state that an unreadable head is not a clean round" \
-    'A head oid you could not read is not a head oid.'
+  # The fail-closed head-oid rule used to live as an inline bash snippet in the body; it
+  # now lives in `wait-for-codex.sh classify` (E99-F149 — classification is code, not
+  # per-lane prose). The BODY must still state the rule, invoke the shipped classifier,
+  # and route its fail-closed exit to needs-human; the TOOL must fail closed on every
+  # corruption shape of pr.json — missing, truncated, key-less and null-key — never
+  # leaving a fresh/blocking file that reads as "zero findings ⇒ all gates green ⇒ merge".
+  need_body "R39: the body no longer runs the shipped classifier" \
+    'wait-for-codex.sh classify'
+  need_body "R39: the body does not state that an unreadable head fails closed" \
+    'A head oid it could not read is not a head oid'
+  need_body "R39: the body does not route the classifier fail-closed exit to needs-human" \
+    '`classify_rc` = 6'
   if ! have_jq; then
     skip "test_body_unreadable_head_fails_closed classifier (jq not installed)"
     return 0
   fi
-  # Run the body's OWN snippet (extracted verbatim from its fenced block), so this locks
-  # the shipped shell and not a paraphrase of it, under both `sh -u` and `sh -e -u`.
   _hd="$T/headoid"; mkdir -p "$_hd"
-  awk '/^```bash$/                 { buf=""; inblk=1; next }
-       inblk && /^```$/            { if (buf ~ /head_ok=0/) {
-                                       printf "%s", buf; exit } inblk=0; next }
-       inblk                       { buf = buf $0 "\n" }' "$BODY" > "$_hd/snippet.sh"
-  grep -q 'headRefOid' "$_hd/snippet.sh" \
-    || fail "R39: could not extract the freshness-filter snippet from the body"
-  cat > "$_hd/harness.sh" <<'SH'
-. "$SNIPPET"
-printf 'head_ok=%s\n' "${head_ok:-unset}"
-if [ -f "$round_dir/fresh-comments.json" ]; then
-  printf 'fresh=%s\n' "$(tr -d ' \n' < "$round_dir/fresh-comments.json")"
-else
-  printf 'fresh=ABSENT\n'
-fi
-SH
+  _eb="$T/fx/bin"
+  if [ ! -x "$_eb/jq" ]; then mk_sandbox_bin "$_eb"; link_real_jq "$_eb"; fi
   # One genuinely fresh P1, plus the two the freshness rule must keep dropping: a stale
   # thread GitHub re-anchored to head, and a comment filed on an older commit.
   cat > "$_hd/findings.json" <<'JSON'
-[{"id":1,"commit_id":"deadbeef","created_at":"2026-07-02T00:00:00Z","body":"![P1 Badge](u) boom"},
- {"id":2,"commit_id":"deadbeef","created_at":"2026-06-01T00:00:00Z","body":"P1 stale, re-anchored"},
- {"id":3,"commit_id":"c0ffee00","created_at":"2026-07-02T00:00:00Z","body":"P1 on an older commit"}]
+[{"id":1,"user":{"login":"chatgpt-codex-connector"},"commit_id":"deadbeef","created_at":"2026-07-02T00:00:00Z","body":"![P1 Badge](u) boom"},
+ {"id":2,"user":{"login":"chatgpt-codex-connector"},"commit_id":"deadbeef","created_at":"2026-06-01T00:00:00Z","body":"P1 stale, re-anchored"},
+ {"id":3,"user":{"login":"chatgpt-codex-connector"},"commit_id":"c0ffee00","created_at":"2026-07-02T00:00:00Z","body":"P1 on an older commit"}]
 JSON
-  # _mk_head_round <dir> <pr.json contents, or @none> — plus a stale fresh-comments.json from an
-  # earlier poll, which a failed read must clear rather than hand on as "zero findings".
+  # _mk_head_round <dir> <pr.json contents, or @none> — plus stale fresh-comments.json and
+  # blocking.json from an earlier poll, which a failed read must CLEAR rather than hand on
+  # as "zero findings".
   _mk_head_round() {
     rm -rf "$1"; mkdir -p "$1"
     printf '2026-07-01T00:00:00Z\n' > "$1/trigger-ts.txt"
     cp "$_hd/findings.json" "$1/review-comments.json"
     printf '[]\n' > "$1/fresh-comments.json"
+    printf '[{"id":99}]\n' > "$1/blocking.json"
     [ "$2" = '@none' ] || printf '%s' "$2" > "$1/pr.json"
   }
   for _c in missing truncated nokey nullkey; do
@@ -1434,32 +1487,29 @@ JSON
       nokey)     _pr='{"reviews":[],"comments":[]}' ;;   # parses, no headRefOid
       nullkey)   _pr='{"headRefOid":null}' ;;            # jq -r prints "null", exits 0
     esac
-    for _opt in '' '-e'; do
-      _mk_head_round "$_hd/r" "$_pr"
-      SNIPPET="$_hd/snippet.sh" round_dir="$_hd/r" \
-        sh $_opt -u "$_hd/harness.sh" > "$_hd/out" 2>"$_hd/err" \
-        || fail "R39: the snippet aborted under 'sh $_opt -u' on a $_c pr.json instead of failing closed"
-      grep -qxF 'head_ok=0' "$_hd/out" \
-        || fail "R39: a $_c pr.json passed as a readable head under 'sh $_opt -u' ($(cat "$_hd/out"))"
-      grep -qxF 'fresh=ABSENT' "$_hd/out" \
-        || fail "R39: a $_c pr.json still produced a fresh-comments.json ($(cat "$_hd/out")) — an empty one reads as a merge"
-    done
+    _mk_head_round "$_hd/r" "$_pr"
+    _rc=0; ( PATH="$_eb" sh "$W" classify "$_hd/r" ) >/dev/null 2>&1 || _rc=$?
+    [ "$_rc" = 6 ] \
+      || fail "R39: a $_c pr.json must fail closed with exit 6 (got $_rc)"
+    [ -f "$_hd/r/blocking.json" ] \
+      && fail "R39: a $_c pr.json left a stale blocking.json standing — an old one reads as a merge"
+    [ -f "$_hd/r/fresh-comments.json" ] \
+      && fail "R39: a $_c pr.json left a stale fresh-comments.json standing"
   done
   # …and both sides of the distinction on a head oid that WAS read: zero fresh findings
   # must still read as a genuine zero, and a fresh finding must survive intact.
   _mk_head_round "$_hd/r" '{"headRefOid":"deadbeef"}'
-  SNIPPET="$_hd/snippet.sh" round_dir="$_hd/r" sh -u "$_hd/harness.sh" > "$_hd/out" 2>/dev/null \
-    || fail "R39: the snippet failed on a valid pr.json"
-  grep -qxF 'head_ok=1' "$_hd/out" || fail "R39: a readable head was rejected ($(cat "$_hd/out"))"
-  grep -qF '"id":1' "$_hd/out"  || fail "R39: the fresh head finding was dropped ($(cat "$_hd/out"))"
-  grep -qF '"id":2' "$_hd/out"  && fail "R39: a stale re-anchored thread leaked back in"
-  grep -qF '"id":3' "$_hd/out"  && fail "R39: a comment filed on an older commit leaked in"
+  ( PATH="$_eb" sh "$W" classify "$_hd/r" "P0,P1" ) >/dev/null 2>&1 \
+    || fail "R39: classify failed on a valid pr.json"
+  grep -qF '"id": 1' "$_hd/r/blocking.json" || grep -qF '"id":1' "$_hd/r/blocking.json" \
+    || fail "R39: the fresh head finding was dropped ($(cat "$_hd/r/blocking.json"))"
+  grep -qF '"id": 2' "$_hd/r/blocking.json" && fail "R39: a stale re-anchored thread leaked back in"
+  grep -qF '"id": 3' "$_hd/r/blocking.json" && fail "R39: a comment filed on an older commit leaked in"
   _mk_head_round "$_hd/r" '{"headRefOid":"feedface"}'          # head nobody filed against
-  SNIPPET="$_hd/snippet.sh" round_dir="$_hd/r" sh -u "$_hd/harness.sh" > "$_hd/out" 2>/dev/null \
-    || fail "R39: the snippet failed on a valid pr.json with zero fresh findings"
-  grep -qxF 'head_ok=1' "$_hd/out" || fail "R39: a readable head with zero findings was rejected"
-  grep -qxF 'fresh=[]' "$_hd/out" \
-    || fail "R39: zero fresh findings must stay readable as zero ($(cat "$_hd/out"))"
+  ( PATH="$_eb" sh "$W" classify "$_hd/r" "P0,P1" ) >/dev/null 2>&1 \
+    || fail "R39: classify failed on a valid pr.json with zero fresh findings"
+  [ "$(tr -d ' \n' < "$_hd/r/blocking.json")" = "[]" ] \
+    || fail "R39: zero fresh findings must stay readable as zero ($(cat "$_hd/r/blocking.json"))"
   pass "R39b an unreadable/headless pr.json fails closed ⇒ no empty blocking.json authorizes a merge"
 }
 
@@ -1956,6 +2006,7 @@ test_clean_via_thumbs_reaction
 test_bot_login_exact_match
 test_bot_login_lookalike_cannot_signal_clean
 test_evaluate_is_offline
+test_classify_offline_contract
 test_failed_findings_fetch_is_never_clean
 test_cache_root_and_gitignore
 

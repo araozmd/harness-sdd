@@ -330,73 +330,64 @@ and `unresolved` rounds out of the finding **rate** and prints them in their own
 
 ### 3. Parse and classify comments
 
-Walk **`review-comments.json` (the inline findings)** + `pr.json` `reviews[*].body` +
-`issue-comments.json` looking for severity tags. Codex tags severity as a **badge image**,
-not bare text — e.g. `![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)`.
-Match `P0|P1|P2|nit` **case-insensitively anywhere in the body** (this catches both the
-badge alt-text/URL form and any bare-text form); **first match wins**; **default to `P2`**
-when nothing matches.
-
-**Only FRESH inline comments count for this round** — the same freshness guard the watcher
-applies (see step 2). An inline comment counts only when it is filed against the head
-commit **and** its `created_at >= trigger.created_at`; otherwise a stale thread GitHub
-re-anchored to head slips back into `blocking.json` and defeats the guard. The watcher
-persists the anchor to `trigger-ts.txt`; apply it when reading the unfiltered
-`review-comments.json`:
-
-**A head oid you could not read is not a head oid.** A `pr.json` that is missing or
-truncated makes `jq` exit non-zero with empty output; a `pr.json` that parses but carries
-no `headRefOid` makes `jq -r` print `null` and exit **0**. Either way `$head` is not the
-head commit, every comment fails `commit_id == $h`, and `fresh-comments.json` — hence
-`blocking.json` — comes out `[]`, which step 6 reads as "zero blocking findings ⇒ all
-gates green ⇒ merge". So guard the **value** as well as the exit status and fail closed:
-an unreadable head aborts the round as `needs-human`, it is not a clean round. (`since`
-needs no such guard — an empty `since` disables the freshness filter and admits *more*
-findings, which errs toward review rather than toward the merge.)
+Classification is **code, not prose** (E99-F149): every lane used to hand-roll the same
+jq and every copy got a rule subtly wrong. Run the shipped classifier — it is pure and
+offline (reads only the round files, invokes no `gh`):
 
 ```bash
-since=$(cat "$round_dir/trigger-ts.txt" 2>/dev/null)  # empty ⇒ filter off ⇒ admits MORE
-head_ok=0            # fail closed: only a head oid we actually READ may filter findings
-if ! head=$(jq -r '.headRefOid // ""' "$round_dir/pr.json") || [ -z "$head" ]; then
-  # Head oid UNKNOWN: pr.json missing, truncated, or without a headRefOid. Filtering on ""
-  # would match nothing and hand the gate an empty blocking.json. Testing the status on the
-  # `if` itself reads the same whether or not the host shell runs with `set -e`, and
-  # `[ -z "$head" ]` catches the absent/null key that `jq -r` reports with exit status 0.
-  rm -f "$round_dir/fresh-comments.json"   # never leave a previous round's file standing
-  echo "could not read headRefOid from pr.json — needs-human, not merging" >&2
-else
-  head_ok=1          # the filter below is anchored to a head oid that was really read
-  jq --arg h "$head" --arg since "$since" '
-    [ .[] | select((.commit_id // "") == $h)
-          | select($since == "" or ((.created_at // "") >= $since)) ]' \
-    "$round_dir/review-comments.json" > "$round_dir/fresh-comments.json"
-fi
-# classify severities from fresh-comments.json (not the raw review-comments.json)
+blocking_set="$(<read pr_loop.blocking_severities from harness.config.yaml>)"  # e.g. "P0,P1"
+sh tools/wait-for-codex.sh classify "$round_dir" "$blocking_set"
+classify_rc=$?
 ```
 
-With `head_ok=0` there is no `fresh-comments.json` to classify and therefore no
-`blocking.json` and no `acted.json`: call `outcome_mark_unresolved "$round_dir"` — **not** a
-bare `echo`, because a `pr.json` you could not read is a statement about the cache and not
-about Codex, so a `findings`/`clean` the watcher already recorded must survive it — and take
-the `needs-human` terminal state of step 5's cap row (label, hand over, return failure). Only
-`head_ok=1` with an empty `blocking.json` means "zero fresh blocking findings".
+The set is whatever `pr_loop.blocking_severities` lists — **read it, do not assume it**.
+The shipped default is `P0,P1`, but a repo may raise it (a harness that ships *gates* has
+good reason to: there, a finding tagged P2 can still mean the gate vouching for something
+it never checked). Whatever is NOT in that list is non-blocking for this repo; `nit` is
+not in any default.
+
+What the classifier implements (the behavioral contract, owned and tested in
+`tools/wait-for-codex.sh` + `tests/test_pr_loop.sh` — do **not** re-implement it inline):
+
+- It scans **`review-comments.json` (the inline findings)**, plus `pr.json`
+  `reviews[*].body` and `issue-comments.json` as **advisory** streams. Codex tags
+  severity as a **badge image**, not bare text — e.g.
+  `![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)`. It matches
+  `P0|P1|P2|nit` **case-insensitively** and **word-boundary anchored** anywhere in the
+  body (this catches both the badge alt-text/URL form and any bare-text form);
+  **first match wins** by position; **default to `P2`** when nothing matches.
+- **Only FRESH Codex inline comments count for this round** — the same freshness guard
+  the watcher applies (see step 2): filed against the head commit **and**
+  `created_at >= trigger.created_at` (read from `trigger-ts.txt`), **and** authored by
+  the Codex bot. A stale thread GitHub re-anchored to head, a human comment that merely
+  mentions "P1", or a bot comment on another commit can never enter `blocking.json`.
+- Fresh Codex `reviews[*].body` / `issue-comments.json` entries carrying a severity tag
+  land in `body-findings.json` — **advisory, never blocking**: they have no `path:line`,
+  so nothing could act on them, and an unactionable blocker would wedge the round.
+- **A head oid it could not read is not a head oid — it fails closed.** On a missing or
+  truncated `pr.json` (or a missing findings stream) it exits **6**, removes any stale
+  `blocking.json`, and writes nothing.
+
+It writes into the round dir:
+
+```
+fresh-comments.json  # inline comments on head, at/after the trigger (raw fresh stream)
+comments.json        # the Codex-authored subset, each with a severity attached
+blocking.json        # filtered to the CONFIGURED blocking severities — the MERGE GATE reads this
+body-findings.json   # advisory severity-tagged review bodies / issue comments (never blocking)
+status.json          # statusCheckRollup snapshot
+```
+
+With `classify_rc` = 6 there is no `blocking.json` and no `acted.json`: call
+`outcome_mark_unresolved "$round_dir"` — **not** a bare `echo`, because a `pr.json` you
+could not read is a statement about the cache and not about Codex, so a `findings`/`clean`
+the watcher already recorded must survive it — and take the `needs-human` terminal state of
+step 5's cap row (label, hand over, return failure). Only `classify_rc` = 0 with an empty
+`blocking.json` means "zero fresh blocking findings".
 
 To re-check the round files offline at any point (no `gh`, no network), run
 `sh tools/wait-for-codex.sh evaluate "$round_dir"` — exit `0` findings,
-`3` clean, `1` pending, applying exactly the rules above.
-
-Then filter to the **blocking severities only**. The set is whatever
-`pr_loop.blocking_severities` lists — **read it, do not assume it**. The shipped default is
-`P0,P1`, but a repo may raise it (a harness that ships *gates* has good reason to: there, a
-finding tagged P2 can still mean the gate vouching for something it never checked). Whatever
-is NOT in that list is non-blocking for this repo; `nit` is not in any default. Save into the
-round dir:
-
-```
-comments.json     # all comments with a severity tag attached
-blocking.json     # filtered to the CONFIGURED blocking severities — the MERGE GATE reads this
-status.json       # statusCheckRollup snapshot
-```
+`3` clean, `1` pending, applying exactly the watcher's resolution rules.
 
 **Do NOT write `acted.json` here.** The round's acted-on set is recorded at **dispatch**, in
 step 5, and this step must not pre-compute it. Classification answers "what did the
