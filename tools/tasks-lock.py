@@ -1963,7 +1963,9 @@ def main(argv):
     p_addf.add_argument("--title", required=True,
                         help="one-line fix intent")
     p_addf.add_argument("--slug", default=None,
-                        help="spec_path slug; derived from the title when omitted")
+                        help="spec_path slug; derived from the title when omitted. "
+                             "Sanitized to [a-z0-9-] either way — a slug is a single "
+                             "path component, never a path")
     p_addf.add_argument("--gated", action="store_true",
                         help="stamp autonomous: false (park at the human gate)")
     p_addf.add_argument(
@@ -2002,6 +2004,9 @@ def main(argv):
         transform = _mutator_text_transform(_import_mutator(args.mutator))
     elif args.cmd == "add-feature":
         allocated = {}  # the assigned id, carried out of the locked transform
+        # Resolved here, outside the lock, for the same reason set-status does it: the
+        # closure must not run `git rev-parse` probes while holding the board lock.
+        hdir = _harness_dir()
 
         def _seed(data):
             epic = None
@@ -2024,12 +2029,25 @@ def main(argv):
                 if m:
                     max_n = max(max_n, int(m.group(1)))
             new_id = "%s-F%02d" % (args.epic, max_n + 1)
-            slug = args.slug
-            if not slug:
-                slug = re.sub(r"[^a-z0-9]+", "-", args.title.lower()).strip("-")[:40]
-                slug = slug.strip("-") or "fix"
-            # Epic dir name: reuse the one the existing rows record (E99-maintenance
-            # etc.) rather than guessing; fall back to the epic id alone.
+            # ONE sanitizer for both slug sources. A custom --slug interpolated verbatim
+            # is a path component: `--slug '../../tmp/owned'` would persist a spec_path
+            # that escapes the harness root, which validate-board.py then rejects — so
+            # the very next mandatory init.sh hard-fails and the board needs manual
+            # repair (Codex #160 P2). Sanitizing custom input through the same rule as
+            # the derived slug reduces it to [a-z0-9-], which cannot traverse.
+            slug = re.sub(
+                r"[^a-z0-9]+", "-", (args.slug or args.title).lower()
+            ).strip("-")[:40]
+            slug = slug.strip("-") or "fix"
+            # Epic dir name, three sources in order (Codex #160 P2: the bare-id
+            # fallback wrote specs/epics/E99/ for the FIRST fix of a fresh E99, while
+            # the epic document and the Fixer contract use specs/epics/E99-maintenance/
+            # — wrong on precisely the create-on-first-use path):
+            #   1) the directory the existing rows already record;
+            #   2) the specs/epics/<epic>-*/ directory on disk, when exactly one
+            #      matches (the same convention validate-board.py resolves epics by);
+            #   3) the Fixer contract's required default for E99 (`E99-maintenance`,
+            #      fixer.md R8 table), else the bare epic id.
             epic_dir = None
             for ft in feats:
                 sp = ft.get("spec_path") if isinstance(ft, dict) else None
@@ -2038,7 +2056,13 @@ def main(argv):
                     epic_dir = m.group(1)
                     break
             if epic_dir is None:
-                epic_dir = args.epic
+                _dirs = sorted(glob.glob(os.path.join(
+                    glob.escape(hdir), "specs", "epics", "%s-*" % args.epic)))
+                _dirs = [d for d in _dirs if os.path.isdir(d)]
+                if len(_dirs) == 1:
+                    epic_dir = os.path.basename(_dirs[0])
+            if epic_dir is None:
+                epic_dir = "E99-maintenance" if args.epic == "E99" else args.epic
             feats.append({
                 "id": new_id,
                 "title": args.title,
