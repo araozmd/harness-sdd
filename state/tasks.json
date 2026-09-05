@@ -527,7 +527,7 @@
         },
         {
           "id": "E99-F75",
-          "title": "[migrated from viernes 2026-08-18] VACUOUS PROSE ASSERTIONS - an assertion that passes on the STALE file pins nothing, and two independent instances were found within a single commit-pair. (1) E99-F59 fixed R11's `grep -qi 'bare'`, which passed on the stale agents/scout.md because that file already said 'never a bare opinion'. (2) E99-F58's round-1 REJECT: tests/test_reviewer.sh L113-114 asserts `grep -qiE 'forbidden|never'`, and 'never' occurs 6x in pre-F58 reviewer.md and 2x in pre-F58 builder.md, all unrelated ('never reject on a guess', 'the Builder never opens a PR'...). In both cases the single most load-bearing semantic was pinned by a word that predated the feature. Fix: one-off audit of EVERY bare single-word `grep -qi '<word>'` in harness-sdd tests/, replacing each with an anchored two-token form that folds newlines, e.g. `tr '\\n' ' ' < \"$f\" | grep -qiE 'forbidden[^.]{0,60}git checkout'` - the validated shape from the F58 review (passes on shipped files, fails on the mutants, fails on the stale files). Then add a convention note to the test-authoring docs: a prose assertion must anchor TWO CO-OCCURRING tokens across folded newlines, and must be verified to FAIL on the pre-change blob. Durable fix upstream in ~/repos/harness-sdd plus the local unversioned sync. Raised by the E99-F58/F59 Reviewer.",
+          "title": "[migrated from viernes 2026-08-18] VACUOUS PROSE ASSERTIONS - an assertion that passes on the STALE file pins nothing, and two independent instances were found within a single commit-pair. (1) E99-F59 fixed R11's `grep -qi 'bare'`, which passed on the stale agents/scout.md because that file already said 'never a bare opinion'. (2) E99-F58's round-1 REJECT: tests/test_reviewer.sh L113-114 asserts `grep -qiE 'forbidden|never'`, and 'never' occurs 6x in pre-F58 reviewer.md and 2x in pre-F58 builder.md, all unrelated ('never reject on a guess', 'the Builder never opens a PR'...). In both cases the single most load-bearing semantic was pinned by a word that predated the feature. Fix: one-off audit of EVERY bare single-word `grep -qi '<word>'` in harness-sdd tests/, replacing each with an anchored two-token form that folds newlines, e.g. `tr '\\n' ' ' < \"$f\" | grep -qiE 'forbidden[^.]{0,60}git checkout'` - the validated shape from the F58 review (passes on shipped files, fails on the mutants, fails on the stale files). Then add a convention note to the test-authoring docs: a prose assertion must anchor TWO CO-OCCURRING tokens across folded newlines, and must be verified to FAIL on the pre-change blob. Durable fix upstream in ~/repos/harness-sdd plus the local unversioned sync. Raised by the E99-F58/F59 Reviewer. \u27c2 [batch carrier: absorbs E99-F76 (paragraph-pinning) and E99-F138 (slicer end-marker control) \u2014 one assertion-hygiene audit PR over the harness's own suite]",
           "status": "pending",
           "sdd": false,
           "autonomous": true,
@@ -541,7 +541,11 @@
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F76-migrated-from-viernes/"
+          "spec_path": "specs/epics/E99-maintenance/F76-migrated-from-viernes/",
+          "parked": {
+            "reason": "absorbed into E99-F75 (2026-09-04 triage, board-row bar): batched assertion-hygiene audit \u2014 R11 pins the added paragraph, not the corrected line. Fix lands with E99-F75; this row is kept for the finding text only.",
+            "unblocked_by": "E99-F75 done"
+          }
         },
         {
           "id": "E99-F88",
@@ -554,7 +558,7 @@
         },
         {
           "id": "E99-F128",
-          "title": "[migrated from viernes 2026-08-18] UPSTREAM NIT (harness-sdd): `_rollback_frontmatter`'s empty `except (OSError, ValueError): pass` carries no explanatory comment, and GitHub's code-quality bot flags it on EVERY repo that vendors the harness. Found on viernes-bff #47 during E99-F125 and confirmed byte-identical in `~/repos/harness-sdd/tools/tasks-lock.py` main, so it is upstream code, not authored in any child repo. THE SWALLOW IS INTENTIONAL AND CORRECT: it sits in the rollback path of a failed frontmatter write, called from an `except Exception:` block that re-raises \u2014 if rollback of one file fails, the remaining files must still be attempted and, crucially, the ORIGINAL exception must be the one that propagates. Letting the rollback's own error escape would mask the real failure with a secondary one. So the fix is a COMMENT saying that, not a code change. \u26a0\ufe0f FIX IT UPSTREAM IN harness-sdd AND RE-INSTALL \u2014 do NOT edit the vendored `.harness/tools/tasks-lock.py` in a child repo, which would recreate exactly the hand-synced-body divergence E99-F117 closed and would be silently reverted by the next installer run. \u26a0\ufe0f WHY IT IS WORTH DOING rather than dismissing: it is a MERGE-BLOCKING unresolved review thread in six repos every time the harness body changes, so the cost repeats on every future upgrade PR. Low value as a code change, real value as removed recurring friction. While there, sweep the file for other bare `pass` handlers and comment them the same way \u2014 the bot will find those on the next pass otherwise.",
+          "title": "[migrated from viernes 2026-08-18] UPSTREAM NIT (harness-sdd): `_rollback_frontmatter`'s empty `except (OSError, ValueError): pass` carries no explanatory comment, and GitHub's code-quality bot flags it on EVERY repo that vendors the harness. Found on viernes-bff #47 during E99-F125 and confirmed byte-identical in `~/repos/harness-sdd/tools/tasks-lock.py` main, so it is upstream code, not authored in any child repo. THE SWALLOW IS INTENTIONAL AND CORRECT: it sits in the rollback path of a failed frontmatter write, called from an `except Exception:` block that re-raises \u2014 if rollback of one file fails, the remaining files must still be attempted and, crucially, the ORIGINAL exception must be the one that propagates. Letting the rollback's own error escape would mask the real failure with a secondary one. So the fix is a COMMENT saying that, not a code change. \u26a0\ufe0f FIX IT UPSTREAM IN harness-sdd AND RE-INSTALL \u2014 do NOT edit the vendored `.harness/tools/tasks-lock.py` in a child repo, which would recreate exactly the hand-synced-body divergence E99-F117 closed and would be silently reverted by the next installer run. \u26a0\ufe0f WHY IT IS WORTH DOING rather than dismissing: it is a MERGE-BLOCKING unresolved review thread in six repos every time the harness body changes, so the cost repeats on every future upgrade PR. Low value as a code change, real value as removed recurring friction. While there, sweep the file for other bare `pass` handlers and comment them the same way \u2014 the bot will find those on the next pass otherwise. \u27c2 [fix riding the 2026-09-04 refactor PR: explanatory comment added to _rollback_frontmatter's intentional swallow]",
           "status": "pending",
           "sdd": false,
           "autonomous": true,
@@ -579,7 +583,11 @@
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F138-migrated-from-viernes/"
+          "spec_path": "specs/epics/E99-maintenance/F138-migrated-from-viernes/",
+          "parked": {
+            "reason": "absorbed into E99-F75 (2026-09-04 triage, board-row bar): batched assertion-hygiene audit \u2014 section slicers have no anti-truncation end-marker control. Fix lands with E99-F75; this row is kept for the finding text only.",
+            "unblocked_by": "E99-F75 done"
+          }
         },
         {
           "id": "E99-F140",
@@ -592,7 +600,7 @@
         },
         {
           "id": "E99-F141",
-          "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 `gh pr merge` EXITING 0 DOES NOT PROVE THE PR MERGED, SO THE LOOP CAN REPORT A LANDING THAT NEVER HAPPENED. The 'Ready to merge' section sets `merged=1` directly from the exit status of `gh pr merge \u2026 --merge --delete-branch`, then runs local cleanup and reports success. Under a MERGE QUEUE (or with auto-merge enabled on the repo) that command may instead enqueue the PR or turn auto-merge on and return 0 \u2014 `gh` 2.96.0's own help says so. A PR later rejected from the queue is then recorded as landed, its local branch is deleted, and the loop returns success. \u26a0\ufe0f THIS IS THE ONE FAILURE MODE THE LOOP'S OWN DOCTRINE SAYS MUST NEVER BE REPORTED AS SUCCESS: 'a merge that auto-merge was asked to land and did not land is never reported as success.' The code does not hold that line because it never observes the merged state. Fix: after the merge call, poll `gh pr view --json state,mergedAt` until MERGED is observed (or a bounded timeout elapses) before setting `merged=1` and cleaning up; on timeout, needs-human. Found by Codex on viernes-bff#50.",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 `gh pr merge` EXITING 0 DOES NOT PROVE THE PR MERGED, SO THE LOOP CAN REPORT A LANDING THAT NEVER HAPPENED. The 'Ready to merge' section sets `merged=1` directly from the exit status of `gh pr merge \u2026 --merge --delete-branch`, then runs local cleanup and reports success. Under a MERGE QUEUE (or with auto-merge enabled on the repo) that command may instead enqueue the PR or turn auto-merge on and return 0 \u2014 `gh` 2.96.0's own help says so. A PR later rejected from the queue is then recorded as landed, its local branch is deleted, and the loop returns success. \u26a0\ufe0f THIS IS THE ONE FAILURE MODE THE LOOP'S OWN DOCTRINE SAYS MUST NEVER BE REPORTED AS SUCCESS: 'a merge that auto-merge was asked to land and did not land is never reported as success.' The code does not hold that line because it never observes the merged state. Fix: after the merge call, poll `gh pr view --json state,mergedAt` until MERGED is observed (or a bounded timeout elapses) before setting `merged=1` and cleaning up; on timeout, needs-human. Found by Codex on viernes-bff#50. \u27c2 [absorbs E99-F144: merge-step verification = mergedAt/mergeCommit observed AND headRefOid unchanged since the reviewed round]",
           "status": "pending",
           "sdd": false,
           "autonomous": false,
@@ -606,11 +614,15 @@
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F142-pr-loop-finding/"
+          "spec_path": "specs/epics/E99-maintenance/F142-pr-loop-finding/",
+          "parked": {
+            "reason": "absorbed into E99-F150 (2026-09-04 triage, board-row bar): same mechanism \u2014 the resume scan trusts directory existence; F150 is the P1 superset (budget exhaustion falls through to merge with no verdict). Fix lands with E99-F150; this row is kept for the finding text only.",
+            "unblocked_by": "E99-F150 done"
+          }
         },
         {
           "id": "E99-F143",
-          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 WITH `auto_merge: false`, AN UNRESOLVED HUMAN THREAD IS REPORTED AS A FAILURE INSTEAD OF THE DOCUMENTED HAND-BACK. The thread-ownership gate sets `merge_ok=0` and instructs 'If `merge_ok=0`, stop here \u2014 go straight to the needs-human terminal state', which returns FAILURE. But when auto_merge is off, the loop's own contract is that finishing green-but-unmerged is a SUCCESS: 'stop after posting the all-gates-green summary and hand back to the human \u2014 resolve threads if you like, but do not merge \u2026 that hand-back COMPLETES the loop: return success. It is the one terminal state where an unmerged PR is the intended outcome.' A human comment on a thread is completely ordinary in that mode, so the common case is mislabelled a failure. \u26a0\ufe0f THE ORDERING IS THE BUG: the thread gate exists to authorise a MERGE, and with auto_merge off there is no merge to authorise. Fix: branch on `auto_merge == false` and take the success hand-back BEFORE evaluating merge authorization. Found by Codex on viernes-bff#50.",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 WITH `auto_merge: false`, AN UNRESOLVED HUMAN THREAD IS REPORTED AS A FAILURE INSTEAD OF THE DOCUMENTED HAND-BACK. The thread-ownership gate sets `merge_ok=0` and instructs 'If `merge_ok=0`, stop here \u2014 go straight to the needs-human terminal state', which returns FAILURE. But when auto_merge is off, the loop's own contract is that finishing green-but-unmerged is a SUCCESS: 'stop after posting the all-gates-green summary and hand back to the human \u2014 resolve threads if you like, but do not merge \u2026 that hand-back COMPLETES the loop: return success. It is the one terminal state where an unmerged PR is the intended outcome.' A human comment on a thread is completely ordinary in that mode, so the common case is mislabelled a failure. \u26a0\ufe0f THE ORDERING IS THE BUG: the thread gate exists to authorise a MERGE, and with auto_merge off there is no merge to authorise. Fix: branch on `auto_merge == false` and take the success hand-back BEFORE evaluating merge authorization. Found by Codex on viernes-bff#50. \u27c2 [batch carrier: absorbs E99-F148 (exit-6 states), E99-F151 (summary ordering), E99-F152 (gh pr checks --required) \u2014 four prose corrections to sdd-pr-loop.md in one PR]",
           "status": "pending",
           "sdd": false,
           "autonomous": false,
@@ -624,7 +636,11 @@
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F144-pr-loop-finding/"
+          "spec_path": "specs/epics/E99-maintenance/F144-pr-loop-finding/",
+          "parked": {
+            "reason": "absorbed into E99-F141 (2026-09-04 triage, board-row bar): same call site \u2014 the merge step must verify BOTH that the PR actually merged and that the reviewed head is still the head. Fix lands with E99-F141; this row is kept for the finding text only.",
+            "unblocked_by": "E99-F141 done"
+          }
         },
         {
           "id": "E99-F145",
@@ -633,11 +649,15 @@
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F145-pr-loop-finding/"
+          "spec_path": "specs/epics/E99-maintenance/F145-pr-loop-finding/",
+          "parked": {
+            "reason": "2026-09-04 triage: OpenCode front-end glue \u2014 held pending the Claude-Code-only simplification decision (see E25). If non-Claude front-ends are parked, this defect is parked with them; if they stay, unpark and fix the emitter.",
+            "unblocked_by": "E25 front-end scope decision"
+          }
         },
         {
           "id": "E99-F146",
-          "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 CONCURRENT pr-fixerS SHARE ONE CHECKOUT AND ONE INDEX. Below the escalation round the runbook spawns one sub-agent PER blocking comment, and the Agent-tool guidance encourages launching independent agents together \u2014 but every fixer runs `git add` and `git commit` in the SAME working tree. Concurrent fixers can overwrite each other's edits to one file, contend on `.git/index.lock`, or sweep another fixer's staged changes into their own commit, so the single push at the end of the round carries missing or misattributed fixes. \u26a0\ufe0f THE ONE-COMMENT-ONE-COMMIT CONTRACT IS WHAT BREAKS: pr-fixer's whole discipline is 'one comment, one fix, one commit, one return', and that is unenforceable while they interleave in a shared index. Fix: state that fixers run SEQUENTIALLY, or give each an isolated worktree+branch (the harness already has `tools/fix-worktree.sh` and an `isolation: worktree` concept to build on). Found on viernes-users#38.",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 CONCURRENT pr-fixerS SHARE ONE CHECKOUT AND ONE INDEX. Below the escalation round the runbook spawns one sub-agent PER blocking comment, and the Agent-tool guidance encourages launching independent agents together \u2014 but every fixer runs `git add` and `git commit` in the SAME working tree. Concurrent fixers can overwrite each other's edits to one file, contend on `.git/index.lock`, or sweep another fixer's staged changes into their own commit, so the single push at the end of the round carries missing or misattributed fixes. \u26a0\ufe0f THE ONE-COMMENT-ONE-COMMIT CONTRACT IS WHAT BREAKS: pr-fixer's whole discipline is 'one comment, one fix, one commit, one return', and that is unenforceable while they interleave in a shared index. Fix: state that fixers run SEQUENTIALLY, or give each an isolated worktree+branch (the harness already has `tools/fix-worktree.sh` and an `isolation: worktree` concept to build on). Found on viernes-users#38. \u27c2 [absorbs E99-F147: checkout discipline first (verify/worktree the PR head), then per-fixer isolation or serialization]",
           "status": "pending",
           "sdd": false,
           "autonomous": false,
@@ -651,7 +671,11 @@
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F147-pr-loop-finding/"
+          "spec_path": "specs/epics/E99-maintenance/F147-pr-loop-finding/",
+          "parked": {
+            "reason": "absorbed into E99-F146 (2026-09-04 triage, board-row bar): same discipline \u2014 the loop must first check out (or worktree) the PR head it is fixing; fixer isolation then builds on that checkout. Fix lands with E99-F146; this row is kept for the finding text only.",
+            "unblocked_by": "E99-F146 done"
+          }
         },
         {
           "id": "E99-F148",
@@ -660,11 +684,15 @@
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F148-pr-loop-finding/"
+          "spec_path": "specs/epics/E99-maintenance/F148-pr-loop-finding/",
+          "parked": {
+            "reason": "absorbed into E99-F143 (2026-09-04 triage, board-row bar): batched sdd-pr-loop.md prose correction \u2014 contradictory exit-6 terminal states. Fix lands with E99-F143; this row is kept for the finding text only.",
+            "unblocked_by": "E99-F143 done"
+          }
         },
         {
           "id": "E99-F149",
-          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 SEVERITY CLASSIFICATION READS THE WHOLE ISSUE-COMMENT STREAM, SO A STALE OR HUMAN COMMENT CAN BLOCK A ROUND. Step 3 walks `review-comments.json` + `reviews[*].body` + `issue-comments.json` looking for severity tags, but the freshness rule (`commit_id == headRefOid` AND `created_at >= trigger`) is applied ONLY to the inline comments. `issue-comments.json` is the entire issue stream, so an older Codex review \u2014 or a HUMAN comment that merely mentions 'P1' \u2014 is classified into the current round. \u26a0\ufe0f IT THEN BLOCKS, AND IT CANNOT BE FIXED: such an entry has no `path`/`line`, which is exactly what pr-fixer needs, so the round stalls or burns budget on something no fixer can act on. Fix: filter EVERY source by the two Codex identities and the trigger timestamp before classifying, not just the inline stream. Found on viernes-bff#50.",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P2 \u2014 SEVERITY CLASSIFICATION READS THE WHOLE ISSUE-COMMENT STREAM, SO A STALE OR HUMAN COMMENT CAN BLOCK A ROUND. Step 3 walks `review-comments.json` + `reviews[*].body` + `issue-comments.json` looking for severity tags, but the freshness rule (`commit_id == headRefOid` AND `created_at >= trigger`) is applied ONLY to the inline comments. `issue-comments.json` is the entire issue stream, so an older Codex review \u2014 or a HUMAN comment that merely mentions 'P1' \u2014 is classified into the current round. \u26a0\ufe0f IT THEN BLOCKS, AND IT CANNOT BE FIXED: such an entry has no `path`/`line`, which is exactly what pr-fixer needs, so the round stalls or burns budget on something no fixer can act on. Fix: filter EVERY source by the two Codex identities and the trigger timestamp before classifying, not just the inline stream. Found on viernes-bff#50. \u27c2 [fix riding the 2026-09-04 refactor PR: classification code-ified as `wait-for-codex.sh classify` with the freshness rule applied to ALL streams, issue comments included]",
           "status": "pending",
           "sdd": false,
           "autonomous": false,
@@ -673,7 +701,7 @@
         },
         {
           "id": "E99-F150",
-          "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 AN EXHAUSTED CACHED ROUND BUDGET FALLS THROUGH TO THE MERGE FLOW WITH NO GATE VERDICT AT ALL. If a previous invocation created the CAP round's directory and then stopped or was interrupted, the resume scan sets `round` to `max_rounds + 1`. The `while [ \"$round\" -le \"$max_rounds\" ]` body is therefore never entered: no review is triggered, `pr-gate.sh` is never consulted, and no verdict exists \u2014 and execution proceeds to the ready-to-merge flow anyway. With the default `auto_merge: true`, a PR whose cap round was incomplete OR STILL HAD BLOCKING FINDINGS can be merged, provided it has no unresolved threads. \u26a0\ufe0f THIS IS THE ROUND-CAP FAILING OPEN: the cap exists to force a needs-human hand-off, and this path skips straight past it to a merge. Closely related to F142 (a round directory's existence is treated as completion) \u2014 same cache-trust root, but this one ends in an unreviewed MERGE rather than a lost round. Fix: route `round > max_rounds` directly to the needs-human terminal state instead of falling through. Found on viernes-web#95.",
+          "title": "[migrated from viernes 2026-08-19] PR-LOOP P1 \u2014 AN EXHAUSTED CACHED ROUND BUDGET FALLS THROUGH TO THE MERGE FLOW WITH NO GATE VERDICT AT ALL. If a previous invocation created the CAP round's directory and then stopped or was interrupted, the resume scan sets `round` to `max_rounds + 1`. The `while [ \"$round\" -le \"$max_rounds\" ]` body is therefore never entered: no review is triggered, `pr-gate.sh` is never consulted, and no verdict exists \u2014 and execution proceeds to the ready-to-merge flow anyway. With the default `auto_merge: true`, a PR whose cap round was incomplete OR STILL HAD BLOCKING FINDINGS can be merged, provided it has no unresolved threads. \u26a0\ufe0f THIS IS THE ROUND-CAP FAILING OPEN: the cap exists to force a needs-human hand-off, and this path skips straight past it to a merge. Closely related to F142 (a round directory's existence is treated as completion) \u2014 same cache-trust root, but this one ends in an unreviewed MERGE rather than a lost round. Fix: route `round > max_rounds` directly to the needs-human terminal state instead of falling through. Found on viernes-web#95. \u27c2 [absorbs E99-F142: fix = a round counts only when its verdict artifact exists, not when its directory does]",
           "status": "pending",
           "sdd": false,
           "autonomous": false,
@@ -687,7 +715,11 @@
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F151-pr-loop-finding/"
+          "spec_path": "specs/epics/E99-maintenance/F151-pr-loop-finding/",
+          "parked": {
+            "reason": "absorbed into E99-F143 (2026-09-04 triage, board-row bar): batched sdd-pr-loop.md prose correction \u2014 success comment posted before the gates it claims. Fix lands with E99-F143; this row is kept for the finding text only.",
+            "unblocked_by": "E99-F143 done"
+          }
         },
         {
           "id": "E99-F152",
@@ -696,7 +728,11 @@
           "sdd": false,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F152-pr-loop-finding/"
+          "spec_path": "specs/epics/E99-maintenance/F152-pr-loop-finding/",
+          "parked": {
+            "reason": "absorbed into E99-F143 (2026-09-04 triage, board-row bar): batched sdd-pr-loop.md prose correction \u2014 required-checks gate must use `gh pr checks --required`. Fix lands with E99-F143; this row is kept for the finding text only.",
+            "unblocked_by": "E99-F143 done"
+          }
         }
       ]
     },
@@ -1000,6 +1036,24 @@
           "spec_path": "specs/epics/E24-upgrade-integrity/F04-thin-child-migration/"
         }
       ]
+    },
+    {
+      "id": "E25",
+      "title": "Front-end scope: park non-Claude front-ends (codex/opencode/antigravity/gemini glue) behind a preserved branch/tag and make the installer Claude-Code-only by default \u2014 the multi-front-end matrix is the largest single share of installer complexity and test surface (2026-09-04 ablation campaign; E99-F145 is parked on this decision)",
+      "status": "draft",
+      "features": []
+    },
+    {
+      "id": "E26",
+      "title": "Self-host the harness: restructure this repo so it IS an installed instance (canonical files at their installed paths, installer copies from there), letting /sdd-next and /sdd-pr-loop run natively here and turning every dogfood session into an integration test of installer output \u2014 kills the shim-drift defect class by construction",
+      "status": "draft",
+      "features": []
+    },
+    {
+      "id": "E27",
+      "title": "Escalation tier fate: decide DELETE vs CASCADE for builder-heavy escalation. Today it ships inert-but-configured-looking (all-inherit models + absent .escalation-arming; E99-F25 ran 3 rejection rounds on the base builder). Either delete the tier machinery as a weaker-model-era patch, or make umbrella models: config cascade to children and keep init.sh's armed/disarmed line as the visibility contract",
+      "status": "draft",
+      "features": []
     }
   ]
 }
