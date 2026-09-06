@@ -38,7 +38,12 @@
 #        issue comment, OR 👍 reaction on the trigger comment).
 #   4  → usage / precondition error (includes an unresolvable trigger timestamp and a
 #        non-positive HARNESS_POLL_INTERVAL).
-#   5  → preflight check failed, or no Codex activity within HARNESS_FIRST_RESPONSE.
+#   5  → `wait` mode ONLY: no Codex activity within HARNESS_FIRST_RESPONSE — the Codex
+#        GitHub App is most likely not installed/authorized on this repo. NEVER returned
+#        by `preflight` (E99-F153: it used to be, conflated with the unrelated codes
+#        below — the same number with an opposite remedy sent a real project chasing an
+#        App-installation problem it did not have, when the actual cause was "wrong
+#        directory", code 9 now).
 #   6  → `classify` only: FAIL-CLOSED — the head oid or the findings stream could not be
 #        read, so no blocking.json exists and the caller must take the needs-human path,
 #        never the merge path.
@@ -47,6 +52,14 @@
 #        verdict, E99-F144); post: the PR is not actually MERGED (`gh pr merge` exiting 0
 #        can mean enqueued/auto-merge-armed, E99-F141). Both fail closed: an unreadable
 #        state is a failed receipt, never a pass.
+#   8  → `preflight` only, AUTH/TOOLING bucket: `gh` missing, `gh` unauthenticated, or
+#        `jq` missing — nothing here can talk to GitHub at all. Remedy: install/authenticate
+#        the missing tool, or accept manual review and set pr_loop.enabled: false.
+#   9  → `preflight` only, ENVIRONMENT bucket: the repo slug is unresolvable. Remedy: you
+#        are very likely in the wrong directory (e.g. an umbrella root instead of the
+#        child repo) — re-run from the repo `gh` can resolve, or `gh repo set-default`.
+#  10  → `preflight` only, USAGE bucket: the PR number does not resolve, or resolves to a
+#        PR that is not OPEN. Remedy: pass an existing, open PR number.
 #
 # Always (re)writes pr.json, review-comments.json, issue-comments.json, reactions.json
 # into round-dir on every poll, so the caller reads the same sources the command body
@@ -66,6 +79,14 @@ set -eu
 # there is nothing left for a prefix to buy.
 WFC_BOT="chatgpt-codex-connector"
 WFC_BOT_REST="chatgpt-codex-connector[bot]"
+
+# Preflight exit-code buckets (E99-F153). One code per REMEDY DIRECTION, never one code
+# per check — a caller's `case "$rc"` can act on the bucket without parsing stderr prose.
+# `5` is deliberately excluded from all three: it stays reserved, exclusively, for the
+# `wait` mode's own first-response probe (see the exit-code table up top).
+WFC_EXIT_PREFLIGHT_AUTH=8      # gh missing/unauthenticated, or jq missing
+WFC_EXIT_PREFLIGHT_ENV=9       # repo slug unresolvable — wrong directory
+WFC_EXIT_PREFLIGHT_USAGE=10    # PR not found, or found but not OPEN
 
 wfc_usage() {
   echo "usage: $0 <pr-number> <trigger-comment-id> <round-dir>" >&2
@@ -243,33 +264,43 @@ wfc_bot_seen() {
 # Static, read-only checks run BEFORE the command body posts anything to GitHub, so a
 # repo without the Codex GitHub App (or without an authed gh) fails in a second with a
 # named remedy instead of polling to the ceiling. Posts NOTHING (R30/R31).
+#
+# Returns one of THREE distinct codes, never a shared one (E99-F153): the six checks
+# below split into three remedy buckets — AUTH/TOOLING (fix your local setup),
+# ENVIRONMENT (fix which directory you're running from), USAGE (fix your PR argument).
+# Before this split every one of them returned the SAME `5`, which is also the wait
+# mode's "Codex GitHub App is most likely not installed" diagnostic — so an operator
+# whose real problem was ENVIRONMENT (wrong directory, an umbrella root instead of the
+# child repo) read the identical code the docs describe for the App-missing case, and
+# chased an App-installation problem they didn't have while the item sat on a board for
+# five days. Splitting the codes makes the two undiagnosable-by-number-alone again.
 wfc_preflight() {
   _pf_pr="$1"
   if ! command -v gh >/dev/null 2>&1; then
     echo "wait-for-codex preflight: \`gh\` is not on PATH — install the GitHub CLI (https://cli.github.com) or set pr_loop.enabled: false" >&2
-    return 5
+    return "$WFC_EXIT_PREFLIGHT_AUTH"
   fi
   if ! gh auth status >/dev/null 2>&1; then
-    echo "wait-for-codex preflight: \`gh\` is not authenticated — run \`gh auth login\`" >&2
-    return 5
+    echo "wait-for-codex preflight: \`gh\` is not authenticated — run \`gh auth login\`, or accept manual review and set pr_loop.enabled: false" >&2
+    return "$WFC_EXIT_PREFLIGHT_AUTH"
   fi
   if ! command -v jq >/dev/null 2>&1; then
     echo "wait-for-codex preflight: \`jq\` is not on PATH — install jq (https://jqlang.github.io/jq/) or set pr_loop.enabled: false" >&2
-    return 5
+    return "$WFC_EXIT_PREFLIGHT_AUTH"
   fi
   if ! _pf_slug="$(gh repo view --json owner,name --jq '"\(.owner.login) \(.name)"' 2>/dev/null)" \
      || [ -z "$_pf_slug" ]; then
-    echo "wait-for-codex preflight: repo slug unresolvable — run from a git repo with a GitHub remote (\`gh repo set-default\`)" >&2
-    return 5
+    echo "wait-for-codex preflight: repo slug unresolvable — you are very likely in the wrong directory (e.g. an umbrella root instead of the child repo); run from a git repo with a GitHub remote (\`gh repo set-default\`)" >&2
+    return "$WFC_EXIT_PREFLIGHT_ENV"
   fi
   if ! _pf_state="$(gh pr view "$_pf_pr" --json state --jq '.state' 2>/dev/null)" \
      || [ -z "$_pf_state" ]; then
     echo "wait-for-codex preflight: PR #$_pf_pr not found in $_pf_slug — pass an existing PR number" >&2
-    return 5
+    return "$WFC_EXIT_PREFLIGHT_USAGE"
   fi
   if [ "$_pf_state" != "OPEN" ]; then
     echo "wait-for-codex preflight: PR #$_pf_pr is $_pf_state, not OPEN — reopen it or pass an open PR" >&2
-    return 5
+    return "$WFC_EXIT_PREFLIGHT_USAGE"
   fi
   echo "wait-for-codex preflight: ok (gh authed, jq present, $_pf_slug PR #$_pf_pr open)" >&2
   return 0
@@ -279,7 +310,15 @@ wfc_preflight() {
 case "${1:-}" in
   preflight)
     if [ -z "${2:-}" ]; then wfc_usage; exit 4; fi
-    if wfc_preflight "$2"; then exit 0; else exit 5; fi
+    # Propagate wfc_preflight's OWN return code (8/9/10 per bucket, or 0) — never a
+    # hardcoded value. This is the E99-F153 fix: the code now carries which remedy
+    # bucket fired, instead of every bucket being flattened to the same number.
+    # NOTE: `if wfc_preflight "$2"; then exit 0; fi; exit $?` looks equivalent but is
+    # NOT — POSIX defines a bare `if cond; then …; fi` with no `else` and a FALSE cond
+    # as exiting 0 itself (no tested list ran), which clobbers `$?` before the trailing
+    # `exit $?` ever reads it. `||` reads `$?` from the failing command directly.
+    wfc_preflight "$2" || exit $?
+    exit 0
     ;;
   evaluate)
     if [ -z "${2:-}" ]; then wfc_usage; exit 4; fi

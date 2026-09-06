@@ -915,37 +915,70 @@ test_preflight_success() {                            # R30
   pass "R30 preflight exits 0 when gh, auth, jq, the repo slug and an OPEN PR all hold"
 }
 
-test_preflight_failure_matrix() {                     # R31
+test_preflight_failure_matrix() {                     # R31 (E99-F153: split into 3 codes)
+  # E99-F153: preflight's six failure checks used to ALL exit 5 — the same number the
+  # wait-mode's own "Codex GitHub App is most likely not installed" diagnostic returns
+  # (see test_first_response_window_fails_fast). An operator who saw exit 5 from
+  # preflight and read the docs for "5" would chase an App-installation problem even
+  # when the real cause was, say, running from the wrong directory. The three cases
+  # below now assert THREE distinct codes, one per remedy bucket, so a caller's
+  # `case "$rc"` can act on the bucket without parsing stderr. Mutation (verified by
+  # hand, not asserted in-suite): collapsing WFC_EXIT_PREFLIGHT_ENV or
+  # WFC_EXIT_PREFLIGHT_USAGE back to WFC_EXIT_PREFLIGHT_AUTH in tools/wait-for-codex.sh
+  # makes the env/usage assertions below fail (got 8, wanted 9 / 10).
+  #
+  # ── AUTH/TOOLING bucket → exit 8: nothing here can talk to GitHub at all ──────────
   # gh missing
   _b="$T/pf1/bin"; mk_sandbox_bin "$_b"; mk_dummy_jq "$_b"
   _rc=0; ( PATH="$_b" sh "$W" preflight 7 ) >/dev/null 2>"$T/.pf1" || _rc=$?
-  [ "$_rc" = 5 ] || fail "R31: gh missing must exit 5 (got $_rc)"
+  [ "$_rc" = 8 ] || fail "R31: gh missing must exit 8 (AUTH bucket, got $_rc)"
   grep -qF 'gh' "$T/.pf1" || fail "R31: gh-missing diagnostic does not name gh"
   [ "$(wc -l < "$T/.pf1" | tr -d ' ')" = "1" ] || fail "R31: gh-missing diagnostic is not one line"
   # unauthed
   _b="$T/pf2/bin"; mk_sandbox_bin "$_b"; mk_gh_stub "$_b"; mk_dummy_jq "$_b"
   _rc=0; ( PATH="$_b" STUB_MODE=missing-auth sh "$W" preflight 7 ) >/dev/null 2>"$T/.pf2" || _rc=$?
-  [ "$_rc" = 5 ] || fail "R31: unauthed gh must exit 5 (got $_rc)"
+  [ "$_rc" = 8 ] || fail "R31: unauthed gh must exit 8 (AUTH bucket, got $_rc)"
   grep -qiF 'auth' "$T/.pf2" || fail "R31: unauthed diagnostic does not name auth"
   # jq missing
   _b="$T/pf3/bin"; mk_sandbox_bin "$_b"; mk_gh_stub "$_b"
   _rc=0; ( PATH="$_b" STUB_MODE=ok sh "$W" preflight 7 ) >/dev/null 2>"$T/.pf3" || _rc=$?
-  [ "$_rc" = 5 ] || fail "R31: missing jq must exit 5 (got $_rc)"
+  [ "$_rc" = 8 ] || fail "R31: missing jq must exit 8 (AUTH bucket, got $_rc)"
   grep -qF 'jq' "$T/.pf3" || fail "R31: jq-missing diagnostic does not name jq"
-  # repo slug unresolvable
+  # nothing was posted: the stub records no `pr comment` because preflight never calls it
+  grep -rqF 'pr comment' "$T/.pf1" "$T/.pf2" "$T/.pf3" \
+    && fail "R31: preflight posted to GitHub"
+  pass "R31 the AUTH/TOOLING bucket (gh missing/unauthed, jq missing) exits 8 with a one-line diagnostic; nothing posted"
+}
+
+test_preflight_environment_bucket() {                 # E99-F153
+  # ── ENVIRONMENT bucket → exit 9: the repo slug is unresolvable (wrong directory) ──
+  # This is the case the original incident actually hit: a viernes run from an umbrella
+  # root, not the child repo. It must NEVER share a code with the AUTH bucket (8) or
+  # with the wait-mode's App-not-installed diagnostic (5) — that collision is the bug.
   _b="$T/pf4/bin"; mk_sandbox_bin "$_b"; mk_gh_stub "$_b"; mk_dummy_jq "$_b"
   _rc=0; ( PATH="$_b" STUB_MODE=no-repo sh "$W" preflight 7 ) >/dev/null 2>"$T/.pf4" || _rc=$?
-  [ "$_rc" = 5 ] || fail "R31: unresolvable repo must exit 5 (got $_rc)"
-  grep -qiF 'repo' "$T/.pf4" || fail "R31: repo diagnostic does not name the repo slug"
-  # PR not open
+  [ "$_rc" = 9 ] || fail "E99-F153: unresolvable repo must exit 9 (ENV bucket, got $_rc)"
+  [ "$_rc" != 5 ] || fail "E99-F153: unresolvable repo must NEVER share exit 5 with the App-not-installed diagnostic"
+  [ "$_rc" != 8 ] || fail "E99-F153: unresolvable repo must NEVER share exit 8 with the AUTH bucket"
+  grep -qiF 'repo' "$T/.pf4" || fail "E99-F153: repo diagnostic does not name the repo slug"
+  grep -qiF 'directory' "$T/.pf4" || fail "E99-F153: repo diagnostic does not name its own remedy (wrong directory)"
+  grep -rqF 'pr comment' "$T/.pf4" && fail "E99-F153: preflight posted to GitHub"
+  pass "E99-F153 the ENVIRONMENT bucket (repo slug unresolvable) exits 9, distinct from AUTH (8) and the App-not-installed diagnostic (5), naming the wrong-directory remedy"
+}
+
+test_preflight_usage_bucket() {                       # E99-F153
+  # ── USAGE bucket → exit 10: the PR argument itself is wrong ──────────────────────
   _b="$T/pf5/bin"; mk_sandbox_bin "$_b"; mk_gh_stub "$_b"; mk_dummy_jq "$_b"
   _rc=0; ( PATH="$_b" STUB_MODE=closed-pr sh "$W" preflight 7 ) >/dev/null 2>"$T/.pf5" || _rc=$?
-  [ "$_rc" = 5 ] || fail "R31: a closed PR must exit 5 (got $_rc)"
-  grep -qF 'OPEN' "$T/.pf5" || fail "R31: closed-PR diagnostic does not mention OPEN"
-  # nothing was posted: the stub records no `pr comment` because preflight never calls it
-  grep -rqF 'pr comment' "$T/.pf1" "$T/.pf2" "$T/.pf3" "$T/.pf4" "$T/.pf5" \
-    && fail "R31: preflight posted to GitHub"
-  pass "R31 each failed precondition exits 5 with a one-line diagnostic; nothing posted"
+  [ "$_rc" = 10 ] || fail "E99-F153: a closed PR must exit 10 (USAGE bucket, got $_rc)"
+  grep -qF 'OPEN' "$T/.pf5" || fail "E99-F153: closed-PR diagnostic does not mention OPEN"
+  # PR not found at all (gh pr view --json state fails)
+  _b="$T/pf6/bin"; mk_sandbox_bin "$_b"; mk_gh_stub "$_b"; mk_dummy_jq "$_b"
+  _rc=0; ( PATH="$_b" STUB_MODE=no-pr sh "$W" preflight 7 ) >/dev/null 2>"$T/.pf6" || _rc=$?
+  [ "$_rc" = 10 ] || fail "E99-F153: PR not found must exit 10 (USAGE bucket, got $_rc)"
+  grep -qF '#7' "$T/.pf6" || fail "E99-F153: PR-not-found diagnostic does not name the PR number"
+  grep -rqF 'pr comment' "$T/.pf5" "$T/.pf6" && fail "E99-F153: preflight posted to GitHub"
+  pass "E99-F153 the USAGE bucket (PR not found / not OPEN) exits 10 with a diagnostic naming the actual fault"
 }
 
 # run_wait <name> <stub-kind> <mode> <extra-env...> — helper for the wait-mode tests.
@@ -2096,6 +2129,8 @@ test_env_overrides_config
 test_watcher_installed_executable_posix
 test_preflight_success
 test_preflight_failure_matrix
+test_preflight_environment_bucket
+test_preflight_usage_bucket
 test_wait_mode_exit_codes
 test_round_dir_sources_written
 test_unresolvable_trigger_ts_exits_4
