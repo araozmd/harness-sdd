@@ -1300,6 +1300,15 @@ model_alias() {
 resolve_model() {
   [ "${MODELS_OFF:-0}" = 1 ] && return 0
   _rm_fe="$1"; _rm_role="$2"
+  # E26-F01 `--self`: the source repo's tiering lives in its committed shims' `model:`
+  # lines (the root harness.config.yaml is the SEED TEMPLATE and must stay all-inherit),
+  # so self mode answers every claude-role resolution from the pre-regeneration harvest.
+  # One choke point: emit_agent, models_any and escalation_verdict all flow through here,
+  # which is what makes the arming verdict REAL rather than re-derived (R3/R4).
+  if [ "${SELF_MODE:-0}" = 1 ] && [ "$_rm_fe" = claude ]; then
+    self_model "$_rm_role"
+    return 0
+  fi
   _rm_tier="$(model_tier "$_rm_role")"
   [ "$_rm_tier" = "inherit" ] && return 0
 
@@ -4136,7 +4145,7 @@ contract; this command carries the interactive front-end.
 
 The free-text idea is in `$ARGUMENTS`. If it is empty, ask the human for it.
 
-1. Run `.harness/init.sh`. If it exits non-zero, STOP and report — do not seed into a
+1. Run `./.harness/init.sh`. If it exits non-zero, STOP and report — do not seed into a
    broken environment.
 2. Read `.harness/harness.config.yaml` and the TaskStore (`.harness/state/tasks.json`,
    per `.harness/store/local.md`).
@@ -4191,7 +4200,7 @@ contract; this command carries the interactive front-end.
 
 The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the human for it.
 
-1. Run `.harness/init.sh`. If it exits non-zero, STOP and report — do not plan into a
+1. Run `./.harness/init.sh`. If it exits non-zero, STOP and report — do not plan into a
    broken environment.
 2. Read `.harness/harness.config.yaml` and the TaskStore (`.harness/state/tasks.json`,
    per `.harness/store/local.md`).
@@ -4255,7 +4264,7 @@ The target `<epic-id>` is in `$ARGUMENTS`. The `<epic-id>` is **required** — i
 `$ARGUMENTS` is **empty**, STOP and **ask** the human for the epic id rather than drilling
 an arbitrary epic.
 
-1. Run `.harness/init.sh`. If it exits non-zero, STOP and report — do not drill into a
+1. Run `./.harness/init.sh`. If it exits non-zero, STOP and report — do not drill into a
    broken environment.
 2. Read `.harness/harness.config.yaml` and the TaskStore (`.harness/state/tasks.json`, per
    `.harness/store/local.md`).
@@ -4313,7 +4322,7 @@ this command carries the interactive front-end.
 The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, STOP and
 **ask** the human what to fix rather than seeding an empty fix.
 
-1. Run `.harness/init.sh`. If it exits non-zero, STOP and report — do not seed into a
+1. Run `./.harness/init.sh`. If it exits non-zero, STOP and report — do not seed into a
    broken environment.
 2. Read `.harness/harness.config.yaml` and the TaskStore (`.harness/state/tasks.json`,
    per `.harness/store/local.md`).
@@ -6293,6 +6302,109 @@ EOF
   LAST_UPGRADE="$UPGRADE"
 }
 
+# ── E26-F01: `--self` — regenerate the SOURCE repo's own glue ─────────────────
+# The repo's `.claude/agents/*` and `.claude/commands/*` used to be hand-maintained
+# mirrors of what install_one generates — every divergence was found by review. `--self`
+# makes drift impossible by construction WITHOUT a second emitter: it runs the real
+# install_one on a throwaway temp target (the whole pipeline through its front door) and
+# transforms that target's output into the source layout. Nothing is reimplemented, so
+# the two renderings cannot diverge in content — only in the `.harness/` prefix and the
+# one sdd-pr-loop banner line below.
+
+# self_model_of <shim-file> — print the `model:` value from the shim's frontmatter
+# (first block only), or nothing.
+self_model_of() {
+  [ -f "$1" ] || return 0
+  awk 'NR>1 && /^---$/{exit} sub(/^model: /,""){print; exit}' "$1"
+  return 0
+}
+
+# self_model <role> — the harvested pre-regeneration model for <role>, or nothing.
+# Consumed by the resolve_model self-mode guard.
+self_model() {
+  printf '%s\n' "${SELF_MODELS:-}" | awk -F'	' -v r="$1" '$1==r{print $2; exit}'
+  return 0
+}
+
+# self_transform — stdin: a generated target-layout body; stdout: the source-layout
+# rendering. ORDER MATTERS: the prefix strip runs FIRST, then the sdd-pr-loop
+# path-resolution line (now stripped to a known literal) is swapped for the
+# source-layout banner — the banner itself names `.harness/`, so a later strip would
+# destroy it. The strip is anchored on `.harness/` exactly: `.pr-loop/` cache tokens
+# and every other dotted path survive untouched.
+self_transform() {
+  sed 's|\.harness/||g' | awk '
+    $0 == "hit. Resolve every relative path against ``." {
+      print "hit. This is the harness **source-layout** copy: paths resolve from the repository root"
+      print "(an installed consumer gets the same body with everything resolved against `.harness/`)."
+      next
+    }
+    { print }'
+}
+
+self_install() {
+  # 1. Harvest the committed shims' models BEFORE anything regenerates (R3). The root
+  # harness.config.yaml is the seed template every fresh install copies, so the source
+  # repo's tiering must live here, never there.
+  SELF_MODELS=""
+  for _si_r in $MODEL_ROLES; do
+    _si_m="$(self_model_of "$SRC/.claude/agents/$_si_r.md")"
+    [ -n "$_si_m" ] || continue
+    SELF_MODELS="$SELF_MODELS$_si_r	$_si_m
+"
+  done
+
+  # 2. Real install into a throwaway target, claude-only, prompts pre-answered so a TTY
+  # run never blocks. The pr-loop gate mirrors the repo's OWN config (R5) — via the
+  # explicit override so the temp target's seeded config carries it and every gated
+  # stage (command copy, pr-fixer shim, §6f reclamation) answers from the same place
+  # install_one always answers from.
+  SELF_MODE=1
+  _si_tmp="$(mktemp -d 2>/dev/null || mktemp -d -t harness-self)"
+  AGENTS_OVERRIDE="claude"
+  BUILDER_BACKEND_OVERRIDE="${BUILDER_BACKEND_OVERRIDE:-in-session}"
+  if [ "$(_cfg_pr_loop_value "$SRC/harness.config.yaml" enabled)" = "true" ]; then
+    PR_LOOP_OVERRIDE="true"
+  else
+    PR_LOOP_OVERRIDE="false"
+  fi
+  echo "══ self mode → regenerating $SRC glue from a temp install ══"
+  install_one "$_si_tmp"
+
+  # 3. Transform the temp target's claude glue into the source layout.
+  mkdir -p "$SRC/.claude/agents" "$SRC/.claude/commands"
+  _si_n=0
+  for _si_f in "$_si_tmp"/.claude/agents/*.md "$_si_tmp"/.claude/commands/*.md; do
+    [ -f "$_si_f" ] || continue
+    case "$_si_f" in
+      */agents/*)   _si_dst="$SRC/.claude/agents/$(basename "$_si_f")" ;;
+      *)            _si_dst="$SRC/.claude/commands/$(basename "$_si_f")" ;;
+    esac
+    self_transform < "$_si_f" > "$_si_dst"
+    _si_n=$((_si_n + 1))
+  done
+  # Gate-off reclamation mirrors install_one §6f: the two pr-loop names leave the
+  # source glue exactly when the temp target lacks them.
+  for _si_g in commands/sdd-pr-loop agents/pr-fixer; do
+    if [ ! -f "$_si_tmp/.claude/$_si_g.md" ] && [ -f "$SRC/.claude/$_si_g.md" ]; then
+      rm -f "$SRC/.claude/$_si_g.md"
+      info "self: removed gate-off pr-loop glue .claude/$_si_g.md"
+    fi
+  done
+
+  # 4. The arming verdict travels verbatim — write_escalation_arming already computed
+  # it from the harvested models via the resolve_model self-mode guard (R4).
+  if [ -f "$_si_tmp/.harness/.escalation-arming" ]; then
+    cp "$_si_tmp/.harness/.escalation-arming" "$SRC/.escalation-arming"
+  elif [ -f "$SRC/.escalation-arming" ]; then
+    rm -f "$SRC/.escalation-arming"
+    info "self: escalation arming verdict reclaimed (no role resolves to a model)"
+  fi
+
+  rm -rf "$_si_tmp"
+  ok "self: $_si_n glue files regenerated into $SRC/.claude/ (+ .escalation-arming)"
+}
+
 # ── manifest auto-population (append-only upsert, never clobbers entries) ──────
 # manifest_upsert <manifest-path> <repo-name>
 #   Ensures the manifest has a top-level `repos:` header and a block for <repo-name>.
@@ -6375,8 +6487,15 @@ PR_LOOP_OVERRIDE=""
 # This keeps a command that requires concurrent subagents off OpenCode installs that
 # cannot satisfy it. Default is "auto" (read marker). Explicit true/false override.
 OPENCODE_PARALLEL_OVERRIDE=""
+# Self mode (E26-F01): regenerate the SOURCE repo's own glue. 0 everywhere else —
+# the resolve_model guard keys off it, so it must never survive into a target run.
+SELF_MODE=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --self)
+      SELF_MODE=1
+      shift
+      ;;
     --pr-loop=*)
       # Explicit override; an empty value (`--pr-loop=`) is treated as "no override"
       # (fall through to the prompt / no-op), matching --agents= and --builder-backend=.
@@ -6486,6 +6605,20 @@ case "${OPENCODE_PARALLEL_OVERRIDE:-}" in
   ""|true|false) ;;
   *) die "unknown --with-opencode-parallel value '$OPENCODE_PARALLEL_OVERRIDE' — legal values are 'true' and 'false'" ;;
 esac
+
+# ── self mode (E26-F01): regenerate the source repo's own glue, nothing else ──
+if [ "$SELF_MODE" = 1 ]; then
+  # Every other mode/diagnostic is refused BEFORE any write: `--self` takes no target
+  # (the target IS $SRC) and shares no semantics with the cascade or the diagnostics.
+  [ -z "$POSITIONAL" ]    || die "--self takes no target path (it regenerates the harness source at $SRC)"
+  [ -z "$UMBRELLA" ]      || die "--self cannot combine with --umbrella"
+  [ "$PRINT_AGENTS" = 0 ] || die "--self cannot combine with --print-agents"
+  [ "$DRY_RUN" = 0 ]      || die "--self cannot combine with --dry-run/--list"
+  [ "$SHARED_REPO" = 0 ]  || die "--self cannot combine with --shared-repo"
+  [ "$RECURSIVE" = 0 ]    || die "--self cannot combine with --recursive"
+  self_install
+  exit 0
+fi
 
 # ── single-target mode (no --umbrella): behave exactly as before ──────────────
 if [ -z "$UMBRELLA" ]; then
