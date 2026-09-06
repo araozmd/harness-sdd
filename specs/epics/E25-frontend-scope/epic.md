@@ -1,7 +1,7 @@
 ---
 id: E25
 title: Front-end scope — Claude-first defaults, non-Claude front-ends parked
-status: planned
+status: done
 ---
 
 # E25 — Front-end scope: park non-Claude front-ends

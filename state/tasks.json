@@ -593,7 +593,13 @@
           "id": "E99-F130",
           "title": "[migrated from viernes 2026-08-18] NO FIRST-CLASS 'APPROVED, AWAITING MERGE' STATE \u2014 so the corrected `done`-after-merge ordering has no ergonomic home, and `in-review` actively MISROUTES. Surfaced by E99-F102 part A (PR #147 round 1): the docs used to say approve -> `set-status done --evidence` -> open PR, so at `done` time the merge commit could not exist and the 'prefer the merge commit' instruction was unfollowable. A fixed the INSTRUCTION (`done` is written after the merge is observed). What it could not fix is where the feature LIVES in between. \u26a0\ufe0f MEASURED ON THE SHIPPED SELECTOR, not assumed: a feature left at `in-review` is NOT inert \u2014 `next-task.mjs` returns `{outcome: selected, route: reviewer, reason: feature-actionable}`, i.e. it hands an ALREADY-APPROVED feature back to a Reviewer every session. That is the defect `next-task.mjs`'s own E99-F77 comment already names ('`in-review` routes a Reviewer at an approved slice'). The `parked` mechanism DOES hold it correctly (`outcome: blocked`, code `gated-owner`, never selected) and `set-status` refuses any transition while parked, so an unpark must precede the `done` write \u2014 also measured. So the workaround exists but costs two `apply --mutator` round-trips per feature and reports an in-flight PR INDISTINGUISHABLY from external owner blockage, which is the signal an operator most needs to tell apart. WHAT THE REAL FIX NEEDS (why it was correctly kept OUT of part A): a first-class awaiting-merge hold with its own selector/diagnostic code, touching `tools/next-task.mjs`, the diagnostics, and coverage in `test_next_task.sh`, `test_feature_park.sh` and `test_dependency_diagnostics.sh` \u2014 a lifecycle change, not a documentation one. \u26a0\ufe0f `none:<why>` must REMAIN a legitimate immediate `done`: console/AWS actions and supersessions have nothing to merge. The distinction to preserve is 'nothing to merge' (fine) vs 'something that has not merged YET' (the defect). Part A states this gap explicitly in agents/orchestrator.md, docs/WORKFLOW.md and the CHANGELOG rather than papering over it.",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "86502c49db09182d3bdc9cac130849631076970b", "ref": "86502c49db09182d3bdc9cac130849631076970b", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "86502c49db09182d3bdc9cac130849631076970b",
+            "ref": "86502c49db09182d3bdc9cac130849631076970b",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [
@@ -821,6 +827,24 @@
           "autonomous": false,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F152-pr-loop-finding/"
+        },
+        {
+          "id": "E99-F153",
+          "title": "wait-for-codex.sh exit 5 conflates five preflight faults whose remedies are opposite (from viernes E99-F113, PR #157)",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F153-preflight-exit-code-split/"
+        },
+        {
+          "id": "E99-F154",
+          "title": "prose-assertion residual: negation immunity and unpinned placement are unstated bounds (from viernes E99-F82, PR #156)",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F154-prose-assertion-bounds/"
         }
       ]
     },
@@ -958,7 +982,7 @@
     {
       "id": "E21",
       "title": "Change-size discipline: keep the review a gate",
-      "status": "in-progress",
+      "status": "done",
       "owner": "araozmd",
       "features": [
         {
@@ -1085,7 +1109,7 @@
     {
       "id": "E24",
       "title": "Upgrade integrity: an unlanded upgrade must not run silently",
-      "status": "in-progress",
+      "status": "done",
       "features": [
         {
           "id": "E24-F01",
@@ -1123,7 +1147,13 @@
           "id": "E24-F04",
           "title": "Migrate existing children to the thin layout (+ --standalone)",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "60dfef43a3c1fb360cfbb17fdfe5d6972f7c8715", "ref": "60dfef43a3c1fb360cfbb17fdfe5d6972f7c8715", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "60dfef43a3c1fb360cfbb17fdfe5d6972f7c8715",
+            "ref": "60dfef43a3c1fb360cfbb17fdfe5d6972f7c8715",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": false,
           "depends_on": [
@@ -1136,7 +1166,7 @@
     {
       "id": "E25",
       "title": "Front-end scope: park non-Claude front-ends (codex/opencode/antigravity/gemini glue) behind a preserved branch/tag and make the installer Claude-Code-only by default \u2014 the multi-front-end matrix is the largest single share of installer complexity and test surface (2026-09-04 ablation campaign; E99-F145 is parked on this decision)",
-      "status": "planned",
+      "status": "done",
       "features": [
         {
           "id": "E25-F01",
@@ -1165,7 +1195,13 @@
           "id": "E26-F01",
           "title": "Installer --self mode: regenerate the source repo's own .claude glue from the target emitters (source-layout paths, repo model pins, real arming verdict)",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "44d1bebd3be20f0432affdc33eaf5b118b8429ac", "ref": "44d1bebd3be20f0432affdc33eaf5b118b8429ac", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "44d1bebd3be20f0432affdc33eaf5b118b8429ac",
+            "ref": "44d1bebd3be20f0432affdc33eaf5b118b8429ac",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [
@@ -1177,7 +1213,13 @@
           "id": "E26-F02",
           "title": "Drift-by-construction gate: suite regenerates glue and asserts byte-equality with committed copies; init.sh warn-only staleness line",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "a1c96d118d324fcb6bc43fc858e713cf04b6cfc8", "ref": "a1c96d118d324fcb6bc43fc858e713cf04b6cfc8", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "a1c96d118d324fcb6bc43fc858e713cf04b6cfc8",
+            "ref": "a1c96d118d324fcb6bc43fc858e713cf04b6cfc8",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [
@@ -1196,7 +1238,13 @@
           "id": "E27-F01",
           "title": "Umbrella models: cascade \u2014 child inherit keys resolve from the coordinator's models block; explicit child values win; escalation verdicts recomputed per cascade; report names each child's source",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "d303f8f9f6f65e3f33028b05f6f96330c2d6be3e", "ref": "d303f8f9f6f65e3f33028b05f6f96330c2d6be3e", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "d303f8f9f6f65e3f33028b05f6f96330c2d6be3e",
+            "ref": "d303f8f9f6f65e3f33028b05f6f96330c2d6be3e",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
