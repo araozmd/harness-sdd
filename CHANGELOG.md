@@ -53,6 +53,46 @@ reverse — as two explicit flags on `harness-install.sh`.
 `docs/INSTALL.md` gains both flags; the install manifest's `BODY LAYOUT` block explains the
 transition and the reverse. Covered by new cases in `tests/test_umbrella.sh`,
 `tests/test_install.sh` and `tests/test_init_drift_guard.sh`.
+## [0.73.0] — 2026-09-05
+
+### Added — ✨ `awaiting-merge`: a first-class home between approval and merge (E99-F130)
+
+An approved feature whose PR was still open had nowhere honest to live: `in-review`
+actively misroutes (the selector hands an already-approved feature back to a Reviewer
+every session — measured), and the owner-gate workaround cost two hand-written mutators
+while reporting an in-flight PR indistinguishably from external blockage. Now:
+`tasks-lock.py await-merge <id> [--pr <n>]` parks it with the new `parked.gate: merge`
+(one guarded write); the selector reports **`awaiting-merge`** — its own blocker code,
+never `gated-owner`, with the exit named inline; every transition except that exit
+bounces; and `set-status <id> done --evidence <merge-ref>` clears the park and writes
+the landing receipt in the same write. Owner parks still hold `done`; the dependency
+one-hop naming distinguishes "awaiting merge" (clears itself) from "owner gate" (never
+does). The selector's own PARK_GATES warning — that the strict gate comparison becomes
+load-bearing the day a second member joins — is discharged with the exact
+cross-reporting assertions it demanded.
+
+## [0.72.1] — 2026-09-05
+
+### Fixed — 🐛 verification hygiene: assertions that can actually fail (E99-F75/F76/F88)
+
+An assertion that passes on the STALE file pins nothing. The suite-wide audit replaced
+every bare single-word `grep -qi '<word>'` prose-contract assertion (~60 call sites
+across 14 suites) with anchored two-token folded-newline pins, each class-checked; the
+convention is now a Builder principle. `agents/scout.md` and `agents/doc-critic.md`
+finally received the two-namespace ADR corrections E99-F59 shipped only downstream,
+and R11 pins their CORRECTED LINES (mutation-verified per file). And the
+mutation-evidence contract is hardened (E99-F88): a mutation counts as evidence only
+when the applied edit is byte-for-byte the edit the contract names, the runner prints
+the applied diff, and a mislabeled mutant is an instrument failure, never a kill —
+pinned fence-aware in the mutation-mandate suite. (The finding's classifier half had
+already shipped as `wait-for-codex.sh classify` in 0.69.0.)
+
+This release also carries the first executed run of the `docs/ABLATION.md` protocol
+(record: `progress/ablation-2026-09-05.md`): both fixes were built by REAL Builder
+sub-agents — one on the stock 1,499-word role prose, one on the 121-word skeleton —
+with no observed discipline loss on the skeleton run; per the protocol, 2-3 more mixed
+runs before any prompt diet lands on main.
+
 ## [0.72.0] — 2026-09-05
 
 ### Changed — 🔧 Claude-first selection defaults (E25-F01)

@@ -156,9 +156,9 @@ pass "R4 init_parity"
 # ── R5: draft gate is normative in BOTH portable contract files ───────────────────
 # R5_draft_gate_normative
 grep -qi 'never actionable\|never selects' "$LOCAL" || fail "R5: $LOCAL lacks never-actionable/never-selects phrasing"
-grep -qi 'draft' "$LOCAL"                           || fail "R5: $LOCAL does not mention draft"
+tr '\n' ' ' < "$LOCAL" | grep -qiE 'draft[^.]{0,30}never actionable' || fail "R5: $LOCAL does not state a draft epic's features are never actionable"
 grep -qi 'never select' "$ORCH"                     || fail "R5: $ORCH lacks never-select phrasing"
-grep -qi 'draft' "$ORCH"                            || fail "R5: $ORCH does not mention draft"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'never select[^.]{0,60}draft' || fail "R5: $ORCH does not forbid selecting a feature of a draft epic"
 # autonomous: true does NOT override the epic gate — stated in both files.
 grep -qi 'autonomous: true.*\(not\|never\)\|\(not\|never\).*override' "$LOCAL" \
   || fail "R5: $LOCAL does not state autonomous does not override the gate"
@@ -260,8 +260,8 @@ grep -qF "## [$V]" CHANGELOG.md || fail "R14: CHANGELOG.md has no '## [$V]' head
 # every later unrelated bump (e.g. a telemetry-formatting release) fails it. That is
 # the freeze-the-moving-value anti-pattern. Assert the lifecycle is documented
 # SOMEWHERE in the log instead, decoupled from $V.
-grep -qi 'draft'   CHANGELOG.md || fail "R14: CHANGELOG.md never records the draft epic state"
-grep -qi 'planned' CHANGELOG.md || fail "R14: CHANGELOG.md never records the planned epic state"
+tr '\n' ' ' < CHANGELOG.md | grep -qiE 'draft[^.]{0,15}planned' \
+  || fail "R14: CHANGELOG.md never records the draft-to-planned epic lifecycle"
 pass "R14 version_changelog"
 
 echo "All epic-lifecycle tests passed."

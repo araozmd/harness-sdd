@@ -28,10 +28,10 @@ pass() { echo "ok - $1"; }
 # ── R1: portable Planner role file ───────────────────────────────────────────────
 # R1_planner_role_exists
 [ -f "$ROLE" ]                          || fail "R1: $ROLE missing"
-grep -qi 'vision'        "$ROLE"        || fail "R1: role does not mention vision"
-grep -qi 'architecture'  "$ROLE"        || fail "R1: role does not mention architecture"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'vision[.]md[^.]{0,15}north star' || fail "R1: role does not describe vision.md as the north star"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'architecture[.]md[^.]{0,15}system shape' || fail "R1: role does not describe architecture.md as the system shape"
 grep -qi 'ADR\|adr'      "$ROLE"        || fail "R1: role does not mention ADRs"
-grep -qi 'draft'         "$ROLE"        || fail "R1: role does not mention draft epics"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'block[^.]{0,10}draft[^.]{0,10}epics' || fail "R1: role does not produce a block of draft epics"
 grep -qi 'AGENTS.md-compatible\|portable' "$ROLE" || fail "R1: role not stated as portable"
 pass "R1 planner_role_exists"
 
@@ -54,24 +54,24 @@ pass "R3 text_only_options"
 # ── R4: vision template (problem/users/outcomes/non-goals) ────────────────────────
 # R4_vision_template
 [ -f "$VTPL" ]                          || fail "R4: $VTPL missing"
-grep -qi 'Problem'      "$VTPL"         || fail "R4: vision template missing Problem"
+grep -qE '^## Problem' "$VTPL"          || fail "R4: vision template missing the Problem section heading"
 grep -qi 'User\|Audience' "$VTPL"       || fail "R4: vision template missing Users/Audience"
-grep -qi 'Outcome'      "$VTPL"         || fail "R4: vision template missing Outcomes"
+grep -qE '^## Outcomes' "$VTPL"         || fail "R4: vision template missing the Outcomes section heading"
 grep -qi 'Non-goal'     "$VTPL"         || fail "R4: vision template missing Non-goals"
 pass "R4 vision_template"
 
 # ── R5: architecture template (system shape + decisions + ADR index) ──────────────
 # R5_arch_template
 [ -f "$ATPL" ]                          || fail "R5: $ATPL missing"
-grep -qi 'shape'    "$ATPL"             || fail "R5: arch template missing system shape"
-grep -qi 'decision' "$ATPL"             || fail "R5: arch template missing decisions"
+tr '\n' ' ' < "$ATPL" | grep -qiE 'system shape[^.]{0,60}decisions' || fail "R5: arch template missing system shape + decisions"
+tr '\n' ' ' < "$ATPL" | grep -qiE 'stable[^.]{0,40}decisions' || fail "R5: arch template missing the stable upfront decisions"
 grep -qF 'ADR'      "$ATPL"             || fail "R5: arch template missing ADR index"
 pass "R5 arch_template"
 
 # ── R6: one-decision ADR template ─────────────────────────────────────────────────
 # R6_adr_template
 [ -f "$DTPL" ]                          || fail "R6: $DTPL missing"
-grep -qi 'Decision' "$DTPL"             || fail "R6: ADR template missing Decision"
+tr '\n' ' ' < "$DTPL" | grep -qiE 'one architecture decision per ADR' || fail "R6: ADR template missing the one-decision-per-ADR rule"
 grep -qi 'Context\|Consequence' "$DTPL" || fail "R6: ADR template missing Context/Consequences"
 pass "R6 adr_template"
 
@@ -92,15 +92,14 @@ pass "R8 writes_architecture"
 # R9_adr_location_numbering
 grep -qF 'specs/adr/' "$ROLE"                       || fail "R9: role does not pin ADR path"
 grep -qi 'NNNN\|4-digit\|zero-pad' "$ROLE"          || fail "R9: role does not state 4-digit numbering"
-grep -qi 'above' "$ROLE"                            || fail "R9: role does not state above-max"
-grep -qi 'max'   "$ROLE"                            || fail "R9: role does not mention max ADR number"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'above[^.]{0,15}max[^.]{0,20}ADR number' || fail "R9: role does not state above-max ADR numbering"
 grep -qi 'no reuse\|never reuse' "$ROLE"            || fail "R9: role does not state no-reuse"
 pass "R9 adr_location_numbering"
 
 # ── R10: depth boundary — stable upfront only; defer deltas to F03; no feature design
 # R10_depth_boundary
 grep -qi 'upfront\|stable\|whole-system' "$ROLE"    || fail "R10: role does not scope to stable upfront decisions"
-grep -qi 'delta' "$ROLE"                            || fail "R10: role does not mention deltas"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'per-epic ADR deltas[^.]{0,15}F03' || fail "R10: role does not defer per-epic ADR deltas to F03"
 grep -qi '/sdd-drill\|F03' "$ROLE"                  || fail "R10: role does not defer to F03/sdd-drill"
 grep -qi 'feature-level' "$ROLE"                    || fail "R10: role does not forbid feature-level design"
 pass "R10 depth_boundary"
@@ -199,17 +198,17 @@ pass "R16 reuse_f01_gate"
 grep -qi 'already exists\|already has a plan' "$ROLE" || fail "R17: role does not handle existing plan"
 grep -qi 'STOP\|refuse' "$ROLE"                     || fail "R17: role does not STOP/refuse by default"
 grep -qi '/sdd-drill\|amend' "$ROLE"                || fail "R17: role does not point at sdd-drill/amend"
-grep -qi 'append' "$ROLE"                           || fail "R17: role does not state amend appends"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'append[^.]{0,10}new epics' || fail "R17: role does not state amend appends new epics"
 grep -qi 'without rewriting\|renumber' "$ROLE"      || fail "R17: role does not state no rewrite/renumber"
 pass "R17 rerun_behavior"
 
 # ── R18: vision.md complements product.md/glossary.md — role AND vision template ───
 # R18_complements_product
-grep -qi 'complement' "$ROLE"                       || fail "R18: role does not state vision complements product/glossary"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'complements[^.]{0,60}product' || fail "R18: role does not state vision complements product/glossary"
 grep -qF 'product.md' "$ROLE"                       || fail "R18: role does not reference product.md"
 grep -qi 'not rewrite or delete\|not.*rewrite.*delete\|never rewrite\|does not rewrite' "$ROLE" \
   || fail "R18: role does not state it does not rewrite/delete product.md/glossary.md"
-grep -qi 'complement' "$VTPL"                       || fail "R18: vision template does not state it complements product/glossary"
+tr '\n' ' ' < "$VTPL" | grep -qiE 'complements[^.]{0,60}product' || fail "R18: vision template does not state it complements product/glossary"
 grep -qF 'product.md' "$VTPL"                       || fail "R18: vision template does not reference product.md"
 pass "R18 complements_product"
 
@@ -225,7 +224,7 @@ pass "R19 backward_compatible"
 
 # ── R20: contract lives in the portable role file (not solely .claude/ glue) ──────
 # R20_portable_contract — producer rules present in agents/planner.md itself.
-grep -qi 'draft' "$ROLE"                            || fail "R20: producer rule 'draft' not in the portable role"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'block[^.]{0,10}draft[^.]{0,10}epics' || fail "R20: producer rule 'block of draft epics' not in the portable role"
 grep -qi 'features: \[\]\|empty' "$ROLE"            || fail "R20: producer rule 'features: []' not in the portable role"
 grep -qi 'never.*spec\|produce.*never spec' "$ROLE" || fail "R20: producer rule 'seeds-never-specs' not in the portable role"
 pass "R20 portable_contract"
@@ -233,9 +232,9 @@ pass "R20 portable_contract"
 # ── R21: WORKFLOW.md places /sdd-plan upstream of /sdd-drill + /sdd-next, producer ─
 # R21_workflow_doc
 grep -qF '/sdd-plan' docs/WORKFLOW.md               || fail "R21: WORKFLOW.md does not mention /sdd-plan"
-grep -qi 'draft' docs/WORKFLOW.md                   || fail "R21: WORKFLOW.md does not mention draft"
+tr '\n' ' ' < docs/WORKFLOW.md | grep -qiE 'roadmap[^.]{0,10}draft[^.]{0,10}epics' || fail "R21: WORKFLOW.md does not place the roadmap of draft epics"
 grep -qi '/sdd-drill\|drill' docs/WORKFLOW.md       || fail "R21: WORKFLOW.md does not mention /sdd-drill"
-grep -qi 'producer' docs/WORKFLOW.md                || fail "R21: WORKFLOW.md does not state producer"
+tr '\n' ' ' < docs/WORKFLOW.md | grep -qiE 'producer that never specs' || fail "R21: WORKFLOW.md does not state the producer-that-never-specs rule"
 grep -qi 'never.*feature spec\|no feature\|never specs' docs/WORKFLOW.md \
   || fail "R21: WORKFLOW.md does not state never feature specs"
 grep -qi 'never advance.*past .*draft\|never advances an epic past\|past .draft.' docs/WORKFLOW.md \

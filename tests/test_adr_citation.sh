@@ -31,15 +31,22 @@ pass() { echo "ok - $1"; }
 # R1_reviewer_resolution_rule
 [ -f "$REV" ]                                     || fail "R1: $REV missing"
 grep -qF 'specs/adr/NNNN-*.md' "$REV"             || fail "R1: reviewer does not name the specs/adr/NNNN-*.md resolution target"
-grep -qi 'resolve' "$REV"                         || fail "R1: reviewer does not state cited ids must resolve"
+# Two-token co-occurrence over folded newlines (E99-F75): a bare single-word grep
+# ('resolve') passes on any stale revision of the file; the pair pins the actual rule.
+tr '\n' ' ' < "$REV" | grep -qiE 'cited id[^.]{0,40}resolve to an existing' \
+                                                  || fail "R1: reviewer does not state cited ids must resolve to an existing ADR file"
 pass "R1 reviewer_resolution_rule"
 
 # ── R2: cited-but-nonexistent id is a SOFT FLAG (same verdict rule), not a reject ─
 # R2_reviewer_soft_flag
 grep -qi 'cited-but-nonexistent' "$REV"           || fail "R2: reviewer does not name the cited-but-nonexistent case"
-grep -qi 'flag' "$REV"                            || fail "R2: reviewer does not soft-flag it"
+# E99-F75: 'flag' and 'renamed\|removed' alone are satisfied by unrelated prose; anchor
+# the soft-flag verb to its object and the rationale to its qualifier.
+tr '\n' ' ' < "$REV" | grep -qiE 'flagged[^.]{0,40}investigate' \
+                                                  || fail "R2: reviewer does not soft-flag it for investigation"
 grep -qi 'not a hard reject\|not.*hard reject' "$REV" || fail "R2: reviewer does not say 'not a hard reject'"
-grep -qi 'renamed\|removed' "$REV"                || fail "R2: reviewer does not give the renamed/removed-legitimately rationale"
+tr '\n' ' ' < "$REV" | grep -qiE 'legitimately renamed/removed' \
+                                                  || fail "R2: reviewer does not give the renamed/removed-legitimately rationale"
 pass "R2 reviewer_soft_flag"
 
 # ── Sandbox builder: the minimal layout init.sh's structural checks require ───────
@@ -321,12 +328,26 @@ for f in "$REV" "$ARC" "$TPL" "$SPF" "$WFL" init.sh; do
     || fail "R11: $f does not acknowledge a second ADR namespace (specs/<product>/adr/)"
   grep -qF '<ns>/ADR-NNNN' "$f" \
     || fail "R11: $f does not name the QUALIFIED citation form <ns>/ADR-NNNN"
-  grep -qi 'bare' "$f" \
-    || fail "R11: $f does not state what a BARE citation resolves against"
+  # E99-F75: `grep -qi 'bare'` was vacuous — every one of these files says 'bare'
+  # somewhere unrelated (e.g. 'a bare scaffold', 'a bare remainder'). Anchor the rule:
+  # bare … resolves/checked against … any (namespace/space).
+  tr '\n' ' ' < "$f" | grep -qiE 'bare[^.]{0,60}against[^.]{0,20}any' \
+    || fail "R11: $f does not state that a BARE citation resolves against ANY namespace"
 done
-grep -qi 'qualified' "$REV"      || fail "R11: reviewer.md does not state the qualified-citation rule"
+# E99-F75: the Scout's drift-check Inputs line and the Doc-critic's plan-output scope
+# row carried the stale single-namespace `specs/adr/NNNN-*.md` claim. Pin each file's
+# CORRECTED line by TWO co-occurring tokens across folded newlines — the product
+# namespace path and the space-separated qualified form. A bare single-word grep (e.g.
+# 'bare', which scout.md satisfies with 'never a bare opinion') passes on the stale
+# text; both pins below were verified to FAIL on the pre-change single-namespace lines.
+for f in agents/scout.md agents/doc-critic.md; do
+  [ -f "$f" ] || fail "R11: $f missing"
+  tr '\n' ' ' < "$f" | grep -qiE 'specs/<product>/adr/[^.]{0,60}<ns> ADR-NNNN' \
+    || fail "R11: $f does not acknowledge the product ADR namespace specs/<product>/adr/ with the qualified <ns> ADR-NNNN citation form"
+done
+tr '\n' ' ' < "$REV" | grep -qiE 'qualified[^.]{0,40}<ns> ADR-NNNN' \
+                                 || fail "R11: reviewer.md does not state the qualified-citation rule (with the <ns> ADR-NNNN prose form)"
 grep -qF '<ns>/ADR-NNNN' "$REV"  || fail "R11: reviewer.md does not name the <ns>/ADR-NNNN form"
-grep -qi 'bare' "$REV"           || fail "R11: reviewer.md does not state what a BARE citation means"
 grep -q 'ADR namespace holds a real' "$REV" \
   || fail "R11: reviewer.md's firing precondition still demands specs/adr/ specifically"
 grep -qi 'qualify the namespace' "$ARC" || fail "R11: architect.md does not teach the qualifier convention"

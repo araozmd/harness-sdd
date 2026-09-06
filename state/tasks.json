@@ -528,7 +528,14 @@
         {
           "id": "E99-F75",
           "title": "[migrated from viernes 2026-08-18] VACUOUS PROSE ASSERTIONS - an assertion that passes on the STALE file pins nothing, and two independent instances were found within a single commit-pair. (1) E99-F59 fixed R11's `grep -qi 'bare'`, which passed on the stale agents/scout.md because that file already said 'never a bare opinion'. (2) E99-F58's round-1 REJECT: tests/test_reviewer.sh L113-114 asserts `grep -qiE 'forbidden|never'`, and 'never' occurs 6x in pre-F58 reviewer.md and 2x in pre-F58 builder.md, all unrelated ('never reject on a guess', 'the Builder never opens a PR'...). In both cases the single most load-bearing semantic was pinned by a word that predated the feature. Fix: one-off audit of EVERY bare single-word `grep -qi '<word>'` in harness-sdd tests/, replacing each with an anchored two-token form that folds newlines, e.g. `tr '\\n' ' ' < \"$f\" | grep -qiE 'forbidden[^.]{0,60}git checkout'` - the validated shape from the F58 review (passes on shipped files, fails on the mutants, fails on the stale files). Then add a convention note to the test-authoring docs: a prose assertion must anchor TWO CO-OCCURRING tokens across folded newlines, and must be verified to FAIL on the pre-change blob. Durable fix upstream in ~/repos/harness-sdd plus the local unversioned sync. Raised by the E99-F58/F59 Reviewer. \u27c2 [batch carrier: absorbs E99-F76 (paragraph-pinning) and E99-F138 (slicer end-marker control) \u2014 one assertion-hygiene audit PR over the harness's own suite]",
-          "status": "pending",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "8f40e648625216ceb676d326dec7d1af3fb2b785",
+            "ref": "8f40e648625216ceb676d326dec7d1af3fb2b785",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -536,21 +543,31 @@
         },
         {
           "id": "E99-F76",
-          "title": "[migrated from viernes 2026-08-18] R11 PINS THE ADDED PARAGRAPH, NOT THE CORRECTED LINE, across all seven files it now loops over. Found by the E99-F59 Reviewer's mutations Y1 and Y2, both of which SURVIVED green: Y1 reverted agents/scout.md's Inputs line to its stale single-namespace form while keeping the new explanatory paragraph; Y2 reverted agents/doc-critic.md's plan-output table row - the literal L19 defect E99-F59 exists to fix - while keeping the new subsection. The Reviewer correctly did NOT block on this (the mutants are self-contradictory rather than coherently wrong, since in scout.md the corrective paragraph immediately follows, and none of the other five files pins its corrected line either) - but the gap is real and general. Fix: extend R11 so each of the seven files has its CORRECTED LINE pinned, not merely the presence of surrounding explanation, with a mutation per file proving a reverted line turns the suite red. ALSO fold in the two non-blocking observations from the same review: (a) a DEAD ASSERTION - `grep -qi 'bare' \"$REV\"` still sits after the loop, unreachable in practice because the anchored form runs first on $REV; (b) the space-separated qualified citation form `<ns> ADR-NNNN` - taught by reviewer.md, SPEC-FORMAT.md L89 and architect.md L73's own `- platform ADR-0008` example - is ABSENT from both newly-updated files, giving the Doc-critic a small false-positive surface. Durable fix upstream in ~/repos/harness-sdd plus the local sync. Raised by the E99-F59 Reviewer.",
-          "status": "pending",
+          "title": "[migrated from viernes 2026-08-18] R11 PINS THE ADDED PARAGRAPH, NOT THE CORRECTED LINE, across all seven files it now loops over. Found by the E99-F59 Reviewer's mutations Y1 and Y2, both of which SURVIVED green: Y1 reverted agents/scout.md's Inputs line to its stale single-namespace form while keeping the new explanatory paragraph; Y2 reverted agents/doc-critic.md's plan-output table row - the literal L19 defect E99-F59 exists to fix - while keeping the new subsection. The Reviewer correctly did NOT block on this (the mutants are self-contradictory rather than coherently wrong, since in scout.md the corrective paragraph immediately follows, and none of the other five files pins its corrected line either) - but the gap is real and general. Fix: extend R11 so each of the seven files has its CORRECTED LINE pinned, not merely the presence of surrounding explanation, with a mutation per file proving a reverted line turns the suite red. ALSO fold in the two non-blocking observations from the same review: (a) a DEAD ASSERTION - `grep -qi 'bare' \"$REV\"` still sits after the loop, unreachable in practice because the anchored form runs first on $REV; (b) the space-separated qualified citation form `<ns> ADR-NNNN` - taught by reviewer.md, SPEC-FORMAT.md L89 and architect.md L73's own `- platform ADR-0008` example - is ABSENT from both newly-updated files, giving the Doc-critic a small false-positive surface. Durable fix upstream in ~/repos/harness-sdd plus the local sync. Raised by the E99-F59 Reviewer. \u27c2 [fixed via the F75 carrier, merged #169]",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "8f40e648625216ceb676d326dec7d1af3fb2b785",
+            "ref": "8f40e648625216ceb676d326dec7d1af3fb2b785",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F76-migrated-from-viernes/",
-          "parked": {
-            "reason": "absorbed into E99-F75 (2026-09-04 triage, board-row bar): batched assertion-hygiene audit \u2014 R11 pins the added paragraph, not the corrected line. Fix lands with E99-F75; this row is kept for the finding text only.",
-            "unblocked_by": "E99-F75 done"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F76-migrated-from-viernes/"
         },
         {
           "id": "E99-F88",
           "title": "[migrated from viernes 2026-08-18] THE MUTATION-EVIDENCE INSTRUMENT ACCEPTS AN EDIT THAT IS NOT THE ONE THE CONTRACT NAMES - harden .harness/agents/reviewer.md checks 3b/3c and the /sdd-pr-loop severity match. TWO CONCRETE DEFECTS, BOTH OBSERVED 2026-08-02, BOTH LABEL-VS-EVIDENCE. (1) On E14-F08 round 1 the mutation runner carried an entry LABELLED as the contract's `InlineError` mutation while the edit it applied duplicated the tab's live region as a second role=status node. The two mutants differ in exactly the property under test, so a mutant the assertion COULD detect went red under the contract's title and certified an assertion that provably could NOT detect the real defect - a broken assertion passed review. The Reviewer recorded this as its OWN instrument failure. FIX: a mutation counts as evidence only when the applied edit is the LITERAL one the contract names, and a runner must print the applied diff so the two can be compared. (2) The ad-hoc severity classifier used to drive /sdd-pr-loop matches the literal `nit` anywhere in a comment body, so Codex finding `3699045452` (badge P2) was tagged `nit` because the word 'initial' contains it. No gate decision changed (P0/P1 are tested first and both P2 and nit are non-blocking) so this is latent, not live - but it is the same defect class, and the skill's own wording ('match P0|P1|P2|nit case-insensitively anywhere in the body, first match wins') is what licenses it. FIX: match the severity BADGE form, not a bare substring. NOTE THE SCOPE PROBLEM AND DECIDE IT EXPLICITLY: .harness/ here is an INSTALLED COPY of harness-sdd (~/repos/harness-sdd). A fix applied only to this workspace is overwritten by the next harness upgrade, so the change belongs UPSTREAM in harness-sdd and then re-installed. Do not silently patch the installed copy and call it done.",
-          "status": "pending",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "8f40e648625216ceb676d326dec7d1af3fb2b785",
+            "ref": "8f40e648625216ceb676d326dec7d1af3fb2b785",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -575,7 +592,7 @@
         {
           "id": "E99-F130",
           "title": "[migrated from viernes 2026-08-18] NO FIRST-CLASS 'APPROVED, AWAITING MERGE' STATE \u2014 so the corrected `done`-after-merge ordering has no ergonomic home, and `in-review` actively MISROUTES. Surfaced by E99-F102 part A (PR #147 round 1): the docs used to say approve -> `set-status done --evidence` -> open PR, so at `done` time the merge commit could not exist and the 'prefer the merge commit' instruction was unfollowable. A fixed the INSTRUCTION (`done` is written after the merge is observed). What it could not fix is where the feature LIVES in between. \u26a0\ufe0f MEASURED ON THE SHIPPED SELECTOR, not assumed: a feature left at `in-review` is NOT inert \u2014 `next-task.mjs` returns `{outcome: selected, route: reviewer, reason: feature-actionable}`, i.e. it hands an ALREADY-APPROVED feature back to a Reviewer every session. That is the defect `next-task.mjs`'s own E99-F77 comment already names ('`in-review` routes a Reviewer at an approved slice'). The `parked` mechanism DOES hold it correctly (`outcome: blocked`, code `gated-owner`, never selected) and `set-status` refuses any transition while parked, so an unpark must precede the `done` write \u2014 also measured. So the workaround exists but costs two `apply --mutator` round-trips per feature and reports an in-flight PR INDISTINGUISHABLY from external owner blockage, which is the signal an operator most needs to tell apart. WHAT THE REAL FIX NEEDS (why it was correctly kept OUT of part A): a first-class awaiting-merge hold with its own selector/diagnostic code, touching `tools/next-task.mjs`, the diagnostics, and coverage in `test_next_task.sh`, `test_feature_park.sh` and `test_dependency_diagnostics.sh` \u2014 a lifecycle change, not a documentation one. \u26a0\ufe0f `none:<why>` must REMAIN a legitimate immediate `done`: console/AWS actions and supersessions have nothing to merge. The distinction to preserve is 'nothing to merge' (fine) vs 'something that has not merged YET' (the defect). Part A states this gap explicitly in agents/orchestrator.md, docs/WORKFLOW.md and the CHANGELOG rather than papering over it.",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [
@@ -585,16 +602,19 @@
         },
         {
           "id": "E99-F138",
-          "title": "[migrated from viernes 2026-08-18] test_stacked_doctrine.sh's TWO SECTION SLICERS ARE FENCE-AWARE BUT HAVE NO ANTI-TRUNCATION CONTROL - so a tail truncation there is still SILENT, which is the half of the pattern E99-F131 did not close. Found during E99-F131's eight-suite audit (PR #154). `sect()` (~line 69) and `span()` (~line 76) already open with `/^```/{f=!f} !f && \u2026`, so the fence half is right and there is no defect in the mechanism E99-F131 names \u2014 which is exactly why it was left alone rather than fixed silently. But NEITHER has an end-marker control, and their only guard is non-emptiness. \u26a0\ufe0f WHY THAT IS NOT ENOUGH, measured on the sibling suite during F131: a truncated extraction is STILL NON-EMPTY, so the emptiness guard passes while every assertion below it runs against a prefix \u2014 reproduced on test_change_size.sh as 27 lines instead of 33 with the suite FULLY GREEN and the section's closing sentence unenforced. FIX: add one anti-truncation control per slicer, keyed on a marker from the section's END and verified unique in its file with `grep -cF` = 1 (the pattern E99-F102 part A landed as MR6/MR7 and E99-F131 carried to three more suites). \u26a0\ufe0f VERIFY BY MUTATION, not by reading: truncate each sliced section's TAIL by a mechanism OTHER than a fence (delete its last two lines) and confirm the suite goes RED naming the truncation \u2014 today it stays green. \u26a0\ufe0f Do NOT also re-do the fence work; it is already correct there, and re-touching it would obscure which half this item closed.",
-          "status": "pending",
+          "title": "[migrated from viernes 2026-08-18] test_stacked_doctrine.sh's TWO SECTION SLICERS ARE FENCE-AWARE BUT HAVE NO ANTI-TRUNCATION CONTROL - so a tail truncation there is still SILENT, which is the half of the pattern E99-F131 did not close. Found during E99-F131's eight-suite audit (PR #154). `sect()` (~line 69) and `span()` (~line 76) already open with `/^```/{f=!f} !f && \u2026`, so the fence half is right and there is no defect in the mechanism E99-F131 names \u2014 which is exactly why it was left alone rather than fixed silently. But NEITHER has an end-marker control, and their only guard is non-emptiness. \u26a0\ufe0f WHY THAT IS NOT ENOUGH, measured on the sibling suite during F131: a truncated extraction is STILL NON-EMPTY, so the emptiness guard passes while every assertion below it runs against a prefix \u2014 reproduced on test_change_size.sh as 27 lines instead of 33 with the suite FULLY GREEN and the section's closing sentence unenforced. FIX: add one anti-truncation control per slicer, keyed on a marker from the section's END and verified unique in its file with `grep -cF` = 1 (the pattern E99-F102 part A landed as MR6/MR7 and E99-F131 carried to three more suites). \u26a0\ufe0f VERIFY BY MUTATION, not by reading: truncate each sliced section's TAIL by a mechanism OTHER than a fence (delete its last two lines) and confirm the suite goes RED naming the truncation \u2014 today it stays green. \u26a0\ufe0f Do NOT also re-do the fence work; it is already correct there, and re-touching it would obscure which half this item closed. \u27c2 [resolved by removal: E21-F07 deleted test_stacked_doctrine.sh with the lane (v0.70.0); its end-marker lesson lives in the F75 hygiene conventions]",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "5e22273129b4ff4be52a495340a5198a2def0911",
+            "ref": "5e22273129b4ff4be52a495340a5198a2def0911",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F138-migrated-from-viernes/",
-          "parked": {
-            "reason": "absorbed into E99-F75 (2026-09-04 triage, board-row bar): batched assertion-hygiene audit \u2014 section slicers have no anti-truncation end-marker control. Fix lands with E99-F75; this row is kept for the finding text only.",
-            "unblocked_by": "E99-F75 done"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F138-migrated-from-viernes/"
         },
         {
           "id": "E99-F140",
@@ -1120,7 +1140,13 @@
           "id": "E25-F01",
           "title": "Claude-first selection defaults: fresh-undetected + interactive default become claude-only; explicit --agents opt-in unchanged; recorded selections never clobbered; docs name the park",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "f536ab939dccecb7bb3760f9b2ca0748ef901eb0", "ref": "f536ab939dccecb7bb3760f9b2ca0748ef901eb0", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "f536ab939dccecb7bb3760f9b2ca0748ef901eb0",
+            "ref": "f536ab939dccecb7bb3760f9b2ca0748ef901eb0",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
@@ -1131,14 +1157,47 @@
     {
       "id": "E26",
       "title": "Self-host the harness: restructure this repo so it IS an installed instance (canonical files at their installed paths, installer copies from there), letting /sdd-next and /sdd-pr-loop run natively here and turning every dogfood session into an integration test of installer output \u2014 kills the shim-drift defect class by construction",
-      "status": "draft",
-      "features": []
+      "status": "planned",
+      "features": [
+        {
+          "id": "E26-F01",
+          "title": "Installer --self mode: regenerate the source repo's own .claude glue from the target emitters (source-layout paths, repo model pins, real arming verdict)",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E27-F01"
+          ],
+          "spec_path": "specs/epics/E26-self-host/F01-self-mode/"
+        },
+        {
+          "id": "E26-F02",
+          "title": "Drift-by-construction gate: suite regenerates glue and asserts byte-equality with committed copies; init.sh warn-only staleness line",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E26-F01"
+          ],
+          "spec_path": "specs/epics/E26-self-host/F02-drift-gate/"
+        }
+      ]
     },
     {
       "id": "E27",
       "title": "Escalation tier fate: decide DELETE vs CASCADE for builder-heavy escalation. Today it ships inert-but-configured-looking (all-inherit models + absent .escalation-arming; E99-F25 ran 3 rejection rounds on the base builder). Either delete the tier machinery as a weaker-model-era patch, or make umbrella models: config cascade to children and keep init.sh's armed/disarmed line as the visibility contract",
-      "status": "draft",
-      "features": []
+      "status": "planned",
+      "features": [
+        {
+          "id": "E27-F01",
+          "title": "Umbrella models: cascade \u2014 child inherit keys resolve from the coordinator's models block; explicit child values win; escalation verdicts recomputed per cascade; report names each child's source",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E27-escalation-cascade/F01-models-cascade/"
+        }
+      ]
     }
   ]
 }

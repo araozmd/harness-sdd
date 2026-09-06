@@ -32,8 +32,8 @@ pass() { echo "ok - $1"; }
 # R1_fixer_role_exists
 [ -f "$ROLE" ]                                || fail "R1: $ROLE missing"
 grep -qi 'sdd: false\|sdd:false' "$ROLE"      || fail "R1: role does not name sdd:false intake"
-grep -qi 'maintenance' "$ROLE"                || fail "R1: role does not mention the maintenance epic"
-grep -qi 'brief' "$ROLE"                      || fail "R1: role does not mention brief-only intake"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'reserved maintenance epic' || fail "R1: role does not mention the reserved maintenance epic"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'one-paragraph inbox brief' || fail "R1: role does not mention the one-paragraph inbox brief intake"
 grep -qi 'hand.*off\|loop' "$ROLE"            || fail "R1: role does not mention hand-off to the loop"
 grep -qi 'AGENTS.md-compatible\|portable' "$ROLE" || fail "R1: role not stated as portable"
 pass "R1 fixer_role_exists"
@@ -68,7 +68,7 @@ pass "R4 reuse_primitive"
 # ── R5: role creates E99 on first use (planned, features: []) + epic.md ───────────
 # R5_epic_create
 grep -qF 'E99' "$ROLE"                        || fail "R5: role does not name E99"
-grep -qi 'maintenance' "$ROLE"                || fail "R5: role does not name the maintenance slug"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'maintenance epic[^.]{0,10}E99' || fail "R5: role does not tie the maintenance epic to E99"
 grep -qi 'Maintenance (hotfixes\|title' "$ROLE" || fail "R5: role does not state the maintenance title"
 grep -qi 'status: "planned"\|planned' "$ROLE" || fail "R5: role does not state planned status"
 grep -qi 'features: \[\]\|empty' "$ROLE"      || fail "R5: role does not state empty features on create"
@@ -79,7 +79,7 @@ pass "R5 epic_create"
 # ── R6: role reuses the same epic by id E99 thereafter; no second bucket, no renumber
 # R6_epic_reuse
 grep -qF 'E99' "$ROLE"                        || fail "R6: role does not name E99"
-grep -qi 'reuse' "$ROLE"                      || fail "R6: role does not state reuse"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'create-on-first-use[^.]{0,10}reuse-by-id' || fail "R6: role does not state create-on-first-use / reuse-by-id"
 grep -qi 'by id\|identify' "$ROLE"            || fail "R6: role does not state identify-by-id"
 grep -qi 'not.*second\|never.*second\|one' "$ROLE" || fail "R6: role does not forbid a second bucket"
 grep -qi 'not.*renumber\|never.*renumber\|append-only' "$ROLE" || fail "R6: role does not forbid renumbering"
@@ -87,7 +87,7 @@ pass "R6 epic_reuse"
 
 # ── R7: maintenance epic is non-draft selectable (planned); never seed draft ──────
 # R7_non_draft
-grep -qi 'planned' "$ROLE"                    || fail "R7: role does not state planned"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'planned[^.]{0,40}skips only[^.]{0,10}draft' || fail "R7: role does not state planned stays selectable (only draft is gated)"
 grep -qi 'selectable\|next()' "$ROLE"         || fail "R7: role does not state selectable/next()"
 grep -qi 'not.*draft\|never.*draft' "$ROLE"   || fail "R7: role does not forbid draft"
 pass "R7 non_draft"
@@ -148,7 +148,7 @@ pass "R8 fix_seed"
 # ── R9: role stamps autonomous:true default + --gated opt-out; existing flag, no new mech
 # R9_autonomous_default
 grep -qF 'autonomous: true' "$ROLE"           || fail "R9: role does not stamp autonomous: true"
-grep -qi 'default' "$ROLE"                    || fail "R9: role does not state autonomous:true is the default"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'autonomous: true[^.]{0,10}by default' || fail "R9: role does not state autonomous:true is the default"
 grep -qi -- '--gated\|opt-out\|gated' "$ROLE" || fail "R9: role does not state the --gated opt-out"
 grep -qF 'autonomous: false' "$ROLE"          || fail "R9: role does not state the autonomous: false opt-out"
 grep -qi 'no new' "$ROLE"                     || fail "R9: role does not state 'no new'"
@@ -179,7 +179,7 @@ pass "R11 revalidate_fail_stop"
 # R12_builder_from_brief
 grep -qi 'sdd: false\|sdd:false' "$BUILDER"   || fail "R12: builder does not mention sdd:false"
 grep -qi 'progress/inbox/\|inbox brief' "$BUILDER" || fail "R12: builder does not reference the inbox brief"
-grep -qi 'test' "$BUILDER"                    || fail "R12: builder does not require a test for the fix"
+tr '\n' ' ' < "$BUILDER" | grep -qiE 'at least one test[^.]{0,10}proves the fix' || fail "R12: builder does not require a test that proves the fix"
 # sdd:true path still present (Loop A precondition + tasks.md worklist unchanged)
 grep -qi 'Loop A' "$BUILDER"                  || fail "R12: builder sdd:true Loop A precondition removed"
 grep -qF 'tasks.md' "$BUILDER"                || fail "R12: builder sdd:true tasks.md worklist removed"
@@ -189,11 +189,11 @@ pass "R12 builder_from_brief"
 # R13_reviewer_behavioural
 grep -qi 'sdd: false\|sdd:false' "$REVIEWER"  || fail "R13: reviewer does not mention sdd:false"
 grep -qi 'behaviour\|behavioral\|behavioural' "$REVIEWER" || fail "R13: reviewer does not state behavioural verification"
-grep -qi 'traceability' "$REVIEWER"           || fail "R13: reviewer does not mention traceability"
+tr '\n' ' ' < "$REVIEWER" | grep -qiE 'behavioural verification[^.]{0,10}traceability' || fail "R13: reviewer does not pair behavioural verification with the traceability ruling"
 grep -qi 'not apply\|no R-id\|without R-id' "$REVIEWER" || fail "R13: reviewer does not state traceability N/A for no-R-id items"
 # sdd:true traceability check (#2, R-id → test) still present
 grep -qi 'R-id' "$REVIEWER"                   || fail "R13: reviewer sdd:true R-id traceability check removed"
-grep -qi 'Traceability' "$REVIEWER"           || fail "R13: reviewer sdd:true traceability check #2 removed"
+tr '\n' ' ' < "$REVIEWER" | grep -qiE 'every[^.]{0,5}R-id[^.]{0,10}in' || fail "R13: reviewer sdd:true traceability check #2 removed"
 pass "R13 reviewer_behavioural"
 
 # ── R14: role + command hand off to the existing loop in-session; Fixer writes no code
@@ -201,7 +201,7 @@ pass "R13 reviewer_behavioural"
 grep -qi 'hand.*off\|loop\|Builder' "$ROLE"   || fail "R14: role does not state hand-off to the loop"
 grep -qi 'in-session\|session' "$ROLE"        || fail "R14: role does not state in-session hand-off"
 grep -qi 'no production code\|writes no code\|write.*no production code' "$ROLE" || fail "R14: role does not state it writes no production code"
-grep -qi 'reuse' "$ROLE"                      || fail "R14: role does not state the routing is reused"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'reuses[^.]{0,10}existing[^.]{0,60}routing' || fail "R14: role does not state the existing routing is reused"
 grep -qi 'not.*re-implement\|do not re-implement\|reuse.*not.*re-implement' "$ROLE" || fail "R14: role does not state routing is not re-implemented"
 grep -qi 'hand.*off\|loop\|Builder' "$CMD"    || fail "R14: command does not state hand-off to the loop"
 grep -qi 'in-session\|session' "$CMD"         || fail "R14: command does not state in-session hand-off"
@@ -249,7 +249,7 @@ pass "R18 portable_contract"
 # R19_workflow_doc
 grep -qF '/sdd-fix' docs/WORKFLOW.md          || fail "R19: WORKFLOW.md does not mention /sdd-fix"
 grep -qi 'sdd: false\|sdd:false' docs/WORKFLOW.md || fail "R19: WORKFLOW.md does not mention sdd:false"
-grep -qi 'maintenance' docs/WORKFLOW.md       || fail "R19: WORKFLOW.md does not mention the maintenance epic"
+tr '\n' ' ' < docs/WORKFLOW.md | grep -qiE 'maintenance epic[^.]{0,15}E99' || fail "R19: WORKFLOW.md does not mention the E99 maintenance epic"
 grep -qi 'inbox brief\|brief' docs/WORKFLOW.md || fail "R19: WORKFLOW.md does not mention the inbox brief"
 grep -qF 'Builder' docs/WORKFLOW.md           || fail "R19: WORKFLOW.md does not mention the Builder"
 grep -qF 'Reviewer' docs/WORKFLOW.md          || fail "R19: WORKFLOW.md does not mention the Reviewer"
@@ -316,7 +316,7 @@ pass "R23 builder_precondition_coherent"
 # the human gate and NOT being handed straight to the Builder. Non-tautological: fails if
 # the role still implies a gated fix runs immediately.
 grep -qi -- '--gated\|gated' "$ROLE"          || fail "R24: role does not mention --gated"
-grep -qi 'park' "$ROLE"                       || fail "R24: role does not state a gated fix parks at the human gate"
+tr '\n' ' ' < "$ROLE" | grep -qiE 'gated[^.]{0,15}parked at the human gate' || fail "R24: role does not state a gated fix parks at the human gate"
 grep -qi 'human gate\|human must approve\|human must' "$ROLE" || fail "R24: role does not state a human must approve the gated fix"
 # the gated fix must NOT be handed straight to the Builder — the role must say so
 grep -qi 'not.*handed straight\|not.*straight to the Builder\|does not.*auto-run\|not auto-run' "$ROLE" \

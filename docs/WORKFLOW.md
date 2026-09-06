@@ -674,6 +674,17 @@ is best-effort — if it is missing or corrupt, reconstruct it from the `gh` API
 an existing round offline (no `gh`, no network) with
 `sh tools/wait-for-codex.sh evaluate <round-dir>` — `0` findings, `3` clean, `1` pending.
 
+## Between approval and merge — `awaiting-merge` (E99-F130)
+
+An approved feature whose PR is still open lives in neither `in-review` (the selector
+would hand it back to a Reviewer) nor `done` (the merge commit does not exist yet, so
+`--evidence` has nothing to verify). Park it: `tasks-lock.py await-merge <id> --pr <n>`
+sets `parked.gate: merge`, the selector reports it as `awaiting-merge` — distinct from
+`gated-owner`, because an in-flight PR clears itself while an owner gate never does —
+and every transition except its own exit bounces. When the merge is observed,
+`set-status <id> done --evidence <merge-ref>` clears the park and writes the landing
+receipt in one guarded write.
+
 ## Stacked-PR lane — DEPRECATED (E21-F07)
 
 The stacked-PR lane shipped in E21-F04/F05 and was removed in E21-F07 after the E21-F06

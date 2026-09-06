@@ -24,29 +24,29 @@ grep -qi 'cross-file consistency' "$REVIEWER" || fail "R1: no 'Cross-file consis
 pass "R1 cross_file_check_item"
 
 # ── R2: check loads the collaborators the diff references ────────────────────────
-grep -qi 'collaborators' "$REVIEWER" || fail "R2: does not mention loading collaborators"
+tr '\n' ' ' < "$REVIEWER" | grep -qiE 'collaborators[^.]{0,10}diff references' || fail "R2: does not mention loading the collaborators the diff references"
 grep -qiE 'references|invoke' "$REVIEWER" || fail "R2: does not tie collaborators to what the diff references/invokes"
 pass "R2 loads_collaborators"
 
 # ── R3: expansion scoped, curate-don't-dump ──────────────────────────────────────
-grep -qi 'scoped' "$REVIEWER" || fail "R3: does not state expansion is scoped"
-grep -qi 'curate' "$REVIEWER" || fail "R3: does not state curate-don't-dump"
-grep -qi 'dump' "$REVIEWER" || fail "R3: does not warn against a whole-repo dump"
+tr '\n' ' ' < "$REVIEWER" | grep -qiE 'scoped to the[^.]{0,15}references' || fail "R3: does not state expansion is scoped to the diff's references"
+tr '\n' ' ' < "$REVIEWER" | grep -qiE 'curate-don.t-dump' || fail "R3: does not state curate-don't-dump"
+tr '\n' ' ' < "$REVIEWER" | grep -qiE 'whole-repo[^.]{0,15}dump' || fail "R3: does not warn against a whole-repo dump"
 pass "R3 scoped_not_dump"
 
 # ── R4: verifies preconditions not contradicted by invoked contracts ─────────────
-grep -qi 'precondition' "$REVIEWER" || fail "R4: does not mention preconditions"
-grep -qi 'contradict' "$REVIEWER" || fail "R4: does not require checking they do not contradict the contracts"
+tr '\n' ' ' < "$REVIEWER" | grep -qiE 'preconditions are satisfied[^.]{0,45}contracts' || fail "R4: does not verify preconditions against the invoked contracts"
+tr '\n' ' ' < "$REVIEWER" | grep -qiE 'do not contradict[^.]{0,15}contracts' || fail "R4: does not require checking they do not contradict the contracts"
 pass "R4 preconditions_not_contradicted"
 
 # ── R5: provable violation ⇒ hard reject ─────────────────────────────────────────
-grep -qi 'provably' "$REVIEWER" || fail "R5: does not state the 'provably violated' threshold"
-grep -qi 'reject' "$REVIEWER" || fail "R5: does not state hard reject"
+tr '\n' ' ' < "$REVIEWER" | grep -qiE 'provably violated[^.]{0,30}demonstrable' || fail "R5: does not state the 'provably violated' (demonstrable) threshold"
+tr '\n' ' ' < "$REVIEWER" | grep -qiE 'breaks it[^.]{0,10}hard reject' || fail "R5: does not state hard reject on a proven violation"
 pass "R5 provable_hard_reject"
 
 # ── R6: suspected-but-unproven ⇒ flag, not block ─────────────────────────────────
-grep -qi 'flag' "$REVIEWER" || fail "R6: does not state the flag (not block) path"
-grep -qi 'justify' "$REVIEWER" || fail "R6: does not ask the Builder to justify"
+tr '\n' ' ' < "$REVIEWER" | grep -qiE 'flag it[^.]{0,30}investigate' || fail "R6: does not state the flag (not block) path"
+tr '\n' ' ' < "$REVIEWER" | grep -qiE 'investigate[^.]{0,10}justify' || fail "R6: does not ask the Builder to investigate and justify"
 pass "R6 suspected_flag_not_block"
 
 # ── R7: PR #10 worked example present ─────────────────────────────────────────────
@@ -55,7 +55,7 @@ grep -qiE 'never opens a PR|open.*PR' "$REVIEWER" || fail "R7: worked example do
 pass "R7 pr10_worked_example"
 
 # ── R8: reject ⇒ specific, actionable, file-based feedback ───────────────────────
-grep -qi 'actionable' "$REVIEWER" || fail "R8: does not state actionable feedback"
+tr '\n' ' ' < "$REVIEWER" | grep -qiE 'actionable[^.]{0,15}file-based' || fail "R8: does not state actionable, file-based feedback"
 grep -qF 'progress/<run>/review.md' "$REVIEWER" || fail "R8: does not name the progress/<run>/review.md feedback artifact"
 pass "R8 actionable_file_based_feedback"
 
@@ -66,8 +66,8 @@ grep -qi 'in-progress' "$ORCH" || fail "R9: does not route reject back to in-pro
 pass "R9 explicit_multi_round"
 
 # ── R10: each round recorded ──────────────────────────────────────────────────────
-grep -qi 'round' "$ORCH" || fail "R10: does not mention rounds"
-grep -qi 'record' "$ORCH" || fail "R10: does not state each round is recorded"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'round[^.]{0,10}= 1[^.]{0,15}first build' || fail "R10: does not define the round counter"
+tr '\n' ' ' < "$ORCH" | grep -qiE 'each round is recorded' || fail "R10: does not state each round is recorded"
 pass "R10 round_recorded"
 
 # ── R11: docs coherent with multi-round loop (no single-pass claim) ──────────────

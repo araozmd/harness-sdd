@@ -55,6 +55,17 @@ saying "it works" means nothing until you prove it. AI-generated code is often
        never merged. Not yet enforced: see **E99-F102**. (Narrowed by E99-F73: that file now
        carries a `## Scratch files and campaign preconditions` section, so "lacks entirely"
        is true of the **revert** half only. Read it as scoped, not as stale.)
+     - **Label = evidence, byte-for-byte.** A mutation counts as evidence only when the
+       applied edit is byte-for-byte the edit the contract names — a mutant that goes red
+       under the right title certifies nothing if a different edit produced the red. The
+       runner must print the applied diff into the run record
+       (`diff <file>.mutbak <file>` or equivalent), so the label and the evidence can
+       be compared instead of trusted. A mutant whose printed diff does not match its
+       label is an **instrument failure** — record it as such, never as a kill: on
+       E14-F08 a runner entry labelled as the contract's `InlineError` mutation applied
+       a different edit, went red under the contract's title, and certified an
+       assertion that could not detect the real defect. A broken assertion passed
+       review on that evidence.
    - **(3c) Prose overstating a guarantee is a DEFECT, not a nit.** A comment, a
      docstring, a `.md` line or a test name that claims more than the code enforces is a
      **required fix at the same severity as the missing enforcement itself** — not a
