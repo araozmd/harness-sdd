@@ -1173,7 +1173,7 @@
         {
           "id": "E26-F02",
           "title": "Drift-by-construction gate: suite regenerates glue and asserts byte-equality with committed copies; init.sh warn-only staleness line",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
