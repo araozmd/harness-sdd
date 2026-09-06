@@ -1168,7 +1168,7 @@ HARNESS_OWNED_CMDS="$HARNESS_SDD_CMDS $HARNESS_PR_LOOP_CMDS"
 # reclamation compares, so the two can never diverge — a second copy would let the
 # install stamp and the pristine reference disagree, which is exactly what makes an
 # already-stamped file unremovable.
-PR_FIXER_DESC="Fixes exactly ONE Codex review comment in an isolated context: reads the comment and the cited hunk, applies the smallest change, commits, returns. One comment, one fix, one commit, one return."
+PR_FIXER_DESC="Fixes exactly ONE Codex review comment in an isolated context: reads the comment and the cited hunk, applies the smallest change, commits, returns. One comment, one fix, one commit, one return. Spawned by /sdd-pr-loop, once per blocking comment."
 
 # ── per-role model routing (E17-F01) ──────────────────────────────────────────
 # Config (`models:` in .harness/harness.config.yaml) → the NATIVE model value of each
@@ -3913,6 +3913,120 @@ host-detectable"
   # `opencode` independently and re-derives the command bodies if Claude is skipped.
   if agent_selected claude; then
   mkdir -p "$TARGET/.claude/agents" "$TARGET/.claude/commands"
+  # claude_agent_body <role> — the per-role shim prose (E26-F01). Reconciled from the
+  # source repo's hand-maintained shims: each role gets a short, role-specific summary
+  # of its working discipline on top of the pointer at the canonical role file. Every
+  # path carries the `.harness/` prefix so the `--self` layout transform is total.
+  claude_agent_body() {
+    case "$1" in
+      orchestrator) cat <<'EOF'
+
+You are the Orchestrator for this project.
+
+Your full role definition is in `.harness/agents/orchestrator.md` — read it now and
+follow it exactly. In Claude Code you delegate by spawning the `architect`, `builder`,
+`reviewer`, and `scout` sub-agents with the Task tool, each with a clean, minimal
+context (only the files it needs). Always run `./.harness/init.sh` first and halt on
+failure. Hand off through `.harness/progress/` files, never by forwarding conversation.
+EOF
+;;
+      architect) cat <<'EOF'
+
+You are the Architect for this project.
+
+Your full role definition is in `.harness/agents/architect.md` — read it now and
+follow it exactly. Produce the four spec files from `.harness/specs/_templates/`,
+write acceptance criteria in EARS with stable R-ids (see
+`.harness/docs/SPEC-FORMAT.md`), and make every requirement testable. Before
+hand-off, run the mandatory R12 doc-critic checkpoint: spawn the `doc-critic`
+sub-agent with `target-type=feature-spec` (that is the only thing `Task` is here
+for). When done, report to the Orchestrator for the `spec-ready` gate. Do not write
+production code.
+EOF
+;;
+      builder) cat <<'EOF'
+
+You are the Builder for this project.
+
+Your full role definition is in `.harness/agents/builder.md` — read it now and follow
+it exactly. Confirm the feature is `in-progress` (human-approved) before writing any
+code. Work `tasks.md` top to bottom, touch only files the `.plan.md` lists, honor
+DO NOT TOUCH, write the tests from `tests.md`, and self-check with
+`./.harness/init.sh`. Report to the Orchestrator for `in-review`; never declare
+`done` yourself.
+EOF
+;;
+      builder-heavy) cat <<'EOF'
+
+You are the Builder (escalation tier) for this project.
+
+Your full role definition is `.harness/agents/builder-heavy.md` — read it now and
+follow it exactly; it defers to `.harness/agents/builder.md` for the whole working
+discipline. Confirm the feature is `in-progress` (human-approved) before writing any
+code. Hand off through `.harness/progress/` files, never by forwarding chat history.
+EOF
+;;
+      reviewer) cat <<'EOF'
+
+You are the Reviewer for this project.
+
+Your full role definition is in `.harness/agents/reviewer.md` — read it now and
+follow it exactly. Be skeptical by default: "done" is not done until proven. Run the
+configured checks, verify the traceability matrix in `tests.md`, exercise the
+running app where relevant, and give specific feedback. Approve → tell the
+Orchestrator to set `done`; reject → write feedback to
+`.harness/progress/<run>/review.md`. You may tighten the harness files to prevent a
+recurring failure.
+EOF
+;;
+      scout) cat <<'EOF'
+
+You are the Scout for this project.
+
+Your full role definition is in `.harness/agents/scout.md` — read it now and follow
+it exactly. Stay focused on the question asked, read excerpts not whole files, and
+write a concise structured findings file to
+`.harness/progress/<run>/scout-<topic>.md`. Make no decisions and write no
+production code.
+EOF
+;;
+      doc-critic) cat <<'EOF'
+
+You are the Doc-critic for this project.
+
+Your full role definition is in `.harness/agents/doc-critic.md` — read it now and
+follow it exactly. You were spawned with one `target-type` (`plan-output`,
+`epic-decomposition`, or `feature-spec`) and the paths just written; review only
+those. Flag only issues that would cause real downstream problems, across
+completeness, consistency, clarity, scope and YAGNI — never spelling or style.
+Your findings are advisory and never block the generating agent. Write a concise
+note to `.harness/progress/<run>/doc-critic-<checkpoint>.md`. Documents only:
+production code is the Reviewer's job.
+EOF
+;;
+      pr-fixer) cat <<'EOF'
+
+You are the pr-fixer for this project.
+
+Your full role definition is in `.harness/agents/pr-fixer.md` — read it now and
+follow it exactly. Fix exactly the one comment you were given: the smallest targeted
+edit, any relevant local check (never the full suite), one commit, one
+`fix-<comment_id>.md` note in `round_dir`, then return. Do not push, do not resolve
+the thread, do not merge, do not touch files the comment did not cite. If the
+comment is unclear, say so in the summary and exit without committing.
+EOF
+;;
+      *) cat <<EOF
+
+You are the **$1** for this project's agent harness (installed in \`.harness/\`).
+
+Your full, canonical role definition is \`.harness/agents/$1.md\` — read it now and
+follow it exactly. Run \`./.harness/init.sh\` before any work and halt on failure.
+Hand off through \`.harness/progress/\` files, never by forwarding chat history.
+EOF
+;;
+    esac
+  }
   emit_agent() { # emit_agent <name> <tools> <description>
     # Frontmatter key order is FIXED (name, description, tools, model) regardless of
     # config state — the `model:` line is either present in that one position or absent
@@ -3927,25 +4041,16 @@ host-detectable"
       if [ -n "$_ea_model" ]; then printf 'model: %s\n' "$_ea_model"; fi
       printf -- '---\n'
     } > "$TARGET/.claude/agents/$1.md"
-    cat >> "$TARGET/.claude/agents/$1.md" <<EOF
-
-You are the **$1** for this project's agent harness (installed in \`.harness/\`).
-
-Your full, canonical role definition is \`.harness/agents/$1.md\` — read it now and
-follow it exactly. Resolve every relative path it mentions against \`.harness/\`
-(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
-\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on failure.
-Hand off through \`.harness/progress/\` files, never by forwarding chat history.
-EOF
+    claude_agent_body "$1" >> "$TARGET/.claude/agents/$1.md"
   }
   emit_agent orchestrator "Read, Bash, Edit, Grep, Glob, Task" \
-    "The Leader. Reads state, runs init.sh, routes the next task, delegates to architect/builder/reviewer/scout. Never writes code."
+    "The Leader. Reads state, runs init.sh, decides the next phase, and delegates to architect/builder/reviewer/scout. Never writes code. Use this at the start of every SDD session."
   # architect carries `Task` so it can spawn the doc-critic sub-agent at its
   # pre-`spec-ready` `target-type=feature-spec` checkpoint (agents/architect.md).
   emit_agent architect "Read, Write, Edit, Grep, Glob, Bash, Task" \
-    "The Spec Author. Writes the 4-file spec in EARS. No production code."
+    "The Spec Author. Turns a feature intent into the 4-file spec (.spec/.plan/.tasks/.tests) using EARS. Writes specs, never production code. Spawn for features in \`pending\` with sdd:true."
   emit_agent builder "Read, Write, Edit, Bash, Grep, Glob" \
-    "The Implementer. Writes code from an APPROVED spec, one task at a time."
+    "The Implementer. Writes code strictly from an APPROVED spec's tasks.md, one task at a time, plus the tests in tests.md. Spawn only when the feature is \`in-progress\`."
   # builder-heavy (E17-F02): the escalation tier. The tool list is copied EXACTLY from
   # `builder` above — ADR-0002 says the two variants differ only by resolved model, so a
   # different tool list would be a behavioral difference the ADR forbids. Both shims point
@@ -3954,14 +4059,14 @@ EOF
   emit_agent builder-heavy "Read, Write, Edit, Bash, Grep, Glob" \
     "The Implementer at the escalation tier. Same instruction body and same discipline as \`builder\`; differs only by the model it resolves to (ADR-0002)."
   emit_agent reviewer "Read, Bash, Grep, Glob, Edit" \
-    "The Evaluator. Verifies against the spec, runs tests, approves or rejects."
+    "The Evaluator/verification layer. Runs init.sh + tests, checks every R-id has a passing test, exercises behavior (Playwright), enforces conventions. Approves or rejects. Spawn when a feature is \`in-review\`."
   emit_agent scout "Read, Grep, Glob, Bash" \
-    "Read-only codebase reconnaissance. Writes findings to progress/."
+    "Read-only codebase reconnaissance. Answers \"where/how is X done?\" and writes concise findings to progress/ so other agents don't burn context. Never modifies production code."
   # doc-critic sub-agent shim (E09): the advisory review pass the architect (and the
   # planner/driller slash commands) spawn at their pre-hand-off checkpoints. Points at
   # the canonical .harness/agents/doc-critic.md; documents-only, no production-code review.
   emit_agent doc-critic "Read, Grep, Glob, Write" \
-    "Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code."
+    "Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code. Spawned by the Architect (and the /sdd-plan, /sdd-drill flows) before hand-off."
   # pr-fixer (E18-F01 R10): the /sdd-pr-loop worker sub-agent, spawned once per blocking
   # Codex comment. GATED on the opt-in pr_loop.enabled — unlike the seven roles above it is
   # NOT stamped by default. It rides the SAME emit_agent path (one shim, pointing at
