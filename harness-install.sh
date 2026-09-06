@@ -4083,8 +4083,7 @@ description: Whole-project inception as Planner — produce vision + architectur
 ---
 
 Act as **Planner** (`.harness/agents/planner.md`). That role file is the durable
-contract; this command carries the interactive front-end. Resolve all relative paths
-against `.harness/`.
+contract; this command carries the interactive front-end.
 
 The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the human for it.
 
