@@ -39,3 +39,9 @@
   state/tasks.json` alone. A later `reset --hard` on that branch destroyed the synced
   frontmatter and broke init.sh's consistency gate on main for every downstream lane.
 - [2026-09-05 builder] A board chore that rolls an epic/feature `done` without syncing the spec frontmatter breaks ./init.sh for EVERY later lane (E25-F01: board `done`, spec `in-review`) — the transition write path must update both, and a red init.sh at session start is worth checking against main before blaming your own diff.
+- [2026-09-05 builder] A fixture COPIED from the repo inherits the artifact under test.
+  E26-F02's "does `--self` write the glue manifest?" passed with the write deleted,
+  because the copy already carried a committed, correct manifest. Any assertion about a
+  file the fixture also ships must DELETE it first — otherwise the test proves the
+  repo's state, not the code's behavior. (Same family as "assertion reachable by
+  another path".)

@@ -1,7 +1,7 @@
 ---
 id: E27
 title: Escalation tier — KEEP, cascade the umbrella's models to children
-status: planned
+status: done
 ---
 
 # E27 — Escalation tier: keep + cascade

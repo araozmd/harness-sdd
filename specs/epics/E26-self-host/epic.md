@@ -1,7 +1,7 @@
 ---
 id: E26
 title: Self-host — the repo's own glue is installer-generated
-status: planned
+status: done
 ---
 
 # E26 — Self-host the harness
