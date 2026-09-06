@@ -42,6 +42,10 @@ glue_diff() {
 
 # ── R1 gate-green: emitters and committed glue are in sync RIGHT NOW ──────────
 F="$(fixture green)"
+# The copy inherits the COMMITTED manifest; drop it so R2 proves --self WRITES the
+# ledger rather than inheriting a stale-but-correct copy (a dropped write survived
+# exactly this way in mutation testing).
+rm -f "$F/.claude/.glue-manifest"
 sh "$F/harness-install.sh" --self >"$T/out1.txt" 2>&1 \
   || { cat "$T/out1.txt" >&2; fail "--self exited non-zero"; }
 _d="$(glue_diff "$F")"
