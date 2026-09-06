@@ -4203,8 +4203,7 @@ description: Lightweight fix lane as Fixer — seed an sdd:false fix under the r
 ---
 
 Act as **Fixer** (`.harness/agents/fixer.md`). That role file is the durable contract;
-this command carries the interactive front-end. Resolve all relative paths against
-`.harness/`.
+this command carries the interactive front-end.
 
 The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, STOP and
 **ask** the human what to fix rather than seeding an empty fix.
@@ -4216,8 +4215,9 @@ The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, 
 3. Run a short, **adaptive** Q&A with the human to settle the fix's shape: what's broken,
    the intended fix, how to verify, and a non-empty `## Files expected to change` list
    of normalized repo-relative paths. Remove one leading `./`, then reject absolute
-   paths, unsafe components, wildcards, control characters, and ambiguous prose.
-   Where the shape forks, offer **at most 3** text-only options; never images.
+   paths, empty/`.`/`..` components, repeated/trailing separators, control characters,
+   wildcards, and ambiguous prose. Where the shape forks, offer **at most 3** options
+   as **text-only** (markdown/ASCII) mockups — never images. Keep it short.
 4. **Maintenance epic (create-on-first-use / reuse-by-id).** Look up epic `E99` in
    `.harness/state/tasks.json`. If **absent**, create it with `id: "E99"`, slug
    `maintenance`, title `"Maintenance (hotfixes & minor fixes)"`, `status: "planned"`,
@@ -4244,9 +4244,10 @@ The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, 
    Reviewer`, the same behaviour `/sdd-next` drives) on the just-seeded fix; **reuse** that
    routing, do not re-implement it. The Fixer writes no production code (the Builder does).
 9. **Report** the maintenance-epic state (created/reused `E99`), the seeded fix (id +
-   title + `spec_path` + `autonomous` value), the inbox brief, that no spec / `spec_path`
-   directory / Architect was created or spawned, and that the fix was handed off to the
-   existing `sdd: false` loop in-session.
+   title + `spec_path` + `autonomous` value), the inbox brief at
+   `.harness/progress/inbox/<id>.md`, that no spec / `spec_path` directory / Architect
+   was created or spawned, and that the fix was handed off to the existing `sdd: false`
+   loop in-session.
 EOF
 
   cat > "$CMDDIR/sdd-fix-parallel.md" <<'EOF'
