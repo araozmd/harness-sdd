@@ -4256,13 +4256,13 @@ description: Run a bounded batch of isolated autonomous E99 fixes through target
 ---
 
 Act as the **Fixer parallel coordinator** (`.harness/agents/fixer.md` → “Parallel
-dispatch mode”), resolving all durable paths against `.harness/`.
+dispatch mode”).
 
 This command is argument-free. If `$ARGUMENTS` is non-empty, STOP and report usage
 `/sdd-fix-parallel`.
 
-1. Run `.harness/init.sh`; stop on non-zero.
-2. Execute the Fixer role's P1–P7 sequence: native concurrency/config/in-session
+1. Run `./.harness/init.sh`; stop on non-zero.
+2. Execute the Fixer role's exact P1–P7 sequence: native concurrency/config/in-session
    Builder preflight, one-time F02 provisioning while the primary is clean, complete
    manifest with provisioning failures before claim/dispatch, coordinator bookkeeping
    branch plus one F01 atomic claim with explicit canonical `HARNESS_DIR`,
@@ -4272,9 +4272,9 @@ This command is argument-free. If `$ARGUMENTS` is non-empty, STOP and report usa
    for one id and its pre-provisioned branch/worktree, creates only its post-approval
    code PR, continues siblings, and reports an observed merge for coordinator-owned
    done and teardown.
-4. No ready work is a zero-mutation `no ready E99 fixes` success. Missing native
-   delegation or `execution.builder.backend: delegate` fails before
-   manifest/provisioning/claim and points to serial `/sdd-fix`; never invent a vendor
+4. With no ready work, print `no ready E99 fixes` and exit zero without mutation. If
+   native delegation is absent or `execution.builder.backend: delegate`, fail before
+   manifest/provisioning/claim and point to serial `/sdd-fix`; never invent a vendor
    API or background shell agent.
 EOF
 
