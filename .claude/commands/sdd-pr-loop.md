@@ -220,7 +220,7 @@ The watcher polls every `HARNESS_POLL_INTERVAL` seconds (default **60**) up to
 `HARNESS_POLL_CEILING` (default **900** = 15 min) and writes the **four sources** into
 `$round_dir` on every poll (`gh pr view` alone does NOT return Codex's findings):
 
-- `pr.json` — `gh pr view --json reviews,comments,statusCheckRollup,headRefOid`
+- `pr.json` — `gh pr view --json reviews,comments,statusCheckRollup,headRefOid,baseRefName,baseRefOid`
 - `review-comments.json` — `repos/<o>/<r>/pulls/<n>/comments`, paginated + flattened —
   **the inline findings**, anchored to file/line. Returned by neither `--json comments`
   (issue comments only) nor `reviews[*].body` (summary banner only).
@@ -292,10 +292,10 @@ it.** Two later steps also want to write `unresolved` — step 3 when it cannot 
 recorded outcome, ask the only question that matters: *does the exit code I am reacting to
 actually carry information about whether a review landed?*
 
-- **It does** when the step observed the review state itself. `pr-gate.sh` exit `9`
+- **It does** when the step observed the review state itself. `tools/pr-gate.sh` exit `9`
   (`unresolved`) is the one such case: the gate ran `wait-for-codex.sh evaluate` against this
   round's own files and nothing resolved. That may replace a recorded outcome.
-- **It does not** when the step merely failed to READ something. `pr-gate.sh` exit `4`
+- **It does not** when the step merely failed to READ something. `tools/pr-gate.sh` exit `4`
   (`blocking.json` missing or not a JSON array) and a `pr.json` too broken to yield a
   `headRefOid` are statements about the **cache**, not about Codex. A review may well have
   landed and been recorded seconds earlier.
@@ -334,8 +334,9 @@ the tool never saw it — so the bias ran toward "spend another round" exactly w
 **Do NOT "solve" that by omitting `blocking.json` on a timeout.** Then *absent* means two
 things as well ("timed out" and "aborted before classifying"), and the trend would answer
 `insufficient` — quietly hiding a run that is failing to get reviewed at all. **A timeout is
-information: it is recorded, and it is reported.** `tools/pr-round-trend.sh` keeps `timeout`
-and `unresolved` rounds out of the finding **rate** and prints them in their own block.
+information: it is recorded, and it is reported.** `tools/pr-round-trend.sh` keeps
+`timeout` and `unresolved` rounds out of the finding **rate** and prints them in their own
+block.
 
 ### 3. Parse and classify comments
 
@@ -356,7 +357,7 @@ it never checked). Whatever is NOT in that list is non-blocking for this repo; `
 not in any default.
 
 What the classifier implements (the behavioral contract, owned and tested in
-`tools/wait-for-codex.sh` + `tests/test_pr_loop.sh` — do **not** re-implement it inline):
+`tools/wait-for-codex.sh` + the harness's own suite — do **not** re-implement it inline):
 
 - It scans **`review-comments.json` (the inline findings)**, plus `pr.json`
   `reviews[*].body` and `issue-comments.json` as **advisory** streams. Codex tags
@@ -425,7 +426,7 @@ is larger than one review pass can cover.
 _cs="$(sh tools/change-size.sh --format json 2>/dev/null || echo '{}')"
 _df="$(printf '%s' "$_cs" | jq -r '.total_files // empty' 2>/dev/null || true)"
 _dl="$(printf '%s' "$_cs" | jq -r '.total_lines // empty' 2>/dev/null || true)"
-sh "$HARNESS_DIR/tools/pr-round-trend.sh" --cache ".pr-loop/$pr_number" \
+sh tools/pr-round-trend.sh --cache ".pr-loop/$pr_number" \
    ${_df:+--diff-files "$_df"} ${_dl:+--diff-lines "$_dl"}
 ```
 
@@ -528,10 +529,9 @@ attention it deserves its own PR, where it gets reviewed on its own diff instead
 a review that already converged.
 
 **Which severities those are is a per-repo fact, so read the key.** Under the default `P0,P1`
-this rule is about P2 and nit. In a repo that configures `P0,P1,P2` — as this one does — P2
-findings **are** blocking and this paragraph does not apply to them; treating them as excluded
-would silently defeat the configured threshold and could authorize a merge over real blocking
-work.
+this rule is about P2 and nit. In a repo that configures `P0,P1,P2`, P2 findings **are**
+blocking and this paragraph does not apply to them — treating them as excluded there would
+silently defeat the configured threshold and could authorize a merge over real blocking work.
 
 That instruction exists because the loop stopped honouring it. On PR #89 every round reported zero
 blocking findings and the loop still spent three rounds and three commits on P2s; on PR #86
@@ -585,13 +585,13 @@ acted_append() {
 }
 ```
 
-`acted.json` means **these findings were acted on**, and `tools/pr-round-trend.sh` uses it as
-the round's finding count precisely because that is a claim about what happened rather than
-about what a filter would have kept. So it is appended by the code paths that *do* the acting
-— the three rows below and the in-session variant under them — and by nothing else. A round
-that disposes of no finding writes no `acted.json`, and the trend reads its `blocking.json`
-instead; a round that acted writes one row per finding, `override: true` on each one whose
-severity `pr_loop.blocking_severities` excludes.
+`acted.json` means **these findings were acted on**, and `tools/pr-round-trend.sh`
+uses it as the round's finding count precisely because that is a claim about what happened
+rather than about what a filter would have kept. So it is appended by the code paths that *do*
+the acting — the three rows below and the in-session variant under them — and by nothing else.
+A round that disposes of no finding writes no `acted.json`, and the trend reads its
+`blocking.json` instead; a round that acted writes one row per finding, `override: true` on
+each one whose severity `pr_loop.blocking_severities` excludes.
 
 **A finding declared blocking is acted on whether or not it was fixed.** The cap row does not
 fix anything, but naming a comment in the `needs-human` hand-over is this round's disposition
@@ -711,7 +711,7 @@ so every `acted.json` that is ever going to exist exists — including the curre
 step 4b could not see. The verdict that goes into either terminal message is this one:
 
 ```bash
-sh "$HARNESS_DIR/tools/pr-round-trend.sh" --cache ".pr-loop/$pr_number" \
+sh tools/pr-round-trend.sh --cache ".pr-loop/$pr_number" \
    ${_df:+--diff-files "$_df"} ${_dl:+--diff-lines "$_dl"}
 ```
 
