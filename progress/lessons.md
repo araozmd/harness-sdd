@@ -45,3 +45,15 @@
   file the fixture also ships must DELETE it first — otherwise the test proves the
   repo's state, not the code's behavior. (Same family as "assertion reachable by
   another path".)
+- [2026-09-06 builder] A two-token folded-newline anchor (`grep -qiE
+  'tokenA[^.]{0,N}tokenB'`) proves co-occurrence, not polarity: "Not strictly forbidden
+  as the revert, but avoid: git checkout -- <file>" still satisfies a
+  forbidden/git-checkout anchor. Chasing every negation/hedge shape is open-ended with
+  no provably bounded cost (a prior Reviewer campaign against this exact sentence
+  reached the same conclusion and logged it, `tests/test_reviewer_mutation_mandate.sh`)
+  — state the bound in the convention (`agents/builder.md` "Co-occurrence is not
+  polarity") instead of pretending a green suite proves polarity it never checked.
+  Placement, by contrast, IS boundable: extract the section a block is expected to live
+  in and require the anchor inside that span, not the whole file — a block moved
+  verbatim to a later section/appendix then reddens (E99-F154 added
+  `tests/test_reviewer.sh` R18/R19 for both).

@@ -14,6 +14,7 @@ cd "$ROOT"
 
 REVIEWER="agents/reviewer.md"
 ORCH="agents/orchestrator.md"
+BUILDER="agents/builder.md"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
@@ -133,5 +134,41 @@ case "$_CP" in
   *) fail "R17: $_CP is outside the tests/test_*.sh glob that tools/run-tests.sh discovers, so it no longer runs" ;;
 esac
 pass "R17 campaign_precondition_suite_present_and_discoverable"
+
+# ── R18: mutation-revert discipline stays at ITS POINT OF USE (E99-F154, bound 2) ────
+# "The whole mutation-revert block relocates to an appendix and the suite stays green"
+# was an unstated bound: nothing asserted WHERE the (3b) forbidden-revert rule sits, only
+# that it existed somewhere in the file. A rule read at its point of use gets followed;
+# the identical text moved past "## What you check" into a later section (e.g. an
+# appendix) reads the same to a whole-file grep and is read by no one at the moment a
+# Reviewer is about to mutate a file. Section-scoped per the house convention
+# (agents/builder.md "pin WHERE the block sits"): extract "## What you check" up to the
+# NEXT `^## ` heading, and require the anchor INSIDE that span — not merely in the file.
+_WYC="$(awk '/^## What you check/{k=1;next} /^## /{k=0} k' "$REVIEWER")"
+[ -n "$_WYC" ] || fail "R18: could not extract '## What you check' from $REVIEWER"
+printf '%s\n' "$_WYC" | tr '\n' ' ' | grep -qiE 'forbidden[^.]{0,60}git checkout' \
+  || fail "R18: the mutation-revert discipline's forbidden 'git checkout -- <file>' rule is not inside '## What you check' — it has moved to a later section (e.g. an appendix), where a Reviewer about to mutate a file will not see it at the point of use"
+pass "R18 mutation_revert_block_stays_at_point_of_use"
+
+# ── R19: the negation-immunity bound is STATED, not silently unenforced (E99-F154, ──
+# bound 1). "Not strictly forbidden as the revert, but avoid: git checkout -- <file>"
+# still satisfies a forbidden/git-checkout co-occurrence anchor, because grep sees
+# co-occurrence, not polarity. That gap is deliberately NOT chased with a
+# polarity-aware pattern (open-ended cost) — instead `agents/builder.md`'s assertion
+# convention must STATE it, so the next author knows what a green two-token-anchor
+# suite does not prove. Section-scoped to "## Principles" (where the rest of the
+# assertion convention lives), markdown emphasis stripped, folded across newlines, and
+# two-token anchored — the house convention this very assertion follows.
+_PRINC="$(awk '/^## Principles/{k=1;next} /^## /{k=0} k' "$BUILDER" | sed 's/[*`]//g' | tr '\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g')"
+[ -n "$_PRINC" ] || fail "R19: could not extract '## Principles' from $BUILDER"
+printf '%s\n' "$_PRINC" | grep -qiE 'co-occurrence[^.]{0,20}not polarity' \
+  || fail "R19: $BUILDER does not state 'co-occurrence is not polarity' in its assertion convention"
+printf '%s\n' "$_PRINC" | grep -qiE 'not chased[^.]{0,60}polarity-aware' \
+  || fail "R19: $BUILDER does not state that the negation-immunity bound is deliberately NOT chased with a polarity-aware pattern"
+printf '%s\n' "$_PRINC" | grep -qiE 'not strictly forbidden[^.]{0,20}but avoid[^.]{0,20}git checkout' \
+  || fail "R19: $BUILDER does not give the worked negation example ('not strictly forbidden ... but avoid: git checkout -- <file>')"
+printf '%s\n' "$_PRINC" | grep -qiE 'does not[^.]{0,20}prove[^.]{0,45}still means what it meant' \
+  || fail "R19: $BUILDER does not state what a green two-token anchor does NOT prove (that the sentence still means what it meant when the anchor was written)"
+pass "R19 negation_immunity_bound_is_stated"
 
 echo "All reviewer tests passed."
