@@ -4,6 +4,24 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.73.0] — 2026-09-05
+
+### Added — ✨ `awaiting-merge`: a first-class home between approval and merge (E99-F130)
+
+An approved feature whose PR was still open had nowhere honest to live: `in-review`
+actively misroutes (the selector hands an already-approved feature back to a Reviewer
+every session — measured), and the owner-gate workaround cost two hand-written mutators
+while reporting an in-flight PR indistinguishably from external blockage. Now:
+`tasks-lock.py await-merge <id> [--pr <n>]` parks it with the new `parked.gate: merge`
+(one guarded write); the selector reports **`awaiting-merge`** — its own blocker code,
+never `gated-owner`, with the exit named inline; every transition except that exit
+bounces; and `set-status <id> done --evidence <merge-ref>` clears the park and writes
+the landing receipt in the same write. Owner parks still hold `done`; the dependency
+one-hop naming distinguishes "awaiting merge" (clears itself) from "owner gate" (never
+does). The selector's own PARK_GATES warning — that the strict gate comparison becomes
+load-bearing the day a second member joins — is discharged with the exact
+cross-reporting assertions it demanded.
+
 ## [0.72.1] — 2026-09-05
 
 ### Fixed — 🐛 verification hygiene: assertions that can actually fail (E99-F75/F76/F88)

@@ -54,6 +54,11 @@ Orchestrator's exclusive ownership of state writes.
   python3 tools/tasks-lock.py set-status <id> <status>
   # seeding one sdd:false fix row (the Fixer's R8/R9 contract) — prints the allocated id
   python3 tools/tasks-lock.py add-feature --title "<one-line fix intent>" [--gated]
+  # parking an APPROVED (in-review) feature as awaiting its PR's merge (E99-F130):
+  # the selector reports `awaiting-merge` (never re-routes a Reviewer at it), and the
+  # one sanctioned exit clears the park and writes the landing receipt in one write
+  python3 tools/tasks-lock.py await-merge <id> [--pr <n>]
+  python3 tools/tasks-lock.py set-status <id> done --evidence <merge-ref>
   ```
 
   Run it from **any** cwd — the helper resolves the harness directory with this
