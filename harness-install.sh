@@ -6403,7 +6403,7 @@ self_install() {
   fi
 
   # 5. Glue manifest (E26-F02): a cksum ledger of every regenerated file, consumed by
-  # init.sh's warn-only staleness line and the tests/test_self_drift.sh gate. The
+  # init.sh's warn-only staleness line and the divergence-gate suite (E26-F02). The
   # globs sort deterministically and the manifest never lists itself, so a second
   # `--self` run leaves it byte-identical.
   (
