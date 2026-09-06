@@ -3,6 +3,7 @@
 #
 #   ./harness-install.sh [--agents=<csv>] [--builder-backend=<value>] [--pr-loop=<true|false>] [--with-opencode-parallel=<true|false>] <target-repo-path>
 #   ./harness-install.sh --umbrella <umbrella-dir> [--shared-repo] [--recursive] [--dry-run|--list]
+#   ./harness-install.sh --self          # regenerate the SOURCE repo's own glue (E26-F01)
 #
 # Idempotent: run once to install, re-run to upgrade.
 #
@@ -6305,7 +6306,7 @@ EOF
 # ── E26-F01: `--self` — regenerate the SOURCE repo's own glue ─────────────────
 # The repo's `.claude/agents/*` and `.claude/commands/*` used to be hand-maintained
 # mirrors of what install_one generates — every divergence was found by review. `--self`
-# makes drift impossible by construction WITHOUT a second emitter: it runs the real
+# makes divergence impossible by construction WITHOUT a second emitter: it runs the real
 # install_one on a throwaway temp target (the whole pipeline through its front door) and
 # transforms that target's output into the source layout. Nothing is reimplemented, so
 # the two renderings cannot diverge in content — only in the `.harness/` prefix and the

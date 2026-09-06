@@ -4,6 +4,25 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.76.0] — 2026-09-05
+
+### Added — ✨ `--self`: the source repo's glue is installer-generated (E26-F01)
+
+The repo's `.claude/agents/*` and `.claude/commands/*` were hand-maintained mirrors
+of what the installer generates — measured on 2026-09-05, all 15 files had forked, in
+BOTH directions. `--self` kills the defect class by construction WITHOUT a second
+emitter: it runs the real `install_one` on a throwaway temp target and transforms
+that output into the source layout (prefix strip + one sdd-pr-loop banner swap),
+harvesting each shim's recorded `model:` line (builder=sonnet, builder-heavy=opus)
+through a `resolve_model` choke-point guard so the root `.escalation-arming` verdict
+is computed, never copied. The reconciliation that made the transform total also
+upstreams the committed copies' richer prose into the emitters — per-role shim
+bodies, inception-brief routing in `/sdd-next`, the fuller `/sdd-fix` intake — so
+every target gets it on the next upgrade; heredoc-only improvements (doc-critic
+checkpoints, `baseRefOid` base-change fields) now reach the source copies, and the
+repo-specific severity aside is dropped for the generic text. New suite:
+`tests/test_self_mode.sh`. The drift GATE (regenerate-and-compare in CI) is E26-F02.
+
 ## [0.75.0] — 2026-09-05
 
 ### Added — ✨ umbrella `models:` cascade (E27-F01)

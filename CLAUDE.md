@@ -10,6 +10,11 @@ The role prompts in `agents/*.md` are mirrored as Claude Code sub-agents in
 clean context. The `agents/*.md` files remain canonical — the `.claude/agents/`
 versions just point at them.
 
+**Do not hand-edit `.claude/agents/*` or `.claude/commands/*`** (E26-F01): they are
+GENERATED — run `sh harness-install.sh --self` after changing an emitter (or a shim's
+`model:` line, which `--self` harvests and preserves) and commit the regenerated
+files. Hand edits are clobbered by the next `--self` run.
+
 ## Slash commands
 
 - `/sdd-next` — run the Orchestrator loop on the next actionable task
