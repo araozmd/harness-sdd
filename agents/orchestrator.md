@@ -422,6 +422,12 @@ the budget exists to surface, and the PR body is where the next reader will look
 Reviewer records the same tier and decision in its verdict (`agents/reviewer.md` → "Change-size
 check before the PR handoff"); your PR body carries it forward.
 
+**After the Reviewer approves and the PR is open, park the feature as awaiting its
+merge** (E99-F130): `python3 tools/tasks-lock.py await-merge <id> --pr <n>`. An approved
+feature left at `in-review` is re-routed to a Reviewer every session; the merge park
+reports `awaiting-merge` instead, and `set-status <id> done --evidence <merge-ref>`
+clears it the moment the merge is observed.
+
 **A PR body must INLINE what it cites — never a `progress/` path.** Per-run dirs under
 `progress/` are gitignored by design (E99-F06), so `see progress/<run>/review.md` dangles
 for every reader on another machine; paste the relevant lines (tier, decision, verdict

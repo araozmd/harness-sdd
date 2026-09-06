@@ -1,8 +1,8 @@
 #!/bin/sh
 # harness-install.sh — install or upgrade the agent harness into a target repo.
 #
-#   ./harness-install.sh [--agents=<csv>] [--builder-backend=<value>] [--pr-loop=<true|false>] [--with-opencode-parallel=<true|false>] <target-repo-path>
-#   ./harness-install.sh --umbrella <umbrella-dir> [--shared-repo] [--recursive] [--dry-run|--list]
+#   ./harness-install.sh [--agents=<csv>] [--builder-backend=<value>] [--pr-loop=<true|false>] [--with-opencode-parallel=<true|false>] [--thin|--standalone] <target-repo-path>
+#   ./harness-install.sh --umbrella <umbrella-dir> [--shared-repo] [--recursive] [--thin] [--dry-run|--list]
 #
 # Idempotent: run once to install, re-run to upgrade.
 #
@@ -87,6 +87,27 @@
 # and auto-populates umbrella.manifest.yaml. Single-target mode (no --umbrella) is
 # unchanged. Pass --dry-run (alias --list) with --umbrella to preview exactly which
 # coordinator + git children would be touched, writing nothing.
+#
+# Body layout (--thin / --standalone, E24-F04, see docs/UMBRELLA.md → "Migrating an
+# existing child"). A child of an umbrella holds its prose tier either as a full local copy
+# or as pointer stubs resolved from umbrella.root (E24-F03 / ADR-0004). These two flags are
+# the ONLY way to move a target between those layouts; neither is ever implied.
+#   --thin        one-time consent to CONVERT a full-copy child to the thin layout. The
+#                 conversion is pristine-only and all-or-nothing: every prose-tier path must
+#                 be byte-identical to the umbrella's copy of the same relative path, or
+#                 nothing in that target converts and every differing path is named. Once a
+#                 child IS thin, every later run keeps it thin with no flag and no prompt —
+#                 the flag is consent per child, not a permanent ceremony. Without it, a run
+#                 against a full-copy child REPORTS whether it would convert and converts
+#                 nothing. Valid in single-target and umbrella mode. A target that records no
+#                 umbrella.root has nothing to resolve, so the flag is inert and silent there;
+#                 a recorded root that does not resolve warns and keeps the full copy, and
+#                 never fails the install.
+#   --standalone  the reverse, and the documented way back: re-materialise the full prose
+#                 body from THIS installer's source over a thin target's stubs, and clear that
+#                 target's umbrella.root. Single-target only; rejected with --umbrella and
+#                 with --thin, before anything is written. It is not a permanent opt-out —
+#                 a later explicit --thin run converts the target again.
 #
 # Shared spec repository (--shared-repo, umbrella mode only, see docs/UMBRELLA.md):
 # OPT-IN. After the cascade, make the umbrella ROOT its own git repo that tracks the
@@ -713,6 +734,25 @@ HARNESS_STUB_SENTINEL='<!-- harness:umbrella-stub -->'
 # moved away would stub its whole prose tier against a path holding nothing. And the
 # component is refused when it is a SYMLINK, matching the boundary every other ownership
 # path in this installer already draws.
+#
+# A TARGET IS NOT ITS OWN UMBRELLA, and this is the third strictness rule, not a special
+# case of the conversion. `umbrella.root: "../"` — one plausible hand edit — resolves to
+# the target's OWN `.harness`, which passes every check above: it is a directory, it is not
+# a symlink, and it certainly holds `.harness-version`. Measured on a normal single-target
+# install plus that one edit: `prose_tier_blockers` then compares the tier with ITSELF,
+# finds no blocker, and `--thin` reports `CONVERTED` while replacing all 30 prose files
+# with stubs whose authoritative path is `../.harness/<rel>` — i.e. each stub names ITSELF.
+# Zero real prose files survive. Staging the write (see the prose tier below) prevents the
+# destructive ORDERING but not that outcome; only refusing the root does.
+#
+# REFUSED HERE, not at the conversion, because the nonsense is the ROOT, not the flag. The
+# fresh/maintenance thin arm has the same problem — it would stub the tier against the same
+# self-naming path — and so would any future caller. Refusing here sends every one of them
+# down the full-local-copy arm, which is the same fallback a missing `.harness-version`
+# already gets: the target keeps a real, readable prose body and the run still exits 0.
+#
+# PHYSICAL PATHS ON BOTH SIDES (`pwd -P`), never the configured string, so `../`, `./../`,
+# an absolute spelling and a symlinked route all reach the same answer.
 umbrella_body_dir() {
   _ubd_h="$1"
   # The cascade's value wins on a FRESH child, where §1 runs before any config exists.
@@ -731,7 +771,14 @@ umbrella_body_dir() {
   [ -L "$_ubd_body" ] && return 0
   [ -d "$_ubd_body" ] || return 0
   [ -f "$_ubd_body/.harness-version" ] || return 0
-  ( CDPATH= cd -- "$_ubd_body" && pwd -P )
+  _ubd_phys="$( CDPATH= cd -- "$_ubd_body" 2>/dev/null && pwd -P )" || _ubd_phys=''
+  [ -n "$_ubd_phys" ] || return 0
+  _ubd_self="$( CDPATH= cd -- "$_ubd_h" 2>/dev/null && pwd -P )" || _ubd_self=''
+  if [ -n "$_ubd_self" ] && [ "$_ubd_phys" = "$_ubd_self" ]; then
+    echo "⚠️  umbrella.root ($_ubd_root) resolves to this target's OWN .harness — a target cannot be its own umbrella, and converting against it would leave every prose file a stub pointing at itself; ignoring the key and keeping the full local body" >&2
+    return 0
+  fi
+  printf '%s\n' "$_ubd_phys"
 }
 
 # gen_body_stub <body-relpath> <umbrella-root-as-written> <dest> — write the pointer stub.
@@ -755,8 +802,552 @@ gen_body_stub() {
     printf '(a lone clone, a CI job, a PR reviewer'"'"'s tree). That is a supported state, not a\n'
     printf 'broken one: `.harness/init.sh`, this repository'"'"'s verification gate and its PR loop\n'
     printf 'all still work here — only the prose body is remote. To materialise a full local\n'
-    printf 'copy, run the harness installer against this repository.\n'
+    printf 'copy, run the harness installer against this repository with `--standalone`.\n'
   } > "$_gbs_dest"
+}
+
+# body_link_travels <link-path> <mirror-root> — true when the SYMLINK at <link-path> still
+# MEANS THE SAME THING once the tree it sits in is moved somewhere else. E24-F04 R2.
+#
+# A thin tier is `cp -R`'d from the UMBRELLA's body and lands in the CHILD, so every link in
+# it is re-read from a different directory. A RELATIVE target is resolved from the link's own
+# directory, so it travels intact exactly while it stays INSIDE the tree being moved, and an
+# ABSOLUTE one names the umbrella's own filesystem from the child. `<mirror-root>` is the
+# staging root, which mirrors `$H`'s layout entry for entry — so "resolves inside the staging
+# root" is the same statement as "resolves inside the child's harness dir" once it is swapped
+# in, which is the property that has to hold.
+#
+# RESOLVED BY THE FILESYSTEM (`cd` + `pwd -P`), never by lexical `..` arithmetic: a `..`
+# stripped from a string is the wrong answer whenever an intervening component is itself a
+# link, and this installer has already paid four blocking findings for re-deriving path
+# semantics in POSIX sh instead of asking the tool.
+#
+# FAIL CLOSED — anything unreadable, unresolvable or absolute answers "does not travel", and
+# the caller's response to that is to write an ordinary pointer stub, which is always
+# readable. There is no destructive branch on either side of this predicate.
+body_link_travels() {
+  _blt_l="$1"; _blt_root="$2"
+  _blt_t="$(readlink "$_blt_l" 2>/dev/null)" || return 1
+  [ -n "$_blt_t" ] || return 1
+  case "$_blt_t" in /*) return 1 ;; esac
+  _blt_rp="$( CDPATH= cd -- "$_blt_root" 2>/dev/null && pwd -P )" || _blt_rp=''
+  [ -n "$_blt_rp" ] || return 1
+  _blt_d="$(dirname -- "$_blt_l")"
+  # A direct target that is itself a symlink has another relocation decision hidden behind
+  # it. Keeping the alias while stubbing an escaping second hop changes the alias from the
+  # authoritative bytes to the generated stub text (Codex #3809738600). Refuse the alias
+  # conservatively; the caller writes its ordinary pointer stub, which resolves the complete
+  # chain at the umbrella instead of reproducing only its first hop in the child.
+  #
+  # PROBED AGAINST THE UMBRELLA TWIN AS WELL (Codex #3942215068): the tree being judged
+  # is built entry by entry, so an alias in an EARLIER entry whose target lives in a
+  # LATER one probes an incomplete tree here and the second link is invisible — kept,
+  # then its target is replaced by a pointer stub, and the child alias reads stub text
+  # where the umbrella alias reads the real bytes. The umbrella body is complete by
+  # definition, so the same relative walk there sees every hop. Both probes stand: the
+  # local one catches links already present in this tree, the umbrella one catches the
+  # not-yet-staged remainder.
+  [ -L "$_blt_d/$_blt_t" ] && return 1
+  if [ -n "${_umb_body:-}" ]; then
+    _blt_rel="${_blt_l#"$_blt_root"/}"
+    [ -L "$_umb_body/$(dirname -- "$_blt_rel")/$_blt_t" ] && return 1
+  fi
+  # (1) THE COMPLETE TARGET, resolved from the link's own directory, whenever the filesystem
+  # can resolve it at all — which is every target that IS a directory, INCLUDING one made of
+  # nothing but traversal (`..`, `../..`, `../../`). This branch exists because the first
+  # version of this predicate resolved only `dirname(target)`, and a target whose LAST
+  # component is `..` has its escape entirely in the part that `dirname` throws away.
+  # Measured on `docs/link -> ../..` (Codex #3804812828): judged travelling, kept by both the
+  # fresh and the maintenance arm, and it then names the UMBRELLA repo root at the umbrella
+  # and the CHILD repo root in the child — two different repositories, which is exactly the
+  # position dependence this predicate exists to reject. `../../` (trailing slash) is the same
+  # defect wearing a different spelling, which is why the decision is taken from the
+  # FILESYSTEM's resolution and not from the shape of the string.
+  _blt_dp="$( CDPATH= cd -- "$_blt_d" 2>/dev/null \
+    && CDPATH= cd -- "$_blt_t" 2>/dev/null && pwd -P )" || _blt_dp=''
+  if [ -z "$_blt_dp" ]; then
+    # (2) The target is not a directory: a FILE, or ABSENT — and absent has to keep working,
+    # because `docs/dangling -> no-such-target` is a shape the full copy also produces and
+    # E24-F03 requires a thin child to keep it. Only here is it sound to resolve the PARENT
+    # and treat the final component as a NAME, and only when it genuinely is one: a final
+    # `.` or `..` that did not resolve above is traversal this cannot account for, so it
+    # fails closed. `basename` is what reads that component, because it normalises the
+    # trailing-slash spellings a `case` on the raw string would miss.
+    #
+    # DELIBERATELY NOT CLAIMED AS TESTED, and the analysis is worth recording rather than
+    # discovering again: with branch (1) in place this guard looks unreachable. Reaching it
+    # needs `cd "$target"` to fail while `cd "$(dirname "$target")"` succeeds and the final
+    # component is `.` or `..` — but `a/..` resolves whenever `a` does, so the two `cd`s
+    # succeed and fail together. It is kept because it is what makes branch (2)'s inference
+    # (a parent inside the root plus a NAME is inside the root) true on its own terms rather
+    # than by leaning on branch (1) being exhaustive; delete branch (1)'s complete-target
+    # resolution and this is the line that stops the escape becoming silent again.
+    case "$(basename -- "$_blt_t")" in
+      .|..) return 1 ;;
+    esac
+    _blt_dp="$( CDPATH= cd -- "$_blt_d" 2>/dev/null \
+      && CDPATH= cd -- "$(dirname -- "$_blt_t")" 2>/dev/null && pwd -P )" || _blt_dp=''
+    [ -n "$_blt_dp" ] || return 1
+    # A parent inside the root plus a plain NAME is inside the root; that inference is what
+    # makes this branch sound, and it is why the `.`/`..` refusal above is not optional.
+  fi
+  case "$_blt_dp" in
+    "$_blt_rp"|"$_blt_rp"/*) return 0 ;;
+  esac
+  return 1
+}
+
+# _ptb_relpath <abs-path> — the HARNESS-DIR-RELATIVE form of a path that `diff` or `find`
+# just named, falling back to the tier entry when it belongs to neither side. Reads
+# prose_tier_blockers' loop variables directly (POSIX sh has no locals; stage_tree reads
+# $_umb_body the same way). It is ONE function because R3's "name every differing path" has
+# to mean the same thing for both producers of blocker paths — the unsafe-node sweep and the
+# exact walk — and two copies of this `case` would be free to diverge.
+# rm_owned_tree <path>… — remove a tree THIS INSTALLER MATERIALISED, making it writable first.
+#
+# THE RULE, STATED ONCE, BECAUSE IT WAS A HABIT AND HABITS GET SKIPPED. `cp -R` carries the
+# SOURCE's modes across, so any tree this installer copied from a source whose modes it does
+# not control can contain a directory it cannot unlink through — `0555` is enough — and the
+# `rm -rf` then fails. That fact was already known here: two sites had grown their own
+# `chmod -R u+w` first. Five had not, and the one that mattered was the cleanup after a
+# SUCCESSFUL conversion, where the failure lands after the tier has already been swapped.
+# Measured (Codex #3805383748): the child ends CONVERTED on disk, `set -e` kills the run
+# before the manifest is written so it still claims `full body layout`, and
+# `.harness-prose-replaced.<pid>` is left inside `.harness`.
+#
+# WHERE IT APPLIES, and the boundary is the PROVENANCE OF THE MODES, not the location:
+#   YES  `copy`'s destination, `stage_tree`'s staging copies, the parked originals, and the
+#        sanitised comparison copies — every one of them arrives via `cp -R` from `$SRC` or
+#        from the umbrella body, carrying whatever modes that tree had.
+#   NO   `$CMDDIR` and the Codex skill temp dir — written by this installer's own heredocs and
+#        generators, so their modes are its umask and a `chmod` there would be noise.
+#
+# `chmod -R` does not follow symlinks ENCOUNTERED during traversal, but GNU chmod follows a
+# symlink supplied as a command-line operand. A regular file may also be a hard link to an
+# external inode. Neither kind needs writable file bits to be unlinked: permission on its
+# parent directory is what controls removal. Therefore only DIRECTORY nodes in a real
+# installer-owned tree are widened. chmod/find failure is deliberately ignored: widening is
+# best effort, and the `rm` that follows is the operation whose exit status actually matters.
+rm_owned_tree() {
+  for _rot_path do
+    if [ -L "$_rot_path" ]; then
+      rm -f "$_rot_path" || return 1
+      continue
+    fi
+    if [ -d "$_rot_path" ]; then
+      find "$_rot_path" -type d -exec chmod u+w {} + 2>/dev/null || :
+    fi
+    rm -rf "$_rot_path" || return 1
+  done
+  return 0
+}
+
+#
+# _ptb_print_path <path> — render one pathname as ONE diagnostic record. A literal newline
+# cannot travel through the newline-delimited blocker stream without becoming two bogus
+# paths, so escape backslash and the C0 separators operators need to recognise. Pass the raw
+# value through the environment: awk `-v` interprets backslash escapes in assignments and
+# would turn a literal `\n` in a filename into the very newline this function must preserve.
+_ptb_print_path() {
+  _PTB_PRINT_PATH="$1"
+  export _PTB_PRINT_PATH
+  if LC_ALL=C awk 'BEGIN {
+    p = ENVIRON["_PTB_PRINT_PATH"]
+    out = ""
+    for (i = 1; i <= length(p); i++) {
+      c = substr(p, i, 1)
+      if (c == "\\") out = out "\\\\"
+      else if (c == "\n") out = out "\\n"
+      else if (c == "\r") out = out "\\r"
+      else if (c == "\t") out = out "\\t"
+      else out = out c
+    }
+    print out
+  }'; then
+    unset _PTB_PRINT_PATH
+    return 0
+  fi
+  unset _PTB_PRINT_PATH
+  return 1
+}
+
+# IT STRIPS `$_ptb_ra`/`$_ptb_rb`, NOT `$_ptb_h`/`$_ptb_u`: those two name the roots of the
+# trees CURRENTLY BEING COMPARED, which are the child's and the umbrella's for an ordinary
+# entry and the regular-node-only copies of them for an entry that holds unsafe nodes (see
+# _ptb_sanitize).
+# Both spellings have to yield the same harness-relative path or R3 would name a temporary
+# directory at the operator.
+_ptb_relpath() {
+  case "$1" in
+    "$_ptb_ra"/*) _ptb_print_path "${1#"$_ptb_ra"/}" ;;
+    "$_ptb_rb"/*) _ptb_print_path "${1#"$_ptb_rb"/}" ;;
+    *)            _ptb_print_path "$_ptb_rel" ;;
+  esac
+}
+
+# _ptb_unsafe_walk <path>… — print every symlink or non-regular, non-directory node AT or
+# UNDER the paths after normalising and escaping it, before any newline-delimited stream can
+# split a legal pathname. Besides symlinks, FIFOs/sockets/devices cannot be handed to `diff`:
+# it may open them and block indefinitely. Quoted globs preserve embedded whitespace/newlines;
+# the dot patterns cover every hidden entry except `.` and `..`. Recursion runs in a subshell
+# because POSIX sh has no local variables.
+_ptb_unsafe_walk() (
+  for _puw_root do
+    if [ -L "$_puw_root" ]; then
+      _ptb_relpath "$_puw_root"
+      continue
+    fi
+    [ -e "$_puw_root" ] || continue
+    if [ -d "$_puw_root" ]; then
+      [ -r "$_puw_root" ] && [ -x "$_puw_root" ] || exit 1
+      for _puw_p in "$_puw_root"/* "$_puw_root"/.[!.]* "$_puw_root"/..?*; do
+        [ -e "$_puw_p" ] || [ -L "$_puw_p" ] || continue
+        if [ -L "$_puw_p" ]; then
+          _ptb_relpath "$_puw_p"
+        elif [ -d "$_puw_p" ]; then
+          _ptb_unsafe_walk "$_puw_p" || exit 1
+        elif [ ! -f "$_puw_p" ]; then
+          _ptb_relpath "$_puw_p"
+        fi
+      done
+    elif [ ! -f "$_puw_root" ]; then
+      _ptb_relpath "$_puw_root"
+    fi
+  done
+)
+
+# _ptb_snapshot_specials <path>… — name every symlink / non-regular, non-directory node
+# in the SNAPSHOT copies, INDEPENDENTLY of _ptb_unsafe_walk. Deliberately a second walker
+# rather than a reuse: the snapshot namer exists to catch what the live sweep MISSED —
+# a node introduced between the sweep and the copy (the post-sweep race), or a sweep that
+# is itself broken. Deriving the names by re-running the same sweep would inherit the
+# same blindness and name nothing (proven by the race-defence control, which mutates the
+# sweep to plant a FIFO and report clean). Same fail-closed shape: an unreadable
+# directory exits 1, and every name renders through _ptb_relpath.
+_ptb_snapshot_specials() (
+  for _pss_root do
+    if [ -L "$_pss_root" ]; then
+      _ptb_relpath "$_pss_root"
+      continue
+    fi
+    [ -e "$_pss_root" ] || continue
+    if [ -d "$_pss_root" ]; then
+      [ -r "$_pss_root" ] && [ -x "$_pss_root" ] || exit 1
+      for _pss_p in "$_pss_root"/* "$_pss_root"/.[!.]* "$_pss_root"/..?*; do
+        [ -e "$_pss_p" ] || [ -L "$_pss_p" ] || continue
+        if [ -L "$_pss_p" ]; then
+          _ptb_relpath "$_pss_p"
+        elif [ -d "$_pss_p" ]; then
+          _ptb_snapshot_specials "$_pss_p" || exit 1
+        elif [ ! -f "$_pss_p" ]; then
+          _ptb_relpath "$_pss_p"
+        fi
+      done
+    elif [ ! -f "$_pss_root" ]; then
+      _ptb_relpath "$_pss_root"
+    fi
+  done
+)
+
+# _ptb_sanitize — REPOINT the current entry's comparison at REGULAR-NODE-ONLY COPIES of its
+# two sides, so `diff -r` can still name every OTHER differing path inside an entry that holds
+# an unsafe node.
+#
+# WHY A COPY AND NOT A CLEVERER `diff` — and the reason is NOT the one the thinning walk has.
+# MEASURED, because the inherited claim did not survive being checked. Two trees that BOTH
+# hold `docs/self -> .`:
+#   this box's `diff -rq` prints `diff: <path>/self: Directory loop detected` for EACH side,
+#   on stderr, and carries on. It does not hang and it does not run to the resolution limit —
+#   that outcome belongs to the GLOB-AND-RECURSE thinning walk (E24-F03, 264 entries), which
+#   is a different traversal, and repeating it about `diff` would have been folklore.
+#   With the link on ONE side only, `diff -r` does not descend at all: the path is `Only in`.
+# The damage is therefore not a hang, it is the NAMING. Those two lines are not a form this
+# parser recognises, so the fail-closed `*)` arm fires and the whole entry collapses to
+# `docs` — R3's per-path promise degrades to entry granularity, and the operator is told a
+# directory differs instead of which file does. Loop detection is also a courtesy of this
+# implementation, not a POSIX guarantee, so a `diff` without it fares worse.
+# The rule that follows is unchanged — never hand `diff` a tree that holds a link — but the
+# previous shape bought it by skipping `diff` for the WHOLE entry, which silently dropped
+# every other blocker in it, against R3's promise to name each one (Codex #3802057859).
+# Removing the links from a COPY buys the same protection — the tree `diff` walks provably
+# holds none — without giving up the comparison.
+#
+# Unsafe nodes are already named by the sweep, so deleting them from BOTH copies loses no
+# blocker; where one collides with a regular path, the two producers name the same
+# harness-relative path and the caller's `sort -u` merges them into one. Removing FIFOs,
+# sockets and devices is also what guarantees neither the leaf nor recursive `diff` can open
+# one and block (Codex #3809428890).
+#
+# Returns NON-ZERO when the copies cannot be built or when a side has nothing left to compare
+# (the entry itself was unsafe) — the caller then falls back to naming the unsafe nodes alone,
+# which is exactly the old behaviour and is still fail-closed: the entry blocks either way.
+_ptb_sanitize() {
+  [ -n "$_ptb_tmp" ] || return 1
+  _ptb_src_a="$_ptb_a"; _ptb_src_b="$_ptb_b"
+  rm_owned_tree "$_ptb_tmp/h" "$_ptb_tmp/u" || return 1
+  mkdir -p "$(dirname -- "$_ptb_tmp/h/$_ptb_rel")" "$(dirname -- "$_ptb_tmp/u/$_ptb_rel")" \
+    || return 1
+  # `cp -R` does NOT follow symlinks or read FIFOs, so it reproduces their directory entries
+  # without traversing a cycle or blocking on a writer — the same property stage_tree relies on.
+  cp -R "$_ptb_src_a" "$_ptb_tmp/h/$_ptb_rel" || return 1
+  cp -R "$_ptb_src_b" "$_ptb_tmp/u/$_ptb_rel" || return 1
+  chmod -R u+w "$_ptb_tmp" 2>/dev/null || :
+  _ptb_a="$_ptb_tmp/h/$_ptb_rel"; _ptb_b="$_ptb_tmp/u/$_ptb_rel"
+  _ptb_ra="$_ptb_tmp/h"; _ptb_rb="$_ptb_tmp/u"
+  # The live-tree sweep and the copies have distinct observation points. Name every
+  # special node present in the SNAPSHOT — via the INDEPENDENT walker, never by
+  # re-running the sweep whose miss this exists to catch — so a node introduced between
+  # the sweep and `cp -R` can never be silently removed by the `find` below and
+  # mistaken for a pristine entry. These records join the caller's single `sort -u`.
+  if ! _ptb_snap_unsafe="$(_ptb_snapshot_specials "$_ptb_a" "$_ptb_b")"; then
+    _ptb_print_path "$_ptb_rel"
+    return 1
+  fi
+  [ -z "$_ptb_snap_unsafe" ] || printf '%s\n' "$_ptb_snap_unsafe"
+  find "$_ptb_tmp/h" "$_ptb_tmp/u" ! -type d ! -type f -exec rm -f {} + \
+    >/dev/null 2>&1 || return 1
+  [ -e "$_ptb_a" ] && [ -e "$_ptb_b" ] || return 1
+}
+
+# _ptb_exact_walk <left-dir> <right-dir> — derive exact names while every raw pathname is
+# still a quoted shell value: paths present only below LEFT, file/directory collisions, and
+# two-sided non-directory differences. `diff -q` otherwise reports these in human sentences
+# whose separators and record newlines are all legal pathname bytes.
+#
+# This walk decides ONLY THE NAME, never whether conversion is safe. `diff`'s exit status
+# below remains the byte-identity authority. Quoted globs keep embedded whitespace/newlines
+# intact while the two dot patterns cover every hidden entry except `.` and `..`. Recursion
+# runs in a subshell because POSIX sh has no local variables; without it, a nested call would
+# overwrite the parent loop's roots.
+_ptb_exact_walk() (
+  _pos_l="$1"; _pos_r="$2"
+  _pos_unsafe=0
+  [ -d "$_pos_l" ] && [ -d "$_pos_r" ] || exit 0
+  [ -r "$_pos_l" ] && [ -x "$_pos_l" ] || exit 1
+  for _pos_p in "$_pos_l"/* "$_pos_l"/.[!.]* "$_pos_l"/..?*; do
+    [ -e "$_pos_p" ] || [ -L "$_pos_p" ] || continue
+    _pos_rel="${_pos_p#"$_pos_l"/}"
+    _pos_other="$_pos_r/$_pos_rel"
+    if [ ! -e "$_pos_other" ] && [ ! -L "$_pos_other" ]; then
+      _ptb_relpath "$_pos_p"
+    elif { [ -d "$_pos_p" ] && [ ! -d "$_pos_other" ]; } \
+      || { [ ! -d "$_pos_p" ] && [ -d "$_pos_other" ]; }; then
+      # Both names exist, but one is a directory and the other is not. `diff` describes
+      # that collision in another human sentence, so name it here at the exact path before
+      # deciding whether recursion is possible.
+      _ptb_relpath "$_pos_p"
+    elif [ -d "$_pos_p" ] && [ ! -L "$_pos_p" ] \
+      && [ -d "$_pos_other" ] && [ ! -L "$_pos_other" ]; then
+      if _ptb_exact_walk "$_pos_p" "$_pos_other"; then
+        :
+      else
+        _pos_child_rc=$?
+        [ "$_pos_child_rc" = "2" ] && _pos_unsafe=1 || exit 1
+      fi
+    elif [ -L "$_pos_p" ] || [ -L "$_pos_other" ] \
+      || [ ! -f "$_pos_p" ] || [ ! -f "$_pos_other" ]; then
+      # Defence in depth against an unsafe node appearing after the pre-sweep. Never open it,
+      # and return the distinct status that moves the later recursive verdict to safe copies.
+      _ptb_relpath "$_pos_p"
+      _pos_unsafe=1
+    elif ! LC_ALL=C diff -q "$_pos_p" "$_pos_other" >/dev/null 2>&1; then
+      _ptb_relpath "$_pos_p"
+    fi
+  done
+  [ "$_pos_unsafe" = "0" ] || exit 2
+)
+
+# _ptb_exact_both <left> <right> — run the quoted exact walk in both directions, preserving
+# status 2 when either side observed an unsafe node after the initial sweep. Continue through
+# both directions so R3 still receives every exact path, not merely the first race witness.
+_ptb_exact_both() (
+  _peb_unsafe=0
+  if _ptb_exact_walk "$1" "$2"; then
+    :
+  else
+    _peb_rc=$?
+    [ "$_peb_rc" = "2" ] && _peb_unsafe=1 || exit 1
+  fi
+  if _ptb_exact_walk "$2" "$1"; then
+    :
+  else
+    _peb_rc=$?
+    [ "$_peb_rc" = "2" ] && _peb_unsafe=1 || exit 1
+  fi
+  [ "$_peb_unsafe" = "0" ] || exit 2
+)
+
+# prose_tier_blockers <harness-dir> <umbrella-body-dir> — print one HARNESS-DIR-RELATIVE
+# path per prose-tier path that BLOCKS converting <harness-dir> to the thin layout; print
+# NOTHING when the whole tier is convertible. E24-F04 R1/R2/R3. This comment documents it and
+# its per-entry helper `_ptb_entry_blockers`, which is defined first and called from its loop.
+#
+# THE REFERENCE IS THE UMBRELLA BODY'S COPY, NOT $SRC. The question a conversion asks is
+# "if I drop this content and point at the umbrella, does the child lose anything?", and the
+# umbrella's copy is the thing the stub will name. In a cascade the two happen to coincide
+# (install_one "$UMB" runs before the child loop), so passing $SRC here passes every
+# cascade-built case. The run that separates them — and the ONLY one that does — is
+# tests/test_umbrella.sh::thin_reference_is_the_umbrella_body: a child still byte-identical
+# to $SRC, an umbrella edited ahead of it, converted single-target. Under the $SRC reference
+# that child converts, and its prose tier is deleted and redirected at umbrella content it
+# never held.
+#
+# CALL `diff` FOR THE DECISION. The predicate needed is "are these two trees identical",
+# which remains `diff -r`'s exit status. The quoted walk above derives only exact diagnostic
+# names before they enter a line-oriented stream; it cannot make a child convertible.
+#
+# `-q` now only prevents needless hunk generation. No diagnostic wording or record boundary
+# is parsed: both the per-file naming probes and the whole-entry authority discard stdout and
+# stderr, so a locale or pathname can never change the safety verdict through prose.
+#
+# FAIL CLOSED. Where byte-identity cannot be ESTABLISHED — a path present on one side only,
+# an entry missing outright, `diff` absent from PATH, a naming walk that cannot complete, or
+# a `diff` trouble status — the entry BLOCKS. `diff`'s EXIT STATUS is the contract; exact
+# diagnostics can narrow the reported path but can never override it. Absence of evidence of
+# an edit is not evidence of its absence. A
+# child-local extra file inside the prose tier is the sharpest case: the conversion replaces
+# the whole tier entry with a `cp -R` of the umbrella's, so it would DELETE that file.
+#
+# A SYMLINK ANYWHERE IN THE ENTRY BLOCKS IT, ON EITHER SIDE, and that is not fussiness —
+# `diff` DEREFERENCES. Two paths that differ STRUCTURALLY while resolving to the same bytes
+# are reported identical, so the entry is judged pristine and the conversion `cp -R`s the
+# UMBRELLA's link into the child. A relative target resolves from the link's own directory,
+# so the child ends up with a link that resolves from the UMBRELLA's location: outside its
+# tree, or broken. Measured on a real full-copy child (Codex #3801551083) — both of these
+# printed CONVERTED and left `agents/builder.md` unreadable:
+#   child REGULAR FILE vs umbrella SYMLINK to identical content
+#   BOTH symlinks, DIFFERENT targets, identical content
+# BOTH SIDES ARE SWEPT, not just the umbrella's. The mirror shape — the CHILD holds the link,
+# the umbrella a regular file — is not a redirect but is still a false pristine: the child's
+# link is judged identical, then deleted and replaced by a stub while the run reports success.
+# `diff --no-dereference` names both correctly and is what this box's diff offers, but it is
+# not portable — GNU diffutils only grew it in 3.3 — and on a box without it every comparison
+# would fail closed, so NO child could ever convert. The quoted unsafe-node sweep needs no
+# capability probe and preserves every legal pathname byte. WHAT IT COSTS: a child and
+# umbrella holding the SAME symlink with the SAME
+# target — provably safe — is refused too. That is this feature's stated posture (anything
+# not provably safe stays full-copy), and it is the same boundary `umbrella_body_dir` and R12
+# already draw around a symlinked root and a symlinked roster.
+#
+# THIS FUNCTION IS NOT WHERE THE LINK RULE IS ENFORCED FOR THE WRITE, and the difference is
+# not an oversight — it is the two questions being different. This one asks "can byte-identity
+# be ESTABLISHED", and a link makes the answer no, so a CONVERSION (which destroys a real
+# body) refuses outright. The WRITER asks "does this link mean the same thing at the child's
+# path", which is answerable, and it answers it in `body_link_travels`, inside `stage_tree` and
+# `stub_files_in` — BELOW every arm, so an arm that never judges anything (the maintenance one)
+# cannot opt out of it. Putting the rule only here is precisely the shape that shipped the
+# dangling link Codex #3802057839 measured.
+#
+# THE SWEEP RUNS BEFORE `diff`, AND REDIRECTS IT RATHER THAN SKIPPING IT. `diff -r` must never
+# be handed a tree that holds a link or another special node: links corrupt structural identity,
+# while FIFOs can block forever waiting for a writer. When the sweep finds one, `diff` is pointed
+# at regular-node-only COPIES of the two sides instead. Both producers then contribute, and the
+# caller merges their output with `sort -u`, because R3 promises the operator EVERY differing
+# path in the tier and an entry holding one unsafe node plus one edit has two of them.
+#
+# _ptb_entry_blockers <no args> — ONE entry's blockers, reading $_ptb_rel/$_ptb_h/$_ptb_u from
+# its caller. It is a function so that the caller can pipe the WHOLE entry through one
+# `sort -u`; the encoded symlink and exact-name producers both write to that stream.
+_ptb_entry_blockers() {
+  _ptb_a="$_ptb_h/$_ptb_rel"
+  _ptb_b="$_ptb_u/$_ptb_rel"
+  _ptb_ra="$_ptb_h"; _ptb_rb="$_ptb_u"
+  # A WHOLE entry absent on one side is diff's exit 2 with its message on STDERR, so a
+  # stdout-only capture would name nothing. Answer it here, where the path is in hand.
+  if [ ! -e "$_ptb_a" ] || [ ! -e "$_ptb_b" ]; then
+    printf '%s\n' "$_ptb_rel"
+    return 0
+  fi
+  # THE UNSAFE-NODE SWEEP (see the rule above). Fail closed on a walk that could not complete:
+  # a side this cannot read is not a side whose shape has been established, and the entry
+  # path itself is the honest thing to name.
+  if ! _ptb_unsafe="$(_ptb_unsafe_walk "$_ptb_a" "$_ptb_b")"; then
+    _ptb_unsafe="$(_ptb_print_path "$_ptb_rel")"
+  fi
+  if [ -n "$_ptb_unsafe" ]; then
+    # When BOTH sides hold the unsafe node, the two absolute paths normalise to the SAME
+    # tier-relative one; the caller's `sort -u` is what keeps that one problem one line.
+    printf '%s\n' "$_ptb_unsafe"
+  fi
+  # ALWAYS snapshot before either comparison, even when the live sweep was clean. An external
+  # writer can change the live tree after any observation; private regular-node-only copies
+  # give the exact walk and authoritative recursive diff one immutable view and close the final
+  # post-walk race (Codex #3809738603). The sanitizer names any unsafe node the snapshot adds.
+  _ptb_sanitize || { _ptb_print_path "$_ptb_rel"; return 0; }   # fail CLOSED: a snapshot
+                                  # that could not be built is not a clean entry — name it
+                                  # (Codex #149 P1: cp -R fails on an unreadable child file
+                                  # the sweep cannot see, and silence here reads as pristine)
+  # Derive exact names independently of `diff`'s human prose. Run both directions so
+  # one-sided paths from either tree are covered; `sort -u` merges two-sided overlap and
+  # overlap with the symlink producer. A traversal failure can never make the tier clean.
+  _ptb_exact=''; _ptb_exact_ok=1
+  if [ -d "$_ptb_a" ] && [ -d "$_ptb_b" ]; then
+    if _ptb_exact="$(_ptb_exact_both "$_ptb_a" "$_ptb_b")"; then
+      _ptb_exact_rc=0
+    else
+      _ptb_exact_rc=$?
+    fi
+    [ -z "$_ptb_exact" ] || printf '%s\n' "$_ptb_exact"
+    if [ "$_ptb_exact_rc" = "2" ]; then
+      # The pre-sweep raced with a newly introduced unsafe node. Its exact name is already in
+      # the output above; sanitize a snapshot now so the authoritative recursive diff below
+      # cannot open the original. Re-run naming to retain every ordinary difference too.
+      _ptb_sanitize || { _ptb_print_path "$_ptb_rel"; return 0; }   # fail CLOSED: a snapshot
+                                  # that could not be built is not a clean entry — name it
+                                  # (Codex #149 P1: cp -R fails on an unreadable child file
+                                  # the sweep cannot see, and silence here reads as pristine)
+      if _ptb_after="$(_ptb_exact_both "$_ptb_a" "$_ptb_b")"; then
+        _ptb_after_rc=0
+      else
+        _ptb_after_rc=$?
+      fi
+      [ -z "$_ptb_after" ] || printf '%s\n' "$_ptb_after"
+      # A private sanitised copy must contain only directories and regular files. If that
+      # invariant cannot be established, keep the named blockers and never invoke `diff`.
+      [ "$_ptb_after_rc" = "0" ] || return 0
+    elif [ "$_ptb_exact_rc" != "0" ]; then
+      _ptb_exact_ok=0
+    fi
+  fi
+  # CAPTURE INSIDE AN `if`. This script runs under `set -eu` and `diff` exits non-zero
+  # in exactly the case this feature exists for, so a bare `_out="$(diff -rq A B)"` would
+  # kill the run the moment a child differs.
+  # Discard diff's human prose: even its record newline is legal in a pathname. Status 0 is
+  # identity, 1 is an ordinary difference, and >1 is trouble. Only status 1 plus a complete,
+  # non-empty exact-name walk may rely on those names; every other non-zero shape falls back
+  # to the tier entry and remains fail-closed.
+  if LC_ALL=C diff -rq "$_ptb_a" "$_ptb_b" >/dev/null 2>&1; then
+    return 0
+  else
+    _ptb_diff_rc=$?
+  fi
+  [ "$_ptb_diff_rc" = "1" ] && [ "$_ptb_exact_ok" = "1" ] && [ -n "$_ptb_exact" ] \
+    && return 0
+  _ptb_print_path "$_ptb_rel"
+}
+
+prose_tier_blockers() {
+  _ptb_h="$1"; _ptb_u="$2"
+  # Defence in depth, deliberately not claimed as tested: a portable fixture cannot remove
+  # `diff` from PATH without also removing it from the harness running the test.
+  if ! command -v diff >/dev/null 2>&1; then
+    for _ptb_rel in $HARNESS_BODY_PROSE; do
+      printf '%s (no `diff` on PATH — byte-identity cannot be established)\n' "$_ptb_rel"
+    done
+    return 0
+  fi
+  # Created up front rather than on first use because _ptb_entry_blockers runs in a PIPELINE,
+  # i.e. a subshell, and a temp root it created there could be neither reused nor removed by
+  # this function. An empty value simply means the sanitised comparison is unavailable and
+  # every entry falls back to naming its unsafe nodes alone.
+  _ptb_tmp="$(mktemp -d 2>/dev/null || mktemp -d -t harness-ptb)" || _ptb_tmp=''
+  for _ptb_rel in $HARNESS_BODY_PROSE; do
+    # ONE `sort -u` PER ENTRY, over BOTH producers: the unsafe-node sweep and exact walk
+    # each name paths, a path can legitimately be named by both, and R3 asks for every
+    # differing path exactly once. (Codex #3802057859.)
+    _ptb_entry_blockers | sort -u
+  done
+  [ -z "$_ptb_tmp" ] || rm_owned_tree "$_ptb_tmp"
 }
 
 # child_is_full_copy <harness-dir> — true when this target already holds REAL prose-tier
@@ -2420,14 +3011,21 @@ install_one() {
     _src="$SRC/$1"; _dst="$H/$1"
     if [ ! -e "$_src" ]; then die "source missing: $1"; fi
     mkdir -p "$(dirname "$_dst")"
-    rm -rf "$_dst"
+    rm_owned_tree "$_dst"
     cp -R "$_src" "$_dst"
   }
-  # stub_files_in <dir-under-$H> <umbrella-root> — walk a tree ALREADY MATERIALISED by
+  # stub_files_in <dir> <umbrella-root> <strip-root> — walk a tree ALREADY MATERIALISED by
   # `cp -R` and replace each REGULAR file's contents with a pointer stub, in place.
   #
+  # <strip-root> IS A PARAMETER because the tree being thinned is no longer the tree the
+  # consumer will open: the whole prose tier is now stubbed inside a STAGING root and moved
+  # into `$H` only once all of it succeeded. The stub TEXT must still name the body-relative
+  # path (`agents/builder.md`), never the staged one, or a converted child would stop being
+  # byte-identical to a fresh thin one — so the caller passes the root whose removal yields
+  # that path, and the recursion carries it down unchanged.
+  #
   # Note the direction: this does not build the shape, it only thins what `cp -R` built.
-  # That inversion is the point — see stub_tree below.
+  # That inversion is the point — see thin_prose_tier below.
   #
   # Globs, not `find | while read`: a glob is newline-safe by construction, and this repo has
   # already been bitten by paths containing newlines. `find -exec` cannot help here because
@@ -2443,24 +3041,49 @@ install_one() {
   # A missed name is now a THINNING miss, not a SHAPE miss: the file is still present with
   # `cp -R`'s own content, merely not stubbed. That is the whole safety win of the inversion.
   stub_files_in() {
-    _sfi_dir="$1"; _sfi_root="$2"
+    _sfi_dir="$1"; _sfi_root="$2"; _sfi_top="$3"
     for _sfi_f in "$_sfi_dir"/* "$_sfi_dir"/.[!.]* "$_sfi_dir"/..?*; do
-      [ -e "$_sfi_f" ] || continue
+      # `-e` DEREFERENCES, so it is false for a symlink whose target is not there — and after
+      # `cp -R` from the umbrella, an escaping link is EXACTLY that: it resolved at the
+      # umbrella and does not resolve here. On its own this guard therefore skipped the one
+      # shape the rule below exists for, and the child kept the dangling link. `-L` is what
+      # makes a link visible to this loop at all; an unmatched glob is neither.
+      { [ -e "$_sfi_f" ] || [ -L "$_sfi_f" ]; } || continue
       if [ -L "$_sfi_f" ]; then
-        # `cp -R` preserves a symlink as a symlink; so must we. Descending instead would
-        # follow it — `[ -d ]` dereferences — and a self- or ancestor-referencing link like
-        # `docs/self -> .` expands into `docs/self/self/...` until the OS resolution limit.
-        # Reproduced end-to-end: 264 entries under a child's docs/ against 8 in a control,
-        # with the cascade still reporting its ordinary status. Stubbing it would be just as
-        # wrong the other way — the write would land on the link's TARGET.
+        # NEVER DESCEND — `[ -d ]` dereferences, and a self- or ancestor-referencing link
+        # like `docs/self -> .` expands into `docs/self/self/...` until the OS resolution
+        # limit. Reproduced end-to-end: 264 entries under a child's docs/ against 8 in a
+        # control, with the cascade still reporting its ordinary status.
         # (Codex r6 P2 #3710311338.)
+        #
+        # THEN THE ONE QUESTION THIS TREE IS ALLOWED TO ASK OF A LINK: does it still mean the
+        # same thing at the child's path? `cp -R` preserves a link as a link, which is right
+        # while it TRAVELS (`docs/self -> .`, `docs/link-to-dir -> nested`) — the child gets
+        # the shape the full copy would give it. It is WRONG the moment the target leaves the
+        # tree: the umbrella's `agents/builder.md -> ../../shared-builder.md` re-resolves from
+        # the CHILD's directory and lands on a path that does not exist, so the child's
+        # builder prompt is a dangling link and the run still prints its ordinary success.
+        # Measured on an already-thin child maintained by an unflagged install
+        # (Codex #3802057839).
+        #
+        # A link that does not travel is REPLACED BY THE ORDINARY STUB — the same stub every
+        # other prose path here gets, naming `<umbrella>/.harness/<rel>`. That is the correct
+        # answer rather than a fallback: the umbrella's own link resolves properly AT the
+        # umbrella, so redirecting the reader there hands them exactly what the umbrella
+        # meant. It is not the "write lands on the TARGET" hazard r6 named either — the link
+        # is UNLINKED first, so the write lands on its own path.
+        if body_link_travels "$_sfi_f" "$_sfi_top"; then
+          continue
+        fi
+        rm -f "$_sfi_f" || return 1
+        gen_body_stub "${_sfi_f#"$_sfi_top"/}" "$_sfi_root" "$_sfi_f" || return 1
         continue
       elif [ -d "$_sfi_f" ]; then
         # SUBSHELL, not a bare call. POSIX sh has no local variables, so a recursive call
         # would overwrite this frame's `_sfi_dir`/`_sfi_root` and every sibling processed
         # AFTER a nested directory would be handled with the wrong frame.
         # (Codex r4 P2 #3705960408.)
-        ( stub_files_in "$_sfi_f" "$_sfi_root" ) || return 1
+        ( stub_files_in "$_sfi_f" "$_sfi_root" "$_sfi_top" ) || return 1
       elif [ -f "$_sfi_f" ]; then
         # `rm -f` first: `cp -R` may preserve a read-only mode, and gen_body_stub writes
         # with `>`, which cannot open a 0444 file.
@@ -2471,19 +3094,45 @@ install_one() {
         # would carry on to `install complete`. (Codex r7 P2 #3711176789.)
         #
         # These two checks are DEFENCE IN DEPTH and are deliberately not claimed as tested:
-        # the `chmod -R u+w` in stub_tree removes the only trigger a portable fixture can
+        # the `chmod -R u+w` in stage_tree removes the only trigger a portable fixture can
         # build, and deleting these `|| return 1`s leaves the suite green. What remains
         # reachable is environmental — a full disk, a read-only mount, ENAMETOOLONG — which
         # the suite cannot create without root or platform-specific tricks. Kept because the
         # failure they guard against is silent, and silence is what made r7 expensive.
         rm -f "$_sfi_f" || return 1
-        gen_body_stub "${_sfi_f#"$H"/}" "$_sfi_root" "$_sfi_f" || return 1
+        gen_body_stub "${_sfi_f#"$_sfi_top"/}" "$_sfi_root" "$_sfi_f" || return 1
       fi
     done
   }
 
-  # stub_tree <relpath> <umbrella-root> — mirror one prose-tier path as pointer stubs,
-  # preserving the SOURCE's shape so every path a consumer opens still exists.
+  # ── The thin prose tier is written ALL AT ONCE, or not at all (E24-F04 R2) ────────────
+  # Two directories under `$H`, both created and destroyed inside one call:
+  #   $_prose_stg   the finished stub tier, built entry by entry, MIRRORING its layout
+  #                 under `$H` so the stub text names the body-relative path
+  #   $_prose_old   what each swap displaced, kept until every swap has succeeded
+  #
+  # WHY THIS EXISTS. The tier used to be written one entry at a time, each one copying,
+  # thinning and swapping before the next began, so a failure on entry 4 left entries 1-3
+  # converted and 4-5 full copies — the mixed layout R2 exists to forbid, and "not a state
+  # anyone can reason about". Reproduced, not assumed: `chmod 0555` on a full-copy child's
+  # `.harness/specs`, then `--thin`, and the run dies in `cp` on `specs/_templates` with
+  # `AGENTS.md`, `agents/` and `docs/` already stubbed. (Codex r2 P2 #3799616454.)
+  #
+  # `.harness-prose-*.$$` LIVES INSIDE `$H`, so `mv` is a rename on one filesystem rather
+  # than a copy, and so a crash leaves the debris where the operator already looks.
+  _prose_stg="$H/.harness-prose-staging.$$"
+  _prose_old="$H/.harness-prose-replaced.$$"
+
+  # stage_tree <relpath> — build ONE prose-tier path's FINISHED replacement under
+  # $_prose_stg, preserving the AUTHORITY's shape so every path a consumer opens still
+  # exists. THE DESTINATION IS NOT TOUCHED — not written, not removed, not even read —
+  # which is what makes a staging failure a no-op on the child.
+  #
+  # It RETURNS non-zero where it used to `die`: the caller holds the other stages and has
+  # to clean them up, and an `exit` from here would leave them behind inside `.harness`.
+  #
+  # IT TAKES NO SOURCE ROOT. It reads `$_umb_body` and `$_umb_root_cfg` — THE PROSE
+  # AUTHORITY — directly, and that absence is the point: see the rule above the branch.
   #
   # THE SHAPE IS PRODUCED BY `cp -R`, NOT REIMPLEMENTED. The requirement is literally "the
   # same shape the full-copy path produces", and the full-copy path is `cp -R` — so the
@@ -2505,48 +3154,327 @@ install_one() {
   # unwritable and the thinning could not overwrite it (r7 #3711176789). The `chmod` below
   # closes that categorically, and unlike the shape class it has a single precondition
   # (the copy must be writable) rather than one bug per filesystem feature.
-  stub_tree() {
-    _st_rel="$1"; _st_root="$2"; _st_src="$SRC/$_st_rel"; _st_dst="$H/$_st_rel"
-    if [ ! -e "$_st_src" ]; then die "source missing: $_st_rel"; fi
-    mkdir -p "$(dirname "$_st_dst")"
-    rm -rf "$_st_dst"
-    cp -R "$_st_src" "$_st_dst"
-    if [ -L "$_st_dst" ]; then
-      :                       # a symlinked tier root: left exactly as the full path leaves it
-    elif [ -d "$_st_dst" ]; then
+  stage_tree() {
+    _st_rel="$1"
+    _st_src="$_umb_body/$_st_rel"; _st_new="$_prose_stg/$_st_rel"
+    if [ ! -L "$_st_src" ] && [ ! -e "$_st_src" ]; then echo "❌ install: source missing: $_st_rel" >&2; return 1; fi
+    mkdir -p "$(dirname "$_st_new")" || return 1
+    cp -R "$_st_src" "$_st_new" || return 1
+    if [ -L "$_st_new" ]; then
+      # A SYMLINKED TIER ROOT gets the SAME rule as a link nested inside one (see
+      # stub_files_in): kept as a link while it travels, replaced by the ordinary stub when it
+      # does not. Stating the rule in ONE predicate and applying it at BOTH places a thin tier
+      # is built is deliberate — the previous shape stated it only where a CONVERSION is
+      # judged, and the maintenance arm, which never judges anything, planted the umbrella's
+      # link in the child unchanged.
+      #
+      # WHAT IT COSTS, stated because it is a real narrowing: an escaping root link to a
+      # DIRECTORY becomes one stub naming the umbrella's path rather than a mirrored subtree,
+      # so the paths beneath it are reached through that one redirect. Mirroring them through
+      # a link that resolves somewhere else in the child is the alternative, and it is the
+      # defect this rule exists to stop.
+      if ! body_link_travels "$_st_new" "$_prose_stg"; then
+        rm -f "$_st_new" || return 1
+        gen_body_stub "$_st_rel" "$_umb_root_cfg" "$_st_new" || return 1
+      fi
+    elif [ -d "$_st_new" ]; then
       # `chmod -R` does NOT follow symlinks encountered during traversal — verified against a
       # tree holding a link to an external 0444 file, which kept its mode — so this cannot
       # reach outside the copy. A stub is new content anyway; inheriting the source file's
       # read-only bit onto a pointer would only make the next upgrade harder.
-      chmod -R u+w "$_st_dst" || die "cannot make the copied prose tier writable: $_st_rel"
-      stub_files_in "$_st_dst" "$_st_root" \
-        || die "failed to stub the prose tier: $_st_rel"
+      chmod -R u+w "$_st_new" || return 1
+      stub_files_in "$_st_new" "$_umb_root_cfg" "$_prose_stg" || return 1
     else
-      rm -f "$_st_dst" || die "cannot replace the copied prose file: $_st_rel"
-      gen_body_stub "$_st_rel" "$_st_root" "$_st_dst" \
-        || die "failed to stub the prose file: $_st_rel"
+      rm -f "$_st_new" || return 1
+      gen_body_stub "$_st_rel" "$_umb_root_cfg" "$_st_new" || return 1
     fi
+  }
+
+  # prose_swap_in / prose_swap_back <relpath> — the COMMIT half, and its undo. A swap is
+  # `mv` the live path aside, `mv` the staged one in; the undo is those two in reverse. The
+  # displaced original is PARKED, never `rm -rf`'d, precisely so the undo has something to
+  # put back — a commit that deleted first could not be rolled back at all. prose_swap_in
+  # returns 2 when the staged move AND the current entry's restore fail; unlike an ordinary
+  # failure, that outcome must preserve both recovery trees for manual repair.
+  prose_swap_in() {
+    _pi_rel="$1"; _pi_dst="$H/$_pi_rel"; _pi_old="$_prose_old/$_pi_rel"
+    mkdir -p "$(dirname "$_pi_dst")" "$(dirname "$_pi_old")" || return 1
+    if [ -e "$_pi_dst" ] || [ -L "$_pi_dst" ]; then
+      mv "$_pi_dst" "$_pi_old" || return 1
+    fi
+    if mv "$_prose_stg/$_pi_rel" "$_pi_dst"; then
+      return 0
+    fi
+    # Undo THIS entry here, so the caller's undo list never has to carry the entry that
+    # failed — the two halves of one swap are only ever half-done inside this function.
+    if [ -e "$_pi_old" ] || [ -L "$_pi_old" ]; then
+      mv "$_pi_old" "$_pi_dst" || return 2
+    fi
+    return 1
+  }
+  prose_swap_back() {
+    _pb_rel="$1"; _pb_dst="$H/$_pb_rel"; _pb_old="$_prose_old/$_pb_rel"
+    if [ -e "$_pb_dst" ] || [ -L "$_pb_dst" ]; then
+      mv "$_pb_dst" "$_prose_stg/$_pb_rel" || return 1
+    fi
+    if [ -e "$_pb_old" ] || [ -L "$_pb_old" ]; then
+      mv "$_pb_old" "$_pb_dst" || return 1
+    fi
+    return 0
+  }
+
+  # thin_prose_tier — write the WHOLE prose tier as pointer stubs, or leave it exactly as it
+  # was. THE ONE ENTRY POINT for every thin arm, and IT TAKES NO ARGUMENTS AT ALL: there is
+  # one prose authority (`$_umb_body`, named as `$_umb_root_cfg`), it is resolved once above
+  # the branch, and no caller gets to nominate another. That is also what makes a CONVERTED
+  # child byte-indistinguishable from a fresh thin one — the two arms now run the same
+  # function over the same tree, so the equality is structural rather than a coincidence of
+  # cascade ordering.
+  #
+  # WHERE THE AUTHORITY IS SILENT, SO IS THIS FUNCTION. `$HARNESS_BODY_PROSE` is THIS
+  # installer's list of tier entries, and the umbrella body may be older than this installer
+  # and simply not have one of them yet. Three answers were available and only one is right:
+  #   die         — turns every routine maintenance run against an older umbrella into a hard
+  #                 failure, including the runs that would upgrade it. Fail-closed protects
+  #                 against DESTROYING on an unestablished premise; refusing to write is
+  #                 already that protection, and killing the run adds nothing but a wedge.
+  #   fall back   — re-introduces `$SRC` as a second authority for that entry, and the stub it
+  #     to `$SRC`   would write names a file the umbrella cannot supply: a dangling pointer
+  #                 whose own text then misdiagnoses it as "a checkout separated from its
+  #                 umbrella". This is exactly the defect Codex #3800164980 names.
+  #   SKIP IT     — the entry is left EXACTLY as it was found: an existing stub survives, an
+  #                 absent path stays absent, nothing is deleted and nothing is invented. The
+  #                 run says so on stderr, naming the path, and exits 0.
+  # Skipping does not weaken R2: all-or-nothing is about the entries this run acts on, and an
+  # entry the authority does not hold is not one of them.
+  #
+  # THE TWO HALVES FAIL DIFFERENTLY, and each is pinned by its own trigger in
+  # `test_umbrella.sh::thin_partial_failure_leaves_tier_whole`:
+  #   TESTED  a failed SWAP, with earlier entries already in place — a `0555` `.harness/specs`
+  #           refuses the `mv` of entry 4 of 5, and the rollback puts entries 1-3 back.
+  #   TESTED  a failed BUILD — an installer source with one prose entry removed, against a
+  #           fresh child — which writes nothing at all, because no entry is swapped until
+  #           every entry has been built. That is structural, not a code path: there is
+  #           nothing to undo. Collapse the two loops into one and it stops being true.
+  #   NOT     `SIGKILL` or a power loss inside the swap window. Nothing here survives that;
+  #           what this design does is shrink the window from "copy, chmod and rewrite ~30
+  #           files" to a handful of renames.
+  #   NOT     a rollback that itself fails. That leaves the tier mixed — the one outcome this
+  #           function cannot prevent — so it KEEPS both directories and names them, rather
+  #           than deleting the operator's only copy of the originals.
+  #
+  # The undo list is built most-recent-first, so the rollback runs LIFO.
+  thin_prose_tier() { # [convert] — pass 'convert' ONLY from the full-copy conversion
+                      # branch: its pristine verdict is what the TOCTOU recheck below
+                      # re-validates, and only there does a parked original hold real
+                      # (deletable) content. Stub-refresh runs park harness-owned stubs
+                      # whose bytes differ from the umbrella by design.
+    _tpt_mode="${1:-refresh}"
+    rm_owned_tree "$_prose_stg" "$_prose_old"
+    mkdir -p "$_prose_stg" "$_prose_old"
+    # THE AUTHORITY DECIDES THE SET OF ENTRIES, not just their contents — and BOTH loops
+    # below walk that same set, or the swap phase would try to move a path the build phase
+    # never staged.
+    _tpt_set=''
+    for _tpt_rel in $HARNESS_BODY_PROSE; do
+      # `-L` first (Codex #149 P2): `-e` DEREFERENCES, so an umbrella entry that is a
+      # dangling symlink would be excluded as "missing" — the child then keeps a stale
+      # directory instead of preserving the umbrella's filesystem shape, and the
+      # body_link_travels judgement below never runs on it.
+      if [ -L "$_umb_body/$_tpt_rel" ] || [ -e "$_umb_body/$_tpt_rel" ]; then
+        _tpt_set="$_tpt_set $_tpt_rel"
+        continue
+      fi
+      echo "⚠️  the umbrella at $_umb_root_cfg does not hold the prose-tier path '$_tpt_rel' — this run left that path exactly as it found it, because a stub may only name a file the umbrella can supply; upgrade the umbrella and re-run to pick it up" >&2
+    done
+    for _tpt_rel in $_tpt_set; do
+      if ! stage_tree "$_tpt_rel"; then
+        rm_owned_tree "$_prose_stg" "$_prose_old"
+        die "could not build the thin prose tier ($_tpt_rel) — nothing was replaced, this target keeps the body it had"
+      fi
+    done
+    _tpt_done=''
+    for _tpt_rel in $_tpt_set; do
+      if prose_swap_in "$_tpt_rel"; then
+        _tpt_done="$_tpt_rel $_tpt_done"
+        continue
+      else
+        # Capture inside the branch: after `fi`, POSIX shells report the compound
+        # command's status rather than reliably preserving prose_swap_in's status 2.
+        _tpt_swap_rc=$?
+      fi
+      for _tpt_undo in $_tpt_done; do
+        prose_swap_back "$_tpt_undo" \
+          || die "could not install the thin prose tier ($_tpt_rel) AND the rollback of $_tpt_undo failed — this target's prose tier is now MIXED; the stubs are under $_prose_stg and the original files under $_prose_old, and both are kept for you to restore by hand"
+      done
+      if [ "$_tpt_swap_rc" = "2" ]; then
+        die "could not install the thin prose tier ($_tpt_rel) — current entry $_tpt_rel could not be restored; every earlier path was rolled back, the staged replacement is under $_prose_stg and the original entry under $_prose_old, and both are kept for you to restore by hand"
+      fi
+      rm_owned_tree "$_prose_stg" "$_prose_old"
+      die "could not install the thin prose tier ($_tpt_rel) — every path already swapped was rolled back, this target keeps the body it had"
+    done
+    # TOCTOU recheck (Codex #149 P2): the pristine verdict observed the live tree at
+    # time T; the swap parked the originals at T+Δ. A write landing in that window is
+    # now sitting in _prose_old about to be discarded as "pristine". Re-compare every
+    # parked original against the umbrella copy the verdict compared it to; any
+    # difference (or any special node, which diff could hang on or misread) rolls the
+    # whole conversion back and refuses, naming the path. Nothing is lost either way —
+    # the originals only ever leave _prose_old on success.
+    _tpt_raced=''
+    for _tpt_rel in $( [ "$_tpt_mode" = "convert" ] && printf '%s' "$_tpt_set" ); do
+      _tpt_old="$_prose_old/$_tpt_rel"; _tpt_umb="$_umb_body/$_tpt_rel"
+      [ -e "$_tpt_old" ] || [ -L "$_tpt_old" ] || continue
+      # BOTH sides are swept before diff runs (Codex #149 round-15): a FIFO planted on
+      # the UMBRELLA side after the pristine snapshot would otherwise be opened by
+      # `diff -rq`, which blocks awaiting a writer. A special node on either side is
+      # itself the raced state — refuse without ever opening anything.
+      if [ -n "$(find "$_tpt_old" "$_tpt_umb" ! -type d ! -type f 2>/dev/null | head -n 1)" ] \
+         || ! diff -rq "$_tpt_old" "$_tpt_umb" >/dev/null 2>&1; then
+        _tpt_raced="$_tpt_rel"
+        break
+      fi
+    done
+    if [ -n "$_tpt_raced" ]; then
+      for _tpt_undo in $_tpt_done; do
+        prose_swap_back "$_tpt_undo" \
+          || die "a concurrent write raced the thin conversion ($_tpt_raced) AND the rollback of $_tpt_undo failed — the stubs are under $_prose_stg and the original files under $_prose_old, both kept for you to restore by hand"
+      done
+      rm_owned_tree "$_prose_stg" "$_prose_old"
+      die "a concurrent write changed '$_tpt_raced' between the pristine verdict and the swap — the conversion was rolled back and this target keeps the body it had; re-run when the tree is quiet"
+    fi
+    rm_owned_tree "$_prose_stg" "$_prose_old"
   }
 
   # The PROGRAM-READ tier is copied unconditionally, in every layout. init.sh execs
   # tools/ and parses store/; a pointer is not a schema (ADR-0004).
   for _body_rel in $HARNESS_BODY_LOCAL; do copy "$_body_rel"; done
 
-  # The PROSE tier is stubbed only for a child that resolves an umbrella AND is not
-  # already carrying a real body. Otherwise it is copied, exactly as before — which is
-  # every single-repo install, and every already-installed child (R9: converting one is
-  # destructive and belongs to E24-F04, not to a routine re-run).
+  # The PROSE tier: a four-way branch over ONE question — which layout does this target end
+  # this run in? (E24-F03 shipped the first two arms; E24-F04 the last two.)
+  #
+  # ── THE PROSE AUTHORITY RULE, stated ONCE for every arm ──────────────────────────────
+  # WHEREVER A THIN PROSE TIER IS BUILT OR REBUILT FOR A TARGET WITH A RESOLVABLE UMBRELLA,
+  # THE UMBRELLA BODY IS THE AUTHORITY — for the pristine COMPARISON, for the WRITE, and for
+  # the SET of entries. `$SRC` is the authority for exactly one thing, the FULL LOCAL COPY
+  # (arms 1 and 4), where there is no umbrella in the answer at all.
+  #
+  # This is stated here rather than on an arm because it was found one arm at a time, three
+  # rounds running, and each per-arm fix left the next arm free to disagree:
+  #   compare   `prose_tier_blockers "$H" "$SRC"`  — a merely STALE child converts and is
+  #             redirected at umbrella content it never held. (r1 local review.)
+  #   write     branch (3) rebuilding from `$SRC`  — a shared path the child and umbrella
+  #             both hold is judged pristine, then DELETED while the run prints CONVERTED.
+  #             (Codex r1 P1 #3799465968.)
+  #   maintain  branch (2) rebuilding from `$SRC`  — the very next ordinary install then
+  #             deletes the stub branch (3) had just created from the umbrella, and
+  #             recreates a `$SRC`-only path as a stub the umbrella cannot resolve.
+  #             Measured on this shape: one `--thin` then one unflagged run, and
+  #             `agents/shared-extra.md` is gone. (Codex r3 P1 #3800164980.)
+  # The rule is now ENFORCED BY SHAPE, not by comment: `thin_prose_tier` takes NO source
+  # argument, so a fifth arm cannot pass a different tree without deleting this design.
+  #
+  # THE ORDERING IS LOAD-BEARING AND MUST NOT CHANGE. prose_tier_blockers reads the target's
+  # ON-DISK prose tier, and §1 has not written to it yet — HARNESS_BODY_LOCAL is copied
+  # first, the prose tier last. Moving the check after the copy compares the installer
+  # against itself and yields a green, meaningless "always convertible".
   _umb_body="$(umbrella_body_dir "$H")"
   _umb_root_cfg="${HARNESS_UMBRELLA_ROOT:-$(_cfg_umbrella_root_value "$H/harness.config.yaml")}"
   BODY_LAYOUT=full
-  if [ -n "$_umb_body" ] && ! child_is_full_copy "$H"; then
-    BODY_LAYOUT=thin
-    for _body_rel in $HARNESS_BODY_PROSE; do stub_tree "$_body_rel" "$_umb_root_cfg"; done
-    ok "prose body resolved from the umbrella at $_umb_root_cfg (stubs; init.sh, store/, tools/ stay local)"
-  else
+  if [ "$STANDALONE" = 1 ]; then
+    # (1) --standalone (R9, R11): the ORDINARY full-copy branch, unconditionally, whatever
+    # umbrella_body_dir says. No new copy path exists or is needed — the full-copy path has
+    # always materialised the whole body from $SRC, so a --standalone run from a newer
+    # installer correctly lands the newer body, and a target that was ALREADY full-copy
+    # takes this same branch and comes out the same way.
     for _body_rel in $HARNESS_BODY_PROSE; do copy "$_body_rel"; done
-    if [ -n "$_umb_body" ]; then
-      info "child already holds a full body — left as-is (converting it is E24-F04)"
+    ok "prose body materialised locally from this installer (--standalone; umbrella.root cleared below)"
+  elif [ -n "$_umb_body" ] && ! child_is_full_copy "$H"; then
+    # (2) E24-F03's maintenance branch — a target that IS thin stays thin. DELIBERATELY
+    # REACHABLE WITH NO FLAG (R5): the layout on disk carries the consent that --thin gave
+    # once, so gating this arm behind THIN_OPT_IN would un-thin every existing child on the
+    # next unflagged cascade. A --thin run against an already-thin child lands HERE, never
+    # in arm (3), which is what makes R7 (idempotence) hold by construction: gen_body_stub's
+    # text depends only on the body-relative path and the configured umbrella root.
+    BODY_LAYOUT=thin
+    # THE SAME AUTHORITY AS BRANCH (3), and it has to be: this arm is where an already-thin
+    # child is MAINTAINED, so it inherits whatever branch (3) built and must not undo it.
+    # The earlier reading — "this arm materialises a tier where there was nothing to judge,
+    # so it has no comparison to disagree with" — stopped being true the moment branch (3)
+    # could produce a stub for an umbrella-only path: this run then meets a tier it did not
+    # write, and rebuilding it from `$SRC` silently deletes exactly that stub.
+    #
+    # The half of that reading which SURVIVES is the older-umbrella worry, and it is
+    # answered per entry inside thin_prose_tier rather than by choosing a second tree: an
+    # entry the umbrella does not hold is skipped and reported, never re-sourced and never
+    # fatal.
+    thin_prose_tier
+    ok "prose body resolved from the umbrella at $_umb_root_cfg (stubs; init.sh, store/, tools/ stay local)"
+  elif [ -n "$_umb_body" ]; then
+    # (3) A FULL-COPY child of a reachable umbrella — the state E24-F03 left alone and this
+    # feature migrates. Compute the blockers IDENTICALLY whether or not the flag was passed,
+    # so the preview can never diverge from the action it previews.
+    _f04_blockers="$(prose_tier_blockers "$H" "$_umb_body")"
+    if [ -z "$_f04_blockers" ] && [ "$THIN_OPT_IN" = 1 ]; then
+      # Converted. thin_prose_tier is REUSED — same function, same tree: the umbrella body,
+      # which is also what prose_tier_blockers just compared this child against.
+      #
+      # The two references are not interchangeable, and each mismatch was measured on this
+      # branch before it was fixed (Codex r1 P1 #3799465968):
+      #   - a path the child AND the umbrella hold and `$SRC` does not — a shared house
+      #     addition under `agents/`, exactly what an umbrella is for — is pristine by the
+      #     comparison, then DELETED by a copy from `$SRC` while the run prints CONVERTED.
+      #     Silent data loss: the refusal branch's "re-installed from source by this run"
+      #     disclosure is on the OTHER branch and never printed here.
+      #   - a path `$SRC` holds and the umbrella does not gets a stub naming a file the
+      #     umbrella cannot supply, and that stub's own text then misdiagnoses it as "a
+      #     checkout separated from its umbrella".
+      #
+      # This does NOT weaken R1's "a converted child is byte-indistinguishable from a fresh
+      # thin one" — it is what MAKES it true. A fresh sibling takes branch (2), which now
+      # runs this same function over this same tree, so the two are equal by construction
+      # instead of by the cascade happening to install the umbrella from `$SRC` first.
+      #
+      # BODY_LAYOUT=thin is what makes manifest.txt record it (R8).
+      BODY_LAYOUT=thin
+      thin_prose_tier convert
+      ok "child already holds a full body — CONVERTED to the thin layout (--thin): its prose tier now resolves from the umbrella at $_umb_root_cfg"
+    else
+      for _body_rel in $HARNESS_BODY_PROSE; do copy "$_body_rel"; done
+      if [ -n "$_f04_blockers" ]; then
+        # ALL-OR-NOTHING (R2), and every blocking path is named (R3). Identical content with
+        # and without the flag — only the verb differs.
+        if [ "$THIN_OPT_IN" = 1 ]; then
+          info "child already holds a full body — NOT converted to the thin layout: these prose-tier paths differ from the umbrella's copy"
+        else
+          info "child already holds a full body — it would NOT convert to the thin layout: these prose-tier paths differ from the umbrella's copy"
+        fi
+        printf '%s\n' "$_f04_blockers" | while IFS= read -r _f04_b; do
+          [ -n "$_f04_b" ] || continue
+          # `info` uses `echo`, whose treatment of backslashes is implementation-defined.
+          # Blocker paths escape literal newlines as `\n`; re-expanding that here would
+          # split the one safe record back into two bogus paths on shells whose echo does it.
+          printf '     differs: %s\n' "$_f04_b"
+        done
+        # Naming a path the operator can no longer read without saying where it went is
+        # worse than not naming it: the full-copy branch re-installs the whole prose tier
+        # from source on EVERY run and always has, on both branches.
+        info "  those paths were re-installed from source by this run, as every install of this tier does — 'git diff' in this repository still shows what they held"
+      else
+        info "child already holds a full body — it WOULD convert to the thin layout; re-run with --thin to convert it"
+      fi
+    fi
+  else
+    # (4) No umbrella body resolves ⇒ the full local copy, which is every single-repo
+    # install and every coordinator.
+    for _body_rel in $HARNESS_BODY_PROSE; do copy "$_body_rel"; done
+    # R6: a RECORDED umbrella.root that does not resolve is the one case worth a word. With
+    # nothing to compare against, byte-identity cannot be established, so nothing converts —
+    # and this is a warning, never an install failure: a child entered on its own is a
+    # supported state (E24-F03). Silent when NO umbrella.root is recorded at all: a
+    # coordinator and a single-repo target are not children, and a warning that fires on
+    # every cascade's coordinator trains people to ignore the one that matters.
+    if [ "$THIN_OPT_IN" = 1 ] && [ -n "$_umb_root_cfg" ]; then
+      echo "⚠️  --thin: umbrella.root is recorded ($_umb_root_cfg) but does not resolve to an installed harness body — nothing converted, this target keeps its full local body" >&2
     fi
   fi
   chmod +x "$H/init.sh" 2>/dev/null || true
@@ -2610,7 +3538,23 @@ install_one() {
   # single-target re-run in that child, and `init.sh`'s report, both read it from here
   # with no env var in sight. Skipped entirely when the value already matches, so an
   # ordinary re-run leaves the file byte-identical.
-  if [ -n "${HARNESS_UMBRELLA_ROOT:-}" ]; then
+  #
+  # --standalone CLEARS it (E24-F04 R10). `umbrella.root` means exactly one thing — resolve
+  # my prose body from here — and after --standalone that statement is false, so leaving the
+  # key set records a relationship that no longer holds and init.sh keeps reporting a linkage
+  # that governs nothing. It costs nothing structurally: umbrella MEMBERSHIP comes from the
+  # cascade's directory discovery and umbrella.manifest.yaml, so a detached child keeps its
+  # manifest entry, its slices and its dispatch. It is NOT a permanent opt-out — the shipped
+  # config seeds `root: ""`, so "cleared" is indistinguishable from "never set", and a later
+  # explicit --thin run converts the target again. Durability comes from the LAYOUT.
+  # Same skip-when-it-already-matches discipline as the record path, so a re-run of
+  # --standalone on an already-detached target leaves the file byte-identical.
+  if [ "$STANDALONE" = 1 ]; then
+    if [ -n "$(_cfg_umbrella_root_value "$H/harness.config.yaml")" ]; then
+      set_umbrella_root "$H/harness.config.yaml" ""
+      info "cleared umbrella.root (--standalone) — this target now carries its own full prose body"
+    fi
+  elif [ -n "${HARNESS_UMBRELLA_ROOT:-}" ]; then
     if [ "$(_cfg_umbrella_root_value "$H/harness.config.yaml")" != "$HARNESS_UMBRELLA_ROOT" ]; then
       set_umbrella_root "$H/harness.config.yaml" "$HARNESS_UMBRELLA_ROOT"
       info "recorded umbrella.root: $HARNESS_UMBRELLA_ROOT"
@@ -2999,16 +3943,25 @@ MODEL ROUTING:
   inherited or unpinned roles omit model, while concrete pins add it role by role. Codex
   role replacement/reclamation requires a matching last-written ownership stamp.
 
-BODY LAYOUT  (E24-F03 / ADR-0004):
+BODY LAYOUT  (E24-F03 + E24-F04 / ADR-0004):
   This target holds the ${BODY_LAYOUT} body layout.
   full  every body path is a local copy — single-repo installs, and every child that
-        already carried a full body when this ran (converting one is destructive and
-        is E24-F04, never a side effect of a re-run).
+        already carried a full body when this ran.
   thin  the PROSE tier is pointer stubs resolved from umbrella.root; the PROGRAM tier
         is still a local copy, because init.sh execs and parses it.
     prose (stub-able) : AGENTS.md agents/ docs/ specs/_templates/ specs/glossary.md
     program (local)   : init.sh store/ tools/ + the example files an operator copies from
   Every generated front-end glue file is PROGRAM tier and always local.
+  Moving between the two layouts is ALWAYS an explicit request — never a side effect:
+    full -> thin   re-run the installer with --thin (once per child; after that the thin
+                   layout is maintained with no flag). The conversion is pristine-only and
+                   all-or-nothing: every prose-tier path must be byte-identical to the
+                   umbrella's copy, or nothing converts and every differing path is named.
+                   Without the flag the run REPORTS whether it would convert and converts
+                   nothing. See docs/UMBRELLA.md -> "Migrating an existing child".
+    thin -> full   re-run the installer with --standalone: the full prose body is
+                   materialised from that installer's own source and umbrella.root is
+                   cleared. That is the documented way back for a child being detached.
 
 PROJECT-OWNED  (seeded once, never clobbered on upgrade):
   .harness/harness.config.yaml   (verification commands + store backend + change_size budget)
@@ -6229,6 +7182,13 @@ RECURSIVE=0
 DRY_RUN=0
 SHARED_REPO=0
 POSITIONAL=""
+# ── E24-F04: the two layout flags ────────────────────────────────────────────────────
+# THE FLAG DECIDES WHETHER TO ACT, NEVER WHAT TO COMPUTE. `prose_tier_blockers` runs at the
+# same point over the same inputs whether or not --thin was passed; the flag only chooses
+# between "convert" and "report what would have happened". One code path, so the preview
+# cannot diverge from the action it previews — which is the whole value of the preview.
+THIN_OPT_IN=0
+STANDALONE=0
 # Diagnostic only (E19-F01): report what `--agents=host` WOULD resolve to for a target,
 # then exit 0 without touching anything. Single-target mode only.
 PRINT_AGENTS=0
@@ -6319,6 +7279,20 @@ while [ "$#" -gt 0 ]; do
       UMBRELLA="$2"
       shift 2
       ;;
+    --thin)
+      # One-time consent to convert a FULL-COPY child of a reachable umbrella to the thin
+      # layout (E24-F04 R1). Never implied, never remembered as a flag: after the first
+      # conversion the LAYOUT ON DISK carries the consent, and the F03 maintenance branch
+      # keeps it thin unflagged.
+      THIN_OPT_IN=1
+      shift
+      ;;
+    --standalone)
+      # The reverse (E24-F04 R9/R10): re-materialise the full prose body from this
+      # installer's source and clear umbrella.root. Single-target only.
+      STANDALONE=1
+      shift
+      ;;
     --shared-repo)
       # Opt-in: version-control the umbrella root (git init + ignore product children).
       # Umbrella mode only; validated below. See docs/UMBRELLA.md "Shared spec repository".
@@ -6373,6 +7347,19 @@ case "${OPENCODE_PARALLEL_OVERRIDE:-}" in
   ""|true|false) ;;
   *) die "unknown --with-opencode-parallel value '$OPENCODE_PARALLEL_OVERRIDE' — legal values are 'true' and 'false'" ;;
 esac
+
+# Same place, same reason, for the two layout flags (E24-F04 R12): a contradictory
+# combination aborts non-zero HERE — after the parse loop, before target resolution, before
+# umbrella discovery and before any install_one — so nothing anywhere has been created or
+# modified when it fires. `--standalone` names ONE target and re-materialises its body;
+# "re-materialise every child of the umbrella" is not a request anyone has made, and
+# `--standalone --thin` asks for the two opposite layouts in a single run.
+if [ "$STANDALONE" = 1 ]; then
+  [ -z "$UMBRELLA" ] \
+    || die "--standalone is single-target only — it re-materialises ONE target's body; not valid with --umbrella"
+  [ "$THIN_OPT_IN" = 0 ] \
+    || die "--standalone and --thin ask for opposite body layouts — pass at most one"
+fi
 
 # ── single-target mode (no --umbrella): behave exactly as before ──────────────
 if [ -z "$UMBRELLA" ]; then

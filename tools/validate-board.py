@@ -46,7 +46,7 @@ SLICE_STATUS = {"pending", "spec-ready", "in-progress", "in-review", "done", "fa
 # Park gates (E99-F77). A CLOSED set: an unrecognised gate is an error, never a silent
 # downgrade to an ordinary park, because the reason code the selector emits is the whole
 # deliverable and a typo that reads as `parked` reports the wrong one.
-PARK_GATES = {"owner"}
+PARK_GATES = {"owner", "merge"}   # `merge` (E99-F130): approved, PR open, awaiting merge
 # Landing attestation (E99-F102 + E99-F129). Also a CLOSED set. All three are WRITABLE:
 # `ancestor` = the ref resolved and ancestry was computed against the repository's default
 # branch and came back true (row 7 of the decision table in tools/tasks-lock.py);
@@ -187,6 +187,14 @@ def _fallback_errors(data):
                         ):
                             errors.append(
                                 "%s.parked.unblocked_by: expected a non-empty string" % fw
+                            )
+                        # Optional (additive, E99-F130) PR receipt. Mirrored for the
+                        # same reason as every park field: the zero-dependency path and
+                        # the JSON schema must agree on the TaskStore contract.
+                        pr = park.get("pr")
+                        if "pr" in park and (not isinstance(pr, str) or not pr):
+                            errors.append(
+                                "%s.parked.pr: expected a non-empty string" % fw
                             )
                         # Optional (additive, E99-F77) gate discriminator. Same
                         # mirroring rule as the park itself: the zero-dependency path

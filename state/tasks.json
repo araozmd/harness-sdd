@@ -592,7 +592,7 @@
         {
           "id": "E99-F130",
           "title": "[migrated from viernes 2026-08-18] NO FIRST-CLASS 'APPROVED, AWAITING MERGE' STATE \u2014 so the corrected `done`-after-merge ordering has no ergonomic home, and `in-review` actively MISROUTES. Surfaced by E99-F102 part A (PR #147 round 1): the docs used to say approve -> `set-status done --evidence` -> open PR, so at `done` time the merge commit could not exist and the 'prefer the merge commit' instruction was unfollowable. A fixed the INSTRUCTION (`done` is written after the merge is observed). What it could not fix is where the feature LIVES in between. \u26a0\ufe0f MEASURED ON THE SHIPPED SELECTOR, not assumed: a feature left at `in-review` is NOT inert \u2014 `next-task.mjs` returns `{outcome: selected, route: reviewer, reason: feature-actionable}`, i.e. it hands an ALREADY-APPROVED feature back to a Reviewer every session. That is the defect `next-task.mjs`'s own E99-F77 comment already names ('`in-review` routes a Reviewer at an approved slice'). The `parked` mechanism DOES hold it correctly (`outcome: blocked`, code `gated-owner`, never selected) and `set-status` refuses any transition while parked, so an unpark must precede the `done` write \u2014 also measured. So the workaround exists but costs two `apply --mutator` round-trips per feature and reports an in-flight PR INDISTINGUISHABLY from external owner blockage, which is the signal an operator most needs to tell apart. WHAT THE REAL FIX NEEDS (why it was correctly kept OUT of part A): a first-class awaiting-merge hold with its own selector/diagnostic code, touching `tools/next-task.mjs`, the diagnostics, and coverage in `test_next_task.sh`, `test_feature_park.sh` and `test_dependency_diagnostics.sh` \u2014 a lifecycle change, not a documentation one. \u26a0\ufe0f `none:<why>` must REMAIN a legitimate immediate `done`: console/AWS actions and supersessions have nothing to merge. The distinction to preserve is 'nothing to merge' (fine) vs 'something that has not merged YET' (the defect). Part A states this gap explicitly in agents/orchestrator.md, docs/WORKFLOW.md and the CHANGELOG rather than papering over it.",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [
@@ -1121,7 +1121,7 @@
         {
           "id": "E24-F04",
           "title": "Migrate existing children to the thin layout (+ --standalone)",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [

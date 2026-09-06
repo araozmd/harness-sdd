@@ -125,12 +125,118 @@ that, and names the recovery step, rather than dangling.
 - A **single-repo** install is untouched: no `umbrella.root`, so the complete body is
   installed locally exactly as before. This is additive.
 - An **already-installed child keeps its full copy.** A cascade never silently converts
-  one — that is destructive, needs a pristine check, and is **E24-F04**. `manifest.txt`
-  records which layout a target holds, and the cascade reports when it left a full body
-  alone.
+  one — that is destructive and needs a pristine check. Converting one is an explicit,
+  one-time request per child: see *Migrating an existing child* below. `manifest.txt`
+  records which layout a target holds, and an ordinary cascade reports what it would have
+  converted.
 - Upgrading the umbrella no longer rewrites the prose body in N children: a stub's text
   depends on the umbrella path, not the version, so it is byte-identical across upgrades.
   `init.sh`, `store/` and `tools/` are still local copies and do still change.
+
+## Migrating an existing child (`--thin`)
+
+An umbrella that has been running since before the thin layout shipped has children that
+each still carry a full local prose body. Converting them is **opt-in per child**, and the
+command is:
+
+```bash
+./harness-install.sh --umbrella /path/to/umbrella-dir --thin
+```
+
+**Run it until it converges** — normally once, twice when the children were behind:
+
+1. The coordinator is upgraded **first**, so it holds the current body. Every child whose
+   prose tier already matches that body converts in this same run. A child that was behind
+   is named, is upgraded by this run, and does **not** convert.
+2. Only if run 1 named anything: those children now match, so a second identical run
+   converts them.
+
+`--thin` also works in single-target mode (`./harness-install.sh --thin <child>`) when you
+want to convert exactly one child.
+
+**The flag is consent, not ceremony.** It is required for the **first** conversion of a
+given child. After that the child *is* thin, and every later cascade maintains the thin
+layout with no flag and no prompt. An ordinary run against a *full-copy* child converts
+nothing and instead reports whether it would — that report is how the option is
+discovered, and it is deliberately not step one of anything. **Never run an unflagged
+cascade as a "preview pass" before the migration:** the unflagged path is the ordinary
+full-copy branch, which overwrites the whole prose tier from source on every run, so it
+*destroys the very differences it just reported*.
+
+### Pristine-only, and all-or-nothing
+
+A prose-tier file is replaced by a stub only when it is **byte-identical to the umbrella's
+copy of the same relative path** — the copy the stub will point at. The question a
+conversion asks is *if I drop this content and redirect, does the child lose anything?*
+
+A tier converts **whole or not at all**. If any prose-tier path differs — content, or
+present on one side only — then **no** file in that child converts, and every differing
+path is named:
+
+```
+child already holds a full body — NOT converted to the thin layout: these prose-tier
+paths differ from the umbrella's copy
+  differs: agents/builder.md
+  differs: agents/local-note.md
+```
+
+A child that is simply **stale** (installed from an older harness version) blocks for
+exactly this reason, and that is correct: at the moment of comparison it genuinely holds
+content the umbrella does not. The same run upgrades it, so the next run converts it —
+that is why the procedure is "run until it converges".
+
+What the refusal guarantees is narrower than it looks, and worth stating plainly: the
+installer will not **redirect** a path to content the umbrella does not hold, and it names
+every path it refused to redirect. It does **not** preserve a locally edited body file —
+the full-copy path has always re-installed the whole prose tier from source on every run,
+on both branches. The pre-run content is recoverable from `git diff` in that child, which
+is why `init.sh` insists the installed body be committed.
+
+### An unreachable umbrella converts nothing, and is never fatal
+
+If a child records an `umbrella.root` that does not resolve to an installed harness body,
+`--thin` **converts nothing, warns, and leaves the full local body in place** — with the
+same exit status the run would have had without the flag:
+
+```
+⚠️  --thin: umbrella.root is recorded (../../) but does not resolve to an installed
+   harness body — nothing converted, this target keeps its full local body
+```
+
+This follows from the pristine rule rather than from taste: with nothing to compare
+against, byte-identity cannot be **established**, so no deletion can be justified. And it
+must not abort, because a child entered on its own — CI, a lone clone, a PR reviewer's
+checkout — is a supported state, not a degraded one. A target that records **no**
+`umbrella.root` at all is not a child, so `--thin` is inert *and silent* there.
+
+## `--standalone` — the way back
+
+A thin child can be re-materialised into a full local body at any time:
+
+```bash
+./harness-install.sh --standalone /path/to/child
+```
+
+Every stub in the prose tier is replaced with the real body file **from that installer's
+own source** (so a newer installer correctly lands the newer body), and the child's
+`umbrella.root` is **cleared**. It is single-target only: `--standalone` with `--umbrella`,
+and `--standalone` with `--thin`, are both rejected before anything is written. Applying it
+to a target that already holds a full local body is fine — it re-installs the body, clears
+the key and exits zero.
+
+**What clearing `umbrella.root` does and does not buy.** `umbrella.root` means exactly one
+thing — *resolve my prose body from here* — and after `--standalone` that statement is
+false, so leaving it set records a relationship that no longer holds and makes `init.sh`
+keep reporting a linkage that governs nothing. Clearing it costs nothing structurally:
+umbrella **membership** comes from the cascade's directory discovery and
+`umbrella.manifest.yaml`, so a detached child keeps its manifest entry, its slices and its
+dispatch.
+
+It is **not a permanent opt-out**. The cascade re-records the key for every child it
+installs, and the shipped config seeds `root: ""` — so "cleared" is indistinguishable from
+"never set". What actually makes `--standalone` durable is the **layout**: the child is
+full-copy again, and every run that does not pass `--thin` leaves a full-copy child alone.
+A per-child permanent exclusion would need a new recorded key, and there is not one.
 
 ## Shared spec repository (opt-in)
 By default the umbrella is a throwaway parent directory — the coordinator's `.harness/`
