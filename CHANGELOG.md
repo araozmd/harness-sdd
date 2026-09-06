@@ -4,6 +4,22 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.75.0] — 2026-09-05
+
+### Added — ✨ umbrella `models:` cascade (E27-F01)
+
+A child config key that resolves to `inherit` (or is absent) now takes the
+COORDINATOR's `models:` value — role → default order, absent child `pin.*` keys fall
+back to the coordinator's pins — before the built-in default; a child's own explicit
+non-`inherit` value always wins. Arming sonnet-builder/opus-escalation across 16
+targets (2026-09-05) required scripting 16 per-child edits; now one coordinator edit
+re-tiers and re-arms every child on the next cascade run, with the escalation verdict
+recomputed in the same pass and one `models cascade:` report line per affected child
+naming each role's tier and source (`own` | `umbrella`). The resolution hangs off
+`umbrella_body_dir`, so a standalone child re-run cascades identically; single-repo
+installs and the coordinator itself are byte-identical to before. New suite:
+`tests/test_models_cascade.sh` (versions 0.73.0 and 0.74.0 are the in-flight E99-F130
+and E24-F04 lanes).
 ## [0.74.0] — 2026-09-05
 
 ### Added — ✨ migrate an existing child to the thin layout, and back (E24-F04)
