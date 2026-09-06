@@ -4027,8 +4027,7 @@ description: Seed a new idea into the TaskStore as Inception (interactive intake
 ---
 
 Act as **Inception** (`.harness/agents/inception.md`). That role file is the durable
-contract; this command carries the interactive front-end. Resolve all relative paths
-against `.harness/`.
+contract; this command carries the interactive front-end.
 
 The free-text idea is in `$ARGUMENTS`. If it is empty, ask the human for it.
 
