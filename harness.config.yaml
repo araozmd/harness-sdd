@@ -209,6 +209,18 @@ umbrella:
   #
   # The cascade writes this; you rarely set it by hand. Moving the umbrella directory
   # invalidates every child's value at once — greppable, but a real coupling.
+  #
+  # LAYOUT IS NEVER IMPLIED BY THIS KEY ALONE (E24-F04). An already-installed child that
+  # carries a full local body keeps it: converting one to stubs happens only when the
+  # installer is run with `--thin`, once per child, and only when every prose-tier path is
+  # byte-identical to the umbrella's copy. `--standalone` is the reverse — it re-materialises
+  # the full body and CLEARS this key, because after it the statement this key makes
+  # ("resolve my prose body from here") is false.
+  #
+  # Clearing it is not a permanent opt-out: the cascade re-records it for every child it
+  # installs, and this shipped default is already `""`, so "cleared" is indistinguishable
+  # from "never set". What makes `--standalone` durable is the LAYOUT — a full-copy child is
+  # left alone by every run that does not pass `--thin`. See docs/UMBRELLA.md.
   root: ""
 
 # Per-role model routing (E17-F01) — OPT-IN and INERT by default.

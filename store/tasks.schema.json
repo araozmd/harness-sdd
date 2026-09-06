@@ -42,8 +42,13 @@
                     "reason": { "type": "string", "minLength": 1 },
                     "unblocked_by": { "type": "string", "minLength": 1 },
                     "gate": {
-                      "$comment": "Optional (additive, E99-F77). A DISCRIMINATOR on the existing park, deliberately not a second field and not a status value. `owner` = every remaining requirement is a person's (a console attestation, a deploy approval, a signature); no agent will ever advance it, so `in-progress`/`in-review` would route a Builder or Reviewer at work that does not exist and `done` would be false. The selector reports it as `gated-owner` instead of `parked` so an Orchestrator can act on the diagnostic without reading progress/history.md. The enum is CLOSED on purpose: an unrecognised value is a validation error, never a silent downgrade to a plain park, because a wrong reason code is the defect this fixes. Absent ⇒ an ordinary park, byte-identical to before.",
-                      "enum": ["owner"]
+                      "$comment": "Optional (additive, E99-F77). A DISCRIMINATOR on the existing park, deliberately not a second field and not a status value. `owner` = every remaining requirement is a person's (a console attestation, a deploy approval, a signature); no agent will ever advance it, so `in-progress`/`in-review` would route a Builder or Reviewer at work that does not exist and `done` would be false. The selector reports it as `gated-owner` instead of `parked` so an Orchestrator can act on the diagnostic without reading progress/history.md. The enum is CLOSED on purpose: an unrecognised value is a validation error, never a silent downgrade to a plain park, because a wrong reason code is the defect this fixes. Absent ⇒ an ordinary park, byte-identical to before. `merge` (E99-F130) = APPROVED, PR OPEN, AWAITING MERGE: the review finished and the work is in flight to the default branch, so no agent role has anything left to do — the selector reports `awaiting-merge` (distinct from `gated-owner`, whose remedy is a person), and the ONE sanctioned way out is `set-status <id> done --evidence <merge-ref>`, which clears the park and writes the landing receipt in a single guarded write.",
+                      "enum": ["owner", "merge"]
+                    },
+                    "pr": {
+                      "$comment": "Optional, meaningful with gate: merge (E99-F130) — the PR the approved feature is awaiting; an operator receipt, never parsed by tooling.",
+                      "type": "string",
+                      "minLength": 1
                     }
                   }
                 },

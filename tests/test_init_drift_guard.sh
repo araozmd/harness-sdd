@@ -705,4 +705,65 @@ grep -qF 'You are the **Builder**' "$U6F/kid/.harness/agents/builder.md" \
   || fail "R6-full: the child's local prose body is not actually present — the case is vacuous"
 pass "a full-copy child with an unreachable umbrella is not reported as remote (E24-F03 R6) [full_copy_child_not_reported_remote]"
 
+# ── E24-F04 R8: a CONVERTED child is committable, and the guard sees it either way ──────
+# converted_child_is_committable.
+#
+# E24-F01's drift guard is this feature's observability: a conversion that went wrong shows
+# up as drift at the top of the next session. That only works if the converted tree is one a
+# `git commit` can land WHOLE — stubs are ordinary tracked files at the same pathspecs, so
+# nothing is added to or removed from the harness-owned set.
+#
+# BOTH HALVES ARE ASSERTED. Without the "dirty before the commit" half, a guard that never
+# runs at all also passes the "clean after" half.
+U7="$T/f04-converted"
+mkdir -p "$U7/kid"
+git -C "$U7/kid" init -q .
+git -C "$U7/kid" config user.email "test@harness.local"
+git -C "$U7/kid" config user.name  "harness test"
+echo seed > "$U7/kid/README.md"
+git -C "$U7/kid" add -A
+git -C "$U7/kid" commit -q -m init
+# FULL-COPY CHILD OF A REACHABLE UMBRELLA — single-target FIRST (no umbrella.root, complete
+# local body), THEN the cascade (records the root, leaves the full body alone). Inverting
+# these two steps yields a THIN child and the conversion below would never run.
+CODEX_HOME="$U7/.ch" HOME="$U7/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude "$U7/kid" >/dev/null 2>&1 \
+  || fail "R8 setup: the single-target install into the child failed"
+CODEX_HOME="$U7/.ch" HOME="$U7/.home" \
+  sh "$SRC/harness-install.sh" --umbrella "$U7" --agents=claude >/dev/null 2>&1 || true
+head -n 1 "$U7/kid/.harness/agents/builder.md" | grep -qxF '<!-- harness:umbrella-stub -->' \
+  && fail "R8 setup: the fixture is not a full-copy child — the conversion below is vacuous"
+git -C "$U7/kid" add -A
+git -C "$U7/kid" commit -q -m "installed harness (full copy)"
+[ -z "$(git -C "$U7/kid" status --porcelain)" ] || fail "R8 setup: the child is dirty right after its commit"
+run_gate "$U7/kid"
+[ "$GATE_RC" = 0 ] || fail "R8 setup: the committed full-copy child failed the gate before any conversion (rc=$GATE_RC): $GATE_OUT"
+
+# Convert it. Single-target, so the coordinator is not re-installed in the same breath.
+CODEX_HOME="$U7/.ch" HOME="$U7/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude --thin "$U7/kid" >/dev/null 2>&1 \
+  || fail "R8: the --thin conversion exited non-zero"
+head -n 1 "$U7/kid/.harness/agents/builder.md" | grep -qxF '<!-- harness:umbrella-stub -->' \
+  || fail "R8: the child was not converted — every assertion below would be about the wrong layout"
+
+# Half one: the conversion is UNCOMMITTED work, and the guard says so.
+[ -n "$(git -C "$U7/kid" status --porcelain)" ] \
+  || fail "R8: the conversion left no git-visible change — the 'clean after commit' half below proves nothing"
+run_gate "$U7/kid"
+[ "$GATE_RC" != 0 ] \
+  || fail "R8: an UNCOMMITTED conversion passed the drift guard — the guard is inert across the transition: $GATE_OUT"
+
+# Half two: committing it makes the same gate pass, with no drift and no new machinery.
+git -C "$U7/kid" add -A
+git -C "$U7/kid" commit -q -m "converted to the thin layout"
+[ -z "$(git -C "$U7/kid" status --porcelain)" ] \
+  || fail "R8: the converted tree is not committable whole — add+commit left it dirty"
+run_gate "$U7/kid"
+[ "$GATE_RC" = 0 ] || fail "R8: a COMMITTED conversion failed the drift guard (rc=$GATE_RC): $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -qi "environment ready" \
+  || fail "R8: the gate did not reach its ready verdict on a committed converted child: $GATE_OUT"
+grep -q 'This target holds the thin body layout' "$U7/kid/.harness/manifest.txt" \
+  || fail "R8: the converted child's manifest does not record the thin body layout"
+pass "a converted child is committable and drift-clean, dirty before the commit (E24-F04 R8) [converted_child_is_committable]"
+
 echo "All init drift-guard tests passed."
