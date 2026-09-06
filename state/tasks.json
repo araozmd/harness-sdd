@@ -1191,7 +1191,7 @@
         {
           "id": "E27-F01",
           "title": "Umbrella models: cascade \u2014 child inherit keys resolve from the coordinator's models block; explicit child values win; escalation verdicts recomputed per cascade; report names each child's source",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
