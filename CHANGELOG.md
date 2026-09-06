@@ -4,6 +4,34 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.78.0] — 2026-09-06
+
+### Fixed — 🐛 `preflight` exit 5 no longer conflates faults with opposite remedies (E99-F153)
+
+`tools/wait-for-codex.sh preflight` returned the same `5` for six unrelated checks, and
+the dispatch arm hardcoded it (`if wfc_preflight …; then exit 0; else exit 5; fi`) so the
+function's own return value was discarded. `5` is also what `wait` mode returns for "no
+Codex activity — the App is most likely not installed", so an operator running from an
+umbrella root instead of the child repo read the documented meaning of `5` and chased an
+App-installation problem they did not have. The six checks now split by **remedy
+direction** into `8` (auth/tooling), `9` (environment — wrong directory), `10` (usage —
+bad PR argument), each naming its own remedy; `5` is reserved exclusively for `wait`
+mode's first-response probe and `preflight` never returns it, so no installed consumer's
+`case "$rc"` arm changes meaning. Exit tables in the `/sdd-pr-loop` body and
+`docs/INSTALL.md` updated in the same change.
+
+### Changed — ✅ the two unstated bounds of grep-on-prose assertions are now decided (E99-F154)
+
+Anchored prose assertions carried two silent bounds. **Placement** is now pinned:
+`tests/test_reviewer.sh` R18 requires the mutation-revert prohibition to sit inside
+`## What you check`, so the block can no longer relocate to an appendix while the suite
+stays green. **Negation immunity** is stated rather than chased — a two-token anchor
+proves co-occurrence, not polarity, and a general "no later clause may invert an earlier
+one" check is open-ended; `agents/builder.md`'s assertion convention now says so
+explicitly (R19 pins that it says so). Both extractors are fence-aware via the one copy
+in `tests/lib/fence.awk`, and R18's anchor requires an imperative the section's own
+negated illustration cannot satisfy.
+
 ## [0.77.0] — 2026-09-05
 
 ### Added — ✨ divergence gate for the self-generated glue (E26-F02)

@@ -831,7 +831,7 @@
         {
           "id": "E99-F153",
           "title": "wait-for-codex.sh exit 5 conflates five preflight faults whose remedies are opposite (from viernes E99-F113, PR #157)",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -840,7 +840,7 @@
         {
           "id": "E99-F154",
           "title": "prose-assertion residual: negation immunity and unpinned placement are unstated bounds (from viernes E99-F82, PR #156)",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
