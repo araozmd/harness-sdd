@@ -1,7 +1,7 @@
 ---
 id: E24
 title: "Upgrade integrity: an unlanded upgrade must not run silently"
-status: in-progress      # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: done             # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 

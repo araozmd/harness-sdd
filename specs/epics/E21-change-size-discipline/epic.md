@@ -1,7 +1,7 @@
 ---
 id: E21
 title: "Change-size discipline: keep the review a gate"
-status: in-progress      # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: done             # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 
@@ -111,7 +111,7 @@ Two things from the pattern are deliberately **rejected**:
 | F03 | `/sdd-pr-loop`: per-round finding trend + "split, don't re-review" at the round cap | done | true | E18-F01 |
 | F04 | Stacked-PR lane for an atomic feature that exceeds the budget | done (re-spec'd as **merge-order safety**) | true | E18-F01, E21-F03 |
 | F05 | The stacked-PR lane's doctrine document | pending (gated) | true | E21-F04 |
-| F06 | The increment contract: delimitation, ownership, review scope | pending (**parked** — product decision open) | true | E21-F05 |
+| F06 | The increment contract: delimitation, ownership, review scope | pending (**parked — DECIDED NO, 2026-08-17**; superseded by F07, will not be built) | true | E21-F05 |
 
 ## Notes
 - **F04 was withdrawn during review of PR #78 (2026-07-28).** Its premise was wrong. The lane
@@ -231,3 +231,11 @@ Two things from the pattern are deliberately **rejected**:
 - **`.harness/progress/` leakage is out of scope here** and is seeded as its own maintenance
   fix (`E99-F06`): 796 lines of per-round pr-loop scratch (5% of PR #76's diff) were committed
   into the product diff and re-read by the reviewer every round.
+
+## Epic closed 2026-09-06
+
+Rolled `done` with F06 left `pending`+parked on purpose. The 2026-08-17 gate decided
+F06 **will not be built** (superseded by F07, which deprecated the stacked lane
+instead), and the board has no `declined` terminal status — so the row stays parked
+with its rationale rather than being deleted or faked as `done`. The selector already
+skips it; do not read the pending row as unfinished work.
