@@ -144,10 +144,30 @@ pass "R17 campaign_precondition_suite_present_and_discoverable"
 # Reviewer is about to mutate a file. Section-scoped per the house convention
 # (agents/builder.md "pin WHERE the block sits"): extract "## What you check" up to the
 # NEXT `^## ` heading, and require the anchor INSIDE that span — not merely in the file.
-_WYC="$(awk '/^## What you check/{k=1;next} /^## /{k=0} k' "$REVIEWER")"
-[ -n "$_WYC" ] || fail "R18: could not extract '## What you check' from $REVIEWER"
-printf '%s\n' "$_WYC" | tr '\n' ' ' | grep -qiE 'forbidden[^.]{0,60}git checkout' \
-  || fail "R18: the mutation-revert discipline's forbidden 'git checkout -- <file>' rule is not inside '## What you check' — it has moved to a later section (e.g. an appendix), where a Reviewer about to mutate a file will not see it at the point of use"
+#
+# EXTRACTION IS FENCE-AWARE (tests/lib/fence.awk, E99-F131 — the one copy): a `## ` line
+# inside a future fenced example must not close the slice, and a fenced QUOTATION of this
+# contract must not satisfy the pin. Fenced content is dropped from the scanned text.
+#
+# THE ANCHOR IS POLARITY-DISTINGUISHING, and it has to be. The obvious pattern
+# `forbidden[^.]{0,60}git checkout` is reachable by TWO paths inside this very section:
+# the real prohibition, and the NEGATED illustration ("Not strictly forbidden as the
+# revert, but avoid: `git checkout -- <file>`") that E99-F154 added right beside it. With
+# the naive anchor, relocating the real rule to an appendix left the suite GREEN — the
+# illustration alone satisfied it, so R18's failure message named a guarantee it could
+# not detect (the house "assertion reachable by another path" defect, recurring). Anchor
+# on the IMPERATIVE the illustration cannot contain — `never use it` — so only the rule
+# itself, at its point of use, can satisfy this.
+FENCE_AWK="$(cat "$ROOT/tests/lib/fence.awk")"
+_WYC="$(awk "$FENCE_AWK"'
+  fence_delim($0) { next }
+  fence           { next }
+  /^## / { k = (index($0, "What you check") > 0); next }
+  k
+' "$REVIEWER" | tr '\n' ' ')"
+[ -n "$_WYC" ] || fail "R18: fence-aware extraction of '## What you check' from $REVIEWER returned empty"
+printf '%s\n' "$_WYC" | grep -qiE 'forbidden as the revert[^.]{0,30}never use it[^.]{0,30}git checkout' \
+  || fail "R18: the mutation-revert discipline's IMPERATIVE prohibition ('Forbidden as the revert — never use it: git checkout -- <file>') is not inside '## What you check' — it has moved to a later section (e.g. an appendix), where a Reviewer about to mutate a file will not see it at the point of use. NOTE: a co-occurrence of 'forbidden' and 'git checkout' is NOT enough here — the negated illustration in this same section satisfies that, which is why this anchor requires 'never use it'"
 pass "R18 mutation_revert_block_stays_at_point_of_use"
 
 # ── R19: the negation-immunity bound is STATED, not silently unenforced (E99-F154, ──
@@ -158,9 +178,15 @@ pass "R18 mutation_revert_block_stays_at_point_of_use"
 # convention must STATE it, so the next author knows what a green two-token-anchor
 # suite does not prove. Section-scoped to "## Principles" (where the rest of the
 # assertion convention lives), markdown emphasis stripped, folded across newlines, and
-# two-token anchored — the house convention this very assertion follows.
-_PRINC="$(awk '/^## Principles/{k=1;next} /^## /{k=0} k' "$BUILDER" | sed 's/[*`]//g' | tr '\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g')"
-[ -n "$_PRINC" ] || fail "R19: could not extract '## Principles' from $BUILDER"
+# two-token anchored — the house convention this very assertion follows. Extraction is
+# fence-aware for the same reason as R18 above.
+_PRINC="$(awk "$FENCE_AWK"'
+  fence_delim($0) { next }
+  fence           { next }
+  /^## / { k = (index($0, "Principles") > 0); next }
+  k
+' "$BUILDER" | sed 's/[*`]//g' | tr '\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g')"
+[ -n "$_PRINC" ] || fail "R19: fence-aware extraction of '## Principles' from $BUILDER returned empty"
 printf '%s\n' "$_PRINC" | grep -qiE 'co-occurrence[^.]{0,20}not polarity' \
   || fail "R19: $BUILDER does not state 'co-occurrence is not polarity' in its assertion convention"
 printf '%s\n' "$_PRINC" | grep -qiE 'not chased[^.]{0,60}polarity-aware' \

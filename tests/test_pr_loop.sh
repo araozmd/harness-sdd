@@ -944,10 +944,19 @@ test_preflight_failure_matrix() {                     # R31 (E99-F153: split int
   _rc=0; ( PATH="$_b" STUB_MODE=ok sh "$W" preflight 7 ) >/dev/null 2>"$T/.pf3" || _rc=$?
   [ "$_rc" = 8 ] || fail "R31: missing jq must exit 8 (AUTH bucket, got $_rc)"
   grep -qF 'jq' "$T/.pf3" || fail "R31: jq-missing diagnostic does not name jq"
+  # Each AUTH arm must name its own REMEDY, not just the failed check — the brief's whole
+  # point is that a bucket is only actionable if the message says what to DO. Naming the
+  # check ('gh'/'auth'/'jq') is the fault; `pr_loop.enabled` is the remedy every AUTH arm
+  # shares (install/authenticate the tool, or accept manual review and turn the loop off).
+  # Without this, stripping the remedy clause left the suite green.
+  for _pf in "$T/.pf1" "$T/.pf2" "$T/.pf3"; do
+    grep -qF 'pr_loop.enabled' "$_pf" \
+      || fail "R31: the AUTH-bucket diagnostic in $_pf names its fault but not its remedy (no pr_loop.enabled escape named)"
+  done
   # nothing was posted: the stub records no `pr comment` because preflight never calls it
   grep -rqF 'pr comment' "$T/.pf1" "$T/.pf2" "$T/.pf3" \
     && fail "R31: preflight posted to GitHub"
-  pass "R31 the AUTH/TOOLING bucket (gh missing/unauthed, jq missing) exits 8 with a one-line diagnostic; nothing posted"
+  pass "R31 the AUTH/TOOLING bucket (gh missing/unauthed, jq missing) exits 8 with a one-line diagnostic naming its remedy; nothing posted"
 }
 
 test_preflight_environment_bucket() {                 # E99-F153
