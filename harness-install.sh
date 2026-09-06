@@ -7355,8 +7355,20 @@ self_install() {
     info "self: escalation arming verdict reclaimed (no role resolves to a model)"
   fi
 
+  # 5. Glue manifest (E26-F02): a cksum ledger of every regenerated file, consumed by
+  # init.sh's warn-only staleness line and the divergence-gate suite (E26-F02). The
+  # globs sort deterministically and the manifest never lists itself, so a second
+  # `--self` run leaves it byte-identical.
+  (
+    CDPATH= cd -- "$SRC" || exit 1
+    for _si_mf in .claude/agents/*.md .claude/commands/*.md .escalation-arming; do
+      [ -f "$_si_mf" ] || continue
+      cksum "$_si_mf"
+    done
+  ) > "$SRC/.claude/.glue-manifest"
+
   rm -rf "$_si_tmp"
-  ok "self: $_si_n glue files regenerated into $SRC/.claude/ (+ .escalation-arming)"
+  ok "self: $_si_n glue files regenerated into $SRC/.claude/ (+ .escalation-arming, .glue-manifest)"
 }
 
 # ── manifest auto-population (append-only upsert, never clobbers entries) ──────

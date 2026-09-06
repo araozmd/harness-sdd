@@ -4,6 +4,18 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.77.0] — 2026-09-05
+
+### Added — ✨ divergence gate for the self-generated glue (E26-F02)
+
+Arms what E26-F01 made possible: `tests/test_self_drift.sh` regenerates the glue in
+a pristine copy and FAILS on any byte of divergence from the committed copy — an
+emitter edited without `--self`, or a hand-edited generated file, is now caught by
+the verification gate instead of by review. `--self` additionally records a cksum
+ledger (`.claude/.glue-manifest`), and `init.sh` prints one warn-only line naming
+the `--self` remedy when a manifested file diverges — source layout only (targets
+ship neither the installer nor the manifest), silent when clean, never blocking.
+
 ## [0.76.0] — 2026-09-05
 
 ### Added — ✨ `--self`: the source repo's glue is installer-generated (E26-F01)

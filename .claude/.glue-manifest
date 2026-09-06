@@ -1,0 +1,16 @@
+1754293473 845 .claude/agents/architect.md
+1157451288 613 .claude/agents/builder-heavy.md
+4021444689 699 .claude/agents/builder.md
+3029902048 940 .claude/agents/doc-critic.md
+2465310980 705 .claude/agents/orchestrator.md
+2836176497 821 .claude/agents/pr-fixer.md
+3509896364 784 .claude/agents/reviewer.md
+2394794318 563 .claude/agents/scout.md
+393564539 3792 .claude/commands/sdd-drill.md
+2137710744 1391 .claude/commands/sdd-fix-parallel.md
+1273071214 3574 .claude/commands/sdd-fix.md
+2869697306 3415 .claude/commands/sdd-new.md
+2578950902 2671 .claude/commands/sdd-next.md
+84553215 3851 .claude/commands/sdd-plan.md
+3183552801 58952 .claude/commands/sdd-pr-loop.md
+2731867399 19 .escalation-arming
