@@ -45,3 +45,33 @@
   file the fixture also ships must DELETE it first — otherwise the test proves the
   repo's state, not the code's behavior. (Same family as "assertion reachable by
   another path".)
+- [2026-09-06 builder] A two-token folded-newline anchor (`grep -qiE
+  'tokenA[^.]{0,N}tokenB'`) proves co-occurrence, not polarity: "Not strictly forbidden
+  as the revert, but avoid: git checkout -- <file>" still satisfies a
+  forbidden/git-checkout anchor. Chasing every negation/hedge shape is open-ended with
+  no provably bounded cost (a prior Reviewer campaign against this exact sentence
+  reached the same conclusion and logged it, `tests/test_reviewer_mutation_mandate.sh`)
+  — state the bound in the convention (`agents/builder.md` "Co-occurrence is not
+  polarity") instead of pretending a green suite proves polarity it never checked.
+  Placement, by contrast, IS boundable: extract the section a block is expected to live
+  in and require the anchor inside that span, not the whole file — a block moved
+  verbatim to a later section/appendix then reddens (E99-F154 added
+  `tests/test_reviewer.sh` R18/R19 for both).
+- [2026-09-06 reviewer] "The file changed" is NOT "the intended line changed". A
+  `replace(old, new, 1)` mutation on a script whose HEADER COMMENT quotes the same
+  sentence as the `echo` silently edits the comment, so the runner sees a landed diff,
+  the suite stays green, and you record a SURVIVED that proves nothing (hit twice in one
+  campaign on `tools/wait-for-codex.sh`). Anchor the mutation to the line KIND you mean
+  (`lstrip().startswith('echo')`), and print the applied diff — a landed-diff check alone
+  cannot tell the two apart.
+- [2026-09-06 reviewer] A test suite with a `#!/bin/sh` shebang but no `+x` bit turns
+  `./tests/<suite>.sh` into "Permission denied" — a NON-ZERO exit that a mutation runner
+  reads as a kill. An entire campaign reported 8 confident kills without ever executing
+  the suite. Require a `FAIL:`/`not ok` line in the output before calling anything a
+  kill, and green the suite once before mutating; rc alone is not evidence.
+- [2026-09-06 reviewer] An assertion added in the SAME change as the prose it pins can be
+  satisfied by that prose's own illustration: E99-F154's R18 anchored
+  `forbidden[^.]{0,60}git checkout`, and the negated example it added one bullet below
+  ("Not strictly forbidden … but avoid: `git checkout`") satisfied it alone — relocating
+  the real rule left the suite green. When a section gains a counter-example, re-derive
+  every anchor over that section and require a token only the real rule carries.

@@ -47,6 +47,13 @@ saying "it works" means nothing until you prove it. AI-generated code is often
        aliases `git restore <file>`, `git checkout HEAD -- <file>`), which restores the
        file to HEAD and discards the mutation *and* every uncommitted line beside it.
        Confirm the restore with a diff, not a test run.
+     - **This forbidding sentence is itself vulnerable to the negation it cannot
+       detect.** "Not strictly forbidden as the revert, but avoid: `git checkout --
+       <file>`" would still satisfy a forbidden/git-checkout co-occurrence anchor,
+       because a grep sees the two tokens sit near each other, not which one governs
+       the other. That is a stated, accepted bound of the anchoring convention itself —
+       see `agents/builder.md`'s "Co-occurrence is not polarity" (E99-F154) — not a gap
+       chased here with a polarity-aware pattern.
      - **This bullet is a CONDENSATION, and the rest is not enforced anywhere.** The
        full discipline — deriving the backup set from the mutation list rather than the
        diff, keeping `*.mutbak` out of `.gitignore` so the residue stays visible, and

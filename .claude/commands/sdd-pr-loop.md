@@ -102,10 +102,26 @@ sh tools/wait-for-codex.sh preflight "$pr_number"
 ```
 
 It checks `gh` on PATH, `gh auth status`, `jq` on PATH, a resolvable repo slug, and that
-the PR exists and is OPEN. It posts **nothing**. On a non-zero exit (`5`), **STOP** and
-report its one-line diagnostic verbatim — do not post `@codex review`, do not poll, do
-not fall back to a hand-rolled check. A repo without the Codex GitHub App should leave
+the PR exists and is OPEN. It posts **nothing**. On a non-zero exit, **STOP** and report
+its one-line diagnostic verbatim — do not post `@codex review`, do not poll, do not fall
+back to a hand-rolled check. A repo without the Codex GitHub App should leave
 `pr_loop.enabled` at its opt-in default of `false` rather than run this loop.
+
+The exit code names which of three remedy buckets fired — **never** treat these as a
+single "preflight failed" signal, and never confuse `9` with the unrelated `5` a later
+step can return (below):
+
+| Exit | Bucket | Failed check(s) | Remedy |
+|---|---|---|---|
+| `8` | Auth/tooling | `gh` missing, `gh` unauthenticated, or `jq` missing | Install/authenticate the missing tool, or accept manual review and set `pr_loop.enabled: false` |
+| `9` | Environment | Repo slug unresolvable | You are very likely in the **wrong directory** (e.g. an umbrella root instead of the child repo) — re-run from the repo `gh` can resolve |
+| `10` | Usage | PR not found, or found but not `OPEN` | Pass an existing, open PR number |
+
+These three used to be one shared code (`5`), the same number step 2's own diagnostic
+below uses for "the Codex GitHub App is most likely not installed" — so an environment
+mistake (wrong directory) and an App-installation problem were indistinguishable by exit
+code alone, and stderr is not something a `case "$rc"` can read. `5` is now reserved
+exclusively for step 2; `preflight` never returns it.
 
 ### 0c. The working tree must BE the PR (E99-F146 / E99-F147)
 

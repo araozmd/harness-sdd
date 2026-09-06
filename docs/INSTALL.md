@@ -129,10 +129,13 @@ is created for the codex or gemini front-ends (those apply fixes in-session).
 
 **Preconditions — the loop only works with all three:** the **Codex GitHub App** installed
 on the target repository, an **authed `gh`**, and **`jq`** on `PATH`. The watcher's
-`preflight` mode checks each one before anything is posted and fails fast (exit `5`) with
-a one-line diagnostic naming the failed check and its remedy. These are **loop-runtime**
-dependencies only: `init.sh` gains no new gate, so a target with neither `gh` nor `jq`
-still passes the environment gate.
+`preflight` mode checks each one before anything is posted and fails fast with a one-line
+diagnostic naming the failed check and its remedy — and a distinct exit code per remedy
+bucket, never one shared code: `8` (auth/tooling — `gh` missing/unauthenticated, `jq`
+missing), `9` (environment — the repo slug is unresolvable, almost always the wrong
+directory), `10` (usage — the PR number doesn't resolve, or isn't `OPEN`). These are
+**loop-runtime** dependencies only: `init.sh` gains no new gate, so a target with neither
+`gh` nor `jq` still passes the environment gate.
 
 Fresh config seeds:
 
@@ -576,8 +579,9 @@ is POSIX `sh` with zero dependencies and never invokes either tool — those sta
 installs and still passes `init.sh`. The App can also legitimately be installed *after* the
 harness, and a target may not even have a remote yet, so an install-time "missing App"
 warning would routinely be wrong. The prompt states the precondition instead, and
-`/sdd-pr-loop`'s own preflight fails fast (exit `5`) naming the failed check and its
-remedy at the one moment that diagnosis can be accurate.
+`/sdd-pr-loop`'s own preflight fails fast — with a distinct exit code per remedy bucket
+(`8` auth/tooling, `9` environment, `10` usage; see above) — naming the failed check and
+its remedy at the one moment that diagnosis can be accurate.
 
 ### Changing either answer later
 

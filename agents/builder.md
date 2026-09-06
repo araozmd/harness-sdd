@@ -102,6 +102,30 @@ comes from.)
   grep -qiE 'tokenA[^.]{0,60}tokenB'` — a whole-file fold would stay green when the
   pair also occurs in another section. Verify the assertion FAILS on the pre-change
   blob before you trust it.
+- **When position is what makes a rule followed, pin WHERE the block sits, not only
+  THAT it exists.** A rule read at its point of use gets followed; the identical rule
+  relocated to a later section or an appendix reads the same to a grep and is read by
+  no one, because nobody is looking there at the moment the rule matters. Extract the
+  section the block is EXPECTED to live in (e.g. `## What you check`, up to the next
+  `^## ` heading) and require the anchor inside THAT span, not merely inside the whole
+  file — `awk '/^## What you check/{k=1;next} /^## /{k=0} k' <file> | tr '\n' ' ' |
+  grep -qiE '<anchor>'`. Verify the assertion FAILS when the block is moved, unedited,
+  past the section's closing heading — a green result that survives the move is the
+  same defect as a whole-file grep, in the shape placement takes (E99-F154).
+- **Co-occurrence is not polarity — a known, accepted bound of this convention.** The
+  two-token anchor above proves the tokens sit in one sentence; it proves nothing about
+  which one governs the other. `Not strictly forbidden as the revert, but avoid: git
+  checkout -- <file>` still satisfies an anchor built from `forbidden` and `git
+  checkout`, because the regex sees co-occurrence, not the `not` that inverted it. This
+  is **not chased with a polarity-aware pattern here**: a general "no later clause may
+  invert an earlier one" check is open-ended — any hedge, negation or contradicting
+  neighbor sentence defeats a specific fix — with no provably bounded cost, the same
+  conclusion a Reviewer mutation campaign against `agents/reviewer.md`'s own
+  forbidden-revert anchor already reached and logged (`tests/
+  test_reviewer_mutation_mandate.sh`). State it instead, so the next author knows what a
+  green suite does not prove: a passing two-token anchor proves the tokens co-occur in
+  one sentence; it does **not** prove the sentence still means what it meant when the
+  anchor was written. Read the diff for polarity — the assertion will not (E99-F154).
 - **Every guarantee you write in prose names the test that pins it.** Before hand-off,
   for each claim in a docstring, comment, or progress note ("never replaces the walk",
   "bounded per run", "catches any writer"), name the test that fails if the claim is
