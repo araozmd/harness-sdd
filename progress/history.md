@@ -233,3 +233,24 @@ Format: `YYYY-MM-DD | <agent> | <feature-id> | <what happened>`
 - 2026-09-05T17:10:06Z E25-F01 done (merged #167, f536ab93; 2 rounds: 2 P2s then clean) — Claude-first defaults live; E99-F145 re-parked on opt-in evidence
 - 2026-09-05T21:39:16Z verification-hygiene batch merged (#169, 8f40e648; rounds 3,1,1,1; first docs/ABLATION.md A/B executed — record progress/ablation-2026-09-05.md): E99-F75/F76/F88 done; F138 resolved by removal (E21-F07)
 - 2026-09-05T23:37:09Z E27 + E26 drilled (planned; F01 cascade, F01/F02 self-host) during the Codex review-quota outage; implementation sequenced after #149/#171
+
+## 2026-09-05 — E24-F04, E99-F130, E27, E26 all land (v0.74.0 → v0.77.0)
+
+Codex review quota was exhausted mid-campaign; at the operator's direction the five
+open lanes merged on hand review instead of a `/sdd-pr-loop` cycle. Each landed with a
+full green suite and mutation-verified assertions, in version order:
+
+- **#171 / E99-F130** (0.73.0) — `awaiting-merge`, the state between approval and merge.
+- **#149 / E24-F04** (0.74.0) — thin-child migration, adopted after 18 days idle and 5
+  further review rounds; 27 mainline merges reconciled.
+- **#173 / E27-F01** (0.75.0) — umbrella `models:` cascade. One coordinator edit now
+  re-tiers and re-arms every child; the 16-target hand-arming toil is gone.
+- **#174 / E26-F01** (0.76.0) — `--self`: the source repo's `.claude/` glue is
+  installer-generated. All 15 files had forked in BOTH directions; the reconciliation
+  upstreams the richer prose so every target gets it on upgrade.
+- **#175 / E26-F02** (0.77.0) — the divergence gate: regenerate-and-compare suite, a
+  cksum glue manifest, and a warn-only `init.sh` staleness line.
+
+Both epics closed. One mutation SURVIVED during E26-F02 and drove a real suite fix
+(the fixture inherited the committed manifest, so "does `--self` write it?" was never
+asked) — recorded in `progress/lessons.md`.
