@@ -4144,8 +4144,7 @@ description: Per-epic drill-down as Driller — decompose one draft epic into fe
 ---
 
 Act as **Driller** (`.harness/agents/driller.md`). That role file is the durable
-contract; this command carries the interactive front-end. Resolve all relative paths
-against `.harness/`.
+contract; this command carries the interactive front-end.
 
 The target `<epic-id>` is in `$ARGUMENTS`. The `<epic-id>` is **required** — if
 `$ARGUMENTS` is **empty**, STOP and **ask** the human for the epic id rather than drilling
