@@ -930,6 +930,18 @@ never overwrites existing values. The mapping is heuristic — review the sugges
 applying. If a tier has no matching model, no pin is emitted for it and the role stays on
 the session model (`inherit`).
 
+## Self mode — `--self` (harness developers only)
+
+`./harness-install.sh --self` regenerates the **source repo's own**
+`.claude/agents/*` and `.claude/commands/*` from the same emitters targets get, plus
+the root `.escalation-arming` from the real escalation verdict. It runs the real
+installer against a throwaway temp target and rewrites that output into the source
+layout (paths lose their `.harness/` prefix), so the two renderings can never diverge
+in content. Each existing shim's `model:` line is harvested and preserved — the
+source repo's tiering lives in the shims, never in the seed-template config. It takes
+no target argument, refuses every other mode, touches nothing outside the glue, and
+is idempotent. Consumers of the harness never need it.
+
 ## Config migration on upgrade (non-destructive)
 
 The installer preserves an existing `.harness/harness.config.yaml` on upgrade. To get

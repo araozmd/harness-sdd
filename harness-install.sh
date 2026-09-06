@@ -3,6 +3,7 @@
 #
 #   ./harness-install.sh [--agents=<csv>] [--builder-backend=<value>] [--pr-loop=<true|false>] [--with-opencode-parallel=<true|false>] [--thin|--standalone] <target-repo-path>
 #   ./harness-install.sh --umbrella <umbrella-dir> [--shared-repo] [--recursive] [--thin] [--dry-run|--list]
+#   ./harness-install.sh --self          # regenerate the SOURCE repo's own glue (E26-F01)
 #
 # Idempotent: run once to install, re-run to upgrade.
 #
@@ -1759,7 +1760,7 @@ HARNESS_OWNED_CMDS="$HARNESS_SDD_CMDS $HARNESS_PR_LOOP_CMDS"
 # reclamation compares, so the two can never diverge — a second copy would let the
 # install stamp and the pristine reference disagree, which is exactly what makes an
 # already-stamped file unremovable.
-PR_FIXER_DESC="Fixes exactly ONE Codex review comment in an isolated context: reads the comment and the cited hunk, applies the smallest change, commits, returns. One comment, one fix, one commit, one return."
+PR_FIXER_DESC="Fixes exactly ONE Codex review comment in an isolated context: reads the comment and the cited hunk, applies the smallest change, commits, returns. One comment, one fix, one commit, one return. Spawned by /sdd-pr-loop, once per blocking comment."
 
 # ── per-role model routing (E17-F01) ──────────────────────────────────────────
 # Config (`models:` in .harness/harness.config.yaml) → the NATIVE model value of each
@@ -1891,6 +1892,15 @@ model_alias() {
 resolve_model() {
   [ "${MODELS_OFF:-0}" = 1 ] && return 0
   _rm_fe="$1"; _rm_role="$2"
+  # E26-F01 `--self`: the source repo's tiering lives in its committed shims' `model:`
+  # lines (the root harness.config.yaml is the SEED TEMPLATE and must stay all-inherit),
+  # so self mode answers every claude-role resolution from the pre-regeneration harvest.
+  # One choke point: emit_agent, models_any and escalation_verdict all flow through here,
+  # which is what makes the arming verdict REAL rather than re-derived (R3/R4).
+  if [ "${SELF_MODE:-0}" = 1 ] && [ "$_rm_fe" = claude ]; then
+    self_model "$_rm_role"
+    return 0
+  fi
   _rm_tier="$(model_tier "$_rm_role")"
   [ "$_rm_tier" = "inherit" ] && return 0
 
@@ -4866,6 +4876,120 @@ host-detectable"
   # `opencode` independently and re-derives the command bodies if Claude is skipped.
   if agent_selected claude; then
   mkdir -p "$TARGET/.claude/agents" "$TARGET/.claude/commands"
+  # claude_agent_body <role> — the per-role shim prose (E26-F01). Reconciled from the
+  # source repo's hand-maintained shims: each role gets a short, role-specific summary
+  # of its working discipline on top of the pointer at the canonical role file. Every
+  # path carries the `.harness/` prefix so the `--self` layout transform is total.
+  claude_agent_body() {
+    case "$1" in
+      orchestrator) cat <<'EOF'
+
+You are the Orchestrator for this project.
+
+Your full role definition is in `.harness/agents/orchestrator.md` — read it now and
+follow it exactly. In Claude Code you delegate by spawning the `architect`, `builder`,
+`reviewer`, and `scout` sub-agents with the Task tool, each with a clean, minimal
+context (only the files it needs). Always run `./.harness/init.sh` first and halt on
+failure. Hand off through `.harness/progress/` files, never by forwarding conversation.
+EOF
+;;
+      architect) cat <<'EOF'
+
+You are the Architect for this project.
+
+Your full role definition is in `.harness/agents/architect.md` — read it now and
+follow it exactly. Produce the four spec files from `.harness/specs/_templates/`,
+write acceptance criteria in EARS with stable R-ids (see
+`.harness/docs/SPEC-FORMAT.md`), and make every requirement testable. Before
+hand-off, run the mandatory R12 doc-critic checkpoint: spawn the `doc-critic`
+sub-agent with `target-type=feature-spec` (that is the only thing `Task` is here
+for). When done, report to the Orchestrator for the `spec-ready` gate. Do not write
+production code.
+EOF
+;;
+      builder) cat <<'EOF'
+
+You are the Builder for this project.
+
+Your full role definition is in `.harness/agents/builder.md` — read it now and follow
+it exactly. Confirm the feature is `in-progress` (human-approved) before writing any
+code. Work `tasks.md` top to bottom, touch only files the `.plan.md` lists, honor
+DO NOT TOUCH, write the tests from `tests.md`, and self-check with
+`./.harness/init.sh`. Report to the Orchestrator for `in-review`; never declare
+`done` yourself.
+EOF
+;;
+      builder-heavy) cat <<'EOF'
+
+You are the Builder (escalation tier) for this project.
+
+Your full role definition is `.harness/agents/builder-heavy.md` — read it now and
+follow it exactly; it defers to `.harness/agents/builder.md` for the whole working
+discipline. Confirm the feature is `in-progress` (human-approved) before writing any
+code. Hand off through `.harness/progress/` files, never by forwarding chat history.
+EOF
+;;
+      reviewer) cat <<'EOF'
+
+You are the Reviewer for this project.
+
+Your full role definition is in `.harness/agents/reviewer.md` — read it now and
+follow it exactly. Be skeptical by default: "done" is not done until proven. Run the
+configured checks, verify the traceability matrix in `tests.md`, exercise the
+running app where relevant, and give specific feedback. Approve → tell the
+Orchestrator to set `done`; reject → write feedback to
+`.harness/progress/<run>/review.md`. You may tighten the harness files to prevent a
+recurring failure.
+EOF
+;;
+      scout) cat <<'EOF'
+
+You are the Scout for this project.
+
+Your full role definition is in `.harness/agents/scout.md` — read it now and follow
+it exactly. Stay focused on the question asked, read excerpts not whole files, and
+write a concise structured findings file to
+`.harness/progress/<run>/scout-<topic>.md`. Make no decisions and write no
+production code.
+EOF
+;;
+      doc-critic) cat <<'EOF'
+
+You are the Doc-critic for this project.
+
+Your full role definition is in `.harness/agents/doc-critic.md` — read it now and
+follow it exactly. You were spawned with one `target-type` (`plan-output`,
+`epic-decomposition`, or `feature-spec`) and the paths just written; review only
+those. Flag only issues that would cause real downstream problems, across
+completeness, consistency, clarity, scope and YAGNI — never spelling or style.
+Your findings are advisory and never block the generating agent. Write a concise
+note to `.harness/progress/<run>/doc-critic-<checkpoint>.md`. Documents only:
+production code is the Reviewer's job.
+EOF
+;;
+      pr-fixer) cat <<'EOF'
+
+You are the pr-fixer for this project.
+
+Your full role definition is in `.harness/agents/pr-fixer.md` — read it now and
+follow it exactly. Fix exactly the one comment you were given: the smallest targeted
+edit, any relevant local check (never the full suite), one commit, one
+`fix-<comment_id>.md` note in `round_dir`, then return. Do not push, do not resolve
+the thread, do not merge, do not touch files the comment did not cite. If the
+comment is unclear, say so in the summary and exit without committing.
+EOF
+;;
+      *) cat <<EOF
+
+You are the **$1** for this project's agent harness (installed in \`.harness/\`).
+
+Your full, canonical role definition is \`.harness/agents/$1.md\` — read it now and
+follow it exactly. Run \`./.harness/init.sh\` before any work and halt on failure.
+Hand off through \`.harness/progress/\` files, never by forwarding chat history.
+EOF
+;;
+    esac
+  }
   emit_agent() { # emit_agent <name> <tools> <description>
     # Frontmatter key order is FIXED (name, description, tools, model) regardless of
     # config state — the `model:` line is either present in that one position or absent
@@ -4880,25 +5004,16 @@ host-detectable"
       if [ -n "$_ea_model" ]; then printf 'model: %s\n' "$_ea_model"; fi
       printf -- '---\n'
     } > "$TARGET/.claude/agents/$1.md"
-    cat >> "$TARGET/.claude/agents/$1.md" <<EOF
-
-You are the **$1** for this project's agent harness (installed in \`.harness/\`).
-
-Your full, canonical role definition is \`.harness/agents/$1.md\` — read it now and
-follow it exactly. Resolve every relative path it mentions against \`.harness/\`
-(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
-\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on failure.
-Hand off through \`.harness/progress/\` files, never by forwarding chat history.
-EOF
+    claude_agent_body "$1" >> "$TARGET/.claude/agents/$1.md"
   }
   emit_agent orchestrator "Read, Bash, Edit, Grep, Glob, Task" \
-    "The Leader. Reads state, runs init.sh, routes the next task, delegates to architect/builder/reviewer/scout. Never writes code."
+    "The Leader. Reads state, runs init.sh, decides the next phase, and delegates to architect/builder/reviewer/scout. Never writes code. Use this at the start of every SDD session."
   # architect carries `Task` so it can spawn the doc-critic sub-agent at its
   # pre-`spec-ready` `target-type=feature-spec` checkpoint (agents/architect.md).
   emit_agent architect "Read, Write, Edit, Grep, Glob, Bash, Task" \
-    "The Spec Author. Writes the 4-file spec in EARS. No production code."
+    "The Spec Author. Turns a feature intent into the 4-file spec (.spec/.plan/.tasks/.tests) using EARS. Writes specs, never production code. Spawn for features in \`pending\` with sdd:true."
   emit_agent builder "Read, Write, Edit, Bash, Grep, Glob" \
-    "The Implementer. Writes code from an APPROVED spec, one task at a time."
+    "The Implementer. Writes code strictly from an APPROVED spec's tasks.md, one task at a time, plus the tests in tests.md. Spawn only when the feature is \`in-progress\`."
   # builder-heavy (E17-F02): the escalation tier. The tool list is copied EXACTLY from
   # `builder` above — ADR-0002 says the two variants differ only by resolved model, so a
   # different tool list would be a behavioral difference the ADR forbids. Both shims point
@@ -4907,14 +5022,14 @@ EOF
   emit_agent builder-heavy "Read, Write, Edit, Bash, Grep, Glob" \
     "The Implementer at the escalation tier. Same instruction body and same discipline as \`builder\`; differs only by the model it resolves to (ADR-0002)."
   emit_agent reviewer "Read, Bash, Grep, Glob, Edit" \
-    "The Evaluator. Verifies against the spec, runs tests, approves or rejects."
+    "The Evaluator/verification layer. Runs init.sh + tests, checks every R-id has a passing test, exercises behavior (Playwright), enforces conventions. Approves or rejects. Spawn when a feature is \`in-review\`."
   emit_agent scout "Read, Grep, Glob, Bash" \
-    "Read-only codebase reconnaissance. Writes findings to progress/."
+    "Read-only codebase reconnaissance. Answers \"where/how is X done?\" and writes concise findings to progress/ so other agents don't burn context. Never modifies production code."
   # doc-critic sub-agent shim (E09): the advisory review pass the architect (and the
   # planner/driller slash commands) spawn at their pre-hand-off checkpoints. Points at
   # the canonical .harness/agents/doc-critic.md; documents-only, no production-code review.
   emit_agent doc-critic "Read, Grep, Glob, Write" \
-    "Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code."
+    "Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code. Spawned by the Architect (and the /sdd-plan, /sdd-drill flows) before hand-off."
   # pr-fixer (E18-F01 R10): the /sdd-pr-loop worker sub-agent, spawned once per blocking
   # Codex comment. GATED on the opt-in pr_loop.enabled — unlike the seven roles above it is
   # NOT stamped by default. It rides the SAME emit_agent path (one shim, pointing at
@@ -4934,34 +5049,44 @@ EOF
 description: Run the Orchestrator loop on the next actionable task (init → route → delegate)
 ---
 
-Act as the **Orchestrator** (`.harness/agents/orchestrator.md`), resolving all
-relative paths against `.harness/`.
+Act as the **Orchestrator** (`.harness/agents/orchestrator.md`).
 
-1. Run `.harness/init.sh`. If it exits non-zero, STOP and report.
+1. Run `./.harness/init.sh`. If it exits non-zero, STOP and report — do not work on a broken
+   environment.
 2. Read `.harness/harness.config.yaml` and the TaskStore (per `.harness/store/local.md`).
-3. Find the next actionable feature and route it by status per
-   `.harness/docs/WORKFLOW.md`:
-   - `pending` + sdd:true → spawn **architect**, then `spec-ready` and PAUSE (human gate).
-   - `spec-ready` + autonomous:true → set `in-progress`, spawn **builder**, then `in-review`.
+3. Find the next actionable feature and route it by status per `.harness/docs/WORKFLOW.md`:
+   - `pending` + sdd:true → spawn **architect**, then set `spec-ready` and PAUSE for
+     the human gate (unless `autonomous`). When spawning the Architect, pass the
+     feature's intent brief `.harness/progress/inbox/<feature-id>.md` (when it exists) as a
+     primary input alongside the spec templates, so Inception's captured intent,
+     constraints, and open questions reach spec generation.
+   - `spec-ready` + `autonomous:true` → human gate is skipped: set `in-progress`,
+     spawn **builder** with the specs, then `in-review`. (A `spec-ready` feature
+     *without* `autonomous:true` is parked at the human gate — not actionable.)
    - `in-progress` → spawn **builder** with the approved specs only, then `in-review`.
    - `in-review` → spawn **reviewer**; approve → open the PR and LEAVE it `in-review`
-     (`done` is written only after the work merges — see `agents/orchestrator.md`
+     (`done` is written only after the work merges — see `.harness/agents/orchestrator.md`
      “Writing `done`”), reject → back to `in-progress`.
 4. Append what happened to `.harness/progress/history.md`.
 
-`$ARGUMENTS` may carry either a specific feature id or a scope token; forward it verbatim
-to the Orchestrator:
-- a specific feature id (e.g. `E01-F01`) → operate on that feature (unchanged).
-- `--mine` → **scoped selection**: consider only features whose **effective owner**
+Map `$ARGUMENTS` to the selector's closed scope flags:
+- no argument → `node .harness/tools/next-task.mjs --json`.
+- the exact token `--mine` → `node .harness/tools/next-task.mjs --json --mine`.
+- one valid positional feature id `E##-F##` → translate it to
+  `node .harness/tools/next-task.mjs --json --feature E##-F##`; never forward the feature
+  id as a selector positional token.
+- anything else is invalid and selects or changes nothing.
+
+Under `--mine`, use **scoped selection**: consider only features whose **effective owner**
   (feature `owner` else parent epic `owner`) equals the identity resolved from
-  `workflow.identity` in `.harness/harness.config.yaml` (`@me`/`self` → authed `gh` user
-  via `gh api user`; else literal). This is **owned-only** — it never claims unassigned
-  work and never writes an `owner`; if the identity is unresolved or no owned actionable
+  `workflow.identity` in `.harness/harness.config.yaml` (`@me`/`self` → authed `gh` user via
+  `gh api user`; else literal). This is **owned-only** — it never claims unassigned work
+  and never writes an `owner`; if the identity is unresolved or no owned actionable
   feature exists, it **fails closed** (selects nothing, reports, changes no state) and
   does **not** widen to board-wide selection. Bare `/sdd-next` (no `--mine`) is unchanged
   board-wide selection and ignores `owner`. The scoping semantics live in the
-  **Orchestrator contract** (`.harness/agents/orchestrator.md` → "Ownership & scoped
-  selection"); this command only forwards the token.
+  **Orchestrator contract** (`.harness/agents/orchestrator.md` → "Ownership & scoped selection");
+  this command only maps the scope.
 EOF
 
   cat > "$CMDDIR/sdd-new.md" <<'EOF'
@@ -4970,12 +5095,11 @@ description: Seed a new idea into the TaskStore as Inception (interactive intake
 ---
 
 Act as **Inception** (`.harness/agents/inception.md`). That role file is the durable
-contract; this command carries the interactive front-end. Resolve all relative paths
-against `.harness/`.
+contract; this command carries the interactive front-end.
 
 The free-text idea is in `$ARGUMENTS`. If it is empty, ask the human for it.
 
-1. Run `.harness/init.sh`. If it exits non-zero, STOP and report — do not seed into a
+1. Run `./.harness/init.sh`. If it exits non-zero, STOP and report — do not seed into a
    broken environment.
 2. Read `.harness/harness.config.yaml` and the TaskStore (`.harness/state/tasks.json`,
    per `.harness/store/local.md`).
@@ -5026,12 +5150,11 @@ description: Whole-project inception as Planner — produce vision + architectur
 ---
 
 Act as **Planner** (`.harness/agents/planner.md`). That role file is the durable
-contract; this command carries the interactive front-end. Resolve all relative paths
-against `.harness/`.
+contract; this command carries the interactive front-end.
 
 The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the human for it.
 
-1. Run `.harness/init.sh`. If it exits non-zero, STOP and report — do not plan into a
+1. Run `./.harness/init.sh`. If it exits non-zero, STOP and report — do not plan into a
    broken environment.
 2. Read `.harness/harness.config.yaml` and the TaskStore (`.harness/state/tasks.json`,
    per `.harness/store/local.md`).
@@ -5089,14 +5212,13 @@ description: Per-epic drill-down as Driller — decompose one draft epic into fe
 ---
 
 Act as **Driller** (`.harness/agents/driller.md`). That role file is the durable
-contract; this command carries the interactive front-end. Resolve all relative paths
-against `.harness/`.
+contract; this command carries the interactive front-end.
 
 The target `<epic-id>` is in `$ARGUMENTS`. The `<epic-id>` is **required** — if
 `$ARGUMENTS` is **empty**, STOP and **ask** the human for the epic id rather than drilling
 an arbitrary epic.
 
-1. Run `.harness/init.sh`. If it exits non-zero, STOP and report — do not drill into a
+1. Run `./.harness/init.sh`. If it exits non-zero, STOP and report — do not drill into a
    broken environment.
 2. Read `.harness/harness.config.yaml` and the TaskStore (`.harness/state/tasks.json`, per
    `.harness/store/local.md`).
@@ -5149,21 +5271,21 @@ description: Lightweight fix lane as Fixer — seed an sdd:false fix under the r
 ---
 
 Act as **Fixer** (`.harness/agents/fixer.md`). That role file is the durable contract;
-this command carries the interactive front-end. Resolve all relative paths against
-`.harness/`.
+this command carries the interactive front-end.
 
 The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, STOP and
 **ask** the human what to fix rather than seeding an empty fix.
 
-1. Run `.harness/init.sh`. If it exits non-zero, STOP and report — do not seed into a
+1. Run `./.harness/init.sh`. If it exits non-zero, STOP and report — do not seed into a
    broken environment.
 2. Read `.harness/harness.config.yaml` and the TaskStore (`.harness/state/tasks.json`,
    per `.harness/store/local.md`).
 3. Run a short, **adaptive** Q&A with the human to settle the fix's shape: what's broken,
    the intended fix, how to verify, and a non-empty `## Files expected to change` list
    of normalized repo-relative paths. Remove one leading `./`, then reject absolute
-   paths, unsafe components, wildcards, control characters, and ambiguous prose.
-   Where the shape forks, offer **at most 3** text-only options; never images.
+   paths, empty/`.`/`..` components, repeated/trailing separators, control characters,
+   wildcards, and ambiguous prose. Where the shape forks, offer **at most 3** options
+   as **text-only** (markdown/ASCII) mockups — never images. Keep it short.
 4. **Maintenance epic (create-on-first-use / reuse-by-id).** Look up epic `E99` in
    `.harness/state/tasks.json`. If **absent**, create it with `id: "E99"`, slug
    `maintenance`, title `"Maintenance (hotfixes & minor fixes)"`, `status: "planned"`,
@@ -5190,9 +5312,10 @@ The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, 
    Reviewer`, the same behaviour `/sdd-next` drives) on the just-seeded fix; **reuse** that
    routing, do not re-implement it. The Fixer writes no production code (the Builder does).
 9. **Report** the maintenance-epic state (created/reused `E99`), the seeded fix (id +
-   title + `spec_path` + `autonomous` value), the inbox brief, that no spec / `spec_path`
-   directory / Architect was created or spawned, and that the fix was handed off to the
-   existing `sdd: false` loop in-session.
+   title + `spec_path` + `autonomous` value), the inbox brief at
+   `.harness/progress/inbox/<id>.md`, that no spec / `spec_path` directory / Architect
+   was created or spawned, and that the fix was handed off to the existing `sdd: false`
+   loop in-session.
 EOF
 
   cat > "$CMDDIR/sdd-fix-parallel.md" <<'EOF'
@@ -5201,13 +5324,13 @@ description: Run a bounded batch of isolated autonomous E99 fixes through target
 ---
 
 Act as the **Fixer parallel coordinator** (`.harness/agents/fixer.md` → “Parallel
-dispatch mode”), resolving all durable paths against `.harness/`.
+dispatch mode”).
 
 This command is argument-free. If `$ARGUMENTS` is non-empty, STOP and report usage
 `/sdd-fix-parallel`.
 
-1. Run `.harness/init.sh`; stop on non-zero.
-2. Execute the Fixer role's P1–P7 sequence: native concurrency/config/in-session
+1. Run `./.harness/init.sh`; stop on non-zero.
+2. Execute the Fixer role's exact P1–P7 sequence: native concurrency/config/in-session
    Builder preflight, one-time F02 provisioning while the primary is clean, complete
    manifest with provisioning failures before claim/dispatch, coordinator bookkeeping
    branch plus one F01 atomic claim with explicit canonical `HARNESS_DIR`,
@@ -5217,9 +5340,9 @@ This command is argument-free. If `$ARGUMENTS` is non-empty, STOP and report usa
    for one id and its pre-provisioned branch/worktree, creates only its post-approval
    code PR, continues siblings, and reports an observed merge for coordinator-owned
    done and teardown.
-4. No ready work is a zero-mutation `no ready E99 fixes` success. Missing native
-   delegation or `execution.builder.backend: delegate` fails before
-   manifest/provisioning/claim and points to serial `/sdd-fix`; never invent a vendor
+4. With no ready work, print `no ready E99 fixes` and exit zero without mutation. If
+   native delegation is absent or `execution.builder.backend: delegate`, fail before
+   manifest/provisioning/claim and point to serial `/sdd-fix`; never invent a vendor
    API or background shell agent.
 EOF
 
@@ -7133,6 +7256,109 @@ EOF
   LAST_UPGRADE="$UPGRADE"
 }
 
+# ── E26-F01: `--self` — regenerate the SOURCE repo's own glue ─────────────────
+# The repo's `.claude/agents/*` and `.claude/commands/*` used to be hand-maintained
+# mirrors of what install_one generates — every divergence was found by review. `--self`
+# makes divergence impossible by construction WITHOUT a second emitter: it runs the real
+# install_one on a throwaway temp target (the whole pipeline through its front door) and
+# transforms that target's output into the source layout. Nothing is reimplemented, so
+# the two renderings cannot diverge in content — only in the `.harness/` prefix and the
+# one sdd-pr-loop banner line below.
+
+# self_model_of <shim-file> — print the `model:` value from the shim's frontmatter
+# (first block only), or nothing.
+self_model_of() {
+  [ -f "$1" ] || return 0
+  awk 'NR>1 && /^---$/{exit} sub(/^model: /,""){print; exit}' "$1"
+  return 0
+}
+
+# self_model <role> — the harvested pre-regeneration model for <role>, or nothing.
+# Consumed by the resolve_model self-mode guard.
+self_model() {
+  printf '%s\n' "${SELF_MODELS:-}" | awk -F'	' -v r="$1" '$1==r{print $2; exit}'
+  return 0
+}
+
+# self_transform — stdin: a generated target-layout body; stdout: the source-layout
+# rendering. ORDER MATTERS: the prefix strip runs FIRST, then the sdd-pr-loop
+# path-resolution line (now stripped to a known literal) is swapped for the
+# source-layout banner — the banner itself names `.harness/`, so a later strip would
+# destroy it. The strip is anchored on `.harness/` exactly: `.pr-loop/` cache tokens
+# and every other dotted path survive untouched.
+self_transform() {
+  sed 's|\.harness/||g' | awk '
+    $0 == "hit. Resolve every relative path against ``." {
+      print "hit. This is the harness **source-layout** copy: paths resolve from the repository root"
+      print "(an installed consumer gets the same body with everything resolved against `.harness/`)."
+      next
+    }
+    { print }'
+}
+
+self_install() {
+  # 1. Harvest the committed shims' models BEFORE anything regenerates (R3). The root
+  # harness.config.yaml is the seed template every fresh install copies, so the source
+  # repo's tiering must live here, never there.
+  SELF_MODELS=""
+  for _si_r in $MODEL_ROLES; do
+    _si_m="$(self_model_of "$SRC/.claude/agents/$_si_r.md")"
+    [ -n "$_si_m" ] || continue
+    SELF_MODELS="$SELF_MODELS$_si_r	$_si_m
+"
+  done
+
+  # 2. Real install into a throwaway target, claude-only, prompts pre-answered so a TTY
+  # run never blocks. The pr-loop gate mirrors the repo's OWN config (R5) — via the
+  # explicit override so the temp target's seeded config carries it and every gated
+  # stage (command copy, pr-fixer shim, §6f reclamation) answers from the same place
+  # install_one always answers from.
+  SELF_MODE=1
+  _si_tmp="$(mktemp -d 2>/dev/null || mktemp -d -t harness-self)"
+  AGENTS_OVERRIDE="claude"
+  BUILDER_BACKEND_OVERRIDE="${BUILDER_BACKEND_OVERRIDE:-in-session}"
+  if [ "$(_cfg_pr_loop_value "$SRC/harness.config.yaml" enabled)" = "true" ]; then
+    PR_LOOP_OVERRIDE="true"
+  else
+    PR_LOOP_OVERRIDE="false"
+  fi
+  echo "══ self mode → regenerating $SRC glue from a temp install ══"
+  install_one "$_si_tmp"
+
+  # 3. Transform the temp target's claude glue into the source layout.
+  mkdir -p "$SRC/.claude/agents" "$SRC/.claude/commands"
+  _si_n=0
+  for _si_f in "$_si_tmp"/.claude/agents/*.md "$_si_tmp"/.claude/commands/*.md; do
+    [ -f "$_si_f" ] || continue
+    case "$_si_f" in
+      */agents/*)   _si_dst="$SRC/.claude/agents/$(basename "$_si_f")" ;;
+      *)            _si_dst="$SRC/.claude/commands/$(basename "$_si_f")" ;;
+    esac
+    self_transform < "$_si_f" > "$_si_dst"
+    _si_n=$((_si_n + 1))
+  done
+  # Gate-off reclamation mirrors install_one §6f: the two pr-loop names leave the
+  # source glue exactly when the temp target lacks them.
+  for _si_g in commands/sdd-pr-loop agents/pr-fixer; do
+    if [ ! -f "$_si_tmp/.claude/$_si_g.md" ] && [ -f "$SRC/.claude/$_si_g.md" ]; then
+      rm -f "$SRC/.claude/$_si_g.md"
+      info "self: removed gate-off pr-loop glue .claude/$_si_g.md"
+    fi
+  done
+
+  # 4. The arming verdict travels verbatim — write_escalation_arming already computed
+  # it from the harvested models via the resolve_model self-mode guard (R4).
+  if [ -f "$_si_tmp/.harness/.escalation-arming" ]; then
+    cp "$_si_tmp/.harness/.escalation-arming" "$SRC/.escalation-arming"
+  elif [ -f "$SRC/.escalation-arming" ]; then
+    rm -f "$SRC/.escalation-arming"
+    info "self: escalation arming verdict reclaimed (no role resolves to a model)"
+  fi
+
+  rm -rf "$_si_tmp"
+  ok "self: $_si_n glue files regenerated into $SRC/.claude/ (+ .escalation-arming)"
+}
+
 # ── manifest auto-population (append-only upsert, never clobbers entries) ──────
 # manifest_upsert <manifest-path> <repo-name>
 #   Ensures the manifest has a top-level `repos:` header and a block for <repo-name>.
@@ -7222,8 +7448,15 @@ PR_LOOP_OVERRIDE=""
 # This keeps a command that requires concurrent subagents off OpenCode installs that
 # cannot satisfy it. Default is "auto" (read marker). Explicit true/false override.
 OPENCODE_PARALLEL_OVERRIDE=""
+# Self mode (E26-F01): regenerate the SOURCE repo's own glue. 0 everywhere else —
+# the resolve_model guard keys off it, so it must never survive into a target run.
+SELF_MODE=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --self)
+      SELF_MODE=1
+      shift
+      ;;
     --pr-loop=*)
       # Explicit override; an empty value (`--pr-loop=`) is treated as "no override"
       # (fall through to the prompt / no-op), matching --agents= and --builder-backend=.
@@ -7347,6 +7580,22 @@ case "${OPENCODE_PARALLEL_OVERRIDE:-}" in
   ""|true|false) ;;
   *) die "unknown --with-opencode-parallel value '$OPENCODE_PARALLEL_OVERRIDE' — legal values are 'true' and 'false'" ;;
 esac
+
+# ── self mode (E26-F01): regenerate the source repo's own glue, nothing else ──
+if [ "$SELF_MODE" = 1 ]; then
+  # Every other mode/diagnostic is refused BEFORE any write: `--self` takes no target
+  # (the target IS $SRC) and shares no semantics with the cascade or the diagnostics.
+  [ -z "$POSITIONAL" ]    || die "--self takes no target path (it regenerates the harness source at $SRC)"
+  [ -z "$UMBRELLA" ]      || die "--self cannot combine with --umbrella"
+  [ "$PRINT_AGENTS" = 0 ] || die "--self cannot combine with --print-agents"
+  [ "$DRY_RUN" = 0 ]      || die "--self cannot combine with --dry-run/--list"
+  [ "$SHARED_REPO" = 0 ]  || die "--self cannot combine with --shared-repo"
+  [ "$RECURSIVE" = 0 ]    || die "--self cannot combine with --recursive"
+  [ "$THIN_OPT_IN" = 0 ]  || die "--self cannot combine with --thin"
+  [ "$STANDALONE" = 0 ]   || die "--self cannot combine with --standalone"
+  self_install
+  exit 0
+fi
 
 # Same place, same reason, for the two layout flags (E24-F04 R12): a contradictory
 # combination aborts non-zero HERE — after the parse loop, before target resolution, before
