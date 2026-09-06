@@ -4,6 +4,55 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.74.0] — 2026-09-05
+
+### Added — ✨ migrate an existing child to the thin layout, and back (E24-F04)
+
+`v0.54.0` (E24-F03) shipped the thin child but changed only what a **fresh** child install
+writes: an already-installed child kept its full local copy of the prose tier forever, and
+nobody was going to re-create five child repos to opt in. This adds the migration — and the
+reverse — as two explicit flags on `harness-install.sh`.
+
+- **`--thin` converts a full-copy child of a reachable umbrella** to pointer stubs, using
+  the same `thin_prose_tier` path a fresh thin install uses, so a converted child is
+  byte-indistinguishable from a fresh one. Valid in single-target and `--umbrella` mode.
+- **Pristine-only, and all-or-nothing.** A path is stubbed only when it is byte-identical
+  to the umbrella body's copy of the same relative path — the copy the stub will point at.
+  If any prose-tier path differs (content, or present on one side only) then **no** file in
+  that child converts and **every** differing path is named, as a tier-relative path. The
+  report also says that this run re-installed those paths from source, as every install of
+  that tier always has, and that `git diff` in the child still shows what they held.
+- **Consent once, then maintenance.** The flag is required for the **first** conversion of
+  a given child. After that the child *is* thin, and every later cascade keeps it thin with
+  no flag and no prompt. A run **without** the flag against a full-copy child converts
+  nothing and reports whether it would — that report is how the option is discovered, and
+  it is deliberately not step one of a migration (the unflagged path is the ordinary
+  full-copy branch, which overwrites the prose tier from source and so destroys the
+  differences it just reported). The migration command is
+  `harness-install.sh --umbrella <dir> --thin`, run until it converges.
+- **A recorded but unresolvable `umbrella.root` converts nothing, warns, keeps the full
+  local body, and does not fail the install.** With nothing to compare against,
+  byte-identity cannot be *established*, so no deletion can be justified — and a child
+  entered on its own (CI, a lone clone, a PR reviewer's checkout) is a supported state, not
+  a degraded one. A target that records no `umbrella.root` is not a child: the flag is
+  inert *and silent* there.
+- **`--standalone` is the documented way back.** It re-materialises the full prose body
+  from that installer's own source over a thin target's stubs and clears the target's
+  `umbrella.root`. Single-target only — rejected with `--umbrella` and with `--thin`,
+  before anything is written. It is not a permanent opt-out: the cascade re-records the key
+  for every child it installs, so what makes it durable is the **layout**, not the key.
+- **Nothing else moved.** No schema change, no new config key, no path added to or removed
+  from the harness-owned set, and no target's layout changes without an operator explicitly
+  passing one of the two flags — which is why this is a MINOR rather than a MAJOR. The
+  stub format, the tier split and the `umbrella.root` mechanism are unchanged (`ADR-0004`),
+  `tools/harness-owned-paths.sh` is untouched, and E24-F01's drift guard and E24-F02's
+  landing audit pass unchanged in both layouts *and across the transition* — a converted
+  tree is one `git commit` lands whole.
+
+`docs/UMBRELLA.md` gains the migration procedure and the `--standalone` section;
+`docs/INSTALL.md` gains both flags; the install manifest's `BODY LAYOUT` block explains the
+transition and the reverse. Covered by new cases in `tests/test_umbrella.sh`,
+`tests/test_install.sh` and `tests/test_init_drift_guard.sh`.
 ## [0.73.0] — 2026-09-05
 
 ### Added — ✨ `awaiting-merge`: a first-class home between approval and merge (E99-F130)
@@ -248,7 +297,6 @@ because nothing exec'd it. Replaced with a PATH walk that demands `-f` and `-x`.
 
 Found by running the suites under dash for the first time — which is the whole argument for
 this change.
-
 ## [0.67.0] — 2026-08-18
 
 ### Added — ✨ the landing record becomes a VERDICT (E99-F129)
@@ -660,7 +708,6 @@ inside a double-quoted string are command substitution in every POSIX shell, and
 parses eagerly where bash defers — so a suite that only ever ran under bash had never
 actually been parsed by the shell Debian and Ubuntu call `sh`. It lands **unused by design**: this is the first of
 two staged changes, and the verification rows consume it next.
-
 ## [0.64.0] — 2026-08-17
 
 ### Added — ✨ `done` must carry a landing record (E99-F102, contract half)
@@ -807,6 +854,7 @@ survivors** (20 on the contract itself, 7 on the documented order and R19's own
 anti-vacuity guards) — including one per acceptance surface for the record shape and the rollup rule
 (with `jsonschema` import-blocked, because with it installed the schema answers for the
 fallback and a deleted fallback check leaves the suite green).
+
 
 ## [0.63.1] — 2026-08-17
 
