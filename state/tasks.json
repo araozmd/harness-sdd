@@ -863,7 +863,8 @@
         {
           "id": "E99-F155",
           "title": "next-task.mjs strands a feature on a STALE dependency cycle: a cycle is recorded as a blocker even when every depends_on is already done",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "c1fc78741b025b6bbaff5977b76ea05be5dedc96", "ref": "c1fc78741b025b6bbaff5977b76ea05be5dedc96", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -872,7 +873,8 @@
         {
           "id": "E99-F156",
           "title": "sync-board.mjs ignores the positional hook contract store/local.md specifies, so every status write full-reconciles the whole board and renames existing columns",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "c1fc78741b025b6bbaff5977b76ea05be5dedc96", "ref": "c1fc78741b025b6bbaff5977b76ea05be5dedc96", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -881,7 +883,8 @@
         {
           "id": "E99-F157",
           "title": "sync-board.mjs sends the Jira PAT as a Bearer token to a plaintext base_url: the scheme is never validated before the credential is read",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "c1fc78741b025b6bbaff5977b76ea05be5dedc96", "ref": "c1fc78741b025b6bbaff5977b76ea05be5dedc96", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
