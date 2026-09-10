@@ -324,8 +324,13 @@ const EPIC_FIELD_ID = fieldByName('Epic').id;
 
 // --- existing issues + items --------------------------------------------------
 // Targeted: ask GitHub for the addressed feature's issue instead of paging 500.
+// `--limit` CAPS THE FETCH, it does not filter: the `--search` below only narrows to
+// titles CONTAINING the id, so many follow-up issues can share that substring. A
+// targeted limit LOWER than the board-wide one could push the exact canonical title out
+// of the result set, the exact-title map would read it as absent, and the reconcile loop
+// would CREATE A DUPLICATE issue. Same cap for both paths; the search is the saving.
 const issueListArgs = ['issue', 'list', '--repo', REPO, '--state', 'all',
-  '--limit', TARGETED ? '20' : '500', '--json', 'number,title,url,state,assignees'];
+  '--limit', '500', '--json', 'number,title,url,state,assignees'];
 if (TARGETED) issueListArgs.push('--search', `${targetFeatureId} in:title`);
 const issues = ghJson(issueListArgs);
 const issueByTitle = new Map(issues.map((i) => [i.title, i]));

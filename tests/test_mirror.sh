@@ -578,6 +578,39 @@ EOF
   grep -Eqi 'item-edit|issue create|item-add|api graphql' "$T/t8-called" && { cat "$T/t8-called"; fail "targeted --dry-run issued a mutating gh call"; }
   pass "targeted --dry-run mutates nothing [mirror_targeted_dry_run_inert]"
 
+  # (i) the targeted `--search <id> in:title` narrows by SUBSTRING, so an id shared by many
+  #     follow-up issues can return far more rows than the exact canonical one. `--limit`
+  #     caps the FETCH, it does not filter — a targeted limit lower than the board-wide one
+  #     truncates the canonical title away, the exact-title map reads it as absent, and the
+  #     reconcile loop CREATES A DUPLICATE issue on a real board. This shim honors --limit
+  #     exactly as gh does and puts the canonical title LAST behind 25 wider matches.
+  mkdir -p "$T/bin-t9"
+  cat > "$T/bin-t9/gh" <<EOF
+#!/bin/sh
+echo "called: \$*" >> "$T/t9-called"
+case "\$1 \$2" in
+  "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
+  "auth status")        echo "Token scopes: 'project', 'repo'"; exit 0 ;;
+  "project view")       echo '{"id":"PID"}' ;;
+  "project field-list") echo '{"fields":[{"id":"FS","name":"Status","options":[{"id":"o1","name":"pending"},{"id":"o2","name":"spec-ready"},{"id":"o3","name":"in-progress"},{"id":"o4","name":"in-review"},{"id":"o5","name":"done"}]},{"id":"FE","name":"Epic","options":$EPIC_HAS}]}' ;;
+  "project item-list")  echo '{"items":[{"id":"IT1","content":{"number":41}},{"id":"IT2","content":{"number":42}}]}' ;;
+  "issue list")
+    _lim=500; _prev=
+    for _a in "\$@"; do [ "\$_prev" = "--limit" ] && _lim="\$_a"; _prev="\$_a"; done
+    LIM="\$_lim" node -e 'const n=Number(process.env.LIM||500);const all=[];for(let i=1;i<=25;i++)all.push({number:100+i,title:"E01-F02 — Y follow-up "+i,url:"https://github.com/acme-org/specs/issues/"+(100+i),state:"OPEN",assignees:[]});all.push({number:42,title:"E01-F02 — Y",url:"https://github.com/acme-org/specs/issues/42",state:"OPEN",assignees:[]});console.log(JSON.stringify(all.slice(0,n)));'
+    ;;
+  *)                    echo '{}' ;;
+esac
+exit 0
+EOF
+  chmod +x "$T/bin-t9/gh"
+  rm -f "$T/t9-called"
+  PATH="$T/bin-t9:$PATH" node "$HT/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/t9-called" 2>/dev/null; fail "targeted wide-match run errored"; }
+  grep -qi 'issue create' "$T/t9-called" && { cat "$T/t9-called"; fail "targeted lookup truncated the result set and created a DUPLICATE issue"; }
+  grep -q -- '--id IT2' "$T/t9-called" || { cat "$T/t9-called"; fail "targeted run never reconciled the existing canonical issue's item"; }
+  pass "a targeted lookup finds the canonical issue behind many id-substring matches [mirror_targeted_no_duplicate_on_wide_match]"
+
   # 14) DRY-RUN mutates nothing (R11) — against a dispatching fake gh with NO pre-existing
   #     issue/item, --dry-run prints "would …" intents and issues zero mutating gh call.
   mkdir -p "$T/bin-dry"
