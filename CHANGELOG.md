@@ -4,7 +4,7 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
-## [0.79.0] — 2026-09-09
+## [0.78.1] — 2026-09-10
 
 ### Fixed — 🐛 a STALE dependency cycle no longer strands a feature forever (E99-F155)
 
@@ -95,8 +95,9 @@ is not a stronger guard. The carve-out matches the **parsed hostname** against t
 literals, never a string prefix — `http://127.0.0.1.evil.com` is a remote host with a
 reassuring prefix and is refused like any other.
 
-MINOR, not PATCH: a plaintext remote `base_url` used to work and now exits non-zero. No
-target that already followed the documented https contract sees any change.
+PATCH, not MINOR: this repo's version contract makes a body bugfix a PATCH regardless of a
+previously-accepted config now being refused — MINOR is reserved for a new capability.
+Operators of a plaintext remote `base_url` do see a behavior change on upgrade.
 
 `tests/test_mirror.sh` gains R19 — six cases, each paired with a control that must succeed
 or fail for a *different* reason, because "the run exited non-zero" is trivially produced
