@@ -223,6 +223,48 @@ self_cycle, _ = call(board([epic("E1", [
 ])]))
 assert self_cycle["blocked"][0]["detail"] == "dependency cycle (feature): E1-F1 -> E1-F1"
 
+# E99-F155 — a STALE cycle must not veto an otherwise actionable feature.
+# The `cycle_board` case above is the LIVE-cycle control and stays exactly as it was: both
+# features have a genuinely unmet dependency, so both still report `dependency-cycle`, and
+# its assert_eq pins the record ORDER (dependency-cycle before unmet-dependency) that
+# hoisting `unmet` above the cycle push could otherwise have silently reversed.
+#
+# Here the back-edge is stale: F1's only dependency is DONE, and F2 merely still lists F1.
+# The documented depends_on gate is satisfied, so F1 is actionable. Before the fix the
+# cycle record made `ordinary.length === 0` unreachable and F1 was unselectable forever.
+stale_cycle, _ = call(board([epic("E1", [
+    feature("E1-F1", depends_on=["E1-F2"]),
+    feature("E1-F2", status="done", depends_on=["E1-F1"]),
+])]))
+assert stale_cycle["selected"] == selected("E1-F1", "pending", "architect"), stale_cycle
+assert stale_cycle["blocked"] == [], stale_cycle
+
+# Slice half of the same rule, with its own live-cycle control.
+#
+# NOT paired on `merged`: a done-but-unmerged slice is short-circuited to `observe-merge`
+# ("observation wins before dependent diagnostics", asserted below) long before this guard
+# runs, so no board can reach the guard with one. The `merged` conjunct inside `unmet` is
+# defensive there, and a pair built on it would assert a state the selector cannot produce.
+# The discriminator that IS reachable is whether the counterpart is done at all.
+stale_slice_cfg = config(manifest_path=str(manifest))
+stale_slice, _ = call(board([epic("E1", [feature("E1-F1", "in-progress", slices=[
+    {"id":"E1-F1@api","repo":"api","status":"done","merged":True,"depends_on":["E1-F1@web"]},
+    {"id":"E1-F1@web","repo":"web","status":"pending","depends_on":["E1-F1@api"]},
+])])]), stale_slice_cfg)
+assert stale_slice["selected"] == selected("E1-F1", "pending", "slice-loop", "E1-F1@web"), stale_slice
+
+# LIVE slice cycle: neither counterpart is done, so the cycle still leaves both waiting.
+# Nothing is selected and the cycle is still reported — without this, "the guard stopped
+# consulting cycles" and "the guard stopped blocking anything" look identical.
+live_slice, _ = call(board([epic("E1", [feature("E1-F1", "in-progress", slices=[
+    {"id":"E1-F1@api","repo":"api","status":"pending","depends_on":["E1-F1@web"]},
+    {"id":"E1-F1@web","repo":"web","status":"pending","depends_on":["E1-F1@api"]},
+])])]), stale_slice_cfg)
+assert live_slice["selected"] is None, live_slice
+assert [r["code"] for r in live_slice["blocked"]] == [
+    "dependency-cycle", "unmet-dependency", "dependency-cycle", "unmet-dependency",
+], live_slice
+
 # Numeric order, input-order independence, and literal tie-break.
 ordered_board = board([
     epic("E10", [feature("E10-F2")]),

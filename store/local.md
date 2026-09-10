@@ -489,6 +489,13 @@ the command does. A team might point it at a `git push` of `state/tasks.json` + 
 at a board mirror (`node tools/sync-board.mjs` — see [`board-mirror.md`](./board-mirror.md)),
 or at a wrapper doing both.
 
+- **The two positional arguments are the contract, and `sync-board.mjs` honors them**
+  (E99-F156). The bundled mirror reconciles **only the named feature** when both are
+  present, so one status write costs one feature's worth of API calls instead of the whole
+  board's. An **epic id** is legitimate here — "the id selects the object kind" above —
+  and is a clean **no-op, exit 0**, since an epic has no feature issue. An id matching
+  neither is an **error**, not a fallback to a full reconcile. Invoked with **no**
+  positionals it still reconciles board-wide, so a by-hand full sync is unchanged.
 - **Empty (default) ⇒ no hook** — exactly today's behavior.
 - **Best-effort, never-blocking** — a non-zero exit NEVER rolls back `tasks.json` and never
   stalls `next()`. Do the local write regardless, then report the sync gap; never block

@@ -171,6 +171,13 @@ The `jira` provider is an **implemented** mirror (not a stub): a one-way project
   the configured `base_url` `/rest/api/2/…` endpoint (search / create / transition),
   authenticated by the Bearer PAT. No MCP server is used or required, so the mirror works
   inside MCP-restricted enterprises.
+- **HTTPS is ENFORCED, not merely expected** (E99-F157). `base_url` is parsed and its
+  scheme checked *before the PAT is read* — so a refused config never takes the credential
+  off disk, let alone puts it on the wire. A value that is not an absolute URL, or that
+  uses any scheme but `https:`, exits non-zero and says so. The one exception is
+  **loopback** (`127.0.0.1`, `::1`, `localhost`), where plaintext never reaches a network;
+  it is matched on the parsed hostname, so `http://127.0.0.1.evil.com` is refused like any
+  other remote host.
 - **One-way invariant.** The sync is strictly one-way: `state/tasks.json` → Jira. Agents
   never **read** Jira to decide work; `tasks.json` stays the single source of truth. Nothing
   here writes back into `tasks.json` or makes the mirror bidirectional.

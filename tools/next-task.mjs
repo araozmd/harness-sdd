@@ -497,7 +497,16 @@ function parkDetail(feature) {
 
 function featureBlockers(feature, featureById, cycles, requireApproval) {
   const records = [];
-  if (cycles.has(feature.id)) records.push({ subject: feature.id, code: 'dependency-cycle', detail: cycles.get(feature.id) });
+  // `unmet` is computed FIRST because the cycle record below is gated on it (E99-F157's
+  // sibling, E99-F155). A cycle blocks only while it still leaves a prerequisite unmet:
+  // once every depends_on is `done`, the remaining back-edge is stale bookkeeping, not
+  // work that can never start, and recording it here strands an otherwise actionable
+  // feature FOREVER — `ordinary.length === 0` never holds, so the selector never offers
+  // it. init.sh keeps sweeping cycles warn-only on every run, so nothing goes invisible;
+  // the diagnostic simply stops being a veto. Record ORDER is unchanged: a cycle that
+  // does still block is pushed before unmet-dependency, as it always was.
+  const unmet = sortedUnique((feature.depends_on || []).filter((id) => !featureById.has(id) || featureById.get(id).status !== 'done'));
+  if (cycles.has(feature.id) && unmet.length) records.push({ subject: feature.id, code: 'dependency-cycle', detail: cycles.get(feature.id) });
   if (feature.epic.status === 'draft') records.push({ subject: feature.id, code: 'gated-epic', detail: `epic ${feature.epic.id} is draft` });
   // E06-F07: a park is a BLOCKER, never a route. Pushed here — beside `gated-epic`, the
   // codebase's existing answer to "exists, understood, not actionable" — and deliberately
@@ -529,7 +538,6 @@ function featureBlockers(feature, featureById, cycles, requireApproval) {
         : { subject: feature.id, code: 'parked', detail: `${parkDetail(feature)} [route when unparked: ${wouldRoute}]` });
     }
   }
-  const unmet = sortedUnique((feature.depends_on || []).filter((id) => !featureById.has(id) || featureById.get(id).status !== 'done'));
   if (unmet.length) {
     // A parked dependency is named inline (E06-F07): without it a stalled chain reports a
     // generic `unmet-dependency` and the reason is invisible one hop away.
@@ -586,7 +594,11 @@ function slicePhase(mode, feature, repos) {
   const cycles = cycleMap(slices, 'slice');
   for (const slice of unfinished) {
     const unmet = (slice.depends_on || []).filter((id) => !byId.has(id) || byId.get(id).status !== 'done' || byId.get(id).merged !== true);
-    if (!cycles.has(slice.id) && unmet.length === 0) {
+    // Same rule as featureBlockers() (E99-F155): a cyclic slice whose counterpart is
+    // already done AND merged has nothing left to wait for. `unmet` already asks the
+    // whole question — it requires done AND merged — so the cycle conjunct only ever
+    // withheld a slice that was ready.
+    if (unmet.length === 0) {
       missingRepo(slice);
       const route = slice.status === 'in-review' ? 'slice-review' : 'slice-loop';
       return selectedResult(mode, feature, slice, route, 'slice-actionable');
