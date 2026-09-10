@@ -832,7 +832,13 @@
           "id": "E99-F153",
           "title": "wait-for-codex.sh exit 5 conflates five preflight faults whose remedies are opposite (from viernes E99-F113, PR #157)",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "60382dae204f31a377bd7085bf9fddde9d305988", "ref": "60382dae204f31a377bd7085bf9fddde9d305988", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "60382dae204f31a377bd7085bf9fddde9d305988",
+            "ref": "60382dae204f31a377bd7085bf9fddde9d305988",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -842,11 +848,44 @@
           "id": "E99-F154",
           "title": "prose-assertion residual: negation immunity and unpinned placement are unstated bounds (from viernes E99-F82, PR #156)",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "60382dae204f31a377bd7085bf9fddde9d305988", "ref": "60382dae204f31a377bd7085bf9fddde9d305988", "repo": "refactor-ablation-phase1", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "60382dae204f31a377bd7085bf9fddde9d305988",
+            "ref": "60382dae204f31a377bd7085bf9fddde9d305988",
+            "repo": "refactor-ablation-phase1",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F154-prose-assertion-bounds/"
+        },
+        {
+          "id": "E99-F155",
+          "title": "next-task.mjs strands a feature on a STALE dependency cycle: a cycle is recorded as a blocker even when every depends_on is already done",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F155-next-task-stale-cycle/"
+        },
+        {
+          "id": "E99-F156",
+          "title": "sync-board.mjs ignores the positional hook contract store/local.md specifies, so every status write full-reconciles the whole board and renames existing columns",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F156-sync-board-targeted-reconcile/"
+        },
+        {
+          "id": "E99-F157",
+          "title": "sync-board.mjs sends the Jira PAT as a Bearer token to a plaintext base_url: the scheme is never validated before the credential is read",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F157-sync-board-jira-https-guard/"
         }
       ]
     },
