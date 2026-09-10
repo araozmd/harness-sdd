@@ -920,6 +920,20 @@ EOF
   grep -q 'https' "$T/r19d.out" || { cat "$T/r19d.out"; fail "loopback-lookalike refusal does not name the required https scheme"; }
   pass "the loopback carve-out matches the host, not a prefix [jira_loopback_not_prefix_match]"
 
+  # (d2) the loopback carve-out is for plaintext HTTP only. Another valid URL scheme on a
+  #      loopback host (`ftp://localhost`) is NOT http, so it must be refused by the same
+  #      guard — a host-only carve-out would wave it through, read the PAT, and die at
+  #      `fetch` with an unhandled "unknown scheme" instead of the documented config error.
+  HJ19D2="$T/hj-r19d2"; mk_jira_scheme "$HJ19D2" "ftp://localhost" ''
+  if PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ19D2/tools/sync-board.mjs" >"$T/r19d2.out" 2>&1; then
+    fail "a non-HTTP scheme on a loopback host should exit non-zero"
+  fi
+  grep -q 'https' "$T/r19d2.out" || { cat "$T/r19d2.out"; fail "non-HTTP loopback refusal does not name the required https scheme"; }
+  # NO network call: nothing is dispatched, so the run must never reach `fetch` — the
+  # transport error that a host-only carve-out produces must be absent.
+  grep -qi 'fetch failed\|unknown scheme' "$T/r19d2.out" && { cat "$T/r19d2.out"; fail "a non-HTTP loopback base_url reached fetch instead of being refused by the guard"; }
+  pass "the loopback carve-out is plaintext HTTP only [jira_loopback_carveout_is_http_only]"
+
   # (e) CONTROL — plaintext to real loopback still runs end to end. Without this the whole
   #     block passes against a guard that refuses every configuration, and the provider's
   #     24 other stub-driven cases would be the only thing noticing.

@@ -174,10 +174,11 @@ The `jira` provider is an **implemented** mirror (not a stub): a one-way project
 - **HTTPS is ENFORCED, not merely expected** (E99-F157). `base_url` is parsed and its
   scheme checked *before the PAT is read* — so a refused config never takes the credential
   off disk, let alone puts it on the wire. A value that is not an absolute URL, or that
-  uses any scheme but `https:`, exits non-zero and says so. The one exception is
-  **loopback** (`127.0.0.1`, `::1`, `localhost`), where plaintext never reaches a network;
-  it is matched on the parsed hostname, so `http://127.0.0.1.evil.com` is refused like any
-  other remote host.
+  uses any scheme but `https:`, exits non-zero and says so. The one exception is plaintext
+  **`http:` on loopback** (`127.0.0.1`, `::1`, `localhost`), where it never reaches a
+  network; the carve-out is scheme-*and*-host, so `ftp://localhost` is refused like any
+  other non-https scheme, and it is matched on the parsed hostname, so
+  `http://127.0.0.1.evil.com` is refused like any other remote host.
 - **One-way invariant.** The sync is strictly one-way: `state/tasks.json` → Jira. Agents
   never **read** Jira to decide work; `tasks.json` stays the single source of truth. Nothing
   here writes back into `tasks.json` or makes the mirror bidirectional.

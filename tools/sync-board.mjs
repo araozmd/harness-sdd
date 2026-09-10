@@ -491,10 +491,15 @@ async function runJira(cfgText) {
   // remote host with a reassuring prefix.
   const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'];
   const isLoopback = LOOPBACK_HOSTS.includes(baseUrl.hostname.replace(/^\[|\]$/g, ''));
+  // The carve-out is for PLAINTEXT HTTP on loopback only — not "any scheme on loopback".
+  // `ftp://localhost` or `ws://localhost` parse fine and are loopback, so a host-only test
+  // would wave them past the guard, read the PAT off disk, and die at `fetch` with an
+  // unhandled "unknown scheme" instead of this fail-closed configuration error.
+  const plaintextLoopback = baseUrl.protocol === 'http:' && isLoopback;
   // `URL.protocol` is already lowercased, so `HTTPS://…` compares equal here while a
   // grep of the raw config text for 'https' would both miss it and accept `httpsx://`.
-  if (baseUrl.protocol !== 'https:' && !isLoopback) {
-    console.error(`[mirror] mirror.board.base_url must use https:// (got '${baseUrl.protocol}//') — the Jira PAT is sent as a Bearer token and must never travel in plaintext. Plain http:// is accepted only for loopback (${LOOPBACK_HOSTS.join(', ')}). No PAT was read and no Jira request was made.`);
+  if (baseUrl.protocol !== 'https:' && !plaintextLoopback) {
+    console.error(`[mirror] mirror.board.base_url must use https:// (got '${baseUrl.protocol}//') — the Jira PAT is sent as a Bearer token and must never travel in plaintext. The only other accepted scheme is plain http://, and only for loopback (${LOOPBACK_HOSTS.join(', ')}). No PAT was read and no Jira request was made.`);
     process.exit(1);
   }
 
