@@ -1135,6 +1135,81 @@ EOF
   grep -qF "$SENTINEL_PAT" "$ROOT/harness.config.yaml" && fail "PAT sentinel present in the committed config"
   pass "PAT never written to tasks.json/config/output, never logged [jira_pat_never_leaks]"
 
+  # ── R21 — the positional hook contract is honored by the JIRA path too ── (E99-F156)
+  # The github-projects path filtered by target while runJira() still reconciled EVERY epic
+  # and feature, so a jira mirror issued board-wide searches/creates/transitions on every
+  # TaskStore write. The object models differ, so the targeted behaviour differs: jira
+  # mirrors epics as REAL issues, so a targeted epic id syncs THAT epic (it is NOT the
+  # no-op the github-projects path performs, where an epic is only a single-select field).
+  #
+  # A TWO-feature + one-epic board is the minimum fixture that can tell scope apart. Kept
+  # local so the cases above keep using mk_jira's single-feature board untouched.
+  # Each search URL carries the per-object label, so `harness%3A<id>&` (the encoded
+  # `labels = harness:<id>` clause, terminated by the &fields= separator) names EXACTLY one
+  # object — `harness%3AE01&` cannot match the E01-F01/E01-F02 feature searches.
+  mk_jira2() { # mk_jira2 <dir> <base_url>
+    _h2="$1"; _u2="$2"
+    mkdir -p "$_h2/tools" "$_h2/state"
+    cp "$TOOL" "$_h2/tools/sync-board.mjs"
+    printf '%s\n' '{"epics":[{"id":"E01","title":"Demo","features":[{"id":"E01-F01","title":"X","status":"pending"},{"id":"E01-F02","title":"Y","status":"in-progress"}]}]}' > "$_h2/state/tasks.json"
+    {
+      printf 'store:\n  tasks: local\nmirror:\n  board:\n    provider: "jira"\n'
+      printf '    base_url: "%s"\n    project_key: "HAR"\n' "$_u2"
+    } > "$_h2/harness.config.yaml"
+  }
+
+  # (a) a targeted FEATURE id issues Jira calls for that feature ONLY.
+  JR="$T/jira-rec-r21a"; JB="$T/jira-body-r21a"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ21A="$T/hj-r21a"; mk_jira2 "$HJ21A" "$URL"
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ21A/tools/sync-board.mjs" E01-F02 set_status 2>&1)" ||
+    { echo "$OUT"; stop_jira_stub; fail "targeted jira feature run errored"; }
+  stop_jira_stub
+  grep -q 'harness%3AE01-F02&' "$JR" || { cat "$JR"; fail "targeted jira run never reconciled the ADDRESSED feature"; }
+  grep -q 'harness%3AE01-F01&' "$JR" && { cat "$JR"; fail "targeted jira run reconciled an UNRELATED feature (still board-wide)"; }
+  grep -q 'harness%3AE01&' "$JR"     && { cat "$JR"; fail "targeted jira feature run also reconciled the epic (still board-wide)"; }
+  pass "a targeted jira run reconciles only the addressed feature [jira_targeted_scope]"
+
+  # (b) a targeted EPIC id SYNCS THE EPIC — under jira an epic is an issue of EPIC_TYPE, so
+  #     skipping it (the github-projects no-op) would drop an epic write on the floor.
+  JR="$T/jira-rec-r21b"; JB="$T/jira-body-r21b"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ21B="$T/hj-r21b"; mk_jira2 "$HJ21B" "$URL"
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ21B/tools/sync-board.mjs" E01 set_status 2>&1)" ||
+    { echo "$OUT"; stop_jira_stub; fail "targeted jira epic run errored"; }
+  stop_jira_stub
+  grep -q 'harness%3AE01&' "$JR" || { cat "$JR"; fail "a targeted epic id was skipped under jira, where an epic IS an issue"; }
+  grep -q 'POST /rest/api/2/issue ' "$JR" || { cat "$JR"; fail "targeted epic run made no epic issue write"; }
+  grep -q 'harness%3AE01-F0' "$JR" && { cat "$JR"; fail "targeted epic run also reconciled the features (still board-wide)"; }
+  grep -qF '"Epic"' "$JB" || { cat "$JB"; fail "targeted epic run did not create the object as an Epic issue type"; }
+  pass "a targeted jira epic id syncs that epic, not a no-op [jira_targeted_epic_synced]"
+
+  # (c) an id matching NEITHER is an error, and NO REST call is made (fail-closed, resolved
+  #     before the transport — never a silent fallback to a board-wide reconcile).
+  JR="$T/jira-rec-r21c"; JB="$T/jira-body-r21c"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ21C="$T/hj-r21c"; mk_jira2 "$HJ21C" "$URL"
+  if PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ21C/tools/sync-board.mjs" E01-F99 set_status >"$T/r21c.out" 2>&1; then
+    stop_jira_stub; cat "$T/r21c.out"; fail "an unknown targeted id should exit non-zero under jira"
+  fi
+  stop_jira_stub
+  [ -s "$JR" ] && { cat "$JR"; fail "an unknown targeted id still issued a Jira REST call"; }
+  grep -qF 'E01-F99' "$T/r21c.out" || { cat "$T/r21c.out"; fail "the unknown-id refusal does not name the id"; }
+  pass "an unknown targeted id fails without any Jira request [jira_targeted_unknown_id]"
+
+  # (d) CONTROL — no positionals still reconciles EVERY object, exactly as before. Without
+  #     this, a runJira() that simply stopped writing anything would pass (a)–(c).
+  JR="$T/jira-rec-r21d"; JB="$T/jira-body-r21d"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ21D="$T/hj-r21d"; mk_jira2 "$HJ21D" "$URL"
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ21D/tools/sync-board.mjs" 2>&1)" ||
+    { echo "$OUT"; stop_jira_stub; fail "board-wide jira run errored"; }
+  stop_jira_stub
+  grep -q 'harness%3AE01&' "$JR"      || { cat "$JR"; fail "board-wide jira run stopped reconciling the epic"; }
+  grep -q 'harness%3AE01-F01&' "$JR"  || { cat "$JR"; fail "board-wide jira run stopped reconciling the first feature"; }
+  grep -q 'harness%3AE01-F02&' "$JR"  || { cat "$JR"; fail "board-wide jira run stopped reconciling the second feature"; }
+  pass "no positionals still reconciles every jira object [jira_boardwide_unchanged]"
+
   # ── R17 — docs pin the jira mirror REST+PAT contract (governing phrases) ──
   grep -qi 'jira contract' "$DOCS"                 || fail "board-mirror.md has no jira contract section"
   grep -qi 'Server / Data Center\|Server/DC\|Server / Data Center' "$DOCS" || fail "jira docs do not pin Server/DC"

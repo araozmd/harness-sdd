@@ -572,8 +572,28 @@ async function runJira(cfgText) {
       id: f.id, summary: `${f.id} — ${f.title}`, kind: 'feature', type: FEATURE_TYPE, status: f.status,
     })),
   );
-  const objects = [...epics, ...features];
-  log(`[mirror] jira: ${epics.length} epics, ${features.length} features -> ${BASE_URL} project ${PROJECT_KEY}${DRY ? ' (dry-run)' : ''}`);
+  const allObjects = [...epics, ...features];
+  // Resolve the hook target BEFORE any Jira request — the same fail-closed ordering the
+  // config/PAT preflight above uses, so a bad id costs nothing and mutates nothing.
+  //
+  // The object model differs from github-projects, so the targeted behaviour does too:
+  // there, epics are a single-select FIELD and a targeted epic id has no issue to touch
+  // (clean no-op). Here, epics are REAL issues of EPIC_TYPE, so a targeted epic id syncs
+  // THAT epic — skipping it would mean an epic status write silently never reaches Jira.
+  // An id matching NEITHER an epic nor a feature is an ERROR: falling back to a board-wide
+  // reconcile because the id was misspelled is precisely the behaviour this removes.
+  let objects = allObjects;
+  if (TARGETED) {
+    const hit = allObjects.find((o) => o.id === targetFeatureId);
+    if (!hit) {
+      console.error(`[mirror] targeted ${hookOp} requested unknown id '${targetFeatureId}' — no Jira request was made.`);
+      process.exit(1);
+    }
+    objects = [hit];
+  }
+  log(TARGETED
+    ? `[mirror] jira targeted ${hookOp}: ${targetFeatureId} (1/${allObjects.length} objects, ${objects[0].kind}) -> ${BASE_URL} project ${PROJECT_KEY}${DRY ? ' (dry-run)' : ''}`
+    : `[mirror] jira: ${epics.length} epics, ${features.length} features -> ${BASE_URL} project ${PROJECT_KEY}${DRY ? ' (dry-run)' : ''}`);
 
   // Reconcile match key: a stable per-id label `harness:<id>` stored on the issue, searched
   // via JQL. Idempotent — a re-run finds the existing issue and transitions it in place.
