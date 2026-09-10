@@ -464,6 +464,153 @@ EOF
   grep -Eqi 'project item-add' "$T/recon-called" && { cat "$T/recon-called"; fail "re-run RE-ADDED an already-present project item (duplicate)"; }
   pass "re-run reconciles existing issue+item, no duplicate [reconcile_idempotent_rerun]"
 
+  # ── R20 — the positional hook contract is honored: targeted reconcile ── (E99-F156)
+  # store/local.md specifies the hook as `<cmd> "<feature-id>" "<op>"`. Until now the tool
+  # read only --dry-run, so every status write reconciled the WHOLE board. Each case below
+  # is paired with a control: "it stopped writing" is the easy way to pass a targeted-scope
+  # assertion, and a suite that only counts the addressed feature's write would accept it.
+  #
+  # A TWO-feature board is the minimum fixture that can tell scope apart at all.
+  mk_harness2() { # mk_harness2 <dir>
+    _h2="$1"
+    mkdir -p "$_h2/tools" "$_h2/state"
+    cp "$TOOL" "$_h2/tools/sync-board.mjs"
+    printf '%s\n' '{"epics":[{"id":"E01","title":"Demo","features":[{"id":"E01-F01","title":"X","status":"pending"},{"id":"E01-F02","title":"Y","status":"pending"}]}]}' > "$_h2/state/tasks.json"
+    printf 'store:\n  tasks: local\nmirror:\n  board:\n    provider: "github-projects"\n    owner: "acme-org"\n    project_number: 7\n    repo: "acme-org/specs"\n' > "$_h2/harness.config.yaml"
+  }
+  # The Status option set is COMPLETE here on purpose: ensureOptions('Status') fires on any
+  # name-set diff, so an incomplete one would make every run emit `api graphql` and case (f)
+  # would be asserting on the Status rewrite while the Epic rewrite went unobserved.
+  # A gh shim whose issue/item sets cover BOTH features, so a board-wide run edits item
+  # IT1 *and* IT2 while a targeted one edits exactly one of them. `$1 $2` dispatch matches
+  # the shims above. `EPIC_OPT` lets one case present an Epic field that does NOT yet carry
+  # the target's option, which is the only state in which ensureOptions must still fire.
+  mk_gh2() { # mk_gh2 <bindir> <recfile> <epic-options-json>
+    mkdir -p "$1"
+    cat > "$1/gh" <<EOF
+#!/bin/sh
+echo "called: \$*" >> "$2"
+case "\$1 \$2" in
+  "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
+  "auth status")        echo "Token scopes: 'project', 'repo'"; exit 0 ;;
+  "project view")       echo '{"id":"PID"}' ;;
+  "project field-list") echo '{"fields":[{"id":"FS","name":"Status","options":[{"id":"o1","name":"pending"},{"id":"o2","name":"spec-ready"},{"id":"o3","name":"in-progress"},{"id":"o4","name":"in-review"},{"id":"o5","name":"done"}]},{"id":"FE","name":"Epic","options":$3}]}' ;;
+  "project item-list")  echo '{"items":[{"id":"IT1","content":{"number":41}},{"id":"IT2","content":{"number":42}}]}' ;;
+  "issue list")         echo '[{"number":41,"title":"E01-F01 — X","url":"https://github.com/acme-org/specs/issues/41","state":"OPEN","assignees":[]},{"number":42,"title":"E01-F02 — Y","url":"https://github.com/acme-org/specs/issues/42","state":"OPEN","assignees":[]}]' ;;
+  *)                    echo '{}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$1/gh"
+  }
+  # EPIC_HAS carries the target's option AND an extra one the board no longer lists. That
+  # asymmetry is the whole point: ensureOptions only mutates on a NAME-SET DIFF, so an
+  # option set that already matches `epics` exactly is a no-op down either path and case (f)
+  # cannot tell them apart. A real board is the asymmetric shape — columns accumulate — and
+  # it is exactly there that a board-wide ensureOptions RENAMES/REMOVES the extra column on
+  # behalf of one feature's status write.
+  EPIC_HAS='[{"id":"oe","name":"E01 — Demo"},{"id":"ox","name":"E42 — Legacy column"}]'
+  EPIC_LACKS='[{"id":"oz","name":"E99 — Other"}]'
+  HT="$T/h-targeted"; mk_harness2 "$HT"
+
+  # (a) targeted run edits ONLY the addressed feature's item.
+  mk_gh2 "$T/bin-t1" "$T/t1-called" "$EPIC_HAS"; rm -f "$T/t1-called"
+  PATH="$T/bin-t1:$PATH" node "$HT/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/t1-called" 2>/dev/null; fail "targeted run errored"; }
+  grep -q -- '--id IT2' "$T/t1-called" || { cat "$T/t1-called"; fail "targeted run did not edit the ADDRESSED feature's item"; }
+  grep -q -- '--id IT1' "$T/t1-called" && { cat "$T/t1-called"; fail "targeted run edited an UNRELATED feature's item (still board-wide)"; }
+  pass "a targeted run reconciles only the addressed feature [mirror_targeted_scope]"
+
+  # (b) CONTROL — no positionals ⇒ board-wide, exactly as before. Without this, a tool that
+  #     simply stopped writing anything would pass (a).
+  mk_gh2 "$T/bin-t2" "$T/t2-called" "$EPIC_HAS"; rm -f "$T/t2-called"
+  PATH="$T/bin-t2:$PATH" node "$HT/tools/sync-board.mjs" >/dev/null 2>&1 ||
+    { cat "$T/t2-called" 2>/dev/null; fail "board-wide run errored"; }
+  grep -q -- '--id IT1' "$T/t2-called" || { cat "$T/t2-called"; fail "board-wide run stopped reconciling the first feature"; }
+  grep -q -- '--id IT2' "$T/t2-called" || { cat "$T/t2-called"; fail "board-wide run stopped reconciling the second feature"; }
+  pass "no positionals still reconciles board-wide [mirror_boardwide_unchanged]"
+
+  # (c) a single positional is NOT a targeted run — the op is half the contract.
+  mk_gh2 "$T/bin-t3" "$T/t3-called" "$EPIC_HAS"; rm -f "$T/t3-called"
+  PATH="$T/bin-t3:$PATH" node "$HT/tools/sync-board.mjs" E01-F02 >/dev/null 2>&1 ||
+    { cat "$T/t3-called" 2>/dev/null; fail "single-positional run errored"; }
+  grep -q -- '--id IT1' "$T/t3-called" || { cat "$T/t3-called"; fail "a lone id was treated as targeted; TARGETED requires BOTH positionals"; }
+  pass "TARGETED requires both positionals [mirror_targeted_needs_both]"
+
+  # (d) an EPIC id is a legitimate hook argument ⇒ clean no-op, exit 0, no board traffic.
+  mk_gh2 "$T/bin-t4" "$T/t4-called" "$EPIC_HAS"; rm -f "$T/t4-called"
+  PATH="$T/bin-t4:$PATH" node "$HT/tools/sync-board.mjs" E01 set_status >"$T/t4.out" 2>&1 ||
+    fail "an epic id must be a no-op, not an error (set_status writes epic status too)"
+  grep -q 'project view' "$T/t4-called" && { cat "$T/t4-called"; fail "epic no-op still opened the project"; }
+  grep -qi 'is an epic' "$T/t4.out" || { cat "$T/t4.out"; fail "epic no-op did not say why it did nothing"; }
+  pass "a targeted epic id is a clean no-op [mirror_targeted_epic_noop]"
+
+  # (e) an id matching NEITHER is an error — never a silent fallback to a full reconcile,
+  #     which is the exact behaviour this feature removes.
+  mk_gh2 "$T/bin-t5" "$T/t5-called" "$EPIC_HAS"; rm -f "$T/t5-called"
+  if PATH="$T/bin-t5:$PATH" node "$HT/tools/sync-board.mjs" E01-F99 set_status >"$T/t5.out" 2>&1; then
+    cat "$T/t5.out"; fail "an unknown targeted id should exit non-zero"
+  fi
+  grep -q -- '--id IT' "$T/t5-called" && { cat "$T/t5-called"; fail "an unknown id fell back to reconciling the board"; }
+  pass "an unknown targeted id fails without touching the board [mirror_targeted_unknown_id]"
+
+  # (f) a targeted run must not rewrite the Epic option set — ensureOptions replaces the
+  #     option list wholesale, so one feature's write used to RENAME every board column.
+  mk_gh2 "$T/bin-t6" "$T/t6-called" "$EPIC_HAS"; rm -f "$T/t6-called"
+  PATH="$T/bin-t6:$PATH" node "$HT/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/t6-called" 2>/dev/null; fail "targeted epic-field run errored"; }
+  grep -q 'api graphql' "$T/t6-called" && { cat "$T/t6-called"; fail "a targeted run rewrote the Epic option set (renames every existing column)"; }
+  pass "a targeted run leaves an existing Epic option set alone [mirror_targeted_no_field_rewrite]"
+
+  # (g) CONTROL for (f) — when the target's epic option is genuinely NEW there is something
+  #     to add, and ensureOptions MUST still fire. Without this, "it never calls
+  #     ensureOptions any more" passes (f).
+  mk_gh2 "$T/bin-t7" "$T/t7-called" "$EPIC_LACKS"; rm -f "$T/t7-called"
+  PATH="$T/bin-t7:$PATH" node "$HT/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/t7-called" 2>/dev/null; fail "targeted new-epic-option run errored"; }
+  grep -q 'api graphql' "$T/t7-called" || { cat "$T/t7-called"; fail "a targeted run did not add a genuinely NEW epic option"; }
+  pass "a targeted run still adds a new Epic option [mirror_targeted_adds_new_option]"
+
+  # (h) --dry-run is still inert in targeted mode.
+  mk_gh2 "$T/bin-t8" "$T/t8-called" "$EPIC_HAS"; rm -f "$T/t8-called"
+  PATH="$T/bin-t8:$PATH" node "$HT/tools/sync-board.mjs" E01-F02 set_status --dry-run >/dev/null 2>&1 ||
+    { cat "$T/t8-called" 2>/dev/null; fail "targeted dry-run errored"; }
+  grep -Eqi 'item-edit|issue create|item-add|api graphql' "$T/t8-called" && { cat "$T/t8-called"; fail "targeted --dry-run issued a mutating gh call"; }
+  pass "targeted --dry-run mutates nothing [mirror_targeted_dry_run_inert]"
+
+  # (i) the targeted `--search <id> in:title` narrows by SUBSTRING, so an id shared by many
+  #     follow-up issues can return far more rows than the exact canonical one. `--limit`
+  #     caps the FETCH, it does not filter — a targeted limit lower than the board-wide one
+  #     truncates the canonical title away, the exact-title map reads it as absent, and the
+  #     reconcile loop CREATES A DUPLICATE issue on a real board. This shim honors --limit
+  #     exactly as gh does and puts the canonical title LAST behind 25 wider matches.
+  mkdir -p "$T/bin-t9"
+  cat > "$T/bin-t9/gh" <<EOF
+#!/bin/sh
+echo "called: \$*" >> "$T/t9-called"
+case "\$1 \$2" in
+  "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
+  "auth status")        echo "Token scopes: 'project', 'repo'"; exit 0 ;;
+  "project view")       echo '{"id":"PID"}' ;;
+  "project field-list") echo '{"fields":[{"id":"FS","name":"Status","options":[{"id":"o1","name":"pending"},{"id":"o2","name":"spec-ready"},{"id":"o3","name":"in-progress"},{"id":"o4","name":"in-review"},{"id":"o5","name":"done"}]},{"id":"FE","name":"Epic","options":$EPIC_HAS}]}' ;;
+  "project item-list")  echo '{"items":[{"id":"IT1","content":{"number":41}},{"id":"IT2","content":{"number":42}}]}' ;;
+  "issue list")
+    _lim=500; _prev=
+    for _a in "\$@"; do [ "\$_prev" = "--limit" ] && _lim="\$_a"; _prev="\$_a"; done
+    LIM="\$_lim" node -e 'const n=Number(process.env.LIM||500);const all=[];for(let i=1;i<=25;i++)all.push({number:100+i,title:"E01-F02 — Y follow-up "+i,url:"https://github.com/acme-org/specs/issues/"+(100+i),state:"OPEN",assignees:[]});all.push({number:42,title:"E01-F02 — Y",url:"https://github.com/acme-org/specs/issues/42",state:"OPEN",assignees:[]});console.log(JSON.stringify(all.slice(0,n)));'
+    ;;
+  *)                    echo '{}' ;;
+esac
+exit 0
+EOF
+  chmod +x "$T/bin-t9/gh"
+  rm -f "$T/t9-called"
+  PATH="$T/bin-t9:$PATH" node "$HT/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/t9-called" 2>/dev/null; fail "targeted wide-match run errored"; }
+  grep -qi 'issue create' "$T/t9-called" && { cat "$T/t9-called"; fail "targeted lookup truncated the result set and created a DUPLICATE issue"; }
+  grep -q -- '--id IT2' "$T/t9-called" || { cat "$T/t9-called"; fail "targeted run never reconciled the existing canonical issue's item"; }
+  pass "a targeted lookup finds the canonical issue behind many id-substring matches [mirror_targeted_no_duplicate_on_wide_match]"
+
   # 14) DRY-RUN mutates nothing (R11) — against a dispatching fake gh with NO pre-existing
   #     issue/item, --dry-run prints "would …" intents and issues zero mutating gh call.
   mkdir -p "$T/bin-dry"
@@ -722,6 +869,92 @@ EOF
   grep -q 'base_url' "$T/r9.out" || { cat "$T/r9.out"; fail "misconfig error does not name the missing base_url key"; }
   pass "missing base_url errors before any network call [jira_misconfig_errors]"
 
+  # ── R19 — base_url transport scheme is ENFORCED https, ahead of the PAT read ── (E99-F157)
+  # The PAT ships as `Authorization: Bearer`, so a plaintext base_url puts a long-lived
+  # credential on the wire. Every case below is PAIRED with a control that must SUCCEED (or
+  # fail for a DIFFERENT reason): "the run exited non-zero" is trivially producible by a
+  # guard that refuses everything, and a suite without the pairing would pass against one.
+  #
+  # mk_jira_scheme <dir> <base_url> <extra> — like mk_jira but never starts a stub: these
+  # cases must make NO network call at all, so there is nothing to serve them.
+  mk_jira_scheme() { mk_jira "$1" "$2" "$3"; }
+
+  # (a) plaintext to a REMOTE host is refused, and nothing is dispatched.
+  HJ19A="$T/hj-r19a"; mk_jira_scheme "$HJ19A" "http://jira.example.invalid" ''
+  if PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ19A/tools/sync-board.mjs" >"$T/r19a.out" 2>&1; then
+    fail "jira with a plaintext remote base_url should exit non-zero"
+  fi
+  grep -q 'https' "$T/r19a.out" || { cat "$T/r19a.out"; fail "plaintext refusal does not name the required https scheme"; }
+  grep -q "$SENTINEL_PAT" "$T/r19a.out" && { fail "plaintext refusal ECHOED the PAT"; }
+  pass "plaintext remote base_url is refused [jira_https_enforced]"
+
+  # (b) ORDERING — the refusal must come from the scheme check, BEFORE the PAT is read.
+  # Both faults are present at once (plaintext base_url AND an unresolvable PAT). If the
+  # scheme check sits ahead of resolveJiraPat() the output is the scheme error; if it were
+  # moved after, this same config would produce R7's no-PAT error instead. That difference
+  # is the whole assertion — it is what lets the refusal promise "no PAT was read".
+  HJ19B="$T/hj-r19b"; mk_jira_scheme "$HJ19B" "http://jira.example.invalid" '    pat_file: "'"$HJ19B"'/does-not-exist"
+'
+  if PATH="$T/bin:$PATH" JIRA_PAT="" node "$HJ19B/tools/sync-board.mjs" >"$T/r19b.out" 2>&1; then
+    fail "jira with a plaintext base_url and no PAT should exit non-zero"
+  fi
+  grep -q 'https' "$T/r19b.out"          || { cat "$T/r19b.out"; fail "scheme check did not run BEFORE the PAT read (got the no-PAT error instead)"; }
+  grep -q 'does-not-exist' "$T/r19b.out" && { cat "$T/r19b.out"; fail "the PAT file was consulted despite an already-refused base_url scheme"; }
+  pass "the scheme refusal precedes the PAT read [jira_https_precedes_pat_read]"
+
+  # (c) a value that is not an absolute URL is refused as such (not left to build a
+  #     nonsense endpoint and fail confusingly at fetch time).
+  HJ19C="$T/hj-r19c"; mk_jira_scheme "$HJ19C" "jira.example.invalid" ''
+  if PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ19C/tools/sync-board.mjs" >"$T/r19c.out" 2>&1; then
+    fail "jira with a schemeless base_url should exit non-zero"
+  fi
+  grep -qi 'absolute URL' "$T/r19c.out" || { cat "$T/r19c.out"; fail "schemeless base_url refusal does not say it needs an absolute URL"; }
+  pass "a non-URL base_url is refused [jira_base_url_must_be_absolute]"
+
+  # (d) the loopback carve-out is a HOST match, not a prefix match. A remote host whose
+  #     name merely BEGINS with a loopback literal must be refused like any other.
+  HJ19D="$T/hj-r19d"; mk_jira_scheme "$HJ19D" "http://127.0.0.1.evil.invalid" ''
+  if PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ19D/tools/sync-board.mjs" >"$T/r19d.out" 2>&1; then
+    fail "a loopback-LOOKALIKE remote host should not inherit the plaintext carve-out"
+  fi
+  grep -q 'https' "$T/r19d.out" || { cat "$T/r19d.out"; fail "loopback-lookalike refusal does not name the required https scheme"; }
+  pass "the loopback carve-out matches the host, not a prefix [jira_loopback_not_prefix_match]"
+
+  # (d2) the loopback carve-out is for plaintext HTTP only. Another valid URL scheme on a
+  #      loopback host (`ftp://localhost`) is NOT http, so it must be refused by the same
+  #      guard — a host-only carve-out would wave it through, read the PAT, and die at
+  #      `fetch` with an unhandled "unknown scheme" instead of the documented config error.
+  HJ19D2="$T/hj-r19d2"; mk_jira_scheme "$HJ19D2" "ftp://localhost" ''
+  if PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ19D2/tools/sync-board.mjs" >"$T/r19d2.out" 2>&1; then
+    fail "a non-HTTP scheme on a loopback host should exit non-zero"
+  fi
+  grep -q 'https' "$T/r19d2.out" || { cat "$T/r19d2.out"; fail "non-HTTP loopback refusal does not name the required https scheme"; }
+  # NO network call: nothing is dispatched, so the run must never reach `fetch` — the
+  # transport error that a host-only carve-out produces must be absent.
+  grep -qi 'fetch failed\|unknown scheme' "$T/r19d2.out" && { cat "$T/r19d2.out"; fail "a non-HTTP loopback base_url reached fetch instead of being refused by the guard"; }
+  pass "the loopback carve-out is plaintext HTTP only [jira_loopback_carveout_is_http_only]"
+
+  # (e) CONTROL — plaintext to real loopback still runs end to end. Without this the whole
+  #     block passes against a guard that refuses every configuration, and the provider's
+  #     24 other stub-driven cases would be the only thing noticing.
+  JR="$T/jira-rec-r19e"; JB="$T/jira-body-r19e"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ19E="$T/hj-r19e"; mk_jira "$HJ19E" "$URL" ''
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ19E/tools/sync-board.mjs" 2>&1)" || { echo "$OUT"; stop_jira_stub; fail "plaintext LOOPBACK run must still be allowed"; }
+  stop_jira_stub
+  [ -s "$JR" ] || fail "loopback carve-out run made no REST call (it must behave exactly as before)"
+  pass "plaintext loopback is still allowed [jira_loopback_plaintext_allowed]"
+
+  # (f) CONTROL — an https:// URL gets PAST the guard. Asserted WITHOUT a TLS stub (fetch
+  #     rejects self-signed certs, which is why the loopback carve-out exists at all): point
+  #     at a host that cannot resolve and require the failure to be a TRANSPORT failure, not
+  #     the scheme refusal. A guard that refused https too would fail here.
+  HJ19F="$T/hj-r19f"; mk_jira_scheme "$HJ19F" "https://jira.example.invalid" ''
+  PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ19F/tools/sync-board.mjs" >"$T/r19f.out" 2>&1 || true
+  grep -q 'must use https' "$T/r19f.out" && { cat "$T/r19f.out"; fail "an https:// base_url was refused by the scheme guard"; }
+  grep -qi 'absolute URL' "$T/r19f.out"  && { cat "$T/r19f.out"; fail "an https:// base_url was refused as not-a-URL"; }
+  pass "an https base_url passes the guard [jira_https_accepted]"
+
   # ── R3 — re-run reconciles by feature-id key, creates NO duplicate issue ──
   JR="$T/jira-rec-r3"; JB="$T/jira-body-r3"
   URL="$(start_jira_stub existing "$JR" "$JB")"   # search returns an EXISTING issue for the feature
@@ -915,6 +1148,81 @@ EOF
   grep -qF "$SENTINEL_PAT" "$TOOL" && fail "PAT sentinel present in the committed tool"
   grep -qF "$SENTINEL_PAT" "$ROOT/harness.config.yaml" && fail "PAT sentinel present in the committed config"
   pass "PAT never written to tasks.json/config/output, never logged [jira_pat_never_leaks]"
+
+  # ── R21 — the positional hook contract is honored by the JIRA path too ── (E99-F156)
+  # The github-projects path filtered by target while runJira() still reconciled EVERY epic
+  # and feature, so a jira mirror issued board-wide searches/creates/transitions on every
+  # TaskStore write. The object models differ, so the targeted behaviour differs: jira
+  # mirrors epics as REAL issues, so a targeted epic id syncs THAT epic (it is NOT the
+  # no-op the github-projects path performs, where an epic is only a single-select field).
+  #
+  # A TWO-feature + one-epic board is the minimum fixture that can tell scope apart. Kept
+  # local so the cases above keep using mk_jira's single-feature board untouched.
+  # Each search URL carries the per-object label, so `harness%3A<id>&` (the encoded
+  # `labels = harness:<id>` clause, terminated by the &fields= separator) names EXACTLY one
+  # object — `harness%3AE01&` cannot match the E01-F01/E01-F02 feature searches.
+  mk_jira2() { # mk_jira2 <dir> <base_url>
+    _h2="$1"; _u2="$2"
+    mkdir -p "$_h2/tools" "$_h2/state"
+    cp "$TOOL" "$_h2/tools/sync-board.mjs"
+    printf '%s\n' '{"epics":[{"id":"E01","title":"Demo","features":[{"id":"E01-F01","title":"X","status":"pending"},{"id":"E01-F02","title":"Y","status":"in-progress"}]}]}' > "$_h2/state/tasks.json"
+    {
+      printf 'store:\n  tasks: local\nmirror:\n  board:\n    provider: "jira"\n'
+      printf '    base_url: "%s"\n    project_key: "HAR"\n' "$_u2"
+    } > "$_h2/harness.config.yaml"
+  }
+
+  # (a) a targeted FEATURE id issues Jira calls for that feature ONLY.
+  JR="$T/jira-rec-r21a"; JB="$T/jira-body-r21a"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ21A="$T/hj-r21a"; mk_jira2 "$HJ21A" "$URL"
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ21A/tools/sync-board.mjs" E01-F02 set_status 2>&1)" ||
+    { echo "$OUT"; stop_jira_stub; fail "targeted jira feature run errored"; }
+  stop_jira_stub
+  grep -q 'harness%3AE01-F02&' "$JR" || { cat "$JR"; fail "targeted jira run never reconciled the ADDRESSED feature"; }
+  grep -q 'harness%3AE01-F01&' "$JR" && { cat "$JR"; fail "targeted jira run reconciled an UNRELATED feature (still board-wide)"; }
+  grep -q 'harness%3AE01&' "$JR"     && { cat "$JR"; fail "targeted jira feature run also reconciled the epic (still board-wide)"; }
+  pass "a targeted jira run reconciles only the addressed feature [jira_targeted_scope]"
+
+  # (b) a targeted EPIC id SYNCS THE EPIC — under jira an epic is an issue of EPIC_TYPE, so
+  #     skipping it (the github-projects no-op) would drop an epic write on the floor.
+  JR="$T/jira-rec-r21b"; JB="$T/jira-body-r21b"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ21B="$T/hj-r21b"; mk_jira2 "$HJ21B" "$URL"
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ21B/tools/sync-board.mjs" E01 set_status 2>&1)" ||
+    { echo "$OUT"; stop_jira_stub; fail "targeted jira epic run errored"; }
+  stop_jira_stub
+  grep -q 'harness%3AE01&' "$JR" || { cat "$JR"; fail "a targeted epic id was skipped under jira, where an epic IS an issue"; }
+  grep -q 'POST /rest/api/2/issue ' "$JR" || { cat "$JR"; fail "targeted epic run made no epic issue write"; }
+  grep -q 'harness%3AE01-F0' "$JR" && { cat "$JR"; fail "targeted epic run also reconciled the features (still board-wide)"; }
+  grep -qF '"Epic"' "$JB" || { cat "$JB"; fail "targeted epic run did not create the object as an Epic issue type"; }
+  pass "a targeted jira epic id syncs that epic, not a no-op [jira_targeted_epic_synced]"
+
+  # (c) an id matching NEITHER is an error, and NO REST call is made (fail-closed, resolved
+  #     before the transport — never a silent fallback to a board-wide reconcile).
+  JR="$T/jira-rec-r21c"; JB="$T/jira-body-r21c"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ21C="$T/hj-r21c"; mk_jira2 "$HJ21C" "$URL"
+  if PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ21C/tools/sync-board.mjs" E01-F99 set_status >"$T/r21c.out" 2>&1; then
+    stop_jira_stub; cat "$T/r21c.out"; fail "an unknown targeted id should exit non-zero under jira"
+  fi
+  stop_jira_stub
+  [ -s "$JR" ] && { cat "$JR"; fail "an unknown targeted id still issued a Jira REST call"; }
+  grep -qF 'E01-F99' "$T/r21c.out" || { cat "$T/r21c.out"; fail "the unknown-id refusal does not name the id"; }
+  pass "an unknown targeted id fails without any Jira request [jira_targeted_unknown_id]"
+
+  # (d) CONTROL — no positionals still reconciles EVERY object, exactly as before. Without
+  #     this, a runJira() that simply stopped writing anything would pass (a)–(c).
+  JR="$T/jira-rec-r21d"; JB="$T/jira-body-r21d"
+  URL="$(start_jira_stub normal "$JR" "$JB")"
+  HJ21D="$T/hj-r21d"; mk_jira2 "$HJ21D" "$URL"
+  OUT="$(PATH="$T/bin:$PATH" JIRA_PAT="$SENTINEL_PAT" node "$HJ21D/tools/sync-board.mjs" 2>&1)" ||
+    { echo "$OUT"; stop_jira_stub; fail "board-wide jira run errored"; }
+  stop_jira_stub
+  grep -q 'harness%3AE01&' "$JR"      || { cat "$JR"; fail "board-wide jira run stopped reconciling the epic"; }
+  grep -q 'harness%3AE01-F01&' "$JR"  || { cat "$JR"; fail "board-wide jira run stopped reconciling the first feature"; }
+  grep -q 'harness%3AE01-F02&' "$JR"  || { cat "$JR"; fail "board-wide jira run stopped reconciling the second feature"; }
+  pass "no positionals still reconciles every jira object [jira_boardwide_unchanged]"
 
   # ── R17 — docs pin the jira mirror REST+PAT contract (governing phrases) ──
   grep -qi 'jira contract' "$DOCS"                 || fail "board-mirror.md has no jira contract section"

@@ -35,7 +35,22 @@ import { dirname, resolve, isAbsolute } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = resolve(HERE, '../harness.config.yaml');   // .harness/harness.config.yaml in a consumer
 const TASKS_PATH = resolve(HERE, '../state/tasks.json');
-const DRY = process.argv.includes('--dry-run');
+const ARGV = process.argv.slice(2);
+const DRY = ARGV.includes('--dry-run');
+// TARGETED RECONCILE (E99-F156). `store/local.md` specifies the post-write hook
+// NORMATIVELY as `<cmd> "<feature-id>" "<op>"`, and the Orchestrator has always passed
+// both. This tool used to read only `--dry-run` and drop the positionals, so a hook the
+// harness documents as targeted ran board-wide: every status write reconciled all ~N
+// features, re-drove `assignee` across unrelated issues, and rewrote the whole Epic option
+// set on behalf of one feature. The doc stated a contract nothing implemented.
+//
+// TARGETED requires BOTH positionals. An argument-less invocation stays byte-for-byte
+// board-wide, which is what keeps every existing consumer — and every by-hand full
+// reconcile — working exactly as before.
+const POSITIONAL = ARGV.filter((a) => !a.startsWith('--'));
+const targetFeatureId = POSITIONAL[0] || '';
+const hookOp = POSITIONAL[1] || '';
+const TARGETED = Boolean(targetFeatureId && hookOp);
 const log = (...a) => console.log(...a);
 
 // --- minimal, dependency-free YAML reader (same ethos as the shell _cfg_* awk helpers):
@@ -226,12 +241,32 @@ if (['@me', 'self', '$me'].includes(ASSIGNEE.toLowerCase())) {
 // --- load + flatten tasks.json ------------------------------------------------
 const data = JSON.parse(readFileSync(TASKS_PATH, 'utf8'));
 const epics = data.epics.map((e) => ({ id: e.id, label: `${e.id} — ${e.title}` }));
-const features = data.epics.flatMap((e) =>
+const allFeatures = data.epics.flatMap((e) =>
   (e.features || []).map((f) => ({
     id: f.id, title: `${f.id} — ${f.title}`, status: f.status, epicLabel: `${e.id} — ${e.title}`,
   })),
 );
-log(`[mirror] github-projects: ${epics.length} epics, ${features.length} features -> ${OWNER}/#${PROJECT_NUMBER}`);
+// Resolve the target BEFORE any gh write, so a bad id costs nothing.
+//
+// An EPIC id is a legitimate hook argument: set_status writes epic status too, and
+// store/local.md says "the id selects the object kind". Epics have no feature issue, so
+// that is a clean NO-OP with exit 0 — not an error. An id that is neither IS an error:
+// silently reconciling the whole board because the id was misspelled is precisely the
+// behaviour this feature removes.
+const targetFeature = TARGETED ? allFeatures.find((f) => f.id === targetFeatureId) : undefined;
+const targetEpic = TARGETED ? epics.find((e) => e.id === targetFeatureId) : undefined;
+if (TARGETED && !targetFeature && targetEpic) {
+  log(`[mirror] targeted ${hookOp}: ${targetFeatureId} is an epic; no feature issue to sync.`);
+  process.exit(0);
+}
+if (TARGETED && !targetFeature) {
+  console.error(`[mirror] targeted ${hookOp} requested unknown feature '${targetFeatureId}' — no board change was made.`);
+  process.exit(1);
+}
+const features = TARGETED ? [targetFeature] : allFeatures;
+log(TARGETED
+  ? `[mirror] github-projects targeted ${hookOp}: ${targetFeatureId} (1/${allFeatures.length} features) -> ${OWNER}/#${PROJECT_NUMBER}`
+  : `[mirror] github-projects: ${epics.length} epics, ${features.length} features -> ${OWNER}/#${PROJECT_NUMBER}`);
 
 // --- project + fields ---------------------------------------------------------
 const project = ghJson(['project', 'view', String(PROJECT_NUMBER), '--owner', OWNER, '--format', 'json']);
@@ -267,15 +302,37 @@ function ensureOptions(fieldName, desired) {
 const statusOptionId = ensureOptions('Status', STATUS_COLS.map((c) => ({
   name: c, color: Object.values(STATUS).find((s) => s.col === c).color,
 })));
-const epicOptionId = ensureOptions('Epic', epics.map((e, i) => ({
-  name: e.label, color: EPIC_COLORS[i % EPIC_COLORS.length],
-})));
+// Read a single-select field's current options WITHOUT mutating it.
+function currentOptionIds(fieldName) {
+  const field = fieldByName(fieldName);
+  if (!field) throw new Error(`field "${fieldName}" not found on project ${OWNER}/#${PROJECT_NUMBER}`);
+  return Object.fromEntries((field.options || []).map((o) => [o.name, o.id]));
+}
+// A targeted run must not rewrite the whole Epic option set: ensureOptions replaces the
+// option list wholesale, so one feature's status write RENAMED every existing board
+// column to whatever the current labels happened to be. When the target's epic option
+// already exists there is nothing to add — read the ids and leave the field alone. Fall
+// back to ensureOptions only when the option is genuinely new (or the run is board-wide).
+const epicOptionsNow = TARGETED ? currentOptionIds('Epic') : null;
+const epicOptionId = (epicOptionsNow && epicOptionsNow[targetFeature.epicLabel])
+  ? epicOptionsNow
+  : ensureOptions('Epic', epics.map((e, i) => ({
+    name: e.label, color: EPIC_COLORS[i % EPIC_COLORS.length],
+  })));
 const STATUS_FIELD_ID = fieldByName('Status').id;
 const EPIC_FIELD_ID = fieldByName('Epic').id;
 
 // --- existing issues + items --------------------------------------------------
-const issues = ghJson(['issue', 'list', '--repo', REPO, '--state', 'all', '--limit', '500',
-  '--json', 'number,title,url,state,assignees']);
+// Targeted: ask GitHub for the addressed feature's issue instead of paging 500.
+// `--limit` CAPS THE FETCH, it does not filter: the `--search` below only narrows to
+// titles CONTAINING the id, so many follow-up issues can share that substring. A
+// targeted limit LOWER than the board-wide one could push the exact canonical title out
+// of the result set, the exact-title map would read it as absent, and the reconcile loop
+// would CREATE A DUPLICATE issue. Same cap for both paths; the search is the saving.
+const issueListArgs = ['issue', 'list', '--repo', REPO, '--state', 'all',
+  '--limit', '500', '--json', 'number,title,url,state,assignees'];
+if (TARGETED) issueListArgs.push('--search', `${targetFeatureId} in:title`);
+const issues = ghJson(issueListArgs);
 const issueByTitle = new Map(issues.map((i) => [i.title, i]));
 const items = ghJson(['project', 'item-list', String(PROJECT_NUMBER), '--owner', OWNER,
   '--format', 'json', '--limit', '500']).items;
@@ -404,6 +461,48 @@ async function runJira(cfgText) {
     process.exit(1);
   }
 
+  // --- transport scheme: HTTPS, enforced (E99-F157) ---------------------------
+  // The PAT travels as `Authorization: Bearer <PAT>` on every request below, so a
+  // plaintext base_url hands a long-lived credential to anyone on the path. Until this
+  // check existed, three records ASSERTED https — the transport comment below, the
+  // `mirror.board.base_url` docs in store/board-mirror.md, and the example config — and
+  // none ENFORCED it, so a one-character typo silently downgraded the transport and the
+  // sync kept working.
+  //
+  // Placed HERE, ahead of resolveJiraPat(), on purpose: store/board-mirror.md documents a
+  // fail-closed ordering (config validated, THEN the PAT read), and honoring it means a
+  // refused config never reads the credential off disk at all — not merely never sends it.
+  // That is what the refusal messages below are able to promise.
+  let baseUrl;
+  try {
+    baseUrl = new URL(BASE_URL);
+  } catch {
+    console.error(`[mirror] mirror.board.base_url is not an absolute URL (got '${BASE_URL}') — expected e.g. https://jira.acme.internal. No PAT was read and no Jira request was made.`);
+    process.exit(1);
+  }
+  // LOOPBACK CARVE-OUT. Plaintext to loopback never reaches a network, so the threat this
+  // guard closes has no path to be on — the same reasoning that makes loopback a secure
+  // context in a browser. It is also what keeps the provider testable: this repo's own
+  // jira suite drives a plaintext 127.0.0.1 stub, and `fetch` will not accept a
+  // self-signed cert, so a strict rule would delete its own acceptance surface.
+  //
+  // Matched on the PARSED hostname against three literals, never on the raw string: a
+  // `startsWith('http://127.0.0.1')` test passes `http://127.0.0.1.evil.com`, which is a
+  // remote host with a reassuring prefix.
+  const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'];
+  const isLoopback = LOOPBACK_HOSTS.includes(baseUrl.hostname.replace(/^\[|\]$/g, ''));
+  // The carve-out is for PLAINTEXT HTTP on loopback only — not "any scheme on loopback".
+  // `ftp://localhost` or `ws://localhost` parse fine and are loopback, so a host-only test
+  // would wave them past the guard, read the PAT off disk, and die at `fetch` with an
+  // unhandled "unknown scheme" instead of this fail-closed configuration error.
+  const plaintextLoopback = baseUrl.protocol === 'http:' && isLoopback;
+  // `URL.protocol` is already lowercased, so `HTTPS://…` compares equal here while a
+  // grep of the raw config text for 'https' would both miss it and accept `httpsx://`.
+  if (baseUrl.protocol !== 'https:' && !plaintextLoopback) {
+    console.error(`[mirror] mirror.board.base_url must use https:// (got '${baseUrl.protocol}//') — the Jira PAT is sent as a Bearer token and must never travel in plaintext. The only other accepted scheme is plain http://, and only for loopback (${LOOPBACK_HOSTS.join(', ')}). No PAT was read and no Jira request was made.`);
+    process.exit(1);
+  }
+
   // --- PAT resolve + fail-closed preflight (before ANY network call) ----------
   // pat_file resolves relative to HARNESS_DIR (HERE/.. — same base as CONFIG_PATH/TASKS_PATH),
   // so the default is a BARE `jira.pat` that lands at <HARNESS_DIR>/jira.pat: `.harness/jira.pat`
@@ -478,8 +577,28 @@ async function runJira(cfgText) {
       id: f.id, summary: `${f.id} — ${f.title}`, kind: 'feature', type: FEATURE_TYPE, status: f.status,
     })),
   );
-  const objects = [...epics, ...features];
-  log(`[mirror] jira: ${epics.length} epics, ${features.length} features -> ${BASE_URL} project ${PROJECT_KEY}${DRY ? ' (dry-run)' : ''}`);
+  const allObjects = [...epics, ...features];
+  // Resolve the hook target BEFORE any Jira request — the same fail-closed ordering the
+  // config/PAT preflight above uses, so a bad id costs nothing and mutates nothing.
+  //
+  // The object model differs from github-projects, so the targeted behaviour does too:
+  // there, epics are a single-select FIELD and a targeted epic id has no issue to touch
+  // (clean no-op). Here, epics are REAL issues of EPIC_TYPE, so a targeted epic id syncs
+  // THAT epic — skipping it would mean an epic status write silently never reaches Jira.
+  // An id matching NEITHER an epic nor a feature is an ERROR: falling back to a board-wide
+  // reconcile because the id was misspelled is precisely the behaviour this removes.
+  let objects = allObjects;
+  if (TARGETED) {
+    const hit = allObjects.find((o) => o.id === targetFeatureId);
+    if (!hit) {
+      console.error(`[mirror] targeted ${hookOp} requested unknown id '${targetFeatureId}' — no Jira request was made.`);
+      process.exit(1);
+    }
+    objects = [hit];
+  }
+  log(TARGETED
+    ? `[mirror] jira targeted ${hookOp}: ${targetFeatureId} (1/${allObjects.length} objects, ${objects[0].kind}) -> ${BASE_URL} project ${PROJECT_KEY}${DRY ? ' (dry-run)' : ''}`
+    : `[mirror] jira: ${epics.length} epics, ${features.length} features -> ${BASE_URL} project ${PROJECT_KEY}${DRY ? ' (dry-run)' : ''}`);
 
   // Reconcile match key: a stable per-id label `harness:<id>` stored on the issue, searched
   // via JQL. Idempotent — a re-run finds the existing issue and transitions it in place.

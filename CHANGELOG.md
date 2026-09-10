@@ -4,6 +4,115 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.78.1] — 2026-09-10
+
+### Fixed — 🐛 a STALE dependency cycle no longer strands a feature forever (E99-F155)
+
+`featureBlockers()` recorded a `dependency-cycle` blocker whenever a feature appeared in a
+cycle, whether or not anything was actually unmet. A pending F1 depending on a **done** F2
+that still lists F1 in its own `depends_on` is a cycle in the graph but not a wait — F1's
+documented `depends_on` gate is satisfied — yet it failed `ordinary.length === 0` and was
+**unselectable forever**. `slicePhase()`'s selection guard carried the same defect for a
+pending slice whose cyclic counterpart was already done and merged.
+
+The cycle record is now emitted only when the cycle leaves a genuinely unmet dependency,
+and the slice guard drops its `!cycles.has(slice.id)` conjunct — `unmet` already asks the
+whole question. Record ORDER is unchanged (`dependency-cycle` still precedes
+`unmet-dependency`), and `init.sh` keeps sweeping cycles warn-only on every run, so the
+diagnostic stays visible; it simply stops being a veto.
+
+**The cuestiona patch gated a third site; this one does not.** Mutation testing showed the
+gate on `slicePhase()`'s *blocked-records* loop survives every test — it is **unreachable**.
+The selection loop above it returns on the first slice with `unmet.length === 0`, so by the
+time the blocked loop runs every remaining slice has an unmet dependency and the added
+conjunct is always true. A guard no test can falsify reads as a checked invariant while
+being decorative, so that site is left exactly as it was.
+
+`tests/test_next_task.sh` gains a stale-cycle case (feature and slice) beside the existing
+live-cycle control, which stays untouched and is what pins the record order. The slice pair
+is deliberately **not** built on `merged`: a done-but-unmerged slice is short-circuited to
+`observe-merge` long before the guard runs, so no board can reach it carrying one, and a
+pair built on `merged` would assert a state the selector cannot produce. Measured:
+**4 mutations, 4 killed, 0 survivors** (plus the fifth survivor above, which removed a
+third of the original patch rather than being papered over).
+
+Origin: `previta/cuestiona`, Codex P1 #3660088975, fixed there as `d36a2c7`.
+
+### Fixed — 🐛 the board mirror honors the positional hook contract (E99-F156)
+
+`store/local.md` specifies the post-write hook **normatively** as
+`<cmd> "<feature-id>" "<op>"`, and the Orchestrator has always passed both.
+`tools/sync-board.mjs` read exactly one thing from argv — `--dry-run` — and dropped the
+positionals, so a hook the harness documents as *targeted* ran **board-wide**: every status
+write reconciled all ~N features (~17 s on a 181-feature board), re-drove `assignee` across
+unrelated issues, and called `ensureOptions('Epic', …)` with the full epic list, which
+replaces the option set wholesale and therefore **renamed every existing board column** on
+behalf of one feature.
+
+The tool now reconciles only the addressed feature when **both** positionals are present.
+An argument-less invocation stays byte-for-byte board-wide, so by-hand full syncs and every
+existing consumer are unchanged. An **epic id** is a legitimate hook argument — `set_status`
+writes epic status too, and the doc already says "the id selects the object kind" — so it
+is a clean **no-op, exit 0**; an id matching neither is an **error**, never a silent
+fallback to a full reconcile. Targeted runs read the Epic field's current option ids
+instead of rewriting it, falling back to `ensureOptions` only for a genuinely new option,
+and fetch the one issue by search rather than paging 500.
+
+`store/local.md` documents the honored contract in the same change — this item exists
+because the tool and the doc drifted apart.
+
+`tests/test_mirror.sh` gains R20, eight cases against a two-feature board (the minimum
+fixture that can tell scope apart at all), each paired with a control. Two fixture traps
+were found by mutation and are worth naming: the shim's **Status** options must be complete
+or every run emits `api graphql` and the Epic assertion silently measures the Status
+rewrite; and the shim's existing **Epic** options must NOT match the board exactly, because
+`ensureOptions` only mutates on a name-set diff — a symmetric fixture is a no-op down both
+paths. Measured: **6 mutations, 6 killed, 0 survivors**.
+
+Origin: `previta/cuestiona`, local commits `213a5d7` / `15db691`.
+
+### Fixed — 🔒 the Jira mirror's `base_url` scheme is enforced, ahead of the PAT read (E99-F157)
+
+`runJira()` validated that `mirror.board.base_url` was **non-empty** and never checked its
+scheme, then sent the PAT to it on every request as `Authorization: Bearer <PAT>`. A
+`http://` typo therefore put a long-lived Jira credential in cleartext on the wire, and
+silently: the sync still worked, so nothing reported it. Three records already ASSERTED
+https — the transport comment in the tool, `store/board-mirror.md`, and the example config
+— and none enforced it.
+
+`base_url` is now parsed and its scheme checked **before `resolveJiraPat()` is called**,
+which honors the fail-closed ordering `store/board-mirror.md` already documents (config
+validated, *then* the PAT read) and is what lets both refusals promise that **no PAT was
+read and no Jira request was made**. A value that is not an absolute URL is refused as
+such rather than left to build a nonsense endpoint and fail confusingly at fetch time.
+
+**Loopback keeps plaintext** (`127.0.0.1`, `::1`, `localhost`): a credential sent to
+loopback never reaches a network, so the threat has no path to be on — the same reasoning
+that makes loopback a secure context in a browser. It is also what keeps the provider
+testable, since `fetch` rejects self-signed certs and this repo's own jira block is 24
+plaintext-loopback stub runs; a guard that forces its own acceptance surface to be deleted
+is not a stronger guard. The carve-out matches the **parsed hostname** against three
+literals, never a string prefix — `http://127.0.0.1.evil.com` is a remote host with a
+reassuring prefix and is refused like any other.
+
+PATCH, not MINOR: this repo's version contract makes a body bugfix a PATCH regardless of a
+previously-accepted config now being refused — MINOR is reserved for a new capability.
+Operators of a plaintext remote `base_url` do see a behavior change on upgrade.
+
+`tests/test_mirror.sh` gains R19 — six cases, each paired with a control that must succeed
+or fail for a *different* reason, because "the run exited non-zero" is trivially produced
+by a guard that refuses everything. The ordering case carries **both** faults at once (a
+plaintext `base_url` AND an unresolvable PAT) and asserts the scheme error rather than
+R7's no-PAT error: that difference is the only observable proof the check precedes the
+credential read. Measured: **5 mutations, 5 killed, 0 survivors** — drop the https guard,
+widen the carve-out to a prefix match, drop the carve-out entirely, refuse https too, and
+move the check after `resolveJiraPat()`.
+
+Origin: found in `previta/cuestiona`, fixed there as `93b4fc0`, and still absent upstream
+at v0.78.0 — so every target running the Jira mirror shipped it. `.harness/tools/` is
+harness-owned and re-copied whole on every install, so the local fix had already been
+re-applied by hand across that repo's 0.38.1 → 0.78.0 upgrade.
+
 ## [0.78.0] — 2026-09-06
 
 ### Fixed — 🐛 `preflight` exit 5 no longer conflates faults with opposite remedies (E99-F153)
