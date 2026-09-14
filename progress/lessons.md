@@ -75,3 +75,12 @@
   ("Not strictly forbidden … but avoid: `git checkout`") satisfied it alone — relocating
   the real rule left the suite green. When a section gains a counter-example, re-derive
   every anchor over that section and require a token only the real rule carries.
+
+- [2026-09-13 builder] The SOURCE repo's `harness.config.yaml` IS the fresh-install seed
+  template (`harness-install.sh:545`, `:1896` — a fresh install copies it verbatim, an
+  upgrade migrates instead). So a LOCAL experiment that flips one of its scalars must
+  never be committed: flipping `execution.builder.backend` to `delegate` here would ship
+  a delegate backend, pointed at a `delegate_cmd` that does not exist in the target, to
+  every consumer. `tests/test_installer_toggles.sh` R9 catches it by comparing a SEEDED
+  config against a MIGRATED one; when they diverge the suite goes red, and it is right to.
+  Trial a backend flip in the working tree, revert before committing.
