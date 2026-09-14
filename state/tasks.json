@@ -864,7 +864,13 @@
           "id": "E99-F155",
           "title": "next-task.mjs strands a feature on a STALE dependency cycle: a cycle is recorded as a blocker even when every depends_on is already done",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "c1fc78741b025b6bbaff5977b76ea05be5dedc96", "ref": "c1fc78741b025b6bbaff5977b76ea05be5dedc96", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "c1fc78741b025b6bbaff5977b76ea05be5dedc96",
+            "ref": "c1fc78741b025b6bbaff5977b76ea05be5dedc96",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -874,7 +880,13 @@
           "id": "E99-F156",
           "title": "sync-board.mjs ignores the positional hook contract store/local.md specifies, so every status write full-reconciles the whole board and renames existing columns",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "c1fc78741b025b6bbaff5977b76ea05be5dedc96", "ref": "c1fc78741b025b6bbaff5977b76ea05be5dedc96", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "c1fc78741b025b6bbaff5977b76ea05be5dedc96",
+            "ref": "c1fc78741b025b6bbaff5977b76ea05be5dedc96",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -884,7 +896,13 @@
           "id": "E99-F157",
           "title": "sync-board.mjs sends the Jira PAT as a Bearer token to a plaintext base_url: the scheme is never validated before the credential is read",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "c1fc78741b025b6bbaff5977b76ea05be5dedc96", "ref": "c1fc78741b025b6bbaff5977b76ea05be5dedc96", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "c1fc78741b025b6bbaff5977b76ea05be5dedc96",
+            "ref": "c1fc78741b025b6bbaff5977b76ea05be5dedc96",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -1293,6 +1311,45 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E27-escalation-cascade/F01-models-cascade/"
+        }
+      ]
+    },
+    {
+      "id": "E28",
+      "title": "Greenfield-to-umbrella path: start every new idea as a single-repo install, let the plan earn the topology, promote to umbrella from the plan's own manifest",
+      "status": "pending",
+      "owner": "araozmd",
+      "features": [
+        {
+          "id": "E28-F01",
+          "title": "Greenfield single-repo path: document + test install-into-empty-dir followed by /sdd-plan as the front door for a new product",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E28-greenfield-to-umbrella/F01-greenfield-single-path/"
+        },
+        {
+          "id": "E28-F02",
+          "title": "Planner topology output: emit a repo-topology ADR + draft umbrella.manifest.yaml when specs/architecture.md names more than one deployable (nothing when it names one)",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E28-F01"
+          ],
+          "spec_path": "specs/epics/E28-greenfield-to-umbrella/F02-planner-topology/"
+        },
+        {
+          "id": "E28-F03",
+          "title": "Installer promotion: single-target install -> umbrella coordinator from umbrella.manifest.yaml, git-init missing children, run optional scaffold_cmd, cascade + landing audit (local git only)",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E28-F02"
+          ],
+          "spec_path": "specs/epics/E28-greenfield-to-umbrella/F03-promote-to-umbrella/"
         }
       ]
     }
