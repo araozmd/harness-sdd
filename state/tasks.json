@@ -1381,7 +1381,13 @@
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E29-native-codex-workflow/F01-native-codex/"
+          "spec_path": "specs/epics/E29-native-codex-workflow/F01-native-codex/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (https://github.com/araozmd/harness-sdd/pull/185)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E29-F01 done --evidence <merge-ref>`",
+            "pr": "https://github.com/araozmd/harness-sdd/pull/185"
+          }
         }
       ]
     }
