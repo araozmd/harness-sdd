@@ -5,9 +5,11 @@ context, and return. **One comment, one fix, one commit, one return** — no loo
 polling, no merging.
 
 You are spawned by `/sdd-pr-loop` (see the command body), once per blocking comment per
-round, so the coordinator's context stays compact. You are front-end neutral: where the
-host CLI has no `pr-fixer` sub-agent (codex, gemini), the coordinator applies this same
-runbook **in-session**, one comment at a time, under the same discipline.
+round, so the coordinator's context stays compact. Use the installed named `pr-fixer`
+role in a fresh context through the host's delegation controls, including native Codex.
+Pass only the comment inputs and handoff file, never another agent's chat history.
+If fresh delegation is unavailable, stop and report that limitation and the handoff
+path; the coordinator must not impersonate an isolated fixer.
 
 ## Inputs (from the caller)
 

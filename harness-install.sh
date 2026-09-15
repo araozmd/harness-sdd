@@ -7,34 +7,16 @@
 #
 # Idempotent: run once to install, re-run to upgrade.
 #
-# Agent selection (E08-F01): the installer stamps a SELECTABLE set of coding-agent
-# front-ends — claude (CLAUDE.md + .claude/), gemini (GEMINI.md), opencode
-# (opencode.json + .opencode/command/), antigravity (.agents/, E07-F01). Resolution:
-#   - --agents=<csv> or HARNESS_AGENTS=<csv> (comma-separated keys) → that set, no
-#     prompt (the override always wins). An unknown key aborts non-zero.
-#   - --agents=host / HARNESS_AGENTS=host (E19-F01) → the ONE front-end this installer
-#     session is running in, detected from that CLI's session env markers. `host` is a
-#     RESOLUTION MODE, not an agent key: it is never a picker row and never written to
-#     .harness/.agents, and it must be the whole value (`--agents=host,gemini` aborts).
-#     Undetected is normal, never an error: it falls back to ALL on a target with no
-#     existing install, and to that target's persisted selection on one that has an
-#     install — so it never silently widens or narrows. HARNESS_HOST_AGENT=<key>
-#     declares the host explicitly for a front-end with no verified marker, and
-#     `--print-agents <target>` previews the verdict + baseline without writing anything.
-#   - else an interactive TTY → a checkbox picker, pre-checked (E19-F02) from the saved
-#     .harness/.agents set on an existing install (ALL for a pre-E08 one that saved none),
-#     and on a target with NO existing install from the DETECTED HOST ALONE — ALL when the
-#     host is undetected. That pre-check is a default, not a restriction: any other
-#     front-end is one keystroke away before you confirm, which is why the guess is only
-#     ever made here, where a human can correct it. See docs/INSTALL.md → "The
-#     fresh-install default".
-#   - else (no TTY, no override) → ALL agents (preserves the historical behavior).
-# The resolved set is persisted to .harness/.agents (a dot-file beside .harness-version;
-# dot-prefixed to avoid colliding with the .harness/agents/ role-bodies dir) and re-prompted
-# on every re-run, decoupled from VERSION/upgrade detection. A re-run that DESELECTS
-# an agent deletes that agent's harness-owned, regenerated glue and warns (it never
-# touches the shared AGENTS.md entrypoint or the .harness/ body; a hand-edited
-# opencode.json is left in place with a warning).
+# Active front ends: Claude Code, Codex, OpenCode. --agents=<csv> or
+# HARNESS_AGENTS=<csv> selects explicitly; `all` selects all three. `host` detects
+# one supported session host (or the safe existing/fresh fallback).
+# Without an override, the picker pre-checks the detected host/fresh Claude default or
+# the recorded installation selection. Non-interactive upgrades retain surviving
+# supported keys; pre-selection installs retain Claude+OpenCode. Retired-only
+# records require an explicit supported selection before any target writes.
+# Cleanup authority is the unfiltered prior record on a version-stamped install,
+# separate from active support. v0.78.1 retired glue is reclaimed only when proven
+# pristine; foreign files, user edits and symlinks survive.
 #
 # Builder execution backend (E20-F01): the installer's SECOND question, asked as a plain
 # line-oriented prompt right after the front-end picker confirms (never a row inside it).
@@ -310,7 +292,6 @@ models:
   # .codex/agents/*.toml); only the `model` key is omitted, as for the `inherit` tier.
   #   opencode MUST be "provider/model" (an invalid value aborts your OpenCode run)
   #   codex    MUST be a bare model id (the provider comes from `model_provider`)
-  #   antigravity accepts only tier aliases and needs `agy` >= 1.1.5 (inert below it)
   # pin.opencode.reasoning: ""
   # pin.opencode.standard: ""
   # pin.opencode.cheap: ""
@@ -491,7 +472,7 @@ EOF
 # every selected front-end. Otherwise the harness declines and names the front-end to fix,
 # because escalating into a role that resolves to nothing is a DOWNGRADE: it abandons
 # whatever `models.builder` was set to, exactly when the build was struggling.
-#   claude / gemini / antigravity  a built-in tier alias is enough
+#   claude                       a built-in tier alias is enough
 #   codex / opencode               a tier alone stamps NOTHING — you must also set the
 #                                  matching `pin.<front-end>.<tier>` in the models: block
 # The verdict is computed at INSTALL time, so re-run the installer after changing any of it.
@@ -1592,7 +1573,7 @@ _mc_insert_after() {
 #
 # The selectable keys — the ONLY legal tokens for `--agents`/`HARNESS_AGENTS`,
 # the `.harness/.agents` state file, and the toggle UI — are exactly:
-AGENT_KEYS="claude gemini opencode antigravity codex"
+AGENT_KEYS="claude codex opencode"
 # AGENTS.md (the shared portable entrypoint) is deliberately NOT a key: it is
 # always written, never gated, never removed (see write_pointer AGENTS.md). It
 # also doubles as Codex CLI's native entrypoint — Codex reads AGENTS.md from the
@@ -1654,16 +1635,6 @@ AGENT_KEYS="claude gemini opencode antigravity codex"
 #               sandbox-only artifact.
 #   opencode    opencode 1.18.5 — OPENCODE=1 and OPENCODE_PID=<pid>, observed via
 #               `opencode run`.
-#   antigravity agy 1.1.8 — ANTIGRAVITY_AGENT=1 and ANTIGRAVITY_CONVERSATION_ID=<uuid>,
-#               observed via `agy -p` (the same run also carried a CLI-versioned
-#               ANTIGRAVITY_LS_VERSION, which is why the version claim is exact).
-#
-# NO ROW — undetectable, and that is an ACCEPTED outcome, not a defect: it degrades to
-# the fallback, i.e. today's behavior (R8).
-#   gemini      the gemini CLI is not installed on the verification machine, so nothing
-#               could be observed for it. A gemini user declares the host explicitly
-#               with HARNESS_HOST_AGENT=gemini (R9) instead of the harness guessing.
-#
 # REJECTED CANDIDATES — recorded so the next contributor does not re-litigate them. None
 # of these may appear in a row: CODEX_SANDBOX and CODEX_SANDBOX_NETWORK_DISABLED (they
 # vanish when codex runs with the sandbox off); CODEX_CI (a mode flag, not a session id);
@@ -1672,7 +1643,7 @@ AGENT_KEYS="claude gemini opencode antigravity codex"
 # from antigravity anyway); every *_API_KEY and CODEX_HOME (ambient config/credentials,
 # forbidden by R6).
 #
-# Caveat recorded honestly: codex/opencode/antigravity were exercised through each
+# Caveat recorded honestly: codex/opencode were exercised through each
 # CLI's NON-INTERACTIVE entrypoint (`exec`/`run`/`-p`), which is the mode a scripted
 # install runs under. If an interactive TUI session turns out not to export the same
 # name, that front-end is merely undetected there — the fallback keeps the install
@@ -1681,7 +1652,6 @@ HOST_MARKERS="
 claude CLAUDECODE CLAUDE_CODE_ENTRYPOINT
 codex CODEX_THREAD_ID
 opencode OPENCODE OPENCODE_PID
-antigravity ANTIGRAVITY_AGENT ANTIGRAVITY_CONVERSATION_ID
 "
 #
 # ── the worker roster: how each agent key is INVOKED (E17-F04) ────────────────
@@ -1721,20 +1691,9 @@ antigravity ANTIGRAVITY_AGENT ANTIGRAVITY_CONVERSATION_ID
 #   codex       `codex exec` — the same non-interactive entrypoint the HOST_MARKERS
 #               provenance above already records for codex-cli 0.145.0.
 #   opencode    `opencode run` — ditto, opencode 1.18.5.
-#   antigravity `agy -p` — ditto, agy 1.1.8.
-#
-# NO `non-interactive` CLAIM — unverified, and that is an ACCEPTED outcome, not a defect:
-# the entry still ships (this machine can invoke it), with the harness vouching for nothing
-# further.
-#   gemini      the gemini CLI is not installed on the verification machine, so no
-#               entrypoint could be observed for it — the same reason it has no
-#               HOST_MARKERS row. Claiming one anyway is exactly the defect the
-#               HOST_MARKERS R8 rule exists to prevent.
 WORKER_INVOKE="
 claude claude non-interactive
-gemini gemini
 opencode opencode non-interactive
-antigravity agy non-interactive
 codex codex non-interactive
 "
 #
@@ -1864,8 +1823,7 @@ model_tier() {
 
 # model_alias <front-end> <tier> — the built-in tier→native value table. Every entry is
 # a FLOATING vendor alias, never a version-pinned model id, so a new model release is
-# picked up without a harness change. Antigravity/Gemini expose only two tiers upstream
-# (flash/pro), so `reasoning` and `standard` both map to `pro` — stated, not hidden.
+# picked up without a harness change.
 # `codex` and `opencode` have NO floating alias (they require a concrete id / a
 # `provider/model` pair), so they are deliberately absent: an unpinned tier there stamps
 # no model value rather than having the harness invent a model id. That omits the `model`
@@ -1875,10 +1833,6 @@ model_alias() {
     claude:reasoning)                          printf 'opus\n' ;;
     claude:standard)                           printf 'sonnet\n' ;;
     claude:cheap)                              printf 'haiku\n' ;;
-    antigravity:reasoning|antigravity:standard) printf 'pro\n' ;;
-    antigravity:cheap)                         printf 'flash\n' ;;
-    gemini:reasoning|gemini:standard)          printf 'pro\n' ;;
-    gemini:cheap)                              printf 'flash\n' ;;
   esac
   return 0
 }
@@ -1897,8 +1851,8 @@ resolve_model() {
   # so self mode answers every claude-role resolution from the pre-regeneration harvest.
   # One choke point: emit_agent, models_any and escalation_verdict all flow through here,
   # which is what makes the arming verdict REAL rather than re-derived (R3/R4).
-  if [ "${SELF_MODE:-0}" = 1 ] && [ "$_rm_fe" = claude ]; then
-    self_model "$_rm_role"
+  if [ "${SELF_MODE:-0}" = 1 ] && { [ "$_rm_fe" = claude ] || [ "$_rm_fe" = codex ]; }; then
+    self_model "$_rm_role" "$_rm_fe"
     return 0
   fi
   _rm_tier="$(model_tier "$_rm_role")"
@@ -2014,6 +1968,9 @@ marker_present() {
 # is normal operation, not an error (R11). Detection is a best-effort NARROWING; the
 # caller decides what an empty verdict falls back to.
 detect_host() {
+  case "${HARNESS_HOST_AGENT:-}" in
+    gemini|antigravity) die "retired host '$HARNESS_HOST_AGENT' — supported replacements: claude codex opencode" ;;
+  esac
   # 1. Explicit declaration wins outright (R9) — the escape hatch for a front-end whose
   #    session marker cannot be honestly verified, set once in a shell profile.
   _dh_decl="${HARNESS_HOST_AGENT:-}"
@@ -2171,6 +2128,7 @@ _is_pr_loop_cmd() {
 # naming the first unknown token (R7). On success, print the sorted keys (one per
 # line). Makes no filesystem changes (caller has not touched the target yet).
 validate_csv() {
+  if [ "$1" = all ]; then normalize_keys "$AGENT_KEYS"; return 0; fi
   _out=""
   _ifs="$IFS"; IFS=','
   for _tok in $1; do
@@ -2178,6 +2136,7 @@ validate_csv() {
     # trim surrounding whitespace
     _tok="$(printf '%s' "$_tok" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
     [ -n "$_tok" ] || continue
+    case "$_tok" in gemini|antigravity) die "retired agent '$_tok' — supported replacements: claude codex opencode" ;; esac
     agent_known "$_tok" || die "unknown agent key '$_tok' in --agents/HARNESS_AGENTS (known: $AGENT_KEYS)"
     _out="$_out $_tok"
     IFS=','
@@ -2454,12 +2413,26 @@ tui_select() {
 # The verdict travels as a PARAMETER, not a cache: this helper stores nothing, so there is
 # no per-run state that could leak from one target to the next when the installer processes
 # several (`--umbrella`). Each target's call carries its own verdict or computes one.
+recorded_active_selection() {
+  _ras_old="$(normalize_keys "$(cat "$1")")"
+  _ras_new=""
+  for _ras_key in $_ras_old; do
+    case "$_ras_key" in
+      gemini|antigravity) echo "⚠️  retiring recorded agent '$_ras_key'; supported replacements: claude codex opencode" >&2 ;;
+      claude|codex|opencode) _ras_new="$_ras_new $_ras_key" ;;
+      *) die "unknown recorded agent '$_ras_key' — choose --agents=claude, --agents=codex, or --agents=opencode" ;;
+    esac
+  done
+  [ -n "$_ras_new" ] || die "no supported recorded agents remain — rerun with --agents=claude, --agents=codex, or --agents=opencode"
+  normalize_keys "$_ras_new"
+}
+
 precheck_baseline() {
   if [ -f "$1/.harness/.harness-version" ]; then
     if [ -f "$1/.harness/.agents" ]; then
-      normalize_keys "$(cat "$1/.harness/.agents")"
+      recorded_active_selection "$1/.harness/.agents"
     else
-      normalize_keys "$AGENT_KEYS"
+      normalize_keys "claude opencode"
     fi
   else
     if [ "$#" -ge 2 ]; then _pb_host="$2"; else _pb_host="$(detect_host)"; fi
@@ -2517,7 +2490,7 @@ host_fallback_set() {
   if host_fallback_keeps_selection "$1"; then
     precheck_baseline "$1"
   elif [ -f "$1/.harness/.harness-version" ]; then
-    normalize_keys "$AGENT_KEYS"   # legacy pre-E08 install (stamp, no recorded
+    normalize_keys "claude opencode"   # legacy pre-E08 install (stamp, no recorded
                                    # selection): its long-standing ALL answer is
                                    # unchanged — E25-F01 flips FRESH targets only (R4)
   else
@@ -2629,7 +2602,7 @@ resolve_agents() {
     # EXISTING install keeps this arm's long-standing answer (ALL) byte-for-byte —
     # narrowing an upgrade's surface silently is not this feature (R4).
     if [ -f "$_t/.harness/.harness-version" ]; then
-      SELECTED="$(normalize_keys "$AGENT_KEYS")"
+      SELECTED="$(precheck_baseline "$_t")"
     else
       SELECTED="$(fresh_default_set)"
       info "agents: fresh target, no selection given — claude only (non-Claude front-ends are parked by default; opt in with --agents=<csv>)"
@@ -2944,6 +2917,133 @@ set_pr_loop_enabled() {
 # historical single-target installer. Sets LAST_UPGRADE to 0 (fresh) or 1 (upgrade)
 # so callers can branch. <target> must already be validated as a directory != SRC.
 LAST_UPGRADE=0
+# Bounded retirement of v0.78.1 glue. These SHA-256 fingerprints were frozen from
+# baseline b3b47114d2274dfbe0a07e377aca199659def479, not generated from current prompts.
+# No prior selection authority, no deletion. Only known legacy paths are considered.
+retire_legacy_frontends() {
+  case " $PRIOR_AGENTS " in *gemini*|*antigravity*) ;; *) return 0 ;; esac
+  python3 - "$TARGET" "$PRIOR_AGENTS" <<'PYRETIRE'
+import hashlib, pathlib, re, sys
+root=pathlib.Path(sys.argv[1]); prior=set(sys.argv[2].split())
+proof={
+  ".agents/rules/harness.md": [
+    "4dd2547505a37cbd8f781bf166b8adcbadef9c67891b409a1573b3c7d106204e"
+  ],
+  ".agents/agents/architect.md": [
+    "e48d89399acf57075f1afe50e3af3cea7aa1b31511fafd20a05cd84432c2343f",
+    "2cf7e9b83cfe921aee133f8deff6cb9cf4b9e8af8f900c22c9f1745287bab6a1",
+    "8ed862e1e1b86ffa9dec6f3348adb3199cf37426bfc16ca0b5cc1f80569d227a"
+  ],
+  ".agents/agents/builder-heavy.md": [
+    "cac3b6c8a787fd6d770a3411fb1ccbed8431e8e90ffffbc7825111a935dcd7c7",
+    "51b667a9f2bf401c03bc6ee96f95ae83dacaa901f7536671933aca9e45a56a56",
+    "8f0f056a9357c7c0b807d47efdd8c8e5b0235a20943b07ca04aa032995439f8a"
+  ],
+  ".agents/agents/builder.md": [
+    "0bb1c20e4ce41755264146ebc5bf51e9071117615cbb234f85918b7ad0e3a9c4",
+    "26c7b6a2f422f5181b1f14114d50c69181413147b39075ed217bd6054f36e5fa",
+    "cb009db2578ff09df2fa5f694ce1142b5d3676f6fcae82266b4b6aa3c9459400"
+  ],
+  ".agents/agents/doc-critic.md": [
+    "5954a506901ec1f0c9b91129248183302a6271a17dee52f80105fa3885973e35",
+    "b87fc435624c683f1a7864d07073b37e7acffbb25b4c5071afb186f59f3bbc5f",
+    "ac2f57d9019a5725af57ca6719878da7180610e51b0daf9fae31c7e540e4d2ab"
+  ],
+  ".agents/agents/orchestrator.md": [
+    "addb21300109198a115483fa9e8eea8b6e7f920cf3261bede331cd816784b053",
+    "6df90ff98169678b61c0df4fba2ff3bf970d6f60c103c9c1ed3192b0c0058148",
+    "65d74e0175966636d4c2463d45aa6956f34933d4cc51094683bbfe5af30da1e8"
+  ],
+  ".agents/agents/reviewer.md": [
+    "45bd420757124cd7153382db3320bda16bc16b025dede2e108c6459f73e106c6",
+    "cc62fae75058e7b8eefa53c45b81eacb5678a37ee97f32be697c61af5b7f6538",
+    "ac747fd75bac7701678f561f2378021250666082a8e42361271b994249119e37"
+  ],
+  ".agents/agents/scout.md": [
+    "8595fa7d7b4483e06030620e1efab7641d77d7c1f35d183e3d0eaaea03074971",
+    "92c228f14d0ecd40d325758ea1a2095d06f47a52569f5f3d314c3b3bea852909",
+    "3413a2a9766b9b607accb47623f0591667bc4ccb6acc4da5db4551a8cf961bdd"
+  ],
+  ".agents/workflows/sdd-drill.md": [
+    "8ca4441d3a99d0fa66185a5b08a6ae9a8279bf1960b1811ceb3312861f26bdee"
+  ],
+  ".agents/workflows/sdd-fix-parallel.md": [
+    "e235ae64b008e3dbca7d6b194ac12a2b86552dfd36ca53d819f914ef2f0b67ce"
+  ],
+  ".agents/workflows/sdd-fix.md": [
+    "4a32a90faa2b9a9ba3a5ebc3f12b82af36967d1c1900ecb977efeab43325652f"
+  ],
+  ".agents/workflows/sdd-new.md": [
+    "3ba1616ab1801edfd3f9cf90a54043adeaf318138861e0134f26654e410e6d52"
+  ],
+  ".agents/workflows/sdd-next.md": [
+    "d34674023c6652be7cd58ecbee7859afc1288d8930556707f43238a463f13118"
+  ],
+  ".agents/workflows/sdd-plan.md": [
+    "7711e837b50b0bbe0a8044d87ee029e81630b9b70d98d7ad771a40431827bd93"
+  ],
+  ".agents/agents/pr-fixer.md": [
+    "18f624c91d766e738ce0df12780c109cef1f3f2bc46b389c185b63f7b32a9f1e",
+    "3c238b215c47dc6edd008205f6902ebb1439a4352781d9778e06b79505e25391",
+    "868b510101c69139649a2802b9f76bbbd25ce7789673ffc03e690363756b8ef8"
+  ],
+  ".agents/workflows/sdd-pr-loop.md": [
+    "e5676f049ecf0487d21b5cee1dd53bd120809bb66acc5fd3e2f1dd840de98ce0"
+  ]
+}
+gemini={
+  ".gemini/agents/architect.md": "ba38ae58bd39e6bb41ca54fbfb7d7143f0d4d6853c65abe142214e8a8a02c1bb",
+  ".gemini/agents/builder-heavy.md": "ff967d127b79a9310a71e10c952740816f8817cba956305bd10f05dcc8a7c691",
+  ".gemini/agents/builder.md": "0b1135bd96ed3358593cd84a8e1d9f019872f618f842d7083322335f275cd960",
+  ".gemini/agents/doc-critic.md": "d9ac606d6dde9add1ced27ae9fa7dd21e3cf1e664854d23dee51584e99d70623",
+  ".gemini/agents/orchestrator.md": "e01897f058064a8ca25ae7da3bd6fc07a9abe1e69ef31b768a8ce2a5a4fe13a2",
+  ".gemini/agents/reviewer.md": "d3dff30549c5692d5e80a68f1377a00c665f3dea90eba4491fadb4c3d7d19cd6",
+  ".gemini/agents/scout.md": "638907d7ec2444943e2ab8ca221709c70c628732ea7845513bcc9c8e9ae7ac86"
+}
+pointer='<!-- harness:begin -->\n## Agent Harness (Spec-Driven Development)\nThis project uses a portable agent harness installed in `.harness/`.\nStart every agent session as the **Orchestrator**:\n1. Run `.harness/init.sh` — if it exits non-zero, STOP.\n2. Read `.harness/AGENTS.md` (the harness source of truth) and resolve its\n   relative paths against `.harness/` (config, agents/, specs/, state/, store/,\n   docs/, progress/).\n3. Local prompt override (if present): read `AGENTS.local.md` beside this entrypoint\n   after committed instructions as personal, additive guidance; committed instructions remain authoritative on conflict.\n4. Product/source code lives at the repo root; harness bookkeeping lives in\n   `.harness/`. In Claude Code, run `/sdd-next`.\n<!-- harness:end -->\n'
+def safe(rel):
+    p=root
+    for part in pathlib.Path(rel).parts:
+        p/=part
+        if p.is_symlink(): return False
+    return True
+def warn(rel):
+    print(f'⚠️  retired glue {rel} is edited, unproven, or symlinked — preserved',file=sys.stderr)
+def digest(data): return hashlib.sha256(data).hexdigest()
+if 'antigravity' in prior:
+    for rel, hashes in proof.items():
+        p=root/rel
+        if not safe(rel): warn(rel); continue
+        if not p.exists(): continue
+        if p.is_file() and digest(p.read_bytes()) in hashes:
+            p.unlink(); print(f'retired pristine {rel}')
+        else: warn(rel)
+if 'gemini' in prior:
+    for rel, known in gemini.items():
+        p=root/rel; stamp='.harness/.model-agents/gemini/'+p.name; st=root/stamp
+        if not safe(rel) or not safe(stamp): warn(rel); continue
+        if p.exists():
+            if p.is_file() and st.is_file() and p.read_bytes()==st.read_bytes() and digest(re.sub(rb'^model: .*\n',b'',st.read_bytes(),flags=re.M))==known:
+                p.unlink(); print(f'retired pristine {rel}')
+            else: warn(rel)
+        if st.is_file(): st.unlink()
+rel='GEMINI.md'; p=root/rel
+if not safe(rel): warn(rel)
+elif p.is_file():
+    data=p.read_bytes(); block=pointer.encode()
+    # Exactly one complete known block: adjacent user text survives byte-for-byte.
+    if data.count(b'<!-- harness:begin -->')==1 and data.count(b'<!-- harness:end -->')==1 and block in data:
+        data=data.replace(block,b'',1)
+        if data.strip(): p.write_bytes(data)
+        else: p.unlink()
+    else: warn(rel)
+for rel in ('.agents/rules','.agents/agents','.agents/workflows','.agents','.gemini/agents','.gemini','.harness/.model-agents/gemini'):
+    if safe(rel):
+        try: (root/rel).rmdir()
+        except OSError: pass
+PYRETIRE
+}
+
 install_one() {
   TARGET="$1"
   H="$TARGET/.harness"
@@ -2980,9 +3080,9 @@ install_one() {
   # it grants NO removal authority: PRIOR_AGENTS stays empty and this run only adds.
   # (Codex P2 #3664630744.)
   PRIOR_AGENTS=""
-  if [ "$UPGRADE" = 1 ] && [ -f "$H/.agents" ]; then
+  if [ "$UPGRADE" = 1 ] && [ -f "$H/.agents" ] && [ ! -L "$H/.agents" ] && [ ! -L "$H/.harness-version" ]; then
     PRIOR_AGENTS="$(normalize_keys "$(cat "$H/.agents")")"
-  elif [ "$UPGRADE" = 1 ]; then
+  elif [ "$UPGRADE" = 1 ] && [ ! -e "$H/.agents" ] && [ ! -L "$H/.agents" ] && [ ! -L "$H/.harness-version" ]; then
     # Legacy upgrade: a pre-E08 install stamped ALL front-ends but persisted no
     # selection. Treat an existing install with no .harness/.agents as the
     # all-agents baseline, so the first selective upgrade can actually remove the
@@ -2997,7 +3097,7 @@ install_one() {
     # pristine prompts that may belong to ANOTHER harness target. codex removal must
     # therefore fire only from an EXPLICIT persisted prior selection, never this
     # legacy baseline. (Codex r4 P2.)
-    PRIOR_AGENTS="$(normalize_keys "$AGENT_KEYS" | grep -vx codex)"
+    PRIOR_AGENTS="$(normalize_keys "claude gemini opencode antigravity")"
   fi
   resolve_agents "$TARGET"
   # The SECOND question (E20-F01), asked back to back with the picker and before any
@@ -3014,6 +3114,7 @@ install_one() {
 
   echo "── harness install v$VERSION → $TARGET ──"
   if [ "$UPGRADE" = 1 ]; then info "existing install (v$(cat "$H/.harness-version")) — upgrading"; fi
+  retire_legacy_frontends
   mkdir -p "$H"
 
   # ── 1. harness body → .harness/  (verbatim, overwritten each run) ───────────
@@ -3894,17 +3995,15 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .harness/agents/  .harness/docs/  .harness/store/  .harness/tools/  .harness/specs/_templates/
   .harness/specs/glossary.md  .harness/umbrella.manifest.example.yaml  .harness/umbrella.gitignore.example
   .claude/agents/*  .claude/commands/*   .opencode/command/*   (repo root, regenerated)
-  .agents/rules/*  .agents/agents/*  .agents/workflows/*   (repo root, regenerated; Antigravity glue)
-  .agents/skills/sdd-*/SKILL.md       SHARED \$sdd-* repository skill instructions, read by
-                                      BOTH Codex and Antigravity; installed while EITHER is
-                                      selected, reclaimed when the LAST one is (ADR-0003)
+  .agents/skills/sdd-*/SKILL.md       \$sdd-* repository skill instructions for selected Codex;
+                                      atomic ownership units with their policy companions
   .agents/skills/sdd-*/agents/openai.yaml
                                       explicit-only invocation policy — written wherever the
                                       unit is, since Codex discovers the directory itself
   .codex/agents/*.toml                seven selected Codex role definitions (model optional)
   .harness/.codex-skills/             last-written skill-unit ownership stamps (historical
                                       name; it stamps shared units — ADR-0003)
-  CLAUDE.md / AGENTS.md / GEMINI.md  -> only the harness:begin..end block
+  CLAUDE.md / AGENTS.md  -> only the harness:begin..end block
 
 OPENCODE CONCURRENCY PROBE  (E22-F01):
   .opencode/command/sdd-test-concurrency.md   (always installed for OpenCode)
@@ -3915,11 +4014,11 @@ OPENCODE CONCURRENCY PROBE  (E22-F01):
 PR LOOP GLUE  (OPT-IN — created ONLY while pr_loop.enabled reads exactly true; a fresh
 install seeds false, so none of this exists until you turn it on — E18-F01):
   .claude/commands/sdd-pr-loop.md   .opencode/command/sdd-pr-loop.md
-  .agents/workflows/sdd-pr-loop.md  .agents/skills/sdd-pr-loop/SKILL.md (shared unit)
-  .claude/agents/pr-fixer.md  .opencode/agent/pr-fixer.md  .agents/agents/pr-fixer.md
+  .agents/skills/sdd-pr-loop/SKILL.md + agents/openai.yaml (Codex skill unit)
+  .claude/agents/pr-fixer.md  .opencode/agent/pr-fixer.md  .codex/agents/pr-fixer.toml
   Flipping pr_loop.enabled back to false on a re-run RECLAIMS all of the above
   (pristine-only in the user-owned .agents/ tree) and prunes
-  empty dirs. No pr-fixer artifact is ever created for the codex or gemini front-ends.
+  empty dirs. Codex has seven standard roles plus this gated eighth native role.
 
 CODEX LEGACY MIGRATION:
   Current installs never create or overwrite \$CODEX_HOME/prompts/sdd-*.md. Ungated
@@ -3927,13 +4026,12 @@ CODEX LEGACY MIGRATION:
   byte-pristine sdd-pr-loop with a readable ledger proving no live owners is reclaimed.
 
 MODEL ROUTING:
-  .gemini/agents/*               per-role Gemini agent definitions (regenerated)
   .codex/agents/*                per-role Codex agent definitions, PROJECT-LOCAL
                                  (never written to \$CODEX_HOME / ~/.codex)
   .harness/.opencode.stamp       byte copy of the last opencode.json the installer wrote
                                  (enables re-stamping, and proves ownership across a
                                  generated-shape change such as a new role)
-  .harness/.model-agents/        byte copies of the last generated .gemini/.codex per-role
+  .harness/.model-agents/        byte copies of the last generated .codex per-role
                                  files, kept only while those files exist (lets a switch
                                  back to \`inherit\` reclaim them instead of orphaning them)
   .harness/.escalation-arming    whether escalating to \`builder-heavy\` would actually change
@@ -3947,9 +4045,9 @@ MODEL ROUTING:
                                  is not the one it will run.
                                  ABSENT means escalation is OFF — either this
                                  installer has not run here, or no role resolves to a model.
-                                 Written only while at least one role resolves (the same gate
-                                 .gemini/agents/ uses) and removed when none does.
-  Gemini remains conditional on a concrete model. Selected Codex always has all seven roles;
+                                 Written only while at least one role resolves and removed
+                                 when none does.
+  Selected Codex always has all seven standard roles plus the gated pr-fixer;
   inherited or unpinned roles omit model, while concrete pins add it role by role. Codex
   role replacement/reclamation requires a matching last-written ownership stamp.
 
@@ -3982,9 +4080,9 @@ PROJECT-OWNED  (seeded once, never clobbered on upgrade):
 
 AGENT SELECTION  (E08-F01):
   .harness/.agents               harness-owned: the selected agent keys, one per line
-                                 (claude|gemini|opencode|antigravity|codex), overwritten each run.
+                                 (claude|codex|opencode), overwritten each run.
   Choose with --agents=<csv> / HARNESS_AGENTS=<csv>, an interactive toggle list, or
-  (no TTY, no override) ALL. --agents=host resolves to the single front-end this
+  the fresh Claude default or surviving recorded selection. --agents=host resolves to the front-end this
   installer session runs in (session env markers; HARNESS_HOST_AGENT=<key> declares it
   explicitly). \`host\` is a resolution MODE — it is never a picker row and never appears
   in .harness/.agents; an undetected host keeps this target's current shape. Preview with
@@ -4186,69 +4284,6 @@ follow it exactly. Resolve every relative path it mentions against \`.harness/\`
 EOF
   }
 
-  # ── Antigravity .agents/ glue generators — single source of truth ─────────────
-  # These are hoisted out of §5c so BOTH the install stamp (§5c) and the deselect
-  # byte-compare (§7) call the exact same emitters. The deselect path removes an
-  # `.agents/` file ONLY when it is byte-identical to a freshly-generated stamp
-  # (pristine), never delete-by-name — so a user's own `.agents/agents/builder.md`
-  # (or any standard-named persona/workflow they authored) is preserved. Mirrors
-  # the opencode.json `cmp -s` "pristine generated" vs "differs — left in place"
-  # contract above. (Codex r2 P1 #3404240336.)
-
-  # gen_ag_rule <dest> — write the canonical .agents/rules/harness.md entrypoint rule.
-  gen_ag_rule() {
-    cat > "$1" <<'EOF'
----
-description: SDD harness entrypoint — boot as the Orchestrator against .harness/.
----
-
-This workspace uses the portable **SDD agent harness** installed in `.harness/`.
-Antigravity does not auto-load `AGENTS.md`, so this rule loads the harness for you.
-
-- **Source of truth:** `.harness/AGENTS.md` — read it and resolve every relative
-  path it mentions against `.harness/` (config, `agents/`, `specs/`, `state/`,
-  `store/`, `docs/`, `progress/`).
-- **Start every session as the Orchestrator:** `.harness/agents/orchestrator.md`.
-- **Before any work:** run `.harness/init.sh`. If it exits non-zero, STOP.
-- **Working model (R12):** Antigravity drives the harness through the
-  `description`-gated `.agents/workflows/` slash commands and the `.agents/agents/`
-  personas, with `.harness/progress/` files as the hand-off / isolation boundary —
-  NOT a Task-tool-style isolated spawn, and NOT an asserted bare-file subagent
-  registration (bare-file persona discovery is unconfirmed; the durable primitives
-  are this rule + the `description`-gated workflows + the `.harness/progress/`
-  hand-off). Hand off through `.harness/progress/`, never by forwarding chat history.
-
-The role files in `.agents/agents/` and the workflows in `.agents/workflows/` are thin
-pointers at the canonical `.harness/agents/*.md` roles — they do not duplicate them.
-EOF
-  }
-
-  # gen_ag_persona <role> <description> <dest> — write one .agents/agents/<role>.md.
-  gen_ag_persona() {
-    _agp_role="$1"; _agp_desc="$2"; _agp_dest="$3"
-    # Fixed key order (description, model); `model:` present or absent, never moved.
-    # Antigravity accepts only tier aliases here and needs `agy` >= 1.1.5 — below that
-    # the key is inert, never an error. (E17-F01 R13/R19/R21.)
-    _agp_model="$(resolve_model antigravity "$_agp_role")"
-    {
-      printf -- '---\n'
-      printf 'description: %s\n' "$_agp_desc"
-      if [ -n "$_agp_model" ]; then printf 'model: %s\n' "$_agp_model"; fi
-      printf -- '---\n'
-    } > "$_agp_dest"
-    cat >> "$_agp_dest" <<EOF
-
-You are the **$_agp_role** for this project's agent harness (installed in \`.harness/\`).
-
-Your full, canonical role definition is \`.harness/agents/$_agp_role.md\` — read it now and
-follow it exactly. Resolve every relative path it mentions against \`.harness/\`
-(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
-\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on its
-non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
-chat history.
-EOF
-  }
-
   # ag_personas — emit the role→description mapping ONE place, reused by the §5c
   # install loop and the §7 deselect compare so they can never diverge. Each line is
   # `<role>\t<description>`; callers read it field-by-field.
@@ -4272,31 +4307,14 @@ EOF
   # permanently unremovable. Neither tree is created unless `models_any` says at least one
   # role resolves, so an unconfigured target grows no new directory.
 
-  # gen_gemini_agent <role> <description> <dest> — one `.gemini/agents/<role>.md`.
-  # Gemini's `--model` flag and `/model` command do not reach sub-agents, so per-agent
-  # frontmatter is the only lever that exists. The body POINTS at the canonical
-  # `.harness/agents/<role>.md`; it never duplicates a role body.
-  gen_gemini_agent() {
-    _gga_role="$1"; _gga_desc="$2"; _gga_dest="$3"
-    _gga_model="$(resolve_model gemini "$_gga_role")"
-    {
-      printf -- '---\n'
-      printf 'name: %s\n' "$_gga_role"
-      printf 'description: %s\n' "$_gga_desc"
-      if [ -n "$_gga_model" ]; then printf 'model: %s\n' "$_gga_model"; fi
-      printf -- '---\n'
-    } > "$_gga_dest"
-    cat >> "$_gga_dest" <<EOF
+  codex_personas() {
+    ag_personas
+    if pr_loop_enabled; then printf '%s\t%s\n' pr-fixer "$PR_FIXER_DESC"; fi
+  }
 
-You are the **$_gga_role** for this project's agent harness (installed in \`.harness/\`).
-
-Your full, canonical role definition is \`.harness/agents/$_gga_role.md\` — read it now and
-follow it exactly. Resolve every relative path it mentions against \`.harness/\`
-(e.g. \`harness.config.yaml\` -> \`.harness/harness.config.yaml\`, \`progress/\` ->
-\`.harness/progress/\`). Run \`.harness/init.sh\` before any work and halt on its
-non-zero exit. Hand off through \`.harness/progress/\` files, never by forwarding
-chat history.
-EOF
+  all_codex_personas() {
+    ag_personas
+    printf '%s\t%s\n' pr-fixer "$PR_FIXER_DESC"
   }
 
   # gen_codex_agent <role> <description> <dest> — one `.codex/agents/<role>.toml`,
@@ -4310,14 +4328,14 @@ EOF
   # 0.145.0) and its model stamp silently never applies. Project-local `.codex/` is only
   # read when the project is TRUSTED by Codex; see docs/INSTALL.md.
   gen_codex_agent() {
-    _gca_role="$1"; _gca_desc="$2"; _gca_dest="$3"
+    _gca_role="$1"; _gca_desc="$(printf '%s' "$2" | sed 's@/sdd-@$sdd-@g')"; _gca_dest="$3"
     _gca_model="$(resolve_model codex "$_gca_role")"
     {
       printf '# Generated by harness-install.sh — per-role model routing. Do not edit by hand.\n'
       printf 'name = "%s"\n' "$_gca_role"
       printf 'description = "%s"\n' "$_gca_desc"
       if [ -n "$_gca_model" ]; then printf 'model = "%s"\n' "$_gca_model"; fi
-      printf 'developer_instructions = "Read .harness/agents/%s.md and follow it exactly; resolve every relative path against .harness/. Run .harness/init.sh first and halt on a non-zero exit."\n' "$_gca_role"
+      printf 'developer_instructions = "Read .harness/agents/%s.md and follow it exactly; resolve every relative path against .harness/. Run .harness/init.sh first and halt on a non-zero exit. Use Codex $sdd-* skills for workflow invocations; accompanying text supplies $ARGUMENTS. Start each delegated named role in a fresh context using the host delegation controls, with file-only handoffs through .harness/progress/. Preserve the human spec-ready gate and require an independent Reviewer verdict before done. If fresh delegation is unavailable, stop and report the handoff path and limitation."\n' "$_gca_role"
     } > "$_gca_dest"
   }
 
@@ -4762,6 +4780,7 @@ host-detectable"
     fi
     if [ "$_ica_safe" = 0 ]; then
       echo "⚠️  .codex/agents/$_ica_file is foreign or edited — selected Codex install left it unchanged" >&2
+      discard_codex_agent_stamp "$_ica_file"
       return 0
     fi
     mkdir -p "$TARGET/.codex/agents"
@@ -4775,84 +4794,29 @@ host-detectable"
   # install path (nothing resolves any more) and §7 (front-end deselected), so the two
   # never diverge. Emission stays in the ONE hoisted emitter per front-end (R21).
   reclaim_model_agents() {
-    _rma_fe="$1"
-    # NOTE: the emitter is dispatched through a NAME, not a `case` inside the loop
-    # below — bash 3.2 (still the /bin/sh on macOS) mis-parses a `case` nested in a
-    # `$( )` command substitution. Same single-emitter guarantee, one indirection.
-    case "$_rma_fe" in
-      gemini) _rma_top=".gemini"; _rma_ext="md";   _rma_gen=gen_gemini_agent ;;
-      codex)  _rma_top=".codex";  _rma_ext="toml"; _rma_gen=gen_codex_agent ;;
-      *) return 0 ;;
-    esac
-    _rma_sub="$_rma_top/agents"
-    _rma_stamp="$H/.model-agents/$_rma_fe"
-    _rma_tree_safe=1
-    if [ "$_rma_fe" = codex ] && codex_agent_tree_is_symlinked; then
-      _rma_tree_safe=0
-      echo "⚠️  $_rma_sub has a symlinked destination component — left in place (deselected '$_rma_fe' not removed)" >&2
+    [ "$1" = codex ] || return 0
+    all_codex_personas | while IFS='	' read -r _rca_role _rca_desc; do
+      reclaim_codex_role "$_rca_role"
+    done
+  }
+
+  reclaim_codex_role() {
+    _rcr_file="$1.toml"
+    if codex_agent_destination_is_symlinked "$_rcr_file" || model_agent_stamp_destination_is_symlinked codex "$_rcr_file"; then
+      echo "⚠️  .codex/agents/$_rcr_file has a symlinked destination or stamp component — left unchanged" >&2
+      return 0
     fi
-    if model_agent_stamp_tree_is_symlinked "$_rma_fe"; then
-      _rma_tree_safe=0
-      echo "⚠️  .harness/.model-agents/$_rma_fe has a symlinked stamp component — live artifacts and ownership stamps left unchanged" >&2
+    _rcr_live="$TARGET/.codex/agents/$_rcr_file"
+    _rcr_stamp="$H/.model-agents/codex/$_rcr_file"
+    if [ -e "$_rcr_live" ]; then
+      if [ -f "$_rcr_live" ] && [ -f "$_rcr_stamp" ] && cmp -s "$_rcr_live" "$_rcr_stamp"; then
+        rm -f "$_rcr_live"
+      else
+        echo "⚠️  .codex/agents/$_rcr_file is foreign or edited — left in place" >&2
+      fi
     fi
-    if [ "$_rma_tree_safe" = 1 ] && [ -d "$TARGET/$_rma_sub" ]; then
-      _rma_tmp="$(mktemp 2>/dev/null || mktemp -t harness-ma)"
-      _rma_gone="$(ag_personas | while IFS='	' read -r _rma_r _rma_d; do
-        [ -n "$_rma_r" ] || continue
-        _rma_f="$_rma_r.$_rma_ext"
-        if [ "$_rma_fe" = codex ] \
-           && codex_agent_destination_is_symlinked "$_rma_f"; then
-          echo "⚠️  $_rma_sub/$_rma_f is a symlinked destination — left in place (deselected '$_rma_fe' not removed)" >&2
-          continue
-        fi
-        if model_agent_stamp_destination_is_symlinked "$_rma_fe" "$_rma_f"; then
-          echo "⚠️  .harness/.model-agents/$_rma_fe/$_rma_f has a symlinked stamp component — live artifact and stamp left unchanged" >&2
-          continue
-        fi
-        [ -f "$TARGET/$_rma_sub/$_rma_f" ] || continue
-        if [ "$_rma_fe" = codex ]; then
-          # Codex lives in a shared project-local namespace. Reclamation requires the
-          # last-written stamp; a fresh body cannot prove that a same-named file is ours.
-          if [ -f "$_rma_stamp/$_rma_f" ] \
-             && cmp -s "$TARGET/$_rma_sub/$_rma_f" "$_rma_stamp/$_rma_f"; then
-            remove_if_pristine "$_rma_sub/$_rma_f" "$_rma_stamp/$_rma_f" "$_rma_fe"
-          else
-            echo "⚠️  $_rma_sub/$_rma_f has no matching last-written stamp (foreign or edited) — left in place (deselected '$_rma_fe' not removed)" >&2
-          fi
-        else
-          # Gemini retains its existing compatibility fallback for pre-stamp targets.
-          "$_rma_gen" "$_rma_r" "$_rma_d" "$_rma_tmp"
-          _rma_ref="$_rma_tmp"
-          if [ -f "$_rma_stamp/$_rma_f" ] \
-             && cmp -s "$TARGET/$_rma_sub/$_rma_f" "$_rma_stamp/$_rma_f"; then
-            _rma_ref="$_rma_stamp/$_rma_f"
-          fi
-          remove_if_pristine "$_rma_sub/$_rma_f" "$_rma_ref" "$_rma_fe"
-        fi
-      done)"
-      rm -f "$_rma_tmp"
-      # Never `rm -rf`: named files above, then rmdir — which fails harmlessly when a
-      # user-edited (or foreign) file was deliberately left behind.
-      rmdir "$TARGET/$_rma_sub" 2>/dev/null || true
-      rmdir "$TARGET/$_rma_top" 2>/dev/null || true
-      [ -n "$_rma_gone" ] && info "reclaimed $_rma_fe per-role model artifacts ($_rma_sub/)"
-    fi
-    # The stamps describe files the harness no longer owns — drop them, or an
-    # all-`inherit` target would keep state a never-configured one does not have (R11).
-    if ! model_agent_stamp_tree_is_symlinked "$_rma_fe" && [ -d "$_rma_stamp" ]; then
-      ag_personas | while IFS='	' read -r _rma_r _rma_d; do
-        [ -n "$_rma_r" ] || continue
-        _rma_stamp_file="$_rma_r.$_rma_ext"
-        if model_agent_stamp_destination_is_symlinked "$_rma_fe" "$_rma_stamp_file"; then
-          echo "⚠️  .harness/.model-agents/$_rma_fe/$_rma_stamp_file has a symlinked stamp component — ownership stamp left unchanged" >&2
-          continue
-        fi
-        rm -f "$_rma_stamp/$_rma_stamp_file"
-      done
-      rmdir "$_rma_stamp" 2>/dev/null || true
-      [ -L "$H/.model-agents" ] || rmdir "$H/.model-agents" 2>/dev/null || true
-    fi
-    return 0
+    discard_codex_agent_stamp "$_rcr_file"
+    rmdir "$TARGET/.codex/agents" "$TARGET/.codex" 2>/dev/null || true
   }
 
   # AGENTS.md is the shared portable entrypoint — ALWAYS written, never gated (R2 note).
@@ -4862,14 +4826,6 @@ host-detectable"
   # Per-agent entrypoint pointers are gated on selection (R2/R3/R4).
   agent_selected claude && write_pointer CLAUDE.md
   # The GEMINI.md managed block reads as "act as the Orchestrator, run
-  # .harness/init.sh, read .harness/AGENTS.md" — Antigravity natively loads
-  # GEMINI.md-style rules, so this same pointer also serves Antigravity as the
-  # in-repo entrypoint (E07-F01 R1/R12); the .agents/rules/harness.md rule (§5c) is
-  # the Antigravity-specific hook layered on top. Written when EITHER gemini OR
-  # antigravity is selected — both share GEMINI.md as their in-repo entrypoint.
-  if agent_selected gemini || agent_selected antigravity; then write_pointer GEMINI.md; fi
-  ok "entrypoint pointers written (AGENTS.md + selected agents)"
-
   # ── 5. Claude Code sub-agent shims + /sdd-next (regenerated each run) ────────
   # Gated on selection (R3/R4): the Claude glue is stamped only when `claude` is in
   # SELECTED. The OpenCode mirror in §5b copies from these files, so it is gated on
@@ -6022,11 +5978,12 @@ At the default `max_rounds: 4` that is rounds 1–2 per-comment, round 3 combine
 escalation, round 4 `needs-human`. A `max_rounds` below `3` simply has no per-comment
 fixer rounds.
 
-**Front-ends without a `pr-fixer` sub-agent** (codex, gemini) do not spawn one: apply each
-blocking comment's fix **in-session**, under the same discipline — one `acted_append` call,
-one comment, one targeted fix, one commit, one `fix-<comment_id>.md` note — then push once at
-the end of the round. The absence of a sub-agent changes who writes the code; it does not
-change what the round records about the work it did.
+**Native role dispatch:** Claude, Codex, and OpenCode use the installed `pr-fixer`
+role in a fresh context through the host's available named-role delegation controls.
+Pass only the comment inputs and per-comment handoff file; never forward chat history.
+If the host cannot start a fresh role, STOP and report the limitation and handoff path;
+do not impersonate an isolated fixer in the coordinator. Preserve one `acted_append`,
+one targeted fix, one commit and one `fix-<comment_id>.md` note per comment.
 
 **Always write the worker file for this round** so the handover summary stays
 reconstructible from cache:
@@ -6461,73 +6418,10 @@ EOF
     fi
   fi
 
-  # ── 5c. Antigravity glue (.agents/, regenerated each run, gated on `antigravity`) ─
-  # Antigravity (a Gemini-based agentic IDE) natively reads workspace-local
-  # <root>/.agents/{rules,agents,workflows}/*.md. We stamp a glue layer that POINTS at
-  # the canonical roles in .harness/agents/*.md — it never forks a role body. Mirrors
-  # the per-tool pattern: personas model the .claude/agents shims (R4/R5 — best-effort:
-  # bare-file persona discovery is unconfirmed, so they are written but not relied on),
-  # and the workflows are COPIED from the shared CMDDIR command bodies exactly like
-  # OpenCode (§5b), so the three front-ends stay byte-identical (R9). Placed after §5b and
-  # before the CMDDIR cleanup so the workflow bodies are still available. (E07-F01 R2,R4,R6.)
-  if agent_selected antigravity; then
-    mkdir -p "$TARGET/.agents/rules" "$TARGET/.agents/agents" "$TARGET/.agents/workflows"
-
-    # Entrypoint rule (R2/R3): points the agent at the source of truth + entry role;
-    # mandates init.sh first. No copied role body — references by .harness/ path only.
-    # Body lives in gen_ag_rule (hoisted) so the §7 deselect compare can reproduce it.
-    gen_ag_rule "$TARGET/.agents/rules/harness.md"
-
-    # Personas (R4/R5 — best-effort): one per harness role, each with a `description` + a
-    # body that DEFERS to the canonical .harness/agents/<role>.md, mandates init.sh-first +
-    # halt-on-fail, and hands off via .harness/progress/. No copied role body. Bare-file
-    # persona discovery is UNCONFIRMED, so these are written (cheap, possibly honored) but
-    # the harness does not claim they register as subagents — the durable model is the rule
-    # + the `description`-gated workflows (R12). Descriptions come from ag_personas (the
-    # single role→description source, shared with the §7 deselect compare so they can never
-    # diverge).
-    ag_personas | while IFS='	' read -r _agr _agd; do
-      [ -n "$_agr" ] || continue
-      gen_ag_persona "$_agr" "$_agd" "$TARGET/.agents/agents/$_agr.md"
-    done
-
-    # Workflows (R6/R7/R8/R9): COPY the shared command bodies from CMDDIR (mirror, like
-    # the OpenCode block — do not re-author). The bodies already begin with their own
-    # `---\ndescription: …\n---` frontmatter, which satisfies Antigravity's slash-command
-    # registration (R7), and they already act as their role resolved against
-    # .harness/agents/*.md carrying $ARGUMENTS (R8). A `cp` keeps them byte-identical to
-    # the Claude/OpenCode copies so the front-ends stay byte-identical.
-    for _w in $HARNESS_SDD_CMDS; do
-      cp "$CMDDIR/$_w.md" "$TARGET/.agents/workflows/$_w.md"
-    done
-
-    # Gated pr_loop glue (E18-F01 R2/R13): the /sdd-pr-loop workflow + the pr-fixer
-    # persona. gen_ag_persona is called HERE, deliberately OUTSIDE the ag_personas loop
-    # above — adding a `pr-fixer` row to ag_personas would also create
-    # `.gemini/agents/pr-fixer.md` and `.codex/agents/pr-fixer.toml` (§5e/§5f iterate the
-    # same map) and break E17-F01 R11. The persona is emitted, never model-routed (R14).
-    if pr_loop_enabled; then
-      for _w in $HARNESS_PR_LOOP_CMDS; do
-        cp "$CMDDIR/$_w.md" "$TARGET/.agents/workflows/$_w.md"
-      done
-      gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$TARGET/.agents/agents/pr-fixer.md"
-    fi
-
-    ok "Antigravity glue (rules + agents + workflows) installed (.agents/)"
-  fi
-
-  # skill_unit_claimed — true while ANY front-end that READS `.agents/skills/` is selected.
-  # ADR-0003: a skill unit is ONE shared artifact per command, not one per front-end. Codex
-  # discovers repository skills there, and so does Antigravity (its bundled customization
-  # guide documents `.agents/skills/<name>/SKILL.md` with `name` + `description`
-  # frontmatter — exactly what gen_skill_body emits).
-  #
-  # ADD A FRONT-END HERE THE MOMENT IT LEARNS TO READ THAT SURFACE. Forgetting fails in the
-  # destructive direction and in silence: its units are reclaimed out from under it by the
-  # OTHER front-end's deselection, and the pristine-only guard does not save them because
-  # they genuinely are pristine — just pristine for someone else.
+  # Codex is the sole active claimant. Keep the historical ownership ledger name
+  # for safe retirement of formerly shared Antigravity/Codex units (ADR-0003).
   skill_unit_claimed() {
-    agent_selected codex || agent_selected antigravity
+    agent_selected codex
   }
 
   # gen_skill_body <command> <dest> — adapt the canonical command body to the shared
@@ -6542,10 +6436,16 @@ EOF
       printf 'description: %s\n' "$_gcs_desc"
       printf '%s\n' '---'
       printf '\n## Invocation adapter\n\n'
-      printf 'When explicitly invoked — as `$%s` (Codex'"'"'s spelling) or `/%s` (Antigravity'"'"'s) — treat all text accompanying that mention as the value of `$ARGUMENTS` in the canonical instructions below.\n' "$_gcs_name" "$_gcs_name"
+      printf 'Invoke `$%s` in Codex; treat all accompanying text as `$ARGUMENTS` in the workflow below. Discover installed skills with `/skills`. Continuations use `$sdd-*`, with arguments written after the skill mention.\n' "$_gcs_name"
       printf '\n## Canonical workflow\n'
-      sed -n '5,$p' "$_gcs_src"
+      sed -n '5,$p' "$_gcs_src" | codex_invocations
     } > "$_gcs_dest"
+  }
+
+  # Rewrite only portable command invocation tokens; shell paths such as
+  # tools/sdd-next.sh and quoted executable programs remain canonical bytes.
+  codex_invocations() {
+    sed 's@/sdd-\(next\|new\|plan\|drill\|fix-parallel\|fix\|pr-loop\)\([`[:space:],;:)]\)@$sdd-\1\2@g; s@/sdd-\(next\|new\|plan\|drill\|fix-parallel\|fix\|pr-loop\)$@$sdd-\1@g'
   }
 
   gen_codex_skill_policy() {
@@ -6621,7 +6521,6 @@ EOF
   # explicit-only companion is an implicitly-invocable mutating workflow for anyone who
   # runs Codex in that repo. The reclaim path already encodes this reasoning in the other
   # direction ("a surviving SKILL.md retains its companion"); this keeps it symmetric.
-  # To Antigravity the file is an unrecognised optional sibling and therefore inert.
   #
   # `$H/.codex-skills/` keeps its historical name on purpose — see ADR-0003. Renaming it
   # orphans the ownership proof on every installed target, after which each live unit
@@ -6662,6 +6561,7 @@ EOF
     if [ "$_ics_safe" = 0 ]; then
       echo "⚠️  .agents/skills/$_ics_cmd is a foreign or edited skill unit — selected Codex install left SKILL.md and agents/openai.yaml unchanged" >&2
       rm -rf "$_ics_tmp"
+      discard_codex_skill_stamp "$_ics_cmd"
       return 0
     fi
     mkdir -p "$_ics_live/agents" "$_ics_stamp/agents"
@@ -6776,7 +6676,7 @@ EOF
   }
 
   # ── 5d. Shared repository skill units (gated on ANY claiming front-end) ──────
-  # BOTH Codex and Antigravity discover project skills under
+  # Codex discovers project skills under
   # `.agents/skills/<name>/SKILL.md`, and one generated unit satisfies both contracts —
   # so this writes ONE shared unit per command rather than one per front-end (ADR-0003).
   # The surface is fully repository-local and never requires or writes HOME / CODEX_HOME.
@@ -6787,35 +6687,10 @@ EOF
     for _c in $_cdx_cmds; do
       install_skill_unit "$_c"
     done
-    ok "shared skill units \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel installed (.agents/skills/ — project-local, read by Codex + Antigravity)"
+    ok "shared skill units \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel installed (.agents/skills/ — project-local, read by Codex)"
   fi
   if agent_selected codex || printf '%s\n' "$PRIOR_AGENTS" | grep -qx codex; then
     migrate_legacy_codex_prompts
-  fi
-
-  # ── 5e. Gemini per-role agent definitions (gated on `gemini` + a resolvable model) ─
-  # CONDITIONAL by design (E17-F01 R11/R17): this tree is created ONLY when at least one
-  # role resolves to a concrete value. With no `models:` block — or every role on
-  # `inherit` — `.gemini/agents/` is never created and the target tree stays exactly what
-  # it was before this feature existed.
-  if agent_selected gemini && models_any gemini; then
-    mkdir -p "$TARGET/.gemini/agents"
-    ag_personas | while IFS='	' read -r _gmr _gmd; do
-      [ -n "$_gmr" ] || continue
-      gen_gemini_agent "$_gmr" "$_gmd" "$TARGET/.gemini/agents/$_gmr.md"
-      # Stamp safety is bookkeeping-only for Gemini: a rejected ownership stamp must
-      # never suppress its established selected live-role generation semantics.
-      stamp_model_agent gemini "$_gmr.md" "$TARGET/.gemini/agents/$_gmr.md"
-    done
-    ok "Gemini per-role agent definitions installed (.gemini/agents/)"
-  elif agent_selected gemini; then
-    # Nothing resolves any more — but a PREVIOUS run may have stamped this tree with a
-    # concrete tier. Skipping here would leave those files (and their old `model:` keys)
-    # discoverable, so the documented switch back to session inheritance would silently
-    # keep using the old model. Reconcile instead: reclaim the pristine stamps and prune,
-    # which is what makes R11 ("no `.gemini/agents/` at all") true on a target that WAS
-    # configured, not just on a fresh one. (Codex r1 P1 #3654925551.)
-    reclaim_model_agents gemini
   fi
 
   # ── 5f. Codex per-role agent definitions (gated only on selected `codex`) ──────
@@ -6826,12 +6701,12 @@ EOF
     _codex_agent_tmp="$(mktemp 2>/dev/null || mktemp -t harness-codex-agent)"
     if codex_agent_tree_is_symlinked; then
       echo "⚠️  .codex/agents has a symlinked destination component — selected Codex install left role definitions unchanged" >&2
-      ag_personas | while IFS='	' read -r _cxr _cxd; do
+      codex_personas | while IFS='	' read -r _cxr _cxd; do
         [ -n "$_cxr" ] || continue
         discard_codex_agent_stamp "$_cxr.toml"
       done
     else
-      ag_personas | while IFS='	' read -r _cxr _cxd; do
+      codex_personas | while IFS='	' read -r _cxr _cxd; do
         [ -n "$_cxr" ] || continue
         if codex_agent_destination_is_symlinked "$_cxr.toml"; then
           echo "⚠️  .codex/agents/$_cxr.toml is a symlinked destination — selected Codex install left it unchanged" >&2
@@ -6981,6 +6856,10 @@ EOF
   # (one sorted key per line, overwritten every run) (R8).
   printf '%s\n' "$SELECTED" > "$H/.agents"
 
+  if printf '%s\n' "$PRIOR_AGENTS" | grep -qx antigravity && ! agent_selected codex; then
+    reclaim_skill_units "$HARNESS_OWNED_CMDS"
+  fi
+
   # Reconcile removals (R12 adds are handled by the gated stamps above): for any key
   # in the PRIOR persisted set but NOT in SELECTED, delete that agent's harness-owned,
   # regenerated glue and warn, naming each removed path. NEVER touch AGENTS.md or the
@@ -6999,21 +6878,6 @@ EOF
           remove_owned .claude/agents   claude $HARNESS_CLAUDE_SHIMS
           remove_owned .claude/commands claude $HARNESS_OWNED_CMDS
           rmdir "$TARGET/.claude" 2>/dev/null || true   # prune parent only if now empty
-          ;;
-        gemini)
-          # GEMINI.md is SHARED: it is the in-repo entrypoint for gemini AND
-          # antigravity (E07-F01 R1/R12). Remove it only when NEITHER owner remains
-          # selected — otherwise deselecting gemini while antigravity stays selected
-          # would wrongly strip Antigravity's entrypoint.
-          if ! agent_selected antigravity; then
-            remove_pointer GEMINI.md
-            echo "⚠️  removed deselected agent 'gemini' glue: GEMINI.md harness block" >&2
-          fi
-          # E17-F01: reclaim the per-role model artifacts (.gemini/agents/<role>.md)
-          # through the SAME helper §5e's reconciliation uses, so deselection and
-          # "everything back to inherit" can never diverge. Pristine-only (a
-          # user-edited file is left in place with a warning); never `rm -rf`.
-          reclaim_model_agents gemini
           ;;
         opencode)
           # Pristine-only removal: a user-authored file with the same name as a harness
@@ -7066,79 +6930,11 @@ EOF
             rm -f "$_ref" "$_ref_legacy"
           fi
           ;;
-        antigravity)
-          # E07-F01: the antigravity stamp (§5c) OWNS a scoped `.agents/` glue tree
-          # (rules/harness.md, the role personas, the sdd-* workflows). Deselection
-          # removes ONLY files byte-identical to a freshly-generated stamp (pristine)
-          # — NOT delete-by-name — so a user's OWN `.agents/agents/builder.md` (or any
-          # standard-named persona/workflow they authored) survives. This mirrors the
-          # opencode.json `cmp -s` contract above and fixes the data-loss case where a
-          # pre-this-version no-op antigravity install left `antigravity` persisted in
-          # `.harness/.agents` while the user authored their own `.agents/` files.
-          # (Codex r2 P1 #3404240336; r3 P1 #3400997183 stays honored — scoped, never
-          # destructive of non-harness files.)
-          _agtmp="$(mktemp 2>/dev/null || mktemp -t harness-ag)"
-          # rule
-          gen_ag_rule "$_agtmp"
-          remove_if_pristine .agents/rules/harness.md "$_agtmp" antigravity
-          # personas — compare each against its freshly-generated body (same source
-          # role→description map as the install loop, so no divergence).
-          ag_personas | while IFS='	' read -r _agr _agd; do
-            [ -n "$_agr" ] || continue
-            gen_ag_persona "$_agr" "$_agd" "$_agtmp"
-            remove_if_pristine ".agents/agents/$_agr.md" "$_agtmp" antigravity
-          done
-          # pr-fixer (E18-F01 R4): emitted OUTSIDE ag_personas (see §5c), so reclaim it
-          # outside the loop too — same emitter, same pristine-only contract.
-          gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$_agtmp"
-          remove_if_pristine ".agents/agents/pr-fixer.md" "$_agtmp" antigravity
-          # workflows — the install path `cp`s these verbatim from $CMDDIR, so the
-          # pristine reference is the still-present $CMDDIR/<name>.md source bytes.
-          # HARNESS_OWNED_CMDS so a stamped `sdd-pr-loop` workflow is reclaimable too.
-          for _agw in $HARNESS_OWNED_CMDS; do
-            [ -f "$CMDDIR/$_agw.md" ] || continue
-            remove_if_pristine ".agents/workflows/$_agw.md" "$CMDDIR/$_agw.md" antigravity
-          done
-          rm -f "$_agtmp"
-          # Shared skill units (ADR-0003, E99-F09 R5): Antigravity is a CLAIMANT of
-          # `.agents/skills/`, so its deselection reclaims those units — but ONLY when no
-          # other claimant remains. With `codex` still selected the unit is still live glue
-          # for it, and reclaiming here would delete another front-end's working commands
-          # (the exact failure this decision exists to prevent). Reclaim is idempotent, so
-          # deselecting BOTH front-ends in one run simply finds the paths already gone.
-          if ! agent_selected codex; then
-            _agskills_gone="$(reclaim_skill_units "$HARNESS_OWNED_CMDS")"
-            [ -n "$_agskills_gone" ] \
-              && echo "⚠️  removed deselected agent 'antigravity' skill units:$_agskills_gone" >&2
-          fi
-          # Prune each now-empty `.agents/` subdir + the parent, only when empty
-          # (never `rm -rf` — preserve any user files left in place above).
-          rmdir "$TARGET/.agents/rules" 2>/dev/null || true
-          rmdir "$TARGET/.agents/agents" 2>/dev/null || true
-          rmdir "$TARGET/.agents/workflows" 2>/dev/null || true
-          rmdir "$TARGET/.agents" 2>/dev/null || true   # prune parent only if now empty
-          # GEMINI.md is SHARED with gemini (E07-F01 R1/R12). Antigravity owns it as
-          # an in-repo entrypoint too, so remove it on antigravity deselection ONLY
-          # when gemini is also not selected — mirroring the gemini case. (Without
-          # this, deselecting an antigravity-only install would orphan GEMINI.md,
-          # since the gemini branch never runs when gemini was never a prior agent.)
-          if ! agent_selected gemini; then
-            remove_pointer GEMINI.md
-            echo "⚠️  removed deselected agent 'antigravity' glue: GEMINI.md harness block" >&2
-          fi
-          ;;
         codex)
-          # Symmetric to the antigravity case above (ADR-0003, E99-F09 R4): the skill unit
-          # is SHARED, so it survives Codex's deselection while Antigravity still claims it.
-          # Its `agents/openai.yaml` companion goes with it and is NOT reclaimed separately —
-          # a surviving, still-discoverable SKILL.md without the explicit-only policy would
-          # become implicitly invocable for anyone who runs Codex in the repo, which is the
-          # same reasoning the partial-unit reclaim below already applies to edited units.
-          if ! agent_selected antigravity; then
-            _cdx_removed="$(reclaim_skill_units "$HARNESS_OWNED_CMDS")"
-            [ -n "$_cdx_removed" ] \
-              && echo "⚠️  removed deselected agent 'codex' skills:$_cdx_removed" >&2
-          fi
+          # Preserve the explicit-only companion whenever an edited skill survives.
+          _cdx_removed="$(reclaim_skill_units "$HARNESS_OWNED_CMDS")"
+          [ -n "$_cdx_removed" ] \
+            && echo "⚠️  removed deselected agent 'codex' skills:$_cdx_removed" >&2
           reclaim_model_agents codex
           ;;
       esac
@@ -7189,23 +6985,9 @@ EOF
       rmdir "$TARGET/.opencode/command" 2>/dev/null || true
       rmdir "$TARGET/.opencode" 2>/dev/null || true
     fi
-    if agent_selected antigravity; then
-      # `.agents/` is a user-owned namespace ⇒ pristine-compare, never delete-by-name.
-      _prl_tmp="$(mktemp 2>/dev/null || mktemp -t harness-prl)"
-      gen_ag_persona pr-fixer "$PR_FIXER_DESC" "$_prl_tmp"
-      _prl_gone="$_prl_gone $(remove_if_pristine .agents/agents/pr-fixer.md "$_prl_tmp" antigravity)"
-      rm -f "$_prl_tmp"
-      for _prc in $HARNESS_PR_LOOP_CMDS; do
-        [ -f "$CMDDIR/$_prc.md" ] || continue
-        _prl_gone="$_prl_gone $(remove_if_pristine ".agents/workflows/$_prc.md" "$CMDDIR/$_prc.md" antigravity)"
-      done
-      rmdir "$TARGET/.agents/agents" 2>/dev/null || true
-      rmdir "$TARGET/.agents/workflows" 2>/dev/null || true
-      rmdir "$TARGET/.agents" 2>/dev/null || true
-    fi
-    # ANY claiming front-end, not just codex (ADR-0003, E99-F09 R6): the gated unit is
-    # shared, so an antigravity-only target would otherwise keep an orphaned
-    # `.agents/skills/sdd-pr-loop/` advertising a loop the operator turned off.
+    if agent_selected codex; then reclaim_codex_role pr-fixer; fi
+
+    # Reconcile the Codex skill under the same gate as the isolated native role.
     if skill_unit_claimed; then
       _prl_gone="$_prl_gone $(reclaim_skill_units "$HARNESS_PR_LOOP_CMDS")"
     fi
@@ -7265,7 +7047,13 @@ EOF
     echo
     echo "Next steps:"
     echo "  1. Edit .harness/specs/product.md for your product."
-    echo "  2. Open the repo in Claude Code and run  /sdd-next  to bootstrap"
+    for _advice_host in $SELECTED; do
+      case "$_advice_host" in
+        claude) echo "  2. Claude Code: open the repo and run /sdd-next" ;;
+        codex) echo '  2. Codex: open the repo, discover with /skills, and invoke $sdd-next' ;;
+        opencode) echo "  2. OpenCode: open the repo and run /sdd-next" ;;
+      esac
+    done
     echo "     (detect test/lint commands, draft your first epics)."
   fi
 
@@ -7292,7 +7080,8 @@ self_model_of() {
 # self_model <role> — the harvested pre-regeneration model for <role>, or nothing.
 # Consumed by the resolve_model self-mode guard.
 self_model() {
-  printf '%s\n' "${SELF_MODELS:-}" | awk -F'	' -v r="$1" '$1==r{print $2; exit}'
+  if [ "${2:-claude}" = codex ]; then _sm_map="${SELF_CODEX_MODELS:-}"; else _sm_map="${SELF_MODELS:-}"; fi
+  printf '%s\n' "$_sm_map" | awk -F'	' -v r="$1" '$1==r{print $2; exit}'
   return 0
 }
 
@@ -7303,7 +7092,7 @@ self_model() {
 # destroy it. The strip is anchored on `.harness/` exactly: `.pr-loop/` cache tokens
 # and every other dotted path survive untouched.
 self_transform() {
-  sed 's|\.harness/||g' | awk '
+  sed 's|\.harness/||g; s|resolve every relative path against \. |resolve every relative path against the repository root. |g; s|Run init.sh first|Run ./init.sh first|g' | awk '
     $0 == "hit. Resolve every relative path against ``." {
       print "hit. This is the harness **source-layout** copy: paths resolve from the repository root"
       print "(an installed consumer gets the same body with everything resolved against `.harness/`)."
@@ -7313,78 +7102,125 @@ self_transform() {
 }
 
 self_install() {
-  # 1. Harvest the committed shims' models BEFORE anything regenerates (R3). The root
-  # harness.config.yaml is the seed template every fresh install copies, so the source
-  # repo's tiering must live here, never there.
-  SELF_MODELS=""
-  for _si_r in $MODEL_ROLES; do
+  # Self supports the same Claude/Codex emitters; OpenCode source mode is deliberately absent.
+  _si_selection="${AGENTS_OVERRIDE:-claude,codex}"
+  if [ "$_si_selection" = all ]; then _si_selection="claude,codex"; fi
+  if [ "$_si_selection" = host ]; then
+    _si_selection="$(detect_host)"
+    [ -n "$_si_selection" ] || die "--self host undetected — select --agents=claude or --agents=codex"
+  fi
+  _si_keys="$(validate_csv "$_si_selection")"
+  for _si_key in $_si_keys; do
+    case "$_si_key" in claude|codex) ;; *) die "--self supports only claude,codex; '$_si_key' is unavailable in source mode" ;; esac
+  done
+  # Harvest independently. Only a safe bare Codex model ID is interpolated into TOML.
+  SELF_MODELS=""; SELF_CODEX_MODELS=""
+  for _si_r in $MODEL_ROLES pr-fixer; do
     _si_m="$(self_model_of "$SRC/.claude/agents/$_si_r.md")"
-    [ -n "$_si_m" ] || continue
     SELF_MODELS="$SELF_MODELS$_si_r	$_si_m
 "
+    _si_m="$(sed -n 's/^model = "\([A-Za-z0-9][A-Za-z0-9._:-]*\)"$/\1/p' "$SRC/.codex/agents/$_si_r.toml" 2>/dev/null | sed -n '1p')"
+    [ "$_si_m" != inherit ] || _si_m=""
+    SELF_CODEX_MODELS="$SELF_CODEX_MODELS$_si_r	$_si_m
+"
   done
-
-  # 2. Real install into a throwaway target, claude-only, prompts pre-answered so a TTY
-  # run never blocks. The pr-loop gate mirrors the repo's OWN config (R5) — via the
-  # explicit override so the temp target's seeded config carries it and every gated
-  # stage (command copy, pr-fixer shim, §6f reclamation) answers from the same place
-  # install_one always answers from.
   SELF_MODE=1
   _si_tmp="$(mktemp -d 2>/dev/null || mktemp -d -t harness-self)"
-  AGENTS_OVERRIDE="claude"
+  AGENTS_OVERRIDE="$(printf '%s' "$_si_keys" | tr '\n' ',')"
   BUILDER_BACKEND_OVERRIDE="${BUILDER_BACKEND_OVERRIDE:-in-session}"
-  if [ "$(_cfg_pr_loop_value "$SRC/harness.config.yaml" enabled)" = "true" ]; then
-    PR_LOOP_OVERRIDE="true"
+  if [ "$(_cfg_pr_loop_value "$SRC/harness.config.yaml" enabled)" = true ]; then
+    PR_LOOP_OVERRIDE=true
   else
-    PR_LOOP_OVERRIDE="false"
+    PR_LOOP_OVERRIDE=false
   fi
   echo "══ self mode → regenerating $SRC glue from a temp install ══"
   install_one "$_si_tmp"
-
-  # 3. Transform the temp target's claude glue into the source layout.
-  mkdir -p "$SRC/.claude/agents" "$SRC/.claude/commands"
-  _si_n=0
-  for _si_f in "$_si_tmp"/.claude/agents/*.md "$_si_tmp"/.claude/commands/*.md; do
+  mkdir -p "$_si_tmp/source"
+  for _si_f in "$_si_tmp"/.claude/agents/*.md "$_si_tmp"/.claude/commands/*.md "$_si_tmp"/.codex/agents/*.toml "$_si_tmp"/.agents/skills/*/SKILL.md "$_si_tmp"/.agents/skills/*/agents/openai.yaml; do
     [ -f "$_si_f" ] || continue
-    case "$_si_f" in
-      */agents/*)   _si_dst="$SRC/.claude/agents/$(basename "$_si_f")" ;;
-      *)            _si_dst="$SRC/.claude/commands/$(basename "$_si_f")" ;;
-    esac
-    self_transform < "$_si_f" > "$_si_dst"
-    _si_n=$((_si_n + 1))
+    _si_rel="${_si_f#"$_si_tmp"/}"
+    mkdir -p "$_si_tmp/source/$(dirname "$_si_rel")"
+    self_transform < "$_si_f" > "$_si_tmp/source/$_si_rel"
   done
-  # Gate-off reclamation mirrors install_one §6f: the two pr-loop names leave the
-  # source glue exactly when the temp target lacks them.
-  for _si_g in commands/sdd-pr-loop agents/pr-fixer; do
-    if [ ! -f "$_si_tmp/.claude/$_si_g.md" ] && [ -f "$SRC/.claude/$_si_g.md" ]; then
-      rm -f "$SRC/.claude/$_si_g.md"
-      info "self: removed gate-off pr-loop glue .claude/$_si_g.md"
-    fi
-  done
-
-  # 4. The arming verdict travels verbatim — write_escalation_arming already computed
-  # it from the harvested models via the resolve_model self-mode guard (R4).
   if [ -f "$_si_tmp/.harness/.escalation-arming" ]; then
-    cp "$_si_tmp/.harness/.escalation-arming" "$SRC/.escalation-arming"
-  elif [ -f "$SRC/.escalation-arming" ]; then
-    rm -f "$SRC/.escalation-arming"
-    info "self: escalation arming verdict reclaimed (no role resolves to a model)"
+    cp "$_si_tmp/.harness/.escalation-arming" "$_si_tmp/source/.escalation-arming"
   fi
-
-  # 5. Glue manifest (E26-F02): a cksum ledger of every regenerated file, consumed by
-  # init.sh's warn-only staleness line and the divergence-gate suite (E26-F02). The
-  # globs sort deterministically and the manifest never lists itself, so a second
-  # `--self` run leaves it byte-identical.
-  (
-    CDPATH= cd -- "$SRC" || exit 1
-    for _si_mf in .claude/agents/*.md .claude/commands/*.md .escalation-arming; do
-      [ -f "$_si_mf" ] || continue
-      cksum "$_si_mf"
-    done
-  ) > "$SRC/.claude/.glue-manifest"
-
+  # Reconcile the existing cksum manifest. Codex skills are atomic ownership units:
+  # a collision in either file preserves both, and cannot become a fresh ownership claim.
+  python3 - "$SRC" "$_si_tmp/source" <<'PYSELF'
+import os, pathlib, subprocess, sys
+root, staged = map(pathlib.Path, sys.argv[1:])
+manifest = pathlib.Path('.claude/.glue-manifest')
+def safe(rel):
+    path = root
+    for index, part in enumerate(rel.parts):
+        path /= part
+        if path.is_symlink() or (index < len(rel.parts)-1 and path.exists() and not path.is_dir()): return False
+    return True
+def checksum(path):
+    return subprocess.check_output(['cksum', str(path)], text=True).split()[:2]
+def warn(rel):
+    print(f'⚠️  self: {rel} is foreign, edited, or symlinked — left unchanged and unclaimed', file=sys.stderr)
+def allowed(rel):
+    v=str(rel)
+    return (v.startswith('.claude/agents/') and v.endswith('.md') or
+            v.startswith('.claude/commands/') and v.endswith('.md') or
+            v.startswith('.codex/agents/') and v.endswith('.toml') or
+            v.startswith('.agents/skills/sdd-') and (v.endswith('/SKILL.md') or v.endswith('/agents/openai.yaml')) or
+            v=='.escalation-arming') and '..' not in rel.parts and not rel.is_absolute()
+if not safe(manifest):
+    sys.exit('self: symlinked manifest component; source glue left unchanged')
+prior={}
+if (root/manifest).is_file():
+    for line in (root/manifest).read_text().splitlines():
+        cols=line.split(' ',2)
+        if len(cols)==3 and allowed(pathlib.Path(cols[2])): prior[pathlib.Path(cols[2])]=cols[:2]
+expected={p.relative_to(staged) for p in staged.rglob('*') if p.is_file()}
+units={}
+for rel in expected | prior.keys():
+    key=pathlib.Path(*rel.parts[:3]) if str(rel).startswith('.agents/skills/') else rel
+    units.setdefault(key,set()).add(rel)
+owned=[]
+for key, paths in sorted(units.items()):
+    wanted=paths & expected
+    protected=False
+    for rel in paths:
+        dst=root/rel
+        if not safe(rel): protected=True; continue
+        if not dst.exists(): continue
+        if not dst.is_file(): protected=True; continue
+        pristine=rel in prior and checksum(dst)==prior[rel]
+        # Exact current generated bytes also prove first-time adoption/model-only overrides.
+        identical=rel in wanted and dst.read_bytes()==(staged/rel).read_bytes()
+        if str(rel).startswith(".codex/") and rel not in prior and b"\nmodel = " in dst.read_bytes():
+            identical=False
+        # Preserve existing Claude model-only local routing while refreshing its generated body.
+        if str(rel).startswith('.claude/') and rel in wanted and rel in prior:
+            pristine=True
+        if not pristine and not identical: protected=True
+    if protected:
+        for rel in sorted(paths):
+            if (root/rel).exists() or not safe(rel): warn(rel)
+        continue
+    for rel in sorted(paths):
+        dst=root/rel
+        if rel in wanted:
+            dst.parent.mkdir(parents=True,exist_ok=True)
+            # No shared deterministic temp collision, symlink or file clobber.
+            import tempfile
+            fd,tmpname=tempfile.mkstemp(prefix='.harness-self-', dir=dst.parent)
+            with os.fdopen(fd,'wb') as f: f.write((staged/rel).read_bytes())
+            os.chmod(tmpname,0o644); os.replace(tmpname,dst)
+            owned.append(rel)
+        elif dst.is_file():
+            dst.unlink()
+            print(f'self: removed pristine deselected/gate-off {rel}')
+(root/manifest).parent.mkdir(parents=True,exist_ok=True)
+lines=[' '.join(checksum(root/p))+' '+str(p)+'\n' for p in sorted(owned)]
+(root/manifest).write_text(''.join(lines))
+PYSELF
   rm -rf "$_si_tmp"
-  ok "self: $_si_n glue files regenerated into $SRC/.claude/ (+ .escalation-arming, .glue-manifest)"
+  ok "self: selected Claude/Codex source glue reconciled (+ .escalation-arming, .glue-manifest)"
 }
 
 # ── manifest auto-population (append-only upsert, never clobbers entries) ──────

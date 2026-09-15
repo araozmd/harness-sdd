@@ -38,7 +38,7 @@ mk_target() {
   git -C "$_t" config user.email "test@harness.local"
   git -C "$_t" config user.name  "harness test"
   CODEX_HOME="$_t/.codex-home" HOME="$_t/.home" \
-    sh "$SRC/harness-install.sh" --agents=claude "$_t" >/dev/null 2>&1 \
+    sh "$SRC/harness-install.sh" --agents="${2:-claude}" "$_t" >/dev/null 2>&1 \
     || fail "harness-install.sh exited non-zero for $_t"
   [ -f "$_t/.harness/.harness-version" ] || fail "install produced no .harness-version in $_t"
   git -C "$_t" add -A
@@ -269,7 +269,7 @@ pass "recovery command reproduces the actual checked pathspec set (R3) [R3_recov
 # units, and calls `.agents/` itself user-owned. A blanket `.agents/` pathspec would fail
 # the mandatory gate on a project's own file there — halting all agent work, which is the
 # dominant risk this feature declared. Reported as P2 on PR #98 round 2.
-mk_target "$T/userglue"
+mk_target "$T/userglue" claude,codex
 mkdir -p "$T/userglue/.agents/skills/mine"
 printf '# our own skill, nothing to do with the harness\n' > "$T/userglue/.agents/skills/mine/SKILL.md"
 printf '# our own note\n' > "$T/userglue/.agents/notes.md"
@@ -277,9 +277,9 @@ run_gate "$T/userglue"
 [ "$GATE_RC" = "0" ] \
   || fail "R4-regression: a project's own files under the user-owned .agents/ tree failed the gate: $GATE_OUT"
 pass "project files in the user-owned .agents/ tree do not trip the guard (R4) [R4_user_owned_agents_tree_not_claimed]"
-# positive control: the sdd-* skill units in that same tree ARE harness-owned
-mkdir -p "$T/userglue/.agents/skills/sdd-drill"
-printf '# unlanded\n' > "$T/userglue/.agents/skills/sdd-drill/SKILL.md"
+# Positive control: a stamp-owned Codex unit in that tree remains mandatory.
+[ -f "$T/userglue/.harness/.codex-skills/sdd-drill/SKILL.md" ] || fail "R4 setup: active Codex skill stamp missing"
+printf '# unlanded\n' >> "$T/userglue/.agents/skills/sdd-drill/SKILL.md"
 run_gate "$T/userglue"
 [ "$GATE_RC" != "0" ] \
   || fail "R4-regression control: an unlanded .agents/skills/sdd-*/SKILL.md PASSED — the glob claims nothing"

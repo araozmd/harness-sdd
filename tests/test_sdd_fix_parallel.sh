@@ -9,7 +9,7 @@ set -eu
 # installer run now stamps claude only. This suite's fixtures predate the flip and
 # assert artifacts across the full matrix; pin the pre-flip selection explicitly
 # (an explicit --agents in any call still wins over this env seed).
-export HARNESS_AGENTS="claude,gemini,opencode,antigravity,codex"
+export HARNESS_AGENTS="claude,codex,opencode"
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"

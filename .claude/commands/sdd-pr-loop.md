@@ -625,11 +625,12 @@ At the default `max_rounds: 4` that is rounds 1–2 per-comment, round 3 combine
 escalation, round 4 `needs-human`. A `max_rounds` below `3` simply has no per-comment
 fixer rounds.
 
-**Front-ends without a `pr-fixer` sub-agent** (codex, gemini) do not spawn one: apply each
-blocking comment's fix **in-session**, under the same discipline — one `acted_append` call,
-one comment, one targeted fix, one commit, one `fix-<comment_id>.md` note — then push once at
-the end of the round. The absence of a sub-agent changes who writes the code; it does not
-change what the round records about the work it did.
+**Native role dispatch:** Claude, Codex, and OpenCode use the installed `pr-fixer`
+role in a fresh context through the host's available named-role delegation controls.
+Pass only the comment inputs and per-comment handoff file; never forward chat history.
+If the host cannot start a fresh role, STOP and report the limitation and handoff path;
+do not impersonate an isolated fixer in the coordinator. Preserve one `acted_append`,
+one targeted fix, one commit and one `fix-<comment_id>.md` note per comment.
 
 **Always write the worker file for this round** so the handover summary stays
 reconstructible from cache:

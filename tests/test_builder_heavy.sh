@@ -21,7 +21,7 @@ export CODEX_HOME="$T/codex-home"
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
-ALL=claude,gemini,opencode,antigravity,codex
+ALL=claude,codex,opencode
 
 mk() { _d="$T/$1"; mkdir -p "$_d"; printf '%s\n' "$_d"; }
 cfg() { printf '%s\n' "$1/.harness/harness.config.yaml"; }
@@ -160,8 +160,6 @@ every_front_end_emits_builder_heavy() {
     || fail "R4: claude emitted no builder-heavy shim"
   [ -f "$_t/.codex/agents/builder-heavy.toml" ] \
     || fail "R4: codex emitted no builder-heavy role definition"
-  [ -f "$_t/.agents/agents/builder-heavy.md" ] \
-    || fail "R4: antigravity emitted no builder-heavy persona"
   grep -q '"builder-heavy"' "$_t/opencode.json" \
     || fail "R4: opencode.json has no builder-heavy member"
   # Claude's shim must carry the SAME tool list as builder — ADR-0002 forbids a behavioral
@@ -169,13 +167,7 @@ every_front_end_emits_builder_heavy() {
   _bt="$(grep '^tools:' "$_t/.claude/agents/builder.md")"
   _ht="$(grep '^tools:' "$_t/.claude/agents/builder-heavy.md")"
   [ "$_bt" = "$_ht" ] || fail "R4/ADR-0002: builder-heavy tools ($_ht) differ from builder ($_bt)"
-  # Gemini is conditional on a concrete model — assert it appears once one resolves.
-  [ -d "$_t/.gemini/agents" ] && fail "R4: all-inherit created .gemini/agents/"
-  set_tier "$_t" builder-heavy cheap
-  run "$_t" "$ALL"
-  [ -f "$_t/.gemini/agents/builder-heavy.md" ] \
-    || fail "R4: gemini emitted no builder-heavy definition once a tier resolved"
-  pass "all five front-ends emit builder-heavy by name; claude's tool list matches builder (R4)"
+  pass "all three front-ends emit builder-heavy by name; claude's tool list matches builder (R4)"
 }
 
 # ── R9: the two builders resolve independently ──────────────────────────────────
@@ -292,17 +284,11 @@ deselect_reclaims_builder_heavy() {
   set_tier "$_t" builder-heavy cheap
   run "$_t" "$ALL"
   [ -f "$_t/.codex/agents/builder-heavy.toml" ] || fail "R7: setup — no codex artifact"
-  [ -f "$_t/.gemini/agents/builder-heavy.md" ]  || fail "R7: setup — no gemini artifact"
-  [ -f "$_t/.agents/agents/builder-heavy.md" ]  || fail "R7: setup — no antigravity persona"
   [ -f "$_t/.claude/agents/builder-heavy.md" ]  || fail "R7: setup — no claude shim"
 
   run_err "$_t" claude >/dev/null 2>&1 || true
   [ -f "$_t/.codex/agents/builder-heavy.toml" ] \
     && fail "R7: deselecting codex left builder-heavy.toml behind"
-  [ -f "$_t/.gemini/agents/builder-heavy.md" ] \
-    && fail "R7: deselecting gemini left builder-heavy.md behind"
-  [ -f "$_t/.agents/agents/builder-heavy.md" ] \
-    && fail "R7: deselecting antigravity left the builder-heavy persona behind"
   [ -f "$_t/.harness/.model-agents/codex/builder-heavy.toml" ] \
     && fail "R7: the codex builder-heavy ownership stamp outlived its artifact"
 

@@ -2,7 +2,9 @@
 
 The harness is portable: it installs into any repo as a self-contained `.harness/`
 directory plus a few thin pointers. Install and upgrade are the **same idempotent
-command**.
+command**. Supported front ends, in priority order, are **Claude Code**,
+**Codex**, and **OpenCode**. Gemini CLI and Antigravity are retired; see
+[legacy upgrades](#retiring-gemini-and-antigravity).
 
 ## Prerequisites
 
@@ -27,22 +29,20 @@ gates (including OpenCode concurrency and opt-in PR-loop glue).
 
 ```
 your-project/
-├── CLAUDE.md / AGENTS.md / GEMINI.md   # your content kept; a marked harness block appended
+├── AGENTS.md / CLAUDE.md              # shared / selected Claude pointer; your content kept
 ├── .claude/agents/*  .claude/commands/{sdd-next,sdd-new,sdd-plan,sdd-drill,sdd-fix,sdd-fix-parallel}.md
 ├── .claude/commands/sdd-pr-loop.md  .claude/agents/pr-fixer.md   # only while pr_loop.enabled (opt-in, seeded false)
 ├── .opencode/command/*.md              # selected OpenCode commands; fix-parallel needs capability/override
 ├── .opencode/agent/pr-fixer.md         # only while pr_loop.enabled (OpenCode file-based sub-agent)
 ├── opencode.json                       # created only if absent (re-stamped only while pristine)
-├── .agents/{rules,agents,workflows}/   # Antigravity glue → resolves to .harness/ (regenerated each run)
-├── .agents/skills/sdd-*/                # SHARED repository-local $sdd-* skill units (Codex + Antigravity)
+├── .agents/skills/sdd-*/                # repository-local Codex $sdd-* skill units
 │   ├── SKILL.md                         # adapter + canonical workflow
 │   └── agents/openai.yaml               # explicit-only invocation policy
-├── .gemini/agents/*.md                 # per-role model routing only — created ONLY when a tier resolves
-├── .codex/agents/*.toml                # seven selected Codex roles; model optional, never ~/.codex
+├── .codex/agents/*.toml                # seven standard Codex roles + gated pr-fixer; model optional
 └── .harness/                           # the whole harness body
     ├── .harness-version  manifest.txt
     ├── .opencode.stamp                  # byte copy of the last opencode.json the installer wrote
-    ├── .model-agents/                   # byte copies of the last .gemini/.codex per-role files (ownership stamps)
+    ├── .model-agents/                   # last-written Codex role files; historical stamp path retained
     ├── AGENTS.md agents/ docs/ store/ tools/ specs/_templates/ init.sh harness.config.yaml
     ├── init.project.sh                  # YOURS — fast project checks, seeded once
     ├── .gitignore                       # seeded: keeps the local-only telemetry log out of VCS
@@ -63,41 +63,65 @@ Existing entrypoint prose is preserved outside the managed
 default keys). Templates and `specs/glossary.md` belong to the refreshed harness body.
 Generated glue follows its front-end ownership rules; see [Layout & ownership](#layout--ownership).
 
-### Shared skill units and legacy Codex prompt migration
+### Codex skill units and legacy prompt migration
 
-Workflow discovery through `.agents/skills/<name>/SKILL.md` is repository-local and is
-read by **both Codex and Antigravity** — Antigravity discovers workspace skills at that
-exact path, and the unit the harness generates already satisfies its `name` +
-`description` frontmatter contract. So the harness writes **one shared unit per command**
-rather than one per front-end (see `specs/adr/0003-one-shared-skill-unit-per-command.md`).
+Selecting **Codex** installs `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`,
+`$sdd-fix`, and `$sdd-fix-parallel` under `.agents/skills/`; `$sdd-pr-loop` follows
+the opt-in gate. Each is an atomic two-file ownership unit: `SKILL.md` contains
+the workflow plus an adapter mapping text accompanying the explicit `$skill`
+mention to `$ARGUMENTS`, and `agents/openai.yaml` sets
+`policy.allow_implicit_invocation: false`. For example, enter
+`$sdd-new Add a settings page`, then `$sdd-next`. `/skills` provides discovery.
+The slash names elsewhere in this document are canonical Claude/OpenCode names;
+Codex continuations use the corresponding `$sdd-*` invocation.
 
-Selecting **either** front-end installs `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`,
-`$sdd-fix`, and `$sdd-fix-parallel` under `.agents/skills/`; `$sdd-pr-loop` follows the
-opt-in gate. Deselecting one front-end while the other is still selected leaves the units
-in place — they are reclaimed only when the **last** claiming front-end goes. Each skill is
-a two-file ownership unit: `SKILL.md` carries the canonical workflow plus an adapter mapping text
-accompanying the explicit `$skill` mention to `$ARGUMENTS`, while `agents/openai.yaml`
-sets `policy.allow_implicit_invocation: false`. Current installation does not read
-`HOME` or `CODEX_HOME` to create workflow glue and never writes or overwrites
-`${CODEX_HOME:-$HOME/.codex}/prompts/sdd-*.md`.
+Last-written copies under `.harness/.codex-skills/` protect both files together.
+Selected installs, gate-off and deselection preserve foreign, edited or
+symlinked units with a diagnostic. Codex role TOMLs use the matching protection
+under `.harness/.model-agents/codex/`. Historical stamp directory names remain
+unchanged, preserving prior ownership evidence. Although ADR-0003 described
+Antigravity as a second claimant, current emission has only the Codex claimant.
+Retirement leaves the units intact when Codex remains selected; otherwise only
+proven pristine units are reclaimed, with edited units and companions preserved.
 
-The `agents/openai.yaml` companion is written wherever a unit is written, including when
-`codex` is not selected: Codex discovers the directory itself, so a `SKILL.md` without the
-explicit-only policy would be implicitly invocable for anyone who runs Codex in the repo.
+Current installation does not use `HOME` or `CODEX_HOME` to create workflow glue
+and never writes global `${CODEX_HOME:-$HOME/.codex}/prompts/sdd-*.md` files.
+The old global resolver remains for migration only. Ungated legacy prompts are
+preserved because their cross-target ownership is unknown. Only a byte-pristine
+legacy `sdd-pr-loop.md` with a readable ownership ledger proving no live owners
+is reclaimable. Missing, unreadable or live-owner evidence preserves the prompt.
 
-Last-written copies under `.harness/.codex-skills/` let a selected install update both
-skill files only when the live unit is absent, current-generated, or still matches the
-previous stamp. That directory keeps its historical name on purpose — it now stamps shared
-units, and renaming it would orphan the ownership proof on every installed target. The same ownership rule governs gate-off and deselection, so foreign or
-edited units survive intact. Codex role TOMLs use their existing last-written stamps
-under `.harness/.model-agents/codex/` for the same protection.
+### Retiring Gemini and Antigravity
 
-The old global resolver is retained only for upgrade migration. Ungated legacy prompts
-are always preserved and diagnosed because there is no cross-target ownership ledger
-that can prove another pre-0.48 repository no longer relies on them. Only
-`sdd-pr-loop.md` is reclaimable: its bytes must match the canonical generated legacy
-command and its readable ownership ledger must prove that no live target still claims
-the prompt. Missing, unreadable, or live-owner state fails safe.
+The accepted selectors are `claude`, `codex`, and `opencode`; `--agents=all`
+expands to those three. Explicit `gemini` or `antigravity` in `--agents`,
+`HARNESS_AGENTS`, or `HARNESS_HOST_AGENT` fails before target writes and names
+supported replacements. Ambient retired-host session markers are ignored.
+
+An upgrade without a new explicit selection filters retired keys from the
+recorded `.harness/.agents` and preserves the supported survivors with a notice.
+For example, `gemini,antigravity,codex` becomes `codex`. When no supported key
+survives, the upgrade stops before mutation; choose the desired replacement:
+
+```bash
+./harness-install.sh --agents=codex /path/to/your-project
+# Or choose --agents=claude, --agents=opencode, or a supported CSV.
+```
+
+A version-stamped legacy install without `.harness/.agents` uses the surviving
+historical baseline `claude,opencode`; it does not infer prior Codex or global
+prompt ownership. An orphan selection file without a version stamp grants no
+legacy removal authority.
+
+Cleanup uses prior ownership evidence before replacing the old body. It removes
+only proven pristine Gemini roles and known Antigravity rules/personas/workflows,
+including gated legacy PR-loop artifacts, and the exact managed GEMINI pointer
+block. Adjacent user text, unrelated siblings, edited or foreign files, symlinks,
+and files with missing or ambiguous proof are preserved with path-specific
+warnings. It never recursively deletes `.agents/` or `.gemini/`. Preserved
+retired glue is excluded from active harness drift ownership. Review the
+warnings and decide separately whether to retain your custom legacy integration.
+The [v0.78.1 baseline](BASELINE-0.78.1.md) remains the historical support record.
 
 ## Bootstrap (first run)
 
@@ -118,7 +142,7 @@ you to run `/sdd-next` to spec and build it. The installer ships this command in
 project alongside `/sdd-next`.
 
 The installer also generates `/sdd-fix-parallel` from one canonical command body for
-Claude, OpenCode, Antigravity, and the Codex `$sdd-fix-parallel` repository skill. It resolves the portable
+Claude, OpenCode, and the Codex `$sdd-fix-parallel` repository skill. It resolves the portable
 Fixer and targeted Orchestrator contracts from `.harness/`, and its filename is
 registry-owned for safe front-end cleanup. Fresh config includes
 `fix_lane.max_parallel: 3` and extension-only `fix_lane.shared_paths: []`. The
@@ -135,13 +159,14 @@ delegate backend fails before manifest/provision/claim and points to serial
 > installer to turn the loop on. Only the literal `true` enables it — an absent block,
 > an absent key, an empty or malformed value all mean off.
 
-The installer also generates **`/sdd-pr-loop`** — `$sdd-pr-loop` in Codex — from one
-canonical body into `.claude/commands/`, `.opencode/command/`, `.agents/workflows/`,
-and `.agents/skills/sdd-pr-loop/SKILL.md`, plus a `pr-fixer` sub-agent for Claude
-(`.claude/agents/pr-fixer.md`), OpenCode (`.opencode/agent/pr-fixer.md`) and Antigravity
-(`.agents/agents/pr-fixer.md`). All of it points at the canonical
-`.harness/agents/pr-fixer.md`; no role body is duplicated, and **no** `pr-fixer` artifact
-is created for the codex or gemini front-ends (those apply fixes in-session).
+The installer generates **`/sdd-pr-loop`** for Claude/OpenCode and
+**`$sdd-pr-loop`** for Codex, plus each selected host’s `pr-fixer` role:
+`.claude/agents/pr-fixer.md`, `.opencode/agent/pr-fixer.md`, or
+`.codex/agents/pr-fixer.toml`. Each points at the canonical
+`.harness/agents/pr-fixer.md`. Codex has seven base roles, or eight while this
+gate is on. Each blocking comment is handed to a fresh native PR-fixer context
+through files. If the host cannot start that role, it must report the limitation
+and handoff path instead of claiming an isolated fix was performed.
 
 **Preconditions — the loop only works with all three:** the **Codex GitHub App** installed
 on the target repository, an **authed `gh`**, and **`jq`** on `PATH`. The watcher's
@@ -192,181 +217,106 @@ cache lives at `.harness/.pr-loop/<pr>/round-<n>/` and is gitignored by the seed
 
 ## Host detection — `--agents=host` (opt-in)
 
-If you work in exactly one coding-agent CLI, you can ask the installer to stamp *that*
-front-end's glue and nothing else, without naming it:
+Use `host` to select the supported coding-agent CLI running the installer:
 
 ```bash
 ./harness-install.sh --agents=host /path/to/your-project
 HARNESS_AGENTS=host ./harness-install.sh /path/to/your-project
 ```
 
-`host` is a **resolution mode, not a sixth agent key**. It never appears in the toggle
-list, it is never written to `.harness/.agents` (that file holds concrete keys only), and
-it must be the **entire** value — `--agents=host,gemini` is rejected with a non-zero exit
-and changes nothing.
-
-**Non-Claude front-ends are parked by default (E25-F01).** On a **fresh** target —
-no `.harness/.harness-version` yet — every no-selection path **with an undetected
-host** resolves to **`claude` only**: the scripted no-override run, the
-undetected-`host` fallback, and the interactive picker's pre-checked baseline (one
-keystroke re-adds any front-end before confirming). When the host IS detected, the
-interactive baseline is that detected front-end, exactly as below. This is a default flip, not a removal: every key stays legal via an
-explicit `--agents=<csv>` / `HARNESS_AGENTS` opt-in (`codex`, `gemini`, `opencode`,
-`antigravity`), and an **existing** install's recorded selection is preserved exactly
-as before. The interactive first install still starts from the detected host — see
-[The fresh-install default](#the-fresh-install-default) below.
+`host` is a resolution mode, not an agent key. It must be the whole value;
+`--agents=host,codex` fails before writes. The recorded `.harness/.agents` holds
+concrete keys only. Explicit `--agents=<csv>` takes precedence over
+`HARNESS_AGENTS`; accepted keys are `claude`, `codex`, and `opencode`.
 
 ### Which markers are trusted
 
-Detection reads **session markers** only — variables a CLI *injects into the environment
-of the processes it launches*. It deliberately ignores ambient configuration and
-credentials: `CODEX_HOME`, `HOME`, `TERM_PROGRAM` and anything ending `_API_KEY`
-(`GEMINI_API_KEY`, `OPENCODE_API_KEY`, `ANTHROPIC_API_KEY`) are forbidden by rule. Those
-prove you *use* a tool somewhere; they never prove this install was launched from it.
+Detection uses session markers injected by a supported CLI. Ambient configuration
+and credentials such as `CODEX_HOME`, `HOME`, `TERM_PROGRAM` and `*_API_KEY`
+variables do not identify the host.
 
-| Front-end | Marker(s) | Verified on |
+| Front-end | Marker(s) | Observed baseline |
 |---|---|---|
 | `claude` | `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT` | Claude Code 2.1.220 |
-| `codex` | `CODEX_THREAD_ID` | codex-cli 0.145.0 (`codex exec`, sandboxed and not) |
-| `opencode` | `OPENCODE`, `OPENCODE_PID` | opencode 1.18.5 (`opencode run`) |
-| `antigravity` | `ANTIGRAVITY_AGENT`, `ANTIGRAVITY_CONVERSATION_ID` | agy 1.1.8 (`agy -p`) |
-| `gemini` | *(none — undetectable)* | no marker verified |
+| `codex` | `CODEX_THREAD_ID` | codex-cli 0.145.0 |
+| `opencode` | `OPENCODE`, `OPENCODE_PID` | opencode 1.18.5 |
 
-Every row above was observed empirically in the delta between a plain login shell and a
-shell the CLI itself spawned. A front-end with no verified marker carries **no row** and
-is simply undetectable — that is an accepted outcome, not a bug, and it degrades to the
-fallback below. **A miss is normal operation and never fails the install.**
-
-Two more rules keep detection honest:
-
-- A marker set to the **empty string** does not count as present.
-- If markers for **two or more** front-ends are present at once — which is exactly what
-  nesting looks like, one CLI shelling out to another — the host is **undetected**, with a
-  diagnostic on stderr naming the candidates. There is no way to tell inner from outer
-  from the environment, so the installer refuses to guess rather than picking a winner.
+Empty markers do not count. Multiple supported hosts produce an ambiguity
+warning and an undetected result. Retired-host markers are ignored. A detection
+miss uses the baseline below and is normal operation.
 
 ### Declaring the host yourself — `HARNESS_HOST_AGENT`
 
-If your front-end is undetectable (or you simply prefer to be explicit), declare it once,
-e.g. in your shell profile:
-
 ```bash
-export HARNESS_HOST_AGENT=gemini
+HARNESS_HOST_AGENT=codex ./harness-install.sh --agents=host /path/to/your-project
 ```
 
-It takes exactly one known agent key and wins over the marker table. Any other value — an
-unknown token, several tokens, or the literal `host` — prints one warning naming the value
-and is then ignored; it never aborts the install. On its own it changes nothing: it only
-feeds `host` resolution, so a run that never passes `host` is unaffected.
+A supported explicit host wins over markers. An unknown value is warned about
+and ignored; explicit retired values `gemini` and `antigravity` are rejected
+before target writes. The declaration feeds host resolution rather than
+replacing an explicit supported CSV selection.
 
-### What happens when the host is undetected — and why the two cases differ
+### What happens when the host is undetected
 
 | Situation | Resolved set |
 |---|---|
-| Detected | that front-end alone |
-| Undetected, **no existing install** in the target | **Claude only** |
-| Undetected, target **already carries an install** | its **persisted `.harness/.agents`** set (ALL if a pre-E08 install persisted none) |
+| Supported host detected with `--agents=host` | That front-end alone |
+| Undetected, fresh target | Claude only |
+| Undetected, version-stamped target with saved selection | Supported survivors of `.harness/.agents` |
+| Undetected, version-stamped target without saved selection | `claude,opencode` |
 
-An undetected explicit `--agents=host` run uses the fresh Claude-only default or
-preserves the existing selection. A detected host selects that front-end alone, even
-on an upgrade. The installer reports which path it used. This explicit-host behavior
-differs from a plain unattended upgrade without an override, which selects all five.
+A detected explicit-host run can narrow an existing install. With no explicit
+selection, upgrades preserve supported recorded keys; retired-only recorded
+selections stop for an explicit replacement. See [migration](#retiring-gemini-and-antigravity).
 
 ### The fresh-install default
 
-You do not have to pass `host` on a **first, interactive install**. When you run the
-installer from a terminal inside a CLI it can detect, the picker opens with **that
-front-end pre-checked and the others unchecked**:
+On a target with no existing install, the interactive picker pre-checks the detected supported
+host, or Claude alone when undetected. Its priority order is:
 
-```
+```text
 [x] claude
-[ ] gemini
-[ ] opencode
-[ ] antigravity
 [ ] codex
+[ ] opencode
 ```
 
-When the host cannot be detected, the fresh baseline is `claude` alone — the
-parked-by-default fresh-install baseline (E25-F01).
-
-It is a **pre-check, not a restriction**: the list is already on screen, so spacebar adds
-any other front-end before you confirm. Confirming as-is stamps the detected front-end's
-glue (plus the always-written `AGENTS.md`) and nothing else.
-
-The interactive picker has three starting states:
-
-| Target | Interactive pre-check |
-|---|---|
-| **No existing install**, host detected | **that front-end alone** |
-| **No existing install**, host undetected | **Claude only** |
-| **Existing install** (any `.harness/.harness-version`) | its persisted `.harness/.agents` selection — **all** front-ends if it predates that file |
-
-Three limits are deliberate:
-
-- **An interactive picker upgrade is never narrowed by detection.** "Existing install" means the target
-  carries `.harness/.harness-version`. A pre-E08 install has every front-end stamped and
-  no persisted selection, so it pre-checks everything: pressing Enter on an upgrade can
-  never delete glue you are using.
-- **Fresh and undetected means Claude only.** Other front-ends remain selectable.
-- **No TTY and no override has its own rule.** A fresh target selects Claude only; an
-  existing install selects all five front-ends. Use explicit `--agents=<csv>` in
-  repeatable install/upgrade scripts to keep the intended selection.
-
-The pre-check is the detected front-end **alone**, never unioned with `claude`: a Gemini
-CLI or OpenCode user should not have to delete `CLAUDE.md` they never asked for.
+You can add or remove selections before confirming. Interactive upgrades start
+from the supported saved `.harness/.agents` selection, irrespective of the currently detected host.
+Fresh unattended installs with no override select Claude only; unattended
+upgrades preserve surviving saved keys. `--agents=all` explicitly selects all
+three. A legacy install without a selection file starts from `claude,opencode`.
 
 ### Seeing what it would do — `--print-agents`
 
+With no existing install and no detected host, the fallback is Claude only.
+An existing install retains its supported persisted selection.
+
 ```bash
 ./harness-install.sh --print-agents /path/to/your-project
-host=claude
-baseline=claude
+# host=claude
+# baseline=claude
 ```
 
-Two lines on stdout, exit 0, **nothing written anywhere**. `host=` is the detected key
-(empty when undetected) and `baseline=` is the set that would be **pre-checked** for that
-target — the same helper the picker seeds from, so the preview cannot disagree with what
-the picker will offer you. On an undetected fresh target it prints `claude` (the
-parked-by-default fresh baseline, E25-F01); on an installed target it prints that
-target's persisted selection. It is single-target only:
-combined with `--umbrella` it exits non-zero with a usage message.
-
-`baseline=` answers "what will the picker check?", which is the same set an **undetected**
-`--agents=host` run falls back to — but on an *existing* install it is not what a
-**detected** `--agents=host` run would select. Reading a `gemini` install from inside
-Claude Code, `host=claude` and `baseline=gemini`: the picker would offer `gemini`, while
-`--agents=host` would narrow the install to `claude`. The two lines are separate answers on
-purpose.
+This read-only preview reports the detected host and the picker’s baseline.
+They can differ: inside Claude, a saved Codex installation reports `host=claude`
+and `baseline=codex`; a detected `--agents=host` would select Claude, while the
+picker starts with Codex. The preview is single-target only and rejects
+`--umbrella`.
 
 ### Changing the selection later
 
-**Re-running the installer is the supported way to change which front-ends are stamped.**
-There is no separate reconfiguration command — the installer *is* the config UI:
+Re-run the installer to add selected glue or remove deselected pristine glue, using
+the picker or an explicit selection:
 
 ```bash
-cd harness-sdd            # your harness checkout
-./harness-install.sh /path/to/your-project
+./harness-install.sh --agents=claude,codex /path/to/your-project
+./harness-install.sh --agents=host /path/to/your-project
 ```
 
-Run interactively, it re-opens the picker **pre-checked from the project's saved
-`.harness/.agents`** and applies the diff both ways:
-
-- **Added** front-ends get their glue stamped on the spot.
-- **Removed** (deselected) front-ends have their harness-owned, regenerated glue
-  **deleted**, with a warning naming each file. The shared `AGENTS.md` entrypoint and the
-  `.harness/` body are never touched, and hand-edited files (e.g. an `opencode.json` you
-  changed) are left in place with a warning instead of being destroyed.
-
-The same thing works non-interactively when you already know the answer — the override
-always wins, and it is the form to use in a script:
-
-```bash
-./harness-install.sh --agents=claude,gemini /path/to/your-project   # exactly these two
-./harness-install.sh --agents=host /path/to/your-project            # just this session's CLI
-```
-
-Either way the resolved set is persisted back to `.harness/.agents`, so the next re-run
-starts from what you chose.
+Newly selected integrations are emitted and deselected glue is reclaimed under
+its ownership guards. Edited or foreign Codex units/roles and a customized
+`opencode.json` survive with warnings. The shared `AGENTS.md` pointer and harness
+body remain installed. The resolved selection is saved to `.harness/.agents`.
 
 ## OpenCode parallel-fix support (`/sdd-fix-parallel`)
 
@@ -419,8 +369,9 @@ version: asking a CLI its version means running it.
   "workers": [
     {"key": "claude", "command": "claude",
      "capabilities": ["harness-selected", "host-detectable", "non-interactive"]},
-    {"key": "gemini", "command": "gemini", "capabilities": []},
-    {"key": "antigravity", "command": "agy",
+    {"key": "codex", "command": "codex",
+     "capabilities": ["host-detectable", "non-interactive"]},
+    {"key": "opencode", "command": "opencode",
      "capabilities": ["host-detectable", "non-interactive"]}
   ]
 }
@@ -432,14 +383,14 @@ version: asking a CLI its version means running it.
 | `capability_vocabulary` | the **closed** set of tags, declared alongside the data. Under `schema: 1` it is exactly these three, always in full — never just the tags this machine happened to produce |
 | `workers[]` | one entry per agent key whose command resolved on `PATH`, in the installer's own key order |
 | `workers[].key` | the agent key — the same token `--agents` and `.harness/.agents` use |
-| `workers[].command` | the invocation name that resolved (note `agy` for `antigravity`) |
+| `workers[].command` | the supported invocation name that resolved |
 | `workers[].capabilities` | a sorted subset of the vocabulary |
 
 | tag | means | the evidence the harness already holds |
 |---|---|---|
 | `harness-selected` | this install selected the CLI as a harness front-end | the key is in the resolved selection |
 | `host-detectable` | `--agents=host` can recognize a session this CLI launched | the key has a host-marker row |
-| `non-interactive` | the CLI has a scriptable, prompt-in entrypoint | a recorded, verified entrypoint (`claude -p`, `codex exec`, `opencode run`, `agy -p`) |
+| `non-interactive` | the CLI has a scriptable, prompt-in entrypoint | a recorded, verified entrypoint (`claude -p`, `codex exec`, `opencode run`) |
 
 Every tag points at a fact the harness can show you. There is deliberately **no** taxonomy
 of what each CLI is *good at* — that would be the harness asserting things it has not
@@ -539,7 +490,7 @@ legal values are `true` and `false`:
 | Value | Meaning |
 |---|---|
 | `false` | **Default, opt-in.** No `/sdd-pr-loop` glue is stamped anywhere — no command, no `pr-fixer` sub-agent, no global Codex prompt. |
-| `true` | Emits PR-loop glue for selected front-ends and their supported fixer surfaces. Codex retains seven standard roles and can use the in-session fixer fallback. Answering `1` later reclaims harness-owned gated glue. |
+| `true` | Emits PR-loop glue for selected front-ends and their supported fixer surfaces. Codex adds its eighth native `pr-fixer` role with fresh-context dispatch. Answering `1` later reclaims harness-owned gated glue. |
 
 **The prompt does not change the default.** Pressing Enter keeps whatever the target
 already has — `false` on a fresh install, and on a re-run the value currently in the file.
@@ -637,24 +588,18 @@ records, and **fails the gate** when they do not:
 It prints the drifted paths (capped at 10) and the `git status` command that lists the
 rest. The fix is normally just to commit the upgrade.
 
-**What counts as harness-owned:** everything under `.harness/` *except* the project-owned
-files the installer seeds once and never clobbers (`harness.config.yaml`,
-`init.project.sh`, `specs/product.md`, `specs/epics/`, `state/`, `progress/`), plus the
-generated front-end glue at the project root — `.claude/agents/`, `.claude/commands/`,
-`.opencode/command/`, `.opencode/agent/pr-fixer.md`, `opencode.json`, and, inside the
-**user-owned** `.agents/` tree, only the parts the installer regenerates:
-`.agents/rules/`, `.agents/agents/`, `.agents/workflows/` and the `.agents/skills/sdd-*/`
-units.
+**What counts as harness-owned:** the installed body under `.harness/`, excluding
+project-owned config, `init.project.sh`, product/epic specs, state and progress,
+plus proven active generated glue for the selected supported front ends.
+This includes managed Claude files, OpenCode files and stamped Codex roles and
+skill units. `.agents/` and `.codex/agents/` are shared namespaces: unrelated
+files are not claimed. Codex roles use per-file evidence under
+`.harness/.model-agents/codex/`; skill units use `.harness/.codex-skills/`.
 
-`.codex/agents/` and `.gemini/agents/` are namespaces you **share** with the installer — it
-preserves role files it did not write. So they are claimed **per file**, from the
-installer's own ownership ledger at `.harness/.model-agents/<tool>/`: a role file the
-installer last wrote is checked; your own `project-role.toml` beside it is not. No ledger
-means nothing is claimed for that tool.
-
-Your own edits to project-owned files — and your own files elsewhere under `.agents/`,
-`.codex/agents/` or `.gemini/agents/` — never trip it. That is the whole point of the
-split.
+After retirement, preserved Gemini or Antigravity glue is excluded from active
+drift ownership. A migration preservation warning therefore does not turn a
+custom retired file into a mandatory init failure. Your unrelated role files
+and siblings remain outside the installer’s ownership claims.
 
 **When the check does not apply**, it stays quiet rather than failing:
 
@@ -792,7 +737,7 @@ the coordinator itself are untouched.
 
 `inherit` compiles to **key omission** on every front-end. The literal string `inherit`
 is never written anywhere: it is unknown on Codex and a hard error on OpenCode, while an
-absent key means "use the session model" on all five.
+absent key means "use the session model" on all three supported front ends.
 
 ### `builder-heavy` — the escalation tier
 
@@ -802,11 +747,10 @@ prompt — and differs only in the tier it resolves to. That lets you retry a ta
 standard Builder is struggling with on a more capable model **without** paying that cost
 on every easy task, which is what raising `models.builder` would do.
 
-Escalation is therefore a pure **routing** decision: something picks a role name, and the
-front-end's generated agent definition supplies the model. That is what makes it work
-everywhere — Codex, OpenCode and Gemini read the model from the generated definition and
-cannot override it per spawn, so a per-spawn override would silently do nothing on three
-of the five front-ends. See [ADR-0002](../specs/adr/0002-builder-heavy-is-a-tier-not-a-second-prompt.md).
+Escalation selects a role name whose generated definition supplies the model.
+Codex and OpenCode use their native model fields; Claude uses model frontmatter.
+The two Builder names keep that choice explicit across supported hosts. See
+[ADR-0002](../specs/adr/0002-builder-heavy-is-a-tier-not-a-second-prompt.md).
 
 Two things worth knowing:
 
@@ -835,16 +779,15 @@ a `builder-heavy:` line. Nothing breaks: an unlisted role falls through to
 
 ### What each tier stamps
 
-| tier | claude | antigravity | gemini | codex | opencode |
-|---|---|---|---|---|---|
-| `reasoning` | `opus` | `pro` | `pro` | *(pin required)* | *(pin required)* |
-| `standard` | `sonnet` | `pro` | `pro` | *(pin required)* | *(pin required)* |
-| `cheap` | `haiku` | `flash` | `flash` | *(pin required)* | *(pin required)* |
-| `inherit` | *omitted* | *omitted* | *omitted* | *omitted* | *omitted* |
+| tier | claude | codex | opencode |
+|---|---|---|---|
+| `reasoning` | `opus` | *(pin required)* | *(pin required)* |
+| `standard` | `sonnet` | *(pin required)* | *(pin required)* |
+| `cheap` | `haiku` | *(pin required)* | *(pin required)* |
+| `inherit` | *omitted* | *omitted* | *omitted* |
 
-Every built-in value is a **floating vendor alias**, never a version-pinned model id, so
-a new model release is picked up without a harness change. Antigravity and Gemini expose
-only two tiers upstream, so `reasoning` and `standard` both map to `pro`.
+Claude’s built-in values are floating vendor aliases. Codex and OpenCode require
+explicit pins for a concrete model; the installer introduces no model default.
 
 ### Pinning an exact model — `models.pin.<front-end>.<tier>`
 
@@ -852,8 +795,8 @@ A pin is written **verbatim** in that front-end's own vocabulary and overrides t
 built-in alias for every role on that tier. It is **required** for `codex` and `opencode`,
 which have no floating alias — an unpinned tier there stamps no **model**, and the
 installer prints one advisory line naming the exact `pin.` key to set. It is the `model`
-key that is omitted, not the role artifact: selecting Codex always registers all seven
-`.codex/agents/*.toml` regardless of any pin (see "Where the values land" below).
+key that is omitted, not the role artifact: selecting Codex registers all seven
+standard `.codex/agents/*.toml`, plus gated `pr-fixer`, regardless of any pin (see "Where the values land" below).
 
 - `opencode` **must** be `provider/model`. A value without a `/` would abort your OpenCode
   runs, so it is warned about and dropped.
@@ -864,23 +807,18 @@ key that is omitted, not the role artifact: selecting Codex always registers all
 
 Those are the only two value checks the installer makes; it cannot know any vendor's
 model list, so every other pin value is passed through untouched.
-- `antigravity` accepts only tier aliases and needs **`agy` >= 1.1.5**; below that the
-  `model:` frontmatter key is inert, never an error. The installer does not probe your
-  CLI version.
 
 ### Where the values land
 
 | front-end | artifact | form |
 |---|---|---|
 | `claude` | `.claude/agents/<role>.md` | `model:` frontmatter key |
-| `antigravity` | `.agents/agents/<role>.md` | `model:` frontmatter key |
-| `opencode` | `opencode.json` | `"model"` member in `agent.<role>` |
-| `gemini` | `.gemini/agents/<role>.md` | `model:` frontmatter key (**new file**) |
 | `codex` | `.codex/agents/<role>.toml` | optional `model = "…"` (role always registered, project-local) |
+| `opencode` | `opencode.json` | `"model"` member in `agent.<role>` |
 
-`.gemini/agents/` remains conditional on at least one concrete Gemini value.
-`.codex/agents/` is different: selecting Codex always registers exactly the seven standard
-roles — the six long-standing ones plus `builder-heavy` — with `name`, `description`, and
+Selecting Codex registers the seven standard roles: `orchestrator`, `architect`,
+`builder`, `builder-heavy`, `reviewer`, `scout`, and `doc-critic`, plus `pr-fixer`
+only while the PR-loop gate is enabled. Each TOML has `name`, `description`, and
 `developer_instructions`. An inherited role or an
 unpinned Codex tier omits `model`; a concrete pin adds `model` only to the roles that
 resolve to it. Only selected front-ends (`--agents`) are stamped.
@@ -903,11 +841,11 @@ installed by an older one — without it an already-installed `opencode.json` wo
 misreported as edited forever. The stamp is now written on **every** run that writes
 `opencode.json`, not only when a role resolves to a concrete model, so future shape changes
 are provable from the stamp alone. `.harness/.model-agents/` is the same
-device for the `.gemini/agents/` and `.codex/agents/` trees: it remembers the exact bytes
+device for active `.codex/agents/` roles: it remembers the exact bytes
 last written there. Returning Codex roles to `inherit` regenerates stamp-matching TOMLs
 without their old `model` keys; a foreign or edited role is preserved and diagnosed.
-Deselecting Codex reclaims only roles that still match their last-written stamp. Both
-stamp trees exist only while the artifacts they describe do.
+Deselecting Codex reclaims only roles that still match their last-written stamp.
+The historical stamp directory names remain unchanged for migration.
 Deselecting a front-end reclaims its
 stamped artifacts through the same pristine byte-comparison every other generated file
 uses — an edited file survives with a warning.
@@ -948,15 +886,88 @@ the session model (`inherit`).
 
 ## Self mode — `--self` (harness developers only)
 
-`./harness-install.sh --self` regenerates the **source repo's own**
-`.claude/agents/*` and `.claude/commands/*` from the same emitters targets get, plus
-the root `.escalation-arming` from the real escalation verdict. It runs the real
-installer against a throwaway temp target and rewrites that output into the source
-layout (paths lose their `.harness/` prefix), so the two renderings can never diverge
-in content. Each existing shim's `model:` line is harvested and preserved — the
-source repo's tiering lives in the shims, never in the seed-template config. It takes
-no target argument, refuses every other mode, touches nothing outside the glue, and
-is idempotent. Consumers of the harness never need it.
+`./harness-install.sh --self` regenerates source **Claude + Codex** glue by
+running the same emitters against a temporary consumer install and transforming
+its references to the repository root. Consumers retain `.harness/` references,
+including umbrella children. Self mode takes no target path and writes no
+personal/global config.
+
+| Selection | Source output |
+|---|---|
+| No selector, `--agents=all`, or `--agents=claude,codex` | Both Claude and Codex |
+| `--agents=claude` | Claude only |
+| `--agents=codex` | Codex only |
+| `--agents=host` | Detected Claude or Codex; otherwise an error |
+| OpenCode or retired selectors | Error before writes |
+
+CLI selection takes precedence over `HARNESS_AGENTS`. The source output includes
+`.claude/agents/`, `.claude/commands/`, `.codex/agents/`, Codex skill units with
+policy companions under `.agents/skills/`, and `.escalation-arming`. The existing
+`.claude/.glue-manifest` tracks both hosts, policies and the arming verdict, and
+source init checks this generated set for drift. Repeated unchanged generation
+is byte-identical. On deselection or gate-off, only previously managed pristine
+artifacts are reclaimed; edited leftovers are preserved with diagnostics and
+excluded from the new manifest.
+
+Claude `model:` frontmatter and valid Codex per-role `model = "…"` choices are
+harvested separately and preserved. An omitted Codex model remains inherited;
+Claude aliases are never translated into Codex pins. A model-only change to a
+managed source Codex TOML is a supported override. Other edits, foreign files,
+and symlink collisions are preserved with warnings. The seed
+`harness.config.yaml` values are not changed by self-generation.
+
+**Combined source escalation is UNARMED when Codex inherits**, even if the
+preserved Claude Builder/heavy choices arm Claude alone. This follows the
+existing all-selected-host rule; it does not erase Claude’s models. Explicit
+`./harness-install.sh --self --agents=claude` retains the previous Claude-only
+verdict. Configure distinct valid Codex Builder/heavy models if you want the
+combined set to arm.
+
+Codex Git operations also follow the selected sandbox and approval policy. Run from
+an appropriate repository or worktree and arrange permission for required Git writes:
+`workspace-write` may protect `.git`, so branch or commit operations can require explicit
+permission or a test-driver-created branch. This does not require changing global Codex
+settings or making the sandbox unrestricted.
+
+### Optional Codex Builder/heavy model choices
+
+Consumer inheritance remains the default. One optional pairing is
+[GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol) for ordinary
+Builder work and [GPT-6 Astra](https://developers.openai.com/api/docs/models/gpt-6-astra)
+for the heavy role. OpenAI describes Sol as a model for complex professional work
+and Astra as its most capable model for difficult end-to-end work. This optional
+project choice leaves the harness defaults unchanged.
+
+For an installed consumer, edit its existing `.harness/harness.config.yaml`
+`models:` block and re-run the installer:
+
+```yaml
+models:
+  default: inherit
+  builder: standard
+  builder-heavy: reasoning
+  pin.codex.standard: "gpt-5.6-sol"
+  pin.codex.reasoning: "gpt-6-astra"
+```
+
+Pins affect every role assigned the corresponding tier. In the **source checkout**,
+edit only the model field in each generated role instead, preserving its other
+keys and instructions:
+
+```toml
+# .codex/agents/builder.toml
+model = "gpt-5.6-sol"
+```
+
+```toml
+# .codex/agents/builder-heavy.toml
+model = "gpt-6-astra"
+```
+
+Then run `./harness-install.sh --self`. These source choices survive regeneration
+and do not become consumer seed defaults. Escalation still requires distinct
+resolved Builder/heavy models for every selected host; it does not verify model
+availability or compare model quality.
 
 ## Config migration on upgrade (non-destructive)
 
@@ -983,7 +994,7 @@ POSIX `sh`, zero deps.
 | generated glue | managed command/role names for selected front-ends, including `.claude/agents/` and `.claude/commands/` harness files | regenerated subject to each emitter's ownership checks; deselection conservatively reclaims owned files |
 | project-owned | `.harness/{harness.config.yaml,init.project.sh,specs/product.md,specs/epics,state/tasks.json,progress}` | preserved (config also append-migrated) |
 | runtime/local | `.harness/{telemetry.jsonl,workers.json,.gitignore}`, project-root `.gitignore` | gitignored; both `.gitignore`s append-seeded (never clobbered), logs/personal state never committed. `workers.json` is installer-OWNED derived data: rewritten every run while `workers.roster` is on, removed when it is off |
-| merge-region | `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` | only the marked block |
+| merge-region | `AGENTS.md` / selected `CLAUDE.md`; legacy `GEMINI.md` cleanup | only the marked block |
 
 The installer also **append-seeds the project-root `.gitignore`** with per-developer
 agent state (`.claude/settings.local.json`, `.claude/scheduled_tasks.lock`, and a commented

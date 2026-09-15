@@ -26,7 +26,7 @@ export CODEX_HOME="$T/codex-home"
 # installer run now stamps claude only. This suite's fixtures predate the flip and
 # assert artifacts across the full matrix; pin the pre-flip selection explicitly
 # (an explicit --agents in any call still wins over this env seed).
-export HARNESS_AGENTS="claude,gemini,opencode,antigravity,codex"
+export HARNESS_AGENTS="claude,codex,opencode"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
@@ -324,7 +324,7 @@ _pos="$(printf '%s\n' "$_blk" \
 pass "R25 session_summary_portable"
 
 # ── R25: AGENTS.md pointer present ───────────────────────────────────────────────
-grep -qiE 'end-of-session.*summary|session.*telemetry summary' AGENTS.md \
+awk '/^## Workflow and gates/{k=1;next} /^## /{k=0} k' AGENTS.md | tr '\n' ' ' | grep -qiE 'Orchestrator[^.]{0,70}end-of-session telemetry' \
   || fail "R25: AGENTS.md missing the end-of-session-summary pointer"
 grep -qF 'agents/orchestrator.md' AGENTS.md || fail "R25: AGENTS.md pointer does not reference agents/orchestrator.md"
 pass "R25 agents_md_summary_pointer"

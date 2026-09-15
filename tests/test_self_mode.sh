@@ -28,7 +28,7 @@ pass() { echo "ok - $1"; }
 fixture() {
   _fx="$T/$1"
   mkdir -p "$_fx"
-  for _e in "$SRC"/* "$SRC"/.claude "$SRC"/.escalation-arming; do
+  for _e in "$SRC"/* "$SRC"/.claude "$SRC"/.codex "$SRC"/.agents "$SRC"/.escalation-arming; do
     [ -e "$_e" ] || continue
     case "$(basename "$_e")" in .git|node_modules) continue ;; esac
     cp -R "$_e" "$_fx/" 2>/dev/null || true
@@ -66,9 +66,13 @@ pass "recorded shim models survive regeneration; model-less shims stay model-les
 
 # ── R4: arming written from the real verdict ──────────────────────────────────
 [ -f "$F/.escalation-arming" ] || fail "no .escalation-arming at the repo root (R4)"
-grep -q "^armed\$" "$F/.escalation-arming" || fail "sonnet→opus did not arm (R4)"
+grep -q "^blocked\$" "$F/.escalation-arming" || fail "combined inherited Codex did not disarm (E29-F01 R5)"
 grep -q "^claude=raise\$" "$F/.escalation-arming" || fail "claude verdict is not raise (R4)"
-pass "arming verdict computed from harvested models (R4) [self_arming_real]"
+grep -q "^codex=neither\$" "$F/.escalation-arming" || fail "inherited Codex verdict missing"
+C="$(fixture claude-only)"
+sh "$C/harness-install.sh" --self --agents=claude >/dev/null 2>&1 || fail "Claude-only self failed"
+grep -qx armed "$C/.escalation-arming" || fail "Claude-only sonnet→opus lost arming"
+pass "combined inherited Codex is unarmed; explicit Claude-only retains arming (R4/R5) [self_arming_real]"
 
 # Disarmed arm: with NO recorded models anywhere, nothing resolves — the verdict file
 # is reclaimed, exactly as write_escalation_arming does for an unconfigured target.
@@ -108,11 +112,16 @@ sh "$G/harness-install.sh" --self >"$T/out-gated.txt" 2>&1 \
 pass "pr-loop glue follows the repo's own pr_loop.enabled, both directions (R5) [self_prloop_gate]"
 
 # ── R6: idempotent + no collateral ────────────────────────────────────────────
-cp -R "$F/.claude" "$T/snap" && cp "$F/.escalation-arming" "$T/snap-arm"
+cp -R "$F/.claude" "$T/snap"
+cp -R "$F/.codex" "$T/snap-codex"
+cp -R "$F/.agents" "$T/snap-skills"
+cp "$F/.escalation-arming" "$T/snap-arm"
 _ver1="$(cat "$F/VERSION")"; _cfg1="$(cat "$F/harness.config.yaml")"
 : > "$F/sentinel-outside-glue.txt"
 sh "$F/harness-install.sh" --self >/dev/null 2>&1 || fail "second --self run exited non-zero (R6)"
 diff -rq "$T/snap" "$F/.claude" >/dev/null || fail "second --self run changed glue bytes (R6)"
+diff -rq "$T/snap-codex" "$F/.codex" >/dev/null || fail "second self changed Codex roles"
+diff -rq "$T/snap-skills" "$F/.agents" >/dev/null || fail "second self changed Codex skill units"
 cmp -s "$T/snap-arm" "$F/.escalation-arming" || fail "second --self run changed the arming file (R6)"
 [ "$(cat "$F/VERSION")" = "$_ver1" ] || fail "--self touched VERSION (R6)"
 [ "$(cat "$F/harness.config.yaml")" = "$_cfg1" ] || fail "--self touched harness.config.yaml (R6)"

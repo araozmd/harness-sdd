@@ -21,7 +21,7 @@ export CODEX_HOME="$T/codex-home"
 # installer run now stamps claude only. This suite's fixtures predate the flip and
 # assert artifacts across the full matrix; pin the pre-flip selection explicitly
 # (an explicit --agents in any call still wins over this env seed).
-export HARNESS_AGENTS="claude,gemini,opencode,antigravity,codex"
+export HARNESS_AGENTS="claude,codex,opencode"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
@@ -436,7 +436,7 @@ arming_artifact_shape() {
   head -n 1 "$_f" | grep -Eq '^(armed|blocked)$' \
     || fail "F05-R2: the first line is not exactly 'armed' or 'blocked': $(head -n 1 "$_f")"
   # Every remaining line is <front-end>=<verdict>, and there is one per SELECTED front-end.
-  _bad="$(sed -n '2,$p' "$_f" | grep -Ev '^(claude|gemini|opencode|antigravity|codex)=(raise|none|same|neither|unstamped)$' || true)"
+  _bad="$(sed -n '2,$p' "$_f" | grep -Ev '^(claude|codex|opencode)=(raise|none|same|neither|unstamped)$' || true)"
   [ -z "$_bad" ] || fail "F05-R2: malformed detail line(s): $_bad"
   [ "$(sed -n '2,$p' "$_f" | wc -l | tr -d ' ')" = 2 ] \
     || fail "F05-R2: expected one detail line per selected front-end (2), got $(sed -n '2,$p' "$_f" | wc -l | tr -d ' ')"

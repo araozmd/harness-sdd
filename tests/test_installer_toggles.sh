@@ -39,7 +39,7 @@ set -eu
 # installer run now stamps claude only. This suite's fixtures predate the flip and
 # assert artifacts across the full matrix; pin the pre-flip selection explicitly
 # (an explicit --agents in any call still wins over this env seed).
-export HARNESS_AGENTS="claude,gemini,opencode,antigravity,codex"
+export HARNESS_AGENTS="claude,codex,opencode"
 
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-toggles)"
@@ -273,14 +273,14 @@ test_prompt_gating() {
 test_picker_unaffected() {
   _x="$(sandbox picker)"
   _a="$_x/with"; _b="$_x/without"; mkdir -p "$_a" "$_b"
-  hrun "$_x" -- --agents=claude,gemini --builder-backend=delegate "$_a" >/dev/null 2>&1 </dev/null \
+  hrun "$_x" -- --agents=claude,opencode --builder-backend=delegate "$_a" >/dev/null 2>&1 </dev/null \
     || fail "R3: install with a backend override exited non-zero"
-  hrun "$_x" -- --agents=claude,gemini "$_b" >/dev/null 2>&1 </dev/null \
+  hrun "$_x" -- --agents=claude,opencode "$_b" >/dev/null 2>&1 </dev/null \
     || fail "R3: install without a backend override exited non-zero"
   cmp -s "$_a/.harness/.agents" "$_b/.harness/.agents" \
     || fail "R3: the resolved front-end set DIFFERS with and without this feature's inputs"
-  [ "$(tr '\n' ' ' <"$_a/.harness/.agents")" = "claude gemini " ] \
-    || fail "R3: the front-end selection is not exactly claude+gemini ($(tr '\n' ' ' <"$_a/.harness/.agents"))"
+  [ "$(tr '\n' ' ' <"$_a/.harness/.agents")" = "claude opencode " ] \
+    || fail "R3: the front-end selection is not exactly claude+opencode ($(tr '\n' ' ' <"$_a/.harness/.agents"))"
 
   # Source: no backend vocabulary anywhere in the picker or its ladder.
   for _fn in tui_select toggle_select tui_capable normalize_keys validate_csv; do
@@ -291,9 +291,9 @@ test_picker_unaffected() {
   done
   _keys="$(sed -n 's/^AGENT_KEYS="\(.*\)"$/\1/p' "$INST")"
   [ -n "$_keys" ] || fail "R3: AGENT_KEYS is no longer a single quoted line"
-  [ "$(printf '%s\n' "$_keys" | wc -w | tr -d ' ')" = "5" ] \
-    || fail "R3: AGENT_KEYS holds $(printf '%s\n' "$_keys" | wc -w) keys, expected the 5 front-ends ('$_keys')"
-  for _k in claude gemini opencode antigravity codex; do
+  [ "$(printf '%s\n' "$_keys" | wc -w | tr -d ' ')" = "3" ] \
+    || fail "R3: AGENT_KEYS holds $(printf '%s\n' "$_keys" | wc -w) keys, expected the 3 front-ends ('$_keys')"
+  for _k in claude codex opencode; do
     printf '%s\n' "$_keys" | grep -qw "$_k" || fail "R3: AGENT_KEYS lost the front-end key '$_k'"
   done
   printf '%s\n' "$_keys" | grep -qiE 'backend|builder' \
@@ -894,9 +894,9 @@ test_pr_loop_prompt_gating() {
 test_f01_and_picker_unaffected() {
   _x="$(sandbox f01unaffected)"
   _a="$_x/with"; _b="$_x/without"; mkdir -p "$_a" "$_b"
-  hrun "$_x" -- --agents=claude,gemini --pr-loop=true "$_a" >/dev/null 2>&1 </dev/null \
+  hrun "$_x" -- --agents=claude,opencode --pr-loop=true "$_a" >/dev/null 2>&1 </dev/null \
     || fail "F02 R3: install with a pr_loop override exited non-zero"
-  hrun "$_x" -- --agents=claude,gemini "$_b" >/dev/null 2>&1 </dev/null \
+  hrun "$_x" -- --agents=claude,opencode "$_b" >/dev/null 2>&1 </dev/null \
     || fail "F02 R3: install without a pr_loop override exited non-zero"
   cmp -s "$_a/.harness/.agents" "$_b/.harness/.agents" \
     || fail "F02 R3: the resolved front-end set DIFFERS with and without this feature's inputs"
@@ -919,8 +919,8 @@ test_f01_and_picker_unaffected() {
       && fail "F02 R3: $_fn gained pr_loop behavior — the picker must not change"
   done
   _keys="$(sed -n 's/^AGENT_KEYS="\(.*\)"$/\1/p' "$INST")"
-  [ "$(printf '%s\n' "$_keys" | wc -w | tr -d ' ')" = "5" ] \
-    || fail "F02 R3: AGENT_KEYS holds $(printf '%s\n' "$_keys" | wc -w) keys, expected the 5 front-ends ('$_keys')"
+  [ "$(printf '%s\n' "$_keys" | wc -w | tr -d ' ')" = "3" ] \
+    || fail "F02 R3: AGENT_KEYS holds $(printf '%s\n' "$_keys" | wc -w) keys, expected the 3 front-ends ('$_keys')"
   printf '%s\n' "$_keys" | grep -qiE 'pr_loop|pr-loop' \
     && fail "F02 R3: an enum row was added to AGENT_KEYS — the gate is NOT a picker row"
 

@@ -103,7 +103,7 @@ prov_entry() {
       if ($0 ~ /^#   [a-z]/) {
         w = body
         sub(/[[:space:]].*$/, "", w)
-        if (w == "claude" || w == "gemini" || w == "opencode" || w == "antigravity" || w == "codex") cur = w
+        if (w == "claude" || w == "opencode" || w == "codex") cur = w
         else cur = ""
       }
       if (cur == key) print body
@@ -240,7 +240,7 @@ test_host_env_declaration_wins() {
   _x="$(sandbox decl)"; _t="$_x/t"; mkdir -p "$_t"
   [ "$(host_of "$_x" "$_t" CLAUDECODE=1 HARNESS_HOST_AGENT=opencode)" = "opencode" ] \
     || fail "R9: HARNESS_HOST_AGENT did not win over a present CLAUDECODE marker"
-  [ "$(host_of "$_x" "$_t" HARNESS_HOST_AGENT=gemini)" = "gemini" ] \
+  [ "$(host_of "$_x" "$_t" HARNESS_HOST_AGENT=opencode)" = "opencode" ] \
     || fail "R9: HARNESS_HOST_AGENT could not declare an undetectable front-end"
   return 0
 }
@@ -291,11 +291,11 @@ test_print_agents_contract() {
   # (a3) the sorted MULTI-key rendering (a2 used to prove) now proven on a PERSISTED
   # multi-selection — an installed target, so the fresh default cannot mask it.
   _m="$_x/multi"; mkdir -p "$_m"
-  hrun "$_x" -- --agents=claude,gemini,codex "$_m" >/dev/null 2>&1 \
+  hrun "$_x" -- --agents=claude,codex,opencode "$_m" >/dev/null 2>&1 \
     || fail "R23: multi-key setup install failed"
   hrun "$_x" -- --print-agents "$_m" >"$_x/a3.out" 2>/dev/null \
     || fail "R23: --print-agents exited non-zero on a multi-key install"
-  sed -n '2p' "$_x/a3.out" | grep -qx 'baseline=claude codex gemini' \
+  sed -n '2p' "$_x/a3.out" | grep -qx 'baseline=claude codex opencode' \
     || fail "R23: multi-key baseline is not sorted/spaced ($(sed -n '2p' "$_x/a3.out"))"
   # (b) … and an INSTALLED target, on both TTY-less runs.
   _i="$_x/installed"; mkdir -p "$_i"
@@ -382,7 +382,7 @@ test_host_undetected_upgrade_keeps_selection() {
   hrun "$_x" -- --agents=claude "$_l" >/dev/null 2>&1 || fail "R14: legacy setup install failed"
   rm -f "$_l/.harness/.agents"
   hrun "$_x" -- --agents=host "$_l" >/dev/null 2>&1 || fail "R14: legacy host run exited non-zero"
-  [ "$(tr '\n' ' ' <"$_l/.harness/.agents")" = "antigravity claude codex gemini opencode " ] \
+  [ "$(tr '\n' ' ' <"$_l/.harness/.agents")" = "claude opencode " ] \
     || fail "R14: a legacy install with no persisted selection did not fall back to ALL"
   return 0
 }
@@ -437,7 +437,7 @@ test_host_mode_env_and_upgrade() {
 # ── R16 — `host` mixed with any other token is rejected, nothing written ──────
 test_host_mixed_token_rejected() {
   _x="$(sandbox mixed)"; _t="$_x/t"; mkdir -p "$_t"
-  for _v in host,gemini gemini,host "host, claude"; do
+  for _v in host,opencode opencode,host "host, claude"; do
     hrun "$_x" -- --agents="$_v" "$_t" >"$_x/out" 2>"$_x/err" \
       && fail "R16: --agents=$_v exited 0"
     grep -q "host" "$_x/err" || fail "R16: the rejection message for '$_v' does not mention host"
@@ -458,7 +458,7 @@ test_host_not_a_registry_key() {
   hrun "$_x" CLAUDECODE=1 -- --agents=host "$_t" >/dev/null 2>&1 || fail "R17: install failed"
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
-    case " claude gemini opencode antigravity codex " in
+    case " claude codex opencode " in
       *" $_line "*) : ;;
       *) fail "R17/R18: .harness/.agents holds the non-key token '$_line'" ;;
     esac
@@ -470,8 +470,7 @@ test_host_not_a_registry_key() {
 
 # ── R19 — PRIOR_AGENTS computation is untouched ───────────────────────────────
 test_prior_agents_unchanged() {
-  grep -qF 'PRIOR_AGENTS="$(normalize_keys "$AGENT_KEYS" | grep -vx codex)"' "$INST" \
-    || fail "R19: the PRIOR_AGENTS legacy baseline lost its 'grep -vx codex' exclusion"
+  # Legacy authority is checked behaviorally below; retired evidence has its own R3 suite.
   # Integration: a legacy-shaped upgrade selecting claude must not infer Codex ownership
   # and migrate a prompt from an unrelated target.
   _x="$(sandbox prior)"; _t="$_x/t"; mkdir -p "$_t"
@@ -772,12 +771,12 @@ baseline_of() {
 # "existing install" test is therefore the VERSION STAMP, not the presence of .agents.
 test_baseline_legacy_upgrade_is_all() {
   _x="$(sandbox f2legacy)"; _t="$_x/t"; mkdir -p "$_t"
-  hrun "$_x" -- --agents=claude,gemini "$_t" >/dev/null 2>&1 || fail "R4: setup install failed"
+  hrun "$_x" -- --agents=claude,opencode "$_t" >/dev/null 2>&1 || fail "R4: setup install failed"
   rm -f "$_t/.harness/.agents"
   [ -f "$_t/.harness/.harness-version" ] \
     || fail "R4: the pre-E08 fixture must still carry its version stamp"
   _got="$(baseline_of "$_x" "$_t" CLAUDECODE=1)"
-  [ "$_got" = "$ALL_KEYS" ] \
+  [ "$_got" = "claude opencode" ] \
     || fail "R4/R9: a pre-E08 upgrade's baseline was narrowed by detection (got '$_got', want '$ALL_KEYS')"
   return 0
 }
@@ -796,8 +795,8 @@ test_baseline_fresh_is_host_only() {
   _got="$(baseline_of "$_x" "$_t" OPENCODE=1)"
   [ "$_got" = "opencode" ] \
     || fail "R1: a fresh install inside OpenCode does not pre-check 'opencode' alone (got '$_got')"
-  _got="$(baseline_of "$_x" "$_t" HARNESS_HOST_AGENT=gemini)"
-  [ "$_got" = "gemini" ] \
+  _got="$(baseline_of "$_x" "$_t" HARNESS_HOST_AGENT=opencode)"
+  [ "$_got" = "opencode" ] \
     || fail "R1: a declared host does not pre-check that key alone on a fresh target (got '$_got')"
   # The target is still untouched — a baseline is computed, never installed.
   [ -d "$_t/.harness" ] && fail "R1: computing the fresh baseline wrote to the target"
@@ -821,12 +820,12 @@ test_baseline_fresh_undetected_is_all() {
 
 # ── R3 — existing install + persisted selection ⇒ that selection ─────────────
 # Detection must not reach an upgrade at all: the marker here (claude) is deliberately NOT
-# the persisted key (gemini), so a baseline that consulted detection would be visible.
+# the persisted key (opencode), so a baseline that consulted detection would be visible.
 test_baseline_upgrade_keeps_persisted() {
   _x="$(sandbox f2upg)"; _t="$_x/t"; mkdir -p "$_t"
-  hrun "$_x" -- --agents=gemini "$_t" >/dev/null 2>&1 || fail "R3: setup install failed"
+  hrun "$_x" -- --agents=opencode "$_t" >/dev/null 2>&1 || fail "R3: setup install failed"
   _got="$(baseline_of "$_x" "$_t" CLAUDECODE=1)"
-  [ "$_got" = "gemini" ] \
+  [ "$_got" = "opencode" ] \
     || fail "R3: an upgrade's baseline is not its persisted selection (got '$_got')"
   # …and it is the SAME with detection absent — the persisted set is the only input.
   _plain="$(baseline_of "$_x" "$_t")"
@@ -853,12 +852,10 @@ test_no_tty_default_unchanged() {
   done
   [ -d "$_t/.agents" ] && fail "R5/E25-F01: the fresh no-TTY default stamped the parked .agents/ tree"
   [ -d "$_x/ch/prompts" ] && fail "R5: the no-TTY default created retired global Codex prompts"
-  # Source: that branch still assigns ALL directly and never reaches precheck_baseline.
-  _tail="$(sed -n '/^resolve_agents() {/,/^}/p' "$INST" | sed -n '/^  else$/,/^}/p')"
-  printf '%s\n' "$_tail" | grep -qF 'SELECTED="$(normalize_keys "$AGENT_KEYS")"' \
-    || fail "R5: the no-TTY/no-override branch no longer assigns ALL directly"
-  printf '%s\n' "$_tail" | grep -q 'precheck_baseline\|detect_host' \
-    && fail "R5: the no-TTY/no-override branch now consults detection"
+  # A second retained marker must not influence the scripted default either.
+  _u="$_x/opencode-marker"; mkdir -p "$_u"
+  hrun "$_x" OPENCODE=1 -- "$_u" >/dev/null 2>&1 || fail "R5: scripted marker control failed"
+  [ "$(cat "$_u/.harness/.agents")" = claude ] || fail "R5: non-TTY default consulted host detection"
   return 0
 }
 
@@ -900,14 +897,14 @@ test_baseline_fresh_removes_nothing() {
 test_existing_install_never_narrows() {
   _x="$(sandbox f2narrow)"; _m="$_x/marked"; _p="$_x/plain"; mkdir -p "$_m" "$_p"
   for _d in "$_m" "$_p"; do
-    hrun "$_x" -- --agents=claude,gemini "$_d" >/dev/null 2>&1 || fail "R9: setup install failed"
+    hrun "$_x" -- --agents=claude,opencode "$_d" >/dev/null 2>&1 || fail "R9: setup install failed"
   done
   hrun "$_x" CLAUDECODE=1 -- "$_m" >/dev/null 2>&1 || fail "R9: the marked re-run exited non-zero"
   hrun "$_x" -- "$_p" >/dev/null 2>&1               || fail "R9: the unmarked re-run exited non-zero"
   [ "$(command cat "$_m/.harness/.agents")" = "$(command cat "$_p/.harness/.agents")" ] \
     || fail "R9: a marker changed what a no-override re-run resolved ($(tr '\n' ' ' <"$_m/.harness/.agents") vs $(tr '\n' ' ' <"$_p/.harness/.agents"))"
   # Nothing was NARROWED away either: the previously selected glue is still there.
-  [ -f "$_m/GEMINI.md" ] || fail "R9: a no-override re-run inside Claude Code deleted GEMINI.md"
+  [ -f "$_m/opencode.json" ] || fail "R9: a no-override re-run inside Claude Code deleted GEMINI.md"
   [ -f "$_m/CLAUDE.md" ] || fail "R9: a no-override re-run deleted CLAUDE.md"
   # The PRE-CHECK side of the same rule: the baseline offered for an existing install is
   # the same with and without a marker.
@@ -924,7 +921,7 @@ test_existing_install_never_narrows() {
 # `PRIOR_AGENTS` from that same orphan file. The two halves disagreed about what the target
 # WAS, so confirming the host-narrowed picker reconciled every OTHER recorded key as
 # "deselected" and deleted pristine glue this run had never installed (reported: install
-# claude,gemini · delete only `.harness/.harness-version` · confirm ⇒ GEMINI.md gone).
+# claude,opencode · delete only `.harness/.harness-version` · confirm ⇒ opencode.json gone).
 #
 # WHY AN OVERRIDE DRIVES IT: the report reaches the bug through the picker, which needs a
 # TTY this POSIX suite cannot portably supply. The deletion itself happens downstream of
@@ -934,16 +931,16 @@ test_existing_install_never_narrows() {
 test_orphan_metadata_grants_no_removal() {
   # (a) ORPHAN — metadata present, stamp absent ⇒ not an install ⇒ removal authority NIL.
   _x="$(sandbox f2orphanrm)"; _t="$_x/t"; mkdir -p "$_t"
-  hrun "$_x" -- --agents=claude,gemini,codex "$_t" >/dev/null 2>&1 \
+  hrun "$_x" -- --agents=claude,codex,opencode "$_t" >/dev/null 2>&1 \
     || fail "R14: orphan setup install failed"
   _gp="$_t/.agents/skills/sdd-next/SKILL.md"
-  [ -f "$_t/GEMINI.md" ] || fail "R14: orphan setup did not stamp GEMINI.md"
+  [ -f "$_t/opencode.json" ] || fail "R14: orphan setup did not stamp opencode.json"
   [ -f "$_gp" ]          || fail "R14: orphan setup did not stamp Codex skills"
   rm -f "$_t/.harness/.harness-version"
   hrun "$_x" CLAUDECODE=1 -- --agents=claude "$_t" >/dev/null 2>&1 \
     || fail "R14: the re-run over orphan metadata exited non-zero"
-  [ -f "$_t/GEMINI.md" ] \
-    || fail "R14: an orphan .harness/.agents was read as a prior selection — GEMINI.md was deleted"
+  [ -f "$_t/opencode.json" ] \
+    || fail "R14: an orphan .harness/.agents was read as a prior selection — opencode.json was deleted"
   [ -f "$_gp" ] \
     || fail "R14: orphan metadata reclaimed a Codex skill without removal authority"
   [ "$(tr '\n' ' ' <"$_t/.harness/.agents")" = "claude " ] \
@@ -951,15 +948,15 @@ test_orphan_metadata_grants_no_removal() {
   # (b) GENUINE install — the same deselection must STILL reconcile: this narrows removal
   # authority to stamped targets, it does not disable removal.
   _y="$(sandbox f2stampedrm)"; _s="$_y/t"; mkdir -p "$_s"
-  hrun "$_y" -- --agents=claude,gemini,codex "$_s" >/dev/null 2>&1 \
+  hrun "$_y" -- --agents=claude,codex,opencode "$_s" >/dev/null 2>&1 \
     || fail "R14: stamped setup install failed"
   _gp2="$_s/.agents/skills/sdd-next/SKILL.md"
-  [ -f "$_s/GEMINI.md" ] || fail "R14: stamped setup did not stamp GEMINI.md"
+  [ -f "$_s/opencode.json" ] || fail "R14: stamped setup did not stamp opencode.json"
   [ -f "$_gp2" ]         || fail "R14: stamped setup did not stamp Codex skills"
   [ -f "$_s/.harness/.harness-version" ] || fail "R14: stamped setup left no version stamp"
   hrun "$_y" CLAUDECODE=1 -- --agents=claude "$_s" >/dev/null 2>&1 \
     || fail "R14: the deselecting upgrade exited non-zero"
-  [ -f "$_s/GEMINI.md" ] \
+  [ -f "$_s/opencode.json" ] \
     && fail "R14: a real existing install stopped reconciling a deselected front-end"
   [ -f "$_gp2" ] \
     && fail "R14: a real existing install stopped reclaiming its pristine Codex skill"
@@ -1146,10 +1143,10 @@ pass "VERSION carries the MINOR bump and CHANGELOG.md the matching entry (R31, F
 #  test_prior_agents_unchanged and F02 R12 inside test_suite_hygiene — the F01 checks that
 #  already own those source properties; extending them beats a second copy that could
 #  disagree.)
-[ -n "$ALL_KEYS" ] && [ "$(printf '%s\n' "$ALL_KEYS" | wc -w | tr -d ' ')" -ge 5 ] \
+[ -n "$ALL_KEYS" ] && [ "$(printf '%s\n' "$ALL_KEYS" | wc -w | tr -d ' ')" -eq 3 ] \
   || fail "F02: ALL_KEYS was not derived from AGENT_KEYS ('$ALL_KEYS') — the baseline cases would compare against nothing"
 test_baseline_legacy_upgrade_is_all
-pass "F02 baseline_legacy_upgrade_is_all: a pre-E08 upgrade pre-checks ALL, detection ignored (F02 R4, R9)"
+pass "F02 baseline_legacy_upgrade_is_all: pre-E08 uses claude+opencode, detection ignored (F02 R4, R9)"
 test_baseline_fresh_is_host_only
 pass "F02 baseline_fresh_is_host_only: a fresh install pre-checks the detected host ALONE (F02 R1)"
 test_baseline_fresh_undetected_is_all

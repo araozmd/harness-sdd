@@ -1,94 +1,67 @@
 # AGENTS.md — harness-sdd
 
-> This file is the **entrypoint** of the harness. It is the first thing any agent
-> reads before doing anything. Keep it short — it is loaded into context every
-> session. Detailed rules live in the files it points to.
->
-> `AGENTS.md` is an open standard. Claude Code, Codex, Gemini CLI, OpenCode and
-> Antigravity all read it (directly or via a one-line pointer). **The model is
-> interchangeable; the harness is not.**
+This is the canonical entrypoint for the portable Spec-Driven Development (SDD)
+harness. Claude Code is the primary host, Codex second, OpenCode third. The
+harness lives in its files; each role starts with a clean, curated context.
 
-## What this is
+## Start every session
 
-A portable **Spec-Driven Development (SDD)** harness. Work flows through four roles
-that each run with a *clean, curated context* and hand off through **files on disk**,
-never through chat history. **Inception** is the front door *before* the loop: it
-turns a raw idea into a `pending` TaskStore entry + an intent brief (via `/sdd-new`).
+1. Run `./init.sh` **before any work**. If it exits non-zero, **STOP and report**;
+   never repair the environment and continue in the same run. The local backend
+   requires `python3` with stdlib `fcntl`; board writes use
+   `python3 tools/tasks-lock.py`.
+2. Read `harness.config.yaml` to select the TaskStore and DocStore backends.
+3. Read `progress/lessons.md`, then `agents/orchestrator.md`; assume the
+   **Orchestrator** role, read the TaskStore, and route the next actionable task.
+4. Follow [the workflow](docs/WORKFLOW.md), delegating through files on disk.
 
-```
-Inception ─► Orchestrator → Architect → Builder → Reviewer    (Scout assists, read-only)
- (intake)      (state)       (specs)     (code)    (verify)
-```
+## Workflow and gates
 
-## The non-negotiable rules
+Inception is the front door before the Orchestrator loop: `/sdd-new` (`$sdd-new`
+in Codex) turns an idea into a pending task and intent brief.
+The loop is Orchestrator → Architect → Builder → Reviewer; Scout
+assists read-only. Role definitions live in `agents/`.
 
-1. **Run `./init.sh` before any work.** If it exits non-zero, STOP. Do not "fix and
-   continue" — a broken environment means hallucinated work. Report and halt.
-   The local backend requires **`python3` with the stdlib `fcntl` module** — since
-   `v0.31.0` the only supported board write path is the lock helper
-   `python3 tools/tasks-lock.py`, so `init.sh` hard-fails (rather than warning)
-   when it is missing. Install python3 or point the harness at another backend.
-2. **Memory lives in files, not in your context.** Read only what you need. Write
-   what you did to `progress/`. Never carry another agent's chat history.
-3. **A task is `done` only when the Reviewer verifies it** — tests pass via
-   `init.sh`, behavior matches the spec. "I think it works" is not done.
-4. **Respect the human-in-the-loop gate.** A spec moves `pending → spec-ready` and
-   then **pauses**. A human (or an explicitly autonomous task) moves it to
-   `in-progress`. Only then may the Builder write code. See `docs/WORKFLOW.md`.
-5. **Minimal tools.** Prefer Bash/grep/cat/ls and the file system. Do not invent
-   specialized tooling; a lean harness beats an inflated one.
+- Pass only the role, relevant specs/tasks, and `progress/` notes to a fresh role
+  context. **Never forward another agent's chat history.** Read only what you
+  need and write what you did to `progress/`.
+- The Architect moves a spec from `pending` to `spec-ready` and **pauses**.
+  A human or an explicitly autonomous task must authorize `in-progress` before
+  the Builder writes code. See [human gates](docs/WORKFLOW.md).
+- Only an **independent Reviewer** may verify completion: tests pass via
+  `init.sh` and configured verification, and behavior matches the approved spec.
+  An implementer's claim is never a `done` verdict.
+- Prefer shell commands and files; keep tools minimal. Store contracts and
+  adapters live in `store/`; the local board is `state/tasks.json`.
+- The Orchestrator prints end-of-session telemetry (phase durations, review
+  rounds, human-gate latency; no tokens or USD). Follow
+  [Orchestrator → Telemetry](agents/orchestrator.md#telemetry).
 
-> **Telemetry:** the Orchestrator prints an end-of-session telemetry summary (per-phase
-> durations, build↔review rounds, human-gate latency — text-only, no tokens/USD) when it
-> wraps up; the full instruction lives in `agents/orchestrator.md` "## Telemetry".
+## Specifications and memory
 
-## Where things live
+`specs/product.md` is the product constitution; feature specs live under
+`specs/epics/<epic>/<feature>/` as `.spec`, `.plan`, `.tasks`, and `.tests` files.
+Use [the spec standard](docs/SPEC-FORMAT.md). Session output and earned lessons
+live in `progress/`; append the durable changelog to `progress/history.md`.
 
-| Path | Purpose |
+| Reference | Purpose |
 |---|---|
-| `harness.config.yaml` | Store backend selection + settings (read this first after init) |
-| `agents/*.md` | The role prompts (Inception, Orchestrator, Architect, Builder, Reviewer, Scout) |
-| `specs/product.md` | Layer 0 — product constitution (stable, high-level) |
-| `specs/epics/<E>/<F>/*.md` | The 4-file feature specs (`.spec` `.plan` `.tasks` `.tests`) |
-| `state/tasks.json` | The TaskStore (local backend) — epic/feature/task state |
-| `progress/` | Per-run agent output + `history.md` changelog + `lessons.md` earned-lessons ledger (read it at session start; append-only) |
-| `store/` | Store contract + backend adapters (local, obsidian, jira) |
-| `docs/RATIONALE.md` | Why the harness exists + the two-layer deletion ledger |
-| `docs/SPEC-FORMAT.md` | The spec standard: EARS + the 4 files + traceability |
-| `docs/WORKFLOW.md` | The loop, the states, the human gates |
+| `docs/RATIONALE.md` | Why the harness exists; the two-layer deletion ledger |
+| `docs/WORKFLOW.md` | State transitions and human gates |
+| `docs/SPEC-FORMAT.md` | EARS, four-file specs, and traceability |
 
-## Start here
+## Branch, review, and release lifecycle
 
-1. Run `./init.sh`. Halt on failure.
-2. Read `harness.config.yaml` to learn which store backends are active.
-3. Read `agents/orchestrator.md` and assume the Orchestrator role.
-4. Read the TaskStore, find the next actionable task, and delegate per the workflow.
-
-## Versioning
-
-`harness-install.sh` stamps `VERSION` into every target's `.harness/.harness-version`
-and uses it for upgrade detection — so `VERSION` is a **public contract**. Bump it
-deliberately, not on every PR.
-
-- **When:** in the same PR, before it's ready to merge, **only if the PR changes the
-  installed body** (`harness-install.sh`, `init.sh`, `agents/`, `docs/`, `store/`,
-  `specs/_templates/`, `harness.config.yaml`, the `.claude/` glue). Docs-only,
-  demo-spec, or CI changes get **no** bump (else downstream `.harness/` dirs look
-  "upgraded" when nothing changed).
-- **How much (SemVer):** PATCH = body/installer bugfix (🐛); MINOR = new
-  backward-compatible capability (✨); MAJOR = breaking layout / `tasks.schema.json`
-  change requiring target migration (💥).
-- Record it in `CHANGELOG.md` and tag the merge commit `vX.Y.Z`.
-- (Optional enforcement: a CI check that fails a PR touching harness-owned paths
-  without a `VERSION` change.)
-
-## Way of work
-
-- Every new work, feature or bug should have its own branch.
-- If a feature is completed make sure the README and docs are up to date.
-- Once all local verifications and tests passed, create a new PR for review.
-- Once a branch is merged delete remote and local branch and go back to main
-  to keep the repo clean.
-- After every feature is finished in its own branch and before continuing with
-  another feature, wait for it to be merged. Only continue autonomously if the
-  next task is explicitly marked as autonomous.
+- Every new feature or bug gets its own branch. Update README and current docs
+  before finishing a feature; after local verification and tests pass, create
+  a PR for review.
+- Wait for that branch to merge before starting another feature, unless the
+  next task is explicitly autonomous. After merge, delete the local and remote
+  feature branches and return to `main`.
+- `VERSION` is a public installer contract. Bump it deliberately in the same PR
+  when the installed body changes: `harness-install.sh`, `init.sh`, `agents/`,
+  `docs/`, `store/`, `specs/_templates/`, `harness.config.yaml`, or `.claude/`
+  glue. Docs-only, demo-spec, and CI changes do not need a bump.
+- Use PATCH for body/installer fixes, MINOR for a capability, and MAJOR for a
+  breaking layout or TaskStore schema change requiring target migration.
+  Record the release in `CHANGELOG.md` and tag the merge commit `vX.Y.Z`.

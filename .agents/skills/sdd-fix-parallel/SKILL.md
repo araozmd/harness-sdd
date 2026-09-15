@@ -1,0 +1,31 @@
+---
+name: sdd-fix-parallel
+description: Run a bounded batch of isolated autonomous E99 fixes through targeted workers
+---
+
+## Invocation adapter
+
+Invoke `$sdd-fix-parallel` in Codex; treat all accompanying text as `$ARGUMENTS` in the workflow below. Discover installed skills with `/skills`. Continuations use `$sdd-*`, with arguments written after the skill mention.
+
+## Canonical workflow
+Act as the **Fixer parallel coordinator** (`agents/fixer.md` → “Parallel
+dispatch mode”).
+
+This command is argument-free. If `$ARGUMENTS` is non-empty, STOP and report usage
+`$sdd-fix-parallel`.
+
+1. Run `./init.sh`; stop on non-zero.
+2. Execute the Fixer role's exact P1–P7 sequence: native concurrency/config/in-session
+   Builder preflight, one-time F02 provisioning while the primary is clean, complete
+   manifest with provisioning failures before claim/dispatch, coordinator bookkeeping
+   branch plus one F01 atomic claim with explicit canonical `HARNESS_DIR`,
+   parallel-safe fan-out before any wait, guarded exclusive numeric wave,
+   bookkeeping PR reconciliation, updated-base proof, and aggregate report.
+3. Each worker uses `agents/orchestrator.md` “Targeted parallel-fix worker mode”
+   for one id and its pre-provisioned branch/worktree, creates only its post-approval
+   code PR, continues siblings, and reports an observed merge for coordinator-owned
+   done and teardown.
+4. With no ready work, print `no ready E99 fixes` and exit zero without mutation. If
+   native delegation is absent or `execution.builder.backend: delegate`, fail before
+   manifest/provisioning/claim and point to serial `$sdd-fix`; never invent a vendor
+   API or background shell agent.
