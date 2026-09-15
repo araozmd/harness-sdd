@@ -1,7 +1,7 @@
 ---
 id: E29
 title: Three supported front ends and native Codex workflow
-status: in-progress
+status: done
 ---
 
 # E29 — Three supported front ends and native Codex workflow
