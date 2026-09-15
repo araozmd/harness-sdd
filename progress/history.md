@@ -258,3 +258,5 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-14 | E99-F158 | Scout audited 0.78.1 documentation; seven correction groups handed to Builder (round 1, default builder). Implementation unchanged.
 - 2026-09-14 | E99-F158 | in-progress → in-review: builder round 1 corrected baseline docs, 44 relative links checked; full pre-edit baseline: all 45 suites passed. Independent final review started.
 - 2026-09-14 | E99-F158 | Reviewer APPROVE round 1: final all 45 suites passed (GNU bash 5.3.15 as /usr/bin/sh); init, 44 relative links and diff checks passed; change-size ok. Documentation baseline ready to publish; implementation unchanged.
+- 2026-09-14 | E99-F158 | done after PR #184 merged at b3b47114d2274dfbe0a07e377aca199659def479; annotated v0.78.1 pushed. Baseline branch removed.
+- 2026-09-14 | E29-F01 | Human approved the reviewed 12-requirement proposal and autonomous implementation; promoted to in-progress on feat/native-codex-three-frontends. Builder-heavy round 1 selected from complexity=complex.
