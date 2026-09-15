@@ -1377,7 +1377,7 @@
         {
           "id": "E29-F01",
           "title": "Retire Gemini and Antigravity and enable the native Codex SDD workflow",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],

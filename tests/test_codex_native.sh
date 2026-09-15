@@ -86,6 +86,31 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
         else: assert f.parent.is_symlink() and external.is_dir()
         assert rel not in (r/'.claude/.glue-manifest').read_text()
         if companion:assert snapshot(unit)==companion and '.agents/skills/sdd-next/' not in (r/'.claude/.glue-manifest').read_text()
+    # R11: a temp install is not proof that a protected source Builder was stamped.
+    # This must inspect the actual source pair, while unrelated role edits stay inert.
+    for role,kind in [('builder','edited'),('builder-heavy','edited'),('builder-heavy','link'),('builder-heavy','parent-link'),('scout','edited')]:
+        r=root/f'source-arming-{role}-{kind}';shutil.copytree(q,r)
+        f=r/f'.codex/agents/{role}.toml'
+        if kind=='edited':
+            f.write_text(f.read_text().replace(f'Read agents/{role}.md', 'Read agents/architect.md'))
+            before=f.read_bytes()
+        elif kind=='link':
+            external=root/'arming-role-external';external.write_bytes(f.read_bytes());f.unlink();f.symlink_to(external);before=external.read_bytes()
+        else:
+            external=root/'arming-parent-external';shutil.move(str(f.parent),str(external));f.parent.symlink_to(external,target_is_directory=True);before=snapshot(external)
+        run(r,None,'--self')
+        verdict=(r/'.escalation-arming').read_text()
+        if role=='scout':assert verdict.startswith('armed\n') and 'codex=raise' in verdict,verdict
+        else:assert verdict.startswith('blocked\n') and 'codex=unstamped' in verdict,verdict
+        if kind=='parent-link':assert f.parent.is_symlink() and snapshot(external)==before
+        elif kind=='link':assert f.is_symlink() and external.read_bytes()==before
+        else:assert f.read_bytes()==before
+        manifest=(r/'.claude/.glue-manifest').read_text()
+        assert str(f.relative_to(r)) not in manifest
+        assert subprocess.check_output(['cksum','.escalation-arming'],cwd=r,text=True).strip() in manifest
+        # The blocked verdict and its ownership are stable after the protected file
+        # has been excluded from the new manifest, not just on the first rejection.
+        snapshot_before=snapshot(r);run(r,None,'--self');assert snapshot(r)==snapshot_before
     print('ok - source_model_and_collision_preservation (R6)')
     # Every Codex artifact class participates in actual source init drift diagnostics.
     for rel in ('.codex/agents/scout.toml','.agents/skills/sdd-next/SKILL.md','.agents/skills/sdd-next/agents/openai.yaml'):
