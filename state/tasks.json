@@ -915,7 +915,13 @@
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F158-documentation-baseline/"
+          "spec_path": "specs/epics/E99-maintenance/F158-documentation-baseline/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (184)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E99-F158 done --evidence <merge-ref>`",
+            "pr": "184"
+          }
         }
       ]
     },
