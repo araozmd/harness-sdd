@@ -907,6 +907,21 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F157-sync-board-jira-https-guard/"
+        },
+        {
+          "id": "E99-F158",
+          "title": "Document the implemented 0.78.1 baseline before front-end simplification",
+          "status": "in-review",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F158-documentation-baseline/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (184)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E99-F158 done --evidence <merge-ref>`",
+            "pr": "184"
+          }
         }
       ]
     },

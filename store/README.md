@@ -35,7 +35,7 @@ Backends: `local` (✅), `obsidian` (✅).
 
 | Backend | TaskStore | DocStore | Deps | File |
 |---|---|---|---|---|
-| local | `state/tasks.json` | markdown in `specs/`, `progress/` | none | `store/local.md` |
+| local | `state/tasks.json` | markdown in `specs/`, `progress/` | Unix Python 3 with stdlib `fcntl`; no third-party Python packages | `store/local.md` |
 | obsidian | feature frontmatter | same files, vault-flavored | Obsidian (optional) | `store/obsidian.md` |
 | jira | Jira issues | Jira/Confluence | MCP + auth | `store/jira.md` (stub) |
 

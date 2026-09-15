@@ -254,3 +254,7 @@ full green suite and mutation-verified assertions, in version order:
 Both epics closed. One mutation SURVIVED during E26-F02 and drove a real suite fix
 (the fixture inherited the committed manifest, so "does `--self` write it?" was never
 asked) — recorded in `progress/lessons.md`.
+
+- 2026-09-14 | E99-F158 | Scout audited 0.78.1 documentation; seven correction groups handed to Builder (round 1, default builder). Implementation unchanged.
+- 2026-09-14 | E99-F158 | in-progress → in-review: builder round 1 corrected baseline docs, 44 relative links checked; full pre-edit baseline: all 45 suites passed. Independent final review started.
+- 2026-09-14 | E99-F158 | Reviewer APPROVE round 1: final all 45 suites passed (GNU bash 5.3.15 as /usr/bin/sh); init, 44 relative links and diff checks passed; change-size ok. Documentation baseline ready to publish; implementation unchanged.

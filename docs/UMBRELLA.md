@@ -79,6 +79,10 @@ each entry's `test_command`/`delegate_cmd` and the coordinator's `integration_co
 
 ## The thin child (v0.54.0+)
 
+This section describes the thin layout. Existing full-copy children keep their local
+prose until an explicit `--thin` migration; a recorded `umbrella.root` alone does not
+convert them. See [Migrating an existing child](#migrating-an-existing-child---thin).
+
 Every child used to carry a full copy of the harness body — 26–29 files per child,
 byte-identical, each able to diverge and each producing its own diff on every upgrade.
 
@@ -92,7 +96,7 @@ a redirect only works where the consumer reads prose. `init.sh` `exec`s `tools/`
 So the tier line is drawn by **what reads the file**
 ([`ADR-0004`](../specs/adr/0004-umbrella-resolved-body-via-pointer-stubs.md)):
 
-| Tier | Paths | In a child of an umbrella |
+| Tier | Paths | In a thin child of an umbrella |
 |---|---|---|
 | **Prose** — an agent reads it | `AGENTS.md`, `agents/`, `docs/`, `specs/_templates/`, `specs/glossary.md` | a one-screen **pointer stub** at the same path |
 | **Program** — `init.sh`/CI parse or exec it | `init.sh`, `store/`, `tools/`, the example files | a full **local copy**, always |
