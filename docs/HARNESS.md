@@ -5,8 +5,8 @@ memory, and verification that help a model work within a repeatable process.
 The model is the engine (or the horse); the harness is the chassis (or the reins).
 
 **The core bet:** models and runtimes change, while repository-owned intent and
-evidence can remain portable. Files you own let this project support Claude, Gemini,
-Codex, or a local model and multiple CLIs without adopting one vendor wrapper.
+evidence can remain portable. Files you own let this project support Claude Code
+(primary), Codex (second), and OpenCode (third) without adopting one vendor wrapper.
 Read the deeper [rationale and deletion ledger](RATIONALE.md) for the limits of
 that claim, the distinction between current-model compensation and durable process
 value, and the evidence required before removing a mechanism.
@@ -43,12 +43,12 @@ value, and the evidence required before removing a mechanism.
 
 ## The commands this harness ships
 
-For selected front-ends and enabled gates, one canonical command body is mirrored
-into `.claude/commands/`,
-`.opencode/command/`, and `.agents/workflows/`. The same instruction body is also wrapped with
-deterministic metadata at `.agents/skills/<name>/SKILL.md` — one shared unit read by both
-Codex and Antigravity (ADR-0003); invoke those repository-local workflows as `$sdd-*`. See [WORKFLOW.md](WORKFLOW.md) for the loop each
-one drives.
+For selected front ends and enabled gates, canonical command bodies are emitted
+into `.claude/commands/` and `.opencode/command/`. Codex receives repository-local
+skills under `.agents/skills/<name>/SKILL.md`, each with an explicit-only policy
+companion. Claude/OpenCode use the `/sdd-*` names in the table; Codex invocation
+uses `$sdd-*`, for example `$sdd-new Add search` and `$sdd-next`. Accompanying text
+supplies `$ARGUMENTS`; `/skills` provides discovery. See [WORKFLOW.md](WORKFLOW.md).
 
 | Command | Role it runs | Gate |
 |---|---|---|
@@ -58,7 +58,7 @@ one drives.
 | `/sdd-next` | Orchestrator — route and delegate the next actionable task | always |
 | `/sdd-fix "<desc>"` | Fixer — the lightweight `sdd:false` maintenance lane | always |
 | `/sdd-fix-parallel` | Fixer — bounded parallel batch of ready E99 fixes | OpenCode requires concurrency capability/override; runtime requires native concurrency and `in-session` Builder |
-| `/sdd-pr-loop <pr>` | the Codex review cycle on one open PR (`pr-fixer` or in-session fallback) | `pr_loop.enabled` (opt-in) |
+| `/sdd-pr-loop <pr>` | the Codex review cycle on one open PR (fresh `pr-fixer` role) | `pr_loop.enabled` (opt-in) |
 
 `/sdd-pr-loop` follows the **opt-in PR-policy gate**: it is stamped
 only while `pr_loop.enabled` reads exactly `true`, and a fresh install seeds `false`.
@@ -68,18 +68,30 @@ that the loop works only on a repository with the **Codex GitHub App** installed
 only fail its own preflight. Those are loop-runtime dependencies alone — `init.sh` never
 checks for them, so a target without either still passes the environment gate. Turning
 the key on and re-running the installer emits PR-loop glue for selected front-ends
-and their supported fixer surfaces; Codex can use the in-session fixer fallback.
+and their native fixer roles, including `.codex/agents/pr-fixer.toml`.
 Turning it back off reclaims harness-owned gated glue. OpenCode separately gates
 `/sdd-fix-parallel`; see [installation](INSTALL.md).
 
-Selecting Codex also registers exactly seven project-local roles in `.codex/agents/`.
+Selecting Codex registers seven standard project-local roles in `.codex/agents/`,
+plus an eighth `pr-fixer` only while the PR-loop gate is enabled. Each delegated
+role receives a fresh context and file paths; the host reports missing delegation
+capability rather than claiming that an isolated role ran.
 Inherited or unpinned roles remain registered without a `model` key; a concrete Codex
-pin adds `model` only where it resolves. Shared skill units are explicit-only through
+pin adds `model` only where it resolves. Skill units are explicit-only through
 `agents/openai.yaml`, which is written wherever the unit is; their adapter maps text accompanying an explicit `$skill` mention
 to the canonical `$ARGUMENTS` term. Last-written stamps protect skill units and role
 files from selected-install overwrite and unsafe reclamation. Current installs never
 create global Codex prompts. Ungated legacy prompts remain because their cross-target
 ownership is unknowable; only ledger-proven, byte-pristine `sdd-pr-loop` is reclaimed.
+
+Source `--self` regeneration defaults to Claude + Codex and preserves their
+separate per-role model choices. With inherited Codex models, combined source
+escalation is UNARMED; explicit Claude-only generation retains its prior verdict.
+See [self mode](INSTALL.md#self-mode----self-harness-developers-only).
+
+Gemini and Antigravity are retired integrations. Their historical records remain;
+upgrades remove only proven pristine old glue and preserve customized files with
+warnings. See [migration](INSTALL.md#retiring-gemini-and-antigravity).
 
 ## Where the ideas come from
 

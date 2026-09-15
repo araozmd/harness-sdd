@@ -74,8 +74,6 @@ emit_body() {
 emit_glue() {
   printf '%s\n' \
     ".claude/agents/" ".claude/commands/" \
-    ".agents/rules/" ".agents/agents/" ".agents/workflows/" \
-    ":(glob).agents/skills/sdd-*/**" \
     ".opencode/command/" ".opencode/agent/pr-fixer.md" \
     "opencode.json"
 
@@ -89,7 +87,24 @@ emit_glue() {
   # default creates no `.gemini/agents/` at all) or ownership is unprovable, and claiming
   # nothing is the fail-safe direction: a missed drift costs a warning, a false positive
   # halts the harness.
-  for _tool in codex gemini; do
+  # Retired namespaces are never mandatory active glue. Skills use the same
+  # last-written ownership evidence as native roles, not a wildcard over user files.
+  if [ -f "$hdir/.agents" ] && ! grep -qx codex "$hdir/.agents"; then return 0; fi
+  _root="$(dirname "$hdir")"
+  if [ ! -L "$_root/.agents" ] && [ ! -L "$_root/.agents/skills" ] && [ ! -L "$hdir/.codex-skills" ]; then
+    for _unit in "$hdir"/.codex-skills/sdd-*; do
+      [ -d "$_unit" ] && [ ! -L "$_unit" ] || continue
+      _name="${_unit##*/}"
+      [ ! -L "$_root/.agents/skills/$_name" ] || continue
+      for _leaf in SKILL.md agents/openai.yaml; do
+        [ ! -L "$_unit/agents" ] && [ ! -L "$_unit/$_leaf" ] && [ -f "$_unit/$_leaf" ] || continue
+        [ ! -L "$_root/.agents/skills/$_name/agents" ] && [ ! -L "$_root/.agents/skills/$_name/$_leaf" ] || continue
+        printf ':(literal).agents/skills/%s/%s\n' "$_name" "$_leaf"
+      done
+    done
+  fi
+  for _tool in codex; do
+    [ ! -L "$_root/.codex" ] && [ ! -L "$_root/.codex/agents" ] || continue
     # REJECT A SYMLINKED LEDGER. `-d` and the glob both follow symlinks, so a symlinked
     # `.model-agents` or `.model-agents/<tool>` would enumerate an EXTERNAL directory and
     # turn arbitrary basenames there into "owned" pathspecs. The installer already refuses
@@ -105,6 +120,7 @@ emit_glue() {
       # and nothing else, so `-f` rejects a directory, fifo, socket and device in one test.
       # `-L` is tested first because `-f` follows symlinks.
       [ -f "$_st" ] || continue
+      [ ! -L "$_root/.codex/agents/${_st##*/}" ] || continue
       # `:(literal)` — a ledger basename is DATA, not a pattern. Without it a stamp named
       # `project-*.toml` is read as an fnmatch wildcard and claims every matching operator
       # file.

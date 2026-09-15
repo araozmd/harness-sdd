@@ -1,17 +1,18 @@
 # harness-sdd
 
-A portable **agent harness** for **Spec-Driven Development**. It runs primarily on
-**Claude Code** and is portable to **Codex**, **Gemini CLI**, **OpenCode**, and
-**Antigravity** — because the harness is just files in the repo, and the model/CLI is
-interchangeable.
+A portable **agent harness** for **Spec-Driven Development**. It supports
+**Claude Code** (primary), with **Codex** second and **OpenCode** third.
+The harness lives in repository files, so the model and supported CLI can change
+without moving the project’s intent or history.
 
 > The model is the engine; the harness is the chassis. Start with
 > [why the harness exists](docs/RATIONALE.md), then see the compact
 > [harness overview](docs/HARNESS.md).
 
-The [0.78.1 baseline](docs/BASELINE-0.78.1.md) separates the implemented five-front-end
-inventory from validation confidence and the planned three-front-end focus. Claude Code
-is the maintainer-validated workflow; Codex has received less deep end-to-end testing.
+The [0.78.1 baseline](docs/BASELINE-0.78.1.md) preserves the historical five-front-end
+inventory and its validation limits. Current releases support three front ends;
+Gemini CLI and Antigravity are retired. See [upgrade guidance](docs/INSTALL.md#retiring-gemini-and-antigravity)
+for selection migration and preservation of customized legacy files.
 
 ## How it works
 
@@ -94,19 +95,20 @@ new epic / feature / task, and writes a `pending` entry plus an intent brief —
 hand-editing `state/tasks.json`. Then the Orchestrator spawns `architect` → (human
 approves) → `builder` → `reviewer`.
 
-## Using other CLIs
+## Supported CLIs
 
 | CLI | Entry file | Sub-agents |
 |---|---|---|
 | **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` (+ `pr-fixer`) + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-fix-parallel`, `/sdd-next`, `/sdd-pr-loop` |
-| **Codex** | `AGENTS.md` (native) | `.codex/agents/*.toml` roles + repository-local `$sdd-*` skills in `.agents/skills/` — shared with Antigravity (including gated `$sdd-pr-loop`) |
-| **Gemini CLI** | `GEMINI.md` → `AGENTS.md` | run roles sequentially |
+| **Codex** | `AGENTS.md` (native) | `.codex/agents/*.toml` roles + repository-local `$sdd-*` skills in `.agents/skills/` (including gated `$sdd-pr-loop`) |
 | **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-test-concurrency` and `/sdd-pr-loop`; `/sdd-fix-parallel` is opt-in (verified by `/sdd-test-concurrency`) |
-| **Antigravity** | `GEMINI.md` + `.agents/rules/` → `AGENTS.md` | `.agents/skills/sdd-*/` shared skill units (its documented discovery surface) + `.agents/agents/*` personas (+ `pr-fixer`) + `.agents/workflows/*`, including `/sdd-fix-parallel` and `/sdd-pr-loop` |
 
 The tables and workflow prose use the portable `/sdd-*` spelling; in Codex, invoke the
 repository skills as `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`,
-`$sdd-fix-parallel`, and (when enabled) `$sdd-pr-loop`.
+`$sdd-fix-parallel`, and (when enabled) `$sdd-pr-loop`. For example, enter
+`$sdd-new Add a settings page`, then `$sdd-next`; accompanying text supplies the
+workflow’s `$ARGUMENTS`. `/skills` is the discovery UI. The human spec approval
+gate and independent Reviewer verdict apply in Codex too.
 
 `/sdd-pr-loop` and front-end-specific `pr-fixer` glue follow the **PR-policy gate**:
 they are stamped only while `pr_loop.enabled` is `true` in `harness.config.yaml`.
@@ -115,8 +117,10 @@ repo, an **authed `gh`** and **`jq`**; without them `/sdd-pr-loop` could only fa
 preflight, so nothing is written until you set `pr_loop.enabled: true` and re-run the
 installer. An absent block, an absent key or any non-`true` value all mean off.
 OpenCode separately gates `/sdd-fix-parallel` on its concurrency capability
-marker or an explicit override. Codex keeps its seven standard role registrations;
-the PR loop can use the in-session fixer fallback.
+marker or an explicit override. Codex has seven standard roles and an eighth native
+`pr-fixer` only while the PR-loop gate is on. It handles each comment in a fresh role
+context with file-only handoffs. A host unable to start that role must report the
+limitation and handoff path; it cannot claim an isolated fix ran.
 
 The harness body — `AGENTS.md`, `agents/`, `specs/`, `progress/`, `init.sh`, the
 stores — is **identical** across all of them. Only the entry filename and the
@@ -235,7 +239,7 @@ configuration: [board mirror contract](store/board-mirror.md).
 
 ```
 AGENTS.md                    entrypoint (open standard)
-CLAUDE.md GEMINI.md          thin per-CLI pointers
+CLAUDE.md                    thin Claude pointer
 opencode.json                OpenCode agents + AGENTS.md instruction
 harness.config.yaml          store backends, hooks, mirror, telemetry, umbrella
 harness-install.sh           install/upgrade into a target (+ --umbrella, --shared-repo)
@@ -249,14 +253,19 @@ store/                       tasks.schema.json, store contract + adapters (local
 docs/                        [RATIONALE.md](docs/RATIONALE.md), SPEC-FORMAT, WORKFLOW, HARNESS, INSTALL, UMBRELLA, CONFIG-LAYERING
 umbrella.manifest.example.yaml   cross-repo coordinator manifest template
 umbrella.gitignore.example       shared-spec-repo .gitignore reference
-.claude/                     Claude Code sub-agents + commands
+.claude/                     generated Claude Code sub-agents + commands + glue manifest
+.codex/agents/               generated native Codex role TOMLs
+.agents/skills/              generated explicit Codex workflow skills + policy companions
 ```
 
 Consumer installs put the body under `.harness/` and generate only selected and
-enabled front-end surfaces. The `.opencode/`, `.agents/`, and `.codex/` directories
-listed in the CLI table are installer outputs, absent from this source checkout.
-See the [installed layout](docs/INSTALL.md#install). Source `--self` regeneration
-covers Claude glue only.
+enabled front-end surfaces. Source `./harness-install.sh --self` defaults to
+**Claude + Codex**; `--agents=claude` or `--agents=codex` selects one source set.
+Source references resolve from the repository root, while consumer glue resolves
+from `.harness/`. Existing per-role models survive regeneration. With inherited
+Codex models, combined source escalation is **UNARMED** even when Claude alone
+was armed; explicit Claude-only generation preserves that prior verdict. See
+[self mode and optional models](docs/INSTALL.md#self-mode----self-harness-developers-only).
 
 ### Codex PR review loop
 
@@ -296,58 +305,42 @@ that capability, or `execution.builder.backend` is `delegate`, use serial `/sdd-
 ```
 
 Idempotent install/upgrade: drops the harness body into `<project>/.harness/`, appends
-a marked pointer block to any existing `CLAUDE.md`/`AGENTS.md`/`GEMINI.md` (your prose
+a marked pointer block to `AGENTS.md` and selected `CLAUDE.md` (your prose
 is preserved), generates the glue for the selected agents, and seeds a runnable
 workspace. Re-run to upgrade — project-authored specs/state are never clobbered. See
 `docs/INSTALL.md`.
 
-**Choosing which agents to support.** The shared portable entrypoint `AGENTS.md` is
-always written, but each coding agent's front-end is **opt-in**. On an interactive
-terminal the installer shows a checkbox-style toggle list — `claude`, `gemini`,
-`opencode`, `antigravity`, `codex` — and stamps only the ones you pick. On a **first**
-interactive install the CLI you are running in is the only one pre-checked (`claude`
-alone when it cannot be detected — non-Claude front-ends are parked by default,
-E25-F01); the others are one keystroke away before you confirm. The choice is
-saved to `.harness/.agents`, so **interactive re-runs pre-check your current
-selection** — add or drop an agent any time, even when the harness version has not
-changed. Deselecting an agent removes only the harness-generated glue (your own
-`.claude/`/`.opencode/`/`.agents/` files and a hand-edited `opencode.json` are left
-untouched — Antigravity glue uses a freshly generated reference, while Codex skills and
-roles require their last-written ownership stamps; edited files survive).
-
-> **Skill units are repository-local and shared.** Selecting `codex` **or** `antigravity`
-> creates `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`, and
-> `$sdd-fix-parallel` as `.agents/skills/<name>/SKILL.md`, plus `$sdd-pr-loop` only while
-> its opt-in gate is enabled. Both front-ends read that surface, so one unit serves both
-> and it is reclaimed only when the last of them is deselected (ADR-0003). Each skill also carries `agents/openai.yaml`, disables implicit invocation,
-> and maps text accompanying the explicit `$skill` mention to the canonical workflow's
-> `$ARGUMENTS`. Selecting **Codex** also registers all seven standard roles in `.codex/agents/`; inherited
-> or unpinned roles simply omit `model`. Last-written ownership stamps prevent selected
-> installs or cleanup from replacing foreign or edited skill units and role files. No
-> current install needs `HOME`/`CODEX_HOME` or writes global prompts. Ungated legacy
-> prompts are preserved because their cross-target ownership is unknowable; only a
-> byte-pristine `sdd-pr-loop` prompt whose ledger proves no live owners may be reclaimed.
+**Choosing which agents to support.** The supported keys are `claude`, `codex`,
+and `opencode`, in that priority order. The interactive picker starts with the
+detected supported host on a fresh target, or Claude when undetected. Fresh
+unattended installs default to Claude. Upgrades preserve the surviving recorded
+selection in `.harness/.agents`; retired-only selections require an explicit
+replacement before any writes. A version-stamped install without a selection
+file resolves to `claude,opencode`. `--agents=all` selects all three.
 
 ```bash
-# Non-interactive / CI — pick explicitly (no prompt):
-./harness-install.sh --agents=claude,opencode /path/to/your-project
+./harness-install.sh --agents=claude,codex /path/to/your-project
 HARNESS_AGENTS=claude ./harness-install.sh /path/to/your-project
-# Work in exactly one CLI? Let the installer detect it (opt-in resolution mode):
 ./harness-install.sh --agents=host /path/to/your-project
 ./harness-install.sh --print-agents /path/to/your-project   # preview, writes nothing
-# No TTY and no override: fresh target ⇒ Claude only; existing install ⇒ all agents.
 ```
 
-`--agents=host` resolves to the front-end whose **session marker** is in this shell —
-`claude`, `codex`, `opencode` or `antigravity` — and stamps only that one. It is a
-resolution *mode*, never a selectable key, so `host` is never saved to `.harness/.agents`.
-A front-end the harness cannot detect (or that you'd rather name yourself) is declared
-with `HARNESS_HOST_AGENT=<key>`. When the host is undetected the run falls back to today's
-baseline — Claude only on a fresh target, and the persisted selection on an existing
-install (all front-ends for a legacy install without a selection file). Plain unattended
-upgrades without an override still select all front-ends; use explicit `--agents=<csv>`
-for repeatable installs and upgrades. See
-[`docs/INSTALL.md`](docs/INSTALL.md) → "Host detection".
+`--agents=host` recognizes the supported host’s session markers; an explicit
+`HARNESS_HOST_AGENT=<key>` can declare it. Ambient retired-host markers are
+ignored. Explicit `gemini` or `antigravity` selectors or host declarations fail
+before target mutation. [Migration guidance](docs/INSTALL.md#retiring-gemini-and-antigravity)
+describes how pristine old glue is reclaimed and edited, foreign, or symlinked
+legacy files are preserved with warnings.
+
+**Codex workflows are repository-local.** Selecting `codex` creates the six base
+`$sdd-*` skill units in `.agents/skills/`, plus `$sdd-pr-loop` when enabled.
+Each includes `SKILL.md` and `agents/openai.yaml`, disabling implicit invocation
+and mapping accompanying text to `$ARGUMENTS`. Seven native roles are registered
+in `.codex/agents/`, plus gated `pr-fixer`; inherited or unpinned models omit
+`model`. Last-written stamps protect edited or foreign units and role files.
+Retiring Antigravity leaves these units in place when Codex remains selected.
+Current installation creates no global Codex prompts; uncertain legacy global
+prompt ownership is preserved. See [installation](docs/INSTALL.md).
 
 **Shared vs personal config.** The install is meant to be *committed and shared* — one
 `CLAUDE.md`, the `.harness/` body, the `.claude/` glue. Per-developer state stays local:

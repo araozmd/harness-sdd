@@ -1,0 +1,358 @@
+# harness-sdd configuration
+# The agents read this once (after init.sh) to learn HOW to read/write state.
+# Swapping a backend value changes where memory lives WITHOUT changing any prompt.
+
+store:
+  # TaskStore: high-level epic/feature/task state the Orchestrator reads.
+  #   local    -> state/tasks.json            (default, zero deps)
+  #   obsidian -> specs/ markdown frontmatter (graph view, backlinks)
+  #   jira     -> Atlassian via MCP           (STUBBED — see store/jira.md)
+  tasks: local
+
+  # DocStore: the externalized memory — specs, progress, history.
+  #   local    -> markdown files in specs/ and progress/
+  #   obsidian -> same files, Obsidian-flavored (wikilinks + frontmatter)
+  docs: local
+
+  # Post-write sync hook (optional, VCS/PM-neutral). When NON-EMPTY, the Orchestrator
+  # runs this command once AFTER any persisted store write (set_status, set_slice_status,
+  # write_spec, done rollup), invoked as:  <cmd> "<feature-id>" "<op>"  with cwd = HARNESS_DIR.
+  # Best-effort: a non-zero exit NEVER rolls back tasks.json and never blocks the loop — it
+  # is reported as a sync gap. Empty (default) ⇒ no hook (today's behavior). The harness never
+  # learns what the command does — a git push, a board mirror, both, or nothing. A team might
+  # point it at `node tools/sync-board.mjs` (see mirror: below) or a push+mirror wrapper.
+  on_write_command: ""
+
+workflow:
+  # Consumed read-only by tools/next-task.mjs. The selector parses only this
+  # approval scalar, workflow.identity, and umbrella.manifest; policy defaults
+  # and Orchestrator write ownership remain unchanged.
+  # Human-in-the-loop gate. When true, a feature pauses at `spec-ready` until a
+  # human moves it to `in-progress`. Individual tasks can opt out via `sdd: false`
+  # or `autonomous: true` in their frontmatter / TaskStore entry.
+  require_spec_approval: true
+
+  # Context hygiene: agents should reset context when their window passes this
+  # fraction full, handing off via progress/ files. Degradation starts ~0.20.
+  context_reset_threshold: 0.40
+
+  # Current developer's identity for scoped `/sdd-next --mine` selection (E10-F01).
+  # Empty (default) ⇒ solo / board-wide, exactly today's behavior (owner ignored).
+  # "@me" or "self" ⇒ resolve dynamically to the authed `gh` user (gh api user),
+  #   so a SHARED config reflects whoever runs it (board-mirror `assignee` pattern).
+  # Any other value ⇒ used verbatim as the literal identity string.
+  # Scoped `--mine` selects only features whose effective owner (feature `owner`
+  # else parent epic `owner`) equals this identity; it never claims unassigned work.
+  identity: ""
+
+# Builder execution backend. The installer ASKS for this — a follow-up prompt right after
+# the front-end picker, on a TTY — and takes --builder-backend=<in-session|delegate> or
+# HARNESS_BUILDER_BACKEND=<value> for scripted runs (the flag wins). RE-RUN the installer
+# to change it later, or edit the value below: only that one scalar is ever rewritten, so
+# every comment and hand-edit in this file survives.
+execution:
+  # The harness's single extension point for plugging in an EXTERNAL executor
+  # without forking any agent role file. Scope is structural: only roles listed
+  # here can be delegated, and only the Builder is delegatable today.
+  #
+  # The Orchestrator is deliberately NOT a key and never will be — it is the loop
+  # that reads this config and invokes delegate_cmd, so it always runs in the host
+  # code-agent. Architect / Reviewer / Scout also always run in-session. To make a
+  # new role delegatable later, add a sibling key here (e.g. `architect:`).
+  builder:
+    #   in-session -> the Builder agent implements the code itself, in this CLI
+    #                 session (DEFAULT). Works with ANY single coding agent and
+    #                 adds zero dependencies — this is what keeps the harness
+    #                 universal for engineers who run only one CLI.
+    #   delegate   -> the Builder does NOT write code; it shells out to
+    #                 `delegate_cmd`, which owns implementation (and may own PR
+    #                 creation/review too). Opt in only when an executor is wired.
+    #                 Selecting it while delegate_cmd is still empty installs fine
+    #                 and WARNS; the Builder stops and reports at run time.
+    backend: in-session
+
+    # Read ONLY when backend: delegate. The Builder invokes it as:
+    #     <delegate_cmd> <feature-id> <abs-spec-path>
+    # It must exit 0 on success, non-zero to signal failure back to the Builder.
+    delegate_cmd: ""
+
+# Bounded E99 quick-fix dispatch. Built-ins harness-install.sh,
+# tests/test_install.sh, and tools/* are immutable; shared_paths only extends them.
+# This lane requires execution.builder.backend: in-session so local review owns
+# post-approval PR timing; delegate mode must use serial /sdd-fix.
+fix_lane:
+  max_parallel: 3
+  shared_paths: []
+
+# Telemetry (optional, additive) — best-effort, local-only observability of how long
+# each sub-agent runs and how long the human spec-approval gate takes. Safe defaults so
+# a target with no `telemetry:` block behaves as if enabled with the default log path.
+telemetry:
+  # Master kill-switch. false ⇒ the Orchestrator skips telemetry capture entirely.
+  # Absence of this whole block ⇒ enabled defaults below.
+  enabled: true
+
+  # Writer + report default log path. Resolved UNDER HARNESS_DIR (the value init.sh
+  # computes: the repo root in the harness source, .harness/ in an installed consumer)
+  # unless given as an absolute path. GITIGNORED / LOCAL-ONLY — never committed (the
+  # source .gitignore ignores /telemetry.jsonl; the installer seeds a .harness/.gitignore
+  # holding telemetry.jsonl for consumers). The report script accepts --log to override.
+  # If you OVERRIDE this to a custom RELATIVE path, the installer ignores it too on its
+  # next run — but if you change it post-install without re-running the installer, add
+  # the new path to .harness/.gitignore yourself so the log stays out of VCS.
+  log: telemetry.jsonl
+
+  # NOTE: token/USD cost accounting is OUT of scope. The `cost` field in each record is a
+  # reserved extension slot for a future instrumented SDK runtime and is null today; this
+  # harness never populates it.
+
+# Board mirror (optional, opt-in) — a one-way PROJECTION of state/tasks.json onto an
+# external project board for human visibility. tasks.json stays the SOURCE OF TRUTH;
+# the board is downstream and disposable (agents never read it). Driven by
+# tools/sync-board.mjs; see store/board-mirror.md. INERT by default: an empty provider
+# means the tool is a no-op. This is a MIRROR, not a store backend (where state lives) —
+# see store/README.md "Mirrors vs backends".
+mirror:
+  board:
+    # ""|none disables (default). github-projects and jira are IMPLEMENTED; azure-boards
+    # is a recognized STUB (no-op until implemented — see store/board-mirror.md).
+    provider: ""
+
+    # github-projects provider config (ignored by other providers):
+    owner: ""             # org/user login that owns the Project + the issues repo
+    project_number: 0     # the GitHub Project number (e.g. 1)
+    repo: ""              # owner/repo that holds the mirrored issues (e.g. my-org/specs)
+
+    # jira provider config (Jira Server / Data Center; ignored by other providers). Auth is
+    # a Bearer PAT read from the JIRA_PAT env var (precedence) OR the gitignored pat_file
+    # below — the PAT is NEVER stored here. REST API only, no MCP. See store/board-mirror.md.
+    base_url: ""              # jira: Jira Server/DC base URL (e.g. https://jira.acme.internal)
+    project_key: ""           # jira: target Jira project key (e.g. HAR)
+    pat_file: "jira.pat"     # jira: gitignored PAT file, resolved under the harness dir (⇒ .harness/jira.pat in a consumer); JIRA_PAT env wins
+    # issue_type_map:         # jira: harness concept -> Jira issue type (omit ⇒ Epic/Story)
+    #   epic: "Epic"
+    #   feature: "Story"
+    epic_name_field: ""       # jira: optional Server/DC "Epic Name" custom field id (e.g. customfield_10011); set only if your project requires it on the Epic create screen. Empty ⇒ omitted (default)
+
+    # Optional: GitHub login assigned to a feature's issue once work has STARTED
+    # (in-progress/in-review/done); cleared for not-started states (pending/spec-ready).
+    # Empty ⇒ never touch assignees. Use "@me" (or "self") to resolve dynamically to the
+    # authed `gh` user, so a shared-repo config reflects whoever runs the sync instead of
+    # hard-coding one person. Idempotent — skips the API call when already correct.
+    assignee: ""
+
+    # Optional: map harness status -> board COLUMN name. Omit for identity (column ==
+    # status). Set this to keep EXISTING board columns without editing sync-board.mjs:
+    # status_map:
+    #   pending: "Todo"
+    #   spec-ready: "Spec ready"
+    #   in-progress: "In Progress"
+    #   in-review: "In review"
+    #   done: "Done"
+
+verification:
+  init_script: ./init.sh
+  # Commands the Reviewer must run before marking work done. Project-specific —
+  # edit these per target repo.
+  # Every suite under tests/, run concurrently, printing only what failed. The suites are
+  # mutually isolated (per-case mktemp fixtures, sandboxed HOME/CODEX_HOME, no writes into
+  # state/ specs/ progress/), so this is 3.5x faster than the serial chain it replaces
+  # (634s -> 171s here) and emits one line on green instead of ~19k tokens of chatter the
+  # Reviewer had to read every round. It also DISCOVERS suites, so adding tests/test_*.sh
+  # no longer means hand-editing this scalar -- the old chain had grown to 27 entries and
+  # every feature appended one. Use `sh tools/run-tests.sh --serial` to bisect a suspected
+  # cross-suite interaction.
+  test_command: ""        # set during bootstrap
+
+  lint_command: ""        # set during bootstrap
+  typecheck_command: ""   # set during bootstrap
+
+  # Umbrella mode only (see docs/UMBRELLA.md): the feature-level integration check
+  # that runs the stack together (e.g. "viernes-infra/dev.sh ci"). It runs ONLY when
+  # every slice of a cross-repo feature is done+merged, and a non-zero exit keeps the
+  # feature out of `done`. Empty ⇒ no integration gate (single-repo default).
+  integration_command: ""
+
+# Umbrella coordinator (cross-repo) — ADDITIVE / opt-in. See docs/UMBRELLA.md.
+# A single-repo project leaves this inert: with `manifest` unset (or the file
+# absent) the coordinator does nothing and the existing single-repo flow
+# (init.sh, verification.test_command, Reviewer `done` verdict) is unchanged.
+umbrella:
+  # Path to the umbrella manifest (see umbrella.manifest.example.yaml). The PRESENCE
+  # of this file is the umbrella-mode switch. Unset/absent ⇒ single-repo, inert.
+  #
+  # Path bases (two, by design): THIS value resolves relative to the harness dir
+  # (.harness/, which is init.sh's cwd) — so the cascade installer's default is
+  # `../umbrella.manifest.yaml` (the manifest sits at the umbrella root). Inside the
+  # manifest, each repo's `path:` resolves relative to the MANIFEST file's own dir,
+  # not to .harness/. See docs/UMBRELLA.md → Manifest reference.
+  #
+  # Dispatch backend is execution.builder.backend above: the default `in-session`
+  # drives each slice by spawning the Builder cd'd into the child repo (no executor,
+  # no per-repo delegate_cmd needed); `delegate` shells out to each repo's delegate_cmd.
+  manifest: ""
+
+  # CHILD-SIDE key (E24-F03, ADR-0004). Set on a CHILD of an umbrella — never on the
+  # coordinator — to the umbrella root, relative to THIS harness dir (`.harness/`), so
+  # a cascade writes `../../`. It is what lets a child resolve the shared harness body
+  # instead of carrying its own copy of it.
+  #
+  # With this set AND resolving to an installed body (`<root>/.harness/.harness-version`
+  # present), the child's PROSE tier — AGENTS.md, agents/, docs/, specs/_templates/,
+  # specs/glossary.md — is written as one-line pointer stubs at the same paths. The
+  # PROGRAM-READ tier — init.sh, store/, tools/ — is always a full local copy, because
+  # init.sh execs and parses those and a program cannot follow a prose pointer.
+  #
+  # UNSET, empty, or unresolvable ⇒ the complete body is installed locally, exactly as
+  # a single-repo install. That is not a degraded mode and never fails init.sh: a child
+  # entered on its own (CI, a lone clone, a PR reviewer's checkout) is a supported state.
+  #
+  # The cascade writes this; you rarely set it by hand. Moving the umbrella directory
+  # invalidates every child's value at once — greppable, but a real coupling.
+  #
+  # LAYOUT IS NEVER IMPLIED BY THIS KEY ALONE (E24-F04). An already-installed child that
+  # carries a full local body keeps it: converting one to stubs happens only when the
+  # installer is run with `--thin`, once per child, and only when every prose-tier path is
+  # byte-identical to the umbrella's copy. `--standalone` is the reverse — it re-materialises
+  # the full body and CLEARS this key, because after it the statement this key makes
+  # ("resolve my prose body from here") is false.
+  #
+  # Clearing it is not a permanent opt-out: the cascade re-records it for every child it
+  # installs, and this shipped default is already `""`, so "cleared" is indistinguishable
+  # from "never set". What makes `--standalone` durable is the LAYOUT — a full-copy child is
+  # left alone by every run that does not pass `--thin`. See docs/UMBRELLA.md.
+  root: ""
+
+# Per-role model routing (E17-F01) — OPT-IN and INERT by default.
+# Tiers: reasoning | standard | cheap | inherit
+# `inherit` compiles to KEY OMISSION on every front-end — the generated agent
+# definitions are byte-identical to a harness without this block.
+# NOTE: `orchestrator` applies only where the orchestrator is a spawned sub-agent
+# (Claude) or the configured primary agent (OpenCode). The model of the session you
+# launched by hand is chosen by how you launched it, not by the harness.
+models:
+  default: inherit        # tier for any role not listed below
+  orchestrator: inherit
+  architect: inherit      # try: reasoning
+  builder: inherit        # try: standard
+  builder-heavy: inherit  # try: reasoning — the escalation tier (E17-F02); same body as
+                          # `builder`, differs only by the model it resolves to (ADR-0002).
+                          # Left `inherit` it is NOT heavier than `builder`.
+  reviewer: inherit       # try: standard
+  scout: inherit          # try: cheap
+  doc-critic: inherit     # try: cheap
+  # Exact-value escape hatch: `pin.<front-end>.<tier>`, written VERBATIM in that
+  # front-end's own vocabulary. REQUIRED for codex and opencode, which have no
+  # floating tier alias — an unpinned tier there stamps no MODEL. The role artifact
+  # itself is still written (selecting Codex always registers all seven
+  # .codex/agents/*.toml); only the `model` key is omitted, as for the `inherit` tier.
+  #   opencode MUST be "provider/model" (an invalid value aborts your OpenCode run)
+  #   codex    MUST be a bare model id (the provider comes from `model_provider`)
+  #   antigravity accepts only tier aliases and needs `agy` >= 1.1.5 (inert below it)
+  # pin.opencode.reasoning: ""
+  # pin.opencode.standard: ""
+  # pin.opencode.cheap: ""
+  # pin.codex.reasoning: ""
+  # pin.codex.standard: ""
+  # pin.codex.cheap: ""
+  # pin.claude.reasoning: ""
+
+# Codex PR review loop (E18-F01) — the policy knobs of `/sdd-pr-loop`.
+# `enabled` is OPT-IN: it is off unless it reads exactly `true`. An absent block, an
+# absent key, an empty value or any other value all mean OFF, and nothing is stamped.
+# Turn it on ONLY on a repo that has the Codex GitHub App installed plus an authed
+# `gh` (and `jq` on PATH) — without them /sdd-pr-loop can only fail its own preflight.
+# While it is on, /sdd-pr-loop and the pr-fixer sub-agent are stamped into every
+# selected front-end; flipping it back to false reclaims all of that glue.
+# The installer ASKS for `enabled` (E20-F02) — a follow-up prompt right after the
+# builder-backend question, on a TTY — and takes --pr-loop=<true|false> for scripted
+# runs. Enter keeps the current value, so the opt-in default never flips by itself. No
+# preflight runs at install time; the prompt just states the precondition. RE-RUN the
+# installer to change it later, or edit the value below: only that one scalar is ever
+# rewritten, so every comment and hand-edit in this file survives. HARNESS_PR_LOOP_ENABLED
+# below is a PER-RUN override — it gates ONE run and is NEVER persisted back here.
+# Per-run env overrides (env wins over config): HARNESS_PR_LOOP_ENABLED,
+# HARNESS_AUTO_MERGE, HARNESS_MAX_ROUNDS, HARNESS_BLOCKING_SEVERITIES,
+# HARNESS_MERGE_STRATEGY. Execution knobs are env-ONLY (never config):
+# HARNESS_POLL_INTERVAL (60), HARNESS_POLL_CEILING (900),
+# HARNESS_FIRST_RESPONSE (180), HARNESS_DRY_RUN.
+# (The harness's own source repo opts in; every fresh install is seeded with `false`.)
+pr_loop:
+  enabled: false                 # opt-in master gate; ONLY `true` stamps /sdd-pr-loop glue
+  auto_merge: true               # merge once every gate is green and threads are Codex-only
+  max_rounds: 4                  # round cap; the cap round labels the PR needs-human
+  blocking_severities: "P0,P1"   # comma-separated severities that block a merge
+  merge_strategy: "merge"        # merge | squash
+
+# Change-size discipline (E21-F01) — ADVISORY in two tiers, never a hard block.
+# Both tiers produce a RECORDED DECISION; neither refuses work. A single hard cap is the
+# wrong instrument twice over: an agent-written change is legitimately denser than a
+# hand-written one, and a rename sweep or a generated contract can be thousands of lines at
+# near-zero review risk per line. An absent block behaves exactly as the values below.
+# Budgets are PRODUCTION lines — tests are a deliberate quality choice already enforced by
+# the Reviewer (a passing test per R-id) and must not be penalised by the instrument that
+# governs review surface.
+change_size:
+  advise_lines: 1500       # production lines added ⇒ split, or record one line saying why not
+  escalate_lines: 3000     # production lines added ⇒ recorded split plan, or an explicit override naming the reason
+  advise_files: 25         # files touched, advise tier
+  escalate_files: 50       # files touched, escalate tier
+  # Drill-time proxy: R-ids in ONE feature spec. It is the only size signal that exists
+  # before any code does, and each R-id obliges a test. Consumed by the Driller (split at
+  # decomposition) and the Architect (stop and report rather than spec an over-budget feature).
+  max_requirements: 12
+  # Path classifiers for the pre-PR check (E21-F02), one EXTENDED REGEX per entry, MATCHED
+  # AGAINST THE REPO-RELATIVE PATH and ADDED to the built-in multi-ecosystem defaults (they
+  # never replace them). A wrong classifier does not make the number slightly off — it makes
+  # it meaningless, so extend these rather than letting a repo's tests count as production.
+  test_paths: []           # extra test-file patterns, e.g. - "(^|/)spec/"
+  generated_paths: []      # extra generated/vendored patterns, excluded from the budget entirely
+
+# Deterministic Builder escalation (E17-F03), armed by the installer (E17-F05).
+# After this many Reviewer rejections, subsequent builds spawn `builder-heavy` instead of
+# `builder`. The counter is the EXISTING build<->review round (agents/orchestrator.md), so
+# this adds no second source of truth. A spec may also start heavy from round 1 with
+# `complexity: complex` in its frontmatter.
+#
+# `0` turns escalation OFF ENTIRELY — neither trigger fires. It is your hard veto, and
+# nothing below overrides it. The shipped value is 2.
+#
+# ESCALATION NEEDS A SECOND YES, AND THE INSTALLER SUPPLIES IT. `harness-install.sh` asks its
+# own model resolver what `builder` and `builder-heavy` resolve to on every front-end it
+# stamps, and records the comparison in `.harness/.escalation-arming`. Escalation fires only
+# while that verdict reads `armed` — i.e. `builder-heavy` resolves to a DIFFERENT model on
+# every selected front-end. Otherwise the harness declines and names the front-end to fix,
+# because escalating into a role that resolves to nothing is a DOWNGRADE: it abandons
+# whatever `models.builder` was set to, exactly when the build was struggling.
+#   claude / gemini / antigravity  a built-in tier alias is enough
+#   codex / opencode               a tier alone stamps NOTHING — you must also set the
+#                                  matching `pin.<front-end>.<tier>` in the models: block
+# The verdict is computed at INSTALL time, so re-run the installer after changing any of it.
+# WHAT THIS DOES NOT CHECK: that the model is STRONGER, or that it exists at all. The harness
+# has no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours;
+# what the check closes is the silent downgrade to no model at all.
+#
+# Under `execution.builder.backend: delegate` escalation is INAPPLICABLE — the external
+# executor picks its own model — and the harness never escalates on that path.
+escalation:
+  after_rejections: 2
+
+# Worker roster (E17-F04) — OPT-IN, local-only, and INERT by default.
+# `true` ⇒ every install writes `.harness/workers.json`: which of the harness's front-end
+# CLIs THIS MACHINE can invoke, recorded as versioned data (`schema: 1`) so an external
+# router can read one file instead of re-probing the environment every time. Nothing in
+# the harness itself consumes it.
+#
+# PRESENCE IS A `PATH` LOOKUP ONLY. The harness NEVER executes a rostered CLI, for any
+# purpose — version detection included, which is why CLI version requirements are
+# documented in comments here rather than checked. A data file cannot spawn a process.
+#
+# ONLY the literal `true` enables it: an absent block, an absent key, an empty value and
+# any other value all mean OFF — and while it is off an existing roster is RECLAIMED
+# (removed) on the next install, so flipping this back to false leaves nothing behind.
+#
+# The roster describes ONE MACHINE, is regenerated (overwritten) on every install, and is
+# gitignored — the same local-only treatment telemetry.jsonl gets, for the same reason:
+# committing it would put one developer's CLI set into a shared repo.
+workers:
+  roster: false

@@ -911,17 +911,18 @@
         {
           "id": "E99-F158",
           "title": "Document the implemented 0.78.1 baseline before front-end simplification",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "b3b47114d2274dfbe0a07e377aca199659def479",
+            "ref": "b3b47114d2274dfbe0a07e377aca199659def479",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F158-documentation-baseline/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (184)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E99-F158 done --evidence <merge-ref>`",
-            "pr": "184"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F158-documentation-baseline/"
         }
       ]
     },
@@ -1365,6 +1366,28 @@
             "E28-F02"
           ],
           "spec_path": "specs/epics/E28-greenfield-to-umbrella/F03-promote-to-umbrella/"
+        }
+      ]
+    },
+    {
+      "id": "E29",
+      "title": "Three supported front ends and native Codex workflow",
+      "status": "in-progress",
+      "features": [
+        {
+          "id": "E29-F01",
+          "title": "Retire Gemini and Antigravity and enable the native Codex SDD workflow",
+          "status": "in-review",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E29-native-codex-workflow/F01-native-codex/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (https://github.com/araozmd/harness-sdd/pull/185)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E29-F01 done --evidence <merge-ref>`",
+            "pr": "https://github.com/araozmd/harness-sdd/pull/185"
+          }
         }
       ]
     }

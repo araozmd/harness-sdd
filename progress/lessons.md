@@ -75,3 +75,4 @@
   ("Not strictly forbidden … but avoid: `git checkout`") satisfied it alone — relocating
   the real rule left the suite green. When a section gains a counter-example, re-derive
   every anchor over that section and require a token only the real rule carries.
+- [2026-09-14 builder] Source self-generation must derive escalation arming after reconciling actual Builder/heavy files and current ownership, not from a successful temporary consumer install; a protected edited or symlinked source role otherwise keeps an optimistic armed verdict. Pin both blocked/unstamped Builder cases and an unaffected Scout control (`test_codex_native.sh`, E29-F01 R11).

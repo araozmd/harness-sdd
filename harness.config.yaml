@@ -248,7 +248,6 @@ models:
   # .codex/agents/*.toml); only the `model` key is omitted, as for the `inherit` tier.
   #   opencode MUST be "provider/model" (an invalid value aborts your OpenCode run)
   #   codex    MUST be a bare model id (the provider comes from `model_provider`)
-  #   antigravity accepts only tier aliases and needs `agy` >= 1.1.5 (inert below it)
   # pin.opencode.reasoning: ""
   # pin.opencode.standard: ""
   # pin.opencode.cheap: ""
@@ -340,7 +339,7 @@ change_size:
 # every selected front-end. Otherwise the harness declines and names the front-end to fix,
 # because escalating into a role that resolves to nothing is a DOWNGRADE: it abandons
 # whatever `models.builder` was set to, exactly when the build was struggling.
-#   claude / gemini / antigravity  a built-in tier alias is enough
+#   claude                       a built-in tier alias is enough
 #   codex / opencode               a tier alone stamps NOTHING — you must also set the
 #                                  matching `pin.<front-end>.<tier>` in the models: block
 # The verdict is computed at INSTALL time, so re-run the installer after changing any of it.

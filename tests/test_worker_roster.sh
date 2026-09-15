@@ -35,7 +35,7 @@ set -eu
 # installer run now stamps claude only. This suite's fixtures predate the flip and
 # assert artifacts across the full matrix; pin the pre-flip selection explicitly
 # (an explicit --agents in any call still wins over this env seed).
-export HARNESS_AGENTS="claude,gemini,opencode,antigravity,codex"
+export HARNESS_AGENTS="claude,codex,opencode"
 
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-roster)"
@@ -44,7 +44,7 @@ trap 'rm -rf "$T"' EXIT
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
-ROSTERED_COMMANDS='claude gemini opencode agy codex'
+ROSTERED_COMMANDS='claude codex opencode gemini agy'
 
 # ── the sandbox PATH ─────────────────────────────────────────────────────────
 #
@@ -245,7 +245,7 @@ ROSTER_REL=".harness/workers.json"
 test_R1_enabled_writes_roster() {
   _d="$(target r1)"
   set_gate "$_d" true
-  _b="$(stub_bin r1 claude agy)"
+  _b="$(stub_bin r1 claude opencode)"
   hrun "$_d" "$_b" >"$T/r1.log" 2>&1 || { cat "$T/r1.log" >&2; fail "R1: installer exited non-zero"; }
   [ -f "$_d/$ROSTER_REL" ] \
     || fail "R1: workers.roster is enabled but the installer wrote no $ROSTER_REL"
@@ -380,7 +380,7 @@ PEOF
   # (b) end to end: the gate off adds no roster, and turning it on adds exactly one file.
   _off="$(target r2off)"
   set_gate "$_off" false
-  _b="$(stub_bin r2 claude agy)"
+  _b="$(stub_bin r2 claude opencode)"
   hrun "$_off" "$_b" >"$T/r2off.log" 2>&1 || { cat "$T/r2off.log" >&2; fail "R2: gate-off install exited non-zero"; }
   [ ! -e "$_off/$ROSTER_REL" ] \
     || fail "R2: the roster gate is off but $ROSTER_REL exists"
@@ -426,7 +426,7 @@ PEOF
 # ── R3 ───────────────────────────────────────────────────────────────────────
 test_R3_ungated_reclaims_existing() {
   _d="$(target r3)"
-  _b="$(stub_bin r3 claude agy)"
+  _b="$(stub_bin r3 claude opencode)"
   set_gate "$_d" true
   hrun "$_d" "$_b" >"$T/r3a.log" 2>&1 || { cat "$T/r3a.log" >&2; fail "R3: setup install exited non-zero"; }
   [ -f "$_d/$ROSTER_REL" ] || fail "R3: setup failed — no roster to reclaim"
@@ -455,19 +455,17 @@ test_R4_schema_is_one() {
 test_R5_one_entry_per_present_cli() {
   _d="$(target r5)"
   set_gate "$_d" true
-  _b="$(stub_bin r5 claude codex agy)"
+  _b="$(stub_bin r5 claude codex opencode)"
   hrun "$_d" "$_b" >"$T/r5.log" 2>&1 || { cat "$T/r5.log" >&2; fail "R5: installer exited non-zero"; }
   _r="$_d/$ROSTER_REL"
 
-  # Exactly one entry per resolving key, in AGENT_KEYS order (claude gemini opencode
-  # antigravity codex) — so the expected sequence is claude, antigravity, codex.
-  [ "$(rq "$_r" keys | tr '\n' ' ')" = "claude antigravity codex " ] \
-    || fail "R5: roster keys are '$(rq "$_r" keys | tr '\n' ' ')', expected 'claude antigravity codex ' (one per resolving key, in AGENT_KEYS order)"
+  # Exactly one entry per resolving supported key, in AGENT_KEYS order.
+  [ "$(rq "$_r" keys | tr '\n' ' ')" = "claude codex opencode " ] \
+    || fail "R5: roster keys are '$(rq "$_r" keys | tr '\n' ' ')', expected 'claude codex opencode ' (one per resolving key, in AGENT_KEYS order)"
 
-  # Each entry names the key it describes and the invocation command that resolved. The
-  # antigravity row is the discriminating one: its command is `agy`, not its key.
+  # Each entry names the key it describes and the invocation command that resolved.
   [ "$(rq "$_r" command claude)" = "claude" ]      || fail "R5: the claude entry's command is '$(rq "$_r" command claude)'"
-  [ "$(rq "$_r" command antigravity)" = "agy" ]    || fail "R5: the antigravity entry's command is '$(rq "$_r" command antigravity)', expected the invocation name 'agy'"
+  [ "$(rq "$_r" command opencode)" = "opencode" ]    || fail "R5: the opencode entry's command is '$(rq "$_r" command opencode)', expected the invocation name 'opencode'"
   [ "$(rq "$_r" command codex)" = "codex" ]        || fail "R5: the codex entry's command is '$(rq "$_r" command codex)'"
 
   # THE ENTRY SHAPE IS AN EQUALITY, NOT A PRESENCE CHECK. "An entry records no filesystem
@@ -475,7 +473,7 @@ test_R5_one_entry_per_present_cli() {
   # test that only checked `key`/`command` were present would pass an emitter that also
   # shipped `path`. `path` was in this spec until the gate removed it, so that emitter is a
   # live possibility rather than a hypothetical.
-  for _k in claude antigravity codex; do
+  for _k in claude codex opencode; do
     [ "$(rq "$_r" fields "$_k")" = "capabilities,command,key" ] \
       || fail "R5: the '$_k' entry's field set is {$(rq "$_r" fields "$_k")}, expected exactly {capabilities,command,key} — an entry records the key and the command that resolved, and NO filesystem path (spec → Recorded decision 4)"
   done
@@ -489,15 +487,15 @@ test_R5_unselected_cli_is_still_rostered() {
   # with other CLIs installed can catch it.
   _d="$(target r5sel)"
   set_gate "$_d" true
-  _b="$(stub_bin r5sel claude codex agy)"
+  _b="$(stub_bin r5sel claude codex opencode)"
   hrun "$_d" "$_b" -- --agents=claude >"$T/r5sel.log" 2>&1 \
     || { cat "$T/r5sel.log" >&2; fail "R5(sel): installer exited non-zero"; }
   _r="$_d/$ROSTER_REL"
 
   [ "$(rq "$_r" command codex)" != "__NOENTRY__" ] \
     || fail "R5(sel): 'codex' is installed but UNSELECTED and has no roster entry — the roster filtered by selection instead of recording it (plan → the agent_selected trap)"
-  [ "$(rq "$_r" command antigravity)" != "__NOENTRY__" ] \
-    || fail "R5(sel): 'antigravity' is installed but UNSELECTED and has no roster entry — the roster filtered by selection instead of recording it"
+  [ "$(rq "$_r" command opencode)" != "__NOENTRY__" ] \
+    || fail "R5(sel): 'opencode' is installed but UNSELECTED and has no roster entry — the roster filtered by selection instead of recording it"
 
   # Selection is a FIELD, never a filter: the unselected entries exist and carry what they
   # earned, minus harness-selected.
@@ -505,8 +503,8 @@ test_R5_unselected_cli_is_still_rostered() {
     || fail "R5(sel): the SELECTED 'claude' entry lacks harness-selected"
   ! has_cap "$_r" codex harness-selected \
     || fail "R5(sel): the UNSELECTED 'codex' entry carries harness-selected"
-  ! has_cap "$_r" antigravity harness-selected \
-    || fail "R5(sel): the UNSELECTED 'antigravity' entry carries harness-selected"
+  ! has_cap "$_r" opencode harness-selected \
+    || fail "R5(sel): the UNSELECTED 'opencode' entry carries harness-selected"
   has_cap "$_r" codex host-detectable \
     || fail "R5(sel): the unselected 'codex' entry lost host-detectable — deselection must not strip a capability it did not derive"
   has_cap "$_r" codex non-interactive \
@@ -536,7 +534,7 @@ test_R6_absent_cli_has_no_entry() {
 test_R7_capabilities_are_closed() {
   _d="$(target r7closed)"
   set_gate "$_d" true
-  _b="$(stub_bin r7closed claude codex agy gemini)"
+  _b="$(stub_bin r7closed claude codex opencode gemini)"
   hrun "$_d" "$_b" >"$T/r7c.log" 2>&1 || { cat "$T/r7c.log" >&2; fail "R7(closed): installer exited non-zero"; }
   _r="$_d/$ROSTER_REL"
 
@@ -571,16 +569,27 @@ test_R7_capabilities_are_closed() {
 test_R7_each_tag_tracks_its_evidence() {
   # One install pairs, for every tag, a key that HAS its evidence with a key that does not.
   #   harness-selected : claude (in --agents) vs codex (installed, not selected)
-  #   host-detectable  : codex  (HOST_MARKERS row) vs gemini (no row)
-  #   non-interactive  : codex  (WORKER_INVOKE claim) vs gemini (no claim)
+  #   host-detectable  : codex  (HOST_MARKERS row) vs opencode (no row)
+  #   non-interactive  : codex  (WORKER_INVOKE claim) vs opencode (no claim)
   _d="$(target r7ev)"
   set_gate "$_d" true
-  _b="$(stub_bin r7ev claude codex gemini)"
+  _b="$(stub_bin r7ev claude codex opencode)"
+  # All retained hosts ship both capability claims. Remove OpenCode's evidence
+  # only in a copied installer to prove tags follow the tables, including absence.
+  _saved_src="$SRC"
+  _probe_src="$T/evidence-source"
+  mkdir -p "$_probe_src"
+  cp -R "$SRC/." "$_probe_src/"
+  sed -e '/^opencode OPENCODE OPENCODE_PID$/d' -e 's/^opencode opencode non-interactive$/opencode opencode/' \
+    "$_probe_src/harness-install.sh" > "$_probe_src/harness-install.sh.tmp"
+  mv "$_probe_src/harness-install.sh.tmp" "$_probe_src/harness-install.sh"
+  SRC="$_probe_src"
   hrun "$_d" "$_b" -- --agents=claude >"$T/r7ev.log" 2>&1 \
     || { cat "$T/r7ev.log" >&2; fail "R7(evidence): installer exited non-zero"; }
+  SRC="$_saved_src"
   _r="$_d/$ROSTER_REL"
 
-  for _k in claude codex gemini; do
+  for _k in claude codex opencode; do
     [ "$(rq "$_r" command "$_k")" != "__NOENTRY__" ] \
       || fail "R7(evidence): setup failed — '$_k' was stubbed on PATH but has no roster entry, so its tags cannot be checked"
   done
@@ -589,14 +598,14 @@ test_R7_each_tag_tracks_its_evidence() {
   ! has_cap "$_r" codex  harness-selected || fail "R7: 'codex' is NOT in the selection but its entry carries harness-selected"
 
   has_cap  "$_r" codex  host-detectable   || fail "R7: 'codex' HAS a HOST_MARKERS row but its entry lacks host-detectable"
-  ! has_cap "$_r" gemini host-detectable  || fail "R7: 'gemini' has NO HOST_MARKERS row but its entry carries host-detectable"
+  ! has_cap "$_r" opencode host-detectable  || fail "R7: 'opencode' has NO HOST_MARKERS row but its entry carries host-detectable"
 
   has_cap  "$_r" codex  non-interactive   || fail "R7: 'codex' HAS a verified WORKER_INVOKE entrypoint but its entry lacks non-interactive"
-  ! has_cap "$_r" gemini non-interactive  || fail "R7: 'gemini' has NO verified entrypoint but its entry claims non-interactive — an unverified claim must never ship"
+  ! has_cap "$_r" opencode non-interactive  || fail "R7: 'opencode' has NO verified entrypoint but its entry claims non-interactive — an unverified claim must never ship"
 
-  # gemini earns nothing at all, and an empty capability list is a meaningful answer.
-  [ "$(rq "$_r" caps gemini)" = "" ] \
-    || fail "R7: the unselected, undetectable, unverified 'gemini' entry carries [$(rq "$_r" caps gemini)], expected an empty capability list"
+  # opencode earns nothing at all, and an empty capability list is a meaningful answer.
+  [ "$(rq "$_r" caps opencode)" = "" ] \
+    || fail "R7: the unselected, undetectable, unverified 'opencode' entry carries [$(rq "$_r" caps opencode)], expected an empty capability list"
 
   # The capability list is SORTED (R7/R9) — checked on the entry that earns more than one.
   [ "$(rq "$_r" caps claude)" = "harness-selected,host-detectable,non-interactive" ] \
@@ -633,7 +642,7 @@ test_R8_never_executes_a_rostered_cli() {
   rm -f "$WITNESS"
   _d="$(target r8)"
   set_gate "$_d" true
-  _b="$(stub_bin r8 claude codex agy)"
+  _b="$(stub_bin r8 claude codex opencode)"
   hrun "$_d" "$_b" >"$T/r8.log" 2>&1 || { cat "$T/r8.log" >&2; fail "R8: installer exited non-zero"; }
 
   # ANCHOR FIRST. "The witness does not exist" is equally true when the sandbox PATH was
@@ -642,7 +651,7 @@ test_R8_never_executes_a_rostered_cli() {
   # reached, on these very stubs, before reading the negative.
   [ -f "$_d/$ROSTER_REL" ] \
     || fail "R8: no roster was written, so the negative assertion below would be vacuous"
-  for _k in claude codex antigravity; do
+  for _k in claude codex opencode; do
     [ "$(rq "$_d/$ROSTER_REL" command "$_k")" != "__NOENTRY__" ] \
       || fail "R8: the roster has no '$_k' entry, so the stubs were never looked up and the negative assertion below would be vacuous"
   done
@@ -655,7 +664,7 @@ test_R8_never_executes_a_rostered_cli() {
 test_R9_rerun_is_byte_identical() {
   _d="$(target r9)"
   set_gate "$_d" true
-  _b="$(stub_bin r9 claude codex agy)"
+  _b="$(stub_bin r9 claude codex opencode)"
 
   # All three roster inputs held fixed: same gate, same selection, same set of resolving
   # keys. BYTE identity (cmp), not field-by-field equivalence — ordering bugs (detection
@@ -830,7 +839,7 @@ test_R11_roster_is_gitignored() {
 test_R12_symlink_is_refused() {
   _d="$(target r12)"
   set_gate "$_d" true
-  _b="$(stub_bin r12 claude agy)"
+  _b="$(stub_bin r12 claude opencode)"
   _outside="$T/r12-outside.json"
   printf 'not-a-roster\n' > "$_outside"
   ln -s "$_outside" "$_d/$ROSTER_REL"
@@ -863,12 +872,15 @@ test_roster_is_valid_json() {
   # resolved. Both shapes are loaded with a REAL parser here; `grep` cannot see either.
   _d="$(target json)"
   set_gate "$_d" true
-  _b="$(stub_bin jsonfull claude codex agy gemini opencode)"
+  _b="$(stub_bin jsonfull claude codex opencode gemini agy)"
   hrun "$_d" "$_b" >"$T/json1.log" 2>&1 || { cat "$T/json1.log" >&2; fail "json: installer exited non-zero"; }
   python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$_d/$ROSTER_REL" \
     || fail "json: the POPULATED roster is not parseable JSON"
-  [ "$(rq "$_d/$ROSTER_REL" nworkers)" = "5" ] \
-    || fail "json: the populated fixture stubbed all five keys but the roster holds $(rq "$_d/$ROSTER_REL" nworkers) entries"
+  for _retired in gemini antigravity; do
+    [ "$(rq "$_d/$ROSTER_REL" command "$_retired")" = "__NOENTRY__" ] || fail "R1: retired CLI $_retired was rostered despite removal"
+  done
+  [ "$(rq "$_d/$ROSTER_REL" nworkers)" = "3" ] \
+    || fail "json: the populated fixture stubbed all three supported keys but the roster holds $(rq "$_d/$ROSTER_REL" nworkers) entries"
   [ "$(rq "$_d/$ROSTER_REL" toplevel)" = "capability_vocabulary,generated_by,schema,workers" ] \
     || fail "json: the roster's top-level keys are {$(rq "$_d/$ROSTER_REL" toplevel)}, expected exactly {capability_vocabulary,generated_by,schema,workers}"
 

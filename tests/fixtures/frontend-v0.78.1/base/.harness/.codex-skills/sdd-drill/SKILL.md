@@ -1,0 +1,62 @@
+---
+name: sdd-drill
+description: Per-epic drill-down as Driller — decompose one draft epic into features + ADR deltas, then one epic-level approval (interactive)
+---
+
+## Invocation adapter
+
+When explicitly invoked — as `$sdd-drill` (Codex's spelling) or `/sdd-drill` (Antigravity's) — treat all text accompanying that mention as the value of `$ARGUMENTS` in the canonical instructions below.
+
+## Canonical workflow
+Act as **Driller** (`.harness/agents/driller.md`). That role file is the durable
+contract; this command carries the interactive front-end.
+
+The target `<epic-id>` is in `$ARGUMENTS`. The `<epic-id>` is **required** — if
+`$ARGUMENTS` is **empty**, STOP and **ask** the human for the epic id rather than drilling
+an arbitrary epic.
+
+1. Run `./.harness/init.sh`. If it exits non-zero, STOP and report — do not drill into a
+   broken environment.
+2. Read `.harness/harness.config.yaml` and the TaskStore (`.harness/state/tasks.json`, per
+   `.harness/store/local.md`).
+3. **Precondition guard.** Resolve `<epic-id>`. If it does not resolve to an existing epic,
+   or the epic's status is **not** `draft` (`planned` / `in-progress` / `done` / legacy
+   `pending`), a default run STOPS and reports why (missing / not-`draft`) — seed nothing,
+   append no ADR, change no status. (Re-running on an already-`planned` epic is an explicit
+   **amend** opt-in that appends features/ADRs above the current max without renumbering or
+   re-flipping.)
+4. Read the target `draft` epic (`.harness/specs/epics/<id>-<slug>/epic.md` + its
+   `.harness/state/tasks.json` row) and F02's design artifacts (`.harness/specs/vision.md`,
+   `.harness/specs/architecture.md`, `.harness/specs/adr/NNNN-*.md`) as inputs.
+5. Run a short, **adaptive** Q&A with the human to settle the feature breakdown. Where the
+   breakdown forks, offer **at most 3** options as **text-only** (markdown/ASCII) mockups —
+   never images. Keep it short.
+6. **Seed** the decomposition: write each new feature into the epic's `features` array
+   (`status: "pending"`, `sdd: true`, one-line `title`, `spec_path`, intra-epic
+   `depends_on`; ids as a next-sequential block strictly above the epic's max `F##`,
+   append-only, no reuse); fill the `epic.md` feature table (one row per feature); and write
+   a per-feature inbox brief at `.harness/progress/inbox/<E##>-F<NN>.md` from
+   `.harness/specs/_templates/inbox-brief.md`, recording the `ADR-NNNN` ids each feature
+   must honor.
+7. **Append** any per-epic **ADR deltas** the decomposition forces at
+   `.harness/specs/adr/NNNN-<title>.md` (4-digit, above the max existing ADR number, no
+   reuse) — do NOT rewrite or renumber F02's existing ADRs. Stay at per-epic depth; defer
+   feature-level design to the feature's own spec.
+8. **Doc-critic checkpoint (before re-validation).** Spawn the **Doc-critic**
+   (`.harness/agents/doc-critic.md`) as a sub-agent with `target-type=epic-decomposition`,
+   passing the target `epic.md` path, its feature table, the per-feature inbox brief paths,
+   and any ADR delta paths. Apply any advisory findings inline, then proceed. If the critic
+   invocation errors or times out, proceed best-effort and append a note under
+   `.harness/progress/<run>/` recording the skipped/failed review.
+9. **Re-validate** `.harness/state/tasks.json` against `.harness/store/tasks.schema.json`. If
+   it fails, report the failure and do NOT claim a successful drill.
+10. Present the **single epic-level decision** (one decision, not per feature):
+   - **approve** → flip the epic `draft → planned` and stamp `autonomous: true` on every
+     seeded feature (all-or-nothing); or
+   - **keep gated** → flip the epic `draft → planned`, leaving every seeded feature
+     `autonomous: false` so each parks at the per-feature spec-approval gate.
+   Re-validate again after the flip/stamp.
+11. **Report** the seeded features (ids + titles + `spec_path`s), the inbox briefs + ADR
+    ids, any ADR deltas, and the decision taken; tell the human to **run `/sdd-next`** to
+    execute. Do NOT spawn the Architect, do NOT write any feature `.spec/.plan/.tasks/.tests`,
+    and advance ONLY the target epic to `planned` — the Driller decomposes, never specs.

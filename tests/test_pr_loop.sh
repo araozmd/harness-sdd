@@ -28,7 +28,7 @@ export CODEX_HOME="$T/codex-home"
 # installer run now stamps claude only. This suite's fixtures predate the flip and
 # assert artifacts across the full matrix; pin the pre-flip selection explicitly
 # (an explicit --agents in any call still wins over this env seed).
-export HARNESS_AGENTS="claude,gemini,opencode,antigravity,codex"
+export HARNESS_AGENTS="claude,codex,opencode"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
@@ -106,8 +106,7 @@ test_command_mirrored_to_all_frontends() {           # R2
   _m="$T/mirror"
   install_on "$_m"
   for _f in "$_m/.claude/commands/sdd-pr-loop.md" \
-            "$_m/.opencode/command/sdd-pr-loop.md" \
-            "$_m/.agents/workflows/sdd-pr-loop.md"; do
+            "$_m/.opencode/command/sdd-pr-loop.md"; do
     [ -f "$_f" ] || fail "R2: /sdd-pr-loop not mirrored to $_f"
     cmp -s "$_f" "$_m/.claude/commands/sdd-pr-loop.md" \
       || fail "R2: $_f is not byte-identical to the Claude copy"
@@ -119,16 +118,12 @@ test_command_mirrored_to_all_frontends() {           # R2
   grep -qx 'name: sdd-pr-loop' "$_skill" || fail "R2: Codex pr-loop skill lacks name metadata"
   grep -qx '  allow_implicit_invocation: false' "$_policy" \
     || fail "R2: Codex pr-loop skill permits implicit invocation"
-  # Both invocation spellings, for the same reason as in test_install.sh: the unit is
-  # shared, and an adapter naming only `$sdd-pr-loop` leaves an Antigravity user's
-  # `/sdd-pr-loop <args>` unbound. (Codex r1 P2 #3705086021.)
-  _adapter="$(grep -F 'as the value of `$ARGUMENTS`' "$_skill")"
+  # Native Codex binds accompanying text to the workflow argument variable.
+  _adapter="$(grep -F 'all accompanying text as `$ARGUMENTS`' "$_skill")"
   [ -n "$_adapter" ] || fail "R2: pr-loop skill has no adapter line binding \$ARGUMENTS"
   printf '%s' "$_adapter" | grep -qF '`$sdd-pr-loop`' \
     || fail "R2: pr-loop skill adapter does not bind the \$sdd-pr-loop (Codex) spelling"
-  printf '%s' "$_adapter" | grep -qF '`/sdd-pr-loop`' \
-    || fail "R2: pr-loop skill adapter does not bind the /sdd-pr-loop (Antigravity) spelling"
-  sed -n '/^## Canonical workflow$/,$p' "$_skill" | tail -n +2 > "$_m/skill.body"
+  sed -n '/^## Canonical workflow$/,$p' "$_skill" | tail -n +2 | sed 's/\$sdd-/\/sdd-/g' > "$_m/skill.body"
   tail -n +5 "$_m/.claude/commands/sdd-pr-loop.md" > "$_m/command.body"
   cmp -s "$_m/skill.body" "$_m/command.body" \
     || fail "R2: Codex pr-loop skill instructions differ from the canonical body"
@@ -144,12 +139,11 @@ test_gate_off_stamps_nothing() {                      # R3
     || fail "R3: a fresh install did not seed pr_loop.enabled: false"
   for _f in "$_o/.claude/commands/sdd-pr-loop.md" \
             "$_o/.opencode/command/sdd-pr-loop.md" \
-            "$_o/.agents/workflows/sdd-pr-loop.md" \
             "$_o/.agents/skills/sdd-pr-loop/SKILL.md" \
             "$_o/.agents/skills/sdd-pr-loop/agents/openai.yaml" \
             "$_o/.claude/agents/pr-fixer.md" \
             "$_o/.opencode/agent/pr-fixer.md" \
-            "$_o/.agents/agents/pr-fixer.md"; do
+            "$_o/.codex/agents/pr-fixer.toml"; do
     [ -e "$_f" ] && fail "R3: gate off but $_f was stamped"
   done
   [ -d "$_o/.opencode/agent" ] && fail "R3: gate off must not create .opencode/agent/"
@@ -160,19 +154,18 @@ test_gate_off_stamps_nothing() {                      # R3
 
 test_deselect_removes_pr_loop_glue() {                # R4
   _d="$T/desel"
-  install_on "$_d"
+  install_on "$_d" --agents=claude,codex
   [ -f "$_d/.claude/commands/sdd-pr-loop.md" ] || fail "R4 setup: glue not stamped"
   [ -f "$_d/.agents/skills/sdd-pr-loop/SKILL.md" ] || fail "R4 setup: Codex skill not stamped"
   # the gate stays ON across the re-run: this proves DESELECTION reclaims, not the gate
-  install_on "$_d" --agents=gemini
+  install_on "$_d" --agents=opencode
   for _f in "$_d/.claude/commands/sdd-pr-loop.md" "$_d/.claude/agents/pr-fixer.md" \
-            "$_d/.opencode/command/sdd-pr-loop.md" "$_d/.opencode/agent/pr-fixer.md" \
-            "$_d/.agents/workflows/sdd-pr-loop.md" "$_d/.agents/agents/pr-fixer.md" \
+            "$_d/.codex/agents/pr-fixer.toml" \
             "$_d/.agents/skills/sdd-pr-loop/SKILL.md" \
             "$_d/.agents/skills/sdd-pr-loop/agents/openai.yaml"; do
     [ -e "$_f" ] && fail "R4: deselected front-end kept $_f"
   done
-  pass "R4 deselect: every front-end's /sdd-pr-loop + pr-fixer reclaimed"
+  pass "R4 deselect: Claude/Codex pr-loop glue reclaimed while OpenCode is selected"
 }
 
 test_gate_flip_off_reclaims() {                       # R5
@@ -184,7 +177,7 @@ test_gate_flip_off_reclaims() {                       # R5
   install_at "$_f"
   for _p in "$_f/.claude/commands/sdd-pr-loop.md" "$_f/.claude/agents/pr-fixer.md" \
             "$_f/.opencode/command/sdd-pr-loop.md" "$_f/.opencode/agent/pr-fixer.md" \
-            "$_f/.agents/workflows/sdd-pr-loop.md" "$_f/.agents/agents/pr-fixer.md" \
+            "$_f/.codex/agents/pr-fixer.toml" \
             "$_f/.agents/skills/sdd-pr-loop/SKILL.md" \
             "$_f/.agents/skills/sdd-pr-loop/agents/openai.yaml"; do
     [ -e "$_p" ] && fail "R5: gate flipped off but $_p survived while the front-end is still selected"
@@ -197,44 +190,14 @@ test_gate_flip_off_reclaims() {                       # R5
   pass "R5 gate true->false while selected reclaims the glue from every front-end"
 }
 
-test_gate_off_reclaims_unit_without_codex() {         # E99-F09 R6
-  # The gated skill unit is SHARED (ADR-0003), so the gate-off pass must reclaim it for
-  # ANY claiming front-end. Gated on `agent_selected codex` — as it was before E99-F09 —
-  # an antigravity-only target keeps an orphaned `.agents/skills/sdd-pr-loop/`
-  # advertising a loop the operator turned off.
-  _a="$T/agy-gate"
-  set_gate "$_a" true
-  install_at "$_a" --agents=antigravity
-  # Fixture precondition: an antigravity-only install must actually stamp the unit,
-  # otherwise "absent after the flip" is satisfied by never having written it.
-  [ -f "$_a/.agents/skills/sdd-pr-loop/SKILL.md" ] \
-    || fail "R6 setup: antigravity-only gate-on install did not stamp the shared pr-loop unit"
-  [ -f "$_a/.agents/skills/sdd-next/SKILL.md" ] \
-    || fail "R6 setup: antigravity-only install did not stamp the ungated units"
-  set_gate "$_a" false
-  install_at "$_a" --agents=antigravity
-  for _p in "$_a/.agents/skills/sdd-pr-loop/SKILL.md" \
-            "$_a/.agents/skills/sdd-pr-loop/agents/openai.yaml" \
-            "$_a/.agents/workflows/sdd-pr-loop.md"; do
-    [ -e "$_p" ] && fail "R6: gate off without codex selected left $_p behind"
-  done
-  # Same run, opposite direction: a gate-off that reclaimed everything would pass the
-  # removal assertions alone.
-  [ -f "$_a/.agents/skills/sdd-next/SKILL.md" ] \
-    || fail "R6: gate off wrongly reclaimed an ungated shared unit"
-  [ -f "$_a/.agents/rules/harness.md" ] \
-    || fail "R6: gate off wrongly reclaimed the antigravity rule"
-  grep -qF 'pr_loop.enabled is not true' "$_a/.err" \
-    || fail "R6: gate-off reclamation was not announced on an antigravity-only target"
-  pass "R6 gate-off reclaims the shared pr-loop unit on an antigravity-only target"
-}
+# Retired Antigravity gate-off coverage: test_frontend_retirement.sh::legacy_owned_cleanup_and_preservation.
 
 test_edited_copy_left_in_place_and_warns() {          # R6
   _e="$T/edited"
   set_gate "$_e" true
   install_at "$_e"
   printf '\n# my own note\n' >> "$_e/.agents/skills/sdd-pr-loop/SKILL.md"
-  printf '\n# my own note\n' >> "$_e/.agents/agents/pr-fixer.md"
+  printf '\n# my own note\n' >> "$_e/.codex/agents/pr-fixer.toml"
   set_gate "$_e" false
   install_at "$_e"
   [ -f "$_e/.agents/skills/sdd-pr-loop/SKILL.md" ] \
@@ -243,10 +206,10 @@ test_edited_copy_left_in_place_and_warns() {          # R6
     || fail "R6: edited Codex skill unit lost its explicit-only metadata"
   grep -qF 'my own note' "$_e/.agents/skills/sdd-pr-loop/SKILL.md" \
     || fail "R6: the user's edit was lost"
-  [ -f "$_e/.agents/agents/pr-fixer.md" ] \
-    || fail "R6: an EDITED .agents/ persona must survive reclamation"
+  [ -f "$_e/.codex/agents/pr-fixer.toml" ] \
+    || fail "R6: an edited native Codex role must survive reclamation"
   grep -qF 'sdd-pr-loop.md' "$_e/.err" || fail "R6: surviving edited prompt was not named in a warning"
-  grep -qF 'pr-fixer.md' "$_e/.err"    || fail "R6: surviving edited persona was not named in a warning"
+  grep -qF 'pr-fixer.toml' "$_e/.err"    || fail "R6: surviving edited persona was not named in a warning"
   pass "R6 edited copies in user-owned namespaces survive, each named in a warning"
 }
 
@@ -315,7 +278,7 @@ test_gate_off_then_on_restores() {                    # R8
   cp "$_r/.claude/commands/sdd-pr-loop.md" "$T/.rt-cmd"
   cp "$_r/.claude/agents/pr-fixer.md"      "$T/.rt-fixer"
   cp "$_r/.opencode/agent/pr-fixer.md"     "$T/.rt-ocfixer"
-  cp "$_r/.agents/agents/pr-fixer.md"      "$T/.rt-agfixer"
+  cp "$_r/.codex/agents/pr-fixer.toml"      "$T/.rt-cxfixer"
   cp "$_r/.agents/skills/sdd-pr-loop/SKILL.md" "$T/.rt-codex-skill"
   cp "$_r/.agents/skills/sdd-pr-loop/agents/openai.yaml" "$T/.rt-codex-policy"
   set_gate "$_r" false
@@ -325,7 +288,7 @@ test_gate_off_then_on_restores() {                    # R8
   cmp -s "$_r/.claude/commands/sdd-pr-loop.md" "$T/.rt-cmd"    || fail "R8: command not byte-identical after off->on"
   cmp -s "$_r/.claude/agents/pr-fixer.md"      "$T/.rt-fixer"  || fail "R8: claude pr-fixer not byte-identical after off->on"
   cmp -s "$_r/.opencode/agent/pr-fixer.md"     "$T/.rt-ocfixer" || fail "R8: opencode pr-fixer not byte-identical after off->on"
-  cmp -s "$_r/.agents/agents/pr-fixer.md"      "$T/.rt-agfixer" || fail "R8: antigravity pr-fixer not byte-identical after off->on"
+  cmp -s "$_r/.codex/agents/pr-fixer.toml"      "$T/.rt-cxfixer" || fail "R8: Codex pr-fixer not byte-identical after off->on"
   cmp -s "$_r/.agents/skills/sdd-pr-loop/SKILL.md" "$T/.rt-codex-skill" \
     || fail "R8: Codex skill not byte-identical after off->on"
   cmp -s "$_r/.agents/skills/sdd-pr-loop/agents/openai.yaml" "$T/.rt-codex-policy" \
@@ -502,25 +465,15 @@ test_opencode_json_unaffected_by_pr_loop() {          # R12
   pass "R12 opencode.json bytes + .opencode.stamp presence are independent of pr_loop"
 }
 
-test_antigravity_pr_fixer_persona() {                 # R13
-  _p="$BASE/.agents/agents/pr-fixer.md"
-  [ -f "$_p" ] || fail "R13: .agents/agents/pr-fixer.md not emitted"
-  grep -qE '^description: ' "$_p" || fail "R13: antigravity persona lacks a description"
-  grep -qF '.harness/agents/pr-fixer.md' "$_p" || fail "R13: persona does not point at the canonical role"
-  pass "R13 .agents/agents/pr-fixer.md emitted through the existing persona emitter"
-}
-
-test_no_codex_gemini_pr_fixer_artifact() {            # R14
-  [ -e "$BASE/.codex/agents/pr-fixer.toml" ] && fail "R14: a codex pr-fixer artifact was created"
-  [ -e "$BASE/.gemini/agents/pr-fixer.md" ]  && fail "R14: a gemini pr-fixer artifact was created"
-  # the role map must not have grown a pr-fixer row (it drives .gemini/ + .codex/ creation)
-  grep -qE '^MODEL_ROLES=.*pr-fixer' "$SRC/harness-install.sh" \
-    && fail "R14: pr-fixer was added to MODEL_ROLES"
-  awk '/^  ag_personas\(\)/,/^  }/' "$SRC/harness-install.sh" | grep -q 'pr-fixer' \
-    && fail "R14: pr-fixer was added to the ag_personas map"
-  grep -qF 'in-session' "$BODY" || fail "R14: body does not tell a front-end without pr-fixer to fix in-session"
-  grep -qF 'codex, gemini' "$BODY" || fail "R14: body does not name the front-ends without a pr-fixer sub-agent"
-  pass "R14 no codex/gemini pr-fixer artifact; role map untouched; body says in-session"
+test_native_codex_pr_fixer() {                       # E29-F01 R9/R10
+  _p="$BASE/.codex/agents/pr-fixer.toml"
+  [ -f "$_p" ] || fail "R9: native Codex pr-fixer was not emitted"
+  grep -q '^name = "pr-fixer"$' "$_p" || fail "R9: native pr-fixer name missing"
+  grep -q '^description = ' "$_p" || fail "R9: native pr-fixer description missing"
+  grep -q '^developer_instructions = ' "$_p" || fail "R9: native pr-fixer instructions missing"
+  grep -qF '.harness/agents/pr-fixer.md' "$_p" || fail "R9: native pr-fixer canonical pointer missing"
+  [ ! -e "$BASE/.gemini/agents/pr-fixer.md" ] || fail "R1: retired Gemini role emitted"
+  pass "R9 native Codex pr-fixer emitted with canonical role pointer"
 }
 
 # ══ Configuration (R15–R20) ═══════════════════════════════════════════════════
@@ -2109,7 +2062,6 @@ test_command_mirrored_to_all_frontends
 test_gate_off_stamps_nothing
 test_deselect_removes_pr_loop_glue
 test_gate_flip_off_reclaims
-test_gate_off_reclaims_unit_without_codex
 test_edited_copy_left_in_place_and_warns
 test_partial_codex_skill_unit_reclaims_owned_paths
 test_reclaim_preserves_user_files_and_prunes
@@ -2123,8 +2075,7 @@ test_canonical_pr_fixer_role
 test_claude_pr_fixer_shim
 test_opencode_pr_fixer_agent_file
 test_opencode_json_unaffected_by_pr_loop
-test_antigravity_pr_fixer_persona
-test_no_codex_gemini_pr_fixer_artifact
+test_native_codex_pr_fixer
 
 test_pr_loop_block_seeded
 test_pr_loop_block_migrated_idempotent

@@ -437,6 +437,13 @@ report that gets truncated mid-sentence.
 
 ## How you delegate (avoid the "broken telephone")
 
+For native Codex, select the installed named role (`architect`, `builder`,
+`builder-heavy`, `reviewer`, or `scout`) through the host's available delegation controls
+and start a fresh context. Use `$sdd-*` for Codex skill invocations; accompanying text
+supplies `$ARGUMENTS`. If fresh role delegation is unavailable, stop and report the
+limitation and file handoff path. Never simulate an independent Reviewer in the host.
+The init-failure halt and human `spec-ready` approval gate still apply.
+
 - Spawn each sub-agent with a **clean context**. Pass it ONLY: its role file, the
   specific spec/task files it needs, and the relevant `progress/` notes.
 - **Never** forward another agent's chat transcript. Hand-offs happen through files.
@@ -720,8 +727,8 @@ python3 tools/telemetry-report.py session
 ```
 
 which reproduces the same per-phase durations, round count, and human-gate latency from
-the log alone, so every AGENTS.md-compatible CLI (Claude Code, Gemini, OpenCode, Codex,
-Antigravity) surfaces the same summary. The reader resolves the **same** log path the
+the log alone, so every supported CLI (Claude Code, Codex, OpenCode) surfaces the same
+summary. The reader resolves the **same** log path the
 writer does — it reads the `telemetry.log` override from `harness.config.yaml` (resolved
 under `HARNESS_DIR`) and falls back to `<HARNESS_DIR>/telemetry.jsonl` — so the summary
 always reflects where records were actually written, even under a custom `telemetry.log`.

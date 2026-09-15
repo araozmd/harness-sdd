@@ -1,5 +1,24 @@
 # The Workflow
 
+## Host invocation and clean role contexts
+
+Supported front ends are Claude Code (primary), Codex (second), and OpenCode
+(third). This document uses canonical `/sdd-*` names for Claude/OpenCode. In
+Codex, invoke `$sdd-new <intent>`, `$sdd-plan <intent>`, `$sdd-drill <epic-id>`,
+`$sdd-next`, `$sdd-fix <description>`, `$sdd-fix-parallel`, and gated
+`$sdd-pr-loop <pr>`. Text accompanying the explicit skill mention supplies
+`$ARGUMENTS`; `/skills` is the discovery UI.
+
+Codex uses native named roles from `.codex/agents/`: seven standard roles plus
+`pr-fixer` while the PR-loop gate is on. Each Architect, Builder, Reviewer or
+PR-fixer handoff starts a fresh role context with file paths and bounded
+instructions, never forwarded chat history. Every role runs init first and
+halts on failure. The Orchestrator still pauses at `spec-ready` for human
+approval unless explicitly autonomous; only the independent Reviewer verdict
+permits `done`. If the host cannot start a required fresh role, report that
+limitation and the handoff path instead of performing an alleged isolated role
+in the current context.
+
 ## Intake — the step before `pending` (`/sdd-new`)
 
 Before a feature is `pending`, a raw idea has to become a well-formed TaskStore
@@ -659,8 +678,9 @@ is an `init.sh` dependency.
    threads' `commit_id` onto each new head.
 5. **Stall check** — a blocking comment id present in this round *and* the previous one
    escalates immediately, whatever the round number.
-6. **Fix** — one `pr-fixer` sub-agent per blocking comment (one comment, one fix, one
-   commit), then push. The `max_rounds - 1` round instead builds one combined prompt and
+6. **Fix** — one fresh `pr-fixer` sub-agent per blocking comment (one comment, one fix,
+   one commit), including the native Codex role with file-only handoffs, then push.
+   The `max_rounds - 1` round instead builds one combined prompt and
    escalates to a different worker, or runs one combined in-session pass. Reaching
    `max_rounds` labels the PR `needs-human` and stops.
 7. **Gate re-check + terminal state** — with every gate green: if any unresolved review
@@ -787,13 +807,17 @@ Notes that matter in practice:
   `none` is the case that matters: the heavy role resolves to **nothing** while `builder`
   resolves to something, so escalating would abandon your configured Builder model for the
   session default — a *downgrade*, arriving exactly when the build was struggling. On
-  `claude` / `gemini` / `antigravity` a built-in tier alias is enough; on `codex` / `opencode`
+  `claude` a built-in tier alias is enough; on `codex` / `opencode`
   a tier alone stamps **nothing** — you must also set the matching `pin.<front-end>.<tier>`.
   The verdict is computed at **install time**, so re-run the installer after changing any of
   it.
 - **The verdict is a conservative AND across selected front-ends.** The rule cannot know
   which front-end it is running under, so one misconfigured front-end disables escalation
   everywhere. That never downgrades anyone, and the `blocked` line tells you which one to fix.
+  Source `--self` defaults to Claude + Codex: inherited Codex makes the combined
+  verdict **UNARMED** even when Claude alone is armed. Explicit
+  `--self --agents=claude` retains the Claude-only verdict; model choices remain
+  in each host’s source role files and are preserved on regeneration.
 - **WHAT IT DOES NOT CHECK: that the model is STRONGER, or that it exists.** The harness has
   no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours —
   what the check closes is the silent downgrade to no model at all.

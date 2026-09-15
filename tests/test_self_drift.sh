@@ -23,7 +23,7 @@ pass() { echo "ok - $1"; }
 fixture() {
   _fx="$T/$1"
   mkdir -p "$_fx"
-  for _e in "$SRC"/* "$SRC"/.claude "$SRC"/.escalation-arming; do
+  for _e in "$SRC"/* "$SRC"/.claude "$SRC"/.codex "$SRC"/.agents "$SRC"/.escalation-arming; do
     [ -e "$_e" ] || continue
     case "$(basename "$_e")" in .git|node_modules) continue ;; esac
     cp -R "$_e" "$_fx/" 2>/dev/null || true
@@ -37,6 +37,8 @@ fixture() {
 glue_diff() {
   diff -r "$1/.claude/agents" "$SRC/.claude/agents" 2>&1 || true
   diff -r "$1/.claude/commands" "$SRC/.claude/commands" 2>&1 || true
+  diff -r "$1/.codex/agents" "$SRC/.codex/agents" 2>&1 || true
+  diff -r "$1/.agents/skills" "$SRC/.agents/skills" 2>&1 || true
   diff "$1/.escalation-arming" "$SRC/.escalation-arming" 2>&1 || true
 }
 
@@ -46,6 +48,7 @@ F="$(fixture green)"
 # ledger rather than inheriting a stale-but-correct copy (a dropped write survived
 # exactly this way in mutation testing).
 rm -f "$F/.claude/.glue-manifest"
+rm -rf "$F/.codex/agents" "$F/.agents/skills"
 sh "$F/harness-install.sh" --self >"$T/out1.txt" 2>&1 \
   || { cat "$T/out1.txt" >&2; fail "--self exited non-zero"; }
 _d="$(glue_diff "$F")"
@@ -66,7 +69,7 @@ pass "an emitter edit without regeneration is caught by the same comparison (R1)
 
 # ── R2: the manifest ledger ───────────────────────────────────────────────────
 [ -f "$F/.claude/.glue-manifest" ] || fail "no .glue-manifest after --self (R2)"
-for _must in .claude/agents/builder.md .claude/commands/sdd-next.md .escalation-arming; do
+for _must in .claude/agents/builder.md .claude/commands/sdd-next.md .codex/agents/builder.toml .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml .escalation-arming; do
   grep -q " $_must\$" "$F/.claude/.glue-manifest" || fail "manifest misses $_must (R2)"
 done
 grep -q "glue-manifest" "$F/.claude/.glue-manifest" && fail "manifest lists itself (R2)"
@@ -98,4 +101,18 @@ grep -q "diverges from its --self manifest" "$T/init-nomani.txt" \
   && fail "staleness warn fired with no manifest present (R3)"
 pass "silent when clean and when the manifest is absent (R3) [warn_silent]"
 
+# E29-F01 R7: each native artifact class participates in the existing manifest.
+for _path in .codex/agents/builder.toml .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml; do
+  _case="$(fixture native-drift)"
+  sh "$_case/harness-install.sh" --self >/dev/null 2>&1 || fail "native drift setup failed"
+  [ -f "$_case/$_path" ] || fail "native drift precondition missing $_path"
+  printf '\n# drift\n' >> "$_case/$_path"
+  (cd "$_case" && ./init.sh) > "$T/native-drift.log" 2>&1 || fail "native drift must remain warn-only"
+  grep -qF "$_path" "$T/native-drift.log" || fail "manifest missed edited $_path"
+  rm -f "$_case/$_path"
+  (cd "$_case" && ./init.sh) > "$T/native-missing.log" 2>&1 || fail "native missing must remain warn-only"
+  grep -qF "$_path" "$T/native-missing.log" || fail "manifest missed removed $_path"
+  rm -rf "$_case"
+done
+pass "native role, skill, and policy edits/removals trigger source drift (R7) [codex_manifest_and_idempotence]"
 echo "ALL PASSED (test_self_drift.sh)"

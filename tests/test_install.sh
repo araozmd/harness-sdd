@@ -17,7 +17,7 @@ export CODEX_HOME="$T/codex-home"
 # installer run now stamps claude only. This suite's fixtures predate the flip and
 # assert artifacts across the full matrix; pin the pre-flip selection explicitly
 # (an explicit --agents in any call still wins over this env seed).
-export HARNESS_AGENTS="claude,gemini,opencode,antigravity,codex"
+export HARNESS_AGENTS="claude,codex,opencode"
 
 # E18-F01: `pr_loop.enabled` is an OPT-IN gate — a fresh install seeds `false` and stamps
 # no /sdd-pr-loop glue at all. This suite's job is the COMMAND-SURFACE contract (generated
@@ -188,14 +188,14 @@ test_entrypoints_reference_local_overrides() {
 }
 
 test_entrypoints_reference_agents_local() {
-  for _ep in AGENTS.md CLAUDE.md GEMINI.md; do
+  for _ep in AGENTS.md CLAUDE.md; do
     grep -qF 'AGENTS.local.md' "$T/$_ep" \
       || fail "$_ep missing AGENTS.local.md local override guidance"
   done
 }
 
 test_local_override_guidance_is_conditional() {
-  for _ep in AGENTS.md CLAUDE.md GEMINI.md; do
+  for _ep in AGENTS.md CLAUDE.md; do
     grep -qF 'if present' "$T/$_ep" \
       || fail "$_ep local override guidance is not conditional"
   done
@@ -203,7 +203,7 @@ test_local_override_guidance_is_conditional() {
 }
 
 test_local_override_precedence_wording() {
-  for _ep in AGENTS.md CLAUDE.md GEMINI.md; do
+  for _ep in AGENTS.md CLAUDE.md; do
     grep -qF 'committed instructions remain authoritative' "$T/$_ep" \
       || fail "$_ep missing committed-instructions precedence wording"
   done
@@ -365,7 +365,7 @@ test_rationale_docs_installed_contract() {
     fail "E16-F02: installed rationale document missing"
   cmp -s "$SRC/docs/RATIONALE.md" "$T/.harness/docs/RATIONALE.md" ||
     fail "E16-F02: installed rationale differs from source"
-  grep -qF '| `docs/RATIONALE.md` |' "$T/.harness/AGENTS.md" ||
+  grep -qF 'docs/RATIONALE.md' "$T/.harness/AGENTS.md" ||
     fail "E16-F02: installed AGENTS docs map does not point to rationale"
   grep -qF '[rationale and deletion ledger](RATIONALE.md)' \
     "$T/.harness/docs/HARNESS.md" ||
@@ -515,9 +515,9 @@ for _p in GEMINI.md opencode.json .agents .codex .opencode; do
 done
 # Explicit opt-in still stamps a parked front-end (the park is a default, not a removal).
 _fo="$(mktemp -d 2>/dev/null || mktemp -d -t harness-fo)"
-CODEX_HOME="$T/codex-home" HARNESS_AGENTS= sh "$SRC/harness-install.sh" --agents=claude,gemini "$_fo" >/dev/null 2>&1 \
+CODEX_HOME="$T/codex-home" HARNESS_AGENTS= sh "$SRC/harness-install.sh" --agents=claude,codex "$_fo" >/dev/null 2>&1 \
   || fail "E25-F01: explicit opt-in install failed"
-[ -f "$_fo/GEMINI.md" ] || fail "E25-F01: explicit --agents=claude,gemini did not stamp GEMINI.md — the park must never disable the opt-in"
+[ -f "$_fo/.codex/agents/builder.toml" ] || fail "E25-F01: explicit --agents=claude,codex did not stamp Codex role — the park must never disable the opt-in"
 rm -rf "$_fd" "$_fo"
 pass "E25-F01: fresh default is claude-only; parked front-ends stay one explicit opt-in away"
 
@@ -569,7 +569,7 @@ for _p in __pycache__/ '*.pyc'; do
   grep -qxF "$_p" "$T/.harness/.gitignore" || fail ".harness/.gitignore missing bytecode ignore $_p (E99-F71/F89)"
 done
 # GENERATED AGENT SURFACES MUST STAY TRACKED. The documented install workflow is
-# committed-and-shared, so ignoring these would leave every Codex skill, Antigravity rule and
+# committed-and-shared, so ignoring these would leave every Codex skill and
 # OpenCode command out of a fresh clone — making .claude/ first-class and every other front
 # end second-class (Codex P1 on araozmd/harness-sdd#96). They are excluded from the
 # change-size budget by the built-in `generated` classifier instead, never by an ignore.
@@ -584,7 +584,7 @@ grep -qxF '.claude/' "$T/.gitignore"                    && fail "the ignores mus
 pass "project-root .gitignore seeds personal/runtime and local prompt ignores (config layering)"
 
 # E09-F02: generated entrypoint marker blocks document optional local prompt guidance.
-for _ep in AGENTS.md CLAUDE.md GEMINI.md; do
+for _ep in AGENTS.md CLAUDE.md; do
   grep -qF 'AGENTS.local.md' "$T/$_ep" \
     || fail "$_ep missing AGENTS.local.md local override guidance"
   grep -qF 'if present' "$T/$_ep" \
@@ -644,7 +644,7 @@ pass "version stamped (R2)"
 # entrypoint: custom prose preserved AND a single harness block added                          # R3
 grep -qF 'Custom instructions here.' "$T/CLAUDE.md" || fail "custom CLAUDE.md content lost"
 grep -qF '<!-- harness:begin -->'     "$T/CLAUDE.md" || fail "harness block not added"
-[ -f "$T/AGENTS.md" ] && [ -f "$T/GEMINI.md" ]      || fail "AGENTS.md/GEMINI.md not created"
+[ -f "$T/AGENTS.md" ]      || fail "AGENTS.md not created"
 test_existing_entrypoint_prose_preserved
 pass "entrypoint merge preserves prose + adds block (R3)"
 
@@ -823,68 +823,14 @@ grep -qE '^mode: subagent$' "$T/.opencode/agent/pr-fixer.md" \
   || fail "opencode pr-fixer is not declared mode: subagent"
 pass "OpenCode commands generated (R7)"
 
-# ── Antigravity glue (.agents/, E07-F01 R1–R12) ───────────────────────────────────────────────
-# Mirrors the .claude/ + .opencode/ assertions above. A sentinel of canonical orchestrator
-# prose proves the glue POINTS at the roles and never forks a body (R3/R5). The default
-# install (no override) stamps ALL agents, so antigravity glue is present here.
-AG_SENTINEL='You are the **Orchestrator**. You are the project manager of the harness.'
-
-# R1: GEMINI.md managed block boots the Orchestrator against .harness/AGENTS.md.
-grep -qF '<!-- harness:begin -->' "$T/GEMINI.md" || fail "GEMINI.md missing harness block (R1)"
-grep -qF '.harness/AGENTS.md' "$T/GEMINI.md"     || fail "GEMINI.md block does not point at .harness/AGENTS.md (R1)"
-
-# R2: Antigravity entrypoint rule written + points at the harness source of truth + entry role.
-[ -f "$T/.agents/rules/harness.md" ]                                  || fail "antigravity rule .agents/rules/harness.md missing (R2)"
-grep -qF '.harness/AGENTS.md' "$T/.agents/rules/harness.md"           || fail "antigravity rule does not point at .harness/AGENTS.md (R2)"
-grep -qF '.harness/agents/orchestrator.md' "$T/.agents/rules/harness.md" || fail "antigravity rule does not point at the orchestrator role (R2)"
-# R3: rule points at canonical roles, no copied role body (sentinel must be ABSENT).
-grep -qF "$AG_SENTINEL" "$T/.agents/rules/harness.md" && fail "antigravity rule embeds a copied role body (R3)"
-
-# R4/R5 (best-effort, SHAPE only — never registration): one persona per role, each with a
-# `description`, deferring to .harness/agents/<role>.md, mandating init.sh + progress/ hand-off,
-# with no copied role body. Bare-file persona discovery is unconfirmed, so these assert shape
-# (correct plural dir, description, defers to canonical role, sentinel absent) — NOT that the
-# persona registers as an Antigravity subagent.
-for r in orchestrator architect builder builder-heavy reviewer scout doc-critic; do
-  [ -f "$T/.agents/agents/$r.md" ]                       || fail "antigravity persona $r missing (R4)"
-  grep -qE '^description:' "$T/.agents/agents/$r.md"      || fail "antigravity persona $r has no description (R4)"
-  grep -qF ".harness/agents/$r.md" "$T/.agents/agents/$r.md" || fail "antigravity persona $r does not defer to .harness/agents/$r.md (R5)"
-  grep -qF '.harness/init.sh' "$T/.agents/agents/$r.md"  || fail "antigravity persona $r does not mandate .harness/init.sh (R5)"
-  grep -qF '.harness/progress/' "$T/.agents/agents/$r.md" || fail "antigravity persona $r does not hand off via .harness/progress/ (R5)"
-  grep -qF "$AG_SENTINEL" "$T/.agents/agents/$r.md"      && fail "antigravity persona $r embeds a copied role body (R5)"
-done
-
-# R6/R7: all five workflows generated, each carrying a `description` (slash-command registration).
-for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-loop; do
-  [ -f "$T/.agents/workflows/$w.md" ]                    || fail "antigravity workflow $w missing (R6)"
-  grep -qE '^description:' "$T/.agents/workflows/$w.md"   || fail "antigravity workflow $w has no description (R7)"
-  grep -qF '$ARGUMENTS' "$T/.agents/workflows/$w.md"      || fail "antigravity workflow $w does not carry \$ARGUMENTS (R8)"
-done
-# E18-F01 R13/R52: the gated pr-fixer persona is emitted for antigravity too, pointing at
-# the canonical role — and it is NOT part of the model-routing persona map.
-[ -f "$T/.agents/agents/pr-fixer.md" ] || fail "antigravity pr-fixer persona missing (E18-F01 R13)"
-grep -qF '.harness/agents/pr-fixer.md' "$T/.agents/agents/pr-fixer.md" \
-  || fail "antigravity pr-fixer persona does not defer to .harness/agents/pr-fixer.md" 
-
-# R8: each workflow acts as its role, resolved against .harness/agents/*.md.
-grep -qF '.harness/agents/orchestrator.md' "$T/.agents/workflows/sdd-next.md" || fail "sdd-next workflow does not resolve orchestrator against .harness/ (R8)"
-grep -qF '.harness/agents/inception.md'    "$T/.agents/workflows/sdd-new.md"  || fail "sdd-new workflow does not resolve inception against .harness/ (R8)"
-grep -qF '.harness/agents/planner.md'      "$T/.agents/workflows/sdd-plan.md" || fail "sdd-plan workflow does not resolve planner against .harness/ (R8)"
-grep -qF '.harness/agents/driller.md'      "$T/.agents/workflows/sdd-drill.md" || fail "sdd-drill workflow does not resolve driller against .harness/ (R8)"
-grep -qF '.harness/agents/fixer.md'        "$T/.agents/workflows/sdd-fix.md"  || fail "sdd-fix workflow does not resolve fixer against .harness/ (R8)"
-grep -qF '.harness/agents/fixer.md' "$T/.agents/workflows/sdd-fix-parallel.md" || fail "sdd-fix-parallel workflow does not resolve fixer"
-
-# R9: each workflow body is byte-identical to the Claude command of the same name (no drift).
-for w in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-loop; do
-  cmp -s "$T/.claude/commands/$w.md" "$T/.agents/workflows/$w.md" || fail "antigravity workflow $w differs from claude $w (R9)"
-done
-pass "Antigravity glue generated (R11)"
+# E29-F01 R1/R3 supersede retired active-host cases here. Frozen legacy
+# cleanup/preservation coverage lives in tests/test_frontend_retirement.sh.
 
 # E10-F01 R12/R13: the /sdd-next scoped-selection front-end is generated into EVERY selected
-# target (Claude/OpenCode/Antigravity here; Codex repository skills in its select case),
+# target (Claude/OpenCode commands and Codex repository skills),
 # byte-identical, and each carries the --mine wiring + forwards $ARGUMENTS. The cmp -s chains
 # above prove byte-identity across targets; assert the scope token reached each generated body.
-for _b in "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" "$T/.agents/workflows/sdd-next.md"; do
+for _b in "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" "$T/.agents/skills/sdd-next/SKILL.md"; do
   grep -qF -- '--mine' "$_b"      || fail "generated /sdd-next glue missing --mine scope wiring: $_b (E10-F01 R12/R13)"
   grep -qF '$ARGUMENTS' "$_b"     || fail "generated /sdd-next glue does not forward \$ARGUMENTS: $_b (E10-F01 R13)"
 done
@@ -1080,14 +1026,14 @@ pass "arg guards reject bad invocations (R9)"
 TA="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 CODEX_HOME="$TA/ch" sh "$SRC/harness-install.sh" "$TA" >/dev/null || fail "no-override install exited non-zero"
 [ -f "$TA/CLAUDE.md" ]       || fail "R6: no-override run did not stamp claude (CLAUDE.md)"
-[ -f "$TA/GEMINI.md" ]       || fail "R6: no-override run did not stamp gemini (GEMINI.md)"
+[ -f "$TA/.codex/agents/builder.toml" ] || fail "R6: all-host run did not stamp Codex"
 [ -f "$TA/opencode.json" ]   || fail "R6: no-override run did not stamp opencode (opencode.json)"
 [ -d "$TA/.claude/commands" ] || fail "R6: no-override run did not stamp claude glue"
 [ -d "$TA/.opencode/command" ] || fail "R6: no-override run did not stamp opencode glue"
 [ -f "$TA/.agents/skills/sdd-next/SKILL.md" ] || fail "R6: no-override run did not stamp codex repository skill"
 [ -d "$TA/ch/prompts" ] && fail "R4: no-override run wrote deprecated global Codex prompts"
 [ -f "$TA/.harness/.agents" ] || fail "R8: .harness/.agents not written on no-override run"
-for _k in claude gemini opencode antigravity codex; do
+for _k in claude codex opencode; do
   grep -qx "$_k" "$TA/.harness/.agents" || fail "R1/R6: .harness/.agents missing '$_k' on ALL default"
 done
 rm -rf "$TA"
@@ -1120,21 +1066,21 @@ pass "--agents=claude,opencode stamps each selected agent (R3)"
 
 # env_override_selects (R5): HARNESS_AGENTS resolves the set, and --agents wins too.
 TD="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-HARNESS_AGENTS=gemini sh "$SRC/harness-install.sh" "$TD" >/dev/null || fail "HARNESS_AGENTS=gemini exited non-zero"
-[ -f "$TD/GEMINI.md" ]   || fail "R5: HARNESS_AGENTS=gemini did not stamp gemini"
-[ -f "$TD/CLAUDE.md" ]   && fail "R5: HARNESS_AGENTS=gemini must not stamp claude"
-[ -f "$TD/opencode.json" ] && fail "R5: HARNESS_AGENTS=gemini must not stamp opencode"
+HARNESS_AGENTS=codex sh "$SRC/harness-install.sh" "$TD" >/dev/null || fail "HARNESS_AGENTS=codex exited non-zero"
+[ -f "$TD/.codex/agents/builder.toml" ]   || fail "R5: HARNESS_AGENTS=codex did not stamp codex"
+[ -f "$TD/CLAUDE.md" ]   && fail "R5: HARNESS_AGENTS=codex must not stamp claude"
+[ -f "$TD/opencode.json" ] && fail "R5: HARNESS_AGENTS=codex must not stamp opencode"
 rm -rf "$TD"
 # --agents wins over an HARNESS_AGENTS env value at the same time
 TD2="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-HARNESS_AGENTS=gemini sh "$SRC/harness-install.sh" --agents=claude "$TD2" >/dev/null || fail "override precedence run failed"
-[ -f "$TD2/CLAUDE.md" ]  || fail "R5: --agents=claude must win over HARNESS_AGENTS=gemini"
-[ -f "$TD2/GEMINI.md" ]  && fail "R5: --agents must override HARNESS_AGENTS (gemini should be skipped)"
+HARNESS_AGENTS=codex sh "$SRC/harness-install.sh" --agents=claude "$TD2" >/dev/null || fail "override precedence run failed"
+[ -f "$TD2/CLAUDE.md" ]  || fail "R5: --agents=claude must win over HARNESS_AGENTS=codex"
+[ -f "$TD2/.codex/agents/builder.toml" ]  && fail "R5: --agents must override HARNESS_AGENTS (codex should be skipped)"
 rm -rf "$TD2"
 pass "explicit --agents / HARNESS_AGENTS override resolves the set, --agents wins (R5)"
 
 # registry_keys (R10): every registry key is individually selectable.
-for _k in claude gemini opencode antigravity codex; do
+for _k in claude codex opencode; do
   TK="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
   sh "$SRC/harness-install.sh" --agents="$_k" "$TK" >/dev/null || fail "R10: --agents=$_k exited non-zero"
   grep -qx "$_k" "$TK/.harness/.agents" || fail "R10: '$_k' not selectable/persisted"
@@ -1142,59 +1088,8 @@ for _k in claude gemini opencode antigravity codex; do
 done
 pass "every registry key is individually selectable (R10)"
 
-# antigravity_only_writes_gemini_entrypoint (E07-F01 R1, Codex r1 P2 #3404185446):
-# GEMINI.md is Antigravity's in-repo bootstrap entrypoint, so an antigravity-only
-# install (no gemini) MUST still write GEMINI.md with the harness managed block.
-TAG="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-sh "$SRC/harness-install.sh" --agents=antigravity "$TAG" >/dev/null || fail "--agents=antigravity exited non-zero"
-[ -f "$TAG/GEMINI.md" ]                              || fail "R1: --agents=antigravity must write GEMINI.md entrypoint (Codex r1 P2)"
-grep -qF '<!-- harness:begin -->' "$TAG/GEMINI.md"   || fail "R1: antigravity-only GEMINI.md missing harness managed block (Codex r1 P2)"
-grep -qF '.harness/AGENTS.md' "$TAG/GEMINI.md"       || fail "R1: antigravity-only GEMINI.md does not point at .harness/AGENTS.md"
-[ -f "$TAG/.agents/rules/harness.md" ]                || fail "R1: antigravity-only install missing .agents/ glue"
-[ -f "$TAG/CLAUDE.md" ]    && fail "R4: antigravity-only must not write CLAUDE.md"
-[ -f "$TAG/opencode.json" ] && fail "R4: antigravity-only must not write opencode.json"
-rm -rf "$TAG"
-pass "--agents=antigravity writes GEMINI.md entrypoint (R1, Codex r1 P2)"
-
-# antigravity_only_installs_shared_units (E99-F09 R1/R2/R3, ADR-0003): Antigravity
-# discovers `.agents/skills/<name>/SKILL.md` with name+description frontmatter, and the
-# unit the harness already generates satisfies that contract — so an antigravity-only
-# target gets the SAME unit Codex gets, byte for byte, policy companion included.
-TAS="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-TCS_REF="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-CODEX_HOME="$TAS/ch" sh "$SRC/harness-install.sh" --agents=antigravity "$TAS" >/dev/null \
-  || fail "R1: --agents=antigravity exited non-zero"
-CODEX_HOME="$TCS_REF/ch" sh "$SRC/harness-install.sh" --agents=codex "$TCS_REF" >/dev/null \
-  || fail "R2 reference install (--agents=codex) exited non-zero"
-for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel; do
-  [ -f "$TAS/.agents/skills/$_c/SKILL.md" ] \
-    || fail "R1: antigravity-only install did not write the shared skill unit $_c"
-  # Antigravity's documented discovery contract: BOTH frontmatter fields, inside the
-  # leading `---` block. A body that merely contains the words elsewhere is not a skill.
-  sed -n '1,4p' "$TAS/.agents/skills/$_c/SKILL.md" | grep -qx -- '---' \
-    || fail "R1: shared skill unit $_c has no leading frontmatter fence"
-  sed -n '1,4p' "$TAS/.agents/skills/$_c/SKILL.md" | grep -q "^name: $_c\$" \
-    || fail "R1: shared skill unit $_c has no matching name: field"
-  sed -n '1,4p' "$TAS/.agents/skills/$_c/SKILL.md" | grep -q '^description: .' \
-    || fail "R1: shared skill unit $_c has no non-empty description: field"
-  # R3: the explicit-only policy is written even though codex is NOT selected — Codex
-  # discovers the directory itself, so a unit without it is implicitly invocable.
-  [ -f "$TAS/.agents/skills/$_c/agents/openai.yaml" ] \
-    || fail "R3: antigravity-only install omitted the explicit-only policy companion for $_c"
-  # R2: three separate installs, compared across runs. Regenerating a reference in-process
-  # would compare the generator with itself and pass even if nothing was installed.
-  cmp -s "$TAS/.agents/skills/$_c/SKILL.md" "$TCS_REF/.agents/skills/$_c/SKILL.md" \
-    || fail "R2: shared unit $_c differs between an antigravity-only and a codex-only install"
-  cmp -s "$TAS/.agents/skills/$_c/agents/openai.yaml" "$TCS_REF/.agents/skills/$_c/agents/openai.yaml" \
-    || fail "R2: policy companion $_c differs between an antigravity-only and a codex-only install"
-done
-TBS="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-CODEX_HOME="$TBS/ch" sh "$SRC/harness-install.sh" --agents=antigravity,codex "$TBS" >/dev/null \
-  || fail "R2 both-selected install exited non-zero"
-cmp -s "$TAS/.agents/skills/sdd-next/SKILL.md" "$TBS/.agents/skills/sdd-next/SKILL.md" \
-  || fail "R2: selecting BOTH claimants produced a different shared unit"
-rm -rf "$TAS" "$TCS_REF" "$TBS"
-pass "an antigravity-only install writes the same shared skill units, policy included (R1, R2, R3)"
+# E29-F01 R1/R3 supersede retired active-host cases here. Frozen legacy
+# cleanup/preservation coverage lives in tests/test_frontend_retirement.sh.
 
 # codex_only_stamps_project_skills: --agents=codex writes repository-local skills with
 # deterministic metadata wrapped around the canonical command bodies. It never creates
@@ -1215,21 +1110,16 @@ for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-lo
     || fail "codex: $_c metadata has no policy block"
   grep -qx '  allow_implicit_invocation: false' "$_policy" \
     || fail "codex: $_c is not explicit-invocation-only"
-  # The unit is shared, so the adapter must bind arguments for BOTH invocation spellings:
-  # Codex types `$sdd-next`, Antigravity types `/sdd-next` (E07-F01 spec → Commands).
-  # Naming only one spelling leaves the other's arguments unbound — the workflow then runs
-  # without the target the user asked for. (Codex r1 P2 #3705086021.)
-  _adapter="$(grep -F 'as the value of `$ARGUMENTS`' "$_skill")"
+  # Native Codex binds the explicit skill invocation arguments.
+  _adapter="$(grep -F 'all accompanying text as `$ARGUMENTS`' "$_skill")"
   [ -n "$_adapter" ] || fail "codex: $_c has no adapter line binding \$ARGUMENTS"
   printf '%s' "$_adapter" | grep -qF "\`\$$_c\`" \
     || fail "codex: $_c adapter does not bind the \$$_c (Codex) invocation spelling"
-  printf '%s' "$_adapter" | grep -qF "\`/$_c\`" \
-    || fail "codex: $_c adapter does not bind the /$_c (Antigravity) invocation spelling"
-  grep -qF 'as the value of `$ARGUMENTS`' "$_skill" \
+  grep -qF 'all accompanying text as `$ARGUMENTS`' "$_skill" \
     || fail "codex: $_c does not define the canonical \$ARGUMENTS mapping"
 done
-# E18-F01 R14: NO pr-fixer artifact is ever created for the codex front-end.
-[ -f "$TCX/.codex/agents/pr-fixer.toml" ] && fail "codex: must not create a pr-fixer artifact (E18-F01 R14)" 
+# E29-F01 R9: gate-on Codex carries the isolated native pr-fixer.
+[ -f "$TCX/.codex/agents/pr-fixer.toml" ] || fail "E29-F01 R9: gate-on Codex pr-fixer missing"
 [ -d "$TCX/ch/prompts" ]                 && fail "codex: current install created deprecated global prompts"
 # no OTHER front-end stamped
 [ -f "$TCX/CLAUDE.md" ]    && fail "R4: --agents=codex must not write CLAUDE.md"
@@ -1244,11 +1134,11 @@ grep -qF -- '--mine' "$TCX/.agents/skills/sdd-next/SKILL.md" || fail "codex: sdd
 # After removing the adapter metadata/instruction, the canonical workflow remains
 # byte-identical to Claude.
 CODEX_HOME="$TCX/ch2" sh "$SRC/harness-install.sh" --agents=claude,codex "$TCX" >/dev/null || fail "codex+claude install failed"
-sed -n '/^## Canonical workflow$/,$p' "$TCX/.agents/skills/sdd-next/SKILL.md" | tail -n +2 > "$TCX/skill.body"
+sed -n '/^## Canonical workflow$/,$p' "$TCX/.agents/skills/sdd-next/SKILL.md" | tail -n +2 | sed 's/\$sdd-/\/sdd-/g' > "$TCX/skill.body"
 tail -n +5 "$TCX/.claude/commands/sdd-next.md" > "$TCX/command.body"
 cmp -s "$TCX/skill.body" "$TCX/command.body" \
   || fail "codex: sdd-next skill instructions differ from the canonical command body"
-sed -n '/^## Canonical workflow$/,$p' "$TCX/.agents/skills/sdd-fix-parallel/SKILL.md" | tail -n +2 > "$TCX/parallel-skill.body"
+sed -n '/^## Canonical workflow$/,$p' "$TCX/.agents/skills/sdd-fix-parallel/SKILL.md" | tail -n +2 | sed 's/\$sdd-/\/sdd-/g' > "$TCX/parallel-skill.body"
 tail -n +5 "$TCX/.claude/commands/sdd-fix-parallel.md" > "$TCX/parallel-command.body"
 cmp -s "$TCX/parallel-skill.body" "$TCX/parallel-command.body" \
   || fail "codex: parallel skill instructions differ from the canonical command body"
@@ -1301,81 +1191,14 @@ CODEX_HOME="$TCS/ch" sh "$SRC/harness-install.sh" --agents=claude "$TCS" >/dev/n
 rm -rf "$TCS"
 pass "selected Codex skill units preserve foreign bytes and update/reclaim only through last-written stamps"
 
-# test_sdd_fix_parallel_registry_cleanup (covered across each deselection block below)
-# codex_deselect_keeps_shared_unit (E99-F09 R4, §7 `codex)`): dropping codex while
-# ANTIGRAVITY IS STILL SELECTED must leave the skill units alone.
-#
-# THIS BLOCK'S VERDICT WAS DELIBERATELY INVERTED by E99-F09 (ADR-0003). It previously
-# asserted the units were REMOVED here, which was correct while `.agents/skills/` was
-# Codex's alone. It is now ONE SHARED UNIT PER COMMAND claimed by {codex, antigravity},
-# so removing it on codex-deselect deletes Antigravity's live command glue — the exact
-# data-loss case that parked PR #87. Do not "restore" the old assertions; the
-# last-claimant reclaim is covered by its own block below.
-TCD="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-CH="$TCD/ch"
-CODEX_HOME="$CH" sh "$SRC/harness-install.sh" --agents=antigravity,codex "$TCD" >/dev/null || fail "codex deselect setup failed"
-# Fixture preconditions, asserted: "still present afterwards" proves nothing about a
-# reclaim if the install never wrote the unit — and neither do the stamps.
-[ -f "$TCD/.agents/skills/sdd-next/SKILL.md" ] || fail "codex deselect setup: skills not stamped"
-[ -f "$TCD/.agents/skills/sdd-next/agents/openai.yaml" ] || fail "codex deselect setup: policy companion not stamped"
-[ -f "$TCD/.harness/.codex-skills/sdd-next/SKILL.md" ] || fail "codex deselect setup: ownership stamp missing"
-cp "$TCD/.agents/skills/sdd-next/SKILL.md" "$TCD/pre-deselect-skill.ref"
-cp "$TCD/.harness/.codex-skills/sdd-next/SKILL.md" "$TCD/pre-deselect-stamp.ref"
-printf '\n# user edit\n' >> "$TCD/.agents/skills/sdd-fix/SKILL.md"
-printf 'mine\n' > "$TCD/.agents/user-file.txt"
-_cwarn="$(CODEX_HOME="$CH" sh "$SRC/harness-install.sh" --agents=antigravity "$TCD" 2>&1 >/dev/null)" \
-  || fail "codex deselect re-run exited non-zero"
-# Compare against bytes captured BEFORE the run, not a freshly generated reference: §5
-# install runs before §7 reclaim, so a fresh reference also matches a unit that was
-# deleted and rewritten.
-cmp -s "$TCD/pre-deselect-skill.ref" "$TCD/.agents/skills/sdd-next/SKILL.md" \
-  || fail "R4: codex deselect changed a shared skill unit Antigravity still claims"
-[ -f "$TCD/.agents/skills/sdd-fix-parallel/SKILL.md" ] || fail "R4: codex deselect removed a shared parallel skill unit"
-[ -f "$TCD/.agents/skills/sdd-pr-loop/SKILL.md" ] || fail "R4: codex deselect removed the shared pr-loop skill unit"
-[ -f "$TCD/.agents/skills/sdd-next/agents/openai.yaml" ] \
-  || fail "R4: codex deselect stripped the explicit-only companion from a surviving shared unit"
-# The stamps must survive too: a reclaim that spared the live files but wiped the stamps
-# leaves every unit unprovable — read as "foreign or edited" and unreclaimable forever.
-cmp -s "$TCD/pre-deselect-stamp.ref" "$TCD/.harness/.codex-skills/sdd-next/SKILL.md" \
-  || fail "R4: codex deselect discarded the ownership stamp of a surviving shared unit"
-[ -f "$TCD/.agents/skills/sdd-fix/SKILL.md" ] || fail "R4: user-edited skill must be preserved on deselect"
-grep -qF '# user edit' "$TCD/.agents/skills/sdd-fix/SKILL.md" || fail "R4: edited skill content was lost"
-[ -f "$TCD/.agents/skills/sdd-fix/agents/openai.yaml" ] \
-  || fail "R4: edited skill unit lost its explicit-only companion on deselect"
-[ -f "$TCD/.agents/rules/harness.md" ] || fail "R3/R9: Codex deselection damaged Antigravity rules"
-[ -f "$TCD/.agents/workflows/sdd-next.md" ] || fail "R3/R9: Codex deselection damaged Antigravity workflows"
-[ -f "$TCD/.agents/user-file.txt" ] || fail "R3: Codex deselection deleted a user sibling"
-printf '%s' "$_cwarn" | grep -qiF 'codex' || fail "R13: removal of codex glue was not warned about"
-grep -qx codex "$TCD/.harness/.agents" && fail "R8: codex must be dropped from .harness/.agents after deselect"
-rm -rf "$TCD"
-pass "codex deselect keeps the shared skill unit Antigravity still claims (R4)"
-
-# antigravity_deselect_keeps_shared_unit (E99-F09 R4, §7 `antigravity)`): the mirror
-# direction. The two reclaim paths are DIFFERENT CODE, so proving one says nothing about
-# the other — and the antigravity branch is the one that newly learned to touch skills.
-TAD="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-CODEX_HOME="$TAD/ch" sh "$SRC/harness-install.sh" --agents=antigravity,codex "$TAD" >/dev/null \
-  || fail "antigravity deselect setup failed"
-[ -f "$TAD/.agents/skills/sdd-next/SKILL.md" ] || fail "antigravity deselect setup: skills not stamped"
-[ -f "$TAD/.harness/.codex-skills/sdd-next/SKILL.md" ] || fail "antigravity deselect setup: ownership stamp missing"
-cp "$TAD/.agents/skills/sdd-next/SKILL.md" "$TAD/pre.ref"
-CODEX_HOME="$TAD/ch" sh "$SRC/harness-install.sh" --agents=codex "$TAD" >/dev/null \
-  || fail "antigravity deselect re-run exited non-zero"
-cmp -s "$TAD/pre.ref" "$TAD/.agents/skills/sdd-next/SKILL.md" \
-  || fail "R4: antigravity deselect changed a shared skill unit Codex still claims"
-[ -f "$TAD/.agents/skills/sdd-next/agents/openai.yaml" ] \
-  || fail "R4: antigravity deselect removed the policy companion of a unit Codex still claims"
-[ -f "$TAD/.harness/.codex-skills/sdd-next/SKILL.md" ] \
-  || fail "R4: antigravity deselect discarded the ownership stamp of a surviving shared unit"
-[ -f "$TAD/.agents/rules/harness.md" ] && fail "R4 setup check: antigravity glue was not actually deselected"
-rm -rf "$TAD"
-pass "antigravity deselect keeps the shared skill unit Codex still claims (R4)"
+# E29-F01: retired-host history is exercised from frozen v0.78.1 output
+# in tests/test_frontend_retirement.sh (R2/R3).
 
 # last_claimant_reclaims_unit (E99-F09 R5): with NO claiming front-end left, the whole
 # unit goes. Paired with the two R4 blocks on the same fixture shape, so "removed" is
 # attributable to the deselect rather than to an install that never wrote anything.
 TLC="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-CODEX_HOME="$TLC/ch" sh "$SRC/harness-install.sh" --agents=antigravity,codex "$TLC" >/dev/null \
+CODEX_HOME="$TLC/ch" sh "$SRC/harness-install.sh" --agents=codex "$TLC" >/dev/null \
   || fail "last-claimant setup failed"
 [ -f "$TLC/.agents/skills/sdd-next/SKILL.md" ] || fail "last-claimant setup: skills not stamped"
 [ -d "$TLC/.harness/.codex-skills" ] || fail "last-claimant setup: ownership stamps missing"
@@ -1388,45 +1211,33 @@ CODEX_HOME="$TLC/ch" sh "$SRC/harness-install.sh" --agents=claude "$TLC" >/dev/n
 rm -rf "$TLC"
 pass "deselecting the last claiming front-end reclaims the whole shared unit (R5)"
 
-# antigravity_only_last_claimant (E99-F09 R5): an antigravity-ONLY target reclaims its
-# units on deselect. Without this the §7 `antigravity)` reclaim could be absent entirely
-# and the R5 block above would still pass through the `codex)` branch.
-TAO="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-CODEX_HOME="$TAO/ch" sh "$SRC/harness-install.sh" --agents=antigravity "$TAO" >/dev/null \
-  || fail "antigravity-only reclaim setup failed"
-[ -f "$TAO/.agents/skills/sdd-next/SKILL.md" ] || fail "antigravity-only reclaim setup: unit not stamped"
-CODEX_HOME="$TAO/ch" sh "$SRC/harness-install.sh" --agents=claude "$TAO" >/dev/null \
-  || fail "antigravity-only reclaim exited non-zero"
-[ -e "$TAO/.agents/skills/sdd-next/SKILL.md" ] \
-  && fail "R5: antigravity-only deselect stranded a pristine shared unit"
-[ -e "$TAO/.harness/.codex-skills" ] && fail "R5: antigravity-only deselect left stale ownership stamps"
-rm -rf "$TAO"
-pass "an antigravity-only target reclaims its shared units on deselect (R5)"
+# E29-F01: retired-host history is exercised from frozen v0.78.1 output
+# in tests/test_frontend_retirement.sh (R2/R3).
 
-# foreign_unit_survives_antigravity_paths (E99-F09 R7): the ownership rules are unchanged,
+# foreign_unit_survives_codex_paths (E99-F09 R7): the ownership rules are unchanged,
 # but they are now reachable through the ANTIGRAVITY gate, which never exercised them
-# before. A foreign unit must survive both an antigravity-triggered install and an
-# antigravity-triggered last-claimant reclaim, bytes intact, with a warning.
+# before. A foreign unit must survive both an codex-triggered install and an
+# codex-triggered last-claimant reclaim, bytes intact, with a warning.
 TFA="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 mkdir -p "$TFA/.agents/skills/sdd-next/agents"
-printf 'foreign antigravity-era skill\n' > "$TFA/.agents/skills/sdd-next/SKILL.md"
+printf 'foreign codex-era skill\n' > "$TFA/.agents/skills/sdd-next/SKILL.md"
 cp "$TFA/.agents/skills/sdd-next/SKILL.md" "$TFA/foreign.ref"
-_fawarn="$(CODEX_HOME="$TFA/ch" sh "$SRC/harness-install.sh" --agents=antigravity "$TFA" 2>&1 >/dev/null)" \
-  || fail "foreign-unit antigravity install exited non-zero"
+_fawarn="$(CODEX_HOME="$TFA/ch" sh "$SRC/harness-install.sh" --agents=codex "$TFA" 2>&1 >/dev/null)" \
+  || fail "foreign-unit codex install exited non-zero"
 cmp -s "$TFA/foreign.ref" "$TFA/.agents/skills/sdd-next/SKILL.md" \
-  || fail "R7: antigravity-triggered install overwrote a foreign skill unit"
+  || fail "R7: codex-triggered install overwrote a foreign skill unit"
 printf '%s\n' "$_fawarn" | grep -qF '.agents/skills/sdd-next' \
-  || fail "R7: antigravity-triggered install did not warn about the foreign skill unit"
+  || fail "R7: codex-triggered install did not warn about the foreign skill unit"
 [ -f "$TFA/.agents/skills/sdd-new/SKILL.md" ] \
   || fail "R7: a foreign sibling blocked the units the install DOES own"
 CODEX_HOME="$TFA/ch" sh "$SRC/harness-install.sh" --agents=claude "$TFA" >/dev/null \
-  || fail "foreign-unit antigravity reclaim exited non-zero"
+  || fail "foreign-unit codex reclaim exited non-zero"
 cmp -s "$TFA/foreign.ref" "$TFA/.agents/skills/sdd-next/SKILL.md" \
-  || fail "R7: antigravity-triggered reclaim deleted or altered a foreign skill unit"
+  || fail "R7: codex-triggered reclaim deleted or altered a foreign skill unit"
 [ -e "$TFA/.agents/skills/sdd-new/SKILL.md" ] \
   && fail "R7 control: the reclaim spared a unit it actually owned"
 rm -rf "$TFA"
-pass "a foreign skill unit survives antigravity-triggered install and reclaim (R7)"
+pass "a foreign skill unit survives codex-triggered install and reclaim (R7)"
 
 # Partial skill units on Codex deselection: a stamp-owned SKILL.md remains reclaimable
 # when its companion metadata is missing or edited. An edited, unproven companion is
@@ -1759,18 +1570,18 @@ pass "--agents=host resolves the running front-end end to end; 'host' is never p
 # reconcile_without_version_bump (R9, R11, R12, R13): a re-run at the SAME version that
 # both adds and removes an agent, using the persisted set as the baseline.
 TG="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-sh "$SRC/harness-install.sh" --agents=claude,gemini "$TG" >/dev/null || fail "reconcile install1 failed"
-[ -f "$TG/GEMINI.md" ] || fail "reconcile setup: gemini not stamped in install1"
+sh "$SRC/harness-install.sh" --agents=claude,codex "$TG" >/dev/null || fail "reconcile install1 failed"
+[ -f "$TG/.codex/agents/builder.toml" ] || fail "reconcile setup: codex not stamped in install1"
 [ -f "$TG/opencode.json" ] && fail "reconcile setup: opencode should be absent after install1"
-# Re-run at the SAME VERSION (R11): drop gemini, add opencode.
+# Re-run at the SAME VERSION (R11): drop codex, add opencode.
 _warn="$(sh "$SRC/harness-install.sh" --agents=claude,opencode "$TG" 2>&1 >/dev/null)" \
   || fail "reconcile install2 exited non-zero"
 # add applied (R12)
 [ -f "$TG/opencode.json" ]     || fail "R12: re-run did not add opencode glue (opencode.json)"
 [ -d "$TG/.opencode/command" ] || fail "R12: re-run did not add opencode commands"
-# remove applied (R13): gemini glue gone, warning printed
-[ -f "$TG/GEMINI.md" ] && fail "R13: deselected gemini glue (GEMINI.md) not removed"
-printf '%s' "$_warn" | grep -qiF 'gemini' || fail "R13: removal of gemini was not warned about"
+# remove applied (R13): codex glue gone, warning printed
+[ -f "$TG/.codex/agents/builder.toml" ] && fail "R13: deselected Codex role not removed"
+printf '%s' "$_warn" | grep -qiF 'codex' || fail "R13: removal of codex was not warned about"
 # claude kept, AGENTS.md survives, .harness/ body intact (R13 never-touch invariants)
 [ -d "$TG/.claude" ]          || fail "R13: still-selected claude glue must survive"
 [ -f "$TG/AGENTS.md" ]        || fail "R13: shared AGENTS.md entrypoint must never be removed"
@@ -1787,13 +1598,11 @@ pass "re-run adds + removes agents at same VERSION, persisted baseline updated (
 # selective upgrade actually removes the now-deselected glue rather than leaving it.
 TL="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 sh "$SRC/harness-install.sh" "$TL" >/dev/null || fail "legacy setup install failed"   # no-override ⇒ ALL
-[ -f "$TL/GEMINI.md" ]   || fail "legacy setup: gemini not stamped by ALL default"
 [ -f "$TL/opencode.json" ] || fail "legacy setup: opencode not stamped by ALL default"
 rm -f "$TL/.harness/.agents"   # simulate a pre-E08 install: stamped all, persisted none
 [ -f "$TL/.harness/.harness-version" ] || fail "legacy setup: not detected as an upgrade"
 _warn="$(sh "$SRC/harness-install.sh" --agents=claude "$TL" 2>&1 >/dev/null)" \
   || fail "legacy upgrade run exited non-zero"
-[ -f "$TL/GEMINI.md" ]     && fail "Codex P2: legacy upgrade must remove deselected GEMINI.md"
 [ -f "$TL/opencode.json" ] && fail "Codex P2: legacy upgrade must remove deselected opencode.json"
 [ -d "$TL/.claude" ]       || fail "Codex P2: still-selected claude glue must survive legacy upgrade"
 [ "$(cat "$TL/.harness/.agents")" = "claude" ] \
@@ -1813,7 +1622,7 @@ printf 'mine\n' > "$TM/.claude/agents/my-custom.md"
 printf 'mine\n' > "$TM/.claude/commands/my-cmd.md"
 printf 'mine\n' > "$TM/.opencode/command/my-oc.md"
 # re-run dropping BOTH claude and opencode:
-sh "$SRC/harness-install.sh" --agents=gemini "$TM" >/dev/null 2>&1 || fail "scoped-remove rerun failed"
+sh "$SRC/harness-install.sh" --agents=codex "$TM" >/dev/null 2>&1 || fail "scoped-remove rerun failed"
 # harness-owned glue removed:
 [ -f "$TM/.claude/agents/orchestrator.md" ] && fail "P1: harness claude shim not removed on deselect"
 [ -f "$TM/.claude/commands/sdd-next.md" ]   && fail "P1: harness claude command not removed on deselect"
@@ -1838,51 +1647,14 @@ pass "deselect removes only harness-owned files, preserves user-authored agents/
 # dirs are pruned (no stale empty .claude/.opencode left behind).
 TN="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 sh "$SRC/harness-install.sh" --agents=claude,opencode "$TN" >/dev/null || fail "prune setup install failed"
-sh "$SRC/harness-install.sh" --agents=gemini "$TN" >/dev/null 2>&1 || fail "prune rerun failed"
+sh "$SRC/harness-install.sh" --agents=codex "$TN" >/dev/null 2>&1 || fail "prune rerun failed"
 [ -d "$TN/.claude" ]   && fail "R13: empty .claude/ not pruned after full claude deselect"
 [ -d "$TN/.opencode" ] && fail "R13: empty .opencode/ not pruned after full opencode deselect"
 rm -rf "$TN"
 pass "deselect prunes harness dirs only when left empty (R13)"
 
-# deselect_antigravity_preserves_user_agent_dir (R13, Codex r3 P1 #3400997183): with the
-# E07-F01 .agents/ glue in place, deselecting antigravity removes ONLY the harness-owned
-# files (scoped remove_owned) and must NEVER delete a user-authored file or `rm -rf` the
-# user's .agents/ dir — the dir survives because it still holds the user's own content.
-TP="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-sh "$SRC/harness-install.sh" "$TP" >/dev/null || fail "antigravity-noop setup install failed"  # ALL ⇒ persists antigravity
-grep -qx antigravity "$TP/.harness/.agents" || fail "setup: antigravity not in persisted baseline"
-mkdir -p "$TP/.agents"; printf 'mine\n' > "$TP/.agents/user-config.md"   # user-authored, not harness-owned
-sh "$SRC/harness-install.sh" --agents=claude "$TP" >/dev/null 2>&1 || fail "antigravity deselect rerun failed"
-[ -d "$TP/.agents" ]                 || fail "Codex r3 P1: user-authored .agents/ dir was wrongly deleted on antigravity deselect"
-[ -f "$TP/.agents/user-config.md" ]   || fail "Codex r3 P1: user-authored .agents/user-config.md was wrongly deleted"
-rm -rf "$TP"
-pass "antigravity deselect is a no-op, never deletes a user-authored .agents/ (Codex r3 P1)"
-
-# antigravity_deselect_is_byte_exact (R13, Codex r2 P1 #3404240336): a pre-this-version
-# no-op antigravity install can leave `antigravity` persisted in .harness/.agents while
-# the user authored their OWN .agents/agents/<role>.md with a STANDARD name. On deselect,
-# the .agents/ glue removal must be byte-compare-and-remove (like opencode.json) — delete
-# ONLY a pristine harness-generated file, NEVER a user file that merely shares the name.
-TPB="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-sh "$SRC/harness-install.sh" --agents=antigravity "$TPB" >/dev/null || fail "ag-exact setup install failed"
-[ -f "$TPB/.agents/agents/builder.md" ]   || fail "ag-exact setup: generated builder persona missing"
-[ -f "$TPB/.agents/agents/reviewer.md" ]  || fail "ag-exact setup: generated reviewer persona missing"
-[ -f "$TPB/.agents/workflows/sdd-next.md" ] || fail "ag-exact setup: generated sdd-next workflow missing"
-# User overwrites builder.md with their OWN distinctive content (a standard-named file).
-printf 'MY CUSTOM ANTIGRAVITY BUILDER\n' > "$TPB/.agents/agents/builder.md"
-# Deselect antigravity.
-sh "$SRC/harness-install.sh" --agents=claude "$TPB" >/dev/null 2>&1 || fail "ag-exact deselect rerun failed"
-# User-authored, standard-named file SURVIVES with its content intact.
-[ -f "$TPB/.agents/agents/builder.md" ]                       || fail "Codex r2 P1: user-authored .agents/agents/builder.md was wrongly deleted on deselect"
-grep -qF 'MY CUSTOM ANTIGRAVITY BUILDER' "$TPB/.agents/agents/builder.md" || fail "Codex r2 P1: user-authored builder.md content not preserved"
-# Pristine harness-generated glue (persona + workflow + rule) IS removed.
-[ -f "$TPB/.agents/agents/reviewer.md" ]  && fail "Codex r2 P1: pristine generated reviewer persona must be removed on deselect"
-[ -f "$TPB/.agents/workflows/sdd-next.md" ] && fail "Codex r2 P1: pristine generated sdd-next workflow must be removed on deselect"
-[ -f "$TPB/.agents/rules/harness.md" ]    && fail "Codex r2 P1: pristine generated .agents/rules/harness.md must be removed on deselect"
-# The .agents/ tree survives because the user file kept .agents/agents/ non-empty.
-[ -d "$TPB/.agents" ]                    || fail "Codex r2 P1: .agents/ wrongly removed while a user file remains"
-rm -rf "$TPB"
-pass "antigravity deselect deletes only byte-pristine .agents/ glue, keeps user files (Codex r2 P1)"
+# E29-F01: retired-host history is exercised from frozen v0.78.1 output
+# in tests/test_frontend_retirement.sh (R2/R3).
 
 # opencode_json_removal_is_byte_exact (R13, Codex r4 P2 #3401025100): on opencode
 # deselect, a PRISTINE generated opencode.json is removed, but one the user edited
@@ -1904,23 +1676,8 @@ grep -q '"model"' "$TQ/opencode.json" || fail "Codex r4 P2: user-edited opencode
 rm -rf "$TQ"
 pass "opencode.json deselect deletes only a byte-pristine generated file, keeps edits (Codex r4 P2)"
 
-# gemini_deselect_keeps_gemini_when_antigravity_remains (E07-F01 R1, Codex r1 P2
-# #3404185446): GEMINI.md is SHARED by gemini and antigravity. Deselecting gemini
-# while antigravity stays selected must KEEP GEMINI.md (antigravity still owns it),
-# and conversely deselecting antigravity-only orphan removal happens only when both
-# owners are gone.
-TR="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-sh "$SRC/harness-install.sh" --agents=gemini,antigravity "$TR" >/dev/null || fail "shared-gemini setup install failed"
-[ -f "$TR/GEMINI.md" ] || fail "shared-gemini setup: GEMINI.md not stamped for gemini,antigravity"
-# Drop gemini, keep antigravity: GEMINI.md must survive (antigravity owns it).
-sh "$SRC/harness-install.sh" --agents=antigravity "$TR" >/dev/null 2>&1 || fail "shared-gemini deselect-gemini rerun failed"
-[ -f "$TR/GEMINI.md" ]                || fail "R1: deselecting gemini while antigravity remains must KEEP GEMINI.md (Codex r1 P2)"
-grep -qF '<!-- harness:begin -->' "$TR/GEMINI.md" || fail "R1: GEMINI.md harness block stripped despite antigravity still selected"
-# Now drop antigravity too (last owner gone): GEMINI.md must finally be removed.
-sh "$SRC/harness-install.sh" --agents=claude "$TR" >/dev/null 2>&1 || fail "shared-gemini deselect-antigravity rerun failed"
-[ -f "$TR/GEMINI.md" ] && fail "R13: GEMINI.md must be removed once NEITHER gemini nor antigravity is selected"
-rm -rf "$TR"
-pass "GEMINI.md shared by gemini+antigravity: kept until both deselected (R1, R13, Codex r1 P2)"
+# E29-F01: retired-host history is exercised from frozen v0.78.1 output
+# in tests/test_frontend_retirement.sh (R2/R3).
 
 # ── E99-F01: interactive checkbox picker (tui_select) + graceful fallback ─────────
 # The arrow-key + spacebar checkbox UI is the PREFERRED interactive path, but it must
@@ -2028,7 +1785,7 @@ test_models_block_idempotent() {   # R3
 }
 
 test_no_models_block_is_byte_identical() {   # R11
-  _all=claude,gemini,opencode,antigravity,codex
+  _all=claude,codex,opencode
   _ta="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
   _tb="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
   CODEX_HOME="$_ta/ch" sh "$SRC/harness-install.sh" --agents="$_all" "$_ta" >/dev/null \
@@ -2048,14 +1805,14 @@ test_no_models_block_is_byte_identical() {   # R11
   # blind to any leak of model state into the manifest.
   diff -r -x 'harness.config.yaml' -x '__pycache__' "$_ta" "$_tb" >/dev/null \
     || fail "R11: an all-inherit target differs from one whose models: block was stripped"
-  # Explicit negatives: no unresolved role gains a model key. Gemini stays conditional;
-  # selected Codex still registers its six model-less roles.
+  # Explicit negatives: no unresolved role gains a model key; retired Gemini stays absent;
+  # gate-on selected Codex registers seven standard roles plus pr-fixer.
   grep -rq '^model:' "$_ta/.claude/agents"  && fail "R11: unconfigured install stamped a model: in .claude/agents"
   grep -q '"model"' "$_ta/opencode.json"    && fail "R11: unconfigured install stamped a model member in opencode.json"
-  grep -rq '^model:' "$_ta/.agents/agents"  && fail "R11: unconfigured install stamped a model: in .agents/agents"
   [ -d "$_ta/.gemini/agents" ]              && fail "R11: unconfigured install created .gemini/agents/"
-  [ "$(find "$_ta/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "7" ] \
-    || fail "R6: unconfigured selected Codex did not register exactly seven roles"
+  [ "$(find "$_ta/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "8" ] \
+    || fail "R6: gate-on selected Codex did not register seven standard roles plus pr-fixer"
+  [ -f "$_ta/.codex/agents/pr-fixer.toml" ] || fail "R9: eighth gate-on Codex role is not pr-fixer"
   # E17-F02 R10: the count alone is satisfied by ANY seventh file — including a foreign or
   # stale one left behind by the very reclaim path these suites exist to police. Name it.
   [ -f "$_ta/.codex/agents/builder-heavy.toml" ] \
@@ -2123,18 +1880,15 @@ test_models_docs_and_manifest() {   # R24
   CODEX_HOME="$_mt/ch" sh "$SRC/harness-install.sh" --agents=claude "$_mt" >/dev/null \
     || fail "R24: setup install exited non-zero"
   _mf="$_mt/.harness/manifest.txt"
-  grep -qF '.gemini/agents/' "$_mf"          || fail "R24: manifest.txt does not list .gemini/agents/"
   grep -qF '.codex/agents/' "$_mf"           || fail "R24: manifest.txt does not list .codex/agents/"
   grep -qF '.harness/.opencode.stamp' "$_mf" || fail "R24: manifest.txt does not list .harness/.opencode.stamp"
-  grep -qF 'claude|gemini|opencode|antigravity|codex' "$_mf" \
+  grep -qF 'claude|codex|opencode' "$_mf" \
     || fail "R24: manifest.txt AGENT SELECTION paragraph still omits codex"
   # The docs must SHIP (the installed copy under .harness/docs/), not just exist in SRC.
   _mi="$_mt/.harness/docs/INSTALL.md"
   grep -qF 'models:' "$_mi"          || fail "R24: installed docs/INSTALL.md does not document the models: block"
   grep -qF 'reasoning' "$_mi"        || fail "R24: installed docs/INSTALL.md does not document the tier vocabulary"
   grep -qF 'provider/model' "$_mi"   || fail "R24: installed docs/INSTALL.md does not document the opencode value rule"
-  grep -qF 'agy' "$_mi"              || fail "R24: installed docs/INSTALL.md does not document the Antigravity agy floor"
-  grep -qF '.gemini/agents/' "$_mi"  || fail "R24: installed docs/INSTALL.md layout tree omits .gemini/agents/"
   grep -qF '.codex/agents/' "$_mi"   || fail "R24: installed docs/INSTALL.md layout tree omits .codex/agents/"
   # verification.test_command now delegates to tools/run-tests.sh, which DISCOVERS every
   # tests/test_*.sh. The intent of this check is "this suite is not orphaned", so accept

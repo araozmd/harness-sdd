@@ -4,6 +4,31 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.79.0] — 2026-09-14
+
+### Native Codex and three supported front ends
+
+- Supported hosts are Claude Code (primary), Codex (second), and OpenCode (third).
+  Explicit `gemini` and `antigravity` selectors now fail. This intentionally removes
+  CLI selectors in a pre-1.0 MINOR release; no TaskStore schema or installed layout
+  migration is required. Baseline 0.78.1 is preserved at tag `v0.78.1`.
+- Upgrades filter retired recorded hosts, retaining supported selections. A retired-only
+  record stops without writes and requests an explicit supported selection. Legacy
+  installs without a selection retain Claude and OpenCode. Pristine proven legacy glue
+  is reclaimed; user edits, foreign files, symlinks, and active Codex skills survive.
+- `--self` now defaults to Claude + Codex from the same consumer emitters, with local
+  models preserved independently and generated artifacts tracked in the existing manifest.
+  Combined source generation with inherited Codex models reports **UNARMED** under the
+  existing all-selected-host policy; explicit Claude-only generation retains its verdict.
+- Codex uses `$sdd-*` skills with arguments after the mention, native fresh role contexts
+  and file-only handoffs. Gated `pr-fixer` now has an isolated native Codex role.
+- Local verification covers hermetic fresh installs, frozen 0.78.1 upgrades, ownership,
+  source regeneration, native role configuration, invocation, and retained-host regression.
+  CLI discovery and bounded toy workflow evidence are recorded separately in the feature's
+  progress reports; parser compatibility alone is not an end-to-end workflow pass.
+  External delegate PR #183 remains unmerged; live GitHub PR-loop verification was outside
+  this change's local smoke test. Existing PR-loop behavior remains covered by stubbed tests.
+
 ## [0.78.1] — 2026-09-10
 
 ### Fixed — 🐛 a STALE dependency cycle no longer strands a feature forever (E99-F155)

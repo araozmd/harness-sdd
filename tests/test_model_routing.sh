@@ -3,7 +3,7 @@
 #
 # Covers R4–R23 and R26: tier resolution, `inherit` ⇒ key omission, the built-in
 # floating-alias table, pin override + the OpenCode `provider/model` guard, unknown-tier
-# tolerance, per-front-end stamping (claude / antigravity / opencode / gemini / codex),
+# tolerance, per-front-end stamping (claude / codex / opencode),
 # conditional creation of the two new trees, selection gating, idempotent re-stamping, the
 # opencode.json re-stamp rules, determinism, and both halves of the BR6 seam — deselection
 # preserves a user-edited artifact (R23) while a re-install regenerates one (R26).
@@ -25,7 +25,7 @@ export CODEX_HOME="$T/codex-home"
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
-ALL=claude,gemini,opencode,antigravity,codex
+ALL=claude,codex,opencode
 ROLES="orchestrator architect builder builder-heavy reviewer scout doc-critic"
 
 # mk <name> — make a target dir under $T and print its path.
@@ -108,8 +108,6 @@ test_inherit_is_omission() {
   run "$_t" "$ALL"
   # Roles left on inherit carry NO key at all, on every front-end.
   grep -q '^model:' "$_t/.claude/agents/builder.md"  && fail "R5: inherit role got a model: key (claude)"
-  grep -q '^model:' "$_t/.agents/agents/builder.md"  && fail "R5: inherit role got a model: key (antigravity)"
-  grep -q '^model:' "$_t/.gemini/agents/builder.md"  && fail "R5: inherit role got a model: key (gemini)"
   grep -q '^model = ' "$_t/.codex/agents/builder.toml" && fail "R5: inherit role got a model key (codex)"
   grep -q '"builder":.*"model"' "$_t/opencode.json"  && fail "R5: inherit role got a model member (opencode)"
   # The literal string `inherit` appears in NO generated agent definition. Scope: the
@@ -117,7 +115,7 @@ test_inherit_is_omission() {
   # (config, docs, specs, role bodies, tools, init.sh, manifest prose) and legitimately
   # uses the word in prose — copying is not generating, so it is out of scope here.
   _hits="$(grep -rl 'inherit' \
-      "$_t/.claude/agents" "$_t/.agents/agents" "$_t/.gemini/agents" "$_t/.codex/agents" \
+      "$_t/.claude/agents" "$_t/.codex/agents" \
       "$_t/opencode.json" 2>/dev/null || true)"
   [ -z "$_hits" ] || fail "R5: the literal 'inherit' leaked into generated artifacts: $_hits"
 
@@ -125,13 +123,13 @@ test_inherit_is_omission() {
   # written VERBATIM, so `pin.<front-end>.<tier>: "inherit"` — an easy misreading of the
   # documented tier vocabulary — would emit `model: inherit` / `model = "inherit"`.
   # R5 is absolute, so a pin of `inherit` must compile to the SAME omission the inherit
-  # TIER does (not to the built-in alias, and not to the literal). Exercised on ALL FIVE
+  # TIER does (not to the built-in alias, and not to the literal). Exercised on ALL THREE
   # front-ends at once: `builder` is on a tier whose pin is `inherit` everywhere, while
-  # `scout` carries a real value so the conditional .gemini/ and .codex/ trees exist and
+  # `scout` carries a real value so the .codex/ tree exists and
   # the builder artifacts are actually there to inspect.
   _p="$(mk r5pin)"; run "$_p" "$ALL"
   set_tier "$_p" builder reasoning
-  for _fe in claude antigravity gemini codex opencode; do
+  for _fe in claude codex opencode; do
     set_pin "$_p" "$_fe" reasoning "inherit"
   done
   set_tier "$_p" scout cheap
@@ -141,8 +139,6 @@ test_inherit_is_omission() {
   # The pinned-to-`inherit` role carries NO model key anywhere. (`opus`/`pro` would mean
   # the guard fell through to the alias instead of omitting.)
   grep -q '^model:'   "$_p/.claude/agents/builder.md"    && fail "R5pin: a pin of 'inherit' produced a model: key (claude)"
-  grep -q '^model:'   "$_p/.agents/agents/builder.md"    && fail "R5pin: a pin of 'inherit' produced a model: key (antigravity)"
-  grep -q '^model:'   "$_p/.gemini/agents/builder.md"    && fail "R5pin: a pin of 'inherit' produced a model: key (gemini)"
   grep -q '^model = ' "$_p/.codex/agents/builder.toml"   && fail "R5pin: a pin of 'inherit' produced a model key (codex)"
   grep -q '"builder":.*"model"' "$_p/opencode.json"      && fail "R5pin: a pin of 'inherit' produced a model member (opencode)"
   # …and the role with a real value still resolves, so this is omission, not a dead run.
@@ -152,7 +148,7 @@ test_inherit_is_omission() {
     || fail "R5pin: setup — the codex scout pin should still resolve"
   # No literal `inherit` anywhere in the generated artifacts, and the drop is diagnosed.
   _phits="$(grep -rl 'inherit' \
-      "$_p/.claude/agents" "$_p/.agents/agents" "$_p/.gemini/agents" "$_p/.codex/agents" \
+      "$_p/.claude/agents" "$_p/.codex/agents" \
       "$_p/opencode.json" 2>/dev/null || true)"
   [ -z "$_phits" ] || fail "R5pin: the literal 'inherit' leaked in via a pin: $_phits"
   printf '%s\n' "$_pe" | grep -q "is a tier name, not a model id" \
@@ -162,22 +158,15 @@ test_inherit_is_omission() {
 
 # ── R6: built-in floating aliases; no harness-frozen model id ────────────────────
 test_builtin_tier_aliases() {
-  _t="$(mk r6)"; run "$_t" claude,gemini,antigravity
+  _t="$(mk r6)"; run "$_t" claude
   set_tier "$_t" architect reasoning
   set_tier "$_t" builder standard
   set_tier "$_t" scout cheap
-  run "$_t" claude,gemini,antigravity
+  run "$_t" claude
   _cl() { sed -n 's/^model: //p' "$_t/.claude/agents/$1.md"; }
-  _ag() { sed -n 's/^model: //p' "$_t/.agents/agents/$1.md"; }
-  _gm() { sed -n 's/^model: //p' "$_t/.gemini/agents/$1.md"; }
   [ "$(_cl architect)" = "opus" ]   || fail "R6: claude reasoning != opus (got '$(_cl architect)')"
   [ "$(_cl builder)"   = "sonnet" ] || fail "R6: claude standard != sonnet (got '$(_cl builder)')"
   [ "$(_cl scout)"     = "haiku" ]  || fail "R6: claude cheap != haiku (got '$(_cl scout)')"
-  [ "$(_ag architect)" = "pro" ]    || fail "R6: antigravity reasoning != pro"
-  [ "$(_ag builder)"   = "pro" ]    || fail "R6: antigravity standard != pro"
-  [ "$(_ag scout)"     = "flash" ]  || fail "R6: antigravity cheap != flash"
-  [ "$(_gm architect)" = "pro" ]    || fail "R6: gemini reasoning != pro"
-  [ "$(_gm scout)"     = "flash" ]  || fail "R6: gemini cheap != flash"
   # No built-in default may be a version-pinned id (any digit in the emitted alias).
   _frozen="$(sed -n '/^model_alias()/,/^}/p' "$SRC/harness-install.sh" | grep -E "printf '[a-z-]*[0-9]" || true)"
   [ -z "$_frozen" ] || fail "R6: the built-in tier table ships a version-pinned model id: $_frozen"
@@ -202,7 +191,7 @@ test_unpinned_codex_opencode_omits() {
     grep -q '^model = ' "$_t/.codex/agents/$_r.toml" \
       && fail "R7: unpinned Codex role $_r gained a model key"
   done
-  # claude/gemini/antigravity DO resolve on the same config (they have aliases).
+  # Claude does resolve on the same config through its built-in aliases.
   grep -q '^model: haiku' "$_t/.claude/agents/scout.md" || fail "R7: claude did not resolve while codex/opencode were unpinned"
   return 0
 }
@@ -257,18 +246,8 @@ test_opencode_pin_format_guard() {
 }
 
 # ── R13: antigravity `.agents/agents/<role>.md` frontmatter ──────────────────────
-test_antigravity_model_frontmatter() {
-  _t="$(mk r13)"; run "$_t" antigravity
-  set_tier "$_t" scout cheap
-  run "$_t" antigravity
-  _f="$_t/.agents/agents/scout.md"
-  grep -q '^description: ' "$_f"        || fail "R13: scout persona lost its description: key"
-  grep -q '^model: flash$' "$_f"        || fail "R13: scout persona carries no model: flash key"
-  [ "$(grep -c '^model:' "$_f")" = "1" ] || fail "R13: scout persona accumulated more than one model: key"
-  grep -q '^model:' "$_t/.agents/agents/builder.md" \
-    && fail "R13: a role on inherit must carry no model: key"
-  return 0
-}
+# E29-F01 R1/R3: retired active emission is replaced by frozen migration coverage
+# in tests/test_frontend_retirement.sh.
 
 # ── R14: opencode `agent.<role>` carries a "model" member ────────────────────────
 test_opencode_json_model_member() {
@@ -287,26 +266,8 @@ test_opencode_json_model_member() {
 }
 
 # ── R15: gemini per-role files, all seven roles, pointer body ────────────────────
-test_gemini_agent_files() {
-  _t="$(mk r15)"; run "$_t" gemini
-  set_tier "$_t" architect reasoning
-  run "$_t" gemini
-  for _r in $ROLES; do
-    [ -f "$_t/.gemini/agents/$_r.md" ] || fail "R15: .gemini/agents/$_r.md not created"
-    grep -q "^name: $_r\$" "$_t/.gemini/agents/$_r.md"  || fail "R15: $_r.md has no name: key"
-    grep -q '^description: ' "$_t/.gemini/agents/$_r.md" || fail "R15: $_r.md has no description: key"
-    grep -qF ".harness/agents/$_r.md" "$_t/.gemini/agents/$_r.md" \
-      || fail "R15: $_r.md does not point at the canonical .harness/agents/$_r.md"
-  done
-  grep -q '^model: pro$' "$_t/.gemini/agents/architect.md" \
-    || fail "R15: the resolved role carries no model: key"
-  grep -q '^model:' "$_t/.gemini/agents/builder.md" \
-    && fail "R15: an inherit role must carry no model: key"
-  # the pointer body must not duplicate the canonical role body
-  [ "$(wc -l < "$_t/.gemini/agents/architect.md")" -lt 30 ] \
-    || fail "R15: the gemini agent file looks like a duplicated role body, not a pointer"
-  return 0
-}
+# E29-F01 R1/R3: retired active emission is replaced by frozen migration coverage
+# in tests/test_frontend_retirement.sh.
 
 # ── R16: codex per-role files are PROJECT-LOCAL, never in $CODEX_HOME ────────────
 test_codex_agent_files_project_local() {
@@ -436,7 +397,7 @@ test_codex_rejects_symlinked_role_destinations() {
 
 # Last-written model stamps must not become ownership capabilities through symlinks.
 # Cover a Codex stamp directory across selected routing + deselection, a Codex stamp
-# leaf across routing, and Gemini's shared stamp helper to keep the guard generic.
+# leaf across routing. Retired Gemini stamp preservation is in the migration suite.
 test_model_stamp_symlinks_are_not_followed() {
   _d="$(mk model-stamp-dir-link)"; run "$_d" codex
   _dext="$T/model-stamp-dir.external"
@@ -481,71 +442,28 @@ test_model_stamp_symlinks_are_not_followed() {
   cmp -s "$_f/live.ref" "$_f/.codex/agents/architect.toml" \
     || fail "round-5 model stamp: routing used a linked Codex stamp leaf as ownership evidence"
 
-  _g="$(mk model-stamp-gemini-link)"
-  run "$_g" gemini
-  set_tier "$_g" scout cheap
-  run "$_g" gemini
-  _gext="$T/model-stamp-gemini.external"
-  mv "$_g/.harness/.model-agents/gemini/scout.md" "$_gext"
-  ln -s "$_gext" "$_g/.harness/.model-agents/gemini/scout.md"
-  printf 'external Gemini stamp sentinel\n' > "$_gext"
-  cp "$_gext" "$_g/.gemini/agents/scout.md"
-  cp "$_gext" "$_gext.ref"
-  cp "$_g/.gemini/agents/scout.md" "$_g/live.ref"
-  set_tier "$_g" scout reasoning
-  run "$_g" gemini
-  [ -L "$_g/.harness/.model-agents/gemini/scout.md" ] \
-    || fail "round-5 model stamp: routing removed a Gemini stamp-leaf link"
-  cmp -s "$_gext.ref" "$_gext" \
-    || fail "round-5 model stamp: routing changed an external Gemini stamp leaf"
-  grep -q '^model: pro$' "$_g/.gemini/agents/scout.md" \
-    || fail "round-6 model stamp: unsafe Gemini stamp suppressed normal live-role regeneration"
   return 0
 }
 
 # R9/round 6: an unsafe Gemini stamp tree affects bookkeeping only. Under the same
 # selected model config, live role bytes must remain exactly the pre-feature baseline.
-test_gemini_unsafe_stamp_keeps_live_generation_bytes() {
-  _base="$(mk gemini-stamp-baseline)"
-  run "$_base" gemini
-  set_tier "$_base" scout cheap
-  run "$_base" gemini
+# E29-F01 R1/R3: retired active emission is replaced by frozen migration coverage
+# in tests/test_frontend_retirement.sh.
 
-  _unsafe="$(mk gemini-stamp-unsafe)"
-  run "$_unsafe" gemini
-  set_tier "$_unsafe" scout cheap
-  _external="$T/gemini-stamp-tree.external"
-  mkdir -p "$_unsafe/.harness/.model-agents" "$_external"
-  printf 'external Gemini stamp tree sentinel\n' > "$_external/sentinel"
-  cp "$_external/sentinel" "$_external/sentinel.ref"
-  ln -s "$_external" "$_unsafe/.harness/.model-agents/gemini"
-  run "$_unsafe" gemini
-
-  diff -r "$_base/.gemini" "$_unsafe/.gemini" >/dev/null \
-    || fail "round-6 Gemini baseline: unsafe stamp tree changed selected live-role bytes"
-  [ -L "$_unsafe/.harness/.model-agents/gemini" ] \
-    || fail "round-6 Gemini baseline: selected routing replaced the unsafe stamp-tree link"
-  cmp -s "$_external/sentinel.ref" "$_external/sentinel" \
-    || fail "round-6 Gemini baseline: selected routing changed external stamp-tree bytes"
-  return 0
-}
-
-# ── R17: Gemini remains conditional; selected Codex roles are always registered ──
+# ── R17: Selected Codex roles are always registered ──
 test_new_trees_conditional() {
   # (a) everything on inherit
-  _t="$(mk r17a)"; run "$_t" gemini,codex
-  [ -d "$_t/.gemini/agents" ] && fail "R17: all-inherit created .gemini/agents/"
+  _t="$(mk r17a)"; run "$_t" codex
   [ "$(find "$_t/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "7" ] \
     || fail "R6: all-inherit Codex did not create exactly seven role TOMLs"
   [ -f "$_t/.codex/agents/builder-heavy.toml" ] \
     || fail "E17-F02 R10: all-inherit Codex did not register builder-heavy"
   grep -q '^model = ' "$_t/.codex/agents/"*.toml \
     && fail "R7: all-inherit Codex role gained a model key"
-  # (b) a real tier without a Codex pin remains model-less, while Gemini resolves.
-  _t2="$(mk r17b)"; run "$_t2" gemini,codex
+  # (b) a real tier without a Codex pin remains model-less.
+  _t2="$(mk r17b)"; run "$_t2" codex
   set_tier "$_t2" architect reasoning
-  run "$_t2" gemini,codex
-  [ -d "$_t2/.gemini/agents" ] || fail "R17: a resolvable gemini tier must create .gemini/agents/"
+  run "$_t2" codex
   [ "$(find "$_t2/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "7" ] \
     || fail "R6: unpinned Codex did not retain exactly seven role TOMLs"
   [ -f "$_t2/.codex/agents/builder-heavy.toml" ] \
@@ -563,7 +481,6 @@ test_selection_gating() {
   set_pin "$_t" codex reasoning "gpt-5"
   run "$_t" claude
   grep -q '^model: opus$' "$_t/.claude/agents/builder.md" || fail "R18: the SELECTED front-end was not stamped"
-  [ -d "$_t/.gemini/agents" ]   && fail "R18: unselected gemini was stamped"
   [ -d "$_t/.codex/agents" ]    && fail "R18: unselected codex was stamped"
   [ -f "$_t/opencode.json" ]    && fail "R18: unselected opencode was stamped"
   [ -d "$_t/.agents/agents" ]   && fail "R18: unselected antigravity was stamped"
@@ -588,14 +505,6 @@ test_restamp_after_config_change() {
     || fail "R19: .claude/agents/builder.md was not re-stamped to the new value"
   [ "$(grep -c '^model:' "$_t/.claude/agents/builder.md")" = "1" ] \
     || fail "R19: .claude/agents/builder.md accumulated a second model key"
-  [ "$(sed -n 's/^model: //p' "$_t/.agents/agents/builder.md")" = "pro" ] \
-    || fail "R19: .agents/agents/builder.md was not re-stamped"
-  [ "$(grep -c '^model:' "$_t/.agents/agents/builder.md")" = "1" ] \
-    || fail "R19: .agents/agents/builder.md accumulated a second model key"
-  [ "$(sed -n 's/^model: //p' "$_t/.gemini/agents/builder.md")" = "pro" ] \
-    || fail "R19: .gemini/agents/builder.md was not re-stamped"
-  [ "$(grep -c '^model:' "$_t/.gemini/agents/builder.md")" = "1" ] \
-    || fail "R19: .gemini/agents/builder.md accumulated a second model key"
   grep -q '^model = "gpt-5"$' "$_t/.codex/agents/builder.toml" \
     || fail "R19: .codex/agents/builder.toml was not re-stamped"
   [ "$(grep -c '^model = ' "$_t/.codex/agents/builder.toml")" = "1" ] \
@@ -624,22 +533,18 @@ test_restamp_overwrites_user_edits() {
   run "$_t" "$ALL"
 
   _cl="$_t/.claude/agents/scout.md"        # pre-existing generated glue — the precedent
-  _ag="$_t/.agents/agents/scout.md"        # pre-existing generated glue — the precedent
-  _gm="$_t/.gemini/agents/scout.md"        # new in E17-F01
   _cx="$_t/.codex/agents/scout.toml"       # new in E17-F01
-  for _f in "$_cl" "$_ag" "$_gm" "$_cx"; do
+  for _f in "$_cl" "$_cx"; do
     [ -f "$_f" ] || fail "R26: setup — $_f was not stamped"
   done
 
   # Keep a pristine reference of each file plus the config, then plant the same edit in
-  # all four. The reference is what "regenerated from the current configuration" means.
+  # both. The reference is what "regenerated from the current configuration" means.
   _ref="$T/r26-ref"; rm -rf "$_ref"; mkdir -p "$_ref"
   cp "$_cl" "$_ref/claude.md"
-  cp "$_ag" "$_ref/antigravity.md"
-  cp "$_gm" "$_ref/gemini.md"
   cp "$_cx" "$_ref/codex.toml"
   cp "$(cfg "$_t")" "$_ref/harness.config.yaml"
-  for _f in "$_cl" "$_ag" "$_gm" "$_cx"; do
+  for _f in "$_cl" "$_cx"; do
     printf 'zzz-user-edit\n' >> "$_f"
   done
 
@@ -651,50 +556,28 @@ test_restamp_overwrites_user_edits() {
   cmp -s "$_ref/harness.config.yaml" "$(cfg "$_t")" \
     || fail "R26: the config changed across the re-run — this test must exercise an UNCHANGED config (R19 owns the changed case)"
 
-  # (a) Gemini retains its regeneration contract; Codex preserves the edit.
-  grep -q 'zzz-user-edit' "$_gm" && fail "R26: an edited .gemini/agents/scout.md was not regenerated on re-install"
+  # (a) Codex preserves the edit.
   grep -q 'zzz-user-edit' "$_cx" || fail "E23 review: an edited .codex/agents/scout.toml was overwritten on selected re-install"
-  # (b) …and from the two PRE-EXISTING ones, the contract R26 says it matches. Asserting
+  # (b) …and from the Claude shim, the contract R26 says it matches. Asserting
   #     this here is what makes "matching the pre-existing generated-glue contract"
   #     verified rather than merely claimed in prose.
   grep -q 'zzz-user-edit' "$_cl" && fail "R26: an edited .claude/agents/scout.md was not regenerated (the precedent R26 cites no longer holds)"
-  grep -q 'zzz-user-edit' "$_ag" && fail "R26: an edited .agents/agents/scout.md was not regenerated (the precedent R26 cites no longer holds)"
 
   # (c) the regenerated body is the NORMAL one — the stamp is intact and single, not a
   #     truncated or doubled rewrite.
-  [ "$(grep -c '^model:' "$_gm")" = "1" ] || fail "R26: .gemini/agents/scout.md does not carry exactly one model: key after regeneration"
   [ "$(grep -c '^model = ' "$_cx")" = "1" ] || fail "E23 review: preserved .codex/agents/scout.toml lost its model key"
   [ "$(grep -c '^model:' "$_cl")" = "1" ] || fail "R26: .claude/agents/scout.md does not carry exactly one model: key after regeneration"
-  [ "$(grep -c '^model:' "$_ag")" = "1" ] || fail "R26: .agents/agents/scout.md does not carry exactly one model: key after regeneration"
-  grep -q '^model: flash$' "$_gm"            || fail "R26: .gemini/agents/scout.md lost its resolved value"
   grep -q '^model = "gpt-5-mini"$' "$_cx"    || fail "R26: .codex/agents/scout.toml lost its resolved value"
   grep -q '^model: haiku$' "$_cl"            || fail "R26: .claude/agents/scout.md lost its resolved value"
-  grep -q '^model: flash$' "$_ag"            || fail "R26: .agents/agents/scout.md lost its resolved value"
 
   # (d) strongest form: each regenerated file is byte-identical to the pristine reference,
   #     i.e. the re-run reproduced the generator's output exactly (this is also what keeps
   #     deselection able to reclaim these files at all — R21).
-  cmp -s "$_ref/gemini.md"      "$_gm" || fail "R26: the regenerated .gemini/agents/scout.md is not byte-identical to the pristine reference"
   cmp -s "$_ref/codex.toml"     "$_cx" && fail "E23 review: edited Codex role unexpectedly reverted to its pristine reference"
   cmp -s "$_ref/claude.md"      "$_cl" || fail "R26: the regenerated .claude/agents/scout.md is not byte-identical to the pristine reference"
-  cmp -s "$_ref/antigravity.md" "$_ag" || fail "R26: the regenerated .agents/agents/scout.md is not byte-identical to the pristine reference"
 
-  # (e) the OTHER half of BR6, in a separate target so both sides of the seam are visible
-  #     in one place: the very same edit, on the DESELECT path, must SURVIVE with a
-  #     warning. R23 unchanged — regeneration overwrites, reclamation does not delete.
-  _b="$(mk r26b)"; run "$_b" "$ALL"
-  set_tier "$_b" scout cheap
-  set_pin "$_b" codex cheap "gpt-5-mini"
-  run "$_b" "$ALL"
-  [ -f "$_b/.gemini/agents/scout.md" ] || fail "R26b: setup — gemini artifact missing"
-  printf 'zzz-user-edit\n' >> "$_b/.gemini/agents/scout.md"
-  _e="$(run_err "$_b" claude)"
-  [ -f "$_b/.gemini/agents/scout.md" ] \
-    || fail "R26b: deselection deleted an EDITED .gemini/agents/scout.md — reclamation must not destroy a user edit (R23)"
-  grep -qx 'zzz-user-edit' "$_b/.gemini/agents/scout.md" \
-    || fail "R26b: the user edit did not survive deselection (R23)"
-  printf '%s\n' "$_e" | grep -q '.gemini/agents/scout.md' \
-    || fail "R26b: no warning naming the preserved file on deselect (R23)"
+  # Deselection preservation for the retained Codex roles is asserted separately
+  # by test_deselect_preserves_user_edits; retired Gemini uses the frozen migration suite.
   return 0
 }
 
@@ -798,10 +681,10 @@ test_stamping_is_deterministic() {
   set_pin "$_t" codex cheap "gpt-5-mini"
   run "$_t" "$ALL"
   _s="$T/r21-snap"; rm -rf "$_s"; mkdir -p "$_s"
-  cp -R "$_t/.claude" "$_t/.agents" "$_t/.gemini" "$_t/.codex" "$_s/"
+  cp -R "$_t/.claude" "$_t/.agents" "$_t/.codex" "$_s/"
   cp "$_t/opencode.json" "$_t/.harness/.opencode.stamp" "$_s/"
   run "$_t" "$ALL"
-  for _d in .claude .agents .gemini .codex; do
+  for _d in .claude .agents .codex; do
     diff -r "$_s/$_d" "$_t/$_d" >/dev/null || fail "R21: $_d/ is not byte-identical across two identical runs"
   done
   cmp -s "$_s/opencode.json" "$_t/opencode.json" || fail "R21: opencode.json is not byte-identical across two identical runs"
@@ -818,12 +701,9 @@ test_deselect_reclaims_stamped() {
   set_pin "$_t" opencode standard "anthropic/claude-sonnet-4-5"
   set_pin "$_t" codex cheap "gpt-5-mini"
   run "$_t" "$ALL"
-  [ -f "$_t/.gemini/agents/scout.md" ]        || fail "R22: setup — gemini artifact missing"
   [ -f "$_t/.codex/agents/scout.toml" ]       || fail "R22: setup — codex artifact missing"
   [ -f "$_t/.harness/.opencode.stamp" ]       || fail "R22: setup — opencode stamp missing"
   run "$_t" claude
-  [ -e "$_t/.gemini/agents" ]            && fail "R22: .gemini/agents/ left behind after deselect"
-  [ -e "$_t/.gemini" ]                   && fail "R22: the harness-created .gemini/ dir left behind"
   [ -e "$_t/.codex/agents" ]             && fail "R22: .codex/agents/ left behind after deselect"
   [ -e "$_t/.codex" ]                    && fail "R22: the harness-created .codex/ dir left behind"
   [ -e "$_t/opencode.json" ]             && fail "R22: a stamped opencode.json was not reclaimed"
@@ -839,42 +719,31 @@ test_deselect_preserves_user_edits() {
   set_tier "$_t" scout cheap
   set_pin "$_t" codex cheap "gpt-5-mini"
   run "$_t" "$ALL"
-  [ -f "$_t/.gemini/agents/scout.md" ]  || fail "R23: setup — gemini artifact missing"
   [ -f "$_t/.codex/agents/scout.toml" ] || fail "R23: setup — codex artifact missing"
-  printf 'x\n' >> "$_t/.gemini/agents/scout.md"
   printf '# mine\n' >> "$_t/.codex/agents/scout.toml"
   _e="$(run_err "$_t" claude)"
-  [ -f "$_t/.gemini/agents/scout.md" ]  || fail "R23: an EDITED .gemini/agents/scout.md was deleted on deselect"
-  grep -qx 'x' "$_t/.gemini/agents/scout.md" || fail "R23: the user edit was not preserved"
   [ -f "$_t/.codex/agents/scout.toml" ] || fail "R23: an EDITED .codex/agents/scout.toml was deleted on deselect"
-  printf '%s\n' "$_e" | grep -q '.gemini/agents/scout.md' \
-    || fail "R23: no warning naming the preserved gemini file"
   printf '%s\n' "$_e" | grep -q '.codex/agents/scout.toml' \
     || fail "R23: no warning naming the preserved codex file"
   # pristine siblings ARE reclaimed; the dirs survive only because a user file remains
-  [ -f "$_t/.gemini/agents/builder.md" ]  && fail "R23: a pristine sibling was not reclaimed (gemini)"
   [ -f "$_t/.codex/agents/builder.toml" ] && fail "R23: a pristine sibling was not reclaimed (codex)"
   return 0
 }
 
 # ── R11/R17: every role back to `inherit` reconciles previously stamped models ──
 test_return_to_inherit_reconciles() {
-  # (a) Gemini remains conditional; Codex regenerates the same seven model-less roles.
-  _t="$(mk r11rec)"; run "$_t" gemini,codex
+  # (a) Codex regenerates the same seven model-less roles.
+  _t="$(mk r11rec)"; run "$_t" codex
   set_tier "$_t" architect reasoning
   set_tier "$_t" scout cheap
   set_pin "$_t" codex cheap "gpt-5-mini"
-  run "$_t" gemini,codex
-  [ -f "$_t/.gemini/agents/architect.md" ] || fail "R11rec: setup — gemini artifact missing"
+  run "$_t" codex
   [ -f "$_t/.codex/agents/scout.toml" ]    || fail "R11rec: setup — codex artifact missing"
-  grep -q '^model: ' "$_t/.gemini/agents/architect.md" || fail "R11rec: setup — gemini model: key missing"
   grep -q '^model = ' "$_t/.codex/agents/scout.toml"   || fail "R11rec: setup — codex model key missing"
   # Now put EVERY role back on inherit — nothing resolves for either front-end.
   set_tier "$_t" architect inherit
   set_tier "$_t" scout inherit
-  run "$_t" gemini,codex
-  [ -e "$_t/.gemini/agents" ] && fail "R11rec: .gemini/agents/ survived a switch back to inherit"
-  [ -e "$_t/.gemini" ]        && fail "R11rec: the harness-created .gemini/ dir survived"
+  run "$_t" codex
   [ "$(find "$_t/.codex/agents" -type f -name '*.toml' | wc -l | tr -d ' ')" = "7" ] \
     || fail "R8: pin→inherit did not retain exactly seven Codex roles"
   [ -f "$_t/.codex/agents/builder-heavy.toml" ] \
@@ -885,47 +754,38 @@ test_return_to_inherit_reconciles() {
   [ -f "$_t/.agents/skills/sdd-next/SKILL.md" ] || fail "R8: pin→inherit removed Codex skills"
 
   # (b) Selected Codex roles update from current routing only while their live bytes
-  # still match the last-written stamp. Edited Codex and Gemini roles are preserved.
-  _u="$(mk r11rec_edit)"; run "$_u" gemini,codex
+  # still match the last-written stamp. Edited Codex roles are preserved.
+  _u="$(mk r11rec_edit)"; run "$_u" codex
   set_tier "$_u" architect reasoning
   set_tier "$_u" scout cheap
   set_pin "$_u" codex cheap "gpt-5-mini"
-  run "$_u" gemini,codex
-  printf 'mine\n' >> "$_u/.gemini/agents/architect.md"
+  run "$_u" codex
   printf '# mine\n' >> "$_u/.codex/agents/scout.toml"
   set_tier "$_u" architect inherit
   set_tier "$_u" scout inherit
-  _e="$(run_err "$_u" gemini,codex)"
-  [ -f "$_u/.gemini/agents/architect.md" ] \
-    || fail "R11rec: an EDITED .gemini/agents/architect.md was deleted on the switch back to inherit"
-  grep -qx 'mine' "$_u/.gemini/agents/architect.md" || fail "R11rec: the gemini user edit was not preserved"
+  _e="$(run_err "$_u" codex)"
   [ -f "$_u/.codex/agents/scout.toml" ] \
     || fail "R8: Codex scout role vanished on the switch back to inherit"
   grep -qx '# mine' "$_u/.codex/agents/scout.toml" \
     || fail "R8: selected Codex pin→inherit overwrote an edited role"
   grep -q '^model = "gpt-5-mini"$' "$_u/.codex/agents/scout.toml" \
     || fail "R8: preserved edited Codex role unexpectedly changed its prior routing"
-  printf '%s\n' "$_e" | grep -q '.gemini/agents/architect.md' \
-    || fail "R11rec: no warning naming the preserved gemini file"
   printf '%s\n' "$_e" | grep -q '.codex/agents/scout.toml' \
     || fail "R8: no warning naming the preserved edited Codex role"
-  # Gemini pristine siblings are reclaimed; Codex siblings remain registered model-less.
-  [ -f "$_u/.gemini/agents/builder.md" ]  && fail "R11rec: a pristine sibling was not reclaimed (gemini)"
+  # Codex siblings remain registered model-less.
   [ -f "$_u/.codex/agents/builder.toml" ] || fail "R8: Codex sibling role vanished on pin→inherit"
 
   # (c) R22 with the `models:` edit and the DESELECT in the SAME run: the on-disk files
   # came from the OLD config, so a freshly generated reference cannot match them. The
   # remembered bytes can — without them a pristine file would be misclassified as
   # user-edited and orphaned. (Codex r1 P2 #3654925555.)
-  _d="$(mk r11rec_desel)"; run "$_d" gemini,codex
+  _d="$(mk r11rec_desel)"; run "$_d" codex
   set_tier "$_d" architect reasoning
   set_pin "$_d" codex reasoning "gpt-5"
-  run "$_d" gemini,codex
-  [ -f "$_d/.gemini/agents/architect.md" ] || fail "R11rec: setup — gemini artifact missing (c)"
+  run "$_d" codex
   [ -f "$_d/.codex/agents/architect.toml" ] || fail "R11rec: setup — codex artifact missing (c)"
   set_tier "$_d" architect cheap          # config changes AND the front-ends go away
   run "$_d" claude
-  [ -e "$_d/.gemini" ] && fail 'R11rec: a models: edit in the deselect run orphaned .gemini/'
   [ -e "$_d/.codex" ]  && fail 'R11rec: a models: edit in the deselect run orphaned .codex/'
   [ -e "$_d/.harness/.model-agents" ] && fail "R11rec: .model-agents/ outlived the artifacts it describes"
   return 0
@@ -936,7 +796,7 @@ pass "tier resolves role → models.default → inherit (R4)"
 test_inherit_is_omission
 pass "inherit compiles to key omission on the tier AND the pin path; the literal string is never generated (R5)"
 test_builtin_tier_aliases
-pass "built-in floating aliases for claude/antigravity/gemini; no harness-frozen model id (R6)"
+pass "built-in floating aliases for claude; no harness-frozen model id (R6)"
 test_unpinned_codex_opencode_omits
 pass "unpinned codex/opencode omit the key and advise exactly once per (front-end, tier) (R7)"
 test_pin_overrides_verbatim
@@ -945,12 +805,8 @@ test_unknown_tier_warns_and_inherits
 pass "unknown tier warns, resolves as inherit, exits 0 (R9)"
 test_opencode_pin_format_guard
 pass "an opencode pin without '/' warns and never reaches opencode.json (R10)"
-test_antigravity_model_frontmatter
-pass "antigravity personas carry model: beside description (R13)"
 test_opencode_json_model_member
 pass "opencode agent.<role> carries a \"model\" member (R14)"
-test_gemini_agent_files
-pass "gemini .gemini/agents/<role>.md created for all seven roles with a pointer body (R15)"
 test_codex_agent_files_project_local
 pass "codex .codex/agents/<role>.toml is project-local; \$CODEX_HOME is never touched (R16)"
 test_codex_selected_preserves_foreign_and_edited
@@ -959,12 +815,10 @@ test_codex_rejects_symlinked_role_destinations
 pass "Codex role install/reclamation reject symlinked files and directories without touching external targets"
 test_model_stamp_symlinks_are_not_followed
 pass "model-agent stamp symlinks are never followed for routing or deselection"
-test_gemini_unsafe_stamp_keeps_live_generation_bytes
-pass "unsafe Gemini stamp trees do not change selected live-role generation bytes"
 test_new_trees_conditional
-pass "Gemini remains conditional; selected Codex always registers seven model-optional roles (R6, R7, R17)"
+pass "Selected Codex always registers seven model-optional roles (R6, R7, R17)"
 test_return_to_inherit_reconciles
-pass "every role back to inherit reclaims Gemini and regenerates seven model-less Codex roles (R8, R11, R17)"
+pass "every role back to inherit regenerates seven model-less Codex roles (R8, R11, R17)"
 test_selection_gating
 pass "an unselected front-end is never stamped, even with a full models: block (R18)"
 test_restamp_after_config_change
