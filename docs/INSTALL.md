@@ -4,6 +4,15 @@ The harness is portable: it installs into any repo as a self-contained `.harness
 directory plus a few thin pointers. Install and upgrade are the **same idempotent
 command**.
 
+## Prerequisites
+
+Use a Unix shell environment. The default local TaskStore requires `python3` with
+the stdlib `fcntl` module for validation and locked writes; `init.sh` fails if either
+is missing. No third-party Python packages are required. Node is optional for task
+selection (which has a prose fallback), and required for board mirrors. PR-loop
+requirements (`gh`, authentication, `jq`, and the Codex GitHub App) apply only when
+that workflow is enabled.
+
 ## Install
 
 ```bash
@@ -12,13 +21,16 @@ cd harness-sdd
 ./harness-install.sh /path/to/your-project
 ```
 
-This writes, into your project:
+The available installed layout is below. `AGENTS.md` and `.harness/` are shared;
+front-end artifacts are emitted only for the selected integrations and applicable
+gates (including OpenCode concurrency and opt-in PR-loop glue).
 
 ```
 your-project/
 ├── CLAUDE.md / AGENTS.md / GEMINI.md   # your content kept; a marked harness block appended
 ├── .claude/agents/*  .claude/commands/{sdd-next,sdd-new,sdd-plan,sdd-drill,sdd-fix,sdd-fix-parallel}.md
 ├── .claude/commands/sdd-pr-loop.md  .claude/agents/pr-fixer.md   # only while pr_loop.enabled (opt-in, seeded false)
+├── .opencode/command/*.md              # selected OpenCode commands; fix-parallel needs capability/override
 ├── .opencode/agent/pr-fixer.md         # only while pr_loop.enabled (OpenCode file-based sub-agent)
 ├── opencode.json                       # created only if absent (re-stamped only while pristine)
 ├── .agents/{rules,agents,workflows}/   # Antigravity glue → resolves to .harness/ (regenerated each run)
@@ -30,8 +42,9 @@ your-project/
 └── .harness/                           # the whole harness body
     ├── .harness-version  manifest.txt
     ├── .opencode.stamp                  # byte copy of the last opencode.json the installer wrote
-    ├── .model-agents/                   # byte copies of the last .gemini/.codex per-role files (model routing only)
+    ├── .model-agents/                   # byte copies of the last .gemini/.codex per-role files (ownership stamps)
     ├── AGENTS.md agents/ docs/ store/ tools/ specs/_templates/ init.sh harness.config.yaml
+    ├── init.project.sh                  # YOURS — fast project checks, seeded once
     ├── .gitignore                       # seeded: keeps the local-only telemetry log out of VCS
     ├── telemetry.jsonl                  # created on first run — local-only, gitignored (E05-F02)
     ├── workers.json                     # only while workers.roster — local-only, gitignored (E17-F04)
@@ -43,9 +56,12 @@ your-project/
 `tools/` ships the zero-dep telemetry reporter (`python3 .harness/tools/telemetry-report.py`);
 see [`../README.md`](../README.md) → Observability and `agents/orchestrator.md` → "## Telemetry".
 
-Nothing you authored is destroyed: existing entrypoint prose is preserved (only the
-`<!-- harness:begin -->…<!-- harness:end -->` block is managed), and project files
-under `.harness/specs|state|progress` are written once and never clobbered.
+Existing entrypoint prose is preserved outside the managed
+`<!-- harness:begin -->…<!-- harness:end -->` block. Project-owned
+`.harness/specs/product.md`, epic specs, state, progress, configuration, and
+`init.project.sh` are preserved on upgrade (configuration also receives missing
+default keys). Templates and `specs/glossary.md` belong to the refreshed harness body.
+Generated glue follows its front-end ownership rules; see [Layout & ownership](#layout--ownership).
 
 ### Shared skill units and legacy Codex prompt migration
 
@@ -92,7 +108,7 @@ harness itself, under the human gate:
 2. Open the project in Claude Code and run **`/sdd-next`**. The seeded `E00-F01`
    bootstrap task is `sdd: true`, so the Orchestrator routes it to the Architect
    (with Scout recon) to draft epics and detect your test/lint/typecheck commands
-   (`.harness/harness.config.yaml` + the project section of `.harness/init.sh`), then
+   (`.harness/harness.config.yaml` + fast project gates in `.harness/init.project.sh`), then
    **pauses at the human gate** for your approval.
 3. Approve, then keep running `/sdd-next` to build features.
 
@@ -248,16 +264,13 @@ feeds `host` resolution, so a run that never passes `host` is unaffected.
 | Situation | Resolved set |
 |---|---|
 | Detected | that front-end alone |
-| Undetected, **no existing install** in the target | **ALL** front-ends |
+| Undetected, **no existing install** in the target | **Claude only** |
 | Undetected, target **already carries an install** | its **persisted `.harness/.agents`** set (ALL if a pre-E08 install persisted none) |
 
-The asymmetry is deliberate. On a target with no existing install there is nothing to
-preserve, so `host` falls back to exactly today's no-override behavior — it can never
-stamp *less* than a plain install would. On a target that already carries an install
-there *is* something to preserve: re-stamping four front-ends onto a claude-only repo
-because detection happened to miss is a user-visible regression. So the rule is
-*detected ⇒ narrow to the one key you asked for; undetected ⇒ never change the shape of
-the install*. Either way the run prints one line saying which it did.
+An undetected explicit `--agents=host` run uses the fresh Claude-only default or
+preserves the existing selection. A detected host selects that front-end alone, even
+on an upgrade. The installer reports which path it used. This explicit-host behavior
+differs from a plain unattended upgrade without an override, which selects all five.
 
 ### The fresh-install default
 
@@ -274,31 +287,30 @@ front-end pre-checked and the others unchecked**:
 ```
 
 When the host cannot be detected, the fresh baseline is `claude` alone — the
-parked-by-default answer every other no-selection path gives (E25-F01).
+parked-by-default fresh-install baseline (E25-F01).
 
 It is a **pre-check, not a restriction**: the list is already on screen, so spacebar adds
 any other front-end before you confirm. Confirming as-is stamps the detected front-end's
 glue (plus the always-written `AGENTS.md`) and nothing else.
 
-Exactly three cases, and only the first is new:
+The interactive picker has three starting states:
 
 | Target | Interactive pre-check |
 |---|---|
 | **No existing install**, host detected | **that front-end alone** |
-| **No existing install**, host undetected | **all** front-ends (unchanged) |
+| **No existing install**, host undetected | **Claude only** |
 | **Existing install** (any `.harness/.harness-version`) | its persisted `.harness/.agents` selection — **all** front-ends if it predates that file |
 
 Three limits are deliberate:
 
-- **An upgrade is never narrowed by detection.** "Existing install" means the target
+- **An interactive picker upgrade is never narrowed by detection.** "Existing install" means the target
   carries `.harness/.harness-version`. A pre-E08 install has every front-end stamped and
   no persisted selection, so it pre-checks everything: pressing Enter on an upgrade can
   never delete glue you are using.
-- **Undetected still means everything.** A miss is normal operation, so a front-end with
-  no verified marker keeps the historical behavior exactly.
-- **Nothing changes without a TTY.** A piped or CI run with no override still stamps every
-  front-end (pass `--agents=host` or `--agents=<csv>` to narrow a scripted install) — a
-  best-effort guess is only acceptable where a human can correct it before it applies.
+- **Fresh and undetected means Claude only.** Other front-ends remain selectable.
+- **No TTY and no override has its own rule.** A fresh target selects Claude only; an
+  existing install selects all five front-ends. Use explicit `--agents=<csv>` in
+  repeatable install/upgrade scripts to keep the intended selection.
 
 The pre-check is the detected front-end **alone**, never unioned with `claude`: a Gemini
 CLI or OpenCode user should not have to delete `CLAUDE.md` they never asked for.
@@ -527,7 +539,7 @@ legal values are `true` and `false`:
 | Value | Meaning |
 |---|---|
 | `false` | **Default, opt-in.** No `/sdd-pr-loop` glue is stamped anywhere — no command, no `pr-fixer` sub-agent, no global Codex prompt. |
-| `true` | `/sdd-pr-loop` and the `pr-fixer` sub-agent are stamped into every selected front-end. Answering `1` on a later re-run **reclaims** all of it in that same run. |
+| `true` | Emits PR-loop glue for selected front-ends and their supported fixer surfaces. Codex retains seven standard roles and can use the in-session fixer fallback. Answering `1` later reclaims harness-owned gated glue. |
 
 **The prompt does not change the default.** Pressing Enter keeps whatever the target
 already has — `false` on a fresh install, and on a re-run the value currently in the file.
@@ -599,10 +611,10 @@ Re-run the same command after pulling a newer harness:
 
 ```bash
 cd harness-sdd && git pull
-./harness-install.sh /path/to/your-project
+./harness-install.sh --agents=claude /path/to/your-project  # use your intended selection
 ```
 
-The harness body and `.claude/` glue are refreshed; the pointer block is replaced in
+The harness body and selected front-end glue are refreshed; the pointer block is replaced in
 place (never duplicated); your `product.md`, `tasks.json`, epics and progress are left
 untouched. `.harness/.harness-version` records the installed version.
 
@@ -967,8 +979,9 @@ POSIX `sh`, zero deps.
 
 | Class | Files | On upgrade |
 |---|---|---|
-| harness-owned | `.harness/{AGENTS.md,agents,docs,store,tools,specs/_templates,init.sh}`, `.claude/*` | overwritten |
-| project-owned | `.harness/{harness.config.yaml,specs/product.md,specs/epics,state/tasks.json,progress}` | preserved (config also append-migrated) |
+| harness-owned body | `.harness/{AGENTS.md,agents,docs,store,tools,specs/_templates,specs/glossary.md,init.sh}` | refreshed; thin children retain prose pointers |
+| generated glue | managed command/role names for selected front-ends, including `.claude/agents/` and `.claude/commands/` harness files | regenerated subject to each emitter's ownership checks; deselection conservatively reclaims owned files |
+| project-owned | `.harness/{harness.config.yaml,init.project.sh,specs/product.md,specs/epics,state/tasks.json,progress}` | preserved (config also append-migrated) |
 | runtime/local | `.harness/{telemetry.jsonl,workers.json,.gitignore}`, project-root `.gitignore` | gitignored; both `.gitignore`s append-seeded (never clobbered), logs/personal state never committed. `workers.json` is installer-OWNED derived data: rewritten every run while `workers.roster` is on, removed when it is off |
 | merge-region | `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` | only the marked block |
 

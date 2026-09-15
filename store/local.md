@@ -1,7 +1,8 @@
 # Store backend: `local` (default)
 
-Zero dependencies. State is plain files in the repo — this *is* the "harness lives
-in the repo" pillar. Use this unless you have a reason not to.
+State is plain files in the repo. The local TaskStore requires Unix Python 3 with
+the stdlib `fcntl` module for validation and locked writes; no third-party Python
+packages are required. Use this unless you have a reason not to.
 
 ## TaskStore → `state/tasks.json`
 Validated by `store/tasks.schema.json` (and by `init.sh`).

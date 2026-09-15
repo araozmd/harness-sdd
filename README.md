@@ -9,6 +9,10 @@ interchangeable.
 > [why the harness exists](docs/RATIONALE.md), then see the compact
 > [harness overview](docs/HARNESS.md).
 
+The [0.78.1 baseline](docs/BASELINE-0.78.1.md) separates the implemented five-front-end
+inventory from validation confidence and the planned three-front-end focus. Claude Code
+is the maintainer-validated workflow; Codex has received less deep end-to-end testing.
+
 ## How it works
 
 An interactive **intake** (Inception) turns a raw idea into a seeded `pending` task;
@@ -50,7 +54,12 @@ The Reviewer runs a **cross-file consistency** check (a change must not contradi
 contracts it invokes) and the build↔review loop is **multi-round until green** — see
 `agents/reviewer.md`.
 
-## Quick start (Claude Code)
+## Quick start in this source checkout (Claude Code)
+
+To use the harness in your own project, follow
+[Installing into an existing project](#installing-into-an-existing-project).
+The default local TaskStore requires Unix Python 3 with the stdlib `fcntl` module;
+no third-party Python packages are required.
 
 ```bash
 cd harness-sdd
@@ -99,17 +108,20 @@ The tables and workflow prose use the portable `/sdd-*` spelling; in Codex, invo
 repository skills as `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`,
 `$sdd-fix-parallel`, and (when enabled) `$sdd-pr-loop`.
 
-`/sdd-pr-loop` and the `pr-fixer` sub-agent are the only **gated** glue: they are stamped
-only while `pr_loop.enabled` is `true` in `harness.config.yaml`, and that gate is
-**opt-in — a fresh install seeds `false`**. The loop needs the **Codex GitHub App** on the
+`/sdd-pr-loop` and front-end-specific `pr-fixer` glue follow the **PR-policy gate**:
+they are stamped only while `pr_loop.enabled` is `true` in `harness.config.yaml`.
+The gate is **opt-in — a fresh install seeds `false`**. The loop needs the **Codex GitHub App** on the
 repo, an **authed `gh`** and **`jq`**; without them `/sdd-pr-loop` could only fail its own
 preflight, so nothing is written until you set `pr_loop.enabled: true` and re-run the
 installer. An absent block, an absent key or any non-`true` value all mean off.
+OpenCode separately gates `/sdd-fix-parallel` on its concurrency capability
+marker or an explicit override. Codex keeps its seven standard role registrations;
+the PR loop can use the in-session fixer fallback.
 
 The harness body — `AGENTS.md`, `agents/`, `specs/`, `progress/`, `init.sh`, the
 stores — is **identical** across all of them. Only the entry filename and the
 sub-agent mechanism differ. Which of these front-ends gets installed is your choice —
-the installer lets you select the agents to support and re-prompts on every upgrade
+the installer lets you select the agents to support and re-prompts on interactive upgrades
 (see [Installing into an existing project](#installing-into-an-existing-project)).
 
 ## Configuring the knowledge base / state
@@ -118,7 +130,7 @@ the installer lets you select the agents to support and re-prompts on every upgr
 
 | Backend | Status | Notes |
 |---|---|---|
-| `local` | ✅ default | `state/tasks.json` + markdown; zero deps |
+| `local` | ✅ default | `state/tasks.json` + markdown; Unix Python 3 with stdlib `fcntl` |
 | `obsidian` | ✅ | point a vault at the repo; frontmatter + `[[wikilinks]]` |
 | `jira` | ⏳ stub | contract defined in `store/jira.md`; wire MCP in a follow-up |
 
@@ -212,13 +224,14 @@ node tools/sync-board.mjs            # sync the configured provider
 node tools/sync-board.mjs --dry-run  # preview, mutate nothing
 ```
 
-`github-projects` is implemented (needs `gh`); `jira` and `azure-boards` are recognized
-no-op **stubs**. Run it automatically after each status change by wiring it into
+`github-projects` (needs `gh`) and Jira Server/Data Center (`jira`, REST + Bearer PAT)
+are implemented mirrors. `azure-boards` remains a recognized no-op **stub**.
+Mirror execution requires Node. Run it automatically after each status change via
 `store.on_write_command`. **Mirror ≠ backend**: a mirror projects local truth outward; a
 backend (`tasks: jira`) *is* the truth. Full contract, the provider table, and column
-configuration: `store/board-mirror.md`.
+configuration: [board mirror contract](store/board-mirror.md).
 
-## Layout
+## Source checkout layout
 
 ```
 AGENTS.md                    entrypoint (open standard)
@@ -228,19 +241,22 @@ harness.config.yaml          store backends, hooks, mirror, telemetry, umbrella
 harness-install.sh           install/upgrade into a target (+ --umbrella, --shared-repo)
 init.sh                      environment verification gate
 agents/                      role prompts (canonical)
-tools/                       zero-dep utilities (next-task.mjs, telemetry-report.py, sync-board.mjs, wait-for-codex.sh, opencode-model-helper.sh)
+tools/                       shell, Python and Node utilities (next-task.mjs, telemetry-report.py, sync-board.mjs, wait-for-codex.sh, opencode-model-helper.sh)
 specs/                       product.md, glossary.md, _templates/, epics/<E>/<F>/*.md
-state/                       tasks.json (local TaskStore) + schema
+state/                       tasks.json (local TaskStore)
 progress/                    run output + history.md
-store/                       store contract + adapters (local, obsidian, jira) + board-mirror
+store/                       tasks.schema.json, store contract + adapters (local, obsidian, jira) + board-mirror
 docs/                        [RATIONALE.md](docs/RATIONALE.md), SPEC-FORMAT, WORKFLOW, HARNESS, INSTALL, UMBRELLA, CONFIG-LAYERING
 umbrella.manifest.example.yaml   cross-repo coordinator manifest template
 umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     Claude Code sub-agents + commands
-.opencode/command/           OpenCode slash commands (/sdd-new, /sdd-plan, /sdd-drill, /sdd-fix, /sdd-next, /sdd-test-concurrency); /sdd-fix-parallel is opt-in
-.agents/                     Antigravity glue + shared explicit-only skill units (.agents/skills/sdd-*/{SKILL.md,agents/openai.yaml})
-.codex/agents/               seven Codex role TOMLs (always present when Codex is selected; model optional)
 ```
+
+Consumer installs put the body under `.harness/` and generate only selected and
+enabled front-end surfaces. The `.opencode/`, `.agents/`, and `.codex/` directories
+listed in the CLI table are installer outputs, absent from this source checkout.
+See the [installed layout](docs/INSTALL.md#install). Source `--self` regeneration
+covers Claude glue only.
 
 ### Codex PR review loop
 
@@ -292,8 +308,8 @@ terminal the installer shows a checkbox-style toggle list — `claude`, `gemini`
 interactive install the CLI you are running in is the only one pre-checked (`claude`
 alone when it cannot be detected — non-Claude front-ends are parked by default,
 E25-F01); the others are one keystroke away before you confirm. The choice is
-saved to `.harness/.agents`, so **every re-run re-prompts with your current selection
-pre-checked** — add or drop an agent any time, even when the harness version hasn't
+saved to `.harness/.agents`, so **interactive re-runs pre-check your current
+selection** — add or drop an agent any time, even when the harness version has not
 changed. Deselecting an agent removes only the harness-generated glue (your own
 `.claude/`/`.opencode/`/`.agents/` files and a hand-edited `opencode.json` are left
 untouched — Antigravity glue uses a freshly generated reference, while Codex skills and
@@ -305,7 +321,7 @@ roles require their last-written ownership stamps; edited files survive).
 > its opt-in gate is enabled. Both front-ends read that surface, so one unit serves both
 > and it is reclaimed only when the last of them is deselected (ADR-0003). Each skill also carries `agents/openai.yaml`, disables implicit invocation,
 > and maps text accompanying the explicit `$skill` mention to the canonical workflow's
-> `$ARGUMENTS`. It also registers all seven standard roles in `.codex/agents/`; inherited
+> `$ARGUMENTS`. Selecting **Codex** also registers all seven standard roles in `.codex/agents/`; inherited
 > or unpinned roles simply omit `model`. Last-written ownership stamps prevent selected
 > installs or cleanup from replacing foreign or edited skill units and role files. No
 > current install needs `HOME`/`CODEX_HOME` or writes global prompts. Ungated legacy
@@ -319,7 +335,7 @@ HARNESS_AGENTS=claude ./harness-install.sh /path/to/your-project
 # Work in exactly one CLI? Let the installer detect it (opt-in resolution mode):
 ./harness-install.sh --agents=host /path/to/your-project
 ./harness-install.sh --print-agents /path/to/your-project   # preview, writes nothing
-# No TTY and no override ⇒ all agents are stamped (back-compatible default).
+# No TTY and no override: fresh target ⇒ Claude only; existing install ⇒ all agents.
 ```
 
 `--agents=host` resolves to the front-end whose **session marker** is in this shell —
@@ -327,8 +343,10 @@ HARNESS_AGENTS=claude ./harness-install.sh /path/to/your-project
 resolution *mode*, never a selectable key, so `host` is never saved to `.harness/.agents`.
 A front-end the harness cannot detect (or that you'd rather name yourself) is declared
 with `HARNESS_HOST_AGENT=<key>`. When the host is undetected the run falls back to today's
-behavior — ALL front-ends on a target with no existing install, and the target's existing
-selection on one that already has an install, so it never silently widens or narrows. See
+baseline — Claude only on a fresh target, and the persisted selection on an existing
+install (all front-ends for a legacy install without a selection file). Plain unattended
+upgrades without an override still select all front-ends; use explicit `--agents=<csv>`
+for repeatable installs and upgrades. See
 [`docs/INSTALL.md`](docs/INSTALL.md) → "Host detection".
 
 **Shared vs personal config.** The install is meant to be *committed and shared* — one
@@ -345,13 +363,17 @@ task state) for the team while git-ignoring the product repos cloned into it. Bo
 single-repo use is unaffected. See `docs/UMBRELLA.md`.
 
 ## Adapting to a real project
-1. Rewrite `specs/product.md` for your product.
-2. Set the test/lint/typecheck commands in `harness.config.yaml` and the
-   project-specific section of `init.sh`.
-3. Add work by running `/sdd-new "<idea>"` (the Inception intake seeds it for you), or
-   hand-author entries from `specs/_templates/`.
 
-After install, steps 1–2 are done for you by the first-run bootstrap (`/sdd-next`).
+Paths below are relative to the installed project root:
+
+1. Rewrite `.harness/specs/product.md` for your product.
+2. Set test/lint/typecheck commands in `.harness/harness.config.yaml`. Put fast
+   project checks in `.harness/init.project.sh`, which survives upgrades and is
+   sourced from the project root. The installer refreshes `.harness/init.sh`.
+3. Add work with `/sdd-new "<idea>"`, or use `.harness/specs/_templates/`.
+
+The first-run bootstrap (`/sdd-next`) helps adapt the project under the human
+approval gate; see [Bootstrap](docs/INSTALL.md#bootstrap-first-run).
 
 Derived from the *Harnessing Engineering* research (harness-engineering + SDD videos,
 Anthropic's long-running-development post, the Harness Engineering knowledge graph).

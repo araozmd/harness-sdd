@@ -615,6 +615,10 @@ cancel siblings. No ready work is a zero-mutation success; missing native concur
 or `execution.builder.backend: delegate` fails before manifest/provision/claim and
 points to serial `/sdd-fix`.
 
+On OpenCode, the installer exposes `/sdd-fix-parallel` only after its concurrency
+capability marker or an explicit override enables it; the probe remains available.
+See [installation](INSTALL.md) for the capability gate.
+
 ## The PR review loop (`/sdd-pr-loop`)
 
 After a feature's local gate is green and its PR is open, `/sdd-pr-loop <pr>` drives the

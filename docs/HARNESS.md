@@ -43,7 +43,8 @@ value, and the evidence required before removing a mechanism.
 
 ## The commands this harness ships
 
-One canonical body per command is mirrored into `.claude/commands/`,
+For selected front-ends and enabled gates, one canonical command body is mirrored
+into `.claude/commands/`,
 `.opencode/command/`, and `.agents/workflows/`. The same instruction body is also wrapped with
 deterministic metadata at `.agents/skills/<name>/SKILL.md` — one shared unit read by both
 Codex and Antigravity (ADR-0003); invoke those repository-local workflows as `$sdd-*`. See [WORKFLOW.md](WORKFLOW.md) for the loop each
@@ -56,18 +57,20 @@ one drives.
 | `/sdd-drill <epic-id>` | Driller — decompose one draft epic into features | always |
 | `/sdd-next` | Orchestrator — route and delegate the next actionable task | always |
 | `/sdd-fix "<desc>"` | Fixer — the lightweight `sdd:false` maintenance lane | always |
-| `/sdd-fix-parallel` | Fixer — bounded parallel batch of ready E99 fixes | always |
-| `/sdd-pr-loop <pr>` | the Codex review cycle on one open PR (spawns `pr-fixer`) | `pr_loop.enabled` (opt-in) |
+| `/sdd-fix-parallel` | Fixer — bounded parallel batch of ready E99 fixes | OpenCode requires concurrency capability/override; runtime requires native concurrency and `in-session` Builder |
+| `/sdd-pr-loop <pr>` | the Codex review cycle on one open PR (`pr-fixer` or in-session fallback) | `pr_loop.enabled` (opt-in) |
 
-`/sdd-pr-loop` is the one **gated** command, and the gate is **opt-in**: it is stamped
+`/sdd-pr-loop` follows the **opt-in PR-policy gate**: it is stamped
 only while `pr_loop.enabled` reads exactly `true`, and a fresh install seeds `false`.
 An absent block, an absent key, an empty or malformed value all mean off. The reason is
 that the loop works only on a repository with the **Codex GitHub App** installed plus an
 **authed `gh`** and **`jq`** on `PATH` — defaulting it on would grow a command that can
 only fail its own preflight. Those are loop-runtime dependencies alone — `init.sh` never
 checks for them, so a target without either still passes the environment gate. Turning
-the key on and re-running the installer stamps the command and its `pr-fixer` sub-agent
-into every selected front-end; turning it back off reclaims all of it.
+the key on and re-running the installer emits PR-loop glue for selected front-ends
+and their supported fixer surfaces; Codex can use the in-session fixer fallback.
+Turning it back off reclaims harness-owned gated glue. OpenCode separately gates
+`/sdd-fix-parallel`; see [installation](INSTALL.md).
 
 Selecting Codex also registers exactly seven project-local roles in `.codex/agents/`.
 Inherited or unpinned roles remain registered without a `model` key; a concrete Codex
