@@ -927,7 +927,7 @@
         {
           "id": "E99-F159",
           "title": "Model tier vocabulary has no slot for Fable: add a `frontier` tier so a role can resolve to it without a pin (pins are per-tier, so architect and builder-heavy cannot differ while both map to `reasoning`)",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],

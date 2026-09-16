@@ -76,3 +76,31 @@
   the real rule left the suite green. When a section gains a counter-example, re-derive
   every anchor over that section and require a token only the real rule carries.
 - [2026-09-14 builder] Source self-generation must derive escalation arming after reconciling actual Builder/heavy files and current ownership, not from a successful temporary consumer install; a protected edited or symlinked source role otherwise keeps an optimistic armed verdict. Pin both blocked/unstamped Builder cases and an unaffected Scout control (`test_codex_native.sh`, E29-F01 R11).
+- [2026-09-16 reviewer] `_model_tier_resolve` has TWO independent tier-recognition arms —
+  the own-config one and the umbrella-cascade one — and a vocabulary edit that `sed`s both
+  at once is killed by `test_model_routing.sh` through the own arm ALONE. Mutate the
+  umbrella arm on its own (`test_models_cascade.sh` only ever exercises
+  reasoning/standard/cheap); E99-F159's new `frontier` arm and its umbrella warning both
+  survived all 47 suites while a coordinator-set tier really did stop stamping.
+- [2026-09-16 reviewer] A tier/vocabulary sweep must grep the PIPE-NO-SPACE form too:
+  E99-F159's brief named `reasoning | standard | cheap` and `reasoning standard cheap`, and
+  both miss `harness-install.sh:1770`'s contract comment `(reasoning|standard|cheap|inherit)`
+  — the docstring of the very function being edited. Grep the intent, not the sample pattern.
+- [2026-09-16 reviewer] The `models:` seed block's fresh-vs-migrated byte-identity is
+  UNPINNED: desyncing `harness-install.sh:271` from `harness.config.yaml:227` passes all 47
+  suites. Only the `workers:` block has a convergence test
+  (`test_install.sh:test_workers_block_seeded_migrated_converge`) — copy it before trusting
+  a hand `diff` on any block-text edit.
+- [2026-09-16 reviewer] An assertion on ONE warning must anchor that warning's distinguishing
+  prefix and its payload in the SAME `grep` (one line), never as two independent greps over
+  the combined output: in umbrella mode the coordinator root is itself an installed target,
+  so its OWN-arm warning for the same bad value co-occurs with the umbrella-arm one and
+  satisfies a payload-only grep. E99-F159 round 2 hit this live — the two-grep form passed
+  against a mutant that regressed only the umbrella sentence. Probe: break the sentence under
+  test, dump the output, and confirm the intact decoy is still sitting there when it reds.
+- [2026-09-16 reviewer] A vocabulary sweep must CLASSIFY its hits, not just count them.
+  `tests/fixtures/<component>-v<version>/**` is frozen installer output under a `SHA256SUMS`
+  manifest — stale vocabulary there is the point, and editing it falsifies the snapshot and
+  breaks the manifest. Same for `CHANGELOG.md` and a `done` feature's own spec/plan. A sweep
+  report that lists "the only surviving hits" without these is an under-count the next sweep
+  will inherit.
