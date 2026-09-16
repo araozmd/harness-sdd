@@ -927,11 +927,36 @@
         {
           "id": "E99-F159",
           "title": "Model tier vocabulary has no slot for Fable: add a `frontier` tier so a role can resolve to it without a pin (pins are per-tier, so architect and builder-heavy cannot differ while both map to `reasoning`)",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "867c75bee00b2ec392103da769a5ba8d4337491c",
+            "ref": "867c75b",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F159-frontier-model-tier/"
+        },
+        {
+          "id": "E99-F160",
+          "title": "The `models:` seed-block byte-identity invariant is unpinned: desyncing the harness-install.sh heredoc from harness.config.yaml survives all 47 suites, unlike the sibling `workers:` block pinned at tests/test_install.sh:154",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F160-models-seed-block-convergence/"
+        },
+        {
+          "id": "E99-F161",
+          "title": "Codex per-role reasoning effort is inexpressible: gen_codex_agent() writes only name/description/model/developer_instructions, though .codex/agents/*.toml accepts model_reasoning_effort (verified empirically, CLI 0.154.0)",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F161-codex-per-role-reasoning-effort/"
         }
       ]
     },
