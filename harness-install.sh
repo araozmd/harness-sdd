@@ -1767,7 +1767,7 @@ _model_warn_once() {
 }
 
 # _model_tier_resolve <role> — resolve the role's TIER into two caller-shell variables:
-# `_mtr_tier` (reasoning|standard|cheap|inherit) and `_mtr_src` (own|umbrella|default).
+# `_mtr_tier` (reasoning|standard|cheap|frontier|inherit) and `_mtr_src` (own|umbrella|default).
 # Chain: target `models.<role>` → target `models.default` → when that yields `inherit`
 # (or nothing) AND the target resolves an umbrella (UMB_MODELS_CFG, E27-F01), the
 # COORDINATOR's `models.<role>` → `models.default` — a child's own explicit value always

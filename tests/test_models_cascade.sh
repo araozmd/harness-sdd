@@ -44,6 +44,7 @@ seed_cfg "$U"
 COORD_CFG="$U/.harness/harness.config.yaml"
 set_cfg_line "$COORD_CFG" builder standard
 set_cfg_line "$COORD_CFG" builder-heavy reasoning
+set_cfg_line "$COORD_CFG" architect frontier
 seed_cfg "$U/child-b"
 set_cfg_line "$U/child-b/.harness/harness.config.yaml" builder cheap
 
@@ -56,6 +57,8 @@ grep -q "^model: sonnet\$" "$U/child-a/.claude/agents/builder.md" \
   || fail "child-a builder did not cascade coordinator standard→sonnet (R1)"
 grep -q "^model: opus\$" "$U/child-a/.claude/agents/builder-heavy.md" \
   || fail "child-a builder-heavy did not cascade coordinator reasoning→opus (R1)"
+grep -q "^model: fable\$" "$U/child-a/.claude/agents/architect.md" \
+  || fail "child-a architect did not cascade coordinator frontier→fable (R1, E99-F159)"
 pass "coordinator tiers cascade into an all-inherit child (R1) [cascade_resolves]"
 
 # ── R2: a child's own explicit non-inherit value wins ─────────────────────────
@@ -75,9 +78,9 @@ grep -q "^claude=raise\$" "$U/child-a/.harness/.escalation-arming" \
 pass "escalation verdict recomputed from cascaded tiers (R4) [verdict_recomputed]"
 
 # ── R5: per-child report line names each role's tier and source ───────────────
-grep -q "models cascade: builder=standard(umbrella) builder-heavy=reasoning(umbrella)" "$OUT" \
+grep -q "models cascade: architect=frontier(umbrella) builder=standard(umbrella) builder-heavy=reasoning(umbrella)" "$OUT" \
   || fail "child-a report line missing or wrong (R5)"
-grep -q "models cascade: builder=cheap(own) builder-heavy=reasoning(umbrella)" "$OUT" \
+grep -q "models cascade: architect=frontier(umbrella) builder=cheap(own) builder-heavy=reasoning(umbrella)" "$OUT" \
   || fail "child-b report line missing or wrong (R5)"
 pass "report lines name tier and source per child (R5) [report_line]"
 
@@ -101,6 +104,8 @@ HARNESS_AGENTS=claude sh "$SRC/harness-install.sh" --umbrella "$U" >"$T/out3.txt
   || { cat "$T/out3.txt" >&2; fail "cascade with coordinator garbage tier exited non-zero (R7)"; }
 grep -q "umbrella models.builder: unrecognized tier 'turbo9'" "$T/out3.txt" \
   || fail "no warning naming the coordinator as the garbage source (R7)"
+grep -q "known tiers: reasoning standard cheap frontier inherit" "$T/out3.txt" \
+  || fail "E99-F159: the umbrella unknown-tier warning does not list all four known tiers (R7)"
 grep -q "^model:" "$U/child-a/.claude/agents/builder.md" \
   && fail "child-a builder stamped a model from a garbage coordinator tier (R7)"
 grep -q "^model: opus\$" "$U/child-a/.claude/agents/builder-heavy.md" \
