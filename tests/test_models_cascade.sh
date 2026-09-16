@@ -102,9 +102,15 @@ pass "coordinator pin fills an absent child pin; own resolution untouched (R3) [
 set_cfg_line "$COORD_CFG" builder turbo9
 HARNESS_AGENTS=claude sh "$SRC/harness-install.sh" --umbrella "$U" >"$T/out3.txt" 2>&1 \
   || { cat "$T/out3.txt" >&2; fail "cascade with coordinator garbage tier exited non-zero (R7)"; }
-grep -q "umbrella models.builder: unrecognized tier 'turbo9'" "$T/out3.txt" \
+grep -q "umbrella models.builder: unrecognized tier 'turbo9' in the coordinator's config" "$T/out3.txt" \
   || fail "no warning naming the coordinator as the garbage source (R7)"
-grep -q "known tiers: reasoning standard cheap frontier inherit" "$T/out3.txt" \
+# Anchor both the umbrella-specific phrasing AND the four-tier list in the SAME
+# sentence (not just anywhere in the combined output) — the coordinator's OWN-arm
+# warning for its own turbo9 value fires too (it is itself an installed target) and
+# still says "frontier" even when only the umbrella arm's warning text regresses to
+# three tiers, so a bare `grep -q 'known tiers: ... frontier ...'` over the whole file
+# would stay green on that mutation. E99-F159 (round 2, Finding 2).
+grep -q "umbrella models.builder: unrecognized tier 'turbo9' in the coordinator's config — treating it as 'inherit' (known tiers: reasoning standard cheap frontier inherit)" "$T/out3.txt" \
   || fail "E99-F159: the umbrella unknown-tier warning does not list all four known tiers (R7)"
 grep -q "^model:" "$U/child-a/.claude/agents/builder.md" \
   && fail "child-a builder stamped a model from a garbage coordinator tier (R7)"
