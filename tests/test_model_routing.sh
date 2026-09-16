@@ -10,6 +10,10 @@
 #
 # Zero dependencies; self-cleaning temp dir. R1–R3, R11, R12, R24 and R25 (the
 # installer-wiring half) live in tests/test_install.sh.
+#
+# E99-F159 additions: the fourth tier `frontier`, resolving to the floating `fable`
+# alias on claude, with no built-in alias on codex/opencode (same shape as the other
+# three tiers) and honored by `pin.<front-end>.frontier`.
 
 set -eu
 
@@ -224,6 +228,10 @@ test_unknown_tier_warns_and_inherits() {
   _e="$(run_err "$_t" claude)"
   printf '%s\n' "$_e" | grep -q 'builder'    || fail "R9: the warning does not name the role"
   printf '%s\n' "$_e" | grep -q 'turbo-9000' || fail "R9: the warning does not name the unrecognized tier"
+  # E99-F159: the known-tiers list in the warning now names all FOUR tiers, so an
+  # operator reading stderr against an older doc is not left one tier short.
+  printf '%s\n' "$_e" | grep -q 'known tiers: reasoning standard cheap frontier inherit' \
+    || fail "E99-F159: the unknown-tier warning does not list all four known tiers"
   grep -q '^model:' "$_t/.claude/agents/builder.md" \
     && fail "R9: an unrecognized tier must resolve as inherit (no model key)"
   [ -f "$_t/.claude/agents/builder.md" ] || fail "R9: the install did not complete"
@@ -242,6 +250,60 @@ test_opencode_pin_format_guard() {
     && fail "R10: an invalid opencode pin must not stamp any model key"
   grep -q 'sonnet-only-no-provider' "$_t/opencode.json" \
     && fail "R10: the invalid pin value leaked into opencode.json"
+  return 0
+}
+
+# ── E99-F159: `frontier` resolves to the floating `fable` alias on claude ────────
+test_frontier_tier_claude_alias() {
+  _t="$(mk f159-alias)"; run "$_t" claude
+  set_tier "$_t" architect frontier
+  run "$_t" claude
+  [ "$(sed -n 's/^model: //p' "$_t/.claude/agents/architect.md")" = "fable" ] \
+    || fail "E99-F159: claude frontier tier did not resolve to fable"
+  # No digit anywhere in the emitted alias: it must stay a FLOATING vendor alias, never
+  # a version-pinned model id (same invariant R6 already pins for the other three tiers).
+  case "$(sed -n 's/^model: //p' "$_t/.claude/agents/architect.md")" in
+    *[0-9]*) fail "E99-F159: the frontier alias looks version-pinned, not floating" ;;
+  esac
+  return 0
+}
+
+# ── E99-F159: an unpinned `frontier` stamps no model on codex/opencode ───────────
+test_frontier_unpinned_codex_opencode_omits() {
+  _t="$(mk f159-unpinned)"; run "$_t" "$ALL"
+  set_tier "$_t" architect frontier
+  run "$_t" "$ALL"
+  [ "$(sed -n 's/^model: //p' "$_t/.claude/agents/architect.md")" = "fable" ] \
+    || fail "E99-F159: setup — claude should still resolve frontier while codex/opencode are unpinned"
+  grep -q '^model = ' "$_t/.codex/agents/architect.toml" \
+    && fail "E99-F159: an unpinned frontier tier stamped a model key on codex"
+  grep -q '"architect":.*"model"' "$_t/opencode.json" \
+    && fail "E99-F159: an unpinned frontier tier stamped a model member on opencode"
+  return 0
+}
+
+# ── E99-F159: pin.<front-end>.frontier is honored on codex and opencode ─────────
+test_frontier_pin_honored() {
+  _t="$(mk f159-pin)"; run "$_t" "$ALL"
+  set_tier "$_t" architect frontier
+  set_pin "$_t" codex frontier "gpt-5-pro"
+  set_pin "$_t" opencode frontier "anthropic/claude-fable"
+  run "$_t" "$ALL"
+  grep -q '^model = "gpt-5-pro"$' "$_t/.codex/agents/architect.toml" \
+    || fail "E99-F159: pin.codex.frontier was not honored"
+  grep -q '"architect":.*"model": "anthropic/claude-fable"' "$_t/opencode.json" \
+    || fail "E99-F159: pin.opencode.frontier was not honored"
+
+  # The opencode provider/model format guard is generic over the tier — a malformed
+  # frontier pin is rejected exactly like a malformed pin on any other tier (R10).
+  _u="$(mk f159-pin-guard)"; run "$_u" opencode
+  set_tier "$_u" architect frontier
+  set_pin "$_u" opencode frontier "fable-only-no-provider"
+  _e="$(run_err "$_u" opencode)"
+  printf '%s\n' "$_e" | grep -q 'provider/model' \
+    || fail "E99-F159: a malformed frontier pin was not rejected by the provider/model guard"
+  grep -q '"model"' "$_u/opencode.json" \
+    && fail "E99-F159: a malformed frontier pin still stamped a model key"
   return 0
 }
 
@@ -805,6 +867,12 @@ test_unknown_tier_warns_and_inherits
 pass "unknown tier warns, resolves as inherit, exits 0 (R9)"
 test_opencode_pin_format_guard
 pass "an opencode pin without '/' warns and never reaches opencode.json (R10)"
+test_frontier_tier_claude_alias
+pass "E99-F159: the frontier tier resolves to the floating fable alias on claude"
+test_frontier_unpinned_codex_opencode_omits
+pass "E99-F159: an unpinned frontier tier stamps no model on codex/opencode"
+test_frontier_pin_honored
+pass "E99-F159: pin.codex.frontier / pin.opencode.frontier are honored; the provider/model guard still applies"
 test_opencode_json_model_member
 pass "opencode agent.<role> carries a \"model\" member (R14)"
 test_codex_agent_files_project_local

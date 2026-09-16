@@ -268,7 +268,7 @@ migrate_config() {
     cat >> "$_cfg" <<'EOF'
 
 # Per-role model routing (E17-F01) — OPT-IN and INERT by default.
-# Tiers: reasoning | standard | cheap | inherit
+# Tiers: reasoning | standard | cheap | frontier | inherit
 # `inherit` compiles to KEY OMISSION on every front-end — the generated agent
 # definitions are byte-identical to a harness without this block.
 # NOTE: `orchestrator` applies only where the orchestrator is a spawned sub-agent
@@ -1781,10 +1781,10 @@ _model_tier_resolve() {
   _mtr_v="$(_cfg_models_value "$_mtr_cfg" "$1")"
   [ -n "$_mtr_v" ] || _mtr_v="$(_cfg_models_value "$_mtr_cfg" default)"
   case "$_mtr_v" in
-    ''|reasoning|standard|cheap|inherit) ;;
+    ''|reasoning|standard|cheap|frontier|inherit) ;;
     *)
       _model_warn_once "tier:$1:$_mtr_v" \
-        "⚠️  models.$1: unrecognized tier '$_mtr_v' — treating it as 'inherit' (known tiers: reasoning standard cheap inherit)"
+        "⚠️  models.$1: unrecognized tier '$_mtr_v' — treating it as 'inherit' (known tiers: reasoning standard cheap frontier inherit)"
       _mtr_v="inherit" ;;
   esac
   if [ -n "$_mtr_v" ] && [ "$_mtr_v" != "inherit" ]; then
@@ -1795,10 +1795,10 @@ _model_tier_resolve() {
     _mtr_u="$(_cfg_models_value "$UMB_MODELS_CFG" "$1")"
     [ -n "$_mtr_u" ] || _mtr_u="$(_cfg_models_value "$UMB_MODELS_CFG" default)"
     case "$_mtr_u" in
-      ''|reasoning|standard|cheap|inherit) ;;
+      ''|reasoning|standard|cheap|frontier|inherit) ;;
       *)
         _model_warn_once "utier:$1:$_mtr_u" \
-          "⚠️  umbrella models.$1: unrecognized tier '$_mtr_u' in the coordinator's config — treating it as 'inherit' (known tiers: reasoning standard cheap inherit)"
+          "⚠️  umbrella models.$1: unrecognized tier '$_mtr_u' in the coordinator's config — treating it as 'inherit' (known tiers: reasoning standard cheap frontier inherit)"
         _mtr_u="inherit" ;;
     esac
     if [ -n "$_mtr_u" ] && [ "$_mtr_u" != "inherit" ]; then
@@ -1833,6 +1833,7 @@ model_alias() {
     claude:reasoning)                          printf 'opus\n' ;;
     claude:standard)                           printf 'sonnet\n' ;;
     claude:cheap)                              printf 'haiku\n' ;;
+    claude:frontier)                           printf 'fable\n' ;;
   esac
   return 0
 }

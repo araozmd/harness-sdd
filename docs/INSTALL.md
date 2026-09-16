@@ -721,7 +721,7 @@ models:
   # pin.codex.cheap: "gpt-5-mini"
 ```
 
-**Tier vocabulary: `reasoning | standard | cheap | inherit`.** A role's tier is
+**Tier vocabulary: `reasoning | standard | cheap | frontier | inherit`.** A role's tier is
 `models.<role>`, else `models.default`, else `inherit`. An **unrecognized** tier is a
 warning on stderr, resolves as `inherit`, and never fails the install — so a config
 written for a newer harness can never block an upgrade on an older installer.
@@ -784,6 +784,7 @@ a `builder-heavy:` line. Nothing breaks: an unlisted role falls through to
 | `reasoning` | `opus` | *(pin required)* | *(pin required)* |
 | `standard` | `sonnet` | *(pin required)* | *(pin required)* |
 | `cheap` | `haiku` | *(pin required)* | *(pin required)* |
+| `frontier` | `fable` | *(pin required)* | *(pin required)* |
 | `inherit` | *omitted* | *omitted* | *omitted* |
 
 Claude’s built-in values are floating vendor aliases. Codex and OpenCode require
