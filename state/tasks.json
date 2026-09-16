@@ -1470,7 +1470,7 @@
         {
           "id": "E30-F01",
           "title": "specs/glossary.md is body-owned but project-authored: make it seed-once and preserve a project's edits (refresh only while byte-identical to the shipped example)",
-          "status": "pending",
+          "status": "spec-ready",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
