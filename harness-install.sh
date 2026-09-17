@@ -3109,6 +3109,68 @@ for rel in ('.agents/rules','.agents/agents','.agents/workflows','.agents','.gem
 PYRETIRE
 }
 
+# ── specs/product.md shipped-stub emitters (E28-F01 round 9) ──────────────────
+# specs/product.md is PROJECT-OWNED: the human edits it and the Planner may never
+# rewrite it. It is seeded once, and an upgrade preserves project-authored content.
+#
+# E28-F01 changed the seeded prose (it used to name /sdd-next as the new-product
+# front door; it now names /sdd-plan then /sdd-drill). A target created by ANY
+# release up to v0.81.0 already has the file, so the old seed-only branch skipped
+# the new prose and the target kept the wrong front door forever (Codex round 9,
+# 4042109208). The fix is a GUARDED refresh: migrate only a file byte-identical
+# to the known prior shipped stub; preserve everything else byte for byte.
+#
+# product_stub_prior — the stub shipped byte-identically from v0.1.0 through
+# v0.81.0 (confirmed with `git log -S` on its distinguishing line). Older or
+# unknown stubs are deliberately NOT in the table and are preserved: this is a
+# one-blob migration, not a general "was it seeded by us?" heuristic.
+product_stub_prior() {
+  cat <<'PRODUCT_STUB_PRIOR_EOF'
+---
+status: draft
+---
+
+# <Product name> — Product Constitution
+
+> Layer 0. The stable, high-level "what & why". Rewrite this for your product,
+> then run /sdd-next to bootstrap (detect test/lint commands, draft epics).
+
+## What this product is
+TODO
+
+## Who it is for
+TODO
+
+## Principles & hard constraints
+TODO
+PRODUCT_STUB_PRIOR_EOF
+}
+
+# product_stub_current — the stub shipped from v0.81.1 (E28-F01): the whole-project
+# front door is /sdd-plan, then /sdd-drill, before /sdd-next.
+product_stub_current() {
+  cat <<'PRODUCT_STUB_CURRENT_EOF'
+---
+status: draft
+---
+
+# <Product name> — Product Constitution
+
+> Layer 0. The stable, high-level "what & why". Rewrite this for your product,
+> then run /sdd-plan to plan the whole project (vision, architecture, ADRs, draft epics),
+> then /sdd-drill <epic-id> to decompose the first epic into features.
+
+## What this product is
+TODO
+
+## Who it is for
+TODO
+
+## Principles & hard constraints
+TODO
+PRODUCT_STUB_CURRENT_EOF
+}
+
 install_one() {
   TARGET="$1"
   H="$TARGET/.harness"
@@ -3817,28 +3879,37 @@ EOF
     info "init.project.sh preserved"
   fi
 
-  if [ ! -f "$H/specs/product.md" ]; then
-    cat > "$H/specs/product.md" <<'EOF'
----
-status: draft
----
-
-# <Product name> — Product Constitution
-
-> Layer 0. The stable, high-level "what & why". Rewrite this for your product,
-> then run /sdd-plan to plan the whole project (vision, architecture, ADRs, draft epics),
-> then /sdd-drill <epic-id> to decompose the first epic into features.
-
-## What this product is
-TODO
-
-## Who it is for
-TODO
-
-## Principles & hard constraints
-TODO
-EOF
+  # specs/product.md is the PROJECT-OWNED constitution. Four states, one rule, no flag
+  # (docs/RATIONALE.md ablation doctrine), mirroring specs/glossary.md below:
+  #   symlink / non-regular      -> preserve (never write through a link)
+  #   absent                     -> seed the current shipped stub
+  #   byte-identical current     -> pristine, leave it alone
+  #   byte-identical PRIOR stub  -> refresh to the current shipped stub (a pristine
+  #                                 seed, not authored content)
+  #   anything else              -> preserve, byte for byte (project-authored)
+  # The `-L` guard precedes `-e` so a dangling link is not read as "absent" and
+  # written THROUGH (same reason as the glossary branch below). The prior-stub test
+  # runs last so only a file that is neither current nor authored is migrated.
+  _prod="$H/specs/product.md"
+  if [ -L "$_prod" ] || { [ -e "$_prod" ] && [ ! -f "$_prod" ]; }; then
+    info "specs/product.md preserved (not a regular file — left exactly as found)"
+  elif [ ! -e "$_prod" ]; then
+    product_stub_current > "$_prod"
     info "seeded specs/product.md (stub)"
+  else
+    _prod_new="$(mktemp 2>/dev/null || mktemp -t harness-prod-new)"
+    _prod_prior="$(mktemp 2>/dev/null || mktemp -t harness-prod-prior)"
+    product_stub_current > "$_prod_new"
+    product_stub_prior > "$_prod_prior"
+    if cmp -s "$_prod" "$_prod_new"; then
+      info "specs/product.md pristine (still byte-identical to the shipped stub)"
+    elif cmp -s "$_prod" "$_prod_prior"; then
+      cp "$_prod_new" "$_prod"
+      info "specs/product.md refreshed (was the pristine pre-0.81.1 stub; project edits are preserved)"
+    else
+      info "specs/product.md preserved (project-authored)"
+    fi
+    rm -f "$_prod_new" "$_prod_prior"
   fi
 
   # specs/glossary.md is PROJECT-OWNED (E30-F01) — a project's own domain vocabulary, not
@@ -7185,6 +7256,22 @@ EOF
     ok "upgrade complete (v$VERSION)"
   else
     ok "install complete (v$VERSION)"
+    # E28-F01 round 9 (4042109214): the single-repo workflow below is WRONG for an
+    # umbrella cascade. The default umbrella root is deliberately non-git unless
+    # --shared-repo, so "run git init" is false advice; and whole-project planning
+    # happens ONCE at the coordinator, so repeating /sdd-plan for every fresh child
+    # is false advice too. Gate the workflow by the cascade role instead.
+    if [ "$HARNESS_UMBRELLA_ROLE" = "coordinator" ]; then
+      echo
+      echo "Next steps (umbrella coordinator):"
+      echo "  1. Child repos are recorded in umbrella.manifest.yaml; init.sh runs the coordinator loop and dispatches each cross-repo feature into them."
+      echo "  2. Plan the whole project ONCE here (see AGENTS.md for this host's plan and drill commands), then decompose the first epic into per-repo slices; each child repo runs its own local SDD loop."
+    elif [ "$HARNESS_UMBRELLA_ROLE" = "child" ]; then
+      echo
+      echo "Next steps (umbrella child):"
+      echo "  1. Cross-repo specs live at the umbrella; this repo runs its own SDD loop on the slices the coordinator dispatches to it."
+      echo "  2. Run init.sh here for this repo's own gates and local feature work."
+    else
     echo
     echo "Next steps:"
     # Version control is the human's step: the installer never runs `git init` on a
@@ -7262,6 +7349,7 @@ EOF
       echo "  6. $_adv_next to spec and build that work."
     fi
     echo "     (detect test/lint commands after planning)."
+    fi
   fi
 
   LAST_UPGRADE="$UPGRADE"
@@ -7516,6 +7604,13 @@ RECURSIVE=0
 DRY_RUN=0
 SHARED_REPO=0
 POSITIONAL=""
+# E28-F01 round 9 (4042109214): which target of an umbrella cascade, if any, the
+# current install_one call is for. Empty in single-target (and --self) mode, so the
+# fresh-install "Next steps" banner prints the single-repo workflow exactly as before;
+# "coordinator"/"child" swap it for umbrella-specific advice, because the default
+# umbrella root is deliberately non-git unless --shared-repo, and whole-project
+# planning happens ONCE at the coordinator — not once per child.
+HARNESS_UMBRELLA_ROLE=""
 # ── E24-F04: the two layout flags ────────────────────────────────────────────────────
 # THE FLAG DECIDES WHETHER TO ACT, NEVER WHAT TO COMPUTE. `prose_tier_blockers` runs at the
 # same point over the same inputs whether or not --thin was passed; the flag only chooses
@@ -7813,6 +7908,7 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
+HARNESS_UMBRELLA_ROLE="coordinator"
 install_one "$UMB"
 
 # Ensure the coordinator config carries an integration_command key (migration on a
@@ -7937,6 +8033,7 @@ for child in "$UMB"/*/; do
       HARNESS_UMBRELLA_ROOT="$_umb_phys"
       ;;
   esac
+  HARNESS_UMBRELLA_ROLE="child"
   install_one "$UMB/$name"   # R10
   unset HARNESS_UMBRELLA_ROOT
   manifest_upsert "$MANIFEST" "$name"   # R12, R14

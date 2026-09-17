@@ -73,6 +73,20 @@ sh "$INSTALL" --umbrella "$U" >"$OUT" 2>&1 || fail "umbrella mode exited non-zer
 grep -q "umbrella cascade" "$OUT" || fail "umbrella mode banner absent (R1)"
 pass "--umbrella <dir> mode accepted and runs (R1) [umbrella_mode_runs]"
 
+# E28-F01 round 9 (4042109214): a cascade is not a single-repo install, and every
+# fresh target (UPGRADE=0) used to print the single-repo `Next steps` workflow —
+# telling the default (non-git) coordinator to `git init` and repeating whole-project
+# planning for every child. Positive control first: the run genuinely completed an
+# install and the coordinator banner is present; then the single-repo workflow must
+# be absent. This suite owns the umbrella path, so the pin lives here too.
+grep -q 'install complete' "$OUT" \
+  || fail "cascade did not report an install completion — the banner assertion would be vacuous"
+grep -q 'Next steps (umbrella coordinator):' "$OUT" \
+  || fail "cascade printed no umbrella coordinator advice — the single-repo banner was gated without a replacement"
+grep -qF 'Run git init and make an initial commit' "$OUT" \
+  && fail "umbrella cascade printed the single-repo git-init banner — umbrella mode keeps that root non-git unless --shared-repo (4042109214)"
+pass "cascade suppresses the single-repo Next steps workflow, emits umbrella advice (E28-F01 round 9) [cascade_no_single_repo_banner]"
+
 # R5: coordinator profile (full body) written to <umbrella>/.harness/.
 [ -d "$U/.harness" ]                          || fail "coordinator .harness missing (R5)"
 [ -f "$U/.harness/AGENTS.md" ]                || fail "coordinator body (AGENTS.md) missing (R5)"

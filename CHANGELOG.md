@@ -76,6 +76,23 @@ All notable changes to the harness body are recorded here. Versions follow
   `tests/test_greenfield.sh` adds `test_multi_host_banner_emits_one_workflow` (exactly one
   step 3/4/5/6 line, one baseline step, one planning step, both invocation forms in that
   step). No VERSION bump beyond this entry.
+- **Round-9 review: the pristine prior `specs/product.md` stub is refreshed on upgrade, and
+  umbrella cascades no longer print the single-repo workflow.** Releases v0.1.0–v0.81.0
+  shipped a `specs/product.md` stub whose prose named `/sdd-next` as the new-product front
+  door; because the seed-only branch ran only when the file was absent, an upgraded target
+  kept the stale front door forever. The installer now refreshes `specs/product.md` only
+  while it is byte-identical to the known prior shipped stub (one blob covering every release
+  through v0.81.0, confirmed by `git log -S` on its distinguishing line) and preserves any
+  project-authored content byte for byte; a symlinked or non-regular file is left untouched.
+  Separately, `--umbrella` routes the coordinator and every child through the same
+  fresh-install `Next steps` banner, which told the default (non-git) coordinator to run
+  `git init` and repeated whole-project planning for every fresh child. The banner is now
+  role-aware: the coordinator names `umbrella.manifest.yaml` and the coordinator loop with
+  planning done once, each child names the umbrella and its own local SDD loop, and the
+  single-repo `git init` workflow is gated out of cascades. `tests/test_greenfield.sh` adds
+  `test_prior_pristine_product_stub_is_refreshed`,
+  `test_edited_product_md_is_preserved_on_upgrade`, and
+  `test_umbrella_cascade_suppresses_single_repo_banner`. No VERSION bump beyond this entry.
 
 ## [0.81.0] — 2026-09-17
 

@@ -48,7 +48,7 @@ your-project/
     ├── .gitignore                       # seeded: keeps the local-only telemetry log out of VCS
     ├── telemetry.jsonl                  # created on first run — local-only, gitignored (E05-F02)
     ├── workers.json                     # only while workers.roster — local-only, gitignored (E17-F04)
-    ├── specs/product.md  specs/epics/   # YOURS — seeded once, never overwritten
+    ├── specs/product.md  specs/epics/   # YOURS — seeded once; project edits preserved
     ├── state/tasks.json                 # YOURS — bootstrap task seeded
     └── progress/
 ```
@@ -58,9 +58,12 @@ see [`../README.md`](../README.md) → Observability and `agents/orchestrator.md
 
 Existing entrypoint prose is preserved outside the managed
 `<!-- harness:begin -->…<!-- harness:end -->` block. Project-owned
-`.harness/specs/product.md`, `.harness/specs/glossary.md`, epic specs, state, progress,
-configuration, and `init.project.sh` are preserved on upgrade (configuration also
-receives missing default keys). Templates belong to the refreshed harness body.
+`.harness/specs/glossary.md`, epic specs, state, progress, configuration, and
+`init.project.sh` are preserved on upgrade (configuration also receives missing default
+keys); `.harness/specs/product.md` is preserved too, except that a file still
+byte-identical to a prior release's shipped stub is refreshed to the current stub, so an
+upgraded target does not keep stale seeded guidance. Templates belong to the refreshed
+harness body.
 Generated glue follows its front-end ownership rules; see [Layout & ownership](#layout--ownership).
 
 ### Shared skill units and legacy prompt migration

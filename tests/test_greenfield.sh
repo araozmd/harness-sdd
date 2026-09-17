@@ -79,6 +79,20 @@
 #     its "second item, after `git init`" cross-reference (the unchanged R5 anchors
 #     still hold; the banner asserts order by first occurrence, not step labels).
 #
+# Round-9 review additions:
+#   * A target created by any release up to 0.81.0 keeps a pristine `specs/product.md`
+#     stub whose prose names `/sdd-next` as the new-product front door. The seed-only
+#     branch skipped it on upgrade, so the wrong front door survived forever
+#     (4042109208). `test_prior_pristine_product_stub_is_refreshed` pins the guarded
+#     refresh (a byte-identical PRIOR shipped stub is migrated), and
+#     `test_edited_product_md_is_preserved_on_upgrade` pins the guard's other half
+#     (project-authored content is never clobbered).
+#   * An umbrella cascade routes every target through `install_one`, so the fresh-install
+#     `Next steps` banner told the default (non-git) coordinator to `git init` and
+#     repeated whole-project planning per child (4042109214).
+#     `test_umbrella_cascade_suppresses_single_repo_banner` pins that a cascade emits
+#     umbrella-specific advice and NEVER the single-repo `git init` workflow.
+#
 # CONVENTIONS THIS SUITE HONOURS (progress/lessons.md):
 #   * No `VERSION` literal anywhere. R10 reads $SRC/VERSION at run time; the
 #     no-literal half is only falsifiable by the Reviewer's bump mutation, not by
@@ -160,6 +174,32 @@ front_door_in() {
 # heading to the next blank line (exclusive). Empty output means the banner is gone.
 banner_block() {
   awk '/^Next steps:/{k=1} k{ if ($0 == "") exit; print }' "$1"
+}
+
+# write_prior_product_stub <path> — materialise the SPECS/PRODUCT.MD STUB SHIPPED BY
+# RELEASES v0.1.0–v0.81.0, byte for byte. It is a FIXTURE, written here as a literal
+# because no installed artifact carries it any more; a test that read the current
+# installer's output for it would be asserting the fix against itself.
+write_prior_product_stub() {
+  cat > "$1" <<'PRIOR_PRODUCT_STUB_EOF'
+---
+status: draft
+---
+
+# <Product name> — Product Constitution
+
+> Layer 0. The stable, high-level "what & why". Rewrite this for your product,
+> then run /sdd-next to bootstrap (detect test/lint commands, draft epics).
+
+## What this product is
+TODO
+
+## Who it is for
+TODO
+
+## Principles & hard constraints
+TODO
+PRIOR_PRODUCT_STUB_EOF
 }
 
 # ── R1 (static) ───────────────────────────────────────────────────────────────
@@ -475,6 +515,60 @@ test_multi_host_banner_emits_one_workflow() {
   pass "multi-host banner emits ONE numbered workflow with per-host alternatives (R5) [multi_host_banner_emits_one_workflow]"
 }
 
+# ── Round-9 (4042109214): an umbrella cascade gets umbrella advice, not the
+# single-repo `git init` workflow ─────────────────────────────────────────────
+#
+# `--umbrella` routes the coordinator AND every child through `install_one`, and
+# every fresh target (UPGRADE=0) printed the single-repo `Next steps` banner. The
+# default umbrella root is deliberately non-git unless `--shared-repo`, so the
+# banner told the coordinator to `git init` a root umbrella mode keeps non-git, and
+# repeated whole-project planning for every fresh child. The cascade must emit
+# umbrella-specific advice and NEVER the single-repo workflow.
+test_umbrella_cascade_suppresses_single_repo_banner() {
+  _um="$T/umbrella-banner"
+  _um_home="$T/umbrella-home"
+  _um_codex="$T/umbrella-codex-home"
+  mkdir -p "$_um/child-a/.git" "$_um/child-b/.git" "$_um_home" "$_um_codex"
+  _um_rc=0
+  env -i PATH="$PATH" HOME="$_um_home" CODEX_HOME="$_um_codex" \
+    sh "$SRC/harness-install.sh" --umbrella "$_um" --agents=claude \
+      --builder-backend=in-session --pr-loop=false \
+    >"$T/umbrella.out" 2>"$T/umbrella.err" || _um_rc=$?
+  [ "$_um_rc" -eq 0 ] \
+    || fail "R8e: the umbrella cascade exited $_um_rc — cannot assert its banner"
+  # Positive controls: the coordinator and a child both actually installed, so the
+  # assertions below read a real cascade, not an aborted one.
+  [ -f "$_um/.harness/.harness-version" ] \
+    || fail "R8e: the cascade left no coordinator install stamp — the run did not land"
+  [ -f "$_um/child-a/.harness/.harness-version" ] \
+    || fail "R8e: the cascade left no child install stamp — the run did not land"
+  _um_flat="$(tr '\n' ' ' < "$T/umbrella.out")"
+  # Positive anchors: the cascade must SAY something umbrella-specific for both roles.
+  # Folded two-token pairs keep each half in one sentence of the banner (the numbered
+  # heading is separated from step 1 by `1.`, so the pair is taken inside step 1).
+  assert_contains "R8e coordinator banner" "$_um_flat" 'umbrella coordinator'
+  assert_contains "R8e coordinator banner" "$_um_flat" 'umbrella.manifest.yaml'
+  printf '%s\n' "$_um_flat" | grep -qiE 'coordinator loop[^.]{0,80}dispatches' \
+    || fail "R8e: the coordinator banner does not state the coordinator loop and its dispatch in one sentence — the cascade prints no umbrella-specific advice"
+  assert_contains "R8e child banner" "$_um_flat" 'umbrella child'
+  printf '%s\n' "$_um_flat" | grep -qiE 'Cross-repo specs[^.]{0,120}SDD loop' \
+    || fail "R8e: the child banner does not state where the specs live and the local SDD loop in one sentence — the child gets no umbrella-specific advice"
+  # No plain single-repo `Next steps:` block (exact heading) anywhere in a cascade.
+  _um_plain="$(banner_block "$T/umbrella.out")"
+  [ -z "$_um_plain" ] \
+    || fail "R8e: the umbrella cascade printed a single-repo 'Next steps:' block — the single-repo workflow must be gated out of cascades (4042109214)"
+  # The exact single-repo git-init step must not appear. In-suite positive control:
+  # the single-repo install captured earlier DID carry it, so a zero here is a real
+  # absence, not a grep whose shape can never match (progress/lessons.md).
+  _sr_init="$(grep -cF 'Run git init and make an initial commit' "$INSTALL_OUT" || true)"
+  [ "$_sr_init" -ge 1 ] \
+    || fail "R8e positive control: the single-repo install banner lacks the git-init step — this assertion's shape is stale"
+  _um_init="$(grep -cF 'Run git init and make an initial commit' "$T/umbrella.out" || true)"
+  [ "$_um_init" -eq 0 ] \
+    || fail "R8e: the umbrella cascade printed the single-repo git-init step $_um_init time(s) — an umbrella coordinator is told to git init a root umbrella mode keeps non-git (4042109214)"
+  pass "umbrella cascade emits umbrella-specific advice, never the single-repo git-init banner [umbrella_cascade_suppresses_single_repo_banner]"
+}
+
 # ── R6 (integration) ──────────────────────────────────────────────────────────
 
 test_install_creates_no_git() {
@@ -562,6 +656,96 @@ test_installed_entrypoint_points_at_sdd_plan() {
   pass "installed entrypoint sends a new product /sdd-plan → /sdd-drill → /sdd-next, host-neutral (round-7 + round-8 reconciliation) [installed_entrypoint_points_at_sdd_plan]"
 }
 
+# ── Round-9 (4042109208): pristine prior product.md stub refreshed on upgrade ──
+#
+# Releases v0.1.0–v0.81.0 shipped a `specs/product.md` stub that told a new-product
+# reader to run `/sdd-next` to draft the epics. E28-F01 changed the shipped prose to
+# `/sdd-plan` → `/sdd-drill`, but the seed-only branch only ran when the file was
+# ABSENT, so every upgraded target kept the stale front door forever. The installer
+# must refresh a file that is still byte-identical to the prior shipped stub, and
+# preserve anything the project authored.
+#
+# This test writes the PRIOR stub as a fixture literal (no installed artifact carries
+# it any more), upgrades, and requires the file to become byte-identical to the stub
+# the CURRENT installer seeds — not merely "to contain /sdd-plan", which a partial
+# migration could satisfy while leaving other stale bytes behind.
+test_prior_pristine_product_stub_is_refreshed() {
+  _pr_tgt="$T/refresh-target"
+  _pr_home="$T/refresh-home"
+  _pr_codex="$T/refresh-codex-home"
+  mkdir -p "$_pr_tgt" "$_pr_home" "$_pr_codex"
+  _pr_rc=0
+  env -i PATH="$PATH" HOME="$_pr_home" CODEX_HOME="$_pr_codex" \
+    sh "$SRC/harness-install.sh" --agents=claude --builder-backend=in-session \
+      --pr-loop=false "$_pr_tgt" \
+    >"$T/refresh-1.out" 2>"$T/refresh-1.err" || _pr_rc=$?
+  [ "$_pr_rc" -eq 0 ] \
+    || fail "R8d: the first install failed ($_pr_rc) — cannot establish the current stub"
+  _pr_prod="$_pr_tgt/.harness/specs/product.md"
+  [ -s "$_pr_prod" ] || fail "R8d: first install seeded no specs/product.md"
+  _pr_cur="$T/refresh-current.md"
+  cp "$_pr_prod" "$_pr_cur"
+  # Simulate the 0.81.0 target: replace the current stub with the prior pristine text.
+  write_prior_product_stub "$_pr_prod"
+  cmp -s "$_pr_prod" "$_pr_cur" \
+    && fail "R8d: the prior fixture equals the current stub — this test cannot distinguish a refresh"
+  grep -qF 'then run /sdd-next to bootstrap' "$_pr_prod" \
+    || fail "R8d: the prior fixture lacks its stale /sdd-next front door — fixture shape is stale"
+  # Upgrade in place.
+  _pr_rc2=0
+  env -i PATH="$PATH" HOME="$_pr_home" CODEX_HOME="$_pr_codex" \
+    sh "$SRC/harness-install.sh" --agents=claude --builder-backend=in-session \
+      --pr-loop=false "$_pr_tgt" \
+    >"$T/refresh-2.out" 2>"$T/refresh-2.err" || _pr_rc2=$?
+  [ "$_pr_rc2" -eq 0 ] \
+    || fail "R8d: the upgrade install failed ($_pr_rc2) — cannot assert the refresh"
+  cmp -s "$_pr_prod" "$_pr_cur" \
+    || fail "R8d: a byte-identical PRIOR pristine stub was NOT refreshed on upgrade — the target keeps the stale /sdd-next front door forever (4042109208)"
+  if grep -qF 'then run /sdd-next to bootstrap' "$_pr_prod"; then
+    fail "R8d: the upgrade left the stale /sdd-next front door in specs/product.md even though the file was a pristine prior stub"
+  fi
+  _pr_flat="$(tr '\n' ' ' < "$_pr_prod")"
+  printf '%s\n' "$_pr_flat" | grep -qE 'sdd-plan[^.]{0,60}draft epics' \
+    || fail "R8d: the refreshed stub does not carry the /sdd-plan front door — the migration replaced the file with the wrong prose"
+  pass "a byte-identical PRIOR pristine product.md stub is refreshed on upgrade (4042109208) [prior_pristine_product_stub_is_refreshed]"
+}
+
+# The guard's other half: a constitution the project actually edited must survive an
+# upgrade byte for byte. Without this, "refresh the prior stub" could be implemented as
+# "overwrite whenever a product.md exists" and silently destroy authored content.
+test_edited_product_md_is_preserved_on_upgrade() {
+  _ed_tgt="$T/edit-target"
+  _ed_home="$T/edit-home"
+  _ed_codex="$T/edit-codex-home"
+  mkdir -p "$_ed_tgt" "$_ed_home" "$_ed_codex"
+  _ed_rc=0
+  env -i PATH="$PATH" HOME="$_ed_home" CODEX_HOME="$_ed_codex" \
+    sh "$SRC/harness-install.sh" --agents=claude --builder-backend=in-session \
+      --pr-loop=false "$_ed_tgt" \
+    >"$T/edit-1.out" 2>"$T/edit-1.err" || _ed_rc=$?
+  [ "$_ed_rc" -eq 0 ] \
+    || fail "R8d: the first install failed ($_ed_rc) — cannot establish the editable constitution"
+  _ed_prod="$_ed_tgt/.harness/specs/product.md"
+  printf '\n\n## Our project\nWe build widgets.\n' >> "$_ed_prod"
+  grep -qF 'We build widgets.' "$_ed_prod" \
+    || fail "R8d: the project edit did not land — the preserve assertion would be vacuous"
+  _ed_before="$T/edit-before.cksum"
+  cksum "$_ed_prod" > "$_ed_before"
+  _ed_rc2=0
+  env -i PATH="$PATH" HOME="$_ed_home" CODEX_HOME="$_ed_codex" \
+    sh "$SRC/harness-install.sh" --agents=claude --builder-backend=in-session \
+      --pr-loop=false "$_ed_tgt" \
+    >"$T/edit-2.out" 2>"$T/edit-2.err" || _ed_rc2=$?
+  [ "$_ed_rc2" -eq 0 ] \
+    || fail "R8d: the upgrade install failed ($_ed_rc2) — cannot assert the preserve guard"
+  cksum "$_ed_prod" > "$T/edit-after.cksum"
+  cmp -s "$_ed_before" "$T/edit-after.cksum" \
+    || fail "R8d: an UPGRADE overwrote a project-edited specs/product.md — the guarded refresh clobbered authored constitution content (4042109208)"
+  grep -qF 'We build widgets.' "$_ed_prod" \
+    || fail "R8d: the project edit vanished across the upgrade even though the checksum matched"
+  pass "a project-edited product.md is preserved byte for byte on upgrade [edited_product_md_is_preserved_on_upgrade]"
+}
+
 # ── R9 (integration) ──────────────────────────────────────────────────────────
 
 test_init_passes_in_non_git_target() {
@@ -602,9 +786,12 @@ test_bootstrap_section_reconciled
 test_empty_non_git_install_succeeds
 test_banner_points_at_sdd_plan
 test_multi_host_banner_emits_one_workflow
+test_umbrella_cascade_suppresses_single_repo_banner
 test_install_creates_no_git
 test_installed_layout_usable
 test_installed_product_md_points_at_sdd_plan
 test_installed_entrypoint_points_at_sdd_plan
+test_prior_pristine_product_stub_is_refreshed
+test_edited_product_md_is_preserved_on_upgrade
 test_init_passes_in_non_git_target
 test_version_stamp_reads_source_version
