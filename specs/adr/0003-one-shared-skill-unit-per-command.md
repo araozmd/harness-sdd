@@ -1,6 +1,6 @@
 # ADR-0003 — `.agents/skills/<name>/` holds ONE shared unit per command, claimed by every front-end that reads it
 
-- **Status:** accepted (E99-F09 re-spec, 2026-08-03)
+- **Status:** accepted (E99-F09 re-spec, 2026-08-03; claimant set updated by E31-F01, 2026-09-17)
 - **Date:** 2026-08-03
 
 ## Context
@@ -57,7 +57,7 @@ Three options were on the table:
 ## Decision
 
 `.agents/skills/<cmd>/` is **one harness-owned unit per command, shared by every front-end
-that reads that surface**. The claiming set is `{codex, opencode}`.
+that reads that surface**. The claiming set is `{codex, antigravity}`.
 
 - **One generator, one body.** The `SKILL.md` bytes for a command do not depend on which
   claiming front-ends are selected. There is exactly one writer.
@@ -89,28 +89,51 @@ that reads that surface**. The claiming set is `{codex, opencode}`.
   bodies under `.harness/agents/`. Whether to *retire* those two unrecognised trees is a
   separate decision with its own migration story, and is not taken here.
 
-**Update — E31-F01 (2026-09-17).** Antigravity was retired in E29, and **OpenCode** was
-added to the claiming set by E31-F01; the set is now `{codex, opencode}`. OpenCode reads
+**Update — E31-F01 (2026-09-17).** This block is authoritative for the **current** claiming
+set; the Decision above and the Consequences below are the historical record as written on
+2026-08-03. Antigravity was retired in E29, and **OpenCode** was added to the claiming set
+by E31-F01, so the set is now `{codex, opencode}`. OpenCode reads
 `.agents/skills/*/SKILL.md`, so leaving it out would repeat exactly the silent-destructive
-omission this ADR warns about below. The decision above is unchanged — one generator, one
-body, install on any claimant, reclaim only on the last — only the membership moved. The
-shared body's invocation adapter now names both the Codex `$sdd-*` and the OpenCode
+omission this ADR warns about. The decision's shape is unchanged — one generator, one body,
+install when any claimant is selected, reclaim only when the last claimant leaves — only
+the membership moved; every Antigravity-specific bullet or consequence in this ADR is the
+historical record, not a statement about the current selection set. Two consequences
+changed:
+
+- **The "Antigravity-only target" consequence is historical.** Antigravity is no longer
+  selectable; the live direction is an **OpenCode-only** target, which gains the same
+  discoverable `/sdd-*` commands for the first time.
+- **The inverted reclaim contract now runs on `{codex, opencode}`.** Deselecting `codex`
+  from a `codex,opencode` selection leaves the pristine shared units in place, because
+  OpenCode still reads them — where the historical ADR recorded the opposite for
+  `antigravity,codex`. The `tests/test_install.sh` assertion was rewritten deliberately and
+  the behavior change is recorded in `CHANGELOG.md`.
+
+The shared body's invocation adapter now names both the Codex `$sdd-*` and the OpenCode
 `/sdd-*` invocation, and the OpenCode-only concurrency precondition lives in the
 `sdd-fix-parallel` body rather than in the file, because Codex still needs that unit.
 
 ## Consequences
 
+> **Historical record (2026-08-03).** These are the consequences of the decision above, as
+> recorded on that date. The current claiming set is `{codex, opencode}`; the E31-F01 update
+> above records which consequences changed. The Antigravity-specific statements below
+> describe the superseded `{codex, antigravity}` decision, not current behavior.
+
 - **Easier.** The collision stops being a hazard to design around: there is one writer, so
   no ordering, no last-writer-wins, and no cross-front-end reclaim to defend against. The
-  Antigravity work shrinks from a migration to a gating-and-reclaim-scoping change.
-- **Easier.** An Antigravity-only target gains discoverable `/sdd-*` commands for the first
-  time — today it receives only `.agents/workflows/*.md`, which Antigravity's documented
-  discovery does not read.
-- **Harder — an existing shipped behavior inverts.** Deselecting `codex` from an
-  `antigravity,codex` target currently deletes the pristine skill units, and
-  `tests/test_install.sh` asserts exactly that (the `TCD` block). Under this decision the
-  units must survive. That assertion is not collateral to be quietly flipped: it is a
-  contract change, must be rewritten deliberately, and belongs in `CHANGELOG.md`.
+  Antigravity work shrank from a migration to a gating-and-reclaim-scoping change.
+- **Easier.** An Antigravity-only target gained discoverable `/sdd-*` commands for the first
+  time — at that date it received only `.agents/workflows/*.md`, which Antigravity's
+  documented discovery does not read. (Antigravity is now retired; the live equivalent is
+  an OpenCode-only target — see the update above.)
+- **Harder — an existing shipped behavior inverts.** At that date, deselecting `codex` from
+  an `antigravity,codex` target deleted the pristine skill units, and
+  `tests/test_install.sh` asserted exactly that (the `TCD` block). Under this decision the
+  units must survive. That assertion was not collateral to be quietly flipped: it is a
+  contract change, rewritten deliberately, and recorded in `CHANGELOG.md`. E31-F01 later
+  re-applied the same inversion to the live `{codex, opencode}` pair — deselecting `codex`
+  there leaves the units too — see the update above.
 - **Harder — "who claims this unit" becomes a real predicate.** Reclaim can no longer be
   read off the front-end being deselected; it depends on the remaining selection. Every new
   front-end that learns to read `.agents/skills/` must be added to the claiming set, and
@@ -118,10 +141,13 @@ shared body's invocation adapter now names both the Codex `$sdd-*` and the OpenC
   out from under it). A test that selects one front-end cannot detect this class of bug —
   the both-selected/deselect-one case is the only shape that can.
 - **Harder — a misleading path name is now load-bearing.** `.harness/.codex-skills/` stamps
-  units that Antigravity may be the sole claimant of. Anyone reading the installer will
-  reasonably assume it is Codex-only; the comment at its definition and this ADR are the
-  only things preventing a "cleanup" rename that would strand every installed target.
-- **Deferred, deliberately.** `.agents/workflows/` and `.agents/agents/` remain installed
-  for Antigravity even though its documented discovery does not read them. They are inert,
-  not harmful, and removing files from installed targets needs its own reclaim and
-  migration decision.
+  units whose sole claimant is not necessarily Codex — at that date an Antigravity-only
+  target, today an OpenCode-only target. Anyone reading the installer will reasonably assume
+  it is Codex-only; the comment at its definition and this ADR are the only things
+  preventing a "cleanup" rename that would strand every installed target.
+- **Deferred, deliberately (resolved by E29).** At that date `.agents/workflows/` and
+  `.agents/agents/` remained installed for Antigravity even though its documented discovery
+  does not read them. They were inert, not harmful, and removing files from installed
+  targets needed its own reclaim and migration decision. E29 took that decision when it
+  retired Antigravity: it reclaims pristine legacy `.agents/workflows/`, `.agents/agents/`
+  and `.agents/rules/` glue.
