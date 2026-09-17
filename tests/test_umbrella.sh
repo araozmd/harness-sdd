@@ -853,7 +853,10 @@ fi
 # ADR-0004. The tier line is drawn by WHAT READS THE FILE: prose is stub-able because an
 # agent follows a reference; init.sh/store/tools are not, because a program parses them.
 SENTINEL='<!-- harness:umbrella-stub -->'
-PROSE_TIER='AGENTS.md agents/builder.md agents/orchestrator.md docs/WORKFLOW.md specs/_templates/feature.spec.md specs/glossary.md'
+# specs/glossary.md is deliberately ABSENT from this sample (E30-F01): it left the prose
+# tier entirely and is project-owned in every layout, so it is never a stub — see
+# glossary_never_stubbed_in_any_layout below.
+PROSE_TIER='AGENTS.md agents/builder.md agents/orchestrator.md docs/WORKFLOW.md specs/_templates/feature.spec.md'
 LOCAL_TIER='init.sh store/tasks.schema.json tools/tasks-lock.py tools/harness-owned-paths.sh'
 
 is_stub() { head -n 1 "$1" 2>/dev/null | grep -qxF "$SENTINEL"; }
@@ -1303,7 +1306,21 @@ pass "E99-F13 unquoted_root_still_strips_trailing_comment"
 #
 # The whole prose tier, swept — never sampled. R2's claim is about the paths the operator
 # did NOT edit, so "no path in the tier became a stub" has to be a sweep of the tree.
-F04_TIER='AGENTS.md agents docs specs/_templates specs/glossary.md'
+#
+# THIS IS A DERIVED EQUALITY, NOT A HAND-EDITED CONSTANT (E30-F01). E24-F04's tests
+# contract recorded "the prose sweep iterates a hardcoded tier list instead of
+# $HARNESS_BODY_PROSE" as a killed mutant, and the kill worked only because
+# specs/glossary.md was the tier's differentiating entry. Now that the glossary has left
+# the tier (it is project-owned in every layout — see glossary_never_stubbed_in_any_layout
+# below), a hand-edited F04_TIER that happens to match today's HARNESS_BODY_PROSE would let
+# that mutant survive silently. Assert equality against the shipped value instead of merely
+# copying it by hand.
+F04_TIER='AGENTS.md agents docs specs/_templates'
+F04_TIER_SRC="$(sed -n "s/^HARNESS_BODY_PROSE='\(.*\)'\$/\1/p" "$SRC/harness-install.sh")"
+[ -n "$F04_TIER_SRC" ] \
+  || fail "F04_TIER control: could not extract HARNESS_BODY_PROSE from \$SRC/harness-install.sh — the anchor pattern is stale"
+[ "$F04_TIER_SRC" = "$F04_TIER" ] \
+  || fail "F04_TIER control: F04_TIER ('$F04_TIER') has drifted from the shipped HARNESS_BODY_PROSE ('$F04_TIER_SRC') — a hardcoded tier list here would let the prose sweep silently stop iterating \$HARNESS_BODY_PROSE (E24-F04's recorded mutation kill)"
 
 # f04_no_stub_in_tier <harness-dir> <context> — fail if ANY file under the prose tier is a
 # stub. The predicate is "line 1 IS the sentinel" (is_stub), matching E24-F03's control.
@@ -1519,9 +1536,13 @@ pass "R3 thin_names_every_blocker — both seeded differing paths are named, the
 #                           hunks and NO filename, so `-q` is what makes it nameable
 #   specs/_templates        a whole tier entry absent on one side — diff exits 2 with its
 #                           message on STDERR, so a stdout-only capture names nothing
-#   specs/glossary.md       a WHITESPACE-ONLY edit — the comparison is BYTE identity, and
-#                           it is the one prose-tier entry no other fixture ever seeds
-#                           (see thin_comparison_is_byte_identity below)
+#   docs/SPEC-FORMAT.md     a WHITESPACE-ONLY edit — the comparison is BYTE identity.
+#                           specs/glossary.md used to carry this shape, but it left the
+#                           prose tier entirely (E30-F01, project-owned in every layout —
+#                           see glossary_never_stubbed_in_any_layout below), so this case
+#                           is re-pointed at another prose-tier REGULAR FILE no other
+#                           fixture in this suite touches (see thin_comparison_is_byte_identity
+#                           below)
 # TWO children, and the split is load-bearing. `extra` carries the child-only file as its
 # ONLY difference, so R2's extra-file claim is independently falsifiable: putting all three
 # shapes in one child would leave the tier blocked by the OTHER two even with the one-sided
@@ -1537,16 +1558,16 @@ printf '\nlocally appended\n' >> "$KS4/AGENTS.md"
 rm -rf "$KS4/specs/_templates"
 # A TRAILING SPACE ON LINE 1 — a whitespace-only edit, and it must stay whitespace-only.
 # New text on a new line would differ under `diff -w` too and would pin nothing.
-awk 'NR == 1 { printf "%s \n", $0; next } { print }' "$KS4/specs/glossary.md" > "$AU/f04c-glossary.tmp"
-cat "$AU/f04c-glossary.tmp" > "$KS4/specs/glossary.md"
+awk 'NR == 1 { printf "%s \n", $0; next } { print }' "$KS4/docs/SPEC-FORMAT.md" > "$AU/f04c-specformat.tmp"
+cat "$AU/f04c-specformat.tmp" > "$KS4/docs/SPEC-FORMAT.md"
 # PRECONDITIONS for thin_comparison_is_byte_identity below. The edit must be a real BYTE
 # difference and must NOT survive `-w`, or the case degenerates into the AGENTS.md shape
 # and stops saying anything about byte identity. Measured against the umbrella's own copy,
 # which is the reference the conversion uses.
-cmp -s "$KS4/specs/glossary.md" "$F04C/.harness/specs/glossary.md" \
-  && fail "R3 control: the seeded specs/glossary.md edit is not a byte difference at all — the byte-identity case below would be vacuous"
-diff -qw "$KS4/specs/glossary.md" "$F04C/.harness/specs/glossary.md" >/dev/null 2>&1 \
-  || fail "R3 control: the seeded specs/glossary.md edit is NOT whitespace-only, so it would also be caught by an identity-modulo-whitespace comparison and pins nothing about BYTE identity"
+cmp -s "$KS4/docs/SPEC-FORMAT.md" "$F04C/.harness/docs/SPEC-FORMAT.md" \
+  && fail "R3 control: the seeded docs/SPEC-FORMAT.md edit is not a byte difference at all — the byte-identity case below would be vacuous"
+diff -qw "$KS4/docs/SPEC-FORMAT.md" "$F04C/.harness/docs/SPEC-FORMAT.md" >/dev/null 2>&1 \
+  || fail "R3 control: the seeded docs/SPEC-FORMAT.md edit is NOT whitespace-only, so it would also be caught by an identity-modulo-whitespace comparison and pins nothing about BYTE identity"
 cascade "$F04C" --thin
 f04_no_stub_in_tier "$KC4" "R2 (a child-only extra prose file must block the tier ON ITS OWN)"
 grep -q 'This target holds the full body layout' "$KC4/manifest.txt" \
@@ -1580,13 +1601,13 @@ pass "R3 thin_blocker_paths_are_normalised — Only-in, regular-file and missing
 # deleted and stubbed ONLY when it is byte-identical to the umbrella's" — and `diff -rq`
 # → `diff -rqw` is a one-character edit that relaxes that to identity-modulo-whitespace
 # and converts this child. A CRLF round-trip through an editor is the realistic form.
-# It is also the only difference this suite ever seeds on `specs/glossary.md`, so it is
+# It is also the only difference this suite ever seeds on `docs/SPEC-FORMAT.md`, so it is
 # what stops the prose sweep from being written as a hardcoded tier list that drops that
 # entry: dropped, the entry is never compared and the child converts on the strength of a
 # comparison that never ran. Both mutations leave every other case in this suite green.
-printf '%s\n' 2>/dev/null "$F04C_SEG" | grep -qF 'differs: specs/glossary.md' \
-  || fail "R2/R3: a WHITESPACE-ONLY edit to specs/glossary.md was not reported as a blocker — either the comparison is identity-modulo-whitespace rather than BYTE identity, or the prose sweep never compared that entry at all; under either, a child whose ONLY difference is that edit CONVERTS and its prose tier is deleted: $F04C_SEG"
-pass "R2/R3 thin_comparison_is_byte_identity — a whitespace-only edit to specs/glossary.md blocks the tier and is named"
+printf '%s\n' 2>/dev/null "$F04C_SEG" | grep -qF 'differs: docs/SPEC-FORMAT.md' \
+  || fail "R2/R3: a WHITESPACE-ONLY edit to docs/SPEC-FORMAT.md was not reported as a blocker — either the comparison is identity-modulo-whitespace rather than BYTE identity, or the prose sweep never compared that entry at all; under either, a child whose ONLY difference is that edit CONVERTS and its prose tier is deleted: $F04C_SEG"
+pass "R2/R3 thin_comparison_is_byte_identity — a whitespace-only edit to docs/SPEC-FORMAT.md blocks the tier and is named"
 
 # ── R2/R3: the pristine REFERENCE is the UMBRELLA'S copy, never the installer's $SRC ────
 # thin_reference_is_the_umbrella_body
@@ -2318,31 +2339,37 @@ pass "R1/R2/R7 thin_maintenance_tree_comes_from_the_umbrella — an ordinary and
 # installer and simply not have a tier entry `$HARNESS_BODY_PROSE` lists yet. Two wrong
 # answers were available and each was measured on this fixture:
 #   re-source from `$SRC`   what shipped: the child silently gets a stub naming
-#                           `../../.harness/specs/glossary.md`, a file the umbrella cannot
+#                           `../../.harness/AGENTS.md`, a file the umbrella cannot
 #                           supply, and that stub's own text misreads the dangling target as
 #                           "a checkout separated from its umbrella". No warning at all.
 #   die                     an installer that simply passed the umbrella body down: exit 1,
-#                           `source missing: specs/glossary.md`, on an ORDINARY maintenance
+#                           `source missing: AGENTS.md`, on an ORDINARY maintenance
 #                           run. Every cascade against that umbrella is wedged — including
 #                           the ones that would upgrade it — for a path nothing had asked to
 #                           be rewritten.
 # The rule is SKIP: the entry is left exactly as found, the path is named on stderr, exit 0.
 # Both directions are asserted, because "left as found" means different things on each side
 # and only both together forbid the two wrong answers.
+#
+# THE REMOVED ENTRY IS `AGENTS.md`, not `specs/glossary.md`. The glossary left the prose
+# tier entirely (E30-F01) — it is project-owned in every layout and is never a candidate
+# for "the umbrella does not hold this entry" — so this fixture is re-pointed at the one
+# other REGULAR-FILE (non-directory) top-level tier entry, matching the shape of the case
+# it replaces.
 F04N="$AU/f04n"
 mk_umb "$F04N" thinkid
 cascade "$F04N"
 KN4="$F04N/thinkid/.harness"
 f04_all_stubs_in_tier "$KN4" "R2/R6 fixture (a fresh cascade child must be thin)"
-cp "$KN4/specs/glossary.md" "$AU/f04n-glossary.ref"
+cp "$KN4/AGENTS.md" "$AU/f04n-agentsmd.ref"
 # AN UMBRELLA OLDER THAN THIS INSTALLER, seeded the only way a fixture can: remove from the
 # installed umbrella body a tier entry the installer still lists.
-rm -f "$F04N/.harness/specs/glossary.md"
-if [ -e "$F04N/.harness/specs/glossary.md" ]; then
-  fail "R2/R6 control: the umbrella body still holds specs/glossary.md, so nothing below exercises a missing entry"
+rm -f "$F04N/.harness/AGENTS.md"
+if [ -e "$F04N/.harness/AGENTS.md" ]; then
+  fail "R2/R6 control: the umbrella body still holds AGENTS.md, so nothing below exercises a missing entry"
 fi
-[ -e "$SRC/specs/glossary.md" ] \
-  || fail "R2/R6 control: the installer's own \$SRC does not hold specs/glossary.md either, so this fixture cannot tell the umbrella apart from \$SRC"
+[ -e "$SRC/AGENTS.md" ] \
+  || fail "R2/R6 control: the installer's own \$SRC does not hold AGENTS.md either, so this fixture cannot tell the umbrella apart from \$SRC"
 
 # (a) AN ALREADY-THIN CHILD that HOLDS the stub. "Left as found" here means the stub survives
 # byte for byte — this is the destructive half, and the one the shipped `$SRC` reference
@@ -2351,16 +2378,16 @@ F04N_OUT="$(CODEX_HOME="$F04N/.ch" HOME="$F04N/.home" \
   sh "$SRC/harness-install.sh" --agents=claude "$F04N/thinkid" 2>&1)" && F04N_RC=0 || F04N_RC=$?
 [ "$F04N_RC" = "0" ] \
   || fail "R6: a routine maintenance run against an umbrella that lacks one tier entry exited $F04N_RC — an umbrella older than the installer must not wedge the runs that would upgrade it: $F04N_OUT"
-printf '%s\n' 2>/dev/null "$F04N_OUT" | grep -qF "does not hold the prose-tier path 'specs/glossary.md'" \
+printf '%s\n' 2>/dev/null "$F04N_OUT" | grep -qF "does not hold the prose-tier path 'AGENTS.md'" \
   || fail "R3/R6: the run skipped a tier entry without naming it, so the operator has no way to learn why that path stopped being maintained: $F04N_OUT"
 printf '%s\n' 2>/dev/null "$F04N_OUT" | grep -qF "does not hold the prose-tier path 'agents'" \
   && fail "R6: the run reported 'agents' as missing from the umbrella too — the skip is firing on entries the umbrella does hold, so the message discriminates nothing: $F04N_OUT"
-cmp -s "$AU/f04n-glossary.ref" "$KN4/specs/glossary.md" \
-  || fail "R2: the maintenance run rewrote or deleted specs/glossary.md, which the umbrella no longer holds — the entry must be left exactly as it was found"
+cmp -s "$AU/f04n-agentsmd.ref" "$KN4/AGENTS.md" \
+  || fail "R2: the maintenance run rewrote or deleted AGENTS.md, which the umbrella no longer holds — the entry must be left exactly as it was found"
 f04_all_stubs_in_tier "$KN4" "R2/R6 (skipping one entry must not disturb the rest of the tier)"
 
 # (b) A FRESH child, which has never held the path. "Left as found" here means ABSENT — the
-# direction that forbids inventing a stub the umbrella cannot resolve. The other four entries
+# direction that forbids inventing a stub the umbrella cannot resolve. The other three entries
 # must still be stubbed, or "no dangling stub" is satisfied by a run that wrote nothing.
 mk_umb "$F04N" newkid
 # `HARNESS_UMBRELLA_ROOT` rather than a cascade: a cascade re-installs the COORDINATOR's own
@@ -2370,12 +2397,12 @@ F04N2_OUT="$(HARNESS_UMBRELLA_ROOT='../../' CODEX_HOME="$F04N/.ch" HOME="$F04N/.
 KN5="$F04N/newkid/.harness"
 [ "$F04N2_RC" = "0" ] \
   || fail "R6: a fresh child under an umbrella that lacks one tier entry exited $F04N2_RC: $F04N2_OUT"
-if [ -e "$KN5/specs/glossary.md" ]; then
-  fail "R2: the umbrella does not hold specs/glossary.md and the run created one anyway — the stub names ../../.harness/specs/glossary.md, which the umbrella cannot supply, and its own text then misreads that dangling target as a checkout separated from its umbrella: $F04N2_OUT"
+if [ -e "$KN5/AGENTS.md" ]; then
+  fail "R2: the umbrella does not hold AGENTS.md and the run created one anyway — the stub names ../../.harness/AGENTS.md, which the umbrella cannot supply, and its own text then misreads that dangling target as a checkout separated from its umbrella: $F04N2_OUT"
 fi
-for _p in AGENTS.md agents docs specs/_templates; do
+for _p in agents docs specs/_templates; do
   [ -e "$KN5/$_p" ] \
-    || fail "R2/R6 control: the fresh child's $_p was not materialised at all, so 'specs/glossary.md is absent' is explained by a run that wrote no tier: $F04N2_OUT"
+    || fail "R2/R6 control: the fresh child's $_p was not materialised at all, so 'AGENTS.md is absent' is explained by a run that wrote no tier: $F04N2_OUT"
 done
 is_stub "$KN5/agents/builder.md" \
   || fail "R2/R6 control: the fresh child's agents/builder.md is not a stub, so this run did not take the thin arm: $F04N2_OUT"
@@ -2948,6 +2975,145 @@ grep -q '^  root: ""$' "$SK/harness.config.yaml" \
 grep -q 'This target holds the full body layout' "$SK/manifest.txt" \
   || fail "R11: the target left the full-copy layout on a repeat --standalone run"
 pass "R11 standalone_is_idempotent — a full-copy target stays full-copy, key stays cleared, exit 0"
+
+# ── R7: the glossary is never stubbed, in any body-copy arm ─────────────────────────────
+# glossary_never_stubbed_in_any_layout (E30-F01)
+#
+# specs/glossary.md left HARNESS_BODY_PROSE entirely (D1): it is project-owned content,
+# like specs/product.md, in every layout — full copy, thin child, or standalone. This is
+# the umbrella-side half of R7; the single-repo/coordinator arm (arm 4) is covered by
+# tests/test_install.sh::test_glossary_edit_preserved_on_upgrade — a single `file::name`
+# exercising all four arms would overstate its own coverage (see .tests.md).
+#
+# arm 2 — THIN MAINTENANCE: a fresh cascade child is thin by default; edit its glossary
+# and run the ORDINARY (unflagged) maintenance install again.
+F04GLA="$AU/f04gl-a"
+mk_umb "$F04GLA" thin1
+cascade "$F04GLA"
+KGLA="$F04GLA/thin1/.harness"
+is_stub "$KGLA/agents/builder.md" \
+  || fail "R7 fixture (arm 2): the fresh cascade child is not thin — arm 2 is not reached"
+printf 'PROJECT TERM — arm2 marker (E30-F01)\n' >> "$KGLA/specs/glossary.md"
+GLA_REF="$(cat "$KGLA/specs/glossary.md")"
+CODEX_HOME="$F04GLA/.ch" HOME="$F04GLA/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude "$F04GLA/thin1" >/dev/null 2>&1 \
+  || fail "R7 (arm 2 thin maintenance): the ordinary maintenance run on a thin child failed"
+[ "$(cat "$KGLA/specs/glossary.md")" = "$GLA_REF" ] \
+  || fail "R7 (arm 2 thin maintenance): the ordinary maintenance run overwrote the child's edited glossary"
+is_stub "$KGLA/specs/glossary.md" \
+  && fail "R7 (arm 2 thin maintenance): the glossary was stubbed"
+
+# arm 3 — FULL-COPY CHILD of a reachable umbrella, unflagged run.
+F04GLC="$AU/f04gl-c"
+f04_fullchild "$F04GLC" full1
+KGLC="$F04GLC/full1/.harness"
+printf 'PROJECT TERM — arm3 marker (E30-F01)\n' >> "$KGLC/specs/glossary.md"
+GLC_REF="$(cat "$KGLC/specs/glossary.md")"
+CODEX_HOME="$F04GLC/.ch" HOME="$F04GLC/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude "$F04GLC/full1" >/dev/null 2>&1 \
+  || fail "R7 (arm 3 full-copy child): the ordinary maintenance run on a full-copy child failed"
+[ "$(cat "$KGLC/specs/glossary.md")" = "$GLC_REF" ] \
+  || fail "R7 (arm 3 full-copy child): the ordinary maintenance run overwrote the child's edited glossary"
+is_stub "$KGLC/specs/glossary.md" \
+  && fail "R7 (arm 3 full-copy child): the glossary was stubbed"
+
+# arm 1 — `--standalone`: detach a thin child; the glossary must survive while
+# agents/builder.md is re-materialised as real prose (the control that proves the run
+# really took the standalone arm, matching R9 standalone_materialises_body above).
+F04GLB="$AU/f04gl-b"
+mk_umb "$F04GLB" standalone1
+cascade "$F04GLB"
+KGLB="$F04GLB/standalone1/.harness"
+is_stub "$KGLB/agents/builder.md" \
+  || fail "R7 fixture (arm 1): the fresh cascade child is not thin — --standalone has nothing to detach"
+printf 'PROJECT TERM — arm1 marker (E30-F01)\n' >> "$KGLB/specs/glossary.md"
+GLB_REF="$(cat "$KGLB/specs/glossary.md")"
+CODEX_HOME="$F04GLB/.ch" HOME="$F04GLB/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude --standalone "$F04GLB/standalone1" >/dev/null 2>&1 \
+  || fail "R7 (arm 1 --standalone): the detach run failed"
+[ "$(cat "$KGLB/specs/glossary.md")" = "$GLB_REF" ] \
+  || fail "R7 (arm 1 --standalone): --standalone overwrote the child's edited glossary"
+is_stub "$KGLB/specs/glossary.md" \
+  && fail "R7 (arm 1 --standalone): the glossary was stubbed"
+grep -qF 'You are the **Builder**' "$KGLB/agents/builder.md" \
+  || fail "R7 (arm 1 --standalone) control: agents/builder.md was not re-materialised as real prose — the run did not take the standalone arm"
+
+# SWEEP, not sample: specs/glossary.md itself, in each of the three children, is never a
+# stub. (specs/_templates/ IS legitimately stubbed in the still-thin children — arm 2's
+# child never converted — so the sweep is scoped to the one path this feature governs,
+# not the whole specs/ tree.)
+for _glf in "$KGLA" "$KGLC" "$KGLB"; do
+  is_stub "$_glf/specs/glossary.md" && fail "R7 sweep: $_glf/specs/glossary.md became a stub"
+done
+pass "R7 glossary_never_stubbed_in_any_layout — arms 1-3 leave an edited glossary real and unchanged"
+
+# ── R8: a thin child owns a REAL glossary; a legacy stub is re-materialised ─────────────
+# glossary_stub_rematerialised_in_thin_child (E30-F01, decision D1)
+F04GLD="$AU/f04gl-d"
+mk_umb "$F04GLD" freshkid
+cascade "$F04GLD"
+KGLD="$F04GLD/freshkid/.harness"
+is_stub "$KGLD/agents/builder.md" \
+  || fail "R8 control: the fresh cascade child is not thin — the case is vacuous"
+is_stub "$KGLD/specs/glossary.md" \
+  && fail "R8: a FRESH thin child's glossary is a stub — the glossary must never be stubbed, even on first cascade"
+cmp -s "$KGLD/specs/glossary.md" "$SRC/specs/glossary.md" \
+  || fail "R8: a fresh thin child's glossary is not byte-identical to the shipped example"
+pass "R8 glossary_stub_rematerialised_in_thin_child (fresh child) — a fresh thin child's glossary is real, not stubbed"
+
+# Legacy migration: hand-write a stub at that path, exactly as a pre-E30-F01 installer
+# would have left one, and re-run.
+printf '%s\n' "$SENTINEL" > "$KGLD/specs/glossary.md"
+printf 'this repo used to route glossary lookups through the umbrella\n' >> "$KGLD/specs/glossary.md"
+F04GLD_OUT="$(CODEX_HOME="$F04GLD/.ch" HOME="$F04GLD/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude "$F04GLD/freshkid" 2>&1)" && F04GLD_RC=0 || F04GLD_RC=$?
+[ "$F04GLD_RC" = "0" ] || fail "R8 (legacy migration): the maintenance run exited $F04GLD_RC: $F04GLD_OUT"
+is_stub "$KGLD/specs/glossary.md" \
+  && fail "R8 (legacy migration): the pre-existing umbrella-stub sentinel survived — the glossary was not re-materialised"
+cmp -s "$KGLD/specs/glossary.md" "$SRC/specs/glossary.md" \
+  || fail "R8 (legacy migration): the re-materialised glossary is not byte-identical to the shipped example"
+printf '%s\n' 2>/dev/null "$F04GLD_OUT" | grep -qF 'specs/glossary.md re-materialised' \
+  || fail "R8 (legacy migration): the run did not report the re-materialised verdict: $F04GLD_OUT"
+pass "R8 glossary_stub_rematerialised_in_thin_child (legacy stub) — a pre-existing umbrella-stub sentinel is replaced by the shipped example"
+
+# Negative control: ordinary project prose at that path (first line is NOT the sentinel)
+# is preserved exactly — the sentinel, never "looks short", is the ownership signal. The
+# sentinel text also appears LATER in the body (documenting the convention itself), not
+# just absent — this is what distinguishes "first line IS the sentinel" from "the FILE
+# CONTAINS the sentinel somewhere": a `grep` over the whole file rather than `head -n 1`
+# would misread this fixture as a stub and re-materialise it, dropping the project's prose.
+printf 'Domain glossary\n\nThis project defines its own terms here. For the record, this\nrepo never uses the harness stub sentinel <!-- harness:umbrella-stub --> as real content.\n' > "$KGLD/specs/glossary.md"
+GLD_PROSE_REF="$(cat "$KGLD/specs/glossary.md")"
+CODEX_HOME="$F04GLD/.ch" HOME="$F04GLD/.home" \
+  sh "$SRC/harness-install.sh" --agents=claude "$F04GLD/freshkid" >/dev/null 2>&1 \
+  || fail "R8 (negative control): the maintenance run failed"
+[ "$(cat "$KGLD/specs/glossary.md")" = "$GLD_PROSE_REF" ] \
+  || fail "R8 (negative control): ordinary project prose (sentinel text appears mid-file, not on line 1) at specs/glossary.md was NOT preserved — the ownership signal is 'first line IS the sentinel', not 'the file contains it somewhere'"
+pass "R8 glossary_stub_rematerialised_in_thin_child (negative control) — ordinary project prose is preserved, never mistaken for a stub even when it quotes the sentinel text"
+
+# ── R9: an edited glossary is not a --thin blocker, and survives the conversion ─────────
+# glossary_edit_does_not_block_thin_conversion (E30-F01)
+#
+# The suite's existing blocked-child cases (thin_all_or_nothing_on_edit,
+# thin_blocker_paths_are_normalised) are the positive control that the blocker machinery
+# still works — referenced, not re-seeded, here.
+F04GLE="$AU/f04gl-e"
+f04_fullchild "$F04GLE" onlyglossary
+KGLE="$F04GLE/onlyglossary/.harness"
+printf 'PROJECT TERM — the only divergence in this child (E30-F01 R9)\n' >> "$KGLE/specs/glossary.md"
+GLE_REF="$(cat "$KGLE/specs/glossary.md")"
+cascade "$F04GLE" --thin
+F04GLE_SEG="$(f04_seg "$AU_OUT" "$F04GLE/onlyglossary")"
+printf '%s\n' 2>/dev/null "$F04GLE_SEG" | grep -qF 'differs: specs/glossary.md' \
+  && fail "R9: an edited glossary was named as a --thin blocker — it left the prose tier and must never block a conversion: $F04GLE_SEG"
+printf '%s\n' 2>/dev/null "$F04GLE_SEG" | grep -qi 'CONVERTED' \
+  || fail "R9: the child whose only divergence is its glossary did not report a conversion: $F04GLE_SEG"
+f04_all_stubs_in_tier "$KGLE" "R9 (the prose tier must convert to stubs — the glossary edit must not block it)"
+is_stub "$KGLE/specs/glossary.md" \
+  && fail "R9: the glossary itself was stubbed by the conversion — it is project-owned, never tier content"
+[ "$(cat "$KGLE/specs/glossary.md")" = "$GLE_REF" ] \
+  || fail "R9: the --thin conversion changed the child's edited glossary bytes"
+pass "R9 glossary_edit_does_not_block_thin_conversion — an edited glossary is not named, the child converts, and the edit survives"
 
 # ── docs contract: docs/UMBRELLA.md documents the migration and the reverse ─────────────
 # f04_docs_contract. FENCE-AWARE extraction: the bare house awk idiom stops at the first

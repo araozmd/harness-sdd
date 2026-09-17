@@ -162,3 +162,72 @@
   `[ -x "$SRC/<file>" ]` check reads the mode that a commit can drop. Proven: `chmod -x
   tools/fix-worktree.sh` keeps all 47 suites green while agents/fixer.md:282's documented
   `tools/fix-worktree.sh create …` dies with Permission denied.
+- [2026-09-16 builder] `tests/test_codex_native.sh`'s R12 check
+  (`assert (src/'VERSION').read_text().strip()=='0.79.0'`) pins the repo's CURRENT top VERSION
+  as a literal, not a historical one — the exact "permanent-suite anti-pattern" other suites'
+  own headers warn against. It broke immediately on E30-F01's routine MINOR bump, unrelated to
+  that feature's own logic. The CHANGELOG-section split on the same line
+  (`split('## [0.79.0]',1)`) is SAFE — it anchors a historical heading text that stays findable
+  no matter what is prepended above it — only the bare `=='0.79.0'` VERSION-file comparison is
+  fragile. Whoever bumps VERSION next must grep for the CURRENT value as a literal (not just
+  `grep 0\.NN\.0 CHANGELOG.md`, which misses a bare VERSION-file comparison) before trusting a
+  green `tools/run-tests.sh`; the fix is a one-line literal sync, not a design change.
+- [2026-09-16 reviewer] A two-stage negative (`extract | grep <shape> | grep -qF <token> && fail`)
+  fails OPEN when stage 2's pattern matches nothing: the `&& fail` is then unreachable for EVERY
+  input and the assertion is decoration. E30-F01 shipped `grep 'pointer .stub'` against a doc
+  that says `**pointer stubs**` (one space, not two chars) — zero matches on the pristine file
+  AND on main, so re-adding the forbidden path to that sentence kept all 47 suites green. The
+  `[ -n "$extracted" ]` staleness guard does NOT cover this: the span extracts fine, it is the
+  PREDICATE that is dead. Before trusting any such negative, run its middle grep alone against
+  the pristine file and require ≥1 line — a positive control on the SHAPE, not just on the span.
+- [2026-09-16 reviewer] When a spec enumerates N authorities that must agree, count the
+  ASSERTIONS, not the authorities: E30-F01's R11 named six and one had an unfirable predicate
+  while `docs/INSTALL.md` had three sites the plan listed and only one asserted. Mutate each
+  authority — and each SITE within it — separately; three of six survived and two restored
+  verbatim the false ownership sentence the feature existed to delete.
+- [2026-09-16 reviewer] A YAML key sweep written as `^[[:space:]]*[A-Za-z0-9_.-]+:.*<token>`
+  matches the token only in the VALUE. It misses `<token>_mode:`, `<token>:` and `seed_<token>:`
+  — i.e. every key NAMED for the thing being forbidden, which is the shape an ablation check is
+  actually for. Alternate the key-name branch in explicitly.
+- [2026-09-16 reviewer] "Exactly one line ON STDOUT" is two claims, and a test that captures
+  `2>&1` pins only the first. Moving the verdict to stderr left E30-F01's R5 green. If the
+  contract names a stream, capture that stream alone (`2>/dev/null`).
+- [2026-09-16 builder] Fixing E30-F01's Finding 1/2 in round 2, a bare `var="$(A | grep B)"`
+  assignment where the pipeline's final command legitimately finds no match ABORTS THE WHOLE
+  `set -eu` SCRIPT SILENTLY — no `FAIL:` line, no error, just early exit — because a solitary
+  assignment's own exit status is the exit status of the command substitution it ran, and
+  under `set -e` that is fatal exactly like any other failing simple command. It happened
+  applying the OWN mutant this round exists to catch: the fixed extraction correctly found
+  zero lines, and the `[ -n "$var" ] || fail …` staleness guard one line below never got a
+  chance to run because the assignment line above it had already killed the process. Any
+  assignment whose RHS pipeline can legitimately produce a false/empty result — which
+  includes every "locate this shape, then check it" two-stage negative this file's own
+  lessons recommend — needs `|| true` on that assignment, not just on the final `[ -z ]`
+  check. Verify by making the RHS deliberately match nothing and confirming the SCRIPT still
+  reaches the `fail()` call, not just that `sh -n` parses.
+- [2026-09-16 reviewer] A `set -eu` bare-command-substitution abort is **RED, not a false green** —
+  correcting the attribution in the builder line above. Measured: `sh -c 'set -eu; v="$(printf a |
+  grep zzz)"; echo REACHED'` exits 1 printing nothing, and `tools/run-tests.sh` reports the suite
+  `===== FAILED (rc=1)` (`:384-406` treats any non-zero child rc, and even a missing rc file, as
+  failure). What the abort destroys is the DIAGNOSTIC, not the signal: you get a log that simply
+  stops mid-suite with no `FAIL:` line and no reason, which is why `|| true` + a named staleness
+  guard is still the right fix. The genuine false green in that round came from the OTHER half of
+  the same bug — a `[^.]*` sentence boundary truncating the forbidden token out of a NON-EMPTY
+  extraction, which sails through `[ -n "$var" ]` and then finds nothing to forbid. Two different
+  failures, two different symptoms: a log that stops early is an abort; `all N suites passed` with
+  a mutant applied is a truncating or dead predicate. Diagnose by reading the suite log's last line
+  before theorising.
+- [2026-09-16 reviewer] An anchor grep that searches **its own suite file** always self-matches, so
+  the `[ -n "$extracted" ] || fail "…anchor is stale"` guard beside it is unreachable for every
+  input. `tests/test_install.sh:2599` greps that file for the literal its own line contains: 2 hits,
+  never 0. Harmless there (the real assertions below still fire, and the self-match is what makes
+  the bare assignment abort-proof), but it is the round-1 dead-guard shape wearing a safety label —
+  and the same idiom pointed at any OTHER file is a live abort. Before trusting a self-grep's
+  staleness guard, count the matches on the pristine file and ask which one is the grep line.
+- [2026-09-16 reviewer] When a two-stage negative is scoped by `grep <shape>` rather than by a
+  structural span, it covers exactly the LINES the shape lands on — so the same forbidden claim
+  survives a line re-wrap. E30-F01's `docs/CONFIG-LAYERING.md` negative greps the one line holding
+  `pointer stub`; restoring `main`'s text there dies, but moving the identical path onto the
+  sentence's OTHER line (a plain markdown re-wrap, no meaning changed) kept all suites green.
+  Mutate the re-wrapped variant too, not just the verbatim revert: prose reflows on every edit, and
+  a line-scoped negative silently narrows every time it does.

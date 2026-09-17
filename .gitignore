@@ -44,3 +44,9 @@ __pycache__/
 # Local-only config for the harness, never committed.
 .local/
 .obsidian/
+
+# Agent scratch files (namespaced by feature-id/role per agents/builder.md) — mutation
+# runners, probe scripts, captured logs. Never repo content; tracked once inflated
+# tools/change-size.sh's ADVISE tier during E30-F01 round 1 review purely because it was
+# untracked-but-present, not because any of it was production code.
+/scratchpad/

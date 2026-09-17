@@ -198,10 +198,12 @@ umbrella:
   # instead of carrying its own copy of it.
   #
   # With this set AND resolving to an installed body (`<root>/.harness/.harness-version`
-  # present), the child's PROSE tier — AGENTS.md, agents/, docs/, specs/_templates/,
-  # specs/glossary.md — is written as one-line pointer stubs at the same paths. The
-  # PROGRAM-READ tier — init.sh, store/, tools/ — is always a full local copy, because
-  # init.sh execs and parses those and a program cannot follow a prose pointer.
+  # present), the child's PROSE tier — AGENTS.md, agents/, docs/, specs/_templates/ — is
+  # written as one-line pointer stubs at the same paths. specs/glossary.md is
+  # PROJECT-OWNED (E30-F01), never this tier: it is seeded once and stays local, real
+  # content in every layout. The PROGRAM-READ tier — init.sh, store/, tools/ — is always
+  # a full local copy, because init.sh execs and parses those and a program cannot follow
+  # a prose pointer.
   #
   # UNSET, empty, or unresolvable ⇒ the complete body is installed locally, exactly as
   # a single-repo install. That is not a degraded mode and never fails init.sh: a child
