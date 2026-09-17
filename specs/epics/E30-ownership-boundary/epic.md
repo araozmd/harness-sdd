@@ -1,7 +1,7 @@
 ---
 id: E30
 title: "Body/project ownership boundary: every .harness/ path is either harness-owned (refreshed on upgrade) or project-authored (seeded once, never clobbered) — specs/glossary.md is classified as both, so an upgrade destroys a project's domain glossary"
-status: pending
+status: done
 owner: araozmd
 ---
 
