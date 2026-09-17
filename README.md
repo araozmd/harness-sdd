@@ -66,8 +66,8 @@ no third-party Python packages are required.
 cd harness-sdd
 ./init.sh                 # environment gate — must pass
 claude                    # CLAUDE.md → AGENTS.md auto-loads
-# new idea? /sdd-new "<idea>"   # Inception triages it → seeds a pending task
-# whole project? /sdd-plan "<idea>"  # the whole-project inception skill: writes vision/architecture + ADRs and seeds draft epics
+# new product? /sdd-plan "<idea>"  # the whole-project inception skill: writes vision/architecture + ADRs and seeds draft epics
+# later idea? /sdd-new "<idea>"   # Inception triages it → seeds a pending task
 # deepen one? /sdd-drill <epic-id>  # the per-epic drill-down skill: decomposes a draft epic into features + ADR deltas, then one epic-level approval (draft → planned)
 # quick fix? /sdd-fix "<desc>"   # the lightweight fix lane: seeds an sdd:false fix under the reserved maintenance epic (brief only, no spec) and runs Builder → Reviewer
 # batch fixes? /sdd-fix-parallel # bounded E99 batch: isolated safe fixes overlap; shared/unknown paths serialize
@@ -90,10 +90,15 @@ than an `init.sh` prerequisite. For direct troubleshooting, run
 `node tools/next-task.mjs --json` (or
 `node .harness/tools/next-task.mjs --json` after installation).
 
-`/sdd-new` is the front door: it asks a few questions, decides whether the idea is a
-new epic / feature / task, and writes a `pending` entry plus an intent brief — without
-hand-editing `state/tasks.json`. Then the Orchestrator spawns `architect` → (human
-approves) → `builder` → `reviewer`.
+A **new product** starts with whole-project inception: `/sdd-plan` writes the vision,
+architecture and ADRs and seeds draft epics, `/sdd-drill <epic-id>` decomposes one, and
+`/sdd-next` specs and builds. See
+[Starting from nothing](docs/INSTALL.md#starting-from-nothing-new-product).
+
+For **later work** in an existing project, `/sdd-new` is the front door: it asks a few
+questions, decides whether the idea is a new epic / feature / task, and writes a
+`pending` entry plus an intent brief — without hand-editing `state/tasks.json`. Then the
+Orchestrator spawns `architect` → (human approves) → `builder` → `reviewer`.
 
 ## Supported CLIs
 
@@ -370,10 +375,13 @@ Paths below are relative to the installed project root:
 2. Set test/lint/typecheck commands in `.harness/harness.config.yaml`. Put fast
    project checks in `.harness/init.project.sh`, which survives upgrades and is
    sourced from the project root. The installer refreshes `.harness/init.sh`.
-3. Add work with `/sdd-new "<idea>"`, or use `.harness/specs/_templates/`.
+3. For a new product, run `/sdd-plan "<idea>"` (whole-project vision, architecture,
+   ADRs, draft epics) → `/sdd-drill <epic-id>` → `/sdd-next`. Add later work with
+   `/sdd-new "<idea>"`, or use `.harness/specs/_templates/`.
 
 The first-run bootstrap (`/sdd-next`) helps adapt the project under the human
-approval gate; see [Bootstrap](docs/INSTALL.md#bootstrap-first-run).
+approval gate; see [Bootstrap](docs/INSTALL.md#bootstrap-first-run) and the
+[greenfield sequence](docs/INSTALL.md#starting-from-nothing-new-product).
 
 Derived from the *Harnessing Engineering* research (harness-engineering + SDD videos,
 Anthropic's long-running-development post, the Harness Engineering knowledge graph).

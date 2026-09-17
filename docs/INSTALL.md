@@ -48,7 +48,7 @@ your-project/
     ├── .gitignore                       # seeded: keeps the local-only telemetry log out of VCS
     ├── telemetry.jsonl                  # created on first run — local-only, gitignored (E05-F02)
     ├── workers.json                     # only while workers.roster — local-only, gitignored (E17-F04)
-    ├── specs/product.md  specs/epics/   # YOURS — seeded once, never overwritten
+    ├── specs/product.md  specs/epics/   # YOURS — seeded once; project edits preserved
     ├── state/tasks.json                 # YOURS — bootstrap task seeded
     └── progress/
 ```
@@ -58,9 +58,12 @@ see [`../README.md`](../README.md) → Observability and `agents/orchestrator.md
 
 Existing entrypoint prose is preserved outside the managed
 `<!-- harness:begin -->…<!-- harness:end -->` block. Project-owned
-`.harness/specs/product.md`, `.harness/specs/glossary.md`, epic specs, state, progress,
-configuration, and `init.project.sh` are preserved on upgrade (configuration also
-receives missing default keys). Templates belong to the refreshed harness body.
+`.harness/specs/glossary.md`, epic specs, state, progress, configuration, and
+`init.project.sh` are preserved on upgrade (configuration also receives missing default
+keys); `.harness/specs/product.md` is preserved too, except that a file still
+byte-identical to a prior release's shipped stub is refreshed to the current stub, so an
+upgraded target does not keep stale seeded guidance. Templates belong to the refreshed
+harness body.
 Generated glue follows its front-end ownership rules; see [Layout & ownership](#layout--ownership).
 
 ### Shared skill units and legacy prompt migration
@@ -136,18 +139,67 @@ retired glue is excluded from active harness drift ownership. Review the
 warnings and decide separately whether to retain your custom legacy integration.
 The [v0.78.1 baseline](BASELINE-0.78.1.md) remains the historical support record.
 
+## Starting from nothing (new product)
+
+For a brand-new product the supported front door is **install first, plan second**.
+The target may be an empty, non-git directory — that is a first-class path, not a
+degraded mode. The installer does not create a git repository.
+
+1. Create an empty directory for the product.
+2. Run `./harness-install.sh /path/to/your-product`. An interactive install asks up to
+   three questions — the front-end picker, the builder backend
+   (`execution.builder.backend`), and the PR-loop opt-in (`pr_loop.enabled`). Each has a
+   flag for scripted installs: `--agents=`, `--builder-backend=`, and `--pr-loop=`.
+3. Run the version-control step **in the installed target**: `cd /path/to/your-product`
+   first, then `git init` and make a `commit`. The installer does not change the
+   caller's working directory, so an unqualified `git init` would target the harness
+   checkout. Version control is the human's step, and a committed body lets `init.sh`'s
+   drift guard verify it: on a non-git tree the guard skips, and on an untracked body it
+   warns — it never fails. This is local only: a PR-based flow also needs a remote
+   (`gh repo create`, or `git remote add` + push) and one feature branch per feature,
+   which is what the harness opens PRs from.
+4. Edit the seeded `.harness/specs/product.md` and fill in the project-constitution
+   `TODO`s — "what this product is", its audience, its principles. It is Layer 0, and
+   `/sdd-plan` plans *around* it rather than rewriting it: `agents/planner.md` defines
+   the vision as complementary to the constitution and forbids the Planner from changing
+   it, so a `TODO` left here survives planning. The installer's `Next steps` banner
+   prints this same edit as its second item, after `git init`.
+5. Open the project and run **`/sdd-plan`** — the whole-project inception that writes
+   the vision, architecture and ADRs and seeds the project's draft epics.
+6. Run **`/sdd-drill <epic-id>`** to decompose the first draft epic into features.
+7. Commit and push the planning baseline to the remote from step 3 — the constitution
+   edit, the vision, architecture and ADRs, the epic decomposition, and the seeded
+   `.harness/state/tasks.json`. Until this commit those planning artifacts are dirty or
+   untracked, so the remote baseline does not describe them.
+8. Create the first feature branch before starting feature work with
+   `/sdd-next`: features are built on their own branch and their PR opens from it, so
+   committing the planning baseline first keeps the vision, ADRs and decomposition out
+   of the first feature PR.
+9. Keep running **`/sdd-next`** to spec and build that work.
+
+The seeded `E00-F01` bootstrap task is not the front door for a new product; `/sdd-next`
+routes it after `/sdd-plan` — see [Bootstrap (first run)](#bootstrap-first-run).
+
 ## Bootstrap (first run)
 
 The installer is deterministic; the *project-specific* adaptation is done through the
-harness itself, under the human gate:
+harness itself, under the human gate. A new product plans before it builds: run
+**`/sdd-plan`** first — the front door is
+[Starting from nothing](#starting-from-nothing-new-product).
 
 1. Edit `.harness/specs/product.md` for your product.
-2. Open the project in Claude Code and run **`/sdd-next`**. The seeded `E00-F01`
-   bootstrap task is `sdd: true`, so the Orchestrator routes it to the Architect
-   (with Scout recon) to draft epics and detect your test/lint/typecheck commands
-   (`.harness/harness.config.yaml` + fast project gates in `.harness/init.project.sh`), then
-   **pauses at the human gate** for your approval.
-3. Approve, then keep running `/sdd-next` to build features.
+2. Run **`/sdd-plan`** to brainstorm the vision, architecture and ADRs and seed the
+   project's draft epics.
+3. Run **`/sdd-drill <epic-id>`** to decompose a draft epic into features.
+4. Commit and push the planning baseline — the constitution edit, the vision,
+   architecture and ADRs, the epic decomposition and the seeded
+   `.harness/state/tasks.json` — then create the first feature branch. This keeps the
+   planning artifacts out of the first feature PR.
+5. Run **`/sdd-next`**. The seeded `E00-F01` bootstrap task is `sdd: true`, so the
+   Orchestrator routes it to the Architect (with Scout recon) to detect your
+   test/lint/typecheck commands (`.harness/harness.config.yaml` + fast project gates in
+   `.harness/init.project.sh`), then **pauses at the human gate** for your approval.
+6. Approve, then keep running `/sdd-next` to build features.
 
 To add new work later, run **`/sdd-new "<idea>"`** — the Inception intake triages it
 (new epic / feature / task), seeds a `pending` entry plus an intent brief, and tells

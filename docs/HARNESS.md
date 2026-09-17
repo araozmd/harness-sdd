@@ -62,6 +62,11 @@ in the table; Codex invocation uses `$sdd-*`, for example `$sdd-new Add search` 
 | `/sdd-fix-parallel` | Fixer — bounded parallel batch of ready E99 fixes | OpenCode requires concurrency capability/override; runtime requires native concurrency and `in-session` Builder |
 | `/sdd-pr-loop <pr>` | the Codex review cycle on one open PR (fresh `pr-fixer` role) | `pr_loop.enabled` (opt-in) |
 
+For a **new product**, the sequence starts at `/sdd-plan` (whole-project inception: vision,
+architecture, ADRs, draft epics), then `/sdd-drill <epic-id>` and `/sdd-next`; `/sdd-new`
+is the intake for **later work** in an existing project. See
+[installation](INSTALL.md#starting-from-nothing-new-product).
+
 `/sdd-pr-loop` follows the **opt-in PR-policy gate**: it is stamped
 only while `pr_loop.enabled` reads exactly `true`, and a fresh install seeds `false`.
 An absent block, an absent key, an empty or malformed value all mean off. The reason is

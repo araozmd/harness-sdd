@@ -3109,6 +3109,68 @@ for rel in ('.agents/rules','.agents/agents','.agents/workflows','.agents','.gem
 PYRETIRE
 }
 
+# ── specs/product.md shipped-stub emitters (E28-F01 round 9) ──────────────────
+# specs/product.md is PROJECT-OWNED: the human edits it and the Planner may never
+# rewrite it. It is seeded once, and an upgrade preserves project-authored content.
+#
+# E28-F01 changed the seeded prose (it used to name /sdd-next as the new-product
+# front door; it now names /sdd-plan then /sdd-drill). A target created by ANY
+# release up to v0.81.0 already has the file, so the old seed-only branch skipped
+# the new prose and the target kept the wrong front door forever (Codex round 9,
+# 4042109208). The fix is a GUARDED refresh: migrate only a file byte-identical
+# to the known prior shipped stub; preserve everything else byte for byte.
+#
+# product_stub_prior — the stub shipped byte-identically from v0.1.0 through
+# v0.81.0 (confirmed with `git log -S` on its distinguishing line). Older or
+# unknown stubs are deliberately NOT in the table and are preserved: this is a
+# one-blob migration, not a general "was it seeded by us?" heuristic.
+product_stub_prior() {
+  cat <<'PRODUCT_STUB_PRIOR_EOF'
+---
+status: draft
+---
+
+# <Product name> — Product Constitution
+
+> Layer 0. The stable, high-level "what & why". Rewrite this for your product,
+> then run /sdd-next to bootstrap (detect test/lint commands, draft epics).
+
+## What this product is
+TODO
+
+## Who it is for
+TODO
+
+## Principles & hard constraints
+TODO
+PRODUCT_STUB_PRIOR_EOF
+}
+
+# product_stub_current — the stub shipped from v0.81.1 (E28-F01): the whole-project
+# front door is /sdd-plan, then /sdd-drill, before /sdd-next.
+product_stub_current() {
+  cat <<'PRODUCT_STUB_CURRENT_EOF'
+---
+status: draft
+---
+
+# <Product name> — Product Constitution
+
+> Layer 0. The stable, high-level "what & why". Rewrite this for your product,
+> then run /sdd-plan to plan the whole project (vision, architecture, ADRs, draft epics),
+> then /sdd-drill <epic-id> to decompose the first epic into features.
+
+## What this product is
+TODO
+
+## Who it is for
+TODO
+
+## Principles & hard constraints
+TODO
+PRODUCT_STUB_CURRENT_EOF
+}
+
 install_one() {
   TARGET="$1"
   H="$TARGET/.harness"
@@ -3817,27 +3879,37 @@ EOF
     info "init.project.sh preserved"
   fi
 
-  if [ ! -f "$H/specs/product.md" ]; then
-    cat > "$H/specs/product.md" <<'EOF'
----
-status: draft
----
-
-# <Product name> — Product Constitution
-
-> Layer 0. The stable, high-level "what & why". Rewrite this for your product,
-> then run /sdd-next to bootstrap (detect test/lint commands, draft epics).
-
-## What this product is
-TODO
-
-## Who it is for
-TODO
-
-## Principles & hard constraints
-TODO
-EOF
+  # specs/product.md is the PROJECT-OWNED constitution. Four states, one rule, no flag
+  # (docs/RATIONALE.md ablation doctrine), mirroring specs/glossary.md below:
+  #   symlink / non-regular      -> preserve (never write through a link)
+  #   absent                     -> seed the current shipped stub
+  #   byte-identical current     -> pristine, leave it alone
+  #   byte-identical PRIOR stub  -> refresh to the current shipped stub (a pristine
+  #                                 seed, not authored content)
+  #   anything else              -> preserve, byte for byte (project-authored)
+  # The `-L` guard precedes `-e` so a dangling link is not read as "absent" and
+  # written THROUGH (same reason as the glossary branch below). The prior-stub test
+  # runs last so only a file that is neither current nor authored is migrated.
+  _prod="$H/specs/product.md"
+  if [ -L "$_prod" ] || { [ -e "$_prod" ] && [ ! -f "$_prod" ]; }; then
+    info "specs/product.md preserved (not a regular file — left exactly as found)"
+  elif [ ! -e "$_prod" ]; then
+    product_stub_current > "$_prod"
     info "seeded specs/product.md (stub)"
+  else
+    _prod_new="$(mktemp 2>/dev/null || mktemp -t harness-prod-new)"
+    _prod_prior="$(mktemp 2>/dev/null || mktemp -t harness-prod-prior)"
+    product_stub_current > "$_prod_new"
+    product_stub_prior > "$_prod_prior"
+    if cmp -s "$_prod" "$_prod_new"; then
+      info "specs/product.md pristine (still byte-identical to the shipped stub)"
+    elif cmp -s "$_prod" "$_prod_prior"; then
+      cp "$_prod_new" "$_prod"
+      info "specs/product.md refreshed (was the pristine pre-0.81.1 stub; project edits are preserved)"
+    else
+      info "specs/product.md preserved (project-authored)"
+    fi
+    rm -f "$_prod_new" "$_prod_prior"
   fi
 
   # specs/glossary.md is PROJECT-OWNED (E30-F01) — a project's own domain vocabulary, not
@@ -4232,7 +4304,9 @@ Start every agent session as the **Orchestrator**:
 3. Local prompt override (if present): read \`AGENTS.local.md\` beside this entrypoint
    after committed instructions as personal, additive guidance; committed instructions remain authoritative on conflict.
 4. Product/source code lives at the repo root; harness bookkeeping lives in
-   \`.harness/\`. In Claude Code, run \`/sdd-next\`.
+   \`.harness/\`. Run \`/sdd-plan\` for a new product (Codex: \`\$sdd-plan\`), then
+   \`/sdd-drill <epic-id>\` (Codex: \`\$sdd-drill <epic-id>\`), then \`/sdd-next\`
+   (Codex: \`\$sdd-next\`); ongoing work resumes with the next command.
 $MARK_END"
     if [ -f "$_f" ] && grep -qF "$MARK_BEGIN" "$_f"; then
       # Replace the marked block IN PLACE: keep the prefix before the begin marker
@@ -7182,17 +7256,111 @@ EOF
     ok "upgrade complete (v$VERSION)"
   else
     ok "install complete (v$VERSION)"
+    # E28-F01 round 9 (4042109214), shrunk in round 10: the single-repo workflow
+    # below is WRONG for an umbrella cascade. The default umbrella root is
+    # deliberately non-git unless --shared-repo, so "run git init" is false advice.
+    # Gate the workflow by the cascade role, and keep each replacement to what is
+    # literally true (Codex round 10): slice selection/dispatch is the /sdd-next
+    # Orchestrator loop, NOT init.sh (which only validates); /sdd-plan and /sdd-drill
+    # never write `slices[]`; and a child's local loop runs from its own
+    # `.harness/init.sh`, not a repo-root `init.sh`.
+    if [ "$HARNESS_UMBRELLA_ROLE" = "coordinator" ]; then
+      echo
+      echo "Next steps (umbrella coordinator):"
+      echo "  This is an umbrella coordinator; see .harness/docs/UMBRELLA.md, then run /sdd-next (\$sdd-next in Codex) from this directory."
+    elif [ "$HARNESS_UMBRELLA_ROLE" = "child" ]; then
+      echo
+      echo "Next steps (umbrella child):"
+      echo "  This is an umbrella child; its local SDD loop runs from $H/init.sh."
+    else
     echo
     echo "Next steps:"
-    echo "  1. Edit .harness/specs/product.md for your product."
-    for _advice_host in $SELECTED; do
-      case "$_advice_host" in
-        claude) echo "  2. Claude Code: open the repo and run /sdd-next" ;;
-        codex) echo '  2. Codex: open the repo, discover with /skills, and invoke $sdd-next' ;;
-        opencode) echo "  2. OpenCode: open the repo and run /sdd-next" ;;
-      esac
-    done
-    echo "     (detect test/lint commands, draft your first epics)."
+    # Version control is the human's step: the installer never runs `git init` on a
+    # single target (R6), yet the installed workflow uses feature branches and PRs.
+    # The fresh-install banner must name it before the host-specific planning commands.
+    # A local-only `git init` cannot open a PR (Codex round 5, 4041813522), so the step
+    # must also name the remote and the per-feature branch discipline. It precedes the
+    # constitution edit so that edit stays uncommitted until the planning baseline,
+    # exactly as docs/INSTALL.md's ordered section states (round 7 consistency audit).
+    # Round 11 (Codex 4042327763): the installer runs in the CALLER's cwd (usually the
+    # harness checkout), and it never `cd`s into the target, so a bare `git init` step
+    # would initialize the wrong repository. Name the installed target explicitly.
+    # --self installs into a throwaway temp target, so it gets a generic phrase rather
+    # than leaking that path into the developer-facing banner (round 11).
+    if [ "${SELF_MODE:-0}" = 1 ]; then
+      _advice_target="the installed project directory"
+    else
+      _advice_target="$TARGET"
+    fi
+    echo "  1. In $_advice_target, run git init and make an initial commit (local only); PR-based execution also needs a remote (gh repo create, or git remote add + push) and one feature branch per feature, which is what the harness opens PRs from."
+    echo "  2. Edit .harness/specs/product.md for your product."
+    # Round 6 (4041879995): the planning artifacts /sdd-plan and /sdd-drill write are
+    # dirty or untracked until they are committed and pushed, so the banner commits the
+    # baseline and creates the first feature branch before /sdd-next runs. Host-neutral:
+    # committing and branching is the human's git work, not a host command.
+    _advice_baseline="Commit and push the planning baseline (constitution, vision, ADRs and decomposed epics), then create the first feature branch — this keeps planning artifacts out of the first feature PR."
+    # Round 8 (4042015434): emit ONE numbered workflow, not one complete sequence per
+    # selected host. The per-host loop printed steps 3-6 (including the baseline commit)
+    # once per selected integration, so with --agents=all the banner read as "run the whole
+    # workflow three times"; a sequential reader then hit /sdd-plan's re-run guard on the
+    # second pass, once the first invocation had written vision.md/architecture.md. Each
+    # front-door step now names the selected hosts' invocation forms as alternatives
+    # WITHIN that one step. Step order is unchanged: plan → drill → baseline → next.
+    _adv_claude=0; _adv_codex=0; _adv_opencode=0
+    if agent_selected claude; then _adv_claude=1; fi
+    if agent_selected codex; then _adv_codex=1; fi
+    if agent_selected opencode; then _adv_opencode=1; fi
+    _adv_count=$((_adv_claude + _adv_codex + _adv_opencode))
+    if [ "$_adv_count" -eq 1 ]; then
+      # A single selected host keeps its exact per-host phrasing: test_codex_native.sh R8
+      # pins the "Claude Code:/Codex:/OpenCode:" labels and Codex's "invoke $sdd-next"
+      # (and forbids the Claude phrasing on a Codex-only install).
+      if [ "$_adv_claude" = 1 ]; then
+        echo "  3. Claude Code: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
+        echo "  4. Claude Code: run /sdd-drill <epic-id> to decompose the first draft epic into features."
+        echo "  5. $_advice_baseline"
+        echo "  6. Claude Code: run /sdd-next to spec and build that work."
+      elif [ "$_adv_codex" = 1 ]; then
+        echo '  3. Codex: open the repo, discover with /skills, and invoke $sdd-plan to brainstorm the vision, architecture, ADRs and draft epics.'
+        echo '  4. Codex: invoke $sdd-drill <epic-id> to decompose the first draft epic into features.'
+        echo "  5. $_advice_baseline"
+        echo '  6. Codex: invoke $sdd-next to spec and build that work.'
+      else
+        echo "  3. OpenCode: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
+        echo "  4. OpenCode: run /sdd-drill <epic-id> to decompose the first draft epic into features."
+        echo "  5. $_advice_baseline"
+        echo "  6. OpenCode: run /sdd-next to spec and build that work."
+      fi
+    else
+      # Multiple hosts: ONE workflow; the host-specific forms are alternatives inside the
+      # one numbered step, so steps 3-6 (and the baseline commit) appear exactly once.
+      if [ "$_adv_claude" = 1 ] && [ "$_adv_opencode" = 1 ]; then
+        _adv_slash_label='Claude Code/OpenCode'
+      elif [ "$_adv_claude" = 1 ]; then
+        _adv_slash_label='Claude Code'
+      else
+        _adv_slash_label='OpenCode'
+      fi
+      if { [ "$_adv_claude" = 1 ] || [ "$_adv_opencode" = 1 ]; } && [ "$_adv_codex" = 1 ]; then
+        _adv_plan="Run /sdd-plan ($_adv_slash_label) or \$sdd-plan (Codex)"
+        _adv_drill="Run /sdd-drill <epic-id> ($_adv_slash_label) or \$sdd-drill <epic-id> (Codex)"
+        _adv_next="Run /sdd-next ($_adv_slash_label) or \$sdd-next (Codex)"
+      elif [ "$_adv_codex" = 1 ]; then
+        _adv_plan='Run $sdd-plan (Codex)'
+        _adv_drill='Run $sdd-drill <epic-id> (Codex)'
+        _adv_next='Run $sdd-next (Codex)'
+      else
+        _adv_plan="Run /sdd-plan ($_adv_slash_label)"
+        _adv_drill="Run /sdd-drill <epic-id> ($_adv_slash_label)"
+        _adv_next="Run /sdd-next ($_adv_slash_label)"
+      fi
+      echo "  3. $_adv_plan to brainstorm the vision, architecture, ADRs and draft epics."
+      echo "  4. $_adv_drill to decompose the first draft epic into features."
+      echo "  5. $_advice_baseline"
+      echo "  6. $_adv_next to spec and build that work."
+    fi
+    echo "     (detect test/lint commands after planning)."
+    fi
   fi
 
   LAST_UPGRADE="$UPGRADE"
@@ -7447,6 +7615,13 @@ RECURSIVE=0
 DRY_RUN=0
 SHARED_REPO=0
 POSITIONAL=""
+# E28-F01 round 9 (4042109214): which target of an umbrella cascade, if any, the
+# current install_one call is for. Empty in single-target (and --self) mode, so the
+# fresh-install "Next steps" banner prints the single-repo workflow exactly as before;
+# "coordinator"/"child" swap it for umbrella-specific advice, because the default
+# umbrella root is deliberately non-git unless --shared-repo, and whole-project
+# planning happens ONCE at the coordinator — not once per child.
+HARNESS_UMBRELLA_ROLE=""
 # ── E24-F04: the two layout flags ────────────────────────────────────────────────────
 # THE FLAG DECIDES WHETHER TO ACT, NEVER WHAT TO COMPUTE. `prose_tier_blockers` runs at the
 # same point over the same inputs whether or not --thin was passed; the flag only chooses
@@ -7744,6 +7919,7 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
+HARNESS_UMBRELLA_ROLE="coordinator"
 install_one "$UMB"
 
 # Ensure the coordinator config carries an integration_command key (migration on a
@@ -7769,7 +7945,7 @@ if [ -z "$(_cfg_umbrella_manifest_value "$COORD_CFG")" ]; then
     }
     { print }
   ' "$COORD_CFG" > "$COORD_CFG.umtmp" && mv "$COORD_CFG.umtmp" "$COORD_CFG"
-  info "coordinator umbrella.manifest -> ../umbrella.manifest.yaml — UMBRELLA MODE ENGAGED (init.sh now runs the coordinator loop; unset this value to revert to single-repo)"
+  info "coordinator umbrella.manifest -> ../umbrella.manifest.yaml — UMBRELLA MODE ENGAGED (run /sdd-next (\$sdd-next in Codex) to drive the coordinator loop; unset this value to revert to single-repo)"
 fi
 
 # Locked design: the auto-populated manifest ALWAYS lives at the umbrella root
@@ -7868,6 +8044,7 @@ for child in "$UMB"/*/; do
       HARNESS_UMBRELLA_ROOT="$_umb_phys"
       ;;
   esac
+  HARNESS_UMBRELLA_ROLE="child"
   install_one "$UMB/$name"   # R10
   unset HARNESS_UMBRELLA_ROOT
   manifest_upsert "$MANIFEST" "$name"   # R12, R14

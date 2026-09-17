@@ -244,3 +244,21 @@
   runner falls back to `/usr/bin/sh` = **bash**. "all N suites passed (/usr/bin/sh [GNU bash …])"
   is a bash claim about `#!/bin/sh` suites, and a dash-only construct added in the diff would
   pass un-caught. Either install dash or report the green as bash-scoped, never as POSIX-sh-scoped.
+- [2026-09-17 reviewer] Renumbering a numbered list is NOT reordering it: an E28-F01 mutant that
+  changed the banner's step numbers (`2. /sdd-plan` → `3. /sdd-plan`, `/sdd-next` → `2.`) left the
+  `/sdd-plan` line PHYSICALLY first, so the suite stayed green and read as a survivor. Reorder by
+  moving the lines the assertion measures (`index($0, n)` scans output order, not the label), and
+  let the mandated applied-diff print show the swap — it is what caught this as an instrument
+  failure rather than a hole in R5.
+- [2026-09-17 builder] A folded two-token anchor over markdown BLOCKQUOTE prose must account for
+  the `> ` continuation prefix: re-wrapping a line inside `> …` inserts `> ` between its words, so
+  `tr '\n' ' '` turns `draft\n> epics` into `draft > epics` and the `sdd-plan[^.]{0,60}draft epics`
+  pair the anchor greps no longer exists (E28-F01 round 7 — the seeded `product.md` stub reddened
+  R8b until both tokens were kept on one physical line). Keep the pair on one line, or strip the
+  quote markers before folding.
+- [2026-09-17 builder] The generated entrypoint block is a DOUBLE-QUOTED `_block="…"` string, so
+  any `$sdd-*` token added to it is command-expanded before it is written; under `set -u` the
+  installer aborts mid-run with `sdd: unbound variable` (no `FAIL:` line, just a broken install).
+  Escape the dollar (`\$sdd-plan`), exactly as the surrounding backticks are escaped (E28-F01
+  round 8, finding 4042015445). A host-neutral pointer edit therefore needs a green single-host
+  install before any test run — R8c alone would have caught it, but only after the banner tests.

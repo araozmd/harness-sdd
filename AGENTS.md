@@ -17,8 +17,13 @@ harness lives in its files; each role starts with a clean, curated context.
 
 ## Workflow and gates
 
-Inception is the front door before the Orchestrator loop: `/sdd-new` (`$sdd-new`
-in Codex) turns an idea into a pending task and intent brief.
+A **new product** plans before it builds: run `/sdd-plan` (`$sdd-plan` in Codex) for
+whole-project inception (vision, architecture, ADRs, draft epics), then `/sdd-drill
+<epic-id>` (`$sdd-drill` in Codex) to decompose an epic into features, then `/sdd-next`
+(`$sdd-next` in Codex) to spec and build.
+For **later work**, Inception is the front door before the Orchestrator loop: `/sdd-new` (`$sdd-new`
+in Codex) turns an idea into a pending task and intent brief, and `/sdd-next`
+specs and builds it.
 The loop is Orchestrator → Architect → Builder → Reviewer; Scout
 assists read-only. Role definitions live in `agents/`.
 

@@ -4,6 +4,117 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.81.1] — 2026-09-17
+
+### Changed — the greenfield single-repo path is the documented front door (E28-F01)
+
+- **`docs/INSTALL.md` gains `## Starting from nothing (new product)`** and the existing
+  `## Bootstrap (first run)` is reconciled to the same order, so there is exactly one
+  new-product story: empty directory → `harness-install.sh` → `git init` + commit →
+  edit `.harness/specs/product.md` (fill the constitution `TODO`s) → `/sdd-plan` →
+  `/sdd-drill <epic-id>` → **commit + push the planning baseline** → **create the first
+  feature branch** → `/sdd-next`. The baseline step is explicit because `/sdd-plan` and
+  `/sdd-drill` leave the constitution edit, vision, architecture, ADRs, decomposition and
+  TaskStore dirty or untracked, and the first feature branch would otherwise carry them
+  into the first feature PR. The section states that an empty, non-git
+  target is supported and that `The installer does not create a git repository.` —
+  version control stays the human's step, and `init.sh`'s drift guard skips on a non-git
+  tree and warns on an untracked body rather than failing. The install step now names the
+  installer's up-to-three interactive questions (front-end picker, builder backend,
+  PR-loop opt-in) instead of calling all of them "the single human gate".
+- **The fresh-install `Next steps` banner presents the ordered front door per selected
+  host**: edit `.harness/specs/product.md` → `git init` + initial commit → `/sdd-plan` →
+  `/sdd-drill <epic-id>` → commit + push the planning baseline → create the first feature
+  branch → `/sdd-next` (Codex: `$sdd-plan` → `$sdd-drill` → `$sdd-next`), so the
+  advertised invocation matches the host's skill surface, the drill
+  step is no longer skipped, and a greenfield reader is told that a local `git init` +
+  commit only brings the install under local version control: PR-based execution also
+  needs a remote (`gh repo create` / `git remote add` + push) and one feature branch per
+  feature, which is what the harness opens a PR from. The host-neutral baseline line
+  appears for every selected host, so the planning artifacts are committed before the
+  first feature PR rather than riding into it. The same correction is stated in
+  the `## Starting from nothing (new product)` section. The upgrade branch is unchanged;
+  the installer still performs no `git init` itself (R6).
+- **New suite `tests/test_greenfield.sh`** installs into an asserted-empty, non-git
+  fixture and covers the banner order, the absence of `.git`, the usable installed
+  layout, the installed `init.sh` passing there, and a version stamp read from `VERSION`
+  at run time (no frozen literal). No new command, flag, config key, prompt or dependency.
+- **Every installed front-door instruction now agrees with `/sdd-plan` (round-2 review):**
+  `/sdd-drill` is documented with its required `<epic-id>` argument in `docs/INSTALL.md`;
+  the seeded `specs/product.md` stub no longer tells a new-product reader that `/sdd-next`
+  drafts the epics; the canonical `AGENTS.md` distinguishes new-product planning
+  (`/sdd-plan` → `/sdd-drill <epic-id>`, or `$sdd-plan` → `$sdd-drill` on Codex) from
+  later work intake (`/sdd-new`) and execution (`/sdd-next`); and the entrypoint pointer
+  block sends a new product through `/sdd-plan` → `/sdd-drill <epic-id>` → `/sdd-next`
+  in one sequence. `tests/test_greenfield.sh`
+  pins the seeded `product.md` claim (positive shape control + negative) and the drill
+  step's `<epic-id>` argument.
+- **Round-7 review: the installed entrypoint no longer skips the drill.** The generated
+  root `AGENTS.md` pointer block named only `/sdd-plan` then `/sdd-next`; because
+  `/sdd-plan` leaves the new epics `draft`, `/sdd-next` reported their features as
+  `gated-epic` and the documented sequence dead-ended for a fresh product. The pointer
+  now names `/sdd-plan` → `/sdd-drill <epic-id>` → `/sdd-next`, the seeded
+  `specs/product.md` stub names the drill step, and the fresh-install banner's human
+  `git init` + initial-commit step precedes the constitution edit so the banner, the
+  `docs/INSTALL.md` ordered sections, and `AGENTS.md` carry one sequence. `README.md`,
+  `CLAUDE.md`, `docs/WORKFLOW.md`, and the banner's per-host host-neutral baseline step
+  already agreed and are unchanged. `tests/test_greenfield.sh`'s
+  `test_installed_entrypoint_points_at_sdd_plan` now pins the drill step (presence plus
+  folded plan → drill → next pairs). No VERSION bump beyond this entry.
+- **Round-8 review: one banner workflow for any selection, and a host-neutral entrypoint.**
+  A multi-host selection (`--agents=all`, or any CSV with more than one host) previously
+  printed steps 3-6 — including the baseline-commit step — once per selected integration,
+  so the `Next steps` banner read as "run the whole workflow three times"; a sequential
+  reader then hit `/sdd-plan`'s re-run guard on the second pass once the first invocation
+  had written `specs/vision.md`/`specs/architecture.md`. The banner now emits exactly ONE
+  numbered workflow, with the selected hosts' invocation forms as alternatives inside each
+  step (`/sdd-plan` for Claude Code/OpenCode, `$sdd-plan` for Codex). A single selected
+  host keeps its exact per-host phrasing. Separately, the generated entrypoint pointer
+  block is now host-neutral: it names both the `/sdd-plan`/`/sdd-drill <epic-id>`/`/sdd-next`
+  and the Codex `$sdd-plan`/`$sdd-drill <epic-id>`/`$sdd-next` forms, so a Codex-only
+  `AGENTS.md` is no longer told to use the slash commands it does not have.
+  `tests/test_greenfield.sh` adds `test_multi_host_banner_emits_one_workflow` (exactly one
+  step 3/4/5/6 line, one baseline step, one planning step, both invocation forms in that
+  step). No VERSION bump beyond this entry.
+- **Round-9 review: the pristine prior `specs/product.md` stub is refreshed on upgrade, and
+  umbrella cascades no longer print the single-repo workflow.** Releases v0.1.0–v0.81.0
+  shipped a `specs/product.md` stub whose prose named `/sdd-next` as the new-product front
+  door; because the seed-only branch ran only when the file was absent, an upgraded target
+  kept the stale front door forever. The installer now refreshes `specs/product.md` only
+  while it is byte-identical to the known prior shipped stub (one blob covering every release
+  through v0.81.0, confirmed by `git log -S` on its distinguishing line) and preserves any
+  project-authored content byte for byte; a symlinked or non-regular file is left untouched.
+  Separately, `--umbrella` routes the coordinator and every child through the same
+  fresh-install `Next steps` banner, which told the default (non-git) coordinator to run
+  `git init` and repeated whole-project planning for every fresh child. The banner is now
+  role-aware and deliberately minimal: the coordinator prints a one-line pointer to
+  `.harness/docs/UMBRELLA.md` and the `/sdd-next` Orchestrator loop (the loop that owns
+  slice selection and dispatch — `init.sh` only validates), each child names its own
+  `<child>/.harness/init.sh`, and the single-repo `git init` workflow is gated out of
+  cascades. An initial, longer round-9 wording was shrunk in round 10 (Codex
+  4042236158/4042236163/4042236168) after review found it claimed `init.sh` runs the
+  coordinator loop and dispatches features, implied `/sdd-plan`+`/sdd-drill` write
+  per-repo `slices[]`, and named a repo-root `init.sh` for children — a shorter banner
+  with no false claims is the contract. `tests/test_greenfield.sh` adds
+  `test_prior_pristine_product_stub_is_refreshed`,
+  `test_edited_product_md_is_preserved_on_upgrade`, and
+  `test_umbrella_cascade_suppresses_single_repo_banner`. No VERSION bump beyond this entry.
+- **Round-11 review: the git step runs in the installed target, and the README distinguishes
+  new products from later work.** `harness-install.sh <target>` runs from the caller's cwd
+  (usually the harness checkout) and never changes directory, so the `git init` + commit step
+  in `## Starting from nothing (new product)` and in the fresh-install `Next steps` banner
+  would have initialized the harness repository, not the product just installed. The section
+  now says `cd /path/to/your-product` first, and the banner names the target path it was given
+  (or "the installed project directory" under `--self`, whose target is a throwaway temp dir).
+  `README.md` no longer states without qualification that `/sdd-new` is "the front door": a new
+  product starts with `/sdd-plan` → `/sdd-drill <epic-id>` → `/sdd-next`, while `/sdd-new` is
+  the intake for later work; `docs/HARNESS.md` and `docs/WORKFLOW.md` carry the same
+  distinction, and `agents/inception.md` names itself the intake/front door for new work once a
+  product exists. `tests/test_greenfield.sh` adds `test_git_step_runs_in_install_target` (the
+  docs name a `cd` into the target; the banner names the target path), and
+  `test_umbrella_cascade_suppresses_single_repo_banner` plus `tests/test_cascade.sh` update
+  their git-step anchor to the new banner sentence. No VERSION bump beyond this entry.
+
 ## [0.81.0] — 2026-09-17
 
 ### OpenCode claims the shared `.agents/skills` units (E31-F01)

@@ -107,7 +107,10 @@ and always local.
 `specs/glossary.md` is **neither tier** (E30-F01, decision D1): a project-owned,
 project-authored domain vocabulary, exactly like `specs/product.md`. It is a real, local
 file in every layout — single repo, coordinator, full-copy child, and thin child alike —
-seeded once and never stubbed, never overwritten on upgrade. A child is a separate repo
+seeded once and never stubbed. Project content is never overwritten on upgrade; the one
+exception is `specs/product.md` (E28-F01 round 9): a file still byte-identical to a prior
+release's shipped stub is refreshed to the current stub, so an upgraded target cannot keep
+stale seeded guidance. A child is a separate repo
 because it has its own domain, so one shared glossary across every child is the wrong
 default; a child's own glossary can still reference the coordinator's in prose.
 
