@@ -161,7 +161,15 @@ degraded mode. The installer does not create a git repository.
 5. Open the project and run **`/sdd-plan`** — the whole-project inception that writes
    the vision, architecture and ADRs and seeds the project's draft epics.
 6. Run **`/sdd-drill <epic-id>`** to decompose the first draft epic into features.
-7. Keep running **`/sdd-next`** to spec and build that work.
+7. Commit and push the planning baseline to the remote from step 3 — the constitution
+   edit, the vision, architecture and ADRs, the epic decomposition, and the seeded
+   `.harness/state/tasks.json`. Until this commit those planning artifacts are dirty or
+   untracked, so the remote baseline does not describe them.
+8. Create the first feature branch before starting feature work with
+   `/sdd-next`: features are built on their own branch and their PR opens from it, so
+   committing the planning baseline first keeps the vision, ADRs and decomposition out
+   of the first feature PR.
+9. Keep running **`/sdd-next`** to spec and build that work.
 
 The seeded `E00-F01` bootstrap task is not the front door for a new product; `/sdd-next`
 routes it after `/sdd-plan` — see [Bootstrap (first run)](#bootstrap-first-run).
@@ -177,11 +185,15 @@ harness itself, under the human gate. A new product plans before it builds: run
 2. Run **`/sdd-plan`** to brainstorm the vision, architecture and ADRs and seed the
    project's draft epics.
 3. Run **`/sdd-drill <epic-id>`** to decompose a draft epic into features.
-4. Run **`/sdd-next`**. The seeded `E00-F01` bootstrap task is `sdd: true`, so the
+4. Commit and push the planning baseline — the constitution edit, the vision,
+   architecture and ADRs, the epic decomposition and the seeded
+   `.harness/state/tasks.json` — then create the first feature branch. This keeps the
+   planning artifacts out of the first feature PR.
+5. Run **`/sdd-next`**. The seeded `E00-F01` bootstrap task is `sdd: true`, so the
    Orchestrator routes it to the Architect (with Scout recon) to detect your
    test/lint/typecheck commands (`.harness/harness.config.yaml` + fast project gates in
    `.harness/init.project.sh`), then **pauses at the human gate** for your approval.
-5. Approve, then keep running `/sdd-next` to build features.
+6. Approve, then keep running `/sdd-next` to build features.
 
 To add new work later, run **`/sdd-new "<idea>"`** — the Inception intake triages it
 (new epic / feature / task), seeds a `pending` entry plus an intent brief, and tells

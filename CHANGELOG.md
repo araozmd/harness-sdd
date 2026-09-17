@@ -12,7 +12,11 @@ All notable changes to the harness body are recorded here. Versions follow
   `## Bootstrap (first run)` is reconciled to the same order, so there is exactly one
   new-product story: empty directory → `harness-install.sh` → `git init` + commit →
   edit `.harness/specs/product.md` (fill the constitution `TODO`s) → `/sdd-plan` →
-  `/sdd-drill <epic-id>` → `/sdd-next`. The section states that an empty, non-git
+  `/sdd-drill <epic-id>` → **commit + push the planning baseline** → **create the first
+  feature branch** → `/sdd-next`. The baseline step is explicit because `/sdd-plan` and
+  `/sdd-drill` leave the constitution edit, vision, architecture, ADRs, decomposition and
+  TaskStore dirty or untracked, and the first feature branch would otherwise carry them
+  into the first feature PR. The section states that an empty, non-git
   target is supported and that `The installer does not create a git repository.` —
   version control stays the human's step, and `init.sh`'s drift guard skips on a non-git
   tree and warns on an untracked body rather than failing. The install step now names the
@@ -20,12 +24,15 @@ All notable changes to the harness body are recorded here. Versions follow
   PR-loop opt-in) instead of calling all of them "the single human gate".
 - **The fresh-install `Next steps` banner presents the ordered front door per selected
   host**: edit `.harness/specs/product.md` → `git init` + initial commit → `/sdd-plan` →
-  `/sdd-drill <epic-id>` → `/sdd-next` (Codex: `$sdd-plan` → `$sdd-drill` →
-  `$sdd-next`), so the advertised invocation matches the host's skill surface, the drill
+  `/sdd-drill <epic-id>` → commit + push the planning baseline → create the first feature
+  branch → `/sdd-next` (Codex: `$sdd-plan` → `$sdd-drill` → `$sdd-next`), so the
+  advertised invocation matches the host's skill surface, the drill
   step is no longer skipped, and a greenfield reader is told that a local `git init` +
   commit only brings the install under local version control: PR-based execution also
   needs a remote (`gh repo create` / `git remote add` + push) and one feature branch per
-  feature, which is what the harness opens a PR from. The same correction is stated in
+  feature, which is what the harness opens a PR from. The host-neutral baseline line
+  appears for every selected host, so the planning artifacts are committed before the
+  first feature PR rather than riding into it. The same correction is stated in
   the `## Starting from nothing (new product)` section. The upgrade branch is unchanged;
   the installer still performs no `git init` itself (R6).
 - **New suite `tests/test_greenfield.sh`** installs into an asserted-empty, non-git

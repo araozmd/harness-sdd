@@ -7192,26 +7192,34 @@ EOF
     # A local-only `git init` cannot open a PR (Codex round 5, 4041813522), so the step
     # must also name the remote and the per-feature branch discipline.
     echo "  2. Run git init and make an initial commit (local only); PR-based execution also needs a remote (gh repo create, or git remote add + push) and one feature branch per feature, which is what the harness opens PRs from."
-    # Each selected host gets the front-door sequence in order — plan, then drill,
-    # then next — in that host's own invocation form (Codex uses the $sdd-* skills).
-    # The lines are emitted plan → drill → next so the printed banner holds the same
-    # order for any selection.
+    # Round 6 (4041879995): the planning artifacts /sdd-plan and /sdd-drill write are
+    # dirty or untracked until they are committed and pushed, so the banner commits the
+    # baseline and creates the first feature branch before /sdd-next runs. Host-neutral:
+    # committing and branching is the human's git work, not a host command.
+    _advice_baseline="Commit and push the planning baseline (constitution, vision, ADRs and decomposed epics), then create the first feature branch — this keeps planning artifacts out of the first feature PR."
+    # Each selected host gets the front-door sequence in order — plan, then drill, then
+    # baseline commit, then next — in that host's own invocation form (Codex uses the
+    # $sdd-* skills). The lines are emitted plan → drill → baseline → next so the
+    # printed banner holds the same order for any selection.
     for _advice_host in $SELECTED; do
       case "$_advice_host" in
         claude)
           echo "  3. Claude Code: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
           echo "  4. Claude Code: run /sdd-drill <epic-id> to decompose the first draft epic into features."
-          echo "  5. Claude Code: run /sdd-next to spec and build that work."
+          echo "  5. $_advice_baseline"
+          echo "  6. Claude Code: run /sdd-next to spec and build that work."
           ;;
         codex)
           echo '  3. Codex: open the repo, discover with /skills, and invoke $sdd-plan to brainstorm the vision, architecture, ADRs and draft epics.'
           echo '  4. Codex: invoke $sdd-drill <epic-id> to decompose the first draft epic into features.'
-          echo '  5. Codex: invoke $sdd-next to spec and build that work.'
+          echo "  5. $_advice_baseline"
+          echo '  6. Codex: invoke $sdd-next to spec and build that work.'
           ;;
         opencode)
           echo "  3. OpenCode: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
           echo "  4. OpenCode: run /sdd-drill <epic-id> to decompose the first draft epic into features."
-          echo "  5. OpenCode: run /sdd-next to spec and build that work."
+          echo "  5. $_advice_baseline"
+          echo "  6. OpenCode: run /sdd-next to spec and build that work."
           ;;
       esac
     done

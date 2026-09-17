@@ -45,6 +45,14 @@
 #   * `test_installed_entrypoint_points_at_sdd_plan` pins the installed root
 #     `AGENTS.md` pointer's new-product branch (4041566967).
 #
+# Round-6 review addition:
+#   * R1/R4/R5 must commit the planning baseline before feature work (4041879995):
+#     `/sdd-plan` and `/sdd-drill` leave `product.md`, the vision, architecture, ADRs,
+#     the decomposition and the TaskStore dirty/untracked, so the sequence must commit
+#     and push them and create the first feature branch before `/sdd-next` — otherwise
+#     the first feature PR carries the planning changes. Anchored as positive tokens
+#     plus folded two-token pairs and first-occurrence order; no fail-open predicate.
+#
 # CONVENTIONS THIS SUITE HONOURS (progress/lessons.md):
 #   * No `VERSION` literal anywhere. R10 reads $SRC/VERSION at run time; the
 #     no-literal half is only falsifiable by the Reviewer's bump mutation, not by
@@ -159,6 +167,20 @@ test_greenfield_section_documents_sequence() {
   require_order "R1 sequence" "$_gf" 'git init' '/sdd-plan' le
   require_order "R1 sequence" "$_gf" '/sdd-plan' '/sdd-drill' le
   require_order "R1 sequence" "$_gf" '/sdd-drill' '/sdd-next' le
+  # Round-6 (4041879995): the sequence must not hand /sdd-next a dirty planning tree.
+  # Positive tokens first, then folded pairs that keep both halves in the same sentence
+  # of the relevant step (the initial `git init` + commit at step 3 is NOT the planning
+  # baseline), then first-occurrence order: drill → baseline commit → feature branch →
+  # the /sdd-next execution step.
+  assert_contains "R1 section" "$_gf" 'planning baseline'
+  assert_contains "R1 section" "$_gf" 'first feature branch'
+  printf '%s\n' "$_gf_flat" | grep -qiE 'push[^.]{0,80}planning baseline' \
+    || fail "R1 section: the baseline step does not name both the push and the planning baseline in one sentence — a local-only commit leaves the remote baseline without the planning artifacts"
+  printf '%s\n' "$_gf_flat" | grep -qiE 'first feature branch[^.]{0,320}first feature PR' \
+    || fail "R1 section: the feature-branch step does not state that committing the baseline first keeps the planning artifacts out of the first feature PR — the reason for the order is missing"
+  require_order "R1 sequence" "$_gf" '/sdd-drill <epic-id>' 'planning baseline' lt
+  require_order "R1 sequence" "$_gf" 'planning baseline' 'first feature branch' lt
+  require_order "R1 sequence" "$_gf" 'first feature branch' '/sdd-next' lt
   pass "greenfield section documents the ordered front door (R1) [greenfield_section_documents_sequence]"
 }
 
@@ -215,6 +237,17 @@ test_bootstrap_section_reconciled() {
   assert_contains "R4 Bootstrap" "$_bs" '/sdd-plan'
   assert_contains "R4 Bootstrap" "$_bs" '/sdd-drill <epic-id>'
   require_order "R4 Bootstrap" "$_bs" '/sdd-plan' '/sdd-next' lt
+  # Round-6 (4041879995): the Bootstrap section describes the same planning → feature
+  # handoff, so it must tell the reader to commit/push the baseline and create the first
+  # feature branch before /sdd-next — one story, not two.
+  assert_contains "R4 Bootstrap" "$_bs" 'planning baseline'
+  assert_contains "R4 Bootstrap" "$_bs" 'first feature branch'
+  _bs_flat="$(printf '%s\n' "$_bs" | tr '\n' ' ')"
+  printf '%s\n' "$_bs_flat" | grep -qiE 'push[^.]{0,80}planning baseline' \
+    || fail "R4 Bootstrap: the baseline step does not name both the push and the planning baseline in one sentence — a local-only commit leaves the remote baseline without the planning artifacts"
+  require_order "R4 Bootstrap" "$_bs" '/sdd-drill <epic-id>' 'planning baseline' lt
+  require_order "R4 Bootstrap" "$_bs" 'planning baseline' 'first feature branch' lt
+  require_order "R4 Bootstrap" "$_bs" 'first feature branch' '/sdd-next' lt
   pass "Bootstrap section routes the seeded E00-F01 after /sdd-plan and keeps its heading (R4) [bootstrap_section_reconciled]"
 }
 
@@ -287,6 +320,17 @@ test_banner_points_at_sdd_plan() {
     || fail "R5 banner: the git step does not tie the initial commit to the required remote in one sentence — a local-only init cannot open a PR, and the banner overclaims that it can"
   printf '%s\n' "$_banner_flat" | grep -qiE 'remote[^.]{0,200}feature branch' \
     || fail "R5 banner: the git step names a remote but does not state the one-feature-branch-per-feature discipline in the same sentence — the PR source branch can be dropped while the remote stays"
+  # Round-6 (4041879995): the banner must commit the planning baseline and branch before
+  # /sdd-next, or the fresh install hands the first feature PR the planning artifacts.
+  # The baseline line is host-neutral, so it appears for every selected host; the folded
+  # pair keeps commit/branch in the baseline step's own sentence, not step 2's git step.
+  assert_contains "R5 banner" "$_banner" 'planning baseline'
+  assert_contains "R5 banner" "$_banner" 'first feature branch'
+  printf '%s\n' "$_banner_flat" | grep -qiE 'planning baseline[^.]{0,160}first feature branch' \
+    || fail "R5 banner: the planning baseline step does not name the first feature branch in the same sentence — the planning artifacts can still ride into the first feature PR"
+  require_order "R5 banner" "$_banner" '/sdd-drill' 'planning baseline' lt
+  require_order "R5 banner" "$_banner" 'planning baseline' '/sdd-next' lt
+  require_order "R5 banner" "$_banner" 'first feature branch' '/sdd-next' lt
   # Non-Codex keeps the slash form: a Claude-only install must not advertise the
   # Codex `$sdd-*` spelling (the instruction varies by host).
   if printf '%s\n' "$_banner" | grep -qF '$sdd-plan'; then
@@ -332,6 +376,14 @@ test_banner_points_at_sdd_plan() {
     || fail "R5 codex banner: the git step does not tie the initial commit to the required remote in one sentence — a local-only init cannot open a PR, and the banner overclaims that it can"
   printf '%s\n' "$_banner_cx_flat" | grep -qiE 'remote[^.]{0,200}feature branch' \
     || fail "R5 codex banner: the git step names a remote but does not state the one-feature-branch-per-feature discipline in the same sentence — the PR source branch can be dropped while the remote stays"
+  # Round-6 (4041879995): the host-neutral baseline step must be present for Codex too.
+  assert_contains "R5 codex banner" "$_banner_cx" 'planning baseline'
+  assert_contains "R5 codex banner" "$_banner_cx" 'first feature branch'
+  printf '%s\n' "$_banner_cx_flat" | grep -qiE 'planning baseline[^.]{0,160}first feature branch' \
+    || fail "R5 codex banner: the planning baseline step does not name the first feature branch in the same sentence — the planning artifacts can still ride into the first feature PR"
+  require_order "R5 codex banner" "$_banner_cx" '$sdd-drill' 'planning baseline' lt
+  require_order "R5 codex banner" "$_banner_cx" 'planning baseline' '$sdd-next' lt
+  require_order "R5 codex banner" "$_banner_cx" 'first feature branch' '$sdd-next' lt
   pass "fresh-install banner presents /sdd-plan → /sdd-drill → /sdd-next per host (Codex: \$sdd-*) on stdout (R5) [banner_points_at_sdd_plan]"
 }
 
