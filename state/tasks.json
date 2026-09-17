@@ -959,7 +959,7 @@
         {
           "id": "E99-F161",
           "title": "Codex per-role reasoning effort is inexpressible: gen_codex_agent() writes only name/description/model/developer_instructions, though .codex/agents/*.toml accepts model_reasoning_effort (verified empirically, CLI 0.154.0)",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -973,6 +973,24 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F162-block-extract-length-floor/"
+        },
+        {
+          "id": "E99-F163",
+          "title": "escalation_verdict compares `model` only, so on Codex two roles differentiated purely by model_reasoning_effort (E99-F161) read as `same` and escalation refuses to arm \u2014 the operator gets genuinely different roles on disk and is still told DISARMED",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F163-escalation-effort-awareness/"
+        },
+        {
+          "id": "E99-F164",
+          "title": "Only one source file's executable bit is checked (tests/test_install.sh:38, added by E99-F161); chmod -x on tools/fix-worktree.sh leaves all 47 suites green while ./tools/fix-worktree.sh is Permission denied",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F164-source-mode-check-class/"
         }
       ]
     },

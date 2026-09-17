@@ -292,6 +292,9 @@ models:
   # .codex/agents/*.toml); only the `model` key is omitted, as for the `inherit` tier.
   #   opencode MUST be "provider/model" (an invalid value aborts your OpenCode run)
   #   codex    MUST be a bare model id (the provider comes from `model_provider`)
+  #   codex ALSO derives `model_reasoning_effort` from this SAME tier automatically —
+  #   no separate knob (cheap=low standard=medium reasoning=high frontier=xhigh); see
+  #   docs/INSTALL.md.
   # pin.opencode.reasoning: ""
   # pin.opencode.standard: ""
   # pin.opencode.cheap: ""
@@ -473,8 +476,11 @@ EOF
 # because escalating into a role that resolves to nothing is a DOWNGRADE: it abandons
 # whatever `models.builder` was set to, exactly when the build was struggling.
 #   claude                       a built-in tier alias is enough
-#   codex / opencode               a tier alone stamps NOTHING — you must also set the
-#                                  matching `pin.<front-end>.<tier>` in the models: block
+#   codex                        a tier alone stamps NO `model` (E99-F161: it DOES stamp
+#                                  `model_reasoning_effort` — see docs/INSTALL.md) — you
+#                                  must also set pin.codex.<tier> for a model to arm
+#   opencode                     a tier alone stamps NOTHING — you must also set the
+#                                  matching pin.opencode.<tier> in the models: block
 # The verdict is computed at INSTALL time, so re-run the installer after changing any of it.
 # WHAT THIS DOES NOT CHECK: that the model is STRONGER, or that it exists at all. The harness
 # has no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours;
@@ -1838,6 +1844,26 @@ model_alias() {
   return 0
 }
 
+# codex_effort_alias <tier> — the built-in tier→`model_reasoning_effort` ladder (E99-F161).
+# Codex's actual capability axis is reasoning effort, not model identity: a user's global
+# `~/.codex/config.toml` typically sets ONE effort for every role, so the SAME tier that
+# picks a floating `model_alias` on claude ALSO picks a Codex effort here — no separate
+# config key (design note in docs/INSTALL.md § Per-role model routing). `ultra` is a REAL
+# Codex value but is deliberately never emitted here: it is supported by exactly two
+# models today and the harness has no model list to check the currently pinned model
+# against ("Ranking is yours" — see `escalation:` above). An unrecognized tier — already
+# normalized to `inherit` by `_model_tier_resolve` before this is ever called — prints
+# nothing, so the caller omits the key.
+codex_effort_alias() {
+  case "$1" in
+    cheap)     printf 'low\n' ;;
+    standard)  printf 'medium\n' ;;
+    reasoning) printf 'high\n' ;;
+    frontier)  printf 'xhigh\n' ;;
+  esac
+  return 0
+}
+
 # resolve_model <front-end> <role> — print that front-end's NATIVE model value for the
 # role, or NOTHING to mean "omit the model key entirely". Order: tier → an explicit
 # `models.pin.<front-end>.<tier>` (verbatim, wins) → the built-in floating alias →
@@ -1897,6 +1923,43 @@ resolve_model() {
 
   _model_warn_once "nopin:$_rm_fe:$_rm_tier" \
     "ℹ️  $_rm_fe has no built-in alias for tier '$_rm_tier' — set models.pin.$_rm_fe.$_rm_tier in .harness/harness.config.yaml to stamp a model there"
+  return 0
+}
+
+# resolve_codex_effort <role> — print the Codex `model_reasoning_effort` value for <role>,
+# or NOTHING to mean "omit the key" (E99-F161). Rides the SAME tier `resolve_model` uses —
+# `_model_tier_resolve` owns the role→tier cascade (own → umbrella → inherit) and its
+# unknown-tier warning/normalization, so this re-derives none of that, exactly like
+# `resolve_model` re-derives no tier logic of its own.
+#
+# GUARDED, but not for the reason the OpenCode `provider/model` check above is. Codex
+# does discard the WHOLE role definition when an agent toml carries an unrecognized KEY
+# ("Ignoring malformed agent role definition… unknown field"), verified empirically
+# against the live CLI (0.154.0) — but that hazard is triggered by the KEY name, a printf
+# literal below (gen_codex_agent) that never varies, and this guard cannot touch it either
+# way. Separately verified against the same CLI: an unrecognized VALUE for the known
+# `model_reasoning_effort` key was NOT observed to be rejected at role-load time — a bogus
+# string loads clean, no startup warning, role kept intact. The guard below exists anyway.
+# Today `codex_effort_alias` only ever returns a value already in this allowlist (nothing
+# here ranks models or infers `ultra` eligibility), so the guard is defense-in-depth
+# against a FUTURE edit to that table emitting a value Codex's schema does not accept —
+# not a check on operator input, since there is no operator-facing effort override to
+# validate.
+resolve_codex_effort() {
+  [ "${MODELS_OFF:-0}" = 1 ] && return 0
+  _rce_role="$1"
+  _model_tier_resolve "$_rce_role"
+  [ "$_mtr_tier" = "inherit" ] && return 0
+  _rce_val="$(codex_effort_alias "$_mtr_tier")"
+  [ -n "$_rce_val" ] || return 0
+  case "$_rce_val" in
+    low|medium|high|xhigh|max|ultra) ;;
+    *)
+      _model_warn_once "effort:$_rce_role:$_rce_val" \
+        "⚠️  codex reasoning effort '$_rce_val' for role '$_rce_role' is not in the known Codex effort vocabulary (low medium high xhigh max ultra) — ignored, no model_reasoning_effort key written"
+      return 0 ;;
+  esac
+  printf '%s\n' "$_rce_val"
   return 0
 }
 
@@ -4327,15 +4390,19 @@ EOF
   # a file that spells the last key `instructions` is rejected at load time with
   # "must define `developer_instructions`" (verified with `codex doctor --json`, CLI
   # 0.145.0) and its model stamp silently never applies. Project-local `.codex/` is only
-  # read when the project is TRUSTED by Codex; see docs/INSTALL.md.
+  # read when the project is TRUSTED by Codex; see docs/INSTALL.md. It also carries an
+  # optional `model_reasoning_effort`, Codex's own capability axis (E99-F161) — see
+  # `resolve_codex_effort` for the tier mapping and the unknown-key hazard it guards.
   gen_codex_agent() {
     _gca_role="$1"; _gca_desc="$(printf '%s' "$2" | sed 's@/sdd-@$sdd-@g')"; _gca_dest="$3"
     _gca_model="$(resolve_model codex "$_gca_role")"
+    _gca_effort="$(resolve_codex_effort "$_gca_role")"
     {
       printf '# Generated by harness-install.sh — per-role model routing. Do not edit by hand.\n'
       printf 'name = "%s"\n' "$_gca_role"
       printf 'description = "%s"\n' "$_gca_desc"
       if [ -n "$_gca_model" ]; then printf 'model = "%s"\n' "$_gca_model"; fi
+      if [ -n "$_gca_effort" ]; then printf 'model_reasoning_effort = "%s"\n' "$_gca_effort"; fi
       printf 'developer_instructions = "Read .harness/agents/%s.md and follow it exactly; resolve every relative path against .harness/. Run .harness/init.sh first and halt on a non-zero exit. Use Codex $sdd-* skills for workflow invocations; accompanying text supplies $ARGUMENTS. Start each delegated named role in a fresh context using the host delegation controls, with file-only handoffs through .harness/progress/. Preserve the human spec-ready gate and require an independent Reviewer verdict before done. If fresh delegation is unavailable, stop and report the handoff path and limitation."\n' "$_gca_role"
     } > "$_gca_dest"
   }

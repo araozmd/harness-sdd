@@ -126,3 +126,39 @@
   reads `270a\` as a filename and exits non-zero having changed nothing. The mutant then runs
   green and looks like a SURVIVOR. Only the mandated "print the applied diff" caught it (empty
   diff = void run, not evidence). Insert blank lines with `awk 'NR==N{print; print ""; next}1'`.
+- [2026-09-16 reviewer] Codex reads project-local `.codex/agents/*.toml` ONLY when the
+  project is trusted (`trust_level = "trusted"` in `~/.codex/config.toml`), so a probe run
+  inside a fresh temp install target sees nothing and reads as proof of absence. `codex
+  doctor` DOES check agent tomls — in a trusted repo an unknown key surfaces as `startup
+  warning  Ignoring malformed agent role definition: … unknown field`. Probe in the trusted
+  repo, and always run the positive control (a known-good file must produce NO warning).
+- [2026-09-16 reviewer] Codex 0.154.0 rejects an unknown KEY in an agent toml (whole role
+  discarded) but accepts an unrecognized VALUE for a known key silently — `model_reasoning_
+  effort = "totally_bogus_zz"` loads clean. Do not let "unknown keys are fatal" justify a
+  value guard in prose: they are different failure modes, and the doc that conflates them
+  tells the next reader a bad value is fatal when it is not.
+- [2026-09-16 reviewer] `./tools/run-tests.sh` `mktemp -d`s into `/tmp`, a 32G tmpfs shared
+  with every other lane on the box. Under pressure whole suites red with `Disk quota
+  exceeded` / `printf: write error` — the shape of real kills. Read `df` before AND after,
+  and re-run with `TMPDIR=<disk-backed path>` before believing any multi-suite failure.
+- [2026-09-16 reviewer] A file-MODE regression is invisible to this suite: every test runs
+  the installer as `sh "$SRC/harness-install.sh"`, so dropping `+x` keeps all 47 green while
+  the README's documented `./harness-install.sh` dies with "Permission denied". Check
+  `git show --stat` for `old mode/new mode` lines on every review, and pin `[ -x … ]` for any
+  script a doc tells a user to execute directly.
+- [2026-09-16 reviewer] "This block has no convergence test" is a claim to MUTATE, not to
+  derive from the named tests. A tail-anchored extractor (`awk '/^# anchor/,0'`) silently
+  covers EVERY block after its anchor: `prl_block` in test_installer_toggles.sh/test_pr_loop.sh
+  pins the `escalation:` and `workers:` seed blocks too, purely because they sit after
+  `# Codex PR review loop` in harness.config.yaml. Both a Reviewer (E99-F161 R1) and the
+  Builder who inherited it declared the escalation block unpinned by reading; one one-sided
+  desync redded two suites. Two real weaknesses remain and are what to report instead: the
+  coverage is ORDERING-DEPENDENT (move the block above the anchor and it vanishes with no
+  test deleted), and the failure NAMES THE ANCHOR'S BLOCK ("the migrated pr_loop block is
+  NOT byte-identical") while the desync is somewhere else entirely.
+- [2026-09-16 reviewer] Every `[ -x "$T/.harness/tools/…" ]` assertion in tests/test_install.sh
+  is VACUOUS with respect to the source repo's git mode: harness-install.sh:3655-3668 explicitly
+  `chmod +x`'s each installed copy, so the assertion tests the installer's own chmod. Only a
+  `[ -x "$SRC/<file>" ]` check reads the mode that a commit can drop. Proven: `chmod -x
+  tools/fix-worktree.sh` keeps all 47 suites green while agents/fixer.md:282's documented
+  `tools/fix-worktree.sh create …` dies with Permission denied.

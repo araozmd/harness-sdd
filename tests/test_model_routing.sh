@@ -307,6 +307,121 @@ test_frontier_pin_honored() {
   return 0
 }
 
+# ── E99-F161: Codex `model_reasoning_effort` rides the SAME tier as `model` ──────
+# No new config key: the tier that would pick a floating `claude` alias also picks a
+# built-in Codex reasoning effort. Unlike `model`, this needs no `pin.codex.<tier>` —
+# the effort is not model-identity, so there is nothing for the operator to pin.
+test_codex_effort_rides_tier() {
+  _t="$(mk f161-rides-tier)"; run "$_t" codex
+  set_tier "$_t" scout      cheap
+  set_tier "$_t" builder    standard
+  set_tier "$_t" architect  reasoning
+  set_tier "$_t" doc-critic frontier
+  run "$_t" codex
+  grep -q '^model_reasoning_effort = "low"$'    "$_t/.codex/agents/scout.toml" \
+    || fail "F161: cheap tier did not stamp effort 'low' on scout"
+  grep -q '^model_reasoning_effort = "medium"$' "$_t/.codex/agents/builder.toml" \
+    || fail "F161: standard tier did not stamp effort 'medium' on builder"
+  grep -q '^model_reasoning_effort = "high"$'   "$_t/.codex/agents/architect.toml" \
+    || fail "F161: reasoning tier did not stamp effort 'high' on architect"
+  grep -q '^model_reasoning_effort = "xhigh"$'  "$_t/.codex/agents/doc-critic.toml" \
+    || fail "F161: frontier tier did not stamp effort 'xhigh' on doc-critic"
+  # None of the four roles above have a `pin.codex.<tier>` set — `model` stays omitted
+  # while `model_reasoning_effort` is stamped, proving effort needs no model pin.
+  for _r in scout builder architect doc-critic; do
+    grep -q '^model = ' "$_t/.codex/agents/$_r.toml" \
+      && fail "F161: setup — $_r unexpectedly resolved a model without a pin"
+  done
+  # A role left on `inherit` gets neither key, and its file is byte-identical to a
+  # target with no models: block edits at all (the untouched-seed control).
+  _u="$(mk f161-inherit)"; run "$_u" codex
+  grep -q '^model_reasoning_effort = ' "$_u/.codex/agents/reviewer.toml" \
+    && fail "F161: an inherit-tier role stamped a model_reasoning_effort key"
+  cmp -s "$_t/.codex/agents/reviewer.toml" "$_u/.codex/agents/reviewer.toml" \
+    || fail "F161: an untouched (inherit) role's file differs across two otherwise-different configs"
+  return 0
+}
+
+# ── E99-F161: the built-in ladder is a FIXED, closed table — no `ultra` ──────────
+# Mirrors R6's frozen-alias check: extract the function body statically (never execute
+# it) so the assertion fails the moment someone edits the table, not just when a role
+# happens to exercise the changed arm.
+test_codex_effort_builtin_ladder_is_fixed() {
+  _body="$(sed -n '/^codex_effort_alias() {/,/^}/p' "$SRC/harness-install.sh")"
+  printf '%s\n' "$_body" | grep -q "cheap)     printf 'low\\\\n'" \
+    || fail "F161: codex_effort_alias no longer maps cheap -> low"
+  printf '%s\n' "$_body" | grep -q "standard)  printf 'medium\\\\n'" \
+    || fail "F161: codex_effort_alias no longer maps standard -> medium"
+  printf '%s\n' "$_body" | grep -q "reasoning) printf 'high\\\\n'" \
+    || fail "F161: codex_effort_alias no longer maps reasoning -> high"
+  printf '%s\n' "$_body" | grep -q "frontier)  printf 'xhigh\\\\n'" \
+    || fail "F161: codex_effort_alias no longer maps frontier -> xhigh"
+  # `ultra` is real Codex vocabulary but is model-specific (exactly two models today) —
+  # the harness has no model list, so the built-in table must never emit it.
+  printf '%s\n' "$_body" | grep -q 'ultra' \
+    && fail "F161: the built-in tier->effort table emits 'ultra' — it cannot know the pinned model supports it"
+  return 0
+}
+
+# ── E99-F161: an invalid effort value is GUARDED — warn once, write nothing ──────
+# Codex does not degrade an unrecognized key: it discards the WHOLE role definition.
+# The harness has no operator-facing effort override (E99-F161 rejected that axis), so
+# the only way an invalid value can ever reach `resolve_codex_effort`'s guard is a
+# maintenance edit to the built-in table — reproduced here as a doctored installer
+# copy, the same technique tests/test_umbrella.sh uses for its own fail-closed control.
+test_codex_effort_guard_rejects_bad_value() {
+  _m="$(mk f161-guard-src)"
+  mkdir -p "$_m/mut"
+  for _md in harness-install.sh VERSION AGENTS.md init.sh agents docs store tools specs \
+             harness.config.yaml umbrella.manifest.example.yaml umbrella.gitignore.example; do
+    [ -e "$SRC/$_md" ] && cp -R "$SRC/$_md" "$_m/mut/"
+  done
+  awk '
+    $0 == "    reasoning) printf '\''high\\n'\'' ;;" {
+      print "    reasoning) printf '\''totally_bogus_effort_zz\\n'\'' ;; # mutation: invalid built-in effort"
+      next
+    }
+    { print }
+  ' "$_m/mut/harness-install.sh" > "$_m/mut/harness-install.mut"
+  mv "$_m/mut/harness-install.mut" "$_m/mut/harness-install.sh"
+  [ "$(grep -c 'mutation: invalid built-in effort' "$_m/mut/harness-install.sh")" = "1" ] \
+    || fail "F161 guard setup: the doctored installer did not carry exactly one injected bad value"
+
+  _t="$(mk f161-guard-bad)"
+  # First run seeds a fresh models: block (config not created yet); THEN set the tier
+  # and re-run — matching every other test's run/edit/run shape.
+  CODEX_HOME="$_t/ch" sh "$_m/mut/harness-install.sh" --agents=codex "$_t" >/dev/null 2>&1 \
+    || fail "F161 guard: first (unmutated-config) install exited non-zero"
+  set_tier "$_t" architect reasoning
+  _e="$(CODEX_HOME="$_t/ch" sh "$_m/mut/harness-install.sh" --agents=codex "$_t" 2>&1 >/dev/null)" \
+    || fail "F161 guard: mutated-table install exited non-zero"
+  printf '%s\n' "$_e" | grep -q "not in the known Codex effort vocabulary" \
+    || fail "F161 guard: no warning for the invalid built-in effort value: $_e"
+  grep -q '^model_reasoning_effort = ' "$_t/.codex/agents/architect.toml" \
+    && fail "F161 guard: an invalid effort value REACHED the generated file"
+
+  # Prove the guard — and not some other omission — is what stopped it: neutralise
+  # ONLY the validation case/esac block (same doctored copy, same bad table entry) and
+  # confirm the identical bad value now DOES reach the file.
+  awk '
+    $0 == "  case \"$_rce_val\" in" { print "  : # mutation: codex effort guard neutralised"; skip=1; next }
+    skip { if ($0 == "  esac") skip=0; next }
+    { print }
+  ' "$_m/mut/harness-install.sh" > "$_m/mut/harness-install.noguard"
+  mv "$_m/mut/harness-install.noguard" "$_m/mut/harness-install.sh"
+  [ "$(grep -c 'mutation: codex effort guard neutralised' "$_m/mut/harness-install.sh")" = "1" ] \
+    || fail "F161 guard control: the doctored installer did not neutralise exactly one guard"
+  _v="$(mk f161-guard-noguard)"
+  CODEX_HOME="$_v/ch" sh "$_m/mut/harness-install.sh" --agents=codex "$_v" >/dev/null 2>&1 \
+    || fail "F161 guard control: setup install (unmutated config) exited non-zero"
+  set_tier "$_v" architect reasoning
+  CODEX_HOME="$_v/ch" sh "$_m/mut/harness-install.sh" --agents=codex "$_v" >/dev/null 2>&1 \
+    || fail "F161 guard control: mutated-table, no-guard install exited non-zero"
+  grep -q '^model_reasoning_effort = "totally_bogus_effort_zz"$' "$_v/.codex/agents/architect.toml" \
+    || fail "F161 guard control: removing the guard did NOT let the bad value through — the earlier rejection was not proven to be the guard's doing"
+  return 0
+}
+
 # ── R13: antigravity `.agents/agents/<role>.md` frontmatter ──────────────────────
 # E29-F01 R1/R3: retired active emission is replaced by frozen migration coverage
 # in tests/test_frontend_retirement.sh.
@@ -873,6 +988,12 @@ test_frontier_unpinned_codex_opencode_omits
 pass "E99-F159: an unpinned frontier tier stamps no model on codex/opencode"
 test_frontier_pin_honored
 pass "E99-F159: pin.codex.frontier / pin.opencode.frontier are honored; the provider/model guard still applies"
+test_codex_effort_rides_tier
+pass "E99-F161: codex model_reasoning_effort rides the same tier as model, with no pin required and no key for inherit"
+test_codex_effort_builtin_ladder_is_fixed
+pass "E99-F161: the built-in tier->effort ladder is fixed and never emits model-specific 'ultra'"
+test_codex_effort_guard_rejects_bad_value
+pass "E99-F161: an invalid built-in effort value is rejected by the guard; removing the guard lets it through"
 test_opencode_json_model_member
 pass "opencode agent.<role> carries a \"model\" member (R14)"
 test_codex_agent_files_project_local
