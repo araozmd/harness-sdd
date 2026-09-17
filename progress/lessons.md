@@ -244,3 +244,9 @@
   runner falls back to `/usr/bin/sh` = **bash**. "all N suites passed (/usr/bin/sh [GNU bash …])"
   is a bash claim about `#!/bin/sh` suites, and a dash-only construct added in the diff would
   pass un-caught. Either install dash or report the green as bash-scoped, never as POSIX-sh-scoped.
+- [2026-09-17 reviewer] Renumbering a numbered list is NOT reordering it: an E28-F01 mutant that
+  changed the banner's step numbers (`2. /sdd-plan` → `3. /sdd-plan`, `/sdd-next` → `2.`) left the
+  `/sdd-plan` line PHYSICALLY first, so the suite stayed green and read as a survivor. Reorder by
+  moving the lines the assertion measures (`index($0, n)` scans output order, not the label), and
+  let the mandated applied-diff print show the swap — it is what caught this as an instrument
+  failure rather than a hole in R5.
