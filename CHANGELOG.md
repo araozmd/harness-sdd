@@ -11,7 +11,8 @@ All notable changes to the harness body are recorded here. Versions follow
 - **`docs/INSTALL.md` gains `## Starting from nothing (new product)`** and the existing
   `## Bootstrap (first run)` is reconciled to the same order, so there is exactly one
   new-product story: empty directory → `harness-install.sh` → `git init` + commit →
-  `/sdd-plan` → `/sdd-drill <epic-id>` → `/sdd-next`. The section states that an empty, non-git
+  edit `.harness/specs/product.md` (fill the constitution `TODO`s) → `/sdd-plan` →
+  `/sdd-drill <epic-id>` → `/sdd-next`. The section states that an empty, non-git
   target is supported and that `The installer does not create a git repository.` —
   version control stays the human's step, and `init.sh`'s drift guard skips on a non-git
   tree and warns on an untracked body rather than failing. The install step now names the

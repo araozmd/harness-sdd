@@ -15,6 +15,12 @@
 #   R9  the installed init.sh exits 0 in the still-non-git target
 #   R10 the installed version stamp is read from $SRC/VERSION at run time
 #
+# Round-3 review addition:
+#   * R1 also requires the product-constitution edit step (specs/product.md, fill
+#     the TODOs) to be present and ordered BEFORE /sdd-plan (4041680863). The
+#     Planner cannot repair the omission (agents/planner.md forbids rewriting the
+#     constitution), so the standalone path must instruct the edit itself.
+#
 # Round-2 review additions:
 #   * R1/R4 also pin the drill step's required `<epic-id>` argument
 #     (4041566961), so the advertised sequence is directly executable.
@@ -123,6 +129,18 @@ test_greenfield_section_documents_sequence() {
   # advertised sequence stalls on a command that stops to ask. `/sdd-drill` is kept
   # as a substring so the ordering assertions above stay on the same anchor.
   assert_contains "R1 section" "$_gf" '/sdd-drill <epic-id>'
+  # Round-3 (4041680863): the standalone sequence must include the
+  # product-constitution edit before /sdd-plan. The Planner cannot repair an
+  # omission — agents/planner.md defines the vision as complementary to
+  # specs/product.md and forbids rewriting it — so a greenfield reader who
+  # follows this section alone would keep the seeded stub TODOs forever.
+  assert_contains "R1 section" "$_gf" 'specs/product.md'
+  _gf_flat="$(printf '%s\n' "$_gf" | tr '\n' ' ')"
+  printf '%s\n' "$_gf_flat" | grep -qiE 'edit.{0,80}specs/product\.md' \
+    || fail "R1 section: the sequence names specs/product.md but never tells the reader to EDIT it — naming the constitution is not the required edit step"
+  printf '%s\n' "$_gf_flat" | grep -qiE 'specs/product\.md[^.]{0,80}(TODO|constitution)' \
+    || fail "R1 section: the product-constitution edit (specs/product.md, fill its TODOs) is not stated in one sentence — a standalone greenfield reader keeps the stub constitution and /sdd-plan cannot repair it"
+  require_order "R1 sequence" "$_gf" 'specs/product.md' '/sdd-plan' lt
   require_order "R1 sequence" "$_gf" 'harness-install.sh' 'git init' le
   require_order "R1 sequence" "$_gf" 'git init' '/sdd-plan' le
   require_order "R1 sequence" "$_gf" '/sdd-plan' '/sdd-drill' le

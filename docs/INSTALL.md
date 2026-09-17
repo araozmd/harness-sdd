@@ -150,10 +150,16 @@ degraded mode. The installer does not create a git repository.
 3. Run `git init` and make a `commit`. Version control is the human's step, and a
    committed body lets `init.sh`'s drift guard verify it: on a non-git tree the guard
    skips, and on an untracked body it warns — it never fails.
-4. Open the project and run **`/sdd-plan`** — the whole-project inception that writes
+4. Edit the seeded `.harness/specs/product.md` and fill in the project-constitution
+   `TODO`s — "what this product is", its audience, its principles. It is Layer 0, and
+   `/sdd-plan` plans *around* it rather than rewriting it: `agents/planner.md` defines
+   the vision as complementary to the constitution and forbids the Planner from changing
+   it, so a `TODO` left here survives planning. The installer's `Next steps` banner
+   prints this same edit as its first item.
+5. Open the project and run **`/sdd-plan`** — the whole-project inception that writes
    the vision, architecture and ADRs and seeds the project's draft epics.
-5. Run **`/sdd-drill <epic-id>`** to decompose the first draft epic into features.
-6. Keep running **`/sdd-next`** to spec and build that work.
+6. Run **`/sdd-drill <epic-id>`** to decompose the first draft epic into features.
+7. Keep running **`/sdd-next`** to spec and build that work.
 
 The seeded `E00-F01` bootstrap task is not the front door for a new product; `/sdd-next`
 routes it after `/sdd-plan` — see [Bootstrap (first run)](#bootstrap-first-run).
