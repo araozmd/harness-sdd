@@ -5,7 +5,7 @@ description: Lightweight fix lane as Fixer — seed an sdd:false fix under the r
 
 ## Invocation adapter
 
-Invoke `$sdd-fix` in Codex; treat all accompanying text as `$ARGUMENTS` in the workflow below. Discover installed skills with `/skills`. Continuations use `$sdd-*`, with arguments written after the skill mention.
+In Codex, invoke `$sdd-fix` and write arguments after the skill mention; in OpenCode, invoke `/sdd-fix`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.
 
 ## Canonical workflow
 Act as **Fixer** (`agents/fixer.md`). That role file is the durable contract;
@@ -47,7 +47,7 @@ The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, 
 8. **Hand off in-session.** After seeding + re-validation, **hand the seeded fix off to
    the existing `sdd: false → Builder → Reviewer` loop in-session** — do not stop at
    seeding. Trigger the existing Orchestrator routing (`pending + sdd: false → Builder →
-   Reviewer`, the same behaviour `$sdd-next` drives) on the just-seeded fix; **reuse** that
+   Reviewer`, the same behaviour `/sdd-next` drives) on the just-seeded fix; **reuse** that
    routing, do not re-implement it. The Fixer writes no production code (the Builder does).
 9. **Report** the maintenance-epic state (created/reused `E99`), the seeded fix (id +
    title + `spec_path` + `autonomous` value), the inbox brief at

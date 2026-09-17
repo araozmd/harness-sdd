@@ -35,7 +35,7 @@ your-project/
 ├── .opencode/command/*.md              # selected OpenCode commands; fix-parallel needs capability/override
 ├── .opencode/agent/pr-fixer.md         # only while pr_loop.enabled (OpenCode file-based sub-agent)
 ├── opencode.json                       # created only if absent (re-stamped only while pristine)
-├── .agents/skills/sdd-*/                # repository-local Codex $sdd-* skill units
+├── .agents/skills/sdd-*/                # shared Codex/OpenCode $sdd-*/sdd-* skill units
 │   ├── SKILL.md                         # adapter + canonical workflow
 │   └── agents/openai.yaml               # explicit-only invocation policy
 ├── .codex/agents/*.toml                # seven standard Codex roles + gated pr-fixer; model optional
@@ -63,26 +63,39 @@ configuration, and `init.project.sh` are preserved on upgrade (configuration als
 receives missing default keys). Templates belong to the refreshed harness body.
 Generated glue follows its front-end ownership rules; see [Layout & ownership](#layout--ownership).
 
-### Codex skill units and legacy prompt migration
+### Shared skill units and legacy prompt migration
 
-Selecting **Codex** installs `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`,
-`$sdd-fix`, and `$sdd-fix-parallel` under `.agents/skills/`; `$sdd-pr-loop` follows
-the opt-in gate. Each is an atomic two-file ownership unit: `SKILL.md` contains
-the workflow plus an adapter mapping text accompanying the explicit `$skill`
-mention to `$ARGUMENTS`, and `agents/openai.yaml` sets
+Selecting **Codex** or **OpenCode** installs `$sdd-next` / `/sdd-next` (and likewise
+`$sdd-new` / `/sdd-new`, `sdd-plan`, `sdd-drill`, `sdd-fix`, `sdd-fix-parallel`) under
+`.agents/skills/`; `$sdd-pr-loop` follows the opt-in gate. Both hosts read the same
+repository-local unit (ADR-0003), so there is **one** `SKILL.md` per command no matter
+which claimant is selected. Each is an atomic two-file ownership unit: `SKILL.md`
+contains the workflow plus a **host-neutral adapter** that names both the Codex
+`$sdd-*` invocation and the OpenCode `/sdd-*` invocation and maps text accompanying
+the skill mention to `$ARGUMENTS`, and `agents/openai.yaml` sets
 `policy.allow_implicit_invocation: false`. For example, enter
-`$sdd-new Add a settings page`, then `$sdd-next`. `/skills` provides discovery.
-The slash names elsewhere in this document are canonical Claude/OpenCode names;
-Codex continuations use the corresponding `$sdd-*` invocation.
+`$sdd-new Add a settings page` in Codex, then `$sdd-next`. In Codex, `/skills` is the
+discovery UI; OpenCode exposes the units through its command palette and `skill` tool.
+
+`/sdd-fix-parallel` additionally **self-gates in its shared body**: under OpenCode it
+reads `.harness/.opencode-parallel` before spawning any worker and stops unless the
+file reads exactly `supported`, reporting the `/sdd-test-concurrency` →
+`--with-opencode-parallel=true` path in an installed target. In the harness **source**
+checkout no OpenCode command surface is installed, so that probe is unavailable: write
+`supported` to `.opencode-parallel` directly after confirming native concurrent
+sub-agents, or run the batch sequentially instead. The gate lives in the body because
+the unit is one file read by both hosts; on Codex the precondition is a no-op (Codex
+delegates through native concurrent sub-agents).
 
 Last-written copies under `.harness/.codex-skills/` protect both files together.
 Selected installs, gate-off and deselection preserve foreign, edited or
 symlinked units with a diagnostic. Codex role TOMLs use the matching protection
 under `.harness/.model-agents/codex/`. Historical stamp directory names remain
-unchanged, preserving prior ownership evidence. Although ADR-0003 described
-Antigravity as a second claimant, current emission has only the Codex claimant.
-Retirement leaves the units intact when Codex remains selected; otherwise only
-proven pristine units are reclaimed, with edited units and companions preserved.
+unchanged, preserving prior ownership evidence. The claiming set is `{codex, opencode}`
+(ADR-0003): the units are installed while **either** is selected and reclaimed only
+when the **last** claimant is deselected, so deselecting one front-end leaves the
+other's discoverable surface intact. Only proven pristine units are reclaimed, with
+edited units and companions preserved.
 
 Current installation does not use `HOME` or `CODEX_HOME` to create workflow glue
 and never writes global `${CODEX_HOME:-$HOME/.codex}/prompts/sdd-*.md` files.
@@ -336,6 +349,14 @@ workers concurrently. OpenCode support is **not assumed** — it is verified by 
 ```bash
 ./harness-install.sh --agents=opencode --with-opencode-parallel=true /path/to/your-project
 ```
+
+**In the harness source checkout** there is no OpenCode command surface, so
+`/sdd-test-concurrency` is unavailable and `--self` does not emit OpenCode glue.
+OpenCode still discovers the committed shared unit
+`.agents/skills/sdd-fix-parallel/SKILL.md`, which self-gates on `.opencode-parallel`.
+When it gates, either confirm the session can spawn native concurrent sub-agents and
+write `supported` to `.opencode-parallel` directly, or run the batch sequentially with
+`/sdd-fix`.
 
 ## Worker roster (`workers.roster`) — opt-in, local-only
 

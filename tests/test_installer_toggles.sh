@@ -1488,6 +1488,132 @@ test_no_install_time_preflight() {
   return 0
 }
 
+# ── E31-F01 R5 — the shared sdd-fix-parallel body self-gates OpenCode ─────────
+# The concurrency gate is a property of the WORKFLOW, and the shared `.agents/skills`
+# body is the invocation path OpenCode can reach even when the `.opencode/command`
+# copy is withheld. Assert the precondition lives in THAT body, and only there.
+test_sdd_fix_parallel_skill_self_gates_opencode() {
+  _x="$(sandbox e31pargate)"; _t="$_x/t"; mkdir -p "$_t"
+  hrun "$_x" -- --agents=codex,opencode --with-opencode-parallel=true "$_t" \
+    >"$_x/a.out" 2>"$_x/a.err" </dev/null \
+    || fail "E31-F01 R5: install failed: $(command cat "$_x/a.err" | tail -n 3)"
+  _f="$_t/.agents/skills/sdd-fix-parallel/SKILL.md"
+  [ -f "$_f" ] || fail "E31-F01 R5: the shared sdd-fix-parallel unit was not installed"
+  # Scope the prose assertion to the body BEFORE the canonical workflow — the adapter
+  # and precondition only — so an unrelated later line can never satisfy it.
+  _gate="$(sed -n '/^## Canonical workflow$/q;p' "$_f")"
+  [ -n "$_gate" ] || fail "E31-F01 R5: could not extract the pre-workflow body"
+  _folded="$(printf '%s' "$_gate" | tr '\n' ' ')"
+  printf '%s\n' "$_folded" | grep -qF '.harness/.opencode-parallel' \
+    || fail "E31-F01 R5: the shared body does not read .harness/.opencode-parallel"
+  printf '%s\n' "$_folded" | grep -qF 'supported' \
+    || fail "E31-F01 R5: the shared body does not require the 'supported' marker"
+  printf '%s\n' "$_folded" | grep -qF '/sdd-test-concurrency' \
+    || fail "E31-F01 R5: the shared body does not name /sdd-test-concurrency"
+  printf '%s\n' "$_folded" | grep -qF -- '--with-opencode-parallel=true' \
+    || fail "E31-F01 R5: the shared body does not name the override path"
+  printf '%s\n' "$_folded" | grep -qiE 'STOP[^.]{0,80}spawn' \
+    || fail "E31-F01 R5: the shared body does not stop before spawning a worker"
+  # Phrased as a Codex no-op (co-occurrence bound: see agents/builder.md).
+  printf '%s\n' "$_folded" | grep -qiE 'Codex[^.]{0,80}ignores' \
+    || fail "E31-F01 R5: the precondition is not phrased as a Codex no-op"
+  # Source-layout remediation (PR #198 comment 4040537412). The installed-target paths
+  # asserted above — `/sdd-test-concurrency` plus an installer re-run — do not exist in
+  # the harness SOURCE checkout, where OpenCode still discovers this committed unit and
+  # `--self` refuses OpenCode. The precondition must name that layout and give the
+  # executable alternatives, or the gate dead-ends for source-repo OpenCode users.
+  # Anchored on `source checkout` inside the pre-workflow span, not anywhere in the file.
+  printf '%s\n' "$_folded" | grep -qiE 'source checkout.{0,240}confirm native concurrent sub-agents' \
+    || fail "E31-F01 R5: the precondition gives no source-layout remediation (confirm native concurrent sub-agents)"
+  printf '%s\n' "$_folded" | grep -qiE 'source checkout.{0,320}run the batch sequentially' \
+    || fail "E31-F01 R5: the source-layout remediation does not offer the sequential fallback"
+  printf '%s\n' "$_folded" | grep -qiE 'write .supported.{0,120}yourself' \
+    || fail "E31-F01 R5: the source-layout remediation does not tell the user to write the marker directly"
+  # Control: the precondition is specific to sdd-fix-parallel, not smeared over every unit.
+  grep -qF '.opencode-parallel' "$_t/.agents/skills/sdd-next/SKILL.md" \
+    && fail "E31-F01 R5 control: the sdd-next unit carries the concurrency precondition"
+  return 0
+}
+
+# ── E31-F01 — manifest.txt scopes the gate to the native command copy ─────────
+# manifest.txt is an installed target's OWNERSHIP documentation. Before E31-F01 it claimed
+# /sdd-fix-parallel was stamped for OpenCode only when the marker says `supported` and
+# "otherwise it is omitted" — false for the shared `.agents/skills` unit, which is written
+# for EVERY Codex/OpenCode claimant and self-gates at runtime. Assert the manifest names
+# both copies and scopes the marker gate to the native `.opencode/command` one
+# (PR #198 comment 4040142193).
+test_manifest_scopes_parallel_gate_to_opencode_command() {
+  _x="$(sandbox e31parmanifest)"; _t="$_x/t"; mkdir -p "$_t"
+  # OpenCode-only, WITHOUT the `supported` marker: exactly the install where the shared
+  # unit is written but the native command copy is withheld.
+  hrun "$_x" -- --agents=opencode "$_t" \
+    >"$_x/a.out" 2>"$_x/a.err" </dev/null \
+    || fail "E31-F01 manifest: install failed: $(command cat "$_x/a.err" | tail -n 3)"
+  # Behavioral half first: the shared unit IS written, the gated native copy is NOT.
+  [ -f "$_t/.agents/skills/sdd-fix-parallel/SKILL.md" ] \
+    || fail "E31-F01 manifest: OpenCode-only install without 'supported' omitted the shared sdd-fix-parallel unit"
+  [ -f "$_t/.opencode/command/sdd-fix-parallel.md" ] \
+    && fail "E31-F01 manifest: OpenCode-only install without 'supported' stamped the gated native command copy"
+  _mf="$_t/.harness/manifest.txt"
+  [ -f "$_mf" ] || fail "E31-F01 manifest: the install wrote no manifest.txt"
+  # Extract the OPENCODE CONCURRENCY PROBE section by its blank-line end (a STRUCTURAL
+  # bound, not today's last content line) with a length floor, so a truncated capture
+  # cannot satisfy the checks vacuously.
+  _sec="$(awk 'index($0,"OPENCODE CONCURRENCY PROBE")==1{k=1} k&&/^$/{exit} k{print}' "$_mf")"
+  [ -n "$_sec" ] || fail "E31-F01 manifest: could not extract the OPENCODE CONCURRENCY PROBE section"
+  [ "$(printf '%s\n' "$_sec" | wc -l | tr -d ' ')" -ge 4 ] \
+    || fail "E31-F01 manifest: OPENCODE CONCURRENCY PROBE section is implausibly short"
+  _folded="$(printf '%s' "$_sec" | tr '\n' ' ')"
+  # The marker gate is scoped to the NATIVE command copy...
+  printf '%s\n' "$_folded" | grep -qE '\.opencode/command/sdd-fix-parallel\.md.{0,200}(supported|with-opencode-parallel|omitted)' \
+    || fail "E31-F01 manifest: the marker gate is not scoped to the native .opencode/command/sdd-fix-parallel.md copy"
+  # ...and the shared unit is documented as always written and self-gating at runtime.
+  printf '%s\n' "$_folded" | grep -qE '\.agents/skills/sdd-fix-parallel/SKILL\.md.{0,260}ALWAYS.{0,200}self-gate' \
+    || fail "E31-F01 manifest: the shared sdd-fix-parallel unit is not documented as always-written and self-gating"
+  printf '%s\n' "$_folded" | grep -qE '\.agents/skills/sdd-fix-parallel/SKILL\.md.{0,400}\.harness/\.opencode-parallel' \
+    || fail "E31-F01 manifest: the shared sdd-fix-parallel unit does not name .harness/.opencode-parallel as its runtime gate"
+  return 0
+}
+
+# ── E31-F01 — the SOURCE checkout ignores the marker the skill tells users to write
+# The shared sdd-fix-parallel skill's source-layout remediation (PR #198 comment
+# 4040537412) tells an OpenCode user in the harness source checkout to write `supported`
+# to a root-level `.opencode-parallel`. The source repo's own `.gitignore` must therefore
+# ignore it, exactly as the installed `.harness/.gitignore` already does (tests/test_install.sh
+# test_opencode_parallel_optin): left untracked, `primary_clean()` in tools/fix-worktree.sh —
+# plain `git status --porcelain --untracked-files=all` — aborts `create`, so the advertised
+# recovery would defeat the parallel batch it exists to unblock (PR #198 comment 4040730280).
+test_source_gitignore_ignores_opencode_parallel_marker() {
+  # 1. The source rule itself, root-anchored like its neighbours /telemetry.jsonl and
+  #    /state/tasks.json.lock.
+  grep -qxF '/.opencode-parallel' "$SRC/.gitignore" \
+    || fail "E31-F01 source-layout: the harness source .gitignore does not ignore /.opencode-parallel"
+  # 2. End to end through real git, in a disposable repo seeded with THAT file: prove the
+  #    marker is genuinely ignored (root-anchored, not matching some fixture default) by
+  #    asking the exact query primary_clean() asks, with an untracked CONTROL that must
+  #    still appear — otherwise an empty status proves nothing about the ignore.
+  _g="$(sandbox e31parmarker)"; mkdir -p "$_g/repo"
+  cp "$SRC/.gitignore" "$_g/repo/.gitignore"
+  git -C "$_g/repo" init -q -b main
+  git -C "$_g/repo" config user.name fixture
+  git -C "$_g/repo" config user.email fixture@example.invalid
+  git -C "$_g/repo" add .gitignore
+  git -C "$_g/repo" commit -qm "seed source .gitignore"
+  printf 'supported\n' > "$_g/repo/.opencode-parallel"
+  printf 'control\n' > "$_g/repo/untracked-control.txt"
+  _st="$(git -C "$_g/repo" status --porcelain --untracked-files=all)"
+  printf '%s\n' "$_st" | grep -qF '.opencode-parallel' \
+    && fail "E31-F01 source-layout: git still reports .opencode-parallel as untracked"
+  printf '%s\n' "$_st" | grep -qF 'untracked-control.txt' \
+    || fail "E31-F01 source-layout: control file missing from git status — the ignore check could not have failed"
+  # 3. primary_clean() equivalence: with the marker present and no other stray file, the
+  #    canonical checkout is clean, so `tools/fix-worktree.sh create` no longer aborts.
+  rm -f "$_g/repo/untracked-control.txt"
+  [ -z "$(git -C "$_g/repo" status --porcelain --untracked-files=all)" ] \
+    || fail "E31-F01 source-layout: with the marker present the canonical checkout is not primary_clean()"
+  return 0
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 test_answer_mapping_unit
 pass "answer_mapping_unit: the answer→value mapping is pure, extractable and correct for every branch (R2)"
@@ -1549,5 +1675,13 @@ test_docs_document_pr_loop_prompt
 pass "docs_document_pr_loop_prompt: INSTALL.md, the installer's text and the config block document the third question (F02 R13)"
 test_no_install_time_preflight
 pass "no_install_time_preflight: enabling the loop executes neither gh nor jq at install time (F02 R14)"
+
+# ── E31-F01 — OpenCode claims the shared `.agents/skills` surface ─────────────
+test_sdd_fix_parallel_skill_self_gates_opencode
+pass "sdd_fix_parallel_skill_self_gates_opencode (E31-F01 R5): the shared skill body self-gates OpenCode and is a Codex no-op"
+test_manifest_scopes_parallel_gate_to_opencode_command
+pass "manifest_scopes_parallel_gate_to_opencode_command (E31-F01): manifest.txt scopes the OpenCode marker gate to the native command copy and documents the always-present self-gated shared unit"
+test_source_gitignore_ignores_opencode_parallel_marker
+pass "source_gitignore_ignores_opencode_parallel_marker (E31-F01): the source .gitignore ignores the marker the skill's source-layout remediation tells users to write, so primary_clean() stays clean"
 
 echo "All installer-toggle tests passed."

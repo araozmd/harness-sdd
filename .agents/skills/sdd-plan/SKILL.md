@@ -5,7 +5,7 @@ description: Whole-project inception as Planner — produce vision + architectur
 
 ## Invocation adapter
 
-Invoke `$sdd-plan` in Codex; treat all accompanying text as `$ARGUMENTS` in the workflow below. Discover installed skills with `/skills`. Continuations use `$sdd-*`, with arguments written after the skill mention.
+In Codex, invoke `$sdd-plan` and write arguments after the skill mention; in OpenCode, invoke `/sdd-plan`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.
 
 ## Canonical workflow
 Act as **Planner** (`agents/planner.md`). That role file is the durable
@@ -19,7 +19,7 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    per `store/local.md`).
 3. **Re-run guard.** If `specs/vision.md` or `specs/architecture.md`
    already exists, a default run STOPS and reports that the project already has a plan —
-   point the human at `$sdd-drill` (F03) to deepen existing epics, or at an explicit
+   point the human at `/sdd-drill` (F03) to deepen existing epics, or at an explicit
    amend mode that **appends** (never overwrites or renumbers). Do not silently
    overwrite.
 4. Run a short, **adaptive** Q&A with the human to clarify: the problem and who it is
@@ -34,7 +34,7 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    decisions), and one ADR per decision at `specs/adr/NNNN-<title>.md` from
    `specs/_templates/adr.md` (4-digit, above the max existing ADR number);
    `architecture.md` references each ADR by its `ADR-NNNN` id. Stay at whole-system
-   depth — defer per-epic deltas to `$sdd-drill` (F03).
+   depth — defer per-epic deltas to `/sdd-drill` (F03).
 7. **Seed** the roadmap: for each epic, write a `state/tasks.json` row with
    `status: "draft"` and `features: []` (ids as a next-sequential block strictly above
    the max existing `E##`, append-only, no reuse), and create
@@ -61,5 +61,5 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
 10. **Report** the artifacts written (`specs/vision.md`,
    `specs/architecture.md`, each `specs/adr/NNNN-*.md`), the seeded
    `draft` epics (ids + titles + `epic.md` paths), and tell the human to **run
-   `$sdd-drill <epic-id>`** next. Do NOT spawn the Architect, do NOT write any feature
+   `/sdd-drill <epic-id>`** next. Do NOT spawn the Architect, do NOT write any feature
    spec, and do NOT advance any epic past `draft` — the Planner produces, never specs.

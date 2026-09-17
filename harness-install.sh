@@ -4087,8 +4087,9 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .harness/agents/  .harness/docs/  .harness/store/  .harness/tools/  .harness/specs/_templates/
   .harness/umbrella.manifest.example.yaml  .harness/umbrella.gitignore.example
   .claude/agents/*  .claude/commands/*   .opencode/command/*   (repo root, regenerated)
-  .agents/skills/sdd-*/SKILL.md       \$sdd-* repository skill instructions for selected Codex;
-                                      atomic ownership units with their policy companions
+  .agents/skills/sdd-*/SKILL.md       shared \$sdd-* repository skill instructions for the
+                                      selected Codex and OpenCode claimants; atomic
+                                      ownership units with their policy companions
   .agents/skills/sdd-*/agents/openai.yaml
                                       explicit-only invocation policy — written wherever the
                                       unit is, since Codex discovers the directory itself
@@ -4100,8 +4101,13 @@ HARNESS-OWNED  (overwritten on every upgrade):
 OPENCODE CONCURRENCY PROBE  (E22-F01):
   .opencode/command/sdd-test-concurrency.md   (always installed for OpenCode)
   .harness/.opencode-parallel                   (marker: 'supported' or 'sequential')
-  /sdd-fix-parallel is stamped for OpenCode ONLY when the marker is 'supported' or when
-  the installer is run with --with-opencode-parallel=true; otherwise it is omitted.
+  /sdd-fix-parallel has two OpenCode-relevant copies. The native command copy
+  .opencode/command/sdd-fix-parallel.md is stamped for OpenCode ONLY when the marker is
+  'supported' or when the installer is run with --with-opencode-parallel=true; otherwise
+  it is omitted. The shared skill unit .agents/skills/sdd-fix-parallel/SKILL.md is
+  ALWAYS written for the selected Codex/OpenCode claimants and self-gates at runtime:
+  under OpenCode its body reads .harness/.opencode-parallel and stops unless it reads
+  exactly 'supported'.
 
 PR LOOP GLUE  (OPT-IN — created ONLY while pr_loop.enabled reads exactly true; a fresh
 install seeds false, so none of this exists until you turn it on — E18-F01):
@@ -6514,15 +6520,21 @@ EOF
     fi
   fi
 
-  # Codex is the sole active claimant. Keep the historical ownership ledger name
-  # for safe retirement of formerly shared Antigravity/Codex units (ADR-0003).
+  # A shared skill unit is claimed by ANY front-end that reads `.agents/skills/`
+  # (ADR-0003). Codex and OpenCode both read it, so either selection installs the
+  # units and only the LAST claimant's deselection reclaims them. Keep the historical
+  # ownership ledger name for safe retirement of formerly shared Antigravity/Codex units.
   skill_unit_claimed() {
-    agent_selected codex
+    agent_selected codex || agent_selected opencode
   }
 
   # gen_skill_body <command> <dest> — adapt the canonical command body to the shared
-  # repository-local skill format. The adapter explicitly maps text accompanying the
-  # `$skill` mention to the canonical body's `$ARGUMENTS` term.
+  # repository-local skill format. One body is read by every claiming front-end
+  # (ADR-0003), so the body keeps the canonical PORTABLE `/sdd-*` spellings and the
+  # adapter names BOTH host invocations (Codex `$sdd-*`, OpenCode `/sdd-*`) and maps
+  # text accompanying the skill mention to the canonical body's `$ARGUMENTS` term.
+  # Rewriting the body to one host's spelling would tell the other host to invoke a
+  # token it cannot accept; the adapter is the invocation contract for both.
   gen_skill_body() {
     _gcs_name="$1"; _gcs_dest="$2"; _gcs_src="$CMDDIR/$_gcs_name.md"
     _gcs_desc="$(sed -n 's/^description: //p' "$_gcs_src" | sed -n '1p')"
@@ -6532,16 +6544,28 @@ EOF
       printf 'description: %s\n' "$_gcs_desc"
       printf '%s\n' '---'
       printf '\n## Invocation adapter\n\n'
-      printf 'Invoke `$%s` in Codex; treat all accompanying text as `$ARGUMENTS` in the workflow below. Discover installed skills with `/skills`. Continuations use `$sdd-*`, with arguments written after the skill mention.\n' "$_gcs_name"
+      printf 'In Codex, invoke `$%s` and write arguments after the skill mention; in OpenCode, invoke `/%s`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.\n' "$_gcs_name" "$_gcs_name"
+      # R5: the concurrency gate is a property of the workflow, not of one file. The
+      # shared unit is written for every claimant, so the OpenCode capability
+      # precondition lives in the BODY — unconditional text, conditional in effect
+      # (Codex has native concurrent delegation and reads it as a no-op).
+      if [ "$_gcs_name" = "sdd-fix-parallel" ]; then
+        printf '\n> **OpenCode capability precondition.** If the running host is OpenCode, read\n'
+        printf '> `.harness/.opencode-parallel` before spawning any worker. If it does not read\n'
+        printf '> exactly `supported`, STOP without spawning a worker. In an installed target run\n'
+        printf '> `/sdd-test-concurrency` to confirm native concurrent delegation, then re-run\n'
+        printf '> the installer with `--with-opencode-parallel=true`. In the harness source checkout\n'
+        printf '> no OpenCode command surface is installed, so that probe is unavailable: either\n'
+        printf '> confirm native concurrent sub-agents and write `supported` to\n'
+        printf '> `.harness/.opencode-parallel` yourself, or run the batch sequentially instead.\n'
+        printf '> Codex ignores this precondition: it delegates through native concurrent sub-agents.\n'
+      fi
       printf '\n## Canonical workflow\n'
-      sed -n '5,$p' "$_gcs_src" | codex_invocations
+      # Host-neutral: the canonical body's portable `/sdd-*` spellings are preserved
+      # verbatim. The adapter above carries the Codex `$sdd-*` / OpenCode `/sdd-*` mapping,
+      # so no host-specific rewrite is applied here.
+      sed -n '5,$p' "$_gcs_src"
     } > "$_gcs_dest"
-  }
-
-  # Rewrite only portable command invocation tokens; shell paths such as
-  # tools/sdd-next.sh and quoted executable programs remain canonical bytes.
-  codex_invocations() {
-    sed 's@/sdd-\(next\|new\|plan\|drill\|fix-parallel\|fix\|pr-loop\)\([`[:space:],;:)]\)@$sdd-\1\2@g; s@/sdd-\(next\|new\|plan\|drill\|fix-parallel\|fix\|pr-loop\)$@$sdd-\1@g'
   }
 
   gen_codex_skill_policy() {
@@ -6783,7 +6807,7 @@ EOF
     for _c in $_cdx_cmds; do
       install_skill_unit "$_c"
     done
-    ok "shared skill units \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel installed (.agents/skills/ — project-local, read by Codex)"
+    ok "shared skill units \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel installed (.agents/skills/ — project-local, read by Codex and OpenCode)"
   fi
   if agent_selected codex || printf '%s\n' "$PRIOR_AGENTS" | grep -qx codex; then
     migrate_legacy_codex_prompts
@@ -6952,7 +6976,10 @@ EOF
   # (one sorted key per line, overwritten every run) (R8).
   printf '%s\n' "$SELECTED" > "$H/.agents"
 
-  if printf '%s\n' "$PRIOR_AGENTS" | grep -qx antigravity && ! agent_selected codex; then
+  # Retiring Antigravity (E29) drops its skill claim; with NO claimant left the shared
+  # units go. A surviving `codex` OR `opencode` selection keeps them (skill_unit_claimed),
+  # the same predicate the install gate uses (ADR-0003).
+  if printf '%s\n' "$PRIOR_AGENTS" | grep -qx antigravity && ! skill_unit_claimed; then
     reclaim_skill_units "$HARNESS_OWNED_CMDS"
   fi
 
@@ -7025,12 +7052,27 @@ EOF
             fi
             rm -f "$_ref" "$_ref_legacy"
           fi
+          # Shared skill units are claimed by both Codex and OpenCode: reclaim them
+          # here ONLY when opencode was the last claimant, so a surviving `codex`
+          # selection keeps the surface (ADR-0003). A plain `if` (never a trailing
+          # `[ ] && echo`) keeps this loop's last-command status zero under `set -e`.
+          if ! skill_unit_claimed; then
+            _oc_skill_removed="$(reclaim_skill_units "$HARNESS_OWNED_CMDS")"
+            if [ -n "$_oc_skill_removed" ]; then
+              echo "⚠️  removed deselected agent 'opencode' skills:$_oc_skill_removed" >&2
+            fi
+          fi
           ;;
         codex)
           # Preserve the explicit-only companion whenever an edited skill survives.
-          _cdx_removed="$(reclaim_skill_units "$HARNESS_OWNED_CMDS")"
-          [ -n "$_cdx_removed" ] \
-            && echo "⚠️  removed deselected agent 'codex' skills:$_cdx_removed" >&2
+          # The shared units go only when NO claimant remains (ADR-0003): deselecting
+          # codex while `opencode` still reads the surface must leave them in place.
+          if ! skill_unit_claimed; then
+            _cdx_removed="$(reclaim_skill_units "$HARNESS_OWNED_CMDS")"
+            if [ -n "$_cdx_removed" ]; then
+              echo "⚠️  removed deselected agent 'codex' skills:$_cdx_removed" >&2
+            fi
+          fi
           reclaim_model_agents codex
           ;;
       esac

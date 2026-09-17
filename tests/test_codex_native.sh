@@ -129,11 +129,40 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     p=fresh('consumer');install(p,'--agents=all','--pr-loop=true');native(p,prefix='.harness/')
     for cmd in cmds|{'sdd-pr-loop'}:
         skill=(p/f'.agents/skills/{cmd}/SKILL.md').read_text();canonical=(p/f'.claude/commands/{cmd}.md').read_text()
-        assert f'`${cmd}`' in skill and '$ARGUMENTS' in skill
-        assert not re.search(r'/sdd-(?:new|next|plan|drill|fix|pr-loop)(?:[`\s])',skill)
+        adapter=skill.split('## Invocation adapter',1)[1].split('## Canonical workflow',1)[0]
+        workflow=skill.split('## Canonical workflow',1)[1]
+        # PR #198 comment 4040142185: one body is read by BOTH claimants, so the BODY stays
+        # host-neutral — it keeps the canonical PORTABLE `/sdd-*` spellings, and the ADAPTER
+        # above carries the Codex `$sdd-*` / OpenCode `/sdd-*` mapping. `$sdd-*` is the
+        # Codex-only spelling, so a body carrying it tells an OpenCode reader to invoke a
+        # token its host cannot accept; the adapter must retain BOTH invocations.
+        assert f'`${cmd}`' in adapter and f'`/{cmd}`' in adapter and '$ARGUMENTS' in adapter
+        assert '$sdd-' not in workflow,f'{cmd}: shared body still carries the Codex-only $sdd-* spelling'
+        # The body must equal the canonical command body, so the neutrality guarantee cannot
+        # be satisfied by a body unrelated to what the host actually runs.
+        assert workflow.lstrip('\n')==canonical.split('---\n',2)[2].lstrip('\n'),f'{cmd}: shared body differs from the canonical command body'
         # Executable shell programs are preserved exactly across the adapter.
         assert re.findall(r'```(?:bash|sh)\n(.*?)```',skill,re.S)==re.findall(r'```(?:bash|sh)\n(.*?)```',canonical,re.S)
-    assert '`$sdd-drill <epic-id>`' in (p/'.agents/skills/sdd-plan/SKILL.md').read_text()
+    # The portable spelling reaches both hosts through the adapter; the Codex-only spelling
+    # must not appear in the body (PR #198 comment 4040142185).
+    assert '`/sdd-drill <epic-id>`' in (p/'.agents/skills/sdd-plan/SKILL.md').read_text()
+    assert '`$sdd-drill <epic-id>`' not in (p/'.agents/skills/sdd-plan/SKILL.md').read_text()
+    # E31-F01 R4: one shared unit, read by both claimants, so the adapter must name the
+    # Codex `$sdd-*` invocation AND the OpenCode `/sdd-*` invocation, keep the `$ARGUMENTS`
+    # mapping, and never point a host at `/skills` (OpenCode has no such command).
+    h=fresh('adapter-host-neutral');install(h,'--agents=codex,opencode')
+    for cmd in cmds:
+        text=(h/f'.agents/skills/{cmd}/SKILL.md').read_text()
+        adapter=text.split('## Invocation adapter',1)[1].split('## Canonical workflow',1)[0]
+        assert f'`${cmd}`' in adapter,f'{cmd}: adapter lost the Codex invocation'
+        assert f'`/{cmd}`' in adapter,f'{cmd}: adapter lost the OpenCode invocation'
+        assert '$ARGUMENTS' in adapter,f'{cmd}: adapter lost the $ARGUMENTS mapping'
+        assert '/skills' not in adapter,f'{cmd}: adapter still tells the host to use /skills'
+        # The body's cross-command references (e.g. sdd-plan -> `/sdd-drill`) must also
+        # reach Codex, so the adapter states the general `/sdd-<name>` -> host mapping.
+        assert '`$sdd-<name>`' in adapter,f'{cmd}: adapter has no general Codex invocation mapping'
+        assert '`/sdd-<name>`' in adapter,f'{cmd}: adapter has no general OpenCode invocation mapping'
+    print('ok - skill_adapter_is_host_neutral (R4)')
     for host,advice in [('claude','Claude Code:'),('codex','Codex:'),('opencode','OpenCode:')]:
         target=fresh('advice-'+host);out=install(target,'--agents='+host);assert advice in out
         if host=='codex':assert 'invoke $sdd-next' in out and 'Open the repo in Claude Code' not in out
@@ -190,7 +219,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
         install(old,'--agents=all','--pr-loop=true')
         for rel,content in golden.items():assert (old/rel).read_bytes()==content, 'retained old emission changed: '+rel
     print('ok - retained_host_and_seed_regression (R11)')
-    assert (src/'VERSION').read_text().strip()=='0.80.0' and not (src/'GEMINI.md').exists()
+    assert (src/'VERSION').read_text().strip()=='0.81.0' and not (src/'GEMINI.md').exists()
     a=(src/'AGENTS.md').read_text()
     for token in ('./init.sh','non-zero','STOP','harness.config.yaml','agents/orchestrator.md','progress/lessons.md','spec-ready','in-progress','independent Reviewer','chat history','telemetry','tokens','VERSION','CHANGELOG.md','MINOR','MAJOR','branch','PR','main'):
         assert token.lower() in a.lower(),token

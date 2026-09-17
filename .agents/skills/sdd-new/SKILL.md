@@ -5,7 +5,7 @@ description: Seed a new idea into the TaskStore as Inception (interactive intake
 
 ## Invocation adapter
 
-Invoke `$sdd-new` in Codex; treat all accompanying text as `$ARGUMENTS` in the workflow below. Discover installed skills with `/skills`. Continuations use `$sdd-*`, with arguments written after the skill mention.
+In Codex, invoke `$sdd-new` and write arguments after the skill mention; in OpenCode, invoke `/sdd-new`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.
 
 ## Canonical workflow
 Act as **Inception** (`agents/inception.md`). That role file is the durable
@@ -41,7 +41,7 @@ The free-text idea is in `$ARGUMENTS`. If it is empty, ask the human for it.
        NOT append to the brief — it has already been consumed, so the note would be a
        silent no-op. STOP and tell the human the addition must go back through
        specification: either raise it with the Architect to re-spec / update that
-       feature's spec & task list, or re-run `$sdd-new` to seed it as a NEW feature
+       feature's spec & task list, or re-run `/sdd-new` to seed it as a NEW feature
        (altitude 2) that `depends_on` the existing one. Do not write a no-op note.
    - **Altitudes 2 & 3:** write the `pending` feature entry into
      `state/tasks.json` (and, for a new epic, the epic entry +
@@ -54,5 +54,5 @@ The free-text idea is in `$ARGUMENTS`. If it is empty, ask the human for it.
 8. **Report** the `<feature-id>` (for altitude 1, the EXISTING feature's id), the
    relevant `state/tasks.json` entry, the
    `progress/inbox/<feature-id>.md` path, and tell the human to **run
-   `$sdd-next`** next. Do NOT spawn the Architect and do NOT change any status —
+   `/sdd-next`** next. Do NOT spawn the Architect and do NOT change any status —
    Inception seeds, never specs, and never moves a feature past `pending`.

@@ -159,13 +159,18 @@ test_deselect_removes_pr_loop_glue() {                # R4
   [ -f "$_d/.agents/skills/sdd-pr-loop/SKILL.md" ] || fail "R4 setup: Codex skill not stamped"
   # the gate stays ON across the re-run: this proves DESELECTION reclaims, not the gate
   install_on "$_d" --agents=opencode
+  # Claude/Codex-OWN glue is reclaimed...
   for _f in "$_d/.claude/commands/sdd-pr-loop.md" "$_d/.claude/agents/pr-fixer.md" \
-            "$_d/.codex/agents/pr-fixer.toml" \
-            "$_d/.agents/skills/sdd-pr-loop/SKILL.md" \
-            "$_d/.agents/skills/sdd-pr-loop/agents/openai.yaml"; do
+            "$_d/.codex/agents/pr-fixer.toml"; do
     [ -e "$_f" ] && fail "R4: deselected front-end kept $_f"
   done
-  pass "R4 deselect: Claude/Codex pr-loop glue reclaimed while OpenCode is selected"
+  # ...but the shared `.agents/skills` unit is claimed by OpenCode too (E31-F01 R2):
+  # deselecting the Codex claimant while OpenCode reads the surface must leave it.
+  for _f in "$_d/.agents/skills/sdd-pr-loop/SKILL.md" \
+            "$_d/.agents/skills/sdd-pr-loop/agents/openai.yaml"; do
+    [ -f "$_f" ] || fail "E31-F01 R2: shared pr-loop skill was reclaimed while OpenCode claims it: $_f"
+  done
+  pass "R4 deselect: Claude/Codex-own pr-loop glue reclaimed; shared skill kept for OpenCode (E31-F01 R2)"
 }
 
 test_gate_flip_off_reclaims() {                       # R5
