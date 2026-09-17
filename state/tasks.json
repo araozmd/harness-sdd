@@ -1414,17 +1414,18 @@
         {
           "id": "E28-F01",
           "title": "Greenfield single-repo path: document + test install-into-empty-dir followed by /sdd-plan as the front door for a new product",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "9c4d5e51d9bcbe1fa938c2f4ada8db47d7866ad1",
+            "ref": "9c4d5e51d9bcbe1fa938c2f4ada8db47d7866ad1",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
-          "spec_path": "specs/epics/E28-greenfield-to-umbrella/F01-greenfield-single-path/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (200)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E28-F01 done --evidence <merge-ref>`",
-            "pr": "200"
-          }
+          "spec_path": "specs/epics/E28-greenfield-to-umbrella/F01-greenfield-single-path/"
         },
         {
           "id": "E28-F02",
