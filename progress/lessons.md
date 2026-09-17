@@ -104,3 +104,25 @@
   breaks the manifest. Same for `CHANGELOG.md` and a `done` feature's own spec/plan. A sweep
   report that lists "the only surviving hits" without these is an under-count the next sweep
   will inherit.
+- [2026-09-16 reviewer] A block extractor bounded by the block's CURRENT LAST CONTENT LINE
+  (`awk ... m && /^  # pin\.claude\.reasoning: ""$/ { exit }`) guards only a PREFIX: a line
+  appended after that anchor but still inside the block is invisible, so the convergence test
+  stays green on a real desync (E99-F160 M8/M8b survived all 47 suites). Bound blocks
+  STRUCTURALLY — blank line, heredoc `EOF`, or the next top-level key — never on the line that
+  happens to be last today, because "append one more entry" is the likeliest next edit.
+- [2026-09-16 reviewer] "Both extracts empty ⇒ `cmp -s` passes" is the vacuous shape to probe on
+  any extract-and-compare test, and a per-file `[ -s ]` guard genuinely closes it — but only for
+  the START anchor. Probe the END anchor separately in BOTH directions (deleted in one file, in
+  both, and content added past it): the empty-extract route and the over-run route fail loudly,
+  while the past-the-anchor route is the one that passes silently.
+- [2026-09-16 reviewer] A STRUCTURAL block bound (`m && (/^$/ || /^EOF$/) { exit }`) fixes the
+  append-past-the-end hole but opens the mirror one: a blank line inserted INSIDE the block
+  truncates the capture, and because the capture is still non-empty the `[ -s ]` guard stays
+  silent. Symmetric in both copies it is a vacuous pass — E99-F160 MF2/MG/ML: one blank line
+  after the anchor in both files, plus a real one-sided desync, and all 47 suites stay green.
+  Any extract-and-compare test needs a LENGTH FLOOR (`[ "$(wc -l < x)" -ge N ]`), not just
+  `[ -s ]`; `[ -s ]` only pins the START anchor.
+- [2026-09-16 reviewer] `sed -i '270a\' -e '' <file>` does not insert a blank line — GNU sed
+  reads `270a\` as a filename and exits non-zero having changed nothing. The mutant then runs
+  green and looks like a SURVIVOR. Only the mandated "print the applied diff" caught it (empty
+  diff = void run, not evidence). Insert blank lines with `awk 'NR==N{print; print ""; next}1'`.

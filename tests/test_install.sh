@@ -125,12 +125,15 @@ test_change_size_block_seeded() {
 # file, because the gate is off by default.
 #
 # workers_block <config> — the `workers:` block WITH its comment header, from the anchor
-# comment to the `roster:` scalar. Anchored on the comment rather than the `workers:` line
-# because the seeded and migrated texts must converge INCLUDING their documentation, and
-# bounded at the scalar so trailing content (which migration can only append at EOF) never
-# enters the comparison.
+# comment to the block's structural end. Anchored on the comment rather than the
+# `workers:` line because the seeded and migrated texts must converge INCLUDING their
+# documentation, and bounded STRUCTURALLY — the next blank line, or the heredoc's `EOF`
+# terminator when reading harness-install.sh's source text directly — rather than on
+# `roster:` (today's last content line), so a line appended after `roster:` but still
+# inside the block stays inside the comparison instead of silently falling outside it
+# (same bound shape as models_block below; hardened alongside it, E99-F160 R1 sibling).
 workers_block() {
-  awk '/^# Worker roster \(E17-F04\)/ { w = 1 } w { print } w && /^  roster:/ { exit }' "$1"
+  awk '/^# Worker roster \(E17-F04\)/ { w = 1 } w && (/^$/ || /^EOF$/) { exit } w { print }' "$1"
 }
 
 test_worker_roster_wiring_installed() {
@@ -179,6 +182,50 @@ test_workers_block_seeded_migrated_converge() {
   [ "$(grep -cE '^workers:[[:space:]]*(#.*)?$' "$_wcfg")" = "1" ] \
     || fail "workers convergence: the config carries $(grep -cE '^workers:' "$_wcfg") top-level workers: headers, expected exactly 1"
   rm -rf "$_wc"
+}
+
+# models_block <file> — the `models:` block WITH its comment header, from the
+# `# Per-role model routing` anchor to the block's structural end. Works unmodified on
+# EITHER the shipped harness.config.yaml OR the raw harness-install.sh source text: the
+# heredoc harness-install.sh appends is written to be byte-identical to the shipped
+# block, so the same anchor/bound pair captures both without installing anything.
+#
+# Bounded STRUCTURALLY — the next blank line (harness.config.yaml) or the heredoc's
+# `EOF` terminator (harness-install.sh's source text) — rather than on
+# `pin.claude.reasoning` (today's last content line). A bound on the last content line
+# guards only a PREFIX: a pin line appended after it but still inside the block would be
+# invisible to the comparison below, which is exactly the desync shape this test exists
+# to catch (E99-F160 R1 — M8/M8b). The block has no interior blank line today, so the
+# `/^$/` arm is unambiguous; if that ever stops holding, bound on the next top-level key
+# instead.
+models_block() {
+  awk '/^# Per-role model routing \(E17-F01\)/ { m = 1 } m && (/^$/ || /^EOF$/) { exit } m { print }' "$1"
+}
+
+# E17-F01: the `models:` block is DUPLICATED — the seed shipped in harness.config.yaml
+# and the heredoc harness-install.sh appends when migrating an older config — and
+# nothing enforced the two stayed byte-identical (found live as mutant M6 in the
+# E99-F159 review, which desynced them and survived the full suite). A FRESH install
+# copies harness.config.yaml verbatim; an UPGRADE only ever runs the heredoc; if an
+# author edits one copy and forgets the other, the two installed populations silently
+# diverge depending on when each target was installed — the same defect class the
+# sibling `workers:` comparison above (test_workers_block_seeded_migrated_converge)
+# already guards.
+#
+# Compared directly against the two SOURCE FILES, not by installing and re-diffing an
+# installed target: the failure this guards against is an author editing one copy and
+# not the other, so the assertion should name THAT — which source desynced — rather
+# than a downstream "two installed configs differ" symptom two steps removed from the
+# edit that caused it.
+test_models_block_seed_and_heredoc_converge() {
+  models_block "$SRC/harness.config.yaml" > "$T/models-cfg.txt"
+  [ -s "$T/models-cfg.txt" ] \
+    || fail "models convergence: the models: block could not be captured from harness.config.yaml — its comment header anchor is missing"
+  models_block "$SRC/harness-install.sh" > "$T/models-install.txt"
+  [ -s "$T/models-install.txt" ] \
+    || fail "models convergence: the models: block could not be captured from harness-install.sh's heredoc — its comment header anchor is missing"
+  cmp -s "$T/models-cfg.txt" "$T/models-install.txt" \
+    || fail "models convergence: harness-install.sh's heredoc models: block is NOT byte-identical to harness.config.yaml's seeded block: $(diff "$T/models-cfg.txt" "$T/models-install.txt" | head -n 8)"
 }
 
 test_entrypoints_reference_local_overrides() {
@@ -449,6 +496,7 @@ pass "progress/lessons.md seeded once, survives upgrade re-run (earned-lessons l
 test_change_size_block_seeded       # E21-F01
 test_worker_roster_wiring_installed # E17-F04
 test_workers_block_seeded_migrated_converge # E17-F04
+test_models_block_seed_and_heredoc_converge # E17-F01
 [ -x "$T/.harness/init.sh" ]                   || fail ".harness/init.sh not executable"     # R1
 [ -f "$T/.harness/specs/product.md" ]          || fail "product.md stub not seeded"          # R6
 [ -f "$T/.harness/state/tasks.json" ]          || fail "bootstrap tasks.json missing"        # R6
