@@ -1408,7 +1408,7 @@
         {
           "id": "E28-F01",
           "title": "Greenfield single-repo path: document + test install-into-empty-dir followed by /sdd-plan as the front door for a new product",
-          "status": "pending",
+          "status": "spec-ready",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
