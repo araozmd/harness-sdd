@@ -5,7 +5,7 @@ description: Per-epic drill-down as Driller — decompose one draft epic into fe
 
 ## Invocation adapter
 
-In Codex, invoke `$sdd-drill` and write arguments after the skill mention; in OpenCode, invoke `/sdd-drill`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below.
+In Codex, invoke `$sdd-drill` and write arguments after the skill mention; in OpenCode, invoke `/sdd-drill`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.
 
 ## Canonical workflow
 Act as **Driller** (`agents/driller.md`). That role file is the durable
@@ -57,6 +57,6 @@ an arbitrary epic.
      `autonomous: false` so each parks at the per-feature spec-approval gate.
    Re-validate again after the flip/stamp.
 11. **Report** the seeded features (ids + titles + `spec_path`s), the inbox briefs + ADR
-    ids, any ADR deltas, and the decision taken; tell the human to **run `$sdd-next`** to
+    ids, any ADR deltas, and the decision taken; tell the human to **run `/sdd-next`** to
     execute. Do NOT spawn the Architect, do NOT write any feature `.spec/.plan/.tasks/.tests`,
     and advance ONLY the target epic to `planned` — the Driller decomposes, never specs.

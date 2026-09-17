@@ -6525,8 +6525,11 @@ EOF
 
   # gen_skill_body <command> <dest> — adapt the canonical command body to the shared
   # repository-local skill format. One body is read by every claiming front-end
-  # (ADR-0003), so the adapter names BOTH host invocations and maps text accompanying
-  # the skill mention to the canonical body's `$ARGUMENTS` term.
+  # (ADR-0003), so the body keeps the canonical PORTABLE `/sdd-*` spellings and the
+  # adapter names BOTH host invocations (Codex `$sdd-*`, OpenCode `/sdd-*`) and maps
+  # text accompanying the skill mention to the canonical body's `$ARGUMENTS` term.
+  # Rewriting the body to one host's spelling would tell the other host to invoke a
+  # token it cannot accept; the adapter is the invocation contract for both.
   gen_skill_body() {
     _gcs_name="$1"; _gcs_dest="$2"; _gcs_src="$CMDDIR/$_gcs_name.md"
     _gcs_desc="$(sed -n 's/^description: //p' "$_gcs_src" | sed -n '1p')"
@@ -6536,7 +6539,7 @@ EOF
       printf 'description: %s\n' "$_gcs_desc"
       printf '%s\n' '---'
       printf '\n## Invocation adapter\n\n'
-      printf 'In Codex, invoke `$%s` and write arguments after the skill mention; in OpenCode, invoke `/%s`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below.\n' "$_gcs_name" "$_gcs_name"
+      printf 'In Codex, invoke `$%s` and write arguments after the skill mention; in OpenCode, invoke `/%s`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.\n' "$_gcs_name" "$_gcs_name"
       # R5: the concurrency gate is a property of the workflow, not of one file. The
       # shared unit is written for every claimant, so the OpenCode capability
       # precondition lives in the BODY — unconditional text, conditional in effect
@@ -6550,14 +6553,11 @@ EOF
         printf '> ignores this precondition: it delegates through native concurrent sub-agents.\n'
       fi
       printf '\n## Canonical workflow\n'
-      sed -n '5,$p' "$_gcs_src" | codex_invocations
+      # Host-neutral: the canonical body's portable `/sdd-*` spellings are preserved
+      # verbatim. The adapter above carries the Codex `$sdd-*` / OpenCode `/sdd-*` mapping,
+      # so no host-specific rewrite is applied here.
+      sed -n '5,$p' "$_gcs_src"
     } > "$_gcs_dest"
-  }
-
-  # Rewrite only portable command invocation tokens; shell paths such as
-  # tools/sdd-next.sh and quoted executable programs remain canonical bytes.
-  codex_invocations() {
-    sed 's@/sdd-\(next\|new\|plan\|drill\|fix-parallel\|fix\|pr-loop\)\([`[:space:],;:)]\)@$sdd-\1\2@g; s@/sdd-\(next\|new\|plan\|drill\|fix-parallel\|fix\|pr-loop\)$@$sdd-\1@g'
   }
 
   gen_codex_skill_policy() {

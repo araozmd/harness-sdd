@@ -5,7 +5,7 @@ description: Run a bounded batch of isolated autonomous E99 fixes through target
 
 ## Invocation adapter
 
-In Codex, invoke `$sdd-fix-parallel` and write arguments after the skill mention; in OpenCode, invoke `/sdd-fix-parallel`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below.
+In Codex, invoke `$sdd-fix-parallel` and write arguments after the skill mention; in OpenCode, invoke `/sdd-fix-parallel`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.
 
 > **OpenCode capability precondition.** If the running host is OpenCode, read
 > `.opencode-parallel` before spawning any worker. If it does not read
@@ -19,7 +19,7 @@ Act as the **Fixer parallel coordinator** (`agents/fixer.md` → “Parallel
 dispatch mode”).
 
 This command is argument-free. If `$ARGUMENTS` is non-empty, STOP and report usage
-`$sdd-fix-parallel`.
+`/sdd-fix-parallel`.
 
 1. Run `./init.sh`; stop on non-zero.
 2. Execute the Fixer role's exact P1–P7 sequence: native concurrency/config/in-session
@@ -34,5 +34,5 @@ This command is argument-free. If `$ARGUMENTS` is non-empty, STOP and report usa
    done and teardown.
 4. With no ready work, print `no ready E99 fixes` and exit zero without mutation. If
    native delegation is absent or `execution.builder.backend: delegate`, fail before
-   manifest/provisioning/claim and point to serial `$sdd-fix`; never invent a vendor
+   manifest/provisioning/claim and point to serial `/sdd-fix`; never invent a vendor
    API or background shell agent.

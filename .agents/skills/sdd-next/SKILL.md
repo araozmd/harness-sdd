@@ -5,7 +5,7 @@ description: Run the Orchestrator loop on the next actionable task (init → rou
 
 ## Invocation adapter
 
-In Codex, invoke `$sdd-next` and write arguments after the skill mention; in OpenCode, invoke `/sdd-next`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below.
+In Codex, invoke `$sdd-next` and write arguments after the skill mention; in OpenCode, invoke `/sdd-next`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.
 
 ## Canonical workflow
 Act as the **Orchestrator** (`agents/orchestrator.md`).
@@ -42,7 +42,7 @@ Under `--mine`, use **scoped selection**: consider only features whose **effecti
   `gh api user`; else literal). This is **owned-only** — it never claims unassigned work
   and never writes an `owner`; if the identity is unresolved or no owned actionable
   feature exists, it **fails closed** (selects nothing, reports, changes no state) and
-  does **not** widen to board-wide selection. Bare `$sdd-next` (no `--mine`) is unchanged
+  does **not** widen to board-wide selection. Bare `/sdd-next` (no `--mine`) is unchanged
   board-wide selection and ignores `owner`. The scoping semantics live in the
   **Orchestrator contract** (`agents/orchestrator.md` → "Ownership & scoped selection");
   this command only maps the scope.

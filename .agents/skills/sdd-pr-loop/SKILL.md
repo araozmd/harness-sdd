@@ -5,7 +5,7 @@ description: Drive the Codex review cycle on an open PR — trigger @codex revie
 
 ## Invocation adapter
 
-In Codex, invoke `$sdd-pr-loop` and write arguments after the skill mention; in OpenCode, invoke `/sdd-pr-loop`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below.
+In Codex, invoke `$sdd-pr-loop` and write arguments after the skill mention; in OpenCode, invoke `/sdd-pr-loop`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.
 
 ## Canonical workflow
 Drive the Codex review cycle on an open PR until every gate is green or the round cap is
@@ -35,7 +35,7 @@ key behaves exactly as the default.
 
 `pr_loop.enabled` is the **opt-in** master gate: this command is only installed at all
 because it reads exactly `true`. Anything else — an absent block, an absent key, an empty
-or malformed value — means off, and the installer stamps no `$sdd-pr-loop` glue.
+or malformed value — means off, and the installer stamps no `/sdd-pr-loop` glue.
 
 Execution knobs are **env-only** (never config): `HARNESS_POLL_INTERVAL` (60),
 `HARNESS_POLL_CEILING` (900), `HARNESS_FIRST_RESPONSE` (180), `HARNESS_DRY_RUN`.
@@ -49,7 +49,7 @@ Use a `while` loop so the round counter can be restarted. `round_dir=.pr-loop/<p
 `max_rounds` is read from `pr_loop.max_rounds` (default 4).
 
 `max_rounds` is a budget for the **PR**, not for one invocation of this command. Resume the
-counter from the highest round already in the cache, so re-running `$sdd-pr-loop` cannot
+counter from the highest round already in the cache, so re-running `/sdd-pr-loop` cannot
 silently grant a fresh budget — PR #86 reached round 12 against `max_rounds: 4` exactly that
 way, and the `needs-human` hand-off that should have fired at round 4 never did.
 
