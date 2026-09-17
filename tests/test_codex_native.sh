@@ -205,7 +205,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
         install(old,'--agents=all','--pr-loop=true')
         for rel,content in golden.items():assert (old/rel).read_bytes()==content, 'retained old emission changed: '+rel
     print('ok - retained_host_and_seed_regression (R11)')
-    assert (src/'VERSION').read_text().strip()=='0.80.0' and not (src/'GEMINI.md').exists()
+    assert (src/'VERSION').read_text().strip()=='0.81.0' and not (src/'GEMINI.md').exists()
     a=(src/'AGENTS.md').read_text()
     for token in ('./init.sh','non-zero','STOP','harness.config.yaml','agents/orchestrator.md','progress/lessons.md','spec-ready','in-progress','independent Reviewer','chat history','telemetry','tokens','VERSION','CHANGELOG.md','MINOR','MAJOR','branch','PR','main'):
         assert token.lower() in a.lower(),token

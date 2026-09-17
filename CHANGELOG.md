@@ -4,6 +4,38 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.81.0] — 2026-09-17
+
+### OpenCode claims the shared `.agents/skills` units (E31-F01)
+
+- **The claiming set is now `{codex, opencode}` (ADR-0003).** OpenCode 1.18.31 reads
+  `.agents/skills/*/SKILL.md`, so it joins Codex as a claimant of the one harness-owned unit
+  per command. Installing while **either** is selected writes the units; reclaiming them now
+  happens only when the **last** claimant is deselected. Selecting `opencode` alone installs
+  the full `.agents/skills/sdd-*/` set.
+- **The invocation adapter is host-neutral.** `SKILL.md` no longer speaks Codex only: it
+  names the Codex `$sdd-*` invocation (arguments written after the mention) and the OpenCode
+  `/sdd-*` invocation, keeps the `$ARGUMENTS` mapping, and no longer instructs OpenCode to
+  discover skills with `/skills` (a surface OpenCode does not have). There is one body for
+  every claimant, so the bytes do not depend on whether `opencode` is selected.
+- **`/sdd-fix-parallel` self-gates in its shared body.** The installer already withheld
+  `.opencode/command/sdd-fix-parallel.md` unless `.harness/.opencode-parallel` read
+  `supported`, but OpenCode also reads the shared `.agents/skills` unit, which bypassed that
+  gate. The unit now carries an OpenCode capability precondition: under OpenCode it reads
+  `.harness/.opencode-parallel` and stops before spawning a worker unless the file reads
+  exactly `supported`, reporting the `/sdd-test-concurrency` → `--with-opencode-parallel=true`
+  path. Codex reads the paragraph as a no-op.
+- **Inverted reclaim contract — behavior change.** Deselecting `codex` from a
+  `codex,opencode` selection no longer deletes the pristine shared units: OpenCode still reads
+  them, and they must survive (previously the surface was reclaimed out from under the
+  remaining claimant — ADR-0003's silent-destructive direction). Reclamation now runs only
+  when the last of `{codex, opencode}` leaves, in either deselect order, and the
+  `tests/test_install.sh` mixed-selection cases plus `tests/test_pr_loop.sh` R4 encode the new
+  contract. A `codex`-only selection remains byte-identical (R6).
+- The source repo's committed `.agents/skills/*/SKILL.md` glue is regenerated with the new
+  adapter; the installer's own success line, install manifest, docs and ADR-0003 name both
+  claimants. No new dependency, config key, prompt or flag.
+
 ## [0.80.0] — 2026-09-16
 
 ### `specs/glossary.md` becomes project-owned — seeded once, preserved on upgrade (E30-F01)

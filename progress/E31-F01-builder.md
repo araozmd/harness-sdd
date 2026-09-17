@@ -83,3 +83,39 @@ Restored `git show HEAD:harness-install.sh` over the working copy, ran the real 
   shared units (e.g. `:6645`, `:6650`, `:6674`). T6 named only the §5d success line and the
   install manifest, so those were left untouched to stay in scope; they are a description
   divergence the ADR/R4 spirit would also want named, and are worth a small follow-up fix.
+
+---
+
+## Round 2 — blocking finding B1 (no release record) fixed
+
+The Reviewer rejected on B1 only: the round-1 commit changed the installed body
+(`harness-install.sh`, `docs/`, `.claude/.glue-manifest`) with no `VERSION`/`CHANGELOG`
+record, and ADR-0003:109-113 says the inverted reclaim contract belongs in the changelog.
+
+- `VERSION` `0.80.0 → 0.81.0` (MINOR — new capability: OpenCode claimant).
+- `CHANGELOG.md` gained a top `## [0.81.0] — 2026-09-17` entry recording (a) the
+  `{codex, opencode}` claiming set (ADR-0003); (b) the host-neutral invocation adapter;
+  (c) the `sdd-fix-parallel` OpenCode capability precondition; and (d) **explicitly the
+  inverted reclaim contract** — `codex,opencode → deselect codex` now PRESERVES the units
+  OpenCode still reads, where the old behavior deleted them (the assertion deliberately
+  rewritten in `tests/test_install.sh` and `tests/test_pr_loop.sh`).
+- Synced the one suite literal the Reviewer named: `tests/test_codex_native.sh` now pins
+  `VERSION == '0.81.0'` (was `0.80.0`). `grep -rn '0\.80\.0'` over `tests/ docs/ README.md
+  harness-install.sh specs/` (excluding the frozen `frontend-v0.78.1` fixture) returns no
+  hits.
+- Non-blocking fold-in: `E31-F01.tests.md` R1–R6 statuses → ✅, and the OpenCode end-to-end
+  bullet now describes the resolved *surface* (OpenCode prefers `.opencode/command/<name>.md`
+  over a same-named skill; only `sdd-fix-parallel` is skill-served in a target, and
+  `source:"skill"` is the source-repo reading the epic probe recorded) and requires the
+  PR-loop gate for `sdd-pr-loop` to be present.
+- Left the residual `harness-install.sh:6645/6650/6674` "selected Codex install" warnings
+  untouched, per the Reviewer's follow-up (not a block).
+
+### Round-2 verification
+
+- `./init.sh` → **exit 0**.
+- `sh tools/run-tests.sh` → **`all 47 suites passed`** (rc=0, `--jobs 8`). Disk before/after:
+  `/tmp` 16G avail of 32G.
+- No source-glue regeneration was needed: `VERSION` is not part of any generated unit or the
+  `.claude/.glue-manifest` checksum set (round-1 `--self` output still matches its emitter;
+  `test_self_drift.sh` green).
