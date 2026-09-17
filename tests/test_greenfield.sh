@@ -15,6 +15,16 @@
 #   R9  the installed init.sh exits 0 in the still-non-git target
 #   R10 the installed version stamp is read from $SRC/VERSION at run time
 #
+# Round-2 review additions:
+#   * R1/R4 also pin the drill step's required `<epic-id>` argument
+#     (4041566961), so the advertised sequence is directly executable.
+#   * `test_installed_product_md_points_at_sdd_plan` pins that the seeded
+#     `specs/product.md` names `/sdd-plan` for a new product's epics and never
+#     `/sdd-next` (4041566967). It carries a positive SHAPE control before the
+#     negative, per the dead-predicate lesson (progress/lessons.md).
+#   * `test_installed_entrypoint_points_at_sdd_plan` pins the installed root
+#     `AGENTS.md` pointer's new-product branch (4041566967).
+#
 # CONVENTIONS THIS SUITE HONOURS (progress/lessons.md):
 #   * No `VERSION` literal anywhere. R10 reads $SRC/VERSION at run time; the
 #     no-literal half is only falsifiable by the Reviewer's bump mutation, not by
@@ -46,10 +56,16 @@ pass() { echo "ok - $1"; }
 
 # section_span <file> <exact H2 line> — print the span from that heading to the
 # next `## ` heading (exclusive). Empty output means the heading is stale/moved.
+# Fence-aware via tests/lib/fence.awk, the ONE shared CommonMark rule
+# (test_change_size.sh R9d): a `## ` line inside a fenced block must not end the
+# span. The awk program is passed through the shell verbatim; the fence file's
+# backticks are not re-scanned because command-substitution output is not re-expanded.
 section_span() {
-  awk -v h="$2" '
-    !k && $0 == h { k = 1 }
-    k && /^## / && $0 != h { exit }
+  SECTION_HEADING="$2" awk "$(cat "$SRC/tests/lib/fence.awk")"'
+    BEGIN { h = ENVIRON["SECTION_HEADING"] }
+    fence_delim($0) { if (k) print; next }
+    !k && !fence && $0 == h { k = 1 }
+    k && !fence && /^## / && $0 != h { exit }
     k { print }
   ' "$1"
 }
@@ -103,6 +119,10 @@ test_greenfield_section_documents_sequence() {
   for _a in 'harness-install.sh' 'git init' '/sdd-plan' '/sdd-drill' '/sdd-next'; do
     assert_contains "R1 section" "$_gf" "$_a"
   done
+  # Round-2 (4041566961): the drill step must name the epic id it requires, or the
+  # advertised sequence stalls on a command that stops to ask. `/sdd-drill` is kept
+  # as a substring so the ordering assertions above stay on the same anchor.
+  assert_contains "R1 section" "$_gf" '/sdd-drill <epic-id>'
   require_order "R1 sequence" "$_gf" 'harness-install.sh' 'git init' le
   require_order "R1 sequence" "$_gf" 'git init' '/sdd-plan' le
   require_order "R1 sequence" "$_gf" '/sdd-plan' '/sdd-drill' le
@@ -150,6 +170,7 @@ test_bootstrap_section_reconciled() {
   assert_contains "R4 Bootstrap" "$_bs" 'E00-F01'
   assert_contains "R4 Bootstrap" "$_bs" '/sdd-next'
   assert_contains "R4 Bootstrap" "$_bs" '/sdd-plan'
+  assert_contains "R4 Bootstrap" "$_bs" '/sdd-drill <epic-id>'
   require_order "R4 Bootstrap" "$_bs" '/sdd-plan' '/sdd-next' lt
   pass "Bootstrap section routes the seeded E00-F01 after /sdd-plan and keeps its heading (R4) [bootstrap_section_reconciled]"
 }
@@ -262,6 +283,45 @@ test_installed_layout_usable() {
   pass "installed layout is usable (entrypoint, body, seeded board, /sdd-plan command) (R8) [installed_layout_usable]"
 }
 
+# ── Round-2 reconciliation: installed product.md front door (4041566967) ───────
+
+# The seeded constitution ships into every target and is the first thing a
+# greenfield reader edits. It must point at /sdd-plan to draft the project's
+# epics, never at /sdd-next — otherwise a fresh install carries two competing
+# front doors and the cheaper-to-read one wins.
+test_installed_product_md_points_at_sdd_plan() {
+  _prod="$TGT/.harness/specs/product.md"
+  [ -s "$_prod" ] \
+    || fail "R8b: installed .harness/specs/product.md is missing or empty — the seeded new-product guidance cannot be checked"
+  _prod_flat="$(tr '\n' ' ' < "$_prod")"
+  # Positive control on the SHAPE before the negative: the document must still
+  # carry a <plan>→<epics> instruction, so the negative below cannot pass merely
+  # because the guidance vanished (progress/lessons.md: a dead middle predicate
+  # is decoration, not a test).
+  printf '%s\n' "$_prod_flat" | grep -qE 'sdd-plan[^.]{0,60}draft epics' \
+    || fail "R8b: installed product.md no longer points a new product at /sdd-plan to draft its epics — the front-door replacement is absent (stale extraction or dropped guidance)"
+  if printf '%s\n' "$_prod_flat" | grep -qiE 'sdd-next[^.]{0,60}draft epics'; then
+    fail "R8b: installed product.md still tells a new-product reader that /sdd-next drafts the project's epics — the two front doors conflict on a fresh install"
+  fi
+  pass "installed product.md points at /sdd-plan (not /sdd-next) to draft a new product's epics (round-2 reconciliation) [installed_product_md_points_at_sdd_plan]"
+}
+
+# The target-root entrypoint pointer is the first instruction an agent reads on a
+# fresh install. It must send a new product to /sdd-plan rather than straight into
+# the execution loop — otherwise the installed bootstrap text carries a third,
+# competing front door (round-2 review 4041566967).
+test_installed_entrypoint_points_at_sdd_plan() {
+  _ep="$TGT/AGENTS.md"
+  [ -s "$_ep" ] \
+    || fail "R8c: installed target-root AGENTS.md is missing or empty — the session-entry instruction cannot be checked"
+  _ep_flat="$(tr '\n' ' ' < "$_ep")"
+  # Positive folded anchor: the new-product branch and /sdd-plan must co-occur in
+  # one sentence, so removing either half reds here.
+  printf '%s\n' "$_ep_flat" | grep -qiE 'sdd-plan[^.]{0,80}new product' \
+    || fail "R8c: installed entrypoint does not send a new product to /sdd-plan — a fresh install still starts an agent at /sdd-next"
+  pass "installed entrypoint sends a new product to /sdd-plan (round-2 reconciliation) [installed_entrypoint_points_at_sdd_plan]"
+}
+
 # ── R9 (integration) ──────────────────────────────────────────────────────────
 
 test_init_passes_in_non_git_target() {
@@ -303,5 +363,7 @@ test_empty_non_git_install_succeeds
 test_banner_points_at_sdd_plan
 test_install_creates_no_git
 test_installed_layout_usable
+test_installed_product_md_points_at_sdd_plan
+test_installed_entrypoint_points_at_sdd_plan
 test_init_passes_in_non_git_target
 test_version_stamp_reads_source_version

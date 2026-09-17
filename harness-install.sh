@@ -3826,7 +3826,7 @@ status: draft
 # <Product name> — Product Constitution
 
 > Layer 0. The stable, high-level "what & why". Rewrite this for your product,
-> then run /sdd-next to bootstrap (detect test/lint commands, draft epics).
+> then run /sdd-plan to plan the whole project (vision, architecture, ADRs, draft epics).
 
 ## What this product is
 TODO
@@ -4232,7 +4232,8 @@ Start every agent session as the **Orchestrator**:
 3. Local prompt override (if present): read \`AGENTS.local.md\` beside this entrypoint
    after committed instructions as personal, additive guidance; committed instructions remain authoritative on conflict.
 4. Product/source code lives at the repo root; harness bookkeeping lives in
-   \`.harness/\`. In Claude Code, run \`/sdd-next\`.
+   \`.harness/\`. In Claude Code, run \`/sdd-plan\` for a new product, then
+   \`/sdd-next\`; ongoing work resumes with \`/sdd-next\`.
 $MARK_END"
     if [ -f "$_f" ] && grep -qF "$MARK_BEGIN" "$_f"; then
       # Replace the marked block IN PLACE: keep the prefix before the begin marker

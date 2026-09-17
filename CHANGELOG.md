@@ -11,7 +11,7 @@ All notable changes to the harness body are recorded here. Versions follow
 - **`docs/INSTALL.md` gains `## Starting from nothing (new product)`** and the existing
   `## Bootstrap (first run)` is reconciled to the same order, so there is exactly one
   new-product story: empty directory → `harness-install.sh` → `git init` + commit →
-  `/sdd-plan` → `/sdd-drill` → `/sdd-next`. The section states that an empty, non-git
+  `/sdd-plan` → `/sdd-drill <epic-id>` → `/sdd-next`. The section states that an empty, non-git
   target is supported and that `The installer does not create a git repository.` —
   version control stays the human's step, and `init.sh`'s drift guard skips on a non-git
   tree and warns on an untracked body rather than failing. The install step now names the
@@ -26,6 +26,14 @@ All notable changes to the harness body are recorded here. Versions follow
   fixture and covers the banner order, the absence of `.git`, the usable installed
   layout, the installed `init.sh` passing there, and a version stamp read from `VERSION`
   at run time (no frozen literal). No new command, flag, config key, prompt or dependency.
+- **Every installed front-door instruction now agrees with `/sdd-plan` (round-2 review):**
+  `/sdd-drill` is documented with its required `<epic-id>` argument in `docs/INSTALL.md`;
+  the seeded `specs/product.md` stub no longer tells a new-product reader that `/sdd-next`
+  drafts the epics; the canonical `AGENTS.md` distinguishes new-product planning
+  (`/sdd-plan` → `/sdd-drill <epic-id>`) from later work intake (`/sdd-new`) and execution
+  (`/sdd-next`); and the entrypoint pointer block sends a new product to `/sdd-plan`
+  before `/sdd-next`. `tests/test_greenfield.sh` pins the seeded `product.md` claim
+  (positive shape control + negative) and the drill step's `<epic-id>` argument.
 
 ## [0.81.0] — 2026-09-17
 

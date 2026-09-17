@@ -152,7 +152,7 @@ degraded mode. The installer does not create a git repository.
    skips, and on an untracked body it warns — it never fails.
 4. Open the project and run **`/sdd-plan`** — the whole-project inception that writes
    the vision, architecture and ADRs and seeds the project's draft epics.
-5. Run **`/sdd-drill`** to decompose the first draft epic into features.
+5. Run **`/sdd-drill <epic-id>`** to decompose the first draft epic into features.
 6. Keep running **`/sdd-next`** to spec and build that work.
 
 The seeded `E00-F01` bootstrap task is not the front door for a new product; `/sdd-next`
@@ -168,7 +168,7 @@ harness itself, under the human gate. A new product plans before it builds: run
 1. Edit `.harness/specs/product.md` for your product.
 2. Run **`/sdd-plan`** to brainstorm the vision, architecture and ADRs and seed the
    project's draft epics.
-3. Run **`/sdd-drill`** to decompose a draft epic into features.
+3. Run **`/sdd-drill <epic-id>`** to decompose a draft epic into features.
 4. Run **`/sdd-next`**. The seeded `E00-F01` bootstrap task is `sdd: true`, so the
    Orchestrator routes it to the Architect (with Scout recon) to detect your
    test/lint/typecheck commands (`.harness/harness.config.yaml` + fast project gates in
