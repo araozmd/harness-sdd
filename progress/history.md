@@ -289,3 +289,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-17 E28-F01 pr-loop: round 6 returned 1 blocking docs finding; human override — cap raised to 7, comprehensive docs-sequence fix dispatched.
 - 2026-09-17 E28-F01 pr-loop: round 7 returned 1 blocking finding (generated entrypoint omits /sdd-drill); human override — cap raised to 8, comprehensive entrypoint-prose audit dispatched.
 - 2026-09-17 E28-F01 pr-loop: round 8 returned 2 blocking findings (multi-host banner repeats full workflow; generated AGENTS.md pointer is Claude-only). Human override — cap raised to 9, one combined structural fix dispatched.
+- 2026-09-17 E28-F01 pr-loop: round 9 returned 2 blocking findings (upgrade path leaves stale product stub; banner fires in umbrella cascades). Human override — cap raised to 10; fix includes an interaction sweep so the review converges.
