@@ -123,16 +123,27 @@ pass "message lists a capped sample and offers the listing command (R3) [R3_mess
 mk_target "$T/owned"
 printf '\n# local project tweak\n' >> "$T/owned/.harness/harness.config.yaml"
 printf '{"note":"local"}\n' > "$T/owned/.harness/progress/scratch.md"
+# E30-F01 (R10): specs/glossary.md is project-owned (seeded once, preserved on upgrade) —
+# an uncommitted edit to it alone must not read as harness drift either.
+printf '\nR10 marker term — uncommitted project glossary edit\n' >> "$T/owned/.harness/specs/glossary.md"
 run_gate "$T/owned"
 [ "$GATE_RC" = "0" ] \
-  || fail "R4: project-owned changes (harness.config.yaml, progress/) failed the gate: $GATE_OUT"
-pass "project-owned changes alone do not trip the guard (R4) [R4_project_owned_excluded]"
+  || fail "R4/R10: project-owned changes (harness.config.yaml, progress/, specs/glossary.md) failed the gate: $GATE_OUT"
+pass "project-owned changes alone do not trip the guard (R4, R10) [R4_project_owned_excluded]"
 # positive control on the SAME tree
 echo "# unlanded edit" >> "$T/owned/.harness/agents/reviewer.md"
 run_gate "$T/owned"
 [ "$GATE_RC" != "0" ] \
   || fail "R4 control: a harness-owned change in the same tree PASSED — the guard excludes everything"
 pass "…and a harness-owned change in that same tree still fails (R4 control) [R4_project_owned_excluded]"
+
+# R10: assert the SOURCE directly, once. emit_body() has two consumers — init.sh's drift
+# guard (exercised above) and the installer's post-cascade landing audit — and this
+# assertion covers both at the one place the pathspec list exists, instead of arguing that
+# the second consumer shares an implementation.
+"$SRC/tools/harness-owned-paths.sh" body "$T/owned/.harness" | grep -qxF ':(exclude).harness/specs/glossary.md' \
+  || fail "R10: tools/harness-owned-paths.sh body does not exclude .harness/specs/glossary.md"
+pass "harness-owned-paths.sh excludes specs/glossary.md at the source (R10) [R10_glossary_excluded_at_source]"
 
 # ── R5: root-level generated glue is in scope ─────────────────────────────────────
 # R5_root_glue_in_scope

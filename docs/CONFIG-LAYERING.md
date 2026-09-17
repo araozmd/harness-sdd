@@ -19,10 +19,12 @@ layer their config, so *personal* settings have a separate home. The rule is jus
 | **User-global** | `~/.claude/CLAUDE.md`, your global agent settings | prompt/model preferences that follow *you* across every project | not in any project repo |
 
 In an umbrella, a **thin** child's prose body (`AGENTS.md`, `agents/`, `docs/`,
-`specs/_templates/`, `specs/glossary.md`) is a set of committed **pointer stubs** resolving
-to the umbrella's copy via `umbrella.root` — still project layer, still committed, just
-short. Existing full-copy children keep their local prose unless explicitly migrated
-with `--thin`; setting `umbrella.root` alone does not convert them. See
+`specs/_templates/`) is a set of committed **pointer stubs** resolving to the umbrella's
+copy via `umbrella.root` — still project layer, still committed, just short.
+`specs/glossary.md` is project-owned (E30-F01) and is never a stub in any layout — a
+thin child's own glossary is real, local content, just like `specs/product.md`. Existing
+full-copy children keep their local prose unless explicitly migrated with `--thin`;
+setting `umbrella.root` alone does not convert them. See
 [`UMBRELLA.md`](./UMBRELLA.md) → *The thin child*.
 
 The harness-generated `.claude/agents/*` and `.claude/commands/*` are **project** layer —

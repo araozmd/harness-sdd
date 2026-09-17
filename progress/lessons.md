@@ -162,3 +162,13 @@
   `[ -x "$SRC/<file>" ]` check reads the mode that a commit can drop. Proven: `chmod -x
   tools/fix-worktree.sh` keeps all 47 suites green while agents/fixer.md:282's documented
   `tools/fix-worktree.sh create …` dies with Permission denied.
+- [2026-09-16 builder] `tests/test_codex_native.sh`'s R12 check
+  (`assert (src/'VERSION').read_text().strip()=='0.79.0'`) pins the repo's CURRENT top VERSION
+  as a literal, not a historical one — the exact "permanent-suite anti-pattern" other suites'
+  own headers warn against. It broke immediately on E30-F01's routine MINOR bump, unrelated to
+  that feature's own logic. The CHANGELOG-section split on the same line
+  (`split('## [0.79.0]',1)`) is SAFE — it anchors a historical heading text that stays findable
+  no matter what is prepended above it — only the bare `=='0.79.0'` VERSION-file comparison is
+  fragile. Whoever bumps VERSION next must grep for the CURRENT value as a literal (not just
+  `grep 0\.NN\.0 CHANGELOG.md`, which misses a bare VERSION-file comparison) before trusting a
+  green `tools/run-tests.sh`; the fix is a one-line literal sync, not a design change.

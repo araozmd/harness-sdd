@@ -2137,4 +2137,331 @@ test_standalone_flag_conflicts() {
 }
 test_standalone_flag_conflicts
 
+# ══ E30-F01 — specs/glossary.md is project-owned: seeded once, preserved on upgrade ══════
+# specs/glossary.md left HARNESS_BODY_PROSE (decision D1): it is project content, like
+# specs/product.md, never harness body and never a stub-able prose-tier path. Three states,
+# one rule, no flag: absent -> seed; byte-identical to the shipped example -> pristine;
+# anything else -> preserve byte for byte. The one exception (an existing umbrella
+# pointer-stub sentinel) is covered by tests/test_umbrella.sh's R8 cases, along with the
+# thin-child and --thin-conversion arms of R7/R9 — this suite owns the single-repo /
+# coordinator arm and the static ownership-documentation contract.
+
+# R1
+test_glossary_seeded_on_fresh_install() {
+  _tg1="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  _og1="$(CODEX_HOME="$_tg1/ch" HOME="$_tg1/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg1" 2>&1)" \
+    || fail "R1: fresh install exited non-zero: $_og1"
+  [ -f "$_tg1/.harness/specs/glossary.md" ] \
+    || fail "R1: .harness/specs/glossary.md was not created on a fresh install"
+  cmp -s "$_tg1/.harness/specs/glossary.md" "$SRC/specs/glossary.md" \
+    || fail "R1: the seeded glossary is not byte-identical to the shipped example"
+  printf '%s\n' "$_og1" | grep -qF 'seeded specs/glossary.md' \
+    || fail "R1: the run's stdout does not report the seeded verdict: $_og1"
+  # CONTROL: this is a genuine install-time artifact, not a file the fixture inherited from
+  # the repo (progress/lessons.md, 2026-09-05) — deleting it makes the existence assertion
+  # above fail with no further run, proving the case is not satisfiable for free.
+  rm -f "$_tg1/.harness/specs/glossary.md"
+  [ ! -e "$_tg1/.harness/specs/glossary.md" ] \
+    || fail "R1 control: the glossary survived its own deletion — the fixture is not testing what it claims to"
+  rm -rf "$_tg1"
+  pass "an absent glossary is seeded byte-identical to the shipped example (R1) [test_glossary_seeded_on_fresh_install]"
+}
+test_glossary_seeded_on_fresh_install
+
+# R2
+test_glossary_pristine_verdict() {
+  _tg2="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_tg2/ch" HOME="$_tg2/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg2" >/dev/null 2>&1 \
+    || fail "R2 setup: fresh install exited non-zero"
+  _og2="$(CODEX_HOME="$_tg2/ch" HOME="$_tg2/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg2" 2>&1)" \
+    || fail "R2: the second (pristine) run exited non-zero: $_og2"
+  cmp -s "$_tg2/.harness/specs/glossary.md" "$SRC/specs/glossary.md" \
+    || fail "R2: the glossary is no longer byte-identical to the shipped example after a pristine re-run"
+  printf '%s\n' "$_og2" | grep -qF 'specs/glossary.md pristine' \
+    || fail "R2: the pristine run's stdout does not report the pristine verdict: $_og2"
+  printf '%s\n' "$_og2" | grep -qF 'specs/glossary.md preserved' \
+    && fail "R2: a byte-identical glossary was reported PRESERVED, not pristine — the two verdicts are not distinct: $_og2"
+  rm -rf "$_tg2"
+  pass "a byte-identical glossary reports the pristine verdict, distinct from preserved (R2) [test_glossary_pristine_verdict]"
+}
+test_glossary_pristine_verdict
+
+# R3 (+ R7's single-repo/coordinator arm — see tests.md's matrix row for R7)
+test_glossary_edit_preserved_on_upgrade() {
+  # (a) a DISTINCTIVE project glossary — the fixture's own bytes, not merely an append to
+  # the shipped example, per progress/lessons.md 2026-09-05 ("a fixture copied from the repo
+  # inherits the artifact under test" — never assert against content the fixture inherited
+  # for free).
+  _tg3a="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_tg3a/ch" HOME="$_tg3a/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg3a" >/dev/null 2>&1 \
+    || fail "R3 setup: fresh install exited non-zero"
+  printf '\n**Marker** — E30-F01 project-authored term.  \n' >> "$_tg3a/.harness/specs/glossary.md"
+  cp "$_tg3a/.harness/specs/glossary.md" "$_tg3a/glossary.ref"
+  _og3a="$(CODEX_HOME="$_tg3a/ch" HOME="$_tg3a/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg3a" 2>&1)" \
+    || fail "R3: the upgrade run exited non-zero: $_og3a"
+  cmp -s "$_tg3a/.harness/specs/glossary.md" "$_tg3a/glossary.ref" \
+    || fail "R3: a project-edited glossary was NOT left byte-for-byte unchanged on upgrade"
+  printf '%s\n' "$_og3a" | grep -qF 'specs/glossary.md preserved' \
+    || fail "R3: the upgrade's stdout does not report the preserved verdict: $_og3a"
+  rm -rf "$_tg3a"
+
+  # (b) WHITESPACE-ONLY control — a trailing space on line 1 is a real byte difference and
+  # must still be preserved: cmp-grade byte identity, never diff -w.
+  _tg3b="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_tg3b/ch" HOME="$_tg3b/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg3b" >/dev/null 2>&1 \
+    || fail "R3 setup (whitespace): fresh install exited non-zero"
+  awk 'NR==1{printf "%s \n", $0; next} {print}' "$_tg3b/.harness/specs/glossary.md" > "$_tg3b/gloss.tmp"
+  cat "$_tg3b/gloss.tmp" > "$_tg3b/.harness/specs/glossary.md"
+  cmp -s "$_tg3b/.harness/specs/glossary.md" "$SRC/specs/glossary.md" \
+    && fail "R3 control: the seeded trailing-space edit is not a byte difference at all — the byte-identity case is vacuous"
+  diff -qw "$_tg3b/.harness/specs/glossary.md" "$SRC/specs/glossary.md" >/dev/null 2>&1 \
+    || fail "R3 control: the seeded edit is NOT whitespace-only, so it pins nothing about BYTE identity"
+  cp "$_tg3b/.harness/specs/glossary.md" "$_tg3b/glossary.ref"
+  _og3b="$(CODEX_HOME="$_tg3b/ch" HOME="$_tg3b/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg3b" 2>&1)" \
+    || fail "R3 (whitespace): the upgrade run exited non-zero: $_og3b"
+  cmp -s "$_tg3b/.harness/specs/glossary.md" "$_tg3b/glossary.ref" \
+    || fail "R3: a WHITESPACE-ONLY edit was not left byte-for-byte unchanged — the comparison is identity-modulo-whitespace rather than BYTE identity"
+  printf '%s\n' "$_og3b" | grep -qF 'specs/glossary.md preserved' \
+    || fail "R3 (whitespace): the upgrade's stdout does not report the preserved verdict: $_og3b"
+  rm -rf "$_tg3b"
+
+  # (c) NON-REGULAR-FILE arm — a symlink pointing OUTSIDE the tree must be left exactly as
+  # found: never followed, never unlinked, never replaced. Real red-to-green: a naive
+  # `[ -e ]`-first implementation dereferences and writes through the link.
+  _tg3c="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_tg3c/ch" HOME="$_tg3c/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg3c" >/dev/null 2>&1 \
+    || fail "R3 setup (symlink): fresh install exited non-zero"
+  mkdir -p "$_tg3c/outside"
+  printf 'external content the installer must never touch\n' > "$_tg3c/outside/ext.md"
+  rm -f "$_tg3c/.harness/specs/glossary.md"
+  ln -s "$_tg3c/outside/ext.md" "$_tg3c/.harness/specs/glossary.md"
+  _og3c="$(CODEX_HOME="$_tg3c/ch" HOME="$_tg3c/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg3c" 2>&1)" \
+    || fail "R3 (symlink): the upgrade run exited non-zero: $_og3c"
+  [ -L "$_tg3c/.harness/specs/glossary.md" ] \
+    || fail "R3: the glossary path is no longer a symlink — it was unlinked or replaced"
+  [ "$(readlink "$_tg3c/.harness/specs/glossary.md")" = "$_tg3c/outside/ext.md" ] \
+    || fail "R3: the symlink's target changed — it was re-pointed"
+  grep -qxF 'external content the installer must never touch' "$_tg3c/outside/ext.md" \
+    || fail "R3: the symlink's TARGET file was overwritten — the installer wrote THROUGH the link"
+  printf '%s\n' "$_og3c" | grep -qF 'specs/glossary.md preserved' \
+    || fail "R3 (symlink): the upgrade's stdout does not report the preserved verdict: $_og3c"
+  rm -rf "$_tg3c"
+
+  pass "any byte difference (incl. a symlink) leaves the glossary exactly as found and reports preserved (R3, R7 single-repo arm) [test_glossary_edit_preserved_on_upgrade]"
+}
+test_glossary_edit_preserved_on_upgrade
+
+# R4
+test_glossary_reseeded_when_deleted() {
+  _tg4="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_tg4/ch" HOME="$_tg4/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg4" >/dev/null 2>&1 \
+    || fail "R4 setup: fresh install exited non-zero"
+  [ -f "$_tg4/.harness/.harness-version" ] \
+    || fail "R4 setup: no version stamp — the next run would not take the UPGRADE path this case is about"
+  rm -f "$_tg4/.harness/specs/glossary.md"
+  _og4="$(CODEX_HOME="$_tg4/ch" HOME="$_tg4/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg4" 2>&1)" \
+    || fail "R4: the upgrade run exited non-zero: $_og4"
+  [ -f "$_tg4/.harness/specs/glossary.md" ] \
+    || fail "R4: the deleted glossary was not re-seeded on upgrade"
+  cmp -s "$_tg4/.harness/specs/glossary.md" "$SRC/specs/glossary.md" \
+    || fail "R4: the re-seeded glossary is not byte-identical to the shipped example"
+  printf '%s\n' "$_og4" | grep -qF 'seeded specs/glossary.md' \
+    || fail "R4: the upgrade's stdout does not report the seeded verdict: $_og4"
+  rm -rf "$_tg4"
+  pass "a glossary deleted after a previous install is re-seeded on upgrade (R4) [test_glossary_reseeded_when_deleted]"
+}
+test_glossary_reseeded_when_deleted
+
+# R5
+test_glossary_reports_one_verdict_line() {
+  # seeded
+  _tg5a="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  _og5a="$(CODEX_HOME="$_tg5a/ch" HOME="$_tg5a/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg5a" 2>&1)" \
+    || fail "R5 (seeded): install exited non-zero: $_og5a"
+  [ "$(printf '%s\n' "$_og5a" | grep -cF 'specs/glossary.md')" = "1" ] \
+    || fail "R5 (seeded): expected exactly one line naming specs/glossary.md: $_og5a"
+  rm -rf "$_tg5a"
+
+  # pristine
+  _tg5b="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_tg5b/ch" HOME="$_tg5b/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg5b" >/dev/null 2>&1 \
+    || fail "R5 (pristine) setup: fresh install exited non-zero"
+  _og5b="$(CODEX_HOME="$_tg5b/ch" HOME="$_tg5b/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg5b" 2>&1)" \
+    || fail "R5 (pristine): install exited non-zero: $_og5b"
+  [ "$(printf '%s\n' "$_og5b" | grep -cF 'specs/glossary.md')" = "1" ] \
+    || fail "R5 (pristine): expected exactly one line naming specs/glossary.md: $_og5b"
+  rm -rf "$_tg5b"
+
+  # preserved
+  _tg5c="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_tg5c/ch" HOME="$_tg5c/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg5c" >/dev/null 2>&1 \
+    || fail "R5 (preserved) setup: fresh install exited non-zero"
+  printf '\nR5 marker term\n' >> "$_tg5c/.harness/specs/glossary.md"
+  _og5c="$(CODEX_HOME="$_tg5c/ch" HOME="$_tg5c/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg5c" 2>&1)" \
+    || fail "R5 (preserved): install exited non-zero: $_og5c"
+  [ "$(printf '%s\n' "$_og5c" | grep -cF 'specs/glossary.md')" = "1" ] \
+    || fail "R5 (preserved): expected exactly one line naming specs/glossary.md: $_og5c"
+  rm -rf "$_tg5c"
+
+  pass "exactly one glossary verdict line per target per run, in every state (R5) [test_glossary_reports_one_verdict_line]"
+}
+test_glossary_reports_one_verdict_line
+
+# R6
+test_glossary_seed_is_idempotent() {
+  _tg6="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_tg6/ch" HOME="$_tg6/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg6" >/dev/null 2>&1 \
+    || fail "R6 setup: fresh install exited non-zero"
+  _og6a="$(CODEX_HOME="$_tg6/ch" HOME="$_tg6/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg6" 2>&1)" \
+    || fail "R6: run 1 (over an already-seeded, unchanged target) exited non-zero: $_og6a"
+  cp "$_tg6/.harness/specs/glossary.md" "$_tg6/after-run1.ref"
+  _og6b="$(CODEX_HOME="$_tg6/ch" HOME="$_tg6/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg6" 2>&1)" \
+    || fail "R6: run 2 exited non-zero: $_og6b"
+  cmp -s "$_tg6/.harness/specs/glossary.md" "$_tg6/after-run1.ref" \
+    || fail "R6: the glossary's bytes after run 2 differ from what run 1 left"
+  for _og6 in "$_og6a" "$_og6b"; do
+    printf '%s\n' "$_og6" | grep -qF 'specs/glossary.md pristine' \
+      || fail "R6: an unchanged re-run did not report the same pristine verdict both times: $_og6"
+  done
+  [ -z "$(find "$_tg6/.harness/specs" -maxdepth 1 -name 'glossary.md.*' 2>/dev/null)" ] \
+    || fail "R6: a sibling artifact (.dist/.orig/.bak) was created beside specs/glossary.md"
+  rm -rf "$_tg6"
+  pass "two runs over an unchanged target converge on the same bytes and verdict, no sibling file (R6) [test_glossary_seed_is_idempotent]"
+}
+test_glossary_seed_is_idempotent
+
+# R11 — placement, not mere presence: extract each span first, then assert inside it
+# (workers_block above is the precedent for bounding a block STRUCTURALLY).
+
+# manifest_section <manifest.txt> <heading-substring-at-col-0> — from that heading line to
+# the next blank line (manifest.txt's sections are blank-line delimited).
+manifest_section() {
+  awk -v h="$2" '
+    index($0, h) == 1 { k = 1 }
+    k && /^$/ { exit }
+    k { print }
+  ' "$1"
+}
+
+# header_ownership_block <harness-install.sh> — the installer's own two ownership-class
+# bullets, bounded from the BODY bullet's opening line to the next blank comment line —
+# the block's structural end, not today's last content line (progress/lessons.md,
+# E99-F160's block-bound lesson).
+header_ownership_block() {
+  awk '
+    /The harness BODY \(agents, docs, store, tools, templates, init\.sh, config, AGENTS\.md\)/ { k = 1 }
+    k && /^#[[:space:]]*$/ { exit }
+    k { print }
+  ' "$1"
+}
+
+# doc_section <doc.md> <heading-substring> — from a `^## ` heading CONTAINING
+# <heading-substring> to the NEXT `^## ` heading. FENCE-AWARE (tests/lib/fence.awk, E99-F131):
+# a bare heading-reset toggle stops at the first `#`-looking line inside a fenced code
+# block, and every doc this feature touches carries fenced examples — a naive slicer would
+# truncate the section and every assertion below it would run against a prefix.
+DOC_FENCE_AWK="$(cat "$SRC/tests/lib/fence.awk")"
+doc_section() {
+  awk -v h="$2" "$DOC_FENCE_AWK"'
+    fence_delim($0) { if (k) print; next }
+    !fence && /^## / {
+      if (k) exit
+      k = (index($0, h) > 0)
+      if (k) print
+      next
+    }
+    k
+  ' "$1"
+}
+
+# config_key_comment <harness.config.yaml> <anchor-substring> — from the first line
+# containing <anchor-substring> to the next line that is NOT a comment (the key line
+# itself), a structural bound rather than a fixed line count.
+config_key_comment() {
+  awk -v h="$2" '
+    index($0, h) > 0 { k = 1 }
+    k && $0 !~ /^[[:space:]]*#/ { exit }
+    k { print }
+  ' "$1"
+}
+
+test_glossary_ownership_documented() {
+  _tg11="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_tg11/ch" HOME="$_tg11/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg11" >/dev/null 2>&1 \
+    || fail "R11 setup: fresh install exited non-zero"
+
+  # ── manifest.txt ──────────────────────────────────────────────────────────────────────
+  _mf11="$_tg11/.harness/manifest.txt"
+  manifest_section "$_mf11" 'PROJECT-OWNED' | grep -qF '.harness/specs/glossary.md' \
+    || fail "R11: installed manifest.txt's PROJECT-OWNED block does not name .harness/specs/glossary.md"
+  manifest_section "$_mf11" 'HARNESS-OWNED' | grep -qF 'specs/glossary.md' \
+    && fail "R11: installed manifest.txt's HARNESS-OWNED block still names specs/glossary.md"
+  grep -E '^[[:space:]]*prose \(stub-able\)' "$_mf11" | grep -qF 'glossary' \
+    && fail "R11: installed manifest.txt's prose (stub-able) tier line still names the glossary"
+
+  # ── harness-install.sh header (SOURCE — this file is never installed into a target) ────
+  _hdr11="$(header_ownership_block "$SRC/harness-install.sh")"
+  [ -n "$_hdr11" ] \
+    || fail "R11: could not extract the installer header's ownership-class block — the anchor is stale"
+  printf '%s\n' "$_hdr11" | grep -A2 'PROJECT-authored content' | grep -qF 'specs/glossary.md' \
+    || fail "R11: the installer header's PROJECT-authored bullet does not name specs/glossary.md"
+  printf '%s\n' "$_hdr11" | grep 'The harness BODY' | grep -qF 'glossary' \
+    && fail "R11: the installer header's BODY bullet still names the glossary"
+
+  # ── docs/INSTALL.md — Layout & ownership table ──────────────────────────────────────────
+  _im11="$(doc_section "$_tg11/.harness/docs/INSTALL.md" 'Layout & ownership')"
+  [ -n "$_im11" ] || fail "R11: could not extract the installed docs/INSTALL.md Layout & ownership table"
+  printf '%s\n' "$_im11" | grep '| project-owned |' | grep -qF 'specs/glossary.md' \
+    || fail "R11: docs/INSTALL.md's project-owned row does not name specs/glossary.md"
+  printf '%s\n' "$_im11" | grep '| harness-owned body |' | grep -qF 'glossary' \
+    && fail "R11: docs/INSTALL.md's harness-owned body row still names the glossary"
+
+  # ── docs/UMBRELLA.md — Prose tier row + the D1 sentence ────────────────────────────────
+  _um11="$(doc_section "$_tg11/.harness/docs/UMBRELLA.md" 'The thin child')"
+  [ -n "$_um11" ] || fail "R11: could not extract the installed docs/UMBRELLA.md thin-child section"
+  printf '%s\n' "$_um11" | grep '\*\*Prose\*\*' | grep -qF 'glossary' \
+    && fail "R11: docs/UMBRELLA.md's Prose tier row still names the glossary"
+  printf '%s\n' "$_um11" | tr '\n' ' ' | grep -qiE 'glossary\.md[^.]{0,80}neither tier' \
+    || fail "R11: docs/UMBRELLA.md's thin-child section does not record decision D1 (the glossary is neither tier)"
+
+  # ── docs/CONFIG-LAYERING.md — the thin-child sentence ──────────────────────────────────
+  _cl11="$(doc_section "$_tg11/.harness/docs/CONFIG-LAYERING.md" 'The three layers')"
+  [ -n "$_cl11" ] || fail "R11: could not extract the installed docs/CONFIG-LAYERING.md three-layers section"
+  printf '%s\n' "$_cl11" | grep 'pointer .stub' | grep -qF 'glossary' \
+    && fail "R11: docs/CONFIG-LAYERING.md's thin-child pointer-stub sentence still names the glossary"
+
+  # ── harness.config.yaml — the seeded umbrella.root comment ─────────────────────────────
+  _cc11="$(config_key_comment "$_tg11/.harness/harness.config.yaml" 'CHILD-SIDE key')"
+  [ -n "$_cc11" ] || fail "R11: could not extract the installed umbrella.root key comment"
+  printf '%s\n' "$_cc11" | grep 'PROSE tier' | grep -qF 'glossary' \
+    && fail "R11: the installed umbrella.root comment's PROSE-tier line still names the glossary"
+
+  # ── ablation companion: no config KEY named 'glossar' anywhere, at any indentation ──────
+  # (docs/RATIONALE.md ablation doctrine — this feature adds no key, flag or prompt.)
+  _seedkeys11="$(grep -inE '^[[:space:]]*[A-Za-z0-9_.-]+:.*glossar' "$SRC/harness.config.yaml" || true)"
+  [ -z "$_seedkeys11" ] \
+    || fail "R11 ablation: the shipped harness.config.yaml (seed template) has a 'glossar' KEY line: $_seedkeys11"
+  _mckeys11="$(sed -n '/^migrate_config()/,/^}/p' "$SRC/harness-install.sh" | grep -inE "'[[:space:]]*[A-Za-z0-9_.-]+:.*glossar" || true)"
+  [ -z "$_mckeys11" ] \
+    || fail "R11 ablation: migrate_config's default table has a 'glossar' KEY line: $_mckeys11"
+
+  rm -rf "$_tg11"
+  pass "all six ownership authorities classify specs/glossary.md project-owned; none calls it body or prose tier (R11) [test_glossary_ownership_documented]"
+}
+test_glossary_ownership_documented
+
+# R12 — the shipped example's bytes are pinned behind an explaining tripwire (decision D2).
+test_shipped_glossary_bytes_pinned() {
+  cmp -s "$SRC/specs/glossary.md" "$SRC/tests/fixtures/glossary-shipped.md" \
+    || fail "R12: the shipped specs/glossary.md changed bytes. Every install still byte-identical to the OLD example will silently stop tracking it, because a single comparison cannot tell 'pristine but older' from 'project-edited'. Implement the .harness/.glossary-seed stamp (E30-F01 decision D2) before changing these bytes, or record the accepted freeze — then refresh tests/fixtures/glossary-shipped.md."
+  # The message half is otherwise unfalsifiable (the only run that prints it has already
+  # changed the bytes) — statically grep this suite's own source for both required parts.
+  grep -qF '.glossary-seed' "$SRC/tests/test_install.sh" \
+    || fail "R12: this suite's failure message does not name the .harness/.glossary-seed follow-up (D2)"
+  grep -qF 'silently stop tracking' "$SRC/tests/test_install.sh" \
+    || fail "R12: this suite's failure message does not state the consequence (every pristine install silently stops tracking the example)"
+  pass "the shipped glossary's bytes are pinned behind a tripwire naming the consequence and the .glossary-seed follow-up (R12) [test_shipped_glossary_bytes_pinned]"
+}
+test_shipped_glossary_bytes_pinned
+
 echo "All install tests passed."

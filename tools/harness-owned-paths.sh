@@ -57,6 +57,7 @@ emit_body() {
   printf ':(exclude)%sharness.config.yaml\n' "$pfx"
   printf ':(exclude)%sinit.project.sh\n'     "$pfx"
   printf ':(exclude)%sspecs/product.md\n'    "$pfx"
+  printf ':(exclude)%sspecs/glossary.md\n'   "$pfx"
   printf ':(exclude)%sspecs/epics/\n'        "$pfx"
   printf ':(exclude)%sstate/\n'              "$pfx"
   printf ':(exclude)%sprogress/\n'           "$pfx"

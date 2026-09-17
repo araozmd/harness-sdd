@@ -58,9 +58,9 @@ see [`../README.md`](../README.md) → Observability and `agents/orchestrator.md
 
 Existing entrypoint prose is preserved outside the managed
 `<!-- harness:begin -->…<!-- harness:end -->` block. Project-owned
-`.harness/specs/product.md`, epic specs, state, progress, configuration, and
-`init.project.sh` are preserved on upgrade (configuration also receives missing
-default keys). Templates and `specs/glossary.md` belong to the refreshed harness body.
+`.harness/specs/product.md`, `.harness/specs/glossary.md`, epic specs, state, progress,
+configuration, and `init.project.sh` are preserved on upgrade (configuration also
+receives missing default keys). Templates belong to the refreshed harness body.
 Generated glue follows its front-end ownership rules; see [Layout & ownership](#layout--ownership).
 
 ### Codex skill units and legacy prompt migration
@@ -678,11 +678,13 @@ exactly as the single-target form below — only an additive, value-preserving c
 ### Body layout — `--thin` and `--standalone`
 
 A child of an umbrella holds its **prose** tier (`AGENTS.md`, `agents/`, `docs/`,
-`specs/_templates/`, `specs/glossary.md`) either as a full local copy or as pointer stubs
-resolved from `umbrella.root`. The **program** tier (`init.sh`, `store/`, `tools/`, the
-example files) and every generated front-end glue file are always local copies. These two
-flags are the only way to move a target between the two layouts — neither is ever implied,
-and no target's layout changes without one of them.
+`specs/_templates/`) either as a full local copy or as pointer stubs resolved from
+`umbrella.root`. The **program** tier (`init.sh`, `store/`, `tools/`, the example files)
+and every generated front-end glue file are always local copies. `specs/glossary.md` is
+project-owned (E30-F01) and is never part of either tier: it is a real, local file in
+every layout, seeded once and never stubbed. These two flags are the only way to move a
+target between the two layouts — neither is ever implied, and no target's layout changes
+without one of them.
 
 | Flag | Mode | Effect |
 |---|---|---|
@@ -1041,9 +1043,9 @@ POSIX `sh`, zero deps.
 
 | Class | Files | On upgrade |
 |---|---|---|
-| harness-owned body | `.harness/{AGENTS.md,agents,docs,store,tools,specs/_templates,specs/glossary.md,init.sh}` | refreshed; thin children retain prose pointers |
+| harness-owned body | `.harness/{AGENTS.md,agents,docs,store,tools,specs/_templates,init.sh}` | refreshed; thin children retain prose pointers |
 | generated glue | managed command/role names for selected front-ends, including `.claude/agents/` and `.claude/commands/` harness files | regenerated subject to each emitter's ownership checks; deselection conservatively reclaims owned files |
-| project-owned | `.harness/{harness.config.yaml,init.project.sh,specs/product.md,specs/epics,state/tasks.json,progress}` | preserved (config also append-migrated) |
+| project-owned | `.harness/{harness.config.yaml,init.project.sh,specs/product.md,specs/glossary.md,specs/epics,state/tasks.json,progress}` | preserved (config also append-migrated) |
 | runtime/local | `.harness/{telemetry.jsonl,workers.json,.gitignore}`, project-root `.gitignore` | gitignored; both `.gitignore`s append-seeded (never clobbered), logs/personal state never committed. `workers.json` is installer-OWNED derived data: rewritten every run while `workers.roster` is on, removed when it is off |
 | merge-region | `AGENTS.md` / selected `CLAUDE.md`; legacy `GEMINI.md` cleanup | only the marked block |
 

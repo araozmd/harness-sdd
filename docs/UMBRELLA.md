@@ -98,11 +98,18 @@ So the tier line is drawn by **what reads the file**
 
 | Tier | Paths | In a thin child of an umbrella |
 |---|---|---|
-| **Prose** — an agent reads it | `AGENTS.md`, `agents/`, `docs/`, `specs/_templates/`, `specs/glossary.md` | a one-screen **pointer stub** at the same path |
+| **Prose** — an agent reads it | `AGENTS.md`, `agents/`, `docs/`, `specs/_templates/` | a one-screen **pointer stub** at the same path |
 | **Program** — `init.sh`/CI parse or exec it | `init.sh`, `store/`, `tools/`, the example files | a full **local copy**, always |
 
 Generated front-end glue (`.claude/`, `.agents/`, `.opencode/`, `.codex/`) is program tier
 and always local.
+
+`specs/glossary.md` is **neither tier** (E30-F01, decision D1): a project-owned,
+project-authored domain vocabulary, exactly like `specs/product.md`. It is a real, local
+file in every layout — single repo, coordinator, full-copy child, and thin child alike —
+seeded once and never stubbed, never overwritten on upgrade. A child is a separate repo
+because it has its own domain, so one shared glossary across every child is the wrong
+default; a child's own glossary can still reference the coordinator's in prose.
 
 The cascade records the linkage as `umbrella.root` in each child's `harness.config.yaml`
 (`../../`), written by the component that already knows the answer. An upward filesystem

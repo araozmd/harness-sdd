@@ -4,6 +4,48 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.80.0] — 2026-09-16
+
+### `specs/glossary.md` becomes project-owned — seeded once, preserved on upgrade (E30-F01)
+
+- **The defect this fixes.** `specs/glossary.md` was listed in `HARNESS_BODY_PROSE`, so
+  every installer run overwrote `<target>/.harness/specs/glossary.md` with the shipped
+  chatbot-handoff example — even though the file's own second line invites the edit, and
+  every sibling under `specs/` (`product.md`, `epics/`) is project-owned. This destroyed a
+  real project's domain glossary twice in the field, most recently silently inside a merged
+  PR.
+- **The fix.** The path leaves `HARNESS_BODY_PROSE` entirely and joins the seed-once /
+  preserve class `specs/product.md` and `progress/lessons.md` already occupy. On every run:
+  absent ⇒ seed the shipped example; byte-identical to the shipped example ⇒ pristine,
+  left identical; anything else ⇒ preserved, byte for byte (`cmp`-grade — a trailing space
+  is a project edit). A file at that path whose first line is the existing umbrella
+  pointer-stub sentinel is harness-written, not project content, and is replaced by the
+  shipped example. A non-regular file at that path (symlink, directory) is left exactly as
+  found — never followed, never unlinked, never replaced. Exactly one verdict line is
+  printed per target per run.
+- **Decision D1 — a thin child owns a REAL glossary.** The glossary is no longer a
+  stub-able prose-tier path in any layout — single repo, coordinator, full-copy child, or
+  thin child. An existing stub at that path is re-materialised from the shipped example.
+  An edited glossary is never a `--thin` conversion blocker.
+- **Decision D2 — no seed stamp; the fail-safe is accepted and guarded.** A single
+  byte-identity comparison cannot tell "pristine but older" from "project-edited", so an
+  install last seeded by a pre-0.80.0 installer with an unedited glossary is read as
+  pristine (correct, because the shipped example has not changed since this repo's first
+  commit). This is accepted rather than adding a new `.harness/` stamp path, and
+  `tools/run-tests.sh` now fails loudly if the shipped example's bytes ever change,
+  naming the `.harness/.glossary-seed` follow-up that would fully discharge the refresh
+  guarantee.
+- **Migration story.** No target requires operator action. A pre-0.80.0 install's glossary
+  is byte-identical to the example it was seeded with (unchanged since inception), so it
+  reads as pristine on the first 0.80.0 run; a project-edited glossary is read as preserved
+  from that same first run — the exact outcome the field incident calls for.
+- `tools/harness-owned-paths.sh`'s `emit_body()` now excludes the path, so an uncommitted
+  glossary edit fails neither `init.sh`'s drift guard nor the installer's post-cascade
+  landing audit. The installer header, `manifest.txt`, `docs/INSTALL.md`,
+  `docs/CONFIG-LAYERING.md`, `docs/UMBRELLA.md` and the seeded `harness.config.yaml`
+  comment all now classify the path project-owned; none calls it harness body or
+  stub-able prose. No new config key, flag or prompt.
+
 ## [0.79.0] — 2026-09-14
 
 ### Native Codex and three supported front ends
