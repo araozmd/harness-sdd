@@ -93,6 +93,16 @@
 #     `test_umbrella_cascade_suppresses_single_repo_banner` pins that a cascade emits
 #     umbrella-specific advice and NEVER the single-repo `git init` workflow.
 #
+# Round-10 review additions:
+#   * The round-9 umbrella advice was itself wrong (Codex 4042236158/4042236163/
+#     4042236168): it said `init.sh` runs the coordinator loop and dispatches features
+#     (init.sh only validates; the `/sdd-next` Orchestrator loop selects/dispatches),
+#     it implied `/sdd-plan`+`/sdd-drill` write per-repo `slices[]` (sdd-drill only seeds
+#     ordinary feature entries), and it told a child to run a repo-root `init.sh` (the
+#     executable is `<child>/.harness/init.sh`). The banner was shrunk to two true
+#     pointers, and `test_umbrella_cascade_suppresses_single_repo_banner` now pins the
+#     absence of those claims in addition to the umbrella-aware suppression.
+#
 # CONVENTIONS THIS SUITE HONOURS (progress/lessons.md):
 #   * No `VERSION` literal anywhere. R10 reads $SRC/VERSION at run time; the
 #     no-literal half is only falsifiable by the Reviewer's bump mutation, not by
@@ -523,7 +533,9 @@ test_multi_host_banner_emits_one_workflow() {
 # default umbrella root is deliberately non-git unless `--shared-repo`, so the
 # banner told the coordinator to `git init` a root umbrella mode keeps non-git, and
 # repeated whole-project planning for every fresh child. The cascade must emit
-# umbrella-specific advice and NEVER the single-repo workflow.
+# umbrella-specific advice and NEVER the single-repo workflow. Round 10 shrank that
+# advice to two true pointers after Codex found the round-9 prose overclaimed, so this
+# test also pins the ABSENCE of those specific false claims.
 test_umbrella_cascade_suppresses_single_repo_banner() {
   _um="$T/umbrella-banner"
   _um_home="$T/umbrella-home"
@@ -542,17 +554,42 @@ test_umbrella_cascade_suppresses_single_repo_banner() {
     || fail "R8e: the cascade left no coordinator install stamp — the run did not land"
   [ -f "$_um/child-a/.harness/.harness-version" ] \
     || fail "R8e: the cascade left no child install stamp — the run did not land"
-  _um_flat="$(tr '\n' ' ' < "$T/umbrella.out")"
-  # Positive anchors: the cascade must SAY something umbrella-specific for both roles.
-  # Folded two-token pairs keep each half in one sentence of the banner (the numbered
-  # heading is separated from step 1 by `1.`, so the pair is taken inside step 1).
-  assert_contains "R8e coordinator banner" "$_um_flat" 'umbrella coordinator'
-  assert_contains "R8e coordinator banner" "$_um_flat" 'umbrella.manifest.yaml'
-  printf '%s\n' "$_um_flat" | grep -qiE 'coordinator loop[^.]{0,80}dispatches' \
-    || fail "R8e: the coordinator banner does not state the coordinator loop and its dispatch in one sentence — the cascade prints no umbrella-specific advice"
-  assert_contains "R8e child banner" "$_um_flat" 'umbrella child'
-  printf '%s\n' "$_um_flat" | grep -qiE 'Cross-repo specs[^.]{0,120}SDD loop' \
-    || fail "R8e: the child banner does not state where the specs live and the local SDD loop in one sentence — the child gets no umbrella-specific advice"
+  # Round-10 (Codex 4042236158/4042236163/4042236168): the round-9 banner was shrunk
+  # to two true pointers. Extract each role's banner span (heading plus its two-space
+  # advice lines, stopping at the three-space activation info line) and assert BOTH
+  # the positive pointer and the ABSENCE of the three false claims. The extraction
+  # floor is the positive control that keeps the negatives from passing vacuously.
+  _um_coord="$(awk -v h='Next steps (umbrella coordinator):' \
+    '$0==h{k=1;print;next} k && /^  [^ ]/{print;next} k{exit}' "$T/umbrella.out")"
+  _um_coord_n="$(printf '%s\n' "$_um_coord" | grep -c '' || true)"
+  [ "$_um_coord_n" -ge 2 ] \
+    || fail "R8e: the coordinator banner span extracted $_um_coord_n line(s) — stale extraction, the absence checks below would be vacuous"
+  assert_contains "R8e coordinator banner" "$_um_coord" 'umbrella coordinator'
+  printf '%s\n' "$_um_coord" | grep -qE 'UMBRELLA\.md[^.]{0,80}sdd-next' \
+    || fail "R8e: the coordinator banner does not name both the umbrella doc and the /sdd-next Orchestrator loop in one sentence — the coordinator gets no true pointer to the loop that owns dispatch"
+  if printf '%s\n' "$_um_coord" | grep -qi 'init\.sh'; then
+    fail "R8e: the coordinator banner still names init.sh — init.sh only validates; slice selection/dispatch is the /sdd-next Orchestrator loop (Codex round 10, 4042236158)"
+  fi
+  if printf '%s\n' "$_um_coord" | grep -qi 'dispatch'; then
+    fail "R8e: the coordinator banner still attributes dispatch — init.sh does not dispatch; that is the /sdd-next Orchestrator loop (Codex round 10, 4042236158)"
+  fi
+  if printf '%s\n' "$_um_coord" | grep -qiE 'slices?|sdd-plan|sdd-drill'; then
+    fail "R8e: the coordinator banner still promises per-repo slices or names sdd-plan/sdd-drill as their authors — sdd-drill only seeds ordinary feature entries and never writes slices[] (Codex round 10, 4042236163)"
+  fi
+  _um_child="$(awk -v h='Next steps (umbrella child):' \
+    '$0==h{k=1;print;next} k && /^  [^ ]/{print;next} k{exit}' "$T/umbrella.out")"
+  _um_child_n="$(printf '%s\n' "$_um_child" | grep -c '' || true)"
+  [ "$_um_child_n" -ge 2 ] \
+    || fail "R8e: the child banner span extracted $_um_child_n line(s) — stale extraction, the path checks below would be vacuous"
+  assert_contains "R8e child banner" "$_um_child" 'umbrella child'
+  # The temp-path component GNU mktemp makes (`tmp.XXXXXXXXXX`) contains a literal dot,
+  # so a `[^.]` sentence bound would truncate before the path; bound by length instead.
+  _um_child_flat="$(tr '\n' ' ' < "$T/umbrella.out")"
+  printf '%s\n' "$_um_child_flat" | grep -qiE 'umbrella child.{0,300}\.harness/init\.sh' \
+    || fail "R8e: the child banner does not name its own .harness/init.sh in one sentence — a child is told to run a repo-root init.sh that does not exist (Codex round 10, 4042236168)"
+  if printf '%s\n' "$_um_child" | grep -qiE 'Run init\.sh here'; then
+    fail "R8e: the child banner still says a repo-root 'Run init.sh here' — the executable is <child>/.harness/init.sh (Codex round 10, 4042236168)"
+  fi
   # No plain single-repo `Next steps:` block (exact heading) anywhere in a cascade.
   _um_plain="$(banner_block "$T/umbrella.out")"
   [ -z "$_um_plain" ] \

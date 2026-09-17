@@ -7256,21 +7256,22 @@ EOF
     ok "upgrade complete (v$VERSION)"
   else
     ok "install complete (v$VERSION)"
-    # E28-F01 round 9 (4042109214): the single-repo workflow below is WRONG for an
-    # umbrella cascade. The default umbrella root is deliberately non-git unless
-    # --shared-repo, so "run git init" is false advice; and whole-project planning
-    # happens ONCE at the coordinator, so repeating /sdd-plan for every fresh child
-    # is false advice too. Gate the workflow by the cascade role instead.
+    # E28-F01 round 9 (4042109214), shrunk in round 10: the single-repo workflow
+    # below is WRONG for an umbrella cascade. The default umbrella root is
+    # deliberately non-git unless --shared-repo, so "run git init" is false advice.
+    # Gate the workflow by the cascade role, and keep each replacement to what is
+    # literally true (Codex round 10): slice selection/dispatch is the /sdd-next
+    # Orchestrator loop, NOT init.sh (which only validates); /sdd-plan and /sdd-drill
+    # never write `slices[]`; and a child's local loop runs from its own
+    # `.harness/init.sh`, not a repo-root `init.sh`.
     if [ "$HARNESS_UMBRELLA_ROLE" = "coordinator" ]; then
       echo
       echo "Next steps (umbrella coordinator):"
-      echo "  1. Child repos are recorded in umbrella.manifest.yaml; init.sh runs the coordinator loop and dispatches each cross-repo feature into them."
-      echo "  2. Plan the whole project ONCE here (see AGENTS.md for this host's plan and drill commands), then decompose the first epic into per-repo slices; each child repo runs its own local SDD loop."
+      echo "  This is an umbrella coordinator; see .harness/docs/UMBRELLA.md, then run /sdd-next (\$sdd-next in Codex) from this directory."
     elif [ "$HARNESS_UMBRELLA_ROLE" = "child" ]; then
       echo
       echo "Next steps (umbrella child):"
-      echo "  1. Cross-repo specs live at the umbrella; this repo runs its own SDD loop on the slices the coordinator dispatches to it."
-      echo "  2. Run init.sh here for this repo's own gates and local feature work."
+      echo "  This is an umbrella child; its local SDD loop runs from $H/init.sh."
     else
     echo
     echo "Next steps:"

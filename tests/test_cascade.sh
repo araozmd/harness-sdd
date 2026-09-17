@@ -73,19 +73,40 @@ sh "$INSTALL" --umbrella "$U" >"$OUT" 2>&1 || fail "umbrella mode exited non-zer
 grep -q "umbrella cascade" "$OUT" || fail "umbrella mode banner absent (R1)"
 pass "--umbrella <dir> mode accepted and runs (R1) [umbrella_mode_runs]"
 
-# E28-F01 round 9 (4042109214): a cascade is not a single-repo install, and every
-# fresh target (UPGRADE=0) used to print the single-repo `Next steps` workflow —
-# telling the default (non-git) coordinator to `git init` and repeating whole-project
-# planning for every child. Positive control first: the run genuinely completed an
-# install and the coordinator banner is present; then the single-repo workflow must
-# be absent. This suite owns the umbrella path, so the pin lives here too.
+# E28-F01 round 9 (4042109214) + round 10 shrink: a cascade is not a single-repo
+# install, and every fresh target (UPGRADE=0) used to print the single-repo `Next
+# steps` workflow — telling the default (non-git) coordinator to `git init` and
+# repeating whole-project planning for every child. Positive control first: the run
+# genuinely completed an install and BOTH role banners are present; then the
+# single-repo workflow must be absent, the round-9 overclaims must be absent, and a
+# child must name its own `.harness/init.sh`. This suite owns the umbrella path.
 grep -q 'install complete' "$OUT" \
   || fail "cascade did not report an install completion — the banner assertion would be vacuous"
 grep -q 'Next steps (umbrella coordinator):' "$OUT" \
   || fail "cascade printed no umbrella coordinator advice — the single-repo banner was gated without a replacement"
+grep -q 'Next steps (umbrella child):' "$OUT" \
+  || fail "cascade printed no umbrella child advice — the single-repo banner was gated without a replacement"
 grep -qF 'Run git init and make an initial commit' "$OUT" \
   && fail "umbrella cascade printed the single-repo git-init banner — umbrella mode keeps that root non-git unless --shared-repo (4042109214)"
-pass "cascade suppresses the single-repo Next steps workflow, emits umbrella advice (E28-F01 round 9) [cascade_no_single_repo_banner]"
+# Round 10 (4042236158/4042236163/4042236168): the round-9 advice overclaimed. Extract
+# each banner (heading + two-space advice lines, stopping before the three-space
+# activation info) and pin the false claims absent, with a line-count floor as the
+# positive control against a vacuous extraction.
+_um_coord="$(awk -v h='Next steps (umbrella coordinator):' \
+  '$0==h{k=1;print;next} k && /^  [^ ]/{print;next} k{exit}' "$OUT")"
+[ "$(printf '%s\n' "$_um_coord" | grep -c '' || true)" -ge 2 ] \
+  || fail "coordinator banner span is empty/stale — the absence checks would be vacuous"
+printf '%s\n' "$_um_coord" | grep -qi 'init\.sh' \
+  && fail "coordinator banner still names init.sh — init.sh only validates; dispatch is the /sdd-next Orchestrator loop (4042236158)"
+printf '%s\n' "$_um_coord" | grep -qiE 'slices?|sdd-plan|sdd-drill' \
+  && fail "coordinator banner still promises per-repo slices or names sdd-plan/sdd-drill — sdd-drill never writes slices[] (4042236163)"
+_um_child="$(awk -v h='Next steps (umbrella child):' \
+  '$0==h{k=1;print;next} k && /^  [^ ]/{print;next} k{exit}' "$OUT")"
+[ "$(printf '%s\n' "$_um_child" | grep -c '' || true)" -ge 2 ] \
+  || fail "child banner span is empty/stale — the path check would be vacuous"
+printf '%s\n' "$_um_child" | grep -qE '\.harness/init\.sh' \
+  || fail "child banner does not name <child>/.harness/init.sh — a child is told to run a repo-root init.sh that does not exist (4042236168)"
+pass "cascade suppresses the single-repo Next steps workflow, emits shrunk true umbrella advice (E28-F01 round 9/10) [cascade_no_single_repo_banner]"
 
 # R5: coordinator profile (full body) written to <umbrella>/.harness/.
 [ -d "$U/.harness" ]                          || fail "coordinator .harness missing (R5)"

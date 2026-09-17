@@ -87,9 +87,15 @@ All notable changes to the harness body are recorded here. Versions follow
   Separately, `--umbrella` routes the coordinator and every child through the same
   fresh-install `Next steps` banner, which told the default (non-git) coordinator to run
   `git init` and repeated whole-project planning for every fresh child. The banner is now
-  role-aware: the coordinator names `umbrella.manifest.yaml` and the coordinator loop with
-  planning done once, each child names the umbrella and its own local SDD loop, and the
-  single-repo `git init` workflow is gated out of cascades. `tests/test_greenfield.sh` adds
+  role-aware and deliberately minimal: the coordinator prints a one-line pointer to
+  `.harness/docs/UMBRELLA.md` and the `/sdd-next` Orchestrator loop (the loop that owns
+  slice selection and dispatch — `init.sh` only validates), each child names its own
+  `<child>/.harness/init.sh`, and the single-repo `git init` workflow is gated out of
+  cascades. An initial, longer round-9 wording was shrunk in round 10 (Codex
+  4042236158/4042236163/4042236168) after review found it claimed `init.sh` runs the
+  coordinator loop and dispatches features, implied `/sdd-plan`+`/sdd-drill` write
+  per-repo `slices[]`, and named a repo-root `init.sh` for children — a shorter banner
+  with no false claims is the contract. `tests/test_greenfield.sh` adds
   `test_prior_pristine_product_stub_is_refreshed`,
   `test_edited_product_md_is_preserved_on_upgrade`, and
   `test_umbrella_cascade_suppresses_single_repo_banner`. No VERSION bump beyond this entry.
