@@ -959,7 +959,8 @@
         {
           "id": "E99-F161",
           "title": "Codex per-role reasoning effort is inexpressible: gen_codex_agent() writes only name/description/model/developer_instructions, though .codex/agents/*.toml accepts model_reasoning_effort (verified empirically, CLI 0.154.0)",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "f3498a9ead5e56def7d113cbf71d5a4cdb721248", "ref": "f3498a9", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
