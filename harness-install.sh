@@ -7935,7 +7935,7 @@ if [ -z "$(_cfg_umbrella_manifest_value "$COORD_CFG")" ]; then
     }
     { print }
   ' "$COORD_CFG" > "$COORD_CFG.umtmp" && mv "$COORD_CFG.umtmp" "$COORD_CFG"
-  info "coordinator umbrella.manifest -> ../umbrella.manifest.yaml — UMBRELLA MODE ENGAGED (init.sh now runs the coordinator loop; unset this value to revert to single-repo)"
+  info "coordinator umbrella.manifest -> ../umbrella.manifest.yaml — UMBRELLA MODE ENGAGED (run /sdd-next (\$sdd-next in Codex) to drive the coordinator loop; unset this value to revert to single-repo)"
 fi
 
 # Locked design: the auto-populated manifest ALWAYS lives at the umbrella root
