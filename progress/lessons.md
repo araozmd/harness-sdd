@@ -192,3 +192,16 @@
 - [2026-09-16 reviewer] "Exactly one line ON STDOUT" is two claims, and a test that captures
   `2>&1` pins only the first. Moving the verdict to stderr left E30-F01's R5 green. If the
   contract names a stream, capture that stream alone (`2>/dev/null`).
+- [2026-09-16 builder] Fixing E30-F01's Finding 1/2 in round 2, a bare `var="$(A | grep B)"`
+  assignment where the pipeline's final command legitimately finds no match ABORTS THE WHOLE
+  `set -eu` SCRIPT SILENTLY — no `FAIL:` line, no error, just early exit — because a solitary
+  assignment's own exit status is the exit status of the command substitution it ran, and
+  under `set -e` that is fatal exactly like any other failing simple command. It happened
+  applying the OWN mutant this round exists to catch: the fixed extraction correctly found
+  zero lines, and the `[ -n "$var" ] || fail …` staleness guard one line below never got a
+  chance to run because the assignment line above it had already killed the process. Any
+  assignment whose RHS pipeline can legitimately produce a false/empty result — which
+  includes every "locate this shape, then check it" two-stage negative this file's own
+  lessons recommend — needs `|| true` on that assignment, not just on the final `[ -z ]`
+  check. Verify by making the RHS deliberately match nothing and confirming the SCRIPT still
+  reaches the `fail()` call, not just that `sh -n` parses.

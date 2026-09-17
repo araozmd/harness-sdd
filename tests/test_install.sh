@@ -2500,7 +2500,19 @@ test_glossary_ownership_documented() {
   # legitimately names the glossary two sentences earlier as project-owned.
   _im11_install="$(doc_section "$_tg11/.harness/docs/INSTALL.md" 'Install')"
   [ -n "$_im11_install" ] || fail "R11: could not extract the installed docs/INSTALL.md Install section"
-  _im11_sentence="$(printf '%s' "$_im11_install" | tr '\n' ' ' | grep -oE '[^.]*belong to the refreshed harness body\.')"
+  # Split on '. ' (a PERIOD FOLLOWED BY WHITESPACE) — a real sentence boundary — not on every
+  # bare period: this prose is thick with inline code spans like `specs/glossary.md` and
+  # `product.md`, whose internal '.' has no trailing whitespace, so `\.[[:space:]]+` does not
+  # split there. (A naive `[^.]*` boundary DOES stop at that internal '.' and truncates
+  # "glossary" out of the match before the "glossar" check ever runs — proven: it let the
+  # M23 mutant, which re-adds "specs/glossary.md` belong to…", through undetected on first
+  # attempt.) The split delimiter keeps the period with the sentence it ends (`.\n`, not a
+  # bare `\n`) — consuming it instead would strip the trailing period the grep below anchors
+  # on and the sentence would never match even in the correct, unmutated tree. `|| true`:
+  # grep legitimately finds no match when the anchor is stale, and this line runs under
+  # `set -eu`, where a bare `var="$(… | grep …)"` assignment with no match aborts the WHOLE
+  # script silently, before the `[ -n … ] || fail` guard below ever gets a chance to run.
+  _im11_sentence="$(printf '%s' "$_im11_install" | tr '\n' ' ' | sed -E 's/\.[[:space:]]+/.\n/g' | grep 'belong to the refreshed harness body\.' || true)"
   [ -n "$_im11_sentence" ] \
     || fail "R11: could not locate docs/INSTALL.md's 'refreshed harness body' sentence — the anchor is stale"
   printf '%s' "$_im11_sentence" | grep -qF 'glossary' \
@@ -2534,8 +2546,10 @@ test_glossary_ownership_documented() {
   # a literal character in that gap, so stage 1 was empty for every possible input and the
   # `&& fail` below was unreachable. Positive-control the shape itself before trusting the
   # negative: require at least one line, so a future rewording reddens THIS line instead of
-  # silently going vacuous again.
-  _cl11_stub="$(printf '%s\n' "$_cl11" | grep -F 'pointer stub')"
+  # silently going vacuous again. `|| true`: under `set -eu` a bare `var="$(… | grep …)"`
+  # assignment aborts the whole script silently on a no-match exit status, before the
+  # `[ -n … ] || fail` guard below runs (found the hard way testing this very fix).
+  _cl11_stub="$(printf '%s\n' "$_cl11" | grep -F 'pointer stub' || true)"
   [ -n "$_cl11_stub" ] \
     || fail "R11: could not locate docs/CONFIG-LAYERING.md's pointer-stub sentence by its 'pointer stub' shape — the anchor is stale"
   printf '%s' "$_cl11_stub" | grep -qF 'glossary' \
