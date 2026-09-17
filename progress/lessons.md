@@ -205,3 +205,29 @@
   lessons recommend — needs `|| true` on that assignment, not just on the final `[ -z ]`
   check. Verify by making the RHS deliberately match nothing and confirming the SCRIPT still
   reaches the `fail()` call, not just that `sh -n` parses.
+- [2026-09-16 reviewer] A `set -eu` bare-command-substitution abort is **RED, not a false green** —
+  correcting the attribution in the builder line above. Measured: `sh -c 'set -eu; v="$(printf a |
+  grep zzz)"; echo REACHED'` exits 1 printing nothing, and `tools/run-tests.sh` reports the suite
+  `===== FAILED (rc=1)` (`:384-406` treats any non-zero child rc, and even a missing rc file, as
+  failure). What the abort destroys is the DIAGNOSTIC, not the signal: you get a log that simply
+  stops mid-suite with no `FAIL:` line and no reason, which is why `|| true` + a named staleness
+  guard is still the right fix. The genuine false green in that round came from the OTHER half of
+  the same bug — a `[^.]*` sentence boundary truncating the forbidden token out of a NON-EMPTY
+  extraction, which sails through `[ -n "$var" ]` and then finds nothing to forbid. Two different
+  failures, two different symptoms: a log that stops early is an abort; `all N suites passed` with
+  a mutant applied is a truncating or dead predicate. Diagnose by reading the suite log's last line
+  before theorising.
+- [2026-09-16 reviewer] An anchor grep that searches **its own suite file** always self-matches, so
+  the `[ -n "$extracted" ] || fail "…anchor is stale"` guard beside it is unreachable for every
+  input. `tests/test_install.sh:2599` greps that file for the literal its own line contains: 2 hits,
+  never 0. Harmless there (the real assertions below still fire, and the self-match is what makes
+  the bare assignment abort-proof), but it is the round-1 dead-guard shape wearing a safety label —
+  and the same idiom pointed at any OTHER file is a live abort. Before trusting a self-grep's
+  staleness guard, count the matches on the pristine file and ask which one is the grep line.
+- [2026-09-16 reviewer] When a two-stage negative is scoped by `grep <shape>` rather than by a
+  structural span, it covers exactly the LINES the shape lands on — so the same forbidden claim
+  survives a line re-wrap. E30-F01's `docs/CONFIG-LAYERING.md` negative greps the one line holding
+  `pointer stub`; restoring `main`'s text there dies, but moving the identical path onto the
+  sentence's OTHER line (a plain markdown re-wrap, no meaning changed) kept all suites green.
+  Mutate the re-wrapped variant too, not just the verbatim revert: prose reflows on every edit, and
+  a line-scoped negative silently narrows every time it does.
