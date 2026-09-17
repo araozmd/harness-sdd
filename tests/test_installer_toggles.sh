@@ -1575,6 +1575,45 @@ test_manifest_scopes_parallel_gate_to_opencode_command() {
   return 0
 }
 
+# ── E31-F01 — the SOURCE checkout ignores the marker the skill tells users to write
+# The shared sdd-fix-parallel skill's source-layout remediation (PR #198 comment
+# 4040537412) tells an OpenCode user in the harness source checkout to write `supported`
+# to a root-level `.opencode-parallel`. The source repo's own `.gitignore` must therefore
+# ignore it, exactly as the installed `.harness/.gitignore` already does (tests/test_install.sh
+# test_opencode_parallel_optin): left untracked, `primary_clean()` in tools/fix-worktree.sh —
+# plain `git status --porcelain --untracked-files=all` — aborts `create`, so the advertised
+# recovery would defeat the parallel batch it exists to unblock (PR #198 comment 4040730280).
+test_source_gitignore_ignores_opencode_parallel_marker() {
+  # 1. The source rule itself, root-anchored like its neighbours /telemetry.jsonl and
+  #    /state/tasks.json.lock.
+  grep -qxF '/.opencode-parallel' "$SRC/.gitignore" \
+    || fail "E31-F01 source-layout: the harness source .gitignore does not ignore /.opencode-parallel"
+  # 2. End to end through real git, in a disposable repo seeded with THAT file: prove the
+  #    marker is genuinely ignored (root-anchored, not matching some fixture default) by
+  #    asking the exact query primary_clean() asks, with an untracked CONTROL that must
+  #    still appear — otherwise an empty status proves nothing about the ignore.
+  _g="$(sandbox e31parmarker)"; mkdir -p "$_g/repo"
+  cp "$SRC/.gitignore" "$_g/repo/.gitignore"
+  git -C "$_g/repo" init -q -b main
+  git -C "$_g/repo" config user.name fixture
+  git -C "$_g/repo" config user.email fixture@example.invalid
+  git -C "$_g/repo" add .gitignore
+  git -C "$_g/repo" commit -qm "seed source .gitignore"
+  printf 'supported\n' > "$_g/repo/.opencode-parallel"
+  printf 'control\n' > "$_g/repo/untracked-control.txt"
+  _st="$(git -C "$_g/repo" status --porcelain --untracked-files=all)"
+  printf '%s\n' "$_st" | grep -qF '.opencode-parallel' \
+    && fail "E31-F01 source-layout: git still reports .opencode-parallel as untracked"
+  printf '%s\n' "$_st" | grep -qF 'untracked-control.txt' \
+    || fail "E31-F01 source-layout: control file missing from git status — the ignore check could not have failed"
+  # 3. primary_clean() equivalence: with the marker present and no other stray file, the
+  #    canonical checkout is clean, so `tools/fix-worktree.sh create` no longer aborts.
+  rm -f "$_g/repo/untracked-control.txt"
+  [ -z "$(git -C "$_g/repo" status --porcelain --untracked-files=all)" ] \
+    || fail "E31-F01 source-layout: with the marker present the canonical checkout is not primary_clean()"
+  return 0
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 test_answer_mapping_unit
 pass "answer_mapping_unit: the answer→value mapping is pure, extractable and correct for every branch (R2)"
@@ -1642,5 +1681,7 @@ test_sdd_fix_parallel_skill_self_gates_opencode
 pass "sdd_fix_parallel_skill_self_gates_opencode (E31-F01 R5): the shared skill body self-gates OpenCode and is a Codex no-op"
 test_manifest_scopes_parallel_gate_to_opencode_command
 pass "manifest_scopes_parallel_gate_to_opencode_command (E31-F01): manifest.txt scopes the OpenCode marker gate to the native command copy and documents the always-present self-gated shared unit"
+test_source_gitignore_ignores_opencode_parallel_marker
+pass "source_gitignore_ignores_opencode_parallel_marker (E31-F01): the source .gitignore ignores the marker the skill's source-layout remediation tells users to write, so primary_clean() stays clean"
 
 echo "All installer-toggle tests passed."

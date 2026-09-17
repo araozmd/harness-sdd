@@ -12,6 +12,14 @@ progress/*/
 # get the equivalent entry in their seeded .harness/.gitignore from harness-install.sh.)
 /.pr-loop/
 
+# OpenCode parallel-batch concurrency marker (E31-F01). The shared sdd-fix-parallel skill's
+# source-layout remediation tells a source-repo user to write `supported` to a root-level
+# .opencode-parallel; the harness source runs from the repo root, where the marker resolves
+# root-relative and the .harness/ ignore below does NOT cover it. Left untracked it makes
+# tools/fix-worktree.sh primary_clean() abort, so the recovery would defeat its own batch.
+# (Installed consumers get the equivalent entry in their seeded .harness/.gitignore.)
+/.opencode-parallel
+
 # Local isolated feature worktrees.
 .worktrees/
 .claude/worktrees/
