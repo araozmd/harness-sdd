@@ -2313,24 +2313,31 @@ test_glossary_reseeded_when_deleted() {
 }
 test_glossary_reseeded_when_deleted
 
-# R5
+# R5 — "on stdout" is a claim about the STREAM, not merely the count and content. Each arm
+# below captures stdout and stderr SEPARATELY (round-1 Finding 5): the prior `2>&1` capture
+# proved the count and the substring but could not tell a verdict on stdout from the same
+# verdict moved to stderr — proven by moving all five `info` calls to `>&2` and watching the
+# whole suite stay green. `$_errN` is kept only so a genuine install failure still reports
+# the diagnostic a maintainer needs; it plays no part in the R5 assertions themselves.
 test_glossary_reports_one_verdict_line() {
   # seeded
   _tg5a="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
-  _og5a="$(CODEX_HOME="$_tg5a/ch" HOME="$_tg5a/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg5a" 2>&1)" \
-    || fail "R5 (seeded): install exited non-zero: $_og5a"
+  _err5a="$_tg5a/stderr.log"
+  _og5a="$(CODEX_HOME="$_tg5a/ch" HOME="$_tg5a/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg5a" 2>"$_err5a")" \
+    || fail "R5 (seeded): install exited non-zero: $_og5a $(cat "$_err5a" 2>/dev/null)"
   [ "$(printf '%s\n' "$_og5a" | grep -cF 'specs/glossary.md')" = "1" ] \
-    || fail "R5 (seeded): expected exactly one line naming specs/glossary.md: $_og5a"
+    || fail "R5 (seeded): expected exactly one line ON STDOUT naming specs/glossary.md: $_og5a"
   rm -rf "$_tg5a"
 
   # pristine
   _tg5b="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
   CODEX_HOME="$_tg5b/ch" HOME="$_tg5b/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg5b" >/dev/null 2>&1 \
     || fail "R5 (pristine) setup: fresh install exited non-zero"
-  _og5b="$(CODEX_HOME="$_tg5b/ch" HOME="$_tg5b/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg5b" 2>&1)" \
-    || fail "R5 (pristine): install exited non-zero: $_og5b"
+  _err5b="$_tg5b/stderr.log"
+  _og5b="$(CODEX_HOME="$_tg5b/ch" HOME="$_tg5b/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg5b" 2>"$_err5b")" \
+    || fail "R5 (pristine): install exited non-zero: $_og5b $(cat "$_err5b" 2>/dev/null)"
   [ "$(printf '%s\n' "$_og5b" | grep -cF 'specs/glossary.md')" = "1" ] \
-    || fail "R5 (pristine): expected exactly one line naming specs/glossary.md: $_og5b"
+    || fail "R5 (pristine): expected exactly one line ON STDOUT naming specs/glossary.md: $_og5b"
   rm -rf "$_tg5b"
 
   # preserved
@@ -2338,13 +2345,14 @@ test_glossary_reports_one_verdict_line() {
   CODEX_HOME="$_tg5c/ch" HOME="$_tg5c/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg5c" >/dev/null 2>&1 \
     || fail "R5 (preserved) setup: fresh install exited non-zero"
   printf '\nR5 marker term\n' >> "$_tg5c/.harness/specs/glossary.md"
-  _og5c="$(CODEX_HOME="$_tg5c/ch" HOME="$_tg5c/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg5c" 2>&1)" \
-    || fail "R5 (preserved): install exited non-zero: $_og5c"
+  _err5c="$_tg5c/stderr.log"
+  _og5c="$(CODEX_HOME="$_tg5c/ch" HOME="$_tg5c/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg5c" 2>"$_err5c")" \
+    || fail "R5 (preserved): install exited non-zero: $_og5c $(cat "$_err5c" 2>/dev/null)"
   [ "$(printf '%s\n' "$_og5c" | grep -cF 'specs/glossary.md')" = "1" ] \
-    || fail "R5 (preserved): expected exactly one line naming specs/glossary.md: $_og5c"
+    || fail "R5 (preserved): expected exactly one line ON STDOUT naming specs/glossary.md: $_og5c"
   rm -rf "$_tg5c"
 
-  pass "exactly one glossary verdict line per target per run, in every state (R5) [test_glossary_reports_one_verdict_line]"
+  pass "exactly one glossary verdict line per target per run, on stdout, in every state (R5) [test_glossary_reports_one_verdict_line]"
 }
 test_glossary_reports_one_verdict_line
 
@@ -2415,6 +2423,27 @@ doc_section() {
   ' "$1"
 }
 
+# doc_h3_section <doc.md> <h3-heading-substring> — from a `^### ` heading CONTAINING
+# <heading-substring> to the NEXT `^## ` OR `^### ` heading (whichever comes first).
+# Same fence-awareness as doc_section, one level deeper: `docs/INSTALL.md`'s `--thin`/
+# `--standalone` prose-tier enumeration lives under a `###` subheading nested inside a `##`
+# section doc_section already returns whole (by design — it does not stop at `###`), so a
+# section-level negative there is satisfied by ANY occurrence in the whole parent section,
+# including the very sentence, two lines later, that correctly explains the glossary is
+# NOT in that tier. This bounds to the subsection alone.
+doc_h3_section() {
+  awk -v h="$2" "$DOC_FENCE_AWK"'
+    fence_delim($0) { if (k) print; next }
+    !fence && /^###? / {
+      if (k) exit
+      k = ($0 ~ /^### / && index($0, h) > 0)
+      if (k) print
+      next
+    }
+    k
+  ' "$1"
+}
+
 # config_key_comment <harness.config.yaml> <anchor-substring> — from the first line
 # containing <anchor-substring> to the next line that is NOT a comment (the key line
 # itself), a structural bound rather than a fixed line count.
@@ -2446,16 +2475,48 @@ test_glossary_ownership_documented() {
     || fail "R11: could not extract the installer header's ownership-class block — the anchor is stale"
   printf '%s\n' "$_hdr11" | grep -A2 'PROJECT-authored content' | grep -qF 'specs/glossary.md' \
     || fail "R11: the installer header's PROJECT-authored bullet does not name specs/glossary.md"
-  printf '%s\n' "$_hdr11" | grep 'The harness BODY' | grep -qF 'glossary' \
-    && fail "R11: the installer header's BODY bullet still names the glossary"
+  # Bound the WHOLE BODY bullet (its opening line AND its continuation line), not just the
+  # opening line — a two-line bullet can carry the forbidden claim on either line, and the
+  # naive single-line grep below missed the continuation line entirely (Finding 3, round 1).
+  _hdr11_body="$(printf '%s\n' "$_hdr11" | awk '/PROJECT-authored content/{exit} /The harness BODY/{k=1} k')"
+  [ -n "$_hdr11_body" ] \
+    || fail "R11: could not extract the installer header's BODY bullet — the anchor is stale"
+  printf '%s\n' "$_hdr11_body" | grep -qF 'glossary' \
+    && fail "R11: the installer header's BODY bullet (including its continuation line) still names the glossary"
 
-  # ── docs/INSTALL.md — Layout & ownership table ──────────────────────────────────────────
+  # ── docs/INSTALL.md — Layout & ownership table (site 993) ───────────────────────────────
   _im11="$(doc_section "$_tg11/.harness/docs/INSTALL.md" 'Layout & ownership')"
   [ -n "$_im11" ] || fail "R11: could not extract the installed docs/INSTALL.md Layout & ownership table"
   printf '%s\n' "$_im11" | grep '| project-owned |' | grep -qF 'specs/glossary.md' \
     || fail "R11: docs/INSTALL.md's project-owned row does not name specs/glossary.md"
   printf '%s\n' "$_im11" | grep '| harness-owned body |' | grep -qF 'glossary' \
     && fail "R11: docs/INSTALL.md's harness-owned body row still names the glossary"
+
+  # ── docs/INSTALL.md — the "refreshed harness body" sentence (site 63) ───────────────────
+  # `.plan.md` names THREE docs/INSTALL.md sites (63, 681, 993); only the table above (993)
+  # was asserted in round 1. This sentence is the field incident's verbatim ownership claim
+  # ("Templates and `specs/glossary.md` belong to the refreshed harness body.") — pin it by
+  # extracting the exact SENTENCE, not the whole `## Install` section, because that section
+  # legitimately names the glossary two sentences earlier as project-owned.
+  _im11_install="$(doc_section "$_tg11/.harness/docs/INSTALL.md" 'Install')"
+  [ -n "$_im11_install" ] || fail "R11: could not extract the installed docs/INSTALL.md Install section"
+  _im11_sentence="$(printf '%s' "$_im11_install" | tr '\n' ' ' | grep -oE '[^.]*belong to the refreshed harness body\.')"
+  [ -n "$_im11_sentence" ] \
+    || fail "R11: could not locate docs/INSTALL.md's 'refreshed harness body' sentence — the anchor is stale"
+  printf '%s' "$_im11_sentence" | grep -qF 'glossary' \
+    && fail "R11: docs/INSTALL.md's 'refreshed harness body' sentence (site 63) still names the glossary"
+
+  # ── docs/INSTALL.md — the --thin/--standalone prose-tier enumeration (site 681) ─────────
+  # Scoped to the PARENTHETICAL enumeration itself, not the whole `### Body layout`
+  # subsection: that subsection's very next sentence correctly says the glossary is NOT part
+  # of either tier, so a section-wide negative would be satisfied by its own correct prose.
+  _bl11="$(doc_h3_section "$_tg11/.harness/docs/INSTALL.md" 'Body layout')"
+  [ -n "$_bl11" ] || fail "R11: could not extract the installed docs/INSTALL.md Body layout subsection"
+  _bl11_prose="$(printf '%s' "$_bl11" | tr '\n' ' ' | sed -n 's/.*\*\*prose\*\* tier (\([^)]*\)).*/\1/p')"
+  [ -n "$_bl11_prose" ] \
+    || fail "R11: could not extract docs/INSTALL.md's prose-tier enumeration — the anchor is stale"
+  printf '%s' "$_bl11_prose" | grep -qF 'glossary' \
+    && fail "R11: docs/INSTALL.md's --thin/--standalone prose-tier enumeration (site 681) still names the glossary"
 
   # ── docs/UMBRELLA.md — Prose tier row + the D1 sentence ────────────────────────────────
   _um11="$(doc_section "$_tg11/.harness/docs/UMBRELLA.md" 'The thin child')"
@@ -2468,7 +2529,16 @@ test_glossary_ownership_documented() {
   # ── docs/CONFIG-LAYERING.md — the thin-child sentence ──────────────────────────────────
   _cl11="$(doc_section "$_tg11/.harness/docs/CONFIG-LAYERING.md" 'The three layers')"
   [ -n "$_cl11" ] || fail "R11: could not extract the installed docs/CONFIG-LAYERING.md three-layers section"
-  printf '%s\n' "$_cl11" | grep 'pointer .stub' | grep -qF 'glossary' \
+  # `-F 'pointer stub'`, not `grep 'pointer .stub'` (round-1 defect, Finding 1): the doc says
+  # "**pointer stubs**" — ONE space between "pointer" and "stub" — and the old regex demanded
+  # a literal character in that gap, so stage 1 was empty for every possible input and the
+  # `&& fail` below was unreachable. Positive-control the shape itself before trusting the
+  # negative: require at least one line, so a future rewording reddens THIS line instead of
+  # silently going vacuous again.
+  _cl11_stub="$(printf '%s\n' "$_cl11" | grep -F 'pointer stub')"
+  [ -n "$_cl11_stub" ] \
+    || fail "R11: could not locate docs/CONFIG-LAYERING.md's pointer-stub sentence by its 'pointer stub' shape — the anchor is stale"
+  printf '%s' "$_cl11_stub" | grep -qF 'glossary' \
     && fail "R11: docs/CONFIG-LAYERING.md's thin-child pointer-stub sentence still names the glossary"
 
   # ── harness.config.yaml — the seeded umbrella.root comment ─────────────────────────────
@@ -2479,10 +2549,21 @@ test_glossary_ownership_documented() {
 
   # ── ablation companion: no config KEY named 'glossar' anywhere, at any indentation ──────
   # (docs/RATIONALE.md ablation doctrine — this feature adds no key, flag or prompt.)
-  _seedkeys11="$(grep -inE '^[[:space:]]*[A-Za-z0-9_.-]+:.*glossar' "$SRC/harness.config.yaml" || true)"
+  # Two alternatives, not one (Finding 4, round 1): `key:.*glossar` matches the token only in
+  # the VALUE, so it missed every key NAMED for the glossary itself — `glossary_mode: seed`,
+  # `glossary: true`, `seed_glossary: true` all slipped through, which is exactly the shape an
+  # ablation check exists to catch. The added alternative matches `glossar` inside the KEY
+  # name directly, regardless of what follows the colon.
+  _glossar_key_re='^[[:space:]]*[A-Za-z0-9_.-]*glossar[A-Za-z0-9_.-]*:|^[[:space:]]*[A-Za-z0-9_.-]+:.*glossar'
+  _seedkeys11="$(grep -inE "$_glossar_key_re" "$SRC/harness.config.yaml" || true)"
   [ -z "$_seedkeys11" ] \
     || fail "R11 ablation: the shipped harness.config.yaml (seed template) has a 'glossar' KEY line: $_seedkeys11"
-  _mckeys11="$(sed -n '/^migrate_config()/,/^}/p' "$SRC/harness-install.sh" | grep -inE "'[[:space:]]*[A-Za-z0-9_.-]+:.*glossar" || true)"
+  # migrate_config's default-table entries are shell string literals opening with a leading
+  # `'` (e.g. `'  integration_command: "" …'`), so both alternatives here require that quote
+  # too — dropping it for the key-name alternative would also match unrelated prose lines in
+  # this function's comments that happen to mention "glossar" without being a key at all.
+  _mc_glossar_key_re="'[[:space:]]*[A-Za-z0-9_.-]*glossar[A-Za-z0-9_.-]*:|'[[:space:]]*[A-Za-z0-9_.-]+:.*glossar"
+  _mckeys11="$(sed -n '/^migrate_config()/,/^}/p' "$SRC/harness-install.sh" | grep -inE "$_mc_glossar_key_re" || true)"
   [ -z "$_mckeys11" ] \
     || fail "R11 ablation: migrate_config's default table has a 'glossar' KEY line: $_mckeys11"
 

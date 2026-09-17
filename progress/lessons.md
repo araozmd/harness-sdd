@@ -172,3 +172,23 @@
   fragile. Whoever bumps VERSION next must grep for the CURRENT value as a literal (not just
   `grep 0\.NN\.0 CHANGELOG.md`, which misses a bare VERSION-file comparison) before trusting a
   green `tools/run-tests.sh`; the fix is a one-line literal sync, not a design change.
+- [2026-09-16 reviewer] A two-stage negative (`extract | grep <shape> | grep -qF <token> && fail`)
+  fails OPEN when stage 2's pattern matches nothing: the `&& fail` is then unreachable for EVERY
+  input and the assertion is decoration. E30-F01 shipped `grep 'pointer .stub'` against a doc
+  that says `**pointer stubs**` (one space, not two chars) — zero matches on the pristine file
+  AND on main, so re-adding the forbidden path to that sentence kept all 47 suites green. The
+  `[ -n "$extracted" ]` staleness guard does NOT cover this: the span extracts fine, it is the
+  PREDICATE that is dead. Before trusting any such negative, run its middle grep alone against
+  the pristine file and require ≥1 line — a positive control on the SHAPE, not just on the span.
+- [2026-09-16 reviewer] When a spec enumerates N authorities that must agree, count the
+  ASSERTIONS, not the authorities: E30-F01's R11 named six and one had an unfirable predicate
+  while `docs/INSTALL.md` had three sites the plan listed and only one asserted. Mutate each
+  authority — and each SITE within it — separately; three of six survived and two restored
+  verbatim the false ownership sentence the feature existed to delete.
+- [2026-09-16 reviewer] A YAML key sweep written as `^[[:space:]]*[A-Za-z0-9_.-]+:.*<token>`
+  matches the token only in the VALUE. It misses `<token>_mode:`, `<token>:` and `seed_<token>:`
+  — i.e. every key NAMED for the thing being forbidden, which is the shape an ablation check is
+  actually for. Alternate the key-name branch in explicitly.
+- [2026-09-16 reviewer] "Exactly one line ON STDOUT" is two claims, and a test that captures
+  `2>&1` pins only the first. Moving the verdict to stderr left E30-F01's R5 green. If the
+  contract names a stream, capture that stream alone (`2>/dev/null`).
