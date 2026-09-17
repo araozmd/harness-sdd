@@ -287,3 +287,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-17 E28-F01 pr-loop: round 4 (cap) returned 2 blocking findings (gate needs-human); human override recorded — cap raised to 5 (same as E31-F01) and a combined fix pass dispatched instead of handing off.
 - 2026-09-17 E28-F01 pr-loop: round 5 (raised cap) returned 1 blocking finding; human override — cap raised to 6 and combined fix dispatched.
 - 2026-09-17 E28-F01 pr-loop: round 6 returned 1 blocking docs finding; human override — cap raised to 7, comprehensive docs-sequence fix dispatched.
+- 2026-09-17 E28-F01 pr-loop: round 7 returned 1 blocking finding (generated entrypoint omits /sdd-drill); human override — cap raised to 8, comprehensive entrypoint-prose audit dispatched.
