@@ -1478,6 +1478,32 @@
           "spec_path": "specs/epics/E30-ownership-boundary/F01-glossary-project-owned/"
         }
       ]
+    },
+    {
+      "id": "E31",
+      "title": "OpenCode is a claimed, first-class front end",
+      "status": "pending",
+      "owner": "araozmd",
+      "features": [
+        {
+          "id": "E31-F01",
+          "title": "OpenCode claims the shared .agents/skills units; the unit is host-neutral and the concurrency gate holds",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [],
+          "spec_path": "specs/epics/E31-opencode-first-class/F01-shared-skill-surface/"
+        },
+        {
+          "id": "E31-F02",
+          "title": "The source repo's OpenCode glue is installer-generated: opencode.json, .opencode commands, and pr-fixer via --self",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": ["E31-F01"],
+          "spec_path": "specs/epics/E31-opencode-first-class/F02-source-host-parity/"
+        }
+      ]
     }
   ]
 }
