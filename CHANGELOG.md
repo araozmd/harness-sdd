@@ -4,6 +4,24 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.81.1] — 2026-09-17
+
+### Changed — the greenfield single-repo path is the documented front door (E28-F01)
+
+- **`docs/INSTALL.md` gains `## Starting from nothing (new product)`** and the existing
+  `## Bootstrap (first run)` is reconciled to the same order, so there is exactly one
+  new-product story: empty directory → `harness-install.sh` → `git init` + commit →
+  `/sdd-plan` → `/sdd-drill` → `/sdd-next`. The section states that an empty, non-git
+  target is supported and that `The installer does not create a git repository.` —
+  version control stays the human's step, and `init.sh`'s drift guard skips on a non-git
+  tree and warns on an untracked body rather than failing.
+- **The fresh-install `Next steps` banner names `/sdd-plan` before `/sdd-next`.** The
+  upgrade branch is unchanged; the installer still performs no `git init`.
+- **New suite `tests/test_greenfield.sh`** installs into an asserted-empty, non-git
+  fixture and covers the banner order, the absence of `.git`, the usable installed
+  layout, the installed `init.sh` passing there, and a version stamp read from `VERSION`
+  at run time (no frozen literal). No new command, flag, config key, prompt or dependency.
+
 ## [0.81.0] — 2026-09-17
 
 ### OpenCode claims the shared `.agents/skills` units (E31-F01)
