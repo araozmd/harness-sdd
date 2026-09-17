@@ -239,3 +239,8 @@
   `if [ -n "$var" ]; then echo …; fi` (a false `if` still returns 0), and pin it by running the
   no-op path (a target already reclaimed by an earlier phase). Same family as the bare-assignment
   abort lesson, one shell construct over.
+- [2026-09-17 reviewer] Before trusting a `run-tests.sh` green on THIS box, read the shell it
+  names AND check the fallback: `command -v dash posh ash` returns nothing here, so the
+  runner falls back to `/usr/bin/sh` = **bash**. "all N suites passed (/usr/bin/sh [GNU bash …])"
+  is a bash claim about `#!/bin/sh` suites, and a dash-only construct added in the diff would
+  pass un-caught. Either install dash or report the green as bash-scoped, never as POSIX-sh-scoped.

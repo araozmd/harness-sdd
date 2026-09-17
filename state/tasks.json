@@ -1488,7 +1488,7 @@
         {
           "id": "E31-F01",
           "title": "OpenCode claims the shared .agents/skills units; the unit is host-neutral and the concurrency gate holds",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
