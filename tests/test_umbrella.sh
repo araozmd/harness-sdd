@@ -3077,15 +3077,19 @@ printf '%s\n' 2>/dev/null "$F04GLD_OUT" | grep -qF 'specs/glossary.md re-materia
 pass "R8 glossary_stub_rematerialised_in_thin_child (legacy stub) — a pre-existing umbrella-stub sentinel is replaced by the shipped example"
 
 # Negative control: ordinary project prose at that path (first line is NOT the sentinel)
-# is preserved exactly — the sentinel, never "looks short", is the ownership signal.
-printf 'Domain glossary\n\nThis project defines its own terms here.\n' > "$KGLD/specs/glossary.md"
+# is preserved exactly — the sentinel, never "looks short", is the ownership signal. The
+# sentinel text also appears LATER in the body (documenting the convention itself), not
+# just absent — this is what distinguishes "first line IS the sentinel" from "the FILE
+# CONTAINS the sentinel somewhere": a `grep` over the whole file rather than `head -n 1`
+# would misread this fixture as a stub and re-materialise it, dropping the project's prose.
+printf 'Domain glossary\n\nThis project defines its own terms here. For the record, this\nrepo never uses the harness stub sentinel <!-- harness:umbrella-stub --> as real content.\n' > "$KGLD/specs/glossary.md"
 GLD_PROSE_REF="$(cat "$KGLD/specs/glossary.md")"
 CODEX_HOME="$F04GLD/.ch" HOME="$F04GLD/.home" \
   sh "$SRC/harness-install.sh" --agents=claude "$F04GLD/freshkid" >/dev/null 2>&1 \
   || fail "R8 (negative control): the maintenance run failed"
 [ "$(cat "$KGLD/specs/glossary.md")" = "$GLD_PROSE_REF" ] \
-  || fail "R8 (negative control): ordinary project prose (not the sentinel) at specs/glossary.md was NOT preserved — the ownership signal is something other than the sentinel"
-pass "R8 glossary_stub_rematerialised_in_thin_child (negative control) — ordinary project prose is preserved, never mistaken for a stub"
+  || fail "R8 (negative control): ordinary project prose (sentinel text appears mid-file, not on line 1) at specs/glossary.md was NOT preserved — the ownership signal is 'first line IS the sentinel', not 'the file contains it somewhere'"
+pass "R8 glossary_stub_rematerialised_in_thin_child (negative control) — ordinary project prose is preserved, never mistaken for a stub even when it quotes the sentinel text"
 
 # ── R9: an edited glossary is not a --thin blocker, and survives the conversion ─────────
 # glossary_edit_does_not_block_thin_conversion (E30-F01)

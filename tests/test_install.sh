@@ -2247,7 +2247,48 @@ test_glossary_edit_preserved_on_upgrade() {
     || fail "R3 (symlink): the upgrade's stdout does not report the preserved verdict: $_og3c"
   rm -rf "$_tg3c"
 
-  pass "any byte difference (incl. a symlink) leaves the glossary exactly as found and reports preserved (R3, R7 single-repo arm) [test_glossary_edit_preserved_on_upgrade]"
+  # (c2) NON-REGULAR-FILE arm, SENTINEL-SHAPED target — the ordinary-prose target in (c)
+  # cannot by itself distinguish "the -L guard runs first" from "the -L guard is missing
+  # entirely": with ordinary content neither implementation ever reaches a `cp`, so (c)
+  # alone is satisfied by both. A symlink whose TARGET's first line is the umbrella-stub
+  # sentinel is the one shape that forces the difference: an implementation that checks
+  # `[ -e ] && [ ! -f ]` without `-L` first DEREFERENCES the link, reads the sentinel, and
+  # `cp`s the shipped example THROUGH the link, clobbering the external file. Verified as a
+  # real red-to-green during E30-F01's own build.
+  _tg3c2="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_tg3c2/ch" HOME="$_tg3c2/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg3c2" >/dev/null 2>&1 \
+    || fail "R3 setup (symlink, sentinel-shaped target): fresh install exited non-zero"
+  mkdir -p "$_tg3c2/outside"
+  printf '<!-- harness:umbrella-stub -->\nexternal content the installer must never touch\n' > "$_tg3c2/outside/ext-stub.md"
+  rm -f "$_tg3c2/.harness/specs/glossary.md"
+  ln -s "$_tg3c2/outside/ext-stub.md" "$_tg3c2/.harness/specs/glossary.md"
+  _og3c2="$(CODEX_HOME="$_tg3c2/ch" HOME="$_tg3c2/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg3c2" 2>&1)" \
+    || fail "R3 (symlink, sentinel-shaped target): the upgrade run exited non-zero: $_og3c2"
+  [ -L "$_tg3c2/.harness/specs/glossary.md" ] \
+    || fail "R3 (sentinel-shaped target): the glossary path is no longer a symlink — it was unlinked or replaced"
+  grep -qxF '<!-- harness:umbrella-stub -->' "$_tg3c2/outside/ext-stub.md" \
+    || fail "R3 (sentinel-shaped target): the symlink's TARGET file was overwritten — the installer wrote THROUGH the link because its target happened to look like a stub"
+  printf '%s\n' "$_og3c2" | grep -qF 'specs/glossary.md preserved' \
+    || fail "R3 (sentinel-shaped target): the upgrade's stdout does not report the preserved verdict: $_og3c2"
+  rm -rf "$_tg3c2"
+
+  # (c3) NON-REGULAR-FILE arm, DANGLING symlink — `-e` is FALSE for a dangling link, so an
+  # `[ ! -e ]`-first implementation reads it as absent and seeds through it. Assert the
+  # run stays exit-0 and creates nothing at the dangling target.
+  _tg3c3="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$_tg3c3/ch" HOME="$_tg3c3/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg3c3" >/dev/null 2>&1 \
+    || fail "R3 setup (dangling symlink): fresh install exited non-zero"
+  rm -f "$_tg3c3/.harness/specs/glossary.md"
+  ln -s "$_tg3c3/nonexistent-target.md" "$_tg3c3/.harness/specs/glossary.md"
+  _og3c3="$(CODEX_HOME="$_tg3c3/ch" HOME="$_tg3c3/home" sh "$SRC/harness-install.sh" --agents=claude "$_tg3c3" 2>&1)" \
+    || fail "R3 (dangling symlink): the upgrade run exited non-zero: $_og3c3"
+  [ -L "$_tg3c3/.harness/specs/glossary.md" ] \
+    || fail "R3 (dangling symlink): the glossary path is no longer a symlink"
+  [ ! -e "$_tg3c3/nonexistent-target.md" ] \
+    || fail "R3 (dangling symlink): a file now exists at the dangling link's target — the installer seeded THROUGH the link"
+  rm -rf "$_tg3c3"
+
+  pass "any byte difference (incl. a symlink, live or dangling, to ordinary or sentinel-shaped content) leaves the glossary exactly as found and reports preserved (R3, R7 single-repo arm) [test_glossary_edit_preserved_on_upgrade]"
 }
 test_glossary_edit_preserved_on_upgrade
 
@@ -2456,10 +2497,17 @@ test_shipped_glossary_bytes_pinned() {
     || fail "R12: the shipped specs/glossary.md changed bytes. Every install still byte-identical to the OLD example will silently stop tracking it, because a single comparison cannot tell 'pristine but older' from 'project-edited'. Implement the .harness/.glossary-seed stamp (E30-F01 decision D2) before changing these bytes, or record the accepted freeze — then refresh tests/fixtures/glossary-shipped.md."
   # The message half is otherwise unfalsifiable (the only run that prints it has already
   # changed the bytes) — statically grep this suite's own source for both required parts.
-  grep -qF '.glossary-seed' "$SRC/tests/test_install.sh" \
-    || fail "R12: this suite's failure message does not name the .harness/.glossary-seed follow-up (D2)"
-  grep -qF 'silently stop tracking' "$SRC/tests/test_install.sh" \
-    || fail "R12: this suite's failure message does not state the consequence (every pristine install silently stops tracking the example)"
+  # SCOPED TO THE ACTUAL fail() STRING, not the whole file: a bare whole-file grep for
+  # '.glossary-seed' is satisfied by these two assertions' OWN description text below (and
+  # by the `pass` line), so it would stay green even if the real message on the line above
+  # lost the phrase entirely — proven as a real survivor during E30-F01's own build.
+  _r12_msg="$(grep -F 'the shipped specs/glossary.md changed bytes' "$SRC/tests/test_install.sh")"
+  [ -n "$_r12_msg" ] \
+    || fail "R12: could not locate this suite's own R12 failure message by its anchor text — the anchor is stale"
+  printf '%s' "$_r12_msg" | grep -qF '.glossary-seed' \
+    || fail "R12: this suite's OWN failure message does not name the .harness/.glossary-seed follow-up (D2)"
+  printf '%s' "$_r12_msg" | grep -qF 'silently stop tracking' \
+    || fail "R12: this suite's OWN failure message does not state the consequence (every pristine install silently stops tracking the example)"
   pass "the shipped glossary's bytes are pinned behind a tripwire naming the consequence and the .glossary-seed follow-up (R12) [test_shipped_glossary_bytes_pinned]"
 }
 test_shipped_glossary_bytes_pinned
