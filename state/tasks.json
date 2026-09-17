@@ -1464,13 +1464,14 @@
     {
       "id": "E30",
       "title": "Body/project ownership boundary: every .harness/ path is either harness-owned (refreshed on upgrade) or project-authored (seeded once, never clobbered) \u2014 specs/glossary.md is classified as both, so an upgrade destroys a project's domain glossary",
-      "status": "pending",
+      "status": "done",
       "owner": "araozmd",
       "features": [
         {
           "id": "E30-F01",
           "title": "specs/glossary.md is body-owned but project-authored: make it seed-once and preserve a project's edits (refresh only while byte-identical to the shipped example)",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "1e2ce7341468c7bd1d79c4926ebaf2fcf4efca5c", "ref": "1e2ce73", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": true,
           "autonomous": false,
           "depends_on": [],
