@@ -5,7 +5,7 @@ description: Lightweight fix lane as Fixer — seed an sdd:false fix under the r
 
 ## Invocation adapter
 
-Invoke `$sdd-fix` in Codex; treat all accompanying text as `$ARGUMENTS` in the workflow below. Discover installed skills with `/skills`. Continuations use `$sdd-*`, with arguments written after the skill mention.
+In Codex, invoke `$sdd-fix` and write arguments after the skill mention; in OpenCode, invoke `/sdd-fix`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below.
 
 ## Canonical workflow
 Act as **Fixer** (`agents/fixer.md`). That role file is the durable contract;

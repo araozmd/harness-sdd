@@ -5,7 +5,14 @@ description: Run a bounded batch of isolated autonomous E99 fixes through target
 
 ## Invocation adapter
 
-Invoke `$sdd-fix-parallel` in Codex; treat all accompanying text as `$ARGUMENTS` in the workflow below. Discover installed skills with `/skills`. Continuations use `$sdd-*`, with arguments written after the skill mention.
+In Codex, invoke `$sdd-fix-parallel` and write arguments after the skill mention; in OpenCode, invoke `/sdd-fix-parallel`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below.
+
+> **OpenCode capability precondition.** If the running host is OpenCode, read
+> `.opencode-parallel` before spawning any worker. If it does not read
+> exactly `supported`, STOP without spawning a worker and report that this
+> workflow needs `/sdd-test-concurrency` to confirm native concurrent delegation
+> and a re-run of the installer with `--with-opencode-parallel=true`. Codex
+> ignores this precondition: it delegates through native concurrent sub-agents.
 
 ## Canonical workflow
 Act as the **Fixer parallel coordinator** (`agents/fixer.md` → “Parallel

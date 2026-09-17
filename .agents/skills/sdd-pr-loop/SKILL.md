@@ -5,7 +5,7 @@ description: Drive the Codex review cycle on an open PR — trigger @codex revie
 
 ## Invocation adapter
 
-Invoke `$sdd-pr-loop` in Codex; treat all accompanying text as `$ARGUMENTS` in the workflow below. Discover installed skills with `/skills`. Continuations use `$sdd-*`, with arguments written after the skill mention.
+In Codex, invoke `$sdd-pr-loop` and write arguments after the skill mention; in OpenCode, invoke `/sdd-pr-loop`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below.
 
 ## Canonical workflow
 Drive the Codex review cycle on an open PR until every gate is green or the round cap is

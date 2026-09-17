@@ -1488,6 +1488,41 @@ test_no_install_time_preflight() {
   return 0
 }
 
+# ── E31-F01 R5 — the shared sdd-fix-parallel body self-gates OpenCode ─────────
+# The concurrency gate is a property of the WORKFLOW, and the shared `.agents/skills`
+# body is the invocation path OpenCode can reach even when the `.opencode/command`
+# copy is withheld. Assert the precondition lives in THAT body, and only there.
+test_sdd_fix_parallel_skill_self_gates_opencode() {
+  _x="$(sandbox e31pargate)"; _t="$_x/t"; mkdir -p "$_t"
+  hrun "$_x" -- --agents=codex,opencode --with-opencode-parallel=true "$_t" \
+    >"$_x/a.out" 2>"$_x/a.err" </dev/null \
+    || fail "E31-F01 R5: install failed: $(command cat "$_x/a.err" | tail -n 3)"
+  _f="$_t/.agents/skills/sdd-fix-parallel/SKILL.md"
+  [ -f "$_f" ] || fail "E31-F01 R5: the shared sdd-fix-parallel unit was not installed"
+  # Scope the prose assertion to the body BEFORE the canonical workflow — the adapter
+  # and precondition only — so an unrelated later line can never satisfy it.
+  _gate="$(sed -n '/^## Canonical workflow$/q;p' "$_f")"
+  [ -n "$_gate" ] || fail "E31-F01 R5: could not extract the pre-workflow body"
+  _folded="$(printf '%s' "$_gate" | tr '\n' ' ')"
+  printf '%s\n' "$_folded" | grep -qF '.harness/.opencode-parallel' \
+    || fail "E31-F01 R5: the shared body does not read .harness/.opencode-parallel"
+  printf '%s\n' "$_folded" | grep -qF 'supported' \
+    || fail "E31-F01 R5: the shared body does not require the 'supported' marker"
+  printf '%s\n' "$_folded" | grep -qF '/sdd-test-concurrency' \
+    || fail "E31-F01 R5: the shared body does not name /sdd-test-concurrency"
+  printf '%s\n' "$_folded" | grep -qF -- '--with-opencode-parallel=true' \
+    || fail "E31-F01 R5: the shared body does not name the override path"
+  printf '%s\n' "$_folded" | grep -qiE 'STOP[^.]{0,80}spawn' \
+    || fail "E31-F01 R5: the shared body does not stop before spawning a worker"
+  # Phrased as a Codex no-op (co-occurrence bound: see agents/builder.md).
+  printf '%s\n' "$_folded" | grep -qiE 'Codex[^.]{0,80}ignores' \
+    || fail "E31-F01 R5: the precondition is not phrased as a Codex no-op"
+  # Control: the precondition is specific to sdd-fix-parallel, not smeared over every unit.
+  grep -qF '.opencode-parallel' "$_t/.agents/skills/sdd-next/SKILL.md" \
+    && fail "E31-F01 R5 control: the sdd-next unit carries the concurrency precondition"
+  return 0
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 test_answer_mapping_unit
 pass "answer_mapping_unit: the answer→value mapping is pure, extractable and correct for every branch (R2)"
@@ -1549,5 +1584,9 @@ test_docs_document_pr_loop_prompt
 pass "docs_document_pr_loop_prompt: INSTALL.md, the installer's text and the config block document the third question (F02 R13)"
 test_no_install_time_preflight
 pass "no_install_time_preflight: enabling the loop executes neither gh nor jq at install time (F02 R14)"
+
+# ── E31-F01 — OpenCode claims the shared `.agents/skills` surface ─────────────
+test_sdd_fix_parallel_skill_self_gates_opencode
+pass "sdd_fix_parallel_skill_self_gates_opencode (E31-F01 R5): the shared skill body self-gates OpenCode and is a Codex no-op"
 
 echo "All installer-toggle tests passed."

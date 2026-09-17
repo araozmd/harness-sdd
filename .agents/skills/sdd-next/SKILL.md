@@ -5,7 +5,7 @@ description: Run the Orchestrator loop on the next actionable task (init → rou
 
 ## Invocation adapter
 
-Invoke `$sdd-next` in Codex; treat all accompanying text as `$ARGUMENTS` in the workflow below. Discover installed skills with `/skills`. Continuations use `$sdd-*`, with arguments written after the skill mention.
+In Codex, invoke `$sdd-next` and write arguments after the skill mention; in OpenCode, invoke `/sdd-next`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below.
 
 ## Canonical workflow
 Act as the **Orchestrator** (`agents/orchestrator.md`).

@@ -57,7 +57,7 @@ Three options were on the table:
 ## Decision
 
 `.agents/skills/<cmd>/` is **one harness-owned unit per command, shared by every front-end
-that reads that surface**. The claiming set is `{codex, antigravity}`.
+that reads that surface**. The claiming set is `{codex, opencode}`.
 
 - **One generator, one body.** The `SKILL.md` bytes for a command do not depend on which
   claiming front-ends are selected. There is exactly one writer.
@@ -88,6 +88,15 @@ that reads that surface**. The claiming set is `{codex, antigravity}`.
   `.agents/rules/harness.md` is a recognised Rule and already routes to the canonical role
   bodies under `.harness/agents/`. Whether to *retire* those two unrecognised trees is a
   separate decision with its own migration story, and is not taken here.
+
+**Update — E31-F01 (2026-09-17).** Antigravity was retired in E29, and **OpenCode** was
+added to the claiming set by E31-F01; the set is now `{codex, opencode}`. OpenCode reads
+`.agents/skills/*/SKILL.md`, so leaving it out would repeat exactly the silent-destructive
+omission this ADR warns about below. The decision above is unchanged — one generator, one
+body, install on any claimant, reclaim only on the last — only the membership moved. The
+shared body's invocation adapter now names both the Codex `$sdd-*` and the OpenCode
+`/sdd-*` invocation, and the OpenCode-only concurrency precondition lives in the
+`sdd-fix-parallel` body rather than in the file, because Codex still needs that unit.
 
 ## Consequences
 

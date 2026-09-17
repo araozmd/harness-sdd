@@ -44,11 +44,13 @@ value, and the evidence required before removing a mechanism.
 ## The commands this harness ships
 
 For selected front ends and enabled gates, canonical command bodies are emitted
-into `.claude/commands/` and `.opencode/command/`. Codex receives repository-local
-skills under `.agents/skills/<name>/SKILL.md`, each with an explicit-only policy
-companion. Claude/OpenCode use the `/sdd-*` names in the table; Codex invocation
-uses `$sdd-*`, for example `$sdd-new Add search` and `$sdd-next`. Accompanying text
-supplies `$ARGUMENTS`; `/skills` provides discovery. See [WORKFLOW.md](WORKFLOW.md).
+into `.claude/commands/` and `.opencode/command/`. Codex and OpenCode both read the
+shared repository-local skills under `.agents/skills/<name>/SKILL.md` (ADR-0003),
+each with an explicit-only policy companion. Claude/OpenCode use the `/sdd-*` names
+in the table; Codex invocation uses `$sdd-*`, for example `$sdd-new Add search` and
+`$sdd-next`. The shared adapter names both invocations; accompanying text supplies
+`$ARGUMENTS`. In Codex, `/skills` provides discovery. See
+[WORKFLOW.md](WORKFLOW.md).
 
 | Command | Role it runs | Gate |
 |---|---|---|
@@ -78,11 +80,16 @@ role receives a fresh context and file paths; the host reports missing delegatio
 capability rather than claiming that an isolated role ran.
 Inherited or unpinned roles remain registered without a `model` key; a concrete Codex
 pin adds `model` only where it resolves. Skill units are explicit-only through
-`agents/openai.yaml`, which is written wherever the unit is; their adapter maps text accompanying an explicit `$skill` mention
-to the canonical `$ARGUMENTS` term. Last-written stamps protect skill units and role
-files from selected-install overwrite and unsafe reclamation. Current installs never
-create global Codex prompts. Ungated legacy prompts remain because their cross-target
-ownership is unknowable; only ledger-proven, byte-pristine `sdd-pr-loop` is reclaimed.
+`agents/openai.yaml`, which is written wherever the unit is; their host-neutral adapter
+names the Codex `$sdd-*` and OpenCode `/sdd-*` invocations and maps text accompanying an
+explicit skill mention to the canonical `$ARGUMENTS` term. The `sdd-fix-parallel` unit
+carries an OpenCode capability precondition (read `.harness/.opencode-parallel`; stop
+unless it reads `supported`) that is a no-op on Codex. Last-written stamps protect skill
+units and role files from selected-install overwrite and unsafe reclamation; the units
+are claimed by both Codex and OpenCode and reclaimed only when the last claimant is
+deselected. Current installs never create global Codex prompts. Ungated legacy prompts
+remain because their cross-target ownership is unknowable; only ledger-proven,
+byte-pristine `sdd-pr-loop` is reclaimed.
 
 Source `--self` regeneration defaults to Claude + Codex and preserves their
 separate per-role model choices. With inherited Codex models, combined source

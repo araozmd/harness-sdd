@@ -5,7 +5,7 @@ description: Per-epic drill-down as Driller — decompose one draft epic into fe
 
 ## Invocation adapter
 
-Invoke `$sdd-drill` in Codex; treat all accompanying text as `$ARGUMENTS` in the workflow below. Discover installed skills with `/skills`. Continuations use `$sdd-*`, with arguments written after the skill mention.
+In Codex, invoke `$sdd-drill` and write arguments after the skill mention; in OpenCode, invoke `/sdd-drill`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below.
 
 ## Canonical workflow
 Act as **Driller** (`agents/driller.md`). That role file is the durable

@@ -100,15 +100,17 @@ approves) → `builder` → `reviewer`.
 | CLI | Entry file | Sub-agents |
 |---|---|---|
 | **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` (+ `pr-fixer`) + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-fix-parallel`, `/sdd-next`, `/sdd-pr-loop` |
-| **Codex** | `AGENTS.md` (native) | `.codex/agents/*.toml` roles + repository-local `$sdd-*` skills in `.agents/skills/` (including gated `$sdd-pr-loop`) |
-| **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-test-concurrency` and `/sdd-pr-loop`; `/sdd-fix-parallel` is opt-in (verified by `/sdd-test-concurrency`) |
+| **Codex** | `AGENTS.md` (native) | `.codex/agents/*.toml` roles + the shared repository-local `$sdd-*` skills in `.agents/skills/` (including gated `$sdd-pr-loop`) |
+| **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-test-concurrency` and `/sdd-pr-loop`; it also reads the shared `.agents/skills/` units, so `/sdd-*` resolve from both surfaces; `/sdd-fix-parallel` is opt-in (verified by `/sdd-test-concurrency`) |
 
 The tables and workflow prose use the portable `/sdd-*` spelling; in Codex, invoke the
-repository skills as `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`,
+shared repository skills as `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`,
 `$sdd-fix-parallel`, and (when enabled) `$sdd-pr-loop`. For example, enter
 `$sdd-new Add a settings page`, then `$sdd-next`; accompanying text supplies the
-workflow’s `$ARGUMENTS`. `/skills` is the discovery UI. The human spec approval
-gate and independent Reviewer verdict apply in Codex too.
+workflow’s `$ARGUMENTS`. OpenCode reads the same shared units, so `/sdd-*` resolve from
+`.agents/skills/` as well as from `.opencode/command/`; in Codex, `/skills` is the
+discovery UI. The human spec approval gate and independent Reviewer verdict apply in
+Codex too.
 
 `/sdd-pr-loop` and front-end-specific `pr-fixer` glue follow the **PR-policy gate**:
 they are stamped only while `pr_loop.enabled` is `true` in `harness.config.yaml`.
@@ -117,10 +119,12 @@ repo, an **authed `gh`** and **`jq`**; without them `/sdd-pr-loop` could only fa
 preflight, so nothing is written until you set `pr_loop.enabled: true` and re-run the
 installer. An absent block, an absent key or any non-`true` value all mean off.
 OpenCode separately gates `/sdd-fix-parallel` on its concurrency capability
-marker or an explicit override. Codex has seven standard roles and an eighth native
-`pr-fixer` only while the PR-loop gate is on. It handles each comment in a fresh role
-context with file-only handoffs. A host unable to start that role must report the
-limitation and handoff path; it cannot claim an isolated fix ran.
+marker or an explicit override; the shared `sdd-fix-parallel` skill body carries the
+same precondition, so it holds wherever the workflow is invoked in OpenCode. Codex has
+seven standard roles and an eighth native `pr-fixer` only while the PR-loop gate is on.
+It handles each comment in a fresh role context with file-only handoffs. A host unable
+to start that role must report the limitation and handoff path; it cannot claim an
+isolated fix ran.
 
 The harness body — `AGENTS.md`, `agents/`, `specs/`, `progress/`, `init.sh`, the
 stores — is **identical** across all of them. Only the entry filename and the
@@ -332,15 +336,18 @@ before target mutation. [Migration guidance](docs/INSTALL.md#retiring-gemini-and
 describes how pristine old glue is reclaimed and edited, foreign, or symlinked
 legacy files are preserved with warnings.
 
-**Codex workflows are repository-local.** Selecting `codex` creates the six base
-`$sdd-*` skill units in `.agents/skills/`, plus `$sdd-pr-loop` when enabled.
-Each includes `SKILL.md` and `agents/openai.yaml`, disabling implicit invocation
-and mapping accompanying text to `$ARGUMENTS`. Seven native roles are registered
-in `.codex/agents/`, plus gated `pr-fixer`; inherited or unpinned models omit
-`model`. Last-written stamps protect edited or foreign units and role files.
-Retiring Antigravity leaves these units in place when Codex remains selected.
-Current installation creates no global Codex prompts; uncertain legacy global
-prompt ownership is preserved. See [installation](docs/INSTALL.md).
+**Codex and OpenCode workflows are repository-local.** Selecting `codex` **or**
+`opencode` creates the six base `$sdd-*` / `/sdd-*` skill units in `.agents/skills/`, plus
+`$sdd-pr-loop` when enabled. Both hosts read the same unit (ADR-0003), so there is one
+`SKILL.md` per command whose host-neutral adapter names both invocations and maps
+accompanying text to `$ARGUMENTS`, with `agents/openai.yaml` disabling implicit invocation.
+The `sdd-fix-parallel` body additionally stops an OpenCode invocation unless
+`.harness/.opencode-parallel` reads `supported` (a no-op on Codex). Seven native roles are
+registered in `.codex/agents/`, plus gated `pr-fixer`; inherited or unpinned models omit
+`model`. Last-written stamps protect edited or foreign units and role files, and the units
+are reclaimed only when the last claimant is deselected. Current installation creates no
+global Codex prompts; uncertain legacy global prompt ownership is preserved. See
+[installation](docs/INSTALL.md).
 
 **Shared vs personal config.** The install is meant to be *committed and shared* — one
 `CLAUDE.md`, the `.harness/` body, the `.claude/` glue. Per-developer state stays local:

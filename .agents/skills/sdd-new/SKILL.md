@@ -5,7 +5,7 @@ description: Seed a new idea into the TaskStore as Inception (interactive intake
 
 ## Invocation adapter
 
-Invoke `$sdd-new` in Codex; treat all accompanying text as `$ARGUMENTS` in the workflow below. Discover installed skills with `/skills`. Continuations use `$sdd-*`, with arguments written after the skill mention.
+In Codex, invoke `$sdd-new` and write arguments after the skill mention; in OpenCode, invoke `/sdd-new`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below.
 
 ## Canonical workflow
 Act as **Inception** (`agents/inception.md`). That role file is the durable

@@ -5,7 +5,7 @@ description: Whole-project inception as Planner — produce vision + architectur
 
 ## Invocation adapter
 
-Invoke `$sdd-plan` in Codex; treat all accompanying text as `$ARGUMENTS` in the workflow below. Discover installed skills with `/skills`. Continuations use `$sdd-*`, with arguments written after the skill mention.
+In Codex, invoke `$sdd-plan` and write arguments after the skill mention; in OpenCode, invoke `/sdd-plan`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below.
 
 ## Canonical workflow
 Act as **Planner** (`agents/planner.md`). That role file is the durable

@@ -231,3 +231,11 @@
   sentence's OTHER line (a plain markdown re-wrap, no meaning changed) kept all suites green.
   Mutate the re-wrapped variant too, not just the verbatim revert: prose reflows on every edit, and
   a line-scoped negative silently narrows every time it does.
+- [2026-09-17 builder] A branch reaching the end of the §7 `printf | while read` reclaim loop is the
+  LOOP BODY's last command, so its exit status becomes the loop's. Ending it on
+  `[ -n "$var" ] && echo …` makes the loop return 1 whenever the list is empty (the common
+  no-op case), and `set -e` then aborts the whole installer mid-run with no message and no
+  diagnosis — the run simply stops after the previous `ok` line. Use
+  `if [ -n "$var" ]; then echo …; fi` (a false `if` still returns 0), and pin it by running the
+  no-op path (a target already reclaimed by an earlier phase). Same family as the bare-assignment
+  abort lesson, one shell construct over.

@@ -1271,6 +1271,96 @@ CODEX_HOME="$TLC/ch" sh "$SRC/harness-install.sh" --agents=claude "$TLC" >/dev/n
 rm -rf "$TLC"
 pass "deselecting the last claiming front-end reclaims the whole shared unit (R5)"
 
+# ── E31-F01 — the shared surface gains OpenCode as a second claimant (ADR-0003) ──
+# The claiming predicate is the install gate AND the reclaim gate, so the two
+# directions are exercised together: install when ANY claimant is selected, reclaim
+# only when the LAST one leaves. A single-claimant fixture cannot detect the
+# silent-destructive regression; all reclaim cases below are two-claimant.
+
+# opencode_only_installs_shared_skill_units (E31-F01 R1): OpenCode reads
+# `.agents/skills/*/SKILL.md`, so an opencode-only selection must stamp the units even
+# though `codex` is absent.
+TOS="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CODEX_HOME="$TOS/ch" sh "$SRC/harness-install.sh" --agents=opencode "$TOS" >/dev/null \
+  || fail "E31-F01 R1: opencode-only install exited non-zero"
+for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel; do
+  [ -f "$TOS/.agents/skills/$_c/SKILL.md" ] \
+    || fail "E31-F01 R1: opencode-only selection did not install .agents/skills/$_c/SKILL.md"
+  [ -f "$TOS/.agents/skills/$_c/agents/openai.yaml" ] \
+    || fail "E31-F01 R1: opencode-only selection did not install .agents/skills/$_c/agents/openai.yaml"
+done
+[ -d "$TOS/.harness/.codex-skills" ] \
+  || fail "E31-F01 R1: opencode-only selection wrote no ownership stamps"
+rm -rf "$TOS"
+pass "opencode_only_installs_shared_skill_units (E31-F01 R1): an opencode-only selection installs the shared units"
+
+# deselect_opencode_keeps_shared_units_for_codex (E31-F01 R2): a shared unit stays
+# while ANY claimant remains selected. Deselecting opencode while codex remains must
+# leave every SKILL.md, its policy companion and its ownership stamp in place.
+TDK="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CODEX_HOME="$TDK/ch" sh "$SRC/harness-install.sh" --agents=codex,opencode "$TDK" >/dev/null \
+  || fail "E31-F01 R2: two-claimant setup install failed"
+[ -f "$TDK/.agents/skills/sdd-next/SKILL.md" ] \
+  || fail "E31-F01 R2 setup: sdd-next was not stamped"
+CODEX_HOME="$TDK/ch" sh "$SRC/harness-install.sh" --agents=codex "$TDK" >/dev/null \
+  || fail "E31-F01 R2: deselecting opencode exited non-zero"
+for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel; do
+  [ -f "$TDK/.agents/skills/$_c/SKILL.md" ] \
+    || fail "E31-F01 R2: deselecting opencode removed $_c/SKILL.md while codex remained"
+  [ -f "$TDK/.agents/skills/$_c/agents/openai.yaml" ] \
+    || fail "E31-F01 R2: deselecting opencode removed $_c/agents/openai.yaml while codex remained"
+done
+[ -f "$TDK/.harness/.codex-skills/sdd-next/SKILL.md" ] \
+  || fail "E31-F01 R2: deselecting opencode dropped the still-claimed ownership stamp"
+rm -rf "$TDK"
+pass "deselect_opencode_keeps_shared_units_for_codex (E31-F01 R2): deselecting opencode leaves the units while codex remains"
+
+# deselect_last_claimant_reclaims_shared_units (E31-F01 R3): reclaim happens only
+# when the LAST claimant leaves. Both deselect orders are exercised because either
+# claimant can be the last one out, and a one-sided test cannot see the other.
+for _e31_order in "codex opencode" "opencode codex"; do
+  _e31_keep="${_e31_order% *}"; _e31_drop="${_e31_order#* }"
+  TDL="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  CODEX_HOME="$TDL/ch" sh "$SRC/harness-install.sh" --agents=codex,opencode "$TDL" >/dev/null \
+    || fail "E31-F01 R3 ($_e31_order): two-claimant setup install failed"
+  [ -f "$TDL/.agents/skills/sdd-next/SKILL.md" ] \
+    || fail "E31-F01 R3 ($_e31_order): setup did not stamp sdd-next"
+  CODEX_HOME="$TDL/ch" sh "$SRC/harness-install.sh" --agents="$_e31_keep" "$TDL" >/dev/null \
+    || fail "E31-F01 R3 ($_e31_order): deselecting $_e31_drop exited non-zero"
+  [ -f "$TDL/.agents/skills/sdd-next/SKILL.md" ] \
+    || fail "E31-F01 R3 ($_e31_order): deselecting $_e31_drop reclaimed a unit $_e31_keep still claims"
+  _e31_warn="$(CODEX_HOME="$TDL/ch" sh "$SRC/harness-install.sh" --agents=claude "$TDL" 2>&1 >/dev/null)" \
+    || fail "E31-F01 R3 ($_e31_order): deselecting the last claimant exited non-zero"
+  [ -e "$TDL/.agents/skills/sdd-next/SKILL.md" ] \
+    && fail "E31-F01 R3 ($_e31_order): deselecting the last claimant left a pristine shared unit"
+  printf '%s\n' "$_e31_warn" | grep -qF '.agents/skills/sdd-next/SKILL.md' \
+    || fail "E31-F01 R3 ($_e31_order): the last-claimant reclaim did not warn naming the removed path (R13)"
+  [ -e "$TDL/.agents/skills" ] \
+    && fail "E31-F01 R3 ($_e31_order): deselecting the last claimant did not prune .agents/skills"
+  [ -e "$TDL/.harness/.codex-skills" ] \
+    && fail "E31-F01 R3 ($_e31_order): deselecting the last claimant left stale ownership stamps"
+  rm -rf "$TDL"
+done
+pass "deselect_last_claimant_reclaims_shared_units (E31-F01 R3): the last claimant's deselect reclaims the pristine units (both orders)"
+
+# codex_only_shared_units_byte_identical (E31-F01 R6): the one shared body does not
+# depend on which claimants are selected. The SKILL.md bytes generated for a
+# codex-only selection must equal those for codex,opencode.
+TBI_C="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+TBI_CO="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+CODEX_HOME="$TBI_C/ch" sh "$SRC/harness-install.sh" --agents=codex "$TBI_C" >/dev/null \
+  || fail "E31-F01 R6: codex-only install failed"
+CODEX_HOME="$TBI_CO/ch" sh "$SRC/harness-install.sh" --agents=codex,opencode "$TBI_CO" >/dev/null \
+  || fail "E31-F01 R6: codex,opencode install failed"
+for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel; do
+  cmp -s "$TBI_C/.agents/skills/$_c/SKILL.md" "$TBI_CO/.agents/skills/$_c/SKILL.md" \
+    || fail "E31-F01 R6: $_c/SKILL.md bytes depend on whether opencode is selected"
+done
+cmp -s "$TBI_C/.agents/skills/sdd-next/agents/openai.yaml" "$TBI_CO/.agents/skills/sdd-next/agents/openai.yaml" \
+  || fail "E31-F01 R6: the policy companion depends on whether opencode is selected"
+rm -rf "$TBI_C" "$TBI_CO"
+pass "codex_only_shared_units_byte_identical (E31-F01 R6): SKILL.md bytes are equal for codex-only and codex,opencode"
+
 # E29-F01: retired-host history is exercised from frozen v0.78.1 output
 # in tests/test_frontend_retirement.sh (R2/R3).
 
@@ -1639,9 +1729,16 @@ _warn="$(sh "$SRC/harness-install.sh" --agents=claude,opencode "$TG" 2>&1 >/dev/
 # add applied (R12)
 [ -f "$TG/opencode.json" ]     || fail "R12: re-run did not add opencode glue (opencode.json)"
 [ -d "$TG/.opencode/command" ] || fail "R12: re-run did not add opencode commands"
-# remove applied (R13): codex glue gone, warning printed
+# remove applied (R13): codex's own role glue is gone. The shared `.agents/skills`
+# units are NOT reclaimed here — `opencode` was just added and now claims them
+# (E31-F01 R2), so the codex-specific skill reclamation does not fire.
 [ -f "$TG/.codex/agents/builder.toml" ] && fail "R13: deselected Codex role not removed"
-printf '%s' "$_warn" | grep -qiF 'codex' || fail "R13: removal of codex was not warned about"
+[ -f "$TG/.agents/skills/sdd-next/SKILL.md" ] \
+  || fail "E31-F01 R2: deselecting codex while opencode claims the surface removed the shared unit"
+[ -f "$TG/.harness/.codex-skills/sdd-next/SKILL.md" ] \
+  || fail "E31-F01 R2: deselecting codex while opencode claims the surface dropped the ownership stamp"
+printf '%s' "$_warn" | grep -qF "removed deselected agent 'codex' skills" \
+  && fail "E31-F01 R2: deselecting codex while opencode claims the surface still reclaimed the shared units"
 # claude kept, AGENTS.md survives, .harness/ body intact (R13 never-touch invariants)
 [ -d "$TG/.claude" ]          || fail "R13: still-selected claude glue must survive"
 [ -f "$TG/AGENTS.md" ]        || fail "R13: shared AGENTS.md entrypoint must never be removed"

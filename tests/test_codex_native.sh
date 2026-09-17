@@ -130,10 +130,25 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     for cmd in cmds|{'sdd-pr-loop'}:
         skill=(p/f'.agents/skills/{cmd}/SKILL.md').read_text();canonical=(p/f'.claude/commands/{cmd}.md').read_text()
         assert f'`${cmd}`' in skill and '$ARGUMENTS' in skill
-        assert not re.search(r'/sdd-(?:new|next|plan|drill|fix|pr-loop)(?:[`\s])',skill)
+        # The host-neutral ADAPTER (E31-F01) names the OpenCode `/sdd-*` form; the CANONICAL
+        # WORKFLOW below it must stay Codex-native `$sdd-*` throughout.
+        workflow=skill.split('## Canonical workflow',1)[1]
+        assert not re.search(r'/sdd-(?:new|next|plan|drill|fix|pr-loop)(?:[`\s])',workflow)
         # Executable shell programs are preserved exactly across the adapter.
         assert re.findall(r'```(?:bash|sh)\n(.*?)```',skill,re.S)==re.findall(r'```(?:bash|sh)\n(.*?)```',canonical,re.S)
     assert '`$sdd-drill <epic-id>`' in (p/'.agents/skills/sdd-plan/SKILL.md').read_text()
+    # E31-F01 R4: one shared unit, read by both claimants, so the adapter must name the
+    # Codex `$sdd-*` invocation AND the OpenCode `/sdd-*` invocation, keep the `$ARGUMENTS`
+    # mapping, and never point a host at `/skills` (OpenCode has no such command).
+    h=fresh('adapter-host-neutral');install(h,'--agents=codex,opencode')
+    for cmd in cmds:
+        text=(h/f'.agents/skills/{cmd}/SKILL.md').read_text()
+        adapter=text.split('## Invocation adapter',1)[1].split('## Canonical workflow',1)[0]
+        assert f'`${cmd}`' in adapter,f'{cmd}: adapter lost the Codex invocation'
+        assert f'`/{cmd}`' in adapter,f'{cmd}: adapter lost the OpenCode invocation'
+        assert '$ARGUMENTS' in adapter,f'{cmd}: adapter lost the $ARGUMENTS mapping'
+        assert '/skills' not in adapter,f'{cmd}: adapter still tells the host to use /skills'
+    print('ok - skill_adapter_is_host_neutral (R4)')
     for host,advice in [('claude','Claude Code:'),('codex','Codex:'),('opencode','OpenCode:')]:
         target=fresh('advice-'+host);out=install(target,'--agents='+host);assert advice in out
         if host=='codex':assert 'invoke $sdd-next' in out and 'Open the repo in Claude Code' not in out
