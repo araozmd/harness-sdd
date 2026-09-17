@@ -7185,15 +7185,30 @@ EOF
     echo
     echo "Next steps:"
     echo "  1. Edit .harness/specs/product.md for your product."
-    echo "  2. Run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
+    # Each selected host gets the front-door sequence in order — plan, then drill,
+    # then next — in that host's own invocation form (Codex uses the $sdd-* skills).
+    # The lines are emitted plan → drill → next so the printed banner holds the same
+    # order for any selection.
     for _advice_host in $SELECTED; do
       case "$_advice_host" in
-        claude) echo "  3. Claude Code: open the repo and run /sdd-next" ;;
-        codex) echo '  3. Codex: open the repo, discover with /skills, and invoke $sdd-next' ;;
-        opencode) echo "  3. OpenCode: open the repo and run /sdd-next" ;;
+        claude)
+          echo "  2. Claude Code: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
+          echo "  3. Claude Code: run /sdd-drill <epic-id> to decompose the first draft epic into features."
+          echo "  4. Claude Code: run /sdd-next to spec and build that work."
+          ;;
+        codex)
+          echo '  2. Codex: open the repo, discover with /skills, and invoke $sdd-plan to brainstorm the vision, architecture, ADRs and draft epics.'
+          echo '  3. Codex: invoke $sdd-drill <epic-id> to decompose the first draft epic into features.'
+          echo '  4. Codex: invoke $sdd-next to spec and build that work.'
+          ;;
+        opencode)
+          echo "  2. OpenCode: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
+          echo "  3. OpenCode: run /sdd-drill <epic-id> to decompose the first draft epic into features."
+          echo "  4. OpenCode: run /sdd-next to spec and build that work."
+          ;;
       esac
     done
-    echo "     (detect test/lint commands after /sdd-plan)."
+    echo "     (detect test/lint commands after planning)."
   fi
 
   LAST_UPGRADE="$UPGRADE"

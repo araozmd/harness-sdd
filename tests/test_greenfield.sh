@@ -7,7 +7,8 @@
 #   R2  the section states the empty/non-git facts and who runs `git init`
 #   R3  exactly one `/sdd-plan`-before-`/sdd-next` order, in both sections
 #   R4  "Bootstrap (first run)" keeps its heading and routes E00-F01 after /sdd-plan
-#   R5  the fresh-install `Next steps` banner names /sdd-plan before /sdd-next
+#   R5  the fresh-install `Next steps` banner presents the ordered front door per host
+#       (/sdd-plan → /sdd-drill → /sdd-next; Codex: $sdd-plan → $sdd-drill → $sdd-next)
 #   R6  a single-target install creates no `.git`
 #   R7  the one install runs into an asserted-empty, non-git fixture
 #   R8  the installed layout is usable (AGENTS.md, .harness, board, /sdd-plan)
@@ -83,6 +84,12 @@ front_door_in() {
   assert_contains "$1" "$2" '/sdd-plan'
   assert_contains "$1" "$2" '/sdd-next'
   require_order "$1" "$2" '/sdd-plan' '/sdd-next' lt
+}
+
+# banner_block <file> — the fresh-install `Next steps:` block of <file>, from the
+# heading to the next blank line (exclusive). Empty output means the banner is gone.
+banner_block() {
+  awk '/^Next steps:/{k=1} k{ if ($0 == "") exit; print }' "$1"
 }
 
 # ── R1 (static) ───────────────────────────────────────────────────────────────
@@ -184,15 +191,48 @@ test_empty_non_git_install_succeeds() {
 
 test_banner_points_at_sdd_plan() {
   [ "$INSTALLED" -eq 1 ] || fail "R5: no install ran (R7 must succeed first)"
-  _banner="$(awk '/^Next steps:/{k=1} k{ if ($0 == "") exit; print }' "$INSTALL_OUT")"
+  _banner="$(banner_block "$INSTALL_OUT")"
   [ -n "$_banner" ] \
     || fail "R5: fresh-install stdout has no 'Next steps:' banner block — the greenfield pointer is gone"
   [ "$(line_count "$_banner")" -ge 2 ] \
     || fail "R5: the 'Next steps:' block is fewer than 2 lines — stale extraction"
-  assert_contains "R5 banner" "$_banner" '/sdd-plan'
-  assert_contains "R5 banner" "$_banner" '/sdd-next'
+  # The selected (Claude) host gets the whole ordered front door: plan → drill → next.
+  for _a in '/sdd-plan' '/sdd-drill' '/sdd-next'; do
+    assert_contains "R5 banner" "$_banner" "$_a"
+  done
+  require_order "R5 banner" "$_banner" '/sdd-plan' '/sdd-drill' lt
+  require_order "R5 banner" "$_banner" '/sdd-drill' '/sdd-next' lt
   require_order "R5 banner" "$_banner" '/sdd-plan' '/sdd-next' lt
-  pass "fresh-install banner names /sdd-plan before /sdd-next on stdout (R5) [banner_points_at_sdd_plan]"
+  # Non-Codex keeps the slash form: a Claude-only install must not advertise the
+  # Codex `$sdd-*` spelling (the instruction varies by host).
+  if printf '%s\n' "$_banner" | grep -qF '$sdd-plan'; then
+    fail "R5 banner: a Claude-only install advertises the Codex form '\$sdd-plan' — the front-door step must vary by host"
+  fi
+
+  # A Codex-only install must be told the Codex skill form, in the same order.
+  _cx_tgt="$T/codex-advice-target"
+  _cx_home="$T/codex-advice-home"
+  _cx_codex_home="$T/codex-advice-codex-home"
+  mkdir -p "$_cx_tgt" "$_cx_home" "$_cx_codex_home"
+  _cx_rc=0
+  env -i PATH="$PATH" HOME="$_cx_home" CODEX_HOME="$_cx_codex_home" \
+    sh "$SRC/harness-install.sh" --agents=codex --builder-backend=in-session \
+      --pr-loop=false "$_cx_tgt" \
+    >"$T/codex-advice.out" 2>"$T/codex-advice.err" || _cx_rc=$?
+  [ "$_cx_rc" -eq 0 ] \
+    || fail "R5: a Codex-only install exited $_cx_rc — cannot assert the Codex banner form"
+  _banner_cx="$(banner_block "$T/codex-advice.out")"
+  [ -n "$_banner_cx" ] \
+    || fail "R5: fresh Codex-only install stdout has no 'Next steps:' banner block"
+  [ "$(line_count "$_banner_cx")" -ge 2 ] \
+    || fail "R5: the Codex 'Next steps:' block is fewer than 2 lines — stale extraction"
+  for _a in '$sdd-plan' '$sdd-drill' '$sdd-next'; do
+    assert_contains "R5 codex banner" "$_banner_cx" "$_a"
+  done
+  require_order "R5 codex banner" "$_banner_cx" '$sdd-plan' '$sdd-drill' lt
+  require_order "R5 codex banner" "$_banner_cx" '$sdd-drill' '$sdd-next' lt
+  require_order "R5 codex banner" "$_banner_cx" '$sdd-plan' '$sdd-next' lt
+  pass "fresh-install banner presents /sdd-plan → /sdd-drill → /sdd-next per host (Codex: \$sdd-*) on stdout (R5) [banner_points_at_sdd_plan]"
 }
 
 # ── R6 (integration) ──────────────────────────────────────────────────────────

@@ -143,7 +143,10 @@ The target may be an empty, non-git directory — that is a first-class path, no
 degraded mode. The installer does not create a git repository.
 
 1. Create an empty directory for the product.
-2. Run `./harness-install.sh /path/to/your-product` and answer the single human gate.
+2. Run `./harness-install.sh /path/to/your-product`. An interactive install asks up to
+   three questions — the front-end picker, the builder backend
+   (`execution.builder.backend`), and the PR-loop opt-in (`pr_loop.enabled`). Each has a
+   flag for scripted installs: `--agents=`, `--builder-backend=`, and `--pr-loop=`.
 3. Run `git init` and make a `commit`. Version control is the human's step, and a
    committed body lets `init.sh`'s drift guard verify it: on a non-git tree the guard
    skips, and on an untracked body it warns — it never fails.
