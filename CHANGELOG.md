@@ -45,9 +45,22 @@ All notable changes to the harness body are recorded here. Versions follow
   drafts the epics; the canonical `AGENTS.md` distinguishes new-product planning
   (`/sdd-plan` → `/sdd-drill <epic-id>`, or `$sdd-plan` → `$sdd-drill` on Codex) from
   later work intake (`/sdd-new`) and execution (`/sdd-next`); and the entrypoint pointer
-  block sends a new product to `/sdd-plan` before `/sdd-next`. `tests/test_greenfield.sh`
+  block sends a new product through `/sdd-plan` → `/sdd-drill <epic-id>` → `/sdd-next`
+  in one sequence. `tests/test_greenfield.sh`
   pins the seeded `product.md` claim (positive shape control + negative) and the drill
   step's `<epic-id>` argument.
+- **Round-7 review: the installed entrypoint no longer skips the drill.** The generated
+  root `AGENTS.md` pointer block named only `/sdd-plan` then `/sdd-next`; because
+  `/sdd-plan` leaves the new epics `draft`, `/sdd-next` reported their features as
+  `gated-epic` and the documented sequence dead-ended for a fresh product. The pointer
+  now names `/sdd-plan` → `/sdd-drill <epic-id>` → `/sdd-next`, the seeded
+  `specs/product.md` stub names the drill step, and the fresh-install banner's human
+  `git init` + initial-commit step precedes the constitution edit so the banner, the
+  `docs/INSTALL.md` ordered sections, and `AGENTS.md` carry one sequence. `README.md`,
+  `CLAUDE.md`, `docs/WORKFLOW.md`, and the banner's per-host host-neutral baseline step
+  already agreed and are unchanged. `tests/test_greenfield.sh`'s
+  `test_installed_entrypoint_points_at_sdd_plan` now pins the drill step (presence plus
+  folded plan → drill → next pairs). No VERSION bump beyond this entry.
 
 ## [0.81.0] — 2026-09-17
 

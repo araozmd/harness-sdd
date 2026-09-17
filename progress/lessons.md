@@ -250,3 +250,9 @@
   moving the lines the assertion measures (`index($0, n)` scans output order, not the label), and
   let the mandated applied-diff print show the swap — it is what caught this as an instrument
   failure rather than a hole in R5.
+- [2026-09-17 builder] A folded two-token anchor over markdown BLOCKQUOTE prose must account for
+  the `> ` continuation prefix: re-wrapping a line inside `> …` inserts `> ` between its words, so
+  `tr '\n' ' '` turns `draft\n> epics` into `draft > epics` and the `sdd-plan[^.]{0,60}draft epics`
+  pair the anchor greps no longer exists (E28-F01 round 7 — the seeded `product.md` stub reddened
+  R8b until both tokens were kept on one physical line). Keep the pair on one line, or strip the
+  quote markers before folding.

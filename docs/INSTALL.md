@@ -157,7 +157,7 @@ degraded mode. The installer does not create a git repository.
    `/sdd-plan` plans *around* it rather than rewriting it: `agents/planner.md` defines
    the vision as complementary to the constitution and forbids the Planner from changing
    it, so a `TODO` left here survives planning. The installer's `Next steps` banner
-   prints this same edit as its first item.
+   prints this same edit as its second item, after `git init`.
 5. Open the project and run **`/sdd-plan`** — the whole-project inception that writes
    the vision, architecture and ADRs and seeds the project's draft epics.
 6. Run **`/sdd-drill <epic-id>`** to decompose the first draft epic into features.

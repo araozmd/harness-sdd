@@ -53,6 +53,17 @@
 #     the first feature PR carries the planning changes. Anchored as positive tokens
 #     plus folded two-token pairs and first-occurrence order; no fail-open predicate.
 #
+# Round-7 review addition:
+#   * `test_installed_entrypoint_points_at_sdd_plan` also pins the drill step in the
+#     installed root AGENTS.md pointer (4041951737). Without it, the pointer sends a
+#     new product from `/sdd-plan` straight to `/sdd-next`; `/sdd-plan` leaves the
+#     epics `draft`, so `/sdd-next` reports their features as `gated-epic`. Presence
+#     plus folded `/sdd-plan → /sdd-drill → /sdd-next` pairs, not a whole-file grep.
+#   * The fresh-install banner's human git step (`git init` + initial commit) now
+#     precedes the constitution edit, matching `docs/INSTALL.md`'s ordered section and
+#     its "second item, after `git init`" cross-reference (the unchanged R5 anchors
+#     still hold; the banner asserts order by first occurrence, not step labels).
+#
 # CONVENTIONS THIS SUITE HONOURS (progress/lessons.md):
 #   * No `VERSION` literal anywhere. R10 reads $SRC/VERSION at run time; the
 #     no-literal half is only falsifiable by the Reviewer's bump mutation, not by
@@ -331,6 +342,11 @@ test_banner_points_at_sdd_plan() {
   require_order "R5 banner" "$_banner" '/sdd-drill' 'planning baseline' lt
   require_order "R5 banner" "$_banner" 'planning baseline' '/sdd-next' lt
   require_order "R5 banner" "$_banner" 'first feature branch' '/sdd-next' lt
+  # Round 7: the human `git init` + initial-commit step precedes the constitution edit,
+  # matching docs/INSTALL.md's ordered section and its "second item, after `git init`"
+  # cross-reference — the edit stays uncommitted until the planning baseline.
+  assert_contains "R5 banner" "$_banner" 'specs/product.md'
+  require_order "R5 banner" "$_banner" 'git init' 'specs/product.md' lt
   # Non-Codex keeps the slash form: a Claude-only install must not advertise the
   # Codex `$sdd-*` spelling (the instruction varies by host).
   if printf '%s\n' "$_banner" | grep -qF '$sdd-plan'; then
@@ -384,6 +400,9 @@ test_banner_points_at_sdd_plan() {
   require_order "R5 codex banner" "$_banner_cx" '$sdd-drill' 'planning baseline' lt
   require_order "R5 codex banner" "$_banner_cx" 'planning baseline' '$sdd-next' lt
   require_order "R5 codex banner" "$_banner_cx" 'first feature branch' '$sdd-next' lt
+  # Round 7: the host-neutral git step precedes the constitution edit for Codex too.
+  assert_contains "R5 codex banner" "$_banner_cx" 'specs/product.md'
+  require_order "R5 codex banner" "$_banner_cx" 'git init' 'specs/product.md' lt
   pass "fresh-install banner presents /sdd-plan → /sdd-drill → /sdd-next per host (Codex: \$sdd-*) on stdout (R5) [banner_points_at_sdd_plan]"
 }
 
@@ -434,13 +453,21 @@ test_installed_product_md_points_at_sdd_plan() {
   if printf '%s\n' "$_prod_flat" | grep -qiE 'sdd-next[^.]{0,60}draft epics'; then
     fail "R8b: installed product.md still tells a new-product reader that /sdd-next drafts the project's epics — the two front doors conflict on a fresh install"
   fi
-  pass "installed product.md points at /sdd-plan (not /sdd-next) to draft a new product's epics (round-2 reconciliation) [installed_product_md_points_at_sdd_plan]"
+  # Round 7 (4041951737): the stub must name the drill step too, or a reader who
+  # follows it stops at /sdd-plan and hands /sdd-next a board of draft epics.
+  assert_contains "R8b product.md" "$_prod_flat" '/sdd-drill <epic-id>'
+  pass "installed product.md points at /sdd-plan → /sdd-drill (not /sdd-next) to draft a new product's epics (round-2 + round-7 reconciliation) [installed_product_md_points_at_sdd_plan]"
 }
 
 # The target-root entrypoint pointer is the first instruction an agent reads on a
 # fresh install. It must send a new product to /sdd-plan rather than straight into
 # the execution loop — otherwise the installed bootstrap text carries a third,
 # competing front door (round-2 review 4041566967).
+#
+# Round 7 (4041951737): it must not send a new product straight from /sdd-plan to
+# /sdd-next. /sdd-plan leaves the epics `draft`, so /sdd-next reports their features
+# as `gated-epic`; the drill step has to sit between them. Presence kills the
+# omission; the folded pairs keep plan → drill → next in one sentence.
 test_installed_entrypoint_points_at_sdd_plan() {
   _ep="$TGT/AGENTS.md"
   [ -s "$_ep" ] \
@@ -450,7 +477,12 @@ test_installed_entrypoint_points_at_sdd_plan() {
   # one sentence, so removing either half reds here.
   printf '%s\n' "$_ep_flat" | grep -qiE 'sdd-plan[^.]{0,80}new product' \
     || fail "R8c: installed entrypoint does not send a new product to /sdd-plan — a fresh install still starts an agent at /sdd-next"
-  pass "installed entrypoint sends a new product to /sdd-plan (round-2 reconciliation) [installed_entrypoint_points_at_sdd_plan]"
+  assert_contains "R8c entrypoint" "$_ep_flat" '/sdd-drill <epic-id>'
+  printf '%s\n' "$_ep_flat" | grep -qiE 'sdd-plan[^.]{0,120}sdd-drill' \
+    || fail "R8c: installed entrypoint sends a new product from /sdd-plan but never names /sdd-drill before /sdd-next — the seeded epics stay draft and /sdd-next reports them gated-epic"
+  printf '%s\n' "$_ep_flat" | grep -qiE 'sdd-drill[^.]{0,120}sdd-next' \
+    || fail "R8c: installed entrypoint names /sdd-drill but does not route on to /sdd-next in the same sentence — the new-product sequence is incomplete"
+  pass "installed entrypoint sends a new product /sdd-plan → /sdd-drill → /sdd-next (round-7 reconciliation) [installed_entrypoint_points_at_sdd_plan]"
 }
 
 # ── R9 (integration) ──────────────────────────────────────────────────────────

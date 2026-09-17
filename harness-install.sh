@@ -3826,7 +3826,8 @@ status: draft
 # <Product name> — Product Constitution
 
 > Layer 0. The stable, high-level "what & why". Rewrite this for your product,
-> then run /sdd-plan to plan the whole project (vision, architecture, ADRs, draft epics).
+> then run /sdd-plan to plan the whole project (vision, architecture, ADRs, draft epics),
+> then /sdd-drill <epic-id> to decompose the first epic into features.
 
 ## What this product is
 TODO
@@ -4233,7 +4234,8 @@ Start every agent session as the **Orchestrator**:
    after committed instructions as personal, additive guidance; committed instructions remain authoritative on conflict.
 4. Product/source code lives at the repo root; harness bookkeeping lives in
    \`.harness/\`. In Claude Code, run \`/sdd-plan\` for a new product, then
-   \`/sdd-next\`; ongoing work resumes with \`/sdd-next\`.
+   \`/sdd-drill <epic-id>\`, then \`/sdd-next\`; ongoing work resumes with
+   \`/sdd-next\`.
 $MARK_END"
     if [ -f "$_f" ] && grep -qF "$MARK_BEGIN" "$_f"; then
       # Replace the marked block IN PLACE: keep the prefix before the begin marker
@@ -7185,13 +7187,15 @@ EOF
     ok "install complete (v$VERSION)"
     echo
     echo "Next steps:"
-    echo "  1. Edit .harness/specs/product.md for your product."
     # Version control is the human's step: the installer never runs `git init` on a
     # single target (R6), yet the installed workflow uses feature branches and PRs.
     # The fresh-install banner must name it before the host-specific planning commands.
     # A local-only `git init` cannot open a PR (Codex round 5, 4041813522), so the step
-    # must also name the remote and the per-feature branch discipline.
-    echo "  2. Run git init and make an initial commit (local only); PR-based execution also needs a remote (gh repo create, or git remote add + push) and one feature branch per feature, which is what the harness opens PRs from."
+    # must also name the remote and the per-feature branch discipline. It precedes the
+    # constitution edit so that edit stays uncommitted until the planning baseline,
+    # exactly as docs/INSTALL.md's ordered section states (round 7 consistency audit).
+    echo "  1. Run git init and make an initial commit (local only); PR-based execution also needs a remote (gh repo create, or git remote add + push) and one feature branch per feature, which is what the harness opens PRs from."
+    echo "  2. Edit .harness/specs/product.md for your product."
     # Round 6 (4041879995): the planning artifacts /sdd-plan and /sdd-drill write are
     # dirty or untracked until they are committed and pushed, so the banner commits the
     # baseline and creates the first feature branch before /sdd-next runs. Host-neutral:
