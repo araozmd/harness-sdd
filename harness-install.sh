@@ -7185,14 +7185,15 @@ EOF
     echo
     echo "Next steps:"
     echo "  1. Edit .harness/specs/product.md for your product."
+    echo "  2. Run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
     for _advice_host in $SELECTED; do
       case "$_advice_host" in
-        claude) echo "  2. Claude Code: open the repo and run /sdd-next" ;;
-        codex) echo '  2. Codex: open the repo, discover with /skills, and invoke $sdd-next' ;;
-        opencode) echo "  2. OpenCode: open the repo and run /sdd-next" ;;
+        claude) echo "  3. Claude Code: open the repo and run /sdd-next" ;;
+        codex) echo '  3. Codex: open the repo, discover with /skills, and invoke $sdd-next' ;;
+        opencode) echo "  3. OpenCode: open the repo and run /sdd-next" ;;
       esac
     done
-    echo "     (detect test/lint commands, draft your first epics)."
+    echo "     (detect test/lint commands after /sdd-plan)."
   fi
 
   LAST_UPGRADE="$UPGRADE"

@@ -1,0 +1,267 @@
+#!/bin/sh
+# test_greenfield.sh — E28-F01: the greenfield single-repo front door.
+#
+# Covers R1–R10 of
+# specs/epics/E28-greenfield-to-umbrella/F01-greenfield-single-path/E28-F01.spec.md:
+#   R1  "Starting from nothing (new product)" documents the ordered front door
+#   R2  the section states the empty/non-git facts and who runs `git init`
+#   R3  exactly one `/sdd-plan`-before-`/sdd-next` order, in both sections
+#   R4  "Bootstrap (first run)" keeps its heading and routes E00-F01 after /sdd-plan
+#   R5  the fresh-install `Next steps` banner names /sdd-plan before /sdd-next
+#   R6  a single-target install creates no `.git`
+#   R7  the one install runs into an asserted-empty, non-git fixture
+#   R8  the installed layout is usable (AGENTS.md, .harness, board, /sdd-plan)
+#   R9  the installed init.sh exits 0 in the still-non-git target
+#   R10 the installed version stamp is read from $SRC/VERSION at run time
+#
+# CONVENTIONS THIS SUITE HONOURS (progress/lessons.md):
+#   * No `VERSION` literal anywhere. R10 reads $SRC/VERSION at run time; the
+#     no-literal half is only falsifiable by the Reviewer's bump mutation, not by
+#     an in-suite self-grep (which would be a dead predicate).
+#   * Every prose assertion extracts the SECTION it names (heading → next `## `)
+#     and guards it non-empty with a line-count floor before asserting, so a
+#     rename or move reds instead of silently passing on an empty span.
+#   * Every ordering assertion has a positive presence control first, so an
+#     absent anchor cannot make the position comparison vacuous.
+#   * The fixture is created empty and asserted non-git before installing — never
+#     a copy of the repo, which would inherit the artifact under test.
+#   * stdout is captured separately from stderr: the banner contract names stdout.
+#
+# Zero dependencies; self-cleaning temp dir; POSIX sh only.
+
+set -eu
+
+SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-greenfield)"
+trap 'rm -rf "$T"' EXIT
+
+DOC="$SRC/docs/INSTALL.md"
+README="$SRC/README.md"
+
+fail() { echo "FAIL: $1" >&2; exit 1; }
+pass() { echo "ok - $1"; }
+
+# ── extraction / assertion helpers ────────────────────────────────────────────
+
+# section_span <file> <exact H2 line> — print the span from that heading to the
+# next `## ` heading (exclusive). Empty output means the heading is stale/moved.
+section_span() {
+  awk -v h="$2" '
+    !k && $0 == h { k = 1 }
+    k && /^## / && $0 != h { exit }
+    k { print }
+  ' "$1"
+}
+
+# line_count <text>
+line_count() { printf '%s\n' "$1" | grep -c ''; }
+
+# assert_contains <label> <haystack> <needle> — positive control.
+assert_contains() {
+  printf '%s\n' "$2" | grep -qF -- "$3" \
+    || fail "$1: missing required anchor '$3' — the assertion set is incomplete, not just mis-ordered"
+}
+
+# require_order <label> <span> <A> <B> [le|lt] — first A must precede first B.
+# Both anchors must be present, so a missing token can never make this vacuous.
+require_order() {
+  _ro_lbl="$1"; _ro_sp="$2"; _ro_a="$3"; _ro_b="$4"; _ro_op="${5:-lt}"
+  _ro_pa="$(printf '%s\n' "$_ro_sp" | awk -v n="$_ro_a" 'index($0,n){print NR; exit}')"
+  _ro_pb="$(printf '%s\n' "$_ro_sp" | awk -v n="$_ro_b" 'index($0,n){print NR; exit}')"
+  [ -n "$_ro_pa" ] || fail "$_ro_lbl: anchor '$_ro_a' is absent — ordering check would be vacuous"
+  [ -n "$_ro_pb" ] || fail "$_ro_lbl: anchor '$_ro_b' is absent — ordering check would be vacuous"
+  case "$_ro_op" in
+    le) [ "$_ro_pa" -le "$_ro_pb" ] \
+          || fail "$_ro_lbl: '$_ro_a' (line $_ro_pa) is AFTER '$_ro_b' (line $_ro_pb)" ;;
+    *)  [ "$_ro_pa" -lt "$_ro_pb" ] \
+          || fail "$_ro_lbl: '$_ro_a' (line $_ro_pa) is NOT before '$_ro_b' (line $_ro_pb)" ;;
+  esac
+}
+
+# front_door_in <label> <span> — /sdd-plan before /sdd-next, both present.
+front_door_in() {
+  assert_contains "$1" "$2" '/sdd-plan'
+  assert_contains "$1" "$2" '/sdd-next'
+  require_order "$1" "$2" '/sdd-plan' '/sdd-next' lt
+}
+
+# ── R1 (static) ───────────────────────────────────────────────────────────────
+
+test_greenfield_section_documents_sequence() {
+  _gf="$(section_span "$DOC" '## Starting from nothing (new product)')"
+  [ -n "$_gf" ] \
+    || fail "R1: docs/INSTALL.md has no '## Starting from nothing (new product)' section — the new-product front door is undocumented"
+  [ "$(line_count "$_gf")" -ge 6 ] \
+    || fail "R1: the 'Starting from nothing' section is fewer than 6 lines — it is stale, truncated or moved"
+  for _a in 'harness-install.sh' 'git init' '/sdd-plan' '/sdd-drill' '/sdd-next'; do
+    assert_contains "R1 section" "$_gf" "$_a"
+  done
+  require_order "R1 sequence" "$_gf" 'harness-install.sh' 'git init' le
+  require_order "R1 sequence" "$_gf" 'git init' '/sdd-plan' le
+  require_order "R1 sequence" "$_gf" '/sdd-plan' '/sdd-drill' le
+  require_order "R1 sequence" "$_gf" '/sdd-drill' '/sdd-next' le
+  pass "greenfield section documents the ordered front door (R1) [greenfield_section_documents_sequence]"
+}
+
+# ── R2 (static) ───────────────────────────────────────────────────────────────
+
+test_greenfield_section_states_non_git_and_human_git_init() {
+  _gf="$(section_span "$DOC" '## Starting from nothing (new product)')"
+  [ -n "$_gf" ] \
+    || fail "R2: the 'Starting from nothing' section is missing — cannot state the empty/non-git facts"
+  for _a in empty non-git commit drift; do
+    assert_contains "R2 section" "$_gf" "$_a"
+  done
+  printf '%s\n' "$_gf" | grep -qF 'The installer does not create a git repository.' \
+    || fail "R2: the section does not state 'The installer does not create a git repository.' — a reader cannot tell who owns version control"
+  pass "greenfield section states the non-git target and the human git-init step (R2) [greenfield_section_states_non_git_and_human_git_init]"
+}
+
+# ── R3 (static) ───────────────────────────────────────────────────────────────
+
+test_one_front_door_story() {
+  _gf="$(section_span "$DOC" '## Starting from nothing (new product)')"
+  _bs="$(section_span "$DOC" '## Bootstrap (first run)')"
+  [ -n "$_gf" ] || fail "R3: the 'Starting from nothing' section is missing"
+  [ -n "$_bs" ] || fail "R3: the 'Bootstrap (first run)' section is missing — README's anchor cannot resolve"
+  [ "$(line_count "$_gf")" -ge 6 ] || fail "R3: 'Starting from nothing' is shorter than 6 lines — stale extraction"
+  [ "$(line_count "$_bs")" -ge 4 ] || fail "R3: 'Bootstrap (first run)' is shorter than 4 lines — stale extraction"
+  front_door_in "R3 greenfield section" "$_gf"
+  front_door_in "R3 Bootstrap section" "$_bs"
+  pass "exactly one front-door order (/sdd-plan before /sdd-next) in both sections (R3) [one_front_door_story]"
+}
+
+# ── R4 (static) ───────────────────────────────────────────────────────────────
+
+test_bootstrap_section_reconciled() {
+  grep -qF 'docs/INSTALL.md#bootstrap-first-run' "$README" \
+    || fail "R4: README.md no longer links to docs/INSTALL.md#bootstrap-first-run — the anchor consumer was dropped"
+  grep -qF '## Bootstrap (first run)' "$DOC" \
+    || fail "R4: docs/INSTALL.md no longer carries the heading '## Bootstrap (first run)' — README's anchor cannot resolve"
+  _bs="$(section_span "$DOC" '## Bootstrap (first run)')"
+  [ -n "$_bs" ] || fail "R4: the 'Bootstrap (first run)' span is empty"
+  assert_contains "R4 Bootstrap" "$_bs" 'E00-F01'
+  assert_contains "R4 Bootstrap" "$_bs" '/sdd-next'
+  assert_contains "R4 Bootstrap" "$_bs" '/sdd-plan'
+  require_order "R4 Bootstrap" "$_bs" '/sdd-plan' '/sdd-next' lt
+  pass "Bootstrap section routes the seeded E00-F01 after /sdd-plan and keeps its heading (R4) [bootstrap_section_reconciled]"
+}
+
+# ── The single install (R7 preconditions) ─────────────────────────────────────
+
+TGT="$T/target"
+mkdir -p "$TGT"
+HOME_SANDBOX="$T/home"
+CODEX_SANDBOX="$T/codex-home"
+mkdir -p "$HOME_SANDBOX" "$CODEX_SANDBOX"
+INSTALL_OUT="$T/install.out"
+INSTALL_ERR="$T/install.err"
+INSTALLED=0
+
+test_empty_non_git_install_succeeds() {
+  [ -d "$TGT" ] || fail "R7: fixture directory does not exist"
+  [ -z "$(ls -A "$TGT")" ] \
+    || fail "R7: fixture '$TGT' is not empty before install — the case would test an inherited tree, not a greenfield install"
+  [ ! -e "$TGT/.git" ] \
+    || fail "R7: fixture is already a git work tree — this is not the empty, non-git target the case names"
+  _rc=0
+  env -i PATH="$PATH" HOME="$HOME_SANDBOX" CODEX_HOME="$CODEX_SANDBOX" \
+    sh "$SRC/harness-install.sh" --agents=claude --builder-backend=in-session \
+      --pr-loop=false "$TGT" \
+    >"$INSTALL_OUT" 2>"$INSTALL_ERR" || _rc=$?
+  if [ "$_rc" -ne 0 ]; then
+    echo "--- installer stderr ---" >&2
+    sed -n '1,60p' "$INSTALL_ERR" >&2 || true
+    fail "R7: install into an empty, non-git directory exited $_rc — the documented greenfield path is broken"
+  fi
+  INSTALLED=1
+  [ -f "$TGT/.harness/.harness-version" ] \
+    || fail "R7: install exited 0 but left no .harness/.harness-version — it did not land in THIS fixture"
+  pass "empty, non-git install succeeds and lands in the fixture (R7) [empty_non_git_install_succeeds]"
+}
+
+# ── R5 (integration) ──────────────────────────────────────────────────────────
+
+test_banner_points_at_sdd_plan() {
+  [ "$INSTALLED" -eq 1 ] || fail "R5: no install ran (R7 must succeed first)"
+  _banner="$(awk '/^Next steps:/{k=1} k{ if ($0 == "") exit; print }' "$INSTALL_OUT")"
+  [ -n "$_banner" ] \
+    || fail "R5: fresh-install stdout has no 'Next steps:' banner block — the greenfield pointer is gone"
+  [ "$(line_count "$_banner")" -ge 2 ] \
+    || fail "R5: the 'Next steps:' block is fewer than 2 lines — stale extraction"
+  assert_contains "R5 banner" "$_banner" '/sdd-plan'
+  assert_contains "R5 banner" "$_banner" '/sdd-next'
+  require_order "R5 banner" "$_banner" '/sdd-plan' '/sdd-next' lt
+  pass "fresh-install banner names /sdd-plan before /sdd-next on stdout (R5) [banner_points_at_sdd_plan]"
+}
+
+# ── R6 (integration) ──────────────────────────────────────────────────────────
+
+test_install_creates_no_git() {
+  [ ! -e "$TGT/.git" ] \
+    || fail "R6: the installer created a .git in a single-target install — it must stay out of version control"
+  [ -n "$(ls -A "$TGT")" ] \
+    || fail "R6: target is empty — the 'no .git' result is vacuous (the install never ran)"
+  [ -f "$TGT/.harness/.harness-version" ] \
+    || fail "R6: no install stamp — 'no .git' is vacuously true and proves nothing"
+  pass "single-target install created no .git (R6) [install_creates_no_git]"
+}
+
+# ── R8 (integration) ──────────────────────────────────────────────────────────
+
+test_installed_layout_usable() {
+  [ -f "$TGT/AGENTS.md" ] || fail "R8: installed target has no AGENTS.md entrypoint"
+  [ -d "$TGT/.harness" ] || fail "R8: installed target has no .harness/ body"
+  [ -s "$TGT/.harness/state/tasks.json" ] \
+    || fail "R8: seeded board .harness/state/tasks.json is missing or empty"
+  python3 -c 'import json,sys; raw=open(sys.argv[1]).read(); json.loads(raw); sys.exit(0 if "E00-F01" in raw else 1)' \
+      "$TGT/.harness/state/tasks.json" \
+    || fail "R8: seeded board is not valid JSON or lacks the E00-F01 bootstrap entry"
+  [ -f "$TGT/.claude/commands/sdd-plan.md" ] \
+    || fail "R8: the selected front-end's /sdd-plan command artifact (.claude/commands/sdd-plan.md) is missing"
+  pass "installed layout is usable (entrypoint, body, seeded board, /sdd-plan command) (R8) [installed_layout_usable]"
+}
+
+# ── R9 (integration) ──────────────────────────────────────────────────────────
+
+test_init_passes_in_non_git_target() {
+  [ ! -e "$TGT/.git" ] \
+    || fail "R9: the target became a git tree before init.sh — the non-git case is not being exercised"
+  _rc=0
+  _out="$( cd "$TGT" && ./.harness/init.sh 2>&1 )" || _rc=$?
+  if [ "$_rc" -ne 0 ]; then
+    echo "--- installed init.sh output ---" >&2
+    printf '%s\n' "$_out" >&2 || true
+    fail "R9: installed .harness/init.sh exited $_rc in a non-git target — the drift guard must skip, never fail"
+  fi
+  printf '%s\n' "$_out" | grep -qF 'harness-sdd init' \
+    || fail "R9: init.sh exited 0 without printing the harness init banner — a zero exit from a file that never ran is not a pass"
+  [ ! -e "$TGT/.git" ] \
+    || fail "R9: init.sh created a git repository — the drift guard must not initialize version control"
+  pass "installed init.sh exits 0 in the still-non-git target (R9) [init_passes_in_non_git_target]"
+}
+
+# ── R10 (integration) ─────────────────────────────────────────────────────────
+
+test_version_stamp_reads_source_version() {
+  _src_ver="$(cat "$SRC/VERSION")"
+  [ -n "$_src_ver" ] || fail "R10: $SRC/VERSION is empty"
+  _inst_ver="$(cat "$TGT/.harness/.harness-version")" \
+    || fail "R10: installed .harness/.harness-version is missing"
+  [ "$_inst_ver" = "$_src_ver" ] \
+    || fail "R10: installed version stamp ('$_inst_ver') != source VERSION ('$_src_ver')"
+  pass "installed version stamp is derived from \$SRC/VERSION at run time (R10) [version_stamp_reads_source_version]"
+}
+
+# ── run ───────────────────────────────────────────────────────────────────────
+
+test_greenfield_section_documents_sequence
+test_greenfield_section_states_non_git_and_human_git_init
+test_one_front_door_story
+test_bootstrap_section_reconciled
+test_empty_non_git_install_succeeds
+test_banner_points_at_sdd_plan
+test_install_creates_no_git
+test_installed_layout_usable
+test_init_passes_in_non_git_target
+test_version_stamp_reads_source_version

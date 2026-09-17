@@ -136,18 +136,41 @@ retired glue is excluded from active harness drift ownership. Review the
 warnings and decide separately whether to retain your custom legacy integration.
 The [v0.78.1 baseline](BASELINE-0.78.1.md) remains the historical support record.
 
+## Starting from nothing (new product)
+
+For a brand-new product the supported front door is **install first, plan second**.
+The target may be an empty, non-git directory — that is a first-class path, not a
+degraded mode. The installer does not create a git repository.
+
+1. Create an empty directory for the product.
+2. Run `./harness-install.sh /path/to/your-product` and answer the single human gate.
+3. Run `git init` and make a `commit`. Version control is the human's step, and a
+   committed body lets `init.sh`'s drift guard verify it: on a non-git tree the guard
+   skips, and on an untracked body it warns — it never fails.
+4. Open the project and run **`/sdd-plan`** — the whole-project inception that writes
+   the vision, architecture and ADRs and seeds the project's draft epics.
+5. Run **`/sdd-drill`** to decompose the first draft epic into features.
+6. Keep running **`/sdd-next`** to spec and build that work.
+
+The seeded `E00-F01` bootstrap task is not the front door for a new product; `/sdd-next`
+routes it after `/sdd-plan` — see [Bootstrap (first run)](#bootstrap-first-run).
+
 ## Bootstrap (first run)
 
 The installer is deterministic; the *project-specific* adaptation is done through the
-harness itself, under the human gate:
+harness itself, under the human gate. A new product plans before it builds: run
+**`/sdd-plan`** first — the front door is
+[Starting from nothing](#starting-from-nothing-new-product).
 
 1. Edit `.harness/specs/product.md` for your product.
-2. Open the project in Claude Code and run **`/sdd-next`**. The seeded `E00-F01`
-   bootstrap task is `sdd: true`, so the Orchestrator routes it to the Architect
-   (with Scout recon) to draft epics and detect your test/lint/typecheck commands
-   (`.harness/harness.config.yaml` + fast project gates in `.harness/init.project.sh`), then
-   **pauses at the human gate** for your approval.
-3. Approve, then keep running `/sdd-next` to build features.
+2. Run **`/sdd-plan`** to brainstorm the vision, architecture and ADRs and seed the
+   project's draft epics.
+3. Run **`/sdd-drill`** to decompose a draft epic into features.
+4. Run **`/sdd-next`**. The seeded `E00-F01` bootstrap task is `sdd: true`, so the
+   Orchestrator routes it to the Architect (with Scout recon) to detect your
+   test/lint/typecheck commands (`.harness/harness.config.yaml` + fast project gates in
+   `.harness/init.project.sh`), then **pauses at the human gate** for your approval.
+5. Approve, then keep running `/sdd-next` to build features.
 
 To add new work later, run **`/sdd-new "<idea>"`** — the Inception intake triages it
 (new epic / feature / task), seeds a `pending` entry plus an intent brief, and tells
