@@ -248,6 +248,9 @@ models:
   # .codex/agents/*.toml); only the `model` key is omitted, as for the `inherit` tier.
   #   opencode MUST be "provider/model" (an invalid value aborts your OpenCode run)
   #   codex    MUST be a bare model id (the provider comes from `model_provider`)
+  #   codex ALSO derives `model_reasoning_effort` from this SAME tier automatically —
+  #   no separate knob (cheap=low standard=medium reasoning=high frontier=xhigh); see
+  #   docs/INSTALL.md.
   # pin.opencode.reasoning: ""
   # pin.opencode.standard: ""
   # pin.opencode.cheap: ""
