@@ -7186,6 +7186,10 @@ EOF
     echo
     echo "Next steps:"
     echo "  1. Edit .harness/specs/product.md for your product."
+    # Version control is the human's step: the installer never runs `git init` on a
+    # single target (R6), yet the installed workflow uses feature branches and PRs.
+    # The fresh-install banner must name it before the host-specific planning commands.
+    echo "  2. Run git init and make an initial commit, so feature branches and PRs work."
     # Each selected host gets the front-door sequence in order — plan, then drill,
     # then next — in that host's own invocation form (Codex uses the $sdd-* skills).
     # The lines are emitted plan → drill → next so the printed banner holds the same
@@ -7193,19 +7197,19 @@ EOF
     for _advice_host in $SELECTED; do
       case "$_advice_host" in
         claude)
-          echo "  2. Claude Code: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
-          echo "  3. Claude Code: run /sdd-drill <epic-id> to decompose the first draft epic into features."
-          echo "  4. Claude Code: run /sdd-next to spec and build that work."
+          echo "  3. Claude Code: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
+          echo "  4. Claude Code: run /sdd-drill <epic-id> to decompose the first draft epic into features."
+          echo "  5. Claude Code: run /sdd-next to spec and build that work."
           ;;
         codex)
-          echo '  2. Codex: open the repo, discover with /skills, and invoke $sdd-plan to brainstorm the vision, architecture, ADRs and draft epics.'
-          echo '  3. Codex: invoke $sdd-drill <epic-id> to decompose the first draft epic into features.'
-          echo '  4. Codex: invoke $sdd-next to spec and build that work.'
+          echo '  3. Codex: open the repo, discover with /skills, and invoke $sdd-plan to brainstorm the vision, architecture, ADRs and draft epics.'
+          echo '  4. Codex: invoke $sdd-drill <epic-id> to decompose the first draft epic into features.'
+          echo '  5. Codex: invoke $sdd-next to spec and build that work.'
           ;;
         opencode)
-          echo "  2. OpenCode: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
-          echo "  3. OpenCode: run /sdd-drill <epic-id> to decompose the first draft epic into features."
-          echo "  4. OpenCode: run /sdd-next to spec and build that work."
+          echo "  3. OpenCode: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
+          echo "  4. OpenCode: run /sdd-drill <epic-id> to decompose the first draft epic into features."
+          echo "  5. OpenCode: run /sdd-next to spec and build that work."
           ;;
       esac
     done

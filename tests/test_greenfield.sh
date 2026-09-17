@@ -9,6 +9,13 @@
 #   R4  "Bootstrap (first run)" keeps its heading and routes E00-F01 after /sdd-plan
 #   R5  the fresh-install `Next steps` banner presents the ordered front door per host
 #       (/sdd-plan → /sdd-drill → /sdd-next; Codex: $sdd-plan → $sdd-drill → $sdd-next)
+#       AND names the human `git init` + initial commit step before those commands
+#
+# Round-4 review addition:
+#   * R5 also requires the `git init` + initial-commit step in the fresh-install
+#     banner, before the host-specific planning commands (4041736459). The installer
+#     still performs no `git init` (R6); this is an instruction to the human, because
+#     the installed workflow needs feature branches and PRs.
 #   R6  a single-target install creates no `.git`
 #   R7  the one install runs into an asserted-empty, non-git fixture
 #   R8  the installed layout is usable (AGENTS.md, .harness, board, /sdd-plan)
@@ -242,6 +249,16 @@ test_banner_points_at_sdd_plan() {
   require_order "R5 banner" "$_banner" '/sdd-plan' '/sdd-drill' lt
   require_order "R5 banner" "$_banner" '/sdd-drill' '/sdd-next' lt
   require_order "R5 banner" "$_banner" '/sdd-plan' '/sdd-next' lt
+  # Round-4 (4041736459): the installer never creates .git (R6) and the installed
+  # workflow needs feature branches and PRs, so the banner must name the human's git
+  # step before the host-specific planning commands. Positive tokens first, then the
+  # folded two-token anchor proves the step names BOTH `git init` and the commit.
+  assert_contains "R5 banner" "$_banner" 'git init'
+  assert_contains "R5 banner" "$_banner" 'commit'
+  _banner_flat="$(printf '%s\n' "$_banner" | tr '\n' ' ')"
+  printf '%s\n' "$_banner_flat" | grep -qiE 'git init[^.]{0,60}commit' \
+    || fail "R5 banner: the git step does not name both \`git init\` and the initial commit in one sentence — a greenfield reader stops at an uncommitted tree"
+  require_order "R5 banner" "$_banner" 'git init' '/sdd-plan' lt
   # Non-Codex keeps the slash form: a Claude-only install must not advertise the
   # Codex `$sdd-*` spelling (the instruction varies by host).
   if printf '%s\n' "$_banner" | grep -qF '$sdd-plan'; then
@@ -271,6 +288,14 @@ test_banner_points_at_sdd_plan() {
   require_order "R5 codex banner" "$_banner_cx" '$sdd-plan' '$sdd-drill' lt
   require_order "R5 codex banner" "$_banner_cx" '$sdd-drill' '$sdd-next' lt
   require_order "R5 codex banner" "$_banner_cx" '$sdd-plan' '$sdd-next' lt
+  # Round-4 (4041736459): the host-neutral git step is present for the Codex banner
+  # too, and still precedes that host's planning command.
+  assert_contains "R5 codex banner" "$_banner_cx" 'git init'
+  assert_contains "R5 codex banner" "$_banner_cx" 'commit'
+  _banner_cx_flat="$(printf '%s\n' "$_banner_cx" | tr '\n' ' ')"
+  printf '%s\n' "$_banner_cx_flat" | grep -qiE 'git init[^.]{0,60}commit' \
+    || fail "R5 codex banner: the git step does not name both \`git init\` and the initial commit in one sentence — a greenfield reader stops at an uncommitted tree"
+  require_order "R5 codex banner" "$_banner_cx" 'git init' '$sdd-plan' lt
   pass "fresh-install banner presents /sdd-plan → /sdd-drill → /sdd-next per host (Codex: \$sdd-*) on stdout (R5) [banner_points_at_sdd_plan]"
 }
 

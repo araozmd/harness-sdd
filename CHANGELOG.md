@@ -19,10 +19,12 @@ All notable changes to the harness body are recorded here. Versions follow
   installer's up-to-three interactive questions (front-end picker, builder backend,
   PR-loop opt-in) instead of calling all of them "the single human gate".
 - **The fresh-install `Next steps` banner presents the ordered front door per selected
-  host**: `/sdd-plan` → `/sdd-drill <epic-id>` → `/sdd-next` (Codex: `$sdd-plan` →
-  `$sdd-drill` → `$sdd-next`), so the advertised invocation matches the host's skill
-  surface and the drill step is no longer skipped. The upgrade branch is unchanged; the
-  installer still performs no `git init`.
+  host**: edit `.harness/specs/product.md` → `git init` + initial commit → `/sdd-plan` →
+  `/sdd-drill <epic-id>` → `/sdd-next` (Codex: `$sdd-plan` → `$sdd-drill` →
+  `$sdd-next`), so the advertised invocation matches the host's skill surface, the drill
+  step is no longer skipped, and a greenfield reader is told to bring the install under
+  version control before the feature-branch/PR workflow needs it. The upgrade branch is
+  unchanged; the installer still performs no `git init` itself (R6).
 - **New suite `tests/test_greenfield.sh`** installs into an asserted-empty, non-git
   fixture and covers the banner order, the absence of `.git`, the usable installed
   layout, the installed `init.sh` passing there, and a version stamp read from `VERSION`
@@ -31,10 +33,11 @@ All notable changes to the harness body are recorded here. Versions follow
   `/sdd-drill` is documented with its required `<epic-id>` argument in `docs/INSTALL.md`;
   the seeded `specs/product.md` stub no longer tells a new-product reader that `/sdd-next`
   drafts the epics; the canonical `AGENTS.md` distinguishes new-product planning
-  (`/sdd-plan` → `/sdd-drill <epic-id>`) from later work intake (`/sdd-new`) and execution
-  (`/sdd-next`); and the entrypoint pointer block sends a new product to `/sdd-plan`
-  before `/sdd-next`. `tests/test_greenfield.sh` pins the seeded `product.md` claim
-  (positive shape control + negative) and the drill step's `<epic-id>` argument.
+  (`/sdd-plan` → `/sdd-drill <epic-id>`, or `$sdd-plan` → `$sdd-drill` on Codex) from
+  later work intake (`/sdd-new`) and execution (`/sdd-next`); and the entrypoint pointer
+  block sends a new product to `/sdd-plan` before `/sdd-next`. `tests/test_greenfield.sh`
+  pins the seeded `product.md` claim (positive shape control + negative) and the drill
+  step's `<epic-id>` argument.
 
 ## [0.81.0] — 2026-09-17
 
