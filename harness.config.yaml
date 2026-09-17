@@ -343,8 +343,11 @@ change_size:
 # because escalating into a role that resolves to nothing is a DOWNGRADE: it abandons
 # whatever `models.builder` was set to, exactly when the build was struggling.
 #   claude                       a built-in tier alias is enough
-#   codex / opencode               a tier alone stamps NOTHING — you must also set the
-#                                  matching `pin.<front-end>.<tier>` in the models: block
+#   codex                        a tier alone stamps NO `model` (E99-F161: it DOES stamp
+#                                  `model_reasoning_effort` — see docs/INSTALL.md) — you
+#                                  must also set pin.codex.<tier> for a model to arm
+#   opencode                     a tier alone stamps NOTHING — you must also set the
+#                                  matching pin.opencode.<tier> in the models: block
 # The verdict is computed at INSTALL time, so re-run the installer after changing any of it.
 # WHAT THIS DOES NOT CHECK: that the model is STRONGER, or that it exists at all. The harness
 # has no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours;

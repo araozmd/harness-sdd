@@ -476,8 +476,11 @@ EOF
 # because escalating into a role that resolves to nothing is a DOWNGRADE: it abandons
 # whatever `models.builder` was set to, exactly when the build was struggling.
 #   claude                       a built-in tier alias is enough
-#   codex / opencode               a tier alone stamps NOTHING — you must also set the
-#                                  matching `pin.<front-end>.<tier>` in the models: block
+#   codex                        a tier alone stamps NO `model` (E99-F161: it DOES stamp
+#                                  `model_reasoning_effort` — see docs/INSTALL.md) — you
+#                                  must also set pin.codex.<tier> for a model to arm
+#   opencode                     a tier alone stamps NOTHING — you must also set the
+#                                  matching pin.opencode.<tier> in the models: block
 # The verdict is computed at INSTALL time, so re-run the installer after changing any of it.
 # WHAT THIS DOES NOT CHECK: that the model is STRONGER, or that it exists at all. The harness
 # has no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours;
@@ -1929,14 +1932,19 @@ resolve_model() {
 # unknown-tier warning/normalization, so this re-derives none of that, exactly like
 # `resolve_model` re-derives no tier logic of its own.
 #
-# GUARDED exactly like the OpenCode `provider/model` check above, and for the identical
-# reason: Codex does not degrade an unrecognized key, it discards the WHOLE role
-# definition ("Ignoring malformed agent role definition… unknown field"), verified
-# empirically against the live CLI. So a value that is not a real Codex effort must never
-# reach the file — warn once, write nothing. Today `codex_effort_alias` only ever returns
-# a value already in this allowlist (nothing here ranks models or infers `ultra`
-# eligibility), so the guard is defense-in-depth against a future edit to that table, not
-# a check on operator input — there is no operator-facing effort override to validate.
+# GUARDED, but not for the reason the OpenCode `provider/model` check above is. Codex
+# does discard the WHOLE role definition when an agent toml carries an unrecognized KEY
+# ("Ignoring malformed agent role definition… unknown field"), verified empirically
+# against the live CLI (0.154.0) — but that hazard is triggered by the KEY name, a printf
+# literal below (gen_codex_agent) that never varies, and this guard cannot touch it either
+# way. Separately verified against the same CLI: an unrecognized VALUE for the known
+# `model_reasoning_effort` key was NOT observed to be rejected at role-load time — a bogus
+# string loads clean, no startup warning, role kept intact. The guard below exists anyway.
+# Today `codex_effort_alias` only ever returns a value already in this allowlist (nothing
+# here ranks models or infers `ultra` eligibility), so the guard is defense-in-depth
+# against a FUTURE edit to that table emitting a value Codex's schema does not accept —
+# not a check on operator input, since there is no operator-facing effort override to
+# validate.
 resolve_codex_effort() {
   [ "${MODELS_OFF:-0}" = 1 ] && return 0
   _rce_role="$1"

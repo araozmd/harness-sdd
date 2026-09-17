@@ -29,6 +29,18 @@ export HARNESS_PR_LOOP_ENABLED=true
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
+# F1 (E99-F161 round 2): every test in this suite invokes `sh "$SRC/harness-install.sh"`,
+# never `./harness-install.sh` directly — so a dropped executable bit is invisible to all
+# 47 suites while README.md:304,322-325 and docs/UMBRELLA.md document the direct-exec
+# form. This is the ONLY assertion in the whole suite that notices that class of
+# regression; do not remove it without replacing it with an equivalent.
+test_harness_install_is_executable() {
+  [ -x "$SRC/harness-install.sh" ] ||
+    fail "harness-install.sh is not executable — README documents ./harness-install.sh"
+  pass "harness-install.sh keeps its executable bit (E99-F161 R2) [harness_install_is_executable]"
+}
+test_harness_install_is_executable
+
 test_root_gitignore_seeds_local_prompt_files() {
   [ -f "$T/.gitignore" ] || fail "project-root .gitignore not seeded"
   for _p in AGENTS.local.md CLAUDE.local.md AGENTS.override.md; do

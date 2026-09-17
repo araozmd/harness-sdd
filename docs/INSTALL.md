@@ -807,17 +807,36 @@ role's capability, and a second, independently-set dial could disagree with it �
 all. Riding the existing tier also adds no new vocabulary: only Codex's own accepted
 effort values are ever written.
 
+**Deliberately NOT enforced yet: `escalation_verdict` still compares `model` only, not
+`model_reasoning_effort`.** A Codex operator who sets `builder: standard` /
+`builder-heavy: reasoning` now gets genuinely differentiated roles on disk (`medium` vs
+`high` effort) — but `escalation:` still reads `DISARMED` for Codex unless the two tiers
+also resolve to different `model` pins, because the arming check in `harness-install.sh`
+was intentionally left untouched by this change (see "Ranking is yours" under
+`escalation:` in `harness.config.yaml`). Making effort a second, independent signal the
+arming check can arm on is scope for a follow-up — it is owed a board row, not yet
+filed, and is not covered by this feature.
+
 Codex additionally recognizes `max` and, on exactly two models
 (`gpt-6-astra`, `gpt-5.6-sol`), `ultra`. Neither is stamped by the built-in ladder above:
 the harness has no model list and does not infer which model a role's pin resolves to
 (see "Ranking is yours" under `escalation:` in `harness.config.yaml`), so it never
 guesses whether the currently pinned model supports `ultra`.
 
-**This value is guarded before it ever reaches a file.** Codex does not degrade an
-unrecognized key — it discards the *entire* role definition ("Ignoring malformed agent
-role definition… unknown field"), verified against the live CLI (0.154.0). So, exactly
-like the OpenCode `provider/model` format check, an effort value that is not one of
-Codex's own recognized values is warned about once and never written.
+**This value is guarded before it ever reaches a file — but not for the reason the
+unknown-key hazard suggests.** Two facts, verified separately against the live CLI
+(0.154.0), and not the same fact: an unrecognized **key** in an agent toml does make
+Codex discard the *entire* role definition ("Ignoring malformed agent role
+definition… unknown field") — but that hazard is triggered by the key name, which this
+installer never varies, so no value guard can address it either way. An unrecognized
+**value** for the known `model_reasoning_effort` key, by contrast, was **not** observed
+to be rejected at role-load time: a deliberately bogus string loaded clean, with no
+startup warning and the role kept intact. The guard exists anyway, exactly like the
+OpenCode `provider/model` format check, as defence-in-depth: `codex_effort_alias` today
+only ever returns a value already in the known-effort allowlist, so the guard currently
+has no operator input to reject — it exists against a *future* edit to that built-in
+table emitting a value Codex's schema does not accept, not against anything reachable
+today.
 
 ### Pinning an exact model — `models.pin.<front-end>.<tier>`
 

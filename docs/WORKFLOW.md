@@ -807,8 +807,12 @@ Notes that matter in practice:
   `none` is the case that matters: the heavy role resolves to **nothing** while `builder`
   resolves to something, so escalating would abandon your configured Builder model for the
   session default — a *downgrade*, arriving exactly when the build was struggling. On
-  `claude` a built-in tier alias is enough; on `codex` / `opencode`
-  a tier alone stamps **nothing** — you must also set the matching `pin.<front-end>.<tier>`.
+  `claude` a built-in tier alias is enough; on `opencode` a tier alone stamps **nothing** —
+  you must also set the matching `pin.opencode.<tier>`. On `codex` a tier alone stamps NO
+  `model` (same requirement) but, since E99-F161, DOES stamp `model_reasoning_effort` —
+  see `docs/INSTALL.md`'s "Codex reasoning effort" section; `escalation_verdict` still
+  compares `model` only, so that effort difference does not by itself arm escalation
+  (deliberately deferred, not yet enforced — owed a follow-up board row).
   The verdict is computed at **install time**, so re-run the installer after changing any of
   it.
 - **The verdict is a conservative AND across selected front-ends.** The rule cannot know
