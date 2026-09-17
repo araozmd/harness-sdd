@@ -4233,9 +4233,9 @@ Start every agent session as the **Orchestrator**:
 3. Local prompt override (if present): read \`AGENTS.local.md\` beside this entrypoint
    after committed instructions as personal, additive guidance; committed instructions remain authoritative on conflict.
 4. Product/source code lives at the repo root; harness bookkeeping lives in
-   \`.harness/\`. In Claude Code, run \`/sdd-plan\` for a new product, then
-   \`/sdd-drill <epic-id>\`, then \`/sdd-next\`; ongoing work resumes with
-   \`/sdd-next\`.
+   \`.harness/\`. Run \`/sdd-plan\` for a new product (Codex: \`\$sdd-plan\`), then
+   \`/sdd-drill <epic-id>\` (Codex: \`\$sdd-drill <epic-id>\`), then \`/sdd-next\`
+   (Codex: \`\$sdd-next\`); ongoing work resumes with the next command.
 $MARK_END"
     if [ -f "$_f" ] && grep -qF "$MARK_BEGIN" "$_f"; then
       # Replace the marked block IN PLACE: keep the prefix before the begin marker
@@ -7201,32 +7201,66 @@ EOF
     # baseline and creates the first feature branch before /sdd-next runs. Host-neutral:
     # committing and branching is the human's git work, not a host command.
     _advice_baseline="Commit and push the planning baseline (constitution, vision, ADRs and decomposed epics), then create the first feature branch — this keeps planning artifacts out of the first feature PR."
-    # Each selected host gets the front-door sequence in order — plan, then drill, then
-    # baseline commit, then next — in that host's own invocation form (Codex uses the
-    # $sdd-* skills). The lines are emitted plan → drill → baseline → next so the
-    # printed banner holds the same order for any selection.
-    for _advice_host in $SELECTED; do
-      case "$_advice_host" in
-        claude)
-          echo "  3. Claude Code: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
-          echo "  4. Claude Code: run /sdd-drill <epic-id> to decompose the first draft epic into features."
-          echo "  5. $_advice_baseline"
-          echo "  6. Claude Code: run /sdd-next to spec and build that work."
-          ;;
-        codex)
-          echo '  3. Codex: open the repo, discover with /skills, and invoke $sdd-plan to brainstorm the vision, architecture, ADRs and draft epics.'
-          echo '  4. Codex: invoke $sdd-drill <epic-id> to decompose the first draft epic into features.'
-          echo "  5. $_advice_baseline"
-          echo '  6. Codex: invoke $sdd-next to spec and build that work.'
-          ;;
-        opencode)
-          echo "  3. OpenCode: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
-          echo "  4. OpenCode: run /sdd-drill <epic-id> to decompose the first draft epic into features."
-          echo "  5. $_advice_baseline"
-          echo "  6. OpenCode: run /sdd-next to spec and build that work."
-          ;;
-      esac
-    done
+    # Round 8 (4042015434): emit ONE numbered workflow, not one complete sequence per
+    # selected host. The per-host loop printed steps 3-6 (including the baseline commit)
+    # once per selected integration, so with --agents=all the banner read as "run the whole
+    # workflow three times"; a sequential reader then hit /sdd-plan's re-run guard on the
+    # second pass, once the first invocation had written vision.md/architecture.md. Each
+    # front-door step now names the selected hosts' invocation forms as alternatives
+    # WITHIN that one step. Step order is unchanged: plan → drill → baseline → next.
+    _adv_claude=0; _adv_codex=0; _adv_opencode=0
+    if agent_selected claude; then _adv_claude=1; fi
+    if agent_selected codex; then _adv_codex=1; fi
+    if agent_selected opencode; then _adv_opencode=1; fi
+    _adv_count=$((_adv_claude + _adv_codex + _adv_opencode))
+    if [ "$_adv_count" -eq 1 ]; then
+      # A single selected host keeps its exact per-host phrasing: test_codex_native.sh R8
+      # pins the "Claude Code:/Codex:/OpenCode:" labels and Codex's "invoke $sdd-next"
+      # (and forbids the Claude phrasing on a Codex-only install).
+      if [ "$_adv_claude" = 1 ]; then
+        echo "  3. Claude Code: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
+        echo "  4. Claude Code: run /sdd-drill <epic-id> to decompose the first draft epic into features."
+        echo "  5. $_advice_baseline"
+        echo "  6. Claude Code: run /sdd-next to spec and build that work."
+      elif [ "$_adv_codex" = 1 ]; then
+        echo '  3. Codex: open the repo, discover with /skills, and invoke $sdd-plan to brainstorm the vision, architecture, ADRs and draft epics.'
+        echo '  4. Codex: invoke $sdd-drill <epic-id> to decompose the first draft epic into features.'
+        echo "  5. $_advice_baseline"
+        echo '  6. Codex: invoke $sdd-next to spec and build that work.'
+      else
+        echo "  3. OpenCode: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
+        echo "  4. OpenCode: run /sdd-drill <epic-id> to decompose the first draft epic into features."
+        echo "  5. $_advice_baseline"
+        echo "  6. OpenCode: run /sdd-next to spec and build that work."
+      fi
+    else
+      # Multiple hosts: ONE workflow; the host-specific forms are alternatives inside the
+      # one numbered step, so steps 3-6 (and the baseline commit) appear exactly once.
+      if [ "$_adv_claude" = 1 ] && [ "$_adv_opencode" = 1 ]; then
+        _adv_slash_label='Claude Code/OpenCode'
+      elif [ "$_adv_claude" = 1 ]; then
+        _adv_slash_label='Claude Code'
+      else
+        _adv_slash_label='OpenCode'
+      fi
+      if { [ "$_adv_claude" = 1 ] || [ "$_adv_opencode" = 1 ]; } && [ "$_adv_codex" = 1 ]; then
+        _adv_plan="Run /sdd-plan ($_adv_slash_label) or \$sdd-plan (Codex)"
+        _adv_drill="Run /sdd-drill <epic-id> ($_adv_slash_label) or \$sdd-drill <epic-id> (Codex)"
+        _adv_next="Run /sdd-next ($_adv_slash_label) or \$sdd-next (Codex)"
+      elif [ "$_adv_codex" = 1 ]; then
+        _adv_plan='Run $sdd-plan (Codex)'
+        _adv_drill='Run $sdd-drill <epic-id> (Codex)'
+        _adv_next='Run $sdd-next (Codex)'
+      else
+        _adv_plan="Run /sdd-plan ($_adv_slash_label)"
+        _adv_drill="Run /sdd-drill <epic-id> ($_adv_slash_label)"
+        _adv_next="Run /sdd-next ($_adv_slash_label)"
+      fi
+      echo "  3. $_adv_plan to brainstorm the vision, architecture, ADRs and draft epics."
+      echo "  4. $_adv_drill to decompose the first draft epic into features."
+      echo "  5. $_advice_baseline"
+      echo "  6. $_adv_next to spec and build that work."
+    fi
     echo "     (detect test/lint commands after planning)."
   fi
 

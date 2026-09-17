@@ -61,6 +61,21 @@ All notable changes to the harness body are recorded here. Versions follow
   already agreed and are unchanged. `tests/test_greenfield.sh`'s
   `test_installed_entrypoint_points_at_sdd_plan` now pins the drill step (presence plus
   folded plan → drill → next pairs). No VERSION bump beyond this entry.
+- **Round-8 review: one banner workflow for any selection, and a host-neutral entrypoint.**
+  A multi-host selection (`--agents=all`, or any CSV with more than one host) previously
+  printed steps 3-6 — including the baseline-commit step — once per selected integration,
+  so the `Next steps` banner read as "run the whole workflow three times"; a sequential
+  reader then hit `/sdd-plan`'s re-run guard on the second pass once the first invocation
+  had written `specs/vision.md`/`specs/architecture.md`. The banner now emits exactly ONE
+  numbered workflow, with the selected hosts' invocation forms as alternatives inside each
+  step (`/sdd-plan` for Claude Code/OpenCode, `$sdd-plan` for Codex). A single selected
+  host keeps its exact per-host phrasing. Separately, the generated entrypoint pointer
+  block is now host-neutral: it names both the `/sdd-plan`/`/sdd-drill <epic-id>`/`/sdd-next`
+  and the Codex `$sdd-plan`/`$sdd-drill <epic-id>`/`$sdd-next` forms, so a Codex-only
+  `AGENTS.md` is no longer told to use the slash commands it does not have.
+  `tests/test_greenfield.sh` adds `test_multi_host_banner_emits_one_workflow` (exactly one
+  step 3/4/5/6 line, one baseline step, one planning step, both invocation forms in that
+  step). No VERSION bump beyond this entry.
 
 ## [0.81.0] — 2026-09-17
 

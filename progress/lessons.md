@@ -256,3 +256,9 @@
   pair the anchor greps no longer exists (E28-F01 round 7 — the seeded `product.md` stub reddened
   R8b until both tokens were kept on one physical line). Keep the pair on one line, or strip the
   quote markers before folding.
+- [2026-09-17 builder] The generated entrypoint block is a DOUBLE-QUOTED `_block="…"` string, so
+  any `$sdd-*` token added to it is command-expanded before it is written; under `set -u` the
+  installer aborts mid-run with `sdd: unbound variable` (no `FAIL:` line, just a broken install).
+  Escape the dollar (`\$sdd-plan`), exactly as the surrounding backticks are escaped (E28-F01
+  round 8, finding 4042015445). A host-neutral pointer edit therefore needs a green single-host
+  install before any test run — R8c alone would have caught it, but only after the banner tests.

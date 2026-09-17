@@ -53,6 +53,21 @@
 #     the first feature PR carries the planning changes. Anchored as positive tokens
 #     plus folded two-token pairs and first-occurrence order; no fail-open predicate.
 #
+# Round-8 review addition:
+#   * The fresh-install banner emits exactly ONE numbered workflow for any selection:
+#     a multi-host selection (`--agents=all`, or any CSV with >1 host) lists the
+#     host-specific invocation forms as alternatives WITHIN each step, instead of
+#     printing steps 3-6 plus the baseline commit once per host (4042015434). The
+#     pre-change loop made the banner read as "run the whole workflow three times",
+#     and a sequential reader hit /sdd-plan's re-run guard on the second pass.
+#     `test_multi_host_banner_emits_one_workflow` pins exactly one step 3/4/5/6 line,
+#     exactly one baseline step and one planning step, and both `/sdd-*` + `$sdd-*`
+#     forms in that single planning step.
+#   * The generated entrypoint pointer (`write_pointer AGENTS.md` / `CLAUDE.md`) is
+#     host-neutral: it names both `/sdd-plan`/`$sdd-plan` forms (and the drill/next
+#     equivalents), so a Codex-only install is not told to use slash commands it does
+#     not have (4042015445). R8c's anchors are unchanged by the wording.
+#
 # Round-7 review addition:
 #   * `test_installed_entrypoint_points_at_sdd_plan` also pins the drill step in the
 #     installed root AGENTS.md pointer (4041951737). Without it, the pointer sends a
@@ -406,6 +421,60 @@ test_banner_points_at_sdd_plan() {
   pass "fresh-install banner presents /sdd-plan → /sdd-drill → /sdd-next per host (Codex: \$sdd-*) on stdout (R5) [banner_points_at_sdd_plan]"
 }
 
+# ── R5 (multi-host regression) ────────────────────────────────────────────────
+
+# Round-8 (4042015434): a multi-host selection must emit ONE numbered workflow, not
+# one complete numbered sequence per host. The pre-change loop printed steps 3-6 (and
+# the host-neutral baseline commit) once per selected integration, so `--agents=all`
+# read as "run the whole workflow three times" and a sequential reader hit /sdd-plan's
+# re-run guard on the second pass. The host-specific invocation forms are alternatives
+# WITHIN each single step now. This is the regression surface the round-8 fix adds.
+test_multi_host_banner_emits_one_workflow() {
+  _mh_tgt="$T/multi-advice-target"
+  _mh_home="$T/multi-advice-home"
+  _mh_codex_home="$T/multi-advice-codex-home"
+  mkdir -p "$_mh_tgt" "$_mh_home" "$_mh_codex_home"
+  _mh_rc=0
+  env -i PATH="$PATH" HOME="$_mh_home" CODEX_HOME="$_mh_codex_home" \
+    sh "$SRC/harness-install.sh" --agents=all --builder-backend=in-session \
+      --pr-loop=false "$_mh_tgt" \
+    >"$T/multi-advice.out" 2>"$T/multi-advice.err" || _mh_rc=$?
+  [ "$_mh_rc" -eq 0 ] \
+    || fail "R5 multi-host: an --agents=all install exited $_mh_rc — cannot assert the single-workflow banner"
+  _banner_all="$(banner_block "$T/multi-advice.out")"
+  [ -n "$_banner_all" ] \
+    || fail "R5 multi-host: fresh multi-host install stdout has no 'Next steps:' banner block"
+  [ "$(line_count "$_banner_all")" -ge 2 ] \
+    || fail "R5 multi-host: the 'Next steps:' block is fewer than 2 lines — stale extraction"
+  # Exactly ONE line per numbered step 3-6: a per-host workflow repeats them.
+  # `|| true` on every `grep -c` assignment: a legitimate zero-match still exits 1
+  # from the substitution, and under `set -e` a bare assignment aborts the whole
+  # suite with no FAIL: line (progress/lessons.md).
+  for _mh_n in 3 4 5 6; do
+    _mh_c="$(printf '%s\n' "$_banner_all" | grep -cE "^  ${_mh_n}\." || true)"
+    [ "$_mh_c" -eq 1 ] \
+      || fail "R5 multi-host: step ${_mh_n} appears ${_mh_c} times — a multi-host selection must emit ONE numbered workflow, not one per host (4042015434)"
+  done
+  # Exactly ONE baseline-commit step and ONE planning step.
+  _mh_base="$(printf '%s\n' "$_banner_all" | grep -cF 'planning baseline' || true)"
+  [ "$_mh_base" -eq 1 ] \
+    || fail "R5 multi-host: the baseline-commit step appears ${_mh_base} times — --agents=all must not print the baseline per host (4042015434)"
+  _mh_plan="$(printf '%s\n' "$_banner_all" | grep -c 'sdd-plan' || true)"
+  [ "$_mh_plan" -eq 1 ] \
+    || fail "R5 multi-host: the planning step appears ${_mh_plan} times — a multi-host selection must not repeat the whole workflow (4042015434)"
+  # The single planning step must name BOTH invocation forms as alternatives in its
+  # own line, or the "one workflow" would have collapsed to one host's command.
+  _mh_plan_line="$(printf '%s\n' "$_banner_all" | grep 'sdd-plan' || true)"
+  [ -n "$_mh_plan_line" ] || fail "R5 multi-host: no planning line found — cannot assert the host alternatives"
+  printf '%s\n' "$_mh_plan_line" | grep -qE '/sdd-plan[^.]{0,80}\$sdd-plan' \
+    || fail "R5 multi-host: the single planning step does not name both '/sdd-plan' and '\$sdd-plan' as alternatives in one step — the host commands must not collapse to one host's form"
+  assert_contains "R5 multi-host banner" "$_banner_all" '/sdd-drill <epic-id>'
+  require_order "R5 multi-host banner" "$_banner_all" '/sdd-plan' '/sdd-next' lt
+  require_order "R5 multi-host banner" "$_banner_all" '/sdd-drill' 'planning baseline' lt
+  require_order "R5 multi-host banner" "$_banner_all" 'planning baseline' '/sdd-next' lt
+  pass "multi-host banner emits ONE numbered workflow with per-host alternatives (R5) [multi_host_banner_emits_one_workflow]"
+}
+
 # ── R6 (integration) ──────────────────────────────────────────────────────────
 
 test_install_creates_no_git() {
@@ -482,7 +551,15 @@ test_installed_entrypoint_points_at_sdd_plan() {
     || fail "R8c: installed entrypoint sends a new product from /sdd-plan but never names /sdd-drill before /sdd-next — the seeded epics stay draft and /sdd-next reports them gated-epic"
   printf '%s\n' "$_ep_flat" | grep -qiE 'sdd-drill[^.]{0,120}sdd-next' \
     || fail "R8c: installed entrypoint names /sdd-drill but does not route on to /sdd-next in the same sentence — the new-product sequence is incomplete"
-  pass "installed entrypoint sends a new product /sdd-plan → /sdd-drill → /sdd-next (round-7 reconciliation) [installed_entrypoint_points_at_sdd_plan]"
+  # Round 8 (4042015445): the same block is written to AGENTS.md on EVERY install
+  # (including Codex-only, where AGENTS.md is the native repository entrypoint), so it
+  # must name the Codex `$sdd-*` forms too — otherwise a Codex-only install is told to
+  # invoke slash commands it does not have. Both forms must sit in the one sentence.
+  assert_contains "R8c entrypoint" "$_ep_flat" '$sdd-plan'
+  assert_contains "R8c entrypoint" "$_ep_flat" '$sdd-drill <epic-id>'
+  printf '%s\n' "$_ep_flat" | grep -qiE '/sdd-plan[^.]{0,80}\$sdd-plan' \
+    || fail "R8c: installed entrypoint names only the slash form — a Codex-only install reads the same block and has no /sdd-plan; name the \$sdd-plan form in the same sentence"
+  pass "installed entrypoint sends a new product /sdd-plan → /sdd-drill → /sdd-next, host-neutral (round-7 + round-8 reconciliation) [installed_entrypoint_points_at_sdd_plan]"
 }
 
 # ── R9 (integration) ──────────────────────────────────────────────────────────
@@ -524,6 +601,7 @@ test_one_front_door_story
 test_bootstrap_section_reconciled
 test_empty_non_git_install_succeeds
 test_banner_points_at_sdd_plan
+test_multi_host_banner_emits_one_workflow
 test_install_creates_no_git
 test_installed_layout_usable
 test_installed_product_md_points_at_sdd_plan
