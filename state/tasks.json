@@ -943,7 +943,14 @@
         {
           "id": "E99-F160",
           "title": "The `models:` seed-block byte-identity invariant is unpinned: desyncing the harness-install.sh heredoc from harness.config.yaml survives all 47 suites, unlike the sibling `workers:` block pinned at tests/test_install.sh:154",
-          "status": "pending",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "986adbc6a19d73b431760aaa8fef264ea1e39a7f",
+            "ref": "986adbc",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -957,6 +964,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F161-codex-per-role-reasoning-effort/"
+        },
+        {
+          "id": "E99-F162",
+          "title": "models_block/workers_block terminate on the FIRST blank line after the anchor, so a symmetric blank-line reformat silently shrinks both extracts to one line and a real desync passes \u2014 add a length floor",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F162-block-extract-length-floor/"
         }
       ]
     },
