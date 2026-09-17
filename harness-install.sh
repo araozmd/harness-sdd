@@ -6552,10 +6552,13 @@ EOF
       if [ "$_gcs_name" = "sdd-fix-parallel" ]; then
         printf '\n> **OpenCode capability precondition.** If the running host is OpenCode, read\n'
         printf '> `.harness/.opencode-parallel` before spawning any worker. If it does not read\n'
-        printf '> exactly `supported`, STOP without spawning a worker and report that this\n'
-        printf '> workflow needs `/sdd-test-concurrency` to confirm native concurrent delegation\n'
-        printf '> and a re-run of the installer with `--with-opencode-parallel=true`. Codex\n'
-        printf '> ignores this precondition: it delegates through native concurrent sub-agents.\n'
+        printf '> exactly `supported`, STOP without spawning a worker. In an installed target run\n'
+        printf '> `/sdd-test-concurrency` to confirm native concurrent delegation, then re-run\n'
+        printf '> the installer with `--with-opencode-parallel=true`. In the harness source checkout\n'
+        printf '> no OpenCode command surface is installed, so that probe is unavailable: either\n'
+        printf '> confirm native concurrent sub-agents and write `supported` to\n'
+        printf '> `.harness/.opencode-parallel` yourself, or run the batch sequentially instead.\n'
+        printf '> Codex ignores this precondition: it delegates through native concurrent sub-agents.\n'
       fi
       printf '\n## Canonical workflow\n'
       # Host-neutral: the canonical body's portable `/sdd-*` spellings are preserved

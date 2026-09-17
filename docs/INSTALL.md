@@ -80,9 +80,12 @@ discovery UI; OpenCode exposes the units through its command palette and `skill`
 `/sdd-fix-parallel` additionally **self-gates in its shared body**: under OpenCode it
 reads `.harness/.opencode-parallel` before spawning any worker and stops unless the
 file reads exactly `supported`, reporting the `/sdd-test-concurrency` →
-`--with-opencode-parallel=true` path. The gate lives in the body because the unit is
-one file read by both hosts; on Codex the precondition is a no-op (Codex delegates
-through native concurrent sub-agents).
+`--with-opencode-parallel=true` path in an installed target. In the harness **source**
+checkout no OpenCode command surface is installed, so that probe is unavailable: write
+`supported` to `.opencode-parallel` directly after confirming native concurrent
+sub-agents, or run the batch sequentially instead. The gate lives in the body because
+the unit is one file read by both hosts; on Codex the precondition is a no-op (Codex
+delegates through native concurrent sub-agents).
 
 Last-written copies under `.harness/.codex-skills/` protect both files together.
 Selected installs, gate-off and deselection preserve foreign, edited or
@@ -346,6 +349,14 @@ workers concurrently. OpenCode support is **not assumed** — it is verified by 
 ```bash
 ./harness-install.sh --agents=opencode --with-opencode-parallel=true /path/to/your-project
 ```
+
+**In the harness source checkout** there is no OpenCode command surface, so
+`/sdd-test-concurrency` is unavailable and `--self` does not emit OpenCode glue.
+OpenCode still discovers the committed shared unit
+`.agents/skills/sdd-fix-parallel/SKILL.md`, which self-gates on `.opencode-parallel`.
+When it gates, either confirm the session can spawn native concurrent sub-agents and
+write `supported` to `.opencode-parallel` directly, or run the batch sequentially with
+`/sdd-fix`.
 
 ## Worker roster (`workers.roster`) — opt-in, local-only
 

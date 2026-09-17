@@ -84,7 +84,11 @@ pin adds `model` only where it resolves. Skill units are explicit-only through
 names the Codex `$sdd-*` and OpenCode `/sdd-*` invocations and maps text accompanying an
 explicit skill mention to the canonical `$ARGUMENTS` term. The `sdd-fix-parallel` unit
 carries an OpenCode capability precondition (read `.harness/.opencode-parallel`; stop
-unless it reads `supported`) that is a no-op on Codex. Last-written stamps protect skill
+unless it reads `supported`) that is a no-op on Codex. In an installed target the
+remediation is `/sdd-test-concurrency` then `--with-opencode-parallel=true`; in the
+harness source checkout, where no OpenCode command surface is installed, it is to write
+`supported` to the marker directly after confirming native concurrent sub-agents, or to
+run the batch sequentially instead. Last-written stamps protect skill
 units and role files from selected-install overwrite and unsafe reclamation; the units
 are claimed by both Codex and OpenCode and reclaimed only when the last claimant is
 deselected. Current installs never create global Codex prompts. Ungated legacy prompts

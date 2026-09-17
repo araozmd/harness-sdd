@@ -1517,6 +1517,18 @@ test_sdd_fix_parallel_skill_self_gates_opencode() {
   # Phrased as a Codex no-op (co-occurrence bound: see agents/builder.md).
   printf '%s\n' "$_folded" | grep -qiE 'Codex[^.]{0,80}ignores' \
     || fail "E31-F01 R5: the precondition is not phrased as a Codex no-op"
+  # Source-layout remediation (PR #198 comment 4040537412). The installed-target paths
+  # asserted above — `/sdd-test-concurrency` plus an installer re-run — do not exist in
+  # the harness SOURCE checkout, where OpenCode still discovers this committed unit and
+  # `--self` refuses OpenCode. The precondition must name that layout and give the
+  # executable alternatives, or the gate dead-ends for source-repo OpenCode users.
+  # Anchored on `source checkout` inside the pre-workflow span, not anywhere in the file.
+  printf '%s\n' "$_folded" | grep -qiE 'source checkout.{0,240}confirm native concurrent sub-agents' \
+    || fail "E31-F01 R5: the precondition gives no source-layout remediation (confirm native concurrent sub-agents)"
+  printf '%s\n' "$_folded" | grep -qiE 'source checkout.{0,320}run the batch sequentially' \
+    || fail "E31-F01 R5: the source-layout remediation does not offer the sequential fallback"
+  printf '%s\n' "$_folded" | grep -qiE 'write .supported.{0,120}yourself' \
+    || fail "E31-F01 R5: the source-layout remediation does not tell the user to write the marker directly"
   # Control: the precondition is specific to sdd-fix-parallel, not smeared over every unit.
   grep -qF '.opencode-parallel' "$_t/.agents/skills/sdd-next/SKILL.md" \
     && fail "E31-F01 R5 control: the sdd-next unit carries the concurrency precondition"

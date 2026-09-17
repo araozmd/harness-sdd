@@ -9,10 +9,13 @@ In Codex, invoke `$sdd-fix-parallel` and write arguments after the skill mention
 
 > **OpenCode capability precondition.** If the running host is OpenCode, read
 > `.opencode-parallel` before spawning any worker. If it does not read
-> exactly `supported`, STOP without spawning a worker and report that this
-> workflow needs `/sdd-test-concurrency` to confirm native concurrent delegation
-> and a re-run of the installer with `--with-opencode-parallel=true`. Codex
-> ignores this precondition: it delegates through native concurrent sub-agents.
+> exactly `supported`, STOP without spawning a worker. In an installed target run
+> `/sdd-test-concurrency` to confirm native concurrent delegation, then re-run
+> the installer with `--with-opencode-parallel=true`. In the harness source checkout
+> no OpenCode command surface is installed, so that probe is unavailable: either
+> confirm native concurrent sub-agents and write `supported` to
+> `.opencode-parallel` yourself, or run the batch sequentially instead.
+> Codex ignores this precondition: it delegates through native concurrent sub-agents.
 
 ## Canonical workflow
 Act as the **Fixer parallel coordinator** (`agents/fixer.md` → “Parallel
