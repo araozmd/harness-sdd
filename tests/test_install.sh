@@ -125,12 +125,15 @@ test_change_size_block_seeded() {
 # file, because the gate is off by default.
 #
 # workers_block <config> — the `workers:` block WITH its comment header, from the anchor
-# comment to the `roster:` scalar. Anchored on the comment rather than the `workers:` line
-# because the seeded and migrated texts must converge INCLUDING their documentation, and
-# bounded at the scalar so trailing content (which migration can only append at EOF) never
-# enters the comparison.
+# comment to the block's structural end. Anchored on the comment rather than the
+# `workers:` line because the seeded and migrated texts must converge INCLUDING their
+# documentation, and bounded STRUCTURALLY — the next blank line, or the heredoc's `EOF`
+# terminator when reading harness-install.sh's source text directly — rather than on
+# `roster:` (today's last content line), so a line appended after `roster:` but still
+# inside the block stays inside the comparison instead of silently falling outside it
+# (same bound shape as models_block below; hardened alongside it, E99-F160 R1 sibling).
 workers_block() {
-  awk '/^# Worker roster \(E17-F04\)/ { w = 1 } w { print } w && /^  roster:/ { exit }' "$1"
+  awk '/^# Worker roster \(E17-F04\)/ { w = 1 } w && (/^$/ || /^EOF$/) { exit } w { print }' "$1"
 }
 
 test_worker_roster_wiring_installed() {
@@ -182,13 +185,21 @@ test_workers_block_seeded_migrated_converge() {
 }
 
 # models_block <file> — the `models:` block WITH its comment header, from the
-# `# Per-role model routing` anchor to its last `pin.claude.reasoning` comment line.
-# Works unmodified on EITHER the shipped harness.config.yaml OR the raw
-# harness-install.sh source text: the heredoc harness-install.sh appends is written to
-# be byte-identical to the shipped block, so the same anchor/bound pair captures both
-# without installing anything.
+# `# Per-role model routing` anchor to the block's structural end. Works unmodified on
+# EITHER the shipped harness.config.yaml OR the raw harness-install.sh source text: the
+# heredoc harness-install.sh appends is written to be byte-identical to the shipped
+# block, so the same anchor/bound pair captures both without installing anything.
+#
+# Bounded STRUCTURALLY — the next blank line (harness.config.yaml) or the heredoc's
+# `EOF` terminator (harness-install.sh's source text) — rather than on
+# `pin.claude.reasoning` (today's last content line). A bound on the last content line
+# guards only a PREFIX: a pin line appended after it but still inside the block would be
+# invisible to the comparison below, which is exactly the desync shape this test exists
+# to catch (E99-F160 R1 — M8/M8b). The block has no interior blank line today, so the
+# `/^$/` arm is unambiguous; if that ever stops holding, bound on the next top-level key
+# instead.
 models_block() {
-  awk '/^# Per-role model routing \(E17-F01\)/ { m = 1 } m { print } m && /^  # pin\.claude\.reasoning: ""$/ { exit }' "$1"
+  awk '/^# Per-role model routing \(E17-F01\)/ { m = 1 } m && (/^$/ || /^EOF$/) { exit } m { print }' "$1"
 }
 
 # E17-F01: the `models:` block is DUPLICATED — the seed shipped in harness.config.yaml
