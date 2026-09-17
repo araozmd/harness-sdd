@@ -814,8 +814,8 @@ effort values are ever written.
 also resolve to different `model` pins, because the arming check in `harness-install.sh`
 was intentionally left untouched by this change (see "Ranking is yours" under
 `escalation:` in `harness.config.yaml`). Making effort a second, independent signal the
-arming check can arm on is scope for a follow-up — it is owed a board row, not yet
-filed, and is not covered by this feature.
+arming check can arm on is scope for a follow-up — not yet enforced, see E99-F163, and
+is not covered by this feature.
 
 Codex additionally recognizes `max` and, on exactly two models
 (`gpt-6-astra`, `gpt-5.6-sol`), `ultra`. Neither is stamped by the built-in ladder above:

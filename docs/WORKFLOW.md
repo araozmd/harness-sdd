@@ -812,7 +812,7 @@ Notes that matter in practice:
   `model` (same requirement) but, since E99-F161, DOES stamp `model_reasoning_effort` —
   see `docs/INSTALL.md`'s "Codex reasoning effort" section; `escalation_verdict` still
   compares `model` only, so that effort difference does not by itself arm escalation
-  (deliberately deferred, not yet enforced — owed a follow-up board row).
+  (deliberately deferred, not yet enforced — see E99-F163).
   The verdict is computed at **install time**, so re-run the installer after changing any of
   it.
 - **The verdict is a conservative AND across selected front-ends.** The rule cannot know
