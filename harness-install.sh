@@ -4101,8 +4101,13 @@ HARNESS-OWNED  (overwritten on every upgrade):
 OPENCODE CONCURRENCY PROBE  (E22-F01):
   .opencode/command/sdd-test-concurrency.md   (always installed for OpenCode)
   .harness/.opencode-parallel                   (marker: 'supported' or 'sequential')
-  /sdd-fix-parallel is stamped for OpenCode ONLY when the marker is 'supported' or when
-  the installer is run with --with-opencode-parallel=true; otherwise it is omitted.
+  /sdd-fix-parallel has two OpenCode-relevant copies. The native command copy
+  .opencode/command/sdd-fix-parallel.md is stamped for OpenCode ONLY when the marker is
+  'supported' or when the installer is run with --with-opencode-parallel=true; otherwise
+  it is omitted. The shared skill unit .agents/skills/sdd-fix-parallel/SKILL.md is
+  ALWAYS written for the selected Codex/OpenCode claimants and self-gates at runtime:
+  under OpenCode its body reads .harness/.opencode-parallel and stops unless it reads
+  exactly 'supported'.
 
 PR LOOP GLUE  (OPT-IN — created ONLY while pr_loop.enabled reads exactly true; a fresh
 install seeds false, so none of this exists until you turn it on — E18-F01):

@@ -1523,6 +1523,46 @@ test_sdd_fix_parallel_skill_self_gates_opencode() {
   return 0
 }
 
+# ── E31-F01 — manifest.txt scopes the gate to the native command copy ─────────
+# manifest.txt is an installed target's OWNERSHIP documentation. Before E31-F01 it claimed
+# /sdd-fix-parallel was stamped for OpenCode only when the marker says `supported` and
+# "otherwise it is omitted" — false for the shared `.agents/skills` unit, which is written
+# for EVERY Codex/OpenCode claimant and self-gates at runtime. Assert the manifest names
+# both copies and scopes the marker gate to the native `.opencode/command` one
+# (PR #198 comment 4040142193).
+test_manifest_scopes_parallel_gate_to_opencode_command() {
+  _x="$(sandbox e31parmanifest)"; _t="$_x/t"; mkdir -p "$_t"
+  # OpenCode-only, WITHOUT the `supported` marker: exactly the install where the shared
+  # unit is written but the native command copy is withheld.
+  hrun "$_x" -- --agents=opencode "$_t" \
+    >"$_x/a.out" 2>"$_x/a.err" </dev/null \
+    || fail "E31-F01 manifest: install failed: $(command cat "$_x/a.err" | tail -n 3)"
+  # Behavioral half first: the shared unit IS written, the gated native copy is NOT.
+  [ -f "$_t/.agents/skills/sdd-fix-parallel/SKILL.md" ] \
+    || fail "E31-F01 manifest: OpenCode-only install without 'supported' omitted the shared sdd-fix-parallel unit"
+  [ -f "$_t/.opencode/command/sdd-fix-parallel.md" ] \
+    && fail "E31-F01 manifest: OpenCode-only install without 'supported' stamped the gated native command copy"
+  _mf="$_t/.harness/manifest.txt"
+  [ -f "$_mf" ] || fail "E31-F01 manifest: the install wrote no manifest.txt"
+  # Extract the OPENCODE CONCURRENCY PROBE section by its blank-line end (a STRUCTURAL
+  # bound, not today's last content line) with a length floor, so a truncated capture
+  # cannot satisfy the checks vacuously.
+  _sec="$(awk 'index($0,"OPENCODE CONCURRENCY PROBE")==1{k=1} k&&/^$/{exit} k{print}' "$_mf")"
+  [ -n "$_sec" ] || fail "E31-F01 manifest: could not extract the OPENCODE CONCURRENCY PROBE section"
+  [ "$(printf '%s\n' "$_sec" | wc -l | tr -d ' ')" -ge 4 ] \
+    || fail "E31-F01 manifest: OPENCODE CONCURRENCY PROBE section is implausibly short"
+  _folded="$(printf '%s' "$_sec" | tr '\n' ' ')"
+  # The marker gate is scoped to the NATIVE command copy...
+  printf '%s\n' "$_folded" | grep -qE '\.opencode/command/sdd-fix-parallel\.md.{0,200}(supported|with-opencode-parallel|omitted)' \
+    || fail "E31-F01 manifest: the marker gate is not scoped to the native .opencode/command/sdd-fix-parallel.md copy"
+  # ...and the shared unit is documented as always written and self-gating at runtime.
+  printf '%s\n' "$_folded" | grep -qE '\.agents/skills/sdd-fix-parallel/SKILL\.md.{0,260}ALWAYS.{0,200}self-gate' \
+    || fail "E31-F01 manifest: the shared sdd-fix-parallel unit is not documented as always-written and self-gating"
+  printf '%s\n' "$_folded" | grep -qE '\.agents/skills/sdd-fix-parallel/SKILL\.md.{0,400}\.harness/\.opencode-parallel' \
+    || fail "E31-F01 manifest: the shared sdd-fix-parallel unit does not name .harness/.opencode-parallel as its runtime gate"
+  return 0
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 test_answer_mapping_unit
 pass "answer_mapping_unit: the answer→value mapping is pure, extractable and correct for every branch (R2)"
@@ -1588,5 +1628,7 @@ pass "no_install_time_preflight: enabling the loop executes neither gh nor jq at
 # ── E31-F01 — OpenCode claims the shared `.agents/skills` surface ─────────────
 test_sdd_fix_parallel_skill_self_gates_opencode
 pass "sdd_fix_parallel_skill_self_gates_opencode (E31-F01 R5): the shared skill body self-gates OpenCode and is a Codex no-op"
+test_manifest_scopes_parallel_gate_to_opencode_command
+pass "manifest_scopes_parallel_gate_to_opencode_command (E31-F01): manifest.txt scopes the OpenCode marker gate to the native command copy and documents the always-present self-gated shared unit"
 
 echo "All installer-toggle tests passed."
