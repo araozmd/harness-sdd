@@ -21,6 +21,10 @@ in the current context.
 
 ## Intake — the step before `pending` (`/sdd-new`)
 
+For a **brand-new product**, whole-project planning comes first — see
+[Whole-project inception](#whole-project-inception-sdd-plan). `/sdd-new` is the intake
+for **later work** in an existing project.
+
 Before a feature is `pending`, a raw idea has to become a well-formed TaskStore
 entry. That is **Inception**'s job (`agents/inception.md`), driven by the `/sdd-new`
 slash command. A human runs `/sdd-new "<idea>"`, answers a short adaptive Q&A, and

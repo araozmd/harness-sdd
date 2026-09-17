@@ -99,6 +99,21 @@ All notable changes to the harness body are recorded here. Versions follow
   `test_prior_pristine_product_stub_is_refreshed`,
   `test_edited_product_md_is_preserved_on_upgrade`, and
   `test_umbrella_cascade_suppresses_single_repo_banner`. No VERSION bump beyond this entry.
+- **Round-11 review: the git step runs in the installed target, and the README distinguishes
+  new products from later work.** `harness-install.sh <target>` runs from the caller's cwd
+  (usually the harness checkout) and never changes directory, so the `git init` + commit step
+  in `## Starting from nothing (new product)` and in the fresh-install `Next steps` banner
+  would have initialized the harness repository, not the product just installed. The section
+  now says `cd /path/to/your-product` first, and the banner names the target path it was given
+  (or "the installed project directory" under `--self`, whose target is a throwaway temp dir).
+  `README.md` no longer states without qualification that `/sdd-new` is "the front door": a new
+  product starts with `/sdd-plan` → `/sdd-drill <epic-id>` → `/sdd-next`, while `/sdd-new` is
+  the intake for later work; `docs/HARNESS.md` and `docs/WORKFLOW.md` carry the same
+  distinction, and `agents/inception.md` names itself the intake/front door for new work once a
+  product exists. `tests/test_greenfield.sh` adds `test_git_step_runs_in_install_target` (the
+  docs name a `cd` into the target; the banner names the target path), and
+  `test_umbrella_cascade_suppresses_single_repo_banner` plus `tests/test_cascade.sh` update
+  their git-step anchor to the new banner sentence. No VERSION bump beyond this entry.
 
 ## [0.81.0] — 2026-09-17
 

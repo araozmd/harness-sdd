@@ -471,6 +471,30 @@ test_banner_points_at_sdd_plan() {
   pass "fresh-install banner presents /sdd-plan → /sdd-drill → /sdd-next per host (Codex: \$sdd-*) on stdout (R5) [banner_points_at_sdd_plan]"
 }
 
+# ── Round 11 (4042327763): the git step runs in the INSTALL TARGET ────────────
+#
+# `harness-install.sh <target>` runs from the caller's cwd (usually the harness
+# checkout) and never changes directory, so a bare `git init` in the docs or the
+# banner would initialize the harness repo, not the freshly installed product. Both
+# surfaces must place the git step in the target: the docs by naming a `cd` into it,
+# the banner by naming the target path the installer was given.
+test_git_step_runs_in_install_target() {
+  _gt_gf="$(section_span "$DOC" '## Starting from nothing (new product)')"
+  [ -n "$_gt_gf" ] \
+    || fail "R2/cwd: the 'Starting from nothing' section is missing — cannot check the git step's cwd"
+  _gt_gf_flat="$(printf '%s\n' "$_gt_gf" | tr '\n' ' ')"
+  # `cd <target>` must precede `git init` in the section's own run of prose, so the
+  # reader is told where to run it (a bare `git init` targets the harness checkout).
+  printf '%s\n' "$_gt_gf_flat" | grep -qiE 'cd [^ ]+[^.]{0,40}git init' \
+    || fail "R2/cwd: docs/INSTALL.md's git step is not cwd-correct — it never tells the greenfield reader to cd into the installed target first, so a bare \`git init\` initializes the harness checkout (4042327763)"
+  [ "$INSTALLED" -eq 1 ] || fail "R2/cwd: no install ran — the banner check would be vacuous"
+  _gt_banner="$(banner_block "$INSTALL_OUT")"
+  [ -n "$_gt_banner" ] \
+    || fail "R2/cwd: fresh-install stdout has no 'Next steps:' banner block — cannot check the banner's git step"
+  require_order "R2/cwd banner" "$_gt_banner" "$TGT" 'git init' le
+  pass "docs and fresh-install banner run the git step in the installed target, not the caller's cwd [git_step_runs_in_install_target]"
+}
+
 # ── R5 (multi-host regression) ────────────────────────────────────────────────
 
 # Round-8 (4042015434): a multi-host selection must emit ONE numbered workflow, not
@@ -597,10 +621,10 @@ test_umbrella_cascade_suppresses_single_repo_banner() {
   # The exact single-repo git-init step must not appear. In-suite positive control:
   # the single-repo install captured earlier DID carry it, so a zero here is a real
   # absence, not a grep whose shape can never match (progress/lessons.md).
-  _sr_init="$(grep -cF 'Run git init and make an initial commit' "$INSTALL_OUT" || true)"
+  _sr_init="$(grep -cF 'make an initial commit (local only)' "$INSTALL_OUT" || true)"
   [ "$_sr_init" -ge 1 ] \
     || fail "R8e positive control: the single-repo install banner lacks the git-init step — this assertion's shape is stale"
-  _um_init="$(grep -cF 'Run git init and make an initial commit' "$T/umbrella.out" || true)"
+  _um_init="$(grep -cF 'make an initial commit (local only)' "$T/umbrella.out" || true)"
   [ "$_um_init" -eq 0 ] \
     || fail "R8e: the umbrella cascade printed the single-repo git-init step $_um_init time(s) — an umbrella coordinator is told to git init a root umbrella mode keeps non-git (4042109214)"
   pass "umbrella cascade emits umbrella-specific advice, never the single-repo git-init banner [umbrella_cascade_suppresses_single_repo_banner]"
@@ -822,6 +846,7 @@ test_one_front_door_story
 test_bootstrap_section_reconciled
 test_empty_non_git_install_succeeds
 test_banner_points_at_sdd_plan
+test_git_step_runs_in_install_target
 test_multi_host_banner_emits_one_workflow
 test_umbrella_cascade_suppresses_single_repo_banner
 test_install_creates_no_git

@@ -7282,7 +7282,17 @@ EOF
     # must also name the remote and the per-feature branch discipline. It precedes the
     # constitution edit so that edit stays uncommitted until the planning baseline,
     # exactly as docs/INSTALL.md's ordered section states (round 7 consistency audit).
-    echo "  1. Run git init and make an initial commit (local only); PR-based execution also needs a remote (gh repo create, or git remote add + push) and one feature branch per feature, which is what the harness opens PRs from."
+    # Round 11 (Codex 4042327763): the installer runs in the CALLER's cwd (usually the
+    # harness checkout), and it never `cd`s into the target, so a bare `git init` step
+    # would initialize the wrong repository. Name the installed target explicitly.
+    # --self installs into a throwaway temp target, so it gets a generic phrase rather
+    # than leaking that path into the developer-facing banner (round 11).
+    if [ "${SELF_MODE:-0}" = 1 ]; then
+      _advice_target="the installed project directory"
+    else
+      _advice_target="$TARGET"
+    fi
+    echo "  1. In $_advice_target, run git init and make an initial commit (local only); PR-based execution also needs a remote (gh repo create, or git remote add + push) and one feature branch per feature, which is what the harness opens PRs from."
     echo "  2. Edit .harness/specs/product.md for your product."
     # Round 6 (4041879995): the planning artifacts /sdd-plan and /sdd-drill write are
     # dirty or untracked until they are committed and pushed, so the banner commits the

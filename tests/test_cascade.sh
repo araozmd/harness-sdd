@@ -86,7 +86,7 @@ grep -q 'Next steps (umbrella coordinator):' "$OUT" \
   || fail "cascade printed no umbrella coordinator advice — the single-repo banner was gated without a replacement"
 grep -q 'Next steps (umbrella child):' "$OUT" \
   || fail "cascade printed no umbrella child advice — the single-repo banner was gated without a replacement"
-grep -qF 'Run git init and make an initial commit' "$OUT" \
+grep -qF 'make an initial commit (local only)' "$OUT" \
   && fail "umbrella cascade printed the single-repo git-init banner — umbrella mode keeps that root non-git unless --shared-repo (4042109214)"
 # Round 10 (4042236158/4042236163/4042236168): the round-9 advice overclaimed. Extract
 # each banner (heading + two-space advice lines, stopping before the three-space
