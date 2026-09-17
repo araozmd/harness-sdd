@@ -22,6 +22,13 @@
 #   R9  the installed init.sh exits 0 in the still-non-git target
 #   R10 the installed version stamp is read from $SRC/VERSION at run time
 #
+# Round-5 review addition:
+#   * R5/R2 must not overclaim: a local-only `git init` + commit cannot open a PR
+#     (4041813522). The git step must name the remote (`gh repo create` / `git remote
+#     add` + push) and the one-feature-branch-per-feature discipline the PR is opened
+#     from. Anchored as positive tokens plus folded two-token pairs, never a
+#     fail-open negative.
+#
 # Round-3 review addition:
 #   * R1 also requires the product-constitution edit step (specs/product.md, fill
 #     the TODOs) to be present and ordered BEFORE /sdd-plan (4041680863). The
@@ -166,6 +173,17 @@ test_greenfield_section_states_non_git_and_human_git_init() {
   done
   printf '%s\n' "$_gf" | grep -qF 'The installer does not create a git repository.' \
     || fail "R2: the section does not state 'The installer does not create a git repository.' — a reader cannot tell who owns version control"
+  # Round-5 (4041813522): the documented git step must not overclaim either. A
+  # local-only `git init` + commit cannot open a PR, so the section must name the
+  # remote and the per-feature branch discipline alongside it. The two-token anchors
+  # keep both halves in one sentence of the human-git step, not anywhere in the span.
+  assert_contains "R2 section" "$_gf" 'remote'
+  assert_contains "R2 section" "$_gf" 'feature branch'
+  _gf_r2_flat="$(printf '%s\n' "$_gf" | tr '\n' ' ')"
+  printf '%s\n' "$_gf_r2_flat" | grep -qiE 'local only[^.]{0,80}remote' \
+    || fail "R2: the git step calls itself local only but does not tie that to the required remote in one sentence — a reader can keep a local-only init and believe PRs work"
+  printf '%s\n' "$_gf_r2_flat" | grep -qiE 'remote[^.]{0,200}feature branch' \
+    || fail "R2: the git step names a remote but does not state the one-feature-branch-per-feature discipline in the same sentence — the PR source branch can be dropped while the remote stays"
   pass "greenfield section states the non-git target and the human git-init step (R2) [greenfield_section_states_non_git_and_human_git_init]"
 }
 
@@ -259,6 +277,16 @@ test_banner_points_at_sdd_plan() {
   printf '%s\n' "$_banner_flat" | grep -qiE 'git init[^.]{0,60}commit' \
     || fail "R5 banner: the git step does not name both \`git init\` and the initial commit in one sentence — a greenfield reader stops at an uncommitted tree"
   require_order "R5 banner" "$_banner" 'git init' '/sdd-plan' lt
+  # Round-5 (4041813522): a local-only `git init` + commit cannot open a PR. The git
+  # step must name the remote (gh repo create / git remote add + push) and the
+  # one-feature-branch discipline the PR is opened from. The folded two-token anchors
+  # prove both halves sit in the git step's own sentence, so deleting either reds here.
+  assert_contains "R5 banner" "$_banner" 'remote'
+  assert_contains "R5 banner" "$_banner" 'feature branch'
+  printf '%s\n' "$_banner_flat" | grep -qiE 'commit[^.]{0,120}remote' \
+    || fail "R5 banner: the git step does not tie the initial commit to the required remote in one sentence — a local-only init cannot open a PR, and the banner overclaims that it can"
+  printf '%s\n' "$_banner_flat" | grep -qiE 'remote[^.]{0,200}feature branch' \
+    || fail "R5 banner: the git step names a remote but does not state the one-feature-branch-per-feature discipline in the same sentence — the PR source branch can be dropped while the remote stays"
   # Non-Codex keeps the slash form: a Claude-only install must not advertise the
   # Codex `$sdd-*` spelling (the instruction varies by host).
   if printf '%s\n' "$_banner" | grep -qF '$sdd-plan'; then
@@ -296,6 +324,14 @@ test_banner_points_at_sdd_plan() {
   printf '%s\n' "$_banner_cx_flat" | grep -qiE 'git init[^.]{0,60}commit' \
     || fail "R5 codex banner: the git step does not name both \`git init\` and the initial commit in one sentence — a greenfield reader stops at an uncommitted tree"
   require_order "R5 codex banner" "$_banner_cx" 'git init' '$sdd-plan' lt
+  # Round-5 (4041813522): the host-neutral git step must not overclaim either — the
+  # Codex banner names the remote and the per-feature branch discipline in the step.
+  assert_contains "R5 codex banner" "$_banner_cx" 'remote'
+  assert_contains "R5 codex banner" "$_banner_cx" 'feature branch'
+  printf '%s\n' "$_banner_cx_flat" | grep -qiE 'commit[^.]{0,120}remote' \
+    || fail "R5 codex banner: the git step does not tie the initial commit to the required remote in one sentence — a local-only init cannot open a PR, and the banner overclaims that it can"
+  printf '%s\n' "$_banner_cx_flat" | grep -qiE 'remote[^.]{0,200}feature branch' \
+    || fail "R5 codex banner: the git step names a remote but does not state the one-feature-branch-per-feature discipline in the same sentence — the PR source branch can be dropped while the remote stays"
   pass "fresh-install banner presents /sdd-plan → /sdd-drill → /sdd-next per host (Codex: \$sdd-*) on stdout (R5) [banner_points_at_sdd_plan]"
 }
 

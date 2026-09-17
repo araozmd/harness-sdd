@@ -149,7 +149,9 @@ degraded mode. The installer does not create a git repository.
    flag for scripted installs: `--agents=`, `--builder-backend=`, and `--pr-loop=`.
 3. Run `git init` and make a `commit`. Version control is the human's step, and a
    committed body lets `init.sh`'s drift guard verify it: on a non-git tree the guard
-   skips, and on an untracked body it warns — it never fails.
+   skips, and on an untracked body it warns — it never fails. This is local only: a
+   PR-based flow also needs a remote (`gh repo create`, or `git remote add` + push) and
+   one feature branch per feature, which is what the harness opens PRs from.
 4. Edit the seeded `.harness/specs/product.md` and fill in the project-constitution
    `TODO`s — "what this product is", its audience, its principles. It is Layer 0, and
    `/sdd-plan` plans *around* it rather than rewriting it: `agents/planner.md` defines

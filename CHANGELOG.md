@@ -22,9 +22,12 @@ All notable changes to the harness body are recorded here. Versions follow
   host**: edit `.harness/specs/product.md` → `git init` + initial commit → `/sdd-plan` →
   `/sdd-drill <epic-id>` → `/sdd-next` (Codex: `$sdd-plan` → `$sdd-drill` →
   `$sdd-next`), so the advertised invocation matches the host's skill surface, the drill
-  step is no longer skipped, and a greenfield reader is told to bring the install under
-  version control before the feature-branch/PR workflow needs it. The upgrade branch is
-  unchanged; the installer still performs no `git init` itself (R6).
+  step is no longer skipped, and a greenfield reader is told that a local `git init` +
+  commit only brings the install under local version control: PR-based execution also
+  needs a remote (`gh repo create` / `git remote add` + push) and one feature branch per
+  feature, which is what the harness opens a PR from. The same correction is stated in
+  the `## Starting from nothing (new product)` section. The upgrade branch is unchanged;
+  the installer still performs no `git init` itself (R6).
 - **New suite `tests/test_greenfield.sh`** installs into an asserted-empty, non-git
   fixture and covers the banner order, the absence of `.git`, the usable installed
   layout, the installed `init.sh` passing there, and a version stamp read from `VERSION`

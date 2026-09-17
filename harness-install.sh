@@ -7189,7 +7189,9 @@ EOF
     # Version control is the human's step: the installer never runs `git init` on a
     # single target (R6), yet the installed workflow uses feature branches and PRs.
     # The fresh-install banner must name it before the host-specific planning commands.
-    echo "  2. Run git init and make an initial commit, so feature branches and PRs work."
+    # A local-only `git init` cannot open a PR (Codex round 5, 4041813522), so the step
+    # must also name the remote and the per-feature branch discipline.
+    echo "  2. Run git init and make an initial commit (local only); PR-based execution also needs a remote (gh repo create, or git remote add + push) and one feature branch per feature, which is what the harness opens PRs from."
     # Each selected host gets the front-door sequence in order — plan, then drill,
     # then next — in that host's own invocation form (Codex uses the $sdd-* skills).
     # The lines are emitted plan → drill → next so the printed banner holds the same
