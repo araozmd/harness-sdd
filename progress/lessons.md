@@ -284,3 +284,10 @@
   "required fix" is itself subsumed (`scratchpad/E28-F02-builder/mut.py`, all three RED,
   both no-op controls green).
 - [2026-09-17 reviewer] A mutation runner that restores with `shutil.copyfile(path, bak)` + `shutil.move(bak, path)` silently drops the exec bit: `copyfile` creates the backup at 0644 and `move` puts that mode back, so a 755 script comes back 644 while `diff -q` on content reports "restored". On E28-F02 round 2 this turned the scratch clone's `harness-install.sh` non-executable and the next `./harness-install.sh --self` exited 126 — a mode-only delta invisible to a content diff. Verify the restore with `diff -qr`/`stat`, not just `diff -q`, or restore with `cp -p`/`shutil.copy2`; and never run a post-campaign probe that executes a file a mutation touched without first re-checking its mode.
+- [2026-09-18 builder] A helper whose OUTPUT the flow never consumes cannot be pinned by
+  mutating it: E28-F03's promotion seed step wrote `"./$key"` as a literal beside
+  `promotion_rebase_path`, so the R3 mutant (`print ../<key>`) survived a green
+  `test_paths_rebased_to_umbrella_root` until the seed step was rewired to consume the
+  helper. Before trusting a contract test on a helper, grep the flow for the helper's NAME
+  — if the value is reconstructed at the call site, the helper is decoration and the test
+  proves nothing about it.
