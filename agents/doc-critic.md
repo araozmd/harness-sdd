@@ -22,6 +22,9 @@ The generating agent spawns you as a sub-agent with a clean context and a single
 
 The generating agent passes you only this role file, the `target-type`, and the paths
 just written. You return advisory findings; the generating agent applies fixes inline.
+When the caller scopes `plan-output` to a subset of the listed documents — for example an
+amend's newly written material — review only that subset and propose fixes only there;
+never review or edit a document the caller did not pass.
 
 ## Review scope and calibration (what to flag)
 

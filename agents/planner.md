@@ -221,14 +221,18 @@ following five elements so it can be drilled independently later:
 
 ## Doc-critic checkpoint after `/sdd-plan` (R9)
 
-After writing the `/sdd-plan` artifacts (`specs/vision.md`,
-`specs/architecture.md`, the ADRs at `specs/adr/NNNN-*.md`, the draft epics in
-`state/tasks.json`, and every seeded `specs/epics/<id>-<slug>/epic.md`) and before
-re-validation, spawn the **Doc-critic** (`agents/doc-critic.md`) as a sub-agent with
-`target-type=plan-output`. Pass the paths just written. Apply any advisory findings
-inline, then proceed. If the critic invocation errors or times out, proceed
-best-effort and append a note to `progress/<run>/` recording the skipped or failed
-review.
+After writing the `/sdd-plan` artifacts and before re-validation, spawn the **Doc-critic**
+(`agents/doc-critic.md`) as a sub-agent with `target-type=plan-output`. On a greenfield
+run, pass every path just written (`specs/vision.md`, `specs/architecture.md`, the ADRs at
+`specs/adr/NNNN-*.md`, the draft epics in `state/tasks.json`, and every seeded
+`specs/epics/<id>-<slug>/epic.md`) and apply any advisory findings inline. On an amend, the
+doc-critic reviews only the newly written material — the dated, append-only `## Repo
+topology` delta section appended to `specs/architecture.md`, the new `repo-topology ADR`,
+and the newly seeded `epic.md` files. An amend never applies a doc-critic fix to a
+committed `specs/vision.md`, `specs/architecture.md`, or an existing ADR: those committed
+artifacts stay untouched, because the amend is append-only and must not rewrite the
+committed planning baseline. If the critic invocation errors or times out, proceed
+best-effort and append a note to `progress/<run>/` recording the skipped or failed review.
 
 ## Validate before claiming success (R13)
 

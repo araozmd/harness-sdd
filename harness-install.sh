@@ -5403,11 +5403,20 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    5. **Pointers to relevant shared ADRs** — references in `architecture.md` / ADRs that
       constrain this epic (or an explicit note that none apply).
 9. **Doc-critic checkpoint (before re-validation).** Spawn the **Doc-critic**
-   (`.harness/agents/doc-critic.md`) as a sub-agent with `target-type=plan-output`,
-   passing the paths just written (`specs/vision.md`, `specs/architecture.md`, each ADR,
-   and every seeded `epic.md`). Apply any advisory findings inline, then proceed. If the
-   critic invocation errors or times out, proceed best-effort and append a note under
-   `.harness/progress/<run>/` recording the skipped/failed review.
+   (`.harness/agents/doc-critic.md`) as a sub-agent with `target-type=plan-output`.
+   On a greenfield run, pass every path just written
+   (`.harness/specs/vision.md`, `.harness/specs/architecture.md`, each ADR, and every
+   seeded `epic.md`) and apply any advisory findings inline.
+   On an amend, the doc-critic reviews only the newly written material — the dated,
+   append-only `## Repo topology` delta section appended to
+   `.harness/specs/architecture.md`, the new `repo-topology ADR`, and the newly seeded
+   `epic.md` files.
+   An amend never applies a doc-critic fix to a committed
+   `.harness/specs/vision.md`, `.harness/specs/architecture.md`, or an existing ADR:
+   those committed artifacts stay untouched, because the amend is append-only and must
+   not rewrite the committed planning baseline. If the critic invocation errors or
+   times out, proceed best-effort and append a note under `.harness/progress/<run>/`
+   recording the skipped/failed review.
 10. **Re-validate** `.harness/state/tasks.json` against
    `.harness/store/tasks.schema.json`. If it fails, report the failure and do NOT claim
    a successful plan.

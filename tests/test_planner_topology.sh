@@ -23,7 +23,10 @@
 #       (the latest delta names the full set; earlier deltas superseded), so add/remove/
 #       rename are all expressible; the trigger reads that effective set and removes the
 #       derived draft when it falls to <=1 deployable (committed ADRs kept); the draft is
-#       the ONE carve-out from the amend's no-deletion rule
+#       the ONE carve-out from the amend's no-deletion rule; and the amend's doc-critic
+#       checkpoint reviews ONLY the newly written material, prohibiting fixes to the
+#       committed vision/architecture/existing ADRs (the greenfield branch keeps the
+#       full plan-output checkpoint)
 #   R12 the derived umbrella.manifest.draft.yaml is excluded from the harness-owned path
 #       set (source AND installed layouts), so an untracked draft does not fail the drift
 #       guard, while a genuine harness-body edit still does
@@ -56,6 +59,7 @@ DRILL_CMD="$SRC/.claude/commands/sdd-drill.md"
 DRILL_SKILL="$SRC/.agents/skills/sdd-drill/SKILL.md"
 EX="$SRC/umbrella.manifest.example.yaml"
 DOC="$SRC/docs/UMBRELLA.md"
+DOC_CRITIC="$SRC/agents/doc-critic.md"
 CFG="$SRC/harness.config.yaml"
 
 # The ONE CommonMark fence rule (E99-F131); every markdown-heading slicer in this repo
@@ -184,6 +188,12 @@ DRILL_SKILL_SPAN="$T/drill-skill.span"; DRILL_SKILL_FOLD="$T/drill-skill.fold"
 # greenfield/amend branches live (finding 4043487846).
 PLAN_WHAT_SPAN="$T/plan-what.span"; PLAN_WHAT_FOLD="$T/plan-what.fold"
 DRILL_WHAT_SPAN="$T/drill-what.span"; DRILL_WHAT_FOLD="$T/drill-what.fold"
+# The Planner's `## Doc-critic checkpoint` section (finding 4043799422): the AMEND
+# checkpoint is scoped there, so it is extracted as its own span — the `## Repo
+# topology output` span and `## What you do` do not carry it.
+ROLE_CRITIC_SPAN="$T/role-critic.span"; ROLE_CRITIC_FOLD="$T/role-critic.fold"
+# The Doc-critic role's own invocation contract (the caller may scope a subset).
+DOC_CRITIC_SPAN="$T/doc-critic.span"; DOC_CRITIC_FOLD="$T/doc-critic.fold"
 
 extract_section "$ROLE" "Repo topology output" > "$ROLE_SPAN"
 extract_heredoc "$INST" 'cat > "$CMDDIR/sdd-plan.md" <<'"'"'EOF'"'"'' > "$BODY_SPAN"
@@ -193,6 +203,8 @@ extract_heredoc "$INST" 'cat > "$CMDDIR/sdd-drill.md" <<'"'"'EOF'"'"'' > "$DRILL
 extract_section "$DRILL_SKILL" "Canonical workflow" > "$DRILL_SKILL_SPAN"
 extract_section "$ROLE" "What you do" > "$PLAN_WHAT_SPAN"
 extract_section "$DRILLER" "What you do" > "$DRILL_WHAT_SPAN"
+extract_section "$ROLE" "Doc-critic checkpoint" > "$ROLE_CRITIC_SPAN"
+extract_section "$DOC_CRITIC" "Invocation contract" > "$DOC_CRITIC_SPAN"
 
 fold_to "$ROLE_SPAN"  "$ROLE_FOLD"
 fold_to "$BODY_SPAN"  "$BODY_FOLD"
@@ -204,6 +216,8 @@ fold_to "$DRILL_CMD"        "$DRILL_CMD_FOLD"
 fold_to "$DRILL_SKILL_SPAN" "$DRILL_SKILL_FOLD"
 fold_to "$PLAN_WHAT_SPAN"   "$PLAN_WHAT_FOLD"
 fold_to "$DRILL_WHAT_SPAN"  "$DRILL_WHAT_FOLD"
+fold_to "$ROLE_CRITIC_SPAN" "$ROLE_CRITIC_FOLD"
+fold_to "$DOC_CRITIC_SPAN"  "$DOC_CRITIC_FOLD"
 
 # ── R1: the repo-topology ADR ──────────────────────────────────────────────────
 # test_role_and_body_name_the_topology_adr
@@ -660,6 +674,46 @@ for _gs_pair in "R11 role no-op greenfield|$ROLE_FOLD" \
     "greenfield" "appends" "repo-topology ADR"
 done
 pass "R11 the topology output step is gated on an actual set change and the no-artifact rule is greenfield-scoped while a consolidation amend still appends the ADR [test_amend_is_append_only]"
+
+# ── R11: the amend doc-critic checkpoint reviews ONLY newly written material ────
+# (Reviewer finding 4043799422.) The amend branch forbids rewriting vision.md,
+# architecture.md and existing ADRs in STEPS 5-6, but step 9 still passed ALL of those
+# committed artifacts to `target-type=plan-output` and told the Planner to apply the
+# findings inline; `agents/doc-critic.md` requires fixes in every reviewed document, so an
+# epic-only or topology amendment could rewrite the committed planning baseline
+# INDIRECTLY through the checkpoint. The amend checkpoint must review ONLY the newly
+# written material (new epics, the new repo-topology ADR, the appended `## Repo topology`
+# delta) and must PROHIBIT fixes to committed artifacts; the greenfield branch keeps the
+# full `plan-output` checkpoint. Each check is bounded to a naming sentence with its own
+# positive control: on pre-change text no sentence names `newly written material` or
+# `committed planning baseline`, so both positive controls fail (the RED check). The
+# scope sentence must ALSO satisfy the existing R11 `## Repo topology` delta attribution
+# above (it names the delta, `append-only`, `dated`, `specs/architecture.md` and `ADR`),
+# which is why those tokens are carried here rather than a bare step reference.
+guard "R11 doc-critic role" "$ROLE_CRITIC_SPAN" 5
+for _dc_pair in "R11 doc-critic role|$ROLE_CRITIC_FOLD" \
+                "R11 doc-critic emitted body|$BODY_FOLD" \
+                "R11 doc-critic .claude/commands|$CMD_FOLD" \
+                "R11 doc-critic .agents/skills|$SKILL_FOLD"; do
+  _dc_lbl="${_dc_pair%%|*}"; _dc_f="${_dc_pair#*|}"
+  # The amend checkpoint's scope sentence names only the new material. The scope
+  # token is the PHRASE `only the newly written`, not the bare word `only`: the same
+  # sentence also contains `append-only`, so a bare-`only` check is satisfied by
+  # `append-only` and stays green when the exclusivity verb is deleted (M5, R13).
+  every_naming_sentence_carries "$_dc_lbl scope" "$_dc_f" "newly written material" \
+    "only the newly written" "repo-topology ADR" "delta" "epic.md"
+  # ...and the prohibition sentence forbids fixing the committed baseline.
+  every_naming_sentence_carries "$_dc_lbl prohibition" "$_dc_f" "committed planning baseline" \
+    "never" "fix" "specs/vision.md" "specs/architecture.md" "existing ADR"
+done
+# The Doc-critic role's contract must state that a caller-scoped subset limits the fixes
+# to that subset (the clarification that makes the checkpoint's own "apply fixes inline"
+# clause harmless when the caller passes only the new material). Positive control: the
+# sentence naming `review only that subset` must exist; on pre-change text it does not.
+guard "R11 doc-critic contract" "$DOC_CRITIC_SPAN" 3
+every_naming_sentence_carries "R11 doc-critic contract scope" "$DOC_CRITIC_FOLD" \
+  "review only that subset" "newly written material" "propose fixes only there" "never"
+pass "R11 the amend doc-critic checkpoint reviews only newly written material and prohibits fixes to committed artifacts [test_amend_is_append_only]"
 
 # ── R12: the derived draft is project-owned, not harness drift ─────────────────
 # test_draft_excluded_from_harness_owned
