@@ -1408,7 +1408,7 @@
     {
       "id": "E28",
       "title": "Greenfield-to-umbrella path: start every new idea as a single-repo install, let the plan earn the topology, promote to umbrella from the plan's own manifest",
-      "status": "pending",
+      "status": "done",
       "owner": "araozmd",
       "features": [
         {
