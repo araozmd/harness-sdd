@@ -195,18 +195,22 @@ for _r2_pair in "R2 role|$ROLE_FOLD" "R2 body|$BODY_FOLD"; do
   grep -qiE 'one[^.]{0,40}per deployable' "$_r2_f" \
     || fail "$_r2_lbl: the shape sentence does not state one entry per deployable — 'a manifest' without the per-deployable rule would pass"
 done
-# Coordinator grammar (Reviewer finding 4042914423): the coordinator's manifestRepos()
-# accepts a key only through `[A-Za-z0-9_-]+`, so keying an entry by a dotted directory
-# (`api.v2`) yields `malformed repos entry`. The contract must name a coordinator-safe
-# logical key and put the actual directory in `path`. Bounded to the sentence naming
-# `logical name`, so the entry-field list elsewhere cannot satisfy it. Asserted on every
-# surface the step lives on — a hand-edit that drops it on the executable body alone is
-# the divergence ADR-0003's one-body rule forbids (same lesson as R8's full anchor set).
+# Coordinator grammar (Reviewer finding 4043038790): the coordinator's manifestRepos()
+# accepts a key only through `[A-Za-z0-9_-]+`, but a slice id ends in `[a-z0-9-]+`
+# (`store/tasks.schema.json`, tools/next-task.mjs's SLICE_RE), and slice.repo must equal
+# that suffix. So an underscore/uppercase key is a manifest entry no schema-valid slice can
+# reference; keying by a dotted directory (`api.v2`) is likewise a `malformed repos entry`.
+# The contract must name a slice-grammar logical key and put the actual directory in
+# `path`. Bounded to the sentence naming `logical name`, so the entry-field list elsewhere
+# cannot satisfy it. Asserted on every surface the step lives on — a hand-edit that drops it
+# on the executable body alone is the divergence ADR-0003's one-body rule forbids (same
+# lesson as R8's full anchor set). The worked example `api-v2` is pinned too, so widening
+# the grammar back to `[A-Za-z0-9_-]+` OR leaving the `api_v2` example reds.
 for _r2k_pair in "R2 role key grammar|$ROLE_FOLD" "R2 emitted body key grammar|$BODY_FOLD" \
                  "R2 .claude/commands key grammar|$CMD_FOLD" "R2 .agents/skills key grammar|$SKILL_FOLD"; do
   _r2k_lbl="${_r2k_pair%%|*}"; _r2k_f="${_r2k_pair#*|}"
   every_naming_sentence_carries "$_r2k_lbl" "$_r2k_f" "logical name" \
-    '[A-Za-z0-9_-]+' 'directory' 'path'
+    '[a-z0-9-]+' 'api-v2' 'directory' 'path'
 done
 pass "R2 role + body name the draft and its per-deployable key set [test_role_and_body_name_the_draft_and_keys]"
 
@@ -451,7 +455,7 @@ repos:
     init: ./init.sh
     test_command: "npm test"
     delegate_cmd: ""
-  api_v2:
+  api-v2:
     path: ../api.v2
     init: ./init.sh
     test_command: "pytest"
@@ -521,7 +525,7 @@ for ln in lines:
         in_repos = False
     if not in_repos:
         continue
-    m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", ln)
+    m = re.match(r"^  ([a-z0-9-]+):\s*$", ln)
     if m:
         cur = m.group(1)
         repos[cur] = {}
@@ -530,15 +534,17 @@ for ln in lines:
     if m and cur:
         repos[cur][m.group(1)] = m.group(2)
 assert len(repos) >= 3, "extracted %d repos, want >= 3" % len(repos)
-assert set(repos) == {"bff", "web", "api_v2"}, sorted(repos)
+assert set(repos) == {"bff", "web", "api-v2"}, sorted(repos)
 for r, f in repos.items():
     for need in ("path", "init", "test_command", "delegate_cmd"):
         assert need in f, "repo %s missing %s" % (r, need)
     assert f["path"].startswith("../"), "repo %s path %r is not relative to the draft's own dir" % (r, f["path"])
-# The coordinator grammar: the key is a logical name in [A-Za-z0-9_-]+, never the raw
-# dotted directory; the actual directory lives in `path` (Reviewer finding 4042914423).
-assert repos["api_v2"]["path"] == "../api.v2", \
-    "the dotted directory must live in path, not the key (got key=api_v2 path=%r)" % repos["api_v2"]["path"]
+# The coordinator grammar: the key is a slice-id-compatible logical name in [a-z0-9-]+, never
+# the raw dotted directory; the actual directory lives in `path` (Reviewer finding
+# 4043038790). The parser above is already restricted to [a-z0-9-]+, so an underscore or
+# uppercase key line extracts < 3 repos and reds the count guard as well.
+assert repos["api-v2"]["path"] == "../api.v2", \
+    "the dotted directory must live in path, not the key (got key=api-v2 path=%r)" % repos["api-v2"]["path"]
 print("ok %d repos" % len(repos))
 PY
 # The draft's header must mark it DRAFT and inert.

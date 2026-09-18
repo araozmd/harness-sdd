@@ -45,7 +45,8 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    `delegate_cmd` (empty string), and optionally the `scaffold_cmd` runner key that is
    optional and opaque: the harness never interprets it and only the E28-F03 promotion
    runs it. The entry key is a logical name, not the directory name: it must match
-   `[A-Za-z0-9_-]+` (normalize a dotted dir such as `api.v2` to `api_v2`) while `path`
+   `[a-z0-9-]+` (the slice-id suffix grammar, so a valid slice's `repo` can equal the
+   key; normalize a dotted dir such as `api.v2` to `api-v2`) while `path`
    carries the actual directory (`path: ../api.v2`). Write each `path` relative to the
    draft file's own directory (the child
    sibling). The draft's header must mark it a
