@@ -7,7 +7,10 @@
 #       from the generic architecture-ADR pass so a greenfield run cannot emit two
 #   R2  >1 deployable ⇒ draft at umbrella.manifest.draft.yaml, one repos: entry per
 #       deployable with the required key set; keys are normalization-unique and a
-#       collision is disambiguated deterministically (-2, -3, ...) (+ fixture run)
+#       collision is disambiguated deterministically (-2, -3, ...); on an amend the
+#       draft is reconciled against the existing file so a surviving deployable keeps
+#       its key (never renumbered), suffixes go only to newly added deployables, and a
+#       removed deployable's key is never reused (+ fixture run)
 #   R3  exactly one (or zero) deployable ⇒ writes neither artifact
 #   R4  the draft is inert: no umbrella.manifest write, no umbrella.manifest.yaml,
 #       no umbrella engagement (static + fixture run 1)
@@ -340,7 +343,29 @@ for _r2u_pair in "R2 role unique keys|$ROLE_FOLD" "R2 emitted body unique keys|$
     'normalizing' 'collide' '-2' '-3' 'order' 'manifestRepos' \
     'complete set' 'already assigned' 'api!' 'api-2-2'
 done
-pass "R2 role + body name the draft and its per-deployable, collision-safe key set [test_role_and_body_name_the_draft_and_keys]"
+# Amend key stability (PR #202 finding 4043920075). The collision allocator above is
+# defined for a fresh set; re-running it against the NEW set on an amend RENUMBERS a
+# surviving deployable. With `api.v2` and `api-v2` initially keyed `api-v2` and `api-v2-2`,
+# removing the first makes a from-scratch allocation give the survivor `api-v2` — but
+# existing slices still reference `api-v2-2` (the amendment workflow updates neither their
+# ids nor `slice.repo`), so the survivor becomes undispatchable, while a slice for the
+# removed deployable can now resolve onto the survivor. The contract must RECONCILE against
+# the existing draft: survivors keep their key, suffixes go only to newly added
+# deployables, and a removed key is never handed to a different deployable. Bounded to the
+# sentence naming `surviving` and the sentence naming `removed deployable's key` (positive
+# controls), asserted on every surface the key rule lives on. On pre-change text neither
+# needle names a sentence, so both controls RED — the exact defect the finding reports.
+for _r2s_pair in "R2 role amend key stability|$ROLE_FOLD" \
+                 "R2 emitted body amend key stability|$BODY_FOLD" \
+                 "R2 .claude/commands amend key stability|$CMD_FOLD" \
+                 "R2 .agents/skills amend key stability|$SKILL_FOLD"; do
+  _r2s_lbl="${_r2s_pair%%|*}"; _r2s_f="${_r2s_pair#*|}"
+  every_naming_sentence_carries "$_r2s_lbl survivor keeps its key" "$_r2s_f" "surviving" \
+    "keeps" "never renumbered" "newly added" "suffix"
+  every_naming_sentence_carries "$_r2s_lbl removed key not reused" "$_r2s_f" "removed deployable's key" \
+    "never reused" "different deployable"
+done
+pass "R2 role + body preserve surviving keys across an amend (no renumbering, fresh suffixes only, removed keys not reused) [test_role_and_body_name_the_draft_and_keys]"
 
 # ── R3: exactly one deployable writes neither artifact ─────────────────────────
 # test_single_deployable_writes_neither

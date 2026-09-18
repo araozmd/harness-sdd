@@ -120,7 +120,12 @@ deployable in that order, take its normalized name if that candidate is unused, 
 append `-2`, `-3`, … and take the smallest suffix whose candidate is not already assigned,
 so `api`, `api!`, `api-2` allocate `api`, `api-2`, `api-2-2` — because `manifestRepos()`
 rejects duplicate repository keys, so a shared key would leave one deployable with no
-usable `repos:` entry.
+usable `repos:` entry. On an amend, the Planner reconciles against the existing draft
+instead of reallocating its keys: each **surviving** deployable keeps its already-assigned
+key, so a survivor is never renumbered, and a suffix is allocated only for a newly added
+deployable. A removed deployable's key is never reused by a different deployable in the
+same reconciliation, so an existing slice whose `repo` named the removed deployable cannot
+silently resolve onto a survivor.
 Write each `path` relative to the draft file's own directory (the child sibling). The
 draft's header must mark it a `DRAFT` and state that it is `inert`.
 

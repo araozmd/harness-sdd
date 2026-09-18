@@ -8,7 +8,7 @@
 2056805182 43 .agents/skills/sdd-new/agents/openai.yaml
 1382132549 3071 .agents/skills/sdd-next/SKILL.md
 2056805182 43 .agents/skills/sdd-next/agents/openai.yaml
-2780901399 11608 .agents/skills/sdd-plan/SKILL.md
+965318285 12079 .agents/skills/sdd-plan/SKILL.md
 2056805182 43 .agents/skills/sdd-plan/agents/openai.yaml
 3791321589 60560 .agents/skills/sdd-pr-loop/SKILL.md
 2056805182 43 .agents/skills/sdd-pr-loop/agents/openai.yaml
@@ -25,7 +25,7 @@
 1273071214 3574 .claude/commands/sdd-fix.md
 2869697306 3415 .claude/commands/sdd-new.md
 2578950902 2671 .claude/commands/sdd-next.md
-29287780 11208 .claude/commands/sdd-plan.md
+898344762 11679 .claude/commands/sdd-plan.md
 2029175671 60151 .claude/commands/sdd-pr-loop.md
 2520888052 764 .codex/agents/architect.toml
 2336035316 852 .codex/agents/builder-heavy.toml
