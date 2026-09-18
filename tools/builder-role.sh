@@ -137,7 +137,7 @@ _cfg_scalar() {
 # verdict. It still derives nothing about models itself — which is why it still must never
 # parse the `models:` section.
 #
-# The verdict proves the model CHANGES, not that it is STRONGER: the installer has no model
+# The verdict proves the resolved stamp CHANGES, not that it is STRONGER: the installer has no model
 # list and invents none (E17-F01), so `pin.claude.reasoning: haiku` reads as armed. What the
 # gate closes is the downgrade-to-nothing case above, which is the one an operator cannot see
 # coming.
@@ -161,7 +161,7 @@ esac
 # instead of interacting.
 #
 # ABSENT means OFF. Two situations produce absence — a target that has not re-run the
-# installer since this release, and one where no role resolves to a model at all — and both
+# installer since this release, and one where no role resolves on either axis at all — and both
 # have the same remedy, so they share one message. Escalating on absence would be exactly the
 # unverified guess this gate exists to delete.
 #
@@ -209,12 +209,12 @@ fi
 _escalate() {
   if [ "$_threshold" -le 0 ]; then
     # Reachable only from the complexity arm: the round arm requires a positive threshold.
-    echo "ℹ️  $1, but escalation.after_rejections is 0 (off) — using 'builder'. Set it to a positive number, and give models.builder-heavy a tier that actually resolves on your front-end (codex/opencode need a matching pin.<front-end>.<tier>)." >&2
+    echo "ℹ️  $1, but escalation.after_rejections is 0 (off) — using 'builder'. Set it to a positive number, and give models.builder-heavy a tier that actually resolves on your front-end. On codex a different model_reasoning_effort alone arms — no pin needed; opencode also needs a matching pin.opencode.<tier>." >&2
   elif [ "$_armed" = 1 ]; then
     echo builder-heavy
     exit 0
   elif [ -n "$_blocked_by" ]; then
-    echo "ℹ️  $1, but the installer recorded that escalating would NOT raise the model — blocked by: $_blocked_by. Give that front-end's models.builder-heavy a tier that resolves to a different model (codex/opencode also need a matching pin.<front-end>.<tier>), then re-run harness-install.sh. Using 'builder'." >&2
+    echo "ℹ️  $1, but the installer recorded that escalating would NOT raise the resolved stamp — blocked by: $_blocked_by. Give that front-end's models.builder-heavy a different tier. On codex a different model_reasoning_effort alone arms — no pin needed; opencode also needs a matching pin.opencode.<tier>. Then re-run harness-install.sh. Using 'builder'." >&2
   else
     echo "ℹ️  $1, but no escalation verdict is recorded (.harness/.escalation-arming is absent) — re-run harness-install.sh after giving models.builder-heavy a tier that resolves on your front-end. Using 'builder'." >&2
   fi

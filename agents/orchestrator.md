@@ -364,9 +364,10 @@ at `2`, where `0` disables both triggers — **and** an `armed` verdict in
 telling the operator what to configure, not reporting a failure.
 
 **The installer answers "would escalating actually help?" — you never estimate it.**
-`harness-install.sh` asks its own resolver what `builder` and `builder-heavy` resolve to on
-every front-end it stamps and records the comparison in `.harness/.escalation-arming`. That
-file decides. Do not read it yourself, do not reason about `models:` or its pins, and do not
+`harness-install.sh` asks its own resolvers for the whole resolved stamp — `model` plus, on
+codex only, `model_reasoning_effort` (E99-F163) — that `builder` and `builder-heavy` resolve
+to on every front-end it stamps, and records the comparison in `.harness/.escalation-arming`.
+That file decides. Do not read it yourself, do not reason about `models:` or its pins, and do not
 add a judgement on top: two E17-F03 review rounds killed two attempts to work this out
 anywhere other than the resolver, and each was wrong on a different front-end.
 

@@ -293,7 +293,8 @@ models:
   architect: inherit      # try: reasoning
   builder: inherit        # try: standard
   builder-heavy: inherit  # try: reasoning — the escalation tier (E17-F02); same body as
-                          # `builder`, differs only by the model it resolves to (ADR-0002).
+                          # `builder`, differs only by the resolved stamp — the model, and
+                          # on codex the reasoning effort, it resolves to (ADR-0002).
                           # Left `inherit` it is NOT heavier than `builder`.
   reviewer: inherit       # try: standard
   scout: inherit          # try: cheap
@@ -4511,7 +4512,7 @@ EOF
 orchestrator	The Leader. Reads state, runs init.sh, routes the next task, delegates to architect/builder/reviewer/scout. Never writes code.
 architect	The Spec Author. Writes the 4-file spec in EARS. No production code.
 builder	The Implementer. Writes code from an APPROVED spec, one task at a time.
-builder-heavy	The Implementer at the escalation tier. Same instruction body and same discipline as `builder`; differs only by the model it resolves to (ADR-0002).
+builder-heavy	The Implementer at the escalation tier. Same instruction body and same discipline as `builder`; differs only by the resolved stamp — the model, and on codex the reasoning effort, it resolves to (ADR-0002).
 reviewer	The Evaluator. Verifies against the spec, runs tests, approves or rejects.
 scout	Read-only codebase reconnaissance. Writes findings to progress/.
 doc-critic	Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code.
@@ -5201,7 +5202,7 @@ EOF
   # at their own canonical body, and .harness/agents/builder-heavy.md is itself a pointer
   # at builder.md, so the instruction text still exists in exactly one place.
   emit_agent builder-heavy "Read, Write, Edit, Bash, Grep, Glob" \
-    "The Implementer at the escalation tier. Same instruction body and same discipline as \`builder\`; differs only by the model it resolves to (ADR-0002)."
+    "The Implementer at the escalation tier. Same instruction body and same discipline as \`builder\`; differs only by the resolved stamp — the model, and on codex the reasoning effort, it resolves to (ADR-0002)."
   emit_agent reviewer "Read, Bash, Grep, Glob, Edit" \
     "The Evaluator/verification layer. Runs init.sh + tests, checks every R-id has a passing test, exercises behavior (Playwright), enforces conventions. Approves or rejects. Spawn when a feature is \`in-review\`."
   emit_agent scout "Read, Grep, Glob, Bash" \

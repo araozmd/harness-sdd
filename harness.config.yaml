@@ -238,7 +238,8 @@ models:
   architect: inherit      # try: reasoning
   builder: inherit        # try: standard
   builder-heavy: inherit  # try: reasoning — the escalation tier (E17-F02); same body as
-                          # `builder`, differs only by the model it resolves to (ADR-0002).
+                          # `builder`, differs only by the resolved stamp — the model, and
+                          # on codex the reasoning effort, it resolves to (ADR-0002).
                           # Left `inherit` it is NOT heavier than `builder`.
   reviewer: inherit       # try: standard
   scout: inherit          # try: cheap

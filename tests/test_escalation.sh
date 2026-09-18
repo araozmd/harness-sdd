@@ -1127,6 +1127,100 @@ widened_verdict_is_named_in_the_generated_manifest() {
   pass "the generated .harness/manifest.txt describes the widened model+effort stamp (E99-F163 F1a)"
 }
 
+# ── E99-F163 finding 4047253492: the release records the widened verdict ────────
+# The installer body changed (widened `escalation_verdict`) and the shipped config/docs
+# changed with it, so the release must be recorded. The exact VERSION literal is pinned by
+# tests/test_codex_native.sh; this pins the CHANGELOG entry that gives it meaning and the
+# generic VERSION<->newest-heading agreement (never a frozen future value).
+release_records_the_widened_verdict() {
+  _cl="$SRC/CHANGELOG.md"
+  grep -qF '## [0.84.1]' "$_cl" \
+    || fail "E99-F163: CHANGELOG.md has no 0.84.1 entry for the widened escalation verdict"
+  # Fence-aware section extraction, then positive two-token anchors. The pre-change blob has
+  # no 0.84.1 heading at all, so the section is EMPTY and the first assertion reds; the
+  # content anchors below stay discriminating against an entry whose heading survives but
+  # whose body is reverted to the model-only wording.
+  _s="$(awk -v h='## [0.84.1]' "$(cat "$SRC/tests/lib/fence.awk")"'
+    fence_delim($0) { if (k) print; next }
+    !fence && /^## /{k=(index($0,h)>0);next}
+    k' "$_cl" | tr '\n' ' ')"
+  [ -n "$_s" ] || fail "E99-F163: the 0.84.1 CHANGELOG section is empty"
+  printf '%s' "$_s" | grep -qiE 'escalation_verdict.{0,200}model_reasoning_effort' \
+    || fail "E99-F163: the 0.84.1 entry does not record the model+effort verdict"
+  printf '%s' "$_s" | grep -qiE 'model_reasoning_effort.{0,80}alone[[:space:]]+arms' \
+    || fail "E99-F163: the 0.84.1 entry does not record that a codex effort difference alone arms"
+  printf '%s' "$_s" | grep -qiE 'pin\.opencode' \
+    || fail "E99-F163: the 0.84.1 entry does not record opencode's matching-pin requirement"
+  # The release is coherent: VERSION equals the newest heading (generic, not a literal).
+  _vh="$(awk 'match($0, /^## \[[^]]+\]/) { print substr($0, RSTART + 4, RLENGTH - 5); exit }' "$_cl")"
+  [ "$_vh" = "$(tr -d ' \t\r\n' < "$SRC/VERSION")" ] \
+    || fail "E99-F163: VERSION $(cat "$SRC/VERSION") does not match the newest CHANGELOG heading [$_vh]"
+  pass "the 0.84.1 release records the widened escalation verdict and its remediation (E99-F163)"
+}
+
+# ── E99-F163 finding 4047253495: the remediation names the widened stamp ────────
+# The reviewer found `tools/builder-role.sh` still told operators that Codex needs BOTH a
+# different model AND a matching `pin.codex.<tier>`, which is false since the verdict weighs
+# effort: a different tier alone (⇒ a different `model_reasoning_effort`) arms with no pin.
+# OpenCode's pin requirement is real and must survive. These are BEHAVIORAL assertions on the
+# tool's stderr (the operator reads that line), plus section-scoped anchors on the role doc
+# and the EMITTED builder-heavy descriptions (N4), read from a real install rather than the
+# source strings.
+remediation_distinguishes_codex_effort_from_opencode_pin() {
+  # A blocked verdict naming codex, so the blocking branch's advisory is what we read.
+  _blk="$(mkfix rblk 2 blocked codex=none opencode=same)"
+  _m="$(err complex 1 --config "$_blk" | tr '\n' ' ')"
+  [ -n "$_m" ] || fail "E99-F163 N1: the blocked advisory was empty"
+  # Positive two-token anchors. `model_reasoning_effort` occurs NOWHERE in the pre-change
+  # message, so the first is RED on the old text; the concrete `pin.opencode` (not the generic
+  # `pin.<front-end>`) is likewise new.
+  printf '%s' "$_m" | grep -qiE 'model_reasoning_effort.{0,40}alone[[:space:]]+arms' \
+    || fail "E99-F163 N1: the blocked advisory does not say a codex reasoning-effort difference alone arms"
+  printf '%s' "$_m" | grep -qiE 'opencode.{0,40}pin\.opencode' \
+    || fail "E99-F163 N1: the blocked advisory dropped opencode's matching-pin requirement"
+  # The superseded blanket claim is GONE: codex and opencode are no longer told one remedy.
+  printf '%s' "$_m" | grep -q 'codex/opencode need a matching pin' \
+    && fail "E99-F163 N1: the blocked advisory still prescribes one pin rule for codex AND opencode"
+
+  # The threshold-veto advisory (the OTHER remediation string) carries the same correction.
+  _offmsg="$(err complex 1 --config "$(mkfix roff 0 armed claude=raise)" | tr '\n' ' ')"
+  printf '%s' "$_offmsg" | grep -qiE 'model_reasoning_effort.{0,40}alone[[:space:]]+arms' \
+    || fail "E99-F163 N1: the after_rejections=0 advisory does not explain a codex effort-only escalation"
+  printf '%s' "$_offmsg" | grep -qiE 'opencode.{0,40}pin\.opencode' \
+    || fail "E99-F163 N1: the after_rejections=0 advisory dropped opencode's matching-pin requirement"
+
+  # agents/orchestrator.md — section-scoped. "its own resolver" (singular) is the stale
+  # wording; "own resolvers" (plural) + "whole resolved stamp" is the correction.
+  _orch="$T/orch-stamp"
+  awk -v h='### Which Builder — ask the tool, do not decide (E17-F03)' \
+    '/^#{2,} /{k=(index($0,h)>0);next} k' "$SRC/agents/orchestrator.md" | tr '\n' ' ' > "$_orch"
+  [ -s "$_orch" ] || fail "E99-F163 N1: the orchestrator's 'Which Builder' section did not extract — the heading moved"
+  grep -qiE 'own[[:space:]]+resolvers' "$_orch" \
+    || fail "E99-F163 N1: agents/orchestrator.md still says a single 'own resolver'"
+  grep -qiE 'whole[[:space:]]+resolved[[:space:]]+stamp' "$_orch" \
+    || fail "E99-F163 N1: agents/orchestrator.md does not name the whole resolved stamp"
+
+  # The EMITTED builder-heavy descriptions: read the artifacts a real install writes, not the
+  # source strings. claude reads `emit_agent`; codex reads `ag_personas`; the installed seed
+  # comment reads the models heredoc — so all three corrected sites are exercised.
+  _bt="$T/n4-target"; install_to "$_bt" "$T/ch-n4" --agents=claude,codex
+  for _f in "$_bt/.claude/agents/builder-heavy.md" "$_bt/.codex/agents/builder-heavy.toml"; do
+    [ -f "$_f" ] || fail "E99-F163 N4: setup — no emitted builder-heavy description at $_f"
+    grep -qiE 'resolved[[:space:]]+stamp' "$_f" \
+      || fail "E99-F163 N4: $_f still says the Builders differ only by the model"
+    grep -qiE 'reasoning[[:space:]]+effort' "$_f" \
+      || fail "E99-F163 N4: $_f does not name codex reasoning effort"
+  done
+  _seed="$T/n4-seed"
+  awk '/builder-heavy: inherit/ {k=1} k {print} k && /NOT heavier than/ {exit}' \
+    "$_bt/.harness/harness.config.yaml" | tr '\n' ' ' > "$_seed"
+  [ -s "$_seed" ] || fail "E99-F163 N4: the installed models seed comment did not extract"
+  grep -qiE 'resolved[[:space:]]+stamp' "$_seed" \
+    || fail "E99-F163 N4: the installed builder-heavy seed comment still says 'only by the model'"
+
+  pass "the remediation distinguishes codex effort-only arming from opencode's pin, and every emitted builder-heavy description names the resolved stamp (E99-F163 N1/N4)"
+}
+
 # ── usage errors ────────────────────────────────────────────────────────────────
 usage_errors_are_loud() {
   # A malformed COMPLEXITY is a human typo and must never fail a build (F03-R2). A malformed
@@ -1169,6 +1263,8 @@ docs_agree_with_the_shipped_default
 no_doc_claims_the_harness_cannot_check
 effort_is_named_in_the_operator_docs
 widened_verdict_is_named_in_the_generated_manifest
+release_records_the_widened_verdict
+remediation_distinguishes_codex_effort_from_opencode_pin
 usage_errors_are_loud
 
 # ── init.sh visibility line: quoted thresholds normalize like _cfg_scalar ────────────
