@@ -423,3 +423,20 @@
   it resolves to") into every target's agent shim, and after E99-F163 a codex effort-only pair
   differs by `model_reasoning_effort` alone — stale, shipped, and pinned by no test (E99-F163 N4).
   When a verdict's axes move, grep the `emit_agent` strings alongside the docs.
+- [2026-09-18 builder] `git ls-files -s` reads the INDEX, so a bare `chmod -x` on a tracked
+  script leaves it reporting `100755` — a source-mode check built on the tracked mode ALONE
+  stays green on the exact E99-F161 reproduction. Assert BOTH the tracked mode (the committed
+  contract) and the worktree `[ -x ]` bit (what `./script` needs), and kill each arm with its
+  own mutant: bare `chmod -x` for the worktree arm, `git update-index --chmod=-x` for the
+  tracked arm. (E99-F164)
+- [2026-09-18 builder] A per-file executable-bit check rots the moment a script is added;
+  derive the required set by RULE (every tracked `*.sh` with a shebang outside `tests/`) so a
+  new script is covered on commit, and add a fail-closed canary list of the `./`-documented
+  entrypoints so widening the exemption to drop one reds naming it. Prove the guard by
+  mutating the exemption, not by reading it. (E99-F164)
+- [2026-09-18 builder] A list-membership guard where every element is space-delimited must be
+  mutated on the FIRST element too: `sed 's# token##'` silently no-ops there because the first
+  token has no leading space (`_sse_expected="first …`), so the suite runs unmutated, stays
+  green, and reads as a SURVIVOR. Anchor the deletion on the delimiter (`s#="first #="#`) or
+  require the applied diff to be non-empty before recording any result — the "print the applied
+  diff" rule is what turns this void run back into a kill. (E99-F164 F2b)
