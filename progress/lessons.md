@@ -410,3 +410,11 @@
   E31-F02's version instead of the current one. Check the lane's precedent before bumping, and
   if a bump is required, grep the CURRENT VERSION literal (`test_codex_native.sh:279`) AND the
   newest-entry-coupled suites.
+- [2026-09-18 reviewer] Widening a contract's semantics must sweep the GENERATED operator-facing
+  docs, not just the sites the brief enumerates. E99-F163 updated the seed block and the two named
+  docs but left the `.harness/manifest.txt` heredoc (`harness-install.sh:4252-4262`) saying `armed`
+  means "change the model, computed from resolve_model" — now false, shipped to every target, and
+  unpinned by any test. Also stale: the reclaim `info` line (`:4743`), `docs/INSTALL.md:867-873`,
+  and `docs/WORKFLOW.md:811/837`. Before approving a semantics change, grep every surface that
+  NAMES the artifact (`escalation-arming`, the verdict words) and each doc's EARLIER sections, not
+  only the section the diff touched.

@@ -326,3 +326,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-18 E99-F162 pr-loop: round 4 (cap) returned 1 blocking finding (mapping boundary must skip column-0 comments). Human override — cap raised to 5.
 - 2026-09-18 E99-F162 merged in PR #208 at e9912b7 after a 5-round Codex review loop (1→1→1→1→0). Marked done with verified ancestor evidence; 4 threads resolved. The fix ended as a semantic mapping comparison + non-comment structural bound + kept byte-cmp (floor/end-marker retired).
 - 2026-09-18 E99-F163 Orchestrator: autonomous sdd:false fix; set in-progress and spawning Builder.
+- 2026-09-18 E99-F163 build round 1 -> Reviewer REJECT (prose-only: F1a-F1e unchanged operator-facing surfaces); back to in-progress.
