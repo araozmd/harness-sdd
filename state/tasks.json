@@ -1454,7 +1454,13 @@
           "depends_on": [
             "E28-F02"
           ],
-          "spec_path": "specs/epics/E28-greenfield-to-umbrella/F03-promote-to-umbrella/"
+          "spec_path": "specs/epics/E28-greenfield-to-umbrella/F03-promote-to-umbrella/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (204)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E28-F03 done --evidence <merge-ref>`",
+            "pr": "204"
+          }
         }
       ]
     },
