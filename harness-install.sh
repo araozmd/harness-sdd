@@ -7600,6 +7600,9 @@ def allowed(rel):
             v.startswith('.claude/commands/') and v.endswith('.md') or
             v.startswith('.codex/agents/') and v.endswith('.toml') or
             v.startswith('.agents/skills/sdd-') and (v.endswith('/SKILL.md') or v.endswith('/agents/openai.yaml')) or
+            v=='opencode.json' or
+            v.startswith('.opencode/command/') and v.endswith('.md') or
+            v=='.opencode/agent/pr-fixer.md' or
             v=='.escalation-arming') and '..' not in rel.parts and not rel.is_absolute()
 if not safe(manifest):
     sys.exit('self: symlinked manifest component; source glue left unchanged')
@@ -7659,16 +7662,16 @@ PYSELF
 }
 
 self_install() {
-  # Self supports the same Claude/Codex emitters; OpenCode source mode is deliberately absent.
-  _si_selection="${AGENTS_OVERRIDE:-claude,codex}"
-  if [ "$_si_selection" = all ]; then _si_selection="claude,codex"; fi
+  # Self supports the same Claude/Codex/OpenCode emitters; retired front-ends stay refused.
+  _si_selection="${AGENTS_OVERRIDE:-claude,codex,opencode}"
+  if [ "$_si_selection" = all ]; then _si_selection="claude,codex,opencode"; fi
   if [ "$_si_selection" = host ]; then
     _si_selection="$(detect_host)"
-    [ -n "$_si_selection" ] || die "--self host undetected — select --agents=claude or --agents=codex"
+    [ -n "$_si_selection" ] || die "--self host undetected — select --agents=claude, --agents=codex or --agents=opencode"
   fi
   _si_keys="$(validate_csv "$_si_selection")"
   for _si_key in $_si_keys; do
-    case "$_si_key" in claude|codex) ;; *) die "--self supports only claude,codex; '$_si_key' is unavailable in source mode" ;; esac
+    case "$_si_key" in claude|codex|opencode) ;; *) die "--self supports only claude,codex,opencode; '$_si_key' is unavailable in source mode" ;; esac
   done
   # Harvest independently. Only a safe bare Codex model ID is interpolated into TOML.
   SELF_MODELS=""; SELF_CODEX_MODELS=""
@@ -7690,10 +7693,16 @@ self_install() {
   else
     PR_LOOP_OVERRIDE=false
   fi
+  # R4: the source tree is machine-independent. The temp install's fresh TARGET cannot see
+  # a source-root `.opencode-parallel` marker, so the ONLY lever that could put a
+  # machine-local capability artifact into the source glue is the CLI flag — neutralise it.
+  # Result: `sdd-test-concurrency.md` is always emitted, `sdd-fix-parallel.md` never is, and
+  # the bytes are identical with and without `--with-opencode-parallel=true`.
+  OPENCODE_PARALLEL_OVERRIDE=false
   echo "══ self mode → regenerating $SRC glue from a temp install ══"
   install_one "$_si_tmp"
   mkdir -p "$_si_tmp/source"
-  for _si_f in "$_si_tmp"/.claude/agents/*.md "$_si_tmp"/.claude/commands/*.md "$_si_tmp"/.codex/agents/*.toml "$_si_tmp"/.agents/skills/*/SKILL.md "$_si_tmp"/.agents/skills/*/agents/openai.yaml; do
+  for _si_f in "$_si_tmp"/.claude/agents/*.md "$_si_tmp"/.claude/commands/*.md "$_si_tmp"/.codex/agents/*.toml "$_si_tmp"/.agents/skills/*/SKILL.md "$_si_tmp"/.agents/skills/*/agents/openai.yaml "$_si_tmp"/opencode.json "$_si_tmp"/.opencode/command/*.md "$_si_tmp"/.opencode/agent/*.md; do
     [ -f "$_si_f" ] || continue
     _si_rel="${_si_f#"$_si_tmp"/}"
     mkdir -p "$_si_tmp/source/$(dirname "$_si_rel")"
@@ -7712,7 +7721,15 @@ self_install() {
   # arming again from the model map. Scout/other-role edits do not affect this gate.
   _UNSTAMPED_FILE="$(mktemp 2>/dev/null || mktemp -t harness-self-unstamped)"
   for _si_fe in $SELECTED; do
-    case "$_si_fe" in claude) _si_ext=md ;; codex) _si_ext=toml ;; esac
+    case "$_si_fe" in
+      claude) _si_ext=md ;;
+      codex) _si_ext=toml ;;
+      # OpenCode has no per-role Builder file: `builder-heavy` lives as a key in
+      # opencode.json, so this per-role-file probe cannot compute its verdict. Skipping it
+      # lets write_escalation_arming publish the honest config-derived `opencode=neither`
+      # instead of a fabricated `opencode=unstamped`.
+      *) continue ;;
+    esac
     for _si_role in builder builder-heavy; do
       _si_rel=".$_si_fe/agents/$_si_role.$_si_ext"
       if [ -L "$SRC/.$_si_fe" ] || [ -L "$SRC/.$_si_fe/agents" ] \
@@ -7732,7 +7749,7 @@ self_install() {
   fi
   self_reconcile "$_si_tmp/source" arming
   rm -rf "$_si_tmp"
-  ok "self: selected Claude/Codex source glue reconciled (+ .escalation-arming, .glue-manifest)"
+  ok "self: selected Claude/Codex/OpenCode source glue reconciled (+ .escalation-arming, .glue-manifest)"
 }
 
 # ── manifest auto-population (append-only upsert, never clobbers entries) ──────

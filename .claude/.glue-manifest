@@ -35,4 +35,13 @@
 1687510987 939 .codex/agents/pr-fixer.toml
 2582892132 768 .codex/agents/reviewer.toml
 2996970126 752 .codex/agents/scout.toml
-1501396876 35 .escalation-arming
+2107829833 52 .escalation-arming
+405350244 635 .opencode/agent/pr-fixer.md
+3360195966 6235 .opencode/command/sdd-drill.md
+1273071214 3574 .opencode/command/sdd-fix.md
+2869697306 3415 .opencode/command/sdd-new.md
+2578950902 2671 .opencode/command/sdd-next.md
+10195721 13798 .opencode/command/sdd-plan.md
+2029175671 60151 .opencode/command/sdd-pr-loop.md
+4083098437 1963 .opencode/command/sdd-test-concurrency.md
+4123573485 1295 opencode.json
