@@ -210,7 +210,24 @@ fold_to "$DRILL_WHAT_SPAN"  "$DRILL_WHAT_FOLD"
 guard "R1" "$ROLE_SPAN" 8
 require_tokens "R1 positive control" "$ROLE_FOLD" "more than one deployable" "repo-topology ADR"
 require_tokens "R1" "$ROLE_FOLD" "specs/adr/" "ADR-" "above the max existing ADR number"
-pass "R1 role names one repo-topology ADR, specs/adr/ + ADR- and above-max allocation [test_role_and_body_name_the_topology_adr]"
+# The ADR's CONTENT obligation (Reviewer finding 4043709586): it is not merely "an ADR at
+# a path" — it is a single decision that NAMES EACH REPOSITORY and explains WHY IT IS
+# SEPARATE, which is exactly what the spec's R1 requires and what F03's promotion consumes
+# (the artifact justifying the umbrella). Without it the umbrella's rationale is never
+# recorded and the ADR degrades to a bare pointer. Bounded to the sentence naming `names
+# each repository` (positive control), so the path/allocation sentence elsewhere cannot
+# satisfy it; asserted on every surface the topology step lives on, so a hand-edit that
+# drops the justification on the executable body alone reds (the R8 full-anchor-set
+# lesson). On pre-change text no sentence names `names each repository`, so this REDs.
+for _rj_pair in "R1 role ADR justification|$ROLE_FOLD" \
+                "R1 emitted body ADR justification|$BODY_FOLD" \
+                "R1 .claude/commands ADR justification|$CMD_FOLD" \
+                "R1 .agents/skills ADR justification|$SKILL_FOLD"; do
+  _rj_lbl="${_rj_pair%%|*}"; _rj_f="${_rj_pair#*|}"
+  every_naming_sentence_carries "$_rj_lbl" "$_rj_f" "names each repository" \
+    "repo-topology ADR" "why it is separate"
+done
+pass "R1 role + body + both source artifacts require the ADR to name each repository and why it is separate [test_role_and_body_name_the_topology_adr]"
 
 # ── R7: the portable contract carries the whole rule ───────────────────────────
 # test_planner_role_portable_contract
@@ -609,6 +626,40 @@ for _ag_pair in "R11 amend gate role|$PLAN_WHAT_FOLD" "R11 amend gate emitted bo
     "must not touch the topology artifacts"
 done
 pass "R11 the amend branch gates the topology writes on a detected deployable-set change and leaves them alone for a non-topology amend [test_amend_is_append_only]"
+
+# ── R11: the topology output step ITSELF is gated; the no-op rule is greenfield-scoped ─
+# (Reviewer findings 4043709578 and 4043709584 — two refinements of the same condition.)
+# (1) Step 7 was labeled "both branches" and wrote the ADR + draft unconditionally
+#     whenever the architecture named >1 deployable — so a non-topology AMEND on a project
+#     that ALREADY has >1 deployable manufactured a redundant topology ADR and rewrote the
+#     draft. The step itself must be gated on an ACTUAL deployable-set change: greenfield's
+#     set is new, and an amend acts only when it changed the set.
+# (2) The no-artifact rule was unqualified ("exactly one deployable => write neither"),
+#     which contradicted the collapse/consolidation-amend rule (a set-changing amend ALWAYS
+#     appends the new repo-topology ADR, even when it collapses to one deployable). The two
+#     directives must agree: the no-op rule is scoped to GREENFIELD runs, and the same
+#     sentence states the consolidation amend still appends the ADR (and removes the draft).
+# Bounded to a step-7-only needle (`topology output step`) and to the no-op sentence
+# (`exactly one deployable`) respectively, on all four surfaces. On pre-change text no
+# sentence names `topology output step`, and the no-op sentence carries neither
+# `greenfield` nor `appends` — so each assertion REDs there.
+for _tg_pair in "R11 role topology gate|$ROLE_FOLD" \
+                "R11 emitted body topology gate|$BODY_FOLD" \
+                "R11 .claude/commands topology gate|$CMD_FOLD" \
+                "R11 .agents/skills topology gate|$SKILL_FOLD"; do
+  _tg_lbl="${_tg_pair%%|*}"; _tg_f="${_tg_pair#*|}"
+  every_naming_sentence_carries "$_tg_lbl" "$_tg_f" "topology output step" \
+    "deployable-set change" "Only when"
+done
+for _gs_pair in "R11 role no-op greenfield|$ROLE_FOLD" \
+                "R11 emitted body no-op greenfield|$BODY_FOLD" \
+                "R11 .claude/commands no-op greenfield|$CMD_FOLD" \
+                "R11 .agents/skills no-op greenfield|$SKILL_FOLD"; do
+  _gs_lbl="${_gs_pair%%|*}"; _gs_f="${_gs_pair#*|}"
+  every_naming_sentence_carries "$_gs_lbl" "$_gs_f" "exactly one deployable" \
+    "greenfield" "appends" "repo-topology ADR"
+done
+pass "R11 the topology output step is gated on an actual set change and the no-artifact rule is greenfield-scoped while a consolidation amend still appends the ADR [test_amend_is_append_only]"
 
 # ── R12: the derived draft is project-owned, not harness drift ─────────────────
 # test_draft_excluded_from_harness_owned

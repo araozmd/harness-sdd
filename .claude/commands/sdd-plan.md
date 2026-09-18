@@ -43,9 +43,15 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    `specs/_templates/adr.md` (4-digit, above the max existing ADR number);
    `architecture.md` references each ADR by its `ADR-NNNN` id. Stay at whole-system
    depth — defer per-epic deltas to `/sdd-drill` (F03).
-7. **Repo topology output (both branches).** Repo topology is an output of planning,
-   never an input. When `specs/architecture.md` names more than one deployable, write exactly
-   one `repo-topology ADR` at `specs/adr/NNNN-<title>.md`, allocated strictly
+7. **Repo topology output.** Repo topology is an output of planning,
+   never an input. The topology output step is itself gated on an actual
+   deployable-set change: Only when the amend added or removed a deployable, or gave
+   one a new name, does it append the dated topology delta and the new `repo-topology
+   ADR` and reconcile the draft, while a non-topology amend leaves the topology
+   artifacts untouched. On a greenfield run the set is new, so when
+   `specs/architecture.md` names more than one deployable, write exactly
+   one `repo-topology ADR` at `specs/adr/NNNN-<title>.md` — a single decision
+   that names each repository and explains why it is separate — allocated strictly
    above the max existing ADR number (4-digit, no reuse), and reference it from
    `specs/architecture.md`'s ADR index by its `ADR-NNNN` id. Also write a draft
    manifest at `umbrella.manifest.draft.yaml` with one `repos:` entry per
@@ -72,8 +78,10 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    `harness.config.yaml`, and never write `umbrella.manifest.yaml`, so
    the draft's presence alone does not engage umbrella mode. Engagement is the config key
    pointing at an existing manifest — that is E28-F03's promotion, not yours.
-   When `specs/architecture.md` names exactly one deployable (or none), write
-   neither a `repo-topology ADR` nor an `umbrella.manifest.draft.yaml`.
+   On a greenfield run, when `specs/architecture.md` names exactly one deployable
+   (or none), write neither a `repo-topology ADR` nor an `umbrella.manifest.draft.yaml`;
+   a consolidation amend to one deployable (or none) still appends the new
+   `repo-topology ADR` and removes the derived draft, per the amend contract below.
    The Planner is the single writer of the draft manifest. `/sdd-drill` never creates or
    amends `umbrella.manifest.draft.yaml`; a topology change is a `/sdd-plan`
    amend that is **append-only** and reconciles the draft.
