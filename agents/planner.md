@@ -229,7 +229,8 @@ renumber, or version-fork committed artifacts.
 When the plan is written and validation passed, report to the human:
 
 - the artifacts written (`specs/vision.md`, `specs/architecture.md`, each
-  `specs/adr/NNNN-*.md`);
+  `specs/adr/NNNN-*.md`, and, when the plan names multiple deployables, the draft
+  manifest at `umbrella.manifest.draft.yaml`);
 - the seeded `draft` epics (ids + titles) and their `epic.md` paths;
 - and the instruction: **run `/sdd-drill <epic-id>`** (F03) next to deepen a `draft`
   epic into features.

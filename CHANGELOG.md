@@ -26,6 +26,11 @@ All notable changes to the harness body are recorded here. Versions follow
   optional, harness-opaque key while retaining the four required entry keys.
 - **New suite `tests/test_planner_topology.sh`** covers R1–R10 with structurally-bounded
   spans and an install-free fixture plan run through `tools/next-task.mjs`.
+- **The planning handoff names the draft.** `/sdd-plan`'s final report enumerates
+  `umbrella.manifest.draft.yaml` alongside the vision/architecture/ADRs/epics whenever the
+  plan names multiple deployables, and `docs/INSTALL.md`'s planning-baseline commit/push
+  checklists include it, so the draft is committed with the baseline and available to
+  E28-F03 in another checkout.
 
 ## [0.81.1] — 2026-09-17
 

@@ -80,7 +80,9 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    `store/tasks.schema.json`. If it fails, report the failure and do NOT claim
    a successful plan.
 11. **Report** the artifacts written (`specs/vision.md`,
-   `specs/architecture.md`, each `specs/adr/NNNN-*.md`), the seeded
+   `specs/architecture.md`, each `specs/adr/NNNN-*.md`, and, when
+   the plan names multiple deployables, the draft manifest at
+   `umbrella.manifest.draft.yaml`), the seeded
    `draft` epics (ids + titles + `epic.md` paths), and tell the human to **run
    `/sdd-drill <epic-id>`** next. Do NOT spawn the Architect, do NOT write any feature
    spec, and do NOT advance any epic past `draft` — the Planner produces, never specs.

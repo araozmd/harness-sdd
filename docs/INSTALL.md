@@ -168,9 +168,10 @@ degraded mode. The installer does not create a git repository.
    the vision, architecture and ADRs and seeds the project's draft epics.
 6. Run **`/sdd-drill <epic-id>`** to decompose the first draft epic into features.
 7. Commit and push the planning baseline to the remote from step 3 — the constitution
-   edit, the vision, architecture and ADRs, the epic decomposition, and the seeded
-   `.harness/state/tasks.json`. Until this commit those planning artifacts are dirty or
-   untracked, so the remote baseline does not describe them.
+   edit, the vision, architecture and ADRs, the epic decomposition, the seeded
+   `.harness/state/tasks.json`, and, when the plan names more than one deployable, the
+   draft `.harness/umbrella.manifest.draft.yaml`. Until this commit those planning
+   artifacts are dirty or untracked, so the remote baseline does not describe them.
 8. Create the first feature branch before starting feature work with
    `/sdd-next`: features are built on their own branch and their PR opens from it, so
    committing the planning baseline first keeps the vision, ADRs and decomposition out
@@ -192,9 +193,10 @@ harness itself, under the human gate. A new product plans before it builds: run
    project's draft epics.
 3. Run **`/sdd-drill <epic-id>`** to decompose a draft epic into features.
 4. Commit and push the planning baseline — the constitution edit, the vision,
-   architecture and ADRs, the epic decomposition and the seeded
-   `.harness/state/tasks.json` — then create the first feature branch. This keeps the
-   planning artifacts out of the first feature PR.
+   architecture and ADRs, the epic decomposition, the seeded
+   `.harness/state/tasks.json`, and, when the plan names more than one deployable, the
+   draft `.harness/umbrella.manifest.draft.yaml` — then create the first feature branch.
+   This keeps the planning artifacts out of the first feature PR.
 5. Run **`/sdd-next`**. The seeded `E00-F01` bootstrap task is `sdd: true`, so the
    Orchestrator routes it to the Architect (with Scout recon) to detect your
    test/lint/typecheck commands (`.harness/harness.config.yaml` + fast project gates in

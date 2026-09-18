@@ -300,6 +300,24 @@ for _r8_f in "$BODY_SPAN" "$CMD" "$SKILL_SPAN"; do
 done
 pass "R8 emitted body + both source-mode artifacts carry the same step, no fork [test_command_body_matches_role_no_divergence]"
 
+# ── R8 (handoff): the post-plan report enumerates the draft on every surface ───
+# The draft is a planning artifact, so the final handoff must name it — otherwise a
+# user can commit every listed planning artifact while leaving the untracked draft
+# behind (Reviewer finding 4042832630), and E28-F03 gets nothing to promote in
+# another checkout. Bounded to the SENTENCE naming `artifacts written`, so the
+# step-7 `umbrella.manifest.draft.yaml` token cannot satisfy it.
+ROLE_REPORT_SPAN="$T/role-report.span"; ROLE_REPORT_FOLD="$T/role-report.fold"
+extract_section "$ROLE" "Completion report" > "$ROLE_REPORT_SPAN"
+guard "R8 handoff role" "$ROLE_REPORT_SPAN" 3
+fold_to "$ROLE_REPORT_SPAN" "$ROLE_REPORT_FOLD"
+for _r8h_pair in "R8 handoff role|$ROLE_REPORT_FOLD" "R8 handoff emitted body|$BODY_FOLD" \
+                 "R8 handoff .claude/commands|$CMD_FOLD" "R8 handoff .agents/skills|$SKILL_FOLD"; do
+  _r8h_lbl="${_r8h_pair%%|*}"; _r8h_f="${_r8h_pair#*|}"
+  every_naming_sentence_carries "$_r8h_lbl" "$_r8h_f" "artifacts written" \
+    "umbrella.manifest.draft.yaml"
+done
+pass "R8 post-plan report names the draft on the role, emitted body and both source artifacts [test_command_body_matches_role_no_divergence]"
+
 # ── R9: example manifest + UMBRELLA.md Manifest reference ──────────────────────
 # test_example_manifest_documents_scaffold_cmd
 [ -f "$EX" ] || fail "R9: $EX is missing"
