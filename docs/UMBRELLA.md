@@ -404,10 +404,12 @@ set `done` prematurely while a slice or the integration gate is red):
   invariant — a feature cannot be stored `done` while any slice is not `done`+`merged`.
   The manifest is also what **locates** each slice's repository for that check: `path:` is
   resolved against the manifest file's own directory, so the sibling layout the example uses
-  (`../viernes-bff`) and any key that is not a directory name both work. A slice naming a
-  repository the manifest does not declare is **refused** — the same fact `next-task.mjs`
-  already halts on as `manifest-error`; one that is declared but not present in this
-  checkout simply degrades to `unchecked`.
+  (`../viernes-bff`) and any key that is not a directory name both work. That split is a
+  coordinator-dispatch allowance, but `promotion requires` the aligned shape: the entry key
+  must equal the child `directory` basename (see "Promoting a single install to a
+  coordinator"). A slice naming a repository the manifest does not declare is **refused** —
+  the same fact `next-task.mjs` already halts on as `manifest-error`; one that is declared
+  but not present in this checkout simply degrades to `unchecked`.
 
   That write also carries a **landing record, bound per slice repository** (E99-F102):
   `tasks-lock.py set-status <id> done --evidence <repo>=<ref>`, repeated **once per slice
@@ -419,6 +421,52 @@ set `done` prematurely while a slice or the integration gate is red):
   decision table, including what happens when the check is impossible.
 - **Failure** — if the integration command exits **non-zero**, keep the feature out of
   `done` and surface the integration failure.
+
+## Promoting a single install to a coordinator
+
+`--from-manifest <file>` is umbrella mode only: combined with `--umbrella <dir>` it
+promotes an existing **single install** at `<dir>` into a coordinator, using the Planner's
+draft manifest (`<dir>/.harness/umbrella.manifest.draft.yaml`). The target must already
+hold an install (`<dir>/.harness/.harness-version`). The draft is never a switch on its
+own: only the flag enters promotion mode. Promotion fails closed when the draft is
+missing or unreadable, when it has no non-empty top-level `repos:` mapping, and when an
+entry's path escapes the umbrella, is not a direct child, or names an existing path that
+is not a git work tree.
+
+Promotion **re-bases** each draft entry's `path:` from the draft file's own directory to
+the **umbrella root**: `../<key>` in the draft becomes `./<key>` in the live manifest,
+and the entry's `init`, `test_command`, `delegate_cmd` and optional `scaffold_cmd` are
+carried over unchanged.
+
+Promotion requires that each entry key equal the child directory basename and match
+`[a-z0-9-]+`. Coordinator dispatch still supports a key that is not a directory name, but
+promotion requires the aligned shape, because the reused cascade discovers children by
+directory name. When an entry's path is outside the umbrella, is not a direct child, or
+its basename does not equal the key, the run aborts and names the path and the remedy:
+**rename** the directory to the key, or re-run `/sdd-plan` to reconcile the draft.
+
+Promotion creates each missing child and runs `git init` locally. Promotion is **local
+git** only: it never adds a remote, and the remote work the human still **owes** (a GitHub
+remote, branch protection, Codex App) is theirs to do separately. The entry's optional
+`scaffold_cmd` is **opaque**: the harness never interprets it, and only promotion runs it,
+inside a child promotion just created. A non-zero `scaffold_cmd` prints a warning naming
+the child and the command, and the run continues.
+
+Promotion seeds the live `<dir>/umbrella.manifest.yaml` with one `repos:` entry per
+declared deployable, without overwriting an entry that already exists under `repos:`.
+Run promotion before a plain `--umbrella` cascade on the same root: a plain cascade writes
+its own TODO-placeholder entries, and promotion then preserves those instead of filling
+in the draft's fields. `--dry-run` previews the promotion and writes nothing;
+`--shared-repo` composes with promotion.
+
+The existing **landing audit** is the only git-state gate: it exits `3` naming each target
+whose harness-owned paths are unlanded, and it commits nothing. A target that is already
+dirty — including the uncommitted state a previous promotion left — stays promotable:
+promotion adds no separate dirty-tree refusal.
+
+The promoted root keeps its own board. `.harness/state/tasks.json`, `specs/`, `progress/`
+and config values are carried over unchanged, so the root's board remains the umbrella
+board; promotion writes no child-local board.
 
 ## Manifest reference
 See `umbrella.manifest.example.yaml`. One entry per child repo under `repos:`, each
