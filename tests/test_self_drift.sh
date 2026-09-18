@@ -39,7 +39,22 @@ glue_diff() {
   diff -r "$1/.claude/commands" "$SRC/.claude/commands" 2>&1 || true
   diff -r "$1/.codex/agents" "$SRC/.codex/agents" 2>&1 || true
   diff -r "$1/.agents/skills" "$SRC/.agents/skills" 2>&1 || true
+  diff -r "$1/.opencode/command" "$SRC/.opencode/command" 2>&1 || true
+  diff -r "$1/.opencode/agent" "$SRC/.opencode/agent" 2>&1 || true
+  # `-u` so the OpenCode FILE diff names its path in the header; a bare `diff` of two files
+  # prints only the hunks, and the R1 gate-red arm asserts the path is named.
+  diff -u "$1/opencode.json" "$SRC/opencode.json" 2>&1 || true
   diff "$1/.escalation-arming" "$SRC/.escalation-arming" 2>&1 || true
+}
+
+# The green fixture inherits `opencode.json` through the `"$SRC"/*` glob; drop it (and any
+# `.opencode/` a future fixture might copy) before `--self`. This is the falsifiability
+# condition for the OpenCode arm: without it, the regenerated-vs-committed comparison is
+# green against a stale committed artifact and proves the repo's state, not the code
+# (`progress/lessons.md` 2026-09-05, copied-fixture).
+purge_inherited_opencode() {
+  rm -f "$1/opencode.json"
+  rm -rf "$1/.opencode"
 }
 
 # ── R1 gate-green: emitters and committed glue are in sync RIGHT NOW ──────────
@@ -49,6 +64,8 @@ F="$(fixture green)"
 # exactly this way in mutation testing).
 rm -f "$F/.claude/.glue-manifest"
 rm -rf "$F/.codex/agents" "$F/.agents/skills"
+# R6/R1 falsifiability: the OpenCode glue must be REGENERATED, not inherited.
+purge_inherited_opencode "$F"
 sh "$F/harness-install.sh" --self >"$T/out1.txt" 2>&1 \
   || { cat "$T/out1.txt" >&2; fail "--self exited non-zero"; }
 _d="$(glue_diff "$F")"
@@ -67,9 +84,27 @@ printf '%s\n' "$_d" | grep -q "MUTATED" \
   || fail "an emitter edit did not surface in the comparison — the gate cannot catch divergence (R1)"
 pass "an emitter edit without regeneration is caught by the same comparison (R1) [gate_red]"
 
+# ── R6 gate-red: an OPENCODE emitter edit without regeneration is caught too ──
+# Emitter-specific: this mutates gen_opencode_json's orchestrator description, so only
+# the OpenCode-owned opencode.json can carry the divergence. Asserting both the token and
+# the PATH is what proves the comparison reaches the OpenCode surface (a .claude-only
+# gate would red on the OTHER arm's mutation and stay silent here).
+O="$(fixture opencode-red)"
+purge_inherited_opencode "$O"
+sed 's/The Leader: routes the next task, delegates\./The MUTATED OpenCode Leader: routes the next task, delegates./' \
+  "$O/harness-install.sh" > "$O/harness-install.sh.t" && mv "$O/harness-install.sh.t" "$O/harness-install.sh"
+grep -q "MUTATED OpenCode Leader" "$O/harness-install.sh" || fail "setup: OpenCode emitter mutation did not apply"
+sh "$O/harness-install.sh" --self >/dev/null 2>&1 || fail "mutated OpenCode --self exited non-zero"
+_d="$(glue_diff "$O")"
+printf '%s\n' "$_d" | grep -q "MUTATED OpenCode Leader" \
+  || fail "an OpenCode emitter edit did not surface in the comparison — the gate cannot catch OpenCode divergence (R6)"
+printf '%s\n' "$_d" | grep -q "opencode.json" \
+  || fail "the OpenCode drift diff does not name opencode.json — the gate cannot attribute the divergence (R6)"
+pass "an OpenCode emitter edit without regeneration is caught and named (R6) [opencode_gate_red]"
+
 # ── R2: the manifest ledger ───────────────────────────────────────────────────
 [ -f "$F/.claude/.glue-manifest" ] || fail "no .glue-manifest after --self (R2)"
-for _must in .claude/agents/builder.md .claude/commands/sdd-next.md .codex/agents/builder.toml .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml .escalation-arming; do
+for _must in .claude/agents/builder.md .claude/commands/sdd-next.md .codex/agents/builder.toml .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml .escalation-arming opencode.json .opencode/command/sdd-next.md .opencode/command/sdd-test-concurrency.md .opencode/agent/pr-fixer.md; do
   grep -q " $_must\$" "$F/.claude/.glue-manifest" || fail "manifest misses $_must (R2)"
 done
 grep -q "glue-manifest" "$F/.claude/.glue-manifest" && fail "manifest lists itself (R2)"
@@ -101,8 +136,11 @@ grep -q "diverges from its --self manifest" "$T/init-nomani.txt" \
   && fail "staleness warn fired with no manifest present (R3)"
 pass "silent when clean and when the manifest is absent (R3) [warn_silent]"
 
-# E29-F01 R7: each native artifact class participates in the existing manifest.
-for _path in .codex/agents/builder.toml .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml; do
+# E29-F01 R7 + E31-F02 R6: each native artifact class participates in the existing
+# manifest, and (F02) so does every OpenCode-owned file. The OpenCode paths are asserted
+# here AND in the R2 ledger loop above, so a gate that only compares bytes without a
+# manifest entry (or vice versa) cannot pass on one surface alone.
+for _path in .codex/agents/builder.toml .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml opencode.json .opencode/command/sdd-next.md .opencode/agent/pr-fixer.md; do
   _case="$(fixture native-drift)"
   sh "$_case/harness-install.sh" --self >/dev/null 2>&1 || fail "native drift setup failed"
   [ -f "$_case/$_path" ] || fail "native drift precondition missing $_path"

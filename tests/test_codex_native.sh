@@ -3,7 +3,7 @@
 set -eu
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 python3 - "$SRC" <<'PY'
-import hashlib, os, pathlib, re, shutil, subprocess, sys, tempfile, tomllib
+import hashlib, json, os, pathlib, re, shutil, subprocess, sys, tempfile, tomllib
 src=pathlib.Path(sys.argv[1])
 roles={'orchestrator','architect','builder','builder-heavy','reviewer','scout','doc-critic'}
 cmds={'sdd-new','sdd-plan','sdd-drill','sdd-next','sdd-fix','sdd-fix-parallel'}
@@ -21,10 +21,15 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     def source(name,clean=True):
         p=root/name;shutil.copytree(src,p,ignore=shutil.ignore_patterns('.git','node_modules','scratchpad','__pycache__'))
         if clean:
-            for rel in ('.claude/agents','.claude/commands','.codex/agents','.agents/skills'):
+            for rel in ('.claude/agents','.claude/commands','.codex/agents','.agents/skills','.opencode'):
                 shutil.rmtree(p/rel,ignore_errors=True)
             (p/'.claude/.glue-manifest').unlink(missing_ok=True)
             (p/'.escalation-arming').unlink(missing_ok=True)
+            # F02: `opencode.json` is root-level generated glue. Delete it too, so a
+            # `--self` run must GENERATE it rather than inherit the committed copy (a
+            # copied fixture inherits the artifact under test, progress/lessons.md
+            # 2026-09-05) and so a narrowed selection can be asserted to leave none.
+            (p/'opencode.json').unlink(missing_ok=True)
         return p
     def snapshot(p):
         return {str(f.relative_to(p)):('link',os.readlink(f)) if f.is_symlink() else ('file',hashlib.sha256(f.read_bytes()).hexdigest()) for f in p.rglob('*') if f.is_file() or f.is_symlink()}
@@ -43,22 +48,32 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     run(p,None,'--self'); native(p); assert (p/'.claude/commands/sdd-next.md').exists()
     assert (p/'harness.config.yaml').read_bytes()==seed and (p/'AGENTS.md').read_bytes()==canonical
     before=snapshot(p);run(p,None,'--self');assert snapshot(p)==before,'self second run changed bytes'
-    for selection,claude,codex in [('claude',True,False),('codex',False,True),('claude,codex',True,True),('all',True,True),('host',False,True)]:
+    for selection,claude,codex,opencode in [('claude',True,False,False),('codex',False,True,False),('opencode',False,False,True),('claude,codex',True,True,False),('all',True,True,True),('host',False,True,False)]:
         q=source('select-'+selection.replace(',','-'));run(q,None,'--self','--agents='+selection,extra={'HARNESS_HOST_AGENT':'codex'} if selection=='host' else {})
         assert (q/'.claude/commands/sdd-next.md').exists()==claude
         assert (q/'.codex/agents/builder.toml').exists()==codex
+        # F02 R1: OpenCode is now a first-class `--self` target, generated not inherited
+        # (source() deletes it), so a narrowed selection must actually leave it absent.
+        assert (q/'.opencode/command/sdd-next.md').exists()==opencode
+        assert (q/'opencode.json').exists()==opencode
         if codex:native(q)
-    for selection in ('gemini','antigravity','opencode'):
+    # F02 R9: `--agents=host` resolves an OpenCode session to the OpenCode surface.
+    q=source('select-host-opencode');run(q,None,'--self','--agents=host',extra={'HARNESS_HOST_AGENT':'opencode'})
+    assert (q/'.opencode/command/sdd-next.md').exists() and (q/'opencode.json').exists()
+    assert not (q/'.claude/commands/sdd-next.md').exists() and not (q/'.codex/agents/builder.toml').exists()
+    for selection in ('gemini','antigravity'):
         before=snapshot(p);run(p,None,'--self','--agents='+selection,ok=False);assert snapshot(p)==before
-    before=snapshot(p);run(p,None,'--self','--agents=host',extra={'HARNESS_HOST_AGENT':'opencode'},ok=False);assert snapshot(p)==before
     print('ok - self_selection_and_paths (R5)')
     # Model-only overrides are independent of seed settings and the other host.
     q=source('models');shutil.copytree(src/'.claude/agents',q/'.claude/agents',dirs_exist_ok=True)
-    run(q,None,'--self')
+    # F02 H2: these arming assertions are about Codex model routing. Pin the selection to
+    # claude,codex so a bare `--self` (which now also selects OpenCode) cannot make the
+    # conservative AND `blocked` for an unrelated reason.
+    run(q,None,'--self','--agents=claude,codex')
     claude_models={r:re.findall(r'^model: (.+)$',(q/f'.claude/agents/{r}.md').read_text(),re.M) for r in roles}
     for role,model in [('builder','gpt-5.6-sol'),('builder-heavy','gpt-6-astra')]:
         f=q/f'.codex/agents/{role}.toml';f.write_text(f.read_text().replace('developer_instructions =',f'model = "{model}"\ndeveloper_instructions ='))
-    run(q,None,'--self')
+    run(q,None,'--self','--agents=claude,codex')
     assert tomllib.loads((q/'.codex/agents/builder.toml').read_text())['model']=='gpt-5.6-sol'
     assert tomllib.loads((q/'.codex/agents/builder-heavy.toml').read_text())['model']=='gpt-6-astra'
     assert 'model' not in tomllib.loads((q/'.codex/agents/scout.toml').read_text())
@@ -98,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
             external=root/'arming-role-external';external.write_bytes(f.read_bytes());f.unlink();f.symlink_to(external);before=external.read_bytes()
         else:
             external=root/'arming-parent-external';shutil.move(str(f.parent),str(external));f.parent.symlink_to(external,target_is_directory=True);before=snapshot(external)
-        run(r,None,'--self')
+        run(r,None,'--self','--agents=claude,codex')
         verdict=(r/'.escalation-arming').read_text()
         if role=='scout':assert verdict.startswith('armed\n') and 'codex=raise' in verdict,verdict
         else:assert verdict.startswith('blocked\n') and 'codex=unstamped' in verdict,verdict
@@ -110,7 +125,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
         assert subprocess.check_output(['cksum','.escalation-arming'],cwd=r,text=True).strip() in manifest
         # The blocked verdict and its ownership are stable after the protected file
         # has been excluded from the new manifest, not just on the first rejection.
-        snapshot_before=snapshot(r);run(r,None,'--self');assert snapshot(r)==snapshot_before
+        snapshot_before=snapshot(r);run(r,None,'--self','--agents=claude,codex');assert snapshot(r)==snapshot_before
     print('ok - source_model_and_collision_preservation (R6)')
     # Every Codex artifact class participates in actual source init drift diagnostics.
     for rel in ('.codex/agents/scout.toml','.agents/skills/sdd-next/SKILL.md','.agents/skills/sdd-next/agents/openai.yaml'):
@@ -227,7 +242,41 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
         install(old,'--agents=all','--pr-loop=true')
         for rel,content in golden.items():assert (old/rel).read_bytes()==content, 'retained old emission changed: '+rel
     print('ok - retained_host_and_seed_regression (R11)')
-    assert (src/'VERSION').read_text().strip()=='0.83.0' and not (src/'GEMINI.md').exists()
+    # F02 R9: the COMMITTED SOURCE-layout OpenCode glue must resolve /sdd-next and the
+    # builder-heavy + pr-fixer agents. The static assertions are mandatory; the live probe
+    # is gated on the binary and reports skipped where OpenCode is unavailable (CI).
+    oc=json.loads((src/'opencode.json').read_text())
+    assert 'builder-heavy' in oc.get('agent',{}) and oc['agent']['builder-heavy'].get('prompt')=='{file:./agents/builder-heavy.md}'
+    assert (src/'.opencode/command/sdd-next.md').is_file()
+    assert (src/'.opencode/agent/pr-fixer.md').is_file()
+    ocbin=shutil.which('opencode')
+    if ocbin:
+        # OpenCode installs runtime deps into `.opencode/` on first run, so the LIVE probe
+        # runs against an ISOLATED copy of the source layout — never the repository itself.
+        # Capture through a FILE, not a pipe: opencode truncates its JSON at 64 KiB when
+        # stdout is a pipe, which silently drops the `command` section this probe asserts.
+        probe=pathlib.Path(tempfile.mkdtemp(prefix='opencode-source-probe-'))
+        try:
+            for rel in ('opencode.json','AGENTS.md'):
+                if (src/rel).is_file(): shutil.copy2(src/rel,probe/rel)
+            (probe/'.opencode').mkdir(parents=True,exist_ok=True)
+            for rel in ('.opencode/command','.opencode/agent','agents'):
+                if (src/rel).is_dir(): shutil.copytree(src/rel,probe/rel)
+            def oc(*args):
+                fd,fn=tempfile.mkstemp(prefix='opencode-probe-');os.close(fd)
+                with open(fn,'w') as fh:
+                    subprocess.run([ocbin,*args],cwd=probe,stdout=fh,stderr=subprocess.STDOUT,timeout=120)
+                data=pathlib.Path(fn).read_text();os.unlink(fn);return data
+            agents=oc('agent','list')
+            assert 'builder-heavy (subagent)' in agents and 'pr-fixer (subagent)' in agents,agents
+            commands=oc('debug','config')
+            assert '"sdd-next"' in commands,'live opencode probe did not resolve /sdd-next'
+            print('ok - opencode_source_host_resolves (R9, live)')
+        finally:
+            shutil.rmtree(probe,ignore_errors=True)
+    else:
+        print('skip - live opencode probe unavailable; static source-layout assertions passed (R9)')
+    assert (src/'VERSION').read_text().strip()=='0.84.0' and not (src/'GEMINI.md').exists()
     a=(src/'AGENTS.md').read_text()
     for token in ('./init.sh','non-zero','STOP','harness.config.yaml','agents/orchestrator.md','progress/lessons.md','spec-ready','in-progress','independent Reviewer','chat history','telemetry','tokens','VERSION','CHANGELOG.md','MINOR','MAJOR','branch','PR','main'):
         assert token.lower() in a.lower(),token

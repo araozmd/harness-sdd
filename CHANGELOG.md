@@ -4,6 +4,33 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.84.0] — 2026-09-18
+
+### Added — the source repo's OpenCode glue is installer-generated (E31-F02)
+
+- **`harness-install.sh --self` now regenerates OpenCode source glue** (`opencode.json`,
+  `.opencode/command/*.md`, and `.opencode/agent/pr-fixer.md` while `pr_loop.enabled`),
+  running the existing OpenCode emitters through the same throwaway install as Claude and
+  Codex and transforming them to the source layout. `opencode` joins the default selection
+  (`claude,codex,opencode`), `--agents=all` maps to all three, and `gemini`/`antigravity`
+  stay refused.
+- **The committed `opencode.json` gains `builder-heavy`.** It had six hand-maintained
+  agents and omitted the escalation role, so escalation silently no-opped on OpenCode
+  (ADR-0002's failure). It is now a generated file owned per-file by the reconciler and
+  recorded in `.claude/.glue-manifest`, alongside each `.opencode/command/*.md` and
+  `.opencode/agent/pr-fixer.md`.
+- **Source OpenCode output is machine-independent.** `--self` neutralises the
+  `--with-opencode-parallel` capability flag, so `/sdd-test-concurrency` is always emitted
+  and neither the capability-gated `/sdd-fix-parallel` command nor the `.opencode-parallel`
+  marker can enter version control; output is byte-identical with and without the flag.
+- **Escalation arming no longer lies.** The `--self` arming loop skips front-ends with no
+  per-role Builder file, so a correctly written `opencode.json` is not published as
+  `opencode=unstamped`; the config-derived `opencode=neither` keeps the combined first line
+  `blocked` (the source seed pins no OpenCode model).
+- **E26-F02's drift gate covers OpenCode byte-for-byte** (`tests/test_self_drift.sh` now
+  diffs `opencode.json` and `.opencode/`), and `tests/test_source_shims.sh` retires its
+  `builder-heavy:opencode` / `pr-fixer:opencode` known gaps now that both are registered.
+
 ## [0.83.0] — 2026-09-18
 
 ### Added — installer promotion: a single install becomes an umbrella coordinator (E28-F03)

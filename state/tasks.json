@@ -1537,13 +1537,19 @@
         {
           "id": "E31-F02",
           "title": "The source repo's OpenCode glue is installer-generated: opencode.json, .opencode commands, and pr-fixer via --self",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
             "E31-F01"
           ],
-          "spec_path": "specs/epics/E31-opencode-first-class/F02-source-host-parity/"
+          "spec_path": "specs/epics/E31-opencode-first-class/F02-source-host-parity/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (206)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E31-F02 done --evidence <merge-ref>`",
+            "pr": "206"
+          }
         }
       ]
     }
