@@ -309,3 +309,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-17 E28-F02 pr-loop: round 13 returned 2 blocking findings (avoid duplicate topology ADR; allow critic fixes within the appended delta only). Human override — cap raised to 14.
 - 2026-09-17 E28-F02 pr-loop: round 14 returned 1 blocking finding (preserve logical keys across amendments). Human override — cap raised to 15.
 - 2026-09-17 E28-F02 pr-loop: round 15 returned 1 blocking finding (Driller must persist the discovered topology before handoff). Human override — cap raised to 16.
+- 2026-09-17 E28-F02 pr-loop: round 16 returned 2 blocking findings (path-only amendments; persist key assignments across a draft-deletion interval). Human override — cap raised to 17.
