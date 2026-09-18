@@ -1543,7 +1543,13 @@
           "depends_on": [
             "E31-F01"
           ],
-          "spec_path": "specs/epics/E31-opencode-first-class/F02-source-host-parity/"
+          "spec_path": "specs/epics/E31-opencode-first-class/F02-source-host-parity/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (206)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E31-F02 done --evidence <merge-ref>`",
+            "pr": "206"
+          }
         }
       ]
     }
