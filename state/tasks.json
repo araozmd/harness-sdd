@@ -975,7 +975,7 @@
         {
           "id": "E99-F162",
           "title": "models_block/workers_block terminate on the FIRST blank line after the anchor, so a symmetric blank-line reformat silently shrinks both extracts to one line and a real desync passes \u2014 add a length floor",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
