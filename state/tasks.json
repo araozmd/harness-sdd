@@ -1430,7 +1430,7 @@
         {
           "id": "E28-F02",
           "title": "Planner topology output: emit a repo-topology ADR + draft umbrella.manifest.yaml when specs/architecture.md names more than one deployable (nothing when it names one)",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
