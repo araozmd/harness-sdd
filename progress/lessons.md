@@ -418,3 +418,8 @@
   and `docs/WORKFLOW.md:811/837`. Before approving a semantics change, grep every surface that
   NAMES the artifact (`escalation-arming`, the verdict words) and each doc's EARLIER sections, not
   only the section the diff touched.
+- [2026-09-18 reviewer] The same sweep must also cover the EMITTED ROLE DESCRIPTIONS, which name no
+  artifact: `harness-install.sh` writes `builder-heavy`'s description ("differs only by the model
+  it resolves to") into every target's agent shim, and after E99-F163 a codex effort-only pair
+  differs by `model_reasoning_effort` alone — stale, shipped, and pinned by no test (E99-F163 N4).
+  When a verdict's axes move, grep the `emit_agent` strings alongside the docs.

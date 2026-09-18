@@ -327,3 +327,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-18 E99-F162 merged in PR #208 at e9912b7 after a 5-round Codex review loop (1→1→1→1→0). Marked done with verified ancestor evidence; 4 threads resolved. The fix ended as a semantic mapping comparison + non-comment structural bound + kept byte-cmp (floor/end-marker retired).
 - 2026-09-18 E99-F163 Orchestrator: autonomous sdd:false fix; set in-progress and spawning Builder.
 - 2026-09-18 E99-F163 build round 1 -> Reviewer REJECT (prose-only: F1a-F1e unchanged operator-facing surfaces); back to in-progress.
+- 2026-09-18 E99-F163 build round 2 -> Reviewer APPROVE at 7a57895 (prose-only round: F1a-F1e all fixed and each pinned; both round-1 survivors R8/R11 now RED; 21 kills / 0 survived / 2 controls; code byte-unchanged from round 1; seed twin byte-identical; 50/50 suites green bash-scoped on neutral disk TMPDIR; change-size `ok`). Ready for the Orchestrator to set `done` and open the PR.
