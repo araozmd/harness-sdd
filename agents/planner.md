@@ -83,12 +83,14 @@ names more than one deployable, write exactly one `repo-topology ADR` at
 `ADR-NNNN` id. Also write a draft manifest at `umbrella.manifest.draft.yaml` in the
 harness directory (`.harness/umbrella.manifest.draft.yaml` in an installed target).
 
-The draft has one `repos:` entry per deployable, keyed by the repo/dir name, each with
-`path`, `init`, `test_command`, `delegate_cmd` (empty string), and optionally the
+The draft has one `repos:` entry per deployable, each with a coordinator-safe logical
+key, `path`, `init`, `test_command`, `delegate_cmd` (empty string), and optionally the
 `scaffold_cmd` runner key that is optional and opaque: the harness never interprets it
-and only the E28-F03 promotion runs it. Write each `path` relative to the draft file's own directory
-(the child sibling). The draft's header must
-mark it a `DRAFT` and state that it is `inert`.
+and only the E28-F03 promotion runs it. The entry key is a logical name, not the
+directory name: it must match `[A-Za-z0-9_-]+` (normalize a dotted dir such as `api.v2`
+to `api_v2`) while `path` carries the actual directory (`path: ../api.v2`). Write each
+`path` relative to the draft file's own directory (the child sibling). The draft's header
+must mark it a `DRAFT` and state that it is `inert`.
 
 The draft is inert and is not the switch: never set or change `umbrella.manifest` in
 `harness.config.yaml`, and never write `umbrella.manifest.yaml`, so the draft's presence
@@ -99,8 +101,14 @@ When `specs/architecture.md` names exactly one deployable (or none), write neith
 `repo-topology ADR` nor an `umbrella.manifest.draft.yaml`.
 
 The Planner is the single writer of the draft manifest. `/sdd-drill` never creates or
-amends `umbrella.manifest.draft.yaml`; a topology change is a `/sdd-plan` amend that
-reconciles the draft.
+amends `umbrella.manifest.draft.yaml`; a topology change is a `/sdd-plan` amend that is
+**append-only** and reconciles the draft.
+
+An amendment is **append-only**: it appends a dated `## Repo topology` delta section to
+`specs/architecture.md` and a new `repo-topology ADR` above the max existing ADR number,
+instead of rewriting the original section. Read the topology trigger from the **union**
+of the original architecture and every appended topology delta, so an amendment that
+adds a deployable still clears the trigger and reconciles the draft.
 
 ## Seed the draft epics (R11, R12)
 

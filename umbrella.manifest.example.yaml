@@ -10,6 +10,11 @@
 # undispatchable: the coordinator must refuse to dispatch it and report an error that
 # names the missing repo.
 #
+# Each `repos:` key is a coordinator-safe logical name matching [A-Za-z0-9_-]+ (that is
+# the value a slice's `repo` carries). Put the actual directory/repo name in `path:`: a
+# dotted directory key would be refused as `malformed repos entry`, so key `api_v2` with
+# `path: ../api.v2`.
+#
 # `path:` is resolved relative to THIS manifest file's own directory (the umbrella
 # root), NOT relative to .harness/. (The `umbrella.manifest` value in
 # harness.config.yaml is the one resolved relative to .harness/ — two different bases,

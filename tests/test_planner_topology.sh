@@ -15,6 +15,9 @@
 #   R8  the emitted /sdd-plan body + both source-mode artifacts carry the same step
 #   R9  umbrella.manifest.example.yaml + docs/UMBRELLA.md document scaffold_cmd
 #   R10 the Planner is the single writer; /sdd-drill does not amend the draft
+#   R11 an amend records a topology change append-only (dated `## Repo topology`
+#       delta + new ADR) and reads the trigger from the union of original + appended,
+#       so an amendment that adds a deployable still produces the draft
 #
 # House rules (see progress/lessons.md; all are load-bearing here):
 #   * Every span is extracted STRUCTURALLY (a `## ` heading → the next `## `; the
@@ -192,6 +195,19 @@ for _r2_pair in "R2 role|$ROLE_FOLD" "R2 body|$BODY_FOLD"; do
   grep -qiE 'one[^.]{0,40}per deployable' "$_r2_f" \
     || fail "$_r2_lbl: the shape sentence does not state one entry per deployable — 'a manifest' without the per-deployable rule would pass"
 done
+# Coordinator grammar (Reviewer finding 4042914423): the coordinator's manifestRepos()
+# accepts a key only through `[A-Za-z0-9_-]+`, so keying an entry by a dotted directory
+# (`api.v2`) yields `malformed repos entry`. The contract must name a coordinator-safe
+# logical key and put the actual directory in `path`. Bounded to the sentence naming
+# `logical name`, so the entry-field list elsewhere cannot satisfy it. Asserted on every
+# surface the step lives on — a hand-edit that drops it on the executable body alone is
+# the divergence ADR-0003's one-body rule forbids (same lesson as R8's full anchor set).
+for _r2k_pair in "R2 role key grammar|$ROLE_FOLD" "R2 emitted body key grammar|$BODY_FOLD" \
+                 "R2 .claude/commands key grammar|$CMD_FOLD" "R2 .agents/skills key grammar|$SKILL_FOLD"; do
+  _r2k_lbl="${_r2k_pair%%|*}"; _r2k_f="${_r2k_pair#*|}"
+  every_naming_sentence_carries "$_r2k_lbl" "$_r2k_f" "logical name" \
+    '[A-Za-z0-9_-]+' 'directory' 'path'
+done
 pass "R2 role + body name the draft and its per-deployable key set [test_role_and_body_name_the_draft_and_keys]"
 
 # ── R3: exactly one deployable writes neither artifact ─────────────────────────
@@ -368,13 +384,39 @@ every_naming_sentence_carries "R10 role" "$ROLE_FOLD" "/sdd-drill" "never" "amen
 # the /sdd-drill clause above: that clause's `amend` is a substring of `amends`, so
 # deleting the whole re-plan clause would stay green without this line. The sentence
 # naming `topology change` is required to carry `/sdd-plan`, not just `amend`.
-every_naming_sentence_carries "R10 role re-plan" "$ROLE_FOLD" "topology change" "/sdd-plan" "amend"
+every_naming_sentence_carries "R10 role re-plan" "$ROLE_FOLD" "topology change" "/sdd-plan" "amend" "append-only" "reconciles the draft"
 [ -f "$DRILLER" ] || fail "R10: $DRILLER is missing"
 # Positive control FIRST (the Planner-side rule above), then the absence check.
 if grep -qF 'umbrella.manifest.draft.yaml' "$DRILLER"; then
   fail "R10: agents/driller.md names umbrella.manifest.draft.yaml — the Driller must not touch the draft (the Planner is its single writer)"
 fi
 pass "R10 Planner is single writer; driller.md does not amend the draft [test_drill_does_not_amend_draft]"
+
+# ── R11: the amend path is append-only and can still produce the draft ─────────
+# test_amend_is_append_only
+# A topology change is a `/sdd-plan` amend (R10), but the amend contract is append-only
+# and never rewrites the original `specs/architecture.md`. Without an appended
+# `## Repo topology` delta plus a trigger that reads the union of the original and the
+# appended decisions, the documented path re-reads the original one-deployable
+# architecture and writes neither artifact — the defect this pins (Reviewer finding
+# 4042914412). Each check is bounded to a sentence that only this rule carries, so the
+# step-8 `append-only` remark cannot satisfy it.
+guard "R11 role" "$ROLE_SPAN" 8
+guard "R11 body" "$BODY_SPAN" 20
+for _r11_pair in "R11 role|$ROLE_FOLD" "R11 emitted body|$BODY_FOLD" \
+                 "R11 .claude/commands|$CMD_FOLD" "R11 .agents/skills|$SKILL_FOLD"; do
+  _r11_lbl="${_r11_pair%%|*}"; _r11_f="${_r11_pair#*|}"
+  # (1) The topology-change sentence itself is append-only and reconciles the draft.
+  every_naming_sentence_carries "$_r11_lbl change" "$_r11_f" "topology change" \
+    "/sdd-plan" "amend" "append-only" "reconciles the draft"
+  # (2) The append-only mechanism: a dated `## Repo topology` delta + a new ADR.
+  every_naming_sentence_carries "$_r11_lbl delta" "$_r11_f" "## Repo topology" \
+    "append-only" "dated" "delta" "specs/architecture.md" "ADR"
+  # (3) The trigger reads the union of the original architecture + appended deltas.
+  every_naming_sentence_carries "$_r11_lbl union" "$_r11_f" "union" \
+    "original" "appended" "trigger"
+done
+pass "R11 amended topology change is append-only + the union trigger can produce the draft [test_amend_is_append_only]"
 
 # ── Fixture plan run (R2, R4, R9) — install-free, absolute manifest paths ──────
 # test_fixture_plan_run_draft_shape_and_inertness
@@ -386,7 +428,7 @@ mkdir -p "$PLAN/specs" "$PLAN/state"
 cat > "$PLAN/specs/architecture.md" <<'MD'
 # Architecture (fixture)
 
-Three deployables: `bff`, `web`, and `api`, each its own repository.
+Three deployables: `bff`, `web`, and `api.v2`, each its own repository.
 
 ## ADR index
 - ADR-0001 — fixture
@@ -409,8 +451,8 @@ repos:
     init: ./init.sh
     test_command: "npm test"
     delegate_cmd: ""
-  api:
-    path: ../api
+  api_v2:
+    path: ../api.v2
     init: ./init.sh
     test_command: "pytest"
     delegate_cmd: ""
@@ -488,11 +530,15 @@ for ln in lines:
     if m and cur:
         repos[cur][m.group(1)] = m.group(2)
 assert len(repos) >= 3, "extracted %d repos, want >= 3" % len(repos)
-assert set(repos) == {"bff", "web", "api"}, sorted(repos)
+assert set(repos) == {"bff", "web", "api_v2"}, sorted(repos)
 for r, f in repos.items():
     for need in ("path", "init", "test_command", "delegate_cmd"):
         assert need in f, "repo %s missing %s" % (r, need)
     assert f["path"].startswith("../"), "repo %s path %r is not relative to the draft's own dir" % (r, f["path"])
+# The coordinator grammar: the key is a logical name in [A-Za-z0-9_-]+, never the raw
+# dotted directory; the actual directory lives in `path` (Reviewer finding 4042914423).
+assert repos["api_v2"]["path"] == "../api.v2", \
+    "the dotted directory must live in path, not the key (got key=api_v2 path=%r)" % repos["api_v2"]["path"]
 print("ok %d repos" % len(repos))
 PY
 # The draft's header must mark it DRAFT and inert.
