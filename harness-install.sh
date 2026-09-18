@@ -7815,6 +7815,15 @@ promotion_normalize_path() {
 #   result to be a DIRECT child of <umbrella-root> whose basename equals <key> and matches
 #   ^[a-z0-9-]+$. Prints the normalized absolute child path, or fails. Never prints a path
 #   that escapes the umbrella. Internal companion of promotion_rebase_path.
+#
+#   For an EXISTING child the lexical check is not enough: `<umbrella>/<key>` may itself be
+#   a SYMLINK whose target lives outside the umbrella, in which case the lexical parent
+#   still reads as the umbrella and the existing-child check follows the link. Promotion's
+#   fail-closed guarantee is about physical location, so an existing directory is resolved
+#   with `cd`/`pwd -P` and its PHYSICAL parent must be the umbrella root too. (A missing
+#   child has no physical target to resolve.) The cascade deliberately supports symlinked
+#   children (E24-F03); promotion, which promises not to write outside the umbrella, does
+#   not.
 promotion_resolve_child() {
   _prc_dir="$1"; _prc_umb="$2"; _prc_key="$3"; _prc_path="$4"
   printf '%s' "$_prc_key" | grep -Eq '^[a-z0-9-]+$' || return 1
@@ -7823,6 +7832,10 @@ promotion_resolve_child() {
   _prc_parent="${_prc_res%/*}"
   [ "$_prc_base" = "$_prc_key" ] || return 1
   [ "$_prc_parent" = "$_prc_umb" ] || return 1
+  if [ -d "$_prc_res" ]; then
+    _prc_phys="$(CDPATH= cd -- "$_prc_res" 2>/dev/null && pwd -P)" || return 1
+    [ "${_prc_phys%/*}" = "$_prc_umb" ] || return 1
+  fi
   printf '%s\n' "$_prc_res"
 }
 
@@ -8338,9 +8351,12 @@ if [ "$DRY_RUN" = 1 ] && [ "$PROMOTION_READY" = 1 ]; then
     if [ ! -e "$_pd_child" ]; then
       echo "would create child: $_pd_key"
       echo "would git init $_pd_key"
-    fi
-    if [ "$_pd_scaffold" != '""' ] && [ -n "$_pd_scaffold" ]; then
-      echo "would run scaffold_cmd: $_pd_key"
+      # scaffold_cmd is previewed only for a child that would be created, mirroring the
+      # apply step (which runs it only inside the missing-child branch). Previewing it for
+      # a pre-existing child would report an action the real run explicitly skips.
+      if [ "$_pd_scaffold" != '""' ] && [ -n "$_pd_scaffold" ]; then
+        echo "would run scaffold_cmd: $_pd_key"
+      fi
     fi
     echo "would re-base path: $_pd_key"
   done <<PROM_PREVIEW

@@ -431,7 +431,9 @@ hold an install (`<dir>/.harness/.harness-version`). The draft is never a switch
 own: only the flag enters promotion mode. Promotion fails closed when the draft is
 missing or unreadable, when it has no non-empty top-level `repos:` mapping, and when an
 entry's path escapes the umbrella, is not a direct child, or names an existing path that
-is not a git work tree.
+is not a git work tree. The gate is physical: an existing child that is a symlink resolving
+outside the umbrella is refused, so promotion never installs into a repository the umbrella
+does not physically contain.
 
 Promotion **re-bases** each draft entry's `path:` from the draft file's own directory to
 the **umbrella root**: `../<key>` in the draft becomes `./<key>` in the live manifest,

@@ -171,6 +171,10 @@ test_promotion_docs_contract() {
   require_sentence_pair "R1 re-base"  "$_umb" "re-base"  "path" "umbrella root"
   require_sentence_pair "R1 local-git" "$_umb" "local git" "remote" "owes"
   require_sentence_pair "R1 fail-closed" "$_umb" "fails closed" "repos:" "fails closed"
+  # the physical/symlink boundary: the sentence naming `physical` carries both `symlink`
+  # and `outside`, so a pre-existing child resolving outside the umbrella is documented as
+  # refused. Dropping/moving the sentence reds (no sentence names `physical`).
+  require_sentence_pair "R1 physical" "$_umb" "physical" "symlink" "outside"
   require_sentence_pair "R1 key-align" "$_umb" "promotion requires" "directory" "promotion requires"
   require_sentence_pair "R1 remedy"   "$_umb" "remedy"   "rename" "/sdd-plan"
   require_sentence_pair "R1 scaffold-opaque" "$_umb" "scaffold_cmd" "opaque" "only promotion"
@@ -384,6 +388,38 @@ test_path_gates_fail_closed() {
   grep -qF 'rename' "$T/r4-regfile.out" "$T/r4-regfile.err" || fail "R4 (regfile): refusal omits the 'rename' remedy"
   grep -qF '/sdd-plan' "$T/r4-regfile.out" "$T/r4-regfile.err" || fail "R4 (regfile): refusal omits the '/sdd-plan' remedy"
 
+  # existing child that is a SYMLINK to a git work tree OUTSIDE the umbrella. The lexical
+  # parent check reads `<umbrella>/alpha` and accepts it, and the existing-child check
+  # follows the link (the external repo has `.git`), so without a PHYSICAL resolution the
+  # cascade installs into the external repository despite promotion's fail-closed
+  # guarantee. The external target has `.git` but NO `.harness`: any `.harness` under it can
+  # only have come from promotion following the link.
+  _sy_out="$T/r4-symlink-outside"; _sy="$T/r4-symlink"
+  _syd="$_sy/.harness/umbrella.manifest.draft.yaml"
+  build_single "$_sy"
+  mkdir -p "$_sy_out"
+  ( cd "$_sy_out" && git init -q ) >/dev/null 2>&1 \
+    || fail "R4 (symlink) setup: external git init failed"
+  ls -A "$_sy_out" > "$T/r4-symlink-outside.before"
+  { printf 'repos:\n'; printf '%b' "  alpha:\n    path: ../alpha\n    init: ./init.sh\n    test_command: \"\"\n    delegate_cmd: \"\"\n"; } > "$_syd"
+  ln -s "$_sy_out" "$_sy/alpha"
+  _sy_rc="$(promote "$_sy" "$_syd" "$T/r4-symlink.out" "$T/r4-symlink.err")"
+  # The REAL symptom first: a refused gate writes nothing, so the external target must be
+  # untouched. Asserted before the wording checks so a mutant's kill names the write-outside
+  # failure, not a secondary message mismatch (the external target has `.git` but no
+  # `.harness`, so any `.harness` there came from promotion following the link).
+  [ ! -e "$_sy_out/.harness" ] \
+    || fail "R4 (symlink): promotion followed the symlink and installed into the external work tree — it must never write outside the umbrella"
+  [ "$_sy_rc" != "0" ] \
+    || fail "R4 (symlink): a child symlinked outside the umbrella was accepted (rc=$_sy_rc) — the path gate is lexical, not physical"
+  [ "$_sy_rc" != "3" ] \
+    || fail "R4 (symlink): the run reached the landing audit (rc=3) instead of refusing at the physical path gate (want rc=1)"
+  grep -qF '../alpha' "$T/r4-symlink.out" "$T/r4-symlink.err" \
+    || fail "R4 (symlink): the refusal does not name the offending draft path '../alpha'"
+  ls -A "$_sy_out" > "$T/r4-symlink-outside.now"
+  cmp -s "$T/r4-symlink-outside.before" "$T/r4-symlink-outside.now" \
+    || fail "R4 (symlink): a refused promotion modified the external work tree"
+
   # Positive control: the aligned ../<key> shape on a SEPARATE fixture IS accepted and the
   # child appears — the refusals above are not satisfied by every run failing.
   _u="$T/r4-valid"; _d="$_u/.harness/umbrella.manifest.draft.yaml"
@@ -529,6 +565,47 @@ test_dry_run_writes_nothing() {
   pass "--dry-run previews create/git-init/scaffold/re-base and writes nothing; real run writes (R8) [test_dry_run_writes_nothing]"
 }
 test_dry_run_writes_nothing
+
+# ── R8: the scaffold preview is gated on the child being CREATED ───────────────
+# The apply step runs scaffold_cmd only inside its missing-child branch, so the preview
+# must do the same. A pre-existing git child with a non-empty scaffold_cmd must produce NO
+# `would run scaffold_cmd` line (otherwise --dry-run reports an action the real run
+# explicitly skips); a missing child with the same field must still be previewed.
+test_dry_run_scaffold_preview_only_for_missing() {
+  _u="$T/r8-scaffold"; _d="$_u/.harness/umbrella.manifest.draft.yaml"
+  build_single "$_u"
+  # alpha exists as a real local git work tree (so the pre-pass accepts it as an existing
+  # child); beta does not exist.
+  mkdir -p "$_u/alpha"
+  ( cd "$_u/alpha" && git init -q ) >/dev/null 2>&1 \
+    || fail "R8 scaffold preview setup: alpha git init failed"
+  {
+    printf 'repos:\n'
+    printf '%b' "  alpha:\n    path: ../alpha\n    init: ./init.sh\n    test_command: \"\"\n    delegate_cmd: \"\"\n    scaffold_cmd: \"echo existing-child > scaffold-alpha\"\n"
+    printf '%b' "  beta:\n    path: ../beta\n    init: ./init.sh\n    test_command: \"\"\n    delegate_cmd: \"\"\n    scaffold_cmd: \"echo missing-child > scaffold-beta\"\n"
+  } > "$_d"
+  _rc=0
+  sh "$INSTALL" --umbrella "$_u" --from-manifest "$_d" --dry-run \
+    >"$T/r8-scaffold.out" 2>"$T/r8-scaffold.err" || _rc=$?
+  [ "$_rc" = "0" ] || fail "R8 scaffold preview: --dry-run exited $_rc (want 0)"
+  # fixture shape positive control: beta is missing and alpha is not.
+  grep -qF 'would create child: beta' "$T/r8-scaffold.out" \
+    || fail "R8 scaffold preview: the missing child 'beta' was not previewed for creation"
+  if grep -qF 'would create child: alpha' "$T/r8-scaffold.out"; then
+    fail "R8 scaffold preview: the pre-existing child 'alpha' was previewed for creation"
+  fi
+  # the discriminating assertion: alpha's non-empty scaffold_cmd must NOT be previewed.
+  if grep -qF 'would run scaffold_cmd: alpha' "$T/r8-scaffold.out"; then
+    fail "R8 scaffold preview: a pre-existing git child got a 'would run scaffold_cmd' preview — the preview drifted from the apply condition (apply runs it only for a created child)"
+  fi
+  # positive control: the missing child's non-empty scaffold_cmd IS previewed, so the
+  # absence above is not satisfied by the preview dropping the line entirely.
+  grep -qF 'would run scaffold_cmd: beta' "$T/r8-scaffold.out" \
+    || fail "R8 scaffold preview positive control: the missing child's scaffold_cmd was not previewed"
+  [ ! -e "$_u/beta" ] || fail "R8 scaffold preview: --dry-run wrote the missing child"
+  pass "--dry-run previews scaffold_cmd only for children that would be created (R8) [test_dry_run_scaffold_preview_only_for_missing]"
+}
+test_dry_run_scaffold_preview_only_for_missing
 
 # ── R9: the landing audit is the ONLY git-state gate ───────────────────────────
 test_landing_audit_is_the_gate() {
