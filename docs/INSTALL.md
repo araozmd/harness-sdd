@@ -726,6 +726,24 @@ body); it does three things:
 `--recursive` is accepted but the deeper-scan semantics are deferred; today it still
 scans depth 1 and prints a note.
 
+### Promoting a single install to a coordinator
+
+If `/sdd-plan` planned a multi-repo product, it wrote the Planner's draft manifest at
+`<umbrella>/.harness/umbrella.manifest.draft.yaml`. Turn the existing single install at
+`<umbrella>` into the coordinator with `--from-manifest <file>`:
+
+```bash
+./harness-install.sh --umbrella /path/to/umbrella-dir \
+  --from-manifest /path/to/umbrella-dir/.harness/umbrella.manifest.draft.yaml
+```
+
+Promotion creates each missing child and `git init`s it (local only), runs the entry's
+optional opaque `scaffold_cmd`, re-bases each draft `path:` to the umbrella root, seeds
+`umbrella.manifest.yaml`, and then reuses the normal cascade. It fails closed on an
+invalid draft or an unsafe child path. Preview it with `--dry-run`. The full contract,
+including the key-equals-directory rule and the landing-audit gate, is in
+[`UMBRELLA.md`](./UMBRELLA.md#promoting-a-single-install-to-a-coordinator).
+
 ### Shared spec repository (`--shared-repo`)
 
 By default the umbrella root is **not** a git repo, so the coordinator's `.harness/`

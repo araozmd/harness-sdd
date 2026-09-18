@@ -284,3 +284,30 @@
   "required fix" is itself subsumed (`scratchpad/E28-F02-builder/mut.py`, all three RED,
   both no-op controls green).
 - [2026-09-17 reviewer] A mutation runner that restores with `shutil.copyfile(path, bak)` + `shutil.move(bak, path)` silently drops the exec bit: `copyfile` creates the backup at 0644 and `move` puts that mode back, so a 755 script comes back 644 while `diff -q` on content reports "restored". On E28-F02 round 2 this turned the scratch clone's `harness-install.sh` non-executable and the next `./harness-install.sh --self` exited 126 — a mode-only delta invisible to a content diff. Verify the restore with `diff -qr`/`stat`, not just `diff -q`, or restore with `cp -p`/`shutil.copy2`; and never run a post-campaign probe that executes a file a mutation touched without first re-checking its mode.
+- [2026-09-18 builder] A helper whose OUTPUT the flow never consumes cannot be pinned by
+  mutating it: E28-F03's promotion seed step wrote `"./$key"` as a literal beside
+  `promotion_rebase_path`, so the R3 mutant (`print ../<key>`) survived a green
+  `test_paths_rebased_to_umbrella_root` until the seed step was rewired to consume the
+  helper. Before trusting a contract test on a helper, grep the flow for the helper's NAME
+  — if the value is reconstructed at the call site, the helper is decoration and the test
+  proves nothing about it.
+- [2026-09-18 reviewer] A fail-closed negative fixture that can be satisfied by a DIFFERENT guard is not discriminating: E28-F03's R1 "target holds no existing install" test put the draft OUTSIDE the target, so deleting the `.harness-version` refusal still aborted at the path-resolution gate and stayed green. Place the fixture so only the guard under test can produce the refusal (draft inside `<target>/.harness/` with `path: ../<key>`), and assert the refusal NAMES the target — rc≠0 alone is not the requirement.
+- [2026-09-18 reviewer] A carried-field assertion is vacuous when the fixture value equals the code default: E28-F03's R3 draft used `init: ./init.sh` and `delegate_cmd: ""`, identical to the defaults, so deleting either field from the seeded block left all 50 suites green. Use a distinctive value per field and assert each field the contract enumerates (same family as "count the assertions, not the authorities").
+- [2026-09-18 reviewer] A per-clause guard can be unpinned while a combined mutant is killed: deleting only the `^[a-z0-9-]+$` key-grammar arm survived all suites because the fixture (`api-v2`/`../api.v2`) is caught by the basename≠key arm. Mutation-test each ARM of a compound guard separately; the combined deletion certifies only the stronger arm.
+- [2026-09-18 builder] Point `TMPDIR` OUTSIDE any git work tree for a test run: `tests/test_promote.sh`'s R9 non-git fixture (`build_single_nogit`) proves the coordinator reports `no git` via `git -C <fixture> rev-parse --is-inside-work-tree`, which walks ANCESTORS — a `TMPDIR` under the harness repo makes the fixture a work tree, reds that assertion, and turns a no-op mutation control into a phantom kill (it cost a discarded campaign here). Run with a neutral disk-backed `TMPDIR` (`/var/tmp/...`), read `df` before and after, and have the runner refuse a `TMPDIR` where that probe succeeds.
+- [2026-09-18 reviewer] A supplementary mutant can read SURVIVED because the suite was never the one under mutation: `tools/run-tests.sh` resolves its DEFAULT glob against its own root, but an explicit RELATIVE suite argument is executed verbatim against the CALLER's cwd (`"$run" "$suite"`, run-tests.sh:384), so `sh <clone>/tools/run-tests.sh tests/x.sh` run from another directory tests THAT directory's suite and installer (its `SRC` is `dirname $0/..` of the cwd-resolved path). Pass ABSOLUTE suite paths, or run with cwd at the repo under test; the runner's own "works from any cwd" comment (run-tests.sh:116) is true only for the no-argument case.
+- [2026-09-18 builder] A negative gate test can KILL its mutant while still naming the wrong
+  guarantee: the first draft of E28-F03's symlink regression asserted `rc != 0` before the
+  external-write check, and the unfixed run reached the landing audit (`rc=3`), so the mutant
+  red at a secondary wording assertion instead of "promotion wrote outside the umbrella".
+  In a flow with more than one non-zero exit (gate `1` vs audit `3`), assert the REAL symptom
+  first and pin the gate's own exit code distinct from the other, or the suite's failure
+  message will misdirect the next maintainer to a cosmetic mismatch.
+- [2026-09-18 builder] `[ -e "$p" ]` FOLLOWS a symlink, so a DANGLING symlink reads as
+  "missing" — a fail-before-write pre-pass that only tests `-e` accepts it, and the apply
+  phase then `mkdir`s over the link AFTER an earlier missing child has already been created
+  and `git init`-ed, yielding a partial promotion (E28-F03 finding 4045131033). Test the
+  link explicitly (`-L`, true even when `-e` is false) in the pre-pass. `-L` does not
+  replace the physical `cd`/`pwd -P` parent check: keep them as separate guards in separate
+  places (resolve owns symlink-to-OUTSIDE, existing-child owns dangling and inside) so each
+  mutant has its own assertion that reds.

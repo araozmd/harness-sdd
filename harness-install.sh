@@ -3,6 +3,7 @@
 #
 #   ./harness-install.sh [--agents=<csv>] [--builder-backend=<value>] [--pr-loop=<true|false>] [--with-opencode-parallel=<true|false>] [--thin|--standalone] <target-repo-path>
 #   ./harness-install.sh --umbrella <umbrella-dir> [--shared-repo] [--recursive] [--thin] [--dry-run|--list]
+#   ./harness-install.sh --umbrella <umbrella-dir> --from-manifest <file> [--shared-repo] [--dry-run]
 #   ./harness-install.sh --self          # regenerate the SOURCE repo's own glue (E26-F01)
 #
 # Idempotent: run once to install, re-run to upgrade.
@@ -71,6 +72,17 @@
 # and auto-populates umbrella.manifest.yaml. Single-target mode (no --umbrella) is
 # unchanged. Pass --dry-run (alias --list) with --umbrella to preview exactly which
 # coordinator + git children would be touched, writing nothing.
+#
+# Promotion (E28-F03): `--umbrella <dir> --from-manifest <file>` is umbrella mode only
+# and turns an EXISTING single install at <dir> into a coordinator from the Planner's
+# draft manifest (`<dir>/.harness/umbrella.manifest.draft.yaml`). It creates each missing
+# child and `git init`s it (local only, no remote), runs the entry's optional opaque
+# `scaffold_cmd` inside the child it just created, re-bases each draft `path:` from the
+# draft's directory to the umbrella root, seeds `<dir>/umbrella.manifest.yaml`
+# non-clobbering, and then reuses the existing cascade. It fails closed on a missing or
+# invalid manifest (no non-empty `repos:`), a path that escapes the umbrella or is not a
+# direct child named by the entry key, and a declared child that already exists but is not
+# a git work tree. --dry-run previews it; --shared-repo composes.
 #
 # Body layout (--thin / --standalone, E24-F04, see docs/UMBRELLA.md → "Migrating an
 # existing child"). A child of an umbrella holds its prose tier either as a full local copy
@@ -7766,8 +7778,218 @@ manifest_upsert() {
   ' "$_mf" > "$_mf.uptmp" && mv "$_mf.uptmp" "$_mf"
 }
 
+# ── E28-F03: promotion helpers (draft manifest → live manifest) ─────────────────
+#
+# Promotion turns an EXISTING single install into an umbrella coordinator from the
+# Planner's draft manifest. These helpers are pure transforms/validators: the pre-pass
+# validates with them and writes nothing, and only the apply step (after the dry-run
+# block) creates children and seeds the live manifest. The child install, discovery,
+# manifest_upsert and landing audit are reused unchanged.
+
+# promotion_normalize_path <base-abs> <path>
+#   Lexically resolve <path> against <base-abs> WITHOUT requiring the result to exist (a
+#   missing child has no directory to `cd` into). Prints the normalized absolute path.
+#   Internal to the promotion helpers; not part of the public contract.
+promotion_normalize_path() {
+  _pnp_base="$1"; _pnp_path="$2"
+  case "$_pnp_path" in
+    /*) _pnp_cur="$_pnp_path" ;;
+    *)  _pnp_cur="$_pnp_base/$_pnp_path" ;;
+  esac
+  _pnp_out=""
+  _pnp_ifs="$IFS"
+  IFS='/'
+  for _pnp_c in $_pnp_cur; do
+    case "$_pnp_c" in
+      ""|.) : ;;
+      ..)   _pnp_out="${_pnp_out%/*}" ;;
+      *)    _pnp_out="$_pnp_out/$_pnp_c" ;;
+    esac
+  done
+  IFS="$_pnp_ifs"
+  printf '%s\n' "$_pnp_out"
+}
+
+# promotion_resolve_child <draft-dir> <umbrella-root> <key> <path>
+#   Resolve <path> against <draft-dir> (the draft file's own directory) and require the
+#   result to be a DIRECT child of <umbrella-root> whose basename equals <key> and matches
+#   ^[a-z0-9-]+$. Prints the normalized absolute child path, or fails. Never prints a path
+#   that escapes the umbrella. Internal companion of promotion_rebase_path.
+#
+#   For an EXISTING child the lexical check is not enough: `<umbrella>/<key>` may itself be
+#   a SYMLINK whose target lives outside the umbrella, in which case the lexical parent
+#   still reads as the umbrella and the existing-child check follows the link. Promotion's
+#   fail-closed guarantee is about physical location, so an existing directory is resolved
+#   with `cd`/`pwd -P` and its PHYSICAL parent must be the umbrella root too. (A missing
+#   child has no physical target to resolve.) The cascade deliberately supports symlinked
+#   children (E24-F03); promotion, which promises not to write outside the umbrella, does
+#   not.
+promotion_resolve_child() {
+  _prc_dir="$1"; _prc_umb="$2"; _prc_key="$3"; _prc_path="$4"
+  printf '%s' "$_prc_key" | grep -Eq '^[a-z0-9-]+$' || return 1
+  _prc_res="$(promotion_normalize_path "$_prc_dir" "$_prc_path")"
+  _prc_base="${_prc_res##*/}"
+  _prc_parent="${_prc_res%/*}"
+  [ "$_prc_base" = "$_prc_key" ] || return 1
+  [ "$_prc_parent" = "$_prc_umb" ] || return 1
+  if [ -d "$_prc_res" ]; then
+    _prc_phys="$(CDPATH= cd -- "$_prc_res" 2>/dev/null && pwd -P)" || return 1
+    [ "${_prc_phys%/*}" = "$_prc_umb" ] || return 1
+  fi
+  printf '%s\n' "$_prc_res"
+}
+
+# promotion_rebase_path <draft-dir> <umbrella-root> <key> <path>
+#   Validate the entry (see promotion_resolve_child) and print the LIVE manifest value
+#   `./<key>` (the draft's base is the harness dir, so `../<key>`; the live base is the
+#   umbrella root). Fails otherwise.
+promotion_rebase_path() {
+  _prb_key="$3"
+  promotion_resolve_child "$1" "$2" "$3" "$4" >/dev/null || return 1
+  printf './%s\n' "$_prb_key"
+}
+
+# promotion_existing_child <path>
+#   A declared child that already exists must be a real directory with a `.git` entry (dir
+#   or file). A missing path is fine (promotion creates it). Otherwise fails — a declared
+#   child that exists but is not a git work tree would become a phantom live entry the
+#   cascade never installs (R4).
+#
+#   A SYMLINK is an EXISTING path even when it dangles: `-e` follows the link, so a
+#   dangling link reads as missing here, the pre-pass passes, and the apply phase then
+#   `mkdir`s over the link — after an earlier missing child has already been created and
+#   `git init`-ed, leaving a partial promotion and breaking the fail-before-write
+#   guarantee. Promotion only ever writes into a real child directory inside the umbrella
+#   (the cascade's deliberate symlinked-child support does not extend to promotion), so a
+#   link is refused here, in the pre-pass, before any mkdir/git-init/scaffold/manifest
+#   write. The symlink-to-a-work-tree-OUTSIDE case is still refused earlier, by
+#   promotion_resolve_child's physical parent check, which names the draft path.
+promotion_existing_child() {
+  _pec="$1"
+  if [ -L "$_pec" ]; then return 1; fi
+  [ -e "$_pec" ] || return 0
+  [ -d "$_pec" ] || return 1
+  [ -e "$_pec/.git" ] || return 1
+  return 0
+}
+
+# promotion_unquote <scalar>
+#   Strip ONE layer of matching surrounding double or single quotes, so an opaque
+#   `scaffold_cmd: "sh -c 'touch x'"` runs as `sh -c 'touch x'` rather than as a
+#   command named `"sh -c 'touch x'"` (which exits 127). The live manifest still receives
+#   the RAW scalar, so the draft's quoting is carried over verbatim.
+promotion_unquote() {
+  _pu="$1"
+  case "$_pu" in
+    \"*\") _pu="${_pu#\"}"; _pu="${_pu%\"}" ;;
+    \'*\') _pu="${_pu#\'}"; _pu="${_pu%\'}" ;;
+  esac
+  printf '%s\n' "$_pu"
+}
+
+# promotion_read_manifest <file>
+#   Parse the bounded draft shape (a top-level `repos:` line, two-space entry keys,
+#   four-space fields) and print one TAB-separated record per entry:
+#     key <TAB> path <TAB> init <TAB> test_command <TAB> delegate_cmd <TAB> scaffold_cmd
+#   On a missing/unreadable file, a missing top-level `repos:`, a `repos:` mapping with
+#   zero entries, or an entry with no `path:`, print nothing and return non-zero:
+#     1 missing/unreadable, 2 no `repos:`, 3 zero entries, 4 entry missing `path`.
+#   It never reads the draft as a live manifest.
+promotion_read_manifest() {
+  _prm="$1"
+  [ -f "$_prm" ] && [ -r "$_prm" ] || return 1
+  awk '
+    BEGIN { have_repos=0; in_repos=0; count=0; bad=0; out="" }
+    /^repos:[[:space:]]*$/ { have_repos=1; in_repos=1; next }
+    in_repos && /^[^[:space:]#]/ { in_repos=0 }
+    in_repos && /^  [^[:space:]#]/ {
+      if (count > 0) {
+        if (path == "") bad=1
+        out = out key "\t" path "\t" init "\t" test "\t" delegate "\t" scaffold "\n"
+      }
+      line=$0
+      sub(/^  /,"",line); sub(/:[[:space:]]*$/,"",line)
+      key=line
+      path=""; init=""; test=""; delegate=""; scaffold=""
+      count++
+      next
+    }
+    in_repos && /^    path:/         { v=$0; sub(/^    path:[[:space:]]*/,"",v);           sub(/[[:space:]]+$/,"",v); path=v;     next }
+    in_repos && /^    init:/         { v=$0; sub(/^    init:[[:space:]]*/,"",v);           sub(/[[:space:]]+$/,"",v); init=v;     next }
+    in_repos && /^    test_command:/ { v=$0; sub(/^    test_command:[[:space:]]*/,"",v);   sub(/[[:space:]]+$/,"",v); test=v;     next }
+    in_repos && /^    delegate_cmd:/ { v=$0; sub(/^    delegate_cmd:[[:space:]]*/,"",v);   sub(/[[:space:]]+$/,"",v); delegate=v; next }
+    in_repos && /^    scaffold_cmd:/ { v=$0; sub(/^    scaffold_cmd:[[:space:]]*/,"",v);   sub(/[[:space:]]+$/,"",v); scaffold=v; next }
+    END {
+      if (!have_repos) exit 2
+      if (count == 0) exit 3
+      if (path == "") bad=1
+      out = out key "\t" path "\t" init "\t" test "\t" delegate "\t" scaffold "\n"
+      if (bad) exit 4
+      printf "%s", out
+    }
+  ' "$_prm"
+}
+
+# promotion_seed_manifest <live> <key> <path> <init> <test> <delegate> <scaffold>
+#   Ensure the live manifest has a top-level `repos:` and insert the entry (with the
+#   REAL draft fields, not manifest_upsert's TODO placeholders) ONLY when the key is
+#   absent under `repos:`. Mirrors manifest_upsert's scoping: a same-named two-space key
+#   under an unrelated section is not the entry. A pre-existing key is preserved
+#   verbatim. `scaffold_cmd` is written only when the value names a real command (the
+#   empty draft scalar `""` is treated as absent).
+promotion_seed_manifest() {
+  _psm_live="$1"; _psm_key="$2"; _psm_path="$3"
+  _psm_init="$4"; _psm_test="$5"; _psm_delegate="$6"; _psm_scaffold="$7"
+  [ -n "$_psm_init" ] || _psm_init='./init.sh'
+  [ -n "$_psm_test" ] || _psm_test='""'
+  [ -n "$_psm_delegate" ] || _psm_delegate='""'
+  [ "$_psm_scaffold" = '""' ] && _psm_scaffold=""
+  if [ ! -f "$_psm_live" ]; then
+    printf 'repos:\n' > "$_psm_live"
+  elif ! grep -Eq '^repos:[[:space:]]*$' "$_psm_live"; then
+    printf 'repos:\n' >> "$_psm_live"
+  fi
+  if awk -v n="$_psm_key" '
+       /^repos:[[:space:]]*$/ { r=1; next }
+       r && /^[^[:space:]#]/ { r=0 }
+       r && $0 ~ ("^  " n ":[[:space:]]*$") { found=1 }
+       END { exit found ? 0 : 1 }
+     ' "$_psm_live"; then
+    return 0
+  fi
+  _psm_blk="$_psm_live.psmblk"
+  {
+    printf '  %s:\n' "$_psm_key"
+    printf '    path: %s\n' "$_psm_path"
+    printf '    init: %s\n' "$_psm_init"
+    printf '    test_command: %s\n' "$_psm_test"
+    printf '    delegate_cmd: %s\n' "$_psm_delegate"
+    if [ -n "$_psm_scaffold" ]; then printf '    scaffold_cmd: %s\n' "$_psm_scaffold"; fi
+  } > "$_psm_blk"
+  if ! awk -v blkfile="$_psm_blk" '
+       /^repos:[[:space:]]*$/ { print; in_repos=1; next }
+       in_repos && !inserted && /^[^[:space:]#]/ {
+         while ((getline line < blkfile) > 0) print line
+         close(blkfile); inserted=1; in_repos=0
+       }
+       { print }
+       END {
+         if (in_repos && !inserted) { while ((getline line < blkfile) > 0) print line; close(blkfile) }
+       }
+     ' "$_psm_live" > "$_psm_live.psmout"; then
+    rm -f "$_psm_blk" "$_psm_live.psmout"
+    return 1
+  fi
+  mv "$_psm_live.psmout" "$_psm_live"
+  rm -f "$_psm_blk"
+  return 0
+}
+
 # ── arg parsing ───────────────────────────────────────────────────────────────
 UMBRELLA=""
+# E28-F03 promotion: path to the Planner's draft manifest. Empty everywhere unless
+# --from-manifest was passed; it is umbrella-mode only and NEVER a switch on its own.
+FROM_MANIFEST=""
 RECURSIVE=0
 DRY_RUN=0
 SHARED_REPO=0
@@ -7883,6 +8105,20 @@ while [ "$#" -gt 0 ]; do
       UMBRELLA="$2"
       shift 2
       ;;
+    --from-manifest=*)
+      # E28-F03 promotion. An empty value (`--from-manifest=`) is a usage error, not a
+      # silent "no promotion": it would otherwise run a plain cascade at the one moment
+      # the user asked to promote. Rejected before any target resolution or write.
+      FROM_MANIFEST="${1#--from-manifest=}"
+      [ -n "$FROM_MANIFEST" ] || die "usage: $0 --umbrella <umbrella-dir> --from-manifest <file> (empty value)"
+      shift
+      ;;
+    --from-manifest)
+      [ "$#" -ge 2 ] || die "usage: $0 --umbrella <umbrella-dir> --from-manifest <file>"
+      FROM_MANIFEST="$2"
+      [ -n "$FROM_MANIFEST" ] || die "usage: $0 --umbrella <umbrella-dir> --from-manifest <file> (empty value)"
+      shift 2
+      ;;
     --thin)
       # One-time consent to convert a FULL-COPY child of a reachable umbrella to the thin
       # layout (E24-F04 R1). Never implied, never remembered as a flag: after the first
@@ -7964,6 +8200,7 @@ if [ "$SELF_MODE" = 1 ]; then
   [ "$RECURSIVE" = 0 ]    || die "--self cannot combine with --recursive"
   [ "$THIN_OPT_IN" = 0 ]  || die "--self cannot combine with --thin"
   [ "$STANDALONE" = 0 ]   || die "--self cannot combine with --standalone"
+  [ -z "$FROM_MANIFEST" ] || die "--self cannot combine with --from-manifest"
   self_install
   exit 0
 fi
@@ -7981,10 +8218,23 @@ if [ "$STANDALONE" = 1 ]; then
     || die "--standalone and --thin ask for opposite body layouts — pass at most one"
 fi
 
+# E28-F03 promotion guards, same place and same reason: a contradictory combination must
+# abort non-zero after the parse loop and BEFORE any target resolution, discovery or write.
+# Promotion creates the ordinary full child profile and owns the draft, so it composes with
+# neither layout flag (and `--standalone` is already single-target-only above).
+if [ -n "$FROM_MANIFEST" ]; then
+  [ "$THIN_OPT_IN" = 0 ] \
+    || die "--from-manifest cannot combine with --thin — promotion creates the ordinary full child profile"
+  [ "$STANDALONE" = 0 ] \
+    || die "--from-manifest cannot combine with --standalone"
+fi
+
 # ── single-target mode (no --umbrella): behave exactly as before ──────────────
 if [ -z "$UMBRELLA" ]; then
   [ "$DRY_RUN" = 0 ] || die "--dry-run/--list is umbrella-mode only (use with --umbrella)"
   [ "$SHARED_REPO" = 0 ] || die "--shared-repo is umbrella-mode only (use with --umbrella)"
+  [ -z "$FROM_MANIFEST" ] \
+    || die "--from-manifest requires --umbrella (umbrella mode only) — it promotes an existing single install at <umbrella-dir> into a coordinator"
   if [ "${POSITIONAL}" = "" ]; then die "usage: $0 <target-repo-path>"; fi
   TGT="$POSITIONAL"
   if [ ! -d "$TGT" ]; then die "target '$TGT' is not a directory"; fi
@@ -8035,10 +8285,94 @@ if [ -n "$POSITIONAL" ]; then die "do not pass a positional <target> with --umbr
 UMB="$(CDPATH= cd -- "$UMBRELLA" && pwd -P)"
 if [ "$UMB" = "$(CDPATH= cd -- "$SRC" && pwd -P)" ]; then die "umbrella dir must differ from the harness source ($SRC)"; fi
 
+# ── E28-F03: promotion pre-pass (validate; writes nothing) ────────────────────
+# Runs only when --from-manifest is given. Every gate fires BEFORE the dry-run preview
+# and before any write, so a refused promotion leaves the target byte-identical. The
+# validated entries are carried to the preview/apply steps as TAB-separated records
+# (key, draft path, init, test_command, delegate_cmd, scaffold_cmd, absolute child path);
+# every field is non-empty (`""` marks an absent scalar) so the TAB read cannot misalign.
+_PROM_TAB="$(printf '\t')"
+PROMOTION_READY=0
+_promotion_entries=""
+if [ -n "$FROM_MANIFEST" ]; then
+  # (i) The target must be an EXISTING single install. A plain --umbrella on a fresh dir
+  # still works — this refusal is keyed on the flag, never on the directory.
+  [ -f "$UMB/.harness/.harness-version" ] \
+    || die "promotion: target '$UMB' holds no existing install (no $UMB/.harness/.harness-version) — --from-manifest promotes an EXISTING single install; install there first or drop --from-manifest"
+  # (ii) The named manifest must exist and be readable.
+  if [ ! -f "$FROM_MANIFEST" ]; then
+    die "promotion: manifest '$FROM_MANIFEST' is missing — pass the Planner's draft (e.g. $UMB/.harness/umbrella.manifest.draft.yaml)"
+  fi
+  if [ ! -r "$FROM_MANIFEST" ]; then
+    die "promotion: manifest '$FROM_MANIFEST' is unreadable"
+  fi
+  _prom_draft_dir="$(CDPATH= cd -- "$(dirname -- "$FROM_MANIFEST")" && pwd -P)" \
+    || die "promotion: cannot resolve the manifest directory for '$FROM_MANIFEST'"
+  # (iii) Parse/validate the bounded draft shape. Distinct exit codes name the reason.
+  _prom_rc=0
+  _prom_raw="$(promotion_read_manifest "$FROM_MANIFEST")" || _prom_rc=$?
+  case "$_prom_rc" in
+    0) : ;;
+    2) die "promotion: manifest '$FROM_MANIFEST' has no top-level 'repos:' mapping — it fails closed on a draft with no repos:" ;;
+    3) die "promotion: manifest '$FROM_MANIFEST' declares an empty 'repos:' mapping — no deployable entries" ;;
+    4) die "promotion: manifest '$FROM_MANIFEST' has an entry with no 'path:' — each repos: entry must carry a path" ;;
+    *) die "promotion: manifest '$FROM_MANIFEST' is missing or unreadable" ;;
+  esac
+  # (iv) Validate every entry and record the validated plan.
+  _prom_new_count=0
+  while IFS="$_PROM_TAB" read -r _pe_key _pe_path _pe_init _pe_test _pe_delegate _pe_scaffold; do
+    [ -n "$_pe_key" ] || continue
+    _pe_child="$(promotion_resolve_child "$_prom_draft_dir" "$UMB" "$_pe_key" "$_pe_path")" \
+      || die "promotion: entry '$_pe_key' path '$_pe_path' must resolve to a direct child directory of the umbrella root '$UMB' named '$_pe_key' and matching ^[a-z0-9-]+\$ — rename the directory to the key, or re-run /sdd-plan to reconcile the draft"
+    promotion_existing_child "$_pe_child" \
+      || die "promotion: child '$_pe_child' for entry '$_pe_key' already exists but is not a real directory the cascade can install (a symlink, a non-directory, or no .git) — remove the symlink/rename the directory to the key, or re-run /sdd-plan to reconcile the draft"
+    [ -n "$_pe_init" ] || _pe_init='./init.sh'
+    [ -n "$_pe_test" ] || _pe_test='""'
+    [ -n "$_pe_delegate" ] || _pe_delegate='""'
+    [ -n "$_pe_scaffold" ] || _pe_scaffold='""'
+    _promotion_entries="$_promotion_entries$_pe_key$_PROM_TAB$_pe_path$_PROM_TAB$_pe_init$_PROM_TAB$_pe_test$_PROM_TAB$_pe_delegate$_PROM_TAB$_pe_scaffold$_PROM_TAB$_pe_child
+"
+    if [ ! -e "$_pe_child" ]; then _prom_new_count=$((_prom_new_count + 1)); fi
+  done <<PROM_PARSE
+$_prom_raw
+PROM_PARSE
+  # A created directory without `.git` is invisible to discovery — the silent half-install
+  # the gates exist to prevent — so if a child must be created and git is unavailable, fail
+  # closed HERE, before any mkdir.
+  if [ "$_prom_new_count" -gt 0 ] && ! command -v git >/dev/null 2>&1; then
+    die "promotion: git is required to create and git-init $_prom_new_count missing child(ren) — install git, or create the children yourself and re-run"
+  fi
+  PROMOTION_READY=1
+  info "promotion: validated $_prom_new_count child(ren) to create from $FROM_MANIFEST"
+fi
+
 if [ "$DRY_RUN" = 1 ]; then
   echo "══ umbrella cascade (DRY RUN — nothing will be written) → $UMB ══"
 else
   echo "══ umbrella cascade → $UMB ══"
+fi
+
+# E28-F03: the promotion preview runs inside the existing dry-run block, so it inherits the
+# "nothing will be written" banner and the exit 0. Validation happened in the pre-pass
+# above; this only prints the plan.
+if [ "$DRY_RUN" = 1 ] && [ "$PROMOTION_READY" = 1 ]; then
+  echo "── promotion preview ──"
+  while IFS="$_PROM_TAB" read -r _pd_key _pd_path _pd_init _pd_test _pd_delegate _pd_scaffold _pd_child; do
+    [ -n "$_pd_key" ] || continue
+    if [ ! -e "$_pd_child" ]; then
+      echo "would create child: $_pd_key"
+      echo "would git init $_pd_key"
+      # scaffold_cmd is previewed only for a child that would be created, mirroring the
+      # apply step (which runs it only inside the missing-child branch). Previewing it for
+      # a pre-existing child would report an action the real run explicitly skips.
+      if [ "$_pd_scaffold" != '""' ] && [ -n "$_pd_scaffold" ]; then
+        echo "would run scaffold_cmd: $_pd_key"
+      fi
+    fi
+    echo "would re-base path: $_pd_key"
+  done <<PROM_PREVIEW
+$_promotion_entries
+PROM_PREVIEW
 fi
 
 # (a) coordinator profile into the umbrella dir.
@@ -8074,6 +8408,49 @@ if [ "$DRY_RUN" = 1 ]; then
   fi
   echo "── end dry run — re-run without --dry-run/--list to apply ──"
   exit 0
+fi
+
+# ── E28-F03: promotion apply (create missing children, scaffold, seed live manifest) ──
+# Runs after the dry-run block and before the unchanged cascade. The pre-pass has already
+# validated every entry, so this step only acts. Created children are ordinary local git
+# repos (no remote), which the existing depth-1 discovery then installs.
+if [ "$PROMOTION_READY" = 1 ]; then
+  echo "── promotion: applying the draft plan ──"
+  while IFS="$_PROM_TAB" read -r _pa_key _pa_path _pa_init _pa_test _pa_delegate _pa_scaffold _pa_child; do
+    [ -n "$_pa_key" ] || continue
+    if [ ! -e "$_pa_child" ]; then
+      mkdir -p "$_pa_child"
+      ( cd "$_pa_child" && git init -q ) \
+        || die "promotion: git init failed for child '$_pa_key' at $_pa_child"
+      info "created child '$_pa_key' (local git repo) → $_pa_child"
+      # scaffold_cmd is opaque and best-effort: it runs ONLY for a child promotion just
+      # created, and a non-zero exit warns on stderr and does NOT abort the run.
+      if [ "$_pa_scaffold" != '""' ] && [ -n "$_pa_scaffold" ]; then
+        _pa_cmd="$(promotion_unquote "$_pa_scaffold")"
+        _pa_rc=0
+        ( cd "$_pa_child" && sh -c "$_pa_cmd" ) >/dev/null 2>&1 || _pa_rc=$?
+        if [ "$_pa_rc" -ne 0 ]; then
+          echo "⚠️  scaffold_cmd failed for child '$_pa_key' (exit $_pa_rc): $_pa_scaffold" >&2
+        fi
+      fi
+    fi
+  done <<PROM_APPLY
+$_promotion_entries
+PROM_APPLY
+  # Seed the live root manifest NON-CLOBBERING before the cascade's manifest_upsert runs.
+  # A key that already exists is preserved verbatim; only absent keys get the draft's real
+  # fields (manifest_upsert would write TODO placeholders instead).
+  while IFS="$_PROM_TAB" read -r _ps_key _ps_path _ps_init _ps_test _ps_delegate _ps_scaffold _ps_child; do
+    [ -n "$_ps_key" ] || continue
+    # The live value comes from the SAME helper the pre-pass validated with, so there is
+    # one source for the `./<key>` re-base (a hard-coded literal here would let the helper
+    # diverge unobserved).
+    _ps_live="$(promotion_rebase_path "$_prom_draft_dir" "$UMB" "$_ps_key" "$_ps_path")" \
+      || die "promotion: cannot re-base entry '$_ps_key' (internal inconsistency)"
+    promotion_seed_manifest "$UMB/umbrella.manifest.yaml" "$_ps_key" "$_ps_live" "$_ps_init" "$_ps_test" "$_ps_delegate" "$_ps_scaffold"
+  done <<PROM_SEED
+$_promotion_entries
+PROM_SEED
 fi
 
 HARNESS_UMBRELLA_ROLE="coordinator"
