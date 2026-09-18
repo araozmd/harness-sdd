@@ -332,3 +332,66 @@
   anchor (`mentions … repository root`) plus a no-empty-inline-code-span negative with a
   planted positive control (E31-F02 finding 4045793773; `test_self_mode.sh::
   opencode_pr_fixer_root_explicit`, `test_source_shims.sh`).
+- [2026-09-18 builder] A length floor on an extract-and-compare test fires **before** the
+  byte comparison, so a mutant that layers a real one-sided desync on top of a truncation
+  reports TRUNCATION, not the desync — the desync is unreachable below the point extraction
+  stopped. Don't promise "the mutant names the desync" for that layered shape; the floor
+  names the root cause it is there to catch, and the truncation and `cmp` messages must stay
+  textually distinct so the two failures are never conflated (E99-F162 MF2/MG/ML).
+- [2026-09-18 builder] A "structural minimum" floor for a comment-heavy block is the
+  physical line of its LAST REQUIRED key, which can coincide with the block's final line
+  (workers: `roster:` = 19 = today's length). That is a contract, not a snapshot — a line
+  added after the key never moves it — so verify the distinguishing mutant instead of the
+  number: a symmetric blank AFTER the top-level key truncates both copies to 18 lines, and
+  only a floor above 18 sees it; a floor chosen one below the last required key to *look*
+  "not exact" silently misses that shape (E99-F162 MW).
+- [2026-09-18 reviewer] A per-block length floor must be the block's last **content** line,
+  not its last required **key**, whenever later lines are still inside the compared span:
+  E99-F162's models floor 18 = `doc-critic:` while the models block runs to 35 lines of
+  escape-hatch documentation, so a symmetric blank after `doc-critic:` truncates both copies
+  to 18, clears the floor, and a one-sided desync in the 17-line tail passes (MTAIL green;
+  floor 35 kills it). Workers got the shape right (19 = `roster:` = the block's final line);
+  apply the same rule to every extract-and-compare block.
+- [2026-09-18 builder] Fixing that finding, a "next top-level key" END bound was NOT a clean
+  substitute for the first-blank bound on the models block: the `harness.config.yaml` copy is
+  followed by a 20-line `# Codex PR review loop …` comment header before `pr_loop:`, while the
+  install-side heredoc stops at its `EOF` before that header — so the two bounds capture
+  different spans for a reason the test never intends to compare. When a block's tail is a
+  fixed documentation run with no next-key signal at matching offsets, floor at the last
+  CONTENT line (models 35; workers 19) instead of re-bounding; prove it with a symmetric
+  blank AFTER the last required key (MTAIL), which must red with "TRUNCATED", and a one-sided
+  tail desync (MTAILD), which must red via `cmp` at `35c35`.
+- [2026-09-18 builder] A length floor is a lower bound on DEPTH, not proof the extractor reached
+  the block's END: a line appended past the floor's last content line GROWS the compared span
+  while the floor keeps passing, so a one-sided desync in the new tail compares equal (E99-F162
+  finding 4046240133 — the constant-floor shape Codex rejected). Pair every extract-and-compare
+  floor with an END MARKER: assert the capture's LAST line IS the block's structural last content
+  line, and that marker occurs exactly ONCE in its source (`grep -cF == 1`), so a future append
+  reds and forces the maintainer to advance it. A desync that touches the marker line now reds at
+  the END MARKER rather than via `cmp`; pin a separate non-marker tail desync if the `cmp`
+  diagnostic is the contract. Pin BOTH new claims with neutered-guard controls — marker neutered
+  + append-past-marker must go GREEN (`control-marker.py` A), uniqueness neutered + duplicated
+  marker must go GREEN (`control-unique.py`) — or the guard is decoration beside a check that
+  already covers it.
+- [2026-09-18 builder] Replacing a first-blank block bound with a "next column-0 line" bound
+  has two traps (E99-F162 finding 4046384380): (1) the block's own top-level key must be
+  identified by KEY grammar (`^[A-Za-z0-9_.-]+:`), not by "first column-0 line after the
+  anchor" — the workers block's own comment header is *also* column-0, so that rule ends the
+  capture on the header; (2) do NOT also strip trailing comment-only lines to reconcile an
+  asymmetric next-block header — that drops the block's own `# pin…` documentation and
+  reopens E99-F160 M8/M8b. Stop at the next block's column-0 header (exclude it by the BOUND)
+  and trim only trailing blanks; the pin comments stay in the compared span. A structural
+  bound that reaches the mapping boundary makes a constant length floor redundant — retire it
+  rather than leave an unpinned constant, and prove the bound with a pre-fix old-test control
+  (the finding's mutant is GREEN on the old bound, RED on the new one).
+- [2026-09-18 builder] Superseding the previous entry's "stop at the next block's column-0
+  header": that header test must require the line be **NON-COMMENT** (`/^[^[:space:]#]/`),
+  because a column-0 comment does NOT end a YAML mapping. With any-column-0 it, appending
+  `# extra model documentation` then an indented `pin.claude.frontier` to one copy stops the
+  capture AT the comment, so both extracts stay byte-identical while the config reader walks
+  through the comment and reads the child (E99-F162 finding 4046520085; the pre-fix test was
+  GREEN on it). Pair the byte `cmp` with a SEMANTIC `key=value` comparison (comment-only and
+  blank lines dropped, matching `_cfg_models_value`) but keep BOTH: each is uniquely
+  load-bearing — byte owns the block's comment-byte identity (E99-F160 MC/MD), semantic owns
+  reader-visible keys; only the next block's trailing column-0 comment header is trimmed, so
+  indented `# pin…` comment appends still red (E99-F162 round-5 controls).

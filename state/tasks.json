@@ -975,11 +975,17 @@
         {
           "id": "E99-F162",
           "title": "models_block/workers_block terminate on the FIRST blank line after the anchor, so a symmetric blank-line reformat silently shrinks both extracts to one line and a real desync passes \u2014 add a length floor",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F162-block-extract-length-floor/"
+          "spec_path": "specs/epics/E99-maintenance/F162-block-extract-length-floor/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (208)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E99-F162 done --evidence <merge-ref>`",
+            "pr": "208"
+          }
         },
         {
           "id": "E99-F163",
