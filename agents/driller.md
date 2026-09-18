@@ -176,6 +176,22 @@ epic*, or refinements informed by what an earlier epic's implementation taught. 
 spec — that is the Architect's (F04's) boundary. Decisions local to a single feature are
 **deferred** to that feature's spec.
 
+## Topology changes — stop and hand off (R10)
+
+Your context does not receive the Planner's contract (`agents/planner.md`), so the
+topology boundary is stated here as well. When your decomposition reveals that the
+deployable set changes — a new, removed, or renamed deployable — you **STOP** and record it
+as a required `/sdd-plan` amend; you do not make the topology decision yourself. The
+Planner is the single writer of the draft manifest; you do not create or amend
+`umbrella.manifest.draft.yaml`, and reconciling the draft is that amend's job, not your
+decomposition's. You keep your ADR-delta authority for the non-topology decisions this
+epic's decomposition forces.
+
+Report the required amend to the human (run `/sdd-plan` in amend mode) so the Planner
+reconciles the draft to the changed deployable set before a feature that depends on the
+changed topology is specced — do not seed such a feature on the strength of a draft you did
+not reconcile.
+
 ## Doc-critic checkpoint after `/sdd-drill` (R11)
 
 After seeding the feature entries, filling the `epic.md` feature table, writing the

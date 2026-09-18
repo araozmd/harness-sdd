@@ -15,7 +15,9 @@
 #   R7  the portable agents/planner.md carries the whole rule
 #   R8  the emitted /sdd-plan body + both source-mode artifacts carry the same step
 #   R9  umbrella.manifest.example.yaml + docs/UMBRELLA.md document scaffold_cmd
-#   R10 the Planner is the single writer; /sdd-drill does not amend the draft
+#   R10 the Planner is the single writer; /sdd-drill does not amend the draft and the
+#       Driller STOPS and records a required /sdd-plan amend when a decomposition changes
+#       the deployable set (role + emitted body + both source-mode command surfaces)
 #   R11 an amend records a topology change append-only (dated `## Repo topology`
 #       delta + a new ADR ALWAYS, including a collapse) as a COMPLETE replacement snapshot
 #       (the latest delta names the full set; earlier deltas superseded), so add/remove/
@@ -50,6 +52,8 @@ INST="$SRC/harness-install.sh"
 CMD="$SRC/.claude/commands/sdd-plan.md"
 SKILL="$SRC/.agents/skills/sdd-plan/SKILL.md"
 DRILLER="$SRC/agents/driller.md"
+DRILL_CMD="$SRC/.claude/commands/sdd-drill.md"
+DRILL_SKILL="$SRC/.agents/skills/sdd-drill/SKILL.md"
 EX="$SRC/umbrella.manifest.example.yaml"
 DOC="$SRC/docs/UMBRELLA.md"
 CFG="$SRC/harness.config.yaml"
@@ -167,15 +171,29 @@ ROLE_SPAN="$T/role.span"; ROLE_FOLD="$T/role.fold"
 BODY_SPAN="$T/body.span"; BODY_FOLD="$T/body.fold"
 CMD_FOLD="$T/cmd.fold"
 SKILL_SPAN="$T/skill.span"; SKILL_FOLD="$T/skill.fold"
+# The Driller surfaces (R10, Reviewer finding 4043416606): the Driller's clean context
+# does not receive agents/planner.md, so the stop-and-hand-off rule must live on the role
+# and on the /sdd-drill command body it is actually given.
+DRILL_ROLE_SPAN="$T/drill-role.span"; DRILL_ROLE_FOLD="$T/drill-role.fold"
+DRILL_BODY_SPAN="$T/drill-body.span"; DRILL_BODY_FOLD="$T/drill-body.fold"
+DRILL_CMD_FOLD="$T/drill-cmd.fold"
+DRILL_SKILL_SPAN="$T/drill-skill.span"; DRILL_SKILL_FOLD="$T/drill-skill.fold"
 
 extract_section "$ROLE" "Repo topology output" > "$ROLE_SPAN"
 extract_heredoc "$INST" 'cat > "$CMDDIR/sdd-plan.md" <<'"'"'EOF'"'"'' > "$BODY_SPAN"
 extract_section "$SKILL" "Canonical workflow" > "$SKILL_SPAN"
+extract_section "$DRILLER" "Topology changes" > "$DRILL_ROLE_SPAN"
+extract_heredoc "$INST" 'cat > "$CMDDIR/sdd-drill.md" <<'"'"'EOF'"'"'' > "$DRILL_BODY_SPAN"
+extract_section "$DRILL_SKILL" "Canonical workflow" > "$DRILL_SKILL_SPAN"
 
 fold_to "$ROLE_SPAN"  "$ROLE_FOLD"
 fold_to "$BODY_SPAN"  "$BODY_FOLD"
 fold_to "$CMD"        "$CMD_FOLD"
 fold_to "$SKILL_SPAN" "$SKILL_FOLD"
+fold_to "$DRILL_ROLE_SPAN"  "$DRILL_ROLE_FOLD"
+fold_to "$DRILL_BODY_SPAN"  "$DRILL_BODY_FOLD"
+fold_to "$DRILL_CMD"        "$DRILL_CMD_FOLD"
+fold_to "$DRILL_SKILL_SPAN" "$DRILL_SKILL_FOLD"
 
 # ── R1: the repo-topology ADR ──────────────────────────────────────────────────
 # test_role_and_body_name_the_topology_adr
@@ -421,12 +439,34 @@ every_naming_sentence_carries "R10 role" "$ROLE_FOLD" "/sdd-drill" "never" "amen
 # deleting the whole re-plan clause would stay green without this line. The sentence
 # naming `topology change` is required to carry `/sdd-plan`, not just `amend`.
 every_naming_sentence_carries "R10 role re-plan" "$ROLE_FOLD" "topology change" "/sdd-plan" "amend" "append-only" "reconciles the draft"
-[ -f "$DRILLER" ] || fail "R10: $DRILLER is missing"
-# Positive control FIRST (the Planner-side rule above), then the absence check.
-if grep -qF 'umbrella.manifest.draft.yaml' "$DRILLER"; then
-  fail "R10: agents/driller.md names umbrella.manifest.draft.yaml — the Driller must not touch the draft (the Planner is its single writer)"
-fi
-pass "R10 Planner is single writer; driller.md does not amend the draft [test_drill_does_not_amend_draft]"
+# The Driller-side rule (Reviewer finding 4043416606). The Planner-side sentence above
+# never reaches the Driller: its clean context is `agents/driller.md` plus the
+# `/sdd-drill` command body, not `agents/planner.md`. On every surface the Driller rule
+# lives on, the sentence naming the changed deployable set must carry the hand-off
+# (`/sdd-plan` + `amend`, and `required` + `STOP` to prove it STOPS and records it); the
+# sentence naming the draft must carry the Planner's single-writer authority and the
+# Driller's `do not create or amend` prohibition (a positive prohibition, not an absence
+# grep, so a Driller granted write authority would red); the sentence naming the topology
+# decision must carry `do not make` (the Driller hands the decision to the Planner); and
+# the sentence naming the ADR-delta authority must scope it to the non-topology decisions
+# it keeps. Each surface is asserted independently, so a divergence on the emitted body
+# reds while the role stays green (ADR-0003's one-body rule, the R8 lesson).
+guard "R10 driller role" "$DRILL_ROLE_SPAN" 5
+guard "R10 driller body" "$DRILL_BODY_SPAN" 20
+guard "R10 driller skill" "$DRILL_SKILL_SPAN" 20
+[ -f "$DRILL_CMD" ] || fail "R10: $DRILL_CMD is missing — the source-mode /sdd-drill command was not reconciled"
+for _r10_pair in "R10 driller role|$DRILL_ROLE_FOLD" "R10 driller emitted body|$DRILL_BODY_FOLD" \
+                 "R10 driller .claude/commands|$DRILL_CMD_FOLD" "R10 driller .agents/skills|$DRILL_SKILL_FOLD"; do
+  _r10_lbl="${_r10_pair%%|*}"; _r10_f="${_r10_pair#*|}"
+  every_naming_sentence_carries "$_r10_lbl hand-off" "$_r10_f" "deployable set changes" \
+    "/sdd-plan" "amend" "required" "STOP"
+  every_naming_sentence_carries "$_r10_lbl decision" "$_r10_f" "the topology decision" "do not make"
+  every_naming_sentence_carries "$_r10_lbl draft authority" "$_r10_f" "umbrella.manifest.draft.yaml" \
+    "Planner" "single writer" "do not create or amend"
+  every_naming_sentence_carries "$_r10_lbl ADR-delta authority" "$_r10_f" "your ADR-delta authority" \
+    "non-topology"
+done
+pass "R10 Planner is single writer; the Driller stops and records a required /sdd-plan amend [test_drill_does_not_amend_draft]"
 
 # ── R11: the amend path is append-only, latest-delta-wins, and removes the draft ─
 # test_amend_is_append_only

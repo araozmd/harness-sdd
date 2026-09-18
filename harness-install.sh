@@ -5435,21 +5435,29 @@ an arbitrary epic.
    `.harness/specs/adr/NNNN-<title>.md` (4-digit, above the max existing ADR number, no
    reuse) — do NOT rewrite or renumber F02's existing ADRs. Stay at per-epic depth; defer
    feature-level design to the feature's own spec.
-8. **Doc-critic checkpoint (before re-validation).** Spawn the **Doc-critic**
+8. **Topology changes — stop and hand off.** If the decomposition reveals that the
+   deployable set changes — a new, removed, or renamed deployable — STOP and record it as a
+   required `/sdd-plan` amend; do not make the topology decision yourself. The Planner is
+   the single writer of the draft manifest; you do not create or amend
+   `.harness/umbrella.manifest.draft.yaml`, and do NOT run `/sdd-plan` yourself. Keep your
+   ADR-delta authority for the non-topology decisions this decomposition forces. Report the
+   required amend to the human so the Planner reconciles the draft before a feature that
+   depends on the changed deployable set is specced.
+9. **Doc-critic checkpoint (before re-validation).** Spawn the **Doc-critic**
    (`.harness/agents/doc-critic.md`) as a sub-agent with `target-type=epic-decomposition`,
    passing the target `epic.md` path, its feature table, the per-feature inbox brief paths,
    and any ADR delta paths. Apply any advisory findings inline, then proceed. If the critic
    invocation errors or times out, proceed best-effort and append a note under
    `.harness/progress/<run>/` recording the skipped/failed review.
-9. **Re-validate** `.harness/state/tasks.json` against `.harness/store/tasks.schema.json`. If
-   it fails, report the failure and do NOT claim a successful drill.
-10. Present the **single epic-level decision** (one decision, not per feature):
-   - **approve** → flip the epic `draft → planned` and stamp `autonomous: true` on every
-     seeded feature (all-or-nothing); or
-   - **keep gated** → flip the epic `draft → planned`, leaving every seeded feature
-     `autonomous: false` so each parks at the per-feature spec-approval gate.
-   Re-validate again after the flip/stamp.
-11. **Report** the seeded features (ids + titles + `spec_path`s), the inbox briefs + ADR
+10. **Re-validate** `.harness/state/tasks.json` against `.harness/store/tasks.schema.json`. If
+    it fails, report the failure and do NOT claim a successful drill.
+11. Present the **single epic-level decision** (one decision, not per feature):
+    - **approve** → flip the epic `draft → planned` and stamp `autonomous: true` on every
+      seeded feature (all-or-nothing); or
+    - **keep gated** → flip the epic `draft → planned`, leaving every seeded feature
+      `autonomous: false` so each parks at the per-feature spec-approval gate.
+    Re-validate again after the flip/stamp.
+12. **Report** the seeded features (ids + titles + `spec_path`s), the inbox briefs + ADR
     ids, any ADR deltas, and the decision taken; tell the human to **run `/sdd-next`** to
     execute. Do NOT spawn the Architect, do NOT write any feature `.spec/.plan/.tasks/.tests`,
     and advance ONLY the target epic to `planned` — the Driller decomposes, never specs.
