@@ -384,3 +384,14 @@
   bound that reaches the mapping boundary makes a constant length floor redundant — retire it
   rather than leave an unpinned constant, and prove the bound with a pre-fix old-test control
   (the finding's mutant is GREEN on the old bound, RED on the new one).
+- [2026-09-18 builder] Superseding the previous entry's "stop at the next block's column-0
+  header": that header test must require the line be **NON-COMMENT** (`/^[^[:space:]#]/`),
+  because a column-0 comment does NOT end a YAML mapping. With any-column-0 it, appending
+  `# extra model documentation` then an indented `pin.claude.frontier` to one copy stops the
+  capture AT the comment, so both extracts stay byte-identical while the config reader walks
+  through the comment and reads the child (E99-F162 finding 4046520085; the pre-fix test was
+  GREEN on it). Pair the byte `cmp` with a SEMANTIC `key=value` comparison (comment-only and
+  blank lines dropped, matching `_cfg_models_value`) but keep BOTH: each is uniquely
+  load-bearing — byte owns the block's comment-byte identity (E99-F160 MC/MD), semantic owns
+  reader-visible keys; only the next block's trailing column-0 comment header is trimmed, so
+  indented `# pin…` comment appends still red (E99-F162 round-5 controls).

@@ -29,55 +29,90 @@ export HARNESS_PR_LOOP_ENABLED=true
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
-# E99-F162 — STRUCTURAL END + END MARKER + NO-INTERIOR-BLANK for every block extract that
-# is compared against another copy. `[ -s ]` proves only that the START anchor matched; the
-# block must also be bounded where its mapping really ends, or an appended entry escapes the
-# comparison entirely.
+# E99-F162 — SEMANTIC MAPPING EQUALITY plus a separate, scoped BYTE-IDENTITY check for every
+# duplicated `models:` / `workers:` block. `[ -s ]` proves only that the START anchor matched;
+# a block whose mapping is compared must also be bounded where its mapping really ends, or an
+# appended entry escapes the comparison entirely.
 #
 # The bound is the block's STRUCTURAL END: from the anchor comment, through the block's own
 # top-level key and its indented mapping/comment lines, up to (but excluding) the next
-# COLUMN-0 line — the next block's comment header, the next top-level key, or the heredoc's
-# `EOF` terminator — then a trailing run of blank lines is dropped. It is deliberately NOT
-# the first blank line (finding 4046384380): YAML ignores blank lines inside a mapping, so an
-# indented child appended after such a blank is still a member of THIS mapping, yet a
-# blank-bounded extractor stops before it, the capture still ends on the END MARKER,
-# uniqueness and `cmp` both pass, and fresh-install (verbatim config copy) and migrated
-# (heredoc append) targets silently diverge. The block's own indented `# pin.…`
-# documentation STAYS in the compared span: stripping trailing comment-only lines would
-# reopen E99-F160 M8/M8b, so the next block's column-0 header is excluded by the BOUND, not
-# by dropping comments.
+# COLUMN-0 NON-COMMENT line — the next block's top-level key, a later mapping's key, or the
+# heredoc's `EOF` terminator. A column-0 COMMENT does NOT end a YAML mapping (finding
+# 4046520085): YAML ignores comments, so `models:` keeps an indented child appended after
+# one, and a bound that stopped at the comment truncated the capture exactly where the desync
+# escaped — `# extra model documentation` + an indented `pin.claude.frontier` on the config
+# side only left both extracts byte-identical while a config reader read the new pin. It is
+# deliberately NOT the first blank line either (finding 4046384380): YAML ignores blank lines
+# inside a mapping too.
 #
-# On top of the bound, each of the four extracts carries two structural checks:
-#   * END MARKER — the capture's LAST line IS the block's structural last content line, and
-#     that line occurs EXACTLY once in its source (`grep -cF` == 1). A truncating bound reds
-#     here; a legitimate append past the marker reds too, forcing the maintainer to advance
-#     the marker instead of silently widening the blind spot (finding 4046240133).
-#   * NO INTERIOR BLANK — the mapping is one unbroken run. A blank line inside the span is
-#     the shape that used to truncate the capture and hide a one-sided tail desync
-#     (E99-F160 MF2/MG/ML) and is still the separator the old bound treated as
-#     authoritative; the canonical block carries none.
-# A constant LENGTH FLOOR (rounds 1-3) is RETIRED here: with a structural bound the END
-# MARKER already proves the exact end and the NO-INTERIOR-BLANK guard owns the interior-blank
-# shape, so a floor can no longer be the unique cause of any kill — it would be an unpinned
-# constant. The markers (each verified unique in its source) are:
-#   * models  — `  # pin.claude.reasoning: ""` (the block's last line in BOTH
-#     harness.config.yaml and the harness-install.sh heredoc).
-#   * workers — `  roster: false` (the `workers:` block's last content line).
-require_extract_end_marker() {
-  _em_cap="$1"; _em_marker="$2"; _em_src="$3"; _em_what="$4"
-  _em_last="$(tail -n 1 "$_em_cap" || true)"
-  [ "$_em_last" = "$_em_marker" ] \
-    || fail "$_em_what: extraction did NOT reach the block's END MARKER — captured last line is '$_em_last', expected '$_em_marker'. The structural bound (next top-level key / EOF) fired INSIDE the block (truncation), a line was APPENDED past the marker (e.g. a real mapping key added after the blank, finding 4046384380), or this copy's last line was edited one-sided (desync). If the block legitimately grew, update this test's end marker to the block's new last content line"
-  _em_n="$(grep -cF -- "$_em_marker" "$_em_src" || true)"
-  [ "$_em_n" = "1" ] \
-    || fail "$_em_what: END MARKER is not unique in $_em_src — found ${_em_n:-0} occurrence(s) of '$_em_marker', expected exactly 1. The marker must name a single structural end: update it to the block's unique last content line"
+# The block's own indented `# pin.…` documentation STAYS in the byte comparison. Only the
+# next block's COLUMN-0 comment header is dropped, by the trailing trim in `_block_region`:
+# the config's `# Codex PR review loop …` header precedes `pr_loop:` but the install-side
+# heredoc stops at its `EOF` before it, so that run is a known, intended asymmetry — not a
+# desync. Trimming blank + column-0-comment tails removes it without stripping the block's
+# own (indented) documentation (E99-F160 M8/M8b).
+#
+# Two checks run over every captured block:
+#   * SEMANTIC EQUALITY (`require_same_mapping`) — the `key=value` leaves a config READER
+#     sees, with comment-only lines, blank lines and inline comments dropped. This is the
+#     authoritative check for a real added/changed/removed key (finding 4046520085's
+#     `pin.claude.frontier`) and matches `_cfg_models_value`'s behaviour: layout is
+#     irrelevant, any real key-value is not.
+#   * BYTE IDENTITY (`cmp` on the captured text, plus `require_no_interior_blank`) — a
+#     separate, clearly-scoped check that the block's own comments and formatting stay in
+#     sync byte-for-byte.
+# A constant LENGTH FLOOR (rounds 1-3) and the END MARKER (round 4) are RETIRED: with a
+# structural bound the semantic check owns an appended real key and
+# `require_no_interior_blank` owns an interior blank, so a floor was an unpinned constant;
+# and the marker is no longer the boundary, so its "did not reach the marker" message would
+# misname a real appended key as a stale marker.
+#
+# mapping_pairs <capture> — the SEMANTIC view of a captured block: one `key=value` per
+# indented mapping leaf, sorted. Comment-only lines, blank lines and inline comments are
+# dropped; a real key/value is not. Mirrors what `_cfg_models_value` accepts.
+mapping_pairs() {
+  awk '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*$/ { next }
+    /^[^[:space:]]/ { next }
+    {
+      line = $0
+      sub(/[[:space:]]+#.*$/, "", line)
+      if (line !~ /^[[:space:]]+[A-Za-z0-9_.-]+:/) next
+      key = line; sub(/^[[:space:]]+/, "", key); sub(/:.*/, "", key)
+      val = line; sub(/^[[:space:]]+[A-Za-z0-9_.-]+:[[:space:]]*/, "", val); sub(/[[:space:]]+$/, "", val)
+      print key "=" val
+    }' "$1" | LC_ALL=C sort
+}
+
+# require_same_mapping <what> <seed-capture> <migrated-capture> <required-key>...
+# Fail-CLOSED on a stale or truncated extractor (an empty parse, or any required key
+# missing), then require the two parsed mappings to be equal. The failure message names a
+# SEMANTIC key/value desync, distinct from the byte-identity `cmp` below and from the
+# interior-blank guard, so the next maintainer can tell the three apart.
+require_same_mapping() {
+  _rsm_what="$1"; _rsm_seed="$2"; _rsm_migr="$3"; shift 3
+  mapping_pairs "$_rsm_seed" > "$_rsm_seed.pairs"
+  mapping_pairs "$_rsm_migr" > "$_rsm_migr.pairs"
+  [ -s "$_rsm_seed.pairs" ] \
+    || fail "$_rsm_what: no SEMANTIC key/value pairs parsed from the seeded copy — the extractor or its mapping anchor is stale (fail-closed)"
+  [ -s "$_rsm_migr.pairs" ] \
+    || fail "$_rsm_what: no SEMANTIC key/value pairs parsed from the migrated copy — the extractor or its mapping anchor is stale (fail-closed)"
+  for _rsm_f in "$_rsm_seed.pairs" "$_rsm_migr.pairs"; do
+    for _rsm_k in "$@"; do
+      grep -q "^${_rsm_k}=" "$_rsm_f" \
+        || fail "$_rsm_what: the parsed mapping from ${_rsm_f%.pairs} is missing required key '$_rsm_k' — the extractor did not reach the whole mapping, or a required key was deleted (fail-closed)"
+    done
+  done
+  cmp -s "$_rsm_seed.pairs" "$_rsm_migr.pairs" \
+    || fail "$_rsm_what: the two copies' SEMANTIC mapping differs — a real key/value was added, changed or removed on one side (comment-only, blank-line and inline-comment reformatting does NOT count). Parsed diff: $(diff "$_rsm_seed.pairs" "$_rsm_migr.pairs" | head -n 8)"
 }
 
 # require_no_interior_blank <capture> <what> — the canonical mapping block is one unbroken
-# run with no blank line inside it. A blank was the OLD bound's terminator; while the
-# structural bound no longer stops there, a blank inside the span is exactly the shape that
-# used to truncate the capture and let a one-sided tail desync compare equal, and the
-# duplicated text must not carry it (E99-F162 MF2/MTAIL).
+# run with no blank line inside it. A blank inside the span is the shape that used to
+# truncate the capture and let a one-sided tail desync compare equal, and the duplicated text
+# must not carry it (E99-F162 MF2/MTAIL/MW). A blank is semantically inert, so this is a
+# separate formatting check over the same capture, not part of the semantic comparison.
 require_no_interior_blank() {
   _nb_cap="$1"; _nb_what="$2"
   _nb_hit="$(grep -n '^$' "$_nb_cap" | head -n 1 || true)"
@@ -192,21 +227,30 @@ test_change_size_block_seeded() {
 # the ubiquitous .gitignore line (R11), the seeded opt-in config key (R1/R2), and NO roster
 # file, because the gate is off by default.
 #
+# _block_region <anchor-literal> <file> — emit a duplicated block's captured text: from the
+# column-0 anchor comment line, through the block's own top-level key and its indented
+# mapping/comment lines, up to (but excluding) the next COLUMN-0 NON-COMMENT line or EOF;
+# then drop the trailing run of blank / column-0 comment-only lines (the next block's
+# header, which the install-side heredoc does not carry). A column-0 COMMENT does not end a
+# YAML mapping (finding 4046520085); the full rule and its rationale are at the top of this
+# file. Shared by `workers_block` and `models_block` so the two bounds cannot drift apart.
+_block_region() {
+  awk -v anchor="$1" '
+    substr($0, 1, length(anchor)) == anchor { m = 1; b[++n] = $0; next }
+    m && /^[A-Za-z0-9_.-]+:/ && !k { k = 1; b[++n] = $0; next }
+    m && k && /^[^[:space:]#]/ { exit }
+    m { b[++n] = $0 }
+    END {
+      while (n > 0 && (b[n] == "" || b[n] ~ /^#/)) n--
+      for (i = 1; i <= n; i++) print b[i]
+    }' "$2"
+}
+
 # workers_block <config> — the `workers:` block WITH its comment header, from the anchor
 # comment to the block's STRUCTURAL end. Anchored on the comment rather than the
 # `workers:` line because the seeded and migrated texts must converge INCLUDING their
-# documentation, and bounded STRUCTURALLY — through the block's own top-level `workers:`
-# key and its indented lines, up to the next COLUMN-0 line or EOF, minus any trailing blank
-# run. A blank line inside the mapping is NOT an end: YAML keeps an indented child appended
-# after it in THIS mapping, so a blank bound lets that child escape the seeded-vs-migrated
-# comparison (finding 4046384380; same bound shape as models_block below).
-workers_block() {
-  awk '/^# Worker roster \(E17-F04\)/ { m = 1; b[++n] = $0; next }
-       m && /^[A-Za-z0-9_.-]+:/ && !k { k = 1; b[++n] = $0; next }
-       m && k && /^[^[:space:]]/ { exit }
-       m { b[++n] = $0 }
-       END { while (n > 0 && b[n] == "") n--; for (i = 1; i <= n; i++) print b[i] }' "$1"
-}
+# documentation. A blank or comment-only line inside the mapping is NOT an end.
+workers_block() { _block_region '# Worker roster' "$1"; }
 
 test_worker_roster_wiring_installed() {
   _c="$T/.harness/harness.config.yaml"
@@ -236,7 +280,6 @@ test_workers_block_seeded_migrated_converge() {
   workers_block "$_wcfg" > "$_wc/blk-seeded.txt"
   [ -s "$_wc/blk-seeded.txt" ] \
     || fail "workers convergence: the SEEDED workers: block could not be captured — its comment header anchor is missing from the source harness.config.yaml"
-  require_extract_end_marker "$_wc/blk-seeded.txt" '  roster: false' "$_wcfg" "workers convergence: the SEEDED workers: block"
   require_no_interior_blank "$_wc/blk-seeded.txt" "workers convergence: the SEEDED workers: block"
 
   # Strip the whole block INCLUDING its comment header, so migration has to re-supply both.
@@ -248,8 +291,12 @@ test_workers_block_seeded_migrated_converge() {
   workers_block "$_wcfg" > "$_wc/blk-migrated.txt"
   [ -s "$_wc/blk-migrated.txt" ] \
     || fail "workers convergence: migrate_config appended no workers: block to a config that lacked one"
-  require_extract_end_marker "$_wc/blk-migrated.txt" '  roster: false' "$_wcfg" "workers convergence: the MIGRATED workers: block"
   require_no_interior_blank "$_wc/blk-migrated.txt" "workers convergence: the MIGRATED workers: block"
+  # SEMANTIC equality first: the key/value leaves a config reader sees, so a real appended
+  # key (the finding's shape) reds here even if its comments/framing keep the byte captures
+  # identical. `cmp` below is the separate, scoped comment/format byte-identity check.
+  require_same_mapping "workers convergence: the seeded and migrated workers: blocks" \
+    "$_wc/blk-seeded.txt" "$_wc/blk-migrated.txt" roster
   cmp -s "$_wc/blk-seeded.txt" "$_wc/blk-migrated.txt" \
     || fail "workers convergence: the MIGRATED workers: block is NOT byte-identical to the seeded one: $(diff "$_wc/blk-seeded.txt" "$_wc/blk-migrated.txt" | head -n 8)"
 
@@ -264,24 +311,11 @@ test_workers_block_seeded_migrated_converge() {
 # `# Per-role model routing` anchor to the block's STRUCTURAL end. Works unmodified on
 # EITHER the shipped harness.config.yaml OR the raw harness-install.sh source text: the
 # heredoc harness-install.sh appends is written to be byte-identical to the shipped
-# block, so the same anchor/bound pair captures both without installing anything.
-#
-# STRUCTURAL bound (finding 4046384380): the anchor, the block's own top-level `models:`
-# key, and its indented lines, up to the next COLUMN-0 line — `# Codex PR review loop …`
-# in the config, the heredoc's `EOF` in harness-install.sh — minus any trailing blank run.
-# NOT the first blank line: YAML keeps an indented child appended after a blank inside this
-# mapping, and a blank-bounded extractor stops before it, so the capture still ends on the
-# END MARKER while a one-sided appended key escapes `cmp`. The next block's `# Codex …`
-# header is excluded because it is COLUMN-0 (the bound), not by stripping comment lines:
-# the block's own `# pin…` documentation must stay in the compared span (E99-F160 M8/M8b,
-# which a trailing-comment strip would reopen).
-models_block() {
-  awk '/^# Per-role model routing \(E17-F01\)/ { m = 1; b[++n] = $0; next }
-       m && /^[A-Za-z0-9_.-]+:/ && !k { k = 1; b[++n] = $0; next }
-       m && k && /^[^[:space:]]/ { exit }
-       m { b[++n] = $0 }
-       END { while (n > 0 && b[n] == "") n--; for (i = 1; i <= n; i++) print b[i] }' "$1"
-}
+# block, so the same anchor/bound pair captures both without installing anything. Same
+# `_block_region` bound as `workers_block`; see the top-of-file section comment for why a
+# column-0 comment does not end the mapping and why the trailing `# Codex …` header is
+# trimmed only by its COLUMN-0 comment shape (the block's own indented `# pin…` docs stay).
+models_block() { _block_region '# Per-role model routing' "$1"; }
 
 # E17-F01: the `models:` block is DUPLICATED — the seed shipped in harness.config.yaml
 # and the heredoc harness-install.sh appends when migrating an older config — and
@@ -302,13 +336,17 @@ test_models_block_seed_and_heredoc_converge() {
   models_block "$SRC/harness.config.yaml" > "$T/models-cfg.txt"
   [ -s "$T/models-cfg.txt" ] \
     || fail "models convergence: the models: block could not be captured from harness.config.yaml — its comment header anchor is missing"
-  require_extract_end_marker "$T/models-cfg.txt" '  # pin.claude.reasoning: ""' "$SRC/harness.config.yaml" "models convergence: harness.config.yaml's seeded models: block"
   require_no_interior_blank "$T/models-cfg.txt" "models convergence: harness.config.yaml's seeded models: block"
   models_block "$SRC/harness-install.sh" > "$T/models-install.txt"
   [ -s "$T/models-install.txt" ] \
     || fail "models convergence: the models: block could not be captured from harness-install.sh's heredoc — its comment header anchor is missing"
-  require_extract_end_marker "$T/models-install.txt" '  # pin.claude.reasoning: ""' "$SRC/harness-install.sh" "models convergence: harness-install.sh's heredoc models: block"
   require_no_interior_blank "$T/models-install.txt" "models convergence: harness-install.sh's heredoc models: block"
+  # SEMANTIC equality first (finding 4046520085): the mapping a config reader sees. A real
+  # key appended after a column-0 comment on ONE side (e.g. `pin.claude.frontier`) is caught
+  # here regardless of how the comments frame it; `cmp` below is the separate, scoped
+  # comment/format byte-identity check.
+  require_same_mapping "models convergence: harness.config.yaml vs harness-install.sh's heredoc models: block" \
+    "$T/models-cfg.txt" "$T/models-install.txt" default orchestrator architect builder builder-heavy reviewer scout doc-critic
   cmp -s "$T/models-cfg.txt" "$T/models-install.txt" \
     || fail "models convergence: harness-install.sh's heredoc models: block is NOT byte-identical to harness.config.yaml's seeded block: $(diff "$T/models-cfg.txt" "$T/models-install.txt" | head -n 8)"
 }
