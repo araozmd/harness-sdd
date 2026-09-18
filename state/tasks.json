@@ -979,7 +979,13 @@
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F162-block-extract-length-floor/"
+          "spec_path": "specs/epics/E99-maintenance/F162-block-extract-length-floor/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (208)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E99-F162 done --evidence <merge-ref>`",
+            "pr": "208"
+          }
         },
         {
           "id": "E99-F163",
