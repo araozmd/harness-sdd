@@ -1448,19 +1448,20 @@
         {
           "id": "E28-F03",
           "title": "Installer promotion: single-target install -> umbrella coordinator from umbrella.manifest.yaml, git-init missing children, run optional scaffold_cmd, cascade + landing audit (local git only)",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "8f40c650e73e70993a172ceb1f5d8a87fcf364f7",
+            "ref": "8f40c650e73e70993a172ceb1f5d8a87fcf364f7",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": false,
           "depends_on": [
             "E28-F02"
           ],
-          "spec_path": "specs/epics/E28-greenfield-to-umbrella/F03-promote-to-umbrella/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (204)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E28-F03 done --evidence <merge-ref>`",
-            "pr": "204"
-          }
+          "spec_path": "specs/epics/E28-greenfield-to-umbrella/F03-promote-to-umbrella/"
         }
       ]
     },
