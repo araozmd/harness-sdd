@@ -29,35 +29,64 @@ export HARNESS_PR_LOOP_ENABLED=true
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
-# E99-F162 — LENGTH FLOOR for every block extract that is compared against another copy.
-# `[ -s ]` proves only that the START anchor matched: a capture truncated by a blank line
-# inserted INSIDE the block is still non-empty, and when BOTH copies truncate at the same
-# place the byte comparison passes on two stubs (E99-F160 MF2/MG/ML — one blank line after
-# the anchor in each file, plus a real one-sided mid-block desync, stayed green through all
-# 47 suites). Each floor below is the physical line of the block's LAST CONTENT line inside
-# the blank/EOF-bounded span in the pristine source, so a blank line inserted anywhere in
-# that span drops the capture below it and reds naming truncation:
-#   * models  35 — the block is COMMENT-HEAVY: the escape-hatch documentation (the seven
-#                  `# pin.<front-end>.<tier>` examples) runs for 17 lines AFTER the last
-#                  required role key, `doc-critic:` (line 18), and those lines are INSIDE the
-#                  extracted span. A floor at the key alone (18) is the hole finding
-#                  4046166646 names: a blank line after `doc-critic:` truncates both copies
-#                  to exactly 18, clears the floor, and a one-sided desync in the 17-line
-#                  tail passes silently. 35 is the block's last content line — the last
-#                  `# pin.claude.reasoning: ""` example.
-#   * workers 19 — `roster: false` is both the last content line and the last child of
-#                  `workers:`; nothing optional follows it.
-# The floor is the last CONTENT line, NOT the last required key: a key-only floor covers just
-# a prefix of the compared span, while the byte comparison covers it all. Lines APPENDED to
-# the block keep the floor passing (it is a lower bound); the number needs editing only if a
-# block's fixed tail is legitimately SHORTENED (for models, dropping a `# pin.*` example).
-# A capture under the floor reds HERE naming truncation; only captures that clear it reach
-# the byte comparison, whose failure names a desync instead — the two are never conflated.
+# E99-F162 — END MARKER + LENGTH FLOOR for every block extract that is compared against
+# another copy. `[ -s ]` proves only that the START anchor matched; a length floor proves
+# only that the capture reached some minimum depth. Neither proves the extractor reached the
+# block's END, and that gap is two-way (finding 4046240133):
+#   * a blank line inserted INSIDE the block truncates the capture — still non-empty, and
+#     still above a stale floor if the floor sat at a key that comes early enough;
+#   * a line APPENDED past the floor's last-content line grows the block while the floor
+#     keeps passing, so a desync between the floor and the true end compares equal.
+# In both shapes a one-sided desync in the unbounded tail passes silently (E99-F160
+# MF2/MG/ML). So each of the four extracts is pinned by an END MARKER: the capture's LAST
+# line must be the block's structural last content line, and that marker line must occur
+# exactly ONCE in the source it was captured from (`grep -cF` == 1). A truncation before the
+# marker fails loudly; a legitimate APPEND past the marker ALSO fails loudly, forcing the
+# maintainer to advance the marker (and the floor) instead of silently widening the blind
+# spot. The floor stays as a complementary lower bound that names truncation in a capture
+# which never reached the marker; the END MARKER is what proves the extractor reached the
+# real block end.
+#   * models  35 / marker `  # pin.claude.reasoning: ""` — the block is COMMENT-HEAVY: the
+#                  escape-hatch documentation (the seven `# pin.<front-end>.<tier>`
+#                  examples) runs for 17 lines AFTER the last required role key,
+#                  `doc-critic:` (line 18), and those lines are INSIDE the extracted span.
+#                  A floor at the key alone (18) is the hole finding 4046166646 named: a
+#                  blank line after `doc-critic:` truncates both copies to exactly 18,
+#                  clears the floor, and a one-sided desync in the 17-line tail passes
+#                  silently. 35 is the block's last content line — the last
+#                  `# pin.claude.reasoning: ""` example, which the end marker verifies is
+#                  the capture's tail (not a truncated prefix).
+#   * workers 19 / marker `  roster: false` — both the last content line and the last child
+#                  of `workers:`; nothing optional follows it.
+# The floor is the last CONTENT line, NOT the last required key: a key-only floor covers
+# just a prefix of the compared span, while the byte comparison covers it all. A capture
+# under the floor reds HERE naming truncation; only captures that clear it reach the END
+# MARKER check, whose failure names truncation-or-append and tells the maintainer to update
+# the marker. The comparison's own failure names a desync — the three are never conflated.
 require_extract_floor() {
   _ef="$1"; _floor="$2"; _what="$3"
   _en="$(wc -l < "$_ef" | tr -d ' ' || true)"
   [ "$_en" -ge "$_floor" ] \
     || fail "$_what: extraction TRUNCATED — captured only ${_en:-0} line(s), fewer than this block's length floor of $_floor (its last content line inside the extractor's span); the extractor's bound (blank line / EOF) fired INSIDE the block, so a one-sided desync past that point would compare equal and pass silently"
+}
+
+# require_extract_end_marker <capture> <marker-line> <source> <what> — proves the extractor
+# reached the block's real END, not merely a non-empty/above-floor prefix. Two claims, both
+# needed: (1) the marker occurs EXACTLY once in <source> (`grep -cF` == 1), so it names a
+# unique structural end and cannot be satisfied by a duplicate or a moved occurrence; (2)
+# the capture's LAST line IS that marker. A truncating bound leaves the capture ending early
+# and reds; a legitimate append past the marker moves the true end and reds too, telling the
+# maintainer to advance the marker (the rot shape finding 4046240133 names, which a constant
+# floor alone cannot see). `grep -c`/`tail` are wrapped `|| true` so a zero count or an empty
+# capture reaches the named guard instead of aborting under `set -e` with no diagnosis.
+require_extract_end_marker() {
+  _em_cap="$1"; _em_marker="$2"; _em_src="$3"; _em_what="$4"
+  _em_last="$(tail -n 1 "$_em_cap" || true)"
+  [ "$_em_last" = "$_em_marker" ] \
+    || fail "$_em_what: extraction did NOT reach the block's END MARKER — captured last line is '$_em_last', expected '$_em_marker'. The extractor's bound (blank line / EOF) fired INSIDE the block (truncation), a line was APPENDED past the marker, or this copy's last line was edited one-sided (desync). If the block legitimately grew, update this test's end marker (and its length floor) to the block's new last content line"
+  _em_n="$(grep -cF -- "$_em_marker" "$_em_src" || true)"
+  [ "$_em_n" = "1" ] \
+    || fail "$_em_what: END MARKER is not unique in $_em_src — found ${_em_n:-0} occurrence(s) of '$_em_marker', expected exactly 1. The marker must name a single structural end: update it to the block's unique last content line"
 }
 
 # F1 (E99-F161 round 2): every test in this suite invokes `sh "$SRC/harness-install.sh"`,
@@ -208,6 +237,7 @@ test_workers_block_seeded_migrated_converge() {
   [ -s "$_wc/blk-seeded.txt" ] \
     || fail "workers convergence: the SEEDED workers: block could not be captured — its comment header anchor is missing from the source harness.config.yaml"
   require_extract_floor "$_wc/blk-seeded.txt" 19 "workers convergence: the SEEDED workers: block"
+  require_extract_end_marker "$_wc/blk-seeded.txt" '  roster: false' "$_wcfg" "workers convergence: the SEEDED workers: block"
 
   # Strip the whole block INCLUDING its comment header, so migration has to re-supply both.
   awk '/^# Worker roster \(E17-F04\)/ { skip = 1 } skip && /^  roster:/ { skip = 0; next } !skip' \
@@ -219,6 +249,7 @@ test_workers_block_seeded_migrated_converge() {
   [ -s "$_wc/blk-migrated.txt" ] \
     || fail "workers convergence: migrate_config appended no workers: block to a config that lacked one"
   require_extract_floor "$_wc/blk-migrated.txt" 19 "workers convergence: the MIGRATED workers: block"
+  require_extract_end_marker "$_wc/blk-migrated.txt" '  roster: false' "$_wcfg" "workers convergence: the MIGRATED workers: block"
   cmp -s "$_wc/blk-seeded.txt" "$_wc/blk-migrated.txt" \
     || fail "workers convergence: the MIGRATED workers: block is NOT byte-identical to the seeded one: $(diff "$_wc/blk-seeded.txt" "$_wc/blk-migrated.txt" | head -n 8)"
 
@@ -270,10 +301,12 @@ test_models_block_seed_and_heredoc_converge() {
   [ -s "$T/models-cfg.txt" ] \
     || fail "models convergence: the models: block could not be captured from harness.config.yaml — its comment header anchor is missing"
   require_extract_floor "$T/models-cfg.txt" 35 "models convergence: harness.config.yaml's seeded models: block"
+  require_extract_end_marker "$T/models-cfg.txt" '  # pin.claude.reasoning: ""' "$SRC/harness.config.yaml" "models convergence: harness.config.yaml's seeded models: block"
   models_block "$SRC/harness-install.sh" > "$T/models-install.txt"
   [ -s "$T/models-install.txt" ] \
     || fail "models convergence: the models: block could not be captured from harness-install.sh's heredoc — its comment header anchor is missing"
   require_extract_floor "$T/models-install.txt" 35 "models convergence: harness-install.sh's heredoc models: block"
+  require_extract_end_marker "$T/models-install.txt" '  # pin.claude.reasoning: ""' "$SRC/harness-install.sh" "models convergence: harness-install.sh's heredoc models: block"
   cmp -s "$T/models-cfg.txt" "$T/models-install.txt" \
     || fail "models convergence: harness-install.sh's heredoc models: block is NOT byte-identical to harness.config.yaml's seeded block: $(diff "$T/models-cfg.txt" "$T/models-install.txt" | head -n 8)"
 }

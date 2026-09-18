@@ -361,3 +361,15 @@
   CONTENT line (models 35; workers 19) instead of re-bounding; prove it with a symmetric
   blank AFTER the last required key (MTAIL), which must red with "TRUNCATED", and a one-sided
   tail desync (MTAILD), which must red via `cmp` at `35c35`.
+- [2026-09-18 builder] A length floor is a lower bound on DEPTH, not proof the extractor reached
+  the block's END: a line appended past the floor's last content line GROWS the compared span
+  while the floor keeps passing, so a one-sided desync in the new tail compares equal (E99-F162
+  finding 4046240133 — the constant-floor shape Codex rejected). Pair every extract-and-compare
+  floor with an END MARKER: assert the capture's LAST line IS the block's structural last content
+  line, and that marker occurs exactly ONCE in its source (`grep -cF == 1`), so a future append
+  reds and forces the maintainer to advance it. A desync that touches the marker line now reds at
+  the END MARKER rather than via `cmp`; pin a separate non-marker tail desync if the `cmp`
+  diagnostic is the contract. Pin BOTH new claims with neutered-guard controls — marker neutered
+  + append-past-marker must go GREEN (`control-marker.py` A), uniqueness neutered + duplicated
+  marker must go GREEN (`control-unique.py`) — or the guard is decoration beside a check that
+  already covers it.
