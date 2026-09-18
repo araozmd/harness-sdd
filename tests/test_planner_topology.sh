@@ -3,7 +3,8 @@
 #
 # Covers R1–R10 of
 # specs/epics/E28-greenfield-to-umbrella/F02-planner-topology/E28-F02.spec.md:
-#   R1  >1 deployable ⇒ exactly one repo-topology ADR, above-max 4-digit id
+#   R1  >1 deployable ⇒ exactly one repo-topology ADR, above-max 4-digit id, excluded
+#       from the generic architecture-ADR pass so a greenfield run cannot emit two
 #   R2  >1 deployable ⇒ draft at umbrella.manifest.draft.yaml, one repos: entry per
 #       deployable with the required key set; keys are normalization-unique and a
 #       collision is disambiguated deterministically (-2, -3, ...) (+ fixture run)
@@ -24,7 +25,8 @@
 #       rename are all expressible; the trigger reads that effective set and removes the
 #       derived draft when it falls to <=1 deployable (committed ADRs kept); the draft is
 #       the ONE carve-out from the amend's no-deletion rule; and the amend's doc-critic
-#       checkpoint reviews ONLY the newly written material, prohibiting fixes to the
+#       checkpoint reviews ONLY the newly written material, ALLOWING fixes within the
+#       appended `## Repo topology` delta while prohibiting changes OUTSIDE it — the
 #       committed vision/architecture/existing ADRs (the greenfield branch keeps the
 #       full plan-output checkpoint)
 #   R12 the derived umbrella.manifest.draft.yaml is excluded from the harness-owned path
@@ -242,6 +244,41 @@ for _rj_pair in "R1 role ADR justification|$ROLE_FOLD" \
     "repo-topology ADR" "why it is separate"
 done
 pass "R1 role + body + both source artifacts require the ADR to name each repository and why it is separate [test_role_and_body_name_the_topology_adr]"
+
+# ── R1: the repo-topology decision is EXCLUDED from the generic ADR pass ───────
+# (Reviewer finding 4043843860.) The generic architecture-ADR pass above requires one
+# ADR per decision, topology included, while the topology step then writes its own
+# `repo-topology ADR` — so a literal greenfield run can emit TWO topology ADRs despite
+# the "exactly one" rule. The topology decision must be excluded from the generic pass,
+# and the topology step must state that it fulfills that pass, so exactly one is
+# produced. Bounded to the sentence naming `generic ADR pass` (positive control), which
+# only the resolved wording carries; on pre-change text no sentence names it, so the
+# assertion REDs. Asserted on every surface the step lives on (role, emitted body,
+# `.claude/commands`, `.agents/skills`) so a hand-edit dropping the exclusion on the
+# executable body alone reds.
+for _ga_pair in "R1 role generic pass exclusion|$ROLE_FOLD" \
+                 "R1 emitted body generic pass exclusion|$BODY_FOLD" \
+                 "R1 .claude/commands generic pass exclusion|$CMD_FOLD" \
+                 "R1 .agents/skills generic pass exclusion|$SKILL_FOLD"; do
+  _ga_lbl="${_ga_pair%%|*}"; _ga_f="${_ga_pair#*|}"
+  every_naming_sentence_carries "$_ga_lbl" "$_ga_f" "generic ADR pass" \
+    "excluded" "exactly one" "repo-topology ADR"
+done
+# ...and the generic pass SENTENCE itself must carry the exclusion: a separate
+# `generic ADR pass` sentence alone does not stop the pass from still claiming the
+# topology decision. Bounded to the sentence naming `one ADR per decision`, on every
+# surface that carries the generic pass (the role's `## What you do`, the emitted body,
+# `.claude/commands`, `.agents/skills`). On pre-change text that sentence carries
+# neither `repo-topology` nor `excluded`, so this REDs with the finding's exact defect.
+for _gp_pair in "R1 role generic pass|$PLAN_WHAT_FOLD" \
+                 "R1 emitted body generic pass|$BODY_FOLD" \
+                 "R1 .claude/commands generic pass|$CMD_FOLD" \
+                 "R1 .agents/skills generic pass|$SKILL_FOLD"; do
+  _gp_lbl="${_gp_pair%%|*}"; _gp_f="${_gp_pair#*|}"
+  every_naming_sentence_carries "$_gp_lbl" "$_gp_f" "one ADR per decision" \
+    "repo-topology" "excluded"
+done
+pass "R1 the repo-topology decision is excluded from the generic architecture-ADR pass, so exactly one repo-topology ADR is produced [test_role_and_body_name_the_topology_adr]"
 
 # ── R7: the portable contract carries the whole rule ───────────────────────────
 # test_planner_role_portable_contract
@@ -702,9 +739,20 @@ for _dc_pair in "R11 doc-critic role|$ROLE_CRITIC_FOLD" \
   # `append-only` and stays green when the exclusivity verb is deleted (M5, R13).
   every_naming_sentence_carries "$_dc_lbl scope" "$_dc_f" "newly written material" \
     "only the newly written" "repo-topology ADR" "delta" "epic.md"
-  # ...and the prohibition sentence forbids fixing the committed baseline.
-  every_naming_sentence_carries "$_dc_lbl prohibition" "$_dc_f" "committed planning baseline" \
-    "never" "fix" "specs/vision.md" "specs/architecture.md" "existing ADR"
+  # ...and the prohibition sentence ALLOWS fixes WITHIN the appended section while
+  # forbidding any change OUTSIDE it (Reviewer finding 4043843863). The checkpoint reviews
+  # the appended `## Repo topology` delta, so a valid finding against the delta must be
+  # fixable; the old "never applies a doc-critic fix to a committed specs/architecture.md"
+  # wording forbade fixing the very section under review, so a valid delta finding had to
+  # be ignored. The prohibition is now scoped to "no changes outside the appended
+  # section". Bounded to the sentence naming `committed planning baseline` (positive
+  # control); on pre-change text that sentence carries neither
+  # `fix within the appended section only` nor `no changes outside the appended section`,
+  # so each assertion REDs there.
+  every_naming_sentence_carries "$_dc_lbl prohibition inside" "$_dc_f" "committed planning baseline" \
+    "fix within the appended section only" "repo-topology ADR" "epic.md"
+  every_naming_sentence_carries "$_dc_lbl prohibition outside" "$_dc_f" "committed planning baseline" \
+    "no changes outside the appended section" "specs/vision.md" "specs/architecture.md" "existing ADR"
 done
 # The Doc-critic role's contract must state that a caller-scoped subset limits the fixes
 # to that subset (the clarification that makes the checkpoint's own "apply fixes inline"
@@ -713,7 +761,7 @@ done
 guard "R11 doc-critic contract" "$DOC_CRITIC_SPAN" 3
 every_naming_sentence_carries "R11 doc-critic contract scope" "$DOC_CRITIC_FOLD" \
   "review only that subset" "newly written material" "propose fixes only there" "never"
-pass "R11 the amend doc-critic checkpoint reviews only newly written material and prohibits fixes to committed artifacts [test_amend_is_append_only]"
+pass "R11 the amend doc-critic checkpoint reviews only newly written material, allows fixes within the appended section and prohibits changes outside it [test_amend_is_append_only]"
 
 # ── R12: the derived draft is project-owned, not harness drift ─────────────────
 # test_draft_excluded_from_harness_owned

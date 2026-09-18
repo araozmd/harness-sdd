@@ -40,7 +40,8 @@ spec.**
    non-goals, and the roadmap shape.
 4. **Write** `specs/vision.md` from `specs/_templates/vision.md` (greenfield run).
 5. **Write** `specs/architecture.md` from `specs/_templates/architecture.md`, and one
-   ADR per decision at `specs/adr/NNNN-<title>.md` from `specs/_templates/adr.md`;
+   ADR per decision at `specs/adr/NNNN-<title>.md` from `specs/_templates/adr.md` — the
+   repo-topology decision is excluded here, owned by the repo-topology step;
    `architecture.md` references each ADR by its `ADR-NNNN` id.
 6. **Seed under the board lock** a block of `draft` epics (each `status: "draft"`,
    `features: []`) and a matching `specs/epics/<id>-<slug>/epic.md` per epic.
@@ -77,7 +78,8 @@ On a greenfield run, write `specs/architecture.md` from
 `specs/adr/NNNN-<title>.md`, where `NNNN` is **4-digit zero-padded** (`0001`, `0002`,
 …). Allocate `NNNN` strictly **above** the **max** existing ADR number — **no reuse** of
 a vacated number, even if a lower one is free. One decision per ADR; each is an atomic,
-citable unit.
+citable unit. The repo-topology decision is excluded from this generic ADR pass: the
+repo-topology step owns it and writes its single `repo-topology ADR`.
 
 **Architecture depth boundary (D6).** Scope `architecture.md`/ADR depth to the stable,
 **whole-system upfront** decisions only — the cross-cutting choices that constrain more
@@ -88,8 +90,11 @@ what an earlier epic's implementation taught, are F03's job — not yours.
 
 ## Repo topology output (R1-R7, R10)
 
-Repo topology is an output of planning, never an input. The topology output step is
-itself gated on an actual deployable-set change: Only when the amend added or removed a
+Repo topology is an output of planning, never an input. The repo-topology decision is
+excluded from the generic ADR pass above: the repo-topology step fulfills that pass and
+writes exactly one `repo-topology ADR`, so a greenfield plan never produces a second. The
+topology output step is itself gated on an actual deployable-set change: Only when the
+amend added or removed a
 deployable, or gave one a new name, does it append the dated topology delta and the new
 `repo-topology ADR` and reconcile the draft, while a non-topology amend leaves the
 topology artifacts untouched. On a greenfield run the set is new, so when
@@ -228,10 +233,12 @@ run, pass every path just written (`specs/vision.md`, `specs/architecture.md`, t
 `specs/epics/<id>-<slug>/epic.md`) and apply any advisory findings inline. On an amend, the
 doc-critic reviews only the newly written material — the dated, append-only `## Repo
 topology` delta section appended to `specs/architecture.md`, the new `repo-topology ADR`,
-and the newly seeded `epic.md` files. An amend never applies a doc-critic fix to a
-committed `specs/vision.md`, `specs/architecture.md`, or an existing ADR: those committed
-artifacts stay untouched, because the amend is append-only and must not rewrite the
-committed planning baseline. If the critic invocation errors or times out, proceed
+and the newly seeded `epic.md` files. An amend may apply a doc-critic fix within the
+appended section only — the dated topology delta, the new `repo-topology ADR` and the
+newly seeded `epic.md` — and makes no changes outside the appended section: the committed
+`specs/vision.md`, the rest of `specs/architecture.md`, and every existing ADR stay
+untouched, because the amend is append-only and must not rewrite the committed planning
+baseline. If the critic invocation errors or times out, proceed
 best-effort and append a note to `progress/<run>/` recording the skipped or failed review.
 
 ## Validate before claiming success (R13)

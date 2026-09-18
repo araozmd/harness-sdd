@@ -40,11 +40,15 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
 6. **Greenfield branch only — Write** `specs/architecture.md` from
    `specs/_templates/architecture.md` (system shape + stable upfront
    decisions), and one ADR per decision at `specs/adr/NNNN-<title>.md` from
-   `specs/_templates/adr.md` (4-digit, above the max existing ADR number);
+   `specs/_templates/adr.md` (4-digit, above the max existing ADR number); the
+   repo-topology decision is excluded here, owned by the repo-topology step;
    `architecture.md` references each ADR by its `ADR-NNNN` id. Stay at whole-system
    depth — defer per-epic deltas to `/sdd-drill` (F03).
 7. **Repo topology output.** Repo topology is an output of planning,
-   never an input. The topology output step is itself gated on an actual
+   never an input. The repo-topology decision is excluded from the generic ADR pass
+   above: the repo-topology step fulfills that pass and writes exactly one
+   `repo-topology ADR`, so a greenfield plan never produces a second. The topology output
+   step is itself gated on an actual
    deployable-set change: Only when the amend added or removed a deployable, or gave
    one a new name, does it append the dated topology delta and the new `repo-topology
    ADR` and reconcile the draft, while a non-topology amend leaves the topology
@@ -132,10 +136,12 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    append-only `## Repo topology` delta section appended to
    `specs/architecture.md`, the new `repo-topology ADR`, and the newly seeded
    `epic.md` files.
-   An amend never applies a doc-critic fix to a committed
-   `specs/vision.md`, `specs/architecture.md`, or an existing ADR:
-   those committed artifacts stay untouched, because the amend is append-only and must
-   not rewrite the committed planning baseline. If the critic invocation errors or
+   An amend may apply a doc-critic fix within the appended section only — the dated
+   topology delta, the new `repo-topology ADR` and the newly seeded `epic.md` — and makes
+   no changes outside the appended section: the committed `specs/vision.md`,
+   the rest of `specs/architecture.md`, and every existing ADR stay untouched,
+   because the amend is append-only and must not rewrite the committed planning baseline.
+   If the critic invocation errors or
    times out, proceed best-effort and append a note under `progress/<run>/`
    recording the skipped/failed review.
 10. **Re-validate** `state/tasks.json` against
