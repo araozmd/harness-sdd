@@ -4,6 +4,34 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.83.0] — 2026-09-18
+
+### Added — installer promotion: a single install becomes an umbrella coordinator (E28-F03)
+
+- **`--umbrella <dir> --from-manifest <file>` promotes an existing single install into an
+  umbrella coordinator** from the Planner's draft manifest
+  (`<dir>/.harness/umbrella.manifest.draft.yaml`). The flag is umbrella-mode only; without
+  it single-target mode and the plain `--umbrella` cascade are unchanged. The target must
+  already carry an install (`.harness/.harness-version`), and the draft's presence is never
+  the switch.
+- **Promotion reuses the existing cascade.** It creates each missing child and runs
+  `git init` locally (no remote), runs the entry's optional opaque `scaffold_cmd` inside
+  children it just created (best-effort; a non-zero exit warns on stderr naming the child
+  and the command and continues), re-bases each draft `path:` from the draft's own directory
+  to the umbrella root (`../<key>` ⇒ `./<key>`), and seeds `umbrella.manifest.yaml`
+  non-clobberingly before the child install, discovery and landing audit run unchanged.
+- **Every gate fails closed.** A missing/unreadable/empty-`repos:` manifest, a `path:`
+  escaping the umbrella, a non-direct child, a basename that does not equal the `repos:`
+  key, and a declared child that already exists but is not a git work tree all abort
+  non-zero before any write, naming the path and the remedy. `--dry-run` previews the
+  create/git-init/scaffold/re-base plan and writes nothing; `--shared-repo` composes.
+- **The promoted root keeps its own board** (`state/tasks.json`, `specs/`, `progress/`,
+  config values) and promotion writes no child-local board; the landing audit (exit `3`,
+  never commits) remains the only git-state gate.
+- **New suite `tests/test_promote.sh`** covers R1–R9 and R11 with positive controls and
+  structurally-bounded docs spans; `tests/test_install.sh` gains the single-target/wiring
+  assertions for R1 and R10.
+
 ## [0.82.0] — 2026-09-17
 
 ### Added — the Planner emits a repo-topology ADR and a draft umbrella manifest (E28-F02)
