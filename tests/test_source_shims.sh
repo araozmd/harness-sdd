@@ -63,46 +63,39 @@ SPAWNED='architect builder builder-heavy doc-critic orchestrator pr-fixer review
 NOT_SPAWNED='driller fixer inception planner'
 
 # ─────────────────────────────────────────────────────────────────────────────────────
-# Known gaps: real, same class, and OUT OF SCOPE for E99-F16 (they are different
-# capabilities with different callers — E17-F03's escalation tier and the pr-loop's fixer —
-# and folding them in would have made that fix a survey).
+# Known gaps: NONE currently. E99-F16 carried `builder-heavy:opencode` and
+# `pr-fixer:opencode` here because the source OpenCode surface was hand-maintained and
+# incomplete. E31-F02 generates that surface via `--self`, so `builder-heavy` is now a key
+# in the generated opencode.json (opencode-json mechanism) and `pr-fixer` is
+# `.opencode/agent/pr-fixer.md` (opencode-file mechanism) — both are covered by the
+# general registration rule below, and the entries were deleted.
 #
-# These are asserted as STILL BEING GAPS, not skipped. An entry that is merely exempted
-# outlives its reason silently; an entry asserted to still be broken fails the moment
-# someone fixes it, and the failure message says to delete the line. That is the only way
-# an exemption list stays honest.
+# The list is kept, not removed: a future genuine gap is asserted as STILL BEING A GAP,
+# not skipped. An entry that is merely exempted outlives its reason silently; an entry
+# asserted to still be broken fails the moment someone fixes it, and the failure message
+# says to delete the line. That is the only way an exemption list stays honest.
 #
 # Format: <role>:<front-end>, one per line.
-KNOWN_GAPS='builder-heavy:opencode
-pr-fixer:opencode'
+KNOWN_GAPS=''
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 # 1. The front-end enumeration, machine-checked rather than assumed.
 #
-# Source registers Claude and native Codex roles plus the existing OpenCode JSON
-# entries. Every registered role is validated below; retired/unsupported source
-# registration trees remain absent.
+# Source registers Claude and native Codex roles, plus OpenCode through BOTH its
+# mechanisms: the `agent:` map in opencode.json AND the file-based `.opencode/agent/`
+# tree (F02 made `.opencode/` installer-generated source glue). Every registered role
+# is validated below; retired/unsupported source registration trees remain absent.
 [ -d "$SRC/.claude/agents" ] \
   || fail "source front-end enumeration: .claude/agents/ is missing entirely"
 [ -f "$SRC/opencode.json" ] \
   || fail "source front-end enumeration: opencode.json is missing entirely"
 [ -d "$SRC/.codex/agents" ] || fail "source native Codex registration missing"
-for _fe in .gemini .opencode; do
-  # `.opencode` is the one entry with a KNOWN remedy, so it gets its own message. Its
-  # KNOWN_GAPS xfail (`pr-fixer:opencode`) can ONLY be fixed by creating
-  # `.opencode/agent/pr-fixer.md` — which trips this absence check ~70 lines before the
-  # xfail's own self-expiry message fires. Sending that author to "add the mechanism" is a
-  # dead end: `opencode-file` is already one of the mechanisms registration_probe validates
-  # in full. The xfail design promises "it fails the moment someone fixes it and the
-  # message says to delete the line"; without this, that promise breaks on the one entry
-  # whose fix is least obvious.
-  if [ "$_fe" = ".opencode" ]; then
-    [ -e "$SRC/$_fe" ] && fail "source now has .opencode/ — if you are retiring the 'pr-fixer:opencode' known gap, the 'opencode-file' mechanism in registration_probe ALREADY validates .opencode/agent/<role>.md in full and needs no change: just delete '.opencode' from this absence list and delete that KNOWN_GAPS line"
-  else
-    [ -e "$SRC/$_fe" ] && fail "source now registers roles in $_fe/ — that front-end is not covered by this suite's per-role loop; add it to registration_probe's MECHANISMS/EXTRACTORS and to this enumeration (a new front-end silently uncovered is exactly the E99-F16 bug)"
-  fi
+[ -d "$SRC/.opencode/agent" ] \
+  || fail "source front-end enumeration: .opencode/agent/ is missing — F02 generates it as source glue; without it the opencode-file mechanism is absent"
+for _fe in .gemini; do
+  [ -e "$SRC/$_fe" ] && fail "source now registers roles in $_fe/ — that front-end is not covered by this suite's per-role loop; add it to registration_probe's MECHANISMS/EXTRACTORS and to this enumeration (a new front-end silently uncovered is exactly the E99-F16 bug)"
 done
-pass "source registers roles in three front-ends (.claude/agents/, .codex/agents/, opencode.json)"
+pass "source registers roles in three front-ends (.claude/agents/, .codex/agents/, opencode.json + .opencode/agent/)"
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 # 2. The classification accounts for every role file.
@@ -303,9 +296,9 @@ def m_opencode_json():
 def m_opencode_file():
     # `.opencode/agent/<role>.md` — the file-based OpenCode agent. This is the mechanism
     # the installer uses for pr-fixer (harness-install.sh's gen_oc_agent), which
-    # tests/test_pr_loop.sh:482 asserts must NEVER appear in opencode.json. Absent from the
-    # source today; modeled so that retiring the `pr-fixer:opencode` known gap is checked
-    # rather than merely counted.
+    # tests/test_pr_loop.sh:482 asserts must NEVER appear in opencode.json. E31-F02 makes
+    # `--self` emit it as source glue, which is what lets the general registration rule
+    # below cover `pr-fixer:opencode` instead of an exemption.
     text = read(os.path.join(SRC, ".opencode", "agent", ROLE + ".md"))
     if text is None:
         return ABSENT
