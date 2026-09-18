@@ -5307,8 +5307,12 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
      removed, or given a new name — does it append the dated topology delta and the new
      `repo-topology ADR` and reconcile or remove the derived draft, as the repo-topology
      contract below describes; an amend that only adds epics or non-topology ADR deltas
-     must not touch the topology artifacts. Never rewrite, re-seed, or renumber an
-     existing artifact or roadmap entry.
+     must not touch the topology artifacts. This amend consumes the Driller's persisted
+     **topology handoff** when one exists: read `.harness/progress/<run>/topology-handoff.md`,
+     which carries the full resulting deployable set the drill discovered — each
+     deployable's logical key, its `path`, and why it is separate — so the amend detects
+     the change from the persisted set instead of guessing. Never rewrite, re-seed, or
+     renumber an existing artifact or roadmap entry.
 4. Run a short, **adaptive** Q&A with the human to clarify: the problem and who it is
    for, the outcomes, the non-goals, and the roadmap shape. Where the shape forks, offer
    **at most 3** options as **text-only** (markdown/ASCII) mockups — never images. Keep
@@ -5476,9 +5480,20 @@ an arbitrary epic.
    topology decision yourself. The Planner is the single writer of the draft manifest;
    you do not create or amend `.harness/umbrella.manifest.draft.yaml`, and do NOT run
    `/sdd-plan` yourself. Keep your ADR-delta authority for the non-topology decisions
-   this decomposition forces. Report the required amend to the human so the Planner
-   reconciles the draft before a feature that depends on the changed deployable set is
-   specced. A topology-dependent feature must not be persisted before that amend.
+   this decomposition forces. **Persist the discovered topology before you hand off.**
+   The Planner's amend starts in a fresh context and `.harness/specs/architecture.md`
+   still names the old deployable set, so an amend cannot see what your Q&A discovered
+   unless you write it down: before you report, persist the full resulting deployable set
+   to a durable **topology handoff** file at `.harness/progress/<run>/topology-handoff.md`
+   — one entry per deployable with its logical key, its `path`, and why it is separate when
+   known. The handoff is the only topology artifact you write; it does not grant you
+   manifest-write authority, and the Planner remains the single writer. Report the
+   required amend to the human (run `/sdd-plan` in amend mode) and name the
+   `.harness/progress/<run>/topology-handoff.md` file in that stop message, so the fresh
+   amend consumes the persisted set instead of guessing. Reconcile against that set before
+   a feature that depends on the changed topology is specced — do not seed such a feature
+   on the strength of a draft you did not reconcile. A topology-dependent feature must not
+   be persisted before that amend.
 7. **Seed** the decomposition: write each new feature into the epic's `features` array
    (`status: "pending"`, `sdd: true`, one-line `title`, `spec_path`, intra-epic
    `depends_on`; ids as a next-sequential block strictly above the epic's max `F##`,

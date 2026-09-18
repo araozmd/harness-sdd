@@ -33,9 +33,20 @@ an arbitrary epic.
    topology decision yourself. The Planner is the single writer of the draft manifest;
    you do not create or amend `umbrella.manifest.draft.yaml`, and do NOT run
    `/sdd-plan` yourself. Keep your ADR-delta authority for the non-topology decisions
-   this decomposition forces. Report the required amend to the human so the Planner
-   reconciles the draft before a feature that depends on the changed deployable set is
-   specced. A topology-dependent feature must not be persisted before that amend.
+   this decomposition forces. **Persist the discovered topology before you hand off.**
+   The Planner's amend starts in a fresh context and `specs/architecture.md`
+   still names the old deployable set, so an amend cannot see what your Q&A discovered
+   unless you write it down: before you report, persist the full resulting deployable set
+   to a durable **topology handoff** file at `progress/<run>/topology-handoff.md`
+   — one entry per deployable with its logical key, its `path`, and why it is separate when
+   known. The handoff is the only topology artifact you write; it does not grant you
+   manifest-write authority, and the Planner remains the single writer. Report the
+   required amend to the human (run `/sdd-plan` in amend mode) and name the
+   `progress/<run>/topology-handoff.md` file in that stop message, so the fresh
+   amend consumes the persisted set instead of guessing. Reconcile against that set before
+   a feature that depends on the changed topology is specced — do not seed such a feature
+   on the strength of a draft you did not reconcile. A topology-dependent feature must not
+   be persisted before that amend.
 7. **Seed** the decomposition: write each new feature into the epic's `features` array
    (`status: "pending"`, `sdd: true`, one-line `title`, `spec_path`, intra-epic
    `depends_on`; ids as a next-sequential block strictly above the epic's max `F##`,

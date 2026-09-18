@@ -34,8 +34,12 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
      removed, or given a new name — does it append the dated topology delta and the new
      `repo-topology ADR` and reconcile or remove the derived draft, as the repo-topology
      contract below describes; an amend that only adds epics or non-topology ADR deltas
-     must not touch the topology artifacts. Never rewrite, re-seed, or renumber an
-     existing artifact or roadmap entry.
+     must not touch the topology artifacts. This amend consumes the Driller's persisted
+     **topology handoff** when one exists: read `progress/<run>/topology-handoff.md`,
+     which carries the full resulting deployable set the drill discovered — each
+     deployable's logical key, its `path`, and why it is separate — so the amend detects
+     the change from the persisted set instead of guessing. Never rewrite, re-seed, or
+     renumber an existing artifact or roadmap entry.
 4. Run a short, **adaptive** Q&A with the human to clarify: the problem and who it is
    for, the outcomes, the non-goals, and the roadmap shape. Where the shape forks, offer
    **at most 3** options as **text-only** (markdown/ASCII) mockups — never images. Keep

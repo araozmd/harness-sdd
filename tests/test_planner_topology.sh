@@ -21,7 +21,9 @@
 #   R9  umbrella.manifest.example.yaml + docs/UMBRELLA.md document scaffold_cmd
 #   R10 the Planner is the single writer; /sdd-drill does not amend the draft and the
 #       Driller STOPS and records a required /sdd-plan amend when a decomposition changes
-#       the deployable set (role + emitted body + both source-mode command surfaces)
+#       the deployable set, PERSISTING the full resulting deployable set (logical key +
+#       path) to a progress/ handoff and naming that file in its stop message (role +
+#       emitted body + both source-mode command surfaces)
 #   R11 an amend records a topology change append-only (dated `## Repo topology`
 #       delta + a new ADR ALWAYS, including a collapse) as a COMPLETE replacement snapshot
 #       (the latest delta names the full set; earlier deltas superseded), so add/remove/
@@ -31,7 +33,8 @@
 #       checkpoint reviews ONLY the newly written material, ALLOWING fixes within the
 #       appended `## Repo topology` delta while prohibiting changes OUTSIDE it — the
 #       committed vision/architecture/existing ADRs (the greenfield branch keeps the
-#       full plan-output checkpoint)
+#       full plan-output checkpoint); the amend CONSUMES the Driller's persisted
+#       `progress/<run>/topology-handoff.md` set when one exists, instead of guessing
 #   R12 the derived umbrella.manifest.draft.yaml is excluded from the harness-owned path
 #       set (source AND installed layouts), so an untracked draft does not fail the drift
 #       guard, while a genuine harness-body edit still does
@@ -569,6 +572,23 @@ for _r10_pair in "R10 driller role|$DRILL_ROLE_FOLD" "R10 driller emitted body|$
   every_naming_sentence_carries "$_r10_lbl ADR-delta authority" "$_r10_f" "your ADR-delta authority" \
     "non-topology"
 done
+# PERSIST before the hand-off (PR #202 finding 4043983531). Stopping is not enough: the
+# Planner's amend starts in a FRESH context and `specs/architecture.md` still names the old
+# deployable set, so a literal amend cannot detect what the drill discovered and is told to
+# leave the topology artifacts untouched. The Driller must therefore persist the full
+# resulting deployable set (each deployable: logical key + `path` + why separate) to a
+# durable handoff under `progress/` and NAME that file in its stop message, so the fresh
+# amend can consume it. Bounded to the sentence naming `topology handoff` and the sentence
+# naming `stop message` (each a positive control), so the surrounding no-write prose cannot
+# satisfy either. On pre-change text neither needle names a sentence, so both RED.
+for _r10p_pair in "R10 driller role|$DRILL_ROLE_FOLD" "R10 driller emitted body|$DRILL_BODY_FOLD" \
+                  "R10 driller .claude/commands|$DRILL_CMD_FOLD" "R10 driller .agents/skills|$DRILL_SKILL_FOLD"; do
+  _r10p_lbl="${_r10p_pair%%|*}"; _r10p_f="${_r10p_pair#*|}"
+  every_naming_sentence_carries "$_r10p_lbl persist" "$_r10p_f" "topology handoff" \
+    "progress/" "logical key" "path"
+  every_naming_sentence_carries "$_r10p_lbl stop message" "$_r10p_f" "stop message" \
+    "topology-handoff.md"
+done
 # ORDERING, not mere presence (finding 4043487843): the stop-and-hand-off check must run
 # BEFORE any seeding/table/brief/ADR write, or the topology-dependent feature the durable
 # contract says not to seed is already persisted when the Driller stops and a re-run after
@@ -702,6 +722,23 @@ for _ag_pair in "R11 amend gate role|$PLAN_WHAT_FOLD" "R11 amend gate emitted bo
     "must not touch the topology artifacts"
 done
 pass "R11 the amend branch gates the topology writes on a detected deployable-set change and leaves them alone for a non-topology amend [test_amend_is_append_only]"
+
+# ── R11: the amend CONSUMES the Driller's persisted topology handoff ───────────
+# (PR #202 finding 4043983531, the Planner half.) The Driller persists the resulting
+# deployable set to a progress handoff, but unless the amend tells the fresh Planner to
+# consume it the file is inert and the amend still guesses — while it is instructed to
+# leave the topology artifacts untouched. The Amend branch must name the handoff file and
+# say it detects the change from that persisted set. Bounded to the sentence naming
+# `topology handoff` (positive control), on the role's `## What you do` (where the Amend
+# branch lives) and the emitted body / both source artifacts. On pre-change text no
+# sentence names `topology handoff`, so the positive control fails.
+for _ac_pair in "R11 amend consume role|$PLAN_WHAT_FOLD" "R11 amend consume emitted body|$BODY_FOLD" \
+                "R11 amend consume .claude/commands|$CMD_FOLD" "R11 amend consume .agents/skills|$SKILL_FOLD"; do
+  _ac_lbl="${_ac_pair%%|*}"; _ac_f="${_ac_pair#*|}"
+  every_naming_sentence_carries "$_ac_lbl" "$_ac_f" "topology handoff" \
+    "progress/" "consumes" "logical key" "path"
+done
+pass "R11 the amend branch consumes the Driller's persisted topology handoff (progress/ + logical key + path) instead of guessing [test_amend_is_append_only]"
 
 # ── R11: the topology output step ITSELF is gated; the no-op rule is greenfield-scoped ─
 # (Reviewer findings 4043709578 and 4043709584 — two refinements of the same condition.)

@@ -35,7 +35,11 @@ spec.**
    a new name — does it append the dated topology delta and the new `repo-topology ADR`
    and reconcile or remove the derived draft, as the `## Repo topology output` section
    below describes; an amend that only adds epics or non-topology ADR deltas must not
-   touch the topology artifacts.
+   touch the topology artifacts. This amend consumes the Driller's persisted **topology
+   handoff** when one exists: read `progress/<run>/topology-handoff.md`, which carries the
+   full resulting deployable set the drill discovered — each deployable's logical key, its
+   `path`, and why it is separate — so the amend detects the change from the persisted set
+   instead of guessing.
 3. Run a short, **adaptive** Q&A to clarify the problem, the users, the outcomes, the
    non-goals, and the roadmap shape.
 4. **Write** `specs/vision.md` from `specs/_templates/vision.md` (greenfield run).
