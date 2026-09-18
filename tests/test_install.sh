@@ -29,6 +29,28 @@ export HARNESS_PR_LOOP_ENABLED=true
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
+# E99-F162 — LENGTH FLOOR for every block extract that is compared against another copy.
+# `[ -s ]` proves only that the START anchor matched: a capture truncated by a blank line
+# inserted INSIDE the block is still non-empty, and when BOTH copies truncate at the same
+# place the byte comparison passes on two stubs (E99-F160 MF2/MG/ML — one blank line after
+# the anchor in each file, plus a real one-sided mid-block desync, stayed green through all
+# 47 suites). Each floor below is the physical line of the block's LAST REQUIRED key in the
+# pristine source, so the number is a contract rather than a snapshot of the block today:
+#   * models  18 — `doc-critic:`, the last of the seven MODEL_ROLE_NAMES roles; the anchor,
+#                  `models:`, `default` and every role key sit at or before it.
+#   * workers 19 — `roster:`, the last child of `workers:`; it is the block's final line
+#                  only because nothing optional follows it. Lines added after the last
+#                  required key keep the floor passing, so a failure here is an EARLY stop,
+#                  never a block that was merely edited.
+# A capture under the floor reds HERE naming truncation; only captures that clear it reach
+# the byte comparison, whose failure names a desync instead — the two are never conflated.
+require_extract_floor() {
+  _ef="$1"; _floor="$2"; _what="$3"
+  _en="$(wc -l < "$_ef" | tr -d ' ' || true)"
+  [ "$_en" -ge "$_floor" ] \
+    || fail "$_what: extraction TRUNCATED — captured only ${_en:-0} line(s), fewer than the block's structural minimum of $_floor; the extractor's bound (blank line / EOF) fired INSIDE the block, so a one-sided desync past that point would compare equal and pass silently"
+}
+
 # F1 (E99-F161 round 2): every test in this suite invokes `sh "$SRC/harness-install.sh"`,
 # never `./harness-install.sh` directly — so a dropped executable bit is invisible to all
 # 47 suites while README.md:304,322-325 and docs/UMBRELLA.md document the direct-exec
@@ -176,6 +198,7 @@ test_workers_block_seeded_migrated_converge() {
   workers_block "$_wcfg" > "$_wc/blk-seeded.txt"
   [ -s "$_wc/blk-seeded.txt" ] \
     || fail "workers convergence: the SEEDED workers: block could not be captured — its comment header anchor is missing from the source harness.config.yaml"
+  require_extract_floor "$_wc/blk-seeded.txt" 19 "workers convergence: the SEEDED workers: block"
 
   # Strip the whole block INCLUDING its comment header, so migration has to re-supply both.
   awk '/^# Worker roster \(E17-F04\)/ { skip = 1 } skip && /^  roster:/ { skip = 0; next } !skip' \
@@ -186,6 +209,7 @@ test_workers_block_seeded_migrated_converge() {
   workers_block "$_wcfg" > "$_wc/blk-migrated.txt"
   [ -s "$_wc/blk-migrated.txt" ] \
     || fail "workers convergence: migrate_config appended no workers: block to a config that lacked one"
+  require_extract_floor "$_wc/blk-migrated.txt" 19 "workers convergence: the MIGRATED workers: block"
   cmp -s "$_wc/blk-seeded.txt" "$_wc/blk-migrated.txt" \
     || fail "workers convergence: the MIGRATED workers: block is NOT byte-identical to the seeded one: $(diff "$_wc/blk-seeded.txt" "$_wc/blk-migrated.txt" | head -n 8)"
 
@@ -233,9 +257,11 @@ test_models_block_seed_and_heredoc_converge() {
   models_block "$SRC/harness.config.yaml" > "$T/models-cfg.txt"
   [ -s "$T/models-cfg.txt" ] \
     || fail "models convergence: the models: block could not be captured from harness.config.yaml — its comment header anchor is missing"
+  require_extract_floor "$T/models-cfg.txt" 18 "models convergence: harness.config.yaml's seeded models: block"
   models_block "$SRC/harness-install.sh" > "$T/models-install.txt"
   [ -s "$T/models-install.txt" ] \
     || fail "models convergence: the models: block could not be captured from harness-install.sh's heredoc — its comment header anchor is missing"
+  require_extract_floor "$T/models-install.txt" 18 "models convergence: harness-install.sh's heredoc models: block"
   cmp -s "$T/models-cfg.txt" "$T/models-install.txt" \
     || fail "models convergence: harness-install.sh's heredoc models: block is NOT byte-identical to harness.config.yaml's seeded block: $(diff "$T/models-cfg.txt" "$T/models-install.txt" | head -n 8)"
 }

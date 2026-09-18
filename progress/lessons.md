@@ -332,3 +332,16 @@
   anchor (`mentions … repository root`) plus a no-empty-inline-code-span negative with a
   planted positive control (E31-F02 finding 4045793773; `test_self_mode.sh::
   opencode_pr_fixer_root_explicit`, `test_source_shims.sh`).
+- [2026-09-18 builder] A length floor on an extract-and-compare test fires **before** the
+  byte comparison, so a mutant that layers a real one-sided desync on top of a truncation
+  reports TRUNCATION, not the desync — the desync is unreachable below the point extraction
+  stopped. Don't promise "the mutant names the desync" for that layered shape; the floor
+  names the root cause it is there to catch, and the truncation and `cmp` messages must stay
+  textually distinct so the two failures are never conflated (E99-F162 MF2/MG/ML).
+- [2026-09-18 builder] A "structural minimum" floor for a comment-heavy block is the
+  physical line of its LAST REQUIRED key, which can coincide with the block's final line
+  (workers: `roster:` = 19 = today's length). That is a contract, not a snapshot — a line
+  added after the key never moves it — so verify the distinguishing mutant instead of the
+  number: a symmetric blank AFTER the top-level key truncates both copies to 18 lines, and
+  only a floor above 18 sees it; a floor chosen one below the last required key to *look*
+  "not exact" silently misses that shape (E99-F162 MW).
