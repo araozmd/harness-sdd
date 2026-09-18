@@ -995,7 +995,13 @@
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F163-escalation-effort-awareness/"
+          "spec_path": "specs/epics/E99-maintenance/F163-escalation-effort-awareness/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (210)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E99-F163 done --evidence <merge-ref>`",
+            "pr": "210"
+          }
         },
         {
           "id": "E99-F164",
