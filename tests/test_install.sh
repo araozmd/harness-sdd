@@ -34,21 +34,30 @@ pass() { echo "ok - $1"; }
 # inserted INSIDE the block is still non-empty, and when BOTH copies truncate at the same
 # place the byte comparison passes on two stubs (E99-F160 MF2/MG/ML — one blank line after
 # the anchor in each file, plus a real one-sided mid-block desync, stayed green through all
-# 47 suites). Each floor below is the physical line of the block's LAST REQUIRED key in the
-# pristine source, so the number is a contract rather than a snapshot of the block today:
-#   * models  18 — `doc-critic:`, the last of the seven MODEL_ROLE_NAMES roles; the anchor,
-#                  `models:`, `default` and every role key sit at or before it.
-#   * workers 19 — `roster:`, the last child of `workers:`; it is the block's final line
-#                  only because nothing optional follows it. Lines added after the last
-#                  required key keep the floor passing, so a failure here is an EARLY stop,
-#                  never a block that was merely edited.
+# 47 suites). Each floor below is the physical line of the block's LAST CONTENT line inside
+# the blank/EOF-bounded span in the pristine source, so a blank line inserted anywhere in
+# that span drops the capture below it and reds naming truncation:
+#   * models  35 — the block is COMMENT-HEAVY: the escape-hatch documentation (the seven
+#                  `# pin.<front-end>.<tier>` examples) runs for 17 lines AFTER the last
+#                  required role key, `doc-critic:` (line 18), and those lines are INSIDE the
+#                  extracted span. A floor at the key alone (18) is the hole finding
+#                  4046166646 names: a blank line after `doc-critic:` truncates both copies
+#                  to exactly 18, clears the floor, and a one-sided desync in the 17-line
+#                  tail passes silently. 35 is the block's last content line — the last
+#                  `# pin.claude.reasoning: ""` example.
+#   * workers 19 — `roster: false` is both the last content line and the last child of
+#                  `workers:`; nothing optional follows it.
+# The floor is the last CONTENT line, NOT the last required key: a key-only floor covers just
+# a prefix of the compared span, while the byte comparison covers it all. Lines APPENDED to
+# the block keep the floor passing (it is a lower bound); the number needs editing only if a
+# block's fixed tail is legitimately SHORTENED (for models, dropping a `# pin.*` example).
 # A capture under the floor reds HERE naming truncation; only captures that clear it reach
 # the byte comparison, whose failure names a desync instead — the two are never conflated.
 require_extract_floor() {
   _ef="$1"; _floor="$2"; _what="$3"
   _en="$(wc -l < "$_ef" | tr -d ' ' || true)"
   [ "$_en" -ge "$_floor" ] \
-    || fail "$_what: extraction TRUNCATED — captured only ${_en:-0} line(s), fewer than the block's structural minimum of $_floor; the extractor's bound (blank line / EOF) fired INSIDE the block, so a one-sided desync past that point would compare equal and pass silently"
+    || fail "$_what: extraction TRUNCATED — captured only ${_en:-0} line(s), fewer than this block's length floor of $_floor (its last content line inside the extractor's span); the extractor's bound (blank line / EOF) fired INSIDE the block, so a one-sided desync past that point would compare equal and pass silently"
 }
 
 # F1 (E99-F161 round 2): every test in this suite invokes `sh "$SRC/harness-install.sh"`,
@@ -232,8 +241,11 @@ test_workers_block_seeded_migrated_converge() {
 # guards only a PREFIX: a pin line appended after it but still inside the block would be
 # invisible to the comparison below, which is exactly the desync shape this test exists
 # to catch (E99-F160 R1 — M8/M8b). The block has no interior blank line today, so the
-# `/^$/` arm is unambiguous; if that ever stops holding, bound on the next top-level key
-# instead.
+# `/^$/` arm is unambiguous; an interior blank would truncate BOTH captures, which is why
+# the two model extracts below carry a length floor (finding 4046166646). A "next top-level
+# key" bound is not a drop-in here: the config copy is followed by the `pr_loop:` comment
+# header, while the install-side heredoc stops at `EOF` before that header, so both bounds
+# would have to move in lockstep to stay comparable.
 models_block() {
   awk '/^# Per-role model routing \(E17-F01\)/ { m = 1 } m && (/^$/ || /^EOF$/) { exit } m { print }' "$1"
 }
@@ -257,11 +269,11 @@ test_models_block_seed_and_heredoc_converge() {
   models_block "$SRC/harness.config.yaml" > "$T/models-cfg.txt"
   [ -s "$T/models-cfg.txt" ] \
     || fail "models convergence: the models: block could not be captured from harness.config.yaml — its comment header anchor is missing"
-  require_extract_floor "$T/models-cfg.txt" 18 "models convergence: harness.config.yaml's seeded models: block"
+  require_extract_floor "$T/models-cfg.txt" 35 "models convergence: harness.config.yaml's seeded models: block"
   models_block "$SRC/harness-install.sh" > "$T/models-install.txt"
   [ -s "$T/models-install.txt" ] \
     || fail "models convergence: the models: block could not be captured from harness-install.sh's heredoc — its comment header anchor is missing"
-  require_extract_floor "$T/models-install.txt" 18 "models convergence: harness-install.sh's heredoc models: block"
+  require_extract_floor "$T/models-install.txt" 35 "models convergence: harness-install.sh's heredoc models: block"
   cmp -s "$T/models-cfg.txt" "$T/models-install.txt" \
     || fail "models convergence: harness-install.sh's heredoc models: block is NOT byte-identical to harness.config.yaml's seeded block: $(diff "$T/models-cfg.txt" "$T/models-install.txt" | head -n 8)"
 }

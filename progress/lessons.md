@@ -352,3 +352,12 @@
   to 18, clears the floor, and a one-sided desync in the 17-line tail passes (MTAIL green;
   floor 35 kills it). Workers got the shape right (19 = `roster:` = the block's final line);
   apply the same rule to every extract-and-compare block.
+- [2026-09-18 builder] Fixing that finding, a "next top-level key" END bound was NOT a clean
+  substitute for the first-blank bound on the models block: the `harness.config.yaml` copy is
+  followed by a 20-line `# Codex PR review loop …` comment header before `pr_loop:`, while the
+  install-side heredoc stops at its `EOF` before that header — so the two bounds capture
+  different spans for a reason the test never intends to compare. When a block's tail is a
+  fixed documentation run with no next-key signal at matching offsets, floor at the last
+  CONTENT line (models 35; workers 19) instead of re-bounding; prove it with a symmetric
+  blank AFTER the last required key (MTAIL), which must red with "TRUNCATED", and a one-sided
+  tail desync (MTAILD), which must red via `cmp` at `35c35`.
