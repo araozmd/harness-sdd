@@ -6,9 +6,9 @@ permission:
   bash: allow
 ---
 
-You are the **pr-fixer** for this project's agent harness (installed in ``).
+You are the **pr-fixer** for this project's agent harness (installed in the repository root).
 
 Your full, canonical role definition is `agents/pr-fixer.md` — read it now and
-follow it exactly. Resolve every relative path it mentions against ``
+follow it exactly. Resolve every relative path it mentions against the repository root
 (e.g. `harness.config.yaml` -> `harness.config.yaml`, `progress/` ->
 `progress/`).

@@ -7561,13 +7561,19 @@ self_model() {
 }
 
 # self_transform — stdin: a generated target-layout body; stdout: the source-layout
-# rendering. ORDER MATTERS: the prefix strip runs FIRST, then the sdd-pr-loop
-# path-resolution line (now stripped to a known literal) is swapped for the
+# rendering. ORDER MATTERS: the OpenCode-agent root rewrites run FIRST and match the
+# target-side `.harness/` prose they replace (`installed in `.harness/`` and
+# `mentions against `.harness/``); then the generic prefix strip runs; finally the
+# sdd-pr-loop path-resolution line (now stripped to a known literal) is swapped for the
 # source-layout banner — the banner itself names `.harness/`, so a later strip would
-# destroy it. The strip is anchored on `.harness/` exactly: `.pr-loop/` cache tokens
-# and every other dotted path survive untouched.
+# destroy it. A bare strip of the OpenCode agent left an EMPTY backtick placeholder where
+# the target names `.harness/`, so a source checkout told the agent to resolve against
+# nothing (PR #206 finding 4045793773); the two pre-strip rules name the repository root
+# instead, mirroring the command glue's source-layout line. The strip is anchored on
+# `.harness/` exactly: `.pr-loop/` cache tokens and every other dotted path survive
+# untouched.
 self_transform() {
-  sed 's|\.harness/||g; s|resolve every relative path against \. |resolve every relative path against the repository root. |g; s|Run init.sh first|Run ./init.sh first|g' | awk '
+  sed 's|(installed in `\.harness/`)|(installed in the repository root)|g; s|mentions against `\.harness/`|mentions against the repository root|g; s|\.harness/||g; s|resolve every relative path against \. |resolve every relative path against the repository root. |g; s|Run init.sh first|Run ./init.sh first|g' | awk '
     $0 == "hit. Resolve every relative path against ``." {
       print "hit. This is the harness **source-layout** copy: paths resolve from the repository root"
       print "(an installed consumer gets the same body with everything resolved against `.harness/`)."

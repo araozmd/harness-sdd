@@ -307,6 +307,32 @@ opencode_glue_source_layout() {
   pass "generated OpenCode glue carries the source layout (R7) [opencode_glue_source_layout]"
 }
 
+opencode_pr_fixer_root_explicit() {
+  # E31-F02 finding 4045793773 (PR #206): the OpenCode pr-fixer shim must name an explicit
+  # repository root. A bare `.harness/` strip left `installed in `` ` and `mentions
+  # against `` `, so a session OpenCode starts outside the repo root had NO root to resolve
+  # `progress/` against. Asserts the GENERATED fixture; test_source_shims asserts the
+  # committed artifact and test_self_drift's green arm ties committed == regenerated.
+  _pf="$F/.opencode/agent/pr-fixer.md"
+  [ -f "$_pf" ] || fail "no .opencode/agent/pr-fixer.md to check for an explicit root (R7)"
+  # Positive two-token anchor over the FOLDED body: "mentions" and "repository root" must
+  # co-occur in one sentence. Pre-fix the body contains no "repository root" at all, so the
+  # anchor reds on the trimmed-to-empty placeholder (replayed in the mutation probe).
+  _folded="$(tr '\n' ' ' < "$_pf")"
+  printf '%s\n' "$_folded" | grep -qE 'mentions[^.]{0,80}repository root' \
+    || fail "source .opencode/agent/pr-fixer.md does not resolve relative paths against an explicit repository root (R7)"
+  # Negative (§ "no empty path placeholder"). The stripped placeholder is an empty inline
+  # code span; count it on the fixed file (0). The planted probe is the positive control on
+  # the SHAPE, so the predicate can never be dead (lessons 2026-09-16).
+  _empties="$(grep -c '``' "$_pf" || true)"
+  [ "$_empties" -eq 0 ] \
+    || fail "source .opencode/agent/pr-fixer.md still carries an empty path placeholder (found $_empties) (R7)"
+  printf '%s\n' 'against ``' > "$T/empty-placeholder-probe"
+  grep -q '``' "$T/empty-placeholder-probe" \
+    || fail "test bug: the empty-placeholder predicate cannot match its own shape (R7)"
+  pass "source pr-fixer shim names an explicit repository root with no empty placeholder (R7) [opencode_pr_fixer_root_explicit]"
+}
+
 opencode_native_command_body() {
   for _c in sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-pr-loop; do
     _oc="$F/.opencode/command/$_c.md"; _cc="$F/.claude/commands/$_c.md"
@@ -389,6 +415,7 @@ self_opencode_pr_fixer_gate
 self_opencode_capability_glue_absent
 self_opencode_ownership_guards
 opencode_glue_source_layout
+opencode_pr_fixer_root_explicit
 opencode_native_command_body
 shared_skill_adapter_reused
 version_minor_and_changelog

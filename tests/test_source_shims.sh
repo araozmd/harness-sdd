@@ -469,6 +469,23 @@ done
 pass "every spawned role is registered in every source front-end (known gaps excepted)"
 
 # ─────────────────────────────────────────────────────────────────────────────────────
+# 3b. E31-F02 finding 4045793773 (PR #206): the COMMITTED source pr-fixer shim must name
+# an explicit repository root. A bare `.harness/` strip turned the target body's
+# `installed in `.harness/`` and `mentions against `.harness/`` into empty backtick spans,
+# so an OpenCode session started outside the repo root had no root to resolve `progress/`
+# against. The registration rule above proves the file points at `agents/pr-fixer.md`; it
+# does not prove the RESOLUTION INSTRUCTION names a root, which is what this pins.
+# test_self_mode.sh asserts the generator that writes this file; the drift gate ties the
+# two (committed == regenerated). Two tokens in one folded sentence, not a bare token.
+_PF="$SRC/.opencode/agent/pr-fixer.md"
+[ -f "$_PF" ] || fail "R7: committed .opencode/agent/pr-fixer.md is missing"
+tr '\n' ' ' < "$_PF" | grep -qE 'mentions[^.]{0,80}repository root' \
+  || fail "R7: committed .opencode/agent/pr-fixer.md does not resolve relative paths against an explicit repository root (finding 4045793773)"
+grep -q '``' "$_PF" \
+  && fail "R7: committed .opencode/agent/pr-fixer.md carries an empty path placeholder (finding 4045793773)"
+pass "committed source pr-fixer shim names the repository root with no empty placeholder (R7)"
+
+# ─────────────────────────────────────────────────────────────────────────────────────
 # 4. The doc-critic checkpoint specifically — all three preconditions, asserted apart.
 #
 # The general rule above proves the doc-critic shim FILE exists and that opencode.json

@@ -323,3 +323,12 @@
   source layout (opencode.json + AGENTS.md + `.opencode/` + `agents/`), or the test dirties
   the very working tree it is asserting on — and those artifacts must never be committed
   as glue.
+- [2026-09-18 builder] A generic prefix-strip transform (`s|prefix/||g`) that is correct for
+  POINTER paths leaves an EMPTY root when it strips PROSE that named the prefix as its base
+  ("resolve paths against `<prefix>/`"): the source shim then resolves against nothing, which
+  is worse than the installed form. The bug is a positive ABSENCE, so a "no surviving prefix"
+  assertion (E31-F02 R7's original `opencode_glue_source_layout`) stays green on it. Rewrite
+  the prose to an explicit root BEFORE the strip, and pin both halves — a two-token positive
+  anchor (`mentions … repository root`) plus a no-empty-inline-code-span negative with a
+  planted positive control (E31-F02 finding 4045793773; `test_self_mode.sh::
+  opencode_pr_fixer_root_explicit`, `test_source_shims.sh`).
