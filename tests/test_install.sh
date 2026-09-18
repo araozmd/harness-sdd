@@ -120,17 +120,87 @@ require_no_interior_blank() {
     || fail "$_nb_what: a BLANK line sits INSIDE the captured mapping (capture line ${_nb_hit%%:*}). The block must be one unbroken run — a blank here is the shape that used to truncate the extraction and hide a one-sided tail desync (E99-F162 MF2/MTAIL)"
 }
 
-# F1 (E99-F161 round 2): every test in this suite invokes `sh "$SRC/harness-install.sh"`,
-# never `./harness-install.sh` directly — so a dropped executable bit is invisible to all
-# 47 suites while README.md:304,322-325 and docs/UMBRELLA.md document the direct-exec
-# form. This is the ONLY assertion in the whole suite that notices that class of
-# regression; do not remove it without replacing it with an equivalent.
-test_harness_install_is_executable() {
-  [ -x "$SRC/harness-install.sh" ] ||
-    fail "harness-install.sh is not executable — README documents ./harness-install.sh"
-  pass "harness-install.sh keeps its executable bit (E99-F161 R2) [harness_install_is_executable]"
+# E99-F164 R1: the SOURCE executable bit for EVERY script the repo expects to be run
+# directly — derived by RULE, not one hand-written case per file.
+#
+# E99-F161 pinned only harness-install.sh; the CLASS survived it (the round-2 Reviewer
+# left all 47 suites green after `chmod -x tools/fix-worktree.sh`, while
+# `./tools/fix-worktree.sh` — documented at agents/fixer.md:282 — was Permission denied).
+# Every test invokes these with `sh "$SRC/<file>"`, never `./<file>`, so no suite executed
+# them and no suite could notice the missing bit.
+#
+# The required set is DERIVED, so it cannot rot:
+#   * REQUIRED: every tracked `*.sh` that carries a `#!` shebang and does NOT live under
+#     `tests/`. A new top-level or `tools/` script is covered the moment it is committed
+#     — there is no list to remember to extend.
+#   * EXEMPT: anything under `tests/`. tools/run-tests.sh runs every suite as
+#     `sh <suite>` (run-tests.sh:372) and many suites are deliberately mode 100644;
+#     forcing +x there would be wrong. `tests/fixtures/**` is frozen installer
+#     output/data, not an entrypoint. This is the ONLY exemption, and it is by PATH RULE
+#     (not by name); a genuinely non-direct-exec script outside tests/ would have to be
+#     classified explicitly, which is the point — the distinction is drawn by "is this a
+#     `./`-documented entrypoint or a runner-invoked/data script", and today every
+#     non-test `.sh` with a shebang is the former.
+#
+# TWO mode facts are checked, because they catch DIFFERENT regressions:
+#   * GIT'S TRACKED MODE (`git ls-files -s` == 100755) — the committed contract. It is
+#     authoritative and umask-independent, and it reds a commit that drops the bit even
+#     if the working tree was `chmod +x`'d back.
+#   * THE WORKING-TREE bit (`[ -x ]`) — what `./script` actually needs, and the exact
+#     shape the round-2 Reviewer reproduced with a bare `chmod -x`: the index is
+#     unchanged by that command, so a tracked-mode-only check stays GREEN on it and would
+#     not close the gap. (git preserves owner-exec on a normal checkout, so this does not
+#     false-fail after a fresh clone with a normal umask.)
+#
+# The `[ -x "$T/.harness/…" ]` assertions elsewhere in this suite are VACUOUS for this
+# guarantee: harness-install.sh:3655-3668 `chmod +x`'es each INSTALLED copy, so they test
+# the installer's own chmod, never the committed source mode.
+test_source_scripts_are_executable() {
+  command -v git >/dev/null 2>&1 \
+    || { pass "source_scripts_are_executable: git unavailable, source-mode check skipped"; return 0; }
+
+  _sse_files="$(git -C "$SRC" ls-files '*.sh' 2>/dev/null)" \
+    || fail "source_scripts_are_executable: git ls-files failed — cannot derive the script set"
+
+  _sse_seen=""
+  _sse_missing=""
+  while IFS= read -r _sse_f; do
+    [ -n "$_sse_f" ] || continue
+    case "$_sse_f" in tests/*) continue ;; esac        # runner-invoked via `sh`, exempt
+    [ -f "$SRC/$_sse_f" ] \
+      || fail "source_scripts_are_executable: tracked script '$_sse_f' is absent from the worktree"
+    # Only an interpreter-bearing file is a direct-exec candidate; a data `.sh` with no
+    # shebang would not be `./`-runnable even with +x, so it is not forced executable.
+    case "$(head -n 1 "$SRC/$_sse_f" 2>/dev/null || true)" in
+      '#!'*) : ;;
+      *) continue ;;
+    esac
+    _sse_seen="$_sse_seen $_sse_f"
+    _sse_mode="$(git -C "$SRC" ls-files -s -- "$_sse_f" 2>/dev/null | awk '{print $1}')"
+    if [ "$_sse_mode" != "100755" ]; then
+      _sse_missing="$_sse_missing $_sse_f(git:${_sse_mode:-<none>})"
+    elif [ ! -x "$SRC/$_sse_f" ]; then
+      _sse_missing="$_sse_missing $_sse_f(worktree:not-executable)"
+    fi
+  done <<_SSE_EOF
+$_sse_files
+_SSE_EOF
+
+  # Fail-CLOSED derivation guard: a broken or over-broad enumeration must not make this
+  # vacuously green. Each anchor is a script a doc tells a user/agent to run with a
+  # leading `./`; if the rule stops covering one, this reds and names it.
+  for _sse_c in harness-install.sh init.sh tools/run-tests.sh tools/fix-worktree.sh; do
+    case " $_sse_seen " in
+      *" $_sse_c "*) : ;;
+      *) fail "source_scripts_are_executable: derivation missed '$_sse_c' — the required-set rule or its tests/ exemption is wrong (a documented ./entrypoint must be covered)" ;;
+    esac
+  done
+
+  [ -z "$_sse_missing" ] \
+    || fail "source script(s) the repo documents running directly are not executable:$_sse_missing (E99-F164: git mode must be 100755 AND the worktree bit set; README documents ./harness-install.sh, agents/fixer.md documents ./tools/fix-worktree.sh)"
+  pass "all source scripts the repo runs directly keep their executable bit (E99-F164 R1) [source_scripts_are_executable]"
 }
-test_harness_install_is_executable
+test_source_scripts_are_executable
 
 test_root_gitignore_seeds_local_prompt_files() {
   [ -f "$T/.gitignore" ] || fail "project-root .gitignore not seeded"

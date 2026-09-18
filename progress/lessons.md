@@ -423,3 +423,14 @@
   it resolves to") into every target's agent shim, and after E99-F163 a codex effort-only pair
   differs by `model_reasoning_effort` alone — stale, shipped, and pinned by no test (E99-F163 N4).
   When a verdict's axes move, grep the `emit_agent` strings alongside the docs.
+- [2026-09-18 builder] `git ls-files -s` reads the INDEX, so a bare `chmod -x` on a tracked
+  script leaves it reporting `100755` — a source-mode check built on the tracked mode ALONE
+  stays green on the exact E99-F161 reproduction. Assert BOTH the tracked mode (the committed
+  contract) and the worktree `[ -x ]` bit (what `./script` needs), and kill each arm with its
+  own mutant: bare `chmod -x` for the worktree arm, `git update-index --chmod=-x` for the
+  tracked arm. (E99-F164)
+- [2026-09-18 builder] A per-file executable-bit check rots the moment a script is added;
+  derive the required set by RULE (every tracked `*.sh` with a shebang outside `tests/`) so a
+  new script is covered on commit, and add a fail-closed canary list of the `./`-documented
+  entrypoints so widening the exemption to drop one reds naming it. Prove the guard by
+  mutating the exemption, not by reading it. (E99-F164)
