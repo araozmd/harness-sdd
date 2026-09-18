@@ -420,6 +420,73 @@ test_path_gates_fail_closed() {
   cmp -s "$T/r4-symlink-outside.before" "$T/r4-symlink-outside.now" \
     || fail "R4 (symlink): a refused promotion modified the external work tree"
 
+  # DANGLING child symlink (`-e` follows the link and is false, so the old check treated it
+  # as missing): the apply phase would `mkdir` over the link — AFTER an earlier missing
+  # entry had already been created and git-init-ed, a partial promotion. The dangling link
+  # is the LATER entry (`zeta`) and `alpha` is the earlier missing one, so "nothing was
+  # written" proves the pre-pass refused the whole plan before any child was created.
+  # Tested BEFORE the symlink-inside case so this mutant's kill names the dangling-symlink
+  # guarantee, not the earlier link assertion.
+  _dl="$T/r4-dangling"; _dld="$_dl/.harness/umbrella.manifest.draft.yaml"
+  build_single "$_dl"
+  { printf 'repos:\n'; printf '%b' "  alpha:\n    path: ../alpha\n    init: ./init.sh\n    test_command: \"\"\n    delegate_cmd: \"\"\n"; printf '%b' "  zeta:\n    path: ../zeta\n    init: ./init.sh\n    test_command: \"\"\n    delegate_cmd: \"\"\n"; } > "$_dld"
+  ln -s "$T/r4-dangling-target-does-not-exist" "$_dl/zeta"
+  [ -L "$_dl/zeta" ] || fail "R4 (dangling) setup: the fixture child is not a symlink"
+  [ ! -e "$_dl/zeta" ] || fail "R4 (dangling) setup: the fixture symlink is not dangling"
+  snapshot "$_dl" "$T/r4-dangling-snap"
+  _dl_rc="$(promote "$_dl" "$_dld" "$T/r4-dangling.out" "$T/r4-dangling.err")"
+  # REAL symptom first: a refused pre-pass leaves the earlier missing child uncreated.
+  [ ! -e "$_dl/alpha" ] \
+    || fail "R4 (dangling): a later dangling symlink let an earlier missing child be created — the pre-pass is not fail-before-write"
+  [ ! -e "$_dl/alpha/.git" ] \
+    || fail "R4 (dangling): a later dangling symlink let an earlier child be git-inited"
+  [ ! -e "$_dl/umbrella.manifest.yaml" ] \
+    || fail "R4 (dangling): a dangling-symlink refusal still wrote the live manifest"
+  [ "$_dl_rc" != "0" ] \
+    || fail "R4 (dangling): a dangling child symlink was accepted (rc=$_dl_rc)"
+  [ "$_dl_rc" != "3" ] \
+    || fail "R4 (dangling): the run reached the landing audit (rc=3) instead of refusing in the pre-pass (want rc=1)"
+  grep -qF "$_dl/zeta" "$T/r4-dangling.out" "$T/r4-dangling.err" \
+    || fail "R4 (dangling): the refusal does not name the dangling child '$_dl/zeta'"
+  unchanged "$_dl" "$T/r4-dangling-snap" \
+    || fail "R4 (dangling): a refused dangling-symlink promotion wrote into the target (.harness or the root listing changed)"
+  # POSITIVE CONTROL: the same fixture shape without the dangling link IS accepted and
+  # creates alpha, so the refusal is keyed on the dangling symlink, not on the draft shape.
+  _pc="$T/r4-dangling-pc"; _pcd="$_pc/.harness/umbrella.manifest.draft.yaml"
+  build_single "$_pc"
+  { printf 'repos:\n'; printf '%b' "  alpha:\n    path: ../alpha\n    init: ./init.sh\n    test_command: \"\"\n    delegate_cmd: \"\"\n"; printf '%b' "  zeta:\n    path: ../zeta\n    init: ./init.sh\n    test_command: \"\"\n    delegate_cmd: \"\"\n"; } > "$_pcd"
+  _pc_rc="$(promote "$_pc" "$_pcd" "$T/r4-dangling-pc.out" "$T/r4-dangling-pc.err")"
+  case "$_pc_rc" in 0|3) : ;; *) fail "R4 (dangling) positive control: the same draft without the link failed (rc=$_pc_rc)" ;; esac
+  [ -e "$_pc/alpha/.git" ] \
+    || fail "R4 (dangling) positive control: the same draft did not create alpha — the refusal test proves nothing"
+
+  # existing child that is a SYMLINK to a valid git work tree INSIDE the umbrella. Promotion
+  # does not extend the cascade's deliberate symlinked-child support: it writes only into
+  # real child directories, so the link must fail closed in the pre-pass before the cascade
+  # follows it. (Round 1 covered the outside-escaping variant above; this pins the
+  # inside-target link, which the lexical-and-physical parent check alone accepts.)
+  _si="$T/r4-symlink-inside"; _sid="$_si/.harness/umbrella.manifest.draft.yaml"
+  build_single "$_si"
+  mkdir -p "$_si/realalpha"
+  ( cd "$_si/realalpha" && git init -q ) >/dev/null 2>&1 \
+    || fail "R4 (symlink-inside) setup: realalpha git init failed"
+  ls -A "$_si/realalpha" > "$T/r4-symlink-inside.before"
+  { printf 'repos:\n'; printf '%b' "  alpha:\n    path: ../alpha\n    init: ./init.sh\n    test_command: \"\"\n    delegate_cmd: \"\"\n"; } > "$_sid"
+  ln -s "$_si/realalpha" "$_si/alpha"
+  _si_rc="$(promote "$_si" "$_sid" "$T/r4-symlink-inside.out" "$T/r4-symlink-inside.err")"
+  # REAL symptom first: promotion must never write through a symlinked child into its target.
+  [ ! -e "$_si/realalpha/.harness" ] \
+    || fail "R4 (symlink-inside): promotion wrote through a symlinked child into its target — a symlinked child must fail closed"
+  [ "$_si_rc" != "0" ] \
+    || fail "R4 (symlink-inside): a symlinked child was accepted (rc=$_si_rc)"
+  [ "$_si_rc" != "3" ] \
+    || fail "R4 (symlink-inside): the run reached the landing audit (rc=3) instead of refusing in the pre-pass (want rc=1)"
+  grep -qF "$_si/alpha" "$T/r4-symlink-inside.out" "$T/r4-symlink-inside.err" \
+    || fail "R4 (symlink-inside): the refusal does not name the offending child '$_si/alpha'"
+  ls -A "$_si/realalpha" > "$T/r4-symlink-inside.now"
+  cmp -s "$T/r4-symlink-inside.before" "$T/r4-symlink-inside.now" \
+    || fail "R4 (symlink-inside): a refused promotion modified the symlink target"
+
   # Positive control: the aligned ../<key> shape on a SEPARATE fixture IS accepted and the
   # child appears — the refusals above are not satisfied by every run failing.
   _u="$T/r4-valid"; _d="$_u/.harness/umbrella.manifest.draft.yaml"
@@ -428,7 +495,7 @@ test_path_gates_fail_closed() {
   _rc="$(promote "$_u" "$_d" "$T/r4-valid.out" "$T/r4-valid.err")"
   case "$_rc" in 0|3) : ;; *) fail "R4 positive control: aligned ../<key> shape was refused (rc=$_rc)" ;; esac
   [ -e "$_u/solo/.git" ] || fail "R4 positive control: the aligned child was not created as a git repo"
-  pass "escaping/non-direct/mismatched/pathless/non-git/regular-file paths abort writing nothing, remedy named; aligned shape accepted (R4) [test_path_gates_fail_closed]"
+  pass "escaping/non-direct/mismatched/pathless/non-git/regular-file/dangling+inside-symlink paths abort writing nothing, remedy/child named; aligned shape accepted (R4) [test_path_gates_fail_closed]"
 }
 test_path_gates_fail_closed
 

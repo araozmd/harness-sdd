@@ -303,3 +303,11 @@
   In a flow with more than one non-zero exit (gate `1` vs audit `3`), assert the REAL symptom
   first and pin the gate's own exit code distinct from the other, or the suite's failure
   message will misdirect the next maintainer to a cosmetic mismatch.
+- [2026-09-18 builder] `[ -e "$p" ]` FOLLOWS a symlink, so a DANGLING symlink reads as
+  "missing" — a fail-before-write pre-pass that only tests `-e` accepts it, and the apply
+  phase then `mkdir`s over the link AFTER an earlier missing child has already been created
+  and `git init`-ed, yielding a partial promotion (E28-F03 finding 4045131033). Test the
+  link explicitly (`-L`, true even when `-e` is false) in the pre-pass. `-L` does not
+  replace the physical `cd`/`pwd -P` parent check: keep them as separate guards in separate
+  places (resolve owns symlink-to-OUTSIDE, existing-child owns dangling and inside) so each
+  mutant has its own assertion that reds.

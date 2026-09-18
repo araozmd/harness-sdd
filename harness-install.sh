@@ -7850,12 +7850,23 @@ promotion_rebase_path() {
 }
 
 # promotion_existing_child <path>
-#   A declared child that already exists must be a directory with a `.git` entry (dir or
-#   file). A missing path is fine (promotion creates it). Otherwise fails — a declared
+#   A declared child that already exists must be a real directory with a `.git` entry (dir
+#   or file). A missing path is fine (promotion creates it). Otherwise fails — a declared
 #   child that exists but is not a git work tree would become a phantom live entry the
 #   cascade never installs (R4).
+#
+#   A SYMLINK is an EXISTING path even when it dangles: `-e` follows the link, so a
+#   dangling link reads as missing here, the pre-pass passes, and the apply phase then
+#   `mkdir`s over the link — after an earlier missing child has already been created and
+#   `git init`-ed, leaving a partial promotion and breaking the fail-before-write
+#   guarantee. Promotion only ever writes into a real child directory inside the umbrella
+#   (the cascade's deliberate symlinked-child support does not extend to promotion), so a
+#   link is refused here, in the pre-pass, before any mkdir/git-init/scaffold/manifest
+#   write. The symlink-to-a-work-tree-OUTSIDE case is still refused earlier, by
+#   promotion_resolve_child's physical parent check, which names the draft path.
 promotion_existing_child() {
   _pec="$1"
+  if [ -L "$_pec" ]; then return 1; fi
   [ -e "$_pec" ] || return 0
   [ -d "$_pec" ] || return 1
   [ -e "$_pec/.git" ] || return 1
@@ -8314,7 +8325,7 @@ if [ -n "$FROM_MANIFEST" ]; then
     _pe_child="$(promotion_resolve_child "$_prom_draft_dir" "$UMB" "$_pe_key" "$_pe_path")" \
       || die "promotion: entry '$_pe_key' path '$_pe_path' must resolve to a direct child directory of the umbrella root '$UMB' named '$_pe_key' and matching ^[a-z0-9-]+\$ — rename the directory to the key, or re-run /sdd-plan to reconcile the draft"
     promotion_existing_child "$_pe_child" \
-      || die "promotion: child '$_pe_child' for entry '$_pe_key' already exists but is not a git work tree (no .git) — rename the directory to the key, or re-run /sdd-plan to reconcile the draft"
+      || die "promotion: child '$_pe_child' for entry '$_pe_key' already exists but is not a real directory the cascade can install (a symlink, a non-directory, or no .git) — remove the symlink/rename the directory to the key, or re-run /sdd-plan to reconcile the draft"
     [ -n "$_pe_init" ] || _pe_init='./init.sh'
     [ -n "$_pe_test" ] || _pe_test='""'
     [ -n "$_pe_delegate" ] || _pe_delegate='""'
