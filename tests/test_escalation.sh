@@ -393,34 +393,43 @@ the_tool_does_not_infer_resolution() {
 
 # ── F05-R1: the verdict tracks resolve_model, including its pin rules ───────────
 # A grep for `model_alias` in the diff would prove nothing about a hand-rolled copy. So this
-# case changes ONLY a `pin.codex.<tier>` between installs — a value no independent verdict
-# logic could get right without going through resolve_model's per-front-end pin handling —
-# and asserts the verdict flips. Both directions, so a hardcoded answer fails one of them.
+# case changes ONLY a `pin.<front-end>.<tier>` between installs — a value no independent
+# verdict logic could get right without going through resolve_model's per-front-end pin
+# handling — and asserts the verdict flips. Both directions, so a hardcoded answer fails one
+# of them.
+#
+# The front-end is `opencode`, not `codex`: since E99-F163 the Codex verdict also weighs
+# `model_reasoning_effort`. Two roles on the SAME tier necessarily share both a pin key and
+# an effort, while two roles on DIFFERENT tiers already differ by effort with no pin at all —
+# so on codex a pin change can no longer be the SOLE flip this case needs. OpenCode has no
+# effort axis, so its verdict remains a pure function of `resolve_model`'s pin table, which is
+# exactly what this case isolates. Codex's effort path is covered by
+# `effort_only_differentiation_arms`.
 verdict_comes_from_resolve_model() {
-  _t="$T/rm"; install_to "$_t" "$T/ch-rm" --agents=codex
+  _t="$T/rm"; install_to "$_t" "$T/ch-rm" --agents=opencode
   _c="$_t/.harness/harness.config.yaml"
-  # builder resolves (pinned), builder-heavy names a tier that codex does NOT alias and that
+  # builder resolves (pinned), builder-heavy names a tier that opencode does NOT alias and that
   # carries no pin ⇒ `none`, the exact downgrade #3716777878 described.
   set_models "$_c" builder standard
   set_models "$_c" builder-heavy reasoning
-  set_models "$_c" 'pin.codex.standard' '"gpt-5"'
-  install_to "$_t" "$T/ch-rm" --agents=codex
+  set_models "$_c" 'pin.opencode.standard' '"anthropic/claude-sonnet-4"'
+  install_to "$_t" "$T/ch-rm" --agents=opencode
   # Fixture precondition: a pin key that lands OUTSIDE the models: block resolves nothing for
   # either role, and the downgrade could not appear — which would read as "not reproducible".
-  [ "$(verdict_for "$_t" codex)" = none ] \
-    || fail "F05-R1: precondition — expected codex=none with builder pinned and reasoning unpinned, got '$(verdict_for "$_t" codex)'"
+  [ "$(verdict_for "$_t" opencode)" = none ] \
+    || fail "F05-R1: precondition — expected opencode=none with builder pinned and reasoning unpinned, got '$(verdict_for "$_t" opencode)'"
 
   # Add ONLY the reasoning pin. Nothing else about the config changes.
-  set_models "$_c" 'pin.codex.reasoning' '"gpt-5-codex"'
-  install_to "$_t" "$T/ch-rm" --agents=codex
-  [ "$(verdict_for "$_t" codex)" = raise ] \
-    || fail "F05-R1: adding pin.codex.reasoning did not flip the verdict to raise (got '$(verdict_for "$_t" codex)')"
+  set_models "$_c" 'pin.opencode.reasoning' '"anthropic/claude-opus-4"'
+  install_to "$_t" "$T/ch-rm" --agents=opencode
+  [ "$(verdict_for "$_t" opencode)" = raise ] \
+    || fail "F05-R1: adding pin.opencode.reasoning did not flip the verdict to raise (got '$(verdict_for "$_t" opencode)')"
 
   # And back: removing it must restore `none`, so the `raise` above is not a one-way latch.
-  grep -v '^  pin\.codex\.reasoning:' "$_c" > "$_c.t" && mv "$_c.t" "$_c"
-  install_to "$_t" "$T/ch-rm" --agents=codex
-  [ "$(verdict_for "$_t" codex)" = none ] \
-    || fail "F05-R1: removing pin.codex.reasoning did not restore none (got '$(verdict_for "$_t" codex)')"
+  grep -v '^  pin\.opencode\.reasoning:' "$_c" > "$_c.t" && mv "$_c.t" "$_c"
+  install_to "$_t" "$T/ch-rm" --agents=opencode
+  [ "$(verdict_for "$_t" opencode)" = none ] \
+    || fail "F05-R1: removing pin.opencode.reasoning did not restore none (got '$(verdict_for "$_t" opencode)')"
   pass "the verdict follows resolve_model's pin rules in both directions (F05-R1)"
 }
 
@@ -506,41 +515,106 @@ verdict_truth_table() {
   pass "all four verdict cells are produced from real configs; only all-raise arms (F05-R3)"
 }
 
+# ── F05-R13 / E99-F163: a Codex effort difference alone arms ────────────────────
+# The deferred gap: `builder: standard` / `builder-heavy: reasoning` on codex stamps NO
+# `model` (neither tier is pinned) but DOES stamp `medium`/`high` `model_reasoning_effort`
+# (E99-F161), so the roles on disk genuinely differ while a model-only comparison read them
+# as `same` and disarmed the target. Verified behaviourally, not by grepping the resolver:
+# the installer is run and the target's own `.codex/agents/*.toml` + `.harness/.escalation-arming`
+# are read back. The keep-cases come from the brief: identical stamps are still `same`, and a
+# role resolving to nothing on either axis is still `none`/`neither`.
+effort_only_differentiation_arms() {
+  _t="$T/effort"; install_to "$_t" "$T/ch-effort" --agents=codex
+  _c="$_t/.harness/harness.config.yaml"
+  set_models "$_c" builder standard
+  set_models "$_c" builder-heavy reasoning
+  install_to "$_t" "$T/ch-effort" --agents=codex
+
+  # Precondition: the target really is effort-ONLY — no `model` key on EITHER Builder role, but
+  # distinct efforts. Without this the case could pass on a model pin set elsewhere.
+  grep -q '^model_reasoning_effort = "medium"$' "$_t/.codex/agents/builder.toml" \
+    || fail "E99-F163: builder.toml did not stamp medium effort"
+  grep -q '^model_reasoning_effort = "high"$' "$_t/.codex/agents/builder-heavy.toml" \
+    || fail "E99-F163: builder-heavy.toml did not stamp high effort"
+  grep -q '^model = ' "$_t/.codex/agents/builder.toml" \
+    && fail "E99-F163 precondition: builder.toml carries a model, so the effort axis is not isolated"
+  grep -q '^model = ' "$_t/.codex/agents/builder-heavy.toml" \
+    && fail "E99-F163 precondition: builder-heavy.toml carries a model, so the effort axis is not isolated"
+
+  # The verdict and the artifact that gates the actual escalation.
+  [ "$(verdict_for "$_t" codex)" = raise ] \
+    || fail "E99-F163: an effort-only Codex difference gave '$(verdict_for "$_t" codex)', not raise"
+  [ "$(head -n 1 "$_t/.harness/.escalation-arming")" = armed ] \
+    || fail "E99-F163: an effort-only Codex difference did not arm"
+
+  # SAME effort is still `same`: the widened comparison must not collapse into "any pair of
+  # tiers raises". Both roles on the SAME tier share their effort, so only a `model` pin could
+  # differ, and neither is pinned.
+  set_models "$_c" builder-heavy standard
+  install_to "$_t" "$T/ch-effort" --agents=codex
+  [ "$(verdict_for "$_t" codex)" = same ] \
+    || fail "E99-F163: identical effort stamps gave '$(verdict_for "$_t" codex)', not same"
+  [ "$(head -n 1 "$_t/.harness/.escalation-arming")" = blocked ] \
+    || fail "E99-F163: an identical-effort Codex pair armed"
+
+  # NOTHING on either axis is still `none`/`neither`. `builder` resolves only through effort,
+  # so an `inherit` heavy role is the downgrade (`none`); with BOTH Builder roles inherited but
+  # another role still resolving, the target writes an artifact and the cell is `neither`.
+  set_models "$_c" builder-heavy inherit
+  install_to "$_t" "$T/ch-effort" --agents=codex
+  [ "$(verdict_for "$_t" codex)" = none ] \
+    || fail "E99-F163: an inherit heavy role gave '$(verdict_for "$_t" codex)', not none"
+  set_models "$_c" builder inherit
+  set_models "$_c" reviewer standard
+  install_to "$_t" "$T/ch-effort" --agents=codex
+  [ "$(verdict_for "$_t" codex)" = neither ] \
+    || fail "E99-F163: both roles resolving nothing gave '$(verdict_for "$_t" codex)', not neither"
+  [ "$(head -n 1 "$_t/.harness/.escalation-arming")" = blocked ] \
+    || fail "E99-F163: a neither verdict armed"
+
+  pass "a Codex effort-only difference arms; same effort stays same; nothing on either axis stays none/neither (E99-F163)"
+}
+
 # ── F05-R3: the conservative AND, asserted in BOTH orders ───────────────────────
 # A first-wins or last-wins bug passes exactly one of these two. $AGENT_KEYS orders claude
-# first and codex last, so one config puts the raising front-end first and the other last.
+# first and opencode last, so one config puts the raising front-end first and the other last.
+# The blocking front-end is `opencode` rather than `codex`: on codex, a role with a
+# non-`inherit` tier resolves an effort even unpinned, so a `none` codex role is no longer
+# reachable beside a raising claude role (different tiers ⇒ effort differs ⇒ raise). OpenCode
+# has no effort axis, so `pin.opencode.standard` without `pin.opencode.reasoning` is still the
+# `none` downgrade.
 and_across_front_ends() {
-  # A: claude=raise (first), codex=none (last).
-  _a="$T/and-a"; install_to "$_a" "$T/ch-and-a" --agents=claude,codex
+  # A: claude=raise (first), opencode=none (last).
+  _a="$T/and-a"; install_to "$_a" "$T/ch-and-a" --agents=claude,opencode
   _c="$_a/.harness/harness.config.yaml"
   set_models "$_c" builder standard; set_models "$_c" builder-heavy reasoning
-  set_models "$_c" 'pin.codex.standard' '"gpt-5"'
-  install_to "$_a" "$T/ch-and-a" --agents=claude,codex
+  set_models "$_c" 'pin.opencode.standard' '"anthropic/claude-sonnet-4"'
+  install_to "$_a" "$T/ch-and-a" --agents=claude,opencode
   [ "$(verdict_for "$_a" claude)" = raise ] \
     || fail "F05-R3: precondition A — claude is '$(verdict_for "$_a" claude)', not raise"
-  [ "$(verdict_for "$_a" codex)" = none ] \
-    || fail "F05-R3: precondition A — codex is '$(verdict_for "$_a" codex)', not none"
+  [ "$(verdict_for "$_a" opencode)" = none ] \
+    || fail "F05-R3: precondition A — opencode is '$(verdict_for "$_a" opencode)', not none"
   [ "$(head -n 1 "$_a/.harness/.escalation-arming")" = blocked ] \
     || fail "F05-R3: raise-first + none-last armed — the AND became an OR"
 
-  # B: claude=same (first), codex=raise (last).
-  _b="$T/and-b"; install_to "$_b" "$T/ch-and-b" --agents=claude,codex
+  # B: claude=same (first), opencode=raise (last).
+  _b="$T/and-b"; install_to "$_b" "$T/ch-and-b" --agents=claude,opencode
   _c="$_b/.harness/harness.config.yaml"
   set_models "$_c" builder standard; set_models "$_c" builder-heavy reasoning
   set_models "$_c" 'pin.claude.reasoning' 'sonnet'
-  set_models "$_c" 'pin.codex.standard' '"gpt-5"'
-  set_models "$_c" 'pin.codex.reasoning' '"gpt-5-codex"'
-  install_to "$_b" "$T/ch-and-b" --agents=claude,codex
+  set_models "$_c" 'pin.opencode.standard' '"anthropic/claude-sonnet-4"'
+  set_models "$_c" 'pin.opencode.reasoning' '"anthropic/claude-opus-4"'
+  install_to "$_b" "$T/ch-and-b" --agents=claude,opencode
   [ "$(verdict_for "$_b" claude)" = same ] \
     || fail "F05-R3: precondition B — claude is '$(verdict_for "$_b" claude)', not same"
-  [ "$(verdict_for "$_b" codex)" = raise ] \
-    || fail "F05-R3: precondition B — codex is '$(verdict_for "$_b" codex)', not raise"
+  [ "$(verdict_for "$_b" opencode)" = raise ] \
+    || fail "F05-R3: precondition B — opencode is '$(verdict_for "$_b" opencode)', not raise"
   [ "$(head -n 1 "$_b/.harness/.escalation-arming")" = blocked ] \
     || fail "F05-R3: same-first + raise-last armed — the AND reads only one front-end"
 
   # Control: all-raise on the SAME two front-ends does arm, so "always blocked" cannot pass.
   grep -v '^  pin\.claude\.reasoning:' "$_c" > "$_c.t" && mv "$_c.t" "$_c"
-  install_to "$_b" "$T/ch-and-b" --agents=claude,codex
+  install_to "$_b" "$T/ch-and-b" --agents=claude,opencode
   [ "$(head -n 1 "$_b/.harness/.escalation-arming")" = armed ] \
     || fail "F05-R3: control — an all-raise two-front-end target did not arm"
   pass "the verdict is a conservative AND, in both front-end orders (F05-R3)"
@@ -940,6 +1014,44 @@ no_doc_claims_the_harness_cannot_check() {
   pass "both superseded claims are gone from all seven operator-facing sites (F05-R11)"
 }
 
+# ── F05-R13: the operator docs say the verdict weighs effort (E99-F163) ──────────
+# The prose that named the gap ("`escalation_verdict` still compares `model` only") had to move
+# with the code. These are section-scoped POSITIVE anchors: a whole-file grep for
+# `escalation_verdict`/`model_reasoning_effort` co-occurrence stays green on the PRE-change
+# blob (the old sentence carries both tokens, inverted), so each anchor is a phrase only the
+# new text has, extracted from the section that owns the rule.
+effort_is_named_in_the_operator_docs() {
+  _inst="$T/doc-install"
+  awk 'BEGIN{h="### Codex reasoning effort"} /^#{2,} /{k=(index($0,h)>0);next} k' \
+    "$SRC/docs/INSTALL.md" | tr '\n' ' ' > "$_inst"
+  [ -s "$_inst" ] || fail "E99-F163: the Codex reasoning effort section did not extract — the heading moved"
+  grep -qiE 'effort difference alone' "$_inst" \
+    || fail "E99-F163: docs/INSTALL.md's Codex effort section does not say an effort difference alone arms"
+
+  _wf="$T/doc-workflow"
+  awk 'BEGIN{h="### Which Builder runs"} /^#{2,} /{k=(index($0,h)>0);next} k' \
+    "$SRC/docs/WORKFLOW.md" | tr '\n' ' ' > "$_wf"
+  [ -s "$_wf" ] || fail "E99-F163: the 'Which Builder runs' section did not extract — the heading moved"
+  grep -qiE 'different[[:space:]]+resolved[[:space:]]+stamp' "$_wf" \
+    || fail "E99-F163: docs/WORKFLOW.md's escalation section does not say the verdict compares the whole resolved stamp"
+
+  # And the superseded gap statement is gone. The positive anchors above prove the current rule
+  # IS documented, so this negative cannot pass merely because escalation went undocumented.
+  for _d in "$SRC/docs/INSTALL.md" "$SRC/docs/WORKFLOW.md"; do
+    grep -qi 'compares `model` only' "$_d" \
+      && fail "E99-F163: $_d still says the verdict compares model only"
+  done
+
+  # The seed block in BOTH copies names effort in the comparison. The byte-identity of the two
+  # copies is pinned by prl_block()/the install convergence tests; this pins the SEMANTIC the
+  # identical bytes carry, so a symmetric revert in both files cannot slip through.
+  for _b in "$SRC/harness.config.yaml" "$SRC/harness-install.sh"; do
+    grep -q 'whole resolved stamp, `model` plus' "$_b" \
+      || fail "E99-F163: $_b's escalation seed block does not name the model+effort stamp"
+  done
+  pass "the operator docs and both seed-block copies name effort in the verdict and drop the deferred-gap wording (E99-F163)"
+}
+
 # ── usage errors ────────────────────────────────────────────────────────────────
 usage_errors_are_loud() {
   # A malformed COMPLEXITY is a human typo and must never fail a build (F03-R2). A malformed
@@ -968,6 +1080,7 @@ prose_records_the_choice
 telemetry_contract_intact
 the_tool_does_not_infer_resolution
 verdict_comes_from_resolve_model
+effort_only_differentiation_arms
 arming_artifact_shape
 verdict_truth_table
 and_across_front_ends
@@ -979,6 +1092,7 @@ both_gates_required
 decline_reasons_are_distinguishable
 docs_agree_with_the_shipped_default
 no_doc_claims_the_harness_cannot_check
+effort_is_named_in_the_operator_docs
 usage_errors_are_loud
 
 # ── init.sh visibility line: quoted thresholds normalize like _cfg_scalar ────────────

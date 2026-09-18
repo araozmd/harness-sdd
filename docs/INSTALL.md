@@ -906,15 +906,16 @@ role's capability, and a second, independently-set dial could disagree with it �
 all. Riding the existing tier also adds no new vocabulary: only Codex's own accepted
 effort values are ever written.
 
-**Deliberately NOT enforced yet: `escalation_verdict` still compares `model` only, not
-`model_reasoning_effort`.** A Codex operator who sets `builder: standard` /
-`builder-heavy: reasoning` now gets genuinely differentiated roles on disk (`medium` vs
-`high` effort) — but `escalation:` still reads `DISARMED` for Codex unless the two tiers
-also resolve to different `model` pins, because the arming check in `harness-install.sh`
-was intentionally left untouched by this change (see "Ranking is yours" under
-`escalation:` in `harness.config.yaml`). Making effort a second, independent signal the
-arming check can arm on is scope for a follow-up — not yet enforced, see E99-F163, and
-is not covered by this feature.
+**Escalation counts it (E99-F163).** `escalation_verdict` compares the whole resolved stamp
+— `model` plus, on Codex, `model_reasoning_effort` — so a Codex operator who sets
+`builder: standard` / `builder-heavy: reasoning` gets genuinely differentiated roles on disk
+(`medium` vs `high` effort) **and** an `armed` verdict even when neither tier carries a
+`model` pin: an effort difference alone is enough. A distinct `model` pin is needed only when
+you also want distinct `model` ids, not to arm. Because the comparison is over the whole
+stamp, a role that resolves to nothing on either axis (`inherit` on both, or a tier that
+stamps no model and no effort) still reads `neither`/`none` as before, so the downgrade guard
+is unchanged. See "Ranking is yours" under `escalation:` in `harness.config.yaml`; the check
+still proves change, not strength.
 
 Codex additionally recognizes `max` and, on exactly two models
 (`gpt-6-astra`, `gpt-5.6-sol`), `ultra`. Neither is stamped by the built-in ladder above:
@@ -1121,9 +1122,10 @@ model = "gpt-6-astra"
 ```
 
 Then run `./harness-install.sh --self`. These source choices survive regeneration
-and do not become consumer seed defaults. Escalation still requires distinct
-resolved Builder/heavy models for every selected host; it does not verify model
-availability or compare model quality.
+and do not become consumer seed defaults. Escalation still requires a distinct resolved
+Builder/heavy stamp for every selected host — on Codex, a differing `model` pin or a
+differing `model_reasoning_effort` (E99-F163); it does not verify model availability or
+compare model quality.
 
 ## Config migration on upgrade (non-destructive)
 
