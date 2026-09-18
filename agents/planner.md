@@ -30,8 +30,12 @@ spec.**
    In the **Greenfield branch** (neither exists) the vision, architecture and ADR writes
    below are the run's output; in the **Amend branch** you SKIP those greenfield template
    writes — an amend never rewrites committed `specs/vision.md`/`specs/architecture.md`
-   or an existing ADR — and perform only the append-only delta work the
-   `## Repo topology output` section below describes.
+   or an existing ADR — and append any new `draft` epics above the current maximum. Only
+   when the amend detects a deployable-set change — a deployable added, removed, or given
+   a new name — does it append the dated topology delta and the new `repo-topology ADR`
+   and reconcile or remove the derived draft, as the `## Repo topology output` section
+   below describes; an amend that only adds epics or non-topology ADR deltas must not
+   touch the topology artifacts.
 3. Run a short, **adaptive** Q&A to clarify the problem, the users, the outcomes, the
    non-goals, and the roadmap shape.
 4. **Write** `specs/vision.md` from `specs/_templates/vision.md` (greenfield run).

@@ -587,6 +587,29 @@ for _rb_pair in "R11 plan branches role|$PLAN_WHAT_FOLD" "R11 plan branches emit
 done
 pass "R11 /sdd-plan has explicit greenfield vs amend branches; the amend branch skips the greenfield writes [test_plan_branches_skip_greenfield_writes]"
 
+# ── R11: the amend branch GATES the topology writes on a detected set change ────
+# (Reviewer finding 4043612841.) The pre-change amend branch told the Planner to
+# append the dated topology delta and the new `repo-topology ADR` and reconcile or
+# remove the derived draft on EVERY amend — including one that only adds roadmap epics
+# or non-topology ADRs. That both manufactures a redundant topology decision and
+# contradicts the amend contract, which conditions those operations on a CHANGED
+# deployable set. The branch must state the condition explicitly (only a detected
+# deployable-set change touches the topology artifacts) AND state the boundary the
+# other way (a non-topology amend leaves them alone). Bounded per surface, so a branch
+# that keeps the unconditional operations cannot pass: on pre-change text the needle
+# `deployable-set change` is absent, so the positive control fails. The `non-topology
+# ADR deltas` needle is deliberately distinct from the Driller's `non-topology
+# decisions`, so this check cannot be satisfied by the Driller rule.
+for _ag_pair in "R11 amend gate role|$PLAN_WHAT_FOLD" "R11 amend gate emitted body|$BODY_FOLD" \
+                "R11 amend gate .claude/commands|$CMD_FOLD" "R11 amend gate .agents/skills|$SKILL_FOLD"; do
+  _ag_lbl="${_ag_pair%%|*}"; _ag_f="${_ag_pair#*|}"
+  every_naming_sentence_carries "$_ag_lbl condition" "$_ag_f" "deployable-set change" \
+    "Only when" "topology delta" "repo-topology ADR" "reconcile"
+  every_naming_sentence_carries "$_ag_lbl non-topology amend" "$_ag_f" "non-topology ADR deltas" \
+    "must not touch the topology artifacts"
+done
+pass "R11 the amend branch gates the topology writes on a detected deployable-set change and leaves them alone for a non-topology amend [test_amend_is_append_only]"
+
 # ── R12: the derived draft is project-owned, not harness drift ─────────────────
 # test_draft_excluded_from_harness_owned
 # The draft is DERIVED: docs/INSTALL.md commits the planning baseline only AFTER

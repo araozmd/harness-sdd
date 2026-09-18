@@ -23,10 +23,12 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    - **Amend branch** — entered when the project already has a plan and the human asked
      for an amend: SKIP the greenfield template writes in steps 5–6 — an amend never
      rewrites `specs/vision.md` or `specs/architecture.md` and never
-     renumbers an existing ADR — and perform only the append-only delta work: append
-     the dated topology delta and the new `repo-topology ADR`, append any new `draft`
-     epics above the current maximum, and reconcile or remove the derived draft, as the
-     repo-topology contract below describes. Never rewrite, re-seed, or renumber an
+     renumbers an existing ADR — and append any new `draft` epics above the current
+     maximum. Only when the amend detects a deployable-set change — a deployable added,
+     removed, or given a new name — does it append the dated topology delta and the new
+     `repo-topology ADR` and reconcile or remove the derived draft, as the repo-topology
+     contract below describes; an amend that only adds epics or non-topology ADR deltas
+     must not touch the topology artifacts. Never rewrite, re-seed, or renumber an
      existing artifact or roadmap entry.
 4. Run a short, **adaptive** Q&A with the human to clarify: the problem and who it is
    for, the outcomes, the non-goals, and the roadmap shape. Where the shape forks, offer
