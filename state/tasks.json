@@ -991,7 +991,7 @@
         {
           "id": "E99-F163",
           "title": "escalation_verdict compares `model` only, so on Codex two roles differentiated purely by model_reasoning_effort (E99-F161) read as `same` and escalation refuses to arm \u2014 the operator gets genuinely different roles on disk and is still told DISARMED",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
