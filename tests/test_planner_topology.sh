@@ -5,7 +5,8 @@
 # specs/epics/E28-greenfield-to-umbrella/F02-planner-topology/E28-F02.spec.md:
 #   R1  >1 deployable ⇒ exactly one repo-topology ADR, above-max 4-digit id
 #   R2  >1 deployable ⇒ draft at umbrella.manifest.draft.yaml, one repos: entry per
-#       deployable with the required key set (+ fixture run)
+#       deployable with the required key set; keys are normalization-unique and a
+#       collision is disambiguated deterministically (-2, -3, ...) (+ fixture run)
 #   R3  exactly one (or zero) deployable ⇒ writes neither artifact
 #   R4  the draft is inert: no umbrella.manifest write, no umbrella.manifest.yaml,
 #       no umbrella engagement (static + fixture run 1)
@@ -16,8 +17,9 @@
 #   R9  umbrella.manifest.example.yaml + docs/UMBRELLA.md document scaffold_cmd
 #   R10 the Planner is the single writer; /sdd-drill does not amend the draft
 #   R11 an amend records a topology change append-only (dated `## Repo topology`
-#       delta + new ADR) and reads the trigger from the union of original + appended,
-#       so an amendment that adds a deployable still produces the draft
+#       delta + new ADR) with the latest delta authoritative per deployable, so a
+#       rename/remove drops the obsolete name; the trigger reads that effective set and
+#       removes the derived draft when it falls to <=1 deployable (committed ADRs kept)
 #
 # House rules (see progress/lessons.md; all are load-bearing here):
 #   * Every span is extracted STRUCTURALLY (a `## ` heading → the next `## `; the
@@ -109,7 +111,7 @@ sentences() {
 require_tokens() {
   _rt_lbl="$1"; _rt_f="$2"; shift 2
   for _rt_tok in "$@"; do
-    grep -qF "$_rt_tok" "$_rt_f" || fail "$_rt_lbl: missing pinned anchor '$_rt_tok' — the topology step is missing or diverged"
+    grep -qF -- "$_rt_tok" "$_rt_f" || fail "$_rt_lbl: missing pinned anchor '$_rt_tok' — the topology step is missing or diverged"
   done
 }
 
@@ -124,7 +126,7 @@ every_naming_sentence_carries() {
     || fail "$_en_lbl: no sentence names '$_en_needle' — positive control failed, the rule is absent"
   while IFS= read -r _en_s; do
     for _en_tok in "$@"; do
-      if ! printf '%s' "$_en_s" | grep -qF "$_en_tok"; then
+      if ! printf '%s' "$_en_s" | grep -qF -- "$_en_tok"; then
         fail "$_en_lbl: the sentence naming '$_en_needle' does not carry '$_en_tok' — the attribution is not bounded to the rule (got: $_en_s)"
       fi
     done
@@ -147,7 +149,7 @@ no_naming_sentence_carries() {
     || fail "$_nn_lbl: no sentence names '$_nn_needle' — positive control failed, the rule is absent"
   while IFS= read -r _nn_s; do
     for _nn_tok in "$@"; do
-      if printf '%s' "$_nn_s" | grep -qF "$_nn_tok"; then
+      if printf '%s' "$_nn_s" | grep -qF -- "$_nn_tok"; then
         fail "$_nn_lbl: the sentence naming '$_nn_needle' also carries '$_nn_tok' — the path base is contradictory (got: $_nn_s)"
       fi
     done
@@ -212,7 +214,27 @@ for _r2k_pair in "R2 role key grammar|$ROLE_FOLD" "R2 emitted body key grammar|$
   every_naming_sentence_carries "$_r2k_lbl" "$_r2k_f" "logical name" \
     '[a-z0-9-]+' 'api-v2' 'directory' 'path'
 done
-pass "R2 role + body name the draft and its per-deployable key set [test_role_and_body_name_the_draft_and_keys]"
+# Collision-safe keys (Reviewer finding 4043129416): two DISTINCT deployable names can
+# normalize to the SAME key (`api.v2` and `api-v2` both yield `api-v2`), and the
+# coordinator's manifestRepos() rejects duplicate repository keys — so the later entry
+# would be unusable and the promotion/selector flow would drop a deployable. The contract
+# must require UNIQUE keys after normalization with a stated deterministic disambiguation
+# order (`-2`, `-3`, …). Bounded to the sentence naming `unique` (positive control) and
+# asserted on every surface the key rule lives on: the grammar sentence does not name
+# `unique`, so it cannot satisfy this, and `-2`/`-3` + `order` in one sentence is the
+# anchor for the deterministic rule while `manifestRepos` names the consequence. `-3` is
+# pinned alongside `-2` because the worked example `api-v2-2` itself contains `-2`: a
+# mutant that deletes the explicit `-2`, `-3`, … sequence but keeps the example would
+# survive a `-2`-only check (found in this round's campaign), while `-3` is reachable
+# only through the stated sequence. The `--` in the helpers keeps a leading-dash token
+# from being read as a grep option.
+for _r2u_pair in "R2 role unique keys|$ROLE_FOLD" "R2 emitted body unique keys|$BODY_FOLD" \
+                 "R2 .claude/commands unique keys|$CMD_FOLD" "R2 .agents/skills unique keys|$SKILL_FOLD"; do
+  _r2u_lbl="${_r2u_pair%%|*}"; _r2u_f="${_r2u_pair#*|}"
+  every_naming_sentence_carries "$_r2u_lbl" "$_r2u_f" "unique" \
+    'normalizing' 'collide' '-2' '-3' 'order' 'manifestRepos'
+done
+pass "R2 role + body name the draft and its per-deployable, collision-safe key set [test_role_and_body_name_the_draft_and_keys]"
 
 # ── R3: exactly one deployable writes neither artifact ─────────────────────────
 # test_single_deployable_writes_neither
@@ -396,15 +418,20 @@ if grep -qF 'umbrella.manifest.draft.yaml' "$DRILLER"; then
 fi
 pass "R10 Planner is single writer; driller.md does not amend the draft [test_drill_does_not_amend_draft]"
 
-# ── R11: the amend path is append-only and can still produce the draft ─────────
+# ── R11: the amend path is append-only, latest-delta-wins, and removes the draft ─
 # test_amend_is_append_only
 # A topology change is a `/sdd-plan` amend (R10), but the amend contract is append-only
 # and never rewrites the original `specs/architecture.md`. Without an appended
-# `## Repo topology` delta plus a trigger that reads the union of the original and the
-# appended decisions, the documented path re-reads the original one-deployable
-# architecture and writes neither artifact — the defect this pins (Reviewer finding
-# 4042914412). Each check is bounded to a sentence that only this rule carries, so the
-# step-8 `append-only` remark cannot satisfy it.
+# `## Repo topology` delta plus a trigger that reads past the original section, the
+# documented path re-reads the original one-deployable architecture and writes neither
+# artifact (Reviewer finding 4042914412). A PURE union is the mirror defect (Reviewer
+# finding 4043129426): it preserves a deployable that a later delta renamed or removed,
+# so the `>1` trigger stays true and the draft keeps repositories that no longer exist.
+# The delta is therefore authoritative for the deployables it names (latest delta wins
+# per deployable), and when the effective set falls to one deployable (or none) the
+# derived draft is removed while the committed ADRs are preserved. Each check is bounded
+# to a sentence that only its rule carries, so the step-8 `append-only` remark and the
+# no-op sentence's draft token cannot satisfy them.
 guard "R11 role" "$ROLE_SPAN" 8
 guard "R11 body" "$BODY_SPAN" 20
 for _r11_pair in "R11 role|$ROLE_FOLD" "R11 emitted body|$BODY_FOLD" \
@@ -416,11 +443,20 @@ for _r11_pair in "R11 role|$ROLE_FOLD" "R11 emitted body|$BODY_FOLD" \
   # (2) The append-only mechanism: a dated `## Repo topology` delta + a new ADR.
   every_naming_sentence_carries "$_r11_lbl delta" "$_r11_f" "## Repo topology" \
     "append-only" "dated" "delta" "specs/architecture.md" "ADR"
-  # (3) The trigger reads the union of the original architecture + appended deltas.
-  every_naming_sentence_carries "$_r11_lbl union" "$_r11_f" "union" \
-    "original" "appended" "trigger"
+  # (3) The amend delta is AUTHORITATIVE: effective set = union of the original and the
+  # appended deltas with the latest delta winning PER DEPLOYABLE — not a pure union,
+  # which would preserve a renamed/removed deployable (Reviewer finding 4043129426).
+  every_naming_sentence_carries "$_r11_lbl latest delta" "$_r11_f" "latest delta" \
+    "authoritative" "union" "original" "appended" "per deployable"
+  # (4) The trigger reads the EFFECTIVE set; when it falls to one deployable (or none)
+  # the derived draft is REMOVED and the committed repo-topology ADRs are preserved
+  # (append-only, never deleted). The `one deployable` + `removes` + draft-token trio in
+  # ONE sentence is the anchor: the draft token alone sits in the no-op sentence, and
+  # `removes`/`one deployable` alone sit elsewhere in the span.
+  every_naming_sentence_carries "$_r11_lbl effective set" "$_r11_f" "effective set" \
+    "trigger" "one deployable" "removes" "umbrella.manifest.draft.yaml" "reconciles"
 done
-pass "R11 amended topology change is append-only + the union trigger can produce the draft [test_amend_is_append_only]"
+pass "R11 amended topology change is append-only, latest-delta-wins, and removes the draft at <=1 deployable [test_amend_is_append_only]"
 
 # ── Fixture plan run (R2, R4, R9) — install-free, absolute manifest paths ──────
 # test_fixture_plan_run_draft_shape_and_inertness

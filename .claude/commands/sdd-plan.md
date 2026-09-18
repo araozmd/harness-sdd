@@ -41,7 +41,14 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    runs it. The entry key is a logical name, not the directory name: it must match
    `[a-z0-9-]+` (the slice-id suffix grammar, so a valid slice's `repo` can equal the
    key; normalize a dotted dir such as `api.v2` to `api-v2`) while `path`
-   carries the actual directory (`path: ../api.v2`). Write each `path` relative to the
+   carries the actual directory (`path: ../api.v2`). After normalizing every deployable
+   name to `[a-z0-9-]+`, the keys must be **unique**: when two deployable names collide on
+   one key (for example `api.v2` and `api-v2` both normalize to `api-v2`), disambiguate
+   deterministically in the order the deployables are named in
+   `specs/architecture.md` — the first keeps the bare key and each later
+   collision appends `-2`, `-3`, … (`api-v2`, then `api-v2-2`) — because
+   `manifestRepos()` rejects duplicate repository keys, so a shared key would leave one
+   deployable with no usable `repos:` entry. Write each `path` relative to the
    draft file's own directory (the child
    sibling). The draft's header must mark it a
    `DRAFT` and state that it is `inert`.
@@ -57,10 +64,18 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
 
    An amendment is **append-only**: it appends a dated `## Repo topology` delta section
    to `specs/architecture.md` and a new `repo-topology ADR` above the max
-   existing ADR number, instead of rewriting the original section. Read the topology
-   trigger from the **union** of the original architecture and every appended topology
-   delta, so an amendment that adds a deployable still clears the trigger and reconciles
-   the draft.
+   existing ADR number, instead of rewriting the original section. An amend's delta is
+   **authoritative for every deployable it names**: the effective deployable set is the
+   union of the original architecture and every appended topology delta with the **latest
+   delta winning per deployable**, so a later delta that renames or removes a deployable
+   drops the obsolete name from the effective deployable set instead of preserving it.
+   The trigger reads that **effective set**, not the original section alone: when the
+   effective set
+   falls to one deployable (or none), the Planner removes the derived
+   `umbrella.manifest.draft.yaml` and writes no new `repo-topology ADR` — the
+   already-committed repo-topology ADRs are preserved (append-only, never deleted) — and
+   when it is still more than one, the Planner reconciles the draft to exactly the
+   effective set, removing the entries whose deployables are gone.
 8. **Seed** the roadmap: for each epic, write a `state/tasks.json` row with
    `status: "draft"` and `features: []` (ids as a next-sequential block strictly above
    the max existing `E##`, append-only, no reuse), and create
