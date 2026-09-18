@@ -283,3 +283,4 @@
   byte-for-byte mutants against the fixed suite is the cheapest way to catch that a
   "required fix" is itself subsumed (`scratchpad/E28-F02-builder/mut.py`, all three RED,
   both no-op controls green).
+- [2026-09-17 reviewer] A mutation runner that restores with `shutil.copyfile(path, bak)` + `shutil.move(bak, path)` silently drops the exec bit: `copyfile` creates the backup at 0644 and `move` puts that mode back, so a 755 script comes back 644 while `diff -q` on content reports "restored". On E28-F02 round 2 this turned the scratch clone's `harness-install.sh` non-executable and the next `./harness-install.sh --self` exited 126 — a mode-only delta invisible to a content diff. Verify the restore with `diff -qr`/`stat`, not just `diff -q`, or restore with `cp -p`/`shutil.copy2`; and never run a post-campaign probe that executes a file a mutation touched without first re-checking its mode.
