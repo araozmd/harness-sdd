@@ -1448,7 +1448,7 @@
         {
           "id": "E28-F03",
           "title": "Installer promotion: single-target install -> umbrella coordinator from umbrella.manifest.yaml, git-init missing children, run optional scaffold_cmd, cascade + landing audit (local git only)",
-          "status": "spec-ready",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
