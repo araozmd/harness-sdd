@@ -373,3 +373,14 @@
   + append-past-marker must go GREEN (`control-marker.py` A), uniqueness neutered + duplicated
   marker must go GREEN (`control-unique.py`) — or the guard is decoration beside a check that
   already covers it.
+- [2026-09-18 builder] Replacing a first-blank block bound with a "next column-0 line" bound
+  has two traps (E99-F162 finding 4046384380): (1) the block's own top-level key must be
+  identified by KEY grammar (`^[A-Za-z0-9_.-]+:`), not by "first column-0 line after the
+  anchor" — the workers block's own comment header is *also* column-0, so that rule ends the
+  capture on the header; (2) do NOT also strip trailing comment-only lines to reconcile an
+  asymmetric next-block header — that drops the block's own `# pin…` documentation and
+  reopens E99-F160 M8/M8b. Stop at the next block's column-0 header (exclude it by the BOUND)
+  and trim only trailing blanks; the pin comments stay in the compared span. A structural
+  bound that reaches the mapping boundary makes a constant length floor redundant — retire it
+  rather than leave an unpinned constant, and prove the bound with a pre-fix old-test control
+  (the finding's mutant is GREEN on the old bound, RED on the new one).
