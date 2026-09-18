@@ -145,6 +145,33 @@ pass "…and a harness-owned change in that same tree still fails (R4 control) [
   || fail "R10: tools/harness-owned-paths.sh body does not exclude .harness/specs/glossary.md"
 pass "harness-owned-paths.sh excludes specs/glossary.md at the source (R10) [R10_glossary_excluded_at_source]"
 
+# ── E28-F02 R12: the derived Planner draft is project-owned, not harness drift ─────
+# draft_untracked_does_not_trip_guard
+# /sdd-plan writes .harness/umbrella.manifest.draft.yaml, and docs/INSTALL.md commits the
+# planning baseline only AFTER /sdd-drill — so between those steps the draft is untracked.
+# The whole .harness/ tree is claimed as body, so the draft hard-failed the MANDATORY gate
+# on a file the Planner legitimately wrote (P1 finding 4043317437). The exclusion is in the
+# SHARED ownership definition; the positive control on the SAME tree proves it did not
+# widen to the body.
+mk_target "$T/draft"
+printf '# umbrella.manifest.draft.yaml — DRAFT, inert\nrepos: {}\n' \
+  > "$T/draft/.harness/umbrella.manifest.draft.yaml"
+# Precondition: the draft really is untracked, or this case exercises nothing.
+[ -z "$(git -C "$T/draft" ls-files -- .harness/umbrella.manifest.draft.yaml)" ] \
+  || fail "E28-F02: fixture precondition broken — the draft is already tracked"
+run_gate "$T/draft"
+[ "$GATE_RC" = "0" ] \
+  || fail "E28-F02: an untracked umbrella.manifest.draft.yaml FAILED the drift gate — the Planner's derived output is claimed as harness body: $GATE_OUT"
+printf '%s' "$GATE_OUT" | grep -qi "matches the commit" \
+  || fail "E28-F02: the gate did not report the body as matching the commit: $GATE_OUT"
+pass "an untracked umbrella.manifest.draft.yaml does not trip the drift guard (E28-F02 R12) [draft_untracked_does_not_trip_guard]"
+# positive control on the SAME tree
+echo "# unlanded edit" >> "$T/draft/.harness/agents/planner.md"
+run_gate "$T/draft"
+[ "$GATE_RC" != "0" ] \
+  || fail "E28-F02 control: a harness-body edit in the same tree PASSED — the exclusion widened past the derived draft"
+pass "…and a genuine harness-body edit in that same tree still fails (E28-F02 R12 control) [draft_untracked_does_not_trip_guard]"
+
 # ── R5: root-level generated glue is in scope ─────────────────────────────────────
 # R5_root_glue_in_scope
 mk_target "$T/glue"

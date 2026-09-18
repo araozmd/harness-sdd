@@ -212,14 +212,22 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     assert tomllib.loads((p/'.codex/agents/builder-heavy.toml').read_text())['model']=='gpt-6-astra'
     assert (p/'.harness/.escalation-arming').read_text().startswith('armed\n')
     # Frozen old emission is the regression oracle, not the newly edited emitter.
+    # Files a feature INTENTIONALLY regenerates are excluded, or the oracle would
+    # contradict that feature: `sdd-pr-loop.md` has always been regenerated, and
+    # E28-F02 adds the Planner topology step to the `/sdd-plan` body and the Driller
+    # stop-and-hand-off step to the `/sdd-drill` body. The CURRENT `sdd-plan`/`sdd-drill`
+    # bodies are still pinned — by the skill-equals-canonical assertion above and by
+    # tests/test_planner_topology.sh R8/R10 — so this only drops the claim that the
+    # v0.78.1 bytes survive, which E28-F02 deliberately makes false.
+    _regenerated={'sdd-pr-loop.md','sdd-plan.md','sdd-drill.md'}
     for variant in ('all-five-on','all-five-models-on'):
         old=fresh('golden-'+variant)
         subprocess.run(['sh',str(src/'tests/fixtures/frontend-v0.78.1/materialize.sh'),variant,str(old)],check=True)
-        golden={str(f.relative_to(old)):f.read_bytes() for pattern in ('.claude/agents/*.md','.claude/commands/*.md','.opencode/command/*.md','.opencode/agent/*.md','opencode.json') for f in old.glob(pattern) if f.name!='sdd-pr-loop.md'}
+        golden={str(f.relative_to(old)):f.read_bytes() for pattern in ('.claude/agents/*.md','.claude/commands/*.md','.opencode/command/*.md','.opencode/agent/*.md','opencode.json') for f in old.glob(pattern) if f.name not in _regenerated}
         install(old,'--agents=all','--pr-loop=true')
         for rel,content in golden.items():assert (old/rel).read_bytes()==content, 'retained old emission changed: '+rel
     print('ok - retained_host_and_seed_regression (R11)')
-    assert (src/'VERSION').read_text().strip()=='0.81.1' and not (src/'GEMINI.md').exists()
+    assert (src/'VERSION').read_text().strip()=='0.82.0' and not (src/'GEMINI.md').exists()
     a=(src/'AGENTS.md').read_text()
     for token in ('./init.sh','non-zero','STOP','harness.config.yaml','agents/orchestrator.md','progress/lessons.md','spec-ready','in-progress','independent Reviewer','chat history','telemetry','tokens','VERSION','CHANGELOG.md','MINOR','MAJOR','branch','PR','main'):
         assert token.lower() in a.lower(),token

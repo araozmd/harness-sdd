@@ -52,6 +52,13 @@ esac
 #
 # `telemetry.jsonl` needs no exclusion — the installer seeds `.harness/.gitignore` for it.
 # `umbrella.manifest.yaml` is project-owned and simply never listed.
+#
+# `umbrella.manifest.draft.yaml` is a DERIVED, project-owned artifact the Planner writes
+# (E28-F02): the documented flow commits the planning baseline only AFTER `/sdd-drill`, so
+# between `/sdd-plan` and that commit the draft is legitimately untracked. Claiming it as
+# harness body would hard-fail the mandatory gate on a file the Planner just wrote (P1
+# finding 4043317437) — the same false-positive shape that put `.codex`/`.gemini` and the
+# four E99-F10 corrections into this list. It is excluded, never enumerated as owned.
 emit_body() {
   printf '%s\n' "$pfx"
   printf ':(exclude)%sharness.config.yaml\n' "$pfx"
@@ -61,6 +68,7 @@ emit_body() {
   printf ':(exclude)%sspecs/epics/\n'        "$pfx"
   printf ':(exclude)%sstate/\n'              "$pfx"
   printf ':(exclude)%sprogress/\n'           "$pfx"
+  printf ':(exclude)%sumbrella.manifest.draft.yaml\n' "$pfx"
 }
 
 # ── generated front-end glue at the PROJECT ROOT ─────────────────────────────────────────

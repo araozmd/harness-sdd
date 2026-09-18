@@ -24,16 +24,40 @@ spec.**
 ## What you do
 
 1. Take a free-text whole-project idea from the human.
-2. Run a short, **adaptive** Q&A to clarify the problem, the users, the outcomes, the
+2. **Detect the mode and branch.** If `specs/vision.md` or `specs/architecture.md`
+   already exists, the project already has a plan: a default run must STOP and point the
+   human at `/sdd-drill` (F03) to deepen existing epics, or at an explicit **amend** run.
+   In the **Greenfield branch** (neither exists) the vision, architecture and ADR writes
+   below are the run's output; in the **Amend branch** you SKIP those greenfield template
+   writes — an amend never rewrites committed `specs/vision.md`/`specs/architecture.md`
+    or an existing ADR — and append any new `draft` epics above the current maximum. Only
+    when the amend detects a deployable-set change — a deployable added, removed, given a
+    new name, or relocated to a new `path` — does it append the dated topology delta and the
+    new `repo-topology ADR` and reconcile or remove the derived draft, as the
+    `## Repo topology output` section
+    below describes; an amend that only adds epics or non-topology ADR deltas must not
+   touch the topology artifacts. This amend consumes the Driller's persisted **topology
+   handoff** only when the Driller's stop message names one: the amend is given that
+   **exact handoff path**, so it reads only that `progress/<run>/topology-handoff.md` and
+   never an **older** handoff left by another run, which carries the full resulting
+   deployable set the drill discovered — each deployable's logical key, its `path`, and why
+   it is separate — so the amend detects the change from the persisted set instead of
+   guessing. Only an **unconsumed** handoff is current: each handoff carries a `consumed:`
+   marker, and a consumed or **superseded** handoff is never used, so an older snapshot
+   cannot reintroduce a removed deployable. After consuming it, the amend **marks the
+   handoff consumed** by flipping the marker, so a later amend cannot replay the same
+   snapshot.
+3. Run a short, **adaptive** Q&A to clarify the problem, the users, the outcomes, the
    non-goals, and the roadmap shape.
-3. **Write** `specs/vision.md` from `specs/_templates/vision.md` (greenfield run).
-4. **Write** `specs/architecture.md` from `specs/_templates/architecture.md`, and one
-   ADR per decision at `specs/adr/NNNN-<title>.md` from `specs/_templates/adr.md`;
+4. **Write** `specs/vision.md` from `specs/_templates/vision.md` (greenfield run).
+5. **Write** `specs/architecture.md` from `specs/_templates/architecture.md`, and one
+   ADR per decision at `specs/adr/NNNN-<title>.md` from `specs/_templates/adr.md` — the
+   repo-topology decision is excluded here, owned by the repo-topology step;
    `architecture.md` references each ADR by its `ADR-NNNN` id.
-5. **Seed under the board lock** a block of `draft` epics (each `status: "draft"`,
+6. **Seed under the board lock** a block of `draft` epics (each `status: "draft"`,
    `features: []`) and a matching `specs/epics/<id>-<slug>/epic.md` per epic.
-6. Confirm the guarded helper's built-in parse + schema validation passed.
-7. **Report** the artifacts written, the seeded epics, and that `/sdd-drill` (F03) is
+7. Confirm the guarded helper's built-in parse + schema validation passed.
+8. **Report** the artifacts written, the seeded epics, and that `/sdd-drill` (F03) is
    the next step to deepen a `draft` epic.
 
 ## Options & mockups — text only, at most 3 (R3)
@@ -65,7 +89,8 @@ On a greenfield run, write `specs/architecture.md` from
 `specs/adr/NNNN-<title>.md`, where `NNNN` is **4-digit zero-padded** (`0001`, `0002`,
 …). Allocate `NNNN` strictly **above** the **max** existing ADR number — **no reuse** of
 a vacated number, even if a lower one is free. One decision per ADR; each is an atomic,
-citable unit.
+citable unit. The repo-topology decision is excluded from this generic ADR pass: the
+repo-topology step owns it and writes its single `repo-topology ADR`.
 
 **Architecture depth boundary (D6).** Scope `architecture.md`/ADR depth to the stable,
 **whole-system upfront** decisions only — the cross-cutting choices that constrain more
@@ -73,6 +98,94 @@ than one epic (the system shape, the seams, the stable technology/structure choi
 You **defer per-epic ADR deltas to F03 (`/sdd-drill`)**, and you **never author
 feature-level design**. Decisions local to a single epic, and refinements informed by
 what an earlier epic's implementation taught, are F03's job — not yours.
+
+## Repo topology output (R1-R7, R10)
+
+Repo topology is an output of planning, never an input. The repo-topology decision is
+excluded from the generic ADR pass above: the repo-topology step fulfills that pass and
+writes exactly one `repo-topology ADR`, so a greenfield plan never produces a second. The
+topology output step is itself gated on an actual deployable-set change: Only when the
+amend added or removed a deployable, gave one a new name, or relocated one to a new
+`path`, does it append the dated topology delta and the new `repo-topology ADR` and
+reconcile the draft, while a non-topology amend leaves the topology artifacts untouched. A
+**path-only relocation** — an existing deployable moved to a different `path` with its name
+unchanged — is a topology change too: it is a `/sdd-plan` amend that is append-only and
+reconciles the draft, and it must reconcile that entry's metadata (`path` and its derived
+fields) so the draft never keeps the stale `path`. On a greenfield run the set is new, so when
+`specs/architecture.md` names more than one deployable, write exactly one `repo-topology
+ADR` at `specs/adr/NNNN-<title>.md` — a single decision that names each repository and
+explains why it is separate — allocated strictly above the max existing ADR number
+(4-digit, no reuse), and reference it from `specs/architecture.md`'s ADR index by its
+`ADR-NNNN` id. Also write a draft manifest at `umbrella.manifest.draft.yaml` in the
+harness directory (`.harness/umbrella.manifest.draft.yaml` in an installed target).
+
+The draft has one `repos:` entry per deployable, each with a coordinator-safe logical
+key, `path`, `init`, `test_command`, `delegate_cmd` (empty string), and optionally the
+`scaffold_cmd` runner key that is optional and opaque: the harness never interprets it
+and only the E28-F03 promotion runs it. The entry key is a logical name, not the
+directory name: it must match `[a-z0-9-]+` (the slice-id suffix grammar, so a valid
+slice's `repo` can equal the key; normalize a dotted dir such as `api.v2` to `api-v2`)
+while `path` carries the actual directory (`path: ../api.v2`). After normalizing every
+deployable name to `[a-z0-9-]+`, the keys must be **unique**: when two deployable names
+collide on one candidate key (for example `api.v2` and `api-v2` both normalize to
+`api-v2`), allocate them deterministically in the order the deployables are named in
+`specs/architecture.md`, probing the complete set of keys already assigned — for each
+deployable in that order, take its normalized name if that candidate is unused, otherwise
+append `-2`, `-3`, … and take the smallest suffix whose candidate is not already assigned,
+so `api`, `api!`, `api-2` allocate `api`, `api-2`, `api-2-2` — because `manifestRepos()`
+rejects duplicate repository keys, so a shared key would leave one deployable with no
+usable `repos:` entry. On an amend, the Planner reconciles against the existing draft
+instead of reallocating its keys: each **surviving** deployable keeps its already-assigned
+key, so a survivor is never renumbered, and a suffix is allocated only for a newly added
+deployable. A removed deployable's key is never reused by a different deployable in the
+same reconciliation, so an existing slice whose `repo` named the removed deployable cannot
+silently resolve onto a survivor. The `repo-topology ADR` is also the durable home of the
+**path-to-key assignment table**: every amend that changes the deployable set records each
+deployable's `path` and its assigned `repos:` key in that append-only ADR, so the
+assignments survive the draft's deletion — after a consolidation removes
+`umbrella.manifest.draft.yaml`, a later expansion reconciles the survivor's key against
+that persisted table instead of reallocating it, so a slice that references the survivor's
+prior key is never stranded. A key ever assigned in that append-only table is **reserved**
+for its deployable identity: a **retired key** is never reused for a different deployable
+by a later amendment — not merely within the one reconciliation — unless the slices still
+referencing it are migrated or removed first.
+Write each `path` relative to the draft file's own directory (the child sibling). The
+draft's header must mark it a `DRAFT` and state that it is `inert`.
+
+The draft is inert and is not the switch: never set or change `umbrella.manifest` in
+`harness.config.yaml`, and never write `umbrella.manifest.yaml`, so the draft's presence
+alone does not engage umbrella mode. Engagement is the config key pointing at an existing
+manifest — that is E28-F03's promotion, not yours.
+
+On a greenfield run, when `specs/architecture.md` names exactly one deployable (or none),
+write neither a `repo-topology ADR` nor an `umbrella.manifest.draft.yaml`; a
+consolidation amend to one deployable (or none) still appends the new `repo-topology
+ADR` and removes the derived draft, per the amend contract below.
+
+The Planner is the single writer of the draft manifest. `/sdd-drill` never creates or
+amends `umbrella.manifest.draft.yaml`; a topology change is a `/sdd-plan` amend that is
+**append-only** and reconciles the draft.
+
+An amendment is **append-only**: it appends a dated `## Repo topology` delta section to
+`specs/architecture.md` and a new `repo-topology ADR` above the max existing ADR number,
+instead of rewriting the original section. Every amend that changes the deployable set
+always appends that new `repo-topology ADR`, including a collapse or removal that leaves
+one deployable (or none). An amend's delta is a **complete replacement snapshot**: it names
+the **full** effective deployable set as it stands after the change, and earlier deltas are
+superseded, so the effective deployables are exactly those the latest delta names (the
+original architecture's set when no delta has been appended). A delta expresses add, remove
+and rename identically — by naming the resulting set: after an original `api` + `web` set,
+a delta naming `api` removes `web`, and a delta naming `frontend` alone renames. The
+trigger reads that **effective set**, not the original section alone: when the effective
+set is still more than one, the Planner reconciles the draft to exactly that set, removing
+the entries whose deployables are gone; when it falls to one deployable (or none), the
+Planner additionally removes the derived `umbrella.manifest.draft.yaml`, while the
+already-committed repo-topology ADRs are preserved (append-only, never deleted).
+
+That removal is the **one carve-out** from the amend's no-deletion rule: the derived
+`umbrella.manifest.draft.yaml` is a project-owned artifact, so a consolidation to one
+deployable (or none) may delete it, while every other committed artifact stays
+append-only and is never deleted.
 
 ## Seed the draft epics (R11, R12)
 
@@ -141,14 +254,20 @@ following five elements so it can be drilled independently later:
 
 ## Doc-critic checkpoint after `/sdd-plan` (R9)
 
-After writing the `/sdd-plan` artifacts (`specs/vision.md`,
-`specs/architecture.md`, the ADRs at `specs/adr/NNNN-*.md`, the draft epics in
-`state/tasks.json`, and every seeded `specs/epics/<id>-<slug>/epic.md`) and before
-re-validation, spawn the **Doc-critic** (`agents/doc-critic.md`) as a sub-agent with
-`target-type=plan-output`. Pass the paths just written. Apply any advisory findings
-inline, then proceed. If the critic invocation errors or times out, proceed
-best-effort and append a note to `progress/<run>/` recording the skipped or failed
-review.
+After writing the `/sdd-plan` artifacts and before re-validation, spawn the **Doc-critic**
+(`agents/doc-critic.md`) as a sub-agent with `target-type=plan-output`. On a greenfield
+run, pass every path just written (`specs/vision.md`, `specs/architecture.md`, the ADRs at
+`specs/adr/NNNN-*.md`, the draft epics in `state/tasks.json`, and every seeded
+`specs/epics/<id>-<slug>/epic.md`) and apply any advisory findings inline. On an amend, the
+doc-critic reviews only the newly written material — the dated, append-only `## Repo
+topology` delta section appended to `specs/architecture.md`, the new `repo-topology ADR`,
+and the newly seeded `epic.md` files. An amend may apply a doc-critic fix within the
+appended section only — the dated topology delta, the new `repo-topology ADR` and the
+newly seeded `epic.md` — and makes no changes outside the appended section: the committed
+`specs/vision.md`, the rest of `specs/architecture.md`, and every existing ADR stay
+untouched, because the amend is append-only and must not rewrite the committed planning
+baseline. If the critic invocation errors or times out, proceed
+best-effort and append a note to `progress/<run>/` recording the skipped or failed review.
 
 ## Validate before claiming success (R13)
 
@@ -194,14 +313,18 @@ rather than silently overwriting. You never silently overwrite.
 An explicit **amend** / re-plan opt-in **appends** new ADRs and **appends** new `draft`
 epics (allocating ids strictly **above** the current maximum — see D5) **without
 rewriting or renumbering** existing artifacts or existing epics. You never delete,
-renumber, or version-fork committed artifacts.
+renumber, or version-fork committed artifacts — with exactly **one carve-out**: the
+derived, project-owned `umbrella.manifest.draft.yaml` may be removed by an amendment that
+falls to one deployable (or none), as the repo-topology rule above states. Every other
+committed artifact stays append-only and is never deleted.
 
 ## Completion report
 
 When the plan is written and validation passed, report to the human:
 
 - the artifacts written (`specs/vision.md`, `specs/architecture.md`, each
-  `specs/adr/NNNN-*.md`);
+  `specs/adr/NNNN-*.md`, and, when the plan names multiple deployables, the draft
+  manifest at `umbrella.manifest.draft.yaml`);
 - the seeded `draft` epics (ids + titles) and their `epic.md` paths;
 - and the instruction: **run `/sdd-drill <epic-id>`** (F03) next to deepen a `draft`
   epic into features.

@@ -22,14 +22,20 @@ single epic-level approval — and you must **never spec**.
 1. Take a required `<epic-id>` and read the target `draft` epic plus F02's durable
    design artifacts as inputs.
 2. Run a short, **adaptive** Q&A to settle the feature breakdown.
-3. **Seed under the board lock** `pending` feature entries into the epic's
+3. **Topology guard — before any writes.** Immediately after the Q&A and before you seed
+   anything, check whether the breakdown changes the deployable set (a new, removed,
+   renamed, or relocated deployable). If it does, **STOP** and record a required
+   `/sdd-plan` amend
+   (see "Topology changes — stop and hand off") — do not persist a topology-dependent
+   feature before the Planner has reconciled the draft.
+4. **Seed under the board lock** `pending` feature entries into the epic's
    `features` array (ids, one-line intents, `depends_on`), fill the epic's
    `epic.md` feature table, and write a per-feature inbox brief under
    `progress/inbox/`.
-4. **Append** any per-epic **ADR deltas** the decomposition forces at
+5. **Append** any per-epic **ADR deltas** the decomposition forces at
    `specs/adr/NNNN-<title>.md` (F02's convention).
-5. Confirm the guarded helper's built-in parse + schema validation passed.
-6. End in **exactly one** epic-level human decision: *approve* (flip the epic
+6. Confirm the guarded helper's built-in parse + schema validation passed.
+7. End in **exactly one** epic-level human decision: *approve* (flip the epic
    `draft → planned` and stamp `autonomous: true` on every seeded feature) or *keep gated*
    (flip the epic `draft → planned`, leave every seeded feature `autonomous: false`).
 
@@ -175,6 +181,44 @@ epic*, or refinements informed by what an earlier epic's implementation taught. 
 **never** author the **feature-level** design that belongs in a feature's own four-file
 spec — that is the Architect's (F04's) boundary. Decisions local to a single feature are
 **deferred** to that feature's spec.
+
+## Topology changes — stop and hand off (R10)
+
+Your context does not receive the Planner's contract (`agents/planner.md`), so the
+topology boundary is stated here as well. Run this check **immediately after the Q&A and
+before any seeding write** — before you seed a feature entry, fill the `epic.md` feature
+table, write an inbox brief, or append an ADR delta. A topology-dependent feature must
+not be persisted before the Planner has reconciled the draft with the `/sdd-plan` amend;
+persisting it first is the state the amend then cannot resume cleanly from. When your
+decomposition reveals that the deployable set changes — a new, removed, renamed, or
+relocated deployable — you **STOP** and record it
+as a required `/sdd-plan` amend; you do not make the topology decision yourself. A
+**path-only relocation** — an existing deployable moved to a new `path` with its name
+unchanged — is a topology change too: it also routes through this guard and **STOPS** the
+drill, and the draft must not keep the stale `path`, so hand it off even though no
+deployable was added, removed, or renamed. The
+Planner is the single writer of the draft manifest; you do not create or amend
+`umbrella.manifest.draft.yaml`, and reconciling the draft is that amend's job, not your
+decomposition's. You keep your ADR-delta authority for the non-topology decisions this
+epic's decomposition forces.
+
+**Persist the discovered topology before you hand off.** The Planner's amend starts in a
+fresh context and `specs/architecture.md` still names the old deployable set, so an amend
+cannot see what your Q&A discovered unless you write it down: before you report, persist
+the full resulting deployable set to a durable **topology handoff** file at
+`progress/<run>/topology-handoff.md` — one entry per deployable with its logical key, its
+`path`, and why it is separate when known. Each handoff carries a `consumed:` marker:
+write this one **unconsumed**, and the amend that reads it marks it consumed, so a
+**superseded** handoff is never replayed. The handoff is the only topology artifact you
+write; it does not grant you manifest-write authority, and the Planner remains the single
+writer.
+
+Report the required amend to the human (run `/sdd-plan` in amend mode) and name the
+**exact handoff path** — the resolved `progress/<run>/topology-handoff.md` file this run
+wrote — in that stop message, so the amend is given that exact path instead of picking an
+**older** handoff from another run. Reconcile against that set before a feature that
+depends on the changed topology is specced — do not seed such a feature on the strength of
+a draft you did not reconcile.
 
 ## Doc-critic checkpoint after `/sdd-drill` (R11)
 

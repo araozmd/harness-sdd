@@ -4,6 +4,34 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.82.0] — 2026-09-17
+
+### Added — the Planner emits a repo-topology ADR and a draft umbrella manifest (E28-F02)
+
+- **`/sdd-plan` emits a repo-topology output when the architecture names more than one
+  deployable.** The Planner writes one `repo-topology ADR` at
+  `specs/adr/NNNN-<title>.md` (allocated above the max existing ADR number) and a draft
+  manifest at `umbrella.manifest.draft.yaml` with one `repos:` entry per deployable
+  (`path`, `init`, `test_command`, `delegate_cmd`, optional `scaffold_cmd`). When the
+  architecture names exactly one deployable (or none) it writes neither artifact.
+- **The draft is inert.** The Planner never sets `umbrella.manifest` and never writes
+  `umbrella.manifest.yaml`, so the draft's presence alone does not engage umbrella mode;
+  only E28-F03's promotion turns it into a live coordinator. `scaffold_cmd` is optional
+  and harness-opaque — only the promotion runs it.
+- **The rule is added to the portable `agents/planner.md` and the generated `/sdd-plan`
+  command body**, and reconciled from that one body into the source-mode
+  `.claude/commands/sdd-plan.md` and `.agents/skills/sdd-plan/SKILL.md`, so the role
+  contract and the command body cannot diverge (ADR-0003).
+- **`umbrella.manifest.example.yaml` and `docs/UMBRELLA.md` document `scaffold_cmd`** as an
+  optional, harness-opaque key while retaining the four required entry keys.
+- **New suite `tests/test_planner_topology.sh`** covers R1–R10 with structurally-bounded
+  spans and an install-free fixture plan run through `tools/next-task.mjs`.
+- **The planning handoff names the draft.** `/sdd-plan`'s final report enumerates
+  `umbrella.manifest.draft.yaml` alongside the vision/architecture/ADRs/epics whenever the
+  plan names multiple deployables, and `docs/INSTALL.md`'s planning-baseline commit/push
+  checklists include it, so the draft is committed with the baseline and available to
+  E28-F03 in another checkout.
+
 ## [0.81.1] — 2026-09-17
 
 ### Changed — the greenfield single-repo path is the documented front door (E28-F01)

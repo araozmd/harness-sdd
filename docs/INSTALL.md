@@ -168,9 +168,10 @@ degraded mode. The installer does not create a git repository.
    the vision, architecture and ADRs and seeds the project's draft epics.
 6. Run **`/sdd-drill <epic-id>`** to decompose the first draft epic into features.
 7. Commit and push the planning baseline to the remote from step 3 — the constitution
-   edit, the vision, architecture and ADRs, the epic decomposition, and the seeded
-   `.harness/state/tasks.json`. Until this commit those planning artifacts are dirty or
-   untracked, so the remote baseline does not describe them.
+   edit, the vision, architecture and ADRs, the epic decomposition, the seeded
+   `.harness/state/tasks.json`, and, when the plan names more than one deployable, the
+   draft `.harness/umbrella.manifest.draft.yaml`. Until this commit those planning
+   artifacts are dirty or untracked, so the remote baseline does not describe them.
 8. Create the first feature branch before starting feature work with
    `/sdd-next`: features are built on their own branch and their PR opens from it, so
    committing the planning baseline first keeps the vision, ADRs and decomposition out
@@ -192,9 +193,10 @@ harness itself, under the human gate. A new product plans before it builds: run
    project's draft epics.
 3. Run **`/sdd-drill <epic-id>`** to decompose a draft epic into features.
 4. Commit and push the planning baseline — the constitution edit, the vision,
-   architecture and ADRs, the epic decomposition and the seeded
-   `.harness/state/tasks.json` — then create the first feature branch. This keeps the
-   planning artifacts out of the first feature PR.
+   architecture and ADRs, the epic decomposition, the seeded
+   `.harness/state/tasks.json`, and, when the plan names more than one deployable, the
+   draft `.harness/umbrella.manifest.draft.yaml` — then create the first feature branch.
+   This keeps the planning artifacts out of the first feature PR.
 5. Run **`/sdd-next`**. The seeded `E00-F01` bootstrap task is `sdd: true`, so the
    Orchestrator routes it to the Architect (with Scout recon) to detect your
    test/lint/typecheck commands (`.harness/harness.config.yaml` + fast project gates in
@@ -662,8 +664,10 @@ It prints the drifted paths (capped at 10) and the `git status` command that lis
 rest. The fix is normally just to commit the upgrade.
 
 **What counts as harness-owned:** the installed body under `.harness/`, excluding
-project-owned config, `init.project.sh`, product/epic specs, state and progress,
-plus proven active generated glue for the selected supported front ends.
+project-owned config, `init.project.sh`, product/epic specs, state and progress, the
+derived Planner draft `.harness/umbrella.manifest.draft.yaml` (a `/sdd-plan` output the
+documented flow commits only after `/sdd-drill`, so an untracked draft must not fail the
+gate), plus proven active generated glue for the selected supported front ends.
 This includes managed Claude files, OpenCode files and stamped Codex roles and
 skill units. `.agents/` and `.codex/agents/` are shared namespaces: unrelated
 files are not claimed. Codex roles use per-file evidence under
@@ -1119,6 +1123,7 @@ POSIX `sh`, zero deps.
 | harness-owned body | `.harness/{AGENTS.md,agents,docs,store,tools,specs/_templates,init.sh}` | refreshed; thin children retain prose pointers |
 | generated glue | managed command/role names for selected front-ends, including `.claude/agents/` and `.claude/commands/` harness files | regenerated subject to each emitter's ownership checks; deselection conservatively reclaims owned files |
 | project-owned | `.harness/{harness.config.yaml,init.project.sh,specs/product.md,specs/glossary.md,specs/epics,state/tasks.json,progress}` | preserved (config also append-migrated) |
+| derived, project-owned | `.harness/umbrella.manifest.draft.yaml` (only when `specs/architecture.md` names more than one deployable) | never installer-managed; excluded from the drift guard, so an untracked draft does not fail `init.sh`; a collapse amend may remove it |
 | runtime/local | `.harness/{telemetry.jsonl,workers.json,.gitignore}`, project-root `.gitignore` | gitignored; both `.gitignore`s append-seeded (never clobbered), logs/personal state never committed. `workers.json` is installer-OWNED derived data: rewritten every run while `workers.roster` is on, removed when it is off |
 | merge-region | `AGENTS.md` / selected `CLAUDE.md`; legacy `GEMINI.md` cleanup | only the marked block |
 

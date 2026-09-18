@@ -66,7 +66,7 @@ no third-party Python packages are required.
 cd harness-sdd
 ./init.sh                 # environment gate — must pass
 claude                    # CLAUDE.md → AGENTS.md auto-loads
-# new product? /sdd-plan "<idea>"  # the whole-project inception skill: writes vision/architecture + ADRs and seeds draft epics
+# new product? /sdd-plan "<idea>"  # the whole-project inception skill: writes vision/architecture + ADRs and seeds draft epics; >1 deployable also writes a repo-topology ADR + an inert umbrella.manifest.draft.yaml
 # later idea? /sdd-new "<idea>"   # Inception triages it → seeds a pending task
 # deepen one? /sdd-drill <epic-id>  # the per-epic drill-down skill: decomposes a draft epic into features + ADR deltas, then one epic-level approval (draft → planned)
 # quick fix? /sdd-fix "<desc>"   # the lightweight fix lane: seeds an sdd:false fix under the reserved maintenance epic (brief only, no spec) and runs Builder → Reviewer
@@ -92,7 +92,10 @@ than an `init.sh` prerequisite. For direct troubleshooting, run
 
 A **new product** starts with whole-project inception: `/sdd-plan` writes the vision,
 architecture and ADRs and seeds draft epics, `/sdd-drill <epic-id>` decomposes one, and
-`/sdd-next` specs and builds. See
+`/sdd-next` specs and builds. When the architecture names **more than one deployable**,
+`/sdd-plan` also writes a repo-topology ADR and a **`umbrella.manifest.draft.yaml`** that is
+**inert** — its presence does not engage umbrella mode; only a later explicit promotion step
+(E28-F03) does. See
 [Starting from nothing](docs/INSTALL.md#starting-from-nothing-new-product).
 
 For **later work** in an existing project, `/sdd-new` is the front door: it asks a few
@@ -376,8 +379,11 @@ Paths below are relative to the installed project root:
    project checks in `.harness/init.project.sh`, which survives upgrades and is
    sourced from the project root. The installer refreshes `.harness/init.sh`.
 3. For a new product, run `/sdd-plan "<idea>"` (whole-project vision, architecture,
-   ADRs, draft epics) → `/sdd-drill <epic-id>` → `/sdd-next`. Add later work with
-   `/sdd-new "<idea>"`, or use `.harness/specs/_templates/`.
+   ADRs, draft epics; plus a repo-topology ADR and an inert `umbrella.manifest.draft.yaml`
+   when the architecture names more than one deployable — presence alone does not engage
+   umbrella mode, and promotion is a later explicit step, E28-F03) → `/sdd-drill <epic-id>`
+   → `/sdd-next`. Add later work with `/sdd-new "<idea>"`, or use
+   `.harness/specs/_templates/`.
 
 The first-run bootstrap (`/sdd-next`) helps adapt the project under the human
 approval gate; see [Bootstrap](docs/INSTALL.md#bootstrap-first-run) and the
