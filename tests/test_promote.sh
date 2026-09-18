@@ -83,6 +83,9 @@ build_single_nogit() {
 #            never re-runs)
 #   beta   — empty scaffold_cmd
 #   gamma  — failing scaffold_cmd (best-effort warning, run continues)
+# `init` and `delegate_cmd` carry NON-DEFAULT values: a fixture equal to the code default
+# (`./init.sh` / `""`) makes the "carried over" assertion vacuous, because deletion of the
+# seeded field is then indistinguishable from the default (2026-09-18 reviewer lesson).
 write_draft() {
   cat > "$1" <<'YAML'
 # umbrella.manifest.draft.yaml — DRAFT, written by /sdd-plan.
@@ -90,21 +93,21 @@ write_draft() {
 repos:
   alpha:
     path: ../alpha
-    init: ./init.sh
+    init: ./boot.sh
     test_command: "npm test"
-    delegate_cmd: ""
+    delegate_cmd: ./delegate.sh
     scaffold_cmd: "echo x >> scaffold-count"
   beta:
     path: ../beta
-    init: ./init.sh
+    init: ./boot.sh
     test_command: "pytest"
-    delegate_cmd: ""
+    delegate_cmd: ./delegate.sh
     scaffold_cmd: ""
   gamma:
     path: ../gamma
-    init: ./init.sh
+    init: ./boot.sh
     test_command: "make test"
-    delegate_cmd: ""
+    delegate_cmd: ./delegate.sh
     scaffold_cmd: "exit 7"
 YAML
 }
@@ -183,6 +186,70 @@ test_promotion_docs_contract() {
 }
 test_promotion_docs_contract
 
+# ── R1: promotion into a NON-install target is refused, naming the target ──────
+# The draft sits INSIDE the target's .harness/ with an ALIGNED `path: ../<key>`, so the
+# existing-install guard is the ONLY gate that can refuse this run. A draft OUTSIDE the
+# target aborts later at the path-resolution gate and would mask a deleted guard — the
+# exact false-green the 2026-09-18 reviewer found (deleting the guard let a child +
+# live manifest be written into a non-install directory at rc=3).
+test_promotion_requires_existing_install() {
+  _u="$T/r1-noninstall"; mkdir -p "$_u/.harness"
+  _d="$_u/.harness/umbrella.manifest.draft.yaml"
+  write_draft "$_d"
+  snapshot "$_u" "$T/r1-noninstall-snap"
+  _rc="$(promote "$_u" "$_d" "$T/r1-noninstall.out" "$T/r1-noninstall.err")"
+  [ "$_rc" != "0" ] \
+    || fail "R1: --from-manifest into a non-install target was accepted (rc=$_rc)"
+  grep -qF "$_u" "$T/r1-noninstall.out" "$T/r1-noninstall.err" \
+    || fail "R1: the non-install refusal does not name the target '$_u' — the operator cannot tell which directory was refused"
+  grep -qF 'existing install' "$T/r1-noninstall.out" "$T/r1-noninstall.err" \
+    || fail "R1: the non-install refusal does not name the missing existing install"
+  [ ! -e "$_u/alpha" ] || fail "R1: the refused non-install target had a child created"
+  [ ! -f "$_u/umbrella.manifest.yaml" ] || fail "R1: the refused non-install target got a live manifest"
+  [ ! -f "$_u/.harness/.harness-version" ] || fail "R1: the refused non-install target was installed into"
+  unchanged "$_u" "$T/r1-noninstall-snap" \
+    || fail "R1: a refused non-install target was written into (.harness or the root listing changed)"
+  # POSITIVE CONTROL: the SAME directory with a plain --umbrella still succeeds, so the
+  # refusal is keyed on the flag and not on the directory lacking an install.
+  _rc=0; sh "$INSTALL" --umbrella "$_u" >"$T/r1-noninstall-pc.out" 2>"$T/r1-noninstall-pc.err" || _rc=$?
+  [ "$_rc" = "0" ] \
+    || fail "R1 positive control: a plain --umbrella into the same non-install dir was refused (rc=$_rc)"
+  [ -f "$_u/.harness/.harness-version" ] \
+    || fail "R1 positive control: the plain cascade did not install into the target — the refusal test proves nothing"
+  pass "promotion into a non-install target is refused naming the target, writing nothing; plain cascade on the same dir works (R1) [test_promotion_requires_existing_install]"
+}
+test_promotion_requires_existing_install
+
+# ── R1 composition: --shared-repo + promotion; --dry-run + --shared-repo ───────
+test_shared_repo_promotion_composes() {
+  _u="$T/r1-shared"; _d="$_u/.harness/umbrella.manifest.draft.yaml"
+  build_single_nogit "$_u"; write_draft "$_d"
+  [ ! -e "$_u/.git" ] || fail "R1 --shared-repo setup: the fixture root is already a git repo"
+  _rc=0
+  sh "$INSTALL" --umbrella "$_u" --from-manifest "$_d" --shared-repo \
+    >"$T/r1-shared.out" 2>"$T/r1-shared.err" || _rc=$?
+  case "$_rc" in 0|3) : ;; *) fail "R1 --shared-repo: promotion failed (rc=$_rc)" ;; esac
+  [ -e "$_u/.git" ] || fail "R1 --shared-repo: the umbrella root was not git-inited"
+  [ -f "$_u/alpha/.harness/agents/builder.md" ] \
+    || fail "R1 --shared-repo: the promoted child was not installed"
+  grep -Eq '^  alpha:[[:space:]]*$' "$_u/umbrella.manifest.yaml" \
+    || fail "R1 --shared-repo: no live manifest entry for the promoted child"
+  # --dry-run --shared-repo previews the same plan and writes nothing.
+  _u2="$T/r1-shared-dry"; _d2="$_u2/.harness/umbrella.manifest.draft.yaml"
+  build_single_nogit "$_u2"; write_draft "$_d2"
+  snapshot "$_u2" "$T/r1-shared-dry-snap"
+  _rc=0
+  sh "$INSTALL" --umbrella "$_u2" --from-manifest "$_d2" --shared-repo --dry-run \
+    >"$T/r1-shared-dry.out" 2>"$T/r1-shared-dry.err" || _rc=$?
+  [ "$_rc" = "0" ] || fail "R1 --shared-repo --dry-run exited $_rc (want 0)"
+  [ ! -e "$_u2/.git" ] || fail "R1 --shared-repo --dry-run created the root .git"
+  [ ! -e "$_u2/alpha" ] || fail "R1 --shared-repo --dry-run created a child"
+  unchanged "$_u2" "$T/r1-shared-dry-snap" \
+    || fail "R1 --shared-repo --dry-run wrote into the target"
+  pass "--shared-repo composes with promotion (root git-init, child installed, manifest entry); --dry-run writes nothing (R1) [test_shared_repo_promotion_composes]"
+}
+test_shared_repo_promotion_composes
+
 # ── R2: a missing/invalid/empty-repos manifest aborts, writing nothing ─────────
 test_manifest_gates_fail_closed() {
   for _case in absent norepos zero; do
@@ -233,9 +300,14 @@ test_paths_rebased_to_umbrella_root() {
       fail "R3: live manifest carries the draft's ../$_k base (the F02 Q1 regression)"
     fi
   done
-  # the draft's REAL fields, not manifest_upsert's TODO placeholders.
+  # the draft's REAL fields, not manifest_upsert's TODO placeholders. `init` and
+  # `delegate_cmd` are asserted with the fixture's NON-DEFAULT values: the previous
+  # `./init.sh`/`""` fixture could not distinguish "carried over" from "defaulted", so
+  # deleting either seeded line left the suite green (2026-09-18 reviewer lesson).
   grep -qF 'test_command: "npm test"' "$_m" || fail "R3: live entry did not carry the draft's test_command"
   grep -qF 'test_command: "pytest"' "$_m" || fail "R3: live entry did not carry the draft's test_command (beta)"
+  grep -qF 'init: ./boot.sh' "$_m" || fail "R3: live entry did not carry the draft's init"
+  grep -qF 'delegate_cmd: ./delegate.sh' "$_m" || fail "R3: live entry did not carry the draft's delegate_cmd"
   grep -qF 'scaffold_cmd: "echo x >> scaffold-count"' "$_m" || fail "R3: live entry did not carry the draft's scaffold_cmd"
   if grep -qF 'TODO' "$_m"; then
     fail "R3: live manifest carries manifest_upsert's TODO placeholders instead of the draft's fields"
@@ -274,6 +346,18 @@ test_path_gates_fail_closed() {
   [ ! -e "$T/r4-mismatch/api.v2" ] || fail "R4 (mismatch): a basename!=key directory was created"
   grep -qF 'rename' "$T/r4-mismatch.out" "$T/r4-mismatch.err" || fail "R4 (mismatch): refusal omits the 'rename' remedy"
   grep -qF '/sdd-plan' "$T/r4-mismatch.out" "$T/r4-mismatch.err" || fail "R4 (mismatch): refusal omits the '/sdd-plan' remedy"
+
+  # key grammar ^[a-z0-9-]+$: the basename EQUALS the key but the key is invalid, so ONLY
+  # the grammar arm can refuse it. The api-v2 case above is caught by the basename!=key
+  # arm, so deleting the grammar arm alone would otherwise leave every suite green
+  # (2026-09-18 reviewer lesson on compound guards).
+  _mk grammar "  Alpha:\n    path: ../Alpha\n"
+  grep -qF "entry 'Alpha'" "$T/r4-grammar.out" "$T/r4-grammar.err" \
+    || fail "R4 (grammar): refusal does not name the invalid key 'Alpha'"
+  grep -qF '../Alpha' "$T/r4-grammar.out" "$T/r4-grammar.err" || fail "R4 (grammar): refusal does not name ../Alpha"
+  [ ! -e "$T/r4-grammar/Alpha" ] || fail "R4 (grammar): an invalid-grammar key created its child directory"
+  grep -qF 'rename' "$T/r4-grammar.out" "$T/r4-grammar.err" || fail "R4 (grammar): refusal omits the 'rename' remedy"
+  grep -qF '/sdd-plan' "$T/r4-grammar.out" "$T/r4-grammar.err" || fail "R4 (grammar): refusal omits the '/sdd-plan' remedy"
 
   _mk nopath "  alpha:\n    init: ./init.sh\n"
   [ ! -e "$T/r4-nopath/alpha" ] || fail "R4 (nopath): a pathless entry created a child"

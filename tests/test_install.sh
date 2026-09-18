@@ -2713,14 +2713,29 @@ test_from_manifest_requires_umbrella() {
   # no target and no --umbrella: a usage error, writing nothing anywhere.
   _rc=0; sh "$SRC/harness-install.sh" --from-manifest "$_d" >/dev/null 2>&1 || _rc=$?
   [ "$_rc" != "0" ] || fail "R1: --from-manifest without --umbrella was accepted"
-  # a non-install target is refused ONLY when the flag is given.
-  _fr="$T/f03-fresh"; mkdir -p "$_fr"
-  _rc=0; sh "$SRC/harness-install.sh" --umbrella "$_fr" --from-manifest "$_d" >/dev/null 2>&1 || _rc=$?
+  # a non-install target is refused ONLY when the flag is given. Place the draft INSIDE
+  # the target's .harness/ with an ALIGNED `path: ../alpha`, so ONLY the existing-install
+  # refusal can fire: with the draft OUTSIDE the target the run aborts at the later
+  # path-resolution gate, which masks a deleted `.harness-version` guard (2026-09-18
+  # reviewer lesson — that masking kept all 50 suites green while a child and a live
+  # manifest were written into a non-install directory).
+  _nt="$T/f03-noninstall"; mkdir -p "$_nt/.harness"
+  printf 'repos:\n  alpha:\n    path: ../alpha\n    init: ./boot.sh\n    test_command: ""\n    delegate_cmd: ./delegate.sh\n' \
+    > "$_nt/.harness/umbrella.manifest.draft.yaml"
+  _rc=0
+  sh "$SRC/harness-install.sh" --umbrella "$_nt" --from-manifest "$_nt/.harness/umbrella.manifest.draft.yaml" \
+    >"$T/f03-ni.out" 2>"$T/f03-ni.err" || _rc=$?
   [ "$_rc" != "0" ] || fail "R1: --from-manifest into a fresh non-install target was accepted"
-  [ ! -e "$_fr/.harness" ] || fail "R1: the refused non-install target was written into"
+  grep -qF "$_nt" "$T/f03-ni.out" "$T/f03-ni.err" \
+    || fail "R1: the non-install refusal does not name the target '$_nt'"
+  grep -qF 'existing install' "$T/f03-ni.out" "$T/f03-ni.err" \
+    || fail "R1: the non-install refusal does not name the missing existing install"
+  [ ! -e "$_nt/alpha" ] || fail "R1: the refused non-install target had a child created"
+  [ ! -f "$_nt/umbrella.manifest.yaml" ] || fail "R1: the refused non-install target got a live manifest"
+  [ ! -f "$_nt/.harness/.harness-version" ] || fail "R1: the refused non-install target was installed into"
   # POSITIVE CONTROL: the SAME fresh dir with a plain --umbrella still succeeds, so the
   # refusal is keyed on the flag and not on the directory.
-  _rc=0; sh "$SRC/harness-install.sh" --umbrella "$_fr" >/dev/null 2>&1 || _rc=$?
+  _rc=0; sh "$SRC/harness-install.sh" --umbrella "$_nt" >/dev/null 2>&1 || _rc=$?
   [ "$_rc" = "0" ] || fail "R1 positive control: a plain --umbrella into a fresh dir was refused (rc=$_rc)"
   pass "--from-manifest requires --umbrella and an existing install; fresh plain cascade works (R1) [from_manifest_requires_umbrella]"
 }
@@ -2748,7 +2763,13 @@ test_from_manifest_single_target_rejected() {
   [ "$_rc" != "0" ] || fail "R1: --standalone --from-manifest was accepted"
   _rc=0; sh "$SRC/harness-install.sh" --umbrella "$_fr" --from-manifest "$_d" --thin >/dev/null 2>&1 || _rc=$?
   [ "$_rc" != "0" ] || fail "R1: --thin --from-manifest was accepted"
-  pass "--from-manifest rejected in single-target/empty/missing-value/--self/--standalone/--thin (R1) [from_manifest_single_target_rejected]"
+  # --print-agents is a single-target-only diagnostic and its umbrella-mode rejection
+  # (harness-install.sh:8255) fires before the promotion pre-pass, so the composition is a
+  # usage error that writes nothing.
+  _rc=0; sh "$SRC/harness-install.sh" --umbrella "$_fr" --from-manifest "$_d" --print-agents >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" != "0" ] || fail "R1: --print-agents --from-manifest was accepted"
+  [ ! -e "$_fr/.harness/.harness-version" ] || fail "R1: --print-agents --from-manifest wrote into the target"
+  pass "--from-manifest rejected in single-target/empty/missing-value/--self/--standalone/--thin/--print-agents (R1) [from_manifest_single_target_rejected]"
 }
 test_from_manifest_single_target_rejected
 
