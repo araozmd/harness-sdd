@@ -310,3 +310,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-17 E28-F02 pr-loop: round 14 returned 1 blocking finding (preserve logical keys across amendments). Human override — cap raised to 15.
 - 2026-09-17 E28-F02 pr-loop: round 15 returned 1 blocking finding (Driller must persist the discovered topology before handoff). Human override — cap raised to 16.
 - 2026-09-17 E28-F02 pr-loop: round 16 returned 2 blocking findings (path-only amendments; persist key assignments across a draft-deletion interval). Human override — cap raised to 17.
+- 2026-09-17 E28-F02 pr-loop: round 17 returned 3 blocking findings (bind amend to the exact/consumed handoff; Driller relocation guard; reserve removed keys). Human override — cap raised to 18; this is the FINAL round: if round 18 is not clean, the feature goes needs-human rather than overriding again.
