@@ -1436,7 +1436,13 @@
           "depends_on": [
             "E28-F01"
           ],
-          "spec_path": "specs/epics/E28-greenfield-to-umbrella/F02-planner-topology/"
+          "spec_path": "specs/epics/E28-greenfield-to-umbrella/F02-planner-topology/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (202)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E28-F02 done --evidence <merge-ref>`",
+            "pr": "202"
+          }
         },
         {
           "id": "E28-F03",
