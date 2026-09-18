@@ -1007,7 +1007,7 @@
         {
           "id": "E99-F164",
           "title": "Only one source file's executable bit is checked (tests/test_install.sh:38, added by E99-F161); chmod -x on tools/fix-worktree.sh leaves all 47 suites green while ./tools/fix-worktree.sh is Permission denied",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],

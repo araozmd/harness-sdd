@@ -329,3 +329,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-18 E99-F163 build round 1 -> Reviewer REJECT (prose-only: F1a-F1e unchanged operator-facing surfaces); back to in-progress.
 - 2026-09-18 E99-F163 build round 2 -> Reviewer APPROVE at 7a57895 (prose-only round: F1a-F1e all fixed and each pinned; both round-1 survivors R8/R11 now RED; 21 kills / 0 survived / 2 controls; code byte-unchanged from round 1; seed twin byte-identical; 50/50 suites green bash-scoped on neutral disk TMPDIR; change-size `ok`). Ready for the Orchestrator to set `done` and open the PR.
 - 2026-09-18 E99-F163 merged in PR #210 at ccb28b7 after a 2-round Codex review loop (2→0). Widened escalation_verdict to the whole stamp, bumped 0.84.0→0.84.1, swept remediation prose. Marked done; 2 threads resolved.
+- 2026-09-18 E99-F164 Orchestrator: autonomous sdd:false fix; set in-progress and spawning Builder.
