@@ -1,7 +1,7 @@
 ---
 id: E31
 title: "OpenCode is a claimed, first-class front end"
-status: pending          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: done             # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 
