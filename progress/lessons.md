@@ -311,3 +311,15 @@
   replace the physical `cd`/`pwd -P` parent check: keep them as separate guards in separate
   places (resolve owns symlink-to-OUTSIDE, existing-child owns dangling and inside) so each
   mutant has its own assertion that reds.
+- [2026-09-18 builder] `opencode debug config` truncates its JSON at exactly 64 KiB when
+  stdout is a PIPE and silently drops everything past that — including the `command`
+  section (the resolved `/sdd-*` commands). Capture such CLI output through a FILE
+  (`stdout=open(tmp,'w')`), never `subprocess.PIPE`; the R9 live probe failed on a
+  complete config until this was fixed.
+- [2026-09-18 builder] Running the OpenCode CLI with cwd inside the harness source repo
+  installs its runtime deps into the tracked `.opencode/` (`package.json`,
+  `package-lock.json`, `node_modules/`, plus a generated `.opencode/.gitignore`). A live
+  "does OpenCode resolve the source glue?" probe MUST run against an isolated COPY of the
+  source layout (opencode.json + AGENTS.md + `.opencode/` + `agents/`), or the test dirties
+  the very working tree it is asserting on — and those artifacts must never be committed
+  as glue.

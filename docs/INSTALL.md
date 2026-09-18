@@ -404,13 +404,15 @@ workers concurrently. OpenCode support is **not assumed** — it is verified by 
 ./harness-install.sh --agents=opencode --with-opencode-parallel=true /path/to/your-project
 ```
 
-**In the harness source checkout** there is no OpenCode command surface, so
-`/sdd-test-concurrency` is unavailable and `--self` does not emit OpenCode glue.
-OpenCode still discovers the committed shared unit
-`.agents/skills/sdd-fix-parallel/SKILL.md`, which self-gates on `.opencode-parallel`.
-When it gates, either confirm the session can spawn native concurrent sub-agents and
-write `supported` to `.opencode-parallel` directly, or run the batch sequentially with
-`/sdd-fix`.
+**In the harness source checkout** `--self` now generates the OpenCode surface too
+(`opencode.json`, `.opencode/command/*.md`, and `.opencode/agent/pr-fixer.md` while the
+PR-loop gate is on), including `/sdd-test-concurrency`. The source output is
+machine-independent: the capability-gated `/sdd-fix-parallel` command and its
+`.opencode-parallel` marker are never emitted or committed. OpenCode still discovers the
+committed shared unit `.agents/skills/sdd-fix-parallel/SKILL.md`, which self-gates on
+`.opencode-parallel`. When it gates, either confirm the session can spawn native
+concurrent sub-agents and write `supported` to `.opencode-parallel` directly, or run the
+batch sequentially with `/sdd-fix`.
 
 ## Worker roster (`workers.roster`) — opt-in, local-only
 
@@ -1034,7 +1036,7 @@ the session model (`inherit`).
 
 ## Self mode — `--self` (harness developers only)
 
-`./harness-install.sh --self` regenerates source **Claude + Codex** glue by
+`./harness-install.sh --self` regenerates source **Claude + Codex + OpenCode** glue by
 running the same emitters against a temporary consumer install and transforming
 its references to the repository root. Consumers retain `.harness/` references,
 including umbrella children. Self mode takes no target path and writes no
@@ -1042,20 +1044,24 @@ personal/global config.
 
 | Selection | Source output |
 |---|---|
-| No selector, `--agents=all`, or `--agents=claude,codex` | Both Claude and Codex |
+| No selector, `--agents=all`, or `--agents=claude,codex,opencode` | Claude, Codex and OpenCode |
 | `--agents=claude` | Claude only |
 | `--agents=codex` | Codex only |
-| `--agents=host` | Detected Claude or Codex; otherwise an error |
-| OpenCode or retired selectors | Error before writes |
+| `--agents=opencode` | OpenCode only |
+| `--agents=host` | Detected Claude, Codex or OpenCode; otherwise an error |
+| Retired selectors (`gemini`, `antigravity`) | Error before writes |
 
 CLI selection takes precedence over `HARNESS_AGENTS`. The source output includes
 `.claude/agents/`, `.claude/commands/`, `.codex/agents/`, Codex skill units with
-policy companions under `.agents/skills/`, and `.escalation-arming`. The existing
-`.claude/.glue-manifest` tracks both hosts, policies and the arming verdict, and
-source init checks this generated set for drift. Repeated unchanged generation
-is byte-identical. On deselection or gate-off, only previously managed pristine
-artifacts are reclaimed; edited leftovers are preserved with diagnostics and
-excluded from the new manifest.
+policy companions under `.agents/skills/`, `.escalation-arming`, and the generated
+OpenCode glue — `opencode.json` plus `.opencode/command/*.md` and
+`.opencode/agent/pr-fixer.md` while the PR-loop gate is on. `/sdd-test-concurrency` is
+always emitted; the capability-gated `/sdd-fix-parallel` command and its
+`.opencode-parallel` marker are never source output. The existing `.claude/.glue-manifest`
+tracks every host, policies and the arming verdict, and source init checks this generated
+set for drift. Repeated unchanged generation is byte-identical. On deselection or
+gate-off, only previously managed pristine artifacts are reclaimed; edited leftovers are
+preserved with diagnostics and excluded from the new manifest.
 
 Claude `model:` frontmatter and valid Codex per-role `model = "…"` choices are
 harvested separately and preserved. An omitted Codex model remains inherited;
@@ -1064,9 +1070,11 @@ managed source Codex TOML is a supported override. Other edits, foreign files,
 and symlink collisions are preserved with warnings. The seed
 `harness.config.yaml` values are not changed by self-generation.
 
-**Combined source escalation is UNARMED when Codex inherits**, even if the
-preserved Claude Builder/heavy choices arm Claude alone. This follows the
-existing all-selected-host rule; it does not erase Claude’s models. Explicit
+**Combined source escalation is UNARMED when any selected host cannot raise**, even if
+the preserved Claude Builder/heavy choices arm Claude alone. The source seed pins no
+OpenCode model, so `opencode` resolves `neither` and blocks the combined verdict; Codex
+inheritance blocks it the same way. This follows the existing all-selected-host rule; it
+does not erase Claude’s models. Explicit
 `./harness-install.sh --self --agents=claude` retains the previous Claude-only
 verdict. Configure distinct valid Codex Builder/heavy models if you want the
 combined set to arm.
