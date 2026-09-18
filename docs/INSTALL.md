@@ -864,13 +864,14 @@ Two things worth knowing:
 - **But automatic routing needs a second yes, which the installer computes for you.** While
   `builder-heavy` is on `inherit` — the shipped state described above — escalating would
   hand the build *no model key at all*, abandoning whatever `models.builder` was set to
-  exactly when the build is struggling. So `harness-install.sh` asks its own resolver what
-  `builder` and `builder-heavy` resolve to on every front-end it stamps, and records the
-  comparison in `.harness/.escalation-arming`. Escalation fires only while that file reads
-  `armed`; otherwise the harness declines and names the front-end to fix. **Re-run the
-  installer after changing a tier or a pin** — the verdict is computed at install time.
-  What it does **not** check: that the model is *stronger*, or that it exists. The harness
-  has no model list and invents none. See `docs/WORKFLOW.md` → "Which Builder runs".
+  exactly when the build is struggling. So `harness-install.sh` asks its own resolvers what
+  `builder` and `builder-heavy` resolve to — the whole resolved stamp, `model` plus, on
+  Codex, `model_reasoning_effort` — on every front-end it stamps, and records the comparison
+  in `.harness/.escalation-arming`. Escalation fires only while that file reads `armed`;
+  otherwise the harness declines and names the front-end to fix. **Re-run the installer
+  after changing a tier or a pin** — the verdict is computed at install time.
+  What it does **not** check: that the **stamp** is *stronger*, or that it exists. The
+  harness has no model list and invents none. See `docs/WORKFLOW.md` → "Which Builder runs".
 
 An **upgraded** target keeps whatever `models:` block it already had, so it will not grow
 a `builder-heavy:` line. Nothing breaks: an unlisted role falls through to

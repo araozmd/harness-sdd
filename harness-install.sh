@@ -4250,16 +4250,18 @@ MODEL ROUTING:
                                  files, kept only while those files exist (lets a switch
                                  back to \`inherit\` reclaim them instead of orphaning them)
   .harness/.escalation-arming    whether escalating to \`builder-heavy\` would actually change
-                                 the model, computed from resolve_model at install time and
+                                 the resolved stamp — the \`model\` plus, on codex,
+                                 \`model_reasoning_effort\` (E99-F163) — computed from
+                                 resolve_model / resolve_codex_effort at install time and
                                  read by tools/builder-role.sh. First line \`armed\`/\`blocked\`,
                                  then one \`<front-end>=<verdict>\` per selected front-end,
                                  where <verdict> is raise|none|same|neither|unstamped.
                                  \`unstamped\` means the installer DECLINED to rewrite that
                                  front-end's live artifact (edited opencode.json, foreign or
-                                 symlinked .codex/agents/builder*.toml), so the resolved model
+                                 symlinked .codex/agents/builder*.toml), so the resolved stamp
                                  is not the one it will run.
                                  ABSENT means escalation is OFF — either this
-                                 installer has not run here, or no role resolves to a model.
+                                 installer has not run here, or no role resolves on either axis.
                                  Written only while at least one role resolves and removed
                                  when none does.
   Selected Codex always has all seven standard roles plus the gated pr-fixer;
@@ -4740,7 +4742,7 @@ EOF
     if [ "$_ea_any" = 0 ]; then
       if [ -f "$H/.escalation-arming" ]; then
         rm -f "$H/.escalation-arming"
-        info "escalation arming verdict reclaimed (no role resolves to a model any more)"
+        info "escalation arming verdict reclaimed (no role resolves on either axis any more)"
       fi
       return 0
     fi

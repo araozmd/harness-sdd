@@ -808,7 +808,7 @@ Notes that matter in practice:
 
   A fifth verdict, `unstamped`, means the installer **declined to rewrite that front-end's
   live artifact** — an edited `opencode.json`, or a foreign/edited/symlinked
-  `.codex/agents/builder*.toml`. The resolved model then describes a file that was never
+  `.codex/agents/builder*.toml`. The resolved stamp then describes a file that was never
   written, so it is not the one that front-end will run, and the verdict refuses to vouch
   for it. Restore the artifact (or let the installer own it) and re-run.
 
@@ -834,7 +834,8 @@ Notes that matter in practice:
   no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours —
   what the check closes is the silent downgrade to no model or effort at all.
 - **An absent verdict means off.** Either the installer has not run since v0.58.0, or no role
-  resolves to a model. Same remedy: configure `models.builder-heavy` and re-run the installer.
+  resolves on either axis. Same remedy: configure `models.builder-heavy` and re-run the
+  installer.
 - **`0` disables BOTH triggers — including `complexity: complex`.** It is the master switch,
   not just a round threshold. A tagged spec on a target that has not opted in routes to
   `builder` and the tool says why on stderr. (Leaving the tag live at `0` would escalate into

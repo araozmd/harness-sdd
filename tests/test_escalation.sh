@@ -751,9 +751,14 @@ artifact_written_and_reclaimed() {
     || fail "F05-R4: control — a configured install wrote no artifact, so the absence legs are vacuous"
 
   # Switch everything back ⇒ it is REMOVED, not left stale. Asserting only the final absence
-  # would pass against an installer that never wrote it at all.
+  # would pass against an installer that never wrote it at all. Capture stdout here (not
+  # install_to's /dev/null) so the reclaim MESSAGE is pinned too: the gate is model-or-effort
+  # now, so a message still naming the model alone understates the remedy (E99-F163 F1b).
   set_models "$_c" builder inherit; set_models "$_c" builder-heavy inherit
-  install_to "$_t" "$T/ch-rec" --agents=claude
+  _out="$(CODEX_HOME="$T/ch-rec" sh "$SRC/harness-install.sh" --agents=claude "$_t" 2>&1)" \
+    || fail "F05-R4: the reclaim install exited non-zero"
+  printf '%s' "$_out" | grep -q 'no role resolves on either axis any more' \
+    || fail "E99-F163 F1b: the reclaim message still says the verdict is model-only"
   [ -f "$_t/.harness/.escalation-arming" ] \
     && fail "F05-R4: switching every role back to inherit left a stale arming artifact"
   pass "the artifact is written only while a model resolves, and reclaimed when none does (F05-R4)"
@@ -1028,12 +1033,39 @@ effort_is_named_in_the_operator_docs() {
   grep -qiE 'effort difference alone' "$_inst" \
     || fail "E99-F163: docs/INSTALL.md's Codex effort section does not say an effort difference alone arms"
 
+  # F1c: the EARLIER `builder-heavy` section (INSTALL.md:864-873) describes the same mechanism
+  # and had to move with it. Pin it section-scoped: the "Codex reasoning effort" section above
+  # also names the whole stamp, so a whole-file anchor would stay green while this earlier
+  # section kept saying a single "own resolver" checks whether "the model" is stronger.
+  _bh="$T/doc-builder-heavy"
+  awk 'BEGIN{h="### `builder-heavy`"} /^#{2,} /{k=(index($0,h)>0);next} k' \
+    "$SRC/docs/INSTALL.md" | tr '\n' ' ' > "$_bh"
+  [ -s "$_bh" ] || fail "E99-F163 F1c: the builder-heavy section did not extract — the heading moved"
+  grep -qiE 'own[[:space:]]+resolvers' "$_bh" \
+    || fail "E99-F163 F1c: docs/INSTALL.md still says a single 'own resolver'"
+  grep -qiE 'whole[[:space:]]+resolved[[:space:]]+stamp' "$_bh" \
+    || fail "E99-F163 F1c: docs/INSTALL.md's builder-heavy section does not name the whole resolved stamp"
+  grep -qiE '\*\*stamp\*\*[[:space:]]+is[[:space:]]+\*stronger\*' "$_bh" \
+    || fail "E99-F163 F1c: docs/INSTALL.md still says the check is about the 'model' being stronger"
+
   _wf="$T/doc-workflow"
   awk 'BEGIN{h="### Which Builder runs"} /^#{2,} /{k=(index($0,h)>0);next} k' \
     "$SRC/docs/WORKFLOW.md" | tr '\n' ' ' > "$_wf"
   [ -s "$_wf" ] || fail "E99-F163: the 'Which Builder runs' section did not extract — the heading moved"
   grep -qiE 'different[[:space:]]+resolved[[:space:]]+stamp' "$_wf" \
     || fail "E99-F163: docs/WORKFLOW.md's escalation section does not say the verdict compares the whole resolved stamp"
+  # F1d: the `unstamped` clause and the absent-verdict clause named a "resolved model" only.
+  # Both live in this same section, so scope to $_wf and use DISTINCT anchors: a lone
+  # "either axis" anchor would be satisfied by the `none` bullet below while the absent clause
+  # still said "to a model".
+  grep -qiE 'resolved[[:space:]]+stamp[[:space:]]+then[[:space:]]+describes' "$_wf" \
+    || fail "E99-F163 F1d: docs/WORKFLOW.md's unstamped clause still says 'resolved model'"
+  grep -qiE 'no[[:space:]]+role[[:space:]]+resolves[[:space:]]+on[[:space:]]+either[[:space:]]+axis' "$_wf" \
+    || fail "E99-F163 F1d: docs/WORKFLOW.md's absent clause still says 'no role resolves to a model'"
+  # F1e(2): the `none` bullet's "nothing on either axis" is its own claim — R11 reverted it to
+  # "nothing", and all suites stayed green because only "different resolved stamp" was anchored.
+  grep -qiE 'nothing[[:space:]]+on[[:space:]]+either[[:space:]]+axis' "$_wf" \
+    || fail "E99-F163 F1e: docs/WORKFLOW.md's 'none' clause does not say nothing resolves on either axis"
 
   # And the superseded gap statement is gone. The positive anchors above prove the current rule
   # IS documented, so this negative cannot pass merely because escalation went undocumented.
@@ -1049,7 +1081,50 @@ effort_is_named_in_the_operator_docs() {
     grep -q 'whole resolved stamp, `model` plus' "$_b" \
       || fail "E99-F163: $_b's escalation seed block does not name the model+effort stamp"
   done
+
+  # F1e(1): the stamp phrase above does NOT pin the codex BULLET three lines below it. R8
+  # reverted that bullet's verdict ("arms" → "does NOT arm") in BOTH copies — byte-identically,
+  # so prl_block passed — and every suite stayed green. Extract the escalation seed block
+  # structurally from each copy and anchor the bullet's OWN claim; a whole-file grep for the
+  # phrase would be satisfied by the docs, which say the same thing in other words.
+  _seed_n=0
+  for _b in "$SRC/harness.config.yaml" "$SRC/harness-install.sh"; do
+    _seed_n=$((_seed_n + 1))
+    _seed="$T/seed-codex-bullet-$_seed_n"
+    awk '/# ESCALATION NEEDS A SECOND YES/ {k=1} k {print} k && /^  after_rejections:/ {exit}' \
+      "$_b" | tr '\n' ' ' > "$_seed"
+    [ -s "$_seed" ] || fail "E99-F163 F1e: the escalation seed block did not extract from $_b"
+    grep -qiE 'effort[[:space:]]+difference[[:space:]]+alone[[:space:]]+arms' "$_seed" \
+      || fail "E99-F163 F1e: $_b's seed block does not say a codex effort difference alone arms"
+  done
   pass "the operator docs and both seed-block copies name effort in the verdict and drop the deferred-gap wording (E99-F163)"
+}
+
+# ── F1a (E99-F163): the GENERATED manifest describes the widened verdict ────────
+# The heredoc at harness-install.sh:4252 is shipped into every target's
+# .harness/manifest.txt, and until this fix it told operators `armed` meant a changed
+# MODEL computed from `resolve_model` — false since E99-F163 (an effort-only Codex pair
+# arms with no `model` key on either role). Read the INSTALLED artifact, not the source
+# heredoc: a whole-file grep for the corrected phrase could be satisfied by another
+# occurrence in the installer, and the manifest is what the operator actually reads.
+widened_verdict_is_named_in_the_generated_manifest() {
+  _mv="$T/manifest"; install_to "$_mv" "$T/ch-manifest" --agents=claude
+  _mf="$_mv/.harness/manifest.txt"
+  [ -f "$_mf" ] || fail "E99-F163 F1a: the installer wrote no .harness/manifest.txt"
+  # Scope to the .escalation-arming entry: from its line through its final clause.
+  awk '/\.harness\/\.escalation-arming/ {k=1} k {print} k && /Written only while/ {exit}' \
+    "$_mf" | tr '\n' ' ' > "$T/manifest-entry"
+  [ -s "$T/manifest-entry" ] \
+    || fail "E99-F163 F1a: the .escalation-arming manifest entry did not extract — its shape moved"
+  grep -qiE 'change[[:space:]]+the[[:space:]]+resolved[[:space:]]+stamp' "$T/manifest-entry" \
+    || fail "E99-F163 F1a: the generated manifest still says escalating changes only the model"
+  grep -qF 'resolve_codex_effort' "$T/manifest-entry" \
+    || fail "E99-F163 F1a: the generated manifest does not name resolve_codex_effort"
+  grep -qiE 'resolved[[:space:]]+stamp[[:space:]]+is[[:space:]]+not[[:space:]]+the[[:space:]]+one[[:space:]]+it[[:space:]]+will[[:space:]]+run' "$T/manifest-entry" \
+    || fail "E99-F163 F1a: the generated manifest still calls the unstamped case a 'resolved model'"
+  grep -qiE 'no[[:space:]]+role[[:space:]]+resolves[[:space:]]+on[[:space:]]+either[[:space:]]+axis' "$T/manifest-entry" \
+    || fail "E99-F163 F1a: the generated manifest still says ABSENT is 'no role resolves to a model'"
+  pass "the generated .harness/manifest.txt describes the widened model+effort stamp (E99-F163 F1a)"
 }
 
 # ── usage errors ────────────────────────────────────────────────────────────────
@@ -1093,6 +1168,7 @@ decline_reasons_are_distinguishable
 docs_agree_with_the_shipped_default
 no_doc_claims_the_harness_cannot_check
 effort_is_named_in_the_operator_docs
+widened_verdict_is_named_in_the_generated_manifest
 usage_errors_are_loud
 
 # ── init.sh visibility line: quoted thresholds normalize like _cfg_scalar ────────────
