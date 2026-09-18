@@ -262,3 +262,24 @@
   Escape the dollar (`\$sdd-plan`), exactly as the surrounding backticks are escaped (E28-F01
   round 8, finding 4042015445). A host-neutral pointer edit therefore needs a green single-host
   install before any test run — R8c alone would have caught it, but only after the banner tests.
+- [2026-09-17 reviewer] A per-surface anchor list that omits the very anchors a role-only test
+  checks lets a semantic divergence survive on the executable surface: E28-F02's R8 asserted
+  five tokens on the emitted `/sdd-plan` body + both source-mode artifacts but not
+  `specs/adr/`, `ADR-` or the allocation phrase, even though the plan's content contract said
+  those "must appear in `agents/planner.md` AND the emitted `/sdd-plan` body" — so
+  `.harness/spects/adr/…` (M24) and a dropped allocation clause (M2b) stayed green while the
+  role kept them, and R8's own residual claimed it "catches a missing/renamed rule on a
+  surface". When a spec says N surfaces carry "the same step", assert the FULL pinned-anchor
+  set on every surface, not a convenient subset; and a two-clause attribution joined by `;`
+  plus `amend` matching `amends` let R10's "a topology change is a `/sdd-plan` amend" clause be
+  deleted outright (M23) with the suite green — assert the re-plan clause as its own phrase.
+- [2026-09-17 builder] Fixing that R8 hole, adding the three anchors to the whole-span
+  `require_tokens` list did **not** kill the Reviewer's own M2b/M24 mutants: the emitted body
+  carries `specs/adr/`/`ADR-`/the allocation phrase in the EARLIER generic architecture-ADR
+  step too, so a topology-step-only rename/drop is still satisfied elsewhere in the span.
+  Adding a token to a whole-span check is not the same as pinning the STEP: bound it to the
+  sentence/step that carries the rule (`every_naming_sentence_carries … "more than one
+  deployable" …`) and prove the kill by replaying the exact mutant. Replaying the Reviewer's
+  byte-for-byte mutants against the fixed suite is the cheapest way to catch that a
+  "required fix" is itself subsumed (`scratchpad/E28-F02-builder/mut.py`, all three RED,
+  both no-op controls green).

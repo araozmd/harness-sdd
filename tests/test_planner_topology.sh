@@ -238,9 +238,22 @@ grep -qF '## Invocation adapter' "$SKILL" \
   || fail "R8: .agents/skills/sdd-plan/SKILL.md lost the shared-unit header '## Invocation adapter' — the unit was blanked or truncated"
 for _r8_pair in "R8 emitted body|$BODY_FOLD" "R8 .claude/commands|$CMD_FOLD" "R8 .agents/skills|$SKILL_FOLD"; do
   _r8_lbl="${_r8_pair%%|*}"; _r8_f="${_r8_pair#*|}"
+  # The FULL pinned-anchor set from the plan's content contract, not a convenient
+  # subset: the ADR path/id/allocation anchors are asserted on every surface too, so
+  # the executable body cannot diverge on where ADRs go while the role keeps them
+  # (Reviewer Finding A / M2b, M24).
   require_tokens "$_r8_lbl" "$_r8_f" \
     "more than one deployable" "repo-topology ADR" "umbrella.manifest.draft.yaml" \
-    "scaffold_cmd" "does not engage umbrella mode"
+    "scaffold_cmd" "does not engage umbrella mode" \
+    "specs/adr/" "ADR-" "above the max existing ADR number"
+  # ...and those ADR anchors are pinned to the TOPOLOGY sentence (the one naming the
+  # `more than one deployable` trigger), not merely anywhere in the span: the emitted
+  # body also carries `specs/adr/` in the earlier generic architecture-ADR step, so a
+  # whole-span token check leaves the topology step's own path / above-max allocation
+  # rule renameable or deletable (Reviewer M2b, M24). Bounded here so the divergence
+  # reds on every surface.
+  every_naming_sentence_carries "$_r8_lbl ADR step" "$_r8_f" "more than one deployable" \
+    "specs/adr/" "ADR-" "above the max existing ADR number"
 done
 # ADR-0003: one body, no per-host fork of the topology step. Anchored on the tokens
 # anywhere in the span (a fork need not start at column 0); none of the three
@@ -301,6 +314,11 @@ pass "R9 example + docs document scaffold_cmd and keep the four required keys [t
 guard "R10 role" "$ROLE_SPAN" 8
 require_tokens "R10 role" "$ROLE_FOLD" "single writer"
 every_naming_sentence_carries "R10 role" "$ROLE_FOLD" "/sdd-drill" "never" "amend"
+# R10's THIRD clause — "a topology change is a `/sdd-plan` amend" — is distinct from
+# the /sdd-drill clause above: that clause's `amend` is a substring of `amends`, so
+# deleting the whole re-plan clause would stay green without this line. The sentence
+# naming `topology change` is required to carry `/sdd-plan`, not just `amend`.
+every_naming_sentence_carries "R10 role re-plan" "$ROLE_FOLD" "topology change" "/sdd-plan" "amend"
 [ -f "$DRILLER" ] || fail "R10: $DRILLER is missing"
 # Positive control FIRST (the Planner-side rule above), then the absence check.
 if grep -qF 'umbrella.manifest.draft.yaml' "$DRILLER"; then
