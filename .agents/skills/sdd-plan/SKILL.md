@@ -45,7 +45,7 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    `delegate_cmd` (empty string), and optionally the `scaffold_cmd` runner key that is
    optional and opaque: the harness never interprets it and only the E28-F03 promotion
    runs it. Write each `path` relative to the draft file's own directory (the child
-   sibling), never relative to the harness directory. The draft's header must mark it a
+   sibling). The draft's header must mark it a
    `DRAFT` and state that it is `inert`.
    The draft is inert and is not the switch: never set or change `umbrella.manifest` in
    `harness.config.yaml`, and never write `umbrella.manifest.yaml`, so

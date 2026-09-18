@@ -87,7 +87,7 @@ The draft has one `repos:` entry per deployable, keyed by the repo/dir name, eac
 `path`, `init`, `test_command`, `delegate_cmd` (empty string), and optionally the
 `scaffold_cmd` runner key that is optional and opaque: the harness never interprets it
 and only the E28-F03 promotion runs it. Write each `path` relative to the draft file's own directory
-(the child sibling), never relative to the harness directory. The draft's header must
+(the child sibling). The draft's header must
 mark it a `DRAFT` and state that it is `inert`.
 
 The draft is inert and is not the switch: never set or change `umbrella.manifest` in

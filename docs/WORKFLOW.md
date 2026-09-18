@@ -70,7 +70,10 @@ both the per-epic `/sdd-drill` (F03) and the `/sdd-next` loop. A human runs
 `/sdd-plan "<idea>"`, answers a short adaptive Q&A, and the Planner writes the durable
 design artifacts — `specs/vision.md`, `specs/architecture.md` + ADRs at
 `specs/adr/NNNN-*.md` — and seeds a block of `draft` epics (`state/tasks.json` rows with
-`features: []` + a one-paragraph `epic.md` each).
+`features: []` + a one-paragraph `epic.md` each). When the architecture names **more than
+one deployable**, it also writes a repo-topology ADR and an **inert**
+`umbrella.manifest.draft.yaml`: presence alone does not engage umbrella mode, and only a
+later explicit promotion step (E28-F03) turns it into a live coordinator.
 
 The Planner is a **producer that never specs**: it writes no feature
 `.spec/.plan/.tasks/.tests`, never spawns the Architect, and **never advances an epic

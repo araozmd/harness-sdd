@@ -128,6 +128,29 @@ every_naming_sentence_carries() {
   done < "$T/sentences.hit"
 }
 
+# no_naming_sentence_carries <label> <folded-file> <needle> <forbidden-token>... — the
+# counterpart of every_naming_sentence_carries for a rule whose defect is a CONTRADICTORY
+# clause rather than a missing one. Positive control: a sentence naming <needle> must exist;
+# then none of them may carry any <forbidden-token>. The path-base rule needs this because
+# in an installed target the draft lives in the harness dir, so a clause forbidding that base
+# (or moving it to the project root) states the opposite of the required `../<child>` base
+# while still leaving `path` + `own directory` in the sentence (which the positive check
+# above alone cannot see).
+no_naming_sentence_carries() {
+  _nn_lbl="$1"; _nn_fold="$2"; _nn_needle="$3"; shift 3
+  sentences "$_nn_fold" > "$T/sentences.none"
+  grep -F "$_nn_needle" "$T/sentences.none" > "$T/sentences.none-hit" || true
+  [ -s "$T/sentences.none-hit" ] \
+    || fail "$_nn_lbl: no sentence names '$_nn_needle' — positive control failed, the rule is absent"
+  while IFS= read -r _nn_s; do
+    for _nn_tok in "$@"; do
+      if printf '%s' "$_nn_s" | grep -qF "$_nn_tok"; then
+        fail "$_nn_lbl: the sentence naming '$_nn_needle' also carries '$_nn_tok' — the path base is contradictory (got: $_nn_s)"
+      fi
+    done
+  done < "$T/sentences.none-hit"
+}
+
 # ── extract every span once ────────────────────────────────────────────────────
 ROLE_SPAN="$T/role.span"; ROLE_FOLD="$T/role.fold"
 BODY_SPAN="$T/body.span"; BODY_FOLD="$T/body.fold"
@@ -215,6 +238,15 @@ every_naming_sentence_carries "R5 role header" "$ROLE_FOLD" "DRAFT" "inert" "hea
 every_naming_sentence_carries "R5 body header" "$BODY_FOLD" "DRAFT" "inert" "header"
 every_naming_sentence_carries "R5 role path base" "$ROLE_FOLD" "own directory" "path"
 every_naming_sentence_carries "R5 body path base" "$BODY_FOLD" "own directory" "path"
+# ...and the base sentence must NOT also forbid it or re-base it to the project root: in an
+# installed target the draft IS in the harness dir, so "never relative to the harness
+# directory" contradicts the required `../<child>` sibling path. The positive pair check
+# above stays green on the contradiction (both tokens survive), so this negative is what
+# pins the correction on every surface the clause appears on.
+no_naming_sentence_carries "R5 role path base" "$ROLE_FOLD" "own directory" "harness directory" "project root"
+no_naming_sentence_carries "R5 body path base" "$BODY_FOLD" "own directory" "harness directory" "project root"
+no_naming_sentence_carries "R5 .claude/commands" "$CMD_FOLD" "own directory" "harness directory" "project root"
+no_naming_sentence_carries "R5 .agents/skills" "$SKILL_FOLD" "own directory" "harness directory" "project root"
 pass "R5 DRAFT/inert header and path relative to the draft's own directory [test_draft_header_and_path_base]"
 
 # ── R6: scaffold_cmd optional and opaque, attributed to F03 ────────────────────
