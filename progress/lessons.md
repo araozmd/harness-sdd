@@ -434,3 +434,9 @@
   new script is covered on commit, and add a fail-closed canary list of the `./`-documented
   entrypoints so widening the exemption to drop one reds naming it. Prove the guard by
   mutating the exemption, not by reading it. (E99-F164)
+- [2026-09-18 builder] A list-membership guard where every element is space-delimited must be
+  mutated on the FIRST element too: `sed 's# token##'` silently no-ops there because the first
+  token has no leading space (`_sse_expected="first …`), so the suite runs unmutated, stays
+  green, and reads as a SURVIVOR. Anchor the deletion on the delimiter (`s#="first #="#`) or
+  require the applied diff to be non-empty before recording any result — the "print the applied
+  diff" rule is what turns this void run back into a kill. (E99-F164 F2b)

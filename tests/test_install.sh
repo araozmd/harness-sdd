@@ -129,18 +129,21 @@ require_no_interior_blank() {
 # Every test invokes these with `sh "$SRC/<file>"`, never `./<file>`, so no suite executed
 # them and no suite could notice the missing bit.
 #
-# The required set is DERIVED, so it cannot rot:
+# The required set is DERIVED by RULE and pinned by an explicit expected set:
 #   * REQUIRED: every tracked `*.sh` that carries a `#!` shebang and does NOT live under
 #     `tests/`. A new top-level or `tools/` script is covered the moment it is committed
-#     — there is no list to remember to extend.
+#     — there is no list to remember to extend for the COVERAGE.
 #   * EXEMPT: anything under `tests/`. tools/run-tests.sh runs every suite as
 #     `sh <suite>` (run-tests.sh:372) and many suites are deliberately mode 100644;
 #     forcing +x there would be wrong. `tests/fixtures/**` is frozen installer
 #     output/data, not an entrypoint. This is the ONLY exemption, and it is by PATH RULE
-#     (not by name); a genuinely non-direct-exec script outside tests/ would have to be
-#     classified explicitly, which is the point — the distinction is drawn by "is this a
-#     `./`-documented entrypoint or a runner-invoked/data script", and today every
-#     non-test `.sh` with a shebang is the former.
+#     (not by name). Note what the rule actually requires: +x on EVERY non-test shebang
+#     `*.sh`, not only on scripts a doc happens to invoke as `./<path>`. Today all 11 such
+#     scripts are run directly (as `./` or as commands), but that is the current
+#     population, not the rule's documentation basis. A future runner-only/data `*.sh`
+#     outside `tests/` must not be left non-executable silently: the explicit expected set
+#     below reds until it is either classified here or given an explicit path-rule
+#     exemption — which is the point.
 #
 # TWO mode facts are checked, because they catch DIFFERENT regressions:
 #   * GIT'S TRACKED MODE (`git ls-files -s` == 100755) — the committed contract. It is
@@ -156,8 +159,12 @@ require_no_interior_blank() {
 # guarantee: harness-install.sh:3655-3668 `chmod +x`'es each INSTALLED copy, so they test
 # the installer's own chmod, never the committed source mode.
 test_source_scripts_are_executable() {
+  # Fail CLOSED, never skip: git is a hard harness dependency (the board and init.sh both
+  # need it), so its absence is a broken environment, not a licence to pass this check. A
+  # skip here is the fail-open shape: on a host with no git, a bare `chmod -x
+  # harness-install.sh` is invisible (E99-F164 F1).
   command -v git >/dev/null 2>&1 \
-    || { pass "source_scripts_are_executable: git unavailable, source-mode check skipped"; return 0; }
+    || fail "source_scripts_are_executable: git is not on PATH — cannot verify source script modes; git is a hard harness dependency, so this is a broken environment, not a skip (E99-F164 F1)"
 
   _sse_files="$(git -C "$SRC" ls-files '*.sh' 2>/dev/null)" \
     || fail "source_scripts_are_executable: git ls-files failed — cannot derive the script set"
@@ -186,15 +193,35 @@ test_source_scripts_are_executable() {
 $_sse_files
 _SSE_EOF
 
-  # Fail-CLOSED derivation guard: a broken or over-broad enumeration must not make this
-  # vacuously green. Each anchor is a script a doc tells a user/agent to run with a
-  # leading `./`; if the rule stops covering one, this reds and names it.
-  for _sse_c in harness-install.sh init.sh tools/run-tests.sh tools/fix-worktree.sh; do
-    case " $_sse_seen " in
-      *" $_sse_c "*) : ;;
-      *) fail "source_scripts_are_executable: derivation missed '$_sse_c' — the required-set rule or its tests/ exemption is wrong (a documented ./entrypoint must be covered)" ;;
+  # Fail-CLOSED completeness guard: a broken or over-broad enumeration must not make this
+  # vacuously green, and a subset must not satisfy it. The derived set is compared for
+  # EQUALITY against the explicit expected set below — every member the rule is supposed to
+  # cover must be PRESENT (so dropping any ONE reds and names it) and no unlisted script may
+  # APPEAR (so a new non-test shebang script reds until it is classified here). Because the
+  # check runs in both directions, editing either side alone also reds: a member removed
+  # from the expected list shows up as unexpected-derived, one removed from the derivation
+  # shows up as missing. That is what keeps the set from rotting silently.
+  _sse_expected="harness-install.sh init.sh tools/builder-role.sh tools/change-size.sh tools/fix-worktree.sh tools/harness-owned-paths.sh tools/opencode-model-helper.sh tools/pr-gate.sh tools/pr-round-trend.sh tools/run-tests.sh tools/wait-for-codex.sh"
+
+  _sse_unexpected=""
+  for _sse_f in $_sse_seen; do
+    case " $_sse_expected " in
+      *" $_sse_f "*) : ;;
+      *) _sse_unexpected="$_sse_unexpected $_sse_f" ;;
     esac
   done
+  [ -z "$_sse_unexpected" ] \
+    || fail "source_scripts_are_executable: derived set includes undeclared script(s):$_sse_unexpected — add them to the explicit expected set (or exempt them by path rule) so the set cannot rot silently (E99-F164 F2)"
+
+  _sse_missed=""
+  for _sse_c in $_sse_expected; do
+    case " $_sse_seen " in
+      *" $_sse_c "*) : ;;
+      *) _sse_missed="$_sse_missed $_sse_c" ;;
+    esac
+  done
+  [ -z "$_sse_missed" ] \
+    || fail "source_scripts_are_executable: derivation missed direct-exec script(s):$_sse_missed — the required-set rule or its tests/ exemption is wrong (E99-F164 F2)"
 
   [ -z "$_sse_missing" ] \
     || fail "source script(s) the repo documents running directly are not executable:$_sse_missing (E99-F164: git mode must be 100755 AND the worktree bit set; README documents ./harness-install.sh, agents/fixer.md documents ./tools/fix-worktree.sh)"
