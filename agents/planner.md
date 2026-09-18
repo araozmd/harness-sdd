@@ -130,6 +130,11 @@ the entries whose deployables are gone; when it falls to one deployable (or none
 Planner additionally removes the derived `umbrella.manifest.draft.yaml`, while the
 already-committed repo-topology ADRs are preserved (append-only, never deleted).
 
+That removal is the **one carve-out** from the amend's no-deletion rule: the derived
+`umbrella.manifest.draft.yaml` is a project-owned artifact, so a consolidation to one
+deployable (or none) may delete it, while every other committed artifact stays
+append-only and is never deleted.
+
 ## Seed the draft epics (R11, R12)
 
 Read `state/tasks.json` first. Then seed each roadmap epic into `state/tasks.json`
@@ -250,7 +255,10 @@ rather than silently overwriting. You never silently overwrite.
 An explicit **amend** / re-plan opt-in **appends** new ADRs and **appends** new `draft`
 epics (allocating ids strictly **above** the current maximum — see D5) **without
 rewriting or renumbering** existing artifacts or existing epics. You never delete,
-renumber, or version-fork committed artifacts.
+renumber, or version-fork committed artifacts — with exactly **one carve-out**: the
+derived, project-owned `umbrella.manifest.draft.yaml` may be removed by an amendment that
+falls to one deployable (or none), as the repo-topology rule above states. Every other
+committed artifact stays append-only and is never deleted.
 
 ## Completion report
 

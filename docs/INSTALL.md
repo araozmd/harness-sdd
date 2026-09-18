@@ -664,8 +664,10 @@ It prints the drifted paths (capped at 10) and the `git status` command that lis
 rest. The fix is normally just to commit the upgrade.
 
 **What counts as harness-owned:** the installed body under `.harness/`, excluding
-project-owned config, `init.project.sh`, product/epic specs, state and progress,
-plus proven active generated glue for the selected supported front ends.
+project-owned config, `init.project.sh`, product/epic specs, state and progress, the
+derived Planner draft `.harness/umbrella.manifest.draft.yaml` (a `/sdd-plan` output the
+documented flow commits only after `/sdd-drill`, so an untracked draft must not fail the
+gate), plus proven active generated glue for the selected supported front ends.
 This includes managed Claude files, OpenCode files and stamped Codex roles and
 skill units. `.agents/` and `.codex/agents/` are shared namespaces: unrelated
 files are not claimed. Codex roles use per-file evidence under
@@ -1121,6 +1123,7 @@ POSIX `sh`, zero deps.
 | harness-owned body | `.harness/{AGENTS.md,agents,docs,store,tools,specs/_templates,init.sh}` | refreshed; thin children retain prose pointers |
 | generated glue | managed command/role names for selected front-ends, including `.claude/agents/` and `.claude/commands/` harness files | regenerated subject to each emitter's ownership checks; deselection conservatively reclaims owned files |
 | project-owned | `.harness/{harness.config.yaml,init.project.sh,specs/product.md,specs/glossary.md,specs/epics,state/tasks.json,progress}` | preserved (config also append-migrated) |
+| derived, project-owned | `.harness/umbrella.manifest.draft.yaml` (only when `specs/architecture.md` names more than one deployable) | never installer-managed; excluded from the drift guard, so an untracked draft does not fail `init.sh`; a collapse amend may remove it |
 | runtime/local | `.harness/{telemetry.jsonl,workers.json,.gitignore}`, project-root `.gitignore` | gitignored; both `.gitignore`s append-seeded (never clobbered), logs/personal state never committed. `workers.json` is installer-OWNED derived data: rewritten every run while `workers.roster` is on, removed when it is off |
 | merge-region | `AGENTS.md` / selected `CLAUDE.md`; legacy `GEMINI.md` cleanup | only the marked block |
 

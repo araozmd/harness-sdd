@@ -80,6 +80,11 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    entries whose deployables are gone; when it falls to one deployable (or none), the
    Planner additionally removes the derived `umbrella.manifest.draft.yaml`, while
    the already-committed repo-topology ADRs are preserved (append-only, never deleted).
+
+   That removal is the **one carve-out** from the amend's no-deletion rule: the derived
+   `umbrella.manifest.draft.yaml` is a project-owned artifact, so a consolidation
+   to one deployable (or none) may delete it, while every other committed artifact stays
+   append-only and is never deleted.
 8. **Seed** the roadmap: for each epic, write a `state/tasks.json` row with
    `status: "draft"` and `features: []` (ids as a next-sequential block strictly above
    the max existing `E##`, append-only, no reuse), and create

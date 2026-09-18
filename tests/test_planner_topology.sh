@@ -20,7 +20,11 @@
 #       delta + a new ADR ALWAYS, including a collapse) as a COMPLETE replacement snapshot
 #       (the latest delta names the full set; earlier deltas superseded), so add/remove/
 #       rename are all expressible; the trigger reads that effective set and removes the
-#       derived draft when it falls to <=1 deployable (committed ADRs kept)
+#       derived draft when it falls to <=1 deployable (committed ADRs kept); the draft is
+#       the ONE carve-out from the amend's no-deletion rule
+#   R12 the derived umbrella.manifest.draft.yaml is excluded from the harness-owned path
+#       set (source AND installed layouts), so an untracked draft does not fail the drift
+#       guard, while a genuine harness-body edit still does
 #
 # House rules (see progress/lessons.md; all are load-bearing here):
 #   * Every span is extracted STRUCTURALLY (a `## ` heading → the next `## `; the
@@ -475,6 +479,12 @@ for _r11_pair in "R11 role|$ROLE_FOLD" "R11 emitted body|$BODY_FOLD" \
   # sentence, so the positive control fails there.
   every_naming_sentence_carries "$_r11_lbl collapse ADR" "$_r11_f" "collapse" \
     "always" "appends" "repo-topology ADR" "removal" "one deployable"
+  # (6) The derived draft is the ONE carve-out from the amend's no-deletion rule
+  # (finding 4043317444): the sentence naming `carve-out` must carry the draft path and
+  # `derived`. The word `collapse` is deliberately absent from that sentence, so check (5)
+  # — which extracts EVERY sentence naming `collapse` — stays green on it.
+  every_naming_sentence_carries "$_r11_lbl carve-out" "$_r11_f" "carve-out" \
+    "umbrella.manifest.draft.yaml" "derived"
   # ...and the resolved contract must not re-introduce the contradiction the old sentence
   # carried: neither the collapse sentence nor the effective-set removal sentence may
   # disclaim the required ADR (`writes no new repo-topology ADR`). Positive control first,
@@ -483,6 +493,58 @@ for _r11_pair in "R11 role|$ROLE_FOLD" "R11 emitted body|$BODY_FOLD" \
   no_naming_sentence_carries "$_r11_lbl removal no-ADR" "$_r11_f" "effective set" "writes no new"
 done
 pass "R11 amended topology change is append-only, latest-delta-wins, and removes the draft at <=1 deployable [test_amend_is_append_only]"
+
+# ── R12: the derived draft is project-owned, not harness drift ─────────────────
+# test_draft_excluded_from_harness_owned
+# The draft is DERIVED: docs/INSTALL.md commits the planning baseline only AFTER
+# /sdd-drill, so between /sdd-plan and that commit it is untracked — yet tools/
+# harness-owned-paths.sh claims the whole .harness/ tree as body, which hard-failed the
+# mandatory drift gate on a file the Planner just wrote (P1 finding 4043317437). The fix
+# is ONE :(exclude) line in the SHARED ownership definition (both init.sh's drift guard
+# and the installer's cascade audit read it), so it must resolve in BOTH layouts — a
+# source-layout-only fix would leave the installed target failing.
+guard "R12" "$ROLE_SPAN" 8
+sh "$SRC/tools/harness-owned-paths.sh" body "$SRC" \
+  | grep -qxF ':(exclude)umbrella.manifest.draft.yaml' \
+  || fail "R12: source-layout body pathspecs do not exclude umbrella.manifest.draft.yaml — the Planner's derived draft is claimed as harness body"
+sh "$SRC/tools/harness-owned-paths.sh" body "$SRC/.harness" \
+  | grep -qxF ':(exclude).harness/umbrella.manifest.draft.yaml' \
+  || fail "R12: installed-layout body pathspecs do not exclude .harness/umbrella.manifest.draft.yaml — an untracked draft hard-fails init.sh's gate"
+
+# Behavioral probe: run the EXACT query init.sh runs (`git status --porcelain -uall --
+# <the body pathspecs>`) in a scratch repo. Writes only under $T. The positive control is
+# in the SAME repo and differs only in WHICH file changed: without it an empty result
+# would be satisfied by a pathspec set that checks nothing.
+PROBE="$T/drift-probe"
+mkdir -p "$PROBE/.harness/agents"
+git -C "$PROBE" init -q .
+git -C "$PROBE" config user.email "test@harness.local"
+git -C "$PROBE" config user.name "harness test"
+printf 'name = "planner body"\n' > "$PROBE/.harness/agents/planner.md"
+git -C "$PROBE" add -A
+git -C "$PROBE" commit -q -m "installed harness body"
+[ -z "$(git -C "$PROBE" status --porcelain)" ] \
+  || fail "R12 probe: fixture is dirty right after its commit — every assertion below would be about the wrong tree"
+printf '# umbrella.manifest.draft.yaml — DRAFT, inert\nrepos: {}\n' \
+  > "$PROBE/.harness/umbrella.manifest.draft.yaml"
+# The body pathspecs, one per line. `set -f` around the unquoted expansion because the
+# pathspec list is expanded by the shell, not quoted (no pathspec contains whitespace).
+sh "$SRC/tools/harness-owned-paths.sh" body "$PROBE/.harness" > "$T/drift-probe.specs"
+set -f
+_probe_drift="$(git -C "$PROBE" status --porcelain -uall -- $(cat "$T/drift-probe.specs") || true)"
+set +f
+[ -z "$_probe_drift" ] \
+  || fail "R12 probe: an untracked umbrella.manifest.draft.yaml is inside the checked set — init.sh would hard-fail on the Planner's own output: $_probe_drift"
+# Positive control in the SAME repo: a genuine harness-body edit must still be reported.
+printf '\n# unlanded edit\n' >> "$PROBE/.harness/agents/planner.md"
+set -f
+_probe_drift="$(git -C "$PROBE" status --porcelain -uall -- $(cat "$T/drift-probe.specs") || true)"
+set +f
+case "$_probe_drift" in
+  *agents/planner.md*) : ;;
+  *) fail "R12 control: a modified tracked harness-body file is NOT reported — the exclusion widened past the derived draft: $_probe_drift" ;;
+esac
+pass "R12 derived umbrella.manifest.draft.yaml is excluded from harness-owned paths (source + installed), with a real body edit still drifting [test_draft_excluded_from_harness_owned]"
 
 # ── Fixture plan run (R2, R4, R9) — install-free, absolute manifest paths ──────
 # test_fixture_plan_run_draft_shape_and_inertness
