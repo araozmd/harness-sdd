@@ -238,7 +238,8 @@ models:
   architect: inherit      # try: reasoning
   builder: inherit        # try: standard
   builder-heavy: inherit  # try: reasoning — the escalation tier (E17-F02); same body as
-                          # `builder`, differs only by the model it resolves to (ADR-0002).
+                          # `builder`, differs only by the resolved stamp — the model, and
+                          # on codex the reasoning effort, it resolves to (ADR-0002).
                           # Left `inherit` it is NOT heavier than `builder`.
   reviewer: inherit       # try: standard
   scout: inherit          # try: cheap
@@ -338,22 +339,24 @@ change_size:
 # nothing below overrides it. The shipped value is 2.
 #
 # ESCALATION NEEDS A SECOND YES, AND THE INSTALLER SUPPLIES IT. `harness-install.sh` asks its
-# own model resolver what `builder` and `builder-heavy` resolve to on every front-end it
-# stamps, and records the comparison in `.harness/.escalation-arming`. Escalation fires only
-# while that verdict reads `armed` — i.e. `builder-heavy` resolves to a DIFFERENT model on
-# every selected front-end. Otherwise the harness declines and names the front-end to fix,
-# because escalating into a role that resolves to nothing is a DOWNGRADE: it abandons
+# own resolvers what `builder` and `builder-heavy` resolve to on every front-end it stamps —
+# the whole resolved stamp, `model` plus, on codex only, `model_reasoning_effort` (E99-F163) —
+# and records the comparison in `.harness/.escalation-arming`. Escalation fires only while
+# that verdict reads `armed` — i.e. `builder-heavy` resolves to a DIFFERENT stamp on every
+# selected front-end. Otherwise the harness declines and names the front-end to fix, because
+# escalating into a role that resolves to nothing on either axis is a DOWNGRADE: it abandons
 # whatever `models.builder` was set to, exactly when the build was struggling.
 #   claude                       a built-in tier alias is enough
-#   codex                        a tier alone stamps NO `model` (E99-F161: it DOES stamp
-#                                  `model_reasoning_effort` — see docs/INSTALL.md) — you
-#                                  must also set pin.codex.<tier> for a model to arm
+#   codex                        a tier alone stamps NO `model` but DOES stamp a DIFFERENT
+#                                  `model_reasoning_effort` for a different tier (E99-F161),
+#                                  so an effort difference alone arms; set pin.codex.<tier>
+#                                  when you also want distinct `model` ids
 #   opencode                     a tier alone stamps NOTHING — you must also set the
 #                                  matching pin.opencode.<tier> in the models: block
 # The verdict is computed at INSTALL time, so re-run the installer after changing any of it.
-# WHAT THIS DOES NOT CHECK: that the model is STRONGER, or that it exists at all. The harness
+# WHAT THIS DOES NOT CHECK: that the stamp is STRONGER, or that it exists at all. The harness
 # has no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours;
-# what the check closes is the silent downgrade to no model at all.
+# what the check closes is the silent downgrade to no model or effort at all.
 #
 # Under `execution.builder.backend: delegate` escalation is INAPPLICABLE — the external
 # executor picks its own model — and the harness never escalates on that path.

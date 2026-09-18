@@ -795,8 +795,9 @@ Notes that matter in practice:
   `.harness/.escalation-arming`. Either one alone routes to `builder`.
 - **The installer computes the verdict; you do not have to.** `harness-install.sh` asks its
   own model resolver what `builder` and `builder-heavy` resolve to on every front-end it
-  stamps, and records the comparison. `armed` means `builder-heavy` resolves to a **different**
-  model on every selected front-end. Anything else is `blocked`, and the file names the
+  stamps, and records the comparison. `armed` means `builder-heavy` resolves to a **different
+  resolved stamp** — the `model` plus, on Codex, `model_reasoning_effort` (E99-F163) — on
+  every selected front-end. Anything else is `blocked`, and the file names the
   front-end that blocked it:
 
   ```
@@ -807,19 +808,19 @@ Notes that matter in practice:
 
   A fifth verdict, `unstamped`, means the installer **declined to rewrite that front-end's
   live artifact** — an edited `opencode.json`, or a foreign/edited/symlinked
-  `.codex/agents/builder*.toml`. The resolved model then describes a file that was never
+  `.codex/agents/builder*.toml`. The resolved stamp then describes a file that was never
   written, so it is not the one that front-end will run, and the verdict refuses to vouch
   for it. Restore the artifact (or let the installer own it) and re-run.
 
-  `none` is the case that matters: the heavy role resolves to **nothing** while `builder`
-  resolves to something, so escalating would abandon your configured Builder model for the
-  session default — a *downgrade*, arriving exactly when the build was struggling. On
-  `claude` a built-in tier alias is enough; on `opencode` a tier alone stamps **nothing** —
-  you must also set the matching `pin.opencode.<tier>`. On `codex` a tier alone stamps NO
-  `model` (same requirement) but, since E99-F161, DOES stamp `model_reasoning_effort` —
-  see `docs/INSTALL.md`'s "Codex reasoning effort" section; `escalation_verdict` still
-  compares `model` only, so that effort difference does not by itself arm escalation
-  (deliberately deferred, not yet enforced — see E99-F163).
+  `none` is the case that matters: the heavy role resolves to **nothing on either axis**
+  while `builder` resolves to something, so escalating would abandon your configured Builder
+  model for the session default — a *downgrade*, arriving exactly when the build was
+  struggling. On `claude` a built-in tier alias is enough; on `opencode` a tier alone stamps
+  **nothing** — you must also set the matching `pin.opencode.<tier>`. On `codex` a tier alone
+  stamps NO `model` but, since E99-F161, DOES stamp `model_reasoning_effort`, and since
+  E99-F163 the verdict compares the whole resolved stamp (`model` plus effort) — so an effort
+  difference alone arms without any `model` pin, and a pin is needed only for distinct `model`
+  ids. See `docs/INSTALL.md`'s "Codex reasoning effort" section.
   The verdict is computed at **install time**, so re-run the installer after changing any of
   it.
 - **The verdict is a conservative AND across selected front-ends.** The rule cannot know
@@ -829,11 +830,12 @@ Notes that matter in practice:
   verdict **UNARMED** even when Claude alone is armed. Explicit
   `--self --agents=claude` retains the Claude-only verdict; model choices remain
   in each host’s source role files and are preserved on regeneration.
-- **WHAT IT DOES NOT CHECK: that the model is STRONGER, or that it exists.** The harness has
+- **WHAT IT DOES NOT CHECK: that the stamp is STRONGER, or that it exists.** The harness has
   no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours —
-  what the check closes is the silent downgrade to no model at all.
+  what the check closes is the silent downgrade to no model or effort at all.
 - **An absent verdict means off.** Either the installer has not run since v0.58.0, or no role
-  resolves to a model. Same remedy: configure `models.builder-heavy` and re-run the installer.
+  resolves on either axis. Same remedy: configure `models.builder-heavy` and re-run the
+  installer.
 - **`0` disables BOTH triggers — including `complexity: complex`.** It is the master switch,
   not just a round threshold. A tagged spec on a target that has not opted in routes to
   `builder` and the tool says why on stderr. (Leaving the tag live at `0` would escalate into

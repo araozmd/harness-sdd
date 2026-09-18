@@ -13,7 +13,7 @@
 3791321589 60560 .agents/skills/sdd-pr-loop/SKILL.md
 2056805182 43 .agents/skills/sdd-pr-loop/agents/openai.yaml
 1754293473 845 .claude/agents/architect.md
-1157451288 613 .claude/agents/builder-heavy.md
+2521915606 672 .claude/agents/builder-heavy.md
 4021444689 699 .claude/agents/builder.md
 3029902048 940 .claude/agents/doc-critic.md
 2465310980 705 .claude/agents/orchestrator.md
@@ -28,7 +28,7 @@
 10195721 13798 .claude/commands/sdd-plan.md
 2029175671 60151 .claude/commands/sdd-pr-loop.md
 2520888052 764 .codex/agents/architect.toml
-2336035316 852 .codex/agents/builder-heavy.toml
+363529875 911 .codex/agents/builder-heavy.toml
 3647493360 763 .codex/agents/builder.toml
 2131861020 870 .codex/agents/doc-critic.toml
 1419543680 828 .codex/agents/orchestrator.toml

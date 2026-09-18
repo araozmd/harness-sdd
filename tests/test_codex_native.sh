@@ -230,11 +230,15 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     # Files a feature INTENTIONALLY regenerates are excluded, or the oracle would
     # contradict that feature: `sdd-pr-loop.md` has always been regenerated, and
     # E28-F02 adds the Planner topology step to the `/sdd-plan` body and the Driller
-    # stop-and-hand-off step to the `/sdd-drill` body. The CURRENT `sdd-plan`/`sdd-drill`
-    # bodies are still pinned — by the skill-equals-canonical assertion above and by
-    # tests/test_planner_topology.sh R8/R10 — so this only drops the claim that the
-    # v0.78.1 bytes survive, which E28-F02 deliberately makes false.
-    _regenerated={'sdd-pr-loop.md','sdd-plan.md','sdd-drill.md'}
+    # stop-and-hand-off step to the `/sdd-drill` body. E99-F163 likewise regenerates
+    # `.claude/agents/builder-heavy.md` — the emitted description now names the resolved
+    # stamp (model, and on codex reasoning effort), which is the N4 fix; its content is
+    # pinned positively by tests/test_escalation.sh's N4 assertions. The CURRENT
+    # `sdd-plan`/`sdd-drill` bodies are still pinned — by the skill-equals-canonical
+    # assertion above and by tests/test_planner_topology.sh R8/R10 — so this only drops
+    # the claim that the v0.78.1 bytes survive, which those features deliberately make
+    # false.
+    _regenerated={'sdd-pr-loop.md','sdd-plan.md','sdd-drill.md','builder-heavy.md'}
     for variant in ('all-five-on','all-five-models-on'):
         old=fresh('golden-'+variant)
         subprocess.run(['sh',str(src/'tests/fixtures/frontend-v0.78.1/materialize.sh'),variant,str(old)],check=True)
@@ -276,7 +280,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
             shutil.rmtree(probe,ignore_errors=True)
     else:
         print('skip - live opencode probe unavailable; static source-layout assertions passed (R9)')
-    assert (src/'VERSION').read_text().strip()=='0.84.0' and not (src/'GEMINI.md').exists()
+    assert (src/'VERSION').read_text().strip()=='0.84.1' and not (src/'GEMINI.md').exists()
     a=(src/'AGENTS.md').read_text()
     for token in ('./init.sh','non-zero','STOP','harness.config.yaml','agents/orchestrator.md','progress/lessons.md','spec-ready','in-progress','independent Reviewer','chat history','telemetry','tokens','VERSION','CHANGELOG.md','MINOR','MAJOR','branch','PR','main'):
         assert token.lower() in a.lower(),token

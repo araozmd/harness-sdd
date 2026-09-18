@@ -395,3 +395,31 @@
   load-bearing — byte owns the block's comment-byte identity (E99-F160 MC/MD), semantic owns
   reader-visible keys; only the next block's trailing column-0 comment header is trimmed, so
   indented `# pin…` comment appends still red (E99-F162 round-5 controls).
+- [2026-09-18 builder] Widening a comparison is a TWO-SITE change: the comparison and the
+  GATE that decides whether the artifact recording it is written at all. E99-F163 widened
+  `escalation_verdict` to model+effort but `write_escalation_arming` gated artifact creation
+  on `models_any`, which still read only `resolve_model` — so a codex effort-only target had
+  its widened `raise` reclaimed as "nothing configured". Mutate the gate separately from the
+  comparison; deleting just the `models_any` effort arm gives an empty verdict line, not a
+  wrong verdict.
+- [2026-09-18 builder] The E99 brief-only fix lane ships WITHOUT a VERSION/CHANGELOG bump even
+  when it edits `harness-install.sh` / `harness.config.yaml` / `docs/` — E99-F159 and E99-F161
+  did exactly that at 0.79.0 — and the brief's file list omits both. A bump here is not free:
+  `tests/test_self_mode.sh` R11 asserts the NEWEST CHANGELOG entry mentions OpenCode, which
+  only E31-F02's 0.84.0 entry does, so any later release reds it until R11 is re-anchored on
+  E31-F02's version instead of the current one. Check the lane's precedent before bumping, and
+  if a bump is required, grep the CURRENT VERSION literal (`test_codex_native.sh:279`) AND the
+  newest-entry-coupled suites.
+- [2026-09-18 reviewer] Widening a contract's semantics must sweep the GENERATED operator-facing
+  docs, not just the sites the brief enumerates. E99-F163 updated the seed block and the two named
+  docs but left the `.harness/manifest.txt` heredoc (`harness-install.sh:4252-4262`) saying `armed`
+  means "change the model, computed from resolve_model" — now false, shipped to every target, and
+  unpinned by any test. Also stale: the reclaim `info` line (`:4743`), `docs/INSTALL.md:867-873`,
+  and `docs/WORKFLOW.md:811/837`. Before approving a semantics change, grep every surface that
+  NAMES the artifact (`escalation-arming`, the verdict words) and each doc's EARLIER sections, not
+  only the section the diff touched.
+- [2026-09-18 reviewer] The same sweep must also cover the EMITTED ROLE DESCRIPTIONS, which name no
+  artifact: `harness-install.sh` writes `builder-heavy`'s description ("differs only by the model
+  it resolves to") into every target's agent shim, and after E99-F163 a codex effort-only pair
+  differs by `model_reasoning_effort` alone — stale, shipped, and pinned by no test (E99-F163 N4).
+  When a verdict's axes move, grep the `emit_agent` strings alongside the docs.

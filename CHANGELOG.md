@@ -4,6 +4,26 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.84.1] — 2026-09-18
+
+### Fixed — escalation weighs the whole resolved stamp (E99-F163)
+
+- **The arming verdict compares more than the model.** `escalation_verdict()` now compares
+  the whole resolved stamp — `model` plus, on Codex only, `model_reasoning_effort` — so a
+  Codex `builder: standard` / `builder-heavy: reasoning` target that produces genuinely
+  different roles on disk (`medium` vs `high`) is reported `armed` instead of `DISARMED`.
+  `models_any()` counts a Codex effort-only stamp as configured, so the widened verdict
+  cannot be reclaimed as "nothing configured". Claude and OpenCode are unchanged (they write
+  no effort key).
+- **The remediation prose names the widened stamp.** `tools/builder-role.sh` no longer tells
+  a Codex operator to add a matching `pin.codex.<tier>`: a differing
+  `model_reasoning_effort` alone arms, and a pin is needed only for distinct `model` ids.
+  OpenCode still requires its matching `pin.opencode.<tier>`. `agents/orchestrator.md` names
+  the installer's **resolvers** (plural) and the whole resolved stamp.
+- **The emitted `builder-heavy` description is effort-aware.** The `models:` seed comment and
+  both emitted role descriptions now say the two Builders differ only by the resolved stamp —
+  the model, and on Codex the reasoning effort — rather than "only by the model" (N4).
+
 ## [0.84.0] — 2026-09-18
 
 ### Added — the source repo's OpenCode glue is installer-generated (E31-F02)

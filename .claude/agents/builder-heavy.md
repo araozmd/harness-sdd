@@ -1,6 +1,6 @@
 ---
 name: builder-heavy
-description: The Implementer at the escalation tier. Same instruction body and same discipline as `builder`; differs only by the model it resolves to (ADR-0002).
+description: The Implementer at the escalation tier. Same instruction body and same discipline as `builder`; differs only by the resolved stamp — the model, and on codex the reasoning effort, it resolves to (ADR-0002).
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: opus
 ---

@@ -391,11 +391,19 @@ shared_skill_adapter_reused() {
 version_minor_and_changelog() {
   # Compared by PARSED COMPONENTS, never by freezing the exact literal (a permanent-suite
   # anti-pattern). test_codex_native.sh pins the current literal it needs; this asserts the
-  # bump direction and the matching, OpenCode-naming CHANGELOG entry.
+  # bump direction and the matching CHANGELOG entries.
+  #
+  # E99-F163 bumped 0.84.0 -> 0.84.1 (a PATCH recording the installer-body change), so
+  # E31-F02's OpenCode-naming release is no longer the newest entry. The OpenCode content
+  # check is therefore anchored on E31-F02's OWN historical heading (`## [0.84.0]`): a
+  # historical heading stays findable after any later release, whereas "the newest entry
+  # names OpenCode" reds on the first release that is not about OpenCode. The CURRENT
+  # release stays pinned STRUCTURALLY (VERSION must have its own entry), so a bump with no
+  # CHANGELOG entry still reds — the guarantee, without the version coupling.
   _v="$(cat "$F/VERSION")"
   _maj="${_v%%.*}"; _rest="${_v#*.}"; _min="${_rest%%.*}"
   [ "$_maj" -eq 0 ] || fail "unexpected MAJOR version $_maj (R11)"
-  [ "$_min" -ge 84 ] || fail "VERSION $_v is not the MINOR bump this feature requires (R11)"
+  [ "$_min" -ge 84 ] || fail "VERSION $_v is not at or beyond the E31-F02 MINOR bump (R11)"
   # Shared fence rule again. The reset is level-2 EXACTLY (`/^## /`), so the entry's own
   # `### Added` subsection does not end the slice early; the call to fence_delim($0) is
   # what keeps test_change_size R9d's one-copy invariant satisfied.
@@ -404,9 +412,14 @@ version_minor_and_changelog() {
     !fence && /^## /{k=(index($0,h)>0);next}
     k' "$F/CHANGELOG.md")"
   [ -n "$_sec" ] || fail "CHANGELOG.md has no entry for $_v (R11)"
-  printf '%s\n' "$_sec" | grep -q 'OpenCode' \
-    || fail "the CHANGELOG entry for $_v does not mention OpenCode (R11)"
-  pass "VERSION carries the MINOR bump and CHANGELOG the matching entry (R11) [version_minor_and_changelog]"
+  _oc="$(awk -v h='## [0.84.0]' "$(cat "$F/tests/lib/fence.awk")"'
+    fence_delim($0) { if (k) print; next }
+    !fence && /^## /{k=(index($0,h)>0);next}
+    k' "$F/CHANGELOG.md")"
+  [ -n "$_oc" ] || fail "CHANGELOG.md has no E31-F02 (0.84.0) entry (R11)"
+  printf '%s\n' "$_oc" | grep -q 'OpenCode' \
+    || fail "the E31-F02 CHANGELOG entry (0.84.0) does not mention OpenCode (R11)"
+  pass "VERSION is at/after the E31-F02 MINOR bump, the current release has a CHANGELOG entry, and the 0.84.0 entry names OpenCode (R11) [version_minor_and_changelog]"
 }
 
 self_regenerates_opencode_glue

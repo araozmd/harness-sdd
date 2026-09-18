@@ -293,7 +293,8 @@ models:
   architect: inherit      # try: reasoning
   builder: inherit        # try: standard
   builder-heavy: inherit  # try: reasoning — the escalation tier (E17-F02); same body as
-                          # `builder`, differs only by the model it resolves to (ADR-0002).
+                          # `builder`, differs only by the resolved stamp — the model, and
+                          # on codex the reasoning effort, it resolves to (ADR-0002).
                           # Left `inherit` it is NOT heavier than `builder`.
   reviewer: inherit       # try: standard
   scout: inherit          # try: cheap
@@ -482,22 +483,24 @@ EOF
 # nothing below overrides it. The shipped value is 2.
 #
 # ESCALATION NEEDS A SECOND YES, AND THE INSTALLER SUPPLIES IT. `harness-install.sh` asks its
-# own model resolver what `builder` and `builder-heavy` resolve to on every front-end it
-# stamps, and records the comparison in `.harness/.escalation-arming`. Escalation fires only
-# while that verdict reads `armed` — i.e. `builder-heavy` resolves to a DIFFERENT model on
-# every selected front-end. Otherwise the harness declines and names the front-end to fix,
-# because escalating into a role that resolves to nothing is a DOWNGRADE: it abandons
+# own resolvers what `builder` and `builder-heavy` resolve to on every front-end it stamps —
+# the whole resolved stamp, `model` plus, on codex only, `model_reasoning_effort` (E99-F163) —
+# and records the comparison in `.harness/.escalation-arming`. Escalation fires only while
+# that verdict reads `armed` — i.e. `builder-heavy` resolves to a DIFFERENT stamp on every
+# selected front-end. Otherwise the harness declines and names the front-end to fix, because
+# escalating into a role that resolves to nothing on either axis is a DOWNGRADE: it abandons
 # whatever `models.builder` was set to, exactly when the build was struggling.
 #   claude                       a built-in tier alias is enough
-#   codex                        a tier alone stamps NO `model` (E99-F161: it DOES stamp
-#                                  `model_reasoning_effort` — see docs/INSTALL.md) — you
-#                                  must also set pin.codex.<tier> for a model to arm
+#   codex                        a tier alone stamps NO `model` but DOES stamp a DIFFERENT
+#                                  `model_reasoning_effort` for a different tier (E99-F161),
+#                                  so an effort difference alone arms; set pin.codex.<tier>
+#                                  when you also want distinct `model` ids
 #   opencode                     a tier alone stamps NOTHING — you must also set the
 #                                  matching pin.opencode.<tier> in the models: block
 # The verdict is computed at INSTALL time, so re-run the installer after changing any of it.
-# WHAT THIS DOES NOT CHECK: that the model is STRONGER, or that it exists at all. The harness
+# WHAT THIS DOES NOT CHECK: that the stamp is STRONGER, or that it exists at all. The harness
 # has no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours;
-# what the check closes is the silent downgrade to no model at all.
+# what the check closes is the silent downgrade to no model or effort at all.
 #
 # Under `execution.builder.backend: delegate` escalation is INAPPLICABLE — the external
 # executor picks its own model — and the harness never escalates on that path.
@@ -1976,34 +1979,54 @@ resolve_codex_effort() {
   return 0
 }
 
-# models_any <front-end> — exit 0 iff at least one role resolves to a non-empty value.
-# Gates the CONDITIONAL creation of the `.gemini/agents/` and `.codex/agents/` trees, so
-# an unconfigured target never grows a directory it did not have before.
+# models_any <front-end> — exit 0 iff at least one role resolves to a non-empty value on
+# that front-end. Consumed by `write_escalation_arming` as the "is this target configured
+# at all?" gate, so an unconfigured target never grows an artifact it did not have before.
+#
+# FOR CODEX THE RESOLVED STAMP IS MODEL **AND** EFFORT (E99-F163). A `standard`/`reasoning`
+# Codex pair with no pins resolves no `model`, but it DOES resolve `medium`/`high`
+# `model_reasoning_effort` (E99-F161) — genuinely differentiated roles on disk. Without
+# this arm the gate would reclaim the arming artifact for exactly the target
+# `escalation_verdict` now reports `raise` for, so the effort-aware verdict could never
+# reach an operator. An all-`inherit` target still resolves nothing on either axis.
 models_any() {
   for _ma_role in $MODEL_ROLES; do
     if [ -n "$(resolve_model "$1" "$_ma_role")" ]; then return 0; fi
+    if [ "$1" = "codex" ] && [ -n "$(resolve_codex_effort "$_ma_role")" ]; then return 0; fi
   done
   return 1
 }
 
 # escalation_verdict <front-end> — would escalating from `builder` to `builder-heavy`
-# actually change the model on this front-end? Prints exactly one of:
+# actually change the resolved stamp on this front-end? Prints exactly one of:
 #
-#   raise    heavy resolves to a non-empty value that DIFFERS from builder's
-#   none     heavy resolves to NOTHING while builder resolves to something  ← the downgrade
-#   same     both resolve to the identical non-empty value
-#   neither  neither resolves — both inherit the session model
+#   raise    heavy's stamp is non-empty and DIFFERS from builder's
+#   none     heavy's stamp is EMPTY while builder's is not  ← the downgrade
+#   same     both stamps are the identical non-empty pair
+#   neither  neither stamp carries anything — both inherit the session model
+#
+# THE STAMP IS MODEL **AND** EFFORT (E99-F163). What the installer writes for a role is
+# `resolve_model`'s `model` value, PLUS — on `codex` only — the `model_reasoning_effort`
+# `resolve_codex_effort` stamps beside it (E99-F161). Comparing `model` alone read two
+# genuinely differentiated Codex roles (`builder: standard` / `builder-heavy: reasoning`,
+# no `model` on either because neither tier is pinned) as `same`, so the harness refused to
+# arm an escalation it could in fact honour. Effort joins the comparison ONLY for `codex`:
+# claude and opencode never write an effort key, and the role's TIER resolves an effort
+# value on any front-end, so counting it elsewhere would arm on a difference no artifact
+# carries. `none` now means NOTHING resolves on EITHER axis — the abandonment the cell
+# exists to catch; a heavy role that resolves only to effort still changes something.
 #
 # WHY THIS LIVES HERE AND NOT IN tools/builder-role.sh (E17-F05). Two E17-F03 review rounds
 # killed two attempts to answer this question from the CONFIG: "heavy: inherit resolves like
 # builder" (#3716706727) and "arm on a non-inherit tier" (#3716777878, which misses that
 # codex/opencode stamp nothing for an unpinned tier). Both were re-derivations of a subset of
 # `resolve_model`, which owns the per-front-end alias tables and the pin rules — so each
-# approximation was wrong on a different front-end. This function re-derives NOTHING: it calls
-# `resolve_model` and compares the two strings it gets back. That is the entire feature.
+# approximation was wrong on a different front-end. This function re-derives NOTHING: it
+# calls the same `resolve_model` / `resolve_codex_effort` emitters that stamp the artifacts
+# and compares what they return. That is the entire feature.
 #
 # WHAT IT DOES NOT PROVE. `resolve_model` returns opaque vendor strings, and the harness has
-# no model list and deliberately invents none (E17-F01). So `raise` means the model CHANGES,
+# no model list and deliberately invents none (E17-F01). So `raise` means the stamp CHANGES,
 # not that it is STRONGER — `pin.claude.reasoning: haiku` reads as `raise`. Ranking lives in
 # the tier vocabulary the operator chose. What this closes is the downgrade-to-nothing case,
 # which is the one an operator cannot see coming; it is not a model-strength check and no
@@ -2014,9 +2037,20 @@ models_any() {
 escalation_verdict() {
   _ev_b="$(resolve_model "$1" builder)"
   _ev_h="$(resolve_model "$1" builder-heavy)"
-  if   [ -n "$_ev_h" ] && [ "$_ev_h" != "$_ev_b" ]; then printf 'raise\n'
-  elif [ -z "$_ev_h" ] && [ -n "$_ev_b" ];          then printf 'none\n'
-  elif [ -z "$_ev_h" ] && [ -z "$_ev_b" ];          then printf 'neither\n'
+  _ev_bx=""; _ev_hx=""
+  if [ "$1" = "codex" ]; then
+    _ev_bx="$(resolve_codex_effort builder)"
+    _ev_hx="$(resolve_codex_effort builder-heavy)"
+  fi
+  # A role "resolves" iff EITHER axis carries a value.
+  _ev_bany=0
+  if [ -n "$_ev_b" ] || [ -n "$_ev_bx" ]; then _ev_bany=1; fi
+  _ev_hany=0
+  if [ -n "$_ev_h" ] || [ -n "$_ev_hx" ]; then _ev_hany=1; fi
+  if [ "$_ev_hany" = 1 ] && { [ "$_ev_h" != "$_ev_b" ] || [ "$_ev_hx" != "$_ev_bx" ]; }; then
+    printf 'raise\n'
+  elif [ "$_ev_hany" = 0 ] && [ "$_ev_bany" = 1 ]; then printf 'none\n'
+  elif [ "$_ev_hany" = 0 ] && [ "$_ev_bany" = 0 ]; then printf 'neither\n'
   else                                                   printf 'same\n'
   fi
 }
@@ -4217,16 +4251,18 @@ MODEL ROUTING:
                                  files, kept only while those files exist (lets a switch
                                  back to \`inherit\` reclaim them instead of orphaning them)
   .harness/.escalation-arming    whether escalating to \`builder-heavy\` would actually change
-                                 the model, computed from resolve_model at install time and
+                                 the resolved stamp — the \`model\` plus, on codex,
+                                 \`model_reasoning_effort\` (E99-F163) — computed from
+                                 resolve_model / resolve_codex_effort at install time and
                                  read by tools/builder-role.sh. First line \`armed\`/\`blocked\`,
                                  then one \`<front-end>=<verdict>\` per selected front-end,
                                  where <verdict> is raise|none|same|neither|unstamped.
                                  \`unstamped\` means the installer DECLINED to rewrite that
                                  front-end's live artifact (edited opencode.json, foreign or
-                                 symlinked .codex/agents/builder*.toml), so the resolved model
+                                 symlinked .codex/agents/builder*.toml), so the resolved stamp
                                  is not the one it will run.
                                  ABSENT means escalation is OFF — either this
-                                 installer has not run here, or no role resolves to a model.
+                                 installer has not run here, or no role resolves on either axis.
                                  Written only while at least one role resolves and removed
                                  when none does.
   Selected Codex always has all seven standard roles plus the gated pr-fixer;
@@ -4476,7 +4512,7 @@ EOF
 orchestrator	The Leader. Reads state, runs init.sh, routes the next task, delegates to architect/builder/reviewer/scout. Never writes code.
 architect	The Spec Author. Writes the 4-file spec in EARS. No production code.
 builder	The Implementer. Writes code from an APPROVED spec, one task at a time.
-builder-heavy	The Implementer at the escalation tier. Same instruction body and same discipline as `builder`; differs only by the model it resolves to (ADR-0002).
+builder-heavy	The Implementer at the escalation tier. Same instruction body and same discipline as `builder`; differs only by the resolved stamp — the model, and on codex the reasoning effort, it resolves to (ADR-0002).
 reviewer	The Evaluator. Verifies against the spec, runs tests, approves or rejects.
 scout	Read-only codebase reconnaissance. Writes findings to progress/.
 doc-critic	Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code.
@@ -4658,7 +4694,8 @@ EOF
   }
 
   # write_escalation_arming — record, for the front-ends selected on THIS run, whether
-  # escalating to `builder-heavy` would actually change the model (E17-F05).
+  # escalating to `builder-heavy` would actually change the resolved stamp — the `model`
+  # plus, on codex, `model_reasoning_effort` (E99-F163) — rather than the model alone (E17-F05).
   #
   # Format — first line is exactly one word so the consuming rule needs no parser:
   #
@@ -4679,10 +4716,11 @@ EOF
   # identical model and fails the identical way, while the operator reads that a heavier
   # Builder was tried. A misleading record is worse than a legible decline.
   #
-  # GATED on `models_any`, the same gate `.gemini/agents/` uses (E17-F01 R11): a target with
-  # every role on `inherit` — the shipped default — must not grow a file a never-configured
-  # target lacks. When nothing resolves, an existing artifact is REMOVED rather than left
-  # stale, which is the reclamation reclaim_model_agents performs for the per-role stamps.
+  # GATED on `models_any`, so a target with every role on `inherit` — the shipped default —
+  # must not grow a file a never-configured target lacks. Since E99-F163 `models_any` counts a
+  # Codex effort-only stamp as configured, matching the widened verdict. When nothing
+  # resolves, an existing artifact is REMOVED rather than left stale, which is the
+  # reclamation reclaim_model_agents performs for the per-role stamps.
   #
   # Detail lines are emitted in $AGENT_KEYS order, not selection order, so re-installing the
   # same target twice yields a byte-identical file.
@@ -4705,7 +4743,7 @@ EOF
     if [ "$_ea_any" = 0 ]; then
       if [ -f "$H/.escalation-arming" ]; then
         rm -f "$H/.escalation-arming"
-        info "escalation arming verdict reclaimed (no role resolves to a model any more)"
+        info "escalation arming verdict reclaimed (no role resolves on either axis any more)"
       fi
       return 0
     fi
@@ -4734,7 +4772,7 @@ EOF
     if [ "$_ea_armed" = 1 ]; then _ea_first=armed; else _ea_first=blocked; fi
     { printf '%s\n' "$_ea_first"; printf '%s' "$_ea_body"; } > "$H/.escalation-arming"
     if [ "$_ea_armed" = 1 ]; then
-      ok "escalation armed — builder-heavy resolves to a different model on every selected front-end"
+      ok "escalation armed — builder-heavy resolves to a different stamp (model and, on codex, reasoning effort) on every selected front-end"
     else
       info "escalation NOT armed — see .harness/.escalation-arming for which front-end blocked it"
     fi
@@ -5164,7 +5202,7 @@ EOF
   # at their own canonical body, and .harness/agents/builder-heavy.md is itself a pointer
   # at builder.md, so the instruction text still exists in exactly one place.
   emit_agent builder-heavy "Read, Write, Edit, Bash, Grep, Glob" \
-    "The Implementer at the escalation tier. Same instruction body and same discipline as \`builder\`; differs only by the model it resolves to (ADR-0002)."
+    "The Implementer at the escalation tier. Same instruction body and same discipline as \`builder\`; differs only by the resolved stamp — the model, and on codex the reasoning effort, it resolves to (ADR-0002)."
   emit_agent reviewer "Read, Bash, Grep, Glob, Edit" \
     "The Evaluator/verification layer. Runs init.sh + tests, checks every R-id has a passing test, exercises behavior (Playwright), enforces conventions. Approves or rejects. Spawn when a feature is \`in-review\`."
   emit_agent scout "Read, Grep, Glob, Bash" \
