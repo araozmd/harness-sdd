@@ -304,3 +304,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-17 E28-F02 pr-loop: round 8 returned 1 blocking finding (Driller must stop-and-handoff topology changes to /sdd-plan amend). Human override — cap raised to 9.
 - 2026-09-17 E28-F02 pr-loop: round 9 returned 2 blocking findings (drill topology check placement; /sdd-plan needs explicit greenfield-vs-amend branching). Human override — cap raised to 10.
 - 2026-09-17 E28-F02 pr-loop: round 10 returned 1 blocking finding (amend branch must gate topology writes on an actual deployable-set change). Human override — cap raised to 11.
+- 2026-09-17 E28-F02 pr-loop: round 11 returned 3 blocking findings (condition the 'both branches' topology step; scope the no-ADR rule to greenfield; ADR must justify each repo). Human override — cap raised to 12.
