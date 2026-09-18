@@ -25,8 +25,9 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
      rewrites `specs/vision.md` or `specs/architecture.md` and never
      renumbers an existing ADR — and append any new `draft` epics above the current
      maximum. Only when the amend detects a deployable-set change — a deployable added,
-     removed, or given a new name — does it append the dated topology delta and the new
-     `repo-topology ADR` and reconcile or remove the derived draft, as the repo-topology
+     removed, given a new name, or relocated to a new `path` — does it append the dated
+     topology delta and the new `repo-topology ADR` and reconcile or remove the derived
+     draft, as the repo-topology
      contract below describes; an amend that only adds epics or non-topology ADR deltas
      must not touch the topology artifacts. This amend consumes the Driller's persisted
      **topology handoff** when one exists: read `progress/<run>/topology-handoff.md`,
@@ -53,10 +54,15 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    above: the repo-topology step fulfills that pass and writes exactly one
    `repo-topology ADR`, so a greenfield plan never produces a second. The topology output
    step is itself gated on an actual
-   deployable-set change: Only when the amend added or removed a deployable, or gave
-   one a new name, does it append the dated topology delta and the new `repo-topology
+   deployable-set change: Only when the amend added or removed a deployable, gave
+   one a new name, or relocated one to a new `path`, does it append the dated topology
+   delta and the new `repo-topology
    ADR` and reconcile the draft, while a non-topology amend leaves the topology
-   artifacts untouched. On a greenfield run the set is new, so when
+   artifacts untouched. A **path-only relocation** — an existing deployable moved to a
+   different `path` with its name unchanged — is a topology change too: it is a
+   `/sdd-plan` amend that is append-only and reconciles the draft, and it must reconcile
+   that entry's metadata (`path` and its derived fields) so the draft never keeps the
+   stale `path`. On a greenfield run the set is new, so when
    `specs/architecture.md` names more than one deployable, write exactly
    one `repo-topology ADR` at `specs/adr/NNNN-<title>.md` — a single decision
    that names each repository and explains why it is separate — allocated strictly
@@ -83,7 +89,13 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    its already-assigned key, so a survivor is never renumbered, and a suffix is allocated
    only for a newly added deployable. A removed deployable's key is never reused by a
    different deployable in the same reconciliation, so an existing slice whose `repo` named
-   the removed deployable cannot silently resolve onto a survivor. Write each `path` relative to the
+   the removed deployable cannot silently resolve onto a survivor. The `repo-topology ADR`
+   is also the durable home of the **path-to-key assignment table**: every amend that
+   changes the deployable set records each deployable's `path` and its assigned `repos:` key
+   in that append-only ADR, so the assignments survive the draft's deletion — after a
+   consolidation removes `umbrella.manifest.draft.yaml`, a later expansion
+   reconciles the survivor's key against that persisted table instead of reallocating it, so
+   a slice that references the survivor's prior key is never stranded. Write each `path` relative to the
    draft file's own directory (the child
    sibling). The draft's header must mark it a
    `DRAFT` and state that it is `inert`.

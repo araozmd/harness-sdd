@@ -369,6 +369,26 @@ for _r2s_pair in "R2 role amend key stability|$ROLE_FOLD" \
     "never reused" "different deployable"
 done
 pass "R2 role + body preserve surviving keys across an amend (no renumbering, fresh suffixes only, removed keys not reused) [test_role_and_body_name_the_draft_and_keys]"
+# Path-to-key assignments survive the draft's deletion (PR #202 finding 4044043016). The
+# draft was the ONLY durable place the path->key assignments lived, yet a collapse to one
+# deployable (or none) REMOVES it: the draft must go while every committed artifact stays
+# append-only. After that single-deployable interval a later expansion reallocates the
+# survivor's key from scratch and RENUMBERS it (`api-v2-2` -> `api-v2`), stranding every
+# slice whose `repo` still names `api-v2-2` (the amendment workflow updates neither slice
+# ids nor `slice.repo`). The repo-topology ADR is append-only and every set-changing amend
+# appends one, so the assignment table must be recorded there and the survivor reconciled
+# against THAT persisted table, not the deleted draft. Bounded to the sentence naming
+# `path-to-key` (positive control), on every surface the key rule lives on. On pre-change
+# text no sentence names `path-to-key`, so the positive control REDs.
+for _r2p_pair in "R2 role durable key table|$ROLE_FOLD" \
+                 "R2 emitted body durable key table|$BODY_FOLD" \
+                 "R2 .claude/commands durable key table|$CMD_FOLD" \
+                 "R2 .agents/skills durable key table|$SKILL_FOLD"; do
+  _r2p_lbl="${_r2p_pair%%|*}"; _r2p_f="${_r2p_pair#*|}"
+  every_naming_sentence_carries "$_r2p_lbl" "$_r2p_f" "path-to-key" \
+    "repo-topology ADR" "append-only" "survive the draft"
+done
+pass "R2 path-to-key assignments are recorded in the append-only repo-topology ADR and survive the draft's deletion [test_role_and_body_name_the_draft_and_keys]"
 
 # ── R3: exactly one deployable writes neither artifact ─────────────────────────
 # test_single_deployable_writes_neither
@@ -722,6 +742,24 @@ for _ag_pair in "R11 amend gate role|$PLAN_WHAT_FOLD" "R11 amend gate emitted bo
     "must not touch the topology artifacts"
 done
 pass "R11 the amend branch gates the topology writes on a detected deployable-set change and leaves them alone for a non-topology amend [test_amend_is_append_only]"
+
+# ── R11: a path-only relocation IS a topology change; reconcile entry metadata ──
+# (PR #202 finding 4044043011.) The trigger classified the deployable SET, so RELOCATING
+# an existing deployable to a new `path` without renaming it looked unchanged: the topology
+# output step stayed off and the derived draft kept the STALE `path`. A relocation must be
+# treated as a topology change (the entry metadata is reconciled) even though the set is
+# the same. Bounded to the sentence naming `path-only relocation` (positive control), on
+# every surface the step lives on. On pre-change text no sentence names `path-only
+# relocation`, so the positive control REDs.
+for _r11r_pair in "R11 role path-only relocation|$ROLE_FOLD" \
+                  "R11 emitted body path-only relocation|$BODY_FOLD" \
+                  "R11 .claude/commands path-only relocation|$CMD_FOLD" \
+                  "R11 .agents/skills path-only relocation|$SKILL_FOLD"; do
+  _r11r_lbl="${_r11r_pair%%|*}"; _r11r_f="${_r11r_pair#*|}"
+  every_naming_sentence_carries "$_r11r_lbl" "$_r11r_f" "path-only relocation" \
+    "topology change" "reconcile that entry's metadata" "stale"
+done
+pass "R11 a path-only relocation is a topology change that reconciles the entry metadata, so the draft keeps no stale path [test_amend_is_append_only]"
 
 # ── R11: the amend CONSUMES the Driller's persisted topology handoff ───────────
 # (PR #202 finding 4043983531, the Planner half.) The Driller persists the resulting

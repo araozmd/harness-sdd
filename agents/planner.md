@@ -30,11 +30,12 @@ spec.**
    In the **Greenfield branch** (neither exists) the vision, architecture and ADR writes
    below are the run's output; in the **Amend branch** you SKIP those greenfield template
    writes — an amend never rewrites committed `specs/vision.md`/`specs/architecture.md`
-   or an existing ADR — and append any new `draft` epics above the current maximum. Only
-   when the amend detects a deployable-set change — a deployable added, removed, or given
-   a new name — does it append the dated topology delta and the new `repo-topology ADR`
-   and reconcile or remove the derived draft, as the `## Repo topology output` section
-   below describes; an amend that only adds epics or non-topology ADR deltas must not
+    or an existing ADR — and append any new `draft` epics above the current maximum. Only
+    when the amend detects a deployable-set change — a deployable added, removed, given a
+    new name, or relocated to a new `path` — does it append the dated topology delta and the
+    new `repo-topology ADR` and reconcile or remove the derived draft, as the
+    `## Repo topology output` section
+    below describes; an amend that only adds epics or non-topology ADR deltas must not
    touch the topology artifacts. This amend consumes the Driller's persisted **topology
    handoff** when one exists: read `progress/<run>/topology-handoff.md`, which carries the
    full resulting deployable set the drill discovered — each deployable's logical key, its
@@ -98,10 +99,13 @@ Repo topology is an output of planning, never an input. The repo-topology decisi
 excluded from the generic ADR pass above: the repo-topology step fulfills that pass and
 writes exactly one `repo-topology ADR`, so a greenfield plan never produces a second. The
 topology output step is itself gated on an actual deployable-set change: Only when the
-amend added or removed a
-deployable, or gave one a new name, does it append the dated topology delta and the new
-`repo-topology ADR` and reconcile the draft, while a non-topology amend leaves the
-topology artifacts untouched. On a greenfield run the set is new, so when
+amend added or removed a deployable, gave one a new name, or relocated one to a new
+`path`, does it append the dated topology delta and the new `repo-topology ADR` and
+reconcile the draft, while a non-topology amend leaves the topology artifacts untouched. A
+**path-only relocation** — an existing deployable moved to a different `path` with its name
+unchanged — is a topology change too: it is a `/sdd-plan` amend that is append-only and
+reconciles the draft, and it must reconcile that entry's metadata (`path` and its derived
+fields) so the draft never keeps the stale `path`. On a greenfield run the set is new, so when
 `specs/architecture.md` names more than one deployable, write exactly one `repo-topology
 ADR` at `specs/adr/NNNN-<title>.md` — a single decision that names each repository and
 explains why it is separate — allocated strictly above the max existing ADR number
@@ -129,7 +133,13 @@ instead of reallocating its keys: each **surviving** deployable keeps its alread
 key, so a survivor is never renumbered, and a suffix is allocated only for a newly added
 deployable. A removed deployable's key is never reused by a different deployable in the
 same reconciliation, so an existing slice whose `repo` named the removed deployable cannot
-silently resolve onto a survivor.
+silently resolve onto a survivor. The `repo-topology ADR` is also the durable home of the
+**path-to-key assignment table**: every amend that changes the deployable set records each
+deployable's `path` and its assigned `repos:` key in that append-only ADR, so the
+assignments survive the draft's deletion — after a consolidation removes
+`umbrella.manifest.draft.yaml`, a later expansion reconciles the survivor's key against
+that persisted table instead of reallocating it, so a slice that references the survivor's
+prior key is never stranded.
 Write each `path` relative to the draft file's own directory (the child sibling). The
 draft's header must mark it a `DRAFT` and state that it is `inert`.
 
