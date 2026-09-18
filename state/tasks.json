@@ -1007,17 +1007,18 @@
         {
           "id": "E99-F164",
           "title": "Only one source file's executable bit is checked (tests/test_install.sh:38, added by E99-F161); chmod -x on tools/fix-worktree.sh leaves all 47 suites green while ./tools/fix-worktree.sh is Permission denied",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "29dc48c7b37dee2c6dadcdee07a4e1befff3cab6",
+            "ref": "29dc48c7b37dee2c6dadcdee07a4e1befff3cab6",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F164-source-mode-check-class/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (212)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E99-F164 done --evidence <merge-ref>`",
-            "pr": "212"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F164-source-mode-check-class/"
         }
       ]
     },
