@@ -19,6 +19,9 @@
 # default `backend: in-session`, the Orchestrator dispatches each slice by spawning the
 # Builder sub-agent cd'd into the child repo (no executor needed) — leave `delegate_cmd`
 # empty in that mode.
+#
+# `scaffold_cmd:` is optional and opaque: the harness never interprets it; only the
+# E28-F03 promotion runs it.
 
 repos:
   viernes-bff:
@@ -26,15 +29,18 @@ repos:
     init: ./init.sh               # that repo's own environment gate
     test_command: "npm test"      # that repo's own verification (its verification.test_command)
     delegate_cmd: ""              # only for backend: delegate — invoked as <delegate_cmd> <feature-id> <abs-spec-path>
+    scaffold_cmd: ""              # optional and opaque — only E28-F03's promotion runs it
 
   lia-api:
     path: ../lia-api
     init: ./init.sh
     test_command: "pytest"
     delegate_cmd: ""              # only for backend: delegate
+    scaffold_cmd: ""              # optional and opaque — only E28-F03's promotion runs it
 
   viernes-web:
     path: ../viernes-web
     init: ./init.sh
     test_command: "npm test"
     delegate_cmd: ""              # only for backend: delegate
+    scaffold_cmd: ""              # optional and opaque — only E28-F03's promotion runs it

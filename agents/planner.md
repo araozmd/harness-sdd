@@ -74,6 +74,34 @@ You **defer per-epic ADR deltas to F03 (`/sdd-drill`)**, and you **never author
 feature-level design**. Decisions local to a single epic, and refinements informed by
 what an earlier epic's implementation taught, are F03's job — not yours.
 
+## Repo topology output (R1-R7, R10)
+
+Repo topology is an output of planning, never an input. When `specs/architecture.md`
+names more than one deployable, write exactly one `repo-topology ADR` at
+`specs/adr/NNNN-<title>.md`, allocated strictly above the max existing ADR number
+(4-digit, no reuse), and reference it from `specs/architecture.md`'s ADR index by its
+`ADR-NNNN` id. Also write a draft manifest at `umbrella.manifest.draft.yaml` in the
+harness directory (`.harness/umbrella.manifest.draft.yaml` in an installed target).
+
+The draft has one `repos:` entry per deployable, keyed by the repo/dir name, each with
+`path`, `init`, `test_command`, `delegate_cmd` (empty string), and optionally the
+`scaffold_cmd` runner key that is optional and opaque: the harness never interprets it
+and only the E28-F03 promotion runs it. Write each `path` relative to the draft file's own directory
+(the child sibling), never relative to the harness directory. The draft's header must
+mark it a `DRAFT` and state that it is `inert`.
+
+The draft is inert and is not the switch: never set or change `umbrella.manifest` in
+`harness.config.yaml`, and never write `umbrella.manifest.yaml`, so the draft's presence
+alone does not engage umbrella mode. Engagement is the config key pointing at an existing
+manifest — that is E28-F03's promotion, not yours.
+
+When `specs/architecture.md` names exactly one deployable (or none), write neither a
+`repo-topology ADR` nor an `umbrella.manifest.draft.yaml`.
+
+The Planner is the single writer of the draft manifest. `/sdd-drill` never creates or
+amends `umbrella.manifest.draft.yaml`; a topology change is a `/sdd-plan` amend that
+reconciles the draft.
+
 ## Seed the draft epics (R11, R12)
 
 Read `state/tasks.json` first. Then seed each roadmap epic into `state/tasks.json`

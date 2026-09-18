@@ -5308,7 +5308,28 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    `.harness/specs/_templates/adr.md` (4-digit, above the max existing ADR number);
    `architecture.md` references each ADR by its `ADR-NNNN` id. Stay at whole-system
    depth — defer per-epic deltas to `/sdd-drill` (F03).
-7. **Seed** the roadmap: for each epic, write a `.harness/state/tasks.json` row with
+7. **Repo topology output.** Repo topology is an output of planning, never an input.
+   When `.harness/specs/architecture.md` names more than one deployable, write exactly
+   one `repo-topology ADR` at `.harness/specs/adr/NNNN-<title>.md`, allocated strictly
+   above the max existing ADR number (4-digit, no reuse), and reference it from
+   `.harness/specs/architecture.md`'s ADR index by its `ADR-NNNN` id. Also write a draft
+   manifest at `.harness/umbrella.manifest.draft.yaml` with one `repos:` entry per
+   deployable, keyed by the repo/dir name, each with `path`, `init`, `test_command`,
+   `delegate_cmd` (empty string), and optionally the `scaffold_cmd` runner key that is
+   optional and opaque: the harness never interprets it and only the E28-F03 promotion
+   runs it. Write each `path` relative to the draft file's own directory (the child
+   sibling), never relative to the harness directory. The draft's header must mark it a
+   `DRAFT` and state that it is `inert`.
+   The draft is inert and is not the switch: never set or change `umbrella.manifest` in
+   `.harness/harness.config.yaml`, and never write `.harness/umbrella.manifest.yaml`, so
+   the draft's presence alone does not engage umbrella mode. Engagement is the config key
+   pointing at an existing manifest — that is E28-F03's promotion, not yours.
+   When `.harness/specs/architecture.md` names exactly one deployable (or none), write
+   neither a `repo-topology ADR` nor an `umbrella.manifest.draft.yaml`.
+   The Planner is the single writer of the draft manifest. `/sdd-drill` never creates or
+   amends `.harness/umbrella.manifest.draft.yaml`; a topology change is a `/sdd-plan`
+   amend that reconciles the draft.
+8. **Seed** the roadmap: for each epic, write a `.harness/state/tasks.json` row with
    `status: "draft"` and `features: []` (ids as a next-sequential block strictly above
    the max existing `E##`, append-only, no reuse), and create
    `.harness/specs/epics/<id>-<slug>/epic.md` anchored by a one-paragraph business brief
@@ -5322,16 +5343,16 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
       relies on, or must stay clear of.
    5. **Pointers to relevant shared ADRs** — references in `architecture.md` / ADRs that
       constrain this epic (or an explicit note that none apply).
-8. **Doc-critic checkpoint (before re-validation).** Spawn the **Doc-critic**
+9. **Doc-critic checkpoint (before re-validation).** Spawn the **Doc-critic**
    (`.harness/agents/doc-critic.md`) as a sub-agent with `target-type=plan-output`,
    passing the paths just written (`specs/vision.md`, `specs/architecture.md`, each ADR,
    and every seeded `epic.md`). Apply any advisory findings inline, then proceed. If the
    critic invocation errors or times out, proceed best-effort and append a note under
    `.harness/progress/<run>/` recording the skipped/failed review.
-9. **Re-validate** `.harness/state/tasks.json` against
+10. **Re-validate** `.harness/state/tasks.json` against
    `.harness/store/tasks.schema.json`. If it fails, report the failure and do NOT claim
    a successful plan.
-10. **Report** the artifacts written (`.harness/specs/vision.md`,
+11. **Report** the artifacts written (`.harness/specs/vision.md`,
    `.harness/specs/architecture.md`, each `.harness/specs/adr/NNNN-*.md`), the seeded
    `draft` epics (ids + titles + `epic.md` paths), and tell the human to **run
    `/sdd-drill <epic-id>`** next. Do NOT spawn the Architect, do NOT write any feature

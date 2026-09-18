@@ -425,4 +425,5 @@ See `umbrella.manifest.example.yaml`. One entry per child repo under `repos:`, e
 with `path`, `init`, `test_command`, and `delegate_cmd`. `delegate_cmd` is **required
 only under `backend: delegate`**; under the default `backend: in-session` it is unused
 and may be left empty. A slice whose `repo` is absent from `repos:` is undispatchable
-and must be reported.
+and must be reported. `scaffold_cmd` is an optional per-entry key and is opaque: the
+harness never interprets it, and only the E28-F03 promotion runs it.
