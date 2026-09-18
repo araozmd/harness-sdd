@@ -301,3 +301,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-17 E28-F02 pr-loop: round 5 returned 2 blocking findings (key-collision normalization; amend must allow removal/consolidation). Human override — cap raised to 6.
 - 2026-09-17 E28-F02 pr-loop: round 6 returned 3 blocking findings (suffix probing; delta removal semantics; contradictory collapse-ADR rule). Human override — cap raised to 7; fix simplifies the delta to a complete replacement snapshot to close the class.
 - 2026-09-17 E28-F02 pr-loop: round 7 returned 2 blocking findings (P1: draft under .harness/ trips the init.sh drift guard; no-deletion carve-out). Human override — cap raised to 8.
+- 2026-09-17 E28-F02 pr-loop: round 8 returned 1 blocking finding (Driller must stop-and-handoff topology changes to /sdd-plan amend). Human override — cap raised to 9.
