@@ -5309,11 +5309,17 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
      draft, as the repo-topology
      contract below describes; an amend that only adds epics or non-topology ADR deltas
      must not touch the topology artifacts. This amend consumes the Driller's persisted
-     **topology handoff** when one exists: read `.harness/progress/<run>/topology-handoff.md`,
-     which carries the full resulting deployable set the drill discovered — each
-     deployable's logical key, its `path`, and why it is separate — so the amend detects
-     the change from the persisted set instead of guessing. Never rewrite, re-seed, or
-     renumber an existing artifact or roadmap entry.
+     **topology handoff** only when the Driller's stop message names one: the amend is
+     given that **exact handoff path**, so it reads only that
+     `.harness/progress/<run>/topology-handoff.md` and never an **older** handoff left by
+     another run, which carries the full resulting deployable set the drill discovered —
+     each deployable's logical key, its `path`, and why it is separate — so the amend
+     detects the change from the persisted set instead of guessing. Only an **unconsumed**
+     handoff is current: each handoff carries a `consumed:` marker, and a consumed or
+     **superseded** handoff is never used, so an older snapshot cannot reintroduce a
+     removed deployable. After consuming it, the amend **marks the handoff consumed** by
+     flipping the marker, so a later amend cannot replay the same snapshot. Never rewrite,
+     re-seed, or renumber an existing artifact or roadmap entry.
 4. Run a short, **adaptive** Q&A with the human to clarify: the problem and who it is
    for, the outcomes, the non-goals, and the roadmap shape. Where the shape forks, offer
    **at most 3** options as **text-only** (markdown/ASCII) mockups — never images. Keep
@@ -5374,7 +5380,11 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    in that append-only ADR, so the assignments survive the draft's deletion — after a
    consolidation removes `.harness/umbrella.manifest.draft.yaml`, a later expansion
    reconciles the survivor's key against that persisted table instead of reallocating it, so
-   a slice that references the survivor's prior key is never stranded. Write each `path` relative to the
+   a slice that references the survivor's prior key is never stranded. A key ever assigned
+   in that append-only table is **reserved** for its deployable identity: a **retired key**
+   is never reused for a different deployable by a later amendment — not merely within the
+   one reconciliation — unless the slices still referencing it are migrated or removed
+   first. Write each `path` relative to the
    draft file's own directory (the child
    sibling). The draft's header must mark it a
    `DRAFT` and state that it is `inert`.
@@ -5486,10 +5496,14 @@ an arbitrary epic.
    never images. Keep it short.
 6. **Topology changes — stop and hand off (before any writes).** Check this immediately
    after the Q&A and before seeding anything. If the decomposition reveals that the
-   deployable set changes — a new, removed, or renamed deployable — STOP here, before
-   you seed any feature entry, fill the epic's feature table, write any inbox brief, or
-   append any ADR delta, and record it as a required `/sdd-plan` amend; do not make the
-   topology decision yourself. The Planner is the single writer of the draft manifest;
+   deployable set changes — a new, removed, renamed, or relocated deployable — STOP here,
+   before you seed any feature entry, fill the epic's feature table, write any inbox brief,
+   or append any ADR delta, and record it as a required `/sdd-plan` amend; do not make the
+   topology decision yourself. A **path-only relocation** — an existing deployable moved to
+   a new `path` with its name unchanged — is a topology change too: it also routes through
+   this guard and **STOPS** the drill, and the draft must not keep the stale `path`, so
+   hand it off even though no deployable was added, removed, or renamed. The Planner is the
+   single writer of the draft manifest;
    you do not create or amend `.harness/umbrella.manifest.draft.yaml`, and do NOT run
    `/sdd-plan` yourself. Keep your ADR-delta authority for the non-topology decisions
    this decomposition forces. **Persist the discovered topology before you hand off.**
@@ -5498,14 +5512,17 @@ an arbitrary epic.
    unless you write it down: before you report, persist the full resulting deployable set
    to a durable **topology handoff** file at `.harness/progress/<run>/topology-handoff.md`
    — one entry per deployable with its logical key, its `path`, and why it is separate when
-   known. The handoff is the only topology artifact you write; it does not grant you
+   known. Each handoff carries a `consumed:` marker: write this one **unconsumed**, and the
+   amend that reads it marks it consumed, so a **superseded** handoff is never replayed.
+   The handoff is the only topology artifact you write; it does not grant you
    manifest-write authority, and the Planner remains the single writer. Report the
    required amend to the human (run `/sdd-plan` in amend mode) and name the
-   `.harness/progress/<run>/topology-handoff.md` file in that stop message, so the fresh
-   amend consumes the persisted set instead of guessing. Reconcile against that set before
-   a feature that depends on the changed topology is specced — do not seed such a feature
-   on the strength of a draft you did not reconcile. A topology-dependent feature must not
-   be persisted before that amend.
+   **exact handoff path** — the resolved `.harness/progress/<run>/topology-handoff.md`
+   file this run wrote — in that stop message, so the amend is given that exact path
+   instead of picking an **older** handoff from another run. Reconcile against that set
+   before a feature that depends on the changed topology is specced — do not seed such a
+   feature on the strength of a draft you did not reconcile. A topology-dependent feature
+   must not be persisted before that amend.
 7. **Seed** the decomposition: write each new feature into the epic's `features` array
    (`status: "pending"`, `sdd: true`, one-line `title`, `spec_path`, intra-epic
    `depends_on`; ids as a next-sequential block strictly above the epic's max `F##`,

@@ -389,6 +389,25 @@ for _r2p_pair in "R2 role durable key table|$ROLE_FOLD" \
     "repo-topology ADR" "append-only" "survive the draft"
 done
 pass "R2 path-to-key assignments are recorded in the append-only repo-topology ADR and survive the draft's deletion [test_role_and_body_name_the_draft_and_keys]"
+# Retired keys stay reserved across FUTURE amendments (PR #202 finding 4044146394). The
+# existing no-reuse rule is scoped to ONE reconciliation, so a later amendment could hand a
+# retired key to a different deployable: the historical assignment lives in the append-only
+# path-to-key table, so a key ever assigned there must stay reserved for its deployable
+# identity and never be reassigned by a later amendment — unless the slices still
+# referencing it have first been migrated or removed. Bounded to the sentence naming
+# `retired key` (positive control), on every surface the key rule lives on; the sentence
+# deliberately does NOT name `path-to-key` (spelled as "that append-only table"), so the
+# existing path-to-key attribution above is not widened. On pre-change text no sentence
+# names `retired key`, so both positive controls RED.
+for _r2k2_pair in "R2 role reserved keys|$ROLE_FOLD" \
+                  "R2 emitted body reserved keys|$BODY_FOLD" \
+                  "R2 .claude/commands reserved keys|$CMD_FOLD" \
+                  "R2 .agents/skills reserved keys|$SKILL_FOLD"; do
+  _r2k2_lbl="${_r2k2_pair%%|*}"; _r2k2_f="${_r2k2_pair#*|}"
+  every_naming_sentence_carries "$_r2k2_lbl" "$_r2k2_f" "retired key" \
+    "reserved" "append-only" "different deployable" "migrated"
+done
+pass "R2 a retired key stays reserved across future amendments (append-only table, no different deployable, unless slices migrated/removed) [test_role_and_body_name_the_draft_and_keys]"
 
 # ── R3: exactly one deployable writes neither artifact ─────────────────────────
 # test_single_deployable_writes_neither
@@ -585,7 +604,17 @@ for _r10_pair in "R10 driller role|$DRILL_ROLE_FOLD" "R10 driller emitted body|$
                  "R10 driller .claude/commands|$DRILL_CMD_FOLD" "R10 driller .agents/skills|$DRILL_SKILL_FOLD"; do
   _r10_lbl="${_r10_pair%%|*}"; _r10_f="${_r10_pair#*|}"
   every_naming_sentence_carries "$_r10_lbl hand-off" "$_r10_f" "deployable set changes" \
-    "/sdd-plan" "amend" "required" "STOP"
+    "/sdd-plan" "amend" "required" "STOP" "relocated"
+  # ...and a PATH-ONLY RELOCATION must route through the same guard (PR #202 finding
+  # 4044146386): the guard recognized only add/remove/rename, so moving an existing
+  # deployable to a new `path` without renaming it slipped past — the drill persisted a
+  # topology-dependent feature and the derived draft kept the stale `path`. Bounded to the
+  # sentence naming `path-only relocation` (positive control), on every Driller surface
+  # (role `## Topology changes`, emitted `/sdd-drill` body, `.claude/commands/sdd-drill.md`,
+  # `.agents/skills/sdd-drill/SKILL.md`). On pre-change text no Driller sentence names
+  # `path-only relocation`, so each positive control REDs.
+  every_naming_sentence_carries "$_r10_lbl relocation" "$_r10_f" "path-only relocation" \
+    "STOP" "stale"
   every_naming_sentence_carries "$_r10_lbl decision" "$_r10_f" "the topology decision" "do not make"
   every_naming_sentence_carries "$_r10_lbl draft authority" "$_r10_f" "umbrella.manifest.draft.yaml" \
     "Planner" "single writer" "do not create or amend"
@@ -608,6 +637,21 @@ for _r10p_pair in "R10 driller role|$DRILL_ROLE_FOLD" "R10 driller emitted body|
     "progress/" "logical key" "path"
   every_naming_sentence_carries "$_r10p_lbl stop message" "$_r10p_f" "stop message" \
     "topology-handoff.md"
+  # BIND the handoff to the intended run (PR #202 finding 4044146384). Several
+  # `topology-handoff.md` files can accumulate under `progress/<run>/`, so "when one
+  # exists" let a fresh amend pick an OLDER snapshot and reintroduce removed deployables.
+  # The stop message must name the EXACT handoff path so the amend is given that path
+  # rather than the first file it finds. Bounded to the sentence naming `exact handoff
+  # path` (positive control), on every Driller surface. On pre-change text no sentence
+  # names `exact handoff path`, so each positive control REDs.
+  every_naming_sentence_carries "$_r10p_lbl exact path" "$_r10p_f" "exact handoff path" \
+    "stop message" "older"
+  # ...and the handoff ITSELF carries a consumed/superseded marker so a later amend can
+  # tell a current handoff from a spent one; only an unconsumed handoff is replayed.
+  # Bounded to the sentence naming `unconsumed` (positive control). On pre-change text no
+  # sentence names `unconsumed`, so each positive control REDs.
+  every_naming_sentence_carries "$_r10p_lbl unconsumed" "$_r10p_f" "unconsumed" \
+    "consumed" "superseded" "marker"
 done
 # ORDERING, not mere presence (finding 4043487843): the stop-and-hand-off check must run
 # BEFORE any seeding/table/brief/ADR write, or the topology-dependent feature the durable
@@ -775,8 +819,23 @@ for _ac_pair in "R11 amend consume role|$PLAN_WHAT_FOLD" "R11 amend consume emit
   _ac_lbl="${_ac_pair%%|*}"; _ac_f="${_ac_pair#*|}"
   every_naming_sentence_carries "$_ac_lbl" "$_ac_f" "topology handoff" \
     "progress/" "consumes" "logical key" "path"
+  # BIND the amend to the intended handoff (PR #202 finding 4044146384). The unqualified
+  # "when one exists" lookup let a fresh amend read an OLDER `progress/<run>/topology-handoff.md`
+  # and reintroduce removed deployables. The amend must be given the EXACT handoff path the
+  # Driller's stop message named, must use it only while it is UNCONSUMED (each handoff
+  # carries a `consumed:` marker and a consumed/superseded one is never used), and must
+  # MARK it consumed after reading so a later amend cannot replay it. Each is bounded to its
+  # own naming sentence (positive controls); on pre-change text no sentence names `exact
+  # handoff path`, `unconsumed` or `marks the handoff consumed`, so each REDs.
+  every_naming_sentence_carries "$_ac_lbl exact path" "$_ac_f" "exact handoff path" \
+    "stop message" "older"
+  every_naming_sentence_carries "$_ac_lbl unconsumed" "$_ac_f" "unconsumed" \
+    "consumed" "superseded" "current"
+  every_naming_sentence_carries "$_ac_lbl mark consumed" "$_ac_f" "marks the handoff consumed" \
+    "marker" "replay"
 done
 pass "R11 the amend branch consumes the Driller's persisted topology handoff (progress/ + logical key + path) instead of guessing [test_amend_is_append_only]"
+pass "R11 the amend is bound to the exact handoff path named in the stop message, uses only an unconsumed handoff, and marks it consumed [test_amend_is_append_only]"
 
 # ── R11: the topology output step ITSELF is gated; the no-op rule is greenfield-scoped ─
 # (Reviewer findings 4043709578 and 4043709584 — two refinements of the same condition.)

@@ -23,8 +23,9 @@ single epic-level approval — and you must **never spec**.
    design artifacts as inputs.
 2. Run a short, **adaptive** Q&A to settle the feature breakdown.
 3. **Topology guard — before any writes.** Immediately after the Q&A and before you seed
-   anything, check whether the breakdown changes the deployable set (a new, removed, or
-   renamed deployable). If it does, **STOP** and record a required `/sdd-plan` amend
+   anything, check whether the breakdown changes the deployable set (a new, removed,
+   renamed, or relocated deployable). If it does, **STOP** and record a required
+   `/sdd-plan` amend
    (see "Topology changes — stop and hand off") — do not persist a topology-dependent
    feature before the Planner has reconciled the draft.
 4. **Seed under the board lock** `pending` feature entries into the epic's
@@ -189,9 +190,13 @@ before any seeding write** — before you seed a feature entry, fill the `epic.m
 table, write an inbox brief, or append an ADR delta. A topology-dependent feature must
 not be persisted before the Planner has reconciled the draft with the `/sdd-plan` amend;
 persisting it first is the state the amend then cannot resume cleanly from. When your
-decomposition reveals that the deployable set changes — a new, removed, or renamed
-deployable — you **STOP** and record it
-as a required `/sdd-plan` amend; you do not make the topology decision yourself. The
+decomposition reveals that the deployable set changes — a new, removed, renamed, or
+relocated deployable — you **STOP** and record it
+as a required `/sdd-plan` amend; you do not make the topology decision yourself. A
+**path-only relocation** — an existing deployable moved to a new `path` with its name
+unchanged — is a topology change too: it also routes through this guard and **STOPS** the
+drill, and the draft must not keep the stale `path`, so hand it off even though no
+deployable was added, removed, or renamed. The
 Planner is the single writer of the draft manifest; you do not create or amend
 `umbrella.manifest.draft.yaml`, and reconciling the draft is that amend's job, not your
 decomposition's. You keep your ADR-delta authority for the non-topology decisions this
@@ -202,13 +207,16 @@ fresh context and `specs/architecture.md` still names the old deployable set, so
 cannot see what your Q&A discovered unless you write it down: before you report, persist
 the full resulting deployable set to a durable **topology handoff** file at
 `progress/<run>/topology-handoff.md` — one entry per deployable with its logical key, its
-`path`, and why it is separate when known. The handoff is the only topology artifact you
+`path`, and why it is separate when known. Each handoff carries a `consumed:` marker:
+write this one **unconsumed**, and the amend that reads it marks it consumed, so a
+**superseded** handoff is never replayed. The handoff is the only topology artifact you
 write; it does not grant you manifest-write authority, and the Planner remains the single
 writer.
 
 Report the required amend to the human (run `/sdd-plan` in amend mode) and name the
-`progress/<run>/topology-handoff.md` file in that stop message, so the fresh amend consumes
-the persisted set instead of guessing. Reconcile against that set before a feature that
+**exact handoff path** — the resolved `progress/<run>/topology-handoff.md` file this run
+wrote — in that stop message, so the amend is given that exact path instead of picking an
+**older** handoff from another run. Reconcile against that set before a feature that
 depends on the changed topology is specced — do not seed such a feature on the strength of
 a draft you did not reconcile.
 

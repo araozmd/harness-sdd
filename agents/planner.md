@@ -37,10 +37,16 @@ spec.**
     `## Repo topology output` section
     below describes; an amend that only adds epics or non-topology ADR deltas must not
    touch the topology artifacts. This amend consumes the Driller's persisted **topology
-   handoff** when one exists: read `progress/<run>/topology-handoff.md`, which carries the
-   full resulting deployable set the drill discovered — each deployable's logical key, its
-   `path`, and why it is separate — so the amend detects the change from the persisted set
-   instead of guessing.
+   handoff** only when the Driller's stop message names one: the amend is given that
+   **exact handoff path**, so it reads only that `progress/<run>/topology-handoff.md` and
+   never an **older** handoff left by another run, which carries the full resulting
+   deployable set the drill discovered — each deployable's logical key, its `path`, and why
+   it is separate — so the amend detects the change from the persisted set instead of
+   guessing. Only an **unconsumed** handoff is current: each handoff carries a `consumed:`
+   marker, and a consumed or **superseded** handoff is never used, so an older snapshot
+   cannot reintroduce a removed deployable. After consuming it, the amend **marks the
+   handoff consumed** by flipping the marker, so a later amend cannot replay the same
+   snapshot.
 3. Run a short, **adaptive** Q&A to clarify the problem, the users, the outcomes, the
    non-goals, and the roadmap shape.
 4. **Write** `specs/vision.md` from `specs/_templates/vision.md` (greenfield run).
@@ -139,7 +145,10 @@ deployable's `path` and its assigned `repos:` key in that append-only ADR, so th
 assignments survive the draft's deletion — after a consolidation removes
 `umbrella.manifest.draft.yaml`, a later expansion reconciles the survivor's key against
 that persisted table instead of reallocating it, so a slice that references the survivor's
-prior key is never stranded.
+prior key is never stranded. A key ever assigned in that append-only table is **reserved**
+for its deployable identity: a **retired key** is never reused for a different deployable
+by a later amendment — not merely within the one reconciliation — unless the slices still
+referencing it are migrated or removed first.
 Write each `path` relative to the draft file's own directory (the child sibling). The
 draft's header must mark it a `DRAFT` and state that it is `inert`.
 
