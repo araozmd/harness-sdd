@@ -5290,26 +5290,38 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    broken environment.
 2. Read `.harness/harness.config.yaml` and the TaskStore (`.harness/state/tasks.json`,
    per `.harness/store/local.md`).
-3. **Re-run guard.** If `.harness/specs/vision.md` or `.harness/specs/architecture.md`
-   already exists, a default run STOPS and reports that the project already has a plan —
-   point the human at `/sdd-drill` (F03) to deepen existing epics, or at an explicit
-   amend mode that **appends** (never overwrites or renumbers). Do not silently
-   overwrite.
+3. **Detect the mode and branch.** If `.harness/specs/vision.md` or
+   `.harness/specs/architecture.md` already exists, the project already has a plan. A
+   default run that was not asked to amend STOPS and reports that, pointing the human
+   at `/sdd-drill` (F03) to deepen existing epics or at an explicit **amend** run. The
+   run then takes **exactly one** of two explicit branches:
+   - **Greenfield branch (first run)** — entered when neither
+     `.harness/specs/vision.md` nor `.harness/specs/architecture.md` exists: continue
+     with steps 4–8 and write the vision, the architecture + ADRs, the repo-topology
+     output, and the roadmap.
+   - **Amend branch** — entered when the project already has a plan and the human asked
+     for an amend: SKIP the greenfield template writes in steps 5–6 — an amend never
+     rewrites `.harness/specs/vision.md` or `.harness/specs/architecture.md` and never
+     renumbers an existing ADR — and perform only the append-only delta work: append
+     the dated topology delta and the new `repo-topology ADR`, append any new `draft`
+     epics above the current maximum, and reconcile or remove the derived draft, as the
+     repo-topology contract below describes. Never rewrite, re-seed, or renumber an
+     existing artifact or roadmap entry.
 4. Run a short, **adaptive** Q&A with the human to clarify: the problem and who it is
    for, the outcomes, the non-goals, and the roadmap shape. Where the shape forks, offer
    **at most 3** options as **text-only** (markdown/ASCII) mockups — never images. Keep
    it short; ask only what you need to write the vision and sketch the roadmap.
-5. **Write** `.harness/specs/vision.md` from `.harness/specs/_templates/vision.md`
+5. **Greenfield branch only — Write** `.harness/specs/vision.md` from `.harness/specs/_templates/vision.md`
    (north star: problem, users, outcomes, non-goals; it complements
    `.harness/specs/product.md`/`glossary.md`).
-6. **Write** `.harness/specs/architecture.md` from
+6. **Greenfield branch only — Write** `.harness/specs/architecture.md` from
    `.harness/specs/_templates/architecture.md` (system shape + stable upfront
    decisions), and one ADR per decision at `.harness/specs/adr/NNNN-<title>.md` from
    `.harness/specs/_templates/adr.md` (4-digit, above the max existing ADR number);
    `architecture.md` references each ADR by its `ADR-NNNN` id. Stay at whole-system
    depth — defer per-epic deltas to `/sdd-drill` (F03).
-7. **Repo topology output.** Repo topology is an output of planning, never an input.
-   When `.harness/specs/architecture.md` names more than one deployable, write exactly
+7. **Repo topology output (both branches).** Repo topology is an output of planning,
+   never an input. When `.harness/specs/architecture.md` names more than one deployable, write exactly
    one `repo-topology ADR` at `.harness/specs/adr/NNNN-<title>.md`, allocated strictly
    above the max existing ADR number (4-digit, no reuse), and reference it from
    `.harness/specs/architecture.md`'s ADR index by its `ADR-NNNN` id. Also write a draft
@@ -5364,7 +5376,9 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    `.harness/umbrella.manifest.draft.yaml` is a project-owned artifact, so a consolidation
    to one deployable (or none) may delete it, while every other committed artifact stays
    append-only and is never deleted.
-8. **Seed** the roadmap: for each epic, write a `.harness/state/tasks.json` row with
+8. **Seed** the roadmap (a greenfield run seeds the whole block; an amend appends above
+   the current maximum and never re-seeds or rewrites an existing row): for each epic,
+   write a `.harness/state/tasks.json` row with
    `status: "draft"` and `features: []` (ids as a next-sequential block strictly above
    the max existing `E##`, append-only, no reuse), and create
    `.harness/specs/epics/<id>-<slug>/epic.md` anchored by a one-paragraph business brief
@@ -5424,25 +5438,28 @@ an arbitrary epic.
 5. Run a short, **adaptive** Q&A with the human to settle the feature breakdown. Where the
    breakdown forks, offer **at most 3** options as **text-only** (markdown/ASCII) mockups —
    never images. Keep it short.
-6. **Seed** the decomposition: write each new feature into the epic's `features` array
+6. **Topology changes — stop and hand off (before any writes).** Check this immediately
+   after the Q&A and before seeding anything. If the decomposition reveals that the
+   deployable set changes — a new, removed, or renamed deployable — STOP here, before
+   you seed any feature entry, fill the epic's feature table, write any inbox brief, or
+   append any ADR delta, and record it as a required `/sdd-plan` amend; do not make the
+   topology decision yourself. The Planner is the single writer of the draft manifest;
+   you do not create or amend `.harness/umbrella.manifest.draft.yaml`, and do NOT run
+   `/sdd-plan` yourself. Keep your ADR-delta authority for the non-topology decisions
+   this decomposition forces. Report the required amend to the human so the Planner
+   reconciles the draft before a feature that depends on the changed deployable set is
+   specced. A topology-dependent feature must not be persisted before that amend.
+7. **Seed** the decomposition: write each new feature into the epic's `features` array
    (`status: "pending"`, `sdd: true`, one-line `title`, `spec_path`, intra-epic
    `depends_on`; ids as a next-sequential block strictly above the epic's max `F##`,
    append-only, no reuse); fill the `epic.md` feature table (one row per feature); and write
    a per-feature inbox brief at `.harness/progress/inbox/<E##>-F<NN>.md` from
    `.harness/specs/_templates/inbox-brief.md`, recording the `ADR-NNNN` ids each feature
    must honor.
-7. **Append** any per-epic **ADR deltas** the decomposition forces at
+8. **Append** any per-epic **ADR deltas** the decomposition forces at
    `.harness/specs/adr/NNNN-<title>.md` (4-digit, above the max existing ADR number, no
    reuse) — do NOT rewrite or renumber F02's existing ADRs. Stay at per-epic depth; defer
    feature-level design to the feature's own spec.
-8. **Topology changes — stop and hand off.** If the decomposition reveals that the
-   deployable set changes — a new, removed, or renamed deployable — STOP and record it as a
-   required `/sdd-plan` amend; do not make the topology decision yourself. The Planner is
-   the single writer of the draft manifest; you do not create or amend
-   `.harness/umbrella.manifest.draft.yaml`, and do NOT run `/sdd-plan` yourself. Keep your
-   ADR-delta authority for the non-topology decisions this decomposition forces. Report the
-   required amend to the human so the Planner reconciles the draft before a feature that
-   depends on the changed deployable set is specced.
 9. **Doc-critic checkpoint (before re-validation).** Spawn the **Doc-critic**
    (`.harness/agents/doc-critic.md`) as a sub-agent with `target-type=epic-decomposition`,
    passing the target `epic.md` path, its feature table, the per-feature inbox brief paths,

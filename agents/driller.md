@@ -22,14 +22,19 @@ single epic-level approval — and you must **never spec**.
 1. Take a required `<epic-id>` and read the target `draft` epic plus F02's durable
    design artifacts as inputs.
 2. Run a short, **adaptive** Q&A to settle the feature breakdown.
-3. **Seed under the board lock** `pending` feature entries into the epic's
+3. **Topology guard — before any writes.** Immediately after the Q&A and before you seed
+   anything, check whether the breakdown changes the deployable set (a new, removed, or
+   renamed deployable). If it does, **STOP** and record a required `/sdd-plan` amend
+   (see "Topology changes — stop and hand off") — do not persist a topology-dependent
+   feature before the Planner has reconciled the draft.
+4. **Seed under the board lock** `pending` feature entries into the epic's
    `features` array (ids, one-line intents, `depends_on`), fill the epic's
    `epic.md` feature table, and write a per-feature inbox brief under
    `progress/inbox/`.
-4. **Append** any per-epic **ADR deltas** the decomposition forces at
+5. **Append** any per-epic **ADR deltas** the decomposition forces at
    `specs/adr/NNNN-<title>.md` (F02's convention).
-5. Confirm the guarded helper's built-in parse + schema validation passed.
-6. End in **exactly one** epic-level human decision: *approve* (flip the epic
+6. Confirm the guarded helper's built-in parse + schema validation passed.
+7. End in **exactly one** epic-level human decision: *approve* (flip the epic
    `draft → planned` and stamp `autonomous: true` on every seeded feature) or *keep gated*
    (flip the epic `draft → planned`, leave every seeded feature `autonomous: false`).
 
@@ -179,8 +184,13 @@ spec — that is the Architect's (F04's) boundary. Decisions local to a single f
 ## Topology changes — stop and hand off (R10)
 
 Your context does not receive the Planner's contract (`agents/planner.md`), so the
-topology boundary is stated here as well. When your decomposition reveals that the
-deployable set changes — a new, removed, or renamed deployable — you **STOP** and record it
+topology boundary is stated here as well. Run this check **immediately after the Q&A and
+before any seeding write** — before you seed a feature entry, fill the `epic.md` feature
+table, write an inbox brief, or append an ADR delta. A topology-dependent feature must
+not be persisted before the Planner has reconciled the draft with the `/sdd-plan` amend;
+persisting it first is the state the amend then cannot resume cleanly from. When your
+decomposition reveals that the deployable set changes — a new, removed, or renamed
+deployable — you **STOP** and record it
 as a required `/sdd-plan` amend; you do not make the topology decision yourself. The
 Planner is the single writer of the draft manifest; you do not create or amend
 `umbrella.manifest.draft.yaml`, and reconciling the draft is that amend's job, not your

@@ -31,25 +31,28 @@ an arbitrary epic.
 5. Run a short, **adaptive** Q&A with the human to settle the feature breakdown. Where the
    breakdown forks, offer **at most 3** options as **text-only** (markdown/ASCII) mockups —
    never images. Keep it short.
-6. **Seed** the decomposition: write each new feature into the epic's `features` array
+6. **Topology changes — stop and hand off (before any writes).** Check this immediately
+   after the Q&A and before seeding anything. If the decomposition reveals that the
+   deployable set changes — a new, removed, or renamed deployable — STOP here, before
+   you seed any feature entry, fill the epic's feature table, write any inbox brief, or
+   append any ADR delta, and record it as a required `/sdd-plan` amend; do not make the
+   topology decision yourself. The Planner is the single writer of the draft manifest;
+   you do not create or amend `umbrella.manifest.draft.yaml`, and do NOT run
+   `/sdd-plan` yourself. Keep your ADR-delta authority for the non-topology decisions
+   this decomposition forces. Report the required amend to the human so the Planner
+   reconciles the draft before a feature that depends on the changed deployable set is
+   specced. A topology-dependent feature must not be persisted before that amend.
+7. **Seed** the decomposition: write each new feature into the epic's `features` array
    (`status: "pending"`, `sdd: true`, one-line `title`, `spec_path`, intra-epic
    `depends_on`; ids as a next-sequential block strictly above the epic's max `F##`,
    append-only, no reuse); fill the `epic.md` feature table (one row per feature); and write
    a per-feature inbox brief at `progress/inbox/<E##>-F<NN>.md` from
    `specs/_templates/inbox-brief.md`, recording the `ADR-NNNN` ids each feature
    must honor.
-7. **Append** any per-epic **ADR deltas** the decomposition forces at
+8. **Append** any per-epic **ADR deltas** the decomposition forces at
    `specs/adr/NNNN-<title>.md` (4-digit, above the max existing ADR number, no
    reuse) — do NOT rewrite or renumber F02's existing ADRs. Stay at per-epic depth; defer
    feature-level design to the feature's own spec.
-8. **Topology changes — stop and hand off.** If the decomposition reveals that the
-   deployable set changes — a new, removed, or renamed deployable — STOP and record it as a
-   required `/sdd-plan` amend; do not make the topology decision yourself. The Planner is
-   the single writer of the draft manifest; you do not create or amend
-   `umbrella.manifest.draft.yaml`, and do NOT run `/sdd-plan` yourself. Keep your
-   ADR-delta authority for the non-topology decisions this decomposition forces. Report the
-   required amend to the human so the Planner reconciles the draft before a feature that
-   depends on the changed deployable set is specced.
 9. **Doc-critic checkpoint (before re-validation).** Spawn the **Doc-critic**
    (`agents/doc-critic.md`) as a sub-agent with `target-type=epic-decomposition`,
    passing the target `epic.md` path, its feature table, the per-feature inbox brief paths,

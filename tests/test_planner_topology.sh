@@ -178,6 +178,12 @@ DRILL_ROLE_SPAN="$T/drill-role.span"; DRILL_ROLE_FOLD="$T/drill-role.fold"
 DRILL_BODY_SPAN="$T/drill-body.span"; DRILL_BODY_FOLD="$T/drill-body.fold"
 DRILL_CMD_FOLD="$T/drill-cmd.fold"
 DRILL_SKILL_SPAN="$T/drill-skill.span"; DRILL_SKILL_FOLD="$T/drill-skill.fold"
+# The role's ordered `## What you do` list is the durable contract's step order — the
+# topology guard must be listed BEFORE the seeding step, matching the executable body
+# (finding 4043487843). PLAN_WHAT_* is the Planner's `## What you do`, where the explicit
+# greenfield/amend branches live (finding 4043487846).
+PLAN_WHAT_SPAN="$T/plan-what.span"; PLAN_WHAT_FOLD="$T/plan-what.fold"
+DRILL_WHAT_SPAN="$T/drill-what.span"; DRILL_WHAT_FOLD="$T/drill-what.fold"
 
 extract_section "$ROLE" "Repo topology output" > "$ROLE_SPAN"
 extract_heredoc "$INST" 'cat > "$CMDDIR/sdd-plan.md" <<'"'"'EOF'"'"'' > "$BODY_SPAN"
@@ -185,6 +191,8 @@ extract_section "$SKILL" "Canonical workflow" > "$SKILL_SPAN"
 extract_section "$DRILLER" "Topology changes" > "$DRILL_ROLE_SPAN"
 extract_heredoc "$INST" 'cat > "$CMDDIR/sdd-drill.md" <<'"'"'EOF'"'"'' > "$DRILL_BODY_SPAN"
 extract_section "$DRILL_SKILL" "Canonical workflow" > "$DRILL_SKILL_SPAN"
+extract_section "$ROLE" "What you do" > "$PLAN_WHAT_SPAN"
+extract_section "$DRILLER" "What you do" > "$DRILL_WHAT_SPAN"
 
 fold_to "$ROLE_SPAN"  "$ROLE_FOLD"
 fold_to "$BODY_SPAN"  "$BODY_FOLD"
@@ -194,6 +202,8 @@ fold_to "$DRILL_ROLE_SPAN"  "$DRILL_ROLE_FOLD"
 fold_to "$DRILL_BODY_SPAN"  "$DRILL_BODY_FOLD"
 fold_to "$DRILL_CMD"        "$DRILL_CMD_FOLD"
 fold_to "$DRILL_SKILL_SPAN" "$DRILL_SKILL_FOLD"
+fold_to "$PLAN_WHAT_SPAN"   "$PLAN_WHAT_FOLD"
+fold_to "$DRILL_WHAT_SPAN"  "$DRILL_WHAT_FOLD"
 
 # ── R1: the repo-topology ADR ──────────────────────────────────────────────────
 # test_role_and_body_name_the_topology_adr
@@ -466,7 +476,30 @@ for _r10_pair in "R10 driller role|$DRILL_ROLE_FOLD" "R10 driller emitted body|$
   every_naming_sentence_carries "$_r10_lbl ADR-delta authority" "$_r10_f" "your ADR-delta authority" \
     "non-topology"
 done
-pass "R10 Planner is single writer; the Driller stops and records a required /sdd-plan amend [test_drill_does_not_amend_draft]"
+# ORDERING, not mere presence (finding 4043487843): the stop-and-hand-off check must run
+# BEFORE any seeding/table/brief/ADR write, or the topology-dependent feature the durable
+# contract says not to seed is already persisted when the Driller stops and a re-run after
+# the plan amendment appends another decomposition instead of resuming cleanly. Asserted
+# structurally by PHYSICAL LINE ORDER in the two ordered lists that actually drive the
+# run — the executable /sdd-drill body and the role's `## What you do`. Positive control:
+# both anchors must exist. On pre-change text the body's topology step sits AFTER the
+# seeding step (so the comparison reds); the role's list has no topology guard at all (so
+# its positive control reds).
+_drill_order() {  # <span> <topology-pattern> <seed-pattern> <label>
+  _do_t="$(grep -nF "$2" "$1" | head -n1 | cut -d: -f1 || true)"
+  _do_s="$(grep -nF "$3" "$1" | head -n1 | cut -d: -f1 || true)"
+  [ -n "$_do_t" ] \
+    || fail "$4: no topology-check anchor — the stop-and-hand-off step is absent from the ordered list"
+  [ -n "$_do_s" ] \
+    || fail "$4: no seeding anchor — the ordering assertion has no second anchor"
+  [ "$_do_t" -lt "$_do_s" ] \
+    || fail "$4: the topology check (line $_do_t) does not precede the seeding step (line $_do_s) — a topology-dependent feature is persisted before the stop-and-hand-off"
+}
+_drill_order "$DRILL_BODY_SPAN" '**Topology changes' '**Seed** the decomposition' "R10 drill emitted body ordering"
+_drill_order "$DRILL_CMD" '**Topology changes' '**Seed** the decomposition' "R10 drill .claude/commands ordering"
+_drill_order "$DRILL_SKILL_SPAN" '**Topology changes' '**Seed** the decomposition' "R10 drill .agents/skills ordering"
+_drill_order "$DRILL_WHAT_SPAN" '**Topology guard' '**Seed under the board lock**' "R10 drill role ordering"
+pass "R10 Planner is single writer; the Driller stops and records a required /sdd-plan amend, and the topology check precedes any seeding write [test_drill_does_not_amend_draft]"
 
 # ── R11: the amend path is append-only, latest-delta-wins, and removes the draft ─
 # test_amend_is_append_only
@@ -533,6 +566,26 @@ for _r11_pair in "R11 role|$ROLE_FOLD" "R11 emitted body|$BODY_FOLD" \
   no_naming_sentence_carries "$_r11_lbl removal no-ADR" "$_r11_f" "effective set" "writes no new"
 done
 pass "R11 amended topology change is append-only, latest-delta-wins, and removes the draft at <=1 deployable [test_amend_is_append_only]"
+
+# ── R11: /sdd-plan has explicit greenfield vs amend branches ────────────────────
+# test_plan_branches_skip_greenfield_writes
+# The old re-run guard merely "permitted an amend to continue" while steps 5-6 still
+# unconditionally wrote vision.md/architecture.md from their templates, so the amend
+# either overwrote committed planning artifacts or depended on the model ignoring earlier
+# ordered steps (finding 4043487846). The two modes must be EXPLICIT branches on every
+# surface, and the amend branch must SKIP the greenfield template writes. Bounded to the
+# sentence naming `Amend branch` (positive control), so the greenfield sentence alone
+# cannot satisfy the skip rule. The role's `## What you do` is the durable contract; the
+# emitted body and its two source-mode artifacts are the executed surfaces.
+guard "R11 plan branches role" "$PLAN_WHAT_SPAN" 5
+for _rb_pair in "R11 plan branches role|$PLAN_WHAT_FOLD" "R11 plan branches emitted body|$BODY_FOLD" \
+                "R11 plan branches .claude/commands|$CMD_FOLD" "R11 plan branches .agents/skills|$SKILL_FOLD"; do
+  _rb_lbl="${_rb_pair%%|*}"; _rb_f="${_rb_pair#*|}"
+  require_tokens "$_rb_lbl branch labels" "$_rb_f" "Greenfield branch" "Amend branch"
+  every_naming_sentence_carries "$_rb_lbl amend skip" "$_rb_f" "Amend branch" \
+    "SKIP" "greenfield" "never rewrites"
+done
+pass "R11 /sdd-plan has explicit greenfield vs amend branches; the amend branch skips the greenfield writes [test_plan_branches_skip_greenfield_writes]"
 
 # ── R12: the derived draft is project-owned, not harness drift ─────────────────
 # test_draft_excluded_from_harness_owned

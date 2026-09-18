@@ -24,16 +24,24 @@ spec.**
 ## What you do
 
 1. Take a free-text whole-project idea from the human.
-2. Run a short, **adaptive** Q&A to clarify the problem, the users, the outcomes, the
+2. **Detect the mode and branch.** If `specs/vision.md` or `specs/architecture.md`
+   already exists, the project already has a plan: a default run must STOP and point the
+   human at `/sdd-drill` (F03) to deepen existing epics, or at an explicit **amend** run.
+   In the **Greenfield branch** (neither exists) the vision, architecture and ADR writes
+   below are the run's output; in the **Amend branch** you SKIP those greenfield template
+   writes — an amend never rewrites committed `specs/vision.md`/`specs/architecture.md`
+   or an existing ADR — and perform only the append-only delta work the
+   `## Repo topology output` section below describes.
+3. Run a short, **adaptive** Q&A to clarify the problem, the users, the outcomes, the
    non-goals, and the roadmap shape.
-3. **Write** `specs/vision.md` from `specs/_templates/vision.md` (greenfield run).
-4. **Write** `specs/architecture.md` from `specs/_templates/architecture.md`, and one
+4. **Write** `specs/vision.md` from `specs/_templates/vision.md` (greenfield run).
+5. **Write** `specs/architecture.md` from `specs/_templates/architecture.md`, and one
    ADR per decision at `specs/adr/NNNN-<title>.md` from `specs/_templates/adr.md`;
    `architecture.md` references each ADR by its `ADR-NNNN` id.
-5. **Seed under the board lock** a block of `draft` epics (each `status: "draft"`,
+6. **Seed under the board lock** a block of `draft` epics (each `status: "draft"`,
    `features: []`) and a matching `specs/epics/<id>-<slug>/epic.md` per epic.
-6. Confirm the guarded helper's built-in parse + schema validation passed.
-7. **Report** the artifacts written, the seeded epics, and that `/sdd-drill` (F03) is
+7. Confirm the guarded helper's built-in parse + schema validation passed.
+8. **Report** the artifacts written, the seeded epics, and that `/sdd-drill` (F03) is
    the next step to deepen a `draft` epic.
 
 ## Options & mockups — text only, at most 3 (R3)

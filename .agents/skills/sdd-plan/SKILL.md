@@ -17,26 +17,38 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    broken environment.
 2. Read `harness.config.yaml` and the TaskStore (`state/tasks.json`,
    per `store/local.md`).
-3. **Re-run guard.** If `specs/vision.md` or `specs/architecture.md`
-   already exists, a default run STOPS and reports that the project already has a plan —
-   point the human at `/sdd-drill` (F03) to deepen existing epics, or at an explicit
-   amend mode that **appends** (never overwrites or renumbers). Do not silently
-   overwrite.
+3. **Detect the mode and branch.** If `specs/vision.md` or
+   `specs/architecture.md` already exists, the project already has a plan. A
+   default run that was not asked to amend STOPS and reports that, pointing the human
+   at `/sdd-drill` (F03) to deepen existing epics or at an explicit **amend** run. The
+   run then takes **exactly one** of two explicit branches:
+   - **Greenfield branch (first run)** — entered when neither
+     `specs/vision.md` nor `specs/architecture.md` exists: continue
+     with steps 4–8 and write the vision, the architecture + ADRs, the repo-topology
+     output, and the roadmap.
+   - **Amend branch** — entered when the project already has a plan and the human asked
+     for an amend: SKIP the greenfield template writes in steps 5–6 — an amend never
+     rewrites `specs/vision.md` or `specs/architecture.md` and never
+     renumbers an existing ADR — and perform only the append-only delta work: append
+     the dated topology delta and the new `repo-topology ADR`, append any new `draft`
+     epics above the current maximum, and reconcile or remove the derived draft, as the
+     repo-topology contract below describes. Never rewrite, re-seed, or renumber an
+     existing artifact or roadmap entry.
 4. Run a short, **adaptive** Q&A with the human to clarify: the problem and who it is
    for, the outcomes, the non-goals, and the roadmap shape. Where the shape forks, offer
    **at most 3** options as **text-only** (markdown/ASCII) mockups — never images. Keep
    it short; ask only what you need to write the vision and sketch the roadmap.
-5. **Write** `specs/vision.md` from `specs/_templates/vision.md`
+5. **Greenfield branch only — Write** `specs/vision.md` from `specs/_templates/vision.md`
    (north star: problem, users, outcomes, non-goals; it complements
    `specs/product.md`/`glossary.md`).
-6. **Write** `specs/architecture.md` from
+6. **Greenfield branch only — Write** `specs/architecture.md` from
    `specs/_templates/architecture.md` (system shape + stable upfront
    decisions), and one ADR per decision at `specs/adr/NNNN-<title>.md` from
    `specs/_templates/adr.md` (4-digit, above the max existing ADR number);
    `architecture.md` references each ADR by its `ADR-NNNN` id. Stay at whole-system
    depth — defer per-epic deltas to `/sdd-drill` (F03).
-7. **Repo topology output.** Repo topology is an output of planning, never an input.
-   When `specs/architecture.md` names more than one deployable, write exactly
+7. **Repo topology output (both branches).** Repo topology is an output of planning,
+   never an input. When `specs/architecture.md` names more than one deployable, write exactly
    one `repo-topology ADR` at `specs/adr/NNNN-<title>.md`, allocated strictly
    above the max existing ADR number (4-digit, no reuse), and reference it from
    `specs/architecture.md`'s ADR index by its `ADR-NNNN` id. Also write a draft
@@ -91,7 +103,9 @@ The free-text whole-project idea is in `$ARGUMENTS`. If it is empty, ask the hum
    `umbrella.manifest.draft.yaml` is a project-owned artifact, so a consolidation
    to one deployable (or none) may delete it, while every other committed artifact stays
    append-only and is never deleted.
-8. **Seed** the roadmap: for each epic, write a `state/tasks.json` row with
+8. **Seed** the roadmap (a greenfield run seeds the whole block; an amend appends above
+   the current maximum and never re-seeds or rewrites an existing row): for each epic,
+   write a `state/tasks.json` row with
    `status: "draft"` and `features: []` (ids as a next-sequential block strictly above
    the max existing `E##`, append-only, no reuse), and create
    `specs/epics/<id>-<slug>/epic.md` anchored by a one-paragraph business brief
