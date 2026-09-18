@@ -345,3 +345,10 @@
   number: a symmetric blank AFTER the top-level key truncates both copies to 18 lines, and
   only a floor above 18 sees it; a floor chosen one below the last required key to *look*
   "not exact" silently misses that shape (E99-F162 MW).
+- [2026-09-18 reviewer] A per-block length floor must be the block's last **content** line,
+  not its last required **key**, whenever later lines are still inside the compared span:
+  E99-F162's models floor 18 = `doc-critic:` while the models block runs to 35 lines of
+  escape-hatch documentation, so a symmetric blank after `doc-critic:` truncates both copies
+  to 18, clears the floor, and a one-sided desync in the 17-line tail passes (MTAIL green;
+  floor 35 kills it). Workers got the shape right (19 = `roster:` = the block's final line);
+  apply the same rule to every extract-and-compare block.
