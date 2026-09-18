@@ -17,9 +17,10 @@
 #   R9  umbrella.manifest.example.yaml + docs/UMBRELLA.md document scaffold_cmd
 #   R10 the Planner is the single writer; /sdd-drill does not amend the draft
 #   R11 an amend records a topology change append-only (dated `## Repo topology`
-#       delta + new ADR) with the latest delta authoritative per deployable, so a
-#       rename/remove drops the obsolete name; the trigger reads that effective set and
-#       removes the derived draft when it falls to <=1 deployable (committed ADRs kept)
+#       delta + a new ADR ALWAYS, including a collapse) as a COMPLETE replacement snapshot
+#       (the latest delta names the full set; earlier deltas superseded), so add/remove/
+#       rename are all expressible; the trigger reads that effective set and removes the
+#       derived draft when it falls to <=1 deployable (committed ADRs kept)
 #
 # House rules (see progress/lessons.md; all are load-bearing here):
 #   * Every span is extracted STRUCTURALLY (a `## ` heading → the next `## `; the
@@ -136,11 +137,12 @@ every_naming_sentence_carries() {
 # no_naming_sentence_carries <label> <folded-file> <needle> <forbidden-token>... — the
 # counterpart of every_naming_sentence_carries for a rule whose defect is a CONTRADICTORY
 # clause rather than a missing one. Positive control: a sentence naming <needle> must exist;
-# then none of them may carry any <forbidden-token>. The path-base rule needs this because
-# in an installed target the draft lives in the harness dir, so a clause forbidding that base
-# (or moving it to the project root) states the opposite of the required `../<child>` base
-# while still leaving `path` + `own directory` in the sentence (which the positive check
-# above alone cannot see).
+# then none of them may carry any <forbidden-token>. Two uses: the path-base rule (in an
+# installed target the draft lives in the harness dir, so a clause forbidding that base — or
+# moving it to the project root — states the opposite of the required `../<child>` base while
+# still leaving `path` + `own directory` in the sentence), and the amend contract (the
+# effective-set removal sentence must not re-add the old `writes no new repo-topology ADR`
+# disclaimer, which contradicts the always-append rule while `removes`/`reconciles` survive).
 no_naming_sentence_carries() {
   _nn_lbl="$1"; _nn_fold="$2"; _nn_needle="$3"; shift 3
   sentences "$_nn_fold" > "$T/sentences.none"
@@ -150,7 +152,7 @@ no_naming_sentence_carries() {
   while IFS= read -r _nn_s; do
     for _nn_tok in "$@"; do
       if printf '%s' "$_nn_s" | grep -qF -- "$_nn_tok"; then
-        fail "$_nn_lbl: the sentence naming '$_nn_needle' also carries '$_nn_tok' — the path base is contradictory (got: $_nn_s)"
+        fail "$_nn_lbl: the sentence naming '$_nn_needle' also carries '$_nn_tok' — it contradicts a rule this contract requires (got: $_nn_s)"
       fi
     done
   done < "$T/sentences.none-hit"
@@ -214,25 +216,29 @@ for _r2k_pair in "R2 role key grammar|$ROLE_FOLD" "R2 emitted body key grammar|$
   every_naming_sentence_carries "$_r2k_lbl" "$_r2k_f" "logical name" \
     '[a-z0-9-]+' 'api-v2' 'directory' 'path'
 done
-# Collision-safe keys (Reviewer finding 4043129416): two DISTINCT deployable names can
-# normalize to the SAME key (`api.v2` and `api-v2` both yield `api-v2`), and the
-# coordinator's manifestRepos() rejects duplicate repository keys — so the later entry
-# would be unusable and the promotion/selector flow would drop a deployable. The contract
-# must require UNIQUE keys after normalization with a stated deterministic disambiguation
-# order (`-2`, `-3`, …). Bounded to the sentence naming `unique` (positive control) and
-# asserted on every surface the key rule lives on: the grammar sentence does not name
-# `unique`, so it cannot satisfy this, and `-2`/`-3` + `order` in one sentence is the
-# anchor for the deterministic rule while `manifestRepos` names the consequence. `-3` is
-# pinned alongside `-2` because the worked example `api-v2-2` itself contains `-2`: a
-# mutant that deletes the explicit `-2`, `-3`, … sequence but keeps the example would
-# survive a `-2`-only check (found in this round's campaign), while `-3` is reachable
-# only through the stated sequence. The `--` in the helpers keeps a leading-dash token
-# from being read as a grep option.
+# Collision-safe keys (Reviewer finding 4043129416), completed by finding 4043241872:
+# two DISTINCT deployable names can normalize to the SAME key (`api.v2` and `api-v2` both
+# yield `api-v2`), and the coordinator's manifestRepos() rejects duplicate repository
+# keys — so the later entry would be unusable and the promotion/selector flow would drop a
+# deployable. The contract must require UNIQUE keys after normalization with a stated
+# deterministic disambiguation, and the allocator must probe the COMPLETE set of keys
+# already assigned: the old first-incumbent rule re-collides when a LATER deployable's bare
+# normalized name equals a suffix already handed out (`api`, `api!`, `api-2` previously
+# allocated `api`, `api-2`, `api-2`). Bounded to the sentence naming `unique` (positive
+# control) and asserted on every surface the key rule lives on: the grammar sentence does
+# not name `unique`, so it cannot satisfy this. `-2`/`-3` + `order` is the deterministic
+# rule while `manifestRepos` names the consequence; `-3` is pinned because the worked
+# example `api-2-2` itself contains `-2`, so a `-2`-only check survives deleting the
+# explicit sequence. The resolved example `api`, `api!`, `api-2` => `api`, `api-2`,
+# `api-2-2` and the phrase `complete set`/`already assigned` are the full-set-probe anchors:
+# the pre-change first-incumbent wording carries none of them, so each reds there. The `--`
+# in the helpers keeps a leading-dash token from being read as a grep option.
 for _r2u_pair in "R2 role unique keys|$ROLE_FOLD" "R2 emitted body unique keys|$BODY_FOLD" \
                  "R2 .claude/commands unique keys|$CMD_FOLD" "R2 .agents/skills unique keys|$SKILL_FOLD"; do
   _r2u_lbl="${_r2u_pair%%|*}"; _r2u_f="${_r2u_pair#*|}"
   every_naming_sentence_carries "$_r2u_lbl" "$_r2u_f" "unique" \
-    'normalizing' 'collide' '-2' '-3' 'order' 'manifestRepos'
+    'normalizing' 'collide' '-2' '-3' 'order' 'manifestRepos' \
+    'complete set' 'already assigned' 'api!' 'api-2-2'
 done
 pass "R2 role + body name the draft and its per-deployable, collision-safe key set [test_role_and_body_name_the_draft_and_keys]"
 
@@ -424,14 +430,16 @@ pass "R10 Planner is single writer; driller.md does not amend the draft [test_dr
 # and never rewrites the original `specs/architecture.md`. Without an appended
 # `## Repo topology` delta plus a trigger that reads past the original section, the
 # documented path re-reads the original one-deployable architecture and writes neither
-# artifact (Reviewer finding 4042914412). A PURE union is the mirror defect (Reviewer
-# finding 4043129426): it preserves a deployable that a later delta renamed or removed,
-# so the `>1` trigger stays true and the draft keeps repositories that no longer exist.
-# The delta is therefore authoritative for the deployables it names (latest delta wins
-# per deployable), and when the effective set falls to one deployable (or none) the
-# derived draft is removed while the committed ADRs are preserved. Each check is bounded
-# to a sentence that only its rule carries, so the step-8 `append-only` remark and the
-# no-op sentence's draft token cannot satisfy them.
+# artifact (Reviewer finding 4042914412). The delta is a COMPLETE REPLACEMENT SNAPSHOT
+# (Reviewer finding 4043241876): it names the full effective set and earlier deltas are
+# superseded, so removal AND rename are expressible, not just add — a pure union (or a
+# latest-wins-per-name reading) cannot express removal and keeps repositories that no
+# longer exist. Every amend that changes the set ALWAYS appends the new repo-topology ADR,
+# including a collapse to <=1 (Reviewer finding 4043241880), and when the effective set
+# falls to one deployable (or none) the Planner additionally removes the derived draft
+# while the committed ADRs are preserved. Each check is bounded to a sentence that only
+# its rule carries, so the step-8 `append-only` remark and the no-op sentence's draft
+# token cannot satisfy them.
 guard "R11 role" "$ROLE_SPAN" 8
 guard "R11 body" "$BODY_SPAN" 20
 for _r11_pair in "R11 role|$ROLE_FOLD" "R11 emitted body|$BODY_FOLD" \
@@ -443,11 +451,15 @@ for _r11_pair in "R11 role|$ROLE_FOLD" "R11 emitted body|$BODY_FOLD" \
   # (2) The append-only mechanism: a dated `## Repo topology` delta + a new ADR.
   every_naming_sentence_carries "$_r11_lbl delta" "$_r11_f" "## Repo topology" \
     "append-only" "dated" "delta" "specs/architecture.md" "ADR"
-  # (3) The amend delta is AUTHORITATIVE: effective set = union of the original and the
-  # appended deltas with the latest delta winning PER DEPLOYABLE — not a pure union,
-  # which would preserve a renamed/removed deployable (Reviewer finding 4043129426).
-  every_naming_sentence_carries "$_r11_lbl latest delta" "$_r11_f" "latest delta" \
-    "authoritative" "union" "original" "appended" "per deployable"
+  # (3) The amend delta is a COMPLETE REPLACEMENT SNAPSHOT, not a union with a
+  # latest-per-deployable override: the latest delta names the **full** effective set and
+  # earlier deltas are superseded, so removal AND rename are both expressible by naming the
+  # resulting set (Reviewer finding 4043241876 — the union wording could not express
+  # removal: original `{api, web}` + a delta naming `{api}` retained `web`).
+  every_naming_sentence_carries "$_r11_lbl snapshot" "$_r11_f" "complete replacement snapshot" \
+    "full" "superseded" "latest delta" "original"
+  every_naming_sentence_carries "$_r11_lbl remove/rename" "$_r11_f" "rename" \
+    "add" "remove" "naming" "removes" "frontend"
   # (4) The trigger reads the EFFECTIVE set; when it falls to one deployable (or none)
   # the derived draft is REMOVED and the committed repo-topology ADRs are preserved
   # (append-only, never deleted). The `one deployable` + `removes` + draft-token trio in
@@ -455,6 +467,20 @@ for _r11_pair in "R11 role|$ROLE_FOLD" "R11 emitted body|$BODY_FOLD" \
   # `removes`/`one deployable` alone sit elsewhere in the span.
   every_naming_sentence_carries "$_r11_lbl effective set" "$_r11_f" "effective set" \
     "trigger" "one deployable" "removes" "umbrella.manifest.draft.yaml" "reconciles"
+  # (5) The ADR-on-collapse rule and the draft-removal rule AGREE (Reviewer finding
+  # 4043241880): a topology change that alters the deployable set ALWAYS appends a new
+  # repo-topology ADR, including a collapse/removal that leaves one deployable (or none),
+  # and the <=1 case ADDITIONALLY removes the derived draft (4). Bounded to the sentence
+  # naming `collapse`, which only this rule carries; the pre-change text has no such
+  # sentence, so the positive control fails there.
+  every_naming_sentence_carries "$_r11_lbl collapse ADR" "$_r11_f" "collapse" \
+    "always" "appends" "repo-topology ADR" "removal" "one deployable"
+  # ...and the resolved contract must not re-introduce the contradiction the old sentence
+  # carried: neither the collapse sentence nor the effective-set removal sentence may
+  # disclaim the required ADR (`writes no new repo-topology ADR`). Positive control first,
+  # then the forbidden token.
+  no_naming_sentence_carries "$_r11_lbl collapse no-ADR" "$_r11_f" "collapse" "writes no new"
+  no_naming_sentence_carries "$_r11_lbl removal no-ADR" "$_r11_f" "effective set" "writes no new"
 done
 pass "R11 amended topology change is append-only, latest-delta-wins, and removes the draft at <=1 deployable [test_amend_is_append_only]"
 

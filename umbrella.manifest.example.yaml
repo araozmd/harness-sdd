@@ -17,8 +17,10 @@
 #
 # Keys must be UNIQUE after normalization: two names can normalize to the same key
 # (`api.v2` and `api-v2` both yield `api-v2`), and manifestRepos() refuses duplicate
-# repository keys. Disambiguate deterministically in the architecture's naming order —
-# the first keeps the bare key and each later collision appends `-2`, `-3`, … .
+# repository keys. Allocate keys in the architecture's naming order, probing the complete
+# set of keys already assigned: take the normalized name if that candidate is unused,
+# otherwise append `-2`, `-3`, … and take the smallest suffix whose candidate is not
+# already assigned — so `api`, `api!`, `api-2` allocate `api`, `api-2`, `api-2-2`.
 #
 # `path:` is resolved relative to THIS manifest file's own directory (the umbrella
 # root), NOT relative to .harness/. (The `umbrella.manifest` value in

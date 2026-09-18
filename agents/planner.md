@@ -91,11 +91,14 @@ directory name: it must match `[a-z0-9-]+` (the slice-id suffix grammar, so a va
 slice's `repo` can equal the key; normalize a dotted dir such as `api.v2` to `api-v2`)
 while `path` carries the actual directory (`path: ../api.v2`). After normalizing every
 deployable name to `[a-z0-9-]+`, the keys must be **unique**: when two deployable names
-collide on one key (for example `api.v2` and `api-v2` both normalize to `api-v2`),
-disambiguate deterministically in the order the deployables are named in
-`specs/architecture.md` — the first keeps the bare key and each later collision appends
-`-2`, `-3`, … (`api-v2`, then `api-v2-2`) — because `manifestRepos()` rejects duplicate
-repository keys, so a shared key would leave one deployable with no usable `repos:` entry.
+collide on one candidate key (for example `api.v2` and `api-v2` both normalize to
+`api-v2`), allocate them deterministically in the order the deployables are named in
+`specs/architecture.md`, probing the complete set of keys already assigned — for each
+deployable in that order, take its normalized name if that candidate is unused, otherwise
+append `-2`, `-3`, … and take the smallest suffix whose candidate is not already assigned,
+so `api`, `api!`, `api-2` allocate `api`, `api-2`, `api-2-2` — because `manifestRepos()`
+rejects duplicate repository keys, so a shared key would leave one deployable with no
+usable `repos:` entry.
 Write each `path` relative to the draft file's own directory (the child sibling). The
 draft's header must mark it a `DRAFT` and state that it is `inert`.
 
@@ -113,16 +116,19 @@ amends `umbrella.manifest.draft.yaml`; a topology change is a `/sdd-plan` amend 
 
 An amendment is **append-only**: it appends a dated `## Repo topology` delta section to
 `specs/architecture.md` and a new `repo-topology ADR` above the max existing ADR number,
-instead of rewriting the original section. An amend's delta is **authoritative for every
-deployable it names**: the effective deployable set is the union of the original
-architecture and every appended topology delta with the **latest delta winning per
-deployable**, so a later delta that renames or removes a deployable drops the obsolete
-name from the effective deployable set instead of preserving it. The trigger reads that
-**effective set**, not the original section alone: when the effective set falls to one
-deployable (or none), the Planner removes the derived `umbrella.manifest.draft.yaml` and
-writes no new `repo-topology ADR` — the already-committed repo-topology ADRs are preserved
-(append-only, never deleted) — and when it is still more than one, the Planner reconciles
-the draft to exactly the effective set, removing the entries whose deployables are gone.
+instead of rewriting the original section. Every amend that changes the deployable set
+always appends that new `repo-topology ADR`, including a collapse or removal that leaves
+one deployable (or none). An amend's delta is a **complete replacement snapshot**: it names
+the **full** effective deployable set as it stands after the change, and earlier deltas are
+superseded, so the effective deployables are exactly those the latest delta names (the
+original architecture's set when no delta has been appended). A delta expresses add, remove
+and rename identically — by naming the resulting set: after an original `api` + `web` set,
+a delta naming `api` removes `web`, and a delta naming `frontend` alone renames. The
+trigger reads that **effective set**, not the original section alone: when the effective
+set is still more than one, the Planner reconciles the draft to exactly that set, removing
+the entries whose deployables are gone; when it falls to one deployable (or none), the
+Planner additionally removes the derived `umbrella.manifest.draft.yaml`, while the
+already-committed repo-topology ADRs are preserved (append-only, never deleted).
 
 ## Seed the draft epics (R11, R12)
 
