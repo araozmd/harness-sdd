@@ -611,6 +611,146 @@ EOF
   grep -q -- '--id IT2' "$T/t9-called" || { cat "$T/t9-called"; fail "targeted run never reconciled the existing canonical issue's item"; }
   pass "a targeted lookup finds the canonical issue behind many id-substring matches [mirror_targeted_no_duplicate_on_wide_match]"
 
+  # ── R22 — reconcile by feature ID, never by full title ── (E99-F165)
+  # The mirror used to key find-or-create on the FULL `<id> — <title>`: renaming a feature
+  # orphaned its issue and minted a twin, and a targeted search MISS (fuzzy search, index
+  # lag) created a twin too. A fixture-driven fake gh: a `--search` issue list answers from
+  # .search, a plain one from .full, the project item list from .items. Mirror-seeded issues
+  # carry the seed-body marker; a hand-filed follow-up does not.
+  mk_gh_fx() { # mk_gh_fx <bindir> <recfile> <fixture.json>
+    mkdir -p "$1"
+    cat > "$1/gh" <<EOF
+#!/usr/bin/env node
+const fs = require('node:fs');
+const a = process.argv.slice(2);
+fs.appendFileSync('$2', 'called: ' + a.join(' ') + '\n');
+const fx = JSON.parse(fs.readFileSync('$3', 'utf8'));
+const out = (v) => process.stdout.write(typeof v === 'string' ? v : JSON.stringify(v));
+const k = a[0] + ' ' + (a[1] || '');
+if (k === '--version ') out('gh version 2.62.0 (2024-11-27)\n');
+else if (k === 'auth status') out("Token scopes: 'project', 'repo'\n");
+else if (k === 'project view') out({ id: 'PID' });
+else if (k === 'project field-list') out({ fields: [
+  { id: 'FS', name: 'Status', options: ['pending', 'spec-ready', 'in-progress', 'in-review', 'done'].map((name, i) => ({ id: 'o' + i, name })) },
+  { id: 'FE', name: 'Epic', options: [{ id: 'oe', name: 'E01 — Demo' }] } ] });
+else if (k === 'project item-list') out({ items: fx.items, totalCount: fx.items.length });
+else if (k === 'issue list') out(a.includes('--search') ? fx.search : fx.full);
+else if (k === 'issue create') out('https://github.com/acme-org/specs/issues/999\n');
+else if (k === 'project item-add') out({ id: 'ITNEW' });
+else out({});
+EOF
+    chmod +x "$1/gh"
+  }
+  SEED='Seeded from `state/tasks.json` by `sync-board.mjs`.'
+  fx_issue() { # fx_issue <number> <title> <state> <stateReason> [body]
+    node -e 'const [n,t,s,r,b]=process.argv.slice(1);console.log(JSON.stringify({number:+n,title:t,url:"https://github.com/acme-org/specs/issues/"+n,state:s,stateReason:r,assignees:[],body:b}))' \
+      "$1" "$2" "$3" "$4" "${5-$SEED}"
+  }
+  HI="$T/h-byid"; mk_harness2 "$HI"   # E01-F01 "X", E01-F02 "Y" — both pending
+
+  # (a) title drift ⇒ the existing issue is RETITLED, no twin is created.
+  printf '{"search":[%s],"full":[%s],"items":[{"id":"IT2","content":{"number":42}}]}\n' \
+    "$(fx_issue 42 'E01-F02 — an older wording' OPEN '')" "$(fx_issue 42 'E01-F02 — an older wording' OPEN '')" > "$T/fx-a.json"
+  mk_gh_fx "$T/bin-ia" "$T/ia-called" "$T/fx-a.json"; rm -f "$T/ia-called"
+  PATH="$T/bin-ia:$PATH" node "$HI/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/ia-called" 2>/dev/null; fail "drift run errored"; }
+  grep -q 'issue edit 42 .*--title E01-F02 — Y' "$T/ia-called" || { cat "$T/ia-called"; fail "a drifted title was not updated on the existing issue"; }
+  grep -q 'issue create' "$T/ia-called" && { cat "$T/ia-called"; fail "title drift created a TWIN issue"; }
+  pass "title drift retitles the existing issue, never creates a twin [mirror_byid_drift_retitles]"
+
+  # (b) twins sharing an id: canonical = the on-project one (#42, not the lowest #30); the
+  #     open off-project twin is commented + closed not-planned; an already-retired twin is
+  #     untouched; a twin closed under a DIFFERENT title (possible id collision) keeps its
+  #     close reason and only leaves the project; a hand-filed follow-up is ignored.
+  FXB="$(fx_issue 20 'E01-F02 — Y' CLOSED NOT_PLANNED),$(fx_issue 30 'E01-F02 — Y' OPEN ''),$(fx_issue 42 'E01-F02 — Y' OPEN ''),$(fx_issue 50 'E01-F02 — another feature seeded under this id' CLOSED COMPLETED),$(fx_issue 60 'E01-F02 — follow-up: flaky test' OPEN '' 'filed by hand')"
+  printf '{"search":[%s],"full":[%s],"items":[{"id":"IT2","content":{"number":42}},{"id":"IT5","content":{"number":50}},{"id":"IT6","content":{"number":60}}]}\n' "$FXB" "$FXB" > "$T/fx-b.json"
+  mk_gh_fx "$T/bin-ib" "$T/ib-called" "$T/fx-b.json"; rm -f "$T/ib-called"
+  PATH="$T/bin-ib:$PATH" node "$HI/tools/sync-board.mjs" E01-F02 set_status >"$T/ib.out" 2>&1 ||
+    { cat "$T/ib.out" "$T/ib-called" 2>/dev/null; fail "twin run errored"; }
+  grep -q 'issue comment 30 .*#42' "$T/ib-called" || { cat "$T/ib-called"; fail "the open twin was not told which issue it duplicates"; }
+  grep -q 'issue close 30 .*--reason not planned' "$T/ib-called" || { cat "$T/ib-called"; fail "the open twin was not closed as not planned"; }
+  grep -q -- 'item-delete .*--id IT5' "$T/ib-called" || { cat "$T/ib-called"; fail "a closed twin was left on the project"; }
+  grep -Eq 'issue (comment|close|edit) 50|issues/50' "$T/ib-called" && { cat "$T/ib-called"; fail "a closed twin with a DIFFERENT title had its history rewritten (possible id collision)"; }
+  grep -q 'WARN #50 .*possible id collision' "$T/ib.out" || { cat "$T/ib.out"; fail "a possible id collision was not reported"; }
+  grep -Eq 'issue (comment|close|edit) 20|issues/20' "$T/ib-called" && { cat "$T/ib-called"; fail "an already-retired twin was touched again (not idempotent)"; }
+  grep -Eq 'issue (comment|close|edit) 60|issues/60|--id IT6' "$T/ib-called" && { cat "$T/ib-called"; fail "a hand-filed follow-up sharing the prefix (even on the project) was treated as a twin"; }
+  grep -Eq 'issue (comment|close) 42|--id IT2 .*item-delete|item-delete .*--id IT2' "$T/ib-called" && { cat "$T/ib-called"; fail "the canonical issue was retired"; }
+  grep -q 'issue create' "$T/ib-called" && { cat "$T/ib-called"; fail "twin run created an issue"; }
+  pass "twins: on-project issue kept, open twins closed not-planned, all off the project, collisions and follow-ups left alone [mirror_byid_twins_retired]"
+
+  # (c) --dry-run covers every new mutation.
+  mk_gh_fx "$T/bin-ic" "$T/ic-called" "$T/fx-b.json"; rm -f "$T/ic-called"
+  PATH="$T/bin-ic:$PATH" node "$HI/tools/sync-board.mjs" E01-F02 set_status --dry-run >"$T/ic.out" 2>&1 ||
+    { cat "$T/ic.out"; fail "twin dry-run errored"; }
+  grep -Eqi 'issue (create|edit|close|reopen|comment)|item-(add|edit|delete)|api graphql|-X PATCH' "$T/ic-called" && { cat "$T/ic-called"; fail "--dry-run issued a mutating gh call"; }
+  grep -q 'would close duplicate #30' "$T/ic.out" || { cat "$T/ic.out"; fail "dry-run did not announce the twin retirement"; }
+  pass "twin retirement and retitle honour --dry-run [mirror_byid_dry_run_inert]"
+
+  # (d) a targeted search MISS is confirmed against the FULL listing — never a create.
+  printf '{"search":[],"full":[%s],"items":[{"id":"IT2","content":{"number":42}}]}\n' "$(fx_issue 42 'E01-F02 — Y' OPEN '')" > "$T/fx-d.json"
+  mk_gh_fx "$T/bin-id" "$T/id-called" "$T/fx-d.json"; rm -f "$T/id-called"
+  PATH="$T/bin-id:$PATH" node "$HI/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/id-called" 2>/dev/null; fail "search-miss run errored"; }
+  grep -q 'issue create' "$T/id-called" && { cat "$T/id-called"; fail "a search miss created a TWIN of an existing issue"; }
+  grep -q -- '--id IT2' "$T/id-called" || { cat "$T/id-called"; fail "the existing issue was not reconciled after the full listing"; }
+  pass "a targeted search miss is confirmed on the full listing, never creates [mirror_byid_search_miss_no_create]"
+
+  # (e) CONTROL for (d): a feature genuinely absent from the full listing IS created — after it.
+  printf '{"search":[],"full":[],"items":[]}\n' > "$T/fx-e.json"
+  mk_gh_fx "$T/bin-ie" "$T/ie-called" "$T/fx-e.json"; rm -f "$T/ie-called"
+  PATH="$T/bin-ie:$PATH" node "$HI/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/ie-called" 2>/dev/null; fail "absent-feature run errored"; }
+  _full="$(grep -n 'issue list' "$T/ie-called" | grep -v -- '--search' | head -1 | cut -d: -f1)"
+  _create="$(grep -n 'issue create' "$T/ie-called" | head -1 | cut -d: -f1)"
+  [ -n "$_full" ] && [ -n "$_create" ] && [ "$_full" -lt "$_create" ] || { cat "$T/ie-called"; fail "an absent feature was not created only after a full listing"; }
+  pass "a genuinely absent feature is created after the full listing confirms it [mirror_byid_absent_creates]"
+
+  # (f) a listing that may be truncated FAILS LOUDLY before any mutation.
+  node -e 'const a=[];for(let i=0;i<5000;i++)a.push({number:1000+i,title:"E09-F"+i+" — filler",url:"u",state:"OPEN",stateReason:"",assignees:[],body:""});console.log(JSON.stringify({search:[],full:a,items:[]}))' > "$T/fx-f.json"
+  mk_gh_fx "$T/bin-if" "$T/if-called" "$T/fx-f.json"; rm -f "$T/if-called"
+  if PATH="$T/bin-if:$PATH" node "$HI/tools/sync-board.mjs" E01-F02 set_status >"$T/if.out" 2>&1; then
+    cat "$T/if.out"; fail "a possibly-truncated listing did not fail"
+  fi
+  grep -q 'may be truncated' "$T/if.out" || { cat "$T/if.out"; fail "truncation failure did not say why"; }
+  grep -Eqi 'issue (create|edit|close|comment)|item-(add|edit|delete)' "$T/if-called" && { cat "$T/if-called"; fail "a truncated listing still mutated the board"; }
+  pass "a possibly-truncated listing fails loudly before any mutation [mirror_byid_truncation_fails_closed]"
+
+  # (g) a search hit is a SAMPLE: a lone OFF-project hit may hide the on-project issue, so
+  #     it is re-checked on the full listing — the off-project twin is never put on the board.
+  printf '{"search":[%s],"full":[%s,%s],"items":[{"id":"IT2","content":{"number":42,"title":"E01-F02 — Y"}}]}\n' \
+    "$(fx_issue 30 'E01-F02 — Y' OPEN '')" "$(fx_issue 30 'E01-F02 — Y' OPEN '')" "$(fx_issue 42 'E01-F02 — Y' OPEN '')" > "$T/fx-g.json"
+  mk_gh_fx "$T/bin-ig" "$T/ig-called" "$T/fx-g.json"; rm -f "$T/ig-called"
+  PATH="$T/bin-ig:$PATH" node "$HI/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/ig-called" 2>/dev/null; fail "off-project-hit run errored"; }
+  grep -q 'project item-add' "$T/ig-called" && { cat "$T/ig-called"; fail "an off-project twin returned by search was put on the board"; }
+  grep -q 'issue close 30 .*not planned' "$T/ig-called" || { cat "$T/ig-called"; fail "the off-project twin was not retired in favour of the on-project issue"; }
+  pass "a lone off-project search hit is re-checked on the full listing [mirror_byid_search_sample_rechecked]"
+
+  # (h) a retired twin (closed not-planned) is never promoted to canonical — not even when it
+  #     is still on the project — over a live issue.
+  FXH="$(fx_issue 20 'E01-F02 — Y' CLOSED NOT_PLANNED),$(fx_issue 42 'E01-F02 — Y' OPEN '')"
+  printf '{"search":[%s],"full":[%s],"items":[{"id":"IT0","content":{"number":20,"title":"E01-F02 — Y"}}]}\n' "$FXH" "$FXH" > "$T/fx-h.json"
+  mk_gh_fx "$T/bin-ih" "$T/ih-called" "$T/fx-h.json"; rm -f "$T/ih-called"
+  PATH="$T/bin-ih:$PATH" node "$HI/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/ih-called" 2>/dev/null; fail "retired-twin run errored"; }
+  grep -Eq 'issue (reopen|close|comment) 42' "$T/ih-called" && { cat "$T/ih-called"; fail "the live issue was retired in favour of a retired twin"; }
+  grep -Eq 'issue reopen 20' "$T/ih-called" && { cat "$T/ih-called"; fail "a retired twin was reopened"; }
+  grep -q -- 'item-delete .*--id IT0' "$T/ih-called" || { cat "$T/ih-called"; fail "the retired twin was left on the board"; }
+  grep -q 'item-add .*issues/42' "$T/ih-called" || { cat "$T/ih-called"; fail "the live issue was not put on the board"; }
+  pass "a retired twin is never promoted over a live issue [mirror_byid_retired_never_canonical]"
+
+  # (i) a CLOSED issue under another title (a completed id collision) on the project never
+  #     displaces the current exact-title tracker that is off the project.
+  FXI="$(fx_issue 10 'E01-F02 — a different feature seeded under this id elsewhere' CLOSED COMPLETED),$(fx_issue 42 'E01-F02 — Y' OPEN '')"
+  printf '{"search":[%s],"full":[%s],"items":[{"id":"IT1","content":{"number":10,"title":"E01-F02 — a different feature seeded under this id elsewhere"}}]}\n' "$FXI" "$FXI" > "$T/fx-i.json"
+  mk_gh_fx "$T/bin-ii" "$T/ii-called" "$T/fx-i.json"; rm -f "$T/ii-called"
+  PATH="$T/bin-ii:$PATH" node "$HI/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/ii-called" 2>/dev/null; fail "collision-on-project run errored"; }
+  grep -Eq 'issue (close|comment) 42|issue edit 42 .*--title' "$T/ii-called" && { cat "$T/ii-called"; fail "a completed id collision displaced the current tracker"; }
+  grep -Eq 'issue (reopen|edit|comment) 10' "$T/ii-called" && { cat "$T/ii-called"; fail "a completed id collision had its history rewritten"; }
+  grep -q 'item-add .*issues/42' "$T/ii-called" || { cat "$T/ii-called"; fail "the current tracker was not put on the board"; }
+  pass "a completed id collision never displaces the current tracker [mirror_byid_collision_never_canonical]"
+
   # 14) DRY-RUN mutates nothing (R11) — against a dispatching fake gh with NO pre-existing
   #     issue/item, --dry-run prints "would …" intents and issues zero mutating gh call.
   mkdir -p "$T/bin-dry"
@@ -665,7 +805,7 @@ EOF
   done
   # No stray mirror.board key beyond the known set, and no committed token/secret literal.
   UNKNOWN="$(grep -oE "\['mirror', 'board', '[a-z_]+'\]" "$TOOL" | grep -oE "'[a-z_]+'\]" | sed "s/[]']//g" \
-    | grep -vE '^(provider|owner|project_number|repo|status_map|assignee|base_url|project_key|pat_file|issue_type_map|epic_name_field)$' || true)"
+    | grep -vE '^(provider|owner|project_number|repo|status_map|assignee|duplicate_comment|base_url|project_key|pat_file|issue_type_map|epic_name_field)$' || true)"
   [ -z "$UNKNOWN" ] || fail "tool introduced a new mirror.board key: $UNKNOWN"
   grep -Eqi 'ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' "$TOOL" && fail "tool contains a committed GitHub token literal"
   pass "config read from existing mirror.board shape; no new key/secret [no_new_config_key]"

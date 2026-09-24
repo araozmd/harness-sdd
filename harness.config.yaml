@@ -140,6 +140,10 @@ mirror:
     # authed `gh` user, so a shared-repo config reflects whoever runs the sync instead of
     # hard-coding one person. Idempotent — skips the API call when already correct.
     assignee: ""
+    # Comment left on a twin issue when the mirror retires it (closed not-planned). Empty ⇒
+    # the built-in English note. {canonical} expands to "#N" of the kept issue — do not type
+    # a literal " #" here: the config reader treats it as the start of a YAML comment.
+    duplicate_comment: ""
 
     # Optional: map harness status -> board COLUMN name. Omit for identity (column ==
     # status). Set this to keep EXISTING board columns without editing sync-board.mjs:

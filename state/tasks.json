@@ -1019,6 +1019,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F164-source-mode-check-class/"
+        },
+        {
+          "id": "E99-F165",
+          "title": "sync-board.mjs keys find-or-create on the FULL issue title and trusts a targeted --search miss, so a renamed feature or a lagging search index mints twin issues (a consumer board reached 11 duplicated ids)",
+          "status": "in-review",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F165-board-mirror-reconcile-by-id/"
         }
       ]
     },

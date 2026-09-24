@@ -4,6 +4,31 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.84.2] — 2026-09-23
+
+### Fixed — the GitHub Projects mirror reconciles by feature id, not by full title (E99-F165)
+
+- **A renamed feature no longer mints a twin.** `sync-board.mjs` keyed find-or-create on
+  the full `<id> — <title>`, so editing a feature title in `tasks.json` orphaned its issue
+  and created a new one. Mirror-owned issues (exact canonical title or the seed-body marker —
+  project membership alone is not ownership) are now grouped by the id in the title prefix, and the kept
+  issue is retitled in place (`gh issue edit --title`).
+- **Twins self-heal.** When several mirror-owned issues share an id, the one already on the
+  project (current = not retired and not a closed different-title collision; else the
+  lowest current one) is kept; every other open twin
+  is commented on and closed *not planned*, and every twin leaves the project
+  (`gh project item-delete`). A twin already closed under a DIFFERENT title is only taken
+  off the project and reported — it may be a separate feature that collided on the id — and
+  a hand-filed follow-up reusing the prefix is never touched. Idempotent. The note is
+  `mirror.board.duplicate_comment` (optional; `{canonical}` → `#N`).
+- **A search result is a sample, not a census.** A targeted (hook) run accepts its
+  `--search` result only when it is exactly one issue already on the project; a miss, an
+  off-project hit, or twins are decided on the full `issue list --state all`. A listing
+  that may be truncated (issues or project items) exits 1 before any mutation.
+- `--dry-run` covers every new mutation and now also announces close/reopen; full runs warn
+  about on-project issues whose id is gone from `tasks.json`. Jira is untouched.
+- Reported from a consumer board with 11 duplicated ids across 233 issues / 216 features.
+
 ## [0.84.1] — 2026-09-18
 
 ### Fixed — escalation weighs the whole resolved stamp (E99-F163)

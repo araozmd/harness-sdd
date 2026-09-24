@@ -98,10 +98,25 @@ Projects-v2 / scope requirement — **before** any board-mutating call, so a pre
 never leaves the board half-written.
 
 `tasks.json` is the source of truth; the script makes the board match it, idempotently:
-one **issue per feature** in `repo` (matched by exact title), each added as a **project
+one **issue per feature** in `repo`, each added as a **project
 item**, with the **Status** (mapped from the feature state machine) and **Epic**
 single-select fields set, closing `done` issues and reopening regressed ones. Re-runs are
 no-ops when nothing changed. Config lives entirely in `harness.config.yaml`:
+
+- **Matched by feature id, not title.** A mirror-owned issue — one with the exact canonical
+  title or one the mirror seeded (its body ends with the `Seeded from … by sync-board.mjs`
+  marker); being on the project is not ownership —
+  belongs to the feature whose id opens its title (`<id> — …`). A renamed feature retitles its
+  issue in place instead of minting a twin. A hand-filed issue that merely reuses the prefix is
+  not mirror-owned and is never retitled or retired.
+- **Twins self-heal.** When several issues carry one id, the one already on the project (else
+  the lowest number) is kept; every other open twin is commented on and closed *not planned*
+  (`duplicate_comment`, `{canonical}` → `#N`), and every twin is removed from the project. A
+  twin already closed under a *different* title is only taken off the project and reported —
+  it may be a separate feature that collided on the id, and its history is left intact.
+- **A search miss never creates.** A targeted (hook) run looks the id up with GitHub search,
+  which is fuzzy and lags; when it finds nothing, absence is confirmed against the full issue
+  listing before an issue is created. A listing that may be truncated aborts the run.
 
 ```yaml
 mirror:
