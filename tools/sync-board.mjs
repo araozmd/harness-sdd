@@ -223,7 +223,10 @@ const EPIC_COLORS = ['BLUE', 'GREEN', 'PURPLE', 'ORANGE', 'PINK', 'RED', 'YELLOW
 // (pending/spec-ready) stay unassigned so the board reflects who is doing what right now.
 const ASSIGNED_STATUSES = new Set(['in-progress', 'in-review', 'done']);
 
-function gh(args, input) { return execFileSync('gh', args, { encoding: 'utf8', input, maxBuffer: 1 << 24 }); }
+// maxBuffer is a CEILING, not an allocation. A full `issue list` carries every issue body (the
+// seed-marker ownership check needs it), and a few hundred long bodies already exceed 16 MiB —
+// an ENOBUFS there would stop the reconcile before its completeness guard ever ran.
+function gh(args, input) { return execFileSync('gh', args, { encoding: 'utf8', input, maxBuffer: 1 << 30 }); }
 function ghJson(args) { return JSON.parse(gh(args)); }
 function graphql(query, variables) {
   return JSON.parse(gh(['api', 'graphql', '--input', '-'], JSON.stringify({ query, variables })));

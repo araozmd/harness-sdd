@@ -793,6 +793,15 @@ EOF
   grep -q 'api graphql' "$T/im-called" && { cat "$T/im-called"; fail "a targeted run rewrote a field before its fallback listing was checked"; }
   pass "a targeted fallback listing is checked before any field write [mirror_byid_targeted_fallback_before_fields]"
 
+  # (n) a full listing carries every issue body; one larger than the old 16 MiB exec buffer
+  #     (300 × 60 KB bodies here) must still reconcile instead of dying with ENOBUFS.
+  node -e 'const big="x".repeat(60000);const a=[];for(let i=0;i<300;i++)a.push({number:1000+i,title:"E09-F"+i+" — filler",url:"u",state:"OPEN",stateReason:"",assignees:[],body:big});a.push({number:42,title:"E01-F02 — Y",url:"https://github.com/acme-org/specs/issues/42",state:"OPEN",stateReason:"",assignees:[],body:""});console.log(JSON.stringify({search:[],full:a,items:[{id:"IT2",content:{number:42,title:"E01-F02 — Y"}}]}))' > "$T/fx-n.json"
+  mk_gh_fx "$T/bin-in" "$T/in-called" "$T/fx-n.json"; rm -f "$T/in-called"
+  PATH="$T/bin-in:$PATH" node "$HI/tools/sync-board.mjs" E01-F02 set_status >"$T/in.out" 2>&1 ||
+    { tail -5 "$T/in.out"; fail "a listing larger than 16 MiB broke the reconcile (exec buffer)"; }
+  grep -q -- '--id IT2' "$T/in-called" || { tail -5 "$T/in-called"; fail "large-listing run did not reconcile the tracker"; }
+  pass "a >16 MiB issue listing still reconciles [mirror_byid_large_listing]"
+
   # 14) DRY-RUN mutates nothing (R11) — against a dispatching fake gh with NO pre-existing
   #     issue/item, --dry-run prints "would …" intents and issues zero mutating gh call.
   mkdir -p "$T/bin-dry"
