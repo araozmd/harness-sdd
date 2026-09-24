@@ -347,7 +347,6 @@ function groupById(list) {
   }
   return byId;
 }
-let fullListing = !TARGETED;
 // The targeted search keeps the board-wide cap: `--search` narrows by SUBSTRING, so many
 // issues can share the id, and a lower cap could push the real one out of the result set.
 let issuesById = groupById(TARGETED
@@ -372,6 +371,23 @@ const projectItemsById = new Map();
 for (const i of repoItems) {
   const id = featureIdOf(i.content?.title ?? i.title);
   if (id) projectItemsById.set(id, (projectItemsById.get(id) || 0) + 1);
+}
+const mirrorOwned = (f) => (i) => i.title === f.title || SEED_MARKER_RE.test(i.body || '');
+// Search results are a SAMPLE, not a census: a non-empty hit can still omit a same-id issue
+// (index lag, substring cap). The fast path is accepted only when it cannot mislead — exactly
+// one candidate, on the project, and the only project item carrying this id. Anything else (a
+// miss, an off-project hit that might hide the on-project one, an on-project twin the search
+// dropped, twins to retire) is decided on the full listing — fetched and checked HERE, before
+// any field write. An off-project twin the search dropped is not on the board; the next full
+// run retires it.
+if (TARGETED) {
+  const hits = (issuesById.get(targetFeature.id) || []).filter(mirrorOwned(targetFeature));
+  const searchSettles = hits.length === 1 && itemByNumber.has(hits[0].number)
+    && (projectItemsById.get(targetFeature.id) || 0) <= 1;
+  if (!searchSettles) {
+    log(`[mirror] search is not conclusive for ${targetFeature.id}; confirming against the full listing.`);
+    issuesById = groupById(listAllIssues());
+  }
 }
 
 // A duplicate is retired when it is CLOSED as not-planned/duplicate AND off the project.
@@ -457,23 +473,8 @@ function createIssue(f) {
   log(`[mirror] created issue #${number}: ${f.title}`);
   return { number, title: f.title, url, state: 'OPEN', assignees: [] };
 }
-const mirrorOwned = (f) => (i) => i.title === f.title || SEED_MARKER_RE.test(i.body || '');
 for (const f of features) {
-  let candidates = (issuesById.get(f.id) || []).filter(mirrorOwned(f));
-  // Search results are a SAMPLE, not a census: a non-empty hit can still omit a same-id
-  // issue (index lag, substring cap). The fast path is accepted only when it cannot mislead
-  // — exactly one candidate, on the project, and the only project item carrying this id.
-  // Anything else (a miss, an off-project hit that might hide the on-project one, an
-  // on-project twin the search dropped, twins to retire) is decided on the full listing.
-  // An off-project twin the search dropped is not on the board; the next full run retires it.
-  const searchSettles = candidates.length === 1 && itemByNumber.has(candidates[0].number)
-    && (projectItemsById.get(f.id) || 0) <= 1;
-  if (!fullListing && !searchSettles) {
-    log(`[mirror] search is not conclusive for ${f.id}; confirming against the full listing.`);
-    issuesById = groupById(listAllIssues());
-    fullListing = true;
-    candidates = (issuesById.get(f.id) || []).filter(mirrorOwned(f));
-  }
+  const candidates = (issuesById.get(f.id) || []).filter(mirrorOwned(f));
   let issue;
   if (!candidates.length) {
     if (DRY) { log(`[dry-run] would create issue: ${f.title}`); continue; }

@@ -782,6 +782,17 @@ EOF
   grep -q 'api graphql' "$T/il-called" && { cat "$T/il-called"; fail "a field-option rewrite ran before the truncation abort"; }
   pass "listings are checked before any field-option rewrite [mirror_byid_listing_before_fields]"
 
+  # (m) same for a TARGETED run whose search is inconclusive: its full-listing fallback is
+  #     fetched and checked before any field write (Epic option is new here, so a late check
+  #     would have rewritten the field first).
+  mk_harness2 "$T/h-byid-m"
+  sed -i.bak 's/"title":"Demo"/"title":"Brand new epic"/' "$T/h-byid-m/state/tasks.json"
+  mk_gh_fx "$T/bin-im" "$T/im-called" "$T/fx-l.json"; rm -f "$T/im-called"
+  if PATH="$T/bin-im:$PATH" node "$T/h-byid-m/tools/sync-board.mjs" E01-F02 set_status >"$T/im.out" 2>&1; then cat "$T/im.out"; fail "targeted truncated fallback did not fail"; fi
+  grep -q 'may be truncated' "$T/im.out" || { cat "$T/im.out"; fail "targeted truncation failure did not say why"; }
+  grep -q 'api graphql' "$T/im-called" && { cat "$T/im-called"; fail "a targeted run rewrote a field before its fallback listing was checked"; }
+  pass "a targeted fallback listing is checked before any field write [mirror_byid_targeted_fallback_before_fields]"
+
   # 14) DRY-RUN mutates nothing (R11) — against a dispatching fake gh with NO pre-existing
   #     issue/item, --dry-run prints "would …" intents and issues zero mutating gh call.
   mkdir -p "$T/bin-dry"
