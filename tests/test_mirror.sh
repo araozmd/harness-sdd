@@ -802,6 +802,16 @@ EOF
   grep -q -- '--id IT2' "$T/in-called" || { tail -5 "$T/in-called"; fail "large-listing run did not reconcile the tracker"; }
   pass "a >16 MiB issue listing still reconciles [mirror_byid_large_listing]"
 
+  # (o) when only RETIRED twins carry the id, none is reopened: a new tracker is created.
+  FXO="$(fx_issue 20 'E01-F02 — Y' CLOSED NOT_PLANNED),$(fx_issue 21 'E01-F02 — Y' CLOSED DUPLICATE)"
+  printf '{"search":[%s],"full":[%s],"items":[]}\n' "$FXO" "$FXO" > "$T/fx-o.json"
+  mk_gh_fx "$T/bin-io" "$T/io-called" "$T/fx-o.json"; rm -f "$T/io-called"
+  PATH="$T/bin-io:$PATH" node "$HI/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/io-called" 2>/dev/null; fail "retired-only run errored"; }
+  grep -Eq 'issue (reopen|edit|comment|close) 2[01]' "$T/io-called" && { cat "$T/io-called"; fail "a retired twin was adopted/reopened"; }
+  grep -q 'issue create' "$T/io-called" || { cat "$T/io-called"; fail "no tracker was created when only retired twins exist"; }
+  pass "only retired twins ⇒ a new tracker, none reopened [mirror_byid_retired_only_creates]"
+
   # 14) DRY-RUN mutates nothing (R11) — against a dispatching fake gh with NO pre-existing
   #     issue/item, --dry-run prints "would …" intents and issues zero mutating gh call.
   mkdir -p "$T/bin-dry"

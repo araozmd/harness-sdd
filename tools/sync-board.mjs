@@ -483,28 +483,24 @@ for (const f of features) {
     if (DRY) { log(`[dry-run] would create issue: ${f.title}`); continue; }
     issue = createIssue(f);
   } else {
-    // Canonical, lowest number first within each tier: a CURRENT issue on the project; else
-    // any current issue; else the exact-title one; else an on-project one; else the lowest.
-    // Not current = retired (closed not-planned/duplicate) or a closed issue under another
-    // title (a completed id collision) — promoting either would retire the real tracker and
-    // reopen history. Every other same-id issue is retired.
+    // Canonical, lowest number first: a CURRENT issue on the project, else any current issue,
+    // else none — a new tracker is created. Not current = retired (closed not-planned/
+    // duplicate) or a closed issue under another title (a completed id collision / closed
+    // history): adopting either would reopen or retitle history. Every other same-id issue
+    // is retired.
     const sorted = [...candidates].sort((a, b) => a.number - b.number);
     const onProject = (i) => itemByNumber.has(i.number);
     // "Current" = not retired AND not a closed issue under a different title (a completed id
     // collision is history, never the tracker — promoting it would retire the real one).
     const current = (i) => !isRetired(i) && !(i.state === 'CLOSED' && i.title !== f.title);
-    issue = sorted.find((i) => onProject(i) && current(i))
-      || sorted.find(current)
-      || sorted.find((i) => i.title === f.title)
-      || sorted.find((i) => onProject(i) && i.state !== 'CLOSED')
-      || sorted.find((i) => i.state !== 'CLOSED' || i.title === f.title);
+    issue = sorted.find((i) => onProject(i) && current(i)) || sorted.find(current);
   }
   if (!issue) {
-    // Every candidate is a CLOSED issue under another title — history (a completed id
-    // collision, or a closed tracker since renamed). Never retitle or reopen it: create the
+    // No candidate is current — only retired twins or closed history (a completed id
+    // collision, or a closed tracker since renamed). Never retitle or reopen those: create the
     // tracker, then retire the old ones below (off the project, history intact).
     if (DRY) {
-      log(`[dry-run] would create issue: ${f.title} (only closed different-title issues carry ${f.id})`);
+      log(`[dry-run] would create issue: ${f.title} (no current issue carries ${f.id})`);
       for (const old of candidates) retireDuplicate(old, { number: 'NEW', title: f.title });
       continue;
     }
