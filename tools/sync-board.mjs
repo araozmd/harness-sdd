@@ -305,30 +305,9 @@ function ensureOptions(fieldName, desired) {
   return Object.fromEntries((fresh.options || []).map((o) => [o.name, o.id]));
 }
 
-const statusOptionId = ensureOptions('Status', STATUS_COLS.map((c) => ({
-  name: c, color: Object.values(STATUS).find((s) => s.col === c).color,
-})));
-// Read a single-select field's current options WITHOUT mutating it.
-function currentOptionIds(fieldName) {
-  const field = fieldByName(fieldName);
-  if (!field) throw new Error(`field "${fieldName}" not found on project ${OWNER}/#${PROJECT_NUMBER}`);
-  return Object.fromEntries((field.options || []).map((o) => [o.name, o.id]));
-}
-// A targeted run must not rewrite the whole Epic option set: ensureOptions replaces the
-// option list wholesale, so one feature's status write RENAMED every existing board
-// column to whatever the current labels happened to be. When the target's epic option
-// already exists there is nothing to add — read the ids and leave the field alone. Fall
-// back to ensureOptions only when the option is genuinely new (or the run is board-wide).
-const epicOptionsNow = TARGETED ? currentOptionIds('Epic') : null;
-const epicOptionId = (epicOptionsNow && epicOptionsNow[targetFeature.epicLabel])
-  ? epicOptionsNow
-  : ensureOptions('Epic', epics.map((e, i) => ({
-    name: e.label, color: EPIC_COLORS[i % EPIC_COLORS.length],
-  })));
-const STATUS_FIELD_ID = fieldByName('Status').id;
-const EPIC_FIELD_ID = fieldByName('Epic').id;
-
 // --- existing issues + items --------------------------------------------------
+// Listed BEFORE any field-option mutation, so a possibly-truncated listing aborts the run
+// before it has changed anything on the board.
 // Issues are matched by the STABLE feature id parsed from the title prefix `<id> — `, never
 // by the full title: feature titles are editable in tasks.json, and a full-title key orphaned
 // the old issue and minted a twin on every rename. A targeted run asks GitHub search first
@@ -379,11 +358,18 @@ const itemList = ghJson(['project', 'item-list', String(PROJECT_NUMBER), '--owne
   '--format', 'json', '--limit', String(LIST_LIMIT)]);
 const items = itemList.items || [];
 assertComplete('project item', items.length, itemList.totalCount);
-const itemByNumber = new Map(items.filter((i) => i.content?.number != null).map((i) => [i.content.number, i.id]));
+// A project can hold issues and PRs from SEVERAL repos, and issue numbers only mean something
+// within one repo: keep only this REPO's issues, or a delete could hit another repo's card.
+const sameRepo = (i) => {
+  const r = i.content?.repository ?? String(i.repository || '').replace(/^https?:\/\/[^/]+\//, '');
+  return !r || r.toLowerCase() === REPO.toLowerCase();
+};
+const repoItems = items.filter((i) => sameRepo(i) && (!i.content?.type || i.content.type === 'Issue'));
+const itemByNumber = new Map(repoItems.filter((i) => i.content?.number != null).map((i) => [i.content.number, i.id]));
 // Project item counts per feature id (from the item's own title), so a targeted run can
 // tell a lone on-project hit from one whose on-project twin the search did not return.
 const projectItemsById = new Map();
-for (const i of items) {
+for (const i of repoItems) {
   const id = featureIdOf(i.content?.title ?? i.title);
   if (id) projectItemsById.set(id, (projectItemsById.get(id) || 0) + 1);
 }
@@ -439,7 +425,38 @@ if (!TARGETED) {
   }
 }
 
+const statusOptionId = ensureOptions('Status', STATUS_COLS.map((c) => ({
+  name: c, color: Object.values(STATUS).find((s) => s.col === c).color,
+})));
+// Read a single-select field's current options WITHOUT mutating it.
+function currentOptionIds(fieldName) {
+  const field = fieldByName(fieldName);
+  if (!field) throw new Error(`field "${fieldName}" not found on project ${OWNER}/#${PROJECT_NUMBER}`);
+  return Object.fromEntries((field.options || []).map((o) => [o.name, o.id]));
+}
+// A targeted run must not rewrite the whole Epic option set: ensureOptions replaces the
+// option list wholesale, so one feature's status write RENAMED every existing board
+// column to whatever the current labels happened to be. When the target's epic option
+// already exists there is nothing to add — read the ids and leave the field alone. Fall
+// back to ensureOptions only when the option is genuinely new (or the run is board-wide).
+const epicOptionsNow = TARGETED ? currentOptionIds('Epic') : null;
+const epicOptionId = (epicOptionsNow && epicOptionsNow[targetFeature.epicLabel])
+  ? epicOptionsNow
+  : ensureOptions('Epic', epics.map((e, i) => ({
+    name: e.label, color: EPIC_COLORS[i % EPIC_COLORS.length],
+  })));
+const STATUS_FIELD_ID = fieldByName('Status').id;
+const EPIC_FIELD_ID = fieldByName('Epic').id;
+
 // --- reconcile each feature ---------------------------------------------------
+function createIssue(f) {
+  // The last line is SEED_MARKER_RE's anchor — keep the two in step.
+  const body = `**Epic:** ${f.epicLabel}\n**Status (tasks.json):** ${f.status}\n\nSeeded from \`state/tasks.json\` by \`sync-board.mjs\`.`;
+  const url = gh(['issue', 'create', '--repo', REPO, '--title', f.title, '--body', body]).trim().split('\n').pop();
+  const number = Number(url.split('/').pop());
+  log(`[mirror] created issue #${number}: ${f.title}`);
+  return { number, title: f.title, url, state: 'OPEN', assignees: [] };
+}
 const mirrorOwned = (f) => (i) => i.title === f.title || SEED_MARKER_RE.test(i.body || '');
 for (const f of features) {
   let candidates = (issuesById.get(f.id) || []).filter(mirrorOwned(f));
@@ -460,12 +477,7 @@ for (const f of features) {
   let issue;
   if (!candidates.length) {
     if (DRY) { log(`[dry-run] would create issue: ${f.title}`); continue; }
-    // The last line is SEED_MARKER_RE's anchor — keep the two in step.
-    const body = `**Epic:** ${f.epicLabel}\n**Status (tasks.json):** ${f.status}\n\nSeeded from \`state/tasks.json\` by \`sync-board.mjs\`.`;
-    const url = gh(['issue', 'create', '--repo', REPO, '--title', f.title, '--body', body]).trim().split('\n').pop();
-    const number = Number(url.split('/').pop());
-    issue = { number, title: f.title, url, state: 'OPEN', assignees: [] };
-    log(`[mirror] created issue #${number}: ${f.title}`);
+    issue = createIssue(f);
   } else {
     // Canonical, lowest number first within each tier: a CURRENT issue on the project; else
     // any current issue; else the exact-title one; else an on-project one; else the lowest.
@@ -480,15 +492,28 @@ for (const f of features) {
     issue = sorted.find((i) => onProject(i) && current(i))
       || sorted.find(current)
       || sorted.find((i) => i.title === f.title)
-      || sorted.find(onProject)
-      || sorted[0];
-    for (const dupe of sorted) if (dupe !== issue) retireDuplicate(dupe, issue);
-    if (issue.title !== f.title) {
-      if (DRY) log(`[dry-run] would retitle #${issue.number}: ${issue.title}  ->  ${f.title}`);
-      else {
-        gh(['issue', 'edit', String(issue.number), '--repo', REPO, '--title', f.title]);
-        log(`[mirror] retitled #${issue.number} -> ${f.title}`);
-      }
+      || sorted.find((i) => onProject(i) && i.state !== 'CLOSED')
+      || sorted.find((i) => i.state !== 'CLOSED' || i.title === f.title);
+  }
+  if (!issue) {
+    // Every candidate is a CLOSED issue under another title — history (a completed id
+    // collision, or a closed tracker since renamed). Never retitle or reopen it: create the
+    // tracker, then retire the old ones below (off the project, history intact).
+    if (DRY) {
+      log(`[dry-run] would create issue: ${f.title} (only closed different-title issues carry ${f.id})`);
+      for (const old of candidates) retireDuplicate(old, { number: 'NEW', title: f.title });
+      continue;
+    }
+    issue = createIssue(f);
+  }
+  for (const dupe of [...candidates].sort((a, b) => a.number - b.number)) {
+    if (dupe.number !== issue.number) retireDuplicate(dupe, issue);
+  }
+  if (issue.title !== f.title) {
+    if (DRY) log(`[dry-run] would retitle #${issue.number}: ${issue.title}  ->  ${f.title}`);
+    else {
+      gh(['issue', 'edit', String(issue.number), '--repo', REPO, '--title', f.title]);
+      log(`[mirror] retitled #${issue.number} -> ${f.title}`);
     }
   }
 

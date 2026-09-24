@@ -25,6 +25,11 @@ All notable changes to the harness body are recorded here. Versions follow
   `--search` result only when it is exactly one issue already on the project; a miss, an
   off-project hit, or twins are decided on the full `issue list --state all`. A listing
   that may be truncated (issues or project items) exits 1 before any mutation.
+- **History is never rewritten.** A CLOSED issue under another title is never adopted,
+  retitled or reopened — it cannot be told apart from a different feature that collided on
+  the id — so the mirror creates the tracker and takes the old one off the project. Project
+  items are keyed to this repo's issues only (a project can mix repositories), and both
+  listings are read and checked before any field-option rewrite.
 - `--dry-run` covers every new mutation and now also announces close/reopen; full runs warn
   about on-project issues whose id is gone from `tasks.json`. Jira is untouched.
 - Reported from a consumer board with 11 duplicated ids across 233 issues / 216 features.

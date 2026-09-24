@@ -751,6 +751,37 @@ EOF
   grep -q 'item-add .*issues/42' "$T/ii-called" || { cat "$T/ii-called"; fail "the current tracker was not put on the board"; }
   pass "a completed id collision never displaces the current tracker [mirror_byid_collision_never_canonical]"
 
+  # (j) a project can mix repositories: another repo's card with the same issue number is
+  #     never deleted as a twin.
+  FXJ="$(fx_issue 30 'E01-F02 — Y' OPEN ''),$(fx_issue 42 'E01-F02 — Y' OPEN '')"
+  printf '{"search":[%s],"full":[%s],"items":[{"id":"IT2","content":{"number":42,"title":"E01-F02 — Y","repository":"acme-org/specs","type":"Issue"}},{"id":"ITX","content":{"number":30,"title":"other","repository":"acme-org/other","type":"Issue"}}]}\n' "$FXJ" "$FXJ" > "$T/fx-j.json"
+  mk_gh_fx "$T/bin-ij" "$T/ij-called" "$T/fx-j.json"; rm -f "$T/ij-called"
+  PATH="$T/bin-ij:$PATH" node "$HI/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/ij-called" 2>/dev/null; fail "cross-repo run errored"; }
+  grep -q -- '--id ITX' "$T/ij-called" && { cat "$T/ij-called"; fail "another repository's project card was touched"; }
+  grep -q 'issue close 30 .*not planned' "$T/ij-called" || { cat "$T/ij-called"; fail "the real twin was not retired"; }
+  pass "project items are keyed to this repo's issues only [mirror_byid_cross_repo_safe]"
+
+  # (k) when the ONLY issue carrying the id is closed under another title, it is history:
+  #     never retitled or reopened — a new tracker is created and the old one leaves the board.
+  printf '{"search":[%s],"full":[%s],"items":[{"id":"IT1","content":{"number":10,"title":"E01-F02 — old wording"}}]}\n' \
+    "$(fx_issue 10 'E01-F02 — old wording' CLOSED COMPLETED)" "$(fx_issue 10 'E01-F02 — old wording' CLOSED COMPLETED)" > "$T/fx-k.json"
+  mk_gh_fx "$T/bin-ik" "$T/ik-called" "$T/fx-k.json"; rm -f "$T/ik-called"
+  PATH="$T/bin-ik:$PATH" node "$HI/tools/sync-board.mjs" E01-F02 set_status >/dev/null 2>&1 ||
+    { cat "$T/ik-called" 2>/dev/null; fail "closed-other-title run errored"; }
+  grep -Eq 'issue (edit|reopen|comment|close) 10' "$T/ik-called" && { cat "$T/ik-called"; fail "a closed different-title issue was adopted (history rewritten)"; }
+  grep -q 'issue create' "$T/ik-called" || { cat "$T/ik-called"; fail "no tracker was created"; }
+  grep -q -- 'item-delete .*--id IT1' "$T/ik-called" || { cat "$T/ik-called"; fail "the old closed issue was left on the board"; }
+  pass "a closed different-title issue is never adopted [mirror_byid_closed_other_title_not_adopted]"
+
+  # (l) listings are read and checked BEFORE any field-option rewrite: a board-wide run on a
+  #     possibly-truncated listing must not have rewritten the Epic options first.
+  node -e 'const a=[];for(let i=0;i<5000;i++)a.push({number:1000+i,title:"E09-F"+i+" — filler",url:"u",state:"OPEN",stateReason:"",assignees:[],body:""});console.log(JSON.stringify({search:[],full:a,items:[]}))' > "$T/fx-l.json"
+  mk_gh_fx "$T/bin-il" "$T/il-called" "$T/fx-l.json"; rm -f "$T/il-called"
+  if PATH="$T/bin-il:$PATH" node "$HI/tools/sync-board.mjs" >"$T/il.out" 2>&1; then cat "$T/il.out"; fail "board-wide truncated listing did not fail"; fi
+  grep -q 'api graphql' "$T/il-called" && { cat "$T/il-called"; fail "a field-option rewrite ran before the truncation abort"; }
+  pass "listings are checked before any field-option rewrite [mirror_byid_listing_before_fields]"
+
   # 14) DRY-RUN mutates nothing (R11) — against a dispatching fake gh with NO pre-existing
   #     issue/item, --dry-run prints "would …" intents and issues zero mutating gh call.
   mkdir -p "$T/bin-dry"

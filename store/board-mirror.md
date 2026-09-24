@@ -107,7 +107,10 @@ no-ops when nothing changed. Config lives entirely in `harness.config.yaml`:
   title or one the mirror seeded (its body ends with the `Seeded from … by sync-board.mjs`
   marker); being on the project is not ownership —
   belongs to the feature whose id opens its title (`<id> — …`). A renamed feature retitles its
-  issue in place instead of minting a twin. A hand-filed issue that merely reuses the prefix is
+  issue in place instead of minting a twin — when that issue is still open. A CLOSED issue under
+  another title is never adopted, retitled or reopened (it cannot be told apart from a different
+  feature that collided on the id): the mirror creates the tracker and takes the old one off the
+  project. Only this repo's issues on the project count (a project can mix repositories). A hand-filed issue that merely reuses the prefix is
   not mirror-owned and is never retitled or retired.
 - **Twins self-heal.** When several issues carry one id, the one already on the project (else
   the lowest number) is kept; every other open twin is commented on and closed *not planned*
