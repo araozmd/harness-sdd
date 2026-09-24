@@ -1023,7 +1023,8 @@
         {
           "id": "E99-F165",
           "title": "sync-board.mjs keys find-or-create on the FULL issue title and trusts a targeted --search miss, so a renamed feature or a lagging search index mints twin issues (a consumer board reached 11 duplicated ids)",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "98ebb4c8f8e9a5f3d43649f0f3a35f80058a7b6c", "ref": "98ebb4c8f8e9a5f3d43649f0f3a35f80058a7b6c", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
