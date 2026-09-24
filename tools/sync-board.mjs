@@ -23,6 +23,12 @@
 //                      jira in F01 (deferred to E10). See store/board-mirror.md.
 //   azure-boards    -> STUB (recognized, not implemented yet — see store/board-mirror.md).
 //
+// Mirror-owned issues (exact canonical title, or seeded by this tool) are matched to
+// features by the STABLE id in the title prefix (`<id> — `), not by the full title: a renamed feature retitles its issue, twins sharing an id are retired
+// (closed not-planned + removed from the project; `mirror.board.duplicate_comment` sets the
+// note, `{canonical}` expands to `#N` of the kept issue), and nothing is created until a FULL issue listing
+// confirms the id is absent.
+//
 // All provider config lives in harness.config.yaml under `mirror.board` — nothing about a
 // specific org/repo/tool is hard-coded here. Status columns default to the harness status
 // names verbatim (identity map), so the board is not tied to any one team's column naming.
@@ -217,7 +223,10 @@ const EPIC_COLORS = ['BLUE', 'GREEN', 'PURPLE', 'ORANGE', 'PINK', 'RED', 'YELLOW
 // (pending/spec-ready) stay unassigned so the board reflects who is doing what right now.
 const ASSIGNED_STATUSES = new Set(['in-progress', 'in-review', 'done']);
 
-function gh(args, input) { return execFileSync('gh', args, { encoding: 'utf8', input, maxBuffer: 1 << 24 }); }
+// maxBuffer is a CEILING, not an allocation. A full `issue list` carries every issue body (the
+// seed-marker ownership check needs it), and a few hundred long bodies already exceed 16 MiB —
+// an ENOBUFS there would stop the reconcile before its completeness guard ever ran.
+function gh(args, input) { return execFileSync('gh', args, { encoding: 'utf8', input, maxBuffer: 1 << 30 }); }
 function ghJson(args) { return JSON.parse(gh(args)); }
 function graphql(query, variables) {
   return JSON.parse(gh(['api', 'graphql', '--input', '-'], JSON.stringify({ query, variables })));
@@ -299,6 +308,142 @@ function ensureOptions(fieldName, desired) {
   return Object.fromEntries((fresh.options || []).map((o) => [o.name, o.id]));
 }
 
+// --- existing issues + items --------------------------------------------------
+// Listed BEFORE any field-option mutation, so a possibly-truncated listing aborts the run
+// before it has changed anything on the board.
+// Issues are matched by the STABLE feature id parsed from the title prefix `<id> — `, never
+// by the full title: feature titles are editable in tasks.json, and a full-title key orphaned
+// the old issue and minted a twin on every rename. A targeted run asks GitHub search first
+// (fast path), but search is fuzzy and its index lags, so a search MISS is never trusted:
+// absence is confirmed against the FULL listing before anything is created.
+const FEATURE_ID_RE = /^(E\d+-F\d+) — /;
+const featureIdOf = (title) => (String(title || '').match(FEATURE_ID_RE) || [])[1] || '';
+const LIST_LIMIT = 5000;
+const ISSUE_FIELDS = 'number,title,url,state,stateReason,assignees,body';
+// Only MIRROR-OWNED issues take part in matching: one carrying the exact canonical title
+// (the old match rule, so nothing it matched goes invisible) or one the mirror seeded (its
+// body carries this marker). Being on the project is NOT ownership — a hand-filed follow-up
+// that reuses the `<id> — ` prefix can sit on the board too, and must never be retitled,
+// promoted or retired as a twin.
+const SEED_MARKER_RE = /Seeded from `[^`]*tasks\.json` by `[^`]*sync-board\.mjs`/;
+// Fail LOUDLY (exit 1, before any mutation that depends on it) when a listing may be
+// truncated: a partial listing would make present issues look absent and mint twins.
+function assertComplete(what, got, total) {
+  if (got >= LIST_LIMIT || (typeof total === 'number' && got < total)) {
+    console.error(`[mirror] ${what} listing may be truncated (got ${got}${typeof total === 'number' ? ` of ${total}` : ''}, limit ${LIST_LIMIT}) — refusing to reconcile against a partial view. Raise LIST_LIMIT in sync-board.mjs.`);
+    process.exit(1);
+  }
+}
+function listAllIssues() {
+  const all = ghJson(['issue', 'list', '--repo', REPO, '--state', 'all',
+    '--limit', String(LIST_LIMIT), '--json', ISSUE_FIELDS]);
+  assertComplete('issue', all.length);
+  return all;
+}
+function groupById(list) {
+  const byId = new Map();
+  for (const i of list) {
+    const id = featureIdOf(i.title);
+    if (!id) continue;
+    if (!byId.has(id)) byId.set(id, []);
+    byId.get(id).push(i);
+  }
+  return byId;
+}
+// The targeted search keeps the board-wide cap: `--search` narrows by SUBSTRING, so many
+// issues can share the id, and a lower cap could push the real one out of the result set.
+let issuesById = groupById(TARGETED
+  ? ghJson(['issue', 'list', '--repo', REPO, '--state', 'all', '--limit', '500',
+    '--json', ISSUE_FIELDS, '--search', `${targetFeatureId} in:title`])
+  : listAllIssues());
+const itemList = ghJson(['project', 'item-list', String(PROJECT_NUMBER), '--owner', OWNER,
+  '--format', 'json', '--limit', String(LIST_LIMIT)]);
+const items = itemList.items || [];
+assertComplete('project item', items.length, itemList.totalCount);
+// A project can hold issues and PRs from SEVERAL repos, and issue numbers only mean something
+// within one repo: keep only this REPO's issues, or a delete could hit another repo's card.
+const sameRepo = (i) => {
+  const r = i.content?.repository ?? String(i.repository || '').replace(/^https?:\/\/[^/]+\//, '');
+  return !r || r.toLowerCase() === REPO.toLowerCase();
+};
+const repoItems = items.filter((i) => sameRepo(i) && (!i.content?.type || i.content.type === 'Issue'));
+const itemByNumber = new Map(repoItems.filter((i) => i.content?.number != null).map((i) => [i.content.number, i.id]));
+// Project item counts per feature id (from the item's own title), so a targeted run can
+// tell a lone on-project hit from one whose on-project twin the search did not return.
+const projectItemsById = new Map();
+for (const i of repoItems) {
+  const id = featureIdOf(i.content?.title ?? i.title);
+  if (id) projectItemsById.set(id, (projectItemsById.get(id) || 0) + 1);
+}
+const mirrorOwned = (f) => (i) => i.title === f.title || SEED_MARKER_RE.test(i.body || '');
+// Search results are a SAMPLE, not a census: a non-empty hit can still omit a same-id issue
+// (index lag, substring cap). The fast path is accepted only when it cannot mislead — exactly
+// one candidate, on the project, and the only project item carrying this id. Anything else (a
+// miss, an off-project hit that might hide the on-project one, an on-project twin the search
+// dropped, twins to retire) is decided on the full listing — fetched and checked HERE, before
+// any field write. An off-project twin the search dropped is not on the board; the next full
+// run retires it.
+if (TARGETED) {
+  const hits = (issuesById.get(targetFeature.id) || []).filter(mirrorOwned(targetFeature));
+  const searchSettles = hits.length === 1 && itemByNumber.has(hits[0].number)
+    && (projectItemsById.get(targetFeature.id) || 0) <= 1;
+  if (!searchSettles) {
+    log(`[mirror] search is not conclusive for ${targetFeature.id}; confirming against the full listing.`);
+    issuesById = groupById(listAllIssues());
+  }
+}
+
+// A duplicate is retired when it is CLOSED as not-planned/duplicate AND off the project.
+// Anything short of that is finished here — idempotent, so re-runs are no-ops. One carve-out:
+// a twin that is already CLOSED under a DIFFERENT title is not re-labelled. Two branches that
+// seeded the same id independently produce exactly that shape (a different feature that may
+// have shipped under the colliding id), and rewriting its close reason to "not planned" would
+// falsify its history. It is still taken off the project, and reported for a human.
+const DUP_COMMENT = yamlGet(cfgText, ['mirror', 'board', 'duplicate_comment'])
+  || 'Duplicate of {canonical} — the mirror now reconciles by feature id.';
+const isRetired = (i) => i.state === 'CLOSED'
+  && ['NOT_PLANNED', 'DUPLICATE'].includes(String(i.stateReason || '').toUpperCase());
+function retireDuplicate(dupe, canonical) {
+  const n = String(dupe.number);
+  const retired = isRetired(dupe);
+  const collision = !retired && dupe.state === 'CLOSED' && dupe.title !== canonical.title;
+  if (collision) {
+    log(`[mirror] WARN #${n} shares id ${featureIdOf(dupe.title)} with #${canonical.number} but has a different title and is already closed — possible id collision, close reason left as-is.`);
+  } else if (!retired) {
+    if (DRY) log(`[dry-run] would close duplicate #${n} as not planned (canonical #${canonical.number})`);
+    else {
+      gh(['issue', 'comment', n, '--repo', REPO, '--body', DUP_COMMENT.replace(/\{canonical\}/g, `#${canonical.number}`)]);
+      if (dupe.state === 'CLOSED') {
+        gh(['api', '-X', 'PATCH', `repos/${REPO}/issues/${n}`, '-f', 'state=closed', '-f', 'state_reason=not_planned']);
+      } else {
+        gh(['issue', 'close', n, '--repo', REPO, '--reason', 'not planned']);
+      }
+      log(`[mirror] closed duplicate #${n} as not planned (canonical #${canonical.number})`);
+    }
+  }
+  const dupeItem = itemByNumber.get(dupe.number);
+  if (dupeItem) {
+    if (DRY) log(`[dry-run] would remove duplicate #${n} from project`);
+    else {
+      gh(['project', 'item-delete', String(PROJECT_NUMBER), '--owner', OWNER, '--id', dupeItem]);
+      itemByNumber.delete(dupe.number);
+      log(`[mirror] removed duplicate #${n} from project`);
+    }
+  }
+}
+
+// Full runs: surface project issues whose id is gone from tasks.json. Report only — whether
+// such an issue was renumbered, shipped or abandoned is a human call, not the mirror's.
+if (!TARGETED) {
+  const known = new Set(allFeatures.map((f) => f.id));
+  for (const [id, list] of issuesById) {
+    if (known.has(id)) continue;
+    for (const i of list) {
+      if (itemByNumber.has(i.number)) log(`[mirror] WARN #${i.number} (${id}) is on the project but ${id} is not in tasks.json — left untouched.`);
+    }
+  }
+}
+
 const statusOptionId = ensureOptions('Status', STATUS_COLS.map((c) => ({
   name: c, color: Object.values(STATUS).find((s) => s.col === c).color,
 })));
@@ -322,32 +467,54 @@ const epicOptionId = (epicOptionsNow && epicOptionsNow[targetFeature.epicLabel])
 const STATUS_FIELD_ID = fieldByName('Status').id;
 const EPIC_FIELD_ID = fieldByName('Epic').id;
 
-// --- existing issues + items --------------------------------------------------
-// Targeted: ask GitHub for the addressed feature's issue instead of paging 500.
-// `--limit` CAPS THE FETCH, it does not filter: the `--search` below only narrows to
-// titles CONTAINING the id, so many follow-up issues can share that substring. A
-// targeted limit LOWER than the board-wide one could push the exact canonical title out
-// of the result set, the exact-title map would read it as absent, and the reconcile loop
-// would CREATE A DUPLICATE issue. Same cap for both paths; the search is the saving.
-const issueListArgs = ['issue', 'list', '--repo', REPO, '--state', 'all',
-  '--limit', '500', '--json', 'number,title,url,state,assignees'];
-if (TARGETED) issueListArgs.push('--search', `${targetFeatureId} in:title`);
-const issues = ghJson(issueListArgs);
-const issueByTitle = new Map(issues.map((i) => [i.title, i]));
-const items = ghJson(['project', 'item-list', String(PROJECT_NUMBER), '--owner', OWNER,
-  '--format', 'json', '--limit', '500']).items;
-const itemByNumber = new Map(items.filter((i) => i.content?.number != null).map((i) => [i.content.number, i.id]));
-
 // --- reconcile each feature ---------------------------------------------------
+function createIssue(f) {
+  // The last line is SEED_MARKER_RE's anchor — keep the two in step.
+  const body = `**Epic:** ${f.epicLabel}\n**Status (tasks.json):** ${f.status}\n\nSeeded from \`state/tasks.json\` by \`sync-board.mjs\`.`;
+  const url = gh(['issue', 'create', '--repo', REPO, '--title', f.title, '--body', body]).trim().split('\n').pop();
+  const number = Number(url.split('/').pop());
+  log(`[mirror] created issue #${number}: ${f.title}`);
+  return { number, title: f.title, url, state: 'OPEN', assignees: [] };
+}
 for (const f of features) {
-  let issue = issueByTitle.get(f.title);
-  if (!issue) {
+  const candidates = (issuesById.get(f.id) || []).filter(mirrorOwned(f));
+  let issue;
+  if (!candidates.length) {
     if (DRY) { log(`[dry-run] would create issue: ${f.title}`); continue; }
-    const body = `**Epic:** ${f.epicLabel}\n**Status (tasks.json):** ${f.status}\n\nSeeded from \`state/tasks.json\` by \`sync-board.mjs\`.`;
-    const url = gh(['issue', 'create', '--repo', REPO, '--title', f.title, '--body', body]).trim().split('\n').pop();
-    const number = Number(url.split('/').pop());
-    issue = { number, title: f.title, url, state: 'OPEN', assignees: [] };
-    log(`[mirror] created issue #${number}: ${f.title}`);
+    issue = createIssue(f);
+  } else {
+    // Canonical, lowest number first: a CURRENT issue on the project, else any current issue,
+    // else none — a new tracker is created. Not current = retired (closed not-planned/
+    // duplicate) or a closed issue under another title (a completed id collision / closed
+    // history): adopting either would reopen or retitle history. Every other same-id issue
+    // is retired.
+    const sorted = [...candidates].sort((a, b) => a.number - b.number);
+    const onProject = (i) => itemByNumber.has(i.number);
+    // "Current" = not retired AND not a closed issue under a different title (a completed id
+    // collision is history, never the tracker — promoting it would retire the real one).
+    const current = (i) => !isRetired(i) && !(i.state === 'CLOSED' && i.title !== f.title);
+    issue = sorted.find((i) => onProject(i) && current(i)) || sorted.find(current);
+  }
+  if (!issue) {
+    // No candidate is current — only retired twins or closed history (a completed id
+    // collision, or a closed tracker since renamed). Never retitle or reopen those: create the
+    // tracker, then retire the old ones below (off the project, history intact).
+    if (DRY) {
+      log(`[dry-run] would create issue: ${f.title} (no current issue carries ${f.id})`);
+      for (const old of candidates) retireDuplicate(old, { number: 'NEW', title: f.title });
+      continue;
+    }
+    issue = createIssue(f);
+  }
+  for (const dupe of [...candidates].sort((a, b) => a.number - b.number)) {
+    if (dupe.number !== issue.number) retireDuplicate(dupe, issue);
+  }
+  if (issue.title !== f.title) {
+    if (DRY) log(`[dry-run] would retitle #${issue.number}: ${issue.title}  ->  ${f.title}`);
+    else {
+      gh(['issue', 'edit', String(issue.number), '--repo', REPO, '--title', f.title]);
+      log(`[mirror] retitled #${issue.number} -> ${f.title}`);
+    }
   }
 
   let itemId = itemByNumber.get(issue.number);
@@ -404,7 +571,10 @@ for (const f of features) {
 
   // close done / reopen regressed
   const shouldClose = f.status === 'done';
-  if (!DRY) {
+  if (DRY) {
+    if (shouldClose && issue.state !== 'CLOSED') log(`[dry-run] would close #${issue.number} as completed`);
+    if (!shouldClose && issue.state === 'CLOSED') log(`[dry-run] would reopen #${issue.number}`);
+  } else {
     if (shouldClose && issue.state !== 'CLOSED') gh(['issue', 'close', String(issue.number), '--repo', REPO, '--reason', 'completed']);
     if (!shouldClose && issue.state === 'CLOSED') gh(['issue', 'reopen', String(issue.number), '--repo', REPO]);
   }
