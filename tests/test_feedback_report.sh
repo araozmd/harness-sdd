@@ -323,7 +323,73 @@ test_field_allowlist_rejects() {
   for _ph in inception architect builder reviewer scout slice-dispatch handoff install; do
     _create_case "phase $_ph" --trigger harness-malfunction --symptom tool-failure --phase "$_ph"
   done
-  pass "R4 each allow-list rejects an out-of-list value and accepts every valid member; missing trigger/symptom reject (R4) [test_field_allowlist_rejects]"
+
+  # ── `--command` SHIPPEDNESS (R4; closes F1 and F5) ─────────────────────────────────────
+  # A shipped sdd-* unit present in the body creates...
+  _f="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  mkdir -p "$_f/.claude/commands"
+  printf 'shipped command body\n' > "$_f/.claude/commands/sdd-next.md"
+  use_fx "$_f"
+  run_ok "$_f" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh \
+    --command sdd-next --session-id s-r4
+  [ "$(create_count)" = "1" ] \
+    || fail "R4: a shipped, present sdd-next unit did NOT create — the sdd-* positive control is dead"
+  # ...a project-authored sdd-* unit at the SAME project-writable path is rejected (F1)...
+  _f2="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  mkdir -p "$_f2/.claude/commands"
+  printf 'project-authored\n' > "$_f2/.claude/commands/sdd-ACME-SECRET-777.md"
+  use_fx "$_f2"
+  run_ok "$_f2" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh \
+    --command sdd-ACME-SECRET-777 --session-id s-r4
+  [ "$(create_count)" = "0" ] \
+    || fail "R4/F1: a project-authored sdd-* unit created an upstream issue; only a NAME the harness ships may transmit"
+  [ "$(report_count "$_f2")" -ge 1 ] \
+    || fail "R4/F1: the rejected project-authored command wrote no local report"
+  # ...a shipped NAME that is not present in this body is rejected (present means present)...
+  _f3="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  use_fx "$_f3"
+  run_ok "$_f3" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh \
+    --command sdd-next --session-id s-r4
+  [ "$(create_count)" = "0" ] \
+    || fail "R4: a shipped name absent from the installed body created an issue; the unit must be present"
+  # ...and a marker-injecting name is rejected by the charset guard (F5). Two vectors:
+  # (a) an sdd-* name carrying ':' at the project-writable path, (b) a ':'-bearing name
+  # placed under tools/ — the latter is rejected ONLY by the charset guard, so it pins it.
+  _f4="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  mkdir -p "$_f4/.claude/commands"
+  printf 'project-authored\n' > "$_f4/.claude/commands/sdd-harness-feedback:evil.md"
+  use_fx "$_f4"
+  run_ok "$_f4" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh \
+    --command 'sdd-harness-feedback:evil' --session-id s-r4
+  [ "$(create_count)" = "0" ] \
+    || fail "R4/F5: a project sdd-* name carrying ':' was accepted; it could forge a second marker token in the body"
+  _f5="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  printf 'marker-shaped tool name\n' > "$_f5/.harness/tools/harness-feedback:evil"
+  use_fx "$_f5"
+  run_ok "$_f5" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh \
+    --command 'harness-feedback:evil' --session-id s-r4
+  [ "$(create_count)" = "0" ] \
+    || fail "R4/F5: a tools/ basename carrying ':' was accepted; the charset guard must reject any name that could inject a body line/marker token"
+
+  pass "R4 each allow-list rejects an out-of-list value and accepts every valid member; missing trigger/symptom reject; --command is a shippedness allow-list (R4) [test_field_allowlist_rejects]"
+}
+
+# ── R4 (shipped-command convergence) ────────────────────────────────────────────────────
+# `_valid_command`'s sdd-* name set is a SECOND copy of the installer's HARNESS_SDD_CMDS +
+# HARNESS_PR_LOOP_CMDS. Any desync in either direction reds: a command the installer ships
+# but the tool rejects (reports about it would silently local-copy), or a name the tool
+# accepts that the installer does not ship (a project-specific token could transmit).
+test_shipped_command_set_converges() {
+  _tool="$(grep '^_shipped_sdd_cmds=' "$TOOL" | sed 's/^_shipped_sdd_cmds="//; s/"$//' \
+    | tr ' ' '\n' | grep '^sdd-' | LC_ALL=C sort -u)"
+  [ -n "$_tool" ] || fail "R4: could not extract _shipped_sdd_cmds from tools/harness-report.sh"
+  _inst="$(sed -n 's/^HARNESS_SDD_CMDS="\(.*\)"$/\1/p; s/^HARNESS_PR_LOOP_CMDS="\(.*\)"$/\1/p' \
+    "$SRC/harness-install.sh" | tr ' ' '\n' | grep '^sdd-' | LC_ALL=C sort -u)"
+  [ -n "$_inst" ] \
+    || fail "R4: could not extract HARNESS_SDD_CMDS/HARNESS_PR_LOOP_CMDS from harness-install.sh"
+  [ "$_tool" = "$_inst" ] \
+    || fail "R4: the tool's shipped sdd-* set diverged from harness-install.sh's own command lists — tool: $(printf '%s' "$_tool" | tr '\n' ' ') | installer: $(printf '%s' "$_inst" | tr '\n' ' ')"
+  pass "R4 the tool's shipped sdd-* set converges with the installer's HARNESS_SDD_CMDS+HARNESS_PR_LOOP_CMDS [test_shipped_command_set_converges]"
 }
 
 # ── R5 ────────────────────────────────────────────────────────────────────────────────────
@@ -617,7 +683,23 @@ test_local_copy_and_fallback() {
   [ "$(report_count "$_fx4")" -ge 1 ] || fail "R11: a failing gh create wrote no local copy"
   present 'Outcome: fallback' "$(latest_report "$_fx4")" \
     "R11: a failing gh create did not record outcome fallback"
-  pass "R11 every enabled report writes the local copy; gh missing/unauthenticated/failing fall back and exit 0 (R11) [test_local_copy_and_fallback]"
+
+  # gh present and authenticated but the DUPLICATE-SEARCH call fails: local copy only, no
+  # create, exit 0. The duplicate search is what gates filing, so a failed search must not
+  # let the tool fall through to create (F2's M41 survivor).
+  _fx5="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  use_fx "$_fx5"
+  SH_LIST_RC=1
+  run_ok "$_fx5" --trigger harness-malfunction --symptom tool-failure \
+    --file tools/run-tests.sh --session-id s-listfail
+  [ "$(create_count)" = "0" ] \
+    || fail "R11: a failing gh issue list still created an issue; a failed duplicate search must not file"
+  [ "$(report_count "$_fx5")" -ge 1 ] || fail "R11: a failing gh issue list wrote no local copy"
+  present 'Outcome: fallback' "$(latest_report "$_fx5")" \
+    "R11: a failing gh issue list did not record outcome fallback"
+  present 'Reason: gh-list' "$(latest_report "$_fx5")" \
+    "R11: a failing gh issue list did not record reason gh-list"
+  pass "R11 every enabled report writes the local copy; gh missing/unauthenticated/failing (auth, list, create) fall back and exit 0 (R11) [test_local_copy_and_fallback]"
 }
 
 # ── R12 ───────────────────────────────────────────────────────────────────────────────────
@@ -658,7 +740,32 @@ test_shipping_artifacts() {
   fi
   grep -qF 'E32-F02' "$_is" || fail "R12: the INSTALL.md feedback section does not name E32-F02"
   grep -qF 'E32-F03' "$_is" || fail "R12: the INSTALL.md feedback section does not name E32-F03"
-  pass "R12 VERSION, the chmod entry, the CHANGELOG [0.86.0] span and the corrected INSTALL.md feedback span all ship (R12) [test_shipping_artifacts]"
+
+  # Pristine-bytes control (tests.md R12): the stale phrase must be the REAL pre-change
+  # text, and must be gone from the working file. `origin/main`/`main` is the branch base
+  # before this change merges; once it carries the change the base no longer holds the
+  # phrase, so the liveness half is evaluated only while it is still true (post-merge it
+  # would red every run for a reason unrelated to this feature). The working-file negative
+  # always runs, so reverting the sentence reds in every environment.
+  _now="$(grep -cF 'No reporter ships yet' "$SRC/docs/INSTALL.md")" || _now=0
+  [ "$_now" = "0" ] \
+    || fail "R12: the working docs/INSTALL.md still contains 'No reporter ships yet' ($_now line(s))"
+  _base=""
+  for _ref in origin/main main; do
+    if git -C "$SRC" rev-parse --verify --quiet "$_ref" >/dev/null 2>&1; then _base="$_ref"; break; fi
+  done
+  if [ -n "$_base" ] && _bytes="$(git -C "$SRC" show "$_base:docs/INSTALL.md" 2>/dev/null)"; then
+    _old="$(printf '%s\n' "$_bytes" | grep -cF 'No reporter ships yet')" || _old=0
+    if [ "$_old" -ge 1 ]; then
+      _ctrl="$_base carries the pre-change phrase on $_old line(s) — the negative is LIVE"
+    else
+      _ctrl="$_base no longer carries the pre-change phrase (post-merge); liveness half skipped, working-file negative still enforced"
+    fi
+  else
+    _ctrl="no origin/main|main base ref to read; liveness half skipped, working-file negative still enforced"
+  fi
+  printf '%s\n' "$_ctrl" > "$T/r12-pristine-control.txt"
+  pass "R12 VERSION, the chmod entry, the CHANGELOG [0.86.0] span, the corrected INSTALL.md feedback span, and the pristine-bytes control all ship (R12) [test_shipping_artifacts]"
 }
 
 # ── non-functional ────────────────────────────────────────────────────────────────────────
@@ -678,6 +785,7 @@ test_marker_grammar
 test_disabled_is_silent
 test_repo_resolution
 test_field_allowlist_rejects
+test_shipped_command_set_converges
 test_harness_owned_file_filter
 test_title_format
 test_body_allowlisted_no_freeform

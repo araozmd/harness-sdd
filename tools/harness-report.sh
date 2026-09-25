@@ -205,21 +205,43 @@ _valid_exit_code() {
   [ "${#1}" -le 3 ]
 }
 # R4's `--command` is a SEMANTIC allow-list: the name must resolve to something the
-# installed body ships, so a project-specific token cannot ride the field upstream.
+# installed body SHIPS, so a project-specific token cannot ride the field upstream.
 # Accepts a basename of a regular file under $H/tools/, init.sh, harness-install.sh, or a
-# shipped sdd-* unit in the body.
+# SHIPPED sdd-* unit present in the body.
+#
+# SHIPPEDNESS OF AN sdd-* UNIT IS A NAME CHECK, NOT A PATH-PRESENCE CHECK. `.agents/skills/`
+# is a user-owned tree and `.claude/commands/` is regenerated wholesale, so "a file with
+# this name exists at a project-writable path" admits a project-authored command like
+# `sdd-ACME-SECRET-777` (F1) — and because the name reaches the body's `Command:` line, a
+# name containing `harness-feedback:` could even forge a second marker token (F5).
+#
+# `_shipped_sdd_cmds` is a SECOND copy of harness-install.sh's HARNESS_SDD_CMDS unioned with
+# HARNESS_PR_LOOP_CMDS. A desync is not trusted: tests/test_feedback_report.sh::
+# test_shipped_command_set_converges extracts the installer's own lists and reds on ANY
+# divergence, in either direction (the convergence-test pattern the models:/workers: blocks
+# use). The charset guard rejects `:`/whitespace so no command name can inject a body line.
+_shipped_sdd_cmds=" sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-loop "
+_is_shipped_sdd() {
+  case "$_shipped_sdd_cmds" in *" $1 "*) return 0 ;; *) return 1 ;; esac
+}
 _valid_command() {
   _c="$1"
-  case "$_c" in */*) return 1 ;; esac
+  # A harness command name is a bare basename of [A-Za-z0-9._-]+ — this rejects path
+  # separators AND any charset that could inject a `Label:`/marker token into the body.
+  printf '%s' "$_c" | grep -qE '^[A-Za-z0-9._-]+$' || return 1
   if [ -f "$H/tools/$_c" ]; then return 0; fi
   case "$_c" in
     init.sh|harness-install.sh)
-      if [ -f "$H/$_c" ]; then return 0; fi ;;
+      if [ -f "$H/$_c" ]; then return 0; fi
+      return 1 ;;
   esac
-  case "$_c" in sdd-*) : ;; *) return 1 ;; esac
-  if [ -d "$_proj/.agents/skills/$_c" ]; then return 0; fi
+  # sdd-*: the name must be one the harness ships AND the unit must be present in THIS
+  # installed body (any selected front-end's copy, or the shared skill unit).
+  _is_shipped_sdd "$_c" || return 1
   if [ -f "$_proj/.claude/commands/$_c.md" ]; then return 0; fi
   if [ -f "$_proj/.opencode/command/$_c.md" ]; then return 0; fi
+  if [ -f "$_proj/.agents/skills/$_c/SKILL.md" ]; then return 0; fi
+  if [ -f "$H/.codex-skills/$_c/SKILL.md" ]; then return 0; fi
   return 1
 }
 _valid_session() {
