@@ -1574,6 +1574,13 @@
           "spec_path": "specs/epics/E31-opencode-first-class/F02-source-host-parity/"
         }
       ]
+    },
+    {
+      "id": "E32",
+      "title": "Harness feedback loop: auto-reported harness issues + on-demand triage",
+      "status": "draft",
+      "owner": "araozmd",
+      "features": []
     }
   ]
 }
