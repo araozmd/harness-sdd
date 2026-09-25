@@ -98,10 +98,40 @@ Projects-v2 / scope requirement — **before** any board-mutating call, so a pre
 never leaves the board half-written.
 
 `tasks.json` is the source of truth; the script makes the board match it, idempotently:
-one **issue per feature** in `repo` (matched by exact title), each added as a **project
+one **issue per feature** in `repo`, each added as a **project
 item**, with the **Status** (mapped from the feature state machine) and **Epic**
 single-select fields set, closing `done` issues and reopening regressed ones. Re-runs are
 no-ops when nothing changed. Config lives entirely in `harness.config.yaml`:
+
+- **Matched by feature id, not title.** A mirror-owned issue — one with the exact canonical
+  title or one the mirror seeded (its body carries the `Seeded from … by sync-board.mjs`
+  marker the mirror writes); being on the project is not ownership —
+  belongs to the feature whose id opens its title (`<id> — …`). A renamed feature retitles its
+  issue in place instead of minting a twin — when that issue is still open. A CLOSED issue under
+  another title is never adopted, retitled or reopened (it cannot be told apart from a different
+  feature that collided on the id): the mirror creates the tracker and takes the old one off the
+  project. Only this repo's issues on the project count (a project can mix repositories). A hand-filed issue that merely reuses the prefix is
+  not mirror-owned and is never retitled or retired.
+- **Twins self-heal — only a CURRENT issue can be kept.** When several mirror-owned issues
+  carry one id, the kept (canonical) issue is the lowest-numbered *current* one on the
+  project, else the lowest-numbered *current* one anywhere. *Current* means not retired
+  (closed *not planned* / *duplicate*) and not closed under a title other than the
+  feature's current one. Being on the
+  project never makes a retired or closed-under-another-title issue canonical, so a live
+  tracker is never displaced by one. When no candidate is current, a new tracker is created
+  and none of the old ones is reopened or retitled. Every other same-id candidate is retired:
+  an open twin (or a closed, not-yet-retired one under the kept issue's title) is commented on and
+  closed *not planned* (`duplicate_comment`, `{canonical}` → `#N`), and every twin is removed
+  from the project. A twin already closed under a *different* title is only taken off the
+  project and reported — it may be a separate feature that collided on the id, and its
+  history is left intact.
+- **A search result is a sample, not a census.** A targeted (hook) run looks the id up with
+  GitHub search, which is fuzzy, lags and is capped, so a result can omit a same-id issue.
+  It is trusted only when it returns exactly one mirror-owned issue, that issue is already on
+  the project, and no other project item carries the id. Anything else — a miss, an
+  off-project hit, several hits — is decided on the full issue listing
+  (`issue list --state all`) before anything is created, retitled or retired, so a search
+  miss never creates. A listing that may be truncated aborts the run.
 
 ```yaml
 mirror:

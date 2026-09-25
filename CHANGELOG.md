@@ -4,6 +4,69 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.84.4] — 2026-09-24
+
+### Changed — agents write `done` in the project's enforced closure-line format
+
+- **`agents/orchestrator.md` → "Writing `done`" step 4.** When the project's
+  `init.project.sh` enforces a closure-line format for `progress/history.md` (a check that
+  every `done` feature has a closure entry), the Orchestrator writes that entry in exactly
+  that format; the project's entrypoints document it and the check prints it on failure.
+  Free text around it is fine; only the fixed line closes the feature.
+- **`agents/reviewer.md` → "Verdict".** The Reviewer's approval summary is not the closure
+  entry; the Orchestrator writes it after the merge.
+- Origin: a downstream project replaced a free-text closure detector (every review round found
+  another wording that closed the wrong feature, e.g. a feature's own spec PR `MERGED`) with a
+  fixed-format line. The harness ships no such check itself; these are pointers only.
+
+## [0.84.3] — 2026-09-24
+
+### Fixed — `store/board-mirror.md` states the canonical-issue rule the mirror actually runs
+
+- **Twins: only a CURRENT issue can be kept.** The doc still said "the one already on the
+  project (else the lowest number) is kept". `sync-board.mjs` (0.84.2) keeps the
+  lowest-numbered *current* issue on the project, else the lowest-numbered current one
+  anywhere — current = not retired (closed not-planned/duplicate) and not closed under a
+  title other than the feature's — and creates a new tracker (reopening nothing) when none is
+  current. Project membership never promotes a retired or closed-history issue.
+- **Search trust, stated exactly.** A targeted run trusts its `--search` result only when it
+  returns exactly one mirror-owned issue that is on the project and no other project item
+  carries the id; everything else is decided on the full listing. The doc described only
+  the search-miss case.
+- Ownership wording: the seed marker is matched anywhere in the body ("carries"), not only
+  at its end. `tests/test_mirror.sh` pins all three, scoped to the github-projects section.
+  Docs only; no code change. Reported by a consumer (Codex review on its board-mirror port).
+
+## [0.84.2] — 2026-09-23
+
+### Fixed — the GitHub Projects mirror reconciles by feature id, not by full title (E99-F165)
+
+- **A renamed feature no longer mints a twin.** `sync-board.mjs` keyed find-or-create on
+  the full `<id> — <title>`, so editing a feature title in `tasks.json` orphaned its issue
+  and created a new one. Mirror-owned issues (exact canonical title or the seed-body marker —
+  project membership alone is not ownership) are now grouped by the id in the title prefix, and the kept
+  issue is retitled in place (`gh issue edit --title`).
+- **Twins self-heal.** When several mirror-owned issues share an id, the one already on the
+  project (current = not retired and not a closed different-title collision; else the
+  lowest current one) is kept; every other open twin
+  is commented on and closed *not planned*, and every twin leaves the project
+  (`gh project item-delete`). A twin already closed under a DIFFERENT title is only taken
+  off the project and reported — it may be a separate feature that collided on the id — and
+  a hand-filed follow-up reusing the prefix is never touched. Idempotent. The note is
+  `mirror.board.duplicate_comment` (optional; `{canonical}` → `#N`).
+- **A search result is a sample, not a census.** A targeted (hook) run accepts its
+  `--search` result only when it is exactly one issue already on the project; a miss, an
+  off-project hit, or twins are decided on the full `issue list --state all`. A listing
+  that may be truncated (issues or project items) exits 1 before any mutation.
+- **History is never rewritten.** A CLOSED issue under another title is never adopted,
+  retitled or reopened — it cannot be told apart from a different feature that collided on
+  the id — so the mirror creates the tracker and takes the old one off the project. Project
+  items are keyed to this repo's issues only (a project can mix repositories), and both
+  listings are read and checked before any field-option rewrite.
+- `--dry-run` covers every new mutation and now also announces close/reopen; full runs warn
+  about on-project issues whose id is gone from `tasks.json`. Jira is untouched.
+- Reported from a consumer board with 11 duplicated ids across 233 issues / 216 features.
+
 ## [0.84.1] — 2026-09-18
 
 ### Fixed — escalation weighs the whole resolved stamp (E99-F163)

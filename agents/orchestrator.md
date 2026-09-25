@@ -282,7 +282,11 @@ The order on the main path is therefore:
 2. Run the change-size handoff and open the PR (see below).
 3. **Observe the merge.**
 4. Then `set-status <id> done --evidence <merge-commit>`, and record the round in
-   `progress/history.md`.
+   `progress/history.md`. When the project's `init.project.sh` enforces a closure-line
+   format (a check that every `done` feature has a closure entry), write that entry in
+   exactly that format — the project's entrypoints (`AGENTS.md`, `CLAUDE.md`) document it,
+   and the check prints it when it fails. Free text around it is fine; only the fixed line
+   closes the feature.
 
 ⚠️ **Between (1) and (3) the board has no state that means "approved, awaiting merge".**
 Measured: a feature left `in-review` is *not* inert — `tools/next-task.mjs` routes
