@@ -1625,7 +1625,7 @@
         {
           "id": "E32-F02",
           "title": "tools/harness-report.sh: redaction pass, versioned body marker, duplicate search, per-session cap, progress/ fallback",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
