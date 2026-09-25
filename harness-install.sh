@@ -540,6 +540,37 @@ workers:
   roster: false
 EOF
   fi
+
+  # --- feedback block (E32-F01 harness defect auto-reporting switch) ---
+  # Top-level, append-only at EOF. Keep this heredoc BYTE-IDENTICAL to the tail of the
+  # source harness.config.yaml — a FRESH install copies the config verbatim and never
+  # migrates, an UPGRADE only migrates, and the two must converge on the same bytes
+  # (tests/test_feedback_config.sh asserts it), same convergence rule as models: / pr_loop:
+  # / execution: / change_size: / escalation: / workers: above.
+  #
+  # The presence check is DELIBERATELY WIDER than its siblings' `^feedback:[[:space:]]*(#.*)?$`:
+  # it also matches the one-line flow form `feedback: { enabled: false }` (and `feedback: null`),
+  # which the narrow pattern would miss. Missing that form would append a SECOND `feedback:`
+  # mapping with `enabled: true`, and since most YAML parsers keep the LAST duplicate key, an
+  # operator's flow-form opt-out would silently flip back ON.
+  if ! grep -Eq '^feedback:([[:space:]]|$)' "$_cfg"; then
+    cat >> "$_cfg" <<'EOF'
+
+# Harness feedback (E32-F01) — ON by default. When one of a narrow set of harness defects
+# is detected (see E32), the harness may auto-report it as an issue on `repo` below, and
+# sends ONLY allow-listed harness fields — never project content. Opt out with
+# `enabled: false`; deleting this block does NOT opt out, because the next upgrade
+# re-seeds it ON with a fresh notice. `repo` is `[HOST/]OWNER/REPO` (2 or 3 `/`-separated
+# parts); an omitted HOST means `github.com`, so a GitHub Enterprise checkout still reports
+# to the public upstream unless you repoint it. `max_per_session` caps how many issues one
+# session may file; `0` files nothing upstream. In an umbrella, each child's OWN block
+# governs sessions rooted there — no inheritance from the coordinator.
+feedback:
+  enabled: true
+  repo: github.com/araozmd/harness-sdd
+  max_per_session: 3
+EOF
+  fi
 }
 
 # seed_pr_loop_optin <file> — force `pr_loop.enabled` to the OPT-IN default (`false`) in a
@@ -1419,6 +1450,24 @@ _cfg_pr_loop_value() {
     /^pr_loop:[[:space:]]*(#.*)?$/ { p=1; next }
     p && /^[^[:space:]#]/ { p=0 }
     p && $0 ~ re {
+      sub(/^[[:space:]]+[^:]*:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+      gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+    }
+  ' "$1"
+}
+
+# _cfg_feedback_value <file> <key> — print the `feedback.<key>` scalar (unquoted,
+# comment-stripped) from inside the TOP-LEVEL `feedback:` section; empty if unset or if the
+# file does not exist. Section-scoped exactly like _cfg_pr_loop_value, so a same-named key
+# nested under ANOTHER section can never be read as this one (E32-F01). Commented example
+# lines never match — the `#` precedes the key.
+_cfg_feedback_value() {
+  [ -f "$1" ] || return 0
+  awk -v k="$2" '
+    BEGIN { gsub(/\./, "[.]", k); re = "^[[:space:]]+" k ":" }
+    /^feedback:[[:space:]]*(#.*)?$/ { f=1; next }
+    f && /^[^[:space:]#]/ { f=0 }
+    f && $0 ~ re {
       sub(/^[[:space:]]+[^:]*:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
       gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
     }
@@ -3796,6 +3845,17 @@ install_one() {
 
   # harness.config.yaml is project-owned once seeded: bootstrap fills in the
   # verification commands (and store backend), so an upgrade must NOT clobber it.
+  #
+  # _fb_before (E32-F01): whether a `feedback:` header already exists, probed BEFORE this
+  # run touches the file at all. On the fresh branch the file does not exist yet, so this
+  # is always 0. On the preserve branch it is read before migrate_config runs. Compared
+  # against the post-write state below to decide whether THIS run seeded the block (R2,
+  # R5, R6): the wider presence check (also matches the one-line flow form) is what
+  # migrate_config's own feedback entry uses, so the two agree on what "present" means.
+  _fb_cfg="$H/harness.config.yaml"
+  _fb_before=0
+  if [ -f "$_fb_cfg" ] && grep -Eq '^feedback:([[:space:]]|$)' "$_fb_cfg"; then _fb_before=1; fi
+
   if [ ! -f "$H/harness.config.yaml" ]; then
     cp "$SRC/harness.config.yaml" "$H/harness.config.yaml"
     # the target is a DIFFERENT product — start its verification commands blank.
@@ -3814,6 +3874,19 @@ install_one() {
     # the F01 umbrella.manifest / verification.integration_command) to the preserved
     # config without altering existing values or comments.
     migrate_config "$H/harness.config.yaml"
+  fi
+
+  # ── feedback notice (E32-F01 R2, R5, R6, R7) ────────────────────────────────
+  # The block was seeded THIS run iff it was absent before (either branch above) and is
+  # present now — the fresh branch always seeds it (the template carries the block), the
+  # preserve branch only when migrate_config just appended it. migrate_config itself stays
+  # a pure, silent file transform (its many other callers/tests are unaffected). Guarded by
+  # SELF_MODE so the temporary consumer install `--self` runs never prints, matching that
+  # `--self` never writes $SRC/harness.config.yaml (R7).
+  if [ "$_fb_before" = 0 ] && grep -Eq '^feedback:([[:space:]]|$)' "$_fb_cfg" \
+     && [ "${SELF_MODE:-0}" != 1 ]; then
+    _fb_repo="$(_cfg_feedback_value "$_fb_cfg" repo)"
+    info "feedback: harness defects may be auto-reported as issues on $_fb_repo — to opt out set feedback.enabled: false in $_fb_cfg"
   fi
 
   # ── 2a. persist the umbrella linkage (E24-F03 R1) ───────────────────────────

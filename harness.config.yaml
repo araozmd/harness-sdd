@@ -386,3 +386,17 @@ escalation:
 # committing it would put one developer's CLI set into a shared repo.
 workers:
   roster: false
+
+# Harness feedback (E32-F01) — ON by default. When one of a narrow set of harness defects
+# is detected (see E32), the harness may auto-report it as an issue on `repo` below, and
+# sends ONLY allow-listed harness fields — never project content. Opt out with
+# `enabled: false`; deleting this block does NOT opt out, because the next upgrade
+# re-seeds it ON with a fresh notice. `repo` is `[HOST/]OWNER/REPO` (2 or 3 `/`-separated
+# parts); an omitted HOST means `github.com`, so a GitHub Enterprise checkout still reports
+# to the public upstream unless you repoint it. `max_per_session` caps how many issues one
+# session may file; `0` files nothing upstream. In an umbrella, each child's OWN block
+# governs sessions rooted there — no inheritance from the coordinator.
+feedback:
+  enabled: true
+  repo: github.com/araozmd/harness-sdd
+  max_per_session: 3
