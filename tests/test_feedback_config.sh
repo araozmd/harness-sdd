@@ -351,10 +351,14 @@ test_cascade_per_target_seed_and_notice() {
 # ── R9 / R10 (docs) ──────────────────────────────────────────────────────────────────────
 # _section <heading-literal> <file> — from the column-0 heading through, but excluding,
 # the next column-0 `## ` heading or EOF. Uses index()==1 (no regex) so backticks/parens/
-# em-dashes in the heading need no escaping. FENCE-AWARE (tests/lib/fence.awk, E99-F131,
-# enforced repo-wide by tests/test_change_size.sh R9d): docs/INSTALL.md's feedback section
-# carries a fenced YAML example, so a bare heading-reset toggle would misread a column-0
-# '#'-looking line inside a fence as the next heading and truncate the section.
+# em-dashes in the heading need no escaping. FENCE-AWARE (tests/lib/fence.awk, E99-F131):
+# docs/INSTALL.md's feedback section carries a fenced YAML example, so a bare heading-reset
+# toggle would misread a column-0 '#'-looking line inside a fence as the next heading and
+# truncate the section. NOT currently caught by tests/test_change_size.sh R9d if this call
+# is removed — R9d's per-slicer scan pairs single quotes file-wide, and a stray apostrophe
+# earlier in this file (there are hundreds) shifts the pairing so it never sees this awk
+# program (E32-F01 round 2 M17 survived deleting the fence_delim($0) call below). See
+# E99-F166 (progress/inbox/E99-F166.md) for the fix to R9d's scan.
 FENCE_AWK="$(cat "$SRC/tests/lib/fence.awk")"
 _section() {
   awk -v h="$1" "$FENCE_AWK"'
