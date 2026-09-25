@@ -4,6 +4,24 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.84.3] — 2026-09-24
+
+### Fixed — `store/board-mirror.md` states the canonical-issue rule the mirror actually runs
+
+- **Twins: only a CURRENT issue can be kept.** The doc still said "the one already on the
+  project (else the lowest number) is kept". `sync-board.mjs` (0.84.2) keeps the
+  lowest-numbered *current* issue on the project, else the lowest-numbered current one
+  anywhere — current = not retired (closed not-planned/duplicate) and not closed under a
+  title other than the feature's — and creates a new tracker (reopening nothing) when none is
+  current. Project membership never promotes a retired or closed-history issue.
+- **Search trust, stated exactly.** A targeted run trusts its `--search` result only when it
+  returns exactly one mirror-owned issue that is on the project and no other project item
+  carries the id; everything else is decided on the full listing. The doc described only
+  the search-miss case.
+- Ownership wording: the seed marker is matched anywhere in the body ("carries"), not only
+  at its end. `tests/test_mirror.sh` pins all three, scoped to the github-projects section.
+  Docs only; no code change. Reported by a consumer (Codex review on its board-mirror port).
+
 ## [0.84.2] — 2026-09-23
 
 ### Fixed — the GitHub Projects mirror reconciles by feature id, not by full title (E99-F165)
