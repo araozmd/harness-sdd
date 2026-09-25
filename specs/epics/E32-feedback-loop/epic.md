@@ -37,7 +37,8 @@ reporters) and the harness maintainer (the triager).
   network or auth errors, and agent mistakes the harness correctly caught. The triggers,
   the non-triggers, and the redaction pass are verified by fixture scenarios and a
   redaction corpus that the feature specs define.
-- Every filed body is built **only from allow-listed structured fields** (trigger type,
+- Every outbound field (issue title, body, duplicate-search query) is built **only from
+  allow-listed structured fields** (trigger type,
   harness `VERSION`, host, role, phase, harness-owned paths validated against
   `tools/harness-owned-paths.sh`, harness command name, exit code, a fixed-vocabulary
   symptom code). Free-form text is never sent upstream; it stays in the local
