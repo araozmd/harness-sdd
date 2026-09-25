@@ -1,7 +1,7 @@
 ---
 id: E32
 title: "Harness feedback loop: auto-reported harness issues + on-demand triage"
-status: draft            # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: planned          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 
@@ -73,8 +73,9 @@ reporters) and the harness maintainer (the triager).
 - **Non-goals:** scheduled or autonomous triage (deferred until real reports exist);
   auto-fixing an issue without the human gate; telemetry or usage analytics; any channel
   other than GitHub issues; reporting on project (non-harness) defects.
-- Installed-body change: this bumps a **MINOR** `VERSION` (new capability) in the PR that
-  changes the installed body.
+- Installed-body change: each PR that changes the installed body bumps `VERSION` per
+  `AGENTS.md`. F01 is MINOR (new config), F02 is PATCH (a tool nothing calls yet), and F03
+  is MINOR (reporting goes live).
 - Front-end parity: the reporting rule and command must reach Claude, Codex, and OpenCode
   through the existing emitters. Source-repo-only surfaces (the labeler workflow,
   `/sdd-triage`) must not be installed into targets.
@@ -82,7 +83,9 @@ reporters) and the harness maintainer (the triager).
 ## Cross-epic dependencies and boundaries
 
 - **E99 / fix lane (`/sdd-fix`)** and **E04 idea intake (`/sdd-new`)** are the triage
-  routes; this epic calls them and doesn't change them.
+  routes; this epic calls them and doesn't change their contracts. The one narrow exception
+  is owned by F05: a feature seeded from an issue records its number, so the PR body
+  carries `Fixes #N`.
 - **E26 self-hosting (`--self`)**: generated glue for any new command is emitted and
   drift-gated like the existing ones; no hand-edited `.claude/*`.
 - **E20 workflow toggles / `pr_loop` gating** is the precedent for a config-gated,
@@ -95,6 +98,35 @@ reporters) and the harness maintainer (the triager).
   follows it.
 - **ADR-0004:** umbrella children resolve the body through pointer stubs. The drill checks
   where the reporting rule and the `feedback.*` config resolve for an umbrella child.
-- No other ADR applies. This repo has no `specs/architecture.md`, and the drill records
-  any new decision (for example, how source-only commands are withheld from targets) as
-  an ADR delta.
+- **ADR-0005** (drill delta): source-only surfaces are emitted only by `--self`.
+- **ADR-0006** (drill delta): the versioned body marker is the only contract between
+  reporter and triage.
+- No other ADR applies. This repo has no `specs/architecture.md`.
+
+## Features
+
+| id | title | status | sdd | depends_on |
+|---|---|---|---|---|
+| E32-F01 | feedback.* config block seeded on fresh install and upgrade, with the one-line opt-out notice | pending | true | — |
+| E32-F02 | tools/harness-report.sh: redaction pass, versioned body marker, duplicate search, per-session cap, progress/ fallback | pending | true | E32-F01 |
+| E32-F03 | Reporting rule + /sdd-report command on every front end: four triggers, end-of-task and early-stop filing | pending | true | E32-F02 |
+| E32-F04 | Source-repo GitHub Action that labels marker-carrying issues without trusting their bodies | pending | true | E32-F02 |
+| E32-F05 | Source-only /sdd-triage: group harness-feedback issues, propose routes, seed only on human approval | pending | true | E32-F04 |
+
+ADR deltas: **ADR-0005** (source-only surfaces emitted only by `--self`) and **ADR-0006**
+(the body marker is the only reporter↔triage contract).
+
+## Notes
+
+- Size (E21-F01): the reporter was split along its real seam. **F02** is the deterministic
+  tool (redaction, marker, duplicate search, cap, fallback), which carries the privacy
+  risk and gets fixture tests. **F03** is the prompt and command glue that decides *when* to
+  call it. Every feature is expected to stay under `max_requirements: 12`.
+- Drill decisions (from the doc-critic pass):
+  - Only the **session-owning top-level role** files a report. Sub-agents record trigger
+    notes under `progress/`, and the top-level role reads them. This keeps the cap and the
+    duplicate search single-writer and keeps F03 within budget.
+  - F01 owns how config and the `progress/` fallback path resolve for an umbrella child
+    (ADR-0004); F02 and F03 follow that answer.
+  - F04 owns the trigger→label mapping: `missing-capability` → `enhancement`, the other
+    three → `bug`. It labels on `opened` only, never on edit.

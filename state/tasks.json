@@ -1578,9 +1578,63 @@
     {
       "id": "E32",
       "title": "Harness feedback loop: auto-reported harness issues + on-demand triage",
-      "status": "draft",
+      "status": "planned",
       "owner": "araozmd",
-      "features": []
+      "features": [
+        {
+          "id": "E32-F01",
+          "title": "feedback.* config block seeded on fresh install and upgrade, with the one-line opt-out notice",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E32-feedback-loop/F01-feedback-config/"
+        },
+        {
+          "id": "E32-F02",
+          "title": "tools/harness-report.sh: redaction pass, versioned body marker, duplicate search, per-session cap, progress/ fallback",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E32-F01"
+          ],
+          "spec_path": "specs/epics/E32-feedback-loop/F02-report-tool/"
+        },
+        {
+          "id": "E32-F03",
+          "title": "Reporting rule + /sdd-report command on every front end: four triggers, end-of-task and early-stop filing",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E32-F02"
+          ],
+          "spec_path": "specs/epics/E32-feedback-loop/F03-report-rule/"
+        },
+        {
+          "id": "E32-F04",
+          "title": "Source-repo GitHub Action that labels marker-carrying issues without trusting their bodies",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E32-F02"
+          ],
+          "spec_path": "specs/epics/E32-feedback-loop/F04-labeler-action/"
+        },
+        {
+          "id": "E32-F05",
+          "title": "Source-only /sdd-triage: group harness-feedback issues, propose routes, seed only on human approval",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E32-F04"
+          ],
+          "spec_path": "specs/epics/E32-feedback-loop/F05-sdd-triage/"
+        }
+      ]
     }
   ]
 }
