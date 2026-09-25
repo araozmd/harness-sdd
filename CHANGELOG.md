@@ -4,6 +4,29 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.85.0] — 2026-09-25
+
+### Added — `feedback:` config block + opt-out notice (E32-F01)
+
+- **New top-level `feedback:` block**, seeded on every fresh install and appended (via
+  `migrate_config`) on every upgrade of a target that predates it: `enabled: true`,
+  `repo: github.com/araozmd/harness-sdd`, `max_per_session: 3`. It is the one visible
+  switch for E32's later auto-reporting features (the reporter and its triggers are not
+  implemented yet — this block is accurate but inert until they land).
+- **One-line install notice.** Whenever the installer seeds the block, it prints exactly
+  one line on stdout naming the resolved `repo`, the literal `feedback.enabled: false`,
+  and the config path it just seeded — so the switch is never silently turned on. A run
+  that seeds nothing (the block already exists) prints no notice, and `--self` never
+  prints one.
+- **The operator's block is never touched.** Any existing column-0 `feedback:` line —
+  block style or the one-line flow form (`feedback: { enabled: false }`) — is left
+  exactly as it is; opting out is `feedback.enabled: false`, not deleting the block (a
+  missing block is re-seeded ON on the next upgrade).
+- In an umbrella, each child's own `feedback:` block governs sessions rooted in that
+  child, with no inheritance from or override by the coordinator (ADR-0004).
+- Documented in `docs/INSTALL.md` (new `## Harness feedback` section) and
+  `docs/CONFIG-LAYERING.md`.
+
 ## [0.84.4] — 2026-09-24
 
 ### Changed — agents write `done` in the project's enforced closure-line format

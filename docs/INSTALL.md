@@ -414,6 +414,70 @@ committed shared unit `.agents/skills/sdd-fix-parallel/SKILL.md`, which self-gat
 concurrent sub-agents and write `supported` to `.opencode-parallel` directly, or run the
 batch sequentially with `/sdd-fix`.
 
+## Harness feedback (`feedback:`) — on by default
+
+**What it is.** A top-level `feedback:` block that is the one visible switch for E32: when
+one of a narrow set of harness defects is detected, the harness may auto-report it as a
+scrubbed GitHub issue upstream (allow-listed harness fields only, never project content).
+**No reporter ships yet** — this block is accurate but inert until **E32-F02** (the report
+tool: the allow-list and redaction pass) and **E32-F03** (the triggers that decide when
+reporting fires) land. The switch ships **on**, and the installer tells you so at the
+moment it becomes possible to matter.
+
+**Shipped defaults.** A fresh install, and an upgrade of a target that has no `feedback:`
+block yet, both seed:
+
+```yaml
+feedback:
+  enabled: true
+  repo: github.com/araozmd/harness-sdd
+  max_per_session: 3
+```
+
+**The notice.** Whenever the installer seeds this block — fresh install or upgrade — it
+prints exactly one line on stdout, for that target, naming the resolved `repo`, the
+literal `feedback.enabled: false`, and the config path it just seeded. A run that seeds
+nothing (the block already exists) prints no notice.
+
+**Resolution contract** (every consumer of this block, reporter included, resolves it this
+way):
+
+- `enabled` — after any trailing `# comment` is stripped, **only** the bare, unquoted,
+  lower-case token `true` enables reporting. A missing block, a missing key, an empty
+  value, a quoted `"true"`, `True`, or anything else all mean **off**. The default is
+  fail-closed because this is a privacy switch.
+- `repo` — grammar `[HOST/]OWNER/REPO`: 2 or 3 `/`-separated parts, each non-empty and
+  matching `[A-Za-z0-9._-]+`. Two parts mean `OWNER/REPO` on `github.com`; an omitted HOST
+  always means `github.com`. A missing or empty value resolves to the shipped default.
+  Anything else — a scheme (`https://`), a leading or trailing `/`, an empty part, four or
+  more parts, or any other character — is malformed and turns reporting **off**; the
+  consumer never guesses a repo.
+- `max_per_session` — a non-negative integer (`[0-9]+`). `0` means nothing is filed
+  upstream in that session. A missing value, or any value that is not a non-negative
+  integer (negatives included), resolves to `3`.
+
+**Opting out means `enabled: false`, not deleting the block.** The documented opt-out is:
+
+```yaml
+feedback:
+  enabled: false
+```
+
+A missing block is **re-seeded on** (with a fresh notice) on the next upgrade — deleting
+the block is not an opt-out.
+
+**Umbrella children.** `harness.config.yaml` is a standalone, program-read config (ADR-0004):
+each child's **own** `feedback:` block governs sessions rooted in that child, with no
+inheritance from the coordinator and no override from it either. The cascade seeds and
+prints a notice for each target separately. The local fallback directory the reporter
+writes to (`progress/feedback/`) always resolves **under the governing harness dir** —
+`<child>/.harness/progress/feedback/` for a child, `.harness/progress/feedback/` for any
+other installed target, and `progress/feedback/` in the harness source repo — never the
+umbrella's own directory.
+
+**Changing it later.** There is no install-time prompt or `--feedback=` flag. Edit the
+value in `.harness/harness.config.yaml` (or the umbrella child's own copy) directly.
+
 ## Worker roster (`workers.roster`) — opt-in, local-only
 
 **What it is.** With `workers.roster: true`, every install writes
@@ -1132,8 +1196,9 @@ compare model quality.
 
 The installer preserves an existing `.harness/harness.config.yaml` on upgrade. To get
 newer additive default keys (e.g. the `umbrella.manifest`,
-`verification.integration_command`, and the `telemetry:` block introduced after a target
-was first installed) into that preserved file, every upgrade runs an **append-only
+`verification.integration_command`, the `telemetry:` block, and the `feedback:` block
+introduced after a target was first installed) into that preserved file, every upgrade
+runs an **append-only
 migration**: it adds any missing default key (under its section header, or as a new
 header+key block at EOF) **without altering any existing value or comment**. It is
 idempotent — a config that already has every default key is left byte-for-byte unchanged.

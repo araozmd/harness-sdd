@@ -280,7 +280,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
             shutil.rmtree(probe,ignore_errors=True)
     else:
         print('skip - live opencode probe unavailable; static source-layout assertions passed (R9)')
-    assert (src/'VERSION').read_text().strip()=='0.84.4' and not (src/'GEMINI.md').exists()
+    assert (src/'VERSION').read_text().strip()=='0.85.0' and not (src/'GEMINI.md').exists()
     a=(src/'AGENTS.md').read_text()
     for token in ('./init.sh','non-zero','STOP','harness.config.yaml','agents/orchestrator.md','progress/lessons.md','spec-ready','in-progress','independent Reviewer','chat history','telemetry','tokens','VERSION','CHANGELOG.md','MINOR','MAJOR','branch','PR','main'):
         assert token.lower() in a.lower(),token
