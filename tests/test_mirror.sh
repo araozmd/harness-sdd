@@ -39,6 +39,20 @@ tr '\n' ' ' < "$DOCS" | grep -qiE 'scopes[^.]{0,10}project[^.]{0,10}repo' || fai
 grep -qi 'no[- ]*mcp\|never[[:space:]]*mcp\|not[[:space:]]*mcp' "$DOCS" \
   || grep -qi 'gh` CLI ONLY'      "$DOCS" || fail "docs do not reaffirm the gh-only / no-MCP transport"
 grep -qi 'one-way'                "$DOCS" || fail "docs do not reaffirm the one-way invariant"
+# E99-F66: the github-projects contract describes the CURRENT canonical rule — section-scoped,
+# two-token anchors, so an unrelated mention elsewhere in the file cannot satisfy them.
+GHSEC=$(awk '/^## github-projects contract/{k=1;next} /^## /{k=0} k' "$DOCS" | tr '\n' ' ' | tr -s ' ')
+echo "$GHSEC" | grep -qE 'on the project \(else the lowest number\) is kept' \
+  && fail "board-mirror.md still says project membership alone picks the canonical issue [mirror_doc_current_only_canonical]"
+echo "$GHSEC" | grep -qE 'lowest-numbered \*current\* one on the project[^.]{0,80}lowest-numbered \*current\* one anywhere' \
+  || fail "board-mirror.md does not restrict canonical selection to current issues [mirror_doc_current_only_canonical]"
+echo "$GHSEC" | grep -qE 'trusted only when it returns exactly one mirror-owned issue[^.]{0,80}already on the project[^.]{0,60}no other project item carries the id' \
+  || fail "board-mirror.md does not state when a targeted search result is trusted [mirror_doc_search_trust]"
+echo "$GHSEC" | grep -qE 'body ends with the `Seeded from' \
+  && fail "board-mirror.md says the seed marker must END the body; the tool matches it anywhere [mirror_doc_marker_anywhere]"
+echo "$GHSEC" | grep -qE 'its body carries the `Seeded from[^;]{0,60}marker the mirror writes' \
+  || fail "board-mirror.md does not say the body CARRIES the seed marker (matched anywhere) [mirror_doc_marker_anywhere]"
+pass "board-mirror.md documents the current-only canonical rule, the search trust and the marker location [mirror_doc_current_only_canonical]"
 pass "docs pin gh transport contract: min gh version + scopes + gh-only/no-MCP + one-way [docs_pin_gh_transport_contract]"
 
 # ── VERSION shape (R14) — SemVer shape + a matching CHANGELOG entry. Behavior/shape only:
