@@ -1613,7 +1613,13 @@
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E32-feedback-loop/F01-feedback-config/"
+          "spec_path": "specs/epics/E32-feedback-loop/F01-feedback-config/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (219)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E32-F01 done --evidence <merge-ref>`",
+            "pr": "219"
+          }
         },
         {
           "id": "E32-F02",
