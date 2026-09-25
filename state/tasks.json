@@ -1608,7 +1608,8 @@
           "sdd": true,
           "autonomous": true,
           "depends_on": [
-            "E32-F02"
+            "E32-F02",
+            "E32-F04"
           ],
           "spec_path": "specs/epics/E32-feedback-loop/F03-report-rule/"
         },

@@ -114,7 +114,7 @@ reporters) and the harness maintainer (the triager).
 |---|---|---|---|---|
 | E32-F01 | feedback.* config block seeded on fresh install and upgrade, with the one-line opt-out notice | pending | true | — |
 | E32-F02 | tools/harness-report.sh: redaction pass, versioned body marker, duplicate search, per-session cap, progress/ fallback | pending | true | E32-F01 |
-| E32-F03 | Reporting rule + /sdd-report command on every front end: four triggers, end-of-task and early-stop filing | pending | true | E32-F02 |
+| E32-F03 | Reporting rule + /sdd-report command on every front end: four triggers, end-of-task and early-stop filing | pending | true | E32-F02, E32-F04 |
 | E32-F04 | Source-repo GitHub Action that labels marker-carrying issues without trusting their bodies | pending | true | E32-F02 |
 | E32-F05 | Source-only /sdd-triage: group harness-feedback issues, propose routes, seed only on human approval | pending | true | E32-F04 |
 
@@ -135,3 +135,5 @@ ADR deltas: **ADR-0005** (source-only surfaces emitted only by `--self`) and **A
     (ADR-0004); F02 and F03 follow that answer.
   - F04 owns the trigger→label mapping: `missing-capability` → `enhancement`, the other
     three → `bug`. It labels on `opened` only, never on edit.
+  - F04 lands before F03 (F03 depends on F04), so no report is filed before the labeler
+    exists — a report opened earlier would stay unlabeled and invisible to F05's triage.
