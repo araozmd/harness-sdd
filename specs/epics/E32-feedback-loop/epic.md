@@ -50,6 +50,11 @@ reporters) and the harness maintainer (the triager).
   either. There is a **per-session cap** (the drill names its value and config key).
 - Reports are filed when the task ends **or** when it stops early (aborted, parked, or
   failed), because a harness malfunction is most likely to fire on an early stop.
+- **`init.sh` hard stop:** the "STOP and report" rule in `AGENTS.md` gets one narrow
+  exception, reporting. When `init.sh` exits non-zero and the failure is a harness
+  malfunction, the session may call the F02 reporter **once** as part of *report*, then
+  stop. That call makes no repair and no board write, and the session doesn't continue,
+  so reporting never becomes a way around the gate. F03 owns this wording.
 - When `gh` is missing or unauthenticated, or filing fails, the report is written under
   `progress/` instead, and it never blocks or fails the task.
 - `feedback.enabled: false` disables reporting completely. A fresh install seeds `true`
@@ -79,7 +84,8 @@ reporters) and the harness maintainer (the triager).
   auto-fixing an issue without the human gate; telemetry or usage analytics; any channel
   other than GitHub issues; reporting on project (non-harness) defects.
 - Installed-body change: each PR that changes the installed body bumps `VERSION` per
-  `AGENTS.md`. F01 is MINOR (new config), F02 is PATCH (a tool nothing calls yet), and F03
+  `AGENTS.md`. F01 is MINOR (new config), F02 is MINOR (a new installed tool,
+  even before anything calls it), and F03
   is MINOR (reporting goes live).
 - Front-end parity: the reporting rule and command must reach Claude, Codex, and OpenCode
   through the existing emitters. Source-repo-only surfaces (the labeler workflow,
