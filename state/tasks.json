@@ -1594,7 +1594,7 @@
         {
           "id": "E32-F01",
           "title": "feedback.* config block seeded on fresh install and upgrade, with the one-line opt-out notice",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],

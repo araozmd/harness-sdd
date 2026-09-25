@@ -339,3 +339,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-25 E32 pr-loop: PR #218 round 4 (cap) returned 2 blocking P2s (fixed in 685eb8d). Human override — cap raised to 5.
 - 2026-09-25 E32 pr-loop: PR #218 round 5 (raised cap) returned 1 P2 (host-qualified feedback.repo), fixed in ab26421. Human override: merge without another round (planning docs only; every finding fixed).
 - 2026-09-25 E32-F01 Orchestrator: Architect wrote the 4 spec files (11 R-ids, complexity=complex); doc-critic applied 5 advisory findings (wider existing-block detection, pinned `repo` grammar, `true`-only enablement, CHANGELOG notice). Set spec-ready; autonomous → in-progress. Spawning Builder.
+- 2026-09-25 E32-F01 in-progress → in-review (builder round 1: spec complexity=complex, escalation not armed). 4 commits, VERSION 0.85.0; the new suite is 13/13, but the full suite didn't complete because the host ran out of memory (an unrelated Go test process was using 37 GiB).
