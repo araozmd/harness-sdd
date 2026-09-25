@@ -265,7 +265,27 @@ test_no_notice_when_present() {
     || fail "R6: re-run on a config that already carries the feedback: block printed a notice: $(cat "$T/r6-notice.txt")"
   ! grep -qF 'feedback.enabled: false' "$_rout" \
     || fail "R6: re-run on a config that already carries the feedback: block printed the notice phrase somewhere on stdout"
-  pass "re-run on a config that already carries the feedback: block prints zero notice lines (R6) [test_no_notice_when_present]"
+
+  # One-line flow form (the operator's opt-out, `feedback: { enabled: false }`) must be
+  # recognized as "already present" too — a presence-check regex narrowed to the block
+  # form alone (reviewer round-1 M4) misses this shape and prints a spurious notice
+  # telling an operator who already opted out to opt out, naming an empty repo.
+  _rf="$T/r6-flow"; mkdir -p "$_rf"
+  sh "$INSTALL" "$_rf" >/dev/null 2>&1 || fail "R6 flow-form: seed install failed"
+  _rfcfg="$_rf/.harness/harness.config.yaml"
+  strip_feedback_block "$_rfcfg"
+  printf '\nfeedback: { enabled: false }\n' >> "$_rfcfg"
+  grep -Eq '^feedback:' "$_rfcfg" \
+    || fail "R6 flow-form: setup failed — no column-0 feedback: line present after fixture write"
+  _rfout="$T/r6-flow.out"
+  sh "$INSTALL" "$_rf" >"$_rfout" 2>/dev/null || fail "R6 flow-form: second install failed"
+  notice_lines "$_rfout" "github.com/araozmd/harness-sdd" "$_rfcfg" > "$T/r6-flow-notice.txt"
+  [ ! -s "$T/r6-flow-notice.txt" ] \
+    || fail "R6 flow-form: re-run on a config carrying the one-line flow-form feedback: { enabled: false } printed a notice: $(cat "$T/r6-flow-notice.txt")"
+  ! grep -qF 'feedback.enabled: false' "$_rfout" \
+    || fail "R6 flow-form: re-run on a config carrying the one-line flow-form feedback: block printed the notice phrase somewhere on stdout"
+
+  pass "re-run on a config that already carries the feedback: block, in either the block form or the one-line flow form, prints zero notice lines (R6) [test_no_notice_when_present]"
 }
 
 # ── R7 ──────────────────────────────────────────────────────────────────────────────────
@@ -331,11 +351,16 @@ test_cascade_per_target_seed_and_notice() {
 # ── R9 / R10 (docs) ──────────────────────────────────────────────────────────────────────
 # _section <heading-literal> <file> — from the column-0 heading through, but excluding,
 # the next column-0 `## ` heading or EOF. Uses index()==1 (no regex) so backticks/parens/
-# em-dashes in the heading need no escaping.
+# em-dashes in the heading need no escaping. FENCE-AWARE (tests/lib/fence.awk, E99-F131,
+# enforced repo-wide by tests/test_change_size.sh R9d): docs/INSTALL.md's feedback section
+# carries a fenced YAML example, so a bare heading-reset toggle would misread a column-0
+# '#'-looking line inside a fence as the next heading and truncate the section.
+FENCE_AWK="$(cat "$SRC/tests/lib/fence.awk")"
 _section() {
-  awk -v h="$1" '
-    index($0,h)==1 { k=1; print; next }
-    k && /^## / { exit }
+  awk -v h="$1" "$FENCE_AWK"'
+    fence_delim($0) { if (k) print; next }
+    !fence && index($0,h)==1 { k=1; print; next }
+    !fence && k && /^## / { exit }
     k { print }
   ' "$2"
 }
