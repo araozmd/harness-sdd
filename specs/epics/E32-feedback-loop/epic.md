@@ -37,9 +37,13 @@ reporters) and the harness maintainer (the triager).
   network or auth errors, and agent mistakes the harness correctly caught. The triggers,
   the non-triggers, and the redaction pass are verified by fixture scenarios and a
   redaction corpus that the feature specs define.
-- Every filed body passes a **redaction pass** (secrets, tokens, emails, absolute paths,
-  and project source) before `gh issue create`. It describes harness behavior only and
-  names harness files, never project files.
+- Every filed body is built **only from allow-listed structured fields** (trigger type,
+  harness `VERSION`, host, role, phase, harness-owned paths validated against
+  `tools/harness-owned-paths.sh`, harness command name, exit code, a fixed-vocabulary
+  symptom code). Free-form text is never sent upstream; it stays in the local
+  `progress/feedback/` copy. A **redaction pass** (secrets, tokens, emails, absolute
+  paths) still runs before `gh issue create` as a second layer. The body describes
+  harness behavior only and names harness files, never project files.
 - Filing is bounded. The agent searches for duplicates first (`gh issue list --search`).
   If a duplicate exists, no new issue is opened and the agent doesn't comment on it
   either. There is a **per-session cap** (the drill names its value and config key).
@@ -68,8 +72,8 @@ reporters) and the harness maintainer (the triager).
   applies to the **labeler Action**: it parses the marker as data and never puts issue
   text into a `run:` shell line or a `${{ }}` expression (script-injection risk).
 - **Privacy is load-bearing.** Filing is automatic and there's no human review, and a
-  target may be a private repo. So redaction and the "harness files only" rule are part of
-  the contract, not advice.
+  target may be a private repo. So the allow-listed body (no free-form text upstream),
+  redaction, and the "harness files only" rule are part of the contract, not advice.
 - **Non-goals:** scheduled or autonomous triage (deferred until real reports exist);
   auto-fixing an issue without the human gate; telemetry or usage analytics; any channel
   other than GitHub issues; reporting on project (non-harness) defects.
