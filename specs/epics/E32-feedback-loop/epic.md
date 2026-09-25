@@ -23,7 +23,7 @@ reporters) and the harness maintainer (the triager).
 ## Success criteria (epic level)
 
 - An installed harness with `feedback.enabled: true` (the **default**) and an
-  authenticated `gh` files an issue on `feedback.repo` (default `araozmd/harness-sdd`) at
+  authenticated `gh` files an issue on `feedback.repo` (default `github.com/araozmd/harness-sdd`, host-qualified so a GitHub Enterprise checkout still reports to the public upstream) at
   the **end of the task**, with no human confirmation. It files only when one of the four
   triggers fired:
   1. **harness malfunction:** `init.sh`, `harness-install.sh`, `tools/*`, or a TaskStore
