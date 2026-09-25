@@ -274,7 +274,8 @@ on the assumption the Orchestrator will re-derive it.
 
 - **Approve** → tell the Orchestrator to set `done`; append a summary to
   `progress/history.md`. Include the change-size tier and, for `advise`/`escalate`, the
-  recorded decision.
+  recorded decision. The summary is not the closure entry: the Orchestrator writes that
+  after the merge, in the project's closure-line format when `init.project.sh` enforces one.
 - **Reject** → write detailed feedback to `progress/<run>/review.md` and send the
   feature back to `in-progress` for the Builder.
 

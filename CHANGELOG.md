@@ -4,6 +4,21 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.84.4] — 2026-09-24
+
+### Changed — agents write `done` in the project's enforced closure-line format
+
+- **`agents/orchestrator.md` → "Writing `done`" step 4.** When the project's
+  `init.project.sh` enforces a closure-line format for `progress/history.md` (a check that
+  every `done` feature has a closure entry), the Orchestrator writes that entry in exactly
+  that format; the project's entrypoints document it and the check prints it on failure.
+  Free text around it is fine; only the fixed line closes the feature.
+- **`agents/reviewer.md` → "Verdict".** The Reviewer's approval summary is not the closure
+  entry; the Orchestrator writes it after the merge.
+- Origin: a downstream project replaced a free-text closure detector (every review round found
+  another wording that closed the wrong feature, e.g. a feature's own spec PR `MERGED`) with a
+  fixed-format line. The harness ships no such check itself; these are pointers only.
+
 ## [0.84.3] — 2026-09-24
 
 ### Fixed — `store/board-mirror.md` states the canonical-issue rule the mirror actually runs
