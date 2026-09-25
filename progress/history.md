@@ -345,3 +345,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-25 E32-F01 in-review → reject (round 2): F3, the test comment claims R9d enforces a convention it can't see (M17 survived). Seeded E99-F166 for R9d's quote-pairing blind spot. Back to in-progress.
 - 2026-09-25 E32-F01 in-progress → in-review (builder round 3): F3 comment now states the R9d gap and cites E99-F166.
 - 2026-09-25 E32-F01 in-review → approve (round 3). M4/M18 caught, M17 is a known gap tracked by E99-F166, full suite 51/51 (bash; no dash on this host), change-size ok (89 production lines). Opening the PR.
+- 2026-09-25 E32-F01 merged in PR #219 at d337bb8 (Codex review clean in round 1). Marked done with evidence; tagged v0.85.0.
