@@ -343,3 +343,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-25 E32-F01 in-review → reject (round 1): the R6 no-notice check isn't tested for the one-line form; the INSTALL.md feedback section overstates behavior that isn't shipped yet. Suite: 50/51, and the one failure is host-caused (a mise python3 shim). Back to in-progress.
 - 2026-09-25 E32-F01 in-progress → in-review (builder round 2): F1/F2 fixed, plus the R9d fence convention. Full suite 51/51 (--jobs 2, disk TMPDIR, real python3 first on PATH).
 - 2026-09-25 E32-F01 in-review → reject (round 2): F3, the test comment claims R9d enforces a convention it can't see (M17 survived). Seeded E99-F166 for R9d's quote-pairing blind spot. Back to in-progress.
+- 2026-09-25 E32-F01 in-progress → in-review (builder round 3): F3 comment now states the R9d gap and cites E99-F166.
