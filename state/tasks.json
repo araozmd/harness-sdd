@@ -1024,11 +1024,26 @@
           "id": "E99-F165",
           "title": "sync-board.mjs keys find-or-create on the FULL issue title and trusts a targeted --search miss, so a renamed feature or a lagging search index mints twin issues (a consumer board reached 11 duplicated ids)",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "98ebb4c8f8e9a5f3d43649f0f3a35f80058a7b6c", "ref": "98ebb4c8f8e9a5f3d43649f0f3a35f80058a7b6c", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "98ebb4c8f8e9a5f3d43649f0f3a35f80058a7b6c",
+            "ref": "98ebb4c8f8e9a5f3d43649f0f3a35f80058a7b6c",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F165-board-mirror-reconcile-by-id/"
+        },
+        {
+          "id": "E99-F166",
+          "title": "test_change_size.sh R9d pairs single quotes file-wide, so one stray apostrophe hides every later awk program from the fence-convention scan (silent pass)",
+          "status": "pending",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F166-r9d-quote-pairing-blind-spot/"
         }
       ]
     },
@@ -1594,7 +1609,7 @@
         {
           "id": "E32-F01",
           "title": "feedback.* config block seeded on fresh install and upgrade, with the one-line opt-out notice",
-          "status": "in-review",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
