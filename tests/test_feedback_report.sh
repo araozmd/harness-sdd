@@ -83,15 +83,18 @@ make_stub
 # counter increment would happen in a subshell and every fixture would collide on fx1 while
 # a previous test's report files survived in it.
 make_fixture() { # make_fixture [enabled] [repo] [max_per_session] [installed-version]
+  # ${x-DEFAULT} (no colon): an EXPLICIT empty arg must stay empty, so R3's "missing/empty
+  # repo resolves to the shipped default" fixture really exercises the tool's default and
+  # not a fixture that wrote the default in itself.
   _fx="$(mktemp -d "$T/fx.XXXXXX" 2>/dev/null)" || fail "could not create a fixture dir"
   mkdir -p "$_fx/.harness/tools" "$_fx/bin"
   cp -R "$SRC/tools/." "$_fx/.harness/tools/" 2>/dev/null || true
-  printf '%s\n' "${4:-9.9.9}" > "$_fx/.harness/.harness-version"
+  printf '%s\n' "${4-9.9.9}" > "$_fx/.harness/.harness-version"
   {
     printf 'feedback:\n'
-    printf '  enabled: %s\n' "${1:-true}"
-    printf '  repo: %s\n' "${2:-github.com/araozmd/harness-sdd}"
-    printf '  max_per_session: %s\n' "${3:-3}"
+    printf '  enabled: %s\n' "${1-true}"
+    printf '  repo: %s\n' "${2-github.com/araozmd/harness-sdd}"
+    printf '  max_per_session: %s\n' "${3-3}"
   } > "$_fx/.harness/harness.config.yaml"
   git -C "$_fx" init -q 2>/dev/null || true
   printf '%s\n' "$_fx"
@@ -302,7 +305,25 @@ test_field_allowlist_rejects() {
   # Missing required fields take the same reject path as an out-of-list value.
   _reject_case "missing trigger" --symptom tool-failure
   _reject_case "missing symptom" --trigger harness-malfunction
-  pass "R4 each allow-list rejects an out-of-list value and accepts a valid one; missing trigger/symptom reject (R4) [test_field_allowlist_rejects]"
+
+  # FULL enum coverage: every member of every vocabulary must be accepted. A mutant that
+  # drops ONE code from an enum has no other way to red, so each member gets its own
+  # positive control (delete a code and this loop names it).
+  for _tr in harness-malfunction contradictory-instruction workaround missing-capability; do
+    _create_case "trigger $_tr" --trigger "$_tr" --symptom tool-failure
+  done
+  for _sy in init-failure install-failure tool-failure board-write-failure gate-unsatisfiable \
+             instruction-conflict doc-conflict workflow-gap state-corruption; do
+    _create_case "symptom $_sy" --trigger harness-malfunction --symptom "$_sy"
+  done
+  for _ro in orchestrator architect builder builder-heavy reviewer scout \
+             driller fixer planner inception doc-critic pr-fixer; do
+    _create_case "role $_ro" --trigger harness-malfunction --symptom tool-failure --role "$_ro"
+  done
+  for _ph in inception architect builder reviewer scout slice-dispatch handoff install; do
+    _create_case "phase $_ph" --trigger harness-malfunction --symptom tool-failure --phase "$_ph"
+  done
+  pass "R4 each allow-list rejects an out-of-list value and accepts every valid member; missing trigger/symptom reject (R4) [test_field_allowlist_rejects]"
 }
 
 # ── R5 ────────────────────────────────────────────────────────────────────────────────────
@@ -385,6 +406,10 @@ test_body_allowlisted_no_freeform() {
   _off="$(awk 'NR > 1 && $0 !~ /^[A-Za-z][A-Za-z ]*: / { print }' "$BODY")"
   [ -z "$_off" ] \
     || fail "R7: the upstream body carries a line that is not a marker or Label: value line: $_off"
+  # …and the label lines are in the plan's FIXED order.
+  _ord="$(sed -n 's/^\([A-Za-z][A-Za-z ]*\): .*/\1/p' "$BODY" | tr '\n' '|')"
+  [ "$_ord" = "Harness version|Trigger|Symptom|File|Exit code|Role|Phase|" ] \
+    || fail "R7: the body's Label: value lines are not in the fixed order (got: $_ord)"
   # Positive control: the same token IS preserved in the local copy, so the negative above
   # is not dead.
   _rep="$(latest_report "$_fx")"
@@ -398,20 +423,31 @@ test_redaction_corpus() {
   _in="$T/r8-in.txt"
   cat > "$_in" <<'EOF'
 Token: ghp_abcdefghijklmnop
-Token2: sk-abcdefghijklmnop
-Token3: AKIAABCDEFGHIJKLMNOP
+Token2: gho_abcdefghijklmnop
+Token3: ghu_abcdefghijklmnop
+Token4: ghs_abcdefghijklmnop
+Token5: ghr_abcdefghijklmnop
+Token6: github_pat_abcdefghijklmnop
+Token7: sk-abcdefghijklmnop
+Token8: AKIAABCDEFGHIJKLMNOP
 Email: user@example.com
 Path: /home/secret/place
 Path2: /tmp/secret/place
 Path3: /Users/alice/secret
+Path4: /private/var/secret
+Path5: /private/tmp
 EOF
   _out="$T/r8-out.txt"
   sh "$TOOL" redact < "$_in" > "$_out"
 
   # Positive controls on the INPUT: each raw shape must be present before the pass, or the
-  # absence assertions below would be vacuous.
-  for _raw in 'ghp_abcdefghijklmnop' 'sk-abcdefghijklmnop' 'AKIAABCDEFGHIJKLMNOP' \
-              'user@example.com' '/home/secret/place' '/tmp/secret/place' '/Users/alice/secret'; do
+  # absence assertions below would be vacuous. Every named corpus shape is covered so a
+  # mutant that drops one prefix or one alternative reds here and names it.
+  for _raw in 'ghp_abcdefghijklmnop' 'gho_abcdefghijklmnop' 'ghu_abcdefghijklmnop' \
+              'ghs_abcdefghijklmnop' 'ghr_abcdefghijklmnop' 'github_pat_abcdefghijklmnop' \
+              'sk-abcdefghijklmnop' 'AKIAABCDEFGHIJKLMNOP' \
+              'user@example.com' '/home/secret/place' '/tmp/secret/place' '/Users/alice/secret' \
+              '/private/var/secret' '/private/tmp'; do
     present "$_raw" "$_in" "R8 positive control: the input does not contain the raw shape $_raw"
     absent "$_raw" "$_out" "R8: redact left the raw shape $_raw in its output"
   done
@@ -450,15 +486,16 @@ EOF
 
 # ── R9 ────────────────────────────────────────────────────────────────────────────────────
 test_duplicate_skips_create() {
-  # (a) CONTROL: an issue whose title merely mentions the words must NOT suppress a distinct
-  # report. A substring matcher would wrongly turn this red.
+  # (a) CONTROL: an issue whose title merely mentions the words — here it EMBEDS the fixed
+  # title inside a longer title — must NOT suppress a distinct report. An inexact
+  # matcher (substring, prefix, case-folded) would wrongly turn this red.
   _fx="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
   use_fx "$_fx"
-  SH_LIST_JSON='[{"number":9,"title":"harness-feedback malfunction tool-failure tools/run-tests.sh"}]'
+  SH_LIST_JSON='[{"number":9,"title":"Re: [harness-feedback] harness-malfunction tool-failure in tools/run-tests.sh (possible duplicate?)"}]'
   run_ok "$_fx" --trigger harness-malfunction --symptom tool-failure \
     --file tools/run-tests.sh --session-id s-dup-a
   [ "$(create_count)" = "1" ] \
-    || fail "R9: a returned issue whose title merely mentions the words suppressed a distinct report; matching must be exact, not substring"
+    || fail "R9: a returned issue whose title merely mentions the words suppressed a distinct report; matching must be exact, not substring/prefix"
   [ "$(argv_value --search)" = "in:title [harness-feedback] harness-malfunction tool-failure in tools/run-tests.sh" ] \
     || fail "R9: the search query is not title-scoped (got: $(argv_value --search))"
   [ "$(argv_value --json)" = "number,title" ] \
