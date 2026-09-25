@@ -370,6 +370,28 @@ test_field_allowlist_rejects() {
     --command 'harness-feedback:evil' --session-id s-r4
   [ "$(create_count)" = "0" ] \
     || fail "R4/F5: a tools/ basename carrying ':' was accepted; the charset guard must reject any name that could inject a body line/marker token"
+  # (c) embedded NEWLINE (F5 round-3 bypass): the old LINE-BASED grep matched the first
+  # line and, with a tools/ file of that exact newline-bearing name present, the presence
+  # arm accepted it — the `Command:` line then forged a second marker token.
+  _f6="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _nl_cmd="sneaky
+harness-feedback:evil"
+  printf 'x\n' > "$_f6/.harness/tools/$_nl_cmd"
+  use_fx "$_f6"
+  run_ok "$_f6" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh \
+    --command "$_nl_cmd" --session-id s-r4
+  [ "$(create_count)" = "0" ] \
+    || fail "R4/F5: a command name embedding a newline was accepted; it can inject a second harness-feedback: token"
+  [ "$(report_count "$_f6")" -ge 1 ] \
+    || fail "R4/F5: the embedded-newline command reject wrote no local report"
+  # Adversarial control: a normal create in the same fixture yields exactly ONE marker token.
+  run_ok "$_f6" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh \
+    --command run-tests.sh --session-id s-r4
+  [ "$(create_count)" = "1" ] \
+    || fail "R4/F5: the normal-command control did not create"
+  _mc="$(grep -c 'harness-feedback:' "$BODY")" || _mc=1
+  [ "$_mc" = "1" ] \
+    || fail "R4/F5: the created body carries $_mc 'harness-feedback:' occurrences, expected exactly 1"
 
   pass "R4 each allow-list rejects an out-of-list value and accepts every valid member; missing trigger/symptom reject; --command is a shippedness allow-list (R4) [test_field_allowlist_rejects]"
 }
@@ -742,11 +764,11 @@ test_shipping_artifacts() {
   grep -qF 'E32-F03' "$_is" || fail "R12: the INSTALL.md feedback section does not name E32-F03"
 
   # Pristine-bytes control (tests.md R12): the stale phrase must be the REAL pre-change
-  # text, and must be gone from the working file. `origin/main`/`main` is the branch base
-  # before this change merges; once it carries the change the base no longer holds the
-  # phrase, so the liveness half is evaluated only while it is still true (post-merge it
-  # would red every run for a reason unrelated to this feature). The working-file negative
-  # always runs, so reverting the sentence reds in every environment.
+  # text, and must be gone from the working file. While the base branch's docs/INSTALL.md
+  # DIFFERS from the working copy, the base IS the pre-change text and MUST carry the phrase
+  # (a base that lost or never had it reds here, so the negative can never be decorative).
+  # Once the base already carries the change (post-merge) the liveness half is N/A; the
+  # working-file negative always runs, so reverting the sentence reds in every environment.
   _now="$(grep -cF 'No reporter ships yet' "$SRC/docs/INSTALL.md")" || _now=0
   [ "$_now" = "0" ] \
     || fail "R12: the working docs/INSTALL.md still contains 'No reporter ships yet' ($_now line(s))"
@@ -754,15 +776,18 @@ test_shipping_artifacts() {
   for _ref in origin/main main; do
     if git -C "$SRC" rev-parse --verify --quiet "$_ref" >/dev/null 2>&1; then _base="$_ref"; break; fi
   done
-  if [ -n "$_base" ] && _bytes="$(git -C "$SRC" show "$_base:docs/INSTALL.md" 2>/dev/null)"; then
-    _old="$(printf '%s\n' "$_bytes" | grep -cF 'No reporter ships yet')" || _old=0
-    if [ "$_old" -ge 1 ]; then
-      _ctrl="$_base carries the pre-change phrase on $_old line(s) — the negative is LIVE"
+  _base_file="$T/r12-base-install.md"
+  if [ -n "$_base" ] && git -C "$SRC" show "$_base:docs/INSTALL.md" > "$_base_file" 2>/dev/null; then
+    _old="$(grep -cF 'No reporter ships yet' "$_base_file")" || _old=0
+    if cmp -s "$_base_file" "$SRC/docs/INSTALL.md"; then
+      _ctrl="$_base already carries the working copy (post-merge); liveness assertion N/A, working-file negative enforced"
     else
-      _ctrl="$_base no longer carries the pre-change phrase (post-merge); liveness half skipped, working-file negative still enforced"
+      [ "$_old" -ge 1 ] \
+        || fail "R12 pristine control: $_base differs from the working docs/INSTALL.md (so it is the pre-change base) but contains 'No reporter ships yet' on 0 lines — the forbidden phrase is not the real pre-change text, so the working-file negative is decorative"
+      _ctrl="$_base carries the real pre-change phrase on $_old line(s) — the liveness assertion holds"
     fi
   else
-    _ctrl="no origin/main|main base ref to read; liveness half skipped, working-file negative still enforced"
+    _ctrl="no origin/main|main base ref to read; liveness assertion N/A, working-file negative enforced"
   fi
   printf '%s\n' "$_ctrl" > "$T/r12-pristine-control.txt"
   pass "R12 VERSION, the chmod entry, the CHANGELOG [0.86.0] span, the corrected INSTALL.md feedback span, and the pristine-bytes control all ship (R12) [test_shipping_artifacts]"

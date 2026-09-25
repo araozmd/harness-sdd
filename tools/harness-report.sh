@@ -219,16 +219,23 @@ _valid_exit_code() {
 # HARNESS_PR_LOOP_CMDS. A desync is not trusted: tests/test_feedback_report.sh::
 # test_shipped_command_set_converges extracts the installer's own lists and reds on ANY
 # divergence, in either direction (the convergence-test pattern the models:/workers: blocks
-# use). The charset guard rejects `:`/whitespace so no command name can inject a body line.
+# use). The WHOLE-STRING charset guard below rejects every character outside
+# `[A-Za-z0-9._-]` — `:`, whitespace AND embedded newlines — so no command name can inject
+# a body line or a second marker token.
 _shipped_sdd_cmds=" sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-loop "
 _is_shipped_sdd() {
   case "$_shipped_sdd_cmds" in *" $1 "*) return 0 ;; *) return 1 ;; esac
 }
 _valid_command() {
   _c="$1"
-  # A harness command name is a bare basename of [A-Za-z0-9._-]+ — this rejects path
-  # separators AND any charset that could inject a `Label:`/marker token into the body.
-  printf '%s' "$_c" | grep -qE '^[A-Za-z0-9._-]+$' || return 1
+  # A harness command name is a bare basename of [A-Za-z0-9._-]+. The guard is a POSIX
+  # `case` over the WHOLE string (not a line-based grep): an embedded newline was the F5
+  # bypass, because a per-line match let `sneaky\nharness-feedback:evil` through and the
+  # `Command:` line then forged a second marker token. `case` matches any character outside
+  # the set, newline included.
+  case "$_c" in
+    ''|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
   if [ -f "$H/tools/$_c" ]; then return 0; fi
   case "$_c" in
     init.sh|harness-install.sh)
