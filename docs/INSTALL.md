@@ -419,10 +419,11 @@ batch sequentially with `/sdd-fix`.
 **What it is.** A top-level `feedback:` block that is the one visible switch for E32: when
 one of a narrow set of harness defects is detected, the harness may auto-report it as a
 scrubbed GitHub issue upstream (allow-listed harness fields only, never project content).
-**No reporter ships yet** — this block is accurate but inert until **E32-F02** (the report
-tool: the allow-list and redaction pass) and **E32-F03** (the triggers that decide when
-reporting fires) land. The switch ships **on**, and the installer tells you so at the
-moment it becomes possible to matter.
+**The report tool ships** (`tools/harness-report.sh`, **E32-F02**): it enforces the
+allow-list, the versioned body marker, the duplicate search, the per-session cap, and the
+redaction pass. Reporting stays inert until **E32-F03** (the triggers that decide when
+reporting fires) lands — until then nothing calls the tool. The switch ships **on**, and
+the installer tells you so at the moment it becomes possible to matter.
 
 **Shipped defaults.** A fresh install, and an upgrade of a target that has no `feedback:`
 block yet, both seed:
