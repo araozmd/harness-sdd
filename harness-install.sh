@@ -1773,7 +1773,7 @@ codex codex non-interactive
 # own agents/commands sharing the same dir (Codex r2 P1). Keep in sync with the
 # emit_agent calls and the command-copy loops in install_one().
 HARNESS_CLAUDE_SHIMS="orchestrator architect builder builder-heavy reviewer scout doc-critic pr-fixer"
-HARNESS_SDD_CMDS="sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel"
+HARNESS_SDD_CMDS="sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-report"
 
 # E18-F01: the pr_loop glue is GATED on the OPT-IN `pr_loop.enabled`, so it is emitted
 # from a SEPARATE list — joining $HARNESS_SDD_CMDS would make it unconditional (and, with
@@ -5759,6 +5759,61 @@ This command is argument-free. If `$ARGUMENTS` is non-empty, STOP and report usa
    API or background shell agent.
 EOF
 
+  # /sdd-report (E32-F03) — the prompts decide WHEN to call F02's reporter; this body
+  # never re-implements its filing mechanics. The canonical body is written in TARGET
+  # layout (`.harness/` paths); `--self` strips the prefix for the source copy.
+  cat > "$CMDDIR/sdd-report.md" <<'EOF'
+---
+description: File one harness-feedback report through tools/harness-report.sh for one of the four triggers
+---
+
+File **exactly one** harness-feedback report for a **harness defect**, then stop. This
+command drafts the report and calls the reporter; `.harness/tools/harness-report.sh` owns
+every filing mechanic (allow-list, marker, duplicate search, per-session cap, redaction) —
+never re-implement any of them here.
+Resolve every relative path against `.harness/`.
+
+1. **Identify the trigger, or refuse.** Read `.harness/progress/feedback/notes.md` and the
+   direct evidence. The trigger MUST be exactly one of `harness-malfunction`,
+   `contradictory-instruction`, `workaround`, or `missing-capability`. A failure of the
+   project's own code or tests, a transient network or auth error, or an agent mistake the
+   harness correctly caught is **not** a trigger — report nothing and STOP.
+2. **Pick the symptom** from the fixed vocabulary: `init-failure`, `install-failure`,
+   `tool-failure`, `board-write-failure`, `gate-unsatisfiable`, `instruction-conflict`,
+   `doc-conflict`, `workflow-gap`, `state-corruption`. An `init.sh` failure maps to
+   `init-failure`. Never invent a code.
+3. **Pass at least one harness-owned `--file`.** Use `init.sh` for the `init.sh`-failure
+   path; otherwise the failing harness tool/path (for example `tools/harness-report.sh`, or
+   the named `--command`). F02 rejects the whole report to a local copy when no supplied
+   path is harness-owned, so a report with no accepted `--file` never files upstream.
+4. **Call the reporter** with the allow-listed upstream fields only:
+
+   ```sh
+   sh .harness/tools/harness-report.sh \
+     --trigger  <the trigger> \
+     --symptom  <the symptom code> \
+     --file     <a harness-owned path> \
+     --command  <harness command name> \
+     --exit-code <n> \
+     --role     <role> \
+     --phase    <phase> \
+     --session-id "${HARNESS_FEEDBACK_SESSION_ID:-$(date -u +%Y%m%dT%H%M%SZ)}" \
+     --notes-file <temp-file>
+   ```
+
+   The session token is `HARNESS_FEEDBACK_SESSION_ID`, minted once per session and matching
+   `[A-Za-z0-9._-]{1,64}` (on the `init.sh` hard-stop path, where no `session-start` marker
+   exists, mint it from `date -u +%Y%m%dT%H%M%SZ`). The `date -u +%Y%m%dT%H%M%SZ` fallback in
+   the call above is grammar-safe, so the token is never left unset and the per-session cap
+   ledger is never bypassed.
+5. **Free-form text is local-only.** Write the prose summary to a temp file and pass it via
+   `--notes-file`; it reaches the local `.harness/progress/feedback/` copy, is never an
+   upstream field, and is never sent to `gh`.
+6. **Report and stop.** The reporter never fails the task: a missing or unauthenticated
+   `gh`, a duplicate, a capped session, or a bad field degrades to the local copy and exits
+   0. State the outcome and stop.
+EOF
+
   # /sdd-test-concurrency (OpenCode only) — probes whether this OpenCode session can
   # spawn subagents concurrently. The marker it writes drives whether
   # harness-install.sh stamps /sdd-fix-parallel for OpenCode.
@@ -6817,7 +6872,7 @@ EOF
     for _c in $HARNESS_SDD_CMDS; do
       cp "$CMDDIR/$_c.md" "$TARGET/.claude/commands/$_c.md"
     done
-    ok "Claude Code commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel installed (.claude/)"
+    ok "Claude Code commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel + /sdd-report installed (.claude/)"
     if pr_loop_enabled; then
       for _c in $HARNESS_PR_LOOP_CMDS; do
         cp "$CMDDIR/$_c.md" "$TARGET/.claude/commands/$_c.md"
@@ -6858,9 +6913,9 @@ EOF
       fi
     fi
     if opencode_parallel_wanted; then
-      ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel installed (.opencode/)"
+      ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel + /sdd-report installed (.opencode/)"
     else
-      ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-test-concurrency installed (.opencode/); /sdd-fix-parallel skipped (run /sdd-test-concurrency, then re-run installer with --with-opencode-parallel=true to add it)"
+      ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-report + /sdd-test-concurrency installed (.opencode/); /sdd-fix-parallel skipped (run /sdd-test-concurrency, then re-run installer with --with-opencode-parallel=true to add it)"
     fi
     if pr_loop_enabled; then
       for _c in $HARNESS_PR_LOOP_CMDS; do
@@ -7162,7 +7217,7 @@ EOF
     for _c in $_cdx_cmds; do
       install_skill_unit "$_c"
     done
-    ok "shared skill units \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel installed (.agents/skills/ — project-local, read by Codex and OpenCode)"
+    ok "shared skill units \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel + \$sdd-report installed (.agents/skills/ — project-local, read by Codex and OpenCode)"
   fi
   if agent_selected codex || printf '%s\n' "$PRIOR_AGENTS" | grep -qx codex; then
     migrate_legacy_codex_prompts
@@ -7676,9 +7731,11 @@ self_model() {
 # rendering. ORDER MATTERS: the OpenCode-agent root rewrites run FIRST and match the
 # target-side `.harness/` prose they replace (`installed in `.harness/`` and
 # `mentions against `.harness/``); then the generic prefix strip runs; finally the
-# sdd-pr-loop path-resolution line (now stripped to a known literal) is swapped for the
-# source-layout banner — the banner itself names `.harness/`, so a later strip would
-# destroy it. A bare strip of the OpenCode agent left an EMPTY backtick placeholder where
+# sdd-pr-loop and sdd-report path-resolution lines (now stripped to known literals) are
+# swapped for their source-layout wording — any `.harness/` written in inline code would
+# otherwise collapse to an EMPTY placeholder, so each such line needs its own exact-line
+# swap. The sdd-pr-loop banner itself names `.harness/`, so a later strip would destroy it.
+# A bare strip of the OpenCode agent left an EMPTY backtick placeholder where
 # the target names `.harness/`, so a source checkout told the agent to resolve against
 # nothing (PR #206 finding 4045793773); the two pre-strip rules name the repository root
 # instead, mirroring the command glue's source-layout line. The strip is anchored on
@@ -7689,6 +7746,10 @@ self_transform() {
     $0 == "hit. Resolve every relative path against ``." {
       print "hit. This is the harness **source-layout** copy: paths resolve from the repository root"
       print "(an installed consumer gets the same body with everything resolved against `.harness/`)."
+      next
+    }
+    $0 == "Resolve every relative path against ``." {
+      print "Resolve every relative path against the repository root."
       next
     }
     { print }'

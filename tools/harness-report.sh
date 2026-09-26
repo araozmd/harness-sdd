@@ -222,7 +222,7 @@ _valid_exit_code() {
 # use). The WHOLE-STRING charset guard below rejects every character outside
 # `[A-Za-z0-9._-]` — `:`, whitespace AND embedded newlines — so no command name can inject
 # a body line or a second marker token.
-_shipped_sdd_cmds=" sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-pr-loop "
+_shipped_sdd_cmds=" sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-report sdd-pr-loop "
 _is_shipped_sdd() {
   case "$_shipped_sdd_cmds" in *" $1 "*) return 0 ;; *) return 1 ;; esac
 }
