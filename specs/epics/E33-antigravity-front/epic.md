@@ -1,7 +1,7 @@
 ---
 id: E33
 title: Native Antigravity front end via shared skills and dynamic subagent dispatch
-status: planned          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: done          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 
@@ -29,7 +29,7 @@ This epic introduces a first-class, lightweight Antigravity front end that:
 ## Features
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| F01 | Native Antigravity invocation adapter, dynamic subagent dispatch, and documentation | pending | true | — |
+| F01 | Native Antigravity invocation adapter, dynamic subagent dispatch, and documentation | done | true | — |
 
 ## Notes
 - Aligns with ADR-0003 (shared skill units) and ADR-0004 (resolved body pointers).
