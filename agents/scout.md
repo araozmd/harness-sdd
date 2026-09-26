@@ -74,6 +74,7 @@ nothing. The human/log must be able to tell "ran and found nothing" from "never 
 
 ## Reporting harness defects
 
-On one of the four triggers, append an entry to `progress/feedback/notes.md` (a
-`## <trigger>` heading plus `symptom:` / `command:` / `phase:`); never invoke the reporter —
+On one of the four triggers, append an entry to the harness-root-relative
+`progress/feedback/notes.md` (`.harness/progress/feedback/notes.md` in an installed target) —
+a `## <trigger>` heading plus `symptom:` / `command:` / `phase:`; never invoke the reporter —
 only the session-owning top-level role files.

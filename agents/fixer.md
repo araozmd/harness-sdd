@@ -386,4 +386,5 @@ When the fix is seeded and re-validation passed, report to the human:
 At end of task or on an early stop, if one of the four triggers fired, invoke
 `/sdd-report` (Codex: `$sdd-report`) — you are the only filer. Mint
 `HARNESS_FEEDBACK_SESSION_ID` once per session and reuse it; sub-agents leave
-`progress/feedback/notes.md` entries for you.
+harness-root-relative `progress/feedback/notes.md` entries
+(`.harness/progress/feedback/notes.md` in an installed target) for you.

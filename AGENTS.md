@@ -72,7 +72,8 @@ it mints `HARNESS_FEEDBACK_SESSION_ID` **once per session** (the telemetry `sess
 `started_at` with every character outside `[A-Za-z0-9._-]` removed, or
 `date -u +%Y%m%dT%H%M%SZ` when no marker exists) and reuses it for every report. Sub-agents
 (Architect, Builder, Reviewer, Scout, Doc-critic, pr-fixer) **never** invoke the reporter: on
-a trigger they append one entry to `progress/feedback/notes.md` — a `## <trigger>` heading
+a trigger they append one entry to the harness-root-relative `progress/feedback/notes.md`
+(`.harness/progress/feedback/notes.md` in an installed target) — a `## <trigger>` heading
 plus `symptom:` / `command:` / `phase:` (and an optional harness `file:`) — for the owning
 role to pick up.
 

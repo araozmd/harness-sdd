@@ -295,6 +295,7 @@ worth a board row — see the Fixer's severity bar.
 
 ## Reporting harness defects
 
-On one of the four triggers, append an entry to `progress/feedback/notes.md` (a
-`## <trigger>` heading plus `symptom:` / `command:` / `phase:`); never invoke the reporter —
+On one of the four triggers, append an entry to the harness-root-relative
+`progress/feedback/notes.md` (`.harness/progress/feedback/notes.md` in an installed target) —
+a `## <trigger>` heading plus `symptom:` / `command:` / `phase:`; never invoke the reporter —
 only the session-owning top-level role files.

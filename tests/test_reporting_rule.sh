@@ -157,6 +157,11 @@ test_rule_filer_and_notes() {
     || fail "R4: the filer clause does not name /sdd-report"
   printf '%s' "$_who" | grep -qF 'progress/feedback/notes.md' \
     || fail "R4: the sub-agent note path progress/feedback/notes.md is not named"
+  # The ledger path must resolve to the SAME place the installed /sdd-report reads
+  # (`.harness/progress/feedback/notes.md`), not the project root. Anchor the harness-root
+  # clause to the concrete installed path in one bounded match, not two independent greps.
+  printf '%s' "$_who" | grep -qE 'harness-root-relative.{0,120}\.harness/progress/feedback/notes\.md' \
+    || fail "R4: the sub-agent note path is not resolved against the harness root (.harness/progress/feedback/notes.md in an installed target)"
   for _field in 'symptom:' 'command:' 'phase:'; do
     printf '%s' "$_who" | grep -qF "$_field" \
       || fail "R4: the note-entry format does not name '$_field'"
@@ -188,6 +193,10 @@ test_role_prompts_carry_rule() {
       || fail "R5: agents/$_r.md does not name the early-stop filing moment"
     printf '%s' "$_sf" | grep -qF 'HARNESS_FEEDBACK_SESSION_ID' \
       || fail "R5: agents/$_r.md does not carry the once-per-session token duty"
+    # The note ledger the sub-agents write is harness-root-relative; the session owner
+    # must read it where the installed /sdd-report does (`.harness/...`), not the root.
+    printf '%s' "$_sf" | grep -qE 'harness-root-relative.{0,120}\.harness/progress/feedback/notes\.md' \
+      || fail "R5: agents/$_r.md does not resolve the note ledger against the harness root (.harness/progress/feedback/notes.md in an installed target)"
   done
   for _r in $SUB_ROLES; do
     _f="$SRC/agents/$_r.md"
@@ -197,6 +206,11 @@ test_role_prompts_carry_rule() {
     _sf="$(printf '%s\n' "$_s" | tr '\n' ' ' | tr -s ' ')"
     printf '%s' "$_sf" | grep -qF 'progress/feedback/notes.md' \
       || fail "R5: agents/$_r.md (sub-agent) does not carry the note path"
+    # A sub-agent writing the bare path in an installed target lands at the project root,
+    # where the session owner (via /sdd-report) never looks. Anchor the harness-root
+    # clause to the concrete installed path in ONE bounded match.
+    printf '%s' "$_sf" | grep -qE 'harness-root-relative.{0,120}\.harness/progress/feedback/notes\.md' \
+      || fail "R5: agents/$_r.md (sub-agent) does not resolve the note path against the harness root (.harness/progress/feedback/notes.md in an installed target)"
     printf '%s' "$_sf" | grep -qiE 'never[^.]{0,30}invoke the reporter' \
       || fail "R5: agents/$_r.md does not prohibit invoking the reporter"
     for _field in 'symptom:' 'command:' 'phase:'; do
