@@ -368,6 +368,20 @@ test_report_command_body_contract() {
   fi
   printf '%s' "$_bf" | grep -qF 'rejects any other nonempty value' \
     || fail "R8: the body does not state that an out-of-set phase is rejected"
+  # --exit-code is OPTIONAL too: a reportable event such as an instruction conflict or a
+  # recurring workflow gap has no process exit status, so the invocation must say to omit
+  # the flag rather than leave a placeholder for the caller to invent. A placeholder fails
+  # F02's _valid_exit_code and silently downgrades the WHOLE report to a local-only
+  # rejection. A revert to a bare, mandatory `--exit-code <n>` reds both anchors below.
+  printf '%s' "$_invoc" | grep -qF -- 'omit the flag when no process exited' \
+    || fail "R8: the invocation block presents --exit-code as mandatory; it must say to omit the flag when no process exited"
+  if printf '%s' "$_invoc" | grep -qE -- '--exit-code[[:space:]]*<n>'; then
+    fail "R8: the invocation block still presents the --exit-code <n> placeholder as the value to pass"
+  fi
+  printf '%s' "$_bf" | grep -qE 'exit-code.{0,40}is optional' \
+    || fail "R8: the body does not state the --exit-code flag is optional"
+  printf '%s' "$_bf" | grep -qE 'placeholder.{0,120}downgrades the whole report' \
+    || fail "R8: the body does not state that a placeholder --exit-code downgrades the whole report to the local fallback"
   printf '%s' "$_invoc" | grep -qF -- '--session-id' \
     || fail "R8: the invocation block does not pass --session-id"
   printf '%s' "$_invoc" | grep -qF 'HARNESS_FEEDBACK_SESSION_ID' \

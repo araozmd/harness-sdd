@@ -29,12 +29,17 @@ Resolve every relative path against the repository root.
      --symptom  <the symptom code> \
      --file     <a harness-owned path> \
      --command  <harness command name> \
-     --exit-code <n> \
+     --exit-code <a real exit status; omit the flag when no process exited> \
      --role     <role> \
      --phase    <one of inception|architect|builder|reviewer|scout|slice-dispatch|handoff|install; omit when none applies> \
      --session-id "${HARNESS_FEEDBACK_SESSION_ID:-$(date -u +%Y%m%dT%H%M%SZ)}" \
      --notes-file <temp-file>
    ```
+
+   The `--exit-code` flag is optional: pass the real process exit status (one to three
+   digits) only when a process actually exited, and omit the flag entirely when none did —
+   never leave a placeholder such as `<n>`, which fails F02's `_valid_exit_code` and
+   downgrades the whole report to the local fallback.
 
    The `--phase` flag is optional: pass only one of the enumerated phases, and omit it
    entirely when none applies. F02's `_valid_phase` rejects any other nonempty value and
