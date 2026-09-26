@@ -61,3 +61,9 @@ comment you were meant to fix.
 - **Merging**, labeling, or touching the PR's state.
 - **Touching files unrelated to the comment.**
 - **Running the full test suite** or invoking other workers.
+
+## Reporting harness defects
+
+On one of the four triggers, append an entry to `progress/feedback/notes.md` (a
+`## <trigger>` heading plus `symptom:` / `command:` / `phase:`); never invoke the reporter —
+only the session-owning top-level role files.

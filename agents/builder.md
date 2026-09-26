@@ -170,3 +170,9 @@ enforced — see **E99-F102**.
 When every task is ticked and your self-check passes, report completion to the
 Orchestrator and let it move the feature to `in-review`. Do **not** declare it
 `done` — that is the Reviewer's call.
+
+## Reporting harness defects
+
+On one of the four triggers, append an entry to `progress/feedback/notes.md` (a
+`## <trigger>` heading plus `symptom:` / `command:` / `phase:`); never invoke the reporter —
+only the session-owning top-level role files.

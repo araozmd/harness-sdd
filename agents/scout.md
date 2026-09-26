@@ -71,3 +71,9 @@ epics, or **no** `specs/architecture.md` / ADR set to re-validate against (archi
 **"nothing to re-validate"** with the reason (no remaining planning-state epics / no
 architecture) and change
 nothing. The human/log must be able to tell "ran and found nothing" from "never ran".
+
+## Reporting harness defects
+
+On one of the four triggers, append an entry to `progress/feedback/notes.md` (a
+`## <trigger>` heading plus `symptom:` / `command:` / `phase:`); never invoke the reporter —
+only the session-owning top-level role files.

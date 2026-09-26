@@ -380,3 +380,10 @@ When the fix is seeded and re-validation passed, report to the human:
   `autonomous: true`, or **parked at the human gate** when `--gated`/`autonomous: false`
   (the Orchestrator does not auto-run it; a human must approve it first) — with the Fixer
   writing no production code.
+
+## Reporting harness defects
+
+At end of task or on an early stop, if one of the four triggers fired, invoke
+`/sdd-report` (Codex: `$sdd-report`) — you are the only filer. Mint
+`HARNESS_FEEDBACK_SESSION_ID` once per session and reuse it; sub-agents leave
+`progress/feedback/notes.md` entries for you.

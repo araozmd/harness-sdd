@@ -7,7 +7,12 @@ harness lives in its files; each role starts with a clean, curated context.
 ## Start every session
 
 1. Run `./init.sh` **before any work**. If it exits non-zero, **STOP and report**;
-   never repair the environment and continue in the same run. The local backend
+   never repair the environment and continue in the same run. **One narrow exception,
+   reporting only:** when that non-zero exit is a harness malfunction
+   (`harness-malfunction`), the session may call the reporter **once**
+   (`tools/harness-report.sh`, trigger `harness-malfunction`) as the *report*, and then
+   stops. That call makes **no repair** and **no board write**, the session **does not
+   continue**, and reporting is **never a way around the gate**. The local backend
    requires `python3` with stdlib `fcntl`; board writes use
    `python3 tools/tasks-lock.py`.
 2. Read `harness.config.yaml` to select the TaskStore and DocStore backends.
@@ -41,6 +46,35 @@ assists read-only. Role definitions live in `agents/`.
 - The Orchestrator prints end-of-session telemetry (phase durations, review
   rounds, human-gate latency; no tokens or USD). Follow
   [Orchestrator → Telemetry](agents/orchestrator.md#telemetry).
+
+## Reporting harness defects
+
+Report exactly these four **harness defects** — the only reportable conditions — and nothing
+else:
+
+- **`harness-malfunction`** — a harness script such as `init.sh`, `harness-install.sh`,
+  `tools/*`, or a TaskStore write fails while the project itself is healthy.
+- **`contradictory-instruction`** — role prompts or docs conflict, or a gate cannot be
+  satisfied as written.
+- **`workaround`** — you had to leave the documented workflow to finish.
+- **`missing-capability`** — a recurring situation has no path in the workflow.
+
+A failure of the project's own code or tests, a transient network or auth error, and an
+agent mistake the harness correctly caught are **not** triggers: **none of them produces a
+report**.
+
+**When.** File a report when the task ends **or** when the session stops early (aborted,
+parked, or failed). Never file mid-flow.
+
+**Who.** Only the **session-owning top-level role** — the Orchestrator, or Fixer / Inception /
+Planner / Driller when it owns the session — invokes `/sdd-report` (Codex: `$sdd-report`), and
+it mints `HARNESS_FEEDBACK_SESSION_ID` **once per session** (the telemetry `session-start`
+`started_at` with every character outside `[A-Za-z0-9._-]` removed, or
+`date -u +%Y%m%dT%H%M%SZ` when no marker exists) and reuses it for every report. Sub-agents
+(Architect, Builder, Reviewer, Scout, Doc-critic, pr-fixer) **never** invoke the reporter: on
+a trigger they append one entry to `progress/feedback/notes.md` — a `## <trigger>` heading
+plus `symptom:` / `command:` / `phase:` (and an optional harness `file:`) — for the owning
+role to pick up.
 
 ## Specifications and memory
 

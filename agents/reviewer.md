@@ -292,3 +292,9 @@ prevented the round (a probe idiom, an environment gotcha, a class of over-claim
 append one dated line (`- [YYYY-MM-DD reviewer] …`). A finding that is a *lesson* goes
 there; only a finding that is *work* (recurring, blocks progress, or fails open) is
 worth a board row — see the Fixer's severity bar.
+
+## Reporting harness defects
+
+On one of the four triggers, append an entry to `progress/feedback/notes.md` (a
+`## <trigger>` heading plus `symptom:` / `command:` / `phase:`); never invoke the reporter —
+only the session-owning top-level role files.

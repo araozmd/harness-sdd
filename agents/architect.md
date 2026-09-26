@@ -209,3 +209,9 @@ When all four files are written (plus, for a sliced feature, the pinned contract
 artifact and slice references), the doc-critic checkpoint has completed, and any inline
 fixes are applied, tell the Orchestrator the feature is ready and let it set the status
 to `spec-ready`. Then **stop** — the human gate comes next.
+
+## Reporting harness defects
+
+On one of the four triggers, append an entry to `progress/feedback/notes.md` (a
+`## <trigger>` heading plus `symptom:` / `command:` / `phase:`); never invoke the reporter —
+only the session-owning top-level role files.

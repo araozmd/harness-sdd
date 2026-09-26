@@ -79,3 +79,9 @@ In addition to inline fixes, write a concise progress note at
 - the issues found, each with the fix applied;
 - or, if the pass was skipped/failed, the reason and the fact that the generating agent
   proceeded best-effort.
+
+## Reporting harness defects
+
+On one of the four triggers, append an entry to `progress/feedback/notes.md` (a
+`## <trigger>` heading plus `symptom:` / `command:` / `phase:`); never invoke the reporter —
+only the session-owning top-level role files.
