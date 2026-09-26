@@ -359,3 +359,6 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-25 E32-F04 in-review → reject (round 1): F1 R7's canary fixture couldn't discriminate its own named mutation (first line was a shell syntax error). Back to in-progress.
 - 2026-09-25 E32-F04 in-progress → in-review (builder round 2): shell-parseable forged fixture + `${{ }}`-first-line fixture + issue-number guard test; 30/30 mutants. Reviewer also hit a host-only `test_umbrella.sh` mise-shim hang, worked around.
 - 2026-09-25 E32-F04 in-review → approve (round 2). F1 closed and pinned; full suite 53/53 (bash-scoped; no dash), `--self` diff-free, change-size `ok` (224 production lines / 3 files). Opening the PR.
+- 2026-09-26 E32-F04 in-review → reject (round 1): Codex P2 — the labeler refetched the issue body via `gh api`, so an edit after `opened` could reclassify; fixed to read the `opened`-event snapshot (R2 reconciled). 
+- 2026-09-26 E32-F04 pr-loop round 2 → reject: Codex P2 — concurrent label-create race left a valid report unlabeled; fixed to re-probe on create failure.
+- 2026-09-26 E32-F04 merged in PR #224 at f737c3b after a 3-round Codex review loop (P2, P2, clean). Reviewer APPROVED round 2 pre-PR. Change-size ok (224 production lines). Marked done with verified ancestor evidence. Next actionable: F03 (now that F04 landed) and F05.
