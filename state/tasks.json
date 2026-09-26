@@ -1649,7 +1649,7 @@
         {
           "id": "E32-F04",
           "title": "Source-repo GitHub Action that labels marker-carrying issues without trusting their bodies",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
