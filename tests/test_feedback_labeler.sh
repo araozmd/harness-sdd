@@ -675,19 +675,24 @@ test_source_only_placement() {
     fail "R10: harness-install.sh references .github/workflows — the surface must not be installed"
   fi
 
-  # No VERSION bump / no CHANGELOG entry vs the base ref.
-  _base=""
-  for _ref in origin/main main; do
-    if git -C "$SRC" rev-parse --verify --quiet "$_ref" >/dev/null 2>&1; then _base="$_ref"; break; fi
-  done
-  if [ -z "$_base" ]; then
-    printf 'note: R10 VERSION/CHANGELOG no-diff assertion N/A — neither origin/main nor main resolves (not treated as a pass)\n'
+  # R10's no-bump clause governs THIS feature's change, not the branch tip. The original
+  # branch-vs-base diff reds the moment ANY later feature legitimately bumps VERSION (E32-F03
+  # is the first after F04) — the same base-relative landmine class as E32-F02's R12 control.
+  # Anchor on the commit that ADDED the labeler script (the F04 change itself) and assert that
+  # commit touched neither VERSION nor CHANGELOG. Self-limiting: if that commit is not in this
+  # clone (shallow checkout), report N/A — never a silent pass.
+  _addc="$(git -C "$SRC" log --diff-filter=A --format='%H' -1 -- .github/scripts/feedback-labeler.sh 2>/dev/null)" || _addc=""
+  if [ -z "$_addc" ]; then
+    printf 'note: R10 VERSION/CHANGELOG no-diff assertion N/A — the labeler introducing commit is not in this clone (not treated as a pass)\n'
   else
-    _changed="$(git -C "$SRC" diff --name-only "$_base" -- VERSION CHANGELOG.md)"
+    _show="$(git -C "$SRC" show --name-only --format='' "$_addc")"
+    [ -n "$_show" ] \
+      || fail "R10 positive control: the labeler introducing commit ($_addc) shows no files, so the path-scoped no-bump check below would be vacuous"
+    _changed="$(git -C "$SRC" show --name-only --format='' "$_addc" -- VERSION CHANGELOG.md)"
     [ -z "$_changed" ] \
-      || fail "R10: this CI-only change touched $_base:$_changed — no VERSION bump and no CHANGELOG entry are owed"
+      || fail "R10: the F04 labeler change ($_addc) touched VERSION/CHANGELOG.md — the F04 change owes no VERSION bump and no CHANGELOG entry"
   fi
-  pass "R10 both surfaces live under .github/, the installer references neither, and VERSION/CHANGELOG are unchanged vs base [test_source_only_placement]"
+  pass "R10 both surfaces live under .github/, the installer references neither, and the labeler-adding change touched no VERSION/CHANGELOG [test_source_only_placement]"
 }
 
 # ── R11 ───────────────────────────────────────────────────────────────────────────────────
