@@ -356,11 +356,16 @@ test_report_command_body_contract() {
   _tok="$(date -u +%Y%m%dT%H%M%SZ)"
   printf '%s' "$_tok" | grep -qE '^[A-Za-z0-9._-]{1,64}$' \
     || fail "R8: the body's fallback expression produces a token F02 rejects (got '$_tok')"
-  # Free-form text is local-only.
+  # Free-form text is local-only. Pin EACH negating clause by its own literal wording: a
+  # bounded `never[^.]{0,40}sent to` anchor is maskable by the earlier "is never an upstream
+  # field" (the negator need not be the one governing "sent to"). The clause itself must carry
+  # the negation, so flipping "is never sent to" → "is sometimes sent to" reds.
   printf '%s' "$_bf" | grep -qi 'local-only' \
     || fail "R8: the body does not state the free-form summary is local-only"
-  printf '%s' "$_bf" | grep -qiE 'never[^.]{0,40}sent to' \
-    || fail "R8: the body does not state free-form text is never sent upstream"
+  printf '%s' "$_bf" | grep -qF 'is never an upstream field' \
+    || fail "R8: the body does not state free-form text is never an upstream field"
+  printf '%s' "$_bf" | grep -qF 'is never sent to' \
+    || fail "R8: the free-form-off-upstream polarity is not pinned to the negating clause itself (a different 'never' earlier in the sentence must not satisfy it)"
   # Symptom vocabulary: init.sh failure maps to init-failure.
   printf '%s' "$_bf" | grep -qiE 'init\.sh. failure maps to .init-failure' \
     || fail "R8: the body does not map an init.sh failure to init-failure"
