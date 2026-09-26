@@ -1649,7 +1649,8 @@
         {
           "id": "E32-F04",
           "title": "Source-repo GitHub Action that labels marker-carrying issues without trusting their bodies",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "f737c3bfaf923320f9392098db1d4e5ee9549bc7", "ref": "f737c3bfaf923320f9392098db1d4e5ee9549bc7", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [
