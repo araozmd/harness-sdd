@@ -768,11 +768,12 @@ test_shipping_artifacts() {
   # 'No reporter ships yet', which is already gone from the base the NEXT docs/INSTALL.md
   # editor will see — so it would red on an unrelated docs change (E32-F03 is the first
   # feature to touch this section after F02). Re-anchor on the F02 sentence E32-F03 removes
-  # ('Reporting stays inert until …') and make the liveness half SELF-LIMITING: it is
-  # enforced only while the base branch's copy really carries that pre-change sentence, and
-  # reported N/A once a base no longer does (post-merge, or any later docs edit that moves
-  # past it). The working-file negative always runs, so reverting the sentence reds in every
-  # environment.
+  # ('Reporting stays inert until …') and make the base-liveness observation SELF-LIMITING
+  # and INFORMATIONAL: while the base branch's copy carries the pre-change sentence it is
+  # recorded as real, and once a base no longer does (post-merge, or a later docs edit) it
+  # is recorded N/A. It is deliberately NOT a failing assertion — the load-bearing half is
+  # the working-file negative below, which always runs, so reverting the sentence reds in
+  # every environment.
   _now="$(grep -cF 'Reporting stays inert until' "$SRC/docs/INSTALL.md")" || _now=0
   [ "$_now" = "0" ] \
     || fail "R12: the working docs/INSTALL.md still states reporting is inert ($_now line(s))"
@@ -784,14 +785,14 @@ test_shipping_artifacts() {
   if [ -n "$_base" ] && git -C "$SRC" show "$_base:docs/INSTALL.md" > "$_base_file" 2>/dev/null; then
     _old="$(grep -cF 'Reporting stays inert until' "$_base_file")" || _old=0
     if cmp -s "$_base_file" "$SRC/docs/INSTALL.md"; then
-      _ctrl="$_base already carries the working copy (post-merge); liveness assertion N/A, working-file negative enforced"
+      _ctrl="$_base already carries the working copy (post-merge); base-liveness N/A; working-file negative ran"
     elif [ "$_old" -ge 1 ]; then
-      _ctrl="$_base carries the real pre-change sentence on $_old line(s) — the liveness assertion holds"
+      _ctrl="$_base carries the real pre-change sentence on $_old line(s) (recorded, informational)"
     else
-      _ctrl="$_base no longer carries the anchored pre-change sentence; liveness assertion N/A (self-limiting), working-file negative enforced"
+      _ctrl="$_base no longer carries the anchored pre-change sentence; base-liveness N/A (self-limiting); working-file negative ran"
     fi
   else
-    _ctrl="no origin/main|main base ref to read; liveness assertion N/A, working-file negative enforced"
+    _ctrl="no origin/main|main base ref to read; base-liveness N/A; working-file negative ran"
   fi
   printf '%s\n' "$_ctrl" > "$T/r12-pristine-control.txt"
   pass "R12 VERSION, the chmod entry, the CHANGELOG [0.86.0] span, the corrected INSTALL.md feedback span, and the pristine-bytes control all ship (R12) [test_shipping_artifacts]"

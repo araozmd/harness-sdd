@@ -679,10 +679,14 @@ test_source_only_placement() {
   # branch-vs-base diff reds the moment ANY later feature legitimately bumps VERSION (E32-F03
   # is the first after F04) — the same base-relative landmine class as E32-F02's R12 control.
   # Anchor on the commit that ADDED the labeler script (the F04 change itself) and assert that
-  # commit touched neither VERSION nor CHANGELOG. Self-limiting: if that commit is not in this
-  # clone (shallow checkout), report N/A — never a silent pass.
+  # commit touched neither VERSION nor CHANGELOG. Self-limiting: in a SHALLOW clone the
+  # history is grafted, so `--diff-filter=A` returns the grafted root (which appears to add
+  # every file) and would false-fail; report N/A there — never a silent pass.
+  _shallow="$(git -C "$SRC" rev-parse --is-shallow-repository 2>/dev/null)" || _shallow=""
   _addc="$(git -C "$SRC" log --diff-filter=A --format='%H' -1 -- .github/scripts/feedback-labeler.sh 2>/dev/null)" || _addc=""
-  if [ -z "$_addc" ]; then
+  if [ "$_shallow" = "true" ]; then
+    printf 'note: R10 VERSION/CHANGELOG no-diff assertion N/A — shallow clone (history is grafted, so the introducing commit cannot be attributed; not treated as a pass)\n'
+  elif [ -z "$_addc" ]; then
     printf 'note: R10 VERSION/CHANGELOG no-diff assertion N/A — the labeler introducing commit is not in this clone (not treated as a pass)\n'
   else
     _show="$(git -C "$SRC" show --name-only --format='' "$_addc")"
