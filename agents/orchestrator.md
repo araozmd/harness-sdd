@@ -451,7 +451,8 @@ The init-failure halt and human `spec-ready` approval gate still apply.
 
 For Antigravity, because subagent personas are not statically loaded from repository files,
 the Orchestrator defines ephemeral subagents dynamically using the `define_subagent` tool
-(setting `system_prompt` from the canonical role file `agents/<role>.md`) and launches
+(setting `system_prompt` from the canonical role file `agents/<role>.md`, and passing
+`enable_write_tools=True` so roles can create/edit files and run verification commands) and launches
 them via `invoke_subagent` to start a fresh, isolated context. Use `/sdd-*` for Antigravity
 skill invocations. If subagent invocation tools are unavailable, stop and report the
 limitation and file handoff path rather than simulating roles in the same conversation.

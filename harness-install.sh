@@ -4807,6 +4807,7 @@ EOF
     _ea_any=0
     for _ea_k in $AGENT_KEYS; do
       agent_selected "$_ea_k" || continue
+      case "$_ea_k" in antigravity) continue ;; esac
       if models_any "$_ea_k"; then _ea_any=1; fi
     done
 
@@ -4827,6 +4828,7 @@ EOF
     _ea_seen=0
     for _ea_k in $AGENT_KEYS; do
       agent_selected "$_ea_k" || continue
+      case "$_ea_k" in antigravity) continue ;; esac
       _ea_seen=1
       # `unstamped` outranks whatever resolve_model would say: the config's answer is about
       # a file this run did not write, so it describes a model the front-end will not use.
@@ -5323,7 +5325,7 @@ Act as the **Orchestrator** (`.harness/agents/orchestrator.md`).
    - `in-review` → spawn **reviewer**; approve → open the PR and LEAVE it `in-review`
      (`done` is written only after the work merges — see `.harness/agents/orchestrator.md`
      “Writing `done`”), reject → back to `in-progress`.
-   (In Antigravity, define role subagents dynamically with `define_subagent` using canonical `.harness/agents/<role>.md` prompts and dispatch via `invoke_subagent` to maintain role context hygiene.)
+   (In Antigravity, define role subagents dynamically with `define_subagent` using canonical `.harness/agents/<role>.md` prompts and `enable_write_tools=True`, dispatching via `invoke_subagent` to maintain role context hygiene.)
 4. Append what happened to `.harness/progress/history.md`.
 
 Map `$ARGUMENTS` to the selector's closed scope flags:

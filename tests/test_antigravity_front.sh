@@ -28,6 +28,7 @@ test_orchestrator_antigravity_guidance() {
   grep -qi "Antigravity" "$_orch" || fail "orchestrator.md does not mention Antigravity"
   grep -q "define_subagent" "$_orch" || fail "orchestrator.md does not describe define_subagent"
   grep -q "invoke_subagent" "$_orch" || fail "orchestrator.md does not describe invoke_subagent"
+  grep -q "enable_write_tools" "$_orch" || fail "orchestrator.md does not specify enable_write_tools"
   pass "test_orchestrator_antigravity_guidance"
 }
 
@@ -36,6 +37,7 @@ test_reviewer_isolation_guidance() {
   [ -f "$_next" ] || fail "Missing sdd-next/SKILL.md"
   grep -q "define_subagent" "$_next" || fail "sdd-next/SKILL.md missing define_subagent dispatch guidance"
   grep -q "invoke_subagent" "$_next" || fail "sdd-next/SKILL.md missing invoke_subagent dispatch guidance"
+  grep -q "enable_write_tools" "$_next" || fail "sdd-next/SKILL.md missing enable_write_tools dispatch guidance"
   pass "test_reviewer_isolation_guidance"
 }
 

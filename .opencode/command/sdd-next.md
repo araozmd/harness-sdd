@@ -20,7 +20,7 @@ Act as the **Orchestrator** (`agents/orchestrator.md`).
    - `in-review` → spawn **reviewer**; approve → open the PR and LEAVE it `in-review`
      (`done` is written only after the work merges — see `agents/orchestrator.md`
      “Writing `done`”), reject → back to `in-progress`.
-   (In Antigravity, define role subagents dynamically with `define_subagent` using canonical `agents/<role>.md` prompts and dispatch via `invoke_subagent` to maintain role context hygiene.)
+   (In Antigravity, define role subagents dynamically with `define_subagent` using canonical `agents/<role>.md` prompts and `enable_write_tools=True`, dispatching via `invoke_subagent` to maintain role context hygiene.)
 4. Append what happened to `progress/history.md`.
 
 Map `$ARGUMENTS` to the selector's closed scope flags:

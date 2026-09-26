@@ -6,7 +6,7 @@
 2056805182 43 .agents/skills/sdd-fix-parallel/agents/openai.yaml
 3467404020 3841 .agents/skills/sdd-new/SKILL.md
 2056805182 43 .agents/skills/sdd-new/agents/openai.yaml
-3247647173 3290 .agents/skills/sdd-next/SKILL.md
+1121685929 3320 .agents/skills/sdd-next/SKILL.md
 2056805182 43 .agents/skills/sdd-next/agents/openai.yaml
 3143670989 14227 .agents/skills/sdd-plan/SKILL.md
 2056805182 43 .agents/skills/sdd-plan/agents/openai.yaml
@@ -24,7 +24,7 @@
 2137710744 1391 .claude/commands/sdd-fix-parallel.md
 1273071214 3574 .claude/commands/sdd-fix.md
 2869697306 3415 .claude/commands/sdd-new.md
-441019828 2861 .claude/commands/sdd-next.md
+2165227541 2891 .claude/commands/sdd-next.md
 10195721 13798 .claude/commands/sdd-plan.md
 2029175671 60151 .claude/commands/sdd-pr-loop.md
 2520888052 764 .codex/agents/architect.toml
@@ -40,7 +40,7 @@
 3360195966 6235 .opencode/command/sdd-drill.md
 1273071214 3574 .opencode/command/sdd-fix.md
 2869697306 3415 .opencode/command/sdd-new.md
-441019828 2861 .opencode/command/sdd-next.md
+2165227541 2891 .opencode/command/sdd-next.md
 10195721 13798 .opencode/command/sdd-plan.md
 2029175671 60151 .opencode/command/sdd-pr-loop.md
 4083098437 1963 .opencode/command/sdd-test-concurrency.md
