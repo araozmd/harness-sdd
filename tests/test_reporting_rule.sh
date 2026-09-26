@@ -495,7 +495,38 @@ test_session_token_stable() {
   _t4="$(cd "$_nofx" && HARNESS_FEEDBACK_SESSION_ID= sh "$_snip")"
   printf '%s' "$_t4" | grep -qE '^[A-Za-z0-9._-]{1,64}$' \
     || fail "R8: the no-marker fallback produces a token F02 rejects (got '$_t4')"
-  pass "R8 the session token is minted once and reused — latest session-start derived, exported value preferred, grammar-safe fallback (R8) [test_session_token_stable]"
+
+  # A CONFIGURED telemetry.log (RELATIVE override) must be resolved the same way the
+  # writer/reader resolve it: <harness dir>/<value>. A hard-coded default path misses the
+  # marker, falls back to `date`, and re-mints the token on every call more than a second
+  # apart — resetting F02's `.session-count` and bypassing `max_per_session`. A decoy at
+  # the DEFAULT path with a DIFFERENT (older) marker makes the two routes distinguishable:
+  # a default-path reader returns the decoy, a config-aware reader returns the custom one.
+  _cfx="$T/session-id-custom"; mkdir -p "$_cfx/.harness/custom"
+  printf '%s\n' 'telemetry:' '  log: custom/telemetry.jsonl' \
+    > "$_cfx/.harness/harness.config.yaml"
+  printf '%s\n' '{"schema_version":1,"type":"session-start","started_at":"2026-07-07T07:07:07Z"}' \
+    > "$_cfx/.harness/custom/telemetry.jsonl"
+  printf '%s\n' '{"schema_version":1,"type":"session-start","started_at":"2026-01-01T00:00:00Z"}' \
+    > "$_cfx/.harness/telemetry.jsonl"
+  _c1="$(cd "$_cfx" && HARNESS_FEEDBACK_SESSION_ID= sh "$_snip")"
+  sleep 1
+  _c2="$(cd "$_cfx" && HARNESS_FEEDBACK_SESSION_ID= sh "$_snip")"
+  [ "$_c1" = "$_c2" ] \
+    || fail "R8: the session token is not stable across calls under a configured telemetry.log ('$_c1' vs '$_c2') — F02's per-session cap ledger would reset"
+  [ "$_c1" = "2026-07-07T070707Z" ] \
+    || fail "R8: the configured relative telemetry.log is ignored (got '$_c1'); the token must come from the override, not the default path"
+
+  # An ABSOLUTE override is used verbatim (never rejoined under the harness dir).
+  _afx="$T/session-id-absolute"; _alog="$T/session-id-absolute-log/t.jsonl"
+  mkdir -p "$_afx/.harness" "$T/session-id-absolute-log"
+  printf 'telemetry:\n  log: %s\n' "$_alog" > "$_afx/.harness/harness.config.yaml"
+  printf '%s\n' '{"schema_version":1,"type":"session-start","started_at":"2026-08-08T08:08:08Z"}' \
+    > "$_alog"
+  _a1="$(cd "$_afx" && HARNESS_FEEDBACK_SESSION_ID= sh "$_snip")"
+  [ "$_a1" = "2026-08-08T080808Z" ] \
+    || fail "R8: an absolute telemetry.log override is not honored (got '$_a1')"
+  pass "R8 the session token is minted once and reused — latest session-start derived from the configured telemetry.log, exported value preferred, grammar-safe fallback (R8) [test_session_token_stable]"
 }
 
 # ── R9 ────────────────────────────────────────────────────────────────────────────────────

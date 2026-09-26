@@ -36,9 +36,33 @@ Resolve every relative path against the repository root.
    # current session's telemetry `session-start` marker (deterministic, so every call in
    # the session reuses the same token), else the `init.sh` hard-stop stamp. Re-running
    # `date` per call would reset F02's per-session cap ledger.
+   # Resolve the telemetry log EXACTLY as the writer/reader do: a `telemetry.log`
+   # override from harness.config.yaml (relative values resolve under the harness dir,
+   # absolute values are used as-is), else the default log. A hard-coded default path
+   # would miss the marker under a documented override and re-mint `date` on every
+   # report, resetting the per-session cap.
    _hf_session="${HARNESS_FEEDBACK_SESSION_ID:-}"
-   if [ -z "$_hf_session" ] && [ -f telemetry.jsonl ]; then
-     _hf_session="$(grep -E '"type"[[:space:]]*:[[:space:]]*"session-start"' telemetry.jsonl 2>/dev/null \
+   _hf_dir=
+   _hf_cfg="${_hf_dir}harness.config.yaml"
+   _hf_log="${_hf_dir}telemetry.jsonl"
+   if [ -f "$_hf_cfg" ]; then
+     _hf_log_override="$(awk '
+       /^telemetry:[[:space:]]*(#.*)?$/ { t=1; next }
+       t && /^[^[:space:]#]/ { t=0 }
+       t && /^[[:space:]]+log:/ {
+         sub(/^[[:space:]]+log:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+         gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+       }
+     ' "$_hf_cfg" 2>/dev/null || true)"
+     if [ -n "$_hf_log_override" ]; then
+       case "$_hf_log_override" in
+         /*) _hf_log="$_hf_log_override" ;;
+         *)  _hf_log="${_hf_dir}$_hf_log_override" ;;
+       esac
+     fi
+   fi
+   if [ -z "$_hf_session" ] && [ -f "$_hf_log" ]; then
+     _hf_session="$(grep -E '"type"[[:space:]]*:[[:space:]]*"session-start"' "$_hf_log" 2>/dev/null \
        | tail -n 1 \
        | python3 -c 'import json,re,sys;r=json.loads(sys.stdin.read() or "{}");sys.stdout.write(re.sub(r"[^A-Za-z0-9._-]","",r.get("started_at","")))' 2>/dev/null || true)"
    fi
