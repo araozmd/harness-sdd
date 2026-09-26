@@ -17,10 +17,14 @@ Resolve every relative path against the repository root.
    `tool-failure`, `board-write-failure`, `gate-unsatisfiable`, `instruction-conflict`,
    `doc-conflict`, `workflow-gap`, `state-corruption`. An `init.sh` failure maps to
    `init-failure`. Never invent a code.
-3. **Pass at least one harness-owned `--file`.** Use `init.sh` for the `init.sh`-failure
-   path; otherwise the failing harness tool/path (for example `tools/harness-report.sh`, or
-   the named `--command`). F02 rejects the whole report to a local copy when no supplied
-   path is harness-owned, so a report with no accepted `--file` never files upstream.
+3. **Pass at least one harness-owned `--file`, as a concrete body path.** Use `init.sh` for
+   the `init.sh`-failure path; otherwise supply the failing harness tool's own tracked body
+   path — for example `tools/harness-report.sh`, `init.sh`, or `harness-install.sh`. Never
+   pass an `sdd-*` command basename such as `sdd-next` as `--file`: F02 accepts only real
+   tracked harness-body paths, so a command basename is dropped and the report falls to the
+   local-only copy when it is the sole file. F02 rejects the whole report to a local copy
+   when no supplied path is harness-owned, so a report with no accepted `--file` never files
+   upstream.
 4. **Mint the session token once, then call the reporter** with the allow-listed upstream
    fields only:
 
@@ -28,8 +32,9 @@ Resolve every relative path against the repository root.
    # --- harness-session-id:begin ---
    # ONE token per session: the exported value if the session owner set it, else the
    # current session's telemetry `session-start` marker (deterministic, so every call in
-   # the session reuses the same token), else the `init.sh` hard-stop stamp. Re-running
-   # `date` per call would reset F02's per-session cap ledger.
+   # the session reuses the same token), else a `date` stamp minted ONCE and persisted in
+   # the feedback dir, read back on later calls. Re-running `date` per call would give
+   # reports >1s apart different ids and reset F02's per-session cap ledger.
    # Resolve the telemetry log EXACTLY as the writer/reader do: a `telemetry.log`
    # override from harness.config.yaml (relative values resolve under the harness dir,
    # absolute values are used as-is), else the default log. A hard-coded default path
@@ -60,13 +65,28 @@ Resolve every relative path against the repository root.
        | tail -n 1 \
        | python3 -c 'import json,re,sys;r=json.loads(sys.stdin.read() or "{}");sys.stdout.write(re.sub(r"[^A-Za-z0-9._-]","",r.get("started_at","")))' 2>/dev/null || true)"
    fi
-   [ -n "$_hf_session" ] || _hf_session="$(date -u +%Y%m%dT%H%M%SZ)"
+   if [ -z "$_hf_session" ]; then
+     # No export and no `session-start` marker: telemetry is disabled (or its best-effort
+     # write failed), so the telemetry-derived path above yielded nothing. Mint the `date`
+     # fallback ONCE and persist it in the feedback dir; every later call in the session
+     # reads it back. Recomputing `date` per call would give reports >1s apart different
+     # ids, resetting F02's `.session-count` ledger and bypassing `max_per_session`.
+     _hf_fallback="${_hf_dir}progress/feedback/.session-id"
+     if [ -f "$_hf_fallback" ]; then
+       _hf_session="$(cat "$_hf_fallback" 2>/dev/null || true)"
+     fi
+     if [ -z "$_hf_session" ]; then
+       _hf_session="$(date -u +%Y%m%dT%H%M%SZ)"
+       mkdir -p "${_hf_fallback%/*}" 2>/dev/null || true
+       printf '%s\n' "$_hf_session" > "$_hf_fallback" 2>/dev/null || true
+     fi
+   fi
    # --- harness-session-id:end ---
 
    sh tools/harness-report.sh \
      --trigger  <the trigger> \
      --symptom  <the symptom code> \
-     --file     <a harness-owned path> \
+     --file     <a concrete harness-owned body path> \
      --command  <harness command name; omit when no command applies> \
      --exit-code <a real exit status; omit the flag when no process exited> \
      --role     <role> \
@@ -95,8 +115,10 @@ Resolve every relative path against the repository root.
    otherwise derives one token deterministically from the telemetry `session-start` marker —
    so no export is required, and repeated calls in one session share the token instead of
    resetting F02's per-session cap ledger. On the `init.sh` hard-stop path, where no
-   `session-start` marker exists, it falls back to `date -u +%Y%m%dT%H%M%SZ`; that fallback
-   is grammar-safe, so the token is never left unset and the cap is never bypassed.
+   `session-start` marker exists, it mints the `date -u +%Y%m%dT%H%M%SZ` fallback **once**
+   and persists it in the feedback dir, reading it back on later calls — so two reports more
+   than a second apart still share one token. That fallback is grammar-safe, so the token is
+   never left unset and the cap is never bypassed.
 5. **Free-form text is local-only.** Write the prose summary to a temp file and pass it via
    `--notes-file`; it reaches the local `progress/feedback/` copy, is never an
    upstream field, and is never sent to `gh`.

@@ -346,6 +346,17 @@ _cmd_body() {
   ' "$INSTALL"
 }
 
+# _step3_span <body-file> — the numbered step-3 (--file contract) span, up to step 4. The
+# `--file` rule is read where it is written; extracting the step keeps a `--command` decoy
+# elsewhere in the body from satisfying the anchors (agents/builder.md placement rule).
+_step3_span() {
+  awk '
+    index($0,"3. **Pass at least one") { k=1 }
+    k && index($0,"4. **Mint") { exit }
+    k
+  ' "$1"
+}
+
 test_report_command_body_contract() {
   _body="$T/sdd-report-body.md"
   _cmd_body > "$_body"
@@ -417,6 +428,20 @@ test_report_command_body_contract() {
     || fail "R8: the body does not require at least one harness-owned --file"
   printf '%s' "$_bf" | grep -qF 'init.sh' \
     || fail "R8: the body does not pass a harness-owned --file (init.sh for the init path)"
+  # The --file must be a CONCRETE tracked harness-body path, never an sdd-* command basename:
+  # F02's `_prepare_listing` accepts only real harness-body paths, so `--file sdd-next` is
+  # dropped and a sole-file report falls to the local-only copy (finding 4110441412).
+  # Reverting step 3 to the old "or the named --command" suggestion reds all three anchors.
+  _step3="$(_step3_span "$_body")"
+  _floor "$_step3" 200 "R8: the sdd-report step-3 --file span"
+  _s3="$(printf '%s\n' "$_step3" | tr '\n' ' ' | tr -s ' ')"
+  printf '%s' "$_s3" | grep -qF 'harness-install.sh' \
+    || fail "R8: step 3 names no concrete harness-owned body path (e.g. harness-install.sh) to pass as --file"
+  printf '%s' "$_s3" | grep -qiE 'never[^.]{0,60}sdd-' \
+    || fail "R8: step 3 does not forbid passing an sdd-* command basename as --file"
+  if printf '%s' "$_s3" | grep -qF 'or the named `--command`'; then
+    fail "R8: step 3 still suggests the named --command as --file — F02 drops that basename and the report falls local-only"
+  fi
   _tok="$(date -u +%Y%m%dT%H%M%SZ)"
   printf '%s' "$_tok" | grep -qE '^[A-Za-z0-9._-]{1,64}$' \
     || fail "R8: the body's fallback expression produces a token F02 rejects (got '$_tok')"
@@ -495,6 +520,23 @@ test_session_token_stable() {
   _t4="$(cd "$_nofx" && HARNESS_FEEDBACK_SESSION_ID= sh "$_snip")"
   printf '%s' "$_t4" | grep -qE '^[A-Za-z0-9._-]{1,64}$' \
     || fail "R8: the no-marker fallback produces a token F02 rejects (got '$_t4')"
+
+  # No marker + no export (telemetry disabled, or its best-effort write failed): the `date`
+  # fallback must be minted ONCE and persisted, so every later call in the session reuses one
+  # token. Recomputing `date` per call hands reports >1s apart different ids, resetting F02's
+  # `.session-count` ledger and bypassing `max_per_session` (finding 4110441411).
+  _pfx="$T/session-id-fallback"; mkdir -p "$_pfx/.harness"
+  _p1="$(cd "$_pfx" && HARNESS_FEEDBACK_SESSION_ID= sh "$_snip")"
+  sleep 1
+  _p2="$(cd "$_pfx" && HARNESS_FEEDBACK_SESSION_ID= sh "$_snip")"
+  [ "$_p1" = "$_p2" ] \
+    || fail "R8: the no-marker date fallback is recomputed per call ('$_p1' vs '$_p2') — reports >1s apart get different ids and bypass F02's max_per_session"
+  [ -f "$_pfx/.harness/progress/feedback/.session-id" ] \
+    || fail "R8: the no-marker fallback was not persisted under the harness dir, so a later call cannot reuse it"
+  [ "$_p1" = "$(cat "$_pfx/.harness/progress/feedback/.session-id")" ] \
+    || fail "R8: the persisted fallback token does not match the token the block returned"
+  printf '%s' "$_p1" | grep -qE '^[A-Za-z0-9._-]{1,64}$' \
+    || fail "R8: the persisted fallback produces a token F02 rejects (got '$_p1')"
 
   # A CONFIGURED telemetry.log (RELATIVE override) must be resolved the same way the
   # writer/reader resolve it: <harness dir>/<value>. A hard-coded default path misses the
