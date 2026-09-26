@@ -103,8 +103,14 @@ printf '%s\n' "$_d" | grep -q "opencode.json" \
 pass "an OpenCode emitter edit without regeneration is caught and named (R6) [opencode_gate_red]"
 
 # ── R2: the manifest ledger ───────────────────────────────────────────────────
+# `.claude/commands/` is NOT purged before the fixture's `--self`, and `--self` leaves an
+# edited file "unchanged and unclaimed", so a HAND EDIT to a committed `.claude/commands/*.md`
+# is invisible to the byte-diff (it compares the edit to itself). The manifest ledger is that
+# class's only backstop: after the manifest is deleted, an edited file cannot be re-adopted,
+# so it drops out of the fresh manifest and these `_must` greps red. Every committed command
+# unit must therefore be listed here — including E32-F03's `sdd-report`.
 [ -f "$F/.claude/.glue-manifest" ] || fail "no .glue-manifest after --self (R2)"
-for _must in .claude/agents/builder.md .claude/commands/sdd-next.md .codex/agents/builder.toml .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml .escalation-arming opencode.json .opencode/command/sdd-next.md .opencode/command/sdd-test-concurrency.md .opencode/agent/pr-fixer.md; do
+for _must in .claude/agents/builder.md .claude/commands/sdd-next.md .claude/commands/sdd-report.md .codex/agents/builder.toml .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml .agents/skills/sdd-report/SKILL.md .agents/skills/sdd-report/agents/openai.yaml .escalation-arming opencode.json .opencode/command/sdd-next.md .opencode/command/sdd-test-concurrency.md .opencode/command/sdd-report.md .opencode/agent/pr-fixer.md; do
   grep -q " $_must\$" "$F/.claude/.glue-manifest" || fail "manifest misses $_must (R2)"
 done
 grep -q "glue-manifest" "$F/.claude/.glue-manifest" && fail "manifest lists itself (R2)"
