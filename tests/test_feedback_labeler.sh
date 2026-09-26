@@ -72,6 +72,10 @@ case "${1:-}/${2:-}" in
       printf 'HTTP/2.0 500 Internal Server Error\n'
       exit "${GH_PROBE_RC}"
     fi
+    # A create that lost the concurrent race leaves its mark: the label now exists.
+    if [ -n "${GH_CREATE_RACE:-}" ] && [ -f "${GH_LOG}.race" ]; then
+      printf 'HTTP/2.0 200 OK\n'; exit 0
+    fi
     case " ${GH_PRESENT:-} " in
       *" $_name "*) printf 'HTTP/2.0 200 OK\n'; exit 0 ;;
     esac
@@ -83,6 +87,10 @@ case "${1:-}/${2:-}" in
     if [ -n "${GH_BODY_FILE:-}" ]; then cat "$GH_BODY_FILE"; fi
     exit 0 ;;
   label/create)
+    if [ -n "${GH_CREATE_RACE:-}" ]; then
+      : > "${GH_LOG}.race"        # a peer job created the label first
+      exit "${GH_CREATE_RC:-1}"   # our create loses the race and reports failure
+    fi
     [ "${GH_CREATE_RC:-0}" -eq 0 ] || exit "${GH_CREATE_RC}"
     exit 0 ;;
   issue/edit)
@@ -158,7 +166,8 @@ run_label_ok() {
   [ "$_rc" = "0" ] || fail "label-issue $1 exited $_rc; expected 0"
 }
 clear_controls() {
-  unset GH_BODY_FILE GH_FETCH_RC GH_PRESENT GH_PROBE_RC GH_CREATE_RC GH_EDIT_RC 2>/dev/null || true
+  unset GH_BODY_FILE GH_FETCH_RC GH_PRESENT GH_PROBE_RC GH_CREATE_RC GH_EDIT_RC GH_CREATE_RACE 2>/dev/null || true
+  rm -f "${GLOG}.race"
   : > "$GLOG"
 }
 
@@ -526,7 +535,33 @@ test_label_ensure_create_only_missing() {
   [ "$(create_count)" = "0" ] \
     || fail "R8: a hard probe error still created $(create_count) label(s); only a definitive 404 is 'absent'"
   unset GH_PROBE_RC
-  pass "R8 absent labels are created with the pinned values, existing labels are untouched, a probe error aborts non-zero with zero creates [test_label_ensure_create_only_missing]"
+
+  # (d) concurrent create race: our create fails, but a re-probe shows the label now exists
+  # (a peer `issues: opened` job created it first), so the run must continue and still edit
+  # the issue. This is the guarantee the re-probe adds (P2 #4109798865).
+  clear_controls
+  export GH_BODY_FILE="$_valid" GH_PRESENT='harness-feedback' GH_CREATE_RACE=1
+  _rc="$(run_label_rc 7)"
+  [ "$_rc" = "0" ] \
+    || fail "R8: a create that lost the concurrent race exited $_rc; it must re-probe, see the label exists, and continue"
+  [ "$(create_count)" = "1" ] \
+    || fail "R8: the lost-race run made $(create_count) create call(s), expected exactly 1"
+  [ "$(edit_count)" = "1" ] \
+    || fail "R8: the lost-race run did not edit the issue (edit_count=$(edit_count)); the valid report was left unlabeled"
+  unset GH_PRESENT GH_CREATE_RACE
+
+  # (e) genuine create failure with the label still absent must surface non-zero and not edit
+  # (the non-race control for (d): same controls, no race mark).
+  clear_controls
+  export GH_BODY_FILE="$_valid" GH_PRESENT='harness-feedback' GH_CREATE_RC=1
+  _rc="$(run_label_rc 7)"
+  [ "$_rc" != "0" ] \
+    || fail "R8: a genuine create failure that leaves the label absent exited 0"
+  [ "$(edit_count)" = "0" ] \
+    || fail "R8: a genuine create failure still edited the issue"
+  unset GH_PRESENT GH_CREATE_RC
+
+  pass "R8 absent labels are created with the pinned values, existing labels are untouched, a probe error aborts non-zero with zero creates, and a create lost to a concurrent race re-probes and continues [test_label_ensure_create_only_missing]"
 }
 
 # ── R9 ────────────────────────────────────────────────────────────────────────────────────

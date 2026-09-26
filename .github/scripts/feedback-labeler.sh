@@ -131,8 +131,18 @@ ensure_labels() {
     esac
   done
   for _el_l in $_el_absent; do
-    gh label create "$_el_l" --repo "$GH_REPO" \
-      --color "$(label_color "$_el_l")" --description "$(label_desc "$_el_l")" || return 1
+    if gh label create "$_el_l" --repo "$GH_REPO" \
+      --color "$(label_color "$_el_l")" --description "$(label_desc "$_el_l")"; then
+      continue
+    fi
+    # A concurrent `issues: opened` job may have created the label between the probe above
+    # and this create, so the create loses the race though the label now exists. Re-probe:
+    # continue only if the label is now definitely present; a create that genuinely failed
+    # (still 404, or an undecidable probe) must still surface non-zero.
+    if probe_label_present "$_el_l"; then
+      continue
+    fi
+    return 1
   done
   return 0
 }
