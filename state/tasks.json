@@ -1643,7 +1643,8 @@
         {
           "id": "E32-F03",
           "title": "Reporting rule + /sdd-report command on every front end: four triggers, end-of-task and early-stop filing",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "22ad0da257277d38ac5937fa8c0f8bb8aed41dc2", "ref": "22ad0da257277d38ac5937fa8c0f8bb8aed41dc2", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [
