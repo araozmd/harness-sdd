@@ -98,7 +98,7 @@ emit_glue() {
   # halts the harness.
   # Retired namespaces are never mandatory active glue. Skills use the same
   # last-written ownership evidence as native roles, not a wildcard over user files.
-  if [ -f "$hdir/.agents" ] && ! grep -qx codex "$hdir/.agents"; then return 0; fi
+  if [ -f "$hdir/.agents" ] && ! grep -qE '^(codex|opencode|antigravity)$' "$hdir/.agents"; then return 0; fi
   _root="$(dirname "$hdir")"
   if [ ! -L "$_root/.agents" ] && [ ! -L "$_root/.agents/skills" ] && [ ! -L "$hdir/.codex-skills" ]; then
     for _unit in "$hdir"/.codex-skills/sdd-*; do

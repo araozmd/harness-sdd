@@ -25,22 +25,26 @@ with tempfile.TemporaryDirectory(prefix='harness-retirement-') as temp:
         return subprocess.check_output(['sh',str(p/'.harness/tools/harness-owned-paths.sh'),'all',str(p/'.harness')],text=True)
     # Explicit errors must precede every target mutation, including on an upgrade.
     p=old('explicit'); before=snapshot(p)
-    for args,e in [(('--agents=gemini',),{}),(('--agents=claude,antigravity',),{}),((),{'HARNESS_AGENTS':'gemini'}),(('--agents=host',),{'HARNESS_HOST_AGENT':'antigravity'})]:
+    for args,e in [(('--agents=gemini',),{}),((),{'HARNESS_AGENTS':'gemini'}),(('--agents=host',),{'HARNESS_HOST_AGENT':'gemini'})]:
         out=install(p,*args,extra=e,ok=False)
-        assert 'claude' in out and 'codex' in out and 'opencode' in out
+        assert 'claude' in out and 'codex' in out and 'opencode' in out and 'antigravity' in out
         assert snapshot(p)==before, 'explicit rejected selector mutated target'
-    p=fresh('all'); install(p,'--agents=all'); assert (p/'.harness/.agents').read_text()=='claude\ncodex\nopencode\n'
+    p=fresh('all'); install(p,'--agents=all'); assert (p/'.harness/.agents').read_text()=='antigravity\nclaude\ncodex\nopencode\n'
     p=fresh('ambient'); install(p,'--agents=host',extra={'ANTIGRAVITY_AGENT':'1','GEMINI_CLI':'1'}); assert (p/'.harness/.agents').read_text()=='claude\n'
     print('ok - active_registry_and_explicit_rejection (R1)')
-    p=old('retired-only','retired-only-off'); before=snapshot(p)
+    p=old('retired-only','gemini-only-off'); before=snapshot(p)
     out=install(p,ok=False); assert '--agents=codex' in out and snapshot(p)==before
     install(p,'--agents=codex'); assert not (p/'GEMINI.md').exists()
     for variant in ('mixed-off','all-five-off','all-five-on','all-five-models-on','all-five-pro-on','all-five-flash-on','gemini-only-off','antigravity-only-off'):
         p=old('upgrade-'+variant,variant)
-        args=('--agents=codex',) if variant in ('gemini-only-off','antigravity-only-off') else ()
+        args=('--agents=codex',) if variant == 'gemini-only-off' else ()
         install(p,*args)
         selected=(p/'.harness/.agents').read_text()
-        assert 'gemini' not in selected and 'antigravity' not in selected
+        assert 'gemini' not in selected
+        if variant == 'gemini-only-off':
+            assert selected == 'codex\n'
+        elif variant == 'antigravity-only-off':
+            assert selected == 'antigravity\n'
         assert not (p/'.agents/rules/harness.md').exists()
         assert not list((p/'.agents/workflows').glob('*.md'))
         assert not list((p/'.agents/agents').glob('*.md'))
@@ -76,7 +80,7 @@ with tempfile.TemporaryDirectory(prefix='harness-retirement-') as temp:
     subprocess.run(['git','-C',str(p),'add','.'],check=True)
     subprocess.run(['git','-C',str(p),'-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],check=True)
     (p/changed[0]).write_text('changed again after install\n')
-    r=subprocess.run(['sh',str(p/'.harness/init.sh')],cwd=p,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+    r=subprocess.run([str(p/'.harness/init.sh')],cwd=p,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
     assert r.returncode==0,r.stdout
     print('ok - post_retirement_drift_ownership (R4)')
     # Edited / foreign / file-link / parent-link protections for each legacy surface.

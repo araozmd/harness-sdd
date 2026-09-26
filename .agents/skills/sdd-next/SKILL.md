@@ -5,7 +5,7 @@ description: Run the Orchestrator loop on the next actionable task (init → rou
 
 ## Invocation adapter
 
-In Codex, invoke `$sdd-next` and write arguments after the skill mention; in OpenCode, invoke `/sdd-next`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.
+In Antigravity or OpenCode, invoke `/sdd-next`; in Codex, invoke `$sdd-next` and write arguments after the skill mention. In all hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the Antigravity or OpenCode invocation is `/sdd-<name>`.
 
 ## Canonical workflow
 Act as the **Orchestrator** (`agents/orchestrator.md`).
@@ -26,6 +26,7 @@ Act as the **Orchestrator** (`agents/orchestrator.md`).
    - `in-review` → spawn **reviewer**; approve → open the PR and LEAVE it `in-review`
      (`done` is written only after the work merges — see `agents/orchestrator.md`
      “Writing `done`”), reject → back to `in-progress`.
+   (In Antigravity, define role subagents dynamically with `define_subagent` using canonical `agents/<role>.md` prompts and `enable_write_tools=True`, dispatching via `invoke_subagent` to maintain role context hygiene.)
 4. Append what happened to `progress/history.md`.
 
 Map `$ARGUMENTS` to the selector's closed scope flags:

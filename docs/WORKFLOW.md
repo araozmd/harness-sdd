@@ -2,12 +2,14 @@
 
 ## Host invocation and clean role contexts
 
-Supported front ends are Claude Code (primary), Codex (second), and OpenCode
-(third). This document uses canonical `/sdd-*` names for Claude/OpenCode. In
-Codex, invoke `$sdd-new <intent>`, `$sdd-plan <intent>`, `$sdd-drill <epic-id>`,
-`$sdd-next`, `$sdd-fix <description>`, `$sdd-fix-parallel`, and gated
-`$sdd-pr-loop <pr>`. Text accompanying the explicit skill mention supplies
-`$ARGUMENTS`; `/skills` is the discovery UI.
+Supported front ends are Claude Code (primary), Codex (second), OpenCode
+(third), and Antigravity. This document uses canonical `/sdd-*` names for Claude,
+OpenCode, and Antigravity. In Codex, invoke `$sdd-new <intent>`, `$sdd-plan <intent>`,
+`$sdd-drill <epic-id>`, `$sdd-next`, `$sdd-fix <description>`, `$sdd-fix-parallel`,
+and gated `$sdd-pr-loop <pr>`. Text accompanying the explicit skill mention supplies
+`$ARGUMENTS`; `/skills` is the discovery UI. In Antigravity, skills are natively
+discovered from `.agents/skills/` as `/sdd-*` slash commands, and role handoffs use
+dynamic `define_subagent` with `agents/<role>.md` system prompts via `invoke_subagent`.
 
 Codex uses native named roles from `.codex/agents/`: seven standard roles plus
 `pr-fixer` while the PR-loop gate is on. Each Architect, Builder, Reviewer or

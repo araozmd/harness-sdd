@@ -1143,7 +1143,7 @@ pass "VERSION carries the MINOR bump and CHANGELOG.md the matching entry (R31, F
 #  test_prior_agents_unchanged and F02 R12 inside test_suite_hygiene — the F01 checks that
 #  already own those source properties; extending them beats a second copy that could
 #  disagree.)
-[ -n "$ALL_KEYS" ] && [ "$(printf '%s\n' "$ALL_KEYS" | wc -w | tr -d ' ')" -eq 3 ] \
+[ -n "$ALL_KEYS" ] && [ "$(printf '%s\n' "$ALL_KEYS" | wc -w | tr -d ' ')" -eq 4 ] \
   || fail "F02: ALL_KEYS was not derived from AGENT_KEYS ('$ALL_KEYS') — the baseline cases would compare against nothing"
 test_baseline_legacy_upgrade_is_all
 pass "F02 baseline_legacy_upgrade_is_all: pre-E08 uses claude+opencode, detection ignored (F02 R4, R9)"

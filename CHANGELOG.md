@@ -4,6 +4,21 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.87.0] — 2026-09-25
+
+### Added — Native Antigravity front end via shared skills and dynamic subagent dispatch (E33-F01)
+
+- **Native Antigravity support via `.agents/skills/`.** The harness now officially supports
+  Google Antigravity alongside Claude Code, Codex, and OpenCode. Skills in `.agents/skills/`
+  document `/sdd-*` slash commands in their invocation adapters, sharing the same units across
+  Codex and Antigravity.
+- **Dynamic subagent registration in Orchestrator.** Role delegation in Antigravity uses
+  `define_subagent` with system prompts loaded from `agents/<role>.md` and dispatches via
+  `invoke_subagent`, maintaining strict context isolation and the independent Reviewer gate
+  without requiring machine-global plugin installation.
+- **Canonical documentation refreshed.** `AGENTS.md`, `README.md`, and `docs/WORKFLOW.md`
+  now accurately describe Antigravity invocation and multi-agent execution.
+
 ## [0.86.0] — 2026-09-25
 
 ### Added — `tools/harness-report.sh`: the allow-listed feedback reporter (E32-F02)

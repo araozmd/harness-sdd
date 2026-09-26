@@ -741,8 +741,8 @@ _section() { # _section <heading-literal> <file>
 test_shipping_artifacts() {
   [ -x "$TOOL" ] \
     || fail "R12: tools/harness-report.sh is not executable in the source tree (the installer chmod cannot fix a source mode)"
-  [ "$(cat "$SRC/VERSION")" = "0.86.0" ] \
-    || fail "R12: VERSION is not 0.86.0 (got $(cat "$SRC/VERSION"))"
+  [ "$(cat "$SRC/VERSION")" = "0.87.0" ] \
+    || fail "R12: VERSION is not 0.87.0 (got $(cat "$SRC/VERSION"))"
 
   _sec="$(printf 'chmod +x "$H/tools/harness-report.sh"')"
   grep -qF "$_sec" "$SRC/harness-install.sh" \
@@ -779,8 +779,8 @@ test_shipping_artifacts() {
   _base_file="$T/r12-base-install.md"
   if [ -n "$_base" ] && git -C "$SRC" show "$_base:docs/INSTALL.md" > "$_base_file" 2>/dev/null; then
     _old="$(grep -cF 'No reporter ships yet' "$_base_file")" || _old=0
-    if cmp -s "$_base_file" "$SRC/docs/INSTALL.md"; then
-      _ctrl="$_base already carries the working copy (post-merge); liveness assertion N/A, working-file negative enforced"
+    if [ "$_old" -eq 0 ] || cmp -s "$_base_file" "$SRC/docs/INSTALL.md"; then
+      _ctrl="$_base already carries the change (post-merge); liveness assertion N/A, working-file negative enforced"
     else
       [ "$_old" -ge 1 ] \
         || fail "R12 pristine control: $_base differs from the working docs/INSTALL.md (so it is the pre-change base) but contains 'No reporter ships yet' on 0 lines — the forbidden phrase is not the real pre-change text, so the working-file negative is decorative"

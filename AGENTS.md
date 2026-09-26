@@ -1,8 +1,9 @@
 # AGENTS.md — harness-sdd
 
 This is the canonical entrypoint for the portable Spec-Driven Development (SDD)
-harness. Claude Code is the primary host, Codex second, OpenCode third. The
-harness lives in its files; each role starts with a clean, curated context.
+harness. Claude Code is the primary host, Codex second, OpenCode third, and
+Antigravity supported via `.agents/skills/`. The harness lives in its files; each
+role starts with a clean, curated context.
 
 ## Start every session
 

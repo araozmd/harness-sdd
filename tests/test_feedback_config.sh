@@ -235,7 +235,7 @@ test_notice_on_seed() {
   sh "$INSTALL" "$_f" >"$_fout" 2>/dev/null || fail "R5 fresh: install failed"
   _fcfg="$_f/.harness/harness.config.yaml"
   notice_lines "$_fout" "github.com/araozmd/harness-sdd" "$_fcfg" > "$T/r5-fresh-notice.txt"
-  [ "$(wc -l < "$T/r5-fresh-notice.txt")" = "1" ] \
+  [ "$(wc -l < "$T/r5-fresh-notice.txt")" -eq 1 ] \
     || fail "R5 fresh: expected exactly 1 stdout line carrying the repo, 'feedback.enabled: false', and the config path together, got $(wc -l < "$T/r5-fresh-notice.txt")"
 
   # migrating upgrade.
@@ -246,7 +246,7 @@ test_notice_on_seed() {
   _mout="$T/r5-migrate.out"
   sh "$INSTALL" "$_m" >"$_mout" 2>/dev/null || fail "R5 migrate: install failed"
   notice_lines "$_mout" "github.com/araozmd/harness-sdd" "$_mcfg" > "$T/r5-migrate-notice.txt"
-  [ "$(wc -l < "$T/r5-migrate-notice.txt")" = "1" ] \
+  [ "$(wc -l < "$T/r5-migrate-notice.txt")" -eq 1 ] \
     || fail "R5 migrate: expected exactly 1 stdout line carrying the repo, 'feedback.enabled: false', and the config path together, got $(wc -l < "$T/r5-migrate-notice.txt")"
 
   pass "fresh install and migrating upgrade each print exactly one feedback notice line, naming repo/opt-out/config path, on stdout (R5) [test_notice_on_seed]"
@@ -334,7 +334,7 @@ test_cascade_per_target_seed_and_notice() {
     _cfg="$_t/.harness/harness.config.yaml"
     grep -Eq '^feedback:' "$_cfg" || fail "R8: $_t was not seeded a feedback: block"
     notice_lines "$_out" "github.com/araozmd/harness-sdd" "$_cfg" > "$T/r8-notice-$(basename "$_t" | tr -c 'A-Za-z0-9' _).txt"
-    [ "$(wc -l < "$T/r8-notice-$(basename "$_t" | tr -c 'A-Za-z0-9' _).txt")" = "1" ] \
+    [ "$(wc -l < "$T/r8-notice-$(basename "$_t" | tr -c 'A-Za-z0-9' _).txt")" -eq 1 ] \
       || fail "R8: expected exactly 1 notice line naming $_cfg"
   done
 
@@ -435,7 +435,7 @@ changelog_release_section() {
 }
 
 test_version_and_changelog() {
-  [ "$(cat "$SRC/VERSION")" = "0.86.0" ] || fail "R11: VERSION is not 0.86.0 (got $(cat "$SRC/VERSION"))"
+  [ "$(cat "$SRC/VERSION")" = "0.87.0" ] || fail "R11: VERSION is not 0.87.0 (got $(cat "$SRC/VERSION"))"
   changelog_release_section > "$T/changelog-release.txt"
   [ -s "$T/changelog-release.txt" ] \
     || fail "R11: could not extract the ## [0.85.0] CHANGELOG section — heading anchor is stale"
@@ -443,7 +443,7 @@ test_version_and_changelog() {
     grep -qF "$_tok" "$T/changelog-release.txt" \
       || fail "R11: CHANGELOG.md's [0.85.0] section is missing '$_tok'"
   done
-  pass "VERSION is 0.86.0 and CHANGELOG's [0.85.0] section names the block, its default-on enabled: true, the default repo, the notice, and the opt-out (R11) [test_version_and_changelog]"
+  pass "VERSION is 0.87.0 and CHANGELOG's [0.85.0] section names the block, its default-on enabled: true, the default repo, the notice, and the opt-out (R11) [test_version_and_changelog]"
 }
 
 # ── non-functional: suite itself is +x, POSIX sh (E32-F01 tests.md) ───────────────────

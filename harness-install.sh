@@ -1644,7 +1644,7 @@ _mc_insert_after() {
 #
 # The selectable keys — the ONLY legal tokens for `--agents`/`HARNESS_AGENTS`,
 # the `.harness/.agents` state file, and the toggle UI — are exactly:
-AGENT_KEYS="claude codex opencode"
+AGENT_KEYS="claude codex opencode antigravity"
 # AGENTS.md (the shared portable entrypoint) is deliberately NOT a key: it is
 # always written, never gated, never removed (see write_pointer AGENTS.md). It
 # also doubles as Codex CLI's native entrypoint — Codex reads AGENTS.md from the
@@ -2129,7 +2129,7 @@ marker_present() {
 # caller decides what an empty verdict falls back to.
 detect_host() {
   case "${HARNESS_HOST_AGENT:-}" in
-    gemini|antigravity) die "retired host '$HARNESS_HOST_AGENT' — supported replacements: claude codex opencode" ;;
+    gemini) die "retired host '$HARNESS_HOST_AGENT' — supported replacements: claude codex opencode antigravity" ;;
   esac
   # 1. Explicit declaration wins outright (R9) — the escape hatch for a front-end whose
   #    session marker cannot be honestly verified, set once in a shell profile.
@@ -2296,7 +2296,7 @@ validate_csv() {
     # trim surrounding whitespace
     _tok="$(printf '%s' "$_tok" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
     [ -n "$_tok" ] || continue
-    case "$_tok" in gemini|antigravity) die "retired agent '$_tok' — supported replacements: claude codex opencode" ;; esac
+    case "$_tok" in gemini) die "retired agent '$_tok' — supported replacements: claude codex opencode antigravity" ;; esac
     agent_known "$_tok" || die "unknown agent key '$_tok' in --agents/HARNESS_AGENTS (known: $AGENT_KEYS)"
     _out="$_out $_tok"
     IFS=','
@@ -2578,12 +2578,12 @@ recorded_active_selection() {
   _ras_new=""
   for _ras_key in $_ras_old; do
     case "$_ras_key" in
-      gemini|antigravity) echo "⚠️  retiring recorded agent '$_ras_key'; supported replacements: claude codex opencode" >&2 ;;
-      claude|codex|opencode) _ras_new="$_ras_new $_ras_key" ;;
-      *) die "unknown recorded agent '$_ras_key' — choose --agents=claude, --agents=codex, or --agents=opencode" ;;
+      gemini) echo "⚠️  retiring recorded agent '$_ras_key'; supported replacements: claude codex opencode antigravity" >&2 ;;
+      claude|codex|opencode|antigravity) _ras_new="$_ras_new $_ras_key" ;;
+      *) die "unknown recorded agent '$_ras_key' — choose --agents=claude, --agents=codex, --agents=opencode, or --agents=antigravity" ;;
     esac
   done
-  [ -n "$_ras_new" ] || die "no supported recorded agents remain — rerun with --agents=claude, --agents=codex, or --agents=opencode"
+  [ -n "$_ras_new" ] || die "no supported recorded agents remain — rerun with --agents=claude, --agents=codex, --agents=opencode, or --agents=antigravity"
   normalize_keys "$_ras_new"
 }
 
@@ -4807,6 +4807,7 @@ EOF
     _ea_any=0
     for _ea_k in $AGENT_KEYS; do
       agent_selected "$_ea_k" || continue
+      case "$_ea_k" in antigravity) continue ;; esac
       if models_any "$_ea_k"; then _ea_any=1; fi
     done
 
@@ -4827,6 +4828,7 @@ EOF
     _ea_seen=0
     for _ea_k in $AGENT_KEYS; do
       agent_selected "$_ea_k" || continue
+      case "$_ea_k" in antigravity) continue ;; esac
       _ea_seen=1
       # `unstamped` outranks whatever resolve_model would say: the config's answer is about
       # a file this run did not write, so it describes a model the front-end will not use.
@@ -5323,6 +5325,7 @@ Act as the **Orchestrator** (`.harness/agents/orchestrator.md`).
    - `in-review` → spawn **reviewer**; approve → open the PR and LEAVE it `in-review`
      (`done` is written only after the work merges — see `.harness/agents/orchestrator.md`
      “Writing `done`”), reject → back to `in-progress`.
+   (In Antigravity, define role subagents dynamically with `define_subagent` using canonical `.harness/agents/<role>.md` prompts and `enable_write_tools=True`, dispatching via `invoke_subagent` to maintain role context hygiene.)
 4. Append what happened to `.harness/progress/history.md`.
 
 Map `$ARGUMENTS` to the selector's closed scope flags:
@@ -6880,7 +6883,7 @@ EOF
   # units and only the LAST claimant's deselection reclaims them. Keep the historical
   # ownership ledger name for safe retirement of formerly shared Antigravity/Codex units.
   skill_unit_claimed() {
-    agent_selected codex || agent_selected opencode
+    agent_selected codex || agent_selected opencode || agent_selected antigravity
   }
 
   # gen_skill_body <command> <dest> — adapt the canonical command body to the shared
@@ -6899,7 +6902,7 @@ EOF
       printf 'description: %s\n' "$_gcs_desc"
       printf '%s\n' '---'
       printf '\n## Invocation adapter\n\n'
-      printf 'In Codex, invoke `$%s` and write arguments after the skill mention; in OpenCode, invoke `/%s`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.\n' "$_gcs_name" "$_gcs_name"
+      printf 'In Antigravity or OpenCode, invoke `/%s`; in Codex, invoke `$%s` and write arguments after the skill mention. In all hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the Antigravity or OpenCode invocation is `/sdd-<name>`.\n' "$_gcs_name" "$_gcs_name"
       # R5: the concurrency gate is a property of the workflow, not of one file. The
       # shared unit is written for every claimant, so the OpenCode capability
       # precondition lives in the BODY — unconditional text, conditional in effect
@@ -7430,6 +7433,14 @@ EOF
           fi
           reclaim_model_agents codex
           ;;
+        antigravity)
+          if ! skill_unit_claimed; then
+            _agy_removed="$(reclaim_skill_units "$HARNESS_OWNED_CMDS")"
+            if [ -n "$_agy_removed" ]; then
+              echo "⚠️  removed deselected agent 'antigravity' skills:$_agy_removed" >&2
+            fi
+          fi
+          ;;
       esac
     done
   fi
@@ -7587,11 +7598,12 @@ EOF
     # second pass, once the first invocation had written vision.md/architecture.md. Each
     # front-door step now names the selected hosts' invocation forms as alternatives
     # WITHIN that one step. Step order is unchanged: plan → drill → baseline → next.
-    _adv_claude=0; _adv_codex=0; _adv_opencode=0
+    _adv_claude=0; _adv_codex=0; _adv_opencode=0; _adv_antigravity=0
     if agent_selected claude; then _adv_claude=1; fi
     if agent_selected codex; then _adv_codex=1; fi
     if agent_selected opencode; then _adv_opencode=1; fi
-    _adv_count=$((_adv_claude + _adv_codex + _adv_opencode))
+    if agent_selected antigravity; then _adv_antigravity=1; fi
+    _adv_count=$((_adv_claude + _adv_codex + _adv_opencode + _adv_antigravity))
     if [ "$_adv_count" -eq 1 ]; then
       # A single selected host keeps its exact per-host phrasing: test_codex_native.sh R8
       # pins the "Claude Code:/Codex:/OpenCode:" labels and Codex's "invoke $sdd-next"
@@ -7606,34 +7618,40 @@ EOF
         echo '  4. Codex: invoke $sdd-drill <epic-id> to decompose the first draft epic into features.'
         echo "  5. $_advice_baseline"
         echo '  6. Codex: invoke $sdd-next to spec and build that work.'
-      else
+      elif [ "$_adv_opencode" = 1 ]; then
         echo "  3. OpenCode: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
         echo "  4. OpenCode: run /sdd-drill <epic-id> to decompose the first draft epic into features."
         echo "  5. $_advice_baseline"
         echo "  6. OpenCode: run /sdd-next to spec and build that work."
+      else
+        echo "  3. Antigravity: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
+        echo "  4. Antigravity: run /sdd-drill <epic-id> to decompose the first draft epic into features."
+        echo "  5. $_advice_baseline"
+        echo "  6. Antigravity: run /sdd-next to spec and build that work."
       fi
     else
       # Multiple hosts: ONE workflow; the host-specific forms are alternatives inside the
       # one numbered step, so steps 3-6 (and the baseline commit) appear exactly once.
-      if [ "$_adv_claude" = 1 ] && [ "$_adv_opencode" = 1 ]; then
-        _adv_slash_label='Claude Code/OpenCode'
-      elif [ "$_adv_claude" = 1 ]; then
-        _adv_slash_label='Claude Code'
-      else
-        _adv_slash_label='OpenCode'
+      _slash_hosts=""
+      if [ "$_adv_claude" = 1 ]; then _slash_hosts="Claude Code"; fi
+      if [ "$_adv_opencode" = 1 ]; then
+        if [ -n "$_slash_hosts" ]; then _slash_hosts="$_slash_hosts/OpenCode"; else _slash_hosts="OpenCode"; fi
       fi
-      if { [ "$_adv_claude" = 1 ] || [ "$_adv_opencode" = 1 ]; } && [ "$_adv_codex" = 1 ]; then
-        _adv_plan="Run /sdd-plan ($_adv_slash_label) or \$sdd-plan (Codex)"
-        _adv_drill="Run /sdd-drill <epic-id> ($_adv_slash_label) or \$sdd-drill <epic-id> (Codex)"
-        _adv_next="Run /sdd-next ($_adv_slash_label) or \$sdd-next (Codex)"
+      if [ "$_adv_antigravity" = 1 ]; then
+        if [ -n "$_slash_hosts" ]; then _slash_hosts="$_slash_hosts/Antigravity"; else _slash_hosts="Antigravity"; fi
+      fi
+      if [ -n "$_slash_hosts" ] && [ "$_adv_codex" = 1 ]; then
+        _adv_plan="Run /sdd-plan ($_slash_hosts) or \$sdd-plan (Codex)"
+        _adv_drill="Run /sdd-drill <epic-id> ($_slash_hosts) or \$sdd-drill <epic-id> (Codex)"
+        _adv_next="Run /sdd-next ($_slash_hosts) or \$sdd-next (Codex)"
       elif [ "$_adv_codex" = 1 ]; then
         _adv_plan='Run $sdd-plan (Codex)'
         _adv_drill='Run $sdd-drill <epic-id> (Codex)'
         _adv_next='Run $sdd-next (Codex)'
       else
-        _adv_plan="Run /sdd-plan ($_adv_slash_label)"
-        _adv_drill="Run /sdd-drill <epic-id> ($_adv_slash_label)"
-        _adv_next="Run /sdd-next ($_adv_slash_label)"
+        _adv_plan="Run /sdd-plan ($_slash_hosts)"
+        _adv_drill="Run /sdd-drill <epic-id> ($_slash_hosts)"
+        _adv_next="Run /sdd-next ($_slash_hosts)"
       fi
       echo "  3. $_adv_plan to brainstorm the vision, architecture, ADRs and draft epics."
       echo "  4. $_adv_drill to decompose the first draft epic into features."
