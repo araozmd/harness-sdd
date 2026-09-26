@@ -325,32 +325,38 @@ test_report_command_body_contract() {
   _cmd_body > "$_body"
   _floor "$(cat "$_body")" 300 "R8: the canonical sdd-report command body"
   _bf="$(_fold "$_body")"
-  # Calls the tool at its harness path.
-  printf '%s' "$_bf" | grep -qF 'tools/harness-report.sh' \
-    || fail "R8: the body does not call tools/harness-report.sh"
-  # Allow-listed upstream fields only.
+  # The actual invocation is the fenced shell block; every allow-listed flag must live THERE,
+  # not merely somewhere in the prose (a body that names a flag but drops it from the call
+  # never passes it).
+  _invoc="$(awk '
+    /^[[:space:]]*```sh[[:space:]]*$/ { k=1; next }
+    k && /^[[:space:]]*```[[:space:]]*$/ { exit }
+    k
+  ' "$_body")"
+  _floor "$_invoc" 120 "R8: the sdd-report invocation block"
+  printf '%s' "$_invoc" | grep -qF 'tools/harness-report.sh' \
+    || fail "R8: the invocation block does not call tools/harness-report.sh"
   for _flag in --trigger --symptom --file --command --exit-code --role --phase; do
-    printf '%s' "$_bf" | grep -qF -- "$_flag" \
-      || fail "R8: the body does not pass the allow-listed field $_flag"
+    printf '%s' "$_invoc" | grep -qF -- "$_flag" \
+      || fail "R8: the invocation block does not pass the allow-listed field $_flag"
   done
+  printf '%s' "$_invoc" | grep -qF -- '--session-id' \
+    || fail "R8: the invocation block does not pass --session-id"
+  printf '%s' "$_invoc" | grep -qF 'HARNESS_FEEDBACK_SESSION_ID' \
+    || fail "R8: the invocation block does not pass HARNESS_FEEDBACK_SESSION_ID"
+  printf '%s' "$_invoc" | grep -qF 'date -u +%Y%m%dT%H%M%SZ' \
+    || fail "R8: the invocation block names no grammar-safe date fallback for the session token"
+  printf '%s' "$_invoc" | grep -qF -- '--notes-file' \
+    || fail "R8: the invocation block does not pass --notes-file"
   # At least one harness-owned --file (F02 rejects otherwise).
   printf '%s' "$_bf" | grep -qiE 'at least one harness-owned' \
     || fail "R8: the body does not require at least one harness-owned --file"
   printf '%s' "$_bf" | grep -qF 'init.sh' \
     || fail "R8: the body does not pass a harness-owned --file (init.sh for the init path)"
-  # Session token + grammar-safe fallback.
-  printf '%s' "$_bf" | grep -qF -- '--session-id' \
-    || fail "R8: the body does not pass --session-id"
-  printf '%s' "$_bf" | grep -qF 'HARNESS_FEEDBACK_SESSION_ID' \
-    || fail "R8: the body does not pass HARNESS_FEEDBACK_SESSION_ID"
-  printf '%s' "$_bf" | grep -qF 'date -u +%Y%m%dT%H%M%SZ' \
-    || fail "R8: the body names no grammar-safe date fallback for the session token"
   _tok="$(date -u +%Y%m%dT%H%M%SZ)"
   printf '%s' "$_tok" | grep -qE '^[A-Za-z0-9._-]{1,64}$' \
     || fail "R8: the body's fallback expression produces a token F02 rejects (got '$_tok')"
   # Free-form text is local-only.
-  printf '%s' "$_bf" | grep -qF -- '--notes-file' \
-    || fail "R8: the body does not pass --notes-file"
   printf '%s' "$_bf" | grep -qi 'local-only' \
     || fail "R8: the body does not state the free-form summary is local-only"
   printf '%s' "$_bf" | grep -qiE 'never[^.]{0,40}sent to' \
