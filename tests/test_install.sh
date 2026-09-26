@@ -201,7 +201,7 @@ _SSE_EOF
   # check runs in both directions, editing either side alone also reds: a member removed
   # from the expected list shows up as unexpected-derived, one removed from the derivation
   # shows up as missing. That is what keeps the set from rotting silently.
-  _sse_expected="harness-install.sh init.sh tools/builder-role.sh tools/change-size.sh tools/fix-worktree.sh tools/harness-owned-paths.sh tools/opencode-model-helper.sh tools/pr-gate.sh tools/pr-round-trend.sh tools/run-tests.sh tools/wait-for-codex.sh"
+  _sse_expected="harness-install.sh init.sh tools/builder-role.sh tools/change-size.sh tools/fix-worktree.sh tools/harness-owned-paths.sh tools/harness-report.sh tools/opencode-model-helper.sh tools/pr-gate.sh tools/pr-round-trend.sh tools/run-tests.sh tools/wait-for-codex.sh"
 
   _sse_unexpected=""
   for _sse_f in $_sse_seen; do

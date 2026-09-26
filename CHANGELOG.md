@@ -4,6 +4,30 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.86.0] — 2026-09-25
+
+### Added — `tools/harness-report.sh`: the allow-listed feedback reporter (E32-F02)
+
+- **New executable `tools/harness-report.sh`.** It files exactly one harness-feedback
+  issue upstream, built only from allow-listed structured fields — trigger, symptom, an
+  accepted harness-owned file, command, exit code, role, phase, and a validated session
+  token. Free-form text (`--notes-file`) is never an input to the title, body, or
+  duplicate-search query; it stays in the local `progress/feedback/` copy. The privacy
+  guarantee is the allow-list; a fixed redaction corpus is a second layer.
+- **Versioned body marker.** The body begins with exactly one line,
+  `<!-- harness-feedback:v1 host=<host> version=<harness-version> trigger=<trigger> -->`,
+  the contract E32-F04 (labeler) and E32-F05 (triage) parse. The marker is left byte-exact
+  by redaction. A non-semver `VERSION` files nothing and writes the local report instead.
+- **Bounded filing.** A title-scoped duplicate search treats a report as a duplicate only
+  on an exact title match (no create, no comment), and `feedback.max_per_session` caps new
+  issues per caller-supplied session token; a different token resets the count.
+- **The tool never fails the caller.** Disabled reporting, a malformed `repo`, an
+  out-of-allow-list value, a duplicate, a capped or tokenless session, and a missing,
+  unauthenticated or erroring `gh` all exit 0 and, where applicable, write
+  `progress/feedback/<timestamp>.md` (which is already gitignored in both layouts).
+- `docs/INSTALL.md`'s feedback section now states that the report tool ships; reporting
+  stays inert until E32-F03's triggers land.
+
 ## [0.85.0] — 2026-09-25
 
 ### Added — `feedback:` config block + opt-out notice (E32-F01)
