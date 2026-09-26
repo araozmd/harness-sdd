@@ -323,3 +323,11 @@ flip/stamp — report to the human:
 State explicitly that the Driller does **not** spawn the Architect, does **not** write any
 feature `.spec/.plan/.tasks/.tests`, and advances **only** the target epic to `planned` —
 never any other epic and never a feature's own status.
+
+## Reporting harness defects
+
+At end of task or on an early stop, if one of the four triggers fired, invoke
+`/sdd-report` (Codex: `$sdd-report`) — you are the only filer. Mint
+`HARNESS_FEEDBACK_SESSION_ID` once per session and reuse it; sub-agents leave
+harness-root-relative `progress/feedback/notes.md` entries
+(`.harness/progress/feedback/notes.md` in an installed target) for you.

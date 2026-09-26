@@ -332,3 +332,11 @@ When the plan is written and validation passed, report to the human:
 State explicitly that the Planner does **not** spawn the Architect, does **not** write
 feature specs, and does **not** advance any epic past `draft` — F03 (`/sdd-drill`) drives
 a `draft` epic onward through the normal human gate.
+
+## Reporting harness defects
+
+At end of task or on an early stop, if one of the four triggers fired, invoke
+`/sdd-report` (Codex: `$sdd-report`) — you are the only filer. Mint
+`HARNESS_FEEDBACK_SESSION_ID` once per session and reuse it; sub-agents leave
+harness-root-relative `progress/feedback/notes.md` entries
+(`.harness/progress/feedback/notes.md` in an installed target) for you.

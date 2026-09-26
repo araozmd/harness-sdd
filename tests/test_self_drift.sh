@@ -103,8 +103,41 @@ printf '%s\n' "$_d" | grep -q "opencode.json" \
 pass "an OpenCode emitter edit without regeneration is caught and named (R6) [opencode_gate_red]"
 
 # ── R2: the manifest ledger ───────────────────────────────────────────────────
+# `.claude/agents/` and `.claude/commands/` are NOT purged before the fixture's `--self`, and
+# `--self` leaves an edited file "unchanged and unclaimed", so a HAND EDIT to a committed
+# `.claude/*` unit is invisible to the byte-diff (it compares the edit to itself). The
+# regenerated manifest is that class's ONLY backstop: after the committed manifest is deleted,
+# an edited file cannot be re-adopted, so it drops out of the fresh manifest and the `_must`
+# grep below reds. `_must` therefore enumerates EVERY committed generated unit the manifest
+# carries — the `.claude/agents/*.md` + `.claude/commands/*.md` pair is the load-bearing
+# (inherited) class; `.codex/agents/`, `.agents/skills/`, `.opencode/` and `opencode.json` are
+# listed for a complete enumeration (the byte-diff also covers those, because the fixture
+# purges their dirs). When a feature commits a NEW generated unit, ADD it here — an unlisted
+# `.claude/` unit fails open (the hole E32-F03 rounds 1-2 closed).
 [ -f "$F/.claude/.glue-manifest" ] || fail "no .glue-manifest after --self (R2)"
-for _must in .claude/agents/builder.md .claude/commands/sdd-next.md .codex/agents/builder.toml .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml .escalation-arming opencode.json .opencode/command/sdd-next.md .opencode/command/sdd-test-concurrency.md .opencode/agent/pr-fixer.md; do
+for _must in \
+  .claude/agents/architect.md .claude/agents/builder-heavy.md .claude/agents/builder.md \
+  .claude/agents/doc-critic.md .claude/agents/orchestrator.md .claude/agents/pr-fixer.md \
+  .claude/agents/reviewer.md .claude/agents/scout.md \
+  .claude/commands/sdd-drill.md .claude/commands/sdd-fix.md .claude/commands/sdd-fix-parallel.md \
+  .claude/commands/sdd-new.md .claude/commands/sdd-next.md .claude/commands/sdd-plan.md \
+  .claude/commands/sdd-pr-loop.md .claude/commands/sdd-report.md \
+  .codex/agents/architect.toml .codex/agents/builder-heavy.toml .codex/agents/builder.toml \
+  .codex/agents/doc-critic.toml .codex/agents/orchestrator.toml .codex/agents/pr-fixer.toml \
+  .codex/agents/reviewer.toml .codex/agents/scout.toml \
+  .agents/skills/sdd-drill/SKILL.md .agents/skills/sdd-drill/agents/openai.yaml \
+  .agents/skills/sdd-fix/SKILL.md .agents/skills/sdd-fix/agents/openai.yaml \
+  .agents/skills/sdd-fix-parallel/SKILL.md .agents/skills/sdd-fix-parallel/agents/openai.yaml \
+  .agents/skills/sdd-new/SKILL.md .agents/skills/sdd-new/agents/openai.yaml \
+  .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml \
+  .agents/skills/sdd-plan/SKILL.md .agents/skills/sdd-plan/agents/openai.yaml \
+  .agents/skills/sdd-pr-loop/SKILL.md .agents/skills/sdd-pr-loop/agents/openai.yaml \
+  .agents/skills/sdd-report/SKILL.md .agents/skills/sdd-report/agents/openai.yaml \
+  .escalation-arming opencode.json \
+  .opencode/agent/pr-fixer.md \
+  .opencode/command/sdd-drill.md .opencode/command/sdd-fix.md .opencode/command/sdd-new.md \
+  .opencode/command/sdd-next.md .opencode/command/sdd-plan.md .opencode/command/sdd-pr-loop.md \
+  .opencode/command/sdd-report.md .opencode/command/sdd-test-concurrency.md; do
   grep -q " $_must\$" "$F/.claude/.glue-manifest" || fail "manifest misses $_must (R2)"
 done
 grep -q "glue-manifest" "$F/.claude/.glue-manifest" && fail "manifest lists itself (R2)"

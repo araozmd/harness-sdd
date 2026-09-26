@@ -747,3 +747,11 @@ under `HARNESS_DIR`) and falls back to `<HARNESS_DIR>/telemetry.jsonl` — so th
 always reflects where records were actually written, even under a custom `telemetry.log`.
 (Pass `--log` only to inspect a different log.) If there is no telemetry yet, the script
 exits 0 with a "no telemetry yet" notice — print that.
+
+## Reporting harness defects
+
+At end of task or on an early stop, if one of the four triggers fired, invoke
+`/sdd-report` (Codex: `$sdd-report`) — you are the only filer. Mint
+`HARNESS_FEEDBACK_SESSION_ID` once per session and reuse it; sub-agents leave
+harness-root-relative `progress/feedback/notes.md` entries
+(`.harness/progress/feedback/notes.md` in an installed target) for you.

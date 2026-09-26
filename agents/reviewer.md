@@ -292,3 +292,12 @@ prevented the round (a probe idiom, an environment gotcha, a class of over-claim
 append one dated line (`- [YYYY-MM-DD reviewer] …`). A finding that is a *lesson* goes
 there; only a finding that is *work* (recurring, blocks progress, or fails open) is
 worth a board row — see the Fixer's severity bar.
+
+## Reporting harness defects
+
+On one of the four triggers, create the ledger directory if it is missing — `mkdir -p
+progress/feedback` in the source repo, `mkdir -p .harness/progress/feedback` in an installed
+target — then append an entry to the harness-root-relative `progress/feedback/notes.md`
+(`.harness/progress/feedback/notes.md` in an installed target) — a `## <trigger>` heading plus
+`symptom:` / `command:` / `phase:`; never invoke the reporter — only the session-owning
+top-level role files.

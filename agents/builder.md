@@ -170,3 +170,12 @@ enforced — see **E99-F102**.
 When every task is ticked and your self-check passes, report completion to the
 Orchestrator and let it move the feature to `in-review`. Do **not** declare it
 `done` — that is the Reviewer's call.
+
+## Reporting harness defects
+
+On one of the four triggers, create the ledger directory if it is missing — `mkdir -p
+progress/feedback` in the source repo, `mkdir -p .harness/progress/feedback` in an installed
+target — then append an entry to the harness-root-relative `progress/feedback/notes.md`
+(`.harness/progress/feedback/notes.md` in an installed target) — a `## <trigger>` heading plus
+`symptom:` / `command:` / `phase:`; never invoke the reporter — only the session-owning
+top-level role files.

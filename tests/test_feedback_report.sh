@@ -741,8 +741,8 @@ _section() { # _section <heading-literal> <file>
 test_shipping_artifacts() {
   [ -x "$TOOL" ] \
     || fail "R12: tools/harness-report.sh is not executable in the source tree (the installer chmod cannot fix a source mode)"
-  [ "$(cat "$SRC/VERSION")" = "0.87.0" ] \
-    || fail "R12: VERSION is not 0.87.0 (got $(cat "$SRC/VERSION"))"
+  [ "$(cat "$SRC/VERSION")" = "0.88.0" ] \
+    || fail "R12: VERSION is not 0.88.0 (got $(cat "$SRC/VERSION"))"
 
   _sec="$(printf 'chmod +x "$H/tools/harness-report.sh"')"
   grep -qF "$_sec" "$SRC/harness-install.sh" \
@@ -764,30 +764,35 @@ test_shipping_artifacts() {
   grep -qF 'E32-F03' "$_is" || fail "R12: the INSTALL.md feedback section does not name E32-F03"
 
   # Pristine-bytes control (tests.md R12): the stale phrase must be the REAL pre-change
-  # text, and must be gone from the working file. While the base branch's docs/INSTALL.md
-  # DIFFERS from the working copy, the base IS the pre-change text and MUST carry the phrase
-  # (a base that lost or never had it reds here, so the negative can never be decorative).
-  # Once the base already carries the change (post-merge) the liveness half is N/A; the
-  # working-file negative always runs, so reverting the sentence reds in every environment.
-  _now="$(grep -cF 'No reporter ships yet' "$SRC/docs/INSTALL.md")" || _now=0
+  # text, and must be gone from the working file. F02's original control anchored on
+  # 'No reporter ships yet', which is already gone from the base the NEXT docs/INSTALL.md
+  # editor will see — so it would red on an unrelated docs change (E32-F03 is the first
+  # feature to touch this section after F02). Re-anchor on the F02 sentence E32-F03 removes
+  # ('Reporting stays inert until …') and make the base-liveness observation SELF-LIMITING
+  # and INFORMATIONAL: while the base branch's copy carries the pre-change sentence it is
+  # recorded as real, and once a base no longer does (post-merge, or a later docs edit) it
+  # is recorded N/A. It is deliberately NOT a failing assertion — the load-bearing half is
+  # the working-file negative below, which always runs, so reverting the sentence reds in
+  # every environment.
+  _now="$(grep -cF 'Reporting stays inert until' "$SRC/docs/INSTALL.md")" || _now=0
   [ "$_now" = "0" ] \
-    || fail "R12: the working docs/INSTALL.md still contains 'No reporter ships yet' ($_now line(s))"
+    || fail "R12: the working docs/INSTALL.md still states reporting is inert ($_now line(s))"
   _base=""
   for _ref in origin/main main; do
     if git -C "$SRC" rev-parse --verify --quiet "$_ref" >/dev/null 2>&1; then _base="$_ref"; break; fi
   done
   _base_file="$T/r12-base-install.md"
   if [ -n "$_base" ] && git -C "$SRC" show "$_base:docs/INSTALL.md" > "$_base_file" 2>/dev/null; then
-    _old="$(grep -cF 'No reporter ships yet' "$_base_file")" || _old=0
-    if [ "$_old" -eq 0 ] || cmp -s "$_base_file" "$SRC/docs/INSTALL.md"; then
-      _ctrl="$_base already carries the change (post-merge); liveness assertion N/A, working-file negative enforced"
+    _old="$(grep -cF 'Reporting stays inert until' "$_base_file")" || _old=0
+    if cmp -s "$_base_file" "$SRC/docs/INSTALL.md"; then
+      _ctrl="$_base already carries the working copy (post-merge); base-liveness N/A; working-file negative ran"
+    elif [ "$_old" -ge 1 ]; then
+      _ctrl="$_base carries the real pre-change sentence on $_old line(s) (recorded, informational)"
     else
-      [ "$_old" -ge 1 ] \
-        || fail "R12 pristine control: $_base differs from the working docs/INSTALL.md (so it is the pre-change base) but contains 'No reporter ships yet' on 0 lines — the forbidden phrase is not the real pre-change text, so the working-file negative is decorative"
-      _ctrl="$_base carries the real pre-change phrase on $_old line(s) — the liveness assertion holds"
+      _ctrl="$_base no longer carries the anchored pre-change sentence; base-liveness N/A (self-limiting); working-file negative ran"
     fi
   else
-    _ctrl="no origin/main|main base ref to read; liveness assertion N/A, working-file negative enforced"
+    _ctrl="no origin/main|main base ref to read; base-liveness N/A; working-file negative ran"
   fi
   printf '%s\n' "$_ctrl" > "$T/r12-pristine-control.txt"
   pass "R12 VERSION, the chmod entry, the CHANGELOG [0.86.0] span, the corrected INSTALL.md feedback span, and the pristine-bytes control all ship (R12) [test_shipping_artifacts]"

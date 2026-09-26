@@ -61,3 +61,12 @@ comment you were meant to fix.
 - **Merging**, labeling, or touching the PR's state.
 - **Touching files unrelated to the comment.**
 - **Running the full test suite** or invoking other workers.
+
+## Reporting harness defects
+
+On one of the four triggers, create the ledger directory if it is missing — `mkdir -p
+progress/feedback` in the source repo, `mkdir -p .harness/progress/feedback` in an installed
+target — then append an entry to the harness-root-relative `progress/feedback/notes.md`
+(`.harness/progress/feedback/notes.md` in an installed target) — a `## <trigger>` heading plus
+`symptom:` / `command:` / `phase:`; never invoke the reporter — only the session-owning
+top-level role files.

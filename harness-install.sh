@@ -1773,7 +1773,7 @@ codex codex non-interactive
 # own agents/commands sharing the same dir (Codex r2 P1). Keep in sync with the
 # emit_agent calls and the command-copy loops in install_one().
 HARNESS_CLAUDE_SHIMS="orchestrator architect builder builder-heavy reviewer scout doc-critic pr-fixer"
-HARNESS_SDD_CMDS="sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel"
+HARNESS_SDD_CMDS="sdd-next sdd-new sdd-plan sdd-drill sdd-fix sdd-fix-parallel sdd-report"
 
 # E18-F01: the pr_loop glue is GATED on the OPT-IN `pr_loop.enabled`, so it is emitted
 # from a SEPARATE list — joining $HARNESS_SDD_CMDS would make it unconditional (and, with
@@ -3841,7 +3841,10 @@ install_one() {
   fi
 
   # ── 2. project workspace → .harness/  (seed once, never clobber) ────────────
-  mkdir -p "$H/specs/epics" "$H/progress" "$H/state"
+  # `progress/feedback/` is where sub-agents append trigger notes and where F02 writes its
+  # local fallback + per-session cap ledger. Seed it here so a pristine target's first append
+  # does not fail with "Directory nonexistent" before the owning role can read it (E32-F03).
+  mkdir -p "$H/specs/epics" "$H/progress" "$H/progress/feedback" "$H/state"
   if [ ! -f "$H/specs/epics/.gitkeep" ]; then : > "$H/specs/epics/.gitkeep"; fi
 
   # harness.config.yaml is project-owned once seeded: bootstrap fills in the
@@ -5762,6 +5765,150 @@ This command is argument-free. If `$ARGUMENTS` is non-empty, STOP and report usa
    API or background shell agent.
 EOF
 
+  # /sdd-report (E32-F03) — the prompts decide WHEN to call F02's reporter; this body
+  # never re-implements its filing mechanics. The canonical body is written in TARGET
+  # layout (`.harness/` paths); `--self` strips the prefix for the source copy.
+  cat > "$CMDDIR/sdd-report.md" <<'EOF'
+---
+description: File one harness-feedback report through tools/harness-report.sh for one of the four triggers
+---
+
+File **exactly one** harness-feedback report for a **harness defect**, then stop. This
+command drafts the report and calls the reporter; `.harness/tools/harness-report.sh` owns
+every filing mechanic (allow-list, marker, duplicate search, per-session cap, redaction) —
+never re-implement any of them here.
+Resolve every relative path against `.harness/`.
+
+1. **Identify the trigger, or refuse.** Read `.harness/progress/feedback/notes.md` and the
+   direct evidence. The trigger MUST be exactly one of `harness-malfunction`,
+   `contradictory-instruction`, `workaround`, or `missing-capability`. A failure of the
+   project's own code or tests, a transient network or auth error, or an agent mistake the
+   harness correctly caught is **not** a trigger — report nothing and STOP.
+2. **Pick the symptom** from the fixed vocabulary: `init-failure`, `install-failure`,
+   `tool-failure`, `board-write-failure`, `gate-unsatisfiable`, `instruction-conflict`,
+   `doc-conflict`, `workflow-gap`, `state-corruption`. An `init.sh` failure maps to
+   `init-failure`. Never invent a code.
+3. **Pass at least one harness-owned `--file`, as a concrete body path.** Use `init.sh` for
+   the `init.sh`-failure path; otherwise supply the failing harness tool's own tracked body
+   path — for example `tools/harness-report.sh`, `init.sh`, or `harness-install.sh`. Never
+   pass an `sdd-*` command basename such as `sdd-next` as `--file`: F02 accepts only real
+   tracked harness-body paths, so a command basename is dropped and the report falls to the
+   local-only copy when it is the sole file. F02 rejects the whole report to a local copy
+   when no supplied path is harness-owned, so a report with no accepted `--file` never files
+   upstream.
+4. **Mint the session token once, then call the reporter** with the allow-listed upstream
+   fields only:
+
+   ```sh
+   # --- harness-session-id:begin ---
+   # ONE token per session: the exported value if the session owner set it, else the
+   # current session's telemetry `session-start` marker (deterministic, so every call in
+   # the session reuses the same token), else a `date` stamp minted ONCE and persisted in
+   # the feedback dir, read back on later calls. Re-running `date` per call would give
+   # reports >1s apart different ids and reset F02's per-session cap ledger.
+   # Resolve the telemetry log EXACTLY as the writer/reader do: a `telemetry.log`
+   # override from harness.config.yaml (relative values resolve under the harness dir,
+   # absolute values are used as-is), else the default log. A hard-coded default path
+   # would miss the marker under a documented override and re-mint `date` on every
+   # report, resetting the per-session cap.
+   _hf_session="${HARNESS_FEEDBACK_SESSION_ID:-}"
+   _hf_dir=.harness/
+   _hf_cfg="${_hf_dir}harness.config.yaml"
+   _hf_log="${_hf_dir}telemetry.jsonl"
+   if [ -f "$_hf_cfg" ]; then
+     _hf_log_override="$(awk '
+       /^telemetry:[[:space:]]*(#.*)?$/ { t=1; next }
+       t && /^[^[:space:]#]/ { t=0 }
+       t && /^[[:space:]]+log:/ {
+         sub(/^[[:space:]]+log:[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, "")
+         gsub(/^"|"$|^'\''|'\''$/, ""); print; exit
+       }
+     ' "$_hf_cfg" 2>/dev/null || true)"
+     if [ -n "$_hf_log_override" ]; then
+       case "$_hf_log_override" in
+         /*) _hf_log="$_hf_log_override" ;;
+         *)  _hf_log="${_hf_dir}$_hf_log_override" ;;
+       esac
+     fi
+   fi
+   if [ -z "$_hf_session" ] && [ -f "$_hf_log" ]; then
+     _hf_session="$(grep -E '"type"[[:space:]]*:[[:space:]]*"session-start"' "$_hf_log" 2>/dev/null \
+       | tail -n 1 \
+       | python3 -c 'import json,re,sys;r=json.loads(sys.stdin.read() or "{}");sys.stdout.write(re.sub(r"[^A-Za-z0-9._-]","",r.get("started_at","")))' 2>/dev/null || true)"
+   fi
+   if [ -z "$_hf_session" ]; then
+     # No export and no `session-start` marker: telemetry is disabled (or its best-effort
+     # write failed), so the telemetry-derived path above yielded nothing. Mint the `date`
+     # fallback ONCE and persist it in the feedback dir; every later call in the session
+     # reads it back. Recomputing `date` per call would give reports >1s apart different
+     # ids, resetting F02's `.session-count` ledger and bypassing `max_per_session`.
+     _hf_fallback="${_hf_dir}progress/feedback/.session-id"
+     if [ -f "$_hf_fallback" ]; then
+       _hf_session="$(cat "$_hf_fallback" 2>/dev/null || true)"
+       # Re-validate on READ: a corrupt or foreign `.session-id` must never be returned
+       # verbatim. F02's `_valid_session` rejects a token outside `^[A-Za-z0-9._-]{1,64}$`
+       # and drops the WHOLE report to a local copy, so one bad line here would silently
+       # degrade EVERY later report in this repo. Ignore it and re-mint below. `case`, not
+       # `grep`: a glob class also matches an embedded newline that a line-based grep misses.
+       case "$_hf_session" in
+         ''|*[!A-Za-z0-9._-]*) _hf_session="" ;;
+       esac
+       [ "${#_hf_session}" -le 64 ] || _hf_session=""
+     fi
+     if [ -z "$_hf_session" ]; then
+       _hf_session="$(date -u +%Y%m%dT%H%M%SZ)"
+       mkdir -p "${_hf_fallback%/*}" 2>/dev/null || true
+       printf '%s\n' "$_hf_session" > "$_hf_fallback" 2>/dev/null || true
+     fi
+   fi
+   # --- harness-session-id:end ---
+
+   sh .harness/tools/harness-report.sh \
+     --trigger  <the trigger> \
+     --symptom  <the symptom code> \
+     --file     <a concrete harness-owned body path> \
+     --command  <harness command name; omit when no command applies> \
+     --exit-code <a real exit status; omit the flag when no process exited> \
+     --role     <role> \
+     --phase    <one of inception|architect|builder|reviewer|scout|slice-dispatch|handoff|install; omit when none applies> \
+     --session-id "$_hf_session" \
+     --notes-file <temp-file>
+   ```
+
+   The `--command` flag is optional: pass the harness command name that failed or is
+   implicated, and omit the flag entirely when no command applies — for example a
+   `doc-conflict` or `instruction-conflict` report, where no harness command ran. Never
+   leave a placeholder such as `<harness command name>`: it fails F02's `_valid_command`
+   and downgrades the whole report to the local fallback.
+
+   The `--exit-code` flag is optional: pass the real process exit status (one to three
+   digits) only when a process actually exited, and omit the flag entirely when none did —
+   never leave a placeholder such as `<n>`, which fails F02's `_valid_exit_code` and
+   downgrades the whole report to the local fallback.
+
+   The `--phase` flag is optional: pass only one of the enumerated phases, and omit it
+   entirely when none applies. F02's `_valid_phase` rejects any other nonempty value and
+   downgrades the whole report to the local fallback.
+
+   The session token matches `[A-Za-z0-9._-]{1,64}` and is minted **once per session**: the
+   block above reuses `HARNESS_FEEDBACK_SESSION_ID` when the session owner exported it, and
+   otherwise derives one token deterministically from the telemetry `session-start` marker —
+   so no export is required, and repeated calls in one session share the token instead of
+   resetting F02's per-session cap ledger. On the `init.sh` hard-stop path, where no
+   `session-start` marker exists, it mints the `date -u +%Y%m%dT%H%M%SZ` fallback **once**
+   and persists it in the feedback dir, reading it back on later calls — so two reports more
+   than a second apart still share one token. That fallback is grammar-safe, and a value read
+   back from the file is re-validated against the same grammar before reuse: a corrupt or
+   foreign `.session-id` is ignored and re-minted, so the token is never left unset, no later
+   report is dropped for want of a valid token, and the cap is never bypassed.
+5. **Free-form text is local-only.** Write the prose summary to a temp file and pass it via
+   `--notes-file`; it reaches the local `.harness/progress/feedback/` copy, is never an
+   upstream field, and is never sent to `gh`.
+6. **Report and stop.** The reporter never fails the task: a missing or unauthenticated
+   `gh`, a duplicate, a capped session, or a bad field degrades to the local copy and exits
+   0. State the outcome and stop.
+EOF
+
   # /sdd-test-concurrency (OpenCode only) — probes whether this OpenCode session can
   # spawn subagents concurrently. The marker it writes drives whether
   # harness-install.sh stamps /sdd-fix-parallel for OpenCode.
@@ -6820,7 +6967,7 @@ EOF
     for _c in $HARNESS_SDD_CMDS; do
       cp "$CMDDIR/$_c.md" "$TARGET/.claude/commands/$_c.md"
     done
-    ok "Claude Code commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel installed (.claude/)"
+    ok "Claude Code commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel + /sdd-report installed (.claude/)"
     if pr_loop_enabled; then
       for _c in $HARNESS_PR_LOOP_CMDS; do
         cp "$CMDDIR/$_c.md" "$TARGET/.claude/commands/$_c.md"
@@ -6861,9 +7008,9 @@ EOF
       fi
     fi
     if opencode_parallel_wanted; then
-      ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel installed (.opencode/)"
+      ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-fix-parallel + /sdd-report installed (.opencode/)"
     else
-      ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-test-concurrency installed (.opencode/); /sdd-fix-parallel skipped (run /sdd-test-concurrency, then re-run installer with --with-opencode-parallel=true to add it)"
+      ok "OpenCode commands /sdd-next + /sdd-new + /sdd-plan + /sdd-drill + /sdd-fix + /sdd-report + /sdd-test-concurrency installed (.opencode/); /sdd-fix-parallel skipped (run /sdd-test-concurrency, then re-run installer with --with-opencode-parallel=true to add it)"
     fi
     if pr_loop_enabled; then
       for _c in $HARNESS_PR_LOOP_CMDS; do
@@ -7165,7 +7312,7 @@ EOF
     for _c in $_cdx_cmds; do
       install_skill_unit "$_c"
     done
-    ok "shared skill units \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel installed (.agents/skills/ — project-local, read by Codex and OpenCode)"
+    ok "shared skill units \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel + \$sdd-report installed (.agents/skills/ — project-local, read by Codex and OpenCode)"
   fi
   if agent_selected codex || printf '%s\n' "$PRIOR_AGENTS" | grep -qx codex; then
     migrate_legacy_codex_prompts
@@ -7694,9 +7841,11 @@ self_model() {
 # rendering. ORDER MATTERS: the OpenCode-agent root rewrites run FIRST and match the
 # target-side `.harness/` prose they replace (`installed in `.harness/`` and
 # `mentions against `.harness/``); then the generic prefix strip runs; finally the
-# sdd-pr-loop path-resolution line (now stripped to a known literal) is swapped for the
-# source-layout banner — the banner itself names `.harness/`, so a later strip would
-# destroy it. A bare strip of the OpenCode agent left an EMPTY backtick placeholder where
+# sdd-pr-loop and sdd-report path-resolution lines (now stripped to known literals) are
+# swapped for their source-layout wording — any `.harness/` written in inline code would
+# otherwise collapse to an EMPTY placeholder, so each such line needs its own exact-line
+# swap. The sdd-pr-loop banner itself names `.harness/`, so a later strip would destroy it.
+# A bare strip of the OpenCode agent left an EMPTY backtick placeholder where
 # the target names `.harness/`, so a source checkout told the agent to resolve against
 # nothing (PR #206 finding 4045793773); the two pre-strip rules name the repository root
 # instead, mirroring the command glue's source-layout line. The strip is anchored on
@@ -7707,6 +7856,10 @@ self_transform() {
     $0 == "hit. Resolve every relative path against ``." {
       print "hit. This is the harness **source-layout** copy: paths resolve from the repository root"
       print "(an installed consumer gets the same body with everything resolved against `.harness/`)."
+      next
+    }
+    $0 == "Resolve every relative path against ``." {
+      print "Resolve every relative path against the repository root."
       next
     }
     { print }'

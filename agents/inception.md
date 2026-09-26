@@ -170,3 +170,11 @@ When the seed is done and validation passed, report to the human:
 State explicitly that Inception does **not** spawn the Architect and does **not**
 change status — `/sdd-next` (the Orchestrator) drives everything from `pending`
 onward through the normal human gate.
+
+## Reporting harness defects
+
+At end of task or on an early stop, if one of the four triggers fired, invoke
+`/sdd-report` (Codex: `$sdd-report`) — you are the only filer. Mint
+`HARNESS_FEEDBACK_SESSION_ID` once per session and reuse it; sub-agents leave
+harness-root-relative `progress/feedback/notes.md` entries
+(`.harness/progress/feedback/notes.md` in an installed target) for you.

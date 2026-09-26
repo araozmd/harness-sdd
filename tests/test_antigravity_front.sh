@@ -10,7 +10,7 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
 test_skills_invocation_adapter() {
-  _skills="sdd-drill sdd-fix sdd-fix-parallel sdd-new sdd-next sdd-plan sdd-pr-loop"
+  _skills="sdd-drill sdd-fix sdd-fix-parallel sdd-new sdd-next sdd-plan sdd-pr-loop sdd-report"
   for s in $_skills; do
     _f="$ROOT/.agents/skills/$s/SKILL.md"
     [ -f "$_f" ] || fail "Missing skill file: $_f"
