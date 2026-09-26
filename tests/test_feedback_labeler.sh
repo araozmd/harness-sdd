@@ -108,6 +108,10 @@ count_calls() { # <ERE over the joined call line>
   [ -f "$GLOG" ] || { echo 0; return 0; }
   calls_joined | grep -E "$1" | wc -l | tr -d ' '
 }
+gh_calls() { # total calls recorded (positive control for "no gh call" assertions)
+  [ -f "$GLOG" ] || { echo 0; return 0; }
+  grep -c '^CALL$' "$GLOG" 2>/dev/null || true
+}
 create_count() { count_calls '^label create '; }
 edit_count()   { count_calls '^issue edit '; }
 comment_count(){ count_calls '^issue comment '; }
@@ -425,13 +429,17 @@ test_parse_injection() {
   [ "$(edit_count)" = "1" ] || fail "R7: the injection body did not label by its first line"
   unset GH_BODY_FILE GH_PRESENT
 
-  # Forged marker that is NOT the first line: empty set, no mutation, no execution.
+  # Forged marker that is NOT the first line, and a SHELL-PARSEABLE first line. This shape is
+  # what makes the whole-body interpreter mutation observable: `sh -c "$(cat body)"` runs line
+  # 1 (creating the canary) before it ever trips over the marker on line 2. A first line that
+  # is itself a shell syntax error (`<!-- ... -->` or `${{ ... }}`) makes `sh -c` abort before
+  # ANY injected command, which is exactly the blind spot the Reviewer's F1 named.
   rm -f "$_can"
   _forged="$T/r7-forged.md"
   {
-    printf '${{ github.event.issue.body }}\n'
-    printf '%s\n' "$MARKER_CI"
     printf '`touch "%s"`\n' "$_can"
+    printf '%s\n' "$MARKER_CI"
+    printf '$(touch "%s")\n' "$_can"
   } > "$_forged"
   grep -qF "$_can" "$_forged" \
     || fail "R7 positive control: the forged fixture lacks the canary path"
@@ -446,6 +454,28 @@ test_parse_injection() {
   [ "$(edit_count)" = "0" ] || fail "R7: the forged-marker body edited the issue"
   [ "$(comment_count)" = "0" ] || fail "R7: the forged-marker body posted a comment"
   [ ! -e "$_can" ] || fail "R7: the forged-marker body executed text (canary created)"
+  unset GH_BODY_FILE
+
+  # ${{ }}-shaped FIRST line (a bad substitution that aborts an interpreter): still rejected,
+  # still no execution. Keeps that shape covered independently of the marker-first fixture.
+  rm -f "$_can"
+  _brace="$T/r7-brace.md"
+  {
+    printf '${{ github.event.issue.body }}\n'
+    printf '%s\n' "$MARKER_HM"
+    printf '`touch "%s"`\n' "$_can"
+  } > "$_brace"
+  grep -qF "$_can" "$_brace" \
+    || fail "R7 positive control: the brace-first fixture lacks the canary path"
+  _out3="$(run_parse "$_brace")"
+  [ -z "$_out3" ] \
+    || fail "R7: a \${{ }}-first-line body classified (got: $(printf '%s' "$_out3" | tr '\n' '|'))"
+  clear_controls
+  export GH_BODY_FILE="$_brace"
+  _rc="$(run_label_rc 7)"
+  [ "$_rc" = "0" ] || fail "R7: the brace-first body exited $_rc; expected 0"
+  [ "$(edit_count)" = "0" ] || fail "R7: the brace-first body edited the issue"
+  [ ! -e "$_can" ] || fail "R7: the brace-first body executed text (canary created)"
   unset GH_BODY_FILE
   pass "R7 metacharacters/command substitutions/\${{ }}/embedded-newline attempts execute nothing; classification is first-line only [test_parse_injection]"
 }
@@ -532,6 +562,32 @@ test_apply_and_no_comment() {
   pass "R9 one gh issue edit --add-label with exactly the set, zero comments, failing fetch/mutation exits non-zero [test_apply_and_no_comment]"
 }
 
+# ── plan-pinned, non-R-id: the issue-number guard (Reviewer R-a) ──────────────────────────
+# E32-F04.plan.md "Fetch + apply" step 1 pins `^[0-9]+$`; a malformed argument is a workflow bug
+# and must abort loudly BEFORE any gh call, never reach the API path.
+test_issue_number_guard() {
+  _valid="$T/rguard-valid.md"
+  printf '%s\n' "$MARKER_HM" > "$_valid"
+  for _bad in 'abc' '7x' '7;rm' ''; do
+    clear_controls
+    export GH_BODY_FILE="$_valid"
+    _rc="$(run_label_rc "$_bad")"
+    [ "$_rc" != "0" ] \
+      || fail "issue-number guard: malformed number '$_bad' exited 0; it must abort non-zero"
+    [ "$(gh_calls)" = "0" ] \
+      || fail "issue-number guard: malformed number '$_bad' still invoked gh $(gh_calls) time(s)"
+  done
+  # Positive control: the SAME path with a valid number does fetch, so the zeros above are not
+  # the only possible outcome.
+  clear_controls
+  export GH_BODY_FILE="$_valid" GH_PRESENT='harness-feedback bug'
+  run_label_ok 7
+  has_call '^api repos/acme/harness-sdd/issues/7 --jq \.body$' \
+    || fail "issue-number guard positive control: a valid number did not fetch the body"
+  unset GH_BODY_FILE GH_PRESENT
+  pass "issue-number guard: malformed arguments abort non-zero with zero gh calls; a valid number fetches (plan-pinned, non-R-id) [test_issue_number_guard]"
+}
+
 # ── R10 ───────────────────────────────────────────────────────────────────────────────────
 test_source_only_placement() {
   [ -f "$WF" ] || fail "R10: $WF is missing"
@@ -600,6 +656,7 @@ test_label_mapping
 test_parse_injection
 test_label_ensure_create_only_missing
 test_apply_and_no_comment
+test_issue_number_guard
 test_source_only_placement
 test_parser_interface
 
