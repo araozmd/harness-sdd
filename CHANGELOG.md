@@ -4,6 +4,33 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.87.0] — 2026-09-25
+
+### Added — the reporting rule + `/sdd-report`: reporting goes live (E32-F03)
+
+- **Reporting is live.** A short `## Reporting harness defects` rule now ships in `AGENTS.md`
+  and one line in every role prompt, naming the four trigger tokens verbatim
+  (`harness-malfunction`, `contradictory-instruction`, `workaround`, `missing-capability`),
+  the three non-triggers that are never reported, and the filing moment: end of task or an
+  early stop (aborted/parked/failed), never mid-flow.
+- **Single writer.** Only the session-owning top-level role (Orchestrator, or
+  Fixer/Inception/Planner/Driller when it owns the session) invokes the reporter, minting
+  `HARNESS_FEEDBACK_SESSION_ID` once per session; every sub-agent appends trigger notes to
+  `progress/feedback/notes.md` and never invokes it, so F02's per-session cap and duplicate
+  search stay coherent.
+- **New `/sdd-report` command** (Codex: `$sdd-report`), emitted to Claude, Codex and
+  OpenCode through the existing emitters (one shared `.agents/skills/sdd-report/` unit plus
+  the `.claude/commands/` and `.opencode/command/` mirrors). It drafts the allow-listed
+  structured fields, requires at least one harness-owned `--file`, passes the session token
+  (with the grammar-safe `date -u +%Y%m%dT%H%M%SZ` fallback) and the local-only
+  `--notes-file`, and calls `tools/harness-report.sh` — it re-implements none of F02's
+  mechanisms.
+- **One narrow `init.sh` exception, reporting only.** A non-zero `init.sh` exit that is a
+  harness malfunction may make exactly one reporter call as the report, then stop — no
+  repair, no board write, no continuation, and reporting is never a way around the gate.
+- `tools/harness-report.sh`'s shipped-command allow-list learns `sdd-report`; `VERSION` is
+  bumped and the coupled current-version test literals are swept.
+
 ## [0.86.0] — 2026-09-25
 
 ### Added — `tools/harness-report.sh`: the allow-listed feedback reporter (E32-F02)

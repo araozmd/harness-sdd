@@ -107,13 +107,13 @@ Orchestrator spawns `architect` → (human approves) → `builder` → `reviewer
 
 | CLI | Entry file | Sub-agents |
 |---|---|---|
-| **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` (+ `pr-fixer`) + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-fix-parallel`, `/sdd-next`, `/sdd-pr-loop` |
+| **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` (+ `pr-fixer`) + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-fix-parallel`, `/sdd-next`, `/sdd-report`, `/sdd-pr-loop` |
 | **Codex** | `AGENTS.md` (native) | `.codex/agents/*.toml` roles + the shared repository-local `$sdd-*` skills in `.agents/skills/` (including gated `$sdd-pr-loop`) |
 | **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-test-concurrency` and `/sdd-pr-loop`; it also reads the shared `.agents/skills/` units, so `/sdd-*` resolve from both surfaces; `/sdd-fix-parallel` is opt-in (verified by `/sdd-test-concurrency`) |
 
 The tables and workflow prose use the portable `/sdd-*` spelling; in Codex, invoke the
 shared repository skills as `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`,
-`$sdd-fix-parallel`, and (when enabled) `$sdd-pr-loop`. For example, enter
+`$sdd-fix-parallel`, `$sdd-report`, and (when enabled) `$sdd-pr-loop`. For example, enter
 `$sdd-new Add a settings page`, then `$sdd-next`; accompanying text supplies the
 workflow’s `$ARGUMENTS`. OpenCode reads the same shared units, so `/sdd-*` resolve from
 `.agents/skills/` as well as from `.opencode/command/`; in Codex, `/skills` is the
