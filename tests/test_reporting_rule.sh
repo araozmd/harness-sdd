@@ -538,6 +538,32 @@ test_session_token_stable() {
   printf '%s' "$_p1" | grep -qE '^[A-Za-z0-9._-]{1,64}$' \
     || fail "R8: the persisted fallback produces a token F02 rejects (got '$_p1')"
 
+  # A corrupt or foreign persisted `.session-id` must NOT be returned verbatim. F02's
+  # `_valid_session` rejects an out-of-grammar `--session-id` and drops the WHOLE report to a
+  # local copy, so one bad line in `.session-id` would silently degrade EVERY later report in
+  # the repo. The read-back re-validates against the grammar and re-mints (PR #227 round 5).
+  _badfx="$T/session-id-corrupt"; mkdir -p "$_badfx/.harness/progress/feedback"
+  for _bad in 'has space' 'has:colon' 'has/slash' "$(printf 'line1\nline2')"; do
+    printf '%s\n' "$_bad" > "$_badfx/.harness/progress/feedback/.session-id"
+    _tbad="$(cd "$_badfx" && HARNESS_FEEDBACK_SESSION_ID= sh "$_snip")"
+    [ "$_tbad" != "$_bad" ] \
+      || fail "R8: the corrupt persisted session id was returned verbatim — F02 rejects it and every later report degrades to a local copy"
+    printf '%s' "$_tbad" | grep -qE '^[A-Za-z0-9._-]{1,64}$' \
+      || fail "R8: a corrupt persisted session id was not re-minted to a grammar-valid token (got '$_tbad')"
+    _persisted="$(cat "$_badfx/.harness/progress/feedback/.session-id")"
+    printf '%s' "$_persisted" | grep -qE '^[A-Za-z0-9._-]{1,64}$' \
+      || fail "R8: the corrupt persisted session id was not overwritten with the re-minted token, so a later call would reject it again"
+  done
+  # Over the 64-char cap: F02's grammar bounds length, so an over-long value is ignored too.
+  _long65="$(awk 'BEGIN{for(i=0;i<65;i++)printf "a"}')"
+  printf '%s\n' "$_long65" > "$_badfx/.harness/progress/feedback/.session-id"
+  _tlong="$(cd "$_badfx" && HARNESS_FEEDBACK_SESSION_ID= sh "$_snip")"
+  [ "$_tlong" != "$_long65" ] \
+    || fail "R8: a 65-char persisted session id was returned verbatim — F02's ^[A-Za-z0-9._-]{1,64}$ caps length"
+  printf '%s' "$_tlong" | grep -qE '^[A-Za-z0-9._-]{1,64}$' \
+    || fail "R8: an over-length persisted session id was not re-minted to a grammar-valid token"
+  pass "R8 a corrupt or over-length persisted session id is re-validated and re-minted on read-back, never returned verbatim (R8) [test_session_token_stable]"
+
   # A CONFIGURED telemetry.log (RELATIVE override) must be resolved the same way the
   # writer/reader resolve it: <harness dir>/<value>. A hard-coded default path misses the
   # marker, falls back to `date`, and re-mints the token on every call more than a second

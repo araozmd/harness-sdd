@@ -688,6 +688,52 @@ printf '%s' "$AU_OUT" | grep -qE "landed +child-t" \
   || fail "R2-shapes control: a HEALTHY landed target was not reported landed — the local-only subtraction is missing: $AU_OUT"
 [ "$AU_RC" = "0" ] || fail "R2-shapes control: a healthy landed cascade exited $AU_RC, want 0"
 pass "…while a healthy target is still landed (R2 control) [R2_ignored_owned_subtree_is_not_landed]"
+
+# ── R2: the harness-seeded ignored progress/ run dir (and workers.json) is subtracted ───
+# R2_seeded_progress_run_dir_is_subtracted
+# The installer seeds `.harness/progress/feedback/` (E32-F03) and its own `.harness/.gitignore`
+# ignores `progress/*/`, so every landed target's audit sees one ignored owned dir. Without a
+# `progress/` entry in the local-only subtraction the audit reports EVERY child unverifiable
+# and exits 3 — PR #227 sat two commits red behind a green Codex trend this way. The empty-dir
+# healthy control above did not catch it on its own, so pin the RUNTIME shape: a NON-EMPTY
+# feedback dir holding F02's `.session-id`, which is exactly what a real target has.
+mk_umb "$AU/progseed" child-z
+cascade "$AU/progseed"
+mkdir -p "$AU/progseed/child-z/.harness/progress/feedback"
+printf '20260101T000000Z\n' > "$AU/progseed/child-z/.harness/progress/feedback/.session-id"
+land "$AU/progseed/child-z"
+# Preconditions: the dir really is ignored, and git really reports it as an ignored DIRECTORY
+# (the shape the subtraction matches), not as the file inside it.
+git -C "$AU/progseed/child-z" check-ignore -q .harness/progress/feedback/ \
+  || fail "R2-progseed: fixture precondition broken — progress/feedback is not ignored"
+git -C "$AU/progseed/child-z" status --porcelain -z -uall --ignored=matching -- .harness/ \
+  | tr '\0' '\n' | grep -qxF '!! .harness/progress/feedback/' \
+  || fail "R2-progseed: fixture precondition broken — git does not report the ignored progress dir as a dir"
+cascade "$AU/progseed"
+printf '%s' "$AU_OUT" | grep -qE "landed +child-z" \
+  || fail "R2-progseed: a landed target whose only ignored owned path is the harness-seeded progress/feedback/ dir was NOT reported landed — emit_local_only lacks the progress/ entry: $AU_OUT"
+[ "$AU_RC" = "0" ] || fail "R2-progseed: the fully landed cascade exited $AU_RC, want 0"
+pass "the harness-seeded ignored progress/ run dir is subtracted, so a landed target stays landed (R2) [R2_seeded_progress_run_dir_is_subtracted]"
+
+# The subtraction is consumed as a `|`-joined ERE alternation by `grep -Ev`
+# (harness-install.sh:8982), so build THAT string and drive it over the shapes git emits AND
+# the loose files the SOURCE layout tracks. Two-sided on purpose: a `progress/` pattern that
+# matches no ignored path leaves the regression open, while a bare `(^|/)progress/` would also
+# subtract tracked-layout loose files and can turn a real drift into a false clean.
+_lo_alt="$(sh "$SRC/tools/harness-owned-paths.sh" local-only "$AU/healthy/child-t/.harness" \
+  | tr '\n' '|' | sed 's/|$//')"
+[ -n "$_lo_alt" ] || fail "R2-localonly: emit_local_only printed nothing"
+for _lo_p in '.harness/progress/feedback/' '.harness/progress/run-9/' '.harness/workers.json'; do
+  printf '%s\n' "$_lo_p" | grep -qE "$_lo_alt" \
+    || fail "R2-localonly: a harness-seeded ignored path is NOT in the local-only subtraction: $_lo_p"
+done
+for _lo_p in 'progress/history.md' 'progress/lessons.md' 'progress/README.md' 'progress/inbox/E04-F01.md'; do
+  if printf '%s\n' "$_lo_p" | grep -qE "$_lo_alt"; then
+    fail "R2-localonly: a TRACKED-style loose progress file matches the local-only subtraction (the progress/ pattern must stay directory-only): $_lo_p"
+  fi
+done
+pass "emit_local_only subtracts harness-seeded progress/ dirs and workers.json while never matching the tracked-layout loose progress files (R2) [R2_seeded_progress_run_dir_is_subtracted]"
+
 # Control 2: a fresh, un-ignored body is UNLANDED, not unverifiable — a probe keyed on
 # tracked-ness rather than ignored-ness passes the matrix above and silently exempts every
 # fresh cascade.

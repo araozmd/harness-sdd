@@ -74,6 +74,15 @@ Resolve every relative path against the repository root.
      _hf_fallback="${_hf_dir}progress/feedback/.session-id"
      if [ -f "$_hf_fallback" ]; then
        _hf_session="$(cat "$_hf_fallback" 2>/dev/null || true)"
+       # Re-validate on READ: a corrupt or foreign `.session-id` must never be returned
+       # verbatim. F02's `_valid_session` rejects a token outside `^[A-Za-z0-9._-]{1,64}$`
+       # and drops the WHOLE report to a local copy, so one bad line here would silently
+       # degrade EVERY later report in this repo. Ignore it and re-mint below. `case`, not
+       # `grep`: a glob class also matches an embedded newline that a line-based grep misses.
+       case "$_hf_session" in
+         ''|*[!A-Za-z0-9._-]*) _hf_session="" ;;
+       esac
+       [ "${#_hf_session}" -le 64 ] || _hf_session=""
      fi
      if [ -z "$_hf_session" ]; then
        _hf_session="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -117,8 +126,10 @@ Resolve every relative path against the repository root.
    resetting F02's per-session cap ledger. On the `init.sh` hard-stop path, where no
    `session-start` marker exists, it mints the `date -u +%Y%m%dT%H%M%SZ` fallback **once**
    and persists it in the feedback dir, reading it back on later calls — so two reports more
-   than a second apart still share one token. That fallback is grammar-safe, so the token is
-   never left unset and the cap is never bypassed.
+   than a second apart still share one token. That fallback is grammar-safe, and a value read
+   back from the file is re-validated against the same grammar before reuse: a corrupt or
+   foreign `.session-id` is ignored and re-minted, so the token is never left unset, no later
+   report is dropped for want of a valid token, and the cap is never bypassed.
 5. **Free-form text is local-only.** Write the prose summary to a temp file and pass it via
    `--notes-file`; it reaches the local `progress/feedback/` copy, is never an
    upstream field, and is never sent to `gh`.

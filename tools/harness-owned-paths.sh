@@ -165,8 +165,24 @@ emit_local_only() {
     '(^|/)\.opencode-parallel$' \
     '(^|/)__pycache__/' \
     '\.pyc$' \
-    '(^|/)state/tasks\.json\.lock$'
+    '(^|/)state/tasks\.json\.lock$' \
+    '(^|/)workers\.json$' \
+    '(^|/)progress/[^/]*/$'
 
+  # ── the two entries above, and why each carries its exact shape ─────────────────────────
+  # `progress/*/` is seeded into `.harness/.gitignore` (E99-F06; with `.gitkeep`,
+  # `README.md` and `inbox/` re-included), so git reports an ignored run dir WITH A TRAILING
+  # SLASH. Matching only DIRECTORY paths is what keeps this entry safe in the harness SOURCE
+  # layout, where `progress/` also holds TRACKED loose files (`history.md`, `lessons.md`,
+  # `README.md`, `inbox/<brief>.md`): a bare `(^|/)progress/` would subtract an ignored path
+  # under `progress/` that is not a seeded run dir and turn a real drift into a false clean.
+  # A caller must subtract exactly what the installer deliberately ignores, no more.
+  #
+  # `workers.json` is the worker roster (E17-F04): the installer ignores `.harness/workers.json`
+  # UNCONDITIONALLY, because one machine's local CLI set must never be committed. Without an
+  # entry here a target that HAS a roster is reported unverifiable forever — the same defect
+  # shape as `progress/`, latent only while `workers.roster` seeds false.
+  #
   # The telemetry log path is CONFIGURABLE, so the list above cannot be fixed. When
   # `telemetry.log` is overridden to a relative path, install_one adds THAT path to
   # `.harness/.gitignore` itself — and a caller subtracting only the hard-coded defaults
