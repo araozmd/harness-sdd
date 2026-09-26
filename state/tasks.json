@@ -1625,7 +1625,8 @@
         {
           "id": "E32-F02",
           "title": "tools/harness-report.sh: redaction pass, versioned body marker, duplicate search, per-session cap, progress/ fallback",
-          "status": "in-progress",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "1100ce3e661944604d40c37e9fd32d8947823605", "ref": "1100ce3e661944604d40c37e9fd32d8947823605", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [

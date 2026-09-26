@@ -118,8 +118,8 @@ reporters) and the harness maintainer (the triager).
 
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| E32-F01 | feedback.* config block seeded on fresh install and upgrade, with the one-line opt-out notice | pending | true | — |
-| E32-F02 | tools/harness-report.sh: redaction pass, versioned body marker, duplicate search, per-session cap, progress/ fallback | pending | true | E32-F01 |
+| E32-F01 | feedback.* config block seeded on fresh install and upgrade, with the one-line opt-out notice | done | true | — |
+| E32-F02 | tools/harness-report.sh: redaction pass, versioned body marker, duplicate search, per-session cap, progress/ fallback | done | true | E32-F01 |
 | E32-F03 | Reporting rule + /sdd-report command on every front end: four triggers, end-of-task and early-stop filing | pending | true | E32-F02, E32-F04 |
 | E32-F04 | Source-repo GitHub Action that labels marker-carrying issues without trusting their bodies | pending | true | E32-F02 |
 | E32-F05 | Source-only /sdd-triage: group harness-feedback issues, propose routes, seed only on human approval | pending | true | E32-F04 |
