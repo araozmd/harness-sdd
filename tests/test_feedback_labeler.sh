@@ -2,14 +2,14 @@
 # test_feedback_labeler.sh — test contract for E32-F04.
 #
 # Covers R1-R11 of E32-F04.spec.md (see E32-F04.tests.md for the row-by-row mapping). Zero
-# dependency POSIX sh (+ awk/grep/sed/git), matching the house style of
+# dependency POSIX sh (+ awk/grep/sed/git/jq), matching the house style of
 # tests/test_feedback_report.sh: a self-cleaning mktemp tree, fail/pass helpers, dash-clean.
 #
 # NO test makes a network call or runs a real GitHub Action: `gh` is STUBBED on PATH and
 # records its argv one token per line (each call opened by a `CALL` line); the workflow is
 # asserted statically from its bytes. Fixture bodies are written under this suite's mktemp
 # tree at run time — nothing is committed under tests/fixtures/** (that tree is frozen
-# installer data).
+# installer data). test_event_snapshot_body writes a GITHUB_EVENT_PATH payload there too.
 #
 # Every negative ships with a positive control on its own shape (a middle predicate that
 # must match the pristine artifact), per the discrimination requirements in E32-F04.tests.md.
@@ -31,6 +31,9 @@ mkdir -p "$STUBDIR"
 # The host may carry a real gh (a mise shim) later on PATH; prepending the stub makes it win.
 PATH="$STUBDIR:$PATH"
 export PATH
+# Bodies are driven through the gh stub; clear any ambient event payload so it cannot shadow
+# them. test_event_snapshot_body sets its own GITHUB_EVENT_PATH explicitly.
+unset GITHUB_EVENT_PATH 2>/dev/null || true
 
 # label-issue needs the workflow's env: values. GH_REPO is the `github.repository` shape
 # (owner/repo), never host-qualified.
@@ -588,6 +591,37 @@ test_issue_number_guard() {
   pass "issue-number guard: malformed arguments abort non-zero with zero gh calls; a valid number fetches (plan-pinned, non-R-id) [test_issue_number_guard]"
 }
 
+# ── R1/R2: the opened-event body snapshot wins over the mutable API fetch (P2 #4109762155) ──
+# The workflow listens on `opened` only (R1), so classification must use the body AS FILED.
+# When Actions supplies GITHUB_EVENT_PATH, `label-issue` reads `.issue.body` from that payload
+# into the temp file instead of refetching the (mutable) issue. Here the API would serve a
+# DIFFERENT, marker-less body: the event body must win and no body fetch may occur.
+test_event_snapshot_body() {
+  _ev="$T/r1-event.json"
+  _stale="$T/r1-stale.md"
+  printf '{"issue":{"body":"%s\\n"}}\n' "$MARKER_HM" > "$_ev"
+  printf 'edited body with no marker\n' > "$_stale"
+  # Positive control: the divergent "current" body is really not a report, so a run that used
+  # it would record zero edits — the edit-1 assertion below is not vacuous.
+  [ -z "$(run_parse "$_stale")" ] \
+    || fail "P2 snapshot positive control: the divergent API body is a report, so the test does not discriminate"
+
+  clear_controls
+  export GITHUB_EVENT_PATH="$_ev" GH_BODY_FILE="$_stale" GH_PRESENT='harness-feedback bug'
+  run_label_ok 7
+  [ "$(edit_count)" = "1" ] \
+    || fail "P2 snapshot: the opened-event body did not classify (edit_count=$(edit_count)); the mutable API body was used instead"
+  [ "$(argv_value --add-label)" = "harness-feedback,bug" ] \
+    || fail "P2 snapshot: --add-label was '$(argv_value --add-label)', expected the event marker's set"
+  [ "$(count_calls '^api repos/acme/harness-sdd/issues/7 ')" = "0" ] \
+    || fail "P2 snapshot: the issue body was refetched from the API although an event payload was present"
+  # Positive control: other gh calls (the label probes) DID run, so the "no body fetch" zero is not a dead log.
+  [ "$(gh_calls)" -gt 0 ] \
+    || fail "P2 snapshot positive control: no gh call was recorded, so the 'no body fetch' zero is vacuous"
+  unset GITHUB_EVENT_PATH GH_BODY_FILE GH_PRESENT
+  pass "P2 the opened-event body snapshot classifies the issue without refetching the mutable body [test_event_snapshot_body]"
+}
+
 # ── R10 ───────────────────────────────────────────────────────────────────────────────────
 test_source_only_placement() {
   [ -f "$WF" ] || fail "R10: $WF is missing"
@@ -657,6 +691,7 @@ test_parse_injection
 test_label_ensure_create_only_missing
 test_apply_and_no_comment
 test_issue_number_guard
+test_event_snapshot_body
 test_source_only_placement
 test_parser_interface
 

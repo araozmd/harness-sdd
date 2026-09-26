@@ -12,14 +12,17 @@
 #   parse <body-file>     classify a body offline; prints the label set (one name per line:
 #                         `harness-feedback` then the category label) or nothing at all.
 #                         Exit 0 in every classification case (empty output = not a report).
-#   label-issue <number>  fetch the issue body via the GitHub API into a file, parse it,
-#                         ensure the labels exist, and add them in one `gh issue edit` call.
+#   label-issue <number>  read the opened-event body snapshot (GITHUB_EVENT_PATH) into a
+#                         file, parse it, ensure the labels exist, and add them in one
+#                         `gh issue edit` call. Actions always sets GITHUB_EVENT_PATH; a
+#                         local run with no event payload falls back to the GitHub API.
 #                         Exit 0 when it labels or deliberately no-ops; non-zero only when a
-#                         required `gh` operation fails, so the failure shows in the Action log.
+#                         required read/`gh` operation fails, so it shows in the Action log.
 #
 # Security posture (ADR-0006): the first body line is the ONLY classification input. No byte
 # of the body is ever sourced, eval'd, passed to `sh -c`, or interpolated into a `gh` argv;
-# the body reaches the parser only as a file fetched through the API.
+# the body reaches the parser only as a file written from the opened-event payload snapshot
+# (or, when no event payload exists, from the API) — never as a shell word.
 
 set -eu
 LC_ALL=C
@@ -134,7 +137,7 @@ ensure_labels() {
   return 0
 }
 
-# label_issue <issue-number> — the fetch + apply path. No comment path exists anywhere.
+# label_issue <issue-number> — the read + apply path. No comment path exists anywhere.
 label_issue() {
   _li_n="${1:-}"
   case "$_li_n" in
@@ -148,8 +151,19 @@ label_issue() {
   _li_tmp="$(mktemp "${TMPDIR:-/tmp}/.feedback-labeler.XXXXXX" 2>/dev/null)" \
     || { printf 'feedback-labeler: mktemp failed\n' >&2; return 1; }
 
-  # The body is redirected to a FILE; it never enters an argv or a shell word.
-  if gh api "repos/$GH_REPO/issues/$_li_n" --jq .body > "$_li_tmp"; then
+  # The body is written to a FILE; it never enters an argv or a shell word. R1 fixes the
+  # classification at filing time: prefer the `opened` event payload's body snapshot over
+  # refetching the issue, so a later edit (or a rerun after an edit) cannot reclassify it.
+  # Actions always sets GITHUB_EVENT_PATH; the `gh api` arm serves only a local run with no
+  # event payload, where there is no snapshot to preserve. (Codex P2 #4109762155: `gh api`
+  # has no event-snapshot semantics.)
+  if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH:-}" ]; then
+    jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH" > "$_li_tmp" || {
+      rm -f "$_li_tmp"
+      printf 'feedback-labeler: failed to read the event body of issue %s\n' "$_li_n" >&2
+      return 3
+    }
+  elif gh api "repos/$GH_REPO/issues/$_li_n" --jq .body > "$_li_tmp"; then
     :
   else
     rm -f "$_li_tmp"

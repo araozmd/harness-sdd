@@ -2,7 +2,8 @@ name: harness-feedback labeler
 
 # E32-F04 — labels issues that carry F02's `harness-feedback:v1` body marker.
 # The marker is the ONLY classification input (ADR-0006); every other byte of the issue
-# body is untrusted data and reaches the parser only as a file fetched through the API.
+# body is untrusted data and reaches the parser only as a file written from the opened-event
+# payload snapshot (a run with no event payload falls back to an API fetch).
 on:
   issues:
     types: [opened]
