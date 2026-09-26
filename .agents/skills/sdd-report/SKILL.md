@@ -37,10 +37,14 @@ Resolve every relative path against the repository root.
      --command  <harness command name> \
      --exit-code <n> \
      --role     <role> \
-     --phase    <phase> \
+     --phase    <one of inception|architect|builder|reviewer|scout|slice-dispatch|handoff|install; omit when none applies> \
      --session-id "${HARNESS_FEEDBACK_SESSION_ID:-$(date -u +%Y%m%dT%H%M%SZ)}" \
      --notes-file <temp-file>
    ```
+
+   The `--phase` flag is optional: pass only one of the enumerated phases, and omit it
+   entirely when none applies. F02's `_valid_phase` rejects any other nonempty value and
+   downgrades the whole report to the local fallback.
 
    The session token is `HARNESS_FEEDBACK_SESSION_ID`, minted once per session and matching
    `[A-Za-z0-9._-]{1,64}` (on the `init.sh` hard-stop path, where no `session-start` marker

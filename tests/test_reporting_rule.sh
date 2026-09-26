@@ -340,6 +340,20 @@ test_report_command_body_contract() {
     printf '%s' "$_invoc" | grep -qF -- "$_flag" \
       || fail "R8: the invocation block does not pass the allow-listed field $_flag"
   done
+  # --phase is OPTIONAL but CONSTRAINED to F02's `_valid_phase` set: any other nonempty
+  # value rejects the whole report to the local fallback. The invocation block must name
+  # the set (not a bare placeholder) and say to omit the flag when none applies.
+  for _ph in inception architect builder reviewer scout slice-dispatch handoff install; do
+    printf '%s' "$_invoc" | grep -qF -- "$_ph" \
+      || fail "R8: the invocation block does not name the F02-valid phase '$_ph'"
+  done
+  printf '%s' "$_invoc" | grep -qF -- 'omit when none applies' \
+    || fail "R8: the invocation block does not say to omit --phase when no phase applies"
+  if printf '%s' "$_invoc" | grep -qF -- '<phase>'; then
+    fail "R8: the invocation block still passes the unconstrained --phase placeholder"
+  fi
+  printf '%s' "$_bf" | grep -qF 'rejects any other nonempty value' \
+    || fail "R8: the body does not state that an out-of-set phase is rejected"
   printf '%s' "$_invoc" | grep -qF -- '--session-id' \
     || fail "R8: the invocation block does not pass --session-id"
   printf '%s' "$_invoc" | grep -qF 'HARNESS_FEEDBACK_SESSION_ID' \
