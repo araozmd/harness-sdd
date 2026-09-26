@@ -362,3 +362,10 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-09-26 E32-F04 in-review → reject (round 1): Codex P2 — the labeler refetched the issue body via `gh api`, so an edit after `opened` could reclassify; fixed to read the `opened`-event snapshot (R2 reconciled). 
 - 2026-09-26 E32-F04 pr-loop round 2 → reject: Codex P2 — concurrent label-create race left a valid report unlabeled; fixed to re-probe on create failure.
 - 2026-09-26 E32-F04 merged in PR #224 at f737c3b after a 3-round Codex review loop (P2, P2, clean). Reviewer APPROVED round 2 pre-PR. Change-size ok (224 production lines). Marked done with verified ancestor evidence. Next actionable: F03 (now that F04 landed) and F05.
+- 2026-09-25 E32-F03 Orchestrator: Architect wrote the 4 spec files (11 R-ids, complexity=complex); top-level doc-critic applied 9 findings (session-token grammar on the init.sh path, mandatory `--file`, `--notes-file`, README sweep, stale-literal predicate, pristine-control claim, R1 semantics, R10 scope). Set spec-ready; autonomous → in-progress.
+- 2026-09-25 E32-F03 in-progress → in-review (builder round 1): rule in AGENTS.md + role prompts, `/sdd-report` emitted for all 3 fronts + `--self` glue, VERSION 0.87.0 + sweep; 54/54 suites (bash-scoped).
+- 2026-09-25 E32-F03 in-review → reject (round 1): the new `.claude/commands/sdd-report.md` was unpinned by the `--self` drift gate; a maskable polarity anchor.
+- 2026-09-25 E32-F03 in-progress → in-review (builder round 2): `_must` ledger pins sdd-report; polarity pinned per clause.
+- 2026-09-25 E32-F03 in-review → reject (round 2): the round-2 comment over-claimed the ledger (2 of 8 committed command units).
+- 2026-09-25 E32-F03 in-progress → in-review (builder round 3): exhaustive 51/51 generated-unit ledger + accurate comment.
+- 2026-09-25 E32-F03 in-review → approve (round 3). All blockers closed and pinned; full suite 54/54 (bash-scoped; no dash), `--self` diff-free, change-size ok (182 production lines / 17 files). Opening the PR.

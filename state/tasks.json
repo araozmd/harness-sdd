@@ -1637,7 +1637,7 @@
         {
           "id": "E32-F03",
           "title": "Reporting rule + /sdd-report command on every front end: four triggers, end-of-task and early-stop filing",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
