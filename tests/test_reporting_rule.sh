@@ -166,6 +166,11 @@ test_rule_filer_and_notes() {
     printf '%s' "$_who" | grep -qF "$_field" \
       || fail "R4: the note-entry format does not name '$_field'"
   done
+  # The ledger directory does not exist in a pristine checkout or fresh target, so a bare
+  # append would die with "Directory nonexistent" and the owning role would never see the
+  # note. The rule must tell the sub-agent to create it first.
+  printf '%s' "$_who" | grep -qF 'mkdir -p' \
+    || fail "R4: the sub-agent note clause does not require mkdir -p before appending"
   printf '%s' "$_who" | grep -qiE 'never[^.]{0,40}invoke the reporter' \
     || fail "R4: the sub-agent prohibition ('never invoke the reporter') is missing"
   for _r in Architect Builder Reviewer Scout Doc-critic pr-fixer; do
@@ -217,6 +222,9 @@ test_role_prompts_carry_rule() {
       printf '%s' "$_sf" | grep -qF "$_field" \
         || fail "R5: agents/$_r.md note format does not name '$_field'"
     done
+    # A pristine tree has no `progress/feedback/`: each sub-agent prompt must create it.
+    printf '%s' "$_sf" | grep -qF 'mkdir -p' \
+      || fail "R5: agents/$_r.md does not require mkdir -p before appending the note"
   done
   # builder-heavy delegates to builder.md: it must NOT carry a second copy of the rule.
   if _section '## Reporting harness defects' "$SRC/agents/builder-heavy.md" | grep -q .; then
@@ -243,6 +251,10 @@ test_frontend_parity() {
   for _fe in claude codex opencode; do
     _tgt="$(_ensure_target "$_fe")"
     [ -f "$_tgt/.harness/AGENTS.md" ] || fail "R6: $_fe target has no .harness/AGENTS.md"
+    # The ledger directory must exist in a fresh target: a sub-agent's first note append
+    # would otherwise fail with "Directory nonexistent" before the owner can read it.
+    [ -d "$_tgt/.harness/progress/feedback" ] \
+      || fail "R6: $_fe target did not seed .harness/progress/feedback (E32-F03 note ledger)"
     cmp -s "$SRC/AGENTS.md" "$_tgt/.harness/AGENTS.md" \
       || fail "R6: $_fe's .harness/AGENTS.md is not the source AGENTS.md — the rule must install verbatim"
     _sec="$(_section '## Reporting harness defects' "$_tgt/.harness/AGENTS.md")"
@@ -382,6 +394,16 @@ test_report_command_body_contract() {
     || fail "R8: the body does not state the --exit-code flag is optional"
   printf '%s' "$_bf" | grep -qE 'placeholder.{0,120}downgrades the whole report' \
     || fail "R8: the body does not state that a placeholder --exit-code downgrades the whole report to the local fallback"
+  # --command is OPTIONAL too (mirroring --exit-code/--phase): a doc-conflict /
+  # instruction-conflict / workflow-gap report has no failed harness command, and a
+  # placeholder fails F02's `_valid_command` and silently downgrades the WHOLE report.
+  # The invocation must tell the caller to omit the flag rather than present it as mandatory.
+  printf '%s' "$_invoc" | grep -qF -- 'omit when no command applies' \
+    || fail "R8: the invocation block presents --command as mandatory; it must say to omit the flag when none applies"
+  printf '%s' "$_bf" | grep -qE 'command.{0,30}is optional' \
+    || fail "R8: the body does not state the --command flag is optional"
+  printf '%s' "$_bf" | grep -qE 'is optional.{0,200}no command applies.{0,120}doc-conflict' \
+    || fail "R8: the optional --command clause does not name a no-command report case (doc-conflict)"
   printf '%s' "$_invoc" | grep -qF -- '--session-id' \
     || fail "R8: the invocation block does not pass --session-id"
   printf '%s' "$_invoc" | grep -qF 'HARNESS_FEEDBACK_SESSION_ID' \
@@ -415,6 +437,65 @@ test_report_command_body_contract() {
   printf '%s' "$_bf" | grep -qiE 'never re-implement' \
     || fail "R8: the body does not forbid re-implementing F02's mechanisms"
   pass "R8 the command body calls the reporter with the allow-listed flags, requires a harness-owned --file, supplies a grammar-safe session token, keeps free-form local-only, and maps init.sh to init-failure (R8) [test_report_command_body_contract]"
+}
+
+# ── R8 (session token) — the token is minted ONCE per session and reused ──────────────────
+# The command must not re-evaluate `date` on every call: reports more than a second apart
+# would then carry different session ids, reset `.session-count` and bypass `max_per_session`.
+# Extract the emitter's marked minting span, RUN it (the test harness appends the print that
+# reports the variable the span fills), and pin: deterministic from the LATEST session-start
+# marker, stable across calls, the exported value preferred, and the no-marker fallback
+# grammar-safe.
+_session_snippet() {
+  _cmd_body | awk '
+    /--- harness-session-id:begin ---/ { k=1; next }
+    /--- harness-session-id:end ---/   { k=0 }
+    k
+  ' | sed 's/^   //'
+  printf '%s\n' 'printf "%s" "$_hf_session"'
+}
+
+test_session_token_stable() {
+  _snip="$T/session-id.sh"
+  _session_snippet > "$_snip"
+  _floor "$(cat "$_snip")" 120 "R8: the session-token minting span"
+  grep -qF 'HARNESS_FEEDBACK_SESSION_ID' "$_snip" \
+    || fail "R8: the token minting span does not read HARNESS_FEEDBACK_SESSION_ID"
+  grep -qF 'session-start' "$_snip" \
+    || fail "R8: the token minting span does not derive from the session-start marker"
+  grep -qF 'date -u +%Y%m%dT%H%M%SZ' "$_snip" \
+    || fail "R8: the token minting span names no grammar-safe fallback"
+
+  # Latest marker wins, colons dropped, hyphens kept (spec: 2026-06-06T09:00:00Z →
+  # 2026-06-06T090000Z). The middle record proves the extractor keys on `session-start`.
+  _sfx="$T/session-id-fixture"; mkdir -p "$_sfx/.harness"
+  {
+    printf '%s\n' '{"schema_version":1,"type":"session-start","started_at":"2026-01-01T00:00:00Z"}'
+    printf '%s\n' '{"schema_version":1,"type":"phase","phase":"builder"}'
+    printf '%s\n' '{"schema_version":1,"type":"session-start","started_at":"2026-06-06T09:00:00Z"}'
+  } > "$_sfx/.harness/telemetry.jsonl"
+
+  _t1="$(cd "$_sfx" && HARNESS_FEEDBACK_SESSION_ID= sh "$_snip")"
+  sleep 1
+  _t2="$(cd "$_sfx" && HARNESS_FEEDBACK_SESSION_ID= sh "$_snip")"
+  [ "$_t1" = "$_t2" ] \
+    || fail "R8: the session token is not stable across calls ('$_t1' vs '$_t2') — F02's per-session cap ledger would reset"
+  [ "$_t1" = "2026-06-06T090000Z" ] \
+    || fail "R8: the session token is not the latest marker-derived token (got '$_t1')"
+  printf '%s' "$_t1" | grep -qE '^[A-Za-z0-9._-]{1,64}$' \
+    || fail "R8: the derived session token fails F02's grammar (got '$_t1')"
+
+  # An exported token is preferred (the session owner's once-per-session mint wins).
+  _t3="$(cd "$_sfx" && HARNESS_FEEDBACK_SESSION_ID=exported-session sh "$_snip")"
+  [ "$_t3" = "exported-session" ] \
+    || fail "R8: an exported HARNESS_FEEDBACK_SESSION_ID is not preferred (got '$_t3')"
+
+  # No marker (the init.sh hard-stop path): the fallback is still grammar-safe.
+  _nofx="$T/session-id-nomarker"; mkdir -p "$_nofx"
+  _t4="$(cd "$_nofx" && HARNESS_FEEDBACK_SESSION_ID= sh "$_snip")"
+  printf '%s' "$_t4" | grep -qE '^[A-Za-z0-9._-]{1,64}$' \
+    || fail "R8: the no-marker fallback produces a token F02 rejects (got '$_t4')"
+  pass "R8 the session token is minted once and reused — latest session-start derived, exported value preferred, grammar-safe fallback (R8) [test_session_token_stable]"
 }
 
 # ── R9 ────────────────────────────────────────────────────────────────────────────────────
@@ -525,6 +606,7 @@ test_role_prompts_carry_rule
 test_frontend_parity
 test_report_command_emitted
 test_report_command_body_contract
+test_session_token_stable
 test_init_hard_stop_exception
 test_tool_command_membership
 test_release_sweep

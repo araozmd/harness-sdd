@@ -3841,7 +3841,10 @@ install_one() {
   fi
 
   # ── 2. project workspace → .harness/  (seed once, never clobber) ────────────
-  mkdir -p "$H/specs/epics" "$H/progress" "$H/state"
+  # `progress/feedback/` is where sub-agents append trigger notes and where F02 writes its
+  # local fallback + per-session cap ledger. Seed it here so a pristine target's first append
+  # does not fail with "Directory nonexistent" before the owning role can read it (E32-F03).
+  mkdir -p "$H/specs/epics" "$H/progress" "$H/progress/feedback" "$H/state"
   if [ ! -f "$H/specs/epics/.gitkeep" ]; then : > "$H/specs/epics/.gitkeep"; fi
 
   # harness.config.yaml is project-owned once seeded: bootstrap fills in the
@@ -5786,20 +5789,41 @@ Resolve every relative path against `.harness/`.
    path; otherwise the failing harness tool/path (for example `tools/harness-report.sh`, or
    the named `--command`). F02 rejects the whole report to a local copy when no supplied
    path is harness-owned, so a report with no accepted `--file` never files upstream.
-4. **Call the reporter** with the allow-listed upstream fields only:
+4. **Mint the session token once, then call the reporter** with the allow-listed upstream
+   fields only:
 
    ```sh
+   # --- harness-session-id:begin ---
+   # ONE token per session: the exported value if the session owner set it, else the
+   # current session's telemetry `session-start` marker (deterministic, so every call in
+   # the session reuses the same token), else the `init.sh` hard-stop stamp. Re-running
+   # `date` per call would reset F02's per-session cap ledger.
+   _hf_session="${HARNESS_FEEDBACK_SESSION_ID:-}"
+   if [ -z "$_hf_session" ] && [ -f .harness/telemetry.jsonl ]; then
+     _hf_session="$(grep -E '"type"[[:space:]]*:[[:space:]]*"session-start"' .harness/telemetry.jsonl 2>/dev/null \
+       | tail -n 1 \
+       | python3 -c 'import json,re,sys;r=json.loads(sys.stdin.read() or "{}");sys.stdout.write(re.sub(r"[^A-Za-z0-9._-]","",r.get("started_at","")))' 2>/dev/null || true)"
+   fi
+   [ -n "$_hf_session" ] || _hf_session="$(date -u +%Y%m%dT%H%M%SZ)"
+   # --- harness-session-id:end ---
+
    sh .harness/tools/harness-report.sh \
      --trigger  <the trigger> \
      --symptom  <the symptom code> \
      --file     <a harness-owned path> \
-     --command  <harness command name> \
+     --command  <harness command name; omit when no command applies> \
      --exit-code <a real exit status; omit the flag when no process exited> \
      --role     <role> \
      --phase    <one of inception|architect|builder|reviewer|scout|slice-dispatch|handoff|install; omit when none applies> \
-     --session-id "${HARNESS_FEEDBACK_SESSION_ID:-$(date -u +%Y%m%dT%H%M%SZ)}" \
+     --session-id "$_hf_session" \
      --notes-file <temp-file>
    ```
+
+   The `--command` flag is optional: pass the harness command name that failed or is
+   implicated, and omit the flag entirely when no command applies — for example a
+   `doc-conflict` or `instruction-conflict` report, where no harness command ran. Never
+   leave a placeholder such as `<harness command name>`: it fails F02's `_valid_command`
+   and downgrades the whole report to the local fallback.
 
    The `--exit-code` flag is optional: pass the real process exit status (one to three
    digits) only when a process actually exited, and omit the flag entirely when none did —
@@ -5810,11 +5834,13 @@ Resolve every relative path against `.harness/`.
    entirely when none applies. F02's `_valid_phase` rejects any other nonempty value and
    downgrades the whole report to the local fallback.
 
-   The session token is `HARNESS_FEEDBACK_SESSION_ID`, minted once per session and matching
-   `[A-Za-z0-9._-]{1,64}` (on the `init.sh` hard-stop path, where no `session-start` marker
-   exists, mint it from `date -u +%Y%m%dT%H%M%SZ`). The `date -u +%Y%m%dT%H%M%SZ` fallback in
-   the call above is grammar-safe, so the token is never left unset and the per-session cap
-   ledger is never bypassed.
+   The session token matches `[A-Za-z0-9._-]{1,64}` and is minted **once per session**: the
+   block above reuses `HARNESS_FEEDBACK_SESSION_ID` when the session owner exported it, and
+   otherwise derives one token deterministically from the telemetry `session-start` marker —
+   so no export is required, and repeated calls in one session share the token instead of
+   resetting F02's per-session cap ledger. On the `init.sh` hard-stop path, where no
+   `session-start` marker exists, it falls back to `date -u +%Y%m%dT%H%M%SZ`; that fallback
+   is grammar-safe, so the token is never left unset and the cap is never bypassed.
 5. **Free-form text is local-only.** Write the prose summary to a temp file and pass it via
    `--notes-file`; it reaches the local `.harness/progress/feedback/` copy, is never an
    upstream field, and is never sent to `gh`.

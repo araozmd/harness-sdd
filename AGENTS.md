@@ -68,11 +68,12 @@ parked, or failed). Never file mid-flow.
 
 **Who.** Only the **session-owning top-level role** — the Orchestrator, or Fixer / Inception /
 Planner / Driller when it owns the session — invokes `/sdd-report` (Codex: `$sdd-report`), and
-it mints `HARNESS_FEEDBACK_SESSION_ID` **once per session** (the telemetry `session-start`
-`started_at` with every character outside `[A-Za-z0-9._-]` removed, or
+it mints and exports `HARNESS_FEEDBACK_SESSION_ID` **once per session** (the telemetry
+`session-start` `started_at` with every character outside `[A-Za-z0-9._-]` removed, or
 `date -u +%Y%m%dT%H%M%SZ` when no marker exists) and reuses it for every report. Sub-agents
 (Architect, Builder, Reviewer, Scout, Doc-critic, pr-fixer) **never** invoke the reporter: on
-a trigger they append one entry to the harness-root-relative `progress/feedback/notes.md`
+a trigger they create the ledger directory if it is missing (`mkdir -p` its parent), then
+append one entry to the harness-root-relative `progress/feedback/notes.md`
 (`.harness/progress/feedback/notes.md` in an installed target) — a `## <trigger>` heading
 plus `symptom:` / `command:` / `phase:` (and an optional harness `file:`) — for the owning
 role to pick up.
