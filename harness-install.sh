@@ -5323,6 +5323,7 @@ Act as the **Orchestrator** (`.harness/agents/orchestrator.md`).
    - `in-review` → spawn **reviewer**; approve → open the PR and LEAVE it `in-review`
      (`done` is written only after the work merges — see `.harness/agents/orchestrator.md`
      “Writing `done`”), reject → back to `in-progress`.
+   (In Antigravity, define role subagents dynamically with `define_subagent` using canonical `.harness/agents/<role>.md` prompts and dispatch via `invoke_subagent` to maintain role context hygiene.)
 4. Append what happened to `.harness/progress/history.md`.
 
 Map `$ARGUMENTS` to the selector's closed scope flags:
@@ -6899,7 +6900,7 @@ EOF
       printf 'description: %s\n' "$_gcs_desc"
       printf '%s\n' '---'
       printf '\n## Invocation adapter\n\n'
-      printf 'In Codex, invoke `$%s` and write arguments after the skill mention; in OpenCode, invoke `/%s`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.\n' "$_gcs_name" "$_gcs_name"
+      printf 'In Antigravity or OpenCode, invoke `/%s`; in Codex, invoke `$%s` and write arguments after the skill mention. In all hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the Antigravity or OpenCode invocation is `/sdd-<name>`.\n' "$_gcs_name" "$_gcs_name"
       # R5: the concurrency gate is a property of the workflow, not of one file. The
       # shared unit is written for every claimant, so the OpenCode capability
       # precondition lives in the BODY — unconditional text, conditional in effect

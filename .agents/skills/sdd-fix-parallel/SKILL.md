@@ -5,7 +5,7 @@ description: Run a bounded batch of isolated autonomous E99 fixes through target
 
 ## Invocation adapter
 
-In Codex, invoke `$sdd-fix-parallel` and write arguments after the skill mention; in OpenCode, invoke `/sdd-fix-parallel`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.
+In Antigravity or OpenCode, invoke `/sdd-fix-parallel`; in Codex, invoke `$sdd-fix-parallel` and write arguments after the skill mention. In all hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the Antigravity or OpenCode invocation is `/sdd-<name>`.
 
 > **OpenCode capability precondition.** If the running host is OpenCode, read
 > `.opencode-parallel` before spawning any worker. If it does not read

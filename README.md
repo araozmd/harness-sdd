@@ -1,7 +1,8 @@
 # harness-sdd
 
 A portable **agent harness** for **Spec-Driven Development**. It supports
-**Claude Code** (primary), with **Codex** second and **OpenCode** third.
+**Claude Code** (primary), with **Codex** second, **OpenCode** third, and
+**Antigravity** supported natively via `.agents/skills/`.
 The harness lives in repository files, so the model and supported CLI can change
 without moving the project’s intent or history.
 
@@ -10,8 +11,9 @@ without moving the project’s intent or history.
 > [harness overview](docs/HARNESS.md).
 
 The [0.78.1 baseline](docs/BASELINE-0.78.1.md) preserves the historical five-front-end
-inventory and its validation limits. Current releases support three front ends;
-Gemini CLI and Antigravity are retired. See [upgrade guidance](docs/INSTALL.md#retiring-gemini-and-antigravity)
+inventory and its validation limits. Gemini CLI legacy installer emitters remain retired;
+Antigravity is supported natively via shared `.agents/skills/` units and dynamic subagent dispatch.
+See [upgrade guidance](docs/INSTALL.md#retiring-gemini-and-antigravity)
 for selection migration and preservation of customized legacy files.
 
 ## How it works

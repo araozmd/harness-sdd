@@ -449,6 +449,13 @@ supplies `$ARGUMENTS`. If fresh role delegation is unavailable, stop and report 
 limitation and file handoff path. Never simulate an independent Reviewer in the host.
 The init-failure halt and human `spec-ready` approval gate still apply.
 
+For Antigravity, because subagent personas are not statically loaded from repository files,
+the Orchestrator defines ephemeral subagents dynamically using the `define_subagent` tool
+(setting `system_prompt` from the canonical role file `agents/<role>.md`) and launches
+them via `invoke_subagent` to start a fresh, isolated context. Use `/sdd-*` for Antigravity
+skill invocations. If subagent invocation tools are unavailable, stop and report the
+limitation and file handoff path rather than simulating roles in the same conversation.
+
 - Spawn each sub-agent with a **clean context**. Pass it ONLY: its role file, the
   specific spec/task files it needs, and the relevant `progress/` notes.
 - **Never** forward another agent's chat transcript. Hand-offs happen through files.
