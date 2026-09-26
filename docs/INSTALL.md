@@ -3,8 +3,8 @@
 The harness is portable: it installs into any repo as a self-contained `.harness/`
 directory plus a few thin pointers. Install and upgrade are the **same idempotent
 command**. Supported front ends, in priority order, are **Claude Code**,
-**Codex**, and **OpenCode**. Gemini CLI and Antigravity are retired; see
-[legacy upgrades](#retiring-gemini-and-antigravity).
+**Codex**, **OpenCode**, and **Antigravity**. Gemini CLI is retired; see
+[legacy upgrades](#retiring-gemini).
 
 ## Prerequisites
 
@@ -107,21 +107,21 @@ preserved because their cross-target ownership is unknown. Only a byte-pristine
 legacy `sdd-pr-loop.md` with a readable ownership ledger proving no live owners
 is reclaimable. Missing, unreadable or live-owner evidence preserves the prompt.
 
-### Retiring Gemini and Antigravity
+### Retiring Gemini
 
-The accepted selectors are `claude`, `codex`, and `opencode`; `--agents=all`
-expands to those three. Explicit `gemini` or `antigravity` in `--agents`,
+The accepted selectors are `claude`, `codex`, `opencode`, and `antigravity`; `--agents=all`
+expands to those four. Explicit `gemini` in `--agents`,
 `HARNESS_AGENTS`, or `HARNESS_HOST_AGENT` fails before target writes and names
 supported replacements. Ambient retired-host session markers are ignored.
 
 An upgrade without a new explicit selection filters retired keys from the
 recorded `.harness/.agents` and preserves the supported survivors with a notice.
-For example, `gemini,antigravity,codex` becomes `codex`. When no supported key
+For example, `gemini,codex` becomes `codex`. When no supported key
 survives, the upgrade stops before mutation; choose the desired replacement:
 
 ```bash
 ./harness-install.sh --agents=codex /path/to/your-project
-# Or choose --agents=claude, --agents=opencode, or a supported CSV.
+# Or choose --agents=claude, --agents=opencode, --agents=antigravity, or a supported CSV.
 ```
 
 A version-stamped legacy install without `.harness/.agents` uses the surviving
@@ -334,7 +334,7 @@ replacing an explicit supported CSV selection.
 
 A detected explicit-host run can narrow an existing install. With no explicit
 selection, upgrades preserve supported recorded keys; retired-only recorded
-selections stop for an explicit replacement. See [migration](#retiring-gemini-and-antigravity).
+selections stop for an explicit replacement. See [migration](#retiring-gemini).
 
 ### The fresh-install default
 
@@ -345,6 +345,7 @@ host, or Claude alone when undetected. Its priority order is:
 [x] claude
 [ ] codex
 [ ] opencode
+[ ] antigravity
 ```
 
 You can add or remove selections before confirming. Interactive upgrades start

@@ -341,16 +341,17 @@ HARNESS_AGENTS=claude ./harness-install.sh /path/to/your-project
 
 `--agents=host` recognizes the supported host’s session markers; an explicit
 `HARNESS_HOST_AGENT=<key>` can declare it. Ambient retired-host markers are
-ignored. Explicit `gemini` or `antigravity` selectors or host declarations fail
-before target mutation. [Migration guidance](docs/INSTALL.md#retiring-gemini-and-antigravity)
+ignored. Explicit `gemini` selectors or host declarations fail
+before target mutation. [Migration guidance](docs/INSTALL.md#retiring-gemini)
 describes how pristine old glue is reclaimed and edited, foreign, or symlinked
 legacy files are preserved with warnings.
 
-**Codex and OpenCode workflows are repository-local.** Selecting `codex` **or**
-`opencode` creates the six base `$sdd-*` / `/sdd-*` skill units in `.agents/skills/`, plus
-`$sdd-pr-loop` when enabled. Both hosts read the same unit (ADR-0003), so there is one
-`SKILL.md` per command whose host-neutral adapter names both invocations and maps
-accompanying text to `$ARGUMENTS`, with `agents/openai.yaml` disabling implicit invocation.
+**Antigravity, Codex, and OpenCode workflows are repository-local.** Selecting
+`antigravity`, `codex`, **or** `opencode` creates the six base `/sdd-*` / `$sdd-*` skill units
+in `.agents/skills/`, plus `/sdd-pr-loop` when enabled. All three hosts read the same unit
+(ADR-0003), so there is one `SKILL.md` per command whose host-neutral adapter names both
+invocations and maps accompanying text to `$ARGUMENTS`, with `agents/openai.yaml` disabling
+implicit invocation.
 The `sdd-fix-parallel` body additionally stops an OpenCode invocation unless
 `.harness/.opencode-parallel` reads `supported` (a no-op on Codex). Seven native roles are
 registered in `.codex/agents/`, plus gated `pr-fixer`; inherited or unpinned models omit

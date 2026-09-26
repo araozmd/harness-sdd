@@ -61,7 +61,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     q=source('select-host-opencode');run(q,None,'--self','--agents=host',extra={'HARNESS_HOST_AGENT':'opencode'})
     assert (q/'.opencode/command/sdd-next.md').exists() and (q/'opencode.json').exists()
     assert not (q/'.claude/commands/sdd-next.md').exists() and not (q/'.codex/agents/builder.toml').exists()
-    for selection in ('gemini','antigravity'):
+    for selection in ('gemini',):
         before=snapshot(p);run(p,None,'--self','--agents='+selection,ok=False);assert snapshot(p)==before
     print('ok - self_selection_and_paths (R5)')
     # Model-only overrides are independent of seed settings and the other host.
@@ -130,10 +130,10 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     # Every Codex artifact class participates in actual source init drift diagnostics.
     for rel in ('.codex/agents/scout.toml','.agents/skills/sdd-next/SKILL.md','.agents/skills/sdd-next/agents/openai.yaml'):
         f=p/rel;original=f.read_bytes();f.write_bytes(original+b'\nDRIFT\n')
-        r=subprocess.run(['sh',str(p/'init.sh')],cwd=p,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+        r=subprocess.run([str(p/'init.sh')],cwd=p,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
         assert 'generated glue diverges' in r.stdout and rel in r.stdout
         f.write_bytes(original);f.unlink()
-        r=subprocess.run(['sh',str(p/'init.sh')],cwd=p,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+        r=subprocess.run([str(p/'init.sh')],cwd=p,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
         assert rel in r.stdout and 'generated glue diverges' in r.stdout
         f.write_bytes(original)
     manifest=(p/'.claude/.glue-manifest').read_text()
@@ -238,7 +238,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     # assertion above and by tests/test_planner_topology.sh R8/R10 — so this only drops
     # the claim that the v0.78.1 bytes survive, which those features deliberately make
     # false.
-    _regenerated={'sdd-pr-loop.md','sdd-plan.md','sdd-drill.md','builder-heavy.md'}
+    _regenerated={'sdd-pr-loop.md','sdd-plan.md','sdd-drill.md','builder-heavy.md','sdd-next.md'}
     for variant in ('all-five-on','all-five-models-on'):
         old=fresh('golden-'+variant)
         subprocess.run(['sh',str(src/'tests/fixtures/frontend-v0.78.1/materialize.sh'),variant,str(old)],check=True)
@@ -280,7 +280,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
             shutil.rmtree(probe,ignore_errors=True)
     else:
         print('skip - live opencode probe unavailable; static source-layout assertions passed (R9)')
-    assert (src/'VERSION').read_text().strip()=='0.86.0' and not (src/'GEMINI.md').exists()
+    assert (src/'VERSION').read_text().strip()=='0.87.0' and not (src/'GEMINI.md').exists()
     a=(src/'AGENTS.md').read_text()
     for token in ('./init.sh','non-zero','STOP','harness.config.yaml','agents/orchestrator.md','progress/lessons.md','spec-ready','in-progress','independent Reviewer','chat history','telemetry','tokens','VERSION','CHANGELOG.md','MINOR','MAJOR','branch','PR','main'):
         assert token.lower() in a.lower(),token
