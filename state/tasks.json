@@ -1626,7 +1626,13 @@
           "id": "E32-F02",
           "title": "tools/harness-report.sh: redaction pass, versioned body marker, duplicate search, per-session cap, progress/ fallback",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "1100ce3e661944604d40c37e9fd32d8947823605", "ref": "1100ce3e661944604d40c37e9fd32d8947823605", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "1100ce3e661944604d40c37e9fd32d8947823605",
+            "ref": "1100ce3e661944604d40c37e9fd32d8947823605",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [
@@ -1668,6 +1674,24 @@
             "E32-F04"
           ],
           "spec_path": "specs/epics/E32-feedback-loop/F05-sdd-triage/"
+        }
+      ]
+    },
+    {
+      "id": "E33",
+      "title": "Native Antigravity front end via shared skills and dynamic subagent dispatch",
+      "status": "done",
+      "owner": "araozmd",
+      "features": [
+        {
+          "id": "E33-F01",
+          "title": "Native Antigravity invocation adapter, dynamic subagent dispatch, and documentation",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "82597175a1d73981ddeaf6fe5021e1caaaab3d5e", "ref": "82597175a1d73981ddeaf6fe5021e1caaaab3d5e", "repo": "harness-sdd", "verified": "ancestor"},
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E33-antigravity-front/F01-antigravity-support/"
         }
       ]
     }

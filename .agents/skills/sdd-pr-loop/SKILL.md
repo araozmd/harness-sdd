@@ -5,7 +5,7 @@ description: Drive the Codex review cycle on an open PR — trigger @codex revie
 
 ## Invocation adapter
 
-In Codex, invoke `$sdd-pr-loop` and write arguments after the skill mention; in OpenCode, invoke `/sdd-pr-loop`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.
+In Antigravity or OpenCode, invoke `/sdd-pr-loop`; in Codex, invoke `$sdd-pr-loop` and write arguments after the skill mention. In all hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the Antigravity or OpenCode invocation is `/sdd-<name>`.
 
 ## Canonical workflow
 Drive the Codex review cycle on an open PR until every gate is green or the round cap is

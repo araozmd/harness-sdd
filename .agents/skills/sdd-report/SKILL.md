@@ -5,7 +5,7 @@ description: File one harness-feedback report through tools/harness-report.sh fo
 
 ## Invocation adapter
 
-In Codex, invoke `$sdd-report` and write arguments after the skill mention; in OpenCode, invoke `/sdd-report`. In both hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the OpenCode invocation is `/sdd-<name>`.
+In Antigravity or OpenCode, invoke `/sdd-report`; in Codex, invoke `$sdd-report` and write arguments after the skill mention. In all hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the Antigravity or OpenCode invocation is `/sdd-<name>`.
 
 ## Canonical workflow
 File **exactly one** harness-feedback report for a **harness defect**, then stop. This

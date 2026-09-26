@@ -640,15 +640,15 @@ test_tool_command_membership() {
 
 # ── R11 ───────────────────────────────────────────────────────────────────────────────────
 test_release_sweep() {
-  [ "$(cat "$SRC/VERSION")" = "0.87.0" ] \
-    || fail "R11: VERSION is not 0.87.0 (got $(cat "$SRC/VERSION"))"
+  [ "$(cat "$SRC/VERSION")" = "0.88.0" ] \
+    || fail "R11: VERSION is not 0.88.0 (got $(cat "$SRC/VERSION"))"
 
   _new="$T/cl-new.txt"
-  _section '## [0.87.0]' "$SRC/CHANGELOG.md" > "$_new"
-  [ -s "$_new" ] || fail "R11: no ## [0.87.0] CHANGELOG section"
+  _section '## [0.88.0]' "$SRC/CHANGELOG.md" > "$_new"
+  [ -s "$_new" ] || fail "R11: no ## [0.88.0] CHANGELOG section"
   grep -qiE 'reporting (is )?live|reporting goes live' "$_new" \
-    || fail "R11: the [0.87.0] CHANGELOG section does not name reporting going live"
-  grep -qF 'E32-F03' "$_new" || fail "R11: the [0.87.0] CHANGELOG section does not name E32-F03"
+    || fail "R11: the [0.88.0] CHANGELOG section does not name reporting going live"
+  grep -qF 'E32-F03' "$_new" || fail "R11: the [0.88.0] CHANGELOG section does not name E32-F03"
   # Historical anchors and the deliberate non-semver fixture stay byte-intact.
   grep -qF '## [0.86.0]' "$SRC/CHANGELOG.md" || fail "R11: the historical ## [0.86.0] anchor is gone"
   grep -qF '## [0.85.0]' "$SRC/CHANGELOG.md" || fail "R11: the historical ## [0.85.0] anchor is gone"
@@ -673,20 +673,20 @@ test_release_sweep() {
     || fail "R11: README's \$sdd-* sentence does not name \$sdd-report"
 
   # The stale-literal predicate is pinned to the exact comparison / pass-message SHAPE, not a
-  # bare '0.86.0' grep. Positive control: the predicate must match a planted probe, or the
+  # bare '0.87.0' grep. Positive control: the predicate must match a planted probe, or the
   # sweep below would be a dead predicate that greens on any input.
   _probe="$T/stale-probe.txt"
-  printf '%s\n' '[ "$(cat "$SRC/VERSION")" = "0.86.0" ]' > "$_probe"
-  printf '%s\n' "assert (src/'VERSION').read_text().strip()=='0.86.0'" >> "$_probe"
-  printf '%s\n' 'VERSION is 0.86.0 and the changelog' >> "$_probe"
-  grep -qE '= "0\.86\.0"|==.0\.86\.0.|VERSION is 0\.86\.0' "$_probe" \
+  printf '%s\n' '[ "$(cat "$SRC/VERSION")" = "0.87.0" ]' > "$_probe"
+  printf '%s\n' "assert (src/'VERSION').read_text().strip()=='0.87.0'" >> "$_probe"
+  printf '%s\n' 'VERSION is 0.87.0 and the changelog' >> "$_probe"
+  grep -qE '= "0\.87\.0"|==.0\.87\.0.|VERSION is 0\.87\.0' "$_probe" \
     || fail "R11 control: the stale-literal predicate cannot match its own probe shape, so the sweep is a dead predicate"
   for _f in test_codex_native.sh test_feedback_config.sh test_feedback_report.sh; do
-    if grep -qE '= "0\.86\.0"|==.0\.86\.0.|VERSION is (not )?0\.86\.0' "$SRC/tests/$_f"; then
-      fail "R11: tests/$_f still pins the CURRENT VERSION 0.86.0 — sync the literal to 0.87.0 (the historical ## [0.85.0]/[0.86.0] anchors and the -rc1 fixture stay)"
+    if grep -qE '= "0\.87\.0"|==.0\.87\.0.|VERSION is (not )?0\.87\.0' "$SRC/tests/$_f"; then
+      fail "R11: tests/$_f still pins the CURRENT VERSION 0.87.0 — sync the literal to 0.88.0 (the historical ## [0.85.0]/[0.86.0] anchors and the -rc1 fixture stay)"
     fi
   done
-  pass "R11 VERSION=0.87.0, the CHANGELOG [0.87.0] entry names reporting live, INSTALL.md is no longer inert, README names /sdd-report, and the coupled literals are swept (R11) [test_release_sweep]"
+  pass "R11 VERSION=0.88.0, the CHANGELOG [0.88.0] entry names reporting live, INSTALL.md is no longer inert, README names /sdd-report, and the coupled literals are swept (R11) [test_release_sweep]"
 }
 
 # ── non-functional ────────────────────────────────────────────────────────────────────────

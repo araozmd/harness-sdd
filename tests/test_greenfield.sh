@@ -252,7 +252,7 @@ test_greenfield_section_documents_sequence() {
   assert_contains "R1 section" "$_gf" 'first feature branch'
   printf '%s\n' "$_gf_flat" | grep -qiE 'push[^.]{0,80}planning baseline' \
     || fail "R1 section: the baseline step does not name both the push and the planning baseline in one sentence — a local-only commit leaves the remote baseline without the planning artifacts"
-  printf '%s\n' "$_gf_flat" | grep -qiE 'first feature branch[^.]{0,320}first feature PR' \
+  printf '%s\n' "$_gf_flat" | grep -qiE 'first feature branch[^.]{0,200}[^.]{0,120}first feature PR' \
     || fail "R1 section: the feature-branch step does not state that committing the baseline first keeps the planning artifacts out of the first feature PR — the reason for the order is missing"
   require_order "R1 sequence" "$_gf" '/sdd-drill <epic-id>' 'planning baseline' lt
   require_order "R1 sequence" "$_gf" 'planning baseline' 'first feature branch' lt
@@ -609,7 +609,7 @@ test_umbrella_cascade_suppresses_single_repo_banner() {
   # The temp-path component GNU mktemp makes (`tmp.XXXXXXXXXX`) contains a literal dot,
   # so a `[^.]` sentence bound would truncate before the path; bound by length instead.
   _um_child_flat="$(tr '\n' ' ' < "$T/umbrella.out")"
-  printf '%s\n' "$_um_child_flat" | grep -qiE 'umbrella child.{0,300}\.harness/init\.sh' \
+  printf '%s\n' "$_um_child_flat" | grep -qiE 'umbrella child.{0,200}.{0,100}\.harness/init\.sh' \
     || fail "R8e: the child banner does not name its own .harness/init.sh in one sentence — a child is told to run a repo-root init.sh that does not exist (Codex round 10, 4042236168)"
   if printf '%s\n' "$_um_child" | grep -qiE 'Run init\.sh here'; then
     fail "R8e: the child banner still says a repo-root 'Run init.sh here' — the executable is <child>/.harness/init.sh (Codex round 10, 4042236168)"

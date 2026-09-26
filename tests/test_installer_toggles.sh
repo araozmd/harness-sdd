@@ -291,9 +291,9 @@ test_picker_unaffected() {
   done
   _keys="$(sed -n 's/^AGENT_KEYS="\(.*\)"$/\1/p' "$INST")"
   [ -n "$_keys" ] || fail "R3: AGENT_KEYS is no longer a single quoted line"
-  [ "$(printf '%s\n' "$_keys" | wc -w | tr -d ' ')" = "3" ] \
-    || fail "R3: AGENT_KEYS holds $(printf '%s\n' "$_keys" | wc -w) keys, expected the 3 front-ends ('$_keys')"
-  for _k in claude codex opencode; do
+  [ "$(printf '%s\n' "$_keys" | wc -w | tr -d ' ')" = "4" ] \
+    || fail "R3: AGENT_KEYS holds $(printf '%s\n' "$_keys" | wc -w) keys, expected the 4 front-ends ('$_keys')"
+  for _k in claude codex opencode antigravity; do
     printf '%s\n' "$_keys" | grep -qw "$_k" || fail "R3: AGENT_KEYS lost the front-end key '$_k'"
   done
   printf '%s\n' "$_keys" | grep -qiE 'backend|builder' \
@@ -919,8 +919,8 @@ test_f01_and_picker_unaffected() {
       && fail "F02 R3: $_fn gained pr_loop behavior — the picker must not change"
   done
   _keys="$(sed -n 's/^AGENT_KEYS="\(.*\)"$/\1/p' "$INST")"
-  [ "$(printf '%s\n' "$_keys" | wc -w | tr -d ' ')" = "3" ] \
-    || fail "F02 R3: AGENT_KEYS holds $(printf '%s\n' "$_keys" | wc -w) keys, expected the 3 front-ends ('$_keys')"
+  [ "$(printf '%s\n' "$_keys" | wc -w | tr -d ' ')" = "4" ] \
+    || fail "F02 R3: AGENT_KEYS holds $(printf '%s\n' "$_keys" | wc -w) keys, expected the 4 front-ends ('$_keys')"
   printf '%s\n' "$_keys" | grep -qiE 'pr_loop|pr-loop' \
     && fail "F02 R3: an enum row was added to AGENT_KEYS — the gate is NOT a picker row"
 
@@ -1525,7 +1525,7 @@ test_sdd_fix_parallel_skill_self_gates_opencode() {
   # Anchored on `source checkout` inside the pre-workflow span, not anywhere in the file.
   printf '%s\n' "$_folded" | grep -qiE 'source checkout.{0,240}confirm native concurrent sub-agents' \
     || fail "E31-F01 R5: the precondition gives no source-layout remediation (confirm native concurrent sub-agents)"
-  printf '%s\n' "$_folded" | grep -qiE 'source checkout.{0,320}run the batch sequentially' \
+  printf '%s\n' "$_folded" | grep -qiE 'source checkout.{0,200}.{0,120}run the batch sequentially' \
     || fail "E31-F01 R5: the source-layout remediation does not offer the sequential fallback"
   printf '%s\n' "$_folded" | grep -qiE 'write .supported.{0,120}yourself' \
     || fail "E31-F01 R5: the source-layout remediation does not tell the user to write the marker directly"
@@ -1568,9 +1568,9 @@ test_manifest_scopes_parallel_gate_to_opencode_command() {
   printf '%s\n' "$_folded" | grep -qE '\.opencode/command/sdd-fix-parallel\.md.{0,200}(supported|with-opencode-parallel|omitted)' \
     || fail "E31-F01 manifest: the marker gate is not scoped to the native .opencode/command/sdd-fix-parallel.md copy"
   # ...and the shared unit is documented as always written and self-gating at runtime.
-  printf '%s\n' "$_folded" | grep -qE '\.agents/skills/sdd-fix-parallel/SKILL\.md.{0,260}ALWAYS.{0,200}self-gate' \
+  printf '%s\n' "$_folded" | grep -qE '\.agents/skills/sdd-fix-parallel/SKILL\.md.{0,200}.{0,60}ALWAYS.{0,200}self-gate' \
     || fail "E31-F01 manifest: the shared sdd-fix-parallel unit is not documented as always-written and self-gating"
-  printf '%s\n' "$_folded" | grep -qE '\.agents/skills/sdd-fix-parallel/SKILL\.md.{0,400}\.harness/\.opencode-parallel' \
+  printf '%s\n' "$_folded" | grep -qE '\.agents/skills/sdd-fix-parallel/SKILL\.md.{0,200}.{0,200}\.harness/\.opencode-parallel' \
     || fail "E31-F01 manifest: the shared sdd-fix-parallel unit does not name .harness/.opencode-parallel as its runtime gate"
   return 0
 }
