@@ -54,15 +54,11 @@ parse_body() {
     return 0
   fi
 
-  # Extract the trigger from the VALIDATED first line (trust-on-validated-input). The host
-  # charset cannot contain `=`, so the first ` trigger=` is the field separator.
-  _pb_trigger=""
-  case "$_pb_first" in
-    *' trigger=harness-malfunction -->')       _pb_trigger=harness-malfunction ;;
-    *' trigger=contradictory-instruction -->') _pb_trigger=contradictory-instruction ;;
-    *' trigger=workaround -->')                _pb_trigger=workaround ;;
-    *' trigger=missing-capability -->')        _pb_trigger=missing-capability ;;
-  esac
+  # Extract the trigger from the VALIDATED first line (trust-on-validated-input): the
+  # anchored grammar above has already restricted it to the four-value vocabulary, so this
+  # capture needs no second membership check. (host/version charsets cannot contain a space,
+  # so the first ` trigger=` is the field separator.)
+  _pb_trigger="$(printf '%s\n' "$_pb_first" | sed -n 's/^.* trigger=\([^ ]*\) -->$/\1/p')"
   [ -n "$_pb_trigger" ] || return 0
 
   _pb_cat=bug
