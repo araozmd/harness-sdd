@@ -1,0 +1,25 @@
+name: harness-feedback labeler
+
+# E32-F04 — labels issues that carry F02's `harness-feedback:v1` body marker.
+# The marker is the ONLY classification input (ADR-0006); every other byte of the issue
+# body is untrusted data and reaches the parser only as a file written from the opened-event
+# payload snapshot (a run with no event payload falls back to an API fetch).
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - name: Label marker-carrying issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: sh .github/scripts/feedback-labeler.sh label-issue "$ISSUE_NUMBER"
