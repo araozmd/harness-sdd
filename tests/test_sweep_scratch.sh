@@ -405,6 +405,125 @@ test_unparseable_flow_style_store_block_refuses() {
   pass "R12 test_unparseable_flow_style_store_block_refuses"
 }
 
+# ── R12 (broad YAML-shape matrix for `_cfg_store_tasks`) ──────────────────────────
+# Round-3 escalation: Codex found a THIRD unrecognized `store:` shape (indented
+# top-level block) after the flow-style hole above, so `_cfg_store_tasks` was
+# rewritten around a python3 reader instead of another awk special-case. This
+# matrix pins the reader's real scope directly, rather than one shape at a time.
+
+# ── R12: absent store: block defaults to local (no config file at all) ────────────
+test_absent_store_block_defaults_local() {
+  make_fixture r12-absent
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+  # No harness.config.yaml at all — make_fixture never writes one.
+
+  run_sweep
+  [ "$RC" -eq 0 ] || fail "R12: an absent harness.config.yaml did not default to local: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+eligible$' \
+    || fail "R12: an absent harness.config.yaml did not scan normally (local default): $OUT"
+  pass "R12 test_absent_store_block_defaults_local"
+}
+
+# ── R12: block-style tasks: local, explicit — scans normally, no refusal ─────────
+test_block_style_explicit_local_scans_normally() {
+  make_fixture r12-explicit-local
+  write_config 'store:
+  tasks: local
+  docs: local
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] || fail "R12: explicit block-style 'tasks: local' was refused: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12: explicit block-style 'tasks: local' did not scan/remove normally: $OUT"
+  pass "R12 test_block_style_explicit_local_scans_normally"
+}
+
+# ── R12: block-style non-local (jira) refuses, same as the existing obsidian case ─
+test_block_style_non_local_jira_refuses() {
+  make_fixture r12-jira
+  write_config 'store:
+  tasks: jira
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep
+  [ "$RC" -ne 0 ] \
+    || fail "R12: a block-style 'tasks: jira' backend did not exit non-zero: $OUT"
+  printf '%s\n' "$OUT" | grep -qiE 'unsupported TaskStore backend.*jira' \
+    || fail "R12: the refusal does not name the jira backend: $OUT"
+  has_verdict_line \
+    && fail "R12: a per-entry verdict was printed despite an unsupported jira backend: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: a scratch directory vanished against an unsupported jira backend"
+  pass "R12 test_block_style_non_local_jira_refuses"
+}
+
+# ── R12: INDENTED top-level block-style non-local — this round's exact repro ──────
+test_indented_top_level_block_non_local_refuses() {
+  make_fixture r12-indented
+  write_config '  store:
+    tasks: obsidian
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep
+  [ "$RC" -ne 0 ] \
+    || fail "R12: an indented top-level 'store:' block selecting obsidian did NOT refuse — the exact repro that let --apply delete a live done-in-obsidian scratch dir: $OUT"
+  has_verdict_line \
+    && fail "R12: a per-entry verdict was printed despite an indented top-level store: block: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: a scratch directory vanished on a dry run against an indented store: block"
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: --apply against an indented top-level store: block did not exit non-zero: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply deleted E01-F01-builder despite an indented store: block selecting a non-local backend — this is the exact round-3 repro"
+  pass "R12 test_indented_top_level_block_non_local_refuses"
+}
+
+# ── R12: tab-indented block-style non-local — mixed-indentation-character shape ───
+test_tab_indented_block_non_local_refuses() {
+  make_fixture r12-tabs
+  printf 'store:\n\ttasks: jira\n' > "$PRIMARY/harness.config.yaml"
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: a tab-indented 'tasks:' line under a non-local backend did not refuse: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply deleted a scratch dir despite a tab-indented non-local store: block"
+  pass "R12 test_tab_indented_block_non_local_refuses"
+}
+
+# ── R12: a `tasks:` key under a DIFFERENT top-level block must never be mistaken
+# for `store.tasks` — the store: block here genuinely omits tasks:, so this must
+# default to local, not pick up the unrelated key.
+test_tasks_key_in_other_top_level_block_not_mistaken() {
+  make_fixture r12-other-block
+  write_config 'store:
+  docs: local
+other:
+  tasks: obsidian
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12: a 'tasks:' key under an unrelated top-level block was mistaken for store.tasks: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12: the store: block (which genuinely omits tasks:) did not default to local: $OUT"
+  pass "R12 test_tasks_key_in_other_top_level_block_not_mistaken"
+}
+
 # ── R13 ─────────────────────────────────────────────────────────────────────────────
 test_remove_failure_reported_and_exits_nonzero() {
   if ! modes_bind_this_uid; then
@@ -449,6 +568,12 @@ test_report_has_summary_verdicts_and_bytes_reclaimed
 test_scoped_vs_full_scan
 test_unsupported_backend_refuses_before_touching_anything
 test_unparseable_flow_style_store_block_refuses
+test_absent_store_block_defaults_local
+test_block_style_explicit_local_scans_normally
+test_block_style_non_local_jira_refuses
+test_indented_top_level_block_non_local_refuses
+test_tab_indented_block_non_local_refuses
+test_tasks_key_in_other_top_level_block_not_mistaken
 test_remove_failure_reported_and_exits_nonzero
 
 echo "all sweep-scratch tests passed"

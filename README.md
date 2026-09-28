@@ -263,7 +263,7 @@ harness.config.yaml          store backends, hooks, mirror, telemetry, umbrella,
 harness-install.sh           install/upgrade into a target (+ --umbrella, --shared-repo)
 init.sh                      environment verification gate
 agents/                      role prompts (canonical)
-tools/                       shell, Python and Node utilities (next-task.mjs, telemetry-report.py, sync-board.mjs, wait-for-codex.sh, opencode-model-helper.sh, harness-report.sh)
+tools/                       shell, Python and Node utilities (next-task.mjs, telemetry-report.py, sync-board.mjs, wait-for-codex.sh, opencode-model-helper.sh, harness-report.sh, sweep-scratch.sh)
 specs/                       product.md, glossary.md, _templates/, epics/<E>/<F>/*.md
 state/                       tasks.json (local TaskStore)
 progress/                    run output + history.md
@@ -328,6 +328,30 @@ append notes to `progress/feedback/notes.md`. The underlying tool
 (`tools/harness-report.sh`) enforces a strict allow-list of structured fields and scrubs
 free-form content. Configuration lives under `feedback:` in `harness.config.yaml`
 (`enabled: true`, `max_per_session: 3`, `repo: github.com/araozmd/harness-sdd`).
+
+### Scratch-dir cleanup
+
+Builder/Reviewer/Fixer/PR-fixer sessions each write scratch state under their own
+namespaced `scratchpad/<feature-id>-<role>/` directory, and never remove it themselves —
+the Orchestrator's "Writing `done`" step already sweeps it automatically once a feature
+lands, so day-to-day use needs nothing manual. `tools/sweep-scratch.sh [<feature-id>]
+[--apply]` is the tool behind that hook, and also a directly runnable operator command
+for a manual backfill (e.g. after a bulk import, or to reclaim scratch left over before
+this hook existed):
+
+```bash
+sh tools/sweep-scratch.sh              # dry-run, every scratchpad/ entry: report only
+sh tools/sweep-scratch.sh E01-F01      # dry-run, scoped to one feature id
+sh tools/sweep-scratch.sh --apply      # mutate: remove every eligible entry
+sh tools/sweep-scratch.sh E01-F01 --apply   # mutate, scoped to one feature id
+```
+
+Dry-run (no `--apply`) is the default and only reports; `--apply` is the only switch
+that mutates the filesystem. An entry is eligible for removal only once its owning
+feature's TaskStore status is `done`; anything else (not found, not yet `done`, an
+unrecognized directory name, or a symlink escaping `scratchpad/`) is skipped and
+reported, never removed. Requires the `local` TaskStore backend (`store.tasks: local`
+in `harness.config.yaml`) — the tool refuses outright under any other backend.
 
 ## Installing into an existing project
 

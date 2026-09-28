@@ -601,6 +601,15 @@ When the selected feature has `slices[]`, drive it slice by slice:
   never set `done` *prematurely* (while a slice or integration is red) — not "never
   write it". (The Reviewer still owns the per-slice `done` verdict inside each child
   repo; you only roll the slices up.)
+- **Sweep the feature's scratch, best-effort.** Immediately after writing that
+  derived `done`, invoke the scratch sweep scoped to that feature id, with
+  `--apply`: `sh tools/sweep-scratch.sh <id> --apply` (installed layout: `sh
+  .harness/tools/sweep-scratch.sh <id> --apply`) — the same invocation and the same
+  best-effort contract as the main-path "Writing `done`" hook above: a non-zero
+  sweep exit is recorded but never blocks the loop and never reverts or reopens the
+  `done` write. The main-path hook never fires here — this rollup persists the
+  feature's `done` directly, without traversing that numbered step — so this is the
+  only place that sweeps a done umbrella feature's own scratch.
 
 ## Epic-done rollup + drift check (additive — beside the feature rollup above)
 

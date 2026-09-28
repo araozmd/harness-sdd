@@ -134,36 +134,148 @@ resolve_repository
 # feature (E34-F01.spec.md scopes liveness to "TaskStore status `done`", and this repo's
 # own harness.config.yaml sets `store.tasks: local`), so refuse outright for any other
 # configured backend instead: fail closed, exit non-zero, touch nothing.
-_cfg_store_tasks() { # _cfg_store_tasks <file> — echoes store.tasks; empty output means
-  # store.tasks is genuinely absent (no top-level `store:` block at all, or a
-  # block-style `store:` block that omits `tasks:`) — the caller may default that
-  # to `local`. A non-zero exit means a `store:` block IS present but not in the
-  # one block-style shape this parser understands (e.g. flow-style
-  # `store: {tasks: obsidian, docs: local}`, or any scalar/other unrecognized
-  # shape on the `store:` line itself) — the caller must fail closed on that, NOT
-  # default to local, because an empty parse result there means "couldn't read
-  # it", not "the key is absent".
-  [ -f "$1" ] || return 0
-  awk '
-    /^store:[[:space:]]*(#.*)?$/ { in_store = 1; next }
-    /^store:/                    { exit 3 }
-    /^[^[:space:]#]/             { in_store = 0 }
-    in_store {
-      line = $0
-      sub(/#.*$/, "", line)
-      if (match(line, "^[[:space:]]+tasks[[:space:]]*:")) {
-        v = substr(line, RSTART + RLENGTH)
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
-        gsub(/^"|"$/, "", v)
-        gsub(/^\x27|\x27$/, "", v)
-        if (v != "") { print v; exit }
-      }
-    }
-  ' "$1"
+_cfg_store_tasks() { # _cfg_store_tasks <file> — echoes store.tasks; empty output
+  # (exit 0) means store.tasks is genuinely absent: no top-level `store:` key
+  # anywhere in the file at all, or a `store:` block that is present but omits
+  # `tasks:` — the caller may default that to `local`. A non-zero exit means a
+  # `store:` block IS present but this parser cannot confidently extract its
+  # `tasks:` scalar from the shape it is written in (regardless of WHY: flow vs.
+  # block style, indentation, a non-mapping value on the `store:` line itself,
+  # or anything else this minimal parser does not recognize) — the caller must
+  # fail closed on that, NOT default to local, because an empty parse result
+  # there would mean "couldn't read it", not "the key is absent".
+  python3 - "$1" <<'PYEOF'
+import re
+import sys
+
+
+def strip_comment(line):
+    # Naive but quote-aware '#' stripping: good enough for this one config
+    # file's own shape (store:/tasks: values never themselves contain a '#').
+    out = []
+    in_squote = in_dquote = False
+    for ch in line:
+        if ch == "'" and not in_dquote:
+            in_squote = not in_squote
+        elif ch == '"' and not in_squote:
+            in_dquote = not in_dquote
+        elif ch == "#" and not in_squote and not in_dquote:
+            break
+        out.append(ch)
+    return "".join(out)
+
+
+def unquote(v):
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+        return v[1:-1]
+    return v
+
+
+def parse_store_tasks(path):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw_lines = fh.read().splitlines()
+    except FileNotFoundError:
+        return ("", 0)
+    except OSError:
+        return (None, 1)
+
+    entries = []  # (indent, stripped-content) per non-blank, non-comment line
+    for line in raw_lines:
+        content = strip_comment(line)
+        stripped = content.strip()
+        if stripped == "":
+            continue
+        indent = len(content) - len(content.lstrip(" \t"))
+        entries.append((indent, stripped))
+
+    if not entries:
+        return ("", 0)
+
+    # The document's own top-level keys must all share ONE consistent
+    # indentation, whatever it is — this is what lets a uniformly-indented
+    # file (the whole top-level mapping written at, say, 2-space indent) still
+    # be recognized as "top-level", the same shape a real YAML reader accepts.
+    base_indent = entries[0][0]
+
+    store_idx = None
+    store_rest = ""
+    for idx, (indent, stripped) in enumerate(entries):
+        if indent == base_indent and re.match(r"^store:(\s|$|\{)", stripped):
+            store_idx = idx
+            store_rest = stripped[len("store:"):].strip()
+            break
+
+    if store_idx is None:
+        # No top-level `store:` key. A `store:`-looking key at some OTHER
+        # indentation is ambiguous — it might be the document's real top level
+        # mismatched against our indentation assumption, or a nested key that
+        # only looks similar — so fail closed rather than guess; only the
+        # complete absence of any `store:`-looking line anywhere defaults to
+        # `local`.
+        for indent, stripped in entries:
+            if re.match(r"^store:(\s|$|\{)", stripped):
+                return (None, 1)
+        return ("", 0)
+
+    if store_rest.startswith("{"):
+        if not store_rest.endswith("}"):
+            return (None, 1)  # multi-line flow mapping — out of scope
+        tasks_val = None
+        for part in store_rest[1:-1].split(","):
+            part = part.strip()
+            if not part:
+                continue
+            kv = part.split(":", 1)
+            if len(kv) != 2:
+                return (None, 1)
+            if kv[0].strip() == "tasks":
+                tasks_val = unquote(kv[1])
+        return (tasks_val, 0) if tasks_val is not None else ("", 0)
+
+    if store_rest != "":
+        return (None, 1)  # a scalar/other shape on the `store:` line itself
+
+    # Block style: the block's own direct lines are every subsequent entry
+    # more indented than the top level, up to the first entry back at or
+    # below it (which ends the block, and is never itself part of it — so a
+    # `tasks:` key belonging to a DIFFERENT top-level block is never mistaken
+    # for this one's).
+    block = []
+    for indent, stripped in entries[store_idx + 1:]:
+        if indent <= base_indent:
+            break
+        block.append((indent, stripped))
+
+    if not block:
+        return ("", 0)  # `store:` present with no children — tasks absent
+
+    child_indent = min(indent for indent, _ in block)
+    tasks_line = None
+    for indent, stripped in block:
+        if indent == child_indent and re.match(r"^tasks:", stripped):
+            tasks_line = stripped[len("tasks:"):].strip()
+            break
+
+    if tasks_line is None:
+        return ("", 0)  # `tasks:` genuinely absent from the `store:` block
+    if tasks_line == "" or tasks_line[0] in "{[":
+        return (None, 1)  # no inline scalar to confidently extract
+    return (unquote(tasks_line), 0)
+
+
+_value, _code = parse_store_tasks(sys.argv[1])
+if _code != 0:
+    sys.exit(1)
+if _value:
+    print(_value)
+sys.exit(0)
+PYEOF
 }
 
 if ! STORE_TASKS="$(_cfg_store_tasks "$CONFIG")"; then
-  die "cannot parse the 'store:' block in $CONFIG — this tool only recognizes the block-style form ('store:' on its own line, then an indented 'tasks: <backend>'); refusing to guess whether the configured backend is local"
+  die "cannot recognize 'tasks:' under the 'store:' block in $CONFIG; refusing to guess whether the configured backend is local"
 fi
 STORE_TASKS="${STORE_TASKS:-local}"
 [ "$STORE_TASKS" = "local" ] ||

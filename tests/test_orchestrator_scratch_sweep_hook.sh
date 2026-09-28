@@ -75,4 +75,33 @@ printf '%s\n' "$DONE_SEC" | grep -qiE 'never reverts or reopens.{0,40}done' \
   || fail "R9: the section does not say the sweep never reverts or reopens the done write"
 
 pass "R9 orchestrator_writing_done_sweep_hook_documented"
+
+# ── the umbrella integration rollup ALSO names the same sweep invocation ─────────
+# Round-3 escalation finding: the umbrella feature-rollup path (inside "## Umbrella
+# mode") persists a feature's derived `done` directly and never traverses the
+# numbered "Writing `done`" main-path hook above — so it needs its OWN sweep
+# invocation, immediately after ITS OWN `done` write, not a cross-reference alone.
+UMBRELLA_SEC="$(section '## Umbrella mode' "$ORCH" | flat)"
+[ -n "$UMBRELLA_SEC" ] \
+  || fail "R9: orchestrator.md has no '## Umbrella mode' section — the heading was renamed or removed"
+
+# ANTI-TRUNCATION: reach the integration-gate-and-rollup bullet block's own final
+# sentence before asserting anything below it.
+printf '%s\n' "$UMBRELLA_SEC" | grep -qi 'you only roll the slices up' \
+  || fail "R9: the '## Umbrella mode' section extraction is TRUNCATED — it does not reach the integration-gate-and-rollup block's final sentence"
+
+printf '%s\n' "$UMBRELLA_SEC" | grep -qiE 'immediately after writing that[^.]{0,20}derived[^.]{0,20}done' \
+  || fail "R9: the umbrella integration-gate-and-rollup block does not say the sweep runs IMMEDIATELY AFTER writing the derived done, in one sentence"
+printf '%s\n' "$UMBRELLA_SEC" | grep -qF 'sweep-scratch.sh <id> --apply' \
+  || fail "R9: the umbrella rollup block does not name the exact invocation 'sweep-scratch.sh <id> --apply'"
+printf '%s\n' "$UMBRELLA_SEC" | grep -qi '.harness/tools/sweep-scratch.sh <id> --apply' \
+  || fail "R9: the umbrella rollup block does not also name the installed-layout equivalent invocation"
+printf '%s\n' "$UMBRELLA_SEC" | grep -qiE 'best-effort' \
+  || fail "R9: the umbrella rollup block does not call its sweep invocation best-effort"
+printf '%s\n' "$UMBRELLA_SEC" | grep -qiE 'non-zero.{0,20}sweep exit is recorded.{0,90}never blocks' \
+  || fail "R9: the umbrella rollup block does not say a non-zero sweep exit is RECORDED and never BLOCKS the loop, in one sentence"
+printf '%s\n' "$UMBRELLA_SEC" | grep -qiE 'never blocks.{0,60}never reverts or reopens' \
+  || fail "R9: the umbrella rollup block does not say the sweep never blocks AND never reverts/reopens, in one sentence"
+
+pass "R9 orchestrator_umbrella_rollup_sweep_hook_documented"
 echo "All orchestrator scratch-sweep-hook tests passed."
