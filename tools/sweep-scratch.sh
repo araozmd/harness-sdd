@@ -16,7 +16,7 @@
 #                 report only, touch nothing. This is the ONLY switch between the two
 #                 modes — classification and reporting are identical in both (R1).
 #
-# FAIL-CLOSED, on four distinct axes:
+# FAIL-CLOSED, on five distinct axes:
 #   - An entry whose name does not start with `<feature-id>-` is `unrecognized` and is
 #     NEVER acted on, in any mode (R2).
 #   - An entry whose feature id is absent from the TaskStore, or whose status is
@@ -27,6 +27,9 @@
 #   - An entry whose resolved real path is not a direct child of the resolved
 #     scratchpad/ directory (e.g. a symlink escaping it) is skipped and reported as an
 #     anomaly, never deleted through (R6).
+#   - If `store.tasks` in harness.config.yaml is anything other than `local` (the only
+#     backend this tool reads status from), the tool refuses outright before touching
+#     `state/tasks.json` or scratchpad/ at all, and exits non-zero (R12).
 #
 # The tool never mutates the TaskStore, never writes outside the one resolved
 # scratchpad/ directory, and never globs or acts on scratchpad/ itself.
@@ -103,8 +106,14 @@ EOF
   SELF_DIR="$(absolute_dir "$(dirname -- "$0")")" ||
     die "cannot locate helper"
   case "$SELF_DIR" in
-    "$CALLER_TOP/tools") BOARD="$PRIMARY/state/tasks.json" ;;
-    "$CALLER_TOP/.harness/tools") BOARD="$PRIMARY/.harness/state/tasks.json" ;;
+    "$CALLER_TOP/tools")
+      BOARD="$PRIMARY/state/tasks.json"
+      CONFIG="$PRIMARY/harness.config.yaml"
+      ;;
+    "$CALLER_TOP/.harness/tools")
+      BOARD="$PRIMARY/.harness/state/tasks.json"
+      CONFIG="$PRIMARY/.harness/harness.config.yaml"
+      ;;
     *) die "helper must run from tools/ or .harness/tools/ in the caller worktree" ;;
   esac
   # scratchpad/ is ALWAYS resolved at <primary>/scratchpad, never inside .harness/ —
@@ -113,6 +122,41 @@ EOF
   SCRATCHPAD="$PRIMARY/scratchpad"
 }
 resolve_repository
+
+# ── TaskStore backend guard (R12) ──────────────────────────────────────────────────
+# Everything below assumes the `local` TaskStore backend (`store.tasks: local` in
+# harness.config.yaml, store/local.md): a flat JSON file this process reads directly.
+# When `store.tasks` is `obsidian`, feature status lives in specs/ frontmatter instead
+# (store/obsidian.md) and `tasks.json` is only an optional, possibly stale or absent,
+# mirror — reading it as the source of truth here could leave completed scratch forever
+# (mirror absent/stale) or delete still-active scratch (a stale mirror that still says
+# `done`). Parsing every backend's canonical status source is out of scope for this
+# feature (E34-F01.spec.md scopes liveness to "TaskStore status `done`", and this repo's
+# own harness.config.yaml sets `store.tasks: local`), so refuse outright for any other
+# configured backend instead: fail closed, exit non-zero, touch nothing.
+_cfg_store_tasks() { # _cfg_store_tasks <file> — echoes store.tasks, or nothing if absent
+  [ -f "$1" ] || return 0
+  awk '
+    /^store:[[:space:]]*(#.*)?$/ { in_store = 1; next }
+    /^[^[:space:]#]/             { in_store = 0 }
+    in_store {
+      line = $0
+      sub(/#.*$/, "", line)
+      if (match(line, "^[[:space:]]+tasks[[:space:]]*:")) {
+        v = substr(line, RSTART + RLENGTH)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+        gsub(/^"|"$/, "", v)
+        gsub(/^\x27|\x27$/, "", v)
+        if (v != "") { print v; exit }
+      }
+    }
+  ' "$1"
+}
+
+STORE_TASKS="$(_cfg_store_tasks "$CONFIG" || :)"
+STORE_TASKS="${STORE_TASKS:-local}"
+[ "$STORE_TASKS" = "local" ] ||
+  die "unsupported TaskStore backend store.tasks: $STORE_TASKS — this tool only reads the 'local' backend ($BOARD); refusing to scan or mutate scratchpad/ for any other backend"
 
 # ── TaskStore read, ONCE, before classifying a single entry (R5) ──────────────────
 # A read/parse failure here is a TOOL-LEVEL error: abort the whole scan, classify and

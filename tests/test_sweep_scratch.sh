@@ -9,7 +9,7 @@
 # so this also doubles as a check that the tool runs under whatever `sh` resolves to
 # on this host, consistent with every other suite tools/run-tests.sh selects.
 #
-# R-id coverage: R1-R8 of E34-F01.spec.md, per E34-F01.tests.md's traceability table.
+# R-id coverage: R1-R8, R12 of E34-F01.spec.md, per E34-F01.tests.md's traceability table.
 
 set -eu
 
@@ -46,6 +46,12 @@ make_fixture() {
 # write_board <json> — overwrite the fixture's TaskStore verbatim.
 write_board() {
   printf '%s' "$1" > "$PRIMARY/state/tasks.json"
+}
+
+# write_config <yaml> — write the fixture's harness.config.yaml verbatim (source
+# layout ⇒ repo root, matching resolve_repository's "tools/" case).
+write_config() {
+  printf '%s' "$1" > "$PRIMARY/harness.config.yaml"
 }
 
 # scratch_dir <name> [<size-kb>] — create a scratchpad/<name>/ with a file of the
@@ -323,6 +329,36 @@ test_scoped_vs_full_scan() {
   pass "R8 test_scoped_vs_full_scan"
 }
 
+# ── R12 ─────────────────────────────────────────────────────────────────────────────
+test_unsupported_backend_refuses_before_touching_anything() {
+  make_fixture r12
+  write_config 'store:
+  tasks: obsidian
+  docs: local
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep
+  [ "$RC" -ne 0 ] \
+    || fail "R12: an unsupported store.tasks backend (obsidian) did not exit non-zero: $OUT"
+  printf '%s\n' "$OUT" | grep -qiE 'unsupported TaskStore backend.*obsidian' \
+    || fail "R12: the refusal does not name the unsupported backend: $OUT"
+  has_verdict_line \
+    && fail "R12: a per-entry verdict was printed despite the backend being unsupported — the scan must refuse BEFORE classifying anything: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: a scratch directory vanished on a dry (non --apply) run against an unsupported backend"
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: --apply against an unsupported backend did not exit non-zero: $OUT"
+  has_verdict_line \
+    && fail "R12: --apply against an unsupported backend printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply removed a scratch directory despite the tool being required to refuse first"
+  pass "R12 test_unsupported_backend_refuses_before_touching_anything"
+}
+
 test_default_is_dry_run_apply_mutates
 test_classifies_feature_id_prefix_skips_unrecognized
 test_done_feature_removed_on_apply_reported_dry_run
@@ -332,5 +368,6 @@ test_symlink_escape_skipped
 test_exit_code_reflects_tool_errors_only
 test_report_has_summary_verdicts_and_bytes_reclaimed
 test_scoped_vs_full_scan
+test_unsupported_backend_refuses_before_touching_anything
 
 echo "all sweep-scratch tests passed"
