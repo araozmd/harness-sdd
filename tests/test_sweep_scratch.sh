@@ -527,7 +527,11 @@ other:
 # ── R12: DOUBLE-quoted top-level 'store:' key, flow-style value — round-4 repro ───
 # Codex's exact reproduction: a quoted top-level key hid the store: block from the
 # matcher entirely, so it defaulted to local and let --apply delete a done-in-name
-# scratch dir whose real backend was obsidian.
+# scratch dir whose real backend was obsidian. Round 5 (the allowlist rewrite)
+# now refuses ANY flow-style mapping outright, up front, before ever trying to
+# resolve a backend name from it — so the refusal message names the shape
+# problem generically rather than the specific backend; the load-bearing
+# assertion is that it refuses and touches nothing, not the message's wording.
 test_double_quoted_top_level_key_flow_style_refuses() {
   make_fixture r12-dquote-top-flow
   write_config '"store": {"tasks": obsidian, "docs": local}
@@ -538,8 +542,8 @@ test_double_quoted_top_level_key_flow_style_refuses() {
   run_sweep --apply
   [ "$RC" -ne 0 ] \
     || fail "R12: a double-quoted top-level 'store:' key with a flow-style non-local value did not refuse: $OUT"
-  printf '%s\n' "$OUT" | grep -qiE 'unsupported TaskStore backend.*obsidian' \
-    || fail "R12: the refusal does not name the obsidian backend for a double-quoted top-level key: $OUT"
+  printf '%s\n' "$OUT" | grep -qiE 'cannot recognize' \
+    || fail "R12: the refusal does not report an unrecognized document shape for a flow-style value: $OUT"
   [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
     || fail "R12: --apply deleted E01-F01-builder despite a double-quoted top-level store: key selecting a non-local backend — the exact round-4 repro"
   pass "R12 test_double_quoted_top_level_key_flow_style_refuses"
@@ -618,6 +622,180 @@ test_quoted_top_level_key_explicit_local_scans_normally() {
   pass "R12 test_quoted_top_level_key_explicit_local_scans_normally"
 }
 
+# ── R12 (round-5 allowlist rewrite: exact repro + adversarial stress matrix) ──────
+# This was the FIFTH consecutive round in which Codex found a distinct unrecognized
+# store: shape in this exact function (block-only baseline -> flow-style value ->
+# indented block -> quoted keys -> whole-document flow mapping). Round 5 stops
+# enumerating accepted shapes and instead validates the WHOLE document against ONE
+# canonical shape up front (validate_canonical_shape), refusing everything else.
+# The exact repro pins the reported bug; the stress cases below are adversarial
+# shapes no prior round tried, each asserting the parser either resolves the ONE
+# canonical case correctly or refuses — never silently defaults to local when the
+# real answer is unknown.
+
+# ── R12: the exact round-5 repro — a whole-document flow mapping ──────────────────
+test_whole_document_flow_mapping_refuses() {
+  make_fixture r12-whole-doc-flow
+  write_config '{store: {tasks: obsidian, docs: local}}
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: a whole-document flow mapping did not refuse — the exact round-5 repro (Codex #4128053695): $OUT"
+  printf '%s\n' "$OUT" | grep -qiE 'cannot recognize' \
+    || fail "R12: the refusal does not report an unrecognized document shape for a whole-document flow mapping: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply deleted E01-F01-builder despite a whole-document flow mapping whose real backend (obsidian) is unknown to this parser — the exact round-5 repro"
+  pass "R12 test_whole_document_flow_mapping_refuses"
+}
+
+# ── R12 stress: multi-document YAML ('---' separator) refuses ────────────────────
+test_multi_document_separator_refuses() {
+  make_fixture r12-multidoc
+  write_config '---
+store:
+  tasks: obsidian
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12 stress: a multi-document '---' separator did not refuse: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12 stress: --apply deleted E01-F01-builder despite a multi-document YAML file"
+  pass "R12 stress test_multi_document_separator_refuses"
+}
+
+# ── R12 stress: an anchor on the store: key refuses ───────────────────────────────
+test_anchor_on_store_key_refuses() {
+  make_fixture r12-anchor
+  write_config 'store: &store_anchor
+  tasks: obsidian
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12 stress: an anchor (&store_anchor) on the store: key did not refuse: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12 stress: --apply deleted E01-F01-builder despite an anchored store: key selecting a non-local backend"
+  pass "R12 stress test_anchor_on_store_key_refuses"
+}
+
+# ── R12 stress: a store: value that is itself a bare scalar (not a mapping) ──────
+test_store_scalar_value_refuses() {
+  make_fixture r12-store-scalar
+  write_config 'store: local
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12 stress: a bare scalar value directly on the store: line did not refuse: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12 stress: --apply deleted E01-F01-builder despite a store: line whose own value is a scalar, not a resolvable mapping"
+  pass "R12 stress test_store_scalar_value_refuses"
+}
+
+# ── R12 stress: deeply nested flow-style value refuses ────────────────────────────
+test_deeply_nested_flow_refuses() {
+  make_fixture r12-deep-flow
+  write_config 'store: {tasks: {nested: obsidian}}
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12 stress: a deeply nested flow-style store: value did not refuse: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12 stress: --apply deleted E01-F01-builder despite a deeply nested flow-style store: value"
+  pass "R12 stress test_deeply_nested_flow_refuses"
+}
+
+# ── R12 stress: a 'tasks:' key repeated at multiple indentation levels in different
+# blocks resolves correctly (store's own block genuinely omits tasks:, so it must
+# default to local rather than picking up a same-named key from an unrelated block).
+test_tasks_key_at_multiple_levels_resolves_correctly() {
+  make_fixture r12-multi-level-tasks
+  write_config 'store:
+  docs: local
+other:
+  tasks: obsidian
+  nested:
+    tasks: jira
+tasks: attop
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 stress: a 'tasks:' key repeated at multiple indentation levels made the store's own (tasks-less) block unresolvable: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 stress: the store: block (which genuinely omits tasks:) did not default to local despite unrelated 'tasks:' keys elsewhere: $OUT"
+  pass "R12 stress test_tasks_key_at_multiple_levels_resolves_correctly"
+}
+
+# ── R12 stress: 'store:' appearing only inside a comment resolves correctly ──────
+test_store_mentioned_only_in_comment_resolves_correctly() {
+  make_fixture r12-store-in-comment
+  write_config '# store:
+#   tasks: obsidian
+other: value
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 stress: a 'store:' key mentioned only inside a comment was treated as a real store: block: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 stress: a commented-out store: mention did not default to local: $OUT"
+  pass "R12 stress test_store_mentioned_only_in_comment_resolves_correctly"
+}
+
+# ── R12 stress: trailing/leading whitespace variations do not confuse the parser ──
+test_whitespace_variations_resolve_correctly() {
+  make_fixture r12-whitespace
+  printf 'store:   \n  tasks:   jira   \n' > "$PRIMARY/harness.config.yaml"
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12 stress: trailing whitespace around store:/tasks: lines did not refuse the correctly-resolved non-local (jira) backend: $OUT"
+  printf '%s\n' "$OUT" | grep -qiE 'unsupported TaskStore backend.*jira' \
+    || fail "R12 stress: trailing/leading whitespace prevented correctly identifying the jira backend: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12 stress: --apply deleted E01-F01-builder despite a whitespace-padded non-local store: block"
+  pass "R12 stress test_whitespace_variations_resolve_correctly"
+}
+
+# ── R12 stress: a store: block indented under a key that already has a scalar
+# value (invalid nesting) refuses rather than silently treating store: as absent ──
+test_store_indented_under_scalar_valued_key_refuses() {
+  make_fixture r12-invalid-nesting
+  write_config 'foo: bar
+    store:
+      tasks: obsidian
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12 stress: a store: block indented under a key that already carries a scalar value did not refuse: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12 stress: --apply deleted E01-F01-builder despite an invalidly-nested store: block whose real backend is unknown"
+  pass "R12 stress test_store_indented_under_scalar_valued_key_refuses"
+}
+
 # ── R13 ─────────────────────────────────────────────────────────────────────────────
 test_remove_failure_reported_and_exits_nonzero() {
   if ! modes_bind_this_uid; then
@@ -673,6 +851,15 @@ test_single_quoted_top_level_key_block_style_refuses
 test_quoted_nested_tasks_key_block_style_refuses
 test_quoted_key_and_quoted_value_combination_refuses
 test_quoted_top_level_key_explicit_local_scans_normally
+test_whole_document_flow_mapping_refuses
+test_multi_document_separator_refuses
+test_anchor_on_store_key_refuses
+test_store_scalar_value_refuses
+test_deeply_nested_flow_refuses
+test_tasks_key_at_multiple_levels_resolves_correctly
+test_store_mentioned_only_in_comment_resolves_correctly
+test_whitespace_variations_resolve_correctly
+test_store_indented_under_scalar_valued_key_refuses
 test_remove_failure_reported_and_exits_nonzero
 
 echo "all sweep-scratch tests passed"

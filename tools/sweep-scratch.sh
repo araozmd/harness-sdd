@@ -135,15 +135,29 @@ resolve_repository
 # own harness.config.yaml sets `store.tasks: local`), so refuse outright for any other
 # configured backend instead: fail closed, exit non-zero, touch nothing.
 _cfg_store_tasks() { # _cfg_store_tasks <file> — echoes store.tasks; empty output
-  # (exit 0) means store.tasks is genuinely absent: no top-level `store:` key
-  # anywhere in the file at all, or a `store:` block that is present but omits
-  # `tasks:` — the caller may default that to `local`. A non-zero exit means a
-  # `store:` block IS present but this parser cannot confidently extract its
-  # `tasks:` scalar from the shape it is written in (regardless of WHY: flow vs.
-  # block style, indentation, a non-mapping value on the `store:` line itself,
-  # or anything else this minimal parser does not recognize) — the caller must
-  # fail closed on that, NOT default to local, because an empty parse result
-  # there would mean "couldn't read it", not "the key is absent".
+  # (exit 0) means store.tasks is genuinely absent: the document matches the ONE
+  # canonical shape this parser accepts (see validate_canonical_shape below) and
+  # has no top-level `store:` key at all, or a `store:` block present but omitting
+  # `tasks:` — the caller may default that to `local`. A non-zero exit means one
+  # of two DISTINCT refusal cases, both "cannot confidently resolve, so fail
+  # closed, NOT default to local":
+  #   1. the document does not match the one recognized shape AT ALL (a flow-style
+  #      mapping/sequence anywhere — top-level or nested, a multi-document
+  #      `---`/`...` marker, an anchor/alias, or any other structural surprise).
+  #      This is checked BEFORE any key search, so a whole-document wrapper the
+  #      key search would otherwise walk right past — e.g.
+  #      `{store: {tasks: obsidian, docs: local}}`, whose first "key" tokenizes
+  #      as the single fused string `{store` and so never matches `store` — can
+  #      never be silently read as "store: absent" (Codex #4128053695, round 5).
+  #   2. the document IS the recognized shape, but a `store:` block present in
+  #      it still cannot be resolved to a `tasks:` scalar (e.g. `store: local` —
+  #      the store: line's own value is a bare scalar, not a mapping).
+  # Four straight rounds (block-only baseline -> flow-style value -> indented
+  # block -> quoted keys) each added one more "and also accept this shape too"
+  # branch to the key search itself. Round 5 stops that: the shape validator
+  # below is the ONLY gate, checked once, up front, and is not aware of `store`
+  # or `tasks` as key names at all — it is a generic block-YAML-nesting check,
+  # not one more special case.
   python3 - "$1" <<'PYEOF'
 import re
 import sys
@@ -180,12 +194,10 @@ _KEY_VALUE_RE = re.compile(
 def split_key_value(text):
     # THE ONE tokenizer for "<key>: <value-or-nothing>", where <key> is a bare
     # token OR a single- or double-quoted string (quotes stripped here, so the
-    # caller never sees them) — independent of indentation depth or whether
-    # `text` is a whole line or one `,`-split fragment of a flow-style `{...}`
-    # mapping. Returns (key, rest-of-text-after-the-colon), or None when `text`
-    # does not start with a recognized key token followed by ':' at all (e.g. a
-    # list item, a continuation line, or anything else that is not a mapping
-    # entry) — the caller decides what "not a key: value line" means for it.
+    # caller never sees them) — independent of indentation depth. Returns
+    # (key, rest-of-text-after-the-colon), or None when `text` does not start
+    # with a recognized key token followed by ':' at all (e.g. a list item, a
+    # continuation line, or anything else that is not a mapping entry).
     m = _KEY_VALUE_RE.match(text)
     if not m:
         return None
@@ -193,6 +205,86 @@ def split_key_value(text):
     if key is None:
         key = m.group(3)
     return key, m.group(4)
+
+
+# Structural characters that disqualify a SCOPE outright, wherever within that
+# scope they appear outside quotes: flow-mapping/-sequence delimiters, and the
+# anchor/alias sigils YAML uses for `&name` / `*name` (a merge key's own alias
+# reference is always one of these, so no separate `<<` check is needed). Which
+# scope this applies to matters: harness.config.yaml legitimately uses `[]` for
+# empty lists under UNRELATED top-level keys elsewhere in the very same file
+# (e.g. `fix_lane.shared_paths: []`) — this reader has no business rejecting
+# the whole document over a shape in a section it never reads — so this set is
+# only ever checked against (a) the document's own top-level lines, and (b) the
+# `store:` key's own line plus its nested block, never the rest of the document.
+_DISQUALIFYING_CHARS = frozenset("{}[]&*")
+
+
+def _contains_unquoted(text, chars):
+    in_squote = in_dquote = False
+    for ch in text:
+        if ch == "'" and not in_dquote:
+            in_squote = not in_squote
+        elif ch == '"' and not in_squote:
+            in_dquote = not in_dquote
+        elif ch in chars and not in_squote and not in_dquote:
+            return True
+    return False
+
+
+def _is_document_marker(stripped):
+    # YAML multi-document separator/end markers. This reader supports exactly
+    # ONE document; any of these disqualify the whole file, wherever they are —
+    # there is no legitimate top-level or nested `key:` line that is literally
+    # bare `---`/`...`, so checking the whole document has no false-positive risk.
+    return stripped in ("---", "...") or stripped.startswith(("--- ", "---\t", "... ", "...\t"))
+
+
+def validate_canonical_shape(entries):
+    # The ONE document shape this parser accepts: a plain block-style mapping —
+    # `key:` lines at one consistent top-level indentation, none of them a flow
+    # mapping/sequence — whose values are each either absent, an inline scalar,
+    # or a further-indented plain block-style nested mapping (never a line
+    # indented under a key that already carries an inline scalar value). This
+    # is deliberately generic: it never names `store` or `tasks`, and it never
+    # inspects content NESTED under an unrelated top-level key, so a `[]` or
+    # similar flow value two sections away from `store:` (this repo's own
+    # harness.config.yaml has several) can never make an otherwise-canonical
+    # document refuse. Returns None when `entries` matches; otherwise a short
+    # reason string (the caller only needs "it didn't match", but a reason
+    # keeps this auditable).
+    if not entries:
+        return None  # a genuinely empty document is the canonical empty shape
+
+    for _, stripped in entries:
+        if _is_document_marker(stripped):
+            return "multi-document YAML ('---'/'...' marker) is not supported"
+
+    base_indent = entries[0][0]
+    for indent, stripped in entries:
+        if indent == base_indent and _contains_unquoted(stripped, _DISQUALIFYING_CHARS):
+            return "a top-level flow-style mapping/sequence or anchor/alias is not supported"
+
+    # A virtual root block, always open, at an indent strictly below every real
+    # entry — so top-level entries are always valid children of it. Each stack
+    # frame is (indent, is_open): "open" means that entry's own inline value
+    # was empty, i.e. it is a block-mapping key that may legitimately have
+    # further-indented children.
+    stack = [(base_indent - 1, True)]
+    for indent, stripped in entries:
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        if not stack:
+            return "a line indented below every open block"
+        _, parent_open = stack[-1]
+        if not parent_open:
+            return "a line indented under a key that already has an inline scalar value"
+        kv = split_key_value(stripped)
+        if kv is None:
+            return "a line that is not a recognized 'key:' mapping entry"
+        _, rest = kv
+        stack.append((indent, rest.strip() == ""))
+    return None
 
 
 def parse_store_tasks(path):
@@ -213,13 +305,17 @@ def parse_store_tasks(path):
         indent = len(content) - len(content.lstrip(" \t"))
         entries.append((indent, stripped))
 
+    if validate_canonical_shape(entries) is not None:
+        return (None, 1)
+
     if not entries:
         return ("", 0)
 
-    # The document's own top-level keys must all share ONE consistent
-    # indentation, whatever it is — this is what lets a uniformly-indented
-    # file (the whole top-level mapping written at, say, 2-space indent) still
-    # be recognized as "top-level", the same shape a real YAML reader accepts.
+    # The shape validator above already guarantees every entry at this
+    # indentation is a recognized `key:` line, and that indentation is
+    # consistent for the whole document — so no further "is this ambiguous?"
+    # fallback is needed here; an unresolved `store:`-looking key at some OTHER
+    # indentation is now structurally impossible to have slipped through.
     base_indent = entries[0][0]
 
     store_idx = None
@@ -227,45 +323,25 @@ def parse_store_tasks(path):
     for idx, (indent, stripped) in enumerate(entries):
         if indent != base_indent:
             continue
-        kv = split_key_value(stripped)
-        if kv is None:
-            continue
-        key, rest = kv
+        key, rest = split_key_value(stripped)
         if key == "store":
             store_idx = idx
             store_rest = rest.strip()
             break
 
     if store_idx is None:
-        # No top-level `store:` key. A `store:`-looking key (bare or quoted) at
-        # some OTHER indentation is ambiguous — it might be the document's real
-        # top level mismatched against our indentation assumption, or a nested
-        # key that only looks similar — so fail closed rather than guess; only
-        # the complete absence of any `store:`-looking key anywhere defaults to
-        # `local`.
-        for indent, stripped in entries:
-            kv = split_key_value(stripped)
-            if kv is not None and kv[0] == "store":
-                return (None, 1)
-        return ("", 0)
+        return ("", 0)  # no top-level `store:` key anywhere — tasks absent
 
-    if store_rest.startswith("{"):
-        if not store_rest.endswith("}"):
-            return (None, 1)  # multi-line flow mapping — out of scope
-        tasks_val = None
-        for part in store_rest[1:-1].split(","):
-            part = part.strip()
-            if not part:
-                continue
-            kv = split_key_value(part)
-            if kv is None:
-                return (None, 1)
-            if kv[0] == "tasks":
-                tasks_val = unquote(kv[1])
-        return (tasks_val, 0) if tasks_val is not None else ("", 0)
+    if _contains_unquoted(store_rest, _DISQUALIFYING_CHARS):
+        return (None, 1)  # e.g. `store: {tasks: obsidian}` — a flow mapping
+        # right on the store: line itself is refused here explicitly rather
+        # than falling into the bare-scalar check below with a confusing
+        # "the whole {...} string looked like a scalar" reading.
 
     if store_rest != "":
-        return (None, 1)  # a scalar/other shape on the `store:` line itself
+        return (None, 1)  # a scalar (or anything else) on the `store:` line
+        # itself — reaching here (no disqualifying chars) means a bare
+        # non-mapping scalar, e.g. `store: local`.
 
     # Block style: the block's own direct lines are every subsequent entry
     # more indented than the top level, up to the first entry back at or
@@ -281,6 +357,16 @@ def parse_store_tasks(path):
     if not block:
         return ("", 0)  # `store:` present with no children — tasks absent
 
+    # The store: block is the ONE scope, besides the top level itself, where a
+    # flow-style mapping/sequence or anchor/alias is refused even though it is
+    # nested — this repo's harness.config.yaml uses `[]`/flow elsewhere in the
+    # document (outside store:), which is out of scope and left alone; only
+    # store's OWN block must be plain block-style, since its own `tasks:` value
+    # is what this reader must resolve to a scalar.
+    for _, block_stripped in block:
+        if _contains_unquoted(block_stripped, _DISQUALIFYING_CHARS):
+            return (None, 1)
+
     child_indent = min(indent for indent, _ in block)
     tasks_line = None
     for indent, stripped in block:
@@ -293,8 +379,9 @@ def parse_store_tasks(path):
 
     if tasks_line is None:
         return ("", 0)  # `tasks:` genuinely absent from the `store:` block
-    if tasks_line == "" or tasks_line[0] in "{[":
-        return (None, 1)  # no inline scalar to confidently extract
+    if tasks_line == "":
+        return (None, 1)  # `tasks:` present but with no inline scalar (e.g.
+        # its own nested block) — flow was already ruled out for this block above.
     return (unquote(tasks_line), 0)
 
 
