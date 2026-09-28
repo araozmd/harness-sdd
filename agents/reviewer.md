@@ -113,6 +113,14 @@ saying "it works" means nothing until you prove it. AI-generated code is often
      confirmed healthy** — re-read the free space, repair the machine, and run it again.
      **A mass-failure run is never evidence**; it is an aborted run, and it is reported as
      one.
+   - **(3f) Never remove your own scratch directory.** A campaign writes its scratch under
+     `scratchpad/<feature-id>-reviewer/` per (3d); it never removes that directory itself —
+     not at hand-off, not on cleanup, not ever. Removal happens only through the sweep,
+     `tools/sweep-scratch.sh`, and only once the owning feature's TaskStore status reaches
+     `done` (see `agents/orchestrator.md`'s "Writing `done`" sweep hook). The sweep is a
+     fail-closed backstop, never a convenience your own judgment substitutes for: it leaves a
+     directory untouched whenever it cannot establish `done` from the TaskStore, and
+     self-removal by the role that wrote it would defeat that fail-closed contract outright.
 4. **Conventions.** Architecture and style match `specs/product.md` and the
    `.plan.md`. Nothing on the "DO NOT TOUCH" list was changed.
 5. **Cross-file consistency.** Tests passing proves nothing about a contradiction

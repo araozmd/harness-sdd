@@ -4,6 +4,36 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.89.0] — 2026-09-28
+
+### Added — automated scratch-dir sweep + role hand-off rules (E34-F01)
+
+- **New `tools/sweep-scratch.sh`.** Scans `scratchpad/`, dry-run by default (report
+  only), mutates only with an explicit `--apply` flag. Classifies each immediate entry by
+  its leading `<feature-id>-<remainder>` name; an entry whose name does not match is
+  `unrecognized` and is never acted on. Liveness is the local TaskStore's feature
+  `status`, read **once per run before any entry is classified**: a read/parse failure of
+  the TaskStore aborts the whole scan before anything is classified or removed and exits
+  non-zero — a distinct outcome from a per-entry skip. An entry whose feature id is not
+  found, or whose status is anything other than `done`, is skipped with the specific
+  reason and never removed, in every mode, and never flips the exit code. Before any
+  removal, the entry's resolved real path must be a direct child of the resolved
+  `scratchpad/` real path — a symlink escaping it is skipped and reported as an anomaly,
+  never deleted through. Accepts an optional single feature-id argument to scope the scan;
+  prints one line per classified entry (`removed` / `eligible` / `skipped: <reason>` /
+  `unrecognized`) plus a final summary of counts per verdict and total bytes reclaimed.
+- **Orchestrator hook.** `agents/orchestrator.md`'s "Writing `done`" step now invokes the
+  sweep scoped to the just-landed feature id with `--apply`, immediately after
+  `set-status <id> done`, best-effort: a non-zero sweep exit is recorded but never blocks
+  or reverses the `done` write.
+- **Role hand-off contract.** `agents/builder.md`, `agents/reviewer.md` (new check `(3f)`),
+  `agents/fixer.md`, and `agents/pr-fixer.md` now each state that a role never removes its
+  own namespaced `scratchpad/<feature-id>-<role>/` directory itself — removal happens only
+  through the sweep, once the owning feature reaches `done`.
+- Ships executable in both the source (`tools/sweep-scratch.sh`) and installed
+  (`.harness/tools/sweep-scratch.sh`) layouts; added to `test_source_scripts_are_executable`'s
+  required set.
+
 ## [0.88.0] — 2026-09-26
 
 ### Added — the reporting rule + `/sdd-report`: reporting goes live (E32-F03)

@@ -287,6 +287,12 @@ The order on the main path is therefore:
    exactly that format — the project's entrypoints (`AGENTS.md`, `CLAUDE.md`) document it,
    and the check prints it when it fails. Free text around it is fine; only the fixed line
    closes the feature.
+5. **Sweep the feature's scratch, best-effort.** Immediately after step 4's
+   `set-status <id> done --evidence <merge-commit>` write, invoke the scratch sweep scoped
+   to that feature id, with `--apply`: `sh tools/sweep-scratch.sh <id> --apply` (installed
+   layout: `sh .harness/tools/sweep-scratch.sh <id> --apply`). This is best-effort: a
+   non-zero sweep exit is recorded (e.g. beside the `progress/history.md` round line) but
+   never blocks the loop and never reverts or reopens the `done` write step 4 already made.
 
 ⚠️ **Between (1) and (3) the board has no state that means "approved, awaiting merge".**
 Measured: a feature left `in-review` is *not* inert — `tools/next-task.mjs` routes

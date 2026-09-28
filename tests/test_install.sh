@@ -201,7 +201,7 @@ _SSE_EOF
   # check runs in both directions, editing either side alone also reds: a member removed
   # from the expected list shows up as unexpected-derived, one removed from the derivation
   # shows up as missing. That is what keeps the set from rotting silently.
-  _sse_expected=".github/scripts/feedback-labeler.sh harness-install.sh init.sh tools/builder-role.sh tools/change-size.sh tools/fix-worktree.sh tools/harness-owned-paths.sh tools/harness-report.sh tools/opencode-model-helper.sh tools/pr-gate.sh tools/pr-round-trend.sh tools/run-tests.sh tools/wait-for-codex.sh"
+  _sse_expected=".github/scripts/feedback-labeler.sh harness-install.sh init.sh tools/builder-role.sh tools/change-size.sh tools/fix-worktree.sh tools/harness-owned-paths.sh tools/harness-report.sh tools/opencode-model-helper.sh tools/pr-gate.sh tools/pr-round-trend.sh tools/run-tests.sh tools/sweep-scratch.sh tools/wait-for-codex.sh"
 
   _sse_unexpected=""
   for _sse_f in $_sse_seen; do
@@ -534,6 +534,13 @@ test_fix_worktree_helper_installed_executable() {
     fail "installed tools/fix-worktree.sh is missing or not executable"
 }
 
+# E34-F01 R11: the scratch sweep must ship in the body AND be executable in the
+# installed layout — mirroring the fix-worktree assertion just above.
+test_sweep_scratch_helper_installed_executable() {
+  [ -x "$T/.harness/tools/sweep-scratch.sh" ] ||
+    fail "installed tools/sweep-scratch.sh is missing or not executable"
+}
+
 # E99: the deterministic pr-loop gate and the concurrent suite runner must ship in the
 # body AND be executable. Both are wired the same way every other tools/ helper is —
 # `copy tools` plus an explicit chmod — and the chmod line is asserted here, not just the
@@ -694,6 +701,7 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "installer exited non-zero"
 [ -f "$T/.harness/tools/tasks-lock.py" ] || fail "tools/tasks-lock.py not installed (board write lock would be missing in consumers)" # R10
 [ -x "$T/.harness/tools/tasks-lock.py" ] || fail "installed tools/tasks-lock.py is not executable (board write lock not runnable)"     # R10
 test_fix_worktree_helper_installed_executable
+test_sweep_scratch_helper_installed_executable
 test_dependency_diagnostics_installed_contract
 test_next_task_installed_contract
 test_rationale_docs_installed_contract
