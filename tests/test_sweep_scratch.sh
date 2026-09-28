@@ -524,6 +524,100 @@ other:
   pass "R12 test_tasks_key_in_other_top_level_block_not_mistaken"
 }
 
+# ── R12: DOUBLE-quoted top-level 'store:' key, flow-style value — round-4 repro ───
+# Codex's exact reproduction: a quoted top-level key hid the store: block from the
+# matcher entirely, so it defaulted to local and let --apply delete a done-in-name
+# scratch dir whose real backend was obsidian.
+test_double_quoted_top_level_key_flow_style_refuses() {
+  make_fixture r12-dquote-top-flow
+  write_config '"store": {"tasks": obsidian, "docs": local}
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: a double-quoted top-level 'store:' key with a flow-style non-local value did not refuse: $OUT"
+  printf '%s\n' "$OUT" | grep -qiE 'unsupported TaskStore backend.*obsidian' \
+    || fail "R12: the refusal does not name the obsidian backend for a double-quoted top-level key: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply deleted E01-F01-builder despite a double-quoted top-level store: key selecting a non-local backend — the exact round-4 repro"
+  pass "R12 test_double_quoted_top_level_key_flow_style_refuses"
+}
+
+# ── R12: SINGLE-quoted top-level 'store:' key, block-style value ──────────────────
+test_single_quoted_top_level_key_block_style_refuses() {
+  make_fixture r12-squote-top-block
+  write_config "'store':
+  tasks: jira
+"
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: a single-quoted top-level 'store:' key with a block-style non-local value did not refuse: $OUT"
+  printf '%s\n' "$OUT" | grep -qiE 'unsupported TaskStore backend.*jira' \
+    || fail "R12: the refusal does not name the jira backend for a single-quoted top-level key: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply deleted E01-F01-builder despite a single-quoted top-level store: key selecting a non-local backend"
+  pass "R12 test_single_quoted_top_level_key_block_style_refuses"
+}
+
+# ── R12: bare top-level 'store:' key, QUOTED nested 'tasks:' key (block-style) ────
+test_quoted_nested_tasks_key_block_style_refuses() {
+  make_fixture r12-quoted-nested-block
+  write_config 'store:
+  "tasks": obsidian
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: a quoted nested 'tasks:' key (block-style) with a non-local value did not refuse: $OUT"
+  printf '%s\n' "$OUT" | grep -qiE 'unsupported TaskStore backend.*obsidian' \
+    || fail "R12: the refusal does not name the obsidian backend for a quoted nested tasks: key: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply deleted E01-F01-builder despite a quoted nested tasks: key selecting a non-local backend"
+  pass "R12 test_quoted_nested_tasks_key_block_style_refuses"
+}
+
+# ── R12: quoted top-level key + quoted nested key + quoted value, all at once ─────
+test_quoted_key_and_quoted_value_combination_refuses() {
+  make_fixture r12-quoted-key-and-value
+  write_config '"store":
+  "tasks": "obsidian"
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: a quoted top-level key + quoted nested key + quoted value did not refuse: $OUT"
+  printf '%s\n' "$OUT" | grep -qiE 'unsupported TaskStore backend.*obsidian' \
+    || fail "R12: the refusal does not name the obsidian backend for the quoted key + quoted value combination: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply deleted E01-F01-builder despite a fully-quoted key/value store: shape selecting a non-local backend"
+  pass "R12 test_quoted_key_and_quoted_value_combination_refuses"
+}
+
+# ── R12: quoted top-level key, explicit 'local' value still scans normally ────────
+test_quoted_top_level_key_explicit_local_scans_normally() {
+  make_fixture r12-quoted-top-local
+  write_config '"store":
+  tasks: local
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] || fail "R12: a quoted top-level 'store:' key with explicit 'tasks: local' was refused: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12: a quoted top-level 'store:' key with explicit 'tasks: local' did not scan/remove normally: $OUT"
+  pass "R12 test_quoted_top_level_key_explicit_local_scans_normally"
+}
+
 # ── R13 ─────────────────────────────────────────────────────────────────────────────
 test_remove_failure_reported_and_exits_nonzero() {
   if ! modes_bind_this_uid; then
@@ -574,6 +668,11 @@ test_block_style_non_local_jira_refuses
 test_indented_top_level_block_non_local_refuses
 test_tab_indented_block_non_local_refuses
 test_tasks_key_in_other_top_level_block_not_mistaken
+test_double_quoted_top_level_key_flow_style_refuses
+test_single_quoted_top_level_key_block_style_refuses
+test_quoted_nested_tasks_key_block_style_refuses
+test_quoted_key_and_quoted_value_combination_refuses
+test_quoted_top_level_key_explicit_local_scans_normally
 test_remove_failure_reported_and_exits_nonzero
 
 echo "all sweep-scratch tests passed"

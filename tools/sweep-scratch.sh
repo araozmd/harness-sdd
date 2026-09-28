@@ -172,6 +172,29 @@ def unquote(v):
     return v
 
 
+_KEY_VALUE_RE = re.compile(
+    r'^(?:"((?:[^"\\]|\\.)*)"|\'([^\']*)\'|([^\s:\'"]+))\s*:(.*)$'
+)
+
+
+def split_key_value(text):
+    # THE ONE tokenizer for "<key>: <value-or-nothing>", where <key> is a bare
+    # token OR a single- or double-quoted string (quotes stripped here, so the
+    # caller never sees them) — independent of indentation depth or whether
+    # `text` is a whole line or one `,`-split fragment of a flow-style `{...}`
+    # mapping. Returns (key, rest-of-text-after-the-colon), or None when `text`
+    # does not start with a recognized key token followed by ':' at all (e.g. a
+    # list item, a continuation line, or anything else that is not a mapping
+    # entry) — the caller decides what "not a key: value line" means for it.
+    m = _KEY_VALUE_RE.match(text)
+    if not m:
+        return None
+    key = m.group(1) if m.group(1) is not None else m.group(2)
+    if key is None:
+        key = m.group(3)
+    return key, m.group(4)
+
+
 def parse_store_tasks(path):
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -202,20 +225,27 @@ def parse_store_tasks(path):
     store_idx = None
     store_rest = ""
     for idx, (indent, stripped) in enumerate(entries):
-        if indent == base_indent and re.match(r"^store:(\s|$|\{)", stripped):
+        if indent != base_indent:
+            continue
+        kv = split_key_value(stripped)
+        if kv is None:
+            continue
+        key, rest = kv
+        if key == "store":
             store_idx = idx
-            store_rest = stripped[len("store:"):].strip()
+            store_rest = rest.strip()
             break
 
     if store_idx is None:
-        # No top-level `store:` key. A `store:`-looking key at some OTHER
-        # indentation is ambiguous — it might be the document's real top level
-        # mismatched against our indentation assumption, or a nested key that
-        # only looks similar — so fail closed rather than guess; only the
-        # complete absence of any `store:`-looking line anywhere defaults to
+        # No top-level `store:` key. A `store:`-looking key (bare or quoted) at
+        # some OTHER indentation is ambiguous — it might be the document's real
+        # top level mismatched against our indentation assumption, or a nested
+        # key that only looks similar — so fail closed rather than guess; only
+        # the complete absence of any `store:`-looking key anywhere defaults to
         # `local`.
         for indent, stripped in entries:
-            if re.match(r"^store:(\s|$|\{)", stripped):
+            kv = split_key_value(stripped)
+            if kv is not None and kv[0] == "store":
                 return (None, 1)
         return ("", 0)
 
@@ -227,10 +257,10 @@ def parse_store_tasks(path):
             part = part.strip()
             if not part:
                 continue
-            kv = part.split(":", 1)
-            if len(kv) != 2:
+            kv = split_key_value(part)
+            if kv is None:
                 return (None, 1)
-            if kv[0].strip() == "tasks":
+            if kv[0] == "tasks":
                 tasks_val = unquote(kv[1])
         return (tasks_val, 0) if tasks_val is not None else ("", 0)
 
@@ -254,8 +284,11 @@ def parse_store_tasks(path):
     child_indent = min(indent for indent, _ in block)
     tasks_line = None
     for indent, stripped in block:
-        if indent == child_indent and re.match(r"^tasks:", stripped):
-            tasks_line = stripped[len("tasks:"):].strip()
+        if indent != child_indent:
+            continue
+        kv = split_key_value(stripped)
+        if kv is not None and kv[0] == "tasks":
+            tasks_line = kv[1].strip()
             break
 
     if tasks_line is None:
