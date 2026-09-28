@@ -9,7 +9,7 @@
 # so this also doubles as a check that the tool runs under whatever `sh` resolves to
 # on this host, consistent with every other suite tools/run-tests.sh selects.
 #
-# R-id coverage: R1-R8, R12 of E34-F01.spec.md, per E34-F01.tests.md's traceability table.
+# R-id coverage: R1-R8, R12, R13 of E34-F01.spec.md, per E34-F01.tests.md's traceability table.
 
 set -eu
 
@@ -88,6 +88,26 @@ run_sweep() {
   OUT="$(cd "$PRIMARY" && ./tools/sweep-scratch.sh "$@" 2>&1)"
   RC=$?
   set -e
+}
+
+# modes_bind_this_uid — true when THIS user is actually constrained by directory mode
+# bits. A BEHAVIOURAL PROBE, deliberately not `id -u`: root never gets a real filesystem
+# refusal from `chmod 0555`, so the R13 fixture below (which NEEDS `rm -rf` to actually
+# fail) would run mistakenly as root and prove nothing. Mirrors
+# tests/test_umbrella.sh's own `modes_bind_this_uid` probe (Codex #3805383759) rather than
+# re-deriving a second, divergent copy of the same idiom.
+modes_bind_this_uid() {
+  _mbu="$TMP_ROOT/.mode-probe.$$"
+  rm -rf "$_mbu" 2>/dev/null || :
+  mkdir -p "$_mbu/ro" || return 1
+  : > "$_mbu/ro/f" || return 1
+  chmod 0555 "$_mbu/ro" || return 1
+  if rm -rf "$_mbu" 2>/dev/null; then
+    return 1
+  fi
+  chmod -R u+w "$_mbu" 2>/dev/null || :
+  rm -rf "$_mbu" 2>/dev/null || :
+  return 0
 }
 
 # has_verdict_line — true iff $OUT contains at least one PER-ENTRY verdict line, in the
@@ -359,6 +379,39 @@ test_unsupported_backend_refuses_before_touching_anything() {
   pass "R12 test_unsupported_backend_refuses_before_touching_anything"
 }
 
+# ── R13 ─────────────────────────────────────────────────────────────────────────────
+test_remove_failure_reported_and_exits_nonzero() {
+  if ! modes_bind_this_uid; then
+    echo "skip - R13 test_remove_failure_reported_and_exits_nonzero: mode bits do not bind this user (uid $(id -u)), so \`rm -rf\` cannot be made to fail here and this case cannot occur" >&2
+    return 0
+  fi
+
+  make_fixture r13
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"},{"id":"E01-F09","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+  scratch_dir E01-F09-reviewer
+  # E01-F01-builder sorts first (glob order) and is made unremovable: rm -rf cannot
+  # empty it (0555, contains a file it cannot unlink), so this exercises BOTH "a
+  # removal failure is reported and flips the exit code" and "the scan still
+  # continues to the entry after it" in one fixture.
+  chmod 0555 "$PRIMARY/scratchpad/E01-F01-builder"
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R13: an rm -rf failure on an eligible entry did not make --apply exit non-zero: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+skipped: remove-failed$' \
+    || fail "R13: the failed removal was not reported as skipped: remove-failed: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F09-reviewer[[:space:]]+removed$' \
+    || fail "R13: a later eligible entry was not still removed after an earlier removal failed — the scan must not stop early: $OUT"
+  printf '%s\n' "$OUT" | grep -q '^summary:' \
+    || fail "R13: no summary line was printed despite a removal failure: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R13: the entry rm -rf failed to remove no longer exists on disk"
+
+  chmod 0755 "$PRIMARY/scratchpad/E01-F01-builder" 2>/dev/null || :
+  pass "R13 test_remove_failure_reported_and_exits_nonzero"
+}
+
 test_default_is_dry_run_apply_mutates
 test_classifies_feature_id_prefix_skips_unrecognized
 test_done_feature_removed_on_apply_reported_dry_run
@@ -369,5 +422,6 @@ test_exit_code_reflects_tool_errors_only
 test_report_has_summary_verdicts_and_bytes_reclaimed
 test_scoped_vs_full_scan
 test_unsupported_backend_refuses_before_touching_anything
+test_remove_failure_reported_and_exits_nonzero
 
 echo "all sweep-scratch tests passed"

@@ -239,6 +239,11 @@ N_ELIGIBLE=0
 N_SKIPPED=0
 N_UNRECOGNIZED=0
 BYTES_RECLAIMED=0
+# R13: set the instant an `rm -rf` actually fails (permissions, read-only fs, I/O
+# error) on an otherwise-eligible entry — distinct from every other exit-code case,
+# and the ONLY thing that flips the final exit non-zero once classification has
+# begun (R7's tool-level errors abort before this point; a plain skip never sets it).
+ANY_REMOVE_FAILED=0
 
 if [ -n "$SCRATCHPAD_REAL" ]; then
   for _entry in "$SCRATCHPAD"/*; do
@@ -292,6 +297,7 @@ if [ -n "$SCRATCHPAD_REAL" ]; then
         echo "$_name	removed"
       else
         N_SKIPPED=$((N_SKIPPED + 1))
+        ANY_REMOVE_FAILED=1
         echo "$_name	skipped: remove-failed"
       fi
     else
@@ -302,4 +308,8 @@ if [ -n "$SCRATCHPAD_REAL" ]; then
 fi
 
 echo "summary: total=$TOTAL removed=$N_REMOVED eligible=$N_ELIGIBLE skipped=$N_SKIPPED unrecognized=$N_UNRECOGNIZED bytes_reclaimed=$BYTES_RECLAIMED"
+# R13: the full summary always prints first; only the exit code reflects a removal
+# failure, and only when at least one occurred — every other case (dry-run, a clean
+# --apply run, or --apply with only classification skips) still exits 0.
+[ "$ANY_REMOVE_FAILED" -eq 0 ] || exit 1
 exit 0
