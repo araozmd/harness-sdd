@@ -346,7 +346,15 @@ Append a terminal or recoverable result for every selected fix and retain all
 `cap-deferred` entries. After every worker settles, serialize the supplied transition
 records into `progress/history.md`, then run one locked finalizer: set only fixes whose
 worker reported `merge-observed` to `done`, and preserve every recoverable failure at
-its last legitimate state. Commit the complete final board/history truth on the
+its last legitimate state. Immediately after the finalizer sets a fix to `done`, invoke
+the scratch sweep scoped to that fix's id, with `--apply`, once per finalized fix:
+`sh tools/sweep-scratch.sh <id> --apply` (installed layout:
+`sh .harness/tools/sweep-scratch.sh <id> --apply`) — this lane writes `done` itself and
+never reaches the Orchestrator main-path "Writing `done`" sweep hook
+(`agents/orchestrator.md`), so the finalizer must invoke the sweep directly, one call per
+finalized fix id when several finalize in the same pass. This is best-effort: a non-zero
+sweep exit is recorded but never blocks the finalizer and never reverts or reopens the
+`done` write. Commit the complete final board/history truth on the
 bookkeeping branch, push it, create/update its coordinator-owned bookkeeping PR, and
 require that PR's observed merge before cleanup. This PR contains shared bookkeeping
 only; it does not bypass a fix's local Reviewer or replace a per-fix code PR.
