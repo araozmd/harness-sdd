@@ -14,7 +14,7 @@ layer their config, so *personal* settings have a separate home. The rule is jus
 
 | Layer | Lives in | Scope | VCS |
 |---|---|---|---|
-| **Project** | `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` (incl. the `harness:begin..end` block), `.harness/` | facts true for everyone on the project: architecture, conventions, the harness entrypoint | **committed** (shared) |
+| **Project** | `CLAUDE.md` / `AGENTS.md` (incl. the `harness:begin..end` block), `.harness/` | facts true for everyone on the project: architecture, conventions, the harness entrypoint | **committed** (shared) |
 | **Personal** | `.claude/settings.local.json`, `.claude/scheduled_tasks.lock`, `.claude/worktrees/`, `AGENTS.local.md`, `CLAUDE.local.md`, `AGENTS.override.md` | one developer's permissions, model pick, local hooks, runtime locks, isolated fix checkouts, and personal prompt guidance | **gitignored** (never shared) |
 | **User-global** | `~/.claude/CLAUDE.md`, your global agent settings | prompt/model preferences that follow *you* across every project | not in any project repo |
 
@@ -63,7 +63,7 @@ personal prompt layer, not project facts.
 
 Use local prompt files only for personal, additive guidance: local house style, temporary
 debug notes, shortcuts, or preferences that should not become shared project instructions.
-Committed project instructions in `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, and
+Committed project instructions in `CLAUDE.md`, `AGENTS.md`, and
 `.harness/AGENTS.md` remain authoritative when they conflict with a personal prompt file.
 
 The portable convention is `AGENTS.local.md` at the repository root. Generated entrypoint

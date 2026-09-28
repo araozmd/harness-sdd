@@ -6,7 +6,7 @@ The model is the engine (or the horse); the harness is the chassis (or the reins
 
 **The core bet:** models and runtimes change, while repository-owned intent and
 evidence can remain portable. Files you own let this project support Claude Code
-(primary), Codex (second), and OpenCode (third) without adopting one vendor wrapper.
+(primary), Codex (second), OpenCode (third), and Antigravity without adopting one vendor wrapper.
 Read the deeper [rationale and deletion ledger](RATIONALE.md) for the limits of
 that claim, the distinction between current-model compensation and durable process
 value, and the evidence required before removing a mechanism.
@@ -44,13 +44,14 @@ value, and the evidence required before removing a mechanism.
 ## The commands this harness ships
 
 For selected front ends and enabled gates, canonical command bodies are emitted
-into `.claude/commands/` and `.opencode/command/`. Codex and OpenCode both read the
-shared repository-local skills under `.agents/skills/<name>/SKILL.md` (ADR-0003),
-each with an explicit-only policy companion. Claude/OpenCode use the `/sdd-*` names
+into `.claude/commands/` and `.opencode/command/`. Codex, OpenCode, and Antigravity all
+read the shared repository-local skills under `.agents/skills/<name>/SKILL.md` (ADR-0003),
+each with an explicit-only policy companion. Claude/OpenCode/Antigravity use the `/sdd-*` names
 in the table; Codex invocation uses `$sdd-*`, for example `$sdd-new Add search` and
 `$sdd-next`. The shared adapter names both invocations; accompanying text supplies
-`$ARGUMENTS`. In Codex, `/skills` provides discovery. See
-[WORKFLOW.md](WORKFLOW.md).
+`$ARGUMENTS`. In Codex, `/skills` provides discovery. In Antigravity, `/sdd-*` slash commands
+are discovered natively and roles are leased dynamically via `define_subagent` / `invoke_subagent`.
+See [WORKFLOW.md](WORKFLOW.md).
 
 | Command | Role it runs | Gate |
 |---|---|---|
@@ -60,6 +61,7 @@ in the table; Codex invocation uses `$sdd-*`, for example `$sdd-new Add search` 
 | `/sdd-next` | Orchestrator — route and delegate the next actionable task | always |
 | `/sdd-fix "<desc>"` | Fixer — the lightweight `sdd:false` maintenance lane | always |
 | `/sdd-fix-parallel` | Fixer — bounded parallel batch of ready E99 fixes | OpenCode requires concurrency capability/override; runtime requires native concurrency and `in-session` Builder |
+| `/sdd-report` | Session owner — report a verified harness defect upstream | always (inert if feedback.enabled is false) |
 | `/sdd-pr-loop <pr>` | the Codex review cycle on one open PR (fresh `pr-fixer` role) | `pr_loop.enabled` (opt-in) |
 
 For a **new product**, the sequence starts at `/sdd-plan` (whole-project inception: vision,
@@ -95,7 +97,7 @@ harness source checkout, where no OpenCode command surface is installed, it is t
 `supported` to the marker directly after confirming native concurrent sub-agents, or to
 run the batch sequentially instead. Last-written stamps protect skill
 units and role files from selected-install overwrite and unsafe reclamation; the units
-are claimed by both Codex and OpenCode and reclaimed only when the last claimant is
+are claimed by Antigravity, Codex, and OpenCode and reclaimed only when the last claimant is
 deselected. Current installs never create global Codex prompts. Ungated legacy prompts
 remain because their cross-target ownership is unknowable; only ledger-proven,
 byte-pristine `sdd-pr-loop` is reclaimed.
@@ -105,9 +107,9 @@ separate per-role model choices. With inherited Codex models, combined source
 escalation is UNARMED; explicit Claude-only generation retains its prior verdict.
 See [self mode](INSTALL.md#self-mode----self-harness-developers-only).
 
-Gemini and Antigravity are retired integrations. Their historical records remain;
+Gemini CLI is a retired integration. Its historical records remain;
 upgrades remove only proven pristine old glue and preserve customized files with
-warnings. See [migration](INSTALL.md#retiring-gemini-and-antigravity).
+warnings. See [migration](INSTALL.md#retiring-gemini).
 
 ## Where the ideas come from
 
