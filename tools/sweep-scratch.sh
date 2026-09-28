@@ -134,10 +134,19 @@ resolve_repository
 # feature (E34-F01.spec.md scopes liveness to "TaskStore status `done`", and this repo's
 # own harness.config.yaml sets `store.tasks: local`), so refuse outright for any other
 # configured backend instead: fail closed, exit non-zero, touch nothing.
-_cfg_store_tasks() { # _cfg_store_tasks <file> — echoes store.tasks, or nothing if absent
+_cfg_store_tasks() { # _cfg_store_tasks <file> — echoes store.tasks; empty output means
+  # store.tasks is genuinely absent (no top-level `store:` block at all, or a
+  # block-style `store:` block that omits `tasks:`) — the caller may default that
+  # to `local`. A non-zero exit means a `store:` block IS present but not in the
+  # one block-style shape this parser understands (e.g. flow-style
+  # `store: {tasks: obsidian, docs: local}`, or any scalar/other unrecognized
+  # shape on the `store:` line itself) — the caller must fail closed on that, NOT
+  # default to local, because an empty parse result there means "couldn't read
+  # it", not "the key is absent".
   [ -f "$1" ] || return 0
   awk '
     /^store:[[:space:]]*(#.*)?$/ { in_store = 1; next }
+    /^store:/                    { exit 3 }
     /^[^[:space:]#]/             { in_store = 0 }
     in_store {
       line = $0
@@ -153,7 +162,9 @@ _cfg_store_tasks() { # _cfg_store_tasks <file> — echoes store.tasks, or nothin
   ' "$1"
 }
 
-STORE_TASKS="$(_cfg_store_tasks "$CONFIG" || :)"
+if ! STORE_TASKS="$(_cfg_store_tasks "$CONFIG")"; then
+  die "cannot parse the 'store:' block in $CONFIG — this tool only recognizes the block-style form ('store:' on its own line, then an indented 'tasks: <backend>'); refusing to guess whether the configured backend is local"
+fi
 STORE_TASKS="${STORE_TASKS:-local}"
 [ "$STORE_TASKS" = "local" ] ||
   die "unsupported TaskStore backend store.tasks: $STORE_TASKS — this tool only reads the 'local' backend ($BOARD); refusing to scan or mutate scratchpad/ for any other backend"

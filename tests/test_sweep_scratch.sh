@@ -379,6 +379,32 @@ test_unsupported_backend_refuses_before_touching_anything() {
   pass "R12 test_unsupported_backend_refuses_before_touching_anything"
 }
 
+# ── R12 (flow-style, unparseable) ──────────────────────────────────────────────────
+test_unparseable_flow_style_store_block_refuses() {
+  make_fixture r12-flow
+  write_config 'store: {tasks: obsidian, docs: local}
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep
+  [ "$RC" -ne 0 ] \
+    || fail "R12: a flow-style store: block that the parser cannot read did not exit non-zero: $OUT"
+  has_verdict_line \
+    && fail "R12: a per-entry verdict was printed despite an unparseable store: block — the scan must refuse BEFORE classifying anything: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: a scratch directory vanished on a dry (non --apply) run against an unparseable store: block"
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: --apply against an unparseable flow-style store: block did not exit non-zero: $OUT"
+  has_verdict_line \
+    && fail "R12: --apply against an unparseable store: block printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply removed a scratch directory despite an unparseable store: block that must have refused first — this is the exact 'obsidian mirror says done, real backend is not local' repro"
+  pass "R12 test_unparseable_flow_style_store_block_refuses"
+}
+
 # ── R13 ─────────────────────────────────────────────────────────────────────────────
 test_remove_failure_reported_and_exits_nonzero() {
   if ! modes_bind_this_uid; then
@@ -422,6 +448,7 @@ test_exit_code_reflects_tool_errors_only
 test_report_has_summary_verdicts_and_bytes_reclaimed
 test_scoped_vs_full_scan
 test_unsupported_backend_refuses_before_touching_anything
+test_unparseable_flow_style_store_block_refuses
 test_remove_failure_reported_and_exits_nonzero
 
 echo "all sweep-scratch tests passed"
