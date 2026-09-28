@@ -319,7 +319,7 @@ HARNESS_HOST_AGENT=codex ./harness-install.sh --agents=host /path/to/your-projec
 ```
 
 A supported explicit host wins over markers. An unknown value is warned about
-and ignored; explicit retired values `gemini` and `antigravity` are rejected
+and ignored; explicit retired value `gemini` is rejected
 before target writes. The declaration feeds host resolution rather than
 replacing an explicit supported CSV selection.
 
@@ -352,7 +352,7 @@ You can add or remove selections before confirming. Interactive upgrades start
 from the supported saved `.harness/.agents` selection, irrespective of the currently detected host.
 Fresh unattended installs with no override select Claude only; unattended
 upgrades preserve surviving saved keys. `--agents=all` explicitly selects all
-three. A legacy install without a selection file starts from `claude,opencode`.
+four. A legacy install without a selection file starts from `claude,opencode`.
 
 ### Seeing what it would do — `--print-agents`
 
@@ -1119,7 +1119,8 @@ personal/global config.
 | `--agents=codex` | Codex only |
 | `--agents=opencode` | OpenCode only |
 | `--agents=host` | Detected Claude, Codex or OpenCode; otherwise an error |
-| Retired selectors (`gemini`, `antigravity`) | Error before writes |
+| Unsupported source mode (`antigravity`) | Error before writes (`--self supports only claude,codex,opencode`) |
+| Retired selector (`gemini`) | Error before writes |
 
 CLI selection takes precedence over `HARNESS_AGENTS`. The source output includes
 `.claude/agents/`, `.claude/commands/`, `.codex/agents/`, Codex skill units with

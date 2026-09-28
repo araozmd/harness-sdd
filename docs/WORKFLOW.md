@@ -6,7 +6,7 @@ Supported front ends are Claude Code (primary), Codex (second), OpenCode
 (third), and Antigravity. This document uses canonical `/sdd-*` names for Claude,
 OpenCode, and Antigravity. In Codex, invoke `$sdd-new <intent>`, `$sdd-plan <intent>`,
 `$sdd-drill <epic-id>`, `$sdd-next`, `$sdd-fix <description>`, `$sdd-fix-parallel`,
-and gated `$sdd-pr-loop <pr>`. Text accompanying the explicit skill mention supplies
+`$sdd-report`, and gated `$sdd-pr-loop <pr>`. Text accompanying the explicit skill mention supplies
 `$ARGUMENTS`; `/skills` is the discovery UI. In Antigravity, skills are natively
 discovered from `.agents/skills/` as `/sdd-*` slash commands, and role handoffs use
 dynamic `define_subagent` with `agents/<role>.md` system prompts via `invoke_subagent`.
@@ -733,6 +733,28 @@ feature, its own PR against the default branch, its own review. That is the supp
 answer to a feature that exceeds the change-size budget, and it needs no machinery this
 document has to keep accurate. Git history preserves the removed lane if the decision is
 ever revisited.
+
+## Reporting harness defects (`/sdd-report`)
+
+When a verified harness defect occurs, `/sdd-report` (Codex: `$sdd-report`) reports it
+upstream. Reporting is strictly confined to four defect triggers:
+
+- **`harness-malfunction`** — a harness script (`init.sh`, `harness-install.sh`, `tools/*`,
+  or TaskStore locking/validation) fails while the project itself is healthy.
+- **`contradictory-instruction`** — role prompts or documentation conflict, or a gate
+  cannot be satisfied as written.
+- **`workaround`** — you had to depart from the documented workflow to finish.
+- **`missing-capability`** — a recurring situation has no path in the workflow.
+
+Failures of project code or tests, transient network/auth issues, and agent mistakes caught
+by harness gates are **not triggers and are never reported**.
+
+### Filing discipline
+
+- **When:** File when the task ends or when the session stops early (aborted, parked, or failed). Never file mid-flow.
+- **Who:** Only the **session-owning top-level role** (Orchestrator, Fixer, Inception, Planner, Driller) invokes `/sdd-report`. Sub-agents (Architect, Builder, Reviewer, Scout, Doc-critic, PR-fixer) **never** invoke the reporter directly; on a defect trigger, they append notes with `## <trigger>`, `symptom:`, `command:`, `phase:`, and `file:` to `progress/feedback/notes.md`.
+- **Session token:** The owning role mints and exports `HARNESS_FEEDBACK_SESSION_ID` once per session (derived from telemetry start timestamp or a UTC date token) and reuses it for every report.
+- **Privacy and bounds:** `tools/harness-report.sh` sends only allow-listed structured fields to GitHub. Free-form notes remain in the local gitignored `progress/feedback/` ledger. Reporting is capped per session (`feedback.max_per_session`, default 3) and obeys `feedback.enabled: false`.
 
 ## Context hygiene
 

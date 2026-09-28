@@ -13,7 +13,7 @@ without moving the project’s intent or history.
 The [0.78.1 baseline](docs/BASELINE-0.78.1.md) preserves the historical five-front-end
 inventory and its validation limits. Gemini CLI legacy installer emitters remain retired;
 Antigravity is supported natively via shared `.agents/skills/` units and dynamic subagent dispatch.
-See [upgrade guidance](docs/INSTALL.md#retiring-gemini-and-antigravity)
+See [upgrade guidance](docs/INSTALL.md#retiring-gemini)
 for selection migration and preservation of customized legacy files.
 
 ## How it works
@@ -75,6 +75,7 @@ claude                    # CLAUDE.md → AGENTS.md auto-loads
 # batch fixes? /sdd-fix-parallel # bounded E99 batch: isolated safe fixes overlap; shared/unknown paths serialize
 # then:     /sdd-next            # runs the Orchestrator on the next task
 # PR open?  /sdd-pr-loop <pr>    # drives the Codex review cycle: trigger, background watch, classify, fix, merge
+# defect?   /sdd-report          # report a harness defect (top-level session role)
 ```
 
 If `./init.sh` prints a `TaskStore dependency-cycle` warning, follow the closed
@@ -112,6 +113,7 @@ Orchestrator spawns `architect` → (human approves) → `builder` → `reviewer
 | **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` (+ `pr-fixer`) + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-fix-parallel`, `/sdd-next`, `/sdd-report`, `/sdd-pr-loop` |
 | **Codex** | `AGENTS.md` (native) | `.codex/agents/*.toml` roles + the shared repository-local `$sdd-*` skills in `.agents/skills/` (including gated `$sdd-pr-loop`) |
 | **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-test-concurrency` and `/sdd-pr-loop`; it also reads the shared `.agents/skills/` units, so `/sdd-*` resolve from both surfaces; `/sdd-fix-parallel` is opt-in (verified by `/sdd-test-concurrency`) |
+| **Antigravity** | `AGENTS.md` (native) | Dynamic subagents leased via `define_subagent` / `invoke_subagent` from `agents/<role>.md` + `/sdd-*` slash commands via shared `.agents/skills/` |
 
 The tables and workflow prose use the portable `/sdd-*` spelling; in Codex, invoke the
 shared repository skills as `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`,
@@ -119,8 +121,10 @@ shared repository skills as `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, 
 `$sdd-new Add a settings page`, then `$sdd-next`; accompanying text supplies the
 workflow’s `$ARGUMENTS`. OpenCode reads the same shared units, so `/sdd-*` resolve from
 `.agents/skills/` as well as from `.opencode/command/`; in Codex, `/skills` is the
-discovery UI. The human spec approval gate and independent Reviewer verdict apply in
-Codex too.
+discovery UI. In Antigravity, skills in `.agents/skills/` are discovered natively as
+`/sdd-*` slash commands, and role handoffs use dynamic subagents (`define_subagent` /
+`invoke_subagent`) with clean contexts loaded from `agents/<role>.md`. The human spec
+approval gate and independent Reviewer verdict apply across all hosts.
 
 `/sdd-pr-loop` and front-end-specific `pr-fixer` glue follow the **PR-policy gate**:
 they are stamped only while `pr_loop.enabled` is `true` in `harness.config.yaml`.
@@ -255,11 +259,11 @@ configuration: [board mirror contract](store/board-mirror.md).
 AGENTS.md                    entrypoint (open standard)
 CLAUDE.md                    thin Claude pointer
 opencode.json                OpenCode agents + AGENTS.md instruction
-harness.config.yaml          store backends, hooks, mirror, telemetry, umbrella
+harness.config.yaml          store backends, hooks, mirror, telemetry, umbrella, feedback
 harness-install.sh           install/upgrade into a target (+ --umbrella, --shared-repo)
 init.sh                      environment verification gate
 agents/                      role prompts (canonical)
-tools/                       shell, Python and Node utilities (next-task.mjs, telemetry-report.py, sync-board.mjs, wait-for-codex.sh, opencode-model-helper.sh)
+tools/                       shell, Python and Node utilities (next-task.mjs, telemetry-report.py, sync-board.mjs, wait-for-codex.sh, opencode-model-helper.sh, harness-report.sh)
 specs/                       product.md, glossary.md, _templates/, epics/<E>/<F>/*.md
 state/                       tasks.json (local TaskStore)
 progress/                    run output + history.md
@@ -269,12 +273,12 @@ umbrella.manifest.example.yaml   cross-repo coordinator manifest template
 umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     generated Claude Code sub-agents + commands + glue manifest
 .codex/agents/               generated native Codex role TOMLs
-.agents/skills/              generated explicit Codex workflow skills + policy companions
+.agents/skills/              shared repository-local workflow skills (Codex, Antigravity, OpenCode)
 ```
 
 Consumer installs put the body under `.harness/` and generate only selected and
 enabled front-end surfaces. Source `./harness-install.sh --self` defaults to
-**Claude + Codex**; `--agents=claude` or `--agents=codex` selects one source set.
+**Claude + Codex**; `--agents=claude`, `--agents=codex`, or `--agents=opencode` selects one source set.
 Source references resolve from the repository root, while consumer glue resolves
 from `.harness/`. Existing per-role models survive regeneration. With inherited
 Codex models, combined source escalation is **UNARMED** even when Claude alone
@@ -312,6 +316,19 @@ once; shared locked board state is persisted through a coordinator bookkeeping P
 then the local base is fast-forwarded before exact safe teardown. If the host lacks
 that capability, or `execution.builder.backend` is `delegate`, use serial `/sdd-fix`.
 
+### Harness defect reporting
+
+`/sdd-report` (Codex: `$sdd-report`) reports verified harness defects upstream to the
+harness repository. Reporting is strictly limited to four defect triggers:
+`harness-malfunction`, `contradictory-instruction`, `workaround`, and `missing-capability`.
+Project test failures, transient errors, and user/agent mistakes are never reported.
+Only the top-level session-owning role (Orchestrator, Fixer, Inception, Planner, Driller)
+invokes the reporter, minting `HARNESS_FEEDBACK_SESSION_ID` once per session; sub-agents
+append notes to `progress/feedback/notes.md`. The underlying tool
+(`tools/harness-report.sh`) enforces a strict allow-list of structured fields and scrubs
+free-form content. Configuration lives under `feedback:` in `harness.config.yaml`
+(`enabled: true`, `max_per_session: 3`, `repo: github.com/araozmd/harness-sdd`).
+
 ## Installing into an existing project
 
 ```bash
@@ -325,12 +342,12 @@ workspace. Re-run to upgrade — project-authored specs/state are never clobbere
 `docs/INSTALL.md`.
 
 **Choosing which agents to support.** The supported keys are `claude`, `codex`,
-and `opencode`, in that priority order. The interactive picker starts with the
+`opencode`, and `antigravity`, in that priority order. The interactive picker starts with the
 detected supported host on a fresh target, or Claude when undetected. Fresh
 unattended installs default to Claude. Upgrades preserve the surviving recorded
 selection in `.harness/.agents`; retired-only selections require an explicit
 replacement before any writes. A version-stamped install without a selection
-file resolves to `claude,opencode`. `--agents=all` selects all three.
+file resolves to `claude,opencode`. `--agents=all` selects all four.
 
 ```bash
 ./harness-install.sh --agents=claude,codex /path/to/your-project
@@ -347,8 +364,8 @@ describes how pristine old glue is reclaimed and edited, foreign, or symlinked
 legacy files are preserved with warnings.
 
 **Antigravity, Codex, and OpenCode workflows are repository-local.** Selecting
-`antigravity`, `codex`, **or** `opencode` creates the six base `/sdd-*` / `$sdd-*` skill units
-in `.agents/skills/`, plus `/sdd-pr-loop` when enabled. All three hosts read the same unit
+`antigravity`, `codex`, **or** `opencode` creates the base `/sdd-*` / `$sdd-*` skill units
+in `.agents/skills/` (including `/sdd-report`, plus `/sdd-pr-loop` when enabled). All three hosts read the same unit
 (ADR-0003), so there is one `SKILL.md` per command whose host-neutral adapter names both
 invocations and maps accompanying text to `$ARGUMENTS`, with `agents/openai.yaml` disabling
 implicit invocation.

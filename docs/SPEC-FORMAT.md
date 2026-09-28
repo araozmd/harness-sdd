@@ -2,11 +2,12 @@
 
 This is the standard every spec in this harness follows. It is deliberately
 CLI-agnostic and model-agnostic: the same files drive Claude Code (primary), Codex
-(second), and OpenCode (third). Specs are also the project's **living documentation**.
+(second), OpenCode (third), and Antigravity. Specs are also the project's **living documentation**.
 
 Command names in this document use the canonical `/sdd-*` spelling. In Codex,
 invoke the corresponding `$sdd-*` skill with accompanying argument text, such as
-`$sdd-plan A shared reading list`. The spec format and approval gates are the same.
+`$sdd-plan A shared reading list`. In Antigravity, invoke them as native `/sdd-*`
+slash commands. The spec format and approval gates are the same.
 
 ## The hierarchy: Product → Epic → Feature
 
