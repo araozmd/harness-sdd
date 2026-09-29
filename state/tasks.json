@@ -1716,7 +1716,7 @@
     },
     {
       "id": "E34",
-      "title": "Resource hygiene: bounded cleanup of scratch files, handoff files, and merged worktrees/branches",
+      "title": "Resource hygiene: automated scratch-dir sweep for finished features",
       "status": "done",
       "features": [
         {

@@ -1,11 +1,24 @@
 ---
 id: E34
-title: "Resource hygiene: bounded cleanup of scratch files, handoff files, and merged worktrees/branches"
+title: "Resource hygiene: automated scratch-dir sweep for finished features"
 status: done             # legacy alias of planned; drill when ready to decompose further
 owner: araozmd
 ---
 
-# Epic E34 — Resource hygiene: bounded cleanup of scratch files, handoff files, and merged worktrees/branches
+# Epic E34 — Resource hygiene: automated scratch-dir sweep for finished features
+
+**Scope note (2026-09-29, post-rollup correction):** this epic's original brief and
+success criteria below covered three artifact kinds — scratch files, `progress/`
+handoff files, and git worktrees/branches. Only the scratch-directory sweep was ever
+seeded, specced, and built (E34-F01); the other two were explicitly deferred (see
+Notes) and never became board features. Closing this epic `done` while its stated
+success criteria still named undelivered work was flagged as misleading by Codex
+review on the done-rollup PR (#234) — title and success criteria below are corrected
+to describe only what `E34-F01` actually shipped. The deferred handoff-file and
+worktree/branch sweeps are **not** carried forward as open scope on this epic; they
+are ideas for a **separate, future `/sdd-new` intake** (a new epic or feature, seeded
+fresh when someone wants to build them), not unfinished work blocking this one's
+closure.
 
 ## Business brief
 
@@ -28,31 +41,32 @@ sub-agents concurrently it exhausts disk quota. The users are anyone running thi
 harness with multiple concurrent sub-agents/worktrees, and, secondarily, the harness
 maintainer who has to explain the same cleanup instruction over and over.
 
-This epic makes cleanup a **standing discipline** instead of a per-prompt ask: a
-defined, bounded automated sweep for what accumulates (stale scratch dirs, consumed/
-superseded handoff files, merged worktrees and branches), plus explicit hand-off rules
-in the relevant role files (`agents/builder.md`, `agents/reviewer.md`, `agents/fixer.md`,
-`agents/pr-fixer.md`, `agents/orchestrator.md`) naming *when* each role's own artifacts
-become eligible for cleanup and who is expected to remove or sweep them.
+This epic makes scratch-file cleanup a **standing discipline** instead of a per-prompt
+ask: a defined, bounded automated sweep for stale scratch dirs, plus explicit hand-off
+rules in the relevant role files (`agents/builder.md`, `agents/reviewer.md`,
+`agents/fixer.md`, `agents/pr-fixer.md`, `agents/orchestrator.md`) naming *when* each
+role's own scratch becomes eligible for cleanup and who is expected to sweep it.
+(The original brief also named `progress/` handoff files and merged worktrees/branches
+as accumulating in the same way — see the scope note above for why those are not part
+of this epic's delivered or remaining scope.)
 
 ## Success criteria (epic level)
 
-- A sweep — tool-invoked, not re-typed into every prompt — reclaims: `scratchpad/`
-  entries whose feature is `done` (or otherwise terminal) and no longer being read by
-  any in-flight role; `progress/` handoff files that carry a `consumed`/superseded
-  marker (the pattern `agents/driller.md`/`agents/planner.md` already use for
-  `topology-handoff.md`) or otherwise belong to a completed run; and git worktrees/
-  local+remote branches already merged into the default branch, excluding anything
-  still checked out or referenced by an open PR.
+- A sweep — tool-invoked, not re-typed into every prompt — reclaims `scratchpad/`
+  entries whose feature is `done` and no longer being read by any in-flight role.
+  **Delivered** as `tools/sweep-scratch.sh` (E34-F01).
 - The sweep is **never destructive to in-flight work**: it must not delete a scratch
-  dir, handoff file, worktree, or branch tied to a feature that is not in a terminal
-  state, and it must fail closed (skip, don't guess) when it can't determine that.
-- Each relevant role file states, at its own hand-off point, what it is responsible for
-  leaving cleanly behind (or removing itself) versus what the sweep will catch later —
-  so cleanup timing is a defined contract, not an implicit hope.
-- (To be defined at drill/spec time, informed by the mechanism choice already made
-  during intake — see the inbox brief: an automated sweep tool backed by explicit
-  role hand-off rules, not role-file discipline alone and not tooling alone.)
+  dir tied to a feature that is not `done`, and it must fail closed (skip, don't
+  guess) when it can't determine that. **Delivered.**
+- Each relevant role file states, at its own hand-off point, that it never removes its
+  own `scratchpad/<feature-id>-<role>/` directory itself — only the sweep does, once
+  the owning feature is `done`. **Delivered** across `agents/builder.md`,
+  `agents/reviewer.md`, `agents/fixer.md`, `agents/pr-fixer.md`, with invocation hooks
+  in `agents/orchestrator.md`'s main-path and umbrella-rollup `done` writes and in the
+  parallel-fix lane's P7 finalizer.
+- ~~`progress/` handoff-file sweep~~ and ~~git worktree/branch sweep~~ — **not
+  delivered, not carried forward as open scope on this epic.** See the scope note
+  above and Notes below.
 
 ## Features
 
@@ -60,10 +74,11 @@ become eligible for cleanup and who is expected to remove or sweep them.
 |---|---|---|---|---|
 | E34-F01 | Automated scratch-dir sweep + role hand-off rules for finished features | done | true | — |
 
-Not yet seeded on the TaskStore (`state/tasks.json`) — the two follow-on features named
-in Notes below (`progress/` handoff-file sweep; git worktree + local-branch sweep) have
-no board row yet. Seeding one is an Orchestrator/`tasks-lock.py add-feature` action, not
-a Doc-only edit, so this table intentionally does not list them as rows until then.
+This epic is closed with exactly the one feature above. The two ideas named in Notes
+below (`progress/` handoff-file sweep; git worktree + local-branch sweep) were never
+seeded on the TaskStore and are **not** open scope on this epic — see the scope note
+under the title. They remain documented here only as a pointer for whoever picks them
+up later via a fresh `/sdd-new`.
 
 ## Notes
 
@@ -75,9 +90,11 @@ a Doc-only edit, so this table intentionally does not list them as rows until th
   and the simplest liveness signal, TaskStore status). A `progress/` handoff-file sweep
   and a git worktree + local-branch sweep (general backstop outside E15's lane; remote-
   branch deletion deferred further, needing its own confirmation gate) are the two
-  follow-on E34 features this seam implies — **not yet seeded on the TaskStore, drilled,
-  or specced**. Each needs a board row (`tasks-lock.py add-feature`) and its own
-  `/sdd-drill` or direct Architect pass before it is workable. See
+  follow-on ideas this seam implies — **not seeded on the TaskStore, drilled, or
+  specced, and not open scope on this now-closed epic** (see the scope note under the
+  title). Whoever picks either one up later seeds it fresh via `/sdd-new`, which
+  triages it to a new epic or feature on its own merits rather than reopening this
+  one. See
   `specs/epics/E34-resource-hygiene/F01-cleanup-discipline/E34-F01.spec.md`'s Context and
   Out-of-scope sections for the full reasoning.
 - E34-F01 also decided: no new `/sdd-*` slash command (the sweep is a standalone
