@@ -1,7 +1,7 @@
 ---
 id: E34
 title: "Resource hygiene: automated scratch-dir sweep for finished features"
-status: done             # legacy alias of planned; drill when ready to decompose further
+status: done             # closed with its one delivered feature; deferred ideas route through a future /sdd-new, not a drill of this epic
 owner: araozmd
 ---
 
