@@ -815,6 +815,113 @@ test_leading_utf8_bom_does_not_hide_store_block() {
   pass "R12 stress test_leading_utf8_bom_does_not_hide_store_block"
 }
 
+# ── R12 (round-6: unrelated block-style YAML sequences must not disqualify the
+# document) ────────────────────────────────────────────────────────────────────────
+# Codex #4128378011's exact repro: a real `store: tasks: local` block coexists with
+# an unrelated top-level block-style list (`fix_lane.shared_paths:` written as
+# `- item` lines, not `[]`). Round 5's whole-document validator rejected any line
+# that was not a recognized `key:` mapping entry, including a legitimate list item
+# nested under a key it never needed to resolve — the opposite failure class from
+# rounds 1-5 (too permissive): this is a false refusal on a supported config shape.
+
+test_unrelated_block_sequence_does_not_disqualify_document() {
+  make_fixture r12-unrelated-sequence
+  write_config 'store:
+  tasks: local
+fix_lane:
+  shared_paths:
+    - docs/generated/*
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 round-6: an unrelated block-style sequence (fix_lane.shared_paths) made a document with an explicit store.tasks: local refuse: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 round-6: store.tasks: local did not scan/remove normally despite the unrelated sequence: $OUT"
+  pass "R12 round-6 test_unrelated_block_sequence_does_not_disqualify_document"
+}
+
+test_unrelated_block_sequence_multiple_items_does_not_disqualify_document() {
+  make_fixture r12-unrelated-sequence-multi
+  write_config 'store:
+  tasks: local
+fix_lane:
+  shared_paths:
+    - docs/generated/*
+    - another/generated/path
+    - a/third/path
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 round-6: a multi-item unrelated block-style sequence made the document refuse: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 round-6: store.tasks: local did not scan/remove normally despite a multi-item unrelated sequence: $OUT"
+  pass "R12 round-6 test_unrelated_block_sequence_multiple_items_does_not_disqualify_document"
+}
+
+test_unrelated_empty_block_sequence_does_not_disqualify_document() {
+  make_fixture r12-unrelated-sequence-empty-block
+  write_config 'store:
+  tasks: local
+fix_lane:
+  shared_paths:
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 round-6: an unrelated key with an empty block value (no list items at all) made the document refuse: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 round-6: store.tasks: local did not scan/remove normally despite an unrelated empty-valued key: $OUT"
+  pass "R12 round-6 test_unrelated_empty_block_sequence_does_not_disqualify_document"
+}
+
+test_unrelated_flow_style_empty_list_still_resolves_correctly() {
+  make_fixture r12-unrelated-sequence-flow-empty
+  write_config 'store:
+  tasks: local
+fix_lane:
+  shared_paths: []
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 round-6: an unrelated flow-style empty list ([]) regressed — it must already have worked before this round's fix: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 round-6: store.tasks: local did not scan/remove normally with an unrelated flow-style empty list: $OUT"
+  pass "R12 round-6 test_unrelated_flow_style_empty_list_still_resolves_correctly"
+}
+
+# ── R12 (round-6): a sequence item INSIDE the store: block itself is a different,
+# more suspicious case — store:'s schema is a scalar or plain mapping, never a
+# list, so this stays disqualifying rather than being skipped like an unrelated
+# list elsewhere in the document (see tools/sweep-scratch.sh's
+# validate_canonical_shape for the scoping rationale).
+test_sequence_item_inside_store_block_still_refuses() {
+  make_fixture r12-sequence-inside-store
+  write_config 'store:
+  tasks: local
+  - unexpected
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12 round-6: a sequence item nested inside the store: block itself did not refuse: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12 round-6: --apply deleted E01-F01-builder despite an unrecognized sequence item inside the store: block"
+  pass "R12 round-6 test_sequence_item_inside_store_block_still_refuses"
+}
+
 # ── R13 ─────────────────────────────────────────────────────────────────────────────
 test_remove_failure_reported_and_exits_nonzero() {
   if ! modes_bind_this_uid; then
@@ -880,6 +987,11 @@ test_store_mentioned_only_in_comment_resolves_correctly
 test_whitespace_variations_resolve_correctly
 test_store_indented_under_scalar_valued_key_refuses
 test_leading_utf8_bom_does_not_hide_store_block
+test_unrelated_block_sequence_does_not_disqualify_document
+test_unrelated_block_sequence_multiple_items_does_not_disqualify_document
+test_unrelated_empty_block_sequence_does_not_disqualify_document
+test_unrelated_flow_style_empty_list_still_resolves_correctly
+test_sequence_item_inside_store_block_still_refuses
 test_remove_failure_reported_and_exits_nonzero
 
 echo "all sweep-scratch tests passed"

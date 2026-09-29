@@ -232,6 +232,18 @@ def _contains_unquoted(text, chars):
     return False
 
 
+def _is_sequence_item(stripped):
+    # A YAML block-sequence item ('-' alone, or '-' followed by a space and the
+    # item's own, possibly-empty, inline content). `split_key_value()` correctly
+    # returns None for this shape — it is not a mapping entry — but that is not
+    # itself disqualifying: legitimate `harness.config.yaml` keys are documented
+    # in exactly this block-list form (e.g. `fix_lane.shared_paths:` followed by
+    # `- docs/generated/*`), and this reader has no business refusing the whole
+    # document over list syntax in a section it never reads (Codex #4128378011,
+    # round 6 — the false-refusal counterpart to round 5's over-permissive gap).
+    return stripped == "-" or stripped.startswith("- ")
+
+
 def _is_document_marker(stripped):
     # YAML multi-document separator/end markers. This reader supports exactly
     # ONE document; any of these disqualify the whole file, wherever they are —
@@ -244,15 +256,22 @@ def validate_canonical_shape(entries):
     # The ONE document shape this parser accepts: a plain block-style mapping —
     # `key:` lines at one consistent top-level indentation, none of them a flow
     # mapping/sequence — whose values are each either absent, an inline scalar,
-    # or a further-indented plain block-style nested mapping (never a line
-    # indented under a key that already carries an inline scalar value). This
-    # is deliberately generic: it never names `store` or `tasks`, and it never
-    # inspects content NESTED under an unrelated top-level key, so a `[]` or
-    # similar flow value two sections away from `store:` (this repo's own
-    # harness.config.yaml has several) can never make an otherwise-canonical
-    # document refuse. Returns None when `entries` matches; otherwise a short
-    # reason string (the caller only needs "it didn't match", but a reason
-    # keeps this auditable).
+    # a further-indented plain block-style nested mapping (never a line indented
+    # under a key that already carries an inline scalar value), or — outside
+    # `store:`'s own subtree only — a further-indented block SEQUENCE (`- item`
+    # lines). This is deliberately generic: it never names `store` or `tasks`
+    # for the flow/mapping shape checks, and it never inspects content NESTED
+    # under an unrelated top-level key for THOSE, so a `[]` or similar flow
+    # value two sections away from `store:` (this repo's own harness.config.yaml
+    # has several) can never make an otherwise-canonical document refuse. The
+    # one deliberate exception is sequence-item recognition itself, which does
+    # need to know whether a given frame is inside `store:`'s subtree — a
+    # sequence under `store:` stays disqualifying (that schema is never a list),
+    # while a sequence anywhere else (e.g. `fix_lane.shared_paths:` block-list
+    # items) is ordinary, unrelated YAML this reader never needs to resolve
+    # (Codex #4128378011, round 6). Returns None when `entries` matches;
+    # otherwise a short reason string (the caller only needs "it didn't match",
+    # but a reason keeps this auditable).
     if not entries:
         return None  # a genuinely empty document is the canonical empty shape
 
@@ -267,23 +286,38 @@ def validate_canonical_shape(entries):
 
     # A virtual root block, always open, at an indent strictly below every real
     # entry — so top-level entries are always valid children of it. Each stack
-    # frame is (indent, is_open): "open" means that entry's own inline value
-    # was empty, i.e. it is a block-mapping key that may legitimately have
-    # further-indented children.
-    stack = [(base_indent - 1, True)]
+    # frame is (indent, is_open, in_store, is_root): "open" means that entry's
+    # own inline value was empty, i.e. it is a block-mapping key that may
+    # legitimately have further-indented children; "in_store" is True for the
+    # top-level `store:` key's own frame and every frame nested under it —
+    # store:'s schema is a scalar or a plain mapping, never a list, at either
+    # scope, so a sequence item there stays disqualifying even though sequence
+    # items are otherwise ignored elsewhere in the document (see below).
+    stack = [(base_indent - 1, True, False, True)]
     for indent, stripped in entries:
         while stack and indent <= stack[-1][0]:
             stack.pop()
         if not stack:
             return "a line indented below every open block"
-        _, parent_open = stack[-1]
+        _, parent_open, parent_in_store, parent_is_root = stack[-1]
         if not parent_open:
             return "a line indented under a key that already has an inline scalar value"
+
+        if _is_sequence_item(stripped):
+            if not parent_in_store and not parent_is_root:
+                # Nested under some OTHER key's block (not the top level itself,
+                # and not store:'s own subtree) — legitimate, unrelated YAML list
+                # content this reader never needs to resolve. Skip it: it is a
+                # leaf, not a mapping key, so it never opens a new stack frame.
+                continue
+            return "a line that is not a recognized 'key:' mapping entry"
+
         kv = split_key_value(stripped)
         if kv is None:
             return "a line that is not a recognized 'key:' mapping entry"
-        _, rest = kv
-        stack.append((indent, rest.strip() == ""))
+        key, rest = kv
+        in_store = parent_in_store or (parent_is_root and key == "store")
+        stack.append((indent, rest.strip() == "", in_store, False))
     return None
 
 
