@@ -629,6 +629,41 @@ test_block_style_non_local_jira_refuses() {
   pass "R12 test_block_style_non_local_jira_refuses"
 }
 
+# ── R12 (Codex #4130742436): an EXPLICIT empty `tasks:` scalar must refuse, not
+# silently default to local — `tasks: ""`, `tasks: ''`, and a bare `tasks:` with
+# nothing after the colon are all present-but-unresolvable, which is a DIFFERENT
+# case than `tasks:` being genuinely absent from the block (the ONE case that may
+# default to local); the shell caller's `${STORE_TASKS:-local}` expansion cannot
+# tell "unset" from "set to empty string" apart on its own, so `_cfg_store_tasks`
+# itself must refuse (non-zero exit) rather than print empty stdout for this case.
+test_explicit_empty_tasks_value_refuses() {
+  for _label_variant in 'double-quoted:tasks: ""' "single-quoted:tasks: ''" 'bare:tasks:'; do
+    _label="${_label_variant%%:*}"
+    _line="${_label_variant#*:}"
+    make_fixture "r12-empty-$_label"
+    write_config "store:
+  $_line
+"
+    write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+    scratch_dir E01-F01-builder
+
+    run_sweep
+    [ "$RC" -ne 0 ] \
+      || fail "R12: an explicit empty tasks: value ($_label) did NOT refuse on a dry run: $OUT"
+    has_verdict_line \
+      && fail "R12: a per-entry verdict was printed despite an explicit empty tasks: value ($_label): $OUT"
+    [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+      || fail "R12: a scratch directory vanished on a dry run against an explicit empty tasks: value ($_label)"
+
+    run_sweep --apply
+    [ "$RC" -ne 0 ] \
+      || fail "R12: --apply against an explicit empty tasks: value ($_label) did not exit non-zero: $OUT"
+    [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+      || fail "R12: --apply deleted a done-marked scratch dir despite an explicit empty tasks: value ($_label) — Codex #4130742436's exact repro"
+  done
+  pass "R12 test_explicit_empty_tasks_value_refuses"
+}
+
 # ── R12: INDENTED top-level block-style non-local — this round's exact repro ──────
 test_indented_top_level_block_non_local_refuses() {
   make_fixture r12-indented
@@ -1363,6 +1398,7 @@ test_missing_config_file_refuses
 test_explicit_key_mapping_at_top_level_refuses
 test_block_style_explicit_local_scans_normally
 test_block_style_non_local_jira_refuses
+test_explicit_empty_tasks_value_refuses
 test_indented_top_level_block_non_local_refuses
 test_tab_indented_block_non_local_refuses
 test_tasks_key_in_other_top_level_block_not_mistaken

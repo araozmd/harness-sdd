@@ -501,7 +501,19 @@ def parse_store_tasks(path):
     if tasks_line == "":
         return (None, 1)  # `tasks:` present but with no inline scalar (e.g.
         # its own nested block) — flow was already ruled out for this block above.
-    return (unquote(tasks_line), 0)
+    resolved = unquote(tasks_line)
+    if resolved == "":
+        return (None, 1)  # `tasks:` present with an EXPLICIT empty scalar —
+        # `""` or `''` unquoting to an empty string. This is NOT the same as
+        # `tasks:` being absent: someone deliberately wrote an empty value,
+        # and empty string is not `local`/`obsidian`/`jira`/anything this tool
+        # recognizes. Returning it as a plain "" success here would be
+        # byte-identical, from the caller's shell side, to the genuinely-absent
+        # case just above — `${STORE_TASKS:-local}` cannot distinguish "unset"
+        # from "set to empty string" — and would silently default to `local`,
+        # defeating R12's whole refuse-on-ambiguity contract (Codex
+        # #4130742436). Refuse here instead, before that conflation can happen.
+    return (resolved, 0)
 
 
 _value, _code = parse_store_tasks(sys.argv[1])
