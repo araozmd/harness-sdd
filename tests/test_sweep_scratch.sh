@@ -304,6 +304,87 @@ test_schema_invalid_id_aborts_whole_scan_no_changes() {
   pass "R14 test_schema_invalid_id_aborts_whole_scan_no_changes"
 }
 
+# Codex #4131060237: R14's own guard only validated the SHAPE of a present string
+# value — a record whose id/status is missing entirely, JSON null, or a non-string
+# type (number, list, object) fell through the `isinstance(..., str)` check and was
+# silently skipped rather than aborting the whole scan. Each case below pairs the
+# malformed record with a SECOND, otherwise-valid `done` feature that owns real
+# scratch, so a silent-skip regression would still show it removed.
+test_schema_invalid_status_null_aborts_whole_scan_no_changes() {
+  make_fixture r14c
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":null},{"id":"E01-F02","status":"done"}]}]}'
+  scratch_dir E01-F02-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R14: a null status did not make --apply exit non-zero"
+  has_verdict_line \
+    && fail "R14: --apply against a null status printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F02-builder" ] \
+    || fail "R14: --apply removed a valid done feature's scratch despite an unrelated record having a null status — the whole scan must abort instead of silently skipping the null record"
+  pass "R14 test_schema_invalid_status_null_aborts_whole_scan_no_changes"
+}
+
+test_schema_invalid_status_missing_aborts_whole_scan_no_changes() {
+  make_fixture r14d
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01"},{"id":"E01-F02","status":"done"}]}]}'
+  scratch_dir E01-F02-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R14: a missing status key did not make --apply exit non-zero"
+  has_verdict_line \
+    && fail "R14: --apply against a missing status key printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F02-builder" ] \
+    || fail "R14: --apply removed a valid done feature's scratch despite an unrelated record having no status key — the whole scan must abort instead of silently skipping the record"
+  pass "R14 test_schema_invalid_status_missing_aborts_whole_scan_no_changes"
+}
+
+test_schema_invalid_id_null_aborts_whole_scan_no_changes() {
+  make_fixture r14e
+  write_board '{"epics":[{"id":"E01","features":[{"id":null,"status":"done"},{"id":"E01-F02","status":"done"}]}]}'
+  scratch_dir E01-F02-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R14: a null id did not make --apply exit non-zero"
+  has_verdict_line \
+    && fail "R14: --apply against a null id printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F02-builder" ] \
+    || fail "R14: --apply removed a valid done feature's scratch despite an unrelated record having a null id — the whole scan must abort instead of silently skipping the null record"
+  pass "R14 test_schema_invalid_id_null_aborts_whole_scan_no_changes"
+}
+
+test_schema_invalid_id_missing_aborts_whole_scan_no_changes() {
+  make_fixture r14f
+  write_board '{"epics":[{"id":"E01","features":[{"status":"done"},{"id":"E01-F02","status":"done"}]}]}'
+  scratch_dir E01-F02-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R14: a missing id key did not make --apply exit non-zero"
+  has_verdict_line \
+    && fail "R14: --apply against a missing id key printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F02-builder" ] \
+    || fail "R14: --apply removed a valid done feature's scratch despite an unrelated record having no id key — the whole scan must abort instead of silently skipping the record"
+  pass "R14 test_schema_invalid_id_missing_aborts_whole_scan_no_changes"
+}
+
+test_schema_invalid_non_string_types_abort_whole_scan_no_changes() {
+  make_fixture r14g
+  write_board '{"epics":[{"id":"E01","features":[{"id":["E01","F01"],"status":42},{"id":"E01-F02","status":"done"}]}]}'
+  scratch_dir E01-F02-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R14: a non-string id/status (list/number) did not make --apply exit non-zero"
+  has_verdict_line \
+    && fail "R14: --apply against a non-string id/status printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F02-builder" ] \
+    || fail "R14: --apply removed a valid done feature's scratch despite an unrelated record having a non-string id/status — the whole scan must abort instead of silently skipping the record"
+  pass "R14 test_schema_invalid_non_string_types_abort_whole_scan_no_changes"
+}
+
 # ── R6 ──────────────────────────────────────────────────────────────────────────────
 test_symlink_escape_skipped() {
   make_fixture r6
@@ -1386,6 +1467,11 @@ test_not_found_or_non_done_skipped
 test_corrupt_taskstore_aborts_whole_scan_no_changes
 test_schema_invalid_status_forged_row_aborts_whole_scan_no_changes
 test_schema_invalid_id_aborts_whole_scan_no_changes
+test_schema_invalid_status_null_aborts_whole_scan_no_changes
+test_schema_invalid_status_missing_aborts_whole_scan_no_changes
+test_schema_invalid_id_null_aborts_whole_scan_no_changes
+test_schema_invalid_id_missing_aborts_whole_scan_no_changes
+test_schema_invalid_non_string_types_abort_whole_scan_no_changes
 test_symlink_escape_skipped
 test_exit_code_reflects_tool_errors_only
 test_report_has_summary_verdicts_and_bytes_reclaimed

@@ -578,13 +578,20 @@ for epic in epics:
             continue
         fid = feat.get("id")
         status = feat.get("status")
-        if isinstance(fid, str) and isinstance(status, str):
-            if not FID_RE.match(fid) or status not in STATUS_ENUM:
-                # Schema-invalid record (R14): could otherwise inject a forged
-                # row into this tab-delimited output — abort the whole scan
-                # instead of skipping just this one record.
-                sys.exit(1)
-            print(fid + "\t" + status)
+        if (
+            not isinstance(fid, str)
+            or not isinstance(status, str)
+            or not FID_RE.match(fid)
+            or status not in STATUS_ENUM
+        ):
+            # Schema-invalid record (R14): a missing/non-string id or status is
+            # just as schema-invalid as a malformed-but-present string value —
+            # either shape could otherwise inject a forged row into this
+            # tab-delimited output, or let a partially-validated board carry on
+            # past a record that never proved its own shape. Abort the whole
+            # scan instead of silently skipping just this one record.
+            sys.exit(1)
+        print(fid + "\t" + status)
 PYEOF
 )"
 TASKSTORE_RC=$?
