@@ -20,11 +20,24 @@
 #   - An entry whose name does not start with `<feature-id>-` is `unrecognized` and is
 #     NEVER acted on, in any mode (R2).
 #   - An entry whose feature id is absent from the TaskStore, or whose status is
-#     anything other than `done`, is `skipped: <reason>` and never removed (R4).
+#     anything other than `done`, is `skipped: <reason>` and never removed (R4). A
+#     feature carrying a `parked` field (store/tasks.schema.json: PRESENCE MEANS
+#     PARKED, regardless of shape) is never eligible either, even when its `status`
+#     scalar reads `done` — reported as `skipped: status:parked` (R15, Codex
+#     #4131629415).
 #   - If the TaskStore itself cannot be read or parsed, OR a record's `id`/`status`
 #     violates store/tasks.schema.json's grammar, the WHOLE scan aborts before
 #     classifying or removing anything — a tool-level error, distinct from a
 #     per-entry skip, and the process exits non-zero (R5, R14).
+#     KNOWN LIMITATION (disclosed, not an oversight): R15's parked check and R5/R14's
+#     id/status grammar check are the only cross-field/shape validation this tool
+#     performs. It does not re-validate store/tasks.schema.json's full cross-field
+#     contract — e.g. a sliced feature's `done` requiring every slice `done` AND
+#     `merged`, or any other invariant tasks-lock.py enforces at write time. A board
+#     that reached an inconsistent cross-field state by bypassing that guarded write
+#     path (a hand-edit, or an externally imported board) is already outside this
+#     harness's supported operating model, and this tool does not attempt to re-derive
+#     or re-enforce that integrity guarantee beyond the parked check above.
 #   - An entry whose resolved real path is not a direct child of the resolved
 #     scratchpad/ directory (e.g. a symlink escaping it) is skipped and reported as an
 #     anomaly, never deleted through (R6).
@@ -604,6 +617,22 @@ for epic in epics:
             # past a record that never proved its own shape. Abort the whole
             # scan instead of silently skipping just this one record.
             sys.exit(1)
+        # R15 (Codex #4131629415): store/tasks.schema.json's `parked` field is a
+        # cross-field invariant this reader otherwise never sees — its own
+        # $comment says PRESENCE MEANS PARKED, regardless of shape, and a `done`
+        # status may never accompany it (the schema forbids that combination
+        # outright). The sanctioned write path (tasks-lock.py) already refuses a
+        # done+parked transition, so this combination can only reach state/
+        # tasks.json by bypassing that guard — a hand-edit or an imported board,
+        # both already outside this harness's supported operating model. Report
+        # the actual liveness here rather than trust the raw `done` scalar: print
+        # "parked" instead of "done" so lookup_status()'s `$_status != "done"`
+        # check downstream naturally treats the row as ineligible, without a
+        # second parked-tracking mechanism. This is a narrow, targeted guard —
+        # NOT full cross-field schema validation; see this file's header comment
+        # for the disclosed remaining gap.
+        if status == "done" and "parked" in feat:
+            status = "parked"
         print(fid + "\t" + status)
 PYEOF
 )"

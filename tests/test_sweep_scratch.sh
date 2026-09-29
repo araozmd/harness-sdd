@@ -9,7 +9,7 @@
 # so this also doubles as a check that the tool runs under whatever `sh` resolves to
 # on this host, consistent with every other suite tools/run-tests.sh selects.
 #
-# R-id coverage: R1-R8, R12, R13, R14 of E34-F01.spec.md, per E34-F01.tests.md's traceability table.
+# R-id coverage: R1-R8, R12, R13, R14, R15 of E34-F01.spec.md, per E34-F01.tests.md's traceability table.
 
 set -eu
 
@@ -214,6 +214,31 @@ test_not_found_or_non_done_skipped() {
   [ -d "$PRIMARY/scratchpad/E09-F09-builder" ] \
     || fail "R4: --apply removed a not-found entry"
   pass "R4 test_not_found_or_non_done_skipped"
+}
+
+# ── R15 ─────────────────────────────────────────────────────────────────────────────
+# Codex #4131629415: a feature carrying a `parked` field must never be treated as
+# eligible, even when its `status` scalar reads `done` — store/tasks.schema.json's
+# own cross-field rule forbids that combination, and the sanctioned write path
+# (tasks-lock.py) already refuses to write it, so this shape can only reach
+# state/tasks.json via a hand-edit or an imported board. This is a normal per-entry
+# skip (like R4), not a whole-scan abort (R5/R14) — the record's own id/status shape
+# is still schema-valid on its own.
+test_parked_done_feature_skipped_not_removed() {
+  make_fixture r15
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done","parked":{"reason":"external blocker"}}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep
+  [ "$RC" -eq 0 ] || fail "R15: dry-run exited non-zero on a normal parked skip: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+skipped: status:parked$' \
+    || fail "R15: a done+parked entry was not skipped with a parked reason: $OUT"
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] || fail "R15: --apply exited non-zero on a normal parked skip: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R15: --apply removed a done+parked entry — Codex #4131629415's exact repro"
+  pass "R15 test_parked_done_feature_skipped_not_removed"
 }
 
 # ── R5 ──────────────────────────────────────────────────────────────────────────────
@@ -1520,6 +1545,7 @@ test_default_is_dry_run_apply_mutates
 test_classifies_feature_id_prefix_skips_unrecognized
 test_done_feature_removed_on_apply_reported_dry_run
 test_not_found_or_non_done_skipped
+test_parked_done_feature_skipped_not_removed
 test_corrupt_taskstore_aborts_whole_scan_no_changes
 test_schema_invalid_status_forged_row_aborts_whole_scan_no_changes
 test_schema_invalid_id_aborts_whole_scan_no_changes

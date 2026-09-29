@@ -16,7 +16,10 @@ All notable changes to the harness body are recorded here. Versions follow
   the TaskStore aborts the whole scan before anything is classified or removed and exits
   non-zero — a distinct outcome from a per-entry skip. An entry whose feature id is not
   found, or whose status is anything other than `done`, is skipped with the specific
-  reason and never removed, in every mode, and never flips the exit code. Before any
+  reason and never removed, in every mode, and never flips the exit code. A feature
+  carrying a `parked` field (store/tasks.schema.json: presence means parked, regardless
+  of shape) is skipped too, even when its `status` scalar reads `done` — reported as
+  `skipped: status:parked` (Codex #4131629415). Before any
   removal, the entry's resolved real path must be a direct child of the resolved
   `scratchpad/` real path — a symlink escaping it is skipped and reported as an anomaly,
   never deleted through. Accepts an optional single feature-id argument to scope the scan;
@@ -44,6 +47,15 @@ All notable changes to the harness body are recorded here. Versions follow
   exhaustive — a disclosed, deliberate gap, not an oversight; closing it properly needs a
   real YAML dependency or a different way to derive the backend, not another hand-rolled
   pattern per edge case.
+- **Known limitation.** The parked check above and the `id`/`status` grammar check
+  (R5/R14) are the only cross-field/shape validation this tool performs against
+  store/tasks.schema.json. It does not re-validate the schema's full cross-field
+  contract — e.g. a sliced feature's `done` requiring every slice `done` AND `merged`,
+  or any other invariant `tasks-lock.py` enforces at write time. A board that reached an
+  inconsistent cross-field state by bypassing that guarded write path (a hand-edit, or an
+  externally imported board) is already outside this harness's supported operating model;
+  this tool does not attempt to re-derive or re-enforce that integrity guarantee beyond
+  the parked check (Codex #4131629415).
 
 ## [0.88.0] — 2026-09-26
 
