@@ -803,7 +803,7 @@ test_store_indented_under_scalar_valued_key_refuses() {
 # closed with encoding="utf-8-sig" (transparently strips a BOM if present).
 test_leading_utf8_bom_does_not_hide_store_block() {
   make_fixture r12-utf8-bom
-  printf '\xEF\xBB\xBFstore:\n  tasks: obsidian\n' > "$PRIMARY/harness.config.yaml"
+  printf '\357\273\277store:\n  tasks: obsidian\n' > "$PRIMARY/harness.config.yaml"
   write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
   scratch_dir E01-F01-builder
 
