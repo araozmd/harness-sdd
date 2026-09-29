@@ -1554,6 +1554,87 @@ test_block_scalar_inside_store_block_still_refuses() {
   pass "R12 round-8 test_block_scalar_inside_store_block_still_refuses"
 }
 
+# ── R12 (Codex #4132718580, round 18): a duplicate `tasks:` key inside store:'s own
+# block — `tasks: local` followed by `tasks: obsidian` — must refuse rather than let
+# whichever occurrence the scan finds first silently decide the backend. This is the
+# nested-key counterpart of R14's round-17 duplicate-id TaskStore fix. Reproduced
+# without this fix: --apply exits 0 and deletes done-marked scratch even though the
+# LATER entry selects a non-local backend.
+test_duplicate_tasks_key_conflicting_values_refuses() {
+  make_fixture r12-dup-tasks-conflict
+  write_config 'store:
+  tasks: local
+  tasks: obsidian
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep
+  [ "$RC" -ne 0 ] \
+    || fail "R12: a duplicate 'tasks:' key (local + obsidian) did not exit non-zero on a dry run: $OUT"
+  has_verdict_line \
+    && fail "R12: a per-entry verdict was printed despite a duplicate 'tasks:' key — the scan must refuse BEFORE classifying anything: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: a scratch directory vanished on a dry (non --apply) run against a duplicate 'tasks:' key"
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: --apply against a duplicate 'tasks:' key (local + obsidian) did not exit non-zero: $OUT"
+  has_verdict_line \
+    && fail "R12: --apply against a duplicate 'tasks:' key printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply deleted E01-F01-builder despite a duplicate 'tasks:' key — Codex #4132718580's exact repro (the later 'obsidian' entry selects a non-local backend, but a first-match reader would have used 'local' and deleted live scratch)"
+  pass "R12 test_duplicate_tasks_key_conflicting_values_refuses"
+}
+
+# Same duplicate-key refusal, but the two duplicates AGREE on value (both 'local').
+# The refusal must fire on the duplication itself, not on a value conflict — a
+# lenient reader that only refused when the two disagreed would still be wrong
+# (matches R14's round-17 duplicate-id-with-matching-status coverage).
+test_duplicate_tasks_key_matching_values_refuses() {
+  make_fixture r12-dup-tasks-match
+  write_config 'store:
+  tasks: local
+  tasks: local
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: a duplicate 'tasks:' key with matching (local + local) values did not exit non-zero: $OUT"
+  has_verdict_line \
+    && fail "R12: --apply against a duplicate 'tasks:' key with matching values printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply deleted E01-F01-builder despite a duplicate 'tasks:' key, even though both values agreed — duplication alone must refuse"
+  pass "R12 test_duplicate_tasks_key_matching_values_refuses"
+}
+
+# ── R12 (Codex #4132718580, round 18): TWO top-level `store:` mapping headers, each
+# with its own `tasks:` child selecting a different backend. This exercises a
+# SEPARATE code path from the nested duplicate-key case above — find_store_key's
+# top-level scan, not parse_store_tasks's store:-block scan — so it needs its own
+# repro rather than relying on the nested case to cover it.
+test_duplicate_top_level_store_block_refuses() {
+  make_fixture r12-dup-top-store
+  write_config 'store:
+  tasks: local
+store:
+  tasks: obsidian
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: two top-level 'store:' blocks (local then obsidian) did not exit non-zero: $OUT"
+  has_verdict_line \
+    && fail "R12: --apply against a duplicate top-level 'store:' block printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply deleted E01-F01-builder despite a duplicate top-level 'store:' block — the later 'obsidian' block selects a non-local backend, but a first-match top-level scan would have used 'local'"
+  pass "R12 test_duplicate_top_level_store_block_refuses"
+}
+
 # ── R13 ─────────────────────────────────────────────────────────────────────────────
 test_remove_failure_reported_and_exits_nonzero() {
   if ! modes_bind_this_uid; then
@@ -1650,6 +1731,9 @@ test_block_scalar_with_blank_lines_in_content_does_not_disqualify_document
 test_folded_block_scalar_content_does_not_disqualify_document
 test_block_scalar_at_end_of_document_closes_at_eof
 test_block_scalar_inside_store_block_still_refuses
+test_duplicate_tasks_key_conflicting_values_refuses
+test_duplicate_tasks_key_matching_values_refuses
+test_duplicate_top_level_store_block_refuses
 test_remove_failure_reported_and_exits_nonzero
 
 echo "all sweep-scratch tests passed"

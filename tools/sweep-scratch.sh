@@ -356,6 +356,7 @@ def find_store_key(entries):
     # a scalar-valued key.
     ROOT = (-1, True, False)  # (indent, open, is_block_scalar)
     stack = [ROOT]
+    found = None  # first top-level `store:` match, held until the scan finishes
     for idx, (indent, stripped) in enumerate(entries):
         while len(stack) > 1 and indent <= stack[-1][0]:
             stack.pop()
@@ -404,8 +405,16 @@ def find_store_key(entries):
 
         if key == "store":
             if is_top_level:
-                return idx, indent, rest.strip()
-            if not parent_open:
+                if found is not None:
+                    # A second top-level `store:` block — which of the two is
+                    # authoritative is genuinely ambiguous (Codex #4132718580,
+                    # round 18, the top-level counterpart of round 17's
+                    # duplicate-`id` TaskStore fix): refuse rather than
+                    # silently using whichever one this scan happened to see
+                    # first.
+                    raise _Refuse()
+                found = (idx, indent, rest.strip())
+            elif not parent_open:
                 raise _Refuse()
             # Legitimately nested under some OTHER open block (an unrelated
             # key that happens to also be named `store`) — not ours; keep
@@ -414,6 +423,8 @@ def find_store_key(entries):
         is_block_scalar = kv is not None and _BLOCK_SCALAR_RE.match(rest.strip()) is not None
         stack.append((indent, is_open, is_block_scalar))
 
+    if found is not None:
+        return found
     return None, None, None
 
 
@@ -509,8 +520,17 @@ def parse_store_tasks(path):
             continue
         kv = split_key_value(stripped)
         if kv is not None and kv[0] == "tasks":
+            if tasks_line is not None:
+                # A second `tasks:` key at store:'s own child indentation —
+                # which of the two selects the authoritative backend is
+                # genuinely ambiguous (Codex #4132718580, round 18, the
+                # nested-key counterpart of round 17's duplicate-`id`
+                # TaskStore fix): refuse rather than silently letting
+                # whichever occurrence this scan saw first win. Keep
+                # scanning (not break) so a duplicate is never missed
+                # merely because it happens to appear after other keys.
+                return (None, 1)
             tasks_line = kv[1].strip()
-            break
 
     if tasks_line is None:
         return ("", 0)  # `tasks:` genuinely absent from the `store:` block
