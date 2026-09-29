@@ -385,6 +385,62 @@ test_schema_invalid_non_string_types_abort_whole_scan_no_changes() {
   pass "R14 test_schema_invalid_non_string_types_abort_whole_scan_no_changes"
 }
 
+# Codex #4131236393: the id/status validation above only ever ran once a feature
+# array ELEMENT was already known to be a dict — a non-object element (the literal
+# `42` below) fell through an earlier `isinstance(feat, dict)` guard that silently
+# `continue`d past it instead of aborting, even though store/tasks.schema.json
+# requires every features[] element to be an object. Reproduces Codex's exact
+# `--apply` repro: a real done feature paired with a bare-number sibling record.
+test_schema_invalid_non_object_feature_aborts_whole_scan_no_changes() {
+  make_fixture r14h
+  write_board '{"epics":[{"id":"E01","features":[42,{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R14: a non-object feature array element (42) did not make --apply exit non-zero"
+  has_verdict_line \
+    && fail "R14: --apply against a non-object feature array element printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R14: --apply removed a valid done feature's scratch despite a sibling non-object feature record — the whole scan must abort instead of silently skipping it"
+  pass "R14 test_schema_invalid_non_object_feature_aborts_whole_scan_no_changes"
+}
+
+# Same schema requirement, one level up: store/tasks.schema.json also requires every
+# epics[] element to be an object. A non-object epic array element shared the exact
+# same silent-`continue` gap before this fix.
+test_schema_invalid_non_object_epic_aborts_whole_scan_no_changes() {
+  make_fixture r14i
+  write_board '{"epics":[42,{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R14: a non-object epic array element (42) did not make --apply exit non-zero"
+  has_verdict_line \
+    && fail "R14: --apply against a non-object epic array element printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R14: --apply removed a valid done feature's scratch despite a sibling non-object epic record — the whole scan must abort instead of silently skipping it"
+  pass "R14 test_schema_invalid_non_object_epic_aborts_whole_scan_no_changes"
+}
+
+# And one field over: an epic's `features` value must itself be an array — a string
+# there shared the same silent-`continue` gap.
+test_schema_invalid_features_not_list_aborts_whole_scan_no_changes() {
+  make_fixture r14j
+  write_board '{"epics":[{"id":"E01","features":"not-a-list"},{"id":"E02","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R14: a non-array epic.features value did not make --apply exit non-zero"
+  has_verdict_line \
+    && fail "R14: --apply against a non-array epic.features value printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R14: --apply removed a valid done feature's scratch despite a sibling epic with a non-array features value — the whole scan must abort instead of silently skipping it"
+  pass "R14 test_schema_invalid_features_not_list_aborts_whole_scan_no_changes"
+}
+
 # ── R6 ──────────────────────────────────────────────────────────────────────────────
 test_symlink_escape_skipped() {
   make_fixture r6
@@ -1472,6 +1528,9 @@ test_schema_invalid_status_missing_aborts_whole_scan_no_changes
 test_schema_invalid_id_null_aborts_whole_scan_no_changes
 test_schema_invalid_id_missing_aborts_whole_scan_no_changes
 test_schema_invalid_non_string_types_abort_whole_scan_no_changes
+test_schema_invalid_non_object_feature_aborts_whole_scan_no_changes
+test_schema_invalid_non_object_epic_aborts_whole_scan_no_changes
+test_schema_invalid_features_not_list_aborts_whole_scan_no_changes
 test_symlink_escape_skipped
 test_exit_code_reflects_tool_errors_only
 test_report_has_summary_verdicts_and_bytes_reclaimed

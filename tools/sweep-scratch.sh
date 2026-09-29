@@ -569,13 +569,26 @@ if not isinstance(epics, list):
 
 for epic in epics:
     if not isinstance(epic, dict):
-        continue
+        # Schema-invalid record (Codex #4131236393): store/tasks.schema.json
+        # requires every epics[] element to be an object, same as it requires
+        # every features[] element to be one (below). Abort the whole scan
+        # rather than silently skipping a structurally invalid epic — a
+        # partially-validated board can never be trusted.
+        sys.exit(1)
     feats = epic.get("features")
     if not isinstance(feats, list):
-        continue
+        # Same schema requirement, one field over: an epic's `features` must
+        # be an array. A missing/non-array value is just as schema-invalid as
+        # a non-object array element and must abort the same way.
+        sys.exit(1)
     for feat in feats:
         if not isinstance(feat, dict):
-            continue
+            # Schema-invalid record (Codex #4131236393): a non-object element
+            # in the features[] array (e.g. a bare number) is schema-invalid
+            # exactly like a malformed/missing id or status below — silently
+            # skipping it let a partially-invalid board carry on and delete a
+            # real done feature's scratch. Abort the whole scan instead.
+            sys.exit(1)
         fid = feat.get("id")
         status = feat.get("status")
         if (
