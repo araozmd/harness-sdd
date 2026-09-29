@@ -507,4 +507,104 @@ grep -qF "$(tr -d ' \n\r\t' < VERSION)" "$_self" \
   && fail "R10: this suite contains the current VERSION string — a permanent suite must not freeze it"
 pass "R10 suite_hygiene"
 
+# ── E34-F01: the non-self-removal hand-off contract ───────────────────────────────
+# The sweep (`tools/sweep-scratch.sh`) is the ONLY thing that ever removes a role's
+# namespaced scratch directory, and only once the owning feature reaches `done`. Four
+# role files now state that, each at its own pinned anchor: agents/builder.md (a new
+# bullet in the section R6 above already covers), agents/reviewer.md (a new (3f) — R2's
+# own span '**(3e)' '' already reaches it, which is why R7's negative-space check below
+# already sees both without further wiring), and two BRAND NEW `## Scratch files`
+# sections in agents/fixer.md / agents/pr-fixer.md, neither of which any earlier check
+# in this file extracts.
+
+# section2 <file> <heading> — same fence-aware heading extraction as section(), but for
+# an arbitrary file rather than the hard-coded $BUILDER.
+section2() {
+  awk -v h="$2" "$_FENCE_AWK"'
+    fence_delim($0) { if (k) print; next }
+    !fence && /^#+ / { k = (index($0, h) > 0); next }
+    k
+  ' "$1"
+}
+
+# handoff_checks <flattened-block> <what> — the FIVE claims all four sites make in
+# common, per agents/builder.md's E34-F01 bullet and its near-verbatim copies in
+# reviewer.md (3f), fixer.md and pr-fixer.md's new sections.
+handoff_checks() {
+  _hc_b="$1"; _hc_w="$2"
+
+  printf '%s\n' "$_hc_b" | grep -qF 'not at hand-off, not on cleanup, not ever' \
+    || fail "$_hc_w: does not state the prohibition holds at hand-off, on cleanup, and always ('not at hand-off, not on cleanup, not ever')"
+
+  printf '%s\n' "$_hc_b" | grep -qiE 'removal happens only through the sweep[^.]{0,60}sweep-scratch\.sh' \
+    || fail "$_hc_w: does not tie 'removal happens only through the sweep' to tools/sweep-scratch.sh in one sentence"
+
+  printf '%s\n' "$_hc_b" | grep -qiE "owning feature.{0,30}taskstore status reaches.{0,10}done" \
+    || fail "$_hc_w: does not require the OWNING FEATURE's TaskStore status to reach done before removal"
+
+  printf '%s\n' "$_hc_b" | grep -qiE 'never[^.]{0,90}(itself|yourself)' \
+    || fail "$_hc_w: does not state the role never removes the directory itself/yourself"
+
+  printf '%s\n' "$_hc_b" | grep -qiE 'writing.{0,10}.done.{0,20}sweep hook' \
+    || fail "$_hc_w: does not cross-reference agents/orchestrator.md's Writing \`done\` sweep hook"
+}
+
+# ── R11: agents/builder.md's new non-self-removal bullet ─────────────────────────
+BNR="$(section "$BUILDER_HEADING" | span '**Never remove your own scratch directory' '' | flat)"
+[ -n "$BNR" ] \
+  || fail "R11: agents/builder.md's '$BUILDER_HEADING' section has no 'Never remove your own scratch directory' bullet — the E34-F01 non-self-removal hand-off contract is missing"
+_hbnr="$(head_of "$BNR")"
+case "$_hbnr" in
+  "Never remove your own scratch directory. A role that writes a namespaced scratchpad/<feature-id>-<role>/ directory never deletes it itself"*) : ;;
+  *) fail "R11: agents/builder.md's non-self-removal bullet does not OPEN with its obligation. ⚠️ IF YOU LEGITIMATELY REWORDED IT, EDIT THIS LITERAL IN THE SAME COMMIT — do NOT relax it into a wider window (see R3's note)." ;;
+esac
+handoff_checks "$BNR" "R11: builder.md non-self-removal bullet"
+pass "R11 builder_never_removes_its_own_scratch_directory"
+
+# ── R12: agents/reviewer.md's new (3f) sub-item ───────────────────────────────────
+F3="$(printf '%s\n' "$C3" | span '**(3f)' '' | flat)"
+[ -n "$F3" ] || fail "R12: check 3 of $REVIEWER contains no literal '(3f)' label — a 'reviewer.md check 3f' citation resolves to nothing"
+_hf3="$(head_of "$F3")"
+case "$_hf3" in
+  "(3f) Never remove your own scratch directory. A campaign writes its scratch under scratchpad/<feature-id>-reviewer/ per (3d); it never removes that directory itself"*) : ;;
+  *) fail "R12: reviewer.md (3f) does not OPEN with its obligation. ⚠️ IF YOU LEGITIMATELY REWORDED IT, EDIT THIS LITERAL IN THE SAME COMMIT." ;;
+esac
+handoff_checks "$F3" "R12: reviewer.md (3f)"
+pass "R12 reviewer_3f_never_removes_its_own_scratch_directory"
+
+# ── R13/R14: the two BRAND NEW '## Scratch files' sections ───────────────────────
+# Neither agents/fixer.md nor agents/pr-fixer.md carried a scratch section before
+# E34-F01 — these extractions did not exist in this suite until now, unlike R11/R12
+# above which extend spans already reachable from R6/R2's existing extraction.
+FIXER="$SRC/agents/fixer.md"
+PRFIXER="$SRC/agents/pr-fixer.md"
+FSEC="$(section2 "$FIXER" 'Scratch files' | flat)"
+PSEC="$(section2 "$PRFIXER" 'Scratch files' | flat)"
+
+[ -n "$FSEC" ] || fail "R13: agents/fixer.md has no '## Scratch files' section"
+printf '%s\n' "$FSEC" | grep -qiF 'agents/builder.md' \
+  || fail "R13: agents/fixer.md's '## Scratch files' section does not cross-reference agents/builder.md's namespacing convention"
+handoff_checks "$FSEC" "R13: fixer.md '## Scratch files'"
+pass "R13 fixer_scratch_files_section_present_and_complete"
+
+[ -n "$PSEC" ] || fail "R14: agents/pr-fixer.md has no '## Scratch files' section"
+printf '%s\n' "$PSEC" | grep -qiF 'agents/builder.md' \
+  || fail "R14: agents/pr-fixer.md's '## Scratch files' section does not cross-reference agents/builder.md's namespacing convention"
+handoff_checks "$PSEC" "R14: pr-fixer.md '## Scratch files'"
+pass "R14 pr_fixer_scratch_files_section_present_and_complete"
+
+# ── R15: NEGATIVE SPACE over the two brand-new sections ───────────────────────────
+# R7 above already re-scans D3/E3/BSEC, which structurally already contain R11's and
+# R12's new text (BSEC is the WHOLE builder.md section; E3 runs to the end of check 3,
+# which now includes (3f)) — so R7 needs no changes to cover them. FSEC/PSEC are new
+# extractions R7 never sees, so they get their own pass of the same two alternations.
+_NEW2="$(printf '%s\n%s\n' "$FSEC" "$PSEC")"
+_opt3="$(printf '%s\n' "$_NEW2" | grep -oiwE 'may|optional|optionally|discretionary' | head -1 || :)"
+[ -z "$_opt3" ] \
+  || fail "R15: the new fixer.md/pr-fixer.md scratch-files sections contain the optionality marker '$_opt3' — a hand-off contract does not hedge"
+_opt4="$(printf '%s\n' "$_NEW2" | grep -oiE 'if time allows|not required|at your discretion|purely a convenience|nice to have|need not|only if you|where practical|when convenient|best effort' | head -1 || :)"
+[ -z "$_opt4" ] \
+  || fail "R15: the new fixer.md/pr-fixer.md scratch-files sections contain the opt-out phrase '$_opt4' — a hand-off contract does not offer an out"
+pass "R15 fixer_and_prfixer_sections_carry_no_optionality"
+
 echo "All scratch/disk precondition tests passed."

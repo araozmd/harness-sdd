@@ -346,7 +346,15 @@ Append a terminal or recoverable result for every selected fix and retain all
 `cap-deferred` entries. After every worker settles, serialize the supplied transition
 records into `progress/history.md`, then run one locked finalizer: set only fixes whose
 worker reported `merge-observed` to `done`, and preserve every recoverable failure at
-its last legitimate state. Commit the complete final board/history truth on the
+its last legitimate state. Immediately after the finalizer sets a fix to `done`, invoke
+the scratch sweep scoped to that fix's id, with `--apply`, once per finalized fix:
+`sh tools/sweep-scratch.sh <id> --apply` (installed layout:
+`sh .harness/tools/sweep-scratch.sh <id> --apply`) — this lane writes `done` itself and
+never reaches the Orchestrator main-path "Writing `done`" sweep hook
+(`agents/orchestrator.md`), so the finalizer must invoke the sweep directly, one call per
+finalized fix id when several finalize in the same pass. This is best-effort: a non-zero
+sweep exit is recorded but never blocks the finalizer and never reverts or reopens the
+`done` write. Commit the complete final board/history truth on the
 bookkeeping branch, push it, create/update its coordinator-owned bookkeeping PR, and
 require that PR's observed merge before cleanup. This PR contains shared bookkeeping
 only; it does not bypass a fix's local Reviewer or replace a per-fix code PR.
@@ -380,6 +388,16 @@ When the fix is seeded and re-validation passed, report to the human:
   `autonomous: true`, or **parked at the human gate** when `--gated`/`autonomous: false`
   (the Orchestrator does not auto-run it; a human must approve it first) — with the Fixer
   writing no production code.
+
+## Scratch files
+
+If you write any scratch state outside the repo, namespace it exactly as
+`agents/builder.md`'s `## Scratch files and campaign preconditions` section requires
+(`scratchpad/<feature-id>-<role>/`, never the scratchpad root, never a bare generic name) —
+that convention is not restated here. Never remove your own namespaced scratch directory
+yourself, not at hand-off, not on cleanup, not ever. Removal happens only through the sweep,
+`tools/sweep-scratch.sh`, and only once the owning feature's TaskStore status reaches `done`
+(see `agents/orchestrator.md`'s "Writing `done`" sweep hook).
 
 ## Reporting harness defects
 

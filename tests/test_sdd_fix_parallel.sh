@@ -544,6 +544,23 @@ need "$FIXER" 'tools/tasks-lock.py' "R4/R12: F01 helper missing"
 need "$FIXER" 'HARNESS_DIR="$HARNESS_MAIN"' "R12: canonical HARNESS_DIR missing"
 pass "R7/R8/R9/R10/R11/R12/R13/R20 coordinator ordering contract"
 
+# test_p7_finalizer_invokes_scratch_sweep
+# E34-F01 R9 extension: the P7 finalizer writes `done` itself and never reaches the
+# Orchestrator main-path "Writing `done`" sweep hook, so P7 must invoke the same
+# scoped sweep directly, once per finalized fix id.
+python3 - "$FIXER" <<'PY' || fail "R9: P7 finalizer does not invoke the scratch sweep per finalized fix"
+import sys
+s = open(sys.argv[1]).read()
+section = s.split("### P7 — aggregate report and exit", 1)[1].split("\n### ", 1)[0]
+assert "sh tools/sweep-scratch.sh <id> --apply" in section, "missing source-layout sweep invocation"
+assert "sh .harness/tools/sweep-scratch.sh <id> --apply" in section, "missing installed-layout sweep invocation"
+assert "once per finalized fix" in section, "missing once-per-finalized-fix scoping"
+assert "best-effort" in section, "missing best-effort contract"
+assert "never blocks the finalizer" in section, "missing never-blocks contract"
+assert "never reverts or reopens" in section, "missing never-reverts contract"
+PY
+pass "R9 P7 finalizer invokes per-fix scratch sweep"
+
 need "$ORCH" 'Targeted parallel-fix worker mode' "R13: targeted worker mode missing"
 need "$ORCH" 'never call global `next()`' "R13: targeted mode does not disable next()"
 need "$ORCH" 'clean Builder context' "R13: clean Builder context missing"

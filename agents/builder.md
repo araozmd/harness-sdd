@@ -164,6 +164,14 @@ enforced — see **E99-F102**.
   the environment is confirmed healthy** — re-read the free space, repair the machine, and
   run it again. **A mass-failure run is never evidence**; it is an aborted run, and it is
   reported as one.
+- **Never remove your own scratch directory.** A role that writes a namespaced
+  `scratchpad/<feature-id>-<role>/` directory never deletes it itself — not at hand-off, not
+  on cleanup, not ever. Removal happens only through the sweep, `tools/sweep-scratch.sh`, and
+  only once the owning feature's TaskStore status reaches `done` (see
+  `agents/orchestrator.md`'s "Writing `done`" sweep hook). The sweep is a fail-closed
+  backstop, never a convenience your own judgment substitutes for: it leaves a directory
+  untouched whenever it cannot establish `done` from the TaskStore, and self-removal by the
+  role that wrote it would defeat that fail-closed contract outright.
 
 ## Hand-off
 

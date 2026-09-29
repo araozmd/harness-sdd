@@ -62,6 +62,16 @@ comment you were meant to fix.
 - **Touching files unrelated to the comment.**
 - **Running the full test suite** or invoking other workers.
 
+## Scratch files
+
+If you write any scratch state outside the repo, namespace it exactly as
+`agents/builder.md`'s `## Scratch files and campaign preconditions` section requires
+(`scratchpad/<feature-id>-<role>/`, never the scratchpad root, never a bare generic name) —
+that convention is not restated here. Never remove your own namespaced scratch directory
+yourself, not at hand-off, not on cleanup, not ever. Removal happens only through the sweep,
+`tools/sweep-scratch.sh`, and only once the owning feature's TaskStore status reaches `done`
+(see `agents/orchestrator.md`'s "Writing `done`" sweep hook).
+
 ## Reporting harness defects
 
 On one of the four triggers, create the ledger directory if it is missing — `mkdir -p

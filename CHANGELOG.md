@@ -4,6 +4,59 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.89.0] — 2026-09-28
+
+### Added — automated scratch-dir sweep + role hand-off rules (E34-F01)
+
+- **New `tools/sweep-scratch.sh`.** Scans `scratchpad/`, dry-run by default (report
+  only), mutates only with an explicit `--apply` flag. Classifies each immediate entry by
+  its leading `<feature-id>-<remainder>` name; an entry whose name does not match is
+  `unrecognized` and is never acted on. Liveness is the local TaskStore's feature
+  `status`, read **once per run before any entry is classified**: a read/parse failure of
+  the TaskStore aborts the whole scan before anything is classified or removed and exits
+  non-zero — a distinct outcome from a per-entry skip. An entry whose feature id is not
+  found, or whose status is anything other than `done`, is skipped with the specific
+  reason and never removed, in every mode, and never flips the exit code. A feature
+  carrying a `parked` field (store/tasks.schema.json: presence means parked, regardless
+  of shape) is skipped too, even when its `status` scalar reads `done` — reported as
+  `skipped: status:parked` (Codex #4131629415). Before any
+  removal, the entry's resolved real path must be a direct child of the resolved
+  `scratchpad/` real path — a symlink escaping it is skipped and reported as an anomaly,
+  never deleted through. Accepts an optional single feature-id argument to scope the scan;
+  prints one line per classified entry (`removed` / `eligible` / `skipped: <reason>` /
+  `unrecognized`) plus a final summary of counts per verdict and total bytes reclaimed.
+- **Orchestrator hook.** `agents/orchestrator.md`'s "Writing `done`" step now invokes the
+  sweep scoped to the just-landed feature id with `--apply`, immediately after
+  `set-status <id> done`, best-effort: a non-zero sweep exit is recorded but never blocks
+  or reverses the `done` write.
+- **Role hand-off contract.** `agents/builder.md`, `agents/reviewer.md` (new check `(3f)`),
+  `agents/fixer.md`, and `agents/pr-fixer.md` now each state that a role never removes its
+  own namespaced `scratchpad/<feature-id>-<role>/` directory itself — removal happens only
+  through the sweep, once the owning feature reaches `done`.
+- Ships executable in both the source (`tools/sweep-scratch.sh`) and installed
+  (`.harness/tools/sweep-scratch.sh`) layouts; added to `test_source_scripts_are_executable`'s
+  required set.
+- **Known limitation.** The R12 `store.tasks` backend guard's hand-rolled YAML reader
+  handles the realistic, common YAML authoring shapes exercised by this repo's own test
+  suite, but it is not a full YAML parser. Uncommon or unusual syntax — e.g. escaped
+  characters in a quoted `store:`/`tasks:` key (Codex #4129683687), or a block-scalar
+  header whose indentation/chomping indicators appear in a less-common order (Codex
+  #4130134127) — may cause it to fail closed (refuse, exit non-zero) rather than resolve
+  correctly; these are illustrative examples of the class, not an exhaustive list. This
+  is always safe (the tool never mutates anything when it fails closed) but not
+  exhaustive — a disclosed, deliberate gap, not an oversight; closing it properly needs a
+  real YAML dependency or a different way to derive the backend, not another hand-rolled
+  pattern per edge case.
+- **Known limitation.** The parked check above and the `id`/`status` grammar check
+  (R5/R14) are the only cross-field/shape validation this tool performs against
+  store/tasks.schema.json. It does not re-validate the schema's full cross-field
+  contract — e.g. a sliced feature's `done` requiring every slice `done` AND `merged`,
+  or any other invariant `tasks-lock.py` enforces at write time. A board that reached an
+  inconsistent cross-field state by bypassing that guarded write path (a hand-edit, or an
+  externally imported board) is already outside this harness's supported operating model;
+  this tool does not attempt to re-derive or re-enforce that integrity guarantee beyond
+  the parked check (Codex #4131629415).
+
 ## [0.88.0] — 2026-09-26
 
 ### Added — the reporting rule + `/sdd-report`: reporting goes live (E32-F03)

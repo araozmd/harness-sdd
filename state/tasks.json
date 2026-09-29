@@ -1644,7 +1644,13 @@
           "id": "E32-F03",
           "title": "Reporting rule + /sdd-report command on every front end: four triggers, end-of-task and early-stop filing",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "22ad0da257277d38ac5937fa8c0f8bb8aed41dc2", "ref": "22ad0da257277d38ac5937fa8c0f8bb8aed41dc2", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "22ad0da257277d38ac5937fa8c0f8bb8aed41dc2",
+            "ref": "22ad0da257277d38ac5937fa8c0f8bb8aed41dc2",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [
@@ -1657,7 +1663,13 @@
           "id": "E32-F04",
           "title": "Source-repo GitHub Action that labels marker-carrying issues without trusting their bodies",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "f737c3bfaf923320f9392098db1d4e5ee9549bc7", "ref": "f737c3bfaf923320f9392098db1d4e5ee9549bc7", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "f737c3bfaf923320f9392098db1d4e5ee9549bc7",
+            "ref": "f737c3bfaf923320f9392098db1d4e5ee9549bc7",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [
@@ -1688,11 +1700,33 @@
           "id": "E33-F01",
           "title": "Native Antigravity invocation adapter, dynamic subagent dispatch, and documentation",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "82597175a1d73981ddeaf6fe5021e1caaaab3d5e", "ref": "82597175a1d73981ddeaf6fe5021e1caaaab3d5e", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "82597175a1d73981ddeaf6fe5021e1caaaab3d5e",
+            "ref": "82597175a1d73981ddeaf6fe5021e1caaaab3d5e",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E33-antigravity-front/F01-antigravity-support/"
+        }
+      ]
+    },
+    {
+      "id": "E34",
+      "title": "Resource hygiene: bounded cleanup of scratch files, handoff files, and merged worktrees/branches",
+      "status": "pending",
+      "features": [
+        {
+          "id": "E34-F01",
+          "title": "Automated cleanup sweep + role hand-off rules for scratch files, stale progress/ handoffs, and merged worktrees/branches",
+          "status": "in-review",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E34-resource-hygiene/F01-cleanup-discipline/"
         }
       ]
     }
