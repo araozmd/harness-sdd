@@ -165,7 +165,14 @@ _cfg_store_tasks() { # _cfg_store_tasks <file> — echoes store.tasks; empty out
   # its `tasks:` child can be resolved unambiguously). Nothing else in the
   # document — no matter what YAML feature it uses, a block scalar, a
   # sequence, a flow mapping, an anchor/alias, anything — is ever examined,
-  # classified, or allowed to trigger a refusal.
+  # classified, or allowed to trigger a refusal. Round 8's first pass left one
+  # gap open, though: a block scalar's own CONTENT lines were still being
+  # key-matched like structure, so content that happened to read `store:` (a
+  # heredoc inside an unrelated key) could still derail the search (Codex
+  # #4129040215). `find_store_key()` now recognizes an actual block-scalar
+  # header (`key: |`/`>` and its chomping/indentation indicators) and treats
+  # every more-indented line after it as opaque literal text, unconditionally
+  # — see its own docstring for the one YAML grammar rule this implements.
   python3 - "$1" <<'PYEOF'
 import re
 import sys
@@ -263,39 +270,76 @@ class _Refuse(Exception):
     pass
 
 
+# A YAML block-scalar header: the literal ('|') or folded ('>') indicator,
+# an optional explicit chomping indicator ('-'/'+'), and an optional explicit
+# indentation indicator digit — e.g. `|`, `|-`, `|+`, `>`, `>2`, `|-2`.
+# Comments are already stripped from `rest` before this is checked, so this
+# never has to account for a trailing `# ...` itself. This is the ONE YAML
+# grammar rule this reader implements for block scalars: detect where one
+# opens, then treat every more-indented line after it as opaque literal
+# content — never structure — regardless of what that content says (Codex
+# #4129040215, round 8: a block scalar's content can itself contain a line
+# that reads like `store:`, and YAML says that text is never interpreted).
+_BLOCK_SCALAR_RE = re.compile(r'^[|>][+-]?[0-9]?$')
+
+
 def find_store_key(entries):
     # Locate the top-level `store:` key by walking the document top to
     # bottom, tracking ONLY indentation-based nesting — never what any OTHER
-    # line's content IS. That tracking answers exactly two narrow questions
-    # about a candidate `store:` line: (a) is it directly under the
+    # line's content IS (with exactly one exception: recognizing a block
+    # scalar's own header line, below, so its content can be skipped rather
+    # than misread as structure). That tracking answers exactly two narrow
+    # questions about a candidate `store:` line: (a) is it directly under the
     # document's own root (nothing else encloses it — i.e. it really is
     # top-level, however that document happens to indent its top level), and
     # (b) if not, is its immediate parent a key that already carries its own
     # inline scalar value (invalid nesting — the document's structure around
     # `store:` is broken, not merely "store: absent")? Frames are popped by
-    # plain indentation comparison alone, so a block scalar, sequence, flow
-    # mapping, anchor, or anything else nested under some UNRELATED top-level
-    # key is walked past and never inspected for its own shape (Codex
-    # #4128789217, round 7 — the block-scalar counterpart to round 6's
-    # unrelated-sequence false refusal).
+    # plain indentation comparison alone, so a sequence, flow mapping,
+    # anchor, or anything else nested under some UNRELATED top-level key is
+    # walked past and never inspected for its own shape (round 6/7).
+    #
+    # Round 7's fix left one gap: a block-scalar header line (`key: |`) has a
+    # non-empty `rest` (the `|` itself), so it was recorded as a CLOSED frame
+    # (is_open=False) — the same shape as `key: some scalar`. A later line
+    # that is really just opaque block-scalar CONTENT, but happens to start
+    # with `store:` (e.g. inside a `test_command: |` heredoc), was then
+    # walked into that closed frame's "child" check and wrongly raised
+    # _Refuse() as `store:` invalidly nested under a scalar-valued key —
+    # Codex #4129040215. Round 8 closes this by recognizing the block-scalar
+    # header itself (see _BLOCK_SCALAR_RE) and marking its frame specially:
+    # every subsequent entry more indented than that header's own line is
+    # opaque content and is skipped unconditionally, before ANY key-matching
+    # or structural check ever runs on it — not just the key=="store" one.
     #
     # The one remaining exception, matching this reader's contract since
     # rounds 4-5, is the document's own TOP-LEVEL lines themselves: those are
     # still checked for the exact shapes that hid a real `store:` key from a
     # naive search (a flow-style mapping/sequence or anchor/alias, or a YAML
-    # multi-document marker) — never anything nested under them.
+    # multi-document marker) — never anything nested under them, and never
+    # anything that is itself opaque block-scalar content.
     #
     # Returns (store_idx, store_indent, store_rest) for a top-level `store:`
     # key found, or (None, None, None) when the document genuinely has none
     # anywhere. Raises _Refuse when the search itself cannot confidently
     # tell — an unreadable top-level line, or `store:` invalidly nested under
     # a scalar-valued key.
-    ROOT = (-1, True)
+    ROOT = (-1, True, False)  # (indent, open, is_block_scalar)
     stack = [ROOT]
     for idx, (indent, stripped) in enumerate(entries):
         while len(stack) > 1 and indent <= stack[-1][0]:
             stack.pop()
-        _, parent_open = stack[-1]
+        _, parent_open, parent_is_block_scalar = stack[-1]
+
+        if parent_is_block_scalar:
+            # Opaque literal content of an open block scalar: never
+            # classified, never key-matched, never structurally interpreted
+            # — full stop, whatever it says (Codex #4129040215). Its own
+            # indentation already guarantees it stays nested here until a
+            # line back at or below the block scalar header's indentation
+            # pops this frame above.
+            continue
+
         is_top_level = len(stack) == 1
 
         if is_top_level:
@@ -322,7 +366,8 @@ def find_store_key(entries):
             # key that happens to also be named `store`) — not ours; keep
             # scanning for a real top-level one.
 
-        stack.append((indent, is_open))
+        is_block_scalar = kv is not None and _BLOCK_SCALAR_RE.match(rest.strip()) is not None
+        stack.append((indent, is_open, is_block_scalar))
 
     return None, None, None
 

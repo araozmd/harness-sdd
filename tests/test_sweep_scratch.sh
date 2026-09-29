@@ -1018,6 +1018,133 @@ notes:
   pass "R12 round-7 test_document_marker_lookalike_in_unrelated_block_scalar_does_not_disqualify_document"
 }
 
+# ── R12 (round-8: a block scalar's own CONTENT must stay opaque, even when that
+# content itself reads like a `store:` line) ──────────────────────────────────────
+# Round 7 stopped an unrelated block scalar's mere PRESENCE from disqualifying the
+# document, but its header line (`key: |`) was still recorded as a "closed" frame
+# (non-empty inline value), so a later content line that happened to start with
+# `store:` was still key-matched against that closed frame and wrongly refused as
+# `store:` invalidly nested under a scalar-valued key — Codex #4129040215. Round 8
+# makes block-scalar content genuinely opaque: find_store_key() now recognizes the
+# block-scalar header itself and skips every more-indented line after it
+# unconditionally, never key-matching it at all.
+
+# ── Codex's exact repro: block-scalar content containing a `store:`-shaped line,
+# alongside a REAL top-level store: elsewhere in the document ────────────────────
+test_block_scalar_content_shaped_like_store_key_does_not_disqualify_document() {
+  make_fixture r12-block-scalar-content-looks-like-store
+  write_config 'verification:
+  test_command: |
+    echo setup
+    store: local
+    echo teardown
+store:
+  tasks: local
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 round-8: block-scalar CONTENT that itself reads like 'store: local' made a document with a real top-level store: block refuse — Codex #4129040215: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 round-8: store.tasks: local did not scan/remove normally despite the store:-shaped block-scalar content: $OUT"
+  pass "R12 round-8 test_block_scalar_content_shaped_like_store_key_does_not_disqualify_document"
+}
+
+# ── adversarial: block-scalar content interrupted by blank lines ─────────────────
+test_block_scalar_with_blank_lines_in_content_does_not_disqualify_document() {
+  make_fixture r12-block-scalar-blank-lines
+  write_config 'verification:
+  test_command: |
+    echo one
+
+    store: local
+
+    echo two
+store:
+  tasks: local
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 round-8: blank lines inside an unrelated block scalar's content made the document refuse: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 round-8: store.tasks: local did not scan/remove normally despite blank lines inside the block scalar: $OUT"
+  pass "R12 round-8 test_block_scalar_with_blank_lines_in_content_does_not_disqualify_document"
+}
+
+# ── adversarial: a folded ('>') block scalar, not literal ('|') ──────────────────
+test_folded_block_scalar_content_does_not_disqualify_document() {
+  make_fixture r12-folded-block-scalar
+  write_config 'notes:
+  summary: >
+    store: local
+    this is folded text
+store:
+  tasks: local
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 round-8: a folded ('>') block scalar's content made the document refuse: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 round-8: store.tasks: local did not scan/remove normally despite the folded block scalar: $OUT"
+  pass "R12 round-8 test_folded_block_scalar_content_does_not_disqualify_document"
+}
+
+# ── adversarial: the block scalar is the LAST thing in the document — no trailing
+# dedent line ever closes it; EOF must close it correctly, and the real store:
+# block must still resolve because it appears BEFORE the trailing block scalar ────
+test_block_scalar_at_end_of_document_closes_at_eof() {
+  make_fixture r12-block-scalar-eof
+  write_config 'store:
+  tasks: local
+verification:
+  test_command: |
+    store: local
+    echo done
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 round-8: a trailing block scalar with no closing dedent line (EOF) made the document refuse: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 round-8: store.tasks: local did not scan/remove normally despite the trailing, EOF-closed block scalar: $OUT"
+  pass "R12 round-8 test_block_scalar_at_end_of_document_closes_at_eof"
+}
+
+# ── adversarial: a block scalar opening genuinely INSIDE store:'s own block is a
+# different case — store:'s schema is a scalar or plain mapping, never a block
+# scalar, so this stays disqualifying per the existing "ambiguous content inside
+# store: refuses" contract, rather than being newly exempted like the cases above
+# (see tools/sweep-scratch.sh's parse_store_tasks block-scanning loop, which this
+# round's find_store_key change does not touch: find_store_key returns as soon as
+# it finds the top-level store: line, before ever walking store:'s own children) ──
+test_block_scalar_inside_store_block_still_refuses() {
+  make_fixture r12-block-scalar-inside-store
+  write_config 'store:
+  tasks: local
+  notes: |
+    [not actually a list, just content]
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12 round-8: a block scalar nested inside the store: block itself, with disqualifying-looking content, did not refuse: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12 round-8: --apply deleted E01-F01-builder despite an ambiguous block scalar inside the store: block"
+  pass "R12 round-8 test_block_scalar_inside_store_block_still_refuses"
+}
+
 # ── R13 ─────────────────────────────────────────────────────────────────────────────
 test_remove_failure_reported_and_exits_nonzero() {
   if ! modes_bind_this_uid; then
@@ -1092,6 +1219,11 @@ test_block_scalar_in_unrelated_section_does_not_disqualify_document
 test_anchor_and_alias_in_unrelated_section_does_not_disqualify_document
 test_flow_mapping_in_unrelated_section_does_not_disqualify_document
 test_document_marker_lookalike_in_unrelated_block_scalar_does_not_disqualify_document
+test_block_scalar_content_shaped_like_store_key_does_not_disqualify_document
+test_block_scalar_with_blank_lines_in_content_does_not_disqualify_document
+test_folded_block_scalar_content_does_not_disqualify_document
+test_block_scalar_at_end_of_document_closes_at_eof
+test_block_scalar_inside_store_block_still_refuses
 test_remove_failure_reported_and_exits_nonzero
 
 echo "all sweep-scratch tests passed"
