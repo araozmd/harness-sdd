@@ -26,9 +26,12 @@
 #     scalar reads `done` — reported as `skipped: status:parked` (R15, Codex
 #     #4131629415).
 #   - If the TaskStore itself cannot be read or parsed, OR a record's `id`/`status`
-#     violates store/tasks.schema.json's grammar, the WHOLE scan aborts before
-#     classifying or removing anything — a tool-level error, distinct from a
-#     per-entry skip, and the process exits non-zero (R5, R14).
+#     violates store/tasks.schema.json's grammar, OR the same feature `id` appears
+#     more than once anywhere in the board (store/tasks.schema.json requires ids to
+#     be globally unique — tools/next-task.mjs:271 enforces the same invariant on its
+#     own read path), the WHOLE scan aborts before classifying or removing anything —
+#     a tool-level error, distinct from a per-entry skip, and the process exits
+#     non-zero (R5, R14).
 #     KNOWN LIMITATION (disclosed, not an oversight): R15's parked check and R5/R14's
 #     id/status grammar check are the only cross-field/shape validation this tool
 #     performs. It does not re-validate store/tasks.schema.json's full cross-field
@@ -580,6 +583,7 @@ epics = data.get("epics")
 if not isinstance(epics, list):
     sys.exit(1)
 
+seen_fids = set()
 for epic in epics:
     if not isinstance(epic, dict):
         # Schema-invalid record (Codex #4131236393): store/tasks.schema.json
@@ -617,6 +621,22 @@ for epic in epics:
             # past a record that never proved its own shape. Abort the whole
             # scan instead of silently skipping just this one record.
             sys.exit(1)
+        if fid in seen_fids:
+            # R14 extension (Codex #4132354818): store/tasks.schema.json requires
+            # feature ids to be globally unique across the whole board, and
+            # tools/next-task.mjs:271 already enforces exactly this invariant on the
+            # canonical selector's own read path (`if (featureIds.has(feature.id))
+            # throw ...`). lookup_status()'s awk lookup below matches on first `$1 ==
+            # id` and exits — so a duplicate id let array order silently decide which
+            # row's status won. Codex's repro paired a `done` row with a later
+            # `in-progress` row for the same id and reproduced --apply deleting the
+            # live record's scratch. The duplicate id is itself the schema violation,
+            # regardless of whether the two rows happen to agree on status — abort the
+            # whole scan the same way every other schema-invalid record above does,
+            # rather than resolving the ambiguity by trusting whichever row this loop
+            # reaches first.
+            sys.exit(1)
+        seen_fids.add(fid)
         # R15 (Codex #4131629415): store/tasks.schema.json's `parked` field is a
         # cross-field invariant this reader otherwise never sees — its own
         # $comment says PRESENCE MEANS PARKED, regardless of shape, and a `done`

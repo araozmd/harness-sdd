@@ -466,6 +466,52 @@ test_schema_invalid_features_not_list_aborts_whole_scan_no_changes() {
   pass "R14 test_schema_invalid_features_not_list_aborts_whole_scan_no_changes"
 }
 
+# Codex #4132354818: store/tasks.schema.json requires feature ids to be globally
+# unique, and tools/next-task.mjs:271 already rejects a duplicate id on its own read
+# path. lookup_status()'s awk lookup matches the FIRST `$1 == id` row and exits, so a
+# duplicate id let array order silently decide which row's status was trusted — here a
+# `done` row precedes a later `in-progress` row for the SAME id, and an unguarded
+# --apply would delete the live record's scratch.
+test_duplicate_feature_id_conflicting_status_aborts_whole_scan_no_changes() {
+  make_fixture r14k
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"},{"id":"E01-F01","status":"in-progress"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep
+  [ "$RC" -ne 0 ] \
+    || fail "R14: a duplicate feature id (done + in-progress) did not make the tool exit non-zero"
+  has_verdict_line \
+    && fail "R14: a per-entry verdict was printed despite a duplicate feature id — the scan must abort BEFORE classifying anything: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] || fail "R14: a directory vanished on a dry (non --apply) run"
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R14: --apply against a duplicate feature id (done + in-progress) did not exit non-zero"
+  has_verdict_line \
+    && fail "R14: --apply against a duplicate feature id printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R14: --apply removed scratch for a duplicated feature id — Codex #4132354818's exact repro (a done row masking a later in-progress row for the same id)"
+  pass "R14 test_duplicate_feature_id_conflicting_status_aborts_whole_scan_no_changes"
+}
+
+# Same duplicate-id abort, but the two duplicate records AGREE on status (both
+# `done`). The abort must fire on the duplication itself, not on a status conflict —
+# a lenient reader that only aborted when the rows disagreed would still be wrong.
+test_duplicate_feature_id_matching_status_aborts_whole_scan_no_changes() {
+  make_fixture r14l
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"},{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R14: a duplicate feature id with matching (done + done) status did not make --apply exit non-zero"
+  has_verdict_line \
+    && fail "R14: --apply against a duplicate feature id with matching status printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R14: --apply removed scratch for a feature id duplicated with matching status — a duplicate id is a schema violation on its own, not just when the duplicates disagree"
+  pass "R14 test_duplicate_feature_id_matching_status_aborts_whole_scan_no_changes"
+}
+
 # ── R6 ──────────────────────────────────────────────────────────────────────────────
 test_symlink_escape_skipped() {
   make_fixture r6
@@ -1557,6 +1603,8 @@ test_schema_invalid_non_string_types_abort_whole_scan_no_changes
 test_schema_invalid_non_object_feature_aborts_whole_scan_no_changes
 test_schema_invalid_non_object_epic_aborts_whole_scan_no_changes
 test_schema_invalid_features_not_list_aborts_whole_scan_no_changes
+test_duplicate_feature_id_conflicting_status_aborts_whole_scan_no_changes
+test_duplicate_feature_id_matching_status_aborts_whole_scan_no_changes
 test_symlink_escape_skipped
 test_exit_code_reflects_tool_errors_only
 test_report_has_summary_verdicts_and_bytes_reclaimed
