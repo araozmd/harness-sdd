@@ -1717,12 +1717,13 @@
     {
       "id": "E34",
       "title": "Resource hygiene: bounded cleanup of scratch files, handoff files, and merged worktrees/branches",
-      "status": "pending",
+      "status": "done",
       "features": [
         {
           "id": "E34-F01",
           "title": "Automated cleanup sweep + role hand-off rules for scratch files, stale progress/ handoffs, and merged worktrees/branches",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "62d6c6a8055cbf70fdb5365d2260978dd5d2c633", "ref": "62d6c6a8055cbf70fdb5365d2260978dd5d2c633", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [],

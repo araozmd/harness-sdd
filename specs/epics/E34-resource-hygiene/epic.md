@@ -1,7 +1,7 @@
 ---
 id: E34
 title: "Resource hygiene: bounded cleanup of scratch files, handoff files, and merged worktrees/branches"
-status: pending          # legacy alias of planned; drill when ready to decompose further
+status: done             # legacy alias of planned; drill when ready to decompose further
 owner: araozmd
 ---
 
@@ -58,7 +58,7 @@ become eligible for cleanup and who is expected to remove or sweep them.
 
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| E34-F01 | Automated cleanup sweep + role hand-off rules for scratch files, stale progress/ handoffs, and merged worktrees/branches | pending | true | — |
+| E34-F01 | Automated scratch-dir sweep + role hand-off rules for finished features | done | true | — |
 
 Not yet seeded on the TaskStore (`state/tasks.json`) — the two follow-on features named
 in Notes below (`progress/` handoff-file sweep; git worktree + local-branch sweep) have
