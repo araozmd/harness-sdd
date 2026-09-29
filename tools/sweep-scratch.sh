@@ -30,6 +30,14 @@
 #   - If `store.tasks` in harness.config.yaml is anything other than `local` (the only
 #     backend this tool reads status from), the tool refuses outright before touching
 #     `state/tasks.json` or scratchpad/ at all, and exits non-zero (R12).
+#     KNOWN LIMITATION (disclosed, not an oversight — see Codex #4129683687): the R12
+#     guard's hand-rolled reader does not decode YAML scalar escape sequences (e.g. a
+#     `\uXXXX`-style escape) inside a quoted `store:`/`tasks:` key. A key written with
+#     such an escape is not recognized as `store`/`tasks`, so the tool fails closed
+#     (refuses, exits non-zero) instead of resolving it correctly — safe, but it won't
+#     run. Closing this gap properly needs either a real YAML dependency or a different
+#     way to derive the backend, not another hand-rolled pattern; deferred, not fixed
+#     in this PR.
 #
 # The tool never mutates the TaskStore, never writes outside the one resolved
 # scratchpad/ directory, and never globs or acts on scratchpad/ itself.
@@ -563,7 +571,17 @@ BYTES_RECLAIMED=0
 ANY_REMOVE_FAILED=0
 
 if [ -n "$SCRATCHPAD_REAL" ]; then
-  for _entry in "$SCRATCHPAD"/*; do
+  # Three glob patterns, not one: POSIX `*` alone never matches a dot-prefixed name,
+  # so a dot-prefixed directory or dangling symlink under scratchpad/ would otherwise
+  # never be enumerated at all — omitted from the summary's `total` and never given a
+  # verdict (Codex #4129683699). `.[!.]*` matches single-dot-prefixed names (excludes
+  # literal `.` and `..` themselves) and `..?*` matches double-dot-prefixed names
+  # (`..foo`, excludes literal `..`); the three patterns are mutually exclusive
+  # character classes, so no entry is ever matched by more than one of them. When any
+  # one pattern has no match, it expands to its own literal unmatched-pattern string
+  # (no nullglob in POSIX sh), which the existing `[ -e ] || [ -L ]` guard below
+  # rejects for each pattern independently, same as it always has for the bare `*`.
+  for _entry in "$SCRATCHPAD"/* "$SCRATCHPAD"/.[!.]* "$SCRATCHPAD"/..?*; do
     [ -e "$_entry" ] || [ -L "$_entry" ] || continue
     _name="${_entry##*/}"
     _fid="$(parse_fid "$_name")"

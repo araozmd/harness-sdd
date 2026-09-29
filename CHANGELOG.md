@@ -33,6 +33,11 @@ All notable changes to the harness body are recorded here. Versions follow
 - Ships executable in both the source (`tools/sweep-scratch.sh`) and installed
   (`.harness/tools/sweep-scratch.sh`) layouts; added to `test_source_scripts_are_executable`'s
   required set.
+- **Known limitation.** The R12 `store.tasks` backend guard's hand-rolled YAML reader
+  does not decode scalar escape sequences inside a quoted `store:`/`tasks:` key; such a
+  key is not recognized, and the tool fails closed (refuses, exits non-zero) rather than
+  resolving it — a disclosed, deliberate gap, not an oversight; closing it properly needs
+  a real YAML dependency or a different way to derive the backend.
 
 ## [0.88.0] — 2026-09-26
 

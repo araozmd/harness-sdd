@@ -349,6 +349,48 @@ test_scoped_vs_full_scan() {
   pass "R8 test_scoped_vs_full_scan"
 }
 
+# ── dotglob (Codex #4129683699) ─────────────────────────────────────────────────────
+# POSIX `*` alone never matches a dot-prefixed name. A dot-prefixed directory, a
+# double-dot-prefixed directory, and a dangling dot-prefixed symlink must all still be
+# enumerated by an unscoped scan: counted in `total` and given a verdict, never
+# silently dropped. None of the three ever matches a real `E##-F##-` feature-id
+# prefix, so all three are `unrecognized`, alongside one ordinary matching entry, to
+# also confirm no entry is double-counted across the three glob patterns the fix adds.
+test_dotglob_entries_included_in_unscoped_scan() {
+  make_fixture r-dotglob
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+  scratch_dir .hidden-dir
+  scratch_dir ..double-dot-dir
+  scratch_symlink .dangling-link "$TMP_ROOT/r-dotglob-target-does-not-exist"
+
+  run_sweep
+  [ "$RC" -eq 0 ] || fail "dotglob: unscoped dry-run exited non-zero: $OUT"
+
+  printf '%s\n' "$OUT" | grep -qE '^\.hidden-dir[[:space:]]+unrecognized$' \
+    || fail "dotglob: a dot-prefixed directory was omitted or misclassified by the unscoped scan: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^\.\.double-dot-dir[[:space:]]+unrecognized$' \
+    || fail "dotglob: a double-dot-prefixed directory was omitted or misclassified by the unscoped scan: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^\.dangling-link[[:space:]]+unrecognized$' \
+    || fail "dotglob: a dangling dot-prefixed symlink was omitted or misclassified by the unscoped scan: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+eligible$' \
+    || fail "dotglob: the ordinary recognized entry was not still reported alongside the dot entries: $OUT"
+
+  _n_hidden=$(printf '%s\n' "$OUT" | grep -cE '^\.hidden-dir[[:space:]]')
+  [ "$_n_hidden" = "1" ] \
+    || fail "dotglob: .hidden-dir was reported $_n_hidden times — the three glob patterns must not overlap: $OUT"
+
+  _summary="$(printf '%s\n' "$OUT" | grep '^summary:' || :)"
+  [ -n "$_summary" ] || fail "dotglob: no summary line was printed: $OUT"
+  _total=$(printf '%s\n' "$_summary" | sed -n 's/.*total=\([0-9]*\).*/\1/p')
+  _unrecognized=$(printf '%s\n' "$_summary" | sed -n 's/.*unrecognized=\([0-9]*\).*/\1/p')
+  [ "$_total" = "4" ] \
+    || fail "dotglob: summary total is '$_total', expected 4 (1 ordinary + 3 dot-prefixed entries): $_summary"
+  [ "$_unrecognized" = "3" ] \
+    || fail "dotglob: summary unrecognized is '$_unrecognized', expected 3: $_summary"
+  pass "dotglob test_dotglob_entries_included_in_unscoped_scan"
+}
+
 # ── R12 ─────────────────────────────────────────────────────────────────────────────
 test_unsupported_backend_refuses_before_touching_anything() {
   make_fixture r12
@@ -1187,6 +1229,7 @@ test_symlink_escape_skipped
 test_exit_code_reflects_tool_errors_only
 test_report_has_summary_verdicts_and_bytes_reclaimed
 test_scoped_vs_full_scan
+test_dotglob_entries_included_in_unscoped_scan
 test_unsupported_backend_refuses_before_touching_anything
 test_unparseable_flow_style_store_block_refuses
 test_absent_store_block_defaults_local
