@@ -30,14 +30,19 @@
 #   - If `store.tasks` in harness.config.yaml is anything other than `local` (the only
 #     backend this tool reads status from), the tool refuses outright before touching
 #     `state/tasks.json` or scratchpad/ at all, and exits non-zero (R12).
-#     KNOWN LIMITATION (disclosed, not an oversight — see Codex #4129683687): the R12
-#     guard's hand-rolled reader does not decode YAML scalar escape sequences (e.g. a
-#     `\uXXXX`-style escape) inside a quoted `store:`/`tasks:` key. A key written with
-#     such an escape is not recognized as `store`/`tasks`, so the tool fails closed
-#     (refuses, exits non-zero) instead of resolving it correctly — safe, but it won't
-#     run. Closing this gap properly needs either a real YAML dependency or a different
-#     way to derive the backend, not another hand-rolled pattern; deferred, not fixed
-#     in this PR.
+#     KNOWN LIMITATION (disclosed, not an oversight): the R12 guard's hand-rolled
+#     reader handles the realistic, common YAML authoring shapes exercised by this
+#     file's own test suite, but it is not a full YAML parser. Uncommon or unusual
+#     syntax — e.g. escaped characters in a quoted `store:`/`tasks:` key (Codex
+#     #4129683687), or a block-scalar header whose indentation/chomping indicators
+#     appear in a less-common order (Codex #4130134127) — may cause it to fail closed
+#     (refuse, exit non-zero) rather than resolve correctly. These two are illustrative
+#     examples of the class, not an exhaustive list; other YAML features not yet
+#     encountered could trip the same guard the same way. This is always safe (the
+#     tool never mutates anything when it fails closed — it just refuses to run) but
+#     not exhaustive. Closing this gap properly needs either a real YAML dependency or
+#     a different way to derive the backend, not another hand-rolled pattern per edge
+#     case; deferred, not fixed in this PR.
 #
 # The tool never mutates the TaskStore, never writes outside the one resolved
 # scratchpad/ directory, and never globs or acts on scratchpad/ itself.
