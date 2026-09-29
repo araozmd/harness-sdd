@@ -21,9 +21,10 @@
 #     NEVER acted on, in any mode (R2).
 #   - An entry whose feature id is absent from the TaskStore, or whose status is
 #     anything other than `done`, is `skipped: <reason>` and never removed (R4).
-#   - If the TaskStore itself cannot be read or parsed, the WHOLE scan aborts before
+#   - If the TaskStore itself cannot be read or parsed, OR a record's `id`/`status`
+#     violates store/tasks.schema.json's grammar, the WHOLE scan aborts before
 #     classifying or removing anything — a tool-level error, distinct from a
-#     per-entry skip, and the process exits non-zero (R5).
+#     per-entry skip, and the process exits non-zero (R5, R14).
 #   - An entry whose resolved real path is not a direct child of the resolved
 #     scratchpad/ directory (e.g. a symlink escaping it) is skipped and reported as an
 #     anomaly, never deleted through (R6).
@@ -519,13 +520,26 @@ STORE_TASKS="${STORE_TASKS:-local}"
 [ "$STORE_TASKS" = "local" ] ||
   die "unsupported TaskStore backend store.tasks: $STORE_TASKS — this tool only reads the 'local' backend ($BOARD); refusing to scan or mutate scratchpad/ for any other backend"
 
-# ── TaskStore read, ONCE, before classifying a single entry (R5) ──────────────────
+# ── TaskStore read, ONCE, before classifying a single entry (R5, R14) ─────────────
 # A read/parse failure here is a TOOL-LEVEL error: abort the whole scan, classify and
 # remove nothing, exit non-zero. This is deliberately distinct from a per-entry R4
-# skip, which never touches the exit code.
+# skip, which never touches the exit code. R14 folds a schema-invalid record into
+# this SAME abort path deliberately: this printed line is later split by the shell
+# side on tab/newline (`lookup_status`'s `awk -F'\t'`), so an `id`/`status` string
+# that is syntactically valid JSON but violates store/tasks.schema.json's grammar —
+# e.g. a status of `pending\nE99-F99\tdone` — can forge an extra `id\tstatus` row
+# naming a feature that does not exist, with a fabricated status (Codex #4130566648).
+# The schema's `id` pattern and `status` enum are validated BEFORE printing any row,
+# and either check failing exits 1 exactly like the read/parse failure above, so a
+# schema-invalid TaskStore hits the identical `TASKSTORE_RC -ne 0` die() below — the
+# record is just as untrustworthy as one this reader cannot parse at all.
 TASKSTORE_OUT="$(python3 - "$BOARD" <<'PYEOF'
 import json
+import re
 import sys
+
+FID_RE = re.compile(r"^E[0-9]+-F[0-9]+$")
+STATUS_ENUM = {"pending", "spec-ready", "in-progress", "in-review", "done"}
 
 path = sys.argv[1]
 try:
@@ -553,6 +567,11 @@ for epic in epics:
         fid = feat.get("id")
         status = feat.get("status")
         if isinstance(fid, str) and isinstance(status, str):
+            if not FID_RE.match(fid) or status not in STATUS_ENUM:
+                # Schema-invalid record (R14): could otherwise inject a forged
+                # row into this tab-delimited output — abort the whole scan
+                # instead of skipping just this one record.
+                sys.exit(1)
             print(fid + "\t" + status)
 PYEOF
 )"

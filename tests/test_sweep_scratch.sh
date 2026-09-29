@@ -9,7 +9,7 @@
 # so this also doubles as a check that the tool runs under whatever `sh` resolves to
 # on this host, consistent with every other suite tools/run-tests.sh selects.
 #
-# R-id coverage: R1-R8, R12, R13 of E34-F01.spec.md, per E34-F01.tests.md's traceability table.
+# R-id coverage: R1-R8, R12, R13, R14 of E34-F01.spec.md, per E34-F01.tests.md's traceability table.
 
 set -eu
 
@@ -246,6 +246,62 @@ test_corrupt_taskstore_aborts_whole_scan_no_changes() {
   [ -d "$PRIMARY/scratchpad/not-a-feature-dir" ] \
     || fail "R5: --apply removed a directory despite the whole scan being required to abort first"
   pass "R5 test_corrupt_taskstore_aborts_whole_scan_no_changes"
+}
+
+# ── R14 ─────────────────────────────────────────────────────────────────────────────
+# Codex #4130566648: a `status` value that is syntactically valid JSON but embeds a tab
+# and newline can be split by the shell's tab-delimited parsing into a forged second
+# `id\tstatus` row naming a feature that does not exist. The whole scan must abort
+# exactly like R5, and nothing — including a directory namespaced for the forged id —
+# may be removed.
+test_schema_invalid_status_forged_row_aborts_whole_scan_no_changes() {
+  make_fixture r14a
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"pending\nE99-F99\tdone"}]}]}'
+  scratch_dir E01-F01-builder
+  # E99-F99 is not a real feature anywhere in the board above — only the forged row
+  # (if the injection worked) would ever call it "done".
+  scratch_dir E99-F99-builder
+
+  run_sweep
+  [ "$RC" -ne 0 ] \
+    || fail "R14: a schema-invalid status (forged row) did not make the tool exit non-zero"
+  has_verdict_line \
+    && fail "R14: a per-entry verdict was printed despite a schema-invalid TaskStore record — the scan must abort BEFORE classifying anything: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] || fail "R14: a directory vanished on a dry (non --apply) run"
+  [ -d "$PRIMARY/scratchpad/E99-F99-builder" ] || fail "R14: a directory vanished on a dry (non --apply) run"
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R14: --apply against a schema-invalid status did not exit non-zero"
+  has_verdict_line \
+    && fail "R14: --apply against a schema-invalid status printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R14: --apply removed a directory despite the whole scan being required to abort first"
+  [ -d "$PRIMARY/scratchpad/E99-F99-builder" ] \
+    || fail "R14: --apply removed the FORGED entry — a row-injection via an embedded tab/newline let a non-existent feature be treated as done"
+  pass "R14 test_schema_invalid_status_forged_row_aborts_whole_scan_no_changes"
+}
+
+test_schema_invalid_id_aborts_whole_scan_no_changes() {
+  make_fixture r14b
+  write_board '{"epics":[{"id":"E01","features":[{"id":"not-an-id","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep
+  [ "$RC" -ne 0 ] \
+    || fail "R14: a schema-invalid feature id did not make the tool exit non-zero"
+  has_verdict_line \
+    && fail "R14: a per-entry verdict was printed despite a schema-invalid feature id: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] || fail "R14: a directory vanished on a dry (non --apply) run"
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R14: --apply against a schema-invalid feature id did not exit non-zero"
+  has_verdict_line \
+    && fail "R14: --apply against a schema-invalid feature id printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R14: --apply removed a directory despite the whole scan being required to abort first"
+  pass "R14 test_schema_invalid_id_aborts_whole_scan_no_changes"
 }
 
 # ── R6 ──────────────────────────────────────────────────────────────────────────────
@@ -1293,6 +1349,8 @@ test_classifies_feature_id_prefix_skips_unrecognized
 test_done_feature_removed_on_apply_reported_dry_run
 test_not_found_or_non_done_skipped
 test_corrupt_taskstore_aborts_whole_scan_no_changes
+test_schema_invalid_status_forged_row_aborts_whole_scan_no_changes
+test_schema_invalid_id_aborts_whole_scan_no_changes
 test_symlink_escape_skipped
 test_exit_code_reflects_tool_errors_only
 test_report_has_summary_verdicts_and_bytes_reclaimed
