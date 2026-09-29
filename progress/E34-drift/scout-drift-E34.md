@@ -93,8 +93,12 @@ No other epic is `draft`/`planned`/`pending`; all others (including E34 itself) 
 - None. All three remaining epics verified still-valid against E34's actual artifacts
   (not just its title). No staleness signal fired for any of them.
 - Note for the record (not a staleness signal, just an observation): E34's own epic.md
-  names two not-yet-seeded follow-on features (`progress/` handoff-file sweep; git
-  worktree/branch sweep) that will eventually live under E34 itself — a future
-  drift-check when those land should re-check E32-F05 again, since a `progress/`-handoff
-  sweep is the E34 territory closest to E32's `progress/feedback/` usage. Today, neither
-  follow-on exists yet, so there is nothing to re-validate against.
+  names two deferred ideas (`progress/` handoff-file sweep; git worktree/branch sweep).
+  **Post-merge correction (2026-09-29, PR #234):** E34 was closed `done` and these are
+  now routed through a future, separate `/sdd-new` intake (a new epic or feature),
+  **not** "under E34" as this note originally said — E34 is `done` and
+  `agents/driller.md` refuses to operate on a `done` epic. Whenever either idea is
+  eventually built (under whatever epic id `/sdd-new` allocates), a future drift-check
+  should still re-check E32-F05 against it, since a `progress/`-handoff sweep is the
+  territory closest to E32's `progress/feedback/` usage. Today neither idea exists yet,
+  so there is nothing to re-validate against.
