@@ -904,7 +904,7 @@ fix_lane:
 # more suspicious case — store:'s schema is a scalar or plain mapping, never a
 # list, so this stays disqualifying rather than being skipped like an unrelated
 # list elsewhere in the document (see tools/sweep-scratch.sh's
-# validate_canonical_shape for the scoping rationale).
+# find_store_key for the scoping rationale).
 test_sequence_item_inside_store_block_still_refuses() {
   make_fixture r12-sequence-inside-store
   write_config 'store:
@@ -920,6 +920,102 @@ test_sequence_item_inside_store_block_still_refuses() {
   [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
     || fail "R12 round-6: --apply deleted E01-F01-builder despite an unrecognized sequence item inside the store: block"
   pass "R12 round-6 test_sequence_item_inside_store_block_still_refuses"
+}
+
+# ── R12 (round-7: a YAML feature nested under an UNRELATED top-level key must not
+# disqualify the document, no matter which feature it is) ─────────────────────────
+# Round 6 closed this gap for block-sequences specifically; Codex #4128789217 found
+# the exact same false-refusal class one YAML feature over: a legitimate block
+# scalar (`key: |` + indented continuation lines) under a top-level key this tool
+# never reads. Round 7 stops enumerating tolerated features one at a time and
+# narrows _cfg_store_tasks's scope instead (see find_store_key in
+# tools/sweep-scratch.sh): content nested under any OTHER top-level key is walked
+# past by indentation alone and never classified, so no YAML feature used there —
+# block scalar, anchor/alias, flow mapping, or a literal '---'/'...' line embedded
+# as ordinary block-scalar content — can ever trigger a refusal.
+
+# ── the exact repro: a block scalar under an unrelated top-level key ─────────────
+test_block_scalar_in_unrelated_section_does_not_disqualify_document() {
+  make_fixture r12-block-scalar-unrelated
+  write_config 'verification:
+  test_command: |
+    some command here
+    another line
+store:
+  tasks: local
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 round-7: a block scalar under an unrelated top-level key (verification.test_command) made a document with an explicit store.tasks: local refuse — the exact repro (Codex #4128789217): $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 round-7: store.tasks: local did not scan/remove normally despite the unrelated block scalar: $OUT"
+  pass "R12 round-7 test_block_scalar_in_unrelated_section_does_not_disqualify_document"
+}
+
+# ── adversarial: an anchor AND an alias, both nested under an unrelated key ───────
+test_anchor_and_alias_in_unrelated_section_does_not_disqualify_document() {
+  make_fixture r12-anchor-alias-unrelated
+  write_config 'store:
+  tasks: local
+other:
+  primary: &base_value hello
+  secondary: *base_value
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 round-7: an anchor/alias pair nested under an unrelated top-level key made the document refuse: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 round-7: store.tasks: local did not scan/remove normally despite the unrelated anchor/alias: $OUT"
+  pass "R12 round-7 test_anchor_and_alias_in_unrelated_section_does_not_disqualify_document"
+}
+
+# ── adversarial: a flow mapping nested under an unrelated key ────────────────────
+test_flow_mapping_in_unrelated_section_does_not_disqualify_document() {
+  make_fixture r12-flow-mapping-unrelated
+  write_config 'store:
+  tasks: local
+other:
+  nested: {a: 1, b: 2}
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 round-7: a flow mapping nested under an unrelated top-level key made the document refuse: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 round-7: store.tasks: local did not scan/remove normally despite the unrelated flow mapping: $OUT"
+  pass "R12 round-7 test_flow_mapping_in_unrelated_section_does_not_disqualify_document"
+}
+
+# ── adversarial: literal '---'/'...' lines as block-scalar CONTENT under an
+# unrelated key — not real document-separator markers, just text that happens to
+# look like one, deep inside a section this tool never reads ──────────────────────
+test_document_marker_lookalike_in_unrelated_block_scalar_does_not_disqualify_document() {
+  make_fixture r12-marker-lookalike-unrelated
+  write_config 'store:
+  tasks: local
+notes:
+  changelog: |
+    ---
+    entry one
+    ...
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -eq 0 ] \
+    || fail "R12 round-7: '---'/'...' lines inside an unrelated block scalar's own content made the document refuse: $OUT"
+  printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+removed$' \
+    || fail "R12 round-7: store.tasks: local did not scan/remove normally despite the unrelated block-scalar content resembling document markers: $OUT"
+  pass "R12 round-7 test_document_marker_lookalike_in_unrelated_block_scalar_does_not_disqualify_document"
 }
 
 # ── R13 ─────────────────────────────────────────────────────────────────────────────
@@ -992,6 +1088,10 @@ test_unrelated_block_sequence_multiple_items_does_not_disqualify_document
 test_unrelated_empty_block_sequence_does_not_disqualify_document
 test_unrelated_flow_style_empty_list_still_resolves_correctly
 test_sequence_item_inside_store_block_still_refuses
+test_block_scalar_in_unrelated_section_does_not_disqualify_document
+test_anchor_and_alias_in_unrelated_section_does_not_disqualify_document
+test_flow_mapping_in_unrelated_section_does_not_disqualify_document
+test_document_marker_lookalike_in_unrelated_block_scalar_does_not_disqualify_document
 test_remove_failure_reported_and_exits_nonzero
 
 echo "all sweep-scratch tests passed"
