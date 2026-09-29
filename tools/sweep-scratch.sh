@@ -368,6 +368,21 @@ def find_store_key(entries):
             key, rest = kv
             is_open = rest.strip() == ""
         else:
+            if is_top_level:
+                # A top-level, non-blank, non-comment line that is not an ordinary
+                # `key:` mapping entry, not a list item, not a document marker, and
+                # does not contain a disqualifying flow/anchor character either —
+                # e.g. an explicit-key YAML mapping entry (`? tasks` / `: obsidian`,
+                # Codex #4130253947). This reader recognizes no such shape, so it
+                # cannot tell whether this line is, or hides, the real `store:` key;
+                # treating it as ordinary skippable content would let it walk right
+                # past an actual backend selection and default to "absent ⇒ local".
+                # Refuse rather than silently continue past genuinely unclassifiable
+                # top-level content — narrower than round 5's abandoned
+                # whole-document validator: this fires ONLY on the document's own
+                # top-level lines, never on anything nested under some OTHER key
+                # (round 7-10's scope-narrowing is untouched).
+                raise _Refuse()
             key, rest, is_open = None, "", False
 
         if key == "store":
@@ -395,7 +410,13 @@ def parse_store_tasks(path):
         with open(path, "r", encoding="utf-8-sig") as fh:
             raw_lines = fh.read().splitlines()
     except FileNotFoundError:
-        return ("", 0)
+        # A missing config file is a READ FAILURE, not "no store: key found in an
+        # existing file" — it can never establish which TaskStore backend is
+        # authoritative, so it must fail closed exactly like any other unreadable
+        # config (the OSError branch just below), not silently resolve to "absent,
+        # default local" and let the caller proceed to delete scratch directories
+        # under an unverified backend (Codex #4130253950).
+        return (None, 1)
     except OSError:
         return (None, 1)
 
@@ -452,6 +473,16 @@ def parse_store_tasks(path):
         if _contains_unquoted(block_stripped, _DISQUALIFYING_CHARS):
             return (None, 1)
         if _is_sequence_item(block_stripped):
+            return (None, 1)
+        if split_key_value(block_stripped) is None:
+            # Neither an ordinary `key:` mapping entry nor a recognized
+            # disqualifying/sequence shape — e.g. an explicit-key YAML mapping
+            # entry (`? tasks` / `: obsidian`, Codex #4130253947). store:'s own
+            # schema is a scalar or a plain block mapping, never anything else
+            # (see this block's own docstring above), so a line here this reader
+            # cannot classify as an ordinary key is ambiguous, not "not tasks:" —
+            # refuse rather than silently walking past it and concluding tasks:
+            # is absent.
             return (None, 1)
 
     child_indent = min(indent for indent, _ in block)

@@ -35,6 +35,12 @@ make_fixture() {
   cp "$TOOL_SRC" "$PRIMARY/tools/sweep-scratch.sh"
   chmod +x "$PRIMARY/tools/sweep-scratch.sh"
   printf '{"epics":[]}\n' > "$PRIMARY/state/tasks.json"
+  # A real install always seeds harness.config.yaml (harness-install.sh); most
+  # fixtures here don't care about R12's store.tasks resolution at all, so give
+  # them an explicit, ordinary local backend by default. R12 tests that DO care
+  # override this with their own write_config, and the one test exercising a
+  # genuinely absent config file (Codex #4130253950) removes it after this call.
+  printf 'store:\n  tasks: local\n' > "$PRIMARY/harness.config.yaml"
   git -C "$PRIMARY" init -q
   git -C "$PRIMARY" config user.name "Sweep Scratch Test"
   git -C "$PRIMARY" config user.email "sweep-scratch@example.test"
@@ -453,18 +459,80 @@ test_unparseable_flow_style_store_block_refuses() {
 # rewritten around a python3 reader instead of another awk special-case. This
 # matrix pins the reader's real scope directly, rather than one shape at a time.
 
-# ── R12: absent store: block defaults to local (no config file at all) ────────────
+# ── R12: a store: block PRESENT but omitting tasks: still defaults to local ───────
 test_absent_store_block_defaults_local() {
   make_fixture r12-absent
+  write_config 'store:
+  docs: local
+'
   write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
   scratch_dir E01-F01-builder
-  # No harness.config.yaml at all — make_fixture never writes one.
 
   run_sweep
-  [ "$RC" -eq 0 ] || fail "R12: an absent harness.config.yaml did not default to local: $OUT"
+  [ "$RC" -eq 0 ] || fail "R12: a store: block present but omitting tasks: did not default to local: $OUT"
   printf '%s\n' "$OUT" | grep -qE '^E01-F01-builder[[:space:]]+eligible$' \
-    || fail "R12: an absent harness.config.yaml did not scan normally (local default): $OUT"
+    || fail "R12: a store: block omitting tasks: did not scan normally (local default): $OUT"
   pass "R12 test_absent_store_block_defaults_local"
+}
+
+# ── R12 (Codex #4130253950): a genuinely MISSING config file must fail closed,
+# not silently default to local — an absent file cannot establish which TaskStore
+# backend is authoritative, so proceeding is not safe. Before this fix, this exact
+# fixture let --apply exit 0 and delete a done-marked scratch directory.
+test_missing_config_file_refuses() {
+  make_fixture r12-missing-config
+  rm -f "$PRIMARY/harness.config.yaml"
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep
+  [ "$RC" -ne 0 ] \
+    || fail "R12: a missing harness.config.yaml did not exit non-zero: $OUT"
+  has_verdict_line \
+    && fail "R12: a per-entry verdict was printed despite a missing config file: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: a scratch directory vanished on a dry (non --apply) run against a missing config file"
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: --apply against a missing config file did not exit non-zero: $OUT"
+  has_verdict_line \
+    && fail "R12: --apply against a missing config file printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply removed a scratch directory despite a missing config file that must have refused first — Codex #4130253950"
+  pass "R12 test_missing_config_file_refuses"
+}
+
+# ── R12 (Codex #4130253947): an explicit-key YAML mapping entry inside store:'s own
+# block (`? tasks` / `: obsidian`) is genuinely unclassifiable by this reader — not an
+# ordinary `key:` entry, not a list item, not disqualifying-char content — so it must
+# refuse rather than silently conclude tasks: is absent and default to local. Full
+# YAML explicit-key support is intentionally NOT implemented here.
+test_explicit_key_mapping_at_top_level_refuses() {
+  make_fixture r12-explicit-key
+  write_config 'store:
+  ? tasks
+  : obsidian
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep
+  [ "$RC" -ne 0 ] \
+    || fail "R12: a top-level explicit-key mapping entry did not exit non-zero: $OUT"
+  has_verdict_line \
+    && fail "R12: a per-entry verdict was printed despite an unclassifiable explicit-key entry: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: a scratch directory vanished on a dry (non --apply) run against an explicit-key store: block"
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12: --apply against an explicit-key store: block did not exit non-zero: $OUT"
+  has_verdict_line \
+    && fail "R12: --apply against an explicit-key store: block printed a per-entry verdict: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12: --apply removed a scratch directory despite an explicit-key store.tasks: obsidian block that must have refused first — Codex #4130253947"
+  pass "R12 test_explicit_key_mapping_at_top_level_refuses"
 }
 
 # ── R12: block-style tasks: local, explicit — scans normally, no refusal ─────────
@@ -1233,6 +1301,8 @@ test_dotglob_entries_included_in_unscoped_scan
 test_unsupported_backend_refuses_before_touching_anything
 test_unparseable_flow_style_store_block_refuses
 test_absent_store_block_defaults_local
+test_missing_config_file_refuses
+test_explicit_key_mapping_at_top_level_refuses
 test_block_style_explicit_local_scans_normally
 test_block_style_non_local_jira_refuses
 test_indented_top_level_block_non_local_refuses
