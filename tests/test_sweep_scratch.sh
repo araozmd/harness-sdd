@@ -796,6 +796,25 @@ test_store_indented_under_scalar_valued_key_refuses() {
   pass "R12 stress test_store_indented_under_scalar_valued_key_refuses"
 }
 
+# ── R12 stress: a leading UTF-8 BOM must not make a real store: block invisible ──
+# A BOM'd first line reads as "﻿store:" to a naive line-prefix match, which
+# would never match "store:" and silently conclude the block is absent -> default
+# local, on a config that in fact selects a non-local backend. Round-5 residual gap,
+# closed with encoding="utf-8-sig" (transparently strips a BOM if present).
+test_leading_utf8_bom_does_not_hide_store_block() {
+  make_fixture r12-utf8-bom
+  printf '\xEF\xBB\xBFstore:\n  tasks: obsidian\n' > "$PRIMARY/harness.config.yaml"
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+
+  run_sweep --apply
+  [ "$RC" -ne 0 ] \
+    || fail "R12 stress: a leading UTF-8 BOM hid a real non-local store: block instead of refusing: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
+    || fail "R12 stress: --apply deleted E01-F01-builder despite a BOM'd config selecting a non-local backend"
+  pass "R12 stress test_leading_utf8_bom_does_not_hide_store_block"
+}
+
 # ── R13 ─────────────────────────────────────────────────────────────────────────────
 test_remove_failure_reported_and_exits_nonzero() {
   if ! modes_bind_this_uid; then
@@ -860,6 +879,7 @@ test_tasks_key_at_multiple_levels_resolves_correctly
 test_store_mentioned_only_in_comment_resolves_correctly
 test_whitespace_variations_resolve_correctly
 test_store_indented_under_scalar_valued_key_refuses
+test_leading_utf8_bom_does_not_hide_store_block
 test_remove_failure_reported_and_exits_nonzero
 
 echo "all sweep-scratch tests passed"

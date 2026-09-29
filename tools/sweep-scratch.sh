@@ -289,7 +289,12 @@ def validate_canonical_shape(entries):
 
 def parse_store_tasks(path):
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        # utf-8-sig: transparently strips a leading UTF-8 BOM if present (and is a
+        # no-op otherwise) — without it, a BOM'd config's first line reads as
+        # "﻿store:", the top-level key search never matches, and the tool
+        # would silently conclude store: is absent and default to local instead
+        # of refusing — the exact failure class every prior round closed.
+        with open(path, "r", encoding="utf-8-sig") as fh:
             raw_lines = fh.read().splitlines()
     except FileNotFoundError:
         return ("", 0)
