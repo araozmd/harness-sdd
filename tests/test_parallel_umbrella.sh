@@ -57,22 +57,32 @@ for kind in plain errexit; do
   done
 done
 pass failed_group_and_errexit
-# Child sh must resolve through the runner's selected strict-shell shim.
+# Observe actual PATH-resolved child invocations, even when /bin/sh is already dash.
 reset_groups
-# Record the shim target while alive; the runner removes its workdir on exit.
-cat > "$F/tests/test_umbrella_02_fixture.sh" <<'CHILD'
+SHELL_SPY="$W/shell-spy"; export SHELL_SPY
+mkdir "$SHELL_SPY"
+: > "$MARKERS.shell"
+cat > "$SHELL_SPY/sh" <<'SPY'
+#!/bin/sh
 set -eu
-p="$(command -v sh)"
-if [ "${p##*/}" = sh ] && grep -q '^exec ' "$p" 2>/dev/null; then
-  sed -n 's/^exec \([^ ]*\).*/\1/p' "$p" > "$MARKERS.shell"
-else
-  printf '%s\n' "$p" > "$MARKERS.shell"
-fi
-CHILD
+printf '%s\n' "${1##*/}" >> "$MARKERS.shell"
+exec "$STRICT_SH" "$@"
+SPY
+chmod +x "$SHELL_SPY/sh"
+# Capture the runner's selected shim before interposing the recorder. Forward every
+# invocation to that exact shim; an absolute /bin/sh child bypasses the recorder.
+cat > "$F/tests/test_umbrella.sh" <<'AGGREGATE'
+STRICT_SH="$(command -v sh)"; export STRICT_SH
+PATH="$SHELL_SPY:$PATH"; export PATH
+AGGREGATE
+cat "$SRC/tests/test_umbrella.sh" >> "$F/tests/test_umbrella.sh"
 run_status sh "$F/tools/run-tests.sh" "$F/tests/test_umbrella.sh"
 [ "$RC" = 0 ] || fail strict_child
-SELECTED="$(sed -n 's/.*suites passed (\([^ ]*\) .*/\1/p' "$W/output")"
-[ "$(cat "$MARKERS.shell")" = "$SELECTED" ] || fail 'strict_child: child interpreter differs from runner'
+for n in 01 02 03 04 05 06 07 08 09 10 11 12 13; do
+  printf 'test_umbrella_%s_fixture.sh\n' "$n"
+done > "$W/expected-shell"
+cmp -s "$MARKERS.shell" "$W/expected-shell" || fail 'strict_child: child bypassed selected PATH shell'
+cp "$SRC/tests/test_umbrella.sh" "$F/tests/"
 pass strict_child
 for kind in helper group; do
   for mode in default explicit; do

@@ -437,3 +437,5 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-10-09T19:49:59Z E99-F169: Architect and fresh doc-critic completed 11-requirement spec; owner advanced spec-ready → in-progress under recorded autonomous authorization. Baseline umbrella suite passed in 209.14s. Builder round 1 routed.
 
 - 2026-10-09T20:22:50Z E99-F169 Builder round 1 completed: 13 byte-conserved groups, focused checks and six mutations pass; identical 93 result/skip records; umbrella 209.14s → 71.61s (2.92×). Independent full verification pending; owner advanced in-review.
+
+- 2026-10-09T20:34:48Z E99-F169 Reviewer round 1: all 71 suites pass, conservation/results verified; rejected unpinned strict-shell invocation check. Builder round 2 strengthened that check; exact /bin/sh bypass now fails, normal focused/init checks pass. Returned in-review for independent final verification.
