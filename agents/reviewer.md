@@ -47,6 +47,14 @@ saying "it works" means nothing until you prove it. AI-generated code is often
        aliases `git restore <file>`, `git checkout HEAD -- <file>`), which restores the
        file to HEAD and discards the mutation *and* every uncommitted line beside it.
        Confirm the restore with a diff, not a test run.
+     - **Parallel shared checkout boundary.** A Reviewer running parallel lanes must
+       never mutate a tracked file in a shared umbrella or consumer checkout in place,
+       including `.gitignore`; backup/restore and stash do not protect concurrent
+       readers. Copy each needed fixture to a private worktree or namespaced disposable
+       repository, run one mutant there at a time, and restore between mutants.
+       Measure named rows and assertions from the private fixture, leaving shared
+       tracked ground truth untouched. The safe-revert instructions above still apply
+       to files already isolated in the Reviewer's private workspace.
      - **This forbidding sentence is itself vulnerable to the negation it cannot
        detect.** "Not strictly forbidden as the revert, but avoid: `git checkout --
        <file>`" would still satisfy a forbidden/git-checkout co-occurrence anchor,
