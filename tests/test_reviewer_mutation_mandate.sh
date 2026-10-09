@@ -559,4 +559,13 @@ printf '%s\n' "$_EV" | grep -qiE 'instrument failure[^.]{0,45}never as a kill' \
   || fail "R15: (3b) does not forbid recording an instrument failure AS A KILL — a mislabeled mutant that goes red is exactly how a broken assertion passes review"
 pass "R15 3b_mutation_evidence_is_the_literal_named_edit"
 
+# R16: issue #222, parallel lanes cannot mutate shared tracked ground truth.
+printf '%s\n' "$B3" | grep -qF 'A Reviewer running parallel lanes must never mutate a tracked file in a shared umbrella or consumer checkout in place, including .gitignore; backup/restore and stash do not protect concurrent readers.' \
+  || fail 'R16: check 3b must forbid in-place tracked-file mutation in parallel shared checkouts, including .gitignore; backup and stash are insufficient'
+printf '%s\n' "$B3" | grep -qF 'Copy each needed fixture to a private worktree or namespaced disposable repository, run one mutant there at a time, and restore between mutants.' \
+  || fail 'R16: check 3b must require private worktree/disposable repository mutation and per-mutant restore'
+printf '%s\n' "$B3" | grep -qF 'Measure named rows and assertions from the private fixture, leaving shared tracked ground truth untouched.' \
+  || fail 'R16: check 3b must give the no-write measurement alternative'
+pass 'R16 3b_parallel_shared_tracked_files_stay_untouched'
+
 echo "All reviewer mutation-mandate tests passed."
