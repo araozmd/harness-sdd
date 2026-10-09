@@ -108,11 +108,29 @@ use_fx() {
   unset SH_AUTH_RC SH_LIST_RC SH_CREATE_RC SH_LIST_JSON 2>/dev/null || true
 }
 
+# Compose verified synthetic evidence for legacy guard fixtures.
+default_details() {
+  python3 - "$T/default.json" "$@" <<'DETAILS'
+import json, sys
+args=sys.argv[2:]; trigger='harness-malfunction'; files=[]
+for i,arg in enumerate(args[:-1]):
+    if arg=='--trigger': trigger=args[i+1]
+    if arg=='--file' and args[i+1].startswith('tools/'): files.append(args[i+1])
+keys={'harness-malfunction':['failure','project_health'],'workaround':['documented_path','failed_because','alternative'],'contradictory-instruction':['instruction_a','instruction_b'],'missing-capability':['occurrences','workflow_gap','impact']}.get(trigger,[])
+data=dict(summary='Harness checker omits a required validation branch',observed='The synthetic fixture proceeds despite the absent required value.',expected='The checker should retain the invalid fixture locally without publication.',reproduction='Inspect the validation branch and compare the synthetic missing value fixture.',evidence=(files[0] if files else 'tools/harness-report.sh')+' contains the branch that accepts the incomplete fixture.',context={k:'The synthetic fixture demonstrates the missing validation obligation.' for k in keys})
+json.dump(data,open(sys.argv[1],'w'))
+DETAILS
+}
+
 # ── runners ───────────────────────────────────────────────────────────────────────────────
 # run_ok asserts the R4 non-functional contract on EVERY call: the tool exits 0. The SH_*
 # controls feed the stub; use_fx clears them between tests.
 run_ok() {
   _fx="$1"; shift
+  if [ "${DETAILS_AUTO:-1}" = 1 ]; then
+    default_details "$@"
+    set -- "$@" --details-file "$T/default.json"
+  fi
   _rc=0
   GH_LOG="$GLOG" GH_BODY_OUT="$BODY" \
   GH_AUTH_RC="${SH_AUTH_RC:-0}" GH_LIST_RC="${SH_LIST_RC:-0}" GH_CREATE_RC="${SH_CREATE_RC:-0}" \
@@ -126,6 +144,10 @@ run_ok() {
 # (/usr/bin:/bin holds git, date, sed, grep, awk and NOT gh — verified by the caller below).
 run_nogh() {
   _fx="$1"; shift
+  if [ "${DETAILS_AUTO:-1}" = 1 ]; then
+    default_details "$@"
+    set -- "$@" --details-file "$T/default.json"
+  fi
   _rc=0
   GH_LOG="$GLOG" GH_BODY_OUT="$BODY" PATH=/usr/bin:/bin \
     sh "$_fx/.harness/tools/harness-report.sh" "$@" || _rc=$?
@@ -461,7 +483,7 @@ test_title_format() {
     --file tools/run-tests.sh --command run-tests.sh --exit-code 1 \
     --role builder --phase builder --session-id s-title
   _t="$(argv_value --title)"
-  [ "$_t" = "[harness-feedback] harness-malfunction tool-failure in tools/run-tests.sh" ] \
+  printf '%s' "$_t" | grep -qE '^\[harness-feedback\] harness-malfunction tool-failure in tools/run-tests.sh \[[0-9a-f]{16}\]$'  \
     || fail "R6: the --title argv is not the exact fixed title (got: $_t)"
 
   # A second trigger/symptom/file combination proves the variables are the accepted ones,
@@ -471,7 +493,7 @@ test_title_format() {
   run_ok "$_fx2" --trigger workaround --symptom doc-conflict \
     --file tools/change-size.sh --session-id s-title2
   _t2="$(argv_value --title)"
-  [ "$_t2" = "[harness-feedback] workaround doc-conflict in tools/change-size.sh" ] \
+  printf '%s' "$_t2" | grep -qE '^\[harness-feedback\] workaround doc-conflict in tools/change-size.sh \[[0-9a-f]{16}\]$'  \
     || fail "R6: the title does not track the accepted fields (got: $_t2)"
   pass "R6 the issue title is exactly [harness-feedback] <trigger> <symptom> in <first accepted file> (R6) [test_title_format]"
 }
@@ -490,10 +512,8 @@ test_body_allowlisted_no_freeform() {
   # Negative: the free-form token is never transmitted.
   absent 'ZEBRAFISH-NOTE-90817' "$BODY" "R7: free-form notes text reached the upstream body"
   absent 'ZEBRAFISH-NOTE-90817' "$GLOG" "R7: free-form notes text reached a gh argv (title/search)"
-  # Structural: every line after the marker is a Label: value line.
-  _off="$(awk 'NR > 1 && $0 !~ /^[A-Za-z][A-Za-z ]*: / { print }' "$BODY")"
-  [ -z "$_off" ] \
-    || fail "R7: the upstream body carries a line that is not a marker or Label: value line: $_off"
+  present '## Summary' "$BODY" 'details_public_body: missing summary'
+  present '## Trigger context' "$BODY" 'details_public_body: missing context'
   # …and the label lines are in the plan's FIXED order.
   _ord="$(sed -n 's/^\([A-Za-z][A-Za-z ]*\): .*/\1/p' "$BODY" | tr '\n' '|')"
   [ "$_ord" = "Harness version|Trigger|Symptom|File|Exit code|Role|Phase|" ] \
@@ -564,7 +584,7 @@ EOF
   printf 'token-shaped tool\n' > "$_fx/.harness/tools/ghp_abcdefghijklmnop"
   use_fx "$_fx"
   run_ok "$_fx" --trigger harness-malfunction --symptom tool-failure \
-    --file tools/ghp_abcdefghijklmnop --session-id s-redact
+    --file tools/run-tests.sh --file tools/ghp_abcdefghijklmnop --session-id s-redact
   [ "$(sed -n '1p' "$BODY")" = "<!-- harness-feedback:v1 host=sk-abcdef version=9.9.9 trigger=harness-malfunction -->" ] \
     || fail "R8: the create-path marker was redacted or altered (got: $(sed -n '1p' "$BODY"))"
   absent 'ghp_abcdefghijklmnop' "$BODY" "R8: the token-shaped file basename was not redacted on the create path"
@@ -584,15 +604,16 @@ test_duplicate_skips_create() {
     --file tools/run-tests.sh --session-id s-dup-a
   [ "$(create_count)" = "1" ] \
     || fail "R9: a returned issue whose title merely mentions the words suppressed a distinct report; matching must be exact, not substring/prefix"
-  [ "$(argv_value --search)" = "in:title [harness-feedback] harness-malfunction tool-failure in tools/run-tests.sh" ] \
+  [ "$(argv_value --search)" = "in:title $(argv_value --title)" ] \
     || fail "R9: the search query is not title-scoped (got: $(argv_value --search))"
   [ "$(argv_value --json)" = "number,title" ] \
     || fail "R9: the duplicate search did not request number,title (got: $(argv_value --json))"
 
+  _exact_title="$(argv_value --title)"
   # (b) an EXACT title match means no create and no comment; the local copy is still written.
   _fx2="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
   use_fx "$_fx2"
-  SH_LIST_JSON='[{"number":8,"title":"[harness-feedback] harness-malfunction tool-failure in tools/run-tests.sh"}]'
+  SH_LIST_JSON="[{\"number\":8,\"title\":\"$_exact_title\"}]"
   run_ok "$_fx2" --trigger harness-malfunction --symptom tool-failure \
     --file tools/run-tests.sh --session-id s-dup-b
   [ "$(create_count)" = "0" ] \
@@ -810,7 +831,117 @@ test_suite_is_executable() {
   pass "tests/test_feedback_report.sh is executable and the gh-missing PATH premise holds (non-functional) [test_suite_is_executable]"
 }
 
+# E32-F06 integration matrix: every rejected payload must stop BEFORE gh auth.
+details_adversarial_matrix() {
+  _fx="$(make_fixture)"; use_fx "$_fx"
+  default_details --trigger harness-malfunction --file tools/harness-report.sh
+  python3 - "$SRC" "$_fx" "$T/default.json" "$STUBDIR" <<'MATRIX'
+import copy, json, os, pathlib, subprocess, sys
+src, fx, default, stub = map(pathlib.Path, sys.argv[1:])
+base=json.loads(default.read_text()); payload=fx/'payload.json'; log=fx/'gh.log'; body=fx/'body.out'
+env=dict(os.environ, GH_LOG=str(log), GH_BODY_OUT=str(body), PATH=str(stub)+os.pathsep+os.environ['PATH'])
+args=['sh',str(fx/'.harness/tools/harness-report.sh'),'--trigger','harness-malfunction','--symptom','tool-failure','--file','tools/harness-report.sh','--session-id','matrix','--details-file',str(payload)]
+count=0
+
+def run(data, reason=None, raw=False, extra=()):
+    global count
+    count+=1; log.write_text('')
+    payload.write_bytes(data if raw else json.dumps(data).encode())
+    result=subprocess.run(args+list(extra),env=env,capture_output=True)
+    assert result.returncode==0, (count,result.stderr)
+    reports=list((fx/'.harness/progress/feedback').glob('*.md'))
+    report=max(reports,key=lambda p:p.stat().st_mtime_ns).read_text()
+    if reason:
+        assert not log.read_text(), ('gh called for',count,reason)
+        assert reason in report, (count,reason,report)
+        assert not result.stdout and not result.stderr, ('rejected payload leaked diagnostics',count)
+    else:
+        assert 'Outcome: filed' in report or 'Outcome: duplicate' in report, report
+    return report
+
+for field in base:
+    data=copy.deepcopy(base); del data[field]; run(data,field+': missing')
+for field in ('summary','observed','expected','reproduction','evidence'):
+    for value in (None,1,[],{},'','TODO '*30,'unknown; N/A; not available; see notes; pending', '[REDACTED-SECRET] '*4, 'summary observed expected harness-malfunction tool-failure tools/harness-report.sh 9.9.9', 'x'*19):
+        data=copy.deepcopy(base); data[field]=value; run(data,field+':')
+    data=copy.deepcopy(base); data[field]='x'*(241 if field=='summary' else 1501); run(data,field+': length')
+for raw in (b'{',b'\xff',b'[]',b'{"summary":1,"summary":2}',b' '*16385):
+    run(raw,'details-file:',raw=True)
+for level in ('root','context'):
+    data=copy.deepcopy(base); (data if level=='root' else data['context'])['foreign']='a private unknown field'; run(data,'unknown keys')
+unsafe=['ghp_abc','gho_abc','ghu_abc','ghs_abc','ghr_abc','github_pat_abc','sk-abcdef','AKIAABCDEFGHIJKLMNOP','user@example.com','-----BEGIN PRIVATE KEY-----','TOKEN: xyz','secret=xyz','Password: xyz','api_key=xyz','authorization: xyz','https://example.invalid','mailto:private','custom://host','/opt/private/data','/etc/passwd','C:\\private\\data','\\\\server\\share','~/private','../private','a/../b','foreign/tools/harness-report.sh','project/private.txt','\x00','\x01','\x0b','\x1f','\x7f','\x85','\u202e','\u2066','\ud800','<!--','-->','HARNESS-FEEDBACK:v1']
+for value in unsafe:
+    data=copy.deepcopy(base); data['context']['failure']='The verified operation failed with '+value+' in the synthetic fixture.'; run(data,'context.failure:')
+for value in ('prefix-tools/harness-report.sh','foreign/tools/harness-report.sh','tools/harness-report.sh.extra'):
+    data=copy.deepcopy(base); data['evidence']='Inspect '+value+' for the missing validation branch.'; run(data,'evidence:')
+contexts={'harness-malfunction':['failure','project_health'],'contradictory-instruction':['instruction_a','instruction_b'],'workaround':['documented_path','failed_because','alternative'],'missing-capability':['occurrences','workflow_gap','impact']}
+# Distinct sessions keep this matrix independent of the cap.
+for trigger, keys in contexts.items():
+    args[3]=trigger
+    data=copy.deepcopy(base)
+    facts={
+        'failure':'The synthetic missing-value invocation created an upstream issue.',
+        'project_health':'The independent synthetic project test completed successfully.',
+        'instruction_a':'tools/harness-report.sh requires validation before invoking the upstream client.',
+        'instruction_b':'tools/run-tests.sh fixture expects the invalid invocation to publish.',
+        'documented_path':'The documented command requires a complete validation result.',
+        'failed_because':'The required field was absent from the synthetic validation output.',
+        'alternative':'The owner inspected the tracked validation source to obtain evidence.',
+        'occurrences':'The first synthetic missing-value call and the second empty-value call both published.',
+        'workflow_gap':'The current validation branch has no route to retain incomplete evidence.',
+        'impact':'Both incomplete reports omitted the information needed to reproduce the failure.'}
+    data['context']={k:facts[k] for k in keys}
+    for key in keys:
+        broken=copy.deepcopy(data); del broken['context'][key]; run(broken,'context.'+key+': missing',extra=('--file','tools/run-tests.sh'))
+    run(data,extra=('--file','tools/run-tests.sh','--session-id',trigger))
+print('ok - details_completeness, details_trigger_matrix, details_unsafe_corpus')
+args[3]='harness-malfunction'
+# Complete corrected evidence can file using the same token as withheld attempts.
+run(base)
+text=body.read_text()
+assert text.splitlines()[0]=='<!-- harness-feedback:v1 host=github.com version=9.9.9 trigger=harness-malfunction -->'
+assert text.count('harness-feedback:')==1
+for heading in ('Summary','Observed','Expected','Reproduction or inspection','Evidence','Trigger context'):
+    assert '## '+heading in text
+assert str(payload) not in text and 'matrix' not in text
+
+def title():
+    lines=log.read_text().splitlines(); return lines[lines.index('--title')+1]
+first=title()
+# Different key order, whitespace, metadata and file order leave identity unchanged.
+data={k:v for k,v in reversed(list(base.items()))}; data['observed']='  '+data['observed'].replace(' ', ' \n ')+'  '
+(fx/'.harness/.harness-version').write_text('8.7.6')
+run(data,extra=('--session-id','new-session','--phase','reviewer'))
+assert title()==first
+# Exact duplicate suppresses both issue and comment; a legacy title does not.
+env['GH_LIST_JSON']=json.dumps([{'number':1,'title':first}]); run(data,extra=('--session-id','duplicate'))
+assert 'create' not in log.read_text().splitlines() and 'comment' not in log.read_text().splitlines()
+env['GH_LIST_JSON']=json.dumps([{'number':2,'title':first.rsplit(' [',1)[0]}]); run(data,extra=('--session-id','legacy'))
+assert 'create' in log.read_text().splitlines()
+env.pop('GH_LIST_JSON')
+data['observed']='The synthetic checker discarded the accepted file instead of rejecting the missing evidence.'
+run(data,extra=('--session-id','distinct')); assert title()!=first
+# Shell data is executable if evaluated, yet must remain inert through this interface.
+canary=fx/'canary'; env['CANARY']=str(canary)
+data=copy.deepcopy(base); data['observed']='The check retained "quotes" and $(touch "$CANARY") and `touch "$CANARY"` as inert text.'
+notes=fx/'notes'; notes.write_text('ghp_privateRawSecret $(touch "$CANARY")')
+run(data,extra=('--notes-file',str(notes),'--session-id','canary'))
+assert not canary.exists(); assert '$(touch "$CANARY")' in body.read_text(); assert 'ghp_privateRawSecret' not in body.read_text()+log.read_text()
+assert any('ghp_privateRawSecret' in p.read_text() for p in (fx/'.harness/progress/feedback').glob('*.md'))
+print('ok - details_public_body, details_fingerprint_identity, details_privacy_and_canary')
+MATRIX
+}
+
 # ── run ───────────────────────────────────────────────────────────────────────────────────
+details_schema_gate() {
+  _fx="$(make_fixture)"; use_fx "$_fx"
+  DETAILS_AUTO=0 run_ok "$_fx" --trigger harness-malfunction --symptom tool-failure --file tools/harness-report.sh --session-id schema
+  [ "$(gh_calls)" -eq 0 ] || fail "details_schema_gate: absent details reached gh"
+  present 'details-file: missing' "$(latest_report "$_fx")" 'details_schema_gate: missing diagnostic'
+  pass 'details_schema_gate'
+}
+details_schema_gate
+details_adversarial_matrix
 test_marker_grammar
 test_disabled_is_silent
 test_repo_resolution
