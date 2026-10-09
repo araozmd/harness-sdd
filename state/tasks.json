@@ -1049,7 +1049,13 @@
           "id": "E99-F167",
           "title": "Refuse ambiguous sweep config keys and malformed feature IDs",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "923fb11d753d5c584b5a3cde41f44d7377edb4d7", "ref": "923fb11d753d5c584b5a3cde41f44d7377edb4d7", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "923fb11d753d5c584b5a3cde41f44d7377edb4d7",
+            "ref": "923fb11d753d5c584b5a3cde41f44d7377edb4d7",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -1059,7 +1065,13 @@
           "id": "E99-F168",
           "title": "Keep reviewer mutation checks off shared tracked files",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "3180c54c9fe4f828eab0fbabf4f53085d66bdc03", "ref": "3180c54c9fe4f828eab0fbabf4f53085d66bdc03", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "3180c54c9fe4f828eab0fbabf4f53085d66bdc03",
+            "ref": "3180c54c9fe4f828eab0fbabf4f53085d66bdc03",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
@@ -1707,6 +1719,18 @@
             "E32-F04"
           ],
           "spec_path": "specs/epics/E32-feedback-loop/F05-sdd-triage/"
+        },
+        {
+          "id": "E32-F06",
+          "title": "Actionable sanitized harness reports with immediate automatic filing",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E32-F02",
+            "E32-F03"
+          ],
+          "spec_path": "specs/epics/E32-feedback-loop/F06-actionable-reports/"
         }
       ]
     },
