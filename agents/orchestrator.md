@@ -560,7 +560,14 @@ report that gets truncated mid-sentence.
 
 For the external Builder backend, before invoking delegate_cmd, include the approved
 brief and the **Source-issue PR provenance** requirement from the pre-PR handoff in
-the file instructions. Verify or correct its resulting PR body before review handoff.
+`progress/<run>/delegate-handoff.md` and pass its absolute path via
+`HARNESS_BUILDER_HANDOFF`, following `agents/builder.md`'s **Delegate provenance
+extension** (also for umbrella child dispatch). Verify the wired command consumes
+the file before dispatch; unsupported adapters stop. Require `Handoff: consumed`
+and `PR: <URL>` for each created/updated PR, or `PR: none`, in its result; missing
+or contradictory results stop review handoff even on exit 0. Verify or correct
+every returned PR body before review handoff. Apply the extension when the inbox
+brief contains Source issues; otherwise retain the existing delegate interface.
 
 For native Codex, select the installed named role (`architect`, `builder`,
 `builder-heavy`, `reviewer`, or `scout`) through the host's available delegation controls

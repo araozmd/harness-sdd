@@ -58,6 +58,9 @@ comes from.)
    misconfiguration — do NOT silently fall back to writing code yourself.
 3. Invoke it exactly as: `<delegate_cmd> <feature-id> <abs-spec-path>`, where
    `<abs-spec-path>` is the feature's `spec_path` resolved to an absolute path.
+   Before invocation, read the feature's inbox brief. If it contains a
+   `## Source issues` section, use the provenance extension below; the brief is
+   not implicitly available through `spec_path`.
    The executor owns implementation (it may also open a PR and run its own
    review) — your job is to hand it the spec and surface its result, not to
    second-guess *how* it codes.
@@ -66,6 +69,35 @@ comes from.)
 5. On success: append the executor's summary (and any PR link) to
    `progress/<run>/`. Tasks in `<feature>.tasks.md` are the executor's checklist;
    tick what the result shows completed. Do not also implement in-session.
+
+### Delegate provenance extension
+
+For an inbox brief containing `## Source issues` (including malformed or
+cross-repository entries), prepare `progress/<run>/delegate-handoff.md`. Inline
+the approved brief and the complete **Source-issue PR provenance** rule from
+`agents/orchestrator.md`'s pre-PR handoff, including validation against the actual
+PR repository and the required `Fixes #N` lines. Do not pass only an inbox path:
+the executor must receive the contents even when it cannot access the inbox.
+
+Keep the two positional arguments unchanged. Pass this file's absolute path in
+the invocation environment as `HARNESS_BUILDER_HANDOFF`; for example:
+`HARNESS_BUILDER_HANDOFF="<absolute-handoff-path>" <delegate_cmd> <feature-id> <abs-spec-path>`.
+The configured command or its adapter MUST read that file and include its contents
+in the executor's instructions before implementation or PR creation. If it runs
+remotely, the adapter must transfer the contents; a local path alone is insufficient.
+Before dispatch, verify that the wired command supports this extension; if it does
+not, STOP and report the missing adapter support rather than invoke it without
+provenance. Calls with no Source issues section retain the existing contract and
+must not inherit a stale `HARNESS_BUILDER_HANDOFF` value.
+
+The executor's successful result must include `Handoff: consumed` and a `PR: <URL>`
+line for every PR it created or updated, or exactly `PR: none` if it touched none.
+Persist these lines with the executor summary in `progress/<run>/`. Missing
+acknowledgment, missing PR identity, or contradictory PR lines are an incomplete
+handoff even on exit 0: return to the Orchestrator without advancing to review.
+The Orchestrator verifies or corrects every returned PR body against the approved
+brief before review handoff. Executor review never replaces the independent
+harness Reviewer verdict.
 
 ## Principles
 

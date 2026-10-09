@@ -190,6 +190,11 @@ In `delegate` mode the Builder does not write code — it invokes
 `delegate_cmd <feature-id> <abs-spec-path>` and surfaces the result. The executor
 owns implementation (and may own PR creation / review too). On non-zero exit the
 Builder records the failure and hands back to the Orchestrator.
+For briefs with `Source issues`, the command must also consume the file named by
+`HARNESS_BUILDER_HANDOFF` into its executor instructions and report handoff
+acknowledgment plus every resulting PR URL (or no PR), as defined in
+[the Builder contract](agents/builder.md#delegate-provenance-extension). Unsupported
+adapters stop before dispatch; other calls retain the two-argument interface.
 
 Scope is deliberate and structural:
 
