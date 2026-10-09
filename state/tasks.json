@@ -1080,7 +1080,8 @@
         {
           "id": "E99-F169",
           "title": "Parallelize isolated umbrella test groups to reduce verification time",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "95f6b3476cc02a3009fedf0ced65e8b4759c34bb", "ref": "95f6b3476cc02a3009fedf0ced65e8b4759c34bb", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
