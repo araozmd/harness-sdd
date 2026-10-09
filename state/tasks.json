@@ -1635,7 +1635,7 @@
     {
       "id": "E32",
       "title": "Harness feedback loop: auto-reported harness issues + on-demand triage",
-      "status": "planned",
+      "status": "done",
       "owner": "araozmd",
       "features": [
         {
@@ -1712,19 +1712,20 @@
         {
           "id": "E32-F05",
           "title": "Source-only /sdd-triage: group harness-feedback issues, propose routes, seed only on human approval",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "152edadedd907421d2394b4eef86ba8c9abfdfd8",
+            "ref": "152edadedd907421d2394b4eef86ba8c9abfdfd8",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [
             "E32-F04"
           ],
-          "spec_path": "specs/epics/E32-feedback-loop/F05-sdd-triage/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (247)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E32-F05 done --evidence <merge-ref>`",
-            "pr": "247"
-          }
+          "spec_path": "specs/epics/E32-feedback-loop/F05-sdd-triage/"
         },
         {
           "id": "E32-F06",

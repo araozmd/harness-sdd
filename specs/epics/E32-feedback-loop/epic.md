@@ -1,7 +1,7 @@
 ---
 id: E32
 title: "Harness feedback loop: auto-reported harness issues + on-demand triage"
-status: planned          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: done             # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 
