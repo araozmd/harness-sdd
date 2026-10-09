@@ -118,10 +118,18 @@ fi
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 if [ -z "$suites" ]; then
+  split_umbrella=false
+  for s in "$root"/tests/test_umbrella_[0-9][0-9]_*.sh; do
+    [ -f "$s" ] || continue
+    split_umbrella=true
+    break
+  done
   for s in "$root"/tests/test_*.sh; do
     [ -f "$s" ] || continue
-    # The compatibility aggregate would duplicate the independently scheduled groups.
-    [ "$s" != "$root/tests/test_umbrella.sh" ] || continue
+    # Only the split layout makes umbrella a duplicate compatibility aggregate.
+    if [ "$split_umbrella" = true ] && [ "$s" = "$root/tests/test_umbrella.sh" ]; then
+      continue
+    fi
     suites="$suites $s"
   done
 fi

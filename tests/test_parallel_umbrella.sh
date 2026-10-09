@@ -20,6 +20,30 @@ run_status() {
   RC=0
   "$@" > "$W/output" 2>&1 || RC=$?
 }
+# Installed targets can have an ordinary umbrella suite without split groups.
+for layout in only alongside; do
+  if [ "$layout" = alongside ]; then
+    echo 'echo other >> "$MARKERS"' > "$F/tests/test_other.sh"
+  fi
+  for result in pass fail; do
+    : > "$MARKERS"
+    echo 'echo umbrella >> "$MARKERS"' > "$F/tests/test_umbrella.sh"
+    if [ "$result" = fail ]; then echo 'exit 9' >> "$F/tests/test_umbrella.sh"; fi
+    run_status sh "$F/tools/run-tests.sh"
+    if [ "$result" = pass ]; then
+      [ "$RC" = 0 ] || fail "standalone_umbrella: $layout failed"
+    else
+      [ "$RC" = 1 ] || fail "standalone_umbrella: $layout hid suite failure"
+    fi
+    echo umbrella > "$W/expected"
+    if [ "$layout" = alongside ]; then echo other >> "$W/expected"; fi
+    sort "$W/expected" > "$W/expected-sorted"
+    sort "$MARKERS" > "$W/actual"
+    cmp -s "$W/actual" "$W/expected-sorted" || fail "standalone_umbrella: $layout skipped or duplicated a suite"
+  done
+done
+rm "$F/tests/test_other.sh"
+pass standalone_umbrella
 reset_groups
 # A distinctive aggregate proves exclusion rather than a lucky duplicate-free dispatcher.
 echo 'echo aggregate >> "$MARKERS"' > "$F/tests/test_umbrella.sh"
