@@ -54,7 +54,10 @@ saying "it works" means nothing until you prove it. AI-generated code is often
        repository, run one mutant there at a time, and restore between mutants.
        Measure named rows and assertions from the private fixture, leaving shared
        tracked ground truth untouched. The safe-revert instructions above still apply
-       to files already isolated in the Reviewer's private workspace.
+       to files already isolated in the Reviewer's private workspace. In a linked
+       worktree used by parallel reviewers, use the backup-copy `*.mutbak` revert
+       method; never use `git stash` there because `refs/stash` is shared across linked
+       worktrees.
      - **This forbidding sentence is itself vulnerable to the negation it cannot
        detect.** "Not strictly forbidden as the revert, but avoid: `git checkout --
        <file>`" would still satisfy a forbidden/git-checkout co-occurrence anchor,

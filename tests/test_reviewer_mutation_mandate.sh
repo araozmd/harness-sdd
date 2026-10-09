@@ -566,6 +566,8 @@ printf '%s\n' "$B3" | grep -qF 'Copy each needed fixture to a private worktree o
   || fail 'R16: check 3b must require private worktree/disposable repository mutation and per-mutant restore'
 printf '%s\n' "$B3" | grep -qF 'Measure named rows and assertions from the private fixture, leaving shared tracked ground truth untouched.' \
   || fail 'R16: check 3b must give the no-write measurement alternative'
+printf '%s\n' "$B3" | grep -qF 'In a linked worktree used by parallel reviewers, use the backup-copy .mutbak revert method; never use git stash there because refs/stash is shared across linked worktrees.' \
+  || fail 'R16: check 3b must require backup-copy reverts and forbid shared stash use in linked worktrees'
 pass 'R16 3b_parallel_shared_tracked_files_stay_untouched'
 
 echo "All reviewer mutation-mandate tests passed."
