@@ -2,7 +2,7 @@
 id: E99-F169
 title: Parallelize isolated umbrella test groups
 epic: E99-maintenance
-status: in-review
+status: done
 sdd: true
 autonomous: true
 complexity: standard
