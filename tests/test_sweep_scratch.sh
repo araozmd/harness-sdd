@@ -329,6 +329,19 @@ test_schema_invalid_id_aborts_whole_scan_no_changes() {
   pass "R14 test_schema_invalid_id_aborts_whole_scan_no_changes"
 }
 
+test_schema_invalid_id_final_newline_aborts_whole_scan() {
+  make_fixture r14-id-final-newline
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01\n","status":"done"},{"id":"E01-F02","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+  scratch_dir E01-F02-reviewer
+  run_sweep --apply
+  [ "$RC" -ne 0 ] || fail "R14: final-newline feature id passed schema validation: $OUT"
+  has_verdict_line && fail "R14: classified scratch before validating the whole board: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] || fail "R14: removed malformed-ID scratch"
+  [ -d "$PRIMARY/scratchpad/E01-F02-reviewer" ] || fail "R14: removed valid done neighbor despite malformed ID"
+  pass "R14 test_schema_invalid_id_final_newline_aborts_whole_scan"
+}
+
 # Codex #4131060237: R14's own guard only validated the SHAPE of a present string
 # value — a record whose id/status is missing entirely, JSON null, or a non-string
 # type (number, list, object) fell through the `isinstance(..., str)` check and was
@@ -1013,6 +1026,49 @@ test_quoted_key_and_quoted_value_combination_refuses() {
   [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] \
     || fail "R12: --apply deleted E01-F01-builder despite a fully-quoted key/value store: shape selecting a non-local backend"
   pass "R12 test_quoted_key_and_quoted_value_combination_refuses"
+}
+
+test_escaped_top_level_store_key_refuses() {
+  make_fixture r12-escaped-store
+  write_config '"sto\u0072e":
+  tasks: obsidian
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+  run_sweep --apply
+  [ "$RC" -ne 0 ] || fail "R12: escaped top-level store key fell through to local: $OUT"
+  has_verdict_line && fail "R12: classified scratch despite escaped top-level store key: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] || fail "R12: deleted scratch using stale local mirror"
+  pass "R12 test_escaped_top_level_store_key_refuses"
+}
+
+test_escaped_nested_tasks_key_refuses() {
+  make_fixture r12-escaped-tasks
+  write_config 'store:
+  "ta\u0073ks": jira
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+  run_sweep --apply
+  [ "$RC" -ne 0 ] || fail "R12: escaped nested tasks key fell through to local: $OUT"
+  has_verdict_line && fail "R12: classified scratch despite escaped nested tasks key: $OUT"
+  [ -d "$PRIMARY/scratchpad/E01-F01-builder" ] || fail "R12: deleted scratch using stale local mirror"
+  pass "R12 test_escaped_nested_tasks_key_refuses"
+}
+
+test_escaped_key_in_unrelated_block_does_not_refuse() {
+  make_fixture r12-unrelated-escaped-key
+  write_config 'other:
+  "ta\u0073ks": jira
+store:
+  tasks: local
+'
+  write_board '{"epics":[{"id":"E01","features":[{"id":"E01-F01","status":"done"}]}]}'
+  scratch_dir E01-F01-builder
+  run_sweep --apply
+  [ "$RC" -eq 0 ] || fail "R12: unrelated escaped key blocked ordinary local sweep: $OUT"
+  [ ! -e "$PRIMARY/scratchpad/E01-F01-builder" ] || fail "R12: ordinary local sweep did not remove done scratch: $OUT"
+  pass "R12 test_escaped_key_in_unrelated_block_does_not_refuse"
 }
 
 # ── R12: quoted top-level key, explicit 'local' value still scans normally ────────
@@ -1706,6 +1762,10 @@ test_double_quoted_top_level_key_flow_style_refuses
 test_single_quoted_top_level_key_block_style_refuses
 test_quoted_nested_tasks_key_block_style_refuses
 test_quoted_key_and_quoted_value_combination_refuses
+test_escaped_top_level_store_key_refuses
+test_escaped_nested_tasks_key_refuses
+test_escaped_key_in_unrelated_block_does_not_refuse
+test_schema_invalid_id_final_newline_aborts_whole_scan
 test_quoted_top_level_key_explicit_local_scans_normally
 test_whole_document_flow_mapping_refuses
 test_multi_document_separator_refuses

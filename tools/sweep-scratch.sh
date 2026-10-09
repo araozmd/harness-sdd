@@ -50,16 +50,11 @@
 #     KNOWN LIMITATION (disclosed, not an oversight): the R12 guard's hand-rolled
 #     reader handles the realistic, common YAML authoring shapes exercised by this
 #     file's own test suite, but it is not a full YAML parser. Uncommon or unusual
-#     syntax — e.g. escaped characters in a quoted `store:`/`tasks:` key (Codex
-#     #4129683687), or a block-scalar header whose indentation/chomping indicators
-#     appear in a less-common order (Codex #4130134127) — may cause it to fail closed
-#     (refuse, exit non-zero) rather than resolve correctly. These two are illustrative
-#     examples of the class, not an exhaustive list; other YAML features not yet
-#     encountered could trip the same guard the same way. This is always safe (the
-#     tool never mutates anything when it fails closed — it just refuses to run) but
-#     not exhaustive. Closing this gap properly needs either a real YAML dependency or
-#     a different way to derive the backend, not another hand-rolled pattern per edge
-#     case; deferred, not fixed in this PR.
+#     syntax, such as a block-scalar header whose indentation/chomping indicators
+#     appear in a less-common order (Codex #4130134127), may cause a refusal rather
+#     than resolve correctly. Escaped double-quoted mapping keys at the document
+#     top level or directly within `store:` are explicitly refused (R12). Other
+#     YAML features may still trip the guard; this reader is not a full parser.
 #
 # The tool never mutates the TaskStore, never writes outside the one resolved
 # scratchpad/ directory, and never globs or acts on scratchpad/ itself.
@@ -382,6 +377,8 @@ def find_store_key(entries):
                 raise _Refuse()
 
         kv = split_key_value(stripped)
+        if is_top_level and kv is not None and stripped.startswith('"') and "\\" in kv[0]:
+            raise _Refuse()
         if kv is not None:
             key, rest = kv
             is_open = rest.strip() == ""
@@ -519,6 +516,8 @@ def parse_store_tasks(path):
         if indent != child_indent:
             continue
         kv = split_key_value(stripped)
+        if kv is not None and stripped.startswith('"') and "\\" in kv[0]:
+            return (None, 1)
         if kv is not None and kv[0] == "tasks":
             if tasks_line is not None:
                 # A second `tasks:` key at store:'s own child indentation —
@@ -581,7 +580,7 @@ STORE_TASKS="${STORE_TASKS:-local}"
 # and either check failing exits 1 exactly like the read/parse failure above, so a
 # schema-invalid TaskStore hits the identical `TASKSTORE_RC -ne 0` die() below — the
 # record is just as untrustworthy as one this reader cannot parse at all.
-TASKSTORE_OUT="$(python3 - "$BOARD" <<'PYEOF'
+TASKSTORE_OUT=$(python3 - "$BOARD" <<'PYEOF'
 import json
 import re
 import sys
@@ -631,7 +630,7 @@ for epic in epics:
         if (
             not isinstance(fid, str)
             or not isinstance(status, str)
-            or not FID_RE.match(fid)
+            or not FID_RE.fullmatch(fid)
             or status not in STATUS_ENUM
         ):
             # Schema-invalid record (R14): a missing/non-string id or status is
@@ -675,7 +674,7 @@ for epic in epics:
             status = "parked"
         print(fid + "\t" + status)
 PYEOF
-)"
+)
 TASKSTORE_RC=$?
 [ "$TASKSTORE_RC" -eq 0 ] ||
   die "cannot read or parse the TaskStore at $BOARD — aborting the whole scan; nothing was classified, nothing was removed (exit $TASKSTORE_RC)"

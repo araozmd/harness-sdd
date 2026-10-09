@@ -644,8 +644,8 @@ test_release_sweep() {
   # HISTORICAL '## [0.88.0]' CHANGELOG-section checks below it, which stay pointed at
   # that release's own append-only entry regardless of what VERSION is today. Whoever
   # bumps VERSION next must sync this literal too (progress/lessons.md, 2026-09-16).
-  [ "$(cat "$SRC/VERSION")" = "0.89.0" ] \
-    || fail "R11: VERSION is not 0.89.0 (got $(cat "$SRC/VERSION"))"
+  [ "$(cat "$SRC/VERSION")" = "0.89.2" ] \
+    || fail "R11: VERSION is not 0.89.2 (got $(cat "$SRC/VERSION"))"
 
   _new="$T/cl-new.txt"
   _section '## [0.88.0]' "$SRC/CHANGELOG.md" > "$_new"
@@ -690,7 +690,7 @@ test_release_sweep() {
       fail "R11: tests/$_f still pins the CURRENT VERSION 0.87.0 — sync the literal to 0.88.0 (the historical ## [0.85.0]/[0.86.0] anchors and the -rc1 fixture stay)"
     fi
   done
-  pass "R11 VERSION=0.89.0, the CHANGELOG [0.88.0] entry names reporting live, INSTALL.md is no longer inert, README names /sdd-report, and the coupled literals are swept (R11) [test_release_sweep]"
+  pass "R11 VERSION=0.89.2, the CHANGELOG [0.88.0] entry names reporting live, INSTALL.md is no longer inert, README names /sdd-report, and the coupled literals are swept (R11) [test_release_sweep]"
 }
 
 # ── non-functional ────────────────────────────────────────────────────────────────────────

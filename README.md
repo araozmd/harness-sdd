@@ -56,6 +56,8 @@ roadmap: `specs/epics/E06-planning-tier/epic.md`). See `docs/WORKFLOW.md`.
 The Reviewer runs a **cross-file consistency** check (a change must not contradict the
 contracts it invokes) and the build↔review loop is **multi-round until green** — see
 `agents/reviewer.md`.
+Parallel Reviewer mutation campaigns use private fixtures so shared tracked files
+remain stable; see `agents/reviewer.md` check 3b.
 
 ## Quick start in this source checkout (Claude Code)
 
@@ -352,6 +354,10 @@ feature's TaskStore status is `done`; anything else (not found, not yet `done`, 
 unrecognized directory name, or a symlink escaping `scratchpad/`) is skipped and
 reported, never removed. Requires the `local` TaskStore backend (`store.tasks: local`
 in `harness.config.yaml`) — the tool refuses outright under any other backend.
+Escaped double-quoted mapping keys at the document top level or directly within
+`store:` are refused because the config reader cannot resolve them safely. A board
+containing any malformed feature ID also aborts before scratch is classified or
+deleted.
 
 ## Installing into an existing project
 

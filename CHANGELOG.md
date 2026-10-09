@@ -4,6 +4,29 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.89.2] — 2026-10-08
+
+### Fixed — isolate parallel Reviewer mutations (#222)
+
+- Check 3b now requires parallel Reviewers to mutate shared tracked-file fixtures
+  in a private worktree or namespaced disposable repository, restoring between
+  mutants. Shared umbrella and consumer checkout files, including `.gitignore`,
+  stay untouched while named assertions are measured from the private fixture.
+- Added an R16 contract test and private mutation probes that detect removal or
+  inversion of the rule. Existing private-file safe revert guidance and visible
+  `*.mutbak` backups remain in effect.
+
+## [0.89.1] — 2026-10-08
+
+### Fixed — fail-closed scratch sweep (#237)
+
+- Refuse escaped double-quoted mapping keys at the config top level or directly
+  within `store:` before consulting the local board. Require a full feature ID
+  match for every TaskStore record, so a trailing newline aborts the entire sweep
+  before scratch is classified or deleted.
+- Keep the TaskStore command-substitution assignment compatible with macOS
+  `/bin/sh`; the focused suite's syntax gate now runs on that shell.
+
 ## [0.89.0] — 2026-09-28
 
 ### Added — automated scratch-dir sweep + role hand-off rules (E34-F01)
