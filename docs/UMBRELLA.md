@@ -14,6 +14,10 @@ root can itself be a git repo that tracks **only** `.harness/` + the umbrella do
 git-ignores the child product repos — a *shared spec repository* a team clones so epics,
 specs, and task state are versioned and shared instead of stranded on one laptop.
 
+Parallel Reviewers must run mutations against a private worktree or namespaced
+disposable repository; shared tracked files such as the umbrella `.gitignore` stay
+untouched. See [Reviewer check 3b](../agents/reviewer.md#what-you-check).
+
 ## Opt-in switch (single-repo stays inert)
 Umbrella mode is engaged **only** when `umbrella.manifest` in `harness.config.yaml`
 points at an existing manifest file. Copy the shipped template to start — it lives at
