@@ -50,4 +50,3 @@ No TaskStore changes, PR merge, or remote comments performed by this reviewer. T
 ## Superseded baseline run
 
 Initial head `466f82a98af633eb0d6b37a6d15dc77acf61789d` predates main's macOS Bash 3.2 parsing fix for `tools/sweep-scratch.sh` (PR #241). Its configured test run failed `test_sweep_scratch.sh` R1 with unmatched quote/EOF at lines 805/807. The script has identical blob `6543e84b4c6d86bf968e03ddacfa64a23e78f1e2` at that head and its parent; the failure reproduces with `/bin/sh -n` on the parent blob and does not occur under dash/current Homebrew Bash. It is unrelated to the dependency pin. The superseded run was stopped after its failure was explained, and the full suite restarted on the updated head. The updated sweep script passes `/bin/sh -n`.
-
