@@ -872,7 +872,7 @@ for field in ('summary','observed','expected','reproduction','evidence'):
     for value in (None,1,[],{},'','TODO '*30,'unknown; N/A; not available; see notes; pending', '[REDACTED-SECRET] '*4, 'summary observed expected harness-malfunction tool-failure tools/harness-report.sh 9.9.9', 'harness malfunction tool failure 9 9 9 harness malfunction tool failure 9 9 9', 'x'*19):
         data=copy.deepcopy(base); data[field]=value; run(data,field+':')
     data=copy.deepcopy(base); data[field]='x'*(241 if field=='summary' else 1501); run(data,field+': length')
-for raw in (b'{',b'\xff',b'[]',b'{"summary":1,"summary":2}',b' '*16385):
+for raw in (b'{',b'\xff',b'[]',b'{"summary":1,"summary":2}'):
     run(raw,'details-file:',raw=True)
 for key in base['context']:
     for value in (None, [], {}, 1, 'x'*19, 'x'*1001):
@@ -886,6 +886,9 @@ for control in ('\x00','\x1f','\x85'):
     data=copy.deepcopy(base); data['summary']=control+base['summary']; run(data,'summary: forbidden')
 for value in ('prefix-tools/harness-report.sh','foreign/tools/harness-report.sh','tools/harness-report.sh.extra','private+tools/harness-report.sh','tools/harness-report.sh@customer','客户+tools/harness-report.sh','tools/harness-report.sh%private','prefix=tools/harness-report.sh'):
     data=copy.deepcopy(base); data['evidence']='Inspect '+value+' for the missing validation branch.'; run(data,'evidence:')
+# Substantive safe prose must still link evidence to an accepted file.
+data=copy.deepcopy(base); data['evidence']='The fixture completed with a missing validation condition.'
+run(data,'evidence: accepted file reference missing')
 contexts={'harness-malfunction':['failure','project_health'],'contradictory-instruction':['instruction_a','instruction_b'],'workaround':['documented_path','failed_because','alternative'],'missing-capability':['occurrences','workflow_gap','impact']}
 # Distinct sessions keep this matrix independent of the cap.
 for trigger, keys in contexts.items():
@@ -912,7 +915,10 @@ for field, maximum in [('summary',240),('observed',1500),('expected',1500),('rep
     for size in (20,maximum):
         data=copy.deepcopy(base); data[field]='x'*size
         run(data,extra=('--session-id','boundary-'+str(count)))
-raw=json.dumps(base).encode(); run(raw+b' '*(16384-len(raw)),raw=True,extra=('--session-id','bytes'))
+raw=json.dumps(base).encode()
+# JSON whitespace keeps both boundary payloads otherwise valid.
+run(raw+b' '*(16385-len(raw)),'details-file: exceeds 16384 bytes',raw=True)
+run(raw+b' '*(16384-len(raw)),raw=True,extra=('--session-id','bytes'))
 print('ok - details_completeness, details_trigger_matrix, details_unsafe_corpus')
 args[3]='harness-malfunction'
 # Complete corrected evidence can file using the same token as withheld attempts.
