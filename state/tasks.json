@@ -1048,7 +1048,7 @@
         {
           "id": "E99-F167",
           "title": "Refuse ambiguous sweep config keys and malformed feature IDs",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],

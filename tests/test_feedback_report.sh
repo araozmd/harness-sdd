@@ -741,8 +741,8 @@ _section() { # _section <heading-literal> <file>
 test_shipping_artifacts() {
   [ -x "$TOOL" ] \
     || fail "R12: tools/harness-report.sh is not executable in the source tree (the installer chmod cannot fix a source mode)"
-  [ "$(cat "$SRC/VERSION")" = "0.89.0" ] \
-    || fail "R12: VERSION is not 0.89.0 (got $(cat "$SRC/VERSION"))"
+  [ "$(cat "$SRC/VERSION")" = "0.89.1" ] \
+    || fail "R12: VERSION is not 0.89.1 (got $(cat "$SRC/VERSION"))"
 
   _sec="$(printf 'chmod +x "$H/tools/harness-report.sh"')"
   grep -qF "$_sec" "$SRC/harness-install.sh" \

@@ -352,6 +352,10 @@ feature's TaskStore status is `done`; anything else (not found, not yet `done`, 
 unrecognized directory name, or a symlink escaping `scratchpad/`) is skipped and
 reported, never removed. Requires the `local` TaskStore backend (`store.tasks: local`
 in `harness.config.yaml`) — the tool refuses outright under any other backend.
+Escaped double-quoted mapping keys at the document top level or directly within
+`store:` are refused because the config reader cannot resolve them safely. A board
+containing any malformed feature ID also aborts before scratch is classified or
+deleted.
 
 ## Installing into an existing project
 
