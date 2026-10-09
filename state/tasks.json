@@ -1057,7 +1057,7 @@
         {
           "id": "E99-F168",
           "title": "Keep reviewer mutation checks off shared tracked files",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
