@@ -56,6 +56,8 @@ roadmap: `specs/epics/E06-planning-tier/epic.md`). See `docs/WORKFLOW.md`.
 The Reviewer runs a **cross-file consistency** check (a change must not contradict the
 contracts it invokes) and the build↔review loop is **multi-round until green** — see
 `agents/reviewer.md`.
+Parallel Reviewer mutation campaigns use private fixtures so shared tracked files
+remain stable; see `agents/reviewer.md` check 3b.
 
 ## Quick start in this source checkout (Claude Code)
 
