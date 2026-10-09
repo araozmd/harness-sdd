@@ -14,6 +14,8 @@
 2056805182 43 .agents/skills/sdd-pr-loop/agents/openai.yaml
 2338094706 11171 .agents/skills/sdd-report/SKILL.md
 2056805182 43 .agents/skills/sdd-report/agents/openai.yaml
+1392633382 6296 .agents/skills/sdd-triage/SKILL.md
+2056805182 43 .agents/skills/sdd-triage/agents/openai.yaml
 1754293473 845 .claude/agents/architect.md
 2521915606 672 .claude/agents/builder-heavy.md
 4021444689 699 .claude/agents/builder.md
@@ -30,6 +32,7 @@
 10195721 13798 .claude/commands/sdd-plan.md
 2029175671 60151 .claude/commands/sdd-pr-loop.md
 1478355213 10736 .claude/commands/sdd-report.md
+3736292821 5861 .claude/commands/sdd-triage.md
 2520888052 764 .codex/agents/architect.toml
 363529875 911 .codex/agents/builder-heavy.toml
 3647493360 763 .codex/agents/builder.toml
@@ -48,4 +51,5 @@
 2029175671 60151 .opencode/command/sdd-pr-loop.md
 1478355213 10736 .opencode/command/sdd-report.md
 4083098437 1963 .opencode/command/sdd-test-concurrency.md
+3736292821 5861 .opencode/command/sdd-triage.md
 4123573485 1295 opencode.json

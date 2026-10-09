@@ -1712,19 +1712,31 @@
         {
           "id": "E32-F05",
           "title": "Source-only /sdd-triage: group harness-feedback issues, propose routes, seed only on human approval",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
             "E32-F04"
           ],
-          "spec_path": "specs/epics/E32-feedback-loop/F05-sdd-triage/"
+          "spec_path": "specs/epics/E32-feedback-loop/F05-sdd-triage/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (247)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E32-F05 done --evidence <merge-ref>`",
+            "pr": "247"
+          }
         },
         {
           "id": "E32-F06",
           "title": "Actionable sanitized harness reports with immediate automatic filing",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "bc68c2895669669ae3092d907c9bf7ea24f606b5", "ref": "bc68c2895669669ae3092d907c9bf7ea24f606b5", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "bc68c2895669669ae3092d907c9bf7ea24f606b5",
+            "ref": "bc68c2895669669ae3092d907c9bf7ea24f606b5",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [

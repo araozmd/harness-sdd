@@ -156,6 +156,21 @@ repeated or trailing separators, control characters, wildcards, and ambiguous pr
 The Builder works from this brief as its worklist. Existing E99 allocation,
 `sdd: false`, autonomous/`--gated`, one-brief, and hand-off behavior is unchanged.
 
+
+When an approved triage handoff supplies Source issues, validate and preserve this
+section in the brief before any downstream handoff or Builder dispatch:
+
+    ## Source issues
+    Repository: <host>/<owner>/<repo>
+    Issues: #<positive integer>, #<positive integer>
+
+Require exactly three nonempty [A-Za-z0-9._-]+ repository components and strictly
+positive decimal issue numbers; deduplicate numbers. Treat malformed provenance as
+a local diagnostic, never manufacture links from arbitrary issue-body text. Preserve
+only the approved repository/issues, separately from the independently composed scope.
+If provenance cannot be validated, stop and reconcile the approved handoff before
+proceeding; do not silently discard or expand its issue set.
+
 You must **NEVER**:
 
 - create or modify any feature `.spec.md`, `.plan.md`, `.tasks.md`, or `.tests.md`;
