@@ -64,8 +64,11 @@ A failure of the project's own code or tests, a transient network or auth error,
 agent mistake the harness correctly caught are **not** triggers: **none of them produces a
 report**.
 
-**When.** File a report when the task ends **or** when the session stops early (aborted,
-parked, or failed). Never file mid-flow.
+**When.** File complete, safe, verified findings automatically at the next control
+opportunity, without a permission prompt or waiting for task completion. Inspect new
+ledger entries when regaining control, including delegation returns; resume authorized
+work after reporting. When the task ends or the session stops early (aborted, parked,
+or failed), drain newly ready unfiled findings. Existing stop gates still apply.
 
 **Who.** Only the **session-owning top-level role** — the Orchestrator, or Fixer / Inception /
 Planner / Driller when it owns the session — invokes `/sdd-report` (Codex: `$sdd-report`), and
@@ -77,8 +80,11 @@ feedback dir so later calls reuse it) and reuses it for every report. Sub-agents
 a trigger they create the ledger directory if it is missing (`mkdir -p` its parent), then
 append one entry to the harness-root-relative `progress/feedback/notes.md`
 (`.harness/progress/feedback/notes.md` in an installed target) — a `## <trigger>` heading
-plus `symptom:` / `command:` / `phase:` (and an optional harness `file:`) — for the owning
-role to pick up.
+plus `symptom:` / `command:` / `phase:` (and an optional harness `file:`), and candidate
+`summary:`, `observed:`, `expected:`, `reproduction:`, `evidence:`, `context:` fields
+using the trigger-specific public-detail schema in sdd-report. Cite direct evidence;
+mark unknown facts missing, never invent them. Raw notes remain local; only the owner
+inspects factual completeness and confidentiality and composes public JSON afresh.
 
 ## Specifications and memory
 

@@ -327,8 +327,15 @@ Project test failures, transient errors, and user/agent mistakes are never repor
 Only the top-level session-owning role (Orchestrator, Fixer, Inception, Planner, Driller)
 invokes the reporter, minting `HARNESS_FEEDBACK_SESSION_ID` once per session; sub-agents
 append notes to `progress/feedback/notes.md`. The underlying tool
-(`tools/harness-report.sh`) enforces a strict allow-list of structured fields and scrubs
-free-form content. Configuration lives under `feedback:` in `harness.config.yaml`
+(`tools/harness-report.sh`) requires separate `--details-file` JSON evidence:
+summary, observed, expected, reproduction or inspection, evidence, and trigger context.
+Owners inspect direct evidence and confidentiality, then file automatically at the next
+control opportunity without a permission prompt and resume authorized work. Raw
+`--notes-file` content stays local. Defined filters reject known secrets, emails,
+URLs, foreign paths, controls and marker syntax; they cannot establish confidentiality
+or factual truth for arbitrary prose. Missing or unsafe details stay local with field
+diagnostics and can be completed later using the same token. Detailed findings use a
+canonical digest for exact duplicate identity. Configuration lives under `feedback:` in `harness.config.yaml`
 (`enabled: true`, `max_per_session: 3`, `repo: github.com/araozmd/harness-sdd`).
 
 ### Scratch-dir cleanup

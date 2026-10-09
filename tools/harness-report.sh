@@ -1,15 +1,9 @@
 #!/bin/sh
 # harness-report.sh — file ONE allow-listed harness-feedback report upstream (E32-F02).
 #
-# The caller is E32-F03's reporting rule; F04 (the labeler) and F05 (triage) consume the
-# marker this tool writes. Automatic filing runs with no human review, so the privacy
-# contract lives here, in one auditable place:
-#
-#   THE ALLOW-LIST IS THE GUARANTEE, REDACTION IS A SECOND LAYER.
-#   Every outbound field (title, body, duplicate-search query) is built ONLY from values
-#   that passed a fixed allow-list (enum, grammar, or harness ownership). Free-form text
-#   (--notes-file) is never an input to the title, body, or search query; it lives only in
-#   the local progress/feedback/ copy. The corpus redaction pass (R8) runs afterward.
+# Public evidence is bounded, validated JSON; raw notes remain local. Lexical filters
+# are not a confidentiality or truth classifier: the owner reviews direct evidence.
+# Tests: test_feedback_report.sh::details_*.
 #
 # THE TOOL NEVER FAILS THE CALLER. Missing --trigger/--symptom, an out-of-allow-list value,
 # a duplicate, a capped or tokenless session, a non-semver VERSION, a missing/unauthenticated/
@@ -27,6 +21,7 @@
 #     [--phase    <enumerated phase>]
 #     [--session-id <token>]                         # [A-Za-z0-9._-]{1,64};
 #                                                    # env HARNESS_FEEDBACK_SESSION_ID also read
+#     --details-file <path>                         # bounded public JSON evidence
 #     [--notes-file <path>]                          # free-form; LOCAL COPY ONLY
 #   harness-report.sh redact                         # stdin -> redacted stdout (R8), exit 0
 #
@@ -97,7 +92,7 @@ DEFAULT_REPO="github.com/araozmd/harness-sdd"
 CFG="$H/harness.config.yaml"
 
 _trigger=""; _symptom=""; _role=""; _phase=""; _command=""; _exit_code=""
-_notes_file=""; _session_arg=""; _files_raw=""
+_details_file=""; _notes_file=""; _session_arg=""; _files_raw=""
 
 # ── argument parser ──────────────────────────────────────────────────────────────────────
 while [ $# -gt 0 ]; do
@@ -109,6 +104,7 @@ while [ $# -gt 0 ]; do
     --command)   shift; if [ $# -gt 0 ]; then _command="$1";   shift; fi ;;
     --exit-code) shift; if [ $# -gt 0 ]; then _exit_code="$1"; shift; fi ;;
     --session-id) shift; if [ $# -gt 0 ]; then _session_arg="$1"; shift; fi ;;
+    --details-file) shift; if [ $# -gt 0 ]; then _details_file="$1"; shift; fi ;;
     --notes-file) shift; if [ $# -gt 0 ]; then _notes_file="$1"; shift; fi ;;
     --file)      shift; if [ $# -gt 0 ]; then _files_raw="$_files_raw$1
 "; shift; fi ;;
@@ -353,7 +349,7 @@ if [ -z "$_reject" ]; then
       grep -qxF -- "$_pfx$_cand" "$_listing" 2>/dev/null || continue
       printf '%s\n' "$_cand"
     done > "$_wk/accepted" || true
-    _files="$(cat "$_wk/accepted" 2>/dev/null)" || _files=""
+    _files="$(sort -u "$_wk/accepted" 2>/dev/null)" || _files=""
   fi
   if [ -z "$_files" ]; then
     _setreject file
@@ -401,6 +397,7 @@ write_local_copy() {
     if [ -n "$_a_role" ];           then printf 'Role: %s\n' "$_a_role"; fi
     if [ -n "$_a_phase" ];          then printf 'Phase: %s\n' "$_a_phase"; fi
     if [ -n "$_session_arg" ];      then printf 'Session: %s\n' "$_session_arg"; fi
+    if [ -n "${_wk:-}" ] && [ -f "$_wk/details.md" ]; then cat "$_wk/details.md"; fi
     printf '\nNotes:\n'
   } > "$_f" 2>/dev/null || true
   if [ -n "$_notes_file" ] && [ -f "$_notes_file" ]; then
@@ -426,6 +423,17 @@ fi
 _session="${_session_arg:-${HARNESS_FEEDBACK_SESSION_ID:-}}"
 if ! _valid_session "$_session"; then
   _finish no-session
+fi
+
+# Public detail validation precedes every gh call and does not consume the cap.
+if ! command -v python3 >/dev/null 2>&1; then
+  _finish rejected 'details-file: parser unavailable'
+fi
+printf '%s\n' "$_files" > "$_wk/detail-files"
+if ! python3 "$H/tools/harness-report-details.py" "$_details_file" "$_a_trigger" "$_a_symptom" \
+    "$_wk/detail-files" "$_wk" "$_a_ver" "$_a_command" "$_a_exit" "$_a_role" "$_a_phase" \
+    2> "$_wk/details-errors"; then
+  _finish rejected "$(cat "$_wk/details-errors")"
 fi
 
 # ── per-session cap (R10) ─────────────────────────────────────────────────────────────────
@@ -459,7 +467,7 @@ fi
 # title EQUALS the fixed title exactly (client-side comparison) — a mere mention must not
 # suppress a distinct report.
 _first_file="$(printf '%s\n' "$_files" | sed -n '1p')"
-_title="[harness-feedback] $_a_trigger $_a_symptom in $_first_file"
+_title="[harness-feedback] $_a_trigger $_a_symptom in $_first_file [$(cat "$_wk/digest")]"
 _search="in:title $_title"
 
 if _list_out="$(GH_HOST="$_host" gh issue list --repo "$_owner/$_name" --state open \
@@ -499,6 +507,7 @@ _body_raw="$_wk/body.raw"
   if [ -n "$_a_exit" ];    then printf 'Exit code: %s\n' "$_a_exit"; fi
   if [ -n "$_a_role" ];    then printf 'Role: %s\n' "$_a_role"; fi
   if [ -n "$_a_phase" ];   then printf 'Phase: %s\n' "$_a_phase"; fi
+  cat "$_wk/details.md"
 } > "$_body_raw" 2>/dev/null || true
 _body_red="$_wk/body.redacted"
 redact_stream < "$_body_raw" > "$_body_red" 2>/dev/null || true
