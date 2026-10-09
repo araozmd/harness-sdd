@@ -1723,7 +1723,8 @@
         {
           "id": "E32-F06",
           "title": "Actionable sanitized harness reports with immediate automatic filing",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "bc68c2895669669ae3092d907c9bf7ea24f606b5", "ref": "bc68c2895669669ae3092d907c9bf7ea24f606b5", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [
