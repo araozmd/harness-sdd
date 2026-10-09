@@ -431,3 +431,9 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-10-09T16:03:49Z | E32-F05 approved PR #247 opened: https://github.com/araozmd/harness-sdd/pull/247. Parked awaiting-merge; status remains in-review, done requires observed merge.
 - 2026-10-09T19:16:47Z | E32-F05 completion: PR #247 merged at 152edadedd907421d2394b4eef86ba8c9abfdfd8 after Codex round 2 clean; round 1 late P2 fixed with concrete delegate handoff, acknowledgement and PR identities plus config-template synchronization. Final 58/58 suites passed under dash; guarded done accepted merge evidence. E32 rolled up done because all six features landed; scratch sweep removed one eligible directory. Release v0.91.0 targets feature merge.
 - 2026-10-09T19:19:16Z | E32 epic-done Scout drift check: nothing to re-validate because specs/architecture.md is absent; E13/E14 remain draft, no demotions. Published v0.91.0 at 152edad.
+
+- 2026-10-09T19:45:26Z | E99-F169 seeded pending/autonomous from user-approved umbrella test parallelization. Inception captured intent; Scout mapped 13 safe candidate groups and isolation/aggregate-discovery risks. Architect routed by exact-target selector.
+
+- 2026-10-09T19:49:59Z E99-F169: Architect and fresh doc-critic completed 11-requirement spec; owner advanced spec-ready → in-progress under recorded autonomous authorization. Baseline umbrella suite passed in 209.14s. Builder round 1 routed.
+
+- 2026-10-09T20:22:50Z E99-F169 Builder round 1 completed: 13 byte-conserved groups, focused checks and six mutations pass; identical 93 result/skip records; umbrella 209.14s → 71.61s (2.92×). Independent full verification pending; owner advanced in-review.

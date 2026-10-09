@@ -1076,6 +1076,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F168-reviewer-mutation-isolation/"
+        },
+        {
+          "id": "E99-F169",
+          "title": "Parallelize isolated umbrella test groups to reduce verification time",
+          "status": "in-review",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F169-parallel-umbrella-tests/"
         }
       ]
     },

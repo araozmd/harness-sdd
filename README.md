@@ -477,3 +477,23 @@ approval gate; see [Bootstrap](docs/INSTALL.md#bootstrap-first-run) and the
 
 Derived from the *Harnessing Engineering* research (harness-engineering + SDD videos,
 Anthropic's long-running-development post, the Harness Engineering knowledge graph).
+
+### Running the tests
+
+Run `sh tools/run-tests.sh` for the full suite (eight workers by default). Umbrella
+coverage lives in 13 independent `tests/test_umbrella_[0-9][0-9]_*.sh` groups,
+with shared helpers under `tests/lib/umbrella/`. Default discovery excludes the
+compatibility aggregate to avoid running these cases twice. The runner parses
+all umbrella groups and helpers before executing even a focused selection.
+
+Use `sh tests/test_umbrella.sh` to run umbrella groups sequentially, or
+`sh tools/run-tests.sh tests/test_umbrella.sh` for the same aggregate under the
+runner's selected strict shell. To measure concurrent umbrella coverage, run
+`sh tools/run-tests.sh --jobs 8 tests/test_umbrella_[0-9][0-9]_*.sh`.
+The cheap plumbing regression is `sh tools/run-tests.sh tests/test_parallel_umbrella.sh`.
+
+For comparable timings, use an existing disk-backed `TMPDIR` outside this repository
+and every other Git work tree, check free disk space, and place a real Python
+interpreter directory before version-manager shims on `PATH`. Keep the shell,
+environment and host load comparable; successful case logs are normally discarded
+by the runner, so preserve them separately when comparing result multisets.

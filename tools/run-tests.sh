@@ -120,6 +120,8 @@ root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 if [ -z "$suites" ]; then
   for s in "$root"/tests/test_*.sh; do
     [ -f "$s" ] || continue
+    # The compatibility aggregate would duplicate the independently scheduled groups.
+    [ "$s" != "$root/tests/test_umbrella.sh" ] || continue
     suites="$suites $s"
   done
 fi
@@ -324,7 +326,10 @@ fi
 # tools/*.sh are included because a parse error in a TOOL is WORSE than one in a test. A
 # test fails loudly; a tool that dies mid-run takes a caller's behavior with it, quietly.
 preflight_bad=""
-for _f in "$@" "$root"/tools/*.sh; do
+# The explicit aggregate invokes child suites, which source umbrella helpers. Parse
+# all of them before any execution, including focused aggregate selections.
+for _f in "$@" "$root"/tools/*.sh "$root"/tests/test_umbrella.sh \
+  "$root"/tests/test_umbrella_[0-9][0-9]_*.sh "$root"/tests/lib/umbrella/*.sh; do
   [ -f "$_f" ] || continue
   if _pf_err="$("$strict_sh" -n "$_f" 2>&1)"; then :; else
     preflight_bad="$preflight_bad $(basename "$_f")"

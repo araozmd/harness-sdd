@@ -4,6 +4,13 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.91.1] — 2026-10-09
+
+### Fixed
+- Run umbrella test coverage as 13 isolated parallel suites while preserving the
+  serial compatibility entrypoint. Default verification avoids duplicate execution
+  and parse-checks all umbrella groups and helpers before running tests.
+
 ## [0.91.0] — 2026-10-09
 
 ### Added
