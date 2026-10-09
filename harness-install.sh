@@ -412,6 +412,10 @@ execution:
     # Read ONLY when backend: delegate. The Builder invokes it as:
     #     <delegate_cmd> <feature-id> <abs-spec-path>
     # It must exit 0 on success, non-zero to signal failure back to the Builder.
+    # Source issues briefs additionally require HARNESS_BUILDER_HANDOFF support:
+    # consume the file into executor instructions and return handoff/PR identity
+    # per agents/builder.md's Delegate provenance extension. Unsupported adapters
+    # stop before dispatch; the two positional arguments remain unchanged.
     delegate_cmd: ""
 EOF
   fi
