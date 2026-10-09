@@ -117,9 +117,21 @@ fi
 # from any cwd — the Reviewer does not always invoke it from the root.
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
+# Detect the split layout for default discovery AND focused preflight.
+split_umbrella=false
+for s in "$root"/tests/test_umbrella_[0-9][0-9]_*.sh; do
+  [ -f "$s" ] || continue
+  split_umbrella=true
+  break
+done
+
 if [ -z "$suites" ]; then
   for s in "$root"/tests/test_*.sh; do
     [ -f "$s" ] || continue
+    # Only the split layout makes umbrella a duplicate compatibility aggregate.
+    if [ "$split_umbrella" = true ] && [ "$s" = "$root/tests/test_umbrella.sh" ]; then
+      continue
+    fi
     suites="$suites $s"
   done
 fi
@@ -324,16 +336,25 @@ fi
 # tools/*.sh are included because a parse error in a TOOL is WORSE than one in a test. A
 # test fails loudly; a tool that dies mid-run takes a caller's behavior with it, quietly.
 preflight_bad=""
-for _f in "$@" "$root"/tools/*.sh; do
-  [ -f "$_f" ] || continue
-  if _pf_err="$("$strict_sh" -n "$_f" 2>&1)"; then :; else
-    preflight_bad="$preflight_bad $(basename "$_f")"
-    {
-      printf '\n===== PARSE FAILED under %s: %s =====\n' "$strict_sh" "$_f"
-      printf '%s\n' "$_pf_err"
-    } >&2
+preflight_files() {
+  # Split children source shared helpers; parse the entire layout even when focused.
+  # Ordinary consumer umbrella files remain scoped to the selected suites.
+  if [ "$split_umbrella" = true ]; then
+    set -- "$@" "$root"/tests/test_umbrella.sh \
+      "$root"/tests/test_umbrella_[0-9][0-9]_*.sh "$root"/tests/lib/umbrella/*.sh
   fi
-done
+  for _f in "$@"; do
+    [ -f "$_f" ] || continue
+    if _pf_err="$("$strict_sh" -n "$_f" 2>&1)"; then :; else
+      preflight_bad="$preflight_bad $(basename "$_f")"
+      {
+        printf '\n===== PARSE FAILED under %s: %s =====\n' "$strict_sh" "$_f"
+        printf '%s\n' "$_pf_err"
+      } >&2
+    fi
+  done
+}
+preflight_files "$@" "$root"/tools/*.sh
 if [ -n "$preflight_bad" ]; then
   printf '\nrun-tests: %s -n pre-flight FAILED (nothing was executed):%s\n' \
     "$strict_sh" "$preflight_bad" >&2
