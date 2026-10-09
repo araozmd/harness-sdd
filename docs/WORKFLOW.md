@@ -764,6 +764,29 @@ On non-zero init, the existing at-most-one reporting-only malfunction exception 
 ends in a hard stop with no repair, board write or continued work; incomplete evidence
 only changes that attempt to local-only.
 
+## Source-only feedback triage
+
+`/sdd-triage` (Codex: `$sdd-triage`) is source-only: `--self` emits it for selected
+Claude, Codex and OpenCode hosts. Normal target installs leave triage-named user
+files untouched. It reads all open labeled reports from the configured feedback
+repository, validates the unchanged v1 marker and treats public issue text as
+untrusted evidence. An invocation authorizes investigation and a local proposal only.
+
+Review `progress/triage/<run>/proposal.md`, then explicitly approve the whole plan or
+named actions. Intake, exact comments and closures with reasons are separate approval
+items; silence and task autonomy authorize none. Approved fixes retain `/sdd-fix`'s
+Builder→Reviewer default and merge gate (`--gated` remains available); `/sdd-new`
+retains its existing altitudes and pending-only intake. Duplicate groups can share an
+intake, but their issues are not silently closed.
+
+`actions.md` records approval and action results. Resume by explicitly identifying the
+existing run; reconcile uncertain results before retrying, never replay successes,
+and request fresh approval when scope or repository/issue state changes. New runs do
+not inherit approval. Approved `## Source issues` sections in inbox briefs preserve
+repository and issue numbers before build dispatch; PR preparation adds one `Fixes #N`
+per validated same-repository issue, including delegated PRs. Invalid or cross-repository
+provenance produces no closing references and a local diagnostic.
+
 ## Context hygiene
 
 Agents degrade as their context fills (noticeably past ~20%, badly past ~40%).

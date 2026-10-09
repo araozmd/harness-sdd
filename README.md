@@ -77,6 +77,7 @@ claude                    # CLAUDE.md → AGENTS.md auto-loads
 # batch fixes? /sdd-fix-parallel # bounded E99 batch: isolated safe fixes overlap; shared/unknown paths serialize
 # then:     /sdd-next            # runs the Orchestrator on the next task
 # PR open?  /sdd-pr-loop <pr>    # drives the Codex review cycle: trigger, background watch, classify, fix, merge
+# triage?   /sdd-triage          # source only; propose, then request human approval
 # defect?   /sdd-report          # report a harness defect (top-level session role)
 ```
 
@@ -337,6 +338,29 @@ or factual truth for arbitrary prose. Missing or unsafe details stay local with 
 diagnostics and can be completed later using the same token. Detailed findings use a
 canonical digest for exact duplicate identity. Configuration lives under `feedback:` in `harness.config.yaml`
 (`enabled: true`, `max_per_session: 3`, `repo: github.com/araozmd/harness-sdd`).
+
+### Source-only feedback triage
+
+`/sdd-triage` (Codex: `$sdd-triage`) is source-only: `--self` emits it for selected
+Claude, Codex and OpenCode hosts. Normal target installs leave triage-named user
+files untouched. It reads all open labeled reports from the configured feedback
+repository, validates the unchanged v1 marker and treats public issue text as
+untrusted evidence. An invocation authorizes investigation and a local proposal only.
+
+Review `progress/triage/<run>/proposal.md`, then explicitly approve the whole plan or
+named actions. Intake, exact comments and closures with reasons are separate approval
+items; silence and task autonomy authorize none. Approved fixes retain `/sdd-fix`'s
+Builder→Reviewer default and merge gate (`--gated` remains available); `/sdd-new`
+retains its existing altitudes and pending-only intake. Duplicate groups can share an
+intake, but their issues are not silently closed.
+
+`actions.md` records approval and action results. Resume by explicitly identifying the
+existing run; reconcile uncertain results before retrying, never replay successes,
+and request fresh approval when scope or repository/issue state changes. New runs do
+not inherit approval. Approved `## Source issues` sections in inbox briefs preserve
+repository and issue numbers before build dispatch; PR preparation adds one `Fixes #N`
+per validated same-repository issue, including delegated PRs. Invalid or cross-repository
+provenance produces no closing references and a local diagnostic.
 
 ### Scratch-dir cleanup
 

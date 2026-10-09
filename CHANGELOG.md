@@ -4,6 +4,16 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.91.0] — 2026-10-09
+
+### Added
+- Source-only `/sdd-triage` (Codex `$sdd-triage`) reads complete feedback snapshots,
+  validates supported markers and prepares investigated proposals. Explicit human
+  approval scopes each intake, comment and closure; local receipts support resume.
+- Approved Source issues survive fix/new briefs and become deduplicated same-repository
+  PR closing references, including delegated Builder PR preparation. Normal target
+  installs never emit or own triage commands or skills.
+
 ## [0.90.0] — 2026-10-08
 
 ### Added

@@ -435,7 +435,8 @@ changelog_release_section() {
 }
 
 test_version_and_changelog() {
-  [ "$(cat "$SRC/VERSION")" = "0.90.0" ] || fail "R11: VERSION is not 0.90.0 (got $(cat "$SRC/VERSION"))"
+  _latest="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' "$SRC/CHANGELOG.md" | sed -n '1p')"
+  [ -n "$_latest" ] && [ "$(cat "$SRC/VERSION")" = "$_latest" ] || fail "R11: VERSION does not match newest CHANGELOG entry (got $(cat "$SRC/VERSION"))"
   changelog_release_section > "$T/changelog-release.txt"
   [ -s "$T/changelog-release.txt" ] \
     || fail "R11: could not extract the ## [0.85.0] CHANGELOG section — heading anchor is stale"
@@ -443,7 +444,7 @@ test_version_and_changelog() {
     grep -qF "$_tok" "$T/changelog-release.txt" \
       || fail "R11: CHANGELOG.md's [0.85.0] section is missing '$_tok'"
   done
-  pass "VERSION is 0.90.0 and CHANGELOG's [0.85.0] section names the block, its default-on enabled: true, the default repo, the notice, and the opt-out (R11) [test_version_and_changelog]"
+  pass "VERSION matches the newest entry and CHANGELOG's [0.85.0] section names the block, its default-on enabled: true, the default repo, the notice, and the opt-out (R11) [test_version_and_changelog]"
 }
 
 # ── non-functional: suite itself is +x, POSIX sh (E32-F01 tests.md) ───────────────────

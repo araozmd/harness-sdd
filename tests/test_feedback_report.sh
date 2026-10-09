@@ -762,8 +762,9 @@ _section() { # _section <heading-literal> <file>
 test_shipping_artifacts() {
   [ -x "$TOOL" ] \
     || fail "R12: tools/harness-report.sh is not executable in the source tree (the installer chmod cannot fix a source mode)"
-  [ "$(cat "$SRC/VERSION")" = "0.90.0" ] \
-    || fail "R12: VERSION is not 0.90.0 (got $(cat "$SRC/VERSION"))"
+  _latest="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' "$SRC/CHANGELOG.md" | sed -n '1p')"
+  [ -n "$_latest" ] && [ "$(cat "$SRC/VERSION")" = "$_latest" ] \
+    || fail "R12: VERSION does not match newest CHANGELOG entry (got $(cat "$SRC/VERSION"))"
 
   _sec="$(printf 'chmod +x "$H/tools/harness-report.sh"')"
   grep -qF "$_sec" "$SRC/harness-install.sh" \

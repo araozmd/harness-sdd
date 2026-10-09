@@ -1712,7 +1712,7 @@
         {
           "id": "E32-F05",
           "title": "Source-only /sdd-triage: group harness-feedback issues, propose routes, seed only on human approval",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [

@@ -121,7 +121,7 @@ for _must in \
   .claude/agents/reviewer.md .claude/agents/scout.md \
   .claude/commands/sdd-drill.md .claude/commands/sdd-fix.md .claude/commands/sdd-fix-parallel.md \
   .claude/commands/sdd-new.md .claude/commands/sdd-next.md .claude/commands/sdd-plan.md \
-  .claude/commands/sdd-pr-loop.md .claude/commands/sdd-report.md \
+  .claude/commands/sdd-pr-loop.md .claude/commands/sdd-report.md .claude/commands/sdd-triage.md \
   .codex/agents/architect.toml .codex/agents/builder-heavy.toml .codex/agents/builder.toml \
   .codex/agents/doc-critic.toml .codex/agents/orchestrator.toml .codex/agents/pr-fixer.toml \
   .codex/agents/reviewer.toml .codex/agents/scout.toml \
@@ -133,11 +133,12 @@ for _must in \
   .agents/skills/sdd-plan/SKILL.md .agents/skills/sdd-plan/agents/openai.yaml \
   .agents/skills/sdd-pr-loop/SKILL.md .agents/skills/sdd-pr-loop/agents/openai.yaml \
   .agents/skills/sdd-report/SKILL.md .agents/skills/sdd-report/agents/openai.yaml \
+  .agents/skills/sdd-triage/SKILL.md .agents/skills/sdd-triage/agents/openai.yaml \
   .escalation-arming opencode.json \
   .opencode/agent/pr-fixer.md \
   .opencode/command/sdd-drill.md .opencode/command/sdd-fix.md .opencode/command/sdd-new.md \
   .opencode/command/sdd-next.md .opencode/command/sdd-plan.md .opencode/command/sdd-pr-loop.md \
-  .opencode/command/sdd-report.md .opencode/command/sdd-test-concurrency.md; do
+  .opencode/command/sdd-report.md .opencode/command/sdd-test-concurrency.md .opencode/command/sdd-triage.md; do
   grep -q " $_must\$" "$F/.claude/.glue-manifest" || fail "manifest misses $_must (R2)"
 done
 grep -q "glue-manifest" "$F/.claude/.glue-manifest" && fail "manifest lists itself (R2)"
@@ -173,7 +174,7 @@ pass "silent when clean and when the manifest is absent (R3) [warn_silent]"
 # manifest, and (F02) so does every OpenCode-owned file. The OpenCode paths are asserted
 # here AND in the R2 ledger loop above, so a gate that only compares bytes without a
 # manifest entry (or vice versa) cannot pass on one surface alone.
-for _path in .codex/agents/builder.toml .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml opencode.json .opencode/command/sdd-next.md .opencode/agent/pr-fixer.md; do
+for _path in .codex/agents/builder.toml .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml opencode.json .opencode/command/sdd-next.md .opencode/agent/pr-fixer.md .claude/commands/sdd-triage.md .opencode/command/sdd-triage.md .agents/skills/sdd-triage/SKILL.md .agents/skills/sdd-triage/agents/openai.yaml; do
   _case="$(fixture native-drift)"
   sh "$_case/harness-install.sh" --self >/dev/null 2>&1 || fail "native drift setup failed"
   [ -f "$_case/$_path" ] || fail "native drift precondition missing $_path"

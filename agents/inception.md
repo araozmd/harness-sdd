@@ -149,6 +149,26 @@ followed by body sections capturing:
 - **Constraints** — non-negotiables the Architect must honor.
 - **Open questions for the Architect** — what is still undecided.
 
+
+When an approved triage handoff supplies Source issues, validate and preserve this
+section in the brief before any downstream handoff or Builder dispatch:
+
+    ## Source issues
+    Repository: <host>/<owner>/<repo>
+    Issues: #<positive integer>, #<positive integer>
+
+Require exactly three nonempty [A-Za-z0-9._-]+ repository components and strictly
+positive decimal issue numbers; deduplicate numbers. Treat malformed provenance as
+a local diagnostic, never manufacture links from arbitrary issue-body text. Preserve
+only the approved repository/issues, separately from the independently composed scope.
+If provenance cannot be validated, stop and reconcile the approved handoff before
+proceeding; do not silently discard or expand its issue set.
+
+For altitude 1, append only while the existing feature is pending; merge matching
+repository provenance and deduplicate its numbers. A conflicting repository requires
+clarification, never replacement. If the brief was consumed, follow the existing
+altitude-1 stop/Q&A contract; do not append provenance to a consumed brief.
+
 The brief captures *intent only* — never EARS, never a plan, never the four spec
 files.
 
