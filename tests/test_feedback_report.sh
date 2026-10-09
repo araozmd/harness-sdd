@@ -879,7 +879,7 @@ for key in base['context']:
         data=copy.deepcopy(base); data['context'][key]=value; run(data,'context.'+key+':')
 for level in ('root','context'):
     data=copy.deepcopy(base); (data if level=='root' else data['context'])['foreign']='a private unknown field'; run(data,'unknown keys')
-unsafe=['ghp_abc','gho_abc','ghu_abc','ghs_abc','ghr_abc','github_pat_abc','sk-abcdef','AKIAABCDEFGHIJKLMNOP','user@example.com','-----BEGIN PRIVATE KEY-----','TOKEN: xyz','secret=xyz','Password: xyz','api_key=xyz','authorization: xyz','https://example.invalid','mailto:private','custom://host','custom:opaque','custom:1234','/opt/private/data','/etc/passwd','C:\\private\\data','\\\\server\\share','~/private','../private','a/../b','foreign/tools/harness-report.sh','project/private.txt','\x00','\x01','\x0b','\x1f','\x7f','\x85','\u202e','\u2066','\ud800','<!--','-->','HARNESS-FEEDBACK:v1']
+unsafe=['ghp_abc','gho_abc','ghu_abc','ghs_abc','ghr_abc','github_pat_abc','sk-abcdef','AKIAABCDEFGHIJKLMNOP','user@example.com','-----BEGIN PRIVATE KEY-----','TOKEN: xyz','secret=xyz','Password: xyz','api_key=xyz','authorization: xyz','https://example.invalid','mailto:private','custom://host','custom:opaque','custom:1234','/opt/private/data','/etc/passwd','C:\\private\\data','\\\\server\\share','~/private','../private','a/../b','foreign/tools/harness-report.sh','project/private.txt','\x00','\x01','\x0b','\x1f','\x7f','\x85','\u202e','\u2066','\ud800','<!--','-->','--!>','HARNESS-FEEDBACK:v1']
 for value in unsafe:
     data=copy.deepcopy(base); data['context']['failure']='The verified operation failed with '+value+' in the synthetic fixture.'; run(data,'context.failure:')
 for control in ('\x00','\x1f','\x85'):

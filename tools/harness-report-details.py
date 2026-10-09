@@ -19,7 +19,7 @@ CONTEXT = {
 }
 COMMON = ('summary', 'observed', 'expected', 'reproduction', 'evidence')
 SECRET = re.compile(r'gh[pousr]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|AKIA[A-Z0-9]{16}|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}')
-UNSAFE = re.compile(r'-----[^\n]*PRIVATE KEY-----|\b(?:token|secret|password|api_key|authorization)\s*[:=]\s*\S|[A-Za-z]:[\\/]|\\\\|~[/\\]|(?:^|[/\\\s])\.\.(?:[/\\\s]|$)|<!--|-->|harness-feedback:', re.I)
+UNSAFE = re.compile(r'-----[^\n]*PRIVATE KEY-----|\b(?:token|secret|password|api_key|authorization)\s*[:=]\s*\S|[A-Za-z]:[\\/]|\\\\|~[/\\]|(?:^|[/\\\s])\.\.(?:[/\\\s]|$)|<!--|--!?>|harness-feedback:', re.I)
 URI = re.compile(r'\b[A-Za-z][A-Za-z0-9+.-]*:\S')
 
 
