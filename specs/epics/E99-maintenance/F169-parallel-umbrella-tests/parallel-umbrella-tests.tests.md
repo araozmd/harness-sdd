@@ -12,7 +12,7 @@
 | R7 | `tests/test_parallel_umbrella.sh::parse_before_execution`: malformed helper and group, each separately, produce preflight failure and no execution canary for default and explicit aggregate selection | integration | Builder passed; Reviewer pending |
 | R8 | `progress/parallel-umbrella-tests/benchmark.md`: normalized original ok/skip multiset equality for original baseline, new serial aggregate, new eight-worker groups | behavioral comparison | Builder passed; Reviewer pending |
 | R9 | `progress/parallel-umbrella-tests/benchmark.md`: comparable baseline elapsed > eight-worker group elapsed, with commands/environment/exit codes and ratio | performance | Builder passed; Reviewer pending |
-| R10 | Independent Reviewer log: `./init.sh` and `sh tools/run-tests.sh` on final source state | regression | pending independent Reviewer |
+| R10 | Independent Reviewer log: `./init.sh` and `sh tools/run-tests.sh` on final source state | regression | Reviewer passed on `8c3f818`: all 71 suites, `/bin/dash`, jobs 8; see `progress/parallel-umbrella-tests/reviewer-r2.md` |
 | R11 | Reviewer inspects README against actual paths, direct/focused/full commands, and TMPDIR/Python prerequisites | documentation audit | documentation updated; Reviewer pending |
 
 ## Cheap integration fixture
