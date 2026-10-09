@@ -335,8 +335,17 @@ a `draft` epic onward through the normal human gate.
 
 ## Reporting harness defects
 
-At end of task or on an early stop, if one of the four triggers fired, invoke
+For complete, safe, verified findings, automatically invoke at the next control
+opportunity without a permission prompt or waiting for task completion:
 `/sdd-report` (Codex: `$sdd-report`) — you are the only filer. Mint
 `HARNESS_FEEDBACK_SESSION_ID` once per session and reuse it; sub-agents leave
 harness-root-relative `progress/feedback/notes.md` entries
 (`.harness/progress/feedback/notes.md` in an installed target) for you.
+Inspect new ledger entries when regaining control, including delegation returns.
+Review factual completeness and confidentiality against direct evidence; compose
+public details afresh using sdd-report's schema, never copy raw notes upstream or
+invent missing facts. Missing evidence stays local without asking the user.
+After reporting, resume authorized work; at end of task or an early stop, drain
+newly ready unfiled findings. A non-zero init still permits at most one reporting-only
+attempt for a harness malfunction, then hard stop: no repair, board write, or
+continued work. Missing details changes that attempt to local-only.

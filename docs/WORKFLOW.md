@@ -751,10 +751,18 @@ by harness gates are **not triggers and are never reported**.
 
 ### Filing discipline
 
-- **When:** File when the task ends or when the session stops early (aborted, parked, or failed). Never file mid-flow.
-- **Who:** Only the **session-owning top-level role** (Orchestrator, Fixer, Inception, Planner, Driller) invokes `/sdd-report`. Sub-agents (Architect, Builder, Reviewer, Scout, Doc-critic, PR-fixer) **never** invoke the reporter directly; on a defect trigger, they append notes with `## <trigger>`, `symptom:`, `command:`, `phase:`, and `file:` to `progress/feedback/notes.md`.
+- **When:** File complete, safe, verified findings automatically at the next control opportunity, without a permission prompt or waiting for task completion. Inspect new ledger entries on delegation returns, then resume authorized work. Drain newly ready unfiled findings when the task ends or the session stops early (aborted, parked, or failed).
+- **Who:** Only the **session-owning top-level role** (Orchestrator, Fixer, Inception, Planner, Driller) invokes `/sdd-report`. Sub-agents (Architect, Builder, Reviewer, Scout, Doc-critic, PR-fixer) **never** invoke the reporter directly; on a defect trigger, they append notes with `## <trigger>`, `symptom:`, `command:`, `phase:`, and `file:` plus candidate `summary:`, `observed:`, `expected:`, `reproduction:`, `evidence:`, and trigger-specific `context:` to `progress/feedback/notes.md`. Cite direct evidence and mark unknown facts missing; never invent them.
 - **Session token:** The owning role mints and exports `HARNESS_FEEDBACK_SESSION_ID` once per session (derived from telemetry start timestamp or a UTC date token) and reuses it for every report.
-- **Privacy and bounds:** `tools/harness-report.sh` sends only allow-listed structured fields to GitHub. Free-form notes remain in the local gitignored `progress/feedback/` ledger. Reporting is capped per session (`feedback.max_per_session`, default 3) and obeys `feedback.enabled: false`.
+- **Privacy and bounds:** `tools/harness-report.sh` requires bounded `--details-file` JSON with common facts and trigger-specific evidence, separately from local raw notes. Owners inspect direct evidence and confidentiality before filing. Defined lexical filters reject known secrets, emails, URLs, foreign paths, controls and marker syntax; they cannot establish arbitrary prose confidentiality or factual truth. Missing or unsafe details stay local with field diagnostics. Free-form raw notes remain in the local gitignored `progress/feedback/` ledger. Reporting is capped per session (`feedback.max_per_session`, default 3) and obeys `feedback.enabled: false`.
+
+The tool reads at most 16,384 bytes plus one overflow byte. See sdd-report for the
+closed schema and field bounds; complete details contribute to a canonical digest
+so different findings in the same file can file separately. Exact open matches create
+neither another issue nor a comment. No background retry or consent step is added.
+On non-zero init, the existing at-most-one reporting-only malfunction exception still
+ends in a hard stop with no repair, board write or continued work; incomplete evidence
+only changes that attempt to local-only.
 
 ## Context hygiene
 

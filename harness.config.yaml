@@ -389,7 +389,7 @@ workers:
 
 # Harness feedback (E32-F01) — ON by default. When one of a narrow set of harness defects
 # is detected (see E32), the harness may auto-report it as an issue on `repo` below, and
-# sends ONLY allow-listed harness fields — never project content. Opt out with
+# sends validated public harness evidence; raw notes stay local. Opt out with
 # `enabled: false`; deleting this block does NOT opt out, because the next upgrade
 # re-seeds it ON with a fresh notice. `repo` is `[HOST/]OWNER/REPO` (2 or 3 `/`-separated
 # parts); an omitted HOST means `github.com`, so a GitHub Enterprise checkout still reports

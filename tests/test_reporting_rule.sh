@@ -133,14 +133,14 @@ test_rule_filing_moments() {
   _floor "$_span" 60 "R3: the filing-moment span"
   _w="$(printf '%s\n' "$_span" | tr '\n' ' ' | tr -s ' ')"
   printf '%s' "$_w" | grep -qF 'task ends' \
-    || fail "R3: the rule does not name the end-of-task filing moment"
+    || fail "R3: the rule does not name automatic filing at the next control opportunity"
   printf '%s' "$_w" | grep -qF 'stops early' \
     || fail "R3: the rule does not name the early-stop filing moment"
   printf '%s' "$_w" | grep -qF 'aborted, parked, or failed' \
     || fail "R3: the early stop is not scoped to aborted/parked/failed"
-  printf '%s' "$_w" | grep -qiE 'never[^.]{0,30}mid-flow' \
-    || fail "R3: the rule has no 'never ... mid-flow' polarity anchor"
-  pass "R3 the rule states end-of-task and early-stop (aborted/parked/failed) filing, never mid-flow (R3) [test_rule_filing_moments]"
+  printf '%s' "$_w" | grep -qiE 'automatically[^.]{0,120}next control' \
+    || fail "immediate_owner_reporting: missing automatic next control opportunity"
+  pass "R3 the rule states end-of-task and early-stop (aborted/parked/failed) filing, automatically at the next control opportunity (R3) [test_rule_filing_moments]"
 }
 
 # ── R4 ────────────────────────────────────────────────────────────────────────────────────
@@ -192,8 +192,8 @@ test_role_prompts_carry_rule() {
     _sf="$(printf '%s\n' "$_s" | tr '\n' ' ' | tr -s ' ')"
     printf '%s' "$_sf" | grep -qF '/sdd-report' \
       || fail "R5: agents/$_r.md (session-owning) does not carry the /sdd-report filing duty"
-    printf '%s' "$_sf" | grep -qiE 'end of task|end-of-task' \
-      || fail "R5: agents/$_r.md does not name the end-of-task filing moment"
+    printf '%s' "$_sf" | grep -qiE 'automatically[^.]{0,120}next control' \
+      || fail "R5: agents/$_r.md does not name automatic filing at the next control opportunity"
     printf '%s' "$_sf" | grep -qi 'early stop' \
       || fail "R5: agents/$_r.md does not name the early-stop filing moment"
     printf '%s' "$_sf" | grep -qF 'HARNESS_FEEDBACK_SESSION_ID' \
@@ -693,6 +693,32 @@ test_release_sweep() {
   pass "R11 VERSION=0.89.2, the CHANGELOG [0.88.0] entry names reporting live, INSTALL.md is no longer inert, README names /sdd-report, and the coupled literals are swept (R11) [test_release_sweep]"
 }
 
+# E32-F06 contract assertions inspect each reporting section, including installed roles.
+actionable_contract_surfaces() {
+  for _root in "$SRC" "$(_ensure_target claude)/.harness" "$(_ensure_target codex)/.harness" "$(_ensure_target opencode)/.harness"; do
+    for _role in orchestrator fixer inception planner driller; do
+      _text="$(_section '## Reporting harness defects' "$_root/agents/$_role.md" | tr '\n' ' ')"
+      for _pair in 'automatically[^.]{0,90}next control' 'without a permission prompt' 'delegation returns' 'resume authorized work' 'never copy raw notes upstream' 'never[^.]{0,35}invent missing facts' 'at most one reporting-only' 'hard stop[^.]{0,90}no repair'; do
+        printf '%s' "$_text" | grep -qE "$_pair" || fail "immediate_owner_reporting: $_role lacks $_pair"
+      done
+    done
+    for _role in architect builder reviewer scout doc-critic pr-fixer; do
+      _text="$(_section '## Reporting harness defects' "$_root/agents/$_role.md" | tr '\n' ' ')"
+      for _key in summary observed expected reproduction evidence context; do
+        printf '%s' "$_text" | grep -qF "$_key:" || fail "subagent_evidence_handoff: $_role lacks $_key"
+      done
+      printf '%s' "$_text" | grep -qE 'mark unknown facts missing and never invent' || fail "subagent_evidence_handoff: invented facts allowed"
+      printf '%s' "$_text" | grep -qE 'never invoke the reporter' || fail "subagent_evidence_handoff: publisher ownership"
+    done
+    [ -f "$_root/tools/harness-report-details.py" ] || fail 'actionable_contract_surfaces: validator not installed'
+  done
+  _text="$(_between "$INSTALL" 'File **exactly one** harness-feedback report' 'EOF' | tr '\n' ' ')"
+  for _pair in '--details-file <verified-public-json-file>' 'direct evidence for factual meaning and confidentiality' 'at least two concrete observed occasions' 'both incompatible obligations' 'never invent missing facts' 'then hard stop with no repair, no board write' 'without a permission prompt' 'resume the caller'; do
+    printf '%s' "$_text" | grep -qF -- "$_pair" || fail "actionable_contract_surfaces: emitter lacks $_pair"
+  done
+  pass 'immediate_owner_reporting, subagent_evidence_handoff, init_exception_preserved, actionable_contract_surfaces'
+}
+
 # ── non-functional ────────────────────────────────────────────────────────────────────────
 test_suite_is_executable() {
   [ -x "$SRC/tests/test_reporting_rule.sh" ] \
@@ -713,6 +739,7 @@ test_session_token_stable
 test_init_hard_stop_exception
 test_tool_command_membership
 test_release_sweep
+actionable_contract_surfaces
 test_suite_is_executable
 
 echo "all reporting-rule tests passed"

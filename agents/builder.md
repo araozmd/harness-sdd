@@ -187,3 +187,12 @@ target — then append an entry to the harness-root-relative `progress/feedback/
 (`.harness/progress/feedback/notes.md` in an installed target) — a `## <trigger>` heading plus
 `symptom:` / `command:` / `phase:`; never invoke the reporter — only the session-owning
 top-level role files.
+
+The same entry includes candidate `summary:`, `observed:`, `expected:`,
+`reproduction:`, `evidence:` and `context:` fields using sdd-report's trigger-specific
+schema. Cite direct harness evidence and concrete source inspection or synthetic
+steps; mark unknown facts missing and never invent them. Record both incompatible
+obligations for a conflict, or two observed occasions for a missing capability.
+Raw notes remain local; the owner inspects confidentiality and factual completeness
+and composes public JSON afresh. Hand off at the existing control boundary; never
+invoke the reporter or ask the user for reporting permission.

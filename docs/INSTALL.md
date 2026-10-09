@@ -419,14 +419,31 @@ batch sequentially with `/sdd-fix`.
 
 **What it is.** A top-level `feedback:` block that is the one visible switch for E32: when
 one of a narrow set of harness defects is detected, the harness may auto-report it as a
-scrubbed GitHub issue upstream (allow-listed harness fields only, never project content).
+validated GitHub issue upstream with public harness evidence and accepted metadata.
 **The report tool ships** (`tools/harness-report.sh`, **E32-F02**): it enforces the
 allow-list, the versioned body marker, the duplicate search, the per-session cap, and the
 redaction pass. **Reporting is live** (**E32-F03**): a short reporting rule and the
 `/sdd-report` command (Codex: `$sdd-report`) call the tool when one of the four harness
-defects fires — never for a project failure — at the end of a task or on an early stop. The
+defects has complete, safe, verified evidence. Owners file automatically at the next control
+opportunity without a permission prompt, inspect delegation-return notes, then resume
+authorized work. Newly ready unfiled findings are drained at task end or early stop. The
 switch ships **on**, and the installer tells you so at the moment it becomes possible to
 matter.
+
+**Public details and privacy.** The reporter requires `--details-file` UTF-8 JSON,
+separate from `--notes-file`, with summary, observed, expected, reproduction or source
+inspection, evidence referencing an accepted harness file, and exact trigger context.
+The closed schema and bounds are documented in sdd-report; maximum file size is
+16,384 bytes. Owners compose facts afresh from direct harness evidence and synthetic
+examples, inspect confidentiality, and never invent missing evidence. Raw notes stay
+local. Defined filters reject known secrets, emails, URLs, foreign paths, controls and
+marker syntax; they cannot establish arbitrary prose confidentiality or factual truth.
+Missing or unsafe evidence produces local field diagnostics before any GitHub call;
+complete it later using the same session token. Canonical details fingerprints preserve
+exact duplicate suppression while allowing distinct findings in the same harness file.
+Non-zero init retains the at-most-one reporting-only exception followed by hard stop;
+missing evidence makes that attempt local-only, never authorizes continued work.
+The validator is installed with the standalone tools directory, including thin children.
 
 **Shipped defaults.** A fresh install, and an upgrade of a target that has no `feedback:`
 block yet, both seed:
