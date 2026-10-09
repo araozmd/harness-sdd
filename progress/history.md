@@ -428,3 +428,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-10-09T15:20:09Z | E32-F05 pending → spec-ready: Architect produced 12-requirement four-file spec; Doc-critic advice applied. Autonomous development authorized.
 - 2026-10-09T15:51:25Z | E32-F05 in-progress → in-review (builder round 1; complex spec, escalation disarmed): source-only triage, gated workflow, provenance and 0.91.0 release implemented. Focused checks green; full run 56/58 with two version assertions corrected and targeted reruns green; independent final full verification pending.
 - 2026-10-09T16:03:23Z | E32-F05 in-review → approve (round 1): independent Reviewer verified all 58 suites under dash, behavioral A–D and 15 killed mutations; no findings. Change-size tier ok; PR/merge pending.
+- 2026-10-09T16:03:49Z | E32-F05 approved PR #247 opened: https://github.com/araozmd/harness-sdd/pull/247. Parked awaiting-merge; status remains in-review, done requires observed merge.
