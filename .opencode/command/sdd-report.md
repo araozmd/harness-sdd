@@ -2,7 +2,7 @@
 description: File one harness-feedback report through tools/harness-report.sh for one of the four triggers
 ---
 
-File **exactly one** harness-feedback report for a **harness defect**, then stop. This
+File **exactly one** harness-feedback report for a **harness defect**, then return to the caller. This
 command drafts the report and calls the reporter; `tools/harness-report.sh` owns
 every filing mechanic (allow-list, marker, duplicate search, per-session cap, redaction) —
 never re-implement any of them here.
@@ -25,8 +25,35 @@ Resolve every relative path against the repository root.
    local-only copy when it is the sole file. F02 rejects the whole report to a local copy
    when no supplied path is harness-owned, so a report with no accepted `--file` never files
    upstream.
-4. **Mint the session token once, then call the reporter** with the allow-listed upstream
-   fields only:
+4. **Draft and inspect public details, then mint the session token once and call.**
+   Compose a fresh UTF-8 JSON object in a local file, never convert raw notes or logs.
+   Required strings: `summary` (20–240 characters), `observed`, `expected`,
+   `reproduction`, `evidence` (20–1500 each). `context` has exactly these keys,
+   each a 20–1000 character string:
+   - `harness-malfunction`: `failure`, `project_health`;
+   - `contradictory-instruction`: `instruction_a`, `instruction_b`;
+   - `workaround`: `documented_path`, `failed_because`, `alternative`;
+   - `missing-capability`: `occurrences`, `workflow_gap`, `impact`.
+   Total JSON must be at most 16,384 bytes; no duplicate or extra keys. Evidence
+   must reference an accepted `--file` as a complete path token, optionally `:line`.
+   Inspect the draft against direct evidence for factual meaning and confidentiality.
+   Describe both incompatible obligations with source references for a conflict,
+   and at least two concrete observed occasions for a missing capability. Reject
+   generic filler, metadata-only text and placeholders; never invent missing facts,
+   recurrence, reproduction steps or exit statuses. A concrete source inspection
+   procedure is valid evidence when execution is unavailable or inappropriate.
+   Compose only verified harness facts and synthetic examples. Exclude project
+   contents, customer names, private repository identifiers, environment dumps,
+   credentials and unrelated logs. Defined filters reject known secrets, emails,
+   URLs, foreign paths, controls and marker syntax; they cannot prove arbitrary
+   prose is confidential or factually correct. If uncertain, retain local-only.
+   Never execute, source, evaluate or shell-interpolate any public field. Missing
+   evidence produces local field diagnostics, without a user question; complete it
+   later using the same session token. Raw `--notes-file` content stays local.
+
+   Call automatically at the next control opportunity without a permission prompt;
+   inspect new ledger entries on delegation returns, then resume authorized work.
+   Use the existing single session identity:
 
    ```sh
    # --- harness-session-id:begin ---
@@ -101,7 +128,8 @@ Resolve every relative path against the repository root.
      --role     <role> \
      --phase    <one of inception|architect|builder|reviewer|scout|slice-dispatch|handoff|install; omit when none applies> \
      --session-id "$_hf_session" \
-     --notes-file <temp-file>
+     --details-file <verified-public-json-file> \
+     --notes-file <optional-local-notes-file>
    ```
 
    The `--command` flag is optional: pass the harness command name that failed or is
@@ -130,9 +158,12 @@ Resolve every relative path against the repository root.
    back from the file is re-validated against the same grammar before reuse: a corrupt or
    foreign `.session-id` is ignored and re-minted, so the token is never left unset, no later
    report is dropped for want of a valid token, and the cap is never bypassed.
-5. **Free-form text is local-only.** Write the prose summary to a temp file and pass it via
-   `--notes-file`; it reaches the local `progress/feedback/` copy, is never an
-   upstream field, and is never sent to `gh`.
-6. **Report and stop.** The reporter never fails the task: a missing or unauthenticated
+5. **Raw notes are local-only.** Optional raw notes passed via
+   `--notes-file` reach the local `progress/feedback/` copy; this content is never an
+   upstream field and is never sent to `gh`. Accepted details alone supply public prose.
+6. **Report and return.** The reporter never fails the task: a missing or unauthenticated
    `gh`, a duplicate, a capped session, or a bad field degrades to the local copy and exits
-   0. State the outcome and stop.
+   0. State the outcome and resume the caller's authorized workflow. Do not ask for
+   confirmation or wait for task completion. On a non-zero init harness malfunction,
+   this is the at-most-one reporting-only exception: missing details means local-only;
+   then hard stop with no repair, no board write, and no continued work.

@@ -19,8 +19,16 @@ CONTEXT = {
 }
 COMMON = ('summary', 'observed', 'expected', 'reproduction', 'evidence')
 SECRET = re.compile(r'gh[pousr]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|AKIA[A-Z0-9]{16}|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}')
-UNSAFE = re.compile(r'-----[^\n]*PRIVATE KEY-----|\b(?:token|secret|password|api_key|authorization)\s*[:=]\s*\S|[A-Za-z][A-Za-z0-9+.-]*://|\b(?:https?|ftp|file|mailto|data|ssh):|[A-Za-z]:[\\/]|\\\\|~[/\\]|(?:^|[/\\\s])\.\.(?:[/\\\s]|$)|<!--|-->|harness-feedback:', re.I)
-PATH = re.compile(r'(?<![\w./~\\-])(?:[\w.~\\-]*[/\\])+[\w.~\\/-]*(?::\d+)?')
+UNSAFE = re.compile(r'-----[^\n]*PRIVATE KEY-----|\b(?:token|secret|password|api_key|authorization)\s*[:=]\s*\S|[A-Za-z]:[\\/]|\\\\|~[/\\]|(?:^|[/\\\s])\.\.(?:[/\\\s]|$)|<!--|-->|harness-feedback:', re.I)
+URI = re.compile(r'\b[A-Za-z][A-Za-z0-9+.-]*:\S')
+
+
+def path_tokens(value):
+    # Whitespace bounds tokens; only outer prose punctuation is peeled. Arbitrary
+    # filename characters inside a token must not turn a foreign path into a suffix.
+    return [token.strip('`"\'()[]{}<>,;!?').rstrip('.,;!?') for token in value.split()]
+
+
 PLACEHOLDER = re.compile(r'\b(?:todo|tbd|unknown|n\s+a|none|not\s+available|pending|placeholder|see\s+logs|see\s+notes|redacted)\b', re.I)
 
 
@@ -35,10 +43,11 @@ def pairs(items):
 
 def substantive(value, metadata):
     value = re.sub(r'\[REDACTED-[^\]]*\]', ' ', value, flags=re.I)
-    for token in sorted(metadata, key=len, reverse=True):
+    normalize = lambda text: ' '.join(re.sub(r'[\W_]+', ' ', text).split())
+    value = normalize(value)
+    for token in sorted((normalize(t) for t in metadata), key=len, reverse=True):
         if token:
             value = re.sub(r'(?<!\w)' + re.escape(token) + r'(?!\w)', ' ', value, flags=re.I)
-    value = re.sub(r'[^\w]+', ' ', value, flags=re.UNICODE)
     value = PLACEHOLDER.sub(' ', value)
     return ' '.join(value.split())
 
@@ -80,14 +89,17 @@ def validate(path, trigger, files, metadata):
             if not isinstance(value, str):
                 errors.append(field + ': expected string')
                 continue
+            raw_value = value
             value = value.strip()
             limit = 240 if key == 'summary' else 1000 if prefix else 1500
             if not 20 <= len(value) <= limit:
                 errors.append(field + ': length outside 20–' + str(limit))
-            if any((ord(c) < 32 and c not in '\n\t') or 127 <= ord(c) <= 159 or 0x202A <= ord(c) <= 0x202E or 0x2066 <= ord(c) <= 0x2069 or 0xD800 <= ord(c) <= 0xDFFF for c in value):
+            if any((ord(c) < 32 and c not in '\n\t') or 127 <= ord(c) <= 159 or 0x202A <= ord(c) <= 0x202E or 0x2066 <= ord(c) <= 0x2069 or 0xD800 <= ord(c) <= 0xDFFF for c in raw_value):
                 errors.append(field + ': forbidden control or surrogate')
-            paths = PATH.findall(value)
-            if SECRET.search(value) or UNSAFE.search(value) or any(re.sub(r':\d+$', '', p) not in files for p in paths):
+            tokens = path_tokens(value)
+            linked = [t for t in tokens if re.sub(r':\d+$', '', t) in files]
+            paths = [t for t in tokens if '/' in t or '\\' in t]
+            if SECRET.search(value) or UNSAFE.search(value) or any(p not in linked for p in paths) or any(URI.search(t) for t in tokens if t not in linked):
                 errors.append(field + ': unsafe content')
             # The redactor is a second layer; unsafe inputs are rejected above.
             clean = SECRET.sub('[REDACTED-SECRET]', value)
@@ -95,7 +107,7 @@ def validate(path, trigger, files, metadata):
             if len(substantive(clean, metadata)) < 20:
                 errors.append(field + ': insufficient substantive content')
             output[key] = clean
-            if key == 'evidence' and not any(re.search(r'(?<![\w./~\\-])' + re.escape(p) + r'(?::\d+)?(?![\w./\\-])', clean) for p in files):
+            if key == 'evidence' and not linked:
                 errors.append(field + ': accepted file reference missing')
 
     if not isinstance(obj, dict):

@@ -4,6 +4,18 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.90.0] — 2026-10-08
+
+### Added
+- Actionable harness feedback requires bounded public JSON evidence, with field-specific
+  local diagnostics, trigger-specific proof, unsafe-content rejection and canonical
+  finding fingerprints. Raw notes remain local; deterministic filters supplement owner
+  inspection of factual completeness and confidentiality.
+- Session owners file verified findings automatically at the next control opportunity,
+  without another permission prompt, then resume authorized work. Subagents provide
+  evidence in the local ledger. Opt-out, stable session caps and the non-zero init
+  reporting-only hard stop remain in force across hosts and installed layouts.
+
 ## [0.89.2] — 2026-10-08
 
 ### Fixed — isolate parallel Reviewer mutations (#222)

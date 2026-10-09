@@ -523,7 +523,7 @@ test_body_allowlisted_no_freeform() {
   _rep="$(latest_report "$_fx")"
   [ -n "$_rep" ] || fail "R7: no local report was written"
   present 'ZEBRAFISH-NOTE-90817' "$_rep" "R7: the free-form notes are missing from the local copy (the negative is then vacuous)"
-  pass "R7 the upstream body is marker + allow-listed Label: value lines only; notes stay in the local copy (R7) [test_body_allowlisted_no_freeform]"
+  pass "R7 the upstream body includes accepted details and metadata; raw notes stay local (R7) [test_body_allowlisted_no_freeform]"
 }
 
 # ── R8 ────────────────────────────────────────────────────────────────────────────────────
@@ -762,8 +762,8 @@ _section() { # _section <heading-literal> <file>
 test_shipping_artifacts() {
   [ -x "$TOOL" ] \
     || fail "R12: tools/harness-report.sh is not executable in the source tree (the installer chmod cannot fix a source mode)"
-  [ "$(cat "$SRC/VERSION")" = "0.89.2" ] \
-    || fail "R12: VERSION is not 0.89.2 (got $(cat "$SRC/VERSION"))"
+  [ "$(cat "$SRC/VERSION")" = "0.90.0" ] \
+    || fail "R12: VERSION is not 0.90.0 (got $(cat "$SRC/VERSION"))"
 
   _sec="$(printf 'chmod +x "$H/tools/harness-report.sh"')"
   grep -qF "$_sec" "$SRC/harness-install.sh" \
@@ -836,7 +836,7 @@ details_adversarial_matrix() {
   _fx="$(make_fixture)"; use_fx "$_fx"
   default_details --trigger harness-malfunction --file tools/harness-report.sh
   python3 - "$SRC" "$_fx" "$T/default.json" "$STUBDIR" <<'MATRIX'
-import copy, json, os, pathlib, subprocess, sys
+import copy, hashlib, json, os, pathlib, shutil, subprocess, sys
 src, fx, default, stub = map(pathlib.Path, sys.argv[1:])
 base=json.loads(default.read_text()); payload=fx/'payload.json'; log=fx/'gh.log'; body=fx/'body.out'
 env=dict(os.environ, GH_LOG=str(log), GH_BODY_OUT=str(body), PATH=str(stub)+os.pathsep+os.environ['PATH'])
@@ -859,20 +859,32 @@ def run(data, reason=None, raw=False, extra=()):
         assert 'Outcome: filed' in report or 'Outcome: duplicate' in report, report
     return report
 
+# Missing, nonregular, and unavailable parser paths fail locally without gh.
+for badpath in (fx/'absent', fx):
+    log.write_text(''); altered=args.copy(); altered[-1]=str(badpath)
+    result=subprocess.run(altered,env=env,capture_output=True,timeout=10)
+    assert result.returncode==0 and not log.read_text()
+fifo=fx/'fifo'; os.mkfifo(fifo); log.write_text(''); altered=args.copy(); altered[-1]=str(fifo)
+assert subprocess.run(altered,env=env,timeout=10).returncode==0 and not log.read_text()
 for field in base:
     data=copy.deepcopy(base); del data[field]; run(data,field+': missing')
 for field in ('summary','observed','expected','reproduction','evidence'):
-    for value in (None,1,[],{},'','TODO '*30,'unknown; N/A; not available; see notes; pending', '[REDACTED-SECRET] '*4, 'summary observed expected harness-malfunction tool-failure tools/harness-report.sh 9.9.9', 'x'*19):
+    for value in (None,1,[],{},'','TODO '*30,'unknown; N/A; not available; see notes; pending', '[REDACTED-SECRET] '*4, 'summary observed expected harness-malfunction tool-failure tools/harness-report.sh 9.9.9', 'harness malfunction tool failure 9 9 9 harness malfunction tool failure 9 9 9', 'x'*19):
         data=copy.deepcopy(base); data[field]=value; run(data,field+':')
     data=copy.deepcopy(base); data[field]='x'*(241 if field=='summary' else 1501); run(data,field+': length')
 for raw in (b'{',b'\xff',b'[]',b'{"summary":1,"summary":2}',b' '*16385):
     run(raw,'details-file:',raw=True)
+for key in base['context']:
+    for value in (None, [], {}, 1, 'x'*19, 'x'*1001):
+        data=copy.deepcopy(base); data['context'][key]=value; run(data,'context.'+key+':')
 for level in ('root','context'):
     data=copy.deepcopy(base); (data if level=='root' else data['context'])['foreign']='a private unknown field'; run(data,'unknown keys')
-unsafe=['ghp_abc','gho_abc','ghu_abc','ghs_abc','ghr_abc','github_pat_abc','sk-abcdef','AKIAABCDEFGHIJKLMNOP','user@example.com','-----BEGIN PRIVATE KEY-----','TOKEN: xyz','secret=xyz','Password: xyz','api_key=xyz','authorization: xyz','https://example.invalid','mailto:private','custom://host','/opt/private/data','/etc/passwd','C:\\private\\data','\\\\server\\share','~/private','../private','a/../b','foreign/tools/harness-report.sh','project/private.txt','\x00','\x01','\x0b','\x1f','\x7f','\x85','\u202e','\u2066','\ud800','<!--','-->','HARNESS-FEEDBACK:v1']
+unsafe=['ghp_abc','gho_abc','ghu_abc','ghs_abc','ghr_abc','github_pat_abc','sk-abcdef','AKIAABCDEFGHIJKLMNOP','user@example.com','-----BEGIN PRIVATE KEY-----','TOKEN: xyz','secret=xyz','Password: xyz','api_key=xyz','authorization: xyz','https://example.invalid','mailto:private','custom://host','custom:opaque','custom:1234','/opt/private/data','/etc/passwd','C:\\private\\data','\\\\server\\share','~/private','../private','a/../b','foreign/tools/harness-report.sh','project/private.txt','\x00','\x01','\x0b','\x1f','\x7f','\x85','\u202e','\u2066','\ud800','<!--','-->','HARNESS-FEEDBACK:v1']
 for value in unsafe:
     data=copy.deepcopy(base); data['context']['failure']='The verified operation failed with '+value+' in the synthetic fixture.'; run(data,'context.failure:')
-for value in ('prefix-tools/harness-report.sh','foreign/tools/harness-report.sh','tools/harness-report.sh.extra'):
+for control in ('\x00','\x1f','\x85'):
+    data=copy.deepcopy(base); data['summary']=control+base['summary']; run(data,'summary: forbidden')
+for value in ('prefix-tools/harness-report.sh','foreign/tools/harness-report.sh','tools/harness-report.sh.extra','private+tools/harness-report.sh','tools/harness-report.sh@customer','客户+tools/harness-report.sh','tools/harness-report.sh%private','prefix=tools/harness-report.sh'):
     data=copy.deepcopy(base); data['evidence']='Inspect '+value+' for the missing validation branch.'; run(data,'evidence:')
 contexts={'harness-malfunction':['failure','project_health'],'contradictory-instruction':['instruction_a','instruction_b'],'workaround':['documented_path','failed_because','alternative'],'missing-capability':['occurrences','workflow_gap','impact']}
 # Distinct sessions keep this matrix independent of the cap.
@@ -894,6 +906,13 @@ for trigger, keys in contexts.items():
     for key in keys:
         broken=copy.deepcopy(data); del broken['context'][key]; run(broken,'context.'+key+': missing',extra=('--file','tools/run-tests.sh'))
     run(data,extra=('--file','tools/run-tests.sh','--session-id',trigger))
+# Inclusive boundaries, whitespace-preserving body, and byte ceiling.
+args[3]='harness-malfunction'
+for field, maximum in [('summary',240),('observed',1500),('expected',1500),('reproduction',1500)]:
+    for size in (20,maximum):
+        data=copy.deepcopy(base); data[field]='x'*size
+        run(data,extra=('--session-id','boundary-'+str(count)))
+raw=json.dumps(base).encode(); run(raw+b' '*(16384-len(raw)),raw=True,extra=('--session-id','bytes'))
 print('ok - details_completeness, details_trigger_matrix, details_unsafe_corpus')
 args[3]='harness-malfunction'
 # Complete corrected evidence can file using the same token as withheld attempts.
@@ -908,6 +927,9 @@ assert str(payload) not in text and 'matrix' not in text
 def title():
     lines=log.read_text().splitlines(); return lines[lines.index('--title')+1]
 first=title()
+identity=dict(trigger='harness-malfunction',symptom='tool-failure',files=['tools/harness-report.sh'],details=base)
+expected=hashlib.sha256(json.dumps(identity,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()[:16]
+assert first.endswith('['+expected+']')
 # Different key order, whitespace, metadata and file order leave identity unchanged.
 data={k:v for k,v in reversed(list(base.items()))}; data['observed']='  '+data['observed'].replace(' ', ' \n ')+'  '
 (fx/'.harness/.harness-version').write_text('8.7.6')
@@ -928,6 +950,30 @@ notes=fx/'notes'; notes.write_text('ghp_privateRawSecret $(touch "$CANARY")')
 run(data,extra=('--notes-file',str(notes),'--session-id','canary'))
 assert not canary.exists(); assert '$(touch "$CANARY")' in body.read_text(); assert 'ghp_privateRawSecret' not in body.read_text()+log.read_text()
 assert any('ghp_privateRawSecret' in p.read_text() for p in (fx/'.harness/progress/feedback').glob('*.md'))
+# Complete token linkage accepts ordinary punctuation and explicit line citations.
+data=copy.deepcopy(base); data['evidence']='Inspect (tools/harness-report.sh:42) for the missing validation branch.'
+run(data,extra=('--session-id','citation'))
+run(base,extra=('--file','tools/run-tests.sh','--session-id','ordered')); ordered=title()
+reordered=args.copy(); args[7]='tools/run-tests.sh'
+run(base,extra=('--file','tools/harness-report.sh','--session-id','reordered')); assert title()==ordered
+args=reordered
+# Source and thin-child governing roots use their own tools, config and local reports.
+for layout in ('source','thin'):
+    target=fx/layout; target.mkdir(); subprocess.run(['git','init','-q',str(target)],check=True)
+    home=target if layout=='source' else target/'.harness'; home.mkdir(exist_ok=True)
+    shutil.copytree(fx/'.harness/tools',home/'tools')
+    (home/'harness.config.yaml').write_text('feedback:\n  enabled: true\n  max_per_session: 3\numbrella:\n  root: ../unavailable-parent\n')
+    (home/('VERSION' if layout=='source' else '.harness-version')).write_text('7.6.5')
+    if layout=='thin': (home/'AGENTS.md').write_text('Resolve shared prose from unavailable parent.\n')
+    payload.write_text(json.dumps(base)); log.write_text('')
+    command=args.copy(); command[1]=str(home/'tools/harness-report.sh')
+    assert subprocess.run(command,env=env).returncode==0
+    assert 'version=7.6.5' in body.read_text().splitlines()[0]
+    assert any('Outcome: filed' in p.read_text() for p in (home/'progress/feedback').glob('*.md'))
+# Missing parser runtime is an operational local fallback, never a gh call.
+parser=stub/'python3'; parser.write_text('#!/bin/sh\nexit 127\n'); parser.chmod(0o755)
+log.write_text(''); assert subprocess.run(args,env=env).returncode==0 and not log.read_text(); parser.unlink()
+print('ok - details_existing_guards: source, standalone installed, thin child, unavailable parser')
 print('ok - details_public_body, details_fingerprint_identity, details_privacy_and_canary')
 MATRIX
 }
