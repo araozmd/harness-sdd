@@ -42,8 +42,28 @@ for layout in only alongside; do
     cmp -s "$W/actual" "$W/expected-sorted" || fail "standalone_umbrella: $layout skipped or duplicated a suite"
   done
 done
-rm "$F/tests/test_other.sh"
 pass standalone_umbrella
+# Unselected ordinary umbrella files must not block a focused consumer suite.
+for kind in aggregate helper; do
+  : > "$MARKERS"
+  echo ':' > "$F/tests/test_umbrella.sh"
+  if [ "$kind" = aggregate ]; then BAD="$F/tests/test_umbrella.sh"
+  else BAD="$F/tests/lib/umbrella/bad.sh"; fi
+  echo 'if then' > "$BAD"
+  run_status sh "$F/tools/run-tests.sh" "$F/tests/test_other.sh"
+  [ "$RC" = 0 ] || fail "focused_unsplit: unselected $kind blocked selected suite"
+  echo other > "$W/expected"
+  cmp -s "$MARKERS" "$W/expected" || fail "focused_unsplit: $kind selection changed"
+  if [ "$kind" = aggregate ]; then
+    : > "$MARKERS"
+    run_status sh "$F/tools/run-tests.sh" "$F/tests/test_umbrella.sh" "$F/tests/test_other.sh"
+    [ "$RC" = 3 ] || fail 'focused_unsplit: selected malformed suite escaped preflight'
+    [ ! -s "$MARKERS" ] || fail 'focused_unsplit: executed before selected parse failure'
+  fi
+  rm "$BAD"
+done
+rm "$F/tests/test_other.sh"
+pass focused_unsplit
 reset_groups
 # A distinctive aggregate proves exclusion rather than a lucky duplicate-free dispatcher.
 echo 'echo aggregate >> "$MARKERS"' > "$F/tests/test_umbrella.sh"
@@ -108,15 +128,18 @@ done > "$W/expected-shell"
 cmp -s "$MARKERS.shell" "$W/expected-shell" || fail 'strict_child: child bypassed selected PATH shell'
 cp "$SRC/tests/test_umbrella.sh" "$F/tests/"
 pass strict_child
-for kind in helper group; do
-  for mode in default explicit; do
+for kind in helper group aggregate; do
+  for mode in default explicit unrelated; do
     reset_groups
+    cp "$SRC/tests/test_umbrella.sh" "$F/tests/"
     echo 'echo canary >> "$MARKERS"' > "$F/tests/test_canary.sh"
     if [ "$kind" = helper ]; then BAD="$F/tests/lib/umbrella/bad.sh"
-    else BAD="$F/tests/test_umbrella_02_fixture.sh"; fi
+    elif [ "$kind" = group ]; then BAD="$F/tests/test_umbrella_02_fixture.sh"
+    else BAD="$F/tests/test_umbrella.sh"; fi
     echo 'if then' > "$BAD"
     if [ "$mode" = default ]; then run_status sh "$F/tools/run-tests.sh"
-    else run_status sh "$F/tools/run-tests.sh" "$F/tests/test_umbrella.sh"; fi
+    elif [ "$mode" = explicit ]; then run_status sh "$F/tools/run-tests.sh" "$F/tests/test_umbrella.sh"
+    else run_status sh "$F/tools/run-tests.sh" "$F/tests/test_canary.sh"; fi
     [ "$RC" = 3 ] || fail "parse_before_execution: $kind $mode status $RC"
     [ ! -s "$MARKERS" ] || fail "parse_before_execution: $kind $mode executed a suite"
     rm "$BAD"
