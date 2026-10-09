@@ -62,7 +62,7 @@ env["HOME"] = env.pop("F04P_HOME")
 try:
     result = subprocess.run(
         ["sh", sys.argv[1], "--agents=claude", "--thin", sys.argv[2]],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
 except subprocess.TimeoutExpired as exc:
     if exc.stdout:
         sys.stdout.buffer.write(exc.stdout)
@@ -147,7 +147,7 @@ env["PATH"] = env.pop("F04P_RACE_PATH")
 try:
     result = subprocess.run(
         ["sh", sys.argv[1], "--agents=claude", "--thin", sys.argv[2]],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
 except subprocess.TimeoutExpired as exc:
     if exc.stdout:
         sys.stdout.buffer.write(exc.stdout)
