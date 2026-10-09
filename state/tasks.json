@@ -1048,7 +1048,8 @@
         {
           "id": "E99-F167",
           "title": "Refuse ambiguous sweep config keys and malformed feature IDs",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "923fb11d753d5c584b5a3cde41f44d7377edb4d7", "ref": "923fb11d753d5c584b5a3cde41f44d7377edb4d7", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
