@@ -1723,7 +1723,7 @@
         {
           "id": "E32-F06",
           "title": "Actionable sanitized harness reports with immediate automatic filing",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
