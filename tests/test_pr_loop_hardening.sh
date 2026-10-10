@@ -199,6 +199,8 @@ test_resume_skips_completed_fixers() {
     fn "$_b" fix_done > "$T/fd.sh"; fn "$_b" acted_append > "$T/aa.sh"
     grep -qF 'fix_done() {' "$T/fd.sh" || fail "P2: $_b has no fix_done helper"
     grep -qF 'not already `fix_done`' "$_b" || fail "P2: $_b per-comment dispatch row does not filter completed fixes"
+    grep '^| `max_rounds - 1` |' "$_b" | grep -qF 'the SAME per-comment receipts `fix_done` reads' \
+      || fail "P2: $_b combined escalation leaves no per-comment receipt, so its resume re-sends fixed comments (#4239187036)"
     _g="$T/repo"; rm -rf "$_g"; mkdir -p "$_g/round"
     ( cd "$_g" && git init -q . && git config user.email t@t && git config user.name t \
       && git commit -q --allow-empty -m "fix: address Codex P1 on a.sh:1 (#333)" \
