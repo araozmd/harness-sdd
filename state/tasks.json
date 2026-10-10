@@ -1081,11 +1081,26 @@
           "id": "E99-F169",
           "title": "Parallelize isolated umbrella test groups to reduce verification time",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "95f6b3476cc02a3009fedf0ced65e8b4759c34bb", "ref": "95f6b3476cc02a3009fedf0ced65e8b4759c34bb", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "95f6b3476cc02a3009fedf0ced65e8b4759c34bb",
+            "ref": "95f6b3476cc02a3009fedf0ced65e8b4759c34bb",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F169-parallel-umbrella-tests/"
+        },
+        {
+          "id": "E99-F170",
+          "title": "Harden /sdd-pr-loop hand-back head check, dry-run mutations and fixer resume",
+          "status": "in-review",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F170-pr-loop-handback-dryrun-resume/"
         }
       ]
     },

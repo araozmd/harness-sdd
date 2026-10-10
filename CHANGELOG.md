@@ -4,6 +4,20 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.91.2] — 2026-10-10
+
+### Fixed — /sdd-pr-loop hand-back, dry run and resume (E99-F170)
+- The `auto_merge: false` hand-back now runs the reviewed-head receipt (`merge-verify
+  pre`) before it posts the all-gates-green summary or writes `handback`. A head that
+  moved after review is refused to needs-human and marked `stale`, so the next run
+  re-reviews instead of reporting an older review as green.
+- `HARNESS_DRY_RUN=1` now suppresses every remote and repository mutation through one
+  `mut` wrapper: ready, checkout, labels, fixer dispatch and pushes, thread resolution,
+  terminal comments, merge and cleanup. Its round cache lives under `.pr-loop/dry-run/`.
+- Resuming an interrupted findings round dispatches only unfinished fixes. `fix_done`
+  reads each `fix-<id>.md` note and the `(#<id>)` commits after the reviewed head.
+  `acted_append` is idempotent per comment id.
+
 ## [0.91.1] — 2026-10-09
 
 ### Fixed

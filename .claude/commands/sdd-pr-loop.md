@@ -37,9 +37,46 @@ Execution knobs are **env-only** (never config): `HARNESS_POLL_INTERVAL` (60),
 Round cache: `.pr-loop/<pr>/round-<n>/` — gitignored and best-effort; if it is
 missing or corrupt, reconstruct it from the `gh` API.
 
+## Dry run — EVERY mutation is suppressed (E99-F170)
+
+`HARNESS_DRY_RUN=1` is a rehearsal: it may READ anything (`gh pr view`, `gh api` GETs,
+the offline `evaluate`/`classify`/`pr-gate.sh` steps) and write only its own cache, but
+it must change **nothing** on the remote or in the repository. Skipping only the trigger
+comment is not a dry run — the loop would still mark the PR ready, check it out, commit
+and push fixes, label it, resolve threads, post terminal comments and (with
+`HARNESS_AUTO_MERGE=true`) merge it. So every remote or repository mutation in this
+runbook goes through ONE wrapper, and nothing mutating is ever called bare:
+
+```bash
+# mut <command...> — run a remote/repository mutation, or log-and-skip it on a dry run.
+# Wraps: gh pr ready / comment / edit / checkout / merge, the resolveReviewThread
+# mutation, git push / checkout / pull / branch -D / remote prune. A skipped call
+# reports success so the rehearsal walks the same path a real run would.
+mut() {
+  if [ "${HARNESS_DRY_RUN:-0}" = "1" ]; then
+    printf 'sdd-pr-loop: DRY-RUN — skipped: %s\n' "$*" >&2
+    return 0
+  fi
+  "$@"
+}
+# A dry run keeps its OWN cache root: its stub round must never count toward the real
+# PR's round budget, and a rehearsed `handback`/`merged` marker must never short-circuit
+# a later real run at the same head.
+pr_cache=".pr-loop/$pr_number"
+[ "${HARNESS_DRY_RUN:-0}" = "1" ] && pr_cache=".pr-loop/dry-run/$pr_number"
+```
+
+Under a dry run, additionally: **dispatch no `pr-fixer` and run no in-session fix pass**
+(a fixer edits and commits — list the comments it would have received instead), write
+no TaskStore status, and take **no merge** (the merge block below names what it would
+have merged and stops). `gh pr checkout` is skipped too, so §0c's OID check then demands
+a tree that is ALREADY at the PR head — a dry run never moves your checkout. A dry run
+reports what it would have done and posts no terminal comment.
+
 ## Per-round runbook
 
-Use a `while` loop so the round counter can be restarted. `round_dir=.pr-loop/<pr>/round-<round>`;
+Use a `while` loop so the round counter can be restarted. `round_dir=$pr_cache/round-<round>`
+(`.pr-loop/<pr>/…`; `.pr-loop/dry-run/<pr>/…` on a dry run);
 `max_rounds` is read from `pr_loop.max_rounds` (default 4).
 
 `max_rounds` is a budget for the **PR**, not for one invocation of this command. Resume the
@@ -49,7 +86,7 @@ way, and the `needs-human` hand-off that should have fired at round 4 never did.
 
 ```bash
 round=1; resume_round=""
-for _d in .pr-loop/$pr_number/round-*/; do
+for _d in "$pr_cache"/round-*/; do
   [ -d "$_d" ] || continue                       # unmatched glob — no cache yet
   # A round COUNTS toward the budget only when it recorded an outcome (E99-F142/F150):
   # `mkdir -p` runs before preflight, so a run that died pre-verdict leaves a directory
@@ -91,7 +128,7 @@ if [ -n "$resume_round" ]; then
   fi
 fi
 while [ "$round" -le "$max_rounds" ]; do
-  round_dir=".pr-loop/$pr_number/round-$round"
+  round_dir="$pr_cache/round-$round"
   mkdir -p "$round_dir"
 ```
 
@@ -138,7 +175,7 @@ reviewed PR looks unfixed while an unrelated branch quietly receives the commits
 pr_head_oid="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo '')"
 if [ -z "$pr_head_oid" ]; then
   echo "cannot resolve the PR's head oid — needs-human, not proceeding" >&2
-  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
   exit 1     # TERMINAL — a warning that falls through would preserve the exact
              # failure this section closes (fixes pushed from an unrelated tree)
 fi
@@ -149,7 +186,7 @@ fi
 # tracked paths only.
 if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
   echo "working tree has uncommitted tracked changes — they would be swept into fixer commits; commit/stash them first — needs-human, not proceeding" >&2
-  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
   exit 1     # TERMINAL
 fi
 # ALWAYS run the checkout — object equality alone is not a binding (Codex #165
@@ -157,14 +194,14 @@ fi
 # while the later plain `git push` fails, or lands on a different ref entirely.
 # `gh pr checkout` binds branch, upstream and push destination (fork-safe) and is
 # idempotent when the tree is already on the PR branch.
-if ! gh pr checkout "$pr_number" 2>/dev/null; then
+if ! mut gh pr checkout "$pr_number" 2>/dev/null; then
   echo "could not check out PR #$pr_number (conflicting local changes?) — needs-human, not proceeding" >&2
-  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
   exit 1     # TERMINAL, same reason
 fi
 if [ -z "$(git branch --show-current 2>/dev/null)" ]; then
   echo "working tree is detached after checkout — needs-human, not proceeding" >&2
-  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
   exit 1     # TERMINAL
 fi
 if [ "$(git rev-parse HEAD 2>/dev/null)" != "$pr_head_oid" ] \
@@ -175,7 +212,7 @@ if [ "$(git rev-parse HEAD 2>/dev/null)" != "$pr_head_oid" ] \
   # promised re-entry at needs-human and discard legitimate fix work (Codex #165
   # round-4). Anything else is an unrelated tree and fails closed.
   echo "working tree is neither at the PR head $pr_head_oid nor locally ahead of it — needs-human, not proceeding" >&2
-  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
   exit 1     # TERMINAL — OID-verified even after a successful checkout
 fi
 ```
@@ -194,7 +231,7 @@ slug=$(gh repo view --json owner,name --jq '"\(.owner.login) \(.name)"')
 owner=${slug%% *}; repo=${slug##* }
 ```
 
-- **Round 1:** mark the PR ready for review (`gh pr ready <pr>`), then comment `@codex review`.
+- **Round 1:** mark the PR ready for review (`mut gh pr ready "$pr_number"`), then comment `@codex review`.
 - **Round 2+:** comment `@codex review` again to request a re-review of the new commits.
 
 **Capture the triggering comment's id straight from the post response.** Step 2 uses it
@@ -206,14 +243,16 @@ the just-posted `@codex review` is on a later page and the lookup returns a stal
 `null` — which silently disables the freshness filter.
 
 ```bash
-trigger_url=$(gh pr comment "$pr_number" --body "@codex review")   # this IS the round's trigger post
+trigger_url=$(mut gh pr comment "$pr_number" --body "@codex review")   # this IS the round's trigger post
 trigger_comment_id="${trigger_url##*issuecomment-}"                # .../pull/N#issuecomment-<id>
 ```
 
 (The "comment `@codex review`" step and this capture are a single action — do not post twice.)
 
-If `HARNESS_DRY_RUN=1`, **skip the real `gh pr comment` post** entirely and synthesize
-stub review data in `$round_dir` for downstream testing.
+If `HARNESS_DRY_RUN=1`, `mut` **skips the real `gh pr comment` post** (and `gh pr ready`)
+entirely — `trigger_url` comes back empty — so synthesize stub review data in `$round_dir`
+(under the dry-run `$pr_cache`) for downstream testing. The trigger is only the FIRST
+mutation a dry run suppresses, not the only one: see "Dry run" above.
 
 ### 2. Poll for the review (background watcher)
 
@@ -442,7 +481,7 @@ is larger than one review pass can cover.
 _cs="$(sh tools/change-size.sh --format json 2>/dev/null || echo '{}')"
 _df="$(printf '%s' "$_cs" | jq -r '.total_files // empty' 2>/dev/null || true)"
 _dl="$(printf '%s' "$_cs" | jq -r '.total_lines // empty' 2>/dev/null || true)"
-sh tools/pr-round-trend.sh --cache ".pr-loop/$pr_number" \
+sh tools/pr-round-trend.sh --cache "$pr_cache" \
    ${_df:+--diff-files "$_df"} ${_dl:+--diff-lines "$_dl"}
 ```
 
@@ -590,16 +629,44 @@ round that still has blocking findings is a hand-over.
 #
 # Call it at the MOMENT a finding is disposed of as blocking: immediately before handing it
 # to a pr-fixer, before starting an in-session fix, or as the cap row lists it as a surviving
-# blocking comment. One call, one row, one finding.
+# blocking comment. One call, one row, one finding — and IDEMPOTENT per id (E99-F170): a
+# resumed round that re-reaches a comment it already recorded must not count it twice.
 acted_append() {
   _a="$round_dir/acted.json"
   [ -s "$_a" ] || printf '[]\n' > "$_a"
   case "${5:-configured}" in override) _ov=true ;; *) _ov=false ;; esac
   jq --argjson id "$1" --arg p "$2" --argjson l "${3:-0}" --arg s "$4" --argjson o "$_ov" \
-     '. + [{id:$id, path:$p, line:$l, severity:$s, override:$o}]' "$_a" > "$_a.tmp" \
+     'if any(.[]; .id == $id) then . else . + [{id:$id, path:$p, line:$l, severity:$s, override:$o}] end' \
+     "$_a" > "$_a.tmp" \
     && mv "$_a.tmp" "$_a"
 }
 ```
+
+**Resuming a round — skip the fixes that already completed (E99-F170).** A round RE-ENTERED on its cached findings (see the resume scan) may already have run some
+of its sequential fixers before the interruption: their commits are local (the round
+pushes once, at the end) and their `fix-<comment_id>.md` notes are in the round dir.
+Re-dispatching the ORIGINAL blocking set would hand those comments to a second fixer, on
+code that is already fixed. So before dispatching any comment, ask:
+
+```bash
+# fix_done <comment_id> — true when THIS round already finished that comment's fix: its
+# fixer wrote the `fix-<id>.md` note (committed, or deliberately declined), or its
+# `(#<id>)` fix commit sits after the head this round reviewed (committed, interrupted
+# before the note). Only commits AFTER the reviewed head count, so a previous round's fix
+# for a recurring comment id never masks this round's work.
+fix_done() {
+  [ -s "$round_dir/fix-$1.md" ] && return 0
+  _fd_head="$(jq -r '.headRefOid // ""' "$round_dir/pr.json" 2>/dev/null || echo '')"
+  [ -n "$_fd_head" ] || return 1
+  git log --format=%s "$_fd_head..HEAD" 2>/dev/null | grep -qF "(#$1)"
+}
+```
+
+Dispatch only the comments for which `fix_done` is false; report the skipped ids as
+"completed before the interruption". A comment already in `acted.json` but not `fix_done`
+was handed to a fixer that never finished — dispatch it again (`acted_append` will not
+duplicate its row). When every blocking comment is `fix_done`, dispatch nothing and go
+straight to the round's push.
 
 `acted.json` means **these findings were acted on**, and `tools/pr-round-trend.sh`
 uses it as the round's finding count precisely because that is a claim about what happened
@@ -617,9 +684,9 @@ that.
 
 | Round | Behavior |
 |---|---|
-| below `max_rounds - 1` | For each blocking comment: **`acted_append` it first**, then spawn one **`pr-fixer`** sub-agent **at a time — sequentially, never concurrently** (§0c: one shared checkout and index), passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `git push`. |
-| `max_rounds - 1` | **`acted_append` every comment going into the prompt**, then build **one combined fix prompt** (all blocking comments concatenated) and escalate to a **different worker** if the host CLI offers one; where no router exists, run one combined **in-session** pass instead. Then push. |
-| `max_rounds` (cap) | Stop the loop. `gh pr edit "$pr_number" --add-label needs-human`. **`acted_append` every blocking comment that survived** — the cap round disposes of them by declaring them, not by fixing them — then write `echo handover > "$round_dir/disposed"`. Post the handover summary listing every round, the surviving comments, and the cache path — **and the trend verdict, re-run after these rows exist**. When it is `non-converging`, the message must say what the tool's remedy line says, and must show the per-round series and the concentration list that make the case. Return failure. |
+| below `max_rounds - 1` | For each blocking comment **not already `fix_done`** (resume, above): **`acted_append` it first**, then spawn one **`pr-fixer`** sub-agent **at a time — sequentially, never concurrently** (§0c: one shared checkout and index), passing it the PR number, comment id, file path, line and body. It commits one fix and writes `fix-<comment_id>.md` into the round dir. After all fixers return, `mut git push`. On a dry run, spawn no fixer: list the comments instead. |
+| `max_rounds - 1` | **`acted_append` every comment going into the prompt**, then build **one combined fix prompt** (all blocking comments not already `fix_done`, concatenated) and escalate to a **different worker** if the host CLI offers one; where no router exists, run one combined **in-session** pass instead. The combined pass must leave the SAME per-comment receipts `fix_done` reads: one `fix-<comment_id>.md` per comment it addressed, and every addressed `(#<comment_id>)` in its commit subject(s) — otherwise an interrupted escalation round re-sends already-fixed comments. Then `mut git push`. On a dry run, run no fix pass: list the comments instead. |
+| `max_rounds` (cap) | Stop the loop. `mut gh pr edit "$pr_number" --add-label needs-human`. **`acted_append` every blocking comment that survived** — the cap round disposes of them by declaring them, not by fixing them — then write `echo handover > "$round_dir/disposed"`. Post the handover summary listing every round, the surviving comments, and the cache path — **and the trend verdict, re-run after these rows exist**. When it is `non-converging`, the message must say what the tool's remedy line says, and must show the per-round series and the concentration list that make the case. Return failure. |
 
 At the default `max_rounds: 4` that is rounds 1–2 per-comment, round 3 combined
 escalation, round 4 `needs-human`. A `max_rounds` below `3` simply has no per-comment
@@ -674,7 +741,7 @@ written. Everything the message needs is already in the round cache, so write it
 — no post, no poll, nothing that can hang:
 
 ```bash
-msg=".pr-loop/$pr_number/squash-message.txt"
+msg="$pr_cache/squash-message.txt"
 default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
 {
   gh pr view "$pr_number" --json title --jq '.title'
@@ -684,7 +751,7 @@ default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.na
   git log --reverse --format='- %s' "origin/$default_branch..HEAD"
   echo
   echo "Blocking fixes resolved:"
-  for f in .pr-loop/"$pr_number"/round-*/fix-*.md; do
+  for f in "$pr_cache"/round-*/fix-*.md; do
     [ -f "$f" ] && sed -n 's/^- One-line: //p' "$f"
   done
 } > "$msg"
@@ -713,13 +780,13 @@ Before posting **either** terminal-state comment, build the handover summary by 
 the cache:
 
 ```bash
-for d in .pr-loop/"$pr_number"/round-*/; do
+for d in "$pr_cache"/round-*/; do
   n=$(basename "$d" | sed 's/round-//')
   worker=$(cat "$d/worker" 2>/dev/null || echo "?")
   role=$(cat "$d/role" 2>/dev/null || echo "?")
   echo "- round-$n: $worker ($role)"
 done
-for d in .pr-loop/"$pr_number"/round-*/; do cat "$d/worker" 2>/dev/null; done \
+for d in "$pr_cache"/round-*/; do cat "$d/worker" 2>/dev/null; done \
   | sort | uniq -c
 ```
 
@@ -728,12 +795,16 @@ so every `acted.json` that is ever going to exist exists — including the curre
 step 4b could not see. The verdict that goes into either terminal message is this one:
 
 ```bash
-sh tools/pr-round-trend.sh --cache ".pr-loop/$pr_number" \
+sh tools/pr-round-trend.sh --cache "$pr_cache" \
    ${_df:+--diff-files "$_df"} ${_dl:+--diff-lines "$_dl"}
 ```
 
-Save the rendered summary to `.pr-loop/<pr>/handover-summary.md` and post it on
-**both** terminal states.
+Save the rendered summary to `$pr_cache/handover-summary.md` and post it on
+**both** terminal states — always through the wrapper, so a dry run posts nothing:
+
+```bash
+mut gh pr comment "$pr_number" --body-file "$pr_cache/handover-summary.md"
+```
 
 ## Terminal states
 
@@ -848,7 +919,7 @@ else
   resolve_ok=1
   while read -r _allcodex tid; do
     [ -z "$tid" ] && continue
-    gh api graphql -f query='
+    mut gh api graphql -f query='
       mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ id isResolved } } }' \
       -f id="$tid" >/dev/null || resolve_ok=0   # try the rest, but remember the failure
   done <<UNRESOLVED
@@ -875,6 +946,35 @@ next invocation recognize a completed hand-back instead of spending budget
 re-reviewing a deliberately-unmerged green PR — and **return success**. It is the one terminal state where an
 unmerged PR is the intended outcome, so never route it to needs-human.
 
+**Revalidate the reviewed head BEFORE the hand-back says anything** (E99-F170). The
+hand-back is a claim — "Codex reviewed this PR and every gate is green" — and it is only
+true of the head this round reviewed. A commit pushed after `pr.json` was captured is
+unreviewed, so the hand-back runs the same `merge-verify pre` receipt the merge path runs,
+and runs it **before** posting the green summary and **before** writing `handback`:
+otherwise the human is told the PR is green while Codex reviewed an older head, and the
+terminal marker would then short-circuit the next invocation as already done.
+
+```bash
+# auto_merge:false hand-back — the receipt FIRST, then the claim, then the marker.
+if ! sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" pre; then
+  # Moved or unreadable head: no green summary and NO `handback` marker. `stale` records
+  # that this round's verdict no longer describes the PR, so the next invocation ADVANCES
+  # to a fresh review round instead of re-entering this one on its outdated green verdict.
+  echo "sdd-pr-loop: hand-back refused — head moved since the reviewed round (unreviewed commits) — needs-human" >&2
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  [ "${HARNESS_DRY_RUN:-0}" = "1" ] || echo stale > "$round_dir/disposed"
+  handback_ok=0      # take the needs-human terminal state and return failure
+else
+  handback_ok=1
+  mut gh pr comment "$pr_number" --body-file "$pr_cache/handover-summary.md"
+  [ "${HARNESS_DRY_RUN:-0}" = "1" ] || echo handback > "$round_dir/disposed"
+fi
+```
+
+A refused hand-back is the needs-human state, not a success: the new commits need their
+own review round, which the next invocation starts (a `stale` round is finished, so the
+resume scan advances past it and triggers a fresh `@codex review` on the new head).
+
 Where `pr_loop.auto_merge` is **true**, merge with the configured `merge_strategy`,
 deleting the remote branch in the same call.
 
@@ -898,26 +998,31 @@ default_branch="${default_branch:-$(gh repo view --json defaultBranchRef --jq '.
 base_ref="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo '')"
 if [ -z "$default_branch" ] || [ -z "$base_ref" ] || [ "$base_ref" != "$default_branch" ]; then
   echo "sdd-pr-loop: merge refused — base '$base_ref' is not the default branch '$default_branch' (stacked lane deprecated, E21-F07); retarget the PR — needs-human" >&2
-  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
 elif [ -z "$reviewed_head" ]; then
   echo "sdd-pr-loop: merge refused — reviewed head unreadable from the round cache — needs-human" >&2
-  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
 elif ! sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" pre; then
   # E99-F144: a push AFTER the clean review must not inherit its verdict — the receipt
   # compares the PR's current head against the head this round actually reviewed.
   echo "sdd-pr-loop: merge refused — head moved since the reviewed round (unreviewed commits) — needs-human" >&2
-  gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  [ "${HARNESS_DRY_RUN:-0}" = "1" ] || echo stale > "$round_dir/disposed"   # next run re-reviews
 elif [ "${merge_ok:-0}" != "1" ]; then
   echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
+elif [ "${HARNESS_DRY_RUN:-0}" = "1" ]; then
+  # Dry run (E99-F170): EVERY gate above held, thread eligibility included — say what
+  # WOULD merge, merge nothing. A dry run must reach the disposition a live run would.
+  echo "sdd-pr-loop: DRY-RUN — would merge PR #$pr_number at $reviewed_head (${merge_strategy:-merge})" >&2
 elif [ "${merge_strategy:-merge}" = "squash" ]; then
-  msg=".pr-loop/$pr_number/squash-message.txt"
+  msg="$pr_cache/squash-message.txt"
   if [ -s "$msg" ]; then
-    gh pr merge "$pr_number" --squash --delete-branch --body-file "$msg" --match-head-commit "$reviewed_head" && merge_oid="$(sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
+    mut gh pr merge "$pr_number" --squash --delete-branch --body-file "$msg" --match-head-commit "$reviewed_head" && merge_oid="$(sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
   else                        # no message composed — squash with GitHub's default body
-    gh pr merge "$pr_number" --squash --delete-branch --match-head-commit "$reviewed_head" && merge_oid="$(sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
+    mut gh pr merge "$pr_number" --squash --delete-branch --match-head-commit "$reviewed_head" && merge_oid="$(sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
   fi
 else
-  gh pr merge "$pr_number" --merge --delete-branch --match-head-commit "$reviewed_head" && merge_oid="$(sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
+  mut gh pr merge "$pr_number" --merge --delete-branch --match-head-commit "$reviewed_head" && merge_oid="$(sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" && merged=1
 fi
 ```
 
@@ -931,10 +1036,10 @@ if [ "${merged:-0}" = "1" ]; then
                                         # now is the round finished; an interrupt re-enters
   default_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
   branch=$(gh pr view "$pr_number" --json headRefName --jq '.headRefName')
-  git checkout "$default_branch" >/dev/null 2>&1 || true
-  git pull --ff-only >/dev/null 2>&1 || true
-  git branch -D "$branch" 2>/dev/null || true          # local
-  git remote prune origin >/dev/null 2>&1 || true      # drop the stale remote-tracking ref
+  mut git checkout "$default_branch" >/dev/null 2>&1 || true
+  mut git pull --ff-only >/dev/null 2>&1 || true
+  mut git branch -D "$branch" 2>/dev/null || true          # local
+  mut git remote prune origin >/dev/null 2>&1 || true      # drop the stale remote-tracking ref
 fi
 ```
 
@@ -954,7 +1059,8 @@ not land is never reported as success.
 ### Needs-human (failure)
 
 Apply the `needs-human` label, post the **same handover summary** block (so the human sees
-exactly which workers tried and where they got stuck), and return failure. Reached by: the
+exactly which workers tried and where they got stuck) — both through `mut`, so a dry run
+does neither — and return failure. Reached by: the
 `max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, a merge that would not land.
 
 **Say what the human should conclude.** Include the step-4b trend output **verbatim,
@@ -987,6 +1093,7 @@ merge did not land, that is this state, and it is a failure.
     trigger-ts.txt            # freshness anchor
     outcome                   # ONE WORD: findings | clean | timeout | unresolved (step 2b)
     disposed                  # terminal disposition, TYPED: fixed | merged | handback | handover
+                              # | stale (head moved past the reviewed one — next run re-reviews)
     fresh-comments.json, comments.json, blocking.json, status.json
     acted.json                # appended at DISPATCH (step 5): one row per finding this round
                               # acted on, severity + override per row. Absent when the round

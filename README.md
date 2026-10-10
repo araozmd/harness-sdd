@@ -309,7 +309,9 @@ each overridable
 per run by `HARNESS_PR_LOOP_ENABLED`, `HARNESS_AUTO_MERGE`, `HARNESS_MAX_ROUNDS`,
 `HARNESS_BLOCKING_SEVERITIES`, `HARNESS_MERGE_STRATEGY`. Execution knobs are env-only:
 `HARNESS_POLL_INTERVAL` (60s), `HARNESS_POLL_CEILING` (900s), `HARNESS_FIRST_RESPONSE`
-(180s — fail fast when the Codex GitHub App never answers) and `HARNESS_DRY_RUN`.
+(180s — fail fast when the Codex GitHub App never answers) and `HARNESS_DRY_RUN`
+(`1` = a read-only rehearsal: every PR, push, label, thread and merge mutation is skipped
+and the round cache is kept apart under `.pr-loop/dry-run/`).
 `gh` and `jq` are required only by this loop; `init.sh` does not check for them.
 
 ### Parallel maintenance fixes
