@@ -560,7 +560,9 @@ gate_rc=$?
 
 **The gate's verdict is binding, and it is asked exactly ONCE per round.** `merge` (0) means
 the review is finished: leave this step entirely, **break the loop before advancing the round
-counter**, and go to step 6. Do **NOT** write `disposed` here: the merge path writes it
+counter**, and go to **Ready to merge** below. Step 6 re-checks a FIX round and never runs
+on a `merge` verdict, so the terminal paths run the required-CI gate themselves
+(`ci_required_gate`, E99-F171) before they post, mark or merge anything. Do **NOT** write `disposed` here: the merge path writes it
 only after its terminal action completes (the verified merge, or the `auto_merge:
 false` hand-back), so an interruption anywhere in between RE-ENTERS this round on its
 cached green verdict instead of stranding it (Codex #165 round-2) then "ready to merge". Breaking preserves the successful `round`
@@ -733,8 +735,9 @@ What remains is to confirm the fix commits did not break anything, then **advanc
 round counter and trigger a fresh `@codex review` (step 1). The new review is what produces
 the next round's blocking set.
 
-If checks are still pending, wait for them; if any fail, treat the failure like a blocking
-comment for the next round.
+If checks are still pending, wait for them (`ci_required_gate` under Ready to merge does
+exactly that, bounded by `HARNESS_POLL_CEILING`); if any fail, treat the failure like a
+blocking comment for the next round.
 
 #### Squash-merge prep (only when `merge_strategy` is `squash`)
 
@@ -822,6 +825,54 @@ mut gh pr comment "$pr_number" --body-file "$pr_cache/handover-summary.md"
 with blocking findings would otherwise fall through here and auto-merge (E99-F150).
 No verdict of this run's own ⇒ the cap row's `needs-human` terminal state, never this
 section.
+
+**Required CI gates BOTH terminal paths** (E99-F171). A `merge` verdict says the REVIEW is
+finished, nothing more: a clean or non-blocking round breaks out of the loop before step 6,
+so without a gate here the hand-back would post "all gates green" and write `handback`
+while a required check is still running or red, and auto-merge would merge over it. Both
+the hand-back and the merge therefore wait on the PR's **required** checks first (optional
+jobs never block — E99-F152), reusing the watcher's poll knobs. `gh pr checks` is a read,
+so a dry run still asks it; everything that follows a failure goes through `mut`.
+
+```bash
+# ci_required_gate — wait for the PR's REQUIRED checks. 0 = every required check passed,
+# or the repository requires none. 1 = a required check failed, the checks were still
+# pending at HARNESS_POLL_CEILING, or gh could not read them. Never claims green on 1.
+ci_required_gate() {
+  _ci_iv="${HARNESS_POLL_INTERVAL:-60}"; _ci_ceil="${HARNESS_POLL_CEILING:-900}"
+  case "$_ci_iv" in ''|*[!0-9]*|0) _ci_iv=60 ;; esac
+  case "$_ci_ceil" in ''|*[!0-9]*) _ci_ceil=900 ;; esac
+  _ci_waited=0
+  while :; do
+    _ci_rc=0; _ci_out="$(gh pr checks "$pr_number" --required 2>&1)" || _ci_rc=$?
+    case "$_ci_rc" in
+      0) return 0 ;;
+      8) : ;;                                    # gh: checks pending — poll again
+      *) if printf '%s\n' "$_ci_out" | grep -qi 'no required checks reported'; then
+           echo "sdd-pr-loop: no required checks on PR #$pr_number — required-CI gate passes" >&2
+           return 0
+         fi
+         printf 'sdd-pr-loop: required CI failing or unreadable on PR #%s — needs-human\n%s\n' \
+           "$pr_number" "$_ci_out" >&2
+         return 1 ;;
+    esac
+    if [ "$_ci_waited" -ge "$_ci_ceil" ]; then
+      echo "sdd-pr-loop: required CI still pending after ${_ci_ceil}s on PR #$pr_number — needs-human" >&2
+      return 1
+    fi
+    _ci_nap="$_ci_iv"
+    [ $(( _ci_ceil - _ci_waited )) -lt "$_ci_nap" ] && _ci_nap=$(( _ci_ceil - _ci_waited ))
+    [ "$_ci_nap" -gt 0 ] || _ci_nap=1
+    sleep "$_ci_nap"; _ci_waited=$(( _ci_waited + _ci_nap ))
+  done
+}
+```
+
+A failed required-CI gate is the **needs-human** terminal state on either path: label
+the PR (through `mut`), post **no** green summary, merge nothing, and write **no**
+`disposed` marker. The round stays re-enterable, so the next invocation reuses its cached
+green review and asks CI again. A human fix commit moves the head instead, and then the
+head receipt marks the round `stale` and a fresh review runs.
 
 **Build** the summary now — but post it only when a terminal state actually lands
 (after `merged=1` below, or with the `auto_merge: false` hand-back). Posting first
@@ -961,8 +1012,24 @@ otherwise the human is told the PR is green while Codex reviewed an older head, 
 terminal marker would then short-circuit the next invocation as already done.
 
 ```bash
-# auto_merge:false hand-back — the receipt FIRST, then the claim, then the marker.
+# auto_merge:false hand-back — the receipt and required CI FIRST, then the claim, then
+# the marker. The receipt runs again after the CI wait: a push during it would otherwise
+# be handed back as green on checks that ran against a different head.
+hb_refused=""
 if ! sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" pre; then
+  hb_refused=stale
+elif ! ci_required_gate; then
+  hb_refused=ci
+elif ! sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" pre; then
+  hb_refused=stale
+fi
+if [ "$hb_refused" = ci ]; then
+  # Required CI red, or still pending at the ceiling (E99-F171): no green summary and NO
+  # marker — the round stays re-enterable so the next run re-checks CI on its cached review.
+  echo "sdd-pr-loop: hand-back refused — required CI is not green — needs-human" >&2
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  handback_ok=0      # take the needs-human terminal state and return failure
+elif [ "$hb_refused" = stale ]; then
   # Moved or unreadable head: no green summary and NO `handback` marker. `stale` records
   # that this round's verdict no longer describes the PR, so the next invocation ADVANCES
   # to a fresh review round instead of re-entering this one on its outdated green verdict.
@@ -1014,6 +1081,12 @@ elif ! sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" pre; th
   echo "sdd-pr-loop: merge refused — head moved since the reviewed round (unreviewed commits) — needs-human" >&2
   mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
   [ "${HARNESS_DRY_RUN:-0}" = "1" ] || echo stale > "$round_dir/disposed"   # next run re-reviews
+elif ! ci_required_gate; then
+  # E99-F171: a clean review is not green CI. Required checks red or still pending at the
+  # ceiling ⇒ needs-human, no merge, no marker (the next run re-checks CI on this review).
+  # A push during the wait cannot slip through: --match-head-commit pins the merge below.
+  echo "sdd-pr-loop: merge refused — required CI is not green — needs-human" >&2
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
 elif [ "${merge_ok:-0}" != "1" ]; then
   echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
 elif [ "${HARNESS_DRY_RUN:-0}" = "1" ]; then
@@ -1067,7 +1140,9 @@ not land is never reported as success.
 Apply the `needs-human` label, post the **same handover summary** block (so the human sees
 exactly which workers tried and where they got stuck) — both through `mut`, so a dry run
 does neither — and return failure. Reached by: the
-`max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, a merge that would not land.
+`max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, a merge that would not land,
+required CI that is red or still pending at the ceiling (E99-F171 — say which required
+checks, from `ci_required_gate`'s output; never the "all gates green" header).
 
 **Say what the human should conclude.** Include the step-4b trend output **verbatim,
 including its `NEVER REVIEWED` block** — a cap reached because reviews kept timing out is a
