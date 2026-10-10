@@ -1112,7 +1112,7 @@
         {
           "id": "E99-F171",
           "title": "Gate /sdd-pr-loop hand-back and auto-merge on required CI",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
