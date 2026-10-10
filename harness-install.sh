@@ -6927,33 +6927,85 @@ finished, nothing more: a clean or non-blocking round breaks out of the loop bef
 so without a gate here the hand-back would post "all gates green" and write `handback`
 while a required check is still running or red, and auto-merge would merge over it. Both
 the hand-back and the merge therefore wait on the PR's **required** checks first (optional
-jobs never block — E99-F152), reusing the watcher's poll knobs. `gh pr checks` is a read,
-so a dry run still asks it; everything that follows a failure goes through `mut`.
+jobs never block — E99-F152), reusing the watcher's poll knobs. `gh pr checks` and the
+branch-protection/ruleset reads are reads, so a dry run still asks them; everything that
+follows a failure goes through `mut`. Two traps the helper closes: gh **exits 0** when a
+required check was **cancelled** (its `cancel` bucket is neither failed nor pending), so
+the verdict comes from the JSON buckets, not the exit status; and "no required checks
+reported" only means none has **started** yet. The rollup is therefore compared with what
+the base branch actually requires (classic protection contexts plus `required_status_checks`
+rulesets). A required context that has not reported yet is pending, and an empty rollup is
+green only when the base provably requires nothing.
 
 ```bash
-# ci_required_gate — wait for the PR's REQUIRED checks. 0 = every required check passed,
-# or the repository requires none. 1 = a required check failed, the checks were still
-# pending at HARNESS_POLL_CEILING, or gh could not read them. Never claims green on 1.
+# ci_required_gate — wait for the PR's REQUIRED checks. 0 = every required check passed
+# (`skipping` counts, as GitHub counts it), or the base branch provably requires none.
+# 1 = a required check failed or was CANCELLED, a required check was still pending or not
+# yet reported at HARNESS_POLL_CEILING, or gh could not read the checks. Never green on 1.
 ci_required_gate() {
   _ci_iv="${HARNESS_POLL_INTERVAL:-60}"; _ci_ceil="${HARNESS_POLL_CEILING:-900}"
   case "$_ci_iv" in ''|*[!0-9]*|0) _ci_iv=60 ;; esac
   case "$_ci_ceil" in ''|*[!0-9]*) _ci_ceil=900 ;; esac
-  _ci_waited=0
+  _ci_waited=0; _ci_why=""
   while :; do
-    _ci_rc=0; _ci_out="$(gh pr checks "$pr_number" --required 2>&1)" || _ci_rc=$?
-    case "$_ci_rc" in
-      0) return 0 ;;
-      8) : ;;                                    # gh: checks pending — poll again
+    # The rollup lists only checks that have STARTED, so "no required checks reported"
+    # can mean "none configured" OR "the required workflow has not registered yet". Read
+    # what the BASE branch requires — classic protection and rulesets — every poll; an
+    # unreadable answer is "unknown", and unknown is never green.
+    _ci_known=0; _ci_want=""
+    _ci_base="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo '')"
+    if [ -n "$_ci_base" ] \
+       && _ci_bp="$(gh api "repos/{owner}/{repo}/branches/$_ci_base" \
+            --jq '.protection.required_status_checks.contexts[]?' 2>/dev/null)" \
+       && _ci_rs="$(gh api "repos/{owner}/{repo}/rules/branches/$_ci_base" \
+            --jq '.[] | select(.type == "required_status_checks")
+                  | .parameters.required_status_checks[].context' 2>/dev/null)"; then
+      _ci_known=1
+      _ci_want="$(printf '%s\n%s\n' "$_ci_bp" "$_ci_rs" | sed '/^$/d' | sort -u)"
+    fi
+    # Classify by BUCKET, not by gh's exit status: gh exits 0 with a CANCELLED required
+    # check (its `cancel` bucket is neither Failed nor Pending), so the status lies there.
+    _ci_out="$(gh pr checks "$pr_number" --required --json name,bucket 2>&1)" || :
+    case "$_ci_out" in
+      \[*) _ci_rep="$_ci_out" ;;
       *) if printf '%s\n' "$_ci_out" | grep -qi 'no required checks reported'; then
-           echo "sdd-pr-loop: no required checks on PR #$pr_number — required-CI gate passes" >&2
-           return 0
-         fi
-         printf 'sdd-pr-loop: required CI failing or unreadable on PR #%s — needs-human\n%s\n' \
-           "$pr_number" "$_ci_out" >&2
-         return 1 ;;
+           _ci_rep='[]'
+         else
+           printf 'sdd-pr-loop: required CI unreadable on PR #%s — needs-human\n%s\n' \
+             "$pr_number" "$_ci_out" >&2
+           return 1
+         fi ;;
+    esac
+    if ! _ci_cls="$(printf '%s' "$_ci_rep" | jq -r --arg want "$_ci_want" '
+          ($want | split("\n") | map(select(length > 0))) as $w
+          | (map(select(.bucket == "fail" or .bucket == "cancel") | .name)) as $bad
+          | (map(select(.bucket != "pass" and .bucket != "skipping"
+                        and .bucket != "fail" and .bucket != "cancel") | .name)) as $pend
+          | ($w - map(.name)) as $miss
+          | if ($bad | length) > 0 then "bad \($bad | join(", "))"
+            elif ($pend | length) > 0 then "wait pending: \($pend | join(", "))"
+            elif ($miss | length) > 0 then "wait not reported yet: \($miss | join(", "))"
+            elif length > 0 then "ok"
+            else "empty" end' 2>/dev/null)"; then
+      echo "sdd-pr-loop: required CI unreadable on PR #$pr_number — needs-human" >&2
+      return 1
+    fi
+    case "$_ci_cls" in
+      ok) [ "$_ci_known" = 1 ] && return 0
+          _ci_why="required-check configuration of '$_ci_base' unreadable" ;;
+      empty)
+        if [ "$_ci_known" = 1 ]; then
+          echo "sdd-pr-loop: base '$_ci_base' requires no checks — required-CI gate passes" >&2
+          return 0
+        fi
+        _ci_why="no required check reported and the configuration of '$_ci_base' is unreadable" ;;
+      bad\ *)
+        echo "sdd-pr-loop: required CI failed or cancelled on PR #$pr_number (${_ci_cls#bad }) — needs-human" >&2
+        return 1 ;;
+      *) _ci_why="${_ci_cls#wait }" ;;
     esac
     if [ "$_ci_waited" -ge "$_ci_ceil" ]; then
-      echo "sdd-pr-loop: required CI still pending after ${_ci_ceil}s on PR #$pr_number — needs-human" >&2
+      echo "sdd-pr-loop: required CI not green after ${_ci_ceil}s on PR #$pr_number ($_ci_why) — needs-human" >&2
       return 1
     fi
     _ci_nap="$_ci_iv"

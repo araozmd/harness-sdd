@@ -78,19 +78,30 @@ case "\$*" in
   *"--json state,mergedAt,mergeCommit"*) echo "MERGED 2026-10-10T00:00:00Z bbbb" ;;
   *"--json baseRefName"*|*"defaultBranchRef"*) echo main ;;
   *"pr comment"*) echo "https://github.com/o/r/pull/7#issuecomment-1" ;;
+  *"/rules/branches/"*)
+    # Rulesets' required contexts (already --jq-filtered). Absent \$_e/req_rules ⇒ none.
+    [ -e "$_e/api_fail" ] && exit 1
+    [ -f "$_e/req_rules" ] && cat "$_e/req_rules" ;;
+  *"api repos/"*"/branches/"*)
+    # Classic protection's required contexts. Absent \$_e/req ⇒ "build"; empty ⇒ none.
+    [ -e "$_e/api_fail" ] && exit 1
+    if [ -f "$_e/req" ]; then cat "$_e/req"; else echo build; fi ;;
   *"pr checks"*)
     # Required-CI answer, scripted by \$_e/ci (one mode per line, consumed in order; the
-    # last line repeats). Absent ⇒ pass. Modes mirror gh: pass=0, fail=1, pending=8,
-    # none=1 + "no required checks reported".
+    # last line repeats). Absent ⇒ pass. Shapes mirror gh --json name,bucket; "none" is
+    # gh's empty-rollup diagnostic, and a cancelled check exits 0 exactly as gh does.
     _m=pass
     if [ -s "$_e/ci" ]; then
       _m="\$(head -n 1 "$_e/ci")"
       [ "\$(wc -l < "$_e/ci")" -gt 1 ] && { tail -n +2 "$_e/ci" > "$_e/ci.n"; mv "$_e/ci.n" "$_e/ci"; }
     fi
     case "\$_m" in
-      pass)    echo "build	pass	1m	https://ci/1"; exit 0 ;;
-      fail)    echo "build	fail	1m	https://ci/1"; exit 1 ;;
-      pending) echo "build	pending	0	https://ci/1"; exit 8 ;;
+      pass)    echo '[{"name":"build","bucket":"pass"}]'; exit 0 ;;
+      skip)    echo '[{"name":"build","bucket":"skipping"}]'; exit 0 ;;
+      fail)    echo '[{"name":"build","bucket":"fail"}]'; exit 1 ;;
+      cancel)  echo '[{"name":"build","bucket":"cancel"}]'; exit 0 ;;
+      pending) echo '[{"name":"build","bucket":"pending"}]'; exit 8 ;;
+      other)   echo '[{"name":"lint","bucket":"pass"}]'; exit 0 ;;
       none)    echo "no required checks reported on the 'feat' branch" >&2; exit 1 ;;
     esac ;;
 esac
@@ -266,18 +277,30 @@ assert g < hb.index('handover-summary.md') and g < hb.index('echo handback >')
 assert mg.index('ci_required_gate') < mg.index('mut gh pr merge')
 PY
     # ── helper semantics ─────────────────────────────────────────────────────────
-    for _case in "pass:0" "none:0" "fail:1" "pending:1" "pending
-pending
-pass:0"; do
-      _modes="${_case%:*}"; _want="${_case##*:}"
+    # <ci modes>:<required contexts, "," separated; "-" = none; "!" = API unreadable>:<rc>
+    for _case in "pass:build:0" "skip:build:0" "fail:build:1" "cancel:build:1" "pending:build:1" \
+                 "pending pending pass:build:0" "none:-:0" "none:build:1" "none none pass:build:0" \
+                 "other:build:1" "other:-:0" "pass:!:1" "none:!:1"; do
+      _modes="${_case%%:*}"; _rest="${_case#*:}"; _req="${_rest%%:*}"; _want="${_rest##*:}"
       _e="$T/ci-fn"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-      printf '%s\n' "$_modes" > "$_e/ci"
+      printf '%s\n' $_modes > "$_e/ci"
+      case "$_req" in
+        -) : > "$_e/req" ;;
+        !) touch "$_e/api_fail" ;;
+        *) printf '%s\n' "$_req" | tr ',' '\n' > "$_e/req" ;;
+      esac
       _got=0
       ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=3 \
           sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>/dev/null || _got=$?
       [ "$_got" = "$_want" ] \
-        || fail "CI: $_b ci_required_gate on '$(echo $_modes)' returned $_got, want $_want"
+        || fail "CI: $_b ci_required_gate on '$_modes' (required: $_req) returned $_got, want $_want"
     done
+    # A context required only by a RULESET is waited on too (classic protection empty).
+    _e="$T/ci-rules"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    : > "$_e/req"; echo build > "$_e/req_rules"; echo none > "$_e/ci"
+    ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=1 \
+        sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>/dev/null \
+      && fail "CI: $_b passed an empty rollup although a ruleset requires 'build'"
     # Pending forever is bounded by the ceiling, not an unbounded wait.
     _e="$T/ci-ceil"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     echo pending > "$_e/ci"
@@ -286,10 +309,10 @@ pass:0"; do
     _polls="$(grep -c 'pr checks' "$_e/gh.log")"
     [ "$_polls" -ge 2 ] && [ "$_polls" -le 4 ] \
       || fail "CI: $_b pending CI polled $_polls times under a 2s ceiling (want a bounded re-poll)"
-    grep -q 'still pending after 2s' "$_e/err" || fail "CI: $_b pending-at-ceiling is not reported"
+    grep -q 'not green after 2s' "$_e/err" || fail "CI: $_b pending-at-ceiling is not reported"
 
     # ── hand-back (auto_merge:false) ────────────────────────────────────────────
-    for _mode in fail pending; do
+    for _mode in fail cancel pending; do
       _e="$T/hb-ci-$_mode"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       echo "$_mode" > "$_e/ci"
       run_block "$_e" "$T/hb.sh" ''
@@ -307,9 +330,9 @@ pass:0"; do
     run_block "$_e" "$T/hb.sh" ''
     [ "$(cat "$_e/round/disposed" 2>/dev/null)" = handback ] \
       || fail "CI: $_b hand-back did not complete once required CI turned green"
-    # A repo with NO required checks is not blocked.
+    # A base branch that provably requires NO checks is not blocked.
     _e="$T/hb-ci-none"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-    echo none > "$_e/ci"
+    echo none > "$_e/ci"; : > "$_e/req"
     run_block "$_e" "$T/hb.sh" ''
     [ "$(cat "$_e/round/disposed" 2>/dev/null)" = handback ] \
       || fail "CI: $_b hand-back blocked on a repo that requires no checks"
@@ -321,7 +344,7 @@ pass:0"; do
     [ -e "$_e/round/disposed" ] && fail "CI: $_b dry-run red-CI hand-back wrote a marker"
 
     # ── auto-merge ───────────────────────────────────────────────────────────────
-    for _mode in fail pending; do
+    for _mode in fail cancel pending; do
       _e="$T/mg-ci-$_mode"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       echo "$_mode" > "$_e/ci"
       run_block "$_e" "$T/merge.sh" 'merge_ok=1'

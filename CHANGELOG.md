@@ -15,8 +15,12 @@ All notable changes to the harness body are recorded here. Versions follow
   anything. The hand-back re-checks the reviewed head after the wait.
 - Red required CI, or CI still pending at the ceiling, goes to needs-human. The label goes
   through `mut`, no green comment is posted and no `disposed` marker is written, so the
-  next run re-checks CI on the cached review. A repository with no required checks is not
-  blocked.
+  next run re-checks CI on the cached review.
+- The verdict comes from the `--json` buckets, because gh exits 0 on a **cancelled**
+  required check. The rollup is also compared with what the base branch requires (classic
+  protection contexts plus `required_status_checks` rulesets). A required context that
+  has not reported yet counts as pending. An empty rollup passes only when the base
+  provably requires no checks.
 
 ## [0.91.2] — 2026-10-10
 
