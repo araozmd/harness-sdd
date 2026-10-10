@@ -10,6 +10,9 @@
 #       pushes/thread resolution/terminal comments/merge all still ran.
 #   P2  re-entering an interrupted findings round re-dispatched every original blocking
 #       comment, ignoring the fixes the round had already completed.
+#   P1  (E99-F171) a clean/non-blocking `merge` verdict left the loop before step 6, the
+#       only `gh pr checks --required` call: the hand-back posted "all gates green" and
+#       wrote `handback` — and auto-merge merged — while required CI was pending or red.
 #
 # Every body that ships is checked: the three self-hosted copies AND a freshly installed
 # target (the installer heredoc is the canonical source; a fix to only one copy ships the
@@ -75,6 +78,21 @@ case "\$*" in
   *"--json state,mergedAt,mergeCommit"*) echo "MERGED 2026-10-10T00:00:00Z bbbb" ;;
   *"--json baseRefName"*|*"defaultBranchRef"*) echo main ;;
   *"pr comment"*) echo "https://github.com/o/r/pull/7#issuecomment-1" ;;
+  *"pr checks"*)
+    # Required-CI answer, scripted by \$_e/ci (one mode per line, consumed in order; the
+    # last line repeats). Absent ⇒ pass. Modes mirror gh: pass=0, fail=1, pending=8,
+    # none=1 + "no required checks reported".
+    _m=pass
+    if [ -s "$_e/ci" ]; then
+      _m="\$(head -n 1 "$_e/ci")"
+      [ "\$(wc -l < "$_e/ci")" -gt 1 ] && { tail -n +2 "$_e/ci" > "$_e/ci.n"; mv "$_e/ci.n" "$_e/ci"; }
+    fi
+    case "\$_m" in
+      pass)    echo "build	pass	1m	https://ci/1"; exit 0 ;;
+      fail)    echo "build	fail	1m	https://ci/1"; exit 1 ;;
+      pending) echo "build	pending	0	https://ci/1"; exit 8 ;;
+      none)    echo "no required checks reported on the 'feat' branch" >&2; exit 1 ;;
+    esac ;;
 esac
 exit 0
 EOF
@@ -87,7 +105,8 @@ EOF
 run_block() {
   _rd="$1"; _sn="$2"; _pre="$3"
   ( cd "$_rd" && PATH="$_rd/bin:$PATH" HARNESS_MERGE_VERIFY_INTERVAL=1 HARNESS_MERGE_VERIFY_CEILING=2 \
-      sh -c "$(cat "$T/mut.sh")
+      HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=2 sh -c "$(cat "$T/mut.sh")
+$(cat "$T/ci.sh" 2>/dev/null)
 pr_number=7; round_dir=round; pr_cache=.; default_branch=main; $_pre
 $(cat "$_sn")
 printf '%s\n' \"\${merged:-unset} \${handback_ok:-unset}\" > result" ) >/dev/null 2>"$_rd/err" || :
@@ -97,7 +116,7 @@ printf '%s\n' \"\${merged:-unset} \${handback_ok:-unset}\" > result" ) >/dev/nul
 test_handback_revalidates_head() {
   have_jq || { skip "handback_revalidates_head (jq not installed)"; return 0; }
   for _b in $BODIES; do
-    fn "$_b" mut > "$T/mut.sh"
+    fn "$_b" mut > "$T/mut.sh"; fn "$_b" ci_required_gate > "$T/ci.sh"
     grep -qF 'mut() {' "$T/mut.sh" || fail "P1: no mut() wrapper in $_b"
     block "$_b" 'echo handback > "$round_dir/disposed"' > "$T/hb.sh" \
       || fail "P1: $_b has no executable hand-back block — the marker is written from prose only"
@@ -159,7 +178,7 @@ PY
       || fail "P1 dry-run: $_b dry run writes into the real round cache (budget + handback poisoning)"
     grep -qF 'spawn no fixer' "$_b" || fail "P1 dry-run: $_b still dispatches fixers (they commit) on a dry run"
     # Executed: the wrapper skips under HARNESS_DRY_RUN=1 and runs otherwise.
-    fn "$_b" mut > "$T/mut.sh"
+    fn "$_b" mut > "$T/mut.sh"; fn "$_b" ci_required_gate > "$T/ci.sh"
     _m="$T/mutx"; rm -rf "$_m"; mkdir -p "$_m"
     ( . "$T/mut.sh"; HARNESS_DRY_RUN=1; mut touch "$_m/dry" ) 2>/dev/null
     [ -e "$_m/dry" ] && fail "P1 dry-run: $_b mut ran a mutation under HARNESS_DRY_RUN=1"
@@ -169,7 +188,7 @@ PY
   # Executed: the merge block on a dry run merges NOTHING; on a real run it merges.
   if have_jq; then
     for _b in $BODIES; do
-      fn "$_b" mut > "$T/mut.sh"
+      fn "$_b" mut > "$T/mut.sh"; fn "$_b" ci_required_gate > "$T/ci.sh"
       block "$_b" '--match-head-commit "$reviewed_head"' > "$T/merge.sh" || fail "setup: no merge block in $_b"
       _e="$T/mg-dry"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       run_block "$_e" "$T/merge.sh" 'merge_ok=1; HARNESS_DRY_RUN=1'
@@ -226,7 +245,107 @@ test_resume_skips_completed_fixers() {
   pass "P2 resume: completed fixes (note or post-review commit) are skipped, acted rows are not duplicated (all bodies)"
 }
 
+# ══ P1 (E99-F171) — required CI gates BOTH terminal paths ══════════════════════════
+test_required_ci_gates_terminal_paths() {
+  have_jq || { skip "required_ci_gates_terminal_paths (jq not installed)"; return 0; }
+  for _b in $BODIES; do
+    fn "$_b" mut > "$T/mut.sh"; fn "$_b" ci_required_gate > "$T/ci.sh"
+    grep -qF 'ci_required_gate() {' "$T/ci.sh" || fail "CI: $_b has no ci_required_gate helper"
+    grep -qF 'gh pr checks "$pr_number" --required' "$T/ci.sh" \
+      || fail "CI: $_b helper does not read the REQUIRED checks"
+    grep -qF 'and go to step 6' "$_b" \
+      && fail "CI: $_b step 5 still routes a merge verdict to step 6 (which it skips)"
+    block "$_b" 'echo handback > "$round_dir/disposed"' > "$T/hb.sh" || fail "setup: no hand-back block in $_b"
+    block "$_b" '--match-head-commit "$reviewed_head"' > "$T/merge.sh" || fail "setup: no merge block in $_b"
+    # Static ordering: the gate precedes the green post / marker, and every merge call.
+    python3 - "$T/hb.sh" "$T/merge.sh" <<'PY' || fail "CI: $_b claims or merges before the required-CI gate"
+import sys
+hb = open(sys.argv[1]).read(); mg = open(sys.argv[2]).read()
+g = hb.index('ci_required_gate')
+assert g < hb.index('handover-summary.md') and g < hb.index('echo handback >')
+assert mg.index('ci_required_gate') < mg.index('mut gh pr merge')
+PY
+    # ── helper semantics ─────────────────────────────────────────────────────────
+    for _case in "pass:0" "none:0" "fail:1" "pending:1" "pending
+pending
+pass:0"; do
+      _modes="${_case%:*}"; _want="${_case##*:}"
+      _e="$T/ci-fn"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      printf '%s\n' "$_modes" > "$_e/ci"
+      _got=0
+      ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=3 \
+          sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>/dev/null || _got=$?
+      [ "$_got" = "$_want" ] \
+        || fail "CI: $_b ci_required_gate on '$(echo $_modes)' returned $_got, want $_want"
+    done
+    # Pending forever is bounded by the ceiling, not an unbounded wait.
+    _e="$T/ci-ceil"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    echo pending > "$_e/ci"
+    ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=2 \
+        sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>"$_e/err" && fail "CI: $_b pending CI passed the gate"
+    _polls="$(grep -c 'pr checks' "$_e/gh.log")"
+    [ "$_polls" -ge 2 ] && [ "$_polls" -le 4 ] \
+      || fail "CI: $_b pending CI polled $_polls times under a 2s ceiling (want a bounded re-poll)"
+    grep -q 'still pending after 2s' "$_e/err" || fail "CI: $_b pending-at-ceiling is not reported"
+
+    # ── hand-back (auto_merge:false) ────────────────────────────────────────────
+    for _mode in fail pending; do
+      _e="$T/hb-ci-$_mode"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      echo "$_mode" > "$_e/ci"
+      run_block "$_e" "$T/hb.sh" ''
+      grep -q 'pr comment' "$_e/gh.log" \
+        && fail "CI: $_b hand-back posted 'all gates green' with required CI $_mode"
+      [ -e "$_e/round/disposed" ] \
+        && fail "CI: $_b hand-back wrote disposed=$(cat "$_e/round/disposed") with required CI $_mode (must stay re-enterable)"
+      grep -q 'add-label needs-human' "$_e/gh.log" \
+        || fail "CI: $_b hand-back with required CI $_mode is not routed to needs-human"
+      [ "$(cut -d' ' -f2 "$_e/result")" = 0 ] || fail "CI: $_b hand-back with required CI $_mode did not return failure"
+    done
+    # Required CI green after a pending poll → the hand-back completes.
+    _e="$T/hb-ci-late"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    printf 'pending\npass\n' > "$_e/ci"
+    run_block "$_e" "$T/hb.sh" ''
+    [ "$(cat "$_e/round/disposed" 2>/dev/null)" = handback ] \
+      || fail "CI: $_b hand-back did not complete once required CI turned green"
+    # A repo with NO required checks is not blocked.
+    _e="$T/hb-ci-none"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    echo none > "$_e/ci"
+    run_block "$_e" "$T/hb.sh" ''
+    [ "$(cat "$_e/round/disposed" 2>/dev/null)" = handback ] \
+      || fail "CI: $_b hand-back blocked on a repo that requires no checks"
+    # Dry run with red CI: labels nothing, posts nothing, marks nothing.
+    _e="$T/hb-ci-dry"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    echo fail > "$_e/ci"
+    run_block "$_e" "$T/hb.sh" 'HARNESS_DRY_RUN=1'
+    grep -q 'pr comment\|pr edit' "$_e/gh.log" && fail "CI: $_b dry-run red-CI hand-back mutated the PR"
+    [ -e "$_e/round/disposed" ] && fail "CI: $_b dry-run red-CI hand-back wrote a marker"
+
+    # ── auto-merge ───────────────────────────────────────────────────────────────
+    for _mode in fail pending; do
+      _e="$T/mg-ci-$_mode"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      echo "$_mode" > "$_e/ci"
+      run_block "$_e" "$T/merge.sh" 'merge_ok=1'
+      grep -q 'pr merge' "$_e/gh.log" && fail "CI: $_b auto-merged with required CI $_mode"
+      [ "$(cut -d' ' -f1 "$_e/result")" = 1 ] && fail "CI: $_b reached merged=1 with required CI $_mode"
+      [ -e "$_e/round/disposed" ] && fail "CI: $_b red-CI merge refusal wrote a disposed marker"
+      grep -q 'add-label needs-human' "$_e/gh.log" \
+        || fail "CI: $_b merge refused on required CI $_mode is not routed to needs-human"
+    done
+    _e="$T/mg-ci-dry"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    echo fail > "$_e/ci"
+    run_block "$_e" "$T/merge.sh" 'merge_ok=1; HARNESS_DRY_RUN=1'
+    grep -q 'would merge' "$_e/err" && fail "CI: $_b dry run claims it would merge over red required CI"
+    grep -q 'pr edit\|pr merge' "$_e/gh.log" && fail "CI: $_b dry-run red-CI merge mutated the PR"
+    _e="$T/mg-ci-pass"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    printf 'pending\npass\n' > "$_e/ci"
+    run_block "$_e" "$T/merge.sh" 'merge_ok=1'
+    grep -q 'pr merge' "$_e/gh.log" || fail "CI: $_b never merged once required CI turned green"
+  done
+  pass "P1 required CI: hand-back and auto-merge wait on required checks; red/pending-at-ceiling ⇒ needs-human, no green post, no marker, no merge (all bodies)"
+}
+
 test_handback_revalidates_head
+test_required_ci_gates_terminal_paths
 test_dry_run_suppresses_every_mutation
 test_resume_skips_completed_fixers
 echo "All pr-loop hardening tests passed."
