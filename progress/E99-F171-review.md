@@ -16,3 +16,18 @@
   - ceiling check removed: killed (the run hung, caught by timeout 124/143)
 
 Non-blocking nit: removing the ceiling makes the test time out rather than fail cleanly. It is still detected.
+
+## Round 2 (3161b38) — APPROVE
+
+- `./init.sh` exits 0. `tests/test_pr_loop_hardening.sh` passes under both sh and dash.
+- The diff `f1dcda0..3161b38` classifies by `--json name,bucket`, so a `cancel` bucket counts as red even though gh exits 0. It reads base-branch required contexts from classic protection and from rulesets on every poll. A missing required context counts as pending. An empty rollup is green only when the configuration read succeeded (`known=1`) and came back empty. Unreadable configuration or an unreadable rollup fails closed. `skipping` counts as pass.
+- I applied each mutant in a scratch copy via the installer and `--self`. Each one made the suite fail:
+  - drop the `cancel` clause: killed
+  - return 0 on `ok` without `known=1`: killed
+  - treat empty as green without `known=1`: killed
+  - ignore `$miss`: killed
+  - ignore `$pend`: killed
+  - count `skipping` as pending: killed
+  - ruleset source replaced with an empty string: killed
+  - classic source replaced with an empty string: killed
+- Nit, non-blocking: the gh stub returns pre-filtered output and ignores `--jq`. The two `gh api` jq filters are therefore not exercised by the suite. I checked them by hand against sample JSON, and they behave correctly: contexts are extracted, a missing `protection` yields nothing, and the ruleset context is extracted. A typo in either filter would not be caught by the tests.
