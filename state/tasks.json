@@ -1097,11 +1097,26 @@
           "id": "E99-F170",
           "title": "Harden /sdd-pr-loop hand-back head check, dry-run mutations and fixer resume",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "37752607d695db27e46e881fc48e6b85461a1d2f", "ref": "37752607d695db27e46e881fc48e6b85461a1d2f", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "37752607d695db27e46e881fc48e6b85461a1d2f",
+            "ref": "37752607d695db27e46e881fc48e6b85461a1d2f",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F170-pr-loop-handback-dryrun-resume/"
+        },
+        {
+          "id": "E99-F171",
+          "title": "Gate /sdd-pr-loop hand-back and auto-merge on required CI",
+          "status": "in-progress",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F171-pr-loop-required-ci-gate/"
         }
       ]
     },
