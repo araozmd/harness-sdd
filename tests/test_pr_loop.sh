@@ -1723,10 +1723,14 @@ gh() {
   [ "${GH_MODE:-fail}" = "fail" ] || return 0     # ok: a PR with zero unresolved threads
   echo "gh: HTTP 502 Bad Gateway" >&2; return 1   # transient enumeration failure
 }
+# The snippet routes mutations through the runbook's own dry-run wrapper (E99-F170).
+. "${SNIPPET%/*}/mut.sh"
 owner=o; repo=r; pr_number=1
 . "$SNIPPET"
 echo "merge_ok=${merge_ok:-unset}"
 SH
+  awk '$0 == "mut() {" { p = 1 } p { print } p && /^\}$/ { exit }' "$BODY" > "$_fe/mut.sh"
+  grep -qF 'mut() {' "$_fe/mut.sh" || fail "R42: could not extract the mut wrapper from the body"
   for _opt in '' '-e'; do
     GH_LOG="$_fe/calls" GH_MODE=fail SNIPPET="$_fe/snippet.sh" \
       sh $_opt -u "$_fe/harness.sh" > "$_fe/out" 2>"$_fe/err" \
@@ -1782,10 +1786,14 @@ gh() {
     *) printf 'true T_codex_1\ntrue T_codex_2\n' ;; # the enumeration: two Codex-only threads
   esac
 }
+# The snippet routes mutations through the runbook's own dry-run wrapper (E99-F170).
+. "${SNIPPET%/*}/mut.sh"
 owner=o; repo=r; pr_number=1
 . "$SNIPPET"
 echo "merge_ok=${merge_ok:-unset}"
 SH
+  awk '$0 == "mut() {" { p = 1 } p { print } p && /^\}$/ { exit }' "$BODY" > "$_fr/mut.sh"
+  grep -qF 'mut() {' "$_fr/mut.sh" || fail "R42: could not extract the mut wrapper from the body"
   for _opt in '' '-e'; do
     RESOLVE_MODE=fail GH_LOG="$_fr/calls" SNIPPET="$_fr/snippet.sh" \
       sh $_opt -u "$_fr/harness.sh" > "$_fr/out" 2>"$_fr/err" \
@@ -1913,7 +1921,11 @@ test_body_handover_summary() {                        # R46
 test_body_dry_run() {                                 # R47
   need_body "R47: body does not honor HARNESS_DRY_RUN" 'HARNESS_DRY_RUN=1'
   need_body "R47: body does not skip the real post under dry run" \
-    'skip the real `gh pr comment` post'
+    'skips the real `gh pr comment` post'
+  # E99-F170: the trigger is the FIRST mutation a dry run suppresses, not the only one —
+  # tests/test_pr_loop_hardening.sh executes the wrapper and sweeps every code block.
+  need_body "R47: body does not suppress EVERY mutation on a dry run" \
+    'Dry run — EVERY mutation is suppressed'
   need_body "R47: body does not synthesize stub review data" 'synthesize'
   pass "R47 HARNESS_DRY_RUN=1 skips the real comment post and synthesizes stub data"
 }
