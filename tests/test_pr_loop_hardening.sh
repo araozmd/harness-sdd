@@ -79,13 +79,35 @@ case "\$*" in
   *"--json baseRefName"*|*"defaultBranchRef"*) echo main ;;
   *"pr comment"*) echo "https://github.com/o/r/pull/7#issuecomment-1" ;;
   *"/rules/branches/"*)
-    # Rulesets' required contexts (already --jq-filtered). Absent \$_e/req_rules ⇒ none.
+    # Raw ruleset JSON: \$_e/req_rules lists required_status_checks contexts and
+    # \$_e/req_wf lists required workflows ("<repository_id> <path>"); absent ⇒ none.
     [ -e "$_e/api_fail" ] && exit 1
-    [ -f "$_e/req_rules" ] && cat "$_e/req_rules" ;;
+    _rc="\$(sed 's/.*/{"context":"&"}/' "$_e/req_rules" 2>/dev/null | paste -sd, -)"
+    _rw="\$(awk '{printf "%s{\\"repository_id\\":%s,\\"path\\":\\"%s\\"}", (NR>1?",":""), \$1, \$2}' "$_e/req_wf" 2>/dev/null)"
+    printf '[{"type":"deletion","parameters":null}'
+    [ -n "\$_rc" ] && printf ',{"type":"required_status_checks","parameters":{"required_status_checks":[%s]}}' "\$_rc"
+    [ -n "\$_rw" ] && printf ',{"type":"workflows","parameters":{"workflows":[%s]}}' "\$_rw"
+    printf ']\n' ;;
+  *"actions/workflows"*)
+    # Workflow path → name resolution; \$_e/wf_name absent ⇒ unresolvable.
+    [ -e "$_e/api_fail" ] && exit 1
+    if [ -f "$_e/wf_name" ]; then
+      printf '{"workflows":[{"path":"%s","name":"%s"}]}\n' "\$(cut -d' ' -f2 "$_e/req_wf")" "\$(cat "$_e/wf_name")"
+    else echo '{"workflows":[]}'; fi ;;
   *"api repos/"*"/branches/"*)
-    # Classic protection's required contexts. Absent \$_e/req ⇒ "build"; empty ⇒ none.
+    # Raw branch JSON with classic protection contexts. Absent \$_e/req ⇒ "build"; empty ⇒ none.
     [ -e "$_e/api_fail" ] && exit 1
-    if [ -f "$_e/req" ]; then cat "$_e/req"; else echo build; fi ;;
+    if [ -f "$_e/req" ]; then _c="\$(sed 's/.*/"&"/' "$_e/req" | paste -sd, -)"; else _c='"build"'; fi
+    printf '{"protected":true,"protection":{"required_status_checks":{"contexts":[%s]}}}\n' "\$_c" ;;
+  *"pr checks"*"--json name,bucket,workflow"*)
+    # ALL checks (required-workflow matching), scripted by \$_e/ci_all: wfpass / wfpending
+    # / wffail / wfnone (gh's "no checks reported"). Absent ⇒ wfpass.
+    case "\$(cat "$_e/ci_all" 2>/dev/null || echo wfpass)" in
+      wfpass)    echo '[{"name":"org","bucket":"pass","workflow":"Org CI"}]' ;;
+      wfpending) echo '[{"name":"org","bucket":"pending","workflow":"Org CI"}]'; exit 8 ;;
+      wffail)    echo '[{"name":"org","bucket":"fail","workflow":"Org CI"}]'; exit 1 ;;
+      wfnone)    echo "no checks reported on the 'feat' branch" >&2; exit 1 ;;
+    esac ;;
   *"pr checks"*)
     # Required-CI answer, scripted by \$_e/ci (one mode per line, consumed in order; the
     # last line repeats). Absent ⇒ pass. Shapes mirror gh --json name,bucket; "none" is
@@ -301,6 +323,20 @@ PY
     ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=1 \
         sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>/dev/null \
       && fail "CI: $_b passed an empty rollup although a ruleset requires 'build'"
+    # A required WORKFLOW (ruleset `workflows` rule) is waited on by workflow name.
+    #   <ci_all mode>:<wf_name resolvable? y/n>:<rc>  — required rollup empty ("none").
+    for _case in "wfnone:y:1" "wfpending:y:1" "wffail:y:1" "wfpass:y:0" "wfpass:n:1"; do
+      _wm="${_case%%:*}"; _rest="${_case#*:}"; _res="${_rest%%:*}"; _want="${_rest##*:}"
+      _e="$T/ci-wf"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      : > "$_e/req"; echo none > "$_e/ci"; echo "$_wm" > "$_e/ci_all"
+      echo "42 .github/workflows/org-ci.yml" > "$_e/req_wf"
+      [ "$_res" = y ] && echo "Org CI" > "$_e/wf_name"
+      _got=0
+      ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=1 \
+          sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>/dev/null || _got=$?
+      [ "$_got" = "$_want" ] \
+        || fail "CI: $_b required workflow ($_wm, resolvable=$_res) returned $_got, want $_want"
+    done
     # Pending forever is bounded by the ceiling, not an unbounded wait.
     _e="$T/ci-ceil"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     echo pending > "$_e/ci"
