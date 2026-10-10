@@ -7110,11 +7110,12 @@ elif ! sh .harness/tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number
   echo "sdd-pr-loop: merge refused — head moved since the reviewed round (unreviewed commits) — needs-human" >&2
   mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
   [ "${HARNESS_DRY_RUN:-0}" = "1" ] || echo stale > "$round_dir/disposed"   # next run re-reviews
-elif [ "${HARNESS_DRY_RUN:-0}" = "1" ]; then
-  # Dry run (E99-F170): every receipt above held — say what WOULD merge, merge nothing.
-  echo "sdd-pr-loop: DRY-RUN — would merge PR #$pr_number at $reviewed_head (${merge_strategy:-merge}); merge_ok=${merge_ok:-0}" >&2
 elif [ "${merge_ok:-0}" != "1" ]; then
   echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
+elif [ "${HARNESS_DRY_RUN:-0}" = "1" ]; then
+  # Dry run (E99-F170): EVERY gate above held, thread eligibility included — say what
+  # WOULD merge, merge nothing. A dry run must reach the disposition a live run would.
+  echo "sdd-pr-loop: DRY-RUN — would merge PR #$pr_number at $reviewed_head (${merge_strategy:-merge})" >&2
 elif [ "${merge_strategy:-merge}" = "squash" ]; then
   msg="$pr_cache/squash-message.txt"
   if [ -s "$msg" ]; then

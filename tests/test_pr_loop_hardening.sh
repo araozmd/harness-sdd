@@ -179,6 +179,12 @@ PY
         && fail "P1 dry-run: $_b reached merged=1 on a dry run — the merge path ran instead of stopping"
       grep -q 'DRY-RUN — would merge' "$_e/err" \
         || fail "P1 dry-run: $_b dry run does not say what it would have merged"
+      # A dry run with a human/unreadable thread (merge_ok=0) must report the disposition a
+      # live run reaches — needs-human — never "would merge" (#4239219016).
+      _e="$T/mg-dry-held"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      run_block "$_e" "$T/merge.sh" 'merge_ok=0; HARNESS_DRY_RUN=1'
+      grep -q 'would merge' "$_e/err" && fail "P1 dry-run: $_b claims a dry-run merge although merge_ok=0"
+      grep -q 'needs-human, not merging' "$_e/err" || fail "P1 dry-run: $_b dry run with merge_ok=0 does not report needs-human"
       _e="$T/mg-real"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       run_block "$_e" "$T/merge.sh" 'merge_ok=1; HARNESS_DRY_RUN=0'
       grep -q 'pr merge' "$_e/gh.log" || fail "P1 dry-run: $_b real-run merge block never merged (wrapper broke the live path)"
