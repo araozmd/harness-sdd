@@ -125,6 +125,11 @@ PY
     grep -q 'pr comment' "$_e/gh.log" || fail "P1: $_b unchanged-head hand-back never posted its summary"
     [ "$(cat "$_e/round/disposed" 2>/dev/null)" = handback ] \
       || fail "P1: $_b unchanged-head hand-back did not record its terminal marker"
+    # Executed: a DRY-RUN hand-back posts nothing and leaves no marker behind.
+    _e="$T/hb-dry"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    run_block "$_e" "$T/hb.sh" 'HARNESS_DRY_RUN=1'
+    grep -q 'pr comment' "$_e/gh.log" && fail "P1: $_b dry-run hand-back posted the green summary"
+    [ -e "$_e/round/disposed" ] && fail "P1: $_b dry-run hand-back wrote a disposed marker"
   done
   pass "P1 hand-back: reviewed-head receipt before the green post and the marker; a moved head is refused (all bodies)"
 }
