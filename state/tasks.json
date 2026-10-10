@@ -1096,7 +1096,8 @@
         {
           "id": "E99-F170",
           "title": "Harden /sdd-pr-loop hand-back head check, dry-run mutations and fixer resume",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "37752607d695db27e46e881fc48e6b85461a1d2f", "ref": "37752607d695db27e46e881fc48e6b85461a1d2f", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
