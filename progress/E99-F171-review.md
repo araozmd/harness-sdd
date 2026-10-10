@@ -31,3 +31,21 @@ Non-blocking nit: removing the ceiling makes the test time out rather than fail 
   - ruleset source replaced with an empty string: killed
   - classic source replaced with an empty string: killed
 - Nit, non-blocking: the gh stub returns pre-filtered output and ignores `--jq`. The two `gh api` jq filters are therefore not exercised by the suite. I checked them by hand against sample JSON, and they behave correctly: contexts are extracted, a missing `protection` yields nothing, and the ruleset context is extracted. A typo in either filter would not be caught by the tests.
+
+## Round 3 (80ee692) — APPROVE
+
+- `./init.sh` exits 0. `tests/test_pr_loop_hardening.sh` passes under both sh and dash.
+- The diff `2d46bd0..80ee692` makes the gate fetch raw branch and rules JSON and parse them locally with jq, so the stub now exercises the filters. Each ruleset `workflows` entry (repository_id + path) is resolved through `repositories/<id>/actions/workflows` to a workflow name. An entry that cannot be resolved sets `known=0`, so the gate is never green. Runs of each required workflow are matched by name across ALL PR checks: no runs yet is pending, and fail or cancel is red. A required workflow with all runs passing returns green.
+- I applied each mutant in a scratch copy via the installer and `--self`, one at a time:
+  - drop workflow matching: killed
+  - treat an unresolvable workflow as known: killed
+  - drop `$wfc` from `$bad`: killed
+  - drop `$wfc` from `$pend`: killed
+  - drop the workflow term from `$miss`: killed
+  - classic protection filter pointed at a wrong path: killed
+  - `workflows` rule filter pointed at a wrong path: killed
+  - ruleset `required_status_checks` filter pointed at a wrong path (`.parameters.contexts[]`): SURVIVED
+  - `"ok"` condition no longer counting required workflows: survived
+- The ruleset-path survivor is fail-closed. jq errors on null, so `known=0` and the gate is never green; the mutant is safe, only less useful. The suite lacks the positive case that pins it: a ruleset requires 'build', build passes, and the gate returns 0. I recommend adding it. It is non-blocking.
+- The `"ok"` survivor is equivalent. `ok` and `empty` both return 0 when `known=1`, and both wait when `known=0`.
+- Nit: workflow and rules lookups use `per_page=100` with no pagination. Beyond 100 they fail closed.

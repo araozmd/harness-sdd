@@ -323,6 +323,11 @@ PY
     ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=1 \
         sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>/dev/null \
       && fail "CI: $_b passed an empty rollup although a ruleset requires 'build'"
+    _e="$T/ci-rules-ok"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    : > "$_e/req"; echo build > "$_e/req_rules"; echo pass > "$_e/ci"
+    ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=1 \
+        sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>/dev/null \
+      || fail "CI: $_b ruleset-required 'build' passed but the gate is not green (ruleset filter broken)"
     # A required WORKFLOW (ruleset `workflows` rule) is waited on by workflow name.
     #   <ci_all mode>:<wf_name resolvable? y/n>:<rc>  — required rollup empty ("none").
     for _case in "wfnone:y:1" "wfpending:y:1" "wffail:y:1" "wfpass:y:0" "wfpass:n:1"; do
