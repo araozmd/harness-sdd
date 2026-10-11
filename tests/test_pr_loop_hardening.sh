@@ -448,11 +448,19 @@ PY
       grep -q 'add-label needs-human' "$_e/gh.log" \
         || fail "CI: $_b post-CI thread refusal ($_th) is not routed to needs-human"
     done
-    # Codex-only threads (still unresolved on a dry run) do not block.
+    # A Codex thread the pre-wait enumeration already vetted (still unresolved on a dry
+    # run) does not block…
     _e="$T/mg-thr-codex"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     echo "true PRRT_codex" > "$_e/threads"
-    run_block "$_e" "$T/merge.sh" 'merge_ok=1'
-    grep -q 'pr merge' "$_e/gh.log" || fail "CI: $_b a Codex-only thread blocked the merge after the CI wait"
+    run_block "$_e" "$T/merge.sh" 'merge_ok=1; unresolved="true PRRT_codex"'
+    grep -q 'pr merge' "$_e/gh.log" || fail "CI: $_b an already-vetted Codex thread blocked the merge after the CI wait"
+    # …but a Codex thread that ARRIVED during the wait is unreviewed input: it blocks.
+    _e="$T/mg-thr-late"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    printf 'true PRRT_codex\ntrue PRRT_late\n' > "$_e/threads"
+    run_block "$_e" "$T/merge.sh" 'merge_ok=1; unresolved="true PRRT_codex"'
+    grep -q 'pr merge' "$_e/gh.log" && fail "CI: $_b merged over a Codex thread that arrived during the CI wait"
+    grep -q 'add-label needs-human' "$_e/gh.log" \
+      || fail "CI: $_b a late Codex thread is not routed to needs-human"
     _e="$T/mg-ci-pass"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     printf 'pending\npass\n' > "$_e/ci"
     run_block "$_e" "$T/merge.sh" 'merge_ok=1'

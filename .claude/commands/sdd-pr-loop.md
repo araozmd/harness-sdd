@@ -1164,11 +1164,16 @@ elif ! ci_required_gate; then
   # A push during the wait cannot slip through: --match-head-commit pins the merge below.
   echo "sdd-pr-loop: merge refused — required CI is not green — needs-human" >&2
   mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-elif ! _ts_after="$(thread_scan)" || printf '%s\n' "$_ts_after" | grep -q '^false '; then
-  # The CI wait can last up to the ceiling, and a human can open or answer a thread in
-  # it without moving the head (--match-head-commit cannot see that). Re-read the
-  # threads: anything not provably Codex-only — or an enumeration that failed — blocks.
-  echo "sdd-pr-loop: merge refused — a non-Codex review thread appeared (or threads were unreadable) during the CI wait — needs-human" >&2
+elif ! _ts_after="$(thread_scan)" \
+     || printf '%s\n' "$_ts_after" | grep -v '^$' | grep -qvxF -e "${unresolved:-}"; then
+  # The CI wait can last up to the ceiling, and threads can change in it without moving
+  # the head (--match-head-commit cannot see that): a human may open or answer one, and
+  # Codex may post a LATE finding that never went through classify or the gate. So the
+  # only unresolved threads allowed now are the exact `true <id>` lines the pre-wait
+  # enumeration already vetted (they remain only on a dry run, whose resolves are
+  # skipped). Anything new or changed — or a rescan that failed — blocks; the next run
+  # reviews it properly.
+  echo "sdd-pr-loop: merge refused — review threads changed (or were unreadable) during the CI wait — needs-human" >&2
   mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
 elif [ "${HARNESS_DRY_RUN:-0}" = "1" ]; then
   # Dry run (E99-F170): EVERY gate above held, thread eligibility included — say what
