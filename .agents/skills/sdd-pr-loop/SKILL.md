@@ -1094,15 +1094,33 @@ terminal marker would then short-circuit the next invocation as already done.
 # auto_merge:false hand-back — the receipt and required CI FIRST, then the claim, then
 # the marker. The receipt runs again after the CI wait: a push during it would otherwise
 # be handed back as green on checks that ran against a different head.
+#
+# The CI wait can last up to the ceiling, and review input can change in it WITHOUT moving
+# the head: Codex may post a late finding, a resolved thread may be reopened, a thread may
+# gain a reply. So the threads are snapshotted before the wait and compared after it; any
+# thread that is new or changed is unreviewed input — refuse rather than call it green.
 hb_refused=""
 if ! sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" pre; then
   hb_refused=stale
+elif ! _hb_thr_pre="$(thread_scan)"; then
+  hb_refused=threads
 elif ! ci_required_gate; then
   hb_refused=ci
 elif ! sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" pre; then
   hb_refused=stale
+elif ! _hb_thr_post="$(thread_scan)" \
+     || printf '%s\n' "$_hb_thr_post" | grep -v '^$' | grep -qvxF -e "$_hb_thr_pre"; then
+  hb_refused=threads
 fi
-if [ "$hb_refused" = ci ]; then
+if [ "$hb_refused" = threads ]; then
+  # Review threads unreadable, or changed during the CI wait: no green summary. `stale`
+  # makes the next invocation run a FRESH review round, so the late input is classified
+  # instead of being skipped by a re-entry on this round's cached (older) review.
+  echo "sdd-pr-loop: hand-back refused — review threads changed (or were unreadable) during the CI wait — needs-human" >&2
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  [ "${HARNESS_DRY_RUN:-0}" = "1" ] || echo stale > "$round_dir/disposed"
+  handback_ok=0      # take the needs-human terminal state and return failure
+elif [ "$hb_refused" = ci ]; then
   # Required CI red, or still pending at the ceiling (E99-F171): no green summary and NO
   # marker — the round stays re-enterable so the next run re-checks CI on its cached review.
   echo "sdd-pr-loop: hand-back refused — required CI is not green — needs-human" >&2
@@ -1170,17 +1188,25 @@ elif ! ci_required_gate; then
   # A push during the wait cannot slip through: --match-head-commit pins the merge below.
   echo "sdd-pr-loop: merge refused — required CI is not green — needs-human" >&2
   mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+elif _base_after="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo '')" \
+     && [ "$_base_after" != "$default_branch" ]; then
+  # The CI wait can last up to the ceiling and --match-head-commit pins only the HEAD, so
+  # every other pre-wait verdict is re-read after it. A PR retargeted during the wait would
+  # otherwise merge into the new base and delete its head.
+  echo "sdd-pr-loop: merge refused — base changed to '$_base_after' during the CI wait (default '$default_branch') — needs-human" >&2
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
 elif ! _ts_after="$(thread_scan)" \
-     || printf '%s\n' "$_ts_after" | grep -v '^$' | grep -qvxF -e "${unresolved:-}"; then
-  # The CI wait can last up to the ceiling, and threads can change in it without moving
-  # the head (--match-head-commit cannot see that): a human may open or answer one, and
-  # Codex may post a LATE finding that never went through classify or the gate. So the
-  # only unresolved threads allowed now are the exact `true <id>` lines the pre-wait
-  # enumeration already vetted (they remain only on a dry run, whose resolves are
-  # skipped). Anything new or changed — or a rescan that failed — blocks; the next run
-  # reviews it properly.
+     || printf '%s\n' "$_ts_after" | grep -v '^$' \
+        | grep -qvxF -e "$([ "${HARNESS_DRY_RUN:-0}" = "1" ] && printf '%s' "${unresolved:-}")"; then
+  # Threads can change during the wait without moving the head: a human may open or
+  # answer one, Codex may post a LATE finding that never went through classify or the
+  # gate, a resolved thread may be reopened. A live run resolved every vetted Codex thread
+  # above, so NOTHING may be unresolved now; a dry run (resolves skipped) allows exactly
+  # the vetted lines. Anything else — or a rescan that failed — blocks, and `stale` makes
+  # the next run review it in a fresh round instead of re-entering this one.
   echo "sdd-pr-loop: merge refused — review threads changed (or were unreadable) during the CI wait — needs-human" >&2
   mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+  [ "${HARNESS_DRY_RUN:-0}" = "1" ] || echo stale > "$round_dir/disposed"
 elif [ "${HARNESS_DRY_RUN:-0}" = "1" ]; then
   # Dry run (E99-F170): EVERY gate above held, thread eligibility included — say what
   # WOULD merge, merge nothing. A dry run must reach the disposition a live run would.

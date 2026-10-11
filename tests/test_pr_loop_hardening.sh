@@ -104,6 +104,9 @@ case "\$*" in
     if [ -f "$_e/req" ]; then _c="\$(sed 's/.*/"&"/' "$_e/req" | paste -sd, -)"; else _c='"build"'; fi
     printf '{"protected":true,"protection":{"required_status_checks":{"contexts":[%s]}}}\n' "\$_c" ;;
   *"pr checks"*)
+    # Anything staged as *_next lands the moment CI is read — i.e. DURING the CI wait.
+    [ -f "$_e/base_next" ] && mv "$_e/base_next" "$_e/base"
+    [ -f "$_e/threads_next" ] && mv "$_e/threads_next" "$_e/threads"
     # Required-CI answer, scripted by \$_e/ci (one mode per line, consumed in order; the
     # last line repeats). Absent ⇒ pass. Shapes mirror gh --json name,bucket; "none" is
     # gh's empty-rollup diagnostic, and a cancelled check exits 0 exactly as gh does.
@@ -292,6 +295,7 @@ import sys
 hb = open(sys.argv[1]).read(); mg = open(sys.argv[2]).read()
 g = hb.index('ci_required_gate')
 assert g < hb.index('handover-summary.md') and g < hb.index('echo handback >')
+assert hb.index('_hb_thr_pre="$(thread_scan)"') < g < hb.index('_hb_thr_post="$(thread_scan)"') < hb.index('echo handback >')
 assert mg.index('ci_required_gate') < mg.index('mut gh pr merge')
 assert mg.index('"${merge_ok:-0}" != "1"') < mg.index('ci_required_gate')
 PY
@@ -448,12 +452,44 @@ PY
       grep -q 'add-label needs-human' "$_e/gh.log" \
         || fail "CI: $_b post-CI thread refusal ($_th) is not routed to needs-human"
     done
-    # A Codex thread the pre-wait enumeration already vetted (still unresolved on a dry
-    # run) does not block…
+    # A DRY run (resolves skipped) still sees the vetted Codex thread: it does not block…
     _e="$T/mg-thr-codex"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     echo "true PRRT_codex" > "$_e/threads"
+    run_block "$_e" "$T/merge.sh" 'merge_ok=1; unresolved="true PRRT_codex"; HARNESS_DRY_RUN=1'
+    grep -q 'would merge' "$_e/err" || fail "CI: $_b dry run blocked on its own vetted (unresolved) Codex thread"
+    # …but on a LIVE run every vetted thread was resolved, so one still/again unresolved
+    # after the wait (reopened) blocks.
+    _e="$T/mg-thr-reopen"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    echo "true PRRT_codex" > "$_e/threads"
     run_block "$_e" "$T/merge.sh" 'merge_ok=1; unresolved="true PRRT_codex"'
-    grep -q 'pr merge' "$_e/gh.log" || fail "CI: $_b an already-vetted Codex thread blocked the merge after the CI wait"
+    grep -q 'pr merge' "$_e/gh.log" && fail "CI: $_b merged over a Codex thread reopened during the CI wait"
+    [ "$(cat "$_e/round/disposed" 2>/dev/null)" = stale ] \
+      || fail "CI: $_b post-wait thread refusal does not mark the round stale for a fresh review"
+    # A PR retargeted away from the default branch DURING the wait is not merged.
+    _e="$T/mg-retarget"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    echo release > "$_e/base_next"
+    run_block "$_e" "$T/merge.sh" 'merge_ok=1'
+    grep -q 'pr merge' "$_e/gh.log" && fail "CI: $_b merged a PR retargeted during the CI wait"
+    grep -q "base changed to 'release'" "$_e/err" || fail "CI: $_b retarget during the CI wait is not reported"
+    # Hand-back: a Codex thread posted (or reopened) during the wait ⇒ no green, stale.
+    _e="$T/hb-thr-late"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    echo "true PRRT_late" > "$_e/threads_next"
+    run_block "$_e" "$T/hb.sh" ''
+    grep -q 'pr comment' "$_e/gh.log" && fail "CI: $_b hand-back posted green over a thread that arrived during the CI wait"
+    [ "$(cat "$_e/round/disposed" 2>/dev/null)" = stale ] \
+      || fail "CI: $_b hand-back thread refusal does not mark the round stale"
+    grep -q 'add-label needs-human' "$_e/gh.log" || fail "CI: $_b hand-back thread refusal is not needs-human"
+    # …while threads that did not change (e.g. a human thread handed back as feedback) pass.
+    _e="$T/hb-thr-same"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    echo "false PRRT_human" > "$_e/threads"
+    run_block "$_e" "$T/hb.sh" ''
+    [ "$(cat "$_e/round/disposed" 2>/dev/null)" = handback ] \
+      || fail "CI: $_b hand-back refused although no thread changed during the CI wait"
+    # A thread scan that fails BEFORE the wait refuses too (no green on unread input).
+    _e="$T/hb-thr-fail"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    touch "$_e/threads_fail"
+    run_block "$_e" "$T/hb.sh" ''
+    grep -q 'pr comment' "$_e/gh.log" && fail "CI: $_b hand-back posted green with unreadable threads"
     # …but a Codex thread that ARRIVED during the wait is unreviewed input: it blocks.
     _e="$T/mg-thr-late"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     printf 'true PRRT_codex\ntrue PRRT_late\n' > "$_e/threads"
