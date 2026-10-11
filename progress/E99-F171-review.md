@@ -85,3 +85,18 @@ Non-blocking nit: removing the ceiling makes the test time out rather than fail 
   - `workflow_dispatch` added to the allowed list: killed
   - `pull_request_target` dropped: SURVIVED
 - Non-blocking nit: the `pull_request_target`-only success path has no pin. Dropping it fails closed, as a false needs-human for such workflows. A case with a `pull_request_target` success run that expects green would pin it.
+
+## Round 6 (03a2fc7) — APPROVE
+
+- `./init.sh` exits 0. `tests/test_pr_loop_hardening.sh` passes under both sh and dash.
+- The diff `071a442..03a2fc7` removes all the runs-matching code. A ruleset `workflows` rule on any page of the rules returns 1 with the message "requires ruleset workflows … confirm required CI by hand — needs-human". The rules are still read with `--paginate --slurp` and flattened. Cancel, missing-is-pending and known-only-empty-green are unchanged.
+- The prose, CHANGELOG, comments and test stub are consistent, with no stale references to name, path or run matching. The self-hosted copies match what `--self` regenerates, since the scratch `--self` run left `git status` clean.
+- I applied each mutant in a scratch copy via the installer and `--self`, one at a time:
+  - fail-closed check dropped: killed
+  - workflows counted on page 1 only: killed
+  - flatten dropped: killed
+  - missing context treated as ok: killed
+  - `known` check dropped on `ok`: killed
+  - `cancel` removed from `red`: SURVIVED
+- The `cancel` survivor is equivalent for green/not-green. A cancelled check now falls into `$pend` and waits to the ceiling, so it is never green. Only the fail-fast, an immediate red, is unpinned. Non-blocking.
+- Behavioural note: any base with a ruleset `workflows` rule will always go to needs-human on both terminal paths. That is the intended trade-off, and it is documented.

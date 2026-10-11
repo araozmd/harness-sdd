@@ -306,6 +306,14 @@ PY
       [ "$_got" = "$_want" ] \
         || fail "CI: $_b ci_required_gate on '$_modes' (required: $_req) returned $_got, want $_want"
     done
+    # A CANCELLED required check is red at once, not pending until the ceiling.
+    _e="$T/ci-cancel"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    echo cancel > "$_e/ci"
+    ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=30 \
+        sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>"$_e/err" \
+      && fail "CI: $_b passed a cancelled required check"
+    grep -q 'failed or cancelled' "$_e/err" \
+      || fail "CI: $_b treats a cancelled required check as pending instead of red"
     # A context required only by a RULESET is waited on too (classic protection empty).
     _e="$T/ci-rules"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     : > "$_e/req"; echo build > "$_e/req_rules"; echo none > "$_e/ci"
