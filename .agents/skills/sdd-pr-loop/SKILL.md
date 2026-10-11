@@ -838,18 +838,19 @@ required check was **cancelled** (its `cancel` bucket is neither failed nor pend
 the verdict comes from the JSON buckets, not the exit status; and "no required checks
 reported" only means none has **started** yet. The rollup is therefore compared with what
 the base branch actually requires (classic protection contexts plus `required_status_checks`
-rulesets, plus ruleset `workflows` rules matched to the head's Actions runs by repository
-and path, every rules page read). A required workflow hosted in another repository cannot
-be matched from here and keeps the gate non-green (needs-human). A required context
-or required workflow that has not reported yet is pending, and an empty rollup is green
-only when the base provably requires nothing.
+rulesets, every rules page read). A required context that has not reported yet is
+pending, and an empty rollup is green only when the base provably requires nothing. A
+base governed by a ruleset `workflows` rule (required workflows) is never declared green
+here: the rollup does not carry the repository/path/revision/event identity such a rule
+pins, so the loop hands that confirmation to a human (needs-human) instead of guessing.
 
 ```bash
 # ci_required_gate — wait for the PR's REQUIRED checks. 0 = every required check passed
 # (`skipping` counts, as GitHub counts it), or the base branch provably requires none.
-# 1 = a required check failed or was CANCELLED, a required check or required workflow was
-# still pending or not yet reported at HARNESS_POLL_CEILING, or gh could not read them.
-# Never green on 1. Needs gh >= 2.48 (`--slurp`); an older gh reads as "unknown".
+# 1 = a required check failed or was CANCELLED, a required check was still pending or not
+# yet reported at HARNESS_POLL_CEILING, the base requires ruleset WORKFLOWS (which this
+# loop cannot verify), or gh could not read the checks or the configuration. Never green
+# on 1. Needs gh >= 2.48 (`--slurp`); an older gh reads as "unknown".
 ci_required_gate() {
   _ci_iv="${HARNESS_POLL_INTERVAL:-60}"; _ci_ceil="${HARNESS_POLL_CEILING:-900}"
   case "$_ci_iv" in ''|*[!0-9]*|0) _ci_iv=60 ;; esac
@@ -857,11 +858,10 @@ ci_required_gate() {
   _ci_waited=0; _ci_why=""
   while :; do
     # The rollup lists only checks that have STARTED, so "no required checks reported"
-    # can mean "none configured" OR "the required workflow has not registered yet". Read
+    # can mean "none configured" OR "the required check has not registered yet". Read
     # what the BASE branch requires every poll: classic protection contexts plus EVERY
-    # page of the active rules (`required_status_checks` contexts and `workflows`
-    # rules). Anything unreadable or incomplete is "unknown", and unknown is never green.
-    _ci_known=0; _ci_want=""; _ci_wfr=""
+    # page of the active rules. Anything unreadable is "unknown", never green.
+    _ci_known=0; _ci_want=""; _ci_wfn=0
     _ci_base="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo '')"
     if [ -n "$_ci_base" ] \
        && _ci_bpj="$(gh api "repos/{owner}/{repo}/branches/$_ci_base" 2>/dev/null)" \
@@ -872,30 +872,19 @@ ci_required_gate() {
             && printf '%s' "$_ci_rsj" \
               | jq -r '.[] | select(.type == "required_status_checks")
                        | .parameters.required_status_checks[].context'; } 2>/dev/null)" \
-       && _ci_wfr="$(printf '%s' "$_ci_rsj" | jq -c '[.[] | select(.type == "workflows")
-              | .parameters.workflows[] | {repository_id, path}]' 2>/dev/null)"; then
+       && _ci_wfn="$(printf '%s' "$_ci_rsj" | jq '[.[] | select(.type == "workflows")] | length' 2>/dev/null)"; then
       _ci_known=1
       _ci_want="$(printf '%s\n' "$_ci_want" | sed '/^$/d' | sort -u)"
     fi
-    # A required WORKFLOW is identified by (repository_id, path), never by display name —
-    # an unrelated workflow may share the name. Its runs are matched on the PR head by
-    # that identity; a rule pointing at ANOTHER repository cannot be matched from here,
-    # so it makes the configuration unknown (fail closed: needs-human at the ceiling).
-    _ci_runs='[]'
-    if [ "$_ci_known" = 1 ] && [ "$_ci_wfr" != '[]' ]; then
-      _ci_rid="$(gh api "repos/{owner}/{repo}" --jq '.id' 2>/dev/null || echo '')"
-      _ci_head="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo '')"
-      if [ -z "$_ci_rid" ] || [ -z "$_ci_head" ] \
-         || [ "$(printf '%s' "$_ci_wfr" | jq --arg r "$_ci_rid" \
-                 'all(.[]; (.repository_id | tostring) == $r)' 2>/dev/null)" != true ] \
-         || ! _ci_runs="$(gh api --paginate --slurp \
-                 "repos/{owner}/{repo}/actions/runs?head_sha=$_ci_head&per_page=100" 2>/dev/null \
-               | jq -c '[.[] | .workflow_runs[]? | {path, event, status, conclusion, created_at}]' 2>/dev/null)" \
-         || [ -z "$_ci_runs" ]; then
-        _ci_known=0; _ci_runs='[]'
-      fi
+    # A ruleset `workflows` rule (required workflows) is pinned by repository, path and
+    # revision and satisfied only by particular events and contexts. The checks rollup
+    # carries none of that identity, so this loop cannot prove such a rule satisfied —
+    # and a guess is exactly the false green this gate exists to prevent. Fail CLOSED:
+    # a base that requires workflows always hands the CI confirmation to a human.
+    if [ "$_ci_known" = 1 ] && [ "${_ci_wfn:-0}" != 0 ]; then
+      echo "sdd-pr-loop: base '$_ci_base' requires ruleset workflows, which the loop cannot verify — confirm required CI by hand — needs-human" >&2
+      return 1
     fi
-    [ -n "$_ci_wfr" ] || _ci_wfr='[]'
     # Classify by BUCKET, not by gh's exit status: gh exits 0 with a CANCELLED required
     # check (its `cancel` bucket is neither Failed nor Pending), so the status lies there.
     _ci_out="$(gh pr checks "$pr_number" --required --json name,bucket 2>&1)" || :
@@ -909,44 +898,30 @@ ci_required_gate() {
            return 1
          fi ;;
     esac
-    # Each required workflow is decided by its LATEST run on the head (by created_at) among
-    # the events a ruleset workflow counts — pull_request, pull_request_target, merge_group;
-    # a push or workflow_dispatch run of the same file never satisfies the rule:
-    # none ⇒ not reported yet, not completed ⇒ pending, success/skipped/neutral ⇒ ok,
-    # any other conclusion (failure, cancelled, timed_out, …) ⇒ red.
-    if ! _ci_cls="$(jq -rn --argjson req "$_ci_rep" --argjson wfr "$_ci_wfr" \
-          --argjson runs "$_ci_runs" --arg want "$_ci_want" '
+    if ! _ci_cls="$(printf '%s' "$_ci_rep" | jq -r --arg want "$_ci_want" '
           def red: .bucket == "fail" or .bucket == "cancel";
           def done_ok: .bucket == "pass" or .bucket == "skipping";
           ($want | split("\n") | map(select(length > 0))) as $w
-          | [$wfr[] | .path as $p
-             | ([$runs[] | select((.path | sub("@.*$"; "")) == $p)
-                        | select(.event | IN("pull_request", "pull_request_target", "merge_group"))]
-                | sort_by(.created_at) | last) as $r
-             | if $r == null then {name: "workflow \($p)", bucket: "missing"}
-               elif $r.status != "completed" then {name: "workflow \($p)", bucket: "pending"}
-               elif ($r.conclusion | IN("success", "skipped", "neutral")) then {name: "workflow \($p)", bucket: "pass"}
-               else {name: "workflow \($p)", bucket: "fail"} end] as $wf
-          | ([$req[], $wf[]] | map(select(red) | .name) | unique) as $bad
-          | ([$req[], $wf[]] | map(select((red or done_ok or .bucket == "missing") | not) | .name) | unique) as $pend
-          | (($w - ($req | map(.name))) + [$wf[] | select(.bucket == "missing") | .name]) as $miss
+          | (map(select(red) | .name) | unique) as $bad
+          | (map(select((red or done_ok) | not) | .name) | unique) as $pend
+          | ($w - map(.name)) as $miss
           | if ($bad | length) > 0 then "bad \($bad | join(", "))"
             elif ($pend | length) > 0 then "wait pending: \($pend | join(", "))"
             elif ($miss | length) > 0 then "wait not reported yet: \($miss | join(", "))"
-            elif ($req | length) > 0 or ($wf | length) > 0 then "ok"
+            elif length > 0 then "ok"
             else "empty" end' 2>/dev/null)"; then
       echo "sdd-pr-loop: required CI unreadable on PR #$pr_number — needs-human" >&2
       return 1
     fi
     case "$_ci_cls" in
       ok) [ "$_ci_known" = 1 ] && return 0
-          _ci_why="required-check configuration of '$_ci_base' unreadable or unmatchable" ;;
+          _ci_why="required-check configuration of '$_ci_base' unreadable" ;;
       empty)
         if [ "$_ci_known" = 1 ]; then
           echo "sdd-pr-loop: base '$_ci_base' requires no checks — required-CI gate passes" >&2
           return 0
         fi
-        _ci_why="no required check reported and the configuration of '$_ci_base' is unreadable or unmatchable" ;;
+        _ci_why="no required check reported and the configuration of '$_ci_base' is unreadable" ;;
       bad\ *)
         echo "sdd-pr-loop: required CI failed or cancelled on PR #$pr_number (${_ci_cls#bad }) — needs-human" >&2
         return 1 ;;
