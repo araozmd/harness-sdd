@@ -109,3 +109,10 @@ Non-blocking nit: removing the ceiling makes the test time out rather than fail 
   - raw base in both URLs: killed (the failure message is from a static "without URL-encoding" check in the suite)
   - raw base in the rules URL only: killed (same static check)
 - Caveat, non-blocking: the encoding also turns `/` into `%2F` for names like `feat/x`. GitHub accepts this for the branch endpoints, but I did not verify it live.
+
+## Round 8 (ebdec3f) — APPROVE
+
+- `./init.sh` exits 0. `tests/test_pr_loop_hardening.sh` passes under both sh and dash.
+- The diff `47cbf93..ebdec3f` moves the `ci_required_gate` branch to just after the `merge_ok` check. It still sits before the dry-run and merge branches and after the stale-head receipt. A thread blocker is no longer delayed or masked by the CI wait.
+- The mutant that restores the old order (the `merge_ok` branch moved back to after the CI gate) made the suite fail.
+- Non-blocking observation: the `merge_ok` refusal branch only echoes and does not label needs-human. That was already the case and is unchanged by this commit.
