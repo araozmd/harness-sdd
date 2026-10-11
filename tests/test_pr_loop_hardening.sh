@@ -287,6 +287,7 @@ hb = open(sys.argv[1]).read(); mg = open(sys.argv[2]).read()
 g = hb.index('ci_required_gate')
 assert g < hb.index('handover-summary.md') and g < hb.index('echo handback >')
 assert mg.index('ci_required_gate') < mg.index('mut gh pr merge')
+assert mg.index('"${merge_ok:-0}" != "1"') < mg.index('ci_required_gate')
 PY
     # ── helper semantics ─────────────────────────────────────────────────────────
     # <ci modes>:<required contexts, "," separated; "-" = none; "!" = API unreadable>:<rc>

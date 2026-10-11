@@ -7251,14 +7251,16 @@ elif ! sh .harness/tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number
   echo "sdd-pr-loop: merge refused — head moved since the reviewed round (unreviewed commits) — needs-human" >&2
   mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
   [ "${HARNESS_DRY_RUN:-0}" = "1" ] || echo stale > "$round_dir/disposed"   # next run re-reviews
+elif [ "${merge_ok:-0}" != "1" ]; then
+  echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
 elif ! ci_required_gate; then
-  # E99-F171: a clean review is not green CI. Required checks red or still pending at the
-  # ceiling ⇒ needs-human, no merge, no marker (the next run re-checks CI on this review).
+  # E99-F171: a clean review is not green CI. Asked only once the PR is otherwise
+  # eligible (merge_ok), so a thread blocker is never delayed or masked by the CI wait.
+  # Required checks red or still pending at the ceiling ⇒ needs-human, no merge, no
+  # marker (the next run re-checks CI on this review).
   # A push during the wait cannot slip through: --match-head-commit pins the merge below.
   echo "sdd-pr-loop: merge refused — required CI is not green — needs-human" >&2
   mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
-elif [ "${merge_ok:-0}" != "1" ]; then
-  echo "unresolved non-Codex threads remain — needs-human, not merging" >&2
 elif [ "${HARNESS_DRY_RUN:-0}" = "1" ]; then
   # Dry run (E99-F170): EVERY gate above held, thread eligibility included — say what
   # WOULD merge, merge nothing. A dry run must reach the disposition a live run would.
