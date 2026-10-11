@@ -1112,7 +1112,8 @@
         {
           "id": "E99-F171",
           "title": "Gate /sdd-pr-loop hand-back and auto-merge on required CI",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "8072eb28aa6f2fd52d34d05124a8b42a8cf72a68", "ref": "8072eb28aa6f2fd52d34d05124a8b42a8cf72a68", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
