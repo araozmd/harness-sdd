@@ -79,35 +79,31 @@ case "\$*" in
   *"--json baseRefName"*|*"defaultBranchRef"*) echo main ;;
   *"pr comment"*) echo "https://github.com/o/r/pull/7#issuecomment-1" ;;
   *"/rules/branches/"*)
-    # Raw ruleset JSON: \$_e/req_rules lists required_status_checks contexts and
-    # \$_e/req_wf lists required workflows ("<repository_id> <path>"); absent ⇒ none.
+    # Ruleset JSON as gh --paginate --slurp returns it (an array of pages):
+    # \$_e/req_rules lists required_status_checks contexts (on PAGE 2 when \$_e/rules_p2
+    # exists) and \$_e/req_wf lists required workflows ("<repository_id> <path>").
     [ -e "$_e/api_fail" ] && exit 1
     _rc="\$(sed 's/.*/{"context":"&"}/' "$_e/req_rules" 2>/dev/null | paste -sd, -)"
     _rw="\$(awk '{printf "%s{\\"repository_id\\":%s,\\"path\\":\\"%s\\"}", (NR>1?",":""), \$1, \$2}' "$_e/req_wf" 2>/dev/null)"
-    printf '[{"type":"deletion","parameters":null}'
-    [ -n "\$_rc" ] && printf ',{"type":"required_status_checks","parameters":{"required_status_checks":[%s]}}' "\$_rc"
-    [ -n "\$_rw" ] && printf ',{"type":"workflows","parameters":{"workflows":[%s]}}' "\$_rw"
-    printf ']\n' ;;
-  *"actions/workflows"*)
-    # Workflow path → name resolution; \$_e/wf_name absent ⇒ unresolvable.
+    _sc=""; [ -n "\$_rc" ] && _sc=',{"type":"required_status_checks","parameters":{"required_status_checks":['"\$_rc"']}}'
+    _wf=""; [ -n "\$_rw" ] && _wf=',{"type":"workflows","parameters":{"workflows":['"\$_rw"']}}'
+    if [ -e "$_e/rules_p2" ]; then
+      printf '[[{"type":"deletion","parameters":null}%s],[{"type":"non_fast_forward","parameters":null}%s]]\n' "\$_wf" "\$_sc"
+    else
+      printf '[[{"type":"deletion","parameters":null}%s%s]]\n' "\$_sc" "\$_wf"
+    fi ;;
+  *"actions/runs?head_sha="*)
+    # The head's Actions runs (slurped pages), scripted by \$_e/runs, one run per line as
+    # "<path> <status> <conclusion|-> <created_at>". Absent ⇒ no runs.
     [ -e "$_e/api_fail" ] && exit 1
-    if [ -f "$_e/wf_name" ]; then
-      printf '{"workflows":[{"path":"%s","name":"%s"}]}\n' "\$(cut -d' ' -f2 "$_e/req_wf")" "\$(cat "$_e/wf_name")"
-    else echo '{"workflows":[]}'; fi ;;
+    _r="\$(awk '{printf "%s{\\"path\\":\\"%s\\",\\"status\\":\\"%s\\",\\"conclusion\\":%s,\\"created_at\\":\\"%s\\"}", (NR>1?",":""), \$1, \$2, (\$3=="-"?"null":"\\""\$3"\\""), \$4}' "$_e/runs" 2>/dev/null)"
+    printf '[{"workflow_runs":[%s]}]\n' "\$_r" ;;
+  *"api repos/{owner}/{repo} --jq .id"*) echo 42 ;;
   *"api repos/"*"/branches/"*)
     # Raw branch JSON with classic protection contexts. Absent \$_e/req ⇒ "build"; empty ⇒ none.
     [ -e "$_e/api_fail" ] && exit 1
     if [ -f "$_e/req" ]; then _c="\$(sed 's/.*/"&"/' "$_e/req" | paste -sd, -)"; else _c='"build"'; fi
     printf '{"protected":true,"protection":{"required_status_checks":{"contexts":[%s]}}}\n' "\$_c" ;;
-  *"pr checks"*"--json name,bucket,workflow"*)
-    # ALL checks (required-workflow matching), scripted by \$_e/ci_all: wfpass / wfpending
-    # / wffail / wfnone (gh's "no checks reported"). Absent ⇒ wfpass.
-    case "\$(cat "$_e/ci_all" 2>/dev/null || echo wfpass)" in
-      wfpass)    echo '[{"name":"org","bucket":"pass","workflow":"Org CI"}]' ;;
-      wfpending) echo '[{"name":"org","bucket":"pending","workflow":"Org CI"}]'; exit 8 ;;
-      wffail)    echo '[{"name":"org","bucket":"fail","workflow":"Org CI"}]'; exit 1 ;;
-      wfnone)    echo "no checks reported on the 'feat' branch" >&2; exit 1 ;;
-    esac ;;
   *"pr checks"*)
     # Required-CI answer, scripted by \$_e/ci (one mode per line, consumed in order; the
     # last line repeats). Absent ⇒ pass. Shapes mirror gh --json name,bucket; "none" is
@@ -328,20 +324,42 @@ PY
     ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=1 \
         sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>/dev/null \
       || fail "CI: $_b ruleset-required 'build' passed but the gate is not green (ruleset filter broken)"
-    # A required WORKFLOW (ruleset `workflows` rule) is waited on by workflow name.
-    #   <ci_all mode>:<wf_name resolvable? y/n>:<rc>  — required rollup empty ("none").
-    for _case in "wfnone:y:1" "wfpending:y:1" "wffail:y:1" "wfpass:y:0" "wfpass:n:1"; do
-      _wm="${_case%%:*}"; _rest="${_case#*:}"; _res="${_rest%%:*}"; _want="${_rest##*:}"
+    # A required WORKFLOW (ruleset `workflows` rule) is matched to the head's runs by
+    # repository + PATH, never display name. Required rollup empty ("none") throughout.
+    #   <rule repo id>|<runs, ";"-separated>|<rc>
+    W=.github/workflows/org-ci.yml
+    for _case in "42||1" \
+                 "42|$W in_progress - 2026-01-01T00:00:00Z|1" \
+                 "42|$W completed failure 2026-01-01T00:00:00Z|1" \
+                 "42|$W completed cancelled 2026-01-01T00:00:00Z|1" \
+                 "42|$W completed success 2026-01-01T00:00:00Z|0" \
+                 "42|$W completed skipped 2026-01-01T00:00:00Z|0" \
+                 "42|.github/workflows/other.yml completed success 2026-01-01T00:00:00Z|1" \
+                 "42|$W completed failure 2026-01-01T00:00:00Z;$W completed success 2026-01-02T00:00:00Z|0" \
+                 "42|$W completed success 2026-01-02T00:00:00Z;$W completed failure 2026-01-01T00:00:00Z|0" \
+                 "99|$W completed success 2026-01-01T00:00:00Z|1"; do
+      _rid="${_case%%|*}"; _rest="${_case#*|}"; _runs="${_rest%%|*}"; _want="${_rest##*|}"
       _e="$T/ci-wf"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-      : > "$_e/req"; echo none > "$_e/ci"; echo "$_wm" > "$_e/ci_all"
-      echo "42 .github/workflows/org-ci.yml" > "$_e/req_wf"
-      [ "$_res" = y ] && echo "Org CI" > "$_e/wf_name"
+      : > "$_e/req"; echo none > "$_e/ci"; echo "$_rid $W" > "$_e/req_wf"
+      [ -n "$_runs" ] && printf '%s\n' "$_runs" | tr ';' '\n' > "$_e/runs"
       _got=0
       ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=1 \
           sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>/dev/null || _got=$?
       [ "$_got" = "$_want" ] \
-        || fail "CI: $_b required workflow ($_wm, resolvable=$_res) returned $_got, want $_want"
+        || fail "CI: $_b required workflow (rule repo $_rid; runs '$_runs') returned $_got, want $_want"
     done
+    # A required-status rule on a LATER rules page is still read (pagination).
+    _e="$T/ci-p2"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    : > "$_e/req"; echo build > "$_e/req_rules"; touch "$_e/rules_p2"; echo none > "$_e/ci"
+    ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=1 \
+        sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>/dev/null \
+      && fail "CI: $_b ignored a required check declared on rules page 2"
+    grep -q 'api --paginate --slurp repos/{owner}/{repo}/rules/branches/' "$_e/gh.log" \
+      || fail "CI: $_b does not paginate the active-rules inventory"
+    echo pass > "$_e/ci"
+    ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=1 \
+        sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>/dev/null \
+      || fail "CI: $_b multi-page rules inventory is not combined (page-2 'build' passed, gate not green)"
     # Pending forever is bounded by the ceiling, not an unbounded wait.
     _e="$T/ci-ceil"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     echo pending > "$_e/ci"

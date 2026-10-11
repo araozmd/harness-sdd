@@ -18,9 +18,12 @@ All notable changes to the harness body are recorded here. Versions follow
   next run re-checks CI on the cached review.
 - The verdict comes from the `--json` buckets, because gh exits 0 on a **cancelled**
   required check. The rollup is also compared with what the base branch requires (classic
-  protection contexts, `required_status_checks` rulesets, and ruleset `workflows` rules
-  resolved to workflow names). A required context or required workflow that has not
-  reported yet counts as pending. An empty rollup passes only when the base
+  protection contexts, plus `required_status_checks` and `workflows` rules from every page
+  of the active rules). A required workflow is matched to the head's Actions runs by its
+  repository and path, never by display name. A required context or required workflow
+  that has not reported yet counts as pending. A required workflow hosted in another
+  repository cannot be matched, so it keeps the gate non-green (needs-human). The gate
+  needs gh 2.48 or later for `--slurp`. An empty rollup passes only when the base
   provably requires no checks.
 
 ## [0.91.2] — 2026-10-10
