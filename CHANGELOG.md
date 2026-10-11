@@ -26,6 +26,10 @@ All notable changes to the harness body are recorded here. Versions follow
   The rollup does not carry the repository, path, revision or event identity that such a
   rule pins, so the loop goes to needs-human and asks for CI to be confirmed by hand
   rather than guessing.
+- On the auto-merge path the CI wait runs only once the PR is eligible on threads
+  (`merge_ok`), so a thread blocker is never delayed or hidden. The review threads are
+  read again after the wait through the new shared `thread_scan`, so a human thread
+  opened during the wait still blocks the merge.
 
 ## [0.91.2] — 2026-10-10
 

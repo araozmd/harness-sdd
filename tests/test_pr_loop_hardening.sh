@@ -78,6 +78,11 @@ case "\$*" in
   *"--json state,mergedAt,mergeCommit"*) echo "MERGED 2026-10-10T00:00:00Z bbbb" ;;
   *"--json baseRefName"*) cat "$_e/base" 2>/dev/null || echo main ;;
   *"defaultBranchRef"*) echo main ;;
+  *"api graphql"*"reviewThreads"*)
+    # Unresolved-thread scan ("<allcodex> <id>" lines, already --jq-filtered), from
+    # \$_e/threads; absent ⇒ none.
+    [ -e "$_e/threads_fail" ] && exit 1
+    cat "$_e/threads" 2>/dev/null; : ;;
   *"pr comment"*) echo "https://github.com/o/r/pull/7#issuecomment-1" ;;
   *"/rules/branches/"*)
     # Ruleset JSON as gh --paginate --slurp returns it (an array of pages):
@@ -130,6 +135,7 @@ run_block() {
   ( cd "$_rd" && PATH="$_rd/bin:$PATH" HARNESS_MERGE_VERIFY_INTERVAL=1 HARNESS_MERGE_VERIFY_CEILING=2 \
       HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=2 sh -c "$(cat "$T/mut.sh")
 $(cat "$T/ci.sh" 2>/dev/null)
+$(cat "$T/ts.sh" 2>/dev/null)
 pr_number=7; round_dir=round; pr_cache=.; default_branch=main; $_pre
 $(cat "$_sn")
 printf '%s\n' \"\${merged:-unset} \${handback_ok:-unset}\" > result" ) >/dev/null 2>"$_rd/err" || :
@@ -139,7 +145,7 @@ printf '%s\n' \"\${merged:-unset} \${handback_ok:-unset}\" > result" ) >/dev/nul
 test_handback_revalidates_head() {
   have_jq || { skip "handback_revalidates_head (jq not installed)"; return 0; }
   for _b in $BODIES; do
-    fn "$_b" mut > "$T/mut.sh"; fn "$_b" ci_required_gate > "$T/ci.sh"
+    fn "$_b" mut > "$T/mut.sh"; fn "$_b" ci_required_gate > "$T/ci.sh"; fn "$_b" thread_scan > "$T/ts.sh"
     grep -qF 'mut() {' "$T/mut.sh" || fail "P1: no mut() wrapper in $_b"
     block "$_b" 'echo handback > "$round_dir/disposed"' > "$T/hb.sh" \
       || fail "P1: $_b has no executable hand-back block — the marker is written from prose only"
@@ -201,7 +207,7 @@ PY
       || fail "P1 dry-run: $_b dry run writes into the real round cache (budget + handback poisoning)"
     grep -qF 'spawn no fixer' "$_b" || fail "P1 dry-run: $_b still dispatches fixers (they commit) on a dry run"
     # Executed: the wrapper skips under HARNESS_DRY_RUN=1 and runs otherwise.
-    fn "$_b" mut > "$T/mut.sh"; fn "$_b" ci_required_gate > "$T/ci.sh"
+    fn "$_b" mut > "$T/mut.sh"; fn "$_b" ci_required_gate > "$T/ci.sh"; fn "$_b" thread_scan > "$T/ts.sh"
     _m="$T/mutx"; rm -rf "$_m"; mkdir -p "$_m"
     ( . "$T/mut.sh"; HARNESS_DRY_RUN=1; mut touch "$_m/dry" ) 2>/dev/null
     [ -e "$_m/dry" ] && fail "P1 dry-run: $_b mut ran a mutation under HARNESS_DRY_RUN=1"
@@ -211,7 +217,7 @@ PY
   # Executed: the merge block on a dry run merges NOTHING; on a real run it merges.
   if have_jq; then
     for _b in $BODIES; do
-      fn "$_b" mut > "$T/mut.sh"; fn "$_b" ci_required_gate > "$T/ci.sh"
+      fn "$_b" mut > "$T/mut.sh"; fn "$_b" ci_required_gate > "$T/ci.sh"; fn "$_b" thread_scan > "$T/ts.sh"
       block "$_b" '--match-head-commit "$reviewed_head"' > "$T/merge.sh" || fail "setup: no merge block in $_b"
       _e="$T/mg-dry"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       run_block "$_e" "$T/merge.sh" 'merge_ok=1; HARNESS_DRY_RUN=1'
@@ -272,7 +278,7 @@ test_resume_skips_completed_fixers() {
 test_required_ci_gates_terminal_paths() {
   have_jq || { skip "required_ci_gates_terminal_paths (jq not installed)"; return 0; }
   for _b in $BODIES; do
-    fn "$_b" mut > "$T/mut.sh"; fn "$_b" ci_required_gate > "$T/ci.sh"
+    fn "$_b" mut > "$T/mut.sh"; fn "$_b" ci_required_gate > "$T/ci.sh"; fn "$_b" thread_scan > "$T/ts.sh"
     grep -qF 'ci_required_gate() {' "$T/ci.sh" || fail "CI: $_b has no ci_required_gate helper"
     grep -qF 'gh pr checks "$pr_number" --required' "$T/ci.sh" \
       || fail "CI: $_b helper does not read the REQUIRED checks"
@@ -423,6 +429,30 @@ PY
     run_block "$_e" "$T/merge.sh" 'merge_ok=1; HARNESS_DRY_RUN=1'
     grep -q 'would merge' "$_e/err" && fail "CI: $_b dry run claims it would merge over red required CI"
     grep -q 'pr edit\|pr merge' "$_e/gh.log" && fail "CI: $_b dry-run red-CI merge mutated the PR"
+    # Threads are re-read AFTER the CI wait: a human thread that appeared during it blocks.
+    grep -qF 'thread_scan() {' "$T/ts.sh" || fail "CI: $_b has no reusable thread_scan"
+    python3 - "$T/merge.sh" <<'PY' || fail "CI: $_b merge does not re-read threads after the CI wait"
+import sys
+mg = open(sys.argv[1]).read()
+assert mg.index('ci_required_gate') < mg.index('thread_scan') < mg.index('mut gh pr merge')
+PY
+    for _th in "false PRRT_human" "!"; do
+      _e="$T/mg-thr"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      if [ "$_th" = "!" ]; then
+        touch "$_e/threads_fail"     # the enumeration itself FAILS after the wait
+      else
+        echo "$_th" > "$_e/threads"
+      fi
+      run_block "$_e" "$T/merge.sh" 'merge_ok=1'
+      grep -q 'pr merge' "$_e/gh.log" && fail "CI: $_b merged although threads changed or were unreadable after the CI wait ($_th)"
+      grep -q 'add-label needs-human' "$_e/gh.log" \
+        || fail "CI: $_b post-CI thread refusal ($_th) is not routed to needs-human"
+    done
+    # Codex-only threads (still unresolved on a dry run) do not block.
+    _e="$T/mg-thr-codex"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    echo "true PRRT_codex" > "$_e/threads"
+    run_block "$_e" "$T/merge.sh" 'merge_ok=1'
+    grep -q 'pr merge' "$_e/gh.log" || fail "CI: $_b a Codex-only thread blocked the merge after the CI wait"
     _e="$T/mg-ci-pass"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     printf 'pending\npass\n' > "$_e/ci"
     run_block "$_e" "$T/merge.sh" 'merge_ok=1'

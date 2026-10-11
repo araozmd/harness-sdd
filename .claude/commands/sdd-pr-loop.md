@@ -1012,23 +1012,28 @@ shell, where the flag survives.
 # `gh api --jq` takes no --arg, and are compared as EXACT literals: a prefix test would
 # let `chatgpt-codex-connector-evil` pass as the thread's only participant, so the loop
 # would resolve an impostor's thread and merge over it.
+# thread_scan — one line "<allcodex> <id>" per UNRESOLVED thread; exit status is gh's, so
+# a failed enumeration is distinguishable from an empty one. Re-run after the CI wait.
+thread_scan() {
+  gh api graphql -f query='
+    query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
+      repository(owner:$owner,name:$repo){
+        pullRequest(number:$pr){
+          reviewThreads(first:100,after:$endCursor){
+            nodes{ id isResolved comments(first:100){ totalCount nodes{ author{ login } } } }
+            pageInfo{ hasNextPage endCursor }
+          }}}}' \
+    -f owner="$owner" -f repo="$repo" -F pr="$pr_number" --paginate \
+    --jq '.data.repository.pullRequest.reviewThreads.nodes[]
+          | select(.isResolved | not)
+          | (.comments.totalCount == (.comments.nodes | length)) as $whole
+          | ([.comments.nodes[].author.login // ""]
+               | all(. == "chatgpt-codex-connector"
+                  or . == "chatgpt-codex-connector[bot]")) as $codex
+          | "\($whole and $codex) \(.id)"'
+}
 merge_ok=0            # fail closed: only a COMPLETED, clean enumeration may raise this
-if ! unresolved=$(gh api graphql -f query='
-  query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
-    repository(owner:$owner,name:$repo){
-      pullRequest(number:$pr){
-        reviewThreads(first:100,after:$endCursor){
-          nodes{ id isResolved comments(first:100){ totalCount nodes{ author{ login } } } }
-          pageInfo{ hasNextPage endCursor }
-        }}}}' \
-  -f owner="$owner" -f repo="$repo" -F pr="$pr_number" --paginate \
-  --jq '.data.repository.pullRequest.reviewThreads.nodes[]
-        | select(.isResolved | not)
-        | (.comments.totalCount == (.comments.nodes | length)) as $whole
-        | ([.comments.nodes[].author.login // ""]
-             | all(. == "chatgpt-codex-connector"
-                or . == "chatgpt-codex-connector[bot]")) as $codex
-        | "\($whole and $codex) \(.id)"')
+if ! unresolved=$(thread_scan)
 then
   # Enumeration FAILED: `unresolved` is empty because gh errored, not because the PR is
   # clean. Testing the status on the `if` itself (rather than after the assignment) reads
@@ -1158,6 +1163,12 @@ elif ! ci_required_gate; then
   # marker (the next run re-checks CI on this review).
   # A push during the wait cannot slip through: --match-head-commit pins the merge below.
   echo "sdd-pr-loop: merge refused — required CI is not green — needs-human" >&2
+  mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
+elif ! _ts_after="$(thread_scan)" || printf '%s\n' "$_ts_after" | grep -q '^false '; then
+  # The CI wait can last up to the ceiling, and a human can open or answer a thread in
+  # it without moving the head (--match-head-commit cannot see that). Re-read the
+  # threads: anything not provably Codex-only — or an enumeration that failed — blocks.
+  echo "sdd-pr-loop: merge refused — a non-Codex review thread appeared (or threads were unreadable) during the CI wait — needs-human" >&2
   mut gh pr edit "$pr_number" --add-label needs-human >/dev/null 2>&1 || true
 elif [ "${HARNESS_DRY_RUN:-0}" = "1" ]; then
   # Dry run (E99-F170): EVERY gate above held, thread eligibility included — say what
