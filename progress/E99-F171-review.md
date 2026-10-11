@@ -49,3 +49,27 @@ Non-blocking nit: removing the ceiling makes the test time out rather than fail 
 - The ruleset-path survivor is fail-closed. jq errors on null, so `known=0` and the gate is never green; the mutant is safe, only less useful. The suite lacks the positive case that pins it: a ruleset requires 'build', build passes, and the gate returns 0. I recommend adding it. It is non-blocking.
 - The `"ok"` survivor is equivalent. `ok` and `empty` both return 0 when `known=1`, and both wait when `known=0`.
 - Nit: workflow and rules lookups use `per_page=100` with no pagination. Beyond 100 they fail closed.
+
+## Round 4 (806b6c5) — APPROVE, with unpinned guarantees to close
+
+- `./init.sh` exits 0. `tests/test_pr_loop_hardening.sh` passes under both sh and dash.
+- The code in `1ea1171..806b6c5` reads correctly:
+  - Rules are read with `--paginate --slurp` and then flattened.
+  - Required workflows are matched on (repository_id, path), with any `@ref` stripped.
+  - The runs are taken from `actions/runs?head_sha=<head>`, and the latest run by `created_at` decides.
+  - A rule whose repository_id differs from this repo's, or an unreadable repo id, sets `known=0`.
+  - No run for the head is pending, not completed is pending, and success/skipped/neutral is ok. Any other conclusion is red.
+- I applied each mutant in a scratch copy via the installer and `--self`, one at a time. These were killed:
+  - name or any-path match: killed
+  - earliest run instead of latest: killed
+  - cross-repo rule treated as matchable: killed
+  - failure or cancelled treated as ok: killed
+  - the "missing" term dropped from `$miss`: killed
+  - a missing run counted as pass: killed
+  - `head_sha` filter dropped: killed
+  - `--paginate` dropped from the rules read: killed
+- Survivors, none of which make the current code wrong:
+  1. **`timed_out` treated as ok.** This is a safety guarantee with no pin. Add a case with a `timed_out` latest run that expects a non-zero return.
+  2. **`@ref` suffix stripping removed.** Runs of ruleset-required workflows carry `path@refs/...`. With no test case, a regression would fail closed everywhere and produce false needs-human outcomes. Add a case with an `@refs/heads/main` run path that expects green.
+  3. **In-progress run treated as red instead of pending.** The mutant `status != "completed"` → false still gave non-green results. A case where an in-progress run turns completed/success on a later poll would pin the wait-then-pass behaviour.
+- The `--paginate` kill comes from a textual assertion in the suite, plus the stub's page-2 rule. Both are acceptable.

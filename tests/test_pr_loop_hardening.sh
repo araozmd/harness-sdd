@@ -94,10 +94,13 @@ case "\$*" in
     fi ;;
   *"actions/runs?head_sha="*)
     # The head's Actions runs (slurped pages), scripted by \$_e/runs, one run per line as
-    # "<path> <status> <conclusion|-> <created_at>". Absent ⇒ no runs.
+    # "<path> <status> <conclusion|-> <created_at>". Absent ⇒ no runs. \$_e/runs_next, when
+    # present, replaces them after this poll.
     [ -e "$_e/api_fail" ] && exit 1
     _r="\$(awk '{printf "%s{\\"path\\":\\"%s\\",\\"status\\":\\"%s\\",\\"conclusion\\":%s,\\"created_at\\":\\"%s\\"}", (NR>1?",":""), \$1, \$2, (\$3=="-"?"null":"\\""\$3"\\""), \$4}' "$_e/runs" 2>/dev/null)"
-    printf '[{"workflow_runs":[%s]}]\n' "\$_r" ;;
+    printf '[{"workflow_runs":[%s]}]\n' "\$_r"
+    [ -f "$_e/runs_next" ] && mv "$_e/runs_next" "$_e/runs"   # the NEXT poll sees these
+    : ;;
   *"api repos/{owner}/{repo} --jq .id"*) echo 42 ;;
   *"api repos/"*"/branches/"*)
     # Raw branch JSON with classic protection contexts. Absent \$_e/req ⇒ "build"; empty ⇒ none.
@@ -337,6 +340,8 @@ PY
                  "42|.github/workflows/other.yml completed success 2026-01-01T00:00:00Z|1" \
                  "42|$W completed failure 2026-01-01T00:00:00Z;$W completed success 2026-01-02T00:00:00Z|0" \
                  "42|$W completed success 2026-01-02T00:00:00Z;$W completed failure 2026-01-01T00:00:00Z|0" \
+                 "42|$W completed timed_out 2026-01-01T00:00:00Z|1" \
+                 "42|$W@refs/heads/main completed success 2026-01-01T00:00:00Z|0" \
                  "99|$W completed success 2026-01-01T00:00:00Z|1"; do
       _rid="${_case%%|*}"; _rest="${_case#*|}"; _runs="${_rest%%|*}"; _want="${_rest##*|}"
       _e="$T/ci-wf"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -348,6 +353,14 @@ PY
       [ "$_got" = "$_want" ] \
         || fail "CI: $_b required workflow (rule repo $_rid; runs '$_runs') returned $_got, want $_want"
     done
+    # An in-progress required workflow is WAITED on (pending), then passes once it completes.
+    _e="$T/ci-wf-late"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    : > "$_e/req"; echo none > "$_e/ci"; echo "42 $W" > "$_e/req_wf"
+    echo "$W in_progress - 2026-01-01T00:00:00Z" > "$_e/runs"
+    echo "$W completed success 2026-01-01T00:00:00Z" > "$_e/runs_next"
+    ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=3 \
+        sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>/dev/null \
+      || fail "CI: $_b did not wait for an in-progress required workflow to complete green"
     # A required-status rule on a LATER rules page is still read (pagination).
     _e="$T/ci-p2"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     : > "$_e/req"; echo build > "$_e/req_rules"; touch "$_e/rules_p2"; echo none > "$_e/ci"
