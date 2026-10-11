@@ -884,7 +884,7 @@ ci_required_gate() {
                  'all(.[]; (.repository_id | tostring) == $r)' 2>/dev/null)" != true ] \
          || ! _ci_runs="$(gh api --paginate --slurp \
                  "repos/{owner}/{repo}/actions/runs?head_sha=$_ci_head&per_page=100" 2>/dev/null \
-               | jq -c '[.[] | .workflow_runs[]? | {path, status, conclusion, created_at}]' 2>/dev/null)" \
+               | jq -c '[.[] | .workflow_runs[]? | {path, event, status, conclusion, created_at}]' 2>/dev/null)" \
          || [ -z "$_ci_runs" ]; then
         _ci_known=0; _ci_runs='[]'
       fi
@@ -903,7 +903,9 @@ ci_required_gate() {
            return 1
          fi ;;
     esac
-    # Each required workflow is decided by its LATEST run on the head (by created_at):
+    # Each required workflow is decided by its LATEST run on the head (by created_at) among
+    # the events a ruleset workflow counts — pull_request, pull_request_target, merge_group;
+    # a push or workflow_dispatch run of the same file never satisfies the rule:
     # none ⇒ not reported yet, not completed ⇒ pending, success/skipped/neutral ⇒ ok,
     # any other conclusion (failure, cancelled, timed_out, …) ⇒ red.
     if ! _ci_cls="$(jq -rn --argjson req "$_ci_rep" --argjson wfr "$_ci_wfr" \
@@ -912,7 +914,9 @@ ci_required_gate() {
           def done_ok: .bucket == "pass" or .bucket == "skipping";
           ($want | split("\n") | map(select(length > 0))) as $w
           | [$wfr[] | .path as $p
-             | ([$runs[] | select((.path | sub("@.*$"; "")) == $p)] | sort_by(.created_at) | last) as $r
+             | ([$runs[] | select((.path | sub("@.*$"; "")) == $p)
+                        | select(.event | IN("pull_request", "pull_request_target", "merge_group"))]
+                | sort_by(.created_at) | last) as $r
              | if $r == null then {name: "workflow \($p)", bucket: "missing"}
                elif $r.status != "completed" then {name: "workflow \($p)", bucket: "pending"}
                elif ($r.conclusion | IN("success", "skipped", "neutral")) then {name: "workflow \($p)", bucket: "pass"}

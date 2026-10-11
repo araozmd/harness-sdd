@@ -94,10 +94,11 @@ case "\$*" in
     fi ;;
   *"actions/runs?head_sha="*)
     # The head's Actions runs (slurped pages), scripted by \$_e/runs, one run per line as
-    # "<path> <status> <conclusion|-> <created_at>". Absent ⇒ no runs. \$_e/runs_next, when
+    # "<path> <status> <conclusion|-> <created_at> [event]" (event defaults to
+    # pull_request). Absent ⇒ no runs. \$_e/runs_next, when
     # present, replaces them after this poll.
     [ -e "$_e/api_fail" ] && exit 1
-    _r="\$(awk '{printf "%s{\\"path\\":\\"%s\\",\\"status\\":\\"%s\\",\\"conclusion\\":%s,\\"created_at\\":\\"%s\\"}", (NR>1?",":""), \$1, \$2, (\$3=="-"?"null":"\\""\$3"\\""), \$4}' "$_e/runs" 2>/dev/null)"
+    _r="\$(awk '{printf "%s{\\"path\\":\\"%s\\",\\"status\\":\\"%s\\",\\"conclusion\\":%s,\\"created_at\\":\\"%s\\",\\"event\\":\\"%s\\"}", (NR>1?",":""), \$1, \$2, (\$3=="-"?"null":"\\""\$3"\\""), \$4, (\$5==""?"pull_request":\$5)}' "$_e/runs" 2>/dev/null)"
     printf '[{"workflow_runs":[%s]}]\n' "\$_r"
     [ -f "$_e/runs_next" ] && mv "$_e/runs_next" "$_e/runs"   # the NEXT poll sees these
     : ;;
@@ -342,6 +343,10 @@ PY
                  "42|$W completed success 2026-01-02T00:00:00Z;$W completed failure 2026-01-01T00:00:00Z|0" \
                  "42|$W completed timed_out 2026-01-01T00:00:00Z|1" \
                  "42|$W@refs/heads/main completed success 2026-01-01T00:00:00Z|0" \
+                 "42|$W completed success 2026-01-01T00:00:00Z workflow_dispatch|1" \
+                 "42|$W completed success 2026-01-01T00:00:00Z push|1" \
+                 "42|$W completed failure 2026-01-01T00:00:00Z;$W completed success 2026-01-02T00:00:00Z push|1" \
+                 "42|$W completed success 2026-01-01T00:00:00Z merge_group|0" \
                  "99|$W completed success 2026-01-01T00:00:00Z|1"; do
       _rid="${_case%%|*}"; _rest="${_case#*|}"; _runs="${_rest%%|*}"; _want="${_rest##*|}"
       _e="$T/ci-wf"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
