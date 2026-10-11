@@ -1255,10 +1255,12 @@ test_bot_login_lookalike_cannot_signal_clean() {      # R27 (Codex #68 P1, id 36
   grep -qF 'all(startswith("chatgpt-codex-connector"))' "$BODY" \
     && fail "R27: the body's thread-ownership test is still a prefix match"
   _lt="$T/lookalike-threads"; mkdir -p "$_lt"
-  awk '/^  --jq .\.data\.repository\.pullRequest\.reviewThreads\.nodes\[\]$/ { f=1 }
+  # The classifier lives in `thread_scan()` (E99-F171), so tolerate its indentation and a
+  # closing quote with or without the old command-substitution paren.
+  awk '/^ *--jq .\.data\.repository\.pullRequest\.reviewThreads\.nodes\[\]$/ { f=1 }
        f { print }
-       f && /\\\(\$whole and \$codex\) \\\(\.id\)"..$/ { exit }' "$BODY" \
-    | sed -e "1s/^  --jq '//" -e "\$s/')\$//" > "$_lt/filter.jq"
+       f && /\\\(\$whole and \$codex\) \\\(\.id\)"..?$/ { exit }' "$BODY" \
+    | sed -e "1s/^ *--jq '//" -e "\$s/')\$//" -e "\$s/'\$//" > "$_lt/filter.jq"
   [ -s "$_lt/filter.jq" ] || fail "R27: could not extract the thread-classifier jq from the body"
   cat > "$_lt/threads.json" <<'JSON'
 {"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
@@ -1661,10 +1663,10 @@ test_body_truncated_thread_is_not_codex_only() {      # R42 (fail-closed paginat
   # Run the body's OWN --jq program (extracted verbatim) over a fixture in the shape the
   # GraphQL query returns, so this locks the classifier and not a paraphrase of it.
   _tt="$T/threads"; mkdir -p "$_tt"
-  awk '/^  --jq .\.data\.repository\.pullRequest\.reviewThreads\.nodes\[\]$/ { f=1 }
+  awk '/^ *--jq .\.data\.repository\.pullRequest\.reviewThreads\.nodes\[\]$/ { f=1 }
        f { print }
-       f && /\\\(\$whole and \$codex\) \\\(\.id\)"..$/ { exit }' "$BODY" \
-    | sed -e "1s/^  --jq '//" -e "\$s/')\$//" > "$_tt/filter.jq"
+       f && /\\\(\$whole and \$codex\) \\\(\.id\)"..?$/ { exit }' "$BODY" \
+    | sed -e "1s/^ *--jq '//" -e "\$s/')\$//" -e "\$s/'\$//" > "$_tt/filter.jq"
   [ -s "$_tt/filter.jq" ] || fail "R42: could not extract the thread-classifier jq from the body"
   cat > "$_tt/threads.json" <<'JSON'
 {"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
@@ -1702,7 +1704,7 @@ test_body_failed_enumeration_never_merges() {         # R42 (fail-closed enumera
   # threads". If the body ignores the exit status and starts from merge_ok=1, a transient
   # API/auth/pagination failure authorizes a merge over review feedback nobody read.
   need_body "R42: the body does not test the enumeration's exit status" \
-    'if ! unresolved=$(gh api graphql'
+    'if ! unresolved=$(thread_scan)'
   need_body "R42: merge_ok no longer starts fail-closed at 0" \
     'merge_ok=0            # fail closed'
   need_body "R42: the body does not state that a failed enumeration is not an empty one" \
@@ -1712,7 +1714,7 @@ test_body_failed_enumeration_never_merges() {         # R42 (fail-closed enumera
   # without `set -e`: the guard must not depend on the reader's shell options.
   _fe="$T/enum"; mkdir -p "$_fe"
   awk '/^```bash$/                 { buf=""; inblk=1; next }
-       inblk && /^```$/            { if (buf ~ /unresolved=\$\(gh api graphql/) {
+       inblk && /^```$/            { if (buf ~ /unresolved=\$\(thread_scan\)/) {
                                        printf "%s", buf; exit } inblk=0; next }
        inblk                       { buf = buf $0 "\n" }' "$BODY" > "$_fe/snippet.sh"
   grep -q 'gh api graphql' "$_fe/snippet.sh" \
@@ -1771,7 +1773,7 @@ test_body_failed_resolve_never_merges() {             # R42 (fail-closed resolve
   # and without `set -e`, since the guard must not depend on the reader's shell options.
   _fr="$T/resolve"; mkdir -p "$_fr"
   awk '/^```bash$/                 { buf=""; inblk=1; next }
-       inblk && /^```$/            { if (buf ~ /unresolved=\$\(gh api graphql/) {
+       inblk && /^```$/            { if (buf ~ /unresolved=\$\(thread_scan\)/) {
                                        printf "%s", buf; exit } inblk=0; next }
        inblk                       { buf = buf $0 "\n" }' "$BODY" > "$_fr/snippet.sh"
   grep -q 'resolveReviewThread' "$_fr/snippet.sh" \

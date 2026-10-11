@@ -275,7 +275,9 @@ over the default). Execution knobs are **env-only**: `HARNESS_POLL_INTERVAL` (60
 `HARNESS_POLL_CEILING` (900), `HARNESS_FIRST_RESPONSE` (180, `0` disables the probe) and
 `HARNESS_DRY_RUN` (`1` suppresses every remote and repository mutation — ready, checkout,
 fixer commits and pushes, labels, thread resolution, comments, merge — and keeps its round
-cache under `.pr-loop/dry-run/<pr>/`).
+cache under `.pr-loop/dry-run/<pr>/`). `HARNESS_POLL_INTERVAL`/`HARNESS_POLL_CEILING` also bound the required-CI wait that
+both terminal paths (merge and the `auto_merge: false` hand-back) run before claiming
+green.
 
 Flipping `pr_loop.enabled` back to `false` and re-running the installer **reclaims** the
 command and every `pr-fixer` artifact from each still-selected front-end
