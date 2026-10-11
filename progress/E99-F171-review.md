@@ -128,3 +128,14 @@ Non-blocking nit: removing the ceiling makes the test time out rather than fail 
   - `false` lines ignored: killed
   - any thread blocks, Codex-only included: killed
 - Non-blocking observation: the `auto_merge: false` hand-back does not re-scan threads after its CI wait. It claims readiness but does not merge, and the human reviews it anyway, so this is acceptable. It could be mentioned in the docs.
+
+## Round 10 (9caad68) — APPROVE
+
+- `./init.sh` exits 0. `tests/test_pr_loop_hardening.sh` and `tests/test_pr_loop.sh` pass under both sh and dash.
+- The diff `edfc366..9caad68` refuses when the rescan fails, or when any non-empty rescan line is not an exact line of the pre-wait `$unresolved` (`grep -v '^$' | grep -qvxF -e "${unresolved:-}"`). I checked the empty edge by reading the grep semantics. An empty `$unresolved` gives an empty `-e` pattern, which with `-x` matches only empty lines, so every non-empty rescan line refuses. An empty rescan never refuses. `$unresolved` is not reassigned between the first scan and the merge block.
+- I applied each mutant in a scratch copy via the installer and `--self`, one at a time:
+  - revert to the false-only check: killed
+  - drop `-x`: killed
+  - rescan failure no longer refuses: killed
+  - skip the check when `$unresolved` is empty (match-all): killed
+  - `${unresolved:-.*}`: survives, but this is an equivalent mutant. With `-F` the pattern is literal, so it behaves like the empty-pattern case.
