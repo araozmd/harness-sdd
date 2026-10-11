@@ -471,6 +471,11 @@ PY
     run_block "$_e" "$T/merge.sh" 'merge_ok=1'
     grep -q 'pr merge' "$_e/gh.log" && fail "CI: $_b merged a PR retargeted during the CI wait"
     grep -q "base changed to 'release'" "$_e/err" || fail "CI: $_b retarget during the CI wait is not reported"
+    # An UNREADABLE base after the wait is not the default branch either: no merge.
+    _e="$T/mg-base-unread"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    : > "$_e/base_next"
+    run_block "$_e" "$T/merge.sh" 'merge_ok=1'
+    grep -q 'pr merge' "$_e/gh.log" && fail "CI: $_b merged although the base was unreadable after the CI wait"
     # Hand-back: a Codex thread posted (or reopened) during the wait ⇒ no green, stale.
     _e="$T/hb-thr-late"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     echo "true PRRT_late" > "$_e/threads_next"

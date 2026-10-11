@@ -139,3 +139,23 @@ Non-blocking nit: removing the ceiling makes the test time out rather than fail 
   - rescan failure no longer refuses: killed
   - skip the check when `$unresolved` is empty (match-all): killed
   - `${unresolved:-.*}`: survives, but this is an equivalent mutant. With `-F` the pattern is literal, so it behaves like the empty-pattern case.
+
+## Round 11 (38ab68d) — APPROVE, with one unpinned guarantee and one comment overclaim
+
+- `./init.sh` exits 0. `tests/test_pr_loop_hardening.sh` and `tests/test_pr_loop.sh` pass under both sh and dash.
+- The diff `34ef89b..38ab68d` adds three checks:
+  - The hand-back snapshots threads before the CI wait (a failed snapshot refuses) and compares afterwards. A failed or changed rescan sets `hb_refused=threads`: needs-human label, `stale` marker on a live run, no green summary.
+  - After the CI wait the merge path re-reads `baseRefName` and refuses if it differs from `default_branch`.
+  - The merge thread recheck allows the vetted `$unresolved` only on a dry run. On a live run the allowed set is empty, and refusal writes `stale`.
+- I applied each mutant in a scratch copy via the installer and `--self`, one at a time:
+  - hand-back post-wait compare dropped: killed (via the ordering and static check)
+  - hand-back pre-scan failure tolerated: killed
+  - base recheck neutralised: killed
+  - vetted set allowed on a live run: killed
+  - merge-path stale marker dropped: killed
+  - hand-back stale marker dropped: killed
+  - the `'^true '` extra pattern in the hand-back compare: survived, but it is a no-op under `-F` (equivalent mutant)
+  - unreadable post-wait base treated as OK: SURVIVED. See Finding 1.
+- Finding 1 (non-blocking, unpinned): "unreadable base after the wait ⇒ refuse" has no test case. With the `-n` guard added, the suite stays green. The code is correct, because an empty base differs from `default_branch` and so refuses. Add a stub case in which `pr view` returns empty on the post-wait read and expect no merge.
+- Finding 2 (nit, comment overclaim): the hand-back comment says a thread "may gain a reply" counts as a change. The compared line is `"<flag> <id>"`, so a reply to an unchanged human thread is not detected. Only new threads and flag flips are. Soften the comment or document the limit.
+- Observation: on a live run, an immediate rescan right after resolving the vetted Codex threads relies on GitHub reads being consistent. A stale read would produce a false needs-human, and that fails closed.

@@ -7192,9 +7192,12 @@ terminal marker would then short-circuit the next invocation as already done.
 # be handed back as green on checks that ran against a different head.
 #
 # The CI wait can last up to the ceiling, and review input can change in it WITHOUT moving
-# the head: Codex may post a late finding, a resolved thread may be reopened, a thread may
-# gain a reply. So the threads are snapshotted before the wait and compared after it; any
-# thread that is new or changed is unreviewed input — refuse rather than call it green.
+# the head: Codex may post a late finding, a resolved thread may be reopened, a Codex
+# thread may gain a human reply. So the threads are snapshotted before the wait and
+# compared after it: a thread that is new, reopened, or whose Codex-only flag flipped is
+# unreviewed input — refuse rather than call it green. (A further reply on a thread that
+# was already unresolved and human is not detected; that thread is already part of what
+# the hand-back delivers to the human.)
 hb_refused=""
 if ! sh .harness/tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" pre; then
   hb_refused=stale
