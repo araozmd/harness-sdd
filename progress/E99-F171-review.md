@@ -73,3 +73,15 @@ Non-blocking nit: removing the ceiling makes the test time out rather than fail 
   2. **`@ref` suffix stripping removed.** Runs of ruleset-required workflows carry `path@refs/...`. With no test case, a regression would fail closed everywhere and produce false needs-human outcomes. Add a case with an `@refs/heads/main` run path that expects green.
   3. **In-progress run treated as red instead of pending.** The mutant `status != "completed"` → false still gave non-green results. A case where an in-progress run turns completed/success on a later poll would pin the wait-then-pass behaviour.
 - The `--paginate` kill comes from a textual assertion in the suite, plus the stub's page-2 rule. Both are acceptable.
+
+## Round 5 (abf2a0f) — APPROVE
+
+- `./init.sh` exits 0. `tests/test_pr_loop_hardening.sh` passes under both sh and dash.
+- The diff `52cbf7f..abf2a0f` keeps `event` in the runs projection and counts only pull_request, pull_request_target and merge_group runs when deciding a required workflow.
+- I applied each mutant in a scratch copy via the installer and `--self`, one at a time:
+  - event filter removed: killed
+  - `merge_group` dropped: killed
+  - `push` added to the allowed list: killed
+  - `workflow_dispatch` added to the allowed list: killed
+  - `pull_request_target` dropped: SURVIVED
+- Non-blocking nit: the `pull_request_target`-only success path has no pin. Dropping it fails closed, as a false needs-human for such workflows. A case with a `pull_request_target` success run that expects green would pin it.

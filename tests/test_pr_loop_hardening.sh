@@ -347,6 +347,7 @@ PY
                  "42|$W completed success 2026-01-01T00:00:00Z push|1" \
                  "42|$W completed failure 2026-01-01T00:00:00Z;$W completed success 2026-01-02T00:00:00Z push|1" \
                  "42|$W completed success 2026-01-01T00:00:00Z merge_group|0" \
+                 "42|$W completed success 2026-01-01T00:00:00Z pull_request_target|0" \
                  "99|$W completed success 2026-01-01T00:00:00Z|1"; do
       _rid="${_case%%|*}"; _rest="${_case#*|}"; _runs="${_rest%%|*}"; _want="${_rest##*|}"
       _e="$T/ci-wf"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
