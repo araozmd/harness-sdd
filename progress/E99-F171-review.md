@@ -116,3 +116,15 @@ Non-blocking nit: removing the ceiling makes the test time out rather than fail 
 - The diff `47cbf93..ebdec3f` moves the `ci_required_gate` branch to just after the `merge_ok` check. It still sits before the dry-run and merge branches and after the stale-head receipt. A thread blocker is no longer delayed or masked by the CI wait.
 - The mutant that restores the old order (the `merge_ok` branch moved back to after the CI gate) made the suite fail.
 - Non-blocking observation: the `merge_ok` refusal branch only echoes and does not label needs-human. That was already the case and is unchanged by this commit.
+
+## Round 9 (d878dc1) — APPROVE
+
+- `./init.sh` exits 0. `tests/test_pr_loop_hardening.sh` and `tests/test_pr_loop.sh` pass under both sh and dash.
+- The diff `efeaf3f..d878dc1` factors the enumeration query and jq into `thread_scan()`. The initial scan keeps the fail-closed `if ! unresolved=$(thread_scan)` check. The merge block re-scans right after the CI gate and before the dry-run and merge branches. A failed rescan, or any `false` line (a thread not provably Codex-only), gives the needs-human label and no merge. Codex-only lines do not block.
+- I applied each mutant in a scratch copy via the installer and `--self`, one at a time:
+  - recheck dropped: killed
+  - recheck placed before the CI gate: killed
+  - failed rescan treated as clean: killed
+  - `false` lines ignored: killed
+  - any thread blocks, Codex-only included: killed
+- Non-blocking observation: the `auto_merge: false` hand-back does not re-scan threads after its CI wait. It claims readiness but does not merge, and the human reviews it anyway, so this is acceptable. It could be mentioned in the docs.
