@@ -100,3 +100,12 @@ Non-blocking nit: removing the ceiling makes the test time out rather than fail 
   - `cancel` removed from `red`: SURVIVED
 - The `cancel` survivor is equivalent for green/not-green. A cancelled check now falls into `$pend` and waits to the ceiling, so it is never green. Only the fail-fast, an immediate red, is unpinned. Non-blocking.
 - Behavioural note: any base with a ruleset `workflows` rule will always go to needs-human on both terminal paths. That is the intended trade-off, and it is documented.
+
+## Round 7 (9b52f4f) — APPROVE
+
+- `./init.sh` exits 0. `tests/test_pr_loop_hardening.sh` passes under both sh and dash.
+- The diff `62f98e0..9b52f4f` encodes the base with `jq -sRr @uri` before both the `branches/` and `rules/branches/` reads. I checked that `release#1` becomes `release%231`. The fail-closed path stays: `[ -n "$_ci_benc" ]` guards the reads.
+- I applied each mutant in a scratch copy via the installer and `--self`, one at a time:
+  - raw base in both URLs: killed (the failure message is from a static "without URL-encoding" check in the suite)
+  - raw base in the rules URL only: killed (same static check)
+- Caveat, non-blocking: the encoding also turns `/` into `%2F` for names like `feat/x`. GitHub accepts this for the branch endpoints, but I did not verify it live.
