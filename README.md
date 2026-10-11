@@ -301,7 +301,10 @@ was armed; explicit Claude-only generation preserves that prior verdict. See
 `P0|P1|P2|nit` from the inline findings + review bodies + issue comments, spawns one
 `pr-fixer` per blocking comment, and merges when every gate is green and every remaining
 unresolved thread is Codex-owned. A non-Codex unresolved thread routes to `needs-human`
-and never merges.
+and never merges. Both terminal paths, the merge and the `auto_merge: false` hand-back,
+first wait on the PR's **required** checks (`gh pr checks --required`, bounded by
+`HARNESS_POLL_CEILING`). Red or still-pending required CI goes to `needs-human`, never
+to a green summary.
 
 Policy lives in `harness.config.yaml` under `pr_loop:` — `enabled` (opt-in master gate,
 seeded `false`), `auto_merge`, `max_rounds`, `blocking_severities`, `merge_strategy` —

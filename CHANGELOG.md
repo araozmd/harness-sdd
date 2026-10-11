@@ -4,6 +4,29 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.91.3] — 2026-10-10
+
+### Fixed — /sdd-pr-loop required CI on the terminal paths (E99-F171)
+- A clean or non-blocking `merge` verdict left the loop before step 6, which was the only
+  `gh pr checks --required` call. The `auto_merge: false` hand-back could then post "all
+  gates green" and write `handback`, and auto-merge could merge, while required CI was
+  pending or red. A new `ci_required_gate` now waits on the required checks, bounded by
+  `HARNESS_POLL_INTERVAL`/`HARNESS_POLL_CEILING`, before either terminal path claims
+  anything. The hand-back re-checks the reviewed head after the wait.
+- Red required CI, or CI still pending at the ceiling, goes to needs-human. The label goes
+  through `mut`, no green comment is posted and no `disposed` marker is written, so the
+  next run re-checks CI on the cached review.
+- The verdict comes from the `--json` buckets, because gh exits 0 on a **cancelled**
+  required check. The rollup is also compared with what the base branch requires (classic
+  protection contexts plus `required_status_checks` rules from every page of the active
+  rules). A required context that has not reported yet counts as pending, and an empty
+  rollup passes only when the base provably requires no checks. The gate needs gh 2.48 or
+  later for `--slurp`.
+- A base that has a ruleset `workflows` rule (required workflows) is never declared green.
+  The rollup does not carry the repository, path, revision or event identity that such a
+  rule pins, so the loop goes to needs-human and asks for CI to be confirmed by hand
+  rather than guessing.
+
 ## [0.91.2] — 2026-10-10
 
 ### Fixed — /sdd-pr-loop hand-back, dry run and resume (E99-F170)
