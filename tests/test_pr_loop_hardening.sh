@@ -76,7 +76,8 @@ printf '%s\n' "\$*" >> "$_e/gh.log"
 case "\$*" in
   *"--json headRefOid"*) echo "$2" ;;
   *"--json state,mergedAt,mergeCommit"*) echo "MERGED 2026-10-10T00:00:00Z bbbb" ;;
-  *"--json baseRefName"*|*"defaultBranchRef"*) echo main ;;
+  *"--json baseRefName"*) cat "$_e/base" 2>/dev/null || echo main ;;
+  *"defaultBranchRef"*) echo main ;;
   *"pr comment"*) echo "https://github.com/o/r/pull/7#issuecomment-1" ;;
   *"/rules/branches/"*)
     # Ruleset JSON as gh --paginate --slurp returns it (an array of pages):
@@ -306,6 +307,14 @@ PY
       [ "$_got" = "$_want" ] \
         || fail "CI: $_b ci_required_gate on '$_modes' (required: $_req) returned $_got, want $_want"
     done
+    # The base branch is URL-encoded as a REST path parameter (a '#' or '/' in its name).
+    _e="$T/ci-enc"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    printf 'release#1\n' > "$_e/base"
+    ( cd "$_e" && PATH="$_e/bin:$PATH" HARNESS_POLL_INTERVAL=1 HARNESS_POLL_CEILING=1 \
+        sh -c ". '$T/ci.sh'; pr_number=7; ci_required_gate" ) 2>/dev/null \
+      || fail "CI: $_b gate not green for base 'release#1' with passing required checks"
+    grep -q 'branches/release%231' "$_e/gh.log" && ! grep -q 'branches/release#1' "$_e/gh.log" \
+      || fail "CI: $_b interpolates the base branch into REST paths without URL-encoding it"
     # A CANCELLED required check is red at once, not pending until the ceiling.
     _e="$T/ci-cancel"; rm -rf "$_e"; mk_env "$_e" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     echo cancel > "$_e/ci"

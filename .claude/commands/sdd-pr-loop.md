@@ -857,9 +857,12 @@ ci_required_gate() {
     # page of the active rules. Anything unreadable is "unknown", never green.
     _ci_known=0; _ci_want=""; _ci_wfn=0
     _ci_base="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo '')"
-    if [ -n "$_ci_base" ] \
-       && _ci_bpj="$(gh api "repos/{owner}/{repo}/branches/$_ci_base" 2>/dev/null)" \
-       && _ci_rsj="$(gh api --paginate --slurp "repos/{owner}/{repo}/rules/branches/$_ci_base?per_page=100" 2>/dev/null)" \
+    # The base is a PATH parameter: URL-encode it (`release#1`, `a/b`), or a `#` turns
+    # the rest into a fragment and the read fails into a needless needs-human.
+    _ci_benc="$(printf '%s' "$_ci_base" | jq -sRr '@uri' 2>/dev/null || echo '')"
+    if [ -n "$_ci_base" ] && [ -n "$_ci_benc" ] \
+       && _ci_bpj="$(gh api "repos/{owner}/{repo}/branches/$_ci_benc" 2>/dev/null)" \
+       && _ci_rsj="$(gh api --paginate --slurp "repos/{owner}/{repo}/rules/branches/$_ci_benc?per_page=100" 2>/dev/null)" \
        && _ci_rsj="$(printf '%s' "$_ci_rsj" | jq -c '[.[] | if type == "array" then .[] else . end]' 2>/dev/null)" \
        && _ci_want="$( { printf '%s' "$_ci_bpj" \
               | jq -r '.protection.required_status_checks.contexts[]?' \
