@@ -53,7 +53,7 @@ in the table; Codex invocation uses `$sdd-*`, for example `$sdd-new Add search` 
 are discovered natively and roles are leased dynamically via `define_subagent` / `invoke_subagent`.
 pi invokes the same commands as `/sdd-*` through `.pi/prompts/` templates (thin pointers to
 the shared units) or as `/skill:sdd-*`; pi loads both only after the project is trusted
-(`/trust`, or `-a` on a headless run), and pi role isolation arrives with E35-F02.
+(`/trust`, or `-a` on a headless run; then `/reload` or restart pi in an open session), and pi role isolation arrives with E35-F02.
 See [WORKFLOW.md](WORKFLOW.md).
 
 | Command | Role it runs | Gate |
