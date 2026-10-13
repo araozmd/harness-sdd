@@ -300,7 +300,7 @@ test_pi_symlink_and_stamp_guards() {
   _t="$(new_target r7i)"; mkdir -p "$T/outside-r7i" "$_t/.harness"; ln -s "$T/outside-r7i" "$_t/.harness/.pi-prompts"
   ok_inst - - --agents=pi "$_t"
   [ -z "$(ls "$T/outside-r7i")" ] || fail "R7i: install wrote stamps THROUGH a symlinked .harness/.pi-prompts"
-  grep -q 'symlinked stamp component' "$OUT" || fail "R7i: no symlinked-stamp warning on install"
+  grep -q 'symlinked or non-regular stamp component' "$OUT" || fail "R7i: no symlinked-stamp warning on install"
   [ -L "$_t/.harness/.pi-prompts" ] || fail "R7i: the stamp-ledger symlink was replaced"
   # ... and deselect removes nothing through it (M25): real stamps AND fresh templates are victims.
   _t="$(new_target r7j)"; ok_inst - - --agents=pi "$_t"
@@ -310,7 +310,23 @@ test_pi_symlink_and_stamp_guards() {
   [ "$(ls "$T/outside-r7j" | wc -l | tr -d ' ')" = 7 ] \
     || fail "R7j: deselect removed stamps THROUGH a symlinked .harness/.pi-prompts (left: $(ls "$T/outside-r7j" | wc -l | tr -d ' '))"
   [ "$(ls "$_t/.pi/prompts" | wc -l | tr -d ' ')" = 7 ] || fail "R7j: deselect removed live templates despite the symlinked ledger"
-  grep -q 'symlinked stamp component' "$OUT" || fail "R7j: no symlinked-stamp warning on deselect"
+  grep -q 'symlinked or non-regular stamp component' "$OUT" || fail "R7j: no symlinked-stamp warning on deselect"
+  # (m) a non-regular stamp leaf (a directory) is unsafe: re-install copies nothing into it,
+  # deselect leaves the live template and the ledger node in place and does not abort.
+  _t="$(new_target r7m)"; ok_inst - - --agents=pi "$_t"
+  rm -f "$_t/.harness/.pi-prompts/sdd-next.md"; mkdir "$_t/.harness/.pi-prompts/sdd-next.md"
+  ok_inst - - --agents=pi "$_t"
+  [ -z "$(ls -A "$_t/.harness/.pi-prompts/sdd-next.md")" ] || fail "R7m: install copied a stamp INTO a directory stamp leaf"
+  grep -q 'symlinked or non-regular stamp component' "$OUT" || fail "R7m: no non-regular-stamp warning on install"
+  ok_inst - - --agents=claude "$_t"
+  [ -f "$_t/.pi/prompts/sdd-next.md" ] || fail "R7m: deselect deleted the live template behind a directory stamp leaf"
+  [ -d "$_t/.harness/.pi-prompts/sdd-next.md" ] || fail "R7m: deselect removed the directory stamp leaf"
+  [ ! -e "$_t/.pi/prompts/sdd-new.md" ] || fail "R7m: deselect stopped reconciling the other templates"
+  # (n) a ledger that exists as a regular FILE is unsafe too: install must not abort on mkdir.
+  _t="$(new_target r7n)"; mkdir -p "$_t/.harness"; printf 'not a dir\n' > "$_t/.harness/.pi-prompts"
+  ok_inst - - --agents=pi "$_t"
+  [ -f "$_t/.harness/.pi-prompts" ] || fail "R7n: the file-shaped ledger was replaced"
+  grep -q 'symlinked or non-regular stamp component' "$OUT" || fail "R7n: no non-regular-stamp warning for a file-shaped ledger"
   # (k) install -> user edit -> re-install drops the stale stamp, so the file is no longer owned (M18).
   _t="$(new_target r7k)"; ok_inst - - --agents=pi "$_t"
   printf 'user edit\n' >> "$_t/.pi/prompts/sdd-new.md"

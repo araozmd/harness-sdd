@@ -7758,14 +7758,19 @@ EOF
     [ -L "$TARGET/.pi" ] || [ -L "$TARGET/.pi/prompts" ] || [ -L "$TARGET/.pi/prompts/$1.md" ]
   }
 
-  # pi_prompt_stamp_is_symlinked <command> — the ledger dir or the stamp leaf.
-  pi_prompt_stamp_is_symlinked() {
-    [ -L "$H/.pi-prompts" ] || [ -L "$H/.pi-prompts/$1.md" ]
+  # pi_prompt_stamp_is_unsafe <command> — the ledger dir or the stamp leaf is a symlink, or
+  # exists as the wrong node type (a non-directory ledger, a non-regular leaf such as a
+  # directory). Either way the installer cannot copy, compare or `rm -f` it safely, so both
+  # the live template and the ledger node are left unchanged.
+  pi_prompt_stamp_is_unsafe() {
+    [ -L "$H/.pi-prompts" ] || [ -L "$H/.pi-prompts/$1.md" ] \
+      || { [ -e "$H/.pi-prompts" ] && [ ! -d "$H/.pi-prompts" ]; } \
+      || { [ -e "$H/.pi-prompts/$1.md" ] && [ ! -f "$H/.pi-prompts/$1.md" ]; }
   }
 
-  # discard_pi_prompt_stamp <command> — drop a stamp unless a symlink makes it unsafe.
+  # discard_pi_prompt_stamp <command> — drop a stamp unless its node is unsafe (see above).
   discard_pi_prompt_stamp() {
-    pi_prompt_stamp_is_symlinked "$1" && return 0
+    pi_prompt_stamp_is_unsafe "$1" && return 0
     rm -f "$H/.pi-prompts/$1.md"
     return 0
   }
@@ -7775,8 +7780,8 @@ EOF
     _ipp_cmd="$1"
     _ipp_live="$TARGET/.pi/prompts/$_ipp_cmd.md"
     _ipp_stamp="$H/.pi-prompts/$_ipp_cmd.md"
-    if pi_prompt_stamp_is_symlinked "$_ipp_cmd"; then
-      echo "⚠️  .harness/.pi-prompts/$_ipp_cmd.md has a symlinked stamp component — pi prompt template and stamp left unchanged" >&2
+    if pi_prompt_stamp_is_unsafe "$_ipp_cmd"; then
+      echo "⚠️  .harness/.pi-prompts/$_ipp_cmd.md has a symlinked or non-regular stamp component — pi prompt template and stamp left unchanged" >&2
       return 0
     fi
     if pi_prompt_live_is_symlinked "$_ipp_cmd"; then
@@ -7808,8 +7813,8 @@ EOF
     for _rpp_cmd in $_rpp_cmds; do
       _rpp_live="$TARGET/.pi/prompts/$_rpp_cmd.md"
       _rpp_stamp="$H/.pi-prompts/$_rpp_cmd.md"
-      if pi_prompt_stamp_is_symlinked "$_rpp_cmd"; then
-        echo "⚠️  .harness/.pi-prompts/$_rpp_cmd.md has a symlinked stamp component — pi prompt template and stamp left unchanged" >&2
+      if pi_prompt_stamp_is_unsafe "$_rpp_cmd"; then
+        echo "⚠️  .harness/.pi-prompts/$_rpp_cmd.md has a symlinked or non-regular stamp component — pi prompt template and stamp left unchanged" >&2
         continue
       fi
       if pi_prompt_live_is_symlinked "$_rpp_cmd"; then
