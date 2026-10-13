@@ -6,7 +6,7 @@ The model is the engine (or the horse); the harness is the chassis (or the reins
 
 **The core bet:** models and runtimes change, while repository-owned intent and
 evidence can remain portable. Files you own let this project support Claude Code
-(primary), Codex (second), OpenCode (third), and Antigravity without adopting one vendor wrapper.
+(primary), Codex (second), OpenCode (third), Antigravity, and pi without adopting one vendor wrapper.
 Read the deeper [rationale and deletion ledger](RATIONALE.md) for the limits of
 that claim, the distinction between current-model compensation and durable process
 value, and the evidence required before removing a mechanism.
@@ -51,6 +51,9 @@ in the table; Codex invocation uses `$sdd-*`, for example `$sdd-new Add search` 
 `$sdd-next`. The shared adapter names both invocations; accompanying text supplies
 `$ARGUMENTS`. In Codex, `/skills` provides discovery. In Antigravity, `/sdd-*` slash commands
 are discovered natively and roles are leased dynamically via `define_subagent` / `invoke_subagent`.
+pi invokes the same commands as `/sdd-*` through `.pi/prompts/` templates (thin pointers to
+the shared units) or as `/skill:sdd-*`; pi loads both only after the project is trusted
+(`/trust`, or `-a` on a headless run), and pi role isolation arrives with E35-F02.
 See [WORKFLOW.md](WORKFLOW.md).
 
 | Command | Role it runs | Gate |
@@ -97,7 +100,7 @@ harness source checkout, where no OpenCode command surface is installed, it is t
 `supported` to the marker directly after confirming native concurrent sub-agents, or to
 run the batch sequentially instead. Last-written stamps protect skill
 units and role files from selected-install overwrite and unsafe reclamation; the units
-are claimed by Antigravity, Codex, and OpenCode and reclaimed only when the last claimant is
+are claimed by Antigravity, Codex, OpenCode, and pi and reclaimed only when the last claimant is
 deselected. Current installs never create global Codex prompts. Ungated legacy prompts
 remain because their cross-target ownership is unknowable; only ledger-proven,
 byte-pristine `sdd-pr-loop` is reclaimed.

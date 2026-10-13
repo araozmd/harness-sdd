@@ -3,7 +3,7 @@
 The harness is portable: it installs into any repo as a self-contained `.harness/`
 directory plus a few thin pointers. Install and upgrade are the **same idempotent
 command**. Supported front ends, in priority order, are **Claude Code**,
-**Codex**, **OpenCode**, and **Antigravity**. Gemini CLI is retired; see
+**Codex**, **OpenCode**, **Antigravity**, and **pi**. Gemini CLI is retired; see
 [legacy upgrades](#retiring-gemini).
 
 ## Prerequisites
@@ -35,7 +35,8 @@ your-project/
 ├── .opencode/command/*.md              # selected OpenCode commands; fix-parallel needs capability/override
 ├── .opencode/agent/pr-fixer.md         # only while pr_loop.enabled (OpenCode file-based sub-agent)
 ├── opencode.json                       # created only if absent (re-stamped only while pristine)
-├── .agents/skills/sdd-*/                # shared Codex/OpenCode $sdd-*/sdd-* skill units
+├── .pi/prompts/sdd-*.md                # selected pi only: /sdd-* prompt templates (pointers to the skill units)
+├── .agents/skills/sdd-*/                # shared Codex/OpenCode/Antigravity/pi $sdd-*/sdd-* skill units
 │   ├── SKILL.md                         # adapter + canonical workflow
 │   └── agents/openai.yaml               # explicit-only invocation policy
 ├── .codex/agents/*.toml                # seven standard Codex roles + gated pr-fixer; model optional
@@ -94,9 +95,9 @@ Last-written copies under `.harness/.codex-skills/` protect both files together.
 Selected installs, gate-off and deselection preserve foreign, edited or
 symlinked units with a diagnostic. Codex role TOMLs use the matching protection
 under `.harness/.model-agents/codex/`. Historical stamp directory names remain
-unchanged, preserving prior ownership evidence. The claiming set is `{codex, opencode}`
-(ADR-0003): the units are installed while **either** is selected and reclaimed only
-when the **last** claimant is deselected, so deselecting one front-end leaves the
+unchanged, preserving prior ownership evidence. The claiming set is
+`{codex, opencode, antigravity, pi}` (ADR-0003): the units are installed while **any** is
+selected and reclaimed only when the **last** claimant is deselected, so deselecting one front-end leaves the
 other's discoverable surface intact. Only proven pristine units are reclaimed, with
 edited units and companions preserved.
 
@@ -107,10 +108,23 @@ preserved because their cross-target ownership is unknown. Only a byte-pristine
 legacy `sdd-pr-loop.md` with a readable ownership ledger proving no live owners
 is reclaimable. Missing, unreadable or live-owner evidence preserves the prompt.
 
+### pi
+
+Selecting **pi** (`--agents=pi`) claims the shared `.agents/skills/` units (invoke
+`/skill:sdd-next`) and writes `.pi/prompts/sdd-*.md` prompt templates (invoke `/sdd-next`).
+Each template is a thin pointer that tells pi to read the shared `SKILL.md`; it is never a
+second copy of the workflow. pi loads project prompt templates and skills only after the
+project is trusted: run `/trust` in an interactive session, or pass `-a` (`--approve`) on a
+headless `pi -p` run. Ownership is pristine-only, recorded in `.harness/.pi-prompts/`: an
+edited or foreign `.pi/prompts/sdd-*.md` survives install and deselection with a warning,
+and `.pi/` is pruned only when empty. The installer never touches `~/.pi/agent` or
+`.pi/settings.json`. Until E35-F02 lands, a pi session can run the `/sdd-*` workflows but has
+no isolated role contexts; role isolation on pi arrives with E35-F02.
+
 ### Retiring Gemini
 
-The accepted selectors are `claude`, `codex`, `opencode`, and `antigravity`; `--agents=all`
-expands to those four. Explicit `gemini` in `--agents`,
+The accepted selectors are `claude`, `codex`, `opencode`, `antigravity`, and `pi`; `--agents=all`
+expands to those five. Explicit `gemini` in `--agents`,
 `HARNESS_AGENTS`, or `HARNESS_HOST_AGENT` fails before target writes and names
 supported replacements. Ambient retired-host session markers are ignored.
 
@@ -121,7 +135,7 @@ survives, the upgrade stops before mutation; choose the desired replacement:
 
 ```bash
 ./harness-install.sh --agents=codex /path/to/your-project
-# Or choose --agents=claude, --agents=opencode, --agents=antigravity, or a supported CSV.
+# Or choose --agents=claude, --agents=opencode, --agents=antigravity, --agents=pi, or a supported CSV.
 ```
 
 A version-stamped legacy install without `.harness/.agents` uses the surviving
@@ -298,7 +312,7 @@ HARNESS_AGENTS=host ./harness-install.sh /path/to/your-project
 `host` is a resolution mode, not an agent key. It must be the whole value;
 `--agents=host,codex` fails before writes. The recorded `.harness/.agents` holds
 concrete keys only. Explicit `--agents=<csv>` takes precedence over
-`HARNESS_AGENTS`; accepted keys are `claude`, `codex`, and `opencode`.
+`HARNESS_AGENTS`; accepted keys are `claude`, `codex`, `opencode`, `antigravity`, and `pi`.
 
 ### Which markers are trusted
 
@@ -311,6 +325,7 @@ variables do not identify the host.
 | `claude` | `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT` | Claude Code 2.1.220 |
 | `codex` | `CODEX_THREAD_ID` | codex-cli 0.145.0 |
 | `opencode` | `OPENCODE`, `OPENCODE_PID` | opencode 1.18.5 |
+| `pi` | `PI_CODING_AGENT` | pi 1.2.0 |
 
 Empty markers do not count. Multiple supported hosts produce an ambiguity
 warning and an undetected result. Retired-host markers are ignored. A detection
@@ -350,13 +365,14 @@ host, or Claude alone when undetected. Its priority order is:
 [ ] codex
 [ ] opencode
 [ ] antigravity
+[ ] pi
 ```
 
 You can add or remove selections before confirming. Interactive upgrades start
 from the supported saved `.harness/.agents` selection, irrespective of the currently detected host.
 Fresh unattended installs with no override select Claude only; unattended
 upgrades preserve surviving saved keys. `--agents=all` explicitly selects all
-four. A legacy install without a selection file starts from `claude,opencode`.
+five. A legacy install without a selection file starts from `claude,opencode`.
 
 ### Seeing what it would do — `--print-agents`
 
