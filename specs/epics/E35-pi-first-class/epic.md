@@ -72,7 +72,7 @@ the parts that make the harness more than one prompt are missing on pi:
 
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| F01 | pi front-end key: shared-skill claim, `.pi/prompts` commands, host marker, worker entry, docs | pending | true | — |
+| F01 | pi front-end key: shared-skill claim, `.pi/prompts` commands, host marker, worker entry, docs | spec-ready | true | — |
 | F02 | pi role sub-agents: `.pi/agents/<role>.md` for pi-subagents + `tools/pi-dispatch.sh` fallback, `--self` | pending | true | F01 |
 | F03 | pi model routing: `pin.pi.<tier>`, tier→thinking ladder, escalation arming | pending | true | F02 |
 | F04 | pi environment preflight + approval-gated pinned `pi-subagents` install | pending | true | F02 |
