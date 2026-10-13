@@ -404,7 +404,7 @@ test_pi_owned_paths() {
   _t="$(new_target r10i)"; ok_inst - - --agents=pi "$_t"
   (cd "$_t" && git init -q && git config user.email t@example.com && git config user.name t \
     && git add -A && git commit -q -m base) >/dev/null 2>&1
-  (cd "$_t" && env -i PATH="$SANDBOX_PATH" HOME="$T/home" sh ./.harness/init.sh) >"$OUT" 2>&1 \
+  (cd "$_t" && env -i PATH="$SANDBOX_PATH" HOME="$T/home" ./.harness/init.sh) >"$OUT" 2>&1 \
     || { cat "$OUT" >&2; fail "R10: ./.harness/init.sh failed in a committed pi target"; }
   pass "harness-owned-paths reports pi templates only while pi is listed and the ledger is trustworthy (R10)"
 }
