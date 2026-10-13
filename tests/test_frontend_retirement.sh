@@ -3,11 +3,11 @@
 set -eu
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 python3 - "$SRC" <<'PY'
-import hashlib, os, pathlib, shutil, subprocess, sys, tempfile
+import hashlib, os, pathlib, re, shutil, subprocess, sys, tempfile
 src=pathlib.Path(sys.argv[1]); fixture=src/'tests/fixtures/frontend-v0.78.1'
 with tempfile.TemporaryDirectory(prefix='harness-retirement-') as temp:
     root=pathlib.Path(temp); env=os.environ.copy()
-    for key in ('HARNESS_AGENTS','HARNESS_HOST_AGENT','HARNESS_PR_LOOP_ENABLED','CLAUDECODE','CLAUDE_CODE_ENTRYPOINT','CODEX_THREAD_ID','OPENCODE','OPENCODE_PID','ANTIGRAVITY_AGENT','ANTIGRAVITY_CONVERSATION_ID'):
+    for key in ('HARNESS_AGENTS','HARNESS_HOST_AGENT','HARNESS_PR_LOOP_ENABLED','CLAUDECODE','CLAUDE_CODE_ENTRYPOINT','CODEX_THREAD_ID','OPENCODE','OPENCODE_PID','ANTIGRAVITY_AGENT','ANTIGRAVITY_CONVERSATION_ID','PI_CODING_AGENT','PI_SESSION_ID','AI_AGENT'):
         env.pop(key,None)
     env.update(HOME=str(root/'home'),CODEX_HOME=str(root/'codex'))
     def install(p,*args,extra=None,ok=True):
@@ -27,9 +27,9 @@ with tempfile.TemporaryDirectory(prefix='harness-retirement-') as temp:
     p=old('explicit'); before=snapshot(p)
     for args,e in [(('--agents=gemini',),{}),((),{'HARNESS_AGENTS':'gemini'}),(('--agents=host',),{'HARNESS_HOST_AGENT':'gemini'})]:
         out=install(p,*args,extra=e,ok=False)
-        assert 'claude' in out and 'codex' in out and 'opencode' in out and 'antigravity' in out
+        assert 'claude' in out and 'codex' in out and 'opencode' in out and 'antigravity' in out and re.search(r'\bpi\b', out)
         assert snapshot(p)==before, 'explicit rejected selector mutated target'
-    p=fresh('all'); install(p,'--agents=all'); assert (p/'.harness/.agents').read_text()=='antigravity\nclaude\ncodex\nopencode\n'
+    p=fresh('all'); install(p,'--agents=all'); assert (p/'.harness/.agents').read_text()=='antigravity\nclaude\ncodex\nopencode\npi\n'
     p=fresh('ambient'); install(p,'--agents=host',extra={'ANTIGRAVITY_AGENT':'1','GEMINI_CLI':'1'}); assert (p/'.harness/.agents').read_text()=='claude\n'
     print('ok - active_registry_and_explicit_rejection (R1)')
     p=old('retired-only','gemini-only-off'); before=snapshot(p)
