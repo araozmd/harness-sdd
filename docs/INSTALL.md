@@ -115,7 +115,8 @@ Selecting **pi** (`--agents=pi`) claims the shared `.agents/skills/` units (invo
 Each template is a thin pointer that tells pi to read the shared `SKILL.md`; it is never a
 second copy of the workflow. pi loads project prompt templates and skills only after the
 project is trusted: run `/trust` in an interactive session, or pass `-a` (`--approve`) on a
-headless `pi -p` run. Ownership is pristine-only, recorded in `.harness/.pi-prompts/`: an
+headless `pi -p` run. `/trust` does not reload the current session, so run `/reload` (or
+restart pi) before invoking the new `/sdd-*` templates and skills. Ownership is pristine-only, recorded in `.harness/.pi-prompts/`: an
 edited or foreign `.pi/prompts/sdd-*.md` survives install and deselection with a warning,
 and `.pi/` is pruned only when empty. The installer never touches `~/.pi/agent` or
 `.pi/settings.json`. Until E35-F02 lands, a pi session can run the `/sdd-*` workflows but has

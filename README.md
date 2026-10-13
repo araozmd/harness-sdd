@@ -118,7 +118,7 @@ Orchestrator spawns `architect` → (human approves) → `builder` → `reviewer
 | **Codex** | `AGENTS.md` (native) | `.codex/agents/*.toml` roles + the shared repository-local `$sdd-*` skills in `.agents/skills/` (including gated `$sdd-pr-loop`) |
 | **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-test-concurrency` and `/sdd-pr-loop`; it also reads the shared `.agents/skills/` units, so `/sdd-*` resolve from both surfaces; `/sdd-fix-parallel` is opt-in (verified by `/sdd-test-concurrency`) |
 | **Antigravity** | `AGENTS.md` (native) | Dynamic subagents leased via `define_subagent` / `invoke_subagent` from `agents/<role>.md` + `/sdd-*` slash commands via shared `.agents/skills/` |
-| **pi** | `AGENTS.md` (native) | `/sdd-*` prompt templates in `.pi/prompts/` (thin pointers to the shared units) + the shared `.agents/skills/` (`/skill:sdd-*`). Project must be trusted first (`/trust`, or `-a` on a headless run). Role isolation on pi arrives with E35-F02. |
+| **pi** | `AGENTS.md` (native) | `/sdd-*` prompt templates in `.pi/prompts/` (thin pointers to the shared units) + the shared `.agents/skills/` (`/skill:sdd-*`). Project must be trusted first (`/trust`, or `-a` on a headless run), then `/reload` (or restart pi) in an already-open session. Role isolation on pi arrives with E35-F02. |
 
 The tables and workflow prose use the portable `/sdd-*` spelling; in Codex, invoke the
 shared repository skills as `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`,
@@ -439,7 +439,8 @@ legacy files are preserved with warnings.
 
 **pi.** Selecting `pi` installs `.pi/prompts/sdd-*.md` (invoke `/sdd-next`) and claims the shared
 `.agents/skills/` units (invoke `/skill:sdd-next`). Both load only after the project is
-trusted (`/trust`, or `-a` on a headless `pi -p` run). Templates are pristine-only: an edited
+trusted (`/trust`, or `-a` on a headless `pi -p` run); `/trust` does not reload an open session, so
+run `/reload` (or restart pi) afterwards. Templates are pristine-only: an edited
 or foreign one survives deselection. Role isolation on pi arrives with E35-F02.
 
 **Antigravity, Codex, and OpenCode workflows are repository-local.** Selecting

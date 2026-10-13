@@ -459,10 +459,12 @@ test_pi_operator_text() {
   # banners (fresh installs)
   _t="$(new_target r12d)"; ok_inst - - --agents=pi "$_t"
   grep -qF 'pi: open the repo, trust the project' "$OUT" || fail "R12: pi-only banner lacks the trust step"
+  grep -qF 'then /reload (or restart pi)' "$OUT" || fail "R12: pi-only banner lacks the /reload step"
   grep -qF 'pi: run /sdd-next' "$OUT" || fail "R12: pi-only banner lacks /sdd-next"
   _t="$(new_target r12e)"; ok_inst - - --agents=claude,pi "$_t"
   grep -qF '(Claude Code/pi)' "$OUT" || fail "R12: claude,pi banner lacks (Claude Code/pi)"
   grep -qF 'pi: trust the project first' "$OUT" || fail "R12: claude,pi banner lacks the trust line"
+  grep -qF 'then /reload (or restart pi)' "$OUT" || fail "R12: claude,pi banner lacks the /reload step"
   # Antigravity single-host banner is unchanged.
   _t="$(new_target r12f)"; ok_inst - - --agents=antigravity "$_t"
   grep -qF '3. Antigravity: open the repo and run /sdd-plan' "$OUT" || fail "R12: Antigravity banner changed"

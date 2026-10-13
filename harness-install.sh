@@ -8372,7 +8372,7 @@ EOF
         echo "  5. $_advice_baseline"
         echo "  6. OpenCode: run /sdd-next to spec and build that work."
       elif [ "$_adv_pi" = 1 ]; then
-        echo "  3. pi: open the repo, trust the project (/trust, or -a on a headless run), and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
+        echo "  3. pi: open the repo, trust the project (/trust, or -a on a headless run), then /reload (or restart pi) so the new prompts and skills load, and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
         echo "  4. pi: run /sdd-drill <epic-id> to decompose the first draft epic into features."
         echo "  5. $_advice_baseline"
         echo "  6. pi: run /sdd-next to spec and build that work."
@@ -8411,7 +8411,7 @@ EOF
       fi
       echo "  3. $_adv_plan to brainstorm the vision, architecture, ADRs and draft epics."
       if [ "$_adv_pi" = 1 ]; then
-        echo "     (pi: trust the project first — /trust, or -a on a headless run.)"
+        echo "     (pi: trust the project first — /trust, or -a on a headless run — then /reload (or restart pi) so the new prompts and skills load.)"
       fi
       echo "  4. $_adv_drill to decompose the first draft epic into features."
       echo "  5. $_advice_baseline"
