@@ -121,6 +121,8 @@ emit_glue() {
       [ ! -L "$_pst" ] && [ -f "$_pst" ] || continue
       _pname="${_pst##*/}"
       [ ! -L "$_root/.pi/prompts/$_pname" ] || continue
+      # a live leaf that exists but is not a regular file (an operator directory) is never claimed
+      [ ! -e "$_root/.pi/prompts/$_pname" ] || [ -f "$_root/.pi/prompts/$_pname" ] || continue
       printf ':(literal).pi/prompts/%s\n' "$_pname"
     done
   fi

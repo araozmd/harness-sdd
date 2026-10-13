@@ -349,6 +349,25 @@ test_pi_symlink_and_stamp_guards() {
   ok_inst - - --agents=claude "$_t"
   [ -f "$_t/.pi/prompts/sdd-next.md/keep" ] || fail "R7p: deselect removed the directory-shaped template leaf"
   [ ! -e "$_t/.pi/prompts/sdd-new.md" ] || fail "R7p: deselect stopped reconciling the sibling templates"
+  # (q) a SYMLINKED `.pi` (the parent of prompts/): `rmdir .pi/prompts` follows an INTERMEDIATE
+  # symlink, so only an EMPTY outside prompts/ can observe a prune-through (mutant K, round 3).
+  for _v in empty fresh; do
+    _t="$(new_target r7q-$_v)"; _o="$T/outside-r7q-$_v"; rm -rf "$_o"; mkdir -p "$_o/prompts"
+    [ "$_v" = fresh ] && cp "$_d"/.pi/prompts/*.md "$_o/prompts/"
+    _before="$(ls -A "$_o/prompts" | wc -l | tr -d ' ')"
+    ln -s "$_o" "$_t/.pi"
+    ok_inst - - --agents=pi --pr-loop=true "$_t"
+    grep -q 'symlink' "$OUT" || fail "R7q($_v): no symlink warning on install"
+    [ "$(ls -A "$_o" | tr '\n' ' ')" = "prompts " ] || fail "R7q($_v): install wrote through a symlinked .pi ($(ls -A "$_o" | tr '\n' ' '))"
+    [ "$(ls -A "$_o/prompts" | wc -l | tr -d ' ')" = "$_before" ] || fail "R7q($_v): install changed the outside prompts/"
+    ok_inst - - --agents=pi --pr-loop=false "$_t"
+    [ -d "$_o/prompts" ] || fail "R7q($_v): gate-off deleted the outside prompts/ THROUGH a symlinked .pi"
+    [ "$(ls -A "$_o/prompts" | wc -l | tr -d ' ')" = "$_before" ] || fail "R7q($_v): gate-off changed the outside prompts/"
+    ok_inst - - --agents=claude "$_t"
+    [ -L "$_t/.pi" ] || fail "R7q($_v): the .pi symlink was removed on deselect"
+    [ -d "$_o/prompts" ] || fail "R7q($_v): deselect deleted the outside prompts/ THROUGH a symlinked .pi"
+    [ "$(ls -A "$_o/prompts" | wc -l | tr -d ' ')" = "$_before" ] || fail "R7q($_v): deselect changed the outside prompts/"
+  done
   # (k) install -> user edit -> re-install drops the stale stamp, so the file is no longer owned (M18).
   _t="$(new_target r7k)"; ok_inst - - --agents=pi "$_t"
   printf 'user edit\n' >> "$_t/.pi/prompts/sdd-new.md"
@@ -438,6 +457,14 @@ test_pi_owned_paths() {
   mv "$_t/.harness/.pi-prompts" "$T/ledger-r10s"; ln -s "$T/ledger-r10s" "$_t/.harness/.pi-prompts"
   _p="$(cd "$_t" && sh .harness/tools/harness-owned-paths.sh all .harness)"
   printf '%s\n' "$_p" | grep -q '\.pi/' && fail "R10: a symlinked ledger was trusted"
+  # A stamp survives but the live leaf was replaced by a DIRECTORY: it is never claimed (round 3).
+  _t="$(new_target r10d)"; ok_inst - - --agents=pi "$_t"
+  git -C "$_t" init -q 2>/dev/null
+  rm -f "$_t/.pi/prompts/sdd-next.md"; mkdir "$_t/.pi/prompts/sdd-next.md"; : > "$_t/.pi/prompts/sdd-next.md/notes.txt"
+  [ -f "$_t/.harness/.pi-prompts/sdd-next.md" ] || fail "R10d: precondition — the stamp did not survive"
+  _p="$(cd "$_t" && sh .harness/tools/harness-owned-paths.sh all .harness)"
+  printf '%s\n' "$_p" | grep -qxF ':(literal).pi/prompts/sdd-next.md' && fail "R10d: a directory leaf was claimed as harness-owned"
+  printf '%s\n' "$_p" | grep -qxF ':(literal).pi/prompts/sdd-new.md' || fail "R10d: the sibling template lost its claim"
   # ./.harness/init.sh passes once the install is committed.
   _t="$(new_target r10i)"; ok_inst - - --agents=pi "$_t"
   (cd "$_t" && git init -q && git config user.email t@example.com && git config user.name t \
