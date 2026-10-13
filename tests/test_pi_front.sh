@@ -287,8 +287,8 @@ test_pi_symlink_and_stamp_guards() {
   ln -s "$T/outside-r7g2" "$_t/.pi/prompts"
   ok_inst - - --agents=pi --pr-loop=false "$_t"
   ok_inst - - --agents=claude "$_t"
-  [ "$(grep -c 'symlinked destination component' "$OUT")" = 7 ] \
-    || fail "R7g: expected 7 symlink warnings (none for the never-installed sdd-pr-loop), got $(grep -c 'symlinked destination component' "$OUT")"
+  [ "$(grep -c 'symlinked or non-regular destination component' "$OUT")" = 7 ] \
+    || fail "R7g: expected 7 symlink warnings (none for the never-installed sdd-pr-loop), got $(grep -c 'symlinked or non-regular destination component' "$OUT")"
   # (h) the same on pr_loop gate-off with pi still selected.
   _t="$(new_target r7h)"; mkdir -p "$_t/.pi"; _victims "$T/outside-r7h"; ln -s "$T/outside-r7h" "$_t/.pi/prompts"
   ok_inst - - --agents=pi --pr-loop=true "$_t"
@@ -327,6 +327,28 @@ test_pi_symlink_and_stamp_guards() {
   ok_inst - - --agents=pi "$_t"
   [ -f "$_t/.harness/.pi-prompts" ] || fail "R7n: the file-shaped ledger was replaced"
   grep -q 'symlinked or non-regular stamp component' "$OUT" || fail "R7n: no non-regular-stamp warning for a file-shaped ledger"
+  # (o) a live parent that exists as a regular FILE (`.pi`, then `.pi/prompts`) is unsafe:
+  # install must not abort on mkdir, the operator's file survives, the shared units still land.
+  for _pc in .pi .pi/prompts; do
+    _t="$(new_target "r7o-$(printf '%s' "$_pc" | tr '/.' '__')")"; mkdir -p "$_t/$(dirname "$_pc")"
+    printf 'operator file\n' > "$_t/$_pc"
+    ok_inst - - --agents=pi "$_t"
+    [ "$(cat "$_t/$_pc")" = 'operator file' ] || fail "R7o: the file-shaped $_pc was replaced"
+    grep -q 'symlinked or non-regular destination component' "$OUT" || fail "R7o: no non-regular warning for a file-shaped $_pc"
+    [ -f "$_t/.agents/skills/sdd-next/SKILL.md" ] || fail "R7o: install stopped before the shared units with a file-shaped $_pc"
+    [ ! -e "$_t/.harness/.pi-prompts/sdd-next.md" ] || fail "R7o: a stamp was written for a template that was never installed ($_pc)"
+    ok_inst - - --agents=claude "$_t"
+    [ "$(cat "$_t/$_pc")" = 'operator file' ] || fail "R7o: deselect removed the file-shaped $_pc"
+  done
+  # (p) a live template leaf that is a DIRECTORY is unsafe on install and on deselect.
+  _t="$(new_target r7p)"; mkdir -p "$_t/.pi/prompts/sdd-next.md"; : > "$_t/.pi/prompts/sdd-next.md/keep"
+  ok_inst - - --agents=pi "$_t"
+  [ -f "$_t/.pi/prompts/sdd-next.md/keep" ] || fail "R7p: install disturbed a directory-shaped template leaf"
+  grep -q 'symlinked or non-regular destination component' "$OUT" || fail "R7p: no non-regular warning for a directory leaf"
+  [ -f "$_t/.pi/prompts/sdd-new.md" ] || fail "R7p: the sibling templates were not installed"
+  ok_inst - - --agents=claude "$_t"
+  [ -f "$_t/.pi/prompts/sdd-next.md/keep" ] || fail "R7p: deselect removed the directory-shaped template leaf"
+  [ ! -e "$_t/.pi/prompts/sdd-new.md" ] || fail "R7p: deselect stopped reconciling the sibling templates"
   # (k) install -> user edit -> re-install drops the stale stamp, so the file is no longer owned (M18).
   _t="$(new_target r7k)"; ok_inst - - --agents=pi "$_t"
   printf 'user edit\n' >> "$_t/.pi/prompts/sdd-new.md"

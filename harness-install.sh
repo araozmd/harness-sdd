@@ -7753,19 +7753,28 @@ EOF
     } > "$_gpp_dest"
   }
 
-  # pi_prompt_live_is_symlinked <command> — any writable component of the live path.
-  pi_prompt_live_is_symlinked() {
-    [ -L "$TARGET/.pi" ] || [ -L "$TARGET/.pi/prompts" ] || [ -L "$TARGET/.pi/prompts/$1.md" ]
+  # pi_node_unsafe <path> <d|f> — ONE node-type rule for every pi path component (E35-F01).
+  # A component is unsafe when it is a symlink, or when it EXISTS as the wrong node type:
+  # `d` components (`.pi`, `.pi/prompts`, `.harness/.pi-prompts`) must be directories,
+  # `f` leaves (a template, a stamp) must be regular files. An absent node is safe — the
+  # installer creates it. Any unsafe node means the installer cannot `mkdir -p`, write,
+  # `cmp` or `rm -f` there without aborting under `set -e` or following a link, so the
+  # callers below leave that template and its stamp unchanged, with a warning.
+  pi_node_unsafe() {
+    [ -L "$1" ] && return 0
+    [ -e "$1" ] || return 1
+    if [ "$2" = d ]; then [ ! -d "$1" ]; else [ ! -f "$1" ]; fi
   }
 
-  # pi_prompt_stamp_is_unsafe <command> — the ledger dir or the stamp leaf is a symlink, or
-  # exists as the wrong node type (a non-directory ledger, a non-regular leaf such as a
-  # directory). Either way the installer cannot copy, compare or `rm -f` it safely, so both
-  # the live template and the ledger node are left unchanged.
+  # pi_prompt_live_is_unsafe <command> — any component of the live `.pi/prompts/<cmd>.md` path.
+  pi_prompt_live_is_unsafe() {
+    pi_node_unsafe "$TARGET/.pi" d || pi_node_unsafe "$TARGET/.pi/prompts" d \
+      || pi_node_unsafe "$TARGET/.pi/prompts/$1.md" f
+  }
+
+  # pi_prompt_stamp_is_unsafe <command> — the ledger dir or the stamp leaf.
   pi_prompt_stamp_is_unsafe() {
-    [ -L "$H/.pi-prompts" ] || [ -L "$H/.pi-prompts/$1.md" ] \
-      || { [ -e "$H/.pi-prompts" ] && [ ! -d "$H/.pi-prompts" ]; } \
-      || { [ -e "$H/.pi-prompts/$1.md" ] && [ ! -f "$H/.pi-prompts/$1.md" ]; }
+    pi_node_unsafe "$H/.pi-prompts" d || pi_node_unsafe "$H/.pi-prompts/$1.md" f
   }
 
   # discard_pi_prompt_stamp <command> — drop a stamp unless its node is unsafe (see above).
@@ -7784,8 +7793,8 @@ EOF
       echo "⚠️  .harness/.pi-prompts/$_ipp_cmd.md has a symlinked or non-regular stamp component — pi prompt template and stamp left unchanged" >&2
       return 0
     fi
-    if pi_prompt_live_is_symlinked "$_ipp_cmd"; then
-      echo "⚠️  .pi/prompts/$_ipp_cmd.md has a symlinked destination component — pi prompt template left unchanged" >&2
+    if pi_prompt_live_is_unsafe "$_ipp_cmd"; then
+      echo "⚠️  .pi/prompts/$_ipp_cmd.md has a symlinked or non-regular destination component — pi prompt template left unchanged" >&2
       discard_pi_prompt_stamp "$_ipp_cmd"
       return 0
     fi
@@ -7817,10 +7826,10 @@ EOF
         echo "⚠️  .harness/.pi-prompts/$_rpp_cmd.md has a symlinked or non-regular stamp component — pi prompt template and stamp left unchanged" >&2
         continue
       fi
-      if pi_prompt_live_is_symlinked "$_rpp_cmd"; then
+      if pi_prompt_live_is_unsafe "$_rpp_cmd"; then
         # Warn only for a template that is actually there (not for a never-installed one).
         if [ -e "$_rpp_live" ] || [ -L "$_rpp_live" ]; then
-          echo "⚠️  .pi/prompts/$_rpp_cmd.md has a symlinked destination component — pi prompt template left in place" >&2
+          echo "⚠️  .pi/prompts/$_rpp_cmd.md has a symlinked or non-regular destination component — pi prompt template left in place" >&2
         fi
         discard_pi_prompt_stamp "$_rpp_cmd"
         continue
@@ -7839,9 +7848,10 @@ EOF
       fi
       discard_pi_prompt_stamp "$_rpp_cmd"
     done
-    [ -L "$H/.pi-prompts" ] || rmdir "$H/.pi-prompts" 2>/dev/null || true
-    [ -L "$TARGET/.pi" ] || [ -L "$TARGET/.pi/prompts" ] || rmdir "$TARGET/.pi/prompts" 2>/dev/null || true
-    [ -L "$TARGET/.pi" ] || rmdir "$TARGET/.pi" 2>/dev/null || true
+    pi_node_unsafe "$H/.pi-prompts" d || rmdir "$H/.pi-prompts" 2>/dev/null || true
+    pi_node_unsafe "$TARGET/.pi" d || pi_node_unsafe "$TARGET/.pi/prompts" d \
+      || rmdir "$TARGET/.pi/prompts" 2>/dev/null || true
+    pi_node_unsafe "$TARGET/.pi" d || rmdir "$TARGET/.pi" 2>/dev/null || true
     if [ -n "$_rpp_gone" ]; then printf '%s\n' "$_rpp_gone"; fi
     return 0
   }
