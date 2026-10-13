@@ -7813,7 +7813,10 @@ EOF
         continue
       fi
       if pi_prompt_live_is_symlinked "$_rpp_cmd"; then
-        echo "⚠️  .pi/prompts/$_rpp_cmd.md has a symlinked destination component — pi prompt template left in place" >&2
+        # Warn only for a template that is actually there (not for a never-installed one).
+        if [ -e "$_rpp_live" ] || [ -L "$_rpp_live" ]; then
+          echo "⚠️  .pi/prompts/$_rpp_cmd.md has a symlinked destination component — pi prompt template left in place" >&2
+        fi
         discard_pi_prompt_stamp "$_rpp_cmd"
         continue
       fi

@@ -265,6 +265,75 @@ test_pi_prompt_ownership() {
   pass "templates are pristine-only on install, deselect and gate-off; symlinks are refused (R7)"
 }
 
+# ── R7 / R10 hardening (reviewer round 1: M26, M24/M25, M18, M13) ────────────────────────
+# A symlink-refusal test on a REMOVAL path needs a byte-fresh victim in the symlink target,
+# or a delete-through is unobservable (progress/lessons.md, 2026-10-13).
+test_pi_symlink_and_stamp_guards() {
+  # donor: byte-fresh templates (pr-loop on, so sdd-pr-loop.md exists) to plant as victims.
+  _d="$(new_target r7x-donor)"; ok_inst - - --agents=pi --pr-loop=true "$_d"
+  _victims() { rm -rf "$1"; mkdir -p "$1"; cp "$_d"/.pi/prompts/*.md "$1/"; }
+  _nv="$(ls "$_d/.pi/prompts" | wc -l | tr -d ' ')"
+  [ "$_nv" = 8 ] || fail "R7x: donor precondition — expected 8 templates, got $_nv"
+  # (g) deselect through a symlinked .pi/prompts must not delete the outside templates (M26).
+  _t="$(new_target r7g)"; mkdir -p "$_t/.pi"; _victims "$T/outside-r7g"; ln -s "$T/outside-r7g" "$_t/.pi/prompts"
+  ok_inst - - --agents=pi --pr-loop=true "$_t"
+  ok_inst - - --agents=claude "$_t"
+  [ -L "$_t/.pi/prompts" ] || fail "R7g: the symlink was removed on deselect"
+  [ "$(ls "$T/outside-r7g" | wc -l | tr -d ' ')" = 8 ] \
+    || fail "R7g: deselect deleted templates THROUGH a symlinked .pi/prompts (left: $(ls "$T/outside-r7g" | tr '\n' ' '))"
+  grep -q 'symlink' "$OUT" || fail "R7g: no symlink warning on deselect"
+  # one warning per template that exists; none for the never-installed sdd-pr-loop (pr_loop off).
+  _t="$(new_target r7g2)"; mkdir -p "$_t/.pi"; _victims "$T/outside-r7g2"; rm -f "$T/outside-r7g2/sdd-pr-loop.md"
+  ln -s "$T/outside-r7g2" "$_t/.pi/prompts"
+  ok_inst - - --agents=pi --pr-loop=false "$_t"
+  ok_inst - - --agents=claude "$_t"
+  [ "$(grep -c 'symlinked destination component' "$OUT")" = 7 ] \
+    || fail "R7g: expected 7 symlink warnings (none for the never-installed sdd-pr-loop), got $(grep -c 'symlinked destination component' "$OUT")"
+  # (h) the same on pr_loop gate-off with pi still selected.
+  _t="$(new_target r7h)"; mkdir -p "$_t/.pi"; _victims "$T/outside-r7h"; ln -s "$T/outside-r7h" "$_t/.pi/prompts"
+  ok_inst - - --agents=pi --pr-loop=true "$_t"
+  ok_inst - - --agents=pi --pr-loop=false "$_t"
+  [ -f "$T/outside-r7h/sdd-pr-loop.md" ] \
+    || fail "R7h: gate-off deleted sdd-pr-loop.md THROUGH a symlinked .pi/prompts"
+  [ "$(ls "$T/outside-r7h" | wc -l | tr -d ' ')" = 8 ] || fail "R7h: gate-off changed the outside templates"
+  # (i) a symlinked stamp ledger: install writes nothing through it (M24) ...
+  _t="$(new_target r7i)"; mkdir -p "$T/outside-r7i" "$_t/.harness"; ln -s "$T/outside-r7i" "$_t/.harness/.pi-prompts"
+  ok_inst - - --agents=pi "$_t"
+  [ -z "$(ls "$T/outside-r7i")" ] || fail "R7i: install wrote stamps THROUGH a symlinked .harness/.pi-prompts"
+  grep -q 'symlinked stamp component' "$OUT" || fail "R7i: no symlinked-stamp warning on install"
+  [ -L "$_t/.harness/.pi-prompts" ] || fail "R7i: the stamp-ledger symlink was replaced"
+  # ... and deselect removes nothing through it (M25): real stamps AND fresh templates are victims.
+  _t="$(new_target r7j)"; ok_inst - - --agents=pi "$_t"
+  mkdir -p "$T/outside-r7j"; cp "$_t"/.harness/.pi-prompts/*.md "$T/outside-r7j/"
+  rm -rf "$_t/.harness/.pi-prompts"; ln -s "$T/outside-r7j" "$_t/.harness/.pi-prompts"
+  ok_inst - - --agents=claude "$_t"
+  [ "$(ls "$T/outside-r7j" | wc -l | tr -d ' ')" = 7 ] \
+    || fail "R7j: deselect removed stamps THROUGH a symlinked .harness/.pi-prompts (left: $(ls "$T/outside-r7j" | wc -l | tr -d ' '))"
+  [ "$(ls "$_t/.pi/prompts" | wc -l | tr -d ' ')" = 7 ] || fail "R7j: deselect removed live templates despite the symlinked ledger"
+  grep -q 'symlinked stamp component' "$OUT" || fail "R7j: no symlinked-stamp warning on deselect"
+  # (k) install -> user edit -> re-install drops the stale stamp, so the file is no longer owned (M18).
+  _t="$(new_target r7k)"; ok_inst - - --agents=pi "$_t"
+  printf 'user edit\n' >> "$_t/.pi/prompts/sdd-new.md"
+  ok_inst - - --agents=pi "$_t"
+  grep -q 'foreign or edited' "$OUT" || fail "R7k: no foreign-or-edited warning on re-install"
+  [ ! -e "$_t/.harness/.pi-prompts/sdd-new.md" ] || fail "R7k: a stale stamp outlived the user's edit"
+  git -C "$_t" init -q 2>/dev/null
+  _p="$(cd "$_t" && sh .harness/tools/harness-owned-paths.sh all .harness)"
+  printf '%s\n' "$_p" | grep -qxF ':(literal).pi/prompts/sdd-new.md' && fail "R10k: owned-paths claims the user-edited sdd-new.md"
+  printf '%s\n' "$_p" | grep -qxF ':(literal).pi/prompts/sdd-next.md' || fail "R10k: owned-paths lost the untouched sdd-next.md"
+  # (l) R10: with the ledger INTACT, a .agents without pi yields no .pi/ pathspec (M13).
+  _t="$(new_target r10l)"; ok_inst - - --agents=pi "$_t"
+  git -C "$_t" init -q 2>/dev/null
+  _p="$(cd "$_t" && sh .harness/tools/harness-owned-paths.sh all .harness)"
+  printf '%s\n' "$_p" | grep -qxF ':(literal).pi/prompts/sdd-next.md' || fail "R10l: precondition — pi templates not claimed"
+  # `codex` (not `claude`): a list with no skill claimant returns earlier, which would mask the pi guard.
+  printf 'codex\n' > "$_t/.harness/.agents"
+  [ -f "$_t/.harness/.pi-prompts/sdd-next.md" ] || fail "R10l: precondition — the ledger is not intact"
+  _p="$(cd "$_t" && sh .harness/tools/harness-owned-paths.sh all .harness)"
+  printf '%s\n' "$_p" | grep -q '\.pi/' && fail "R10l: a .pi/ pathspec was emitted although .agents lacks pi"
+  pass "symlinked prompts/ledger are refused on removal paths; a stale stamp is dropped; .agents gates .pi/ ownership (R7, R10)"
+}
+
 # ── R8 ─────────────────────────────────────────────────────────────────────────────────────
 test_pi_host_detection() {
   _t="$(new_target r8a)"; ok_inst - PI_CODING_AGENT=true --agents=host "$_t"
@@ -346,7 +415,7 @@ test_escalation_arming_skips_pi() {
     sed -e 's|^  builder: .*|  builder: standard|' -e 's|^  builder-heavy: .*|  builder-heavy: reasoning|' \
       "$1/.harness/harness.config.yaml" > "$1/c.t" && mv "$1/c.t" "$1/.harness/harness.config.yaml"
     grep -q '^  pin.claude.reasoning:' "$1/.harness/harness.config.yaml" \
-      || sed 's|^models:|models:\n  pin.claude.reasoning: opus|' "$1/.harness/harness.config.yaml" > "$1/c.t" \
+      || awk '{print} /^models:/{print "  pin.claude.reasoning: opus"}' "$1/.harness/harness.config.yaml" > "$1/c.t" \
       && mv "$1/c.t" "$1/.harness/harness.config.yaml"
   }
   _a="$(new_target r11a)"; ok_inst - - --agents=claude "$_a"; _cfg "$_a"; ok_inst - - --agents=claude "$_a"
@@ -413,6 +482,7 @@ test_pi_reclaim_only_when_last_claimant
 test_skill_adapter_names_pi
 test_pi_prompt_templates_shape_and_set
 test_pi_prompt_ownership
+test_pi_symlink_and_stamp_guards
 test_pi_host_detection
 test_pi_worker_roster
 test_pi_owned_paths
