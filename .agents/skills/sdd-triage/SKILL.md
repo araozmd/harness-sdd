@@ -6,6 +6,7 @@ description: Investigate source feedback and propose explicitly human-approved i
 ## Invocation adapter
 
 In Antigravity or OpenCode, invoke `/sdd-triage`; in Codex, invoke `$sdd-triage` and write arguments after the skill mention. In all hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the Antigravity or OpenCode invocation is `/sdd-<name>`.
+In pi, invoke `/sdd-triage` (the harness prompt template) or `/skill:sdd-triage`; pi loads project prompt templates and skills only after the project is trusted (`/trust`, or `-a` on a headless run).
 
 ## Canonical workflow
 Assume Orchestrator. Resolve paths from the repository root.

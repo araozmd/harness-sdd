@@ -6,6 +6,7 @@ description: Run the Orchestrator loop on the next actionable task (init → rou
 ## Invocation adapter
 
 In Antigravity or OpenCode, invoke `/sdd-next`; in Codex, invoke `$sdd-next` and write arguments after the skill mention. In all hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the Antigravity or OpenCode invocation is `/sdd-<name>`.
+In pi, invoke `/sdd-next` (the harness prompt template) or `/skill:sdd-next`; pi loads project prompt templates and skills only after the project is trusted (`/trust`, or `-a` on a headless run).
 
 ## Canonical workflow
 Act as the **Orchestrator** (`agents/orchestrator.md`).

@@ -6,6 +6,7 @@ description: Whole-project inception as Planner — produce vision + architectur
 ## Invocation adapter
 
 In Antigravity or OpenCode, invoke `/sdd-plan`; in Codex, invoke `$sdd-plan` and write arguments after the skill mention. In all hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the Antigravity or OpenCode invocation is `/sdd-<name>`.
+In pi, invoke `/sdd-plan` (the harness prompt template) or `/skill:sdd-plan`; pi loads project prompt templates and skills only after the project is trusted (`/trust`, or `-a` on a headless run).
 
 ## Canonical workflow
 Act as **Planner** (`agents/planner.md`). That role file is the durable

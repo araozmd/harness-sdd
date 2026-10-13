@@ -6,6 +6,7 @@ description: Per-epic drill-down as Driller — decompose one draft epic into fe
 ## Invocation adapter
 
 In Antigravity or OpenCode, invoke `/sdd-drill`; in Codex, invoke `$sdd-drill` and write arguments after the skill mention. In all hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the Antigravity or OpenCode invocation is `/sdd-<name>`.
+In pi, invoke `/sdd-drill` (the harness prompt template) or `/skill:sdd-drill`; pi loads project prompt templates and skills only after the project is trusted (`/trust`, or `-a` on a headless run).
 
 ## Canonical workflow
 Act as **Driller** (`agents/driller.md`). That role file is the durable
