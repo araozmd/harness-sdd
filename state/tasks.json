@@ -370,7 +370,7 @@
         {
           "id": "E35-F01",
           "title": "pi front-end key: shared-skill claim, .pi/prompts commands, host marker, worker entry, docs",
-          "status": "spec-ready",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
