@@ -685,6 +685,25 @@ test_pi_agent_reclaim() {
   pass "deselect and gate-off reclaim only pristine role files, pruning .pi/agents, the ledger and .pi only when empty (R6)"
 }
 
+# A hard-linked live leaf or stamp is a regular file, so the node-type matrix cannot see it:
+# a rewrite must replace the leaf, never write through to its other name (reviewer finding).
+test_pi_unit_hardlink_not_written_through() {
+  mk_bases
+  for _k in agents/scout prompts/sdd-next; do
+    _t="$(new_target hl-${_k%%/*})"; cp -a "$T/base-true/." "$_t/"
+    _leaf="$_t/.pi/$_k.md"; _st="$_t/.harness/.pi-${_k%%/*}/${_k#*/}.md"
+    printf 'old\n' > "$_leaf"; cp "$_leaf" "$_st"         # pristine-but-stale: stamp matches live
+    printf 'old\n' > "$T/outside-live"; printf 'old\n' > "$T/outside-stamp"
+    rm -f "$_leaf" "$_st"; ln "$T/outside-live" "$_leaf"; ln "$T/outside-stamp" "$_st"
+    ok_inst --agents=pi --pr-loop=true "$_t"
+    [ "$(cat "$T/outside-live")" = old ] || fail "hard link: install wrote through .pi/$_k.md to its other name"
+    [ "$(cat "$T/outside-stamp")" = old ] || fail "hard link: install wrote through the $_k stamp to its other name"
+    [ "$(cat "$_leaf")" != old ] && cmp -s "$_leaf" "$_st" || fail "hard link: .pi/$_k.md was not refreshed with a matching stamp"
+    ls "$(dirname "$_leaf")" "$(dirname "$_st")" | grep -q 'harness-new' && fail "hard link: a .harness-new sibling was left behind"
+  done
+  pass "a hard-linked unit or stamp is replaced, never written through"
+}
+
 # ── R7: the dispatcher's argv contract ────────────────────────────────────────────────────
 # run_disp <target> <logdir> <path-prefix|-> <args…> — run the dispatcher via its shebang, from a
 # foreign cwd, in a scrubbed environment. stdout -> $T/d.out, stderr -> $T/d.err; returns its status.
@@ -1099,6 +1118,7 @@ test_tool_translation_table
 test_pi_agent_body_pointer
 test_pi_agent_shape_matrix
 test_pi_agent_reclaim
+test_pi_unit_hardlink_not_written_through
 test_dispatch_argv_and_passthrough
 test_dispatch_fail_closed
 test_pi_agents_owned_paths

@@ -7943,8 +7943,12 @@ EOF
        || { [ -f "$_ipu_live" ] && [ -f "$_ipu_stamp" ] && cmp -s "$_ipu_live" "$_ipu_stamp"; } \
        || { [ -f "$_ipu_live" ] && cmp -s "$_ipu_live" "$_ipu_tmp"; }; then
       mkdir -p "$TARGET/.pi/$_ipu_kind" "$H/.pi-$_ipu_kind"
-      cat "$_ipu_tmp" > "$_ipu_live"
-      cp "$_ipu_live" "$_ipu_stamp"
+      # Write a fresh sibling and rename it over the leaf, never `> leaf`: a hard-linked
+      # leaf would otherwise write through to its other name outside the repo. The
+      # sibling is born under the umask (not mktemp's 0600) and keeps no `.md` suffix,
+      # so pi never reads a half-written unit.
+      cat "$_ipu_tmp" > "$_ipu_live.harness-new.$$" && mv -f "$_ipu_live.harness-new.$$" "$_ipu_live"
+      cat "$_ipu_tmp" > "$_ipu_stamp.harness-new.$$" && mv -f "$_ipu_stamp.harness-new.$$" "$_ipu_stamp"
     else
       echo "⚠️  .pi/$_ipu_kind/$_ipu_name.md is a foreign or edited $_ipu_short — left unchanged" >&2
       discard_pi_unit_stamp "$_ipu_kind" "$_ipu_name"
