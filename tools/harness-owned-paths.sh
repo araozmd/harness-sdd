@@ -112,18 +112,28 @@ emit_glue() {
       done
     done
   fi
-  # pi prompt templates (E35-F01): resolved PER FILE from the installer's stamp ledger
-  # `<harness-dir>/.pi-prompts/`, the same fail-safe rule as the skill units above — with
-  # no ledger (or a symlinked component) nothing is claimed. Runs only while pi is listed.
-  if [ -f "$hdir/.agents" ] && grep -qx pi "$hdir/.agents" \
-     && [ ! -L "$_root/.pi" ] && [ ! -L "$_root/.pi/prompts" ] && [ ! -L "$hdir/.pi-prompts" ]; then
-    for _pst in "$hdir"/.pi-prompts/sdd-*.md; do
-      [ ! -L "$_pst" ] && [ -f "$_pst" ] || continue
-      _pname="${_pst##*/}"
-      [ ! -L "$_root/.pi/prompts/$_pname" ] || continue
-      # a live leaf that exists but is not a regular file (an operator directory) is never claimed
-      [ ! -e "$_root/.pi/prompts/$_pname" ] || [ -f "$_root/.pi/prompts/$_pname" ] || continue
-      printf ':(literal).pi/prompts/%s\n' "$_pname"
+  # pi prompt templates (E35-F01) and pi role agents (E35-F02): resolved PER FILE from the
+  # installer's stamp ledger `<harness-dir>/.pi-<kind>/`, the same fail-safe rule as the skill
+  # units above — with no ledger (or an unsafe component) nothing is claimed. Runs only while
+  # pi is listed. Every component must be what the installer expects: a directory for `.pi`,
+  # `.pi/<kind>` and `.pi-<kind>`, a regular file for the stamp and the live leaf. A symlink
+  # (live or dangling) or the wrong node type is skipped, mirroring the installer's
+  # `pi_node_unsafe` (a `tools/` script cannot source the installer).
+  # The leaf glob is `sdd-*.md` for prompts (F01 behavior) and `*.md` for agents (role names).
+  if [ -f "$hdir/.agents" ] && grep -qx pi "$hdir/.agents"; then
+    for _pk in prompts agents; do
+      case "$_pk" in prompts) _pglob='sdd-*.md' ;; *) _pglob='*.md' ;; esac
+      [ ! -L "$_root/.pi" ] && { [ ! -e "$_root/.pi" ] || [ -d "$_root/.pi" ]; } || continue
+      [ ! -L "$_root/.pi/$_pk" ] && { [ ! -e "$_root/.pi/$_pk" ] || [ -d "$_root/.pi/$_pk" ]; } || continue
+      [ ! -L "$hdir/.pi-$_pk" ] && [ -d "$hdir/.pi-$_pk" ] || continue
+      for _pst in "$hdir/.pi-$_pk"/$_pglob; do
+        [ ! -L "$_pst" ] && [ -f "$_pst" ] || continue
+        _pname="${_pst##*/}"
+        [ ! -L "$_root/.pi/$_pk/$_pname" ] || continue
+        # a live leaf that exists but is not a regular file (an operator directory) is never claimed
+        [ ! -e "$_root/.pi/$_pk/$_pname" ] || [ -f "$_root/.pi/$_pk/$_pname" ] || continue
+        printf ':(literal).pi/%s/%s\n' "$_pk" "$_pname"
+      done
     done
   fi
   for _tool in codex; do
