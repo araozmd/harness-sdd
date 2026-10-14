@@ -380,7 +380,7 @@
         {
           "id": "E35-F02",
           "title": "pi role sub-agents: .pi/agents/<role>.md for pi-subagents + tools/pi-dispatch.sh fallback, --self",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
