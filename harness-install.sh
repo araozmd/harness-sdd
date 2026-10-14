@@ -8310,6 +8310,12 @@ EOF
   echo "──────────────────────────────────────────────────"
   if [ "$UPGRADE" = 1 ]; then
     ok "upgrade complete (v$VERSION)"
+    # E35-F01 (Codex #4265595907): an upgrade can add pi or rewrite its templates, and pi
+    # loads `.pi/prompts` / `.agents/skills` only at session start — an already-open
+    # session needs `/reload` (pi docs/prompt-templates.md), so say it on upgrades too.
+    if agent_selected pi; then
+      echo "  pi: run /reload (or restart pi) in any open pi session so the updated /sdd-* prompts and skills load (trust the project first if needed: /trust, or -a on a headless run)."
+    fi
   else
     ok "install complete (v$VERSION)"
     # E28-F01 round 9 (4042109214), shrunk in round 10: the single-repo workflow

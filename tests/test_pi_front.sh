@@ -558,6 +558,15 @@ test_pi_operator_text() {
     grep -qE '/trust|--approve|`-a`' "$SRC/$_d" || fail "R12: $_d lacks the pi trust prerequisite"
     grep -q 'E35-F02' "$SRC/$_d" || fail "R12: $_d lacks the E35-F02 role-isolation note"
   done
+  # An UPGRADE that adds pi (or rewrites its templates) must also tell an open session to
+  # /reload — the fresh-install advice block never runs on upgrades (Codex #4265595907).
+  _t="$(new_target r12u)"; ok_inst - - --agents=claude "$_t"
+  ok_inst - - --agents=claude "$_t"
+  grep -q 'upgrade complete' "$OUT" || fail "R12u: precondition — the re-run was not an upgrade"
+  grep -q 'pi: run /reload' "$OUT" && fail "R12u: a pi reload notice printed on an upgrade without pi"
+  ok_inst - - --agents=claude,pi "$_t"
+  grep -q 'upgrade complete' "$OUT" || fail "R12u: precondition — adding pi was not an upgrade"
+  grep -q 'pi: run /reload (or restart pi)' "$OUT" || fail "R12u: an upgrade that added pi gave no /reload notice"
   pass "operator-facing text and the five docs name pi, the trust prerequisite and E35-F02 (R12)"
 }
 
