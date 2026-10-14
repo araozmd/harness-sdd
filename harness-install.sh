@@ -8,8 +8,8 @@
 #
 # Idempotent: run once to install, re-run to upgrade.
 #
-# Active front ends: Claude Code, Codex, OpenCode. --agents=<csv> or
-# HARNESS_AGENTS=<csv> selects explicitly; `all` selects all three. `host` detects
+# Active front ends: claude, codex, opencode, antigravity, pi. --agents=<csv> or
+# HARNESS_AGENTS=<csv> selects explicitly; `all` selects every key. `host` detects
 # one supported session host (or the safe existing/fresh fallback).
 # Without an override, the picker pre-checks the detected host/fresh Claude default or
 # the recorded installation selection. Non-interactive upgrades retain surviving
@@ -1648,7 +1648,7 @@ _mc_insert_after() {
 #
 # The selectable keys — the ONLY legal tokens for `--agents`/`HARNESS_AGENTS`,
 # the `.harness/.agents` state file, and the toggle UI — are exactly:
-AGENT_KEYS="claude codex opencode antigravity"
+AGENT_KEYS="claude codex opencode antigravity pi"
 # AGENTS.md (the shared portable entrypoint) is deliberately NOT a key: it is
 # always written, never gated, never removed (see write_pointer AGENTS.md). It
 # also doubles as Codex CLI's native entrypoint — Codex reads AGENTS.md from the
@@ -1710,13 +1710,20 @@ AGENT_KEYS="claude codex opencode antigravity"
 #               sandbox-only artifact.
 #   opencode    opencode 1.18.5 — OPENCODE=1 and OPENCODE_PID=<pid>, observed via
 #               `opencode run`.
+#   pi          pi 1.2.0 — PI_CODING_AGENT=true, observed 2026-10-13 in a shell spawned by
+#               the session's bash tool under `pi -p` (`comm -13` against a plain login
+#               shell); pi's docs/environment-variables.md states pi sets it for every
+#               child process it launches.
 # REJECTED CANDIDATES — recorded so the next contributor does not re-litigate them. None
 # of these may appear in a row: CODEX_SANDBOX and CODEX_SANDBOX_NETWORK_DISABLED (they
 # vanish when codex runs with the sandbox off); CODEX_CI (a mode flag, not a session id);
 # AGENT (opencode sets it, but the name belongs to no front-end in particular);
 # GEMINI_CLI (it did NOT appear in the agy delta, and it could not discriminate gemini
 # from antigravity anyway); every *_API_KEY and CODEX_HOME (ambient config/credentials,
-# forbidden by R6).
+# forbidden by R6); `AI_AGENT` (pi sets `AI_AGENT=pi`, but the variable is a generic
+# cross-vendor convention, so its NAME discriminates no front end — the same reason `AGENT`
+# is rejected); `PI_SESSION_ID` (present whenever `PI_CODING_AGENT` is, so it adds no
+# detection power, and one verified marker is enough).
 #
 # Caveat recorded honestly: codex/opencode were exercised through each
 # CLI's NON-INTERACTIVE entrypoint (`exec`/`run`/`-p`), which is the mode a scripted
@@ -1727,6 +1734,7 @@ HOST_MARKERS="
 claude CLAUDECODE CLAUDE_CODE_ENTRYPOINT
 codex CODEX_THREAD_ID
 opencode OPENCODE OPENCODE_PID
+pi PI_CODING_AGENT
 "
 #
 # ── the worker roster: how each agent key is INVOKED (E17-F04) ────────────────
@@ -1766,10 +1774,15 @@ opencode OPENCODE OPENCODE_PID
 #   codex       `codex exec` — the same non-interactive entrypoint the HOST_MARKERS
 #               provenance above already records for codex-cli 0.145.0.
 #   opencode    `opencode run` — ditto, opencode 1.18.5.
+#   pi          `pi -p <prompt>` (`--print`) — pi 1.2.0: runs the prompt once, prints the
+#               final assistant text and exits, non-zero on an error/aborted/length stop.
+#               A headless run must also pass `-a` (`--approve`) or pi skips project
+#               skills and prompt templates (pi docs/security.md#project-trust).
 WORKER_INVOKE="
 claude claude non-interactive
 opencode opencode non-interactive
 codex codex non-interactive
+pi pi non-interactive
 "
 #
 # Harness-OWNED generated basenames (stems; all files are <stem>.md). These are the
@@ -2135,7 +2148,7 @@ marker_present() {
 # caller decides what an empty verdict falls back to.
 detect_host() {
   case "${HARNESS_HOST_AGENT:-}" in
-    gemini) die "retired host '$HARNESS_HOST_AGENT' — supported replacements: claude codex opencode antigravity" ;;
+    gemini) die "retired host '$HARNESS_HOST_AGENT' — supported replacements: claude codex opencode antigravity pi" ;;
   esac
   # 1. Explicit declaration wins outright (R9) — the escape hatch for a front-end whose
   #    session marker cannot be honestly verified, set once in a shell profile.
@@ -2302,7 +2315,7 @@ validate_csv() {
     # trim surrounding whitespace
     _tok="$(printf '%s' "$_tok" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
     [ -n "$_tok" ] || continue
-    case "$_tok" in gemini) die "retired agent '$_tok' — supported replacements: claude codex opencode antigravity" ;; esac
+    case "$_tok" in gemini) die "retired agent '$_tok' — supported replacements: claude codex opencode antigravity pi" ;; esac
     agent_known "$_tok" || die "unknown agent key '$_tok' in --agents/HARNESS_AGENTS (known: $AGENT_KEYS)"
     _out="$_out $_tok"
     IFS=','
@@ -2584,12 +2597,12 @@ recorded_active_selection() {
   _ras_new=""
   for _ras_key in $_ras_old; do
     case "$_ras_key" in
-      gemini) echo "⚠️  retiring recorded agent '$_ras_key'; supported replacements: claude codex opencode antigravity" >&2 ;;
-      claude|codex|opencode|antigravity) _ras_new="$_ras_new $_ras_key" ;;
-      *) die "unknown recorded agent '$_ras_key' — choose --agents=claude, --agents=codex, --agents=opencode, or --agents=antigravity" ;;
+      gemini) echo "⚠️  retiring recorded agent '$_ras_key'; supported replacements: claude codex opencode antigravity pi" >&2 ;;
+      claude|codex|opencode|antigravity|pi) _ras_new="$_ras_new $_ras_key" ;;
+      *) die "unknown recorded agent '$_ras_key' — choose --agents=claude, --agents=codex, --agents=opencode, --agents=antigravity, or --agents=pi" ;;
     esac
   done
-  [ -n "$_ras_new" ] || die "no supported recorded agents remain — rerun with --agents=claude, --agents=codex, --agents=opencode, or --agents=antigravity"
+  [ -n "$_ras_new" ] || die "no supported recorded agents remain — rerun with --agents=claude, --agents=codex, --agents=opencode, --agents=antigravity, or --agents=pi"
   normalize_keys "$_ras_new"
 }
 
@@ -4294,12 +4307,15 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .harness/umbrella.manifest.example.yaml  .harness/umbrella.gitignore.example
   .claude/agents/*  .claude/commands/*   .opencode/command/*   (repo root, regenerated)
   .agents/skills/sdd-*/SKILL.md       shared \$sdd-* repository skill instructions for the
-                                      selected Codex and OpenCode claimants; atomic
+                                      selected Codex, OpenCode, Antigravity and pi claimants; atomic
                                       ownership units with their policy companions
   .agents/skills/sdd-*/agents/openai.yaml
                                       explicit-only invocation policy — written wherever the
                                       unit is, since Codex discovers the directory itself
   .codex/agents/*.toml                seven selected Codex role definitions (model optional)
+  .pi/prompts/sdd-*.md                pi prompt templates (/sdd-*): thin pointers to the shared
+                                      skill units, pristine-only ownership (E35-F01)
+  .harness/.pi-prompts/               last-written pi prompt-template ownership stamps
   .harness/.codex-skills/             last-written skill-unit ownership stamps (historical
                                       name; it stamps shared units — ADR-0003)
   CLAUDE.md / AGENTS.md  -> only the harness:begin..end block
@@ -4386,7 +4402,7 @@ PROJECT-OWNED  (seeded once, never clobbered on upgrade):
 
 AGENT SELECTION  (E08-F01):
   .harness/.agents               harness-owned: the selected agent keys, one per line
-                                 (claude|codex|opencode), overwritten each run.
+                                 (claude|codex|opencode|antigravity|pi), overwritten each run.
   Choose with --agents=<csv> / HARNESS_AGENTS=<csv>, an interactive toggle list, or
   the fresh Claude default or surviving recorded selection. --agents=host resolves to the front-end this
   installer session runs in (session env markers; HARNESS_HOST_AGENT=<key> declares it
@@ -4821,7 +4837,7 @@ EOF
     _ea_any=0
     for _ea_k in $AGENT_KEYS; do
       agent_selected "$_ea_k" || continue
-      case "$_ea_k" in antigravity) continue ;; esac
+      case "$_ea_k" in antigravity|pi) continue ;; esac
       if models_any "$_ea_k"; then _ea_any=1; fi
     done
 
@@ -4842,7 +4858,7 @@ EOF
     _ea_seen=0
     for _ea_k in $AGENT_KEYS; do
       agent_selected "$_ea_k" || continue
-      case "$_ea_k" in antigravity) continue ;; esac
+      case "$_ea_k" in antigravity|pi) continue ;; esac
       _ea_seen=1
       # `unstamped` outranks whatever resolve_model would say: the config's answer is about
       # a file this run did not write, so it describes a model the front-end will not use.
@@ -7471,11 +7487,11 @@ EOF
   fi
 
   # A shared skill unit is claimed by ANY front-end that reads `.agents/skills/`
-  # (ADR-0003). Codex and OpenCode both read it, so either selection installs the
+  # (ADR-0003). Codex, OpenCode, Antigravity and pi all read it, so any selection installs the
   # units and only the LAST claimant's deselection reclaims them. Keep the historical
   # ownership ledger name for safe retirement of formerly shared Antigravity/Codex units.
   skill_unit_claimed() {
-    agent_selected codex || agent_selected opencode || agent_selected antigravity
+    agent_selected codex || agent_selected opencode || agent_selected antigravity || agent_selected pi
   }
 
   # gen_skill_body <command> <dest> — adapt the canonical command body to the shared
@@ -7495,6 +7511,10 @@ EOF
       printf '%s\n' '---'
       printf '\n## Invocation adapter\n\n'
       printf 'In Antigravity or OpenCode, invoke `/%s`; in Codex, invoke `$%s` and write arguments after the skill mention. In all hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the Antigravity or OpenCode invocation is `/sdd-<name>`.\n' "$_gcs_name" "$_gcs_name"
+      # E35-F01 R5: the pi sentence is a SEPARATE printf so the adapter line above stays
+      # byte-identical (pinned by test_antigravity_front / test_install). It must contain
+      # no `$` and no `/skills` (test_codex_native / test_self_mode assert the latter).
+      printf 'In pi, invoke `/%s` (the harness prompt template) or `/skill:%s`; pi loads project prompt templates and skills only after the project is trusted (`/trust`, or `-a` on a headless run).\n' "$_gcs_name" "$_gcs_name"
       # R5: the concurrency gate is a property of the workflow, not of one file. The
       # shared unit is written for every claimant, so the OpenCode capability
       # precondition lives in the BODY — unconditional text, conditional in effect
@@ -7713,6 +7733,131 @@ EOF
     return 0
   }
 
+  # ── pi prompt templates (E35-F01) ─────────────────────────────────────────────
+  # gen_pi_prompt <command> <dest> — the ONLY producer of `.pi/prompts/<cmd>.md` bytes.
+  # The template is a thin pointer to the shared skill unit (ADR-0003/0004), never a copy
+  # of the workflow. Install, deselect and gate-off all compare against this output and
+  # against the stamp in `$H/.pi-prompts/`, so the byte contract lives in one place. The
+  # body carries exactly one `$` (`$ARGUMENTS`): pi substitutes `$@`, `$1` and `${…}`.
+  gen_pi_prompt() {
+    _gpp_name="$1"; _gpp_dest="$2"
+    _gpp_desc="$(sed -n 's/^description: //p' "$CMDDIR/$_gpp_name.md" | sed -n '1p')"
+    {
+      printf '%s\n' '---'
+      printf 'description: %s\n' "$_gpp_desc"
+      printf '%s\n' '---'
+      printf 'Run the harness `%s` workflow. Use the read tool to open `.agents/skills/%s/SKILL.md` and follow it exactly — it is the single shared body for this command. Treat the text between the markers below as the workflow'"'"'s accompanying arguments (empty means none).\n' "$_gpp_name" "$_gpp_name"
+      printf '\n<arguments>\n'
+      printf '%s\n' '$ARGUMENTS'
+      printf '</arguments>\n'
+    } > "$_gpp_dest"
+  }
+
+  # pi_node_unsafe <path> <d|f> — ONE node-type rule for every pi path component (E35-F01).
+  # A component is unsafe when it is a symlink, or when it EXISTS as the wrong node type:
+  # `d` components (`.pi`, `.pi/prompts`, `.harness/.pi-prompts`) must be directories,
+  # `f` leaves (a template, a stamp) must be regular files. An absent node is safe — the
+  # installer creates it. Any unsafe node means the installer cannot `mkdir -p`, write,
+  # `cmp` or `rm -f` there without aborting under `set -e` or following a link, so the
+  # callers below warn and leave the template alone. An unsafe STAMP path leaves the template
+  # and the stamp unchanged; an unsafe LIVE path leaves the template unchanged and drops its
+  # stamp (the fail-safe that ends ownership), unless the stamp path is itself unsafe.
+  pi_node_unsafe() {
+    [ -L "$1" ] && return 0
+    [ -e "$1" ] || return 1
+    if [ "$2" = d ]; then [ ! -d "$1" ]; else [ ! -f "$1" ]; fi
+  }
+
+  # pi_prompt_live_is_unsafe <command> — any component of the live `.pi/prompts/<cmd>.md` path.
+  pi_prompt_live_is_unsafe() {
+    pi_node_unsafe "$TARGET/.pi" d || pi_node_unsafe "$TARGET/.pi/prompts" d \
+      || pi_node_unsafe "$TARGET/.pi/prompts/$1.md" f
+  }
+
+  # pi_prompt_stamp_is_unsafe <command> — the ledger dir or the stamp leaf.
+  pi_prompt_stamp_is_unsafe() {
+    pi_node_unsafe "$H/.pi-prompts" d || pi_node_unsafe "$H/.pi-prompts/$1.md" f
+  }
+
+  # discard_pi_prompt_stamp <command> — drop a stamp unless its node is unsafe (see above).
+  discard_pi_prompt_stamp() {
+    pi_prompt_stamp_is_unsafe "$1" && return 0
+    rm -f "$H/.pi-prompts/$1.md"
+    return 0
+  }
+
+  # install_pi_prompt <command> — write one template, pristine-only (R6/R7).
+  install_pi_prompt() {
+    _ipp_cmd="$1"
+    _ipp_live="$TARGET/.pi/prompts/$_ipp_cmd.md"
+    _ipp_stamp="$H/.pi-prompts/$_ipp_cmd.md"
+    if pi_prompt_stamp_is_unsafe "$_ipp_cmd"; then
+      echo "⚠️  .harness/.pi-prompts/$_ipp_cmd.md has a symlinked or non-regular stamp component — pi prompt template and stamp left unchanged" >&2
+      return 0
+    fi
+    if pi_prompt_live_is_unsafe "$_ipp_cmd"; then
+      echo "⚠️  .pi/prompts/$_ipp_cmd.md has a symlinked or non-regular destination component — pi prompt template left unchanged" >&2
+      discard_pi_prompt_stamp "$_ipp_cmd"
+      return 0
+    fi
+    _ipp_tmp="$(mktemp 2>/dev/null || mktemp -t harness-pi-prompt)"
+    gen_pi_prompt "$_ipp_cmd" "$_ipp_tmp"
+    if [ ! -e "$_ipp_live" ] \
+       || { [ -f "$_ipp_live" ] && [ -f "$_ipp_stamp" ] && cmp -s "$_ipp_live" "$_ipp_stamp"; } \
+       || { [ -f "$_ipp_live" ] && cmp -s "$_ipp_live" "$_ipp_tmp"; }; then
+      mkdir -p "$TARGET/.pi/prompts" "$H/.pi-prompts"
+      cat "$_ipp_tmp" > "$_ipp_live"
+      cp "$_ipp_live" "$_ipp_stamp"
+    else
+      echo "⚠️  .pi/prompts/$_ipp_cmd.md is a foreign or edited prompt template — left unchanged" >&2
+      discard_pi_prompt_stamp "$_ipp_cmd"
+    fi
+    rm -f "$_ipp_tmp"
+    return 0
+  }
+
+  # reclaim_pi_prompts <command-list> <label> — pristine-only removal shared by the §7
+  # deselect arm and the §7b gate-off pass, so the two paths cannot diverge (R7). Prints
+  # the removed paths on stdout like reclaim_skill_units.
+  reclaim_pi_prompts() {
+    _rpp_cmds="$1"; _rpp_gone=""
+    for _rpp_cmd in $_rpp_cmds; do
+      _rpp_live="$TARGET/.pi/prompts/$_rpp_cmd.md"
+      _rpp_stamp="$H/.pi-prompts/$_rpp_cmd.md"
+      if pi_prompt_stamp_is_unsafe "$_rpp_cmd"; then
+        echo "⚠️  .harness/.pi-prompts/$_rpp_cmd.md has a symlinked or non-regular stamp component — pi prompt template and stamp left unchanged" >&2
+        continue
+      fi
+      if pi_prompt_live_is_unsafe "$_rpp_cmd"; then
+        # Warn only for a template that is actually there (not for a never-installed one).
+        if [ -e "$_rpp_live" ] || [ -L "$_rpp_live" ]; then
+          echo "⚠️  .pi/prompts/$_rpp_cmd.md has a symlinked or non-regular destination component — pi prompt template left in place" >&2
+        fi
+        discard_pi_prompt_stamp "$_rpp_cmd"
+        continue
+      fi
+      if [ -e "$_rpp_live" ]; then
+        _rpp_tmp="$(mktemp 2>/dev/null || mktemp -t harness-pi-prompt)"
+        gen_pi_prompt "$_rpp_cmd" "$_rpp_tmp"
+        if [ -f "$_rpp_live" ] \
+           && { { [ -f "$_rpp_stamp" ] && cmp -s "$_rpp_live" "$_rpp_stamp"; } || cmp -s "$_rpp_live" "$_rpp_tmp"; }; then
+          rm -f "$_rpp_live"
+          _rpp_gone="$_rpp_gone .pi/prompts/$_rpp_cmd.md"
+        else
+          echo "⚠️  .pi/prompts/$_rpp_cmd.md has no matching stamp (foreign or edited) — left in place" >&2
+        fi
+        rm -f "$_rpp_tmp"
+      fi
+      discard_pi_prompt_stamp "$_rpp_cmd"
+    done
+    pi_node_unsafe "$H/.pi-prompts" d || rmdir "$H/.pi-prompts" 2>/dev/null || true
+    pi_node_unsafe "$TARGET/.pi" d || pi_node_unsafe "$TARGET/.pi/prompts" d \
+      || rmdir "$TARGET/.pi/prompts" 2>/dev/null || true
+    pi_node_unsafe "$TARGET/.pi" d || rmdir "$TARGET/.pi" 2>/dev/null || true
+    if [ -n "$_rpp_gone" ]; then printf '%s\n' "$_rpp_gone"; fi
+    return 0
+  }
+
   # migrate_legacy_codex_prompts — retire the pre-0.48 machine-global prompt surface.
   # The directory is resolved only for migration and is never created. Ungated prompts
   # are always ownership-unknown and therefore preserved. The gated prompt requires both
@@ -7757,7 +7902,18 @@ EOF
     for _c in $_cdx_cmds; do
       install_skill_unit "$_c"
     done
-    ok "shared skill units \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel + \$sdd-report installed (.agents/skills/ — project-local, read by Codex and OpenCode)"
+    ok "shared skill units \$sdd-next + \$sdd-new + \$sdd-plan + \$sdd-drill + \$sdd-fix + \$sdd-fix-parallel + \$sdd-report installed (.agents/skills/ — project-local, read by Codex, OpenCode, Antigravity and pi)"
+  fi
+
+  # ── 5d-pi. pi prompt templates (E35-F01; gated only on selected `pi`) ───────────
+  # One thin pointer template per shared-unit command, from the SAME `_cdx_cmds` list §5d
+  # just used (pi selected implies skill_unit_claimed, so it is set), so the template set
+  # equals the skill-unit set by construction. Pristine-only; see install_pi_prompt.
+  if agent_selected pi; then
+    for _c in $_cdx_cmds; do
+      install_pi_prompt "$_c"
+    done
+    ok "pi prompt templates /sdd-… installed (.pi/prompts/ — load after project trust)"
   fi
   if agent_selected codex || printf '%s\n' "$PRIOR_AGENTS" | grep -qx codex; then
     migrate_legacy_codex_prompts
@@ -8033,6 +8189,19 @@ EOF
             fi
           fi
           ;;
+        pi)
+          # Pristine-only template removal first (R7), then the shared units only when
+          # pi was the LAST claimant (ADR-0003). Plain `if`s keep the loop's last status
+          # zero under `set -e`. HARNESS_OWNED_CMDS never holds the source-only sdd-triage.
+          _pi_removed="$(reclaim_pi_prompts "$HARNESS_OWNED_CMDS" pi)"
+          if [ -n "$_pi_removed" ]; then echo "⚠️  removed deselected agent 'pi' glue:$_pi_removed" >&2; fi
+          if ! skill_unit_claimed; then
+            _pi_skill_removed="$(reclaim_skill_units "$HARNESS_OWNED_CMDS")"
+            if [ -n "$_pi_skill_removed" ]; then
+              echo "⚠️  removed deselected agent 'pi' skills:$_pi_skill_removed" >&2
+            fi
+          fi
+          ;;
       esac
     done
   fi
@@ -8082,6 +8251,9 @@ EOF
       rmdir "$TARGET/.opencode" 2>/dev/null || true
     fi
     if agent_selected codex; then reclaim_codex_role pr-fixer; fi
+    if agent_selected pi; then
+      _prl_gone="$_prl_gone $(reclaim_pi_prompts "$HARNESS_PR_LOOP_CMDS" pi)"
+    fi
 
     # Reconcile the Codex skill under the same gate as the isolated native role.
     if skill_unit_claimed; then
@@ -8138,6 +8310,12 @@ EOF
   echo "──────────────────────────────────────────────────"
   if [ "$UPGRADE" = 1 ]; then
     ok "upgrade complete (v$VERSION)"
+    # E35-F01 (Codex #4265595907): an upgrade can add pi or rewrite its templates, and pi
+    # loads `.pi/prompts` / `.agents/skills` only at session start — an already-open
+    # session needs `/reload` (pi docs/prompt-templates.md), so say it on upgrades too.
+    if agent_selected pi; then
+      echo "  pi: run /reload (or restart pi) in any open pi session so the updated /sdd-* prompts and skills load (trust the project first if needed: /trust, or -a on a headless run)."
+    fi
   else
     ok "install complete (v$VERSION)"
     # E28-F01 round 9 (4042109214), shrunk in round 10: the single-repo workflow
@@ -8190,12 +8368,13 @@ EOF
     # second pass, once the first invocation had written vision.md/architecture.md. Each
     # front-door step now names the selected hosts' invocation forms as alternatives
     # WITHIN that one step. Step order is unchanged: plan → drill → baseline → next.
-    _adv_claude=0; _adv_codex=0; _adv_opencode=0; _adv_antigravity=0
+    _adv_claude=0; _adv_codex=0; _adv_opencode=0; _adv_antigravity=0; _adv_pi=0
     if agent_selected claude; then _adv_claude=1; fi
     if agent_selected codex; then _adv_codex=1; fi
     if agent_selected opencode; then _adv_opencode=1; fi
     if agent_selected antigravity; then _adv_antigravity=1; fi
-    _adv_count=$((_adv_claude + _adv_codex + _adv_opencode + _adv_antigravity))
+    if agent_selected pi; then _adv_pi=1; fi
+    _adv_count=$((_adv_claude + _adv_codex + _adv_opencode + _adv_antigravity + _adv_pi))
     if [ "$_adv_count" -eq 1 ]; then
       # A single selected host keeps its exact per-host phrasing: test_codex_native.sh R8
       # pins the "Claude Code:/Codex:/OpenCode:" labels and Codex's "invoke $sdd-next"
@@ -8215,6 +8394,11 @@ EOF
         echo "  4. OpenCode: run /sdd-drill <epic-id> to decompose the first draft epic into features."
         echo "  5. $_advice_baseline"
         echo "  6. OpenCode: run /sdd-next to spec and build that work."
+      elif [ "$_adv_pi" = 1 ]; then
+        echo "  3. pi: open the repo, trust the project (/trust, or -a on a headless run), then /reload (or restart pi) so the new prompts and skills load, and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
+        echo "  4. pi: run /sdd-drill <epic-id> to decompose the first draft epic into features."
+        echo "  5. $_advice_baseline"
+        echo "  6. pi: run /sdd-next to spec and build that work."
       else
         echo "  3. Antigravity: open the repo and run /sdd-plan to brainstorm the vision, architecture, ADRs and draft epics."
         echo "  4. Antigravity: run /sdd-drill <epic-id> to decompose the first draft epic into features."
@@ -8232,6 +8416,9 @@ EOF
       if [ "$_adv_antigravity" = 1 ]; then
         if [ -n "$_slash_hosts" ]; then _slash_hosts="$_slash_hosts/Antigravity"; else _slash_hosts="Antigravity"; fi
       fi
+      if [ "$_adv_pi" = 1 ]; then
+        if [ -n "$_slash_hosts" ]; then _slash_hosts="$_slash_hosts/pi"; else _slash_hosts="pi"; fi
+      fi
       if [ -n "$_slash_hosts" ] && [ "$_adv_codex" = 1 ]; then
         _adv_plan="Run /sdd-plan ($_slash_hosts) or \$sdd-plan (Codex)"
         _adv_drill="Run /sdd-drill <epic-id> ($_slash_hosts) or \$sdd-drill <epic-id> (Codex)"
@@ -8246,6 +8433,9 @@ EOF
         _adv_next="Run /sdd-next ($_slash_hosts)"
       fi
       echo "  3. $_adv_plan to brainstorm the vision, architecture, ADRs and draft epics."
+      if [ "$_adv_pi" = 1 ]; then
+        echo "     (pi: trust the project first — /trust, or -a on a headless run — then /reload (or restart pi) so the new prompts and skills load.)"
+      fi
       echo "  4. $_adv_drill to decompose the first draft epic into features."
       echo "  5. $_advice_baseline"
       echo "  6. $_adv_next to spec and build that work."

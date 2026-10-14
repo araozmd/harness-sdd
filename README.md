@@ -1,8 +1,9 @@
 # harness-sdd
 
 A portable **agent harness** for **Spec-Driven Development**. It supports
-**Claude Code** (primary), with **Codex** second, **OpenCode** third, and
-**Antigravity** supported natively via `.agents/skills/`.
+**Claude Code** (primary), with **Codex** second, **OpenCode** third,
+**Antigravity** supported natively via `.agents/skills/`, and the **pi** coding agent
+via `.pi/prompts/` plus the same shared skills.
 The harness lives in repository files, so the model and supported CLI can change
 without moving the project’s intent or history.
 
@@ -117,6 +118,7 @@ Orchestrator spawns `architect` → (human approves) → `builder` → `reviewer
 | **Codex** | `AGENTS.md` (native) | `.codex/agents/*.toml` roles + the shared repository-local `$sdd-*` skills in `.agents/skills/` (including gated `$sdd-pr-loop`) |
 | **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-test-concurrency` and `/sdd-pr-loop`; it also reads the shared `.agents/skills/` units, so `/sdd-*` resolve from both surfaces; `/sdd-fix-parallel` is opt-in (verified by `/sdd-test-concurrency`) |
 | **Antigravity** | `AGENTS.md` (native) | Dynamic subagents leased via `define_subagent` / `invoke_subagent` from `agents/<role>.md` + `/sdd-*` slash commands via shared `.agents/skills/` |
+| **pi** | `AGENTS.md` (native) | `/sdd-*` prompt templates in `.pi/prompts/` (thin pointers to the shared units) + the shared `.agents/skills/` (`/skill:sdd-*`). Project must be trusted first (`/trust`, or `-a` on a headless run), then `/reload` (or restart pi) in an already-open session. Role isolation on pi arrives with E35-F02. |
 
 The tables and workflow prose use the portable `/sdd-*` spelling; in Codex, invoke the
 shared repository skills as `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`,
@@ -281,7 +283,8 @@ umbrella.manifest.example.yaml   cross-repo coordinator manifest template
 umbrella.gitignore.example       shared-spec-repo .gitignore reference
 .claude/                     generated Claude Code sub-agents + commands + glue manifest
 .codex/agents/               generated native Codex role TOMLs
-.agents/skills/              shared repository-local workflow skills (Codex, Antigravity, OpenCode)
+.agents/skills/              shared repository-local workflow skills (Codex, Antigravity, OpenCode, pi)
+.pi/prompts/                 pi `/sdd-*` prompt templates (pointers to the shared skills; pi only)
 ```
 
 Consumer installs put the body under `.harness/` and generate only selected and
@@ -413,12 +416,12 @@ workspace. Re-run to upgrade — project-authored specs/state are never clobbere
 `docs/INSTALL.md`.
 
 **Choosing which agents to support.** The supported keys are `claude`, `codex`,
-`opencode`, and `antigravity`, in that priority order. The interactive picker starts with the
+`opencode`, `antigravity`, and `pi`, in that priority order. The interactive picker starts with the
 detected supported host on a fresh target, or Claude when undetected. Fresh
 unattended installs default to Claude. Upgrades preserve the surviving recorded
 selection in `.harness/.agents`; retired-only selections require an explicit
 replacement before any writes. A version-stamped install without a selection
-file resolves to `claude,opencode`. `--agents=all` selects all four.
+file resolves to `claude,opencode`. `--agents=all` selects all five.
 
 ```bash
 ./harness-install.sh --agents=claude,codex /path/to/your-project
@@ -433,6 +436,12 @@ ignored. Explicit `gemini` selectors or host declarations fail
 before target mutation. [Migration guidance](docs/INSTALL.md#retiring-gemini)
 describes how pristine old glue is reclaimed and edited, foreign, or symlinked
 legacy files are preserved with warnings.
+
+**pi.** Selecting `pi` installs `.pi/prompts/sdd-*.md` (invoke `/sdd-next`) and claims the shared
+`.agents/skills/` units (invoke `/skill:sdd-next`). Both load only after the project is
+trusted (`/trust`, or `-a` on a headless `pi -p` run); `/trust` does not reload an open session, so
+run `/reload` (or restart pi) afterwards. Templates are pristine-only: an edited
+or foreign one survives deselection. Role isolation on pi arrives with E35-F02.
 
 **Antigravity, Codex, and OpenCode workflows are repository-local.** Selecting
 `antigravity`, `codex`, **or** `opencode` creates the base `/sdd-*` / `$sdd-*` skill units

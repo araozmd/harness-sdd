@@ -6,6 +6,7 @@ description: Seed a new idea into the TaskStore as Inception (interactive intake
 ## Invocation adapter
 
 In Antigravity or OpenCode, invoke `/sdd-new`; in Codex, invoke `$sdd-new` and write arguments after the skill mention. In all hosts, treat all accompanying text as `$ARGUMENTS` in the workflow below. Wherever that workflow writes a portable `/sdd-<name>` reference, the Codex invocation is `$sdd-<name>` and the Antigravity or OpenCode invocation is `/sdd-<name>`.
+In pi, invoke `/sdd-new` (the harness prompt template) or `/skill:sdd-new`; pi loads project prompt templates and skills only after the project is trusted (`/trust`, or `-a` on a headless run).
 
 ## Canonical workflow
 Act as **Inception** (`agents/inception.md`). That role file is the durable

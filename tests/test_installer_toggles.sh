@@ -291,9 +291,9 @@ test_picker_unaffected() {
   done
   _keys="$(sed -n 's/^AGENT_KEYS="\(.*\)"$/\1/p' "$INST")"
   [ -n "$_keys" ] || fail "R3: AGENT_KEYS is no longer a single quoted line"
-  [ "$(printf '%s\n' "$_keys" | wc -w | tr -d ' ')" = "4" ] \
-    || fail "R3: AGENT_KEYS holds $(printf '%s\n' "$_keys" | wc -w) keys, expected the 4 front-ends ('$_keys')"
-  for _k in claude codex opencode antigravity; do
+  [ "$(printf '%s\n' "$_keys" | wc -w | tr -d ' ')" = "5" ] \
+    || fail "R3: AGENT_KEYS holds $(printf '%s\n' "$_keys" | wc -w) keys, expected the 5 front-ends ('$_keys')"
+  for _k in claude codex opencode antigravity pi; do
     printf '%s\n' "$_keys" | grep -qw "$_k" || fail "R3: AGENT_KEYS lost the front-end key '$_k'"
   done
   printf '%s\n' "$_keys" | grep -qiE 'backend|builder' \
@@ -919,8 +919,8 @@ test_f01_and_picker_unaffected() {
       && fail "F02 R3: $_fn gained pr_loop behavior — the picker must not change"
   done
   _keys="$(sed -n 's/^AGENT_KEYS="\(.*\)"$/\1/p' "$INST")"
-  [ "$(printf '%s\n' "$_keys" | wc -w | tr -d ' ')" = "4" ] \
-    || fail "F02 R3: AGENT_KEYS holds $(printf '%s\n' "$_keys" | wc -w) keys, expected the 4 front-ends ('$_keys')"
+  [ "$(printf '%s\n' "$_keys" | wc -w | tr -d ' ')" = "5" ] \
+    || fail "F02 R3: AGENT_KEYS holds $(printf '%s\n' "$_keys" | wc -w) keys, expected the 5 front-ends ('$_keys')"
   printf '%s\n' "$_keys" | grep -qiE 'pr_loop|pr-loop' \
     && fail "F02 R3: an enum row was added to AGENT_KEYS — the gate is NOT a picker row"
 

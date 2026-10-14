@@ -362,6 +362,56 @@
       ]
     },
     {
+      "id": "E35",
+      "title": "pi is a claimed, first-class front end",
+      "status": "planned",
+      "owner": "araozmd",
+      "features": [
+        {
+          "id": "E35-F01",
+          "title": "pi front-end key: shared-skill claim, .pi/prompts commands, host marker, worker entry, docs",
+          "status": "in-review",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E35-pi-first-class/F01-pi-frontend-key/"
+        },
+        {
+          "id": "E35-F02",
+          "title": "pi role sub-agents: .pi/agents/<role>.md for pi-subagents + tools/pi-dispatch.sh fallback, --self",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E35-F01"
+          ],
+          "spec_path": "specs/epics/E35-pi-first-class/F02-pi-role-subagents/"
+        },
+        {
+          "id": "E35-F03",
+          "title": "pi model routing: pin.pi.<tier>, tier->thinking ladder, escalation arming",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E35-F02"
+          ],
+          "spec_path": "specs/epics/E35-pi-first-class/F03-pi-model-routing/"
+        },
+        {
+          "id": "E35-F04",
+          "title": "pi environment preflight + approval-gated pinned pi-subagents install",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E35-F02"
+          ],
+          "spec_path": "specs/epics/E35-pi-first-class/F04-pi-preflight-deps/"
+        }
+      ]
+    },
+    {
       "id": "E99",
       "title": "Maintenance (hotfixes & minor fixes)",
       "status": "in-progress",
@@ -1113,7 +1163,13 @@
           "id": "E99-F171",
           "title": "Gate /sdd-pr-loop hand-back and auto-merge on required CI",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "8072eb28aa6f2fd52d34d05124a8b42a8cf72a68", "ref": "8072eb28aa6f2fd52d34d05124a8b42a8cf72a68", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "8072eb28aa6f2fd52d34d05124a8b42a8cf72a68",
+            "ref": "8072eb28aa6f2fd52d34d05124a8b42a8cf72a68",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],

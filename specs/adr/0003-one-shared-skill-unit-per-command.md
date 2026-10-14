@@ -151,3 +151,12 @@ The shared body's invocation adapter now names both the Codex `$sdd-*` and the O
   targets needed its own reclaim and migration decision. E29 took that decision when it
   retired Antigravity: it reclaims pristine legacy `.agents/workflows/`, `.agents/agents/`
   and `.agents/rules/` glue.
+
+## Update — E35-F01 (2026-10-13)
+
+The claiming set is now `{codex, opencode, antigravity, pi}` (E33 re-added `antigravity`;
+E35-F01 adds `pi`). `skill_unit_claimed` is the single predicate: install when any claimant
+is selected, reclaim only when the last one leaves. pi additionally gets
+`.pi/prompts/<cmd>.md` prompt templates. These are thin pointers to the shared unit, not a
+second body, and they carry their own pristine-only stamp ledger `.harness/.pi-prompts/`.
+This is a record update, not a new decision.

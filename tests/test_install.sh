@@ -1356,7 +1356,7 @@ rm -rf "$TD2"
 pass "explicit --agents / HARNESS_AGENTS override resolves the set, --agents wins (R5)"
 
 # registry_keys (R10): every registry key is individually selectable.
-for _k in claude codex opencode; do
+for _k in claude codex opencode pi; do
   TK="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
   sh "$SRC/harness-install.sh" --agents="$_k" "$TK" >/dev/null || fail "R10: --agents=$_k exited non-zero"
   grep -qx "$_k" "$TK/.harness/.agents" || fail "R10: '$_k' not selectable/persisted"

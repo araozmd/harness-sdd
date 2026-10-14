@@ -4,6 +4,29 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.92.0] — 2026-10-13
+
+### Added — pi front-end key (E35-F01)
+- `pi` (the `@earendil-works/pi-coding-agent` CLI) is now a selectable front end:
+  `--agents=pi`, `HARNESS_AGENTS=pi`, and `--agents=all` (now five keys). It joins the
+  claiming set for the shared `.agents/skills/` units (ADR-0003): the units install while
+  any of codex, opencode, antigravity or pi is selected and are reclaimed only when the
+  last claimant leaves.
+- pi gets native `/sdd-*` commands as `.pi/prompts/<cmd>.md` prompt templates. Each is a thin
+  pointer to the shared `SKILL.md` (never a second copy of the workflow) with exactly one
+  `$ARGUMENTS` token. Ownership is pristine-only, via the new `.harness/.pi-prompts/` stamp
+  ledger: an edited or foreign template survives install, deselection and `pr_loop` gate-off
+  with a warning. `tools/harness-owned-paths.sh` reports the stamped templates.
+- `--agents=host` detects pi from `PI_CODING_AGENT`; the worker roster lists `pi`
+  (`pi -p`, non-interactive); pi is excluded from the escalation-arming verdict until its
+  model routing lands (E35-F03).
+- **Shared adapter byte change.** Every shared `SKILL.md` gains one sentence naming the pi
+  invocations (`/<cmd>`, `/skill:<cmd>`) and the project-trust prerequisite. The existing
+  adapter line is unchanged, but the unit bytes differ, so every claimant's units are
+  rewritten on upgrade (pristine ones only; edited units are preserved).
+- pi loads project prompt templates and skills only after the project is trusted (`/trust`,
+  or `-a` on a headless `pi -p` run). Role isolation on pi arrives with E35-F02.
+
 ## [0.91.3] — 2026-10-10
 
 ### Fixed — /sdd-pr-loop required CI on the terminal paths (E99-F171)

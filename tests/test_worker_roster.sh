@@ -44,7 +44,7 @@ trap 'rm -rf "$T"' EXIT
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
-ROSTERED_COMMANDS='claude codex opencode gemini agy'
+ROSTERED_COMMANDS='claude codex opencode gemini agy pi'
 
 # ── the sandbox PATH ─────────────────────────────────────────────────────────
 #

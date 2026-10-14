@@ -98,7 +98,7 @@ emit_glue() {
   # halts the harness.
   # Retired namespaces are never mandatory active glue. Skills use the same
   # last-written ownership evidence as native roles, not a wildcard over user files.
-  if [ -f "$hdir/.agents" ] && ! grep -qE '^(codex|opencode|antigravity)$' "$hdir/.agents"; then return 0; fi
+  if [ -f "$hdir/.agents" ] && ! grep -qE '^(codex|opencode|antigravity|pi)$' "$hdir/.agents"; then return 0; fi
   _root="$(dirname "$hdir")"
   if [ ! -L "$_root/.agents" ] && [ ! -L "$_root/.agents/skills" ] && [ ! -L "$hdir/.codex-skills" ]; then
     for _unit in "$hdir"/.codex-skills/sdd-*; do
@@ -110,6 +110,20 @@ emit_glue() {
         [ ! -L "$_root/.agents/skills/$_name/agents" ] && [ ! -L "$_root/.agents/skills/$_name/$_leaf" ] || continue
         printf ':(literal).agents/skills/%s/%s\n' "$_name" "$_leaf"
       done
+    done
+  fi
+  # pi prompt templates (E35-F01): resolved PER FILE from the installer's stamp ledger
+  # `<harness-dir>/.pi-prompts/`, the same fail-safe rule as the skill units above — with
+  # no ledger (or a symlinked component) nothing is claimed. Runs only while pi is listed.
+  if [ -f "$hdir/.agents" ] && grep -qx pi "$hdir/.agents" \
+     && [ ! -L "$_root/.pi" ] && [ ! -L "$_root/.pi/prompts" ] && [ ! -L "$hdir/.pi-prompts" ]; then
+    for _pst in "$hdir"/.pi-prompts/sdd-*.md; do
+      [ ! -L "$_pst" ] && [ -f "$_pst" ] || continue
+      _pname="${_pst##*/}"
+      [ ! -L "$_root/.pi/prompts/$_pname" ] || continue
+      # a live leaf that exists but is not a regular file (an operator directory) is never claimed
+      [ ! -e "$_root/.pi/prompts/$_pname" ] || [ -f "$_root/.pi/prompts/$_pname" ] || continue
+      printf ':(literal).pi/prompts/%s\n' "$_pname"
     done
   fi
   for _tool in codex; do
