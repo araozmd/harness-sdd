@@ -968,6 +968,427 @@ test_return_to_inherit_reconciles() {
   return 0
 }
 
+# ── E35-F03: the hostile-pin table (ONE copy per suite; the plan's rows 1-35) ─────────────
+# Fields: row-id <TAB> yaml-rhs <TAB> value-read <TAB> installer-verdict <TAB> dispatcher
+# (no thinking:) <TAB> dispatcher (thinking: high). Both value fields are expanded with
+# printf '%b' (bytes a here-doc cannot hold: UTF-8, ESC, TAB, newline, a literal backslash-n
+# written as two backslashes). @EMPTY@ is the empty value (IFS-tab would drop the field);
+# @256@ / @257@ are a valid-charset id of exactly 256 / 257 bytes. A dash in a dispatcher
+# column means the row cannot reach a role file.
+TAB="$(printf '\t')"
+pin_rows() { cat <<'PINROWS'
+1	""	@EMPTY@	absent	—	—
+2	"anthropic/claude-sonnet-4-5"	anthropic/claude-sonnet-4-5	ok	pass	pass
+3	"openrouter/meta-llama/llama-3.1-8b-instruct:free"	openrouter/meta-llama/llama-3.1-8b-instruct:free	ok	pass	pass
+4	"amazon-bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0"	amazon-bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0	ok	pass	pass
+5	"openrouter/anthropic/claude-3.7-sonnet:thinking"	openrouter/anthropic/claude-3.7-sonnet:thinking	ok	pass	pass
+6	"google-vertex/claude-sonnet-4@20250514"	google-vertex/claude-sonnet-4@20250514	ok	pass	pass
+7	"Prov/id:HIGH"	Prov/id:HIGH	ok	pass	pass
+8	'anthropic/claude-opus-4'	anthropic/claude-opus-4	ok	pass	pass
+9	anthropic/claude-opus-4  # note	anthropic/claude-opus-4	ok	pass	pass
+10	@256@	@256@	ok	pass	pass
+11	@257@	@257@	length	3	3
+12	"claude-sonnet"	claude-sonnet	form	pass	pass
+13	"/claude"	/claude	form	pass	pass
+14	"anthropic/"	anthropic/	form	pass	pass
+15	"anthropic//claude"	anthropic//claude	form	pass	pass
+16	"anthropic/claude/"	anthropic/claude/	form	pass	pass
+17	"anthropic/claude:"	anthropic/claude:	form	pass	pass
+18	"-x/claude"	-x/claude	form	3	3
+19	".hidden/claude"	.hidden/claude	form	pass	pass
+20	"anthropic/claude:high"	anthropic/claude:high	suffix	pass	3
+21	"anthropic/claude:high:low"	anthropic/claude:high:low	suffix	pass	3
+22	"anthropic/claude:max"	anthropic/claude:max	suffix	pass	3
+23	"anthropic/claude sonnet"	anthropic/claude sonnet	charset	3	3
+24	anthropic/claude   	anthropic/claude   	charset	3	3
+25	"a/b;rm -rf ~"	a/b;rm -rf ~	charset	3	3
+26	"a/$(id)"	a/$(id)	charset	3	3
+27	"a/b`id`"	a/b`id`	charset	3	3
+28	"a/b\\nc"	a/b\\nc	charset	3	3
+29	"a/b|c"	a/b|c	charset	3	3
+30	"a/b'c"	a/b'c	charset	3	3
+31	"a/b\0303\0251"	a/b\0303\0251	charset	3	3
+32	"a/b\0033[31m"	a/b\0033[31m	charset	3	3
+33	"a/b\0011c"	a/b\0011c	charset	3	3
+34	inherit	inherit	inherit	—	—
+35	"a/b\n    c"	a/b	ok	pass	pass
+PINROWS
+}
+# expand_pin <field> — decode one table value field into the real bytes.
+expand_pin() {
+  case "$1" in
+    @EMPTY@) return 0 ;;
+    @256@) printf 'p/%0254d' 0; return 0 ;;
+    @257@) printf 'p/%0255d' 0; return 0 ;;
+  esac
+  printf '%b' "$1"
+}
+# load_row <tab-line> — split a table line into R_ID R_RHS R_VAL R_INST R_D1 R_D2 (decoded).
+load_row() {
+  IFS="$TAB" read -r R_ID _r_rhs _r_val R_INST R_D1 R_D2 <<ROWEOF
+$1
+ROWEOF
+  R_RHS="$(expand_pin "$_r_rhs"; printf x)"; R_RHS="${R_RHS%x}"
+  R_VAL="$(expand_pin "$_r_val"; printf x)"; R_VAL="${R_VAL%x}"
+}
+
+# ═══ E35-F03: pi model routing ═══════════════════════════════════════════════════════════
+# put_pin <target> <tier> <raw-yaml-rhs> — insert `  pin.pi.<tier>: <rhs>` under `models:`
+# VERBATIM (awk ENVIRON, so backslashes, ESC and newlines in <rhs> survive unchanged).
+put_pin() {
+  _c="$(cfg "$1")"
+  PUT_LINE="  pin.pi.$2: $3" awk '{ print } !d && /^models:[[:space:]]*(#.*)?$/ { print ENVIRON["PUT_LINE"]; d=1 }' \
+    "$_c" > "$_c.t" && mv "$_c.t" "$_c"
+}
+# pi_tiers <target> — the standard four-tier layout: one role per tier, rest inherit.
+pi_tiers() {
+  set_tier "$1" architect reasoning; set_tier "$1" builder standard
+  set_tier "$1" scout cheap;         set_tier "$1" reviewer frontier
+}
+TIER_ROLES="reasoning:architect standard:builder cheap:scout frontier:reviewer"
+# pi_file <target> <role> / pi_line <target> <role> <key> — the role file and one stamped line.
+pi_file() { printf '%s\n' "$1/.pi/agents/$2.md"; }
+pi_line() { sed -n "s/^$3: //p" "$1/.pi/agents/$2.md"; }
+# wait_cells <dir> — join background cells; each cell writes <dir>/<name>.res ending in `done`.
+wait_cells() {
+  wait
+  for _f in "$1"/*.res; do
+    [ "$(tail -n 1 "$_f")" = done ] || { cat "$_f" >&2; fail "cell $(basename "$_f") failed"; }
+  done
+}
+# pin_verdict — extract the installer's pure grammar and run it in-process.
+PV_FN="$T/pv.sh"
+awk '/^pi_pin_verdict\(\) \{/,/^\}/' "$SRC/harness-install.sh" > "$PV_FN"
+[ -s "$PV_FN" ] || fail "setup: could not extract pi_pin_verdict"
+pin_verdict() { sh -c '. "$1"; pi_pin_verdict "$2"' sh "$PV_FN" "$1"; }
+
+# ── R1: the tier→thinking ladder ───────────────────────────────────────────────────────────
+test_pi_thinking_ladder() {
+  _t="$(mk pi-ladder)"; run "$_t" pi
+  pi_tiers "$_t"; set_tier "$_t" doc-critic inherit
+  run "$_t" pi
+  [ "$(pi_line "$_t" architect thinking)" = high ]   || fail "R1a: reasoning did not stamp thinking: high"
+  [ "$(pi_line "$_t" builder thinking)" = medium ]   || fail "R1a: standard did not stamp thinking: medium"
+  [ "$(pi_line "$_t" scout thinking)" = low ]        || fail "R1a: cheap did not stamp thinking: low"
+  [ "$(pi_line "$_t" reviewer thinking)" = xhigh ]   || fail "R1a: frontier did not stamp thinking: xhigh"
+  grep -q '^thinking:' "$(pi_file "$_t" doc-critic)" && fail "R1a: an inherit role carries thinking:"
+  grep -q '^model:' "$(pi_file "$_t" architect)" && fail "R1a: an unpinned tier carries model:"
+  # (b) an unknown tier is the existing warning, then inherit: no thinking.
+  set_tier "$_t" doc-critic turbo
+  _e="$(run_err "$_t" pi)"
+  printf '%s\n' "$_e" | grep -q 'known tiers: reasoning standard cheap frontier inherit' \
+    || fail "R1b: the existing unknown-tier warning is missing"
+  grep -q '^thinking:' "$(pi_file "$_t" doc-critic)" && fail "R1b: an unknown tier stamped thinking:"
+  # (c) an umbrella child on inherit takes the coordinator's tier.
+  _u="$(mk pi-ladder-umb)"; mkdir -p "$_u/child/.git" "$_u/.harness"; cp "$SRC/harness.config.yaml" "$(cfg "$_u")"
+  set_tier "$_u" builder reasoning
+  HARNESS_AGENTS=pi sh "$SRC/harness-install.sh" --umbrella "$_u" >/dev/null 2>&1 || fail "R1c: umbrella install failed"
+  [ "$(pi_line "$_u/child" builder thinking)" = high ] || fail "R1c: an inherit child did not cascade thinking: high"
+  # (d) exactly one tier→thinking table; the codex ladder is the only other one.
+  [ "$(grep -c '^pi_thinking_alias() {' "$SRC/harness-install.sh")" = 1 ] || fail "R1d: pi_thinking_alias is not defined exactly once"
+  [ "$(grep -cE '^[[:space:]]*cheap\)[^#]*(=|printf .)low' "$SRC/harness-install.sh")" = 2 ] \
+    || fail "R1d: a third tier->level table appeared (expected only codex_effort_alias and pi_thinking_alias)"
+}
+
+# ── M2 / M2b: the thinking guard, proven in a scratch COPY of the tree ───────────────────
+# MS: one copied source tree; variant installers sit beside the original as siblings.
+MS="$T/ms"
+mutsrc() {
+  [ -d "$MS" ] && return 0
+  mkdir -p "$MS/specs"
+  for _e in agents AGENTS.md CHANGELOG.md CLAUDE.md docs harness.config.yaml harness-install.sh \
+            init.sh store tools VERSION README.md umbrella.gitignore.example umbrella.manifest.example.yaml; do
+    cp -R "$SRC/$_e" "$MS/"
+  done
+  cp -R "$SRC/specs/_templates" "$SRC/specs/adr" "$SRC/specs/glossary.md" "$SRC/specs/product.md" "$MS/specs/"
+}
+# mutant <name> <exact-line> <replacement> — a sibling installer with ONE line replaced; the
+# marker must occur exactly once (else the mutant would prove nothing).
+mutant() { # <name> <exact-line> <replacement> [<base-installer-basename>]
+  mutsrc
+  _mb="$MS/${4:-harness-install.sh}"
+  [ "$(grep -cxF -- "$2" "$_mb")" = 1 ] || fail "mutant $1: marker line is not present exactly once: $2"
+  M_LINE="$3" M_OLD="$2" awk '$0 == ENVIRON["M_OLD"] { print ENVIRON["M_LINE"]; next } { print }' \
+    "$_mb" > "$MS/harness-install.$1.sh"
+  cmp -s "$_mb" "$MS/harness-install.$1.sh" && fail "mutant $1: the edit changed nothing"
+  return 0
+}
+mrun_err() { # <installer> <target> — stderr only, exit 0 asserted
+  CODEX_HOME="$2/ch" sh "$1" --agents=pi "$2" 2>&1 >/dev/null || fail "mutant install into $2 exited non-zero"
+}
+test_pi_thinking_guard_mutation() {
+  mutant m2 "    reasoning) _pta=high ;;" "    reasoning) _pta=bogus_zz ;;"
+  _t="$(mk pi-m2)"; run "$_t" pi; set_tier "$_t" architect reasoning
+  _e="$(mrun_err "$MS/harness-install.m2.sh" "$_t")"
+  printf '%s\n' "$_e" | grep -q "pi thinking level 'bogus_zz'" || fail "M2: the corrupted ladder value did not warn"
+  grep -q '^thinking:' "$(pi_file "$_t" architect)" && fail "M2: a corrupted ladder value still reached the role file"
+  # M2b: with the guard ALSO neutralized, the bogus value lands — proving the guard did the work.
+  mutant m2b "    off|minimal|low|medium|high|xhigh|max) ;;" "    *) ;;" harness-install.m2.sh
+  _t="$(mk pi-m2b)"; run "$_t" pi; set_tier "$_t" architect reasoning
+  mrun_err "$MS/harness-install.m2b.sh" "$_t" >/dev/null
+  [ "$(pi_line "$_t" architect thinking)" = bogus_zz ] || fail "M2b: with the guard neutralized thinking: bogus_zz did not reach the file"
+}
+
+# ── R2a: the pin grammar, in-process over the whole table ──────────────────────────────────
+test_pi_pin_grammar_table() {
+  _n=0
+  while IFS= read -r _line; do
+    load_row "$_line"
+    case "$R_INST" in absent|inherit) continue ;; esac
+    _got="$(pin_verdict "$R_VAL")"
+    [ "$_got" = "$R_INST" ] || fail "R2a: row $R_ID: pi_pin_verdict says '$_got', table says '$R_INST'"
+    _n=$((_n + 1))
+  done <<ROWS
+$(pin_rows)
+ROWS
+  [ "$_n" -ge 33 ] || fail "R2a: only $_n rows exercised (the table lost rows)"
+  # (e) model_alias has no pi row.
+  awk '/^model_alias\(\) \{/,/^\}/' "$SRC/harness-install.sh" | grep -q 'pi:' && fail "R2e: model_alias grew a pi: row"
+  return 0
+}
+
+# ── R2b-d: valid pins reach model: byte-for-byte ──────────────────────────────────────────
+test_pi_pin_stamped_e2e() {
+  _t="$(mk pi-stamp)"; run "$_t" pi; pi_tiers "$_t"
+  _rows="2:reasoning 3:standard 4:cheap 10:frontier"
+  for _p in $_rows; do
+    _row="$(pin_rows | awk -F"$TAB" -v r="${_p%%:*}" '$1 == r')"
+    load_row "$_row"; put_pin "$_t" "${_p##*:}" "$R_RHS"
+  done
+  _e="$(run_err "$_t" pi)"
+  for _p in $_rows; do
+    _row="$(pin_rows | awk -F"$TAB" -v r="${_p%%:*}" '$1 == r')"; load_row "$_row"
+    for _tr in $TIER_ROLES; do
+      [ "${_tr%%:*}" = "${_p##*:}" ] || continue
+      [ "$(pi_line "$_t" "${_tr##*:}" model)" = "$R_VAL" ] || fail "R2b: row $R_ID did not land byte-for-byte on ${_tr##*:}"
+    done
+  done
+  printf '%s\n' "$_e" | grep -q 'models.pin.pi' && fail "R2b: valid pins produced a pin warning"
+  # (c) an unpinned non-inherit tier: no model:, the notice exactly once even with 3 roles on it.
+  _t="$(mk pi-nopin)"; run "$_t" pi
+  set_tier "$_t" builder standard; set_tier "$_t" reviewer standard; set_tier "$_t" scout standard
+  _e="$(run_err "$_t" pi)"
+  [ "$(printf '%s\n' "$_e" | grep -c 'pi has no built-in alias for tier .standard.')" = 1 ] \
+    || fail "R2c: the no-built-in-alias notice is not printed exactly once per tier"
+  grep -q '^model:' "$(pi_file "$_t" builder)" && fail "R2c: an unpinned tier stamped a model"
+  # (d) umbrella: the child has no pin; the coordinator's pin applies.
+  _u="$(mk pi-umb)"; mkdir -p "$_u/child/.git" "$_u/.harness"; cp "$SRC/harness.config.yaml" "$(cfg "$_u")"
+  set_tier "$_u" builder standard; put_pin "$_u" standard '"a/b"'
+  HARNESS_AGENTS=pi sh "$SRC/harness-install.sh" --umbrella "$_u" >/dev/null 2>&1 || fail "R2d: umbrella install failed"
+  [ "$(pi_line "$_u/child" builder model)" = a/b ] || fail "R2d: the coordinator's pin did not reach the child"
+  # R3d: a coordinator pin that fails the grammar warns and stamps no model.
+  _u="$(mk pi-umb-bad)"; mkdir -p "$_u/child/.git" "$_u/.harness"; cp "$SRC/harness.config.yaml" "$(cfg "$_u")"
+  set_tier "$_u" builder standard; put_pin "$_u" standard '"a/b;x"'
+  _e="$(HARNESS_AGENTS=pi sh "$SRC/harness-install.sh" --umbrella "$_u" 2>&1 >/dev/null)" || fail "R3d: umbrella install failed"
+  printf '%s\n' "$_e" | grep -q 'models.pin.pi.standard has characters outside' || fail "R3d: no charset warning for a bad coordinator pin"
+  grep -q '^model:' "$(pi_file "$_u/child" builder)" && fail "R3d: a bad coordinator pin stamped a model"
+  [ "$(pi_line "$_u/child" builder thinking)" = medium ] || fail "R3d: thinking was lost with the bad coordinator pin"
+}
+
+# ── R3a: every non-ok single-line row, 6 installs in parallel ─────────────────────────────
+hostile_group() { # <name> <row-ids…> — one install, one tier per row, then every assertion
+  _g="$1"; shift
+  _t="$(mk "pi-host-$_g")"; run "$_t" pi; pi_tiers "$_t"
+  _i=0; _assign=""
+  for _rid in "$@"; do
+    _i=$((_i + 1))
+    _tr="$(printf '%s\n' $TIER_ROLES | sed -n "${_i}p")"
+    load_row "$(pin_rows | awk -F"$TAB" -v r="$_rid" '$1 == r')"
+    put_pin "$_t" "${_tr%%:*}" "$R_RHS"
+    _assign="$_assign $_rid:$_tr"
+  done
+  _e="$(CODEX_HOME="$_t/ch" sh "$SRC/harness-install.sh" --agents=pi "$_t" 2>&1 >/dev/null)" \
+    || fail "group $_g: the install exited non-zero"
+  for _a in $_assign; do
+    _rid="${_a%%:*}"; _rest="${_a#*:}"; _tier="${_rest%%:*}"; _role="${_rest##*:}"
+    load_row "$(pin_rows | awk -F"$TAB" -v r="$_rid" '$1 == r')"
+    case "$R_INST" in
+      length) _why='is longer than 256 bytes' ;;
+      charset) _why='has characters outside \[A-Za-z0-9._:/@-\]' ;;
+      form) _why='is not in provider/id form' ;;
+      suffix) _why='ends in a :<thinking> suffix' ;;
+      *) fail "row $_rid is not a rejected row ($R_INST)" ;;
+    esac
+    _w="$(printf '%s\n' "$_e" | grep "models\.pin\.pi\.$_tier ")" || fail "R3a row $_rid: no warning naming models.pin.pi.$_tier"
+    [ "$(printf '%s\n' "$_w" | wc -l | tr -d ' ')" = 1 ] || fail "R3a row $_rid: not exactly one warning line"
+    printf '%s\n' "$_w" | grep -q -- "$_why" || fail "R3a row $_rid: the warning lacks its reason text ($_why): $_w"
+    case "$R_INST" in
+      form|suffix) printf '%s\n' "$_w" | grep -qF -- "'$R_VAL'" || fail "R3a row $_rid: the value is not echoed for $R_INST" ;;
+      *) if [ -n "$R_VAL" ] && printf '%s\n' "$_e" | grep -qF -- "$R_VAL"; then fail "R3a row $_rid: the value was echoed for $R_INST"; fi ;;
+    esac
+    if [ "$(printf '%s' "$_e" | LC_ALL=C tr -cd '\033' | wc -c | tr -d ' ')" != 0 ]; then fail "R3a row $_rid: stderr carries an ESC byte"; fi
+    grep -q '^model:' "$(pi_file "$_t" "$_role")" && fail "R3a row $_rid: a rejected pin still stamped model:"
+    [ -n "$(pi_line "$_t" "$_role" thinking)" ] || fail "R3a row $_rid: thinking was dropped with the rejected pin"
+  done
+  return 0
+}
+test_pi_pin_rejects_hostile_e2e() {
+  _d="$(mk pi-host-res)"
+  ( hostile_group g1 11 12 13 14; echo done ) >"$_d/g1.res" 2>&1 &
+  ( hostile_group g2 15 16 17 18; echo done ) >"$_d/g2.res" 2>&1 &
+  ( hostile_group g3 19 20 21 22; echo done ) >"$_d/g3.res" 2>&1 &
+  ( hostile_group g4 23 24 25 26; echo done ) >"$_d/g4.res" 2>&1 &
+  ( hostile_group g5 27 28 29 30; echo done ) >"$_d/g5.res" 2>&1 &
+  ( hostile_group g6 31 32 33; echo done ) >"$_d/g6.res" 2>&1 &
+  wait_cells "$_d"
+  # (b) row 34: the literal tier name keeps the existing warning.
+  _t="$(mk pi-host-34)"; run "$_t" pi; set_tier "$_t" builder standard; put_pin "$_t" standard inherit
+  _e="$(run_err "$_t" pi)"
+  printf '%s\n' "$_e" | grep -q "models.pin.pi.standard = 'inherit' is a tier name, not a model id" \
+    || fail "R3b: the inherit-pin warning is missing"
+  grep -q '^model:' "$(pi_file "$_t" builder)" && fail "R3b: an inherit pin stamped a model"
+  return 0
+}
+
+# ── R3c: config SHAPES — lookup, not grammar ──────────────────────────────────────────────
+test_pi_pin_config_shapes() {
+  _t="$(mk pi-shape)"; run "$_t" pi; pi_tiers "$_t"
+  _c="$(cfg "$_t")"
+  # commented, unknown tier key, and a pin nested under another top-level section.
+  sed 's|^  # pin\.pi\.cheap: .*|  # pin.pi.cheap: "a/b"|' "$_c" > "$_c.t" && mv "$_c.t" "$_c"
+  grep -q '^  # pin\.pi\.cheap: "a/b"$' "$_c" || fail "setup: commented pin line missing"
+  put_pin "$_t" turbo '"a/b"'
+  printf 'telemetry_extra:\n  pin.pi.reasoning: "a/b"\n' >> "$_c"
+  run "$_t" pi
+  for _r in architect builder scout reviewer; do
+    grep -q '^model:' "$(pi_file "$_t" "$_r")" && fail "R3c: a non-pin shape stamped a model on $_r"
+  done
+  # a valid pin while every role is inherit stamps nothing.
+  _t="$(mk pi-shape-inh)"; run "$_t" pi; put_pin "$_t" standard '"a/b"'; run "$_t" pi
+  grep -rq '^model:' "$_t/.pi/agents" && fail "R3c: a pin with every role inherit stamped a model"
+  # row 35: a multi-line value is read line-wise.
+  _t="$(mk pi-shape-35)"; run "$_t" pi; set_tier "$_t" builder standard
+  load_row "$(pin_rows | awk -F"$TAB" '$1 == 35')"; put_pin "$_t" standard "$R_RHS"; run "$_t" pi
+  [ "$(pi_line "$_t" builder model)" = "$R_VAL" ] || fail "R3c: row 35 did not stamp '$R_VAL'"
+  # an empty pin (row 1) is absent: no model, no warning.
+  _t="$(mk pi-shape-1)"; run "$_t" pi; set_tier "$_t" builder standard; put_pin "$_t" standard '""'
+  _e="$(run_err "$_t" pi)"
+  printf '%s\n' "$_e" | grep 'models.pin.pi.standard' | grep -q '⚠️' && fail "R3c: an empty pin warned"
+  grep -q '^model:' "$(pi_file "$_t" builder)" && fail "R3c: an empty pin stamped a model"
+  return 0
+}
+
+# ── M1: the pin guard, proven by neutralizing it in a scratch copy ───────────────────────
+test_pi_pin_guard_mutation() {
+  mutant m1 '      if [ "$_rm_pv" != ok ]; then' '      if false; then'
+  _t="$(mk pi-m1)"; run "$_t" pi; set_tier "$_t" builder standard
+  load_row "$(pin_rows | awk -F"$TAB" '$1 == 25')"; put_pin "$_t" standard "$R_RHS"
+  mrun_err "$MS/harness-install.m1.sh" "$_t" >/dev/null
+  [ "$(pi_line "$_t" builder model)" = "$R_VAL" ] || fail "M1: with the verdict check neutralized row 25 did not reach model:"
+  run "$_t" pi
+  grep -q '^model:' "$(pi_file "$_t" builder)" && fail "M1: the real installer left the hostile model: in place"
+  return 0
+}
+
+# ── R7: models_any counts thinking alone ──────────────────────────────────────────────────
+test_pi_models_any() {
+  _t="$(mk pi-any1)"; run "$_t" pi
+  [ ! -f "$_t/.harness/.escalation-arming" ] || fail "R7: an all-inherit pi target grew an arming file"
+  set_tier "$_t" builder standard; run "$_t" pi
+  [ -f "$_t/.harness/.escalation-arming" ] || fail "R7: a tier alone (thinking) did not satisfy models_any pi"
+  _t="$(mk pi-any2)"; run "$_t" pi; put_pin "$_t" reasoning '"a/b"'; run "$_t" pi
+  [ ! -f "$_t/.harness/.escalation-arming" ] || fail "R7: a pin on an unused tier counted as configured"
+  return 0
+}
+
+# ── R8: verdict cells ─────────────────────────────────────────────────────────────────────
+verdict_cell() { # <name> <builder> <heavy> <pin-spec> <expected>   pin-spec: "-" or tier=value,…
+  _t="$(mk "pi-v-$1")"; run "$_t" pi
+  set_tier "$_t" builder "$2"; set_tier "$_t" builder-heavy "$3"
+  if [ "$4" != "-" ]; then
+    _oifs="$IFS"; IFS=,
+    for _ps in $4; do put_pin "$_t" "${_ps%%=*}" "\"${_ps#*=}\""; done
+    IFS="$_oifs"
+  fi
+  run "$_t" pi
+  _got="$(sed -n 's/^pi=//p' "$_t/.harness/.escalation-arming" 2>/dev/null)"
+  [ "$_got" = "$5" ] || fail "R8 cell $1: pi verdict '$_got', expected '$5'"
+}
+test_pi_escalation_verdict_cells() {
+  _d="$(mk pi-v-res)"
+  ( verdict_cell a standard reasoning - raise; echo done ) >"$_d/a.res" 2>&1 &
+  ( verdict_cell b standard standard - same; echo done ) >"$_d/b.res" 2>&1 &
+  ( verdict_cell c standard inherit - none; echo done ) >"$_d/c.res" 2>&1 &
+  ( verdict_cell d standard reasoning standard=a/b,reasoning=a/b raise; echo done ) >"$_d/d.res" 2>&1 &
+  ( verdict_cell e reasoning reasoning reasoning=a/b same; echo done ) >"$_d/e.res" 2>&1 &
+  ( verdict_cell f standard reasoning standard=a/b:high raise; echo done ) >"$_d/f.res" 2>&1 &
+  wait_cells "$_d"
+}
+test_pi_verdict_mutation() {
+  mutant m3 '  elif [ "$1" = "pi" ]; then' '  elif [ "$1" = "pi-axis-dropped" ]; then'
+  _t="$(mk pi-m3)"; run "$_t" pi; set_tier "$_t" builder standard; set_tier "$_t" builder-heavy reasoning
+  mrun_err "$MS/harness-install.m3.sh" "$_t" >/dev/null
+  [ "$(sed -n 's/^pi=//p' "$_t/.harness/.escalation-arming")" = neither ] \
+    || fail "M3: dropping the pi thinking axis did not flip standard/reasoning from raise to neither"
+}
+
+# ── R10: pi pins and pi keys leak nowhere when pi is not selected ─────────────────────────
+tsnap() { ( cd "$1" && find . -type f | LC_ALL=C sort | while IFS= read -r _f; do cksum "$_f"; done ); }
+leak_target() { # <name> <with-pi-keys 0|1>
+  _t="$(mk "pi-leak-$1")"; CODEX_HOME="$_t/ch" sh "$SRC/harness-install.sh" --agents=claude,codex,opencode,antigravity "$_t" >/dev/null 2>&1 \
+    || fail "R10: seed install failed ($1)"
+  set_tier "$_t" architect reasoning; set_tier "$_t" builder standard; set_tier "$_t" builder-heavy reasoning; set_tier "$_t" scout cheap
+  set_pin "$_t" claude reasoning opus; set_pin "$_t" codex standard gpt-x; set_pin "$_t" opencode standard openai/x
+  if [ "$2" = 1 ]; then put_pin "$_t" standard '"a/b"'; put_pin "$_t" reasoning '"bad pin;"'; put_pin "$_t" cheap '"a/b:high"'; fi
+  CODEX_HOME="$_t/ch" sh "$SRC/harness-install.sh" --agents=claude,codex,opencode,antigravity "$_t" >/dev/null 2>&1 \
+    || fail "R10: install failed ($1)"
+  tsnap "$_t" > "$T/leak-$1.snap"
+}
+test_pi_pins_do_not_leak() {
+  ( leak_target c1 0; echo done ) >"$T/leak-c1.res" 2>&1 &
+  ( leak_target c2 0; echo done ) >"$T/leak-c2.res" 2>&1 &
+  ( leak_target p 1; echo done ) >"$T/leak-p.res" 2>&1 &
+  wait
+  for _n in c1 c2 p; do [ "$(tail -n 1 "$T/leak-$_n.res")" = done ] || { cat "$T/leak-$_n.res" >&2; fail "R10: cell $_n failed"; }; done
+  # control = paths that legitimately differ between two identical installs (paths, clocks).
+  _bad="$(awk '
+    FILENAME == ARGV[1] { a[$3] = $1 " " $2; next }
+    FILENAME == ARGV[2] { if (a[$3] != $1 " " $2) ctl[$3] = 1; next }
+    { if (!($3 in a) || a[$3] != $1 " " $2) if (!($3 in ctl) && $3 != "./.harness/harness.config.yaml") print $3 }
+  ' "$T/leak-c1.snap" "$T/leak-c2.snap" "$T/leak-p.snap")"
+  [ -z "$_bad" ] || fail "R10: pin.pi.* keys changed non-pi artifacts: $_bad"
+  # the set of files must match too
+  [ "$(awk '{print $3}' "$T/leak-c1.snap")" = "$(awk '{print $3}' "$T/leak-p.snap")" ] || fail "R10: pin.pi.* keys changed the file set"
+}
+
+# ── R11: the seed template and migrate_config converge ───────────────────────────────────
+block_of() { # <config> <start-regex> <key>
+  awk -v start="$2" -v key="$3" '
+    $0 ~ start { p = 1 }
+    p && seen && $0 !~ /^  / { exit }
+    p { print }
+    p && $0 ~ "^" key ":" { seen = 1 }
+  ' "$1"
+}
+test_pi_seed_and_migrate_converge() {
+  _seed="$SRC/harness.config.yaml"
+  _m="$(awk '/^models:/{k=1;next} /^[a-z_]+:/{k=0} k' "$_seed")"
+  printf '%s\n' "$_m" | grep -q '^  # pin\.pi\.cheap: ""$' || fail "R11a: the seed models: block lacks the pin.pi.* comment lines"
+  printf '%s\n' "$_m" | tr '\n' ' ' | grep -qE 'pi ALSO derives[^.]{0,140}cheap=low standard=medium reasoning=high frontier=xhigh' \
+    || fail "R11a: the seed models: block lacks the pi thinking ladder line"
+  _bad="$(printf '%s\n' "$_m" | grep -vE '^[[:space:]]*(#.*)?$' | grep -vE '^  [a-z-]+: inherit([[:space:]]+#.*)?$' || true)"
+  [ -z "$_bad" ] || fail "R11a: a non-comment models: value is not inherit: $_bad"
+  # (b) migrate_config on a config with neither block appends byte-identical text.
+  _t="$(mk pi-mig)"; mkdir -p "$_t/.harness"
+  printf 'store:\n  backend: tasks-md\n' > "$_t/.harness/harness.config.yaml"
+  run "$_t" pi
+  _mc="$(cfg "$_t")"
+  [ "$(block_of "$_seed" '^# Per-role model routing' models)" = "$(block_of "$_mc" '^# Per-role model routing' models)" ] \
+    || fail "R11b: the migrate_config models: block differs from the seed's"
+  [ -n "$(block_of "$_mc" '^# Per-role model routing' models)" ] || fail "R11b: models: block was not migrated in"
+  [ "$(block_of "$_seed" '^# Deterministic Builder escalation' escalation)" = "$(block_of "$_mc" '^# Deterministic Builder escalation' escalation)" ] \
+    || fail "R11b: the migrate_config escalation: block differs from the seed's"
+  [ -n "$(block_of "$_mc" '^# Deterministic Builder escalation' escalation)" ] || fail "R11b: escalation: block was not migrated in"
+  block_of "$_seed" '^# Deterministic Builder escalation' escalation | tr '\n' ' ' | grep -qE 'pi +a tier alone stamps NO `model`[^.]{0,200}thinking' \
+    || fail "R11a: the escalation: comments lack the pi arming row"
+  # (c) a lone commented pin line stamps nothing.
+  _t="$(mk pi-mig-c)"; run "$_t" pi; set_tier "$_t" builder standard
+  sed 's|^  # pin\.pi\.cheap: .*|  # pin.pi.standard: "a/b"|' "$(cfg "$_t")" > "$(cfg "$_t").t" && mv "$(cfg "$_t").t" "$(cfg "$_t")"
+  run "$_t" pi
+  grep -q '^model:' "$(pi_file "$_t" builder)" && fail "R11c: a commented pin line resolved"
+  return 0
+}
+
 test_tier_resolution_order
 pass "tier resolves role → models.default → inherit (R4)"
 test_inherit_is_omission
@@ -1024,5 +1445,30 @@ test_deselect_reclaims_stamped
 pass "deselect reclaims every stamped artifact and prunes the harness-created dirs (R22)"
 test_deselect_preserves_user_edits
 pass "an edited stamped artifact survives deselection with a warning (R23)"
+
+test_pi_thinking_ladder
+pass "E35-F03: the pi thinking ladder rides the tier with no pin, no key for inherit/unknown (R1)"
+test_pi_thinking_guard_mutation
+pass "E35-F03: a corrupt ladder value warns and stamps nothing; without the guard it lands (M2/M2b)"
+test_pi_pin_grammar_table
+pass "E35-F03: pi_pin_verdict matches the hostile-pin table (R2)"
+test_pi_pin_stamped_e2e
+pass "E35-F03: valid pi pins land byte-for-byte; unpinned tiers stamp no model; umbrella cascade (R2, R3d)"
+test_pi_pin_rejects_hostile_e2e
+pass "E35-F03: every rejected pin row warns once, echoes only form/suffix values, stamps no model, keeps thinking (R3)"
+test_pi_pin_config_shapes
+pass "E35-F03: commented, nested, unknown-tier, inherit-only, empty and multi-line pin shapes (R3)"
+test_pi_pin_guard_mutation
+pass "E35-F03: neutralizing the pin verdict lets row 25 reach model: (M1)"
+test_pi_models_any
+pass "E35-F03: models_any pi holds on thinking alone (R7)"
+test_pi_escalation_verdict_cells
+pass "E35-F03: pi verdict cells raise/same/none (R8)"
+test_pi_verdict_mutation
+pass "E35-F03: dropping the pi thinking axis flips raise to neither (M3)"
+test_pi_pins_do_not_leak
+pass "E35-F03: pin.pi.* keys change no artifact when pi is not selected (R10)"
+test_pi_seed_and_migrate_converge
+pass "E35-F03: seed comments document pi; migrate_config blocks are byte-identical (R11)"
 
 echo "All model-routing tests passed."
