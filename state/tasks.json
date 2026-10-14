@@ -392,7 +392,7 @@
         {
           "id": "E35-F03",
           "title": "pi model routing: pin.pi.<tier>, tier->thinking ladder, escalation arming",
-          "status": "pending",
+          "status": "spec-ready",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
