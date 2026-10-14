@@ -4,7 +4,8 @@ This is the canonical entrypoint for the portable Spec-Driven Development (SDD)
 harness. Claude Code is the primary host, Codex second, OpenCode third,
 Antigravity supported via `.agents/skills/`, and pi via `.pi/prompts/` plus the same skills
 (pi loads them only after the project is trusted: `/trust`, or `-a` on a headless run, then `/reload` or restart pi; pi role
-isolation arrives with E35-F02). The harness lives in its files; each
+isolation is the generated `.pi/agents/<role>.md` files for `pi-subagents`, with
+`tools/pi-dispatch.sh` as the fallback). The harness lives in its files; each
 role starts with a clean, curated context.
 
 ## Start every session

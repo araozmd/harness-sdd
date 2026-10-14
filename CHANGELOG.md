@@ -4,6 +4,27 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.93.0] — 2026-10-13
+
+### Added — pi role sub-agents (E35-F02)
+- Selecting `pi` now also writes one `.pi/agents/<role>.md` per role (the Codex role set;
+  `pr-fixer` only while `pr_loop.enabled`), in the format of the community `pi-subagents`
+  package. Each is a thin pointer to `.harness/agents/<role>.md` with a tool allowlist
+  translated from the role's Claude Code tools by a single table (`claude_role_tools`) and
+  a single translation (`pi_tools`); no `model:`/`thinking:` yet (E35-F03). Ownership is
+  pristine-only via the new `.harness/.pi-agents/` stamp ledger, with the same full
+  filesystem-shape refusal rules as the prompt templates (the F01 helpers are generalized
+  by kind, not duplicated). `tools/harness-owned-paths.sh` reports the stamped role files.
+- New `tools/pi-dispatch.sh <role> <task-file>` (installed as `.harness/tools/`): runs one
+  role as a separate `pi -p` process from the role file, the fallback when `pi-subagents`
+  is absent. Exit codes 2 (usage), 3 (unusable role file), 127 (no `pi`), else pi's status.
+- `harness-install.sh --self` now accepts `pi` (default `claude,codex,opencode,pi`) and the
+  repository commits its own `.pi/agents` and `.pi/prompts`; `tests/test_self_drift.sh` gates them.
+- **Shared body change.** The shared `sdd-next` body gains one parenthetical line naming the
+  pi delegation path (`subagent` tool, else `pi-dispatch.sh`), so every front end's
+  `sdd-next` glue is rewritten on upgrade (pristine copies only; edited ones are preserved).
+  `agents/orchestrator.md` gains a pi delegation paragraph.
+
 ## [0.92.0] — 2026-10-13
 
 ### Added — pi front-end key (E35-F01)
