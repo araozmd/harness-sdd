@@ -467,7 +467,7 @@ telling the operator what to configure, not reporting a failure.
 
 **The installer answers "would escalating actually help?" — you never estimate it.**
 `harness-install.sh` asks its own resolvers for the whole resolved stamp — `model` plus, on
-codex only, `model_reasoning_effort` (E99-F163) — that `builder` and `builder-heavy` resolve
+codex only, `model_reasoning_effort` (E99-F163), and on pi only, `thinking` (E35-F03) — that `builder` and `builder-heavy` resolve
 to on every front-end it stamps, and records the comparison in `.harness/.escalation-arming`.
 That file decides. Do not read it yourself, do not reason about `models:` or its pins, and do not
 add a judgement on top: two E17-F03 review rounds killed two attempts to work this out

@@ -496,7 +496,8 @@ test_pi_owned_paths() {
 }
 
 # ── R11 ────────────────────────────────────────────────────────────────────────────────────
-test_escalation_arming_skips_pi() {
+test_escalation_arming_includes_pi() {
+  # Superseded: E35-F01 R11 said pi was excluded from arming; E35-F03 R9 includes it.
   _cfg() {
     sed -e 's|^  builder: .*|  builder: standard|' -e 's|^  builder-heavy: .*|  builder-heavy: reasoning|' \
       "$1/.harness/harness.config.yaml" > "$1/c.t" && mv "$1/c.t" "$1/.harness/harness.config.yaml"
@@ -508,16 +509,16 @@ test_escalation_arming_skips_pi() {
   _b="$(new_target r11b)"; ok_inst - - --agents=claude,pi "$_b"; _cfg "$_b"; ok_inst - - --agents=claude,pi "$_b"
   [ -f "$_a/.harness/.escalation-arming" ] || fail "R11: the claude-only control wrote no arming file"
   [ -f "$_b/.harness/.escalation-arming" ] || fail "R11: claude,pi wrote no arming file"
-  grep -q '^pi=' "$_b/.harness/.escalation-arming" && fail "R11: the arming file carries a pi= line"
-  [ "$(sed -n 1p "$_a/.harness/.escalation-arming")" = "$(sed -n 1p "$_b/.harness/.escalation-arming")" ] \
-    || fail "R11: pi changed the verdict (claude-only '$(sed -n 1p "$_a/.harness/.escalation-arming")' vs claude,pi '$(sed -n 1p "$_b/.harness/.escalation-arming")')"
-  cmp -s "$_a/.harness/.escalation-arming" "$_b/.harness/.escalation-arming" \
-    || fail "R11: the arming file differs between claude and claude,pi"
-  # pi alone: no detail line either.
-  _c="$(new_target r11c)"; ok_inst - - --agents=pi "$_c"
-  [ ! -f "$_c/.harness/.escalation-arming" ] || ! grep -q '^pi=' "$_c/.harness/.escalation-arming" \
-    || fail "R11: a pi-only arming file carries pi="
-  pass "pi is excluded from the escalation-arming file and its verdict (R11)"
+  [ "$(tail -n 1 "$_b/.harness/.escalation-arming")" = "pi=raise" ] \
+    || fail "R11: claude,pi arming file does not end in pi=raise: $(cat "$_b/.harness/.escalation-arming")"
+  [ "$(sed -n 1p "$_b/.harness/.escalation-arming")" = armed ] || fail "R11: claude,pi (both raise) is not armed"
+  [ "$(sed -n 2p "$_b/.harness/.escalation-arming")" = "$(sed -n 2p "$_a/.harness/.escalation-arming")" ] \
+    || fail "R11: pi changed the claude= line"
+  # pi alone, tiers set: armed on thinking alone.
+  _c="$(new_target r11c)"; ok_inst - - --agents=pi "$_c"; _cfg "$_c"; ok_inst - - --agents=pi "$_c"
+  [ "$(cat "$_c/.harness/.escalation-arming")" = "armed
+pi=raise" ] || fail "R11: a pi-only tiered target did not arm on thinking: $(cat "$_c/.harness/.escalation-arming")"
+  pass "pi is included in the escalation-arming file and its verdict (E35-F03 R9)"
 }
 
 # ── R12 ────────────────────────────────────────────────────────────────────────────────────
@@ -584,6 +585,6 @@ test_pi_symlink_and_stamp_guards
 test_pi_host_detection
 test_pi_worker_roster
 test_pi_owned_paths
-test_escalation_arming_skips_pi
+test_escalation_arming_includes_pi
 test_pi_operator_text
 echo "All pi front-end tests passed."

@@ -15,6 +15,8 @@
 #        is absent, non-regular or unreadable
 #   3    unusable role file: absent, a symlink, the wrong node type, under a symlinked or
 #        non-directory `.pi` / `.pi/agents`, or `tools:` / `model:` / `thinking:` invalid
+#        (E35-F03: also a repeated `model:`/`thinking:` line, a `model:` over 256 bytes or
+#        beginning with `-`, or a `model:` ending in `:<level>` beside a `thinking:` line)
 #   127  no `pi` on PATH
 #   else pi's own exit status (stdout is passed through unchanged)
 # Every diagnostic goes to stderr, prefixed `pi-dispatch: `; stdout carries only pi's.
@@ -88,6 +90,30 @@ if fm_has thinking; then
     off|minimal|low|medium|high|xhigh|max) ;;
     *) fail 3 "$R thinking: value '$thinking' is not one of off|minimal|low|medium|high|xhigh|max" ;;
   esac
+fi
+
+# E35-F03 R6 — B/C agreement and argv safety. pi-subagents is last-wins on a repeated key
+# and `fm_get` is first-wins, so a repeated key is drift; an overlong or `-`-leading model
+# is not a model id; a `:<level>` model suffix beside a `thinking:` line runs at one level
+# here (`--thinking` wins) and another through pi-subagents (suffix wins). The charset
+# bracket above is textually the installer's `pi_pin_verdict` one (pinned by test_pi_agents.sh).
+for _k in model thinking; do
+  _n="$(printf '%s\n' "$fm" | grep -c "^$_k:" || true)"
+  [ "$_n" -le 1 ] || fail 3 "$R has $_n $_k: lines (expected at most one)"
+done
+if [ -n "$model" ]; then
+  [ "${#model}" -le 256 ] || fail 3 "$R model: value is longer than 256 bytes"
+  case "$model" in
+    -*) fail 3 "$R model: value begins with '-'" ;;
+  esac
+  if [ -n "$thinking" ]; then
+    case "${model##*:}" in
+      off|minimal|low|medium|high|xhigh|max)
+        case "$model" in
+          *:*) fail 3 "$R model: ends in a :<thinking> suffix while thinking: is also set" ;;
+        esac ;;
+    esac
+  fi
 fi
 
 command -v pi >/dev/null 2>&1 || fail 127 "pi is not on PATH"
