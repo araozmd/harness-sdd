@@ -380,7 +380,8 @@
         {
           "id": "E35-F02",
           "title": "pi role sub-agents: .pi/agents/<role>.md for pi-subagents + tools/pi-dispatch.sh fallback, --self",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "ff5beb6b3ce810214b8ba613a09a7ee170a500f6", "ref": "ff5beb6b3ce810214b8ba613a09a7ee170a500f6", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [
