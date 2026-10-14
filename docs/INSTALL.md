@@ -119,8 +119,23 @@ headless `pi -p` run. `/trust` does not reload the current session, so run `/rel
 restart pi) before invoking the new `/sdd-*` templates and skills. Ownership is pristine-only, recorded in `.harness/.pi-prompts/`: an
 edited or foreign `.pi/prompts/sdd-*.md` survives install and deselection with a warning,
 and `.pi/` is pruned only when empty. The installer never touches `~/.pi/agent` or
-`.pi/settings.json`. Until E35-F02 lands, a pi session can run the `/sdd-*` workflows but has
-no isolated role contexts; role isolation on pi arrives with E35-F02.
+`.pi/settings.json`.
+
+pi has no sub-agents in core, so role isolation comes in two layers (ADR-0007). Selecting pi
+also writes one `.pi/agents/<role>.md` per role (orchestrator, architect, builder,
+builder-heavy, reviewer, scout, doc-critic, and `pr-fixer` while `pr_loop.enabled` is true),
+in the format of the community `pi-subagents` package (it registers a `subagent` tool; pinned
+install is E35-F04). Each file is a thin pointer to `.harness/agents/<role>.md` plus a tool
+allowlist translated from the role's Claude Code tools; it carries no `model:` or `thinking:`
+(E35-F03), so every role inherits the session's model. Ownership is pristine-only, recorded in
+`.harness/.pi-agents/`: an edited, foreign or symlinked role file survives install and
+deselection with a warning. `pi-subagents` loads project agents only when the project is trusted.
+
+Without that package, `.harness/tools/pi-dispatch.sh <role> <task-file>` runs one role as a
+separate `pi -p` process (project root as cwd, the role file's tools and body, the task file
+as the message) and passes pi's stdout and exit status through. Exit codes: `2` bad usage (argument
+count, role name, task file), `3` unusable role file (absent, symlinked, wrong node type, or an
+invalid `tools:`/`model:`/`thinking:`), `127` no `pi` on `PATH`; otherwise pi's own status.
 
 ### Retiring Gemini
 

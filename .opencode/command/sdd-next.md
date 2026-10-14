@@ -21,6 +21,7 @@ Act as the **Orchestrator** (`agents/orchestrator.md`).
      (`done` is written only after the work merges — see `agents/orchestrator.md`
      “Writing `done`”), reject → back to `in-progress`.
    (In Antigravity, define role subagents dynamically with `define_subagent` using canonical `agents/<role>.md` prompts and `enable_write_tools=True`, dispatching via `invoke_subagent` to maintain role context hygiene.)
+   (In pi, delegate each role in a fresh context with the `subagent` tool when the `pi-subagents` package is loaded, otherwise run `tools/pi-dispatch.sh <role> <task-file>`; if neither works, stop and report the limitation and the handoff file path.)
 4. Append what happened to `progress/history.md`.
 
 Map `$ARGUMENTS` to the selector's closed scope flags:

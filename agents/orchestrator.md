@@ -584,6 +584,19 @@ them via `invoke_subagent` to start a fresh, isolated context. Use `/sdd-*` for 
 skill invocations. If subagent invocation tools are unavailable, stop and report the
 limitation and file handoff path rather than simulating roles in the same conversation.
 
+For pi, each role is a generated `.pi/agents/<role>.md` file (a pointer to
+`agents/<role>.md` carrying the role's tool allowlist). When the `subagent` tool is
+available (the `pi-subagents` package is loaded and the project is trusted), launch the
+named role with it in a fresh context. Otherwise write the task to a file under
+`progress/<run>/` and run `tools/pi-dispatch.sh <role> <task-file>`: it runs the role as
+a separate `pi -p` process, prints the role's final answer on stdout, and exits non-zero
+when the role run fails. Use `/sdd-*` (or `/skill:sdd-*`) for pi invocations. If neither
+path is available, stop and report the limitation and file handoff path. Never simulate
+an independent Reviewer in the host. The init-failure halt and human `spec-ready`
+approval gate still apply. On pi the Orchestrator runs in the main session: never
+delegate the `orchestrator` role itself (a delegated Orchestrator would put the
+Architect's doc-critic hand-off past `pi-subagents`' default depth of 2).
+
 - Spawn each sub-agent with a **clean context**. Pass it ONLY: its role file, the
   specific spec/task files it needs, and the relevant `progress/` notes.
 - **Never** forward another agent's chat transcript. Hand-offs happen through files.

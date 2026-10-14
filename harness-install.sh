@@ -4316,6 +4316,12 @@ HARNESS-OWNED  (overwritten on every upgrade):
   .pi/prompts/sdd-*.md                pi prompt templates (/sdd-*): thin pointers to the shared
                                       skill units, pristine-only ownership (E35-F01)
   .harness/.pi-prompts/               last-written pi prompt-template ownership stamps
+  .pi/agents/*.md                     pi role agents for pi-subagents: pointers to
+                                      .harness/agents/<role>.md with a tool allowlist,
+                                      pristine-only ownership (E35-F02)
+  .harness/.pi-agents/                last-written pi role-file ownership stamps
+  .harness/tools/pi-dispatch.sh       pi (pi -p) role dispatcher, the fallback when
+                                      pi-subagents is absent
   .harness/.codex-skills/             last-written skill-unit ownership stamps (historical
                                       name; it stamps shared units — ADR-0003)
   CLAUDE.md / AGENTS.md  -> only the harness:begin..end block
@@ -4639,6 +4645,81 @@ EOF
   all_codex_personas() {
     ag_personas
     printf '%s\t%s\n' pr-fixer "$PR_FIXER_DESC"
+  }
+
+  # claude_role_tools <role> — the ONLY role→Claude-Code-tools table (E35-F02 R3). The
+  # Claude `.claude/agents/*.md` shims (emit_agent) and the pi role files (pi_tools) both
+  # derive from it, so the two tool lists cannot be edited apart. Defined outside the
+  # claude-gated block because pi needs it when `claude` is not selected. An unknown role
+  # prints nothing and returns 1. builder-heavy copies builder exactly (ADR-0002).
+  claude_role_tools() {
+    case "$1" in
+      orchestrator)  printf '%s' "Read, Bash, Edit, Grep, Glob, Task" ;;
+      architect)     printf '%s' "Read, Write, Edit, Grep, Glob, Bash, Task" ;;
+      builder|builder-heavy) printf '%s' "Read, Write, Edit, Bash, Grep, Glob" ;;
+      reviewer)      printf '%s' "Read, Bash, Grep, Glob, Edit" ;;
+      scout)         printf '%s' "Read, Grep, Glob, Bash" ;;
+      doc-critic)    printf '%s' "Read, Grep, Glob, Write" ;;
+      pr-fixer)      printf '%s' "Read, Edit, Bash, Grep, Glob" ;;
+      *) return 1 ;;
+    esac
+  }
+
+  # pi_tools <claude-list> — the ONLY Claude→pi tool translation (E35-F02 R3). Each token
+  # maps Read→read, Bash→bash, Edit→edit, Write→write, Grep→grep, Glob→find,ls, Task→(none:
+  # it becomes allowNestedSubagents, see pi_role_nested). The union is emitted in the
+  # canonical order read, bash, edit, write, grep, find, ls, deduplicated. An unknown or
+  # empty token prints a diagnostic on stderr, NOTHING on stdout, and returns 1.
+  pi_tools() {
+    _pt_set=","
+    _pt_rest="$1,"
+    while [ -n "$_pt_rest" ]; do
+      _pt_tok="${_pt_rest%%,*}"
+      _pt_rest="${_pt_rest#*,}"
+      _pt_tok="${_pt_tok# }"; _pt_tok="${_pt_tok% }"
+      case "$_pt_tok" in
+        Read)  _pt_set="${_pt_set}read," ;;
+        Bash)  _pt_set="${_pt_set}bash," ;;
+        Edit)  _pt_set="${_pt_set}edit," ;;
+        Write) _pt_set="${_pt_set}write," ;;
+        Grep)  _pt_set="${_pt_set}grep," ;;
+        Glob)  _pt_set="${_pt_set}find,ls," ;;
+        Task)  : ;;
+        *) echo "pi_tools: unknown Claude tool '$_pt_tok'" >&2; return 1 ;;
+      esac
+    done
+    _pt_out=""
+    for _pt_t in read bash edit write grep find ls; do
+      case "$_pt_set" in
+        *",$_pt_t,"*) _pt_out="${_pt_out:+$_pt_out, }$_pt_t" ;;
+      esac
+    done
+    printf '%s' "$_pt_out"
+  }
+
+  # pi_role_nested <claude-list> — 0 iff a trimmed token is `Task` (the table's Task row):
+  # such a role gets allowNestedSubagents: true in its pi role file.
+  pi_role_nested() {
+    _prn_rest="$1,"
+    while [ -n "$_prn_rest" ]; do
+      _prn_tok="${_prn_rest%%,*}"
+      _prn_rest="${_prn_rest#*,}"
+      _prn_tok="${_prn_tok# }"; _prn_tok="${_prn_tok% }"
+      [ "$_prn_tok" = Task ] && return 0
+    done
+    return 1
+  }
+
+  # pi_tools_preflight — translate EVERY role before the first pi write, in the main shell
+  # (never a pipeline subshell), so a bad table row fails the install with nothing written.
+  pi_tools_preflight() {
+    for _ptp_role in $(all_codex_personas | cut -f1); do
+      _ptp_list="$(claude_role_tools "$_ptp_role")" \
+        || die "pi role tools: no Claude tool list for role '$_ptp_role'"
+      _ptp_err="$(pi_tools "$_ptp_list" 2>&1 >/dev/null)" \
+        || die "pi role tools: $_ptp_err"
+    done
+    return 0
   }
 
   # gen_codex_agent <role> <description> <dest> — one `.codex/agents/<role>.toml`,
@@ -5294,36 +5375,36 @@ EOF
     } > "$TARGET/.claude/agents/$1.md"
     claude_agent_body "$1" >> "$TARGET/.claude/agents/$1.md"
   }
-  emit_agent orchestrator "Read, Bash, Edit, Grep, Glob, Task" \
+  emit_agent orchestrator "$(claude_role_tools orchestrator)" \
     "The Leader. Reads state, runs init.sh, decides the next phase, and delegates to architect/builder/reviewer/scout. Never writes code. Use this at the start of every SDD session."
   # architect carries `Task` so it can spawn the doc-critic sub-agent at its
   # pre-`spec-ready` `target-type=feature-spec` checkpoint (agents/architect.md).
-  emit_agent architect "Read, Write, Edit, Grep, Glob, Bash, Task" \
+  emit_agent architect "$(claude_role_tools architect)" \
     "The Spec Author. Turns a feature intent into the 4-file spec (.spec/.plan/.tasks/.tests) using EARS. Writes specs, never production code. Spawn for features in \`pending\` with sdd:true."
-  emit_agent builder "Read, Write, Edit, Bash, Grep, Glob" \
+  emit_agent builder "$(claude_role_tools builder)" \
     "The Implementer. Writes code strictly from an APPROVED spec's tasks.md, one task at a time, plus the tests in tests.md. Spawn only when the feature is \`in-progress\`."
   # builder-heavy (E17-F02): the escalation tier. The tool list is copied EXACTLY from
   # `builder` above — ADR-0002 says the two variants differ only by resolved model, so a
   # different tool list would be a behavioral difference the ADR forbids. Both shims point
   # at their own canonical body, and .harness/agents/builder-heavy.md is itself a pointer
   # at builder.md, so the instruction text still exists in exactly one place.
-  emit_agent builder-heavy "Read, Write, Edit, Bash, Grep, Glob" \
+  emit_agent builder-heavy "$(claude_role_tools builder-heavy)" \
     "The Implementer at the escalation tier. Same instruction body and same discipline as \`builder\`; differs only by the resolved stamp — the model, and on codex the reasoning effort, it resolves to (ADR-0002)."
-  emit_agent reviewer "Read, Bash, Grep, Glob, Edit" \
+  emit_agent reviewer "$(claude_role_tools reviewer)" \
     "The Evaluator/verification layer. Runs init.sh + tests, checks every R-id has a passing test, exercises behavior (Playwright), enforces conventions. Approves or rejects. Spawn when a feature is \`in-review\`."
-  emit_agent scout "Read, Grep, Glob, Bash" \
+  emit_agent scout "$(claude_role_tools scout)" \
     "Read-only codebase reconnaissance. Answers \"where/how is X done?\" and writes concise findings to progress/ so other agents don't burn context. Never modifies production code."
   # doc-critic sub-agent shim (E09): the advisory review pass the architect (and the
   # planner/driller slash commands) spawn at their pre-hand-off checkpoints. Points at
   # the canonical .harness/agents/doc-critic.md; documents-only, no production-code review.
-  emit_agent doc-critic "Read, Grep, Glob, Write" \
+  emit_agent doc-critic "$(claude_role_tools doc-critic)" \
     "Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code. Spawned by the Architect (and the /sdd-plan, /sdd-drill flows) before hand-off."
   # pr-fixer (E18-F01 R10): the /sdd-pr-loop worker sub-agent, spawned once per blocking
   # Codex comment. GATED on the opt-in pr_loop.enabled — unlike the seven roles above it is
   # NOT stamped by default. It rides the SAME emit_agent path (one shim, pointing at
   # the canonical .harness/agents/pr-fixer.md — the role body is never duplicated).
   if pr_loop_enabled; then
-    emit_agent pr-fixer "Read, Edit, Bash, Grep, Glob" "$PR_FIXER_DESC"
+    emit_agent pr-fixer "$(claude_role_tools pr-fixer)" "$PR_FIXER_DESC"
   fi
   ok "Claude Code sub-agent shims installed (.claude/agents/)"
   fi  # end: claude-gated sub-agent shims
@@ -5356,6 +5437,7 @@ Act as the **Orchestrator** (`.harness/agents/orchestrator.md`).
      (`done` is written only after the work merges — see `.harness/agents/orchestrator.md`
      “Writing `done`”), reject → back to `in-progress`.
    (In Antigravity, define role subagents dynamically with `define_subagent` using canonical `.harness/agents/<role>.md` prompts and `enable_write_tools=True`, dispatching via `invoke_subagent` to maintain role context hygiene.)
+   (In pi, delegate each role in a fresh context with the `subagent` tool when the `pi-subagents` package is loaded, otherwise run `.harness/tools/pi-dispatch.sh <role> <task-file>`; if neither works, stop and report the limitation and the handoff file path.)
 4. Append what happened to `.harness/progress/history.md`.
 
 Map `$ARGUMENTS` to the selector's closed scope flags:
@@ -7768,93 +7850,157 @@ EOF
     if [ "$2" = d ]; then [ ! -d "$1" ]; else [ ! -f "$1" ]; fi
   }
 
-  # pi_prompt_live_is_unsafe <command> — any component of the live `.pi/prompts/<cmd>.md` path.
-  pi_prompt_live_is_unsafe() {
-    pi_node_unsafe "$TARGET/.pi" d || pi_node_unsafe "$TARGET/.pi/prompts" d \
-      || pi_node_unsafe "$TARGET/.pi/prompts/$1.md" f
+  # ── generalized pi unit helpers (E35-F02 R5/R6) ──────────────────────────────────
+  # ONE implementation of the pristine-only ownership algorithm for every pi unit kind:
+  # `prompts` (`.pi/prompts/<cmd>.md`, E35-F01) and `agents` (`.pi/agents/<role>.md`,
+  # E35-F02). The kind selects only the directory names, the byte producer and the
+  # nouns in the warnings; the node-type predicate and the algorithm are shared so the
+  # two kinds cannot fork. The `prompts` warnings are byte-identical to E35-F01.
+
+  # pi_unit_noun <kind> <full|short> — the noun used in the warnings for a kind.
+  pi_unit_noun() {
+    case "$1:$2" in
+      prompts:full)  printf '%s' 'pi prompt template' ;;
+      prompts:short) printf '%s' 'prompt template' ;;
+      *:full|*:short) printf '%s' 'pi role file' ;;
+    esac
   }
 
-  # pi_prompt_stamp_is_unsafe <command> — the ledger dir or the stamp leaf.
-  pi_prompt_stamp_is_unsafe() {
-    pi_node_unsafe "$H/.pi-prompts" d || pi_node_unsafe "$H/.pi-prompts/$1.md" f
+  # pi_unit_live_unsafe <kind> <name> — any component of the live `.pi/<kind>/<name>.md`.
+  pi_unit_live_unsafe() {
+    pi_node_unsafe "$TARGET/.pi" d || pi_node_unsafe "$TARGET/.pi/$1" d \
+      || pi_node_unsafe "$TARGET/.pi/$1/$2.md" f
   }
 
-  # discard_pi_prompt_stamp <command> — drop a stamp unless its node is unsafe (see above).
-  discard_pi_prompt_stamp() {
-    pi_prompt_stamp_is_unsafe "$1" && return 0
-    rm -f "$H/.pi-prompts/$1.md"
+  # pi_unit_stamp_unsafe <kind> <name> — the ledger dir or the stamp leaf.
+  pi_unit_stamp_unsafe() {
+    pi_node_unsafe "$H/.pi-$1" d || pi_node_unsafe "$H/.pi-$1/$2.md" f
+  }
+
+  # discard_pi_unit_stamp <kind> <name> — drop a unit's stamp. EVERY caller has already ruled out
+  # an unsafe stamp path (install_pi_unit / reclaim_pi_units test pi_unit_stamp_unsafe FIRST and
+  # return/continue), so this is the single place that removes a stamp and needs no second
+  # guard: the stamp-before-live precedence is what keeps it from deleting through a link.
+  discard_pi_unit_stamp() {
+    rm -f "$H/.pi-$1/$2.md"
     return 0
   }
 
-  # install_pi_prompt <command> — write one template, pristine-only (R6/R7).
-  install_pi_prompt() {
-    _ipp_cmd="$1"
-    _ipp_live="$TARGET/.pi/prompts/$_ipp_cmd.md"
-    _ipp_stamp="$H/.pi-prompts/$_ipp_cmd.md"
-    if pi_prompt_stamp_is_unsafe "$_ipp_cmd"; then
-      echo "⚠️  .harness/.pi-prompts/$_ipp_cmd.md has a symlinked or non-regular stamp component — pi prompt template and stamp left unchanged" >&2
+  # gen_pi_agent <role> <dest> — the ONLY producer of `.pi/agents/<role>.md` bytes
+  # (E35-F02 R1/R4). A thin pointer to `.harness/agents/<role>.md` (ADR-0004); no `$`, no
+  # `---` line in the body, no `model:`/`thinking:` (E35-F03 stamps those). The
+  # `allowNestedSubagents` line and the delegation paragraph appear only for a role whose
+  # Claude tool list carries `Task`. The description comes from all_codex_personas so
+  # install and both removal paths compute identical bytes from a role name alone.
+  gen_pi_agent() {
+    _gpa_role="$1"; _gpa_dest="$2"
+    _gpa_list="$(claude_role_tools "$_gpa_role")" || return 1
+    _gpa_tools="$(pi_tools "$_gpa_list")" || return 1
+    _gpa_desc="$(all_codex_personas | awk -F'	' -v r="$_gpa_role" '$1==r {print $2; exit}')"
+    {
+      printf '%s\n' '---'
+      printf 'name: %s\n' "$_gpa_role"
+      printf 'description: %s\n' "$_gpa_desc"
+      printf 'tools: %s\n' "$_gpa_tools"
+      printf '%s\n' 'systemPromptMode: append' 'inheritProjectContext: true' 'inheritSkills: false'
+      if pi_role_nested "$_gpa_list"; then printf '%s\n' 'allowNestedSubagents: true'; fi
+      printf '%s\n' '---'
+      printf '\nYou are the harness **%s** role, running in an isolated pi child context.\n' "$_gpa_role"
+      printf '\nRead `.harness/agents/%s.md` with the read tool and follow it exactly; resolve every relative path it mentions against `.harness/`. Run `./.harness/init.sh` before any work and halt on a non-zero exit. Hand off through `.harness/progress/` files, never by forwarding chat history.\n' "$_gpa_role"
+      if pi_role_nested "$_gpa_list"; then
+        printf '\nTo delegate a role, start it in a fresh context: use the `subagent` tool when it is available, otherwise write the task to a file under `.harness/progress/` and run `.harness/tools/pi-dispatch.sh <role> <task-file>`; if neither works, stop and report the limitation and the handoff file path. Never simulate another role in this context.\n'
+      fi
+    } > "$_gpa_dest"
+  }
+
+  # gen_pi_unit <kind> <name> <dest> — dispatch to the kind's single byte producer.
+  gen_pi_unit() {
+    case "$1" in
+      prompts) gen_pi_prompt "$2" "$3" ;;
+      agents)  gen_pi_agent "$2" "$3" ;;
+    esac
+  }
+
+  # install_pi_unit <kind> <name> — write one unit, pristine-only (E35-F01 R6/R7, E35-F02 R5).
+  install_pi_unit() {
+    _ipu_kind="$1"; _ipu_name="$2"
+    _ipu_live="$TARGET/.pi/$_ipu_kind/$_ipu_name.md"
+    _ipu_stamp="$H/.pi-$_ipu_kind/$_ipu_name.md"
+    _ipu_full="$(pi_unit_noun "$_ipu_kind" full)"
+    _ipu_short="$(pi_unit_noun "$_ipu_kind" short)"
+    if pi_unit_stamp_unsafe "$_ipu_kind" "$_ipu_name"; then
+      echo "⚠️  .harness/.pi-$_ipu_kind/$_ipu_name.md has a symlinked or non-regular stamp component — $_ipu_full and stamp left unchanged" >&2
       return 0
     fi
-    if pi_prompt_live_is_unsafe "$_ipp_cmd"; then
-      echo "⚠️  .pi/prompts/$_ipp_cmd.md has a symlinked or non-regular destination component — pi prompt template left unchanged" >&2
-      discard_pi_prompt_stamp "$_ipp_cmd"
+    if pi_unit_live_unsafe "$_ipu_kind" "$_ipu_name"; then
+      echo "⚠️  .pi/$_ipu_kind/$_ipu_name.md has a symlinked or non-regular destination component — $_ipu_full left unchanged" >&2
+      discard_pi_unit_stamp "$_ipu_kind" "$_ipu_name"
       return 0
     fi
-    _ipp_tmp="$(mktemp 2>/dev/null || mktemp -t harness-pi-prompt)"
-    gen_pi_prompt "$_ipp_cmd" "$_ipp_tmp"
-    if [ ! -e "$_ipp_live" ] \
-       || { [ -f "$_ipp_live" ] && [ -f "$_ipp_stamp" ] && cmp -s "$_ipp_live" "$_ipp_stamp"; } \
-       || { [ -f "$_ipp_live" ] && cmp -s "$_ipp_live" "$_ipp_tmp"; }; then
-      mkdir -p "$TARGET/.pi/prompts" "$H/.pi-prompts"
-      cat "$_ipp_tmp" > "$_ipp_live"
-      cp "$_ipp_live" "$_ipp_stamp"
+    _ipu_tmp="$(mktemp 2>/dev/null || mktemp -t harness-pi-unit)"
+    gen_pi_unit "$_ipu_kind" "$_ipu_name" "$_ipu_tmp"
+    if [ ! -e "$_ipu_live" ] \
+       || { [ -f "$_ipu_live" ] && [ -f "$_ipu_stamp" ] && cmp -s "$_ipu_live" "$_ipu_stamp"; } \
+       || { [ -f "$_ipu_live" ] && cmp -s "$_ipu_live" "$_ipu_tmp"; }; then
+      mkdir -p "$TARGET/.pi/$_ipu_kind" "$H/.pi-$_ipu_kind"
+      # Write a fresh sibling and rename it over the leaf, never `> leaf`: a hard-linked
+      # leaf would otherwise write through to its other name outside the repo. The
+      # sibling is born under the umask (not mktemp's 0600) and keeps no `.md` suffix,
+      # so pi never reads a half-written unit.
+      cat "$_ipu_tmp" > "$_ipu_live.harness-new.$$" && mv -f "$_ipu_live.harness-new.$$" "$_ipu_live"
+      cat "$_ipu_tmp" > "$_ipu_stamp.harness-new.$$" && mv -f "$_ipu_stamp.harness-new.$$" "$_ipu_stamp"
     else
-      echo "⚠️  .pi/prompts/$_ipp_cmd.md is a foreign or edited prompt template — left unchanged" >&2
-      discard_pi_prompt_stamp "$_ipp_cmd"
+      echo "⚠️  .pi/$_ipu_kind/$_ipu_name.md is a foreign or edited $_ipu_short — left unchanged" >&2
+      discard_pi_unit_stamp "$_ipu_kind" "$_ipu_name"
     fi
-    rm -f "$_ipp_tmp"
+    rm -f "$_ipu_tmp"
     return 0
   }
 
-  # reclaim_pi_prompts <command-list> <label> — pristine-only removal shared by the §7
-  # deselect arm and the §7b gate-off pass, so the two paths cannot diverge (R7). Prints
-  # the removed paths on stdout like reclaim_skill_units.
-  reclaim_pi_prompts() {
-    _rpp_cmds="$1"; _rpp_gone=""
-    for _rpp_cmd in $_rpp_cmds; do
-      _rpp_live="$TARGET/.pi/prompts/$_rpp_cmd.md"
-      _rpp_stamp="$H/.pi-prompts/$_rpp_cmd.md"
-      if pi_prompt_stamp_is_unsafe "$_rpp_cmd"; then
-        echo "⚠️  .harness/.pi-prompts/$_rpp_cmd.md has a symlinked or non-regular stamp component — pi prompt template and stamp left unchanged" >&2
+  # reclaim_pi_units <kind> <name-list> <label> — pristine-only removal shared by the §7
+  # deselect arm and the §7b gate-off pass, so the two paths cannot diverge (E35-F01 R7).
+  # Prints the removed paths on stdout like reclaim_skill_units. Prune order: the ledger
+  # dir, then `.pi/<kind>`, then `.pi` — each only when safe, each with a plain `rmdir`
+  # (a non-empty `.pi/prompts`, `.pi/settings.json` or sibling kind keeps its parent).
+  reclaim_pi_units() {
+    _rpu_kind="$1"; _rpu_names="$2"; _rpu_gone=""
+    _rpu_full="$(pi_unit_noun "$_rpu_kind" full)"
+    for _rpu_name in $_rpu_names; do
+      _rpu_live="$TARGET/.pi/$_rpu_kind/$_rpu_name.md"
+      _rpu_stamp="$H/.pi-$_rpu_kind/$_rpu_name.md"
+      if pi_unit_stamp_unsafe "$_rpu_kind" "$_rpu_name"; then
+        echo "⚠️  .harness/.pi-$_rpu_kind/$_rpu_name.md has a symlinked or non-regular stamp component — $_rpu_full and stamp left unchanged" >&2
         continue
       fi
-      if pi_prompt_live_is_unsafe "$_rpp_cmd"; then
-        # Warn only for a template that is actually there (not for a never-installed one).
-        if [ -e "$_rpp_live" ] || [ -L "$_rpp_live" ]; then
-          echo "⚠️  .pi/prompts/$_rpp_cmd.md has a symlinked or non-regular destination component — pi prompt template left in place" >&2
+      if pi_unit_live_unsafe "$_rpu_kind" "$_rpu_name"; then
+        # Warn only for a unit that is actually there (not for a never-installed one).
+        if [ -e "$_rpu_live" ] || [ -L "$_rpu_live" ]; then
+          echo "⚠️  .pi/$_rpu_kind/$_rpu_name.md has a symlinked or non-regular destination component — $_rpu_full left in place" >&2
         fi
-        discard_pi_prompt_stamp "$_rpp_cmd"
+        discard_pi_unit_stamp "$_rpu_kind" "$_rpu_name"
         continue
       fi
-      if [ -e "$_rpp_live" ]; then
-        _rpp_tmp="$(mktemp 2>/dev/null || mktemp -t harness-pi-prompt)"
-        gen_pi_prompt "$_rpp_cmd" "$_rpp_tmp"
-        if [ -f "$_rpp_live" ] \
-           && { { [ -f "$_rpp_stamp" ] && cmp -s "$_rpp_live" "$_rpp_stamp"; } || cmp -s "$_rpp_live" "$_rpp_tmp"; }; then
-          rm -f "$_rpp_live"
-          _rpp_gone="$_rpp_gone .pi/prompts/$_rpp_cmd.md"
+      if [ -e "$_rpu_live" ]; then
+        _rpu_tmp="$(mktemp 2>/dev/null || mktemp -t harness-pi-unit)"
+        gen_pi_unit "$_rpu_kind" "$_rpu_name" "$_rpu_tmp"
+        if [ -f "$_rpu_live" ] \
+           && { { [ -f "$_rpu_stamp" ] && cmp -s "$_rpu_live" "$_rpu_stamp"; } || cmp -s "$_rpu_live" "$_rpu_tmp"; }; then
+          rm -f "$_rpu_live"
+          _rpu_gone="$_rpu_gone .pi/$_rpu_kind/$_rpu_name.md"
         else
-          echo "⚠️  .pi/prompts/$_rpp_cmd.md has no matching stamp (foreign or edited) — left in place" >&2
+          echo "⚠️  .pi/$_rpu_kind/$_rpu_name.md has no matching stamp (foreign or edited) — left in place" >&2
         fi
-        rm -f "$_rpp_tmp"
+        rm -f "$_rpu_tmp"
       fi
-      discard_pi_prompt_stamp "$_rpp_cmd"
+      discard_pi_unit_stamp "$_rpu_kind" "$_rpu_name"
     done
-    pi_node_unsafe "$H/.pi-prompts" d || rmdir "$H/.pi-prompts" 2>/dev/null || true
-    pi_node_unsafe "$TARGET/.pi" d || pi_node_unsafe "$TARGET/.pi/prompts" d \
-      || rmdir "$TARGET/.pi/prompts" 2>/dev/null || true
-    pi_node_unsafe "$TARGET/.pi" d || rmdir "$TARGET/.pi" 2>/dev/null || true
-    if [ -n "$_rpp_gone" ]; then printf '%s\n' "$_rpp_gone"; fi
+    # `rmdir` never follows a FINAL-component symlink and fails on a non-directory, so only an
+    # INTERMEDIATE link needs a guard: `.pi` (a symlinked `.pi` would let `rmdir .pi/agents` prune
+    # inside the link target — lesson 2026-10-13).
+    rmdir "$H/.pi-$_rpu_kind" 2>/dev/null || true
+    pi_node_unsafe "$TARGET/.pi" d || rmdir "$TARGET/.pi/$_rpu_kind" 2>/dev/null || true
+    rmdir "$TARGET/.pi" 2>/dev/null || true
+    if [ -n "$_rpu_gone" ]; then printf '%s\n' "$_rpu_gone"; fi
     return 0
   }
 
@@ -7908,10 +8054,10 @@ EOF
   # ── 5d-pi. pi prompt templates (E35-F01; gated only on selected `pi`) ───────────
   # One thin pointer template per shared-unit command, from the SAME `_cdx_cmds` list §5d
   # just used (pi selected implies skill_unit_claimed, so it is set), so the template set
-  # equals the skill-unit set by construction. Pristine-only; see install_pi_prompt.
+  # equals the skill-unit set by construction. Pristine-only; see install_pi_unit.
   if agent_selected pi; then
     for _c in $_cdx_cmds; do
-      install_pi_prompt "$_c"
+      install_pi_unit prompts "$_c"
     done
     ok "pi prompt templates /sdd-… installed (.pi/prompts/ — load after project trust)"
   fi
@@ -7948,6 +8094,20 @@ EOF
     # verdict cares about: are the two Builder roles on disk what we just generated?
     verify_codex_builder_roles_stamped
     ok "Codex per-role agent definitions installed (.codex/agents/ — project-local)"
+  fi
+
+  # ── 5f-pi. pi role agents (E35-F02; gated only on selected `pi`) ───────────────
+  # One `.pi/agents/<role>.md` per `codex_personas` role (pr-fixer only while pr_loop is
+  # enabled), for the community `pi-subagents` package; `tools/pi-dispatch.sh` is the
+  # always-available fallback (ADR-0007). The preflight translates every tool list BEFORE
+  # the first write, in the main shell (never a pipeline subshell), so a bad table row
+  # fails the install with nothing written. Pristine-only; see install_pi_unit.
+  if agent_selected pi; then
+    pi_tools_preflight
+    for _pir in $(codex_personas | cut -f1); do
+      install_pi_unit agents "$_pir"
+    done
+    ok "pi role agents installed (.pi/agents/ — for pi-subagents; fallback .harness/tools/pi-dispatch.sh)"
   fi
 
   # NOTE: CMDDIR cleanup is intentionally DEFERRED to AFTER §7 — the antigravity
@@ -8193,8 +8353,11 @@ EOF
           # Pristine-only template removal first (R7), then the shared units only when
           # pi was the LAST claimant (ADR-0003). Plain `if`s keep the loop's last status
           # zero under `set -e`. HARNESS_OWNED_CMDS never holds the source-only sdd-triage.
-          _pi_removed="$(reclaim_pi_prompts "$HARNESS_OWNED_CMDS" pi)"
+          _pi_removed="$(reclaim_pi_units prompts "$HARNESS_OWNED_CMDS" pi)"
           if [ -n "$_pi_removed" ]; then echo "⚠️  removed deselected agent 'pi' glue:$_pi_removed" >&2; fi
+          # Role files (E35-F02 R6): every role incl. pr-fixer, same pristine-only rule.
+          _pi_agents_removed="$(reclaim_pi_units agents "$(all_codex_personas | cut -f1)" pi)"
+          if [ -n "$_pi_agents_removed" ]; then echo "⚠️  removed deselected agent 'pi' role files:$_pi_agents_removed" >&2; fi
           if ! skill_unit_claimed; then
             _pi_skill_removed="$(reclaim_skill_units "$HARNESS_OWNED_CMDS")"
             if [ -n "$_pi_skill_removed" ]; then
@@ -8252,7 +8415,8 @@ EOF
     fi
     if agent_selected codex; then reclaim_codex_role pr-fixer; fi
     if agent_selected pi; then
-      _prl_gone="$_prl_gone $(reclaim_pi_prompts "$HARNESS_PR_LOOP_CMDS" pi)"
+      _prl_gone="$_prl_gone $(reclaim_pi_units prompts "$HARNESS_PR_LOOP_CMDS" pi)"
+      _prl_gone="$_prl_gone $(reclaim_pi_units agents pr-fixer pi)"
     fi
 
     # Reconcile the Codex skill under the same gate as the isolated native role.
@@ -8527,6 +8691,8 @@ def allowed(rel):
             v=='opencode.json' or
             v.startswith('.opencode/command/') and v.endswith('.md') or
             v=='.opencode/agent/pr-fixer.md' or
+            v.startswith('.pi/agents/') and v.endswith('.md') or
+            v.startswith('.pi/prompts/sdd-') and v.endswith('.md') or
             v=='.escalation-arming') and '..' not in rel.parts and not rel.is_absolute()
 if not safe(manifest):
     sys.exit('self: symlinked manifest component; source glue left unchanged')
@@ -8586,16 +8752,16 @@ PYSELF
 }
 
 self_install() {
-  # Self supports the same Claude/Codex/OpenCode emitters; retired front-ends stay refused.
-  _si_selection="${AGENTS_OVERRIDE:-claude,codex,opencode}"
-  if [ "$_si_selection" = all ]; then _si_selection="claude,codex,opencode"; fi
+  # Self supports the Claude/Codex/OpenCode/pi emitters; retired front-ends stay refused.
+  _si_selection="${AGENTS_OVERRIDE:-claude,codex,opencode,pi}"
+  if [ "$_si_selection" = all ]; then _si_selection="claude,codex,opencode,pi"; fi
   if [ "$_si_selection" = host ]; then
     _si_selection="$(detect_host)"
-    [ -n "$_si_selection" ] || die "--self host undetected — select --agents=claude, --agents=codex or --agents=opencode"
+    [ -n "$_si_selection" ] || die "--self host undetected — select --agents=claude, --agents=codex, --agents=opencode or --agents=pi"
   fi
   _si_keys="$(validate_csv "$_si_selection")"
   for _si_key in $_si_keys; do
-    case "$_si_key" in claude|codex|opencode) ;; *) die "--self supports only claude,codex,opencode; '$_si_key' is unavailable in source mode" ;; esac
+    case "$_si_key" in claude|codex|opencode|pi) ;; *) die "--self supports only claude,codex,opencode,pi; '$_si_key' is unavailable in source mode" ;; esac
   done
   # Harvest independently. Only a safe bare Codex model ID is interpolated into TOML.
   SELF_MODELS=""; SELF_CODEX_MODELS=""
@@ -8626,7 +8792,7 @@ self_install() {
   echo "══ self mode → regenerating $SRC glue from a temp install ══"
   install_one "$_si_tmp"
   mkdir -p "$_si_tmp/source"
-  for _si_f in "$_si_tmp"/.claude/agents/*.md "$_si_tmp"/.claude/commands/*.md "$_si_tmp"/.codex/agents/*.toml "$_si_tmp"/.agents/skills/*/SKILL.md "$_si_tmp"/.agents/skills/*/agents/openai.yaml "$_si_tmp"/opencode.json "$_si_tmp"/.opencode/command/*.md "$_si_tmp"/.opencode/agent/*.md; do
+  for _si_f in "$_si_tmp"/.claude/agents/*.md "$_si_tmp"/.claude/commands/*.md "$_si_tmp"/.codex/agents/*.toml "$_si_tmp"/.agents/skills/*/SKILL.md "$_si_tmp"/.agents/skills/*/agents/openai.yaml "$_si_tmp"/opencode.json "$_si_tmp"/.opencode/command/*.md "$_si_tmp"/.opencode/agent/*.md "$_si_tmp"/.pi/agents/*.md "$_si_tmp"/.pi/prompts/*.md; do
     [ -f "$_si_f" ] || continue
     _si_rel="${_si_f#"$_si_tmp"/}"
     mkdir -p "$_si_tmp/source/$(dirname "$_si_rel")"
@@ -8673,7 +8839,7 @@ self_install() {
   fi
   self_reconcile "$_si_tmp/source" arming
   rm -rf "$_si_tmp"
-  ok "self: selected Claude/Codex/OpenCode source glue reconciled (+ .escalation-arming, .glue-manifest)"
+  ok "self: selected Claude/Codex/OpenCode/pi source glue reconciled (+ .escalation-arming, .glue-manifest)"
 }
 
 # ── manifest auto-population (append-only upsert, never clobbers entries) ──────

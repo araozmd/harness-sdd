@@ -21,7 +21,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     def source(name,clean=True):
         p=root/name;shutil.copytree(src,p,ignore=shutil.ignore_patterns('.git','node_modules','scratchpad','__pycache__'))
         if clean:
-            for rel in ('.claude/agents','.claude/commands','.codex/agents','.agents/skills','.opencode'):
+            for rel in ('.claude/agents','.claude/commands','.codex/agents','.agents/skills','.opencode','.pi'):
                 shutil.rmtree(p/rel,ignore_errors=True)
             (p/'.claude/.glue-manifest').unlink(missing_ok=True)
             (p/'.escalation-arming').unlink(missing_ok=True)
@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     run(p,None,'--self'); native(p); assert (p/'.claude/commands/sdd-next.md').exists()
     assert (p/'harness.config.yaml').read_bytes()==seed and (p/'AGENTS.md').read_bytes()==canonical
     before=snapshot(p);run(p,None,'--self');assert snapshot(p)==before,'self second run changed bytes'
-    for selection,claude,codex,opencode in [('claude',True,False,False),('codex',False,True,False),('opencode',False,False,True),('claude,codex',True,True,False),('all',True,True,True),('host',False,True,False)]:
+    for selection,claude,codex,opencode,pi in [('claude',True,False,False,False),('codex',False,True,False,False),('opencode',False,False,True,False),('pi',False,False,False,True),('claude,codex',True,True,False,False),('all',True,True,True,True),('host',False,True,False,False)]:
         q=source('select-'+selection.replace(',','-'));run(q,None,'--self','--agents='+selection,extra={'HARNESS_HOST_AGENT':'codex'} if selection=='host' else {})
         assert (q/'.claude/commands/sdd-next.md').exists()==claude
         assert (q/'.codex/agents/builder.toml').exists()==codex
@@ -56,6 +56,9 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
         # (source() deletes it), so a narrowed selection must actually leave it absent.
         assert (q/'.opencode/command/sdd-next.md').exists()==opencode
         assert (q/'opencode.json').exists()==opencode
+        # E35-F02 R10: pi is a first-class `--self` target too (source() deletes `.pi`, so a narrowed
+        # selection must leave it absent and `all` must generate it).
+        assert (q/'.pi/agents/builder.md').exists()==pi and (q/'.pi/prompts/sdd-next.md').exists()==pi
         if codex:native(q)
     # F02 R9: `--agents=host` resolves an OpenCode session to the OpenCode surface.
     q=source('select-host-opencode');run(q,None,'--self','--agents=host',extra={'HARNESS_HOST_AGENT':'opencode'})

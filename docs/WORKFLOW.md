@@ -5,8 +5,8 @@
 Supported front ends are Claude Code (primary), Codex (second), OpenCode
 (third), Antigravity, and pi. This document uses canonical `/sdd-*` names for Claude,
 OpenCode, Antigravity, and pi (pi: `/sdd-*` prompt templates or `/skill:sdd-*`; the project
-must be trusted first, `/trust` or `-a` on a headless run, then `/reload` or restart pi; pi role isolation arrives with
-E35-F02). In Codex, invoke `$sdd-new <intent>`, `$sdd-plan <intent>`,
+must be trusted first, `/trust` or `-a` on a headless run, then `/reload` or restart pi; pi role isolation is the generated `.pi/agents/<role>.md` files
+for `pi-subagents`, with `tools/pi-dispatch.sh` as the fallback). In Codex, invoke `$sdd-new <intent>`, `$sdd-plan <intent>`,
 `$sdd-drill <epic-id>`, `$sdd-next`, `$sdd-fix <description>`, `$sdd-fix-parallel`,
 `$sdd-report`, and gated `$sdd-pr-loop <pr>`. Text accompanying the explicit skill mention supplies
 `$ARGUMENTS`; `/skills` is the discovery UI. In Antigravity, skills are natively

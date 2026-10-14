@@ -475,7 +475,9 @@ test_pi_owned_paths() {
   _t="$(new_target r10s)"; ok_inst - - --agents=pi "$_t"
   mv "$_t/.harness/.pi-prompts" "$T/ledger-r10s"; ln -s "$T/ledger-r10s" "$_t/.harness/.pi-prompts"
   _p="$(cd "$_t" && sh .harness/tools/harness-owned-paths.sh all .harness)"
-  printf '%s\n' "$_p" | grep -q '\.pi/' && fail "R10: a symlinked ledger was trusted"
+  # E35-F02: the agents ledger is a SECOND, independent ledger, so only the prompts claim is
+  # asserted absent here (the agents ledger in this target is legitimately real).
+  printf '%s\n' "$_p" | grep -q '\.pi/prompts/' && fail "R10: a symlinked ledger was trusted"
   # A stamp survives but the live leaf was replaced by a DIRECTORY: it is never claimed (round 3).
   _t="$(new_target r10d)"; ok_inst - - --agents=pi "$_t"
   git -C "$_t" init -q 2>/dev/null
@@ -556,7 +558,8 @@ test_pi_operator_text() {
   for _d in README.md AGENTS.md docs/HARNESS.md docs/INSTALL.md docs/WORKFLOW.md; do
     grep -qw 'pi' "$SRC/$_d" || fail "R12: $_d does not name pi"
     grep -qE '/trust|--approve|`-a`' "$SRC/$_d" || fail "R12: $_d lacks the pi trust prerequisite"
-    grep -q 'E35-F02' "$SRC/$_d" || fail "R12: $_d lacks the E35-F02 role-isolation note"
+    grep -q 'pi-dispatch.sh' "$SRC/$_d" || fail "R12: $_d lacks the pi role-isolation note (pi-dispatch.sh)"
+    grep -q 'arrives with E35-F02' "$SRC/$_d" && fail "R12: $_d still says role isolation arrives with E35-F02"
   done
   # An UPGRADE that adds pi (or rewrites its templates) must also tell an open session to
   # /reload — the fresh-install advice block never runs on upgrades (Codex #4265595907).
@@ -567,7 +570,7 @@ test_pi_operator_text() {
   ok_inst - - --agents=claude,pi "$_t"
   grep -q 'upgrade complete' "$OUT" || fail "R12u: precondition — adding pi was not an upgrade"
   grep -q 'pi: run /reload (or restart pi)' "$OUT" || fail "R12u: an upgrade that added pi gave no /reload notice"
-  pass "operator-facing text and the five docs name pi, the trust prerequisite and E35-F02 (R12)"
+  pass "operator-facing text and the five docs name pi, the trust prerequisite and pi role isolation (R12)"
 }
 
 test_pi_is_selectable

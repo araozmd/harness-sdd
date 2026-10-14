@@ -23,11 +23,15 @@ pass() { echo "ok - $1"; }
 fixture() {
   _fx="$T/$1"
   mkdir -p "$_fx"
-  for _e in "$SRC"/* "$SRC"/.claude "$SRC"/.codex "$SRC"/.agents "$SRC"/.escalation-arming; do
+  for _e in "$SRC"/* "$SRC"/.claude "$SRC"/.codex "$SRC"/.agents "$SRC"/.pi "$SRC"/.escalation-arming; do
     [ -e "$_e" ] || continue
     case "$(basename "$_e")" in .git|node_modules) continue ;; esac
     cp -R "$_e" "$_fx/" 2>/dev/null || true
   done
+  # E35-F02 R11: `.pi/` is purged in EVERY fixture so --self must REGENERATE it (an inherited
+  # .pi would be compared with itself — progress/lessons.md 2026-09-05). The hand-edit arm below
+  # uses fixture_keep_pi, which is the one place an inherited .pi is the point.
+  if [ "${2:-purge}" = purge ]; then rm -rf "$_fx/.pi"; fi
   printf '%s\n' "$_fx"
 }
 
@@ -35,16 +39,21 @@ fixture() {
 # glue; prints divergences (empty = in sync). The single comparison helper both R1
 # arms drive.
 glue_diff() {
-  diff -r "$1/.claude/agents" "$SRC/.claude/agents" 2>&1 || true
-  diff -r "$1/.claude/commands" "$SRC/.claude/commands" 2>&1 || true
-  diff -r "$1/.codex/agents" "$SRC/.codex/agents" 2>&1 || true
-  diff -r "$1/.agents/skills" "$SRC/.agents/skills" 2>&1 || true
-  diff -r "$1/.opencode/command" "$SRC/.opencode/command" 2>&1 || true
-  diff -r "$1/.opencode/agent" "$SRC/.opencode/agent" 2>&1 || true
+  _gd="${2:-$SRC}"   # the "committed" tree: $SRC, or (hand-edit arm) a fixture that models it
+  diff -r "$1/.claude/agents" "$_gd/.claude/agents" 2>&1 || true
+  diff -r "$1/.claude/commands" "$_gd/.claude/commands" 2>&1 || true
+  diff -r "$1/.codex/agents" "$_gd/.codex/agents" 2>&1 || true
+  diff -r "$1/.agents/skills" "$_gd/.agents/skills" 2>&1 || true
+  diff -r "$1/.opencode/command" "$_gd/.opencode/command" 2>&1 || true
+  diff -r "$1/.opencode/agent" "$_gd/.opencode/agent" 2>&1 || true
+  # E35-F02 R11: the pi role files and prompt templates are gated like every other surface.
+  # `diff -r` of a missing side prints "No such file", so a purged-but-unregenerated .pi reds too.
+  diff -r "$1/.pi/agents" "$_gd/.pi/agents" 2>&1 || true
+  diff -r "$1/.pi/prompts" "$_gd/.pi/prompts" 2>&1 || true
   # `-u` so the OpenCode FILE diff names its path in the header; a bare `diff` of two files
   # prints only the hunks, and the R1 gate-red arm asserts the path is named.
-  diff -u "$1/opencode.json" "$SRC/opencode.json" 2>&1 || true
-  diff "$1/.escalation-arming" "$SRC/.escalation-arming" 2>&1 || true
+  diff -u "$1/opencode.json" "$_gd/opencode.json" 2>&1 || true
+  diff "$1/.escalation-arming" "$_gd/.escalation-arming" 2>&1 || true
 }
 
 # The green fixture inherits `opencode.json` through the `"$SRC"/*` glob; drop it (and any
@@ -102,6 +111,47 @@ printf '%s\n' "$_d" | grep -q "opencode.json" \
   || fail "the OpenCode drift diff does not name opencode.json — the gate cannot attribute the divergence (R6)"
 pass "an OpenCode emitter edit without regeneration is caught and named (R6) [opencode_gate_red]"
 
+# ── R11 (E35-F02): the pi surfaces are gated like the rest ───────────────────
+# Green arm: the committed .pi/agents and .pi/prompts equal a fixture whose .pi was PURGED before
+# --self (the shared glue_diff above already compared them; assert it by name here so a regression
+# that stops comparing .pi cannot hide behind the other surfaces being in sync).
+[ -d "$F/.pi/agents" ] && [ -d "$F/.pi/prompts" ] || fail "the green fixture did not regenerate .pi/ (R11)"
+[ -z "$(diff -r "$F/.pi" "$SRC/.pi" 2>&1)" ] || fail "regenerated .pi/ differs from the committed .pi/ (R11)"
+pass "committed .pi/agents + .pi/prompts == regenerated, with .pi purged first (R11) [pi_gate_green]"
+
+PA="$(fixture pi-agent-red)"
+mutate_pi() { # <fixture> <old> <new> — exactly one occurrence, or the arm proves nothing
+  python3 -I -c 'import sys
+p,o,n=sys.argv[1:4]
+s=open(p).read()
+if s.count(o)!=1: sys.exit("mutation matched %d times: %r"%(s.count(o),o))
+open(p,"w").write(s.replace(o,n))' "$1/harness-install.sh" "$2" "$3" || fail "setup: pi emitter mutation did not apply ($2)"
+}
+mutate_pi "$PA" 'running in an isolated pi child context' 'running in a MUTATED pi child context'
+sh "$PA/harness-install.sh" --self >/dev/null 2>&1 || fail "mutated pi-agent --self exited non-zero"
+_d="$(glue_diff "$PA")"
+printf '%s\n' "$_d" | grep -q "MUTATED pi child" || fail "a pi role-emitter edit did not surface in the comparison (R11)"
+printf '%s\n' "$_d" | grep -q "\.pi/agents/" || fail "the pi role drift diff does not name .pi/agents/ (R11)"
+pass "a pi role-file emitter edit without regeneration is caught and names .pi/agents/ (R11) [pi_agent_gate_red]"
+
+PP="$(fixture pi-prompt-red)"
+mutate_pi "$PP" 'Run the harness `%s` workflow. Use the read tool' 'Run the MUTATED harness `%s` workflow. Use the read tool'
+sh "$PP/harness-install.sh" --self >/dev/null 2>&1 || fail "mutated pi-prompt --self exited non-zero"
+_d="$(glue_diff "$PP")"
+printf '%s\n' "$_d" | grep -q "MUTATED harness" || fail "a pi prompt-emitter edit did not surface in the comparison (R11)"
+printf '%s\n' "$_d" | grep -q "\.pi/prompts/" || fail "the pi prompt drift diff does not name .pi/prompts/ (R11)"
+pass "a pi prompt-template emitter edit without regeneration is caught and names .pi/prompts/ (R11) [pi_prompt_gate_red]"
+
+# Hand edit of a COMMITTED pi file: model "committed" as fixture H (inherited .pi, edited), then
+# regenerate in a purged copy of it and compare against H — exactly what CI does against $SRC.
+H="$(fixture pi-hand-edit keep)"
+echo "STALE HAND EDIT" >> "$H/.pi/agents/reviewer.md"
+cp -R "$H" "$T/pi-hand-regen"; rm -rf "$T/pi-hand-regen/.pi"
+sh "$T/pi-hand-regen/harness-install.sh" --self >/dev/null 2>&1 || fail "pi hand-edit regen --self exited non-zero"
+_d="$(glue_diff "$T/pi-hand-regen" "$H")"
+printf '%s\n' "$_d" | grep -q "pi/agents/reviewer.md" || fail "a hand-edited committed .pi/agents/reviewer.md did not red the gate or was not named (R11)"
+pass "a hand-edited committed .pi/agents/reviewer.md reds the gate and is named (R11) [pi_hand_edit_red]"
+
 # ── R2: the manifest ledger ───────────────────────────────────────────────────
 # `.claude/agents/` and `.claude/commands/` are NOT purged before the fixture's `--self`, and
 # `--self` leaves an edited file "unchanged and unclaimed", so a HAND EDIT to a committed
@@ -138,7 +188,12 @@ for _must in \
   .opencode/agent/pr-fixer.md \
   .opencode/command/sdd-drill.md .opencode/command/sdd-fix.md .opencode/command/sdd-new.md \
   .opencode/command/sdd-next.md .opencode/command/sdd-plan.md .opencode/command/sdd-pr-loop.md \
-  .opencode/command/sdd-report.md .opencode/command/sdd-test-concurrency.md .opencode/command/sdd-triage.md; do
+  .opencode/command/sdd-report.md .opencode/command/sdd-test-concurrency.md .opencode/command/sdd-triage.md \
+  .pi/agents/architect.md .pi/agents/builder-heavy.md .pi/agents/builder.md .pi/agents/doc-critic.md \
+  .pi/agents/orchestrator.md .pi/agents/pr-fixer.md .pi/agents/reviewer.md .pi/agents/scout.md \
+  .pi/prompts/sdd-drill.md .pi/prompts/sdd-fix.md .pi/prompts/sdd-fix-parallel.md .pi/prompts/sdd-new.md \
+  .pi/prompts/sdd-next.md .pi/prompts/sdd-plan.md .pi/prompts/sdd-pr-loop.md .pi/prompts/sdd-report.md \
+  .pi/prompts/sdd-triage.md; do
   grep -q " $_must\$" "$F/.claude/.glue-manifest" || fail "manifest misses $_must (R2)"
 done
 grep -q "glue-manifest" "$F/.claude/.glue-manifest" && fail "manifest lists itself (R2)"
@@ -174,7 +229,7 @@ pass "silent when clean and when the manifest is absent (R3) [warn_silent]"
 # manifest, and (F02) so does every OpenCode-owned file. The OpenCode paths are asserted
 # here AND in the R2 ledger loop above, so a gate that only compares bytes without a
 # manifest entry (or vice versa) cannot pass on one surface alone.
-for _path in .codex/agents/builder.toml .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml opencode.json .opencode/command/sdd-next.md .opencode/agent/pr-fixer.md .claude/commands/sdd-triage.md .opencode/command/sdd-triage.md .agents/skills/sdd-triage/SKILL.md .agents/skills/sdd-triage/agents/openai.yaml; do
+for _path in .codex/agents/builder.toml .agents/skills/sdd-next/SKILL.md .agents/skills/sdd-next/agents/openai.yaml opencode.json .opencode/command/sdd-next.md .opencode/agent/pr-fixer.md .claude/commands/sdd-triage.md .opencode/command/sdd-triage.md .agents/skills/sdd-triage/SKILL.md .agents/skills/sdd-triage/agents/openai.yaml .pi/agents/reviewer.md .pi/prompts/sdd-next.md; do
   _case="$(fixture native-drift)"
   sh "$_case/harness-install.sh" --self >/dev/null 2>&1 || fail "native drift setup failed"
   [ -f "$_case/$_path" ] || fail "native drift precondition missing $_path"
