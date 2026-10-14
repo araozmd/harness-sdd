@@ -457,3 +457,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-10-13T23:52:02Z E35-F01 Builder round 3 (20b791e): R7q symlinked .pi + R10d owned-paths dir-leaf skip. Reviewer round 4 REJECT — spec R7 / pi_node_unsafe comment overclaim 'stamp unchanged' on unsafe live path (code drops it, correctly). in-review → in-progress (round 4).
 - 2026-10-14T00:24:03Z E35-F01 Builder round 4 (6371d19): R7 prose aligned. Reviewer round 5 REJECT — deselect/gate-off stamp drop for unsafe live path untested (mutant M2). in-review → in-progress (round 5).
 - 2026-10-14T00:36:41Z E35-F01 Builder round 5 (32300f2): reclaim-side stamp-drop tests. Reviewer round 6 APPROVE (M2 killed by deselect and gate-off steps independently). Resuming PR #260 Codex loop with human-granted budget max_rounds=6.
+- 2026-10-14T00:56:15Z E35-F01 in-review → done: PR #260 merged as 3770fd357325b5265f15e1140da71d3fafb917ae (6 Codex rounds: 4 + 2 human-granted; final clean; 73 suites green), tagged v0.92.0.
