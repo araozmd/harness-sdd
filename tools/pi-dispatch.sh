@@ -45,13 +45,13 @@ case "$task" in /*) ;; *) task="$PWD/$task" ;; esac
 H="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 case "$H" in */.harness) PROJ="${H%/*}" ;; *) PROJ="$H" ;; esac
 
-# Role file. Same node-type rule as the installer's `pi_node_unsafe` (a tools/ script
-# cannot source the installer): a component is unusable when it is a symlink (live or
-# dangling) or exists as the wrong node type; the leaf must also exist.
+# Role file. Same node-type rule as the installer's `pi_node_unsafe` (a tools/ script cannot
+# source the installer): a component is unusable when it is a symlink (live or dangling) or
+# exists as the wrong node type. A non-directory `.pi` or `.pi/agents` needs no check of its own:
+# the leaf below cannot exist beneath it, so it fails the leaf test. A symlinked directory DOES
+# need one — the leaf would resolve through it.
 for _d in "$PROJ/.pi" "$PROJ/.pi/agents"; do
-  if [ -L "$_d" ] || { [ -e "$_d" ] && [ ! -d "$_d" ]; }; then
-    fail 3 "$_d is a symlink or not a directory"
-  fi
+  if [ -L "$_d" ]; then fail 3 "$_d is a symlink"; fi
 done
 R="$PROJ/.pi/agents/$role.md"
 if [ -L "$R" ] || [ ! -f "$R" ]; then
@@ -68,9 +68,8 @@ fm="$(sed -n "2,$((close - 1))p" "$R")"
 fm_has() { printf '%s\n' "$fm" | grep -q "^$1:"; }
 fm_get() { printf '%s\n' "$fm" | sed -n "s/^$1:[[:space:]]*//p" | sed -n '1p'; }
 
-fm_has tools || fail 3 "$R has no tools: line"
 tools="$(fm_get tools | tr -d ' ')"
-[ -n "$tools" ] || fail 3 "$R has an empty tools: value"
+[ -n "$tools" ] || fail 3 "$R has a missing or empty tools: value"
 case "$tools" in
   *[!A-Za-z0-9_:,.*/+-]*) fail 3 "$R tools: value has characters outside the allowed set" ;;
 esac
@@ -101,6 +100,8 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 sed -n "$((close + 1)),\$p" "$R" > "$_tmp"
 
+# Run from the project root. The task path was made absolute above, so it is still readable here.
+cd "$PROJ"
 msg="$(printf 'You are the harness %s role (dispatched by pi-dispatch.sh). Your task follows.\n\n%s' "$role" "$(cat "$task")")"
 
 set -- -p -a --no-session --no-skills
@@ -108,7 +109,6 @@ if [ -n "$model" ]; then set -- "$@" --model "$model"; fi
 if [ -n "$thinking" ]; then set -- "$@" --thinking "$thinking"; fi
 set -- "$@" --tools "$tools" --append-system-prompt "$_tmp" "$msg"
 
-cd "$PROJ"
 # No `exec`: the trap must still remove the temp file. `|| rc=$?` is the set -e-safe capture.
 rc=0
 pi "$@" || rc=$?

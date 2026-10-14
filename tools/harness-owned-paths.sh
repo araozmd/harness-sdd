@@ -125,7 +125,7 @@ emit_glue() {
       case "$_pk" in prompts) _pglob='sdd-*.md' ;; *) _pglob='*.md' ;; esac
       [ ! -L "$_root/.pi" ] && { [ ! -e "$_root/.pi" ] || [ -d "$_root/.pi" ]; } || continue
       [ ! -L "$_root/.pi/$_pk" ] && { [ ! -e "$_root/.pi/$_pk" ] || [ -d "$_root/.pi/$_pk" ]; } || continue
-      [ ! -L "$hdir/.pi-$_pk" ] && [ -d "$hdir/.pi-$_pk" ] || continue
+      [ ! -L "$hdir/.pi-$_pk" ] || continue
       for _pst in "$hdir/.pi-$_pk"/$_pglob; do
         [ ! -L "$_pst" ] && [ -f "$_pst" ] || continue
         _pname="${_pst##*/}"

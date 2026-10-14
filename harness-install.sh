@@ -7877,9 +7877,11 @@ EOF
     pi_node_unsafe "$H/.pi-$1" d || pi_node_unsafe "$H/.pi-$1/$2.md" f
   }
 
-  # discard_pi_unit_stamp <kind> <name> — drop a stamp unless its node is unsafe (see above).
+  # discard_pi_unit_stamp <kind> <name> — drop a unit's stamp. EVERY caller has already ruled out
+  # an unsafe stamp path (install_pi_unit / reclaim_pi_units test pi_unit_stamp_unsafe FIRST and
+  # return/continue), so this is the single place that removes a stamp and needs no second
+  # guard: the stamp-before-live precedence is what keeps it from deleting through a link.
   discard_pi_unit_stamp() {
-    pi_unit_stamp_unsafe "$1" "$2" && return 0
     rm -f "$H/.pi-$1/$2.md"
     return 0
   }
@@ -7988,10 +7990,12 @@ EOF
       fi
       discard_pi_unit_stamp "$_rpu_kind" "$_rpu_name"
     done
-    pi_node_unsafe "$H/.pi-$_rpu_kind" d || rmdir "$H/.pi-$_rpu_kind" 2>/dev/null || true
-    pi_node_unsafe "$TARGET/.pi" d || pi_node_unsafe "$TARGET/.pi/$_rpu_kind" d \
-      || rmdir "$TARGET/.pi/$_rpu_kind" 2>/dev/null || true
-    pi_node_unsafe "$TARGET/.pi" d || rmdir "$TARGET/.pi" 2>/dev/null || true
+    # `rmdir` never follows a FINAL-component symlink and fails on a non-directory, so only an
+    # INTERMEDIATE link needs a guard: `.pi` (a symlinked `.pi` would let `rmdir .pi/agents` prune
+    # inside the link target — lesson 2026-10-13).
+    rmdir "$H/.pi-$_rpu_kind" 2>/dev/null || true
+    pi_node_unsafe "$TARGET/.pi" d || rmdir "$TARGET/.pi/$_rpu_kind" 2>/dev/null || true
+    rmdir "$TARGET/.pi" 2>/dev/null || true
     if [ -n "$_rpu_gone" ]; then printf '%s\n' "$_rpu_gone"; fi
     return 0
   }
