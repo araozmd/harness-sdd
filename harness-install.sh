@@ -7759,7 +7759,9 @@ EOF
   # `f` leaves (a template, a stamp) must be regular files. An absent node is safe — the
   # installer creates it. Any unsafe node means the installer cannot `mkdir -p`, write,
   # `cmp` or `rm -f` there without aborting under `set -e` or following a link, so the
-  # callers below leave that template and its stamp unchanged, with a warning.
+  # callers below warn and leave the template alone. An unsafe STAMP path leaves the template
+  # and the stamp unchanged; an unsafe LIVE path leaves the template unchanged and drops its
+  # stamp (the fail-safe that ends ownership), unless the stamp path is itself unsafe.
   pi_node_unsafe() {
     [ -L "$1" ] && return 0
     [ -e "$1" ] || return 1

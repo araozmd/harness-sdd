@@ -346,6 +346,12 @@ test_pi_symlink_and_stamp_guards() {
   [ -f "$_t/.pi/prompts/sdd-next.md/keep" ] || fail "R7p: install disturbed a directory-shaped template leaf"
   grep -q 'symlinked or non-regular destination component' "$OUT" || fail "R7p: no non-regular warning for a directory leaf"
   [ -f "$_t/.pi/prompts/sdd-new.md" ] || fail "R7p: the sibling templates were not installed"
+  # a stamp that pre-existed an unsafe live leaf is DROPPED (ownership ends), not retained.
+  _t2="$(new_target r7p2)"; ok_inst - - --agents=pi "$_t2"
+  [ -f "$_t2/.harness/.pi-prompts/sdd-next.md" ] || fail "R7p: precondition, no stamp after a clean install"
+  rm -f "$_t2/.pi/prompts/sdd-next.md"; mkdir "$_t2/.pi/prompts/sdd-next.md"
+  ok_inst - - --agents=pi "$_t2"
+  [ ! -e "$_t2/.harness/.pi-prompts/sdd-next.md" ] || fail "R7p: stamp kept for an unsafe (directory) live leaf"
   ok_inst - - --agents=claude "$_t"
   [ -f "$_t/.pi/prompts/sdd-next.md/keep" ] || fail "R7p: deselect removed the directory-shaped template leaf"
   [ ! -e "$_t/.pi/prompts/sdd-new.md" ] || fail "R7p: deselect stopped reconciling the sibling templates"
