@@ -972,7 +972,8 @@ test_return_to_inherit_reconciles() {
 # Fields: row-id <TAB> yaml-rhs <TAB> value-read <TAB> installer-verdict <TAB> dispatcher
 # (no thinking:) <TAB> dispatcher (thinking: high). Both value fields are expanded with
 # printf '%b' (bytes a here-doc cannot hold: UTF-8, ESC, TAB, newline, a literal backslash-n
-# written as two backslashes). @EMPTY@ is the empty value (IFS-tab would drop the field);
+# written as two backslashes). Rows 36-38 fail charset/length WITHOUT a slash, so they pin the
+# check ORDER (charset and length before form: a form verdict would echo the value). @EMPTY@ is the empty value (IFS-tab would drop the field);
 # @256@ / @257@ are a valid-charset id of exactly 256 / 257 bytes. A dash in a dispatcher
 # column means the row cannot reach a role file.
 TAB="$(printf '\t')"
@@ -1012,6 +1013,9 @@ pin_rows() { cat <<'PINROWS'
 33	"a/b\0011c"	a/b\0011c	charset	3	3
 34	inherit	inherit	inherit	—	—
 35	"a/b\n    c"	a/b	ok	pass	pass
+36	"qz\0033[2Jx"	qz\0033[2Jx	charset	3	3
+37	"zq zq"	zq zq	charset	3	3
+38	@257N@	@257N@	length	3	3
 PINROWS
 }
 # expand_pin <field> — decode one table value field into the real bytes.
@@ -1020,6 +1024,7 @@ expand_pin() {
     @EMPTY@) return 0 ;;
     @256@) printf 'p/%0254d' 0; return 0 ;;
     @257@) printf 'p/%0255d' 0; return 0 ;;
+    @257N@) printf '%0257d' 0 | tr 0 ';'; return 0 ;;
   esac
   printf '%b' "$1"
 }
@@ -1141,7 +1146,18 @@ test_pi_pin_grammar_table() {
   done <<ROWS
 $(pin_rows)
 ROWS
-  [ "$_n" -ge 33 ] || fail "R2a: only $_n rows exercised (the table lost rows)"
+  [ "$_n" -ge 36 ] || fail "R2a: only $_n rows exercised (the table lost rows)"
+  # LC_ALL=C inside pi_pin_verdict: under a UTF-8 caller locale 129 x e-acute is 258 BYTES (length).
+  # run-tests.sh forces LC_ALL=C for the suites, so the locale is set explicitly here.
+  _ul="$(locale -a 2>/dev/null | grep -i -m1 -E '^(C|en_US)\.utf-?8$' || true)"
+  if [ -n "$_ul" ]; then
+    _eacute="$(printf '\0303\0251')"; _long=""; _k=0
+    while [ "$_k" -lt 129 ]; do _long="$_long$_eacute"; _k=$((_k + 1)); done
+    [ "$(LC_ALL="$_ul" LANG="$_ul" sh -c '. "$1"; pi_pin_verdict "$2"' sh "$PV_FN" "$_long")" = length ] \
+      || fail "R2a: under $_ul 129 two-byte chars (258 bytes) did not read as length"
+  else
+    echo "note: no UTF-8 locale installed; the LC_ALL=C byte-count cell is skipped"
+  fi
   # supplementary shapes the 35 rows leave to a single guard each
   for _x in 'a/b//c:form' 'a/b/c:ok' 'a/low:ok' 'a:b/c:form' 'a/b:free:high:suffix' 'a/:high:form' 'a/b:Max:ok' 'a/b:off:suffix' 'a/b:minimal:suffix' 'a/b:xhigh:suffix' 'a/b:medium:suffix' 'a/b:low:suffix'; do
     _got="$(pin_verdict "${_x%:*}")"
@@ -1235,6 +1251,7 @@ test_pi_pin_rejects_hostile_e2e() {
   ( hostile_group g4 23 24 25 26; echo done ) >"$_d/g4.res" 2>&1 &
   ( hostile_group g5 27 28 29 30; echo done ) >"$_d/g5.res" 2>&1 &
   ( hostile_group g6 31 32 33; echo done ) >"$_d/g6.res" 2>&1 &
+  ( hostile_group g7 36 37 38; echo done ) >"$_d/g7.res" 2>&1 &
   wait_cells "$_d"
   # (b) row 34: the literal tier name keeps the existing warning.
   _t="$(mk pi-host-34)"; run "$_t" pi; set_tier "$_t" builder standard; put_pin "$_t" standard inherit
@@ -1298,6 +1315,9 @@ test_pi_models_any() {
   [ ! -f "$_t/.harness/.escalation-arming" ] || fail "R7: an all-inherit pi target grew an arming file"
   set_tier "$_t" builder standard; run "$_t" pi
   [ -f "$_t/.harness/.escalation-arming" ] || fail "R7: a tier alone (thinking) did not satisfy models_any pi"
+  # an opencode-only target with tiers and no pin gains no arming file from pi thinking (R10)
+  _t="$(mk pi-any-oc)"; run "$_t" opencode; set_tier "$_t" builder standard; set_tier "$_t" builder-heavy reasoning; run "$_t" opencode
+  [ ! -e "$_t/.harness/.escalation-arming" ] || fail "R10: pi thinking leaked into models_any for opencode"
   _t="$(mk pi-any2)"; run "$_t" pi; put_pin "$_t" reasoning '"a/b"'; run "$_t" pi
   [ ! -f "$_t/.harness/.escalation-arming" ] || fail "R7: a pin on an unused tier counted as configured"
   return 0

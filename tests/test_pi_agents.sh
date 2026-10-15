@@ -1107,7 +1107,8 @@ test_pi_dispatch_prose_and_docs() {
 # Fields: row-id <TAB> yaml-rhs <TAB> value-read <TAB> installer-verdict <TAB> dispatcher
 # (no thinking:) <TAB> dispatcher (thinking: high). Both value fields are expanded with
 # printf '%b' (bytes a here-doc cannot hold: UTF-8, ESC, TAB, newline, a literal backslash-n
-# written as two backslashes). @EMPTY@ is the empty value (IFS-tab would drop the field);
+# written as two backslashes). Rows 36-38 fail charset/length WITHOUT a slash, so they pin the
+# check ORDER (charset and length before form: a form verdict would echo the value). @EMPTY@ is the empty value (IFS-tab would drop the field);
 # @256@ / @257@ are a valid-charset id of exactly 256 / 257 bytes. A dash in a dispatcher
 # column means the row cannot reach a role file.
 TAB="$(printf '\t')"
@@ -1147,6 +1148,9 @@ pin_rows() { cat <<'PINROWS'
 33	"a/b\0011c"	a/b\0011c	charset	3	3
 34	inherit	inherit	inherit	—	—
 35	"a/b\n    c"	a/b	ok	pass	pass
+36	"qz\0033[2Jx"	qz\0033[2Jx	charset	3	3
+37	"zq zq"	zq zq	charset	3	3
+38	@257N@	@257N@	length	3	3
 PINROWS
 }
 # expand_pin <field> — decode one table value field into the real bytes.
@@ -1155,6 +1159,7 @@ expand_pin() {
     @EMPTY@) return 0 ;;
     @256@) printf 'p/%0254d' 0; return 0 ;;
     @257@) printf 'p/%0255d' 0; return 0 ;;
+    @257N@) printf '%0257d' 0 | tr 0 ';'; return 0 ;;
   esac
   printf '%b' "$1"
 }
@@ -1299,7 +1304,7 @@ test_dispatch_model_thinking_parity() {
   done <<ROWS
 $(pin_rows)
 ROWS
-  [ "$_n" -ge 33 ] || fail "R6: only $_n dispatcher rows exercised"
+  [ "$_n" -ge 36 ] || fail "R6: only $_n dispatcher rows exercised"
   # (b) dispatcher-only rows
   { awk 'NR==1{print; next} /^description:/{print; print "model: a/b"; print "model: c/d"; next} {print}' "$FRESH/reviewer.md"; } > "$_t/.pi/agents/reviewer.md"
   _rc=0; run_disp "$_t" "$T/plog2" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?; [ "$_rc" = 3 ] || fail "R6b: two model: lines -> $_rc, expected 3"
@@ -1307,6 +1312,11 @@ ROWS
   _rc=0; run_disp "$_t" "$T/plog2" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?; [ "$_rc" = 3 ] || fail "R6b: two thinking: lines -> $_rc, expected 3"
   { awk 'NR==1{print; next} /^description:/{print; print "thinking: max"; next} {print}' "$FRESH/reviewer.md"; } > "$_t/.pi/agents/reviewer.md"
   rm -rf "$T/plog2"; _rc=0; run_disp "$_t" "$T/plog2" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?; [ "$_rc" = 0 ] || fail "R6b: thinking: max -> $_rc, expected pass"
+  # the suffix conflict for EVERY one of the seven levels
+  for _lv in off minimal low medium high xhigh max; do
+    disp_row "$_t" "a/b:$_lv" high 3 "suffix a/b:$_lv + thinking"
+    disp_row "$_t" "a/b:$_lv" - pass "suffix a/b:$_lv alone"
+  done
   # a bare level-word with no colon is a model name, not a suffix (the *:* guard)
   disp_row "$_t" high high pass "model: high"
   # (d) the charset bracket is textually the same in both validators

@@ -2087,6 +2087,8 @@ resolve_codex_effort() {
 # `max` (mirrors Codex's never-emitted `ultra`). An unrecognized tier — already normalized
 # to `inherit` by `_model_tier_resolve` — prints nothing. This is the ONLY tier→thinking
 # table; there is no operator-facing thinking override (a second dial could disagree).
+# (Assigned through `_pta`, not `printf 'high\n'` per arm like codex_effort_alias: the codex guard test
+# injects into that exact line and demands exactly one match, so a second copy would break it.)
 pi_thinking_alias() {
   _pta=""
   case "$1" in

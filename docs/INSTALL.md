@@ -1030,13 +1030,17 @@ Selecting `pi` stamps two optional lines into each `.pi/agents/<role>.md`, right
   `model:` already ends in a level, while `pi -p --thinking` lets the flag win, so one role
   would run at two levels depending on the path. `tools/pi-dispatch.sh` refuses the same
   shape (and a repeated `model:`/`thinking:` key) in a hand-edited role file, exit 3.
+- **Config-reader quirks** (shared by every front end). A `#` starts a comment even inside
+  quotes, so `"a/b#c"` reads as `a/b`; trailing whitespace without a comment, and CRLF line
+  endings, make the value fail the charset rule (rejected, and not echoed); with a duplicate
+  `pin.pi.<tier>` key the first one wins.
 - **Dispatcher.** `tools/pi-dispatch.sh` forwards the role file's values as
   `--model <m>` and `--thinking <t>`, so `pi-subagents` and the dispatcher share one
   resolver output.
 - **Escalation.** pi arms on a `thinking` difference alone (`builder: standard` /
   `builder-heavy: reasoning`), like Codex effort; the `.escalation-arming` file gains a
-  `pi=<verdict>` line, and `pi=unstamped` means `.pi/agents/builder*.md` was edited or is a
-  symlink.
+  `pi=<verdict>` line, and `pi=unstamped` means `.pi/agents/builder*.md` was edited, is a
+  symlink or missing, or `.pi/agents` is a symlink or not a directory.
 
 ### Codex reasoning effort — `model_reasoning_effort` (E99-F161)
 
