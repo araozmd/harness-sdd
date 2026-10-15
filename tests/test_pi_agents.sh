@@ -1380,6 +1380,11 @@ pi=unstamped" ] || fail "R9$2: expected blocked/pi=unstamped, got: $(cat "$1/.ha
   rm -f "$_x/.pi/agents/builder.md" "$_x/.harness/.pi-agents/builder.md"; ln -s "$T/r9-victim/builder.md" "$_x/.pi/agents/builder.md"
   ok_inst --agents=claude,pi --pr-loop=false "$_x"; _want "$_x" c
   [ "$(cksum < "$T/r9-victim/builder.md")" = "$_vck" ] || fail "R9c: the symlink victim changed"
+  # (c2) a symlinked .pi/agents holding pristine copies: cmp must not be fooled
+  _x="$(_case c2)"; rm -rf "$T/r9-dirvictim"; cp -a "$_x/.pi/agents" "$T/r9-dirvictim"; _dck="$(tree_snap "$T/r9-dirvictim")"
+  rm -rf "$_x/.pi/agents"; ln -s "$T/r9-dirvictim" "$_x/.pi/agents"
+  ok_inst --agents=claude,pi --pr-loop=false "$_x"; _want "$_x" c2
+  [ "$(tree_snap "$T/r9-dirvictim")" = "$_dck" ] || fail "R9c2: the symlinked .pi/agents victim changed"
   # (d) a file-shaped .pi/agents: exit 0 (ok_inst), unstamped
   _x="$(_case d)"; rm -rf "$_x/.pi/agents"; echo foreign > "$_x/.pi/agents"; ok_inst --agents=claude,pi --pr-loop=false "$_x"; _want "$_x" d
   # (e) a pi-only all-inherit target grows no arming file

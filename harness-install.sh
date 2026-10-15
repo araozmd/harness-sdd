@@ -5008,8 +5008,11 @@ EOF
   verify_pi_builder_roles_stamped() {
     _vpb_tmp="$(mktemp 2>/dev/null || mktemp -t harness-vpb)"
     for _vpb_r in builder builder-heavy; do
-      if pi_unit_live_unsafe agents "$_vpb_r" || [ -L "$TARGET/.pi/agents/$_vpb_r.md" ] \
-         || [ ! -f "$TARGET/.pi/agents/$_vpb_r.md" ]; then
+      # ONE guard per hazard: `pi_unit_live_unsafe` is the only thing standing between `cmp`
+      # and a symlinked leaf or `.pi/agents` (cmp reads THROUGH a link and would call a
+      # foreign file byte-identical). An absent or wrong-type leaf needs no guard of its
+      # own: `cmp` fails on it, which reads `unstamped`.
+      if pi_unit_live_unsafe agents "$_vpb_r"; then
         mark_unstamped pi
         continue
       fi

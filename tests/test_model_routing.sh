@@ -1242,6 +1242,13 @@ test_pi_pin_rejects_hostile_e2e() {
   printf '%s\n' "$_e" | grep -q "models.pin.pi.standard = 'inherit' is a tier name, not a model id" \
     || fail "R3b: the inherit-pin warning is missing"
   grep -q '^model:' "$(pi_file "$_t" builder)" && fail "R3b: an inherit pin stamped a model"
+  # one warning per TIER, however many roles ride it
+  _t="$(mk pi-host-once)"; run "$_t" pi
+  set_tier "$_t" builder standard; set_tier "$_t" reviewer standard; set_tier "$_t" scout standard
+  put_pin "$_t" standard '"a/b;x"'
+  _e="$(run_err "$_t" pi)"
+  [ "$(printf '%s\n' "$_e" | grep -c 'models.pin.pi.standard has characters')" = 1 ] \
+    || fail "R3: a rejected pin warned more than once for one tier with three roles on it"
   return 0
 }
 
