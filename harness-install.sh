@@ -2131,7 +2131,7 @@ resolve_pi_thinking() {
 #   form     not provider/id (provider [A-Za-z0-9][A-Za-z0-9._-]*; id non-empty, no edge
 #            or doubled / or :)
 #   suffix   ends in :<one of the seven pi thinking levels> (pi-subagents would ignore
-#            `thinking:` while `pi -p` lets it win — one role, two levels, ADR-0007 drift)
+#            `thinking:` while `pi -p` lets it win — one role, two levels, ADR-0007 divergence)
 #   ok
 # The body is a subshell under LC_ALL=C so byte counts and bracket ranges are locale-proof.
 pi_pin_verdict() {

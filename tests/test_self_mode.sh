@@ -181,11 +181,11 @@ self_regenerates_opencode_glue() {
   # list, not a label. The arming detail lines follow $AGENT_KEYS order, so this proves
   # opencode is IN the default set AND that claude/codex were not dropped.
   _order="$(grep -v '^blocked$' "$F/.escalation-arming" | awk -F= '{print $1}' | tr '\n' ' ' | sed 's/ $//')"
-  [ "$_order" = "claude codex opencode" ] \
-    || fail "default --self selection is not the ordered set 'claude codex opencode' (got '$_order') (R1)"
+  # E35-F03 R9/R12: pi now takes part in the arming verdict (pi=neither from the seed), last.
+  [ "$_order" = "claude codex opencode pi" ] \
+    || fail "default --self selection is not the ordered set 'claude codex opencode pi' (got '$_order') (R1)"
   # E35-F02 R10: pi joined the default selection. The fixture does not copy `.pi/` (it is not in
-  # the copy list), so these files can only come from the --self run under test. pi stays out of
-  # the arming verdict, which is why the ordered set above did not change.
+  # the copy list), so these files can only come from the --self run under test.
   [ -f "$F/.pi/agents/builder.md" ] || fail "bare --self did not create .pi/agents/builder.md (E35-F02 R10)"
   [ -f "$F/.pi/prompts/sdd-next.md" ] || fail "bare --self did not create .pi/prompts/sdd-next.md (E35-F02 R10)"
   pass "bare --self regenerates opencode.json + .opencode command/agent glue (R1) [self_regenerates_opencode_glue]"
