@@ -1151,7 +1151,7 @@ ROWS
   # run-tests.sh forces LC_ALL=C for the suites, so the locale is set explicitly here.
   _ul="$(locale -a 2>/dev/null | grep -i -m1 -E '^(C|en_US)\.utf-?8$' || true)"
   if [ -n "$_ul" ]; then
-    _eacute="$(printf '\0303\0251')"; _long=""; _k=0
+    _eacute="$(printf '\303\251')"; _long=""; _k=0
     while [ "$_k" -lt 129 ]; do _long="$_long$_eacute"; _k=$((_k + 1)); done
     [ "$(LC_ALL="$_ul" LANG="$_ul" sh -c '. "$1"; pi_pin_verdict "$2"' sh "$PV_FN" "$_long")" = length ] \
       || fail "R2a: under $_ul 129 two-byte chars (258 bytes) did not read as length"
