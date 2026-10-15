@@ -2154,9 +2154,9 @@ pi_pin_verdict() {
   case "$_id" in
     ''|/*|:*|*/|*:|*//*) printf 'form\n'; return 0 ;;
   esac
+  # (A value with no ':' cannot match here: it still holds the '/' that `form` required.)
   case "${_v##*:}" in
-    off|minimal|low|medium|high|xhigh|max)
-      case "$_v" in *:*) printf 'suffix\n'; return 0 ;; esac ;;
+    off|minimal|low|medium|high|xhigh|max) printf 'suffix\n'; return 0 ;;
   esac
   printf 'ok\n'
   )

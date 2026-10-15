@@ -1307,6 +1307,8 @@ ROWS
   _rc=0; run_disp "$_t" "$T/plog2" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?; [ "$_rc" = 3 ] || fail "R6b: two thinking: lines -> $_rc, expected 3"
   { awk 'NR==1{print; next} /^description:/{print; print "thinking: max"; next} {print}' "$FRESH/reviewer.md"; } > "$_t/.pi/agents/reviewer.md"
   rm -rf "$T/plog2"; _rc=0; run_disp "$_t" "$T/plog2" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?; [ "$_rc" = 0 ] || fail "R6b: thinking: max -> $_rc, expected pass"
+  # a bare level-word with no colon is a model name, not a suffix (the *:* guard)
+  disp_row "$_t" high high pass "model: high"
   # (d) the charset bracket is textually the same in both validators
   grep -qF '[!A-Za-z0-9._:/@-]' "$INST" || fail "R6d: the installer lost the pin charset bracket"
   grep -qF '[!A-Za-z0-9._:/@-]' "$SRC/tools/pi-dispatch.sh" || fail "R6d: the dispatcher lost the pin charset bracket"

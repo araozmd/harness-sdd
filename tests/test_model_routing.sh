@@ -1142,6 +1142,11 @@ test_pi_pin_grammar_table() {
 $(pin_rows)
 ROWS
   [ "$_n" -ge 33 ] || fail "R2a: only $_n rows exercised (the table lost rows)"
+  # supplementary shapes the 35 rows leave to a single guard each
+  for _x in 'a/b//c:form' 'a/b/c:ok' 'a/low:ok' 'a:b/c:form' 'a/b:free:high:suffix' 'a/:high:form' 'a/b:Max:ok' 'a/b:off:suffix' 'a/b:minimal:suffix' 'a/b:xhigh:suffix' 'a/b:medium:suffix' 'a/b:low:suffix'; do
+    _got="$(pin_verdict "${_x%:*}")"
+    [ "$_got" = "${_x##*:}" ] || fail "R2a: supplementary '${_x%:*}' -> '$_got', expected '${_x##*:}'"
+  done
   # (e) model_alias has no pi row.
   awk '/^model_alias\(\) \{/,/^\}/' "$SRC/harness-install.sh" | grep -q 'pi:' && fail "R2e: model_alias grew a pi: row"
   return 0
