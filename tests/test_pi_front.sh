@@ -518,6 +518,32 @@ test_escalation_arming_includes_pi() {
   _c="$(new_target r11c)"; ok_inst - - --agents=pi "$_c"; _cfg "$_c"; ok_inst - - --agents=pi "$_c"
   [ "$(cat "$_c/.harness/.escalation-arming")" = "armed
 pi=raise" ] || fail "R11: a pi-only tiered target did not arm on thinking: $(cat "$_c/.harness/.escalation-arming")"
+  # pi-subagents settings overrides REPLACE frontmatter, so any agentOverrides entry on
+  # builder/builder-heavy (project or user settings) reads unstamped (Codex #4278450847).
+  _ov() { # <label> <expected verdict>
+    ok_inst - - --agents=pi "$_c"
+    [ "$(sed -n 2p "$_c/.harness/.escalation-arming")" = "pi=$2" ] \
+      || fail "R11ov($1): expected pi=$2: $(cat "$_c/.harness/.escalation-arming")"
+    if [ "$2" = raise ]; then _ov_l1=armed; else _ov_l1=blocked; fi
+    [ "$(sed -n 1p "$_c/.harness/.escalation-arming")" = "$_ov_l1" ] \
+      || fail "R11ov($1): line 1 is not $_ov_l1: $(cat "$_c/.harness/.escalation-arming")"
+  }
+  _ps="$_c/.pi/settings.json"; _us="$T/home/.pi/agent/settings.json"
+  mkdir -p "$T/home/.pi/agent"
+  rm -f "$_ps" "$_us"; _ov none raise
+  printf '%s\n' '{"subagents":{"agentOverrides":{"builder-heavy":{"model":"x/y"}}}}' > "$_ps"
+  _ov project-heavy unstamped
+  rm -f "$_ps"
+  printf '%s\n' '{"subagents":{"agentOverrides":{"builder":{"disabled":true}}}}' > "$_us"
+  _ov user-builder unstamped
+  rm -f "$_us"
+  printf '%s\n' '{"subagents":{"agentOverrides":{"scout":{"model":"x/y"}}}}' > "$_ps"
+  _ov unrelated-scout raise
+  printf '%s\n' '{"subagents":{"agentOverrides":{' > "$_ps"
+  _ov malformed unstamped
+  printf '%s\n' '{"subagents":{"agentOverrides":{}}}' > "$_ps"
+  _ov empty raise
+  rm -f "$_ps" "$_us"
   pass "pi is included in the escalation-arming file and its verdict (E35-F03 R9)"
 }
 

@@ -4492,7 +4492,10 @@ MODEL ROUTING:
                                  \`unstamped\` means the installer DECLINED to rewrite that
                                  front-end's live artifact (edited opencode.json, foreign or
                                  symlinked .codex/agents/builder*.toml, or an edited or
-                                 symlinked .pi/agents/builder*.md), so the resolved stamp
+                                 symlinked .pi/agents/builder*.md), or that a pi-subagents
+                                 settings override (.pi/settings.json or
+                                 ~/.pi/agent/settings.json subagents.agentOverrides) names
+                                 builder or builder-heavy, so the resolved stamp
                                  is not the one it will run.
                                  ABSENT means escalation is OFF — either this
                                  installer has not run here, or no role resolves on either axis.
@@ -5022,6 +5025,47 @@ EOF
       cmp -s "$TARGET/.pi/agents/$_vpb_r.md" "$_vpb_tmp" || mark_unstamped pi
     done
     rm -f "$_vpb_tmp"
+    if pi_builder_overridden; then mark_unstamped pi; fi
+  }
+
+  # pi_builder_overridden — true when a pi-subagents settings override (v0.78.0
+  # `subagents.agentOverrides`, which REPLACES frontmatter fields such as model/thinking/
+  # disabled) names `builder` or `builder-heavy` in the project `.pi/settings.json` or the
+  # user `~/.pi/agent/settings.json` (Codex #4278450847). ANY such entry disqualifies: the
+  # effective config is not computed. READ-ONLY — `~/.pi/agent` is never written (ADR-0007).
+  # Fails CLOSED: a non-regular or unreadable file, a symlinked project file, or an
+  # unparsable file that mentions `agentOverrides` all count as overridden. The user file
+  # may be read through a symlink (a dangling one is non-regular, so overridden).
+  pi_builder_overridden() {
+    for _pbo_f in "$TARGET/.pi/settings.json" "${HOME:+$HOME/.pi/agent/settings.json}"; do
+      [ -n "$_pbo_f" ] || continue
+      [ -e "$_pbo_f" ] || [ -L "$_pbo_f" ] || continue
+      case "$_pbo_f" in "$TARGET"/*) [ -L "$_pbo_f" ] && return 0 ;; esac
+      { [ -f "$_pbo_f" ] && [ -r "$_pbo_f" ]; } || return 0
+      _pbo_rc=2
+      if command -v python3 >/dev/null 2>&1; then
+        _pbo_rc=0
+        python3 -I - "$_pbo_f" <<'PYPBO' >/dev/null 2>&1 || _pbo_rc=$?
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as fh:
+    d = json.load(fh)
+s = d.get("subagents") if isinstance(d, dict) else None
+ao = s.get("agentOverrides") if isinstance(s, dict) else None
+if ao is None:
+    sys.exit(11)
+if not isinstance(ao, dict) or "builder" in ao or "builder-heavy" in ao:
+    sys.exit(10)
+sys.exit(11)
+PYPBO
+      fi
+      case "$_pbo_rc" in
+        10) return 0 ;;
+        11) ;;
+        *) grep -q 'agentOverrides' "$_pbo_f" 2>/dev/null && return 0
+           [ -r "$_pbo_f" ] || return 0 ;;
+      esac
+    done
+    return 1
   }
 
   # write_escalation_arming — record, for the front-ends selected on THIS run, whether

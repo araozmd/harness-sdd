@@ -18,6 +18,9 @@ All notable changes to the harness body are recorded here. Versions follow
 - Escalation: pi joins `.harness/.escalation-arming` (`pi=<verdict>`, `pi=unstamped` for an
   edited `.pi/agents/builder*.md`) and arms on a `thinking` difference alone. Supersedes
   E35-F01 R11. The repository's root `.escalation-arming` gains `pi=neither`.
+- `pi=unstamped` also covers any `pi-subagents` settings override on `builder` or
+  `builder-heavy` (`subagents.agentOverrides` in `.pi/settings.json` or
+  `~/.pi/agent/settings.json`, read-only; unparsable-but-mentioning fails closed).
 
 ## [0.93.0] — 2026-10-13
 

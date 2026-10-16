@@ -1040,7 +1040,11 @@ Selecting `pi` stamps two optional lines into each `.pi/agents/<role>.md`, right
 - **Escalation.** pi arms on a `thinking` difference alone (`builder: standard` /
   `builder-heavy: reasoning`), like Codex effort; the `.escalation-arming` file gains a
   `pi=<verdict>` line, and `pi=unstamped` means `.pi/agents/builder*.md` was edited, is a
-  symlink or missing, or `.pi/agents` is a symlink or not a directory.
+  symlink or missing, or `.pi/agents` is a symlink or not a directory — or that a
+  `pi-subagents` settings override (`subagents.agentOverrides` in `.pi/settings.json` or
+  `~/.pi/agent/settings.json`) names `builder` or `builder-heavy`, since an override replaces
+  the generated frontmatter. The installer only reads those files; an unreadable or
+  unparsable one that mentions `agentOverrides` also reads `unstamped`.
 
 ### Codex reasoning effort — `model_reasoning_effort` (E99-F161)
 
