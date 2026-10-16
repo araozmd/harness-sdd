@@ -520,8 +520,8 @@ test_escalation_arming_includes_pi() {
   _c="$(new_target home/w/r11c)"; ok_inst - - --agents=pi "$_c"; _cfg "$_c"; ok_inst - - --agents=pi "$_c"
   [ "$(cat "$_c/.harness/.escalation-arming")" = "armed
 pi=raise" ] || fail "R11: a pi-only tiered target did not arm on thinking: $(cat "$_c/.harness/.escalation-arming")"
-  # pi-subagents settings overrides REPLACE frontmatter, so any agentOverrides entry on
-  # builder/builder-heavy (project or user settings) reads unstamped (Codex #4278450847).
+  # The blunt rule (Codex #4296704471, #4296704485): ANY top-level `subagents` key in an
+  # in-scope pi settings file, whatever its value, reads unstamped; other keys do not.
   _ov() { # <label> <expected verdict> [VAR=value]
     ok_inst - "${3:--}" --agents=pi "$_c"
     [ "$(sed -n 2p "$_c/.harness/.escalation-arming")" = "pi=$2" ] \
@@ -533,63 +533,29 @@ pi=raise" ] || fail "R11: a pi-only tiered target did not arm on thinking: $(cat
   _ps="$_c/.pi/settings.json"; _us="$T/home/.pi/agent/settings.json"
   mkdir -p "$T/home/.pi/agent"
   rm -f "$_ps" "$_us"; _ov none raise
-  printf '%s\n' '{"subagents":{"agentOverrides":{"builder-heavy":{"model":"x/y"}}}}' > "$_ps"
-  _ov project-heavy unstamped
-  rm -f "$_ps"
-  printf '%s\n' '{"subagents":{"agentOverrides":{"builder":{"disabled":true}}}}' > "$_us"
-  _ov user-builder unstamped
-  rm -f "$_us"
-  printf '%s\n' '{"subagents":{"agentOverrides":{"scout":{"model":"x/y"}}}}' > "$_ps"
-  _ov unrelated-scout raise
-  printf '%s\n' '{"subagents":{"agentOverrides":{' > "$_ps"
-  _ov malformed unstamped
-  printf '%s\n' '{"subagents":{"agentOverrides":{}}}' > "$_ps"
-  _ov empty raise
-  # `subagents` is an ALLOWLIST of known-harmless keys (Codex #4296205717): every other key,
-  # a provider-scoped override on either role, or a non-object shape fails closed.
-  printf '%s\n' '{"subagents":{"agentOverridesByProvider":{"anthropic":{"builder-heavy":{"model":"x/y"}}}}}' > "$_ps"
-  _ov byprovider-heavy unstamped
-  printf '%s\n' '{"subagents":{"agentOverridesByProvider":{"anthropic":{"scout":{"model":"x/y"}}}}}' > "$_ps"
-  _ov byprovider-scout raise
-  printf '%s\n' '{"subagents":{"maxThinking":"xhigh"}}' > "$_ps"; _ov maxThinking unstamped
-  printf '%s\n' '{"subagents":{"disableThinking":true}}' > "$_ps"; _ov disableThinking unstamped
-  printf '%s\n' '{"subagents":{"modelScope":{"enforce":true,"allow":["inherit"]}}}' > "$_ps"
-  _ov modelScope unstamped
-  printf '%s\n' '{"subagents":{"futureKnob":1}}' > "$_ps"; _ov unknown-key unstamped
-  # Neither role stamps a model and both stamp thinking here, so both defaults land alike.
-  printf '%s\n' '{"subagents":{"defaultModel":"x/y","defaultThinking":"low"}}' > "$_ps"
-  _ov defaults raise
   printf '%s\n' '{"theme":"x"}' > "$_ps"; _ov non-subagents raise
+  printf '%s\n' '{"subagents":{}}' > "$_ps"; _ov empty-object unstamped
+  printf '%s\n' '{"subagents":{"defaultExtensions":"not-an-array"}}' > "$_ps"; _ov invalid-value unstamped
+  printf '%s\n' '{"subagents":{"agentOverrides":{"scout":{}}}}' > "$_ps"; _ov unrelated-scout unstamped
   printf '%s\n' '{"subagents":[]}' > "$_ps"; _ov subagents-array unstamped
-  printf '%s\n' '{"subagents":{"agentOverridesByProvider":{"p":3}}}' > "$_ps"
-  _ov byprovider-scalar unstamped
   printf '%s\n' '{"subagents":{"maxThinking":' > "$_ps"; _ov malformed-subagents unstamped
-  # The user file follows PI_CODING_AGENT_DIR as pi resolves it, and ancestor project
-  # settings are allowlist-checked up to (not including) HOME (Codex #4296427279).
-  rm -f "$_ps"; _bh='{"subagents":{"agentOverrides":{"builder-heavy":{"model":"x/y"}}}}'
+  printf '%s\n' '{"theme":' > "$_ps"; _ov malformed-other raise
+  # The user file follows PI_CODING_AGENT_DIR as pi resolves it (a relative value is
+  # unknowable here), and ancestor project settings are checked up to (not including) HOME.
+  rm -f "$_ps"; _sa='{"subagents":{}}'
   mkdir -p "$T/alt" "$T/home/alt" "$T/home/w/.pi"
-  printf '%s\n' "$_bh" > "$T/alt/settings.json"; _ov env-abs unstamped "PI_CODING_AGENT_DIR=$T/alt"
-  rm -f "$T/alt/settings.json"; printf '%s\n' "$_bh" > "$_us"
+  printf '%s\n' "$_sa" > "$T/alt/settings.json"; _ov env-abs unstamped "PI_CODING_AGENT_DIR=$T/alt"
+  rm -f "$T/alt/settings.json"; printf '%s\n' "$_sa" > "$_us"
   _ov env-abs-ignores-home raise "PI_CODING_AGENT_DIR=$T/alt"
   _ov env-empty unstamped "PI_CODING_AGENT_DIR="
-  rm -f "$_us"; printf '%s\n' "$_bh" > "$T/home/alt/settings.json"
+  rm -f "$_us"; printf '%s\n' "$_sa" > "$T/home/alt/settings.json"
   _ov env-tilde unstamped "PI_CODING_AGENT_DIR=~/alt"
   rm -f "$T/home/alt/settings.json"
-  printf '%s\n' "$_bh" > "$T/home/w/.pi/settings.json"; _ov ancestor-heavy unstamped
-  printf '%s\n' '{"theme":"x"}' > "$T/home/w/.pi/settings.json"; _ov ancestor-theme raise
-  mkdir -p "$T/home/.pi"; printf '%s\n' "$_bh" > "$T/home/.pi/settings.json"; _ov home-not-walked raise
-  rm -rf "$T/home/w/.pi" "$T/home/.pi/settings.json"
-  # builder omits `thinking:` while builder-heavy stamps it: defaultThinking would fill only
-  # builder and could equalize the pair, so it no longer counts as harmless.
-  sed 's|^  builder: .*|  builder: inherit|' "$_c/.harness/harness.config.yaml" > "$_c/c.t" \
-    && mv "$_c/c.t" "$_c/.harness/harness.config.yaml"
-  printf '%s\n' '{"subagents":{"defaultThinking":"high"}}' > "$_ps"
-  _ov asymmetric-defaultThinking unstamped
-  # Same for the model axis: only builder-heavy pins one, so defaultModel fills builder alone.
-  awk '{print} /^models:/{print "  pin.pi.reasoning: x/heavy"}' "$_c/.harness/harness.config.yaml" > "$_c/c.t" \
-    && mv "$_c/c.t" "$_c/.harness/harness.config.yaml"
-  printf '%s\n' '{"subagents":{"defaultModel":"x/heavy"}}' > "$_ps"
-  _ov asymmetric-defaultModel unstamped
+  _ov env-relative unstamped "PI_CODING_AGENT_DIR=relcfg"
+  printf '%s\n' "$_sa" > "$T/home/w/.pi/settings.json"; _ov ancestor unstamped
+  rm -rf "$T/home/w/.pi"
+  mkdir -p "$T/home/.pi"; printf '%s\n' "$_sa" > "$T/home/.pi/settings.json"; _ov home-not-walked raise
+  rm -f "$T/home/.pi/settings.json"
   rm -f "$_ps" "$_us"
   pass "pi is included in the escalation-arming file and its verdict (E35-F03 R9)"
 }

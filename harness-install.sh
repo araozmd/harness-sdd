@@ -4492,14 +4492,14 @@ MODEL ROUTING:
                                  \`unstamped\` means the installer DECLINED to rewrite that
                                  front-end's live artifact (edited opencode.json, foreign or
                                  symlinked .codex/agents/builder*.toml, or an edited or
-                                 symlinked .pi/agents/builder*.md), or that the pi-subagents
-                                 \`subagents\` settings (.pi/settings.json or
-                                 ~/.pi/agent/settings.json) are not limited to an allowlist
-                                 of known-harmless keys — e.g. an agentOverrides or
-                                 agentOverridesByProvider entry naming builder or
-                                 builder-heavy, maxThinking, disableThinking, modelScope or
-                                 any unknown key — so the resolved stamp
-                                 is not the one it will run.
+                                 symlinked .pi/agents/builder*.md), or that pi-subagents
+                                 settings are configured — any top-level \`subagents\` key,
+                                 whatever its value, in .pi/settings.json, an ancestor
+                                 .pi/settings.json below HOME, or the user
+                                 <agent dir>/settings.json — or that a relative
+                                 PI_CODING_AGENT_DIR leaves the user file unknowable — so
+                                 the resolved stamp is not the one it will run (or may not
+                                 be: pi-subagents settings are not inspected key by key).
                                  ABSENT means escalation is OFF — either this
                                  installer has not run here, or no role resolves on either axis.
                                  Written only while at least one role resolves and removed
@@ -5031,53 +5031,34 @@ EOF
     if pi_builder_overridden; then mark_unstamped pi; fi
   }
 
-  # pi_builder_overridden — true when pi-subagents (v0.78.0) settings could change what
-  # `builder`/`builder-heavy` actually run (Codex #4278450847, #4296205717, #4296427279). Files
-  # inspected: the project `.pi/settings.json`; every ANCESTOR `.pi/settings.json` of the
-  # target (below); and the user `<agent dir>/settings.json`, where the agent dir is
-  # `pi_user_agent_dir` — `$PI_CODING_AGENT_DIR` when set and non-empty, as pi and
-  # pi-subagents both resolve it, else `~/.pi/agent`. The verdict is an INSTALL-TIME
-  # SNAPSHOT taken in the installer's environment (its HOME, PI_CODING_AGENT_DIR and cwd);
-  # a pi session launched with a different environment, or a settings file edited later, is
-  # not seen until the next install. An ALLOWLIST, so an unknown
-  # or future key fails closed instead of costing a review round each: only the top-level
-  # `subagents` object is inspected (other pi keys are ignored); absent is fine, a non-object
-  # is overridden, and its keys must all be known-harmless:
-  #   defaultProvider, defaultExtensions, defaultSubagentOnlyExtensions — resolve bare ids
-  #     (our pi pins are always provider/id) or fill a field neither role file sets, so they
-  #     land on both roles alike and touch neither model nor thinking;
-  #   defaultModel / defaultThinking — fill ONLY a role lacking that frontmatter key, so they
-  #     are harmless only while both roles stamp it or both omit it; when exactly one omits it
-  #     the default can equalize the pair, and the key counts as overridden;
-  #   agentOverrides — an object naming neither role (an entry REPLACES frontmatter fields);
-  #   agentOverridesByProvider — an object whose every value is such an object (it layers
-  #     over agentOverrides for the active parent provider).
-  # Anything else — maxThinking (a ceiling that fails the launch), disableThinking,
-  # modelScope (can reject builder-heavy's model), an unknown key — is overridden. The
-  # effective config is not computed. READ-ONLY — no settings file is ever written (ADR-0007).
-  # Fails CLOSED: a non-regular or unreadable file, a symlinked project file, or an
-  # unparsable file (or no python3) that mentions `subagents` all count as overridden. The
-  # user and ancestor files may be read through a symlink (a dangling one is non-regular, so
-  # overridden).
+  # pi_builder_overridden — true when pi-subagents settings could change what
+  # `builder`/`builder-heavy` actually run (Codex #4278450847, #4296205717, #4296427279,
+  # #4296704471, #4296704485). BLUNT on purpose: pi-subagents' settings surface is large and
+  # versioned, and any `subagents` entry can change a role's model, thinking, tools or
+  # disabled state, or make pi-subagents reject the launch outright — so the installer does
+  # not inspect keys or values. ANY in-scope settings file with a top-level `subagents` key,
+  # whatever its value (a non-object too), reads overridden; a file without one (e.g.
+  # `{"theme":"x"}`) has no effect. The `tools/pi-dispatch.sh` fallback ignores pi-subagents
+  # settings and still honours the stamped escalation; only auto-arming on pi is disarmed.
   #
-  # Ancestors: pi-subagents' findConfiguredProjectRoot walks from cwd upward (stopping at
-  # $HOME), and an ancestor's `subagents.projectRootResolution: "git-root"` can redirect
-  # project settings to the git root's `.pi/settings.json`. Rather than model that, EVERY
-  # existing ancestor `.pi/settings.json` of the physical target path — excluding the target
-  # itself, stopping before $HOME and before `/`, at most 64 levels (past that, or on a
-  # non-absolute path: overridden) —
-  # gets the same allowlist check. Conservative: `projectRootResolution` is not allowlisted,
-  # so any redirecting ancestor fails closed, and a redirect target that is itself an
-  # ancestor is checked too; the cost is that a harmful-looking ancestor file pi would never
-  # read for this target also reads unstamped.
+  # In-scope files: the project `.pi/settings.json` (a symlink there is overridden); the user
+  # `<agent dir>/settings.json` (`pi_user_agent_dir`); and every ANCESTOR `.pi/settings.json`
+  # of the physical target path — excluding the target itself, stopping before $HOME and
+  # before `/`, at most 64 levels (past that, or on a non-absolute path: overridden). The
+  # ancestor walk stands in for pi-subagents' findConfiguredProjectRoot (cwd upward, stopping
+  # at $HOME) and any `projectRootResolution` redirect. The user and ancestor files may be
+  # read through a symlink. A user agent dir that cannot be resolved here — unset HOME, or a
+  # RELATIVE `$PI_CODING_AGENT_DIR`, which pi resolves against its own launch cwd, not the
+  # installer's — reads overridden. The verdict is an INSTALL-TIME SNAPSHOT taken in the
+  # installer's environment; a later settings edit or a pi session launched with a different
+  # environment is not seen until the next install. READ-ONLY — no settings file is ever
+  # written (ADR-0007). Fails CLOSED: a non-regular or unreadable file, or an unparsable file
+  # (or no python3) whose text mentions `subagents`, counts as overridden.
   pi_builder_overridden() {
-    _pbo_bm="$(resolve_model pi builder)"; _pbo_hm="$(resolve_model pi builder-heavy)"
-    _pbo_bt="$(resolve_pi_thinking builder)"; _pbo_ht="$(resolve_pi_thinking builder-heavy)"
     pi_settings_file_overridden "$TARGET/.pi/settings.json" 1 && return 0
     _pbo_ud="$(pi_user_agent_dir)"
-    if [ -n "$_pbo_ud" ]; then
-      pi_settings_file_overridden "$_pbo_ud/settings.json" 0 && return 0
-    fi
+    [ -n "$_pbo_ud" ] || return 0
+    pi_settings_file_overridden "$_pbo_ud/settings.json" 0 && return 0
     _pbo_d="$(_prompt_owner_id)"; _pbo_h="${HOME:-}"; _pbo_h="${_pbo_h%/}"; _pbo_n=0
     case "$_pbo_d" in /*) ;; *) return 0 ;; esac
     while :; do
@@ -5093,21 +5074,23 @@ EOF
 
   # pi_user_agent_dir — the pi user agent dir, resolved as pi 1.2.0 / pi-subagents 0.78.0
   # getAgentDir do: `$PI_CODING_AGENT_DIR` unset or empty → `$HOME/.pi/agent`; exactly `~` →
-  # `$HOME`; `~/<rest>` → `$HOME/<rest>`; anything else as-is (a relative value is relative to
-  # the installer's cwd). Prints nothing when the result needs an unset HOME.
+  # `$HOME`; `~/<rest>` → `$HOME/<rest>`; an absolute path as-is. Prints nothing (the caller
+  # reads that as overridden) when the result needs an unset HOME, or for a relative value —
+  # pi resolves that against its launch cwd, which the installer cannot know.
   pi_user_agent_dir() {
     case "${PI_CODING_AGENT_DIR:-}" in
       '') [ -z "${HOME:-}" ] || printf '%s\n' "$HOME/.pi/agent" ;;
       '~') [ -z "${HOME:-}" ] || printf '%s\n' "$HOME" ;;
       '~/'*) [ -z "${HOME:-}" ] || printf '%s\n' "$HOME/${PI_CODING_AGENT_DIR#\~/}" ;;
-      *) printf '%s\n' "$PI_CODING_AGENT_DIR" ;;
+      /*) printf '%s\n' "$PI_CODING_AGENT_DIR" ;;
+      *) ;;
     esac
     return 0
   }
 
-  # pi_settings_file_overridden <file> <strict> — the per-file allowlist check behind
-  # pi_builder_overridden (uses its _pbo_* resolved stamps). 0 = overridden, 1 = fine or
-  # absent. <strict>=1 (the project file) also treats a symlink as overridden.
+  # pi_settings_file_overridden <file> <strict> — the per-file check behind
+  # pi_builder_overridden: does the file have a top-level `subagents` key? 0 = overridden,
+  # 1 = fine or absent. <strict>=1 (the project file) also treats a symlink as overridden.
   pi_settings_file_overridden() {
     _pbo_f="$1"
     [ -e "$_pbo_f" ] || [ -L "$_pbo_f" ] || return 1
@@ -5116,34 +5099,11 @@ EOF
     _pbo_rc=2
     if command -v python3 >/dev/null 2>&1; then
       _pbo_rc=0
-      python3 -I - "$_pbo_f" "$_pbo_bm" "$_pbo_hm" "$_pbo_bt" "$_pbo_ht" <<'PYPBO' >/dev/null 2>&1 || _pbo_rc=$?
+      python3 -I - "$_pbo_f" <<'PYPBO' >/dev/null 2>&1 || _pbo_rc=$?
 import json, sys
-f, bm, hm, bt, ht = sys.argv[1:6]
-with open(f, encoding="utf-8") as fh:
+with open(sys.argv[1], encoding="utf-8") as fh:
     d = json.load(fh)
-if not isinstance(d, dict) or "subagents" not in d:
-    sys.exit(11)
-s = d["subagents"]
-if not isinstance(s, dict):
-    sys.exit(10)
-ROLES = ("builder", "builder-heavy")
-ALLOWED = {"defaultModel", "defaultProvider", "defaultThinking", "defaultExtensions",
-           "defaultSubagentOnlyExtensions", "agentOverrides", "agentOverridesByProvider"}
-if any(k not in ALLOWED for k in s):
-    sys.exit(10)
-if "defaultModel" in s and bool(bm) != bool(hm):
-    sys.exit(10)
-if "defaultThinking" in s and bool(bt) != bool(ht):
-    sys.exit(10)
-def names_role(o):
-    return not isinstance(o, dict) or any(r in o for r in ROLES)
-if "agentOverrides" in s and names_role(s["agentOverrides"]):
-    sys.exit(10)
-if "agentOverridesByProvider" in s:
-    bp = s["agentOverridesByProvider"]
-    if not isinstance(bp, dict) or any(names_role(v) for v in bp.values()):
-        sys.exit(10)
-sys.exit(11)
+sys.exit(10 if isinstance(d, dict) and "subagents" in d else 11)
 PYPBO
     fi
     case "$_pbo_rc" in

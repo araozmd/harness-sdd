@@ -1040,18 +1040,22 @@ Selecting `pi` stamps two optional lines into each `.pi/agents/<role>.md`, right
 - **Escalation.** pi arms on a `thinking` difference alone (`builder: standard` /
   `builder-heavy: reasoning`), like Codex effort; the `.escalation-arming` file gains a
   `pi=<verdict>` line, and `pi=unstamped` means `.pi/agents/builder*.md` was edited, is a
-  symlink or missing, or `.pi/agents` is a symlink or not a directory — or that the
-  `pi-subagents` `subagents` settings in `.pi/settings.json`, in any ancestor directory's
-  `.pi/settings.json` below `$HOME`, or in the user `settings.json`
-  (`$PI_CODING_AGENT_DIR/settings.json` when that is set, else `~/.pi/agent/settings.json`)
-  go beyond an allowlist of known-harmless keys: `defaultProvider`, `defaultExtensions`,
-  `defaultSubagentOnlyExtensions`; `defaultModel`/`defaultThinking` only while both roles
-  stamp that field or both omit it (they fill only a role lacking it); and
-  `agentOverrides`/`agentOverridesByProvider.<provider>` objects that name neither
-  `builder` nor `builder-heavy` (an entry replaces the generated frontmatter). Anything else
-  — `maxThinking`, `disableThinking`, `modelScope`, a non-object `subagents`, any unknown
-  key — reads `unstamped`. Other top-level pi keys are ignored. The installer only reads
-  those files; an unreadable or unparsable one that mentions `subagents` also reads
+  symlink or missing, or `.pi/agents` is a symlink or not a directory — or that
+  `pi-subagents` settings are configured at all. Configuring `pi-subagents` settings
+  disarms auto-armed `builder-heavy` on pi: any top-level `subagents` key, whatever its
+  value, in `.pi/settings.json`, in any ancestor directory's `.pi/settings.json` below
+  `$HOME`, or in the user `settings.json` (`$PI_CODING_AGENT_DIR/settings.json` when that
+  is set to an absolute path, `~` or `~/…`, else `~/.pi/agent/settings.json`) reads
+  `unstamped`. The rule is blunt on purpose: the `pi-subagents` settings surface is large
+  and versioned, and any `subagents` entry can change a role's model, thinking, tools or
+  disabled state, or reject the launch, so the installer does not inspect keys or values.
+  Settings files without a `subagents` key have no effect. A relative
+  `PI_CODING_AGENT_DIR` also reads `unstamped` (pi resolves it against its own launch cwd,
+  which the installer cannot know). This is warn-only — the installer prints an
+  `escalation NOT armed` notice and still succeeds — and the `.harness/tools/pi-dispatch.sh`
+  path is unaffected: it ignores `pi-subagents` settings and still honours the stamped
+  escalation. The installer only reads those files;
+  an unreadable one, or an unparsable one that mentions `subagents`, also reads
   `unstamped`. Ancestors are checked because `pi-subagents` can redirect project settings
   (`projectRootResolution`) to an ancestor; checking all of them is deliberately
   conservative. The verdict is an install-time snapshot, taken in the installer's
