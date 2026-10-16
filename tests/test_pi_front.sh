@@ -17,6 +17,7 @@ set -eu
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 INST="$SRC/harness-install.sh"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-pi)"
+T="$(CDPATH= cd -- "$T" && pwd -P)"  # physical, so HOME=$T/home bounds the ancestor walk
 trap 'rm -rf "$T"' EXIT
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
@@ -514,14 +515,15 @@ test_escalation_arming_includes_pi() {
   [ "$(sed -n 1p "$_b/.harness/.escalation-arming")" = armed ] || fail "R11: claude,pi (both raise) is not armed"
   [ "$(sed -n 2p "$_b/.harness/.escalation-arming")" = "$(sed -n 2p "$_a/.harness/.escalation-arming")" ] \
     || fail "R11: pi changed the claude= line"
-  # pi alone, tiers set: armed on thinking alone.
-  _c="$(new_target r11c)"; ok_inst - - --agents=pi "$_c"; _cfg "$_c"; ok_inst - - --agents=pi "$_c"
+  # pi alone, tiers set: armed on thinking alone. Under HOME=$T/home so the installer's
+  # ancestor `.pi/settings.json` walk sees only $T/home/w and stops at HOME (no host file).
+  _c="$(new_target home/w/r11c)"; ok_inst - - --agents=pi "$_c"; _cfg "$_c"; ok_inst - - --agents=pi "$_c"
   [ "$(cat "$_c/.harness/.escalation-arming")" = "armed
 pi=raise" ] || fail "R11: a pi-only tiered target did not arm on thinking: $(cat "$_c/.harness/.escalation-arming")"
   # pi-subagents settings overrides REPLACE frontmatter, so any agentOverrides entry on
   # builder/builder-heavy (project or user settings) reads unstamped (Codex #4278450847).
-  _ov() { # <label> <expected verdict>
-    ok_inst - - --agents=pi "$_c"
+  _ov() { # <label> <expected verdict> [VAR=value]
+    ok_inst - "${3:--}" --agents=pi "$_c"
     [ "$(sed -n 2p "$_c/.harness/.escalation-arming")" = "pi=$2" ] \
       || fail "R11ov($1): expected pi=$2: $(cat "$_c/.harness/.escalation-arming")"
     if [ "$2" = raise ]; then _ov_l1=armed; else _ov_l1=blocked; fi
@@ -562,6 +564,21 @@ pi=raise" ] || fail "R11: a pi-only tiered target did not arm on thinking: $(cat
   printf '%s\n' '{"subagents":{"agentOverridesByProvider":{"p":3}}}' > "$_ps"
   _ov byprovider-scalar unstamped
   printf '%s\n' '{"subagents":{"maxThinking":' > "$_ps"; _ov malformed-subagents unstamped
+  # The user file follows PI_CODING_AGENT_DIR as pi resolves it, and ancestor project
+  # settings are allowlist-checked up to (not including) HOME (Codex #4296427279).
+  rm -f "$_ps"; _bh='{"subagents":{"agentOverrides":{"builder-heavy":{"model":"x/y"}}}}'
+  mkdir -p "$T/alt" "$T/home/alt" "$T/home/w/.pi"
+  printf '%s\n' "$_bh" > "$T/alt/settings.json"; _ov env-abs unstamped "PI_CODING_AGENT_DIR=$T/alt"
+  rm -f "$T/alt/settings.json"; printf '%s\n' "$_bh" > "$_us"
+  _ov env-abs-ignores-home raise "PI_CODING_AGENT_DIR=$T/alt"
+  _ov env-empty unstamped "PI_CODING_AGENT_DIR="
+  rm -f "$_us"; printf '%s\n' "$_bh" > "$T/home/alt/settings.json"
+  _ov env-tilde unstamped "PI_CODING_AGENT_DIR=~/alt"
+  rm -f "$T/home/alt/settings.json"
+  printf '%s\n' "$_bh" > "$T/home/w/.pi/settings.json"; _ov ancestor-heavy unstamped
+  printf '%s\n' '{"theme":"x"}' > "$T/home/w/.pi/settings.json"; _ov ancestor-theme raise
+  mkdir -p "$T/home/.pi"; printf '%s\n' "$_bh" > "$T/home/.pi/settings.json"; _ov home-not-walked raise
+  rm -rf "$T/home/w/.pi" "$T/home/.pi/settings.json"
   # builder omits `thinking:` while builder-heavy stamps it: defaultThinking would fill only
   # builder and could equalize the pair, so it no longer counts as harmless.
   sed 's|^  builder: .*|  builder: inherit|' "$_c/.harness/harness.config.yaml" > "$_c/c.t" \

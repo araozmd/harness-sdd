@@ -1041,7 +1041,9 @@ Selecting `pi` stamps two optional lines into each `.pi/agents/<role>.md`, right
   `builder-heavy: reasoning`), like Codex effort; the `.escalation-arming` file gains a
   `pi=<verdict>` line, and `pi=unstamped` means `.pi/agents/builder*.md` was edited, is a
   symlink or missing, or `.pi/agents` is a symlink or not a directory — or that the
-  `pi-subagents` `subagents` settings in `.pi/settings.json` or `~/.pi/agent/settings.json`
+  `pi-subagents` `subagents` settings in `.pi/settings.json`, in any ancestor directory's
+  `.pi/settings.json` below `$HOME`, or in the user `settings.json`
+  (`$PI_CODING_AGENT_DIR/settings.json` when that is set, else `~/.pi/agent/settings.json`)
   go beyond an allowlist of known-harmless keys: `defaultProvider`, `defaultExtensions`,
   `defaultSubagentOnlyExtensions`; `defaultModel`/`defaultThinking` only while both roles
   stamp that field or both omit it (they fill only a role lacking it); and
@@ -1050,7 +1052,11 @@ Selecting `pi` stamps two optional lines into each `.pi/agents/<role>.md`, right
   — `maxThinking`, `disableThinking`, `modelScope`, a non-object `subagents`, any unknown
   key — reads `unstamped`. Other top-level pi keys are ignored. The installer only reads
   those files; an unreadable or unparsable one that mentions `subagents` also reads
-  `unstamped`.
+  `unstamped`. Ancestors are checked because `pi-subagents` can redirect project settings
+  (`projectRootResolution`) to an ancestor; checking all of them is deliberately
+  conservative. The verdict is an install-time snapshot, taken in the installer's
+  environment (`HOME`, `PI_CODING_AGENT_DIR`, cwd): re-run the installer after changing
+  those or the settings files.
 
 ### Codex reasoning effort — `model_reasoning_effort` (E99-F161)
 

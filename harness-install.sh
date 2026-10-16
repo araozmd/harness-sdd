@@ -5032,8 +5032,14 @@ EOF
   }
 
   # pi_builder_overridden — true when pi-subagents (v0.78.0) settings could change what
-  # `builder`/`builder-heavy` actually run, in the project `.pi/settings.json` or the user
-  # `~/.pi/agent/settings.json` (Codex #4278450847, #4296205717). An ALLOWLIST, so an unknown
+  # `builder`/`builder-heavy` actually run (Codex #4278450847, #4296205717, #4296427279). Files
+  # inspected: the project `.pi/settings.json`; every ANCESTOR `.pi/settings.json` of the
+  # target (below); and the user `<agent dir>/settings.json`, where the agent dir is
+  # `pi_user_agent_dir` — `$PI_CODING_AGENT_DIR` when set and non-empty, as pi and
+  # pi-subagents both resolve it, else `~/.pi/agent`. The verdict is an INSTALL-TIME
+  # SNAPSHOT taken in the installer's environment (its HOME, PI_CODING_AGENT_DIR and cwd);
+  # a pi session launched with a different environment, or a settings file edited later, is
+  # not seen until the next install. An ALLOWLIST, so an unknown
   # or future key fails closed instead of costing a review round each: only the top-level
   # `subagents` object is inspected (other pi keys are ignored); absent is fine, a non-object
   # is overridden, and its keys must all be known-harmless:
@@ -5048,22 +5054,69 @@ EOF
   #     over agentOverrides for the active parent provider).
   # Anything else — maxThinking (a ceiling that fails the launch), disableThinking,
   # modelScope (can reject builder-heavy's model), an unknown key — is overridden. The
-  # effective config is not computed. READ-ONLY — `~/.pi/agent` is never written (ADR-0007).
+  # effective config is not computed. READ-ONLY — no settings file is ever written (ADR-0007).
   # Fails CLOSED: a non-regular or unreadable file, a symlinked project file, or an
   # unparsable file (or no python3) that mentions `subagents` all count as overridden. The
-  # user file may be read through a symlink (a dangling one is non-regular, so overridden).
+  # user and ancestor files may be read through a symlink (a dangling one is non-regular, so
+  # overridden).
+  #
+  # Ancestors: pi-subagents' findConfiguredProjectRoot walks from cwd upward (stopping at
+  # $HOME), and an ancestor's `subagents.projectRootResolution: "git-root"` can redirect
+  # project settings to the git root's `.pi/settings.json`. Rather than model that, EVERY
+  # existing ancestor `.pi/settings.json` of the physical target path — excluding the target
+  # itself, stopping before $HOME and before `/`, at most 64 levels (past that, or on a
+  # non-absolute path: overridden) —
+  # gets the same allowlist check. Conservative: `projectRootResolution` is not allowlisted,
+  # so any redirecting ancestor fails closed, and a redirect target that is itself an
+  # ancestor is checked too; the cost is that a harmful-looking ancestor file pi would never
+  # read for this target also reads unstamped.
   pi_builder_overridden() {
     _pbo_bm="$(resolve_model pi builder)"; _pbo_hm="$(resolve_model pi builder-heavy)"
     _pbo_bt="$(resolve_pi_thinking builder)"; _pbo_ht="$(resolve_pi_thinking builder-heavy)"
-    for _pbo_f in "$TARGET/.pi/settings.json" "${HOME:+$HOME/.pi/agent/settings.json}"; do
-      [ -n "$_pbo_f" ] || continue
-      [ -e "$_pbo_f" ] || [ -L "$_pbo_f" ] || continue
-      case "$_pbo_f" in "$TARGET"/*) [ -L "$_pbo_f" ] && return 0 ;; esac
-      { [ -f "$_pbo_f" ] && [ -r "$_pbo_f" ]; } || return 0
-      _pbo_rc=2
-      if command -v python3 >/dev/null 2>&1; then
-        _pbo_rc=0
-        python3 -I - "$_pbo_f" "$_pbo_bm" "$_pbo_hm" "$_pbo_bt" "$_pbo_ht" <<'PYPBO' >/dev/null 2>&1 || _pbo_rc=$?
+    pi_settings_file_overridden "$TARGET/.pi/settings.json" 1 && return 0
+    _pbo_ud="$(pi_user_agent_dir)"
+    if [ -n "$_pbo_ud" ]; then
+      pi_settings_file_overridden "$_pbo_ud/settings.json" 0 && return 0
+    fi
+    _pbo_d="$(_prompt_owner_id)"; _pbo_h="${HOME:-}"; _pbo_h="${_pbo_h%/}"; _pbo_n=0
+    case "$_pbo_d" in /*) ;; *) return 0 ;; esac
+    while :; do
+      _pbo_d="${_pbo_d%/*}"
+      [ -n "$_pbo_d" ] || break
+      if [ -n "$_pbo_h" ] && [ "$_pbo_d" = "$_pbo_h" ]; then break; fi
+      [ "$_pbo_n" -lt 64 ] || return 0
+      pi_settings_file_overridden "$_pbo_d/.pi/settings.json" 0 && return 0
+      _pbo_n=$((_pbo_n + 1))
+    done
+    return 1
+  }
+
+  # pi_user_agent_dir — the pi user agent dir, resolved as pi 1.2.0 / pi-subagents 0.78.0
+  # getAgentDir do: `$PI_CODING_AGENT_DIR` unset or empty → `$HOME/.pi/agent`; exactly `~` →
+  # `$HOME`; `~/<rest>` → `$HOME/<rest>`; anything else as-is (a relative value is relative to
+  # the installer's cwd). Prints nothing when the result needs an unset HOME.
+  pi_user_agent_dir() {
+    case "${PI_CODING_AGENT_DIR:-}" in
+      '') [ -z "${HOME:-}" ] || printf '%s\n' "$HOME/.pi/agent" ;;
+      '~') [ -z "${HOME:-}" ] || printf '%s\n' "$HOME" ;;
+      '~/'*) [ -z "${HOME:-}" ] || printf '%s\n' "$HOME/${PI_CODING_AGENT_DIR#\~/}" ;;
+      *) printf '%s\n' "$PI_CODING_AGENT_DIR" ;;
+    esac
+    return 0
+  }
+
+  # pi_settings_file_overridden <file> <strict> — the per-file allowlist check behind
+  # pi_builder_overridden (uses its _pbo_* resolved stamps). 0 = overridden, 1 = fine or
+  # absent. <strict>=1 (the project file) also treats a symlink as overridden.
+  pi_settings_file_overridden() {
+    _pbo_f="$1"
+    [ -e "$_pbo_f" ] || [ -L "$_pbo_f" ] || return 1
+    if [ "$2" = 1 ] && [ -L "$_pbo_f" ]; then return 0; fi
+    { [ -f "$_pbo_f" ] && [ -r "$_pbo_f" ]; } || return 0
+    _pbo_rc=2
+    if command -v python3 >/dev/null 2>&1; then
+      _pbo_rc=0
+      python3 -I - "$_pbo_f" "$_pbo_bm" "$_pbo_hm" "$_pbo_bt" "$_pbo_ht" <<'PYPBO' >/dev/null 2>&1 || _pbo_rc=$?
 import json, sys
 f, bm, hm, bt, ht = sys.argv[1:6]
 with open(f, encoding="utf-8") as fh:
@@ -5092,14 +5145,13 @@ if "agentOverridesByProvider" in s:
         sys.exit(10)
 sys.exit(11)
 PYPBO
-      fi
-      case "$_pbo_rc" in
-        10) return 0 ;;
-        11) ;;
-        *) grep -q 'subagents' "$_pbo_f" 2>/dev/null && return 0
-           [ -r "$_pbo_f" ] || return 0 ;;
-      esac
-    done
+    fi
+    case "$_pbo_rc" in
+      10) return 0 ;;
+      11) ;;
+      *) grep -q 'subagents' "$_pbo_f" 2>/dev/null && return 0
+         [ -r "$_pbo_f" ] || return 0 ;;
+    esac
     return 1
   }
 
