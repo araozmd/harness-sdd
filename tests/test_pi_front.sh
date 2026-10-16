@@ -543,6 +543,36 @@ pi=raise" ] || fail "R11: a pi-only tiered target did not arm on thinking: $(cat
   _ov malformed unstamped
   printf '%s\n' '{"subagents":{"agentOverrides":{}}}' > "$_ps"
   _ov empty raise
+  # `subagents` is an ALLOWLIST of known-harmless keys (Codex #4296205717): every other key,
+  # a provider-scoped override on either role, or a non-object shape fails closed.
+  printf '%s\n' '{"subagents":{"agentOverridesByProvider":{"anthropic":{"builder-heavy":{"model":"x/y"}}}}}' > "$_ps"
+  _ov byprovider-heavy unstamped
+  printf '%s\n' '{"subagents":{"agentOverridesByProvider":{"anthropic":{"scout":{"model":"x/y"}}}}}' > "$_ps"
+  _ov byprovider-scout raise
+  printf '%s\n' '{"subagents":{"maxThinking":"xhigh"}}' > "$_ps"; _ov maxThinking unstamped
+  printf '%s\n' '{"subagents":{"disableThinking":true}}' > "$_ps"; _ov disableThinking unstamped
+  printf '%s\n' '{"subagents":{"modelScope":{"enforce":true,"allow":["inherit"]}}}' > "$_ps"
+  _ov modelScope unstamped
+  printf '%s\n' '{"subagents":{"futureKnob":1}}' > "$_ps"; _ov unknown-key unstamped
+  # Neither role stamps a model and both stamp thinking here, so both defaults land alike.
+  printf '%s\n' '{"subagents":{"defaultModel":"x/y","defaultThinking":"low"}}' > "$_ps"
+  _ov defaults raise
+  printf '%s\n' '{"theme":"x"}' > "$_ps"; _ov non-subagents raise
+  printf '%s\n' '{"subagents":[]}' > "$_ps"; _ov subagents-array unstamped
+  printf '%s\n' '{"subagents":{"agentOverridesByProvider":{"p":3}}}' > "$_ps"
+  _ov byprovider-scalar unstamped
+  printf '%s\n' '{"subagents":{"maxThinking":' > "$_ps"; _ov malformed-subagents unstamped
+  # builder omits `thinking:` while builder-heavy stamps it: defaultThinking would fill only
+  # builder and could equalize the pair, so it no longer counts as harmless.
+  sed 's|^  builder: .*|  builder: inherit|' "$_c/.harness/harness.config.yaml" > "$_c/c.t" \
+    && mv "$_c/c.t" "$_c/.harness/harness.config.yaml"
+  printf '%s\n' '{"subagents":{"defaultThinking":"high"}}' > "$_ps"
+  _ov asymmetric-defaultThinking unstamped
+  # Same for the model axis: only builder-heavy pins one, so defaultModel fills builder alone.
+  awk '{print} /^models:/{print "  pin.pi.reasoning: x/heavy"}' "$_c/.harness/harness.config.yaml" > "$_c/c.t" \
+    && mv "$_c/c.t" "$_c/.harness/harness.config.yaml"
+  printf '%s\n' '{"subagents":{"defaultModel":"x/heavy"}}' > "$_ps"
+  _ov asymmetric-defaultModel unstamped
   rm -f "$_ps" "$_us"
   pass "pi is included in the escalation-arming file and its verdict (E35-F03 R9)"
 }

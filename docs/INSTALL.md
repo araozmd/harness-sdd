@@ -1040,11 +1040,17 @@ Selecting `pi` stamps two optional lines into each `.pi/agents/<role>.md`, right
 - **Escalation.** pi arms on a `thinking` difference alone (`builder: standard` /
   `builder-heavy: reasoning`), like Codex effort; the `.escalation-arming` file gains a
   `pi=<verdict>` line, and `pi=unstamped` means `.pi/agents/builder*.md` was edited, is a
-  symlink or missing, or `.pi/agents` is a symlink or not a directory — or that a
-  `pi-subagents` settings override (`subagents.agentOverrides` in `.pi/settings.json` or
-  `~/.pi/agent/settings.json`) names `builder` or `builder-heavy`, since an override replaces
-  the generated frontmatter. The installer only reads those files; an unreadable or
-  unparsable one that mentions `agentOverrides` also reads `unstamped`.
+  symlink or missing, or `.pi/agents` is a symlink or not a directory — or that the
+  `pi-subagents` `subagents` settings in `.pi/settings.json` or `~/.pi/agent/settings.json`
+  go beyond an allowlist of known-harmless keys: `defaultProvider`, `defaultExtensions`,
+  `defaultSubagentOnlyExtensions`; `defaultModel`/`defaultThinking` only while both roles
+  stamp that field or both omit it (they fill only a role lacking it); and
+  `agentOverrides`/`agentOverridesByProvider.<provider>` objects that name neither
+  `builder` nor `builder-heavy` (an entry replaces the generated frontmatter). Anything else
+  — `maxThinking`, `disableThinking`, `modelScope`, a non-object `subagents`, any unknown
+  key — reads `unstamped`. Other top-level pi keys are ignored. The installer only reads
+  those files; an unreadable or unparsable one that mentions `subagents` also reads
+  `unstamped`.
 
 ### Codex reasoning effort — `model_reasoning_effort` (E99-F161)
 

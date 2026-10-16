@@ -4492,10 +4492,13 @@ MODEL ROUTING:
                                  \`unstamped\` means the installer DECLINED to rewrite that
                                  front-end's live artifact (edited opencode.json, foreign or
                                  symlinked .codex/agents/builder*.toml, or an edited or
-                                 symlinked .pi/agents/builder*.md), or that a pi-subagents
-                                 settings override (.pi/settings.json or
-                                 ~/.pi/agent/settings.json subagents.agentOverrides) names
-                                 builder or builder-heavy, so the resolved stamp
+                                 symlinked .pi/agents/builder*.md), or that the pi-subagents
+                                 \`subagents\` settings (.pi/settings.json or
+                                 ~/.pi/agent/settings.json) are not limited to an allowlist
+                                 of known-harmless keys — e.g. an agentOverrides or
+                                 agentOverridesByProvider entry naming builder or
+                                 builder-heavy, maxThinking, disableThinking, modelScope or
+                                 any unknown key — so the resolved stamp
                                  is not the one it will run.
                                  ABSENT means escalation is OFF — either this
                                  installer has not run here, or no role resolves on either axis.
@@ -5028,15 +5031,30 @@ EOF
     if pi_builder_overridden; then mark_unstamped pi; fi
   }
 
-  # pi_builder_overridden — true when a pi-subagents settings override (v0.78.0
-  # `subagents.agentOverrides`, which REPLACES frontmatter fields such as model/thinking/
-  # disabled) names `builder` or `builder-heavy` in the project `.pi/settings.json` or the
-  # user `~/.pi/agent/settings.json` (Codex #4278450847). ANY such entry disqualifies: the
+  # pi_builder_overridden — true when pi-subagents (v0.78.0) settings could change what
+  # `builder`/`builder-heavy` actually run, in the project `.pi/settings.json` or the user
+  # `~/.pi/agent/settings.json` (Codex #4278450847, #4296205717). An ALLOWLIST, so an unknown
+  # or future key fails closed instead of costing a review round each: only the top-level
+  # `subagents` object is inspected (other pi keys are ignored); absent is fine, a non-object
+  # is overridden, and its keys must all be known-harmless:
+  #   defaultProvider, defaultExtensions, defaultSubagentOnlyExtensions — resolve bare ids
+  #     (our pi pins are always provider/id) or fill a field neither role file sets, so they
+  #     land on both roles alike and touch neither model nor thinking;
+  #   defaultModel / defaultThinking — fill ONLY a role lacking that frontmatter key, so they
+  #     are harmless only while both roles stamp it or both omit it; when exactly one omits it
+  #     the default can equalize the pair, and the key counts as overridden;
+  #   agentOverrides — an object naming neither role (an entry REPLACES frontmatter fields);
+  #   agentOverridesByProvider — an object whose every value is such an object (it layers
+  #     over agentOverrides for the active parent provider).
+  # Anything else — maxThinking (a ceiling that fails the launch), disableThinking,
+  # modelScope (can reject builder-heavy's model), an unknown key — is overridden. The
   # effective config is not computed. READ-ONLY — `~/.pi/agent` is never written (ADR-0007).
   # Fails CLOSED: a non-regular or unreadable file, a symlinked project file, or an
-  # unparsable file that mentions `agentOverrides` all count as overridden. The user file
-  # may be read through a symlink (a dangling one is non-regular, so overridden).
+  # unparsable file (or no python3) that mentions `subagents` all count as overridden. The
+  # user file may be read through a symlink (a dangling one is non-regular, so overridden).
   pi_builder_overridden() {
+    _pbo_bm="$(resolve_model pi builder)"; _pbo_hm="$(resolve_model pi builder-heavy)"
+    _pbo_bt="$(resolve_pi_thinking builder)"; _pbo_ht="$(resolve_pi_thinking builder-heavy)"
     for _pbo_f in "$TARGET/.pi/settings.json" "${HOME:+$HOME/.pi/agent/settings.json}"; do
       [ -n "$_pbo_f" ] || continue
       [ -e "$_pbo_f" ] || [ -L "$_pbo_f" ] || continue
@@ -5045,23 +5063,40 @@ EOF
       _pbo_rc=2
       if command -v python3 >/dev/null 2>&1; then
         _pbo_rc=0
-        python3 -I - "$_pbo_f" <<'PYPBO' >/dev/null 2>&1 || _pbo_rc=$?
+        python3 -I - "$_pbo_f" "$_pbo_bm" "$_pbo_hm" "$_pbo_bt" "$_pbo_ht" <<'PYPBO' >/dev/null 2>&1 || _pbo_rc=$?
 import json, sys
-with open(sys.argv[1], encoding="utf-8") as fh:
+f, bm, hm, bt, ht = sys.argv[1:6]
+with open(f, encoding="utf-8") as fh:
     d = json.load(fh)
-s = d.get("subagents") if isinstance(d, dict) else None
-ao = s.get("agentOverrides") if isinstance(s, dict) else None
-if ao is None:
+if not isinstance(d, dict) or "subagents" not in d:
     sys.exit(11)
-if not isinstance(ao, dict) or "builder" in ao or "builder-heavy" in ao:
+s = d["subagents"]
+if not isinstance(s, dict):
     sys.exit(10)
+ROLES = ("builder", "builder-heavy")
+ALLOWED = {"defaultModel", "defaultProvider", "defaultThinking", "defaultExtensions",
+           "defaultSubagentOnlyExtensions", "agentOverrides", "agentOverridesByProvider"}
+if any(k not in ALLOWED for k in s):
+    sys.exit(10)
+if "defaultModel" in s and bool(bm) != bool(hm):
+    sys.exit(10)
+if "defaultThinking" in s and bool(bt) != bool(ht):
+    sys.exit(10)
+def names_role(o):
+    return not isinstance(o, dict) or any(r in o for r in ROLES)
+if "agentOverrides" in s and names_role(s["agentOverrides"]):
+    sys.exit(10)
+if "agentOverridesByProvider" in s:
+    bp = s["agentOverridesByProvider"]
+    if not isinstance(bp, dict) or any(names_role(v) for v in bp.values()):
+        sys.exit(10)
 sys.exit(11)
 PYPBO
       fi
       case "$_pbo_rc" in
         10) return 0 ;;
         11) ;;
-        *) grep -q 'agentOverrides' "$_pbo_f" 2>/dev/null && return 0
+        *) grep -q 'subagents' "$_pbo_f" 2>/dev/null && return 0
            [ -r "$_pbo_f" ] || return 0 ;;
       esac
     done
