@@ -539,7 +539,20 @@ pi=raise" ] || fail "R11: a pi-only tiered target did not arm on thinking: $(cat
   printf '%s\n' '{"subagents":{"agentOverrides":{"scout":{}}}}' > "$_ps"; _ov unrelated-scout unstamped
   printf '%s\n' '{"subagents":[]}' > "$_ps"; _ov subagents-array unstamped
   printf '%s\n' '{"subagents":{"maxThinking":' > "$_ps"; _ov malformed-subagents unstamped
-  printf '%s\n' '{"theme":' > "$_ps"; _ov malformed-other raise
+  # A file pi-subagents cannot read (Node JSON.parse, object required) rejects every launch.
+  printf '%s\n' '{"theme":' > "$_ps"; _ov malformed-other unstamped
+  printf '%s\n' '[]' > "$_ps"; _ov top-level-array unstamped
+  printf '%s\n' '{"x":NaN}' > "$_ps"; _ov nan unstamped
+  printf '\357\273\277{"theme":"x"}\n' > "$_ps"; _ov bom unstamped
+  # The project file is never read through a symlink, even to a harmless object.
+  rm -f "$_ps"; printf '%s\n' '{"theme":1}' > "$T/theme.json"; ln -s "$T/theme.json" "$_ps"
+  _ov project-symlink unstamped
+  rm -f "$_ps" "$T/theme.json"
+  # No HOME and PI_CODING_AGENT_DIR unset: the user agent dir cannot be resolved.
+  env -i PATH="$SANDBOX_PATH" CODEX_HOME="$T/ch" sh "$INST" --agents=pi "$_c" </dev/null >"$OUT" 2>&1 \
+    || { cat "$OUT" >&2; fail "setup: the no-HOME install exited non-zero"; }
+  [ "$(cat "$_c/.harness/.escalation-arming")" = "blocked
+pi=unstamped" ] || fail "R11ov(no-home): expected blocked/pi=unstamped: $(cat "$_c/.harness/.escalation-arming")"
   # The user file follows PI_CODING_AGENT_DIR as pi resolves it (a relative value is
   # unknowable here), and ancestor project settings are checked up to (not including) HOME.
   rm -f "$_ps"; _sa='{"subagents":{}}'

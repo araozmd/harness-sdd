@@ -4495,9 +4495,12 @@ MODEL ROUTING:
                                  symlinked .pi/agents/builder*.md), or that pi-subagents
                                  settings are configured — any top-level \`subagents\` key,
                                  whatever its value, in .pi/settings.json, an ancestor
-                                 .pi/settings.json below HOME, or the user
-                                 <agent dir>/settings.json — or that a relative
-                                 PI_CODING_AGENT_DIR leaves the user file unknowable — so
+                                 .pi/settings.json (below HOME, or up to / for a target
+                                 outside HOME), or the user <agent dir>/settings.json —
+                                 or that one of those files is unreadable, unparsable or
+                                 not a JSON object (pi-subagents rejects every launch on
+                                 it), or that a relative PI_CODING_AGENT_DIR leaves the
+                                 user file unknowable — so
                                  the resolved stamp is not the one it will run (or may not
                                  be: pi-subagents settings are not inspected key by key).
                                  ABSENT means escalation is OFF — either this
@@ -5037,23 +5040,29 @@ EOF
   # versioned, and any `subagents` entry can change a role's model, thinking, tools or
   # disabled state, or make pi-subagents reject the launch outright — so the installer does
   # not inspect keys or values. ANY in-scope settings file with a top-level `subagents` key,
-  # whatever its value (a non-object too), reads overridden; a file without one (e.g.
-  # `{"theme":"x"}`) has no effect. The `tools/pi-dispatch.sh` fallback ignores pi-subagents
-  # settings and still honours the stamped escalation; only auto-arming on pi is disarmed.
+  # whatever its value (a non-object too), reads overridden; a readable JSON object without
+  # one (e.g. `{"theme":"x"}`) has no effect. An unreadable, unparsable or non-object file
+  # disarms too: pi-subagents 0.78.0 (readSettingsFileStrict) rejects every launch on it.
+  # Parsing matches Node's JSON.parse, not Python's: a leading UTF-8 BOM (readFileSync
+  # "utf-8" keeps it, JSON.parse rejects it) and NaN/Infinity fail, as does invalid UTF-8
+  # (Node would decode it lossily — conservative). The `tools/pi-dispatch.sh` fallback
+  # ignores pi-subagents settings and still honours the stamped escalation; only
+  # auto-arming on pi is disarmed.
   #
   # In-scope files: the project `.pi/settings.json` (a symlink there is overridden); the user
   # `<agent dir>/settings.json` (`pi_user_agent_dir`); and every ANCESTOR `.pi/settings.json`
-  # of the physical target path — excluding the target itself, stopping before $HOME and
-  # before `/`, at most 64 levels (past that, or on a non-absolute path: overridden). The
-  # ancestor walk stands in for pi-subagents' findConfiguredProjectRoot (cwd upward, stopping
-  # at $HOME) and any `projectRootResolution` redirect. The user and ancestor files may be
-  # read through a symlink. A user agent dir that cannot be resolved here — unset HOME, or a
-  # RELATIVE `$PI_CODING_AGENT_DIR`, which pi resolves against its own launch cwd, not the
+  # of the physical target path — excluding the target itself, stopping before $HOME (or
+  # before `/` when the target is outside HOME), at most 64 levels (past that, or on a
+  # non-absolute path: overridden). The ancestor walk stands in for pi-subagents'
+  # findConfiguredProjectRoot (cwd upward, stopping at $HOME) and any `projectRootResolution`
+  # redirect. The user and ancestor files may be read through a symlink. A user agent dir
+  # that cannot be resolved here — the default or a `~` form with HOME unset, or a RELATIVE
+  # `$PI_CODING_AGENT_DIR`, which pi resolves against its own launch cwd, not the
   # installer's — reads overridden. The verdict is an INSTALL-TIME SNAPSHOT taken in the
   # installer's environment; a later settings edit or a pi session launched with a different
   # environment is not seen until the next install. READ-ONLY — no settings file is ever
-  # written (ADR-0007). Fails CLOSED: a non-regular or unreadable file, or an unparsable file
-  # (or no python3) whose text mentions `subagents`, counts as overridden.
+  # written (ADR-0007). Fails CLOSED: a non-regular, unreadable, unparsable or non-object
+  # file counts as overridden; without python3, any file whose text mentions `subagents`.
   pi_builder_overridden() {
     pi_settings_file_overridden "$TARGET/.pi/settings.json" 1 && return 0
     _pbo_ud="$(pi_user_agent_dir)"
@@ -5089,30 +5098,34 @@ EOF
   }
 
   # pi_settings_file_overridden <file> <strict> — the per-file check behind
-  # pi_builder_overridden: does the file have a top-level `subagents` key? 0 = overridden,
-  # 1 = fine or absent. <strict>=1 (the project file) also treats a symlink as overridden.
+  # pi_builder_overridden: is the file anything but a Node-parsable JSON object without a
+  # top-level `subagents` key? 0 = overridden, 1 = fine or absent. <strict>=1 (the project file) also treats a symlink as overridden.
   pi_settings_file_overridden() {
     _pbo_f="$1"
     [ -e "$_pbo_f" ] || [ -L "$_pbo_f" ] || return 1
     if [ "$2" = 1 ] && [ -L "$_pbo_f" ]; then return 0; fi
     { [ -f "$_pbo_f" ] && [ -r "$_pbo_f" ]; } || return 0
-    _pbo_rc=2
-    if command -v python3 >/dev/null 2>&1; then
-      _pbo_rc=0
-      python3 -I - "$_pbo_f" <<'PYPBO' >/dev/null 2>&1 || _pbo_rc=$?
-import json, sys
-with open(sys.argv[1], encoding="utf-8") as fh:
-    d = json.load(fh)
-sys.exit(10 if isinstance(d, dict) and "subagents" in d else 11)
-PYPBO
+    if ! command -v python3 >/dev/null 2>&1; then
+      grep -q 'subagents' "$_pbo_f" 2>/dev/null && return 0
+      [ -r "$_pbo_f" ] || return 0
+      return 1
     fi
-    case "$_pbo_rc" in
-      10) return 0 ;;
-      11) ;;
-      *) grep -q 'subagents' "$_pbo_f" 2>/dev/null && return 0
-         [ -r "$_pbo_f" ] || return 0 ;;
-    esac
-    return 1
+    # rc 11 (a parsable object, no `subagents`) is the ONLY fine outcome; anything else —
+    # 10, a parse error, a decode error, a crash — is overridden.
+    _pbo_rc=0
+    python3 -I - "$_pbo_f" <<'PYPBO' >/dev/null 2>&1 || _pbo_rc=$?
+import json, sys
+def no_constant(c):
+    raise ValueError(c)
+with open(sys.argv[1], "rb") as fh:
+    b = fh.read()
+if b.startswith(b"\xef\xbb\xbf"):
+    sys.exit(10)
+d = json.loads(b.decode("utf-8"), parse_constant=no_constant)
+sys.exit(10 if not isinstance(d, dict) or "subagents" in d else 11)
+PYPBO
+    [ "$_pbo_rc" = 11 ] && return 1
+    return 0
   }
 
   # write_escalation_arming — record, for the front-ends selected on THIS run, whether

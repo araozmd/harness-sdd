@@ -1043,20 +1043,22 @@ Selecting `pi` stamps two optional lines into each `.pi/agents/<role>.md`, right
   symlink or missing, or `.pi/agents` is a symlink or not a directory — or that
   `pi-subagents` settings are configured at all. Configuring `pi-subagents` settings
   disarms auto-armed `builder-heavy` on pi: any top-level `subagents` key, whatever its
-  value, in `.pi/settings.json`, in any ancestor directory's `.pi/settings.json` below
-  `$HOME`, or in the user `settings.json` (`$PI_CODING_AGENT_DIR/settings.json` when that
+  value, in `.pi/settings.json`, in any ancestor directory's `.pi/settings.json` (the walk
+  stops before `$HOME`, or at `/` when the target is outside HOME), or in the user `settings.json` (`$PI_CODING_AGENT_DIR/settings.json` when that
   is set to an absolute path, `~` or `~/…`, else `~/.pi/agent/settings.json`) reads
   `unstamped`. The rule is blunt on purpose: the `pi-subagents` settings surface is large
   and versioned, and any `subagents` entry can change a role's model, thinking, tools or
   disabled state, or reject the launch, so the installer does not inspect keys or values.
-  Settings files without a `subagents` key have no effect. A relative
+  A readable JSON object without a `subagents` key has no effect; an unreadable,
+  unparsable or non-object settings file disarms, because `pi-subagents` rejects every
+  launch on it (its parse matches Node's `JSON.parse`, so a leading UTF-8 BOM or `NaN`
+  counts as unparsable). A relative
   `PI_CODING_AGENT_DIR` also reads `unstamped` (pi resolves it against its own launch cwd,
   which the installer cannot know). This is warn-only — the installer prints an
   `escalation NOT armed` notice and still succeeds — and the `.harness/tools/pi-dispatch.sh`
   path is unaffected: it ignores `pi-subagents` settings and still honours the stamped
-  escalation. The installer only reads those files;
-  an unreadable one, or an unparsable one that mentions `subagents`, also reads
-  `unstamped`. Ancestors are checked because `pi-subagents` can redirect project settings
+  escalation. The installer only reads those files. Without `python3` it cannot parse
+  them, so any file whose text mentions `subagents` reads `unstamped`. Ancestors are checked because `pi-subagents` can redirect project settings
   (`projectRootResolution`) to an ancestor; checking all of them is deliberately
   conservative. The verdict is an install-time snapshot, taken in the installer's
   environment (`HOME`, `PI_CODING_AGENT_DIR`, cwd): re-run the installer after changing

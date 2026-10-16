@@ -19,10 +19,12 @@ All notable changes to the harness body are recorded here. Versions follow
   edited `.pi/agents/builder*.md`) and arms on a `thinking` difference alone. Supersedes
   E35-F01 R11. The repository's root `.escalation-arming` gains `pi=neither`.
 - `pi=unstamped` also covers configured `pi-subagents` settings: any top-level `subagents`
-  key, whatever its value, in `.pi/settings.json`, any ancestor `.pi/settings.json` below
-  `$HOME`, or `$PI_CODING_AGENT_DIR/settings.json` (else `~/.pi/agent/settings.json`), plus
-  a relative `PI_CODING_AGENT_DIR` and an unparsable file that mentions `subagents`
-  (read-only, an install-time snapshot, warn-only). No keys or values are inspected; the
+  key, whatever its value, in `.pi/settings.json`, any ancestor `.pi/settings.json` (the
+  walk stops before `$HOME`, or at `/` when the target is outside HOME), or
+  `$PI_CODING_AGENT_DIR/settings.json` (else `~/.pi/agent/settings.json`), plus a relative
+  `PI_CODING_AGENT_DIR` and an unreadable, unparsable or non-object settings file, which
+  `pi-subagents` rejects on every launch (read-only, an install-time snapshot, warn-only).
+  A readable JSON object without a `subagents` key has no effect. No keys or values are inspected; the
   `tools/pi-dispatch.sh` fallback ignores those settings and still honours the escalation.
 
 ## [0.93.0] — 2026-10-13
