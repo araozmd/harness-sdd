@@ -853,7 +853,7 @@ Notes that matter in practice:
 - **The installer computes the verdict; you do not have to.** `harness-install.sh` asks its
   own model resolver what `builder` and `builder-heavy` resolve to on every front-end it
   stamps, and records the comparison. `armed` means `builder-heavy` resolves to a **different
-  resolved stamp** — the `model` plus, on Codex, `model_reasoning_effort` (E99-F163) — on
+  resolved stamp** — the `model` plus, on Codex, `model_reasoning_effort` (E99-F163) and, on pi, `thinking` (E35-F03) — on
   every selected front-end. Anything else is `blocked`, and the file names the
   front-end that blocked it:
 
@@ -877,13 +877,18 @@ Notes that matter in practice:
   stamps NO `model` but, since E99-F161, DOES stamp `model_reasoning_effort`, and since
   E99-F163 the verdict compares the whole resolved stamp (`model` plus effort) — so an effort
   difference alone arms without any `model` pin, and a pin is needed only for distinct `model`
-  ids. See `docs/INSTALL.md`'s "Codex reasoning effort" section.
+  ids. See `docs/INSTALL.md`'s "Codex reasoning effort" section. On `pi` the same shape
+  holds (E35-F03): a tier alone stamps NO `model` (pi has no floating alias) but DOES stamp a
+  `thinking:` level on the role file, so a `thinking` difference alone arms, and a
+  `pin.pi.<tier>` (`provider/id`) is needed only for distinct models. A fifth-verdict
+  `unstamped` also covers an edited or symlinked `.pi/agents/builder*.md`.
   The verdict is computed at **install time**, so re-run the installer after changing any of
   it.
 - **The verdict is a conservative AND across selected front-ends.** The rule cannot know
   which front-end it is running under, so one misconfigured front-end disables escalation
   everywhere. That never downgrades anyone, and the `blocked` line tells you which one to fix.
-  Source `--self` defaults to Claude + Codex: inherited Codex makes the combined
+  Source `--self` defaults to `claude,codex,opencode,pi` (the root `.escalation-arming` ends in
+  `pi=neither`): inherited Codex makes the combined
   verdict **UNARMED** even when Claude alone is armed. Explicit
   `--self --agents=claude` retains the Claude-only verdict; model choices remain
   in each host’s source role files and are preserved on regeneration.

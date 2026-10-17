@@ -193,7 +193,7 @@ allowNestedSubagents: true"; fi
 $_exp
 --- got
 $_got"
-    if grep -qE '^(model|thinking):' "$FRESH/$_r.md"; then fail "R1: $_r carries a model:/thinking: line (E35-F03's job)"; fi
+    if grep -qE '^(model|thinking):' "$FRESH/$_r.md"; then fail "R1: $_r carries a model:/thinking: line in an all-inherit install"; fi
   done
   # a re-install is byte-idempotent (role files AND stamps)
   _t="$(new_target r1i)"; cp -a "$T/base-true/." "$_t/"
@@ -201,7 +201,7 @@ $_got"
   ok_inst --agents=pi --pr-loop=true "$_t"
   [ "$(cd "$_t" && cksum .pi/agents/*.md .harness/.pi-agents/*.md)" = "$_b" ] || fail "R1: a re-install changed the role files or stamps"
   for _r in $ROLES8; do cmp -s "$_t/.pi/agents/$_r.md" "$_t/.harness/.pi-agents/$_r.md" || fail "R1: stamp != live for $_r"; done
-  pass "pi role files: exact set, exact frontmatter, no model/thinking, idempotent (R1)"
+  pass "pi role files: exact set, exact frontmatter, no model/thinking in the all-inherit install, idempotent (R1)"
 }
 
 # ── R2 ─────────────────────────────────────────────────────────────────────────────────────
@@ -1103,6 +1103,366 @@ test_pi_dispatch_prose_and_docs() {
   pass "Orchestrator paragraph placement, sdd-next line, manifest text and the five docs (R12)"
 }
 
+# ── E35-F03: the hostile-pin table (ONE copy per suite; the plan's rows 1-35) ─────────────
+# Fields: row-id <TAB> yaml-rhs <TAB> value-read <TAB> installer-verdict <TAB> dispatcher
+# (no thinking:) <TAB> dispatcher (thinking: high). Both value fields are expanded with
+# printf '%b' (bytes a here-doc cannot hold: UTF-8, ESC, TAB, newline, a literal backslash-n
+# written as two backslashes). Rows 36-38 fail charset/length WITHOUT a slash, so they pin the
+# check ORDER (charset and length before form: a form verdict would echo the value). @EMPTY@ is the empty value (IFS-tab would drop the field);
+# @256@ / @257@ are a valid-charset id of exactly 256 / 257 bytes. A dash in a dispatcher
+# column means the row cannot reach a role file.
+TAB="$(printf '\t')"
+pin_rows() { cat <<'PINROWS'
+1	""	@EMPTY@	absent	—	—
+2	"anthropic/claude-sonnet-4-5"	anthropic/claude-sonnet-4-5	ok	pass	pass
+3	"openrouter/meta-llama/llama-3.1-8b-instruct:free"	openrouter/meta-llama/llama-3.1-8b-instruct:free	ok	pass	pass
+4	"amazon-bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0"	amazon-bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0	ok	pass	pass
+5	"openrouter/anthropic/claude-3.7-sonnet:thinking"	openrouter/anthropic/claude-3.7-sonnet:thinking	ok	pass	pass
+6	"google-vertex/claude-sonnet-4@20250514"	google-vertex/claude-sonnet-4@20250514	ok	pass	pass
+7	"Prov/id:HIGH"	Prov/id:HIGH	ok	pass	pass
+8	'anthropic/claude-opus-4'	anthropic/claude-opus-4	ok	pass	pass
+9	anthropic/claude-opus-4  # note	anthropic/claude-opus-4	ok	pass	pass
+10	@256@	@256@	ok	pass	pass
+11	@257@	@257@	length	3	3
+12	"claude-sonnet"	claude-sonnet	form	pass	pass
+13	"/claude"	/claude	form	pass	pass
+14	"anthropic/"	anthropic/	form	pass	pass
+15	"anthropic//claude"	anthropic//claude	form	pass	pass
+16	"anthropic/claude/"	anthropic/claude/	form	pass	pass
+17	"anthropic/claude:"	anthropic/claude:	form	pass	pass
+18	"-x/claude"	-x/claude	form	3	3
+19	".hidden/claude"	.hidden/claude	form	pass	pass
+20	"anthropic/claude:high"	anthropic/claude:high	suffix	pass	3
+21	"anthropic/claude:high:low"	anthropic/claude:high:low	suffix	pass	3
+22	"anthropic/claude:max"	anthropic/claude:max	suffix	pass	3
+23	"anthropic/claude sonnet"	anthropic/claude sonnet	charset	3	3
+24	anthropic/claude   	anthropic/claude   	charset	3	3
+25	"a/b;rm -rf ~"	a/b;rm -rf ~	charset	3	3
+26	"a/$(id)"	a/$(id)	charset	3	3
+27	"a/b`id`"	a/b`id`	charset	3	3
+28	"a/b\\nc"	a/b\\nc	charset	3	3
+29	"a/b|c"	a/b|c	charset	3	3
+30	"a/b'c"	a/b'c	charset	3	3
+31	"a/b\0303\0251"	a/b\0303\0251	charset	3	3
+32	"a/b\0033[31m"	a/b\0033[31m	charset	3	3
+33	"a/b\0011c"	a/b\0011c	charset	3	3
+34	inherit	inherit	inherit	—	—
+35	"a/b\n    c"	a/b	ok	pass	pass
+36	"qz\0033[2Jx"	qz\0033[2Jx	charset	3	3
+37	"zq zq"	zq zq	charset	3	3
+38	@257N@	@257N@	length	3	3
+PINROWS
+}
+# expand_pin <field> — decode one table value field into the real bytes.
+expand_pin() {
+  case "$1" in
+    @EMPTY@) return 0 ;;
+    @256@) printf 'p/%0254d' 0; return 0 ;;
+    @257@) printf 'p/%0255d' 0; return 0 ;;
+    @257N@) printf '%0257d' 0 | tr 0 ';'; return 0 ;;
+  esac
+  printf '%b' "$1"
+}
+# load_row <tab-line> — split a table line into R_ID R_RHS R_VAL R_INST R_D1 R_D2 (decoded).
+load_row() {
+  IFS="$TAB" read -r R_ID _r_rhs _r_val R_INST R_D1 R_D2 <<ROWEOF
+$1
+ROWEOF
+  R_RHS="$(expand_pin "$_r_rhs"; printf x)"; R_RHS="${R_RHS%x}"
+  R_VAL="$(expand_pin "$_r_val"; printf x)"; R_VAL="${R_VAL%x}"
+}
+
+# ═══ E35-F03: pi model routing ═══════════════════════════════════════════════════════════
+pa_cfg() { printf '%s\n' "$1/.harness/harness.config.yaml"; }
+# pa_tier <target> <role> <tier> — rewrite one `models.<role>` line.
+pa_tier() {
+  _c="$(pa_cfg "$1")"
+  sed "s/^  $2: .*/  $2: $3/" "$_c" > "$_c.t" && mv "$_c.t" "$_c"
+  grep -q "^  $2: $3\$" "$_c" || fail "setup: could not set models.$2 = $3"
+}
+# pa_pin <target> <front-end> <tier> <raw-rhs> — insert `  pin.<fe>.<tier>: <rhs>` verbatim.
+pa_pin() {
+  _c="$(pa_cfg "$1")"
+  PUT_LINE="  pin.$2.$3: $4" awk '{ print } !d && /^models:[[:space:]]*(#.*)?$/ { print ENVIRON["PUT_LINE"]; d=1 }' \
+    "$_c" > "$_c.t" && mv "$_c.t" "$_c"
+}
+# pa_unpin <target> <front-end> <tier> — delete a pin line again.
+pa_unpin() { _c="$(pa_cfg "$1")"; grep -v "^  pin\.$2\.$3:" "$_c" > "$_c.t" && mv "$_c.t" "$_c"; }
+# fm_keys <file> — the frontmatter key sequence of a role file.
+fm_keys() { awk 'NR==1{next} /^---$/{exit} {sub(/:.*/,""); printf "%s ", $0}' "$1"; }
+# body_of <file> — everything after the closing ---.
+body_of() { awk 'c>=2{print} /^---$/{c++}' "$1"; }
+
+# ── R4: model:/thinking: lines, in order, only when non-empty ────────────────────────────
+test_pi_agent_model_thinking_lines() {
+  mk_bases
+  _t="$(new_target r4)"; ok_inst --agents=pi --pr-loop=true "$_t"
+  pa_tier "$_t" builder standard; pa_pin "$_t" pi standard '"anthropic/claude-sonnet-4-5"'
+  pa_tier "$_t" reviewer reasoning; pa_tier "$_t" orchestrator cheap
+  ok_inst --agents=pi --pr-loop=true "$_t"
+  _base="name description"; _tail="tools systemPromptMode inheritProjectContext inheritSkills"
+  [ "$(fm_keys "$_t/.pi/agents/builder.md")" = "$_base model thinking $_tail " ] || fail "R4a: builder keys: $(fm_keys "$_t/.pi/agents/builder.md")"
+  [ "$(fm_keys "$_t/.pi/agents/reviewer.md")" = "$_base thinking $_tail " ] || fail "R4a: reviewer keys: $(fm_keys "$_t/.pi/agents/reviewer.md")"
+  [ "$(fm_keys "$_t/.pi/agents/scout.md")" = "$_base $_tail " ] || fail "R4a: scout keys: $(fm_keys "$_t/.pi/agents/scout.md")"
+  [ "$(fm_keys "$_t/.pi/agents/orchestrator.md")" = "$_base thinking $_tail allowNestedSubagents " ] \
+    || fail "R4a: orchestrator keys: $(fm_keys "$_t/.pi/agents/orchestrator.md")"
+  [ "$(sed -n 's/^model: //p' "$_t/.pi/agents/builder.md")" = anthropic/claude-sonnet-4-5 ] || fail "R4a: builder model value"
+  [ "$(sed -n 's/^thinking: //p' "$_t/.pi/agents/builder.md")" = medium ] || fail "R4a: builder thinking value"
+  for _r in $ROLES8; do
+    body_of "$_t/.pi/agents/$_r.md" > "$T/r4.b1"; body_of "$FRESH/$_r.md" > "$T/r4.b2"
+    cmp -s "$T/r4.b1" "$T/r4.b2" || fail "R4a: the body of $_r changed with the config"
+  done
+  # (b) an all-inherit install is byte-equal to the frozen E35-F02 output (30fcba3)
+  diff -r "$FRESH" "$SRC/tests/fixtures/pi-agents-f02" >/dev/null \
+    || fail "R4b: an all-inherit install differs from the frozen E35-F02 fixture tests/fixtures/pi-agents-f02"
+  [ "$(ls "$SRC/tests/fixtures/pi-agents-f02" | wc -l | tr -d ' ')" = 8 ] || fail "R4b: the frozen fixture does not hold 8 role files"
+  # (c) a re-install leaves every cksum unchanged
+  _b="$(cd "$_t" && cksum .pi/agents/*.md .harness/.pi-agents/*.md)"
+  ok_inst --agents=pi --pr-loop=true "$_t"
+  [ "$(cd "$_t" && cksum .pi/agents/*.md .harness/.pi-agents/*.md)" = "$_b" ] || fail "R4c: a re-install changed the role files or stamps"
+  # (d) pr-fixer follows models.default
+  _t="$(new_target r4d)"; ok_inst --agents=pi --pr-loop=true "$_t"
+  pa_tier "$_t" default cheap; ok_inst --agents=pi --pr-loop=true "$_t"
+  [ "$(sed -n 's/^thinking: //p' "$_t/.pi/agents/pr-fixer.md")" = low ] || fail "R4d: pr-fixer did not follow models.default"
+  grep -q '^thinking:' "$_t/.pi/agents/builder.md" && fail "R4d: an explicit inherit role followed models.default"
+  pass "model:/thinking: lines: order, presence, frozen F02 baseline, idempotence, pr-fixer default (R4)"
+}
+
+# ── R5: pristine role files restamp on a config change ───────────────────────────────────
+test_pi_agent_restamp_on_config_change() {
+  _t="$(new_target r5)"; ok_inst --agents=pi --pr-loop=true "$_t"
+  _live_eq_stamp() { for _r in $ROLES8; do cmp -s "$_t/.pi/agents/$_r.md" "$_t/.harness/.pi-agents/$_r.md" || fail "R5($1): stamp != live for $_r"; done; }
+  _live_eq_stamp 1
+  pa_tier "$_t" builder standard; pa_pin "$_t" pi standard '"a/one"'
+  ok_inst --agents=pi --pr-loop=true "$_t"
+  [ "$(sed -n 's/^model: //p' "$_t/.pi/agents/builder.md")" = a/one ] || fail "R5(2): F02-era file not restamped with the pin"
+  _live_eq_stamp 2
+  pa_unpin "$_t" pi standard; pa_pin "$_t" pi standard '"b/two"'
+  ok_inst --agents=pi --pr-loop=true "$_t"
+  [ "$(sed -n 's/^model: //p' "$_t/.pi/agents/builder.md")" = b/two ] || fail "R5(3): pin -> different pin not restamped"
+  _live_eq_stamp 3
+  echo "# operator edit" >> "$_t/.pi/agents/reviewer.md"; _edited="$(cksum < "$_t/.pi/agents/reviewer.md")"
+  pa_tier "$_t" reviewer standard
+  pa_unpin "$_t" pi standard; pa_pin "$_t" pi standard '"anthropic/claude:high"'
+  ok_inst --agents=pi --pr-loop=true "$_t"
+  grep -q '^model:' "$_t/.pi/agents/builder.md" && fail "R5(4): an invalid pin left model: in place"
+  [ "$(sed -n 's/^thinking: //p' "$_t/.pi/agents/builder.md")" = medium ] || fail "R5(4): thinking was lost with the invalid pin"
+  [ "$(cksum < "$_t/.pi/agents/reviewer.md")" = "$_edited" ] || fail "R5: an edited role file was rewritten"
+  grep -q 'foreign or edited' "$OUT" || fail "R5: no F02 'foreign or edited' warning for the edited role file"
+  pa_tier "$_t" builder inherit
+  ok_inst --agents=pi --pr-loop=true "$_t"
+  grep -qE '^(model|thinking):' "$_t/.pi/agents/builder.md" && fail "R5(5): inherit did not remove both lines"
+  cmp -s "$_t/.pi/agents/builder.md" "$FRESH/builder.md" || fail "R5(5): builder is not back to the F02 bytes"
+  # deselecting pi removes every pristine file (pr-fixer included) and leaves the edited one
+  ok_inst --agents=claude --pr-loop=true "$_t"
+  [ "$(ls "$_t/.pi/agents" 2>/dev/null | tr '\n' ' ')" = "reviewer.md " ] || fail "R5: deselect left '$(ls "$_t/.pi/agents" 2>/dev/null | tr '\n' ' ')'"
+  pass "pristine role files restamp tier/pin/invalid/inherit; edited stays; deselect reclaims (R5)"
+}
+
+# ── R6: dispatcher parity with the installer's grammar ───────────────────────────────────
+# role_with <target> <model-value|-> <thinking|-> — rewrite reviewer.md from the F02 bytes.
+role_with() {
+  { awk -v m="$2" -v th="$3" 'NR==1{print; next}
+       /^description:/ { print; if (m != "-") print "model: " ENVIRON["PA_MODEL"]; if (th != "-") print "thinking: " th; next } {print}' \
+       "$FRESH/reviewer.md"; } > "$1/.pi/agents/reviewer.md"
+}
+disp_row() { # <target> <model> <thinking|-> <expected pass|3> <label>
+  _log="$T/plog"; rm -rf "$_log"
+  PA_MODEL="$2" role_with "$1" "$2" "$3"
+  _rc=0; run_disp "$1" "$_log" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?
+  case "$4" in
+    pass)
+      [ "$_rc" = 0 ] || fail "R6 $5: expected pass, dispatcher exited $_rc: $(cat "$T/d.err")"
+      [ "$(argv_i "$_log" 4)" = --model ] && [ "$(argv_i "$_log" 5)" = "$2" ] || fail "R6 $5: --model <value> is not argv[4..5]"
+      if [ "$3" != - ]; then
+        [ "$(argv_i "$_log" 6)" = --thinking ] && [ "$(argv_i "$_log" 7)" = "$3" ] && [ "$(argv_i "$_log" 8)" = --tools ] \
+          || fail "R6 $5: --thinking $3 is not argv[6..7] before --tools"
+      else
+        [ "$(argv_i "$_log" 6)" = --tools ] || fail "R6 $5: --tools does not follow --model"
+      fi ;;
+    3)
+      [ "$_rc" = 3 ] || fail "R6 $5: expected exit 3, got $_rc"
+      [ ! -s "$T/d.out" ] || fail "R6 $5: stdout is not empty"
+      case "$(sed -n 1p "$T/d.err")" in pi-dispatch:*) ;; *) fail "R6 $5: stderr does not start with pi-dispatch:" ;; esac
+      [ ! -e "$_log/argv" ] || fail "R6 $5: pi was invoked" ;;
+  esac
+}
+test_dispatch_model_thinking_parity() {
+  mk_bases
+  _t="$(new_target r6)"; cp -a "$T/base-true/." "$_t/"; echo task > "$T/ptask.md"
+  _n=0
+  while IFS= read -r _line; do
+    load_row "$_line"
+    [ "$R_D1" != "—" ] || continue
+    disp_row "$_t" "$R_VAL" - "$R_D1" "row $R_ID/no-thinking"
+    disp_row "$_t" "$R_VAL" high "$R_D2" "row $R_ID/thinking"
+    # (c) the subset check, over the table itself
+    if [ "$R_INST" = ok ] && { [ "$R_D1" != pass ] || [ "$R_D2" != pass ]; }; then
+      fail "R6c: row $R_ID is installer-ok but the dispatcher rejects it"
+    fi
+    _n=$((_n + 1))
+  done <<ROWS
+$(pin_rows)
+ROWS
+  [ "$_n" -ge 36 ] || fail "R6: only $_n dispatcher rows exercised"
+  # (b) dispatcher-only rows
+  { awk 'NR==1{print; next} /^description:/{print; print "model: a/b"; print "model: c/d"; next} {print}' "$FRESH/reviewer.md"; } > "$_t/.pi/agents/reviewer.md"
+  _rc=0; run_disp "$_t" "$T/plog2" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?; [ "$_rc" = 3 ] || fail "R6b: two model: lines -> $_rc, expected 3"
+  { awk 'NR==1{print; next} /^description:/{print; print "thinking: low"; print "thinking: high"; next} {print}' "$FRESH/reviewer.md"; } > "$_t/.pi/agents/reviewer.md"
+  _rc=0; run_disp "$_t" "$T/plog2" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?; [ "$_rc" = 3 ] || fail "R6b: two thinking: lines -> $_rc, expected 3"
+  { awk 'NR==1{print; next} /^description:/{print; print "thinking: max"; next} {print}' "$FRESH/reviewer.md"; } > "$_t/.pi/agents/reviewer.md"
+  rm -rf "$T/plog2"; _rc=0; run_disp "$_t" "$T/plog2" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?; [ "$_rc" = 0 ] || fail "R6b: thinking: max -> $_rc, expected pass"
+  # the suffix conflict for EVERY one of the seven levels
+  for _lv in off minimal low medium high xhigh max; do
+    disp_row "$_t" "a/b:$_lv" high 3 "suffix a/b:$_lv + thinking"
+    disp_row "$_t" "a/b:$_lv" - pass "suffix a/b:$_lv alone"
+  done
+  # a bare level-word with no colon is a model name, not a suffix (the *:* guard)
+  disp_row "$_t" high high pass "model: high"
+  # (d) the charset bracket is textually the same in both validators
+  grep -qF '[!A-Za-z0-9._:/@-]' "$INST" || fail "R6d: the installer lost the pin charset bracket"
+  grep -qF '[!A-Za-z0-9._:/@-]' "$SRC/tools/pi-dispatch.sh" || fail "R6d: the dispatcher lost the pin charset bracket"
+  awk '/^pi_pin_verdict\(\) \{/,/^\}/' "$INST" | grep -qF '[!A-Za-z0-9._:/@-]' || fail "R6d: the bracket is not inside pi_pin_verdict"
+  # (e) an installer-stamped role file dispatches with exactly its frontmatter values
+  _s="$(new_target r6e)"; ok_inst --agents=pi --pr-loop=true "$_s"
+  pa_tier "$_s" builder standard; pa_pin "$_s" pi standard '"openrouter/x/y:free"'; ok_inst --agents=pi --pr-loop=true "$_s"
+  rm -rf "$T/plog3"; run_disp "$_s" "$T/plog3" "$STUBBIN" builder "$T/ptask.md" || fail "R6e: an installer-stamped file did not dispatch"
+  [ "$(argv_i "$T/plog3" 5)" = "$(sed -n 's/^model: //p' "$_s/.pi/agents/builder.md")" ] || fail "R6e: --model != the stamped model:"
+  [ "$(argv_i "$T/plog3" 7)" = "$(sed -n 's/^thinking: //p' "$_s/.pi/agents/builder.md")" ] || fail "R6e: --thinking != the stamped thinking:"
+  pass "dispatcher verdicts match the hostile-pin table; installer-ok rows all pass; stamped files dispatch verbatim (R6)"
+}
+# ── M4/M5 (+ the two constants): each dispatcher guard, proven by deleting it ────────────
+dmut() { # <target> <old> <new> — replace exactly one occurrence in the target's dispatcher
+  mutate "$1/.harness/tools/pi-dispatch.sh" "$2" "$3"
+}
+reaches_stub() { # <target> <model-value> <thinking|-> — does the role file reach the stub?
+  rm -rf "$T/plog"; PA_MODEL="$2" role_with "$1" "$2" "$3"
+  _rc=0; run_disp "$1" "$T/plog" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?
+  [ "$_rc" = 0 ] && [ -e "$T/plog/argv" ]
+}
+test_dispatch_guard_mutation() {
+  mk_bases; echo task > "$T/ptask.md"
+  _t="$(new_target m45)"; cp -a "$T/base-true/." "$_t/"
+  # control: the unmutated dispatcher refuses each shape
+  reaches_stub "$_t" anthropic/claude:high high && fail "M4/M5 control: the real dispatcher accepted a suffix conflict"
+  # M5: suffix-conflict check removed
+  dmut "$_t" '  if [ -n "$thinking" ]; then
+    case "${model##*:}" in' '  if false; then
+    case "${model##*:}" in'
+  reaches_stub "$_t" anthropic/claude:high high || fail "M5: without the suffix-conflict check row 20-with-thinking did not reach the stub"
+  # M4: duplicate-key check removed
+  _t="$(new_target m4)"; cp -a "$T/base-true/." "$_t/"
+  dmut "$_t" '[ "$_n" -le 1 ] ||' 'true ||'
+  { awk 'NR==1{print; next} /^description:/{print; print "model: a/b"; print "model: c/d"; next} {print}' "$FRESH/reviewer.md"; } > "$_t/.pi/agents/reviewer.md"
+  rm -rf "$T/plog"; _rc=0; run_disp "$_t" "$T/plog" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?
+  [ "$_rc" = 0 ] && [ -e "$T/plog/argv" ] || fail "M4: without the duplicate-key check two model: lines did not reach the stub"
+  # the 256-byte cap and the leading-dash reject are constants too
+  _t="$(new_target m6)"; cp -a "$T/base-true/." "$_t/"
+  dmut "$_t" '[ "${#model}" -le 256 ] ||' 'true ||'
+  _long="p/$(printf '%0255d' 0)"
+  reaches_stub "$_t" "$_long" - || fail "M6: without the length cap a 257-byte model did not reach the stub"
+  _t="$(new_target m7)"; cp -a "$T/base-true/." "$_t/"
+  dmut "$_t" '    -*) fail 3 ' '    -zzz-no-match) fail 3 '
+  reaches_stub "$_t" -x/claude - || fail "M7: without the leading-dash reject '-x/claude' did not reach the stub"
+  pass "removing the duplicate-key, suffix-conflict, length or leading-dash check lets its row reach pi (M4-M7)"
+}
+
+# ── R9: pi in the escalation arming file ─────────────────────────────────────────────────
+tiered_target() { # <name> <agents-csv> — builder standard / heavy reasoning, claude opus pin
+  _tt="$(new_target "$1")"; ok_inst --agents="$2" --pr-loop=false "$_tt"
+  pa_tier "$_tt" builder standard; pa_tier "$_tt" builder-heavy reasoning; pa_pin "$_tt" claude reasoning opus
+  ok_inst --agents="$2" --pr-loop=false "$_tt"
+  printf '%s\n' "$_tt"
+}
+test_pi_escalation_arming() {
+  _b="$(tiered_target r9base claude,pi)"
+  [ "$(cat "$_b/.harness/.escalation-arming")" = "armed
+claude=raise
+pi=raise" ] || fail "R9a: unexpected arming file: $(cat "$_b/.harness/.escalation-arming")"
+  _case() { _ct="$(new_target "r9$1")"; cp -a "$_b/." "$_ct/"; printf '%s\n' "$_ct"; }
+  _want() { [ "$(cat "$1/.harness/.escalation-arming")" = "blocked
+claude=raise
+pi=unstamped" ] || fail "R9$2: expected blocked/pi=unstamped, got: $(cat "$1/.harness/.escalation-arming")"; }
+  # (b) hand-edited builder-heavy
+  _x="$(_case b)"; echo "# edit" >> "$_x/.pi/agents/builder-heavy.md"; ok_inst --agents=claude,pi --pr-loop=false "$_x"; _want "$_x" b
+  # (c) symlinked builder.md; the victim must not move
+  _x="$(_case c)"; mkdir -p "$T/r9-victim"; cp "$_x/.pi/agents/builder.md" "$T/r9-victim/builder.md"; _vck="$(cksum < "$T/r9-victim/builder.md")"
+  rm -f "$_x/.pi/agents/builder.md" "$_x/.harness/.pi-agents/builder.md"; ln -s "$T/r9-victim/builder.md" "$_x/.pi/agents/builder.md"
+  ok_inst --agents=claude,pi --pr-loop=false "$_x"; _want "$_x" c
+  [ "$(cksum < "$T/r9-victim/builder.md")" = "$_vck" ] || fail "R9c: the symlink victim changed"
+  # (c2) a symlinked .pi/agents holding pristine copies: cmp must not be fooled
+  _x="$(_case c2)"; rm -rf "$T/r9-dirvictim"; cp -a "$_x/.pi/agents" "$T/r9-dirvictim"; _dck="$(tree_snap "$T/r9-dirvictim")"
+  rm -rf "$_x/.pi/agents"; ln -s "$T/r9-dirvictim" "$_x/.pi/agents"
+  ok_inst --agents=claude,pi --pr-loop=false "$_x"; _want "$_x" c2
+  [ "$(tree_snap "$T/r9-dirvictim")" = "$_dck" ] || fail "R9c2: the symlinked .pi/agents victim changed"
+  # (d) a file-shaped .pi/agents: exit 0 (ok_inst), unstamped
+  _x="$(_case d)"; rm -rf "$_x/.pi/agents"; echo foreign > "$_x/.pi/agents"; ok_inst --agents=claude,pi --pr-loop=false "$_x"; _want "$_x" d
+  # (e) a pi-only all-inherit target grows no arming file
+  _x="$(new_target r9e)"; ok_inst --agents=pi "$_x"
+  [ ! -e "$_x/.harness/.escalation-arming" ] || fail "R9e: a pi-only all-inherit target grew an arming file"
+  # (f) an edited scout does not matter
+  _x="$(_case f)"; echo "# edit" >> "$_x/.pi/agents/scout.md"; ok_inst --agents=claude,pi --pr-loop=false "$_x"
+  [ "$(tail -n 1 "$_x/.harness/.escalation-arming")" = pi=raise ] || fail "R9f: an edited scout.md changed the pi verdict"
+  pass "pi=<verdict> line: raise, unstamped on edited/symlinked/file-shaped builder files, scout edits ignored, pi-only inherit absent (R9)"
+}
+
+# ── R10c: adding pi changes only the first line and the pi= line ─────────────────────────
+test_pi_arming_preserves_other_lines() {
+  _a="$(tiered_target r10a claude)"; _b="$(tiered_target r10b claude,pi)"
+  sed '1d;/^pi=/d' "$_a/.harness/.escalation-arming" > "$T/r10.a"
+  sed '1d;/^pi=/d' "$_b/.harness/.escalation-arming" > "$T/r10.b"
+  cmp -s "$T/r10.a" "$T/r10.b" || fail "R10c: adding pi changed a non-pi arming line"
+  grep -q '^pi=' "$_b/.harness/.escalation-arming" || fail "R10c: the claude,pi target lacks its pi= line"
+  diff -r "$_a/.claude" "$_b/.claude" >/dev/null || fail "R10c: the .claude/ tree differs between claude and claude,pi"
+  pass "adding pi to a selection leaves every other arming line and the .claude/ tree unchanged (R10)"
+}
+
+# ── R11d: docs and manifest text ─────────────────────────────────────────────────────────
+test_pi_routing_docs() {
+  grep -q 'pin\.pi\.' "$SRC/docs/INSTALL.md" && grep -q 'thinking' "$SRC/docs/INSTALL.md" || fail "R11d: docs/INSTALL.md lacks pin.pi. / thinking"
+  grep '^| tier |' "$SRC/docs/INSTALL.md" | grep -F 'pi `model`' | grep -qF 'pi `thinking`' || fail "R11d: the INSTALL.md tier table lacks the two pi columns"
+  awk 'BEGIN{RS=""} /model_reasoning_effort/ && /thinking/ {f=1} END{exit !f}' "$SRC/agents/orchestrator.md" \
+    || fail "R11d: agents/orchestrator.md: no paragraph names both model_reasoning_effort and thinking"
+  awk 'BEGIN{h="Which Builder runs"} /^```/{f=!f} !f && /^#+ /{k=(index($0,h)>0);next} k' "$SRC/docs/WORKFLOW.md" | tr '\n' ' ' | grep -qiE 'pi[^.]{0,200}thinking' \
+    || fail "R11d: docs/WORKFLOW.md's 'Which Builder runs' section does not describe pi thinking"
+  _t="$(new_target r11d)"; ok_inst --agents=pi "$_t"
+  grep -qF 'resolve_pi_thinking' "$_t/.harness/manifest.txt" || fail "R11d: manifest.txt does not name resolve_pi_thinking"
+  grep -qF '.pi/agents/builder' "$_t/.harness/manifest.txt" || fail "R11d: manifest.txt does not name the pi unstamped cause"
+  for _d in README.md AGENTS.md docs/HARNESS.md docs/INSTALL.md docs/WORKFLOW.md; do
+    tr '\n' ' ' < "$SRC/$_d" | grep -qE 'no `model:` or `thinking:`[^.]{0,60}\(E35-F03\)' && fail "R11d: $_d still says role files carry no model:/thinking: (E35-F03)"
+  done
+  grep -q '^## \[0.94.0\]' "$SRC/CHANGELOG.md" || fail "R11d: CHANGELOG.md lacks ## [0.94.0]"
+  [ "$(cat "$SRC/VERSION")" = 0.94.0 ] || fail "R11d: VERSION is not 0.94.0"
+  pass "docs, manifest text, CHANGELOG and VERSION describe pi model routing (R11)"
+}
+
+# ── R12: --self resolves pi from the seed; pi=neither; the probe covers pi ───────────────
+test_self_pi_arming() {
+  F="$(self_fixture selfarm-a)"; rm -f "$F/.escalation-arming"
+  self_run "$F" --self || { cat "$OUT" >&2; fail "R12: --self exited non-zero"; }
+  # (a) byte-equal to the committed role files, and no model/thinking lines
+  diff -r "$F/.pi/agents" "$SRC/.pi/agents" >/dev/null || fail "R12a: regenerated .pi/agents differs from the committed files"
+  grep -qE '^(model|thinking):' "$F"/.pi/agents/*.md && fail "R12a: a source role file carries model:/thinking:"
+  # (b) the 5-line arming text
+  [ "$(cat "$F/.escalation-arming")" = "blocked
+claude=raise
+codex=neither
+opencode=neither
+pi=neither" ] || fail "R12b: unexpected source arming file: $(cat "$F/.escalation-arming")"
+  cmp -s "$F/.escalation-arming" "$SRC/.escalation-arming" || fail "R12b: the committed .escalation-arming differs from what --self writes"
+  # (d) a second --self is a byte no-op, arming and manifest included
+  ( cd "$F" && cksum .escalation-arming .claude/.glue-manifest ) > "$T/selfarm.b1"
+  self_run "$F" --self || fail "R12d: second --self failed"
+  ( cd "$F" && cksum .escalation-arming .claude/.glue-manifest ) | cmp -s - "$T/selfarm.b1" || fail "R12d: a second --self changed the arming file or manifest"
+  # (c) the source unstamped probe covers the pi Builder files
+  F="$(self_fixture selfarm-c)"; self_run "$F" --self || fail "R12c: setup --self failed"
+  echo "# hand edit" >> "$F/.pi/agents/builder-heavy.md"
+  self_run "$F" --self || { cat "$OUT" >&2; fail "R12c: --self failed over an edited builder-heavy.md"; }
+  [ "$(sed -n 's/^pi=//p' "$F/.escalation-arming")" = unstamped ] || fail "R12c: an edited .pi/agents/builder-heavy.md did not read pi=unstamped: $(cat "$F/.escalation-arming")"
+  [ "$(sed -n 1p "$F/.escalation-arming")" = blocked ] || fail "R12c: the first line is not blocked"
+  pass "--self: pi=neither from the seed, committed bytes unchanged, probe covers pi, second run no-op (R12)"
+}
+
 # ── runner ─────────────────────────────────────────────────────────────────────────────────
 if [ "$CELLMODE" = 1 ]; then
   # --cell "<comp> <shape> <op> <outcome> <warnings> <kind>": one matrix cell, run by xargs.
@@ -1124,4 +1484,12 @@ test_dispatch_fail_closed
 test_pi_agents_owned_paths
 test_self_emits_pi
 test_pi_dispatch_prose_and_docs
+test_pi_agent_model_thinking_lines
+test_pi_agent_restamp_on_config_change
+test_dispatch_model_thinking_parity
+test_dispatch_guard_mutation
+test_pi_escalation_arming
+test_pi_arming_preserves_other_lines
+test_pi_routing_docs
+test_self_pi_arming
 echo "All pi role sub-agent tests passed."

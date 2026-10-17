@@ -126,8 +126,9 @@ also writes one `.pi/agents/<role>.md` per role (orchestrator, architect, builde
 builder-heavy, reviewer, scout, doc-critic, and `pr-fixer` while `pr_loop.enabled` is true),
 in the format of the community `pi-subagents` package (it registers a `subagent` tool; pinned
 install is E35-F04). Each file is a thin pointer to `.harness/agents/<role>.md` plus a tool
-allowlist translated from the role's Claude Code tools; it carries no `model:` or `thinking:`
-(E35-F03), so every role inherits the session's model. Ownership is pristine-only, recorded in
+allowlist translated from the role's Claude Code tools; it carries `model:`/`thinking:` only
+when the config resolves them (E35-F03, see "pi model and thinking" below), so an
+all-`inherit` role inherits the session's model. Ownership is pristine-only, recorded in
 `.harness/.pi-agents/`: an edited, foreign or symlinked role file survives install and
 deselection with a warning. `pi-subagents` loads project agents only when the project is trusted.
 
@@ -987,7 +988,7 @@ Two things worth knowing:
   hand the build *no model key at all*, abandoning whatever `models.builder` was set to
   exactly when the build is struggling. So `harness-install.sh` asks its own resolvers what
   `builder` and `builder-heavy` resolve to — the whole resolved stamp, `model` plus, on
-  Codex, `model_reasoning_effort` — on every front-end it stamps, and records the comparison
+  Codex, `model_reasoning_effort`, and on pi, `thinking` — on every front-end it stamps, and records the comparison
   in `.harness/.escalation-arming`. Escalation fires only while that file reads `armed`;
   otherwise the harness declines and names the front-end to fix. **Re-run the installer
   after changing a tier or a pin** — the verdict is computed at install time.
@@ -1000,16 +1001,68 @@ a `builder-heavy:` line. Nothing breaks: an unlisted role falls through to
 
 ### What each tier stamps
 
-| tier | claude | codex `model` | codex `model_reasoning_effort` | opencode |
-|---|---|---|---|---|
-| `reasoning` | `opus` | *(pin required)* | `high` | *(pin required)* |
-| `standard` | `sonnet` | *(pin required)* | `medium` | *(pin required)* |
-| `cheap` | `haiku` | *(pin required)* | `low` | *(pin required)* |
-| `frontier` | `fable` | *(pin required)* | `xhigh` | *(pin required)* |
-| `inherit` | *omitted* | *omitted* | *omitted* | *omitted* |
+| tier | claude | codex `model` | codex `model_reasoning_effort` | opencode | pi `model` | pi `thinking` |
+|---|---|---|---|---|---|---|
+| `reasoning` | `opus` | *(pin required)* | `high` | *(pin required)* | *(pin required)* | `high` |
+| `standard` | `sonnet` | *(pin required)* | `medium` | *(pin required)* | *(pin required)* | `medium` |
+| `cheap` | `haiku` | *(pin required)* | `low` | *(pin required)* | *(pin required)* | `low` |
+| `frontier` | `fable` | *(pin required)* | `xhigh` | *(pin required)* | *(pin required)* | `xhigh` |
+| `inherit` | *omitted* | *omitted* | *omitted* | *omitted* | *omitted* | *omitted* |
 
-Claude’s built-in values are floating vendor aliases. Codex and OpenCode require
+Claude’s built-in values are floating vendor aliases. Codex, OpenCode and pi require
 explicit pins for a concrete `model`; the installer introduces no model default.
+
+### pi model and thinking (E35-F03)
+
+Selecting `pi` stamps two optional lines into each `.pi/agents/<role>.md`, right after
+`description:`: `model: <pin>` and `thinking: <level>`.
+
+- **`model:`** is the role's `models.pin.pi.<tier>` and nothing else. It must be
+  `provider/id` (1-256 bytes of `A-Za-z0-9._:/@-`, a provider matching
+  `[A-Za-z0-9][A-Za-z0-9._-]*`, a non-empty id with no leading or trailing `/` or `:` and no
+  `//`) and must **not** end in `:<thinking>` (`off minimal low medium high xhigh max`).
+  A suffix that is not a level (`:free`, `-v1:0`) is part of the id and is accepted. A bad
+  pin warns once per tier, stamps no `model:` and never fails the install; the role keeps
+  its `thinking:`.
+- **`thinking:`** follows the tier through the built-in ladder above, with or without a pin.
+  There is no separate knob. `off`, `minimal` and `max` are never emitted.
+- **Why a pin may not carry its own `:<level>`.** `pi-subagents` ignores `thinking:` when
+  `model:` already ends in a level, while `pi -p --thinking` lets the flag win, so one role
+  would run at two levels depending on the path. `tools/pi-dispatch.sh` refuses the same
+  shape (and a repeated `model:`/`thinking:` key) in a hand-edited role file, exit 3.
+- **Config-reader quirks** (shared by every front end). A `#` starts a comment even inside
+  quotes, so `"a/b#c"` reads as `a/b`; trailing whitespace without a comment, and CRLF line
+  endings, make the value fail the charset rule (rejected, and not echoed); with a duplicate
+  `pin.pi.<tier>` key the first one wins.
+- **Dispatcher.** `tools/pi-dispatch.sh` forwards the role file's values as
+  `--model <m>` and `--thinking <t>`, so `pi-subagents` and the dispatcher share one
+  resolver output.
+- **Escalation.** pi arms on a `thinking` difference alone (`builder: standard` /
+  `builder-heavy: reasoning`), like Codex effort; the `.escalation-arming` file gains a
+  `pi=<verdict>` line, and `pi=unstamped` means `.pi/agents/builder*.md` was edited, is a
+  symlink or missing, or `.pi/agents` is a symlink or not a directory — or that
+  `pi-subagents` settings are configured at all. Configuring `pi-subagents` settings
+  disarms auto-armed `builder-heavy` on pi: any top-level `subagents` key, whatever its
+  value, in `.pi/settings.json`, in any ancestor directory's `.pi/settings.json` (the walk
+  stops before `$HOME`, or includes `/.pi/settings.json` when the target is outside HOME and HOME is not `/`), or in the user `settings.json` (`$PI_CODING_AGENT_DIR/settings.json` when that
+  is set to an absolute path, `~` or `~/…`, else `~/.pi/agent/settings.json`) reads
+  `unstamped`. The rule is blunt on purpose: the `pi-subagents` settings surface is large
+  and versioned, and any `subagents` entry can change a role's model, thinking, tools or
+  disabled state, or reject the launch, so the installer does not inspect keys or values.
+  A readable JSON object without a `subagents` key has no effect; an unreadable,
+  unparsable or non-object settings file disarms, because `pi-subagents` rejects every
+  launch on it (its parse matches Node's `JSON.parse`, so a leading UTF-8 BOM or `NaN`
+  counts as unparsable). A relative
+  `PI_CODING_AGENT_DIR` also reads `unstamped` (pi resolves it against its own launch cwd,
+  which the installer cannot know). This is warn-only — the installer prints an
+  `escalation NOT armed` notice and still succeeds — and the `.harness/tools/pi-dispatch.sh`
+  path is unaffected: it ignores `pi-subagents` settings and still honours the stamped
+  escalation. The installer only reads those files. Without `python3` it cannot parse
+  them, so any file whose text mentions `subagents` reads `unstamped`. Ancestors are checked because `pi-subagents` can redirect project settings
+  (`projectRootResolution`) to an ancestor; checking all of them is deliberately
+  conservative. The verdict is an install-time snapshot, taken in the installer's
+  environment (`HOME`, `PI_CODING_AGENT_DIR`, cwd): re-run the installer after changing
+  those or the settings files.
 
 ### Codex reasoning effort — `model_reasoning_effort` (E99-F161)
 
@@ -1086,6 +1139,7 @@ model list, so every other pin value is passed through untouched.
 | `claude` | `.claude/agents/<role>.md` | `model:` frontmatter key |
 | `codex` | `.codex/agents/<role>.toml` | optional `model = "…"` and optional `model_reasoning_effort = "…"` (role always registered, project-local) |
 | `opencode` | `opencode.json` | `"model"` member in `agent.<role>` |
+| `pi` | `.pi/agents/<role>.md` | optional `model:` (pin only) and optional `thinking:` (tier ladder) frontmatter lines |
 
 Selecting Codex registers the seven standard roles: `orchestrator`, `architect`,
 `builder`, `builder-heavy`, `reviewer`, `scout`, and `doc-critic`, plus `pr-fixer`
@@ -1247,7 +1301,7 @@ model = "gpt-6-astra"
 Then run `./harness-install.sh --self`. These source choices survive regeneration
 and do not become consumer seed defaults. Escalation still requires a distinct resolved
 Builder/heavy stamp for every selected host — on Codex, a differing `model` pin or a
-differing `model_reasoning_effort` (E99-F163); it does not verify model availability or
+differing `model_reasoning_effort` (E99-F163); on pi, a differing `model` pin or `thinking` level (E35-F03); it does not verify model availability or
 compare model quality.
 
 ## Config migration on upgrade (non-destructive)

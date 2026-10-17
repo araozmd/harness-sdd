@@ -309,12 +309,21 @@ models:
   #   codex ALSO derives `model_reasoning_effort` from this SAME tier automatically —
   #   no separate knob (cheap=low standard=medium reasoning=high frontier=xhigh); see
   #   docs/INSTALL.md.
+  #   pi       MUST be "provider/id" with NO ":<thinking>" suffix (a bad value warns and
+  #            stamps no model:). pi has no floating alias, so an unpinned tier stamps no
+  #            `model:`; the role file is still written.
+  #   pi ALSO derives `thinking:` from this SAME tier automatically, pin or no pin —
+  #   no separate knob (cheap=low standard=medium reasoning=high frontier=xhigh); see
+  #   docs/INSTALL.md.
   # pin.opencode.reasoning: ""
   # pin.opencode.standard: ""
   # pin.opencode.cheap: ""
   # pin.codex.reasoning: ""
   # pin.codex.standard: ""
   # pin.codex.cheap: ""
+  # pin.pi.reasoning: ""
+  # pin.pi.standard: ""
+  # pin.pi.cheap: ""
   # pin.claude.reasoning: ""
 EOF
   fi
@@ -488,7 +497,8 @@ EOF
 #
 # ESCALATION NEEDS A SECOND YES, AND THE INSTALLER SUPPLIES IT. `harness-install.sh` asks its
 # own resolvers what `builder` and `builder-heavy` resolve to on every front-end it stamps —
-# the whole resolved stamp, `model` plus, on codex only, `model_reasoning_effort` (E99-F163) —
+# the whole resolved stamp, `model` plus, on codex only, `model_reasoning_effort` (E99-F163)
+# and, on pi only, `thinking` (E35-F03) —
 # and records the comparison in `.harness/.escalation-arming`. Escalation fires only while
 # that verdict reads `armed` — i.e. `builder-heavy` resolves to a DIFFERENT stamp on every
 # selected front-end. Otherwise the harness declines and names the front-end to fix, because
@@ -501,6 +511,10 @@ EOF
 #                                  when you also want distinct `model` ids
 #   opencode                     a tier alone stamps NOTHING — you must also set the
 #                                  matching pin.opencode.<tier> in the models: block
+#   pi                           a tier alone stamps NO `model` but DOES stamp a DIFFERENT
+#                                  `thinking` for a different tier (E35-F03), so a thinking
+#                                  difference alone arms; set pin.pi.<tier> (provider/id,
+#                                  no ":<thinking>" suffix) when you also want distinct models
 # The verdict is computed at INSTALL time, so re-run the installer after changing any of it.
 # WHAT THIS DOES NOT CHECK: that the stamp is STRONGER, or that it exists at all. The harness
 # has no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours;
@@ -1998,6 +2012,25 @@ resolve_model() {
           return 0 ;;
       esac
     fi
+    # pi (E35-F03): a pin is a MODEL, in provider/id form, never a thinking level. A
+    # non-ok `pi_pin_verdict` warns once per tier and stamps no model (the install never
+    # fails; thinking still follows the tier). The value is echoed only when it passed
+    # the length and charset rules — a config value can carry ESC and must not reach a tty.
+    if [ "$_rm_fe" = "pi" ]; then
+      _rm_pv="$(pi_pin_verdict "$_rm_pin")"
+      case "$_rm_pv" in
+        ok) ;;
+        length) _rm_pr="is longer than 256 bytes" ;;
+        charset) _rm_pr="has characters outside [A-Za-z0-9._:/@-]" ;;
+        form) _rm_pr="= '$_rm_pin' is not in provider/id form" ;;
+        *) _rm_pr="= '$_rm_pin' ends in a :<thinking> suffix; thinking comes from the tier ladder" ;;
+      esac
+      if [ "$_rm_pv" != ok ]; then
+        _model_warn_once "pipin:$_rm_tier" \
+          "⚠️  models.pin.pi.$_rm_tier $_rm_pr — ignored, no model: written to .pi/agents (thinking still follows the tier)"
+        return 0
+      fi
+    fi
     printf '%s\n' "$_rm_pin"
     return 0
   fi
@@ -2047,8 +2080,92 @@ resolve_codex_effort() {
   return 0
 }
 
+# pi_thinking_alias <tier> — the built-in tier→pi `thinking` ladder (E35-F03). Value for
+# value the `codex_effort_alias` ladder, so one tier means one effort on both CLIs. `off`,
+# `minimal` and `max` are never emitted: the first two would make a tier WEAKER than
+# inherit, and the harness has no model list to know whether the pinned model supports
+# `max` (mirrors Codex's never-emitted `ultra`). An unrecognized tier — already normalized
+# to `inherit` by `_model_tier_resolve` — prints nothing. This is the ONLY tier→thinking
+# table; there is no operator-facing thinking override (a second dial could disagree).
+# (Assigned through `_pta`, not `printf 'high\n'` per arm like codex_effort_alias: the codex guard test
+# injects into that exact line and demands exactly one match, so a second copy would break it.)
+pi_thinking_alias() {
+  _pta=""
+  case "$1" in
+    cheap)     _pta=low ;;
+    standard)  _pta=medium ;;
+    reasoning) _pta=high ;;
+    frontier)  _pta=xhigh ;;
+  esac
+  [ -z "$_pta" ] || printf '%s\n' "$_pta"
+  return 0
+}
+
+# resolve_pi_thinking <role> — print the pi `thinking` level for <role>, or NOTHING to mean
+# "omit the key" (E35-F03). Rides the tier `_model_tier_resolve` owns (own → umbrella →
+# inherit) and never reads a pin: thinking is stamped even when no model is pinned. The
+# guard is defense-in-depth against a future edit to `pi_thinking_alias` emitting a value
+# pi's `--thinking` does not accept; warned once per tier+value.
+resolve_pi_thinking() {
+  [ "${MODELS_OFF:-0}" = 1 ] && return 0
+  _rpt_role="$1"
+  _model_tier_resolve "$_rpt_role"
+  [ "$_mtr_tier" = "inherit" ] && return 0
+  _rpt_val="$(pi_thinking_alias "$_mtr_tier")"
+  [ -n "$_rpt_val" ] || return 0
+  case "$_rpt_val" in
+    off|minimal|low|medium|high|xhigh|max) ;;
+    *)
+      _model_warn_once "pithink:$_mtr_tier:$_rpt_val" \
+        "⚠️  pi thinking level '$_rpt_val' for tier '$_mtr_tier' is not one of off minimal low medium high xhigh max — ignored, no thinking: written to .pi/agents"
+      return 0 ;;
+  esac
+  printf '%s\n' "$_rpt_val"
+  return 0
+}
+
+# pi_pin_verdict <value> — classify a pi `models.pin.pi.<tier>` value (E35-F03). SELF-
+# CONTAINED on purpose (no globals, no other installer functions) so the test suite can
+# extract and run it in-process. Prints exactly one token, first failing check wins:
+#   length   more than 256 bytes
+#   charset  a byte outside A-Za-z0-9._:/@-   (textually the same bracket expression as
+#            tools/pi-dispatch.sh's model check; test_pi_agents.sh pins that)
+#   form     not provider/id (provider [A-Za-z0-9][A-Za-z0-9._-]*; id non-empty, no edge
+#            or doubled / or :)
+#   suffix   ends in :<one of the seven pi thinking levels> (pi-subagents would ignore
+#            `thinking:` while `pi -p` lets it win — one role, two levels, ADR-0007 divergence)
+#   ok
+# The body is a subshell under LC_ALL=C so byte counts and bracket ranges are locale-proof.
+pi_pin_verdict() {
+  (
+  LC_ALL=C; export LC_ALL
+  _v="$1"
+  if [ "${#_v}" -gt 256 ]; then printf 'length\n'; return 0; fi
+  case "$_v" in
+    *[!A-Za-z0-9._:/@-]*) printf 'charset\n'; return 0 ;;
+  esac
+  case "$_v" in
+    */*) ;;
+    *) printf 'form\n'; return 0 ;;
+  esac
+  _prov="${_v%%/*}"
+  _id="${_v#*/}"
+  case "$_prov" in
+    ''|[!A-Za-z0-9]*|*[!A-Za-z0-9._-]*) printf 'form\n'; return 0 ;;
+  esac
+  case "$_id" in
+    ''|/*|:*|*/|*:|*//*) printf 'form\n'; return 0 ;;
+  esac
+  # (A value with no ':' cannot match here: it still holds the '/' that `form` required.)
+  case "${_v##*:}" in
+    off|minimal|low|medium|high|xhigh|max) printf 'suffix\n'; return 0 ;;
+  esac
+  printf 'ok\n'
+  )
+}
+
 # models_any <front-end> — exit 0 iff at least one role resolves to a non-empty value on
-# that front-end. Consumed by `write_escalation_arming` as the "is this target configured
+# that front-end (for pi: a model OR a thinking level, E35-F03). Consumed by `write_escalation_arming` as the "is this target configured
 # at all?" gate, so an unconfigured target never grows an artifact it did not have before.
 #
 # FOR CODEX THE RESOLVED STAMP IS MODEL **AND** EFFORT (E99-F163). A `standard`/`reasoning`
@@ -2061,6 +2178,7 @@ models_any() {
   for _ma_role in $MODEL_ROLES; do
     if [ -n "$(resolve_model "$1" "$_ma_role")" ]; then return 0; fi
     if [ "$1" = "codex" ] && [ -n "$(resolve_codex_effort "$_ma_role")" ]; then return 0; fi
+    if [ "$1" = "pi" ] && [ -n "$(resolve_pi_thinking "$_ma_role")" ]; then return 0; fi
   done
   return 1
 }
@@ -2078,7 +2196,7 @@ models_any() {
 # `resolve_codex_effort` stamps beside it (E99-F161). Comparing `model` alone read two
 # genuinely differentiated Codex roles (`builder: standard` / `builder-heavy: reasoning`,
 # no `model` on either because neither tier is pinned) as `same`, so the harness refused to
-# arm an escalation it could in fact honour. Effort joins the comparison ONLY for `codex`:
+# arm an escalation it could in fact honour. Effort joins the comparison ONLY for `codex` (and pi `thinking`, E35-F03):
 # claude and opencode never write an effort key, and the role's TIER resolves an effort
 # value on any front-end, so counting it elsewhere would arm on a difference no artifact
 # carries. `none` now means NOTHING resolves on EITHER axis — the abandonment the cell
@@ -2109,6 +2227,9 @@ escalation_verdict() {
   if [ "$1" = "codex" ]; then
     _ev_bx="$(resolve_codex_effort builder)"
     _ev_hx="$(resolve_codex_effort builder-heavy)"
+  elif [ "$1" = "pi" ]; then
+    _ev_bx="$(resolve_pi_thinking builder)"
+    _ev_hx="$(resolve_pi_thinking builder-heavy)"
   fi
   # A role "resolves" iff EITHER axis carries a value.
   _ev_bany=0
@@ -4362,15 +4483,26 @@ MODEL ROUTING:
                                  back to \`inherit\` reclaim them instead of orphaning them)
   .harness/.escalation-arming    whether escalating to \`builder-heavy\` would actually change
                                  the resolved stamp — the \`model\` plus, on codex,
-                                 \`model_reasoning_effort\` (E99-F163) — computed from
-                                 resolve_model / resolve_codex_effort at install time and
+                                 \`model_reasoning_effort\` (E99-F163) and, on pi,
+                                 \`thinking\` (E35-F03) — computed from resolve_model /
+                                 resolve_codex_effort / resolve_pi_thinking at install time and
                                  read by tools/builder-role.sh. First line \`armed\`/\`blocked\`,
                                  then one \`<front-end>=<verdict>\` per selected front-end,
                                  where <verdict> is raise|none|same|neither|unstamped.
                                  \`unstamped\` means the installer DECLINED to rewrite that
                                  front-end's live artifact (edited opencode.json, foreign or
-                                 symlinked .codex/agents/builder*.toml), so the resolved stamp
-                                 is not the one it will run.
+                                 symlinked .codex/agents/builder*.toml, or an edited or
+                                 symlinked .pi/agents/builder*.md), or that pi-subagents
+                                 settings are configured — any top-level \`subagents\` key,
+                                 whatever its value, in .pi/settings.json, an ancestor
+                                 .pi/settings.json (below HOME, or up to / for a target
+                                 outside HOME), or the user <agent dir>/settings.json —
+                                 or that one of those files is unreadable, unparsable or
+                                 not a JSON object (pi-subagents rejects every launch on
+                                 it), or that a relative PI_CODING_AGENT_DIR leaves the
+                                 user file unknowable — so
+                                 the resolved stamp is not the one it will run (or may not
+                                 be: pi-subagents settings are not inspected key by key).
                                  ABSENT means escalation is OFF — either this
                                  installer has not run here, or no role resolves on either axis.
                                  Written only while at least one role resolves and removed
@@ -4828,7 +4960,7 @@ EOF
   # (Codex #3717508457, reproduced on an opencode target — the installer printed
   # "model routing changes were NOT applied" and the verdict still read `armed`.)
   #
-  # Only codex and opencode can reach this ledger. claude (§5), gemini (§5e) and antigravity
+  # Only codex, opencode and pi can reach this ledger. claude (§5), gemini (§5e) and antigravity
   # write their per-role artifacts unconditionally, with no refusal branch, so a selected one
   # of those is always stamped with what `resolve_model` just returned.
   #
@@ -4878,9 +5010,133 @@ EOF
     rm -f "$_vcb_tmp"
   }
 
+  # verify_pi_builder_roles_stamped — pi twin of the codex check above (E35-F03 R9): did
+  # `.pi/agents/builder.md` and `builder-heavy.md` end up byte-equal to what `gen_pi_agent`
+  # now generates? Unsafe path components (symlinked/non-regular, F02 predicates), a missing
+  # or hand-edited file, or a file-shaped `.pi/agents` all read `unstamped`. A live symlink
+  # is never followed by `cmp`. Scoped to the two compared roles: an edited `scout.md` says
+  # nothing about escalation.
+  verify_pi_builder_roles_stamped() {
+    _vpb_tmp="$(mktemp 2>/dev/null || mktemp -t harness-vpb)"
+    for _vpb_r in builder builder-heavy; do
+      # ONE guard per hazard: `pi_unit_live_unsafe` is the only thing standing between `cmp`
+      # and a symlinked leaf or `.pi/agents` (cmp reads THROUGH a link and would call a
+      # foreign file byte-identical). An absent or wrong-type leaf needs no guard of its
+      # own: `cmp` fails on it, which reads `unstamped`.
+      if pi_unit_live_unsafe agents "$_vpb_r"; then
+        mark_unstamped pi
+        continue
+      fi
+      gen_pi_agent "$_vpb_r" "$_vpb_tmp"
+      cmp -s "$TARGET/.pi/agents/$_vpb_r.md" "$_vpb_tmp" || mark_unstamped pi
+    done
+    rm -f "$_vpb_tmp"
+    if pi_builder_overridden; then mark_unstamped pi; fi
+  }
+
+  # pi_builder_overridden — true when pi-subagents settings could change what
+  # `builder`/`builder-heavy` actually run (Codex #4278450847, #4296205717, #4296427279,
+  # #4296704471, #4296704485). BLUNT on purpose: pi-subagents' settings surface is large and
+  # versioned, and any `subagents` entry can change a role's model, thinking, tools or
+  # disabled state, or make pi-subagents reject the launch outright — so the installer does
+  # not inspect keys or values. ANY in-scope settings file with a top-level `subagents` key,
+  # whatever its value (a non-object too), reads overridden; a readable JSON object without
+  # one (e.g. `{"theme":"x"}`) has no effect. An unreadable, unparsable or non-object file
+  # disarms too: pi-subagents 0.78.0 (readSettingsFileStrict) rejects every launch on it.
+  # Parsing matches Node's JSON.parse, not Python's: a leading UTF-8 BOM (readFileSync
+  # "utf-8" keeps it, JSON.parse rejects it) and NaN/Infinity fail, as does invalid UTF-8
+  # (Node would decode it lossily — conservative). The `tools/pi-dispatch.sh` fallback
+  # ignores pi-subagents settings and still honours the stamped escalation; only
+  # auto-arming on pi is disarmed.
+  #
+  # In-scope files: the project `.pi/settings.json` (a symlink there is overridden); the user
+  # `<agent dir>/settings.json` (`pi_user_agent_dir`); and every ANCESTOR `.pi/settings.json`
+  # of the physical target path — excluding the target itself, stopping before $HOME (or
+  # before `/` when the target is outside HOME), at most 64 levels (past that, or on a
+  # non-absolute path: overridden). The ancestor walk stands in for pi-subagents'
+  # findConfiguredProjectRoot (cwd upward, stopping at $HOME) and any `projectRootResolution`
+  # redirect. The user and ancestor files may be read through a symlink. A user agent dir
+  # that cannot be resolved here — the default or a `~` form with HOME unset, or a RELATIVE
+  # `$PI_CODING_AGENT_DIR`, which pi resolves against its own launch cwd, not the
+  # installer's — reads overridden. The verdict is an INSTALL-TIME SNAPSHOT taken in the
+  # installer's environment; a later settings edit or a pi session launched with a different
+  # environment is not seen until the next install. READ-ONLY — no settings file is ever
+  # written (ADR-0007). Fails CLOSED: a non-regular, unreadable, unparsable or non-object
+  # file counts as overridden; without python3, any file whose text mentions `subagents`.
+  pi_builder_overridden() {
+    pi_settings_file_overridden "$TARGET/.pi/settings.json" 1 && return 0
+    _pbo_ud="$(pi_user_agent_dir)"
+    [ -n "$_pbo_ud" ] || return 0
+    pi_settings_file_overridden "$_pbo_ud/settings.json" 0 && return 0
+    _pbo_d="$(_prompt_owner_id)"; _pbo_h="${HOME:-}"; _pbo_h="${_pbo_h%/}"; _pbo_n=0
+    case "$_pbo_d" in /*) ;; *) return 0 ;; esac
+    while :; do
+      _pbo_d="${_pbo_d%/*}"
+      if [ -z "$_pbo_d" ]; then
+        # The filesystem root is a candidate too: pi-subagents' findProjectRootCandidates
+        # tests a directory BEFORE checking whether it is `/`, unless `/` is HOME.
+        [ "$_pbo_h" = "" ] && [ -n "${HOME:-}" ] && break
+        pi_settings_file_overridden "/.pi/settings.json" 0 && return 0
+        break
+      fi
+      if [ -n "$_pbo_h" ] && [ "$_pbo_d" = "$_pbo_h" ]; then break; fi
+      [ "$_pbo_n" -lt 64 ] || return 0
+      pi_settings_file_overridden "$_pbo_d/.pi/settings.json" 0 && return 0
+      _pbo_n=$((_pbo_n + 1))
+    done
+    return 1
+  }
+
+  # pi_user_agent_dir — the pi user agent dir, resolved as pi 1.2.0 / pi-subagents 0.78.0
+  # getAgentDir do: `$PI_CODING_AGENT_DIR` unset or empty → `$HOME/.pi/agent`; exactly `~` →
+  # `$HOME`; `~/<rest>` → `$HOME/<rest>`; an absolute path as-is. Prints nothing (the caller
+  # reads that as overridden) when the result needs an unset HOME, or for a relative value —
+  # pi resolves that against its launch cwd, which the installer cannot know.
+  pi_user_agent_dir() {
+    case "${PI_CODING_AGENT_DIR:-}" in
+      '') [ -z "${HOME:-}" ] || printf '%s\n' "$HOME/.pi/agent" ;;
+      '~') [ -z "${HOME:-}" ] || printf '%s\n' "$HOME" ;;
+      '~/'*) [ -z "${HOME:-}" ] || printf '%s\n' "$HOME/${PI_CODING_AGENT_DIR#\~/}" ;;
+      /*) printf '%s\n' "$PI_CODING_AGENT_DIR" ;;
+      *) ;;
+    esac
+    return 0
+  }
+
+  # pi_settings_file_overridden <file> <strict> — the per-file check behind
+  # pi_builder_overridden: is the file anything but a Node-parsable JSON object without a
+  # top-level `subagents` key? 0 = overridden, 1 = fine or absent. <strict>=1 (the project file) also treats a symlink as overridden.
+  pi_settings_file_overridden() {
+    _pbo_f="$1"
+    [ -e "$_pbo_f" ] || [ -L "$_pbo_f" ] || return 1
+    if [ "$2" = 1 ] && [ -L "$_pbo_f" ]; then return 0; fi
+    { [ -f "$_pbo_f" ] && [ -r "$_pbo_f" ]; } || return 0
+    if ! command -v python3 >/dev/null 2>&1; then
+      grep -q 'subagents' "$_pbo_f" 2>/dev/null && return 0
+      [ -r "$_pbo_f" ] || return 0
+      return 1
+    fi
+    # rc 11 (a parsable object, no `subagents`) is the ONLY fine outcome; anything else —
+    # 10, a parse error, a decode error, a crash — is overridden.
+    _pbo_rc=0
+    python3 -I - "$_pbo_f" <<'PYPBO' >/dev/null 2>&1 || _pbo_rc=$?
+import json, sys
+def no_constant(c):
+    raise ValueError(c)
+with open(sys.argv[1], "rb") as fh:
+    b = fh.read()
+if b.startswith(b"\xef\xbb\xbf"):
+    sys.exit(10)
+d = json.loads(b.decode("utf-8"), parse_constant=no_constant)
+sys.exit(10 if not isinstance(d, dict) or "subagents" in d else 11)
+PYPBO
+    [ "$_pbo_rc" = 11 ] && return 1
+    return 0
+  }
+
   # write_escalation_arming — record, for the front-ends selected on THIS run, whether
   # escalating to `builder-heavy` would actually change the resolved stamp — the `model`
-  # plus, on codex, `model_reasoning_effort` (E99-F163) — rather than the model alone (E17-F05).
+  # plus, on codex, `model_reasoning_effort` (E99-F163) and, on pi, `thinking` (E35-F03) — rather than the model alone (E17-F05).
   #
   # Format — first line is exactly one word so the consuming rule needs no parser:
   #
@@ -4918,7 +5174,7 @@ EOF
     _ea_any=0
     for _ea_k in $AGENT_KEYS; do
       agent_selected "$_ea_k" || continue
-      case "$_ea_k" in antigravity|pi) continue ;; esac
+      case "$_ea_k" in antigravity) continue ;; esac
       if models_any "$_ea_k"; then _ea_any=1; fi
     done
 
@@ -4939,7 +5195,7 @@ EOF
     _ea_seen=0
     for _ea_k in $AGENT_KEYS; do
       agent_selected "$_ea_k" || continue
-      case "$_ea_k" in antigravity|pi) continue ;; esac
+      case "$_ea_k" in antigravity) continue ;; esac
       _ea_seen=1
       # `unstamped` outranks whatever resolve_model would say: the config's answer is about
       # a file this run did not write, so it describes a model the front-end will not use.
@@ -4959,7 +5215,7 @@ EOF
     if [ "$_ea_armed" = 1 ]; then _ea_first=armed; else _ea_first=blocked; fi
     { printf '%s\n' "$_ea_first"; printf '%s' "$_ea_body"; } > "$H/.escalation-arming"
     if [ "$_ea_armed" = 1 ]; then
-      ok "escalation armed — builder-heavy resolves to a different stamp (model and, on codex, reasoning effort) on every selected front-end"
+      ok "escalation armed — builder-heavy resolves to a different stamp (model and, on codex/pi, reasoning effort/thinking) on every selected front-end"
     else
       info "escalation NOT armed — see .harness/.escalation-arming for which front-end blocked it"
     fi
@@ -7888,7 +8144,9 @@ EOF
 
   # gen_pi_agent <role> <dest> — the ONLY producer of `.pi/agents/<role>.md` bytes
   # (E35-F02 R1/R4). A thin pointer to `.harness/agents/<role>.md` (ADR-0004); no `$`, no
-  # `---` line in the body, no `model:`/`thinking:` (E35-F03 stamps those). The
+  # `---` line in the body. `model:`/`thinking:` follow `description:` (E35-F03 R4), each
+  # only when its resolver is non-empty, so an all-`inherit` config is byte-identical to
+  # F02's output; the body never varies with the config. The
   # `allowNestedSubagents` line and the delegation paragraph appear only for a role whose
   # Claude tool list carries `Task`. The description comes from all_codex_personas so
   # install and both removal paths compute identical bytes from a role name alone.
@@ -7897,10 +8155,14 @@ EOF
     _gpa_list="$(claude_role_tools "$_gpa_role")" || return 1
     _gpa_tools="$(pi_tools "$_gpa_list")" || return 1
     _gpa_desc="$(all_codex_personas | awk -F'	' -v r="$_gpa_role" '$1==r {print $2; exit}')"
+    _gpa_model="$(resolve_model pi "$_gpa_role")"
+    _gpa_think="$(resolve_pi_thinking "$_gpa_role")"
     {
       printf '%s\n' '---'
       printf 'name: %s\n' "$_gpa_role"
       printf 'description: %s\n' "$_gpa_desc"
+      if [ -n "$_gpa_model" ]; then printf 'model: %s\n' "$_gpa_model"; fi
+      if [ -n "$_gpa_think" ]; then printf 'thinking: %s\n' "$_gpa_think"; fi
       printf 'tools: %s\n' "$_gpa_tools"
       printf '%s\n' 'systemPromptMode: append' 'inheritProjectContext: true' 'inheritSkills: false'
       if pi_role_nested "$_gpa_list"; then printf '%s\n' 'allowNestedSubagents: true'; fi
@@ -8107,6 +8369,7 @@ EOF
     for _pir in $(codex_personas | cut -f1); do
       install_pi_unit agents "$_pir"
     done
+    verify_pi_builder_roles_stamped
     ok "pi role agents installed (.pi/agents/ — for pi-subagents; fallback .harness/tools/pi-dispatch.sh)"
   fi
 
@@ -8814,6 +9077,7 @@ self_install() {
     case "$_si_fe" in
       claude) _si_ext=md ;;
       codex) _si_ext=toml ;;
+      pi) _si_ext=md ;;
       # OpenCode has no per-role Builder file: `builder-heavy` lives as a key in
       # opencode.json, so this per-role-file probe cannot compute its verdict. Skipping it
       # lets write_escalation_arming publish the honest config-derived `opencode=neither`

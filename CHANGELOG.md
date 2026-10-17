@@ -4,6 +4,29 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.94.0] — 2026-10-13
+
+### Added — pi model routing (E35-F03)
+- `models.pin.pi.<tier>` sets a pi role's `model:` (must be `provider/id`, no `:<thinking>`
+  suffix; a bad pin warns once per tier and stamps no model). A built-in tier-to-`thinking:`
+  ladder (`cheap=low standard=medium reasoning=high frontier=xhigh`) is stamped with or
+  without a pin. Both land in `.pi/agents/<role>.md` after `description:`; an all-`inherit`
+  config is byte-identical to 0.93.0. Pristine role files restamp on a config change.
+- `tools/pi-dispatch.sh` additionally refuses (exit 3) a repeated `model:`/`thinking:` key, a
+  `model:` over 256 bytes or starting with `-`, and a `model:` ending in `:<level>` beside a
+  `thinking:` line.
+- Escalation: pi joins `.harness/.escalation-arming` (`pi=<verdict>`, `pi=unstamped` for an
+  edited `.pi/agents/builder*.md`) and arms on a `thinking` difference alone. Supersedes
+  E35-F01 R11. The repository's root `.escalation-arming` gains `pi=neither`.
+- `pi=unstamped` also covers configured `pi-subagents` settings: any top-level `subagents`
+  key, whatever its value, in `.pi/settings.json`, any ancestor `.pi/settings.json` (the
+  walk stops before `$HOME`, or includes `/.pi/settings.json` when the target is outside HOME and HOME is not `/`), or
+  `$PI_CODING_AGENT_DIR/settings.json` (else `~/.pi/agent/settings.json`), plus a relative
+  `PI_CODING_AGENT_DIR` and an unreadable, unparsable or non-object settings file, which
+  `pi-subagents` rejects on every launch (read-only, an install-time snapshot, warn-only).
+  A readable JSON object without a `subagents` key has no effect. No keys or values are inspected; the
+  `tools/pi-dispatch.sh` fallback ignores those settings and still honours the escalation.
+
 ## [0.93.0] — 2026-10-13
 
 ### Added — pi role sub-agents (E35-F02)

@@ -17,6 +17,7 @@ set -eu
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 INST="$SRC/harness-install.sh"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-pi)"
+T="$(CDPATH= cd -- "$T" && pwd -P)"  # physical, so HOME=$T/home bounds the ancestor walk
 trap 'rm -rf "$T"' EXIT
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
@@ -496,7 +497,8 @@ test_pi_owned_paths() {
 }
 
 # ── R11 ────────────────────────────────────────────────────────────────────────────────────
-test_escalation_arming_skips_pi() {
+test_escalation_arming_includes_pi() {
+  # Superseded: E35-F01 R11 said pi was excluded from arming; E35-F03 R9 includes it.
   _cfg() {
     sed -e 's|^  builder: .*|  builder: standard|' -e 's|^  builder-heavy: .*|  builder-heavy: reasoning|' \
       "$1/.harness/harness.config.yaml" > "$1/c.t" && mv "$1/c.t" "$1/.harness/harness.config.yaml"
@@ -508,16 +510,103 @@ test_escalation_arming_skips_pi() {
   _b="$(new_target r11b)"; ok_inst - - --agents=claude,pi "$_b"; _cfg "$_b"; ok_inst - - --agents=claude,pi "$_b"
   [ -f "$_a/.harness/.escalation-arming" ] || fail "R11: the claude-only control wrote no arming file"
   [ -f "$_b/.harness/.escalation-arming" ] || fail "R11: claude,pi wrote no arming file"
-  grep -q '^pi=' "$_b/.harness/.escalation-arming" && fail "R11: the arming file carries a pi= line"
-  [ "$(sed -n 1p "$_a/.harness/.escalation-arming")" = "$(sed -n 1p "$_b/.harness/.escalation-arming")" ] \
-    || fail "R11: pi changed the verdict (claude-only '$(sed -n 1p "$_a/.harness/.escalation-arming")' vs claude,pi '$(sed -n 1p "$_b/.harness/.escalation-arming")')"
-  cmp -s "$_a/.harness/.escalation-arming" "$_b/.harness/.escalation-arming" \
-    || fail "R11: the arming file differs between claude and claude,pi"
-  # pi alone: no detail line either.
-  _c="$(new_target r11c)"; ok_inst - - --agents=pi "$_c"
-  [ ! -f "$_c/.harness/.escalation-arming" ] || ! grep -q '^pi=' "$_c/.harness/.escalation-arming" \
-    || fail "R11: a pi-only arming file carries pi="
-  pass "pi is excluded from the escalation-arming file and its verdict (R11)"
+  [ "$(tail -n 1 "$_b/.harness/.escalation-arming")" = "pi=raise" ] \
+    || fail "R11: claude,pi arming file does not end in pi=raise: $(cat "$_b/.harness/.escalation-arming")"
+  [ "$(sed -n 1p "$_b/.harness/.escalation-arming")" = armed ] || fail "R11: claude,pi (both raise) is not armed"
+  [ "$(sed -n 2p "$_b/.harness/.escalation-arming")" = "$(sed -n 2p "$_a/.harness/.escalation-arming")" ] \
+    || fail "R11: pi changed the claude= line"
+  # pi alone, tiers set: armed on thinking alone. Under HOME=$T/home so the installer's
+  # ancestor `.pi/settings.json` walk sees only $T/home/w and stops at HOME (no host file).
+  _c="$(new_target home/w/r11c)"; ok_inst - - --agents=pi "$_c"; _cfg "$_c"; ok_inst - - --agents=pi "$_c"
+  [ "$(cat "$_c/.harness/.escalation-arming")" = "armed
+pi=raise" ] || fail "R11: a pi-only tiered target did not arm on thinking: $(cat "$_c/.harness/.escalation-arming")"
+  # The blunt rule (Codex #4296704471, #4296704485): ANY top-level `subagents` key in an
+  # in-scope pi settings file, whatever its value, reads unstamped; other keys do not.
+  _ov() { # <label> <expected verdict> [VAR=value]
+    ok_inst - "${3:--}" --agents=pi "$_c"
+    [ "$(sed -n 2p "$_c/.harness/.escalation-arming")" = "pi=$2" ] \
+      || fail "R11ov($1): expected pi=$2: $(cat "$_c/.harness/.escalation-arming")"
+    if [ "$2" = raise ]; then _ov_l1=armed; else _ov_l1=blocked; fi
+    [ "$(sed -n 1p "$_c/.harness/.escalation-arming")" = "$_ov_l1" ] \
+      || fail "R11ov($1): line 1 is not $_ov_l1: $(cat "$_c/.harness/.escalation-arming")"
+  }
+  _ps="$_c/.pi/settings.json"; _us="$T/home/.pi/agent/settings.json"
+  mkdir -p "$T/home/.pi/agent"
+  rm -f "$_ps" "$_us"; _ov none raise
+  printf '%s\n' '{"theme":"x"}' > "$_ps"; _ov non-subagents raise
+  printf '%s\n' '{"subagents":{}}' > "$_ps"; _ov empty-object unstamped
+  printf '%s\n' '{"subagents":{"defaultExtensions":"not-an-array"}}' > "$_ps"; _ov invalid-value unstamped
+  printf '%s\n' '{"subagents":{"agentOverrides":{"scout":{}}}}' > "$_ps"; _ov unrelated-scout unstamped
+  printf '%s\n' '{"subagents":[]}' > "$_ps"; _ov subagents-array unstamped
+  printf '%s\n' '{"subagents":{"maxThinking":' > "$_ps"; _ov malformed-subagents unstamped
+  # A file pi-subagents cannot read (Node JSON.parse, object required) rejects every launch.
+  printf '%s\n' '{"theme":' > "$_ps"; _ov malformed-other unstamped
+  printf '%s\n' '[]' > "$_ps"; _ov top-level-array unstamped
+  printf '%s\n' '{"x":NaN}' > "$_ps"; _ov nan unstamped
+  printf '\357\273\277{"theme":"x"}\n' > "$_ps"; _ov bom unstamped
+  # The project file is never read through a symlink, even to a harmless object.
+  rm -f "$_ps"; printf '%s\n' '{"theme":1}' > "$T/theme.json"; ln -s "$T/theme.json" "$_ps"
+  _ov project-symlink unstamped
+  rm -f "$_ps" "$T/theme.json"
+  # No HOME and PI_CODING_AGENT_DIR unset: the user agent dir cannot be resolved.
+  env -i PATH="$SANDBOX_PATH" CODEX_HOME="$T/ch" sh "$INST" --agents=pi "$_c" </dev/null >"$OUT" 2>&1 \
+    || { cat "$OUT" >&2; fail "setup: the no-HOME install exited non-zero"; }
+  [ "$(cat "$_c/.harness/.escalation-arming")" = "blocked
+pi=unstamped" ] || fail "R11ov(no-home): expected blocked/pi=unstamped: $(cat "$_c/.harness/.escalation-arming")"
+  # The user file follows PI_CODING_AGENT_DIR as pi resolves it (a relative value is
+  # unknowable here), and ancestor project settings are checked up to (not including) HOME.
+  rm -f "$_ps"; _sa='{"subagents":{}}'
+  mkdir -p "$T/alt" "$T/home/alt" "$T/home/w/.pi"
+  printf '%s\n' "$_sa" > "$T/alt/settings.json"; _ov env-abs unstamped "PI_CODING_AGENT_DIR=$T/alt"
+  rm -f "$T/alt/settings.json"; printf '%s\n' "$_sa" > "$_us"
+  _ov env-abs-ignores-home raise "PI_CODING_AGENT_DIR=$T/alt"
+  _ov env-empty unstamped "PI_CODING_AGENT_DIR="
+  rm -f "$_us"; printf '%s\n' "$_sa" > "$T/home/alt/settings.json"
+  _ov env-tilde unstamped "PI_CODING_AGENT_DIR=~/alt"
+  rm -f "$T/home/alt/settings.json"
+  _ov env-relative unstamped "PI_CODING_AGENT_DIR=relcfg"
+  printf '%s\n' "$_sa" > "$T/home/w/.pi/settings.json"; _ov ancestor unstamped
+  rm -rf "$T/home/w/.pi"
+  mkdir -p "$T/home/.pi"; printf '%s\n' "$_sa" > "$T/home/.pi/settings.json"; _ov home-not-walked raise
+  rm -f "$T/home/.pi/settings.json"
+  rm -f "$_ps" "$_us"
+  # The filesystem root is an ancestor candidate too (Codex #4300302001) unless `/` is HOME.
+  # A real /.pi is not writable here, so bwrap mounts a fake one over a tmpfs root that
+  # re-binds every top-level entry; skipped (with a note) where bwrap cannot do that.
+  # _ro_run <cmd…> — run <cmd…> under bwrap with `/` rebuilt on a tmpfs from the host's
+  # top-level entries and $T/rootpi mounted at /.pi. POSIX sh has no arrays, so the bwrap
+  # options are appended to "$@" and the command words are then rotated to the end.
+  _ro_run() (
+    _ro_n=$#
+    for _ro_e in /*; do
+      case "${_ro_e#/}" in proc|dev) continue ;; esac
+      if [ -L "$_ro_e" ]; then set -- "$@" --symlink "$(readlink "$_ro_e")" "$_ro_e"
+      else set -- "$@" --bind "$_ro_e" "$_ro_e"; fi
+    done
+    set -- "$@" --proc /proc --dev /dev --bind "$T/rootpi" /.pi
+    while [ "$_ro_n" -gt 0 ]; do set -- "$@" "$1"; shift; _ro_n=$((_ro_n - 1)); done
+    exec bwrap --tmpfs / "$@"
+  )
+  _root_ov() { # <label> <expected verdict> <settings json>   (HOME from $_ro_h)
+    printf '%s\n' "$3" > "$T/rootpi/settings.json"
+    _ro_run env -i PATH="$SANDBOX_PATH" HOME="$_ro_h" CODEX_HOME="$T/ch" sh "$INST" --agents=pi "$_d" \
+      </dev/null >"$OUT" 2>&1 || { cat "$OUT" >&2; fail "setup: the root-walk install ($1) exited non-zero"; }
+    [ "$(sed -n 2p "$_d/.harness/.escalation-arming")" = "pi=$2" ] \
+      || fail "R11ov(root-$1): expected pi=$2: $(cat "$_d/.harness/.escalation-arming")"
+  }
+  mkdir -p "$T/rootpi"
+  if command -v bwrap >/dev/null 2>&1 && _ro_run true 2>/dev/null; then
+    # A target outside HOME, so the walk runs to `/`; its tiers come from the r11c config.
+    _d="$(new_target r11d)"; ok_inst - - --agents=pi "$_d"; _cfg "$_d"; ok_inst - - --agents=pi "$_d"
+    _ro_h="$T/home"
+    _root_ov theme raise '{"theme":1}'
+    _root_ov subagents unstamped '{"subagents":{}}'
+    _ro_h=/
+    _root_ov home-is-root raise '{"subagents":{}}'
+  else
+    echo "note: bwrap cannot mount a fake /.pi here — the filesystem-root walk cell is skipped"
+  fi
+  pass "pi is included in the escalation-arming file and its verdict (E35-F03 R9)"
 }
 
 # ── R12 ────────────────────────────────────────────────────────────────────────────────────
@@ -584,6 +673,6 @@ test_pi_symlink_and_stamp_guards
 test_pi_host_detection
 test_pi_worker_roster
 test_pi_owned_paths
-test_escalation_arming_skips_pi
+test_escalation_arming_includes_pi
 test_pi_operator_text
 echo "All pi front-end tests passed."
