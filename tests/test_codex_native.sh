@@ -3,7 +3,7 @@
 set -eu
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 python3 - "$SRC" <<'PY'
-import hashlib, json, os, pathlib, re, shutil, subprocess, sys, tempfile, tomllib
+import hashlib, json, os, pathlib, re, shutil, signal, subprocess, sys, tempfile, tomllib
 src=pathlib.Path(sys.argv[1])
 roles={'orchestrator','architect','builder','builder-heavy','reviewer','scout','doc-critic'}
 cmds={'sdd-new','sdd-plan','sdd-drill','sdd-next','sdd-fix','sdd-fix-parallel'}
@@ -261,19 +261,35 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     # has no `agent` verb, and every `debug`/`agent` call on it spawns a detached
     # `opencode serve --service` daemon. So gate on the MAJOR version and never invoke those
     # verbs on anything but 1.x. `--version` is captured through a FILE with a timeout.
+    def ocgate(text,rc):
+        # Pure decision: None => run the 1.x probe, else the skip reason. Order matters:
+        # exit status first (never trust output from an erroring binary), then parse, then major.
+        if rc!=0: return 'opencode --version exited %d'%rc
+        vm=re.search(r'\d+\.\d+\.\d+',text)
+        if not vm: return 'version unparseable (%r)'%text.strip()[:80]
+        if vm[0].split('.')[0]!='1': return 'detected opencode %s, probe targets 1.x'%vm[0]
+        return None
+    # Hermetic table: pins the gate (and its reason words) on every host, no binary needed.
+    for _t,_rc,_want in (('1.18.35',0,None),('opencode v2.0.32',0,'targets 1.x'),('10.1.2',0,'targets 1.x'),('0.9.1',0,'targets 1.x'),('garbage',0,'unparseable'),('1.2.3',3,'exited 3'),('',0,'unparseable')):
+        _got=ocgate(_t,_rc)
+        assert (_got is None) if _want is None else (_got is not None and _want in _got),(_t,_rc,_got)
     ocskip=None
     if ocbin:
         try:
             vfd,vfn=tempfile.mkstemp(prefix='opencode-version-');os.close(vfd)
             try:
                 with open(vfn,'w') as vfh:
-                    subprocess.run([ocbin,'--version'],stdout=vfh,stderr=subprocess.STDOUT,timeout=30)
+                    # own session so a timeout can kill the whole process group, not just the child
+                    vp=subprocess.Popen([ocbin,'--version'],stdout=vfh,stderr=subprocess.STDOUT,start_new_session=True)
+                    try: vrc=vp.wait(timeout=30)
+                    except subprocess.TimeoutExpired:
+                        try: os.killpg(vp.pid,signal.SIGKILL)
+                        except OSError: pass
+                        vp.wait();raise
                 vout=pathlib.Path(vfn).read_text(errors='replace')
             finally:
                 os.unlink(vfn)
-            vm=re.search(r'\d+\.\d+\.\d+',vout)
-            if not vm: ocskip='version unparseable (%r)'%vout.strip()[:80]
-            elif vm[0].split('.')[0]!='1': ocskip='detected opencode %s, probe targets 1.x'%vm[0]
+            ocskip=ocgate(vout,vrc)
         except Exception as e:
             ocskip='opencode --version failed (%s)'%type(e).__name__
     if ocbin and ocskip is None:
