@@ -1206,7 +1206,7 @@
         {
           "id": "E99-F172",
           "title": "Gate the live opencode probe in test_codex_native.sh on opencode 1.x",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
