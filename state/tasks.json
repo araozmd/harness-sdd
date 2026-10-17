@@ -440,7 +440,7 @@
         {
           "id": "E35-F05",
           "title": "Integrity-pin the pi-subagents install (pre-install lockfile/npmCommand guards + post-install sha512 and file manifest)",
-          "status": "spec-ready",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
