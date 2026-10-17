@@ -592,6 +592,7 @@ row_trust() {
     dir) mkdir "$AD/trust.json" ;;
     fifo) mkfifo "$AD/trust.json" ;;
     dangling) ln -s "$CD/does-not-exist.json" "$AD/trust.json" ;;
+    loop) ln -s "$AD/trust.json" "$AD/trust.json" ;;
     symlink) printf '%s' "$_body" > "$CD/real-trust.json"; ln -s "$CD/real-trust.json" "$AD/trust.json" ;;
     mode0) [ "$(id -u)" != 0 ] || return 0; printf '%s' "$_body" > "$AD/trust.json"; chmod 000 "$AD/trust.json" ;;
     big) python3 - "$AD/trust.json" "$RT" <<'PYBIG'
@@ -642,6 +643,7 @@ str|file|"x"|unknown|invalid
 dir|dir||unknown|not-a-file
 fifo|fifo||unknown|not-a-file
 dangling|dangling||undecided
+loop|loop||unknown|unreadable
 symlink|symlink|{"@T@":true}|trusted
 mode0|mode0|{"@T@":true}|unknown|unreadable
 big|big||unknown|too-large
@@ -1111,6 +1113,7 @@ shape_setup() { # <setup id>  — builds the hostile state inside $TGT; victims 
               printf '{}\n' > "$TGT/.pi/npm/package.json"; printf '*\n!.gitignore\n' > "$TGT/.pi/npm/.gitignore" ;;
     trust-false) mkdir -p "$CD/home/.pi/agent"; printf '{"%s":false}' "$RT" > "$CD/home/.pi/agent/trust.json" ;;
     trust-bad) mkdir -p "$CD/home/.pi/agent"; printf '{' > "$CD/home/.pi/agent/trust.json" ;;
+    trust-loop) mkdir -p "$CD/home/.pi/agent"; ln -s "$CD/home/.pi/agent/trust.json" "$CD/home/.pi/agent/trust.json" ;;
     trust-true) mkdir -p "$CD/home/.pi/agent"; printf '{"%s":true}' "$RT" > "$CD/home/.pi/agent/trust.json" ;;
     *) fail "unknown shape setup $1" ;;
   esac
@@ -1200,6 +1203,7 @@ w13|ctrl-realistic|ok
 c07|ctrl-lockfile|ok
 t01|trust-false|project distrusted
 t02|trust-bad|project trust unknown
+t03|trust-loop|project trust unknown
 c01|ctrl-absent|ok
 c02|ctrl-theme|ok
 c03|ctrl-subagents|ok

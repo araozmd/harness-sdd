@@ -5376,9 +5376,7 @@ try:
     st = os.stat(f)
 except (FileNotFoundError, NotADirectoryError):
     out("undecided")
-except OSError as e:
-    if e.errno == errno.ELOOP:
-        out("undecided")
+except OSError:
     out("unknown", "unreadable")
 if not stat.S_ISREG(st.st_mode):
     out("unknown", "not-a-file")
