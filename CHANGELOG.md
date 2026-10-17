@@ -4,6 +4,21 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.95.0] — 2026-10-16
+
+### Added — pi preflight + approval-gated pi-subagents install (E35-F04)
+- Selecting `pi` now prints a read-only `pi preflight:` report: the pi version (floor 1.0.0),
+  the project's trust state (`trust.json`, pi's nearest-decided-key rule), the pinned
+  `pi-subagents` backend status (`pi list -a`, strictly parsed, fail-closed), the pi example
+  `subagent` extension conflict and any dangling agent links (reported, never modified).
+- `--pi-deps=<check|install|skip>` / `HARNESS_PI_DEPS` (flag wins; default `check`). `install`
+  runs `pi install -l -a npm:pi-subagents@0.78.0` and verifies it with a fresh `pi list -a`;
+  only the flag or a `y` typed at a terminal approves it, never the environment. `check`
+  otherwise prints the exact command. Unsafe paths (`.pi/settings.json`, `.pi/npm/...`:
+  symlinks, hard links, wrong types, unparsable content), a distrusted or unreadable trust
+  store, or an old/unknown pi refuse the install. A flag-approved install that does not end
+  verified exits with the new status 5 after finishing the run. `--self` never runs pi.
+
 ## [0.94.0] — 2026-10-13
 
 ### Added — pi model routing (E35-F03)

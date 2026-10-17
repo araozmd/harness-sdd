@@ -17,6 +17,10 @@
 
 set -eu
 
+# E35-F04: these suites run the installer with pi selected on the real PATH and HOME; the pi
+# preflight must not execute this host's pi (and its report is not under test here).
+export HARNESS_PI_DEPS=skip
+
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 trap 'rm -rf "$T"' EXIT

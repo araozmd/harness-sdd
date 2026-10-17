@@ -9,7 +9,7 @@ with tempfile.TemporaryDirectory(prefix='harness-retirement-') as temp:
     root=pathlib.Path(temp); env=os.environ.copy()
     for key in ('HARNESS_AGENTS','HARNESS_HOST_AGENT','HARNESS_PR_LOOP_ENABLED','CLAUDECODE','CLAUDE_CODE_ENTRYPOINT','CODEX_THREAD_ID','OPENCODE','OPENCODE_PID','ANTIGRAVITY_AGENT','ANTIGRAVITY_CONVERSATION_ID','PI_CODING_AGENT','PI_SESSION_ID','AI_AGENT'):
         env.pop(key,None)
-    env.update(HOME=str(root/'home'),CODEX_HOME=str(root/'codex'))
+    env.update(HOME=str(root/'home'),CODEX_HOME=str(root/'codex'),HARNESS_PI_DEPS='skip')
     def install(p,*args,extra=None,ok=True):
         e=env.copy(); e.update(extra or {})
         r=subprocess.run(['sh',str(src/'harness-install.sh'),*args,str(p)],env=e,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)

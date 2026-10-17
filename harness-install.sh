@@ -4643,6 +4643,26 @@ BUILDER EXECUTION BACKEND  (E20-F01) — the installer's second question:
   installs anyway and WARNS (the Builder stops and reports at run time).
   RE-RUN the installer to change it later.
 
+PI ENVIRONMENT PREFLIGHT (E35-F04) — whenever pi is selected:
+  A read-only report, every line prefixed \`pi preflight:\`: the pi version (against a 1.0.0
+  floor), the project's trust (from <pi agent dir>/trust.json), whether the pinned
+  pi-subagents backend is installed, and any conflicting pi example \`subagent\` extension or
+  dangling agent links (reported, never modified; the installer never writes under the pi
+  agent dir). --pi-deps=<check|install|skip> / HARNESS_PI_DEPS choose the mode; the flag wins,
+  an empty value means "no override", the default is check, an illegal value aborts before
+  any write, and --pi-deps=install is single-target only (not with --umbrella).
+    check    (DEFAULT) report; when the backend is absent or mismatched, either ask y/N
+             (stdin AND stderr must be terminals; default N) or print the exact command
+             \`(cd '<target>' && pi install -l -a npm:pi-subagents@<pin>)\`
+    install  run that command, then verify it with a fresh \`pi list -a\`
+    skip     one line, no pi is executed
+  Only the FLAG or a typed y/yes approves an install. HARNESS_PI_DEPS=install cannot: it is
+  downgraded to check with a notice. Pipes, closed stdin, CI and prior runs never approve.
+  Every pi command runs with the target as cwd, stdin from /dev/null, in its own process
+  group under a time bound (probes 15 s, install 600 s). A flag-approved install that was not
+  attempted, failed, timed out or was not verified exits with status 5 after finishing the
+  run; every other pi problem leaves the exit status unchanged.
+
 PR REVIEW LOOP  (E20-F02) — the installer's third question:
   The pr_loop.enabled gate in .harness/harness.config.yaml. Legal values:
     false        (DEFAULT, opt-in) no /sdd-pr-loop glue is stamped at all
@@ -5303,6 +5323,8 @@ PYRUN
     _pv_rc=0; pi_run "$PI_PROBE_TIMEOUT" 1 --version || _pv_rc=$?
     [ "$_pv_rc" = 0 ] || return 0
     _pv="$(cat "$PI_RUN_OUT"; printf x)"; _pv="${_pv%x}"
+    # a NUL byte is dropped by command substitution: the byte count must equal the char count
+    [ "$(wc -c < "$PI_RUN_OUT" | tr -d ' ')" = "${#_pv}" ] || return 0
     _pv="${_pv%
 }"
     case "$_pv" in ''|*[!0-9A-Za-z.+-]*) return 0 ;; esac
@@ -5618,6 +5640,11 @@ PYSET
           ok)      _pf_why="backend status unknown" ;;
           *)       _pf_why="pi version unknown" ;;
         esac
+        # An unreadable `pi list` is often CAUSED by a hostile path (a FIFO or unparsable
+        # settings file): under a flag install name that actionable reason first.
+        if [ "$_pf_why" = "backend status unknown" ] && [ "$PI_DEPS_MODE" = install ] && ! pi_install_paths_safe; then
+          _pf_why="$PI_UNSAFE_REASON"
+        fi
         info "pi preflight: install: not attempted: $_pf_why"
         pi_preflight_flag_fail
         rm -f "$PI_RUN_OUT"; return 0 ;;
@@ -10129,7 +10156,7 @@ case "$PI_DEPS_MODE" in
 esac
 if [ -z "$PI_DEPS_MODE" ]; then PI_DEPS_MODE=check; PI_DEPS_SOURCE=default; fi
 if [ -n "$UMBRELLA" ] && [ "$PI_DEPS_MODE" = install ] && [ "$PI_DEPS_SOURCE" = flag ]; then
-  die "--pi-deps=install is single-target only — a cascade has no single target to approve (run it per target)"
+  die "--pi-deps=install is single-target only — a cascade has no single target to approve (legal values are 'check', 'install' and 'skip'; run 'install' per target, not with --umbrella)"
 fi
 # The env can choose check or skip but can never approve: downgrade it. The notice is printed
 # later, inside the pi preflight, behind its gates.
