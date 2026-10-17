@@ -446,7 +446,13 @@
           "depends_on": [
             "E35-F04"
           ],
-          "spec_path": "specs/epics/E35-pi-first-class/F05-pi-subagents-integrity-pin/"
+          "spec_path": "specs/epics/E35-pi-first-class/F05-pi-subagents-integrity-pin/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (271)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E35-F05 done --evidence <merge-ref>`",
+            "pr": "271"
+          }
         }
       ]
     },
