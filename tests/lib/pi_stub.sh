@@ -12,7 +12,7 @@
 # its copy diverge" class (E35-F05 tests.md).
 
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-ppf)"
-trap 'rm -rf "$T"' EXIT
+trap '[ -n "${PI_KEEP_T:-}" ] || rm -rf "$T"' EXIT
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
@@ -65,7 +65,7 @@ tree_digest() {
   ( cd "$1" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r _f; do _sha256 < "$_f" | sed "s|  -\$|  $_f|"; done ) | _sha256 | sed 's/ .*//'
 }
 SYN="$T/syn"; mkdir -p "$SYN/package/lib"
-printf '{"name":"pi-subagents","version":"0.78.0"}' > "$SYN/package/package.json"
+printf '{"name":"pi-subagents","version":"0.78.0","dependencies":{"dep":"1.0.0"}}' > "$SYN/package/package.json"
 printf 'export default function () {}\n' > "$SYN/package/index.ts"
 printf 'module.exports = 1;\n' > "$SYN/package/lib/a.js"
 SYN_DIGEST="$(tree_digest "$SYN/package")"
@@ -386,6 +386,7 @@ json.dump({"name": "pi-extensions", "lockfileVersion": 3, "requires": True, "pac
     "": {"name": "pi-extensions", "dependencies": {"pi-subagents": "^" + ver}},
     "node_modules/pi-subagents": e}}, open(f, "w"), indent=2)
 PYLOCK
+  [ $? = 0 ] || fail "mk_lock: python failed"
 }
 CLBL="conflict: a subagent extension (pi example or legacy pi-subagents clone) that registers a conflicting subagent tool at"
 hasl() { grep -qxF "${L}$1" "$OUT" || fail "${CELL:-cell}: missing report line '${L}$1' in: $(grep 'pi preflight' "$OUT" | cut -c1-200)"; }

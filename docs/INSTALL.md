@@ -142,8 +142,27 @@ regular single-link files, because the `npm install` that pi spawns writes them 
 npm's own `.bin` links that point inside the tree. A mismatching `pi-subagents` entry in the
 USER scope cannot be fixed by `pi install -l`, so it is reported as `user-scope mismatch` and nothing is run. `pinned`
 means the entry, the installed-path line pi prints and the package version on disk all agree with the pin.
-An existing `.pi/npm/.npmrc` also refuses the install. The pin is `name@version` resolved through npm, not an
-integrity pin: on a project you trust, a committed lockfile can steer the tarball URL. `--pi-deps=install` is
+An existing `.pi/npm/.npmrc` also refuses the install. **Integrity pin (E35-F05).** `pinned (project)` is
+byte-verified: the effective lockfile (`.pi/npm/npm-shrinkwrap.json`, else `package-lock.json`) must carry the
+pin's version and registry integrity, and the files of `.pi/npm/node_modules/pi-subagents` must hash to the pinned
+tree digest (no extra, missing, changed, linked or hard-linked file). `pinned (user)` is NOT byte-verified: the
+user scope is yours. When the entry is the pin by name but the bytes are not proven, the report says
+`pi-subagents: unverified (lockfile)` or `(files)`, the installer neither prompts nor installs
+(`install: not attempted: backend unverified`) and a flag-approved run exits 5. Because the `npm install` pi
+spawns runs lifecycle scripts and trusts what is on disk, files committed under `.pi/` can steer it, so an
+approved install is also refused BEFORE `pi install` runs when: the project `.pi/settings.json` has a key
+`npmCommand` or `__proto__` at any depth (`npm command override (project settings)`; a user-scope
+`npmCommand` is your own choice and is never refused, but then the byte verification decides `pinned`);
+`.pi/npm/node_modules` exists (`existing .pi/npm/node_modules`: npm keeps whatever is already there, so remove
+`.pi/npm/node_modules` and re-run, and npm reinstalls every listed package from the registry); `.pi/npm` holds
+an entry other than `package.json`, `.gitignore`, `package-lock.json`, `npm-shrinkwrap.json`
+(`unexpected entry in .pi/npm`); `.pi/npm/package.json` holds anything but `name`, `private` and plain-semver
+`dependencies` (`unsafe .pi/npm/package.json content`); or a lockfile is unreadable, has duplicate keys or a
+`resolved` that is not exactly the canonical `https://registry.npmjs.org/...` tarball URL
+(`lockfile <file> unreadable|ambiguous|not canonical`). A mirror registry therefore makes an existing lockfile
+`not canonical`: delete the lockfile, or install without the mirror. Residual: the six dependencies are
+protected only on an install the harness ran (npm fetches them from canonical URLs against lockfile
+integrity); dependencies of an install the harness did not run are not re-verified. `--pi-deps=install` is
 single-target only (not with `--umbrella`); with pi not selected it prints a one-line note
 and has no effect (exit 0, so do not read it as "installed"). A flag-approved install that was not attempted,
 failed, timed out or was not verified finishes the run and exits status 5; every other pi
