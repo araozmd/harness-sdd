@@ -142,7 +142,9 @@ regular single-link files, because the `npm install` that pi spawns writes them 
 npm's own `.bin` links that point inside the tree. A mismatching `pi-subagents` entry in the
 USER scope cannot be fixed by `pi install -l`, so it is reported as `user-scope mismatch` and nothing is run. `pinned`
 means the entry, the installed-path line pi prints and the package version on disk all agree with the pin.
-`--pi-deps=install` is single-target only (not with `--umbrella`); with pi not selected it prints a one-line note
+An existing `.pi/npm/.npmrc` also refuses the install. The pin is `name@version` resolved through npm, not an
+integrity pin: on a project you trust, a committed lockfile can steer the tarball URL. `--pi-deps=install` is
+single-target only (not with `--umbrella`); with pi not selected it prints a one-line note
 and has no effect (exit 0, so do not read it as "installed"). A flag-approved install that was not attempted,
 failed, timed out or was not verified finishes the run and exits status 5; every other pi
 problem leaves the exit status unchanged. Trust: run `/trust` in an interactive pi session

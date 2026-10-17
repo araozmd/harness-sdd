@@ -5453,12 +5453,27 @@ def strings(v):
 for sf in (os.path.join(target, ".pi", "settings.json"), os.path.join(ad, "settings.json") if ad else None):
     if not sf:
         continue
+    # LAYER 1 (mirrors pi, settings-manager.js: JSON.parse(stripBom(readFileSync utf-8))): strip
+    # one BOM, decode with replacement. A file that exists (a symlink is followed; a dangling
+    # link is "absent", as for pi's existsSync) but cannot be read, is not a regular file, or
+    # does not parse to a JSON object => unknown. Never skipped.
+    try:
+        st = os.stat(sf)
+    except OSError:
+        continue
+    if not stat.S_ISREG(st.st_mode) or st.st_size > 4194304:
+        out("unknown")
     try:
         with open(sf, "rb") as fh:
-            sd = json.loads(fh.read().decode("utf-8"))
+            b = fh.read()
+        if b.startswith(b"\xef\xbb\xbf"):
+            b = b[3:]
+        sd = json.loads(b.decode("utf-8", errors="replace"))
     except Exception:
-        continue
-    if isinstance(sd, dict) and "packages" in sd:
+        out("unknown")
+    if not isinstance(sd, dict):
+        out("unknown")
+    if "packages" in sd:
         for x in strings(sd["packages"]):
             if re.search(r"[\x00-\x1f\x7f]", x):
                 out("unknown")
@@ -5476,11 +5491,16 @@ if "No packages installed." in nonblank:
 scope = None
 prev = None
 entries = []
+seen = []
 for l in lines:
     if l == "":
         prev = None
     elif l in ("User packages:", "Project packages:"):
         scope = "user" if l.startswith("User") else "project"
+        # LAYER 2: at most one of each heading, User before Project (pi prints them that way)
+        if scope in seen or (scope == "user" and "project" in seen):
+            out("unknown")
+        seen.append(scope)
         prev = None
     elif l.startswith("    "):
         if prev is None or prev["path"] is not None:
@@ -5525,7 +5545,12 @@ for e in entries:
         okp = e["path"] == exp
     else:
         exp = e["path"]
-        okp = isinstance(exp, str) and exp.startswith("/") and exp.endswith("/node_modules/pi-subagents")
+        # LAYER 3: the printed path must be its own realpath (kills /proc/self/cwd and symlinked
+        # forms), not start with /proc/, and lie OUTSIDE the target (a user-scope install never
+        # lives in the project)
+        okp = (isinstance(exp, str) and exp.startswith("/") and exp.endswith("/node_modules/pi-subagents")
+               and os.path.realpath(exp) == exp and not exp.startswith("/proc/")
+               and not (exp == os.path.realpath(target) or exp.startswith(os.path.realpath(target) + os.sep)))
     if e["text"] == "npm:pi-subagents@" + pin and okp:
         v = version_state(exp)
         if v == "ok":
@@ -5614,6 +5639,11 @@ PYLIST
     done
     if pi_file_unsafe "$TARGET/.pi/settings.json"; then
       PI_UNSAFE_REASON="unsafe path .pi/settings.json"; return 1
+    fi
+    # npm reads .pi/npm/.npmrc (registry, auth, scripts); an existing one is not ours to vouch for
+    # (a symlinked .npmrc is refused by the tree walk below with the same reason)
+    if [ -e "$TARGET/.pi/npm/.npmrc" ]; then
+      PI_UNSAFE_REASON="unsafe path .pi/npm/.npmrc"; return 1
     fi
     if [ -d "$TARGET/.pi/npm" ]; then
       _pi_bad="$(python3 -I - "$TARGET/.pi/npm" <<'PYWALK' 2>/dev/null

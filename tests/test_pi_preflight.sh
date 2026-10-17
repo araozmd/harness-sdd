@@ -106,8 +106,10 @@ case "$mode" in
 import json, os
 def pk(path):
     try:
-        with open(path) as fh:
-            d = json.load(fh)
+        b = open(path, "rb").read()
+        if b.startswith(b"\xef\xbb\xbf"):
+            b = b[3:]
+        d = json.loads(b.decode("utf-8", errors="replace"))
         return d.get("packages", []) if isinstance(d, dict) else []
     except Exception:
         return []
@@ -649,8 +651,8 @@ row_list() {
   _mode="$(fld 2 "$1")"; _want="$(fld 3 "$1")"; _pv="$(fld 4 "$1")"; [ -n "$_pv" ] || _pv=0.78.0
   mk_pkg "$RT/.pi/npm/node_modules/pi-subagents" "$_pv"
   mk_pkg "$CD/home/.pi/agent/npm/node_modules/pi-subagents" "$_pv"
-  mk_pkg "$CD/gprefix/lib/node_modules/pi-subagents" "$_pv"
-  _mode="$(printf '%s' "$_mode" | sed "s|@PP@|$RT/.pi/npm/node_modules/pi-subagents|g;s|@UP@|$CD/home/.pi/agent/npm/node_modules/pi-subagents|g;s|@LP@|$CD/gprefix/lib/node_modules/pi-subagents|g")"
+  mk_pkg "$CD/gprefix/lib/node_modules/pi-subagents" "$_pv"; ln -s "$CD/gprefix" "$CD/lnk"; mk_pkg "${RT}x/node_modules/pi-subagents" "$_pv"
+  _mode="$(printf '%s' "$_mode" | sed "s|@PP@|$RT/.pi/npm/node_modules/pi-subagents|g;s|@UP@|$CD/home/.pi/agent/npm/node_modules/pi-subagents|g;s|@LP@|$CD/gprefix/lib/node_modules/pi-subagents|g;s|@LK@|$CD/lnk/lib/node_modules/pi-subagents|g;s|@SP@|${RT}x/node_modules/pi-subagents|g")"
   ctl "version ok:1.2.0\n" "list $_mode"
   inst "$CTL" HARNESS_PI_PROBE_TIMEOUT=1 null $ARGS --pi-deps=check "$TGT"; want_rc 0
   case "$_want" in
@@ -683,7 +685,17 @@ legacyrel|text:User packages:\n  npm:pi-subagents@0.78.0\n    lib/node_modules/p
 legacyname|text:User packages:\n  npm:pi-subagents@0.78.0\n    @LP@x\n|mismatch-user|0.78.0|legacy
 projlegacy|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @LP@\n|mismatch|0.78.0|legacy
 fakepath|text:Project packages:\n  npm:pi-subagents@0.78.0\n    /fake/path\n|mismatch
-wrongscope|text:User packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|pinned-user
+wrongscope|text:User packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|mismatch-user
+userintarget|text:User packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|mismatch-user
+userproc|text:User packages:\n  npm:pi-subagents@0.78.0\n    /proc/self/cwd/.pi/npm/node_modules/pi-subagents\n|mismatch-user
+userproc1|text:User packages:\n  npm:pi-subagents@0.78.0\n    /proc/1/node_modules/pi-subagents\n|mismatch-user
+usersibling|text:User packages:\n  npm:pi-subagents@0.78.0\n    @SP@\n|pinned-user
+userprocroot|text:User packages:\n  npm:pi-subagents@0.78.0\n    /proc/self/root@LP@\n|mismatch-user|0.78.0|legacy
+usersymlink|text:User packages:\n  npm:pi-subagents@0.78.0\n    @LK@\n|mismatch-user|0.78.0|legacy
+dupuser|text:User packages:\n  npm:other@1\n    /x\n\nUser packages:\n  npm:pi-subagents@0.78.0\n    @LP@\n|unknown|0.78.0|legacy
+duppro|text:Project packages:\n  npm:other@1\n    /x\n\nProject packages:\n  npm:x@1\n    /y\n|unknown
+projfirst|text:Project packages:\n  npm:other@1\n    /x\n\nUser packages:\n  npm:pi-subagents@0.78.0\n    @LP@\n|unknown|0.78.0|legacy
+forgeuser|text:Project packages:\n  npm:a\n\nUser packages:\n  npm:pi-subagents@0.78.0\n    @LP@\n|unknown|0.78.0|legacy
 verother|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|mismatch|0.77.0
 vermissing|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|unknown|none
 verbad|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|unknown|bad
@@ -764,6 +776,50 @@ PYN10
   CELL=list-real-n10c; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list text:No packages installed.\n"
   mkdir -p "$TGT/.pi"; printf '{"packages":["npm:clean@1.0.0"]}' > "$TGT/.pi/settings.json"
   inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: absent"
+  # B4 layer 1: settings files pi can parse but a strict reader cannot (BOM, invalid UTF-8) must
+  # still be checked; one that exists and cannot be read as a JSON object => unknown, never skipped.
+  # The list output is otherwise a clean "No packages installed." so only layer 1 can see it.
+  # clean BOM / invalid-UTF-8 files pi reads fine must NOT read unknown (kills a strict reader)
+  for _k in cleanbom cleanutf8; do
+    CELL="list-real-l1-$_k"; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list text:No packages installed.\n"
+    mkdir -p "$TGT/.pi"
+    case "$_k" in
+      cleanbom) printf '\357\273\277{"packages":["npm:ok@1"]}' > "$TGT/.pi/settings.json" ;;
+      cleanutf8) printf '{"x":"\377","packages":["npm:ok@1"]}' > "$TGT/.pi/settings.json" ;;
+    esac
+    inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: absent"
+  done
+  for _k in bom badutf8 unparseable dirfile fifo array; do
+    CELL="list-real-l1-$_k"; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list text:No packages installed.\n"
+    mkdir -p "$TGT/.pi"
+    case "$_k" in
+      bom) printf '\357\273\277{"packages":["npm:y\\nz"]}' > "$TGT/.pi/settings.json" ;;
+      badutf8) printf '{"x":"\377","packages":["npm:y\\nz"]}' > "$TGT/.pi/settings.json" ;;
+      unparseable) printf '{' > "$TGT/.pi/settings.json" ;;
+      dirfile) mkdir "$TGT/.pi/settings.json" ;;
+      fifo) mkfifo "$TGT/.pi/settings.json" ;;
+      array) printf '[]' > "$TGT/.pi/settings.json" ;;
+    esac
+    inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: unknown"
+  done
+  CELL=list-real-l1-userbom; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list text:No packages installed.\n"
+  mkdir -p "$CD/home/.pi/agent"; printf '\357\273\277{"packages":["npm:y\\nz"]}' > "$CD/home/.pi/agent/settings.json"
+  inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: unknown"
+  CELL=list-real-l1-dangling; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list text:No packages installed.\n"
+  mkdir -p "$TGT/.pi"; ln -s "$CD/nowhere.json" "$TGT/.pi/settings.json"
+  inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: absent"
+  # B4 end to end (the Reviewer's exact forge): BOM + newline-forged User block + a committed
+  # 0.78.0 package, installer run from INSIDE the target with `.` — must never read pinned
+  for _v in bom raw; do
+    CELL="list-forge-e2e-$_v"; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
+    mk_pkg "$TGT/.pi/npm/node_modules/pi-subagents" 0.78.0; mkdir -p "$TGT/.pi"
+    if [ "$_v" = bom ]; then printf '\357\273\277'; else :; fi > "$TGT/.pi/settings.json"
+    printf '{"x":"\377","packages":["npm:a\\n\\nUser packages:\\n  npm:pi-subagents@0.78.0\\n    /proc/self/cwd/.pi/npm/node_modules/pi-subagents"]}' >> "$TGT/.pi/settings.json"
+    agsnap "$CD/home/.pi/agent" > "$CD/snap.0" 2>&1
+    ( cd "$TGT" && env -i PATH="$STUBDIR:$SBPATH" HOME="$CD/home" CODEX_HOME="$CD/ch" STUB_CTL="$CTL" STUB_LOG="$LOG" sh "$INST" $ARGS --pi-deps=check . ) </dev/null >"$OUT" 2>"$ERR" || fail "$CELL: exit non-zero"
+    ! grep -q "pinned 0.78.0" "$OUT" || fail "$CELL: the forged pin read pinned: $(grep 'pi-subagents:' "$OUT")"
+    ! grep -q "install: not needed" "$OUT" || fail "$CELL: the forged pin read 'not needed'"
+  done
   # N11: a PI_CODING_AGENT_DIR with // and /./ is normalised before comparing the printed path
   CELL=list-real-n11; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list text:User packages:\n  npm:pi-subagents@0.78.0\n    $CD/alt/npm/node_modules/pi-subagents\n"
   mk_pkg "$CD/alt/npm/node_modules/pi-subagents" 0.78.0
@@ -1027,6 +1083,10 @@ shape_setup() { # <setup id>  — builds the hostile state inside $TGT; victims 
     nm-innerbin-out) mkdir -p "$TGT/.pi/npm/node_modules/p/node_modules/.bin"; ln -s "$V" "$TGT/.pi/npm/node_modules/p/node_modules/.bin/x" ;;
     nm-bin-out) mkdir -p "$TGT/.pi/npm/node_modules/.bin"; ln -s "$V" "$TGT/.pi/npm/node_modules/.bin/x" ;;
     nm-innerbin-in) mkdir -p "$TGT/.pi/npm/node_modules/p/node_modules/.bin" "$TGT/.pi/npm/node_modules/q"; : > "$TGT/.pi/npm/node_modules/q/x.js"; ln -s ../../../q/x.js "$TGT/.pi/npm/node_modules/p/node_modules/.bin/x" ;;
+    nm-bin-sibling) mkdir -p "$TGT/.pi/npm/node_modules/.bin"; ln -s ../../../npmx/y "$TGT/.pi/npm/node_modules/.bin/x" ;;
+    npmrc-file) mkdir -p "$TGT/.pi/npm"; printf 'registry=x\n' > "$TGT/.pi/npm/.npmrc" ;;
+    npmrc-symlink) mkdir -p "$TGT/.pi/npm"; ln -s "$V" "$TGT/.pi/npm/.npmrc" ;;
+    npmrc-dangling) mkdir -p "$TGT/.pi/npm"; ln -s "$MISS" "$TGT/.pi/npm/.npmrc" ;;
     nm-nonbin-link-in) mkdir -p "$TGT/.pi/npm/node_modules/p" "$TGT/.pi/npm/node_modules/q"; ln -s ../q "$TGT/.pi/npm/node_modules/p/link" ;;
     ctrl-realistic) mkdir -p "$TGT/.pi/npm/node_modules/.bin" "$TGT/.pi/npm/node_modules/pi-subagents/src" "$TGT/.pi/npm/node_modules/@scope/dep"
       printf '{}\n' > "$TGT/.pi/npm/package.json"; printf '*\n!.gitignore\n' > "$TGT/.pi/npm/.gitignore"; printf '{}\n' > "$TGT/.pi/npm/package-lock.json"
@@ -1124,6 +1184,10 @@ w08|nm-deep-hard|unsafe path .pi/npm/node_modules/a/b/c/f.js
 w09|nm-innerbin-out|unsafe path .pi/npm/node_modules/p/node_modules/.bin/x
 w10|nm-bin-out|unsafe path .pi/npm/node_modules/.bin/x
 w11|nm-nonbin-link-in|unsafe path .pi/npm/node_modules/p/link
+w14|nm-bin-sibling|unsafe path .pi/npm/node_modules/.bin/x
+n01|npmrc-file|unsafe path .pi/npm/.npmrc
+n02|npmrc-symlink|unsafe path .pi/npm/.npmrc
+n03|npmrc-dangling|unsafe path .pi/npm/.npmrc
 w12|nm-innerbin-in|ok
 w13|ctrl-realistic|ok
 c07|ctrl-lockfile|ok
