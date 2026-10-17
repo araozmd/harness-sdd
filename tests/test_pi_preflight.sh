@@ -98,7 +98,7 @@ case "$mode" in
   hugeok) head -c 66000 /dev/zero | tr '\0' '\n'; printf 'No packages installed.\n' ;;
   sleep) sleep 30 & echo $! > "$STUB_LOG.gc"; sleep 30 ;;
   noop) ;;
-  real|add-subagents|rc1-subagents)
+  real|add-subagents|rc1-subagents|setsid-real)
     if [ "$key" = list ]; then
       # real pi throws (or blocks) on a settings.json it cannot read: a FIFO or a directory
       { [ ! -e .pi/settings.json ] || [ -f .pi/settings.json ]; } || exit 1
@@ -159,6 +159,8 @@ else:
 if mode in ("add-subagents", "rc1-subagents"):
     d["subagents"] = {}
 os.makedirs(".pi/npm/node_modules/pi-subagents", exist_ok=True)
+with open(".pi/npm/node_modules/pi-subagents/package.json", "w") as fh:
+    fh.write(json.dumps({"name": "pi-subagents", "version": spec.rsplit("@", 1)[1]}))
 for f, c in ((".pi/npm/package.json", "{}\n"), (".pi/npm/.gitignore", "*\n!.gitignore\n")):
     if not os.path.lexists(f):
         with open(f, "w") as fh:
@@ -166,6 +168,7 @@ for f, c in ((".pi/npm/package.json", "{}\n"), (".pi/npm/.gitignore", "*\n!.giti
 with open(".pi/settings.json", "w") as fh:
     fh.write(json.dumps(d, indent=2))
 PYINSTALLREAL
+      [ "$mode" = setsid-real ] && { setsid sleep 9 & }
       [ "$mode" = rc1-subagents ] && exit 1
     fi ;;
 esac
@@ -301,6 +304,12 @@ pty_inst() {
   post_checks
 }
 
+# mk_pkg <dir> <version|none|bad> — an installed pi-subagents package dir with its package.json
+mk_pkg() {
+  mkdir -p "$1"
+  case "$2" in none) ;; bad) printf '{' > "$1/package.json" ;; *) printf '{"name":"pi-subagents","version":"%s"}' "$2" > "$1/package.json" ;; esac
+}
+CLBL="conflict: a subagent extension (pi example or legacy pi-subagents clone) that registers a conflicting subagent tool at"
 hasl() { grep -qxF "${L}$1" "$OUT" || fail "${CELL:-cell}: missing report line '${L}$1' in: $(grep 'pi preflight' "$OUT" | cut -c1-200)"; }
 nol()  { ! grep -qxF "${L}$1" "$OUT" || fail "${CELL:-cell}: unexpected report line '${L}$1'"; }
 hasf() { grep -qF "$1" "$OUT" || fail "${CELL:-cell}: output lacks '$1': $(grep 'pi preflight' "$OUT" | cut -c1-200)"; }
@@ -413,6 +422,7 @@ row_mode() {
   CELL="mode-$(fld 1 "$1")"; mkcell "$CELL"
   _args="$(fld 2 "$1")"; _env="$(fld 3 "$1")"; _want="$(fld 4 "$1")"
   [ "$_args" != - ] || _args=""; [ -n "$_env" ] || _env=-
+  _args="$(printf '%b' "$_args")"; _env="$(printf '%b' "$_env")"
   if [ "$_want" = abort ]; then
     case "$_args" in *--umbrella*) mkdir -p "$CD/u"; _args="$_args $CD/u" ;; esac
     ctl "version ok:1.2.0\n"
@@ -421,6 +431,7 @@ row_mode() {
     cat "$OUT" "$ERR" > "$CD/all"
     for w in check install skip; do grep -qF "'$w'" "$CD/all" || fail "$CELL: the abort message does not name '$w': $(cat "$CD/all")"; done
     [ ! -e "$TGT/.harness" ] || fail "$CELL: the aborting run wrote .harness/"
+    ! grep -q "$(printf '\033')" "$CD/all" || fail "$CELL: the abort message echoed an ESC byte raw"
     no_pi_calls
     return 0
   fi
@@ -449,6 +460,8 @@ a3|--pi-deps=install --umbrella||abort
 a4|--pi-deps=INSTALL||abort
 a5|--pi-deps=check,install||abort
 a6|-|HARNESS_PI_DEPS=bogus|abort
+a7|--pi-deps=\033red||abort
+a8|-|HARNESS_PI_DEPS=x\033y|abort
 EOF
   par_wait
   # a trailing `--pi-deps` with no value is a usage error
@@ -469,6 +482,10 @@ test_gating() {
   mkcell gate-a3; CELL=gate-a3; ctl "version ok:1.2.0\n"
   inst "$CTL" - null --agents=claude --pi-deps=install "$TGT"; want_rc 0
   no_pi_calls; nof "pi preflight"
+  hasf "note: --pi-deps=install has no effect"
+  mkcell gate-a4; CELL=gate-a4; ctl "version ok:1.2.0\n"
+  inst "$CTL" - null --agents=claude --pi-deps=check "$TGT"; want_rc 0
+  nof "has no effect"
   # (b) skip: exactly one skip line, nothing executed
   mkcell gate-b; CELL=gate-b; ctl "version ok:1.2.0\n"
   inst "$CTL" - null $ARGS --pi-deps=skip "$TGT"; want_rc 0
@@ -629,12 +646,16 @@ EOF
 # ══ R5: pi list -a ════════════════════════════════════════════════════════════════════════
 row_list() {
   _id="$(fld 1 "$1")"; CELL="list-$_id"; mkcell "$CELL"
-  _mode="$(fld 2 "$1")"; _want="$(fld 3 "$1")"
+  _mode="$(fld 2 "$1")"; _want="$(fld 3 "$1")"; _pv="$(fld 4 "$1")"; [ -n "$_pv" ] || _pv=0.78.0
+  mk_pkg "$RT/.pi/npm/node_modules/pi-subagents" "$_pv"
+  mk_pkg "$CD/home/.pi/agent/npm/node_modules/pi-subagents" "$_pv"
+  _mode="$(printf '%s' "$_mode" | sed "s|@PP@|$RT/.pi/npm/node_modules/pi-subagents|g;s|@UP@|$CD/home/.pi/agent/npm/node_modules/pi-subagents|g")"
   ctl "version ok:1.2.0\n" "list $_mode"
   inst "$CTL" HARNESS_PI_PROBE_TIMEOUT=1 null $ARGS --pi-deps=check "$TGT"; want_rc 0
   case "$_want" in
     pinned-project) hasl "pi-subagents: pinned 0.78.0 (project)"; hasl "install: not needed" ;;
     pinned-user) hasl "pi-subagents: pinned 0.78.0 (user)"; hasl "install: not needed" ;;
+    mismatch-user) hasl "pi-subagents: mismatch (user scope)"; hasl "install: not attempted: user-scope mismatch" ;;
     *) hasl "pi-subagents: $_want" ;;
   esac
   [ "$(ncalls list)" = 1 ] || fail "$CELL: expected exactly one list call"
@@ -647,12 +668,19 @@ test_list_table() {
   P='npm:pi-subagents@0.78.0'
   while IFS= read -r r; do [ -n "$r" ] || continue; par_add row_list "$r"; done <<'EOF'
 none|text:No packages installed.\n|absent
-pproj|text:Project packages:\n  npm:pi-subagents@0.78.0\n    /p/node_modules/pi-subagents\n|pinned-project
-puser|text:User packages:\n  npm:pi-subagents@0.78.0\n    /p/node_modules/pi-subagents\n|pinned-user
-both|text:User packages:\n  npm:pi-subagents@0.78.0\n    /u\n\nProject packages:\n  npm:pi-subagents@0.78.0\n    /p\n|pinned-project
-mix1|text:User packages:\n  npm:pi-subagents@0.78.0\n    /u\n\nProject packages:\n  npm:pi-subagents@0.77.0\n    /p\n|mismatch
-mix2|text:User packages:\n  npm:pi-subagents@0.77.0\n    /u\n\nProject packages:\n  npm:pi-subagents@0.78.0\n    /p\n|mismatch
-mix3|text:Project packages:\n  npm:pi-subagents@0.78.0\n    /p\n  npm:pi-subagents@0.77.0\n    /q\n|mismatch
+pproj|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|pinned-project
+puser|text:User packages:\n  npm:pi-subagents@0.78.0\n    @UP@\n|pinned-user
+both|text:User packages:\n  npm:pi-subagents@0.78.0\n    @UP@\n\nProject packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|pinned-project
+mix1|text:User packages:\n  npm:pi-subagents@0.78.0\n    @UP@\n\nProject packages:\n  npm:pi-subagents@0.77.0\n    /p\n|mismatch
+mix2|text:User packages:\n  npm:pi-subagents@0.77.0\n    /u\n\nProject packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|mismatch-user
+mix3|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n  npm:pi-subagents@0.77.0\n    /q\n|mismatch
+useronly|text:User packages:\n  npm:pi-subagents@0.77.0\n    /u\n|mismatch-user
+userpin-fakepath|text:User packages:\n  npm:pi-subagents@0.78.0\n    /fake/path\n|mismatch-user
+fakepath|text:Project packages:\n  npm:pi-subagents@0.78.0\n    /fake/path\n|mismatch
+wrongscope|text:User packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|mismatch-user
+verother|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|mismatch|0.77.0
+vermissing|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|unknown|none
+verbad|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|unknown|bad
 nopath|text:Project packages:\n  npm:pi-subagents@0.78.0\n|mismatch
 filtered|text:Project packages:\n  npm:pi-subagents@0.78.0 (filtered)\n    /p\n|mismatch
 old|text:Project packages:\n  npm:pi-subagents@0.77.0\n    /p\n|mismatch
@@ -661,7 +689,7 @@ git|text:Project packages:\n  git:github.com/x/pi-subagents\n    /p\n|mismatch
 upper|text:Project packages:\n  npm:Pi-Subagents@0.78.0\n    /p\n|mismatch
 trailsp|text:Project packages:\n  npm:pi-subagents@0.78.0 \n    /p\n|mismatch
 other|text:Project packages:\n  npm:other-thing@1.0.0\n    /p\n|absent
-sgr|text:\0033[1mProject packages:\0033[22m\n  \0033[32mnpm:pi-subagents@0.78.0\0033[39m\n    /p\n|pinned-project
+sgr|text:\0033[1mProject packages:\0033[22m\n  \0033[32mnpm:pi-subagents@0.78.0\0033[39m\n    @PP@\n|pinned-project
 garbage|text:hello world\n|unknown
 esc|text:Project packages:\n  npm:other\0033[?25h\n    /p\n|unknown
 oscesc|text:Project packages:\n  npm:other\0033]0;x\0007\n|unknown
@@ -683,14 +711,23 @@ EOF
   par_wait
   # `real` rendering drives the same parser from settings files (project and user scope)
   CELL=list-real-p; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
-  mkdir -p "$TGT/.pi/npm/node_modules/pi-subagents"; printf '{"packages":["npm:pi-subagents@0.78.0"]}' > "$TGT/.pi/settings.json"
+  mk_pkg "$TGT/.pi/npm/node_modules/pi-subagents" 0.78.0; printf '{"packages":["npm:pi-subagents@0.78.0"]}' > "$TGT/.pi/settings.json"
   inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: pinned 0.78.0 (project)"
   CELL=list-real-u; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
-  mkdir -p "$CD/home/.pi/agent/npm/node_modules/pi-subagents"; printf '{"packages":["npm:pi-subagents@0.78.0"]}' > "$CD/home/.pi/agent/settings.json"
+  mk_pkg "$CD/home/.pi/agent/npm/node_modules/pi-subagents" 0.78.0; printf '{"packages":["npm:pi-subagents@0.78.0"]}' > "$CD/home/.pi/agent/settings.json"
   inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: pinned 0.78.0 (user)"
   CELL=list-real-m; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
-  mkdir -p "$TGT/.pi/npm/node_modules/pi-subagents"; printf '{"packages":["npm:pi-subagents@0.77.0"]}' > "$TGT/.pi/settings.json"
+  mk_pkg "$TGT/.pi/npm/node_modules/pi-subagents" 0.77.0; printf '{"packages":["npm:pi-subagents@0.77.0"]}' > "$TGT/.pi/settings.json"
   inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: mismatch"
+  # N1: a newline inside a settings source string forges an entry plus a path line; real pi
+  # prints the source verbatim. The forged path is not pi's computed location => not pinned.
+  CELL=list-real-forge; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
+  mkdir -p "$TGT/.pi"; printf '{"packages":["npm:pi-subagents@0.78.0\\n    /fake/path"]}' > "$TGT/.pi/settings.json"
+  inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: mismatch"; nof "pinned 0.78.0"
+  # N6: the installed package must really be the pin (an on-disk 0.77.0 under a 0.78.0 config)
+  CELL=list-real-ver; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
+  mk_pkg "$TGT/.pi/npm/node_modules/pi-subagents" 0.77.0; printf '{"packages":["npm:pi-subagents@0.78.0"]}' > "$TGT/.pi/settings.json"
+  inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: mismatch"; nof "pinned 0.78.0"
   pass "pi list -a: strict line-shape parse, fail-closed mismatch, argv/cwd/stdin/offline pinned (R5)"
 }
 
@@ -699,7 +736,7 @@ row_conflict() {
   _id="$(fld 1 "$1")"; CELL="conf-$_id"; mkcell "$CELL"
   AD="$CD/home/.pi/agent"; mkdir -p "$AD/extensions/subagent" "$AD/agents"
   _ext="$AD/extensions"; _gone=/nonexistent/packages/coding-agent
-  _env=-; _wantc=""; _dang=0; _live=0
+  _env=-; _wantc=""; _dang=0; _live=0; _dangdir="$AD/agents"
   case "$_id" in
     none) ;;
     regular) : > "$_ext/subagent/index.ts"; _wantc="$_ext/subagent/index.ts" ;;
@@ -715,17 +752,30 @@ row_conflict() {
     agents) ln -s "$_gone/a.md" "$AD/agents/a.md"; ln -s "$_gone/b.md" "$AD/agents/b.md"; : > "$AD/agents/live.md"; _dang=2 ;;
     hidden) ln -s "$_gone/.h.md" "$AD/agents/.h.md"; _dang=1 ;;
     unresolvable) : > "$_ext/subagent/index.ts"; _env="PI_CODING_AGENT_DIR=rel/dir" ;;
+    projext) mkdir -p "$TGT/.pi/extensions/subagent"; : > "$TGT/.pi/extensions/subagent/index.ts"; _wantc="$TGT/.pi/extensions/subagent/index.ts" ;;
+    projdangling) mkdir -p "$TGT/.pi/extensions"; ln -s "$_gone/subagent.ts" "$TGT/.pi/extensions/subagent.ts"; _wantc="$TGT/.pi/extensions/subagent.ts (dangling symlink)" ;;
+    homeagents) mkdir -p "$CD/home/.agents"; ln -s "$_gone/a.md" "$CD/home/.agents/a.md"; : > "$CD/home/.agents/live.md"; _dang=1; _dangdir="$CD/home/.agents" ;;
+    eschome) _hm="$CD/h$(printf '\033')x"; mkdir -p "$_hm/.agents"; ln -s "$_gone/a.md" "$_hm/.agents/a.md"; _env="HOME=$_hm" ;;
+    escdir) _env="PI_CODING_AGENT_DIR=/nonexistent/$(printf '\033')[31mx"; : > "$_ext/subagent/index.ts" ;;
   esac
   ctl "version ok:1.2.0\n"
   inst "$CTL" "$_env" null $ARGS --pi-deps=check "$TGT"; want_rc 0
-  if [ -n "$_wantc" ]; then hasl "conflict: pi example subagent extension at $_wantc"
-  else ! grep -q "conflict: pi example subagent extension" "$OUT" || fail "$CELL: a conflict was reported: $(cat "$OUT")"; fi
-  if [ "$_dang" -gt 0 ]; then hasf "$_dang dangling symlink(s) under $AD/agents/ (left untouched)"
+  if [ -n "$_wantc" ]; then hasl "$CLBL $_wantc"
+  else ! grep -q "conflict: a subagent extension" "$OUT" || fail "$CELL: a conflict was reported: $(grep 'pi preflight' "$OUT")"; fi
+  if [ "$_dang" -gt 0 ]; then hasf "$_dang dangling symlink(s) under $_dangdir/ (left untouched)"
   else nof "dangling symlink(s)"; fi
+  # N5: an agent dir with a control character is unresolvable and never echoed
+  if [ "$_id" = eschome ]; then
+    ! grep -q "$(printf '\033')" "$OUT" || fail "$CELL: an ESC byte from HOME reached stdout"
+  fi
+  if [ "$_id" = escdir ]; then
+    ! grep -q "$(printf '\033')" "$OUT" || fail "$CELL: an ESC byte reached stdout"
+    hasl "trust: unknown (agent-dir)"
+  fi
   [ "$_id" != dangling ] || { [ -L "$_ext/subagent/index.ts" ] || fail "$CELL: the dangling link was removed"; }
 }
 test_conflict_table() {
-  for r in none regular dangling livelink indexjs pkgjson flatts flatjs configonly agentsts asfile agents hidden unresolvable; do
+  for r in none regular dangling livelink indexjs pkgjson flatts flatjs configonly agentsts asfile agents hidden unresolvable projext projdangling homeagents escdir eschome; do
     par_add row_conflict "$r"
   done
   par_wait
@@ -757,7 +807,23 @@ test_runner_hygiene() {
   nof CANARY; ! grep -q CANARY "$ERR" || fail "R7c: a probe's output was echoed to stderr"; hasl "pi-subagents: unknown"
   mkcell hyg-canary2; CELL=hyg-canary2; tier_target; : > "$LOG"; ctl "version ok:1.2.0\n" "install real"
   inst "$CTL" STUB_CANARY=1 null $ARGS --pr-loop=false --pi-deps=install "$TGT"
-  nof CANARY; grep -q CANARY-ERR "$ERR" || fail "R7c: the install's pass-through is missing from the installer's stderr"
+  nof CANARY; ! grep -q CANARY "$ERR" || fail "R7c/N9: the install's output reached the installer's stderr"
+  # a FAILED install keeps its output in a private log and says where (installer-authored line)
+  mkcell hyg-canary4; CELL=hyg-canary4; ctl "version ok:1.2.0\n" "install rc:1"
+  inst "$CTL" STUB_CANARY=1 null $ARGS --pi-deps=install "$TGT"; want_rc 5
+  nof CANARY; ! grep -q CANARY "$ERR" || fail "N9: a failed install's output reached stderr"
+  _lg="$(sed -n 's/^   pi preflight: install output kept in //p' "$OUT")"
+  [ -n "$_lg" ] && grep -q CANARY-ERR "$_lg" || fail "N9: the failed install's private log is missing or empty ($_lg)"
+  rm -f "$_lg"
+  # N9: a setsid grandchild of the install must not hold the installer's fds open
+  if command -v setsid >/dev/null 2>&1; then
+    mkcell hyg-setsid; CELL=hyg-setsid; ctl "version ok:1.2.0\n" "install setsid-real"
+    _t0="$(date +%s)"
+    { env -i PATH="$STUBDIR:$SBPATH" HOME="$CD/home" CODEX_HOME="$CD/ch" STUB_CTL="$CTL" STUB_LOG="$LOG" sh "$INST" $ARGS --pi-deps=install "$TGT" </dev/null 2>&1; } | cat > "$OUT"
+    _t1="$(date +%s)"
+    [ $((_t1 - _t0)) -lt 8 ] || fail "N9: a setsid grandchild held the installer's output open for $((_t1 - _t0)) s"
+    hasl "install: installed and verified"
+  fi
   # canary on the version verb alone (stdout is not a version)
   mkcell hyg-canary3; CELL=hyg-canary3; ctl "version text:CANARY-OUT\n"
   inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; nof CANARY; hasl "pi version: unknown"
@@ -899,6 +965,20 @@ shape_setup() { # <setup id>  — builds the hostile state inside $TGT; victims 
     nm-symlink) mkdir -p "$TGT/.pi/npm"; ln -s "$VD" "$TGT/.pi/npm/node_modules" ;;
     nm-dangling) mkdir -p "$TGT/.pi/npm"; ln -s "$MISS" "$TGT/.pi/npm/node_modules" ;;
     nm-file) mkdir -p "$TGT/.pi/npm"; : > "$TGT/.pi/npm/node_modules" ;;
+    lock-symlink) mkdir -p "$TGT/.pi/npm"; ln -s "$V" "$TGT/.pi/npm/package-lock.json" ;;
+    lock-dangling) mkdir -p "$TGT/.pi/npm"; ln -s "$MISS" "$TGT/.pi/npm/package-lock.json" ;;
+    lock-dir) mkdir -p "$TGT/.pi/npm/package-lock.json" ;;
+    lock-hardlink) mkdir -p "$TGT/.pi/npm"; ln "$V" "$TGT/.pi/npm/package-lock.json" ;;
+    shr-symlink) mkdir -p "$TGT/.pi/npm"; ln -s "$V" "$TGT/.pi/npm/npm-shrinkwrap.json" ;;
+    shr-dangling) mkdir -p "$TGT/.pi/npm"; ln -s "$MISS" "$TGT/.pi/npm/npm-shrinkwrap.json" ;;
+    shr-dir) mkdir -p "$TGT/.pi/npm/npm-shrinkwrap.json" ;;
+    shr-hardlink) mkdir -p "$TGT/.pi/npm"; ln "$V" "$TGT/.pi/npm/npm-shrinkwrap.json" ;;
+    xtra-symlink) mkdir -p "$TGT/.pi/npm"; ln -s "$V" "$TGT/.pi/npm/extra.txt" ;;
+    xtra-hardlink) mkdir -p "$TGT/.pi/npm"; ln "$V" "$TGT/.pi/npm/extra.txt" ;;
+    xtra-dir) mkdir -p "$TGT/.pi/npm/extra-dir" ;;
+    xtra-hidden) mkdir -p "$TGT/.pi/npm"; ln -s "$V" "$TGT/.pi/npm/.hidden-lock" ;;
+    xtra-dotdot) mkdir -p "$TGT/.pi/npm"; ln -s "$V" "$TGT/.pi/npm/..odd" ;;
+    ctrl-lockfile) mkdir -p "$TGT/.pi/npm"; printf '{}\n' > "$TGT/.pi/npm/package-lock.json"; printf '{}\n' > "$TGT/.pi/npm/extra.txt" ;;
     ctrl-absent) ;;
     ctrl-theme) mkdir -p "$TGT/.pi"; printf '{"theme":"x"}' > "$TGT/.pi/settings.json" ;;
     ctrl-subagents) mkdir -p "$TGT/.pi"; printf '{"subagents":{}}' > "$TGT/.pi/settings.json" ;;
@@ -963,6 +1043,20 @@ s25|gi-hardlink|unsafe path .pi/npm/.gitignore
 s26|nm-symlink|unsafe path .pi/npm/node_modules
 s27|nm-dangling|unsafe path .pi/npm/node_modules
 s28|nm-file|unsafe path .pi/npm/node_modules
+l01|lock-symlink|unsafe path .pi/npm/package-lock.json
+l02|lock-dangling|unsafe path .pi/npm/package-lock.json
+l03|lock-dir|unsafe path .pi/npm/package-lock.json
+l04|lock-hardlink|unsafe path .pi/npm/package-lock.json
+l05|shr-symlink|unsafe path .pi/npm/npm-shrinkwrap.json
+l06|shr-dangling|unsafe path .pi/npm/npm-shrinkwrap.json
+l07|shr-dir|unsafe path .pi/npm/npm-shrinkwrap.json
+l08|shr-hardlink|unsafe path .pi/npm/npm-shrinkwrap.json
+l09|xtra-symlink|unsafe path .pi/npm/<other>
+l10|xtra-hardlink|unsafe path .pi/npm/<other>
+l11|xtra-dir|unsafe path .pi/npm/<other>
+l12|xtra-hidden|unsafe path .pi/npm/<other>
+l13|xtra-dotdot|unsafe path .pi/npm/<other>
+c07|ctrl-lockfile|ok
 t01|trust-false|project distrusted
 t02|trust-bad|project trust unknown
 c01|ctrl-absent|ok
@@ -1015,7 +1109,7 @@ test_install_verify() {
   [ "$(ncalls install)" = 0 ] || fail "R11: a pinned backend was reinstalled: $(cat "$LOG")"
   hasl "pi-subagents: pinned 0.78.0 (project)"; hasl "install: not needed"
   # (a2) a mismatching pin is replaced in place
-  CELL=iv-a2; mkcell "$CELL"; tier_target; mkdir -p "$TGT/.pi/npm/node_modules/pi-subagents"
+  CELL=iv-a2; mkcell "$CELL"; tier_target; mk_pkg "$TGT/.pi/npm/node_modules/pi-subagents" 0.77.0
   printf '{"packages":["npm:pi-subagents@0.77.0"]}' > "$TGT/.pi/settings.json"
   : > "$LOG"; ctl "version ok:1.2.0\n" "install real"
   inst "$CTL" - null $ARGS --pr-loop=false --pi-deps=install "$TGT"; want_rc 0
@@ -1078,8 +1172,16 @@ EOF
   par_wait
   # flag install with the backend already pinned: success, no install, exit 0
   CELL=exit-pinned; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
-  mkdir -p "$TGT/.pi/npm/node_modules/pi-subagents"; printf '{"packages":["npm:pi-subagents@0.78.0"]}' > "$TGT/.pi/settings.json"
+  mk_pkg "$TGT/.pi/npm/node_modules/pi-subagents" 0.78.0; printf '{"packages":["npm:pi-subagents@0.78.0"]}' > "$TGT/.pi/settings.json"
   inst "$CTL" - null $ARGS --pi-deps=install "$TGT"; want_rc 0; no_install; hasl "install: not needed"
+  # N2: a mismatch in USER scope cannot be fixed by `pi install -l`: refuse up front, run no pi install
+  CELL=exit-usermm; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
+  mk_pkg "$CD/home/.pi/agent/npm/node_modules/pi-subagents" 0.77.0; printf '{"packages":["npm:pi-subagents@0.77.0"]}' > "$CD/home/.pi/agent/settings.json"
+  inst "$CTL" - null $ARGS --pi-deps=install "$TGT"; want_rc 5; no_install
+  hasl "pi-subagents: mismatch (user scope)"; hasl "install: not attempted: user-scope mismatch"; hasf "fix: pi install -l only changes the project"
+  CELL=exit-usermm2; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
+  mk_pkg "$CD/home/.pi/agent/npm/node_modules/pi-subagents" 0.77.0; printf '{"packages":["npm:pi-subagents@0.77.0"]}' > "$CD/home/.pi/agent/settings.json"
+  pty_inst "$CTL" - ie 'y\n' $PTYARGS --pi-deps=check "$TGT"; want_rc 0; no_install; nof "[y/N]"
   # flag install, project distrusted: finishes everything, exits 5 with the full artifact set
   CELL=exit-5; mkcell "$CELL"; shape_setup trust-false; ctl "version ok:1.2.0\n"
   inst "$CTL" - null $ARGS --pi-deps=install "$TGT"; want_rc 5
@@ -1093,8 +1195,9 @@ test_docs() {
   [ "$(cat "$SRC/VERSION")" = 0.95.0 ] || fail "R12: VERSION is not 0.95.0"
   [ "$(grep -m1 '^## \[' "$SRC/CHANGELOG.md" | sed 's/ —.*//')" = '## [0.95.0]' ] || fail "R12: the newest CHANGELOG heading is not ## [0.95.0]"
   awk '/^## \[0.95.0\]/{k=1;next} /^## \[/{k=0} k' "$SRC/CHANGELOG.md" | grep -q 'E35-F04' || fail "R12: the 0.95.0 changelog entry does not name E35-F04"
+  awk '/^## \[0.95.0\]/{k=1;next} /^## \[/{k=0} k' "$SRC/CHANGELOG.md" | tr '\n' ' ' | grep -q 'package-lock.json' || fail "R12: the changelog does not name the npm lockfiles"
   _sec="$(awk '/^### pi$/{k=1;next} /^#{1,3} /{k=0} k' "$SRC/docs/INSTALL.md")"
-  for w in '--pi-deps=check' '--pi-deps=install' '--pi-deps=skip' 'HARNESS_PI_DEPS' 'pi install -l -a npm:pi-subagents@0.78.0' 'cannot approve'; do
+  for w in '--pi-deps=check' '--pi-deps=install' '--pi-deps=skip' 'HARNESS_PI_DEPS' 'pi install -l -a npm:pi-subagents@0.78.0' 'cannot approve' 'package-lock.json' 'user-scope' 'has no effect' '~/.agents'; do
     printf '%s\n' "$_sec" | grep -qF -- "$w" || fail "R12: the INSTALL.md pi section does not mention '$w'"
   done
   printf '%s\n' "$_sec" | tr '\n' ' ' | grep -qiE 'exit(s)? (status )?5' || fail "R12: the INSTALL.md pi section does not document exit status 5"
@@ -1115,17 +1218,25 @@ test_docs() {
   pass "docs/manifest/changelog/version name the feature; one pin constant; portable shell (R12)"
 }
 
-test_decision_pure
-test_mode_parse
-test_gating
-test_version_table
-test_trust_table
-test_list_table
-test_conflict_table
-test_runner_hygiene
-test_approval
-test_shape_matrix
-test_install_verify
-test_exit_status
-test_docs
+# The test functions are independent (own cells, own subshell): run them concurrently and print
+# their output in order.
+run_all() {
+  _ra_i=0
+  for _ra_f in "$@"; do
+    _ra_i=$((_ra_i + 1))
+    ( "$_ra_f" ) > "$T/res.$_ra_f" 2>&1 &
+    eval "_ra_pid_$_ra_i=$!"
+  done
+  _ra_i=0; _ra_bad=0
+  for _ra_f in "$@"; do
+    _ra_i=$((_ra_i + 1))
+    eval "_ra_p=\$_ra_pid_$_ra_i"
+    wait "$_ra_p" || _ra_bad=1
+    cat "$T/res.$_ra_f"
+  done
+  [ "$_ra_bad" = 0 ] || exit 1
+}
+run_all test_decision_pure test_mode_parse test_gating test_version_table test_trust_table \
+  test_list_table test_conflict_table test_runner_hygiene test_approval test_shape_matrix \
+  test_install_verify test_exit_status test_docs
 echo "All pi preflight tests passed."

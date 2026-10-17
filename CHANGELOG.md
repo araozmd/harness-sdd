@@ -14,9 +14,12 @@ All notable changes to the harness body are recorded here. Versions follow
 - `--pi-deps=<check|install|skip>` / `HARNESS_PI_DEPS` (flag wins; default `check`). `install`
   runs `pi install -l -a npm:pi-subagents@0.78.0` and verifies it with a fresh `pi list -a`;
   only the flag or a `y` typed at a terminal approves it, never the environment. `check`
-  otherwise prints the exact command. Unsafe paths (`.pi/settings.json`, `.pi/npm/...`:
-  symlinks, hard links, wrong types, unparsable content), a distrusted or unreadable trust
-  store, or an old/unknown pi refuse the install. A flag-approved install that does not end
+  otherwise prints the exact command. Unsafe paths (`.pi`, `.pi/settings.json`, `.pi/npm`,
+  `.pi/npm/node_modules`, and EVERY other direct child of `.pi/npm/` — `package.json`,
+  `.gitignore`, `package-lock.json`, `npm-shrinkwrap.json`: symlinks, hard links, wrong types),
+  an unparsable `.pi/settings.json`, a user-scope `pi-subagents` mismatch that `-l` cannot fix,
+  a distrusted or unreadable trust store, or an old/unknown pi refuse the install. `pinned`
+  also requires pi's exact installed-path line and the pin's version on disk. A flag-approved install that does not end
   verified exits with the new status 5 after finishing the run. `--self` never runs pi.
 
 ## [0.94.0] — 2026-10-13

@@ -125,7 +125,8 @@ With your approval (below), `pi install` itself writes the `packages` list in
 **pi preflight and the pinned backend (E35-F04).** Whenever pi is selected the installer prints a
 read-only `pi preflight:` report: the pi version (floor 1.0.0), the project's trust state, whether
 the pinned `pi-subagents` package is installed, and any conflicting pi example `subagent`
-extension or dangling `agents/*.md` links under `~/.pi/agent` (reported, never modified).
+extension (project `.pi/extensions/` or the agent dir's `extensions/`; pi's example or a legacy `pi-subagents` clone) and
+dangling symlinks directly under the agent dir's `agents/` (it honours `PI_CODING_AGENT_DIR`) and `~/.agents/` (reported, never modified).
 `--pi-deps=check` (default) reports and, when the backend is absent or mismatched, asks `y/N` on a
 real terminal (stdin and stderr both terminals; default N) or prints the exact command
 `(cd '<target>' && pi install -l -a npm:pi-subagents@0.78.0)`. `--pi-deps=install` runs that command
@@ -134,8 +135,14 @@ and verifies it with a fresh `pi list -a`. `--pi-deps=skip` prints one line and 
 override and an illegal value aborts before any write. `HARNESS_PI_DEPS=install` cannot approve an
 install: it is downgraded to `check` with a notice, and only a typed `y` (or the flag) installs. The
 install is refused (`install: not attempted: <reason>`) on a distrusted or unreadable trust store,
-an old or unknown pi, or an unsafe path or unparsable `.pi/settings.json`; `--pi-deps=install`
-is single-target only (not with `--umbrella`). A flag-approved install that was not attempted,
+an old or unknown pi, an unparsable `.pi/settings.json`, or an unsafe path: `.pi`, `.pi/settings.json`, `.pi/npm`
+or `.pi/npm/node_modules` (a link or the wrong type), and every direct child of `.pi/npm/` other than `node_modules`
+(`package.json`, `.gitignore`, `package-lock.json`, `npm-shrinkwrap.json` ...) must be a regular file with a single
+link, because the `npm install` that pi spawns writes them in place. A mismatching `pi-subagents` entry in the
+USER scope cannot be fixed by `pi install -l`, so it is reported as `user-scope mismatch` and nothing is run. `pinned`
+means the entry, the installed-path line pi prints and the package version on disk all agree with the pin.
+`--pi-deps=install` is single-target only (not with `--umbrella`); with pi not selected it prints a one-line note
+and has no effect (exit 0, so do not read it as "installed"). A flag-approved install that was not attempted,
 failed, timed out or was not verified finishes the run and exits status 5; every other pi
 problem leaves the exit status unchanged. Trust: run `/trust` in an interactive pi session
 (then `/reload`), or pass `-a` on headless runs. Bounds: probes 15 s, install 600 s

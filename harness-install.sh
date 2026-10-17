@@ -4661,7 +4661,9 @@ PI ENVIRONMENT PREFLIGHT (E35-F04) — whenever pi is selected:
   Every pi command runs with the target as cwd, stdin from /dev/null, in its own process
   group under a time bound (probes 15 s, install 600 s). A flag-approved install that was not
   attempted, failed, timed out or was not verified exits with status 5 after finishing the
-  run; every other pi problem leaves the exit status unchanged.
+  run; every other pi problem leaves the exit status unchanged. A user-scope pi-subagents
+  mismatch, an unsafe .pi/ path (any direct child of .pi/npm/ must be a plain file with one
+  link, because npm writes lockfiles there) or a distrusted project refuses the install.
 
 PR REVIEW LOOP  (E20-F02) — the installer's third question:
   The pr_loop.enabled gate in .harness/harness.config.yaml. Legal values:
@@ -5244,7 +5246,8 @@ PYPBO
   # pi_run <timeout-seconds> <capture:0|1> <pi args…> — run `pi` bounded. rc: the child's exit
   # status, 124 on timeout, 125 when a probe printed more than 64 KiB, 127 when pi cannot be
   # executed. capture=1: stdout goes (capped) to $PI_RUN_OUT, stderr is discarded; capture=0
-  # (install only): both of the child's streams go to the INSTALLER'S stderr. The whole process
+  # (install only): both of the child's streams go to the private file "$PI_RUN_OUT.log" and
+  # never to the installer's own fds (a setsid grandchild could hold those open). The whole process
   # group is SIGKILLed on timeout and when the child is done, so npm grandchildren cannot linger.
   pi_run() {
     _pr_to="$1"; _pr_cap="$2"; shift 2
@@ -5259,9 +5262,10 @@ env = dict(os.environ)
 if cap:
     env["PI_OFFLINE"] = "1"
 try:
+    logf = None if cap else open(outp + ".log", "ab")
     p = subprocess.Popen(["pi"] + args, cwd=cwd, stdin=subprocess.DEVNULL,
-                         stdout=(subprocess.PIPE if cap else 2),
-                         stderr=(subprocess.DEVNULL if cap else 2),
+                         stdout=(subprocess.PIPE if cap else logf),
+                         stderr=(subprocess.DEVNULL if cap else logf),
                          env=env, start_new_session=True)
 except OSError:
     sys.exit(127)
@@ -5423,9 +5427,9 @@ PYTRUST
     _pl_rc=0; pi_run "$PI_PROBE_TIMEOUT" 1 list -a || _pl_rc=$?
     [ "$_pl_rc" = 0 ] || return 0
     _pl_res="$PI_RUN_OUT.res"
-    python3 -I - "$PI_RUN_OUT" "$PI_SUBAGENTS_PIN" <<'PYLIST' >"$_pl_res" 2>/dev/null || printf 'unknown\n' >"$_pl_res"
-import re, sys
-pin = sys.argv[2]
+    python3 -I - "$PI_RUN_OUT" "$PI_SUBAGENTS_PIN" "$TARGET" "${PI_AD:-}" <<'PYLIST' >"$_pl_res" 2>/dev/null || printf 'unknown\n' >"$_pl_res"
+import json, os, re, stat, sys
+pin, target, ad = sys.argv[2], sys.argv[3], sys.argv[4]
 def out(s):
     print(s)
     sys.exit(0)
@@ -5455,26 +5459,58 @@ for l in lines:
         scope = "user" if l.startswith("User") else "project"
         prev = None
     elif l.startswith("    "):
-        if prev is None or prev["path"]:
+        if prev is None or prev["path"] is not None:
             out("unknown")
-        prev["path"] = True
+        prev["path"] = l[4:]
     elif l.startswith("  ") and not l.startswith("   "):
         if scope is None:
             out("unknown")
-        prev = {"text": l[2:], "path": False, "scope": scope}
+        prev = {"text": l[2:], "path": None, "scope": scope}
         entries.append(prev)
     else:
         out("unknown")
-mismatch = False
+# pi prints a settings source string VERBATIM, so a source holding a newline can forge an
+# entry plus an installed-path line. The path line must therefore be the exact location pi
+# computes for the scope (getManagedNpmInstallPath), and the package there must really be the pin.
+proj_exp = os.path.join(os.path.realpath(target), ".pi", "npm", "node_modules", "pi-subagents")
+user_exp = os.path.join(ad, "npm", "node_modules", "pi-subagents") if ad else None
+def version_state(path):
+    try:
+        f = os.path.join(path, "package.json")
+        st = os.stat(f)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > 1048576:
+            return "unreadable"
+        with open(f, "rb") as fh:
+            d = json.loads(fh.read().decode("utf-8"))
+    except Exception:
+        return "unreadable"
+    v = d.get("version") if isinstance(d, dict) else None
+    if v == pin:
+        return "ok"
+    return "other" if isinstance(v, str) else "unreadable"
+bad = set()
 pinned = set()
+unreadable = False
 for e in entries:
-    if "pi-subagents" in e["text"].lower():
-        if e["text"] == "npm:pi-subagents@" + pin and e["path"]:
+    if "pi-subagents" not in e["text"].lower():
+        continue
+    exp = proj_exp if e["scope"] == "project" else user_exp
+    if e["text"] == "npm:pi-subagents@" + pin and exp is not None and e["path"] == exp:
+        v = version_state(exp)
+        if v == "ok":
             pinned.add(e["scope"])
+        elif v == "other":
+            bad.add(e["scope"])
         else:
-            mismatch = True
-if mismatch:
+            unreadable = True
+    else:
+        bad.add(e["scope"])
+if "user" in bad:
+    out("mismatch-user")
+if bad:
     out("mismatch")
+if unreadable:
+    out("unknown")
 if "project" in pinned:
     out("pinned-project")
 if "user" in pinned:
@@ -5483,42 +5519,60 @@ out("absent")
 PYLIST
     PI_BACKEND="$(cat "$_pl_res" 2>/dev/null)"
     rm -f "$_pl_res"
-    case "$PI_BACKEND" in pinned-project|pinned-user|mismatch|absent) ;; *) PI_BACKEND=unknown ;; esac
+    case "$PI_BACKEND" in pinned-project|pinned-user|mismatch|mismatch-user|absent) ;; *) PI_BACKEND=unknown ;; esac
     return 0
   }
 
-  # pi_conflict_scan <agent-dir> — report (never modify) the pi example `subagent` extension
-  # and dangling links under <agent dir>/agents/. Plain `[ -e ] || [ -L ]` tests: a dangling
-  # link counts as present. No recursion, no find -L, no write of any kind.
+  # pi_conflict_scan <agent-dir> — report (never modify) a `subagent` extension that registers
+  # a second `subagent` tool: pi's example extension, or the legacy pi-subagents installer's git
+  # clone (both land in extensions/subagent/ — they cannot be told apart reliably, so the label
+  # is neutral). Looked for where pi's loader discovers extensions: the PROJECT
+  # <target>/.pi/extensions/ and the <agent dir>/extensions/. Also counts dangling symlinks
+  # directly under <agent dir>/agents/ and ~/.agents/ (where pi-subagents reads user agents).
+  # Plain `[ -e ] || [ -L ]` tests: a dangling link counts as present. No recursion, no find -L,
+  # no write of any kind. An agent dir or HOME with a control character is skipped (never echoed).
   pi_conflict_scan() {
     _pc_ad="$1"
-    [ -n "$_pc_ad" ] || return 0
-    for _pc_p in "$_pc_ad/extensions/subagent/index.ts" "$_pc_ad/extensions/subagent/index.js" \
-                 "$_pc_ad/extensions/subagent/package.json" "$_pc_ad/extensions/subagent.ts" \
-                 "$_pc_ad/extensions/subagent.js"; do
-      if [ -e "$_pc_p" ] || [ -L "$_pc_p" ]; then
-        if [ -L "$_pc_p" ] && [ ! -e "$_pc_p" ]; then
-          info "pi preflight: conflict: pi example subagent extension at $_pc_p (dangling symlink)"
-        else
-          info "pi preflight: conflict: pi example subagent extension at $_pc_p"
+    for _pc_base in "$TARGET/.pi/extensions" "${_pc_ad:+$_pc_ad/extensions}"; do
+      [ -n "$_pc_base" ] || continue
+      for _pc_p in "$_pc_base/subagent/index.ts" "$_pc_base/subagent/index.js" \
+                   "$_pc_base/subagent/package.json" "$_pc_base/subagent.ts" "$_pc_base/subagent.js"; do
+        if [ -e "$_pc_p" ] || [ -L "$_pc_p" ]; then
+          if [ -L "$_pc_p" ] && [ ! -e "$_pc_p" ]; then _pc_dl=" (dangling symlink)"; else _pc_dl=""; fi
+          info "pi preflight: conflict: a subagent extension (pi example or legacy pi-subagents clone) that registers a conflicting subagent tool at $_pc_p$_pc_dl"
         fi
+      done
+    done
+    _pc_home="${HOME:-}"
+    case "$_pc_home" in *[[:cntrl:]]*) _pc_home="" ;; esac
+    for _pc_d in "${_pc_ad:+$_pc_ad/agents}" "${_pc_home:+$_pc_home/.agents}"; do
+      [ -n "$_pc_d" ] || continue
+      _pc_n=0
+      for _pc_f in "$_pc_d/"* "$_pc_d/".*; do
+        if [ -L "$_pc_f" ] && [ ! -e "$_pc_f" ]; then _pc_n=$((_pc_n + 1)); fi
+      done
+      if [ "$_pc_n" -gt 0 ]; then
+        info "pi preflight: $_pc_n dangling symlink(s) under $_pc_d/ (left untouched) — pi-subagents reads user agents there; remove the broken links"
       fi
     done
-    _pc_n=0
-    for _pc_f in "$_pc_ad/agents/"* "$_pc_ad/agents/".*; do
-      if [ -L "$_pc_f" ] && [ ! -e "$_pc_f" ]; then _pc_n=$((_pc_n + 1)); fi
-    done
-    if [ "$_pc_n" -gt 0 ]; then
-      info "pi preflight: $_pc_n dangling symlink(s) under $_pc_ad/agents/ (left untouched) — pi-subagents reads user agents there; remove the broken links"
-    fi
     return 0
   }
 
-  # pi_install_paths_safe — can `pi install -l` write the paths it writes without following a
-  # link or writing through a hard link? ONE predicate per hazard (the only path guard). On
-  # failure sets PI_UNSAFE_REASON to a fixed word and returns 1. A link is tested with [ -L ]
-  # BEFORE any type test, so it is never classified by its target. npm owns everything inside
-  # node_modules/, so only the directory itself is checked.
+  # pi_install_paths_safe — can the approved `pi install -l` (and the `npm install … --prefix
+  # .pi/npm` it spawns) write what it writes without following a link or writing through a hard
+  # link? ONE predicate per hazard (the only path guard). On failure sets PI_UNSAFE_REASON to a
+  # fixed word and returns 1. A link is tested with [ -L ] BEFORE any type test, so it is never
+  # classified by its target. BLUNT rule for the npm prefix: EVERY existing direct child of
+  # .pi/npm/ except node_modules must be a regular file with link count 1 (package.json,
+  # .gitignore, package-lock.json, npm-shrinkwrap.json, whatever npm writes next); node_modules
+  # itself must be a real directory and npm owns everything inside it.
+  pi_file_unsafe() { # <path> — 0 when a symlink, a non-regular node, or a hard-linked file
+    [ -L "$1" ] && return 0
+    [ -e "$1" ] || return 1
+    [ -f "$1" ] || return 0
+    python3 -I -c 'import os,sys; sys.exit(0 if os.lstat(sys.argv[1]).st_nlink == 1 else 1)' "$1" 2>/dev/null && return 1
+    return 0
+  }
   pi_install_paths_safe() {
     PI_UNSAFE_REASON=""
     for _pi_rel in .pi .pi/npm .pi/npm/node_modules; do
@@ -5526,12 +5580,19 @@ PYLIST
         PI_UNSAFE_REASON="unsafe path $_pi_rel"; return 1
       fi
     done
-    for _pi_rel in .pi/settings.json .pi/npm/package.json .pi/npm/.gitignore; do
-      if [ -L "$TARGET/$_pi_rel" ] || { [ -e "$TARGET/$_pi_rel" ] && [ ! -f "$TARGET/$_pi_rel" ]; }; then
-        PI_UNSAFE_REASON="unsafe path $_pi_rel"; return 1
-      fi
-      if [ -f "$TARGET/$_pi_rel" ] && ! python3 -I -c 'import os,sys; sys.exit(0 if os.lstat(sys.argv[1]).st_nlink == 1 else 1)' "$TARGET/$_pi_rel" 2>/dev/null; then
-        PI_UNSAFE_REASON="unsafe path $_pi_rel"; return 1
+    if pi_file_unsafe "$TARGET/.pi/settings.json"; then
+      PI_UNSAFE_REASON="unsafe path .pi/settings.json"; return 1
+    fi
+    for _pi_c in "$TARGET/.pi/npm/"* "$TARGET/.pi/npm/".[!.]* "$TARGET/.pi/npm/"..?*; do
+      [ -e "$_pi_c" ] || [ -L "$_pi_c" ] || continue
+      _pi_n="${_pi_c##*/}"
+      [ "$_pi_n" != node_modules ] || continue
+      if pi_file_unsafe "$_pi_c"; then
+        case "$_pi_n" in
+          package.json|.gitignore|package-lock.json|npm-shrinkwrap.json) PI_UNSAFE_REASON="unsafe path .pi/npm/$_pi_n" ;;
+          *) PI_UNSAFE_REASON="unsafe path .pi/npm/<other>" ;;
+        esac
+        return 1
       fi
     done
     if [ -f "$TARGET/.pi/settings.json" ]; then
@@ -5595,6 +5656,9 @@ PYSET
 
     # 2. trust and conflicts (neither needs pi)
     _pf_ad="$(pi_user_agent_dir)"
+    # an agent dir holding a control character is treated as unresolvable and never echoed
+    case "$_pf_ad" in *[[:cntrl:]]*) _pf_ad="" ;; esac
+    PI_AD="$_pf_ad"
     PI_TRUST="$(pi_trust_state "$_pf_ad" "$TARGET")"
     _pf_ts="${PI_TRUST%% *}"; _pf_tr=""
     case "$PI_TRUST" in *' '*) _pf_tr="${PI_TRUST#* }" ;; esac
@@ -5620,6 +5684,7 @@ PYSET
     case "$PI_BACKEND" in
       pinned-project) info "pi preflight: pi-subagents: pinned $PI_SUBAGENTS_PIN (project)" ;;
       pinned-user)    info "pi preflight: pi-subagents: pinned $PI_SUBAGENTS_PIN (user)" ;;
+      mismatch-user)  info "pi preflight: pi-subagents: mismatch (user scope)" ;;
       mismatch|absent|unknown) info "pi preflight: pi-subagents: $PI_BACKEND" ;;
       *) PI_BACKEND="not probed"; info "pi preflight: pi-subagents: not probed" ;;
     esac
@@ -5630,6 +5695,13 @@ PYSET
         info "pi preflight: install: not needed"
         rm -f "$PI_RUN_OUT"; return 0 ;;
       absent|mismatch) ;;
+      mismatch-user)
+        # `pi install -l` rewrites only the PROJECT scope: it cannot fix a user-scope entry, so
+        # running third-party code could never end verified. Refuse up front.
+        info "pi preflight: install: not attempted: user-scope mismatch"
+        info "pi preflight: fix: pi install -l only changes the project; update or remove the pi-subagents entry in the user settings.json (${_pf_ad:-the pi agent dir}) so it is pinned or absent"
+        pi_preflight_flag_fail
+        rm -f "$PI_RUN_OUT"; return 0 ;;
       *)
         case "$PI_VER_STATE" in
           missing) _pf_why="pi missing" ;;
@@ -5702,8 +5774,8 @@ PYSET
     if pi_builder_overridden; then mark_unstamped pi; fi
     info "pi preflight: install: $_pf_res"
     case "$_pf_res" in
-      "installed and verified") ;;
-      *) pi_preflight_flag_fail ;;
+      "installed and verified") rm -f "$PI_RUN_OUT.log" ;;
+      *) info "pi preflight: install output kept in $PI_RUN_OUT.log"; pi_preflight_flag_fail ;;
     esac
     rm -f "$PI_RUN_OUT"
     return 0
@@ -9043,6 +9115,10 @@ EOF
   # is not a pi deployment target, ADR-0005). Warn-only; see pi_preflight.
   if agent_selected pi && [ "${SELF_MODE:-0}" != 1 ]; then
     pi_preflight
+  elif [ "${SELF_MODE:-0}" != 1 ] && [ "$PI_DEPS_MODE" = install ] && [ "$PI_DEPS_SOURCE" = flag ]; then
+    # not a `pi preflight:` line (R2: no preflight output without pi); one notice so a CI author
+    # does not read exit 0 as "installed"
+    info "note: --pi-deps=install has no effect — pi is not selected for this target (exit status unchanged)"
   fi
 
   # ── 6b. escalation arming verdict (E17-F05) ─────────────────────────────────
@@ -10149,7 +10225,14 @@ esac
 # fail an install.
 case "$PI_DEPS_MODE" in
   ""|check|install|skip) ;;
-  *) die "unknown --pi-deps value '$PI_DEPS_MODE' — legal values are 'check', 'install' and 'skip' (--pi-deps=<value> / HARNESS_PI_DEPS)" ;;
+  *)
+    # never echo a rejected value raw (control bytes, escapes, newlines): charset before echo
+    case "$PI_DEPS_MODE" in
+      *[!A-Za-z0-9._-]*) _pd_shown="(a value with unsupported characters)" ;;
+      *) _pd_shown="'$PI_DEPS_MODE'" ;;
+    esac
+    [ "${#PI_DEPS_MODE}" -le 40 ] || _pd_shown="(a value over 40 characters)"
+    die "unknown --pi-deps value $_pd_shown — legal values are 'check', 'install' and 'skip' (--pi-deps=<value> / HARNESS_PI_DEPS)" ;;
 esac
 if [ -z "$PI_DEPS_MODE" ]; then PI_DEPS_MODE=check; PI_DEPS_SOURCE=default; fi
 if [ -n "$UMBRELLA" ] && [ "$PI_DEPS_MODE" = install ] && [ "$PI_DEPS_SOURCE" = flag ]; then
