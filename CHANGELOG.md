@@ -24,6 +24,12 @@ All notable changes to the harness body are recorded here. Versions follow
   also requires pi's exact installed-path line and the pin's version on disk. A flag-approved install that does not end
   verified exits with the new status 5 after finishing the run. `--self` never runs pi.
 
+### Fixed
+- `tools/pi-dispatch.sh` also refuses (exit 3) a repeated `tools:` frontmatter key. `fm_get` is
+  first-wins and `pi-subagents` is last-wins, so a duplicate let the fallback and native dispatch
+  paths grant different tool permissions. Key-looking lines in the body are still ignored
+  (R7g split accordingly). Found by Codex review on viernes-ai/viernes-health-specs#2.
+
 ## [0.94.0] — 2026-10-13
 
 ### Added — pi model routing (E35-F03)
