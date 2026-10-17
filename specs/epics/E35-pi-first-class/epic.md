@@ -76,7 +76,7 @@ the parts that make the harness more than one prompt are missing on pi:
 | F02 | pi role sub-agents: `.pi/agents/<role>.md` for pi-subagents + `tools/pi-dispatch.sh` fallback, `--self` | done | true | F01 |
 | F03 | pi model routing: `pin.pi.<tier>`, tier→thinking ladder, escalation arming | done | true | F02 |
 | F04 | pi environment preflight + approval-gated pinned `pi-subagents` install | done | true | F02 |
-| F05 | integrity-pin the `pi-subagents` install: pre-install `npmCommand`/lockfile guards + post-install sha512 and file manifest | spec-ready | true | F04 |
+| F05 | integrity-pin the `pi-subagents` install: pre-install `npmCommand`/lockfile guards + post-install sha512 and tree digest | spec-ready | true | F04 |
 
 ## Notes
 
