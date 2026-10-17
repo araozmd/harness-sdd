@@ -475,3 +475,11 @@
 - [2026-10-13 builder] A guard stacked in BOTH caller and callee (stamp-unsafe checked first by every caller AND again inside `discard_pi_unit_stamp`; a final-component `pi_node_unsafe` before an `rmdir` that already refuses a final symlink) is an EQUIVALENT mutant: removing either alone changes nothing observable, so the Reviewer's mutation pass reports a survivor you cannot kill. Keep ONE guard per hazard, comment why the other layer is not needed, and pin the precedence with a cell where BOTH components are hostile (E35-F02 XP cells). A signal test also must not depend on how the suite was launched: a background-launched suite inherits SIGINT ignored and a shell cannot trap it, so reset the disposition with a python `os.execv` wrapper; and bash runs the EXIT trap on an untrapped TERM where dash does not, so assert the dispatcher WAITED for its child, not just that the temp file is gone.
 - [2026-10-13 reviewer] A node-type shape matrix (absent/file/dir/symlink/dangling) does not cover HARD LINKS: a hard-linked leaf is a regular file, passes `pi_node_unsafe`, and `cat tmp > live` rewrites the linked outside file in place (E35-F02 probe). When a feature claims "never writes through" an operator path, probe a hard link too, and prefer write-to-temp + `mv` for owned files.
 - [2026-10-14 reviewer] When a validator's "never echo unsafe input" rule depends on CHECK ORDER (charset before the echoing form/suffix checks), a table whose every charset-bad row also passes the later checks cannot see a reorder: add rows that fail BOTH the safe-to-echo check and an echoing check (ESC with no slash), and mutate by MOVING the block, not deleting it (E35-F03 A11).
+
+- 2026-10-16 (E35-F03, PR #264 — 5 Codex rounds, all one class): when a verdict depends on a
+  THIRD-PARTY package's config surface (pi-subagents settings: per-agent overrides, provider maps,
+  ceilings, scopes, env-relocated dirs, ancestor project roots, the filesystem root, parse
+  strictness), do not model the surface key by key — Codex finds one more corner per round. Spec
+  the blunt fail-closed rule up front ("any `subagents` key / any unreadable file in any location
+  the package reads → disarm"), derive the LOCATION list from the package's source (not its docs),
+  and table-test each location in round 1.
