@@ -281,7 +281,7 @@ post_checks() {
   cmp -s "$CD/snap.0" "$CD/snap.1" || fail "${CELL:-cell}: the pi agent dir changed during the run (R6/R7)"
   if [ -s "$LOG" ] && [ -d "$TGT" ]; then
     _pc_rt="$(cd "$TGT" && pwd -P)"
-    awk -F'\t' -v rt="$_pc_rt" '{ if ($2 != "cwd=" rt) bad=1; if ($3 != "stdin=devnull") bad=1 } END { exit bad }' "$LOG" \
+    awk -F'\t' -v rt="$_pc_rt" '{ if ($2 != "cwd=" rt && index($2, "cwd=" rt "/") != 1) bad=1; if ($3 != "stdin=devnull") bad=1 } END { exit bad }' "$LOG" \
       || fail "${CELL:-cell}: a pi invocation had the wrong cwd or stdin (R7a): $(cat "$LOG")"
   fi
 }
@@ -554,7 +554,7 @@ EOF
 # ══ R4: trust classification ══════════════════════════════════════════════════════════════
 row_trust() {
   _id="$(fld 1 "$1")"; CELL="trust-$_id"; mkcell "$CELL"
-  _kind="$(fld 2 "$1")"; _body="$(fld 3 "$1")"; _want="$(fld 4 "$1")"
+  _kind="$(fld 2 "$1")"; _body="$(fld 3 "$1")"; _want="$(fld 4 "$1")"; _reason="$(fld 5 "$1")"
   AD="$CD/home/.pi/agent"; mkdir -p "$AD"
   P="$(dirname "$RT")"
   _body="$(printf '%s' "$_body" | sed "s|@T@|$RT|g;s|@P@|$P|g;s|@L@|$CD/lnk|g")"
@@ -582,7 +582,7 @@ PYBIG
   ctl "version ok:1.2.0\n"
   inst "$CTL" "$_env" null $ARGS --pi-deps=check "$_tgtarg"; want_rc 0
   case "$_want" in
-    unknown) grep -q "^${L}trust: unknown (" "$OUT" || fail "$CELL: trust not unknown(<reason>): $(cat "$OUT")" ;;
+    unknown) grep -q "^${L}trust: unknown (${_reason:-[a-z-]*})\$" "$OUT" || fail "$CELL: trust not unknown(${_reason:-<reason>}): $(grep 'trust:' "$OUT")" ;;
     *) hasl "trust: $_want" ;;
   esac
   if [ "$_want" = trusted ]; then nof "pi preflight: fix:"; else hasf "pi preflight: fix: run /trust in an interactive pi session"; fi
@@ -606,20 +606,20 @@ other|file|{"/nowhere":true}|undecided
 link|link|{"@L@":true}|undecided
 linkreal|link|{"@T@":true}|trusted
 bom|bom|{"@T@":true}|trusted
-badjson|file|{|unknown
-arr|file|[]|unknown
-yes|file|{"@T@":"yes"}|unknown
-num|file|{"@T@":1}|unknown
-badother|file|{"@T@":true,"x":"y"}|unknown
-nan|file|{"@T@":NaN}|unknown
-str|file|"x"|unknown
-dir|dir||unknown
-fifo|fifo||unknown
+badjson|file|{|unknown|invalid
+arr|file|[]|unknown|invalid
+yes|file|{"@T@":"yes"}|unknown|invalid
+num|file|{"@T@":1}|unknown|invalid
+badother|file|{"@T@":true,"x":"y"}|unknown|invalid
+nan|file|{"@T@":NaN}|unknown|invalid
+str|file|"x"|unknown|invalid
+dir|dir||unknown|not-a-file
+fifo|fifo||unknown|not-a-file
 dangling|dangling||undecided
 symlink|symlink|{"@T@":true}|trusted
-mode0|mode0|{"@T@":true}|unknown
-big|big||unknown
-rel|relenv||unknown
+mode0|mode0|{"@T@":true}|unknown|unreadable
+big|big||unknown|too-large
+rel|relenv||unknown|agent-dir
 tilde|tilde|{"@T@":true}|trusted
 EOF
   par_wait
@@ -841,6 +841,14 @@ EOF
   CELL=appr-prompt; mkcell "$CELL"; ctl "version ok:1.2.0\n"
   pty_inst "$CTL" - ie 'n\n' $PTYARGS --pi-deps=check "$TGT"
   hasf "[y/N]"; hasf "pi-subagents 0.78.0"; hasf "$TGT"
+  # an umbrella cascade never prompts and never installs, even on a terminal with a typed y
+  CELL=appr-umbrella; mkcell "$CELL"; ctl "version ok:1.2.0\n"
+  mkdir -p "$CD/u/child"; git init -q "$CD/u/child"; TGT="$CD/u"
+  pty_inst "$CTL" - ie 'y\ny\ny\n' --agents=pi --builder-backend=in-session --pr-loop=false --umbrella "$CD/u"
+  # exit 3 is the cascade's own uncommitted-upgrade audit (the child is a bare git init), not pi
+  case "$RC" in 0|3) ;; *) fail "R8: the cascade exited $RC" ;; esac
+  [ "$(grep -c '^argv=\[--version\]' "$LOG")" -ge 1 ] || fail "R8: the cascade never ran the preflight: $(cat "$LOG")"
+  no_install; nof "[y/N]"; hasf "install: not approved — run: "
   # a target path containing a single quote: the printed command round-trips through sh -c
   CELL=appr-quote; mkcell "$CELL"; TGT="$CD/it's here"; mkdir -p "$TGT"; ctl "version ok:1.2.0\n"
   inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; no_install
@@ -862,6 +870,7 @@ shape_setup() { # <setup id>  — builds the hostile state inside $TGT; victims 
   case "$1" in
     pi-symlink) ln -s "$VD" "$TGT/.pi" ;;
     pi-dangling) ln -s "$MISS" "$TGT/.pi" ;;
+    pi-file) : > "$TGT/.pi" ;;
     set-symlink) mkdir -p "$TGT/.pi"; ln -s "$V" "$TGT/.pi/settings.json" ;;
     set-dangling) mkdir -p "$TGT/.pi"; ln -s "$MISS" "$TGT/.pi/settings.json" ;;
     set-dir) mkdir -p "$TGT/.pi/settings.json" ;;
@@ -925,6 +934,7 @@ test_shape_matrix() {
   while IFS= read -r r; do [ -n "$r" ] || continue; par_add row_shape "$r"; done <<'EOF'
 s01|pi-symlink|unsafe path .pi
 s02|pi-dangling|unsafe path .pi
+s02b|pi-file|unsafe path .pi
 s03|set-symlink|unsafe path .pi/settings.json
 s04|set-dangling|unsafe path .pi/settings.json
 s05|set-dir|unsafe path .pi/settings.json

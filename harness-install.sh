@@ -5378,8 +5378,6 @@ except OSError as e:
     out("unknown", "unreadable")
 if not stat.S_ISREG(st.st_mode):
     out("unknown", "not-a-file")
-if st.st_size > 1048576:
-    out("unknown", "too-large")
 try:
     fd = os.open(f, os.O_RDONLY | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as fh:
@@ -5546,8 +5544,7 @@ def nc(c):
 try:
     with open(sys.argv[1], "rb") as fh:
         b = fh.read()
-    if b.startswith(b"\xef\xbb\xbf"):
-        sys.exit(1)
+    # strict utf-8 decode keeps a leading BOM and json.loads then rejects it, as Node does
     d = json.loads(b.decode("utf-8"), parse_constant=nc)
 except Exception:
     sys.exit(1)
