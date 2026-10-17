@@ -404,7 +404,7 @@
         {
           "id": "E35-F04",
           "title": "pi environment preflight + approval-gated pinned pi-subagents install",
-          "status": "in-review",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
