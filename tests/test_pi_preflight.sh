@@ -324,9 +324,16 @@ fld() { printf '%s\n' "$2" | awk -F'|' -v n="$1" '{ print $n }'; }
 ARGS="--agents=pi"
 PTYARGS="--agents=pi --builder-backend=in-session --pr-loop=false"
 
-# parallel table runner: rows on stdin, `ROWFN row` per row, as background jobs
+# parallel table runner: rows on stdin, `ROWFN row` per row, as background jobs. ONE shared
+# worker limit: the test groups run sequentially (run_all below), so at most PPF_JOBS installer
+# jobs run at once suite-wide. Default: online CPUs clamped to [2, 8]; override with PPF_JOBS.
+_ncpu="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 2)"
+case "$_ncpu" in ''|*[!0-9]*) _ncpu=2 ;; esac
+[ "$_ncpu" -ge 2 ] || _ncpu=2; [ "$_ncpu" -le 8 ] || _ncpu=8
+PPF_JOBS="${PPF_JOBS:-$_ncpu}"
+case "$PPF_JOBS" in ''|*[!0-9]*|0) fail "PPF_JOBS must be a positive integer, got '$PPF_JOBS'" ;; esac
 PIDS=""
-par_add() { ( "$@" ) & PIDS="$PIDS $!"; _n=$(( ${_n:-0} + 1 )); [ "$_n" -lt 14 ] || par_wait; }
+par_add() { ( "$@" ) & PIDS="$PIDS $!"; _n=$(( ${_n:-0} + 1 )); [ "$_n" -lt "$PPF_JOBS" ] || par_wait; }
 par_wait() {
   _bad=0
   for _p in $PIDS; do wait "$_p" || _bad=1; done
@@ -1352,23 +1359,12 @@ test_docs() {
   pass "docs/manifest/changelog/version name the feature; one pin constant; portable shell (R12)"
 }
 
-# The test functions are independent (own cells, own subshell): run them concurrently and print
-# their output in order.
+# The test functions are independent (own cells, own subshell). They run one at a time so the
+# PPF_JOBS limit above is suite-wide (concurrent groups multiplied it — Codex P1, PR #267).
 run_all() {
-  _ra_i=0
   for _ra_f in "$@"; do
-    _ra_i=$((_ra_i + 1))
-    ( "$_ra_f" ) > "$T/res.$_ra_f" 2>&1 &
-    eval "_ra_pid_$_ra_i=$!"
+    ( "$_ra_f" ) || exit 1
   done
-  _ra_i=0; _ra_bad=0
-  for _ra_f in "$@"; do
-    _ra_i=$((_ra_i + 1))
-    eval "_ra_p=\$_ra_pid_$_ra_i"
-    wait "$_ra_p" || _ra_bad=1
-    cat "$T/res.$_ra_f"
-  done
-  [ "$_ra_bad" = 0 ] || exit 1
 }
 run_all test_decision_pure test_mode_parse test_gating test_version_table test_trust_table \
   test_list_table test_conflict_table test_runner_hygiene test_approval test_shape_matrix \
