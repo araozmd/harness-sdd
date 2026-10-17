@@ -160,9 +160,13 @@ an entry other than `package.json`, `.gitignore`, `package-lock.json`, `npm-shri
 `dependencies` (`unsafe .pi/npm/package.json content`); or a lockfile is unreadable, has duplicate keys or a
 `resolved` that is not exactly the canonical `https://registry.npmjs.org/...` tarball URL
 (`lockfile <file> unreadable|ambiguous|not canonical`). A mirror registry therefore makes an existing lockfile
-`not canonical`: delete the lockfile, or install without the mirror. Residual: the six dependencies are
-protected only on an install the harness ran (npm fetches them from canonical URLs against lockfile
-integrity); dependencies of an install the harness did not run are not re-verified. `--pi-deps=install` is
+`not canonical`: delete the lockfile, or install without the mirror. Residuals, stated plainly. (1) A project's `.pi/npm/package.json` may list other registry packages
+(plain-semver `dependencies`), and a lockfile may pin them to canonical registry URLs; their install
+scripts run during the approved install, so do not read `pinned` as "only official `pi-subagents` code runs".
+(2) The lockfile check pins each dependency's `resolved` URL but not its `integrity`, and npm can satisfy a
+lockfile `integrity` from your local npm cache without fetching the URL, so a committed lockfile can select
+attacker bytes that are already in that cache. (3) Dependencies of an install the harness did not run are
+not re-verified. `--pi-deps=install` is
 single-target only (not with `--umbrella`); with pi not selected it prints a one-line note
 and has no effect (exit 0, so do not read it as "installed"). A flag-approved install that was not attempted,
 failed, timed out or was not verified finishes the run and exits status 5; every other pi

@@ -67,8 +67,13 @@ tree_digest() {
 SYN="$T/syn"; mkdir -p "$SYN/package/lib"
 printf '{"name":"pi-subagents","version":"0.78.0","dependencies":{"dep":"1.0.0"}}' > "$SYN/package/package.json"
 printf 'export default function () {}\n' > "$SYN/package/index.ts"
-printf 'module.exports = 1;\n' > "$SYN/package/lib/a.js"
+printf 'module.exports = 2;\n' > "$SYN/package/lib/a.js"
 SYN_DIGEST="$(tree_digest "$SYN/package")"
+# the digest sorts rows by RELPATH bytes, not by hash: the fixture is only able to tell the two orders
+# apart when its hash order differs from its path order (E35-F05 round 1, B1) -- assert that here
+_hord="$(cd "$SYN/package" && find . -type f | sed 's|^\./||' | while IFS= read -r _f; do printf '%s %s\n' "$(_sha256 < "$_f" | sed 's/ .*//')" "$_f"; done | LC_ALL=C sort | sed 's/^[^ ]* //' | tr '\n' ' ')"
+_pord="$(cd "$SYN/package" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')"
+[ "$_hord" != "$_pord" ] || fail "setup: the synthetic package's hash order equals its path order ($_pord): the digest sort order would be unpinned"
 ( cd "$SYN" && tar -czf pi-subagents-0.78.0.tgz package )
 SYN_INTEGRITY="$(python3 -c 'import base64,hashlib,sys; print("sha512-" + base64.b64encode(hashlib.sha512(open(sys.argv[1],"rb").read()).digest()).decode())' "$SYN/pi-subagents-0.78.0.tgz")"
 printf '%s\n' "$SYN_INTEGRITY" > "$SYN/integrity"

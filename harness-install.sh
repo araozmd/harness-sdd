@@ -5845,8 +5845,10 @@ def present(p):
         return False
 VER = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?"
 # R1 (project scope only): a key npmCommand or __proto__ at any depth, in every occurrence, after
-# JSON escape decoding. Defensive fallback: F04's strict content check has already refused a
-# project file this reader rejects (R7 step 1), so that branch is not separately mutation-tested.
+# JSON escape decoding. Defensive fallback: a project file this reader rejects was already caught
+# earlier (an oversized file by the status probe's own size cap, which reads `backend status
+# unknown`; links, BOM, NaN and invalid UTF-8 by F04's checks, R7 step 1), so that branch is not
+# separately mutation-tested.
 sf = os.path.join(target, ".pi", "settings.json")
 if present(sf):
     try:

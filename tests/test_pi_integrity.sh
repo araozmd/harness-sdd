@@ -101,6 +101,10 @@ elif var == "bigok":
     data = txt.rstrip("\n") + " " * (4194304 - len(txt.rstrip("\n").encode()))
 elif var == "nan":
     data = '{"lockfileVersion": NaN, "packages": {}}'
+elif var == "inf":
+    data = '{"lockfileVersion": Infinity, "packages": {}}'
+elif var == "ninf":
+    data = '{"lockfileVersion": -Infinity, "packages": {}}'
 else:
     raise SystemExit("unknown variant " + var)
 if data is None:
@@ -217,6 +221,7 @@ row_entries() {
   _id="$1"; cellprep "entries-$_id"; mkdir -p "$NPM"
   case "$_id" in
     yarn) printf '# yarn lockfile v1\n' > "$NPM/yarn.lock" ;;
+    etc-npmrc) mkdir -p "$NPM/etc"; printf 'loglevel=silly\n' > "$NPM/etc/npmrc" ;;
     pnpm) printf "lockfileVersion: '9.0'\n" > "$NPM/pnpm-lock.yaml" ;;
     ws) mkdir -p "$NPM/w1"; printf '{}' > "$NPM/w1/package.json" ;;
     readme) printf 'x\n' > "$NPM/README" ;;
@@ -236,7 +241,7 @@ row_entries() {
 test_prefix_entries() {
   # kills: M3a (R3 removed) yarn/pnpm/ws; M3b (deny-list of lockfile names) readme/escname;
   # M3c (the name echoed) escname; M3d (an allowed name missing from the allow-list) ctrl-all4
-  for r in yarn pnpm ws readme escname npmrc ctrl-all4; do par_add row_entries "$r"; done
+  for r in yarn etc-npmrc pnpm ws readme escname npmrc ctrl-all4; do par_add row_entries "$r"; done
   par_wait
   pass "R3: the .pi/npm direct children are an allow-list; the refusal text never echoes a name"
 }
@@ -266,6 +271,8 @@ row_pkgjson() {
     dup) printf '{"dependencies":{"x":"^1.0.0"},"dependencies":{}}' > "$_f" ;;
     dupdeep) printf '{"dependencies":{"x":"^1.0.0","x":"^1.0.0"}}' > "$_f" ;;
     nan) printf '{"name":NaN}' > "$_f" ;;
+    inf) printf '{"name":Infinity}' > "$_f" ;;
+    ninf) printf '{"name":-Infinity}' > "$_f" ;;
     unparsable) printf '{' > "$_f" ;;
     ctrl-pi) printf '{"name":"pi-extensions","private":true}' > "$_f"; _want=ok ;;
     ctrl-npm) printf '{"name":"pi-extensions","private":true,"dependencies":{"pi-subagents":"^0.78.0","other":"1.2.3"}}' > "$_f"; _want=ok ;;
@@ -282,7 +289,7 @@ test_package_json() {
   # removed) url..depsarray; M4c (re.match with $) nl; M4d (duplicate keys accepted) dup/dupdeep;
   # nonobj (fail-closed: [] has no keys to check); M4e (dependencies missing from the allow-list)
   # ctrl-npm; M6a (strict decode, no BOM strip) ctrl-bom; M6b (strict UTF-8) ctrl-ff
-  for r in overrides workspaces devdeps optdeps scripts version url file git alias tag range or nonstr depsarray nl nonobj dup dupdeep nan unparsable ctrl-pi ctrl-npm ctrl-forms ctrl-bom ctrl-ff; do par_add row_pkgjson "$r"; done
+  for r in overrides workspaces devdeps optdeps scripts version url file git alias tag range or nonstr depsarray nl nonobj dup dupdeep nan inf ninf unparsable ctrl-pi ctrl-npm ctrl-forms ctrl-bom ctrl-ff; do par_add row_pkgjson "$r"; done
   par_wait
   pass "R4: .pi/npm/package.json keys and dependency specs are allow-listed, duplicates and unreadable forms refuse"
 }
@@ -339,6 +346,8 @@ order|package-lock.json|not canonical
 big|package-lock.json|unreadable
 bigok|package-lock.json|ok
 nan|package-lock.json|unreadable
+inf|package-lock.json|unreadable
+ninf|package-lock.json|unreadable
 EOF
   par_wait
   pass "R5/R6: lockfiles need packages, no duplicate keys and exact canonical registry URLs; unreadable forms refuse"
@@ -462,6 +471,8 @@ row_vl() {
     bom) { printf '\357\273\277'; cat "$NPM/package-lock.json"; } > "$NPM/l.t" && mv "$NPM/l.t" "$NPM/package-lock.json"; _want=pinned ;;
     ff) python3 -c 'import sys; b = open(sys.argv[1], "rb").read().replace(b"pi-extensions", b"pi-\xff", 1); open(sys.argv[1], "wb").write(b)' "$NPM/package-lock.json" || fail "$CELL: setup"; _want=pinned ;;
     nan) printf '{"packages":{"node_modules/pi-subagents":{"version":"0.78.0","integrity":"%s"}},"n":NaN}' "$SYN_INTEGRITY" > "$NPM/package-lock.json" ;;
+    inf) printf '{"packages":{"node_modules/pi-subagents":{"version":"0.78.0","integrity":"%s"}},"n":Infinity}' "$SYN_INTEGRITY" > "$NPM/package-lock.json" ;;
+    ninf) printf '{"packages":{"node_modules/pi-subagents":{"version":"0.78.0","integrity":"%s"}},"n":-Infinity}' "$SYN_INTEGRITY" > "$NPM/package-lock.json" ;;
     noentry) printf '{"packages":{}}' > "$NPM/package-lock.json" ;;
     nopackages) printf '{"lockfileVersion":1}' > "$NPM/package-lock.json" ;;
     entrystr) printf '{"packages":{"node_modules/pi-subagents":"x"}}' > "$NPM/package-lock.json" ;;
@@ -479,7 +490,7 @@ test_verify_lockfile() {
   # check) dup-badlast/dup-badfirst; M6a (strict decode) bom; M6b ff; M6c (NaN accepted) nan;
   # M8f (the read follows links) linklock; M8g (S_ISREG check removed -> the fifo hangs, the
   # per-case watchdog reds the row) fifo
-  for r in ok noint wrongint wrongver nolock sw-good sw-bad dup-badlast dup-badfirst dup-other bom ff nan noentry nopackages entrystr linklock fifo; do par_add row_vl "$r"; done
+  for r in ok noint wrongint wrongver nolock sw-good sw-bad dup-badlast dup-badfirst dup-other bom ff nan inf ninf noentry nopackages entrystr linklock fifo; do par_add row_vl "$r"; done
   par_wait
   pass "R8: pinned (project) needs the effective lockfile's version and registry integrity"
 }
@@ -600,8 +611,11 @@ test_constants() {
   done
   # the byte contract: the suite's own implementation over a fixed tree equals a hard-coded digest
   # (2 files: `a` = A, `b/c` = C; lines `<sha256>  <relpath>` sorted by path, one trailing newline)
-  mkdir -p "$T/kat/b"; printf 'A' > "$T/kat/a"; printf 'C' > "$T/kat/b/c"
-  [ "$(tree_digest "$T/kat")" = 76305c77f16817e1bd68a4ae174bd06b6d922d26ee9abdfc50f5468d5644caf9 ] || fail "R11 kat: the suite's tree digest of the fixed tree is $(tree_digest "$T/kat"), want the hard-coded 76305c77f16817e1bd68a4ae174bd06b6d922d26ee9abdfc50f5468d5644caf9"
+  mkdir -p "$T/kat/b"; printf 'A' > "$T/kat/a"; printf 'D' > "$T/kat/b/c"
+  # precondition (B1): the hash order (b/c, then a) differs from the path order (a, then b/c), so a
+  # digest sorted by hash or by the whole line cannot equal the relpath-sorted one
+  [ "$(printf '%s b/c\n%s a\n' "$(printf 'D' | _sha256 | sed 's/ .*//')" "$(printf 'A' | _sha256 | sed 's/ .*//')" | LC_ALL=C sort | head -n 1 | sed 's/^[^ ]* //')" = b/c ] || fail "R11 kat: setup: the hash order equals the path order"
+  [ "$(tree_digest "$T/kat")" = 64254b8d343dd5efae96192cf9c5eca18854d22f5cd14b6ee351a9211b44b17d ] || fail "R11 kat: the suite's tree digest of the fixed tree is $(tree_digest "$T/kat"), want the hard-coded 64254b8d343dd5efae96192cf9c5eca18854d22f5cd14b6ee351a9211b44b17d"
   pass "R11: the two pin constants are single NAME=value lines holding the exact registry integrity and tree digest"
 }
 
@@ -614,7 +628,7 @@ test_docs() {
   awk '/^## \[0.95.0\]/{k=1;next} /^## \[/{k=0} k' "$SRC/CHANGELOG.md" | grep -q 'E35-F04' || fail "R12: the 0.95.0 changelog entry no longer names E35-F04"
   _sec="$(awk '/^### pi$/{k=1;next} /^#{1,3} /{k=0} k' "$SRC/docs/INSTALL.md")"
   ! printf '%s\n' "$_sec" | tr '\n' ' ' | grep -qF 'not an integrity pin' || fail "R12: the INSTALL.md pi section still says 'not an integrity pin'"
-  for w in 'byte-verified' 'npm command override' 'existing .pi/npm/node_modules' 'unexpected entry in .pi/npm' 'not canonical' 'unverified' 'pinned (user)' 'mirror' 'not re-verified' 'remove'; do
+  for w in 'byte-verified' 'npm command override' 'existing .pi/npm/node_modules' 'unexpected entry in .pi/npm' 'not canonical' 'unverified' 'pinned (user)' 'mirror' 'not re-verified' 'cache' 'other registry packages' 'remove'; do
     printf '%s\n' "$_sec" | tr '\n' ' ' | grep -qF -- "$w" || fail "R12: the INSTALL.md pi section does not mention '$w'"
   done
   printf '%s\n' "$_sec" | tr '\n' ' ' | grep -qiE 'pinned \(user\)[^.]{0,40}not byte-verified|not byte-verified[^.]{0,80}pinned \(user\)|`pinned \(user\)` is NOT byte-verified' || fail "R12: the docs do not say pinned (user) is not byte-verified"
@@ -810,7 +824,7 @@ run_all() {
   done
 }
 # PI_ONLY="test_a test_b" runs just those (development aid); PI_KEEP_T=1 keeps the temp dir
-if [ -n "${PI_ONLY:-}" ]; then run_all $PI_ONLY; echo "All selected pi integrity tests passed."; exit 0; fi
+if [ -n "${PI_ONLY:-}" ]; then echo "!!! PI_ONLY is set: running ONLY: $PI_ONLY -- this is NOT the whole suite !!!" >&2; run_all $PI_ONLY; echo "All selected pi integrity tests passed."; exit 0; fi
 run_all test_npm_command test_node_modules test_prefix_entries test_package_json test_lockfiles test_lock_reader \
   test_order_and_exit test_verify_lockfile test_verify_tree test_unverified_flow test_constants test_docs test_real_npm
 echo "All pi integrity tests passed."

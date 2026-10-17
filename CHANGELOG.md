@@ -23,6 +23,9 @@ All notable changes to the harness body are recorded here. Versions follow
   not canonical (a `resolved` other than the exact registry tarball URL; a mirror registry therefore
   refuses). F04's refusals keep their reasons and precedence; every refusal exits 5 under
   `--pi-deps=install`.
+- Documented residuals: the lockfile check pins each dependency's `resolved` URL but not its `integrity`
+  (npm can satisfy an `integrity` from the local npm cache), and dependencies of an install the harness
+  did not run are not re-verified.
 
 ## [0.95.0] — 2026-10-16
 
