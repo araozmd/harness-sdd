@@ -1439,12 +1439,19 @@ test_pi_routing_docs() {
     tr '\n' ' ' < "$SRC/$_d" | grep -qE 'no `model:` or `thinking:`[^.]{0,60}\(E35-F03\)' && fail "R11d: $_d still says role files carry no model:/thinking: (E35-F03)"
   done
   grep -q '^## \[0.94.0\]' "$SRC/CHANGELOG.md" || fail "R11d: CHANGELOG.md lacks ## [0.94.0]"
-  [ "$(cat "$SRC/VERSION")" = 0.94.0 ] || fail "R11d: VERSION is not 0.94.0"
+  # E35-F04 bumped VERSION past 0.94.0; the heading check above pins the release, so this only
+  # requires a well-formed semver (an equality here would red on every later release).
+  grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' "$SRC/VERSION" || fail "R11d: VERSION is not a semver"
   pass "docs, manifest text, CHANGELOG and VERSION describe pi model routing (R11)"
 }
 
 # ── R12: --self resolves pi from the seed; pi=neither; the probe covers pi ───────────────
 test_self_pi_arming() {
+  # E35-F04 R2: --self never runs the pi preflight or any pi command. A logging stub pi sits on
+  # PATH for every --self run in this test; its log must stay empty.
+  _sa_bin="$T/selfarm-bin"; _sa_log="$T/selfarm-pi.log"; mkdir -p "$_sa_bin"; : > "$_sa_log"
+  printf '#!/bin/sh\necho "$*" >> "%s"\nexit 0\n' "$_sa_log" > "$_sa_bin/pi"; chmod +x "$_sa_bin/pi"
+  SANDBOX_PATH_SAVED="$SANDBOX_PATH"; SANDBOX_PATH="$_sa_bin:$SANDBOX_PATH"
   F="$(self_fixture selfarm-a)"; rm -f "$F/.escalation-arming"
   self_run "$F" --self || { cat "$OUT" >&2; fail "R12: --self exited non-zero"; }
   # (a) byte-equal to the committed role files, and no model/thinking lines
@@ -1467,7 +1474,10 @@ pi=neither" ] || fail "R12b: unexpected source arming file: $(cat "$F/.escalatio
   self_run "$F" --self || { cat "$OUT" >&2; fail "R12c: --self failed over an edited builder-heavy.md"; }
   [ "$(sed -n 's/^pi=//p' "$F/.escalation-arming")" = unstamped ] || fail "R12c: an edited .pi/agents/builder-heavy.md did not read pi=unstamped: $(cat "$F/.escalation-arming")"
   [ "$(sed -n 1p "$F/.escalation-arming")" = blocked ] || fail "R12c: the first line is not blocked"
-  pass "--self: pi=neither from the seed, committed bytes unchanged, probe covers pi, second run no-op (R12)"
+  SANDBOX_PATH="$SANDBOX_PATH_SAVED"
+  [ ! -s "$_sa_log" ] || fail "E35-F04 R2: --self executed pi: $(cat "$_sa_log")"
+  ! grep -q 'pi preflight' "$OUT" || fail "E35-F04 R2: --self printed a pi preflight line"
+  pass "--self: pi=neither from the seed, committed bytes unchanged, probe covers pi, second run no-op, no pi executed (R12)"
 }
 
 # ── runner ─────────────────────────────────────────────────────────────────────────────────

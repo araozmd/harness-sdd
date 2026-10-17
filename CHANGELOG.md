@@ -4,7 +4,25 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
-## [Unreleased]
+## [0.95.0] — 2026-10-16
+
+### Added — pi preflight + approval-gated pi-subagents install (E35-F04)
+- Selecting `pi` now prints a read-only `pi preflight:` report: the pi version (floor 1.0.0),
+  the project's trust state (`trust.json`, pi's nearest-decided-key rule), the pinned
+  `pi-subagents` backend status (`pi list -a`, strictly parsed: an unreadable settings file, a control character in a source,
+  a repeated or reordered heading, or an unstable user path never reads `pinned`), the pi example
+  `subagent` extension conflict and any dangling agent links (reported, never modified).
+- `--pi-deps=<check|install|skip>` / `HARNESS_PI_DEPS` (flag wins; default `check`). `install`
+  runs `pi install -l -a npm:pi-subagents@0.78.0` and verifies it with a fresh `pi list -a`;
+  only the flag or a `y` typed at a terminal approves it, never the environment. `check`
+  otherwise prints the exact command. Unsafe paths (`.pi`, `.pi/settings.json`, `.pi/npm`,
+  and the ENTIRE existing `.pi/npm/` tree — lockfiles, `node_modules/.package-lock.json`,
+  `.bin`, `@scope` dirs, anything at any depth: every entry must be a real directory or a
+  regular single-link file; only npm's own `.bin` links pointing inside the tree are allowed),
+  an unparsable `.pi/settings.json`, an existing `.pi/npm/.npmrc`, a user-scope `pi-subagents` mismatch that `-l` cannot fix,
+  a distrusted or unreadable trust store, or an old/unknown pi refuse the install. `pinned`
+  also requires pi's exact installed-path line and the pin's version on disk. A flag-approved install that does not end
+  verified exits with the new status 5 after finishing the run. `--self` never runs pi.
 
 ### Fixed
 - `tools/pi-dispatch.sh` also refuses (exit 3) a repeated `tools:` frontmatter key. `fm_get` is

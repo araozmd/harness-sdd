@@ -118,14 +118,44 @@ project is trusted: run `/trust` in an interactive session, or pass `-a` (`--app
 headless `pi -p` run. `/trust` does not reload the current session, so run `/reload` (or
 restart pi) before invoking the new `/sdd-*` templates and skills. Ownership is pristine-only, recorded in `.harness/.pi-prompts/`: an
 edited or foreign `.pi/prompts/sdd-*.md` survives install and deselection with a warning,
-and `.pi/` is pruned only when empty. The installer never touches `~/.pi/agent` or
-`.pi/settings.json`.
+and `.pi/` is pruned only when empty. The installer never writes under `~/.pi/agent`.
+With your approval (below), `pi install` itself writes the `packages` list in
+`.pi/settings.json` and the `.pi/npm/` directory; both stay yours to remove.
+
+**pi preflight and the pinned backend (E35-F04).** Whenever pi is selected the installer prints a
+read-only `pi preflight:` report: the pi version (floor 1.0.0), the project's trust state, whether
+the pinned `pi-subagents` package is installed, and any conflicting pi example `subagent`
+extension (project `.pi/extensions/` or the agent dir's `extensions/`; pi's example or a legacy `pi-subagents` clone) and
+dangling symlinks directly under the agent dir's `agents/` (it honours `PI_CODING_AGENT_DIR`) and `~/.agents/` (reported, never modified).
+`--pi-deps=check` (default) reports and, when the backend is absent or mismatched, asks `y/N` on a
+real terminal (stdin and stderr both terminals; default N) or prints the exact command
+`(cd '<target>' && pi install -l -a npm:pi-subagents@0.78.0)`. `--pi-deps=install` runs that command
+and verifies it with a fresh `pi list -a`. `--pi-deps=skip` prints one line and runs no pi.
+`HARNESS_PI_DEPS` chooses `check` or `skip` and the flag wins over it; an empty value means no
+override and an illegal value aborts before any write. `HARNESS_PI_DEPS=install` cannot approve an
+install: it is downgraded to `check` with a notice, and only a typed `y` (or the flag) installs. The
+install is refused (`install: not attempted: <reason>`) on a distrusted or unreadable trust store,
+an old or unknown pi, an unparsable `.pi/settings.json`, or an unsafe path: `.pi`, `.pi/settings.json`, `.pi/npm`
+or the `.pi/npm/` tree (a link or the wrong type), and the ENTIRE existing `.pi/npm/` tree at any depth
+(lockfiles, `node_modules/.package-lock.json`, `.bin`, `@scope` dirs ...) must hold only real directories and
+regular single-link files, because the `npm install` that pi spawns writes them in place; the only allowed links are
+npm's own `.bin` links that point inside the tree. A mismatching `pi-subagents` entry in the
+USER scope cannot be fixed by `pi install -l`, so it is reported as `user-scope mismatch` and nothing is run. `pinned`
+means the entry, the installed-path line pi prints and the package version on disk all agree with the pin.
+An existing `.pi/npm/.npmrc` also refuses the install. The pin is `name@version` resolved through npm, not an
+integrity pin: on a project you trust, a committed lockfile can steer the tarball URL. `--pi-deps=install` is
+single-target only (not with `--umbrella`); with pi not selected it prints a one-line note
+and has no effect (exit 0, so do not read it as "installed"). A flag-approved install that was not attempted,
+failed, timed out or was not verified finishes the run and exits status 5; every other pi
+problem leaves the exit status unchanged. Trust: run `/trust` in an interactive pi session
+(then `/reload`), or pass `-a` on headless runs. Bounds: probes 15 s, install 600 s
+(`HARNESS_PI_PROBE_TIMEOUT` / `HARNESS_PI_INSTALL_TIMEOUT` override them with a positive integer).
 
 pi has no sub-agents in core, so role isolation comes in two layers (ADR-0007). Selecting pi
 also writes one `.pi/agents/<role>.md` per role (orchestrator, architect, builder,
 builder-heavy, reviewer, scout, doc-critic, and `pr-fixer` while `pr_loop.enabled` is true),
-in the format of the community `pi-subagents` package (it registers a `subagent` tool; pinned
-install is E35-F04). Each file is a thin pointer to `.harness/agents/<role>.md` plus a tool
+in the format of the community `pi-subagents` package (it registers a `subagent` tool; the pinned
+install is the approval-gated `--pi-deps=install` above). Each file is a thin pointer to `.harness/agents/<role>.md` plus a tool
 allowlist translated from the role's Claude Code tools; it carries `model:`/`thinking:` only
 when the config resolves them (E35-F03, see "pi model and thinking" below), so an
 all-`inherit` role inherits the session's model. Ownership is pristine-only, recorded in
@@ -180,7 +210,8 @@ degraded mode. The installer does not create a git repository.
 2. Run `./harness-install.sh /path/to/your-product`. An interactive install asks up to
    three questions — the front-end picker, the builder backend
    (`execution.builder.backend`), and the PR-loop opt-in (`pr_loop.enabled`). Each has a
-   flag for scripted installs: `--agents=`, `--builder-backend=`, and `--pr-loop=`.
+   flag for scripted installs: `--agents=`, `--builder-backend=`, and `--pr-loop=`
+   (plus `--pi-deps=` for the pi environment preflight, see the pi section).
 3. Run the version-control step **in the installed target**: `cd /path/to/your-product`
    first, then `git init` and make a `commit`. The installer does not change the
    caller's working directory, so an unqualified `git init` would target the harness
