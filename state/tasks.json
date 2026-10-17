@@ -364,7 +364,7 @@
     {
       "id": "E35",
       "title": "pi is a claimed, first-class front end",
-      "status": "planned",
+      "status": "done",
       "owner": "araozmd",
       "features": [
         {
@@ -404,7 +404,8 @@
         {
           "id": "E35-F04",
           "title": "pi environment preflight + approval-gated pinned pi-subagents install",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "730e958fad0e97ef231954d317c7f0e7714bfac6", "ref": "730e958", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [
