@@ -5262,7 +5262,11 @@ env = dict(os.environ)
 if cap:
     env["PI_OFFLINE"] = "1"
 try:
-    logf = None if cap else open(outp + ".log", "ab")
+    logf = None
+    if not cap:
+        lfd = os.open(outp + ".log", os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+        os.fchmod(lfd, 0o600)
+        logf = os.fdopen(lfd, "ab")
     p = subprocess.Popen(["pi"] + args, cwd=cwd, stdin=subprocess.DEVNULL,
                          stdout=(subprocess.PIPE if cap else logf),
                          stderr=(subprocess.DEVNULL if cap else logf),

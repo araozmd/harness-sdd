@@ -915,10 +915,15 @@ test_runner_hygiene() {
   nof CANARY; ! grep -q CANARY "$ERR" || fail "R7c/N9: the install's output reached the installer's stderr"
   # a FAILED install keeps its output in a private log and says where (installer-authored line)
   mkcell hyg-canary4; CELL=hyg-canary4; ctl "version ok:1.2.0\n" "install rc:1"
+  _um="$(umask)"; umask 022
   inst "$CTL" STUB_CANARY=1 null $ARGS --pi-deps=install "$TGT"; want_rc 5
+  umask "$_um"
   nof CANARY; ! grep -q CANARY "$ERR" || fail "N9: a failed install's output reached stderr"
   _lg="$(sed -n 's/^   pi preflight: install output kept in //p' "$OUT")"
   [ -n "$_lg" ] && grep -q CANARY-ERR "$_lg" || fail "N9: the failed install's private log is missing or empty ($_lg)"
+  # the kept log is private (0600) even under a umask of 022
+  _lgm="$(stat -c %a "$_lg" 2>/dev/null || stat -f %Lp "$_lg" 2>/dev/null || echo unknown)"
+  [ "$_lgm" = 600 ] || fail "N9: the failed install's kept log has mode $_lgm under umask 022, want 600"
   rm -f "$_lg"
   # N9: a setsid grandchild of the install must not hold the installer's fds open
   if command -v setsid >/dev/null 2>&1; then
