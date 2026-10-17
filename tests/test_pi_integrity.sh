@@ -495,8 +495,22 @@ test_verify_lockfile() {
   pass "R8: pinned (project) needs the effective lockfile's version and registry integrity"
 }
 
+# open_log -- run the installer's python under an audit hook that logs every path it opens inside
+# the package dir to $OPENLOG (only the program holding tree_ok is instrumented)
+open_log() {
+  OPENLOG="$CD/opens.log"; : > "$OPENLOG"; mkdir -p "$CD/shim"; REALPY="$(command -v python3)"
+  cat > "$CD/hook.py" <<PYHOOK
+import sys as _s
+_lf = open("$OPENLOG", "a", buffering=1)
+_s.addaudithook(lambda e, a: _lf.write(a[0] + "\\n") if e == "open" and isinstance(a[0], str) and "/pi-subagents/" in a[0] else None)
+PYHOOK
+  { printf '#!/bin/sh\ncat > "%s/prog"\n' "$CD"
+    printf 'grep -q "def tree_ok(" "%s/prog" && cat "%s/hook.py" "%s/prog" > "%s/prog2" && mv "%s/prog2" "%s/prog"\n' "$CD" "$CD" "$CD" "$CD" "$CD" "$CD"
+    printf 'exec "%s" "$@" < "%s/prog"\n' "$REALPY" "$CD"; } > "$CD/shim/python3"
+  chmod +x "$CD/shim/python3"; SBPATH="$CD/shim:$SANDBOX_PATH"
+}
 row_vt() {
-  _id="$1"; vcell "vt-$_id"; _want=files
+  _id="$1"; vcell "vt-$_id"; _want=files; OPENLOG=""
   case "$_id" in
     ok) _want=pinned ;;
     extra) printf 'x' > "$P/EVIL.js" ;;
@@ -539,9 +553,20 @@ PYFORGE
     rootlink) mv "$P" "$CD/real-copy"; ln -s "$CD/real-copy" "$P" ;;
     nmlink) mv "$NPM/node_modules" "$CD/nm-copy"; ln -s "$CD/nm-copy" "$NPM/node_modules" ;;
     noR8) printf 'x' >> "$P/index.ts"; mk_lock "$NPM/package-lock.json" -; _want=lockfile ;;
+    manyfiles) mkdir -p "$P/many"; python3 -c 'import sys
+for i in range(10000): open("%s/f%d" % (sys.argv[1], i), "w").close()' "$P/many" || fail "$CELL: setup"; open_log ;;
+    bigfile) truncate -s 67108865 "$P/big" || fail "$CELL: setup"; open_log ;;
     *) fail "unknown R9 row $_id" ;;
   esac
   probe
+  if [ -n "${OPENLOG:-}" ]; then
+    # precondition: the hook saw the package.json read, so an empty match below is not vacuous
+    grep -q '/pi-subagents/package.json$' "$OPENLOG" || fail "$CELL: the open hook logged nothing"
+    case "$_id" in
+      manyfiles) grep -q '/pi-subagents/many/' "$OPENLOG" && fail "$CELL: a file of an over-count tree was opened" ;;
+      bigfile) grep -q '/pi-subagents/big$' "$OPENLOG" && fail "$CELL: a file over the byte cap was opened" ;;
+    esac
+  fi
   case "$_want" in
     pinned) hasl "pi-subagents: pinned 0.78.0 (project)" ;;
     files) hasl "pi-subagents: unverified (files)"; nof "pinned 0.78.0" ;;
@@ -552,8 +577,10 @@ test_verify_tree() {
   # kills: M9a (R9 removed) extra/missing/changed; M9b (the walk follows links) symlink/rootlink/
   # nmlink; M9c (nlink not checked) hardlink; M9d (control-character rule removed) forge-nl;
   # M9e (directories hashed) emptydir; M9f (R9 run regardless of R8, or files ranked above
-  # lockfile) noR8; fifo (a non-regular node is never opened)
-  for r in ok extra missing changed symlink hardlink nested fifo unreadable forge-nl emptydir rootlink nmlink noR8; do par_add row_vt "$r"; done
+  # lockfile) noR8; fifo (a non-regular node is never opened); M9g (no entry-count cap: the
+  # over-count tree is opened) manyfiles; M9h (no byte cap: the 64 MiB + 1 sparse file is opened)
+  # bigfile
+  for r in ok extra missing changed symlink hardlink nested fifo unreadable forge-nl emptydir rootlink nmlink noR8 manyfiles bigfile; do par_add row_vt "$r"; done
   par_wait
   pass "R9: pinned (project) needs the exact tree digest; links, hard links, control-character names and extra files fail"
 }

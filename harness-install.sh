@@ -5470,6 +5470,10 @@ PYTRUST
 import hashlib, json, os, re, stat, sys
 pin, target, ad = sys.argv[2], sys.argv[3], sys.argv[4]
 integrity, tree_sha = sys.argv[5], sys.argv[6]
+# R9 resource bounds, tied to the pin: pi-subagents@0.78.0 is 1331 files, 11950300 bytes unpacked.
+# A tree over either cap is never read (fail closed: `unverified (files)`); a pin bump re-checks them.
+TREE_MAX_ENTRIES = 10000
+TREE_MAX_BYTES = 64 * 1048576
 def out(s):
     print(s)
     sys.exit(0)
@@ -5590,7 +5594,9 @@ def lockfile_ok():
 # E35-F05 plan, "Tree digest"). No link is followed (every component from the target down is a real
 # directory; each entry is a directory or a regular file with link count 1), and a relpath holding
 # a control character is refused: a newline in a name could merge two lines and let a reduced tree
-# reproduce the official digest. Any error => not verified.
+# reproduce the official digest. The walk only lstats; nothing is read until the whole tree fits
+# TREE_MAX_ENTRIES and TREE_MAX_BYTES (by st_size), and each file is then hashed in chunks, never
+# past its lstat size. Any error or cap breach => not verified.
 def tree_ok(path):
     try:
         cur = os.path.realpath(target)
@@ -5598,9 +5604,13 @@ def tree_ok(path):
             cur = os.path.join(cur, part)
             if not stat.S_ISDIR(os.lstat(cur).st_mode):
                 return False
-        rows = []
+        files = []
+        seen = [0, 0]
         def walk(d, rel):
             for n in os.listdir(d):
+                seen[0] += 1
+                if seen[0] > TREE_MAX_ENTRIES:
+                    raise ValueError("too many entries")
                 p = os.path.join(d, n)
                 r = rel + "/" + n if rel else n
                 st = os.lstat(p)
@@ -5610,11 +5620,27 @@ def tree_ok(path):
                     rb = os.fsencode(r)
                     if re.search(rb"[\x00-\x1f\x7f]", rb):
                         raise ValueError("control character in a name")
-                    with open(p, "rb") as fh:
-                        rows.append((rb, hashlib.sha256(fh.read()).hexdigest().encode()))
+                    seen[1] += st.st_size
+                    if seen[1] > TREE_MAX_BYTES:
+                        raise ValueError("too many bytes")
+                    files.append((rb, p, st.st_size))
                 else:
                     raise ValueError("not a plain file")
         walk(path, "")
+        rows = []
+        for rb, p, size in files:
+            h = hashlib.sha256()
+            left = size + 1
+            with open(p, "rb") as fh:
+                while left:
+                    b = fh.read(min(65536, left))
+                    if not b:
+                        break
+                    h.update(b)
+                    left -= len(b)
+            if left != 1:
+                raise ValueError("file changed size while read")
+            rows.append((rb, h.hexdigest().encode()))
         rows.sort()
         return hashlib.sha256(b"".join(h + b"  " + rb + b"\n" for rb, h in rows)).hexdigest() == tree_sha
     except Exception:
