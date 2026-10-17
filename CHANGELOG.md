@@ -4,6 +4,14 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [Unreleased]
+
+### Fixed
+- `tools/pi-dispatch.sh` also refuses (exit 3) a repeated `tools:` frontmatter key. `fm_get` is
+  first-wins and `pi-subagents` is last-wins, so a duplicate let the fallback and native dispatch
+  paths grant different tool permissions. Key-looking lines in the body are still ignored
+  (R7g split accordingly). Found by Codex review on viernes-ai/viernes-health-specs#2.
+
 ## [0.94.0] — 2026-10-13
 
 ### Added — pi model routing (E35-F03)
