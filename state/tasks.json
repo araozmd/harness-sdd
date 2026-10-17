@@ -1206,17 +1206,18 @@
         {
           "id": "E99-F172",
           "title": "Gate the live opencode probe in test_codex_native.sh on opencode 1.x",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "b094ab6a17f88f4b744205e998287d0d37c9973c",
+            "ref": "b094ab6a17f88f4b744205e998287d0d37c9973c",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F172-opencode2-probe-skip/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (269)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E99-F172 done --evidence <merge-ref>`",
-            "pr": "269"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F172-opencode2-probe-skip/"
         }
       ]
     },
