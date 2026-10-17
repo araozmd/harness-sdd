@@ -392,7 +392,8 @@
         {
           "id": "E35-F03",
           "title": "pi model routing: pin.pi.<tier>, tier->thinking ladder, escalation arming",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "3fe984c90f9d6aa1395f87062ea5ad2265a4c38b", "ref": "3fe984c90f9d6aa1395f87062ea5ad2265a4c38b", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [
