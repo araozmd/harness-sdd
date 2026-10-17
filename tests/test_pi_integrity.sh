@@ -85,6 +85,10 @@ elif var == "link":
     pk = setk(pk, "node_modules/jiti", {"link": True, "resolved": "w1"})
 elif var == "key":
     pk = pk + [("x/node_modules/jiti", ent("jiti", "2.7.0"))]
+elif var == "key2":
+    # a key that fails the grammar but whose URL (formula output, "../" included) passes the equality
+    # and normalizes to the OFFICIAL jiti tarball: only the key grammar refuses it
+    pk = [(a, b) for a, b in pk if a != "node_modules/jiti"] + [("node_modules/a/../jiti", ent("jiti", "2.7.0", resolved="https://registry.npmjs.org/a/../jiti/-/jiti-2.7.0.tgz"))]
 elif var == "ctrl-other":
     pk = pk + [("node_modules/left-pad", ent("left-pad", "1.3.0"))]
 elif var == "ctrl-nested":
@@ -92,6 +96,9 @@ elif var == "ctrl-nested":
 elif var == "big":
     txt = raw(pk)
     data = txt.rstrip("\n") + " " * (4194304 + 1 - len(txt.rstrip("\n").encode()))
+elif var == "bigok":
+    txt = raw(pk)
+    data = txt.rstrip("\n") + " " * (4194304 - len(txt.rstrip("\n").encode()))
 elif var == "nan":
     data = '{"lockfileVersion": NaN, "packages": {}}'
 else:
@@ -301,7 +308,7 @@ test_lockfiles() {
   # noresolved; M5f (leaf = the full scoped name) scoped-leaf; M5f' (a wrong leaf for the scoped
   # control) ctrl-scoped = base; M5g (version not part of the URL) ver; M5k (version grammar
   # missing, or after the URL equality) ver-traversal; M5h (prefix match) http/query/mirror;
-  # M5i (key grammar removed) key; M5j (order swapped) order; M6e (no size cap) big; M6c nan
+  # M5i (key grammar removed) key2 (key: the URL check alone already refuses it); M5j (order swapped) order; M6e (no size cap) big; M6c nan
   while IFS='|' read -r id file want; do
     [ -n "$id" ] || continue; par_add row_lock "$id" "$file" "$want"
   done <<'EOF'
@@ -327,8 +334,10 @@ query|package-lock.json|not canonical
 mirror|package-lock.json|not canonical
 link|package-lock.json|not canonical
 key|package-lock.json|not canonical
+key2|package-lock.json|not canonical
 order|package-lock.json|not canonical
 big|package-lock.json|unreadable
+bigok|package-lock.json|ok
 nan|package-lock.json|unreadable
 EOF
   par_wait
@@ -395,6 +404,12 @@ test_order_and_exit() {
   # pi_preflight_flag_fail not called): every refusal row asserts exit 5 AND a finished run
   for r in npmrc-yarn pbom-npmcmd distrust-npmcmd npmcmd-nm nm-yarn yarn-pkgjson pkgjson-lock; do par_add row_order "$r"; done
   par_wait
+  # the run finishes through the arming verdict (the escalation file is written after a refusal)
+  CELL=order-arming; cellprep "$CELL"; tier_target; mkdir -p "$NPM"; : > "$NPM/yarn.lock"
+  : > "$LOG"; ctl "version ok:1.2.0\n" "install real"
+  inst "$CTL" - null $ARGS --pr-loop=false --pi-deps=install "$TGT"
+  refused "unexpected entry in .pi/npm"
+  [ "$(arming_pi)" = raise ] || fail "$CELL: the arming verdict was not written after the refusal (pi=$(arming_pi))"
   # M7g: outside the flag a refusal leaves the exit status unchanged (PTY, `y` typed)
   CELL=order-check-pty; cellprep "$CELL"; mkdir -p "$NPM"; : > "$NPM/yarn.lock"
   pty_inst "$CTL" - ie 'y\n' $PTYARGS "$TGT"; want_rc 0; no_install
@@ -741,6 +756,19 @@ test_real_npm() {
   ! grep -q '/evil/' "$RLOG" || fail "rn-a: the evil URL was requested"
   # (c) a second run: nothing to do
   : > "$LOG"; rn_run; want_rc 0; no_install; hasl "pi-subagents: pinned 0.78.0 (project)"; hasl "install: not needed"
+  # (g) the package files REAL npm wrote are what the digest covers: one appended byte reads
+  # `unverified (files)` and the install is refused (npm would keep the tampered file, fact 8)
+  CELL=rn-g; printf 'X' >> "$NPM/node_modules/pi-subagents/index.ts"; : > "$LOG"; rn_run
+  want_rc 5; no_install; hasl "pi-subagents: unverified (files)"; hasl "install: not attempted: backend unverified"
+  python3 - "$NPM/node_modules/pi-subagents/index.ts" <<'PYUNDO'
+import sys
+b = open(sys.argv[1], "rb").read()
+open(sys.argv[1], "wb").write(b[:-1])
+PYUNDO
+  # the documented residual (R12): a tampered DEPENDENCY of an install the harness did not run is not
+  # re-verified, so the pin still reads pinned
+  CELL=rn-h; printf 'tampered\n' >> "$NPM/node_modules/dep/index.js"; : > "$LOG"; rn_run
+  want_rc 0; no_install; hasl "pi-subagents: pinned 0.78.0 (project)"; hasl "install: not needed"
   # (d) node_modules left from (a), settings moved to @0.77.0: the R2 refusal, no npm
   CELL=rn-d; printf '{"packages":["npm:pi-subagents@0.77.0"]}' > "$TGT/.pi/settings.json"; : > "$LOG"; rn_run
   want_rc 5; no_install; hasl "pi-subagents: mismatch"; hasl "install: not attempted: existing .pi/npm/node_modules"; hasl "$NMFIX"
