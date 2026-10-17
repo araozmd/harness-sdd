@@ -5072,7 +5072,13 @@ EOF
     case "$_pbo_d" in /*) ;; *) return 0 ;; esac
     while :; do
       _pbo_d="${_pbo_d%/*}"
-      [ -n "$_pbo_d" ] || break
+      if [ -z "$_pbo_d" ]; then
+        # The filesystem root is a candidate too: pi-subagents' findProjectRootCandidates
+        # tests a directory BEFORE checking whether it is `/`, unless `/` is HOME.
+        [ "$_pbo_h" = "" ] && [ -n "${HOME:-}" ] && break
+        pi_settings_file_overridden "/.pi/settings.json" 0 && return 0
+        break
+      fi
       if [ -n "$_pbo_h" ] && [ "$_pbo_d" = "$_pbo_h" ]; then break; fi
       [ "$_pbo_n" -lt 64 ] || return 0
       pi_settings_file_overridden "$_pbo_d/.pi/settings.json" 0 && return 0

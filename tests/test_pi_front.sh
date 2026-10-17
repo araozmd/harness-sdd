@@ -570,6 +570,42 @@ pi=unstamped" ] || fail "R11ov(no-home): expected blocked/pi=unstamped: $(cat "$
   mkdir -p "$T/home/.pi"; printf '%s\n' "$_sa" > "$T/home/.pi/settings.json"; _ov home-not-walked raise
   rm -f "$T/home/.pi/settings.json"
   rm -f "$_ps" "$_us"
+  # The filesystem root is an ancestor candidate too (Codex #4300302001) unless `/` is HOME.
+  # A real /.pi is not writable here, so bwrap mounts a fake one over a tmpfs root that
+  # re-binds every top-level entry; skipped (with a note) where bwrap cannot do that.
+  # _ro_run <cmd…> — run <cmd…> under bwrap with `/` rebuilt on a tmpfs from the host's
+  # top-level entries and $T/rootpi mounted at /.pi. POSIX sh has no arrays, so the bwrap
+  # options are appended to "$@" and the command words are then rotated to the end.
+  _ro_run() (
+    _ro_n=$#
+    for _ro_e in /*; do
+      case "${_ro_e#/}" in proc|dev) continue ;; esac
+      if [ -L "$_ro_e" ]; then set -- "$@" --symlink "$(readlink "$_ro_e")" "$_ro_e"
+      else set -- "$@" --bind "$_ro_e" "$_ro_e"; fi
+    done
+    set -- "$@" --proc /proc --dev /dev --bind "$T/rootpi" /.pi
+    while [ "$_ro_n" -gt 0 ]; do set -- "$@" "$1"; shift; _ro_n=$((_ro_n - 1)); done
+    exec bwrap --tmpfs / "$@"
+  )
+  _root_ov() { # <label> <expected verdict> <settings json>   (HOME from $_ro_h)
+    printf '%s\n' "$3" > "$T/rootpi/settings.json"
+    _ro_run env -i PATH="$SANDBOX_PATH" HOME="$_ro_h" CODEX_HOME="$T/ch" sh "$INST" --agents=pi "$_d" \
+      </dev/null >"$OUT" 2>&1 || { cat "$OUT" >&2; fail "setup: the root-walk install ($1) exited non-zero"; }
+    [ "$(sed -n 2p "$_d/.harness/.escalation-arming")" = "pi=$2" ] \
+      || fail "R11ov(root-$1): expected pi=$2: $(cat "$_d/.harness/.escalation-arming")"
+  }
+  mkdir -p "$T/rootpi"
+  if command -v bwrap >/dev/null 2>&1 && _ro_run true 2>/dev/null; then
+    # A target outside HOME, so the walk runs to `/`; its tiers come from the r11c config.
+    _d="$(new_target r11d)"; ok_inst - - --agents=pi "$_d"; _cfg "$_d"; ok_inst - - --agents=pi "$_d"
+    _ro_h="$T/home"
+    _root_ov theme raise '{"theme":1}'
+    _root_ov subagents unstamped '{"subagents":{}}'
+    _ro_h=/
+    _root_ov home-is-root raise '{"subagents":{}}'
+  else
+    echo "note: bwrap cannot mount a fake /.pi here — the filesystem-root walk cell is skipped"
+  fi
   pass "pi is included in the escalation-arming file and its verdict (E35-F03 R9)"
 }
 

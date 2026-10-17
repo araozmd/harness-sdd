@@ -1044,7 +1044,7 @@ Selecting `pi` stamps two optional lines into each `.pi/agents/<role>.md`, right
   `pi-subagents` settings are configured at all. Configuring `pi-subagents` settings
   disarms auto-armed `builder-heavy` on pi: any top-level `subagents` key, whatever its
   value, in `.pi/settings.json`, in any ancestor directory's `.pi/settings.json` (the walk
-  stops before `$HOME`, or at `/` when the target is outside HOME), or in the user `settings.json` (`$PI_CODING_AGENT_DIR/settings.json` when that
+  stops before `$HOME`, or includes `/.pi/settings.json` when the target is outside HOME and HOME is not `/`), or in the user `settings.json` (`$PI_CODING_AGENT_DIR/settings.json` when that
   is set to an absolute path, `~` or `~/…`, else `~/.pi/agent/settings.json`) reads
   `unstamped`. The rule is blunt on purpose: the `pi-subagents` settings surface is large
   and versioned, and any `subagents` entry can change a role's model, thinking, tools or

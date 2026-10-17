@@ -20,7 +20,7 @@ All notable changes to the harness body are recorded here. Versions follow
   E35-F01 R11. The repository's root `.escalation-arming` gains `pi=neither`.
 - `pi=unstamped` also covers configured `pi-subagents` settings: any top-level `subagents`
   key, whatever its value, in `.pi/settings.json`, any ancestor `.pi/settings.json` (the
-  walk stops before `$HOME`, or at `/` when the target is outside HOME), or
+  walk stops before `$HOME`, or includes `/.pi/settings.json` when the target is outside HOME and HOME is not `/`), or
   `$PI_CODING_AGENT_DIR/settings.json` (else `~/.pi/agent/settings.json`), plus a relative
   `PI_CODING_AGENT_DIR` and an unreadable, unparsable or non-object settings file, which
   `pi-subagents` rejects on every launch (read-only, an install-time snapshot, warn-only).
