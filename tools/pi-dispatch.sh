@@ -93,11 +93,12 @@ if fm_has thinking; then
 fi
 
 # E35-F03 R6 — B/C agreement and argv safety. pi-subagents is last-wins on a repeated key
+# (tools: included — a second tools: line would grant different permissions per path)
 # and `fm_get` is first-wins, so a repeated key is drift; an overlong or `-`-leading model
 # is not a model id; a `:<level>` model suffix beside a `thinking:` line runs at one level
 # here (`--thinking` wins) and another through pi-subagents (suffix wins). The charset
 # bracket above is textually the installer's `pi_pin_verdict` one (pinned by test_pi_agents.sh).
-for _k in model thinking; do
+for _k in tools model thinking; do
   _n="$(printf '%s\n' "$fm" | grep -c "^$_k:" || true)"
   [ "$_n" -le 1 ] || fail 3 "$R has $_n $_k: lines (expected at most one)"
 done

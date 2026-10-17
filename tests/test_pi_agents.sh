@@ -803,10 +803,15 @@ test_dispatch_argv_and_passthrough() {
   }
   _ok_tools 'read, bash, mcp:srv/tool.*, my_tool+1-x' 0
   _ok_tools 'read;rm' 3; _ok_tools 'read bash$' 3; _ok_tools 'read|bash' 3; _ok_tools 'read`id`' 3; _ok_tools 'read&' 3; _ok_tools '"read"' 3
-  # (g) only the FIRST frontmatter key counts, and a key-looking line in the BODY is ignored
-  { awk 'NR==1{print; next} /^---$/ && !d {print "tools: read;rm"; d=1} {print}' "$FRESH/reviewer.md"; echo 'thinking: huge'; echo 'model: a b'; } > "$_t/.pi/agents/reviewer.md"
-  rm -rf "$_log"; run_disp "$_t" "$_log" "$STUBBIN" reviewer "$_task" || fail "R7g: a key-looking body line or a later duplicate key broke the dispatch ($(cat "$T/d.err"))"
-  [ "$(argv_i "$_log" 5)" = "read,bash,edit,grep,find,ls" ] || fail "R7g: the first tools: line did not win"
+  # (g) a key-looking line in the BODY is ignored ...
+  { cat "$FRESH/reviewer.md"; echo 'tools: read;rm'; echo 'thinking: huge'; echo 'model: a b'; } > "$_t/.pi/agents/reviewer.md"
+  rm -rf "$_log"; run_disp "$_t" "$_log" "$STUBBIN" reviewer "$_task" || fail "R7g: a key-looking body line broke the dispatch ($(cat "$T/d.err"))"
+  [ "$(argv_i "$_log" 5)" = "read,bash,edit,grep,find,ls" ] || fail "R7g: a body tools: line leaked into --tools"
+  # ... but a DUPLICATE tools: key in the frontmatter is refused: pi-subagents is last-wins and
+  # fm_get first-wins, so the two dispatch paths would grant different tools (R6, Codex review).
+  { awk 'NR==1{print; next} /^---$/ && !d {print "tools: read;rm"; d=1} {print}' "$FRESH/reviewer.md"; } > "$_t/.pi/agents/reviewer.md"
+  rm -rf "$_log"; _rcv=0; run_disp "$_t" "$_log" "$STUBBIN" reviewer "$_task" || _rcv=$?
+  [ "$_rcv" = 3 ] && [ ! -e "$_log/argv" ] || fail "R7g: a duplicate frontmatter tools: key was not refused (rc=$_rcv)"
   # (h) pi killed by a signal aimed at the dispatcher: the temp file is still removed, status is 128+n
   cp "$FRESH/reviewer.md" "$_t/.pi/agents/reviewer.md"
   mkdir -p "$T/sigbin"
@@ -1310,6 +1315,8 @@ ROWS
   _rc=0; run_disp "$_t" "$T/plog2" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?; [ "$_rc" = 3 ] || fail "R6b: two model: lines -> $_rc, expected 3"
   { awk 'NR==1{print; next} /^description:/{print; print "thinking: low"; print "thinking: high"; next} {print}' "$FRESH/reviewer.md"; } > "$_t/.pi/agents/reviewer.md"
   _rc=0; run_disp "$_t" "$T/plog2" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?; [ "$_rc" = 3 ] || fail "R6b: two thinking: lines -> $_rc, expected 3"
+  { awk 'NR==1{print; next} /^tools:/{print; print "tools: read,bash,edit,write"; next} {print}' "$FRESH/reviewer.md"; } > "$_t/.pi/agents/reviewer.md"
+  _rc=0; run_disp "$_t" "$T/plog2" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?; [ "$_rc" = 3 ] || fail "R6b: two tools: lines -> $_rc, expected 3"
   { awk 'NR==1{print; next} /^description:/{print; print "thinking: max"; next} {print}' "$FRESH/reviewer.md"; } > "$_t/.pi/agents/reviewer.md"
   rm -rf "$T/plog2"; _rc=0; run_disp "$_t" "$T/plog2" "$STUBBIN" reviewer "$T/ptask.md" || _rc=$?; [ "$_rc" = 0 ] || fail "R6b: thinking: max -> $_rc, expected pass"
   # the suffix conflict for EVERY one of the seven levels
