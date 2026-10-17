@@ -5438,6 +5438,30 @@ try:
         txt = fh.read().decode("utf-8")
 except Exception:
     out("unknown")
+# N10: pi prints a settings source string verbatim, so a control character (newline included)
+# inside one can forge headings, entries and path lines. Read both settings files directly:
+# any string source holding a control character => unknown, never pinned/mismatch.
+def strings(v):
+    if isinstance(v, str):
+        yield v
+    elif isinstance(v, dict):
+        for x in v.values():
+            yield from strings(x)
+    elif isinstance(v, list):
+        for x in v:
+            yield from strings(x)
+for sf in (os.path.join(target, ".pi", "settings.json"), os.path.join(ad, "settings.json") if ad else None):
+    if not sf:
+        continue
+    try:
+        with open(sf, "rb") as fh:
+            sd = json.loads(fh.read().decode("utf-8"))
+    except Exception:
+        continue
+    if isinstance(sd, dict) and "packages" in sd:
+        for x in strings(sd["packages"]):
+            if re.search(r"[\x00-\x1f\x7f]", x):
+                out("unknown")
 txt = re.sub(r"\x1b\[[0-9;]*m", "", txt)
 if re.search(r"[\x00-\x09\x0b-\x1f\x7f]", txt):
     out("unknown")
@@ -5473,7 +5497,6 @@ for l in lines:
 # entry plus an installed-path line. The path line must therefore be the exact location pi
 # computes for the scope (getManagedNpmInstallPath), and the package there must really be the pin.
 proj_exp = os.path.join(os.path.realpath(target), ".pi", "npm", "node_modules", "pi-subagents")
-user_exp = os.path.join(ad, "npm", "node_modules", "pi-subagents") if ad else None
 def version_state(path):
     try:
         f = os.path.join(path, "package.json")
@@ -5494,8 +5517,16 @@ unreadable = False
 for e in entries:
     if "pi-subagents" not in e["text"].lower():
         continue
-    exp = proj_exp if e["scope"] == "project" else user_exp
-    if e["text"] == "npm:pi-subagents@" + pin and exp is not None and e["path"] == exp:
+    # PROJECT scope: the exact computed path (project settings are the forgery vector). USER
+    # scope: pi falls back to `npm root -g` for a legacy install, so accept the managed path or
+    # any absolute printed path ending /node_modules/pi-subagents whose package.json is the pin.
+    if e["scope"] == "project":
+        exp = proj_exp
+        okp = e["path"] == exp
+    else:
+        exp = e["path"]
+        okp = isinstance(exp, str) and exp.startswith("/") and exp.endswith("/node_modules/pi-subagents")
+    if e["text"] == "npm:pi-subagents@" + pin and okp:
         v = version_state(exp)
         if v == "ok":
             pinned.add(e["scope"])
@@ -5561,11 +5592,12 @@ PYLIST
   # pi_install_paths_safe — can the approved `pi install -l` (and the `npm install … --prefix
   # .pi/npm` it spawns) write what it writes without following a link or writing through a hard
   # link? ONE predicate per hazard (the only path guard). On failure sets PI_UNSAFE_REASON to a
-  # fixed word and returns 1. A link is tested with [ -L ] BEFORE any type test, so it is never
-  # classified by its target. BLUNT rule for the npm prefix: EVERY existing direct child of
-  # .pi/npm/ except node_modules must be a regular file with link count 1 (package.json,
-  # .gitignore, package-lock.json, npm-shrinkwrap.json, whatever npm writes next); node_modules
-  # itself must be a real directory and npm owns everything inside it.
+  # fixed-shape reason and returns 1. BLUNT whole-tree rule (no per-name layers): walk the ENTIRE
+  # existing .pi/npm tree at any depth, hidden names included, never following a symlink; every
+  # entry must be a real directory or a regular file with link count 1. The ONLY exception is a
+  # symlink whose immediate parent directory is named `.bin` and whose resolved target lies
+  # inside realpath(.pi/npm) (npm's own bin links from a previous install). npm writes through
+  # any other link or hard link it finds (lockfiles, node_modules/.package-lock.json, .bin).
   pi_file_unsafe() { # <path> — 0 when a symlink, a non-regular node, or a hard-linked file
     [ -L "$1" ] && return 0
     [ -e "$1" ] || return 1
@@ -5575,7 +5607,7 @@ PYLIST
   }
   pi_install_paths_safe() {
     PI_UNSAFE_REASON=""
-    for _pi_rel in .pi .pi/npm .pi/npm/node_modules; do
+    for _pi_rel in .pi .pi/npm; do
       if [ -L "$TARGET/$_pi_rel" ] || { [ -e "$TARGET/$_pi_rel" ] && [ ! -d "$TARGET/$_pi_rel" ]; }; then
         PI_UNSAFE_REASON="unsafe path $_pi_rel"; return 1
       fi
@@ -5583,18 +5615,54 @@ PYLIST
     if pi_file_unsafe "$TARGET/.pi/settings.json"; then
       PI_UNSAFE_REASON="unsafe path .pi/settings.json"; return 1
     fi
-    for _pi_c in "$TARGET/.pi/npm/"* "$TARGET/.pi/npm/".[!.]* "$TARGET/.pi/npm/"..?*; do
-      [ -e "$_pi_c" ] || [ -L "$_pi_c" ] || continue
-      _pi_n="${_pi_c##*/}"
-      [ "$_pi_n" != node_modules ] || continue
-      if pi_file_unsafe "$_pi_c"; then
-        case "$_pi_n" in
-          package.json|.gitignore|package-lock.json|npm-shrinkwrap.json) PI_UNSAFE_REASON="unsafe path .pi/npm/$_pi_n" ;;
-          *) PI_UNSAFE_REASON="unsafe path .pi/npm/<other>" ;;
+    if [ -d "$TARGET/.pi/npm" ]; then
+      _pi_bad="$(python3 -I - "$TARGET/.pi/npm" <<'PYWALK' 2>/dev/null
+import os, re, stat, sys
+top = sys.argv[1]
+rtop = os.path.realpath(top)
+count = [0]
+def bad(rel):
+    if re.fullmatch(r"[A-Za-z0-9._@+/-]{1,200}", rel):
+        print(rel)
+    else:
+        print("<other>")
+    sys.exit(1)
+def walk(d, rel):
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        bad(rel or "<other>")
+    for n in names:
+        count[0] += 1
+        if count[0] > 200000:
+            bad("<other>")
+        p = os.path.join(d, n)
+        r = rel + "/" + n if rel else n
+        try:
+            st = os.lstat(p)
+        except OSError:
+            bad(r)
+        if stat.S_ISDIR(st.st_mode):
+            walk(p, r)
+        elif stat.S_ISREG(st.st_mode):
+            if st.st_nlink != 1 or r == "node_modules":
+                bad(r)
+        elif stat.S_ISLNK(st.st_mode) and os.path.basename(d) == ".bin":
+            t = os.path.realpath(p)
+            if not (t == rtop or t.startswith(rtop + os.sep)):
+                bad(r)
+        else:
+            bad(r)
+walk(top, "")
+PYWALK
+)" && _pi_rc=0 || _pi_rc=$?
+      if [ "$_pi_rc" != 0 ]; then
+        case "$_pi_bad" in
+          ''|*[!A-Za-z0-9._@+/\<\>-]*) _pi_bad="<other>" ;;
         esac
-        return 1
+        PI_UNSAFE_REASON="unsafe path .pi/npm/$_pi_bad"; return 1
       fi
-    done
+    fi
     if [ -f "$TARGET/.pi/settings.json" ]; then
       # pi merges into this file; it must be a strict (Node-parsable) object whose `packages`,
       # when present, is an array — otherwise pi installs the package but skips the write.

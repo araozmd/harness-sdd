@@ -649,7 +649,8 @@ row_list() {
   _mode="$(fld 2 "$1")"; _want="$(fld 3 "$1")"; _pv="$(fld 4 "$1")"; [ -n "$_pv" ] || _pv=0.78.0
   mk_pkg "$RT/.pi/npm/node_modules/pi-subagents" "$_pv"
   mk_pkg "$CD/home/.pi/agent/npm/node_modules/pi-subagents" "$_pv"
-  _mode="$(printf '%s' "$_mode" | sed "s|@PP@|$RT/.pi/npm/node_modules/pi-subagents|g;s|@UP@|$CD/home/.pi/agent/npm/node_modules/pi-subagents|g")"
+  mk_pkg "$CD/gprefix/lib/node_modules/pi-subagents" "$_pv"
+  _mode="$(printf '%s' "$_mode" | sed "s|@PP@|$RT/.pi/npm/node_modules/pi-subagents|g;s|@UP@|$CD/home/.pi/agent/npm/node_modules/pi-subagents|g;s|@LP@|$CD/gprefix/lib/node_modules/pi-subagents|g")"
   ctl "version ok:1.2.0\n" "list $_mode"
   inst "$CTL" HARNESS_PI_PROBE_TIMEOUT=1 null $ARGS --pi-deps=check "$TGT"; want_rc 0
   case "$_want" in
@@ -676,8 +677,13 @@ mix2|text:User packages:\n  npm:pi-subagents@0.77.0\n    /u\n\nProject packages:
 mix3|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n  npm:pi-subagents@0.77.0\n    /q\n|mismatch
 useronly|text:User packages:\n  npm:pi-subagents@0.77.0\n    /u\n|mismatch-user
 userpin-fakepath|text:User packages:\n  npm:pi-subagents@0.78.0\n    /fake/path\n|mismatch-user
+legacy|text:User packages:\n  npm:pi-subagents@0.78.0\n    @LP@\n|pinned-user|0.78.0|legacy
+legacyold|text:User packages:\n  npm:pi-subagents@0.78.0\n    @LP@\n|mismatch-user|0.77.0|legacy
+legacyrel|text:User packages:\n  npm:pi-subagents@0.78.0\n    lib/node_modules/pi-subagents\n|mismatch-user|0.78.0|legacy
+legacyname|text:User packages:\n  npm:pi-subagents@0.78.0\n    @LP@x\n|mismatch-user|0.78.0|legacy
+projlegacy|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @LP@\n|mismatch|0.78.0|legacy
 fakepath|text:Project packages:\n  npm:pi-subagents@0.78.0\n    /fake/path\n|mismatch
-wrongscope|text:User packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|mismatch-user
+wrongscope|text:User packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|pinned-user
 verother|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|mismatch|0.77.0
 vermissing|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|unknown|none
 verbad|text:Project packages:\n  npm:pi-subagents@0.78.0\n    @PP@\n|unknown|bad
@@ -723,11 +729,45 @@ EOF
   # prints the source verbatim. The forged path is not pi's computed location => not pinned.
   CELL=list-real-forge; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
   mkdir -p "$TGT/.pi"; printf '{"packages":["npm:pi-subagents@0.78.0\\n    /fake/path"]}' > "$TGT/.pi/settings.json"
-  inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: mismatch"; nof "pinned 0.78.0"
+  inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: unknown"; nof "pinned 0.78.0"
   # N6: the installed package must really be the pin (an on-disk 0.77.0 under a 0.78.0 config)
   CELL=list-real-ver; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
   mk_pkg "$TGT/.pi/npm/node_modules/pi-subagents" 0.77.0; printf '{"packages":["npm:pi-subagents@0.78.0"]}' > "$TGT/.pi/settings.json"
   inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: mismatch"; nof "pinned 0.78.0"
+  # N10: a newline in a project source forges a `User packages:` heading plus an entry; both
+  # settings files are read directly and any control character in a source => unknown
+  CELL=list-real-n10; mkcell "$CELL"
+  mk_pkg "$CD/home/.pi/agent/npm/node_modules/pi-subagents" 0.78.0; mkdir -p "$TGT/.pi"
+  python3 - "$TGT/.pi/settings.json" "$CD/home/.pi/agent/npm/node_modules/pi-subagents" <<'PYN10'
+import json, sys
+json.dump({"packages": ["npm:a\n\nUser packages:\n  npm:pi-subagents@0.78.0\n    " + sys.argv[2]]}, open(sys.argv[1], "w"))
+PYN10
+  ctl "version ok:1.2.0\n" "list real"
+  inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: unknown"; nof "pinned 0.78.0"
+  for _cc in 'r' 't' 'e'; do
+    CELL="list-real-n10$_cc"; mkcell "$CELL"; mkdir -p "$TGT/.pi"; ctl "version ok:1.2.0\n" "list real"
+    case "$_cc" in r) _ch='\r' ;; t) _ch='\t' ;; e) _ch='\u001b' ;; esac
+    printf '{"packages":["npm:x%s"]}' "$_ch" > "$TGT/.pi/settings.json"
+    inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: unknown"
+  done
+  # a control character in the USER settings file, or in an object entry's source, counts too —
+  # the list output is otherwise a clean "No packages installed." so only the direct read can see it
+  CELL=list-real-n10u; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list text:No packages installed.\n"
+  mkdir -p "$CD/home/.pi/agent"; printf '{"packages":["npm:y\\nz"]}' > "$CD/home/.pi/agent/settings.json"
+  inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: unknown"
+  CELL=list-real-n10p; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list text:No packages installed.\n"
+  mkdir -p "$TGT/.pi"; printf '{"packages":["npm:y\\nz"]}' > "$TGT/.pi/settings.json"
+  inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: unknown"
+  CELL=list-real-n10o; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list text:No packages installed.\n"
+  mkdir -p "$TGT/.pi"; printf '{"packages":[{"source":"npm:y\\nz","extensions":[]}]}' > "$TGT/.pi/settings.json"
+  inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: unknown"
+  CELL=list-real-n10c; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list text:No packages installed.\n"
+  mkdir -p "$TGT/.pi"; printf '{"packages":["npm:clean@1.0.0"]}' > "$TGT/.pi/settings.json"
+  inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: absent"
+  # N11: a PI_CODING_AGENT_DIR with // and /./ is normalised before comparing the printed path
+  CELL=list-real-n11; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list text:User packages:\n  npm:pi-subagents@0.78.0\n    $CD/alt/npm/node_modules/pi-subagents\n"
+  mk_pkg "$CD/alt/npm/node_modules/pi-subagents" 0.78.0
+  inst "$CTL" "PI_CODING_AGENT_DIR=$CD//alt/./" null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: pinned 0.78.0 (user)"
   pass "pi list -a: strict line-shape parse, fail-closed mismatch, argv/cwd/stdin/offline pinned (R5)"
 }
 
@@ -956,26 +996,43 @@ shape_setup() { # <setup id>  — builds the hostile state inside $TGT; victims 
     npm-file) mkdir -p "$TGT/.pi"; : > "$TGT/.pi/npm" ;;
     pkg-symlink) mkdir -p "$TGT/.pi/npm"; ln -s "$V" "$TGT/.pi/npm/package.json" ;;
     pkg-dangling) mkdir -p "$TGT/.pi/npm"; ln -s "$MISS" "$TGT/.pi/npm/package.json" ;;
-    pkg-dir) mkdir -p "$TGT/.pi/npm/package.json" ;;
+    pkg-dir) mkdir -p "$TGT/.pi/npm/package.json"; ln -s "$V" "$TGT/.pi/npm/package.json/x" ;;
     pkg-hardlink) mkdir -p "$TGT/.pi/npm"; ln "$V" "$TGT/.pi/npm/package.json" ;;
     gi-symlink) mkdir -p "$TGT/.pi/npm"; ln -s "$V" "$TGT/.pi/npm/.gitignore" ;;
     gi-dangling) mkdir -p "$TGT/.pi/npm"; ln -s "$MISS" "$TGT/.pi/npm/.gitignore" ;;
-    gi-dir) mkdir -p "$TGT/.pi/npm/.gitignore" ;;
+    gi-dir) mkdir -p "$TGT/.pi/npm/.gitignore"; ln -s "$V" "$TGT/.pi/npm/.gitignore/x" ;;
     gi-hardlink) mkdir -p "$TGT/.pi/npm"; ln "$V" "$TGT/.pi/npm/.gitignore" ;;
     nm-symlink) mkdir -p "$TGT/.pi/npm"; ln -s "$VD" "$TGT/.pi/npm/node_modules" ;;
     nm-dangling) mkdir -p "$TGT/.pi/npm"; ln -s "$MISS" "$TGT/.pi/npm/node_modules" ;;
     nm-file) mkdir -p "$TGT/.pi/npm"; : > "$TGT/.pi/npm/node_modules" ;;
     lock-symlink) mkdir -p "$TGT/.pi/npm"; ln -s "$V" "$TGT/.pi/npm/package-lock.json" ;;
     lock-dangling) mkdir -p "$TGT/.pi/npm"; ln -s "$MISS" "$TGT/.pi/npm/package-lock.json" ;;
-    lock-dir) mkdir -p "$TGT/.pi/npm/package-lock.json" ;;
+    lock-dir) mkdir -p "$TGT/.pi/npm/package-lock.json"; ln -s "$V" "$TGT/.pi/npm/package-lock.json/x" ;;
     lock-hardlink) mkdir -p "$TGT/.pi/npm"; ln "$V" "$TGT/.pi/npm/package-lock.json" ;;
     shr-symlink) mkdir -p "$TGT/.pi/npm"; ln -s "$V" "$TGT/.pi/npm/npm-shrinkwrap.json" ;;
     shr-dangling) mkdir -p "$TGT/.pi/npm"; ln -s "$MISS" "$TGT/.pi/npm/npm-shrinkwrap.json" ;;
-    shr-dir) mkdir -p "$TGT/.pi/npm/npm-shrinkwrap.json" ;;
+    shr-dir) mkdir -p "$TGT/.pi/npm/npm-shrinkwrap.json"; ln -s "$V" "$TGT/.pi/npm/npm-shrinkwrap.json/x" ;;
     shr-hardlink) mkdir -p "$TGT/.pi/npm"; ln "$V" "$TGT/.pi/npm/npm-shrinkwrap.json" ;;
     xtra-symlink) mkdir -p "$TGT/.pi/npm"; ln -s "$V" "$TGT/.pi/npm/extra.txt" ;;
     xtra-hardlink) mkdir -p "$TGT/.pi/npm"; ln "$V" "$TGT/.pi/npm/extra.txt" ;;
-    xtra-dir) mkdir -p "$TGT/.pi/npm/extra-dir" ;;
+    xtra-dir) mkdir -p "$TGT/.pi/npm/extra-dir"; ln -s "$V" "$TGT/.pi/npm/extra-dir/f" ;;
+    nm-lock-symlink) mkdir -p "$TGT/.pi/npm/node_modules"; ln -s "$V" "$TGT/.pi/npm/node_modules/.package-lock.json" ;;
+    nm-lock-dangling) mkdir -p "$TGT/.pi/npm/node_modules"; ln -s "$MISS" "$TGT/.pi/npm/node_modules/.package-lock.json" ;;
+    nm-lock-hardlink) mkdir -p "$TGT/.pi/npm/node_modules"; ln "$V" "$TGT/.pi/npm/node_modules/.package-lock.json" ;;
+    nm-bin-symlink) mkdir -p "$TGT/.pi/npm/node_modules"; ln -s "$VD" "$TGT/.pi/npm/node_modules/.bin" ;;
+    nm-scope-symlink) mkdir -p "$TGT/.pi/npm/node_modules"; ln -s "$VD" "$TGT/.pi/npm/node_modules/@x" ;;
+    nm-scope-child) mkdir -p "$TGT/.pi/npm/node_modules/@x"; ln -s "$VD" "$TGT/.pi/npm/node_modules/@x/pkg" ;;
+    nm-deep-file) mkdir -p "$TGT/.pi/npm/node_modules/a/b/c"; ln -s "$V" "$TGT/.pi/npm/node_modules/a/b/c/f.js" ;;
+    nm-deep-hard) mkdir -p "$TGT/.pi/npm/node_modules/a/b/c"; ln "$V" "$TGT/.pi/npm/node_modules/a/b/c/f.js" ;;
+    nm-innerbin-out) mkdir -p "$TGT/.pi/npm/node_modules/p/node_modules/.bin"; ln -s "$V" "$TGT/.pi/npm/node_modules/p/node_modules/.bin/x" ;;
+    nm-bin-out) mkdir -p "$TGT/.pi/npm/node_modules/.bin"; ln -s "$V" "$TGT/.pi/npm/node_modules/.bin/x" ;;
+    nm-innerbin-in) mkdir -p "$TGT/.pi/npm/node_modules/p/node_modules/.bin" "$TGT/.pi/npm/node_modules/q"; : > "$TGT/.pi/npm/node_modules/q/x.js"; ln -s ../../../q/x.js "$TGT/.pi/npm/node_modules/p/node_modules/.bin/x" ;;
+    nm-nonbin-link-in) mkdir -p "$TGT/.pi/npm/node_modules/p" "$TGT/.pi/npm/node_modules/q"; ln -s ../q "$TGT/.pi/npm/node_modules/p/link" ;;
+    ctrl-realistic) mkdir -p "$TGT/.pi/npm/node_modules/.bin" "$TGT/.pi/npm/node_modules/pi-subagents/src" "$TGT/.pi/npm/node_modules/@scope/dep"
+      printf '{}\n' > "$TGT/.pi/npm/package.json"; printf '*\n!.gitignore\n' > "$TGT/.pi/npm/.gitignore"; printf '{}\n' > "$TGT/.pi/npm/package-lock.json"
+      printf '{}\n' > "$TGT/.pi/npm/node_modules/.package-lock.json"; printf '{"version":"0.77.0"}' > "$TGT/.pi/npm/node_modules/pi-subagents/package.json"
+      : > "$TGT/.pi/npm/node_modules/pi-subagents/install.mjs"; : > "$TGT/.pi/npm/node_modules/pi-subagents/src/a.js"; : > "$TGT/.pi/npm/node_modules/@scope/dep/index.js"
+      ln -s ../pi-subagents/install.mjs "$TGT/.pi/npm/node_modules/.bin/pi-subagents"; ln -s ../@scope/dep/index.js "$TGT/.pi/npm/node_modules/.bin/dep" ;;
     xtra-hidden) mkdir -p "$TGT/.pi/npm"; ln -s "$V" "$TGT/.pi/npm/.hidden-lock" ;;
     xtra-dotdot) mkdir -p "$TGT/.pi/npm"; ln -s "$V" "$TGT/.pi/npm/..odd" ;;
     ctrl-lockfile) mkdir -p "$TGT/.pi/npm"; printf '{}\n' > "$TGT/.pi/npm/package-lock.json"; printf '{}\n' > "$TGT/.pi/npm/extra.txt" ;;
@@ -1034,28 +1091,41 @@ s16|npm-dangling|unsafe path .pi/npm
 s17|npm-file|unsafe path .pi/npm
 s18|pkg-symlink|unsafe path .pi/npm/package.json
 s19|pkg-dangling|unsafe path .pi/npm/package.json
-s20|pkg-dir|unsafe path .pi/npm/package.json
+s20|pkg-dir|unsafe path .pi/npm/package.json/x
 s21|pkg-hardlink|unsafe path .pi/npm/package.json
 s22|gi-symlink|unsafe path .pi/npm/.gitignore
 s23|gi-dangling|unsafe path .pi/npm/.gitignore
-s24|gi-dir|unsafe path .pi/npm/.gitignore
+s24|gi-dir|unsafe path .pi/npm/.gitignore/x
 s25|gi-hardlink|unsafe path .pi/npm/.gitignore
 s26|nm-symlink|unsafe path .pi/npm/node_modules
 s27|nm-dangling|unsafe path .pi/npm/node_modules
 s28|nm-file|unsafe path .pi/npm/node_modules
 l01|lock-symlink|unsafe path .pi/npm/package-lock.json
 l02|lock-dangling|unsafe path .pi/npm/package-lock.json
-l03|lock-dir|unsafe path .pi/npm/package-lock.json
+l03|lock-dir|unsafe path .pi/npm/package-lock.json/x
 l04|lock-hardlink|unsafe path .pi/npm/package-lock.json
 l05|shr-symlink|unsafe path .pi/npm/npm-shrinkwrap.json
 l06|shr-dangling|unsafe path .pi/npm/npm-shrinkwrap.json
-l07|shr-dir|unsafe path .pi/npm/npm-shrinkwrap.json
+l07|shr-dir|unsafe path .pi/npm/npm-shrinkwrap.json/x
 l08|shr-hardlink|unsafe path .pi/npm/npm-shrinkwrap.json
-l09|xtra-symlink|unsafe path .pi/npm/<other>
-l10|xtra-hardlink|unsafe path .pi/npm/<other>
-l11|xtra-dir|unsafe path .pi/npm/<other>
-l12|xtra-hidden|unsafe path .pi/npm/<other>
-l13|xtra-dotdot|unsafe path .pi/npm/<other>
+l09|xtra-symlink|unsafe path .pi/npm/extra.txt
+l10|xtra-hardlink|unsafe path .pi/npm/extra.txt
+l11|xtra-dir|unsafe path .pi/npm/extra-dir/f
+l12|xtra-hidden|unsafe path .pi/npm/.hidden-lock
+l13|xtra-dotdot|unsafe path .pi/npm/..odd
+w01|nm-lock-symlink|unsafe path .pi/npm/node_modules/.package-lock.json
+w02|nm-lock-dangling|unsafe path .pi/npm/node_modules/.package-lock.json
+w03|nm-lock-hardlink|unsafe path .pi/npm/node_modules/.package-lock.json
+w04|nm-bin-symlink|unsafe path .pi/npm/node_modules/.bin
+w05|nm-scope-symlink|unsafe path .pi/npm/node_modules/@x
+w06|nm-scope-child|unsafe path .pi/npm/node_modules/@x/pkg
+w07|nm-deep-file|unsafe path .pi/npm/node_modules/a/b/c/f.js
+w08|nm-deep-hard|unsafe path .pi/npm/node_modules/a/b/c/f.js
+w09|nm-innerbin-out|unsafe path .pi/npm/node_modules/p/node_modules/.bin/x
+w10|nm-bin-out|unsafe path .pi/npm/node_modules/.bin/x
+w11|nm-nonbin-link-in|unsafe path .pi/npm/node_modules/p/link
+w12|nm-innerbin-in|ok
+w13|ctrl-realistic|ok
 c07|ctrl-lockfile|ok
 t01|trust-false|project distrusted
 t02|trust-bad|project trust unknown

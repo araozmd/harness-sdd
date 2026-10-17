@@ -15,8 +15,9 @@ All notable changes to the harness body are recorded here. Versions follow
   runs `pi install -l -a npm:pi-subagents@0.78.0` and verifies it with a fresh `pi list -a`;
   only the flag or a `y` typed at a terminal approves it, never the environment. `check`
   otherwise prints the exact command. Unsafe paths (`.pi`, `.pi/settings.json`, `.pi/npm`,
-  `.pi/npm/node_modules`, and EVERY other direct child of `.pi/npm/` — `package.json`,
-  `.gitignore`, `package-lock.json`, `npm-shrinkwrap.json`: symlinks, hard links, wrong types),
+  and the ENTIRE existing `.pi/npm/` tree — lockfiles, `node_modules/.package-lock.json`,
+  `.bin`, `@scope` dirs, anything at any depth: every entry must be a real directory or a
+  regular single-link file; only npm's own `.bin` links pointing inside the tree are allowed),
   an unparsable `.pi/settings.json`, a user-scope `pi-subagents` mismatch that `-l` cannot fix,
   a distrusted or unreadable trust store, or an old/unknown pi refuse the install. `pinned`
   also requires pi's exact installed-path line and the pin's version on disk. A flag-approved install that does not end

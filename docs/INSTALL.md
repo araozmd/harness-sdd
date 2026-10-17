@@ -136,9 +136,10 @@ override and an illegal value aborts before any write. `HARNESS_PI_DEPS=install`
 install: it is downgraded to `check` with a notice, and only a typed `y` (or the flag) installs. The
 install is refused (`install: not attempted: <reason>`) on a distrusted or unreadable trust store,
 an old or unknown pi, an unparsable `.pi/settings.json`, or an unsafe path: `.pi`, `.pi/settings.json`, `.pi/npm`
-or `.pi/npm/node_modules` (a link or the wrong type), and every direct child of `.pi/npm/` other than `node_modules`
-(`package.json`, `.gitignore`, `package-lock.json`, `npm-shrinkwrap.json` ...) must be a regular file with a single
-link, because the `npm install` that pi spawns writes them in place. A mismatching `pi-subagents` entry in the
+or the `.pi/npm/` tree (a link or the wrong type), and the ENTIRE existing `.pi/npm/` tree at any depth
+(lockfiles, `node_modules/.package-lock.json`, `.bin`, `@scope` dirs ...) must hold only real directories and
+regular single-link files, because the `npm install` that pi spawns writes them in place; the only allowed links are
+npm's own `.bin` links that point inside the tree. A mismatching `pi-subagents` entry in the
 USER scope cannot be fixed by `pi install -l`, so it is reported as `user-scope mismatch` and nothing is run. `pinned`
 means the entry, the installed-path line pi prints and the package version on disk all agree with the pin.
 `--pi-deps=install` is single-target only (not with `--umbrella`); with pi not selected it prints a one-line note
