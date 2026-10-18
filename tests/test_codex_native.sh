@@ -302,6 +302,9 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
             except Exception: got=None
             if got: return got
             sleep(min(interval,max(deadline-clock(),0)))
+    def octimeout(api_timeout,remaining):
+        # Per-call `opencode api` timeout: never past the warm deadline (no floor; a float is fine).
+        return min(api_timeout,remaining)
     def _warm(seq,limit=60):
         t=[0.0];calls=[]
         def fetch(rem):
@@ -324,6 +327,14 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     _r,_c,_t=_warm([[]]);assert isinstance(_r,AssertionError) and 'cold-start' in str(_r) and len(_c)>2 and _t<=60+0.5,(_r,_c,_t)
     _r,_c,_t=_warm(['raise']);assert isinstance(_r,AssertionError) and 'cold-start' in str(_r) and len(_c)>2 and _t<=60+0.5,(_r,_c,_t)
     assert _c[0]==60 and all(a>b for a,b in zip(_c,_c[1:])),'fetch must receive the shrinking remaining time'
+    # A slow failed poll leaves 0.3 s: the next API call's timeout must stay inside the deadline
+    # (0.3, not a 1 s floor); once remaining <= 0 there is no further call and the result is cold-start.
+    _t=[0.0];_to=[]
+    def _slow(rem):
+        _to.append(octimeout(15,rem));_t[0]+=(59.7 if len(_to)==1 else 0.3);return []
+    try: _r=ocwarm(_slow,60,lambda s:None,lambda:_t[0])
+    except AssertionError as e: _r=e
+    assert isinstance(_r,AssertionError) and 'cold-start' in str(_r) and len(_to)==2 and _to[0]==15 and 0<_to[1]<=60-59.7+1e-9 and abs(_to[1]-0.3)<1e-6,(_r,_to)
     # R7: isolated env for every live probe.
     def ocenv(base=None,tmp=None):
         tmp=pathlib.Path(tmp or tempfile.mkdtemp(prefix='opencode-iso-'))
@@ -430,7 +441,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
                 e=dict(env);e['OPENCODE_PASSWORD']=pw[0]
                 out=tmp/'api.out'
                 with open(out,'w') as fh:
-                    r=subprocess.run([ocbin,'api','--server',url,'GET',path],cwd=layout,env=e,stdout=fh,stderr=subprocess.STDOUT,timeout=max(min(api_timeout,remaining),1))
+                    r=subprocess.run([ocbin,'api','--server',url,'GET',path],cwd=layout,env=e,stdout=fh,stderr=subprocess.STDOUT,timeout=octimeout(api_timeout,remaining))
                 txt=out.read_text(errors='replace')
                 if r.returncode!=0: raise RuntimeError('opencode api GET %s exited %d'%(path,r.returncode))
                 return json.loads(txt)['data']
