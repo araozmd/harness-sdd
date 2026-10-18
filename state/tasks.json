@@ -1240,17 +1240,18 @@
         {
           "id": "E99-F173",
           "title": "pr-loop: detect late comments on existing threads after the CI wait (#259) and reconcile/cancel a queued merge before needs-human (#256)",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "5b088bbd4c2d0008007baa7b1df45801dd34f94b",
+            "ref": "5b088bbd4c2d0008007baa7b1df45801dd34f94b",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F173-pr-loop-late-comments-queued-merge/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (274)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E99-F173 done --evidence <merge-ref>`",
-            "pr": "274"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F173-pr-loop-late-comments-queued-merge/"
         }
       ]
     },
