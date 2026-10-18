@@ -1292,7 +1292,13 @@
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F176-validate-board-draft-warn-crash/"
+          "spec_path": "specs/epics/E99-maintenance/F176-validate-board-draft-warn-crash/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (280)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E99-F176 done --evidence <merge-ref>`",
+            "pr": "280"
+          }
         }
       ]
     },
