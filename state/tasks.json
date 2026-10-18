@@ -1288,7 +1288,7 @@
         {
           "id": "E99-F176",
           "title": "validate-board: draft-epic warning pass crashes with a traceback when epics/features is a non-list scalar",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
