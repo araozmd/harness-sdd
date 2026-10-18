@@ -412,6 +412,49 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
         except ProcessLookupError: return False
         z=subprocess.run(['ps','-o','stat=','-p',str(pid)],stdout=subprocess.PIPE,text=True).stdout.strip()
         return bool(z) and not z.startswith('Z')
+    def pgrp_gone(pgid,proc='/proc'):
+        # A process group is gone when no member exists OR every member is a zombie (state Z):
+        # under a PID 1 that never reaps adopted children, killed grandchildren linger as zombies
+        # and killpg(pgid,0) would succeed forever. Linux: scan <proc>/*/stat (comm is in parens
+        # and may hold spaces or ')', so split on the LAST ')'); elsewhere fall back to killpg.
+        if not os.path.isdir(proc):
+            try: os.killpg(pgid,0)
+            except ProcessLookupError: return True
+            return False
+        for d in os.listdir(proc):
+            if not d.isdigit(): continue
+            try:
+                with open(os.path.join(proc,d,'stat')) as sf: st=sf.read()
+                f=st[st.rindex(')')+1:].split()
+                state,pg=f[0],int(f[2])
+            except (OSError,ValueError,IndexError): continue
+            if pg==pgid and state!='Z': return False
+        return True
+    def _fake_stat(root,pid,comm,state,pgrp):
+        os.makedirs(os.path.join(root,str(pid)),exist_ok=True)
+        with open(os.path.join(root,str(pid),'stat'),'w') as sf: sf.write('%d (%s) %s 1 %d %d 0 -1\n'%(pid,comm,state,pgrp,pgrp))
+    _pr=tempfile.mkdtemp(prefix='fake-proc-')
+    try:
+        os.makedirs(os.path.join(_pr,'self'));_fake_stat(_pr,9,'other','S',900)
+        assert pgrp_gone(500,_pr),'an empty group must count as gone'
+        _fake_stat(_pr,501,'sleep','Z',500);_fake_stat(_pr,502,'sh','Z',500)
+        assert pgrp_gone(500,_pr),'a zombie-only group must count as gone'
+        _fake_stat(_pr,503,'sleep','S',500)
+        assert not pgrp_gone(500,_pr),'a group with a sleeping member must count as alive'
+        _fake_stat(_pr,601,'a) (b 5 c','S',600);_fake_stat(_pr,602,'x) Z 1 700 (y','S',700)
+        assert not pgrp_gone(600,_pr),'tricky comm (")" + spaces) mis-parsed: live member missed'
+        assert not pgrp_gone(700,_pr),'tricky comm (")" + spaces) mis-parsed: live member missed'
+    finally: shutil.rmtree(_pr,ignore_errors=True)
+    if os.path.isdir('/proc/self'):
+        # a REAL unreaped zombie (own session/group) is classified gone; a live sleeper is not
+        _zp=subprocess.Popen(['true'],start_new_session=True);_end=time.monotonic()+5
+        while not pgrp_gone(_zp.pid) and time.monotonic()<_end: time.sleep(0.05)
+        with open('/proc/%d/stat'%_zp.pid) as _sf: _zs=_sf.read()
+        assert _zs[_zs.rindex(')')+1:].split()[0]=='Z' and pgrp_gone(_zp.pid),_zs
+        _zp.wait()
+        _sp=subprocess.Popen(['sleep','30'],start_new_session=True)
+        try: assert not pgrp_gone(_sp.pid),'a live sleeping group was classified gone'
+        finally: _sp.kill();_sp.wait()
     def oc2_probe(ocbin,layout,agents_dir,cmd_stems,start_timeout=30,warm_timeout=60,api_timeout=15,term_grace=10,quiet=False):
         # R3-R6: own a foreground `opencode serve`, wait for it to warm, compare CONTENT, and
         # on EVERY exit path kill its process group. Only --version / serve / api --server /
@@ -425,8 +468,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
         def group_gone(wait):
             end=time.monotonic()+wait
             while True:
-                try: os.killpg(p.pid,0)
-                except ProcessLookupError: return True
+                if pgrp_gone(p.pid): return True
                 if time.monotonic()>=end: return False
                 time.sleep(0.1)
         try:
