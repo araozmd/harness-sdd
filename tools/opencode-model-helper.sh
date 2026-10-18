@@ -44,7 +44,22 @@ if ! cmd_exists opencode; then
   exit 1
 fi
 
-MODELS="$(opencode models 2>/dev/null || true)"
+# opencode 2.x: a bare `opencode models` starts a detached `opencode serve --service`
+# daemon that outlives this script, so ask for `--standalone` there. 1.x rejects that flag
+# (usage text, rc=1), so the flag is chosen by MAJOR. The major is the first component of
+# the first X.Y.Z in `opencode --version` — the same rule as tests/test_codex_native.sh's
+# `ocgate`. A NON-ZERO --version exit means "unknown" whatever it printed (never `|| true`
+# here), and unknown/0/1 keep the historical no-flag call. `if` keeps `set -e` from
+# aborting on a failing version probe.
+if _oc_ver="$(opencode --version 2>/dev/null)"; then
+  _oc_major="$(printf '%s\n' "$_oc_ver" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 | cut -d. -f1)"
+else
+  _oc_major=''
+fi
+case "$_oc_major" in ''|0|1) _oc_models_flag='' ;; *) _oc_models_flag='--standalone' ;; esac
+
+# $_oc_models_flag is unquoted on purpose: empty adds no argument.
+MODELS="$(opencode models $_oc_models_flag 2>/dev/null || true)"
 if [ -z "$MODELS" ]; then
   warn "opencode models returned nothing"
   echo "Check that opencode is authenticated (opencode providers list)."
