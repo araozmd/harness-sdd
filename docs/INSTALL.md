@@ -1236,6 +1236,27 @@ uses — an edited file survives with a warning.
 > only where the orchestrator is a spawned sub-agent (Claude) or the configured primary
 > agent (OpenCode).
 
+### Supported OpenCode versions
+
+The OpenCode glue is verified on **1.18.31**, **1.18.35** and **2.0.32**. Because one layout serves both
+majors, the installer emits the same `opencode.json` (`agent` map, `{file:./.harness/agents/<role>.md}`
+prompts) and the same singular `.opencode/command/` and `.opencode/agent/` directories whatever
+OpenCode you run, and no flag selects it. OpenCode 2.x normalizes the 1.x keys (`agent`, `prompt`,
+`command`) itself and still resolves every role, `pr-fixer` and each `/sdd-*` command from them.
+An absent `opencode` binary changes nothing at install time.
+
+Two 2.x behaviors to know about:
+
+- **2.x leaves a background service.** Every 2.x `opencode debug …` call, and any other
+  service-backed verb (a bare `opencode models` included), starts a detached
+  `opencode serve --service` that keeps running after the command returns. Stop it with
+  `opencode service stop`; `opencode service status` prints `stopped` once it is gone. A
+  one-shot `--standalone` call leaves nothing behind, but it answers from a cold registry.
+- **The first query may be empty.** A freshly started 2.x server can list no agents (not even
+  the built-ins) on its first query and the full set on the next one. Retry rather than
+  concluding the glue is missing. The harness's own live probe owns a foreground
+  `opencode serve`, polls until the list is non-empty (60 s at most), and kills it on exit.
+
 ### OpenCode model helper
 
 OpenCode has no floating tier alias, so you must supply a concrete `provider/model` pin.
@@ -1259,6 +1280,10 @@ Add the snippet by hand under the `models:` block, or apply it automatically:
 ```bash
 sh .harness/tools/opencode-model-helper.sh --apply
 ```
+
+On OpenCode 2.x the helper runs `opencode models --standalone` so it leaves no background
+service behind; on 1.x (which rejects that flag), or when `opencode --version` cannot be read,
+it runs plain `opencode models` as before. The suggested mapping is the same either way.
 
 `--apply` appends missing `pin.opencode.*` lines to `.harness/harness.config.yaml` and
 never overwrites existing values. The mapping is heuristic — review the suggestions before

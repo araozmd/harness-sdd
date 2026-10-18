@@ -4,6 +4,33 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.97.0] — 2026-10-18
+
+### Added — OpenCode 2.x compatibility, a daemon-free 2.x live probe, a 2.x-safe model helper (E31-F03)
+- **No emission change.** One OpenCode layout serves 1.x and 2.x (verified on 1.18.31, 1.18.35
+  and 2.0.32): 2.x normalizes the 1.x `agent` / `prompt` / `command` keys itself and still
+  resolves every role, `pr-fixer` and each `/sdd-*` command, so the installer emits the same
+  bytes as 0.96.3 and selects nothing by major. The earlier `debug agents` `[]` was a cold-start
+  race on a freshly started 2.x server, not a shape problem.
+- New 2.x live probe in `tests/test_codex_native.sh`: it owns a foreground
+  `opencode serve --hostname 127.0.0.1 --port 0`, polls the agent list until warm (60 s at most,
+  failing with `cold-start` / `server did not start`, never skipping), compares each role's
+  resolved `system` to its source file, checks the command set, and kills the server's process
+  group on every exit path, asserting `opencode service status` is `stopped`. It never runs a
+  verb that starts the background service, and it runs under an isolated `HOME` / `XDG_*` with
+  every `OPENCODE*` variable removed. The version gate now routes major 1 and 2 to their own
+  probes and skips any other major with the reason; the 1.x probe also covers a fresh
+  `--agents=opencode` target.
+- `docs/INSTALL.md` documents the verified versions, the single layout, the 2.x background
+  service (`opencode service stop`) and the cold first query.
+
+### Fixed — `opencode-model-helper.sh` leaked a daemon on OpenCode 2.x
+- `tools/opencode-model-helper.sh` ran a bare `opencode models`, which on 2.x leaves a detached
+  `opencode serve --service` running. It now reads the major from `opencode --version` (first
+  `X.Y.Z`, the same rule as the test gate) and passes `--standalone` on major 2 and above. Major 0
+  or 1, unparseable output, or a failing `--version` keep the plain call, because 1.x rejects the
+  flag. The suggested mapping is unchanged.
+
 ## [0.96.3] — 2026-10-18
 
 ### Fixed — validate-board draft-warning pass crashed on a non-list epics/features (E99-F176)
