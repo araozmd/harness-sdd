@@ -99,7 +99,12 @@ case "\$*" in
       head -n 1 "$_e/mvstate"
       [ "\$(wc -l < "$_e/mvstate")" -gt 1 ] && { tail -n +2 "$_e/mvstate" > "$_e/mvstate.n"; mv "$_e/mvstate.n" "$_e/mvstate"; }
     else echo "MERGED 2026-10-10T00:00:00Z bbbb"; fi ;;
-  *"api graphql"*"isInMergeQueue"*) cat "$_e/qstate" 2>/dev/null; : ;;
+  *"api graphql"*"isInMergeQueue"*)
+    # Answer ONLY a query that selects state + isInMergeQueue + autoMergeRequest for PR 7.
+    case "\$*" in
+      *"state isInMergeQueue autoMergeRequest"*"pr=7"*) cat "$_e/qstate" 2>/dev/null; : ;;
+      *) echo "bad merge-state query" >&2; exit 1 ;;
+    esac ;;
   *"--json id"*) echo PR_NODE_7 ;;
   *"pr merge"*"--disable-auto"*|*"dequeuePullRequest"*)
     touch "$_e/cancelled"; [ -e "$_e/cancel_fail" ] && exit 1; : ;;
@@ -579,6 +584,7 @@ PY
     python3 - "$_b" "$PRVIEW_FIELDS" <<'PYF' || fail "256: $_b asks gh pr view --json for a field real gh rejects (e.g. isInMergeQueue)"
 import re, sys
 body, ok = open(sys.argv[1]).read(), set(sys.argv[2].split())
+body = re.sub(r"\\\n\s*", " ", body)
 bad = [f for m in re.finditer(r"gh pr view[^\n]*?--json ([A-Za-z,]+)", body) for f in m.group(1).split(",") if f not in ok]
 sys.exit(1 if bad else 0)
 PYF
@@ -706,6 +712,13 @@ test_queued_merge_never_left_live() {
   for _b in $BODIES; do
     lift_fns "$_b"
     block "$_b" '--match-head-commit "$reviewed_head"' > "$T/merge.sh" || fail "setup: no merge block in $_b"
+    # The state read's REAL jq, over GraphQL-shaped answers (the stub returns canned text).
+    _qjq="$(fn "$_b" queued_merge_reconcile | python3 -c "import re,sys; print(re.search(r\"--jq '(\\.data[^']*)'\", sys.stdin.read()).group(1))")"
+    for _s in 'OPEN|null|false|OPEN false false' 'OPEN|{"enabledAt":"t"}|false|OPEN true false' 'OPEN|null|true|OPEN false true' 'MERGED|null|false|MERGED false false'; do
+      _st="${_s%%|*}"; _r="${_s#*|}"; _am="${_r%%|*}"; _r="${_r#*|}"; _iq="${_r%%|*}"; _want="${_r#*|}"
+      _got="$(printf '{"data":{"repository":{"pullRequest":{"state":"%s","isInMergeQueue":%s,"autoMergeRequest":%s}}}}' "$_st" "$_iq" "$_am" | jq -r "$_qjq" 2>&1)" || :
+      [ "$_got" = "$_want" ] || fail "256: $_b merge-state jq read '$_want' as '$_got'"
+    done
     block "$_b" 'queued_merge_reconcile() {' > "$T/q.sh" || fail "setup: no queued-merge reconcile block in $_b"
     cat "$T/merge.sh" "$T/q.sh" > "$T/mq.sh"
     grep -qF '${HARNESS_QUEUE_RECONCILE_CEILING:-300}' "$T/q.sh" \
@@ -743,7 +756,8 @@ PY
     printf 'OPEN  \n' > "$_e/mvstate"; printf 'CLOSED false false\n' > "$_e/qstate"
     run_block "$_e" "$T/mq.sh" "$_Q"
     grep -q 'pr comment.*may still be queued' "$_e/gh.log" && fail "256: $_b warned about a live request on a CLOSED PR"
-    grep -q 'pr comment.*cancel was confirmed' "$_e/gh.log" || fail "256: $_b CLOSED hand-over does not say nothing is queued"
+    grep -q 'pr comment.*nothing is queued; the PR is CLOSED' "$_e/gh.log" || fail "256: $_b CLOSED hand-over does not say nothing is queued"
+    grep -q 'pr comment.*cancel was confirmed' "$_e/gh.log" && fail "256: $_b CLOSED hand-over claims a cancel"
     # The queue MERGES during the reconcile wait: merged path, no cancel at all.
     _e="$T/q-late"; rm -rf "$_e"; mk_env "$_e" "$_H"
     printf 'OPEN  \nOPEN  \nOPEN  \nMERGED 2026-10-10T00:00:00Z bbbb\n' > "$_e/mvstate"

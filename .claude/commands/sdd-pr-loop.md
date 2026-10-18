@@ -1311,8 +1311,11 @@ queued_merge_reconcile() {
       merge_oid="$(HARNESS_MERGE_VERIFY_CEILING=0 \
         sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" || _q_rc=$?
       [ "$_q_rc" = 0 ] && { merged=1; return 0; } ;;
-    "OPEN false false"|"CLOSED "*)   # cancel held / nothing live: say so in the hand-over
+    "OPEN false false")              # cancel held: say so in the hand-over
       mut gh pr comment "$pr_number" --body "sdd-pr-loop: the queued merge request was cancelled and the cancel was confirmed (state: $_q_st) — the PR did not merge." >/dev/null 2>&1 || :
+      return 1 ;;
+    "CLOSED "*)                      # nothing was ever left to cancel
+      mut gh pr comment "$pr_number" --body "sdd-pr-loop: nothing is queued; the PR is CLOSED and did not merge." >/dev/null 2>&1 || :
       return 1 ;;
   esac
   mut gh pr comment "$pr_number" --body "sdd-pr-loop: could not confirm the queued merge request was cancelled — a merge request may still be queued; check the merge queue / auto-merge before this PR is relied on." >/dev/null 2>&1 || :
@@ -1349,8 +1352,8 @@ stdout is the merge commit oid — pass it to `tasks-lock.py set-status <id> don
 If `gh pr merge` fails — or exits 0 but fails the post receipt with 7 (CLOSED, or state
 unreadable: NOT landed) — (branch-protection race, a required review not yet registered,
 a re-opened thread), retry once after 30s. A post receipt of **11** is NOT retried: the
-request is still live, so `queued_merge_reconcile` above has already waited it out or
-cancelled it. If it still fails the PR will not land: take the
+request is still live, so `queued_merge_reconcile` above has already waited it out,
+cancelled it, or announced that it could not confirm the cancel. If it still fails the PR will not land: take the
 needs-human terminal state below — label `needs-human`, post the error alongside the
 handover summary, and **return failure**. A merge that auto-merge was asked to land and did
 not land is never reported as success.
