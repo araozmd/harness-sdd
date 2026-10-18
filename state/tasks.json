@@ -1857,7 +1857,7 @@
         {
           "id": "E31-F03",
           "title": "OpenCode 2.x compatibility: emitted glue (agents key, agent dir) and CLI probes",
-          "status": "pending",
+          "status": "spec-ready",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
