@@ -134,11 +134,19 @@ def _git(args, cwd):
     Never raises and never blocks: a bounded timeout, and any non-zero exit,
     missing git binary, or timeout maps to None so the caller falls back to
     self-location.
+
+    GIT_NO_LAZY_FETCH=1: in a partial clone a locally missing object (e.g. another
+    branch's board blob under `--filter=blob:none`) would otherwise be fetched from the
+    promisor remote, writing a pack — breaking the read-only/offline contract of the
+    E99-F174 ref scan. With it the `git show` fails and the ref is skipped like any other
+    unreadable one. Honoured since git 2.44; older git ignores it (and may lazy-fetch).
     """
+    env = dict(os.environ, GIT_NO_LAZY_FETCH="1")
     try:
         out = subprocess.run(
             ["git"] + list(args),
             cwd=cwd,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=5,

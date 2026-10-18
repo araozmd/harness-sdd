@@ -8,6 +8,7 @@
 #   A5  a ref whose board is missing or unparsable is skipped WITH a stderr note
 #   A6  the installed layout (`.harness/state/tasks.json`) resolves the in-repo path
 #   A7  the ref scan is capped (MAX_REFS_SCANNED), newest first, and says so
+#   A9  a partial clone's missing board blob is skipped, never lazy-fetched
 #   B   validate-board.py rejects a duplicate feature or epic id (CLI, both validation
 #       paths, and in-process so tasks-lock refuses to WRITE one)
 #   C   `tasks-lock.py renumber`: the guards, the file moves, the duplicate-id selector,
@@ -209,6 +210,38 @@ _got="$(add_id "$R")"
   || fail "A7: under the cap, a-old-high's F30 must still be read (got '$_got')"
 if grep -q 'NOT checked' "$W/err"; then fail "A7: a note claimed a cut under the cap"; fi
 pass "A7 the ref scan is capped at the newest MAX_REFS_SCANNED and reports the cut"
+
+# ── A9: a partial clone's missing board blob is skipped, never lazy-fetched ──
+# A REAL `--filter=blob:none` clone over file:// — the `high` branch's board blob stays on
+# the promisor remote. The scan must not fetch it (no new pack/object in .git/objects),
+# must skip that ref with the stderr note, and still allocate from the visible boards.
+# Partial clone needs git >= 2.19 and GIT_NO_LAZY_FETCH git >= 2.44: SKIP, visibly, when
+# this host cannot build the fixture.
+_a9_skip() { echo "ok - A9 SKIPPED: $1"; }
+_up="$W/a9-remote-src"; mkrepo "$_up" src 1 2
+git -C "$_up" branch -q -M main
+git -C "$_up" checkout -q -b high
+commit_board "$_up" "$_up/state/tasks.json" 1 2 9
+git -C "$_up" checkout -q main
+git clone -q --bare "$_up" "$W/a9-remote.git"
+git -C "$W/a9-remote.git" config uploadpack.allowFilter true
+git -C "$W/a9-remote.git" config uploadpack.allowAnySHA1InWant true
+R="$W/a9"
+if ! git clone -q --no-local --filter=blob:none -b main "file://$W/a9-remote.git" "$R" 2>"$W/a9-clone.err"; then
+  _a9_skip "this git cannot make a partial clone: $(head -1 "$W/a9-clone.err")"
+elif ! git -C "$R" rev-list --objects --missing=print refs/remotes/origin/high 2>/dev/null | grep -q '^?'; then
+  _a9_skip "the clone holds every blob (filter not honoured) — nothing to lazy-fetch"
+else
+  find "$R/.git/objects" -type f | sort > "$W/a9-before"
+  _got="$(add_id "$R")" || fail "A9: a missing promisor blob aborted the allocation: $(cat "$W/err")"
+  find "$R/.git/objects" -type f | sort > "$W/a9-after"
+  cmp -s "$W/a9-before" "$W/a9-after" \
+    || fail "A9: the ref scan lazy-fetched from the promisor remote (new: $(comm -13 "$W/a9-before" "$W/a9-after" | head -3 | tr '\n' ' '))"
+  [ "$_got" = "E99-F03" ] || fail "A9: expected E99-F03 from the visible boards, got '$_got'"
+  grep -q 'refs/remotes/origin/high.*skipped' "$W/err" \
+    || fail "A9: no stderr note skipping the ref whose board blob is missing locally"
+  pass "A9 a partial clone's missing board blob is skipped with a note, never lazy-fetched"
+fi
 
 # ── B: validate-board rejects duplicate ids ──────────────────────────────────
 cat > "$W/dupboard.py" <<'PY'
