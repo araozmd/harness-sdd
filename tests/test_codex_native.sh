@@ -338,7 +338,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
         except ProcessLookupError: return False
         z=subprocess.run(['ps','-o','stat=','-p',str(pid)],stdout=subprocess.PIPE,text=True).stdout.strip()
         return bool(z) and not z.startswith('Z')
-    def oc2_probe(ocbin,layout,agents_dir,cmd_stems,start_timeout=30,warm_timeout=60,term_grace=10,quiet=False):
+    def oc2_probe(ocbin,layout,agents_dir,cmd_stems,start_timeout=30,warm_timeout=60,api_timeout=15,term_grace=10,quiet=False):
         # R3-R6: own a foreground `opencode serve`, wait for it to warm, compare CONTENT, and
         # on EVERY exit path kill its process group. Only --version / serve / api --server /
         # service status are ever run: `debug`, `agent`, `models` and `run` start the 2.x
@@ -371,12 +371,12 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
                 e=dict(env);e['OPENCODE_PASSWORD']=pw[0]
                 out=tmp/'api.out'
                 with open(out,'w') as fh:
-                    r=subprocess.run([ocbin,'api','--server',url,'GET',path],cwd=layout,env=e,stdout=fh,stderr=subprocess.STDOUT,timeout=max(min(15,remaining),1))
+                    r=subprocess.run([ocbin,'api','--server',url,'GET',path],cwd=layout,env=e,stdout=fh,stderr=subprocess.STDOUT,timeout=max(min(api_timeout,remaining),1))
                 txt=out.read_text(errors='replace')
                 if r.returncode!=0: raise RuntimeError('opencode api GET %s exited %d'%(path,r.returncode))
                 return json.loads(txt)['data']
             agents=ocwarm(lambda rem:fetch('/api/agent',rem),time.monotonic()+warm_timeout,time.sleep,time.monotonic)
-            commands=fetch('/api/command',15)
+            commands=fetch('/api/command',api_timeout)
             ids={a['id'] for a in agents}
             want=roles|{'pr-fixer'}
             assert want<=ids,'missing agents %s'%sorted(want-ids)
@@ -411,43 +411,59 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
                 if not st.startswith('stopped'): probs.append('opencode service status is not stopped: %r'%st[:80])
             except Exception as ex: probs.append('cleanup raised %s'%type(ex).__name__)
             shutil.rmtree(tmp,ignore_errors=True)
+            oc2_probe.cleanup_problems=list(probs)
             if probs:
                 if not failed: raise AssertionError('; '.join(probs))
                 if not quiet: print('cleanup problems after a failed probe: '+'; '.join(probs),file=sys.stderr)
     # Hermetic R5/R6 coverage with a FAKE opencode (no real binary, any host): start-up
     # failures, the cold-start deadline, group-kill of a TERM-ignoring child, cleanup after a
     # failed assertion, and the verbs ever invoked.
-    def fake_oc(d,mode,agent_json='[]'):
-        d=pathlib.Path(d);log=d/'argv.log';child=d/'child.pid'
+    def fake_oc(d,mode,agent_json='[]',status='stopped',api_sleep=0):
+        d=pathlib.Path(d);log=d/'argv.log';child=d/'child.pid';envlog=d/'env.log'
         (d/'opencode').write_text('''#!/bin/sh
 echo "$*" >> "%s"
+echo "$1|$PWD|$HOME|$XDG_CONFIG_HOME|$XDG_DATA_HOME|$XDG_STATE_HOME|$XDG_CACHE_HOME|$XDG_RUNTIME_DIR|${OPENCODE_CONFIG:-}|${OPENCODE_PASSWORD:-}" >> "%s"
 case "$1" in
   --version) echo "opencode v2.0.32";;
-  service) echo stopped;;
-  api) case "$5" in /api/agent) echo '{"data":%s}';; /api/command) echo '{"data":[{"name":"sdd-next"}]}';; esac;;
+  service) echo %s;;
+  api) sleep %s; case "$5" in /api/agent) echo '{"data":%s}';; /api/command) echo '{"data":[{"name":"sdd-next"}]}';; esac;;
   serve) case "%s" in
     exit) exit 0;;
     silent) sleep 300 & wait;;
+    pwonly) echo "server password fakepw"; sleep 300 & wait;;
     serve) echo "server listening on http://127.0.0.1:1"; echo "server password fakepw"
            ( trap '' TERM; exec sleep 300 ) & echo $! > "%s"; wait;;
   esac;;
 esac
-'''%(log,agent_json,mode,child))
+'''%(log,envlog,status,api_sleep,agent_json,mode,child))
         os.chmod(d/'opencode',0o755);return str(d/'opencode'),log,child
-    def fake_run(mode,agent_json='[]',**kw):
+    def fake_run(mode,agent_json='[]',status='stopped',api_sleep=0,**kw):
         d=pathlib.Path(tempfile.mkdtemp(prefix='fake-oc-'));lay=d/'layout';lay.mkdir()
         try:
-            b,log,child=fake_oc(d,mode,agent_json)
+            b,log,child=fake_oc(d,mode,agent_json,status,api_sleep)
+            t0=time.monotonic()
             try: oc2_probe(b,lay,'agents',[],quiet=True,**kw);err=None
             except AssertionError as e: err=str(e)
+            fake_run.elapsed=time.monotonic()-t0;fake_run.layout=str(lay)
             argv=log.read_text().splitlines() if log.exists() else []
+            fake_run.env=[l.split('|') for l in (d/'env.log').read_text().splitlines()] if (d/'env.log').exists() else []
             cpid=int(child.read_text()) if child.exists() else None
             return err,argv,cpid
         finally: shutil.rmtree(d,ignore_errors=True)
-    _err,_argv,_ = fake_run('exit',start_timeout=5)
-    assert _err and 'server did not start' in _err,_err
+    import inspect
+    # The spec's numbers (R5): 30 s to start, 60 s to warm; each api call capped at 15 s.
+    _d=inspect.signature(oc2_probe).parameters
+    assert (_d['start_timeout'].default,_d['warm_timeout'].default,_d['api_timeout'].default,_d['term_grace'].default)==(30,60,15,10),_d
+    os.environ['OPENCODE_CONFIG']='/nonexistent/leak.json'   # planted: must never reach opencode
+    _err,_argv,_ = fake_run('exit',start_timeout=20)
+    assert _err and 'server did not start' in _err and 'exited rc=0' in _err and fake_run.elapsed<15,(_err,fake_run.elapsed)
     _err,_argv,_ = fake_run('silent',start_timeout=1,term_grace=1)
     assert _err and 'server did not start' in _err and 'within 1s' in _err,_err
+    _err,_argv,_ = fake_run('pwonly',start_timeout=1,term_grace=1)
+    assert _err and 'server did not start' in _err and 'fakepw' not in _err and '<redacted>' in _err,_err
+    # an api call that never answers is bounded by api_timeout, then the poll gives up
+    _err,_argv,_cpid = fake_run('serve','[]',warm_timeout=3,api_timeout=1,term_grace=1,api_sleep=30)
+    assert _err and 'cold-start' in _err and fake_run.elapsed<20,(_err,fake_run.elapsed)
     _err,_argv,_cpid = fake_run('serve','[]',warm_timeout=2,term_grace=1)
     assert _err and 'cold-start' in _err and 'fakepw' not in _err,_err
     assert _cpid and not _alive(_cpid),'probe left the TERM-ignoring child of the serve process group alive'
@@ -456,6 +472,20 @@ esac
     assert _cpid and not _alive(_cpid),'cleanup did not run (or did not kill the group) after a failed assertion'
     assert _argv[0]=='serve --hostname 127.0.0.1 --port 0',_argv
     assert _argv[-1]=='service status',_argv
+    assert oc2_probe.cleanup_problems==[],oc2_probe.cleanup_problems
+    # Isolation (R7): every invocation ran in the layout, under ONE temp root, with no inherited
+    # OPENCODE_* and the server password only on the api calls.
+    _lay=fake_run.layout;_envs=fake_run.env;assert _envs
+    _root=os.path.commonpath([x for e in _envs for x in e[2:8]])
+    assert _root not in ('/','') and not str(pathlib.Path.home()).startswith(_root) and os.environ['HOME'] not in [x for e in _envs for x in e[2:8]],_root
+    for _e in _envs:
+        assert _e[1]==_lay,_e
+        assert all(x.startswith(_root+'/') for x in _e[2:8]) and _e[8]=='',_e
+        assert (_e[9]=='fakepw')==(_e[0]=='api'),_e
+    # a service that is NOT stopped after the probe is reported
+    fake_run('serve','[]',status='running',warm_timeout=1,term_grace=1)
+    assert any('not stopped' in x for x in oc2_probe.cleanup_problems),oc2_probe.cleanup_problems
+    del os.environ['OPENCODE_CONFIG']
     assert {a.split()[0] for a in _argv}<={'serve','api','service'},_argv
     assert all(a.startswith('api --server http://127.0.0.1:1 GET /api/') for a in _argv if a.startswith('api')),_argv
     print('ok - opencode_probe_hermetic (R5, R6, R7)')

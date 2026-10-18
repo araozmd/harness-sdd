@@ -81,7 +81,7 @@ TABLE
 helper_flag_by_major
 
 # A line of noise before the version must not change the major (first X.Y.Z wins, as in ocgate).
-run_helper 'build 5 of opencode v2.0.32' 0
+run_helper 'build 1 of opencode v2.0.32' 0
 [ "$(grep '^\[models\]' "$T/log")" = '[models][--standalone]' ] \
   || fail "R9: the first X.Y.Z must decide the major even after other digits"
 ok "helper_major_is_first_semver (R9)"
