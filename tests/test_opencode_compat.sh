@@ -73,6 +73,8 @@ opencode v2.0.32|0|[models][--standalone]
 garbage|0|[models]
 |0|[models]
 1.2.3|3|[models]
+opencode v2.0.32 (bun 1.3.1)|0|[models][--standalone]
+1.18.35 node 20.1.0|0|[models]
 opencode v2.0.32|3|[models]
 opencode v2.0.32|1|[models]
 TABLE

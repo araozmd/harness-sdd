@@ -289,7 +289,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
         if major=='2': return 'v2',None
         return None,'detected opencode %s, unsupported major %s (probes target 1.x and 2.x)'%(vm[0],major)
     # Hermetic table: pins the gate (and its reason words) on every host, no binary needed.
-    for _t,_rc,_route,_want in (('1.18.35',0,'v1',None),('opencode v2.0.32',0,'v2',None),('10.1.2',0,None,'unsupported major 10'),('3.0.0',0,None,'unsupported major 3'),('0.9.1',0,None,'unsupported major 0'),('garbage',0,None,'unparseable'),('',0,None,'unparseable'),('1.2.3',3,None,'exited 3'),('garbage',3,None,'exited 3'),('opencode v2.0.32',1,None,'exited 1')):
+    for _t,_rc,_route,_want in (('1.18.35',0,'v1',None),('opencode v2.0.32',0,'v2',None),('10.1.2',0,None,'unsupported major 10'),('3.0.0',0,None,'unsupported major 3'),('0.9.1',0,None,'unsupported major 0'),('garbage',0,None,'unparseable'),('',0,None,'unparseable'),('1.2.3',3,None,'exited 3'),('garbage',3,None,'exited 3'),('opencode v2.0.32',1,None,'exited 1'),('opencode v2.0.32 (bun 1.3.1)',0,'v2',None),('1.18.35 node 20.1.0',0,'v1',None)):
         _got=ocgate(_t,_rc)
         assert _got[0]==_route and (_got[1] is None if _want is None else (_got[1] is not None and _want in _got[1])),(_t,_rc,_got)
     def ocwarm(fetch,deadline,sleep,clock,interval=0.5):
@@ -401,9 +401,9 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
                     except subprocess.TimeoutExpired: pass
                     if not group_gone(term_grace):
                         kill_group(signal.SIGKILL)
-                        try: p.wait(timeout=10)
+                        try: p.wait(timeout=term_grace)
                         except subprocess.TimeoutExpired: pass
-                    if not group_gone(10): probs.append('process group %d still alive after SIGKILL'%p.pid)
+                    if not group_gone(term_grace): probs.append('process group %d still alive after SIGKILL'%p.pid)
                 out=tmp/'status.out'
                 with open(out,'w') as fh:
                     subprocess.run([ocbin,'service','status'],cwd=layout,env=env,stdout=fh,stderr=subprocess.STDOUT,timeout=60)
@@ -432,10 +432,12 @@ case "$1" in
     silent) sleep 300 & wait;;
     pwonly) echo "server password fakepw"; sleep 300 & wait;;
     serve) echo "server listening on http://127.0.0.1:1"; echo "server password fakepw"
-           ( trap '' TERM; exec sleep 300 ) & echo $! > "%s"; wait;;
+           ( trap '' TERM; exec sleep 300 ) & echo $! > "%s"
+           ( trap 'echo got-term > "%s"; exit 0' TERM; sleep 300 & wait ) &
+           wait;;
   esac;;
 esac
-'''%(log,envlog,status,api_sleep,agent_json,mode,child))
+'''%(log,envlog,status,api_sleep,agent_json,mode,child,d/'term.mark'))
         os.chmod(d/'opencode',0o755);return str(d/'opencode'),log,child
     def fake_run(mode,agent_json='[]',status='stopped',api_sleep=0,**kw):
         d=pathlib.Path(tempfile.mkdtemp(prefix='fake-oc-'));lay=d/'layout';lay.mkdir()
@@ -444,7 +446,7 @@ esac
             t0=time.monotonic()
             try: oc2_probe(b,lay,'agents',[],quiet=True,**kw);err=None
             except AssertionError as e: err=str(e)
-            fake_run.elapsed=time.monotonic()-t0;fake_run.layout=str(lay)
+            fake_run.elapsed=time.monotonic()-t0;fake_run.layout=str(lay);fake_run.term_mark=(d/'term.mark').exists()
             argv=log.read_text().splitlines() if log.exists() else []
             fake_run.env=[l.split('|') for l in (d/'env.log').read_text().splitlines()] if (d/'env.log').exists() else []
             cpid=int(child.read_text()) if child.exists() else None
@@ -468,6 +470,15 @@ esac
     _err,_argv,_cpid = fake_run('serve','[]',warm_timeout=2,term_grace=1)
     assert _err and 'cold-start' in _err and 'fakepw' not in _err,_err
     assert _cpid and not _alive(_cpid),'probe left the TERM-ignoring child of the serve process group alive'
+    assert fake_run.term_mark,'SIGTERM was not delivered to the whole process group (a child that handles TERM never saw it)'
+    # the group-gone confirmation: with SIGKILL swallowed the TERM-ignoring child outlives the
+    # kill, and the probe must REPORT it (then we reap it ourselves)
+    _realkg=os.killpg
+    os.killpg=lambda pg,sig:None if sig==signal.SIGKILL else _realkg(pg,sig)
+    try: _err,_argv,_cpid2 = fake_run('serve','[]',warm_timeout=1,term_grace=1)
+    finally: os.killpg=_realkg
+    assert any('still alive' in x for x in oc2_probe.cleanup_problems),oc2_probe.cleanup_problems
+    if _cpid2 and _alive(_cpid2): os.kill(_cpid2,signal.SIGKILL)
     _err,_argv,_cpid = fake_run('serve','[{"id":"orchestrator","system":"x"}]',term_grace=1)
     assert _err and 'missing agents' in _err,_err
     assert _cpid and not _alive(_cpid),'cleanup did not run (or did not kill the group) after a failed assertion'
