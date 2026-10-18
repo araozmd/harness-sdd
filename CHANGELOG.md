@@ -4,6 +4,21 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.96.3] — 2026-10-18
+
+### Fixed — validate-board draft-warning pass crashed on a non-list epics/features (E99-F176)
+- `validate-board.py`'s warn-only draft-epic pass runs before schema validation and iterated
+  `epics` / a draft epic's `features` without a type check, so `{"epics": 5}`, `{"epics": true}`
+  or a draft epic with `"features": 7` printed a `TypeError` traceback instead of the schema
+  error. It now iterates only a real list; a non-list is left to the schema, which reports
+  `epics: expected array` / `epics[0].features: expected array` with rc=1 on both validation
+  paths. The warning text is unchanged.
+- The zero-dependency fallback validator no longer raises `TypeError: cannot use 'list' as a
+  set element` when an enum field (epic/feature/slice `status`, `parked.gate`,
+  `landed.verified`, `landed.slices[].verified`) holds a list or dict: a single shared helper
+  treats an unhashable value as outside the set, so the board gets the usual `not one of ...`
+  error with rc=1.
+
 ## [0.96.2] — 2026-10-17
 
 ### Fixed — concurrent sessions could mint the same fix id (E99-F174, #253)

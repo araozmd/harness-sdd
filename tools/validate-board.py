@@ -127,6 +127,16 @@ def duplicate_id_errors(data):
     return errors
 
 
+def _outside(value, allowed):
+    """`value not in allowed`, but an unhashable value (a list/dict a malformed board put
+    where a string belongs) is simply outside the set instead of raising TypeError
+    (E99-F176). The one place the fallback validator's enum checks absorb that."""
+    try:
+        return value not in allowed
+    except TypeError:
+        return True
+
+
 def _fallback_errors(data):
     """The zero-dependency structural check — a verbatim port of init.sh's fallback."""
     errors = []
@@ -167,7 +177,7 @@ def _fallback_errors(data):
             # ⇒ unowned, which stays valid (backward-compatible).
             if "owner" in ep and not isinstance(ep["owner"], str):
                 errors.append("%s.owner: expected string" % ew)
-            if ep.get("status") not in EPIC_STATUS and "status" in ep:
+            if _outside(ep.get("status"), EPIC_STATUS) and "status" in ep:
                 errors.append(
                     "%s.status '%s': not one of %s"
                     % (ew, ep["status"], sorted(EPIC_STATUS))
@@ -197,7 +207,7 @@ def _fallback_errors(data):
                 # ⇒ falls back to the epic owner, which stays valid.
                 if "owner" in ft and not isinstance(ft["owner"], str):
                     errors.append("%s.owner: expected string" % fw)
-                if ft.get("status") not in FEAT_STATUS and "status" in ft:
+                if _outside(ft.get("status"), FEAT_STATUS) and "status" in ft:
                     errors.append(
                         "%s.status '%s': not one of %s"
                         % (fw, ft["status"], sorted(FEAT_STATUS))
@@ -247,7 +257,7 @@ def _fallback_errors(data):
                         # Optional (additive, E99-F77) gate discriminator. Same
                         # mirroring rule as the park itself: the zero-dependency path
                         # must not accept a board the JSON schema rejects.
-                        if "gate" in park and park.get("gate") not in PARK_GATES:
+                        if "gate" in park and _outside(park.get("gate"), PARK_GATES):
                             errors.append(
                                 "%s.parked.gate '%s': not one of %s"
                                 % (fw, park.get("gate"), sorted(PARK_GATES))
@@ -276,7 +286,7 @@ def _fallback_errors(data):
                             errors.append(
                                 "%s.landed.ref: expected a non-empty string" % fw
                             )
-                        if landed.get("verified") not in LANDED_VERIFIED:
+                        if _outside(landed.get("verified"), LANDED_VERIFIED):
                             errors.append(
                                 "%s.landed.verified '%s': not one of %s"
                                 % (fw, landed.get("verified"), sorted(LANDED_VERIFIED))
@@ -354,7 +364,7 @@ def _fallback_errors(data):
                                                 "must name the commit it was checked on "
                                                 "and the base it was checked against" % (lw, k)
                                             )
-                                if lrec.get("verified") not in LANDED_VERIFIED:
+                                if _outside(lrec.get("verified"), LANDED_VERIFIED):
                                     errors.append(
                                         "%s.verified '%s': not one of %s"
                                         % (lw, lrec.get("verified"), sorted(LANDED_VERIFIED))
@@ -412,7 +422,7 @@ def _fallback_errors(data):
                                 )
                         if "repo" in sl and not isinstance(sl["repo"], str):
                             errors.append("%s.repo: expected string" % sw)
-                        if sl.get("status") not in SLICE_STATUS and "status" in sl:
+                        if _outside(sl.get("status"), SLICE_STATUS) and "status" in sl:
                             errors.append(
                                 "%s.status '%s': not one of %s"
                                 % (sw, sl["status"], sorted(SLICE_STATUS))
@@ -916,10 +926,14 @@ def _emit_draft_warnings(data):
     already neutralizes it — so we warn and continue. Preserved verbatim from
     init.sh so the CLI's stderr output is byte-identical.
     """
-    if isinstance(data, dict):
-        for ep in data.get("epics") or []:
-            if isinstance(ep, dict) and ep.get("status") == "draft":
-                for ft in ep.get("features") or []:
+    # Runs BEFORE schema validation, so `epics` / `features` may be any JSON type: iterate
+    # only a real list. A non-list is the schema's to report (`expected array`), never a
+    # TypeError here (E99-F176).
+    if isinstance(data, dict) and isinstance(data.get("epics"), list):
+        for ep in data["epics"]:
+            if isinstance(ep, dict) and ep.get("status") == "draft" \
+                    and isinstance(ep.get("features"), list):
+                for ft in ep["features"]:
                     if isinstance(ft, dict) and ft.get("status") != "pending":
                         print(
                             "⚠️  draft epic %s has feature %s with status '%s' "
