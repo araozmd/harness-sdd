@@ -1284,6 +1284,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F175-suite-flakes/"
+        },
+        {
+          "id": "E99-F176",
+          "title": "validate-board: draft-epic warning pass crashes with a traceback when epics/features is a non-list scalar",
+          "status": "in-progress",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F176-validate-board-draft-warn-crash/"
         }
       ]
     },
