@@ -2078,8 +2078,10 @@ class _RenumberFiles(object):
     """The file moves a renumber carries: inbox brief and progress dir.
 
     Planned in-lock (every refusal raises BEFORE anything moves), applied just before the
-    board replace, and undone if the replace fails — the board and its files move together
-    or not at all. `progress/inbox/<old>.md` is rewritten to `<new>.md` with its
+    board replace, and undone on any exception raised in-process before the replace
+    completes. The undo is best-effort: a step that cannot be restored is reported on
+    stderr, and a process killed between the moves and the replace leaves the moves
+    applied under an unchanged board (re-run, or move back by hand). `progress/inbox/<old>.md` is rewritten to `<new>.md` with its
     frontmatter `feature:` updated; `progress/<old>/` is renamed.
     """
 
@@ -2181,8 +2183,9 @@ class _RenumberFiles(object):
                     os.unlink(dst)
                 else:
                     os.rename(dst, src)
-            except OSError:
-                pass
+            except OSError as exc:
+                _warn("ROLLBACK FAILED for %s -> %s (%s) — restore it by hand"
+                      % (src, dst, exc))
         self.done = []
 
 
@@ -2206,8 +2209,9 @@ def _renumber_transform(args, hdir, ref_max, holder):
             raise ValueError("--index and --title-match are mutually exclusive")
         epics = [e for e in data.get("epics") or []
                  if isinstance(e, dict) and e.get("id") == epic_id]
-        if len(epics) != 1:
-            raise ValueError("epic %s must appear exactly once on the board" % epic_id)
+        # A duplicated epic id is the validator's to refuse (on the output board).
+        if not epics:
+            raise ValueError("epic %s not found on the board" % epic_id)
         epic = epics[0]
         if new_n <= max(_epic_max_n(data, epic_id), ref_max):
             raise ValueError(
@@ -2245,6 +2249,11 @@ def _renumber_transform(args, hdir, ref_max, holder):
         ft = picked[0][1]
         if ft.get("status") == "done":
             raise ValueError("%s is done — a landed row is never renumbered" % args.old_id)
+        if "parked" in ft:
+            raise ValueError(
+                "%s is parked (await-merge/owner gate) — its park text names the old "
+                "id; unpark it first" % args.old_id
+            )
         if "landed" in ft:
             raise ValueError("%s carries a landed record — never renumbered" % args.old_id)
         for ep in data.get("epics") or []:

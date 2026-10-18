@@ -29,6 +29,10 @@ pass() { echo "ok - $1"; }
 
 W="$(mktemp -d 2>/dev/null || mktemp -d -t harness-fixid)"
 trap 'chmod -R u+rwx "$W" 2>/dev/null || true; rm -rf "$W"' EXIT INT TERM
+# Stop git's repository discovery at $W: a TMPDIR inside some work tree must not turn the
+# no-git fixture (or any "not a repo" expectation) into a repo. Fixture repos under $W/<n>
+# are found directly and are unaffected. Pinned by the nested self-run at the end.
+export GIT_CEILING_DIRECTORIES="$W"
 
 # git identity/config hermetic: no global hooks, signing, or templates leak in.
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
@@ -356,11 +360,15 @@ refuses "$R" 'spec_path' E99-F03 E99-F06
 R="$W/c-pathexists"; mk_ren "$R"
 mkdir -p "$R/specs/epics/E99-maintenance/F03-fix-3"
 refuses "$R" 'exists on disk' E99-F03 E99-F06
+R="$W/c-parked"; mk_ren "$R"
+mutate_row "$R" 'f["status"]="in-review"; f["parked"]={"gate":"merge","reason":"awaiting","unblocked_by":"set-status E99-F03 done"}'
+refuses "$R" 'parked.*unpark' E99-F03 E99-F06
 R="$W/c-dep"; mk_ren "$R"
 mutate_row "$R" 'data["epics"][0]["features"][0]["depends_on"]=["E99-F03"]'
 refuses "$R" 'depends_on' E99-F03 E99-F06
 
 R="$W/c-ids"; mk_ren "$R"
+refuses "$R" 'epic E98 not found' E98-F01 E98-F02
 refuses "$R" 'not found' E99-F04 E99-F06
 refuses "$R" 'different epics' E99-F03 E98-F06
 refuses "$R" 'canonical' E99-F03 E99-F006
@@ -396,6 +404,9 @@ R="$W/c-wrongfm"; mk_ren "$R"; printf -- '---\nfeature: E99-F04\n---\nx\n' > "$R
 refuses "$R" 'exactly one `feature: E99-F03`' E99-F03 E99-F06
 R="$W/c-twofeature"; mk_ren "$R"
 printf -- '---\nfeature: E99-F03\nfeature: E99-F03\n---\nx\n' > "$R/progress/inbox/E99-F03.md"
+refuses "$R" 'exactly one `feature: E99-F03`' E99-F03 E99-F06
+R="$W/c-prefixid"; mk_ren "$R"
+printf -- '---\nfeature: E99-F030\n---\nx\n' > "$R/progress/inbox/E99-F03.md"
 refuses "$R" 'exactly one `feature: E99-F03`' E99-F03 E99-F06
 R="$W/c-linkbrief"; mk_ren "$R"; rm "$R/progress/inbox/E99-F03.md"
 printf 'victim\n' > "$W/victim.md"; ln -s "$W/victim.md" "$R/progress/inbox/E99-F03.md"
@@ -447,6 +458,40 @@ else
   echo "skip - rollback rows need a non-root user (permission bits do not bind root)"
 fi
 
+# Rollback WITHOUT permission tricks (so it runs as root too): run the helper under a wrapper
+# that makes os.replace (the board write) or os.rename (the dir move) raise.
+inject() { # <repo> <os-function> <args...>
+  _ih="$1"; _if="$2"; shift 2
+  HARNESS_DIR="$_ih" python3 -c 'import os, runpy, sys
+fn = sys.argv[1]
+def boom(*a, **k): raise OSError("injected " + fn)
+setattr(os, fn, boom)
+sys.argv = sys.argv[2:]
+runpy.run_path(sys.argv[0], run_name="__main__")' "$_if" "$HELPER" "$@" >/dev/null 2>"$W/err"
+}
+for _fn in replace rename; do
+  R="$W/c-inj-$_fn"; mk_ren "$R"; _s0="$(snap "$R")"
+  if inject "$R" "$_fn" renumber E99-F03 E99-F06; then fail "C: renumber survived an injected os.$_fn failure"; fi
+  grep -q "injected $_fn" "$W/err" || fail "C: os.$_fn was never reached: $(cat "$W/err")"
+  [ "$_s0" = "$(snap "$R")" ] || fail "C: an injected os.$_fn failure left the board or files changed"
+  [ -f "$R/progress/inbox/E99-F03.md" ] && [ ! -e "$R/progress/inbox/E99-F06.md" ] \
+    && [ -d "$R/progress/E99-F03" ] || fail "C: rollback after os.$_fn failed to restore the layout"
+done
+# A rollback step that cannot be undone is reported loudly, never swallowed.
+R="$W/c-inj-loud"; mk_ren "$R"
+HARNESS_DIR="$R" python3 -c 'import os, runpy, sys
+real = os.unlink
+def u(p, *a, **k):
+    if str(p).endswith("E99-F06.md"): raise OSError("cannot unlink dst")
+    return real(p, *a, **k)
+def boom(*a, **k): raise OSError("injected replace")
+os.unlink = u; os.replace = boom
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")' "$HELPER" renumber E99-F03 E99-F06 >/dev/null 2>"$W/err" \
+  && fail "C: renumber survived the injected failures"
+grep -q 'ROLLBACK FAILED' "$W/err" || fail "C: a failed rollback step was not reported: $(cat "$W/err")"
+pass "C rollback is pinned without permission tricks, and a failed restore is loud"
+
 # Duplicate id: two rows share E99-F05 (a bad union). Write the board raw — the guarded
 # path refuses to create it.
 mk_dup() { # <dir>
@@ -471,6 +516,14 @@ refuses "$R" 'selects 0 rows' E99-F05 E99-F06 --title-match 'fix'          # exa
 refuses "$R" 'out of range' E99-F05 E99-F06 --index 2
 refuses "$R" 'out of range' E99-F05 E99-F06 --index -1
 refuses "$R" 'mutually exclusive' E99-F05 E99-F06 --index 0 --title-match 'fix 5'
+R="$W/c-dupsame"; mk_dup "$R"
+python3 - "$R/state/tasks.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); fs = d["epics"][0]["features"]
+fs[3]["title"] = fs[2]["title"]
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+PY
+refuses "$R" 'selects 2 rows' E99-F05 E99-F06 --title-match 'fix 5'
 R="$W/c-dup1"; mk_dup "$R"
 _new="$(ren "$R" E99-F05 E99-F06 --title-match "the other session's fix")" \
   || fail "C: --title-match could not resolve the duplicate: $(cat "$W/err")"
@@ -529,6 +582,19 @@ printf '%s' "$_guard" | grep -qiE 'only exception[^.]{0,40}tasks-lock\.py renumb
 _loc="$(section "$ROOT/store/local.md" 'Deterministic read-only selector' | tr '\n' ' ')"
 printf '%s' "$_loc" | grep -qE 'tasks-lock\.py renumber' \
   || fail "D: store/local.md does not list the renumber command"
+for _f in .claude/commands/sdd-fix.md .agents/skills/sdd-fix/SKILL.md .opencode/command/sdd-fix.md; do
+  tr '\n' ' ' < "$ROOT/$_f" | grep -qiE 'never renumber its existing fixes[^.]{0,20}the one exception: renumber your OWN un-landed' \
+    || fail "D: the emitted $_f does not point never-renumber at its exception"
+done
 pass "D fixer.md and store/local.md document the duplicate-id recovery path"
+
+# The suite must pass with TMPDIR INSIDE a git work tree (the ceiling above is what makes
+# the no-git fixture hermetic). Nested run guarded against recursion.
+if [ -z "${FIXID_NESTED:-}" ]; then
+  mkdir -p "$W/wt/tmp"; git -C "$W/wt" init -q
+  FIXID_NESTED=1 TMPDIR="$W/wt/tmp" GIT_CEILING_DIRECTORIES= sh "$0" >"$W/nested.log" 2>&1 \
+    || fail "TMPDIR inside a git work tree breaks the suite: $(grep FAIL "$W/nested.log" | head -1)"
+  pass "the suite is hermetic with TMPDIR inside a git work tree"
+fi
 
 echo "PASS: test_fix_id_allocation.sh (A1-A7, B, C, D)"
