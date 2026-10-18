@@ -1857,7 +1857,7 @@
         {
           "id": "E31-F03",
           "title": "OpenCode 2.x verification: live 2.x probe + model-helper daemon fix",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
