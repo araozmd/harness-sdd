@@ -290,37 +290,54 @@ d=json.load(sys.stdin)
 assert 'parked' not in json.dumps(d), 'a parked artifact leaked into a parkless board result'
 print('ok')" >/dev/null || fail "R7: a parkless board produced park-related output: $LIVE"
 # Control that FIRES. Without it the assertion above is satisfied by a selector that
-# never emits park output at all, and the derivation step could silently no-op. Run the
-# SAME selector over the repo's own UNDERIVED board: if it currently carries a park, the
-# word must appear. If it carries none, say so rather than passing silently -- an
-# unexercised control is not a control.
+# never emits park output at all, and the derivation step could silently no-op. So run the
+# SAME selector, TARGETED at one feature, over a board that carries an ordinary park there:
+# the word `parked` must appear.
+#
+# E99-F175: the control row is chosen EXPLICITLY, never "the first feature on the live board
+# with a `parked` key". A park written by `tasks-lock.py await-merge` (`parked.gate ==
+# "merge"`) is reported as `awaiting-merge`, which never contains the word `parked`, so that
+# pick made the suite fail whenever an await-merge park sorted first in board order (it did,
+# on the E35-F05 branch). The control board is WITHPARK = the derived parkless board plus ONE
+# ordinary park (`{"reason": ...}`, no gate) on the target, so it is deterministic whatever
+# parks the live board holds. The target is the first live feature carrying a non-merge park
+# (so the live-vs-derived pair below also discriminates a derivation swapped back to the live
+# board), else the first not-done feature.
 # TARGET the parked feature: board-wide selection returns the first ACTIONABLE feature
 # with an empty `blocked` list, so it legitimately never mentions a park that is not in
-# its way. Asserting on the board-wide call would be asserting the wrong thing -- caught
-# by this control failing on its first run, which is the control earning its place.
-_LIVE_PARKED_ID="$(python3 -c "
+# its way. Asserting on the board-wide call would be asserting the wrong thing.
+_PARKED_ID="$(python3 -c "
 import json
 d=json.load(open('$SRC/state/tasks.json'))
-print(next((f['id'] for e in d['epics'] for f in (e.get('features') or []) if 'parked' in f), ''))")"
-if [ -n "$_LIVE_PARKED_ID" ]; then
-  RAW="$(cd "$SRC" && node tools/next-task.mjs --json --feature "$_LIVE_PARKED_ID" 2>&1)" || true
-  case "$RAW" in
-    *parked*) ;;
-    *) fail "R7 control: live board feature $_LIVE_PARKED_ID is parked but a targeted selection emitted no park output -- the parkless assertion above proves nothing: $RAW" ;;
-  esac
-  # ...and the SAME target on the DERIVED board must NOT report a park. This pair is what
-  # makes the derivation load-bearing: without it, R7 passed whether it read the live board
-  # or the parkless one, because board-wide selection returns the first ACTIONABLE feature
-  # with an empty `blocked` list and never mentions a park that is not in its way. A
-  # mutation swapping the derived board back to the live one survived until this existed --
-  # an assertion that cannot tell its two inputs apart is not testing either of them.
-  DERIVED="$(cd "$SRC" && node tools/next-task.mjs --json --feature "$_LIVE_PARKED_ID" --tasks "$T/noparks.json" 2>&1)" || true
-  case "$DERIVED" in
-    *parked*) fail "R7: the derived parkless board still reported a park for $_LIVE_PARKED_ID -- the derivation did not take effect: $DERIVED" ;;
-  esac
-else
-  echo "note - R7 control not exercised: the live board currently carries no park" >&2
-fi
+fs=[f for e in d['epics'] for f in (e.get('features') or [])]
+pick=next((f for f in fs if isinstance(f.get('parked'),dict) and f['parked'].get('gate')!='merge' and f.get('status')!='done'), None) \\
+  or next((f for f in fs if f.get('status')!='done'), None)
+print(pick['id'] if pick else '')")"
+[ -n "$_PARKED_ID" ] || fail "R7 control: the repo board has no not-done feature to park for the control"
+python3 -c "
+import json
+d=json.load(open('$T/noparks.json'))
+for e in d['epics']:
+    for f in e.get('features') or []:
+        if f['id']=='$_PARKED_ID':
+            f['parked']={'reason':'E99-F175 R7 control park'}
+json.dump(d, open('$T/withpark.json','w'))
+" || fail "R7 control: could not build the parked control board"
+RAW="$(cd "$SRC" && node tools/next-task.mjs --json --feature "$_PARKED_ID" --tasks "$T/withpark.json" 2>&1)" || true
+case "$RAW" in
+  *parked*) ;;
+  *) fail "R7 control: $_PARKED_ID carries an ordinary park on the control board but a targeted selection emitted no park output -- the parkless assertion above proves nothing: $RAW" ;;
+esac
+# ...and the SAME target on the DERIVED board must NOT report a park. This pair is what
+# makes the derivation load-bearing: without it, R7 passed whether it read the live board
+# or the parkless one, because board-wide selection returns the first ACTIONABLE feature
+# with an empty `blocked` list and never mentions a park that is not in its way. A
+# mutation swapping the derived board back to the live one survived until this existed --
+# an assertion that cannot tell its two inputs apart is not testing either of them.
+DERIVED="$(cd "$SRC" && node tools/next-task.mjs --json --feature "$_PARKED_ID" --tasks "$T/noparks.json" 2>&1)" || true
+case "$DERIVED" in
+  *parked*) fail "R7: the derived parkless board still reported a park for $_PARKED_ID -- the derivation did not take effect: $DERIVED" ;;
+esac
 pass "E06-F07 R7 absent_parked_key_is_a_pure_superset"
 
 # ── R8: set-status refuses a parked feature, names the reason, writes nothing ────────
