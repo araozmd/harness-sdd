@@ -608,6 +608,29 @@ m._RenumberFiles.apply = ap' renumber E99-F03 E99-F06 && fail "C: renumber moved
 grep -q 'appeared before the move' "$W/err" || fail "C: a late target was not refused: $(cat "$W/err")"
 [ "$(cat "$R/progress/inbox/E99-F06.md")" = planted ] || fail "C: a brief that appeared at the target was clobbered"
 [ -f "$R/progress/inbox/E99-F03.md" ] || fail "C: the late-target refusal lost the source brief"
+# Same for the progress dir (#4305757177): rename would silently replace an EMPTY dir that
+# another session created after planning, so the move refuses and the brief rolls back.
+R="$W/c-race-dir"; mk_ren "$R"; _s0="$(snap "$R")"
+pyrun "$R" 'real = m._RenumberFiles.apply
+def ap(self):
+    os.mkdir(os.path.join(self.root, "progress/E99-F06"))
+    return real(self)
+m._RenumberFiles.apply = ap' renumber E99-F03 E99-F06 && fail "C: renumber moved onto a progress dir that appeared"
+grep -q 'E99-F06 appeared before the move' "$W/err" || fail "C: a late progress dir was not refused: $(cat "$W/err")"
+[ -d "$R/progress/E99-F06" ] && [ -z "$(ls -A "$R/progress/E99-F06")" ] \
+  || fail "C: a progress dir that appeared at the target was replaced"
+rmdir "$R/progress/E99-F06"
+[ "$_s0" = "$(snap "$R")" ] || fail "C: the late-dir refusal left the board, brief or progress dir changed"
+# Rollback of the dir move never clobbers a reappeared (empty) source dir either.
+R="$W/c-race-srcdir"; mk_ren "$R"
+pyrun "$R" 'real = m._RenumberFiles.apply
+def ap(self):
+    real(self)
+    os.mkdir(os.path.join(self.root, "progress/E99-F03"))
+m._RenumberFiles.apply = ap
+os.replace = boom' renumber E99-F03 E99-F06 && fail "C: renumber survived the injected failures"
+grep -q 'ROLLBACK FAILED.*E99-F03 reappeared' "$W/err" || fail "C: a reappeared source dir was not reported: $(cat "$W/err")"
+[ -f "$R/progress/E99-F06/note.txt" ] || fail "C: rollback clobbered a reappeared source dir"
 # Rollback never clobbers a source path that reappeared; it reports loudly instead.
 R="$W/c-race-src"; mk_ren "$R"
 pyrun "$R" 'real = m._RenumberFiles.apply

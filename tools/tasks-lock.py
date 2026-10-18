@@ -2199,6 +2199,10 @@ class _RenumberFiles(object):
                 self.done.append(mv)  # dst is now our inode; rollback writes it back
                 _rewrite_in_place(dst, newraw)
             else:
+                # POSIX rename silently replaces an EMPTY dst directory: re-check right
+                # before it so a progress dir another session just created survives.
+                if os.path.lexists(dst):
+                    raise OSError("refusing: %s appeared before the move" % dst)
                 os.rename(src, dst)
                 self.done.append(mv)
 
@@ -2214,6 +2218,9 @@ class _RenumberFiles(object):
                                       % (src, dst))
                     os.rename(dst, src)
                 else:
+                    if os.path.lexists(src):
+                        raise OSError("%s reappeared; the moved dir is still at %s"
+                                      % (src, dst))
                     os.rename(dst, src)
             except OSError as exc:
                 _warn("ROLLBACK FAILED for %s -> %s (%s) — restore it by hand"
