@@ -67,6 +67,9 @@ lift_fns() {
   { fn "$1" thread_scan; fn "$1" thread_fingerprint; fn "$1" merge_land; } > "$T/ts.sh"
 }
 
+# The `gh pr view --json` fields that exist in real gh (2.102.0). NOT isInMergeQueue.
+PRVIEW_FIELDS="additions assignees author autoMergeRequest baseRefName baseRefOid body changedFiles closed closedAt closingIssuesReferences comments commits createdAt deletions files fullDatabaseId headRefName headRefOid headRepository headRepositoryOwner id isCrossRepository isDraft labels latestReviews maintainerCanModify mergeCommit mergeStateStatus mergeable mergedAt mergedBy milestone number potentialMergeCommit projectCards projectItems reactionGroups reviewDecision reviewRequests reviews state statusCheckRollup title updatedAt url"
+
 # mk_env <dir> <current-head> — a sandbox: stub `gh` (logs every call to $dir/gh.log and
 # answers the reads the snippets make), the REAL watcher at .harness/tools/, a round dir
 # whose pr.json says the reviewed head is `aaaa…`.
@@ -80,6 +83,12 @@ mk_env() {
   cat > "$_e/bin/gh" <<EOF
 #!/bin/sh
 printf '%s\n' "\$*" >> "$_e/gh.log"
+# Real gh rejects a pr-view --json field outside its list (gh 2.102.0); so does this stub.
+case "\$*" in *"pr view"*"--json "*)
+  for _x in \$(printf '%s' "\$*" | sed 's/.*--json \([^ ]*\).*/\1/' | tr ',' ' '); do
+    case " $PRVIEW_FIELDS " in *" \$_x "*) ;; *) echo "Unknown JSON field: \"\$_x\"" >&2; exit 1 ;; esac
+  done ;;
+esac
 case "\$*" in
   *"--json headRefOid"*) echo "$2" ;;
   *"--json state,mergedAt,mergeCommit"*)
@@ -90,7 +99,7 @@ case "\$*" in
       head -n 1 "$_e/mvstate"
       [ "\$(wc -l < "$_e/mvstate")" -gt 1 ] && { tail -n +2 "$_e/mvstate" > "$_e/mvstate.n"; mv "$_e/mvstate.n" "$_e/mvstate"; }
     else echo "MERGED 2026-10-10T00:00:00Z bbbb"; fi ;;
-  *"--json state,autoMergeRequest"*) cat "$_e/qstate" 2>/dev/null; : ;;
+  *"api graphql"*"isInMergeQueue"*) cat "$_e/qstate" 2>/dev/null; : ;;
   *"--json id"*) echo PR_NODE_7 ;;
   *"pr merge"*"--disable-auto"*|*"dequeuePullRequest"*)
     touch "$_e/cancelled"; [ -e "$_e/cancel_fail" ] && exit 1; : ;;
@@ -132,6 +141,7 @@ case "\$*" in
     [ -f "$_e/threads_next" ] && mv "$_e/threads_next" "$_e/threads"
     [ -f "$_e/fp_next" ] && mv "$_e/fp_next" "$_e/fp"
     [ -f "$_e/fp_fail_next" ] && mv "$_e/fp_fail_next" "$_e/fp_fail"
+    [ -f "$_e/fp_fail_clear" ] && rm -f "$_e/fp_fail" "$_e/fp_fail_clear"
     # Required-CI answer, scripted by \$_e/ci (one mode per line, consumed in order; the
     # last line repeats). Absent ⇒ pass. Shapes mirror gh --json name,bucket; "none" is
     # gh's empty-rollup diagnostic, and a cancelled check exits 0 exactly as gh does.
@@ -547,15 +557,15 @@ test_late_comments_refuse_green() {
   for _b in $BODIES; do
     lift_fns "$_b"
     grep -qF 'thread_fingerprint() {' "$T/ts.sh" || fail "259: $_b has no thread_fingerprint helper"
-    grep -qF 'nodes{ id isResolved comments(first:1){ totalCount } }' "$_b" \
+    grep -qF 'nodes{ id isResolved comments(last:1){ totalCount nodes{ id updatedAt } } }' "$_b" \
       || fail "259: $_b fingerprint does not read isResolved + comment totalCount of every thread"
     fn "$_b" thread_fingerprint | grep -qF -e '--paginate' || fail "259: $_b fingerprint is not paginated"
     # The jq program is NOT exercised by the stub gh (it answers already-filtered lines), so
     # run the REAL expression over a GraphQL-shaped sample: "<id> <isResolved> <count>".
     _jq="$(fn "$_b" thread_fingerprint | python3 -c "import re,sys; print(re.search(r\"--jq '([^']*)'\", sys.stdin.read()).group(1))")"
-    _got="$(printf '%s' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"T1","isResolved":true,"comments":{"totalCount":3}},{"id":"T2","isResolved":false,"comments":{"totalCount":1}}]}}}}}' | jq -r "$_jq" 2>&1)" || :
-    [ "$_got" = "T1 true 3
-T2 false 1" ] || fail "259: $_b fingerprint jq does not print '<id> <isResolved> <totalCount>' per thread (got: $_got)"
+    _got="$(printf '%s' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"T1","isResolved":true,"comments":{"totalCount":3,"nodes":[{"id":"C9","updatedAt":"U9"}]}},{"id":"T2","isResolved":false,"comments":{"totalCount":0,"nodes":[]}}]}}}}}' | jq -r "$_jq" 2>&1)" || :
+    [ "$_got" = "T1 true 3 C9 U9
+T2 false 0 null null" ] || fail "259: $_b fingerprint jq does not print '<id> <isResolved> <totalCount> <last id> <updatedAt>' per thread (got: $_got)"
     block "$_b" 'echo handback > "$round_dir/disposed"' > "$T/hb.sh" || fail "setup: no hand-back block in $_b"
     block "$_b" '--match-head-commit "$reviewed_head"' > "$T/merge.sh" || fail "setup: no merge block in $_b"
     block "$_b" 'merge_ok=0 ' > "$T/res.sh" || fail "setup: no resolve block in $_b"
@@ -566,6 +576,12 @@ assert res.index('resolveReviewThread(input') < res.index('_mg_fp_pre="$(thread_
 assert hb.index('_hb_fp_pre="$(thread_fingerprint)"') < hb.index('ci_required_gate') < hb.index('_hb_fp_post="$(thread_fingerprint)"')
 assert mg.index('ci_required_gate') < mg.index('_fp_after="$(thread_fingerprint)"') < mg.index('mut gh pr merge')
 PY
+    python3 - "$_b" "$PRVIEW_FIELDS" <<'PYF' || fail "256: $_b asks gh pr view --json for a field real gh rejects (e.g. isInMergeQueue)"
+import re, sys
+body, ok = open(sys.argv[1]).read(), set(sys.argv[2].split())
+bad = [f for m in re.finditer(r"gh pr view[^\n]*?--json ([A-Za-z,]+)", body) for f in m.group(1).split(",") if f not in ok]
+sys.exit(1 if bad else 0)
+PYF
     # ── hand-back ───────────────────────────────────────────────────────────────
     # <name>|<fp before>|<fp after>|<threads>: growth on an UNRESOLVED thread (scan line
     # unchanged), growth on a RESOLVED thread (not in the scan at all), a resolve flip, a
@@ -573,6 +589,8 @@ PY
     for _c in "unres|PRRT_a false 1|PRRT_a false 2|true PRRT_a" \
               "res|PRRT_a true 1|PRRT_a true 2|" \
               "flip|PRRT_a true 1|PRRT_a false 1|" \
+              "lastid|PRRT_a true 2 C1 U1|PRRT_a true 2 C2 U1|" \
+              "edit|PRRT_a true 2 C1 U1|PRRT_a true 2 C1 U2|" \
               "new|PRRT_a true 1|PRRT_a true 1;PRRT_b true 1|"; do
       _n="${_c%%|*}"; _r="${_c#*|}"; _pre="${_r%%|*}"; _r="${_r#*|}"; _post="${_r%%|*}"; _thr="${_r#*|}"
       _e="$T/hb-fp-$_n"; rm -rf "$_e"; mk_env "$_e" "$_H"
@@ -596,6 +614,11 @@ PY
     touch "$_e/fp_fail"
     run_block "$_e" "$T/hb.sh" ''
     grep -q 'pr comment' "$_e/gh.log" && fail "259: $_b hand-back posted green with an unreadable fingerprint"
+    # ...and a failed scan BEFORE the wait refuses on its own when the post-wait scan succeeds.
+    _e="$T/hb-fp-fail-pre-only"; rm -rf "$_e"; mk_env "$_e" "$_H"
+    touch "$_e/fp_fail" "$_e/fp_fail_clear"
+    run_block "$_e" "$T/hb.sh" ''
+    grep -q 'pr comment' "$_e/gh.log" && fail "259: $_b hand-back posted green although the pre-wait fingerprint scan failed (post succeeded)"
     _e="$T/hb-fp-fail-post"; rm -rf "$_e"; mk_env "$_e" "$_H"
     printf 'PRRT_a true 1\n' > "$_e/fp"; touch "$_e/fp_fail_next"
     run_block "$_e" "$T/hb.sh" ''
@@ -616,7 +639,8 @@ PY
     [ -e "$_e/round/disposed" ] && fail "259: $_b dry-run fingerprint refusal wrote a marker"
 
     # ── auto-merge ──────────────────────────────────────────────────────────────
-    for _c in "unres|PRRT_a false 1|PRRT_a false 2" "res|PRRT_a true 1|PRRT_a true 2" "flip|PRRT_a true 1|PRRT_a false 1"; do
+    for _c in "unres|PRRT_a false 1|PRRT_a false 2" "res|PRRT_a true 1|PRRT_a true 2" "flip|PRRT_a true 1|PRRT_a false 1" \
+              "lastid|PRRT_a true 2 C1 U1|PRRT_a true 2 C2 U1" "edit|PRRT_a true 2 C1 U1|PRRT_a true 2 C1 U2"; do
       _n="${_c%%|*}"; _r="${_c#*|}"; _pre="${_r%%|*}"; _post="${_r#*|}"
       _e="$T/mg-fp-$_n"; rm -rf "$_e"; mk_env "$_e" "$_H"
       printf '%s\n' "$_post" > "$_e/fp_next"; printf '%s\n' "$_pre" > "$_e/fp"
@@ -701,9 +725,10 @@ import sys
 L = open(sys.argv[1]).read().split("\n")
 c = next(i for i, l in enumerate(L) if '--disable-auto' in l)
 assert sum('state,mergedAt,mergeCommit' in l for l in L[:c]) >= 4      # 1st receipt + reconcile wait
-assert any('state,autoMergeRequest' in l for l in L[c:])               # re-read after the cancel
+assert any('isInMergeQueue' in l for l in L[c:])               # re-read after the cancel
 PY
-    grep -q 'pr comment' "$_e/gh.log" && fail "256: $_b warned 'may still be queued' although the cancel was verified"
+    grep -q 'pr comment.*may still be queued' "$_e/gh.log" && fail "256: $_b warned 'may still be queued' although the cancel was verified"
+    grep -q 'pr comment.*cancel was confirmed' "$_e/gh.log" || fail "256: $_b hand-over does not say the cancel was confirmed"
     # The cancel could not be CONFIRMED (still armed / unreadable / calls failing): say so.
     for _qs in "OPEN true false" "OPEN false true" "" "weird"; do
       _e="$T/q-unconfirmed"; rm -rf "$_e"; mk_env "$_e" "$_H"
@@ -717,7 +742,8 @@ PY
     _e="$T/q-closed"; rm -rf "$_e"; mk_env "$_e" "$_H"
     printf 'OPEN  \n' > "$_e/mvstate"; printf 'CLOSED false false\n' > "$_e/qstate"
     run_block "$_e" "$T/mq.sh" "$_Q"
-    grep -q 'pr comment' "$_e/gh.log" && fail "256: $_b warned about a live request on a CLOSED PR"
+    grep -q 'pr comment.*may still be queued' "$_e/gh.log" && fail "256: $_b warned about a live request on a CLOSED PR"
+    grep -q 'pr comment.*cancel was confirmed' "$_e/gh.log" || fail "256: $_b CLOSED hand-over does not say nothing is queued"
     # The queue MERGES during the reconcile wait: merged path, no cancel at all.
     _e="$T/q-late"; rm -rf "$_e"; mk_env "$_e" "$_H"
     printf 'OPEN  \nOPEN  \nOPEN  \nMERGED 2026-10-10T00:00:00Z bbbb\n' > "$_e/mvstate"
@@ -747,6 +773,11 @@ PY
     run_block "$_e" "$T/q.sh" "merged=0; _mv_rc=11; HARNESS_QUEUE_RECONCILE_CEILING=2; HARNESS_DRY_RUN=1"
     grep -q 'pr merge\|dequeuePullRequest\|pr comment\|pr edit' "$_e/gh.log" \
       && fail "256: $_b dry-run queue reconcile mutated the PR"
+    # …and so does the CONFIRMED-cancel hand-over comment (state "held").
+    _e="$T/q-dry-held"; rm -rf "$_e"; mk_env "$_e" "$_H"
+    printf 'OPEN  \n' > "$_e/mvstate"; printf 'OPEN false false\n' > "$_e/qstate"
+    run_block "$_e" "$T/q.sh" "merged=0; _mv_rc=11; HARNESS_QUEUE_RECONCILE_CEILING=2; HARNESS_DRY_RUN=1"
+    grep -q 'pr comment' "$_e/gh.log" && fail "256: $_b dry-run confirmed-cancel hand-over comment is not routed through mut"
   done
   pass "256 queued merge: post receipt 11 => reconcile then cancel via mut, re-read, MERGED => merged path, unconfirmed cancel says so, dry run read-only (all bodies)"
 }

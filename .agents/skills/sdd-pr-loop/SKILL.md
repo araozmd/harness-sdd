@@ -1039,24 +1039,29 @@ thread_scan() {
                   or . == "chatgpt-codex-connector[bot]")) as $codex
           | "\($whole and $codex) \(.id)"'
 }
-# thread_fingerprint — one line "<id> <isResolved> <comments.totalCount>" for EVERY thread,
-# resolved ones included, paginated; exit status is gh's. thread_scan cannot see two kinds of
+# thread_fingerprint — one line "<id> <isResolved> <totalCount> <last comment id> <its
+# updatedAt>" for EVERY thread, resolved ones included, paginated; exit status is gh's. thread_scan cannot see two kinds of
 # late review input (#259): a new Codex reply on a thread that was ALREADY unresolved leaves
 # its "<allcodex> <id>" line byte-identical, and a comment added to a RESOLVED thread (which
-# does not reopen it) is not listed at all. A growing totalCount or a flipped isResolved
-# changes this fingerprint. Snapshot it before the CI wait, require it byte-identical after.
+# does not reopen it) is not listed at all. A growing totalCount, a flipped isResolved, a
+# different LAST comment (delete + add with the same count) or an edit of the last comment
+# (updatedAt) changes this fingerprint. Snapshot it before the CI wait, require it
+# byte-identical after. REMAINING LIMIT: only inline review threads are fingerprinted — a PR
+# review body or a PR-level (issue) comment with no inline thread is not seen, and neither is
+# an in-place edit of a NON-last comment in a thread.
 thread_fingerprint() {
   gh api graphql -f query='
     query ThreadFingerprint($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
       repository(owner:$owner,name:$repo){
         pullRequest(number:$pr){
           reviewThreads(first:100,after:$endCursor){
-            nodes{ id isResolved comments(first:1){ totalCount } }
+            nodes{ id isResolved comments(last:1){ totalCount nodes{ id updatedAt } } }
             pageInfo{ hasNextPage endCursor }
           }}}}' \
     -f owner="$owner" -f repo="$repo" -F pr="$pr_number" --paginate \
     --jq '.data.repository.pullRequest.reviewThreads.nodes[]
-          | "\(.id) \(.isResolved) \(.comments.totalCount)"'
+          | (.comments.nodes[-1] // {}) as $last
+          | "\(.id) \(.isResolved) \(.comments.totalCount) \($last.id) \($last.updatedAt)"'
 }
 merge_ok=0            # fail closed: only a COMPLETED, clean enumeration may raise this
 if ! unresolved=$(thread_scan)
@@ -1128,7 +1133,7 @@ terminal marker would then short-circuit the next invocation as already done.
 # compared after it: a thread that is new, reopened, or whose Codex-only flag flipped is
 # unreviewed input — refuse rather than call it green. `thread_scan` alone cannot see a new
 # comment on a thread that was already unresolved, or on a RESOLVED one (#259), so a second
-# snapshot — `thread_fingerprint`, "<id> <isResolved> <comment count>" for EVERY thread —
+# snapshot — `thread_fingerprint`, per-thread id, resolved flag, comment count and last comment —
 # must also be byte-identical after the wait. Any difference, or a failed scan, is `threads`.
 hb_refused=""
 if ! sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" pre; then
@@ -1270,7 +1275,7 @@ else
 fi
 ```
 
-**A queued merge is not a failed merge, and it must never be left live** (#256). Under a
+**A queued merge is not a failed merge, and it must not be left live unannounced** (#256). Under a
 merge queue or repo-level auto-merge `gh pr merge` exits 0 having only ENQUEUED the PR, and
 the post receipt then reaches its ceiling with the PR still OPEN — `merge-verify post`
 returns **11** for exactly that (7 stays "CLOSED unmerged" or "state unreadable"). Handing
@@ -1300,15 +1305,22 @@ queued_merge_reconcile() {
       mutation($id:ID!){ dequeuePullRequest(input:{id:$id}){ mergeQueueEntry{ id } } }' \
       -f id="$_q_id" >/dev/null 2>&1 || :
   fi
-  _q_st="$(gh pr view "$pr_number" --json state,autoMergeRequest,isInMergeQueue \
-    --jq '"\(.state) \(.autoMergeRequest != null) \(.isInMergeQueue)"' 2>/dev/null || echo '')"
+  # `isInMergeQueue` is not a `gh pr view --json` field (gh rejects it): read it via GraphQL.
+  _q_st="$(gh api graphql -f query='
+    query($owner:String!,$repo:String!,$pr:Int!){
+      repository(owner:$owner,name:$repo){
+        pullRequest(number:$pr){ state isInMergeQueue autoMergeRequest{ enabledAt } }}}' \
+    -f owner="$owner" -f repo="$repo" -F pr="$pr_number" \
+    --jq '.data.repository.pullRequest | "\(.state) \(.autoMergeRequest != null) \(.isInMergeQueue)"' 2>/dev/null || echo '')"
   case "$_q_st" in
     "MERGED "*)       # the queue merged it while we were cancelling — take the merged path
       _q_rc=0
       merge_oid="$(HARNESS_MERGE_VERIFY_CEILING=0 \
         sh tools/wait-for-codex.sh merge-verify "$round_dir" "$pr_number" post)" || _q_rc=$?
       [ "$_q_rc" = 0 ] && { merged=1; return 0; } ;;
-    "OPEN false false"|"CLOSED "*) return 1 ;;   # cancel held / nothing live: plain needs-human
+    "OPEN false false"|"CLOSED "*)   # cancel held / nothing live: say so in the hand-over
+      mut gh pr comment "$pr_number" --body "sdd-pr-loop: the queued merge request was cancelled and the cancel was confirmed (state: $_q_st) — the PR did not merge." >/dev/null 2>&1 || :
+      return 1 ;;
   esac
   mut gh pr comment "$pr_number" --body "sdd-pr-loop: could not confirm the queued merge request was cancelled — a merge request may still be queued; check the merge queue / auto-merge before this PR is relied on." >/dev/null 2>&1 || :
   return 1
@@ -1358,9 +1370,10 @@ does neither — and return failure. Reached by: the
 `max_rounds` cap, a watcher timeout (exit `2`), an unresolved non-Codex thread, a merge that would not land,
 required CI that is red or still pending at the ceiling (E99-F171 — say which required
 checks, from `ci_required_gate`'s output; never the "all gates green" header), and a
-queued merge that did not land (post receipt `11`, #256 — the hand-over says whether the
-cancel held, and a cancel that could not be confirmed says "a merge request may still be
-queued"; a needs-human state never leaves a live merge request behind).
+queued merge that did not land (post receipt `11`, #256 — the loop always attempts the cancel
+before handing off, and `queued_merge_reconcile` comments either that the cancel was
+confirmed or, when it could not be, "a merge request may still be queued"; a cancel it
+cannot confirm is announced, never silently left live).
 
 **Say what the human should conclude.** Include the step-4b trend output **verbatim,
 including its `NEVER REVIEWED` block** — a cap reached because reviews kept timing out is a

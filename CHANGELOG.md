@@ -7,21 +7,24 @@ All notable changes to the harness body are recorded here. Versions follow
 ## [0.96.1] — 2026-10-17
 
 ### Fixed — `/sdd-pr-loop` terminal paths (E99-F173, #259, #256)
-- Late review input during the CI wait is now detected (#259). `thread_scan` lists only
-  UNRESOLVED threads, so a new Codex comment on an already-unresolved thread, or a comment on a
-  thread the loop had resolved, changed nothing it compared. A new `thread_fingerprint` helper
-  prints `<id> <isResolved> <comment count>` for EVERY thread (paginated); the `auto_merge: false`
-  hand-back and the auto-merge path snapshot it before the wait and require it byte-identical
-  after. Any difference, an unreadable scan, or (merge path) a missing snapshot refuses the green
-  terminal action, records `stale` and takes needs-human.
-- A queued merge is no longer left live behind a needs-human hand-off (#256).
+- Late INLINE review-thread input during the CI wait is now detected (#259). `thread_scan` lists
+  only UNRESOLVED threads, so a new Codex comment on an already-unresolved thread, or a comment on
+  a thread the loop had resolved, changed nothing it compared. A new `thread_fingerprint` helper
+  prints `<id> <isResolved> <comment count> <last comment id> <its updatedAt>` for EVERY thread
+  (paginated); the `auto_merge: false` hand-back and the auto-merge path snapshot it before the
+  wait and require it byte-identical after. Any difference, an unreadable scan, or (merge path) a
+  missing snapshot refuses the green terminal action, records `stale` and takes needs-human.
+  Limits: a PR review body or PR-level (issue) comment with no inline thread is NOT fingerprinted,
+  and neither is an in-place edit of a non-last comment inside a thread.
+- A queued merge is no longer left live silently behind a needs-human hand-off (#256).
   `wait-for-codex.sh merge-verify post` exits **11** (new; documented in the script header) when
   the PR is still OPEN at the ceiling, so it is no longer confused with 7 (CLOSED or unreadable).
   On 11 the loop reconciles for `HARNESS_QUEUE_RECONCILE_CEILING` seconds (default 300), then
   cancels through `mut` (`gh pr merge --disable-auto`, and the `dequeuePullRequest` GraphQL
   mutation for a merge queue), re-reads the state (MERGED takes the normal `merged=1` path) and
-  only then hands off. A cancel that cannot be confirmed says "a merge request may still be
-  queued". A dry run stays read-only.
+  only then hands off. The state after the cancel is read via GraphQL (`isInMergeQueue` is not a
+  `gh pr view --json` field). The loop comments whether the cancel was confirmed or, when it
+  could not be, that "a merge request may still be queued". A dry run stays read-only.
 
 ## [0.96.0] — 2026-10-17
 
