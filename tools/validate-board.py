@@ -65,18 +65,66 @@ def validate(data, schema):
     """
     try:
         import jsonschema  # type: ignore
-
-        errs = sorted(
-            jsonschema.Draft7Validator(schema).iter_errors(data),
-            key=lambda e: list(e.path),
-        )
-        out = []
-        for e in errs:
-            loc = "/".join(str(p) for p in e.path) or "(root)"
-            out.append("%s: %s" % (loc, e.message))
-        return out
     except ImportError:
-        return _fallback_errors(data)
+        return _fallback_errors(data) + duplicate_id_errors(data)
+
+    errs = sorted(
+        jsonschema.Draft7Validator(schema).iter_errors(data),
+        key=lambda e: list(e.path),
+    )
+    out = []
+    for e in errs:
+        loc = "/".join(str(p) for p in e.path) or "(root)"
+        out.append("%s: %s" % (loc, e.message))
+    return out + duplicate_id_errors(data)
+
+
+def duplicate_id_errors(data):
+    """Reject two epics, or two features ANYWHERE on the board, sharing one `id` (#253).
+
+    The schema cannot express uniqueness, and two concurrent sessions can each allocate the
+    same next `E99-F##` (the board lock serializes writers on ONE file; it cannot see a row
+    seeded on a branch that has not landed). The collision otherwise surfaces only as a git
+    conflict, and a careless union of the two boards would pass every other check. Runs on
+    BOTH validation paths (jsonschema and the zero-dependency fallback), in the CLI that
+    init.sh runs and in-process in tasks-lock.py, so a write that would produce a duplicate
+    is refused and a duplicated board hard-fails the gate. Tolerant of malformed shapes:
+    those are the schema's errors to report, not this check's.
+    """
+    errors = []
+    if not isinstance(data, dict) or not isinstance(data.get("epics"), list):
+        return errors
+    epic_at = {}
+    feat_at = {}
+    for ei, ep in enumerate(data["epics"]):
+        if not isinstance(ep, dict):
+            continue
+        eid = ep.get("id")
+        if isinstance(eid, str):
+            if eid in epic_at:
+                errors.append(
+                    "epics[%d].id %r: duplicate epic id (also epics[%d])"
+                    % (ei, eid, epic_at[eid])
+                )
+            else:
+                epic_at[eid] = ei
+        feats = ep.get("features")
+        if not isinstance(feats, list):
+            continue
+        for fi, ft in enumerate(feats):
+            fid = ft.get("id") if isinstance(ft, dict) else None
+            if not isinstance(fid, str):
+                continue
+            where = "epics[%d].features[%d]" % (ei, fi)
+            if fid in feat_at:
+                errors.append(
+                    "%s.id %r: duplicate feature id (also %s) — renumber the "
+                    "un-landed one with `tasks-lock.py renumber`"
+                    % (where, fid, feat_at[fid])
+                )
+            else:
+                feat_at[fid] = where
+    return errors
 
 
 def _fallback_errors(data):
