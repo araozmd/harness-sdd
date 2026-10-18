@@ -483,6 +483,21 @@ for _fn in replace rename; do
   [ -f "$R/progress/inbox/E99-F03.md" ] && [ ! -e "$R/progress/inbox/E99-F06.md" ] \
     && [ -d "$R/progress/E99-F03" ] || fail "C: rollback after os.$_fn failed to restore the layout"
 done
+# The restored brief keeps its original mode: a 0600 brief must not come back world-readable.
+R="$W/c-inj-mode"; mk_ren "$R"; chmod 600 "$R/progress/inbox/E99-F03.md"
+if inject "$R" replace renumber E99-F03 E99-F06; then fail "C: renumber survived an injected os.replace failure"; fi
+[ "$(python3 -c 'import os,sys;print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$R/progress/inbox/E99-F03.md")" = "0o600" ] \
+  || fail "C: rollback did not restore the brief's 0600 mode"
+# A mode restore that fails during rollback is reported loudly.
+R="$W/c-inj-fchmod"; mk_ren "$R"
+HARNESS_DIR="$R" python3 -c 'import os, runpy, sys
+def f(*a, **k): raise OSError("cannot fchmod")
+def boom(*a, **k): raise OSError("injected replace")
+os.fchmod = f; os.replace = boom
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")' "$HELPER" renumber E99-F03 E99-F06 >/dev/null 2>"$W/err" \
+  && fail "C: renumber survived the injected failures"
+grep -q 'ROLLBACK FAILED.*cannot fchmod' "$W/err" || fail "C: a failed mode restore was not reported: $(cat "$W/err")"
 # A rollback step that cannot be undone is reported loudly, never swallowed.
 R="$W/c-inj-loud"; mk_ren "$R"
 HARNESS_DIR="$R" python3 -c 'import os, runpy, sys

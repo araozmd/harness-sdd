@@ -2090,6 +2090,7 @@ class _RenumberFiles(object):
         self.old_id, self.new_id = old_id, new_id
         self.moves = []  # ("inbox"|"dir", src, dst, original bytes or None)
         self.done = []
+        self.modes = {}  # inbox src -> original permission bits, for rollback
         inbox = os.path.join("progress", "inbox")
         self._plan_inbox(inbox)
         self._plan_dir()
@@ -2157,6 +2158,7 @@ class _RenumberFiles(object):
         for mv in self.moves:
             kind, src, dst, raw, newraw = mv
             if kind == "inbox":
+                self.modes[src] = stat.S_IMODE(os.stat(src).st_mode)
                 fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
                 self.done.append(mv)  # dst now exists and is ours to undo
                 try:
@@ -2175,9 +2177,11 @@ class _RenumberFiles(object):
             try:
                 if kind == "inbox":
                     if not os.path.lexists(src):
-                        fd = os.open(src, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+                        # Created 0600 (never wider), then set to the recorded mode.
+                        fd = os.open(src, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                         try:
                             os.write(fd, raw)
+                            os.fchmod(fd, self.modes.get(src, 0o600))
                         finally:
                             os.close(fd)
                     os.unlink(dst)
