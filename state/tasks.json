@@ -1288,17 +1288,18 @@
         {
           "id": "E99-F176",
           "title": "validate-board: draft-epic warning pass crashes with a traceback when epics/features is a non-list scalar",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "71c3784cb65f1f03a3ce20e043f662fd0912a0c2",
+            "ref": "71c3784cb65f1f03a3ce20e043f662fd0912a0c2",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F176-validate-board-draft-warn-crash/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (280)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E99-F176 done --evidence <merge-ref>`",
-            "pr": "280"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F176-validate-board-draft-warn-crash/"
         }
       ]
     },
