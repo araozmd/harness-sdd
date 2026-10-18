@@ -1817,7 +1817,7 @@
     {
       "id": "E31",
       "title": "OpenCode is a claimed, first-class front end",
-      "status": "in-progress",
+      "status": "done",
       "owner": "araozmd",
       "features": [
         {
@@ -1857,19 +1857,20 @@
         {
           "id": "E31-F03",
           "title": "OpenCode 2.x verification: live 2.x probe + model-helper daemon fix",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "bb31f67912509a6184a2f55a52622c3c096fd624",
+            "ref": "bb31f67912509a6184a2f55a52622c3c096fd624",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": false,
           "depends_on": [
             "E31-F02"
           ],
-          "spec_path": "specs/epics/E31-opencode-first-class/F03-opencode-2x-compat/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (282)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E31-F03 done --evidence <merge-ref>`",
-            "pr": "282"
-          }
+          "spec_path": "specs/epics/E31-opencode-first-class/F03-opencode-2x-compat/"
         }
       ]
     },
