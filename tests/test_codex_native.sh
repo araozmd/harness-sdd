@@ -365,6 +365,15 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
             except AssertionError: pass
             else: raise AssertionError('iso_check accepted a polluted env: %r'%{k:_bad[k] for k in ('HOME','XDG_DATA_HOME')})
     finally: shutil.rmtree(_tmp,ignore_errors=True)
+    def run_group(argv,timeout,**kw):
+        # Run in its OWN session; on timeout SIGKILL the whole process group (not just the direct
+        # CLI process, whose children would orphan to PPID 1), reap, and re-raise TimeoutExpired.
+        vp=subprocess.Popen(argv,start_new_session=True,**kw)
+        try: return vp.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try: os.killpg(vp.pid,signal.SIGKILL)
+            except OSError: pass
+            vp.wait();raise
     def ocversion(ocbin):
         # The gate's `--version` runs under the isolated env too: on 2.x even `--version` creates
         # log/config/state/cache dirs under $XDG_DATA_HOME etc. (B1). File capture + own session so
@@ -373,12 +382,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
         try:
             out=tmp/'version.out'
             with open(out,'w') as vfh:
-                vp=subprocess.Popen([ocbin,'--version'],env=e,stdout=vfh,stderr=subprocess.STDOUT,start_new_session=True)
-                try: vrc=vp.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    try: os.killpg(vp.pid,signal.SIGKILL)
-                    except OSError: pass
-                    vp.wait();raise
+                vrc=run_group([ocbin,'--version'],30,env=e,stdout=vfh,stderr=subprocess.STDOUT)
             return out.read_text(errors='replace'),vrc
         finally: shutil.rmtree(tmp,ignore_errors=True)
     def oc1_run(ocbin,cwd,*args):
@@ -441,9 +445,9 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
                 e=dict(env);e['OPENCODE_PASSWORD']=pw[0]
                 out=tmp/'api.out'
                 with open(out,'w') as fh:
-                    r=subprocess.run([ocbin,'api','--server',url,'GET',path],cwd=layout,env=e,stdout=fh,stderr=subprocess.STDOUT,timeout=octimeout(api_timeout,remaining))
+                    rc=run_group([ocbin,'api','--server',url,'GET',path],octimeout(api_timeout,remaining),cwd=layout,env=e,stdout=fh,stderr=subprocess.STDOUT)
                 txt=out.read_text(errors='replace')
-                if r.returncode!=0: raise RuntimeError('opencode api GET %s exited %d'%(path,r.returncode))
+                if rc!=0: raise RuntimeError('opencode api GET %s exited %d'%(path,rc))
                 return json.loads(txt)['data']
             agents=ocwarm(lambda rem:fetch('/api/agent',rem),time.monotonic()+warm_timeout,time.sleep,time.monotonic)
             commands=fetch('/api/command',api_timeout)
@@ -476,7 +480,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
                     if not group_gone(term_grace): probs.append('process group %d still alive after SIGKILL'%p.pid)
                 out=tmp/'status.out'
                 with open(out,'w') as fh:
-                    subprocess.run([ocbin,'service','status'],cwd=layout,env=env,stdout=fh,stderr=subprocess.STDOUT,timeout=60)
+                    run_group([ocbin,'service','status'],60,cwd=layout,env=env,stdout=fh,stderr=subprocess.STDOUT)
                 st=out.read_text(errors='replace').strip()
                 if not st.startswith('stopped'): probs.append('opencode service status is not stopped: %r'%st[:80])
             except Exception as ex: probs.append('cleanup raised %s'%type(ex).__name__)
@@ -496,7 +500,7 @@ echo "$1|$PWD|$HOME|$XDG_CONFIG_HOME|$XDG_DATA_HOME|$XDG_STATE_HOME|$XDG_CACHE_H
 case "$1" in
   --version) echo "%s";;
   service) echo %s;;
-  api) sleep %s; case "$5" in /api/agent) echo '{"data":%s}';; /api/command) echo '{"data":[{"name":"sdd-next"}]}';; esac;;
+  api) sleep %s & echo $! > "%s"; wait $!; case "$5" in /api/agent) echo '{"data":%s}';; /api/command) echo '{"data":[{"name":"sdd-next"}]}';; esac;;
   serve) case "%s" in
     exit) exit 0;;
     silent) sleep 300 & wait;;
@@ -507,7 +511,7 @@ case "$1" in
            wait;;
   esac;;
 esac
-'''%(log,envlog,version,status,api_sleep,agent_json,mode,child,d/'term.mark'))
+'''%(log,envlog,version,status,api_sleep,d/'api.pid',agent_json,mode,child,d/'term.mark'))
         os.chmod(d/'opencode',0o755);return str(d/'opencode'),log,child
     def fake_run(mode,agent_json='[]',status='stopped',api_sleep=0,full=False,blank=None,wrong=None,**kw):
         d=pathlib.Path(tempfile.mkdtemp(prefix='fake-oc-'));lay=d/'layout';lay.mkdir()
@@ -527,6 +531,7 @@ esac
             argv=log.read_text().splitlines() if log.exists() else []
             fake_run.env=[l.split('|') for l in (d/'env.log').read_text().splitlines()] if (d/'env.log').exists() else []
             cpid=int(child.read_text()) if child.exists() else None
+            fake_run.api_pid=int((d/'api.pid').read_text()) if (d/'api.pid').exists() else None
             return err,argv,cpid
         finally: shutil.rmtree(d,ignore_errors=True)
     import inspect
@@ -544,6 +549,12 @@ esac
     # (api_timeout 10 > warm_timeout 3: only the min(api_timeout, remaining) bound keeps the poll inside its deadline)
     _err,_argv,_cpid = fake_run('serve','[]',warm_timeout=3,api_timeout=10,term_grace=1,api_sleep=30)
     assert _err and 'cold-start' in _err and fake_run.elapsed<8,(_err,fake_run.elapsed)
+    # ...and the timed-out api call's whole group dies with it: its grandchild `sleep` must not
+    # survive as a PPID-1 orphan (killing only the direct CLI process would leave it running)
+    _ap=fake_run.api_pid;assert _ap,'fake api never recorded its sleep pid'
+    _end=time.monotonic()+2
+    while _alive(_ap) and time.monotonic()<_end: time.sleep(0.1)
+    if _alive(_ap): os.kill(_ap,signal.SIGKILL);raise AssertionError('timed-out opencode api call left its child %d alive'%_ap)
     _err,_argv,_cpid = fake_run('serve','[]',warm_timeout=2,term_grace=1)
     assert _err and 'cold-start' in _err and 'fakepw' not in _err,_err
     assert _cpid and not _alive(_cpid),'probe left the TERM-ignoring child of the serve process group alive'
