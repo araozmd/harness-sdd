@@ -1753,7 +1753,7 @@
     {
       "id": "E31",
       "title": "OpenCode is a claimed, first-class front end",
-      "status": "done",
+      "status": "in-progress",
       "owner": "araozmd",
       "features": [
         {
@@ -1789,6 +1789,17 @@
             "E31-F01"
           ],
           "spec_path": "specs/epics/E31-opencode-first-class/F02-source-host-parity/"
+        },
+        {
+          "id": "E31-F03",
+          "title": "OpenCode 2.x compatibility: emitted glue (agents key, agent dir) and CLI probes",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E31-F02"
+          ],
+          "spec_path": "specs/epics/E31-opencode-first-class/F03-opencode-2x-compat/"
         }
       ]
     },

@@ -1,7 +1,7 @@
 ---
 id: E31
 title: "OpenCode is a claimed, first-class front end"
-status: done             # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: in-progress             # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 
@@ -76,6 +76,7 @@ Codex.
 |---|---|---|---|---|
 | E31-F01 | OpenCode claims the shared `.agents/skills` units; the unit is host-neutral and the concurrency gate holds | pending | true | — |
 | E31-F02 | The source repo's OpenCode glue is installer-generated: `opencode.json`, `.opencode/` commands, and `pr-fixer` via `--self` | pending | true | E31-F01 |
+| E31-F03 | OpenCode 2.x compatibility: emitted glue (`agents` key, agent dir discovery) and CLI probes; 2.x `debug` spawns a detached `serve --service` daemon | pending | true | E31-F02 |
 
 ## Notes
 
