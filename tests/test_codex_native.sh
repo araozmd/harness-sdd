@@ -462,8 +462,9 @@ esac
     _err,_argv,_ = fake_run('pwonly',start_timeout=1,term_grace=1)
     assert _err and 'server did not start' in _err and 'fakepw' not in _err and '<redacted>' in _err,_err
     # an api call that never answers is bounded by api_timeout, then the poll gives up
-    _err,_argv,_cpid = fake_run('serve','[]',warm_timeout=3,api_timeout=1,term_grace=1,api_sleep=30)
-    assert _err and 'cold-start' in _err and fake_run.elapsed<20,(_err,fake_run.elapsed)
+    # (api_timeout 10 > warm_timeout 3: only the min(api_timeout, remaining) bound keeps the poll inside its deadline)
+    _err,_argv,_cpid = fake_run('serve','[]',warm_timeout=3,api_timeout=10,term_grace=1,api_sleep=30)
+    assert _err and 'cold-start' in _err and fake_run.elapsed<8,(_err,fake_run.elapsed)
     _err,_argv,_cpid = fake_run('serve','[]',warm_timeout=2,term_grace=1)
     assert _err and 'cold-start' in _err and 'fakepw' not in _err,_err
     assert _cpid and not _alive(_cpid),'probe left the TERM-ignoring child of the serve process group alive'
