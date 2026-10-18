@@ -269,11 +269,46 @@ class Draft7Validator(object):
     def __init__(self, schema): pass
     def iter_errors(self, data): return iter(())
 PY
+# `PYTHONPATH=""` does NOT hide a site-packages jsonschema, so the fallback path is forced
+# by a meta_path import blocker (as tests/test_ownership.sh does) and the CLI run via runpy.
+cat > "$W/fbrun.py" <<'PY'
+import importlib.abc, runpy, sys
+class _Block(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path, target=None):
+        if name == "jsonschema" or name.startswith("jsonschema."):
+            raise ImportError("jsonschema blocked: forcing the zero-dependency fallback")
+        return None
+sys.meta_path.insert(0, _Block())
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+PY
+vb() { # <pythonpath|empty=forced fallback> <validator args...>
+  _vp="$1"; shift
+  if [ -z "$_vp" ]; then python3 "$W/fbrun.py" "$VALIDATOR" "$@"
+  else PYTHONPATH="$_vp" python3 "$VALIDATOR" "$@"; fi
+}
+# The runner must block an importable jsonschema: a decoy that rejects everything with a
+# marker must be live without the blocker and silent with it.
+mkdir -p "$W/decoy/jsonschema"
+cat > "$W/decoy/jsonschema/__init__.py" <<'PY'
+class _E(object):
+    path = []
+    message = "DECOY-JSONSCHEMA"
+class Draft7Validator(object):
+    def __init__(self, schema): pass
+    def iter_errors(self, data): return iter([_E()])
+PY
+printf '%s' '{"project":"p","epics":[]}' > "$W/fb-ok.json"
+PYTHONPATH="$W/decoy" python3 "$VALIDATOR" "$W/fb-ok.json" "$SCHEMA" 2>&1 | grep -q DECOY-JSONSCHEMA \
+  || fail "B: the decoy jsonschema is not importable, so the blocker row proves nothing"
+PYTHONPATH="$W/decoy" python3 "$W/fbrun.py" "$VALIDATOR" "$W/fb-ok.json" "$SCHEMA" >"$W/verr" 2>&1 \
+  || fail "B: the forced-fallback runner let an importable jsonschema run: $(cat "$W/verr")"
+if grep -q DECOY-JSONSCHEMA "$W/verr"; then fail "B: the forced-fallback runner did not block jsonschema"; fi
 for _k in same-epic cross-epic epic; do
   python3 "$W/dupboard.py" "$_k" "$W/dup-$_k.json"
   for _path in fallback stub; do
     if [ "$_path" = stub ]; then _pp="$W/stub"; else _pp=""; fi
-    PYTHONPATH="$_pp" python3 "$VALIDATOR" "$W/dup-$_k.json" "$SCHEMA" 2>"$W/verr" \
+    vb "$_pp" "$W/dup-$_k.json" "$SCHEMA" 2>"$W/verr" \
       && fail "B: a $_k duplicate id passed validation on the $_path path"
     grep -q 'duplicate' "$W/verr" \
       || fail "B: the $_k/$_path rejection does not say 'duplicate': $(cat "$W/verr")"
@@ -281,7 +316,7 @@ for _k in same-epic cross-epic epic; do
 done
 python3 "$W/dupboard.py" ok "$W/dup-ok.json"
 for _pp in "" "$W/stub"; do
-  PYTHONPATH="$_pp" python3 "$VALIDATOR" "$W/dup-ok.json" "$SCHEMA" \
+  vb "$_pp" "$W/dup-ok.json" "$SCHEMA" \
     || fail "B: distinct ids (same F## in different epics) were rejected"
 done
 # Malformed shapes are the SCHEMA's to report: the duplicate check must tolerate them
@@ -300,10 +335,10 @@ assert m.duplicate_id_errors({"epics": 5}) == [] and m.duplicate_id_errors([]) =
   || fail "B: duplicate_id_errors raised on a non-list epics / non-object board"
 for _f in dup-malformed; do
   for _pp in "" "$W/stub"; do
-    PYTHONPATH="$_pp" python3 "$VALIDATOR" "$W/$_f.json" "$SCHEMA" >/dev/null 2>"$W/verr" && _rc=0 || _rc=$?
+    vb "$_pp" "$W/$_f.json" "$SCHEMA" >/dev/null 2>"$W/verr" && _rc=0 || _rc=$?
     if grep -q Traceback "$W/verr"; then fail "B: $_f crashed the validator: $(cat "$W/verr")"; fi
   done
-  python3 "$VALIDATOR" "$W/$_f.json" "$SCHEMA" >/dev/null 2>&1 \
+  vb "" "$W/$_f.json" "$SCHEMA" >/dev/null 2>&1 \
     && fail "B: the malformed board $_f passed on the fallback path"
 done
 # In-process: tasks-lock refuses a WRITE that would leave a duplicate, board untouched.
@@ -326,7 +361,7 @@ pass "B validate-board rejects duplicate feature/epic ids on both paths and in-p
 dw() { # <name> <json> <expected-substring>
   printf '%s' "$2" > "$W/dw-$1.json"
   for _pp in "" "$W/stub"; do
-    PYTHONPATH="$_pp" python3 "$VALIDATOR" "$W/dw-$1.json" "$SCHEMA" >/dev/null 2>"$W/verr" && _rc=0 || _rc=$?
+    vb "$_pp" "$W/dw-$1.json" "$SCHEMA" >/dev/null 2>"$W/verr" && _rc=0 || _rc=$?
     if grep -q Traceback "$W/verr"; then fail "B2: $1 crashed the draft-warning pass: $(cat "$W/verr")"; fi
     # The stub validator accepts any shape, so only the fallback owes rc=1; the stub path
     # owes "no crash" (a TypeError would exit 1 too, hence the Traceback check above).
@@ -336,21 +371,21 @@ dw() { # <name> <json> <expected-substring>
 # The stub accepts everything, so the `expected array` text is asserted on the fallback only.
 for _c in 'int:5' 'bool:true' 'string:"x"' 'dict:{"a":1}' 'null:null' 'float:5.5'; do
   dw "epics-${_c%%:*}" "{\"project\":\"p\",\"epics\":${_c#*:}}"
-  PYTHONPATH="" python3 "$VALIDATOR" "$W/dw-epics-${_c%%:*}.json" "$SCHEMA" 2>&1 >/dev/null \
+  vb "" "$W/dw-epics-${_c%%:*}.json" "$SCHEMA" 2>&1 >/dev/null \
     | grep -q 'epics: expected array' \
     || fail "B2: epics=${_c%%:*} did not report 'epics: expected array' on the fallback"
 done
 # null and a float are NOT iterable either: a guard narrowed to "not int/bool" must die here.
 for _c in 'int:7' 'null:null' 'float:7.5'; do
   dw "feat-${_c%%:*}" "{\"project\":\"p\",\"epics\":[{\"id\":\"E1\",\"title\":\"t\",\"status\":\"draft\",\"features\":${_c#*:}}]}"
-  PYTHONPATH="" python3 "$VALIDATOR" "$W/dw-feat-${_c%%:*}.json" "$SCHEMA" 2>&1 >/dev/null \
+  vb "" "$W/dw-feat-${_c%%:*}.json" "$SCHEMA" 2>&1 >/dev/null \
     | grep -q 'epics\[0\].features: expected array' \
     || fail "B2: draft epic with ${_c%%:*} features did not report 'features: expected array'"
 done
 # Positive control: the guard must not silence the warning on a well-formed draft epic.
 printf '%s' '{"project":"p","epics":[{"id":"E1","title":"t","status":"draft","features":[{"id":"E1-F01","title":"t","status":"done","sdd":false,"spec_path":"p/"}]}]}' > "$W/dw-ok.json"
 for _pp in "" "$W/stub"; do
-  PYTHONPATH="$_pp" python3 "$VALIDATOR" "$W/dw-ok.json" "$SCHEMA" 2>&1 >/dev/null \
+  vb "$_pp" "$W/dw-ok.json" "$SCHEMA" 2>&1 >/dev/null \
     | grep -q "draft epic E1 has feature E1-F01 with status 'done'" \
     || fail "B2: a valid draft epic with a non-pending feature no longer warns"
 done
@@ -375,7 +410,7 @@ json.dump({"project": "p", "epics": [E]}, open(out, "w"))
 PY
 for _s in epic-status feat-status park-gate landed-verified landed-slice-verified slice-status; do
   python3 "$W/unhash.py" "$_s" "$W/unhash-$_s.json"
-  PYTHONPATH="" python3 "$VALIDATOR" "$W/unhash-$_s.json" "$SCHEMA" >/dev/null 2>"$W/verr" && _rc=0 || _rc=$?
+  vb "" "$W/unhash-$_s.json" "$SCHEMA" >/dev/null 2>"$W/verr" && _rc=0 || _rc=$?
   if grep -q Traceback "$W/verr"; then fail "B3: $_s crashed the fallback validator: $(cat "$W/verr")"; fi
   [ "$_rc" = 1 ] || fail "B3: $_s exited $_rc, expected 1"
   grep -q "not one of" "$W/verr" || fail "B3: $_s did not report 'not one of': $(cat "$W/verr")"
