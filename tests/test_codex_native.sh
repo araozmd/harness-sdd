@@ -439,9 +439,15 @@ case "$1" in
 esac
 '''%(log,envlog,status,api_sleep,agent_json,mode,child,d/'term.mark'))
         os.chmod(d/'opencode',0o755);return str(d/'opencode'),log,child
-    def fake_run(mode,agent_json='[]',status='stopped',api_sleep=0,**kw):
+    def fake_run(mode,agent_json='[]',status='stopped',api_sleep=0,full=False,blank=None,**kw):
         d=pathlib.Path(tempfile.mkdtemp(prefix='fake-oc-'));lay=d/'layout';lay.mkdir()
         try:
+            if full:
+                # a layout the fake serves back faithfully: every role + pr-fixer, system == file
+                (lay/'agents').mkdir();(lay/'.opencode/agent').mkdir(parents=True)
+                for r in roles: (lay/'agents'/(r+'.md')).write_text('body of '+r+'\n')
+                (lay/'.opencode/agent/pr-fixer.md').write_text('---\ndescription: x\n---\nbody of pr-fixer\n')
+                agent_json=json.dumps([{'id':r,'system':'' if r==blank else 'body of '+r} for r in sorted(roles)]+[{'id':'pr-fixer','system':'body of pr-fixer'}])
             b,log,child=fake_oc(d,mode,agent_json,status,api_sleep)
             t0=time.monotonic()
             try: oc2_probe(b,lay,'agents',[],quiet=True,**kw);err=None
@@ -497,6 +503,16 @@ esac
     # a service that is NOT stopped after the probe is reported
     fake_run('serve','[]',status='running',warm_timeout=1,term_grace=1)
     assert any('not stopped' in x for x in oc2_probe.cleanup_problems),oc2_probe.cleanup_problems
+    # the SUCCESS path, end to end against the fake: a faithful layout passes with a clean cleanup...
+    _err,_argv,_cpid = fake_run('serve',full=True,term_grace=1)
+    assert _err is None and oc2_probe.cleanup_problems==[],(_err,oc2_probe.cleanup_problems)
+    assert _cpid and not _alive(_cpid)
+    # ...and a service left running after an otherwise-green probe FAILS it (not just a stderr note)
+    _err,_argv,_cpid = fake_run('serve',status='running',full=True,term_grace=1)
+    assert _err and 'not stopped' in _err,_err
+    # a role whose resolved system differs from its file (silent {file:} failure) is caught
+    _err,_argv,_cpid = fake_run('serve',full=True,blank='builder-heavy',term_grace=1)
+    assert _err and 'builder-heavy' in _err and 'system differs' in _err and _cpid and not _alive(_cpid),_err
     del os.environ['OPENCODE_CONFIG']
     assert {a.split()[0] for a in _argv}<={'serve','api','service'},_argv
     assert all(a.startswith('api --server http://127.0.0.1:1 GET /api/') for a in _argv if a.startswith('api')),_argv
