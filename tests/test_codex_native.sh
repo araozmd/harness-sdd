@@ -331,8 +331,8 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
         # XDG var differ from the ambient ones and share one root (R7). Used on the env of EVERY
         # live 1.x call below, so a call that bypasses ocenv() is caught, not just a broken builder.
         assert not [k for k in e if k.startswith('OPENCODE')],sorted(k for k in e if k.startswith('OPENCODE'))
-        vals=[e[k] for k in ('HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','XDG_RUNTIME_DIR')]
-        assert len({os.path.dirname(v) for v in vals})==1,vals
+        vals=[e.get(k,'') for k in ('HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','XDG_RUNTIME_DIR')]
+        assert all(vals) and len({os.path.dirname(v) for v in vals})==1,vals
         assert all(v!=os.environ.get(k) for k,v in zip(('HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','XDG_RUNTIME_DIR'),vals)),vals
     _e,_tmp=ocenv({'OPENCODE_CONFIG':'/x','OPENCODE_PID':'1','PATH':'/bin','HOME':'/h','XDG_CONFIG_HOME':'/h/.config'})
     try:
