@@ -1856,8 +1856,8 @@
         },
         {
           "id": "E31-F03",
-          "title": "OpenCode 2.x compatibility: emitted glue (agents key, agent dir) and CLI probes",
-          "status": "spec-ready",
+          "title": "OpenCode 2.x verification: live 2.x probe + model-helper daemon fix",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": false,
           "depends_on": [
