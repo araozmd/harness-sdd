@@ -79,6 +79,8 @@ mk_harness() { # mk_harness <dir> <provider-block>
 mkdir -p "$T/bin"
 cat > "$T/bin/gh" <<EOF
 #!/bin/sh
+# E99-F175: drain stdin when given --input -; exiting first EPIPEs the tool's gh() under load
+case " \$* " in *" --input "*) cat >/dev/null ;; esac
 echo "called: \$*" >> "$T/gh-called"
 case "\$1 \$2" in
   "--version ") echo "gh version 2.62.0 (2024-11-27)" ;;
@@ -159,6 +161,8 @@ if command -v node >/dev/null 2>&1; then
   mkdir -p "$T/bin2"
   cat > "$T/bin2/gh" <<'EOF'
 #!/bin/sh
+# E99-F175: drain stdin when given --input -; exiting first EPIPEs the tool's gh() under load
+case " $* " in *" --input "*) cat >/dev/null ;; esac
 case "$1 $2" in
   "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
   "auth status")        echo "Token scopes: 'project', 'read:org', 'repo'"; exit 0 ;;
@@ -197,6 +201,8 @@ EOF
   mkdir -p "$T/bin3"
   cat > "$T/bin3/gh" <<'EOF'
 #!/bin/sh
+# E99-F175: drain stdin when given --input -; exiting first EPIPEs the tool's gh() under load
+case " $* " in *" --input "*) cat >/dev/null ;; esac
 case "$1 $2" in
   "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
   "auth status")        echo "Token scopes: 'project', 'read:org', 'repo'"; exit 0 ;;
@@ -238,6 +244,8 @@ EOF
   mkdir -p "$T/bin4"
   cat > "$T/bin4/gh" <<'EOF'
 #!/bin/sh
+# E99-F175: drain stdin when given --input -; exiting first EPIPEs the tool's gh() under load
+case " $* " in *" --input "*) cat >/dev/null ;; esac
 case "$1 $2" in
   "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
   "auth status")        echo "Token scopes: 'project', 'read:org', 'repo'"; exit 0 ;;
@@ -286,6 +294,8 @@ EOF
   mkdir -p "$T/bin-old"
   cat > "$T/bin-old/gh" <<EOF
 #!/bin/sh
+# E99-F175: drain stdin when given --input -; exiting first EPIPEs the tool's gh() under load
+case " \$* " in *" --input "*) cat >/dev/null ;; esac
 echo "called: \$*" >> "$T/pf-old-called"
 case "\$1 \$2" in
   "--version ") echo "gh version 2.20.0 (2023-01-01)" ;;
@@ -311,6 +321,8 @@ EOF
   mkdir -p "$T/bin-noscope"
   cat > "$T/bin-noscope/gh" <<EOF
 #!/bin/sh
+# E99-F175: drain stdin when given --input -; exiting first EPIPEs the tool's gh() under load
+case " \$* " in *" --input "*) cat >/dev/null ;; esac
 echo "called: \$*" >> "$T/pf-scope-called"
 case "\$1 \$2" in
   "--version ") echo "gh version 2.62.0 (2024-11-27)" ;;
@@ -339,6 +351,8 @@ EOF
   mkdir -p "$T/bin-stderr"
   cat > "$T/bin-stderr/gh" <<EOF
 #!/bin/sh
+# E99-F175: drain stdin when given --input -; exiting first EPIPEs the tool's gh() under load
+case " \$* " in *" --input "*) cat >/dev/null ;; esac
 echo "called: \$*" >> "$T/pf-stderr-called"
 case "\$1 \$2" in
   "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
@@ -374,6 +388,8 @@ EOF
   mkdir -p "$T/bin-readproject"
   cat > "$T/bin-readproject/gh" <<EOF
 #!/bin/sh
+# E99-F175: drain stdin when given --input -; exiting first EPIPEs the tool's gh() under load
+case " \$* " in *" --input "*) cat >/dev/null ;; esac
 echo "called: \$*" >> "$T/pf-readproject-called"
 case "\$1 \$2" in
   "--version ") echo "gh version 2.62.0 (2024-11-27)" ;;
@@ -401,6 +417,8 @@ EOF
   mkdir -p "$T/bin-repostatus"
   cat > "$T/bin-repostatus/gh" <<EOF
 #!/bin/sh
+# E99-F175: drain stdin when given --input -; exiting first EPIPEs the tool's gh() under load
+case " \$* " in *" --input "*) cat >/dev/null ;; esac
 echo "called: \$*" >> "$T/pf-repostatus-called"
 case "\$1 \$2" in
   "--version ") echo "gh version 2.62.0 (2024-11-27)" ;;
@@ -453,6 +471,8 @@ EOF
   mkdir -p "$T/bin-recon"
   cat > "$T/bin-recon/gh" <<EOF
 #!/bin/sh
+# E99-F175: drain stdin when given --input -; exiting first EPIPEs the tool's gh() under load
+case " \$* " in *" --input "*) cat >/dev/null ;; esac
 echo "called: \$*" >> "$T/recon-called"
 case "\$1 \$2" in
   "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
@@ -503,6 +523,8 @@ EOF
     mkdir -p "$1"
     cat > "$1/gh" <<EOF
 #!/bin/sh
+# E99-F175: drain stdin when given --input -; exiting first EPIPEs the tool's gh() under load
+case " \$* " in *" --input "*) cat >/dev/null ;; esac
 echo "called: \$*" >> "$2"
 case "\$1 \$2" in
   "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
@@ -601,6 +623,8 @@ EOF
   mkdir -p "$T/bin-t9"
   cat > "$T/bin-t9/gh" <<EOF
 #!/bin/sh
+# E99-F175: drain stdin when given --input -; exiting first EPIPEs the tool's gh() under load
+case " \$* " in *" --input "*) cat >/dev/null ;; esac
 echo "called: \$*" >> "$T/t9-called"
 case "\$1 \$2" in
   "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
@@ -635,6 +659,8 @@ EOF
     mkdir -p "$1"
     cat > "$1/gh" <<EOF
 #!/usr/bin/env node
+// E99-F175: drain stdin when given --input - (see the sh shims)
+if (process.argv.includes('--input')) require('node:fs').readFileSync(0);
 const fs = require('node:fs');
 const a = process.argv.slice(2);
 fs.appendFileSync('$2', 'called: ' + a.join(' ') + '\n');
@@ -831,6 +857,8 @@ EOF
   mkdir -p "$T/bin-dry"
   cat > "$T/bin-dry/gh" <<EOF
 #!/bin/sh
+# E99-F175: drain stdin when given --input -; exiting first EPIPEs the tool's gh() under load
+case " \$* " in *" --input "*) cat >/dev/null ;; esac
 echo "called: \$*" >> "$T/dry-called"
 case "\$1 \$2" in
   "--version ")         echo "gh version 2.62.0 (2024-11-27)"; exit 0 ;;
