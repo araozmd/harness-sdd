@@ -366,6 +366,12 @@ refuses "$R" 'parked.*unpark' E99-F03 E99-F06
 R="$W/c-dep"; mk_ren "$R"
 mutate_row "$R" 'data["epics"][0]["features"][0]["depends_on"]=["E99-F03"]'
 refuses "$R" 'depends_on' E99-F03 E99-F06
+R="$W/c-sdd"; mk_ren "$R"
+mutate_row "$R" 'f["sdd"]=True'
+refuses "$R" 'not an sdd: false' E99-F03 E99-F06
+R="$W/c-sliced"; mk_ren "$R"
+mutate_row "$R" 'f["slices"]=[{"id":"E99-F03@app","repo":"app","status":"pending"}]'
+refuses "$R" 'carries slices' E99-F03 E99-F06
 
 R="$W/c-ids"; mk_ren "$R"
 refuses "$R" 'epic E98 not found' E98-F01 E98-F02
@@ -383,7 +389,7 @@ python3 "$W/mkboard.py" "$R/state/tasks.json" 1 2 3
   && fail "C: the no-git fixture sits inside a work tree (TMPDIR under a repo?)"
 refuses "$R" 'not above' E99-F03 E99-F02
 refuses "$R" 'not above' E99-F02 E99-F03
-pass "C renumber refuses done, landed, a bad or occupied spec_path, an inbound depends_on, unknown/foreign/non-canonical/non-higher ids"
+pass "C renumber refuses done, landed, sdd:true, sliced, a bad or occupied spec_path, an inbound depends_on, unknown/foreign/non-canonical/non-higher ids"
 
 # File refusals: nothing moves when ANY file move is unsafe, and the board stays put.
 R="$W/c-dstbrief"; mk_ren "$R"; : > "$R/progress/inbox/E99-F06.md"

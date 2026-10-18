@@ -254,8 +254,8 @@ python3 .harness/tools/tasks-lock.py renumber <old-id> <new-id>
 ```
 
 `<new-id>` must be in the same epic, canonical (`E99-F07`), and strictly above that epic's
-max over the same visible refs. The row must not be `done` and must carry no `landed`
-block; no other row may `depends_on` it, and its `spec_path` directory must not exist.
+max over the same visible refs. The row must be an `sdd: false` fix row with no `slices`, must not
+be `done` and must carry no `landed` block; no other row may `depends_on` it, and its `spec_path` directory must not exist.
 `renumber` rewrites the row's `id` and `spec_path` slug prefix, moves
 `progress/inbox/<old>.md` to `<new>.md` (updating its `feature:` frontmatter) and
 `progress/<old>/`, under the board lock. The file moves are undone, best-effort and with a

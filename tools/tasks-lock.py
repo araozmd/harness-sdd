@@ -2249,6 +2249,16 @@ def _renumber_transform(args, hdir, ref_max, holder):
         ft = picked[0][1]
         if ft.get("status") == "done":
             raise ValueError("%s is done — a landed row is never renumbered" % args.old_id)
+        if ft.get("sdd") is not False:
+            raise ValueError(
+                "%s is not an sdd: false fix row — renumber only recovers un-landed "
+                "fix rows" % args.old_id
+            )
+        if ft.get("slices"):
+            raise ValueError(
+                "%s carries slices — their ids are prefixed by the old id; renumber "
+                "never rewrites them" % args.old_id
+            )
         if "parked" in ft:
             raise ValueError(
                 "%s is parked (await-merge/owner gate) — its park text names the old "
@@ -2353,7 +2363,8 @@ def main(argv):
     # renumber (#253) — the documented way out of a duplicated fix id.
     p_ren = sub.add_parser(
         "renumber",
-        help="renumber one UN-LANDED row to a free, higher F## in the same epic",
+        help="renumber one UN-LANDED, unsliced sdd:false fix row to a free, higher "
+             "F## in the same epic",
     )
     p_ren.add_argument("old_id")
     p_ren.add_argument("new_id")
