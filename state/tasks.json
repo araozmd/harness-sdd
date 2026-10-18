@@ -1272,17 +1272,18 @@
         {
           "id": "E99-F175",
           "title": "tests: test_feature_park R7 control picks an await-merge park; test_mirror flakes under parallel load",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "c81f19bf8e5e8726e17d88c6af1988faf1b35791",
+            "ref": "c81f19bf8e5e8726e17d88c6af1988faf1b35791",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F175-suite-flakes/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (278)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E99-F175 done --evidence <merge-ref>`",
-            "pr": "278"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F175-suite-flakes/"
         }
       ]
     },
