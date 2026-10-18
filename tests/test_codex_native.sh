@@ -3,7 +3,7 @@
 set -eu
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 python3 - "$SRC" <<'PY'
-import hashlib, json, os, pathlib, re, shutil, signal, subprocess, sys, tempfile, tomllib
+import hashlib, json, os, pathlib, re, shutil, signal, subprocess, sys, tempfile, time, tomllib
 src=pathlib.Path(sys.argv[1])
 roles={'orchestrator','architect','builder','builder-heavy','reviewer','scout','doc-critic'}
 cmds={'sdd-new','sdd-plan','sdd-drill','sdd-next','sdd-fix','sdd-fix-parallel'}
@@ -259,23 +259,207 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     assert (src/'.opencode/command/sdd-next.md').is_file()
     assert (src/'.opencode/agent/pr-fixer.md').is_file()
     ocbin=shutil.which('opencode')
-    # The live probe drives the opencode 1.x CLI (`agent list`, `debug config`). opencode 2.x
-    # has no `agent` verb, and every `debug`/`agent` call on it spawns a detached
-    # `opencode serve --service` daemon. So gate on the MAJOR version and never invoke those
-    # verbs on anything but 1.x. `--version` is captured through a FILE with a timeout.
+    # E31-F03 R1: ONE emitted layout serves opencode 1.x and 2.x (2.x normalizes `agent`,
+    # `prompt` and `command` itself, verified on 2.0.32; 1.x reads the same files), so the
+    # installer emits the 1.x shape and nothing selects it by major. Hermetic: no binary needed.
+    _ocs=fresh('oc-shape');install(_ocs,'--agents=opencode','--pr-loop=true')
+    _ocj=json.loads((_ocs/'opencode.json').read_text())
+    assert 'agent' in _ocj and 'agents' not in _ocj,sorted(_ocj)
+    assert set(_ocj['agent'])==roles,sorted(_ocj['agent'])
+    for _r,_a in _ocj['agent'].items():
+        assert 'system' not in _a,_r
+        assert _a.get('prompt')=='{file:./.harness/agents/%s.md}'%_r,(_r,_a.get('prompt'))
+    assert (_ocs/'.opencode/command/sdd-next.md').is_file() and (_ocs/'.opencode/agent/pr-fixer.md').is_file()
+    assert not (_ocs/'.opencode/commands').exists() and not (_ocs/'.opencode/agents').exists()
+    print('ok - opencode_dual_major_shape (R1)')
+    # The live probe drives opencode through verbs that exist on one major only. 1.x: `agent
+    # list`, `debug config`. 2.x: those leave a detached `opencode serve --service` daemon, so
+    # the 2.x probe owns a foreground `opencode serve` instead (R3-R6). `--version` is
+    # captured through a FILE with a timeout.
     def ocgate(text,rc):
-        # Pure decision: None => run the 1.x probe, else the skip reason. Order matters:
-        # exit status first (never trust output from an erroring binary), then parse, then major.
-        if rc!=0: return 'opencode --version exited %d'%rc
+        # Pure decision -> (route, reason): route is 'v1' / 'v2' / None (skip, with the reason).
+        # Order matters: exit status first (never trust output from an erroring binary), then
+        # parse, then major. The same first-X.Y.Z rule lives in tools/opencode-model-helper.sh
+        # (tests/test_opencode_compat.sh drives both with one version table).
+        if rc!=0: return None,'opencode --version exited %d'%rc
         vm=re.search(r'\d+\.\d+\.\d+',text)
-        if not vm: return 'version unparseable (%r)'%text.strip()[:80]
-        if vm[0].split('.')[0]!='1': return 'detected opencode %s, probe targets 1.x'%vm[0]
-        return None
+        if not vm: return None,'version unparseable (%r)'%text.strip()[:80]
+        major=vm[0].split('.')[0]
+        if major=='1': return 'v1',None
+        if major=='2': return 'v2',None
+        return None,'detected opencode %s, unsupported major %s (probes target 1.x and 2.x)'%(vm[0],major)
     # Hermetic table: pins the gate (and its reason words) on every host, no binary needed.
-    for _t,_rc,_want in (('1.18.35',0,None),('opencode v2.0.32',0,'targets 1.x'),('10.1.2',0,'targets 1.x'),('0.9.1',0,'targets 1.x'),('garbage',0,'unparseable'),('1.2.3',3,'exited 3'),('',0,'unparseable')):
+    for _t,_rc,_route,_want in (('1.18.35',0,'v1',None),('opencode v2.0.32',0,'v2',None),('10.1.2',0,None,'unsupported major 10'),('3.0.0',0,None,'unsupported major 3'),('0.9.1',0,None,'unsupported major 0'),('garbage',0,None,'unparseable'),('',0,None,'unparseable'),('1.2.3',3,None,'exited 3'),('garbage',3,None,'exited 3'),('opencode v2.0.32',1,None,'exited 1')):
         _got=ocgate(_t,_rc)
-        assert (_got is None) if _want is None else (_got is not None and _want in _got),(_t,_rc,_got)
-    ocskip=None
+        assert _got[0]==_route and (_got[1] is None if _want is None else (_got[1] is not None and _want in _got[1])),(_t,_rc,_got)
+    def ocwarm(fetch,deadline,sleep,clock,interval=0.5):
+        # Pure poll (R5): call fetch(remaining) until it returns a NON-EMPTY list. A fetch that
+        # raises counts as "not warm yet". `deadline` is an absolute time on `clock`.
+        while True:
+            remaining=deadline-clock()
+            if remaining<=0: raise AssertionError('cold-start: agent list still empty at the deadline')
+            try: got=fetch(remaining)
+            except Exception: got=None
+            if got: return got
+            sleep(min(interval,max(deadline-clock(),0)))
+    def _warm(seq,limit=60):
+        t=[0.0];calls=[]
+        def fetch(rem):
+            calls.append(rem);assert rem>0
+            v=seq[min(len(calls)-1,len(seq)-1)]
+            if v=='raise': raise RuntimeError('boom')
+            return v
+        def sleep(s): t[0]+=s
+        try: return ocwarm(fetch,limit,sleep,lambda:t[0]),calls,t[0]
+        except AssertionError as e: return e,calls,t[0]
+    _r,_c,_t=_warm([[],[],['x']]);assert _r==['x'] and len(_c)==3,(_r,_c)
+    _r,_c,_t=_warm([['x']]);assert _r==['x'] and len(_c)==1,(_r,_c)
+    _r,_c,_t=_warm(['raise',['x']]);assert _r==['x'] and len(_c)==2,(_r,_c)
+    _r,_c,_t=_warm([[]]);assert isinstance(_r,AssertionError) and 'cold-start' in str(_r) and len(_c)>2 and _t<=60+0.5,(_r,_c,_t)
+    _r,_c,_t=_warm(['raise']);assert isinstance(_r,AssertionError) and 'cold-start' in str(_r) and len(_c)>2 and _t<=60+0.5,(_r,_c,_t)
+    assert _c[0]==60 and all(a>b for a,b in zip(_c,_c[1:])),'fetch must receive the shrinking remaining time'
+    # R7: isolated env for every live probe.
+    def ocenv(base=None,tmp=None):
+        tmp=pathlib.Path(tmp or tempfile.mkdtemp(prefix='opencode-iso-'))
+        e={k:v for k,v in (base if base is not None else os.environ).items() if not k.startswith('OPENCODE')}
+        for k,sub in (('HOME','home'),('XDG_CONFIG_HOME','config'),('XDG_DATA_HOME','data'),('XDG_STATE_HOME','state'),('XDG_CACHE_HOME','cache'),('XDG_RUNTIME_DIR','run')):
+            (tmp/sub).mkdir(parents=True,exist_ok=True);e[k]=str(tmp/sub)
+        os.chmod(tmp/'run',0o700)
+        return e,tmp
+    _e,_tmp=ocenv({'OPENCODE_CONFIG':'/x','OPENCODE_PID':'1','PATH':'/bin','HOME':'/h','XDG_CONFIG_HOME':'/h/.config'})
+    try:
+        assert not [k for k in _e if k.startswith('OPENCODE')] and _e['PATH']=='/bin',_e
+        for _k in ('HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','XDG_RUNTIME_DIR'):
+            assert pathlib.Path(_e[_k]).resolve().is_relative_to(_tmp.resolve()),(_k,_e[_k])
+        assert (os.stat(_e['XDG_RUNTIME_DIR']).st_mode&0o777)==0o700
+    finally: shutil.rmtree(_tmp,ignore_errors=True)
+    def _alive(pid):
+        try: os.kill(pid,0)
+        except ProcessLookupError: return False
+        z=subprocess.run(['ps','-o','stat=','-p',str(pid)],stdout=subprocess.PIPE,text=True).stdout.strip()
+        return bool(z) and not z.startswith('Z')
+    def oc2_probe(ocbin,layout,agents_dir,cmd_stems,start_timeout=30,warm_timeout=60,term_grace=10,quiet=False):
+        # R3-R6: own a foreground `opencode serve`, wait for it to warm, compare CONTENT, and
+        # on EVERY exit path kill its process group. Only --version / serve / api --server /
+        # service status are ever run: `debug`, `agent`, `models` and `run` start the 2.x
+        # background service (a detached `serve --service` that outlives the suite).
+        env,tmp=ocenv();log=tmp/'serve.log';pw=[None];failed=False;p=None
+        def redact(s): return s.replace(pw[0],'<redacted>') if pw[0] else s
+        def kill_group(sig):
+            try: os.killpg(p.pid,sig)
+            except ProcessLookupError: pass
+        def group_gone(wait):
+            end=time.monotonic()+wait
+            while True:
+                try: os.killpg(p.pid,0)
+                except ProcessLookupError: return True
+                if time.monotonic()>=end: return False
+                time.sleep(0.1)
+        try:
+            with open(log,'w') as fh:
+                p=subprocess.Popen([ocbin,'serve','--hostname','127.0.0.1','--port','0'],cwd=layout,env=env,stdout=fh,stderr=subprocess.STDOUT,start_new_session=True)
+            url=None;end=time.monotonic()+start_timeout
+            while True:
+                txt=log.read_text(errors='replace')
+                m=re.search(r'server listening on (http://\S+)',txt);w=re.search(r'server password (\S+)',txt)
+                if w: pw[0]=w[1]
+                if m and w: url=m[1];break
+                if p.poll() is not None: raise AssertionError('server did not start: opencode serve exited rc=%s: %s'%(p.returncode,redact(txt)[-300:]))
+                if time.monotonic()>=end: raise AssertionError('server did not start within %ss: %s'%(start_timeout,redact(txt)[-300:]))
+                time.sleep(0.2)
+            def fetch(path,remaining):
+                e=dict(env);e['OPENCODE_PASSWORD']=pw[0]
+                out=tmp/'api.out'
+                with open(out,'w') as fh:
+                    r=subprocess.run([ocbin,'api','--server',url,'GET',path],cwd=layout,env=e,stdout=fh,stderr=subprocess.STDOUT,timeout=max(min(15,remaining),1))
+                txt=out.read_text(errors='replace')
+                if r.returncode!=0: raise RuntimeError('opencode api GET %s exited %d'%(path,r.returncode))
+                return json.loads(txt)['data']
+            agents=ocwarm(lambda rem:fetch('/api/agent',rem),time.monotonic()+warm_timeout,time.sleep,time.monotonic)
+            commands=fetch('/api/command',15)
+            ids={a['id'] for a in agents}
+            want=roles|{'pr-fixer'}
+            assert want<=ids,'missing agents %s'%sorted(want-ids)
+            byid={a['id']:a for a in agents}
+            for r in sorted(roles):
+                expected=(pathlib.Path(layout)/agents_dir/(r+'.md')).read_text().strip()
+                assert expected,r
+                assert (byid[r].get('system') or '').strip()==expected,'agent %s system differs from %s/%s.md (silent {file:} failure?)'%(r,agents_dir,r)
+            body=(pathlib.Path(layout)/'.opencode/agent/pr-fixer.md').read_text().split('---',2)[2].strip()
+            assert body and (byid['pr-fixer'].get('system') or '').strip()==body,'pr-fixer system differs from .opencode/agent/pr-fixer.md'
+            names={c['name'] for c in commands}
+            assert 'sdd-next' in names,'sdd-next not resolved: %s'%sorted(names)
+            assert set(cmd_stems)<=names,'missing commands %s'%sorted(set(cmd_stems)-names)
+        except BaseException:
+            failed=True;raise
+        finally:
+            probs=[]
+            try:
+                if p is not None:
+                    kill_group(signal.SIGTERM)
+                    try: p.wait(timeout=term_grace)
+                    except subprocess.TimeoutExpired: pass
+                    if not group_gone(term_grace):
+                        kill_group(signal.SIGKILL)
+                        try: p.wait(timeout=10)
+                        except subprocess.TimeoutExpired: pass
+                    if not group_gone(10): probs.append('process group %d still alive after SIGKILL'%p.pid)
+                out=tmp/'status.out'
+                with open(out,'w') as fh:
+                    subprocess.run([ocbin,'service','status'],cwd=layout,env=env,stdout=fh,stderr=subprocess.STDOUT,timeout=60)
+                st=out.read_text(errors='replace').strip()
+                if not st.startswith('stopped'): probs.append('opencode service status is not stopped: %r'%st[:80])
+            except Exception as ex: probs.append('cleanup raised %s'%type(ex).__name__)
+            shutil.rmtree(tmp,ignore_errors=True)
+            if probs:
+                if not failed: raise AssertionError('; '.join(probs))
+                if not quiet: print('cleanup problems after a failed probe: '+'; '.join(probs),file=sys.stderr)
+    # Hermetic R5/R6 coverage with a FAKE opencode (no real binary, any host): start-up
+    # failures, the cold-start deadline, group-kill of a TERM-ignoring child, cleanup after a
+    # failed assertion, and the verbs ever invoked.
+    def fake_oc(d,mode,agent_json='[]'):
+        d=pathlib.Path(d);log=d/'argv.log';child=d/'child.pid'
+        (d/'opencode').write_text('''#!/bin/sh
+echo "$*" >> "%s"
+case "$1" in
+  --version) echo "opencode v2.0.32";;
+  service) echo stopped;;
+  api) case "$5" in /api/agent) echo '{"data":%s}';; /api/command) echo '{"data":[{"name":"sdd-next"}]}';; esac;;
+  serve) case "%s" in
+    exit) exit 0;;
+    silent) sleep 300 & wait;;
+    serve) echo "server listening on http://127.0.0.1:1"; echo "server password fakepw"
+           ( trap '' TERM; exec sleep 300 ) & echo $! > "%s"; wait;;
+  esac;;
+esac
+'''%(log,agent_json,mode,child))
+        os.chmod(d/'opencode',0o755);return str(d/'opencode'),log,child
+    def fake_run(mode,agent_json='[]',**kw):
+        d=pathlib.Path(tempfile.mkdtemp(prefix='fake-oc-'));lay=d/'layout';lay.mkdir()
+        try:
+            b,log,child=fake_oc(d,mode,agent_json)
+            try: oc2_probe(b,lay,'agents',[],quiet=True,**kw);err=None
+            except AssertionError as e: err=str(e)
+            argv=log.read_text().splitlines() if log.exists() else []
+            cpid=int(child.read_text()) if child.exists() else None
+            return err,argv,cpid
+        finally: shutil.rmtree(d,ignore_errors=True)
+    _err,_argv,_ = fake_run('exit',start_timeout=5)
+    assert _err and 'server did not start' in _err,_err
+    _err,_argv,_ = fake_run('silent',start_timeout=1,term_grace=1)
+    assert _err and 'server did not start' in _err and 'within 1s' in _err,_err
+    _err,_argv,_cpid = fake_run('serve','[]',warm_timeout=2,term_grace=1)
+    assert _err and 'cold-start' in _err and 'fakepw' not in _err,_err
+    assert _cpid and not _alive(_cpid),'probe left the TERM-ignoring child of the serve process group alive'
+    _err,_argv,_cpid = fake_run('serve','[{"id":"orchestrator","system":"x"}]',term_grace=1)
+    assert _err and 'missing agents' in _err,_err
+    assert _cpid and not _alive(_cpid),'cleanup did not run (or did not kill the group) after a failed assertion'
+    assert _argv[0]=='serve --hostname 127.0.0.1 --port 0',_argv
+    assert _argv[-1]=='service status',_argv
+    assert {a.split()[0] for a in _argv}<={'serve','api','service'},_argv
+    assert all(a.startswith('api --server http://127.0.0.1:1 GET /api/') for a in _argv if a.startswith('api')),_argv
+    print('ok - opencode_probe_hermetic (R5, R6, R7)')
+    ocroute=None;ocskip=None
     if ocbin:
         try:
             vfd,vfn=tempfile.mkstemp(prefix='opencode-version-');os.close(vfd)
@@ -291,33 +475,63 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
                 vout=pathlib.Path(vfn).read_text(errors='replace')
             finally:
                 os.unlink(vfn)
-            ocskip=ocgate(vout,vrc)
+            ocroute,ocskip=ocgate(vout,vrc)
         except Exception as e:
             ocskip='opencode --version failed (%s)'%type(e).__name__
-    if ocbin and ocskip is None:
-        # OpenCode installs runtime deps into `.opencode/` on first run, so the LIVE probe
-        # runs against an ISOLATED copy of the source layout — never the repository itself.
-        # Capture through a FILE, not a pipe: opencode truncates its JSON at 64 KiB when
-        # stdout is a pipe, which silently drops the `command` section this probe asserts.
-        probe=pathlib.Path(tempfile.mkdtemp(prefix='opencode-source-probe-'))
-        try:
-            for rel in ('opencode.json','AGENTS.md'):
-                if (src/rel).is_file(): shutil.copy2(src/rel,probe/rel)
-            (probe/'.opencode').mkdir(parents=True,exist_ok=True)
-            for rel in ('.opencode/command','.opencode/agent','agents'):
-                if (src/rel).is_dir(): shutil.copytree(src/rel,probe/rel)
-            def oc(*args):
-                fd,fn=tempfile.mkstemp(prefix='opencode-probe-');os.close(fd)
-                with open(fn,'w') as fh:
-                    subprocess.run([ocbin,*args],cwd=probe,stdout=fh,stderr=subprocess.STDOUT,timeout=120)
-                data=pathlib.Path(fn).read_text();os.unlink(fn);return data
-            agents=oc('agent','list')
+    def gitstat(): 
+        r=subprocess.run(['git','-C',str(src),'status','--porcelain'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+        return r.stdout if r.returncode==0 else None
+    def layout_copy(name):
+        # OpenCode installs runtime deps into `.opencode/` on first run, so a LIVE probe runs
+        # against an ISOLATED copy of the source layout, never the repository itself.
+        probe=fresh(name)
+        for rel in ('opencode.json','AGENTS.md'):
+            if (src/rel).is_file(): shutil.copy2(src/rel,probe/rel)
+        (probe/'.opencode').mkdir(parents=True,exist_ok=True)
+        for rel in ('.opencode/command','.opencode/agent','agents'):
+            if (src/rel).is_dir(): shutil.copytree(src/rel,probe/rel)
+        return probe
+    if ocbin and ocroute:
+        before=gitstat()
+        if ocroute=='v2':
+            # Literal expected set (F6): never derived from the install's own files, so a stem
+            # the installer drops cannot shrink its own expectation.
+            tgt=fresh('oc2-target');install(tgt,'--agents=opencode','--pr-loop=true')
+            oc2_probe(ocbin,tgt,'.harness/agents',['sdd-drill','sdd-fix','sdd-new','sdd-next','sdd-plan','sdd-pr-loop','sdd-report','sdd-test-concurrency'])
+            print('ok - opencode_target_resolves (R3, live 2.x)')
+            # R4: the source copy; expected stems come from the REPOSITORY, not from the copy.
+            stems=sorted(f.stem for f in (src/'.opencode/command').glob('*.md'))
+            assert 'sdd-next' in stems,stems
+            oc2_probe(ocbin,layout_copy('oc2-source'),'agents',stems)
+            print('ok - opencode_source_host_resolves (R4, live 2.x)')
+        else:
+            # Capture through a FILE, not a pipe: opencode truncates its JSON at 64 KiB when
+            # stdout is a pipe, which silently drops the `command` section this probe asserts.
+            def oc(cwd,*args):
+                e,tmp=ocenv()
+                try:
+                    out=tmp/'out.txt'
+                    with open(out,'w') as fh:
+                        subprocess.run([ocbin,*args],cwd=cwd,env=e,stdout=fh,stderr=subprocess.STDOUT,timeout=120)
+                    return out.read_text()
+                finally: shutil.rmtree(tmp,ignore_errors=True)
+            probe=layout_copy('oc1-source')
+            agents=oc(probe,'agent','list')
             assert 'builder-heavy (subagent)' in agents and 'pr-fixer (subagent)' in agents,agents
-            commands=oc('debug','config')
+            commands=oc(probe,'debug','config')
             assert '"sdd-next"' in commands,'live opencode probe did not resolve /sdd-next'
             print('ok - opencode_source_host_resolves (R9, live)')
-        finally:
-            shutil.rmtree(probe,ignore_errors=True)
+            tgt=fresh('oc1-target');install(tgt,'--agents=opencode','--pr-loop=true')
+            agents=oc(tgt,'agent','list')
+            for r in sorted(roles|{'pr-fixer'}):
+                assert re.search(r'^%s \((primary|subagent)\)'%re.escape(r),agents,re.M),(r,agents)
+            assert 'orchestrator (primary)' in agents and 'pr-fixer (subagent)' in agents,agents
+            cfg=json.loads(oc(tgt,'debug','config'))
+            assert 'sdd-next' in cfg['command'],sorted(cfg.get('command',{}))
+            print('ok - opencode_target_resolves (R8, live 1.x)')
+        after=gitstat()
+        assert before==after,'live opencode probes changed the repository tree:\n%s\n--\n%s'%(before,after)
+        print('ok - opencode_probes_isolated (R7)')
     elif ocbin:
         print('skip - live opencode probe: %s; static source-layout assertions passed (R9)'%ocskip)
     else:
