@@ -1396,7 +1396,7 @@ GH
   # BOUNDED: with a tiny ceiling an ever-OPEN PR must still fail closed with 7.
   _rc=0; ( PATH="$_mv/bin" FAKE_STATE='OPEN  ' HARNESS_MERGE_VERIFY_INTERVAL=1 HARNESS_MERGE_VERIFY_CEILING=2 \
            sh "$W" merge-verify "$_mv/r" 9 post ) >/dev/null 2>&1 || _rc=$?
-  [ "$_rc" = 7 ] || fail "F141: a PR still OPEN at the bounded ceiling must fail the post receipt with 7 (got $_rc)"
+  [ "$_rc" = 11 ] || fail "F141/#256: a PR still OPEN at the bounded ceiling must fail the post receipt with 11 (queued, request live) — not 7, which means CLOSED/unreadable (got $_rc)"
   # CLOSED = rejected from the queue: fail FAST, no waiting out the ceiling.
   _t0="$(date +%s)"
   _rc=0; ( PATH="$_mv/bin" FAKE_STATE='CLOSED  ' HARNESS_MERGE_VERIFY_INTERVAL=5 HARNESS_MERGE_VERIFY_CEILING=60 \
@@ -1407,6 +1407,14 @@ GH
   _rc=0; ( PATH="$_mv/bin" FAKE_STATE= HARNESS_MERGE_VERIFY_INTERVAL=1 HARNESS_MERGE_VERIFY_CEILING=2 \
            sh "$W" merge-verify "$_mv/r" 9 post ) >/dev/null 2>&1 || _rc=$?
   [ "$_rc" = 7 ] || fail "F141: unreadable merge state must fail closed (got $_rc)"
+  # #256: 11 is for a PR positively read as OPEN. A state whose first word is anything else
+  # that is not MERGED/CLOSED (garbage) stays the fail-closed 7, and the header documents 11.
+  _rc=0; ( PATH="$_mv/bin" FAKE_STATE='weird  ' HARNESS_MERGE_VERIFY_INTERVAL=1 HARNESS_MERGE_VERIFY_CEILING=2 \
+           sh "$W" merge-verify "$_mv/r" 9 post ) >/dev/null 2>&1 || _rc=$?
+  [ "$_rc" = 7 ] || fail "#256: an unrecognised state at the ceiling must stay the fail-closed 7, not 11 (got $_rc)"
+  awk '/^# Exit codes/{k=1} /^# Always/{k=0} k' "$W" | tr '\n' ' ' \
+    | grep -qE '11 +→ `merge-verify post` only[^.]{0,80}still OPEN at the ceiling' \
+    || fail "#256: wait-for-codex.sh header does not document exit 11 (merge-verify post: still OPEN at the ceiling)"
   pass "F141/F144 merge receipts: pre pins the reviewed head, post polls bounded and proves the landing, both fail closed"
 }
 
@@ -1852,7 +1860,7 @@ test_body_squash_prep_cannot_hang() {                 # R43 (squash path)
   need_body "R43: body does not write the squash message itself" 'squash-message.txt'
   need_body "R43: the squash merge is not guarded on a non-empty message" 'if [ -s "$msg" ]'
   need_body "R43: the squash merge has no default-body fallback (with the atomic head pin + F141 post receipt chained)" \
-    'gh pr merge "$pr_number" --squash --delete-branch --match-head-commit "$reviewed_head" && merge_oid='
+    'gh pr merge "$pr_number" --squash --delete-branch --match-head-commit "$reviewed_head" && merge_land'
   pass "R43 squash prep composes the message locally and degrades to the default body"
 }
 

@@ -52,6 +52,12 @@
 #        verdict, E99-F144); post: the PR is not actually MERGED (`gh pr merge` exiting 0
 #        can mean enqueued/auto-merge-armed, E99-F141). Both fail closed: an unreadable
 #        state is a failed receipt, never a pass.
+#  11  → `merge-verify post` only (#256): the PR is still OPEN at the ceiling — `gh pr merge`
+#        exited 0 but only ENQUEUED it (merge queue / repo-level auto-merge), so the merge
+#        request is still LIVE and may land later. Distinct from 7 (CLOSED, or state
+#        unreadable) because the caller must reconcile and CANCEL it before handing off as
+#        needs-human; a live request left behind merges with nothing recording it. (Not 8:
+#        8-10 are the `preflight` buckets below, and a number must mean one thing.)
 #   8  → `preflight` only, AUTH/TOOLING bucket: `gh` missing, `gh` unauthenticated, or
 #        `jq` missing — nothing here can talk to GitHub at all. Remedy: install/authenticate
 #        the missing tool, or accept manual review and set pr_loop.enabled: false.
@@ -454,7 +460,8 @@ case "${1:-}" in
     #        (E99-F141). On success it prints the merge commit oid on stdout — the
     #        landing evidence the board's `set-status done --evidence` wants.
     # Exit 0 = receipt holds; 7 = receipt FAILED (unreadable state included: a receipt
-    # that cannot be read never passes); 4 = usage.
+    # that cannot be read never passes); 11 = post only: still OPEN at the ceiling, i.e. a
+    # merge request may be queued and live (#256); 4 = usage.
     MV_DIR="${2:-}"; MV_PR="${3:-}"; MV_PHASE="${4:-}"
     case "$MV_PHASE" in pre|post) ;; *) wfc_usage; exit 4 ;; esac
     if [ -z "$MV_DIR" ] || [ -z "$MV_PR" ]; then wfc_usage; exit 4; fi
@@ -505,6 +512,9 @@ case "${1:-}" in
       _mv_el="$(wfc_elapsed "$_mv_start" "$_mv_ticks")"
       if [ $(( _mv_el + _mv_iv )) -gt "$_mv_ceil" ]; then
         echo "merge-verify post: PR #$MV_PR is NOT observably merged after ${_mv_ceil}s (state='$_mv_st') — gh pr merge exiting 0 may only have enqueued it; do not report a landing" >&2
+        # Only a PR positively read as OPEN has a live request to cancel (11). Anything else
+        # — an unreadable state included — stays the fail-closed 7.
+        [ "$_mv_st" = "OPEN" ] && exit 11
         exit 7
       fi
       sleep "$_mv_iv"

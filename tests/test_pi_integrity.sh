@@ -666,8 +666,9 @@ test_constants() {
 
 # ══ R12: docs, changelog, version ═════════════════════════════════════════════════════════
 test_docs() {
-  [ "$(cat "$SRC/VERSION")" = 0.96.0 ] || fail "R12: VERSION is not 0.96.0"
-  [ "$(grep -m1 '^## \[' "$SRC/CHANGELOG.md" | sed 's/ —.*//')" = '## [0.96.0]' ] || fail "R12: the newest CHANGELOG heading is not ## [0.96.0]"
+  # F05 shipped in 0.96.0; later patch releases keep its entry (like the 0.95.0 / E35-F04 check below)
+  [ "$(printf '%s\n0.96.0\n' "$(cat "$SRC/VERSION")" | sort -t. -k1,1n -k2,2n -k3,3n | head -n 1)" = 0.96.0 ] || fail "R12: VERSION is older than 0.96.0"
+  grep -q '^## \[0.96.0\]' "$SRC/CHANGELOG.md" || fail "R12: the CHANGELOG has no ## [0.96.0] entry"
   awk '/^## \[0.96.0\]/{k=1;next} /^## \[/{k=0} k' "$SRC/CHANGELOG.md" | grep -q 'E35-F05' || fail "R12: the 0.96.0 changelog entry does not name E35-F05"
   # F04's entry still exists and still names E35-F04 (PP's R12 relies on it)
   awk '/^## \[0.95.0\]/{k=1;next} /^## \[/{k=0} k' "$SRC/CHANGELOG.md" | grep -q 'E35-F04' || fail "R12: the 0.95.0 changelog entry no longer names E35-F04"
@@ -681,7 +682,7 @@ test_docs() {
   if command -v dash >/dev/null 2>&1; then dash -n "$SRCINST" || fail "dash -n harness-install.sh"; fi
   _pre="$(awk '/pi environment preflight \(E35-F04\) ──/{k=1} /write_escalation_arming — record/{k=0} k' "$SRCINST")"
   printf '%s\n' "$_pre" | grep -vE '^[[:space:]]*#' | grep -qE '(^|[^a-z_-])timeout [0-9]|stat -c|readlink -f' && fail "the preflight uses timeout(1), stat -c or readlink -f"
-  pass "R12: VERSION 0.96.0, CHANGELOG names E35-F05, docs replace the 'not an integrity pin' sentence and state the residual"
+  pass "R12: VERSION >= 0.96.0, CHANGELOG names E35-F05, docs replace the 'not an integrity pin' sentence and state the residual"
 }
 
 # ══ real npm, offline: the guards against the real installer, a LOCAL registry ═════════════
