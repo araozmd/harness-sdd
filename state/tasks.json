@@ -1268,6 +1268,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F174-concurrent-fix-id-allocation/"
+        },
+        {
+          "id": "E99-F175",
+          "title": "tests: test_feature_park R7 control picks an await-merge park; test_mirror flakes under parallel load",
+          "status": "in-progress",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F175-suite-flakes/"
         }
       ]
     },
