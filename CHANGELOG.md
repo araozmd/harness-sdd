@@ -4,6 +4,29 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.96.0] — 2026-10-17
+
+### Changed — integrity-pinned pi-subagents install (E35-F05)
+- `pinned (project)` now means byte-verified: the effective lockfile (`npm-shrinkwrap.json`, else
+  `package-lock.json`) must carry the pin's version and registry integrity, and the files of
+  `.pi/npm/node_modules/pi-subagents` must hash to a pinned tree digest. Two new installer
+  constants hold them: `PI_SUBAGENTS_INTEGRITY` and `PI_SUBAGENTS_TREE_SHA256` (no env override).
+  A project entry that is the pin by name but fails either check reads `pi-subagents: unverified
+  (lockfile|files)`: the installer neither prompts nor installs (`install: not attempted: backend
+  unverified`, with the remove-`node_modules` fix) and a flag-approved run exits 5. `pinned (user)`
+  is unchanged and not byte-verified.
+- New refusals BEFORE an approved `pi install` runs (npm executes lifecycle scripts during the
+  install): a project `.pi/settings.json` key `npmCommand`/`__proto__` at any depth (a user-scope
+  `npmCommand` is never refused or read); an existing `.pi/npm/node_modules`; an unexpected entry in
+  `.pi/npm` (allow-list: `package.json`, `.gitignore`, `package-lock.json`, `npm-shrinkwrap.json`);
+  unsafe `.pi/npm/package.json` content; a lockfile that is unreadable, ambiguous (duplicate keys) or
+  not canonical (a `resolved` other than the exact registry tarball URL; a mirror registry therefore
+  refuses). F04's refusals keep their reasons and precedence; every refusal exits 5 under
+  `--pi-deps=install`.
+- Documented residuals: the lockfile check pins each dependency's `resolved` URL but not its `integrity`
+  (npm can satisfy an `integrity` from the local npm cache), and dependencies of an install the harness
+  did not run are not re-verified.
+
 ## [0.95.0] — 2026-10-16
 
 ### Added — pi preflight + approval-gated pi-subagents install (E35-F04)

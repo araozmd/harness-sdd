@@ -21,335 +21,12 @@ set -eu
 
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 INST="$SRC/harness-install.sh"
-T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-ppf)"
-trap 'rm -rf "$T"' EXIT
-
-fail() { echo "FAIL: $1" >&2; exit 1; }
-pass() { echo "ok - $1"; }
-
-# ── the sandbox PATH: real PATH minus every directory holding a `pi` ─────────────────────
-_sp_out=""; _sp_oifs="$IFS"; IFS=:
-set -- $PATH
-IFS="$_sp_oifs"
-for _sp_d in "$@"; do
-  [ -n "$_sp_d" ] || continue
-  [ -x "$_sp_d/pi" ] && continue
-  if [ -z "$_sp_out" ]; then _sp_out="$_sp_d"; else _sp_out="$_sp_out:$_sp_d"; fi
-done
-SANDBOX_PATH="$_sp_out"
-env -i PATH="$SANDBOX_PATH" sh -c 'command -v pi' >/dev/null 2>&1 \
-  && fail "sandbox setup: 'pi' still resolves on the sandbox PATH"
-for _c in awk sed grep sort tr cp mv rm mkdir cat cmp mktemp find python3 git readlink cksum ln xargs head wc date; do
-  env -i PATH="$SANDBOX_PATH" sh -c "command -v $_c" >/dev/null 2>&1 \
-    || fail "sandbox setup: '$_c' is missing from the sandbox PATH"
-done
-
-# A PATH with every sandbox executable EXCEPT python3 (a symlink mirror), for R7(d)/R11.
-NOPY="$T/nopy"; mkdir -p "$NOPY"
-python3 - "$NOPY" "$SANDBOX_PATH" <<'PYMIRROR'
-import os, sys
-d = sys.argv[1]
-for p in sys.argv[2].split(":"):
-    try:
-        names = os.listdir(p)
-    except OSError:
-        continue
-    for n in names:
-        if n.startswith("python"):
-            continue
-        src, dst = os.path.join(p, n), os.path.join(d, n)
-        if os.path.lexists(dst):
-            continue
-        if os.path.isfile(src) and os.access(src, os.X_OK):
-            os.symlink(src, dst)
-PYMIRROR
-env -i PATH="$NOPY" sh -c 'command -v python3' >/dev/null 2>&1 && fail "setup: python3 still resolves on the no-python PATH"
-
-# ── the stub `pi` ────────────────────────────────────────────────────────────────────────
-STUBDIR="$T/stubbin"; mkdir -p "$STUBDIR"
-cat > "$STUBDIR/pi" <<'STUB'
-#!/bin/sh
-# hermetic stub pi — behaviour per verb from $STUB_CTL ("<verb> <mode>" lines).
-verb="$1"
-dev=other
-[ "$(readlink /proc/self/fd/0 2>/dev/null)" = /dev/null ] && dev=devnull
-args=""
-for a in "$@"; do args="$args[$a] "; done
-arming=no; [ -e .harness/.escalation-arming ] && arming=yes
-nag=0; for f in .pi/agents/*.md; do [ -e "$f" ] && nag=$((nag + 1)); done
-printf 'argv=%s\tcwd=%s\tstdin=%s\toffline=%s\tarming=%s\tagents=%s\n' "$args" "$(pwd -P)" "$dev" "${PI_OFFLINE:-}" "$arming" "$nag" >> "$STUB_LOG"
-case "$verb" in
-  --version) key=version; def='ok:1.2.0\n' ;;
-  list) key=list; def=real ;;
-  install) key=install; def=real ;;
-  *) exit 0 ;;
-esac
-mode=""
-[ -r "${STUB_CTL:-/nonexistent}" ] && mode="$(sed -n "s/^$key //p" "$STUB_CTL" | head -n 1)"
-[ -n "$mode" ] || mode="$def"
-if [ "${STUB_CANARY:-}" = 1 ] && [ "$key" = install ]; then
-  printf 'CANARY-OUT\n'; printf 'CANARY-ERR\n' >&2
-fi
-case "$mode" in
-  ok:*) printf '%b' "${mode#ok:}" ;;
-  rc:*) rest="${mode#rc:}"; rc="${rest%%:*}"; txt="${rest#*:}"; [ "$txt" != "$rest" ] && printf '%b' "$txt"; exit "$rc" ;;
-  text:*) printf '%b' "${mode#text:}" ;;
-  huge) head -c 66000 /dev/zero | tr '\0' x; echo ;;
-  hugeok) head -c 66000 /dev/zero | tr '\0' '\n'; printf 'No packages installed.\n' ;;
-  sleep) sleep 30 & echo $! > "$STUB_LOG.gc"; sleep 30 ;;
-  noop) ;;
-  real|add-subagents|rc1-subagents|setsid-real)
-    if [ "$key" = list ]; then
-      # real pi throws (or blocks) on a settings.json it cannot read: a FIFO or a directory
-      { [ ! -e .pi/settings.json ] || [ -f .pi/settings.json ]; } || exit 1
-      python3 - <<'PYLISTREAL'
-import json, os
-def pk(path):
-    try:
-        b = open(path, "rb").read()
-        if b.startswith(b"\xef\xbb\xbf"):
-            b = b[3:]
-        d = json.loads(b.decode("utf-8", errors="replace"))
-        return d.get("packages", []) if isinstance(d, dict) else []
-    except Exception:
-        return []
-def name(e):
-    s = e if isinstance(e, str) else e.get("source", "")
-    s = s.split(":", 1)[-1]
-    if s.startswith("@"):
-        return "@" + s[1:].split("@")[0]
-    return s.split("@")[0]
-def render(title, ents, base):
-    out = [title]
-    for e in ents:
-        s = e if isinstance(e, str) else e.get("source", "") + " (filtered)"
-        out.append("  " + s)
-        p = os.path.join(base, "node_modules", name(e))
-        if os.path.exists(p):
-            out.append("    " + p)
-    return out
-user = pk(os.environ["HOME"] + "/.pi/agent/settings.json")
-proj = pk(".pi/settings.json")
-if not user and not proj:
-    print("No packages installed.")
-else:
-    lines = []
-    if user:
-        lines += render("User packages:", user, os.environ["HOME"] + "/.pi/agent/npm")
-    if user and proj:
-        lines.append("")
-    if proj:
-        lines += render("Project packages:", proj, os.path.abspath(".pi/npm"))
-    print("\n".join(lines))
-PYLISTREAL
-    else
-      python3 - "$mode" "$@" <<'PYINSTALLREAL'
-import json, os, sys
-mode, spec = sys.argv[1], sys.argv[-1]
-d = {}
-if os.path.exists(".pi/settings.json"):
-    with open(".pi/settings.json") as fh:
-        d = json.load(fh)
-ident = spec.rsplit("@", 1)[0]
-pk = d.setdefault("packages", [])
-for i, e in enumerate(pk):
-    if isinstance(e, str) and e.rsplit("@", 1)[0] == ident:
-        pk[i] = spec
-        break
-else:
-    pk.append(spec)
-if mode in ("add-subagents", "rc1-subagents"):
-    d["subagents"] = {}
-os.makedirs(".pi/npm/node_modules/pi-subagents", exist_ok=True)
-with open(".pi/npm/node_modules/pi-subagents/package.json", "w") as fh:
-    fh.write(json.dumps({"name": "pi-subagents", "version": spec.rsplit("@", 1)[1]}))
-for f, c in ((".pi/npm/package.json", "{}\n"), (".pi/npm/.gitignore", "*\n!.gitignore\n")):
-    if not os.path.lexists(f):
-        with open(f, "w") as fh:
-            fh.write(c)
-with open(".pi/settings.json", "w") as fh:
-    fh.write(json.dumps(d, indent=2))
-PYINSTALLREAL
-      [ "$mode" = setsid-real ] && { setsid sleep 9 & }
-      [ "$mode" = rc1-subagents ] && exit 1
-    fi ;;
-esac
-exit 0
-STUB
-chmod +x "$STUBDIR/pi"
-# a NON-executable `pi` on PATH
-NOXDIR="$T/noxbin"; mkdir -p "$NOXDIR"; printf '#!/bin/sh\nexit 0\n' > "$NOXDIR/pi"; chmod 644 "$NOXDIR/pi"
-
-# ── the PTY runner: stdin/stdout/stderr each a terminal or not, typed input ──────────────
-cat > "$T/ptyrun.py" <<'PYPTY'
-# usage: ptyrun.py <modeflags subset of i,o,e> <typed (python escapes)> <outbase> -- cmd…
-import codecs, os, pty, select, subprocess, sys, time
-mode, typed, base = sys.argv[1], codecs.decode(sys.argv[2], "unicode_escape").encode(), sys.argv[3]
-cmd = sys.argv[5:]
-m, s = pty.openpty()
-w = None
-if "i" in mode:
-    sin = s
-else:
-    r, w = os.pipe(); sin = r
-sout = s if "o" in mode else os.open(base + ".out", os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
-serr = s if "e" in mode else os.open(base + ".err", os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
-p = subprocess.Popen(cmd, stdin=sin, stdout=sout, stderr=serr, close_fds=True)
-os.close(s)
-if w is not None:
-    os.close(r)
-    os.write(w, typed)
-    os.close(w)
-else:
-    os.write(m, typed)
-buf = b""
-dead = time.monotonic() + 90
-while True:
-    if time.monotonic() > dead:
-        p.kill()
-        break
-    r_, _, _ = select.select([m], [], [], 0.2)
-    if r_:
-        try:
-            c = os.read(m, 4096)
-        except OSError:
-            break
-        if not c:
-            break
-        buf += c
-    elif p.poll() is not None:
-        break
-p.wait()
-with open(base + ".tty", "wb") as fh:
-    fh.write(buf)
-with open(base + ".rc", "w") as fh:
-    fh.write(str(p.returncode))
-for f in ("out", "err"):
-    if not os.path.exists(base + "." + f):
-        open(base + "." + f, "w").close()
-PYPTY
-
-# ── fixture helpers ──────────────────────────────────────────────────────────────────────
-SBPATH="$SANDBOX_PATH"
-L="   pi preflight: "
-mkcell() { # <name> — a fresh cell: $CD, $TGT, $RT, $OUT, $ERR, $LOG, $CTL; stub log reset
-  CD="$T/c/$1"; rm -rf "$CD"; mkdir -p "$CD/home" "$CD/ch" "$CD/t"
-  TGT="$CD/t"; RT="$(cd "$TGT" && pwd -P)"; OUT="$CD/out"; ERR="$CD/err"; LOG="$CD/stub.log"; CTL="$CD/ctl"
-  : > "$LOG"; : > "$CTL"; SBPATH="$SANDBOX_PATH"
-}
-ctl() { : > "$CTL"; for _l in "$@"; do printf '%s\n' "$_l" >> "$CTL"; done; }
-
-# snapshot of an agent dir: every entry, every link target, every regular file's cksum
-agsnap() {
-  [ -e "$1" ] || [ -L "$1" ] || { echo absent; return 0; }
-  ( find "$1" | sort
-    find "$1" -type l | sort | while IFS= read -r _l; do printf 'L %s -> %s\n' "$_l" "$(readlink "$_l")"; done
-    find "$1" -type f -exec cksum {} + 2>&1 ) || :
-}
-# victim snapshots: a node's whole identity
-snap() {
-  if [ -L "$1" ]; then printf 'L %s\n' "$(readlink "$1")"
-  elif [ -f "$1" ]; then printf 'F %s\n' "$(cksum < "$1")"
-  elif [ -d "$1" ]; then ( cd "$1" && find . | sort && find . -type f -exec cksum {} + 2>&1 )
-  elif [ -e "$1" ]; then echo X
-  else echo absent; fi
-}
-
-# inst <ctl-file|-> <extra env words|-> <stdin: null|closed|yes> <installer args…>
-# Runs the installer hermetically (stdout → $OUT, stderr → $ERR, rc → $RC) under a 90 s
-# watchdog, then asserts the two invariants every run owes: the agent dir is byte-identical,
-# and every stub record has cwd = target and stdin = /dev/null (R7a).
-inst() {
-  _i_ctl="$1"; _i_env="$2"; _i_in="$3"; shift 3
-  [ "$_i_env" != - ] || _i_env=""
-  _i_path="$SBPATH"
-  _i_stub=""
-  if [ "$_i_ctl" != - ]; then _i_path="$STUBDIR:$SBPATH"; _i_stub="STUB_CTL=$_i_ctl STUB_LOG=$LOG"; fi
-  agsnap "$CD/home/.pi/agent" > "$CD/snap.0" 2>&1
-  RC=0
-  case "$_i_in" in
-    null)   env -i PATH="$_i_path" HOME="$CD/home" CODEX_HOME="$CD/ch" $_i_stub $_i_env sh "$INST" "$@" </dev/null >"$OUT" 2>"$ERR" & ;;
-    closed) env -i PATH="$_i_path" HOME="$CD/home" CODEX_HOME="$CD/ch" $_i_stub $_i_env sh "$INST" "$@" <&- >"$OUT" 2>"$ERR" & ;;
-    yes)    { yes | env -i PATH="$_i_path" HOME="$CD/home" CODEX_HOME="$CD/ch" $_i_stub $_i_env sh "$INST" "$@" >"$OUT" 2>"$ERR"; } & ;;
-    *) fail "inst: bad stdin spec $_i_in" ;;
-  esac
-  _i_p=$!
-  ( sleep 90; kill -9 "$_i_p" 2>/dev/null ) >/dev/null 2>&1 &
-  _i_w=$!
-  wait "$_i_p" || RC=$?
-  kill "$_i_w" 2>/dev/null || :
-  wait "$_i_w" 2>/dev/null || :
-  post_checks
-}
-post_checks() {
-  agsnap "$CD/home/.pi/agent" > "$CD/snap.1" 2>&1
-  cmp -s "$CD/snap.0" "$CD/snap.1" || fail "${CELL:-cell}: the pi agent dir changed during the run (R6/R7)"
-  if [ -s "$LOG" ] && [ -d "$TGT" ]; then
-    _pc_rt="$(cd "$TGT" && pwd -P)"
-    awk -F'\t' -v rt="$_pc_rt" '{ if ($2 != "cwd=" rt && index($2, "cwd=" rt "/") != 1) bad=1; if ($3 != "stdin=devnull") bad=1 } END { exit bad }' "$LOG" \
-      || fail "${CELL:-cell}: a pi invocation had the wrong cwd or stdin (R7a): $(cat "$LOG")"
-  fi
-}
-# pty_inst <ctl|-> <env words|-> <tty flags i/o/e> <typed> <installer args…>  → rc in $RC,
-# $OUT = stdout file + terminal capture, $ERR = stderr file.
-pty_inst() {
-  _p_ctl="$1"; _p_env="$2"; _p_mode="$3"; _p_typed="$4"; shift 4
-  [ "$_p_env" != - ] || _p_env=""
-  _p_path="$SBPATH"; _p_stub=""
-  if [ "$_p_ctl" != - ]; then _p_path="$STUBDIR:$SBPATH"; _p_stub="STUB_CTL=$_p_ctl STUB_LOG=$LOG"; fi
-  agsnap "$CD/home/.pi/agent" > "$CD/snap.0" 2>&1
-  python3 "$T/ptyrun.py" "$_p_mode" "$_p_typed" "$CD/pty" -- \
-    env -i PATH="$_p_path" HOME="$CD/home" CODEX_HOME="$CD/ch" $_p_stub $_p_env sh "$INST" "$@" \
-    || fail "${CELL:-cell}: pty runner failed"
-  RC="$(cat "$CD/pty.rc")"
-  cat "$CD/pty.out" "$CD/pty.tty" | tr -d '\r' > "$OUT"; tr -d '\r' < "$CD/pty.err" > "$ERR"
-  post_checks
-}
-
-# mk_pkg <dir> <version|none|bad> — an installed pi-subagents package dir with its package.json
-mk_pkg() {
-  mkdir -p "$1"
-  case "$2" in none) ;; bad) printf '{' > "$1/package.json" ;; *) printf '{"name":"pi-subagents","version":"%s"}' "$2" > "$1/package.json" ;; esac
-}
-CLBL="conflict: a subagent extension (pi example or legacy pi-subagents clone) that registers a conflicting subagent tool at"
-hasl() { grep -qxF "${L}$1" "$OUT" || fail "${CELL:-cell}: missing report line '${L}$1' in: $(grep 'pi preflight' "$OUT" | cut -c1-200)"; }
-nol()  { ! grep -qxF "${L}$1" "$OUT" || fail "${CELL:-cell}: unexpected report line '${L}$1'"; }
-hasf() { grep -qF "$1" "$OUT" || fail "${CELL:-cell}: output lacks '$1': $(grep 'pi preflight' "$OUT" | cut -c1-200)"; }
-nof()  { ! grep -qF "$1" "$OUT" || fail "${CELL:-cell}: output unexpectedly contains '$1'"; }
-ncalls() { grep -c "^argv=\[$1\]" "$LOG" || :; }
-no_pi_calls() { [ ! -s "$LOG" ] || fail "${CELL:-cell}: the stub pi was called: $(cat "$LOG")"; }
-no_install() { [ "$(ncalls install)" = 0 ] || fail "${CELL:-cell}: pi install was called: $(cat "$LOG")"; }
-want_rc() { [ "$RC" = "$1" ] || fail "${CELL:-cell}: exit $RC, want $1: $(grep 'pi preflight' "$OUT" | cut -c1-200) $(tail -n 5 "$ERR" | cut -c1-200)"; }
-fld() { printf '%s\n' "$2" | awk -F'|' -v n="$1" '{ print $n }'; }
-ARGS="--agents=pi"
-PTYARGS="--agents=pi --builder-backend=in-session --pr-loop=false"
-
-# parallel table runner: rows on stdin, `ROWFN row` per row, as background jobs. ONE shared
-# worker limit: the test groups run sequentially (run_all below), so at most PPF_JOBS installer
-# jobs run at once suite-wide. Default: online CPUs clamped to [2, 8]; override with PPF_JOBS.
-_ncpu="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 2)"
-case "$_ncpu" in ''|*[!0-9]*) _ncpu=2 ;; esac
-[ "$_ncpu" -ge 2 ] || _ncpu=2; [ "$_ncpu" -le 8 ] || _ncpu=8
-PPF_JOBS="${PPF_JOBS:-$_ncpu}"
-case "$PPF_JOBS" in ''|*[!0-9]*|0) fail "PPF_JOBS must be a positive integer, got '$PPF_JOBS'" ;; esac
-PIDS=""
-par_add() { ( "$@" ) & PIDS="$PIDS $!"; _n=$(( ${_n:-0} + 1 )); [ "$_n" -lt "$PPF_JOBS" ] || par_wait; }
-par_wait() {
-  _bad=0
-  for _p in $PIDS; do wait "$_p" || _bad=1; done
-  PIDS=""; _n=0
-  [ "$_bad" = 0 ] || fail "a table cell failed (see above)"
-}
-
-# ── helpers for seeded targets ───────────────────────────────────────────────────────────
-# tier_target: an installed pi target whose tiers make pi raise (builder standard, heavy reasoning)
-tier_target() {
-  inst - "HARNESS_PI_DEPS=skip" null $ARGS --pr-loop=false "$TGT"; want_rc 0
-  _cfg="$TGT/.harness/harness.config.yaml"
-  sed 's/^  builder: .*/  builder: standard/;s/^  builder-heavy: .*/  builder-heavy: reasoning/' "$_cfg" > "$_cfg.t" && mv "$_cfg.t" "$_cfg"
-  grep -q '^  builder-heavy: reasoning$' "$_cfg" || fail "setup: could not seed tiers"
-}
-arming_pi() { sed -n 's/^pi=//p' "$TGT/.harness/.escalation-arming"; }
+SRCINST="$INST"
+. "$SRC/tests/lib/pi_stub.sh"
+# E35-F05: `pinned (project)` is byte-verified, so every row that expects a verified install runs
+# the FIXTURE installer (a copy whose two pin constants are the synthetic package's). Text greps
+# of the installer FILE itself (R12) use $SRCINST, the real one.
+INST="$FXI"
 
 # ══ R12-adjacent pure functions ═══════════════════════════════════════════════════════════
 sed -n '/^pi_deps_decision() {$/,/^}$/p' "$INST" > "$T/dec.sh"
@@ -658,7 +335,7 @@ EOF
 row_list() {
   _id="$(fld 1 "$1")"; CELL="list-$_id"; mkcell "$CELL"
   _mode="$(fld 2 "$1")"; _want="$(fld 3 "$1")"; _pv="$(fld 4 "$1")"; [ -n "$_pv" ] || _pv=0.78.0
-  mk_pkg "$RT/.pi/npm/node_modules/pi-subagents" "$_pv"
+  if [ "$_pv" = 0.78.0 ]; then mk_syn_install "$RT"; else mk_pkg "$RT/.pi/npm/node_modules/pi-subagents" "$_pv"; fi
   mk_pkg "$CD/home/.pi/agent/npm/node_modules/pi-subagents" "$_pv"
   mk_pkg "$CD/gprefix/lib/node_modules/pi-subagents" "$_pv"; ln -s "$CD/gprefix" "$CD/lnk"; mk_pkg "${RT}x/node_modules/pi-subagents" "$_pv"
   _mode="$(printf '%s' "$_mode" | sed "s|@PP@|$RT/.pi/npm/node_modules/pi-subagents|g;s|@UP@|$CD/home/.pi/agent/npm/node_modules/pi-subagents|g;s|@LP@|$CD/gprefix/lib/node_modules/pi-subagents|g;s|@LK@|$CD/lnk/lib/node_modules/pi-subagents|g;s|@SP@|${RT}x/node_modules/pi-subagents|g")"
@@ -738,7 +415,7 @@ EOF
   par_wait
   # `real` rendering drives the same parser from settings files (project and user scope)
   CELL=list-real-p; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
-  mk_pkg "$TGT/.pi/npm/node_modules/pi-subagents" 0.78.0; printf '{"packages":["npm:pi-subagents@0.78.0"]}' > "$TGT/.pi/settings.json"
+  mk_syn_install "$TGT"; printf '{"packages":["npm:pi-subagents@0.78.0"]}' > "$TGT/.pi/settings.json"
   inst "$CTL" - null $ARGS --pi-deps=check "$TGT"; want_rc 0; hasl "pi-subagents: pinned 0.78.0 (project)"
   CELL=list-real-u; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
   mk_pkg "$CD/home/.pi/agent/npm/node_modules/pi-subagents" 0.78.0; printf '{"packages":["npm:pi-subagents@0.78.0"]}' > "$CD/home/.pi/agent/settings.json"
@@ -821,7 +498,7 @@ PYN10
   # 0.78.0 package, installer run from INSIDE the target with `.` — must never read pinned
   for _v in bom raw; do
     CELL="list-forge-e2e-$_v"; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
-    mk_pkg "$TGT/.pi/npm/node_modules/pi-subagents" 0.78.0; mkdir -p "$TGT/.pi"
+    mk_syn_install "$TGT"; mkdir -p "$TGT/.pi"
     if [ "$_v" = bom ]; then printf '\357\273\277'; else :; fi > "$TGT/.pi/settings.json"
     printf '{"x":"\377","packages":["npm:a\\n\\nUser packages:\\n  npm:pi-subagents@0.78.0\\n    /proc/self/cwd/.pi/npm/node_modules/pi-subagents"]}' >> "$TGT/.pi/settings.json"
     agsnap "$CD/home/.pi/agent" > "$CD/snap.0" 2>&1
@@ -1203,9 +880,9 @@ w14|nm-bin-sibling|unsafe path .pi/npm/node_modules/.bin/x
 n01|npmrc-file|unsafe path .pi/npm/.npmrc
 n02|npmrc-symlink|unsafe path .pi/npm/.npmrc
 n03|npmrc-dangling|unsafe path .pi/npm/.npmrc
-w12|nm-innerbin-in|ok
-w13|ctrl-realistic|ok
-c07|ctrl-lockfile|ok
+w12|nm-innerbin-in|existing .pi/npm/node_modules
+w13|ctrl-realistic|existing .pi/npm/node_modules
+c07|ctrl-lockfile|unexpected entry in .pi/npm
 t01|trust-false|project distrusted
 t02|trust-bad|project trust unknown
 t03|trust-loop|project trust unknown
@@ -1213,7 +890,7 @@ c01|ctrl-absent|ok
 c02|ctrl-theme|ok
 c03|ctrl-subagents|ok
 c04|ctrl-pkglist|ok
-c05|ctrl-npm|ok
+c05|ctrl-npm|existing .pi/npm/node_modules
 c06|trust-true|ok
 EOF
   par_wait
@@ -1262,8 +939,11 @@ test_install_verify() {
   CELL=iv-a2; mkcell "$CELL"; tier_target; mk_pkg "$TGT/.pi/npm/node_modules/pi-subagents" 0.77.0
   printf '{"packages":["npm:pi-subagents@0.77.0"]}' > "$TGT/.pi/settings.json"
   : > "$LOG"; ctl "version ok:1.2.0\n" "install real"
-  inst "$CTL" - null $ARGS --pr-loop=false --pi-deps=install "$TGT"; want_rc 0
-  hasl "pi-subagents: mismatch"; hasl "install: installed and verified"
+  inst "$CTL" - null $ARGS --pr-loop=false --pi-deps=install "$TGT"
+  # E35-F05 R2: npm keeps whatever is in node_modules, so a prior install is no longer replaced in
+  # place: the install is refused with the fix, and the run still finishes (exit 5 under the flag)
+  want_rc 5; no_install
+  hasl "pi-subagents: mismatch"; hasl "install: not attempted: existing .pi/npm/node_modules"
   # (b) exit 0 but nothing landed
   CELL=iv-b; mkcell "$CELL"; ctl "version ok:1.2.0\n" "install noop"
   inst "$CTL" - null $ARGS --pi-deps=install "$TGT"; want_rc 5; hasl "install: failed: not verified"
@@ -1322,7 +1002,7 @@ EOF
   par_wait
   # flag install with the backend already pinned: success, no install, exit 0
   CELL=exit-pinned; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
-  mk_pkg "$TGT/.pi/npm/node_modules/pi-subagents" 0.78.0; printf '{"packages":["npm:pi-subagents@0.78.0"]}' > "$TGT/.pi/settings.json"
+  mk_syn_install "$TGT"; printf '{"packages":["npm:pi-subagents@0.78.0"]}' > "$TGT/.pi/settings.json"
   inst "$CTL" - null $ARGS --pi-deps=install "$TGT"; want_rc 0; no_install; hasl "install: not needed"
   # N2: a mismatch in USER scope cannot be fixed by `pi install -l`: refuse up front, run no pi install
   CELL=exit-usermm; mkcell "$CELL"; ctl "version ok:1.2.0\n" "list real"
@@ -1342,8 +1022,9 @@ EOF
 
 # ══ R12: docs, manifest, changelog, version ═══════════════════════════════════════════════
 test_docs() {
-  [ "$(cat "$SRC/VERSION")" = 0.95.0 ] || fail "R12: VERSION is not 0.95.0"
-  [ "$(grep -m1 '^## \[' "$SRC/CHANGELOG.md" | sed 's/ —.*//')" = '## [0.95.0]' ] || fail "R12: the newest CHANGELOG heading is not ## [0.95.0]"
+  # E35-F05 bumped the version: F04's entry is no longer the newest, but it must still exist and
+  # still name E35-F04 (the newest-heading / VERSION equalities now live in test_pi_integrity.sh)
+  grep -q '^## \[0.95.0\]' "$SRC/CHANGELOG.md" || fail "R12: the ## [0.95.0] CHANGELOG heading is gone"
   awk '/^## \[0.95.0\]/{k=1;next} /^## \[/{k=0} k' "$SRC/CHANGELOG.md" | grep -q 'E35-F04' || fail "R12: the 0.95.0 changelog entry does not name E35-F04"
   awk '/^## \[0.95.0\]/{k=1;next} /^## \[/{k=0} k' "$SRC/CHANGELOG.md" | tr '\n' ' ' | grep -q 'package-lock.json' || fail "R12: the changelog does not name the npm lockfiles"
   _sec="$(awk '/^### pi$/{k=1;next} /^#{1,3} /{k=0} k' "$SRC/docs/INSTALL.md")"
@@ -1352,18 +1033,18 @@ test_docs() {
   done
   printf '%s\n' "$_sec" | tr '\n' ' ' | grep -qiE 'exit(s)? (status )?5' || fail "R12: the INSTALL.md pi section does not document exit status 5"
   printf '%s\n' "$_sec" | tr '\n' ' ' | grep -qE 'never touches[^.]*\.pi/settings\.json' && fail "R12: the INSTALL.md pi section still claims it never touches .pi/settings.json"
-  awk 'NR<40' "$INST" | grep -q -- '--pi-deps' || fail "R12: the installer header does not name --pi-deps"
+  awk 'NR<40' "$SRCINST" | grep -q -- '--pi-deps' || fail "R12: the installer header does not name --pi-deps"
   CELL=docs-man; mkcell "$CELL"; inst - - null $ARGS --pi-deps=skip "$TGT"; want_rc 0
   grep -q -- '--pi-deps' "$TGT/.harness/manifest.txt" || fail "R12: the installed manifest.txt does not name --pi-deps"
   grep -qF 'PI ENVIRONMENT PREFLIGHT (E35-F04)' "$TGT/.harness/manifest.txt" || fail "R12: manifest.txt lacks the PI ENVIRONMENT PREFLIGHT paragraph"
   # one pin constant: the literal appears exactly once in code (comments and heredoc text aside)
-  _n="$(grep -n '0\.78\.0' "$INST" | grep -vE '^[0-9]+:[[:space:]]*#' | wc -l | tr -d ' ')"
-  [ "$_n" = 1 ] || fail "R12: the pin literal 0.78.0 appears $_n times in installer code lines (want exactly 1): $(grep -n '0\.78\.0' "$INST" | grep -vE '^[0-9]+:[[:space:]]*#')"
-  grep -q '^PI_SUBAGENTS_PIN=0.78.0$' "$INST" || fail "R12: PI_SUBAGENTS_PIN is not the single constant"
-  grep -q '^PI_VERSION_FLOOR=1.0.0$' "$INST" || fail "R12: PI_VERSION_FLOOR is not the single constant"
+  _n="$(grep -n '0\.78\.0' "$SRCINST" | grep -vE '^[0-9]+:[[:space:]]*#' | wc -l | tr -d ' ')"
+  [ "$_n" = 1 ] || fail "R12: the pin literal 0.78.0 appears $_n times in installer code lines (want exactly 1): $(grep -n '0\.78\.0' "$SRCINST" | grep -vE '^[0-9]+:[[:space:]]*#')"
+  grep -q '^PI_SUBAGENTS_PIN=0.78.0$' "$SRCINST" || fail "R12: PI_SUBAGENTS_PIN is not the single constant"
+  grep -q '^PI_VERSION_FLOOR=1.0.0$' "$SRCINST" || fail "R12: PI_VERSION_FLOOR is not the single constant"
   # non-functional: portable shell only in the pi preflight code
-  sh -n "$INST" || fail "sh -n harness-install.sh"
-  _pre="$(awk '/pi environment preflight \(E35-F04\) ──/{k=1} /write_escalation_arming — record/{k=0} k' "$INST")"
+  sh -n "$SRCINST" || fail "sh -n harness-install.sh"
+  _pre="$(awk '/pi environment preflight \(E35-F04\) ──/{k=1} /write_escalation_arming — record/{k=0} k' "$SRCINST")"
   printf '%s\n' "$_pre" | grep -vE '^[[:space:]]*#' | grep -qE '(^|[^a-z_-])timeout [0-9]|stat -c|readlink -f' && fail "the preflight uses timeout(1), stat -c or readlink -f"
   pass "docs/manifest/changelog/version name the feature; one pin constant; portable shell (R12)"
 }

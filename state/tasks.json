@@ -364,7 +364,7 @@
     {
       "id": "E35",
       "title": "pi is a claimed, first-class front end",
-      "status": "done",
+      "status": "in-progress",
       "owner": "araozmd",
       "features": [
         {
@@ -436,6 +436,23 @@
             "E35-F02"
           ],
           "spec_path": "specs/epics/E35-pi-first-class/F04-pi-preflight-deps/"
+        },
+        {
+          "id": "E35-F05",
+          "title": "Integrity-pin the pi-subagents install (pre-install lockfile/npmCommand guards + post-install sha512 and tree digest)",
+          "status": "in-review",
+          "sdd": true,
+          "autonomous": false,
+          "depends_on": [
+            "E35-F04"
+          ],
+          "spec_path": "specs/epics/E35-pi-first-class/F05-pi-subagents-integrity-pin/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (271)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E35-F05 done --evidence <merge-ref>`",
+            "pr": "271"
+          }
         }
       ]
     },

@@ -2932,6 +2932,43 @@ resolve_agents() {
 # ── pi environment preflight: constants and the pure approval functions (E35-F04) ──────────────
 # ONE pin and ONE floor: every message and the printed command derive from these.
 PI_SUBAGENTS_PIN=0.78.0
+PI_SUBAGENTS_INTEGRITY=sha512-AsOvPL1xaVFV4bqIlheQKNI2LmAoiAKTPXXxi39/BsWJTdMJIqAkZJ3iLi6bTsh2PZHG7Ur08b7VJOtgAMIAig==
+PI_SUBAGENTS_TREE_SHA256=ca6eb868eaf496af797e4ad17485c37d7e97199c30deb50072217d95b724fc87
+# E35-F05: the registry integrity and the extracted-tree digest of that exact pin. Each is a
+# single constant and deliberately has NO env override (a project can set env for the operator's
+# shell, so a knob would be a bypass). A pin bump needs both re-derived: see the E35-F05 plan,
+# "Tree digest" / Reproduction.
+# The ONE lenient JSON reader (E35-F05 R6), shared by the two python here-docs that re-read a file
+# pi or npm reads (pi_install_npm_safe, pi_list_status). It parses AT LEAST as leniently as pi/npm
+# do (one BOM stripped, invalid UTF-8 replaced) and then judges strictly: regular file only (lstat,
+# never a link), <= 4 MiB, NaN/Infinity rejected, every key occurrence recorded, a repeated key in
+# one object flagged. load_lenient(path) -> (obj, dup_seen, keys) or raises.
+PI_LENIENT_PY="$(cat <<'PYREAD'
+import json, os, stat
+def load_lenient(path):
+    st = os.lstat(path)
+    if not stat.S_ISREG(st.st_mode) or st.st_size > 4194304:
+        raise ValueError("not a regular file, or too large")
+    with open(path, "rb") as fh:
+        b = fh.read()
+    if b.startswith(b"\xef\xbb\xbf"):
+        b = b[3:]
+    keys = set()
+    dup = [False]
+    def hook(pairs):
+        seen = set()
+        for k, _v in pairs:
+            keys.add(k)
+            if k in seen:
+                dup[0] = True
+            seen.add(k)
+        return dict(pairs)
+    def bad_constant(c):
+        raise ValueError(c)
+    obj = json.loads(b.decode("utf-8", errors="replace"), object_pairs_hook=hook, parse_constant=bad_constant)
+    return obj, dup[0], keys
+PYREAD
+)"
 PI_VERSION_FLOOR=1.0.0
 # pi_bound <override> <default> — a positive integer <= 3600 overrides the default; anything
 # else (empty, zero, signs, junk, too long, too large) is ignored.
@@ -5429,9 +5466,14 @@ PYTRUST
     _pl_rc=0; pi_run "$PI_PROBE_TIMEOUT" 1 list -a || _pl_rc=$?
     [ "$_pl_rc" = 0 ] || return 0
     _pl_res="$PI_RUN_OUT.res"
-    python3 -I - "$PI_RUN_OUT" "$PI_SUBAGENTS_PIN" "$TARGET" "${PI_AD:-}" <<'PYLIST' >"$_pl_res" 2>/dev/null || printf 'unknown\n' >"$_pl_res"
-import json, os, re, stat, sys
+    { printf '%s\n' "$PI_LENIENT_PY"; cat <<'PYLIST'
+import hashlib, json, os, re, stat, sys
 pin, target, ad = sys.argv[2], sys.argv[3], sys.argv[4]
+integrity, tree_sha = sys.argv[5], sys.argv[6]
+# R9 resource bounds, tied to the pin: pi-subagents@0.78.0 is 1331 files, 11950300 bytes unpacked.
+# A tree over either cap is never read (fail closed: `unverified (files)`); a pin bump re-checks them.
+TREE_MAX_ENTRIES = 10000
+TREE_MAX_BYTES = 64 * 1048576
 def out(s):
     print(s)
     sys.exit(0)
@@ -5533,8 +5575,83 @@ def version_state(path):
     if v == pin:
         return "ok"
     return "other" if isinstance(v, str) else "unreadable"
+# E35-F05 R8: the PROJECT pin needs the effective lockfile (npm's own precedence: shrinkwrap, then
+# package-lock) to carry the pin's version AND registry integrity. The reader never follows a link.
+def lockfile_ok():
+    d = os.path.join(os.path.realpath(target), ".pi", "npm")
+    lf = os.path.join(d, "npm-shrinkwrap.json")
+    if not os.path.lexists(lf):
+        lf = os.path.join(d, "package-lock.json")
+    try:
+        obj, dup, _k = load_lenient(lf)
+    except Exception:
+        return False
+    if dup or not isinstance(obj, dict) or not isinstance(obj.get("packages"), dict):
+        return False
+    e = obj["packages"].get("node_modules/pi-subagents")
+    return isinstance(e, dict) and e.get("version") == pin and e.get("integrity") == integrity
+# E35-F05 R9: sha256 over the sorted `<sha256-hex>  <relpath>\n` lines of the package dir (the
+# E35-F05 plan, "Tree digest"). No link is followed (every component from the target down is a real
+# directory; each entry is a directory or a regular file with link count 1), and a relpath holding
+# a control character is refused: a newline in a name could merge two lines and let a reduced tree
+# reproduce the official digest. The walk only lstats; nothing is read until the whole tree fits
+# TREE_MAX_ENTRIES (counted as os.scandir streams, so an over-cap directory is never listed in full)
+# and TREE_MAX_BYTES (by st_size), and each file is then hashed in chunks, never
+# past its lstat size. Any error or cap breach => not verified.
+def tree_ok(path):
+    try:
+        cur = os.path.realpath(target)
+        for part in os.path.relpath(path, cur).split(os.sep):
+            cur = os.path.join(cur, part)
+            if not stat.S_ISDIR(os.lstat(cur).st_mode):
+                return False
+        files = []
+        seen = [0, 0]
+        def walk(d, rel):
+            # streamed: the cap aborts before a huge directory is enumerated in full
+            with os.scandir(d) as it:
+                for ent in it:
+                    n = ent.name
+                    seen[0] += 1
+                    if seen[0] > TREE_MAX_ENTRIES:
+                        raise ValueError("too many entries")
+                    p = os.path.join(d, n)
+                    r = rel + "/" + n if rel else n
+                    st = os.lstat(p)
+                    if stat.S_ISDIR(st.st_mode):
+                        walk(p, r)
+                    elif stat.S_ISREG(st.st_mode) and st.st_nlink == 1:
+                        rb = os.fsencode(r)
+                        if re.search(rb"[\x00-\x1f\x7f]", rb):
+                            raise ValueError("control character in a name")
+                        seen[1] += st.st_size
+                        if seen[1] > TREE_MAX_BYTES:
+                            raise ValueError("too many bytes")
+                        files.append((rb, p, st.st_size))
+                    else:
+                        raise ValueError("not a plain file")
+        walk(path, "")
+        rows = []
+        for rb, p, size in files:
+            h = hashlib.sha256()
+            left = size + 1
+            with open(p, "rb") as fh:
+                while left:
+                    b = fh.read(min(65536, left))
+                    if not b:
+                        break
+                    h.update(b)
+                    left -= len(b)
+            if left != 1:
+                raise ValueError("file changed size while read")
+            rows.append((rb, h.hexdigest().encode()))
+        rows.sort()
+        return hashlib.sha256(b"".join(h + b"  " + rb + b"\n" for rb, h in rows)).hexdigest() == tree_sha
+    except Exception:
+        return False
 bad = set()
 pinned = set()
+unverified = set()
 unreadable = False
 for e in entries:
     if "pi-subagents" not in e["text"].lower():
@@ -5555,8 +5672,15 @@ for e in entries:
                and not (exp == os.path.realpath(target) or exp.startswith(os.path.realpath(target) + os.sep)))
     if e["text"] == "npm:pi-subagents@" + pin and okp:
         v = version_state(exp)
-        if v == "ok":
-            pinned.add(e["scope"])
+        if v == "ok" and e["scope"] == "project":
+            if not lockfile_ok():
+                unverified.add("lockfile")
+            elif not tree_ok(exp):
+                unverified.add("files")
+            else:
+                pinned.add("project")
+        elif v == "ok":
+            pinned.add("user")
         elif v == "other":
             bad.add(e["scope"])
         else:
@@ -5569,15 +5693,20 @@ if bad:
     out("mismatch")
 if unreadable:
     out("unknown")
+if "lockfile" in unverified:
+    out("unverified-lockfile")
+if "files" in unverified:
+    out("unverified-files")
 if "project" in pinned:
     out("pinned-project")
 if "user" in pinned:
     out("pinned-user")
 out("absent")
 PYLIST
+    } | python3 -I - "$PI_RUN_OUT" "$PI_SUBAGENTS_PIN" "$TARGET" "${PI_AD:-}" "$PI_SUBAGENTS_INTEGRITY" "$PI_SUBAGENTS_TREE_SHA256" >"$_pl_res" 2>/dev/null || printf 'unknown\n' >"$_pl_res"
     PI_BACKEND="$(cat "$_pl_res" 2>/dev/null)"
     rm -f "$_pl_res"
-    case "$PI_BACKEND" in pinned-project|pinned-user|mismatch|mismatch-user|absent) ;; *) PI_BACKEND=unknown ;; esac
+    case "$PI_BACKEND" in pinned-project|pinned-user|unverified-lockfile|unverified-files|mismatch|mismatch-user|absent) ;; *) PI_BACKEND=unknown ;; esac
     return 0
   }
 
@@ -5720,6 +5849,115 @@ PYSET
     return 0
   }
 
+  # pi_install_npm_safe — E35-F05 R1-R5: would npm, run by the approved `pi install -l`, install
+  # code other than the official tarballs? Called ONLY at the install moment (pi_preflight step 5),
+  # right after pi_install_paths_safe, which keeps every F04 refusal and its precedence (R7). It
+  # READS only: nothing under .pi/npm or the pi agent dir is ever written, and the USER settings
+  # file is never opened (a user-scope npmCommand is the operator's own, trusted choice).
+  # FAIL-CLOSED BY STRUCTURE: only python exit 0 passes; any other outcome (a refusal, a crash, no
+  # output) refuses, with the default reason below when python named none.
+  # The checks run in R7 order and the FIRST failure wins; every reason is a fixed word, never
+  # interpolated with file content (a name in .pi/npm may hold an ESC byte).
+  pi_install_npm_safe() {
+    PI_UNSAFE_REASON=""
+    if _pn_r="$({ printf '%s\n' "$PI_LENIENT_PY"; cat <<'PYNPM'
+import re, sys
+target = sys.argv[1]
+npmdir = os.path.join(target, ".pi", "npm")
+def refuse(why):
+    print(why)
+    sys.exit(1)
+def present(p):
+    try:
+        os.lstat(p)
+        return True
+    except FileNotFoundError:
+        return False
+VER = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?"
+# R1 (project scope only): a key npmCommand or __proto__ at any depth, in every occurrence, after
+# JSON escape decoding. Defensive fallback: a project file this reader rejects was already caught
+# earlier (an oversized file by the status probe's own size cap, which reads `backend status
+# unknown`; links, BOM, NaN and invalid UTF-8 by F04's checks, R7 step 1), so that branch is not
+# separately mutation-tested.
+sf = os.path.join(target, ".pi", "settings.json")
+if present(sf):
+    try:
+        _o, _d, keys = load_lenient(sf)
+    except Exception:
+        refuse("unsafe .pi/settings.json content")
+    if "npmCommand" in keys or "__proto__" in keys:
+        refuse("npm command override (project settings)")
+# R2: npm keeps whatever is already in node_modules (any node type counts, an empty dir included)
+if present(os.path.join(npmdir, "node_modules")):
+    refuse("existing .pi/npm/node_modules")
+# R3: the direct children of .pi/npm are an allow-list (never echo a name)
+try:
+    names = os.listdir(npmdir)
+except FileNotFoundError:
+    names = []
+for n in names:
+    if n not in ("package.json", ".gitignore", "package-lock.json", "npm-shrinkwrap.json"):
+        refuse("unexpected entry in .pi/npm")
+# R4: .pi/npm/package.json content allow-list
+pj = os.path.join(npmdir, "package.json")
+if present(pj):
+    why = "unsafe .pi/npm/package.json content"
+    try:
+        d, dup, _k = load_lenient(pj)
+    except Exception:
+        refuse(why)
+    if dup or not isinstance(d, dict) or not set(d) <= {"name", "private", "dependencies"}:
+        refuse(why)
+    if "dependencies" in d:
+        deps = d["dependencies"]
+        if not isinstance(deps, dict):
+            refuse(why)
+        for v in deps.values():
+            if not isinstance(v, str) or not re.fullmatch("[~^]?" + VER, v):
+                refuse(why)
+# R5: lockfiles (package-lock.json first): canonical registry URLs only
+NAME = r"(@[A-Za-z0-9._~-]+/)?[A-Za-z0-9._~-]+"
+KEY = "node_modules/" + NAME + "(/node_modules/" + NAME + ")*"
+for fn in ("package-lock.json", "npm-shrinkwrap.json"):
+    lf = os.path.join(npmdir, fn)
+    if not present(lf):
+        continue
+    pre = "lockfile " + fn + " "
+    try:
+        d, dup, _k = load_lenient(lf)
+    except Exception:
+        refuse(pre + "unreadable")
+    if not isinstance(d, dict) or not isinstance(d.get("packages"), dict):
+        refuse(pre + "unreadable")
+    if dup:
+        refuse(pre + "ambiguous")
+    for key, ent in d["packages"].items():
+        if key == "":
+            continue
+        if not re.fullmatch(KEY, key) or not isinstance(ent, dict):
+            refuse(pre + "not canonical")
+        # the version grammar has no "/": check it BEFORE building the URL, so a version such as
+        # 2.7.0/../../../evil/-/evil-1.0.0 cannot make the formula name another package
+        ver = ent.get("version")
+        if not isinstance(ver, str) or not re.fullmatch(VER, ver):
+            refuse(pre + "not canonical")
+        name = key[len("node_modules/"):].split("/node_modules/")[-1]
+        url = "https://registry.npmjs.org/" + name + "/-/" + name.split("/")[-1] + "-" + ver + ".tgz"
+        if ent.get("resolved") != url:
+            refuse(pre + "not canonical")
+PYNPM
+} | python3 -I - "$TARGET" 2>/dev/null)"; then
+      return 0
+    fi
+    PI_UNSAFE_REASON="${_pn_r:-npm guard failed}"
+    return 1
+  }
+
+  # pi_install_fix_nm — R2's fix line, also printed after `backend unverified` (R10)
+  pi_install_fix_nm() {
+    info "pi preflight: fix: npm keeps whatever is already in .pi/npm/node_modules; remove that directory and re-run, and npm reinstalls every listed package from the registry"
+  }
+
   # pi_preflight_fail_flag — mark a FLAG-approved install that did not end verified (R11).
   # Runs in the main shell; the interactive-approval path never calls it.
   pi_preflight_flag_fail() {
@@ -5785,6 +6023,8 @@ PYSET
       pinned-project) info "pi preflight: pi-subagents: pinned $PI_SUBAGENTS_PIN (project)" ;;
       pinned-user)    info "pi preflight: pi-subagents: pinned $PI_SUBAGENTS_PIN (user)" ;;
       mismatch-user)  info "pi preflight: pi-subagents: mismatch (user scope)" ;;
+      unverified-lockfile) info "pi preflight: pi-subagents: unverified (lockfile)" ;;
+      unverified-files)    info "pi preflight: pi-subagents: unverified (files)" ;;
       mismatch|absent|unknown) info "pi preflight: pi-subagents: $PI_BACKEND" ;;
       *) PI_BACKEND="not probed"; info "pi preflight: pi-subagents: not probed" ;;
     esac
@@ -5795,6 +6035,13 @@ PYSET
         info "pi preflight: install: not needed"
         rm -f "$PI_RUN_OUT"; return 0 ;;
       absent|mismatch) ;;
+      unverified-*)
+        # E35-F05 R10: the project entry is the pin by name@version but its bytes are not proven.
+        # Neither prompt nor install over it (npm would keep what is on disk, R2): say why.
+        info "pi preflight: install: not attempted: backend unverified"
+        pi_install_fix_nm
+        pi_preflight_flag_fail
+        rm -f "$PI_RUN_OUT"; return 0 ;;
       mismatch-user)
         # `pi install -l` rewrites only the PROJECT scope: it cannot fix a user-scope entry, so
         # running third-party code could never end verified. Refuse up front.
@@ -5847,8 +6094,11 @@ PYSET
       esac
     fi
     if [ -z "$_pf_why" ] && ! pi_install_paths_safe; then _pf_why="$PI_UNSAFE_REASON"; fi
+    # E35-F05: only AFTER F04's checks (R7 order), and only here: the install moment
+    if [ -z "$_pf_why" ] && ! pi_install_npm_safe; then _pf_why="$PI_UNSAFE_REASON"; fi
     if [ -n "$_pf_why" ]; then
       info "pi preflight: install: not attempted: $_pf_why"
+      if [ "$_pf_why" = "existing .pi/npm/node_modules" ]; then pi_install_fix_nm; fi
       pi_preflight_flag_fail
       rm -f "$PI_RUN_OUT"; return 0
     fi
