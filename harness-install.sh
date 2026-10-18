@@ -5595,7 +5595,8 @@ def lockfile_ok():
 # directory; each entry is a directory or a regular file with link count 1), and a relpath holding
 # a control character is refused: a newline in a name could merge two lines and let a reduced tree
 # reproduce the official digest. The walk only lstats; nothing is read until the whole tree fits
-# TREE_MAX_ENTRIES and TREE_MAX_BYTES (by st_size), and each file is then hashed in chunks, never
+# TREE_MAX_ENTRIES (counted as os.scandir streams, so an over-cap directory is never listed in full)
+# and TREE_MAX_BYTES (by st_size), and each file is then hashed in chunks, never
 # past its lstat size. Any error or cap breach => not verified.
 def tree_ok(path):
     try:
@@ -5607,25 +5608,28 @@ def tree_ok(path):
         files = []
         seen = [0, 0]
         def walk(d, rel):
-            for n in os.listdir(d):
-                seen[0] += 1
-                if seen[0] > TREE_MAX_ENTRIES:
-                    raise ValueError("too many entries")
-                p = os.path.join(d, n)
-                r = rel + "/" + n if rel else n
-                st = os.lstat(p)
-                if stat.S_ISDIR(st.st_mode):
-                    walk(p, r)
-                elif stat.S_ISREG(st.st_mode) and st.st_nlink == 1:
-                    rb = os.fsencode(r)
-                    if re.search(rb"[\x00-\x1f\x7f]", rb):
-                        raise ValueError("control character in a name")
-                    seen[1] += st.st_size
-                    if seen[1] > TREE_MAX_BYTES:
-                        raise ValueError("too many bytes")
-                    files.append((rb, p, st.st_size))
-                else:
-                    raise ValueError("not a plain file")
+            # streamed: the cap aborts before a huge directory is enumerated in full
+            with os.scandir(d) as it:
+                for ent in it:
+                    n = ent.name
+                    seen[0] += 1
+                    if seen[0] > TREE_MAX_ENTRIES:
+                        raise ValueError("too many entries")
+                    p = os.path.join(d, n)
+                    r = rel + "/" + n if rel else n
+                    st = os.lstat(p)
+                    if stat.S_ISDIR(st.st_mode):
+                        walk(p, r)
+                    elif stat.S_ISREG(st.st_mode) and st.st_nlink == 1:
+                        rb = os.fsencode(r)
+                        if re.search(rb"[\x00-\x1f\x7f]", rb):
+                            raise ValueError("control character in a name")
+                        seen[1] += st.st_size
+                        if seen[1] > TREE_MAX_BYTES:
+                            raise ValueError("too many bytes")
+                        files.append((rb, p, st.st_size))
+                    else:
+                        raise ValueError("not a plain file")
         walk(path, "")
         rows = []
         for rb, p, size in files:

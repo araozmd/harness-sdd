@@ -496,13 +496,27 @@ test_verify_lockfile() {
 }
 
 # open_log -- run the installer's python under an audit hook that logs every path it opens inside
-# the package dir to $OPENLOG (only the program holding tree_ok is instrumented)
+# the package dir to $OPENLOG, and an os.scandir wrapper that logs one line per entry it yields from
+# <pkg>/many to $SCANLOG (only the program holding tree_ok is instrumented)
 open_log() {
-  OPENLOG="$CD/opens.log"; : > "$OPENLOG"; mkdir -p "$CD/shim"; REALPY="$(command -v python3)"
+  OPENLOG="$CD/opens.log"; : > "$OPENLOG"; SCANLOG="$CD/scans.log"; : > "$SCANLOG"; mkdir -p "$CD/shim"; REALPY="$(command -v python3)"
   cat > "$CD/hook.py" <<PYHOOK
 import sys as _s
 _lf = open("$OPENLOG", "a", buffering=1)
 _s.addaudithook(lambda e, a: _lf.write(a[0] + "\\n") if e == "open" and isinstance(a[0], str) and "/pi-subagents/" in a[0] else None)
+import os as _o
+_sc = open("$SCANLOG", "a", buffering=1); _rsd = _o.scandir
+class _SD:
+    def __init__(s, p): s.m = str(p).endswith("/pi-subagents/many"); s.it = _rsd(p)
+    def __enter__(s): return s
+    def __exit__(s, *a): s.it.close()
+    def __iter__(s): return s
+    def __next__(s):
+        e = next(s.it)
+        if s.m: _sc.write("e\\n")
+        return e
+    def close(s): s.it.close()
+_o.scandir = lambda p=".": _SD(p)
 PYHOOK
   { printf '#!/bin/sh\ncat > "%s/prog"\n' "$CD"
     printf 'grep -q "def tree_ok(" "%s/prog" && cat "%s/hook.py" "%s/prog" > "%s/prog2" && mv "%s/prog2" "%s/prog"\n' "$CD" "$CD" "$CD" "$CD" "$CD" "$CD"
@@ -554,7 +568,7 @@ PYFORGE
     nmlink) mv "$NPM/node_modules" "$CD/nm-copy"; ln -s "$CD/nm-copy" "$NPM/node_modules" ;;
     noR8) printf 'x' >> "$P/index.ts"; mk_lock "$NPM/package-lock.json" -; _want=lockfile ;;
     manyfiles) mkdir -p "$P/many"; python3 -c 'import sys
-for i in range(10000): open("%s/f%d" % (sys.argv[1], i), "w").close()' "$P/many" || fail "$CELL: setup"; open_log ;;
+for i in range(10100): open("%s/f%d" % (sys.argv[1], i), "w").close()' "$P/many" || fail "$CELL: setup"; open_log ;;
     bigfile) truncate -s 67108865 "$P/big" || fail "$CELL: setup"; open_log ;;
     *) fail "unknown R9 row $_id" ;;
   esac
@@ -563,7 +577,11 @@ for i in range(10000): open("%s/f%d" % (sys.argv[1], i), "w").close()' "$P/many"
     # precondition: the hook saw the package.json read, so an empty match below is not vacuous
     grep -q '/pi-subagents/package.json$' "$OPENLOG" || fail "$CELL: the open hook logged nothing"
     case "$_id" in
-      manyfiles) grep -q '/pi-subagents/many/' "$OPENLOG" && fail "$CELL: a file of an over-count tree was opened" ;;
+      manyfiles) grep -q '/pi-subagents/many/' "$OPENLOG" && fail "$CELL: a file of an over-count tree was opened"
+        # the cap aborts mid-stream: a 10100-name directory yields at most TREE_MAX_ENTRIES+1 names
+        # (>0 also proves the walk streamed it through os.scandir, not os.listdir)
+        _n=$(wc -l < "$SCANLOG"); [ "$_n" -gt 0 ] || fail "$CELL: the scandir hook saw no entry of many/"
+        [ "$_n" -le 10001 ] || fail "$CELL: many/ enumerated in full ($_n entries) before the cap" ;;
       bigfile) grep -q '/pi-subagents/big$' "$OPENLOG" && fail "$CELL: a file over the byte cap was opened" ;;
     esac
   fi
