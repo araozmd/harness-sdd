@@ -2159,14 +2159,15 @@ class _RenumberFiles(object):
             kind, src, dst, raw, newraw = mv
             if kind == "inbox":
                 self.modes[src] = stat.S_IMODE(os.stat(src).st_mode)
-                fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+                # Created 0600 (never wider), then set to the recorded mode.
+                fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 self.done.append(mv)  # dst now exists and is ours to undo
                 try:
                     os.write(fd, newraw)
+                    os.fchmod(fd, self.modes[src])
                     os.fsync(fd)
                 finally:
                     os.close(fd)
-                os.chmod(dst, stat.S_IMODE(os.stat(src).st_mode))
                 os.unlink(src)
             else:
                 os.rename(src, dst)

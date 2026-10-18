@@ -434,6 +434,22 @@ R="$W/c-mode"; mk_ren "$R"; chmod 600 "$R/progress/inbox/E99-F03.md"
 ren "$R" E99-F03 E99-F06 >/dev/null || fail "C: renumber with a 0600 brief failed"
 [ "$(python3 -c 'import os,sys;print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$R/progress/inbox/E99-F06.md")" = "0o600" ] \
   || fail "C: the moved brief lost its permission bits"
+# The forward move never creates the new brief wider than 0600 (no world-readable window).
+R="$W/c-mode-open"; mk_ren "$R"; chmod 600 "$R/progress/inbox/E99-F03.md"
+HARNESS_DIR="$R" python3 -c 'import os, runpy, sys
+real, log = os.open, sys.argv[1]
+def o(p, flags, mode=0o777, *a, **k):
+    if str(p).endswith("E99-F06.md") and flags & os.O_CREAT:
+        with open(log, "a") as fh: fh.write(oct(mode) + "\n")
+    return real(p, flags, mode, *a, **k)
+os.open = o
+sys.argv = sys.argv[2:]
+runpy.run_path(sys.argv[0], run_name="__main__")' "$W/openmodes" "$HELPER" renumber E99-F03 E99-F06 >/dev/null 2>"$W/err" \
+  || fail "C: renumber under the os.open probe failed: $(cat "$W/err")"
+[ "$(cat "$W/openmodes")" = "0o600" ] \
+  || fail "C: the forward move created the brief with mode $(cat "$W/openmodes"), not 0600"
+[ "$(python3 -c 'import os,sys;print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$R/progress/inbox/E99-F06.md")" = "0o600" ] \
+  || fail "C: the probed forward move lost the brief's 0600 mode"
 pass "C renumber preserves the brief's mode"
 
 # A row with no inbox brief and no progress dir renumbers cleanly (both are optional).
@@ -491,7 +507,11 @@ if inject "$R" replace renumber E99-F03 E99-F06; then fail "C: renumber survived
 # A mode restore that fails during rollback is reported loudly.
 R="$W/c-inj-fchmod"; mk_ren "$R"
 HARNESS_DIR="$R" python3 -c 'import os, runpy, sys
-def f(*a, **k): raise OSError("cannot fchmod")
+real, calls = os.fchmod, []
+def f(*a, **k):  # the forward move'"'"'s fchmod succeeds; the rollback'"'"'s one fails
+    calls.append(1)
+    if len(calls) > 1: raise OSError("cannot fchmod")
+    return real(*a, **k)
 def boom(*a, **k): raise OSError("injected replace")
 os.fchmod = f; os.replace = boom
 sys.argv = sys.argv[1:]
