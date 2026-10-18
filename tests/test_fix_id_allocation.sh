@@ -533,6 +533,37 @@ runpy.run_path(sys.argv[0], run_name="__main__")' "$HELPER" renumber E99-F03 E99
 grep -q 'ROLLBACK FAILED' "$W/err" || fail "C: a failed rollback step was not reported: $(cat "$W/err")"
 pass "C rollback is pinned without permission tricks, and a failed restore is loud"
 
+# Short writes (#4305584899): os.write may return fewer bytes than asked without raising.
+# shortw <repo> <mode> — half: the 1st write is short; zero: every write returns 0;
+# rbzero: the forward write is real, later ones return 0, and the board replace fails.
+shortw() {
+  HARNESS_DIR="$1" python3 -c 'import os, runpy, sys
+real, mode, calls = os.write, sys.argv[1], []
+def w(fd, data):
+    calls.append(1)
+    if mode == "half" and len(calls) == 1: return real(fd, bytes(data)[:len(data) // 2])
+    if mode == "zero" or (mode == "rbzero" and len(calls) > 1): return 0
+    return real(fd, data)
+def boom(*a, **k): raise OSError("injected replace")
+os.write = w
+if mode == "rbzero": os.replace = boom
+sys.argv = sys.argv[2:]
+runpy.run_path(sys.argv[0], run_name="__main__")' "$2" "$HELPER" renumber E99-F03 E99-F06 >/dev/null 2>"$W/err"
+}
+R="$W/c-short-half"; mk_ren "$R"
+shortw "$R" half || fail "C: renumber failed under a recoverable short write: $(cat "$W/err")"
+printf -- '---\nfeature: E99-F06\nseeded_by: fixer\n---\n# Intent\nbody line\n' > "$W/want"
+cmp -s "$W/want" "$R/progress/inbox/E99-F06.md" || fail "C: a short write left the moved brief truncated"
+R="$W/c-short-zero"; mk_ren "$R"; _s0="$(snap "$R")"
+shortw "$R" zero && fail "C: renumber succeeded though the brief write made no progress"
+[ "$_s0" = "$(snap "$R")" ] || fail "C: a zero-byte brief write left the board or files changed"
+[ -f "$R/progress/inbox/E99-F03.md" ] && [ ! -e "$R/progress/inbox/E99-F06.md" ] \
+  || fail "C: a zero-byte brief write did not leave the source brief intact"
+R="$W/c-short-rb"; mk_ren "$R"
+shortw "$R" rbzero && fail "C: renumber survived the injected failures"
+grep -q 'ROLLBACK FAILED.*short write' "$W/err" || fail "C: a short rollback restore was not reported: $(cat "$W/err")"
+pass "C renumber writes the whole brief (short writes loop; a stalled write refuses or is loud)"
+
 # Duplicate id: two rows share E99-F05 (a bad union). Write the board raw — the guarded
 # path refuses to create it.
 mk_dup() { # <dir>

@@ -2074,6 +2074,16 @@ def _visible_ref_max(hdir, epic_id):
 _FEATURE_ID_RE = re.compile(r"^(E[0-9]+)-F([0-9]+)$")
 
 
+def _write_all(fd, data):
+    """os.write every byte of `data` to `fd`; a short write loops, a zero-byte one raises."""
+    view = memoryview(data)
+    while view:
+        n = os.write(fd, view)
+        if not n:
+            raise OSError("short write: 0 of %d bytes written" % len(view))
+        view = view[n:]
+
+
 class _RenumberFiles(object):
     """The file moves a renumber carries: inbox brief and progress dir.
 
@@ -2163,7 +2173,7 @@ class _RenumberFiles(object):
                 fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 self.done.append(mv)  # dst now exists and is ours to undo
                 try:
-                    os.write(fd, newraw)
+                    _write_all(fd, newraw)
                     os.fchmod(fd, self.modes[src])
                     os.fsync(fd)
                 finally:
@@ -2181,7 +2191,7 @@ class _RenumberFiles(object):
                         # Created 0600 (never wider), then set to the recorded mode.
                         fd = os.open(src, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                         try:
-                            os.write(fd, raw)
+                            _write_all(fd, raw)
                             os.fchmod(fd, self.modes.get(src, 0o600))
                         finally:
                             os.close(fd)
