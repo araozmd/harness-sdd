@@ -536,9 +536,16 @@ esac
             ocroute,ocskip=ocgate(vout,vrc)
         except Exception as e:
             ocskip='opencode --version failed (%s)'%type(e).__name__
-    def gitstat(): 
-        r=subprocess.run(['git','-C',str(src),'status','--porcelain'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
-        return r.stdout if r.returncode==0 else None
+    def gitstat():
+        # `git status --porcelain` (R7), plus the IGNORED entries under the paths the OpenCode CLI
+        # writes into (1.x drops `.opencode/.gitignore` + deps there, and this repo ignores them,
+        # so a plain porcelain would miss exactly the pollution this check exists to catch).
+        out=[]
+        for extra in ([],['--ignored','--','.opencode','opencode.json','AGENTS.md']):
+            r=subprocess.run(['git','-C',str(src),'status','--porcelain',*extra],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+            if r.returncode!=0: return None
+            out.append(r.stdout)
+        return '\n--ignored--\n'.join(out)
     def layout_copy(name):
         # OpenCode installs runtime deps into `.opencode/` on first run, so a LIVE probe runs
         # against an ISOLATED copy of the source layout, never the repository itself.
