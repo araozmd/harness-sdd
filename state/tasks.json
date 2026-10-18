@@ -1240,7 +1240,7 @@
         {
           "id": "E99-F173",
           "title": "pr-loop: detect late comments on existing threads after the CI wait (#259) and reconcile/cancel a queued merge before needs-human (#256)",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
