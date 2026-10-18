@@ -268,22 +268,22 @@ pass "E06-F07 R3 fallback_validator_agrees"
 # for -- the REAL selector over the REAL board's content, no hand-written expectation
 # that could drift into agreeing with a bug -- and survives any number of real parks.
 [ -f "$SRC/state/tasks.json" ] || fail "R7 precondition: the repo board is missing"
+# The control row is SYNTHETIC (PR #278 review): a fresh epic, numbered one past the live
+# board's highest, holding one pending feature with an ordinary park. Requiring a live
+# not-done, unparked candidate made the suite red on a board where every feature is done
+# or legitimately parked -- the same coupling to mutable live state this rule removes.
 _PARKED_ID="$(python3 -c "
-import json
+import json, re
 d=json.load(open('$SRC/state/tasks.json'))
-fs=[f for e in d['epics'] for f in (e.get('features') or [])]
-pick=next((f for f in fs if f.get('status')!='done' and 'parked' not in f), None)
-print(pick['id'] if pick else '')")"
-[ -n "$_PARKED_ID" ] || fail "R7 precondition: the repo board has no not-done, unparked feature to park"
-python3 -c "
-import json
-d=json.load(open('$SRC/state/tasks.json'))
-for e in d['epics']:
-    for f in e.get('features') or []:
-        if f['id']=='$_PARKED_ID':
-            f['parked']={'reason':'E99-F175 R7 control park'}
+n=max([int(re.match(r'E(\d+)$', e['id']).group(1)) for e in d['epics']] or [0]) + 1
+fid='E%02d-F01' % n
+d['epics'].append({'id':'E%02d' % n,'title':'E99-F175 R7 synthetic control epic','status':'pending',
+  'features':[{'id':fid,'title':'E99-F175 R7 synthetic control feature','status':'pending',
+    'sdd':False,'spec_path':'specs/E99-F175-r7-control','depends_on':[],
+    'parked':{'reason':'E99-F175 R7 control park'}}]})
 json.dump(d, open('$T/source.json','w'))
-" || fail "R7 precondition: could not build the parked source board"
+print(fid)")" || fail "R7 precondition: could not build the parked source board"
+[ -n "$_PARKED_ID" ] || fail "R7 precondition: no synthetic control feature id was produced"
 python3 -c "
 import json
 d=json.load(open('$T/source.json'))
@@ -314,8 +314,8 @@ print('ok')" >/dev/null || fail "R7: a parkless board produced park-related outp
 # with a `parked` key". A park written by `tasks-lock.py await-merge` (`parked.gate ==
 # "merge"`) is reported as `awaiting-merge`, which never contains the word `parked`, so that
 # pick made the suite fail whenever an await-merge park sorted first in board order (it did,
-# on the E35-F05 branch). The target is the first not-done feature with NO park key, and
-# SOURCE = the live board plus one ordinary park (`{"reason": ...}`, no gate) on it. The
+# on the E35-F05 branch). The target is a SYNTHETIC feature in a synthetic epic, and
+# SOURCE = the live board plus that row with one ordinary park (`{"reason": ...}`, no gate). The
 # parkless board is derived from SOURCE, so the pair below holds whatever parks the live
 # board holds, including none.
 # TARGET the parked feature: board-wide selection returns the first ACTIONABLE feature
