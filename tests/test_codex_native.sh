@@ -345,6 +345,7 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     try:
         assert not [k for k in _e if k.startswith('OPENCODE')] and _e['PATH']=='/bin',_e
         for _k in ('HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','XDG_RUNTIME_DIR'):
+            assert _k in _e,'ocenv dropped %s from the isolated env'%_k
             assert pathlib.Path(_e[_k]).resolve().is_relative_to(_tmp.resolve()),(_k,_e[_k])
         assert (os.stat(_e['XDG_RUNTIME_DIR']).st_mode&0o777)==0o700
         iso_check(_e)
