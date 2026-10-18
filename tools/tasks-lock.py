@@ -2084,6 +2084,19 @@ def _write_all(fd, data):
         view = view[n:]
 
 
+def _rewrite_in_place(path, data):
+    """Overwrite the EXISTING inode at `path` with `data` (no O_CREAT, no O_TRUNC), then
+    truncate to len(data): the new and old lengths differ (F99 -> F100), so the truncate
+    must follow the write."""
+    fd = os.open(path, os.O_WRONLY)
+    try:
+        _write_all(fd, data)
+        os.ftruncate(fd, len(data))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 class _RenumberFiles(object):
     """The file moves a renumber carries: inbox brief and progress dir.
 
@@ -2091,8 +2104,9 @@ class _RenumberFiles(object):
     board replace, and undone on any exception raised in-process before the replace
     completes. The undo is best-effort: a step that cannot be restored is reported on
     stderr, and a process killed between the moves and the replace leaves the moves
-    applied under an unchanged board (re-run, or move back by hand). `progress/inbox/<old>.md` is rewritten to `<new>.md` with its
-    frontmatter `feature:` updated; `progress/<old>/` is renamed.
+    applied under an unchanged board (re-run, or move back by hand). `progress/inbox/<old>.md` is
+    renamed to `<new>.md` as the SAME inode (like `mv`) and its frontmatter `feature:` line
+    rewritten in place, so ownership, mode and links survive; `progress/<old>/` is renamed.
     """
 
     def __init__(self, hdir, old_id, new_id):
@@ -2100,7 +2114,6 @@ class _RenumberFiles(object):
         self.old_id, self.new_id = old_id, new_id
         self.moves = []  # ("inbox"|"dir", src, dst, original bytes or None)
         self.done = []
-        self.modes = {}  # inbox src -> original permission bits, for rollback
         inbox = os.path.join("progress", "inbox")
         self._plan_inbox(inbox)
         self._plan_dir()
@@ -2168,17 +2181,15 @@ class _RenumberFiles(object):
         for mv in self.moves:
             kind, src, dst, raw, newraw = mv
             if kind == "inbox":
-                self.modes[src] = stat.S_IMODE(os.stat(src).st_mode)
-                # Created 0600 (never wider), then set to the recorded mode.
-                fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                self.done.append(mv)  # dst now exists and is ours to undo
-                try:
-                    _write_all(fd, newraw)
-                    os.fchmod(fd, self.modes[src])
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-                os.unlink(src)
+                # Moved like `mv`: the SAME inode is renamed, then rewritten in place, so
+                # uid, gid, mode, xattrs and hard links all survive (#4305624598). The
+                # planning guard proved dst free; re-check right before the rename so a
+                # brief that appeared since is never clobbered.
+                if os.path.lexists(dst):
+                    raise OSError("refusing: %s appeared before the move" % dst)
+                os.rename(src, dst)
+                self.done.append(mv)  # dst is now our inode; rollback writes it back
+                _rewrite_in_place(dst, newraw)
             else:
                 os.rename(src, dst)
                 self.done.append(mv)
@@ -2187,15 +2198,13 @@ class _RenumberFiles(object):
         for kind, src, dst, raw, _new in reversed(self.done):
             try:
                 if kind == "inbox":
-                    if not os.path.lexists(src):
-                        # Created 0600 (never wider), then set to the recorded mode.
-                        fd = os.open(src, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                        try:
-                            _write_all(fd, raw)
-                            os.fchmod(fd, self.modes.get(src, 0o600))
-                        finally:
-                            os.close(fd)
-                    os.unlink(dst)
+                    # Reverse of apply: original bytes back onto the same inode, then
+                    # rename it home. Never clobber a src that reappeared meanwhile.
+                    _rewrite_in_place(dst, raw)
+                    if os.path.lexists(src):
+                        raise OSError("%s reappeared; the moved brief is still at %s"
+                                      % (src, dst))
+                    os.rename(dst, src)
                 else:
                     os.rename(dst, src)
             except OSError as exc:

@@ -429,28 +429,54 @@ refuses "$R" 'symlinked parent' E99-F03 E99-F06
 [ -f "$W/realinbox/E99-F03.md" ] || fail "C: a brief behind a symlinked inbox dir was moved"
 pass "C renumber refuses unsafe file moves (occupied target, bad frontmatter, symlinked file/dir/parent) before touching anything"
 
-# The moved brief keeps its permission bits.
-R="$W/c-mode"; mk_ren "$R"; chmod 600 "$R/progress/inbox/E99-F03.md"
-ren "$R" E99-F03 E99-F06 >/dev/null || fail "C: renumber with a 0600 brief failed"
-[ "$(python3 -c 'import os,sys;print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$R/progress/inbox/E99-F06.md")" = "0o600" ] \
-  || fail "C: the moved brief lost its permission bits"
-# The forward move never creates the new brief wider than 0600 (no world-readable window).
-R="$W/c-mode-open"; mk_ren "$R"; chmod 600 "$R/progress/inbox/E99-F03.md"
+# The brief is MOVED, not copied (#4305624598): the same inode is renamed and rewritten in
+# place, so mode, uid/gid and hard links survive. A recreate-the-file mutant changes st_ino.
+# im <path> — "<st_ino> <octal mode> <nlink>" of a path.
+im() { python3 -c 'import os,sys;s=os.stat(sys.argv[1]);print(s.st_ino, oct(s.st_mode & 0o7777), s.st_nlink)' "$1"; }
+R="$W/c-mode"; mk_ren "$R"; chmod 640 "$R/progress/inbox/E99-F03.md"
+ln "$R/progress/inbox/E99-F03.md" "$W/c-mode-hardlink"
+_im0="$(im "$R/progress/inbox/E99-F03.md")"
+ren "$R" E99-F03 E99-F06 >/dev/null || fail "C: renumber with a 0640 brief failed: $(cat "$W/err")"
+[ "$(im "$R/progress/inbox/E99-F06.md")" = "$_im0" ] \
+  || fail "C: the brief was recreated, not moved (inode/mode/nlink $_im0 -> $(im "$R/progress/inbox/E99-F06.md"))"
+cmp -s "$W/c-mode-hardlink" "$R/progress/inbox/E99-F06.md" \
+  || fail "C: the in-place rewrite did not land on the original inode"
+# Every open of the brief is a plain O_WRONLY on the existing inode: never O_CREAT (a new
+# file) and never O_TRUNC (a killed process would leave the brief empty mid-rewrite).
+R="$W/c-openflags"; mk_ren "$R"
 HARNESS_DIR="$R" python3 -c 'import os, runpy, sys
 real, log = os.open, sys.argv[1]
-def o(p, flags, mode=0o777, *a, **k):
-    if str(p).endswith("E99-F06.md") and flags & os.O_CREAT:
-        with open(log, "a") as fh: fh.write(oct(mode) + "\n")
-    return real(p, flags, mode, *a, **k)
+def o(p, flags, *a, **k):
+    if str(p).endswith(".md") and flags & (os.O_WRONLY | os.O_RDWR):
+        with open(log, "a") as fh: fh.write("%s %d\n" % (os.path.basename(p), flags & (os.O_CREAT | os.O_TRUNC)))
+    return real(p, flags, *a, **k)
 os.open = o
 sys.argv = sys.argv[2:]
-runpy.run_path(sys.argv[0], run_name="__main__")' "$W/openmodes" "$HELPER" renumber E99-F03 E99-F06 >/dev/null 2>"$W/err" \
+runpy.run_path(sys.argv[0], run_name="__main__")' "$W/openflags" "$HELPER" renumber E99-F03 E99-F06 >/dev/null 2>"$W/err" \
   || fail "C: renumber under the os.open probe failed: $(cat "$W/err")"
-[ "$(cat "$W/openmodes")" = "0o600" ] \
-  || fail "C: the forward move created the brief with mode $(cat "$W/openmodes"), not 0600"
-[ "$(python3 -c 'import os,sys;print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$R/progress/inbox/E99-F06.md")" = "0o600" ] \
-  || fail "C: the probed forward move lost the brief's 0600 mode"
-pass "C renumber preserves the brief's mode"
+[ "$(cat "$W/openflags")" = "E99-F06.md 0" ] \
+  || fail "C: the brief was opened for writing with O_CREAT/O_TRUNC or more than once: $(cat "$W/openflags")"
+pass "C renumber moves the brief as the same inode (mode, links kept) and rewrites it in place"
+
+# The id grows a digit (F99 -> F100) or shrinks one (non-canonical F003 -> F04): the
+# rewritten inode must be exactly the new bytes, never the old tail (pins the ftruncate).
+R="$W/c-len-shrink"; mkrepo "$R" src 1 2
+python3 - "$R/state/tasks.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); f = d["epics"][0]["features"][1]
+f["id"], f["spec_path"] = "E99-F003", "specs/epics/E99-maintenance/F003-fix-3/"
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+PY
+mkdir -p "$R/progress/inbox"
+printf -- '---\nfeature: E99-F003\n---\nbody\n' > "$R/progress/inbox/E99-F003.md"
+_im0="$(im "$R/progress/inbox/E99-F003.md")"
+ren "$R" E99-F003 E99-F04 >/dev/null || fail "C: a shrinking renumber failed: $(cat "$W/err")"
+printf -- '---\nfeature: E99-F04\n---\nbody\n' > "$W/want"
+cmp -s "$W/want" "$R/progress/inbox/E99-F04.md" \
+  || fail "C: a shorter rewrite left trailing bytes: $(od -c "$R/progress/inbox/E99-F04.md" | tail -3)"
+[ "$(im "$R/progress/inbox/E99-F04.md")" = "$_im0" ] || fail "C: the shrinking move changed the inode"
+pass "C renumber truncates the rewritten brief to its new length"
+
 
 # A row with no inbox brief and no progress dir renumbers cleanly (both are optional).
 R="$W/c-bare"; mkrepo "$R" src 1 2 3
@@ -499,50 +525,87 @@ for _fn in replace rename; do
   [ -f "$R/progress/inbox/E99-F03.md" ] && [ ! -e "$R/progress/inbox/E99-F06.md" ] \
     && [ -d "$R/progress/E99-F03" ] || fail "C: rollback after os.$_fn failed to restore the layout"
 done
-# The restored brief keeps its original mode: a 0600 brief must not come back world-readable.
-R="$W/c-inj-mode"; mk_ren "$R"; chmod 600 "$R/progress/inbox/E99-F03.md"
-if inject "$R" replace renumber E99-F03 E99-F06; then fail "C: renumber survived an injected os.replace failure"; fi
-[ "$(python3 -c 'import os,sys;print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$R/progress/inbox/E99-F03.md")" = "0o600" ] \
-  || fail "C: rollback did not restore the brief's 0600 mode"
-# A mode restore that fails during rollback is reported loudly.
-R="$W/c-inj-fchmod"; mk_ren "$R"
-HARNESS_DIR="$R" python3 -c 'import os, runpy, sys
-real, calls = os.fchmod, []
-def f(*a, **k):  # the forward move'"'"'s fchmod succeeds; the rollback'"'"'s one fails
-    calls.append(1)
-    if len(calls) > 1: raise OSError("cannot fchmod")
-    return real(*a, **k)
+# pyrun <repo> <python prelude> <renumber args...> — run the helper as a module after a
+# prelude that may patch `os` or the loaded module `m`; stderr in $W/err.
+pyrun() {
+  _ph="$1"; _pp="$2"; shift 2
+  HARNESS_DIR="$_ph" python3 -c 'import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("tl", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 def boom(*a, **k): raise OSError("injected replace")
-os.fchmod = f; os.replace = boom
-sys.argv = sys.argv[1:]
-runpy.run_path(sys.argv[0], run_name="__main__")' "$HELPER" renumber E99-F03 E99-F06 >/dev/null 2>"$W/err" \
-  && fail "C: renumber survived the injected failures"
-grep -q 'ROLLBACK FAILED.*cannot fchmod' "$W/err" || fail "C: a failed mode restore was not reported: $(cat "$W/err")"
+exec(sys.argv[2])
+sys.exit(m.main(sys.argv[3:]))' "$HELPER" "$_pp" "$@" >/dev/null 2>"$W/err"
+}
+# A failed board replace gives the brief back as the SAME inode, with its original bytes,
+# length and mode — the reverse of the in-place move, not a recreated copy.
+R="$W/c-rb-inode"; mk_ren "$R"; chmod 640 "$R/progress/inbox/E99-F03.md"
+cp "$R/progress/inbox/E99-F03.md" "$W/orig"; _im0="$(im "$R/progress/inbox/E99-F03.md")"
+pyrun "$R" 'os.replace = boom' renumber E99-F03 E99-F06 && fail "C: renumber survived an injected os.replace failure"
+[ ! -e "$R/progress/inbox/E99-F06.md" ] || fail "C: rollback left the moved brief behind"
+[ "$(im "$R/progress/inbox/E99-F03.md")" = "$_im0" ] \
+  || fail "C: rollback did not return the same inode/mode ($_im0 -> $(im "$R/progress/inbox/E99-F03.md"))"
+cmp -s "$W/orig" "$R/progress/inbox/E99-F03.md" || fail "C: rollback did not restore the original bytes"
+# The dir move fails AFTER the brief moved (runs as root too): the brief comes back intact.
+R="$W/c-rb-dirfail"; mk_ren "$R"; _s0="$(snap "$R")"; _im0="$(im "$R/progress/inbox/E99-F03.md")"
+pyrun "$R" 'real = os.rename
+def r(a, b, *x, **k):
+    if str(a).endswith("progress/E99-F03"): raise OSError("injected dir rename")
+    return real(a, b, *x, **k)
+os.rename = r' renumber E99-F03 E99-F06 && fail "C: renumber survived a failed dir move"
+grep -q 'injected dir rename' "$W/err" || fail "C: the dir move was never reached: $(cat "$W/err")"
+[ "$_s0" = "$(snap "$R")" ] && [ "$(im "$R/progress/inbox/E99-F03.md")" = "$_im0" ] \
+  || fail "C: a failed dir move did not give the brief back as the same inode"
+# Grow by a digit (F99 -> F100), then roll back: the original is one byte shorter than the
+# rewritten inode, so a missing truncate leaves a trailing byte.
+R="$W/c-rb-len"; mkrepo "$R" src 98 99; mkdir -p "$R/progress/inbox"
+printf -- '---\nfeature: E99-F99\n---\nbody\n' > "$R/progress/inbox/E99-F99.md"
+cp "$R/progress/inbox/E99-F99.md" "$W/orig"; _im0="$(im "$R/progress/inbox/E99-F99.md")"
+pyrun "$R" 'os.replace = boom' renumber E99-F99 E99-F100 && fail "C: renumber survived an injected os.replace failure"
+grep -q 'injected replace' "$W/err" || fail "C: the F99 -> F100 renumber never reached the board replace: $(cat "$W/err")"
+cmp -s "$W/orig" "$R/progress/inbox/E99-F99.md" \
+  || fail "C: a rollback to a shorter brief left trailing bytes: $(od -c "$R/progress/inbox/E99-F99.md" | tail -3)"
+[ "$(im "$R/progress/inbox/E99-F99.md")" = "$_im0" ] || fail "C: the F100 rollback changed the inode"
+# The forward move never clobbers a brief that appeared at the target after planning.
+R="$W/c-race-dst"; mk_ren "$R"
+pyrun "$R" 'real = m._RenumberFiles.apply
+def ap(self):
+    open(os.path.join(self.root, "progress/inbox/E99-F06.md"), "w").write("planted\n")
+    return real(self)
+m._RenumberFiles.apply = ap' renumber E99-F03 E99-F06 && fail "C: renumber moved onto a brief that appeared"
+grep -q 'appeared before the move' "$W/err" || fail "C: a late target was not refused: $(cat "$W/err")"
+[ "$(cat "$R/progress/inbox/E99-F06.md")" = planted ] || fail "C: a brief that appeared at the target was clobbered"
+[ -f "$R/progress/inbox/E99-F03.md" ] || fail "C: the late-target refusal lost the source brief"
+# Rollback never clobbers a source path that reappeared; it reports loudly instead.
+R="$W/c-race-src"; mk_ren "$R"
+pyrun "$R" 'real = m._RenumberFiles.apply
+def ap(self):
+    real(self)
+    open(os.path.join(self.root, "progress/inbox/E99-F03.md"), "w").write("planted\n")
+m._RenumberFiles.apply = ap
+os.replace = boom' renumber E99-F03 E99-F06 && fail "C: renumber survived the injected failures"
+grep -q 'ROLLBACK FAILED.*reappeared' "$W/err" || fail "C: a reappeared source was not reported: $(cat "$W/err")"
+[ "$(cat "$R/progress/inbox/E99-F03.md")" = planted ] || fail "C: rollback clobbered a reappeared source"
 # A rollback step that cannot be undone is reported loudly, never swallowed.
 R="$W/c-inj-loud"; mk_ren "$R"
-HARNESS_DIR="$R" python3 -c 'import os, runpy, sys
-real = os.unlink
-def u(p, *a, **k):
-    if str(p).endswith("E99-F06.md"): raise OSError("cannot unlink dst")
-    return real(p, *a, **k)
-def boom(*a, **k): raise OSError("injected replace")
-os.unlink = u; os.replace = boom
-sys.argv = sys.argv[1:]
-runpy.run_path(sys.argv[0], run_name="__main__")' "$HELPER" renumber E99-F03 E99-F06 >/dev/null 2>"$W/err" \
-  && fail "C: renumber survived the injected failures"
-grep -q 'ROLLBACK FAILED' "$W/err" || fail "C: a failed rollback step was not reported: $(cat "$W/err")"
-pass "C rollback is pinned without permission tricks, and a failed restore is loud"
+pyrun "$R" 'real = os.rename
+def r(a, b, *x, **k):
+    if str(a).endswith("E99-F06.md"): raise OSError("cannot rename back")
+    return real(a, b, *x, **k)
+os.rename = r; os.replace = boom' renumber E99-F03 E99-F06 && fail "C: renumber survived the injected failures"
+grep -q 'ROLLBACK FAILED.*cannot rename back' "$W/err" || fail "C: a failed rollback step was not reported: $(cat "$W/err")"
+pass "C rollback returns the same inode with its original bytes/length/mode, never clobbers, and a failed restore is loud"
 
 # Short writes (#4305584899): os.write may return fewer bytes than asked without raising.
-# shortw <repo> <mode> — half: the 1st write is short; zero: every write returns 0;
-# rbzero: the forward write is real, later ones return 0, and the board replace fails.
+# shortw <repo> <mode> — half: the 1st write is short; zero: the forward write returns 0
+# (the rollback's writes are real); rbzero: the forward write is real, later ones return 0,
+# and the board replace fails.
 shortw() {
   HARNESS_DIR="$1" python3 -c 'import os, runpy, sys
 real, mode, calls = os.write, sys.argv[1], []
 def w(fd, data):
     calls.append(1)
     if mode == "half" and len(calls) == 1: return real(fd, bytes(data)[:len(data) // 2])
-    if mode == "zero" or (mode == "rbzero" and len(calls) > 1): return 0
+    if (mode == "zero" and len(calls) == 1) or (mode == "rbzero" and len(calls) > 1): return 0
     return real(fd, data)
 def boom(*a, **k): raise OSError("injected replace")
 os.write = w
@@ -550,15 +613,19 @@ if mode == "rbzero": os.replace = boom
 sys.argv = sys.argv[2:]
 runpy.run_path(sys.argv[0], run_name="__main__")' "$2" "$HELPER" renumber E99-F03 E99-F06 >/dev/null 2>"$W/err"
 }
-R="$W/c-short-half"; mk_ren "$R"
+R="$W/c-short-half"; mk_ren "$R"; _im0="$(im "$R/progress/inbox/E99-F03.md")"
 shortw "$R" half || fail "C: renumber failed under a recoverable short write: $(cat "$W/err")"
 printf -- '---\nfeature: E99-F06\nseeded_by: fixer\n---\n# Intent\nbody line\n' > "$W/want"
 cmp -s "$W/want" "$R/progress/inbox/E99-F06.md" || fail "C: a short write left the moved brief truncated"
+[ "$(im "$R/progress/inbox/E99-F06.md")" = "$_im0" ] || fail "C: the short-write move changed the inode"
 R="$W/c-short-zero"; mk_ren "$R"; _s0="$(snap "$R")"
+cp "$R/progress/inbox/E99-F03.md" "$W/orig"; _im0="$(im "$R/progress/inbox/E99-F03.md")"
 shortw "$R" zero && fail "C: renumber succeeded though the brief write made no progress"
+grep -q 'short write' "$W/err" || fail "C: the zero-byte write was not the refusal reason: $(cat "$W/err")"
 [ "$_s0" = "$(snap "$R")" ] || fail "C: a zero-byte brief write left the board or files changed"
-[ -f "$R/progress/inbox/E99-F03.md" ] && [ ! -e "$R/progress/inbox/E99-F06.md" ] \
-  || fail "C: a zero-byte brief write did not leave the source brief intact"
+[ ! -e "$R/progress/inbox/E99-F06.md" ] && [ "$(im "$R/progress/inbox/E99-F03.md")" = "$_im0" ] \
+  && cmp -s "$W/orig" "$R/progress/inbox/E99-F03.md" \
+  || fail "C: a zero-byte brief write did not put the same inode back with its original bytes"
 R="$W/c-short-rb"; mk_ren "$R"
 shortw "$R" rbzero && fail "C: renumber survived the injected failures"
 grep -q 'ROLLBACK FAILED.*short write' "$W/err" || fail "C: a short rollback restore was not reported: $(cat "$W/err")"
