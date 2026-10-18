@@ -320,6 +320,39 @@ grep -q 'duplicate' "$W/err" || fail "B: the refused write did not name the dupl
 [ "$_before" = "$(cat "$R/state/tasks.json")" ] || fail "B: a refused duplicate write changed the board"
 pass "B validate-board rejects duplicate feature/epic ids on both paths and in-process"
 
+# ── B2: the draft-warning pass never raises on a non-list epics/features (E99-F176) ──
+# The pass runs BEFORE schema validation, so it sees any JSON type. Path-agnostic rows:
+# no Traceback on both paths, rc=1 on the fallback, the schema's `expected array` message — on the fallback AND the stub.
+dw() { # <name> <json> <expected-substring>
+  printf '%s' "$2" > "$W/dw-$1.json"
+  for _pp in "" "$W/stub"; do
+    PYTHONPATH="$_pp" python3 "$VALIDATOR" "$W/dw-$1.json" "$SCHEMA" >/dev/null 2>"$W/verr" && _rc=0 || _rc=$?
+    if grep -q Traceback "$W/verr"; then fail "B2: $1 crashed the draft-warning pass: $(cat "$W/verr")"; fi
+    # The stub validator accepts any shape, so only the fallback owes rc=1; the stub path
+    # owes "no crash" (a TypeError would exit 1 too, hence the Traceback check above).
+    if [ -z "$_pp" ] && [ "$_rc" != 1 ]; then fail "B2: $1 exited $_rc on the fallback, expected 1"; fi
+  done
+}
+# The stub accepts everything, so the `expected array` text is asserted on the fallback only.
+for _c in 'int:5' 'bool:true' 'string:"x"' 'dict:{"a":1}'; do
+  dw "epics-${_c%%:*}" "{\"project\":\"p\",\"epics\":${_c#*:}}"
+  PYTHONPATH="" python3 "$VALIDATOR" "$W/dw-epics-${_c%%:*}.json" "$SCHEMA" 2>&1 >/dev/null \
+    | grep -q 'epics: expected array' \
+    || fail "B2: epics=${_c%%:*} did not report 'epics: expected array' on the fallback"
+done
+dw feat-int '{"project":"p","epics":[{"id":"E1","title":"t","status":"draft","features":7}]}'
+PYTHONPATH="" python3 "$VALIDATOR" "$W/dw-feat-int.json" "$SCHEMA" 2>&1 >/dev/null \
+  | grep -q 'epics\[0\].features: expected array' \
+  || fail "B2: draft epic with int features did not report 'features: expected array'"
+# Positive control: the guard must not silence the warning on a well-formed draft epic.
+printf '%s' '{"project":"p","epics":[{"id":"E1","title":"t","status":"draft","features":[{"id":"E1-F01","title":"t","status":"done","sdd":false,"spec_path":"p/"}]}]}' > "$W/dw-ok.json"
+for _pp in "" "$W/stub"; do
+  PYTHONPATH="$_pp" python3 "$VALIDATOR" "$W/dw-ok.json" "$SCHEMA" 2>&1 >/dev/null \
+    | grep -q "draft epic E1 has feature E1-F01 with status 'done'" \
+    || fail "B2: a valid draft epic with a non-pending feature no longer warns"
+done
+pass "B2 the draft-warning pass tolerates non-list epics/features and still warns"
+
 # ── C: renumber ──────────────────────────────────────────────────────────────
 # Fixture: board F01..F03 here; branch `other` already carries F05. Row F03 has an inbox
 # brief and a progress dir.

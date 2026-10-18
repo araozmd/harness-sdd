@@ -916,10 +916,14 @@ def _emit_draft_warnings(data):
     already neutralizes it — so we warn and continue. Preserved verbatim from
     init.sh so the CLI's stderr output is byte-identical.
     """
-    if isinstance(data, dict):
-        for ep in data.get("epics") or []:
-            if isinstance(ep, dict) and ep.get("status") == "draft":
-                for ft in ep.get("features") or []:
+    # Runs BEFORE schema validation, so `epics` / `features` may be any JSON type: iterate
+    # only a real list. A non-list is the schema's to report (`expected array`), never a
+    # TypeError here (E99-F176).
+    if isinstance(data, dict) and isinstance(data.get("epics"), list):
+        for ep in data["epics"]:
+            if isinstance(ep, dict) and ep.get("status") == "draft" \
+                    and isinstance(ep.get("features"), list):
+                for ft in ep["features"]:
                     if isinstance(ft, dict) and ft.get("status") != "pending":
                         print(
                             "⚠️  draft epic %s has feature %s with status '%s' "
