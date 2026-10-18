@@ -308,6 +308,9 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
             calls.append(rem);assert rem>0
             v=seq[min(len(calls)-1,len(seq)-1)]
             if v=='raise': raise RuntimeError('boom')
+            if v=='badjson': return json.loads('not json {')['data']      # ValueError, as a non-JSON `opencode api` body
+            if v=='nodata': return json.loads('{}')['data']               # KeyError, as a body without `data`
+            if v=='timeout': raise subprocess.TimeoutExpired('opencode',1)
             return v
         def sleep(s): t[0]+=s
         try: return ocwarm(fetch,limit,sleep,lambda:t[0]),calls,t[0]
@@ -315,6 +318,9 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     _r,_c,_t=_warm([[],[],['x']]);assert _r==['x'] and len(_c)==3,(_r,_c)
     _r,_c,_t=_warm([['x']]);assert _r==['x'] and len(_c)==1,(_r,_c)
     _r,_c,_t=_warm(['raise',['x']]);assert _r==['x'] and len(_c)==2,(_r,_c)
+    for _bad in ('badjson','nodata','timeout'):
+        _r,_c,_t=_warm([_bad,_bad,['x']]);assert _r==['x'] and len(_c)==3,(_bad,_r,_c)
+        _r,_c,_t=_warm([_bad]);assert isinstance(_r,AssertionError) and 'cold-start' in str(_r) and len(_c)>2,(_bad,_r)
     _r,_c,_t=_warm([[]]);assert isinstance(_r,AssertionError) and 'cold-start' in str(_r) and len(_c)>2 and _t<=60+0.5,(_r,_c,_t)
     _r,_c,_t=_warm(['raise']);assert isinstance(_r,AssertionError) and 'cold-start' in str(_r) and len(_c)>2 and _t<=60+0.5,(_r,_c,_t)
     assert _c[0]==60 and all(a>b for a,b in zip(_c,_c[1:])),'fetch must receive the shrinking remaining time'
@@ -328,8 +334,9 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
         return e,tmp
     def iso_check(e):
         # An env handed to opencode is isolated iff no OPENCODE* is inherited and HOME plus every
-        # XDG var differ from the ambient ones and share one root (R7). Used on the env of EVERY
-        # live 1.x call below, so a call that bypasses ocenv() is caught, not just a broken builder.
+        # XDG var differ from the ambient ones and share one root (R7). It judges an env DICT; that
+        # the binary actually RECEIVES such an env is pinned separately, by fake binaries that log
+        # what they observed ($HOME/$XDG_* per call, for --version, serve, api, status and 1.x verbs).
         assert not [k for k in e if k.startswith('OPENCODE')],sorted(k for k in e if k.startswith('OPENCODE'))
         vals=[e.get(k,'') for k in ('HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','XDG_RUNTIME_DIR')]
         assert all(vals) and len({os.path.dirname(v) for v in vals})==1,vals
@@ -346,6 +353,44 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
             except AssertionError: pass
             else: raise AssertionError('iso_check accepted a polluted env: %r'%{k:_bad[k] for k in ('HOME','XDG_DATA_HOME')})
     finally: shutil.rmtree(_tmp,ignore_errors=True)
+    def ocversion(ocbin):
+        # The gate's `--version` runs under the isolated env too: on 2.x even `--version` creates
+        # log/config/state/cache dirs under $XDG_DATA_HOME etc. (B1). File capture + own session so
+        # a timeout can kill the group.
+        e,tmp=ocenv()
+        try:
+            out=tmp/'version.out'
+            with open(out,'w') as vfh:
+                vp=subprocess.Popen([ocbin,'--version'],env=e,stdout=vfh,stderr=subprocess.STDOUT,start_new_session=True)
+                try: vrc=vp.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    try: os.killpg(vp.pid,signal.SIGKILL)
+                    except OSError: pass
+                    vp.wait();raise
+            return out.read_text(errors='replace'),vrc
+        finally: shutil.rmtree(tmp,ignore_errors=True)
+    def oc1_run(ocbin,cwd,*args):
+        # One 1.x call, always under a fresh isolated env, captured through a FILE (opencode 1.x
+        # truncates its JSON at 64 KiB when stdout is a pipe, silently dropping `command`).
+        e,tmp=ocenv()
+        try:
+            out=tmp/'out.txt'
+            with open(out,'w') as fh:
+                subprocess.run([ocbin,*args],cwd=cwd,env=e,stdout=fh,stderr=subprocess.STDOUT,timeout=120)
+            return out.read_text()
+        finally: shutil.rmtree(tmp,ignore_errors=True)
+    def oc1_source(ocbin,probe):
+        agents=oc1_run(ocbin,probe,'agent','list')
+        assert 'builder-heavy (subagent)' in agents and 'pr-fixer (subagent)' in agents,agents
+        commands=oc1_run(ocbin,probe,'debug','config')
+        assert '"sdd-next"' in commands,'live opencode probe did not resolve /sdd-next'
+    def oc1_target(ocbin,tgt):
+        agents=oc1_run(ocbin,tgt,'agent','list')
+        for r in sorted(roles|{'pr-fixer'}):
+            assert re.search(r'^%s \((primary|subagent)\)'%re.escape(r),agents,re.M),(r,agents)
+        assert 'orchestrator (primary)' in agents and 'pr-fixer (subagent)' in agents,agents
+        cfg=json.loads(oc1_run(ocbin,tgt,'debug','config'))
+        assert 'sdd-next' in cfg['command'],sorted(cfg.get('command',{}))
     def _alive(pid):
         try: os.kill(pid,0)
         except ProcessLookupError: return False
@@ -431,13 +476,13 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     # Hermetic R5/R6 coverage with a FAKE opencode (no real binary, any host): start-up
     # failures, the cold-start deadline, group-kill of a TERM-ignoring child, cleanup after a
     # failed assertion, and the verbs ever invoked.
-    def fake_oc(d,mode,agent_json='[]',status='stopped',api_sleep=0):
+    def fake_oc(d,mode,agent_json='[]',status='stopped',api_sleep=0,version='opencode v2.0.32'):
         d=pathlib.Path(d);log=d/'argv.log';child=d/'child.pid';envlog=d/'env.log'
         (d/'opencode').write_text('''#!/bin/sh
 echo "$*" >> "%s"
 echo "$1|$PWD|$HOME|$XDG_CONFIG_HOME|$XDG_DATA_HOME|$XDG_STATE_HOME|$XDG_CACHE_HOME|$XDG_RUNTIME_DIR|${OPENCODE_CONFIG:-}|${OPENCODE_PASSWORD:-}" >> "%s"
 case "$1" in
-  --version) echo "opencode v2.0.32";;
+  --version) echo "%s";;
   service) echo %s;;
   api) sleep %s; case "$5" in /api/agent) echo '{"data":%s}';; /api/command) echo '{"data":[{"name":"sdd-next"}]}';; esac;;
   serve) case "%s" in
@@ -450,9 +495,9 @@ case "$1" in
            wait;;
   esac;;
 esac
-'''%(log,envlog,status,api_sleep,agent_json,mode,child,d/'term.mark'))
+'''%(log,envlog,version,status,api_sleep,agent_json,mode,child,d/'term.mark'))
         os.chmod(d/'opencode',0o755);return str(d/'opencode'),log,child
-    def fake_run(mode,agent_json='[]',status='stopped',api_sleep=0,full=False,blank=None,**kw):
+    def fake_run(mode,agent_json='[]',status='stopped',api_sleep=0,full=False,blank=None,wrong=None,**kw):
         d=pathlib.Path(tempfile.mkdtemp(prefix='fake-oc-'));lay=d/'layout';lay.mkdir()
         try:
             if full:
@@ -460,7 +505,8 @@ esac
                 (lay/'agents').mkdir();(lay/'.opencode/agent').mkdir(parents=True)
                 for r in roles: (lay/'agents'/(r+'.md')).write_text('body of '+r+'\n')
                 (lay/'.opencode/agent/pr-fixer.md').write_text('---\ndescription: x\n---\nbody of pr-fixer\n')
-                agent_json=json.dumps([{'id':r,'system':'' if r==blank else 'body of '+r} for r in sorted(roles)]+[{'id':'pr-fixer','system':'body of pr-fixer'}])
+                def _sys(i): return '' if i==blank else ('WRONG BODY' if i==wrong else 'body of '+i)
+                agent_json=json.dumps([{'id':r,'system':_sys(r)} for r in sorted(roles)]+[{'id':'pr-fixer','system':_sys('pr-fixer')}])
             b,log,child=fake_oc(d,mode,agent_json,status,api_sleep)
             t0=time.monotonic()
             try: oc2_probe(b,lay,'agents',[],quiet=True,**kw);err=None
@@ -507,11 +553,14 @@ esac
     # Isolation (R7): every invocation ran in the layout, under ONE temp root, with no inherited
     # OPENCODE_* and the server password only on the api calls.
     _lay=fake_run.layout;_envs=fake_run.env;assert _envs
-    _root=os.path.commonpath([x for e in _envs for x in e[2:8]])
-    assert _root not in ('/','') and not str(pathlib.Path.home()).startswith(_root) and os.environ['HOME'] not in [x for e in _envs for x in e[2:8]],_root
+    def rowenv(r):  # an env-log row -> the env dict the fake binary observed (OPENCODE_CONFIG only if set)
+        e=dict(zip(('HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','XDG_RUNTIME_DIR'),r[2:8]))
+        if r[8]: e['OPENCODE_CONFIG']=r[8]
+        return e
     for _e in _envs:
         assert _e[1]==_lay,_e
-        assert all(x.startswith(_root+'/') for x in _e[2:8]) and _e[8]=='',_e
+        iso_check(rowenv(_e))
+        assert _e[8]=='',_e
         assert (_e[9]=='fakepw')==(_e[0]=='api'),_e
     # a service that is NOT stopped after the probe is reported
     fake_run('serve','[]',status='running',warm_timeout=1,term_grace=1)
@@ -526,6 +575,32 @@ esac
     # a role whose resolved system differs from its file (silent {file:} failure) is caught
     _err,_argv,_cpid = fake_run('serve',full=True,blank='builder-heavy',term_grace=1)
     assert _err and 'builder-heavy' in _err and 'system differs' in _err and _cpid and not _alive(_cpid),_err
+    # B4: the pr-fixer system comparison is its own R3 bullet: a wrong (non-empty) or empty pr-fixer body fails the probe
+    for _kw in ({'wrong':'pr-fixer'},{'blank':'pr-fixer'}):
+        _err,_argv,_cpid = fake_run('serve',full=True,term_grace=1,**_kw)
+        assert _err and 'pr-fixer system differs' in _err and _cpid and not _alive(_cpid),(_kw,_err)
+    # the gate's `--version` and the 1.x verbs observe an ISOLATED env, not merely record one (B1, B2)
+    def fake_cli(d,body):
+        d=pathlib.Path(d);(d/'opencode').write_text('#!/bin/sh\necho "$1|$PWD|$HOME|$XDG_CONFIG_HOME|$XDG_DATA_HOME|$XDG_STATE_HOME|$XDG_CACHE_HOME|$XDG_RUNTIME_DIR|${OPENCODE_CONFIG:-}|${OPENCODE_PASSWORD:-}" >> "'+str(d/'env.log')+'"\n'+body)
+        os.chmod(d/'opencode',0o755);return str(d/'opencode'),d/'env.log'
+    def seen(envlog,verbs):
+        rows=[l.split('|') for l in envlog.read_text().splitlines()]
+        assert [r[0] for r in rows]==verbs,(verbs,rows)
+        for r in rows:
+            iso_check(rowenv(r))
+        return rows
+    _d=pathlib.Path(tempfile.mkdtemp(prefix='fake-oc1-'))
+    try:
+        _b,_el=fake_cli(_d,'case "$1" in --version) echo 1.18.35;; esac\n')
+        assert ocversion(_b)==('1.18.35\n',0)
+        seen(_el,['--version']);_el.unlink()
+        _roles1=''.join('%s (%s)\n'%(r,'primary' if r=='orchestrator' else 'subagent') for r in sorted(roles|{'pr-fixer'}))
+        _b,_el=fake_cli(_d,"case \"$1\" in agent) printf '%s';; debug) echo '{\"command\":{\"sdd-next\":{}}}';; esac\n"%_roles1.replace('\n','\\n'))
+        (_d/'lay').mkdir()
+        oc1_source(_b,_d/'lay');oc1_target(_b,_d/'lay')
+        _rows=seen(_el,['agent','debug','agent','debug'])
+        assert all(r[1]==str(_d/'lay') for r in _rows)
+    finally: shutil.rmtree(_d,ignore_errors=True)
     del os.environ['OPENCODE_CONFIG']
     assert {a.split()[0] for a in _argv}<={'serve','api','service'},_argv
     assert all(a.startswith('api --server http://127.0.0.1:1 GET /api/') for a in _argv if a.startswith('api')),_argv
@@ -533,19 +608,7 @@ esac
     ocroute=None;ocskip=None
     if ocbin:
         try:
-            vfd,vfn=tempfile.mkstemp(prefix='opencode-version-');os.close(vfd)
-            try:
-                with open(vfn,'w') as vfh:
-                    # own session so a timeout can kill the whole process group, not just the child
-                    vp=subprocess.Popen([ocbin,'--version'],stdout=vfh,stderr=subprocess.STDOUT,start_new_session=True)
-                    try: vrc=vp.wait(timeout=30)
-                    except subprocess.TimeoutExpired:
-                        try: os.killpg(vp.pid,signal.SIGKILL)
-                        except OSError: pass
-                        vp.wait();raise
-                vout=pathlib.Path(vfn).read_text(errors='replace')
-            finally:
-                os.unlink(vfn)
+            vout,vrc=ocversion(ocbin)
             ocroute,ocskip=ocgate(vout,vrc)
         except Exception as e:
             ocskip='opencode --version failed (%s)'%type(e).__name__
@@ -583,32 +646,12 @@ esac
             oc2_probe(ocbin,layout_copy('oc2-source'),'agents',stems)
             print('ok - opencode_source_host_resolves (R4, live 2.x)')
         else:
-            # Capture through a FILE, not a pipe: opencode truncates its JSON at 64 KiB when
-            # stdout is a pipe, which silently drops the `command` section this probe asserts.
-            used=[]
-            def oc(cwd,*args):
-                e,tmp=ocenv();used.append(e)
-                try:
-                    out=tmp/'out.txt'
-                    with open(out,'w') as fh:
-                        subprocess.run([ocbin,*args],cwd=cwd,env=e,stdout=fh,stderr=subprocess.STDOUT,timeout=120)
-                    return out.read_text()
-                finally: shutil.rmtree(tmp,ignore_errors=True)
             probe=layout_copy('oc1-source')
-            agents=oc(probe,'agent','list')
-            assert 'builder-heavy (subagent)' in agents and 'pr-fixer (subagent)' in agents,agents
-            commands=oc(probe,'debug','config')
-            assert '"sdd-next"' in commands,'live opencode probe did not resolve /sdd-next'
+            oc1_source(ocbin,probe)
             print('ok - opencode_source_host_resolves (R9, live)')
             tgt=fresh('oc1-target');install(tgt,'--agents=opencode','--pr-loop=true')
-            agents=oc(tgt,'agent','list')
-            for r in sorted(roles|{'pr-fixer'}):
-                assert re.search(r'^%s \((primary|subagent)\)'%re.escape(r),agents,re.M),(r,agents)
-            assert 'orchestrator (primary)' in agents and 'pr-fixer (subagent)' in agents,agents
-            cfg=json.loads(oc(tgt,'debug','config'))
-            assert 'sdd-next' in cfg['command'],sorted(cfg.get('command',{}))
+            oc1_target(ocbin,tgt)
             print('ok - opencode_target_resolves (R8, live 1.x)')
-        for _e in (used if ocroute=='v1' else []): iso_check(_e)
         after=gitstat()
         assert before==after,'live opencode probes changed the repository tree:\n%s\n--\n%s'%(before,after)
         print('ok - opencode_probes_isolated (R7)')
