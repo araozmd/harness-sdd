@@ -326,12 +326,25 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
             (tmp/sub).mkdir(parents=True,exist_ok=True);e[k]=str(tmp/sub)
         os.chmod(tmp/'run',0o700)
         return e,tmp
+    def iso_check(e):
+        # An env handed to opencode is isolated iff no OPENCODE* is inherited and HOME plus every
+        # XDG var differ from the ambient ones and share one root (R7). Used on the env of EVERY
+        # live 1.x call below, so a call that bypasses ocenv() is caught, not just a broken builder.
+        assert not [k for k in e if k.startswith('OPENCODE')],sorted(k for k in e if k.startswith('OPENCODE'))
+        vals=[e[k] for k in ('HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','XDG_RUNTIME_DIR')]
+        assert len({os.path.dirname(v) for v in vals})==1,vals
+        assert all(v!=os.environ.get(k) for k,v in zip(('HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','XDG_RUNTIME_DIR'),vals)),vals
     _e,_tmp=ocenv({'OPENCODE_CONFIG':'/x','OPENCODE_PID':'1','PATH':'/bin','HOME':'/h','XDG_CONFIG_HOME':'/h/.config'})
     try:
         assert not [k for k in _e if k.startswith('OPENCODE')] and _e['PATH']=='/bin',_e
         for _k in ('HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','XDG_RUNTIME_DIR'):
             assert pathlib.Path(_e[_k]).resolve().is_relative_to(_tmp.resolve()),(_k,_e[_k])
         assert (os.stat(_e['XDG_RUNTIME_DIR']).st_mode&0o777)==0o700
+        iso_check(_e)
+        for _bad in ({**_e,'OPENCODE_CONFIG':'x'},{**_e,'HOME':os.environ.get('HOME','')},{**_e,'XDG_DATA_HOME':'/elsewhere/data'}):
+            try: iso_check(_bad)
+            except AssertionError: pass
+            else: raise AssertionError('iso_check accepted a polluted env: %r'%{k:_bad[k] for k in ('HOME','XDG_DATA_HOME')})
     finally: shutil.rmtree(_tmp,ignore_errors=True)
     def _alive(pid):
         try: os.kill(pid,0)
@@ -572,8 +585,9 @@ esac
         else:
             # Capture through a FILE, not a pipe: opencode truncates its JSON at 64 KiB when
             # stdout is a pipe, which silently drops the `command` section this probe asserts.
+            used=[]
             def oc(cwd,*args):
-                e,tmp=ocenv()
+                e,tmp=ocenv();used.append(e)
                 try:
                     out=tmp/'out.txt'
                     with open(out,'w') as fh:
@@ -594,6 +608,7 @@ esac
             cfg=json.loads(oc(tgt,'debug','config'))
             assert 'sdd-next' in cfg['command'],sorted(cfg.get('command',{}))
             print('ok - opencode_target_resolves (R8, live 1.x)')
+        for _e in (used if ocroute=='v1' else []): iso_check(_e)
         after=gitstat()
         assert before==after,'live opencode probes changed the repository tree:\n%s\n--\n%s'%(before,after)
         print('ok - opencode_probes_isolated (R7)')
