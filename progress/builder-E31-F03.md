@@ -17,7 +17,7 @@ Hermetic mutants ran with `opencode` off PATH; live mutants ran with 2.0.32 (R8*
 | R7a-f | R7 | XDG var dropped; OPENCODE* kept; run dir 0755; serve/api/status without isolated env | all killed |
 | R7h | R7 | 2.x probe cwd=src | SURVIVED: 2.x serve writes nothing into cwd (observed); the tripwire is live on 1.x |
 | R8z,w | R7 | 1.x probe cwd=src (`.opencode/.gitignore` is git-ignored) | killed only after the porcelain check gained `--ignored` for the OpenCode write paths |
-| R8y | R7 | 1.x `oc()` bypasses `ocenv()` | killed only after `iso_check` on every live 1.x env was added |
+| R8y | R7 | 1.x `oc()` bypasses `ocenv()` | round 1 claimed killed; that was WRONG (it only killed the recorded env, not the one the binary received). Round 2: `oc1_run` is driven by a fake 1.x that logs HOME/XDG_*, so deleting `env=` or passing `os.environ` is killed (B2a/B2b) |
 | R1a,b,c | R1 | emitter `agent`->`agents`; `prompt`->`system`; extra `.opencode/commands` dir (scratch clone of harness-install.sh) | all killed |
 | R3a,c,f | R3 | broken `{file:}`; stem dropped; extra literal stem | killed |
 | R3d | R3 | broken `{file:}` + live system compare removed | killed anyway by the hermetic blank-system case (compare pinned twice) |
@@ -36,3 +36,8 @@ Notes:
 - First campaign pass had false HANG kills (timeout 240 s with 10 parallel suites): discarded, rerun at W=5, timeout 900.
 - Mutant runs of a broken `kill_group` leaked fake `opencode serve` shells (my fakes, never the real binary); swept by pid.
 - The live suites left no `opencode.exe serve` before/after any run (pgrep empty on both majors).
+
+Round 2 (reviewer B1-B4), scratch-clone mutants, hermetic with XDG_* unset in the host env:
+B1 (`--version` without env=; with os.environ), B2a/B2b (oc1_run without env / with os.environ),
+B3 (narrowed except; also narrowed + ValueError), B4 (pr-fixer expected = served system),
+A1 (ocenv drops XDG_DATA_HOME, now a named assertion), A2 (OPENCODE* kept): all killed.
