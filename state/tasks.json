@@ -1863,7 +1863,13 @@
           "depends_on": [
             "E31-F02"
           ],
-          "spec_path": "specs/epics/E31-opencode-first-class/F03-opencode-2x-compat/"
+          "spec_path": "specs/epics/E31-opencode-first-class/F03-opencode-2x-compat/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (282)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E31-F03 done --evidence <merge-ref>`",
+            "pr": "282"
+          }
         }
       ]
     },
