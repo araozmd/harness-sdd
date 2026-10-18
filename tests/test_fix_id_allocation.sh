@@ -334,16 +334,19 @@ dw() { # <name> <json> <expected-substring>
   done
 }
 # The stub accepts everything, so the `expected array` text is asserted on the fallback only.
-for _c in 'int:5' 'bool:true' 'string:"x"' 'dict:{"a":1}'; do
+for _c in 'int:5' 'bool:true' 'string:"x"' 'dict:{"a":1}' 'null:null' 'float:5.5'; do
   dw "epics-${_c%%:*}" "{\"project\":\"p\",\"epics\":${_c#*:}}"
   PYTHONPATH="" python3 "$VALIDATOR" "$W/dw-epics-${_c%%:*}.json" "$SCHEMA" 2>&1 >/dev/null \
     | grep -q 'epics: expected array' \
     || fail "B2: epics=${_c%%:*} did not report 'epics: expected array' on the fallback"
 done
-dw feat-int '{"project":"p","epics":[{"id":"E1","title":"t","status":"draft","features":7}]}'
-PYTHONPATH="" python3 "$VALIDATOR" "$W/dw-feat-int.json" "$SCHEMA" 2>&1 >/dev/null \
-  | grep -q 'epics\[0\].features: expected array' \
-  || fail "B2: draft epic with int features did not report 'features: expected array'"
+# null and a float are NOT iterable either: a guard narrowed to "not int/bool" must die here.
+for _c in 'int:7' 'null:null' 'float:7.5'; do
+  dw "feat-${_c%%:*}" "{\"project\":\"p\",\"epics\":[{\"id\":\"E1\",\"title\":\"t\",\"status\":\"draft\",\"features\":${_c#*:}}]}"
+  PYTHONPATH="" python3 "$VALIDATOR" "$W/dw-feat-${_c%%:*}.json" "$SCHEMA" 2>&1 >/dev/null \
+    | grep -q 'epics\[0\].features: expected array' \
+    || fail "B2: draft epic with ${_c%%:*} features did not report 'features: expected array'"
+done
 # Positive control: the guard must not silence the warning on a well-formed draft epic.
 printf '%s' '{"project":"p","epics":[{"id":"E1","title":"t","status":"draft","features":[{"id":"E1-F01","title":"t","status":"done","sdd":false,"spec_path":"p/"}]}]}' > "$W/dw-ok.json"
 for _pp in "" "$W/stub"; do
@@ -352,6 +355,32 @@ for _pp in "" "$W/stub"; do
     || fail "B2: a valid draft epic with a non-pending feature no longer warns"
 done
 pass "B2 the draft-warning pass tolerates non-list epics/features and still warns"
+
+# ── B3: the fallback's enum checks report an unhashable value, never raise (E99-F176) ──
+# `x not in <set>` raised "cannot use 'list' as a set element" for a list/dict where a
+# string belongs. One row per site; fallback path only (the stub accepts every shape).
+cat > "$W/unhash.py" <<'PY'
+import json, sys
+site, out = sys.argv[1], sys.argv[2]
+F = {"id": "E1-F01", "title": "t", "status": "pending", "sdd": False, "spec_path": "p/"}
+E = {"id": "E1", "title": "e", "status": "planned", "features": [F]}
+bad = ["x"]
+if site == "epic-status":    E["status"] = bad
+elif site == "feat-status":  F["status"] = bad
+elif site == "park-gate":    F["parked"] = {"reason": "r", "gate": bad}
+elif site == "landed-verified": F["landed"] = {"ref": "r", "verified": bad}
+elif site == "landed-slice-verified": F["landed"] = {"ref": "r", "slices": [{"repo": "a", "ref": "r", "verified": bad}]}
+elif site == "slice-status":  F["slices"] = [{"id": "E1-F01@a", "repo": "a", "status": bad}]
+json.dump({"project": "p", "epics": [E]}, open(out, "w"))
+PY
+for _s in epic-status feat-status park-gate landed-verified landed-slice-verified slice-status; do
+  python3 "$W/unhash.py" "$_s" "$W/unhash-$_s.json"
+  PYTHONPATH="" python3 "$VALIDATOR" "$W/unhash-$_s.json" "$SCHEMA" >/dev/null 2>"$W/verr" && _rc=0 || _rc=$?
+  if grep -q Traceback "$W/verr"; then fail "B3: $_s crashed the fallback validator: $(cat "$W/verr")"; fi
+  [ "$_rc" = 1 ] || fail "B3: $_s exited $_rc, expected 1"
+  grep -q "not one of" "$W/verr" || fail "B3: $_s did not report 'not one of': $(cat "$W/verr")"
+done
+pass "B3 the fallback validator reports an unhashable enum value cleanly at every site"
 
 # ── C: renumber ──────────────────────────────────────────────────────────────
 # Fixture: board F01..F03 here; branch `other` already carries F05. Row F03 has an inbox
