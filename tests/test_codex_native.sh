@@ -241,7 +241,9 @@ with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     # assertion above and by tests/test_planner_topology.sh R8/R10 — so this only drops
     # the claim that the v0.78.1 bytes survive, which those features deliberately make
     # false.
-    _regenerated={'sdd-pr-loop.md','sdd-plan.md','sdd-drill.md','builder-heavy.md','sdd-next.md'}
+    # E99-F174 likewise regenerates `sdd-fix.md`: its maintenance-epic step now points at the
+    # explicit duplicate-id renumber exception (pinned by tests/test_fix_id_allocation.sh D).
+    _regenerated={'sdd-pr-loop.md','sdd-plan.md','sdd-drill.md','builder-heavy.md','sdd-next.md','sdd-fix.md'}
     for variant in ('all-five-on','all-five-models-on'):
         old=fresh('golden-'+variant)
         subprocess.run(['sh',str(src/'tests/fixtures/frontend-v0.78.1/materialize.sh'),variant,str(old)],check=True)

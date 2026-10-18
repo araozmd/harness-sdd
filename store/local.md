@@ -55,6 +55,10 @@ Orchestrator's exclusive ownership of state writes.
   python3 tools/tasks-lock.py set-status <id> <status>
   # seeding one sdd:false fix row (the Fixer's R8/R9 contract) — prints the allocated id
   python3 tools/tasks-lock.py add-feature --title "<one-line fix intent>" [--gated]
+  # two sessions minted the same fix id (#253): the session whose board lands SECOND
+  # renumbers its OWN un-landed, unsliced sdd:false row (never a done/landed one); a duplicated id needs
+  # --title-match '<exact title>' or --index <n>. validate-board.py rejects duplicate ids.
+  python3 tools/tasks-lock.py renumber <old-id> <new-id> [--title-match <title> | --index <n>]
   # parking an APPROVED (in-review) feature as awaiting its PR's merge (E99-F130):
   # the selector reports `awaiting-merge` (never re-routes a Reviewer at it), and the
   # one sanctioned exit clears the park and writes the landing receipt in one write

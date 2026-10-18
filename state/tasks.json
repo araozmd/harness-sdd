@@ -1252,6 +1252,21 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F173-pr-loop-late-comments-queued-merge/"
+        },
+        {
+          "id": "E99-F174",
+          "title": "tasks-lock: allocate E99 fix ids above every visible board copy, fail loudly on duplicate feature ids, and add a guarded renumber for an un-landed row (#253)",
+          "status": "in-review",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F174-concurrent-fix-id-allocation/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (276)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E99-F174 done --evidence <merge-ref>`",
+            "pr": "276"
+          }
         }
       ]
     },

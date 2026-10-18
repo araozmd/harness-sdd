@@ -134,11 +134,19 @@ def _git(args, cwd):
     Never raises and never blocks: a bounded timeout, and any non-zero exit,
     missing git binary, or timeout maps to None so the caller falls back to
     self-location.
+
+    GIT_NO_LAZY_FETCH=1: in a partial clone a locally missing object (e.g. another
+    branch's board blob under `--filter=blob:none`) would otherwise be fetched from the
+    promisor remote, writing a pack — breaking the read-only/offline contract of the
+    E99-F174 ref scan. With it the `git show` fails and the ref is skipped like any other
+    unreadable one. Honoured since git 2.44; older git ignores it (and may lazy-fetch).
     """
+    env = dict(os.environ, GIT_NO_LAZY_FETCH="1")
     try:
         out = subprocess.run(
             ["git"] + list(args),
             cwd=cwd,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=5,
@@ -1857,7 +1865,7 @@ def _telemetry_transition(hdir, feature_id, old_status, new_status):
         pass  # best-effort by contract — telemetry never breaks a board write
 
 
-def run(transform, timeout, sync_id=None, sync_status=None):
+def run(transform, timeout, sync_id=None, sync_status=None, get_effects=None):
     hdir = _harness_dir()
     tasks_path = os.path.join(hdir, TASKS_REL)
     lock_path = os.path.join(hdir, LOCK_REL)
@@ -1920,6 +1928,12 @@ def run(transform, timeout, sync_id=None, sync_status=None):
             # back if the board replace itself fails, so the two records move together or
             # not at all.
             fm_written = []
+            effects = None
+            if get_effects is not None:
+                # Side effects the transform planned (renumber's file moves). Built
+                # BY the transform, in-lock, so every precondition was checked against
+                # the same re-read the board write rests on.
+                effects = get_effects()
             if sync_id is not None:
                 fm_targets = _frontmatter_targets(
                     vb, hdir, reparsed, sync_id, sync_status
@@ -1932,6 +1946,8 @@ def run(transform, timeout, sync_id=None, sync_status=None):
             # file). If the process dies mid-write, the original is untouched.
             tmp_path = tasks_path + ".tmp.%d" % os.getpid()
             try:
+                if effects is not None:
+                    effects.apply()  # a failure here rolls the moves back (except below)
                 with open(tmp_path, "w") as out:
                     out.write(serialized)
                     out.flush()
@@ -1967,6 +1983,8 @@ def run(transform, timeout, sync_id=None, sync_status=None):
                 except OSError:
                     pass
                 _rollback_frontmatter(vb, os.path.realpath(hdir), fm_written)
+                if effects is not None:
+                    effects.rollback()
                 raise
         finally:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)  # release before returning (R3)
@@ -1977,6 +1995,351 @@ def run(transform, timeout, sync_id=None, sync_status=None):
     # the lock is released (a telemetry append must never extend the lock hold).
     if sync_id is not None and sync_status is not None:
         _telemetry_transition(hdir, sync_id, old_status, sync_status)
+
+
+# ---------------------------------------------------------------------------
+# Concurrent fix-id allocation (#253, E99-F174).
+#
+# The advisory lock serializes writers on ONE board file. It cannot see a row another
+# session has seeded on a board branch that has not landed yet, so two sessions can mint
+# the same `E99-F##`. `add-feature` therefore allocates above the max over every board
+# copy git can show WITHOUT network or side effects, and `renumber` is the guarded way out
+# for a session that still collided. This narrows the race; it cannot close it (a branch
+# nobody has fetched is invisible) — `validate-board.py` is what makes a collision loud.
+
+# Upper bound on how many refs are read per call: one `git show` each, and a clone with
+# thousands of stale remote branches must not stall a board write. Newest commits first;
+# the cut is reported on stderr, never silent.
+MAX_REFS_SCANNED = 200
+
+
+def _epic_max_n(data, epic_id):
+    """Highest `<epic_id>-F<n>` number among that epic's features (0 when none)."""
+    if not isinstance(data, dict) or not isinstance(data.get("epics"), list):
+        return 0
+    pat = re.compile(r"^%s-F(\d+)$" % re.escape(epic_id))
+    max_n = 0
+    for ep in data["epics"]:
+        if not isinstance(ep, dict) or ep.get("id") != epic_id:
+            continue
+        feats = ep.get("features")
+        if not isinstance(feats, list):
+            continue
+        for ft in feats:
+            m = pat.match(str(ft.get("id", "")) if isinstance(ft, dict) else "")
+            if m:
+                max_n = max(max_n, int(m.group(1)))
+    return max_n
+
+
+def _visible_ref_max(hdir, epic_id):
+    """Max `F##` for <epic_id> over HEAD and every local/remote-tracking ref's board.
+
+    Read-only and offline: `rev-parse`, `for-each-ref`, `show` only — never a fetch. A ref
+    whose board is missing or unparsable is skipped with a note on stderr. Outside a git
+    repo (or when the board is not under the repo root) it returns 0, i.e. the local-only
+    behaviour. The caller still has to parse the LOCAL board, as before.
+    """
+    top = _git(["rev-parse", "--show-toplevel"], cwd=hdir)
+    if top is None:
+        return 0
+    rel = os.path.relpath(
+        os.path.realpath(os.path.join(hdir, TASKS_REL)), os.path.realpath(top)
+    )
+    if rel == ".." or rel.startswith(".." + os.sep):
+        _warn("board is outside the git repository root — ref scan skipped")
+        return 0
+    rel = rel.replace(os.sep, "/")
+    listing = _git(
+        ["for-each-ref", "--sort=-committerdate", "--format=%(refname)",
+         "refs/heads", "refs/remotes"],
+        cwd=hdir,
+    )
+    refs = listing.splitlines() if listing else []
+    if len(refs) > MAX_REFS_SCANNED:
+        _warn(
+            "%d refs visible; scanning only the %d most recently committed — the other "
+            "%d are NOT checked for a colliding id"
+            % (len(refs), MAX_REFS_SCANNED, len(refs) - MAX_REFS_SCANNED)
+        )
+        refs = refs[:MAX_REFS_SCANNED]
+    max_n = 0
+    for ref in ["HEAD"] + refs:
+        text = _git(["show", "%s:%s" % (ref, rel)], cwd=hdir)
+        data = None
+        if text is not None:
+            try:
+                data = json.loads(text)
+            except ValueError:
+                data = None
+        if not isinstance(data, dict) or not isinstance(data.get("epics"), list):
+            _warn("%s: no readable %s on this ref — skipped" % (ref, rel))
+            continue
+        max_n = max(max_n, _epic_max_n(data, epic_id))
+    return max_n
+
+
+_FEATURE_ID_RE = re.compile(r"^(E[0-9]+)-F([0-9]+)$")
+
+
+def _write_all(fd, data):
+    """os.write every byte of `data` to `fd`; a short write loops, a zero-byte one raises."""
+    view = memoryview(data)
+    while view:
+        n = os.write(fd, view)
+        if not n:
+            raise OSError("short write: 0 of %d bytes written" % len(view))
+        view = view[n:]
+
+
+def _rewrite_in_place(path, data):
+    """Overwrite the EXISTING inode at `path` with `data` (no O_CREAT, no O_TRUNC), then
+    truncate to len(data): the new and old lengths differ (F99 -> F100), so the truncate
+    must follow the write."""
+    fd = os.open(path, os.O_WRONLY)
+    try:
+        _write_all(fd, data)
+        os.ftruncate(fd, len(data))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+class _RenumberFiles(object):
+    """The file moves a renumber carries: inbox brief and progress dir.
+
+    Planned in-lock (every refusal raises BEFORE anything moves), applied just before the
+    board replace, and undone on any exception raised in-process before the replace
+    completes. The undo is best-effort: a step that cannot be restored is reported on
+    stderr, and a process killed between the moves and the replace leaves the moves
+    applied under an unchanged board (re-run, or move back by hand). `progress/inbox/<old>.md` is
+    renamed to `<new>.md` as the SAME inode (like `mv`) and its frontmatter `feature:` line
+    rewritten in place, so ownership, mode and links survive; `progress/<old>/` is renamed.
+    """
+
+    def __init__(self, hdir, old_id, new_id):
+        self.root = os.path.realpath(hdir)
+        self.old_id, self.new_id = old_id, new_id
+        self.moves = []  # ("inbox"|"dir", src, dst, original bytes or None)
+        self.done = []
+        inbox = os.path.join("progress", "inbox")
+        self._plan_inbox(inbox)
+        self._plan_dir()
+
+    def _node(self, rel):
+        """Absolute path for `rel`, refusing any symlinked ancestor (fail closed)."""
+        parent = os.path.join(self.root, os.path.dirname(rel))
+        if os.path.realpath(parent) != parent:
+            raise ValueError(
+                "refusing to move through %s: it resolves elsewhere (symlinked parent)"
+                % os.path.dirname(rel)
+            )
+        return os.path.join(self.root, rel)
+
+    def _plan_inbox(self, inbox):
+        src = self._node(os.path.join(inbox, self.old_id + ".md"))
+        dst = self._node(os.path.join(inbox, self.new_id + ".md"))
+        if not os.path.lexists(src):
+            return
+        if os.path.islink(src) or not os.path.isfile(src):
+            raise ValueError("refusing: %s is not a regular file" % src)
+        if os.path.lexists(dst):
+            raise ValueError("refusing: %s already exists" % dst)
+        with open(src, "rb") as fh:
+            raw = fh.read()
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raise ValueError("refusing: %s is not valid UTF-8" % src)
+        lines = text.split("\n")
+        if not lines or lines[0].rstrip("\r") != "---":
+            raise ValueError("refusing: %s has no frontmatter block" % src)
+        end = None
+        for i in range(1, len(lines)):
+            if lines[i].rstrip("\r") == "---":
+                end = i
+                break
+        if end is None:
+            raise ValueError("refusing: %s frontmatter is not closed" % src)
+        hits = [i for i in range(1, end)
+                if re.match(r"^feature:[ \t]*%s[ \t]*\r?$" % re.escape(self.old_id),
+                            lines[i])]
+        if len(hits) != 1:
+            raise ValueError(
+                "refusing: %s frontmatter must carry exactly one `feature: %s` line"
+                % (src, self.old_id)
+            )
+        lines[hits[0]] = lines[hits[0]].replace(self.old_id, self.new_id, 1)
+        self.moves.append(("inbox", src, dst, raw, "\n".join(lines).encode("utf-8")))
+
+    def _plan_dir(self):
+        src = self._node(os.path.join("progress", self.old_id))
+        dst = self._node(os.path.join("progress", self.new_id))
+        if not os.path.lexists(src):
+            return
+        if os.path.islink(src) or not os.path.isdir(src):
+            raise ValueError("refusing: %s is not a real directory" % src)
+        if os.path.lexists(dst):
+            raise ValueError("refusing: %s already exists" % dst)
+        self.moves.append(("dir", src, dst, None, None))
+
+    def apply(self):
+        # No rollback of its own: run() calls rollback() on ANY failure between here and
+        # the board replace, so a second one here would be an unobservable duplicate.
+        for mv in self.moves:
+            kind, src, dst, raw, newraw = mv
+            if kind == "inbox":
+                # Moved like `mv`: the SAME inode is renamed, then rewritten in place, so
+                # uid, gid, mode, xattrs and hard links all survive (#4305624598). The
+                # planning guard proved dst free; re-check right before the rename so a
+                # brief that appeared since is never clobbered.
+                if os.path.lexists(dst):
+                    raise OSError("refusing: %s appeared before the move" % dst)
+                os.rename(src, dst)
+                self.done.append(mv)  # dst is now our inode; rollback writes it back
+                _rewrite_in_place(dst, newraw)
+            else:
+                # POSIX rename silently replaces an EMPTY dst directory: re-check right
+                # before it so a progress dir another session just created survives.
+                if os.path.lexists(dst):
+                    raise OSError("refusing: %s appeared before the move" % dst)
+                os.rename(src, dst)
+                self.done.append(mv)
+
+    def rollback(self):
+        for kind, src, dst, raw, _new in reversed(self.done):
+            try:
+                if kind == "inbox":
+                    # Reverse of apply: original bytes back onto the same inode, then
+                    # rename it home. Never clobber a src that reappeared meanwhile.
+                    _rewrite_in_place(dst, raw)
+                    if os.path.lexists(src):
+                        raise OSError("%s reappeared; the moved brief is still at %s"
+                                      % (src, dst))
+                    os.rename(dst, src)
+                else:
+                    if os.path.lexists(src):
+                        raise OSError("%s reappeared; the moved dir is still at %s"
+                                      % (src, dst))
+                    os.rename(dst, src)
+            except OSError as exc:
+                _warn("ROLLBACK FAILED for %s -> %s (%s) — restore it by hand"
+                      % (src, dst, exc))
+        self.done = []
+
+
+def _renumber_transform(args, hdir, ref_max, holder):
+    """Text transform for `renumber <old> <new>`: refuse on ANY doubt, else one rewrite."""
+    def transform_data(data):
+        om = _FEATURE_ID_RE.match(args.old_id)
+        nm = _FEATURE_ID_RE.match(args.new_id)
+        if not om or not nm:
+            raise ValueError("ids must look like E<nn>-F<nn>")
+        if om.group(1) != nm.group(1):
+            raise ValueError(
+                "%s and %s are in different epics — a renumber stays inside one epic"
+                % (args.old_id, args.new_id)
+            )
+        epic_id, old_n, new_n = om.group(1), int(om.group(2)), int(nm.group(2))
+        if args.new_id != "%s-F%02d" % (epic_id, new_n):
+            raise ValueError("%s is not in canonical form %s-F%02d"
+                             % (args.new_id, epic_id, new_n))
+        if args.index is not None and args.title_match is not None:
+            raise ValueError("--index and --title-match are mutually exclusive")
+        epics = [e for e in data.get("epics") or []
+                 if isinstance(e, dict) and e.get("id") == epic_id]
+        # A duplicated epic id is the validator's to refuse (on the output board).
+        if not epics:
+            raise ValueError("epic %s not found on the board" % epic_id)
+        epic = epics[0]
+        if new_n <= max(_epic_max_n(data, epic_id), ref_max):
+            raise ValueError(
+                "%s is not above the max F## for %s over the working board and every "
+                "visible ref (%d) — pick F%02d or higher"
+                % (args.new_id, epic_id,
+                   max(_epic_max_n(data, epic_id), ref_max),
+                   max(_epic_max_n(data, epic_id), ref_max) + 1)
+            )
+        rows = [(i, ft) for i, ft in enumerate(epic.get("features") or [])
+                if isinstance(ft, dict) and ft.get("id") == args.old_id]
+        if not rows:
+            raise ValueError("%s not found in epic %s" % (args.old_id, epic_id))
+        dup = len(rows) > 1
+        if args.index is not None:
+            if not 0 <= args.index < len(rows):
+                raise ValueError("--index %d out of range 0..%d"
+                                 % (args.index, len(rows) - 1))
+            picked = [rows[args.index]]
+        elif args.title_match is not None:
+            picked = [r for r in rows if r[1].get("title") == args.title_match]
+        elif not dup:
+            picked = rows
+        else:
+            raise ValueError(
+                "%s appears %d times — name the row to renumber with --title-match "
+                "'<exact title>' or --index <n>: %s"
+                % (args.old_id, len(rows),
+                   "; ".join("--index %d = %r" % (k, r[1].get("title"))
+                             for k, r in enumerate(rows)))
+            )
+        if len(picked) != 1:
+            raise ValueError("--title-match selects %d rows; it must select exactly one"
+                             % len(picked))
+        ft = picked[0][1]
+        if ft.get("status") == "done":
+            raise ValueError("%s is done — a landed row is never renumbered" % args.old_id)
+        if ft.get("sdd") is not False:
+            raise ValueError(
+                "%s is not an sdd: false fix row — renumber only recovers un-landed "
+                "fix rows" % args.old_id
+            )
+        if ft.get("slices"):
+            raise ValueError(
+                "%s carries slices — their ids are prefixed by the old id; renumber "
+                "never rewrites them" % args.old_id
+            )
+        if "parked" in ft:
+            raise ValueError(
+                "%s is parked (await-merge/owner gate) — its park text names the old "
+                "id; unpark it first" % args.old_id
+            )
+        if "landed" in ft:
+            raise ValueError("%s carries a landed record — never renumbered" % args.old_id)
+        for ep in data.get("epics") or []:
+            for other in (ep.get("features") or []) if isinstance(ep, dict) else []:
+                if (isinstance(other, dict) and other is not ft
+                        and args.old_id in (other.get("depends_on") or [])):
+                    raise ValueError(
+                        "%s depends_on %s — renumbering would leave that edge pointing "
+                        "at the wrong row; repoint it first"
+                        % (other.get("id"), args.old_id)
+                    )
+        spec_path = ft.get("spec_path")
+        sm = re.match(r"^(.*/)F([0-9]+)(-[^/]*/?)$", spec_path or "")
+        if not sm or int(sm.group(2)) != old_n:
+            raise ValueError(
+                "spec_path %r does not carry the F%02d- slug prefix — refusing to guess"
+                % (spec_path, old_n)
+            )
+        if os.path.lexists(os.path.join(hdir, spec_path)):
+            raise ValueError(
+                "%s exists on disk — renumber moves no spec files; only a fix row whose "
+                "spec_path directory was never created is eligible" % spec_path
+            )
+        if dup:
+            sys.stderr.write(
+                "tasks-lock: warning: %s was duplicated — the board row is renumbered "
+                "but progress/inbox/%s.md and progress/%s/ are NOT moved (which "
+                "session owns them cannot be told); move them by hand\n"
+                % (args.old_id, args.old_id, args.old_id)
+            )
+        else:
+            holder["fx"] = _RenumberFiles(hdir, args.old_id, args.new_id)
+        ft["id"] = args.new_id
+        ft["spec_path"] = "%sF%02d%s" % (sm.group(1), new_n, sm.group(3))
+        return data
+
+    return _mutator_text_transform(transform_data)
 
 
 def main(argv):
@@ -2036,6 +2399,24 @@ def main(argv):
         "--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS
     )
 
+    # renumber (#253) — the documented way out of a duplicated fix id.
+    p_ren = sub.add_parser(
+        "renumber",
+        help="renumber one UN-LANDED, unsliced sdd:false fix row to a free, higher "
+             "F## in the same epic",
+    )
+    p_ren.add_argument("old_id")
+    p_ren.add_argument("new_id")
+    p_ren.add_argument("--title-match", default=None,
+                       help="when old_id is duplicated on the board, pick the row whose "
+                            "title EQUALS this (exact, case-sensitive)")
+    p_ren.add_argument("--index", type=int, default=None,
+                       help="when old_id is duplicated, pick the n-th (0-based, board "
+                            "order) row carrying it; use when titles are identical")
+    p_ren.add_argument(
+        "--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS
+    )
+
     # await-merge (E99-F130) — the approved-awaiting-merge hold as one guarded write.
     # An approved feature left at `in-review` is NOT inert: the selector hands it back
     # to a Reviewer every session. The owner-gate workaround held it but cost two
@@ -2089,6 +2470,9 @@ def main(argv):
         # Resolved here, outside the lock, for the same reason set-status does it: the
         # closure must not run `git rev-parse` probes while holding the board lock.
         hdir = _harness_dir()
+        # Offline scan of every board copy git can show, ALSO outside the lock (up to
+        # MAX_REFS_SCANNED `git show` calls must not extend the lock hold).
+        ref_max = _visible_ref_max(hdir, args.epic)
 
         def _seed(data):
             epic = None
@@ -2104,12 +2488,7 @@ def main(argv):
             feats = epic.setdefault("features", [])
             # Next-sequential strictly above the max — a gap left by a removed fix
             # is never refilled (R8).
-            max_n = 0
-            for ft in feats:
-                m = re.match(r"^%s-F(\d+)$" % re.escape(args.epic),
-                             str(ft.get("id", "")) if isinstance(ft, dict) else "")
-                if m:
-                    max_n = max(max_n, int(m.group(1)))
+            max_n = max(_epic_max_n(data, args.epic), ref_max)
             new_id = "%s-F%02d" % (args.epic, max_n + 1)
             # ONE sanitizer for both slug sources. A custom --slug interpolated verbatim
             # is a path component: `--slug '../../tmp/owned'` would persist a spec_path
@@ -2159,6 +2538,12 @@ def main(argv):
             return data
 
         transform = _mutator_text_transform(_seed)
+    elif args.cmd == "renumber":
+        hdir = _harness_dir()
+        _om = _FEATURE_ID_RE.match(args.old_id)
+        ref_max = _visible_ref_max(hdir, _om.group(1)) if _om else 0
+        holder = {}
+        transform = _renumber_transform(args, hdir, ref_max, holder)
     elif args.cmd == "await-merge":
         def _await(data):
             for ep in data.get("epics") or []:
@@ -2200,6 +2585,9 @@ def main(argv):
         if args.cmd == "set-status":
             run(transform, args.timeout,
                 sync_id=args.id, sync_status=args.status)
+        elif args.cmd == "renumber":
+            run(transform, args.timeout, get_effects=lambda: holder.get("fx"))
+            print(args.new_id)
         else:
             run(transform, args.timeout)
         if args.cmd == "add-feature":

@@ -4,6 +4,32 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.96.2] — 2026-10-17
+
+### Fixed — concurrent sessions could mint the same fix id (E99-F174, #253)
+- `tasks-lock.py add-feature` now allocates strictly above the max `F##` for the epic across the
+  working board, HEAD and the board on every local branch and remote-tracking ref
+  (`git for-each-ref` + `git show <ref>:<board path>`, the path taken relative to the repo root so
+  both the source and the installed `.harness/` layout work). Offline and read-only: it never
+  fetches. A ref whose board is missing or unparsable is skipped with a stderr note; the local
+  board must still parse, and outside a git repo it is local-only as before. At most
+  `MAX_REFS_SCANNED` (200) refs are read, newest commit first; the cut is reported on stderr. This
+  narrows the race — a branch nobody has fetched stays invisible.
+- `validate-board.py` rejects two features, or two epics, with the same `id` anywhere on the
+  board (both validation paths, and in-process so `tasks-lock.py` refuses to write one), so
+  `init.sh` hard-fails on a bad union instead of passing it.
+- New `tasks-lock.py renumber <old-id> <new-id> [--title-match <title> | --index <n>]`: the
+  documented recovery. Allowed only for a row that is not `done`, has no `landed` block, has no
+  inbound `depends_on`, and whose `spec_path` directory does not exist; `<new-id>` must be
+  canonical, in the same epic and above the epic's max over the working board and every visible
+  ref. It rewrites `id` and the `spec_path` slug prefix and moves `progress/inbox/<old>.md`
+  (updating `feature:`) and `progress/<old>/`, in one guarded write that rolls the moves back if
+  the board write fails. When the old id is duplicated it needs `--title-match` (exact title) or
+  `--index`; the board row is renumbered but the brief and progress dir are NOT moved then.
+- `agents/fixer.md` gains "Duplicate fix id": the session whose board lands second renumbers its
+  OWN un-landed row before merging and re-runs `init.sh`; "never renumber" still holds for done or
+  landed rows. Mirrored in `store/local.md`.
+
 ## [0.96.1] — 2026-10-17
 
 ### Fixed — `/sdd-pr-loop` terminal paths (E99-F173, #259, #256)

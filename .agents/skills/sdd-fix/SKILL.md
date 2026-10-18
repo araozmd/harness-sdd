@@ -30,7 +30,7 @@ The free-text fix description is in `$ARGUMENTS`. If `$ARGUMENTS` is **empty**, 
    `maintenance`, title `"Maintenance (hotfixes & minor fixes)"`, `status: "planned"`,
    `features: []`, and write `specs/epics/E99-maintenance/epic.md` (title +
    one-paragraph brief only — no feature spec). If **present**, reuse that same epic **by
-   id `E99`** — never create a second maintenance epic and never renumber its existing fixes.
+   id `E99`** — never create a second maintenance epic and never renumber its existing fixes (the one exception: renumber your OWN un-landed row after a duplicate id, per `agents/fixer.md` "Duplicate fix id").
 5. **Seed** one fix: append a feature to `E99`'s `features` array with `sdd: false`,
    `status: "pending"`, a one-line `title`, a `spec_path`
    (`specs/epics/E99-maintenance/F<NN>-<slug>/`, **directory not created**), and an `id`

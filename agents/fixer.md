@@ -91,7 +91,8 @@ only — **no feature spec**). The slug is `maintenance`.
 **reuse that same epic**, re-identified **by id `E99`** — *not* by a marker field (a marker
 would be a schema change) and *not* by title (titles are mutable/typo-prone). You must
 **never create a second** maintenance epic and **never renumber or reorder** its existing
-fixes (append-only). Re-running `/sdd-fix` is idempotent at the epic level: it never forks
+fixes (append-only; the one exception is an un-landed row that collided with another
+session's — see "Duplicate fix id"). Re-running `/sdd-fix` is idempotent at the epic level: it never forks
 a second bucket.
 
 **Never `draft`.** The maintenance epic's status is a **selectable, non-`draft`** value
@@ -124,7 +125,7 @@ Read the maintenance epic's current `features` first. Then **append** one featur
   refilled; always allocate **above** the current maximum (next-sequential, not
   fill-the-gap).
 - **Append** the new fix to the epic's `features` array; existing fixes are **never**
-  reordered or renumbered.
+  reordered or renumbered (except the explicit "Duplicate fix id" exception below).
 
 ### Autonomous by default, `--gated` opt-out (R9)
 
@@ -236,12 +237,50 @@ depends on the fix's `autonomous` flag:
 Either way you still write **no production code** yourself (the Builder does) and you
 create **no spec** and never spawn the Architect.
 
+## Duplicate fix id — renumber your own un-landed row (#253)
+
+`add-feature` allocates above the max `F##` it can see: the working board, HEAD, and the
+board on every local and remote-tracking ref (read offline — it never fetches). It cannot
+see a fix another session seeded on a board branch nobody has fetched, so two concurrent
+sessions can still mint the same `E99-F##`. `validate-board.py` (and so `init.sh`)
+rejects two features or two epics with one `id`; the collision is loud, never silent.
+
+When it happens, **the session whose board lands SECOND renumbers its OWN un-landed row
+before merging**, then re-runs `init.sh`:
+
+```sh
+# installed layout; use tools/tasks-lock.py in this source repository
+python3 .harness/tools/tasks-lock.py renumber <old-id> <new-id>
+```
+
+`<new-id>` must be in the same epic, canonical (`E99-F07`), and strictly above that epic's
+max over the same visible refs. The row must be an `sdd: false` fix row with no `slices`, must not
+be `done` and must carry no `landed` block; no other row may `depends_on` it, and its `spec_path` directory must not exist.
+`renumber` rewrites the row's `id` and `spec_path` slug prefix, moves
+`progress/inbox/<old>.md` to `<new>.md` (updating its `feature:` frontmatter) and
+`progress/<old>/`, under the board lock. The file moves are undone, best-effort and with a
+loud stderr report of anything that could not be restored, if the board write raises; a
+process killed between the moves and the board write leaves them moved, so re-run or move
+them back by hand. It also refuses a parked row (unpark first). It refuses on any doubt
+and changes nothing.
+
+If the two rows were already unioned into one board, `<old-id>` names both. Name yours:
+`renumber <old-id> <new-id> --title-match '<your row's exact title>'` (exact,
+case-sensitive) or `--index <n>` (0-based, board order; the refusal lists each candidate).
+In that case the board row is renumbered but the brief and progress dir are **not** moved
+(which session owns them cannot be told) — move them by hand.
+
+**Never** renumber a `done` or landed row, and never the other session's row: that is the
+exception to "never renumber" and it stops here.
+
 ## What you NEVER do (guardrails)
 
 - **Never** create a second maintenance epic, and **never** seed or touch any epic other
   than the reserved `E99`.
 - **Never** seed the maintenance epic (or any epic) as `draft`.
-- **Never** renumber, reorder, or reuse an existing fix `F##`.
+- **Never** renumber, reorder, or reuse an existing fix `F##` — the ONLY exception is
+  `tasks-lock.py renumber` on your OWN un-landed row, per "Duplicate fix id" above. A
+  `done` row, or one with a `landed` block, is never renumbered.
 - **Never** write a feature `.spec/.plan/.tasks/.tests`, write EARS/a plan, create a
   `spec_path` directory, or spawn the Architect — brief-only, never a spec.
 - **Never** add a new Orchestrator routing rule, a new TaskStore status, or a schema
