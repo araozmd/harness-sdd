@@ -1260,7 +1260,13 @@
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F174-concurrent-fix-id-allocation/"
+          "spec_path": "specs/epics/E99-maintenance/F174-concurrent-fix-id-allocation/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (276)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E99-F174 done --evidence <merge-ref>`",
+            "pr": "276"
+          }
         }
       ]
     },
