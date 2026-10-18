@@ -258,8 +258,11 @@ max over the same visible refs. The row must not be `done` and must carry no `la
 block; no other row may `depends_on` it, and its `spec_path` directory must not exist.
 `renumber` rewrites the row's `id` and `spec_path` slug prefix, moves
 `progress/inbox/<old>.md` to `<new>.md` (updating its `feature:` frontmatter) and
-`progress/<old>/`, in one guarded write that rolls the file moves back if the board write
-fails. It refuses on any doubt and changes nothing.
+`progress/<old>/`, under the board lock. The file moves are undone, best-effort and with a
+loud stderr report of anything that could not be restored, if the board write raises; a
+process killed between the moves and the board write leaves them moved, so re-run or move
+them back by hand. It also refuses a parked row (unpark first). It refuses on any doubt
+and changes nothing.
 
 If the two rows were already unioned into one board, `<old-id>` names both. Name yours:
 `renumber <old-id> <new-id> --title-match '<your row's exact title>'` (exact,

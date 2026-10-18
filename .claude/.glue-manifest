@@ -1,6 +1,6 @@
 2578215388 6865 .agents/skills/sdd-drill/SKILL.md
 2056805182 43 .agents/skills/sdd-drill/agents/openai.yaml
-2548706681 4194 .agents/skills/sdd-fix/SKILL.md
+4290701547 4310 .agents/skills/sdd-fix/SKILL.md
 2056805182 43 .agents/skills/sdd-fix/agents/openai.yaml
 250156997 2755 .agents/skills/sdd-fix-parallel/SKILL.md
 2056805182 43 .agents/skills/sdd-fix-parallel/agents/openai.yaml
@@ -26,7 +26,7 @@
 2394794318 563 .claude/agents/scout.md
 3360195966 6235 .claude/commands/sdd-drill.md
 2137710744 1391 .claude/commands/sdd-fix-parallel.md
-1273071214 3574 .claude/commands/sdd-fix.md
+1498612730 3690 .claude/commands/sdd-fix.md
 2869697306 3415 .claude/commands/sdd-new.md
 566138031 3142 .claude/commands/sdd-next.md
 10195721 13798 .claude/commands/sdd-plan.md
@@ -44,7 +44,7 @@
 959232984 63 .escalation-arming
 1921330608 669 .opencode/agent/pr-fixer.md
 3360195966 6235 .opencode/command/sdd-drill.md
-1273071214 3574 .opencode/command/sdd-fix.md
+1498612730 3690 .opencode/command/sdd-fix.md
 2869697306 3415 .opencode/command/sdd-new.md
 566138031 3142 .opencode/command/sdd-next.md
 10195721 13798 .opencode/command/sdd-plan.md
