@@ -1320,7 +1320,8 @@
         {
           "id": "E99-F178",
           "title": "OpenCode 2.x: reject '#' in opencode model pins; record 2.x host markers",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "3e2062f29c6fae146a9411a7e2cbc92530db953c", "ref": "3e2062f29c6fae146a9411a7e2cbc92530db953c", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
