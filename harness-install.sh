@@ -1739,7 +1739,12 @@ AGENT_KEYS="claude codex opencode antigravity pi"
 #               paths; kept in the row for 1.x). OPENCODE_TERMINAL qualifies under the
 #               rules above: the front-end injects it (Shell.create / Pty.create), it is
 #               session state rather than config or credentials, and a plain shell lacks
-#               it; it is the only marker a 2.x `!` shell carries.
+#               it; it is the only marker a 2.x `!` shell carries. Unlike CODEX_CI (a mode
+#               flag, rejected), opencode sets it on every shell and pty it creates, in
+#               every mode. Trade-off: claude/codex/pi launched from an opencode 2.x `!`
+#               shell or terminal inherits OPENCODE_TERMINAL=1, so the host now resolves
+#               as ambiguous (undetected + one warning), where it used to resolve to the
+#               inner tool; HARNESS_HOST_AGENT=<key> resolves it.
 #   pi          pi 1.2.0 — PI_CODING_AGENT=true, observed 2026-10-13 in a shell spawned by
 #               the session's bash tool under `pi -p` (`comm -13` against a plain login
 #               shell); pi's docs/environment-variables.md states pi sets it for every

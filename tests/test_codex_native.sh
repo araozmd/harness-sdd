@@ -9,7 +9,7 @@ roles={'orchestrator','architect','builder','builder-heavy','reviewer','scout','
 cmds={'sdd-new','sdd-plan','sdd-drill','sdd-next','sdd-fix','sdd-fix-parallel'}
 with tempfile.TemporaryDirectory(prefix='harness-native-') as temp:
     root=pathlib.Path(temp); env=os.environ.copy()
-    for k in ('HARNESS_AGENTS','HARNESS_HOST_AGENT','HARNESS_PR_LOOP_ENABLED','CLAUDECODE','CLAUDE_CODE_ENTRYPOINT','CODEX_THREAD_ID','OPENCODE','OPENCODE_PID','PI_CODING_AGENT','PI_SESSION_ID','AI_AGENT'): env.pop(k,None)
+    for k in ('HARNESS_AGENTS','HARNESS_HOST_AGENT','HARNESS_PR_LOOP_ENABLED','CLAUDECODE','CLAUDE_CODE_ENTRYPOINT','CODEX_THREAD_ID','OPENCODE','OPENCODE_PID','OPENCODE_SESSION_ID','OPENCODE_TERMINAL','PI_CODING_AGENT','PI_SESSION_ID','AI_AGENT'): env.pop(k,None)
     env.update(HOME=str(root/'home'),CODEX_HOME=str(root/'codex'),HARNESS_PI_DEPS='skip')
     def run(source,p,*args,ok=True,extra=None):
         e=env.copy();e.update(extra or {})
