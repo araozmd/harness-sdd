@@ -9,10 +9,11 @@ with tempfile.TemporaryDirectory(prefix='harness-retirement-') as temp:
     root=pathlib.Path(temp)
     # Hostile HOST git config, always on, so the fixture-repo isolation below is mutation-pinned:
     # dropping env=genv from `git commit`, GIT_CONFIG_GLOBAL=devnull, GIT_CONFIG_NOSYSTEM, env=genv on
-    # `git init` or GIT_TEMPLATE_DIR from genv each fails this suite. NOT pinned (defensive only): passing
+    # `git init`, `git add` (hostile core.excludesFile `*`) or GIT_TEMPLATE_DIR from genv each fails this suite. NOT pinned (defensive only): passing
     # genv to init.sh, which runs read-only git.
     (root/'hooks').mkdir(); (root/'hooks/pre-commit').write_text('#!/bin/sh\nexit 1\n'); (root/'hooks/pre-commit').chmod(0o755)
-    (root/'hostile.gitconfig').write_text('[commit]\n gpgsign = true\n[gpg]\n program = /bin/false\n[core]\n hooksPath = %s\n' % (root/'hooks'))
+    (root/'hostile.gitconfig').write_text('[commit]\n gpgsign = true\n[gpg]\n program = /bin/false\n[core]\n hooksPath = %s\n excludesFile = %s\n' % (root/'hooks',root/'hostile.excludes'))
+    (root/'hostile.excludes').write_text('*\n')
     os.environ['GIT_CONFIG_GLOBAL']=str(root/'hostile.gitconfig'); os.environ['GIT_CONFIG_SYSTEM']=str(root/'hostile.gitconfig')
     (root/'tmpl/hooks').mkdir(parents=True); (root/'tmpl/hooks/pre-commit').write_text('#!/bin/sh\nexit 1\n'); (root/'tmpl/hooks/pre-commit').chmod(0o755)
     os.environ['GIT_TEMPLATE_DIR']=str(root/'tmpl')
