@@ -1176,8 +1176,15 @@ installer prints one advisory line naming the exact `pin.` key to set. It is the
 key that is omitted, not the role artifact: selecting Codex registers all seven
 standard `.codex/agents/*.toml`, plus gated `pr-fixer`, regardless of any pin (see "Where the values land" below).
 
-- `opencode` **must** be `provider/model`. A value without a `/` would abort your OpenCode
-  runs, so it is warned about and dropped.
+- `opencode` **must** be `provider/model`, matching OpenCode 2.x's own rule
+  `^[^/#]+/[^#]+$`: a non-empty provider, a `/`, a non-empty model (which may itself contain
+  `/`), and no `#` anywhere (2.x reads `#` as a variant separator). A value without a `/`
+  would abort OpenCode 1.x runs, and 2.x silently drops a `model` that fails the rule (only a
+  log diagnostic), so the pin would look live and do nothing; either way it is warned about
+  and dropped, and no `model` key is written. In practice `/m`, `p/` and `/` are what you can
+  hit: a `#` in `harness.config.yaml` starts a comment (see the config-reader quirk under
+  "pi"), so `a/b#c` is read as `a/b` before the check runs, and the `#` clause is
+  defence in depth.
 - `codex` **must** be a bare model id; the provider comes from your `model_provider`.
 - A pin of `"inherit"` is a **tier name, not a model id**. It is warned about and dropped
   on every front-end, stamping nothing — exactly like the `inherit` tier. The literal

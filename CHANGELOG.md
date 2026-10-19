@@ -4,6 +4,20 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.97.1] — 2026-10-19
+
+### Fixed — OpenCode 2.x: pin guard matches 2.x's rule; 2.x host markers recorded (E99-F178)
+- The `models.pin.opencode.<tier>` guard now mirrors OpenCode 2.x's own acceptance rule
+  `^[^/#]+/[^#]+$` instead of `*/*`, so `/m`, `p/` and `/` are warned about once and stamp no
+  `model` key (2.x would have dropped them silently). The warning names `#`. A `#` in a config
+  pin is unreachable (the config reader strips it as a comment), so that clause is defence in
+  depth, pinned by a direct unit table rather than an end-to-end row. Valid pins, including
+  multi-slash ids, are unchanged.
+- `HOST_MARKERS`: the opencode row gains `OPENCODE_SESSION_ID` and `OPENCODE_TERMINAL`, with
+  the 2.0.32 provenance (agent shell tool and `!` user shell, observed against an isolated
+  `opencode serve` with a local stub model). `OPENCODE_PID` stays for 1.x. `OPENCODE_TERMINAL`
+  is the only marker a 2.x `!` shell carries, so `!sh harness-install.sh` is now detected.
+
 ## [0.97.0] — 2026-10-18
 
 ### Added — OpenCode 2.x compatibility, a daemon-free 2.x live probe, a 2.x-safe model helper (E31-F03)

@@ -257,6 +257,65 @@ test_opencode_pin_format_guard() {
   return 0
 }
 
+# ── E99-F178: the opencode pin guard mirrors OpenCode 2.x's `^[^/#]+/[^#]+$` ─────
+# 2.x SILENTLY drops a `model` that does not match; a looser guard stamps a pin the
+# operator believes is live. REACHABLE rejected shapes (`/m`, `p/`, `/`) go end to end.
+# `#` is NOT reachable from config: `_cfg_models_value` strips `#...` as a comment, so
+# `a/b#c` reads as `a/b` (asserted below, so nobody mistakes the unit rows for e2e).
+test_opencode_pin_2x_shape_e2e() {
+  _i=0
+  for _bad in "/m" "p/" "/"; do
+    _i=$((_i + 1))
+    _t="$(mk f178-bad$_i)"; run "$_t" opencode
+    set_tier "$_t" builder standard
+    set_pin "$_t" opencode standard "$_bad"
+    _e="$(run_err "$_t" opencode)"
+    printf '%s\n' "$_e" | grep -q 'provider/model' \
+      || fail "E99-F178: pin '$_bad' was not warned about"
+    printf '%s\n' "$_e" | grep -qF "'#'" \
+      || fail "E99-F178: the warning for '$_bad' does not name '#'"
+    grep -q '"model"' "$_t/opencode.json" \
+      && fail "E99-F178: rejected pin '$_bad' stamped a model key"
+  done
+  # Controls: still accepted, stamped verbatim (a model id may itself contain '/').
+  _t="$(mk f178-ok)"; run "$_t" opencode
+  set_tier "$_t" builder standard
+  set_pin "$_t" opencode standard "anthropic/claude-x"
+  _e="$(run_err "$_t" opencode)"
+  printf '%s\n' "$_e" | grep -q 'provider/model' && fail "E99-F178: a valid pin was warned about"
+  grep -q '"builder":.*"model": "anthropic/claude-x"' "$_t/opencode.json" \
+    || fail "E99-F178: the valid control pin was not stamped"
+  _t="$(mk f178-ok2)"; run "$_t" opencode
+  set_tier "$_t" builder standard
+  set_pin "$_t" opencode standard "openrouter/anthropic/claude-x"
+  run "$_t" opencode
+  grep -q '"model": "openrouter/anthropic/claude-x"' "$_t/opencode.json" \
+    || fail "E99-F178: a multi-slash model id (valid under the 2.x regex) was not stamped"
+  # Reachability: a '#' in the config is a comment, so 'a/b#c' arrives as the valid 'a/b'.
+  _t="$(mk f178-hash)"; run "$_t" opencode
+  set_tier "$_t" builder standard
+  set_pin "$_t" opencode standard "a/b#c"
+  run "$_t" opencode
+  grep -q '"model": "a/b"' "$_t/opencode.json" \
+    || fail "E99-F178: a '#' in a config pin no longer reads as a comment (reachability premise changed)"
+  grep -q '#' "$_t/opencode.json" && fail "E99-F178: a '#' reached opencode.json"
+  return 0
+}
+
+# The `#` clauses are defence in depth (unreachable from config, see above), so they are
+# pinned DIRECTLY: the function body is extracted from the installer and run in isolation.
+test_opencode_pin_valid_unit() {
+  awk '/^opencode_pin_valid\(\) \{/{k=1} k{print} k&&/^\}/{exit}' "$SRC/harness-install.sh" > "$T/opv.sh"
+  [ -s "$T/opv.sh" ] || fail "E99-F178: opencode_pin_valid not found in harness-install.sh"
+  for _v in "anthropic/claude-x" "p/m/x" "a//" "a/b:c" "p/ m"; do
+    ( . "$T/opv.sh"; opencode_pin_valid "$_v" ) || fail "E99-F178: valid pin '$_v' was rejected"
+  done
+  for _v in "a/b#c" "a#x/b" "#/b" "a/#" "a/b#" "/m" "p/" "/" "" "abc" "#"; do
+    ( . "$T/opv.sh"; opencode_pin_valid "$_v" ) && fail "E99-F178: invalid pin '$_v' was accepted"
+  done
+  return 0
+}
+
 # ── E99-F159: `frontier` resolves to the floating `fable` alias on claude ────────
 test_frontier_tier_claude_alias() {
   _t="$(mk f159-alias)"; run "$_t" claude
@@ -1439,6 +1498,10 @@ test_unknown_tier_warns_and_inherits
 pass "unknown tier warns, resolves as inherit, exits 0 (R9)"
 test_opencode_pin_format_guard
 pass "an opencode pin without '/' warns and never reaches opencode.json (R10)"
+test_opencode_pin_2x_shape_e2e
+pass "E99-F178: opencode pins '/m', 'p/', '/' are rejected naming '#'; valid pins stamp; '#' in config is a comment"
+test_opencode_pin_valid_unit
+pass "E99-F178: opencode_pin_valid mirrors ^[^/#]+/[^#]+\$ (including the defence-in-depth '#' shapes)"
 test_frontier_tier_claude_alias
 pass "E99-F159: the frontier tier resolves to the floating fable alias on claude"
 test_frontier_unpinned_codex_opencode_omits

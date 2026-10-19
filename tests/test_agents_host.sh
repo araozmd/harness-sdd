@@ -235,6 +235,33 @@ test_host_marker_rows_documented() {
   return 0
 }
 
+# ── E99-F178 — every opencode marker VARIABLE detects opencode on its own ─────
+# 1.x sets OPENCODE + OPENCODE_PID; 2.0.32 sets OPENCODE + OPENCODE_SESSION_ID in the agent
+# shell tool and ONLY OPENCODE_TERMINAL in the `!` user shell (no OPENCODE at all there).
+# One row per variable, so deleting any one from the shipped row leaves that case undetected.
+# Each is also paired with CLAUDECODE=1: a new marker must stay a TIE (undetected), never
+# a silent win for either front-end (R5).
+test_host_opencode_markers() {
+  _x="$(sandbox ocmarkers)"; _t="$_x/t"; mkdir -p "$_t"
+  for _v in OPENCODE OPENCODE_PID OPENCODE_SESSION_ID OPENCODE_TERMINAL; do
+    _got="$(host_of "$_x" "$_t" "$_v=1")"
+    [ "$_got" = "opencode" ] \
+      || fail "E99-F178: $_v=1 alone did not resolve the host to 'opencode' (got '$_got')"
+    _got="$(host_of "$_x" "$_t" "$_v=")"
+    [ -z "$_got" ] || fail "E99-F178: an empty $_v counted as present (got '$_got')"
+    _got="$(host_of "$_x" "$_t" CLAUDECODE=1 "$_v=1")"
+    [ -z "$_got" ] \
+      || fail "E99-F178: CLAUDECODE=1 with $_v=1 must be ambiguous/undetected (got '$_got')"
+  done
+  # The provenance entry records the 2.0.32 observation (version + the date it was made).
+  _entry="$(prov_entry opencode)"
+  printf '%s\n' "$_entry" | grep -q '2\.0\.32' \
+    || fail "E99-F178: the opencode provenance entry does not record the 2.0.32 observation"
+  printf '%s\n' "$_entry" | tr '\n' ' ' | grep -qE 'OPENCODE_TERMINAL qualifies[^.]{0,200}(injects|session)' \
+    || fail "E99-F178: the opencode provenance entry does not record why OPENCODE_TERMINAL qualifies"
+  return 0
+}
+
 # ── R9 — HARNESS_HOST_AGENT wins over the marker table ────────────────────────
 test_host_env_declaration_wins() {
   _x="$(sandbox decl)"; _t="$_x/t"; mkdir -p "$_t"
@@ -1094,6 +1121,8 @@ test_host_forbidden_markers
 pass "no ambient config/credential variable acts as a marker, in the table or at runtime (R6)"
 test_host_marker_rows_documented
 pass "every shipped marker VARIABLE is recorded, with a CLI version, in its own key's provenance entry (R8)"
+test_host_opencode_markers
+pass "each opencode marker (1.x and 2.0.32) resolves opencode alone and ties with CLAUDECODE (E99-F178)"
 test_host_env_declaration_wins
 test_host_env_declaration_invalid_warns
 pass "HARNESS_HOST_AGENT declares the host; an invalid value warns and continues (R9, R10)"

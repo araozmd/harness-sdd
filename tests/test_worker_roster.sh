@@ -580,7 +580,7 @@ test_R7_each_tag_tracks_its_evidence() {
   _probe_src="$T/evidence-source"
   mkdir -p "$_probe_src"
   cp -R "$SRC/." "$_probe_src/"
-  sed -e '/^opencode OPENCODE OPENCODE_PID$/d' -e 's/^opencode opencode non-interactive$/opencode opencode/' \
+  sed -e '/^opencode OPENCODE OPENCODE_PID OPENCODE_SESSION_ID OPENCODE_TERMINAL$/d' -e 's/^opencode opencode non-interactive$/opencode opencode/' \
     "$_probe_src/harness-install.sh" > "$_probe_src/harness-install.sh.tmp"
   mv "$_probe_src/harness-install.sh.tmp" "$_probe_src/harness-install.sh"
   SRC="$_probe_src"
