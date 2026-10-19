@@ -7,11 +7,15 @@ import hashlib, os, pathlib, re, shutil, subprocess, sys, tempfile
 src=pathlib.Path(sys.argv[1]); fixture=src/'tests/fixtures/frontend-v0.78.1'
 with tempfile.TemporaryDirectory(prefix='harness-retirement-') as temp:
     root=pathlib.Path(temp)
-    # Hostile HOST git config, always on: a global gpg-signing/hooks config must not reach the
-    # fixture repo (proof for the genv isolation below; mutating genv away fails this suite).
+    # Hostile HOST git config, always on, so the fixture-repo isolation below is mutation-pinned:
+    # dropping env=genv from `git commit`, GIT_CONFIG_GLOBAL=devnull, GIT_CONFIG_NOSYSTEM, env=genv on
+    # `git init` or GIT_TEMPLATE_DIR from genv each fails this suite. NOT pinned (defensive only): passing
+    # genv to init.sh, which runs read-only git.
     (root/'hooks').mkdir(); (root/'hooks/pre-commit').write_text('#!/bin/sh\nexit 1\n'); (root/'hooks/pre-commit').chmod(0o755)
     (root/'hostile.gitconfig').write_text('[commit]\n gpgsign = true\n[gpg]\n program = /bin/false\n[core]\n hooksPath = %s\n' % (root/'hooks'))
-    os.environ['GIT_CONFIG_GLOBAL']=str(root/'hostile.gitconfig')
+    os.environ['GIT_CONFIG_GLOBAL']=str(root/'hostile.gitconfig'); os.environ['GIT_CONFIG_SYSTEM']=str(root/'hostile.gitconfig')
+    (root/'tmpl/hooks').mkdir(parents=True); (root/'tmpl/hooks/pre-commit').write_text('#!/bin/sh\nexit 1\n'); (root/'tmpl/hooks/pre-commit').chmod(0o755)
+    os.environ['GIT_TEMPLATE_DIR']=str(root/'tmpl')
     env=os.environ.copy()
     for key in ('HARNESS_AGENTS','HARNESS_HOST_AGENT','HARNESS_PR_LOOP_ENABLED','CLAUDECODE','CLAUDE_CODE_ENTRYPOINT','CODEX_THREAD_ID','OPENCODE','OPENCODE_PID','ANTIGRAVITY_AGENT','ANTIGRAVITY_CONVERSATION_ID','PI_CODING_AGENT','PI_SESSION_ID','AI_AGENT'):
         env.pop(key,None)
@@ -85,7 +89,8 @@ with tempfile.TemporaryDirectory(prefix='harness-retirement-') as temp:
     # The fixture repo is hermetic: the host's git config (commit.gpgsign, core.hooksPath,
     # init.templateDir, core.excludesFile) and ambient agent env must not reach git or init.sh.
     # Under host config `commit.gpgsign=true` or a global `core.hooksPath` this commit dies
-    # with CalledProcessError, which reads as an installer flake (E99-F177).
+    # with CalledProcessError. Host-config failures are deterministic, so this is a hermeticity
+    # hardening, not a demonstrated cause of the field flake (E99-F177).
     genv=env.copy(); genv.update(GIT_CONFIG_GLOBAL=os.devnull,GIT_CONFIG_NOSYSTEM='1',GIT_TEMPLATE_DIR='')
     subprocess.run(['git','init','-q',str(p)],check=True,env=genv)
     subprocess.run(['git','-C',str(p),'add','.'],check=True,env=genv)
