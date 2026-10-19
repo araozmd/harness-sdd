@@ -6,7 +6,13 @@ python3 - "$SRC" <<'PY'
 import hashlib, os, pathlib, re, shutil, subprocess, sys, tempfile
 src=pathlib.Path(sys.argv[1]); fixture=src/'tests/fixtures/frontend-v0.78.1'
 with tempfile.TemporaryDirectory(prefix='harness-retirement-') as temp:
-    root=pathlib.Path(temp); env=os.environ.copy()
+    root=pathlib.Path(temp)
+    # Hostile HOST git config, always on: a global gpg-signing/hooks config must not reach the
+    # fixture repo (proof for the genv isolation below; mutating genv away fails this suite).
+    (root/'hooks').mkdir(); (root/'hooks/pre-commit').write_text('#!/bin/sh\nexit 1\n'); (root/'hooks/pre-commit').chmod(0o755)
+    (root/'hostile.gitconfig').write_text('[commit]\n gpgsign = true\n[gpg]\n program = /bin/false\n[core]\n hooksPath = %s\n' % (root/'hooks'))
+    os.environ['GIT_CONFIG_GLOBAL']=str(root/'hostile.gitconfig')
+    env=os.environ.copy()
     for key in ('HARNESS_AGENTS','HARNESS_HOST_AGENT','HARNESS_PR_LOOP_ENABLED','CLAUDECODE','CLAUDE_CODE_ENTRYPOINT','CODEX_THREAD_ID','OPENCODE','OPENCODE_PID','ANTIGRAVITY_AGENT','ANTIGRAVITY_CONVERSATION_ID','PI_CODING_AGENT','PI_SESSION_ID','AI_AGENT'):
         env.pop(key,None)
     env.update(HOME=str(root/'home'),CODEX_HOME=str(root/'codex'),HARNESS_PI_DEPS='skip')
@@ -76,11 +82,16 @@ with tempfile.TemporaryDirectory(prefix='harness-retirement-') as temp:
     for rel in changed: assert rel not in owned, 'retired edited glue still mandatory'
     assert '.codex/agents/builder.toml' in owned and '.agents/skills/sdd-next/SKILL.md' in owned
     # The mandatory installed drift guard must not claim edited retired files.
-    subprocess.run(['git','init','-q',str(p)],check=True)
-    subprocess.run(['git','-C',str(p),'add','.'],check=True)
-    subprocess.run(['git','-C',str(p),'-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],check=True)
+    # The fixture repo is hermetic: the host's git config (commit.gpgsign, core.hooksPath,
+    # init.templateDir, core.excludesFile) and ambient agent env must not reach git or init.sh.
+    # Under host config `commit.gpgsign=true` or a global `core.hooksPath` this commit dies
+    # with CalledProcessError, which reads as an installer flake (E99-F177).
+    genv=env.copy(); genv.update(GIT_CONFIG_GLOBAL=os.devnull,GIT_CONFIG_NOSYSTEM='1',GIT_TEMPLATE_DIR='')
+    subprocess.run(['git','init','-q',str(p)],check=True,env=genv)
+    subprocess.run(['git','-C',str(p),'add','.'],check=True,env=genv)
+    subprocess.run(['git','-C',str(p),'-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],check=True,env=genv)
     (p/changed[0]).write_text('changed again after install\n')
-    r=subprocess.run([str(p/'.harness/init.sh')],cwd=p,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+    r=subprocess.run([str(p/'.harness/init.sh')],cwd=p,env=genv,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
     assert r.returncode==0,r.stdout
     print('ok - post_retirement_drift_ownership (R4)')
     # Edited / foreign / file-link / parent-link protections for each legacy surface.
