@@ -1304,7 +1304,8 @@
         {
           "id": "E99-F177",
           "title": "tests: test_frontend_retirement.sh flakes under parallel load",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "14d2be1b35bb7fb256fe0720b72f95b1d2875559", "ref": "14d2be1b35bb7fb256fe0720b72f95b1d2875559", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
