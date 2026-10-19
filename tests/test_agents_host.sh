@@ -235,6 +235,59 @@ test_host_marker_rows_documented() {
   return 0
 }
 
+# ── E99-F178 — every opencode marker VARIABLE detects opencode on its own ─────
+# 1.x sets OPENCODE + OPENCODE_PID; 2.0.32 sets OPENCODE + OPENCODE_SESSION_ID in the agent
+# shell tool and ONLY OPENCODE_TERMINAL in the `!` user shell (no OPENCODE at all there).
+# One row per variable, so deleting any one from the shipped row leaves that case undetected.
+# Each is also paired with CLAUDECODE=1: a new marker must stay a TIE (undetected), never
+# a silent win for either front-end (R5).
+test_host_opencode_markers() {
+  _x="$(sandbox ocmarkers)"; _t="$_x/t"; mkdir -p "$_t"
+  for _v in OPENCODE OPENCODE_PID OPENCODE_SESSION_ID OPENCODE_TERMINAL; do
+    _got="$(host_of "$_x" "$_t" "$_v=1")"
+    [ "$_got" = "opencode" ] \
+      || fail "E99-F178: $_v=1 alone did not resolve the host to 'opencode' (got '$_got')"
+    _got="$(host_of "$_x" "$_t" "$_v=")"
+    [ -z "$_got" ] || fail "E99-F178: an empty $_v counted as present (got '$_got')"
+    _got="$(host_of "$_x" "$_t" CLAUDECODE=1 "$_v=1")"
+    [ -z "$_got" ] \
+      || fail "E99-F178: CLAUDECODE=1 with $_v=1 must be ambiguous/undetected (got '$_got')"
+  done
+  # The provenance entry records the 2.0.32 observation (version + the date it was made).
+  _entry="$(prov_entry opencode)"
+  printf '%s\n' "$_entry" | grep -q '2\.0\.32' \
+    || fail "E99-F178: the opencode provenance entry does not record the 2.0.32 observation"
+  printf '%s\n' "$_entry" | tr '\n' ' ' | grep -qE 'OPENCODE_TERMINAL qualifies[^.]{0,200}(injects|session)' \
+    || fail "E99-F178: the opencode provenance entry does not record why OPENCODE_TERMINAL qualifies"
+  return 0
+}
+
+# ── E99-F178 — every suite's host-marker SCRUB list covers EVERY table variable ─
+# A suite that runs `--agents=host` with HARNESS_HOST_AGENT unset must start from a clean
+# marker env, or it fails on exactly the host a marker was added for (E99-F178 round 2:
+# test_frontend_retirement.sh popped OPENCODE/OPENCODE_PID only and went red under
+# OPENCODE_TERMINAL=1). A scrub list is a line that quotes both 'CLAUDECODE' and
+# 'CODEX_THREAD_ID'; each must quote every variable of the shipped HOST_MARKERS table.
+# Non-vacuous: at least the two known scrubbers must be found.
+test_host_scrub_lists_cover_table() {
+  marker_table | awk 'NF > 1 { for (i = 2; i <= NF; i++) print $i }' | sort -u > "$T/allvars.txt"
+  [ -s "$T/allvars.txt" ] || fail "E99-F178: no marker variables parsed from HOST_MARKERS"
+  _n=0
+  for _f in "$SRC"/tests/*.sh; do
+    case "$_f" in */test_agents_host.sh) continue ;; esac
+    grep -n "'CLAUDECODE'.*'CODEX_THREAD_ID'\|'CODEX_THREAD_ID'.*'CLAUDECODE'" "$_f" > "$T/scrub.txt" 2>/dev/null || continue
+    while IFS= read -r _line; do
+      _n=$((_n + 1))
+      while IFS= read -r _v; do
+        printf '%s\n' "$_line" | grep -qF "'$_v'" \
+          || fail "E99-F178: $(basename "$_f") scrubs host markers but its list omits $_v — it would fail under an opencode session"
+      done < "$T/allvars.txt"
+    done < "$T/scrub.txt"
+  done
+  [ "$_n" -ge 2 ] || fail "E99-F178: found $_n marker scrub lists, expected at least 2 (test_frontend_retirement.sh, test_codex_native.sh)"
+  return 0
+}
+
 # ── R9 — HARNESS_HOST_AGENT wins over the marker table ────────────────────────
 test_host_env_declaration_wins() {
   _x="$(sandbox decl)"; _t="$_x/t"; mkdir -p "$_t"
@@ -1094,6 +1147,10 @@ test_host_forbidden_markers
 pass "no ambient config/credential variable acts as a marker, in the table or at runtime (R6)"
 test_host_marker_rows_documented
 pass "every shipped marker VARIABLE is recorded, with a CLI version, in its own key's provenance entry (R8)"
+test_host_opencode_markers
+pass "each opencode marker (1.x and 2.0.32) resolves opencode alone and ties with CLAUDECODE (E99-F178)"
+test_host_scrub_lists_cover_table
+pass "every suite marker-scrub list names every HOST_MARKERS variable (E99-F178)"
 test_host_env_declaration_wins
 test_host_env_declaration_invalid_warns
 pass "HARNESS_HOST_AGENT declares the host; an invalid value warns and continues (R9, R10)"

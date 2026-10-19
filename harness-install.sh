@@ -1730,7 +1730,21 @@ AGENT_KEYS="claude codex opencode antigravity pi"
 #               sandbox and with the sandbox bypassed on a pty, so it is not a
 #               sandbox-only artifact.
 #   opencode    opencode 1.18.5 — OPENCODE=1 and OPENCODE_PID=<pid>, observed via
-#               `opencode run`.
+#               `opencode run`. opencode 2.0.32 — OPENCODE=1, OPENCODE_SESSION_ID=<ses_…>
+#               and OPENCODE_TERMINAL=1, observed 2026-10-19 (E99-F178) in the agent shell
+#               tool (`env > file`, `comm -13` against the launch env) under an isolated
+#               `opencode serve` driven by a local stub OpenAI-compatible model (no real
+#               model); the `!` user shell (POST /api/session/{id}/shell, no model) added
+#               only OPENCODE_TERMINAL=1. 2.x no longer sets OPENCODE_PID (absent in both
+#               paths; kept in the row for 1.x). OPENCODE_TERMINAL qualifies under the
+#               rules above: the front-end injects it (Shell.create / Pty.create), it is
+#               session state rather than config or credentials, and a plain shell lacks
+#               it; it is the only marker a 2.x `!` shell carries. Unlike CODEX_CI (a mode
+#               flag, rejected), opencode sets it on every shell and pty it creates, in
+#               every mode. Trade-off: claude/codex/pi launched from an opencode 2.x `!`
+#               shell or terminal inherits OPENCODE_TERMINAL=1, so the host now resolves
+#               as ambiguous (undetected + one warning), where it used to resolve to the
+#               inner tool; HARNESS_HOST_AGENT=<key> resolves it.
 #   pi          pi 1.2.0 — PI_CODING_AGENT=true, observed 2026-10-13 in a shell spawned by
 #               the session's bash tool under `pi -p` (`comm -13` against a plain login
 #               shell); pi's docs/environment-variables.md states pi sets it for every
@@ -1754,7 +1768,7 @@ AGENT_KEYS="claude codex opencode antigravity pi"
 HOST_MARKERS="
 claude CLAUDECODE CLAUDE_CODE_ENTRYPOINT
 codex CODEX_THREAD_ID
-opencode OPENCODE OPENCODE_PID
+opencode OPENCODE OPENCODE_PID OPENCODE_SESSION_ID OPENCODE_TERMINAL
 pi PI_CODING_AGENT
 "
 #
@@ -1969,6 +1983,29 @@ codex_effort_alias() {
   return 0
 }
 
+# opencode_pin_valid <value> — exit 0 iff <value> is a model id OpenCode accepts, 1 otherwise.
+# Mirrors OpenCode 2.x's own acceptance regex `^[^/#]+/[^#]+$` (observed 2.0.32, E99-F178):
+# 2.x treats `#` as a variant separator and SILENTLY DROPS (log-only diagnostic) any `model`
+# value that does not match, so a looser check stamps a pin the operator believes is live.
+# Provider = text before the FIRST `/` (non-empty, no `#`); model = the rest (non-empty, no
+# `#`, may itself contain `/`). The `#` clauses are DEFENCE IN DEPTH: `_cfg_models_value`
+# strips `#...` as a comment before any pin reaches here, so `#` is unreachable from
+# harness.config.yaml or the umbrella config; `/m` and `p/` ARE reachable.
+# Pinned by tests/test_model_routing.sh (e2e rows for the reachable shapes, a direct unit
+# table for the rest).
+opencode_pin_valid() {
+  case "$1" in
+    */*) ;;
+    *) return 1 ;;
+  esac
+  _opv_p="${1%%/*}"; _opv_m="${1#*/}"
+  [ -n "$_opv_p" ] && [ -n "$_opv_m" ] || return 1
+  case "$_opv_p$_opv_m" in
+    *'#'*) return 1 ;;
+  esac
+  return 0
+}
+
 # resolve_model <front-end> <role> — print that front-end's NATIVE model value for the
 # role, or NOTHING to mean "omit the model key entirely". Order: tier → an explicit
 # `models.pin.<front-end>.<tier>` (verbatim, wins) → the built-in floating alias →
@@ -2011,13 +2048,11 @@ resolve_model() {
     # operator's runs, so its `provider/model` shape is guarded (a format check, not a
     # model-list check — the installer cannot know any vendor's model list).
     if [ "$_rm_fe" = "opencode" ]; then
-      case "$_rm_pin" in
-        */*) ;;
-        *)
-          _model_warn_once "ocpin:$_rm_tier" \
-            "⚠️  models.pin.opencode.$_rm_tier = '$_rm_pin' is not in provider/model form — ignored, no model key written to opencode.json"
-          return 0 ;;
-      esac
+      if ! opencode_pin_valid "$_rm_pin"; then
+        _model_warn_once "ocpin:$_rm_tier" \
+          "⚠️  models.pin.opencode.$_rm_tier = '$_rm_pin' is not in provider/model form (a non-empty provider, a '/', a non-empty model, and no '#' anywhere) — ignored, no model key written to opencode.json"
+        return 0
+      fi
     fi
     # pi (E35-F03): a pin is a MODEL, in provider/id form, never a thinking level. A
     # non-ok `pi_pin_verdict` warns once per tier and stamps no model (the install never

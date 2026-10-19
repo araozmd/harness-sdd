@@ -395,12 +395,17 @@ variables do not identify the host.
 |---|---|---|
 | `claude` | `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT` | Claude Code 2.1.220 |
 | `codex` | `CODEX_THREAD_ID` | codex-cli 0.145.0 |
-| `opencode` | `OPENCODE`, `OPENCODE_PID` | opencode 1.18.5 |
+| `opencode` | `OPENCODE`, `OPENCODE_PID`, `OPENCODE_SESSION_ID`, `OPENCODE_TERMINAL` | opencode 1.18.5; 2.0.32 |
 | `pi` | `PI_CODING_AGENT` | pi 1.2.0 |
 
 Empty markers do not count. Multiple supported hosts produce an ambiguity
 warning and an undetected result. Retired-host markers are ignored. A detection
 miss uses the baseline below and is normal operation.
+
+Nesting trade-off: a `claude`, `codex` or `pi` session launched from an OpenCode 2.x `!`
+shell or terminal inherits `OPENCODE_TERMINAL=1`, so the host now resolves as ambiguous
+(undetected, plus one warning); before OpenCode 2.x markers were recorded it resolved to the
+inner tool. Declare the host with `HARNESS_HOST_AGENT=<key>` to resolve it.
 
 ### Declaring the host yourself — `HARNESS_HOST_AGENT`
 
@@ -1176,8 +1181,15 @@ installer prints one advisory line naming the exact `pin.` key to set. It is the
 key that is omitted, not the role artifact: selecting Codex registers all seven
 standard `.codex/agents/*.toml`, plus gated `pr-fixer`, regardless of any pin (see "Where the values land" below).
 
-- `opencode` **must** be `provider/model`. A value without a `/` would abort your OpenCode
-  runs, so it is warned about and dropped.
+- `opencode` **must** be `provider/model`, matching OpenCode 2.x's own rule
+  `^[^/#]+/[^#]+$`: a non-empty provider, a `/`, a non-empty model (which may itself contain
+  `/`), and no `#` anywhere (2.x reads `#` as a variant separator). A value without a `/`
+  would abort OpenCode 1.x runs, and 2.x silently drops a `model` that fails the rule (only a
+  log diagnostic), so the pin would look live and do nothing; either way it is warned about
+  and dropped, and no `model` key is written. In practice `/m`, `p/` and `/` are what you can
+  hit: a `#` in `harness.config.yaml` starts a comment (see the config-reader quirk under
+  "pi"), so `a/b#c` is read as `a/b` before the check runs, and the `#` clause is
+  defence in depth.
 - `codex` **must** be a bare model id; the provider comes from your `model_provider`.
 - A pin of `"inherit"` is a **tier name, not a model id**. It is warned about and dropped
   on every front-end, stamping nothing — exactly like the `inherit` tier. The literal
