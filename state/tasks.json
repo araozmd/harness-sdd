@@ -1300,6 +1300,15 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F176-validate-board-draft-warn-crash/"
+        },
+        {
+          "id": "E99-F177",
+          "title": "tests: test_frontend_retirement.sh flakes under parallel load",
+          "status": "in-review",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F177-frontend-retirement-flake/"
         }
       ]
     },
