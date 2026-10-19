@@ -1304,7 +1304,7 @@
         {
           "id": "E99-F177",
           "title": "tests: test_frontend_retirement.sh flakes under parallel load",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
