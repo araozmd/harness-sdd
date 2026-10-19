@@ -17,6 +17,9 @@ All notable changes to the harness body are recorded here. Versions follow
   the 2.0.32 provenance (agent shell tool and `!` user shell, observed against an isolated
   `opencode serve` with a local stub model). `OPENCODE_PID` stays for 1.x. `OPENCODE_TERMINAL`
   is the only marker a 2.x `!` shell carries, so `!sh harness-install.sh` is now detected.
+  Downside: claude, codex or pi launched from an opencode 2.x terminal now inherits
+  `OPENCODE_TERMINAL=1` and resolves as ambiguous (undetected, plus one warning), where it
+  used to resolve to the inner tool; `HARNESS_HOST_AGENT=<key>` overrides it.
 
 ## [0.97.0] — 2026-10-18
 

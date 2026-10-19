@@ -42,3 +42,53 @@ Reviewed: c1fd569 on 13cba00, branch fix/E99-F178-opencode2-pin-host. 2026-10-19
   also a `=1` flag. One clause in the provenance entry would stop the next contributor
   re-litigating it. The clause should say why it differs: opencode sets it on every shell and PTY
   it creates, in every mode, while CODEX_CI depends on the mode.
+
+---
+
+# E99-F178 review, round 2: REJECT (one required test fix)
+
+Reviewed: 4002f50 on c1fd569 on 13cba00. 2026-10-19.
+
+## Evidence
+- `./init.sh` rc=0. Full suite rc=0: `all 78 suites passed (/usr/bin/sh [GNU bash 5.3.15], --jobs 16)`,
+  TMPDIR=/var/tmp/E99-F178-review2 (removed afterwards).
+- Round-1 fixes verified. docs/INSTALL.md:398 lists all four markers with the baseline `opencode 1.18.5; 2.0.32`.
+  The nesting trade-off is recorded in INSTALL.md:405-408 and in the harness-install.sh provenance entry (~1742-1747).
+  The CODEX_CI clause is present. Outside progress/, specs/ and the 0.75-era CHANGELOG history (CHANGELOG.md:3692),
+  no stale two-marker row is left.
+- Mutants, each in a git-archive copy, restored with cp and checked with cmp. All were KILLED, each by its named assertion:
+  - guard back to `*/*`: killed by test_model_routing ("pin '/m' was not warned about");
+  - OPENCODE_TERMINAL dropped from the row: killed by test_agents_host ("OPENCODE_TERMINAL=1 alone did not resolve")
+    and by test_worker_roster;
+  - OPENCODE_TERMINAL dropped from the provenance: killed by test_agents_host R8;
+  - the qualification reason dropped: killed by test_agents_host ("does not record why OPENCODE_TERMINAL qualifies");
+  - the whole 2.0.32 provenance dropped: killed by test_agents_host R8.
+- The test_codex_native.sh pop-list change has NO observable effect. Its c1fd569 version passes with
+  OPENCODE_TERMINAL=1 or OPENCODE_SESSION_ID exported (rc=0), because every host-mode run there sets
+  HARNESS_HOST_AGENT. So it is correct hygiene, but it is unpinned.
+- Change-size: tier `ok`.
+
+## Required fix
+1. **tests/test_frontend_retirement.sh:21.** This env-pop list is the same class as the one fixed in
+   test_codex_native.sh, and it was missed. It still pops only `OPENCODE`, `OPENCODE_PID`. Line 47 runs
+   `--agents=host` and expects the fallback `claude\n`, so any ambient OPENCODE_SESSION_ID or OPENCODE_TERMINAL
+   now makes the installer detect `opencode`, and the assertion fails.
+   - Observed at HEAD: `OPENCODE_TERMINAL=1 sh tests/test_frontend_retirement.sh` gives rc=1 (AssertionError, heredoc
+     line 39). `OPENCODE_SESSION_ID=ses_x` gives rc=1. A clean env gives rc=0, and `OPENCODE=1` gives rc=0.
+   - Base 51c318c with both variables exported gives rc=0. **This is a regression introduced by this branch.**
+   - Full suite under a simulated opencode 2.x agent-shell env (`AGENT=1 AI_AGENT=opencode OPENCODE=1
+     OPENCODE_SESSION_ID=… OPENCODE_TERMINAL=1`): test_frontend_retirement.sh is the only env-caused failure.
+     (test_feedback_labeler also failed, but only because the archive copy has no git history; it passes in the
+     repo under the same env.) So the suite goes red when a Builder runs it from an opencode 2.x session or a `!`
+     shell, which is exactly the host this item targets.
+   - Expected: add 'OPENCODE_SESSION_ID','OPENCODE_TERMINAL' to that tuple. Re-run the command above and get rc=0.
+
+## Advisory (non-blocking)
+- Pin the pop lists so the next marker can't slip again. For example, a check in test_agents_host.sh
+  could assert that every HOST_MARKERS variable appears in each test that clears host markers with `env.pop`, or
+  the two tests could derive their list from the table.
+- The CHANGELOG 0.97.1 entry mentions only the upside (`!sh harness-install.sh` is now detected). It doesn't
+  mention the operator-visible downside: claude, codex or pi nested in an opencode 2.x terminal now resolves as
+  ambiguous and warns. One clause would help. The provenance header ("on 2026-07-28", "against a plain login
+  shell") and the "Caveat recorded honestly" paragraph (exec/run/-p only) are now slightly stale for the 2.x
+  serve and `!` observation. The 2.x entry carries its own date and method, so this is not misleading.

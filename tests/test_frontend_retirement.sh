@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory(prefix='harness-retirement-') as temp:
     (root/'tmpl/hooks').mkdir(parents=True); (root/'tmpl/hooks/pre-commit').write_text('#!/bin/sh\nexit 1\n'); (root/'tmpl/hooks/pre-commit').chmod(0o755)
     os.environ['GIT_TEMPLATE_DIR']=str(root/'tmpl')
     env=os.environ.copy()
-    for key in ('HARNESS_AGENTS','HARNESS_HOST_AGENT','HARNESS_PR_LOOP_ENABLED','CLAUDECODE','CLAUDE_CODE_ENTRYPOINT','CODEX_THREAD_ID','OPENCODE','OPENCODE_PID','ANTIGRAVITY_AGENT','ANTIGRAVITY_CONVERSATION_ID','PI_CODING_AGENT','PI_SESSION_ID','AI_AGENT'):
+    for key in ('HARNESS_AGENTS','HARNESS_HOST_AGENT','HARNESS_PR_LOOP_ENABLED','CLAUDECODE','CLAUDE_CODE_ENTRYPOINT','CODEX_THREAD_ID','OPENCODE','OPENCODE_PID','OPENCODE_SESSION_ID','OPENCODE_TERMINAL','ANTIGRAVITY_AGENT','ANTIGRAVITY_CONVERSATION_ID','PI_CODING_AGENT','PI_SESSION_ID','AI_AGENT'):
         env.pop(key,None)
     env.update(HOME=str(root/'home'),CODEX_HOME=str(root/'codex'),HARNESS_PI_DEPS='skip')
     def install(p,*args,extra=None,ok=True):
