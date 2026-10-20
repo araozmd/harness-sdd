@@ -189,3 +189,34 @@ Reviewed: 070847b on 6f4f73b on e543f23 on 23a61c7, 2026-10-20. Scratch: scratch
   same line counts a non-scrubbed word, because sc is per line, not per statement. None exists in tests/.
 - `n &&` in flush is redundant: h is non-empty only when n > 0. The mutant is equivalent, so this is not a finding.
 - Pre-existing: CHANGELOG.md:5 still points at a non-existent "`CLAUDE.md` → Versioning".
+
+---
+
+# Round 4 review: APPROVE
+
+Reviewed: 5c561c6 on 070847b on 6f4f73b on e543f23 on 23a61c7, 2026-10-20. Scratch: scratchpad/E99-F179-review4/.
+
+## Evidence
+- `./init.sh` rc=0. Full suite rc=0: `all 78 suites passed (/usr/bin/sh [GNU bash 5.3.15], --jobs 16)`, TMPDIR=/var/tmp/E99-F179-review4
+  (removed). Free space 642G on / before and after. change-size tier: `ok` (465 lines / 8 files, 0 production lines).
+- HOST_MARKERS byte-identical to c5f7af3; harness-install.sh diff is `#` lines only; 5c561c6 does not touch it. VERSION 0.97.2.
+- Round-3 shapes at HEAD (complete / missing PI / missing OPENCODE): `(unset … ; sh x)`, `out="$(env -u … sh x)"`,
+  `` out=`env -u …` ``, `echo y |env -u …` all give `LIST` / `LIST|MISS PI_CODING_AGENT pi` / `LIST|MISS OPENCODE opencode`.
+- Real lists: test_codex_native.sh and test_frontend_retirement.sh each give exactly one `LIST`, no MISS; no other tests/*.sh
+  (the guard skips test_agents_host.sh) yields output. tests/test_install.sh:1824 (`$(env -u HOME -u CODEX_HOME …`) is now a
+  scrub-statement line but names no marker, so it yields nothing: correct.
+- Mutants (private git-archive copy, one at a time, diff printed, .mutbak restore, cmp OK):
+  - KILLED: L1 unset class reverted (subshell fixture), L2 env class reverted (cmdsub), XWL leading boundary (X_CLAUDECODE),
+    XWT trailing boundary, XW index, R old env regex, X1, X2, X4, cont dropped from sc, cont=0, XG, XA, XA2, per-line flush,
+    W1 `MISS) fail` -> `:` (wiring), W2 floor `-ge 0` (wiring), W5 LIST counter dropped.
+  - SURVIVED (advisory): W3 real call `scrub_check_dir "$SRC/tests" 2` -> `:`, and W4 its floor `2` -> `0`.
+- Documented blind spots behave as documented: `--unset=` and `-uVAR` silent; `unset …; echo PI_CODING_AGENT` masks PI;
+  prefix scrub silent; comment-interrupted list fails loud.
+
+## Advisory (non-blocking)
+- W3/W4: the Builder's reason is sound. The surviving edits are to the test's own top-level invocation; pinning them needs a
+  test that greps its own source or re-runs itself, the same class as deleting any `test_x` call at the bottom of a suite. The
+  loop mechanics it calls are pinned. Note W4 (floor arg 2 -> 0) survives too, so the "vacuity floor" value itself is unpinned
+  at the call site; the comment "Wiring pinned by test_host_scrub_wiring" is accurate for scrub_check_dir, not for its caller.
+- The wider prefix admits `"`, so a quoted message such as `echo "unset CLAUDECODE CODEX_THREAD_ID …"` is now a (loud) false
+  positive. None exists in tests/.

@@ -1336,7 +1336,7 @@
         {
           "id": "E99-F179",
           "title": "Host-marker follow-ups: scrub-guard blind spots, stale provenance prose, guard failure text",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
