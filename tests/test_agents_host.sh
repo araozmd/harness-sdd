@@ -262,26 +262,46 @@ test_host_opencode_markers() {
   return 0
 }
 
-# ── E99-F178 — every suite's host-marker SCRUB list covers EVERY table variable ─
+# ── E99-F178/F179 — every suite's host-marker SCRUB list covers EVERY table variable ─
 # A suite that runs `--agents=host` with HARNESS_HOST_AGENT unset must start from a clean
 # marker env, or it fails on exactly the host a marker was added for (E99-F178 round 2:
 # test_frontend_retirement.sh popped OPENCODE/OPENCODE_PID only and went red under
-# OPENCODE_TERMINAL=1). A scrub list is a line that quotes both 'CLAUDECODE' and
-# 'CODEX_THREAD_ID'; each must quote every variable of the shipped HOST_MARKERS table.
+# OPENCODE_TERMINAL=1). Parsed PER FILE (E99-F179): a line "hits" variable V when it quotes
+# V ('V' or "V") or is an `unset` / `env -u` line naming V as a word. A scrub list is a run
+# of consecutive hit lines (so a list split across lines is one list) that hits both
+# CLAUDECODE and CODEX_THREAD_ID; it must hit every variable of the shipped HOST_MARKERS table.
+# STILL NOT SEEN (by design, a bound not a defect): a prefix scrub such as
+# startswith('OPENCODE'); a list interrupted by a line that hits no variable (a comment or
+# blank line); a scrub that never names both CLAUDECODE and CODEX_THREAD_ID. New host-mode
+# tests should not hand-roll a scrub: run under `env -i` (the hrun/inst helpers) or set
+# HARNESS_HOST_AGENT, either of which makes the marker env irrelevant.
 # Non-vacuous: at least the two known scrubbers must be found.
 test_host_scrub_lists_cover_table() {
   marker_table | awk 'NF > 1 { for (i = 2; i <= NF; i++) print $i }' | sort -u > "$T/allvars.txt"
   [ -s "$T/allvars.txt" ] || fail "E99-F178: no marker variables parsed from HOST_MARKERS"
+  marker_table | awk 'NF > 1 { for (i = 2; i <= NF; i++) print $i, $1 }' | sort -u > "$T/varowner.txt"
   _n=0
   for _f in "$SRC"/tests/*.sh; do
     case "$_f" in */test_agents_host.sh) continue ;; esac
-    grep -n "'CLAUDECODE'.*'CODEX_THREAD_ID'\|'CODEX_THREAD_ID'.*'CLAUDECODE'" "$_f" > "$T/scrub.txt" 2>/dev/null || continue
-    while IFS= read -r _line; do
-      _n=$((_n + 1))
-      while IFS= read -r _v; do
-        printf '%s\n' "$_line" | grep -qF "'$_v'" \
-          || fail "E99-F178: $(basename "$_f") scrubs host markers but its list omits $_v — it would fail under an opencode session"
-      done < "$T/allvars.txt"
+    awk -v vars="$T/allvars.txt" -v owners="$T/varowner.txt" -v q="'" '
+      BEGIN { while ((getline v < vars) > 0) V[++nv] = v; while ((getline l < owners) > 0) { split(l, a, " "); O[a[1]] = a[2] } }
+      function flush(  i, m) {
+        if (n && (("CLAUDECODE" in h) && ("CODEX_THREAD_ID" in h))) {
+          print "LIST"
+          for (i = 1; i <= nv; i++) if (!(V[i] in h)) print "MISS " V[i] " " O[V[i]]
+        }
+        delete h; n = 0
+      }
+      { hit = 0; sc = ($0 ~ /(^|[ \t;])unset[ \t]/ || $0 ~ /[ \t]-u[ \t]/)
+        for (i = 1; i <= nv; i++)
+          if (index($0, q V[i] q) || index($0, "\"" V[i] "\"") || (sc && $0 ~ ("(^|[^A-Za-z0-9_])" V[i] "([^A-Za-z0-9_]|$)"))) { h[V[i]] = 1; hit = 1 }
+        if (hit) n++; else flush() }
+      END { flush() }' "$_f" > "$T/scrub.txt"
+    while IFS=' ' read -r _k _v _o; do
+      case "$_k" in
+        LIST) _n=$((_n + 1)) ;;
+        MISS) fail "E99-F178: $(basename "$_f") scrubs host markers but its list omits $_v — it would fail under the $_o front-end (a $_o session)" ;;
+      esac
     done < "$T/scrub.txt"
   done
   [ "$_n" -ge 2 ] || fail "E99-F178: found $_n marker scrub lists, expected at least 2 (test_frontend_retirement.sh, test_codex_native.sh)"
