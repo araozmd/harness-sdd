@@ -120,7 +120,8 @@ Read the maintenance epic's current `features` first. Then **append** one featur
 
 - Read `E99`'s `features`, find the **max** existing `F##`, and allocate the new fix id
   as the **next-sequential** `F##` strictly **above** it (`F01` for the first fix;
-  `max + 1` thereafter).
+  `max + 1` thereafter). `add-feature` takes that max over the working board, `HEAD` and
+  the 200 most recently committed local and remote-tracking refs, not the local board alone — see "Duplicate fix id".
 - **No reuse** / **never reuse** a vacated `F##` — a gap left by a removed fix is NOT
   refilled; always allocate **above** the current maximum (next-sequential, not
   fill-the-gap).

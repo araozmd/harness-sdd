@@ -1337,11 +1337,26 @@
           "id": "E99-F179",
           "title": "Host-marker follow-ups: scrub-guard blind spots, stale provenance prose, guard failure text",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "0bedca0f0128c8b8fea101ebb14914adea55d25b", "ref": "0bedca0f0128c8b8fea101ebb14914adea55d25b", "repo": "harness-sdd", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "0bedca0f0128c8b8fea101ebb14914adea55d25b",
+            "ref": "0bedca0f0128c8b8fea101ebb14914adea55d25b",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E99-maintenance/F179-host-marker-advisories/"
+        },
+        {
+          "id": "E99-F180",
+          "title": "Docs sweep: bring human-facing docs in line with 0.96.0-0.97.2",
+          "status": "in-review",
+          "sdd": false,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E99-maintenance/F180-docs-sweep/"
         }
       ]
     },

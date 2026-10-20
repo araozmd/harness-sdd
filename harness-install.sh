@@ -311,7 +311,8 @@ models:
   # floating tier alias — an unpinned tier there stamps no MODEL. The role artifact
   # itself is still written (selecting Codex always registers all seven
   # .codex/agents/*.toml); only the `model` key is omitted, as for the `inherit` tier.
-  #   opencode MUST be "provider/model" (an invalid value aborts your OpenCode run)
+  #   opencode MUST match ^[^/#]+/[^#]+$ ("provider/model"; an invalid value is warned
+  #            about and dropped — no model is stamped)
   #   codex    MUST be a bare model id (the provider comes from `model_provider`)
   #   codex ALSO derives `model_reasoning_effort` from this SAME tier automatically —
   #   no separate knob (cheap=low standard=medium reasoning=high frontier=xhigh); see
@@ -366,7 +367,10 @@ EOF
 # HARNESS_AUTO_MERGE, HARNESS_MAX_ROUNDS, HARNESS_BLOCKING_SEVERITIES,
 # HARNESS_MERGE_STRATEGY. Execution knobs are env-ONLY (never config):
 # HARNESS_POLL_INTERVAL (60), HARNESS_POLL_CEILING (900),
-# HARNESS_FIRST_RESPONSE (180), HARNESS_DRY_RUN.
+# HARNESS_FIRST_RESPONSE (180), HARNESS_DRY_RUN, HARNESS_MERGE_VERIFY_CEILING (180,
+# the post-merge receipt wait), HARNESS_MERGE_VERIFY_INTERVAL (10, the poll step inside that
+# wait), HARNESS_QUEUE_RECONCILE_CEILING (300, the extra wait for a
+# queued merge before it is cancelled).
 # (The harness's own source repo opts in; every fresh install is seeded with `false`.)
 pr_loop:
   enabled: false                 # opt-in master gate; ONLY `true` stamps /sdd-pr-loop glue
@@ -7529,7 +7533,8 @@ because it reads exactly `true`. Anything else — an absent block, an absent ke
 or malformed value — means off, and the installer stamps no `/sdd-pr-loop` glue.
 
 Execution knobs are **env-only** (never config): `HARNESS_POLL_INTERVAL` (60),
-`HARNESS_POLL_CEILING` (900), `HARNESS_FIRST_RESPONSE` (180), `HARNESS_DRY_RUN`.
+`HARNESS_POLL_CEILING` (900), `HARNESS_FIRST_RESPONSE` (180), `HARNESS_MERGE_VERIFY_CEILING`
+(180), `HARNESS_MERGE_VERIFY_INTERVAL` (10), `HARNESS_QUEUE_RECONCILE_CEILING` (300), `HARNESS_DRY_RUN`.
 
 Round cache: `.harness/.pr-loop/<pr>/round-<n>/` — gitignored and best-effort; if it is
 missing or corrupt, reconstruct it from the `gh` API.

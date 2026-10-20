@@ -613,6 +613,15 @@ auto-run it, so it waits until a human moves it to `in-progress` (or re-stamps i
 `sdd: false` primitive above (now split by `autonomous`); the Builder works from the inbox
 brief and the Reviewer verifies the fix behaviourally.
 
+**Concurrent sessions and duplicate fix ids.** `add-feature` allocates the new id above
+the max `F##` across the working board, `HEAD` and every local and remote-tracking ref
+(read offline, never fetched; it scans the 200 most recently committed refs). Two sessions
+can still mint the same id on boards nobody has fetched; `validate-board.py` (and so
+`init.sh`) rejects duplicate feature or epic ids, so the collision is loud. The recovery is
+`tasks-lock.py renumber <old-id> <new-id>`, run by the session whose board lands second
+on its own un-landed row. See [agents/fixer.md](../agents/fixer.md) "Duplicate fix id"
+and [store/local.md](../store/local.md).
+
 ### Bounded parallel fix lane (`/sdd-fix-parallel`)
 
 The argument-free command consumes only ready autonomous `sdd:false` E99 fixes. It
@@ -661,8 +670,11 @@ hand: request the review, apply the blocking findings, wait for merge.
 
 **Preconditions.** The **Codex GitHub App** on the repository, an **authed `gh`**, and
 **`jq`** on `PATH`. Step 0 of the loop runs `tools/wait-for-codex.sh preflight <pr>`,
-which checks each one and **posts nothing**; a failure exits `5` with a one-line
-diagnostic naming the failed check and its remedy, and the loop stops there. None of this
+which checks each one and **posts nothing**; a failure exits `8` (auth/tooling: `gh` or
+`jq` missing, or `gh` unauthenticated), `9` (environment: the repo slug does not resolve,
+usually the wrong directory) or `10` (usage: the PR number does not resolve or is not
+open) with a one-line diagnostic naming the failed check and its remedy, and the loop
+stops there. None of this
 is an `init.sh` dependency.
 
 **One round.**
@@ -676,6 +688,9 @@ is an `init.sh` dependency.
    background** and branch on its exit code; never hand-poll. `0` findings · `3` clean ·
    `2` ceiling timeout (never "clean") · `4` usage/precondition · `5` no Codex activity
    inside `HARNESS_FIRST_RESPONSE` (the Codex GitHub App is probably not installed).
+   The script's other modes have their own codes (`classify` 6, `merge-verify` 7 and 11,
+   `preflight` 8-10), which step 7 and the preconditions above rely on; the full table is
+   in the header of `tools/wait-for-codex.sh`.
    The watcher writes `pr.json`, `review-comments.json`, `issue-comments.json`,
    `reactions.json` and `trigger-ts.txt` into the round dir on every poll — `gh pr view`
    alone returns neither the inline findings nor a banner past the first 100 comments.
@@ -698,11 +713,29 @@ is an `init.sh` dependency.
    thread has a **non-Codex** participant, route to `needs-human`, resolve nothing and do
    not merge. Otherwise resolve the Codex-owned threads and, when `auto_merge` is true,
    merge with `merge_strategy` and `--delete-branch`; with `auto_merge` false, stop after
-   the green summary. Local branch cleanup runs only if the merge command itself
-   succeeded. A handover summary (rounds, worker totals, round-by-round, blocking
+   the green summary. Local branch cleanup runs only if the merge landed (the
+   `merge-verify post` receipt returned `0`). A handover summary (rounds, worker totals, round-by-round, blocking
    comments resolved, cache path) is written to
    `<HARNESS_DIR>/.pr-loop/<pr>/handover-summary.md` and posted on **both** terminal
    states.
+
+   Both terminal paths also run the `merge-verify pre` receipt (the PR's head must still
+   be the reviewed head), wait on the required CI, and snapshot a `thread_fingerprint` of
+   **every** review thread, resolved ones included, before that wait. Any difference
+   afterwards, or an unreadable snapshot, refuses the green action and routes to
+   `needs-human`; a difference, an unreadable hand-back snapshot, or an unreadable
+   snapshot after the CI wait also records the round as `stale` (never in a dry run). Limits: a PR review body or a PR-level (issue)
+   comment with no inline thread is not fingerprinted, and neither is an in-place edit of
+   a non-last comment inside a thread. On the merge path, `gh pr merge` exiting `0` can
+   mean only *enqueued* (merge queue or repo auto-merge): if `merge-verify post` finds the
+   PR still OPEN at its ceiling it exits `11`, and the loop waits up to
+   `HARNESS_QUEUE_RECONCILE_CEILING` (default 300s), then cancels the request
+   (`gh pr merge --disable-auto`, and the `dequeuePullRequest` mutation for a merge queue),
+   re-reads the state and hands off as `needs-human` with a comment saying whether the
+   cancel was confirmed, the PR is CLOSED (nothing was left to cancel), or a request may
+   still be queued. If the queue lands the PR during the reconcile, the loop takes the
+   normal merged path instead. A dry run does none of the
+   mutations.
 
 The per-round cache lives at `<HARNESS_DIR>/.pr-loop/<pr>/round-<n>/`, is gitignored, and
 is best-effort — if it is missing or corrupt, reconstruct it from the `gh` API. Re-check

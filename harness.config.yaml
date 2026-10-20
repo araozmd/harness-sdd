@@ -257,7 +257,8 @@ models:
   # floating tier alias — an unpinned tier there stamps no MODEL. The role artifact
   # itself is still written (selecting Codex always registers all seven
   # .codex/agents/*.toml); only the `model` key is omitted, as for the `inherit` tier.
-  #   opencode MUST be "provider/model" (an invalid value aborts your OpenCode run)
+  #   opencode MUST match ^[^/#]+/[^#]+$ ("provider/model"; an invalid value is warned
+  #            about and dropped — no model is stamped)
   #   codex    MUST be a bare model id (the provider comes from `model_provider`)
   #   codex ALSO derives `model_reasoning_effort` from this SAME tier automatically —
   #   no separate knob (cheap=low standard=medium reasoning=high frontier=xhigh); see
@@ -297,7 +298,10 @@ models:
 # HARNESS_AUTO_MERGE, HARNESS_MAX_ROUNDS, HARNESS_BLOCKING_SEVERITIES,
 # HARNESS_MERGE_STRATEGY. Execution knobs are env-ONLY (never config):
 # HARNESS_POLL_INTERVAL (60), HARNESS_POLL_CEILING (900),
-# HARNESS_FIRST_RESPONSE (180), HARNESS_DRY_RUN.
+# HARNESS_FIRST_RESPONSE (180), HARNESS_DRY_RUN, HARNESS_MERGE_VERIFY_CEILING (180,
+# the post-merge receipt wait), HARNESS_MERGE_VERIFY_INTERVAL (10, the poll step inside that
+# wait), HARNESS_QUEUE_RECONCILE_CEILING (300, the extra wait for a
+# queued merge before it is cancelled).
 # (The harness's own source repo opts in; every fresh install is seeded with `false`.)
 pr_loop:
   enabled: true                  # opt-in master gate; ONLY `true` stamps /sdd-pr-loop glue

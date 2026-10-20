@@ -351,18 +351,28 @@ is a property of what that repo builds — for an ordinary product repo, blockin
 spends review rounds on findings that never blocked anything. Raise it yourself if your
 project has the same shape; nothing stops you.
 
-An upgrade appends the same block byte-for-byte; an absent block (or key) behaves exactly
-as the defaults above, so an existing config that predates the block stays **off** until
+An upgrade appends the same block byte-for-byte **only when `pr_loop:` is absent**; an
+existing block, with whatever comments it carries, is never rewritten. An absent block (or
+key) behaves exactly as the defaults above, so an existing config that predates the block stays **off** until
 you add it. Each policy key takes a per-run env override —
 `HARNESS_PR_LOOP_ENABLED`, `HARNESS_AUTO_MERGE`, `HARNESS_MAX_ROUNDS`,
 `HARNESS_BLOCKING_SEVERITIES`, `HARNESS_MERGE_STRATEGY` (env wins over config, config wins
 over the default). Execution knobs are **env-only**: `HARNESS_POLL_INTERVAL` (60),
 `HARNESS_POLL_CEILING` (900), `HARNESS_FIRST_RESPONSE` (180, `0` disables the probe) and
+`HARNESS_MERGE_VERIFY_CEILING` (180, the wait for the post-merge receipt),
+`HARNESS_MERGE_VERIFY_INTERVAL` (10, the poll step inside that wait),
+`HARNESS_QUEUE_RECONCILE_CEILING` (300, the extra wait for a queued merge before it is
+cancelled) and
 `HARNESS_DRY_RUN` (`1` suppresses every remote and repository mutation — ready, checkout,
 fixer commits and pushes, labels, thread resolution, comments, merge — and keeps its round
 cache under `.pr-loop/dry-run/<pr>/`). `HARNESS_POLL_INTERVAL`/`HARNESS_POLL_CEILING` also bound the required-CI wait that
 both terminal paths (merge and the `auto_merge: false` hand-back) run before claiming
-green.
+green. Both paths also snapshot every review thread before that wait and refuse to go
+green if any thread changed during it (`needs-human`). If `gh pr merge` only enqueued
+the PR (merge queue or auto-merge), `merge-verify post` exits `11`: the loop reconciles for
+`HARNESS_QUEUE_RECONCILE_CEILING`, cancels the request, and hands off as `needs-human`
+with a comment saying whether the cancel was confirmed or a request may still be queued.
+Details: [WORKFLOW.md](WORKFLOW.md).
 
 Flipping `pr_loop.enabled` back to `false` and re-running the installer **reclaims** the
 command and every `pr-fixer` artifact from each still-selected front-end
@@ -395,7 +405,7 @@ variables do not identify the host.
 |---|---|---|
 | `claude` | `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT` | Claude Code 2.1.220 |
 | `codex` | `CODEX_THREAD_ID` | codex-cli 0.145.0 |
-| `opencode` | `OPENCODE`, `OPENCODE_PID`, `OPENCODE_SESSION_ID`, `OPENCODE_TERMINAL` | opencode 1.18.5; 2.0.32 |
+| `opencode` | `OPENCODE`, `OPENCODE_PID`, `OPENCODE_SESSION_ID`, `OPENCODE_TERMINAL` | opencode 1.18.5 (1.x markers); 2.0.32 |
 | `pi` | `PI_CODING_AGENT` | pi 1.2.0 |
 
 Empty markers do not count. Multiple supported hosts produce an ambiguity
