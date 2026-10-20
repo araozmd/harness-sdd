@@ -1336,7 +1336,8 @@
         {
           "id": "E99-F179",
           "title": "Host-marker follow-ups: scrub-guard blind spots, stale provenance prose, guard failure text",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "0bedca0f0128c8b8fea101ebb14914adea55d25b", "ref": "0bedca0f0128c8b8fea101ebb14914adea55d25b", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
