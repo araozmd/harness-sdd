@@ -2397,6 +2397,12 @@ test_seed_comments_match_behaviour() {                   # E99-F180
     grep -A1 'opencode MUST match' "$_f" | tr '\n' ' ' | grep -qE 'warned[[:space:]]+#?[[:space:]]*about and dropped' \
       || fail "E99-F180: $_f's opencode pin comment does not say an invalid pin is warned about and dropped"
   done
+  # The emitted command body's own env-only knob sentence lists them too.
+  for _f in "$SRC/harness-install.sh" "$SRC/.claude/commands/sdd-pr-loop.md"; do
+    grep -A3 'Execution knobs are \*\*env-only\*\*' "$_f" | tr '\n' ' ' \
+      | grep -qE 'HARNESS_MERGE_VERIFY_CEILING[^.]*HARNESS_QUEUE_RECONCILE_CEILING' \
+      || fail "E99-F180: $_f's env-only knob sentence omits the merge-verify/queue-reconcile ceilings"
+  done
   pass "E99-F180 seed comments list every env-only knob and describe the opencode pin truthfully"
 }
 
