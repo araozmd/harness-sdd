@@ -2379,14 +2379,15 @@ test_lane_deprecation_reclaimed() {                    # F07 R2/R3/R4/R5
 test_lane_deprecation_reclaimed
 
 test_seed_comments_match_behaviour() {                   # E99-F180
-  # The comment header above `pr_loop:` must list EVERY env-only execution knob the loop
-  # reads, and the opencode pin comment must not claim an invalid pin aborts a run (it is
+  # The comment header above `pr_loop:` must list every env-only execution knob that
+  # tools/wait-for-codex.sh reads (poll interval/ceiling, first response, dry run, merge-verify
+  # ceiling and interval, queue-reconcile ceiling), and the opencode pin comment must not claim an invalid pin aborts a run (it is
   # warned about and dropped). Checked in BOTH the shipped config and the
   # seed heredoc in the installer, over the pr_loop header span / the pin line only.
   for _f in "$SRC/harness.config.yaml" "$SRC/harness-install.sh"; do
     _hdr="$(awk '/^# Codex PR review loop \(E18-F01\)/{k=1} k&&/^pr_loop:/{exit} k' "$_f" | tr '\n' ' ')"
     for _v in HARNESS_POLL_INTERVAL HARNESS_POLL_CEILING HARNESS_FIRST_RESPONSE HARNESS_DRY_RUN \
-              HARNESS_MERGE_VERIFY_CEILING HARNESS_QUEUE_RECONCILE_CEILING; do
+              HARNESS_MERGE_VERIFY_CEILING HARNESS_MERGE_VERIFY_INTERVAL HARNESS_QUEUE_RECONCILE_CEILING; do
       printf '%s' "$_hdr" | grep -qF "$_v" \
         || fail "E99-F180: $_f's pr_loop header does not list the env-only knob $_v"
     done
@@ -2403,7 +2404,7 @@ test_seed_comments_match_behaviour() {                   # E99-F180
       | grep -qE 'HARNESS_MERGE_VERIFY_CEILING[^.]*HARNESS_QUEUE_RECONCILE_CEILING' \
       || fail "E99-F180: $_f's env-only knob sentence omits the merge-verify/queue-reconcile ceilings"
   done
-  pass "E99-F180 seed comments list every env-only knob and describe the opencode pin truthfully"
+  pass "E99-F180 seed comments list the env-only knobs wait-for-codex.sh reads and describe the opencode pin truthfully"
 }
 
 test_seed_comments_match_behaviour

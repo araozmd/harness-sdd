@@ -33,7 +33,7 @@ or malformed value — means off, and the installer stamps no `/sdd-pr-loop` glu
 
 Execution knobs are **env-only** (never config): `HARNESS_POLL_INTERVAL` (60),
 `HARNESS_POLL_CEILING` (900), `HARNESS_FIRST_RESPONSE` (180), `HARNESS_MERGE_VERIFY_CEILING`
-(180), `HARNESS_QUEUE_RECONCILE_CEILING` (300), `HARNESS_DRY_RUN`.
+(180), `HARNESS_MERGE_VERIFY_INTERVAL` (10), `HARNESS_QUEUE_RECONCILE_CEILING` (300), `HARNESS_DRY_RUN`.
 
 Round cache: `.pr-loop/<pr>/round-<n>/` — gitignored and best-effort; if it is
 missing or corrupt, reconstruct it from the `gh` API.

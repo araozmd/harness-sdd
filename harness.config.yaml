@@ -299,7 +299,8 @@ models:
 # HARNESS_MERGE_STRATEGY. Execution knobs are env-ONLY (never config):
 # HARNESS_POLL_INTERVAL (60), HARNESS_POLL_CEILING (900),
 # HARNESS_FIRST_RESPONSE (180), HARNESS_DRY_RUN, HARNESS_MERGE_VERIFY_CEILING (180,
-# the post-merge receipt wait), HARNESS_QUEUE_RECONCILE_CEILING (300, the extra wait for a
+# the post-merge receipt wait), HARNESS_MERGE_VERIFY_INTERVAL (10, the poll step inside that
+# wait), HARNESS_QUEUE_RECONCILE_CEILING (300, the extra wait for a
 # queued merge before it is cancelled).
 # (The harness's own source repo opts in; every fresh install is seeded with `false`.)
 pr_loop:

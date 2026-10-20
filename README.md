@@ -310,7 +310,7 @@ first wait on the PR's **required** checks (`gh pr checks --required`, bounded b
 `HARNESS_POLL_CEILING`). Red or still-pending required CI goes to `needs-human`, never
 to a green summary. Both paths also refuse to go green if a review thread changed during
 that wait, and a merge that was only queued is reconciled and cancelled before the hand-off
-to `needs-human` (details in [docs/WORKFLOW.md](docs/WORKFLOW.md)).
+to `needs-human` (if the queue lands it during the reconcile, the PR takes the normal merged path) (details in [docs/WORKFLOW.md](docs/WORKFLOW.md)).
 
 Policy lives in `harness.config.yaml` under `pr_loop:` — `enabled` (opt-in master gate,
 seeded `false`), `auto_merge`, `max_rounds`, `blocking_severities`, `merge_strategy` —
@@ -319,7 +319,8 @@ per run by `HARNESS_PR_LOOP_ENABLED`, `HARNESS_AUTO_MERGE`, `HARNESS_MAX_ROUNDS`
 `HARNESS_BLOCKING_SEVERITIES`, `HARNESS_MERGE_STRATEGY`. Execution knobs are env-only:
 `HARNESS_POLL_INTERVAL` (60s), `HARNESS_POLL_CEILING` (900s), `HARNESS_FIRST_RESPONSE`
 (180s — fail fast when the Codex GitHub App never answers),
-`HARNESS_MERGE_VERIFY_CEILING` (180s), `HARNESS_QUEUE_RECONCILE_CEILING` (300s) and `HARNESS_DRY_RUN`
+`HARNESS_MERGE_VERIFY_CEILING` (180s), `HARNESS_MERGE_VERIFY_INTERVAL` (10s),
+`HARNESS_QUEUE_RECONCILE_CEILING` (300s) and `HARNESS_DRY_RUN`
 (`1` = a read-only rehearsal: every PR, push, label, thread and merge mutation is skipped
 and the round cache is kept apart under `.pr-loop/dry-run/`).
 `gh` and `jq` are required only by this loop; `init.sh` does not check for them.

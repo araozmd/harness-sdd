@@ -12,6 +12,9 @@ All notable changes to the harness body are recorded here. Versions follow
   dropped with no model stamped (it said it "aborts your OpenCode run"), and the env-only
   knob list gains `HARNESS_MERGE_VERIFY_CEILING` (180) and `HARNESS_QUEUE_RECONCILE_CEILING`
   (300). Comment text only; no value or behaviour changes.
+- The generated `/sdd-pr-loop` knob list now includes the merge-verify and queue-reconcile
+  ceilings and the `HARNESS_MERGE_VERIFY_INTERVAL` (10) poll step (all three also added to
+  README and `docs/INSTALL.md`).
 - **Upgrade semantics:** an existing `harness.config.yaml` is preserved and its `models:` and
   `pr_loop:` blocks are appended only when absent, so an upgraded install keeps its old
   comment text untouched. Only fresh installs (and a config without the block) get the new

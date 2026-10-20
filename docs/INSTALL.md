@@ -360,6 +360,7 @@ you add it. Each policy key takes a per-run env override —
 over the default). Execution knobs are **env-only**: `HARNESS_POLL_INTERVAL` (60),
 `HARNESS_POLL_CEILING` (900), `HARNESS_FIRST_RESPONSE` (180, `0` disables the probe) and
 `HARNESS_MERGE_VERIFY_CEILING` (180, the wait for the post-merge receipt),
+`HARNESS_MERGE_VERIFY_INTERVAL` (10, the poll step inside that wait),
 `HARNESS_QUEUE_RECONCILE_CEILING` (300, the extra wait for a queued merge before it is
 cancelled) and
 `HARNESS_DRY_RUN` (`1` suppresses every remote and repository mutation — ready, checkout,

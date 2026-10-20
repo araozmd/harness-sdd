@@ -722,8 +722,9 @@ is an `init.sh` dependency.
    Both terminal paths also run the `merge-verify pre` receipt (the PR's head must still
    be the reviewed head), wait on the required CI, and snapshot a `thread_fingerprint` of
    **every** review thread, resolved ones included, before that wait. Any difference
-   afterwards, or an unreadable snapshot, refuses the green action, records the round as
-   `stale` and routes to `needs-human`. Limits: a PR review body or a PR-level (issue)
+   afterwards, or an unreadable snapshot, refuses the green action and routes to
+   `needs-human`; a difference, an unreadable hand-back snapshot, or an unreadable
+   snapshot after the CI wait also records the round as `stale` (never in a dry run). Limits: a PR review body or a PR-level (issue)
    comment with no inline thread is not fingerprinted, and neither is an in-place edit of
    a non-last comment inside a thread. On the merge path, `gh pr merge` exiting `0` can
    mean only *enqueued* (merge queue or repo auto-merge): if `merge-verify post` finds the
@@ -731,7 +732,9 @@ is an `init.sh` dependency.
    `HARNESS_QUEUE_RECONCILE_CEILING` (default 300s), then cancels the request
    (`gh pr merge --disable-auto`, and the `dequeuePullRequest` mutation for a merge queue),
    re-reads the state and hands off as `needs-human` with a comment saying whether the
-   cancel was confirmed or a request may still be queued. A dry run does none of the
+   cancel was confirmed, the PR is CLOSED (nothing was left to cancel), or a request may
+   still be queued. If the queue lands the PR during the reconcile, the loop takes the
+   normal merged path instead. A dry run does none of the
    mutations.
 
 The per-round cache lives at `<HARNESS_DIR>/.pr-loop/<pr>/round-<n>/`, is gitignored, and
