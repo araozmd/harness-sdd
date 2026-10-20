@@ -126,3 +126,66 @@ Reviewed: 6f4f73b on e543f23 on 23a61c7, 2026-10-20. Scratch: scratchpad/E99-F17
 ## Advisory (non-blocking; both fail loud, not silent)
 - XG survived: `cont = ($0 ~ /\\$/)`, which drops the `sc &&` gate.
 - XA survived: dropping the CODEX_THREAD_ID anchor requirement. The anchor rule predates this feature.
+
+---
+
+# Round 3 review: REJECT (two small required fixes)
+
+Reviewed: 070847b on 6f4f73b on e543f23 on 23a61c7, 2026-10-20. Scratch: scratchpad/E99-F179-review3/.
+
+## Evidence
+- `./init.sh` rc=0. Full suite rc=0: `all 78 suites passed (/usr/bin/sh [GNU bash 5.3.15], --jobs 16)`, run with
+  TMPDIR=/var/tmp/E99-F179-review3, which was removed afterwards. Free space was 642G on / before and after.
+- change-size tier: `ok`.
+- HOST_MARKERS is byte-identical to c5f7af3. The harness-install.sh diff is comment-only, and the provenance and caveat
+  prose matches the per-front-end entries.
+- Mutants were run in a private `git archive` copy of the full tests/test_agents_host.sh, one at a time. Each diff
+  was printed and each restore checked with cmp.
+  - KILLED: R (old env regex, by envu_perline), XW (index), XW-trailing boundary, XG, XA (CODEX anchor), XA2 (CLAUDE
+    anchor), X1, X2, X4, X4b (owner lookup), unset clause only, env -u clause only, bare `-u` (sort -u), cont dropped
+    from sc, `cont=0`, per-line flush, and the sq clause (killed by the floor).
+  - SURVIVED: XW-leading boundary (fix 2), `n &&` in flush (an equivalent mutant), the floor set to `-ge 0`, and the
+    guard's `MISS) fail` set to `:` (see advisories).
+- Reviewer fixtures that the self-test does not cover, each run as complete / missing PI / missing OPENCODE:
+  - All correct (LIST, plus the right MISS and owner): `env -u A -u B cmd` on one line, `unset` with TAB separators,
+    tab-indented `unset … \` continuation, `unset` one per line with `\`, Python `for k in ("…",\n "…",\n):
+    env.pop(k, None)`, a `del env['…']` sequence, `os.environ.pop("…", None)` per line, `unset -v`,
+    `HOME=x env PATH=… -u …`, `cd x && unset …`, and `if ! env -u …`.
+
+## Required fixes
+1. **Silent miss: an `unset` / `env -u` list that opens a subshell or command substitution is invisible.**
+   This is at tests/test_agents_host.sh:296. The leading class `(^|[ \t;])` does not admit `(`, `` ` `` or `|`.
+   - These shapes give no LIST and no MISS, so they pass silently whether the list is complete or missing a variable:
+     - `(unset CLAUDECODE … ; sh x)`, the canonical one-command scrub;
+     - `out="$(env -u CLAUDECODE … sh x)"`, the shape this repo already uses at tests/test_install.sh:1824
+       (`"$(env -u HOME -u CODEX_HOME sh …)"`);
+     - `` out=`env -u …` ``;
+     - `echo y |env -u …`.
+   - These are `unset` / `env -u` lists. The guard comment and the CHANGELOG 0.97.2 say such lists "are checked", and
+     STILL NOT SEEN does not name these shapes. Under 3c that is a silent miss of a claimed form.
+   - Expected: change both leading classes to `(^|[^A-Za-z0-9_.$-])`.
+     - In the reviewer's private copy this fixed all four shapes (LIST, plus `MISS PI_CODING_AGENT pi` /
+       `MISS OPENCODE opencode`).
+     - `sort -u CLAUDECODE CODEX_THREAD_ID x` was still ignored, and the full test_agents_host.sh stayed green on the
+       real tests/*.sh.
+   - Add a `subshell` form to the fixture loop (for example `(unset <vars>; cmd)` or `x="$(env -u … cmd)"`), and show
+     that reverting the class goes red.
+   - Alternatively, name the form under STILL NOT SEEN and in CHANGELOG. The fix is cheaper than that.
+2. **The leading word boundary is unpinned, yet 070847b says "pin whole-word".**
+   - Mutant: `("(^|[^A-Za-z0-9_])" V[i] "([^A-Za-z0-9_]|$)")` becomes `(V[i] "([^A-Za-z0-9_]|$)")`. rc=0, SURVIVED.
+   - Why the suite misses it: no HOST_MARKERS variable is a suffix of another, so fixtures built only from table names
+     cannot kill it.
+   - What it lets through: under the mutant, `unset X_CLAUDECODE CODEX_THREAD_ID` is read as a scrub list, and
+     `unset MY_OPENCODE …` would mask a missing OPENCODE.
+   - Expected: add a negative fixture, `printf 'unset X_CLAUDECODE CODEX_THREAD_ID\n'`, and assert that it gives no
+     LIST. The reviewer checked that it gives LIST under the mutant and nothing at HEAD.
+
+## Advisory (non-blocking)
+- The real-file wiring is unpinned. `MISS) fail …` set to `MISS) :` survives, and so does the floor set to `-ge 0`.
+  This was true before the feature: the F178 grep loop was equally unpinned, because the real lists are correct.
+  - A cheap pin: let test_host_scrub_lists_cover_table take a directory, and run it in a subshell on a synthetic dir
+    with one missing variable, expecting a non-zero exit.
+- Unclaimed forms, each silent: `env --unset=VAR` and glued `env -uVAR`. Also, `unset … ; echo PI_CODING_AGENT` on the
+  same line counts a non-scrubbed word, because sc is per line, not per statement. None exists in tests/.
+- `n &&` in flush is redundant: h is non-empty only when n > 0. The mutant is equivalent, so this is not a finding.
+- Pre-existing: CHANGELOG.md:5 still points at a non-existent "`CLAUDE.md` → Versioning".

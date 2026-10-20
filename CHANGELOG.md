@@ -17,8 +17,9 @@ All notable changes to the harness body are recorded here. Versions follow
   lists (including backslash-continued ones), double-quoted lists and lists split across lines
   are checked too; its failure text names the front-end that owns the missing variable. A
   synthetic-fixture self-test pins each form. Still unseen, and documented in the guard: prefix
-  scrubs, a list interrupted by a line naming no variable, and a scrub that never names both
-  `CLAUDECODE` and `CODEX_THREAD_ID`.
+  scrubs, a list interrupted by a line naming no variable, a scrub that never names both
+  `CLAUDECODE` and `CODEX_THREAD_ID`, `env --unset=VAR` and `env -uVAR`, and a same-line
+  over-count such as `unset …; echo PI_CODING_AGENT`.
 
 ## [0.97.1] — 2026-10-19
 

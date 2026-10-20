@@ -274,7 +274,9 @@ test_host_opencode_markers() {
 # lines that each quote ONE anchor (e.g. a run of asserts) therefore also count as one list.
 # STILL NOT SEEN (by design, a bound not a defect): a prefix scrub such as
 # startswith('OPENCODE'); a list interrupted by a line that hits no variable (a comment or
-# blank line); a scrub that never names both CLAUDECODE and CODEX_THREAD_ID. New host-mode
+# blank line); a scrub that never names both CLAUDECODE and CODEX_THREAD_ID; `env --unset=VAR`
+# and `env -uVAR` (no space); and a same-line OVER-count, e.g. `unset ...; echo PI_CODING_AGENT`,
+# which counts the unscrubbed word as a hit. New host-mode
 # tests should not hand-roll a scrub: run under `env -i` (the hrun/inst helpers) or set
 # HARNESS_HOST_AGENT, either of which makes the marker env irrelevant.
 # Non-vacuous: at least the two known scrubbers must be found. The matcher is pinned by
@@ -293,7 +295,7 @@ scrub_scan() {
       delete h; n = 0
     }
     { hit = 0
-      sc = (cont || $0 ~ /(^|[ \t;])unset[ \t]/ || $0 ~ /(^|[ \t;])env[ \t](.*[ \t])?-u[ \t]/)
+      sc = (cont || $0 ~ /(^|[^A-Za-z0-9_.$-])unset[ \t]/ || $0 ~ /(^|[^A-Za-z0-9_.$-])env[ \t](.*[ \t])?-u[ \t]/)
       cont = (sc && $0 ~ /\\$/)
       for (i = 1; i <= nv; i++)
         if (index($0, q V[i] q) || index($0, "\"" V[i] "\"") || (sc && $0 ~ ("(^|[^A-Za-z0-9_])" V[i] "([^A-Za-z0-9_]|$)"))) { h[V[i]] = 1; hit = 1 }
@@ -312,10 +314,11 @@ scrub_tables() {
   marker_table | awk 'NF > 1 { for (i = 2; i <= NF; i++) print $i, $1 }' | sort -u > "$T/varowner.txt"
 }
 
-test_host_scrub_lists_cover_table() {
-  scrub_tables
+# scrub_check_dir <dir> <min-lists> — the real-file loop: fail on any list omitting a variable
+# or on fewer than <min-lists> lists found. Wiring pinned by test_host_scrub_wiring.
+scrub_check_dir() {
   _n=0
-  for _f in "$SRC"/tests/*.sh; do
+  for _f in "$1"/*.sh; do
     case "$_f" in */test_agents_host.sh) continue ;; esac
     scrub_scan "$_f" > "$T/scrub.txt"
     while IFS=' ' read -r _k _v _o; do
@@ -325,7 +328,27 @@ test_host_scrub_lists_cover_table() {
       esac
     done < "$T/scrub.txt"
   done
-  [ "$_n" -ge 2 ] || fail "E99-F178: found $_n marker scrub lists, expected at least 2 (test_frontend_retirement.sh, test_codex_native.sh)"
+  [ "$_n" -ge "$2" ] || fail "E99-F178: found $_n marker scrub lists, expected at least $2 (test_frontend_retirement.sh, test_codex_native.sh)"
+  return 0
+}
+
+test_host_scrub_lists_cover_table() {
+  scrub_tables
+  scrub_check_dir "$SRC/tests" 2
+}
+
+# The loop itself fails on a bad list and on too few lists (each run in a subshell, since
+# `fail` exits), and passes on good ones.
+test_host_scrub_wiring() {
+  scrub_tables
+  _w="$T/wiring"; rm -rf "$_w"; mkdir -p "$_w"
+  _all="$(tr '\n' ' ' < "$T/allvars.txt")"
+  printf 'unset %s\n' "$_all" > "$_w/good1.sh"
+  printf 'unset %s\n' "$_all" > "$_w/good2.sh"
+  ( scrub_check_dir "$_w" 2 ) >/dev/null 2>&1 || fail "E99-F179: the scrub loop rejected two complete fixtures"
+  ( scrub_check_dir "$_w" 3 ) >/dev/null 2>&1 && fail "E99-F179: the scrub loop accepted fewer lists than its floor"
+  printf 'unset CLAUDECODE CODEX_THREAD_ID\n' > "$_w/bad.sh"
+  ( scrub_check_dir "$_w" 2 ) >/dev/null 2>&1 && fail "E99-F179: the scrub loop accepted an incomplete list"
   return 0
 }
 
@@ -341,7 +364,7 @@ test_host_scrub_matcher_forms() {
   _first="CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_THREAD_ID"
   for _miss in PI_CODING_AGENT OPENCODE_TERMINAL OPENCODE; do
     _own="$(awk -v v="$_miss" '$1 == v { print $2 }' "$T/varowner.txt")"
-    for _form in squote dquote multiline unset envu unset_cont envu_cont envu_perline; do
+    for _form in squote dquote multiline unset envu unset_cont envu_cont envu_perline subshell cmdsub pipe; do
       for _case in complete missing; do
         _vars="$_all"; [ "$_case" = missing ] && _vars="$(_drop "$_miss")"
         _rest="$(printf '%s\n' "$_vars" | tr ' ' '\n' | grep . | grep -vx -e CLAUDECODE -e CLAUDE_CODE_ENTRYPOINT -e CODEX_THREAD_ID | tr '\n' ' ')"
@@ -353,6 +376,9 @@ test_host_scrub_matcher_forms() {
           envu)       { printf 'env'; for _w in $_vars; do printf ' -u %s' "$_w"; done; printf ' cmd\n'; } ;;
           unset_cont) printf 'unset %s \\\n  %s\n' "$_first" "$_rest" ;;
           envu_perline) { printf 'env'; for _w in $_vars; do printf ' -u %s \\\n ' "$_w"; done; printf ' cmd\n'; } ;;
+          subshell)   printf '(unset %s; cmd)\n' "$_vars" ;;
+          cmdsub)     { printf 'x="$(env'; for _w in $_vars; do printf ' -u %s' "$_w"; done; printf ' cmd)"\n'; } ;;
+          pipe)       { printf 'echo|env'; for _w in $_vars; do printf ' -u %s' "$_w"; done; printf ' cmd\n'; } ;;
           envu_cont)  { printf 'env'; for _w in $_first; do printf ' -u %s' "$_w"; done; printf ' \\\n '; for _w in $_rest; do printf ' -u %s' "$_w"; done; printf ' cmd\n'; } ;;
         esac > "$T/fx.sh"
         scrub_scan "$T/fx.sh" > "$T/fx.out"
@@ -377,6 +403,8 @@ test_host_scrub_matcher_forms() {
   [ -z "$(scrub_scan "$T/fx.sh")" ] || fail "E99-F179: a continued non-scrub line was read as a scrub list"
   printf "for k in 'CLAUDECODE' 'OPENCODE'; do :; done\n" > "$T/fx.sh"
   [ -z "$(scrub_scan "$T/fx.sh")" ] || fail "E99-F179: a list without the CODEX_THREAD_ID anchor was read as a scrub list"
+  printf 'unset X_CLAUDECODE CODEX_THREAD_ID\n' > "$T/fx.sh"
+  [ -z "$(scrub_scan "$T/fx.sh")" ] || fail "E99-F179: X_CLAUDECODE was read as the CLAUDECODE variable (leading word boundary)"
   printf "for k in 'CODEX_THREAD_ID' 'OPENCODE'; do :; done\n" > "$T/fx.sh"
   [ -z "$(scrub_scan "$T/fx.sh")" ] || fail "E99-F179: a list without the CLAUDECODE anchor was read as a scrub list"
   return 0
@@ -1245,6 +1273,8 @@ test_host_opencode_markers
 pass "each opencode marker (1.x and 2.0.32) resolves opencode alone and ties with CLAUDECODE (E99-F178)"
 test_host_scrub_lists_cover_table
 pass "every suite marker-scrub list names every HOST_MARKERS variable (E99-F178)"
+test_host_scrub_wiring
+pass "the scrub loop fails on an incomplete list and below its floor (E99-F179)"
 test_host_scrub_matcher_forms
 pass "the scrub matcher recognises each form and names the owning front-end on a miss (E99-F179)"
 test_host_env_declaration_wins
