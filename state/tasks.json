@@ -1352,7 +1352,8 @@
         {
           "id": "E99-F180",
           "title": "Docs sweep: bring human-facing docs in line with 0.96.0-0.97.2",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "c302724db3f3b719b9b534179f0ec8f912bffada", "ref": "c302724db3f3b719b9b534179f0ec8f912bffada", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
