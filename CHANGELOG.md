@@ -14,9 +14,11 @@ All notable changes to the harness body are recorded here. Versions follow
   user shell against an isolated `opencode serve`). No `HOST_MARKERS` row or detection
   behaviour changes.
 - `tests/test_agents_host.sh`: the scrub-list guard now parses per file, so `unset` / `env -u`
-  lists, double-quoted lists and lists split across lines are checked too; its failure text
-  names the front-end that owns the missing variable. Prefix scrubs remain unseen and are
-  documented in the guard.
+  lists (including backslash-continued ones), double-quoted lists and lists split across lines
+  are checked too; its failure text names the front-end that owns the missing variable. A
+  synthetic-fixture self-test pins each form. Still unseen, and documented in the guard: prefix
+  scrubs, a list interrupted by a line naming no variable, and a scrub that never names both
+  `CLAUDECODE` and `CODEX_THREAD_ID`.
 
 ## [0.97.1] — 2026-10-19
 
