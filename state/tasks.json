@@ -1352,7 +1352,7 @@
         {
           "id": "E99-F180",
           "title": "Docs sweep: bring human-facing docs in line with 0.96.0-0.97.2",
-          "status": "pending",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
