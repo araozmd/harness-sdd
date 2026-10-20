@@ -262,29 +262,151 @@ test_host_opencode_markers() {
   return 0
 }
 
-# ── E99-F178 — every suite's host-marker SCRUB list covers EVERY table variable ─
+# ── E99-F178/F179 — every suite's host-marker SCRUB list covers EVERY table variable ─
 # A suite that runs `--agents=host` with HARNESS_HOST_AGENT unset must start from a clean
 # marker env, or it fails on exactly the host a marker was added for (E99-F178 round 2:
 # test_frontend_retirement.sh popped OPENCODE/OPENCODE_PID only and went red under
-# OPENCODE_TERMINAL=1). A scrub list is a line that quotes both 'CLAUDECODE' and
-# 'CODEX_THREAD_ID'; each must quote every variable of the shipped HOST_MARKERS table.
-# Non-vacuous: at least the two known scrubbers must be found.
-test_host_scrub_lists_cover_table() {
+# OPENCODE_TERMINAL=1). Parsed PER FILE (E99-F179): a line "hits" variable V when it quotes
+# V ('V' or "V") or is an `unset` / `env ... -u` line naming V as a word; such a statement
+# continues across lines ending in a backslash. A scrub list is a run of consecutive hit
+# lines (so a list split across lines is one list) that hits both CLAUDECODE and
+# CODEX_THREAD_ID; it must hit every variable of the shipped HOST_MARKERS table. Consecutive
+# lines that each quote ONE anchor (e.g. a run of asserts) therefore also count as one list.
+# STILL NOT SEEN (by design, a bound not a defect): a prefix scrub such as
+# startswith('OPENCODE'); a list interrupted by a line that hits no variable (a comment or
+# blank line); a scrub that never names both CLAUDECODE and CODEX_THREAD_ID; `env --unset=VAR`
+# and `env -uVAR` (no space); and a same-line OVER-count, e.g. `unset ...; echo PI_CODING_AGENT`,
+# which counts the unscrubbed word as a hit. New host-mode
+# tests should not hand-roll a scrub: run under `env -i` (the hrun/inst helpers) or set
+# HARNESS_HOST_AGENT, either of which makes the marker env irrelevant.
+# Non-vacuous: at least the two known scrubbers must be found. The matcher is pinned by
+# test_host_scrub_matcher_forms (synthetic fixtures, one per form).
+
+# scrub_scan <file> — needs $T/allvars.txt (names) and $T/varowner.txt ("VAR front-end").
+# Prints `LIST` per scrub list found and `MISS <var> <owner>` per table variable it omits.
+scrub_scan() {
+  awk -v vars="$T/allvars.txt" -v owners="$T/varowner.txt" -v q="'" '
+    BEGIN { while ((getline v < vars) > 0) V[++nv] = v; while ((getline l < owners) > 0) { split(l, a, " "); O[a[1]] = a[2] } }
+    function flush(  i) {
+      if (n && (("CLAUDECODE" in h) && ("CODEX_THREAD_ID" in h))) {
+        print "LIST"
+        for (i = 1; i <= nv; i++) if (!(V[i] in h)) print "MISS " V[i] " " O[V[i]]
+      }
+      delete h; n = 0
+    }
+    { hit = 0
+      sc = (cont || $0 ~ /(^|[^A-Za-z0-9_.$-])unset[ \t]/ || $0 ~ /(^|[^A-Za-z0-9_.$-])env[ \t](.*[ \t])?-u[ \t]/)
+      cont = (sc && $0 ~ /\\$/)
+      for (i = 1; i <= nv; i++)
+        if (index($0, q V[i] q) || index($0, "\"" V[i] "\"") || (sc && $0 ~ ("(^|[^A-Za-z0-9_])" V[i] "([^A-Za-z0-9_]|$)"))) { h[V[i]] = 1; hit = 1 }
+      if (hit) n++; else flush() }
+    END { flush() }' "$1"
+}
+
+# scrub_msg <file-name> <var> <owner> — the guard's failure text (names the owning front-end).
+scrub_msg() {
+  printf '%s' "E99-F178: $1 scrubs host markers but its list omits $2 — it would fail under the $3 front-end (a $3 session)"
+}
+
+scrub_tables() {
   marker_table | awk 'NF > 1 { for (i = 2; i <= NF; i++) print $i }' | sort -u > "$T/allvars.txt"
   [ -s "$T/allvars.txt" ] || fail "E99-F178: no marker variables parsed from HOST_MARKERS"
+  marker_table | awk 'NF > 1 { for (i = 2; i <= NF; i++) print $i, $1 }' | sort -u > "$T/varowner.txt"
+}
+
+# scrub_check_dir <dir> <min-lists> — the real-file loop: fail on any list omitting a variable
+# or on fewer than <min-lists> lists found. Wiring pinned by test_host_scrub_wiring.
+scrub_check_dir() {
   _n=0
-  for _f in "$SRC"/tests/*.sh; do
+  for _f in "$1"/*.sh; do
     case "$_f" in */test_agents_host.sh) continue ;; esac
-    grep -n "'CLAUDECODE'.*'CODEX_THREAD_ID'\|'CODEX_THREAD_ID'.*'CLAUDECODE'" "$_f" > "$T/scrub.txt" 2>/dev/null || continue
-    while IFS= read -r _line; do
-      _n=$((_n + 1))
-      while IFS= read -r _v; do
-        printf '%s\n' "$_line" | grep -qF "'$_v'" \
-          || fail "E99-F178: $(basename "$_f") scrubs host markers but its list omits $_v — it would fail under an opencode session"
-      done < "$T/allvars.txt"
+    scrub_scan "$_f" > "$T/scrub.txt"
+    while IFS=' ' read -r _k _v _o; do
+      case "$_k" in
+        LIST) _n=$((_n + 1)) ;;
+        MISS) fail "$(scrub_msg "$(basename "$_f")" "$_v" "$_o")" ;;
+      esac
     done < "$T/scrub.txt"
   done
-  [ "$_n" -ge 2 ] || fail "E99-F178: found $_n marker scrub lists, expected at least 2 (test_frontend_retirement.sh, test_codex_native.sh)"
+  [ "$_n" -ge "$2" ] || fail "E99-F178: found $_n marker scrub lists, expected at least $2 (test_frontend_retirement.sh, test_codex_native.sh)"
+  return 0
+}
+
+test_host_scrub_lists_cover_table() {
+  scrub_tables
+  scrub_check_dir "$SRC/tests" 2
+}
+
+# The loop itself fails on a bad list and on too few lists (each run in a subshell, since
+# `fail` exits), and passes on good ones.
+test_host_scrub_wiring() {
+  scrub_tables
+  _w="$T/wiring"; rm -rf "$_w"; mkdir -p "$_w"
+  _all="$(tr '\n' ' ' < "$T/allvars.txt")"
+  printf 'unset %s\n' "$_all" > "$_w/good1.sh"
+  printf 'unset %s\n' "$_all" > "$_w/good2.sh"
+  ( scrub_check_dir "$_w" 2 ) >/dev/null 2>&1 || fail "E99-F179: the scrub loop rejected two complete fixtures"
+  ( scrub_check_dir "$_w" 3 ) >/dev/null 2>&1 && fail "E99-F179: the scrub loop accepted fewer lists than its floor"
+  printf 'unset CLAUDECODE CODEX_THREAD_ID\n' > "$_w/bad.sh"
+  ( scrub_check_dir "$_w" 2 ) >/dev/null 2>&1 && fail "E99-F179: the scrub loop accepted an incomplete list"
+  return 0
+}
+
+# Pin each recognised FORM on synthetic fixtures: a complete list yields one LIST and no MISS;
+# the same list with one variable removed yields exactly one LIST and one `MISS <var> <owner>`
+# whose message names that owner front-end. Deleting any form's clause fails this test.
+test_host_scrub_matcher_forms() {
+  scrub_tables
+  _all="$(tr '\n' ' ' < "$T/allvars.txt")"
+  _drop() { printf '%s\n' "$_all" | tr ' ' '\n' | grep -vx "$1" | grep . | tr '\n' ' '; }
+  _sq() { for _w in $1; do printf "'%s' " "$_w"; done; }
+  _dq() { for _w in $1; do printf '"%s" ' "$_w"; done; }
+  _first="CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_THREAD_ID"
+  for _miss in PI_CODING_AGENT OPENCODE_TERMINAL OPENCODE; do
+    _own="$(awk -v v="$_miss" '$1 == v { print $2 }' "$T/varowner.txt")"
+    for _form in squote dquote multiline unset envu unset_cont envu_cont envu_perline subshell cmdsub pipe; do
+      for _case in complete missing; do
+        _vars="$_all"; [ "$_case" = missing ] && _vars="$(_drop "$_miss")"
+        _rest="$(printf '%s\n' "$_vars" | tr ' ' '\n' | grep . | grep -vx -e CLAUDECODE -e CLAUDE_CODE_ENTRYPOINT -e CODEX_THREAD_ID | tr '\n' ' ')"
+        case "$_form" in
+          squote)     { printf 'for k in '; _sq "$_vars"; printf '; do :; done\n'; } ;;
+          dquote)     { printf 'for k in '; _dq "$_vars"; printf '; do :; done\n'; } ;;
+          multiline)  { printf 'for k in '; _sq "$_first"; printf '\n  '; _sq "$_rest"; printf '; do :; done\n'; } ;;
+          unset)      printf 'unset %s\n' "$_vars" ;;
+          envu)       { printf 'env'; for _w in $_vars; do printf ' -u %s' "$_w"; done; printf ' cmd\n'; } ;;
+          unset_cont) printf 'unset %s \\\n  %s\n' "$_first" "$_rest" ;;
+          envu_perline) { printf 'env'; for _w in $_vars; do printf ' -u %s \\\n ' "$_w"; done; printf ' cmd\n'; } ;;
+          subshell)   printf '(unset %s; cmd)\n' "$_vars" ;;
+          cmdsub)     { printf 'x="$(env'; for _w in $_vars; do printf ' -u %s' "$_w"; done; printf ' cmd)"\n'; } ;;
+          pipe)       { printf 'echo|env'; for _w in $_vars; do printf ' -u %s' "$_w"; done; printf ' cmd\n'; } ;;
+          envu_cont)  { printf 'env'; for _w in $_first; do printf ' -u %s' "$_w"; done; printf ' \\\n '; for _w in $_rest; do printf ' -u %s' "$_w"; done; printf ' cmd\n'; } ;;
+        esac > "$T/fx.sh"
+        scrub_scan "$T/fx.sh" > "$T/fx.out"
+        [ "$(grep -c '^LIST$' "$T/fx.out")" = 1 ] || fail "E99-F179: $_form/$_case fixture: expected exactly one scrub list, got: $(tr '\n' '|' < "$T/fx.out")"
+        if [ "$_case" = complete ]; then
+          ! grep -q '^MISS' "$T/fx.out" || fail "E99-F179: $_form complete fixture reported a miss: $(tr '\n' '|' < "$T/fx.out")"
+        else
+          [ "$(grep -c '^MISS' "$T/fx.out")" = 1 ] && grep -qx "MISS $_miss $_own" "$T/fx.out" \
+            || fail "E99-F179: $_form fixture missing $_miss: expected one 'MISS $_miss $_own', got: $(tr '\n' '|' < "$T/fx.out")"
+        fi
+      done
+    done
+    scrub_msg x.sh "$_miss" "$_own" | grep -q "under the $_own front-end" \
+      || fail "E99-F179: the failure text does not name the owning front-end $_own"
+  done
+  # False-positive guard: `sort -u` is not an env -u scrub, so its words are not hits.
+  printf 'sort -u CLAUDECODE CODEX_THREAD_ID x\n' > "$T/fx.sh"
+  [ -z "$(scrub_scan "$T/fx.sh")" ] || fail "E99-F179: a 'sort -u' line was read as a scrub list"
+  # Negative fixtures: a backslash after a NON-scrub line must not turn the next line's bare
+  # words into hits, and a list naming only one of the two anchors is not a scrub list.
+  printf 'echo x \\\n  %s\n' "$_all" > "$T/fx.sh"
+  [ -z "$(scrub_scan "$T/fx.sh")" ] || fail "E99-F179: a continued non-scrub line was read as a scrub list"
+  printf "for k in 'CLAUDECODE' 'OPENCODE'; do :; done\n" > "$T/fx.sh"
+  [ -z "$(scrub_scan "$T/fx.sh")" ] || fail "E99-F179: a list without the CODEX_THREAD_ID anchor was read as a scrub list"
+  printf 'unset X_CLAUDECODE CODEX_THREAD_ID\n' > "$T/fx.sh"
+  [ -z "$(scrub_scan "$T/fx.sh")" ] || fail "E99-F179: X_CLAUDECODE was read as the CLAUDECODE variable (leading word boundary)"
+  printf "for k in 'CODEX_THREAD_ID' 'OPENCODE'; do :; done\n" > "$T/fx.sh"
+  [ -z "$(scrub_scan "$T/fx.sh")" ] || fail "E99-F179: a list without the CLAUDECODE anchor was read as a scrub list"
   return 0
 }
 
@@ -1151,6 +1273,10 @@ test_host_opencode_markers
 pass "each opencode marker (1.x and 2.0.32) resolves opencode alone and ties with CLAUDECODE (E99-F178)"
 test_host_scrub_lists_cover_table
 pass "every suite marker-scrub list names every HOST_MARKERS variable (E99-F178)"
+test_host_scrub_wiring
+pass "the scrub loop fails on an incomplete list and below its floor (E99-F179)"
+test_host_scrub_matcher_forms
+pass "the scrub matcher recognises each form and names the owning front-end on a miss (E99-F179)"
 test_host_env_declaration_wins
 test_host_env_declaration_invalid_warns
 pass "HARNESS_HOST_AGENT declares the host; an invalid value warns and continues (R9, R10)"

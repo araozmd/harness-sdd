@@ -1711,10 +1711,15 @@ AGENT_KEYS="claude codex opencode antigravity pi"
 #     picker row, and is never written to .harness/.agents (R17, R18).
 #
 # PROVENANCE — one entry per key, recording the CLI + VERSION each of that row's marker
-# variables was observed on (R8). Every name below appeared in the `comm -13` delta
-# between a plain login shell and a shell the CLI itself spawned, on 2026-07-28; none of
-# them was present in the plain login shell (the only front-end name that WAS is
-# OPENCODE_API_KEY — a credential, and forbidden by R6, which is the whole point).
+# variables was observed on, and when and how (R8). Date and method differ per front-end:
+# the entries record them where known (opencode 2.0.32: 2026-10-19; pi 1.2.0: 2026-10-13);
+# the claude, codex and opencode 1.x observations date from 2026-07-28 and carry no date of
+# their own below. Every name recorded appeared in a
+# `comm -13` delta between a baseline environment and the environment the CLI itself spawned
+# (claude/codex/pi/opencode 1.x: a plain login shell; opencode 2.x: the launch env of an
+# isolated `opencode serve`, see its entry); none of them was in the baseline (the only
+# front-end name that WAS in a plain login shell is OPENCODE_API_KEY — a credential, and
+# forbidden by R6, which is the whole point).
 #
 # FORMAT IS LOAD-BEARING, do not reflow: an entry starts with the agent key at exactly
 # three spaces of indent and continues on more deeply indented lines. Each entry names
@@ -1760,11 +1765,15 @@ AGENT_KEYS="claude codex opencode antigravity pi"
 # is rejected); `PI_SESSION_ID` (present whenever `PI_CODING_AGENT` is, so it adds no
 # detection power, and one verified marker is enough).
 #
-# Caveat recorded honestly: codex/opencode were exercised through each
-# CLI's NON-INTERACTIVE entrypoint (`exec`/`run`/`-p`), which is the mode a scripted
-# install runs under. If an interactive TUI session turns out not to export the same
-# name, that front-end is merely undetected there — the fallback keeps the install
-# byte-identical to today, so the failure mode is inert.
+# Caveat recorded honestly: how much of each CLI was exercised differs per front-end, and
+# only what is stated here was observed. codex 0.145.0 and opencode 1.18.5 were exercised
+# only through their NON-INTERACTIVE entrypoints (`codex exec` / `opencode run`), pi 1.2.0
+# through `pi -p`; no interactive TUI session of those was observed. opencode 2.0.32 is the
+# exception: both the agent shell tool (driven through `opencode serve` and the session
+# prompt API) and the `!` user shell were observed, though still no interactive TUI. If a
+# TUI session turns out not to export the same name, that front-end is merely undetected
+# there — the fallback keeps the install byte-identical to today, so the failure mode is
+# inert.
 HOST_MARKERS="
 claude CLAUDECODE CLAUDE_CODE_ENTRYPOINT
 codex CODEX_THREAD_ID

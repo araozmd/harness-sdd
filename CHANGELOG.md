@@ -4,6 +4,23 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `CLAUDE.md` → Versioning).
 
+## [0.97.2] — 2026-10-20
+
+### Fixed — host-marker provenance prose and scrub-list guard (E99-F179)
+- `harness-install.sh`: comment-only. The `HOST_MARKERS` provenance header and the "Caveat
+  recorded honestly" paragraph no longer claim every name was observed on 2026-07-28 against
+  a plain login shell, or that only non-interactive entrypoints were exercised. They now state
+  the evidence per front-end, including the opencode 2.0.32 method (agent shell tool and `!`
+  user shell against an isolated `opencode serve`). No `HOST_MARKERS` row or detection
+  behaviour changes.
+- `tests/test_agents_host.sh`: the scrub-list guard now parses per file, so `unset` / `env -u`
+  lists (including backslash-continued ones), double-quoted lists and lists split across lines
+  are checked too; its failure text names the front-end that owns the missing variable. A
+  synthetic-fixture self-test pins each form. Still unseen, and documented in the guard: prefix
+  scrubs, a list interrupted by a line naming no variable, a scrub that never names both
+  `CLAUDECODE` and `CODEX_THREAD_ID`, `env --unset=VAR` and `env -uVAR`, and a same-line
+  over-count such as `unset …; echo PI_CODING_AGENT`.
+
 ## [0.97.1] — 2026-10-19
 
 ### Fixed — OpenCode 2.x: pin guard matches 2.x's rule; 2.x host markers recorded (E99-F178)
