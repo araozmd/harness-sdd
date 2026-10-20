@@ -72,3 +72,57 @@ Reviewed: e543f23 on 23a61c7 on c5f7af3, branch fix/E99-F179-host-marker-advisor
 - Pre-existing and out of scope: CHANGELOG.md:5 points at "`CLAUDE.md` → Versioning", which does not exist.
   The bump rule lives at AGENTS.md:113-117 and covers harness-install.sh with no comment-only exemption, so
   PATCH 0.97.2 is correct.
+
+---
+
+# Round 2 review: REJECT (one required fix plus one small pin)
+
+Reviewed: 6f4f73b on e543f23 on 23a61c7, 2026-10-20. Scratch: scratchpad/E99-F179-review2/.
+
+## Evidence
+- `./init.sh` rc=0. Full suite rc=0: `all 78 suites passed (/usr/bin/sh [GNU bash 5.3.15], --jobs 16)`,
+  run with TMPDIR=/var/tmp/E99-F179-review2, which was removed afterwards. Free space was 642G on / before and after.
+- Mutants were run in a private `git archive` copy, one at a time, with each diff printed and each restore checked with cmp:
+  - KILLED: X1 (dq clause), X2 (`sc = 0`), unset clause only, env -u clause only, bare `-u` (killed by the sort -u fixture),
+    X4 (owner text), `cont` dropped from `sc`, `cont = 0`, per-line flush (multiline), and the sq clause (killed by the floor).
+  - SURVIVED: see fix 2 and the advisories.
+- Round-1 probes: the correct `unset … \` continuation now gives LIST with no MISS, and the broken one is caught.
+- Edge cases:
+  - Continuation into a non-scrub line: OK.
+  - Next statement after a continuation: no leak.
+  - Trailing `\` at EOF: OK.
+  - CRLF: `\`+CR is not a continuation. sh agrees (it runs the next line as a command), and no tests/*.sh has CR, so this does not matter.
+- Real lists: test_codex_native.sh and test_frontend_retirement.sh each give one LIST, so the floor holds.
+- HOST_MARKERS is unchanged, and the harness-install.sh diff is comment-only.
+- Change-size: tier `ok`.
+
+## Required fixes
+1. **An `env -u` list written one flag per line is invisible.** This is at tests/test_agents_host.sh:296.
+   - The cause: `/(^|[ \t;])env[ \t].*[ \t]-u[ \t]/` needs whitespace both after `env` and before `-u`, so the
+     first `-u` in `env -u X` never matches. A line matches only when it has a second `-u`.
+   - The effect: this idiomatic scrub is not recognised, whether complete or missing PI (no LIST, silent pass):
+     ```
+     env -u CLAUDECODE \
+         -u CLAUDE_CODE_ENTRYPOINT \
+         -u CODEX_THREAD_ID \
+         -u OPENCODE -u OPENCODE_PID -u OPENCODE_SESSION_ID -u OPENCODE_TERMINAL \
+         cmd
+     ```
+   - Why the self-test misses it: the `envu_cont` fixture puts three `-u` on its first line.
+   - The CHANGELOG says "`env -u` lists (including backslash-continued ones) … are checked", and the 6f4f73b
+     subject says the same. Under 3c that is an over-claim.
+   - Expected: change the regex to `/(^|[ \t;])env[ \t](.*[ \t])?-u[ \t]/`. In the reviewer's private copy this made
+     the form above give `LIST|MISS PI_CODING_AGENT pi`; the complete form gave `LIST`, `sort -u` was still ignored,
+     and the suite stayed green. Add an `envu_perline` fixture (one `-u` per line) and show that reverting the regex
+     goes red.
+2. **Word-boundary matching is unpinned (XW survived).** Replacing the `(^|[^A-Za-z0-9_])V([^A-Za-z0-9_]|$)` test
+   with `index($0, V[i])` leaves the suite green.
+   - Under that mutant, `unset … OPENCODE_PID …` with OPENCODE missing passes silently, because OPENCODE matches
+     inside OPENCODE_PID.
+   - The comment claims "naming V as a word" and "The matcher is pinned".
+   - Expected: add OPENCODE to the `_miss` loop (`for _miss in PI_CODING_AGENT OPENCODE_TERMINAL OPENCODE`). Its
+     unset/envu fixtures still contain OPENCODE_PID, so they kill XW.
+
+## Advisory (non-blocking; both fail loud, not silent)
+- XG survived: `cont = ($0 ~ /\\$/)`, which drops the `sc &&` gate.
+- XA survived: dropping the CODEX_THREAD_ID anchor requirement. The anchor rule predates this feature.

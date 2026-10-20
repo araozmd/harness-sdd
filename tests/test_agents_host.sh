@@ -293,7 +293,7 @@ scrub_scan() {
       delete h; n = 0
     }
     { hit = 0
-      sc = (cont || $0 ~ /(^|[ \t;])unset[ \t]/ || $0 ~ /(^|[ \t;])env[ \t].*[ \t]-u[ \t]/)
+      sc = (cont || $0 ~ /(^|[ \t;])unset[ \t]/ || $0 ~ /(^|[ \t;])env[ \t](.*[ \t])?-u[ \t]/)
       cont = (sc && $0 ~ /\\$/)
       for (i = 1; i <= nv; i++)
         if (index($0, q V[i] q) || index($0, "\"" V[i] "\"") || (sc && $0 ~ ("(^|[^A-Za-z0-9_])" V[i] "([^A-Za-z0-9_]|$)"))) { h[V[i]] = 1; hit = 1 }
@@ -339,9 +339,9 @@ test_host_scrub_matcher_forms() {
   _sq() { for _w in $1; do printf "'%s' " "$_w"; done; }
   _dq() { for _w in $1; do printf '"%s" ' "$_w"; done; }
   _first="CLAUDECODE CLAUDE_CODE_ENTRYPOINT CODEX_THREAD_ID"
-  for _miss in PI_CODING_AGENT OPENCODE_TERMINAL; do
+  for _miss in PI_CODING_AGENT OPENCODE_TERMINAL OPENCODE; do
     _own="$(awk -v v="$_miss" '$1 == v { print $2 }' "$T/varowner.txt")"
-    for _form in squote dquote multiline unset envu unset_cont envu_cont; do
+    for _form in squote dquote multiline unset envu unset_cont envu_cont envu_perline; do
       for _case in complete missing; do
         _vars="$_all"; [ "$_case" = missing ] && _vars="$(_drop "$_miss")"
         _rest="$(printf '%s\n' "$_vars" | tr ' ' '\n' | grep . | grep -vx -e CLAUDECODE -e CLAUDE_CODE_ENTRYPOINT -e CODEX_THREAD_ID | tr '\n' ' ')"
@@ -352,6 +352,7 @@ test_host_scrub_matcher_forms() {
           unset)      printf 'unset %s\n' "$_vars" ;;
           envu)       { printf 'env'; for _w in $_vars; do printf ' -u %s' "$_w"; done; printf ' cmd\n'; } ;;
           unset_cont) printf 'unset %s \\\n  %s\n' "$_first" "$_rest" ;;
+          envu_perline) { printf 'env'; for _w in $_vars; do printf ' -u %s \\\n ' "$_w"; done; printf ' cmd\n'; } ;;
           envu_cont)  { printf 'env'; for _w in $_first; do printf ' -u %s' "$_w"; done; printf ' \\\n '; for _w in $_rest; do printf ' -u %s' "$_w"; done; printf ' cmd\n'; } ;;
         esac > "$T/fx.sh"
         scrub_scan "$T/fx.sh" > "$T/fx.out"
@@ -370,6 +371,14 @@ test_host_scrub_matcher_forms() {
   # False-positive guard: `sort -u` is not an env -u scrub, so its words are not hits.
   printf 'sort -u CLAUDECODE CODEX_THREAD_ID x\n' > "$T/fx.sh"
   [ -z "$(scrub_scan "$T/fx.sh")" ] || fail "E99-F179: a 'sort -u' line was read as a scrub list"
+  # Negative fixtures: a backslash after a NON-scrub line must not turn the next line's bare
+  # words into hits, and a list naming only one of the two anchors is not a scrub list.
+  printf 'echo x \\\n  %s\n' "$_all" > "$T/fx.sh"
+  [ -z "$(scrub_scan "$T/fx.sh")" ] || fail "E99-F179: a continued non-scrub line was read as a scrub list"
+  printf "for k in 'CLAUDECODE' 'OPENCODE'; do :; done\n" > "$T/fx.sh"
+  [ -z "$(scrub_scan "$T/fx.sh")" ] || fail "E99-F179: a list without the CODEX_THREAD_ID anchor was read as a scrub list"
+  printf "for k in 'CODEX_THREAD_ID' 'OPENCODE'; do :; done\n" > "$T/fx.sh"
+  [ -z "$(scrub_scan "$T/fx.sh")" ] || fail "E99-F179: a list without the CLAUDECODE anchor was read as a scrub list"
   return 0
 }
 
