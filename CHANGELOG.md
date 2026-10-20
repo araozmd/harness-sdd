@@ -2,7 +2,28 @@
 
 All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
-`.harness/.harness-version` (see `CLAUDE.md` → Versioning).
+`.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
+
+## [0.97.3] — 2026-10-20
+
+### Changed — docs sweep for 0.96.0-0.97.2, and the config seed comment (E99-F180)
+- `harness.config.yaml` and the `pr_loop:`/`models:` seed in `harness-install.sh` (kept
+  byte-identical): the opencode pin comment now says an invalid value is warned about and
+  dropped with no model stamped (it said it "aborts your OpenCode run"), and the env-only
+  knob list gains `HARNESS_MERGE_VERIFY_CEILING` (180) and `HARNESS_QUEUE_RECONCILE_CEILING`
+  (300). Comment text only; no value or behaviour changes.
+- **Upgrade semantics:** an existing `harness.config.yaml` is preserved and its `models:` and
+  `pr_loop:` blocks are appended only when absent, so an upgraded install keeps its old
+  comment text untouched. Only fresh installs (and a config without the block) get the new
+  text; edit the comment by hand if you want it.
+- `docs/WORKFLOW.md`, `docs/INSTALL.md`, `README.md`: preflight failures are documented as
+  exits 8/9/10 (not 5); the `/sdd-pr-loop` late-thread fingerprint refusal, the queued-merge
+  reconcile/cancel (`merge-verify post` exit 11) and the two new knobs are documented; the
+  duplicate-fix-id allocation, check and `renumber` recovery are documented in WORKFLOW.
+- `agents/fixer.md`, `agents/reviewer.md`, `store/local.md`: id allocation names the full
+  ref scan, the example summary no longer hard-codes a suite count, and `renumber` points at
+  the full refusal list.
+- `CHANGELOG.md` header now points at the real versioning rule (`AGENTS.md`).
 
 ## [0.97.2] — 2026-10-20
 
