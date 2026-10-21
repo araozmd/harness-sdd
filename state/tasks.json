@@ -1368,7 +1368,8 @@
         {
           "id": "E99-F181",
           "title": "Scrub guard comment: name the unpinned call-site floor and the quoted-'unset' false positive (E99-F179 round-4 advisories)",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "866e9faf9f001bdb8dfdafbbc5756d5e39307785", "ref": "866e9faf9f001bdb8dfdafbbc5756d5e39307785", "repo": "harness-sdd", "verified": "ancestor"},
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
