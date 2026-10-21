@@ -272,6 +272,9 @@ test_host_opencode_markers() {
 # lines (so a list split across lines is one list) that hits both CLAUDECODE and
 # CODEX_THREAD_ID; it must hit every variable of the shipped HOST_MARKERS table. Consecutive
 # lines that each quote ONE anchor (e.g. a run of asserts) therefore also count as one list.
+# Likewise a quoted string holding `unset` / `env -u` plus both anchors (e.g. echo "unset
+# CLAUDECODE CODEX_THREAD_ID ...") reads as a scrub statement and fails loud if it omits a
+# table variable: keep such text out of tests/.
 # STILL NOT SEEN (by design, a bound not a defect): a prefix scrub such as
 # startswith('OPENCODE'); a list interrupted by a line that hits no variable (a comment or
 # blank line); a scrub that never names both CLAUDECODE and CODEX_THREAD_ID; `env --unset=VAR`
@@ -279,7 +282,8 @@ test_host_opencode_markers() {
 # which counts the unscrubbed word as a hit. New host-mode
 # tests should not hand-roll a scrub: run under `env -i` (the hrun/inst helpers) or set
 # HARNESS_HOST_AGENT, either of which makes the marker env irrelevant.
-# Non-vacuous: at least the two known scrubbers must be found. The matcher is pinned by
+# Non-vacuous: the real call asks for at least the two known scrubbers (floor 2; the call and
+# its floor value are not pinned, see scrub_check_dir). The matcher is pinned by
 # test_host_scrub_matcher_forms (synthetic fixtures, one per form).
 
 # scrub_scan <file> — needs $T/allvars.txt (names) and $T/varowner.txt ("VAR front-end").
@@ -315,7 +319,11 @@ scrub_tables() {
 }
 
 # scrub_check_dir <dir> <min-lists> — the real-file loop: fail on any list omitting a variable
-# or on fewer than <min-lists> lists found. Wiring pinned by test_host_scrub_wiring.
+# or on fewer than <min-lists> lists found. test_host_scrub_wiring pins this loop only (its
+# MISS->fail and its floor comparison). It does NOT pin the real call in
+# test_host_scrub_lists_cover_table or that call's floor value 2: replacing the call with `:`
+# or the 2 with 0 stays green, and pinning it would need a self-grep (same class as deleting
+# a test_x call at the bottom of a suite).
 scrub_check_dir() {
   _n=0
   for _f in "$1"/*.sh; do
