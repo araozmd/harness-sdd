@@ -220,4 +220,13 @@ printf '%s\n' "$_c9" | grep -qF 'tasks-pair-check' || fail "R11_ledger_c9_ablati
 printf '%s\n' "$_c9" | grep -qF 'Ablation' || fail "R11_ledger_c9_ablation: C9 evidence cell lacks the Ablation condition"
 pass "R11_ledger_c9_ablation"
 
+# ── R12: VERSION / CHANGELOG paired at runtime (no literal) ───────────────────────────────
+_v="$(cat "$ROOT/VERSION")"
+_head="$(grep -m1 '^## \[' "$ROOT/CHANGELOG.md")"
+case "$_head" in "## [$_v]"*) ;; *) fail "R12_version_changelog_paired: newest CHANGELOG heading '$_head' != VERSION '$_v'" ;; esac
+awk '/^## \[/ { if (sec ~ /E36-F01/ && sec ~ /tasks-pair-check/) ok = 1; sec = ""; next } { sec = sec "\n" $0 }
+     END { if (sec ~ /E36-F01/ && sec ~ /tasks-pair-check/) ok = 1; exit ok ? 0 : 1 }' "$ROOT/CHANGELOG.md" \
+  || fail "R12_version_changelog_paired: no CHANGELOG section names both E36-F01 and tasks-pair-check"
+pass "R12_version_changelog_paired"
+
 echo "all tasks-pairs checks passed"

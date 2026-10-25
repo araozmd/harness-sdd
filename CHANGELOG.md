@@ -4,6 +4,24 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.98.0] — 2026-10-25
+
+### Added — per-requirement red/green task pairs (E36-F01)
+- `specs/_templates/feature.tasks.md` is now pair form: for each `R-id`, a `T<n>a` task writes
+  the failing test and observes RED, a `T<n>b` task writes the minimal code and observes
+  GREEN; refactor tasks are explicit and cite `R-id`s; there is no trailing "write tests"
+  task (ADR-0008 decision 2).
+- `agents/architect.md` (item 3), `agents/builder.md` (Loop A: pairs in order, no code before
+  RED, commit after each GREEN) and `agents/reviewer.md` (new check 7), plus
+  `docs/SPEC-FORMAT.md` ("Tasks — red/green pairs per requirement"), `docs/WORKFLOW.md` and
+  `docs/RATIONALE.md` (ledger row C9).
+- New `tools/tasks-pair-check.py <tasks> --spec <spec>` lint (exit 0 ok / 1 violation / 2
+  input error), shipped and made executable by the installer. Reviewer check 7 rejects on a
+  non-zero exit, but a `.tasks.md` whose first commit predates the tool's first commit is
+  flagged, not rejected (grandfather rule); `sdd: false` items are exempt.
+- Upgrade note: in-flight features with layered `.tasks.md` files are unaffected beyond the
+  advisory flag; re-spec them to pair form when convenient.
+
 ## [0.97.3] — 2026-10-20
 
 ### Changed — docs sweep for 0.96.0-0.97.2, and the config seed comment (E99-F180)
