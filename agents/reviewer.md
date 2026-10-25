@@ -170,6 +170,16 @@ saying "it works" means nothing until you prove it. AI-generated code is often
      `specs/epics/<epic>/<feature>/contract/` and the shared `.spec`/`.plan` reference it
      by id.
 
+7. **Task-pair shape (E36-F01).** For an `sdd: true` feature, run
+   `python3 "$HARNESS_DIR/tools/tasks-pair-check.py" "<dir>/<feature>.tasks.md" --spec
+   "<dir>/<feature>.spec.md"`; any non-zero exit (1 = shape violation, 2 = unreadable or
+   spec-less input) → reject. **Grandfather rule:** a `.tasks.md` whose first commit
+   predates the tool's first commit is flagged ("re-spec to pair form or justify"), not
+   rejected — compare `git log --diff-filter=A --format=%ct -- <path>` for the `.tasks.md`
+   and for `tools/tasks-pair-check.py` (in the repo under review); the `.tasks.md` epoch
+   older than the tool's means flag. `sdd: false` items are exempt (they have no
+   `.tasks.md`). Check #2's traceability text is unchanged; this item checks shape only.
+
 ## ADR-citation check (architecture-aligned specs)
 
 This additive check fires **only where** the project has a recorded architecture **and**
