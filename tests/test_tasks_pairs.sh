@@ -122,4 +122,34 @@ run_lint "$T/t7c.md" --spec "$T/s.md"
 [ "$rc" -eq 0 ] || fail "R7_cited_write_test_passes: rc $rc ($(cat "$T/out"))"
 pass "R7_cited_write_test_passes"
 
+# ── prose helpers: fence-aware slicers (fence.awk), never the bare /^#+ / idiom ───────────
+unfenced() { awk "$FENCE_AWK"'fence_delim($0) { next } !fence' "$1"; }   # unfenced <file>
+slice() { # slice <file> <heading-prefix>: one section up to the next "## " heading, delimiters kept
+  awk -v h="$2" "$FENCE_AWK"'
+    fence_delim($0) { if (keep) print; next }
+    !fence && /^#+ / { keep = (index($0, h) == 1); next }
+    keep' "$1"
+}
+folded() { tr '\n' ' ' | tr -s ' '; }
+# anch <text-file> <regex> <row> <what>
+anch() { folded < "$1" | grep -qiE "$2" || fail "$3: missing anchor: $4"; }
+
+# ── R1: the shipped template is pair form ─────────────────────────────────────────────────
+run_lint "$ROOT/specs/_templates/feature.tasks.md" --spec "$ROOT/specs/_templates/feature.spec.md"
+[ "$rc" -eq 0 ] || fail "R1_template_passes_lint: rc $rc ($(cat "$T/out" "$T/err"))"
+grep -qE '^tasks-pair-check: ok' "$T/out" || fail "R1_template_passes_lint: no ok line"
+pass "R1_template_passes_lint"
+unfenced "$ROOT/specs/_templates/feature.tasks.md" > "$T/tpl.txt"
+for n in 1 2 3 4 5; do
+  _a="$(grep -n "\*\*T${n}a\*\* (R${n})" "$T/tpl.txt" | head -n1)"
+  _b="$(grep -n "\*\*T${n}b\*\* (R${n})" "$T/tpl.txt" | head -n1)"
+  [ -n "$_a" ] && [ -n "$_b" ] || fail "R1_template_shape: T${n}a/T${n}b missing"
+  [ "${_a%%:*}" -lt "${_b%%:*}" ] || fail "R1_template_shape: T${n}a does not precede T${n}b"
+  printf '%s\n' "$_a" | grep -q 'RED' || fail "R1_template_shape: T${n}a does not name RED"
+  printf '%s\n' "$_b" | grep -q 'GREEN' || fail "R1_template_shape: T${n}b does not name GREEN"
+done
+grep -qE '\*\*T6\*\* \(R1, R2\) — refactor' "$T/tpl.txt" || fail "R1_template_shape: no explicit refactor task citing R-ids"
+grep -q 'Write tests per' "$ROOT/specs/_templates/feature.tasks.md" && fail "R1_template_shape: old 'Write tests per' task survives"
+pass "R1_template_shape"
+
 echo "all tasks-pairs checks passed"
