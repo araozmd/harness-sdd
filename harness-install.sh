@@ -473,6 +473,12 @@ change_size:
   # it meaningless, so extend these rather than letting a repo's tests count as production.
   test_paths: []           # extra test-file patterns, e.g. - "(^|/)spec/"
   generated_paths: []      # extra generated/vendored patterns, excluded from the budget entirely
+  # Assertion patterns for the Reviewer's test-drift check (E36-F06), one EXTENDED REGEX per
+  # entry, MATCHED AGAINST THE LINE TEXT of a changed test file and ADDED to the built-ins
+  # (assert/expect(/t.is/t.ok/fail( + the harness suites' ok/fail helpers). Entries are used
+  # VERBATIM (no YAML unescaping), so write a literal `(` as `[(]`. Empty = built-ins only.
+  # Never add a bare `[` or `should`: every ordinary sh edit would become a finding.
+  assert_patterns: []      # e.g. - "(^|[^A-Za-z0-9_])verify[(]"
 EOF
   fi
 
@@ -4128,6 +4134,7 @@ install_one() {
   chmod +x "$H/tools/next-task.mjs" 2>/dev/null || true   # E16-F03 deterministic read-only selector
   chmod +x "$H/tools/wait-for-codex.sh" 2>/dev/null || true   # E18-F01 /sdd-pr-loop background Codex watcher
   chmod +x "$H/tools/change-size.sh" 2>/dev/null || true   # E21-F02 advisory pre-PR change-size check
+  chmod +x "$H/tools/test-drift-check.sh" 2>/dev/null || true   # E36-F06 Reviewer test-drift check
   chmod +x "$H/tools/pr-round-trend.sh" 2>/dev/null || true   # E21-F03 pr-loop convergence trend
   chmod +x "$H/tools/pr-gate.sh" 2>/dev/null || true   # E99 deterministic pr-loop merge/fix/budget verdict
   chmod +x "$H/tools/run-tests.sh" 2>/dev/null || true   # E99 concurrent suite runner, failures-only output
