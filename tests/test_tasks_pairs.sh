@@ -127,7 +127,7 @@ unfenced() { awk "$FENCE_AWK"'fence_delim($0) { next } !fence' "$1"; }   # unfen
 slice() { # slice <file> <heading-prefix>: one section up to the next "## " heading, delimiters kept
   awk -v h="$2" "$FENCE_AWK"'
     fence_delim($0) { if (keep) print; next }
-    !fence && /^#+ / { keep = (index($0, h) == 1); next }
+    !fence && /^## / { keep = (index($0, h) == 1); next }
     keep' "$1"
 }
 folded() { tr '\n' ' ' | tr -s ' '; }
@@ -151,5 +151,58 @@ done
 grep -qE '\*\*T6\*\* \(R1, R2\) — refactor' "$T/tpl.txt" || fail "R1_template_shape: no explicit refactor task citing R-ids"
 grep -q 'Write tests per' "$ROOT/specs/_templates/feature.tasks.md" && fail "R1_template_shape: old 'Write tests per' task survives"
 pass "R1_template_shape"
+
+# ── R2: architect item 3 ──────────────────────────────────────────────────────────────────
+slice "$ROOT/agents/architect.md" '## Your output (the 4-file spec)' > "$T/arch.txt"
+[ -s "$T/arch.txt" ] || fail "R2_architect_item3_pairs: section not found"
+anch "$T/arch.txt" 'T<n>a.{0,160}RED' R2_architect_item3_pairs 'T<n>a ... RED'
+anch "$T/arch.txt" 'T<n>b.{0,160}GREEN' R2_architect_item3_pairs 'T<n>b ... GREEN'
+anch "$T/arch.txt" 'walking.{0,160}first' R2_architect_item3_pairs 'walking ... first'
+anch "$T/arch.txt" 'refactor.{0,160}R-id' R2_architect_item3_pairs 'refactor ... R-id'
+anch "$T/arch.txt" 'tasks-pair-check\.py.{0,160}hand-off' R2_architect_item3_pairs 'tasks-pair-check.py ... hand-off'
+grep -qF 'Sequential, independent, small steps' "$T/arch.txt" && fail "R2_architect_item3_pairs: old item-3 text survives"
+pass "R2_architect_item3_pairs"
+
+# ── R3: SPEC-FORMAT section + table row, WORKFLOW step 5 ──────────────────────────────────
+slice "$ROOT/docs/SPEC-FORMAT.md" '## Tasks — red/green pairs per requirement' > "$T/sf.txt"
+[ -s "$T/sf.txt" ] || fail "R3_spec_format_pairs_section: section '## Tasks — red/green pairs per requirement' not found"
+grep -qE '^ *(```|~~~)' "$T/sf.txt" || fail "R3_spec_format_pairs_section: slice has no fence delimiter — it did not read through the fenced example"
+for a in 'T<n>a.{0,160}RED' 'T<n>b.{0,160}GREEN' 'write.{0,160}tests.{0,160}reject' \
+         'fenced.{0,160}ignored' 'range.{0,160}not expanded' 'own pair' \
+         'co-cit.{0,160}`a` task' 'never.{0,160}code-only'; do
+  anch "$T/sf.txt" "$a" R3_spec_format_pairs_section "$a"
+done
+pass "R3_spec_format_pairs_section"
+slice "$ROOT/docs/SPEC-FORMAT.md" '## The four files' | grep -F '| `.tasks.md`' | grep -qi 'red/green pair' \
+  || fail "R3_spec_format_table_row: .tasks.md row lacks 'red/green pair'"
+pass "R3_spec_format_table_row"
+slice "$ROOT/docs/WORKFLOW.md" '## One run, end to end' | grep -E '^5\.' | grep -i 'pair' | grep -qi 'commit' \
+  || fail "R3_workflow_step5: step 5 lacks pair/commit"
+pass "R3_workflow_step5"
+
+# ── R4: builder Loop A ────────────────────────────────────────────────────────────────────
+slice "$ROOT/agents/builder.md" '## Loop A — in-session (you implement)' > "$T/la.txt"
+[ -s "$T/la.txt" ] || fail "R4_builder_loop_a_pairs: Loop A section not found"
+if ! folded < "$T/la.txt" | grep -qiE 'never.{0,160}code.{0,160}RED|RED.{0,160}before.{0,160}code'; then
+  fail "R4_builder_loop_a_pairs: no 'no code before RED' rule"
+fi
+anch "$T/la.txt" 'commit.{0,160}GREEN' R4_builder_loop_a_pairs 'commit ... GREEN'
+for a in 'in-progress' 'DO NOT TOUCH' './init.sh' 'tasks.md'; do
+  grep -qF "$a" "$T/la.txt" || fail "R4_builder_loop_a_pairs: retained anchor missing: $a"
+done
+pass "R4_builder_loop_a_pairs"
+
+# ── R9: reviewer item 7 inside "What you check" ───────────────────────────────────────────
+slice "$ROOT/agents/reviewer.md" '## What you check' > "$T/rv.txt"
+[ -s "$T/rv.txt" ] || fail "R9_reviewer_item7_in_what_you_check: section not found"
+grep -qE '^7\. ' "$T/rv.txt" || fail "R9_reviewer_item7_in_what_you_check: no item 7 inside '## What you check'"
+anch "$T/rv.txt" '7\. \*\*Task-pair shape' R9_reviewer_item7_in_what_you_check 'Task-pair shape'
+anch "$T/rv.txt" 'tasks-pair-check\.py.{0,160}--spec' R9_reviewer_item7_in_what_you_check 'tasks-pair-check.py ... --spec'
+anch "$T/rv.txt" 'non-zero.{0,160}reject' R9_reviewer_item7_in_what_you_check 'non-zero ... reject'
+anch "$T/rv.txt" 'predates.{0,160}flag' R9_reviewer_item7_in_what_you_check 'predates ... flag'
+anch "$T/rv.txt" 'diff-filter=A' R9_reviewer_item7_in_what_you_check 'diff-filter=A'
+anch "$T/rv.txt" 'sdd: false.{0,160}exempt' R9_reviewer_item7_in_what_you_check 'sdd: false ... exempt'
+anch "$T/rv.txt" 'confirm +`<feature>\.tests\.md` has a test' R9_reviewer_item7_in_what_you_check 'check #2 text retained'
+pass "R9_reviewer_item7_in_what_you_check"
 
 echo "all tasks-pairs checks passed"
