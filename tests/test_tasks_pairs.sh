@@ -211,4 +211,13 @@ _mode="$(git -C "$ROOT" ls-files -s tools/tasks-pair-check.py | cut -c1-6)"
 [ -x "$TOOL" ] || fail "R10_source_mode_100755: tool is not executable on disk"
 pass "R10_source_mode_100755"
 
+# ── R11: ledger row C9 ────────────────────────────────────────────────────────────────────
+slice "$ROOT/docs/RATIONALE.md" '## Deletion ledger' > "$T/led.txt"
+_c9="$(grep -F '| C9 — Task-pair shape lint |' "$T/led.txt" || true)"
+[ -n "$_c9" ] || fail "R11_ledger_c9_ablation: no '| C9 — Task-pair shape lint |' row in the Deletion ledger section"
+printf '%s\n' "$_c9" | grep -qF '| Capability compensation |' || fail "R11_ledger_c9_ablation: C9 layer is not Capability compensation"
+printf '%s\n' "$_c9" | grep -qF 'tasks-pair-check' || fail "R11_ledger_c9_ablation: C9 does not name tasks-pair-check"
+printf '%s\n' "$_c9" | grep -qF 'Ablation' || fail "R11_ledger_c9_ablation: C9 evidence cell lacks the Ablation condition"
+pass "R11_ledger_c9_ablation"
+
 echo "all tasks-pairs checks passed"
