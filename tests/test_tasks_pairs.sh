@@ -205,4 +205,10 @@ anch "$T/rv.txt" 'sdd: false.{0,160}exempt' R9_reviewer_item7_in_what_you_check 
 anch "$T/rv.txt" 'confirm +`<feature>\.tests\.md` has a test' R9_reviewer_item7_in_what_you_check 'check #2 text retained'
 pass "R9_reviewer_item7_in_what_you_check"
 
+# ── R10: source mode 100755 (installer-wiring pin is the source grep in test_install.sh) ──
+_mode="$(git -C "$ROOT" ls-files -s tools/tasks-pair-check.py | cut -c1-6)"
+[ "$_mode" = "100755" ] || fail "R10_source_mode_100755: git mode is '$_mode'"
+[ -x "$TOOL" ] || fail "R10_source_mode_100755: tool is not executable on disk"
+pass "R10_source_mode_100755"
+
 echo "all tasks-pairs checks passed"
