@@ -4,6 +4,7 @@ set -eu
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 W="$(mktemp -d)"
 trap 'chmod -R u+w "$W" 2>/dev/null || :; rm -rf "$W"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "ok - $*"; }
 F="$W/repo"

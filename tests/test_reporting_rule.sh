@@ -20,6 +20,7 @@ REPORT_TOOL="$SRC/tools/harness-report.sh"
 
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-reporting-rule)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 # Sandbox Codex's GLOBAL prompts dir so no installer run touches the developer's real ~/.codex.
 export CODEX_HOME="$T/codex-home"
 

@@ -33,7 +33,11 @@
 # Usage:
 #   tools/run-tests.sh [--jobs N] [--serial] [suite...]
 #
-#   --jobs N   concurrency (default 8). N=1 is identical to --serial.
+#   --jobs N   concurrency (default 4). N=1 is identical to --serial. Capped at
+#              HARNESS_TEST_JOBS_MAX (default 4): a higher N is clamped with a warning.
+#              Each suite spawns harness-install.sh, python unittest and cp/rm trees, so
+#              N jobs is hundreds of processes; 16+8 across two worktrees took a 10-core
+#              laptop to load 100 (2026-10-25).
 #   --serial   run one at a time; use when bisecting a suspected cross-suite interaction.
 #   suite...   specific suites to run (default: every tests/test_*.sh)
 #
@@ -42,6 +46,8 @@
 #   1  at least one suite failed (its full output is on stderr)
 #   3  a suite or tool did not PARSE under the strict shell (nothing was executed)
 #   4  usage error / no suites found / malformed dash allowlist
+#   5  another run-tests.sh is already running on this machine (one run at a time;
+#      the runner does not wait and does not retry — rerun when it has finished)
 #
 # NOTE ON ISOLATION: concurrency here is a claim about the suites, not a wish. If a future
 # suite starts writing to a shared path, it will fail intermittently under --jobs and pass
@@ -51,7 +57,8 @@
 set -eu
 LC_ALL=C; export LC_ALL
 
-jobs=8
+jobs=4
+jobs_max="${HARNESS_TEST_JOBS_MAX:-4}"
 suites=""
 
 usage() {
@@ -71,6 +78,48 @@ while [ $# -gt 0 ]; do
     *)  suites="$suites $1"; shift ;;
   esac
 done
+
+# ── jobs cap (2026-10-25 incident) ─────────────────────────────────────────────────
+# The cap is an environment knob, not a flag: a flag is what the caller already got wrong.
+case "$jobs_max" in ''|*[!0-9]*) jobs_max=4 ;; esac
+[ "$jobs_max" -ge 1 ] || jobs_max=1
+if [ "$jobs" -gt "$jobs_max" ]; then
+  printf 'run-tests: --jobs %s exceeds HARNESS_TEST_JOBS_MAX=%s — clamped to %s (raise the env var deliberately if this machine can take it)\n' \
+    "$jobs" "$jobs_max" "$jobs_max" >&2
+  jobs="$jobs_max"
+fi
+
+# ── one run per machine ─────────────────────────────────────────────────────────────
+# Two concurrent runs (different worktrees, same laptop) multiply the process count and
+# compete for the same tmp filesystem; the second one refuses and exits 5 instead of
+# waiting, so a caller can never queue a third behind it by accident. `mkdir` is the
+# portable atomic claim; a lock whose recorded pid is gone is stale and reclaimed once.
+# A NESTED run — a suite exercising the runner itself (test_grep_probe, test_suite_hygiene)
+# — is already inside the outer run's cap, so it skips the claim: the outer runner exports
+# the marker to every suite it starts. A suite that wants to test the lock unsets it.
+lockdir="${TMPDIR:-/tmp}"; lockdir="${lockdir%/}/harness-run-tests.lock"
+_lock_try=0
+while [ "${HARNESS_RUN_TESTS_NESTED:-0}" != 1 ]; do
+  if mkdir "$lockdir" 2>/dev/null; then
+    printf '%s\n' "$$" >"$lockdir/pid"
+    break
+  fi
+  _holder="$(cat "$lockdir/pid" 2>/dev/null || :)"
+  if [ -n "$_holder" ] && kill -0 "$_holder" 2>/dev/null; then
+    printf 'run-tests: another run-tests.sh (pid %s) is already running on this machine — one suite run at a time; not waiting, not retrying (lock: %s)\n' \
+      "$_holder" "$lockdir" >&2
+    exit 5
+  fi
+  _lock_try=$((_lock_try + 1))
+  [ "$_lock_try" -lt 3 ] || { printf 'run-tests: could not claim %s (stale lock would not clear)\n' "$lockdir" >&2; exit 5; }
+  rm -rf "$lockdir" 2>/dev/null || :
+done
+if [ "${HARNESS_RUN_TESTS_NESTED:-0}" != 1 ]; then
+  trap 'rm -rf "$lockdir"' EXIT HUP INT TERM
+else
+  lockdir=""                               # nested: nothing of ours to release
+fi
+export HARNESS_RUN_TESTS_NESTED=1          # every suite this run starts is nested
 
 # ── grep-flavour probe (E99-F12) — WARN ONLY, once, before any suite runs ─────────────
 #
@@ -362,7 +411,7 @@ if [ -n "$preflight_bad" ]; then
 fi
 
 work="$(mktemp -d)" || { printf 'run-tests: mktemp failed\n' >&2; exit 4; }
-trap 'rm -rf "$work"' EXIT INT TERM
+trap 'rm -rf "$work" ${lockdir:+"$lockdir"}' EXIT HUP INT TERM
 
 # The suites shell out to the TOOLS as `sh tools/foo.sh`, which resolves through PATH — so
 # without this the tools would keep running under the host `sh` no matter what the suites

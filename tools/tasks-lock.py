@@ -1877,6 +1877,14 @@ def run(transform, timeout, sync_id=None, sync_status=None, get_effects=None):
     vb = _load_shared_validator(want_module=True)
     validate = vb.validate
     schema = _load_schema(schema_path)
+    # Warm the validator BEFORE the lock (2026-10-25). `validate()` imports `jsonschema`
+    # lazily on its first call, and that import compiles a lark grammar for the format
+    # checkers — ~3 s on this laptop, far more under load. Its first call used to be the
+    # one INSIDE the critical section, so every writer held the board lock for the whole
+    # import while its siblings burned their `--timeout` waiting on it (R12src: writer B
+    # "could not acquire within 10s" under four concurrent suites). The result of this
+    # throwaway call is irrelevant; only the import side effect is wanted.
+    validate({"project": "", "epics": []}, schema)
 
     # Open (creating if needed) the sibling lockfile. It only ever anchors the
     # advisory lock; it never holds board data.

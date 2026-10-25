@@ -623,11 +623,59 @@ def manifest_repos(hdir):
     return "present", repos
 
 
+# ── sibling-scan cap (2026-10-25) ──────────────────────────────────────────────────────
+# `candidates()` lists the harness dir's PARENT and probes every child for `.git`. When that
+# parent is a system temp dir — a fixture made with a bare `mktemp -d`, a harness installed
+# under /tmp — it can hold 100k+ entries (this laptop's $TMPDIR held 123,268), and each probe
+# is a realpath plus a stat: minutes of pure Python per resolution, then AGAIN inside the
+# board lock when `Witness.still_holds()` recomputes the set. A `set-status … done` was seen
+# holding the lock for 25 minutes that way; nothing was deadlocked, the search space was.
+#
+# A root over the cap is not enumerated: its children are simply not candidates, and
+# `truncated_roots()` reports it so `resolve()` refuses to call an unbound answer unique —
+# the honest outcome is UNKNOWN with the remedy named (bind the evidence, or declare the
+# repository in a manifest), which `tasks-lock.py` records as `unchecked`. Silently scanning
+# fewer siblings and still saying RESOLVED would be exactly the guess I1 forbids.
+_DEFAULT_MAX_SIBLINGS = 512
+
+
+def max_siblings():
+    """The cap: HARNESS_RESOLVE_MAX_SIBLINGS, else 512. Non-numeric or < 1 ⇒ the default."""
+    raw = os.environ.get("HARNESS_RESOLVE_MAX_SIBLINGS", "")
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_MAX_SIBLINGS
+    return value if value >= 1 else _DEFAULT_MAX_SIBLINGS
+
+
+def _scan_roots(hdir):
+    """The directories whose children `candidates()` probes: (parent, hdir), realpath'd."""
+    hdir = os.path.realpath(hdir)
+    return (os.path.dirname(hdir), hdir)
+
+
+def truncated_roots(hdir):
+    """[(root, entry_count)] for every scan root over the cap — empty when none is."""
+    cap = max_siblings()
+    out = []
+    for root in _scan_roots(hdir):
+        try:
+            count = len(os.listdir(root))
+        except OSError:
+            continue
+        if count > cap:
+            out.append((root, count))
+    return out
+
+
 def candidates(hdir, pairs=False):
     """Repositories to search when no manifest names one — nearest first, deduplicated.
 
     (1) the harness dir; (2) its parent; (3) that parent's immediate children. Directory
-    probing only — no git process — so a caller may recompute this cheaply.
+    probing only — no git process — so a caller may recompute this cheaply. A root with
+    more than `max_siblings()` entries contributes no children (see the cap above); the
+    harness dir and its parent themselves are always probed.
 
     The ORDER is documented and then deliberately not relied upon: (1) is the harness
     dir's own repository, which never holds feature work, so "first hit wins" is at its
@@ -650,11 +698,14 @@ def candidates(hdir, pairs=False):
     add(hdir)
     parent = os.path.dirname(hdir)
     add(parent)
+    cap = max_siblings()
     for root in (parent, hdir):
         try:
             entries = sorted(os.listdir(root))
         except OSError:
             continue
+        if len(entries) > cap:
+            continue                      # over the cap: no children from this root
         for name in entries:
             if not name.startswith("."):
                 add(os.path.join(root, name))
@@ -843,6 +894,23 @@ def resolve(ref, repo_name, hdir):
     else:
         cand = tuple(candidates(hdir, pairs=True))
         dirs = [lex for lex, _real in cand]
+        truncated = truncated_roots(hdir)
+        if truncated:
+            # An UNBOUND answer is only ever certain because every neighbour was searched.
+            # A neighbour set that was cut short cannot make it certain, so do not search
+            # the rest at all: the outcome is UNKNOWN whatever the probed few would say.
+            return Resolution(
+                UNKNOWN, repo=None, binding=None, manifest_state=state,
+                candidates=cand,
+                witness=_capture(UNKNOWN, None, None, state, mapping, cand),
+                detail="the search for %s near %s was truncated — %s — so no unbound "
+                       "answer can be called unique; bind the evidence as <repo>=%s or "
+                       "declare the repository in an umbrella manifest"
+                       % (ref, hdir,
+                          "; ".join("%s has %d entries (cap %d, HARNESS_RESOLVE_MAX_SIBLINGS)"
+                                    % (r, n, max_siblings()) for r, n in truncated),
+                          ref),
+            )
 
     hits = [d for d in dirs if resolve_commit(d, ref)]
     if not hits:

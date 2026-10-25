@@ -118,6 +118,7 @@ _cleanup() {
   exit "$_rc"
 }
 trap _cleanup EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 
 fail() { _FAILED=1; echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
@@ -1255,7 +1256,10 @@ open(sys.argv[2], "w").close()
 time.sleep(float(sys.argv[3]))
 PY
 rm -f "$T/held"
-python3 "$T/holder.py" "$W/.harness/state/tasks.json.lock" "$T/held" 3 &
+# Held until the control is over and killed below — a fixed 3 s hold was outlived by the
+# writer's own pre-lock work (validator import, ~3 s, more under load) on 2026-10-25, and
+# the control then "acquired" a lock nobody held any more.
+python3 "$T/holder.py" "$W/.harness/state/tasks.json.lock" "$T/held" 600 &
 HOLD_BG=$!
 _i=0
 while [ ! -f "$T/held" ]; do
@@ -1279,6 +1283,7 @@ case "$SS_OUT" in
   *"needs evidence"*) ;;
   *) fail "R17: a refusal that needs no lock reported a LOCK failure instead — evidence is not being resolved before the lock is taken: $SS_OUT" ;;
 esac
+kill "$HOLD_BG" 2>/dev/null || true
 wait "$HOLD_BG" 2>/dev/null || true
 
 # ── R17b: resolving before the lock must not become a TOCTOU ──────────────────────────
@@ -1547,14 +1552,16 @@ fcntl.flock(fd, fcntl.LOCK_EX)
 open(sys.argv[2], "w").close()
 time.sleep(float(sys.argv[3]))
 PY2
-python3 "$T/holder.py" "$HDA/state/tasks.json.lock" "$T/held3" 4 &
+# hold and delay sized for a loaded machine — see R23's note (2026-10-25): the plan must be
+# done before the newcomer appears, and the write must still be queued when it does.
+python3 "$T/holder.py" "$HDA/state/tasks.json.lock" "$T/held3" 14 &
 AMB_HOLD=$!
 _i=0; while [ ! -f "$T/held3" ]; do _i=$((_i+1)); [ "$_i" -gt 100 ] && fail "R22 control-4: the lock holder never started"; sleep 0.1; done
 ( set +e
-  HARNESS_DIR="$HDA" python3 "$LOCK" set-status E01-F01 done --evidence "$AMB_CHILD"     >"$T/amb.out" 2>&1
+  HARNESS_DIR="$HDA" python3 "$LOCK" set-status E01-F01 done --evidence "$AMB_CHILD" --timeout 30 >"$T/amb.out" 2>&1
   echo $? > "$T/amb.rc" ) &
 AMB_BG=$!
-sleep 1.5                      # the plan has chosen a repository; the write is queued
+sleep 7                        # the plan has chosen a repository; the write is queued
 mkdir -p "$AMB/newcomer" && ( cd "$AMB/newcomer" && git init -q . && git symbolic-ref HEAD refs/heads/main )
 : > "$AMB/newcomer/x.txt"; ( cd "$AMB/newcomer" && git_q add -A && git_q commit -m "appeared mid-write" )
 wait "$AMB_HOLD" 2>/dev/null || true
@@ -1619,15 +1626,20 @@ EOF
 # hold the lock, so the plan completes and the WRITE waits — the exact boundary at issue
 symrun() {  # symrun <retarget-to|"">
   symboard; rm -f "$T/sym.rc" "$T/held2"
-  python3 "$T/holder.py" "$SYM/.harness/state/tasks.json.lock" "$T/held2" 4 &
+  # 2026-10-25: the hold and the retarget delay are sized for a LOADED machine. The plan
+  # (resolver + git) must be finished before the symlink moves, and the write must still be
+  # queued on the lock when it does; a 4 s hold with a 1.5 s delay broke under concurrent
+  # suites (the retarget landed before the plan, the plan saw the decoy, and the case read
+  # "unchecked" where it meant "refused").
+  python3 "$T/holder.py" "$SYM/.harness/state/tasks.json.lock" "$T/held2" 14 &
   SYM_HOLD=$!
   _i=0; while [ ! -f "$T/held2" ]; do _i=$((_i+1)); [ "$_i" -gt 100 ] && fail "R23: the lock holder never started"; sleep 0.1; done
   ( set +e
     HARNESS_DIR="$SYM/.harness" python3 "$LOCK" set-status E01-F01 done \
-      --evidence "alpha=$ID_LANDED" >"$T/sym.out" 2>&1
+      --evidence "alpha=$ID_LANDED" --timeout 30 >"$T/sym.out" 2>&1
     echo $? > "$T/sym.rc" ) &
   SYM_BG=$!
-  sleep 1.5                      # the plan has finished; the write is queued on the lock
+  sleep 7                        # the plan has finished; the write is queued on the lock
   [ -n "$1" ] && ln -sfn "$1" "$T/id-link"
   wait "$SYM_HOLD" 2>/dev/null || true
   await_bg "$SYM_BG" "$T/sym.rc"
