@@ -484,3 +484,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-10-21T01:23:22Z E99-F181 done at 866e9fa (PR #292 merged; Codex round 1 clean; tests-only, no version bump)
 - 2026-10-25T18:10:57Z E36-F01 Architect done: 4-file spec (12 R-ids, complexity: complex, cites ADR-0008; doc-critic 0 blocking/10 advisory applied). pending → spec-ready. Notes: progress/E36-F01/architect.md
 - 2026-10-25T18:11:05Z E36-F01 spec-ready → in-progress (autonomous: true, human gate skipped)
+- 2026-10-25T19:55:51Z E36-F01 | in-progress → in-review (builder round 1: complexity=complex but escalation DISARMED/blocked — builder-role.sh returned builder). VERSION 0.97.3→0.98.0; --self no-op; suite 4/79 red under dash (codex_native, pi_agents, pi_integrity reported failing on pristine main via /var vs /private/var temp paths; pi_preflight passed solo). Report: progress/E36-F01/builder-round1.md
