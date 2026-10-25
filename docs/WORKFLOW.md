@@ -188,6 +188,19 @@ Pass `--repo` whenever the caller is not standing in the tree being measured (`H
 locates the script, not the branch), or the check measures the wrong tree and reports `ok` for
 a branch it never looked at.
 
+### The test-drift check (`tools/test-drift-check.sh`)
+
+The Reviewer's `sh tools/run-tests.sh` proves the assertions that still exist pass; it cannot
+see one that was weakened so it still passes. `tools/test-drift-check.sh <base-ref>
+[<head-ref>] [--tasks-md <feature.tasks.md>]` lists, for every touched test file (the same
+classifier `tools/change-size.sh` uses), each removed or modified assertion line, each newly
+added skip/only/xfail marker and each test name present at base and absent at head. It reports
+and fails: exit `0` clean (or all waived), `1` unwaived findings, `2` usage, `3` cannot diff.
+It never judges whether an edit tightened or weakened an assertion — that look is what it
+forces. A finding is waived per test, by exact name, with a `waive-test-drift: <test name> —
+<reason>` line in the feature's `.tasks.md`. Extra assertion patterns go in
+`change_size.assert_patterns`. It is an added check; `run-tests.sh` stays primary.
+
 ## Architecture-aligned specs (the Architect cites ADRs)
 
 The planning tier produces durable design artifacts; this contract makes them
