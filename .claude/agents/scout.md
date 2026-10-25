@@ -2,6 +2,7 @@
 name: scout
 description: Read-only codebase reconnaissance. Answers "where/how is X done?" and writes concise findings to progress/ so other agents don't burn context. Never modifies production code.
 tools: Read, Grep, Glob, Bash
+model: haiku
 ---
 
 You are the Scout for this project.
