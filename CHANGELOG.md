@@ -4,6 +4,28 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.98.0] — 2026-10-25
+
+### Added — test-drift check (E36-F06)
+- `tools/test-drift-check.sh <base-ref> [<head-ref>] [--tasks-md <file>]`: a diff-based,
+  language-agnostic (POSIX `sh` + `git` + `awk`) check that lists, for every touched test file,
+  each removed or modified assertion line, each newly added skip/only/xfail marker, and each
+  test name present at base and absent at head. It reports and fails (exit `1`); it never
+  judges whether an edit tightened or weakened an assertion. Exit `2` is a usage error
+  (including a malformed waiver), `3` means it could not diff. Waivers are per test, by exact
+  name, as `waive-test-drift: <test name> — <reason>` lines in the feature's `.tasks.md`.
+- `tools/change-size.sh` gains two additive config-query modes, `--print-test-re` and
+  `--print-list <key>`, so the drift tool reuses the one test-path classifier and the one
+  `change_size:` parser instead of carrying copies. Measuring behaviour is unchanged.
+- New config key `change_size.assert_patterns` (default `[]`): extra assertion EREs added to
+  the built-ins, seeded byte-identically in `harness.config.yaml` and the `migrate_config`
+  heredoc. An existing config gets the key only on a fresh seed; absent means built-ins only.
+- `agents/reviewer.md` gains `## Test-drift check before the verdict (E36-F06)`: run the tool
+  against the default branch (and per pair commit when E36-F01 pair commits exist), REJECT on
+  an unwaived finding, treat exit `2`/`3` as "the check did not run". `sh tools/run-tests.sh`
+  stays the primary command. `docs/RATIONALE.md` gains ledger row D14; `docs/WORKFLOW.md`
+  documents the check.
+
 ## [0.97.3] — 2026-10-20
 
 ### Changed — docs sweep for 0.96.0-0.97.2, and the config seed comment (E99-F180)
