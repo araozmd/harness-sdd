@@ -600,6 +600,23 @@ expect_rc 1 "R7g"; expect_ndrift 1 "R7g"
 expect_line '^DRIFT assert-removed \| tests/t\.sh:6 \| R9 label \| ' "R7g: a sh label attributes FORWARD"
 pass "R7g_attribution_forward_label"
 
+# A tie: the removed line (4) is 2 lines below the def (2) and 2 lines above the label (6).
+# The backward definition wins.
+newrepo r7h; put tests/t.sh <<'EOF'
+#!/bin/sh
+t_def() {
+  :
+  [ "$a" = 1 ] || fail "x"
+}
+pass "tie label"
+EOF
+basecommit; feature
+delline tests/t.sh '  [ "$a" = 1 ] || fail "x"'; featcommit
+run "$R" main
+expect_rc 1 "R7h"; expect_ndrift 1 "R7h"
+expect_line '^DRIFT assert-removed \| tests/t\.sh:4 \| t_def \| ' "R7h: on a tie the backward definition wins"
+pass "R7h_attribution_tie_goes_backward"
+
 # ── R9c: finding line shape ──────────────────────────────────────────────────────
 run "$R" main
 expect_rc 1 "R9c"
