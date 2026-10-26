@@ -171,6 +171,16 @@ chk_exit1 R7_leading_write_tests_exit1 'tasks-pair-check: write-tests-task T0'
 run_lint "$T/t7c.md" --spec "$T/s.md"
 [ "$rc" -eq 0 ] || fail "R7_cited_write_test_passes: rc $rc ($(cat "$T/out"))"
 pass "R7_cited_write_test_passes"
+# "write" and "tests" are WHOLE words: one row per word boundary of \bwrite\b.*\btests\b,
+# plus the combined case. Each un-cited task must pass (rc 0).
+for _txt in 'rewrite the contests table' 'rewrite the tests fixture' 'write the contests table' \
+            'writers for the tests' 'write testsuite docs'; do
+  { cat "$T/t.md"; printf -- '- [ ] **T5** — %s\n' "$_txt"; } > "$T/t7w.md"
+  run_lint "$T/t7w.md" --spec "$T/s.md"
+  [ "$rc" -eq 0 ] || fail "R7_whole_words_only[$_txt]: an un-cited '$_txt' task was read as write-tests, rc $rc ($(cat "$T/out"))"
+  grep -qxF 'tasks-pair-check: ok 3 R-ids, 7 tasks' "$T/out" || fail "R7_whole_words_only[$_txt]: $(cat "$T/out")"
+done
+pass "R7_whole_words_only"
 
 # ── prose helpers: fence-aware slicers (fence.awk), never the bare /^#+ / idiom ───────────
 unfenced() { awk "$FENCE_AWK"'fence_delim($0) { next } !fence' "$1"; }   # unfenced <file>
