@@ -11,6 +11,9 @@ date: <YYYY-MM-DD>
 ## Success outcome
 <What does "done" look like from the human's perspective?>
 
+## Observable behavior
+<HTTP / CLI / UI / file / exit code> — <what a user or client sees>
+
 ## Scope / boundaries
 <What is explicitly in scope, and what is out of scope?>
 

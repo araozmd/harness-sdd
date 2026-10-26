@@ -1,0 +1,57 @@
+#!/bin/sh
+# test_observable_slices.sh — E36-F02 (ADR-0008 decision 1): the Driller's observable-slice
+# rule and walking skeleton, the brief's `## Observable behavior` section, and the doc-critic's
+# three findings. This feature ships PROSE, so verification is static: literals by whole-file or
+# section-range `grep -qF`, co-occurrence by `tr '\n' ' ' | grep -qiE 'A[^.]{0,N}B'`, placement
+# by heading line numbers. The house awk section extractor is fence-blind and is NOT used.
+# Never reads VERSION as a literal; never diffs a DO-NOT-TOUCH file against main.
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT"
+
+T="$(mktemp -d)"
+trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
+
+fail() { echo "FAIL: $1" >&2; exit 1; }
+pass() { echo "ok - $1"; }
+
+# ln FILE HEADING-PREFIX -> first line number of a line starting with the prefix
+ln() { grep -n "^$2" "$1" | head -1 | cut -d: -f1; }
+# fold FILE -> the file on one line (newlines to spaces)
+fold() { tr '\n' ' ' < "$1"; }
+# range FILE START-PREFIX END-PREFIX -> the lines from START up to (not incl.) END
+range() {
+  _a="$(ln "$1" "$2")"; _b="$(ln "$1" "$3")"
+  [ -n "$_a" ] && [ -n "$_b" ] && [ "$_a" -lt "$_b" ] || return 1
+  sed -n "${_a},$((_b - 1))p" "$1"
+}
+
+DRILLER="agents/driller.md"
+CRITIC="agents/doc-critic.md"
+INCEP="agents/inception.md"
+TEMPLATE="specs/_templates/inbox-brief.md"
+WORKFLOW="docs/WORKFLOW.md"
+
+# ── R4: the brief template carries `## Observable behavior` ─────────────────────
+r4_order() { # $1 = a brief file; success iff Success outcome < Observable behavior < Scope
+  a="$(ln "$1" '## Success outcome')"; b="$(ln "$1" '## Observable behavior')"
+  c="$(ln "$1" '## Scope / boundaries')"
+  [ -n "$a" ] && [ -n "$b" ] && [ -n "$c" ] && [ "$a" -lt "$b" ] && [ "$b" -lt "$c" ]
+}
+cp "$TEMPLATE" "$T/brief.md"
+r4_order "$T/brief.md" || fail "R4: template lacks '## Observable behavior' between Success outcome and Scope / boundaries"
+body="$(sed -n "$(( $(ln "$T/brief.md" '## Observable behavior') + 1 ))p" "$T/brief.md")"
+printf '%s' "$body" | grep -qF 'user or client sees' || fail "R4: section body does not name what a user or client sees"
+printf '%s' "$body" | grep -qF 'HTTP' || fail "R4: section body does not name a surface"
+for k in 'feature:' 'seeded_by: inception' 'date:'; do
+  grep -qF "$k" "$T/brief.md" || fail "R4: template lost frontmatter '$k'"
+done
+for s in 'Problem' 'Success outcome' 'Scope' 'Chosen options' 'Constraints' 'Open questions'; do
+  grep -q "^## $s" "$T/brief.md" || fail "R4: template lost section '$s'"
+done
+# negative control: with the section sed-ed out the placement check must fail (check is live)
+sed '/^## Observable behavior/,/^## Scope/{/^## Scope/!d;}' "$T/brief.md" > "$T/brief-no.md"
+if r4_order "$T/brief-no.md"; then fail "R4: negative control — placement check passed with the section removed"; fi
+pass "R4_template_section"
