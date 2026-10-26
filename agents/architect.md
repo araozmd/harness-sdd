@@ -42,9 +42,17 @@ For feature `<E##>-<F##>` under `specs/epics/<epic>/<feature>/`, produce exactly
    - Stack, data models (tables/fields/types), API endpoints, dependencies.
    - **Exactly which files/classes/functions to create or change**, and a
      "DO NOT TOUCH" list. Each design decision cites the `R-id`(s) it serves.
-3. **`<feature>.tasks.md`** — Atomic task checklist.
-   - Sequential, independent, small steps ("edit X, add function Y"). Each task
-     lists the `R-id`(s) it satisfies. This is the Builder's only worklist.
+3. **`<feature>.tasks.md`** — Per-requirement red/green pairs (ADR-0008).
+   - For every `R-id`: a `**T<n>a** (R#)` task that writes the failing test named in
+     `.tests.md` and observes **RED**, then a `**T<n>b** (R#)` task that writes the
+     minimal code to pass it and observes **GREEN** (the Builder commits after each
+     GREEN). Order the pairs walking-skeleton `R-id` first — the thinnest end-to-end
+     behavior observable at the product boundary. Refactor tasks are explicit
+     (`**T<n>** (R1, R2) — refactor …`) and cite the `R-id`s whose tests guard them.
+     There is **no** trailing "write tests" task. This is the Builder's only worklist.
+   - Run `python3 "$HARNESS_DIR/tools/tasks-pair-check.py" <feature>.tasks.md --spec
+     <feature>.spec.md` on the file before hand-off; it must exit 0. Grammar: `docs/SPEC-FORMAT.md` → "Tasks —
+     red/green pairs per requirement".
 4. **`<feature>.tests.md`** — The contract.
    - A traceability table: every `R-id` → the concrete test that verifies it.
      This is the just-in-time bridge from requirement to verifiable behavior.
