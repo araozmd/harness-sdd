@@ -708,6 +708,10 @@ expect_rc 2 "R10e"; grep -q 'malformed waiver' "$T/err" || fail "R10e: stderr mu
 printf 'waive-test-drift: test_gone — \n' > "$T/tasks.md"
 run "$R" main --tasks-md "$T/tasks.md"
 expect_rc 2 "R10e empty reason"
+# The separator is an em dash with whitespace on BOTH sides; an unspaced one is no separator.
+printf 'waive-test-drift: a\342\200\224b\n' > "$T/tasks.md"
+run "$R" main --tasks-md "$T/tasks.md"
+expect_rc 2 "R10e unspaced em dash"; grep -q 'malformed waiver' "$T/err" || fail "R10e: an unspaced em dash must be reported as a malformed waiver"
 printf 'The prose form is: waive-test-drift: <name> — <reason> (mid-line is not a waiver)\n' > "$T/tasks.md"
 run "$R" main --tasks-md "$T/tasks.md"
 expect_rc 1 "R10e: a mid-line mention is not a waiver"
