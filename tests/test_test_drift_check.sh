@@ -516,6 +516,25 @@ run "$R" main
 expect_rc 0 "R6d"; [ "$(nlines)" = 1 ] || fail "R6d: a removed marker is no finding"
 pass "R6d_removed_marker_ok"
 
+# An INDENTED decorator (a class method) still attributes forward to the def it decorates,
+# not backward to the previous method.
+newrepo r6e; put tests/test_k.py <<'EOF'
+class TestK:
+    def test_a(self):
+        pass
+
+    def test_m(self):
+        pass
+EOF
+basecommit; feature
+subst tests/test_k.py '    def test_m(self):' '    @pytest.mark.skip
+    def test_m(self):'
+featcommit
+run "$R" main
+expect_rc 1 "R6e"; expect_ndrift 1 "R6e"
+expect_line '^DRIFT skip-added \| tests/test_k\.py:5 \| test_m \| @pytest\.mark\.skip$' "R6e: an indented decorator attributes FORWARD"
+pass "R6e_indented_decorator_forward"
+
 # ── R7: test names and test-removed ──────────────────────────────────────────────
 r7sh() { # the shared sh fixture: two assertion-free functions, one deleted on the branch
   newrepo "$1"
