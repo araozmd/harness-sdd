@@ -49,10 +49,10 @@ ledger_shape() {
     fence_delim($0) { next }
     !fence && /^## Deletion ledger$/ { ledger=1; next }
     !fence && ledger && /^## / { exit }
-    ledger && /^\| (C[1-9]|D([1-9]|1[0-3])) / { count++ }
+    ledger && /^\| (C[1-9]|D([1-9]|1[0-4])) / { count++ }
     END { print count+0 }
   ' "$DOC")"
-  [ "$_rows" -eq 22 ] || fail "ledger must contain exactly 22 C/D rows (found $_rows)"
+  [ "$_rows" -eq 23 ] || fail "ledger must contain exactly 23 C/D rows (found $_rows)"
   [ ! -e "$ROOT/docs/DELETION-LEDGER.md" ] || fail "sibling deletion ledger is forbidden"
   [ ! -e "$ROOT/docs/deletion-ledger.yaml" ] || fail "machine-readable YAML ledger is forbidden"
   [ ! -e "$ROOT/docs/deletion-ledger.json" ] || fail "machine-readable JSON ledger is forbidden"
@@ -92,12 +92,13 @@ durable_inventory() {
     'D10 — Ownership and scoped selection' \
     'D11 — Umbrella contracts, slice rollups, and integration gates' \
     'D12 — Store/execution/mirror seams with local truth' \
-    'D13 — Repository portability, config layering, and versioned install'
+    'D13 — Repository portability, config layering, and versioned install' \
+    'D14 — Test-assertion drift check'
   do
     has "$_label" "$DOC" "missing durable row: $_label"
   done
-  [ "$(grep -Ec '^\| D([1-9]|1[0-3]) — .+ \| Durable trust and intent \|' "$DOC")" -eq 13 ] ||
-    fail "every D1-D13 row must use the durable trust-and-intent layer"
+  [ "$(grep -Ec '^\| D([1-9]|1[0-4]) — .+ \| Durable trust and intent \|' "$DOC")" -eq 14 ] ||
+    fail "every D1-D14 row must use the durable trust-and-intent layer"
   pass "durable_inventory"
 }
 
@@ -106,7 +107,7 @@ row_evidence_completeness() {
     fence_delim($0) { next }
     !fence && /^## Deletion ledger$/ { ledger=1; next }
     !fence && ledger && /^## / { exit }
-    ledger && /^\| (C[1-9]|D([1-9]|1[0-3])) / {
+    ledger && /^\| (C[1-9]|D([1-9]|1[0-4])) / {
       n=split($0, cell, "|")
       if (n != 7) {
         print "malformed five-cell ledger row: " $0 > "/dev/stderr"

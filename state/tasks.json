@@ -514,7 +514,8 @@
         {
           "id": "E36-F06",
           "title": "Test-assertion drift check across the feature branch: tool + Reviewer gate",
-          "status": "pending",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "d4364fcb25ad0d88af492fd607eb0477545f4e6d", "ref": "d4364fcb25ad0d88af492fd607eb0477545f4e6d", "repo": "harness-sdd-E36-F06", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
