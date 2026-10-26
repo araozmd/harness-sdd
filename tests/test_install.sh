@@ -814,8 +814,8 @@ grep -qE '^# .*discovery \| pilot \| production' "$T/.harness/specs/product.md" 
   || fail "E36-F03 R1: seeded product.md has no '# … discovery | pilot | production' comment line"
 grep -qF 'absent means production' "$T/.harness/specs/product.md" \
   || fail "E36-F03 R1: seeded product.md does not state that an absent stage means production"
-awk 'NR==1&&$0!="---"{exit 1} NR>1&&/^---$/{exit} /^stage: production$/{f=1} END{exit !f}' "$T/.harness/specs/product.md" \
-  || fail "E36-F03 R1: the 'stage: production' line is not inside the stub's first --- frontmatter block"
+awk 'NR==1&&$0!="---"{exit 1} NR>1&&/^---$/{exit} /^# .*discovery \| pilot \| production/{c=1} /^stage: production$/{if(c)f=1} END{exit !f}' "$T/.harness/specs/product.md" \
+  || fail "E36-F03 R1: the '# … discovery | pilot | production' comment line and then 'stage: production' are not, in that order, inside the stub's first --- frontmatter block"
 [ -f "$T/.harness/state/tasks.json" ]          || fail "bootstrap tasks.json missing"        # R6
 # E09-F01: doc-critic role is installed and the generating-agent contracts reference it.
 [ -f "$T/.harness/agents/doc-critic.md" ]      || fail "doc-critic role not installed"       # R13
