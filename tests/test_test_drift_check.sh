@@ -184,6 +184,17 @@ expect_rc 0 "R8b"; [ "$(nlines)" = 1 ] || { cat "$T/out" >&2; fail "R8b: pure ad
 expect_line '^test-drift-check: 0 findings, 0 waived, 2 test files examined ' "R8b summary"
 pass "R8b_pure_additions"
 
+# A touched BINARY test file yields no finding but still counts in F (the only file touched).
+newrepo r8c; mkdir -p "$R/tests"
+printf 'a\000b\001\n' > "$R/tests/blob.bin"
+basecommit; feature
+printf 'a\000c\002\n' > "$R/tests/blob.bin"
+featcommit
+run "$R" main
+expect_rc 0 "R8c"; [ "$(nlines)" = 1 ] || { cat "$T/out" >&2; fail "R8c: a binary file yields no finding"; }
+expect_line '^test-drift-check: 0 findings, 0 waived, 1 test files examined ' "R8c: a binary test file is counted in F"
+pass "R8c_binary_counted"
+
 # ── R1: scope and baseline ───────────────────────────────────────────────────────
 newrepo r1a; put src/app.js <<'EOF'
 function f(x) {
