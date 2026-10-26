@@ -91,4 +91,27 @@ R5_adr_template_sticky_boltons() {
 }
 R5_adr_template_sticky_boltons
 
+# R6 — the plan template carries `## Deferred` and every row cites an R-id or an ADR.
+R6_plan_template_deferred() {
+  _p="$I/specs/_templates/feature.plan.md"
+  [ -f "$_p" ] || fail "R6: installed specs/_templates/feature.plan.md missing"
+  grep -qE '^## Deferred' "$_p" || fail "R6: plan template has no '## Deferred' subsection"
+  grep -qF '| Bolt-on | Deferred by | Trigger |' "$_p" \
+    || fail "R6: plan template has no '| Bolt-on | Deferred by | Trigger |' table header"
+  grep -qE '^\| .* \| ADR-NNNN \| .* \|$' "$_p" \
+    || fail "R6: plan template's Deferred table has no placeholder row citing ADR-NNNN in its Deferred-by cell"
+  grep -qF 'Deferred: none — <why>' "$_p" \
+    || fail "R6: plan template does not name the 'Deferred: none — <why>' single-line alternative"
+  grep -qF 'specs/product.md' "$_p" || fail "R6: plan template does not name the stage source specs/product.md"
+  fold "$_p" | grep -qE 'production[^.]{0,40}absent|absent[^.]{0,40}production' \
+    || fail "R6: plan template does not say the stage is production when absent"
+  fold "$_p" | grep -qE 'R-id[^.]{0,80}ADR-NNNN[^.]{0,40}defers' \
+    || fail "R6: plan template's header blockquote does not say every row cites the R-id it serves or the ADR-NNNN that defers it"
+  _f="$(lineno "$_p" '## Files to change')"; _x="$(lineno "$_p" '## Deferred')"; _n="$(lineno "$_p" '## DO NOT TOUCH')"
+  [ "$_f" -gt 0 ] && [ "$_x" -gt "$_f" ] && [ "$_n" -gt "$_x" ] \
+    || fail "R6: '## Deferred' is not between '## Files to change' and '## DO NOT TOUCH' (files=$_f deferred=$_x dnt=$_n)"
+  pass "plan template carries '## Deferred' (table or 'Deferred: none — <why>') and the row-citation blockquote (R6) [R6_plan_template_deferred]"
+}
+R6_plan_template_deferred
+
 echo "All stage/NFR tests passed."
