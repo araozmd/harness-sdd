@@ -151,3 +151,28 @@ csec 'advisory[^.]{0,80}never block[^.]{0,80}no gate[^.]{0,40}no (new )?status[^
 if csec 'reject'; then fail "R7: critic section must not tell anyone to reject"; fi
 if csec 'fail the drill'; then fail "R7: critic section must not fail the drill"; fi
 pass "R7_doc_critic_exemption_and_advisory"
+
+# ── R9: docs/WORKFLOW.md section ──────────────────────────────────────────────────
+H9='## Observable slices and the walking skeleton (ADR-0008)'
+grep -qF "$H9" "$WORKFLOW" || fail "R9: $WORKFLOW lacks the heading '$H9'"
+a="$(ln "$WORKFLOW" '## Change-size discipline')"; b="$(ln "$WORKFLOW" '## Observable slices')"
+c="$(ln "$WORKFLOW" '## Architecture-aligned specs')"
+[ -n "$a" ] && [ -n "$b" ] && [ -n "$c" ] && [ "$a" -lt "$b" ] && [ "$b" -lt "$c" ] \
+  || fail "R9: the section is not between Change-size discipline and Architecture-aligned specs"
+range "$WORKFLOW" '## Observable slices' '## Architecture-aligned specs' | tr '\n' ' ' > "$T/wf-sec.txt"
+WS="$T/wf-sec.txt"
+wsec() { grep -qiE -e "$1" "$WS"; }
+wsecF() { grep -qF -- "$1" "$WS"; }
+wsec 'product boundary[^.]{0,120}HTTP[^.]{0,40}CLI[^.]{0,40}UI[^.]{0,40}file[^.]{0,40}exit code' \
+  || fail "R9: section does not state the product-boundary clause"
+wsec 'first feature of a fresh epic is the walking skeleton' || fail "R9: section does not state the walking-skeleton clause"
+wsec 'internal[^.]{0,80}merged[^.]{0,40}consum' || fail "R9: section does not state the merge-into-consumer clause"
+wsec 'beginning `Observable-slice exemption:`' || fail "R9: section does not state the Observable-slice exemption: Notes line"
+wsec 'only consumer is another epic' || fail "R9: section does not carry the cross-epic exemption"
+for id in observable-behavior-missing walking-skeleton-missing internal-only-outcome exemption-recorded; do
+  wsecF "$id" || fail "R9: section does not name finding $id"
+done
+wsecF 'agents/driller.md' || fail "R9: section does not point at agents/driller.md"
+wsecF 'agents/doc-critic.md' || fail "R9: section does not point at agents/doc-critic.md"
+wsec 'advisory[^.]{0,40}never blocks' || fail "R9: section does not say the rule is advisory and never blocks"
+pass "R9_workflow_section"
