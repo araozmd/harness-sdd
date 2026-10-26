@@ -60,19 +60,19 @@ pass "R2 default --jobs 4; a higher request is clamped to HARNESS_TEST_JOBS_MAX 
 
 # ── R3: one run per machine — a live holder refuses (exit 5, names pid); a stale lock clears ─
 _lock="$T/tmp/harness-run-tests.lock"
-mkdir -p "$_lock"; printf '%s\n' "$$" >"$_lock/pid"      # this shell IS alive ⇒ live holder
+printf '%s\n' "$$" >"$_lock"      # this shell IS alive ⇒ live holder
 _rc=0
 env -u HARNESS_RUN_TESTS_NESTED TMPDIR="$T/tmp" sh "$RUNNER" --jobs 1 "$T/no-such-suite.sh" >"$T/o3.txt" 2>"$T/e3.txt" || _rc=$?
 [ "$_rc" -eq 5 ] || { cat "$T/e3.txt" >&2; fail "R3: a held lock did not exit 5 (got $_rc)"; }
 grep -q "pid $$" "$T/e3.txt" || fail "R3: refusal does not name the holder pid"
 grep -qi 'not waiting' "$T/e3.txt" || fail "R3: refusal does not say it will not wait"
-[ -d "$_lock" ] || fail "R3: the refused run removed the live holder's lock"
+[ -f "$_lock" ] || fail "R3: the refused run removed the live holder's lock"
 # stale: a pid that cannot be alive
-printf '%s\n' 999999999 >"$_lock/pid"
+printf '%s\n' 999999999 >"$_lock"
 _rc=0
 env -u HARNESS_RUN_TESTS_NESTED TMPDIR="$T/tmp" sh "$RUNNER" --jobs 1 "$T/no-such-suite.sh" >/dev/null 2>"$T/e3b.txt" || _rc=$?
 [ "$_rc" -ne 5 ] || { cat "$T/e3b.txt" >&2; fail "R3: a stale lock (dead pid) was treated as held"; }
-[ ! -d "$_lock" ] || fail "R3: the runner left its own lock behind after exiting ($_rc)"
+[ ! -e "$_lock" ] || fail "R3: the runner left its own lock behind after exiting ($_rc)"
 pass "R3 live holder ⇒ exit 5 naming the pid, no wait; stale lock reclaimed and released [machine_lock]"
 
 echo "ALL PASSED (test_suite_hygiene.sh)"

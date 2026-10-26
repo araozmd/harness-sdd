@@ -47,7 +47,8 @@
 #   3  a suite or tool did not PARSE under the strict shell (nothing was executed)
 #   4  usage error / no suites found / malformed dash allowlist
 #   5  another run-tests.sh is already running on this machine (one run at a time;
-#      the runner does not wait and does not retry — rerun when it has finished)
+#      the runner does not wait and does not retry — rerun when it has finished). The
+#      lock is a pid file claimed with `ln`, reclaimed by atomic rename when stale.
 #
 # NOTE ON ISOLATION: concurrency here is a claim about the suites, not a wish. If a future
 # suite starts writing to a shared path, it will fail intermittently under --jobs and pass
@@ -92,32 +93,46 @@ fi
 # ── one run per machine ─────────────────────────────────────────────────────────────
 # Two concurrent runs (different worktrees, same laptop) multiply the process count and
 # compete for the same tmp filesystem; the second one refuses and exits 5 instead of
-# waiting, so a caller can never queue a third behind it by accident. `mkdir` is the
-# portable atomic claim; a lock whose recorded pid is gone is stale and reclaimed once.
+# waiting, so a caller can never queue a third behind it by accident. The lock is a FILE
+# holding the owner's pid: it is written to a private temp file first and claimed with a
+# hard link (`ln` fails if the lock exists), so the pid is there from the instant the lock
+# is, with no empty-holder window. A lock whose pid is gone is reclaimed by an atomic
+# rename (exactly one of several reclaimers wins) and released only by its owner.
 # A NESTED run — a suite exercising the runner itself (test_grep_probe, test_suite_hygiene)
 # — is already inside the outer run's cap, so it skips the claim: the outer runner exports
 # the marker to every suite it starts. A suite that wants to test the lock unsets it.
-lockdir="${TMPDIR:-/tmp}"; lockdir="${lockdir%/}/harness-run-tests.lock"
+lockfile="${TMPDIR:-/tmp}"; lockfile="${lockfile%/}/harness-run-tests.lock"
+release_run_lock() {
+  [ -n "$lockfile" ] || return 0
+  [ "$(cat "$lockfile" 2>/dev/null)" = "$$" ] && rm -f "$lockfile"
+  return 0
+}
 _lock_try=0
 while [ "${HARNESS_RUN_TESTS_NESTED:-0}" != 1 ]; do
-  if mkdir "$lockdir" 2>/dev/null; then
-    printf '%s\n' "$$" >"$lockdir/pid"
+  printf '%s\n' "$$" >"$lockfile.$$"
+  if ln "$lockfile.$$" "$lockfile" 2>/dev/null; then
+    rm -f "$lockfile.$$"
     break
   fi
-  _holder="$(cat "$lockdir/pid" 2>/dev/null || :)"
+  rm -f "$lockfile.$$"
+  _holder="$(cat "$lockfile" 2>/dev/null || :)"
+  case "$_holder" in *[!0-9]*) _holder="" ;; esac
   if [ -n "$_holder" ] && kill -0 "$_holder" 2>/dev/null; then
     printf 'run-tests: another run-tests.sh (pid %s) is already running on this machine — one suite run at a time; not waiting, not retrying (lock: %s)\n' \
-      "$_holder" "$lockdir" >&2
+      "$_holder" "$lockfile" >&2
     exit 5
   fi
   _lock_try=$((_lock_try + 1))
-  [ "$_lock_try" -lt 3 ] || { printf 'run-tests: could not claim %s (stale lock would not clear)\n' "$lockdir" >&2; exit 5; }
-  rm -rf "$lockdir" 2>/dev/null || :
+  [ "$_lock_try" -lt 3 ] || { printf 'run-tests: could not claim %s (stale lock would not clear)\n' "$lockfile" >&2; exit 5; }
+  # atomic reclaim: of several runners renaming the same stale lock exactly one mv succeeds
+  if mv "$lockfile" "$lockfile.stale.$$" 2>/dev/null; then
+    rm -f "$lockfile.stale.$$"
+  fi
 done
 if [ "${HARNESS_RUN_TESTS_NESTED:-0}" != 1 ]; then
-  trap 'rm -rf "$lockdir"' EXIT HUP INT TERM
+  trap 'release_run_lock' EXIT HUP INT TERM
 else
-  lockdir=""                               # nested: nothing of ours to release
+  lockfile=""                              # nested: nothing of ours to release
 fi
 export HARNESS_RUN_TESTS_NESTED=1          # every suite this run starts is nested
 
@@ -411,7 +426,7 @@ if [ -n "$preflight_bad" ]; then
 fi
 
 work="$(mktemp -d)" || { printf 'run-tests: mktemp failed\n' >&2; exit 4; }
-trap 'rm -rf "$work" ${lockdir:+"$lockdir"}' EXIT HUP INT TERM
+trap 'rm -rf "$work"; release_run_lock' EXIT HUP INT TERM
 
 # The suites shell out to the TOOLS as `sh tools/foo.sh`, which resolves through PATH — so
 # without this the tools would keep running under the host `sh` no matter what the suites
