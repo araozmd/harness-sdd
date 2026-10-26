@@ -464,6 +464,95 @@ test_critical_path() {
   pass "R7 critical_path: longest non-done in-scope chain, ties by ADR-0001 order position by position"
 }
 
+# row_fields <id> <file>: the whitespace-delimited fields of the report row for <id>.
+row_fields() {
+  awk -v id="$1" 'index($0, "  " id " ") == 1 { $1 = $1; print }' "$2"
+}
+
+test_human_report() {
+  write_config true
+  board1 "$(feat E1-F6 pending)" "$(feat E1-F5 spec-ready)" \
+    "$(feat E1-F4 pending '[]' '"parked":{"reason":"keys pending; runnable-later"}')" \
+    "$(feat E1-F3 pending '["E1-F2"]' '"autonomous":true')" "$(feat E1-F2 pending '["E1-F1"]' '"autonomous":true')" "$(feat E1-F1 done)"
+  run_tool --waves >"$TMP/h.out" || fail "R8: text --waves failed"
+  sed -n 1p "$TMP/h.out" | grep -qF 'whole board' || fail "R8: line 1 does not name the whole-board scope"
+  [ "$(sed -n 2p "$TMP/h.out" | grep -c '^Wave 0 (done): 1 ')" = 1 ] || fail "R8: line 2 is not 'Wave 0 (done): 1 ...'"
+  grep -q '^Wave 1 (' "$TMP/h.out" || fail "R8: no 'Wave 1 (' heading"
+  # shellcheck disable=SC2046 # field splitting is the point
+  set -- $(row_fields E1-F2 "$TMP/h.out")
+  [ "$#" = 5 ] && [ "$1/$2/$3/$4/$5" = E1-F2/pending/architect/auto/runnable ] ||
+    fail "R8: runnable autonomous row fields are '$*'"
+  # shellcheck disable=SC2046
+  set -- $(row_fields E1-F4 "$TMP/h.out")
+  [ "$1/$2/$3/$4/$5" = E1-F4/pending/architect/-/'[parked]' ] || fail "R8: parked row fields are '$*'"
+  for _f in "$@"; do [ "$_f" != runnable ] || fail "R8: the parked row has a 'runnable' field"; done
+  # shellcheck disable=SC2046
+  set -- $(row_fields E1-F5 "$TMP/h.out")
+  [ "$1/$2/$3/$4/$5" = E1-F5/spec-ready/-/-/'[human-gate]' ] || fail "R8: route-null row fields are '$*'"
+  # shellcheck disable=SC2046
+  set -- $(row_fields E1-F6 "$TMP/h.out")
+  [ "$#" = 5 ] && [ "$1/$2/$3/$4/$5" = E1-F6/pending/architect/-/runnable ] || fail "R8: runnable non-autonomous row fields are '$*'"
+  [ "$(tail -n 1 "$TMP/h.out")" = 'Critical path (2): E1-F2 -> E1-F3' ] || fail "R8: last line is not the critical path"
+  # The full report, byte for byte (the anchors above are the spec; this pins the rest).
+  cat >"$TMP/h.want" <<'TXT'
+Waves — whole board
+Wave 0 (done): 1 feature(s)
+Wave 1 (4 feature(s), 1 autonomous)
+  E1-F2  pending  architect  auto  runnable
+  E1-F4  pending  architect  -  [parked] keys pending; runnable-later [route when unparked: architect]
+  E1-F5  spec-ready  -  -  [human-gate] spec-ready requires approval
+  E1-F6  pending  architect  -  runnable
+Wave 2 (1 feature(s), 1 autonomous)
+  E1-F3  pending  architect  auto  [unmet-dependency] blocking dependencies: E1-F2=pending
+Critical path (2): E1-F2 -> E1-F3
+TXT
+  cmp -s "$TMP/h.out" "$TMP/h.want" || fail "R8: text report differs from the golden report:
+$(diff "$TMP/h.want" "$TMP/h.out" || :)"
+  run_tool --waves --epic E1 >"$TMP/h.out" || fail "R8: text --waves --epic E1 failed"
+  [ "$(sed -n 1p "$TMP/h.out")" = 'Waves — epic E1' ] || fail "R8: --epic E1 line 1 is '$(sed -n 1p "$TMP/h.out")'"
+  # --json: exactly one stdout line, valid JSON.
+  run_tool --waves --json >"$TMP/h.out" || fail "R8: --waves --json failed"
+  [ "$(wc -l <"$TMP/h.out" | tr -d ' ')" = 1 ] || fail "R8: --json printed more than one line"
+  python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$TMP/h.out" || fail "R8: --json output does not parse"
+  # Blocker fields: two blockers render as two [code] fields.
+  board1 "$(feat E1-F2 pending '["E1-F1"]' '"parked":{"reason":"hold"}')" "$(feat E1-F1 pending)"
+  run_tool --waves >"$TMP/h.out" || fail "R8: two-blocker text failed"
+  [ "$(row_fields E1-F2 "$TMP/h.out")" = 'E1-F2 pending architect - [parked] hold [route when unparked: architect] [unmet-dependency] blocking dependencies: E1-F1=pending' ] ||
+    fail "R8: two-blocker row is '$(row_fields E1-F2 "$TMP/h.out")'"
+  # Edge lines: all done; one pending feature.
+  board1 "$(feat E1-F2 done)" "$(feat E1-F1 done)"
+  run_tool --waves >"$TMP/h.out" || fail "R8: all-done text failed"
+  [ "$(tail -n 1 "$TMP/h.out")" = 'Critical path (0): none' ] || fail "R8: all-done board last line is '$(tail -n 1 "$TMP/h.out")'"
+  [ "$(sed -n 2p "$TMP/h.out")" = 'Wave 0 (done): 2 feature(s)' ] || fail "R8: all-done Wave 0 line is '$(sed -n 2p "$TMP/h.out")'"
+  [ "$(wc -l <"$TMP/h.out" | tr -d ' ')" = 3 ] || fail "R8: all-done board printed a wave heading"
+  board1 "$(feat E1-F1 pending)"
+  run_tool --waves >"$TMP/h.out" || fail "R8: single text failed"
+  [ "$(tail -n 1 "$TMP/h.out")" = 'Critical path (1): E1-F1' ] || fail "R8: one-feature path line is '$(tail -n 1 "$TMP/h.out")'"
+  # Invalid graph in text mode: exit 0, `Waves undefined` first, one blocked line per record.
+  board1 "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F1 pending '["E1-F2"]')"
+  _rc=0
+  run_tool --waves >"$TMP/h.out" || _rc=$?
+  [ "$_rc" = 0 ] || fail "R8: invalid-graph text exited $_rc"
+  sed -n 1p "$TMP/h.out" | grep -q '^Waves undefined' || fail "R8: invalid-graph first line is '$(sed -n 1p "$TMP/h.out")'"
+  grep -q '^blocked E1-F1 \[dependency-cycle\]: ' "$TMP/h.out" || fail "R8: no 'blocked E1-F1 [dependency-cycle]: ' line"
+  cat >"$TMP/h.want" <<'TXT'
+Waves undefined: dependency graph is invalid
+blocked E1-F1 [dependency-cycle]: dependency cycle (feature): E1-F1 -> E1-F2 -> E1-F1
+blocked E1-F1 [unmet-dependency]: blocking dependencies: E1-F2=pending
+blocked E1-F2 [dependency-cycle]: dependency cycle (feature): E1-F1 -> E1-F2 -> E1-F1
+blocked E1-F2 [unmet-dependency]: blocking dependencies: E1-F1=pending
+TXT
+  cmp -s "$TMP/h.out" "$TMP/h.want" || fail "R8: invalid-graph report differs:
+$(diff "$TMP/h.want" "$TMP/h.out" || :)"
+  # Input error in text mode: still the JSON error envelope on stdout, exit 1.
+  _rc=0
+  run_tool --waves --epic E9 >"$TMP/h.out" 2>/dev/null || _rc=$?
+  [ "$_rc" = 1 ] || fail "R8: text --epic E9 exited $_rc, want 1"
+  [ "$(json_field 'x["outcome"] + "/" + x["reason"]["code"]' <"$TMP/h.out")" = error/input-error ] ||
+    fail "R8: text-mode input error is not the JSON error envelope"
+  pass "R8 human_report: scope line, Wave 0, wave rows by field, critical path; invalid graph; errors stay JSON"
+}
+
 test_cli_contract
 test_usage_synopsis
 test_wave_assignment
@@ -471,5 +560,6 @@ test_epic_scope
 test_feature_records
 test_invalid_graph
 test_critical_path
+test_human_report
 
 echo "test_waves: $PASS passed"

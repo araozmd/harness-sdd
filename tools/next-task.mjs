@@ -796,6 +796,27 @@ function deriveWaves(model, config, args) {
     scope: { epic }, wave0, waves, critical_path: criticalPath };
 }
 
+// formatWaves — the R8 human report, rendered from the finished envelope (never a second
+// computation). The JSON is the contract; the text is anchored by tests/test_waves.sh.
+function formatWaves(result) {
+  if (result.outcome === 'blocked') {
+    return ['Waves undefined: dependency graph is invalid',
+      ...result.blocked.map((record) => `blocked ${record.subject} [${record.code}]: ${record.detail}`)].join('\n') + '\n';
+  }
+  const lines = [`Waves — ${result.scope.epic === null ? 'whole board' : `epic ${result.scope.epic}`}`,
+    `Wave 0 (done): ${result.wave0.length} feature(s)`];
+  for (const group of result.waves) {
+    lines.push(`Wave ${group.wave} (${group.features.length} feature(s), ${group.features.filter((f) => f.autonomous).length} autonomous)`);
+    for (const f of group.features) {
+      const state = f.runnable ? 'runnable' : f.blocked.map((record) => `[${record.code}] ${record.detail}`).join('  ');
+      lines.push(`  ${f.id}  ${f.status}  ${f.route === null ? '-' : f.route}  ${f.autonomous ? 'auto' : '-'}  ${state}`);
+    }
+  }
+  const path = result.critical_path;
+  lines.push(`Critical path (${path.length}): ${path.length ? path.join(' -> ') : 'none'}`);
+  return lines.join('\n') + '\n';
+}
+
 let args = { mode: 'board' };
 try {
   args = parseArgs(process.argv.slice(2));
@@ -819,8 +840,9 @@ try {
       try { repos = manifestRepos(manifestText); } catch (error) { throw new ExpectedError('manifest-error', `invalid umbrella manifest ${manifestPath}: ${error.message}`); }
     }
   }
-  if (args.mode === 'waves') emit(deriveWaves(model, config, args));
-  else emit(select(model, config, args, repos));
+  if (args.mode !== 'waves') emit(select(model, config, args, repos));
+  else if (args.json) emit(deriveWaves(model, config, args));
+  else process.stdout.write(formatWaves(deriveWaves(model, config, args)));
 } catch (error) {
   const code = error instanceof ExpectedError ? error.code : 'input-error';
   const detail = error instanceof Error ? error.message : String(error);
