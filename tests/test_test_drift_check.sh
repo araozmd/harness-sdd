@@ -1140,6 +1140,35 @@ grep -Fxq 'WAIVED test-removed | tests/t.sh:— | test_gone | x' "$T/out" \
   || { cat "$T/out" >&2; fail "R10g: a tab on each side of the em dash is a valid separator"; }
 pass "R10g_first_separator_and_tab"
 
+# The rest of the R10 line grammar (round 3): no blank is needed after the colon; a name that is
+# empty after trimming, or a dash spaced on ONE side only, is malformed; parsing stops at the
+# first malformed line (one stderr reason); and a CRLF tasks file waives with a clean reason.
+printf 'waive-test-drift:test_gone \342\200\224 no blank after the colon\n' > "$T/tasks.md"
+run "$R" main --tasks-md "$T/tasks.md"
+expect_rc 0 "R10i no blank after the colon"
+grep -Fxq 'WAIVED test-removed | tests/t.sh:— | test_gone | no blank after the colon' "$T/out" \
+  || { cat "$T/out" >&2; fail "R10i: 'waive-test-drift:<name>' needs no blank after the colon"; }
+for _bad in 'waive-test-drift:   \342\200\224 empty name' 'waive-test-drift: test_gone \342\200\224x' \
+            'waive-test-drift: test_gone\342\200\224 x'; do
+  printf "$_bad\n" > "$T/tasks.md"
+  run "$R" main --tasks-md "$T/tasks.md"
+  expect_rc 2 "R10i malformed: $_bad"
+  grep -q 'malformed waiver' "$T/err" || fail "R10i: '$_bad' must be a malformed waiver"
+done
+printf 'See waive-test-drift: for the syntax.\n' > "$T/tasks.md"
+run "$R" main --tasks-md "$T/tasks.md"
+expect_rc 1 "R10i a mid-line mention with no separator is prose, not a malformed waiver"
+printf 'waive-test-drift: one\nwaive-test-drift: two\n' > "$T/tasks.md"
+run "$R" main --tasks-md "$T/tasks.md"
+expect_rc 2 "R10i two malformed lines"
+[ "$(wc -l < "$T/err" | tr -d ' ')" = 1 ] || { cat "$T/err" >&2; fail "R10i: two malformed lines still give ONE stderr reason"; }
+printf 'waive-test-drift: test_gone \342\200\224 crlf reason\r\n' > "$T/tasks.md"
+run "$R" main --tasks-md "$T/tasks.md"
+expect_rc 0 "R10i CRLF tasks file"
+grep -Fxq 'WAIVED test-removed | tests/t.sh:— | test_gone | crlf reason' "$T/out" \
+  || { cat "$T/out" >&2; fail "R10i: a CRLF waiver line waives with the CR trimmed from the reason"; }
+pass "R10i_waiver_grammar_edges"
+
 for nm in test_gone_v2 test_gon Test_gone; do
   printf 'waive-test-drift: %s — not the same name\n' "$nm" > "$T/tasks.md"
   run "$R" main --tasks-md "$T/tasks.md"
