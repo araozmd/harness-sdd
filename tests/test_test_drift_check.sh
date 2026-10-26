@@ -298,6 +298,35 @@ run "$R" main
 expect_rc 0 "R3d"
 pass "R3d_added_assertion_no_finding"
 
+# Pairing is per hunk: a `+` assertion in one -U0 hunk must never pair with a `-` in another.
+# Two scopes, and the first leaves residue (an unpaired `+`) for the second to misuse.
+newrepo r3e; put tests/h.test.js <<'EOF'
+it('first', () => {
+  run(1);
+});
+it('second', () => {
+  run(2);
+  expect(b).toBe(2);
+});
+EOF
+basecommit; feature
+put tests/h.test.js <<'EOF'
+it('first', () => {
+  run(1);
+  expect(a).toBe(1);
+});
+it('second', () => {
+  run(2);
+});
+EOF
+featcommit
+run "$R" main
+expect_rc 1 "R3e"; expect_ndrift 1 "R3e"
+[ "$(cnt '^DRIFT assert-modified ')" = 0 ] || { cat "$T/out" >&2; fail "R3e: a + in hunk 1 paired with a - in hunk 2"; }
+grep -Fxq 'DRIFT assert-removed | tests/h.test.js:6 | second | expect(b).toBe(2);' "$T/out" \
+  || { cat "$T/out" >&2; fail "R3e: want exactly the hunk-2 removal as assert-removed"; }
+pass "R3e_pairing_is_per_hunk"
+
 # ── R4: built-in assertion patterns ──────────────────────────────────────────────
 newrepo r4a
 fam() { # fam <n> <ext> <kind> <line> — a fixture file whose only changed line is <line>
