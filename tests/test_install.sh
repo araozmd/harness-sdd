@@ -675,7 +675,37 @@ JSON
     fail "E16-F03: installed selector did not resolve its own TaskStore"
   printf '%s\n' "$_actual" | grep -qF '"route":"builder"' ||
     fail "E16-F03: installed selector returned wrong route"
+  # E36-F05 R2 (installed half): EXECUTE the installed selector — a grep of source would
+  # pass whether or not the install shipped the synopsis.
+  _rc=0
+  node "$T/.harness/tools/next-task.mjs" --wat >"$T/e36f05-wat.out" 2>"$T/e36f05-wat.err" || _rc=$?
+  [ "$_rc" = 2 ] || fail "E36-F05 R2: installed selector --wat exited $_rc, want 2"
+  grep '^usage: ' "$T/e36f05-wat.err" | grep -qF -- '--waves [--epic E##]' ||
+    fail "E36-F05 R2: installed selector usage line lacks --waves [--epic E##]"
+  # E36-F05 R10: the installed selector derives waves from its own TaskStore.
+  _waves="$(cd / && node "$T/.harness/tools/next-task.mjs" --waves --json)" ||
+    fail "E36-F05 R10: installed selector --waves --json failed"
+  [ "$(printf '%s' "$_waves" | python3 -c 'import json,sys; x=json.load(sys.stdin); print(x["outcome"] + " " + ",".join(f["id"] for f in x["waves"][0]["features"]))')" = 'waves E2-F1' ] ||
+    fail "E36-F05 R10: installed --waves --json is not outcome=waves with E2-F1 in waves[0]"
   mv "$T/.harness/state/tasks.json.e16f03-backup" "$T/.harness/state/tasks.json"
+  # E36-F05 R10: installed role + command carry the wave view INSIDE the completion-report
+  # section / step 12 (line ranges from grep -n numbers; not the fence-blind extractor).
+  _r=$(_e36f05_range "$T/.harness/agents/driller.md" '^## Completion report' '^## ')
+  printf '%s\n' "$_r" | grep -qF -- '--waves --epic' ||
+    fail "E36-F05 R10: installed driller.md Completion report lacks --waves --epic"
+  _r=$(_e36f05_range "$T/.claude/commands/sdd-drill.md" '^12\. \*\*Report' '^[0-9]+\. ')
+  printf '%s\n' "$_r" | grep -qF -- 'node .harness/tools/next-task.mjs --waves --epic' ||
+    fail "E36-F05 R10: installed sdd-drill.md step 12 lacks node .harness/tools/next-task.mjs --waves --epic"
+}
+
+# _e36f05_range <file> <start-ERE> <next-ERE>: lines from the first <start> match to the
+# line before the next <next> match after it, or EOF.
+_e36f05_range() {
+  _s=$(grep -nE "$2" "$1" | head -n 1 | cut -d: -f1)
+  [ -n "$_s" ] || return 0
+  _e=$(grep -nE "$3" "$1" | awk -F: -v s="$_s" '$1 > s { print $1 - 1; exit }')
+  [ -n "$_e" ] || _e=$(wc -l <"$1" | tr -d ' ')
+  sed -n "${_s},${_e}p" "$1"
 }
 
 test_rationale_docs_installed_contract() {

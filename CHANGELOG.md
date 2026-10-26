@@ -4,7 +4,7 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
-## [0.100.0] — 2026-10-26
+## [0.101.0] — 2026-10-26
 
 ### Added — product stage and deferred-decision ADRs (E36-F03)
 - **The product stage.** `specs/product.md` frontmatter declares `stage: discovery | pilot |
@@ -33,6 +33,26 @@ All notable changes to the harness body are recorded here. Versions follow
   table. Enforcement — the plan-row citation lint, the `init.sh` trigger sweep, the doc-critic
   flags and the Reviewer gate — is E36-F04; this release declares and records only.
 - New suite `tests/test_stage_nfrs.sh`; `tests/test_install.sh` pins the stub and the refresh.
+
+## [0.100.0] — 2026-10-26
+
+### Added — derived waves and critical path (E36-F05)
+- `node tools/next-task.mjs --waves [--json] [--epic E##]` prints the dependency graph as
+  waves (`done` = wave 0; otherwise 1 + the highest wave among dependencies), the critical
+  path (longest chain of non-done features, ties in ADR-0001 order) and, per feature, its
+  status, route, `autonomous`, effective `owner`, `runnable` and the selector's own blocker
+  records. `--json` prints one envelope (`mode: "waves"`, `outcome: "waves"`, plus `scope`,
+  `wave0`, `waves`, `critical_path`); it is the contract `/sdd-next --wave` (E36-F07) will
+  consume. `--epic` filters the listing while wave numbers stay board-wide. A live cycle or a
+  missing `depends_on` id yields `outcome: "blocked"`, reason `invalid-graph`, and no wave.
+  Read-only, derived, never stored (ADR-0010). `--json` stays a no-op in the other modes.
+- A `usage-error` now also prints a `usage:` synopsis line on stderr (`reason.detail` is
+  unchanged).
+- The Driller's completion report (`agents/driller.md`, `/sdd-drill` step 12) ends with the
+  `--waves --epic <epic-id>` view of the epic it just seeded.
+- `docs/WORKFLOW.md` gains "Running in waves and across machines": wave 1 via
+  `/sdd-next <id>` per machine, `--mine`/`owner` as the alternative, and the known limitation
+  that bare `/sdd-next` on identical boards picks the same feature.
 
 ## [0.99.0] — 2026-10-26
 

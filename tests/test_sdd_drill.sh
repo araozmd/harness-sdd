@@ -329,4 +329,36 @@ grep -qi 'Neither tier blocks\|neither blocks\|never a hard' docs/WORKFLOW.md \
   || fail "E21-F01 R9: WORKFLOW.md does not state that the budget never blocks"
 pass "E21-F01 R9 change_size_documented"
 
+# E36-F05 R10 test_driller_report_ends_with_waves
+# The Driller's report must END with the wave view of the epic it just seeded. Asserted
+# INSIDE the section/step by a line range cut with `sed -n` on `grep -n` numbers — from the
+# heading (resp. the `12. **Report**` line) to the line before the next `## ` heading (resp.
+# the next numbered step) or EOF. Not the awk section extractor: it is fence-blind.
+# bounded_range <file> <start-ERE> <next-ERE>
+bounded_range() {
+  _s=$(grep -nE "$2" "$1" | head -n 1 | cut -d: -f1)
+  [ -n "$_s" ] || return 0
+  _e=$(grep -nE "$3" "$1" | awk -F: -v s="$_s" '$1 > s { print $1 - 1; exit }')
+  [ -n "$_e" ] || _e=$(wc -l <"$1" | tr -d ' ')
+  sed -n "${_s},${_e}p" "$1"
+}
+_rep=$(bounded_range "$ROLE" '^## Completion report' '^## ')
+[ -n "$_rep" ] || fail "E36-F05 R10: $ROLE has no ## Completion report section"
+printf '%s\n' "$_rep" | grep -qF 'node tools/next-task.mjs --waves --epic <epic-id>' \
+  || fail "E36-F05 R10: $ROLE Completion report does not run node tools/next-task.mjs --waves --epic <epic-id>"
+printf '%s\n' "$_rep" | grep -qF 'node .harness/tools/next-task.mjs --waves --epic <epic-id>' \
+  || fail "E36-F05 R10: $ROLE Completion report does not name the installed .harness/tools path"
+printf '%s\n' "$_rep" | tr '\n' ' ' | grep -qiE '\bend\b.{0,200}--waves --epic|--waves --epic.{0,200}\bend\b' \
+  || fail "E36-F05 R10: $ROLE Completion report does not say the wave view ENDS the report"
+_step=$(bounded_range "$CMD" '^12\. \*\*Report' '^[0-9]+\. ')
+[ -n "$_step" ] || fail "E36-F05 R10: $CMD has no 12. **Report** step"
+# Self mode (`harness-install.sh --self`) rewrites `.harness/` paths to repo-root ones in
+# the committed glue, so the source copy is matched path-agnostically; the installed
+# `.harness/tools/` spelling is pinned by tests/test_install.sh on a real target.
+printf '%s\n' "$_step" | grep -qF 'tools/next-task.mjs --waves --epic <epic-id>' \
+  || fail "E36-F05 R10: $CMD step 12 does not run tools/next-task.mjs --waves --epic <epic-id>"
+printf '%s\n' "$_step" | tr '\n' ' ' | grep -qiE '\bend\b.{0,200}--waves --epic|--waves --epic.{0,200}\bend\b' \
+  || fail "E36-F05 R10: $CMD step 12 does not say the wave view ENDS the report"
+pass "E36-F05 R10 driller_report_ends_with_waves"
+
 echo "All sdd-drill tests passed."
