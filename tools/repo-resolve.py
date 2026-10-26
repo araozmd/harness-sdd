@@ -368,10 +368,10 @@ class Witness(object):
     """
 
     __slots__ = ("outcome", "repo", "binding", "identity", "manifest_state",
-                 "manifest_entry", "candidates", "others")
+                 "manifest_entry", "candidates", "others", "truncated")
 
     def __init__(self, outcome, repo, binding, identity, manifest_state,
-                 manifest_entry, candidates, others):
+                 manifest_entry, candidates, others, truncated=()):
         self.outcome = outcome
         self.repo = repo
         self.binding = binding
@@ -380,6 +380,9 @@ class Witness(object):
         self.manifest_entry = manifest_entry
         self.candidates = tuple(candidates)
         self.others = tuple(others)
+        # WHICH scan roots were over the cap (roots only: a count wobbling under the cap is
+        # not a change in certainty; a root crossing it in either direction is).
+        self.truncated = tuple(truncated)
 
     def still_holds(self, hdir):
         """Would a fresh `resolve()` give the same outcome, repository and certainty?
@@ -399,7 +402,17 @@ class Witness(object):
             if mapping.get(self.binding) != self.manifest_entry:
                 return False, "the manifest now puts %s at %s, not %s" % (
                     self.binding, mapping.get(self.binding), self.manifest_entry)
-        # same CERTAINTY — the search space, by path AND identity...
+        # same CERTAINTY — first, the same SEARCH: a root that crossed the cap since resolve
+        # hides its children, which can leave the candidate tuple below unchanged while the
+        # search is no longer complete.
+        now = tuple(r for r, _n in truncated_roots(hdir))
+        if now != self.truncated:
+            return False, ("the sibling scan near %s changed its truncation (%s before, %s "
+                           "now) so the search that made this answer certain is no longer "
+                           "the same search" % (
+                               hdir, ", ".join(self.truncated) or "none",
+                               ", ".join(now) or "none"))
+        # ...the search space, by path AND identity...
         if self.candidates and tuple(candidates(hdir, pairs=True)) != self.candidates:
             return False, ("the nearby repositories changed (a path or an identity), so "
                            "this answer may no longer be the only one")
@@ -791,7 +804,7 @@ def default_branch(repo):
 # ── the one entry point ───────────────────────────────────────────────────────
 
 
-def _capture(outcome, repo_name, identity, state, mapping, cand, chosen=None):
+def _capture(outcome, repo_name, identity, state, mapping, cand, hdir, chosen=None):
     """Build the Witness from exactly what `resolve()` consulted (see `Witness`)."""
     # Exclude every candidate that IS the chosen repository, not merely the one directory
     # that was picked. A sibling linked worktree is a different path over the same store,
@@ -811,6 +824,7 @@ def _capture(outcome, repo_name, identity, state, mapping, cand, chosen=None):
         binding=repo_name, identity=identity, manifest_state=state,
         manifest_entry=mapping.get(repo_name) if repo_name is not None else None,
         candidates=cand, others=others,
+        truncated=tuple(r for r, _n in truncated_roots(hdir)),
     )
 
 
@@ -832,7 +846,7 @@ def resolve(ref, repo_name, hdir):
             # precisely the guess I1 exists to forbid. Preserve the uncertainty instead.
             return Resolution(
                 UNREADABLE, repo=repo_name, binding=repo_name, manifest_state=state,
-                witness=_capture(UNREADABLE, repo_name, None, state, mapping, cand),
+                witness=_capture(UNREADABLE, repo_name, None, state, mapping, cand, hdir),
                 detail="the umbrella manifest is configured but could not be read, so "
                        "there is no authority for where %r is — and a search would be a "
                        "guess" % repo_name,
@@ -841,7 +855,7 @@ def resolve(ref, repo_name, hdir):
             if repo_name not in mapping:
                 return Resolution(
                     UNDECLARED, repo=repo_name, binding=repo_name, manifest_state=state,
-                    witness=_capture(UNDECLARED, repo_name, None, state, mapping, cand),
+                    witness=_capture(UNDECLARED, repo_name, None, state, mapping, cand, hdir),
                     detail="%s is not declared in the umbrella manifest" % repo_name,
                 )
             lexical = mapping[repo_name]
@@ -852,7 +866,7 @@ def resolve(ref, repo_name, hdir):
                     identity=Identity(lexical) if lexical else None,
                     witness=_capture(UNLOCATABLE, repo_name,
                                      Identity(lexical) if lexical else None,
-                                     state, mapping, cand),
+                                     state, mapping, cand, hdir),
                     detail="%s is declared but cannot be read from this checkout"
                            % repo_name,
                 )
@@ -865,7 +879,7 @@ def resolve(ref, repo_name, hdir):
             if truncated:
                 return Resolution(
                     UNLOCATABLE, repo=repo_name, binding=repo_name, manifest_state=state,
-                    witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand),
+                    witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand, hdir),
                     detail="the search for %r near %s was truncated — %s — so the binding "
                            "cannot be called unique; declare the repository in an umbrella "
                            "manifest"
@@ -878,7 +892,7 @@ def resolve(ref, repo_name, hdir):
                 return Resolution(
                     UNLOCATABLE, repo=repo_name, binding=repo_name,
                     manifest_state=state,
-                    witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand),
+                    witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand, hdir),
                     detail="no repository named %r is visible near %s" % (repo_name, hdir),
                 )
             # A BINDING names a repository; with no manifest to say WHERE that is, the name is
@@ -899,7 +913,7 @@ def resolve(ref, repo_name, hdir):
                 if len(_distinct) > 1:
                     return Resolution(
                         AMBIGUOUS, repo=repo_name, binding=repo_name, manifest_state=state,
-                        witness=_capture(AMBIGUOUS, repo_name, None, state, mapping, cand),
+                        witness=_capture(AMBIGUOUS, repo_name, None, state, mapping, cand, hdir),
                         detail="%r names %d different repositories near %s (%s) and no "
                                "manifest says which one is meant"
                                % (repo_name, len(_distinct), hdir,
@@ -917,7 +931,7 @@ def resolve(ref, repo_name, hdir):
             return Resolution(
                 UNKNOWN, repo=None, binding=None, manifest_state=state,
                 candidates=cand,
-                witness=_capture(UNKNOWN, None, None, state, mapping, cand),
+                witness=_capture(UNKNOWN, None, None, state, mapping, cand, hdir),
                 detail="the search for %s near %s was truncated — %s — so no unbound "
                        "answer can be called unique; bind the evidence as <repo>=%s or "
                        "declare the repository in an umbrella manifest"
@@ -934,7 +948,7 @@ def resolve(ref, repo_name, hdir):
             candidates=cand,
             witness=_capture(UNKNOWN, repo_name,
                              Identity(dirs[0]) if (repo_name is not None and dirs) else None,
-                             state, mapping, cand),
+                             state, mapping, cand, hdir),
             identity=Identity(dirs[0]) if (repo_name is not None and dirs) else None,
             detail="%s does not name a commit in %s"
                    % (ref, repo_name or ("any repository near %s" % hdir)),
@@ -948,7 +962,7 @@ def resolve(ref, repo_name, hdir):
         if len(distinct) > 1:
             return Resolution(
                 AMBIGUOUS, manifest_state=state, candidates=cand,
-                witness=_capture(AMBIGUOUS, None, None, state, mapping, cand),
+                witness=_capture(AMBIGUOUS, None, None, state, mapping, cand, hdir),
                 detail="%s resolves in %d different repositories (%s)"
                        % (ref, len(distinct),
                           ", ".join(os.path.basename(d) for d in distinct)),
@@ -968,7 +982,7 @@ def resolve(ref, repo_name, hdir):
         base=base, base_evidence=evidence, has_origin=has_origin,
         base_tip=advertised, commit=resolve_commit(chosen, ref),
         witness=_capture(RESOLVED, repo_name, Identity(chosen), state, mapping, cand,
-                         chosen=chosen),
+                         hdir, chosen=chosen),
     )
 
 

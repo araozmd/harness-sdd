@@ -713,6 +713,16 @@ case "$ASK_OUT" in *truncated*) ;; *) fail "C12: the bound truncated outcome doe
 HARNESS_RESOLVE_MAX_SIBLINGS=banana ask "$CAP_MAIN" - "$CAP/hd" "r.outcome"
 [ "$ASK_OUT" = "resolved" ] \
   || fail "C12: a non-numeric HARNESS_RESOLVE_MAX_SIBLINGS did not fall back to the default (got $ASK_OUT)"
+# the witness records WHICH roots were truncated: a root that crosses the cap between resolve
+# and the board write hides its children while the candidate tuple stays identical.
+# CONTROL: the same cap both times keeps the witness valid.
+ask "$CAP_MAIN" - "$CAP/hd" "r.witness().still_holds(hdir)[0]"
+[ "$ASK_OUT" = "True" ] || fail "C12 control: an unchanged scan did not still hold ($ASK_OUT)"
+ask "$CAP_MAIN" - "$CAP/hd" "(lambda w: (w.still_holds(hdir)[0], os.environ.__setitem__('HARNESS_RESOLVE_MAX_SIBLINGS', '8'), w.still_holds(hdir)[0]))(r.witness())"
+case "$ASK_OUT" in
+  "(True, None, False)") ;;
+  *) fail "C12: a root crossing the cap after resolve did not invalidate the witness: $ASK_OUT" ;;
+esac
 pass "E99-F129c C12 sibling_scan_cap_refuses_uniqueness_and_names_the_remedy"
 
 echo "All repository-resolver tests passed."
