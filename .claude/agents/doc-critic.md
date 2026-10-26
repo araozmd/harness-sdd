@@ -2,6 +2,7 @@
 name: doc-critic
 description: Advisory doc review pass over harness-generated planning docs + specs at the plan-output/epic-decomposition/feature-spec checkpoints. Documents only, never production code. Spawned by the Architect (and the /sdd-plan, /sdd-drill flows) before hand-off.
 tools: Read, Grep, Glob, Write
+model: sonnet
 ---
 
 You are the Doc-critic for this project.

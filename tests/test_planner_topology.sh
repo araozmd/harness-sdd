@@ -76,6 +76,7 @@ FENCE_AWK="$(cat "$SRC/tests/lib/fence.awk")"
 
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-planner-topology)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }

@@ -44,6 +44,7 @@ _cleanup() {
   exit "$_rc"
 }
 trap _cleanup EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 fail() { _FAILED=1; echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
 
@@ -657,5 +658,95 @@ ask "$NESTED_MAIN" nest "$HDN" "r.outcome + ' ' + os.path.basename(os.path.realp
 [ "$ASK_OUT" = "resolved nest" ] \
   || fail "C11 control-2: with a manifest declaring where nest lives, the binding did not resolve to it (got $ASK_OUT)"
 pass "E99-F129c C11 a_bound_basename_is_not_unique_without_a_manifest"
+
+# ── C12: the sibling-scan cap — a crowded parent is never searched, and says so ────────
+# 2026-10-25: a fixture made with a bare `mktemp -d` puts the harness dir's PARENT at
+# $TMPDIR, which held 123,268 entries on the incident machine. `candidates()` realpath-probed
+# every one, then did it again inside the board lock — minutes per `done`, read as a lock
+# deadlock. A root over HARNESS_RESOLVE_MAX_SIBLINGS (default 512) now contributes no
+# children, and an UNBOUND answer over a truncated search is `unknown` with the remedy named.
+# PAIRED: the same fixture under the default cap resolves — the cap must not be the reason
+# every unbound answer is uncertain.
+CAP="$T/cap"; mkdir -p "$CAP/hd"
+mkrepo "$CAP/child"
+CAP_MAIN="$(cd "$CAP/child" && git rev-parse HEAD)"
+_i=0; while [ "$_i" -lt 12 ]; do mkdir -p "$CAP/filler-$_i"; _i=$((_i + 1)); done   # 14 entries
+# CONTROL — under the default cap the child is found and the answer is unique.
+ask "$CAP_MAIN" - "$CAP/hd" "r.outcome + ' ' + os.path.basename(os.path.realpath(r.directory))"
+[ "$ASK_OUT" = "resolved child" ] \
+  || fail "C12 control: with the parent under the cap, the unbound ref did not resolve to child (got $ASK_OUT)"
+# UNDER TEST — cap 8 < 14 entries: the parent is skipped, and the resolver REFUSES uniqueness.
+HARNESS_RESOLVE_MAX_SIBLINGS=8 ask "$CAP_MAIN" - "$CAP/hd" "r.outcome"
+[ "$ASK_OUT" = "unknown" ] \
+  || fail "C12: over the cap, an unbound ref came back $ASK_OUT instead of unknown — a uniqueness claim over an unsearched set"
+HARNESS_RESOLVE_MAX_SIBLINGS=8 ask "$CAP_MAIN" - "$CAP/hd" "r.detail"
+case "$ASK_OUT" in
+  *truncated*"has 14 entries (cap 8"*"=$CAP_MAIN"*manifest*) ;;
+  *) fail "C12: the truncated outcome does not name the root, its count, the cap and both remedies: $ASK_OUT" ;;
+esac
+# the child is not among the probed candidates — the cap skipped the parent's children.
+HARNESS_RESOLVE_MAX_SIBLINGS=8 ask "$CAP_MAIN" - "$CAP/hd" "any(os.path.basename(c) == 'child' for c in r.witness().candidates)"
+[ "$ASK_OUT" = "False" ] \
+  || fail "C12: the over-cap parent's children were still enumerated as candidates"
+# the cap is deliberately NOT applied to a binding resolved through a manifest: declaring the
+# repository is the documented remedy, so it must keep working in a crowded parent.
+cat > "$CAP/umbrella.manifest.yaml" <<YAML
+repos:
+  child:
+    path: ./child
+YAML
+cat > "$CAP/hd/harness.config.yaml" <<YAML
+umbrella:
+  manifest: ../umbrella.manifest.yaml
+YAML
+HARNESS_RESOLVE_MAX_SIBLINGS=8 ask "$CAP_MAIN" child "$CAP/hd" "r.outcome"
+[ "$ASK_OUT" = "resolved" ] \
+  || fail "C12 remedy: a manifest-declared binding did not resolve under the cap (got $ASK_OUT)"
+# the BOUND, manifest-free search is guarded too: a cut-short scan can hide a same-named repo.
+rm -f "$CAP/hd/harness.config.yaml"
+HARNESS_RESOLVE_MAX_SIBLINGS=8 ask "$CAP_MAIN" child "$CAP/hd" "r.outcome"
+[ "$ASK_OUT" = "unlocatable" ] \
+  || fail "C12: over the cap, a manifest-free bound ref came back $ASK_OUT instead of unlocatable"
+HARNESS_RESOLVE_MAX_SIBLINGS=8 ask "$CAP_MAIN" child "$CAP/hd" "r.detail"
+case "$ASK_OUT" in *truncated*) ;; *) fail "C12: the bound truncated outcome does not say truncated: $ASK_OUT" ;; esac
+# a bad cap value falls back to the default rather than disabling the scan or crashing.
+HARNESS_RESOLVE_MAX_SIBLINGS=banana ask "$CAP_MAIN" - "$CAP/hd" "r.outcome"
+[ "$ASK_OUT" = "resolved" ] \
+  || fail "C12: a non-numeric HARNESS_RESOLVE_MAX_SIBLINGS did not fall back to the default (got $ASK_OUT)"
+# the witness records WHICH roots were truncated: a root that crosses the cap between resolve
+# and the board write hides its children while the candidate tuple stays identical.
+# CONTROL: the same cap both times keeps the witness valid.
+ask "$CAP_MAIN" - "$CAP/hd" "r.witness().still_holds(hdir)[0]"
+[ "$ASK_OUT" = "True" ] || fail "C12 control: an unchanged scan did not still hold ($ASK_OUT)"
+ask "$CAP_MAIN" - "$CAP/hd" "(lambda w: (w.still_holds(hdir)[0], os.environ.__setitem__('HARNESS_RESOLVE_MAX_SIBLINGS', '8'), w.still_holds(hdir)[0]))(r.witness())"
+case "$ASK_OUT" in
+  "(True, None, False)") ;;
+  *) fail "C12: a root crossing the cap after resolve did not invalidate the witness: $ASK_OUT" ;;
+esac
+# CONTROL: a manifest-declared binding never searches siblings, so the same cap crossing must
+# NOT invalidate its witness (a fresh resolve stays `resolved` — refusing would be a false alarm).
+cat > "$CAP/hd/harness.config.yaml" <<YAML
+umbrella:
+  manifest: ../umbrella.manifest.yaml
+YAML
+ask "$CAP_MAIN" child "$CAP/hd" "(lambda w: (r.outcome, w.still_holds(hdir)[0], os.environ.__setitem__('HARNESS_RESOLVE_MAX_SIBLINGS', '8'), w.still_holds(hdir)[0]))(r.witness())"
+case "$ASK_OUT" in
+  "('resolved', True, None, True)") ;;
+  *) fail "C12 control: a cap crossing invalidated a manifest-declared binding that never searched siblings: $ASK_OUT" ;;
+esac
+rm -f "$CAP/hd/harness.config.yaml"
+# the witness records the snapshot the SEARCH was made with, never a resample taken after
+# the git probes (Codex #296 round-5): a root crossing the cap mid-resolution would otherwise
+# be witnessed as the state that justified the answer. Paired: with no snapshot passed, a
+# searching capture refuses outright instead of quietly resampling.
+ask "$CAP_MAIN" - "$CAP/hd" "rr._capture(rr.UNKNOWN, None, None, 'absent', {}, (('$CAP/child','$CAP/child'),), '$CAP/hd', truncated=(('/snapshot/root', 99),)).truncated"
+[ "$ASK_OUT" = "('/snapshot/root',)" ] \
+  || fail "C12 snapshot: _capture resampled the scan instead of recording the snapshot it was given: $ASK_OUT"
+ask "$CAP_MAIN" - "$CAP/hd" "(lambda: rr._capture(rr.UNKNOWN, None, None, 'absent', {}, (('$CAP/child','$CAP/child'),), '$CAP/hd'))()" || true
+case "$ASK_OUT" in
+  *"must pass the scan snapshot"*) ;;
+  *) fail "C12 snapshot control: a searching capture with no snapshot did not refuse (got: $ASK_OUT)" ;;
+esac
+pass "E99-F129c C12 sibling_scan_cap_refuses_uniqueness_and_names_the_remedy"
 
 echo "All repository-resolver tests passed."

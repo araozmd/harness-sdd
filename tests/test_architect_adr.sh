@@ -159,6 +159,7 @@ pass "R15 readme"
 # else the structural fallback mirroring init.sh). NEVER mutates the live state/tasks.json.
 TMPSTORE="$(mktemp)"
 trap 'rm -f "$TMPSTORE"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 cat > "$TMPSTORE" <<'JSON'
 {"project":"fixture","epics":[{"id":"E99","title":"Aligned epic","status":"planned","features":[{"id":"E99-F01","title":"Cited feature","status":"spec-ready","sdd":true,"autonomous":false,"depends_on":[],"spec_path":"specs/epics/E99-x/F01-y/"}]}]}
 JSON

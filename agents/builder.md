@@ -30,7 +30,13 @@ The Orchestrator is never delegated; only this Builder phase is.
 3. For each task: make the change the `.plan.md` specifies, touching only the files
    it lists. Honor the "DO NOT TOUCH" list.
 4. Write the tests named in `<feature>.tests.md` so each `R-id` is covered.
-5. Run `./init.sh` (and the project test command) to self-check before moving on.
+5. Run `./init.sh`, then only the suites your change touches, to self-check before moving
+   on — in this repository `sh tools/run-tests.sh --jobs 4 tests/<suite>.sh …`. The full
+   `verification.test_command` is a **gate**, not an iteration step: run it once before
+   hand-off, and the Reviewer runs it again. Never start a second runner while one is
+   running (it refuses with exit 5 — one run per machine), never raise `--jobs` past the
+   `HARNESS_TEST_JOBS_MAX` cap, and treat a killed run as a stop signal: report it, do not
+   relaunch it (2026-10-25: two concurrent 16+8-job runs made the host unusable).
 6. Tick the task in `<feature>.tasks.md` and append progress to `progress/<run>/`.
 
 ### `sdd: false` items — work from the inbox brief (no `tasks.md`)

@@ -29,6 +29,7 @@ if [ "${1:-}" = --cell ]; then
 else
   T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-pia)"
   trap 'rm -rf "$T"' EXIT
+  trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 fi
 
 fail() { echo "FAIL: $1" >&2; exit 1; }

@@ -11,7 +11,7 @@ saying "it works" means nothing until you prove it. AI-generated code is often
    - **Ask what the green is a statement ABOUT.** A suite is run by *some* interpreter,
      against *some* host state, and a pass is a claim about that pairing — not about the
      code alone. `tools/run-tests.sh` therefore names the shell it used in its summary
-     (`all N suites passed (/bin/dash [...], --jobs 8)`); read it. A green produced by a
+     (`all N suites passed (/bin/dash [...], --jobs 4)`); read it. A green produced by a
      weaker shell than the suites claim (`#!/bin/sh` run by bash) says less than it looks
      like it says, and three environment-dependent greens in two days — a stale compiled
      `.js` shadowing its `.ts`, fixtures inheriting the host's `init.defaultBranch`, two

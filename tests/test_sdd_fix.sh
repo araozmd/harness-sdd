@@ -106,6 +106,7 @@ grep -qi 'append-only\|no reuse' "$ROLE"      || fail "R8: role does not state a
 # mirrors init.sh). NEVER mutates the live state/tasks.json.
 TMPSTORE="$(mktemp)"
 trap 'rm -f "$TMPSTORE"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 cat > "$TMPSTORE" <<'JSON'
 {"project":"fixture","epics":[{"id":"E99","title":"Maintenance (hotfixes & minor fixes)","status":"planned","features":[{"id":"E99-F01","title":"Fix a typo","status":"pending","sdd":false,"autonomous":true,"depends_on":[],"spec_path":"specs/epics/E99-maintenance/F01-fix-a-typo/"}]}]}
 JSON

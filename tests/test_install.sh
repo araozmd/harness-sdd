@@ -9,6 +9,7 @@ set -eu
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 
 # Sandbox CODEX_HOME under the temp dir for the WHOLE suite. Current Codex installs must
 # never write there; migration cases below seed legacy prompts explicitly.
