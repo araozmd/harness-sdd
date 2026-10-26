@@ -33,7 +33,8 @@ All notable changes to the harness body are recorded here. Versions follow
 - **Docs.** `docs/SPEC-FORMAT.md` → *Plan rows cite an R-id or an ADR* states the citation
   grammar once; `docs/WORKFLOW.md` → *Stage and NFRs (ADR-0009)* carries the sticky/bolt-on
   table. Enforcement — the plan-row citation lint, the `init.sh` trigger sweep, the doc-critic
-  flags and the Reviewer gate — is E36-F04; this release declares and records only.
+  flags and the Reviewer gate — will be E36-F04 (not yet enforced); this release declares and
+  records only.
 - New suite `tests/test_stage_nfrs.sh`; `tests/test_install.sh` pins the stub and the refresh.
 
 ## [0.100.0] — 2026-10-26
