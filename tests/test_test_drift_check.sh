@@ -126,6 +126,18 @@ run "$R"
 expect_rc 2 "R9a no args"; [ -s "$T/err" ] || fail "R9a: exit 2 needs a stderr reason"
 run "$R" main --tests-md x
 expect_rc 2 "R9a --tests-md is not a flag"; [ -s "$T/err" ] || fail "R9a: unknown flag needs a stderr reason"
+grep -qF 'unknown flag: --tests-md' "$T/err" || fail "R9a: --tests-md x must be rejected as an unknown flag"
+# Each usage branch gets the minimal argv only IT can reject (round 3, N15/N14): with no value
+# after it, a dropped unknown-flag case would read the flag as a head ref (exit 3), and a
+# third positional reaches only the too-many-arguments branch.
+for _flag in --bogus --tests-md; do
+  run "$R" main "$_flag"
+  expect_rc 2 "R9a main $_flag"
+  grep -qF "unknown flag: $_flag" "$T/err" || fail "R9a: main $_flag must be rejected as an unknown flag"
+done
+run "$R" main feature extra
+expect_rc 2 "R9a a third positional argument"
+grep -qF 'too many arguments: extra' "$T/err" || fail "R9a: a third positional must be rejected as too many arguments"
 run "$R" main --tasks-md /nonexistent/tasks.md
 expect_rc 2 "R9a --tasks-md without a readable file"; [ -s "$T/err" ] || fail "R9a: missing tasks file needs a stderr reason"
 [ "$(wc -l < "$T/err" | tr -d ' ')" = 1 ] || fail "R9a: the stderr reason must be one line"
