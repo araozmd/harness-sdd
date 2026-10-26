@@ -14,6 +14,10 @@ const EPIC_STATUSES = new Set(['draft', 'planned', 'pending', 'in-progress', 'do
 const FEATURE_STATUSES = new Set(['pending', 'spec-ready', 'in-progress', 'in-review', 'done']);
 const SLICE_STATUSES = new Set([...FEATURE_STATUSES, 'failed']);
 const BLOCKED_SUMMARY = 'no actionable work: selection blocked; see reasons above';
+// E36-F05: printed on stderr after the specific `next-task:` diagnostic, only on a
+// usage-error. reason.detail keeps the specific message (consumers parse it); this line is
+// for the human who mistyped a flag.
+const USAGE = 'usage: next-task.mjs [--json] [--mine | --feature E##-F## | --waves [--epic E##]] [--tasks <path>] [--config <path>]';
 // E99-F77: a park may name WHO releases it. `gate: "owner"` is the one case the board
 // could not express — the automatable slice is finished and every remaining requirement
 // is a person's (a console attestation, a deploy approval, a signature). `in-progress`
@@ -71,10 +75,10 @@ function emit(result, diagnostic = null, exitCode = 0) {
 }
 
 function parseArgs(argv) {
-  const out = { mode: 'board', feature: null, tasks: null, config: null };
+  const out = { mode: 'board', feature: null, epic: null, tasks: null, config: null, json: false };
   const seen = new Set();
-  const values = new Set(['--feature', '--tasks', '--config']);
-  const flags = new Set(['--json', '--mine']);
+  const values = new Set(['--feature', '--epic', '--tasks', '--config']);
+  const flags = new Set(['--json', '--mine', '--waves']);
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (!flags.has(arg) && !values.has(arg)) {
@@ -88,6 +92,7 @@ function parseArgs(argv) {
         throw new ExpectedError('usage-error', `${arg} requires a non-empty value`);
       }
       if (arg === '--feature') out.feature = value;
+      if (arg === '--epic') out.epic = value;
       if (arg === '--tasks') out.tasks = value;
       if (arg === '--config') out.config = value;
     }
@@ -95,6 +100,18 @@ function parseArgs(argv) {
   if (seen.has('--mine') && out.feature !== null) {
     throw new ExpectedError('usage-error', '--mine and --feature are mutually exclusive');
   }
+  // E36-F05: `--waves` is a read-only projection of the whole graph, not a selection, so
+  // it composes with neither selection scope. `--json` is recorded for it alone: in the
+  // board/mine/target modes it stays the exact no-op it has always been.
+  out.json = seen.has('--json');
+  if (seen.has('--waves')) {
+    if (out.feature !== null) throw new ExpectedError('usage-error', '--waves and --feature are mutually exclusive');
+    if (seen.has('--mine')) throw new ExpectedError('usage-error', '--waves and --mine are mutually exclusive');
+    if (out.epic !== null && !EPIC_RE.test(out.epic)) throw new ExpectedError('usage-error', `invalid epic id ${out.epic}`);
+    out.mode = 'waves';
+    return out;
+  }
+  if (out.epic !== null) throw new ExpectedError('usage-error', '--epic requires --waves');
   if (out.feature !== null) {
     if (!FEATURE_RE.test(out.feature)) throw new ExpectedError('usage-error', `invalid feature id ${out.feature}`);
     out.mode = 'target';
@@ -683,6 +700,123 @@ function select(model, config, args, repos) {
   return envelope(mode, 'blocked', null, { code: 'selection-blocked', detail: mode === 'target' ? `target ${args.feature} is not actionable` : 'no actionable feature' }, blocked, BLOCKED_SUMMARY);
 }
 
+// deriveWaves — E36-F05, ADR-0010. Waves are a PROJECTION of depends_on, never stored:
+// `done` is wave 0; a non-done feature's wave is 1 + the max wave of its dependencies (a
+// done dependency counts as 0, no dependencies is wave 1). Read-only; ids in ADR-0001 order.
+function deriveWaves(model, config, args) {
+  // The epic is resolved BEFORE the graph is examined, so a missing epic is an input-error
+  // even on an invalid graph (R4 precedence). `--epic` filters the LISTING only: waves are
+  // computed board-wide, because a dependency in another epic still counts.
+  const epic = args.epic;
+  if (epic !== null && !model.epics.some((e) => e.id === epic)) throw new ExpectedError('input-error', `epic ${epic} does not exist`);
+  const inScope = (feature) => epic === null || feature.epic.id === epic;
+  const features = [...model.features].sort((a, b) => compareIds(a.id, b.id));
+  const featureById = new Map(features.map((feature) => [feature.id, feature]));
+  const cycles = cycleMap(features, 'feature');
+  const blockersOf = new Map(features.filter((feature) => feature.status !== 'done')
+    .map((feature) => [feature.id, featureBlockers(feature, featureById, cycles, config.requireApproval)]));
+  // R6 — never invent a wave for an invalid graph. Judged BOARD-WIDE (not by --epic): a
+  // non-done feature carrying a dependency-cycle record (a LIVE cycle — featureBlockers
+  // already omits it for a stale one, E99-F155) or naming an id absent from the board.
+  // Only those features' graph records are reported; a cyclic feature's human-gate or
+  // parked record is not a graph fault, and a mere dependent contributes nothing.
+  const invalid = [];
+  for (const [id, records] of blockersOf) {
+    const cyclic = records.some((record) => record.code === 'dependency-cycle');
+    const dangling = (featureById.get(id).depends_on || []).some((dep) => !featureById.has(dep));
+    if (cyclic || dangling) invalid.push(...records.filter((record) => record.code === 'dependency-cycle' || record.code === 'unmet-dependency'));
+  }
+  if (invalid.length) {
+    const summary = 'waves undefined: dependency graph is invalid; see reasons above';
+    return { ...envelope('waves', 'blocked', null, { code: 'invalid-graph', detail: 'waves undefined: dependency graph is invalid' }, invalid, summary),
+      scope: { epic }, wave0: [], waves: [], critical_path: [] };
+  }
+  const memo = new Map();
+  const wave = (id) => {
+    if (memo.has(id)) return memo.get(id);
+    const feature = featureById.get(id);
+    const n = feature.status === 'done' ? 0 : 1 + Math.max(0, ...(feature.depends_on || []).map(wave));
+    memo.set(id, n);
+    return n;
+  };
+  const scoped = features.filter(inScope);
+  const wave0 = scoped.filter((feature) => feature.status === 'done').map((feature) => feature.id);
+  const groups = new Map();
+  for (const feature of scoped) {
+    if (feature.status === 'done') continue;
+    const n = wave(feature.id);
+    if (!groups.has(n)) groups.set(n, []);
+    // R5: the selector's own records and its feature-level `otherwiseActionable`
+    // predicate — no slice readiness, no --mine scoping (a fan-out consumer applies those).
+    const blocked = blockersOf.get(feature.id);
+    const route = featureRoute(feature, config.requireApproval);
+    groups.get(n).push({
+      id: feature.id,
+      status: feature.status,
+      route,
+      autonomous: feature.autonomous === true,
+      owner: feature.owner !== undefined ? feature.owner : (feature.epic.owner !== undefined ? feature.epic.owner : null),
+      runnable: blocked.length === 0 && route !== null,
+      blocked,
+    });
+  }
+  const waves = [...groups.keys()].sort((a, b) => a - b).map((n) => ({ wave: n, features: groups.get(n) }));
+  // R7 — critical path: the longest chain (by feature count) of in-scope non-done
+  // features over depends_on edges whose BOTH ends are in scope and non-done, root first.
+  // Ties go to the chain least in ADR-0001 order position by position. That comparison
+  // is realised by iteration order: every choice point compares chains with DISTINCT
+  // heads (different dependents of one node, or different start nodes), so position 0
+  // always decides, and visiting candidates in compareIds order with a STRICT `>` on
+  // length keeps the least one. Any longest chain starts at a root (else it could be
+  // extended backward), so taking the best over every node equals the best over roots.
+  const open = scoped.filter((feature) => feature.status !== 'done');
+  const dependents = new Map(open.map((feature) => [feature.id, []]));
+  for (const feature of open) {
+    for (const dep of feature.depends_on || []) if (dependents.has(dep)) dependents.get(dep).push(feature.id);
+  }
+  const chainMemo = new Map();
+  const chain = (id) => {
+    if (!chainMemo.has(id)) {
+      let tail = [];
+      for (const next of dependents.get(id)) {
+        const candidate = chain(next);
+        if (candidate.length > tail.length) tail = candidate;
+      }
+      chainMemo.set(id, [id, ...tail]);
+    }
+    return chainMemo.get(id);
+  };
+  let criticalPath = [];
+  for (const feature of open) {
+    const candidate = chain(feature.id);
+    if (candidate.length > criticalPath.length) criticalPath = candidate;
+  }
+  const summary = `${waves.length} waves over ${open.length} features (+${wave0.length} done); critical path ${criticalPath.length} features`;
+  return { ...envelope('waves', 'waves', null, { code: 'waves-derived', detail: summary }, [], summary),
+    scope: { epic }, wave0, waves, critical_path: criticalPath };
+}
+
+// formatWaves — the R8 human report, rendered from the finished envelope (never a second
+// computation). The JSON is the contract; the text is anchored by tests/test_waves.sh.
+function formatWaves(result) {
+  if (result.outcome === 'blocked') {
+    return ['Waves undefined: dependency graph is invalid',
+      ...result.blocked.map((record) => `blocked ${record.subject} [${record.code}]: ${record.detail}`)].join('\n') + '\n';
+  }
+  const lines = [`Waves — ${result.scope.epic === null ? 'whole board' : `epic ${result.scope.epic}`}`,
+    `Wave 0 (done): ${result.wave0.length} feature(s)`];
+  for (const group of result.waves) {
+    lines.push(`Wave ${group.wave} (${group.features.length} feature(s), ${group.features.filter((f) => f.autonomous).length} autonomous)`);
+    for (const f of group.features) {
+      const state = f.runnable ? 'runnable' : f.blocked.map((record) => `[${record.code}] ${record.detail}`).join('  ');
+      lines.push(`  ${f.id}  ${f.status}  ${f.route === null ? '-' : f.route}  ${f.autonomous ? 'auto' : '-'}  ${state}`);
+    }
+  }
+  const path = result.critical_path;
+  lines.push(`Critical path (${path.length}): ${path.length ? path.join(' -> ') : 'none'}`);
+  return lines.join('\n') + '\n';
+}
+
 let args = { mode: 'board' };
 try {
   args = parseArgs(process.argv.slice(2));
@@ -706,9 +840,12 @@ try {
       try { repos = manifestRepos(manifestText); } catch (error) { throw new ExpectedError('manifest-error', `invalid umbrella manifest ${manifestPath}: ${error.message}`); }
     }
   }
-  emit(select(model, config, args, repos));
+  if (args.mode !== 'waves') emit(select(model, config, args, repos));
+  else if (args.json) emit(deriveWaves(model, config, args));
+  else process.stdout.write(formatWaves(deriveWaves(model, config, args)));
 } catch (error) {
   const code = error instanceof ExpectedError ? error.code : 'input-error';
   const detail = error instanceof Error ? error.message : String(error);
   emit(envelope(args.mode || 'board', 'error', null, { code, detail }), detail, code === 'usage-error' ? 2 : 1);
+  if (code === 'usage-error') process.stderr.write(`${USAGE}\n`);
 }

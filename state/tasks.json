@@ -505,7 +505,8 @@
         {
           "id": "E36-F05",
           "title": "Derived waves and critical path: next-task --waves + Driller report",
-          "status": "pending",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "817252569e143ac9c82a4be00358a8caa977deaa", "ref": "817252569e143ac9c82a4be00358a8caa977deaa", "repo": "harness-sdd-E36-F05", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
