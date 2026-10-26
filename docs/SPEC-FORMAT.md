@@ -159,8 +159,8 @@ or, when nothing is deferred:
 Deferred: none — stage is production
 ```
 
-`E36-F04` turns this grammar into an exit code (the plan-row citation lint, the trigger
-sweep, the Reviewer gate); this section is the schema it lints.
+`E36-F04` will turn this grammar into an exit code (the plan-row citation lint, the trigger
+sweep, the Reviewer gate) — not yet enforced; this section is the schema it will lint.
 
 ## Architecture alignment — cite the ADRs you touch
 

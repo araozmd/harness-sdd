@@ -152,7 +152,7 @@ inbox brief's `## Constraints` also records the `Stage:` the Driller read.
   other ADR stands.
 
 The grammar these forms follow is `docs/SPEC-FORMAT.md` → *Plan rows cite an R-id or an
-ADR*; `E36-F04` enforces it.
+ADR*; `E36-F04` will enforce it (not yet enforced).
 
 ## Principles
 

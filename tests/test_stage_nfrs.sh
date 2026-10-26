@@ -139,6 +139,15 @@ R11_spec_format_grammar_section() {
     || fail "R11: the plan-row rule does not name all four headings and both the R[0-9]+ and ADR-[0-9]{4} tokens in one sentence"
   awk 'index($0,"```")==1{fz=!fz; next} !fz && index($0,"| Bolt-on | Deferred by | Trigger |")>0 {ok=1} END{exit !ok}' "$T/r11.sec" \
     || fail "R11: the '| Bolt-on | Deferred by | Trigger |' header is only in the fenced example, not stated in the rule"
+  # Grammar item 1's default and the two header regexes are the bytes E36-F04 copies:
+  # pin them byte-exact (a dropped `^` anchor or `\S` non-empty guard changes what it lints).
+  fold "$T/r11.sec" | grep -qF 'Absent, or any other value, reads as `production`' \
+    || fail "R11: the grammar section does not say an absent or unrecognized stage reads as production"
+  for _k in '(regex `^- \*\*Status:\*\* deferred`)' '(regex `^- \*\*Trigger:\*\* \S`)'; do
+    fold "$T/r11.sec" | grep -qF -- "$_k" || fail "R11: the grammar section does not state the exact header regex '$_k'"
+  done
+  fold "$T/r11.sec" | grep -qE 'E36-F04`[^.]{0,20}will turn this grammar into an exit code[^.]{0,200}not yet enforced' \
+    || fail "R11: the grammar section does not say E36-F04 WILL turn the grammar into an exit code (not yet enforced)"
   fold "$T/r11.sec" | grep -qE 'E36-F04[^.]{0,80}lint' \
     || fail "R11: the grammar section does not name E36-F04 as the lint that enforces it"
   # The `## Deferred` example heading sits INSIDE a fenced block (``` toggles).
@@ -173,7 +182,10 @@ R7_architect_stage_section() {
     grep -qF -- "$_k" "$T/r7.sec" || fail "R7: the Architect's Stage section does not state '$_k'"
   done
   _f="$(fold "$T/r7.sec")"
-  printf '%s\n' "$_f" | grep -qiE 'absent[^.]{0,60}production' || fail "R7: the Stage section does not say absent means production"
+  printf '%s\n' "$_f" | grep -qiE 'absent or unrecognized[^.]{0,40}production' || fail "R7: the Stage section does not say an absent OR unrecognized stage means production"
+  # E36-F04 is not shipped: the prose must not claim an enforcement that does not exist yet.
+  printf '%s\n' "$_f" | grep -qE 'E36-F04`[^.]{0,20}will enforce it[^.]{0,6}not yet enforced' \
+    || fail "R7: the Stage section does not say E36-F04 WILL enforce the grammar (not yet enforced)"
   printf '%s\n' "$_f" | grep -qiE 'bolt-on[^.]{0,80}without[^.]{0,40}R-id' || fail "R7: the Stage section does not say never add a bolt-on without an R-id"
   # The discovery/pilot branch and its citation target are single-sentence anchors: both
   # tokens also occur elsewhere in the section, so a bare per-token grep has a second producer.
