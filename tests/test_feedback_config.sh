@@ -13,6 +13,7 @@ SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 INSTALL="$SRC/harness-install.sh"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-feedback)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 
 # Sandbox Codex's GLOBAL prompts dir so no run touches the developer's real ~/.codex
 # (same guard every installer-invoking suite uses).

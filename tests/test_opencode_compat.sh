@@ -7,6 +7,7 @@ set -eu
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok() { echo "ok - $*"; }
 

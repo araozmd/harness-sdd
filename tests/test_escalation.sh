@@ -16,6 +16,7 @@ set -eu
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 export CODEX_HOME="$T/codex-home"
 # E25-F01: non-Claude front-ends are parked by default on FRESH targets, so a bare
 # installer run now stamps claude only. This suite's fixtures predate the flip and

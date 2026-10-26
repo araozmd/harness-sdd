@@ -98,6 +98,7 @@ grep -qi 're-validate\|revalidate' "$ORCH"                || fail "R7: orch does
 # that mirrors init.sh). NEVER mutates the live state/tasks.json.
 TMPSTORE="$(mktemp)"
 trap 'rm -f "$TMPSTORE"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 cat > "$TMPSTORE" <<'JSON'
 {"project":"fixture","epics":[
  {"id":"E98","title":"Completed epic","status":"done",

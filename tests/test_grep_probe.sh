@@ -16,6 +16,7 @@ set -eu
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-grep-probe)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
@@ -213,7 +214,7 @@ pass "E99-F12 R6 warning_goes_to_stderr"
 # fail loudly on their own. Fail-safe in the same direction as every other ambiguous case.
 mkdir -p "$T/nogrep"
 _missing=""
-for _t in sh mktemp xargs basename cat rm dirname sed awk; do
+for _t in sh mktemp xargs basename cat rm dirname sed awk ln mv; do   # ln + mv: the machine-lock claim and reclaim (2026-10-25)
   _p="$(command -v "$_t" 2>/dev/null)" || _p=""
   if [ -n "$_p" ]; then ln -sf "$_p" "$T/nogrep/$_t"; else _missing="$_missing $_t"; fi
 done

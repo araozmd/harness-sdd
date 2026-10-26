@@ -71,6 +71,7 @@ run_gate() {
 
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-drift)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 
 # ── R1 + R10: the check runs on an installed target, and a clean one passes ───────
 # R1_check_runs_on_installed_target / R10_clean_passes
