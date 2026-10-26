@@ -232,4 +232,30 @@ R9_brief_template_stage() {
 }
 R9_brief_template_stage
 
+# R10 — WORKFLOW documents the stage, the sticky/bolt-on table, the two forms and E36-F04.
+R10_workflow_stage_section() {
+  _w="$I/docs/WORKFLOW.md"
+  [ -f "$_w" ] || fail "R10: installed docs/WORKFLOW.md missing"
+  grep -qF '## Stage and NFRs (ADR-0009)' "$_w" || fail "R10: docs/WORKFLOW.md has no '## Stage and NFRs (ADR-0009)' section"
+  _a="$(lineno "$_w" '## Architecture-aligned specs')"; _x="$(lineno "$_w" '## Stage and NFRs (ADR-0009)')"
+  [ "$_a" -gt 0 ] && [ "$_x" -gt "$_a" ] \
+    || fail "R10: the Stage section is not after '## Architecture-aligned specs' (arch=$_a stage=$_x)"
+  span "$_w" '## Stage and NFRs (ADR-0009)' '## Doc-critic checkpoints' "$T/r10.sec" \
+    || fail "R10: the Stage section does not sit before '## Doc-critic checkpoints'"
+  grep -qxF '| Sticky (never deferred) | Bolt-on (deferred by an ADR with a trigger) |' "$T/r10.sec" \
+    || fail "R10: the sticky/bolt-on table header is missing from the Stage section"
+  for _row in '| tenant isolation | encryption at rest |' '| the auth boundary | WAF |' \
+              '| secrets out of the repo | rate limits |' '| validation at the system edge | backups, caching |'; do
+    grep -qxF -- "$_row" "$T/r10.sec" || fail "R10: the sticky/bolt-on table lacks the row '$_row'"
+  done
+  for _k in 'stage:' 'specs/product.md' '- **Status:** deferred' '- **Trigger:**' '## Deferred' 'Deferred: none — <why>'; do
+    grep -qF -- "$_k" "$T/r10.sec" || fail "R10: the WORKFLOW Stage section does not state '$_k'"
+  done
+  _f="$(fold "$T/r10.sec")"
+  printf '%s\n' "$_f" | grep -qiE 'absent[^.]{0,60}production' || fail "R10: the WORKFLOW Stage section does not say absent means production"
+  printf '%s\n' "$_f" | grep -qE '[Ee]nforcement[^.]{0,160}E36-F04' || fail "R10: the WORKFLOW Stage section does not name E36-F04 as the enforcement"
+  pass "WORKFLOW Stage section: stage field + default, sticky/bolt-on table, deferred-ADR and ## Deferred forms, enforcement is E36-F04 (R10) [R10_workflow_stage_section]"
+}
+R10_workflow_stage_section
+
 echo "All stage/NFR tests passed."

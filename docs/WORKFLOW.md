@@ -240,6 +240,35 @@ This places the citation contract **between** `/sdd-plan`/`/sdd-drill` (the prod
 the Builder/Reviewer (the consumers) — it is additive and distinct from the `/sdd-plan`,
 `/sdd-drill`, and `/sdd-fix` lanes.
 
+## Stage and NFRs (ADR-0009)
+
+Non-functional requirements are stage-aware, so an MVP plan does not grow production
+machinery nobody asked for. The project declares its stage once, as a `stage:` line in
+`specs/product.md` frontmatter — `discovery`, `pilot` or `production`; when the line is
+absent or unrecognized, the stage is `production` (today's behavior). Only the human writes
+it. The Planner reads it before writing the architecture and ADRs, the Driller copies it
+into every inbox brief's `## Constraints` as `Stage: <value>`, and the Architect reads it
+before writing the `.plan.md`.
+
+| Sticky (never deferred) | Bolt-on (deferred by an ADR with a trigger) |
+|---|---|
+| tenant isolation | encryption at rest |
+| the auth boundary | WAF |
+| secrets out of the repo | rate limits |
+| validation at the system edge | backups, caching |
+
+Sticky NFRs are never deferred at any stage; extending the list is a change to ADR-0009.
+A bolt-on the stage excludes is deferred **by writing, never by omitting**: a deferred ADR
+whose header carries `- **Status:** deferred` and a mandatory `- **Trigger:**` line (the
+observable condition that reopens it), cited from the plan's `## Deferred` subsection. That
+subsection is either a `| Bolt-on | Deferred by | Trigger |` table whose rows each cite an
+`ADR-NNNN`, or the single line `Deferred: none — <why>`. Every plan row cites the `R-id` it
+serves or the `ADR-NNNN` that defers it; a bolt-on is never added without an `R-id`. The
+grammar is `docs/SPEC-FORMAT.md` → *Plan rows cite an R-id or an ADR*.
+
+Enforcement is `E36-F04`: the plan-row citation tool, the `init.sh` trigger sweep, the
+doc-critic flags and the Reviewer gate. This section declares and records only.
+
 ## Doc-critic checkpoints
 
 The **Doc-critic** (`agents/doc-critic.md`) is an automated, advisory review pass that
