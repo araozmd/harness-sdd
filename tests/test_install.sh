@@ -2728,6 +2728,98 @@ test_glossary_reports_one_verdict_line() {
 }
 test_glossary_reports_one_verdict_line
 
+# E36-F03 R2 (and R1's verdict) — the v0.81.1 stub (no `stage:` line) is a SECOND known prior:
+# a target still holding it byte for byte is refreshed to the current stub; an edited file is
+# preserved; the current stub reports pristine. Exactly one stdout line names
+# specs/product.md per run. The v0.81.1 fixture is this test's OWN literal (copied from
+# `git show main:harness-install.sh` before E36-F03): reading the installer's
+# product_stub_prior_0_81_1 would make deleting that function invisible here.
+write_product_stub_0811() {
+  cat > "$1" <<'PRODUCT_STUB_0811_FIXTURE_EOF'
+---
+status: draft
+---
+
+# <Product name> — Product Constitution
+
+> Layer 0. The stable, high-level "what & why". Rewrite this for your product,
+> then run /sdd-plan to plan the whole project (vision, architecture, ADRs, draft epics),
+> then /sdd-drill <epic-id> to decompose the first epic into features.
+
+## What this product is
+TODO
+
+## Who it is for
+TODO
+
+## Principles & hard constraints
+TODO
+PRODUCT_STUB_0811_FIXTURE_EOF
+}
+
+# product_verdict <stdout-file> <arm> — prints the ONE installer verdict line for
+# specs/product.md (an `info` line: three-space indent, then the path or `seeded <path>`; the
+# closing "Next steps" banner also names the path, as a numbered step, and is not a verdict).
+product_verdict() {
+  [ "$(grep -cE '^   (seeded )?specs/product\.md ' "$1")" = "1" ] \
+    || fail "E36-F03 R2 ($2): expected exactly one stdout verdict line for specs/product.md: $(cat "$1")"
+  grep -E '^   (seeded )?specs/product\.md ' "$1"
+}
+
+test_product_stub_0811_refreshed() {
+  # refreshed — and the first fresh install's stdout carries R1's seeded verdict.
+  _tp1="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  mkdir -p "$_tp1/t"
+  CODEX_HOME="$_tp1/ch" HOME="$_tp1/home" sh "$SRC/harness-install.sh" --agents=claude "$_tp1/t" \
+    >"$_tp1/1.out" 2>"$_tp1/1.err" || fail "E36-F03 R1: fresh install exited non-zero: $(cat "$_tp1/1.err")"
+  _v="$(product_verdict "$_tp1/1.out" seeded)"
+  case "$_v" in *'seeded specs/product.md (stub)'*) ;; *) fail "E36-F03 R1: the fresh install's product.md verdict is not 'seeded specs/product.md (stub)': $_v" ;; esac
+  _pp="$_tp1/t/.harness/specs/product.md"
+  cp "$_pp" "$_tp1/current.md"
+  write_product_stub_0811 "$_pp"
+  ! grep -qE '^stage:' "$_pp" || fail "E36-F03 R2 (refreshed): the v0.81.1 fixture already carries a stage: line — fixture shape is stale"
+  ! cmp -s "$_pp" "$_tp1/current.md" || fail "E36-F03 R2 (refreshed): the v0.81.1 fixture equals the current stub — the arm cannot see a refresh"
+  CODEX_HOME="$_tp1/ch" HOME="$_tp1/home" sh "$SRC/harness-install.sh" --agents=claude "$_tp1/t" \
+    >"$_tp1/2.out" 2>"$_tp1/2.err" || fail "E36-F03 R2 (refreshed): upgrade exited non-zero: $(cat "$_tp1/2.err")"
+  _v="$(product_verdict "$_tp1/2.out" refreshed)"
+  case "$_v" in *'specs/product.md refreshed'*) ;; *) fail "E36-F03 R2 (refreshed): a pristine v0.81.1 stub was not refreshed: $_v" ;; esac
+  grep -qxF 'stage: production' "$_pp" || fail "E36-F03 R2 (refreshed): the refreshed product.md has no 'stage: production' line"
+  cmp -s "$_pp" "$_tp1/current.md" || fail "E36-F03 R2 (refreshed): the refreshed product.md is not byte-identical to the current stub"
+  rm -rf "$_tp1"
+
+  # preserved — an edited stub survives byte for byte.
+  _tp2="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  mkdir -p "$_tp2/t"
+  CODEX_HOME="$_tp2/ch" HOME="$_tp2/home" sh "$SRC/harness-install.sh" --agents=claude "$_tp2/t" \
+    >/dev/null 2>"$_tp2/1.err" || fail "E36-F03 R2 (preserved) setup: fresh install exited non-zero: $(cat "$_tp2/1.err")"
+  _pp="$_tp2/t/.harness/specs/product.md"
+  printf 'R2 sentinel\n' >> "$_pp"
+  cp "$_pp" "$_tp2/before.md"
+  CODEX_HOME="$_tp2/ch" HOME="$_tp2/home" sh "$SRC/harness-install.sh" --agents=claude "$_tp2/t" \
+    >"$_tp2/2.out" 2>"$_tp2/2.err" || fail "E36-F03 R2 (preserved): upgrade exited non-zero: $(cat "$_tp2/2.err")"
+  _v="$(product_verdict "$_tp2/2.out" preserved)"
+  case "$_v" in *'specs/product.md preserved'*) ;; *) fail "E36-F03 R2 (preserved): an edited product.md was not reported preserved: $_v" ;; esac
+  cmp -s "$_pp" "$_tp2/before.md" || fail "E36-F03 R2 (preserved): an edited product.md was not left byte-identical"
+  rm -rf "$_tp2"
+
+  # pristine — the current stub, re-run, is left alone and says so.
+  _tp3="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  mkdir -p "$_tp3/t"
+  CODEX_HOME="$_tp3/ch" HOME="$_tp3/home" sh "$SRC/harness-install.sh" --agents=claude "$_tp3/t" \
+    >/dev/null 2>"$_tp3/1.err" || fail "E36-F03 R2 (pristine) setup: fresh install exited non-zero: $(cat "$_tp3/1.err")"
+  _pp="$_tp3/t/.harness/specs/product.md"
+  cp "$_pp" "$_tp3/before.md"
+  CODEX_HOME="$_tp3/ch" HOME="$_tp3/home" sh "$SRC/harness-install.sh" --agents=claude "$_tp3/t" \
+    >"$_tp3/2.out" 2>"$_tp3/2.err" || fail "E36-F03 R2 (pristine): re-run exited non-zero: $(cat "$_tp3/2.err")"
+  _v="$(product_verdict "$_tp3/2.out" pristine)"
+  case "$_v" in *'specs/product.md pristine'*) ;; *) fail "E36-F03 R2 (pristine): the current stub was not reported pristine: $_v" ;; esac
+  cmp -s "$_pp" "$_tp3/before.md" || fail "E36-F03 R2 (pristine): the pristine stub changed on re-run"
+  rm -rf "$_tp3"
+
+  pass "product.md: fresh install seeds the stub; a pristine v0.81.1 stub is refreshed; an edit is preserved; the current stub is pristine — one stdout verdict each (E36-F03 R1, R2) [test_product_stub_0811_refreshed]"
+}
+test_product_stub_0811_refreshed
+
 # R6
 test_glossary_seed_is_idempotent() {
   _tg6="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"

@@ -4360,7 +4360,8 @@ EOF
   #   absent                     -> seed the current shipped stub
   #   byte-identical current     -> pristine, leave it alone
   #   byte-identical PRIOR stub  -> refresh to the current shipped stub (a pristine
-  #                                 seed, not authored content)
+  #                                 seed, not authored content); there are two known
+  #                                 priors, v0.1.0-v0.81.0 and v0.81.1-pre-E36-F03
   #   anything else              -> preserve, byte for byte (project-authored)
   # The `-L` guard precedes `-e` so a dangling link is not read as "absent" and
   # written THROUGH (same reason as the glossary branch below). The prior-stub test
@@ -4374,17 +4375,19 @@ EOF
   else
     _prod_new="$(mktemp 2>/dev/null || mktemp -t harness-prod-new)"
     _prod_prior="$(mktemp 2>/dev/null || mktemp -t harness-prod-prior)"
+    _prod_prior_0811="$(mktemp 2>/dev/null || mktemp -t harness-prod-prior-0811)"
     product_stub_current > "$_prod_new"
     product_stub_prior > "$_prod_prior"
+    product_stub_prior_0_81_1 > "$_prod_prior_0811"
     if cmp -s "$_prod" "$_prod_new"; then
       info "specs/product.md pristine (still byte-identical to the shipped stub)"
-    elif cmp -s "$_prod" "$_prod_prior"; then
+    elif cmp -s "$_prod" "$_prod_prior" || cmp -s "$_prod" "$_prod_prior_0811"; then
       cp "$_prod_new" "$_prod"
-      info "specs/product.md refreshed (was the pristine pre-0.81.1 stub; project edits are preserved)"
+      info "specs/product.md refreshed (was a pristine earlier shipped stub; project edits are preserved)"
     else
       info "specs/product.md preserved (project-authored)"
     fi
-    rm -f "$_prod_new" "$_prod_prior"
+    rm -f "$_prod_new" "$_prod_prior" "$_prod_prior_0811"
   fi
 
   # specs/glossary.md is PROJECT-OWNED (E30-F01) — a project's own domain vocabulary, not
