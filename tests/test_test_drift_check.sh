@@ -636,6 +636,20 @@ expect_rc 1 "R7h"; expect_ndrift 1 "R7h"
 expect_line '^DRIFT assert-removed \| tests/t\.sh:4 \| t_def \| ' "R7h: on a tie the backward definition wins"
 pass "R7h_attribution_tie_goes_backward"
 
+# One finding per NAME: a label present twice at base, both copies removed, is one test-removed.
+newrepo r7i; put tests/t.sh <<'EOF'
+#!/bin/sh
+pass "dup"
+pass "dup"
+pass "keep"
+EOF
+basecommit; feature
+delline tests/t.sh 'pass "dup"'; featcommit
+run "$R" main
+expect_rc 1 "R7i"; expect_ndrift 1 "R7i"
+[ "$(cnt '^DRIFT test-removed \| tests/t\.sh:[0-9—]+ \| dup \| dup$')" = 1 ] || { cat "$T/out" >&2; fail "R7i: a duplicated name is reported once"; }
+pass "R7i_duplicate_name_one_finding"
+
 # ── R9c: finding line shape ──────────────────────────────────────────────────────
 run "$R" main
 expect_rc 1 "R9c"
