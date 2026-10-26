@@ -700,6 +700,34 @@ function select(model, config, args, repos) {
   return envelope(mode, 'blocked', null, { code: 'selection-blocked', detail: mode === 'target' ? `target ${args.feature} is not actionable` : 'no actionable feature' }, blocked, BLOCKED_SUMMARY);
 }
 
+// deriveWaves — E36-F05, ADR-0010. Waves are a PROJECTION of depends_on, never stored:
+// `done` is wave 0; a non-done feature's wave is 1 + the max wave of its dependencies (a
+// done dependency counts as 0, no dependencies is wave 1). Read-only; ids in ADR-0001 order.
+function deriveWaves(model, config, args) {
+  const features = [...model.features].sort((a, b) => compareIds(a.id, b.id));
+  const featureById = new Map(features.map((feature) => [feature.id, feature]));
+  const memo = new Map();
+  const wave = (id) => {
+    if (memo.has(id)) return memo.get(id);
+    const feature = featureById.get(id);
+    const n = feature.status === 'done' ? 0 : 1 + Math.max(0, ...(feature.depends_on || []).map(wave));
+    memo.set(id, n);
+    return n;
+  };
+  const wave0 = features.filter((feature) => feature.status === 'done').map((feature) => feature.id);
+  const groups = new Map();
+  for (const feature of features) {
+    if (feature.status === 'done') continue;
+    const n = wave(feature.id);
+    if (!groups.has(n)) groups.set(n, []);
+    groups.get(n).push({ id: feature.id });
+  }
+  const waves = [...groups.keys()].sort((a, b) => a - b).map((n) => ({ wave: n, features: groups.get(n) }));
+  const summary = `${waves.length} waves over ${features.length - wave0.length} features (+${wave0.length} done)`;
+  return { ...envelope('waves', 'waves', null, { code: 'waves-derived', detail: summary }, [], summary),
+    scope: { epic: null }, wave0, waves, critical_path: [] };
+}
+
 let args = { mode: 'board' };
 try {
   args = parseArgs(process.argv.slice(2));
@@ -723,7 +751,8 @@ try {
       try { repos = manifestRepos(manifestText); } catch (error) { throw new ExpectedError('manifest-error', `invalid umbrella manifest ${manifestPath}: ${error.message}`); }
     }
   }
-  emit(select(model, config, args, repos));
+  if (args.mode === 'waves') emit(deriveWaves(model, config, args));
+  else emit(select(model, config, args, repos));
 } catch (error) {
   const code = error instanceof ExpectedError ? error.code : 'input-error';
   const detail = error instanceof Error ? error.message : String(error);

@@ -155,7 +155,94 @@ test_usage_synopsis() {
   pass "R2 usage_synopsis: usage-error stderr carries the synopsis; detail unchanged"
 }
 
+# Compact, ORDER-PRESERVING renderings of the wave fields: `1:E1-F2|2:E1-F3`. Comparing
+# the whole string pins wave numbers, wave order, membership and in-wave order at once.
+WAVES_SHAPE='"|".join("%s:%s" % (w["wave"], ",".join(f["id"] for f in w["features"])) for w in x["waves"])'
+WAVE0='",".join(x["wave0"])'
+CRIT='",".join(x["critical_path"])'
+
+# feat <id> <status> [deps-json] [extra-json-members]: one feature object.
+feat() {
+  printf '{"id":"%s","title":"%s","status":"%s","sdd":true,"spec_path":"specs/%s/","depends_on":%s%s}' \
+    "$1" "$1" "$2" "$1" "${3:-[]}" "${4:+,$4}"
+}
+# board1 <feature-json>...: a one-epic (E1) board, features in the order given.
+board1() {
+  _f=$(printf '%s,' "$@")
+  printf '{"project":"fixture","epics":[{"id":"E1","title":"one","status":"planned","features":[%s]}]}\n' "${_f%,}" | write_board
+}
+
+# assert_waves_envelope <label> <out-file>: the R3 fixed fields of a valid-graph envelope.
+assert_waves_envelope() {
+  _o=$2
+  [ "$(json_field 'x["schema_version"]' <"$_o")" = 1 ] || fail "R3 [$1]: schema_version is not 1"
+  [ "$(json_field 'type(x["schema_version"]).__name__' <"$_o")" = int ] || fail "R3 [$1]: schema_version is not an integer"
+  [ "$(json_field 'x["mode"]' <"$_o")" = waves ] || fail "R3 [$1]: mode is not waves"
+  [ "$(json_field 'x["outcome"]' <"$_o")" = waves ] || fail "R3 [$1]: outcome is not waves"
+  [ "$(json_field 'x["selected"] is None' <"$_o")" = True ] || fail "R3 [$1]: selected is not null"
+  [ "$(json_field 'x["reason"]["code"]' <"$_o")" = waves-derived ] || fail "R3 [$1]: reason.code is not waves-derived"
+  [ -n "$(json_field 'x["summary"] or ""' <"$_o")" ] || fail "R3 [$1]: summary is empty"
+  [ "$(json_field 'x["reason"]["detail"] == x["summary"]' <"$_o")" = True ] || fail "R3 [$1]: reason.detail != summary"
+  [ "$(json_field 'x["blocked"]' <"$_o")" = '[]' ] || fail "R3 [$1]: blocked is not []"
+  [ "$(json_field 'x["scope"]' <"$_o")" = "{'epic': None}" ] || fail "R3 [$1]: scope is not {epic: null}"
+  [ "$(json_field 'all(type(w["wave"]).__name__ == "int" for w in x["waves"])' <"$_o")" = True ] ||
+    fail "R3 [$1]: a waves[].wave is not an integer"
+  [ "$(json_field 'list(x)' <"$_o")" = "['schema_version', 'mode', 'outcome', 'selected', 'reason', 'blocked', 'summary', 'scope', 'wave0', 'waves', 'critical_path']" ] ||
+    fail "R3 [$1]: envelope key list is not the seven envelope keys plus scope, wave0, waves, critical_path"
+}
+
+test_wave_assignment() {
+  write_config true
+  # Linear chain F1 -> F2 -> F3, F1 done; input order reversed.
+  board1 "$(feat E1-F3 pending '["E1-F2"]')" "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F1 done)"
+  run_tool --waves --json >"$TMP/w.out" || fail "R3 linear: --waves --json failed"
+  assert_waves_envelope linear "$TMP/w.out"
+  [ "$(json_field "$WAVE0" <"$TMP/w.out")" = E1-F1 ] || fail "R3 linear: wave0 is not [E1-F1]"
+  [ "$(json_field "$WAVES_SHAPE" <"$TMP/w.out")" = '1:E1-F2|2:E1-F3' ] ||
+    fail "R3 linear: waves are $(json_field "$WAVES_SHAPE" <"$TMP/w.out"), want 1:E1-F2|2:E1-F3 (a done dependency counts as wave 0)"
+  # Diamond F1 -> {F2, F3} -> F4; input order reversed.
+  board1 "$(feat E1-F4 pending '["E1-F3","E1-F2"]')" "$(feat E1-F3 pending '["E1-F1"]')" \
+    "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F1 pending)"
+  run_tool --waves --json >"$TMP/w.out" || fail "R3 diamond: --waves --json failed"
+  assert_waves_envelope diamond "$TMP/w.out"
+  [ "$(json_field "$WAVE0" <"$TMP/w.out")" = '' ] || fail "R3 diamond: wave0 is not []"
+  [ "$(json_field "$WAVES_SHAPE" <"$TMP/w.out")" = '1:E1-F1|2:E1-F2,E1-F3|3:E1-F4' ] ||
+    fail "R3 diamond: waves are $(json_field "$WAVES_SHAPE" <"$TMP/w.out")"
+  # Two components {F1 -> F2}, {F5 -> F6 -> F7}; input order interleaved and reversed.
+  board1 "$(feat E1-F7 pending '["E1-F6"]')" "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F6 pending '["E1-F5"]')" \
+    "$(feat E1-F5 pending)" "$(feat E1-F1 pending)"
+  run_tool --waves --json >"$TMP/w.out" || fail "R3 components: --waves --json failed"
+  assert_waves_envelope components "$TMP/w.out"
+  [ "$(json_field "$WAVES_SHAPE" <"$TMP/w.out")" = '1:E1-F1,E1-F5|2:E1-F2,E1-F6|3:E1-F7' ] ||
+    fail "R3 components: waves are $(json_field "$WAVES_SHAPE" <"$TMP/w.out")"
+  # MAX, not first/last/min dependency: F3 and F4 each depend on F1 (wave 1) and F2
+  # (wave 2), listed in opposite orders; done features sorted in wave0 (F12 after F9).
+  board1 "$(feat E1-F4 pending '["E1-F2","E1-F1"]')" "$(feat E1-F12 done)" "$(feat E1-F3 pending '["E1-F1","E1-F2"]')" \
+    "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F9 done)" "$(feat E1-F1 pending '["E1-F12"]')"
+  run_tool --waves --json >"$TMP/w.out" || fail "R3 max: --waves --json failed"
+  assert_waves_envelope max "$TMP/w.out"
+  [ "$(json_field "$WAVE0" <"$TMP/w.out")" = 'E1-F9,E1-F12' ] ||
+    fail "R3 max: wave0 is $(json_field "$WAVE0" <"$TMP/w.out"), want E1-F9,E1-F12 (ADR-0001 order, not string order)"
+  [ "$(json_field "$WAVES_SHAPE" <"$TMP/w.out")" = '1:E1-F1|2:E1-F2|3:E1-F3,E1-F4' ] ||
+    fail "R3 max: waves are $(json_field "$WAVES_SHAPE" <"$TMP/w.out"), want a feature's wave = 1 + MAX of its dependencies"
+  # Error envelopes keep the seven-key shape: mode board when parseArgs threw, mode waves
+  # for an input-error raised after parsing.
+  run_tool --waves --wat >"$TMP/e.out" 2>/dev/null || :
+  [ "$(json_field 'list(x)' <"$TMP/e.out")" = "['schema_version', 'mode', 'outcome', 'selected', 'reason', 'blocked', 'summary']" ] ||
+    fail "R3: usage-error envelope is not the seven-key shape"
+  [ "$(json_field 'x["mode"]' <"$TMP/e.out")" = board ] || fail "R3: usage-error envelope mode is not board"
+  _rc=0
+  node "$TOOL" --waves --json --tasks "$TMP/absent.json" --config "$TMP/config.yaml" >"$TMP/e.out" 2>/dev/null || _rc=$?
+  [ "$_rc" = 1 ] || fail "R3: unreadable board under --waves exited $_rc, want 1"
+  [ "$(json_field 'list(x)' <"$TMP/e.out")" = "['schema_version', 'mode', 'outcome', 'selected', 'reason', 'blocked', 'summary']" ] ||
+    fail "R3: input-error envelope is not the seven-key shape"
+  [ "$(json_field 'x["mode"] + "/" + x["outcome"] + "/" + x["reason"]["code"]' <"$TMP/e.out")" = waves/error/input-error ] ||
+    fail "R3: post-parse input-error envelope is not mode=waves outcome=error code=input-error"
+  pass "R3 wave_assignment: linear, diamond, two components, max-of-deps; error envelopes keep seven keys"
+}
+
 test_cli_contract
 test_usage_synopsis
+test_wave_assignment
 
 echo "test_waves: $PASS passed"
