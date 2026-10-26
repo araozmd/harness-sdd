@@ -27,7 +27,7 @@ All notable changes to the harness body are recorded here. Versions follow
   (default 512) entries contributes no children, and an unbound resolution over a truncated
   search is `unknown` (recorded `unchecked`, remedy named) rather than a uniqueness claim
   nobody searched for. A manifest-free bound search is guarded too
-  (`unlocatable`, recorded `unchecked`); a manifest-declared binding is exempt. The witness records which scan roots were truncated and `still_holds()` refuses when that set changes — only for resolutions that searched siblings; manifest-declared bindings keep their exemption. `test_board_lock.sh` alone: 5m34s → seconds for that case.
+  (`unlocatable`, recorded `unchecked`); a manifest-declared binding is exempt. The witness records which scan roots were truncated and `still_holds()` refuses when that set changes — only for resolutions that searched siblings; manifest-declared bindings keep their exemption; the witness records the snapshot the search itself was made with (taken before any git probe), never a resample taken at capture time. `test_board_lock.sh` alone: 5m34s → seconds for that case.
 - `tools/tasks-lock.py`: the shared validator is warmed before the lock is taken. Its first
   `validate()` call imports `jsonschema` (which compiles a lark grammar, ~3 s here, more under
   load) and that first call sat inside the critical section, so every writer held the board

@@ -808,8 +808,17 @@ def default_branch(repo):
 # ── the one entry point ───────────────────────────────────────────────────────
 
 
-def _capture(outcome, repo_name, identity, state, mapping, cand, hdir, chosen=None):
-    """Build the Witness from exactly what `resolve()` consulted (see `Witness`)."""
+def _capture(outcome, repo_name, identity, state, mapping, cand, hdir, chosen=None,
+             truncated=None):
+    """Build the Witness from exactly what `resolve()` consulted (see `Witness`).
+
+    `truncated` is the sibling-scan snapshot the SEARCH was made with — `truncated_roots()`
+    taken before `candidates()` and before any git probe. It is recorded as given, never
+    resampled here: a root crossing the cap while the probes ran would otherwise be
+    witnessed as the state that justified the answer, and `still_holds()` would then accept
+    a result a fresh `resolve()` no longer gives (Codex #296 round-5). A resolution that
+    searched must pass it; one that did not search records nothing.
+    """
     # Exclude every candidate that IS the chosen repository, not merely the one directory
     # that was picked. A sibling linked worktree is a different path over the same store,
     # so fingerprinting it as an unrelated candidate made any commit in the chosen repo
@@ -824,12 +833,15 @@ def _capture(outcome, repo_name, identity, state, mapping, cand, hdir, chosen=No
         if chosen is None or not same_repository(lex, chosen)
     )
     searched = bool(cand) or (repo_name is not None and state == "absent")
+    if searched and truncated is None:
+        raise AssertionError(
+            "_capture: a searching resolution must pass the scan snapshot it searched with")
     return Witness(
         outcome=outcome, repo=repo_name,
         binding=repo_name, identity=identity, manifest_state=state,
         manifest_entry=mapping.get(repo_name) if repo_name is not None else None,
         candidates=cand, others=others,
-        truncated=tuple(r for r, _n in truncated_roots(hdir)) if searched else (),
+        truncated=tuple(r for r, _n in truncated) if searched else (),
         searched=searched,
     )
 
@@ -841,6 +853,7 @@ def resolve(ref, repo_name, hdir):
     re-check this answer later comes back attached to it — see `Resolution.witness`.
     """
     state, mapping = manifest_repos(hdir)
+    scan_truncated = None   # set by the two SEARCHING branches, before their probes
 
     if repo_name is not None:
         cand = ()          # a binding did no search, so there is no uniqueness to witness
@@ -881,11 +894,13 @@ def resolve(ref, repo_name, hdir):
             # A cut-short neighbour set can hide a second repository with the same basename
             # and turn an ambiguous binding into a confident one. Refuse to search it; a
             # manifest-located binding (above) is exempt from the cap by design.
-            truncated = truncated_roots(hdir)
+            scan_truncated = truncated_roots(hdir)   # the snapshot this search is made with
+            truncated = scan_truncated
             if truncated:
                 return Resolution(
                     UNLOCATABLE, repo=repo_name, binding=repo_name, manifest_state=state,
-                    witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand, hdir),
+                    witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand, hdir,
+                                     truncated=scan_truncated),
                     detail="the search for %r near %s was truncated — %s — so the binding "
                            "cannot be called unique; declare the repository in an umbrella "
                            "manifest"
@@ -898,7 +913,8 @@ def resolve(ref, repo_name, hdir):
                 return Resolution(
                     UNLOCATABLE, repo=repo_name, binding=repo_name,
                     manifest_state=state,
-                    witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand, hdir),
+                    witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand, hdir,
+                             truncated=scan_truncated),
                     detail="no repository named %r is visible near %s" % (repo_name, hdir),
                 )
             # A BINDING names a repository; with no manifest to say WHERE that is, the name is
@@ -919,7 +935,8 @@ def resolve(ref, repo_name, hdir):
                 if len(_distinct) > 1:
                     return Resolution(
                         AMBIGUOUS, repo=repo_name, binding=repo_name, manifest_state=state,
-                        witness=_capture(AMBIGUOUS, repo_name, None, state, mapping, cand, hdir),
+                        witness=_capture(AMBIGUOUS, repo_name, None, state, mapping, cand, hdir,
+                             truncated=scan_truncated),
                         detail="%r names %d different repositories near %s (%s) and no "
                                "manifest says which one is meant"
                                % (repo_name, len(_distinct), hdir,
@@ -927,9 +944,10 @@ def resolve(ref, repo_name, hdir):
                     )
                 dirs = _distinct
     else:
+        scan_truncated = truncated_roots(hdir)       # the snapshot this search is made with
         cand = tuple(candidates(hdir, pairs=True))
         dirs = [lex for lex, _real in cand]
-        truncated = truncated_roots(hdir)
+        truncated = scan_truncated
         if truncated:
             # An UNBOUND answer is only ever certain because every neighbour was searched.
             # A neighbour set that was cut short cannot make it certain, so do not search
@@ -937,7 +955,8 @@ def resolve(ref, repo_name, hdir):
             return Resolution(
                 UNKNOWN, repo=None, binding=None, manifest_state=state,
                 candidates=cand,
-                witness=_capture(UNKNOWN, None, None, state, mapping, cand, hdir),
+                witness=_capture(UNKNOWN, None, None, state, mapping, cand, hdir,
+                             truncated=scan_truncated),
                 detail="the search for %s near %s was truncated — %s — so no unbound "
                        "answer can be called unique; bind the evidence as <repo>=%s or "
                        "declare the repository in an umbrella manifest"
@@ -954,7 +973,7 @@ def resolve(ref, repo_name, hdir):
             candidates=cand,
             witness=_capture(UNKNOWN, repo_name,
                              Identity(dirs[0]) if (repo_name is not None and dirs) else None,
-                             state, mapping, cand, hdir),
+                             state, mapping, cand, hdir, truncated=scan_truncated),
             identity=Identity(dirs[0]) if (repo_name is not None and dirs) else None,
             detail="%s does not name a commit in %s"
                    % (ref, repo_name or ("any repository near %s" % hdir)),
@@ -968,7 +987,8 @@ def resolve(ref, repo_name, hdir):
         if len(distinct) > 1:
             return Resolution(
                 AMBIGUOUS, manifest_state=state, candidates=cand,
-                witness=_capture(AMBIGUOUS, None, None, state, mapping, cand, hdir),
+                witness=_capture(AMBIGUOUS, None, None, state, mapping, cand, hdir,
+                             truncated=scan_truncated),
                 detail="%s resolves in %d different repositories (%s)"
                        % (ref, len(distinct),
                           ", ".join(os.path.basename(d) for d in distinct)),
@@ -988,7 +1008,7 @@ def resolve(ref, repo_name, hdir):
         base=base, base_evidence=evidence, has_origin=has_origin,
         base_tip=advertised, commit=resolve_commit(chosen, ref),
         witness=_capture(RESOLVED, repo_name, Identity(chosen), state, mapping, cand,
-                         hdir, chosen=chosen),
+                         hdir, chosen=chosen, truncated=scan_truncated),
     )
 
 

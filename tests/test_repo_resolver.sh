@@ -735,6 +735,18 @@ case "$ASK_OUT" in
   *) fail "C12 control: a cap crossing invalidated a manifest-declared binding that never searched siblings: $ASK_OUT" ;;
 esac
 rm -f "$CAP/hd/harness.config.yaml"
+# the witness records the snapshot the SEARCH was made with, never a resample taken after
+# the git probes (Codex #296 round-5): a root crossing the cap mid-resolution would otherwise
+# be witnessed as the state that justified the answer. Paired: with no snapshot passed, a
+# searching capture refuses outright instead of quietly resampling.
+ask "$CAP_MAIN" - "$CAP/hd" "rr._capture(rr.UNKNOWN, None, None, 'absent', {}, (('$CAP/child','$CAP/child'),), '$CAP/hd', truncated=(('/snapshot/root', 99),)).truncated"
+[ "$ASK_OUT" = "('/snapshot/root',)" ] \
+  || fail "C12 snapshot: _capture resampled the scan instead of recording the snapshot it was given: $ASK_OUT"
+ask "$CAP_MAIN" - "$CAP/hd" "(lambda: rr._capture(rr.UNKNOWN, None, None, 'absent', {}, (('$CAP/child','$CAP/child'),), '$CAP/hd'))()" || true
+case "$ASK_OUT" in
+  *"must pass the scan snapshot"*) ;;
+  *) fail "C12 snapshot control: a searching capture with no snapshot did not refuse (got: $ASK_OUT)" ;;
+esac
 pass "E99-F129c C12 sibling_scan_cap_refuses_uniqueness_and_names_the_remedy"
 
 echo "All repository-resolver tests passed."
