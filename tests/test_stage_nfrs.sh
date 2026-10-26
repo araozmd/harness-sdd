@@ -66,6 +66,10 @@ R4_adr_template_deferred_trigger() {
   _d="$(lineno "$_a" '- **Date:**')"; _t="$(lineno "$_a" '- **Trigger:**')"; _c="$(lineno "$_a" '## Context')"
   [ "$_d" -gt 0 ] && [ "$_t" -eq $((_d + 1)) ] && [ "$_c" -gt "$_t" ] \
     || fail "R4: the Trigger: line is not the header line directly after Date: (date=$_d trigger=$_t context=$_c)"
+  # The guidance prose must copy the FULL header-list form E36-F04 lints, not the short
+  # `Status: deferred`: an author who copies the short form writes an ADR the sweep never sees.
+  fold "$_a" | grep -qE 'ordinary ADR with `- \*\*Status:\*\* deferred` and a[ >]{1,4}\*\*mandatory\*\* `- \*\*Trigger:\*\* <' \
+    || fail "R4: the ADR template guidance does not name the full '- **Status:** deferred' / '- **Trigger:** <…>' header-list form"
   grep -qiE 'one architecture decision per ADR' "$_a" \
     || fail "R4: the ADR template lost its 'One architecture decision per ADR' sentence"
   pass "ADR template lists deferred and carries a mandatory-when-deferred Trigger: header line (R4) [R4_adr_template_deferred_trigger]"
@@ -106,6 +110,8 @@ R6_plan_template_deferred() {
   grep -qF 'specs/product.md' "$_p" || fail "R6: plan template does not name the stage source specs/product.md"
   fold "$_p" | grep -qE 'production[^.]{0,40}absent|absent[^.]{0,40}production' \
     || fail "R6: plan template does not say the stage is production when absent"
+  fold "$_p" | grep -qF 'deferred ADR (`- **Status:** deferred`, with a `- **Trigger:** <' \
+    || fail "R6: plan template blockquote does not name the full '- **Status:** deferred' / '- **Trigger:** <…>' header-list form"
   fold "$_p" | grep -qE 'R-id[^.]{0,80}ADR-NNNN[^.]{0,40}defers' \
     || fail "R6: plan template's header blockquote does not say every row cites the R-id it serves or the ADR-NNNN that defers it"
   _f="$(lineno "$_p" '## Files to change')"; _x="$(lineno "$_p" '## Deferred')"; _n="$(lineno "$_p" '## DO NOT TOUCH')"

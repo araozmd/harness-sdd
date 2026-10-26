@@ -19,7 +19,9 @@ All notable changes to the harness body are recorded here. Versions follow
   `- **Trigger:**` header line, mandatory when the status is `deferred` (decision 2), plus
   guidance naming the sticky NFRs that are never deferred at any stage (tenant isolation, the
   auth boundary, secrets out of the repo, validation at the system edge — decision 3) and the
-  bolt-on examples (encryption at rest, WAF, rate limits, backups, caching).
+  bolt-on examples (encryption at rest, WAF, rate limits, backups, caching). The template's
+  guidance and the plan template's `## Deferred` blockquote spell the header lines in full
+  (`- **Status:** deferred`, `- **Trigger:** <condition>`), the form `E36-F04` will lint.
 - **Plan `## Deferred`.** `specs/_templates/feature.plan.md` gains a `## Deferred` subsection
   (a `| Bolt-on | Deferred by | Trigger |` table or the single line `Deferred: none — <why>`),
   and its header now says every table row cites the `R-id` it serves or the `ADR-NNNN` that

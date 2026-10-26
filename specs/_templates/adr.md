@@ -13,9 +13,9 @@
 > ## Stage-aware NFRs (ADR-0009)
 > A **deferred** ADR parks a bolt-on NFR the product's stage excludes
 > (`stage:` in `specs/product.md` frontmatter — `discovery | pilot | production`,
-> `production` when absent). It is an ordinary ADR with `Status: deferred` and a
-> **mandatory** `Trigger:` line — the observable condition that reopens it (first regulated
-> customer, N users, a named compliance deadline). The feature plan cites it from its
+> `production` when absent). It is an ordinary ADR with `- **Status:** deferred` and a
+> **mandatory** `- **Trigger:** <observable condition>` line — the condition that reopens it
+> (first regulated customer, N users, a named compliance deadline). The feature plan cites it from its
 > `## Deferred` subsection.
 >
 > **Sticky NFRs are never deferred at any stage:** tenant isolation, the auth boundary,

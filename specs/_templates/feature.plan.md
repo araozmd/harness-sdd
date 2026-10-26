@@ -26,7 +26,7 @@
 ## Deferred  (ADR-0009 — bolt-ons the stage excludes)
 > Stage: <discovery | pilot | production> — read from `specs/product.md` frontmatter;
 > `production` when absent. One row per bolt-on this feature leaves out; "Deferred by" is a
-> deferred ADR (`Status: deferred`, with a `Trigger:` line) and "Trigger" copies its
+> deferred ADR (`- **Status:** deferred`, with a `- **Trigger:** <condition>` line) and "Trigger" copies its
 > condition. When nothing is deferred, replace the table with the single line
 > `Deferred: none — <why>` (e.g. `Deferred: none — stage is production`). A bolt-on that is
 > **not** deferred needs an R-id in the rows above — never add one without a requirement.
