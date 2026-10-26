@@ -107,6 +107,19 @@ chk_exit1 R6_first_task_unsuffixed_exit1 'tasks-pair-check: first-task-not-test 
 printf -- '- [ ] **T1a** (R1) — t\n- [ ] **T2c** (R2) — odd suffix\n- [ ] **T3a** (R3) — t\n' > "$T/t6c.md"
 run_lint "$T/t6c.md" --spec "$T/s.md"
 chk_exit1 R6_first_task_unsuffixed_exit1 'tasks-pair-check: first-task-not-test R2 T2c'
+# A suffix that is not exactly one `a`/`b` (any case, any length) is "other", never dropped:
+# a dropped line would let the code-first T2B / T2ab / t2b through to the later T2a.
+for _sx in 'T2B' 'T2ab' 't2b'; do
+  printf -- '- [ ] **T1a** (R1) — t\n- [ ] **%s** (R2) — code first\n- [ ] **T2a** (R2) — t\n- [ ] **T3a** (R3) — t\n' "$_sx" > "$T/t6s.md"
+  run_lint "$T/t6s.md" --spec "$T/s.md"
+  chk_exit1 "R6_suffix_not_dropped_exit1[$_sx]" "tasks-pair-check: first-task-not-test R2 $_sx"
+done
+# ...and the suffix is case-normalised: an upper-case `A` is still the test task.
+printf -- '- [ ] **T1a** (R1) — t\n- [ ] **T2A** (R2) — t\n- [ ] **T2B** (R2) — c\n- [ ] **T3a** (R3) — t\n' > "$T/t6u.md"
+run_lint "$T/t6u.md" --spec "$T/s.md"
+[ "$rc" -eq 0 ] || fail "R6_suffix_case_normalised: T2A first should pass, rc $rc ($(cat "$T/out"))"
+grep -qxF 'tasks-pair-check: ok 3 R-ids, 4 tasks' "$T/out" || fail "R6_suffix_case_normalised: $(cat "$T/out")"
+pass "R6_suffix_case_normalised"
 printf -- '- [ ] **T1a** (R1) — t\n- [ ] **T2a** (R2) — t\n' > "$T/t6d.md"
 run_lint "$T/t6d.md" --spec "$T/s.md"
 chk_exit1 R6_no_task_exit1 'tasks-pair-check: no-task R3'

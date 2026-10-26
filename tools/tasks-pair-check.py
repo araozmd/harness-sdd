@@ -14,8 +14,10 @@ Pure function of two files; stdlib only.  Grammar (identical to docs/SPEC-FORMAT
     info string).  iter_unfenced() is a DELIBERATE second copy of that rule, pinned by
     tests/test_tasks_pairs.sh -- not a hidden one.
   * spec R-id: a line `- **R<n>** ...`; first appearance order, duplicates collapse.
-  * task: `- [ ] **T<n>[a-z]** (R#, R#) -- text` (or `- [x]`).  Suffix `a` = test task, `b` =
-    code task, none or any other letter = "other" (never dropped).  Cited R-ids are the
+  * task: `- [ ] **T<n><suffix>** (R#, R#) -- text` (or `- [x]`); the `T` and the suffix
+    letters match in either case.  Suffix `a`/`A` = test task, `b`/`B` = code task; no suffix,
+    any other letter, or more than one letter (`T1c`, `T1ab`) = "other" -- reported, never
+    dropped.  The T-id is printed as written.  Cited R-ids are the
     explicit R<n> tokens in the parentheses; a range R1-R4 is NOT expanded.
   * violations: `first-task-not-test <R-id> <T-id>`, `no-task <R-id>`, `write-tests-task <T-id>`
     (an un-cited task whose text matches \\bwrite\\b.*\\btests\\b, wherever it sits).
@@ -30,7 +32,7 @@ USAGE = "usage: tasks-pair-check.py <feature.tasks.md> --spec <feature.spec.md>"
 
 RID_RE = re.compile(r"^[ \t]*-[ \t]+\*\*(R[0-9]+)\*\*")
 TASK_RE = re.compile(
-    r"^[ \t]*-[ \t]+\[[ xX]\][ \t]+\*\*(T[0-9]+)([a-z])?\*\*"
+    r"^[ \t]*-[ \t]+\[[ xX]\][ \t]+\*\*([Tt][0-9]+)([A-Za-z]+)?\*\*"
     r"(?:[ \t]*\(([^)]*)\))?[ \t]*(?:—|–|-)?[ \t]*(.*)$"
 )
 WRITE_TESTS_RE = re.compile(r"\bwrite\b.*\btests\b", re.IGNORECASE)
@@ -97,7 +99,8 @@ def read_tasks(path):
         if not m:
             continue
         suffix = m.group(2)
-        kind = "test" if suffix == "a" else "code" if suffix == "b" else "other"
+        norm = (suffix or "").lower()
+        kind = "test" if norm == "a" else "code" if norm == "b" else "other"
         cited = re.findall(r"R[0-9]+", m.group(3) or "")
         tasks.append((m.group(1) + (suffix or ""), kind, cited, m.group(4)))
     return tasks

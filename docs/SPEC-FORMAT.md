@@ -94,8 +94,10 @@ observable at the product boundary). The lint `tools/tasks-pair-check.py <tasks>
 The grammar the lint enforces (and this section, the template and the Architect prompt all
 state the same one):
 
-- A task is a line `- [ ] **T<n>[a|b]** (R#, R#) — text` (or `- [x]`). Suffix `a` is a test
-  task, `b` a code task, no suffix or any other letter is "other" (never dropped). The cited
+- A task is a line `- [ ] **T<n>[a|b]** (R#, R#) — text` (or `- [x]`); the `T` and the suffix
+  match in either case. Suffix `a` (or `A`) is a test task, `b` (or `B`) a code task; no
+  suffix, any other letter, or more than one letter (`T1c`, `T1ab`) is "other" — reported,
+  never dropped, so a `T1B` or `T1ab` first task fails like any code-first task. The cited
   `R-id`s are the explicit `R<n>` tokens inside the parentheses; a range such as `R1–R4` is
   not expanded — cite each id.
 - For every spec `R-id` (a line `- **R<n>** …`), the first task that cites it must be a `T<n>a`
