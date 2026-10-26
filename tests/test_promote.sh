@@ -23,6 +23,7 @@ INSTALL_DOC="$SRC/docs/INSTALL.md"
 UMBRELLA_DOC="$SRC/docs/UMBRELLA.md"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-promote)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 export CODEX_HOME="$T/codex-home"
 export HARNESS_AGENTS="claude"
 export HARNESS_PR_LOOP_ENABLED=false

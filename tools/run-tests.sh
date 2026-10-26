@@ -33,7 +33,11 @@
 # Usage:
 #   tools/run-tests.sh [--jobs N] [--serial] [suite...]
 #
-#   --jobs N   concurrency (default 8). N=1 is identical to --serial.
+#   --jobs N   concurrency (default 4). N=1 is identical to --serial. Capped at
+#              HARNESS_TEST_JOBS_MAX (default 4): a higher N is clamped with a warning.
+#              Each suite spawns harness-install.sh, python unittest and cp/rm trees, so
+#              N jobs is hundreds of processes; 16+8 across two worktrees took a 10-core
+#              laptop to load 100 (2026-10-25).
 #   --serial   run one at a time; use when bisecting a suspected cross-suite interaction.
 #   suite...   specific suites to run (default: every tests/test_*.sh)
 #
@@ -42,6 +46,9 @@
 #   1  at least one suite failed (its full output is on stderr)
 #   3  a suite or tool did not PARSE under the strict shell (nothing was executed)
 #   4  usage error / no suites found / malformed dash allowlist
+#   5  another run-tests.sh is already running on this machine (one run at a time;
+#      the runner does not wait and does not retry — rerun when it has finished). The
+#      lock is a pid file claimed with `ln`, reclaimed by atomic rename when stale.
 #
 # NOTE ON ISOLATION: concurrency here is a claim about the suites, not a wish. If a future
 # suite starts writing to a shared path, it will fail intermittently under --jobs and pass
@@ -51,7 +58,8 @@
 set -eu
 LC_ALL=C; export LC_ALL
 
-jobs=8
+jobs=4
+jobs_max="${HARNESS_TEST_JOBS_MAX:-4}"
 suites=""
 
 usage() {
@@ -71,6 +79,64 @@ while [ $# -gt 0 ]; do
     *)  suites="$suites $1"; shift ;;
   esac
 done
+
+# ── jobs cap (2026-10-25 incident) ─────────────────────────────────────────────────
+# The cap is an environment knob, not a flag: a flag is what the caller already got wrong.
+case "$jobs_max" in ''|*[!0-9]*) jobs_max=4 ;; esac
+[ "$jobs_max" -ge 1 ] || jobs_max=1
+if [ "$jobs" -gt "$jobs_max" ]; then
+  printf 'run-tests: --jobs %s exceeds HARNESS_TEST_JOBS_MAX=%s — clamped to %s (raise the env var deliberately if this machine can take it)\n' \
+    "$jobs" "$jobs_max" "$jobs_max" >&2
+  jobs="$jobs_max"
+fi
+
+# ── one run per machine ─────────────────────────────────────────────────────────────
+# Two concurrent runs (different worktrees, same laptop) multiply the process count and
+# compete for the same tmp filesystem; the second one refuses and exits 5 instead of
+# waiting, so a caller can never queue a third behind it by accident. The lock is a FILE
+# holding the owner's pid: it is written to a private temp file first and claimed with a
+# hard link (`ln` fails if the lock exists), so the pid is there from the instant the lock
+# is, with no empty-holder window. A lock whose pid is gone is reclaimed by an atomic
+# rename (exactly one of several reclaimers wins) and released only by its owner.
+# A NESTED run — a suite exercising the runner itself (test_grep_probe, test_suite_hygiene)
+# — is already inside the outer run's cap, so it skips the claim: the outer runner exports
+# the marker to every suite it starts. A suite that wants to test the lock unsets it.
+# A signal (HUP/INT/TERM) releases the lock and exits non-zero; it never resumes the run.
+lockfile="${TMPDIR:-/tmp}"; lockfile="${lockfile%/}/harness-run-tests.lock"
+release_run_lock() {
+  [ -n "$lockfile" ] || return 0
+  [ "$(cat "$lockfile" 2>/dev/null)" = "$$" ] && rm -f "$lockfile"
+  return 0
+}
+_lock_try=0
+while [ "${HARNESS_RUN_TESTS_NESTED:-0}" != 1 ]; do
+  printf '%s\n' "$$" >"$lockfile.$$"
+  if ln "$lockfile.$$" "$lockfile" 2>/dev/null; then
+    rm -f "$lockfile.$$"
+    break
+  fi
+  rm -f "$lockfile.$$"
+  _holder="$(cat "$lockfile" 2>/dev/null || :)"
+  case "$_holder" in *[!0-9]*) _holder="" ;; esac
+  if [ -n "$_holder" ] && kill -0 "$_holder" 2>/dev/null; then
+    printf 'run-tests: another run-tests.sh (pid %s) is already running on this machine — one suite run at a time; not waiting, not retrying (lock: %s)\n' \
+      "$_holder" "$lockfile" >&2
+    exit 5
+  fi
+  _lock_try=$((_lock_try + 1))
+  [ "$_lock_try" -lt 3 ] || { printf 'run-tests: could not claim %s (stale lock would not clear)\n' "$lockfile" >&2; exit 5; }
+  # atomic reclaim: of several runners renaming the same stale lock exactly one mv succeeds
+  if mv "$lockfile" "$lockfile.stale.$$" 2>/dev/null; then
+    rm -f "$lockfile.stale.$$"
+  fi
+done
+if [ "${HARNESS_RUN_TESTS_NESTED:-0}" != 1 ]; then
+  trap 'release_run_lock' EXIT
+else
+  lockfile=""                              # nested: nothing of ours to release
+fi
+trap 'exit 1' HUP INT TERM                 # a signal exits (into the EXIT cleanup); it never resumes the run
+export HARNESS_RUN_TESTS_NESTED=1          # every suite this run starts is nested
 
 # ── grep-flavour probe (E99-F12) — WARN ONLY, once, before any suite runs ─────────────
 #
@@ -362,7 +428,7 @@ if [ -n "$preflight_bad" ]; then
 fi
 
 work="$(mktemp -d)" || { printf 'run-tests: mktemp failed\n' >&2; exit 4; }
-trap 'rm -rf "$work"' EXIT INT TERM
+trap 'rm -rf "$work"; release_run_lock' EXIT
 
 # The suites shell out to the TOOLS as `sh tools/foo.sh`, which resolves through PATH — so
 # without this the tools would keep running under the host `sh` no matter what the suites

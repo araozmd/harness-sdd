@@ -72,6 +72,13 @@ for e in d['epics']:
     if f['id']==sys.argv[2]: print(f['status'])" "$1" "$2"
 }
 
+# Cleanup on exit AND on a kill. Every case allocates its own `$T` and removes it on the
+# success path; whichever is current when the suite dies is removed here, and `exit`
+# from the signal trap runs the EXIT trap (2026-10-25: killed suites left ~500 tmp dirs).
+T=""
+trap '[ -z "$T" ] || rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM
+
 # ── R1/R2: two concurrent writers both survive (no lost update) ───────────────
 # test_concurrent_writers_no_lost_update / test_reread_inside_lock_sees_prior_write
 # Each writer sleeps INSIDE its mutation to force the critical sections to overlap;
@@ -180,12 +187,22 @@ pass "R4 structurally-invalid mutation also fails stop (parse+schema)"
 # test_acquire_timeout_bounded_clear_error
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-lock)"
 make_fixture "$T"
+# BASELINE first: how long does an UNCONTENDED write take on this machine right now? The
+# helper does real work before it ever touches the lock (git discovery, loading the shared
+# validator — whose jsonschema import compiles a lark grammar, ~3 s here and more under
+# load). The bound below is relative to that, so it measures the ACQUISITION wait and not
+# how slow Python imports are today (2026-10-25: a fixed 5 s bound and a fixed 8 s hold
+# both broke under four concurrent suites — the waiter outlived the holder and "acquired").
+_b0="$(python3 -c 'import time;print(time.time())')"
+HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F02 in-review >/dev/null 2>&1 \
+  || fail "R5 baseline: an uncontended set-status failed"
+_b1="$(python3 -c 'import time;print(time.time())')"
 cat > "$T/holder.py" <<EOF
 import fcntl, os, time
 fd = os.open("$T/state/tasks.json.lock", os.O_RDWR | os.O_CREAT, 0o644)
 fcntl.flock(fd, fcntl.LOCK_EX)
 open("$T/held.flag", "w").close()
-time.sleep(8)
+time.sleep(600)   # held until the suite kills it: the waiter can never outlive the hold
 EOF
 python3 "$T/holder.py" &
 _hp=$!
@@ -203,9 +220,10 @@ if HARNESS_DIR="$T" python3 "$HELPER" set-status E01-F01 done \
   fail "R5: acquisition against a held lock did NOT exit non-zero (silent proceed?)"
 fi
 _end="$(python3 -c 'import time;print(time.time())')"
-# bounded: must return within a small multiple of the timeout (not the 8s hold).
-python3 -c "import sys; sys.exit(0 if ($_end - $_start) < 5 else 1)" \
-  || fail "R5: acquisition blocked well past the timeout (not bounded)"
+# bounded: the contended call may take the uncontended baseline plus a small multiple of
+# the 1 s timeout — never the open-ended hold (the holder sleeps 600 s and is killed below).
+python3 -c "import sys; sys.exit(0 if ($_end - $_start) < ($_b1 - $_b0) + 4 else 1)" \
+  || fail "R5: acquisition blocked well past the timeout (not bounded): contended $(python3 -c "print(round($_end - $_start, 2))")s vs uncontended $(python3 -c "print(round($_b1 - $_b0, 2))")s"
 grep -qF "state/tasks.json.lock" "$T/terr.txt" \
   || fail "R5: timeout error does not name the lockfile"
 grep -qiE 'within|timeout|1s' "$T/terr.txt" \

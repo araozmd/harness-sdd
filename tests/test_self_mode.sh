@@ -15,6 +15,7 @@ set -eu
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 
 # Sandbox Codex's GLOBAL prompts dir (house guard for every installer-invoking suite).
 export CODEX_HOME="$T/codex-home"
@@ -50,6 +51,12 @@ sh "$F/harness-install.sh" --self "$T/x" >/dev/null 2>&1 && fail "--self with a 
 sh "$F/harness-install.sh" --self --umbrella "$T" >/dev/null 2>&1 && fail "--self with --umbrella should exit non-zero (R1)"
 sh "$F/harness-install.sh" --self --print-agents >/dev/null 2>&1 && fail "--self with --print-agents should exit non-zero (R1)"
 pass "--self refuses target/--umbrella/--print-agents (R1) [self_arg_guards]"
+
+# R3 falsifiability: the "model-less shims stay model-less" arm must not depend on the
+# repo's CURRENT tiering (every shim may legitimately carry a model: line — the 2026-10-25
+# re-tier gave scout `haiku`). Strip scout's model line in the FIXTURE so the arm is
+# exercised by construction, the same way the opencode.json deletion above forces generation.
+awk '!/^model: /' "$F/.claude/agents/scout.md" > "$T/scout.tmp" && mv "$T/scout.tmp" "$F/.claude/agents/scout.md"
 
 # ── the real run ──────────────────────────────────────────────────────────────
 sh "$F/harness-install.sh" --self >"$T/out1.txt" 2>&1 \

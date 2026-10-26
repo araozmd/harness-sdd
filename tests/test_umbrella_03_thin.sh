@@ -77,7 +77,7 @@ pass "R8 manifest_records_layout"
 cp "$KA/agents/builder.md" "$AU/f03-stub.ref"
 cp "$KA/.harness-version" "$AU/f03-ver.ref"
 # The bumped installer is a PRIVATE COPY of the source, never the shared checkout.
-# `tools/run-tests.sh` runs suites concurrently (--jobs 8) and its own header warns that a
+# `tools/run-tests.sh` runs suites concurrently (--jobs 4 by default, capped by HARNESS_TEST_JOBS_MAX) and its own header warns that a
 # suite writing to a shared path fails intermittently under it: other suites invoke
 # harness-install.sh (stamping VERSION into their fixtures) and test_pr_loop.sh R54 asserts
 # CHANGELOG carries a heading for exactly the current VERSION. Writing 99.99.99 into

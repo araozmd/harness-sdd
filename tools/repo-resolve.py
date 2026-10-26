@@ -368,10 +368,10 @@ class Witness(object):
     """
 
     __slots__ = ("outcome", "repo", "binding", "identity", "manifest_state",
-                 "manifest_entry", "candidates", "others")
+                 "manifest_entry", "candidates", "others", "truncated", "searched")
 
     def __init__(self, outcome, repo, binding, identity, manifest_state,
-                 manifest_entry, candidates, others):
+                 manifest_entry, candidates, others, truncated=(), searched=False):
         self.outcome = outcome
         self.repo = repo
         self.binding = binding
@@ -380,6 +380,11 @@ class Witness(object):
         self.manifest_entry = manifest_entry
         self.candidates = tuple(candidates)
         self.others = tuple(others)
+        # WHICH scan roots were over the cap (roots only: a count wobbling under the cap is
+        # not a change in certainty; a root crossing it in either direction is).
+        self.truncated = tuple(truncated)
+        # whether this answer's certainty came from the sibling search at all.
+        self.searched = bool(searched)
 
     def still_holds(self, hdir):
         """Would a fresh `resolve()` give the same outcome, repository and certainty?
@@ -399,7 +404,19 @@ class Witness(object):
             if mapping.get(self.binding) != self.manifest_entry:
                 return False, "the manifest now puts %s at %s, not %s" % (
                     self.binding, mapping.get(self.binding), self.manifest_entry)
-        # same CERTAINTY — the search space, by path AND identity...
+        # same CERTAINTY — first, the same SEARCH: a root that crossed the cap since resolve
+        # hides its children, which can leave the candidate tuple below unchanged while the
+        # search is no longer complete. Truncation is a certainty dimension only for answers
+        # whose certainty came from that search: a manifest-declared binding never searches
+        # siblings, so an unrelated directory crossing the cap must not invalidate it.
+        now = tuple(r for r, _n in truncated_roots(hdir)) if self.searched else ()
+        if self.searched and now != self.truncated:
+            return False, ("the sibling scan near %s changed its truncation (%s before, %s "
+                           "now) so the search that made this answer certain is no longer "
+                           "the same search" % (
+                               hdir, ", ".join(self.truncated) or "none",
+                               ", ".join(now) or "none"))
+        # ...the search space, by path AND identity...
         if self.candidates and tuple(candidates(hdir, pairs=True)) != self.candidates:
             return False, ("the nearby repositories changed (a path or an identity), so "
                            "this answer may no longer be the only one")
@@ -623,11 +640,59 @@ def manifest_repos(hdir):
     return "present", repos
 
 
+# ── sibling-scan cap (2026-10-25) ──────────────────────────────────────────────────────
+# `candidates()` lists the harness dir's PARENT and probes every child for `.git`. When that
+# parent is a system temp dir — a fixture made with a bare `mktemp -d`, a harness installed
+# under /tmp — it can hold 100k+ entries (this laptop's $TMPDIR held 123,268), and each probe
+# is a realpath plus a stat: minutes of pure Python per resolution, then AGAIN inside the
+# board lock when `Witness.still_holds()` recomputes the set. A `set-status … done` was seen
+# holding the lock for 25 minutes that way; nothing was deadlocked, the search space was.
+#
+# A root over the cap is not enumerated: its children are simply not candidates, and
+# `truncated_roots()` reports it so `resolve()` refuses to call an unbound answer unique —
+# the honest outcome is UNKNOWN with the remedy named (bind the evidence, or declare the
+# repository in a manifest), which `tasks-lock.py` records as `unchecked`. Silently scanning
+# fewer siblings and still saying RESOLVED would be exactly the guess I1 forbids.
+_DEFAULT_MAX_SIBLINGS = 512
+
+
+def max_siblings():
+    """The cap: HARNESS_RESOLVE_MAX_SIBLINGS, else 512. Non-numeric or < 1 ⇒ the default."""
+    raw = os.environ.get("HARNESS_RESOLVE_MAX_SIBLINGS", "")
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_MAX_SIBLINGS
+    return value if value >= 1 else _DEFAULT_MAX_SIBLINGS
+
+
+def _scan_roots(hdir):
+    """The directories whose children `candidates()` probes: (parent, hdir), realpath'd."""
+    hdir = os.path.realpath(hdir)
+    return (os.path.dirname(hdir), hdir)
+
+
+def truncated_roots(hdir):
+    """[(root, entry_count)] for every scan root over the cap — empty when none is."""
+    cap = max_siblings()
+    out = []
+    for root in _scan_roots(hdir):
+        try:
+            count = len(os.listdir(root))
+        except OSError:
+            continue
+        if count > cap:
+            out.append((root, count))
+    return out
+
+
 def candidates(hdir, pairs=False):
     """Repositories to search when no manifest names one — nearest first, deduplicated.
 
     (1) the harness dir; (2) its parent; (3) that parent's immediate children. Directory
-    probing only — no git process — so a caller may recompute this cheaply.
+    probing only — no git process — so a caller may recompute this cheaply. A root with
+    more than `max_siblings()` entries contributes no children (see the cap above); the
+    harness dir and its parent themselves are always probed.
 
     The ORDER is documented and then deliberately not relied upon: (1) is the harness
     dir's own repository, which never holds feature work, so "first hit wins" is at its
@@ -650,11 +715,14 @@ def candidates(hdir, pairs=False):
     add(hdir)
     parent = os.path.dirname(hdir)
     add(parent)
+    cap = max_siblings()
     for root in (parent, hdir):
         try:
             entries = sorted(os.listdir(root))
         except OSError:
             continue
+        if len(entries) > cap:
+            continue                      # over the cap: no children from this root
         for name in entries:
             if not name.startswith("."):
                 add(os.path.join(root, name))
@@ -740,8 +808,17 @@ def default_branch(repo):
 # ── the one entry point ───────────────────────────────────────────────────────
 
 
-def _capture(outcome, repo_name, identity, state, mapping, cand, chosen=None):
-    """Build the Witness from exactly what `resolve()` consulted (see `Witness`)."""
+def _capture(outcome, repo_name, identity, state, mapping, cand, hdir, chosen=None,
+             truncated=None):
+    """Build the Witness from exactly what `resolve()` consulted (see `Witness`).
+
+    `truncated` is the sibling-scan snapshot the SEARCH was made with — `truncated_roots()`
+    taken before `candidates()` and before any git probe. It is recorded as given, never
+    resampled here: a root crossing the cap while the probes ran would otherwise be
+    witnessed as the state that justified the answer, and `still_holds()` would then accept
+    a result a fresh `resolve()` no longer gives (Codex #296 round-5). A resolution that
+    searched must pass it; one that did not search records nothing.
+    """
     # Exclude every candidate that IS the chosen repository, not merely the one directory
     # that was picked. A sibling linked worktree is a different path over the same store,
     # so fingerprinting it as an unrelated candidate made any commit in the chosen repo
@@ -755,11 +832,17 @@ def _capture(outcome, repo_name, identity, state, mapping, cand, chosen=None):
         for lex, _real in cand
         if chosen is None or not same_repository(lex, chosen)
     )
+    searched = bool(cand) or (repo_name is not None and state == "absent")
+    if searched and truncated is None:
+        raise AssertionError(
+            "_capture: a searching resolution must pass the scan snapshot it searched with")
     return Witness(
         outcome=outcome, repo=repo_name,
         binding=repo_name, identity=identity, manifest_state=state,
         manifest_entry=mapping.get(repo_name) if repo_name is not None else None,
         candidates=cand, others=others,
+        truncated=tuple(r for r, _n in truncated) if searched else (),
+        searched=searched,
     )
 
 
@@ -770,6 +853,7 @@ def resolve(ref, repo_name, hdir):
     re-check this answer later comes back attached to it — see `Resolution.witness`.
     """
     state, mapping = manifest_repos(hdir)
+    scan_truncated = None   # set by the two SEARCHING branches, before their probes
 
     if repo_name is not None:
         cand = ()          # a binding did no search, so there is no uniqueness to witness
@@ -781,7 +865,7 @@ def resolve(ref, repo_name, hdir):
             # precisely the guess I1 exists to forbid. Preserve the uncertainty instead.
             return Resolution(
                 UNREADABLE, repo=repo_name, binding=repo_name, manifest_state=state,
-                witness=_capture(UNREADABLE, repo_name, None, state, mapping, cand),
+                witness=_capture(UNREADABLE, repo_name, None, state, mapping, cand, hdir),
                 detail="the umbrella manifest is configured but could not be read, so "
                        "there is no authority for where %r is — and a search would be a "
                        "guess" % repo_name,
@@ -790,7 +874,7 @@ def resolve(ref, repo_name, hdir):
             if repo_name not in mapping:
                 return Resolution(
                     UNDECLARED, repo=repo_name, binding=repo_name, manifest_state=state,
-                    witness=_capture(UNDECLARED, repo_name, None, state, mapping, cand),
+                    witness=_capture(UNDECLARED, repo_name, None, state, mapping, cand, hdir),
                     detail="%s is not declared in the umbrella manifest" % repo_name,
                 )
             lexical = mapping[repo_name]
@@ -801,18 +885,36 @@ def resolve(ref, repo_name, hdir):
                     identity=Identity(lexical) if lexical else None,
                     witness=_capture(UNLOCATABLE, repo_name,
                                      Identity(lexical) if lexical else None,
-                                     state, mapping, cand),
+                                     state, mapping, cand, hdir),
                     detail="%s is declared but cannot be read from this checkout"
                            % repo_name,
                 )
             dirs = [lexical]
         else:
+            # A cut-short neighbour set can hide a second repository with the same basename
+            # and turn an ambiguous binding into a confident one. Refuse to search it; a
+            # manifest-located binding (above) is exempt from the cap by design.
+            scan_truncated = truncated_roots(hdir)   # the snapshot this search is made with
+            truncated = scan_truncated
+            if truncated:
+                return Resolution(
+                    UNLOCATABLE, repo=repo_name, binding=repo_name, manifest_state=state,
+                    witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand, hdir,
+                                     truncated=scan_truncated),
+                    detail="the search for %r near %s was truncated — %s — so the binding "
+                           "cannot be called unique; declare the repository in an umbrella "
+                           "manifest"
+                           % (repo_name, hdir,
+                              "; ".join("%s has %d entries (cap %d, HARNESS_RESOLVE_MAX_SIBLINGS)"
+                                        % (r, n, max_siblings()) for r, n in truncated)),
+                )
             dirs = [c for c in candidates(hdir) if os.path.basename(c) == repo_name]
             if not dirs:
                 return Resolution(
                     UNLOCATABLE, repo=repo_name, binding=repo_name,
                     manifest_state=state,
-                    witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand),
+                    witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand, hdir,
+                             truncated=scan_truncated),
                     detail="no repository named %r is visible near %s" % (repo_name, hdir),
                 )
             # A BINDING names a repository; with no manifest to say WHERE that is, the name is
@@ -833,7 +935,8 @@ def resolve(ref, repo_name, hdir):
                 if len(_distinct) > 1:
                     return Resolution(
                         AMBIGUOUS, repo=repo_name, binding=repo_name, manifest_state=state,
-                        witness=_capture(AMBIGUOUS, repo_name, None, state, mapping, cand),
+                        witness=_capture(AMBIGUOUS, repo_name, None, state, mapping, cand, hdir,
+                             truncated=scan_truncated),
                         detail="%r names %d different repositories near %s (%s) and no "
                                "manifest says which one is meant"
                                % (repo_name, len(_distinct), hdir,
@@ -841,8 +944,27 @@ def resolve(ref, repo_name, hdir):
                     )
                 dirs = _distinct
     else:
+        scan_truncated = truncated_roots(hdir)       # the snapshot this search is made with
         cand = tuple(candidates(hdir, pairs=True))
         dirs = [lex for lex, _real in cand]
+        truncated = scan_truncated
+        if truncated:
+            # An UNBOUND answer is only ever certain because every neighbour was searched.
+            # A neighbour set that was cut short cannot make it certain, so do not search
+            # the rest at all: the outcome is UNKNOWN whatever the probed few would say.
+            return Resolution(
+                UNKNOWN, repo=None, binding=None, manifest_state=state,
+                candidates=cand,
+                witness=_capture(UNKNOWN, None, None, state, mapping, cand, hdir,
+                             truncated=scan_truncated),
+                detail="the search for %s near %s was truncated — %s — so no unbound "
+                       "answer can be called unique; bind the evidence as <repo>=%s or "
+                       "declare the repository in an umbrella manifest"
+                       % (ref, hdir,
+                          "; ".join("%s has %d entries (cap %d, HARNESS_RESOLVE_MAX_SIBLINGS)"
+                                    % (r, n, max_siblings()) for r, n in truncated),
+                          ref),
+            )
 
     hits = [d for d in dirs if resolve_commit(d, ref)]
     if not hits:
@@ -851,7 +973,7 @@ def resolve(ref, repo_name, hdir):
             candidates=cand,
             witness=_capture(UNKNOWN, repo_name,
                              Identity(dirs[0]) if (repo_name is not None and dirs) else None,
-                             state, mapping, cand),
+                             state, mapping, cand, hdir, truncated=scan_truncated),
             identity=Identity(dirs[0]) if (repo_name is not None and dirs) else None,
             detail="%s does not name a commit in %s"
                    % (ref, repo_name or ("any repository near %s" % hdir)),
@@ -865,7 +987,8 @@ def resolve(ref, repo_name, hdir):
         if len(distinct) > 1:
             return Resolution(
                 AMBIGUOUS, manifest_state=state, candidates=cand,
-                witness=_capture(AMBIGUOUS, None, None, state, mapping, cand),
+                witness=_capture(AMBIGUOUS, None, None, state, mapping, cand, hdir,
+                             truncated=scan_truncated),
                 detail="%s resolves in %d different repositories (%s)"
                        % (ref, len(distinct),
                           ", ".join(os.path.basename(d) for d in distinct)),
@@ -885,7 +1008,7 @@ def resolve(ref, repo_name, hdir):
         base=base, base_evidence=evidence, has_origin=has_origin,
         base_tip=advertised, commit=resolve_commit(chosen, ref),
         witness=_capture(RESOLVED, repo_name, Identity(chosen), state, mapping, cand,
-                         chosen=chosen),
+                         hdir, chosen=chosen, truncated=scan_truncated),
     )
 
 

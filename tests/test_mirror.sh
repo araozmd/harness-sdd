@@ -13,6 +13,7 @@ INSTALLER="$ROOT/harness-install.sh"
 TOOL="$ROOT/tools/sync-board.mjs"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harnessmirror)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 # Sandbox Codex's GLOBAL prompts dir (§5d) so ALL-default installs below never touch
 # the developer's real ~/.codex. (See test_install.sh for the same guard.)
 export CODEX_HOME="$T/codex-home"

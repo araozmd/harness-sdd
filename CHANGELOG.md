@@ -22,6 +22,44 @@ All notable changes to the harness body are recorded here. Versions follow
 - Upgrade note: in-flight features with layered `.tasks.md` files are unaffected beyond the
   advisory flag; re-spec them to pair form when convenient.
 
+## [0.97.4] — 2026-10-25
+
+### Fixed — the suite runner can no longer take the machine down (2026-10-25 incident)
+- `tools/run-tests.sh`: default `--jobs` is 4 (was 8) and any higher request is clamped to
+  `HARNESS_TEST_JOBS_MAX` (default 4) with a warning; one run per machine — a second run
+  while another holds `$TMPDIR/harness-run-tests.lock` exits 5 naming the holder pid and
+  does not wait or retry; the lock is a pid file claimed with `ln` and reclaimed (dead pid)
+  with an atomic rename, released only by its owner; a signal during the run releases the lock and exits non-zero
+  instead of resuming. Two concurrent runs at
+  16+8 jobs in sibling worktrees had pushed a 10-core laptop to load 100.
+- Every suite and `tests/lib` helper that creates a temp dir now traps `HUP INT TERM`
+  (exiting into its `EXIT` cleanup), so a killed run no longer leaks its `mktemp` dirs
+  (~500 were found under `$TMPDIR`, 1 GB, some a week old). `tests/test_board_lock.sh`
+  gains the trap it never had.
+- `tools/repo-resolve.py`: the candidate scan is capped. `candidates()` listed the harness
+  dir's parent and realpath-probed every child; with a fixture (or an install) directly under
+  `$TMPDIR` — 123,268 entries on the incident machine — one `set-status … done --evidence`
+  spent minutes of pure Python, then did it again inside the board lock in
+  `Witness.still_holds()`; that is the "held the flock for 25 minutes" report, and the
+  31-minute `test_board_lock.sh`. A root with more than `HARNESS_RESOLVE_MAX_SIBLINGS`
+  (default 512) entries contributes no children, and an unbound resolution over a truncated
+  search is `unknown` (recorded `unchecked`, remedy named) rather than a uniqueness claim
+  nobody searched for. A manifest-free bound search is guarded too
+  (`unlocatable`, recorded `unchecked`); a manifest-declared binding is exempt. The witness records which scan roots were truncated and `still_holds()` refuses when that set changes — only for resolutions that searched siblings; manifest-declared bindings keep their exemption; the witness records the snapshot the search itself was made with (taken before any git probe), never a resample taken at capture time. `test_board_lock.sh` alone: 5m34s → seconds for that case.
+- `tools/tasks-lock.py`: the shared validator is warmed before the lock is taken. Its first
+  `validate()` call imports `jsonschema` (which compiles a lark grammar, ~3 s here, more under
+  load) and that first call sat inside the critical section, so every writer held the board
+  lock for the import while siblings burned their `--timeout` (R12src writer B timing out at
+  10 s under four concurrent suites). The hold is now the read-mutate-validate-write alone.
+- `tests/test_board_lock.sh` R5 and `tests/test_landed_evidence.sh` R17/R22/R23 no longer
+  encode the pre-lock phase as a fixed sleep: contention controls hold the lock until the
+  suite kills the holder, the R5 bound is relative to an uncontended baseline run, and the
+  plan-then-retarget races use a 14 s hold, a 7 s retarget delay and a 30 s waiter timeout.
+  Each had passed only while the writer's own setup was faster than the hold.
+- New `tests/test_suite_hygiene.sh` keeps the runner/trap properties true structurally;
+  `tests/test_repo_resolver.sh` gains the paired cap case (C9).
+- `agents/reviewer.md`: the example summary line reads `--jobs 4`.
+
 ## [0.97.3] — 2026-10-20
 
 ### Changed — docs sweep for 0.96.0-0.97.2, and the config seed comment (E99-F180)

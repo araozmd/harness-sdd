@@ -21,6 +21,7 @@ SELF="$SRC/tests/test_pr_loop.sh"
 W="$SRC/tools/wait-for-codex.sh"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-prl)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 
 # Suite-wide CODEX_HOME sandbox (belt) — install_at() also sets a per-target one (braces).
 export CODEX_HOME="$T/codex-home"

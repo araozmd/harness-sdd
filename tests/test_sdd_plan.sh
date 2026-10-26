@@ -115,6 +115,7 @@ grep -qi 'no reuse\|never reuse' "$ROLE"            || fail "R11: role does not 
 # mirrors init.sh). NEVER mutates the live state/tasks.json.
 TMPSTORE="$(mktemp)"
 trap 'rm -f "$TMPSTORE"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 cat > "$TMPSTORE" <<'JSON'
 {"project":"fixture","epics":[{"id":"E99","title":"Synthetic draft epic","status":"draft","features":[]}]}
 JSON

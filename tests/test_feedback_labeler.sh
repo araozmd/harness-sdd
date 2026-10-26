@@ -24,6 +24,7 @@ WF="$SRC/.github/workflows/harness-feedback-labeler.yml"
 
 T="$(mktemp -d 2>/dev/null || mktemp -d -t feedback-labeler)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 
 STUBDIR="$T/bin"
 GLOG="$T/gh.log"
