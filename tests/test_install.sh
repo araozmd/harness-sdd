@@ -601,6 +601,21 @@ test_e99_throughput_helpers_installed_contract() {
   fi
 }
 
+test_tasks_pair_check_installed_contract() {
+  [ -x "$T/.harness/tools/tasks-pair-check.py" ] ||
+    fail "E36-F01: installed tasks-pair-check.py missing or not executable"
+  cmp -s "$SRC/tools/tasks-pair-check.py" "$T/.harness/tools/tasks-pair-check.py" ||
+    fail "E36-F01: installed tasks-pair-check.py differs from source"
+  grep -qF 'chmod +x "$H/tools/tasks-pair-check.py"' "$SRC/harness-install.sh" ||
+    fail "E36-F01: installer lacks explicit tasks-pair-check executable wiring"
+  grep -qF 'tools/tasks-pair-check.py' "$T/.harness/agents/reviewer.md" ||
+    fail "E36-F01: installed reviewer does not name tasks-pair-check"
+  grep -qF '**T1a**' "$T/.harness/specs/_templates/feature.tasks.md" ||
+    fail "E36-F01: installed tasks template is not pair form"
+  ! grep -qF 'Write tests per' "$T/.harness/specs/_templates/feature.tasks.md" ||
+    fail "E36-F01: installed tasks template still has the layered write-tests task"
+}
+
 test_dependency_diagnostics_installed_contract() {
   [ -x "$T/.harness/tools/task-diagnostics.py" ] ||
     fail "E16-F01: installed task-diagnostics.py missing or not executable"
@@ -732,6 +747,7 @@ sh "$SRC/harness-install.sh" "$T" >/dev/null || fail "installer exited non-zero"
 test_fix_worktree_helper_installed_executable
 test_sweep_scratch_helper_installed_executable
 test_dependency_diagnostics_installed_contract
+test_tasks_pair_check_installed_contract
 test_next_task_installed_contract
 test_rationale_docs_installed_contract
 test_e99_throughput_helpers_installed_contract

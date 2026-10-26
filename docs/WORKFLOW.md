@@ -854,7 +854,7 @@ So:
    Inception brief); the Architect reads it first and writes the 4 files from it →
    `spec-ready`. **Pause.**
 4. Human reads specs, approves → `in-progress`.
-5. Builder implements `tasks.md`, writes tests from `tests.md`, self-checks → `in-review`.
+5. Builder works `tasks.md` as red/green pairs (failing test, then minimal code), commit per GREEN, self-checks → `in-review`.
 6. Reviewer runs tests + Playwright, verifies every R-id. On **reject** it writes
    file-based feedback to `progress/<run>/review.md` → `in-progress` → Builder
    addresses → re-review; this build↔review loop repeats until green. On **approve**

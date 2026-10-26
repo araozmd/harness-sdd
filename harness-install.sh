@@ -4141,6 +4141,7 @@ install_one() {
   chmod +x "$H/tools/opencode-model-helper.sh" 2>/dev/null || true   # E22-F01 OpenCode model pin helper
   chmod +x "$H/tools/harness-report.sh" 2>/dev/null || true   # E32-F02 allow-listed harness-feedback reporter
   chmod +x "$H/tools/sweep-scratch.sh" 2>/dev/null || true   # E34-F01 automated scratch-dir sweep
+  chmod +x "$H/tools/tasks-pair-check.py" 2>/dev/null || true   # E36-F01 Reviewer task-pair shape lint
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"
