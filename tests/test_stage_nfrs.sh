@@ -141,4 +141,38 @@ R11_spec_format_grammar_section() {
 }
 R11_spec_format_grammar_section
 
+# span <file> <start-heading> <end-heading> <out> — the lines from the line STARTING with
+# <start-heading> up to the line starting with <end-heading>, by line number (fence-proof).
+# Fails the row if either heading is missing or out of order.
+span() {
+  _sa="$(lineno "$1" "$2")"; _sb="$(lineno "$1" "$3")"
+  [ "$_sa" -gt 0 ] && [ "$_sb" -gt "$_sa" ] || return 1
+  sed -n "${_sa},${_sb}p" "$1" > "$4"
+}
+
+# R7 — the Architect reads the stage and defers bolt-ons by writing a deferred ADR.
+R7_architect_stage_section() {
+  _r="$I/agents/architect.md"
+  [ -f "$_r" ] || fail "R7: installed agents/architect.md missing"
+  grep -qF '## Stage and NFRs (ADR-0009)' "$_r" || fail "R7: agents/architect.md has no '## Stage and NFRs (ADR-0009)' section"
+  _u="$(lineno "$_r" '### Umbrella / shared-contract specs')"; _x="$(lineno "$_r" '## Stage and NFRs (ADR-0009)')"
+  [ "$_u" -gt 0 ] && [ "$_x" -gt "$_u" ] \
+    || fail "R7: the Stage section is not after '### Umbrella / shared-contract specs' (umbrella=$_u stage=$_x)"
+  span "$_r" '## Stage and NFRs (ADR-0009)' '## Principles' "$T/r7.sec" \
+    || fail "R7: the Stage section does not sit directly before '## Principles'"
+  for _k in "grep '^stage:'" 'specs/product.md' 'discovery' 'pilot' '- **Status:** deferred' '- **Trigger:**' \
+            '## Deferred' 'never deferred at any stage' 'tenant isolation' 'auth boundary' \
+            'secrets out of the repo' 'validation at the system edge' 'Deferred: none — stage is production'; do
+    grep -qF -- "$_k" "$T/r7.sec" || fail "R7: the Architect's Stage section does not state '$_k'"
+  done
+  _f="$(fold "$T/r7.sec")"
+  printf '%s\n' "$_f" | grep -qiE 'absent[^.]{0,60}production' || fail "R7: the Stage section does not say absent means production"
+  printf '%s\n' "$_f" | grep -qiE 'bolt-on[^.]{0,80}without[^.]{0,40}R-id' || fail "R7: the Stage section does not say never add a bolt-on without an R-id"
+  printf '%s\n' "$_f" | grep -qiE 'not an ADR delta' || fail "R7: the Stage section does not say a deferred ADR is not an ADR delta"
+  printf '%s\n' "$_f" | grep -qiE 'one ADR kind' || fail "R7: the Stage section does not carve out the deferred ADR as the one ADR kind the Architect may author"
+  grep -qF 'do **not** author an ADR delta' "$_r" || fail "R7: the existing 'do **not** author an ADR delta' sentence was lost"
+  pass "Architect Stage section: read stage, absent=production, deferred ADR per excluded bolt-on, no bolt-on without an R-id, sticky never deferred, deferred-ADR carve-out (R7) [R7_architect_stage_section]"
+}
+R7_architect_stage_section
+
 echo "All stage/NFR tests passed."

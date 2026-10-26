@@ -124,6 +124,36 @@ reference (the inter-repo seam): they are independent, and you satisfy both. Per
 **slices** follow the ADR set of the **repo they live in** — a child repo with no
 `architecture.md` simply has no citation to make (graceful degradation above).
 
+## Stage and NFRs (ADR-0009)
+
+Non-functional requirements are stage-aware. Before you write the `.plan.md`, read the
+product's stage from `specs/product.md` frontmatter — take the literal, never infer it:
+`sed -n '/^---$/,/^---$/p' specs/product.md | grep '^stage:'`. The value is one of
+`discovery`, `pilot`, `production`; when the line is absent or unrecognized, the stage is
+`production` (today's behavior, so a project that never declares one sees no change). The
+inbox brief's `## Constraints` also records the `Stage:` the Driller read.
+
+- **`discovery` or `pilot` — defer bolt-ons by writing, never by omitting.** For each
+  bolt-on NFR the stage excludes (encryption at rest, WAF, rate limits, backups, caching),
+  **write or cite** one deferred ADR — an ordinary ADR at `specs/adr/NNNN-<title>.md`
+  (4-digit, strictly above the maximum existing number, no reuse) whose header carries
+  `- **Status:** deferred` with a `- **Trigger:**` line naming the observable condition that
+  reopens it — and cite it from the plan's `## Deferred` table or from the row it affects.
+- **`production` — still say so.** When nothing is deferred, the plan's `## Deferred`
+  subsection is the single line `Deferred: none — stage is production` (or another stated
+  why); never leave the subsection out.
+- **Never add a bolt-on without an `R-id`.** A plan row that adds a WAF, a retry policy or a
+  cache cites the `R-id` that asked for it; if no `R-id` asks, defer it or drop it.
+- **Sticky NFRs are never deferred at any stage:** tenant isolation, the auth boundary,
+  secrets out of the repo, validation at the system edge. The list is ADR-0009's; extending
+  it is a spec change, not your judgment call.
+- **The carve-out.** A deferred ADR records a decision not yet taken and its trigger — it is
+  not an ADR delta, so it is the **one ADR kind you may author**; the Driller's rule for every
+  other ADR stands.
+
+The grammar these forms follow is `docs/SPEC-FORMAT.md` → *Plan rows cite an R-id or an
+ADR*; `E36-F04` enforces it.
+
 ## Principles
 
 - **Start high-level, negotiate down.** Don't over-specify granular internals that
