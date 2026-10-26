@@ -114,4 +114,31 @@ R6_plan_template_deferred() {
 }
 R6_plan_template_deferred
 
+# R11 — SPEC-FORMAT states the citation grammar E36-F04 will lint. The section is bounded
+# by LINE NUMBERS (its own heading .. the known next heading), not by a `^## ` slicer: its
+# fenced `## Deferred` example would truncate a fence-blind slicer.
+R11_spec_format_grammar_section() {
+  _s_f="$I/docs/SPEC-FORMAT.md"
+  [ -f "$_s_f" ] || fail "R11: installed docs/SPEC-FORMAT.md missing"
+  _tk="$(lineno "$_s_f" '## Tasks — red/green pairs per requirement')"
+  _s="$(lineno "$_s_f" '## Plan rows cite an R-id or an ADR')"
+  _e="$(lineno "$_s_f" '## Architecture alignment')"
+  [ "$_s" -gt 0 ] || fail "R11: docs/SPEC-FORMAT.md has no '## Plan rows cite an R-id or an ADR' section"
+  [ "$_tk" -gt 0 ] && [ "$_s" -gt "$_tk" ] && [ "$_e" -gt "$_s" ] \
+    || fail "R11: the grammar section is not after '## Tasks — red/green pairs per requirement' and before '## Architecture alignment' (tasks=$_tk section=$_s next=$_e)"
+  sed -n "${_s},${_e}p" "$_s_f" > "$T/r11.sec"
+  for _k in '^stage: (discovery|pilot|production)$' '- **Status:** deferred' '- **Trigger:**' \
+            'R[0-9]+' 'ADR-[0-9]{4}' '## Data model' '## API / interface' '## Files to change' \
+            '## Deferred' '| Bolt-on | Deferred by | Trigger |' 'Deferred: none — <why>' 'E36-F04'; do
+    grep -qF -- "$_k" "$T/r11.sec" || fail "R11: the grammar section does not state '$_k'"
+  done
+  fold "$T/r11.sec" | grep -qE 'E36-F04[^.]{0,80}lint' \
+    || fail "R11: the grammar section does not name E36-F04 as the lint that enforces it"
+  # The `## Deferred` example heading sits INSIDE a fenced block (``` toggles).
+  awk 'index($0,"```")==1{fz=!fz; next} index($0,"## Deferred")==1 && fz {ok=1} END{exit !ok}' "$T/r11.sec" \
+    || fail "R11: the grammar section's '## Deferred' example is not inside a fenced code block"
+  pass "SPEC-FORMAT carries the citation grammar section (stage regex, deferred header, row rule, ## Deferred forms, E36-F04) (R11) [R11_spec_format_grammar_section]"
+}
+R11_spec_format_grammar_section
+
 echo "All stage/NFR tests passed."
