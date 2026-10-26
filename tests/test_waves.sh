@@ -225,6 +225,18 @@ test_wave_assignment() {
     fail "R3 max: wave0 is $(json_field "$WAVE0" <"$TMP/w.out"), want E1-F9,E1-F12 (ADR-0001 order, not string order)"
   [ "$(json_field "$WAVES_SHAPE" <"$TMP/w.out")" = '1:E1-F1|2:E1-F2|3:E1-F3,E1-F4' ] ||
     fail "R3 max: waves are $(json_field "$WAVES_SHAPE" <"$TMP/w.out"), want a feature's wave = 1 + MAX of its dependencies"
+  # Waves ascend NUMERICALLY even when lower ids sit in higher waves: an 11-deep chain
+  # whose ids run against it (E1-F1 depends on E1-F2 ... E1-F10 on E1-F11) inserts its
+  # waves 11, 10, ..., 1 and string-sorts as 1, 10, 11, 2, ...
+  _chain=''
+  for _i in 1 2 3 4 5 6 7 8 9 10; do
+    _chain="$_chain$(feat "E1-F$_i" pending "[\"E1-F$((_i + 1))\"]"),"
+  done
+  board1 "${_chain}$(feat E1-F11 pending)"
+  run_tool --waves --json >"$TMP/w.out" || fail "R3 deep: --waves --json failed"
+  assert_waves_envelope deep "$TMP/w.out"
+  [ "$(json_field "$WAVES_SHAPE" <"$TMP/w.out")" = '1:E1-F11|2:E1-F10|3:E1-F9|4:E1-F8|5:E1-F7|6:E1-F6|7:E1-F5|8:E1-F4|9:E1-F3|10:E1-F2|11:E1-F1' ] ||
+    fail "R3 deep: waves are $(json_field "$WAVES_SHAPE" <"$TMP/w.out"), want ascending numeric wave order"
   # Error envelopes keep the seven-key shape: mode board when parseArgs threw, mode waves
   # for an input-error raised after parsing.
   run_tool --waves --wat >"$TMP/e.out" 2>/dev/null || :
@@ -357,6 +369,16 @@ ROWS
     [ "$(json_field 'x["outcome"]' <"$TMP/t.out")" = selected ] || fail "R5 [$id]: runnable in waves but not selected in target mode"
     [ "$(record_of "$id" 'r["blocked"]' <"$TMP/r.out")" = '[]' ] || fail "R5 [$id]: runnable record has non-empty blocked"
   done
+  # require_spec_approval: false — the same spec-ready non-autonomous feature routes to the
+  # builder with no human-gate record, exactly as the selector does (both reads of the
+  # config, featureRoute's and featureBlockers', are the view's).
+  write_config false
+  run_tool --waves --json >"$TMP/r.out" || fail "R5: --waves --json (approval false) failed"
+  [ "$(record_of E1-F4 'str(r["route"]) + " " + str(r["runnable"]) + " " + str(r["blocked"])' <"$TMP/r.out")" = 'builder True []' ] ||
+    fail "R5: under require_spec_approval: false, E1-F4 is $(record_of E1-F4 'str(r["route"]) + " " + str(r["runnable"]) + " " + str(r["blocked"])' <"$TMP/r.out"), want builder True []"
+  run_tool --feature E1-F4 >"$TMP/t.out" || fail "R5: target mode E1-F4 (approval false) failed"
+  [ "$(json_field 'x["outcome"]' <"$TMP/t.out")" = selected ] || fail "R5: selector disagrees under approval false"
+  write_config true
   pass "R5 feature_records: exact key set; route/autonomous/owner/runnable; blocked == selector records"
 }
 
@@ -436,6 +458,10 @@ test_critical_path() {
   # Longer beats a smaller root.
   board1 "$(feat E1-F7 pending '["E1-F6"]')" "$(feat E1-F6 pending '["E1-F5"]')" "$(feat E1-F5 pending)" "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F1 pending)"
   crit_is longer-later-root 'E1-F5,E1-F6,E1-F7'
+  # A node whose dependents' chains differ in length takes the LONGER tail even though the
+  # shorter one has the smaller id: F1 -> F2 (leaf) and F1 -> F3 -> F4.
+  board1 "$(feat E1-F4 pending '["E1-F3"]')" "$(feat E1-F3 pending '["E1-F1"]')" "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F1 pending)"
+  crit_is longer-tail 'E1-F1,E1-F3,E1-F4'
   # Equal length, tie decided at position 0.
   board1 "$(feat E1-F4 pending '["E1-F2"]')" "$(feat E1-F3 pending '["E1-F1"]')" "$(feat E1-F2 pending)" "$(feat E1-F1 pending)"
   crit_is tie-position-0 'E1-F1,E1-F3'
@@ -519,6 +545,15 @@ $(diff "$TMP/h.want" "$TMP/h.out" || :)"
   run_tool --waves >"$TMP/h.out" || fail "R8: two-blocker text failed"
   [ "$(row_fields E1-F2 "$TMP/h.out")" = 'E1-F2 pending architect - [parked] hold [route when unparked: architect] [unmet-dependency] blocking dependencies: E1-F1=pending' ] ||
     fail "R8: two-blocker row is '$(row_fields E1-F2 "$TMP/h.out")'"
+  # Under --epic the listed waves keep board-wide numbers and their COUNT differs from the
+  # critical path's length: E2 lists waves 1, 3, 4 while its path is E2-F2 -> E2-F3.
+  boardN "$(epic_json E2 "$(feat E2-F3 pending '["E2-F2"]')" "$(feat E2-F2 pending '["E1-F1"]')" "$(feat E2-F1 pending)")" \
+    "$(epic_json E1 "$(feat E1-F1 pending '["E2-F1"]')")"
+  run_tool --waves --epic E2 >"$TMP/h.out" || fail "R8: text --waves --epic E2 failed"
+  [ "$(grep '^Wave ' "$TMP/h.out" | cut -d' ' -f2 | tr '\n' ' ')" = '0 1 3 4 ' ] ||
+    fail "R8: --epic E2 wave headings are '$(grep '^Wave ' "$TMP/h.out" | cut -d' ' -f2 | tr '\n' ' ')', want board-wide 0 1 3 4"
+  [ "$(tail -n 1 "$TMP/h.out")" = 'Critical path (2): E2-F2 -> E2-F3' ] ||
+    fail "R8: --epic E2 last line is '$(tail -n 1 "$TMP/h.out")'"
   # Edge lines: all done; one pending feature.
   board1 "$(feat E1-F2 done)" "$(feat E1-F1 done)"
   run_tool --waves >"$TMP/h.out" || fail "R8: all-done text failed"
