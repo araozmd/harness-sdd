@@ -258,4 +258,18 @@ R10_workflow_stage_section() {
 }
 R10_workflow_stage_section
 
+# R12 — VERSION and the newest CHANGELOG heading agree (read at runtime, no frozen literal),
+# and some release section's body names E36-F03 and the stage (a historical anchor that stays
+# green when a later release is prepended above it).
+R12_version_changelog_paired() {
+  _v="$(cat "$ROOT/VERSION")"
+  [ -n "$_v" ] || fail "R12: VERSION is empty"
+  _h="$(grep -m1 '^## \[' "$ROOT/CHANGELOG.md" || true)"
+  case "$_h" in "## [$_v]"*) ;; *) fail "R12: the newest CHANGELOG heading '$_h' does not match VERSION $_v" ;; esac
+  awk '/^## \[/{if (e && s) found=1; e=0; s=0; next} /E36-F03/{e=1} /stage/{s=1} END{if (e && s) found=1; exit !found}' "$ROOT/CHANGELOG.md" \
+    || fail "R12: no CHANGELOG release section names both E36-F03 and stage"
+  pass "VERSION matches the newest CHANGELOG heading and a release section names E36-F03 and stage (R12) [R12_version_changelog_paired]"
+}
+R12_version_changelog_paired
+
 echo "All stage/NFR tests passed."
