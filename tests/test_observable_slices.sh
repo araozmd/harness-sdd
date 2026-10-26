@@ -55,3 +55,13 @@ done
 sed '/^## Observable behavior/,/^## Scope/{/^## Scope/!d;}' "$T/brief.md" > "$T/brief-no.md"
 if r4_order "$T/brief-no.md"; then fail "R4: negative control — placement check passed with the section removed"; fi
 pass "R4_template_section"
+
+# ── R5: Inception lists Observable behavior between Success outcome and Scope ───
+a="$(ln "$INCEP" '- \*\*Success outcome\*\*')"; b="$(ln "$INCEP" '- \*\*Observable behavior\*\*')"
+c="$(ln "$INCEP" '- \*\*Scope / boundaries\*\*')"
+[ -n "$a" ] && [ -n "$b" ] && [ -n "$c" ] && [ "$a" -lt "$b" ] && [ "$b" -lt "$c" ] \
+  || fail "R5: $INCEP lacks the '**Observable behavior**' bullet between Success outcome and Scope / boundaries"
+bullet="$(sed -n "${b}p" "$INCEP")"
+printf '%s' "$bullet" | grep -qiE 'surface.{0,60}HTTP.{0,60}exit code' || fail "R5: bullet does not name the surface list"
+printf '%s' "$bullet" | grep -qF 'what a user or client sees' || fail "R5: bullet does not say what a user or client sees"
+pass "R5_inception_brief_sections"
