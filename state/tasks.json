@@ -476,7 +476,7 @@
         {
           "id": "E36-F02",
           "title": "Driller observable-slice rule and walking skeleton; doc-critic checks both",
-          "status": "spec-ready",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
