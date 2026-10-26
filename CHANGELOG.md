@@ -11,7 +11,8 @@ All notable changes to the harness body are recorded here. Versions follow
   `HARNESS_TEST_JOBS_MAX` (default 4) with a warning; one run per machine — a second run
   while another holds `$TMPDIR/harness-run-tests.lock` exits 5 naming the holder pid and
   does not wait or retry; the lock is a pid file claimed with `ln` and reclaimed (dead pid)
-  with an atomic rename, released only by its owner. Two concurrent runs at
+  with an atomic rename, released only by its owner; a signal during the run releases the lock and exits non-zero
+  instead of resuming. Two concurrent runs at
   16+8 jobs in sibling worktrees had pushed a 10-core laptop to load 100.
 - Every suite and `tests/lib` helper that creates a temp dir now traps `HUP INT TERM`
   (exiting into its `EXIT` cleanup), so a killed run no longer leaks its `mktemp` dirs

@@ -101,6 +101,7 @@ fi
 # A NESTED run — a suite exercising the runner itself (test_grep_probe, test_suite_hygiene)
 # — is already inside the outer run's cap, so it skips the claim: the outer runner exports
 # the marker to every suite it starts. A suite that wants to test the lock unsets it.
+# A signal (HUP/INT/TERM) releases the lock and exits non-zero; it never resumes the run.
 lockfile="${TMPDIR:-/tmp}"; lockfile="${lockfile%/}/harness-run-tests.lock"
 release_run_lock() {
   [ -n "$lockfile" ] || return 0
@@ -130,10 +131,11 @@ while [ "${HARNESS_RUN_TESTS_NESTED:-0}" != 1 ]; do
   fi
 done
 if [ "${HARNESS_RUN_TESTS_NESTED:-0}" != 1 ]; then
-  trap 'release_run_lock' EXIT HUP INT TERM
+  trap 'release_run_lock' EXIT
 else
   lockfile=""                              # nested: nothing of ours to release
 fi
+trap 'exit 1' HUP INT TERM                 # a signal exits (into the EXIT cleanup); it never resumes the run
 export HARNESS_RUN_TESTS_NESTED=1          # every suite this run starts is nested
 
 # ── grep-flavour probe (E99-F12) — WARN ONLY, once, before any suite runs ─────────────
@@ -426,7 +428,7 @@ if [ -n "$preflight_bad" ]; then
 fi
 
 work="$(mktemp -d)" || { printf 'run-tests: mktemp failed\n' >&2; exit 4; }
-trap 'rm -rf "$work"; release_run_lock' EXIT HUP INT TERM
+trap 'rm -rf "$work"; release_run_lock' EXIT
 
 # The suites shell out to the TOOLS as `sh tools/foo.sh`, which resolves through PATH — so
 # without this the tools would keep running under the host `sh` no matter what the suites

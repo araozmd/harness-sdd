@@ -75,4 +75,10 @@ env -u HARNESS_RUN_TESTS_NESTED TMPDIR="$T/tmp" sh "$RUNNER" --jobs 1 "$T/no-suc
 [ ! -e "$_lock" ] || fail "R3: the runner left its own lock behind after exiting ($_rc)"
 pass "R3 live holder ⇒ exit 5 naming the pid, no wait; stale lock reclaimed and released [machine_lock]"
 
+# ── R4: a signal exits (into the EXIT cleanup) — cleanup is never bound to a signal alone ──
+grep -qE "^[[:space:]]*trap 'exit 1' HUP INT TERM" "$RUNNER" || fail "R4: run-tests.sh has no trap 'exit 1' HUP INT TERM"
+! grep -qE "^[[:space:]]*trap '[^']*release_run_lock[^']*' [A-Z ]*(HUP|INT|TERM)" "$RUNNER" \
+  || fail "R4: run-tests.sh binds release_run_lock to a signal without exiting (the run would resume unlocked)"
+pass "R4 signals exit non-zero into the EXIT cleanup; the lock is never released while the run continues [signal_exit]"
+
 echo "ALL PASSED (test_suite_hygiene.sh)"
