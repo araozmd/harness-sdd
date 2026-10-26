@@ -2832,6 +2832,27 @@ test_product_stub_0811_refreshed() {
   cmp -s "$_pp" "$_tp2/before.md" || fail "E36-F03 R2 (preserved): an edited product.md was not left byte-identical"
   rm -rf "$_tp2"
 
+  # preserved (v0.81.1 shape) — a human-edited v0.81.1 stub (one TODO filled, no stage: line)
+  # must survive byte for byte: the prior match is the EXACT old stub, not a prefix or a
+  # "looks like the old stub" guess. Edits the OLD shape, because editing the current stub
+  # cannot see a loosened v0.81.1 arm (E36-F03 review F1; N3b, N3x).
+  _tp4="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  mkdir -p "$_tp4/t"
+  CODEX_HOME="$_tp4/ch" HOME="$_tp4/home" sh "$SRC/harness-install.sh" --agents=claude "$_tp4/t" \
+    >/dev/null 2>"$_tp4/1.err" || fail "E36-F03 R2 (preserved-0811) setup: fresh install exited non-zero: $(cat "$_tp4/1.err")"
+  _pp="$_tp4/t/.harness/specs/product.md"
+  write_product_stub_0811 "$_pp"
+  awk '$0=="TODO"&&!d{print "We build widgets.";d=1;next}{print}' "$_pp" > "$_tp4/edited.md" && cp "$_tp4/edited.md" "$_pp"
+  grep -qxF 'We build widgets.' "$_pp" || fail "E36-F03 R2 (preserved-0811) setup: the TODO edit did not apply"
+  ! grep -qE '^stage:' "$_pp" || fail "E36-F03 R2 (preserved-0811): the edited fixture carries a stage: line — fixture shape is stale"
+  cp "$_pp" "$_tp4/before.md"
+  CODEX_HOME="$_tp4/ch" HOME="$_tp4/home" sh "$SRC/harness-install.sh" --agents=claude "$_tp4/t" \
+    >"$_tp4/2.out" 2>"$_tp4/2.err" || fail "E36-F03 R2 (preserved-0811): upgrade exited non-zero: $(cat "$_tp4/2.err")"
+  _v="$(product_verdict "$_tp4/2.out" preserved-0811)"
+  case "$_v" in *'specs/product.md preserved'*) ;; *) fail "E36-F03 R2 (preserved-0811): an edited v0.81.1 product.md was not reported preserved: $_v" ;; esac
+  cmp -s "$_pp" "$_tp4/before.md" || fail "E36-F03 R2 (preserved-0811): an edited v0.81.1 product.md was not left byte-identical"
+  rm -rf "$_tp4"
+
   # pristine — the current stub, re-run, is left alone and says so.
   _tp3="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
   mkdir -p "$_tp3/t"
@@ -2839,7 +2860,7 @@ test_product_stub_0811_refreshed() {
     >/dev/null 2>"$_tp3/1.err" || fail "E36-F03 R2 (pristine) setup: fresh install exited non-zero: $(cat "$_tp3/1.err")"
   _pp="$_tp3/t/.harness/specs/product.md"
   cp "$_pp" "$_tp3/before.md"
-  # The compare branch writes three stub temp files; a private TMPDIR proves all are removed.
+  # The compare branch writes three stub temp files; a private TMPDIR proves all are removed under GNU mktemp only (BSD bare mktemp ignores TMPDIR, so on macOS this row cannot see a leak).
   mkdir -p "$_tp3/tmp"
   TMPDIR="$_tp3/tmp" CODEX_HOME="$_tp3/ch" HOME="$_tp3/home" sh "$SRC/harness-install.sh" --agents=claude "$_tp3/t" \
     >"$_tp3/2.out" 2>"$_tp3/2.err" || fail "E36-F03 R2 (pristine): re-run exited non-zero: $(cat "$_tp3/2.err")"
@@ -2850,7 +2871,7 @@ test_product_stub_0811_refreshed() {
   cmp -s "$_pp" "$_tp3/before.md" || fail "E36-F03 R2 (pristine): the pristine stub changed on re-run"
   rm -rf "$_tp3"
 
-  pass "product.md: fresh install seeds the stub; a pristine v0.81.1 stub is refreshed; an edit is preserved; the current stub is pristine — one stdout verdict each (E36-F03 R1, R2) [test_product_stub_0811_refreshed]"
+  pass "product.md: fresh install seeds the stub; a pristine v0.81.1 stub is refreshed; an edit (of the current or the v0.81.1 stub) is preserved; the current stub is pristine — one stdout verdict each (E36-F03 R1, R2) [test_product_stub_0811_refreshed]"
 }
 test_product_stub_0811_refreshed
 
