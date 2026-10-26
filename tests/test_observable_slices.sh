@@ -87,3 +87,15 @@ sec 'skeleton[^.]{0,200}no intra-epic .?depends_on' || fail "R1: section does no
 sec 'internal[^.]{0,80}merged[^.]{0,40}consum' || fail "R1: section does not merge an internal-only candidate into its consumer"
 sec 'max_requirements[^.]{0,60}size proxy' || fail "R1: section does not say max_requirements remains the size proxy"
 pass "R1_driller_rule_section"
+
+# ── R2: the recorded exemption, the cross-epic sentence, advisory / never blocks ─
+grep -qF 'Observable-slice exemption:' "$DRILLER" || fail "R2: $DRILLER lacks the 'Observable-slice exemption:' token"
+sec 'Observable-slice exemption:' || fail "R2: the token is not inside the observable-slice section"
+sec 'one line per exempted feature[^.]{0,80}Notes' || fail "R2: section does not record one line per exempted feature under Notes"
+sec 'beginning .?Observable-slice exemption:.{0,20}naming the feature id' || fail "R2: exemption line is not required to name the feature id"
+sec 'only consumer is another epic' || fail "R2: section lacks the cross-epic-consumer exemption"
+sec 'only consumer is another epic[^.]{0,200}consuming epic' || fail "R2: cross-epic sentence does not name the consuming epic"
+sec 'only consumer is another epic[^.]{0,250}surface' || fail "R2: cross-epic sentence does not name the surface where behavior becomes observable"
+sec 'advisory[^.]{0,40}never blocks' || fail "R2: section does not say the rule is advisory and never blocks"
+sec 'never[^.]{0,40}blocked[^.]{0,40}shape' || fail "R2: section does not forbid a blocked record on shape alone"
+pass "R2_driller_exemption_record"

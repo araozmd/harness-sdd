@@ -131,6 +131,18 @@ the merge would push the consumer over `max_requirements`, the size rule's split
 observable seams (a read-only surface, the one operation that commits state), not back into
 layers.
 
+**Record the exemption either way.** When you seed a feature whose outcome is nonetheless
+internal, or a fresh epic whose first feature is not end-to-end, write exactly one line per
+exempted feature under `## Notes` in the epic's `epic.md`, beginning
+`Observable-slice exemption:` and naming the feature id and why. For an epic whose only
+consumer is another epic there is no product boundary of its own, so its walking skeleton is the thinnest path the
+consuming epic can exercise, and the exemption line names that consuming epic and the surface
+where the behavior becomes observable.
+
+**This is advisory and it never blocks.** You decompose and you record; you never emit a
+`blocked` record on shape alone, and you never refuse to seed a feature because its outcome is
+internal — `blocked` stays a vocabulary about dependencies and ownership.
+
 ## Seed the feature entries (R7, D3)
 
 Read the epic's current `features` first. Then write each new feature into that epic's
