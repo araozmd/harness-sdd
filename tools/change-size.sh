@@ -12,10 +12,17 @@
 #
 # Usage:
 #   tools/change-size.sh [--base <ref>] [--format text|json] [--repo <dir>]
+#   tools/change-size.sh --print-test-re [--repo <dir>]
+#   tools/change-size.sh --print-list <key> [--repo <dir>]
 #
 #   --base    ref to diff against (default: origin/main, then main, then master)
 #   --format  text (default, human-readable) | json (one object, for a caller to parse)
 #   --repo    repository to measure (default: the current working directory)
+#   --print-test-re   print the effective test-path ERE (built-in TEST_RE + every
+#             change_size.test_paths entry) on one line and exit 0 (E36-F06). Needs no base ref.
+#   --print-list <key>  print each entry of the change_size.<key> list on its own line (nothing
+#             for an absent or empty list) and exit 0 (E36-F06). Needs no base ref. One config
+#             parser, two consumers: tools/test-drift-check.sh reads through these two modes.
 #
 # Exit codes:
 #   0  measured (ANY tier — ok, advise, or escalate). The tier is in the output.
@@ -38,19 +45,25 @@ DEF_ESCALATE_FILES=50
 
 usage() {
   printf 'usage: change-size.sh [--base <ref>] [--format text|json] [--repo <dir>]\n' >&2
+  printf '       change-size.sh --print-test-re [--repo <dir>] | --print-list <key> [--repo <dir>]\n' >&2
   exit 4
 }
 
-base=""; format="text"; repo="."
+base=""; format="text"; repo="."; print_mode=""; print_key=""; _fmt_set=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --base)   [ $# -ge 2 ] || usage; base="$2"; shift 2 ;;
-    --format) [ $# -ge 2 ] || usage; format="$2"; shift 2 ;;
+    --base)   [ $# -ge 2 ] || usage; base="$2"; _fmt_set=1; shift 2 ;;
+    --format) [ $# -ge 2 ] || usage; format="$2"; _fmt_set=1; shift 2 ;;
+    --print-test-re) print_mode="test-re"; shift ;;
+    --print-list)    [ $# -ge 2 ] || usage; print_mode="list"; print_key="$2"; shift 2 ;;
     --repo)   [ $# -ge 2 ] || usage; repo="$2";   shift 2 ;;
     -h|--help) usage ;;
     *) printf 'change-size.sh: unknown argument: %s\n' "$1" >&2; usage ;;
   esac
 done
+# The print modes are config queries, not measurements: combining them with --base/--format is
+# a usage error rather than a silently ignored flag.
+[ -z "$print_mode" ] || [ -z "$_fmt_set" ] || { printf 'change-size.sh: --print-* cannot be combined with --base/--format\n' >&2; usage; }
 case "$format" in text|json) : ;; *) printf 'change-size.sh: --format must be text or json\n' >&2; usage ;; esac
 [ -d "$repo" ] || { printf 'change-size.sh: not a directory: %s\n' "$repo" >&2; exit 4; }
 git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 \
@@ -95,6 +108,7 @@ _v="$(_cfg_change_size "$_cfg" escalate_files || true)"; escalate_files="${_v:-$
 # fallback for a clone without an origin/HEAD ref, not the primary path — a caller on a
 # non-`main` repo should get a measurement, not exit 4 and a Reviewer told to carry on
 # without measuring anything.
+if [ -z "$print_mode" ]; then
 if [ -z "$base" ]; then
   _oh="$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
   if [ -n "$_oh" ] && git -C "$repo" rev-parse --verify --quiet "$_oh" >/dev/null 2>&1; then
@@ -113,6 +127,7 @@ git -C "$repo" rev-parse --verify --quiet "$base" >/dev/null 2>&1 \
 # carry merge commits, and only the merge base measures what a reviewer will actually read.
 mb="$(git -C "$repo" merge-base HEAD "$base" 2>/dev/null || true)"
 [ -n "$mb" ] || { printf 'change-size.sh: no merge base between HEAD and %s\n' "$base" >&2; exit 4; }
+fi
 
 # ── classify ─────────────────────────────────────────────────────────────────────
 # Production = everything that is NOT a test, NOT a spec/progress doc, and NOT declared
@@ -196,6 +211,12 @@ if [ -n "$_gp" ]; then
 $_gp
 CS_GEN_PATHS
 fi
+
+# Config-query modes (E36-F06): the effective classifier / list, no base ref, no measuring.
+case "$print_mode" in
+  test-re) printf '%s\n' "$TEST_RE"; exit 0 ;;
+  list)    _extra "$print_key" || true; exit 0 ;;
+esac
 
 # Measure the WORKING TREE against the merge base, not `"$mb"...HEAD`. The default
 # in-session `agents/builder.md` has no commit step: it edits, tests, and hands the feature

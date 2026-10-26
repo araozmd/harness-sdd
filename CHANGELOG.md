@@ -4,7 +4,7 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
-## [0.99.0] — 2026-10-26
+## [0.100.0] — 2026-10-26
 
 ### Added — derived waves and critical path (E36-F05)
 - `node tools/next-task.mjs --waves [--json] [--epic E##]` prints the dependency graph as
@@ -23,6 +23,45 @@ All notable changes to the harness body are recorded here. Versions follow
 - `docs/WORKFLOW.md` gains "Running in waves and across machines": wave 1 via
   `/sdd-next <id>` per machine, `--mine`/`owner` as the alternative, and the known limitation
   that bare `/sdd-next` on identical boards picks the same feature.
+
+## [0.99.0] — 2026-10-26
+
+### Added — test-drift check (E36-F06)
+- `tools/test-drift-check.sh <base-ref> [<head-ref>] [--tasks-md <file>]`: a diff-based,
+  language-agnostic (POSIX `sh` + `git` + `awk`) check that lists, for every touched test file,
+  each removed or modified assertion line, each newly added skip/only/xfail marker, and each
+  test name present at base and absent at head. It reports and fails (exit `1`); it never
+  judges whether an edit tightened or weakened an assertion. Exit `0` covers only those three
+  kinds of finding: other changed lines in a test file, such as fixtures and expected values,
+  are not checked, and the Reviewer still reads the test diff. Exit `2` is a usage error
+  (including a malformed waiver), `3` means it could not diff. Waivers are per test, by exact
+  name, as `waive-test-drift: <test name> — <reason>` lines in the feature's `.tasks.md`.
+  Touched paths are read NUL-framed (`diff -z`, `ls-files -z`), so a test path containing a `"`
+  or a backslash is examined under its real name; the tool resolves its own directory before
+  changing to the repo root, so a relative invocation from a subdirectory works.
+  Content diffs pass `--no-textconv`, so a `.gitattributes` text-conversion driver cannot hide a
+  weakened assertion; a JS/TS title ends at the first unescaped quote, so `doesn\'t reject` and
+  `doesn\'t throw` stay two names.
+  The Reviewer's default-branch line resolves like `change-size.sh` (`origin/HEAD`, else the first
+  existing of `origin/main main origin/master master origin/trunk trunk`), and an `sdd: false`
+  brief-only item passes its inbox brief as `--tasks-md`, where its waivers live.
+  Unchanged lines inside a hunk (a configured `diff.interHunkContext` keeps them even under
+  `-U0`) advance both line counters and end the removed/added pairing, so a finding is never
+  attributed to the test above it.
+  Every git call's exit status is checked: a failed `git diff`, `ls-files` or `show` is exit `3`
+  ("could not diff", naming the call), never a clean "0 test files examined".
+- `tools/change-size.sh` gains two additive config-query modes, `--print-test-re` and
+  `--print-list <key>`, so the drift tool reuses the one test-path classifier and the one
+  `change_size:` parser instead of carrying copies. Measuring behaviour is unchanged.
+- New config key `change_size.assert_patterns` (default `[]`): extra assertion EREs added to
+  the built-ins, seeded byte-identically in `harness.config.yaml` and the `migrate_config`
+  heredoc. An existing config gets the key only on a fresh seed; absent means built-ins only.
+- `agents/reviewer.md` gains `## Test-drift check before the verdict (E36-F06)`: run the tool
+  against the default branch (and per pair commit, with the same `--tasks-md`, when E36-F01
+  pair commits exist), REJECT on
+  an unwaived finding, treat exit `2`/`3` as "the check did not run". `sh tools/run-tests.sh`
+  stays the primary command. `docs/RATIONALE.md` gains ledger row D14; `docs/WORKFLOW.md`
+  documents the check.
 
 ## [0.98.0] — 2026-10-25
 
