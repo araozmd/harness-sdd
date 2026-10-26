@@ -1220,6 +1220,19 @@ expect_rc 1 "R10e: a mid-line waiver for the real name is not a waiver"
 expect_line '^DRIFT test-removed \| .* \| test_gone \| ' "R10e: test_gone stays unwaived"
 pass "R10e_malformed"
 
+# A name that itself starts with an em dash: with no blank after the colon, the leading dash has
+# no blank before it, so it is not the separator; the split is the first SPACED em dash (W11).
+newrepo r10iw; mkdir -p "$R/tests"
+printf 'ok "x"\npass "\342\200\224 odd"\n' > "$R/tests/t.sh"
+basecommit; feature
+delline tests/t.sh 'ok "x"'; featcommit
+printf 'waive-test-drift:\342\200\224 odd \342\200\224 r\n' > "$T/tasks.md"
+run "$R" main --tasks-md "$T/tasks.md"
+expect_rc 0 "R10i name starting with an em dash"
+grep -Fxq "WAIVED assert-removed | tests/t.sh:1 | $(printf '\342\200\224') odd | r" "$T/out" \
+  || { cat "$T/out" "$T/err" >&2; fail "R10i: a name starting with an em dash splits on the first SPACED em dash"; }
+pass "R10i_name_starts_with_em_dash"
+
 r7g r10f
 printf 'waive-test-drift: R9 label — assertion moved into the helper\n' > "$T/tasks.md"
 run "$R" main --tasks-md "$T/tasks.md"
