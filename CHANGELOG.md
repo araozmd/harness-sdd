@@ -16,6 +16,9 @@ All notable changes to the harness body are recorded here. Versions follow
   are not checked, and the Reviewer still reads the test diff. Exit `2` is a usage error
   (including a malformed waiver), `3` means it could not diff. Waivers are per test, by exact
   name, as `waive-test-drift: <test name> — <reason>` lines in the feature's `.tasks.md`.
+  Touched paths are read NUL-framed (`diff -z`, `ls-files -z`), so a test path containing a `"`
+  or a backslash is examined under its real name; the tool resolves its own directory before
+  changing to the repo root, so a relative invocation from a subdirectory works.
 - `tools/change-size.sh` gains two additive config-query modes, `--print-test-re` and
   `--print-list <key>`, so the drift tool reuses the one test-path classifier and the one
   `change_size:` parser instead of carrying copies. Measuring behaviour is unchanged.

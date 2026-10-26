@@ -120,6 +120,9 @@ if [ -n "$tasks_md" ]; then
 fi
 
 # ── repository, refs, merge base (exit 3) ────────────────────────────────────────
+# Resolve this script's directory BEFORE changing to the repo root: `$0` may be relative to the
+# caller's cwd (`cd tests && sh ../tools/test-drift-check.sh main`).
+self="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)" || cant_diff "cannot resolve the tool directory from $0"
 top="$(git rev-parse --show-toplevel 2>/dev/null)" || cant_diff 'not a git repository'
 cd "$top"
 basec="$(git rev-parse --verify --quiet "$base^{commit}" 2>/dev/null)" || cant_diff "base ref does not resolve: $base"
@@ -136,7 +139,6 @@ short="$(git rev-parse --short "$mb")"
 if [ -n "$headc" ]; then range="$mb $headc"; else range="$mb"; fi
 
 # ── classifier + configured patterns, from the SIBLING change-size.sh (R2, R5) ───
-self="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 TEST_RE="$(sh "$self/change-size.sh" --print-test-re --repo "$top" 2>/dev/null)" \
   || cant_diff "cannot read the test classifier from $self/change-size.sh"
 [ -n "$TEST_RE" ] || cant_diff "empty test classifier from $self/change-size.sh"
@@ -178,19 +180,29 @@ SKIP_RE="$(awk 'NF { printf "%s%s", (n++ ? "|" : ""), $0 } END { print "" }' "$t
 # ── touched test files ───────────────────────────────────────────────────────────
 # Normalised to `<status><TAB><old><TAB><new>` (A, M, D, R, or U for untracked); only paths
 # matching the effective test ERE survive (new path; old path for a deletion).
+# `-z`: `core.quotePath=false` does NOT stop git C-quoting a tracked path that contains `"`,
+# a backslash or a tab (it governs non-ASCII bytes only), so `tests/a".test.js` would arrive as
+# `"tests/a\".test.js"` and miss the classifier. NUL framing is never encoded. NUL -> LF is safe
+# here because pathnames containing LF are a documented non-goal (Known limits).
+# --name-status -z framing: `<status> NUL <path> NUL`, or for R/C `<status> NUL <old> NUL <new> NUL`.
 # shellcheck disable=SC2086
-git -c core.quotePath=false diff --name-status -M $range 2>/dev/null \
-  | DT_RE="$TEST_RE" awk -F'\t' '
-      BEGIN { re = ENVIRON["DT_RE"] }
+git -c core.quotePath=false diff --name-status -z -M $range 2>/dev/null | tr '\000' '\n' \
+  | DT_RE="$TEST_RE" awk '
+      BEGIN { re = ENVIRON["DT_RE"]; want = 0 }
+      want == 0 {
+        s = substr($0, 1, 1)
+        if (s == "R" || s == "C") { want = 2; s = "R" } else { want = 1; if (s == "T") s = "M" }
+        np = 0; next
+      }
       {
-        s = substr($1, 1, 1)
-        if (s == "R" || s == "C") { old = $2; new = $3; s = "R" }
-        else { old = $2; new = $2; if (s == "T") s = "M" }
+        path[++np] = $0
+        if (np < want) next
+        old = path[1]; new = (want == 2) ? path[2] : path[1]; want = 0
         chk = (s == "D") ? old : new
         if (chk ~ re) printf "%s\t%s\t%s\n", s, old, new
       }' > "$tmp/files"
 if [ -z "$headc" ]; then
-  git -c core.quotePath=false ls-files --others --exclude-standard 2>/dev/null \
+  git -c core.quotePath=false ls-files -z --others --exclude-standard 2>/dev/null | tr '\000' '\n' \
     | DT_RE="$TEST_RE" awk '
         BEGIN { re = ENVIRON["DT_RE"] }
         $0 ~ re { printf "U\t%s\t%s\n", $0, $0 }' >> "$tmp/files"

@@ -418,6 +418,33 @@ expect_line '^DRIFT assert-modified \| tests/ü/a\.test\.js:3 \| keeps name \| '
 expect_line "^test-drift-check: 1 findings, 0 waived, 1 test files examined \\(base $_mb\\)\$" "R1g head-ref mode: base is the merge base"
 pass "R1g_merge_base_raw_paths_subdir"
 
+# R1h — paths git C-quotes even under core.quotePath=false (a `"` or a backslash) are read raw,
+# because the listing is NUL-framed (Codex P2 on PR #299); and a RELATIVE tool path from a
+# subdirectory resolves before the tool changes to the repo root (Codex P2 on PR #299).
+newrepo r1h
+js_app 'tests/a".test.js'
+basecommit; feature
+subst 'tests/a".test.js' '  expect(run(1)).toBe(1);' '  expect(run(1)).toBeTruthy();'; featcommit
+put 'tests/b\c.test.js' <<'EOF'
+it.only('fresh', () => {
+  run(0);
+});
+EOF
+run "$R" main
+expect_rc 1 "R1h quoted paths"; expect_ndrift 2 "R1h quoted paths"
+grep -Fq 'DRIFT assert-modified | tests/a".test.js:3 | keeps name | ' "$T/out" \
+  || { cat "$T/out" >&2; fail "R1h: a committed test path containing a double quote is examined, printed raw"; }
+grep -Fq 'DRIFT skip-added | tests/b\c.test.js:1 | fresh | ' "$T/out" \
+  || { cat "$T/out" >&2; fail "R1h: an untracked test path containing a backslash is examined, printed raw"; }
+run "$R" main feature
+expect_rc 1 "R1h head-ref mode"; expect_ndrift 1 "R1h head-ref mode"
+cp "$T/out" "$T/out.abs"
+mkdir -p "$R/tools" && cp "$TOOL" "$ROOT/tools/change-size.sh" "$R/tools/"
+( cd "$R/tests" && sh ../tools/test-drift-check.sh main feature ) > "$T/out" 2> "$T/err" && rc=0 || rc=$?
+expect_rc 1 "R1h relative tool path from a subdirectory"
+cmp -s "$T/out" "$T/out.abs" || { diff "$T/out.abs" "$T/out" >&2 || :; cat "$T/err" >&2; fail "R1h: a relative tool path from a subdirectory must print what the absolute run prints"; }
+pass "R1h_quoted_paths_and_relative_invocation"
+
 # ── R3: assertion findings ───────────────────────────────────────────────────────
 newrepo r3a; js_app tests/app.test.js; basecommit; feature
 subst tests/app.test.js '  expect(run(1)).toBe(1);' '  expect(run(1)).toBeTruthy();'; featcommit
