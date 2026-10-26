@@ -29,8 +29,9 @@ CODEX_HOME="$T/ch" HOME="$T/home" sh "$ROOT/harness-install.sh" --agents=claude 
   || fail "setup: fresh install exited non-zero: $(cat "$T/install.err")"
 I="$T/tgt/.harness"
 
-# fold <file> — the file on one line (newlines to spaces) for sentence-bounded anchors.
-fold() { tr '\n' ' ' < "$1"; }
+# fold <file> — the file on one line (newlines to spaces, runs of spaces squeezed, so a
+# wrapped indented line reads as one sentence) for sentence-bounded anchors.
+fold() { tr '\n' ' ' < "$1" | tr -s ' '; }
 
 # frontmatter_stage_production <file> — 0 iff line 1 is `---` and the bare line
 # `stage: production` sits before the block's closing `---` (the `$` anchor is the grammar:
@@ -174,5 +175,29 @@ R7_architect_stage_section() {
   pass "Architect Stage section: read stage, absent=production, deferred ADR per excluded bolt-on, no bolt-on without an R-id, sticky never deferred, deferred-ADR carve-out (R7) [R7_architect_stage_section]"
 }
 R7_architect_stage_section
+
+# R8 — the Planner reads the stage before architecture.md/ADRs and records excluded bolt-ons
+# as deferred ADRs; it never writes specs/product.md.
+R8_planner_stage_section() {
+  _r="$I/agents/planner.md"
+  [ -f "$_r" ] || fail "R8: installed agents/planner.md missing"
+  grep -qF '## Stage (ADR-0009)' "$_r" || fail "R8: agents/planner.md has no '## Stage (ADR-0009)' section"
+  _w="$(lineno "$_r" '## Write the architecture + ADRs')"; _x="$(lineno "$_r" '## Stage (ADR-0009)')"
+  [ "$_w" -gt 0 ] && [ "$_x" -gt "$_w" ] \
+    || fail "R8: the Stage section is not after '## Write the architecture + ADRs' (arch=$_w stage=$_x)"
+  span "$_r" '## Stage (ADR-0009)' '## Repo topology output' "$T/r8.sec" \
+    || fail "R8: the Stage section does not sit before '## Repo topology output'"
+  grep -qF "grep '^stage:'" "$T/r8.sec" || fail "R8: the Planner's Stage section does not give the read command"
+  _f="$(fold "$T/r8.sec")"
+  printf '%s\n' "$_f" | grep -qiE 'before[^.]{0,80}architecture' || fail "R8: the Stage section does not say the stage is read before writing architecture.md and the ADRs"
+  printf '%s\n' "$_f" | grep -qiE 'absent[^.]{0,60}production' || fail "R8: the Stage section does not say absent means production"
+  printf '%s\n' "$_f" | grep -qiE 'deferred ADR[^.]{0,80}Trigger' || fail "R8: the Stage section does not record an excluded bolt-on as a deferred ADR with a Trigger:"
+  printf '%s\n' "$_f" | grep -qiE 'not an accepted ADR[^.]{0,40}omission' || fail "R8: the Stage section does not say an excluded bolt-on is neither an accepted ADR nor an omission"
+  printf '%s\n' "$_f" | grep -qiE 'never write[^.]{0,30}specs/product' || fail "R8: the Stage section does not say the Planner never writes specs/product.md"
+  printf '%s\n' "$_f" | grep -qiE 'completion report[^.]{0,60}stage|stage[^.]{0,60}completion report' \
+    || fail "R8: the Stage section does not say to name the stage in the completion report"
+  pass "Planner Stage section: read before architecture/ADRs, absent=production, excluded bolt-on = deferred ADR with Trigger:, never writes product.md, names stage in report (R8) [R8_planner_stage_section]"
+}
+R8_planner_stage_section
 
 echo "All stage/NFR tests passed."
