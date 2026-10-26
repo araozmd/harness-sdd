@@ -411,7 +411,7 @@ expect_line "^test-drift-check: 2 findings, 0 waived, 2 test files examined \\(b
 cp "$T/out" "$T/out.top"
 ( cd "$R/tests" && sh "$TOOL" main ) > "$T/out" 2> "$T/err" && rc=0 || rc=$?
 expect_rc 1 "R1g from a subdirectory"
-cmp -s "$T/out" "$T/out.top" || { diff "$T/out.top" "$T/out" >&2; fail "R1g: a run from a subdirectory must print exactly what a run from the top prints"; }
+cmp -s "$T/out" "$T/out.top" || { diff "$T/out.top" "$T/out" >&2 || :; fail "R1g: a run from a subdirectory must print exactly what a run from the top prints"; }
 run "$R" main feature
 expect_rc 1 "R1g head-ref mode"; expect_ndrift 1 "R1g head-ref mode"
 expect_line '^DRIFT assert-modified \| tests/ü/a\.test\.js:3 \| keeps name \| ' "R1g head-ref mode"
@@ -527,7 +527,7 @@ printf '%s\n' \
   "DRIFT skip-added | tests/k.test.js:5 | k3 | it.only('k3', () => {});" \
   'DRIFT assert-removed | tests/r.test.js:2 | r | expect(a).toBe(1);' | sort > "$T/want"
 grep '^DRIFT ' "$T/out" | sort > "$T/got"
-cmp -s "$T/got" "$T/want" || { diff "$T/want" "$T/got" >&2; fail "R3g: the finding set differs (want < / got >)"; }
+cmp -s "$T/got" "$T/want" || { diff "$T/want" "$T/got" >&2 || :; fail "R3g: the finding set differs (want < / got >)"; }
 expect_line '^test-drift-check: 7 findings, 0 waived, 5 test files examined ' "R3g summary"
 pass "R3g_hunk_geometry"
 
@@ -678,7 +678,7 @@ featcommit
 run "$R" main
 expect_rc 1 "R4c"
 grep '^DRIFT assert-removed | tests/alt\.test\.js:' "$T/out" | sed 's/^[^|]*|[^|]*|[^|]*| //' | sort > "$T/got"
-cmp -s "$T/got" "$T/want" || { diff "$T/want" "$T/got" >&2; fail "R4c: every alternative is an assertion and no anchored negative is (want < / got >)"; }
+cmp -s "$T/got" "$T/want" || { diff "$T/want" "$T/got" >&2 || :; fail "R4c: every alternative is an assertion and no anchored negative is (want < / got >)"; }
 [ "$(cnt '^DRIFT [a-z-]+ \| tests/alt\.test\.js:')" = 27 ] || { cat "$T/out" >&2; fail "R4c: only the 27 positives"; }
 pass "R4c_every_assert_alternative"
 # Markers: lines 4-26 of mk.test.js are markers; 27-29 are the anchored negatives.
@@ -1046,7 +1046,7 @@ expect_rc 1 "R7l"
   echo 'DRIFT assert-modified | tests/w.test.js:2 | w | expect(w).toBe(1); -> expect(w).toBeTruthy();'
 } | sort > "$T/want"
 grep '^DRIFT ' "$T/out" | sort > "$T/got"
-cmp -s "$T/got" "$T/want" || { diff "$T/want" "$T/got" >&2; fail "R7l: the finding set differs (want < / got >)"; }
+cmp -s "$T/got" "$T/want" || { diff "$T/want" "$T/got" >&2 || :; fail "R7l: the finding set differs (want < / got >)"; }
 pass "R7l_extractor_and_attribution_matrix"
 # A name holding an UNSPACED em dash is waivable: the separator is the first SPACED one.
 printf 'waive-test-drift: x\342\200\224y \342\200\224 dash inside the name\n' > "$T/tasks.md"
