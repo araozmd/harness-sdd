@@ -310,6 +310,56 @@ carries the tier into the PR body. Your verdict is where the *decision* lives; t
 where the next reader finds it. Recording it here is what makes that possible, so do not skip it
 on the assumption the Orchestrator will re-derive it.
 
+## Test-drift check before the verdict (E36-F06)
+
+`sh tools/run-tests.sh` is still your primary command; this is an added check that the
+primary one cannot make. A green suite says every assertion that still exists passes — it says
+nothing about an assertion that was weakened so it still passes, or a test whose name quietly
+left the file. Run the drift check on the branch you are approving:
+
+```sh
+_def="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || for _c in origin/main main origin/master master origin/trunk trunk; do git rev-parse --verify --quiet "$_c^{commit}" >/dev/null && { echo "$_c"; break; }; done)"
+sh "$HARNESS_DIR/tools/test-drift-check.sh" "$_def" --tasks-md specs/epics/<epic>/<feature>/<feature>.tasks.md
+```
+
+The first line resolves the default branch the way `tools/change-size.sh` does: `origin/HEAD`
+when the clone has it, else the first of `origin/main main origin/master master origin/trunk
+trunk` that exists, so a `master`- or `trunk`-only repository is not handed a `main` that does
+not resolve. **An `sdd: false` brief-only item** has no `.tasks.md` (see the `sdd: false`
+section above): pass its inbox brief instead, `--tasks-md progress/inbox/<id>.md`. Intentional
+drift in that lane is waived the same way, by a `waive-test-drift:` line in the brief.
+
+Pass the **default branch**, not a hard-coded `origin/main`: the tool takes the merge-base
+itself, so a stacked branch or a rebased one is measured from the point a reviewer actually
+reads. **When the branch carries pair commits** (E36-F01 — one commit per red/green pair), run
+it once more per pair commit,
+`sh "$HARNESS_DIR/tools/test-drift-check.sh" <pair-sha> --tasks-md <same file>`, so a test that
+went green at that commit and was weakened later is caught against the finer baseline. Pass the
+same `--tasks-md`: without it a finding already waived there prints as `DRIFT` and exits `1`,
+a false REJECT. Pair commits are optional; the merge-base run is the contract.
+
+Read the exit code, not the prose:
+
+- `0` — no assertion-pattern line was removed or modified, no skip/only marker was added and
+  no extracted test name was removed in any touched test file (or every such finding is waived
+  and printed as `WAIVED`). That is all exit `0` covers. Other changed lines in a test file —
+  fixtures, setup, expected values such as `want=3` → `want=$(add 1 2)` — are not checked, so
+  you still read the test diff yourself (3b). Carry on.
+- `1` — at least one `DRIFT` line. **REJECT** unless the finding is waived: a line
+  `waive-test-drift: <exact test name> — <reason>` in the feature's `.tasks.md`, one per test,
+  exact name. Quote the `DRIFT` lines in `progress/<run>/review.md`. The tool does not judge
+  whether the edit tightened or weakened the assertion, and neither should you from the diff
+  alone — check it the way 3b says: delete the mechanism it claims to pin and watch it go red.
+- `2` or `3` — the check **did not run** (usage error; a ref that does not resolve; no merge
+  base; a git call that failed, named on stderr). That is not a verdict in either direction: fix the invocation and run it again. Do not
+  approve on an unrun check.
+
+The test-file classifier is the one `tools/change-size.sh` uses, and it also matches a
+feature's own `*.spec.md`, so a re-spec prose line containing an assertion pattern reads as a
+finding named by the spec's path, waivable only by that path.
+
+Record the summary line and the decision for any `WAIVED` finding in your verdict.
+
 ## Verdict
 
 - **Approve** → tell the Orchestrator to set `done`; append a summary to

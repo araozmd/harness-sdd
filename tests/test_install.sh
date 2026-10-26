@@ -202,7 +202,7 @@ _SSE_EOF
   # check runs in both directions, editing either side alone also reds: a member removed
   # from the expected list shows up as unexpected-derived, one removed from the derivation
   # shows up as missing. That is what keeps the set from rotting silently.
-  _sse_expected=".github/scripts/feedback-labeler.sh harness-install.sh init.sh tools/builder-role.sh tools/change-size.sh tools/fix-worktree.sh tools/harness-owned-paths.sh tools/harness-report.sh tools/opencode-model-helper.sh tools/pi-dispatch.sh tools/pr-gate.sh tools/pr-round-trend.sh tools/run-tests.sh tools/sweep-scratch.sh tools/wait-for-codex.sh"
+  _sse_expected=".github/scripts/feedback-labeler.sh harness-install.sh init.sh tools/builder-role.sh tools/change-size.sh tools/fix-worktree.sh tools/harness-owned-paths.sh tools/harness-report.sh tools/opencode-model-helper.sh tools/pi-dispatch.sh tools/pr-gate.sh tools/pr-round-trend.sh tools/run-tests.sh tools/sweep-scratch.sh tools/test-drift-check.sh tools/wait-for-codex.sh"
 
   _sse_unexpected=""
   for _sse_f in $_sse_seen; do
@@ -310,12 +310,40 @@ test_change_size_block_seeded() {
     || fail "installed tools/change-size.sh is not executable (the pre-PR size check would not run) (E21-F02)"
   grep -qF 'tools/change-size.sh' "$T/.harness/agents/reviewer.md" \
     || fail "installed reviewer.md does not run the pre-PR change-size check (E21-F02)"
+  # E36-F06: the Reviewer's test-drift check ships as a runnable tool beside change-size.sh
+  # (it asks its SIBLING for the test classifier), and the installed Reviewer names it.
+  [ -f "$T/.harness/tools/test-drift-check.sh" ] \
+    || fail "tools/test-drift-check.sh not installed (the Reviewer's test-drift check would be missing) (E36-F06)"
+  [ -x "$T/.harness/tools/test-drift-check.sh" ] \
+    || fail "installed tools/test-drift-check.sh is not executable (E36-F06)"
+  grep -qF 'tools/test-drift-check.sh' "$T/.harness/agents/reviewer.md" \
+    || fail "installed reviewer.md does not name the test-drift check (E36-F06)"
   grep -qF 'tools/change-size.sh' "$T/.harness/agents/orchestrator.md" \
     || fail "installed orchestrator.md does not run the pre-PR change-size check (E21-F02)"
-  for _k in 'test_paths:' 'generated_paths:'; do
+  for _k in 'test_paths:' 'generated_paths:' 'assert_patterns:'; do
     grep -qF "$_k" "$T/.harness/harness.config.yaml" \
       || fail "installed change_size block missing classifier key $_k (E21-F02)"
   done
+}
+
+# E36-F06: the `change_size:` block exists in TWO sources — the seed in harness.config.yaml
+# (fresh installs copy it) and the heredoc in harness-install.sh's migrate_config (upgrades
+# append it). They must stay byte-identical, anchored on the block's comment header, or a
+# fresh and an upgraded install silently diverge. Source-vs-source (as models_block does),
+# so a failure names WHICH source drifted.
+test_change_size_block_seeded_vs_heredoc_converge() {
+  _csa='# Change-size discipline (E21-F01)'
+  _csr="$(_block_region "$_csa" "$SRC/harness.config.yaml")"
+  _csh="$(_block_region "$_csa" "$SRC/harness-install.sh")"
+  [ -n "$_csr" ] || fail "change_size convergence: no '$_csa' block found in harness.config.yaml (the seed anchor moved?)"
+  [ -n "$_csh" ] || fail "change_size convergence: no '$_csa' block found in harness-install.sh (the heredoc anchor moved?)"
+  printf '%s\n' "$_csr" > "$T/.cs-seed"; printf '%s\n' "$_csh" > "$T/.cs-heredoc"
+  cmp -s "$T/.cs-seed" "$T/.cs-heredoc" \
+    || fail "change_size block differs between harness.config.yaml and the harness-install.sh heredoc (fresh vs upgraded installs would diverge): $(diff "$T/.cs-seed" "$T/.cs-heredoc" | head -n 4 | tr '\n' ' ')"
+  grep -qF 'assert_patterns: []' "$T/.cs-seed" || fail "change_size seed lacks assert_patterns: [] (E36-F06)"
+  grep -qF 'assert_patterns: []' "$T/.cs-heredoc" || fail "change_size heredoc lacks assert_patterns: [] (E36-F06)"
+  rm -f "$T/.cs-seed" "$T/.cs-heredoc"
+  pass "change_size seed and migrate heredoc are byte-identical (E36-F06) [change_size_block_seeded_vs_heredoc_converge]"
 }
 
 # E17-F04: the worker roster's INSTALLER WIRING. The roster itself (detection, the entry
@@ -739,6 +767,7 @@ test_progress_run_dirs_gitignored   # E99-F06
 test_lessons_ledger_seeded_and_preserved
 pass "progress/lessons.md seeded once, survives upgrade re-run (earned-lessons ledger)"
 test_change_size_block_seeded       # E21-F01
+test_change_size_block_seeded_vs_heredoc_converge # E36-F06
 test_worker_roster_wiring_installed # E17-F04
 test_workers_block_seeded_migrated_converge # E17-F04
 test_models_block_seed_and_heredoc_converge # E17-F01
