@@ -378,6 +378,8 @@ newrepo r4b; put tests/t.sh <<'EOF'
 t_one() {
   [ -f "$x" ] && cp "$x" "$y"
   # this should run first
+  reassert(x)
+  my_assert_ok y
   :
 }
 EOF
@@ -387,6 +389,12 @@ subst tests/t.sh '  # this should run first' '  # this should run second'
 featcommit
 run "$R" main
 expect_rc 0 "R4b"; [ "$(nlines)" = 1 ] || { cat "$T/out" >&2; fail "R4b: bare [ ], should and comments are not assertions"; }
+# `assert` is word-bounded: an identifier that merely CONTAINS it is not an assertion.
+subst tests/t.sh '  reassert(x)' '  reassert(y)'
+subst tests/t.sh '  my_assert_ok y' '  my_assert_ok z'
+featcommit
+run "$R" main
+expect_rc 0 "R4b word-bounded assert"; [ "$(nlines)" = 1 ] || { cat "$T/out" >&2; fail "R4b: reassert( / my_assert_ok are not the assert family"; }
 pass "R4b_negatives"
 
 # ── R5: configured assertion patterns ────────────────────────────────────────────
