@@ -24,6 +24,7 @@ TOOL="$ROOT/tools/test-drift-check.sh"
 CS="$ROOT/tools/change-size.sh"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t tdrift)"
 trap 'rm -rf "$T"' EXIT
+trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 # A "not inside a git repo" fixture is only hermetic if git discovery is bounded.
 GIT_CEILING_DIRECTORIES="$T"; export GIT_CEILING_DIRECTORIES
 unset HARNESS_DIR 2>/dev/null || true
