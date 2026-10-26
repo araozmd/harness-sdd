@@ -513,7 +513,7 @@
         {
           "id": "E36-F06",
           "title": "Test-assertion drift check across the feature branch: tool + Reviewer gate",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
