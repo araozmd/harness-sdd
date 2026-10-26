@@ -99,3 +99,12 @@ sec 'only consumer is another epic[^.]{0,250}surface' || fail "R2: cross-epic se
 sec 'advisory[^.]{0,40}never blocks' || fail "R2: section does not say the rule is advisory and never blocks"
 sec 'never[^.]{0,40}blocked[^.]{0,40}shape' || fail "R2: section does not forbid a blocked record on shape alone"
 pass "R2_driller_exemption_record"
+
+# ── R3: the Driller fills each brief's `## Observable behavior` ──────────────────
+grep -qF '## Observable behavior' "$DRILLER" || fail "R3: $DRILLER never names '## Observable behavior'"
+sec '## Observable behavior' || fail "R3: '## Observable behavior' is not inside the observable-slice section"
+sec 'fill[^.]{0,60}## Observable behavior[^.]{0,60}one line' || fail "R3: section does not tell the Driller to fill the brief's Observable behavior with one line"
+sec 'Observable behavior[^.]{0,80}surface' || fail "R3: section does not name the surface"
+sec 'user or client sees' || fail "R3: section does not say what a user or client sees"
+sec 'walking[- ]skeleton[^.]{0,80}end-to-end path' || fail "R3: section does not make the skeleton's line the end-to-end path"
+pass "R3_driller_fills_brief"

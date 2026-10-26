@@ -143,6 +143,11 @@ where the behavior becomes observable.
 `blocked` record on shape alone, and you never refuse to seed a feature because its outcome is
 internal — `blocked` stays a vocabulary about dependencies and ownership.
 
+**Fill the brief.** In each per-feature brief you write, fill the `## Observable behavior`
+section with one line — the surface and what a user or client sees
+(`<surface> — <what a user or client sees>`); for the walking-skeleton feature that line
+describes the end-to-end path.
+
 ## Seed the feature entries (R7, D3)
 
 Read the epic's current `features` first. Then write each new feature into that epic's
