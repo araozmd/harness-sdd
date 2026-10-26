@@ -195,7 +195,10 @@ see one that was weakened so it still passes. `tools/test-drift-check.sh <base-r
 [<head-ref>] [--tasks-md <feature.tasks.md>]` lists, for every touched test file (the same
 classifier `tools/change-size.sh` uses), each removed or modified assertion line, each newly
 added skip/only/xfail marker and each test name present at base and absent at head. It reports
-and fails: exit `0` clean (or all waived), `1` unwaived findings, `2` usage, `3` cannot diff.
+and fails: exit `0` when none of those three kinds of finding is present (or all are waived),
+`1` unwaived findings, `2` usage, `3` cannot diff. Exit `0` covers only those three kinds:
+other changed lines in a test file, such as fixtures and expected values, are not checked, and
+the Reviewer still reads the test diff.
 It never judges whether an edit tightened or weakened an assertion — that look is what it
 forces. A finding is waived per test, by exact name, with a `waive-test-drift: <test name> —
 <reason>` line in the feature's `.tasks.md`. Extra assertion patterns go in

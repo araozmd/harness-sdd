@@ -11,7 +11,9 @@ All notable changes to the harness body are recorded here. Versions follow
   language-agnostic (POSIX `sh` + `git` + `awk`) check that lists, for every touched test file,
   each removed or modified assertion line, each newly added skip/only/xfail marker, and each
   test name present at base and absent at head. It reports and fails (exit `1`); it never
-  judges whether an edit tightened or weakened an assertion. Exit `2` is a usage error
+  judges whether an edit tightened or weakened an assertion. Exit `0` covers only those three
+  kinds of finding: other changed lines in a test file, such as fixtures and expected values,
+  are not checked, and the Reviewer still reads the test diff. Exit `2` is a usage error
   (including a malformed waiver), `3` means it could not diff. Waivers are per test, by exact
   name, as `waive-test-drift: <test name> — <reason>` lines in the feature's `.tasks.md`.
 - `tools/change-size.sh` gains two additive config-query modes, `--print-test-re` and

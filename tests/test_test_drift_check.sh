@@ -759,6 +759,14 @@ for _tok in 'tools/test-drift-check.sh' 'merge-base' '--tasks-md' 'waive-test-dr
             'REJECT' 'did not run' 'run-tests.sh' 'primary'; do
   printf '%s\n' "$_sec" | grep -qF -- "$_tok" || fail "R11a: the Reviewer section must carry '$_tok'"
 done
+# The exit-0 bullet states exactly what exit 0 covers, and names what it does not check.
+_fold="$(printf '%s\n' "$_sec" | tr '\n' ' ')"
+printf '%s' "$_fold" | grep -qE 'assertion-pattern line[^.]{0,120}skip/only marker[^.]{0,80}test name was removed' \
+  || fail "R11a: the exit-0 bullet must name the three kinds of finding it covers"
+printf '%s' "$_fold" | grep -qE 'are not checked[^.]{0,40}still read the test diff' \
+  || fail "R11a: the exit-0 bullet must say other changed lines are not checked and the diff is still read"
+printf '%s' "$_fold" | grep -qF 'nothing removed, modified or skipped' \
+  && fail "R11a: the exit-0 bullet must not claim nothing was removed, modified or skipped"
 pass "R11a_reviewer_section"
 
 # ── R12: the shipped body ────────────────────────────────────────────────────────
