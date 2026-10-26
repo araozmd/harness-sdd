@@ -418,11 +418,58 @@ test_invalid_graph() {
   pass "R6 invalid_graph: live cycle / dangling id -> invalid-graph with only graph records; stale cycle valid"
 }
 
+# crit_is <label> <want> [extra args]: --waves --json critical_path equals <want>.
+crit_is() {
+  _l=$1 _w=$2
+  shift 2
+  run_tool --waves --json "$@" >"$TMP/c.out" || fail "R7 [$_l]: --waves failed"
+  [ "$(json_field 'x["outcome"]' <"$TMP/c.out")" = waves ] || fail "R7 [$_l]: outcome is not waves"
+  _g=$(json_field "$CRIT" <"$TMP/c.out")
+  [ "$_g" = "$_w" ] || fail "R7 [$_l]: critical_path is [$_g], want [$_w]"
+}
+
+test_critical_path() {
+  write_config true
+  # Every fixture lists its features in REVERSE canonical order.
+  board1 "$(feat E1-F4 pending '["E1-F3","E1-F2"]')" "$(feat E1-F3 pending '["E1-F1"]')" "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F1 pending)"
+  crit_is diamond 'E1-F1,E1-F2,E1-F4'
+  # Longer beats a smaller root.
+  board1 "$(feat E1-F7 pending '["E1-F6"]')" "$(feat E1-F6 pending '["E1-F5"]')" "$(feat E1-F5 pending)" "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F1 pending)"
+  crit_is longer-later-root 'E1-F5,E1-F6,E1-F7'
+  # Equal length, tie decided at position 0.
+  board1 "$(feat E1-F4 pending '["E1-F2"]')" "$(feat E1-F3 pending '["E1-F1"]')" "$(feat E1-F2 pending)" "$(feat E1-F1 pending)"
+  crit_is tie-position-0 'E1-F1,E1-F3'
+  # Equal length, tie decided at position 1.
+  board1 "$(feat E1-F3 pending '["E1-F1"]')" "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F1 pending)"
+  crit_is tie-position-1 'E1-F1,E1-F2'
+  # Tie broken by ADR-0001 (numeric) order, not string order: F9 < F10.
+  board1 "$(feat E1-F12 pending '["E1-F9"]')" "$(feat E1-F11 pending '["E1-F10"]')" "$(feat E1-F10 pending)" "$(feat E1-F9 pending)"
+  crit_is tie-numeric 'E1-F9,E1-F12'
+  # A done feature is wave 0 and never part of the chain.
+  board1 "$(feat E1-F3 pending '["E1-F2"]')" "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F1 done)"
+  crit_is through-done 'E1-F2,E1-F3'
+  # Single pending feature; all-done board.
+  board1 "$(feat E1-F2 done)" "$(feat E1-F1 pending)"
+  crit_is single 'E1-F1'
+  board1 "$(feat E1-F2 done '["E1-F1"]')" "$(feat E1-F1 done)"
+  crit_is all-done ''
+  # --epic restricts the chain to in-scope features: E2-F1 -> E1-F1 -> E2-F2 -> E2-F3.
+  # Board-wide the chain runs through E1-F1; under --epic E2 an out-of-scope link breaks
+  # it, leaving E2-F2 -> E2-F3 (longer than E2-F1 alone); under --epic E1 it is E1-F1.
+  boardN "$(epic_json E2 "$(feat E2-F3 pending '["E2-F2"]')" "$(feat E2-F2 pending '["E1-F1"]')" "$(feat E2-F1 pending)")" \
+    "$(epic_json E1 "$(feat E1-F1 pending '["E2-F1"]')")"
+  crit_is board-wide 'E2-F1,E1-F1,E2-F2,E2-F3'
+  crit_is epic-E2 'E2-F2,E2-F3' --epic E2
+  crit_is epic-E1 'E1-F1' --epic E1
+  pass "R7 critical_path: longest non-done in-scope chain, ties by ADR-0001 order position by position"
+}
+
 test_cli_contract
 test_usage_synopsis
 test_wave_assignment
 test_epic_scope
 test_feature_records
 test_invalid_graph
+test_critical_path
 
 echo "test_waves: $PASS passed"

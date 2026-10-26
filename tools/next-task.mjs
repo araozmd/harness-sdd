@@ -761,9 +761,39 @@ function deriveWaves(model, config, args) {
     });
   }
   const waves = [...groups.keys()].sort((a, b) => a - b).map((n) => ({ wave: n, features: groups.get(n) }));
-  const summary = `${waves.length} waves over ${scoped.length - wave0.length} features (+${wave0.length} done)`;
+  // R7 — critical path: the longest chain (by feature count) of in-scope non-done
+  // features over depends_on edges whose BOTH ends are in scope and non-done, root first.
+  // Ties go to the chain least in ADR-0001 order position by position. That comparison
+  // is realised by iteration order: every choice point compares chains with DISTINCT
+  // heads (different dependents of one node, or different start nodes), so position 0
+  // always decides, and visiting candidates in compareIds order with a STRICT `>` on
+  // length keeps the least one. Any longest chain starts at a root (else it could be
+  // extended backward), so taking the best over every node equals the best over roots.
+  const open = scoped.filter((feature) => feature.status !== 'done');
+  const dependents = new Map(open.map((feature) => [feature.id, []]));
+  for (const feature of open) {
+    for (const dep of feature.depends_on || []) if (dependents.has(dep)) dependents.get(dep).push(feature.id);
+  }
+  const chainMemo = new Map();
+  const chain = (id) => {
+    if (!chainMemo.has(id)) {
+      let tail = [];
+      for (const next of dependents.get(id)) {
+        const candidate = chain(next);
+        if (candidate.length > tail.length) tail = candidate;
+      }
+      chainMemo.set(id, [id, ...tail]);
+    }
+    return chainMemo.get(id);
+  };
+  let criticalPath = [];
+  for (const feature of open) {
+    const candidate = chain(feature.id);
+    if (candidate.length > criticalPath.length) criticalPath = candidate;
+  }
+  const summary = `${waves.length} waves over ${open.length} features (+${wave0.length} done); critical path ${criticalPath.length} features`;
   return { ...envelope('waves', 'waves', null, { code: 'waves-derived', detail: summary }, [], summary),
-    scope: { epic }, wave0, waves, critical_path: [] };
+    scope: { epic }, wave0, waves, critical_path: criticalPath };
 }
 
 let args = { mode: 'board' };
