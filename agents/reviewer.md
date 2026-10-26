@@ -325,9 +325,11 @@ sh "$HARNESS_DIR/tools/test-drift-check.sh" "$_def" --tasks-md specs/epics/<epic
 Pass the **default branch**, not a hard-coded `origin/main`: the tool takes the merge-base
 itself, so a stacked branch or a rebased one is measured from the point a reviewer actually
 reads. **When the branch carries pair commits** (E36-F01 — one commit per red/green pair), run
-it once more per pair commit, `sh "$HARNESS_DIR/tools/test-drift-check.sh" <pair-sha>`, so a
-test that went green at that commit and was weakened later is caught against the finer
-baseline. Pair commits are optional; the merge-base run is the contract.
+it once more per pair commit,
+`sh "$HARNESS_DIR/tools/test-drift-check.sh" <pair-sha> --tasks-md <same file>`, so a test that
+went green at that commit and was weakened later is caught against the finer baseline. Pass the
+same `--tasks-md`: without it a finding already waived there prints as `DRIFT` and exits `1`,
+a false REJECT. Pair commits are optional; the merge-base run is the contract.
 
 Read the exit code, not the prose:
 

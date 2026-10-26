@@ -23,7 +23,8 @@ All notable changes to the harness body are recorded here. Versions follow
   the built-ins, seeded byte-identically in `harness.config.yaml` and the `migrate_config`
   heredoc. An existing config gets the key only on a fresh seed; absent means built-ins only.
 - `agents/reviewer.md` gains `## Test-drift check before the verdict (E36-F06)`: run the tool
-  against the default branch (and per pair commit when E36-F01 pair commits exist), REJECT on
+  against the default branch (and per pair commit, with the same `--tasks-md`, when E36-F01
+  pair commits exist), REJECT on
   an unwaived finding, treat exit `2`/`3` as "the check did not run". `sh tools/run-tests.sh`
   stays the primary command. `docs/RATIONALE.md` gains ledger row D14; `docs/WORKFLOW.md`
   documents the check.

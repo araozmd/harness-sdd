@@ -759,6 +759,9 @@ for _tok in 'tools/test-drift-check.sh' 'merge-base' '--tasks-md' 'waive-test-dr
             'REJECT' 'did not run' 'run-tests.sh' 'primary'; do
   printf '%s\n' "$_sec" | grep -qF -- "$_tok" || fail "R11a: the Reviewer section must carry '$_tok'"
 done
+# The per-pair-commit command carries the same --tasks-md, or a waived finding is a false REJECT.
+printf '%s\n' "$_sec" | tr '\n' ' ' | grep -qF 'test-drift-check.sh" <pair-sha> --tasks-md' \
+  || fail "R11a: the per-pair-commit command must pass --tasks-md"
 # The exit-0 bullet states exactly what exit 0 covers, and names what it does not check.
 _fold="$(printf '%s\n' "$_sec" | tr '\n' ' ')"
 printf '%s' "$_fold" | grep -qE 'assertion-pattern line[^.]{0,120}skip/only marker[^.]{0,80}test name was removed' \
