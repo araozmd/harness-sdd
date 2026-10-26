@@ -94,8 +94,10 @@ sec 'Observable-slice exemption:' || fail "R2: the token is not inside the obser
 sec 'one line per exempted feature[^.]{0,80}Notes' || fail "R2: section does not record one line per exempted feature under Notes"
 sec 'beginning .?Observable-slice exemption:.{0,20}naming the feature id' || fail "R2: exemption line is not required to name the feature id"
 sec 'only consumer is another epic' || fail "R2: section lacks the cross-epic-consumer exemption"
-sec 'only consumer is another epic[^.]{0,200}consuming epic' || fail "R2: cross-epic sentence does not name the consuming epic"
-sec 'only consumer is another epic[^.]{0,250}surface' || fail "R2: cross-epic sentence does not name the surface where behavior becomes observable"
+sec 'only consumer is another epic[^.]{0,200}thinnest path the consuming epic can exercise' \
+  || fail "R2: cross-epic sentence does not make the skeleton the thinnest path the consuming epic can exercise"
+sec 'only consumer is another epic[^.]{0,250}the exemption line names that consuming epic and the surface' \
+  || fail "R2: cross-epic sentence does not have the exemption line name the consuming epic and the surface"
 sec 'advisory[^.]{0,40}never blocks' || fail "R2: section does not say the rule is advisory and never blocks"
 sec 'never[^.]{0,40}blocked[^.]{0,40}shape' || fail "R2: section does not forbid a blocked record on shape alone"
 pass "R2_driller_exemption_record"
