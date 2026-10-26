@@ -59,6 +59,13 @@ lowest-numbered feature in the epic's feature table is among the passed paths, o
 an **amend**: `walking-skeleton-missing` is not raised, and briefs the Driller did not pass are
 never read.
 
+**Exemptions.** An `Observable-slice exemption:` line in the epic's `## Notes` that names the
+feature id downgrades the matching finding to an `exemption-recorded` note that is reported but
+not raised; an exemption line that names no feature id is itself reported.
+
+**Advisory.** All three findings are advisory like every other finding: you never block the
+Driller, and there is no gate, no new status and no schema change.
+
 ## Advisory-only behavior
 
 The Doc-critic is **advisory-only**. Your findings are **recommendations only** and never block the generating agent. The

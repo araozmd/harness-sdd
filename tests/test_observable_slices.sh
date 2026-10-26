@@ -139,3 +139,15 @@ csec '\*\*fresh\*\* when the lowest-numbered feature[^.]{0,80}is among' || fail 
 csec 'otherwise it is an \*\*amend\*\*[^.]{0,80}not raised' || fail "R6: amend definition (walking-skeleton-missing not raised) missing"
 csec 'briefs the Driller did not pass are never read' || fail "R6: unpassed briefs are not declared never read"
 pass "R6_doc_critic_three_findings"
+
+# ── R7: exemption downgrades a finding; advisory like every other finding ────────
+csecF 'Observable-slice exemption:' || fail "R7: critic section does not name the Observable-slice exemption: line"
+csec 'exemption:. line in the epic.s `## Notes` that names the feature id downgrades the matching finding to an `exemption-recorded` note that is reported but not raised' \
+  || fail "R7: exemption line naming the feature id does not downgrade to an exemption-recorded note (reported, not raised)"
+csec 'an exemption line that names no feature id is itself reported' \
+  || fail "R7: an exemption line naming no feature id is not itself reported"
+csec 'advisory[^.]{0,80}never block[^.]{0,80}no gate[^.]{0,40}no (new )?status[^.]{0,40}no schema change' \
+  || fail "R7: advisory / never block / no gate / no status / no schema change sentence missing"
+if csec 'reject'; then fail "R7: critic section must not tell anyone to reject"; fi
+if csec 'fail the drill'; then fail "R7: critic section must not fail the drill"; fi
+pass "R7_doc_critic_exemption_and_advisory"
