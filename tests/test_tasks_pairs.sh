@@ -182,6 +182,107 @@ for _txt in 'rewrite the contests table' 'rewrite the tests fixture' 'write the 
 done
 pass "R7_whole_words_only"
 
+# ── R9 grandfather rule: --grandfathered (exit 0 flag / 1 reject class / 2 error) ─────────
+# The tool's date is its MERGE into the default branch: the committer time of the first
+# first-parent commit on that branch touching the tool. The .tasks.md date is the AUTHOR time
+# of the commit that added it (a rebase rewrites committer time, never author time). Fixture
+# repos are hermetic: bounded discovery, no host config, fixed dates.
+GIT_CEILING_DIRECTORIES="$T"; export GIT_CEILING_DIRECTORIES
+GIT_CONFIG_GLOBAL=/dev/null; GIT_CONFIG_NOSYSTEM=1; export GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
+gq() { git -c user.name=fx -c user.email=fx@example.invalid -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
+gci() { # gci <author-epoch> <committer-epoch> <msg>  (stage first)
+  GIT_AUTHOR_DATE="@$1 +0000" GIT_COMMITTER_DATE="@$2 +0000" gq commit -q -m "$3" || fail "fixture commit '$3' failed"
+}
+gf_run() { # gf_run <repo> <tasks-relpath> [args...]
+  _r="$1"; _f="$2"; shift 2
+  set +e; (cd "$_r" && python3 "$TOOL" --grandfathered "$_f" "$@") >"$T/out" 2>"$T/err"; rc=$?; set -e
+}
+gf_expect() { # gf_expect <row> <rc> <stdout-regex>
+  [ "$rc" -eq "$2" ] || fail "$1: expected rc $2, got $rc ($(cat "$T/out" "$T/err"))"
+  grep -qE "$3" "$T/out" || fail "$1: stdout does not match '$3': $(cat "$T/out" "$T/err")"
+  pass "$1"
+}
+# G1 (source layout): base@1000; branch tool adds tools/tasks-pair-check.py @1100; branch sib
+# adds sib.tasks.md @1200 (after the tool's BRANCH commit, before its merge); main merges tool
+# --no-ff (committed @1300, authored @1150 — the merge's COMMITTER time is its date) and
+# edits the tool again @1350; later branches add tasks files @1300/@1400; branch readd adds a
+# tasks file @1200, deletes it @1210 and re-adds it after the merge @1400 (earliest add wins).
+G="$T/g1"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+gq checkout -q -b tool; mkdir -p tools; echo v1 > tools/tasks-pair-check.py; gq add tools; gci 1100 1100 tool
+gq checkout -q main; gq checkout -q -b sib; mkdir -p s; echo x > s/sib.tasks.md; gq add s; gci 1200 1200 sib
+gq checkout -q -b sibrebased main; mkdir -p s; echo x > s/reb.tasks.md; gq add s; gci 1200 1500 rebased
+gq checkout -q -b readd main; mkdir -p s; echo x > s/re.tasks.md; gq add s; gci 1200 1200 re-add-1
+gq rm -q s/re.tasks.md; gci 1210 1210 re-del
+gq checkout -q main
+GIT_AUTHOR_DATE="@1150 +0000" GIT_COMMITTER_DATE="@1300 +0000" gq merge -q --no-ff -m merge-tool tool || fail "fixture merge failed"
+echo v2 > tools/tasks-pair-check.py; gq add tools; gci 1350 1350 tool-v2
+gq checkout -q -b late; mkdir -p s; echo x > s/late.tasks.md; gq add s; gci 1400 1400 late
+gq checkout -q -b same main; mkdir -p s; echo x > s/same.tasks.md; gq add s; gci 1300 1400 same
+gq checkout -q readd; mkdir -p s; echo x > s/re.tasks.md; gq add s; gci 1400 1400 re-add-2
+gq checkout -q -b dirty main; mkdir -p s; echo x > s/new.tasks.md
+cd "$ROOT"
+gq -C "$G" checkout -q sib;  gf_run "$G" s/sib.tasks.md;  gf_expect R9_grandfather_sibling_before_merge_flags 0 '^tasks-pair-check: grandfather flag: '
+gq -C "$G" checkout -q late; gf_run "$G" s/late.tasks.md; gf_expect R9_grandfather_after_merge_rejects 1 '^tasks-pair-check: grandfather reject: '
+grep -qF ' 1300' "$T/out" || fail "R9_grandfather_after_merge_rejects: the tool date is not the merge time 1300: $(cat "$T/out")"
+gq -C "$G" checkout -q same; gf_run "$G" s/same.tasks.md; gf_expect R9_grandfather_same_second_rejects 1 '^tasks-pair-check: grandfather reject: '
+gq -C "$G" checkout -q sibrebased; gf_run "$G" s/reb.tasks.md; gf_expect R9_grandfather_rebased_sibling_flags 0 '^tasks-pair-check: grandfather flag: '
+gq -C "$G" checkout -q dirty; gf_run "$G" s/new.tasks.md; gf_expect R9_grandfather_uncommitted_rejects 1 '^tasks-pair-check: grandfather reject: .*no commit'
+gq -C "$G" checkout -q readd; gf_run "$G" s/re.tasks.md; gf_expect R9_grandfather_earliest_add_wins 0 '^tasks-pair-check: grandfather flag: .*authored 1200'
+ln -s "$G" "$T/g1-link"
+# Absolute and symlinked paths must reach the SAME verdict as the relative one. Both rows are
+# FLAG cases on purpose: a path the tool cannot map into the repo finds no commit, and that
+# reads as "reject", so a reject-case row here could not see a broken path ($T itself sits
+# under a symlink on macOS: /var -> /private/var).
+gq -C "$G" checkout -q sib
+gf_run "$ROOT" "$G/s/sib.tasks.md"; gf_expect R9_grandfather_absolute_path 0 '^tasks-pair-check: grandfather flag: s/sib\.tasks\.md authored 1200'
+gf_run "$ROOT" "$T/g1-link/s/sib.tasks.md"; gf_expect R9_grandfather_symlinked_path 0 '^tasks-pair-check: grandfather flag: s/sib\.tasks\.md authored 1200'
+gq -C "$G" checkout -q late
+# origin/HEAD is asked first: point it at a remote-tracking trunk that never merged the tool.
+gq -C "$G" update-ref refs/remotes/origin/trunk "$(git -C "$G" rev-parse main~2)"
+gq -C "$G" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+gf_run "$G" s/late.tasks.md; gf_expect R9_grandfather_origin_head_first 0 '^tasks-pair-check: grandfather flag: .*origin/trunk'
+gf_run "$G" s/late.tasks.md --base main; gf_expect R9_grandfather_base_override 1 '^tasks-pair-check: grandfather reject: .*main'
+gf_run "$G" s/late.tasks.md --base=main; gf_expect R9_grandfather_base_override_eq_form 1 '^tasks-pair-check: grandfather reject: .*main'
+for _bad in '--base' '--spec'; do  # a trailing --base, or a lint-only flag, is a usage error
+  gf_run "$G" s/late.tasks.md $_bad; [ "$rc" -eq 2 ] || fail "R9_grandfather_usage_exit2[$_bad]: rc $rc ($(cat "$T/out" "$T/err"))"
+  grep -qi 'usage' "$T/err" || fail "R9_grandfather_usage_exit2[$_bad]: no usage on stderr"; pass "R9_grandfather_usage_exit2[$_bad]"
+done
+gf_run "$G" s/late.tasks.md --base no-such-ref; [ "$rc" -eq 2 ] || fail "R9_grandfather_bad_base_exit2: rc $rc"
+grep -qF 'tasks-pair-check: error:' "$T/err" || fail "R9_grandfather_bad_base_exit2: no error line"; pass R9_grandfather_bad_base_exit2
+# G2: the tool is not on the default branch yet -> every .tasks.md is grandfathered, even one
+# authored after the tool's branch commit.
+G="$T/g2"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+gq checkout -q -b feat; mkdir -p tools s; echo v1 > tools/tasks-pair-check.py; gq add tools; gci 1100 1100 tool
+echo x > s/own.tasks.md; gq add s; gci 1400 1400 own
+cd "$ROOT"
+gf_run "$G" s/own.tasks.md; gf_expect R9_grandfather_tool_not_on_default_flags 0 '^tasks-pair-check: grandfather flag: .*not on'
+# G3 (installed-target layout): the tool lives at .harness/tools/tasks-pair-check.py.
+G="$T/g3"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+mkdir -p .harness/tools s; echo v1 > .harness/tools/tasks-pair-check.py; gq add .harness; gci 1100 1100 upgrade
+echo x > s/old.tasks.md; gq add s; gci 1050 1050 old-authored-before-upgrade
+echo x > s/new.tasks.md; gq add s; gci 1200 1200 new
+cd "$ROOT"
+gf_run "$G" s/new.tasks.md; gf_expect R9_grandfather_consumer_layout_rejects 1 '^tasks-pair-check: grandfather reject: '
+gf_run "$G" s/old.tasks.md; gf_expect R9_grandfather_consumer_layout_old_flags 0 '^tasks-pair-check: grandfather flag: '
+# Every fallback default-branch name resolves (no origin/HEAD): the tool on it, a later file.
+for _b in origin/main main origin/master master origin/trunk trunk; do
+  G="$T/g4-$(printf '%s' "$_b" | tr / -)"; mkdir -p "$G"; cd "$G"; gq init -q -b work .
+  mkdir -p tools s; echo v1 > tools/tasks-pair-check.py; gq add tools; gci 1100 1100 tool
+  echo x > s/n.tasks.md; gq add s; gci 1200 1200 n
+  case "$_b" in origin/*) gq update-ref "refs/remotes/$_b" HEAD ;; *) gq branch "$_b" ;; esac
+  cd "$ROOT"
+  gf_run "$G" s/n.tasks.md; gf_expect "R9_grandfather_fallback_branch[$_b]" 1 "^tasks-pair-check: grandfather reject: .*$_b"
+done
+G="$T/g5"; mkdir -p "$G"; cd "$G"; gq init -q -b work .; echo x > a.tasks.md; gq add a.tasks.md; gci 1000 1000 a; cd "$ROOT"
+gf_run "$G" a.tasks.md; [ "$rc" -eq 2 ] || fail "R9_grandfather_no_default_branch_exit2: rc $rc ($(cat "$T/out"))"; pass R9_grandfather_no_default_branch_exit2
+mkdir -p "$T/nogit"; echo x > "$T/nogit/a.tasks.md"
+gf_run "$T/nogit" a.tasks.md; [ "$rc" -eq 2 ] || fail "R9_grandfather_not_a_repo_exit2: rc $rc ($(cat "$T/out"))"
+grep -qF 'tasks-pair-check: error:' "$T/err" || fail "R9_grandfather_not_a_repo_exit2: no error line"
+grep -qF 'is not inside a git work tree' "$T/err" || fail "R9_grandfather_not_a_repo_exit2: wrong reason: $(cat "$T/err")"; pass R9_grandfather_not_a_repo_exit2
+
 # ── prose helpers: fence-aware slicers (fence.awk), never the bare /^#+ / idiom ───────────
 unfenced() { awk "$FENCE_AWK"'fence_delim($0) { next } !fence' "$1"; }   # unfenced <file>
 slice() { # slice <file> <heading-prefix>: one section up to the next "## " heading, delimiters kept
@@ -261,6 +362,11 @@ anch "$T/rv.txt" 'tasks-pair-check\.py.{0,160}--spec' R9_reviewer_item7_in_what_
 anch "$T/rv.txt" 'non-zero.{0,160}reject' R9_reviewer_item7_in_what_you_check 'non-zero ... reject'
 anch "$T/rv.txt" 'predates.{0,160}flag' R9_reviewer_item7_in_what_you_check 'predates ... flag'
 anch "$T/rv.txt" 'diff-filter=A' R9_reviewer_item7_in_what_you_check 'diff-filter=A'
+anch "$T/rv.txt" 'tasks-pair-check\.py.{0,40}--grandfathered.{0,200}exit 0.{0,120}flag' R9_reviewer_item7_in_what_you_check '--grandfathered ... exit 0 ... flag'
+anch "$T/rv.txt" 'merge.{0,80}default branch' R9_reviewer_item7_in_what_you_check 'merge ... default branch (the tool date is its merge)'
+anch "$T/rv.txt" 'first-parent' R9_reviewer_item7_in_what_you_check 'first-parent'
+grep -qF '.harness/tools/tasks-pair-check.py' "$T/rv.txt" || fail "R9_reviewer_item7_in_what_you_check: item 7 does not name the installed-target path .harness/tools/tasks-pair-check.py"
+grep -qF "the tool's first commit" "$T/rv.txt" && fail "R9_reviewer_item7_in_what_you_check: stale commit-time grandfather wording survives"
 anch "$T/rv.txt" 'sdd: false.{0,160}exempt' R9_reviewer_item7_in_what_you_check 'sdd: false ... exempt'
 anch "$T/rv.txt" 'confirm +`<feature>\.tests\.md` has a test' R9_reviewer_item7_in_what_you_check 'check #2 text retained'
 pass "R9_reviewer_item7_in_what_you_check"

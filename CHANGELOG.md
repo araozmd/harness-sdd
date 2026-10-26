@@ -17,10 +17,16 @@ All notable changes to the harness body are recorded here. Versions follow
   `docs/RATIONALE.md` (ledger row C9).
 - New `tools/tasks-pair-check.py <tasks> --spec <spec>` lint (exit 0 ok / 1 violation / 2
   input error), shipped and made executable by the installer. Reviewer check 7 rejects on a
-  non-zero exit, but a `.tasks.md` whose first commit predates the tool's first commit is
-  flagged, not rejected (grandfather rule); `sdd: false` items are exempt.
+  non-zero exit, but a `.tasks.md` authored before the tool's merge into the default branch
+  is flagged, not rejected (grandfather rule, computed by `tasks-pair-check.py
+  --grandfathered <tasks.md>`: exit 0 flag / 1 reject / 2 error; the tool's date is its first
+  first-parent commit on `origin/HEAD`/`main`/`master`/`trunk`, the file's date its first-add
+  author time, and every file is flagged while the tool is not on the default branch);
+  `sdd: false` items are exempt. A task suffix that is not exactly `a`/`b` (any case) is
+  "other", never dropped.
 - Upgrade note: in-flight features with layered `.tasks.md` files are unaffected beyond the
-  advisory flag; re-spec them to pair form when convenient.
+  advisory flag: they were authored before the upgrade reached the default branch. Re-spec
+  them to pair form when convenient.
 
 ## [0.97.4] — 2026-10-25
 

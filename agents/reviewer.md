@@ -172,13 +172,19 @@ saying "it works" means nothing until you prove it. AI-generated code is often
 
 7. **Task-pair shape (E36-F01).** For an `sdd: true` feature, run
    `python3 "$HARNESS_DIR/tools/tasks-pair-check.py" "<dir>/<feature>.tasks.md" --spec
-   "<dir>/<feature>.spec.md"`; any non-zero exit (1 = shape violation, 2 = unreadable or
-   spec-less input) → reject. **Grandfather rule:** a `.tasks.md` whose first commit
-   predates the tool's first commit is flagged ("re-spec to pair form or justify"), not
-   rejected — compare `git log --diff-filter=A --format=%ct -- <path>` for the `.tasks.md`
-   and for `tools/tasks-pair-check.py` (in the repo under review); the `.tasks.md` epoch
-   older than the tool's means flag. `sdd: false` items are exempt (they have no
-   `.tasks.md`). Check #2's traceability text is unchanged; this item checks shape only.
+   "<dir>/<feature>.spec.md"` (the tool is `tools/tasks-pair-check.py` in the harness source
+   repo and `.harness/tools/tasks-pair-check.py` in an installed target); any non-zero exit
+   (1 = shape violation, 2 = unreadable or spec-less input) → reject. **Grandfather rule:**
+   a `.tasks.md` that predates the tool's merge is flagged ("re-spec to pair form or
+   justify"), not rejected. On a non-zero lint exit, run `python3
+   "$HARNESS_DIR/tools/tasks-pair-check.py" --grandfathered "<dir>/<feature>.tasks.md"`:
+   exit 0 → flag, exit 1 → reject, exit 2 → report it and pass `--base <ref>`. The tool's
+   date is its merge into the default branch: the committer time of the first
+   `--first-parent` commit on that branch (`origin/HEAD`, else `main`/`master`/`trunk`)
+   touching either tool path. The `.tasks.md` date is the author time of its first
+   `git log --diff-filter=A` commit. While the tool is not on the default branch, every
+   `.tasks.md` is flagged. `sdd: false` items are exempt (they have no `.tasks.md`).
+   Check #2's traceability text is unchanged; this item checks shape only.
 
 ## ADR-citation check (architecture-aligned specs)
 

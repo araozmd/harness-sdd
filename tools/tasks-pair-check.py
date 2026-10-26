@@ -4,8 +4,9 @@
 E36-F01 / ADR-0008 decision 2.  Usage:
 
     tasks-pair-check.py <feature.tasks.md> --spec <feature.spec.md>
+    tasks-pair-check.py --grandfathered <feature.tasks.md> [--base <ref>]
 
-Pure function of two files; stdlib only.  Grammar (identical to docs/SPEC-FORMAT.md
+The lint is a pure function of two files; stdlib only.  Grammar (identical to docs/SPEC-FORMAT.md
 "Tasks — red/green pairs per requirement"):
 
   * Fenced code is skipped in BOTH files.  The fence rule is the CommonMark one that
@@ -24,12 +25,29 @@ Pure function of two files; stdlib only.  Grammar (identical to docs/SPEC-FORMAT
     (an un-cited task whose text matches \\bwrite\\b.*\\btests\\b, wherever it sits).
 
 Exit: 0 ok, 1 violation(s), 2 usage/input error (stderr `tasks-pair-check: error: ...`).
+
+--grandfathered (Reviewer check 7's grandfather rule; reads git, nothing else):
+  * the tool's date is its MERGE into the default branch -- the committer time of the first
+    first-parent commit on <base> that touches tools/tasks-pair-check.py or
+    .harness/tools/tasks-pair-check.py (source repo / installed target).  <base> is --base,
+    else what `refs/remotes/origin/HEAD` names, else the first of origin/main main
+    origin/master master origin/trunk trunk that resolves (tools/change-size.sh's order).
+  * the .tasks.md date is the AUTHOR time of the earliest commit on HEAD that added it
+    (a rebase rewrites committer time, not author time).
+  * flag (exit 0) when the tool is not on <base> yet, or the .tasks.md date is strictly
+    older than the tool's merge; otherwise reject class (exit 1) -- including a .tasks.md
+    with no commit yet.  Exit 2 when the file is not in a git work tree or no <base> resolves.
 """
+import os
+import subprocess
 import re
 import sys
 
 PFX = "tasks-pair-check: "
-USAGE = "usage: tasks-pair-check.py <feature.tasks.md> --spec <feature.spec.md>"
+USAGE = ("usage: tasks-pair-check.py <feature.tasks.md> --spec <feature.spec.md>\n"
+         "       tasks-pair-check.py --grandfathered <feature.tasks.md> [--base <ref>]")
+TOOL_PATHS = ("tools/tasks-pair-check.py", ".harness/tools/tasks-pair-check.py")
+BASE_FALLBACKS = ("origin/main", "main", "origin/master", "master", "origin/trunk", "trunk")
 
 RID_RE = re.compile(r"^[ \t]*-[ \t]+\*\*(R[0-9]+)\*\*")
 TASK_RE = re.compile(
@@ -122,11 +140,95 @@ def check(rids, tasks):
     return out
 
 
+def _git(repo, *args):
+    try:
+        r = subprocess.run(["git", "-C", repo] + list(args), stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, universal_newlines=True)
+    except OSError as exc:
+        raise InputError("cannot run git: %s" % exc)
+    return r.returncode, r.stdout
+
+
+def _resolves(repo, ref):
+    return _git(repo, "rev-parse", "--verify", "--quiet", ref + "^{commit}")[0] == 0
+
+
+def default_branch(repo):
+    rc, out = _git(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    head = out.strip() if rc == 0 else ""
+    for ref in ((head,) if head else ()) + BASE_FALLBACKS:
+        if _resolves(repo, ref):
+            return ref
+    return None
+
+
+def grandfather(tasks_path, base=None):
+    """Return (flag, reason): flag True = grandfathered (advisory), False = reject class."""
+    path = os.path.realpath(tasks_path)
+    if not os.path.isfile(path):
+        raise InputError("cannot read %s" % tasks_path)
+    rc, out = _git(os.path.dirname(path), "rev-parse", "--show-toplevel")
+    if rc != 0 or not out.strip():
+        raise InputError("%s is not inside a git work tree" % tasks_path)
+    top = out.strip()  # git prints the toplevel symlink-resolved, like `path` above
+    if base is None:
+        base = default_branch(top)
+        if base is None:
+            raise InputError("no default branch resolves (origin/HEAD, %s); pass --base"
+                             % " ".join(BASE_FALLBACKS))
+    elif not _resolves(top, base):
+        raise InputError("--base does not resolve: %s" % base)
+    _rc, out = _git(top, "log", "--first-parent", "--reverse", "--format=%ct", base, "--",
+                    *TOOL_PATHS)
+    stamps = out.split()
+    if not stamps:
+        return True, "tool not on default branch %s yet" % base
+    merged = int(stamps[0])
+    rel = os.path.relpath(path, top)
+    _rc, out = _git(top, "log", "--diff-filter=A", "--format=%at", "HEAD", "--", rel)
+    authored = [int(x) for x in out.split()]
+    if not authored:
+        return False, "%s has no commit on HEAD; tool merged into %s at %d" % (rel, base, merged)
+    first = min(authored)
+    if first < merged:
+        return True, "%s authored %d, before tool merged into %s at %d" % (rel, first, base, merged)
+    return False, "%s authored %d, not before tool merged into %s at %d" % (rel, first, base, merged)
+
+
+def main_grandfathered(args):
+    base = None
+    pos = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--base":
+            if i + 1 >= len(args):
+                raise InputError("--base needs a ref")
+            base = args[i + 1]
+            i += 2
+        elif args[i].startswith("--base="):
+            base = args[i][len("--base="):]
+            i += 1
+        else:
+            pos.append(args[i])
+            i += 1
+    if len(pos) != 1:
+        raise InputError("--grandfathered expects exactly one <feature.tasks.md>")
+    flag, reason = grandfather(pos[0], base)
+    print("%sgrandfather %s: %s" % (PFX, "flag" if flag else "reject", reason))
+    return 0 if flag else 1
+
+
 def main(argv):
     args = argv[1:]
     if any(a in ("-h", "--help") for a in args):
         print(USAGE)
         return 0
+    if "--grandfathered" in args:
+        try:
+            return main_grandfathered([a for a in args if a != "--grandfathered"])
+        except InputError as exc:
+            sys.stderr.write("%serror: %s\n%s\n" % (PFX, exc, USAGE))
+            return 2
     try:
         spec = None
         pos = []
