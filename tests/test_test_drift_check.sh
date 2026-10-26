@@ -18,6 +18,7 @@
 
 set -eu
 LC_ALL=C; export LC_ALL
+TAB_="$(printf '\t')"
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 TOOL="$ROOT/tools/test-drift-check.sh"
@@ -487,6 +488,40 @@ expect_rc 1 "R3e"; expect_ndrift 1 "R3e"
 grep -Fxq 'DRIFT assert-removed | tests/h.test.js:6 | second | expect(b).toBe(2);' "$T/out" \
   || { cat "$T/out" >&2; fail "R3e: want exactly the hunk-2 removal as assert-removed"; }
 pass "R3e_pairing_is_per_hunk"
+
+# Hunk geometry, one repo (round 3): consecutive `-` lines and consecutive `+` markers each keep
+# their OWN line number; a second hunk starts with no residue from the first; an enclosing def at
+# a one-digit line still owns a two-digit line (numeric, not string, comparison); a tab inside the
+# removed text survives into the detail; CRLF text is trimmed; and the `---`/`+++` header of a
+# file whose path contains `assert.` is never read as a content line; and only ASSERTION `+` lines
+# are partners, so an assertion replaced by plain code is assert-removed, not assert-modified.
+newrepo r3g; mkdir -p "$R/tests"
+printf "it('one', () => {\n  expect(a).toBe(1);\n  expect(b).toBe(2);\n  run();\n});\n// pad\n// pad\n// pad\nit('two', () => {\n  run();\n  run();\n  expect(c)\t.toBe(3);\n});\n" > "$R/tests/n.test.js"
+printf "it('k', () => {\n  run();\n});\n" > "$R/tests/k.test.js"
+printf "it('h', () => {\n  run(1);\n});\n" > "$R/tests/assert.test.js"
+printf "it('c', () => {\r\n  expect(a).toBe(1);\r\n  run();\r\n});\r\n" > "$R/tests/crlf.test.js"
+printf "it('r', () => {\n  expect(a).toBe(1);\n});\n" > "$R/tests/r.test.js"
+basecommit; feature
+printf "it('one', () => {\n  run();\n});\n// pad\n// pad\n// pad\nit('two', () => {\n  run();\n  run();\n});\n" > "$R/tests/n.test.js"
+printf "it('k', () => {\n  run();\n});\nit.skip('k2', () => {});\nit.only('k3', () => {});\n" > "$R/tests/k.test.js"
+printf "it('h', () => {\n  run(2);\n});\n" > "$R/tests/assert.test.js"
+printf "it('c', () => {\r\n  run();\r\n});\r\n" > "$R/tests/crlf.test.js"
+printf "it('r', () => {\n  console.log(a);\n});\n" > "$R/tests/r.test.js"
+featcommit
+run "$R" main
+expect_rc 1 "R3g"
+printf '%s\n' \
+  'DRIFT assert-removed | tests/crlf.test.js:2 | c | expect(a).toBe(1);' \
+  "DRIFT assert-removed | tests/n.test.js:12 | two | expect(c)$TAB_.toBe(3);" \
+  'DRIFT assert-removed | tests/n.test.js:2 | one | expect(a).toBe(1);' \
+  'DRIFT assert-removed | tests/n.test.js:3 | one | expect(b).toBe(2);' \
+  "DRIFT skip-added | tests/k.test.js:4 | k2 | it.skip('k2', () => {});" \
+  "DRIFT skip-added | tests/k.test.js:5 | k3 | it.only('k3', () => {});" \
+  'DRIFT assert-removed | tests/r.test.js:2 | r | expect(a).toBe(1);' | sort > "$T/want"
+grep '^DRIFT ' "$T/out" | sort > "$T/got"
+cmp -s "$T/got" "$T/want" || { diff "$T/want" "$T/got" >&2; fail "R3g: the finding set differs (want < / got >)"; }
+expect_line '^test-drift-check: 7 findings, 0 waived, 5 test files examined ' "R3g summary"
+pass "R3g_hunk_geometry"
 
 # The tool pins LC_ALL=C itself, so the CALLER's locale cannot change a verdict (round 3, N18).
 # Observable on hosts whose awk decodes UTF-8 (the macOS system awk): under a UTF-8 locale it
