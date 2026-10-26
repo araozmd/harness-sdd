@@ -42,6 +42,9 @@
 # pathnames containing LF or TAB are unsupported; describe( blocks count as test names; the
 # shared classifier matches `*.spec.md`, so a spec prose line naming an assertion pattern is a
 # finding whose name is the spec's path (waive it by that path).
+# Outside the spec, unpinned (round-3 mutation campaign): a JS/TS test name whose closing quote
+# is on a later line is not extracted; symlinked test paths are not a supported shape (a dangling
+# one reads as empty head text in working-tree mode).
 
 set -eu
 LC_ALL=C
