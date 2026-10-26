@@ -713,6 +713,24 @@ function deriveWaves(model, config, args) {
   const features = [...model.features].sort((a, b) => compareIds(a.id, b.id));
   const featureById = new Map(features.map((feature) => [feature.id, feature]));
   const cycles = cycleMap(features, 'feature');
+  const blockersOf = new Map(features.filter((feature) => feature.status !== 'done')
+    .map((feature) => [feature.id, featureBlockers(feature, featureById, cycles, config.requireApproval)]));
+  // R6 — never invent a wave for an invalid graph. Judged BOARD-WIDE (not by --epic): a
+  // non-done feature carrying a dependency-cycle record (a LIVE cycle — featureBlockers
+  // already omits it for a stale one, E99-F155) or naming an id absent from the board.
+  // Only those features' graph records are reported; a cyclic feature's human-gate or
+  // parked record is not a graph fault, and a mere dependent contributes nothing.
+  const invalid = [];
+  for (const [id, records] of blockersOf) {
+    const cyclic = records.some((record) => record.code === 'dependency-cycle');
+    const dangling = (featureById.get(id).depends_on || []).some((dep) => !featureById.has(dep));
+    if (cyclic || dangling) invalid.push(...records.filter((record) => record.code === 'dependency-cycle' || record.code === 'unmet-dependency'));
+  }
+  if (invalid.length) {
+    const summary = 'waves undefined: dependency graph is invalid; see reasons above';
+    return { ...envelope('waves', 'blocked', null, { code: 'invalid-graph', detail: 'waves undefined: dependency graph is invalid' }, invalid, summary),
+      scope: { epic }, wave0: [], waves: [], critical_path: [] };
+  }
   const memo = new Map();
   const wave = (id) => {
     if (memo.has(id)) return memo.get(id);
@@ -730,7 +748,7 @@ function deriveWaves(model, config, args) {
     if (!groups.has(n)) groups.set(n, []);
     // R5: the selector's own records and its feature-level `otherwiseActionable`
     // predicate — no slice readiness, no --mine scoping (a fan-out consumer applies those).
-    const blocked = featureBlockers(feature, featureById, cycles, config.requireApproval);
+    const blocked = blockersOf.get(feature.id);
     const route = featureRoute(feature, config.requireApproval);
     groups.get(n).push({
       id: feature.id,

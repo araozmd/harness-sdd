@@ -360,10 +360,69 @@ ROWS
   pass "R5 feature_records: exact key set; route/autonomous/owner/runnable; blocked == selector records"
 }
 
+# BLOCKED_SHAPE: every blocked record as `subject code detail`, `;`-joined, in order.
+BLOCKED_SHAPE='";".join("%s %s %s" % (b["subject"], b["code"], b["detail"]) for b in x["blocked"])'
+
+# assert_invalid <label> <out-file> <scope-repr> <blocked-shape>
+assert_invalid() {
+  [ "$(json_field 'x["mode"] + "/" + x["outcome"] + "/" + x["reason"]["code"] + "/" + str(x["selected"])' <"$2")" = waves/blocked/invalid-graph/None ] ||
+    fail "R6 [$1]: not mode=waves outcome=blocked reason=invalid-graph selected=null"
+  [ "$(json_field 'x["scope"]' <"$2")" = "$3" ] || fail "R6 [$1]: scope is $(json_field 'x["scope"]' <"$2"), want $3"
+  [ "$(json_field 'str(x["wave0"]) + str(x["waves"]) + str(x["critical_path"])' <"$2")" = '[][][]' ] ||
+    fail "R6 [$1]: wave0/waves/critical_path are not all empty on an invalid graph"
+  [ -n "$(json_field 'x["summary"] or ""' <"$2")" ] || fail "R6 [$1]: summary is empty"
+  [ "$(json_field 'list(x)' <"$2")" = "['schema_version', 'mode', 'outcome', 'selected', 'reason', 'blocked', 'summary', 'scope', 'wave0', 'waves', 'critical_path']" ] ||
+    fail "R6 [$1]: envelope key list differs from the valid-graph envelope"
+  _got=$(json_field "$BLOCKED_SHAPE" <"$2")
+  [ "$_got" = "$4" ] || fail "R6 [$1]: blocked is
+  $_got
+want
+  $4"
+}
+
+test_invalid_graph() {
+  write_config true
+  # (a) live cycle F1 <-> F2, F3 depends on F2 (a mere dependent: no record); F4 done.
+  board1 "$(feat E1-F4 done)" "$(feat E1-F3 pending '["E1-F2"]')" "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F1 pending '["E1-F2"]')"
+  _rc=0
+  run_tool --waves --json >"$TMP/g.out" || _rc=$?
+  [ "$_rc" = 0 ] || fail "R6 (a): an invalid graph exited $_rc, want 0"
+  assert_invalid a "$TMP/g.out" "{'epic': None}" \
+    'E1-F1 dependency-cycle dependency cycle (feature): E1-F1 -> E1-F2 -> E1-F1;E1-F1 unmet-dependency blocking dependencies: E1-F2=pending;E1-F2 dependency-cycle dependency cycle (feature): E1-F1 -> E1-F2 -> E1-F1;E1-F2 unmet-dependency blocking dependencies: E1-F1=pending'
+  # (b) dangling depends_on, two offenders in non-canonical order (F10 before F9 as text
+  # and in input); F10 is ALSO parked: only its unmet-dependency record appears. F2 is a
+  # mere dependent of F9. F5 is DONE and names a missing id: not an offender.
+  board1 "$(feat E1-F10 pending '["E1-F8","E1-F1"]' '"parked":{"reason":"hold"}')" "$(feat E1-F2 pending '["E1-F9"]')" \
+    "$(feat E1-F9 pending '["E1-F7"]')" "$(feat E1-F5 done '["E1-F6"]')" "$(feat E1-F1 pending)"
+  run_tool --waves --json >"$TMP/g.out" || fail "R6 (b): exited non-zero"
+  assert_invalid b "$TMP/g.out" "{'epic': None}" \
+    'E1-F9 unmet-dependency blocking dependencies: E1-F7=missing;E1-F10 unmet-dependency blocking dependencies: E1-F1=pending, E1-F8=missing'
+  # (c) the dangling edge in E1 while --epic E2: validity is judged board-wide.
+  boardN "$(epic_json E2 "$(feat E2-F1 pending)")" "$(epic_json E1 "$(feat E1-F1 pending '["E1-F9"]')")"
+  run_tool --waves --epic E2 --json >"$TMP/g.out" || fail "R6 (c): exited non-zero"
+  assert_invalid c "$TMP/g.out" "{'epic': 'E2'}" 'E1-F1 unmet-dependency blocking dependencies: E1-F9=missing'
+  # (d) stale cycle: F1 done, F2 pending, mutual edges -> valid, F2 in wave 1. A done
+  # feature naming a missing id is not an offender either.
+  board1 "$(feat E1-F3 done '["E1-F9"]')" "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F1 done '["E1-F2"]')"
+  run_tool --waves --json >"$TMP/g.out" || fail "R6 (d): exited non-zero"
+  [ "$(json_field 'x["outcome"]' <"$TMP/g.out")" = waves ] || fail "R6 (d): a stale cycle made the graph invalid"
+  [ "$(json_field "$WAVES_SHAPE" <"$TMP/g.out")" = '1:E1-F2' ] || fail "R6 (d): stale-cycle feature is not alone in wave 1"
+  [ "$(record_of E1-F2 '[b["code"] for b in r["blocked"]]' <"$TMP/g.out")" = '[]' ] ||
+    fail "R6 (d): stale-cycle feature carries a blocker record"
+  # (e) live cycle where F1 is spec-ready non-autonomous under approval and F2 is parked:
+  # no human-gate and no parked record — only the two graph codes per feature.
+  board1 "$(feat E1-F2 pending '["E1-F1"]' '"parked":{"reason":"hold"}')" "$(feat E1-F1 spec-ready '["E1-F2"]')"
+  run_tool --waves --json >"$TMP/g.out" || fail "R6 (e): exited non-zero"
+  assert_invalid e "$TMP/g.out" "{'epic': None}" \
+    'E1-F1 dependency-cycle dependency cycle (feature): E1-F1 -> E1-F2 -> E1-F1;E1-F1 unmet-dependency blocking dependencies: E1-F2=pending (parked: hold);E1-F2 dependency-cycle dependency cycle (feature): E1-F1 -> E1-F2 -> E1-F1;E1-F2 unmet-dependency blocking dependencies: E1-F1=spec-ready'
+  pass "R6 invalid_graph: live cycle / dangling id -> invalid-graph with only graph records; stale cycle valid"
+}
+
 test_cli_contract
 test_usage_synopsis
 test_wave_assignment
 test_epic_scope
 test_feature_records
+test_invalid_graph
 
 echo "test_waves: $PASS passed"
