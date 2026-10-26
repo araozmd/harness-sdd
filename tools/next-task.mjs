@@ -71,10 +71,10 @@ function emit(result, diagnostic = null, exitCode = 0) {
 }
 
 function parseArgs(argv) {
-  const out = { mode: 'board', feature: null, tasks: null, config: null };
+  const out = { mode: 'board', feature: null, epic: null, tasks: null, config: null, json: false };
   const seen = new Set();
-  const values = new Set(['--feature', '--tasks', '--config']);
-  const flags = new Set(['--json', '--mine']);
+  const values = new Set(['--feature', '--epic', '--tasks', '--config']);
+  const flags = new Set(['--json', '--mine', '--waves']);
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (!flags.has(arg) && !values.has(arg)) {
@@ -88,6 +88,7 @@ function parseArgs(argv) {
         throw new ExpectedError('usage-error', `${arg} requires a non-empty value`);
       }
       if (arg === '--feature') out.feature = value;
+      if (arg === '--epic') out.epic = value;
       if (arg === '--tasks') out.tasks = value;
       if (arg === '--config') out.config = value;
     }
@@ -95,6 +96,18 @@ function parseArgs(argv) {
   if (seen.has('--mine') && out.feature !== null) {
     throw new ExpectedError('usage-error', '--mine and --feature are mutually exclusive');
   }
+  // E36-F05: `--waves` is a read-only projection of the whole graph, not a selection, so
+  // it composes with neither selection scope. `--json` is recorded for it alone: in the
+  // board/mine/target modes it stays the exact no-op it has always been.
+  out.json = seen.has('--json');
+  if (seen.has('--waves')) {
+    if (out.feature !== null) throw new ExpectedError('usage-error', '--waves and --feature are mutually exclusive');
+    if (seen.has('--mine')) throw new ExpectedError('usage-error', '--waves and --mine are mutually exclusive');
+    if (out.epic !== null && !EPIC_RE.test(out.epic)) throw new ExpectedError('usage-error', `invalid epic id ${out.epic}`);
+    out.mode = 'waves';
+    return out;
+  }
+  if (out.epic !== null) throw new ExpectedError('usage-error', '--epic requires --waves');
   if (out.feature !== null) {
     if (!FEATURE_RE.test(out.feature)) throw new ExpectedError('usage-error', `invalid feature id ${out.feature}`);
     out.mode = 'target';
