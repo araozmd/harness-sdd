@@ -107,6 +107,8 @@ test_cli_contract() {
   expect_usage_error epic-feature-id 'invalid epic id E1-F1' --waves --epic E1-F1
   expect_usage_error epic-lowercase 'invalid epic id e1' --waves --epic e1
   expect_usage_error epic-trailing 'invalid epic id E1x' --waves --epic E1x
+  expect_usage_error epic-bare-E 'invalid epic id E' --waves --epic E
+  expect_usage_error waves+feature+epic 'mutually exclusive' --waves --epic E1 --feature E1-F1
   expect_usage_error waves-dup 'duplicate option --waves' --waves --waves
   expect_usage_error epic-dup 'duplicate option --epic' --waves --epic E1 --epic E1
   # Regression: --json stays an exact no-op in board, mine and target modes.
