@@ -698,6 +698,52 @@ for _mode in wt ref; do
 done
 pass "R7j_deleted_and_renamed_files"
 
+# Extractor variants and decorator binding, one repo (round 3, N08/N07/N11): an `async def`
+# test, an extensionless `#!/bin/sh` file (sh by shebang), and a decorator added above the
+# FIRST of two defs, which must name the NEXT def, not the last one in the file.
+newrepo r7k
+put tests/test_async.py <<'EOF'
+async def test_y():
+    pass
+def test_keep():
+    pass
+EOF
+put tests/run <<'EOF'
+#!/bin/sh
+t_run() { :; }
+t_keep() { :; }
+EOF
+put tests/test_dec.py <<'EOF'
+def test_m():
+    pass
+def test_n():
+    pass
+EOF
+basecommit; feature
+put tests/test_async.py <<'EOF'
+def test_keep():
+    pass
+EOF
+delline tests/run 't_run() { :; }'
+put tests/test_dec.py <<'EOF'
+@pytest.mark.skip
+def test_m():
+    pass
+def test_n():
+    pass
+EOF
+featcommit
+run "$R" main
+expect_rc 1 "R7k"; expect_ndrift 3 "R7k"
+grep -Fxq 'DRIFT test-removed | tests/test_async.py:— | test_y | test_y' "$T/out" \
+  || { cat "$T/out" >&2; fail "R7k: a removed async def test_y is test-removed"; }
+grep -Fxq 'DRIFT test-removed | tests/run:— | t_run | t_run' "$T/out" \
+  || { cat "$T/out" >&2; fail "R7k: an extensionless #!/bin/sh file is read as sh"; }
+pass "R7k_async_def_and_shebang_sh"
+grep -Fxq 'DRIFT skip-added | tests/test_dec.py:1 | test_m | @pytest.mark.skip' "$T/out" \
+  || { cat "$T/out" >&2; fail "R6f: a decorator names the NEXT def (test_m), not a later one"; }
+pass "R6f_decorator_names_next_def"
+
 r7g() { # label-style sh suite; the assertion line above `pass "R9 label"` is removed
   newrepo "$1"
   put tests/t.sh <<'EOF'
