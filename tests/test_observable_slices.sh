@@ -176,3 +176,13 @@ wsecF 'agents/driller.md' || fail "R9: section does not point at agents/driller.
 wsecF 'agents/doc-critic.md' || fail "R9: section does not point at agents/doc-critic.md"
 wsec 'advisory[^.]{0,40}never blocks' || fail "R9: section does not say the rule is advisory and never blocks"
 pass "R9_workflow_section"
+
+# ── R10: VERSION / CHANGELOG paired at run time (never a frozen literal) ──────────
+v="$(tr -d '[:space:]' < VERSION)"
+newest="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' CHANGELOG.md | head -1)"
+[ -n "$v" ] && [ "$newest" = "$v" ] || fail "R10: newest CHANGELOG heading ($newest) != VERSION ($v)"
+# some section body (up to the next '## [' heading) names the feature and the exemption token
+awk '/^## \[/{if(sec ~ /E36-F02/ && sec ~ /Observable-slice exemption/){ok=1} sec=""; next} {sec=sec $0 "\n"}
+     END{if(sec ~ /E36-F02/ && sec ~ /Observable-slice exemption/){ok=1} exit ok?0:1}' CHANGELOG.md \
+  || fail "R10: no CHANGELOG section names both E36-F02 and Observable-slice exemption"
+pass "R10_version_changelog_paired"
