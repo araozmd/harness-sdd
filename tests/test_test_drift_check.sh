@@ -597,6 +597,10 @@ git -C "$R" mv tests/a.test.js tests/b.test.js; featcommit
 run "$R" main
 expect_rc 0 "R7f"
 expect_line '^test-drift-check: 0 findings, 0 waived, 1 test files examined ' "R7f counts the renamed file as examined"
+# The same rename read in <head-ref> mode: the head text comes from the NEW path at that commit.
+run "$R" main feature
+expect_rc 0 "R7f main feature"
+expect_line '^test-drift-check: 0 findings, 0 waived, 1 test files examined ' "R7f head-ref mode reads the new path"
 pass "R7f_rename_no_change"
 
 r7g() { # label-style sh suite; the assertion line above `pass "R9 label"` is removed
