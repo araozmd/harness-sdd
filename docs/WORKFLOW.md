@@ -342,6 +342,37 @@ needed; existing owner-free stores keep validating unchanged.
 - **Mirror stays one-way.** `state/tasks.json` is the single source of truth for `owner`;
   no agent reads the board to learn ownership.
 
+## Running in waves and across machines
+
+The roadmap's parallelism is already on the board as `depends_on` edges. The selector
+projects it into **waves** — derived, **never stored** (ADR-0010): nothing about a wave
+is written to the board, and there is no lane, lease or claim field.
+
+- **Definition.** `done` features are wave 0; a non-done feature's wave is 1 + the
+  highest wave among its dependencies (a `done` dependency counts as 0, so a feature with
+  no dependencies is wave 1). The **critical path** is the longest chain of non-done
+  features along `depends_on`, root first; ties go to ADR-0001 id order.
+- **Invocation.** `node tools/next-task.mjs --waves [--json] [--epic E##]`
+  (`node .harness/tools/next-task.mjs ...` in an installed target). Without `--json` it
+  prints a report — one row per feature with its status, route, `auto` when
+  `autonomous: true`, and either `runnable` or its blocker codes; with `--json` it prints
+  one envelope (`outcome: "waves"`). `--waves` covers the whole board. `--epic E##` lists
+  only that epic, but wave numbers stay board-wide (a dependency in another epic still
+  counts), so an epic's first listed wave can be above 1. The Driller ends its report with
+  this view for the epic it just seeded.
+- **Running wave 1 across machines.** Read wave 1 (its `runnable` rows), give each
+  machine one feature, and run `/sdd-next <id>` on that machine — targeting is the
+  multi-machine primitive. Start the critical path first.
+- **Alternative scoping.** Set `owner` on the features (or their epics) and run
+  `/sdd-next --mine` on each machine, as in the section above; each record's `owner`
+  column shows the effective owner.
+- **Known limitation.** Bare `/sdd-next` on identical boards picks the same feature on
+  every machine, because selection is deterministic; use `/sdd-next <id>` or `--mine`.
+- **Invalid graph.** A live dependency cycle or a `depends_on` id absent from the board
+  makes waves undefined: the view reports `invalid-graph` with the cycle witness /
+  `<id>=missing` records and prints no wave at all (exit 0). A stale cycle (every
+  dependency already `done`) is not invalid.
+
 ## Diagnosing blocked selection
 
 Dependency cycles and an empty `/sdd-next` result are planning diagnostics, not
@@ -369,7 +400,8 @@ no actionable work: selection blocked; see reasons above
 Other reasons distinguish a draft parent (`gated-epic`), a park (`parked`, below),
 an owner gate (`gated-owner`, below), human approval (`human-gate`), scoped
 ownership (`owner-excluded` /
-`owner-unresolved`), and a truly empty or all-done board (`no-candidates`). This
+`owner-unresolved`), a truly empty or all-done board (`no-candidates`), and — in the
+`--waves` view only — a graph whose waves are undefined (`invalid-graph`, above). This
 output is informational and read-only. It explains the current selection policy;
 it does not relax a gate, pick a fallback, or introduce a new TaskStore status.
 

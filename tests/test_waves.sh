@@ -553,6 +553,40 @@ $(diff "$TMP/h.want" "$TMP/h.out" || :)"
   pass "R8 human_report: scope line, Wave 0, wave rows by field, critical path; invalid graph; errors stay JSON"
 }
 
+# section_of <file> <exact-heading>: the heading line to the line before the next `## `
+# heading, or EOF — cut with sed on grep -n numbers (the awk extractor is fence-blind).
+section_of() {
+  _s=$(grep -nxF "$2" "$1" | head -n 1 | cut -d: -f1)
+  [ -n "$_s" ] || return 0
+  _e=$(grep -n '^## ' "$1" | awk -F: -v s="$_s" '$1 > s { print $1 - 1; exit }')
+  [ -n "$_e" ] || _e=$(wc -l <"$1" | tr -d ' ')
+  sed -n "${_s},${_e}p" "$1"
+}
+
+test_workflow_docs() {
+  _doc="$ROOT/docs/WORKFLOW.md"
+  _h='## Running in waves and across machines'
+  section_of "$_doc" "$_h" >"$TMP/sec"
+  [ -s "$TMP/sec" ] || fail "R11: docs/WORKFLOW.md has no '$_h' heading"
+  for _lit in '--waves' '--epic' '/sdd-next <id>' '--mine' 'ADR-0010' 'wave 1' 'owner'; do
+    grep -qF -- "$_lit" "$TMP/sec" || fail "R11: the '$_h' section does not mention '$_lit'"
+  done
+  grep -qF -- '--waves [--json] [--epic E##]' "$TMP/sec" || fail "R11: the section does not show the --waves [--json] [--epic E##] invocation"
+  tr '\n' ' ' <"$TMP/sec" | grep -qE 'identical boards[^.]{0,160}same feature|same feature[^.]{0,160}identical boards' ||
+    fail "R11: no sentence states that bare /sdd-next on identical boards picks the same feature"
+  tr '\n' ' ' <"$TMP/sec" | grep -qiE 'never stored|not stored|never written' ||
+    fail "R11: the section does not say waves are never stored"
+  # Placement: between `## Ownership & scoped selection` and `## Diagnosing blocked selection`.
+  _w=$(grep -nxF "$_h" "$_doc" | cut -d: -f1)
+  _o=$(grep -n '^## Ownership & scoped selection' "$_doc" | cut -d: -f1)
+  _d=$(grep -nxF '## Diagnosing blocked selection' "$_doc" | cut -d: -f1)
+  [ "$_o" -lt "$_w" ] && [ "$_w" -lt "$_d" ] ||
+    fail "R11: the section is not placed between Ownership & scoped selection and Diagnosing blocked selection"
+  section_of "$_doc" '## Diagnosing blocked selection' | grep -qF '`invalid-graph`' ||
+    fail "R11: Diagnosing blocked selection does not list the invalid-graph reason code"
+  pass "R11 workflow_docs: Running in waves and across machines section"
+}
+
 # Runs LAST: it audits every run_tool call the suite made.
 test_read_only_and_builtins() {
   _n=$(grep -c -- '--waves' "$RUNS" || :)
@@ -583,6 +617,7 @@ test_feature_records
 test_invalid_graph
 test_critical_path
 test_human_report
+test_workflow_docs
 test_read_only_and_builtins
 
 echo "test_waves: $PASS passed"
