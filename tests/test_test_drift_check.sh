@@ -198,6 +198,16 @@ run "$R" main
 expect_rc 0 "R8a"; [ "$(nlines)" = 1 ] || { cat "$T/out" >&2; fail "R8a: want exactly one stdout line"; }
 expect_line '^test-drift-check: 0 findings, 0 waived, 0 test files examined \(base [0-9a-f]+\)$' "R8a summary"
 [ ! -s "$T/err" ] || fail "R8a: stderr must be empty"
+# The summary names the merge base by its SHORT sha, and the run leaves no temp dir behind.
+expect_line "\\(base $(git -C "$R" rev-parse --short main)\\)\$" "R8a summary names the short merge-base sha"
+# Location-free leak check: the macOS mktemp -d here ignores TMPDIR, so look in the root mktemp
+# really uses for the copy of a waiver whose token only this process wrote (concurrency-safe).
+_probe="$(mktemp -d)"; _troot="$(dirname "$_probe")"; rmdir "$_probe"
+printf 'waive-test-drift: tmpprobe-%s \342\200\224 cleanup probe\n' "$$" > "$T/tasks.md"
+run "$R" main --tasks-md "$T/tasks.md"
+expect_rc 0 "R8a cleanup probe run"
+[ -z "$(grep -l "tmpprobe-$$" "$_troot"/*/waivers 2>/dev/null || true)" ] \
+  || fail "R8a: the tool must remove its temp dir on exit (a waivers copy survived under $_troot)"
 pass "R8a_no_test_change"
 
 newrepo r8b; js_app tests/app.test.js; basecommit; feature
@@ -299,6 +309,23 @@ expect_rc 1 "R1d"
 expect_ndrift 1 "R1d"
 expect_line '^DRIFT assert-modified \| zzz/x\.sh:' "R1d must name zzz/x.sh"
 [ "$(cnt 'tests/x\.sh')" = 0 ] || fail "R1d: tests/x.sh must not be examined under the stub classifier"
+# A sibling that fails, or answers with an empty classifier, stops the check (exit 3): it never
+# examines every path, or none, on a half-read configuration (round 3).
+cat > "$T/stubtools/change-size.sh" <<'EOF'
+#!/bin/sh
+case "$1:$STUB" in
+  --print-test-re:re-fails)   echo '(^|/)zzz/'; exit 1 ;;
+  --print-test-re:re-empty)   echo '' ;;
+  --print-test-re:*)          echo '(^|/)zzz/' ;;
+  --print-list:list-fails)    exit 1 ;;
+esac
+exit 0
+EOF
+for _stub in re-fails:'cannot read the test classifier' re-empty:'empty test classifier' list-fails:'cannot read change_size.assert_patterns'; do
+  ( cd "$R" && STUB="${_stub%%:*}" sh "$T/stubtools/test-drift-check.sh" main ) > "$T/out" 2> "$T/err" && rc=0 || rc=$?
+  expect_rc 3 "R1d stub ${_stub%%:*}"
+  grep -qF "${_stub#*:}" "$T/err" || { cat "$T/err" >&2; fail "R1d: stub ${_stub%%:*} must stop with '${_stub#*:}'"; }
+done
 pass "R1d_stub_classifier"
 
 # Known limit, documented in the tool header and the Reviewer section: the shared classifier
