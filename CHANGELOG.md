@@ -22,6 +22,9 @@ All notable changes to the harness body are recorded here. Versions follow
   Content diffs pass `--no-textconv`, so a `.gitattributes` text-conversion driver cannot hide a
   weakened assertion; a JS/TS title ends at the first unescaped quote, so `doesn\'t reject` and
   `doesn\'t throw` stay two names.
+  The Reviewer's default-branch line resolves like `change-size.sh` (`origin/HEAD`, else the first
+  existing of `origin/main main origin/master master origin/trunk trunk`), and an `sdd: false`
+  brief-only item passes its inbox brief as `--tasks-md`, where its waivers live.
 - `tools/change-size.sh` gains two additive config-query modes, `--print-test-re` and
   `--print-list <key>`, so the drift tool reuses the one test-path classifier and the one
   `change_size:` parser instead of carrying copies. Measuring behaviour is unchanged.

@@ -318,9 +318,16 @@ nothing about an assertion that was weakened so it still passes, or a test whose
 left the file. Run the drift check on the branch you are approving:
 
 ```sh
-_def="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || echo main)"
+_def="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || for _c in origin/main main origin/master master origin/trunk trunk; do git rev-parse --verify --quiet "$_c^{commit}" >/dev/null && { echo "$_c"; break; }; done)"
 sh "$HARNESS_DIR/tools/test-drift-check.sh" "$_def" --tasks-md specs/epics/<epic>/<feature>/<feature>.tasks.md
 ```
+
+The first line resolves the default branch the way `tools/change-size.sh` does: `origin/HEAD`
+when the clone has it, else the first of `origin/main main origin/master master origin/trunk
+trunk` that exists, so a `master`- or `trunk`-only repository is not handed a `main` that does
+not resolve. **An `sdd: false` brief-only item** has no `.tasks.md` (see the `sdd: false`
+section above): pass its inbox brief instead, `--tasks-md progress/inbox/<id>.md`. Intentional
+drift in that lane is waived the same way, by a `waive-test-drift:` line in the brief.
 
 Pass the **default branch**, not a hard-coded `origin/main`: the tool takes the merge-base
 itself, so a stacked branch or a rebased one is measured from the point a reviewer actually

@@ -1360,6 +1360,23 @@ printf '%s' "$_fold" | grep -qE 'are not checked[^.]{0,40}still read the test di
   || fail "R11a: the exit-0 bullet must say other changed lines are not checked and the diff is still read"
 printf '%s' "$_fold" | grep -qF 'nothing removed, modified or skipped' \
   && fail "R11a: the exit-0 bullet must not claim nothing was removed, modified or skipped"
+# A brief-only (sdd: false) item has no .tasks.md: the section names its inbox brief instead.
+printf '%s' "$_fold" | grep -qF -- '--tasks-md progress/inbox/<id>.md' \
+  || fail "R11a: the section must tell a brief-only item to pass its inbox brief as --tasks-md"
+# The default-branch line, EXECUTED from the prose: a master- or trunk-only repository (no
+# origin/HEAD) resolves to its own branch, never to a `main` that does not exist (Codex P2 on PR #299).
+_defline="$(printf '%s\n' "$_sec" | grep '^_def=' | head -n 1)"
+[ -n "$_defline" ] || fail "R11a: the section must carry a one-line _def= default-branch resolution"
+for _b in master trunk main; do
+  newrepo "r11def-$_b"
+  [ "$_b" = main ] || git -C "$R" branch -q -m main "$_b"
+  _got="$(cd "$R" && eval "$_defline" && printf '%s' "$_def")"
+  [ "$_got" = "$_b" ] || fail "R11a: on a $_b-only repository the _def line must resolve '$_b', got '$_got'"
+done
+git -C "$R" update-ref refs/remotes/origin/develop HEAD
+git -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
+_got="$(cd "$R" && eval "$_defline" && printf '%s' "$_def")"
+[ "$_got" = origin/develop ] || fail "R11a: origin/HEAD wins when present, got '$_got'"
 pass "R11a_reviewer_section"
 
 # ── R12: the shipped body ────────────────────────────────────────────────────────
