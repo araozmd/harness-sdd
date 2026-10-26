@@ -294,9 +294,76 @@ test_epic_scope() {
   pass "R4 epic_scope: whole board by default; --epic filters, keeps board-wide waves; missing epic = input-error first"
 }
 
+# record_of <id> <expr-over-r>: evaluate an expression over the wave record of <id>.
+record_of() {
+  python3 -c 'import json,sys
+x=json.load(sys.stdin)
+r=[f for w in x["waves"] for f in w["features"] if f["id"]==sys.argv[1]]
+assert len(r)==1, "%s listed %d times" % (sys.argv[1], len(r))
+r=r[0]
+print(eval(sys.argv[2], {"r":r}))' "$1" "$2"
+}
+
+test_feature_records() {
+  write_config true
+  # Records fixture (require_spec_approval: true), listed out of order. E1 is owned by
+  # alice; E3 is a draft epic.
+  boardN \
+    "$(printf '{"id":"E3","title":"E3","status":"draft","features":[%s]}' "$(feat E3-F1 pending '[]' '"autonomous":true')")" \
+    "$(epic_json E2 "$(feat E2-F1 pending '[]' '"autonomous":false')")" \
+    "$(printf '{"id":"E1","title":"E1","status":"planned","owner":"alice","features":[%s]}' "$(printf '%s,' \
+      "$(feat E1-F7 pending '[]' '"owner":""')" \
+      "$(feat E1-F6 in-review '[]' '"autonomous":true,"parked":{"reason":"PR 12 open","gate":"merge","pr":"12"}')" \
+      "$(feat E1-F5 pending '["E1-F2"]' '"autonomous":true')" \
+      "$(feat E1-F4 spec-ready '[]')" \
+      "$(feat E1-F3 pending '[]' '"parked":{"reason":"console attestation","gate":"owner"}')" \
+      "$(feat E1-F2 pending '[]' '"owner":"bob","autonomous":true,"parked":{"reason":"vendor keys pending"}')" \
+      "$(feat E1-F1 in-progress '[]' '"autonomous":true')" | sed 's/,$//')")"
+  run_tool --waves --json >"$TMP/r.out" || fail "R5: --waves --json failed"
+  [ "$(json_field 'x["outcome"]' <"$TMP/r.out")" = waves ] || fail "R5: outcome is not waves"
+  [ "$(json_field 'sorted({",".join(sorted(f)) for w in x["waves"] for f in w["features"]})' <"$TMP/r.out")" = "['autonomous,blocked,id,owner,route,runnable,status']" ] ||
+    fail "R5: a feature record's key set is not exactly id,status,route,autonomous,owner,runnable,blocked"
+  # id status route autonomous owner runnable first-code — one row per feature.
+  while read -r id status route auto owner runnable code; do
+    got=$(record_of "$id" '" ".join([r["id"], r["status"], str(r["route"]), str(r["autonomous"]), repr(r["owner"]), str(r["runnable"]), r["blocked"][0]["code"] if r["blocked"] else "-"])' <"$TMP/r.out")
+    want="$id $status $route $auto $owner $runnable $code"
+    [ "$got" = "$want" ] || fail "R5 [$id]: record is '$got', want '$want'"
+  done <<'ROWS'
+E1-F1 in-progress builder True 'alice' True -
+E1-F2 pending architect True 'bob' False parked
+E1-F3 pending architect False 'alice' False gated-owner
+E1-F4 spec-ready None False 'alice' False human-gate
+E1-F5 pending architect True 'alice' False unmet-dependency
+E1-F6 in-review reviewer True 'alice' False awaiting-merge
+E1-F7 pending architect False '' True -
+E2-F1 pending architect False None True -
+E3-F1 pending architect True None False gated-epic
+ROWS
+  case $(record_of E1-F2 'r["blocked"][0]["detail"]' <"$TMP/r.out") in
+    *'[route when unparked: architect]') ;;
+    *) fail "R5: parked detail does not end with [route when unparked: architect]" ;;
+  esac
+  # The blocked records ARE the selector's: target mode on the same fixture is the oracle.
+  for id in E1-F2 E1-F3 E1-F4 E1-F5 E1-F6 E3-F1; do
+    run_tool --feature "$id" >"$TMP/t.out" || fail "R5: target mode for $id failed"
+    [ "$(json_field '[[b["code"], b["detail"]] for b in x["blocked"]]' <"$TMP/t.out")" = \
+      "$(record_of "$id" '[[b["code"], b["detail"]] for b in r["blocked"]]' <"$TMP/r.out")" ] ||
+      fail "R5 [$id]: wave record blocked != the selector's target-mode blocked records"
+    [ "$(record_of "$id" 'all(b["subject"] == r["id"] for b in r["blocked"])' <"$TMP/r.out")" = True ] ||
+      fail "R5 [$id]: a blocked record's subject is not the feature"
+  done
+  for id in E1-F1 E1-F7 E2-F1; do
+    run_tool --feature "$id" >"$TMP/t.out" || fail "R5: target mode for $id failed"
+    [ "$(json_field 'x["outcome"]' <"$TMP/t.out")" = selected ] || fail "R5 [$id]: runnable in waves but not selected in target mode"
+    [ "$(record_of "$id" 'r["blocked"]' <"$TMP/r.out")" = '[]' ] || fail "R5 [$id]: runnable record has non-empty blocked"
+  done
+  pass "R5 feature_records: exact key set; route/autonomous/owner/runnable; blocked == selector records"
+}
+
 test_cli_contract
 test_usage_synopsis
 test_wave_assignment
 test_epic_scope
+test_feature_records
 
 echo "test_waves: $PASS passed"

@@ -712,6 +712,7 @@ function deriveWaves(model, config, args) {
   const inScope = (feature) => epic === null || feature.epic.id === epic;
   const features = [...model.features].sort((a, b) => compareIds(a.id, b.id));
   const featureById = new Map(features.map((feature) => [feature.id, feature]));
+  const cycles = cycleMap(features, 'feature');
   const memo = new Map();
   const wave = (id) => {
     if (memo.has(id)) return memo.get(id);
@@ -727,7 +728,19 @@ function deriveWaves(model, config, args) {
     if (feature.status === 'done') continue;
     const n = wave(feature.id);
     if (!groups.has(n)) groups.set(n, []);
-    groups.get(n).push({ id: feature.id });
+    // R5: the selector's own records and its feature-level `otherwiseActionable`
+    // predicate — no slice readiness, no --mine scoping (a fan-out consumer applies those).
+    const blocked = featureBlockers(feature, featureById, cycles, config.requireApproval);
+    const route = featureRoute(feature, config.requireApproval);
+    groups.get(n).push({
+      id: feature.id,
+      status: feature.status,
+      route,
+      autonomous: feature.autonomous === true,
+      owner: feature.owner !== undefined ? feature.owner : (feature.epic.owner !== undefined ? feature.epic.owner : null),
+      runnable: blocked.length === 0 && route !== null,
+      blocked,
+    });
   }
   const waves = [...groups.keys()].sort((a, b) => a - b).map((n) => ({ wave: n, features: groups.get(n) }));
   const summary = `${waves.length} waves over ${scoped.length - wave0.length} features (+${wave0.length} done)`;
