@@ -6,8 +6,9 @@
 > strictly above the maximum existing ADR number (no reuse). Referenced from
 > `specs/architecture.md` by its `ADR-NNNN` id.
 
-- **Status:** <proposed | accepted>
+- **Status:** <proposed | accepted | deferred>
 - **Date:** <YYYY-MM-DD>
+- **Trigger:** <observable condition that reopens this decision — mandatory when Status is deferred; omit otherwise>
 
 ## Context
 <The forces at play — what makes this decision necessary, the constraints and the

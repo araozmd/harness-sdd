@@ -47,4 +47,28 @@ R3_repo_product_stage() {
 }
 R3_repo_product_stage
 
+# lineno <file> <fixed-string> — first line number whose line STARTS with the string (0 if none).
+lineno() {
+  awk -v s="$2" 'index($0,s)==1{print NR; f=1; exit} END{if(!f) print 0}' "$1"
+}
+
+# R4 — the ADR template carries `deferred` and the mandatory-when-deferred Trigger: line.
+R4_adr_template_deferred_trigger() {
+  _a="$I/specs/_templates/adr.md"
+  [ -f "$_a" ] || fail "R4: installed specs/_templates/adr.md missing"
+  grep -qF -- '- **Status:** <proposed | accepted | deferred>' "$_a" \
+    || fail "R4: ADR template Status line does not list 'proposed | accepted | deferred'"
+  grep -qE '^- \*\*Trigger:\*\* ' "$_a" \
+    || fail "R4: ADR template has no '- **Trigger:** ' header line"
+  fold "$_a" | grep -qE 'Trigger:\*\*[^.]{0,120}mandatory when Status is deferred; omit otherwise' \
+    || fail "R4: the Trigger: header line does not state it is mandatory when Status is deferred and omitted otherwise"
+  _d="$(lineno "$_a" '- **Date:**')"; _t="$(lineno "$_a" '- **Trigger:**')"; _c="$(lineno "$_a" '## Context')"
+  [ "$_d" -gt 0 ] && [ "$_t" -eq $((_d + 1)) ] && [ "$_c" -gt "$_t" ] \
+    || fail "R4: the Trigger: line is not the header line directly after Date: (date=$_d trigger=$_t context=$_c)"
+  grep -qiE 'one architecture decision per ADR' "$_a" \
+    || fail "R4: the ADR template lost its 'One architecture decision per ADR' sentence"
+  pass "ADR template lists deferred and carries a mandatory-when-deferred Trigger: header line (R4) [R4_adr_template_deferred_trigger]"
+}
+R4_adr_template_deferred_trigger
+
 echo "All stage/NFR tests passed."
