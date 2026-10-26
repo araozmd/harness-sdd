@@ -587,6 +587,17 @@ test_workflow_docs() {
   pass "R11 workflow_docs: Running in waves and across machines section"
 }
 
+test_release_record() {
+  _top=$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' "$ROOT/CHANGELOG.md" | head -1)
+  [ -n "$_top" ] || fail "R12: CHANGELOG.md has no '## [x.y.z]' heading"
+  [ "$(tr -d '[:space:]' <"$ROOT/VERSION")" = "$_top" ] ||
+    fail "R12: VERSION does not equal the newest CHANGELOG.md heading ($_top)"
+  # SOME entry's body (not its heading, not necessarily the top one) names --waves.
+  awk '/^## \[[0-9]/ { body = 1; next } /^## / { body = 0 } body' "$ROOT/CHANGELOG.md" | grep -qF -- '--waves' ||
+    fail "R12: no CHANGELOG.md entry body mentions --waves"
+  pass "R12 release_record: VERSION = newest CHANGELOG heading; an entry names --waves"
+}
+
 # Runs LAST: it audits every run_tool call the suite made.
 test_read_only_and_builtins() {
   _n=$(grep -c -- '--waves' "$RUNS" || :)
@@ -618,6 +629,7 @@ test_invalid_graph
 test_critical_path
 test_human_report
 test_workflow_docs
+test_release_record
 test_read_only_and_builtins
 
 echo "test_waves: $PASS passed"
