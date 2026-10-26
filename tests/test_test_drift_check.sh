@@ -813,6 +813,20 @@ expect_rc 0 "R10a"
 expect_line '^test-drift-check: 1 findings, 1 waived, ' "R10a"
 pass "R10a_exact_match_waives"
 
+# The split is on the FIRST spaced em dash, so a reason may itself carry one; and the spacing
+# around the separator is any blank, a tab included (round 3, N03/N20).
+printf 'waive-test-drift: test_gone \342\200\224 a \342\200\224 b\n' > "$T/tasks.md"
+run "$R" main --tasks-md "$T/tasks.md"
+expect_rc 0 "R10g first separator"
+grep -Fxq 'WAIVED test-removed | tests/t.sh:— | test_gone | a — b' "$T/out" \
+  || { cat "$T/out" >&2; fail "R10g: split on the FIRST spaced em dash (reason 'a — b')"; }
+printf 'waive-test-drift: test_gone\t\342\200\224\tx\n' > "$T/tasks.md"
+run "$R" main --tasks-md "$T/tasks.md"
+expect_rc 0 "R10g tab separator"
+grep -Fxq 'WAIVED test-removed | tests/t.sh:— | test_gone | x' "$T/out" \
+  || { cat "$T/out" >&2; fail "R10g: a tab on each side of the em dash is a valid separator"; }
+pass "R10g_first_separator_and_tab"
+
 for nm in test_gone_v2 test_gon Test_gone; do
   printf 'waive-test-drift: %s — not the same name\n' "$nm" > "$T/tasks.md"
   run "$R" main --tasks-md "$T/tasks.md"
