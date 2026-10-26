@@ -368,10 +368,10 @@ class Witness(object):
     """
 
     __slots__ = ("outcome", "repo", "binding", "identity", "manifest_state",
-                 "manifest_entry", "candidates", "others", "truncated")
+                 "manifest_entry", "candidates", "others", "truncated", "searched")
 
     def __init__(self, outcome, repo, binding, identity, manifest_state,
-                 manifest_entry, candidates, others, truncated=()):
+                 manifest_entry, candidates, others, truncated=(), searched=False):
         self.outcome = outcome
         self.repo = repo
         self.binding = binding
@@ -383,6 +383,8 @@ class Witness(object):
         # WHICH scan roots were over the cap (roots only: a count wobbling under the cap is
         # not a change in certainty; a root crossing it in either direction is).
         self.truncated = tuple(truncated)
+        # whether this answer's certainty came from the sibling search at all.
+        self.searched = bool(searched)
 
     def still_holds(self, hdir):
         """Would a fresh `resolve()` give the same outcome, repository and certainty?
@@ -404,9 +406,11 @@ class Witness(object):
                     self.binding, mapping.get(self.binding), self.manifest_entry)
         # same CERTAINTY — first, the same SEARCH: a root that crossed the cap since resolve
         # hides its children, which can leave the candidate tuple below unchanged while the
-        # search is no longer complete.
-        now = tuple(r for r, _n in truncated_roots(hdir))
-        if now != self.truncated:
+        # search is no longer complete. Truncation is a certainty dimension only for answers
+        # whose certainty came from that search: a manifest-declared binding never searches
+        # siblings, so an unrelated directory crossing the cap must not invalidate it.
+        now = tuple(r for r, _n in truncated_roots(hdir)) if self.searched else ()
+        if self.searched and now != self.truncated:
             return False, ("the sibling scan near %s changed its truncation (%s before, %s "
                            "now) so the search that made this answer certain is no longer "
                            "the same search" % (
@@ -819,12 +823,14 @@ def _capture(outcome, repo_name, identity, state, mapping, cand, hdir, chosen=No
         for lex, _real in cand
         if chosen is None or not same_repository(lex, chosen)
     )
+    searched = bool(cand) or (repo_name is not None and state == "absent")
     return Witness(
         outcome=outcome, repo=repo_name,
         binding=repo_name, identity=identity, manifest_state=state,
         manifest_entry=mapping.get(repo_name) if repo_name is not None else None,
         candidates=cand, others=others,
-        truncated=tuple(r for r, _n in truncated_roots(hdir)),
+        truncated=tuple(r for r, _n in truncated_roots(hdir)) if searched else (),
+        searched=searched,
     )
 
 

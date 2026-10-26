@@ -723,6 +723,18 @@ case "$ASK_OUT" in
   "(True, None, False)") ;;
   *) fail "C12: a root crossing the cap after resolve did not invalidate the witness: $ASK_OUT" ;;
 esac
+# CONTROL: a manifest-declared binding never searches siblings, so the same cap crossing must
+# NOT invalidate its witness (a fresh resolve stays `resolved` — refusing would be a false alarm).
+cat > "$CAP/hd/harness.config.yaml" <<YAML
+umbrella:
+  manifest: ../umbrella.manifest.yaml
+YAML
+ask "$CAP_MAIN" child "$CAP/hd" "(lambda w: (r.outcome, w.still_holds(hdir)[0], os.environ.__setitem__('HARNESS_RESOLVE_MAX_SIBLINGS', '8'), w.still_holds(hdir)[0]))(r.witness())"
+case "$ASK_OUT" in
+  "('resolved', True, None, True)") ;;
+  *) fail "C12 control: a cap crossing invalidated a manifest-declared binding that never searched siblings: $ASK_OUT" ;;
+esac
+rm -f "$CAP/hd/harness.config.yaml"
 pass "E99-F129c C12 sibling_scan_cap_refuses_uniqueness_and_names_the_remedy"
 
 echo "All repository-resolver tests passed."
