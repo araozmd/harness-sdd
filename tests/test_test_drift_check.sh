@@ -246,6 +246,14 @@ featcommit
 run "$R" main
 expect_rc 0 "R8c"; [ "$(nlines)" = 1 ] || { cat "$T/out" >&2; fail "R8c: a binary file yields no finding"; }
 expect_line '^test-drift-check: 0 findings, 0 waived, 1 test files examined ' "R8c: a binary test file is counted in F"
+# A binary file is skipped BEFORE name extraction: its text would otherwise yield names.
+newrepo r8d; mkdir -p "$R/tests"
+printf '#!/bin/sh\nt_bin() { :; }\n\000\n' > "$R/tests/bin.sh"
+basecommit; feature
+printf '#!/bin/sh\n\000\n' > "$R/tests/bin.sh"; featcommit
+run "$R" main
+expect_rc 0 "R8c binary sh"; [ "$(nlines)" = 1 ] || { cat "$T/out" >&2; fail "R8c: a binary test file yields no finding, not even test-removed"; }
+expect_line '^test-drift-check: 0 findings, 0 waived, 1 test files examined ' "R8c binary sh counted in F"
 pass "R8c_binary_counted"
 
 # ── R1: scope and baseline ───────────────────────────────────────────────────────
