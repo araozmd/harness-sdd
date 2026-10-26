@@ -389,6 +389,25 @@ grep -Fxq 'DRIFT assert-removed | tests/h.test.js:6 | second | expect(b).toBe(2)
   || { cat "$T/out" >&2; fail "R3e: want exactly the hunk-2 removal as assert-removed"; }
 pass "R3e_pairing_is_per_hunk"
 
+# The tool pins LC_ALL=C itself, so the CALLER's locale cannot change a verdict (round 3, N18).
+# Observable on hosts whose awk decodes UTF-8 (the macOS system awk): under a UTF-8 locale it
+# aborts on an invalid byte in a test file, and the tool exits 2 instead of reporting.
+_u8="$(locale -a 2>/dev/null | grep -Ei '^c\.utf-?8$' | head -n 1)"
+[ -n "$_u8" ] || _u8="$(locale -a 2>/dev/null | grep -Ei '^en_us\.utf-?8$' | head -n 1)"
+if [ -n "$_u8" ]; then
+  newrepo r3f; mkdir -p "$R/tests"
+  printf "it('l', () => {\n  \377 assert(z);\n  run();\n});\n" > "$R/tests/l.test.js"
+  basecommit; feature
+  printf "it('l', () => {\n  run();\n});\n" > "$R/tests/l.test.js"; featcommit
+  ( cd "$R" && LC_ALL="$_u8" LANG="$_u8" sh "$TOOL" main ) > "$T/out" 2> "$T/err" && rc=0 || rc=$?
+  expect_rc 1 "R3f under $_u8"; expect_ndrift 1 "R3f under $_u8"
+  expect_line '^DRIFT assert-removed \| tests/l\.test\.js:2 \| l \| ' "R3f: an invalid byte under a UTF-8 caller locale"
+  [ ! -s "$T/err" ] || { cat "$T/err" >&2; fail "R3f: stderr must stay empty under $_u8"; }
+  pass "R3f_caller_utf8_locale"
+else
+  echo "note - R3f_caller_utf8_locale not run: no C.UTF-8 / en_US.UTF-8 locale on this host"
+fi
+
 # ── R4: built-in assertion patterns ──────────────────────────────────────────────
 newrepo r4a
 fam() { # fam <n> <ext> <kind> <line> — a fixture file whose only changed line is <line>
