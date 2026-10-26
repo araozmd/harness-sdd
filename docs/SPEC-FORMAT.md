@@ -47,7 +47,7 @@ Orchestrator and Reviewer use it to verify coverage without reading prose.
 |---|---|---|
 | `.spec.md` | *What* and *why* — business rules, EARS acceptance criteria | Architect |
 | `.plan.md` | *How* — stack, data models, endpoints, files to change | Architect |
-| `.tasks.md` | *In what order* — atomic, sequential steps | Architect → Builder |
+| `.tasks.md` | *In what order* — one red/green pair per `R-id` | Architect → Builder |
 | `.tests.md` | *How we know it's done* — R-id → test mapping | Architect → Reviewer |
 
 ## EARS — the requirement syntax
@@ -75,6 +75,47 @@ Patterns can be combined: *When `<trigger>`, while `<state>`, the `<system>` sha
   user is in the trigger, the system is what we verify.
 - Quantify: "at most 5 notes", "within 2s", not "a few", "fast".
 - Give each a stable id. Never renumber a shipped requirement — append.
+
+## Tasks — red/green pairs per requirement
+
+ADR-0008 decision 2. A `.tasks.md` lists, for every `R-id` of the `.spec.md`, a **pair**:
+`T<n>a (R#)` writes the failing test named in `.tests.md` and observes **RED**; `T<n>b (R#)`
+writes the minimal code to pass it and observes **GREEN**. The Builder commits after each
+GREEN. Order the pairs walking-skeleton `R-id` first (the thinnest end-to-end behavior
+observable at the product boundary). The lint `tools/tasks-pair-check.py <tasks> --spec
+<spec>` turns the shape into an exit code (0 ok, 1 violation, 2 usage/input error).
+
+```markdown
+- [ ] **T1a** (R1) — write failing `tests/test_x.py::test_y`; run it; observe RED
+- [ ] **T1b** (R1) — minimal code in `x.py`; observe GREEN; commit
+- [ ] **T2** (R1) — refactor: extract the helper; R1 test stays GREEN; commit
+```
+
+The grammar the lint enforces (and this section, the template and the Architect prompt all
+state the same one):
+
+- A task is a line `- [ ] **T<n>[a|b]** (R#, R#) — text` (or `- [x]`); the `T` and the suffix
+  match in either case. Suffix `a` (or `A`) is a test task, `b` (or `B`) a code task; no
+  suffix, any other letter, or more than one letter (`T1c`, `T1ab`) is "other" — reported,
+  never dropped, so a `T1B` or `T1ab` first task fails like any code-first task. The cited
+  `R-id`s are the explicit `R<n>` tokens inside the parentheses; a range such as `R1–R4` is
+  not expanded — cite each id.
+- For every spec `R-id` (a line `- **R<n>** …`, or the bold-title form `- **R<n> — Title.** …`;
+  a repeated `R-id` counts once), the first task that cites it must be a `T<n>a`
+  task; an `R-id` no task cites is also a violation.
+- Refactor tasks are explicit and cite the `R-id`s whose tests guard them. Setup or verify
+  tasks with no `R-id` are allowed, but a task that cites no `R-id` and reads "write … tests"
+  is the layered shape this removes, and is rejected wherever it sits in the list.
+- Lines inside fenced code (the CommonMark rule) are ignored in both files.
+- The `.tests.md` traceability table is not read by the lint.
+
+Behavioral (Playwright / e2e) requirements. An `R-id` whose only verification is a
+behavioral row gets its own pair by default: its RED is the e2e spec failing against the
+running app. Where it exercises the same code path as another `R-id`'s pair, the Architect
+may group it by co-citing it on that pair's `a` task (`**T2a** (R2, R4) — …`). A behavioral
+`R-id` therefore obeys the same first-task rule as every other — never a code-only first
+task. The lint cannot tell which `R-id`s are behavioral; whether the e2e RED was actually
+observed is the Reviewer's behavior check.
 
 ## Architecture alignment — cite the ADRs you touch
 

@@ -26,10 +26,16 @@ The Orchestrator is never delegated; only this Builder phase is.
 
 1. Confirm the feature status is `in-progress` (human-approved). If it is only
    `spec-ready`, STOP — you are not cleared to write code.
-2. Work the tasks in `<feature>.tasks.md` **in order, one at a time**.
-3. For each task: make the change the `.plan.md` specifies, touching only the files
-   it lists. Honor the "DO NOT TOUCH" list.
-4. Write the tests named in `<feature>.tests.md` so each `R-id` is covered.
+2. Work the tasks in `<feature>.tasks.md` **in order, one at a time**. The file is
+   per-`R-id` red/green pairs (ADR-0008): `T<n>a` writes the failing test, `T<n>b` the
+   minimal code that passes it.
+3. For each `T<n>a`: write the test named in `<feature>.tests.md`, run it, and **observe it
+   RED** for the right reason. Write **no** code for a pair whose test you have not
+   observed RED — never code ahead of a RED. For each `T<n>b`: make the change the
+   `.plan.md` specifies, touching only the files it lists, honoring the "DO NOT TOUCH"
+   list; stop at the minimal code that turns the test GREEN.
+4. **Commit after each GREEN** — one commit per pair (that commit is the baseline a later
+   drift check diffs against). Refactor tasks run only with their cited tests GREEN.
 5. Run `./init.sh`, then only the suites your change touches, to self-check before moving
    on — in this repository `sh tools/run-tests.sh --jobs 4 tests/<suite>.sh …`. The full
    `verification.test_command` is a **gate**, not an iteration step: run it once before
