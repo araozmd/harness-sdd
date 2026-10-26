@@ -14,6 +14,10 @@ const EPIC_STATUSES = new Set(['draft', 'planned', 'pending', 'in-progress', 'do
 const FEATURE_STATUSES = new Set(['pending', 'spec-ready', 'in-progress', 'in-review', 'done']);
 const SLICE_STATUSES = new Set([...FEATURE_STATUSES, 'failed']);
 const BLOCKED_SUMMARY = 'no actionable work: selection blocked; see reasons above';
+// E36-F05: printed on stderr after the specific `next-task:` diagnostic, only on a
+// usage-error. reason.detail keeps the specific message (consumers parse it); this line is
+// for the human who mistyped a flag.
+const USAGE = 'usage: next-task.mjs [--json] [--mine | --feature E##-F## | --waves [--epic E##]] [--tasks <path>] [--config <path>]';
 // E99-F77: a park may name WHO releases it. `gate: "owner"` is the one case the board
 // could not express — the automatable slice is finished and every remaining requirement
 // is a person's (a console attestation, a deploy approval, a signature). `in-progress`
@@ -724,4 +728,5 @@ try {
   const code = error instanceof ExpectedError ? error.code : 'input-error';
   const detail = error instanceof Error ? error.message : String(error);
   emit(envelope(args.mode || 'board', 'error', null, { code, detail }), detail, code === 'usage-error' ? 2 : 1);
+  if (code === 'usage-error') process.stderr.write(`${USAGE}\n`);
 }

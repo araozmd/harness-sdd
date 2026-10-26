@@ -125,6 +125,37 @@ test_cli_contract() {
   pass "R1 cli_contract: --waves/--epic accepted, every rejecting rule exits 2, --json no-op elsewhere"
 }
 
+# usage_line <stderr-file>: the stderr line beginning `usage:` (empty when absent).
+usage_line() {
+  sed -n '/^usage: /p' "$1"
+}
+
+test_usage_synopsis() {
+  write_config true
+  printf '%s\n' "$ACYCLIC" | write_board
+  for argv in '--wat' '--waves --mine'; do
+    # shellcheck disable=SC2086 # argv is a deliberate word list
+    _rc=0
+    run_tool $argv >"$TMP/syn.out" 2>"$TMP/syn.err" || _rc=$?
+    [ "$_rc" = 2 ] || fail "R2 [$argv]: expected exit 2, got $_rc"
+    [ "$(usage_line "$TMP/syn.err" | wc -l | tr -d ' ')" = 1 ] ||
+      fail "R2 [$argv]: stderr has no single line beginning 'usage:'"
+    usage_line "$TMP/syn.err" | grep -qF -- '--waves [--epic E##]' ||
+      fail "R2 [$argv]: usage line lacks the literal '--waves [--epic E##]'"
+    grep -q '^next-task: ' "$TMP/syn.err" || fail "R2 [$argv]: the specific next-task: diagnostic line is gone"
+  done
+  [ "$(json_field 'x["reason"]["detail"]' <"$TMP/syn.out")" = '--waves and --mine are mutually exclusive' ] ||
+    fail "R2: reason.detail is no longer the specific message"
+  run_tool --wat >"$TMP/syn.out" 2>/dev/null || :
+  [ "$(json_field 'x["reason"]["detail"]' <"$TMP/syn.out")" = 'unknown or positional argument "--wat"' ] ||
+    fail "R2: reason.detail for --wat is no longer the specific message"
+  # The synopsis rides on usage-error ONLY: an input-error keeps its single diagnostic.
+  run_tool --waves --epic E9 >"$TMP/syn.out" 2>"$TMP/syn.err" || :
+  [ -z "$(usage_line "$TMP/syn.err")" ] || fail "R2: a non-usage error printed the usage synopsis"
+  pass "R2 usage_synopsis: usage-error stderr carries the synopsis; detail unchanged"
+}
+
 test_cli_contract
+test_usage_synopsis
 
 echo "test_waves: $PASS passed"
