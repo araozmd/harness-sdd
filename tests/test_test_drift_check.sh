@@ -285,6 +285,31 @@ expect_rc 1 "R1e"; expect_ndrift 1 "R1e"
 expect_line '^DRIFT assert-modified \| specs/f/F\.spec\.md:2 \| specs/f/F\.spec\.md \| ' "R1e: a spec prose line is a finding named by its path"
 pass "R1e_spec_md_is_a_test_file"
 
+# Untracked files belong to the WORKING-TREE head only, and only when not ignored (round 3,
+# N04/N05). Both files carry an `.only(` so listing either one is a visible finding.
+newrepo r1f; js_app tests/app.test.js
+printf 'tests/ign.test.js\n' > "$R/.gitignore"
+basecommit; feature
+put tests/u.test.js <<'EOF'
+it.only('untracked', () => {
+  run();
+});
+EOF
+put tests/ign.test.js <<'EOF'
+it.only('ignored', () => {
+  run();
+});
+EOF
+run "$R" main
+expect_rc 1 "R1f working tree"; expect_ndrift 1 "R1f working tree"
+expect_line '^DRIFT skip-added \| tests/u\.test\.js:1 \| untracked \| ' "R1f: an untracked test file is in the working tree"
+[ "$(cnt 'ign\.test\.js')" = 0 ] || { cat "$T/out" >&2; fail "R1f: a .gitignored test file must not be examined"; }
+expect_line '^test-drift-check: 1 findings, 0 waived, 1 test files examined ' "R1f: F counts the untracked file only"
+run "$R" main feature
+expect_rc 0 "R1f head-ref mode"
+expect_line '^test-drift-check: 0 findings, 0 waived, 0 test files examined ' "R1f: <head-ref> mode never lists untracked files"
+pass "R1f_untracked_scope"
+
 # ── R3: assertion findings ───────────────────────────────────────────────────────
 newrepo r3a; js_app tests/app.test.js; basecommit; feature
 subst tests/app.test.js '  expect(run(1)).toBe(1);' '  expect(run(1)).toBeTruthy();'; featcommit
