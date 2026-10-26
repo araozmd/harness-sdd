@@ -485,7 +485,7 @@
         {
           "id": "E36-F03",
           "title": "Product stage and deferred-decision ADRs with triggers; sticky vs bolt-on NFRs",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
