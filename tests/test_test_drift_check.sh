@@ -141,14 +141,44 @@ grep -qF 'too many arguments: extra' "$T/err" || fail "R9a: a third positional m
 run "$R" main --tasks-md /nonexistent/tasks.md
 expect_rc 2 "R9a --tasks-md without a readable file"; [ -s "$T/err" ] || fail "R9a: missing tasks file needs a stderr reason"
 [ "$(wc -l < "$T/err" | tr -d ' ')" = 1 ] || fail "R9a: the stderr reason must be one line"
+grep -qF 'not a readable file' "$T/err" || fail "R9a: a missing --tasks-md file is named as not readable"
+# Every remaining usage branch, each pinned by the REASON only it prints (round 3): exit 2
+# alone has several producers (dash's own unbound-parameter error among them).
+run "$R" main --tasks-md
+expect_rc 2 "R9a --tasks-md without a value"
+grep -qF -- '--tasks-md needs a file' "$T/err" || fail "R9a: --tasks-md with no value must say it needs a file"
+for _flag in -h --help; do
+  run "$R" main "$_flag"
+  expect_rc 2 "R9a $_flag"
+  grep -qF 'usage: test-drift-check.sh <base-ref>' "$T/err" || fail "R9a: $_flag must print the usage line"
+done
+mkdir -p "$T/adir"
+run "$R" main --tasks-md "$T/adir"
+expect_rc 2 "R9a --tasks-md names a directory"
+grep -qF 'not a readable file' "$T/err" || fail "R9a: a directory is not a readable --tasks-md file"
+printf 'x\n' > "$T/unreadable.md"; chmod 000 "$T/unreadable.md"
+if [ ! -r "$T/unreadable.md" ]; then  # running as root reads anything; the row needs a non-root user
+  run "$R" main --tasks-md "$T/unreadable.md"
+  expect_rc 2 "R9a --tasks-md not readable"
+  grep -qF 'not a readable file' "$T/err" || fail "R9a: an unreadable --tasks-md file is rejected by name"
+fi
+chmod 644 "$T/unreadable.md"
 pass "R9a_exit2_usage"
 
 run "$R" no-such-ref
 expect_rc 3 "R9b unresolvable base"; [ -s "$T/err" ] || fail "R9b: exit 3 needs a stderr reason"
+grep -qF 'base ref does not resolve: no-such-ref' "$T/err" || fail "R9b: an unresolvable base is named"
+run "$R" main no-such-head
+expect_rc 3 "R9b unresolvable head"
+grep -qF 'head ref does not resolve: no-such-head' "$T/err" || fail "R9b: an unresolvable head is named"
 mkdir -p "$T/notrepo"
 run "$T/notrepo" main
 expect_rc 3 "R9b not a git repository"; [ -s "$T/err" ] || fail "R9b: exit 3 needs a stderr reason"
+grep -qF 'not a git repository' "$T/err" || fail "R9b: outside a repository the reason says so"
 git -C "$R" checkout -q --orphan island
+run "$R" main
+expect_rc 3 "R9b unborn HEAD"
+grep -qF 'HEAD does not resolve' "$T/err" || fail "R9b: an unborn HEAD in working-tree mode is named"
 git -C "$R" rm -rfq . 2>/dev/null || true
 git -C "$R" commit -q --allow-empty -m island
 run "$R" main island
