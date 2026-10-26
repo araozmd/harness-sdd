@@ -44,6 +44,21 @@ five dimensions, and ignore stylistic preferences or minor wording:
 Do **not** flag spelling, grammar, formatting, or subjective phrasing unless it actively
 changes the meaning of a requirement.
 
+## Epic-decomposition checks — observable slices (ADR-0008)
+
+At `target-type=epic-decomposition`, beyond the five dimensions above, check the *shape* of
+the decomposition. Three findings, each with a stable id you cite in your progress note:
+
+- `observable-behavior-missing` — a reviewed brief has no `## Observable behavior` section, or the section is empty or still the template placeholder `<HTTP / CLI / UI / file / exit code> — <what a user or client sees>`.
+- `walking-skeleton-missing` — on a fresh drill, the lowest-numbered feature's brief is not end-to-end: its observable behavior names no product-boundary surface, its `## Success outcome` stops at an internal artifact, or the feature has an intra-epic `depends_on`.
+- `internal-only-outcome` — a brief whose `## Success outcome` names only internal artifacts and nothing a user or client can exercise.
+
+**Scope signal.** The briefs under review are the brief paths the Driller passed — those
+written in this run; you have no other signal of what changed. A drill is **fresh** when the
+lowest-numbered feature in the epic's feature table is among the passed paths, otherwise it is
+an **amend**: `walking-skeleton-missing` is not raised, and briefs the Driller did not pass are
+never read.
+
 ## Advisory-only behavior
 
 The Doc-critic is **advisory-only**. Your findings are **recommendations only** and never block the generating agent. The

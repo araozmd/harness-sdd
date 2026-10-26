@@ -108,3 +108,34 @@ sec 'Observable behavior[^.]{0,80}surface' || fail "R3: section does not name th
 sec 'user or client sees' || fail "R3: section does not say what a user or client sees"
 sec 'walking[- ]skeleton[^.]{0,80}end-to-end path' || fail "R3: section does not make the skeleton's line the end-to-end path"
 pass "R3_driller_fills_brief"
+
+# ── R6: the doc-critic's three findings and its scope signal ─────────────────────
+H6='## Epic-decomposition checks — observable slices (ADR-0008)'
+grep -qF "$H6" "$CRITIC" || fail "R6: $CRITIC lacks the heading '$H6'"
+a="$(ln "$CRITIC" '## Review scope and calibration')"; b="$(ln "$CRITIC" '## Epic-decomposition checks')"
+c="$(ln "$CRITIC" '## Advisory-only behavior')"
+[ -n "$a" ] && [ -n "$b" ] && [ -n "$c" ] && [ "$a" -lt "$b" ] && [ "$b" -lt "$c" ] \
+  || fail "R6: the section is not between Review scope and calibration and Advisory-only behavior"
+range "$CRITIC" '## Epic-decomposition checks' '## Advisory-only behavior' > "$T/critic-raw.txt"
+tr '\n' ' ' < "$T/critic-raw.txt" > "$T/critic-sec.txt"
+CS="$T/critic-sec.txt"
+csec() { grep -qiE -e "$1" "$CS"; }
+csecF() { grep -qF -- "$1" "$CS"; }
+csecF 'target-type=epic-decomposition' || fail "R6: section does not name target-type=epic-decomposition"
+csecF '<HTTP / CLI / UI / file / exit code> — <what a user or client sees>' \
+  || fail "R6: section does not name the template placeholder literal"
+csec '- `observable-behavior-missing` — [^.]{0,40}no `## Observable behavior` section[^.]{0,60}empty[^.]{0,60}placeholder' \
+  || fail "R6: observable-behavior-missing trigger (no section / empty / placeholder) missing"
+csec '- `walking-skeleton-missing` — [^.]{0,40}fresh drill[^.]{0,40}lowest-numbered feature' \
+  || fail "R6: walking-skeleton-missing trigger (fresh drill, lowest-numbered feature) missing"
+csec '- `walking-skeleton-missing` — [^.]{0,230}internal artifact' \
+  || fail "R6: walking-skeleton-missing trigger does not cover an outcome that stops at an internal artifact"
+csec '- `walking-skeleton-missing` — [^.]{0,230}intra-epic `depends_on`' \
+  || fail "R6: walking-skeleton-missing trigger does not cover an intra-epic depends_on"
+csec '- `internal-only-outcome` — [^.]{0,60}Success outcome[^.]{0,60}only internal artifacts[^.]{0,60}user or client can exercise' \
+  || fail "R6: internal-only-outcome trigger missing"
+csec 'briefs under review are the brief paths the Driller passed' || fail "R6: scope signal (the passed paths) missing"
+csec '\*\*fresh\*\* when the lowest-numbered feature[^.]{0,80}is among' || fail "R6: fresh definition missing"
+csec 'otherwise it is an \*\*amend\*\*[^.]{0,80}not raised' || fail "R6: amend definition (walking-skeleton-missing not raised) missing"
+csec 'briefs the Driller did not pass are never read' || fail "R6: unpassed briefs are not declared never read"
+pass "R6_doc_critic_three_findings"
