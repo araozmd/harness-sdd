@@ -506,6 +506,39 @@ expect_line '^DRIFT assert-modified \| tests/h2\.test\.js:2 \| kept \| ' "R3h: a
 expect_line '^DRIFT skip-added \| tests/u\.test\.js:1 \| fresh \| ' "R3h: an untracked file's added marker is found despite the textconv driver"
 pass "R3h_textconv_does_not_hide_drift"
 
+# R3i — a configured diff.interHunkContext keeps unchanged lines inside a -U0 hunk; they must
+# advance both line counters and end the -/+ pairing, or a finding in one test is attributed to
+# the test above it and a waiver for that test hides it (Codex P2 on PR #299).
+newrepo r3i
+git -C "$R" config diff.interHunkContext 10
+put tests/i.test.js <<'EOF'
+it('first', () => {
+  expect(a()).toBe(1);
+});
+it('second', () => {
+  expect(b()).toBe(2);
+});
+EOF
+basecommit; feature
+subst tests/i.test.js '  expect(a()).toBe(1);' '  expect(a()).toBeTruthy();'
+subst tests/i.test.js '  expect(b()).toBe(2);' '  expect(b()).toBeTruthy();'; featcommit
+git -C "$R" diff -U0 main feature -- tests/i.test.js | grep -q '^ ' \
+  || fail "R3i precondition: diff.interHunkContext must put a context line inside the -U0 hunk"
+printf 'waive-test-drift: first — tightened on purpose\n' > "$T/tasks.md"
+run "$R" main feature --tasks-md "$T/tasks.md"
+expect_rc 1 "R3i interHunkContext"; expect_ndrift 1 "R3i interHunkContext"
+expect_line '^WAIVED assert-modified \| tests/i\.test\.js:2 \| first \| ' "R3i: the first test's edit is attributed to it"
+expect_line '^DRIFT assert-modified \| tests/i\.test\.js:5 \| second \| ' "R3i: the second test's edit is attributed to the second test, at its own line"
+# pairing does not cross the context: a removal above it and an addition below it are two edits
+git -C "$R" checkout -q main && git -C "$R" checkout -q -b feature2
+delline tests/i.test.js '  expect(a()).toBe(1);'
+subst tests/i.test.js '  expect(b()).toBe(2);' '  expect(b()).toBe(2); expect(c()).toBe(3);'
+subst tests/i.test.js "it('second', () => {" "it.only('second', () => {"; featcommit
+run "$R" main feature2
+expect_line '^DRIFT skip-added \| tests/i\.test\.js:3 \| second \| ' "R3i: a marker after the context is reported at its head line"
+expect_line '^DRIFT assert-removed \| tests/i\.test\.js:2 \| first \| ' "R3i: a removal before the context is not paired with an addition after it"
+pass "R3i_inter_hunk_context_lines"
+
 # ── R3: assertion findings ───────────────────────────────────────────────────────
 newrepo r3a; js_app tests/app.test.js; basecommit; feature
 subst tests/app.test.js '  expect(run(1)).toBe(1);' '  expect(run(1)).toBeTruthy();'; featcommit

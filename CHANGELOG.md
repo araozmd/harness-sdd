@@ -25,6 +25,9 @@ All notable changes to the harness body are recorded here. Versions follow
   The Reviewer's default-branch line resolves like `change-size.sh` (`origin/HEAD`, else the first
   existing of `origin/main main origin/master master origin/trunk trunk`), and an `sdd: false`
   brief-only item passes its inbox brief as `--tasks-md`, where its waivers live.
+  Unchanged lines inside a hunk (a configured `diff.interHunkContext` keeps them even under
+  `-U0`) advance both line counters and end the removed/added pairing, so a finding is never
+  attributed to the test above it.
 - `tools/change-size.sh` gains two additive config-query modes, `--print-test-re` and
   `--print-list <key>`, so the drift tool reuses the one test-path classifier and the one
   `change_size:` parser instead of carrying copies. Measuring behaviour is unchanged.

@@ -385,6 +385,10 @@ while IFS="$TAB" read -r st old new; do
       if (t ~ sre) emit("skip-added", nl2, attr("h", nl2, t), trim(t))
       nl2++; next
     }
+    # An unchanged line inside a hunk: `-U0` alone does not exclude them, because a configured
+    # diff.interHunkContext merges nearby hunks and keeps the lines between. It advances both
+    # sides and ends the current -/+ pairing (edits on either side of it are separate edits).
+    /^ / { flush(); ol++; nl2++; next }
     END {
       flush()
       for (i = 1; i <= cnt["h"]; i++) inhead[nn["h", i]] = 1
