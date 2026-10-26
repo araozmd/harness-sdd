@@ -445,6 +445,67 @@ expect_rc 1 "R1h relative tool path from a subdirectory"
 cmp -s "$T/out" "$T/out.abs" || { diff "$T/out.abs" "$T/out" >&2 || :; cat "$T/err" >&2; fail "R1h: a relative tool path from a subdirectory must print what the absolute run prints"; }
 pass "R1h_quoted_paths_and_relative_invocation"
 
+# R7m — a JS title with an escaped quote is cut at the first UNESCAPED delimiter, so two titles
+# sharing a prefix up to `\'` stay distinct and deleting one is reported (Codex P2 on PR #299).
+newrepo r7m
+put tests/e.test.js <<'EOF'
+it('doesn\'t reject', () => {
+  run(1);
+});
+it('doesn\'t throw', () => {
+  run(2);
+});
+EOF
+basecommit; feature
+put tests/e.test.js <<'EOF'
+it('doesn\'t throw', () => {
+  run(2);
+});
+EOF
+featcommit
+run "$R" main feature
+expect_rc 1 "R7m escaped-quote titles"; expect_ndrift 1 "R7m escaped-quote titles"
+grep -Fq "DRIFT test-removed | tests/e.test.js:" "$T/out" && grep -Fq "| doesn\\'t reject | " "$T/out" \
+  || { cat "$T/out" >&2; fail "R7m: deleting one of two titles that share a prefix up to an escaped quote is a test-removed finding"; }
+pass "R7m_escaped_quote_titles"
+
+# R3h — a textconv driver must not hide a weakened assertion: content diffs read source text,
+# as name extraction does (`--no-textconv`; Codex P2 on PR #299).
+newrepo r3h
+printf 'tests/*.js diff=hide\n' > "$R/.gitattributes"
+git -C "$R" config diff.hide.textconv "sed -e s/toBe\\(1\\)/toBeTruthy\\(\\)/ -e s/it\\.only\\(/it\\(/"
+put tests/h.test.js <<'EOF'
+it('kept', () => {
+  expect(run()).toBe(1);
+  run(2);
+  run(3);
+  run(4);
+  run(5);
+  run(6);
+});
+EOF
+basecommit; feature
+subst tests/h.test.js '  expect(run()).toBe(1);' '  expect(run()).toBeTruthy();'; featcommit
+[ -z "$(git -C "$R" diff main feature -- tests/h.test.js)" ] || fail "R3h precondition: the textconv driver must make the plain diff empty"
+run "$R" main feature
+expect_rc 1 "R3h textconv"; expect_ndrift 1 "R3h textconv"
+expect_line '^DRIFT assert-modified \| tests/h\.test\.js:2 \| kept \| ' "R3h: the weakened assertion is found despite the textconv driver"
+# the rename diff and the untracked (--no-index) diff read source text too
+git -C "$R" checkout -q main && git -C "$R" checkout -q -b feature2
+git -C "$R" mv tests/h.test.js tests/h2.test.js
+[ "$(git -C "$R" diff --cached --name-status -M main | cut -c1)" = R ] || fail "R3h precondition: the move must be detected as a rename"
+subst tests/h2.test.js '  expect(run()).toBe(1);' '  expect(run()).toBeTruthy();'; featcommit
+put tests/u.test.js <<'EOF'
+it.only('fresh', () => {
+  run(0);
+});
+EOF
+run "$R" main
+expect_rc 1 "R3h textconv rename + untracked"; expect_ndrift 2 "R3h textconv rename + untracked"
+expect_line '^DRIFT assert-modified \| tests/h2\.test\.js:2 \| kept \| ' "R3h: a renamed file's weakened assertion is found despite the textconv driver"
+expect_line '^DRIFT skip-added \| tests/u\.test\.js:1 \| fresh \| ' "R3h: an untracked file's added marker is found despite the textconv driver"
+pass "R3h_textconv_does_not_hide_drift"
+
 # ── R3: assertion findings ───────────────────────────────────────────────────────
 newrepo r3a; js_app tests/app.test.js; basecommit; feature
 subst tests/app.test.js '  expect(run(1)).toBe(1);' '  expect(run(1)).toBeTruthy();'; featcommit

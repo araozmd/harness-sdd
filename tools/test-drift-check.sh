@@ -258,7 +258,14 @@ extract_names() { # extract_names <textfile> <pathname>
         if (match(line, re_js)) {
           q = substr(line, RSTART + RLENGTH - 1, 1)
           rest = substr(line, RSTART + RLENGTH)
-          i = index(rest, q)
+          # the first UNESCAPED closing delimiter, so two titles that share a prefix up to an
+          # escaped quote stay two names; a backslash escapes the next character, kept as written
+          i = 0
+          for (k = 1; k <= length(rest); k++) {
+            c = substr(rest, k, 1)
+            if (c == "\\") { k++; continue }
+            if (c == q) { i = k; break }
+          }
           if (i > 0) printf "%d\tB\t%s\n", NR, substr(rest, 1, i - 1)
         }
       } else if (lang == "go") {
@@ -293,13 +300,13 @@ while IFS="$TAB" read -r st old new; do
   esac
   # The -U0 diff for this one file (both paths for a rename).
   case "$st" in
-    U) git diff --no-index --no-color --no-ext-diff -U0 -- /dev/null "$new" > "$tmp/diff.txt" 2>/dev/null || true ;;
+    U) git diff --no-index --no-color --no-ext-diff --no-textconv -U0 -- /dev/null "$new" > "$tmp/diff.txt" 2>/dev/null || true ;;
     R)
       # shellcheck disable=SC2086
-      git diff -U0 --no-color --no-ext-diff -M $range -- "$old" "$new" > "$tmp/diff.txt" 2>/dev/null || true ;;
+      git diff -U0 --no-color --no-ext-diff --no-textconv -M $range -- "$old" "$new" > "$tmp/diff.txt" 2>/dev/null || true ;;
     *)
       # shellcheck disable=SC2086
-      git diff -U0 --no-color --no-ext-diff -M $range -- "$new" > "$tmp/diff.txt" 2>/dev/null || true ;;
+      git diff -U0 --no-color --no-ext-diff --no-textconv -M $range -- "$new" > "$tmp/diff.txt" 2>/dev/null || true ;;
   esac
   # Binary files are skipped silently (still counted as examined).
   if grep -Eq '^(Binary files|GIT binary patch)' "$tmp/diff.txt" 2>/dev/null; then continue; fi

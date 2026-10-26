@@ -19,6 +19,9 @@ All notable changes to the harness body are recorded here. Versions follow
   Touched paths are read NUL-framed (`diff -z`, `ls-files -z`), so a test path containing a `"`
   or a backslash is examined under its real name; the tool resolves its own directory before
   changing to the repo root, so a relative invocation from a subdirectory works.
+  Content diffs pass `--no-textconv`, so a `.gitattributes` text-conversion driver cannot hide a
+  weakened assertion; a JS/TS title ends at the first unescaped quote, so `doesn\'t reject` and
+  `doesn\'t throw` stay two names.
 - `tools/change-size.sh` gains two additive config-query modes, `--print-test-re` and
   `--print-list <key>`, so the drift tool reuses the one test-path classifier and the one
   `change_size:` parser instead of carrying copies. Measuring behaviour is unchanged.
