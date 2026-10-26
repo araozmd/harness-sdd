@@ -200,4 +200,36 @@ R8_planner_stage_section() {
 }
 R8_planner_stage_section
 
+# R9 — the Driller reads the stage with the design artifacts and records it in every brief.
+R9_driller_stage_section() {
+  _r="$I/agents/driller.md"
+  [ -f "$_r" ] || fail "R9: installed agents/driller.md missing"
+  grep -qF '## Stage (ADR-0009)' "$_r" || fail "R9: agents/driller.md has no '## Stage (ADR-0009)' section"
+  _d="$(lineno "$_r" '## Read the draft epic + design artifacts as input')"; _x="$(lineno "$_r" '## Stage (ADR-0009)')"
+  [ "$_d" -gt 0 ] && [ "$_x" -gt "$_d" ] \
+    || fail "R9: the Stage section is not after '## Read the draft epic + design artifacts as input' (read=$_d stage=$_x)"
+  span "$_r" '## Stage (ADR-0009)' '## Feature-size budget' "$T/r9.sec" \
+    || fail "R9: the Stage section does not sit before '## Feature-size budget'"
+  grep -qF "grep '^stage:'" "$T/r9.sec" || fail "R9: the Driller's Stage section does not give the read command"
+  _f="$(fold "$T/r9.sec")"
+  printf '%s\n' "$_f" | grep -qiE 'absent[^.]{0,60}production' || fail "R9: the Stage section does not say absent means production"
+  printf '%s\n' "$_f" | grep -qE 'Stage: <value>[^.]{0,120}## Constraints[^.]{0,60}ADR-NNNN' \
+    || fail "R9: the Stage section does not say to record 'Stage: <value>' in every brief's ## Constraints beside the ADR-NNNN ids"
+  pass "Driller Stage section: read with the design artifacts, absent=production, Stage: <value> in every brief's ## Constraints (R9) [R9_driller_stage_section]"
+}
+R9_driller_stage_section
+
+R9_brief_template_stage() {
+  _b="$I/specs/_templates/inbox-brief.md"
+  [ -f "$_b" ] || fail "R9: installed specs/_templates/inbox-brief.md missing"
+  span "$_b" '## Constraints' '## Open questions' "$T/r9b.sec" \
+    || fail "R9: inbox-brief template lost its '## Constraints' / '## Open questions' headings"
+  grep -qE '^- Stage: <' "$T/r9b.sec" \
+    || fail "R9: inbox-brief template has no '- Stage: <…>' placeholder line under ## Constraints"
+  grep -qF '<Non-negotiables the Architect must honor.>' "$T/r9b.sec" \
+    || fail "R9: inbox-brief template lost its existing ## Constraints placeholder sentence"
+  pass "inbox-brief template carries a '- Stage:' placeholder under ## Constraints (R9) [R9_brief_template_stage]"
+}
+R9_brief_template_stage
+
 echo "All stage/NFR tests passed."
