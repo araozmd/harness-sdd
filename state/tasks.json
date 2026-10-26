@@ -466,7 +466,7 @@
         {
           "id": "E36-F01",
           "title": "Per-requirement red/green task pairs replace the layered tasks template",
-          "status": "in-review",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
