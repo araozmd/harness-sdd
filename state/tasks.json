@@ -505,7 +505,7 @@
         {
           "id": "E36-F05",
           "title": "Derived waves and critical path: next-task --waves + Driller report",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],

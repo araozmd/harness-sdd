@@ -4,6 +4,26 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.100.0] — 2026-10-26
+
+### Added — derived waves and critical path (E36-F05)
+- `node tools/next-task.mjs --waves [--json] [--epic E##]` prints the dependency graph as
+  waves (`done` = wave 0; otherwise 1 + the highest wave among dependencies), the critical
+  path (longest chain of non-done features, ties in ADR-0001 order) and, per feature, its
+  status, route, `autonomous`, effective `owner`, `runnable` and the selector's own blocker
+  records. `--json` prints one envelope (`mode: "waves"`, `outcome: "waves"`, plus `scope`,
+  `wave0`, `waves`, `critical_path`); it is the contract `/sdd-next --wave` (E36-F07) will
+  consume. `--epic` filters the listing while wave numbers stay board-wide. A live cycle or a
+  missing `depends_on` id yields `outcome: "blocked"`, reason `invalid-graph`, and no wave.
+  Read-only, derived, never stored (ADR-0010). `--json` stays a no-op in the other modes.
+- A `usage-error` now also prints a `usage:` synopsis line on stderr (`reason.detail` is
+  unchanged).
+- The Driller's completion report (`agents/driller.md`, `/sdd-drill` step 12) ends with the
+  `--waves --epic <epic-id>` view of the epic it just seeded.
+- `docs/WORKFLOW.md` gains "Running in waves and across machines": wave 1 via
+  `/sdd-next <id>` per machine, `--mine`/`owner` as the alternative, and the known limitation
+  that bare `/sdd-next` on identical boards picks the same feature.
+
 ## [0.99.0] — 2026-10-26
 
 ### Added — test-drift check (E36-F06)
