@@ -178,7 +178,12 @@ saying "it works" means nothing until you prove it. AI-generated code is often
    a `.tasks.md` that predates the tool's merge is flagged ("re-spec to pair form or
    justify"), not rejected. On a non-zero lint exit, run `python3
    "$HARNESS_DIR/tools/tasks-pair-check.py" --grandfathered "<dir>/<feature>.tasks.md"`:
-   exit 0 → flag, exit 1 → reject, exit 2 → report it and pass `--base <ref>`. The tool's
+   exit 0 → flag, exit 1 → reject, exit 2 → the date check did not run. Fetch the default
+   branch first (`git fetch origin`) — a stale `origin/<default>` that predates the tool's
+   merge flags a file that should be rejected. On exit 2 from an unresolvable default branch,
+   retry with `--base <ref>`; if exit 2 persists (no git work tree, unreadable path), the
+   verdict is **flag** with "grandfather check did not run: <stderr>" in the report — the
+   check cannot prove the file is new, so it cannot reject it. The tool's
    date is its merge into the default branch: the committer time of the first
    `--first-parent` commit on that branch (`origin/HEAD`, else `main`/`master`/`trunk`)
    touching either tool path. The `.tasks.md` date is the author time of its first

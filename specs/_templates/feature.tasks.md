@@ -5,7 +5,7 @@
 > observes GREEN; the Builder commits after each GREEN. Order pairs so the walking-skeleton
 > R-id (the thinnest end-to-end observable behavior) comes first. Refactor tasks are explicit
 > and cite the R-ids whose tests guard them. There is no trailing "write tests" task:
-> `python3 tools/tasks-pair-check.py <this file> --spec <feature>.spec.md` must exit 0.
+> `python3 "$HARNESS_DIR/tools/tasks-pair-check.py" <this file> --spec <feature>.spec.md` must exit 0.
 
 - [ ] **T1a** (R1) — write failing `tests/test_handoff.py::test_take_over_assigns_agent`; run it; observe RED
 - [ ] **T1b** (R1) — minimal code: add `handoffRequested` to `models/conversation.py` …; observe GREEN; commit

@@ -78,7 +78,7 @@ pass "R5_fenced_decoys_ignored"
 # one edge corpus to both and require byte-identical unfenced output. Each segment exists
 # for one clause, and removing that clause from either copy changes the output:
 #   closer length · closer char · closer info string · backtick-in-info opener (backtick
-#   only) · run >= 3 · indent 0-3 · trailing blanks on a closer.
+#   only) · run >= 3 · indent 0-3 · trailing blanks (space and tab) on a closer.
 { printf '%s\n' 'P0 outside' \
     '````md' 'P1 in: a 3-run cannot close a 4-run' '```' 'P2 in' '````' 'P3 out' \
     '```' 'P4 in: a tilde run cannot close a backtick fence' '~~~' 'P5 in' '```' 'P6 out' \
@@ -87,7 +87,8 @@ pass "R5_fenced_decoys_ignored"
     '~~~a`b' 'P11 in: a tilde opener may carry a backtick' '~~~' 'P12 out' \
     '``' 'P13 out: a 2-run is not a fence' '~~' 'P14 out' \
     '    ```' 'P15 out: 4-space indent is not a fence' \
-    '   ~~~' 'P16 in: 3-space indent is' '~~~  ' 'P17 out: closer with trailing blanks'
+    '   ~~~' 'P16 in: 3-space indent is' '~~~  ' 'P17 out: closer with trailing blanks' \
+    '~~~' 'P18 in' "$(printf '~~~\t')" 'P19 out: closer with a trailing tab'
 } > "$T/fence-corpus.md"
 awk "$FENCE_AWK"'fence_delim($0) { next } !fence' "$T/fence-corpus.md" > "$T/fence-awk.out"
 python3 - "$TOOL" "$T/fence-corpus.md" > "$T/fence-py.out" <<'PY'
@@ -103,7 +104,7 @@ PY
 printf '%s\n' 'P0 outside' 'P3 out' 'P6 out' 'P9 out' '```a`b' \
   'P10 out: backtick in a backtick info string is not an opener' 'P12 out' '``' \
   'P13 out: a 2-run is not a fence' '~~' 'P14 out' '    ```' 'P15 out: 4-space indent is not a fence' \
-  'P17 out: closer with trailing blanks' > "$T/fence-want.out"
+  'P17 out: closer with trailing blanks' 'P19 out: closer with a trailing tab' > "$T/fence-want.out"
 cmp -s "$T/fence-want.out" "$T/fence-awk.out" \
   || fail "R5_fence_parity: fence.awk reads the corpus differently than the suite expects: $(diff "$T/fence-want.out" "$T/fence-awk.out" | tr '\n' '|')"
 cmp -s "$T/fence-awk.out" "$T/fence-py.out" \

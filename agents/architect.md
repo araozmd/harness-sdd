@@ -50,7 +50,7 @@ For feature `<E##>-<F##>` under `specs/epics/<epic>/<feature>/`, produce exactly
      behavior observable at the product boundary. Refactor tasks are explicit
      (`**T<n>** (R1, R2) — refactor …`) and cite the `R-id`s whose tests guard them.
      There is **no** trailing "write tests" task. This is the Builder's only worklist.
-   - Run `python3 tools/tasks-pair-check.py <feature>.tasks.md --spec
+   - Run `python3 "$HARNESS_DIR/tools/tasks-pair-check.py" <feature>.tasks.md --spec
      <feature>.spec.md` on the file before hand-off; it must exit 0. Grammar: `docs/SPEC-FORMAT.md` → "Tasks —
      red/green pairs per requirement".
 4. **`<feature>.tests.md`** — The contract.
