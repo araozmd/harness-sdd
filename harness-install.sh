@@ -3525,6 +3525,10 @@ PYRETIRE
 # 4042109208). The fix is a GUARDED refresh: migrate only a file byte-identical
 # to the known prior shipped stub; preserve everything else byte for byte.
 #
+# E36-F03 added the `stage:` frontmatter line (ADR-0009), which made the v0.81.1 stub a
+# SECOND known prior: product_stub_prior (v0.1.0 → v0.81.0) and product_stub_prior_0_81_1
+# (v0.81.1 → the release before E36-F03) are the only two blobs the refresh migrates.
+#
 # product_stub_prior — the stub shipped byte-identically from v0.1.0 through
 # v0.81.0 (confirmed with `git log -S` on its distinguishing line). Older or
 # unknown stubs are deliberately NOT in the table and are preserved: this is a
@@ -3551,12 +3555,43 @@ TODO
 PRODUCT_STUB_PRIOR_EOF
 }
 
-# product_stub_current — the stub shipped from v0.81.1 (E28-F01): the whole-project
-# front door is /sdd-plan, then /sdd-drill, before /sdd-next.
+# product_stub_prior_0_81_1 — the stub shipped byte-identically from v0.81.1 (E28-F01)
+# through the release before E36-F03: the whole-project front door is /sdd-plan, then
+# /sdd-drill, before /sdd-next, and there is no `stage:` line. A second known prior blob,
+# not a heuristic — the one-blob-at-a-time migration rule above still holds.
+product_stub_prior_0_81_1() {
+  cat <<'PRODUCT_STUB_PRIOR_0811_EOF'
+---
+status: draft
+---
+
+# <Product name> — Product Constitution
+
+> Layer 0. The stable, high-level "what & why". Rewrite this for your product,
+> then run /sdd-plan to plan the whole project (vision, architecture, ADRs, draft epics),
+> then /sdd-drill <epic-id> to decompose the first epic into features.
+
+## What this product is
+TODO
+
+## Who it is for
+TODO
+
+## Principles & hard constraints
+TODO
+PRODUCT_STUB_PRIOR_0811_EOF
+}
+
+# product_stub_current — the stub shipped from E36-F03: the v0.81.1 front-door text plus
+# the product stage (ADR-0009). The value line is BARE — the stage grammar is
+# `^stage: (discovery|pilot|production)$`, so an inline comment would make it read as
+# production; the explanation sits on its own `#` line inside the block.
 product_stub_current() {
   cat <<'PRODUCT_STUB_CURRENT_EOF'
 ---
 status: draft
+# stage: discovery | pilot | production — absent means production (ADR-0009)
+stage: production
 ---
 
 # <Product name> — Product Constitution

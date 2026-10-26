@@ -773,6 +773,19 @@ test_workers_block_seeded_migrated_converge # E17-F04
 test_models_block_seed_and_heredoc_converge # E17-F01
 [ -x "$T/.harness/init.sh" ]                   || fail ".harness/init.sh not executable"     # R1
 [ -f "$T/.harness/specs/product.md" ]          || fail "product.md stub not seeded"          # R6
+# E36-F03 R1: the seeded stub declares the product stage (ADR-0009) — the bare value line
+# matches the `$`-anchored grammar `^stage: (discovery|pilot|production)$` (an inline comment
+# would make it read as production silently), the explanation sits on its own `#` line, and
+# the line lives INSIDE the first `---` block. The `seeded … (stub)` verdict is asserted by
+# test_product_stub_0811_refreshed, whose fresh install captures stdout (this one discards it).
+grep -qxF 'stage: production' "$T/.harness/specs/product.md" \
+  || fail "E36-F03 R1: seeded product.md has no whole-line 'stage: production' (absent, or an inline comment on the value line)"
+grep -qE '^# .*discovery \| pilot \| production' "$T/.harness/specs/product.md" \
+  || fail "E36-F03 R1: seeded product.md has no '# … discovery | pilot | production' comment line"
+grep -qF 'absent means production' "$T/.harness/specs/product.md" \
+  || fail "E36-F03 R1: seeded product.md does not state that an absent stage means production"
+awk 'NR==1&&$0!="---"{exit 1} NR>1&&/^---$/{exit} /^stage: production$/{f=1} END{exit !f}' "$T/.harness/specs/product.md" \
+  || fail "E36-F03 R1: the 'stage: production' line is not inside the stub's first --- frontmatter block"
 [ -f "$T/.harness/state/tasks.json" ]          || fail "bootstrap tasks.json missing"        # R6
 # E09-F01: doc-critic role is installed and the generating-agent contracts reference it.
 [ -f "$T/.harness/agents/doc-critic.md" ]      || fail "doc-critic role not installed"       # R13
