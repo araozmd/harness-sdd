@@ -704,6 +704,12 @@ function select(model, config, args, repos) {
 // `done` is wave 0; a non-done feature's wave is 1 + the max wave of its dependencies (a
 // done dependency counts as 0, no dependencies is wave 1). Read-only; ids in ADR-0001 order.
 function deriveWaves(model, config, args) {
+  // The epic is resolved BEFORE the graph is examined, so a missing epic is an input-error
+  // even on an invalid graph (R4 precedence). `--epic` filters the LISTING only: waves are
+  // computed board-wide, because a dependency in another epic still counts.
+  const epic = args.epic;
+  if (epic !== null && !model.epics.some((e) => e.id === epic)) throw new ExpectedError('input-error', `epic ${epic} does not exist`);
+  const inScope = (feature) => epic === null || feature.epic.id === epic;
   const features = [...model.features].sort((a, b) => compareIds(a.id, b.id));
   const featureById = new Map(features.map((feature) => [feature.id, feature]));
   const memo = new Map();
@@ -714,18 +720,19 @@ function deriveWaves(model, config, args) {
     memo.set(id, n);
     return n;
   };
-  const wave0 = features.filter((feature) => feature.status === 'done').map((feature) => feature.id);
+  const scoped = features.filter(inScope);
+  const wave0 = scoped.filter((feature) => feature.status === 'done').map((feature) => feature.id);
   const groups = new Map();
-  for (const feature of features) {
+  for (const feature of scoped) {
     if (feature.status === 'done') continue;
     const n = wave(feature.id);
     if (!groups.has(n)) groups.set(n, []);
     groups.get(n).push({ id: feature.id });
   }
   const waves = [...groups.keys()].sort((a, b) => a - b).map((n) => ({ wave: n, features: groups.get(n) }));
-  const summary = `${waves.length} waves over ${features.length - wave0.length} features (+${wave0.length} done)`;
+  const summary = `${waves.length} waves over ${scoped.length - wave0.length} features (+${wave0.length} done)`;
   return { ...envelope('waves', 'waves', null, { code: 'waves-derived', detail: summary }, [], summary),
-    scope: { epic: null }, wave0, waves, critical_path: [] };
+    scope: { epic }, wave0, waves, critical_path: [] };
 }
 
 let args = { mode: 'board' };

@@ -241,8 +241,62 @@ test_wave_assignment() {
   pass "R3 wave_assignment: linear, diamond, two components, max-of-deps; error envelopes keep seven keys"
 }
 
+# epic_json <epic-id> <feature-json>...: one epic object.
+epic_json() {
+  _e=$1
+  shift
+  _f=$(printf '%s,' "$@")
+  printf '{"id":"%s","title":"%s","status":"planned","features":[%s]}' "$_e" "$_e" "${_f%,}"
+}
+# boardN <epic-json>...: a multi-epic board, epics in the order given.
+boardN() {
+  _x=$(printf '%s,' "$@")
+  printf '{"project":"fixture","epics":[%s]}\n' "${_x%,}" | write_board
+}
+
+test_epic_scope() {
+  write_config true
+  # E2-F1 depends on pending E1-F2 (wave 1), so E2-F1 is wave 2 board-wide. E3 is an
+  # existing epic with no features. Epics and features listed out of order.
+  boardN "$(epic_json E3)" \
+    "$(epic_json E2 "$(feat E2-F3 pending)" "$(feat E2-F1 pending '["E1-F2"]')" "$(feat E2-F2 done)")" \
+    "$(epic_json E1 "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F1 done)")"
+  run_tool --waves --json >"$TMP/s.out" || fail "R4: whole-board --waves failed"
+  [ "$(json_field 'x["scope"]["epic"] is None' <"$TMP/s.out")" = True ] || fail "R4: whole board scope.epic is not null"
+  [ "$(json_field "$WAVE0" <"$TMP/s.out")" = 'E1-F1,E2-F2' ] || fail "R4: whole board wave0 is $(json_field "$WAVE0" <"$TMP/s.out")"
+  [ "$(json_field "$WAVES_SHAPE" <"$TMP/s.out")" = '1:E1-F2,E2-F3|2:E2-F1' ] ||
+    fail "R4: whole board waves are $(json_field "$WAVES_SHAPE" <"$TMP/s.out")"
+  run_tool --waves --epic E2 --json >"$TMP/s.out" || fail "R4: --epic E2 failed"
+  [ "$(json_field 'x["outcome"]' <"$TMP/s.out")" = waves ] || fail "R4: --epic E2 outcome is not waves"
+  [ "$(json_field 'x["scope"]' <"$TMP/s.out")" = "{'epic': 'E2'}" ] || fail "R4: --epic E2 scope is not {epic: E2}"
+  [ "$(json_field "$WAVE0" <"$TMP/s.out")" = 'E2-F2' ] || fail "R4: --epic E2 wave0 is $(json_field "$WAVE0" <"$TMP/s.out"), want only E2's done ids"
+  [ "$(json_field "$WAVES_SHAPE" <"$TMP/s.out")" = '1:E2-F3|2:E2-F1' ] ||
+    fail "R4: --epic E2 waves are $(json_field "$WAVES_SHAPE" <"$TMP/s.out"), want 1:E2-F3|2:E2-F1 (board-wide numbers, E1 filtered out)"
+  run_tool --waves --epic E3 --json >"$TMP/s.out" || fail "R4: an existing epic with no features was rejected"
+  [ "$(json_field 'x["scope"]["epic"] + "/" + str(x["wave0"]) + "/" + str(x["waves"]) + "/" + str(x["critical_path"])' <"$TMP/s.out")" = 'E3/[]/[]/[]' ] ||
+    fail "R4: an empty epic does not give empty wave0/waves/critical_path"
+  # Missing epic: input-error, exit 1, stderr names it.
+  _rc=0
+  run_tool --waves --epic E9 --json >"$TMP/s.out" 2>"$TMP/s.err" || _rc=$?
+  [ "$_rc" = 1 ] || fail "R4: --epic E9 exited $_rc, want 1"
+  [ "$(json_field 'x["outcome"] + "/" + x["reason"]["code"] + "/" + x["mode"]' <"$TMP/s.out")" = error/input-error/waves ] ||
+    fail "R4: --epic E9 is not an input-error envelope in mode waves"
+  grep -q 'E9' "$TMP/s.err" || fail "R4: stderr does not name the missing epic E9"
+  # ... and a missing epic wins over a live cycle (checked before the graph).
+  boardN "$(epic_json E1 "$(feat E1-F2 pending '["E1-F1"]')" "$(feat E1-F1 pending '["E1-F2"]')")"
+  _rc=0
+  run_tool --waves --epic E9 --json >"$TMP/s.out" 2>"$TMP/s.err" || _rc=$?
+  [ "$_rc" = 1 ] || fail "R4: --epic E9 on a live-cycle board exited $_rc, want 1"
+  [ "$(json_field 'x["outcome"] + "/" + x["reason"]["code"]' <"$TMP/s.out")" = error/input-error ] ||
+    fail "R4: on a live-cycle board --epic E9 did not win over invalid-graph"
+  [ "$(json_field 'x["reason"]["detail"]' <"$TMP/s.out")" = 'epic E9 does not exist' ] ||
+    fail "R4: missing-epic detail is '$(json_field 'x["reason"]["detail"]' <"$TMP/s.out")'"
+  pass "R4 epic_scope: whole board by default; --epic filters, keeps board-wide waves; missing epic = input-error first"
+}
+
 test_cli_contract
 test_usage_synopsis
 test_wave_assignment
+test_epic_scope
 
 echo "test_waves: $PASS passed"
