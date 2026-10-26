@@ -2853,6 +2853,27 @@ test_product_stub_0811_refreshed() {
   cmp -s "$_pp" "$_tp4/before.md" || fail "E36-F03 R2 (preserved-0811): an edited v0.81.1 product.md was not left byte-identical"
   rm -rf "$_tp4"
 
+  # preserved (v0.81.1, TODOs kept) — the second edit keeps all three TODO lines and edits
+  # only the TAIL, so a check of "no stage: and three TODOs" (N3y) or a suffix/prefix match
+  # (N3t, N3x) is still caught: any byte that differs from the shipped stub means preserved
+  # (E36-F03 review round 2, F5).
+  _tp5="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+  mkdir -p "$_tp5/t"
+  CODEX_HOME="$_tp5/ch" HOME="$_tp5/home" sh "$SRC/harness-install.sh" --agents=claude "$_tp5/t" \
+    >/dev/null 2>"$_tp5/1.err" || fail "E36-F03 R2 (preserved-0811-todos) setup: fresh install exited non-zero: $(cat "$_tp5/1.err")"
+  _pp="$_tp5/t/.harness/specs/product.md"
+  write_product_stub_0811 "$_pp"
+  printf 'Owner: the platform team.\n' >> "$_pp"
+  [ "$(grep -cx TODO "$_pp")" = 3 ] || fail "E36-F03 R2 (preserved-0811-todos) setup: the fixture must keep all three TODO lines"
+  ! grep -qE '^stage:' "$_pp" || fail "E36-F03 R2 (preserved-0811-todos): the edited fixture carries a stage: line — fixture shape is stale"
+  cp "$_pp" "$_tp5/before.md"
+  CODEX_HOME="$_tp5/ch" HOME="$_tp5/home" sh "$SRC/harness-install.sh" --agents=claude "$_tp5/t" \
+    >"$_tp5/2.out" 2>"$_tp5/2.err" || fail "E36-F03 R2 (preserved-0811-todos): upgrade exited non-zero: $(cat "$_tp5/2.err")"
+  _v="$(product_verdict "$_tp5/2.out" preserved-0811-todos)"
+  case "$_v" in *'specs/product.md preserved'*) ;; *) fail "E36-F03 R2 (preserved-0811-todos): an edited v0.81.1 product.md that keeps its TODOs was not reported preserved: $_v" ;; esac
+  cmp -s "$_pp" "$_tp5/before.md" || fail "E36-F03 R2 (preserved-0811-todos): an edited v0.81.1 product.md that keeps its TODOs was not left byte-identical"
+  rm -rf "$_tp5"
+
   # pristine — the current stub, re-run, is left alone and says so.
   _tp3="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
   mkdir -p "$_tp3/t"
