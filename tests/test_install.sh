@@ -2809,8 +2809,12 @@ test_product_stub_0811_refreshed() {
     >/dev/null 2>"$_tp3/1.err" || fail "E36-F03 R2 (pristine) setup: fresh install exited non-zero: $(cat "$_tp3/1.err")"
   _pp="$_tp3/t/.harness/specs/product.md"
   cp "$_pp" "$_tp3/before.md"
-  CODEX_HOME="$_tp3/ch" HOME="$_tp3/home" sh "$SRC/harness-install.sh" --agents=claude "$_tp3/t" \
+  # The compare branch writes three stub temp files; a private TMPDIR proves all are removed.
+  mkdir -p "$_tp3/tmp"
+  TMPDIR="$_tp3/tmp" CODEX_HOME="$_tp3/ch" HOME="$_tp3/home" sh "$SRC/harness-install.sh" --agents=claude "$_tp3/t" \
     >"$_tp3/2.out" 2>"$_tp3/2.err" || fail "E36-F03 R2 (pristine): re-run exited non-zero: $(cat "$_tp3/2.err")"
+  [ -z "$(ls -A "$_tp3/tmp")" ] \
+    || fail "E36-F03 R2 (pristine): the upgrade left temp files behind in TMPDIR: $(ls -A "$_tp3/tmp" | tr '\n' ' ')"
   _v="$(product_verdict "$_tp3/2.out" pristine)"
   case "$_v" in *'specs/product.md pristine'*) ;; *) fail "E36-F03 R2 (pristine): the current stub was not reported pristine: $_v" ;; esac
   cmp -s "$_pp" "$_tp3/before.md" || fail "E36-F03 R2 (pristine): the pristine stub changed on re-run"

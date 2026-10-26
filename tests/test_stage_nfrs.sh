@@ -133,6 +133,12 @@ R11_spec_format_grammar_section() {
             '## Deferred' '| Bolt-on | Deferred by | Trigger |' 'Deferred: none — <why>' 'E36-F04'; do
     grep -qF -- "$_k" "$T/r11.sec" || fail "R11: the grammar section does not state '$_k'"
   done
+  # The row rule is one sentence naming the four headings and both token shapes; the
+  # `## Deferred` header is stated in PROSE, outside the fenced example that also carries it.
+  fold "$T/r11.sec" | grep -qF '`## Data model`, `## API / interface`, `## Files to change` and `## Deferred` headings carries an `R[0-9]+` token or an `ADR-[0-9]{4}` token' \
+    || fail "R11: the plan-row rule does not name all four headings and both the R[0-9]+ and ADR-[0-9]{4} tokens in one sentence"
+  awk 'index($0,"```")==1{fz=!fz; next} !fz && index($0,"| Bolt-on | Deferred by | Trigger |")>0 {ok=1} END{exit !ok}' "$T/r11.sec" \
+    || fail "R11: the '| Bolt-on | Deferred by | Trigger |' header is only in the fenced example, not stated in the rule"
   fold "$T/r11.sec" | grep -qE 'E36-F04[^.]{0,80}lint' \
     || fail "R11: the grammar section does not name E36-F04 as the lint that enforces it"
   # The `## Deferred` example heading sits INSIDE a fenced block (``` toggles).
@@ -169,6 +175,12 @@ R7_architect_stage_section() {
   _f="$(fold "$T/r7.sec")"
   printf '%s\n' "$_f" | grep -qiE 'absent[^.]{0,60}production' || fail "R7: the Stage section does not say absent means production"
   printf '%s\n' "$_f" | grep -qiE 'bolt-on[^.]{0,80}without[^.]{0,40}R-id' || fail "R7: the Stage section does not say never add a bolt-on without an R-id"
+  # The discovery/pilot branch and its citation target are single-sentence anchors: both
+  # tokens also occur elsewhere in the section, so a bare per-token grep has a second producer.
+  printf '%s\n' "$_f" | grep -qE '`discovery` or `pilot`[^.]{0,60}defer bolt-ons by writing' \
+    || fail "R7: the Stage section has no 'discovery or pilot — defer bolt-ons by writing' branch"
+  printf '%s\n' "$_f" | grep -qE 'cite it from[^.]{0,40}`## Deferred`' \
+    || fail "R7: the Stage section does not say to cite the deferred ADR from the plan's ## Deferred"
   printf '%s\n' "$_f" | grep -qiE 'not an ADR delta' || fail "R7: the Stage section does not say a deferred ADR is not an ADR delta"
   printf '%s\n' "$_f" | grep -qiE 'one ADR kind' || fail "R7: the Stage section does not carve out the deferred ADR as the one ADR kind the Architect may author"
   grep -qF 'do **not** author an ADR delta' "$_r" || fail "R7: the existing 'do **not** author an ADR delta' sentence was lost"
@@ -194,7 +206,9 @@ R8_planner_stage_section() {
   printf '%s\n' "$_f" | grep -qiE 'deferred ADR[^.]{0,80}Trigger' || fail "R8: the Stage section does not record an excluded bolt-on as a deferred ADR with a Trigger:"
   printf '%s\n' "$_f" | grep -qiE 'not an accepted ADR[^.]{0,40}omission' || fail "R8: the Stage section does not say an excluded bolt-on is neither an accepted ADR nor an omission"
   printf '%s\n' "$_f" | grep -qiE 'never write[^.]{0,30}specs/product' || fail "R8: the Stage section does not say the Planner never writes specs/product.md"
-  printf '%s\n' "$_f" | grep -qiE 'completion report[^.]{0,60}stage|stage[^.]{0,60}completion report' \
+  # "say so in the completion report" (the absent case) also co-occurs with "stage", so the
+  # name-the-stage instruction is anchored on its own verb.
+  printf '%s\n' "$_f" | grep -qiE 'name the stage you read[^.]{0,80}completion report' \
     || fail "R8: the Stage section does not say to name the stage in the completion report"
   pass "Planner Stage section: read before architecture/ADRs, absent=production, excluded bolt-on = deferred ADR with Trigger:, never writes product.md, names stage in report (R8) [R8_planner_stage_section]"
 }
