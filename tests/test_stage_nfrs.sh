@@ -71,4 +71,24 @@ R4_adr_template_deferred_trigger() {
 }
 R4_adr_template_deferred_trigger
 
+# R5 — the ADR template names the sticky list (never deferred) and the bolt-on examples.
+R5_adr_template_sticky_boltons() {
+  _a="$I/specs/_templates/adr.md"
+  for _k in 'tenant isolation' 'auth boundary' 'secrets out of the repo' 'validation at the system edge'; do
+    grep -qiF "$_k" "$_a" || fail "R5: ADR template guidance does not name the sticky NFR '$_k'"
+  done
+  grep -qF 'never deferred at any stage' "$_a" \
+    || fail "R5: ADR template guidance does not say sticky NFRs are 'never deferred at any stage'"
+  for _k in 'encryption at rest' 'WAF' 'rate limits' 'backups' 'caching'; do
+    grep -qiF "$_k" "$_a" || fail "R5: ADR template guidance does not name the bolt-on example '$_k'"
+  done
+  fold "$_a" | grep -qE 'ADR-0009[^.]{0,40}extending[^.]{0,80}spec change' \
+    || fail "R5: ADR template guidance does not say extending the sticky list is a change to ADR-0009 (a spec change)"
+  _t="$(lineno "$_a" '- **Trigger:**')"; _g="$(lineno "$_a" '> ## Stage-aware NFRs (ADR-0009)')"; _c="$(lineno "$_a" '## Context')"
+  [ "$_g" -gt "$_t" ] && [ "$_c" -gt "$_g" ] \
+    || fail "R5: the '> ## Stage-aware NFRs (ADR-0009)' guidance block is not between the header list and ## Context (trigger=$_t guidance=$_g context=$_c)"
+  pass "ADR template names the 4 sticky NFRs (never deferred at any stage), the 5 bolt-on examples and the spec-change rule (R5) [R5_adr_template_sticky_boltons]"
+}
+R5_adr_template_sticky_boltons
+
 echo "All stage/NFR tests passed."
