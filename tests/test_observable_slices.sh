@@ -65,3 +65,25 @@ bullet="$(sed -n "${b}p" "$INCEP")"
 printf '%s' "$bullet" | grep -qiE 'surface.{0,60}HTTP.{0,60}exit code' || fail "R5: bullet does not name the surface list"
 printf '%s' "$bullet" | grep -qF 'what a user or client sees' || fail "R5: bullet does not say what a user or client sees"
 pass "R5_inception_brief_sections"
+
+# ── R1: the Driller's observable-slice section (the three clauses of decision 1) ─
+H1='## Observable slice — the shape rule beside the size budget (ADR-0008)'
+grep -qF "$H1" "$DRILLER" || fail "R1: $DRILLER lacks the heading '$H1'"
+a="$(ln "$DRILLER" '## Feature-size budget')"; b="$(ln "$DRILLER" '## Observable slice')"
+c="$(ln "$DRILLER" '## Seed the feature entries')"
+[ -n "$a" ] && [ -n "$b" ] && [ -n "$c" ] && [ "$a" -lt "$b" ] && [ "$b" -lt "$c" ] \
+  || fail "R1: observable-slice section is not between the size-budget and seed sections"
+# every further anchor runs over the new section's line range only (whole-file greps for
+# max_requirements / depends_on are green on main and could never be RED)
+range "$DRILLER" '## Observable slice' '## Seed the feature entries' | tr '\n' ' ' > "$T/driller-sec.txt"
+SEC="$T/driller-sec.txt"
+sec() { grep -qiE "$1" "$SEC"; }
+sec 'product boundary[^.]{0,120}HTTP[^.]{0,40}CLI[^.]{0,40}UI[^.]{0,40}file[^.]{0,40}exit code' \
+  || fail "R1: section does not name the product-boundary surfaces (HTTP, CLI, UI, file, exit code)"
+sec 'first feature of a fresh epic is the walking skeleton' || fail "R1: section does not make the first feature of a fresh epic the walking skeleton"
+sec 'thinnest[^.]{0,40}end-to-end' || fail "R1: section does not define the skeleton as the thinnest end-to-end path"
+sec 'lowest[^.]{0,20}F##' || fail "R1: section does not tie the skeleton to the lowest F##"
+sec 'skeleton[^.]{0,200}no intra-epic .?depends_on' || fail "R1: section does not give the skeleton no intra-epic depends_on"
+sec 'internal[^.]{0,80}merged[^.]{0,40}consum' || fail "R1: section does not merge an internal-only candidate into its consumer"
+sec 'max_requirements[^.]{0,60}size proxy' || fail "R1: section does not say max_requirements remains the size proxy"
+pass "R1_driller_rule_section"

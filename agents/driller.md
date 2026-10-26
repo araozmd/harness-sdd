@@ -109,6 +109,28 @@ choice explicit, not to make it for you.
 yours** — they govern a measured diff, which does not exist at decomposition time. Leave them
 to the pre-PR check.
 
+## Observable slice — the shape rule beside the size budget (ADR-0008)
+
+The size budget above says how *much* a feature may carry; this rule says what *shape* it must
+have. `max_requirements` remains the size proxy; this is the shape rule beside it, and it says
+nothing about count.
+
+**Every feature you seed names at least one behavior observable at the product boundary** — an
+HTTP response, a CLI invocation, a UI interaction, a file output or an exit code. A feature
+whose outcome is only a table, a module, an interface, a migration, a schema or a config key
+is not a slice: nothing can be exercised until some later feature lands.
+
+**The first feature of a fresh epic is the walking skeleton**: the thinnest end-to-end path a
+user or client can exercise, the lowest `F##` a default (non-amend) drill seeds, with no
+intra-epic `depends_on`. Cross-cutting setup (a migrations framework, CI, auth middleware) is
+legitimate as the skeleton's content, never as its own horizontal feature. Amend mode appends
+features and does not re-judge the existing first feature.
+
+**A candidate whose outcome is only internal is merged into the slice that consumes it.** When
+the merge would push the consumer over `max_requirements`, the size rule's split applies — along
+observable seams (a read-only surface, the one operation that commits state), not back into
+layers.
+
 ## Seed the feature entries (R7, D3)
 
 Read the epic's current `features` first. Then write each new feature into that epic's
