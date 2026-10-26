@@ -343,18 +343,23 @@ expect_line '^DRIFT assert-modified \| specs/f/F\.spec\.md:2 \| specs/f/F\.spec\
 pass "R1e_spec_md_is_a_test_file"
 
 # Untracked files belong to the WORKING-TREE head only, and only when not ignored (round 3,
-# N04/N05). Both files carry an `.only(` so listing either one is a visible finding.
+# N04/N05). Each file carries an only-marker, so listing any one of them is a visible finding.
 newrepo r1f; js_app tests/app.test.js
 printf 'tests/ign.test.js\n' > "$R/.gitignore"
 basecommit; feature
 put tests/u.test.js <<'EOF'
 it.only('untracked', () => {
-  run();
+  run(0);
 });
 EOF
 put tests/ign.test.js <<'EOF'
 it.only('ignored', () => {
-  run();
+  run(0);
+});
+EOF
+put src/n.js <<'EOF'
+it.only('not a test path', () => {
+  run(0);
 });
 EOF
 run "$R" main
@@ -366,6 +371,43 @@ run "$R" main feature
 expect_rc 0 "R1f head-ref mode"
 expect_line '^test-drift-check: 0 findings, 0 waived, 0 test files examined ' "R1f: <head-ref> mode never lists untracked files"
 pass "R1f_untracked_scope"
+
+# Base is the MERGE BASE, paths are repo-relative and printed raw (round 3): main moves on after
+# the branch point (its new test file must never be seen, in either mode), the touched paths are
+# non-ASCII (git would C-quote them without core.quotePath=false, and the quoted form matches no
+# classifier), and a run from a subdirectory reads the same repository the same way.
+newrepo r1g; js_app 'tests/ü/a.test.js'; basecommit; feature
+subst 'tests/ü/a.test.js' '  expect(run(1)).toBe(1);' '  expect(run(1)).toBeTruthy();'; featcommit
+git -C "$R" checkout -q main
+put tests/m.test.js <<'EOF'
+it('main only', () => {
+  expect(1).toBe(1);
+});
+EOF
+git -C "$R" add -A && git -C "$R" commit -qm main-moves-on
+git -C "$R" checkout -q feature
+_mb="$(git -C "$R" rev-parse --short "$(git -C "$R" merge-base main feature)")"
+[ "$_mb" != "$(git -C "$R" rev-parse --short main)" ] || fail "R1g precondition: main must have moved past the merge base"
+put 'tests/ü/n.test.js' <<'EOF'
+it.only('fresh', () => {
+  run(0);
+});
+EOF
+run "$R" main
+expect_rc 1 "R1g working tree"; expect_ndrift 2 "R1g working tree"
+expect_line '^DRIFT assert-modified \| tests/ü/a\.test\.js:3 \| keeps name \| ' "R1g: a committed non-ASCII test path is examined, printed raw"
+expect_line '^DRIFT skip-added \| tests/ü/n\.test\.js:1 \| fresh \| ' "R1g: an untracked non-ASCII test path is examined, printed raw"
+[ "$(cnt 'm\.test\.js')" = 0 ] || { cat "$T/out" >&2; fail "R1g: a file added on main after the branch point is not on this branch"; }
+expect_line "^test-drift-check: 2 findings, 0 waived, 2 test files examined \\(base $_mb\\)\$" "R1g: base is the merge base"
+cp "$T/out" "$T/out.top"
+( cd "$R/tests" && sh "$TOOL" main ) > "$T/out" 2> "$T/err" && rc=0 || rc=$?
+expect_rc 1 "R1g from a subdirectory"
+cmp -s "$T/out" "$T/out.top" || { diff "$T/out.top" "$T/out" >&2; fail "R1g: a run from a subdirectory must print exactly what a run from the top prints"; }
+run "$R" main feature
+expect_rc 1 "R1g head-ref mode"; expect_ndrift 1 "R1g head-ref mode"
+expect_line '^DRIFT assert-modified \| tests/ü/a\.test\.js:3 \| keeps name \| ' "R1g head-ref mode"
+expect_line "^test-drift-check: 1 findings, 0 waived, 1 test files examined \\(base $_mb\\)\$" "R1g head-ref mode: base is the merge base"
+pass "R1g_merge_base_raw_paths_subdir"
 
 # ── R3: assertion findings ───────────────────────────────────────────────────────
 newrepo r3a; js_app tests/app.test.js; basecommit; feature
