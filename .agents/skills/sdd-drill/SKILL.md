@@ -90,3 +90,7 @@ an arbitrary epic.
     ids, any ADR deltas, and the decision taken; tell the human to **run `/sdd-next`** to
     execute. Do NOT spawn the Architect, do NOT write any feature `.spec/.plan/.tasks/.tests`,
     and advance ONLY the target epic to `planned` — the Driller decomposes, never specs.
+    **End** the report with the wave view: run
+    `node tools/next-task.mjs --waves --epic <epic-id>` and paste its output
+    verbatim as the last section (wave 1 = what can start now, one `/sdd-next <id>` per
+    machine; the critical path = what to start first).

@@ -318,7 +318,14 @@ flip/stamp — report to the human:
   or *keep gated* (`planned`, every feature `autonomous: false`) — and that the epic is now
   `planned`;
 - and the instruction to **run `/sdd-next`** to execute (and, for a gated epic, that each
-  feature parks at the per-feature spec-approval gate).
+  feature parks at the per-feature spec-approval gate);
+- and, to **end** the report, the wave view of the epic just seeded: run
+  `node tools/next-task.mjs --waves --epic <epic-id>` (in an installed target
+  `node .harness/tools/next-task.mjs --waves --epic <epic-id>`) and paste its output
+  verbatim as the report's last section. Its wave 1 is what the operator can start now —
+  one `/sdd-next <id>` per machine — and its critical path is what to start first. The
+  view is derived from `depends_on` and never stored (ADR-0010); a dependency cycle or a
+  missing id prints `Waves undefined` instead, which is itself worth reporting.
 
 State explicitly that the Driller does **not** spawn the Architect, does **not** write any
 feature `.spec/.plan/.tasks/.tests`, and advances **only** the target epic to `planned` —
