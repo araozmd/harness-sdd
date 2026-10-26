@@ -553,6 +553,28 @@ $(diff "$TMP/h.want" "$TMP/h.out" || :)"
   pass "R8 human_report: scope line, Wave 0, wave rows by field, critical path; invalid graph; errors stay JSON"
 }
 
+# Runs LAST: it audits every run_tool call the suite made.
+test_read_only_and_builtins() {
+  _n=$(grep -c -- '--waves' "$RUNS" || :)
+  [ "$_n" -ge 40 ] || fail "R9: only $_n --waves runs were recorded; the read-only audit is not covering the suite"
+  [ ! -s "$WRITES" ] || fail "R9: a run changed the fixture board:
+$(cat "$WRITES")"
+  [ "$(protected_cksums)" = "$PROTECTED_BEFORE" ] ||
+    fail "R9: store/tasks.schema.json, tools/task-diagnostics.py or init.sh changed during the suite"
+  # Statement lines only: a comment in the selector contains `from "..."`.
+  grep -E "^import .* from ['\"]|^import ['\"]" "$TOOL" >"$TMP/imports" || :
+  [ -s "$TMP/imports" ] || fail "R9: found no import statement lines (the scan pattern is broken)"
+  while IFS= read -r _line; do
+    case $_line in
+      *" from 'node:"* | *' from "node:'* | "import 'node:"* | 'import "node:'*) ;;
+      *) fail "R9: non-builtin import: $_line" ;;
+    esac
+  done <"$TMP/imports"
+  ! grep -qF 'import(' "$TOOL" || fail "R9: tools/next-task.mjs contains a dynamic import("
+  ! grep -qF 'require(' "$TOOL" || fail "R9: tools/next-task.mjs contains require("
+  pass "R9 read_only_and_builtins: no --waves run wrote the board or a protected file; node: imports only"
+}
+
 test_cli_contract
 test_usage_synopsis
 test_wave_assignment
@@ -561,5 +583,6 @@ test_feature_records
 test_invalid_graph
 test_critical_path
 test_human_report
+test_read_only_and_builtins
 
 echo "test_waves: $PASS passed"
