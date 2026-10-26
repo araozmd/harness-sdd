@@ -628,6 +628,39 @@ expect_rc 0 "R7f main feature"
 expect_line '^test-drift-check: 0 findings, 0 waived, 1 test files examined ' "R7f head-ref mode reads the new path"
 pass "R7f_rename_no_change"
 
+# The D and R statuses each carry their own fixture (round 3, N17/N16): a DELETED test file
+# yields findings for everything it held, and a rename that also weakens an assertion is
+# diffed old path -> new path (diffing only the new path reads every line as an addition).
+newrepo r7j; put tests/del.sh <<'EOF'
+#!/bin/sh
+t_x() { ok "y"; }
+EOF
+put tests/a.test.js <<'EOF'
+it('renamed', () => {
+  expect(run(1)).toBe(1);
+  run(2);
+  run(3);
+  run(4);
+  run(5);
+});
+EOF
+basecommit; feature
+git -C "$R" rm -q tests/del.sh
+git -C "$R" mv tests/a.test.js tests/b.test.js
+subst tests/b.test.js '  expect(run(1)).toBe(1);' '  expect(run(1)).toBeTruthy();'
+featcommit
+for _mode in wt ref; do
+  if [ "$_mode" = wt ]; then run "$R" main; else run "$R" main feature; fi
+  expect_rc 1 "R7j ($_mode)"; expect_ndrift 3 "R7j ($_mode)"
+  for _want in 'DRIFT test-removed | tests/del.sh:— | t_x | t_x' \
+               'DRIFT assert-removed | tests/del.sh:2 | t_x | t_x() { ok "y"; }' \
+               'DRIFT assert-modified | tests/b.test.js:2 | renamed | expect(run(1)).toBe(1); -> expect(run(1)).toBeTruthy();'; do
+    grep -Fxq "$_want" "$T/out" || { cat "$T/out" >&2; fail "R7j ($_mode): want the line: $_want"; }
+  done
+  expect_line '^test-drift-check: 3 findings, 0 waived, 2 test files examined ' "R7j ($_mode): the deleted file counts in F"
+done
+pass "R7j_deleted_and_renamed_files"
+
 r7g() { # label-style sh suite; the assertion line above `pass "R9 label"` is removed
   newrepo "$1"
   put tests/t.sh <<'EOF'
