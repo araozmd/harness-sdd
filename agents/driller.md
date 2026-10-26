@@ -306,6 +306,10 @@ table, write inbox briefs, and append ADR deltas.
 
 ## Completion report
 
+In the report, state explicitly that the Driller does **not** spawn the Architect, does **not** write any
+feature `.spec/.plan/.tasks/.tests`, and advances **only** the target epic to `planned` —
+never any other epic and never a feature's own status.
+
 When the decomposition is written, the approval decision is recorded, and re-validation
 passed — including the **final** re-validation **after** the approval-branch state
 flip/stamp — report to the human:
@@ -322,14 +326,12 @@ flip/stamp — report to the human:
 - and, to **end** the report, the wave view of the epic just seeded: run
   `node tools/next-task.mjs --waves --epic <epic-id>` (in an installed target
   `node .harness/tools/next-task.mjs --waves --epic <epic-id>`) and paste its output
-  verbatim as the report's last section. Its wave 1 is what the operator can start now —
-  one `/sdd-next <id>` per machine — and its critical path is what to start first. The
+  verbatim as the report's last section. The `runnable` rows of its first listed wave are
+  what the operator can start now — one `/sdd-next <id>` per machine; a parked or gated row
+  in that wave is not, and with `--epic` the first listed wave can be above 1 — and its
+  critical path is what to start first. The
   view is derived from `depends_on` and never stored (ADR-0010); a dependency cycle or a
   missing id prints `Waves undefined` instead, which is itself worth reporting.
-
-State explicitly that the Driller does **not** spawn the Architect, does **not** write any
-feature `.spec/.plan/.tasks/.tests`, and advances **only** the target epic to `planned` —
-never any other epic and never a feature's own status.
 
 ## Reporting harness defects
 

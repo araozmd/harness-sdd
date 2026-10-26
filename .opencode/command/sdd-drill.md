@@ -85,5 +85,5 @@ an arbitrary epic.
     and advance ONLY the target epic to `planned` — the Driller decomposes, never specs.
     **End** the report with the wave view: run
     `node tools/next-task.mjs --waves --epic <epic-id>` and paste its output
-    verbatim as the last section (wave 1 = what can start now, one `/sdd-next <id>` per
-    machine; the critical path = what to start first).
+    verbatim as the last section (the `runnable` rows of the first listed wave = what can
+    start now, one `/sdd-next <id>` per machine; the critical path = what to start first).
