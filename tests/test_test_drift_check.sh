@@ -891,6 +891,11 @@ expect_line '^test-drift-check: 0 findings, 0 waived, 1 test files examined ' "R
 run "$R" main feature
 expect_rc 0 "R7f main feature"
 expect_line '^test-drift-check: 0 findings, 0 waived, 1 test files examined ' "R7f head-ref mode reads the new path"
+# The tool asks for rename detection itself (-M): a user's diff.renames=false changes nothing.
+git -C "$R" config diff.renames false
+run "$R" main feature
+expect_rc 0 "R7f under diff.renames=false"
+expect_line '^test-drift-check: 0 findings, 0 waived, 1 test files examined ' "R7f: -M overrides diff.renames=false"
 pass "R7f_rename_no_change"
 
 # The D and R statuses each carry their own fixture (round 3, N17/N16): a DELETED test file
