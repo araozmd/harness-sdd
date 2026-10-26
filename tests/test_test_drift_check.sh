@@ -711,6 +711,12 @@ expect_rc 2 "R10e empty reason"
 printf 'The prose form is: waive-test-drift: <name> — <reason> (mid-line is not a waiver)\n' > "$T/tasks.md"
 run "$R" main --tasks-md "$T/tasks.md"
 expect_rc 1 "R10e: a mid-line mention is not a waiver"
+# A mid-line mention that names the REAL finding with a valid separator still waives nothing:
+# the prefix must start the line (after an optional list marker).
+printf '> see waive-test-drift: test_gone — x\n' > "$T/tasks.md"
+run "$R" main --tasks-md "$T/tasks.md"
+expect_rc 1 "R10e: a mid-line waiver for the real name is not a waiver"
+expect_line '^DRIFT test-removed \| .* \| test_gone \| ' "R10e: test_gone stays unwaived"
 pass "R10e_malformed"
 
 r7g r10f
