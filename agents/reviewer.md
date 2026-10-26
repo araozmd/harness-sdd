@@ -347,6 +347,10 @@ Read the exit code, not the prose:
   base). That is not a verdict in either direction: fix the invocation and run it again. Do not
   approve on an unrun check.
 
+The test-file classifier is the one `tools/change-size.sh` uses, and it also matches a
+feature's own `*.spec.md`, so a re-spec prose line containing an assertion pattern reads as a
+finding named by the spec's path, waivable only by that path.
+
 Record the summary line and the decision for any `WAIVED` finding in your verdict.
 
 ## Verdict

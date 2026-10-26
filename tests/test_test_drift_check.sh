@@ -259,6 +259,20 @@ expect_line '^DRIFT assert-modified \| zzz/x\.sh:' "R1d must name zzz/x.sh"
 [ "$(cnt 'tests/x\.sh')" = 0 ] || fail "R1d: tests/x.sh must not be examined under the stub classifier"
 pass "R1d_stub_classifier"
 
+# Known limit, documented in the tool header and the Reviewer section: the shared classifier
+# counts a feature's own `*.spec.md` as a test file, and a prose line there has no extractable
+# test name, so its finding carries the PATH as the name (the only name a waiver can use).
+newrepo r1e; put specs/f/F.spec.md <<'EOF'
+# Spec
+The tool shall expect(a) to hold.
+EOF
+basecommit; feature
+subst specs/f/F.spec.md 'The tool shall expect(a) to hold.' 'The tool shall expect(b) to hold.'; featcommit
+run "$R" main
+expect_rc 1 "R1e"; expect_ndrift 1 "R1e"
+expect_line '^DRIFT assert-modified \| specs/f/F\.spec\.md:2 \| specs/f/F\.spec\.md \| ' "R1e: a spec prose line is a finding named by its path"
+pass "R1e_spec_md_is_a_test_file"
+
 # ── R3: assertion findings ───────────────────────────────────────────────────────
 newrepo r3a; js_app tests/app.test.js; basecommit; feature
 subst tests/app.test.js '  expect(run(1)).toBe(1);' '  expect(run(1)).toBeTruthy();'; featcommit
@@ -762,6 +776,9 @@ done
 # The per-pair-commit command carries the same --tasks-md, or a waived finding is a false REJECT.
 printf '%s\n' "$_sec" | tr '\n' ' ' | grep -qF 'test-drift-check.sh" <pair-sha> --tasks-md' \
   || fail "R11a: the per-pair-commit command must pass --tasks-md"
+# The *.spec.md-is-a-test-file limit is stated where the Reviewer reads the findings.
+printf '%s\n' "$_sec" | tr '\n' ' ' | grep -qE "\*\.spec\.md[^.]{0,120}named by the spec's path" \
+  || fail "R11a: the Reviewer section must state that *.spec.md findings are named by the spec's path"
 # The exit-0 bullet states exactly what exit 0 covers, and names what it does not check.
 _fold="$(printf '%s\n' "$_sec" | tr '\n' ' ')"
 printf '%s' "$_fold" | grep -qE 'assertion-pattern line[^.]{0,120}skip/only marker[^.]{0,80}test name was removed' \

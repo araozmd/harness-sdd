@@ -39,7 +39,9 @@
 # Known limits (the prose must never over-claim): a moved assertion is a `-` line and so a
 # finding (waivable); multi-line assertions are detected only on the lines that match; a
 # reworded label in an sh suite reads as test-removed; an inserted `exit 0` is not a marker;
-# pathnames containing LF or TAB are unsupported; describe( blocks count as test names.
+# pathnames containing LF or TAB are unsupported; describe( blocks count as test names; the
+# shared classifier matches `*.spec.md`, so a spec prose line naming an assertion pattern is a
+# finding whose name is the spec's path (waive it by that path).
 
 set -eu
 LC_ALL=C
