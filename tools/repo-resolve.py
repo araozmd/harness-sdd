@@ -858,6 +858,21 @@ def resolve(ref, repo_name, hdir):
                 )
             dirs = [lexical]
         else:
+            # A cut-short neighbour set can hide a second repository with the same basename
+            # and turn an ambiguous binding into a confident one. Refuse to search it; a
+            # manifest-located binding (above) is exempt from the cap by design.
+            truncated = truncated_roots(hdir)
+            if truncated:
+                return Resolution(
+                    UNLOCATABLE, repo=repo_name, binding=repo_name, manifest_state=state,
+                    witness=_capture(UNLOCATABLE, repo_name, None, state, mapping, cand),
+                    detail="the search for %r near %s was truncated — %s — so the binding "
+                           "cannot be called unique; declare the repository in an umbrella "
+                           "manifest"
+                           % (repo_name, hdir,
+                              "; ".join("%s has %d entries (cap %d, HARNESS_RESOLVE_MAX_SIBLINGS)"
+                                        % (r, n, max_siblings()) for r, n in truncated)),
+                )
             dirs = [c for c in candidates(hdir) if os.path.basename(c) == repo_name]
             if not dirs:
                 return Resolution(

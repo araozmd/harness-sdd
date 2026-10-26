@@ -702,6 +702,13 @@ YAML
 HARNESS_RESOLVE_MAX_SIBLINGS=8 ask "$CAP_MAIN" child "$CAP/hd" "r.outcome"
 [ "$ASK_OUT" = "resolved" ] \
   || fail "C12 remedy: a manifest-declared binding did not resolve under the cap (got $ASK_OUT)"
+# the BOUND, manifest-free search is guarded too: a cut-short scan can hide a same-named repo.
+rm -f "$CAP/hd/harness.config.yaml"
+HARNESS_RESOLVE_MAX_SIBLINGS=8 ask "$CAP_MAIN" child "$CAP/hd" "r.outcome"
+[ "$ASK_OUT" = "unlocatable" ] \
+  || fail "C12: over the cap, a manifest-free bound ref came back $ASK_OUT instead of unlocatable"
+HARNESS_RESOLVE_MAX_SIBLINGS=8 ask "$CAP_MAIN" child "$CAP/hd" "r.detail"
+case "$ASK_OUT" in *truncated*) ;; *) fail "C12: the bound truncated outcome does not say truncated: $ASK_OUT" ;; esac
 # a bad cap value falls back to the default rather than disabling the scan or crashing.
 HARNESS_RESOLVE_MAX_SIBLINGS=banana ask "$CAP_MAIN" - "$CAP/hd" "r.outcome"
 [ "$ASK_OUT" = "resolved" ] \
