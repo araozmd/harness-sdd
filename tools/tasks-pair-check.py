@@ -11,8 +11,9 @@ Pure function of two files; stdlib only.  Grammar (identical to docs/SPEC-FORMAT
   * Fenced code is skipped in BOTH files.  The fence rule is the CommonMark one that
     tests/lib/fence.awk encodes (backtick or tilde run >= 3, indented 0-3 spaces; a closer is
     the same char, at least as long, no info string; a backtick opener has no backtick in its
-    info string).  iter_unfenced() is a DELIBERATE second copy of that rule, pinned by
-    tests/test_tasks_pairs.sh -- not a hidden one.
+    info string).  iter_unfenced() is a DELIBERATE second copy of that rule, not a hidden one:
+    tests/test_tasks_pairs.sh R5_fence_parity feeds one edge corpus to both copies and
+    requires identical unfenced output; deleting any one clause of either copy fails it.
   * spec R-id: a line `- **R<n>** ...`; first appearance order, duplicates collapse.
   * task: `- [ ] **T<n><suffix>** (R#, R#) -- text` (or `- [x]`); the `T` and the suffix
     letters match in either case.  Suffix `a`/`A` = test task, `b`/`B` = code task; no suffix,
