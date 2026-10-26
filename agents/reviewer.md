@@ -351,7 +351,7 @@ Read the exit code, not the prose:
   whether the edit tightened or weakened the assertion, and neither should you from the diff
   alone — check it the way 3b says: delete the mechanism it claims to pin and watch it go red.
 - `2` or `3` — the check **did not run** (usage error; a ref that does not resolve; no merge
-  base). That is not a verdict in either direction: fix the invocation and run it again. Do not
+  base; a git call that failed, named on stderr). That is not a verdict in either direction: fix the invocation and run it again. Do not
   approve on an unrun check.
 
 The test-file classifier is the one `tools/change-size.sh` uses, and it also matches a

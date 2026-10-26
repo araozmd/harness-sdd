@@ -28,6 +28,8 @@ All notable changes to the harness body are recorded here. Versions follow
   Unchanged lines inside a hunk (a configured `diff.interHunkContext` keeps them even under
   `-U0`) advance both line counters and end the removed/added pairing, so a finding is never
   attributed to the test above it.
+  Every git call's exit status is checked: a failed `git diff`, `ls-files` or `show` is exit `3`
+  ("could not diff", naming the call), never a clean "0 test files examined".
 - `tools/change-size.sh` gains two additive config-query modes, `--print-test-re` and
   `--print-list <key>`, so the drift tool reuses the one test-path classifier and the one
   `change_size:` parser instead of carrying copies. Measuring behaviour is unchanged.

@@ -186,6 +186,62 @@ run "$R" main island
 expect_rc 3 "R9b no merge base"; [ -s "$T/err" ] || fail "R9b: exit 3 needs a stderr reason"
 pass "R9b_exit3_cannot_diff"
 
+# R9e — a failing git call is exit 3, never a clean verdict: in a pipeline the shell reports
+# the last stage, so a failed `git diff` read as "0 test files examined" (Codex P2 on PR #299).
+# A wrapper on PATH fails exactly one kind of git call, so each check is pinned on its own.
+_realgit="$(command -v git)"
+mkdir -p "$T/failgit"
+cat > "$T/failgit/git" <<EOF
+#!/bin/sh
+case " \$* " in *" \$DT_FAILGIT "*) echo "failgit: refused \$DT_FAILGIT" >&2; exit 128 ;; esac
+exec "$_realgit" "\$@"
+EOF
+chmod +x "$T/failgit/git"
+newrepo r9e
+js_app tests/m.test.js; js_app tests/d.test.js
+put tests/r.test.js <<'EOF'
+it('kept', () => {
+  expect(run()).toBe(1);
+  run(2);
+  run(3);
+  run(4);
+  run(5);
+});
+EOF
+basecommit; feature
+subst tests/m.test.js '  expect(run(1)).toBe(1);' '  expect(run(1)).toBeTruthy();'
+git -C "$R" rm -q tests/d.test.js
+git -C "$R" mv tests/r.test.js tests/r2.test.js
+subst tests/r2.test.js '  expect(run()).toBe(1);' '  expect(run()).toBeTruthy();'; featcommit
+put tests/u.test.js <<'EOF'
+it('fresh', () => {
+  expect(0).toBe(0);
+});
+EOF
+# each probe: <DT_FAILGIT token> <tool args> <stderr reason>
+for _probe in '--name-status|main|git diff --name-status failed' \
+              'ls-files|main|git ls-files --others failed' \
+              'show|main|git show ' \
+              '--no-index|main|git diff --no-index failed' \
+              '-- tests/m.test.js|main feature|git diff failed for tests/m.test.js:'; do
+  _tok="${_probe%%|*}"; _rest="${_probe#*|}"; _args="${_rest%%|*}"; _why="${_rest#*|}"
+  # shellcheck disable=SC2086
+  ( cd "$R" && PATH="$T/failgit:$PATH" DT_FAILGIT="$_tok" sh "$TOOL" $_args ) > "$T/out" 2> "$T/err" && rc=0 || rc=$?
+  [ "$rc" = 3 ] || { cat "$T/out" "$T/err" >&2; fail "R9e: a failing 'git ... $_tok' must exit 3, got $rc"; }
+  grep -qF -- "$_why" "$T/err" || { cat "$T/err" >&2; fail "R9e: stderr must name the failed call ('$_why')"; }
+done
+# the rename diff and the head-side show fail on their own as well
+( cd "$R" && PATH="$T/failgit:$PATH" DT_FAILGIT="tests/r.test.js" sh "$TOOL" main feature ) > "$T/out" 2> "$T/err" && rc=0 || rc=$?
+[ "$rc" = 3 ] && grep -qF 'git diff failed for tests/r.test.js -> tests/r2.test.js' "$T/err" \
+  || { cat "$T/out" "$T/err" >&2; fail "R9e: a failing rename diff must exit 3 and name both paths"; }
+( cd "$R" && PATH="$T/failgit:$PATH" DT_FAILGIT="$(git -C "$R" rev-parse feature):tests/m.test.js" sh "$TOOL" main feature ) > "$T/out" 2> "$T/err" && rc=0 || rc=$?
+[ "$rc" = 3 ] && grep -qF 'git show feature:tests/m.test.js failed' "$T/err" \
+  || { cat "$T/out" "$T/err" >&2; fail "R9e: a failing head-side show must exit 3"; }
+# control: with nothing refused the same tree is a normal findings run
+( cd "$R" && PATH="$T/failgit:$PATH" DT_FAILGIT="no-such-token" sh "$TOOL" main ) > "$T/out" 2> "$T/err" && rc=0 || rc=$?
+[ "$rc" = 1 ] || { cat "$T/out" "$T/err" >&2; fail "R9e control: the wrapper must be transparent, got $rc"; }
+pass "R9e_git_failure_is_exit3"
+
 # ── R8: a clean run is one summary line and nothing on stderr ────────────────────
 newrepo r8a; put src/app.js <<'EOF'
 function f() { return 1; }

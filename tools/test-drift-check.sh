@@ -185,8 +185,13 @@ SKIP_RE="$(awk 'NF { printf "%s%s", (n++ ? "|" : ""), $0 } END { print "" }' "$t
 # `"tests/a\".test.js"` and miss the classifier. NUL framing is never encoded. NUL -> LF is safe
 # here because pathnames containing LF are a documented non-goal (Known limits).
 # --name-status -z framing: `<status> NUL <path> NUL`, or for R/C `<status> NUL <old> NUL <new> NUL`.
+# Every git call's status is checked: in a pipeline the shell reports the LAST stage's status,
+# so a failed `git diff` (e.g. a bad diff.orderFile) would read as "0 test files examined" — a
+# clean verdict from a check that never ran. A git failure is exit 3, the cannot-diff code.
 # shellcheck disable=SC2086
-git -c core.quotePath=false diff --name-status -z -M $range 2>/dev/null | tr '\000' '\n' \
+git -c core.quotePath=false diff --name-status -z -M $range > "$tmp/names.z" 2>"$tmp/git.err" \
+  || cant_diff "git diff --name-status failed: $(head -n 1 "$tmp/git.err")"
+tr '\000' '\n' < "$tmp/names.z" \
   | DT_RE="$TEST_RE" awk '
       BEGIN { re = ENVIRON["DT_RE"]; want = 0 }
       want == 0 {
@@ -202,7 +207,9 @@ git -c core.quotePath=false diff --name-status -z -M $range 2>/dev/null | tr '\0
         if (chk ~ re) printf "%s\t%s\t%s\n", s, old, new
       }' > "$tmp/files"
 if [ -z "$headc" ]; then
-  git -c core.quotePath=false ls-files -z --others --exclude-standard 2>/dev/null | tr '\000' '\n' \
+  git -c core.quotePath=false ls-files -z --others --exclude-standard > "$tmp/others.z" 2>"$tmp/git.err" \
+    || cant_diff "git ls-files --others failed: $(head -n 1 "$tmp/git.err")"
+  tr '\000' '\n' < "$tmp/others.z" \
     | DT_RE="$TEST_RE" awk '
         BEGIN { re = ENVIRON["DT_RE"] }
         $0 ~ re { printf "U\t%s\t%s\n", $0, $0 }' >> "$tmp/files"
@@ -287,26 +294,32 @@ while IFS="$TAB" read -r st old new; do
   : > "$tmp/base.txt"; : > "$tmp/head.txt"
   case "$st" in
     A|U) : ;;
-    *) git show "$mb:$old" > "$tmp/base.txt" 2>/dev/null || : > "$tmp/base.txt" ;;
+    *) git show "$mb:$old" > "$tmp/base.txt" 2>"$tmp/git.err" \
+         || cant_diff "git show $short:$old failed: $(head -n 1 "$tmp/git.err")" ;;
   esac
   case "$st" in
     D) : ;;
     *)
       if [ -n "$headc" ]; then
-        git show "$headc:$new" > "$tmp/head.txt" 2>/dev/null || : > "$tmp/head.txt"
+        git show "$headc:$new" > "$tmp/head.txt" 2>"$tmp/git.err" \
+          || cant_diff "git show $headref:$new failed: $(head -n 1 "$tmp/git.err")"
       elif [ -f "$new" ]; then
         cat "$new" > "$tmp/head.txt"
       fi ;;
   esac
   # The -U0 diff for this one file (both paths for a rename).
   case "$st" in
-    U) git diff --no-index --no-color --no-ext-diff --no-textconv -U0 -- /dev/null "$new" > "$tmp/diff.txt" 2>/dev/null || true ;;
+    U) # --no-index exits 1 when the files differ (always, against /dev/null); >1 is an error
+       _rc=0; git diff --no-index --no-color --no-ext-diff --no-textconv -U0 -- /dev/null "$new" > "$tmp/diff.txt" 2>"$tmp/git.err" || _rc=$?
+       [ "$_rc" -le 1 ] || cant_diff "git diff --no-index failed for $new: $(head -n 1 "$tmp/git.err")" ;;
     R)
       # shellcheck disable=SC2086
-      git diff -U0 --no-color --no-ext-diff --no-textconv -M $range -- "$old" "$new" > "$tmp/diff.txt" 2>/dev/null || true ;;
+      git diff -U0 --no-color --no-ext-diff --no-textconv -M $range -- "$old" "$new" > "$tmp/diff.txt" 2>"$tmp/git.err" \
+        || cant_diff "git diff failed for $old -> $new: $(head -n 1 "$tmp/git.err")" ;;
     *)
       # shellcheck disable=SC2086
-      git diff -U0 --no-color --no-ext-diff --no-textconv -M $range -- "$new" > "$tmp/diff.txt" 2>/dev/null || true ;;
+      git diff -U0 --no-color --no-ext-diff --no-textconv -M $range -- "$new" > "$tmp/diff.txt" 2>"$tmp/git.err" \
+        || cant_diff "git diff failed for $new: $(head -n 1 "$tmp/git.err")" ;;
   esac
   # Binary files are skipped silently (still counted as examined).
   if grep -Eq '^(Binary files|GIT binary patch)' "$tmp/diff.txt" 2>/dev/null; then continue; fi
