@@ -103,10 +103,12 @@ pass "R2_driller_exemption_record"
 # ── R3: the Driller fills each brief's `## Observable behavior` ──────────────────
 grep -qF '## Observable behavior' "$DRILLER" || fail "R3: $DRILLER never names '## Observable behavior'"
 sec '## Observable behavior' || fail "R3: '## Observable behavior' is not inside the observable-slice section"
-sec 'fill[^.]{0,60}## Observable behavior[^.]{0,60}one line' || fail "R3: section does not tell the Driller to fill the brief's Observable behavior with one line"
-sec 'Observable behavior[^.]{0,80}surface' || fail "R3: section does not name the surface"
-sec 'user or client sees' || fail "R3: section does not say what a user or client sees"
-sec 'walking[- ]skeleton[^.]{0,80}end-to-end path' || fail "R3: section does not make the skeleton's line the end-to-end path"
+# one sentence: the fill instruction, the one-line shape, and the skeleton's end-to-end path.
+# (a looser 'walking skeleton ... end-to-end path' anchor is satisfied by the R1 sentence)
+sec 'fill the `## Observable behavior` section with one line — the surface and what a user or client sees' \
+  || fail "R3: section does not tell the Driller to fill the brief's Observable behavior with one line (surface + what a user or client sees)"
+sec 'fill[^.]{0,250}for the walking-skeleton feature that line describes the end-to-end path' \
+  || fail "R3: section does not make the skeleton's line the end-to-end path"
 pass "R3_driller_fills_brief"
 
 # ── R6: the doc-critic's three findings and its scope signal ─────────────────────
