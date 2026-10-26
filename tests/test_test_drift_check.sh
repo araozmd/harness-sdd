@@ -612,6 +612,73 @@ run "$R" main
 expect_rc 0 "R4b word-bounded assert"; [ "$(nlines)" = 1 ] || { cat "$T/out" >&2; fail "R4b: reassert( / my_assert_ok are not the assert family"; }
 pass "R4b_negatives"
 
+# Every alternative of the built-in assertion list, plus one negative per word anchor (round 3).
+# The fixture deletes all of them; exactly the positives may come back as assert-removed.
+newrepo r4c; mkdir -p "$R/tests"
+{
+  echo "it('alt', () => {"
+  for _m in is ok not true false truthy falsy deepEqual notDeepEqual equal notEqual like throws \
+            notThrows regex snapshot pass fail Error Errorf Fatal Fatalf Fail FailNow; do
+    echo "  t.$_m(a);"
+  done
+  echo "  fail 'sq';"
+  echo "  ok 'sq';"
+  echo "  raises(E);"
+  echo "  myexpect(a);"
+  echo "  at.is(a);"
+  echo "  nofail(a);"
+  echo '  look "here";'
+  echo "  unraises(a);"
+  echo "  asserted=1;"
+  echo "  run();"
+  echo "});"
+} > "$R/tests/alt.test.js"
+grep -E '^  (t\.|fail |ok |raises)' "$R/tests/alt.test.js" | sed 's/^  //' | sort > "$T/want"
+[ "$(wc -l < "$T/want" | tr -d ' ')" = 27 ] || fail "R4c precondition: 27 positive lines"
+printf "it('mk', () => {\n  run();\n});\n" > "$R/tests/mk.test.js"
+basecommit; feature
+printf "it('alt', () => {\n  run();\n});\n" > "$R/tests/alt.test.js"
+cat >> "$R/tests/mk.test.js" <<'EOF'
+it.skip('s1', () => {});
+it.only('s2', () => {});
+it.todo('s3');
+xit('s4', () => {});
+xtest('s5', () => {});
+xdescribe('s6', () => {});
+// @pytest.mark.skip
+// @pytest.mark.skipif(x)
+// @pytest.mark.xfail
+pytest.skip("r")
+// @unittest.skip("r")
+// @unittest.skip
+// @unittest.skipIf(x, "r")
+// @unittest.skipUnless(x, "r")
+// @unittest.expectedFailure
+t.Skip("r")
+t.Skipf("r")
+t.SkipNow()
+#[ignore]
+// @Disabled
+// @Ignore("r")
+echo "skip - r"
+echo 'skip - r'
+process.exit(1)
+at.Skip("r")
+// @IgnoreProperties
+EOF
+featcommit
+run "$R" main
+expect_rc 1 "R4c"
+grep '^DRIFT assert-removed | tests/alt\.test\.js:' "$T/out" | sed 's/^[^|]*|[^|]*|[^|]*| //' | sort > "$T/got"
+cmp -s "$T/got" "$T/want" || { diff "$T/want" "$T/got" >&2; fail "R4c: every alternative is an assertion and no anchored negative is (want < / got >)"; }
+[ "$(cnt '^DRIFT [a-z-]+ \| tests/alt\.test\.js:')" = 27 ] || { cat "$T/out" >&2; fail "R4c: only the 27 positives"; }
+pass "R4c_every_assert_alternative"
+# Markers: lines 4-26 of mk.test.js are markers; 27-29 are the anchored negatives.
+grep '^DRIFT skip-added | tests/mk\.test\.js:' "$T/out" | sed 's/^DRIFT skip-added | tests\/mk\.test\.js:\([0-9]*\) .*/\1/' | sort -n | tr '\n' ' ' > "$T/got"
+[ "$(cat "$T/got")" = '4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 ' ] \
+  || { cat "$T/out" >&2; fail "R6g: want skip-added at lines 4-26 exactly, got: $(cat "$T/got")"; }
+pass "R6g_every_marker_alternative"
+
 # ── R5: configured assertion patterns ────────────────────────────────────────────
 r5fixture() { # r5fixture <name> <config text|-> — a JS test with a verify( and an expect( line
   newrepo "$1"
