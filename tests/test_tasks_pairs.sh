@@ -125,6 +125,20 @@ chk_exit2 R8_unreadable_file_exit2
 run_lint "$T/t.md" --spec "$T/nonexistent-spec.md"; chk_exit2 R8_unreadable_file_exit2
 printf '# spec\n\n```\n- **R1** — only in a fence\n```\n' > "$T/s-zero.md"
 run_lint "$T/t.md" --spec "$T/s-zero.md"; chk_exit2 R8_zero_rids_exit2
+# R-id line forms: `- **R1** — …` (house form) and the bold-title form `- **R2 — Title.** …`
+# (E36-F06 and four done specs); `- **R8's clause**` is prose, not an R-id. Duplicates collapse.
+printf '%s\n' '# spec' '- **R1** — house form.' '- **R2 — Bold title.** The system shall …' \
+  '- **R3 – En dash title.** …' "- **R8's documentation clause** — superseded." \
+  '- **R1** — restated later; still one R-id.' > "$T/s-forms.md"
+printf -- '- [ ] **T1a** (R1) — t\n- [ ] **T2a** (R2) — t\n- [ ] **T3a** (R3) — t\n' > "$T/t-forms.md"
+run_lint "$T/t-forms.md" --spec "$T/s-forms.md"
+[ "$rc" -eq 0 ] || fail "R8_rid_line_forms: rc $rc ($(cat "$T/out" "$T/err"))"
+grep -qxF 'tasks-pair-check: ok 3 R-ids, 3 tasks' "$T/out" \
+  || fail "R8_rid_line_forms: expected exactly R1 R2 R3 (bold-title forms read, R8's prose skipped, R1 once): $(cat "$T/out")"
+printf '%s\n' '# spec' '- **R1 — Only the bold-title form.** …' > "$T/s-bold.md"
+run_lint "$T/t-forms.md" --spec "$T/s-bold.md"
+grep -qxF 'tasks-pair-check: ok 1 R-ids, 3 tasks' "$T/out" || fail "R8_rid_line_forms: a bold-title-only spec yields no R-ids: rc $rc $(cat "$T/out" "$T/err")"
+pass "R8_rid_line_forms"
 
 # ── R6: first task not a test task / no task ──────────────────────────────────────────────
 chk_exit1() { # chk_exit1 <row> <expected-line>

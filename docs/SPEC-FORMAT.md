@@ -100,7 +100,8 @@ state the same one):
   never dropped, so a `T1B` or `T1ab` first task fails like any code-first task. The cited
   `R-id`s are the explicit `R<n>` tokens inside the parentheses; a range such as `R1–R4` is
   not expanded — cite each id.
-- For every spec `R-id` (a line `- **R<n>** …`), the first task that cites it must be a `T<n>a`
+- For every spec `R-id` (a line `- **R<n>** …`, or the bold-title form `- **R<n> — Title.** …`;
+  a repeated `R-id` counts once), the first task that cites it must be a `T<n>a`
   task; an `R-id` no task cites is also a violation.
 - Refactor tasks are explicit and cite the `R-id`s whose tests guard them. Setup or verify
   tasks with no `R-id` are allowed, but a task that cites no `R-id` and reads "write … tests"

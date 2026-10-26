@@ -15,7 +15,8 @@ The lint is a pure function of two files; stdlib only.  Grammar (identical to do
     info string).  iter_unfenced() is a DELIBERATE second copy of that rule, not a hidden one:
     tests/test_tasks_pairs.sh R5_fence_parity feeds one edge corpus to both copies and
     requires identical unfenced output; deleting any one clause of either copy fails it.
-  * spec R-id: a line `- **R<n>** ...`; first appearance order, duplicates collapse.
+  * spec R-id: a line `- **R<n>** ...` or the bold-title form `- **R<n> — Title.** ...`
+    (a space, then an em/en dash or hyphen); first appearance order, a repeated R-id counts once.
   * task: `- [ ] **T<n><suffix>** (R#, R#) -- text` (or `- [x]`); the `T` and the suffix
     letters match in either case.  Suffix `a`/`A` = test task, `b`/`B` = code task; no suffix,
     any other letter, or more than one letter (`T1c`, `T1ab`) = "other" -- reported, never
@@ -49,7 +50,7 @@ USAGE = ("usage: tasks-pair-check.py <feature.tasks.md> --spec <feature.spec.md>
 TOOL_PATHS = ("tools/tasks-pair-check.py", ".harness/tools/tasks-pair-check.py")
 BASE_FALLBACKS = ("origin/main", "main", "origin/master", "master", "origin/trunk", "trunk")
 
-RID_RE = re.compile(r"^[ \t]*-[ \t]+\*\*(R[0-9]+)\*\*")
+RID_RE = re.compile(r"^[ \t]*-[ \t]+\*\*(R[0-9]+)(?:\*\*|[ \t]+(?:—|–|-))")
 TASK_RE = re.compile(
     r"^[ \t]*-[ \t]+\[[ xX]\][ \t]+\*\*([Tt][0-9]+)([A-Za-z]+)?\*\*"
     r"(?:[ \t]*\(([^)]*)\))?[ \t]*(?:—|–|-)?[ \t]*(.*)$"
