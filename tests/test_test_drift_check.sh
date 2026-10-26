@@ -794,6 +794,9 @@ for f in tests/m1.test.js tests/m2.test.js tests/test_m3.py tests/test_m4.py tes
 done
 expect_line '^DRIFT skip-added \| tests/test_m4\.py:1 \| test_decorated \| @pytest\.mark\.xfail$' "R6c: a decorator attributes FORWARD"
 pass "R6c_other_markers"
+# A decorator with no definition after it falls back to ordinary attribution (round 3).
+expect_line '^DRIFT skip-added \| tests/test_m3\.py:3 \| test_a \| @pytest\.mark\.skip$' "R6h: a decorator with no later def falls back to the def above"
+pass "R6h_decorator_without_next_def"
 
 newrepo r6d; put tests/app.test.js <<'EOF'
 it.skip('later', () => {
@@ -958,13 +961,7 @@ def test_keep():
     pass
 EOF
 delline tests/run 't_run() { :; }'
-put tests/test_dec.py <<'EOF'
-@pytest.mark.skip
-def test_m():
-    pass
-def test_n():
-    pass
-EOF
+printf '@pytest.mark.skip\ndef test_m():\n    pass\ndef test_n():\n    pass\n' > "$R/tests/test_dec.py"
 featcommit
 run "$R" main
 expect_rc 1 "R7k"; expect_ndrift 3 "R7k"
@@ -976,6 +973,89 @@ pass "R7k_async_def_and_shebang_sh"
 grep -Fxq 'DRIFT skip-added | tests/test_dec.py:1 | test_m | @pytest.mark.skip' "$T/out" \
   || { cat "$T/out" >&2; fail "R6f: a decorator names the NEXT def (test_m), not a later one"; }
 pass "R6f_decorator_names_next_def"
+
+# Every extractor variant and attribution rule, one repo, compared as an exact finding set
+# (round 3): each JS extension, quote and modifier; sh indent, `name ()`, quoted labels, an
+# em dash inside a label, and unanchored look-alikes that are NOT names; each shebang form, and
+# the ones that are not sh; py/go non-test helpers; same-line and nearest-forward labels; a
+# modified assertion that attributes in the BASE file; an `@` inside an assertion is not a
+# decorator; a rename into an unrecognised extension (names are read per side, by that side's
+# path); and a rename from a non-test path INTO a test path is examined (classified by new path).
+newrepo r7l; mkdir -p "$R/tests/d.x"
+for _e in mjs cjs ts tsx jsx; do
+  printf "it('x_%s', () => {});\nit('keep', () => {});\n" "$_e" > "$R/tests/e_$_e.$_e"
+done
+# (\056 is the dot: the suite's own text then carries no .only/.skip/.todo marker literal.)
+printf '%s\n' 'test("dq name", () => {});' 'describe(`bq name`, () => {});' > "$R/tests/q1.js"
+printf "it\056only('mod only', () => {});\nit\056skip('mod skip', () => {});\nit\056todo('mod todo');\n" >> "$R/tests/q1.js"
+printf '%s\n' "it.each('mod each', () => {});" "it('keep', () => {});" >> "$R/tests/q1.js"
+cat > "$R/tests/s1.sh" <<'EOF'
+#!/bin/sh
+t_s1() {
+  echo "see x() here"
+}
+  t_ind() { :; }
+t_sp () { :; }
+pass 'sq label'
+  pass "ind label"
+  echo pass "z"
+bypass "w"
+pass "x—y"
+EOF
+for _sb in 'run2|#!/bin/bash' 'run3|#!/usr/bin/env sh -e' 'run4|#!/usr/bin/env bash -e' \
+           'run5|#!/bin/zsh' 'k.bash|#!/bin/bash' 'd.x/run|#!/bin/sh'; do
+  _f="${_sb%%|*}"; _n="r_$(printf '%s' "$_f" | tr -c 'A-Za-z0-9\n' '_')"
+  printf '%s\n%s() { :; }\nkeep() { :; }\n' "${_sb#*|}" "$_n" > "$R/tests/$_f"
+done
+printf 'def helper():\n    pass\ndef test_p():\n    pass\n' > "$R/tests/test_p.py"
+printf 'func helperX(t *testing.T) {}\nfunc TestSp (t *testing.T) {}\nfunc TestKeep(t *testing.T) {}\n' > "$R/tests/p_test.go"
+printf '#!/bin/sh\npass "same"; ok "y"\nok "w"\npass "first after"\npass "second after"\n' > "$R/tests/f.sh"
+printf '#!/bin/sh\nt_a() {\n  :\n}\nt_b() {\n  ok "v1"\n}\n' > "$R/tests/mod.sh"
+printf '#!/bin/sh\nt_rn() { :; }\n' > "$R/tests/rn.sh"
+printf "it('at1', () => {\n  expect(e).toBe('a@b');\n});\nit('at2', () => {\n  run(0);\n});\n" > "$R/tests/at.test.js"
+mkdir -p "$R/src"; printf "it('w', () => {\n  expect(w).toBe(1);\n  run(1);\n  run(2);\n  run(3);\n});\n" > "$R/src/w.js"
+basecommit; feature
+for _e in mjs cjs ts tsx jsx; do printf "it('keep', () => {});\n" > "$R/tests/e_$_e.$_e"; done
+printf "it('keep', () => {});\n" > "$R/tests/q1.js"
+printf '#!/bin/sh\nt_s1() {\n}\n' > "$R/tests/s1.sh"
+for _f in run2 run3 run4 run5 k.bash d.x/run; do
+  _n="r_$(printf '%s' "$_f" | tr -c 'A-Za-z0-9\n' '_')"; delline "tests/$_f" "$_n() { :; }"
+done
+printf 'def test_p():\n    pass\n' > "$R/tests/test_p.py"
+printf 'func TestKeep(t *testing.T) {}\n' > "$R/tests/p_test.go"
+printf '#!/bin/sh\npass "first after"\npass "second after"\n' > "$R/tests/f.sh"
+printf '#!/bin/sh\nt_a() {\n  :\n  :\n  :\n  :\n}\nt_b() {\n  ok "v2"\n}\n' > "$R/tests/mod.sh"
+git -C "$R" mv tests/rn.sh tests/rn.txt
+printf "it('at1', () => {\n});\nit('at2', () => {\n  run(0);\n});\n" > "$R/tests/at.test.js"
+git -C "$R" mv src/w.js tests/w.test.js
+subst tests/w.test.js '  expect(w).toBe(1);' '  expect(w).toBeTruthy();'
+featcommit
+run "$R" main
+expect_rc 1 "R7l"
+{
+  for _n in x_mjs:e_mjs.mjs x_cjs:e_cjs.cjs x_ts:e_ts.ts x_tsx:e_tsx.tsx x_jsx:e_jsx.jsx \
+            'dq name:q1.js' 'bq name:q1.js' 'mod only:q1.js' 'mod skip:q1.js' 'mod todo:q1.js' 'mod each:q1.js' \
+            t_ind:s1.sh t_sp:s1.sh 'sq label:s1.sh' 'ind label:s1.sh' 'x—y:s1.sh' \
+            r_run2:run2 r_run3:run3 r_run4:run4 r_d_x_run:d.x/run TestSp:p_test.go same:f.sh t_rn:rn.txt; do
+    printf 'DRIFT test-removed | tests/%s:— | %s | %s\n' "${_n#*:}" "${_n%%:*}" "${_n%%:*}"
+  done
+  echo 'DRIFT assert-removed | tests/f.sh:2 | same | pass "same"; ok "y"'
+  echo 'DRIFT assert-removed | tests/f.sh:3 | first after | ok "w"'
+  echo 'DRIFT assert-modified | tests/mod.sh:6 | t_b | ok "v1" -> ok "v2"'
+  echo "DRIFT assert-removed | tests/at.test.js:2 | at1 | expect(e).toBe('a@b');"
+  echo 'DRIFT assert-modified | tests/w.test.js:2 | w | expect(w).toBe(1); -> expect(w).toBeTruthy();'
+} | sort > "$T/want"
+grep '^DRIFT ' "$T/out" | sort > "$T/got"
+cmp -s "$T/got" "$T/want" || { diff "$T/want" "$T/got" >&2; fail "R7l: the finding set differs (want < / got >)"; }
+pass "R7l_extractor_and_attribution_matrix"
+# A name holding an UNSPACED em dash is waivable: the separator is the first SPACED one.
+printf 'waive-test-drift: x\342\200\224y \342\200\224 dash inside the name\n' > "$T/tasks.md"
+run "$R" main --tasks-md "$T/tasks.md"
+expect_rc 1 "R10h"
+[ "$(cnt '^WAIVED ')" = 1 ] || { cat "$T/out" >&2; fail "R10h: exactly one WAIVED line"; }
+grep -Fxq 'WAIVED test-removed | tests/s1.sh:— | x—y | dash inside the name' "$T/out" \
+  || { cat "$T/out" >&2; fail "R10h: a name with an unspaced em dash is waived by the first spaced one"; }
+pass "R10h_unspaced_dash_inside_name"
 
 r7g() { # label-style sh suite; the assertion line above `pass "R9 label"` is removed
   newrepo "$1"
