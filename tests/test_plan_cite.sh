@@ -602,6 +602,20 @@ run_tool --help
 grep -q '^usage: ' "$T/out" || fail "R6_help_exit0: no usage on stdout ($(both))"
 [ ! -s "$T/err" ] || fail "R6_help_exit0: stderr not empty ($(both))"
 pass "R6_help_exit0"
+# An unexpected exception is "the check did not run" (exit 2), never exit 1 — which reads as a
+# violation or a grandfather reject (review round 1, A3). A real input reaches one: a clean
+# plan under a non-ASCII path, printed to an ASCII-only stdout (PYTHONIOENCODING=ascii), makes
+# the ok line's print raise UnicodeEncodeError.
+rm -rf "$T/r6int-$(printf '\303\261')"; mkdir -p "$T/r6int-$(printf '\303\261')"
+cp -R "$FX/specs" "$T/r6int-$(printf '\303\261')/specs"
+_ip="$T/r6int-$(printf '\303\261')/specs/epics/E01-x/F01-good"
+set +e; PYTHONIOENCODING=ascii python3 "$TOOL" "$_ip/E01-F01.plan.md" --spec "$_ip/E01-F01.spec.md" >"$T/out" 2>"$T/err"; rc=$?; set -e
+[ "$rc" -eq 2 ] || fail "R6_internal_error_exit2: an uncaught exception exited $rc, not 2 ($(both))"
+head -n 1 "$T/err" | grep -q '^plan-cite-check: error: internal: UnicodeEncodeError: ' \
+  || fail "R6_internal_error_exit2: stderr's first line is not 'plan-cite-check: error: internal: <type>: <msg>' ($(both))"
+grep -q 'Traceback' "$T/err" && fail "R6_internal_error_exit2: a traceback reached stderr instead of the error line ($(both))"
+[ ! -s "$T/out" ] || fail "R6_internal_error_exit2: stdout is not empty ($(both))"
+pass "R6_internal_error_exit2"
 
 # ── R7: --sweep (deferred-no-trigger, stage-unrecognized) and init.sh 2d, warn-only ──────
 expect_sweep_fail() {

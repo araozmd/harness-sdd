@@ -8,8 +8,9 @@ E36-F04 / ADR-0009 decision 4 ("an uncited plan row is a defect").  Usage:
     plan-cite-check.py --grandfathered <feature.plan.md> [--base <ref>]
 
 Exit: 0 ok, 1 violation(s) / finding(s) / grandfather reject, 2 usage or input error (stderr
-`plan-cite-check: error: ...` plus the usage, nothing on stdout) — exit 2 is "the check did
-not run", never a pass.  Stdlib only; a pure function of the paths named on argv, taken
+`plan-cite-check: error: ...` plus the usage, nothing on stdout) or an unexpected exception
+(stderr `plan-cite-check: error: internal: <type>: <msg>`, no traceback) — exit 2 is "the
+check did not run", never a pass, and never the violation exit 1.  Stdlib only; a pure function of the paths named on argv, taken
 verbatim (no shlex, glob or ~ expansion).
 
 The grammar is E36-F03's, copied byte-exactly from docs/SPEC-FORMAT.md "Plan rows cite an
@@ -564,6 +565,9 @@ def main(argv):
         return main_lint(args)
     except InputError as exc:
         sys.stderr.write("%serror: %s\n%s\n" % (PFX, exc, USAGE))
+        return 2
+    except Exception as exc:  # a bug or an environment the tool did not foresee: did not run
+        sys.stderr.write("%serror: internal: %s: %s\n" % (PFX, type(exc).__name__, exc))
         return 2
 
 
