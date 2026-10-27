@@ -783,10 +783,12 @@ gf_run "$G" s/new.plan.md --base nope; [ "$rc" -eq 2 ] || fail "R8_exit2_bad_bas
 grep -qF 'plan-cite-check: error: --base does not resolve: nope' "$T/err" || fail "R8_exit2_bad_base: wrong error ($(both))"
 [ ! -s "$T/out" ] || fail "R8_exit2_bad_base: stdout not empty"; pass R8_exit2_bad_base
 gf_run "$G" s/new.plan.md --spec x; [ "$rc" -eq 2 ] || fail "R8_lint_flag_in_grandfather_mode_exit2: rc $rc ($(both))"; pass R8_lint_flag_in_grandfather_mode_exit2
-# A failing git call is exit 2, never a verdict: a stub git that fails one `log` call.
+# A failing git call is exit 2, never a verdict: a stub git that fails one `log` call, keyed
+# on that call's distinct --format (the tool-merge log asks %ct, the plan-add log %at) so a
+# mutant that drops --first-parent or --diff-filter still meets the stub.
 mkdir -p "$T/stub"
-for _which in first-parent diff-filter; do
-  printf '#!/bin/sh\ncase " $* " in *" --%s"*) echo "stub: git log failed" >&2; exit 128 ;; esac\nexec %s "$@"\n' "$_which" "$(command -v git)" > "$T/stub/git"
+for _which in 'format=%ct' 'format=%at'; do
+  printf '#!/bin/sh\ncase " $* " in *" --%s "*) echo "stub: git log failed" >&2; exit 128 ;; esac\nexec %s "$@"\n' "$_which" "$(command -v git)" > "$T/stub/git"
   chmod +x "$T/stub/git"
   set +e; (cd "$G" && PATH="$T/stub:$PATH" python3 "$TOOL" --grandfathered s/new.plan.md --base main) >"$T/out" 2>"$T/err"; rc=$?; set -e
   [ "$rc" -eq 2 ] || fail "R8_git_failure_exit2[$_which]: a failed git log gave rc $rc instead of 2 ($(both))"
