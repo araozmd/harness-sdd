@@ -4,21 +4,51 @@
 E36-F04 / ADR-0009 decision 4 ("an uncited plan row is a defect").  Usage:
 
     plan-cite-check.py <feature.plan.md> [--spec <feature.spec.md>] [--specs-dir <dir>]
+    plan-cite-check.py --sweep <specs-dir>
+    plan-cite-check.py --grandfathered <feature.plan.md> [--base <ref>]
 
-Stdlib only; a pure function of the files named on argv.  The grammar is E36-F03's, copied
-byte-exactly from docs/SPEC-FORMAT.md "Plan rows cite an R-id or an ADR" — this tool lints it,
-it never redefines it:
+Exit: 0 ok, 1 violation(s) / finding(s) / grandfather reject, 2 usage or input error (stderr
+`plan-cite-check: error: ...` plus the usage, nothing on stdout) — exit 2 is "the check did
+not run", never a pass.  Stdlib only; a pure function of the paths named on argv, taken
+verbatim (no shlex, glob or ~ expansion).
+
+The grammar is E36-F03's, copied byte-exactly from docs/SPEC-FORMAT.md "Plan rows cite an
+R-id or an ADR" — this tool lints it, it never redefines it.  Where the grammar is silent the
+readings below are the tool's own contract (E36-F04.plan.md, Data model):
 
   * checked sections: `## Data model`, `## API / interface`, `## Files to change`,
     `## Deferred` (a suffix after the name is ignored); a section runs to the next level-1 or
-    level-2 heading; `###` lines stay inside it.
+    level-2 heading; `###` lines stay inside it.  Any other heading is never parsed.
   * fenced code is invisible.  iter_unfenced() is a DELIBERATE second copy of the CommonMark
     rule tests/lib/fence.awk encodes (as tools/tasks-pair-check.py carries one); the suite
     feeds one edge corpus to both and requires identical output (R11_fence_parity).
-  * a table is a run of consecutive `^|` lines; its separator row has cells that are empty
-    or `:?-+:?`; the header row is the row right before a separator; every other row is a
-    data row.
-  * every line is read as strict UTF-8 and a trailing `\\r` (CRLF) is stripped first.
+  * a table is a run of consecutive `^|` lines; its separator row has cells that are each
+    empty or `:?-+:?` (at least one not empty); the header row is the row right before a
+    separator; every other row is a data row.  Cells split on unescaped `|`.
+  * tokens: `R[0-9]+` from a non-alphanumeric left boundary (`PR304` is no citation) and
+    `ADR-[0-9]{4}`, after stripping the `*` `` ` `` `"` `'` wrappers.
+  * ADR namespaces are init.sh 2c's: every directory named `adr` under the specs tree (token
+    = parent basename, `platform` for <specs-dir>/adr; `*.md` directly inside, numbered by
+    leading digits).  `<ns>/ADR-NNNN` (or a known `<ns> ADR-NNNN`) resolves there only, an
+    unknown `<ns>/` never, a bare id in any namespace.  The specs tree is --specs-dir, else
+    the plan's nearest ancestor named `specs`.
+  * every file is read as strict UTF-8 and each line's trailing `\r` (CRLF) is stripped first.
+
+Lint violations (one line each, file order, then `FAIL <n> violation(s)`): `uncited-row
+<plan>:<line> <heading>`, `unknown-rid <plan>:<line> R<n>` (only with --spec),
+`unresolved-adr <plan>:<line> <cite> <reason>`, and for `## Deferred` (a `| Bolt-on |
+Deferred by | Trigger |` table whose rows' second cell cites a resolving `Status: deferred` ADR
+with a non-empty `Trigger:`, or exactly one `Deferred: none — <why>` line):
+`deferred-section-missing`, `deferred-form both|neither|<n>-none-lines`,
+`deferred-table-empty`, `deferred-row-no-adr`, `deferred-by-not-deferred`,
+`deferred-adr-no-trigger`.
+
+--sweep: `deferred-no-trigger <adr>` for a deferred ADR with no `Trigger:` line, and
+`stage-unrecognized <product.md>:<line> <text>` for a `stage:` line in product.md's first
+`---` block that is not `^stage: (discovery|pilot|production)$`.
+
+--grandfathered: grandfather() below is a DELIBERATE second copy of tasks-pair-check's
+merge-time rule, keyed on THIS tool's paths (see its docstring).
 """
 import os
 import re
@@ -330,6 +360,7 @@ def check_plan(plan, sections, spec_rids=None, index=None):
 
     spec_rids None = no --spec: R-id existence is not checked.
     """
+    index = index or {}
     out = []
     for sec, n, text in data_rows(sections):
         rids, has_adr = cites(text)
@@ -339,11 +370,11 @@ def check_plan(plan, sections, spec_rids=None, index=None):
             for rid in rids:
                 if rid not in spec_rids:
                     out.append((n, "unknown-rid %s:%d %s" % (plan, n, rid)))
-        for display, ns, num in adr_citations(text, index or {}):
-            paths, reason = resolve_adr(ns, num, index or {})
+        for display, ns, num in adr_citations(text, index):
+            paths, reason = resolve_adr(ns, num, index)
             if not paths:
                 out.append((n, "unresolved-adr %s:%d %s %s" % (plan, n, display, reason)))
-    deferred, form = check_deferred(plan, sections, index or {})
+    deferred, form = check_deferred(plan, sections, index)
     out.extend(deferred)
     out.sort(key=lambda v: v[0])
     return out, form
