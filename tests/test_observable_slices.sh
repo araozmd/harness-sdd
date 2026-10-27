@@ -150,6 +150,8 @@ csec '- `walking-skeleton-missing` — [^.]{0,230}intra-epic `depends_on`' \
   || fail "R6: walking-skeleton-missing trigger does not cover an intra-epic depends_on"
 csec '- `internal-only-outcome` — [^.]{0,60}Success outcome[^.]{0,60}only internal artifacts[^.]{0,60}user or client can exercise' \
   || fail "R6: internal-only-outcome trigger missing"
+csec 'On the lowest-numbered feature of a fresh drill, `walking-skeleton-missing` subsumes `internal-only-outcome`[^.]{0,80}one finding, not both' \
+  || fail "R6: section does not say walking-skeleton-missing subsumes internal-only-outcome on the lowest feature (one finding, not both)"
 csec 'briefs under review are the brief paths the Driller passed' || fail "R6: scope signal (the passed paths) missing"
 csec '\*\*fresh\*\* when the lowest-numbered feature[^.]{0,80}is among the passed paths' || fail "R6: fresh definition missing"
 csec 'an \*\*amend\*\*: `walking-skeleton-missing` is not raised' || fail "R6: amend definition (walking-skeleton-missing not raised) missing"

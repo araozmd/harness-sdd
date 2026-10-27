@@ -20,7 +20,8 @@ All notable changes to the harness body are recorded here. Versions follow
 - `agents/doc-critic.md` gains `## Epic-decomposition checks — observable slices (ADR-0008)`
   with three advisory findings at `target-type=epic-decomposition`:
   `observable-behavior-missing`, `walking-skeleton-missing`, `internal-only-outcome`; a matching
-  exemption line downgrades a finding to an `exemption-recorded` note.
+  exemption line downgrades a finding to an `exemption-recorded` note; on the lowest-numbered
+  feature of a fresh drill `walking-skeleton-missing` subsumes `internal-only-outcome` (one finding).
 - `/sdd-drill` step 7 (emitted by `harness-install.sh`, regenerated glue) names the brief fill
   and the exemption line; `docs/WORKFLOW.md` documents the rule.
 

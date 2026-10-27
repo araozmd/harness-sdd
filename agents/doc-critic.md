@@ -53,6 +53,9 @@ the decomposition. Three findings, each with a stable id you cite in your progre
 - `walking-skeleton-missing` — on a fresh drill, the lowest-numbered feature's brief is not end-to-end: its observable behavior names no product-boundary surface, its `## Success outcome` stops at an internal artifact, or the feature has an intra-epic `depends_on`.
 - `internal-only-outcome` — a brief whose `## Success outcome` names only internal artifacts and nothing a user or client can exercise.
 
+**Overlap.** On the lowest-numbered feature of a fresh drill, `walking-skeleton-missing`
+subsumes `internal-only-outcome`: when both would apply you raise one finding, not both.
+
 **Scope signal.** The briefs under review are the brief paths the Driller passed — those
 written in this run; you have no other signal of what changed. A drill is **fresh** when the
 lowest-numbered feature in the epic's feature table is among the passed paths, otherwise it is
