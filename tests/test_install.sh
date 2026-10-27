@@ -1156,6 +1156,41 @@ grep -qF 'target-type=epic-decomposition' "$T/.claude/commands/sdd-drill.md" \
   || fail "E09: /sdd-drill glue missing the target-type=epic-decomposition doc-critic checkpoint"
 pass "E09: /sdd-plan + /sdd-drill glue carry drillable-minimum + doc-critic checkpoints"
 
+# E36-F02 R8: the observable-slice rule ships — installed role files, template, /sdd-drill step 7
+grep -qF '## Observable slice — the shape rule beside the size budget (ADR-0008)' "$T/.harness/agents/driller.md" \
+  || fail "E36-F02: installed driller lacks the observable-slice section"
+grep -qF 'Observable-slice exemption:' "$T/.harness/agents/driller.md" \
+  || fail "E36-F02: installed driller lacks the Observable-slice exemption: token"
+grep -qF '## Epic-decomposition checks — observable slices (ADR-0008)' "$T/.harness/agents/doc-critic.md" \
+  || fail "E36-F02: installed doc-critic lacks the observable-slices section"
+for id in observable-behavior-missing walking-skeleton-missing internal-only-outcome; do
+  grep -qF "$id" "$T/.harness/agents/doc-critic.md" || fail "E36-F02: installed doc-critic lacks finding id $id"
+done
+grep -qF 'Observable behavior' "$T/.harness/agents/inception.md" \
+  || fail "E36-F02: installed inception lacks the Observable behavior bullet"
+grep -qF '## Observable behavior' "$T/.harness/specs/_templates/inbox-brief.md" \
+  || fail "E36-F02: installed inbox-brief template lacks ## Observable behavior"
+grep -qxF '<HTTP / CLI / UI / file / exit code> — <what a user or client sees>' "$T/.harness/specs/_templates/inbox-brief.md" \
+  || fail "E36-F02: installed inbox-brief template lacks the shared placeholder line the doc-critic names"
+# step 7 of the installed /sdd-drill, bounded by step 8 (the emitter is the only writer)
+f36="$T/.claude/commands/sdd-drill.md"
+a36="$(grep -n '^7\. ' "$f36" | head -1 | cut -d: -f1)"; b36="$(grep -n '^8\. ' "$f36" | head -1 | cut -d: -f1)"
+[ -n "$a36" ] && [ -n "$b36" ] && [ "$a36" -lt "$b36" ] || fail "E36-F02: cannot bound step 7 of installed sdd-drill.md"
+sed -n "${a36},${b36}p" "$f36" > "$T/drill-step7.txt"
+grep -qF '## Observable behavior' "$T/drill-step7.txt" || fail "E36-F02: sdd-drill step 7 does not name ## Observable behavior"
+grep -qF 'Observable-slice exemption:' "$T/drill-step7.txt" || fail "E36-F02: sdd-drill step 7 does not name Observable-slice exemption:"
+# negative: the sentence stays out of E36-F05's step 12
+c36="$(grep -n '^12\. ' "$f36" | head -1 | cut -d: -f1)"
+[ -n "$c36" ] || fail "E36-F02: cannot find step 12 of installed sdd-drill.md"
+sed -n "${c36},\$p" "$f36" > "$T/drill-step12.txt"
+if grep -qF '## Observable behavior' "$T/drill-step12.txt" || grep -qF 'Observable-slice exemption:' "$T/drill-step12.txt"; then
+  fail "E36-F02: the observable-slice instruction leaked into sdd-drill step 12"
+fi
+# source pin: the installed file is the heredoc's output, so the emitter must carry the sentence
+grep -qF 'Observable-slice exemption:' "$SRC/harness-install.sh" \
+  || fail "E36-F02: harness-install.sh sdd-drill heredoc lacks Observable-slice exemption:"
+pass "E36-F02: installed observable-slice rule (driller, doc-critic, inception, template, sdd-drill step 7)"
+
 # OpenCode glue: same slash commands installed under .opencode/command/                        # R7
 [ -f "$T/.opencode/command/sdd-next.md" ] || fail "opencode sdd-next command missing"
 [ -f "$T/.opencode/command/sdd-new.md" ]  || fail "opencode sdd-new command missing"

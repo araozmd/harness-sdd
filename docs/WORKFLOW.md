@@ -204,6 +204,33 @@ forces. A finding is waived per test, by exact name, with a `waive-test-drift: <
 <reason>` line in the feature's `.tasks.md`. Extra assertion patterns go in
 `change_size.assert_patterns`. It is an added check; `run-tests.sh` stays primary.
 
+## Observable slices and the walking skeleton (ADR-0008)
+
+The size rule above says how *much* a feature may carry; this rule says what *shape* it must
+have, so that something can be exercised before the last feature lands. Three clauses, all
+applied by the Driller at `/sdd-drill`:
+
+1. **Every feature names a behavior observable at the product boundary** — an HTTP response, a
+   CLI invocation, a UI interaction, a file a user or client reads or an exit code. The brief states it in its
+   `## Observable behavior` section (one line: the surface and what a user or client sees).
+2. **The first feature of a fresh epic is the walking skeleton** — the thinnest end-to-end path
+   a user or client can exercise, the lowest `F##` a default drill seeds, with no intra-epic
+   `depends_on`. Cross-cutting setup is that skeleton's content, never its own feature.
+3. **A candidate whose outcome is only internal is merged into the slice that consumes it**,
+   and the size rule's split then runs along observable seams, not layers.
+
+`max_requirements` stays the size proxy; this rule says nothing about count. When a feature is
+nonetheless internal, or a fresh epic's first feature is not end-to-end, the Driller records one
+line per exempted feature in the epic's `## Notes`, beginning `Observable-slice exemption:` and
+naming the feature id and why; for an epic whose only consumer is another epic, the line names
+that consuming epic and the surface where the behavior becomes observable.
+
+The Doc-critic checks the result at `target-type=epic-decomposition` and raises
+`observable-behavior-missing`, `walking-skeleton-missing` and `internal-only-outcome`; a matching
+exemption line downgrades a finding to an `exemption-recorded` note. The rule is advisory and it
+never blocks: no `blocked` record, no gate, no status, no schema change. The wording lives in
+`agents/driller.md` and `agents/doc-critic.md`.
+
 ## Architecture-aligned specs (the Architect cites ADRs)
 
 The planning tier produces durable design artifacts; this contract makes them

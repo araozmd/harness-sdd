@@ -60,7 +60,9 @@ an arbitrary epic.
    append-only, no reuse); fill the `epic.md` feature table (one row per feature); and write
    a per-feature inbox brief at `progress/inbox/<E##>-F<NN>.md` from
    `specs/_templates/inbox-brief.md`, recording the `ADR-NNNN` ids each feature
-   must honor.
+   must honor. Fill each brief's `## Observable behavior` line (the surface and what a user
+   or client sees; the first feature of a fresh epic is the walking skeleton), and record
+   any `Observable-slice exemption:` line in the epic's `epic.md` Notes.
 8. **Append** any per-epic **ADR deltas** the decomposition forces at
    `specs/adr/NNNN-<title>.md` (4-digit, above the max existing ADR number, no
    reuse) — do NOT rewrite or renumber F02's existing ADRs. Stay at per-epic depth; defer

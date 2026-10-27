@@ -4,6 +4,27 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.102.0] — 2026-10-26
+
+### Added — observable-slice rule and walking skeleton (E36-F02)
+- `agents/driller.md` gains `## Observable slice — the shape rule beside the size budget
+  (ADR-0008)`: every seeded feature names a behavior observable at the product boundary (HTTP,
+  CLI, UI, a file a user or client reads, exit code); the first feature of a fresh epic is the walking skeleton
+  (thinnest end-to-end path, no intra-epic `depends_on`); an internal-only candidate is merged
+  into the slice that consumes it. `max_requirements` stays the size proxy. The rule is advisory
+  and never blocks: an exempted feature is recorded as one `Observable-slice exemption:` line in
+  the epic's `## Notes` (a `blocked` record is never emitted on shape alone).
+- `specs/_templates/inbox-brief.md` gains a `## Observable behavior` section after
+  `## Success outcome`; `agents/inception.md` lists it among the brief's body sections and the
+  Driller fills it. Existing briefs are not retro-fitted.
+- `agents/doc-critic.md` gains `## Epic-decomposition checks — observable slices (ADR-0008)`
+  with three advisory findings at `target-type=epic-decomposition`:
+  `observable-behavior-missing`, `walking-skeleton-missing`, `internal-only-outcome`; a matching
+  exemption line downgrades a finding to an `exemption-recorded` note; on the lowest-numbered
+  feature of a fresh drill `walking-skeleton-missing` subsumes `internal-only-outcome` (one finding).
+- `/sdd-drill` step 7 (emitted by `harness-install.sh`, regenerated glue) names the brief fill
+  and the exemption line; `docs/WORKFLOW.md` documents the rule.
+
 ## [0.101.0] — 2026-10-26
 
 ### Added — product stage and deferred-decision ADRs (E36-F03)
