@@ -341,14 +341,14 @@ done
 
 # the index holds only regular *.md files directly in an adr/ dir, numbered by ALL leading digits
 fresh r4bounds
-printf 'x\n' > "$S/adr/0042-notes.txt"; mkdir "$S/adr/0042-dir.md"
+printf 'x\n' > "$S/adr/0042-notes.txt"; ln -s "$S/nowhere" "$S/adr/0042-dangling.md"
 printf '# not an ADR\n' > "$S/epics/E01-x/0042-not-in-adr.md"; printf '# five digits\n' > "$S/adr/00043-five.md"
 add_row "$GP" '| `n.py` | modify | ADR-0042 |'; add_row "$GP" '| `o.py` | modify | ADR-0004 |'
 _l1="$(grep -n '^| `n.py` |' "$GP" | cut -d: -f1)"; _l2="$(grep -n '^| `o.py` |' "$GP" | cut -d: -f1)"
 run_tool "$GP" --spec "$GS"; expect_fail R4_namespace_index_bounds
 [ "$(count '^plan-cite-check: unresolved-adr ')" -eq 2 ] || fail "R4_namespace_index_bounds: expected two unresolved-adr ($(both))"
 grep -qxF "plan-cite-check: unresolved-adr $GP:$_l1 ADR-0042 not-in-any-namespace" "$T/out" \
-  || fail "R4_namespace_index_bounds: a non-.md file, a directory or a file outside adr/ was indexed as ADR-0042 ($(both))"
+  || fail "R4_namespace_index_bounds: a non-.md file, a non-regular (dangling) entry or a file outside adr/ was indexed as ADR-0042 ($(both))"
 grep -qxF "plan-cite-check: unresolved-adr $GP:$_l2 ADR-0004 not-in-any-namespace" "$T/out" \
   || fail "R4_namespace_index_bounds: 00043-five.md was indexed as number 0004 ($(both))"
 pass "R4_namespace_index_bounds"
