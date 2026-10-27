@@ -733,8 +733,10 @@ pass "R7_init_ok_on_good_plan"
 init_case E01-F02 spec-ready true F02-bad; rm "$I/specs/adr/0003-deferred-no-trigger.md"
 grep -v '^- \*\*R' "$I/specs/epics/E01-x/F02-bad/E01-F02.spec.md" > "$T/zero.md"; mv "$T/zero.md" "$I/specs/epics/E01-x/F02-bad/E01-F02.spec.md"
 init_run; init_ok R7_init_exit2_reported_as_did_not_run
-grep -qF "⚠️  plan-cite: E01-F02 check did not run: error: no R-ids found in specs/epics/E01-x/F02-bad/E01-F02.spec.md" "$T/out" \
-  || fail "R7_init_exit2_reported_as_did_not_run: an exit-2 lint is not reported as 'check did not run' ($(both))"
+# ONE line, start to end (R7 "a ⚠️ line"): a multi-line extraction (R2M2) splits it, so no single
+# line carries both the prefix and the closing (warn-only) tag.
+grep -qE '^⚠️  plan-cite: E01-F02 check did not run: error: no R-ids found in specs/epics/E01-x/F02-bad/E01-F02\.spec\.md.* \(warn-only\)$' "$T/out" \
+  || fail "R7_init_exit2_reported_as_did_not_run: an exit-2 lint is not reported as ONE 'check did not run' line ending (warn-only) ($(both))"
 grep -qF '✅ plan citations' "$T/out" && fail "R7_init_exit2_reported_as_did_not_run: the clean line printed though a plan's lint did not run ($(both))"
 pass "R7_init_exit2_reported_as_did_not_run"
 
@@ -758,8 +760,8 @@ cp "$TOOL" "$I/tools/plan-cite-check.py"
 
 init_case E01-F01 spec-ready true F01-good; rm "$I/specs/adr/0003-deferred-no-trigger.md"
 printf '\377\n' >> "$I/specs/bookings/adr/0001-other.md"; init_run; init_ok R7_init_sweep_exit2_did_not_run
-grep -qF '⚠️  plan-cite: sweep did not run: error: cannot read specs/bookings/adr/0001-other.md' "$T/out" \
-  || fail "R7_init_sweep_exit2_did_not_run: a sweep that exited 2 is not reported as 'did not run' ($(both))"
+grep -qE '^⚠️  plan-cite: sweep did not run: error: cannot read specs/bookings/adr/0001-other\.md.* \(warn-only\)$' "$T/out" \
+  || fail "R7_init_sweep_exit2_did_not_run: a sweep that exited 2 is not reported as ONE 'did not run' line ending (warn-only) ($(both))"
 grep -qF '✅ plan citations' "$T/out" && fail "R7_init_sweep_exit2_did_not_run: clean line printed though the sweep did not run ($(both))"
 pass "R7_init_sweep_exit2_did_not_run"
 
