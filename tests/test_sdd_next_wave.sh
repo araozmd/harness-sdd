@@ -379,7 +379,7 @@ test_worker_identity_and_harness_dir() {
   has "wave section" "$_w" 'given exactly: its feature id; the primary'"'"'s absolute path to its inbox brief, or `-` when `progress/inbox/<id>.md` is absent'
   has "wave section" "$_w" 'its pre-provisioned branch and worktree; `HARNESS_DIR` set to that worktree; and the manifest path.'
   has "wave section" "$_w" 'It starts at the Architect: `pending → spec-ready → in-progress`; `autonomous: true` skips the human gate but still records the gate-span pair'
-  has "wave section" "$_w" 'A wave worker writes every board transition through `HARNESS_DIR="<its worktree>" python3 "$HARNESS_DIR/tools/tasks-lock.py"` and commits those transitions on its own feature branch'
+  has "wave section" "$_w" 'A wave worker writes every board transition through `HARNESS_DIR="<its worktree>" python3 "$HARNESS_DIR/tools/tasks-lock.py"` and commits those transitions on its own feature branch; the explicit `HARNESS_DIR` wins over the linked-worktree remap, so'
   has "wave section" "$_w" 'where the targeted mode above says canonical main `HARNESS_DIR`, a wave worker uses its own worktree instead.'
   has "wave section" "$_w" 'On entry it reads the feature'"'"'s status from its own worktree board and resumes at that phase, so a re-spawned worker never restarts the Architect.'
   has "wave section" "$_w" 'A wave worker never stages, commits, switches, stashes, resets or cleans the primary.'
