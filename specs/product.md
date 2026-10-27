@@ -1,3 +1,6 @@
+---
+stage: production
+---
 # Product Constitution
 
 > Layer 0 — the stable, high-level "north star". Every agent reads this for context.

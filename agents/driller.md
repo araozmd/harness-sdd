@@ -75,6 +75,17 @@ Before decomposing, you **read** as inputs:
 
 These are the inputs to the feature breakdown — you read them, you do not rewrite them.
 
+## Stage (ADR-0009)
+
+Read the product's stage with the design artifacts above. Take the literal from
+`specs/product.md` frontmatter: `sed -n '/^---$/,/^---$/p' specs/product.md | grep '^stage:'`
+— one of `discovery`, `pilot`, `production`; when the line is absent or unrecognized, the
+stage is `production`. You never write `specs/product.md`.
+
+Record `Stage: <value>` in every inbox brief's `## Constraints` section, beside the
+`ADR-NNNN` ids you record there — the Architect specs from the brief, so this is how the stage
+reaches it (the F03-D7 hook) and how it decides which bolt-on NFRs to defer.
+
 ## Feature-size budget — split here, not later (E21-F01)
 
 You are the **only** role that decides how large a feature is. Nothing downstream revisits it:

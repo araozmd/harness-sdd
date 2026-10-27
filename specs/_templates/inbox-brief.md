@@ -21,6 +21,7 @@ date: <YYYY-MM-DD>
 <Any options the human picked during the Q&A — one bullet each.>
 
 ## Constraints
+- Stage: <discovery | pilot | production — from specs/product.md frontmatter; production when absent>
 <Non-negotiables the Architect must honor.>
 
 ## Open questions

@@ -4,7 +4,7 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
-## [0.101.0] — 2026-10-26
+## [0.102.0] — 2026-10-26
 
 ### Added — observable-slice rule and walking skeleton (E36-F02)
 - `agents/driller.md` gains `## Observable slice — the shape rule beside the size budget
@@ -23,6 +23,39 @@ All notable changes to the harness body are recorded here. Versions follow
   exemption line downgrades a finding to an `exemption-recorded` note.
 - `/sdd-drill` step 7 (emitted by `harness-install.sh`, regenerated glue) names the brief fill
   and the exemption line; `docs/WORKFLOW.md` documents the rule.
+
+## [0.101.0] — 2026-10-26
+
+### Added — product stage and deferred-decision ADRs (E36-F03)
+- **The product stage.** `specs/product.md` frontmatter declares `stage: discovery | pilot |
+  production` (ADR-0009 decision 1); absent or unrecognized means `production`, today's
+  behavior, so a project that never declares one sees no change. The value line is bare — the
+  grammar is `^stage: (discovery|pilot|production)$` — and the installer's stub puts the
+  explanation on its own `#` line. This repository declares `stage: production`.
+- **Stub + guarded refresh.** A fresh install seeds the new stub. The stub shipped from v0.81.1
+  becomes a second known prior blob: a target whose `product.md` is still that text byte for
+  byte is refreshed (it gains `stage:`); an edited file is preserved byte for byte.
+- **Deferred-decision ADRs.** `specs/_templates/adr.md` adds `deferred` to `Status:` and a
+  `- **Trigger:**` header line, mandatory when the status is `deferred` (decision 2), plus
+  guidance naming the sticky NFRs that are never deferred at any stage (tenant isolation, the
+  auth boundary, secrets out of the repo, validation at the system edge — decision 3) and the
+  bolt-on examples (encryption at rest, WAF, rate limits, backups, caching). The template's
+  guidance and the plan template's `## Deferred` blockquote spell the header lines in full
+  (`- **Status:** deferred`, `- **Trigger:** <condition>`), the form `E36-F04` will lint.
+- **Plan `## Deferred`.** `specs/_templates/feature.plan.md` gains a `## Deferred` subsection
+  (a `| Bolt-on | Deferred by | Trigger |` table or the single line `Deferred: none — <why>`),
+  and its header now says every table row cites the `R-id` it serves or the `ADR-NNNN` that
+  defers it. The inbox-brief template gains a `- Stage:` line under `## Constraints`.
+- **Role prose.** The Planner reads the stage before the architecture and ADRs, the Driller
+  records `Stage: <value>` in every brief, and the Architect defers each excluded bolt-on by a
+  deferred ADR (the one ADR kind it may author), never adds a bolt-on without an `R-id`, and
+  never defers a sticky NFR.
+- **Docs.** `docs/SPEC-FORMAT.md` → *Plan rows cite an R-id or an ADR* states the citation
+  grammar once; `docs/WORKFLOW.md` → *Stage and NFRs (ADR-0009)* carries the sticky/bolt-on
+  table. Enforcement — the plan-row citation lint, the `init.sh` trigger sweep, the doc-critic
+  flags and the Reviewer gate — will be E36-F04 (not yet enforced); this release declares and
+  records only.
+- New suite `tests/test_stage_nfrs.sh`; `tests/test_install.sh` pins the stub and the refresh.
 
 ## [0.100.0] — 2026-10-26
 

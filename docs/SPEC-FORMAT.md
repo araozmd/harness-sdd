@@ -117,6 +117,51 @@ may group it by co-citing it on that pair's `a` task (`**T2a** (R2, R4) — …`
 task. The lint cannot tell which `R-id`s are behavioral; whether the e2e RED was actually
 observed is the Reviewer's behavior check.
 
+## Plan rows cite an R-id or an ADR
+
+Stage-aware NFRs (ADR-0009) rest on one citation grammar, stated here once and copied exactly
+into the ADR and plan templates, `agents/architect.md` and `docs/WORKFLOW.md`. Four forms:
+
+1. **Stage line.** In `specs/product.md`, inside the first `---` … `---` block, a line
+   matching `^stage: (discovery|pilot|production)$`. The value is the whole rest of the line,
+   so no inline comment is allowed on it — an explanation goes on its own `#` line in the
+   block, as the installer's stub shows. Absent, or any other value, reads as `production`.
+   Read it with `sed -n '/^---$/,/^---$/p' specs/product.md | grep '^stage:'`.
+2. **Deferred ADR header.** In `specs/adr/NNNN-*.md` (or a product space's `adr/`), the
+   header list under the `# ADR-NNNN —` title carries a line `- **Status:** deferred`
+   (regex `^- \*\*Status:\*\* deferred`) **and** a line `- **Trigger:**` followed by a
+   non-empty observable condition (regex `^- \*\*Trigger:\*\* \S`). A `deferred` ADR without a
+   `Trigger:` line is a defect. Filename and numbering follow the ordinary ADR rule (4-digit,
+   strictly above the maximum, no reuse).
+3. **Plan-row citation.** Every table row (`^|`) under a `.plan.md`'s `## Data model`,
+   `## API / interface`, `## Files to change` and `## Deferred` headings carries an
+   `R[0-9]+` token or an `ADR-[0-9]{4}` token. Header and separator rows are exempt; the
+   qualified `<ns>/ADR-NNNN` form counts, because `ADR-` is what is matched. A
+   `(serves: …)` suffix on a heading does not stand in for a row citation.
+4. **`## Deferred` subsection.** In `.plan.md`, **either** a table headed
+   `| Bolt-on | Deferred by | Trigger |` whose every row's *Deferred by* cell holds an
+   `ADR-[0-9]{4}` token (the *Trigger* cell copies the ADR's `Trigger:` text), **or** the
+   single line `Deferred: none — <why>`. Never both, never neither.
+
+```markdown
+## Deferred  (ADR-0009 — bolt-ons the stage excludes)
+
+| Bolt-on | Deferred by | Trigger |
+|---|---|---|
+| encryption at rest | ADR-0012 | first regulated customer signs |
+```
+
+or, when nothing is deferred:
+
+```markdown
+## Deferred  (ADR-0009 — bolt-ons the stage excludes)
+
+Deferred: none — stage is production
+```
+
+`E36-F04` will turn this grammar into an exit code (the plan-row citation lint, the trigger
+sweep, the Reviewer gate) — not yet enforced; this section is the schema it will lint.
+
 ## Architecture alignment — cite the ADRs you touch
 
 When the project has been planned (`/sdd-plan` wrote `specs/architecture.md` and ADRs at
