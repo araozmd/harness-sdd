@@ -384,10 +384,10 @@ test_worker_identity_and_harness_dir() {
   _w=$(section "$ORCH" "$WAVE_H")
   has "wave section" "$_w" 'The coordinator spawns every provisioned worker before awaiting any one of them, up to `cap`'
   has "wave section" "$_w" 'given exactly: its feature id; the primary'"'"'s absolute path to its inbox brief, or `-` when `progress/inbox/<id>.md` is absent'
-  has "wave section" "$_w" 'its pre-provisioned branch and worktree; `HARNESS_DIR` set to that worktree; and the manifest path.'
+  has "wave section" "$_w" 'its pre-provisioned branch and worktree; `HARNESS_DIR` set to that worktree'"'"'s harness directory — `<worktree>/.harness` in an installed target, the worktree itself in this harness source checkout; and the manifest path.'
   has "wave section" "$_w" 'It starts at the Architect: `pending → spec-ready → in-progress`; `autonomous: true` skips the human gate but still records the gate-span pair'
-  has "wave section" "$_w" 'A wave worker writes every board transition through `HARNESS_DIR="<its worktree>" python3 "$HARNESS_DIR/tools/tasks-lock.py"` and commits those transitions on its own feature branch; the explicit `HARNESS_DIR` wins over the linked-worktree remap, so'
-  has "wave section" "$_w" 'where the targeted mode above says canonical main `HARNESS_DIR`, a wave worker uses its own worktree instead.'
+  has "wave section" "$_w" 'A wave worker writes every board transition through `HARNESS_DIR="<its worktree'"'"'s harness dir>" python3 "$HARNESS_DIR/tools/tasks-lock.py"` and commits those transitions on its own feature branch; the explicit `HARNESS_DIR` wins over the linked-worktree remap, so'
+  has "wave section" "$_w" 'where the targeted mode above says canonical main `HARNESS_DIR`, a wave worker uses its own worktree'"'"'s harness directory instead.'
   has "wave section" "$_w" 'On entry it reads the feature'"'"'s status from its own worktree board and resumes at that phase, so a re-spawned worker never restarts the Architect.'
   has "wave section" "$_w" 'A wave worker never stages, commits, switches, stashes, resets or cleans the primary.'
   has "wave section" "$_w" 'It stops after opening its PR, with the feature left `in-review`: it never merges, never runs `/sdd-pr-loop`, never writes `done` and never tears down its worktree.'
@@ -424,6 +424,37 @@ test_worker_identity_and_harness_dir() {
     fail "control set-status failed: $(cat "$TMP/r7c.out")"
   [ "$(status_of "$_p/state/tasks.json" E1-F2)" = spec-ready ] || fail "control: the remap did not write the primary board"
   [ "$(cksum <"$_wt/state/tasks.json")" = "$_wt_mid" ] || fail "control: the remapped write also changed the worktree board"
+
+  # Installed layout (Codex P1 on PR #307): the worker's harness directory is
+  # <worktree>/.harness, never the worktree root. The .harness override writes the worktree's
+  # .harness board; the bare worktree root has no tools/ or state/ and must not "succeed".
+  _q="$TMP/r7i/primary"
+  mkdir -p "$_q/.harness/state" "$_q/.harness/store"
+  safe_git init -q -b main "$_q" || { fail "r7i git init"; end; return 0; }
+  cp -R "$ROOT/tools" "$_q/.harness/tools"
+  cp "$ROOT/store/tasks.schema.json" "$_q/.harness/store/tasks.schema.json"
+  printf '#!/bin/sh\nexit 0\n' >"$_q/.harness/init.sh"
+  chmod +x "$_q/.harness/init.sh"
+  printf '.claude/worktrees/\n' >"$_q/.gitignore"
+  board "E1:$(feat E1-F1 pending '[]' '"autonomous":true')" >"$_q/.harness/state/tasks.json"
+  safe_git -C "$_q" add -A && safe_git -C "$_q" -c user.name=t -c user.email=t@example.test commit -qm base ||
+    { fail "r7i fixture commit"; end; return 0; }
+  _wi=$(cd "$_q" && env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 sh .harness/tools/fix-worktree.sh create E1-F1 one 2>"$TMP/r7i.err") ||
+    { fail "r7i create E1-F1 (installed helper) failed: $(cat "$TMP/r7i.err")"; end; return 0; }
+  [ -f "$_wi/.harness/state/tasks.json" ] || { fail "r7i worktree has no .harness board: $_wi"; end; return 0; }
+  _qp_before=$(cksum <"$_q/.harness/state/tasks.json")
+  _wi_before=$(cksum <"$_wi/.harness/state/tasks.json")
+  (cd "$_wi" && HARNESS_DIR="$_wi/.harness" python3 "$_wi/.harness/tools/tasks-lock.py" set-status E1-F1 spec-ready) >"$TMP/r7i.out" 2>&1 ||
+    fail "installed layout: HARNESS_DIR=<worktree>/.harness set-status failed: $(cat "$TMP/r7i.out")"
+  [ "$(status_of "$_wi/.harness/state/tasks.json" E1-F1)" = spec-ready ] || fail "installed layout: the worktree's .harness board is not spec-ready"
+  [ "$(cksum <"$_q/.harness/state/tasks.json")" = "$_qp_before" ] || fail "installed layout: the write changed the PRIMARY board"
+  # Control: the worktree ROOT as HARNESS_DIR cannot reach a board (no tools/, no state/).
+  _wi_mid=$(cksum <"$_wi/.harness/state/tasks.json")
+  if (cd "$_wi" && HARNESS_DIR="$_wi" python3 "$_wi/.harness/tools/tasks-lock.py" set-status E1-F1 in-progress) >"$TMP/r7ic.out" 2>&1; then
+    fail "installed layout control: HARNESS_DIR=<worktree root> must not succeed"
+  fi
+  [ "$(cksum <"$_wi/.harness/state/tasks.json")" = "$_wi_mid" ] || fail "installed layout control: a root-HARNESS_DIR write changed the board"
+  [ "$_wi_before" != "$_wi_mid" ] || fail "installed layout: precondition — the .harness write must have changed the board"
   end
 }
 
