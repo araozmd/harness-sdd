@@ -127,7 +127,7 @@ same_row_two_vars_is_one_hit() {
 }
 
 stdout_clean() {
-  for _case in "CLAUDECODE=1 CODEX_THREAD_ID=x" "OPENCODE=1 PI_CODING_AGENT=true"; do
+  for _case in "CLAUDECODE=1 CODEX_THREAD_ID=x" "OPENCODE=1 PI_CODING_AGENT=true" "HARNESS_HOST_AGENT=bogus" "HARNESS_HOST_AGENT=bogus PI_CODING_AGENT=true"; do
     # shellcheck disable=SC2086  # each case is a list of VAR=VALUE words
     frun $_case
     [ -n "$(errs)" ] || fail "R7 setup: '$_case' produced no diagnostic, so it proves nothing about stdout"
@@ -154,6 +154,66 @@ positional_arg_usage() {
   pass "positional / unknown arguments exit 4; --help / -h print usage and exit 0 (F182-R7)"
 }
 
+# ── F182-R8 ─────────────────────────────────────────────────────────────────────
+declared_known_key_wins() {
+  frun HARNESS_HOST_AGENT=codex CLAUDECODE=1
+  [ "$(out)" = codex ] || fail "R8: HARNESS_HOST_AGENT=codex beside CLAUDECODE=1 printed '$(out)', not codex"
+  [ -z "$(errs)" ]     || fail "R8: a valid declaration warned: $(errs)"
+  # Every marker-row key is accepted as a declaration on its own, and beats ambiguity.
+  for _k in claude codex opencode pi; do
+    frun HARNESS_HOST_AGENT="$_k" CLAUDECODE=1 CODEX_THREAD_ID=x
+    [ "$(out)" = "$_k" ] || fail "R8: HARNESS_HOST_AGENT=$_k over two markers printed '$(out)'"
+    [ -z "$(errs)" ]     || fail "R8: HARNESS_HOST_AGENT=$_k still reported ambiguity: $(errs)"
+  done
+  # An EMPTY declaration is no declaration: markers decide, silently.
+  frun HARNESS_HOST_AGENT= CLAUDECODE=1
+  [ "$(out)" = claude ] || fail "R8: an empty HARNESS_HOST_AGENT did not fall through to markers"
+  [ -z "$(errs)" ]      || fail "R8: an empty HARNESS_HOST_AGENT warned: $(errs)"
+  pass "a declared marker-row key wins over markers and over ambiguity (F182-R8)"
+}
+
+# `antigravity` is a known INSTALLER key with no marker row — so it is never a host key.
+declared_invalid_warns_then_detects() {
+  for _v in 'claude codex' host gemini antigravity Claude 'claude pi'; do
+    frun HARNESS_HOST_AGENT="$_v" PI_CODING_AGENT=true
+    [ "$(out)" = pi ] || fail "R8: HARNESS_HOST_AGENT='$_v' + PI_CODING_AGENT printed '$(out)', not pi"
+    [ "$(rcv)" = 0 ]  || fail "R8: HARNESS_HOST_AGENT='$_v' exited $(rcv)"
+    [ "$(errs | grep -c .)" = 1 ] || fail "R8: HARNESS_HOST_AGENT='$_v' wrote not exactly one warning: $(errs)"
+    errs | grep -qF "ignoring HARNESS_HOST_AGENT='$_v'" \
+      || fail "R8: the warning for HARNESS_HOST_AGENT='$_v' does not name the value: $(errs)"
+  done
+  pass "an unusable HARNESS_HOST_AGENT warns once naming the value, then markers decide (F182-R8)"
+}
+
+declared_antigravity_alone_empty() {
+  frun HARNESS_HOST_AGENT=antigravity
+  [ -z "$(out)" ]  || fail "R8: HARNESS_HOST_AGENT=antigravity alone printed '$(out)' — it has no marker row"
+  [ "$(rcv)" = 0 ] || fail "R8: HARNESS_HOST_AGENT=antigravity alone exited $(rcv)"
+  errs | grep -qF "ignoring HARNESS_HOST_AGENT='antigravity'" \
+    || fail "R8: HARNESS_HOST_AGENT=antigravity alone did not warn: $(errs)"
+  pass "HARNESS_HOST_AGENT=antigravity alone is no key, warned (F182-R8)"
+}
+
+declared_invalid_no_marker_empty() {
+  frun HARNESS_HOST_AGENT=gemini
+  [ -z "$(out)" ]  || fail "R8: HARNESS_HOST_AGENT=gemini alone printed '$(out)'"
+  [ "$(rcv)" = 0 ] || fail "R8: HARNESS_HOST_AGENT=gemini alone exited $(rcv) — the tool must never die"
+  errs | grep -qF "ignoring HARNESS_HOST_AGENT='gemini'" \
+    || fail "R8: HARNESS_HOST_AGENT=gemini alone did not warn: $(errs)"
+  pass "a retired / unknown declaration with no marker prints nothing, warns, exits 0 (F182-R8)"
+}
+
+# The second copy stays ONE table: same keys, same variables, same order, byte for byte.
+marker_rows_parity() {
+  installer_rows > "$T/inst-rows.txt"
+  tool_rows > "$T/tool-rows.txt"
+  [ -s "$T/inst-rows.txt" ] || fail "R8: no HOST_MARKERS rows extracted from harness-install.sh — the block moved"
+  [ -s "$T/tool-rows.txt" ] || fail "R8: no HOST_MARKERS rows extracted from tools/host-frontend.sh — the block moved"
+  cmp -s "$T/inst-rows.txt" "$T/tool-rows.txt" \
+    || fail "R8: tools/host-frontend.sh's HOST_MARKERS rows differ from harness-install.sh's: $(diff "$T/inst-rows.txt" "$T/tool-rows.txt" || true)"
+  pass "the tool's marker rows equal the installer's HOST_MARKERS rows (F182-R8)"
+}
+
 # Must run LAST among the R7/R8 cases: it audits every run above.
 no_file_written() {
   _new="$(find "$T/run" -newer "$T/stamp" 2>/dev/null)"
@@ -170,6 +230,11 @@ two_rows_ambiguous
 same_row_two_vars_is_one_hit
 stdout_clean
 positional_arg_usage
+declared_known_key_wins
+declared_invalid_warns_then_detects
+declared_antigravity_alone_empty
+declared_invalid_no_marker_empty
+marker_rows_parity
 no_file_written
 
 echo "test_host_frontend.sh: ALL PASSED"

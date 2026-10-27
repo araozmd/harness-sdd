@@ -65,7 +65,29 @@ marker_present() {
   [ -n "$_mp_val" ]
 }
 
-# The walk: every key with at least one present marker, one per line, sorted and unique.
+# _row_keys — the first field of every row: the ONLY key list this tool has. There is no third
+# copy of the installer's AGENT_KEYS, so a front-end with no marker row (antigravity) can
+# never be printed — not even when it is declared.
+_row_keys="$(printf '%s\n' "$HOST_MARKERS" | awk 'NF { print $1 }')"
+
+# 1. The explicit declaration wins outright — when it is exactly one marker-row key. Parsed
+#    as detect_host parses it (word-split, one token), so the installer and this tool agree
+#    on every declaration.
+_decl="${HARNESS_HOST_AGENT:-}"
+if [ -n "$_decl" ]; then
+  _dn=0; _one=""
+  for _t in $_decl; do _dn=$((_dn + 1)); _one="$_t"; done
+  if [ "$_dn" -eq 1 ]; then
+    for _k in $_row_keys; do
+      if [ "$_k" = "$_one" ]; then printf '%s\n' "$_one"; exit 0; fi
+    done
+  fi
+  # Anything else warns ONCE and is ignored — never a `die`: a mistyped declaration must not
+  # stop a build, it only loses the declaration's narrowing.
+  echo "⚠️  ignoring HARNESS_HOST_AGENT='$_decl' — expected exactly one of: $(printf '%s' "$_row_keys" | tr '\n' ' ')" >&2
+fi
+
+# 2. The walk: every key with at least one present marker, one per line, sorted and unique.
 _hits="$(
   printf '%s\n' "$HOST_MARKERS" | while IFS= read -r _row; do
     [ -n "$_row" ] || continue
@@ -82,6 +104,6 @@ for _k in $_hits; do _n=$((_n + 1)); done
 if [ "$_n" -eq 1 ]; then
   printf '%s\n' "$_hits"
 elif [ "$_n" -gt 1 ]; then
-  echo "⚠️  host detection ambiguous — session markers present for: $(printf '%s' "$_hits" | tr '\n' ' ')— no host key (builder-role.sh will use the all-front-ends rule)" >&2
+  echo "⚠️  host detection ambiguous — session markers present for: $(printf '%s' "$_hits" | tr '\n' ' ') — no host key (builder-role.sh will use the all-front-ends rule)" >&2
 fi
 exit 0
