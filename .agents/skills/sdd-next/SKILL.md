@@ -37,7 +37,22 @@ Map `$ARGUMENTS` to the selector's closed scope flags:
 - one valid positional feature id `E##-F##` → translate it to
   `node tools/next-task.mjs --json --feature E##-F##`; never forward the feature
   id as a selector positional token.
+- `--wave`, optionally followed by `--max N` and/or `--epic E##` in either order → **wave
+  coordinator mode** (below): the coordinator reads
+  `node tools/next-task.mjs --waves --json`, forwarding `--epic E##` to it, and
+  `--max N` is the coordinator's own worker cap (never a selector flag).
 - anything else is invalid and selects or changes nothing.
+
+`--wave` is a closed-scope token beside `--mine` and `E##-F##`: it cannot be combined with
+either. `--max` and `--epic` are valid only after `--wave`, each at most once; `N` must match
+`^[1-9][0-9]*$` and `E##` must match `^E[0-9]+$`. Any other argument shape (`--wave --mine`,
+`--wave E##-F##`, `--max N` or `--epic E##` without `--wave`, `--max 0`, `--epic E36-F01`,
+a repeated token) selects nothing, changes no state, and prints
+`usage: /sdd-next [--mine | E##-F## | --wave [--max N] [--epic E##]]`.
+
+Under `--wave`, act as the wave coordinator in `agents/orchestrator.md` →
+"## Wave coordinator mode (/sdd-next --wave)"; that section is the contract and this
+command only maps the scope.
 
 Under `--mine`, use **scoped selection**: consider only features whose **effective owner**
   (feature `owner` else parent epic `owner`) equals the identity resolved from

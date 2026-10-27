@@ -1198,6 +1198,8 @@ pass "OpenCode commands generated (R7)"
 for _b in "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" "$T/.agents/skills/sdd-next/SKILL.md"; do
   grep -qF -- '--mine' "$_b"      || fail "generated /sdd-next glue missing --mine scope wiring: $_b (E10-F01 R12/R13)"
   grep -qF '$ARGUMENTS' "$_b"     || fail "generated /sdd-next glue does not forward \$ARGUMENTS: $_b (E10-F01 R13)"
+  grep -qF -- '`--wave` is a closed-scope token beside `--mine`' "$_b" \
+    || fail "generated /sdd-next glue missing the --wave scope token: $_b (E36-F07 R1)"
 done
 pass "E10-F01: /sdd-next glue generated per target, byte-identical, carries --mine + \$ARGUMENTS [sdd_next_glue_generated_all_targets][sdd_next_scope_wiring_asserted]"
 
