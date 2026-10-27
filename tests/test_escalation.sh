@@ -1506,4 +1506,26 @@ F182_R5_garbage_never_opens() {
 }
 F182_R5_garbage_never_opens
 
+# ── F182-R6: a missing or malformed key is a broken CALLER — usage, exit 4 ───────
+# The specific message is asserted, not just `--frontend`: the generic usage line also
+# names `[--frontend <key>]`, so a bare `--frontend` grep would pass on any usage error.
+F182_R6_usage() {
+  [ "$(rc complex 1 --frontend)" = 4 ] || fail "F182-R6: --frontend with no value did not exit 4"
+  [ -z "$(role complex 1 --frontend)" ] || fail "F182-R6: --frontend with no value printed a role"
+  for _v in Claude 'cl aude' claude=raise ../claude -claude 1claude 'claude
+codex'; do
+    [ "$(rc complex 1 --frontend "$_v")" = 4 ] \
+      || fail "F182-R6: --frontend '$_v' did not exit 4"
+    [ -z "$(role complex 1 --frontend "$_v")" ] \
+      || fail "F182-R6: --frontend '$_v' printed a role on stdout"
+    err complex 1 --frontend "$_v" | grep -qF -- "--frontend must be a bare front-end key, got '" \
+      || fail "F182-R6: --frontend '$_v' did not name the malformed key on stderr: $(err complex 1 --frontend "$_v")"
+  done
+  # The accepted shapes: a hyphenated / digit-bearing token, and the empty string (R4).
+  [ "$(rc complex 1 --frontend open-code2)" = 0 ] || fail "F182-R6: a valid token open-code2 was rejected"
+  [ "$(rc complex 1 --frontend '')" = 0 ] || fail "F182-R6: --frontend '' was rejected (it is the R4 no-key path)"
+  pass "--frontend with no value or a non-token value exits 4 with an empty stdout (F182-R6)"
+}
+F182_R6_usage
+
 echo "test_escalation.sh: all cases passed"

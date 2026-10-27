@@ -90,6 +90,21 @@ case "$_round" in
   ''|*[!0-9]*) echo "builder-role.sh: round must be a non-negative integer, got '$_round'" >&2; exit 4 ;;
 esac
 
+# The key must be a bare front-end token, `^[a-z][a-z0-9-]*$`, or empty (R4/R6). Anything
+# else means the CALLER is broken — host-frontend.sh only ever prints a marker-row key — so
+# it is a usage error, like a non-numeric round. Spelled-out letter classes rather than
+# `[a-z]`: a range is collation-dependent in some shells' UTF-8 locales and could admit
+# upper case.
+case "$_frontend" in
+  '') : ;;
+  [abcdefghijklmnopqrstuvwxyz]*)
+    case "$_frontend" in
+      *[!abcdefghijklmnopqrstuvwxyz0123456789-]*)
+        echo "builder-role.sh: --frontend must be a bare front-end key, got '$_frontend'" >&2; exit 4 ;;
+    esac ;;
+  *) echo "builder-role.sh: --frontend must be a bare front-end key, got '$_frontend'" >&2; exit 4 ;;
+esac
+
 # ── 1. Backend, checked FIRST ────────────────────────────────────────────────────
 # Under `delegate` the Builder writes no code: it invokes `<delegate_cmd> <feature-id>
 # <abs-spec-path>` and the external executor chooses its own model. The harness resolves no
