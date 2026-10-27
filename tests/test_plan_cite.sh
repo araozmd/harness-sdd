@@ -105,6 +105,28 @@ F03D="$ROOT/specs/epics/E36-emergent-slices/F03-stage-deferred-adrs"
 run_tool "$F03D/E36-F03.plan.md" --spec "$F03D/E36-F03.spec.md"; expect_ok R1_dogfood_f03_plan
 pass "R1_dogfood_f03_plan"
 
+# The whole stdout of the negative plan, byte for byte: every format, every code, file order
+# (the deferred-form line sorts at its `## Deferred` heading, between lines 16 and 22).
+fresh r1golden
+run_tool "$BP" --spec "$BS"
+{ printf '%s\n' "plan-cite-check: uncited-row $BP:8 Data model" "plan-cite-check: unknown-rid $BP:14 R9" \
+    "plan-cite-check: unresolved-adr $BP:15 ADR-0042 not-in-any-namespace" \
+    "plan-cite-check: unresolved-adr $BP:16 bookings/ADR-0002 not-in-namespace bookings" \
+    "plan-cite-check: deferred-form $BP both" \
+    "plan-cite-check: deferred-by-not-deferred $BP:22 ADR-0001 $S/adr/0001-accepted.md" \
+    "plan-cite-check: deferred-adr-no-trigger $BP:23 ADR-0003 $S/adr/0003-deferred-no-trigger.md" \
+    "plan-cite-check: FAIL 7 violation(s)"; } > "$T/golden"
+[ "$rc" -eq 1 ] && cmp -s "$T/golden" "$T/out" || fail "R1_negative_plan_golden: stdout differs: $(diff "$T/golden" "$T/out" | tr '\n' '|')"
+pass "R1_negative_plan_golden"
+# File order across sections: a `## Deferred` placed BEFORE `## Files to change` reports first.
+OP="$S/epics/E01-x/F01-good/order.plan.md"
+printf '%s\n' '# p' '' '## Deferred' '' 'nothing here' '' '## Files to change' '' '| File | Change |' '|---|---|' '| `a.py` | uncited |' > "$OP"
+run_tool "$OP" --spec "$GS"
+printf '%s\n' "plan-cite-check: deferred-form $OP neither" "plan-cite-check: uncited-row $OP:11 Files to change" \
+  'plan-cite-check: FAIL 2 violation(s)' > "$T/golden"
+cmp -s "$T/golden" "$T/out" || fail "R1_findings_in_file_order: findings are not in file order: $(diff "$T/golden" "$T/out" | tr '\n' '|')"
+pass "R1_findings_in_file_order"
+
 # ── R2: an uncited data row under one of the four headings ⇒ exit 1 uncited-row ─────────
 fresh r1fencectl
 insert_before "$GP" '## Deferred' "$T/decoys.md"
@@ -171,6 +193,27 @@ grep -qxF "plan-cite-check: uncited-row $GP:$_ln Files to change" "$T/out" \
   || fail "R2_rows_after_subheading_checked: a '### sub-heading' closed the '## Files to change' section ($(both))"
 pass "R2_rows_after_subheading_checked"
 
+fresh r2lvl1
+printf '%s\n' '# Appendix (a level-1 heading closes the checked section)' '' '| Note | Text |' '|---|---|' '| uncited | after a level-1 heading |' '' > "$T/lvl1.md"
+insert_before "$GP" '## Deferred' "$T/lvl1.md"
+run_tool "$GP" --spec "$GS"; expect_ok R2_level1_heading_closes_section
+pass "R2_level1_heading_closes_section"
+
+fresh r2empty
+printf '%s\n' '|  |  |  |' > "$T/row.md"
+awk -v f="$T/row.md" '{ print } index($0, "| `e.py` |") == 1 { while ((getline l < f) > 0) print l }' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+_ln="$(grep -n '^|  |  |  |$' "$GP" | cut -d: -f1)"
+run_tool "$GP" --spec "$GS"; expect_fail R2_empty_row_is_uncited
+grep -qxF "plan-cite-check: uncited-row $GP:$_ln Files to change" "$T/out" \
+  || fail "R2_empty_row_is_uncited: a row of empty cells was read as a separator ($(both))"
+pass "R2_empty_row_is_uncited"
+
+fresh r2after
+printf '%s\n' 'Prose straight after the table, with no blank line between.' > "$T/row.md"
+awk -v f="$T/row.md" '{ print } index($0, "| Booking | ref |") == 1 { while ((getline l < f) > 0) print l }' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+run_tool "$GP" --spec "$GS"; expect_ok R2_prose_after_table_not_a_row
+pass "R2_prose_after_table_not_a_row"
+
 # ── R3: --spec given ⇒ an undeclared R<n> is unknown-rid; absent ⇒ not checked ──────────
 fresh r3
 run_tool "$BP" --spec "$BS"; expect_fail R3_unknown_rid
@@ -207,6 +250,22 @@ run_tool "$GP" --spec "$GS"; expect_fail R3_pr_number_not_a_citation
 grep -qxF "plan-cite-check: uncited-row $GP:$_ln Data model" "$T/out" \
   || fail "R3_pr_number_not_a_citation: with R2 removed, the PR304 row is not uncited — PR304 counted as a citation ($(both))"
 pass "R3_pr_number_not_a_citation"
+
+fresh r3fence
+printf '\n```\n- **R9** — a fenced decoy, not a declared R-id\n```\n' >> "$BS"
+run_tool "$BP" --spec "$BS"; expect_fail R3_spec_fenced_rid_not_declared
+grep -qxF "plan-cite-check: unknown-rid $BP:14 R9" "$T/out" || fail "R3_spec_fenced_rid_not_declared: an R-id inside the spec's fenced code was read as declared ($(both))"
+pass "R3_spec_fenced_rid_not_declared"
+# RID_RE is a deliberate copy of tasks-pair-check's: the two read spec R-ids identically.
+python3 - "$TOOL" "$ROOT/tools/tasks-pair-check.py" <<'PY' || fail "R3_rid_re_parity: plan-cite-check's RID_RE differs from tasks-pair-check's"
+import importlib.util, sys
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); return mod
+a, b = load("pcc", sys.argv[1]), load("tpc", sys.argv[2])
+sys.exit(0 if a.RID_RE.pattern == b.RID_RE.pattern else 1)
+PY
+pass "R3_rid_re_parity"
 
 # ── R4: ADR citations resolve under the namespace rule (init.sh 2c / agents/reviewer.md) ─
 # add_row <file> <row> — append a data row right after the positive plan's `d.py` row (inside
@@ -269,6 +328,36 @@ run_tool "$GP" --spec "$GS"; expect_fail R4_wrapper_stripped
 grep -qxF "plan-cite-check: unresolved-adr $GP:$_ln bookings/ADR-0002 not-in-namespace bookings" "$T/out" \
   || fail "R4_wrapper_stripped: '**bookings** ADR-0002' was read as a bare id — the emphasis wrapper was not stripped ($(both))"
 pass "R4_wrapper_stripped"
+
+# each wrapper character on its own: a wrapped known token still qualifies the citation
+for _w in '"' "'" '`'; do
+  fresh r4wrap1
+  add_row "$GP" "| \`wq.py\` | modify | ${_w}bookings${_w} ADR-0002 |"
+  run_tool "$GP" --spec "$GS"; expect_fail "R4_wrapper_stripped[$_w]"
+  grep -qxF "plan-cite-check: unresolved-adr $GP:$_ln bookings/ADR-0002 not-in-namespace bookings" "$T/out" \
+    || fail "R4_wrapper_stripped[$_w]: '${_w}bookings${_w} ADR-0002' was read as a bare id ($(both))"
+  pass "R4_wrapper_stripped[$_w]"
+done
+
+# the index holds only regular *.md files directly in an adr/ dir, numbered by ALL leading digits
+fresh r4bounds
+printf 'x\n' > "$S/adr/0042-notes.txt"; mkdir "$S/adr/0042-dir.md"
+printf '# not an ADR\n' > "$S/epics/E01-x/0042-not-in-adr.md"; printf '# five digits\n' > "$S/adr/00043-five.md"
+add_row "$GP" '| `n.py` | modify | ADR-0042 |'; add_row "$GP" '| `o.py` | modify | ADR-0004 |'
+_l1="$(grep -n '^| `n.py` |' "$GP" | cut -d: -f1)"; _l2="$(grep -n '^| `o.py` |' "$GP" | cut -d: -f1)"
+run_tool "$GP" --spec "$GS"; expect_fail R4_namespace_index_bounds
+[ "$(count '^plan-cite-check: unresolved-adr ')" -eq 2 ] || fail "R4_namespace_index_bounds: expected two unresolved-adr ($(both))"
+grep -qxF "plan-cite-check: unresolved-adr $GP:$_l1 ADR-0042 not-in-any-namespace" "$T/out" \
+  || fail "R4_namespace_index_bounds: a non-.md file, a directory or a file outside adr/ was indexed as ADR-0042 ($(both))"
+grep -qxF "plan-cite-check: unresolved-adr $GP:$_l2 ADR-0004 not-in-any-namespace" "$T/out" \
+  || fail "R4_namespace_index_bounds: 00043-five.md was indexed as number 0004 ($(both))"
+pass "R4_namespace_index_bounds"
+
+fresh r4dup
+add_row "$GP" '| `p.py` | modify | ADR-0042, again ADR-0042 |'
+run_tool "$GP" --spec "$GS"; expect_fail R4_duplicate_cite_one_finding
+[ "$(count "^plan-cite-check: unresolved-adr .*:$_ln ")" -eq 1 ] || fail "R4_duplicate_cite_one_finding: one id cited twice in a row gave more than one finding ($(both))"
+pass "R4_duplicate_cite_one_finding"
 
 fresh r4space
 add_row "$GP" '| `s1.py` | modify | the ADR-0001 |'
@@ -409,6 +498,24 @@ run_tool "$GP" --spec "$GS"; expect_fail R5_trigger_empty_is_no_trigger
 one_deferred R5_trigger_empty_is_no_trigger "plan-cite-check: deferred-adr-no-trigger $GP:$_ln ADR-0002 $S/adr/0002-deferred-waf.md"
 pass "R5_trigger_empty_is_no_trigger"
 
+fresh r5indent
+printf '%s\n' '' '  Deferred: none — indented, so not the grammar line' '' > "$T/body.md"; set_deferred "$GP" "$T/body.md"
+run_tool "$GP" --spec "$GS"; expect_fail R5_indented_none_is_neither
+one_deferred R5_indented_none_is_neither "plan-cite-check: deferred-form $GP neither"
+pass "R5_indented_none_is_neither"
+
+fresh r5pipe
+printf '%s\n' '' '| Bolt-on | Deferred by | Trigger |' '|---|---|---|' '| WAF \| edge proxy | ADR-0002 | first regulated customer signs |' '' > "$T/body.md"; set_deferred "$GP" "$T/body.md"
+run_tool "$GP" --spec "$GS"; expect_ok R5_escaped_pipe_in_cell
+pass "R5_escaped_pipe_in_cell"
+
+# a bare id is satisfied when ANY namespace holding it has a deferred-with-trigger ADR
+fresh r5anyc
+printf '%s\n' '# ADR-0001 — bookings cache deferred (fixture)' '' '- **Status:** deferred' '- **Trigger:** the first 1000 bookings' > "$S/bookings/adr/0001-other.md"
+printf '%s\n' '' '| Bolt-on | Deferred by | Trigger |' '|---|---|---|' '| caching | ADR-0001 | the first 1000 bookings |' '' > "$T/body.md"; set_deferred "$GP" "$T/body.md"
+run_tool "$GP" --spec "$GS"; expect_ok R5_bare_any_namespace_deferred
+pass "R5_bare_any_namespace_deferred"
+
 # ── R6: usage / input errors ⇒ exit 2, `error:` + usage on stderr, nothing on stdout ─────
 # chk_exit2 <row> [<stderr-fixed-string>] — each row's argv is the minimal one ONLY that
 # branch rejects; the optional string names the branch so a second producer cannot pass it.
@@ -447,6 +554,11 @@ fresh r6adr
 printf '\377\n' >> "$S/adr/0002-deferred-waf.md"
 run_tool "$GP" --spec "$GS"; chk_exit2 R6_cited_adr_unreadable "$S/adr/0002-deferred-waf.md"
 
+run_tool --sweep "$S" --grandfathered "$GP"; chk_exit2 R6_two_modes_exit2 'separate modes'
+run_tool --sweep "$S" "$S"; chk_exit2 R6_sweep_two_dirs_exit2 '--sweep expects exactly one <specs-dir>'
+run_tool --grandfathered "$GP" "$GP"; chk_exit2 R6_grandfathered_two_plans_exit2 '--grandfathered expects exactly one <feature.plan.md>'
+cp "$GP" "$T/perm.plan.md"; chmod 000 "$T/perm.plan.md"
+run_tool "$T/perm.plan.md" --spec "$GS" --specs-dir "$S"; chmod 644 "$T/perm.plan.md"; chk_exit2 R6_plan_unreadable_perm 'Permission denied'
 fresh r6out
 run_tool --bogus; [ ! -s "$T/out" ] || fail "R6_stdout_empty_on_error: unknown flag wrote to stdout ($(both))"
 run_tool "$T/nope.plan.md" --spec "$GS"; [ ! -s "$T/out" ] || fail "R6_stdout_empty_on_error: missing plan wrote to stdout ($(both))"
@@ -511,6 +623,15 @@ run_tool --sweep "$S"; expect_ok R7_sweep_clean
 grep -qxF 'plan-cite-check: ok sweep 3 ADR(s), stage: pilot' "$T/out" || fail "R7_sweep_clean: ok line does not count 3 ADRs and stage pilot ($(both))"
 pass "R7_sweep_clean"
 
+fresh r7empty
+rm "$S/adr/0003-deferred-no-trigger.md"; : > "$S/product.md"
+run_tool --sweep "$S"; expect_ok R7_sweep_empty_product
+grep -qxF 'plan-cite-check: ok sweep 3 ADR(s), stage: absent' "$T/out" || fail "R7_sweep_empty_product: ok line ($(both))"
+pass "R7_sweep_empty_product"
+fresh r7pdir
+rm "$S/product.md"; mkdir "$S/product.md"
+run_tool --sweep "$S"; chk_exit2 R7_sweep_product_not_regular 'not a regular file'
+
 run_tool --sweep "$T/nope-specs"; chk_exit2 R7_sweep_dir_unreadable_exit2 'not a directory'
 run_tool --sweep; chk_exit2 R7_sweep_dir_unreadable_exit2 '--sweep expects exactly one <specs-dir>'
 fresh r7lock
@@ -542,6 +663,7 @@ init_case E01-F02 spec-ready true F02-bad; init_run; init_ok R7_init_warns_on_ba
 grep -qF "⚠️  plan-cite: E01-F02 uncited-row specs/epics/E01-x/F02-bad/E01-F02.plan.md:8 Data model (+6 more; warn-only — Reviewer check 8 rejects)" "$T/out" \
   || fail "R7_init_warns_on_bad_plan: no warn line naming E01-F02 and its first finding ($(both))"
 grep -qF '✅ plan citations' "$T/out" && fail "R7_init_warns_on_bad_plan: the clean line printed beside a warning ($(both))"
+grep -qF 'plan-cite: FAIL' "$T/out" && fail "R7_init_warns_on_bad_plan: the tool's FAIL summary leaked as a warning ($(both))"
 pass "R7_init_warns_on_bad_plan"
 grep -qxF "⚠️  plan-cite: deferred-no-trigger specs/adr/0003-deferred-no-trigger.md (warn-only)" "$T/out" \
   || fail "R7_init_sweep_warns_deferred_no_trigger: no sweep warn line for the trigger-less deferred ADR ($(both))"
@@ -580,6 +702,27 @@ grep -qF 'plan-cite' "$T/out" && fail "R7_init_silent_without_tool: 2d printed w
 pass "R7_init_silent_without_tool"
 cp "$TOOL" "$I/tools/plan-cite-check.py"
 
+init_case E01-F01 spec-ready true F01-good; rm "$I/specs/adr/0003-deferred-no-trigger.md"
+printf '\377\n' >> "$I/specs/bookings/adr/0001-other.md"; init_run; init_ok R7_init_sweep_exit2_did_not_run
+grep -qF '⚠️  plan-cite: sweep did not run: error: cannot read specs/bookings/adr/0001-other.md' "$T/out" \
+  || fail "R7_init_sweep_exit2_did_not_run: a sweep that exited 2 is not reported as 'did not run' ($(both))"
+grep -qF '✅ plan citations' "$T/out" && fail "R7_init_sweep_exit2_did_not_run: clean line printed though the sweep did not run ($(both))"
+pass "R7_init_sweep_exit2_did_not_run"
+
+init_case E01-F02 spec-ready true F02-bad; rm "$I/specs/epics/E01-x/F02-bad/E01-F02.plan.md"; init_run; init_ok R7_init_no_plan_did_not_run
+grep -qxF '⚠️  plan-cite: E01-F02 check did not run: no *.plan.md in specs/epics/E01-x/F02-bad/ (warn-only)' "$T/out" \
+  || fail "R7_init_no_plan_did_not_run: a feature with no plan is not reported ($(both))"
+pass "R7_init_no_plan_did_not_run"
+
+# The lint resolves ADRs against the harness specs/ tree (--specs-dir specs), not against the
+# nearest directory named specs above the plan.
+init_case E01-F01 spec-ready true specs/F01-good; rm "$I/specs/adr/0003-deferred-no-trigger.md"
+mkdir -p "$I/specs/epics/E01-x/specs"; cp -R "$FX/specs/epics/E01-x/F01-good" "$I/specs/epics/E01-x/specs/"
+init_run; init_ok R7_init_specs_dir_is_harness_specs
+grep -qxF '✅ plan citations and deferred ADRs clean (1 plan(s) checked)' "$T/out" \
+  || fail "R7_init_specs_dir_is_harness_specs: ADRs were not resolved against the harness specs/ tree ($(both))"
+pass "R7_init_specs_dir_is_harness_specs"
+
 # ── R8: --grandfathered — flag a plan written before THIS tool merged, else reject class ─
 # The tool's date is its MERGE: the committer time of the first first-parent commit on the
 # default branch touching tools/plan-cite-check.py or .harness/tools/plan-cite-check.py. The
@@ -610,22 +753,28 @@ mkdir -p s; echo x > s/old.plan.md; gq add s; gci 1100 1900 old
 echo x > s/itXs.plan.md; gq add s; gci 1100 1100 itx
 echo x > s/re.plan.md; gq add s; gci 1200 1200 re-add-1
 gq rm -q s/re.plan.md; gci 1210 1210 re-del
+gq tag pre-tool
 mkdir -p tools; echo v1 > tools/plan-cite-check.py; gq add tools; gci 1500 1500 tool
+echo x > s/same.plan.md; gq add s; gci 1500 1550 same-second
 echo x > s/new.plan.md; gq add s; gci 1600 1600 new
 echo x > 's/it*s.plan.md'; gq add s; gci 1600 1600 star
 echo x > s/re.plan.md; gq add s; gci 1700 1700 re-add-2
+echo v2 > tools/plan-cite-check.py; gq add tools; gci 1800 1800 tool-v2
 echo x > s/dirty.plan.md
 cd "$ROOT"
 gf_run "$G" s/old.plan.md; gf_expect R8_flag_plan_older_than_merge 0 '^plan-cite-check: grandfather flag: s/old\.plan\.md authored 1100, before tool merged into main at 1500$'
 gf_run "$G" s/new.plan.md; gf_expect R8_reject_plan_after_merge 1 '^plan-cite-check: grandfather reject: s/new\.plan\.md authored 1600, not before tool merged into main at 1500$'
 gf_run "$G" s/dirty.plan.md; gf_expect R8_reject_uncommitted_plan 1 '^plan-cite-check: grandfather reject: s/dirty\.plan\.md has no commit on HEAD'
 gf_run "$G" s/re.plan.md; gf_expect R8_earliest_add_wins 0 '^plan-cite-check: grandfather flag: s/re\.plan\.md authored 1200'
+gf_run "$G" s/same.plan.md; gf_expect R8_same_second_rejects 1 '^plan-cite-check: grandfather reject: s/same\.plan\.md authored 1500, not before tool merged into main at 1500$'
+gf_run "$G" s; [ "$rc" -eq 2 ] || fail "R8_dir_path_exit2: a directory path gave rc $rc ($(both))"
+grep -qF 'not a regular file' "$T/err" || fail "R8_dir_path_exit2: wrong error ($(both))"; pass R8_dir_path_exit2
 gf_run "$G" 's/it*s.plan.md'; gf_expect R8_literal_pathspec 1 '^plan-cite-check: grandfather reject: s/it\*s\.plan\.md authored 1600'
 # An absolute path from another cwd must reach the same verdict — a FLAG case on purpose: a
 # path the tool cannot map into the repo finds no commit, which reads as reject (lesson 2026-10-25).
 gf_run "$T" "$G/s/old.plan.md"; gf_expect R8_absolute_path_flags 0 '^plan-cite-check: grandfather flag: s/old\.plan\.md authored 1100'
 # origin/HEAD is asked first: point it at a remote-tracking ref that never saw the tool.
-gq -C "$G" update-ref refs/remotes/origin/trunk "$(git -C "$G" rev-parse main~4)"
+gq -C "$G" update-ref refs/remotes/origin/trunk "$(git -C "$G" rev-parse pre-tool)"
 gq -C "$G" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
 gf_run "$G" s/new.plan.md; gf_expect R8_flag_tool_not_on_base 0 '^plan-cite-check: grandfather flag: tool not on default branch origin/trunk yet$'
 gf_run "$G" s/new.plan.md --base main; gf_expect R8_base_flag_equals_form 1 '^plan-cite-check: grandfather reject: .* main at 1500$'
@@ -660,6 +809,24 @@ mkdir -p .harness/tools s; echo v1 > .harness/tools/plan-cite-check.py; gq add .
 echo x > s/n.plan.md; gq add s; gci 1200 1200 new
 cd "$ROOT"
 gf_run "$G" s/n.plan.md; gf_expect R8_consumer_layout_rejects 1 '^plan-cite-check: grandfather reject: s/n\.plan\.md authored 1200, not before tool merged into main at 1100$'
+# Every fallback default-branch name resolves (no origin/HEAD): the tool on it, a later plan.
+for _b in origin/main main origin/master master origin/trunk trunk; do
+  G="$T/g5-$(printf '%s' "$_b" | tr / -)"; mkdir -p "$G"; cd "$G"; gq init -q -b work .
+  mkdir -p tools s; echo v1 > tools/plan-cite-check.py; gq add tools; gci 1100 1100 tool
+  echo x > s/n.plan.md; gq add s; gci 1200 1200 n
+  case "$_b" in origin/*) gq update-ref "refs/remotes/$_b" HEAD ;; *) gq branch "$_b" ;; esac
+  cd "$ROOT"
+  gf_run "$G" s/n.plan.md; gf_expect "R8_fallback_branch[$_b]" 1 "^plan-cite-check: grandfather reject: .* $_b at 1100\$"
+done
+# The fallback ORDER is origin/main before main: with both present and only main carrying the
+# tool, the default branch is origin/main and the plan is flagged.
+G="$T/g6"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+gq update-ref refs/remotes/origin/main HEAD
+mkdir -p tools s; echo v1 > tools/plan-cite-check.py; gq add tools; gci 1100 1100 tool
+echo x > s/n.plan.md; gq add s; gci 1200 1200 n
+cd "$ROOT"
+gf_run "$G" s/n.plan.md; gf_expect R8_fallback_order 0 '^plan-cite-check: grandfather flag: tool not on default branch origin/main yet$'
 # G4: the only branch is `trunkless`, no origin: no default branch resolves.
 G="$T/g4"; mkdir -p "$G"; cd "$G"; gq init -q -b trunkless .; echo x > a.plan.md; gq add a.plan.md; gci 1000 1000 a; cd "$ROOT"
 gf_run "$G" a.plan.md; [ "$rc" -eq 2 ] || fail "R8_exit2_no_default_branch: rc $rc ($(both))"
